@@ -5,7 +5,8 @@ import {
   Role,
 } from '../../../generated/prisma/enums';
 
-const { dbMock, databaseNowMock } = vi.hoisted(() => ({
+const { dbMock, databaseClockNowMock, databaseNowMock } = vi.hoisted(() => ({
+  databaseClockNowMock: vi.fn(),
   databaseNowMock: vi.fn(),
   dbMock: {
     pieceworkSettlement: {
@@ -25,6 +26,7 @@ const { dbMock, databaseNowMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/background-jobs/clock', () => ({
+  databaseClockNow: databaseClockNowMock,
   databaseNow: databaseNowMock,
 }));
 
@@ -34,6 +36,7 @@ import {
   getPieceworkSettlementDetail,
   listWorkerPieceworkSettlements,
   lockPieceworkSettlement,
+  lockPieceworkSettlementsForDate,
   markPieceworkSettlementPaid,
   PieceworkSettlementError,
 } from '../piecework-settlement';
@@ -94,6 +97,7 @@ beforeEach(() => {
       run(dbMock),
     );
   databaseNowMock.mockReset().mockResolvedValue(NOW);
+  databaseClockNowMock.mockReset().mockResolvedValue(NOW);
   dbMock.pieceworkSettlement.findUnique.mockResolvedValue(null);
   dbMock.user.findUnique.mockResolvedValue({
     id: 'worker-1',
@@ -141,6 +145,39 @@ describe('aggregatePieceworkSettlementReports', () => {
         report('same', '1.00', 'FULL'),
       ]),
     ).toThrow(PieceworkSettlementError);
+  });
+});
+
+describe('lockPieceworkSettlementsForDate', () => {
+  it('holds the closed-day discovery gate while scanning reporters', async () => {
+    dbMock.productionReport.findMany.mockResolvedValue([]);
+
+    await expect(
+      lockPieceworkSettlementsForDate({
+        workDate: '2026-08-27',
+        actor: ACTOR,
+        now: NOW,
+      }),
+    ).resolves.toEqual({ settled: [], errors: [] });
+
+    expect(dbMock.$executeRaw.mock.calls[0]?.[1]).toBe(
+      'print-shop-erp:piecework-reporting-day:2026-08-27',
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.productionReport.findMany.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('uses the database wall clock for the closed-day boundary', async () => {
+    await expect(
+      lockPieceworkSettlementsForDate({
+        workDate: '2026-08-28',
+        actor: ACTOR,
+      }),
+    ).rejects.toMatchObject({ code: 'OPEN_WORK_DATE' });
+
+    expect(databaseClockNowMock).toHaveBeenCalledWith(dbMock);
+    expect(dbMock.productionReport.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -260,7 +297,20 @@ describe('lockPieceworkSettlement', () => {
         now: NOW,
       }),
     ).rejects.toMatchObject({ code: 'OPEN_WORK_DATE' });
-    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.productionReport.findMany).not.toHaveBeenCalled();
+  });
+
+  it('uses the database wall clock when a caller does not inject time', async () => {
+    await expect(
+      lockPieceworkSettlement({
+        reporterId: 'worker-1',
+        workDate: '2026-08-28',
+        actor: ACTOR,
+      }),
+    ).rejects.toMatchObject({ code: 'OPEN_WORK_DATE' });
+
+    expect(databaseClockNowMock).toHaveBeenCalledWith(dbMock);
+    expect(dbMock.productionReport.findMany).not.toHaveBeenCalled();
   });
 
   it('returns an existing locked settlement without rebuilding items', async () => {

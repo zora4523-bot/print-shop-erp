@@ -67,11 +67,11 @@ test.describe('账单全链 — golden path', () => {
 
     await test.step('生成本月账单（GenerateBillsForm 默认 period=当月）', async () => {
       await page
-        .getByRole('button', { name: /^生成 \/ 追加月账单$/ })
+        .getByRole('button', { name: '生成月账单 / 归集补充账单' })
         .click();
-      // GenerateBillsForm 在 success 时渲染&ldquo;{period} 已生成 N 条&rdquo;
-      // 文案 —— 等到它出现，确认 action 跑完。
-      await expect(page.getByText(/已生成 \d+ 条/)).toBeVisible({
+      // GenerateBillsForm 在 success 时渲染处理销售数；等到状态出现，
+      // 确认 action 与补充账单归集都已完成。
+      await expect(page.getByRole('status')).toContainText(/已处理 \d+ 位销售/u, {
         timeout: 10_000,
       });
     });
@@ -81,7 +81,7 @@ test.describe('账单全链 — golden path', () => {
       // 周期 + 总额 + 状态；点&ldquo;详情&rdquo;链接进去。
       // 由于独立对账账号在 dev DB 里只有这一条当月 FINISHED
       // 订单（其他 wave 创建的 Order 都没到 FINISHED），这条 bill 的
-      // 销售姓名是&ldquo;E2E 销售&rdquo;。
+      // 销售姓名是&ldquo;E2E 对账销售&rdquo;。
       // 金额统一用 formatMoney 渲染千分位 + 2 位小数。同时匹配
       // displayName 和总额，避免点到其他测试账单。
       const row = page
@@ -105,6 +105,13 @@ test.describe('账单全链 — golden path', () => {
       await page
         .getByRole('button', { name: /^发单给销售 \/ 客服$/ })
         .click();
+      const publishDialog = page.getByRole('alertdialog', {
+        name: /^确认发布 .* 账单？$/,
+      });
+      await expect(publishDialog).toBeVisible();
+      await publishDialog
+        .getByRole('button', { name: '确认发单', exact: true })
+        .click();
       // 发单后&ldquo;录入付款&rdquo;表单出现 (ISSUED 状态分支)。
       await expect(page.locator('input[name="amount"]')).toBeVisible({
         timeout: 10_000,
@@ -117,7 +124,17 @@ test.describe('账单全链 — golden path', () => {
 
     await test.step('录入完整付款 (ISSUED → FULLY_PAID)', async () => {
       await page.locator('input[name="amount"]').fill(totalAmount);
-      await page.getByRole('button', { name: /^录入付款流水$/ }).click();
+      await page
+        .getByRole('button', { name: '核对并录入付款', exact: true })
+        .click();
+      const paymentDialog = page.getByRole('alertdialog', {
+        name: '确认录入这笔收款？',
+        exact: true,
+      });
+      await expect(paymentDialog).toBeVisible();
+      await paymentDialog
+        .getByRole('button', { name: '确认录入付款', exact: true })
+        .click();
       // FULLY_PAID 是终态：status badge 切到&ldquo;已结清&rdquo;，&ldquo;录入付款&rdquo;
       // 表单消失（detail 页只在 ISSUED / PARTIAL_PAID 状态渲染）。
       await expect(

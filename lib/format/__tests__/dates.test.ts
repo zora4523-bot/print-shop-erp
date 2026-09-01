@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   formatDateInputShanghai,
+  formatDateTimeLocalShanghai,
   formatDateShanghai,
   formatDateTimeShanghai,
 } from '../dates';
@@ -35,5 +36,17 @@ describe('formatDateInputShanghai', () => {
   it('returns the Shanghai calendar date for an HTML date input', () => {
     expect(formatDateInputShanghai(CROSS_DAY)).toBe('2026-07-09');
     expect(formatDateInputShanghai(null)).toBe('');
+  });
+});
+
+describe('formatDateTimeLocalShanghai', () => {
+  it('formats the Shanghai wall clock for datetime-local inputs', () => {
+    expect(formatDateTimeLocalShanghai(CROSS_DAY)).toBe('2026-07-09T04:30');
+  });
+
+  it('keeps midnight as hour 00 instead of rolling to 24', () => {
+    expect(
+      formatDateTimeLocalShanghai(new Date('2026-07-08T16:00:00.000Z')),
+    ).toBe('2026-07-09T00:00');
   });
 });

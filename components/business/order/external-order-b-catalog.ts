@@ -5,8 +5,10 @@ import {
 import {
   normalizeCatalogPricingText,
   parseCatalogPaperWeight,
+  catalogPricingFactChoices,
 } from '@/lib/order/catalog-pricing-facts';
 import { productCategoryMatchesPricingRoute } from '@/lib/order/pricing-route';
+import { canonicalizeCreateOrderSpecification } from '@/lib/price/create-order/canonical-facts';
 
 export type ExternalOrderPaperKey = string;
 
@@ -16,6 +18,7 @@ type ExternalOrderPaperVariant = {
   paperType: string;
   weight: number;
   paperMaterialId: string | null;
+  outOfStock: boolean;
 };
 
 export type ExternalOrderPaper = {
@@ -47,6 +50,19 @@ export type ExternalOrderCatalogProduct = {
   weight?: number | null;
 };
 
+export type ExternalOrderPaperMaterial = {
+  id: string;
+  name: string;
+  specification?: string | null;
+  weight?: number | null;
+  outOfStock?: boolean;
+};
+
+export type ExternalOrderWeightOption = {
+  value: number;
+  disabled: boolean;
+};
+
 const AUTOMATIC_ROUTES = [
   OrderItemPricingRoute.STOCK_BLANK,
   OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
@@ -54,7 +70,9 @@ const AUTOMATIC_ROUTES = [
 ] as const;
 
 function paperFamilyLabel(paperType: string): string {
-  return paperType.replace(/^\s*\d+(?:\.\d+)?\s*g\s*/i, '').trim();
+  return paperType
+    .replace(/^\s*\d+(?:\.\d+)?\s*(?:g|克)\s*/iu, '')
+    .trim();
 }
 
 function paperAppearance(
@@ -87,7 +105,10 @@ function productPricingRoute(
  */
 export function buildExternalOrderPapers<
   T extends ExternalOrderCatalogProduct,
->(products: readonly T[]): ExternalOrderPaper[] {
+>(
+  products: readonly T[],
+  paperMaterials?: readonly ExternalOrderPaperMaterial[],
+): ExternalOrderPaper[] {
   const byKey = new Map<
     string,
     {
@@ -95,15 +116,24 @@ export function buildExternalOrderPapers<
       variants: ExternalOrderPaperVariant[];
     }
   >();
-  for (const product of products) {
-    const route = productPricingRoute(product);
-    const paperType = product.paperType?.trim();
-    const specification = product.specification?.trim();
-    const weight =
-      product.weight ?? parseCatalogPaperWeight(paperType);
-    if (!route || !paperType || !specification || weight === null) continue;
+  const addVariant = (args: {
+    route: OrderItemPricingRoute;
+    paperType: string;
+    specification: string;
+    weight: number;
+    paperMaterialId: string | null;
+    outOfStock: boolean;
+  }) => {
+    const {
+      route,
+      paperType,
+      specification,
+      weight,
+      paperMaterialId,
+      outOfStock,
+    } = args;
     const label = paperFamilyLabel(paperType);
-    if (!label) continue;
+    if (!label) return;
     const key = normalizeCatalogPricingText(label);
     const entry = byKey.get(key) ?? { label, variants: [] };
     if (
@@ -111,7 +141,8 @@ export function buildExternalOrderPapers<
         (candidate) =>
           candidate.route === route &&
           sameCatalogText(candidate.paperType, paperType) &&
-          sameCatalogText(candidate.specification, specification),
+          sameCatalogText(candidate.specification, specification) &&
+          candidate.paperMaterialId === paperMaterialId,
       )
     ) {
       entry.variants.push({
@@ -119,10 +150,81 @@ export function buildExternalOrderPapers<
         specification,
         paperType,
         weight,
-        paperMaterialId: product.paperMaterialId ?? null,
+        paperMaterialId,
+        outOfStock,
       });
     }
     byKey.set(key, entry);
+  };
+
+  for (const product of products) {
+    const route = productPricingRoute(product);
+    const paperType = product.paperType?.trim();
+    const weight = product.weight ?? parseCatalogPaperWeight(paperType);
+    if (!route || !paperType || weight === null) continue;
+    const linkedPaper = product.paperMaterialId
+      ? paperMaterials?.find((material) => material.id === product.paperMaterialId)
+      : null;
+    for (const specification of catalogPricingFactChoices(
+      product.specification,
+    )) {
+      if (!canonicalizeCreateOrderSpecification(specification)) continue;
+      addVariant({
+        route,
+        paperType,
+        specification,
+        weight,
+        paperMaterialId: product.paperMaterialId ?? null,
+        outOfStock:
+          linkedPaper?.outOfStock === true ||
+          (paperMaterials !== undefined &&
+            Boolean(product.paperMaterialId) &&
+            !linkedPaper),
+      });
+    }
+  }
+
+  // CUSTOM products intentionally own a size, not one paper SKU. Their paper
+  // choices come from the active PAPER material catalog. Combining those two
+  // configured facts does not invent a price: the server adapter re-resolves
+  // both identities and the pure engine returns typed manual pricing for a
+  // material without a published surcharge.
+  const customSpecifications = [
+    ...new Set(
+      products
+        .filter((product) =>
+          productCategoryMatchesPricingRoute(
+            OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+            product.category,
+          ),
+        )
+        .flatMap((product) =>
+          catalogPricingFactChoices(product.specification),
+        )
+        .filter(
+          (specification) =>
+            canonicalizeCreateOrderSpecification(specification) !== null,
+        ),
+    ),
+  ];
+  for (const material of paperMaterials ?? []) {
+    const weight =
+      material.weight ??
+      parseCatalogPaperWeight(material.specification) ??
+      parseCatalogPaperWeight(material.name);
+    if (weight === null) continue;
+    for (const paperType of catalogPricingFactChoices(material.name)) {
+      for (const specification of customSpecifications) {
+        addVariant({
+          route: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+          paperType,
+          specification,
+          weight,
+          paperMaterialId: material.id,
+          outOfStock: material.outOfStock === true,
+        });
+      }
+    }
   }
 
   return [...byKey.entries()].map(([key, entry]) => {
@@ -154,8 +256,9 @@ function sameCatalogText(left: string | null, right: string | null): boolean {
 export function externalOrderPapersForRoute(
   products: readonly ExternalOrderCatalogProduct[],
   route: OrderItemPricingRoute,
+  paperMaterials?: readonly ExternalOrderPaperMaterial[],
 ): readonly ExternalOrderPaper[] {
-  return buildExternalOrderPapers(products).filter((paper) =>
+  return buildExternalOrderPapers(products, paperMaterials).filter((paper) =>
     paper.routes.includes(route),
   );
 }
@@ -165,26 +268,46 @@ export function externalOrderWeightsForSelection(
   route: OrderItemPricingRoute,
   specification: string,
 ): readonly number[] {
-  return [
-    ...new Set(
-      paper.variants
-        .filter(
-          (variant) =>
-            variant.route === route &&
-            sameCatalogText(variant.specification, specification),
-        )
-        .map((variant) => variant.weight),
-    ),
-  ].sort((left, right) => left - right);
+  return externalOrderWeightOptionsForSelection(
+    paper,
+    route,
+    specification,
+  ).map((option) => option.value);
+}
+
+export function externalOrderWeightOptionsForSelection(
+  paper: ExternalOrderPaper,
+  route: OrderItemPricingRoute,
+  specification: string,
+): readonly ExternalOrderWeightOption[] {
+  const byWeight = new Map<number, boolean[]>();
+  for (const variant of paper.variants) {
+    if (
+      variant.route !== route ||
+      !sameCatalogText(variant.specification, specification)
+    ) {
+      continue;
+    }
+    const availability = byWeight.get(variant.weight) ?? [];
+    availability.push(variant.outOfStock);
+    byWeight.set(variant.weight, availability);
+  }
+  return [...byWeight.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([value, stockStates]) => ({
+      value,
+      disabled: stockStates.every(Boolean),
+    }));
 }
 
 export function externalOrderPaperFromType(
   products: readonly ExternalOrderCatalogProduct[],
   paperType: string | null | undefined,
+  paperMaterials?: readonly ExternalOrderPaperMaterial[],
 ): ExternalOrderPaper | null {
   if (!paperType) return null;
   return (
-    buildExternalOrderPapers(products).find((paper) =>
+    buildExternalOrderPapers(products, paperMaterials).find((paper) =>
       paper.variants.some((candidate) =>
         sameCatalogText(candidate.paperType, paperType),
       ),
@@ -215,13 +338,16 @@ export function externalOrderSpecificationsForRoute(
   return [
     ...new Set(
       products
-        .filter(
-          (product) =>
-            product.specification &&
-            productCategoryMatchesPricingRoute(route, product.category),
+        .filter((product) =>
+          productCategoryMatchesPricingRoute(route, product.category),
         )
-        .map((product) => product.specification!.trim())
-        .filter(Boolean),
+        .flatMap((product) =>
+          catalogPricingFactChoices(product.specification),
+        )
+        .filter(
+          (specification) =>
+            canonicalizeCreateOrderSpecification(specification) !== null,
+        ),
     ),
   ];
 }
@@ -246,13 +372,26 @@ export function findExternalOrderCatalogProduct<
   paperType: string,
   specification: string,
 ): T | null {
-  const matches = products.filter(
+  const specificationMatches = products.filter(
     (product) =>
       productCategoryMatchesPricingRoute(route, product.category) &&
-      sameCatalogText(product.specification, specification) &&
-      sameCatalogText(product.paperType, paperType),
+      catalogPricingFactChoices(product.specification).some((choice) =>
+        sameCatalogText(choice, specification),
+      ),
   );
-  return matches.length === 1 ? matches[0]! : null;
+  const exactPaperMatches = specificationMatches.filter((product) =>
+    sameCatalogText(product.paperType, paperType),
+  );
+  if (exactPaperMatches.length !== 0) {
+    return exactPaperMatches.length === 1 ? exactPaperMatches[0]! : null;
+  }
+  if (route !== OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL) return null;
+  const genericCustomProducts = specificationMatches.filter(
+    (product) => !product.paperType?.trim(),
+  );
+  return genericCustomProducts.length === 1
+    ? genericCustomProducts[0]!
+    : null;
 }
 
 export function externalOrderProductStructure(

@@ -55,7 +55,9 @@ test.describe('系统设置', () => {
       test.skip(orderHrefs.length === 0, '开发库里没有工单，跳过打印视图断言');
 
       await page.goto(`/print${orderHrefs[0]}`);
-      await expect(page.locator('.factory-name').first()).toHaveText(probe);
+      await expect(
+        page.locator('.work-order-document .factory').first(),
+      ).toHaveText(probe);
     } finally {
       // 无论断言是否失败都还原，别把探针厂名留给后面的截图门禁
       await page.goto(SETTINGS_PATH);

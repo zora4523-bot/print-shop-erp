@@ -45,6 +45,10 @@ type MutableCommercialOrder = {
   revision: number;
   processingAmount: { toString(): string };
   totalAmount: { toString(): string };
+  quotedFee: { toString(): string } | null;
+  quotedPricingRevisionId: string | null;
+  confirmedFee: { toString(): string } | null;
+  settledFee: { toString(): string } | null;
 };
 
 export class OrderCommercialDetailsError extends Error {
@@ -101,6 +105,10 @@ async function lockAndReadOrder(
       revision: true,
       processingAmount: true,
       totalAmount: true,
+      quotedFee: true,
+      quotedPricingRevisionId: true,
+      confirmedFee: true,
+      settledFee: true,
     },
   });
   if (!order) throw new OrderCommercialDetailsError('工单不存在');
@@ -163,20 +171,40 @@ async function finishCommercialMutation(
   if (totalAmount.isNegative() || totalAmount.gt(MAX_AMOUNT)) {
     throw new OrderCommercialDetailsError('附加费用调整后工单总额超出系统允许范围');
   }
+  const pricingStatus = nextPricingStatus(input.order.pricingStatus);
+  const isPending =
+    pricingStatus === ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
+  const quotedFee = isPending
+    ? totalAmount.toFixed(2)
+    : (input.order.quotedFee?.toString() ?? null);
+  const confirmedFee =
+    pricingStatus === ORDER_PRICING_STATUS.ADMIN_CONFIRMED
+      ? totalAmount.toFixed(2)
+      : null;
   await tx.order.update({
     where: { id: input.order.id },
-    data: { totalAmount: totalAmount.toFixed(2) },
+    data: {
+      totalAmount: totalAmount.toFixed(2),
+      ...(isPending ? { quotedFee } : {}),
+      confirmedFee,
+      settledFee: null,
+    },
     select: { id: true },
   });
   const revision = await appendOrderPricingRevisionInTx(tx, {
     orderId: input.order.id,
-    status: nextPricingStatus(input.order.pricingStatus),
+    status: pricingStatus,
     source: input.source,
     actorId: input.actor.id,
     now: input.now,
     expectedPriceRevision: input.order.priceRevision,
     incrementOrderRevision: true,
     remark: input.remark,
+    orderFeeSnapshot: {
+      quotedFee,
+      confirmedFee,
+      settledFee: null,
+    },
     metadata: {
       commercialDetailMutation: {
         action: input.action,
@@ -184,6 +212,13 @@ async function finishCommercialMutation(
       },
     },
   });
+  if (isPending) {
+    await tx.order.update({
+      where: { id: input.order.id },
+      data: { quotedPricingRevisionId: revision.pricingRevisionId },
+      select: { id: true },
+    });
+  }
   await tx.orderLog.create({
     data: {
       orderId: input.order.id,
@@ -197,6 +232,24 @@ async function finishCommercialMutation(
         totalAmount: {
           before: input.order.totalAmount.toString(),
           after: totalAmount.toFixed(2),
+        },
+        quotedFee: {
+          before: input.order.quotedFee?.toString() ?? null,
+          after: quotedFee,
+        },
+        quotedPricingRevisionId: {
+          before: input.order.quotedPricingRevisionId,
+          after: isPending
+            ? revision.pricingRevisionId
+            : input.order.quotedPricingRevisionId,
+        },
+        confirmedFee: {
+          before: input.order.confirmedFee?.toString() ?? null,
+          after: confirmedFee,
+        },
+        settledFee: {
+          before: input.order.settledFee?.toString() ?? null,
+          after: null,
         },
       },
       remark: input.remark,

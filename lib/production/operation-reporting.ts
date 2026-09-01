@@ -11,7 +11,9 @@ import {
   Role,
   WorkerType,
 } from '../../generated/prisma/enums';
-import { databaseNow } from '../background-jobs/clock';
+import { databaseClockNow } from '../background-jobs/clock';
+import { parseStrictYmd } from '../auth/schemas';
+import { todayShanghai } from '../dashboard/shanghai-clock';
 import { db } from '../db';
 import { orderCascadeLockKey } from '../order/locks';
 import { transitionOrder } from '../order/status-machine';
@@ -20,6 +22,12 @@ import {
   type ProductionCompletionTx,
 } from '../production-completion';
 import { calculatePieceworkAmount } from '../salary/piecework-pricing';
+import {
+  pieceworkReportingDayGateLockKey,
+  pieceworkSettlementLockKey,
+} from '../salary/piecework-lock';
+import { employmentCoversDate } from '../salary/employment';
+import { salaryIdentityLockKey } from '../salary/hourly-lock';
 
 export type OperationReportInput = {
   operationId: string;
@@ -53,6 +61,7 @@ export type OperationReportingErrorCode =
   | 'ACCOUNT_NOT_AUTHORIZED'
   | 'PARTIAL_SOURCE_AMBIGUOUS'
   | 'OVER_REPORT'
+  | 'REPORTING_DAY_SETTLED'
   | 'PIECEWORK_RATE_UNAVAILABLE'
   | 'IDEMPOTENCY_CONFLICT';
 
@@ -97,8 +106,44 @@ const OPERATION_REPORT_SELECT = {
   },
 } satisfies Prisma.ProductionOperationSelect;
 
+const REPORTER_ACCOUNT_SELECT = {
+  id: true,
+  role: true,
+  isActive: true,
+  workerType: true,
+  machineType: true,
+  employmentStartDate: true,
+  employmentEndDate: true,
+} satisfies Prisma.UserSelect;
+
+const IDEMPOTENT_REPORT_SELECT = {
+  id: true,
+  operationId: true,
+  reporterId: true,
+  entryType: true,
+  reportedCompletedQty: true,
+  defectQty: true,
+  reworkQty: true,
+  amount: true,
+  operation: {
+    select: {
+      status: true,
+      orderId: true,
+      order: { select: { status: true } },
+    },
+  },
+} satisfies Prisma.ProductionReportSelect;
+
 type ReportableOperation = Prisma.ProductionOperationGetPayload<{
   select: typeof OPERATION_REPORT_SELECT;
+}>;
+
+type ReporterAccount = Prisma.UserGetPayload<{
+  select: typeof REPORTER_ACCOUNT_SELECT;
+}>;
+
+type IdempotentReport = Prisma.ProductionReportGetPayload<{
+  select: typeof IDEMPOTENT_REPORT_SELECT;
 }>;
 
 const MAX_QUANTITY = new Decimal('99999999999.999');
@@ -148,6 +193,46 @@ function operationLockKey(operationId: string): string {
 
 function idempotencyLockKey(idempotencyKey: string): string {
   return `print-shop-erp:production-report-idempotency:${idempotencyKey}`;
+}
+
+async function lockCurrentPieceworkReportingDay(
+  tx: Prisma.TransactionClient,
+  reporterId: string,
+): Promise<{ reportedAt: Date; workDate: string; workDateCol: Date }> {
+  let reportedAt = await databaseClockNow(tx);
+  let workDate = todayShanghai(reportedAt);
+
+  // Normally one iteration. The loop closes the narrow case where Shanghai
+  // midnight passes while this transaction waits for the batch discovery
+  // gate: after acquiring the old gate, move forward to the new open day.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkReportingDayGateLockKey(
+      workDate,
+    )}))`;
+    const confirmedAt = await databaseClockNow(tx);
+    const confirmedWorkDate = todayShanghai(confirmedAt);
+    if (confirmedWorkDate === workDate) {
+      const workDateCol = parseStrictYmd(workDate);
+      if (!workDateCol) {
+        throw new OperationReportingError(
+          'INVALID_INPUT',
+          '数据库报工日期非法',
+        );
+      }
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkSettlementLockKey(
+        reporterId,
+        workDate,
+      )}))`;
+      return { reportedAt: confirmedAt, workDate, workDateCol };
+    }
+    reportedAt = confirmedAt;
+    workDate = confirmedWorkDate;
+  }
+
+  throw new OperationReportingError(
+    'INVALID_INPUT',
+    `数据库报工日期在事务内持续变化（最后时点 ${reportedAt.toISOString()}）`,
+  );
 }
 
 export type OperationReporterAccount = {
@@ -318,6 +403,384 @@ function sameIdempotentRequest(
   );
 }
 
+type ValidatedOperationReportInput = ReturnType<typeof validateInput>;
+type OperationCompletionPlan = ReturnType<typeof plannedCompletedPieces>;
+
+async function loadLockedOperationContext(
+  tx: Prisma.TransactionClient,
+  input: OperationReportInput,
+  actor: OperationReportActor,
+  parsed: ValidatedOperationReportInput,
+): Promise<{
+  operation: ReportableOperation;
+  account: ReporterAccount;
+  existingReport: IdempotentReport | null;
+}> {
+  const locator = await tx.productionOperation.findUnique({
+    where: { id: input.operationId },
+    select: { id: true, orderId: true },
+  });
+  if (!locator) {
+    throw new OperationReportingError('OPERATION_NOT_FOUND', '生产工序不存在');
+  }
+
+  // Lock order is part of the write protocol. Keep these awaits sequential.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+    locator.orderId,
+  )}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${operationLockKey(
+    input.operationId,
+  )}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${idempotencyLockKey(
+    parsed.idempotencyKey,
+  )}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
+    actor.id,
+  )}))`;
+
+  const [operation, account, existingReport] = await Promise.all([
+    tx.productionOperation.findUnique({
+      where: { id: input.operationId },
+      select: OPERATION_REPORT_SELECT,
+    }),
+    tx.user.findUnique({
+      where: { id: actor.id },
+      select: REPORTER_ACCOUNT_SELECT,
+    }),
+    tx.productionReport.findUnique({
+      where: { idempotencyKey: parsed.idempotencyKey },
+      select: IDEMPOTENT_REPORT_SELECT,
+    }),
+  ]);
+  if (!operation) {
+    throw new OperationReportingError('OPERATION_NOT_FOUND', '生产工序不存在');
+  }
+  if (!account || actor.role !== Role.WORKER || account.role !== actor.role) {
+    throw new OperationReportingError(
+      'ACCOUNT_NOT_AUTHORIZED',
+      '报工账号无效或已变更岗位',
+    );
+  }
+  assertReporterCanPerform(operation.operationType, account);
+  return { operation, account, existingReport };
+}
+
+function replayIdempotentReport(
+  existingReport: IdempotentReport,
+  input: OperationReportInput,
+  actor: OperationReportActor,
+): OperationReportResult {
+  if (!sameIdempotentRequest(existingReport, input, actor)) {
+    throw new OperationReportingError(
+      'IDEMPOTENCY_CONFLICT',
+      '同一幂等键已用于不同的报工请求',
+    );
+  }
+  return {
+    reportId: existingReport.id,
+    operationId: existingReport.operationId,
+    orderId: existingReport.operation.orderId,
+    operationStatus: existingReport.operation.status,
+    orderStatus: existingReport.operation.order.status,
+    completedAggregate: existingReport.reportedCompletedQty.toString(),
+    amount: existingReport.amount.toFixed(2),
+    idempotentReplay: true,
+  };
+}
+
+function assertOperationIsReportable(operation: ReportableOperation): void {
+  if (
+    operation.status === ProductionOperationStatus.COMPLETED ||
+    operation.status === ProductionOperationStatus.CANCELLED
+  ) {
+    throw new OperationReportingError(
+      'OPERATION_NOT_REPORTABLE',
+      '该工序已终态，不能再追加报工',
+    );
+  }
+  if (
+    operation.order.status !== OrderStatus.SCHEDULING &&
+    operation.order.status !== OrderStatus.IN_PRODUCTION
+  ) {
+    throw new OperationReportingError(
+      'ORDER_NOT_REPORTABLE',
+      `工单状态 ${operation.order.status} 不允许报工`,
+    );
+  }
+}
+
+async function computeCompletedAggregate(
+  tx: Prisma.TransactionClient,
+  operation: ReportableOperation,
+  plan: OperationCompletionPlan,
+  parsed: ValidatedOperationReportInput,
+): Promise<Decimal> {
+  const aggregate = await tx.productionReport.aggregate({
+    where: { operationId: operation.id },
+    _sum: { reportedCompletedQty: true, defectQty: true, reworkQty: true },
+  });
+  const alreadyCompleted = new Decimal(
+    aggregate._sum.reportedCompletedQty?.toString() ?? 0,
+  );
+  const completedAggregate = alreadyCompleted.plus(parsed.completed);
+  if (completedAggregate.gt(plan.plannedPieces)) {
+    throw new OperationReportingError(
+      'OVER_REPORT',
+      `累计合格完成数 ${completedAggregate.toString()} 超过计划 ${plan.plannedPieces.toString()}`,
+      {
+        plannedQty: plan.plannedPieces.toString(),
+        alreadyCompleted: alreadyCompleted.toString(),
+        submittedCompleted: parsed.completed.toString(),
+      },
+    );
+  }
+  return completedAggregate;
+}
+
+async function appendPricedProductionReport(
+  tx: Prisma.TransactionClient,
+  operation: ReportableOperation,
+  account: ReporterAccount,
+  plan: OperationCompletionPlan,
+  parsed: ValidatedOperationReportInput,
+): Promise<{ reportId: string; reportedAt: Date; amount: string }> {
+  // The locks above are followed by reporting-day gate -> reporter/day.
+  const { reportedAt, workDate, workDateCol } =
+    await lockCurrentPieceworkReportingDay(tx, account.id);
+  if (!employmentCoversDate(workDateCol, account)) {
+    throw new OperationReportingError(
+      'ACCOUNT_NOT_AUTHORIZED',
+      `报工日 ${workDate} 不在当前账号的雇佣区间内`,
+      { workDate },
+    );
+  }
+  const closedSettlement = await tx.pieceworkSettlement.findUnique({
+    where: {
+      reporterId_workDate: { reporterId: account.id, workDate: workDateCol },
+    },
+    select: { status: true },
+  });
+  if (closedSettlement) {
+    throw new OperationReportingError(
+      'REPORTING_DAY_SETTLED',
+      `报工日 ${workDate} 的计件工资已经 ${closedSettlement.status}，本次报工未写入；请刷新后在当前工作日重试`,
+      { workDate, settlementStatus: closedSettlement.status },
+    );
+  }
+
+  const books = await tx.pieceworkPriceBook.findMany({
+    where: {
+      status: PieceworkPriceBookStatus.PUBLISHED,
+      effectiveFrom: { lte: reportedAt },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gt: reportedAt } }],
+    },
+    select: {
+      id: true,
+      version: true,
+      ruleSetSha256: true,
+      rules: {
+        where: { operationType: operation.operationType },
+        select: { operationType: true, unit: true, amount: true },
+      },
+    },
+    take: 2,
+  });
+  const book = books[0];
+  const rule = book?.rules[0];
+  if (
+    books.length !== 1 ||
+    !book ||
+    !book.ruleSetSha256 ||
+    book.rules.length !== 1 ||
+    !rule ||
+    rule.amount === null ||
+    rule.unit !== operation.unit
+  ) {
+    throw new OperationReportingError(
+      'PIECEWORK_RATE_UNAVAILABLE',
+      '当前时点没有唯一、完整且已发布的工序工价',
+    );
+  }
+
+  const priced = calculatePieceworkAmount(
+    {
+      operationType: operation.operationType,
+      completedQty: parsed.completed.toString(),
+      defectQty: parsed.defect.toString(),
+      reworkQty: parsed.rework.toString(),
+      ...(operation.operationType === PieceworkOperationType.PARTIAL
+        ? { passCount: plan.passCount }
+        : {}),
+    },
+    {
+      operationType: rule.operationType,
+      unit: rule.unit,
+      amount: rule.amount.toString(),
+    },
+  );
+  const report = await tx.productionReport.create({
+    data: {
+      operationId: operation.id,
+      reporterId: account.id,
+      entryType: ProductionReportEntryType.REPORT,
+      source: ProductionReportSource.LIVE,
+      reportedCompletedQty: priced.completedQty,
+      defectQty: priced.excludedDefectQty,
+      reworkQty: priced.excludedReworkQty,
+      chargeableQty: priced.chargeableQty,
+      unit: priced.unit,
+      rate: priced.rate,
+      amount: priced.amount,
+      priceBookId: book.id,
+      priceBookVersion: book.version,
+      ruleSetSha256: book.ruleSetSha256,
+      snapshot: {
+        schemaVersion: 1,
+        reporterId: account.id,
+        operation: {
+          id: operation.id,
+          operationType: operation.operationType,
+          unit: operation.unit,
+          plannedQty: operation.plannedQty.toString(),
+          plannedCompletedPieces: plan.plannedPieces.toString(),
+          passCount: plan.passCount,
+          sources: plan.evidence,
+        },
+        submitted: {
+          completedQty: priced.completedQty,
+          defectQty: priced.excludedDefectQty,
+          reworkQty: priced.excludedReworkQty,
+        },
+        payroll: {
+          defectAndReworkExcluded: true,
+          chargeableQty: priced.chargeableQty,
+          rate: priced.rate,
+          amount: priced.amount,
+          priceBookId: book.id,
+          priceBookVersion: book.version,
+          ruleSetSha256: book.ruleSetSha256,
+        },
+      } as Prisma.InputJsonValue,
+      idempotencyKey: parsed.idempotencyKey,
+      reportedAt,
+    },
+    select: { id: true },
+  });
+  return { reportId: report.id, reportedAt, amount: priced.amount };
+}
+
+async function advanceProductionAfterReport(
+  tx: Prisma.TransactionClient,
+  operation: ReportableOperation,
+  account: ReporterAccount,
+  plan: OperationCompletionPlan,
+  completedAggregate: Decimal,
+  reportedAt: Date,
+): Promise<{ operationStatus: ProductionOperationStatus; orderStatus: OrderStatus }> {
+  const operationStatus = completedAggregate.eq(plan.plannedPieces)
+    ? ProductionOperationStatus.COMPLETED
+    : ProductionOperationStatus.IN_PROGRESS;
+  if (operation.status !== operationStatus) {
+    await tx.productionOperation.update({
+      where: { id: operation.id },
+      data: { status: operationStatus },
+    });
+  }
+
+  let orderStatus: OrderStatus = operation.order.status;
+  if (orderStatus === OrderStatus.SCHEDULING) {
+    transitionOrder(orderStatus, OrderStatus.IN_PRODUCTION);
+    await tx.order.update({
+      where: { id: operation.orderId },
+      data: { status: OrderStatus.IN_PRODUCTION },
+    });
+    await tx.orderLog.create({
+      data: {
+        orderId: operation.orderId,
+        operatorId: account.id,
+        action: 'STATUS_CHANGE',
+        changedFields: {
+          status: {
+            before: OrderStatus.SCHEDULING,
+            after: OrderStatus.IN_PRODUCTION,
+          },
+        },
+        remark: `工序 ${operation.operationType} 首次扫码报工`,
+      },
+    });
+    orderStatus = OrderStatus.IN_PRODUCTION;
+  }
+
+  const remainingOperations = await tx.productionOperation.count({
+    where: {
+      orderId: operation.orderId,
+      status: {
+        notIn: [
+          ProductionOperationStatus.COMPLETED,
+          ProductionOperationStatus.CANCELLED,
+        ],
+      },
+    },
+  });
+  if (remainingOperations === 0) {
+    const completion = await maybeCompleteProductionOrder(
+      tx as unknown as ProductionCompletionTx,
+      operation.orderId,
+      account.id,
+      reportedAt,
+    );
+    if (completion.completed) orderStatus = OrderStatus.COMPLETED;
+  }
+  return { operationStatus, orderStatus };
+}
+
+async function reportProductionOperationInTx(
+  tx: Prisma.TransactionClient,
+  input: OperationReportInput,
+  actor: OperationReportActor,
+  parsed: ValidatedOperationReportInput,
+): Promise<OperationReportResult> {
+  const { operation, account, existingReport } =
+    await loadLockedOperationContext(tx, input, actor, parsed);
+  if (existingReport) {
+    return replayIdempotentReport(existingReport, input, actor);
+  }
+
+  assertOperationIsReportable(operation);
+  const plan = plannedCompletedPieces(operation);
+  const completedAggregate = await computeCompletedAggregate(
+    tx,
+    operation,
+    plan,
+    parsed,
+  );
+  const { reportId, reportedAt, amount } = await appendPricedProductionReport(
+    tx,
+    operation,
+    account,
+    plan,
+    parsed,
+  );
+  const { operationStatus, orderStatus } = await advanceProductionAfterReport(
+    tx,
+    operation,
+    account,
+    plan,
+    completedAggregate,
+    reportedAt,
+  );
+  return {
+    reportId,
+    operationId: operation.id,
+    orderId: operation.orderId,
+    operationStatus,
+    orderStatus,
+    completedAggregate: completedAggregate.toString(),
+    amount,
+    idempotentReplay: false,
+  };
+}
+
 /**
  * Append one immutable operation report. The session actor identifies the
  * reporter; no worker id, assignment, machine candidate, or personal rate is
@@ -328,310 +791,7 @@ export async function reportProductionOperation(
   actor: OperationReportActor,
 ): Promise<OperationReportResult> {
   const parsed = validateInput(input);
-  return db.$transaction(async (tx) => {
-    const locator = await tx.productionOperation.findUnique({
-      where: { id: input.operationId },
-      select: { id: true, orderId: true },
-    });
-    if (!locator) {
-      throw new OperationReportingError(
-        'OPERATION_NOT_FOUND',
-        '生产工序不存在',
-      );
-    }
-
-    // Order -> operation -> request is the single lock order for reporting.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
-      locator.orderId,
-    )}))`;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${operationLockKey(
-      input.operationId,
-    )}))`;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${idempotencyLockKey(
-      parsed.idempotencyKey,
-    )}))`;
-
-    const [operation, account, existingReport] = await Promise.all([
-      tx.productionOperation.findUnique({
-        where: { id: input.operationId },
-        select: OPERATION_REPORT_SELECT,
-      }),
-      tx.user.findUnique({
-        where: { id: actor.id },
-        select: {
-          id: true,
-          role: true,
-          isActive: true,
-          workerType: true,
-          machineType: true,
-        },
-      }),
-      tx.productionReport.findUnique({
-        where: { idempotencyKey: parsed.idempotencyKey },
-        select: {
-          id: true,
-          operationId: true,
-          reporterId: true,
-          entryType: true,
-          reportedCompletedQty: true,
-          defectQty: true,
-          reworkQty: true,
-          amount: true,
-          operation: {
-            select: { status: true, orderId: true, order: { select: { status: true } } },
-          },
-        },
-      }),
-    ]);
-    if (!operation) {
-      throw new OperationReportingError(
-        'OPERATION_NOT_FOUND',
-        '生产工序不存在',
-      );
-    }
-    if (
-      !account ||
-      actor.role !== Role.WORKER ||
-      account.role !== actor.role
-    ) {
-      throw new OperationReportingError(
-        'ACCOUNT_NOT_AUTHORIZED',
-        '报工账号无效或已变更岗位',
-      );
-    }
-    assertReporterCanPerform(operation.operationType, account);
-
-    if (existingReport) {
-      if (!sameIdempotentRequest(existingReport, input, actor)) {
-        throw new OperationReportingError(
-          'IDEMPOTENCY_CONFLICT',
-          '同一幂等键已用于不同的报工请求',
-        );
-      }
-      return {
-        reportId: existingReport.id,
-        operationId: existingReport.operationId,
-        orderId: existingReport.operation.orderId,
-        operationStatus: existingReport.operation.status,
-        orderStatus: existingReport.operation.order.status,
-        completedAggregate: existingReport.reportedCompletedQty.toString(),
-        amount: existingReport.amount.toFixed(2),
-        idempotentReplay: true,
-      };
-    }
-
-    if (
-      operation.status === ProductionOperationStatus.COMPLETED ||
-      operation.status === ProductionOperationStatus.CANCELLED
-    ) {
-      throw new OperationReportingError(
-        'OPERATION_NOT_REPORTABLE',
-        '该工序已终态，不能再追加报工',
-      );
-    }
-    if (
-      operation.order.status !== OrderStatus.SCHEDULING &&
-      operation.order.status !== OrderStatus.IN_PRODUCTION
-    ) {
-      throw new OperationReportingError(
-        'ORDER_NOT_REPORTABLE',
-        `工单状态 ${operation.order.status} 不允许报工`,
-      );
-    }
-
-    const plan = plannedCompletedPieces(operation);
-    const aggregate = await tx.productionReport.aggregate({
-      where: { operationId: operation.id },
-      _sum: {
-        reportedCompletedQty: true,
-        defectQty: true,
-        reworkQty: true,
-      },
-    });
-    const alreadyCompleted = new Decimal(
-      aggregate._sum.reportedCompletedQty?.toString() ?? 0,
-    );
-    const completedAggregate = alreadyCompleted.plus(parsed.completed);
-    if (completedAggregate.gt(plan.plannedPieces)) {
-      throw new OperationReportingError(
-        'OVER_REPORT',
-        `累计合格完成数 ${completedAggregate.toString()} 超过计划 ${plan.plannedPieces.toString()}`,
-        {
-          plannedQty: plan.plannedPieces.toString(),
-          alreadyCompleted: alreadyCompleted.toString(),
-          submittedCompleted: parsed.completed.toString(),
-        },
-      );
-    }
-
-    const reportedAt = await databaseNow(tx);
-    const books = await tx.pieceworkPriceBook.findMany({
-      where: {
-        status: PieceworkPriceBookStatus.PUBLISHED,
-        effectiveFrom: { lte: reportedAt },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: reportedAt } }],
-      },
-      select: {
-        id: true,
-        version: true,
-        ruleSetSha256: true,
-        rules: {
-          where: { operationType: operation.operationType },
-          select: { operationType: true, unit: true, amount: true },
-        },
-      },
-      take: 2,
-    });
-    const book = books[0];
-    const rule = book?.rules[0];
-    if (
-      books.length !== 1 ||
-      !book ||
-      !book.ruleSetSha256 ||
-      book.rules.length !== 1 ||
-      !rule ||
-      rule.amount === null ||
-      rule.unit !== operation.unit
-    ) {
-      throw new OperationReportingError(
-        'PIECEWORK_RATE_UNAVAILABLE',
-        '当前时点没有唯一、完整且已发布的工序工价',
-      );
-    }
-
-    const priced = calculatePieceworkAmount(
-      {
-        operationType: operation.operationType,
-        completedQty: parsed.completed.toString(),
-        defectQty: parsed.defect.toString(),
-        reworkQty: parsed.rework.toString(),
-        ...(operation.operationType === PieceworkOperationType.PARTIAL
-          ? { passCount: plan.passCount }
-          : {}),
-      },
-      {
-        operationType: rule.operationType,
-        unit: rule.unit,
-        amount: rule.amount.toString(),
-      },
-    );
-
-    const report = await tx.productionReport.create({
-      data: {
-        operationId: operation.id,
-        reporterId: account.id,
-        entryType: ProductionReportEntryType.REPORT,
-        source: ProductionReportSource.LIVE,
-        reportedCompletedQty: priced.completedQty,
-        defectQty: priced.excludedDefectQty,
-        reworkQty: priced.excludedReworkQty,
-        chargeableQty: priced.chargeableQty,
-        unit: priced.unit,
-        rate: priced.rate,
-        amount: priced.amount,
-        priceBookId: book.id,
-        priceBookVersion: book.version,
-        ruleSetSha256: book.ruleSetSha256,
-        snapshot: {
-          schemaVersion: 1,
-          reporterId: account.id,
-          operation: {
-            id: operation.id,
-            operationType: operation.operationType,
-            unit: operation.unit,
-            plannedQty: operation.plannedQty.toString(),
-            plannedCompletedPieces: plan.plannedPieces.toString(),
-            passCount: plan.passCount,
-            sources: plan.evidence,
-          },
-          submitted: {
-            completedQty: priced.completedQty,
-            defectQty: priced.excludedDefectQty,
-            reworkQty: priced.excludedReworkQty,
-          },
-          payroll: {
-            defectAndReworkExcluded: true,
-            chargeableQty: priced.chargeableQty,
-            rate: priced.rate,
-            amount: priced.amount,
-            priceBookId: book.id,
-            priceBookVersion: book.version,
-            ruleSetSha256: book.ruleSetSha256,
-          },
-        } as Prisma.InputJsonValue,
-        idempotencyKey: parsed.idempotencyKey,
-        reportedAt,
-      },
-      select: { id: true },
-    });
-
-    const operationStatus = completedAggregate.eq(plan.plannedPieces)
-      ? ProductionOperationStatus.COMPLETED
-      : ProductionOperationStatus.IN_PROGRESS;
-    if (operation.status !== operationStatus) {
-      await tx.productionOperation.update({
-        where: { id: operation.id },
-        data: { status: operationStatus },
-      });
-    }
-
-    let orderStatus: OrderStatus = operation.order.status;
-    if (orderStatus === OrderStatus.SCHEDULING) {
-      transitionOrder(orderStatus, OrderStatus.IN_PRODUCTION);
-      await tx.order.update({
-        where: { id: operation.orderId },
-        data: { status: OrderStatus.IN_PRODUCTION },
-      });
-      await tx.orderLog.create({
-        data: {
-          orderId: operation.orderId,
-          operatorId: account.id,
-          action: 'STATUS_CHANGE',
-          changedFields: {
-            status: {
-              before: OrderStatus.SCHEDULING,
-              after: OrderStatus.IN_PRODUCTION,
-            },
-          },
-          remark: `工序 ${operation.operationType} 首次扫码报工`,
-        },
-      });
-      orderStatus = OrderStatus.IN_PRODUCTION;
-    }
-
-    const remainingOperations = await tx.productionOperation.count({
-      where: {
-        orderId: operation.orderId,
-        status: {
-          notIn: [
-            ProductionOperationStatus.COMPLETED,
-            ProductionOperationStatus.CANCELLED,
-          ],
-        },
-      },
-    });
-    if (remainingOperations === 0) {
-      // Reuse the existing outsource/coverage completion gate only after the
-      // new operation ledger is complete. The helper may also see transitional
-      // legacy tasks; that can delay completion but can never complete early.
-      const completion = await maybeCompleteProductionOrder(
-        tx as unknown as ProductionCompletionTx,
-        operation.orderId,
-        account.id,
-        reportedAt,
-      );
-      if (completion.completed) orderStatus = OrderStatus.COMPLETED;
-    }
-
-    return {
-      reportId: report.id,
-      operationId: operation.id,
-      orderId: operation.orderId,
-      operationStatus,
-      orderStatus,
-      completedAggregate: completedAggregate.toString(),
-      amount: priced.amount,
-      idempotentReplay: false,
-    };
-  });
+  return db.$transaction((tx) =>
+    reportProductionOperationInTx(tx, input, actor, parsed),
+  );
 }

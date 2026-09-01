@@ -47,13 +47,21 @@ const ACTIVE_RULES: Record<string, unknown> = {
   },
 };
 
-function workerFixture(overrides: Partial<{ workerType: WorkerType | null; isActive: boolean; role: Role }> = {}) {
+function workerFixture(overrides: Partial<{
+  workerType: WorkerType | null;
+  isActive: boolean;
+  role: Role;
+  employmentStartDate: Date | null;
+  employmentEndDate: Date | null;
+}> = {}) {
   return {
     id: 'worker-1',
     role: Role.WORKER,
     workerType: WorkerType.CLEANER,
     isActive: true,
     displayName: '打包阿姨',
+    employmentStartDate: null,
+    employmentEndDate: null,
     ...overrides,
   };
 }
@@ -228,6 +236,72 @@ describe('computeHourlyPayroll — CLEANER', () => {
   });
 });
 
+describe('computeHourlyPayroll — Decimal storage closure', () => {
+  const mayRows = (hours: {
+    normalHours: string;
+    otHours: string;
+    spareHours: string;
+  }) =>
+    Array.from({ length: 31 }, (_, index) => ({
+      date: new Date(Date.UTC(2026, 4, index + 1)),
+      ...hours,
+      roleSnapshot: Role.WORKER,
+      workerTypeSnapshot: WorkerType.CLEANER,
+    }));
+
+  it('persists the maximum bounded cleaner rate/OT combination in Decimal(11,2)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    setupAllRules({
+      ...ACTIVE_RULES,
+      CLEANER_HOURLY: { hourlyRate: 9999.99 },
+      OT_MULTIPLIER: { multiplier: 99.99 },
+    });
+    dbMock.attendance.findMany.mockResolvedValue(
+      mayRows({ normalHours: '0.00', otHours: '24.00', spareHours: '0.00' }),
+    );
+
+    const result = await computeHourlyPayroll('worker-1', '2026-05');
+
+    expect(result.totalOtHours).toBe('744.00');
+    expect(Number(result.otSalary)).toBeLessThanOrEqual(999_999_999.99);
+    expect(dbMock.hourlyWorkerPayroll.upsert).toHaveBeenCalledOnce();
+  });
+
+  it('persists maximum cook monthly + spare components in Decimal(11,2)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      workerFixture({ workerType: WorkerType.COOK }),
+    );
+    setupAllRules({
+      ...ACTIVE_RULES,
+      COOK_MONTHLY: { monthlyBase: 99_999_999.99 },
+      COOK_SPARE_HOURLY: { hourlyRate: 9999.99 },
+    });
+    dbMock.attendance.findMany.mockResolvedValue(
+      mayRows({ normalHours: '0.00', otHours: '0.00', spareHours: '24.00' }).map(
+        (row) => ({ ...row, workerTypeSnapshot: WorkerType.COOK }),
+      ),
+    );
+
+    const result = await computeHourlyPayroll('worker-1', '2026-05');
+
+    expect(Number(result.totalSalary)).toBeLessThanOrEqual(999_999_999.99);
+    expect(dbMock.hourlyWorkerPayroll.upsert).toHaveBeenCalledOnce();
+  });
+
+  it('fails before upsert when a legacy hourly rule exceeds Decimal(6,2)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    setupAllRules({
+      ...ACTIVE_RULES,
+      CLEANER_HOURLY: { hourlyRate: 10000 },
+    });
+
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-05'),
+    ).rejects.toThrow(/清废时薪规则.*可保存范围/);
+    expect(dbMock.hourlyWorkerPayroll.upsert).not.toHaveBeenCalled();
+  });
+});
+
 describe('computeHourlyPayroll — COOK (全职/混合/请假/请假代班)', () => {
   beforeEach(() => {
     dbMock.user.findUnique.mockResolvedValue(
@@ -375,6 +449,51 @@ describe('computeHourlyPayroll — Shanghai month range query', () => {
       '2026-06-01T00:00:00.000Z',
     );
   });
+
+  it('includes employment boundary dates and excludes rows outside them from totals and dailyDetail', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      workerFixture({
+        employmentStartDate: new Date('2026-05-10T00:00:00.000Z'),
+        employmentEndDate: new Date('2026-05-20T00:00:00.000Z'),
+      }),
+    );
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue(
+      ['2026-05-09', '2026-05-10', '2026-05-20', '2026-05-21'].map(
+        (date) => ({
+          date: new Date(`${date}T00:00:00.000Z`),
+          normalHours: '8.00',
+          otHours: '0.00',
+          spareHours: '0.00',
+          roleSnapshot: Role.WORKER,
+          workerTypeSnapshot: WorkerType.CLEANER,
+        }),
+      ),
+    );
+
+    const result = await computeHourlyPayroll('worker-1', '2026-05');
+
+    expect(result.totalNormalHours).toBe('16.00');
+    const create = dbMock.hourlyWorkerPayroll.upsert.mock.calls[0][0].create;
+    expect(create.dailyDetail).toEqual([
+      expect.objectContaining({ date: '2026-05-10' }),
+      expect.objectContaining({ date: '2026-05-20' }),
+    ]);
+  });
+
+  it('rejects a month wholly outside the employment interval', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      workerFixture({
+        employmentStartDate: new Date('2026-06-01T00:00:00.000Z'),
+        employmentEndDate: new Date('2026-06-30T00:00:00.000Z'),
+      }),
+    );
+
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-05'),
+    ).rejects.toThrow(/禁止计薪/);
+    expect(dbMock.attendance.findMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('computeHourlyForAllInMonth', () => {
@@ -409,15 +528,27 @@ describe('computeHourlyForAllInMonth', () => {
     dbMock.user.findMany.mockResolvedValue([]);
     await computeHourlyForAllInMonth('2026-05');
     const where = dbMock.user.findMany.mock.calls[0][0].where;
-    expect(where.OR[0].workerType.in).toEqual([
+    expect(where.AND[0].OR[0].workerType.in).toEqual([
       WorkerType.CLEANER,
       WorkerType.COOK,
     ]);
-    expect(where.OR[1].attendanceRecords.some).toMatchObject({
+    expect(where.AND[0].OR[1].attendanceRecords.some).toMatchObject({
       roleSnapshot: Role.WORKER,
       workerTypeSnapshot: {
         in: [WorkerType.CLEANER, WorkerType.COOK],
       },
+    });
+    expect(where.AND[1]).toEqual({
+      OR: [
+        { employmentStartDate: null },
+        { employmentStartDate: { lt: new Date('2026-06-01T00:00:00.000Z') } },
+      ],
+    });
+    expect(where.AND[2]).toEqual({
+      OR: [
+        { employmentEndDate: null },
+        { employmentEndDate: { gte: new Date('2026-05-01T00:00:00.000Z') } },
+      ],
     });
   });
 
@@ -691,8 +822,28 @@ describe('markHourlyPayrollPaid', () => {
       workerName: '李师傅',
     });
     expect(
-      dbMock.hourlyWorkerPayroll.findUnique.mock.calls[0][0].select.worker,
+      dbMock.hourlyWorkerPayroll.findUnique.mock.calls[1][0].select.worker,
     ).toEqual({ select: { displayName: true } });
+  });
+
+  it('re-reads after the lock and refuses an attendance-invalidated payroll', async () => {
+    dbMock.hourlyWorkerPayroll.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({ workerId: 'worker-1', month: '2026-05' })
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      markHourlyPayrollPaid(
+        'p-1',
+        true,
+        new Date('2026-06-01T09:00:00Z'),
+      ),
+    ).rejects.toThrow(/考勤已变更.*重新计算/);
+
+    expect(dbMock.hourlyWorkerPayroll.update).not.toHaveBeenCalled();
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.hourlyWorkerPayroll.findUnique.mock.invocationCallOrder[1]!,
+    );
   });
 
   it('takes the per-(worker, month) advisory lock (Codex round 48 / P0)', async () => {
@@ -707,6 +858,12 @@ describe('markHourlyPayrollPaid', () => {
     expect(sqlCalls[0][1]).toMatch(
       /print-shop-erp:hourly:worker-1:2026-05/,
     );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.hourlyWorkerPayroll.findUnique.mock.invocationCallOrder[1]!,
+    );
+    expect(
+      dbMock.hourlyWorkerPayroll.findUnique.mock.invocationCallOrder[1],
+    ).toBeLessThan(dbMock.hourlyWorkerPayroll.update.mock.invocationCallOrder[0]!);
   });
 });
 
@@ -787,7 +944,16 @@ describe('computeHourlyPayroll — advisory lock + now pinning (Codex round 48)'
     const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
     expect(sqlCalls[0][1]).toMatch(
+      /print-shop-erp:salary-identity:worker-1/,
+    );
+    expect(sqlCalls[1][1]).toMatch(
       /print-shop-erp:hourly:worker-1:2026-05/,
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[1]!,
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      dbMock.user.findUnique.mock.invocationCallOrder[0]!,
     );
     const sharedRuleLock = sqlCalls.find((call) =>
       (call[0] as TemplateStringsArray)

@@ -59,12 +59,6 @@ async function checkWorkerRoutes(
       await expect(
         page.getByRole('heading', { name: route.readyHeading, exact: true }),
       ).toBeVisible();
-      await page.evaluate((requestedTheme) => {
-        localStorage.setItem('erp-theme', requestedTheme);
-        document.documentElement.classList.toggle('dark', requestedTheme === 'dark');
-        document.documentElement.dataset.theme = requestedTheme;
-        document.documentElement.style.colorScheme = requestedTheme;
-      }, theme);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       if (theme === 'dark') {
         await expect(page.locator('html')).toHaveClass(/\bdark\b/);
@@ -72,6 +66,19 @@ async function checkWorkerRoutes(
         await expect(page.locator('html')).not.toHaveClass(/\bdark\b/);
       }
       await route.assertGateState?.(page);
+      // The route is server-rendered, but its reduced-motion color transitions
+      // can still be created during the next paint. Let consecutive paints and
+      // any newly-created transitions settle before axe samples the palette.
+      await page.evaluate(async () => {
+        for (let paint = 0; paint < 3; paint += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await Promise.all(
+            document
+              .getAnimations()
+              .map((animation) => animation.finished.catch(() => undefined)),
+          );
+        }
+      });
       await expectViewportGate(page, testInfo);
       await expectA11yGate(page);
       await attachCandidateScreenshot(

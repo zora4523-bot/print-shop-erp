@@ -45,6 +45,7 @@ function render(isUrgent = false) {
   return renderToStaticMarkup(
     <EditOrderForm
       orderId="order-1"
+      expectedEditVersion={7}
       fieldset="FULL"
       initial={{ ...initial, isUrgent }}
     />,
@@ -89,6 +90,12 @@ describe('EditOrderForm 字段错误的 aria 连线', () => {
     expect(tag).toContain('aria-required="true"');
   });
 
+  it('携带页面加载时的递增编辑版本', () => {
+    const html = render();
+    expect(html).toContain(
+      'type="hidden" name="expectedEditVersion" value="7"',
+    );
+  });
 
   it('急单使用共享复选框并保留原生 FormData 的 on/false 顺序', () => {
     const html = render(true);

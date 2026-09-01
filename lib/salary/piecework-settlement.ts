@@ -5,11 +5,17 @@ import {
   Role,
 } from '../../generated/prisma/enums';
 import { writeAuditLogInTx, type AuditActor } from '../audit-log';
-import { databaseNow } from '../background-jobs/clock';
+import { databaseClockNow, databaseNow } from '../background-jobs/clock';
 import { parseStrictYmd } from '../auth/schemas';
 import { todayShanghai } from '../dashboard/shanghai-clock';
 import { db } from '../db';
 import { shanghaiDayRange } from './daily-common';
+import {
+  pieceworkReportingDayGateLockKey,
+  pieceworkSettlementLockKey,
+} from './piecework-lock';
+
+export { pieceworkSettlementLockKey } from './piecework-lock';
 
 export type PieceworkSettlementReport = {
   id: string;
@@ -84,13 +90,6 @@ function assertClosedWorkDate(workDate: string, now: Date): void {
       `不能锁定当前或未来日期的计件结算（${workDate}，上海日历）`,
     );
   }
-}
-
-export function pieceworkSettlementLockKey(
-  reporterId: string,
-  workDate: string,
-): string {
-  return `print-shop-erp:piecework-settlement:${reporterId}:${workDate}`;
 }
 
 function settlementDateKey(value: Date): string {
@@ -409,12 +408,18 @@ export async function lockPieceworkSettlement(input: {
   now?: Date;
 }): Promise<PieceworkSettlementReceipt> {
   assertAdmin(input.actor);
-  const now = input.now ?? new Date();
-  assertClosedWorkDate(input.workDate, now);
   const { start, end } = shanghaiDayRange(input.workDate);
   const dateCol = parseStrictYmd(input.workDate)!;
 
   return db.$transaction(async (tx) => {
+    // Reporting takes the day gate before the reporter/day lock. Settlement
+    // must use the same order so the closed-day check and final report set are
+    // one serial boundary, without introducing an advisory-lock deadlock.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkReportingDayGateLockKey(
+      input.workDate,
+    )}))`;
+    const now = input.now ?? (await databaseClockNow(tx));
+    assertClosedWorkDate(input.workDate, now);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkSettlementLockKey(
       input.reporterId,
       input.workDate,
@@ -547,31 +552,40 @@ export async function lockPieceworkSettlementsForDate(input: {
   now?: Date;
 }): Promise<PieceworkSettlementBatchResult> {
   assertAdmin(input.actor);
-  const now = input.now ?? new Date();
-  assertClosedWorkDate(input.workDate, now);
   const { start, end } = shanghaiDayRange(input.workDate);
-  const reporters = await db.productionReport.findMany({
-    where: {
-      reportedAt: { gte: start, lt: end },
-      settlementItem: null,
-    },
-    distinct: ['reporterId'],
-    orderBy: { reporterId: 'asc' },
-    select: {
-      reporterId: true,
-      reporter: { select: { displayName: true } },
-    },
+  const discovery = await db.$transaction(async (tx) => {
+    // The discovery scan itself is the close boundary. A live report for this
+    // day either committed before this gate (and is visible below), or will
+    // re-read clock_timestamp() after the gate and move to the current day.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkReportingDayGateLockKey(
+      input.workDate,
+    )}))`;
+    const now = input.now ?? (await databaseClockNow(tx));
+    assertClosedWorkDate(input.workDate, now);
+    const reporters = await tx.productionReport.findMany({
+      where: {
+        reportedAt: { gte: start, lt: end },
+        settlementItem: null,
+      },
+      distinct: ['reporterId'],
+      orderBy: { reporterId: 'asc' },
+      select: {
+        reporterId: true,
+        reporter: { select: { displayName: true } },
+      },
+    });
+    return { now, reporters };
   });
   const settled: PieceworkSettlementReceipt[] = [];
   const errors: PieceworkSettlementBatchResult['errors'] = [];
-  for (const reporter of reporters) {
+  for (const reporter of discovery.reporters) {
     try {
       settled.push(
         await lockPieceworkSettlement({
           reporterId: reporter.reporterId,
           workDate: input.workDate,
           actor: input.actor,
-          now,
+          now: discovery.now,
         }),
       );
     } catch (error) {

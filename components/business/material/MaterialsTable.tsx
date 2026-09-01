@@ -130,7 +130,10 @@ export function MaterialsTable({
       </TableHeader>
       <TableBody>
         {materials.map((m) => (
-          <TableRow key={m.id} className={!m.isActive ? 'opacity-60' : undefined}>
+          <TableRow
+            key={m.id}
+            className={!m.isActive ? 'text-muted-foreground' : undefined}
+          >
             <TableCell className="font-sans tabular-nums text-xs">{m.code}</TableCell>
             <TableCell>
               {businessText(

@@ -364,6 +364,7 @@ model Order {
   quotedFeeCompleteness   OrderQuotedFeeCompleteness?
   quotedPricingRevisionId String?
   revision                Int                         @default(1)
+  editVersion             Int                         @default(0)
   pricingStatus           OrderPricingStatus          @default(PENDING_ADMIN_CONFIRMATION)
   priceRevision           Int                         @default(1)
   pricingConfirmedAt      DateTime?
@@ -1828,18 +1829,19 @@ model PurchaseOrderItem {
 }
 
 model PurchaseReceipt {
-  id              String                @id @default(cuid())
-  receiptNo       String                @unique
-  idempotencyKey  String                @unique
-  purchaseOrderId String
-  receivedById    String
-  status          PurchaseReceiptStatus @default(POSTED)
-  receivedAt      DateTime              @default(now())
-  cancelledAt     DateTime?
-  cancelReason    String?
-  remark          String?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  id                 String                @id @default(cuid())
+  receiptNo          String                @unique
+  idempotencyKey     String                @unique
+  requestFingerprint String?               @db.VarChar(64) // 新请求的规范化业务 payload SHA-256；null 仅用于历史兼容
+  purchaseOrderId    String
+  receivedById       String
+  status             PurchaseReceiptStatus @default(POSTED)
+  receivedAt         DateTime              @default(now())
+  cancelledAt        DateTime?
+  cancelReason       String?
+  remark             String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
   purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id])
   receivedBy    User                  @relation(fields: [receivedById], references: [id])
@@ -2090,8 +2092,8 @@ model CustomerServiceCommission {
   totalSales         Decimal   @db.Decimal(12, 2)
   tierRate           Decimal   @db.Decimal(6, 4)
   commissionAmount   Decimal   @db.Decimal(12, 2)
-  monthlyBaseTotal   Decimal   @db.Decimal(10, 2)
-  totalIncome        Decimal   @db.Decimal(12, 2)
+  monthlyBaseTotal   Decimal   @db.Decimal(12, 2)
+  totalIncome        Decimal   @db.Decimal(13, 2)
   paidBase           Decimal   @default(0) @db.Decimal(12, 2)
   paidCommission     Decimal   @default(0) @db.Decimal(12, 2)
   isFullyPaid        Boolean   @default(false)
@@ -2147,10 +2149,10 @@ model HourlyWorkerPayroll {
   totalSpareHours    Decimal   @default(0) @db.Decimal(6, 2) // COOK 专用
   hourlyRate         Decimal   @db.Decimal(6, 2)
   otMultiplier       Decimal   @db.Decimal(4, 2)
-  baseSalary         Decimal   @db.Decimal(10, 2) // PACKER/CLEANER=hourlyRate×normal; COOK=monthlyBase
-  otSalary           Decimal   @default(0) @db.Decimal(10, 2) // PACKER/CLEANER only
-  spareSalary        Decimal   @default(0) @db.Decimal(10, 2) // COOK only
-  totalSalary        Decimal   @db.Decimal(10, 2)
+  baseSalary         Decimal   @db.Decimal(11, 2) // PACKER/CLEANER=hourlyRate×normal; COOK=monthlyBase
+  otSalary           Decimal   @default(0) @db.Decimal(11, 2) // PACKER/CLEANER only
+  spareSalary        Decimal   @default(0) @db.Decimal(11, 2) // COOK only
+  totalSalary        Decimal   @db.Decimal(11, 2)
   dailyDetail        Json? // 每日工时明细
   // Full rule snapshot at settlement time: hourlyRate / cookMonthly /
   // spareHourlyRate / otMultiplier / workHours config. Enough to
@@ -2229,6 +2231,7 @@ model Bill {
   id            String     @id @default(cuid())
   salesUserId   String
   period        String // YYYY-MM
+  sequence      Int        @default(1) // 1=月账单；2+ = 已发单后的补充账单
   openingAmount Decimal    @default(0) @db.Decimal(12, 2) // 流水启用前的期初/历史账面差额
   totalAmount   Decimal    @db.Decimal(12, 2)
   paidAmount    Decimal    @default(0) @db.Decimal(12, 2)
@@ -2243,7 +2246,7 @@ model Bill {
   items     BillItem[]
   payments  BillPayment[]
 
-  @@unique([salesUserId, period])
+  @@unique([salesUserId, period, sequence])
   @@index([status])
   // Dashboard `getMonthlyBillStats` filters by period alone; the
   // composite (salesUserId, period) unique key can't serve a
@@ -2280,9 +2283,9 @@ model BillItem {
   bill  Bill  @relation(fields: [billId], references: [id], onDelete: Cascade)
   order Order @relation(fields: [orderId], references: [id])
 
-  // Prevent duplicate items for the same (bill, order) under
-  // concurrent generateBillsForPeriod runs. The advisory lock in lib
-  // closes most of the race, but this is the DB-level last-line guard.
+  // One finished order is receivable exactly once, including across monthly
+  // and supplemental bills. This global key is the DB-level last-line guard.
+  @@unique([orderId])
   @@unique([billId, orderId])
   @@index([billId])
 }

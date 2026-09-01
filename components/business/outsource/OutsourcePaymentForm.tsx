@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { recordOutsourcePaymentAction } from '@/actions/outsource';
 import type { OutsourcePaymentMutationResult } from '@/actions/outsource.types';
+import { formatDateTimeLocalShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -199,7 +200,7 @@ export function OutsourcePaymentForm({
             id="outsource-payment-paid-at"
             type="datetime-local"
             name="paidAt"
-            defaultValue={shanghaiDateTimeLocal(new Date())}
+            defaultValue={formatDateTimeLocalShanghai(new Date())}
             required
             aria-invalid={Boolean(errors.paidAt?.length)}
           />
@@ -288,20 +289,4 @@ export function OutsourcePaymentForm({
       ) : null}
     </form>
   );
-}
-
-function shanghaiDateTimeLocal(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const values = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
 }

@@ -4,8 +4,14 @@ import {
   Role,
   WorkerType,
 } from '../generated/prisma/enums';
+import { Prisma } from '../generated/prisma/client';
 import { db } from './db';
 import { parseStrictYmd } from './auth/schemas';
+import { employmentCoversDate } from './salary/employment';
+import {
+  hourlyPayrollLockKey,
+  salaryIdentityLockKey,
+} from './salary/hourly-lock';
 
 // 正式员工考勤：管理员按天记录实际上班/请假天数（支持半天），
 // 时薪工额外记录正常、加班与厨师空闲打包工时。WORK_HOURS 规则仅用于
@@ -18,21 +24,6 @@ export class AttendanceError extends Error {
   }
 }
 
-// Hourly worker types the attendance flow accepts. MACHINE-type
-// workers are on piecework (Slice A) and never enter attendance.
-export const HOURLY_WORKER_TYPES = [
-  WorkerType.PACKER,
-  WorkerType.CLEANER,
-  WorkerType.COOK,
-] as const;
-
-export type HourlyWorkerOption = {
-  id: string;
-  displayName: string;
-  workerType: WorkerType;
-  username: string;
-};
-
 export type AttendanceEmployeeOption = {
   id: string;
   displayName: string;
@@ -41,24 +32,6 @@ export type AttendanceEmployeeOption = {
   employmentType: EmploymentType;
   username: string;
 };
-
-// Active hourly workers (PACKER / CLEANER / COOK) for the attendance
-// page's worker picker. Kept in lib/ so the page never touches Prisma
-// directly (CLAUDE.md §3). The `in` filter guarantees a non-null
-// workerType; Prisma's generated type can't narrow through the filter,
-// so we assert the narrowed shape here once.
-export async function listActiveHourlyWorkers(): Promise<HourlyWorkerOption[]> {
-  const rows = await db.user.findMany({
-    where: {
-      role: Role.WORKER,
-      isActive: true,
-      workerType: { in: [...HOURLY_WORKER_TYPES] },
-    },
-    orderBy: [{ workerType: 'asc' }, { displayName: 'asc' }],
-    select: { id: true, displayName: true, workerType: true, username: true },
-  });
-  return rows as HourlyWorkerOption[];
-}
 
 export async function listActiveAttendanceEmployees(): Promise<
   AttendanceEmployeeOption[]
@@ -113,6 +86,48 @@ export type AttendanceRow = {
   employmentType: EmploymentType;
 };
 
+type MutableAttendanceSnapshot = {
+  normalHours: Decimal.Value;
+  otHours: Decimal.Value;
+  spareHours: Decimal.Value;
+  workUnits: Decimal.Value;
+  leaveUnits: Decimal.Value;
+  leaveType: string | null;
+  remark: string | null;
+};
+
+type NormalizedAttendanceFacts = {
+  normalHours: string;
+  otHours: string;
+  spareHours: string;
+  workUnits: string;
+  leaveUnits: string;
+  leaveType: string | null;
+  remark: string | null;
+};
+
+function sameAttendanceFacts(
+  current: MutableAttendanceSnapshot,
+  next: NormalizedAttendanceFacts,
+): boolean {
+  return (
+    new Decimal(current.normalHours).equals(next.normalHours) &&
+    new Decimal(current.otHours).equals(next.otHours) &&
+    new Decimal(current.spareHours).equals(next.spareHours) &&
+    new Decimal(current.workUnits).equals(next.workUnits) &&
+    new Decimal(current.leaveUnits).equals(next.leaveUnits) &&
+    current.leaveType === next.leaveType &&
+    current.remark === next.remark
+  );
+}
+
+function isPrismaNotFound(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2025'
+  );
+}
+
 // Idempotent upsert: re-recording the same (workerId, date) overwrites
 // the previous row. 管理员可能早上快速录"全勤"再下午细调，这里必须
 // 宽松（注意事项 2 — 幂等）。
@@ -131,36 +146,6 @@ export async function recordAttendance(
     throw new AttendanceError(
       `日期格式非法或非法日历日期（应为合法 YYYY-MM-DD）：${date}`,
     );
-  }
-
-  const worker = await db.user.findUnique({
-    where: { id: workerId },
-    select: {
-      id: true,
-      role: true,
-      workerType: true,
-      isActive: true,
-      displayName: true,
-      employmentType: true,
-    },
-  });
-  if (!worker) throw new AttendanceError('工人不存在');
-  if (!worker.isActive) throw new AttendanceError('工人已停用');
-  if (worker.role === Role.ADMIN || worker.employmentType === null) {
-    throw new AttendanceError('该账号不是可录考勤的在职员工');
-  }
-  const existingIdentity = await db.attendance.findUnique({
-    where: { workerId_date: { workerId, date: dateCol } },
-    select: { roleSnapshot: true, workerTypeSnapshot: true },
-  });
-  const roleSnapshot = existingIdentity?.roleSnapshot ?? worker.role;
-  const workerTypeSnapshot = existingIdentity
-    ? existingIdentity.workerTypeSnapshot
-    : worker.role === Role.WORKER
-      ? worker.workerType
-      : null;
-  if (roleSnapshot === Role.WORKER && workerTypeSnapshot === null) {
-    throw new AttendanceError('师傅账号未配置工种，不能录入考勤');
   }
 
   const normal = dec(input.normalHours);
@@ -182,12 +167,10 @@ export async function recordAttendance(
       throw new AttendanceError(`${label}超出 24 小时`);
     }
   }
+  if (normal.plus(ot).gt(24)) {
+    throw new AttendanceError('正常工时与加班工时合计超出 24 小时');
+  }
 
-  // spareHours silently dropped for non-COOK even if the caller sends
-  // one — keeps the foreman's form shape uniform without polluting
-  // PACKER / CLEANER rows.
-  const effectiveSpare =
-    workerTypeSnapshot === WorkerType.COOK ? spare : new Decimal(0);
   const workUnits = dec(input.workUnits ?? 1);
   const leaveUnits = dec(input.leaveUnits ?? 0);
   if (
@@ -197,69 +180,156 @@ export async function recordAttendance(
   ) {
     throw new AttendanceError('上班和请假只支持半天单位，合计不能超过 1 天');
   }
+  const leaveType = input.leaveType?.trim() || null;
+  const remark = input.remark ?? null;
+  const month = date.slice(0, 7);
 
-  const saved = await db.attendance.upsert({
-    where: { workerId_date: { workerId, date: dateCol } },
-    create: {
+  return db.$transaction(async (tx) => {
+    // Identity precedes worker-month everywhere. Account role/active/date
+    // changes use the same identity key, so the snapshot is read only after a
+    // concurrent account mutation has committed (or before it begins).
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
       workerId,
-      date: dateCol,
-      normalHours: normal.toFixed(2),
-      otHours: ot.toFixed(2),
-      spareHours: effectiveSpare.toFixed(2),
-      workUnits: workUnits.toFixed(1),
-      leaveUnits: leaveUnits.toFixed(1),
-      leaveType: input.leaveType?.trim() || null,
-      remark: input.remark ?? null,
-      roleSnapshot,
-      workerTypeSnapshot,
-      identitySnapshotVerified: true,
-      createdById: actor.id,
-    },
-    update: {
-      normalHours: normal.toFixed(2),
-      otHours: ot.toFixed(2),
-      spareHours: effectiveSpare.toFixed(2),
-      workUnits: workUnits.toFixed(1),
-      leaveUnits: leaveUnits.toFixed(1),
-      leaveType: input.leaveType?.trim() || null,
-      remark: input.remark ?? null,
-      // Deliberately don't overwrite createdById, identity snapshots or their
-      // verification marker on re-entry; both the original recorder and
-      // historical payroll classification stay auditable after an account
-      // change.
-    },
-    select: {
-      id: true,
-      workerId: true,
-      date: true,
-      normalHours: true,
-      otHours: true,
-      spareHours: true,
-      workUnits: true,
-      leaveUnits: true,
-      leaveType: true,
-      remark: true,
-      roleSnapshot: true,
-      workerTypeSnapshot: true,
-    },
-  });
+    )}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyPayrollLockKey(
+      workerId,
+      month,
+    )}))`;
 
-  return {
-    id: saved.id,
-    workerId: saved.workerId,
-    date: saved.date,
-    normalHours: String(saved.normalHours),
-    otHours: String(saved.otHours),
-    spareHours: String(saved.spareHours),
-    workUnits: String(saved.workUnits),
-    leaveUnits: String(saved.leaveUnits),
-    leaveType: saved.leaveType,
-    remark: saved.remark,
-    workerDisplayName: worker.displayName,
-    workerType: saved.workerTypeSnapshot,
-    workerRole: saved.roleSnapshot,
-    employmentType: worker.employmentType ?? EmploymentType.FULL_TIME,
-  };
+    const worker = await tx.user.findUnique({
+      where: { id: workerId },
+      select: {
+        id: true,
+        role: true,
+        workerType: true,
+        isActive: true,
+        displayName: true,
+        employmentType: true,
+        employmentStartDate: true,
+        employmentEndDate: true,
+      },
+    });
+    if (!worker) throw new AttendanceError('工人不存在');
+    if (!worker.isActive) throw new AttendanceError('工人已停用');
+    if (worker.role === Role.ADMIN || worker.employmentType === null) {
+      throw new AttendanceError('该账号不是可录考勤的在职员工');
+    }
+    if (!employmentCoversDate(dateCol, worker)) {
+      throw new AttendanceError('考勤日期不在该员工的雇佣区间内');
+    }
+
+    const payroll = await tx.hourlyWorkerPayroll.findUnique({
+      where: { workerId_month: { workerId, month } },
+      select: { id: true, isPaid: true },
+    });
+    if (payroll?.isPaid) {
+      throw new AttendanceError(
+        `该员工 ${month} 月工资已发放；请先撤销发放再修改考勤`,
+      );
+    }
+
+    const existing = await tx.attendance.findUnique({
+      where: { workerId_date: { workerId, date: dateCol } },
+      select: {
+        roleSnapshot: true,
+        workerTypeSnapshot: true,
+        normalHours: true,
+        otHours: true,
+        spareHours: true,
+        workUnits: true,
+        leaveUnits: true,
+        leaveType: true,
+        remark: true,
+      },
+    });
+    const roleSnapshot = existing?.roleSnapshot ?? worker.role;
+    const workerTypeSnapshot = existing
+      ? existing.workerTypeSnapshot
+      : worker.role === Role.WORKER
+        ? worker.workerType
+        : null;
+    if (roleSnapshot === Role.WORKER && workerTypeSnapshot === null) {
+      throw new AttendanceError('师傅账号未配置工种，不能录入考勤');
+    }
+
+    // spareHours silently drops to zero for non-COOK while retaining an
+    // existing row's immutable identity snapshot.
+    const effectiveSpare =
+      workerTypeSnapshot === WorkerType.COOK ? spare : new Decimal(0);
+    const nextFacts: NormalizedAttendanceFacts = {
+      normalHours: normal.toFixed(2),
+      otHours: ot.toFixed(2),
+      spareHours: effectiveSpare.toFixed(2),
+      workUnits: workUnits.toFixed(1),
+      leaveUnits: leaveUnits.toFixed(1),
+      leaveType,
+      remark,
+    };
+    const factsChanged =
+      existing === null || !sameAttendanceFacts(existing, nextFacts);
+
+    const saved = await tx.attendance.upsert({
+      where: { workerId_date: { workerId, date: dateCol } },
+      create: {
+        workerId,
+        date: dateCol,
+        ...nextFacts,
+        roleSnapshot,
+        workerTypeSnapshot,
+        identitySnapshotVerified: true,
+        createdById: actor.id,
+      },
+      update: {
+        ...nextFacts,
+        // Deliberately don't overwrite createdById, identity snapshots or
+        // their verification marker on re-entry; both the original recorder
+        // and historical payroll classification stay auditable.
+      },
+      select: {
+        id: true,
+        workerId: true,
+        date: true,
+        normalHours: true,
+        otHours: true,
+        spareHours: true,
+        workUnits: true,
+        leaveUnits: true,
+        leaveType: true,
+        remark: true,
+        roleSnapshot: true,
+        workerTypeSnapshot: true,
+      },
+    });
+
+    // An unpaid payroll is a recomputable derivative. Keeping it after a real
+    // source change would allow mark-paid to freeze a stale amount, so remove
+    // it atomically under the same worker-month lock.
+    if (factsChanged && payroll) {
+      const invalidated = await tx.hourlyWorkerPayroll.deleteMany({
+        where: { id: payroll.id, isPaid: false },
+      });
+      if (invalidated.count !== 1) {
+        throw new AttendanceError('工资状态已变化，请刷新后重试');
+      }
+    }
+
+    return {
+      id: saved.id,
+      workerId: saved.workerId,
+      date: saved.date,
+      normalHours: String(saved.normalHours),
+      otHours: String(saved.otHours),
+      spareHours: String(saved.spareHours),
+      workUnits: String(saved.workUnits),
+      leaveUnits: String(saved.leaveUnits),
+      leaveType: saved.leaveType,
+      remark: saved.remark,
+      workerDisplayName: worker.displayName,
+      workerType: saved.workerTypeSnapshot,
+      workerRole: saved.roleSnapshot,
+      employmentType: worker.employmentType ?? EmploymentType.FULL_TIME,
+    };
+  });
 }
 
 // Remove an attendance row — used to correct an accidentally recorded day.
@@ -275,16 +345,54 @@ export async function removeAttendance(
       `日期格式非法或非法日历日期（应为合法 YYYY-MM-DD）：${date}`,
     );
   }
-  try {
-    await db.attendance.delete({
-      where: { workerId_date: { workerId, date: dateCol } },
+  const month = date.slice(0, 7);
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
+      workerId,
+    )}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyPayrollLockKey(
+      workerId,
+      month,
+    )}))`;
+
+    const payroll = await tx.hourlyWorkerPayroll.findUnique({
+      where: { workerId_month: { workerId, month } },
+      select: { id: true, isPaid: true },
     });
+    if (payroll?.isPaid) {
+      throw new AttendanceError(
+        `该员工 ${month} 月工资已发放；请先撤销发放再删除考勤`,
+      );
+    }
+
+    const existing = await tx.attendance.findUnique({
+      where: { workerId_date: { workerId, date: dateCol } },
+      select: { id: true },
+    });
+    if (!existing) return { removed: false };
+
+    try {
+      await tx.attendance.delete({
+        where: { workerId_date: { workerId, date: dateCol } },
+      });
+    } catch (error) {
+      // Only Prisma's real P2025 means the row disappeared and is therefore
+      // an idempotent no-op. Constraint, connection and unknown failures must
+      // remain visible to the action/caller.
+      if (isPrismaNotFound(error)) return { removed: false };
+      throw error;
+    }
+
+    if (payroll) {
+      const invalidated = await tx.hourlyWorkerPayroll.deleteMany({
+        where: { id: payroll.id, isPaid: false },
+      });
+      if (invalidated.count !== 1) {
+        throw new AttendanceError('工资状态已变化，请刷新后重试');
+      }
+    }
     return { removed: true };
-  } catch {
-    // Prisma throws P2025 for "record to delete not found"; we treat
-    // it as a no-op — idempotent from the foreman's perspective.
-    return { removed: false };
-  }
+  });
 }
 
 // Read all attendance rows for one worker in a given Shanghai

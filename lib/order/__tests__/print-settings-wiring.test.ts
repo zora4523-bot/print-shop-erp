@@ -9,6 +9,26 @@ function source(path: string): string {
 }
 
 describe('print factory-name wiring', () => {
+  it('浏览器与静态 HTML 共用 lib/order 的布局与数据契约', () => {
+    const page = source('app/print/orders/[id]/page.tsx');
+    const html = source('lib/order/print-html.tsx');
+    const view = source('lib/order/print-view.ts');
+    const layout = source('lib/order/print-layout.tsx');
+
+    expect(page).toContain(
+      "import { OrderPrintLayout } from '@/lib/order/print-layout'",
+    );
+    expect(html).toContain(
+      "import { OrderPrintLayout } from './print-layout'",
+    );
+    expect(html).toContain("import type { PrintOrder } from './print-types'");
+    expect(view).toContain("from './print-types'");
+    expect(layout).toContain("from './print-types'");
+    expect([html, view, layout].join('\n')).not.toContain(
+      'components/business/order/OrderPrintLayout',
+    );
+  });
+
   it('浏览器打印读取当前厂名并显式传给共享布局', () => {
     const page = source('app/print/orders/[id]/page.tsx');
 

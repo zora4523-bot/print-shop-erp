@@ -9,6 +9,7 @@ const {
   revalidatePathMock,
   redirectMock,
   MockMaterialInvariantError,
+  MockMaterialUnitChangeError,
 } = vi.hoisted(() => ({
   permissionsMock: { requirePermission: vi.fn() },
   materialMock: {
@@ -28,6 +29,12 @@ const {
       this.name = 'MaterialInvariantError';
     }
   },
+  MockMaterialUnitChangeError: class extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'MaterialUnitChangeError';
+    }
+  },
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -40,6 +47,7 @@ vi.mock('@/lib/material', () => ({
   createMaterialTransaction: materialMock.createMaterialTransaction,
   getMaterialSummary: materialMock.getMaterialSummary,
   MaterialInvariantError: MockMaterialInvariantError,
+  MaterialUnitChangeError: MockMaterialUnitChangeError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 vi.mock('next/navigation', () => ({ redirect: redirectMock }));
@@ -300,6 +308,26 @@ describe('updateMaterialAction', () => {
     );
     const result = await updateMaterialAction('mat1', null, fd(validMaterial));
     expect(result.status).toBe('error');
+  });
+
+  it('maps an immutable unit change to the unit field', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    materialMock.updateMaterial.mockRejectedValueOnce(
+      new MockMaterialUnitChangeError('物料创建后不能修改单位；如需新单位，请新建物料'),
+    );
+
+    const result = await updateMaterialAction(
+      'mat1',
+      null,
+      fd({ ...validMaterial, unit: '卷' }),
+    );
+
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: {
+        unit: ['物料创建后不能修改单位；如需新单位，请新建物料'],
+      },
+    });
   });
 
   it('does not forward currentStock or isActive through basic edit', async () => {

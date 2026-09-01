@@ -54,6 +54,7 @@ export default async function EditOrderPage({ params }: PageProps) {
 
       <EditOrderForm
         orderId={order.id}
+        expectedEditVersion={order.editVersion}
         fieldset={fieldset}
         initial={{
           customName: order.customName,

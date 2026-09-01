@@ -1,0 +1,107 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: print_shop_erp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d print_shop_erp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/print_shop_erp_ci
+      AUTH_SECRET: ci-only-auth-secret-not-for-production-2026
+      AUTH_TRUST_HOST: "true"
+      SEED_ADMIN_USERNAME: ci-admin
+      SEED_ADMIN_PASSWORD: ci-only-admin-password-not-for-production
+      BACKGROUND_JOBS_MODE: inline
+      NOTIFICATION_MOCK_MODE: "true"
+      CDR_BUNDLE_MOCK_MODE: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate and validate Prisma client
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma validate
+
+      - name: Verify the complete fresh migration chain
+        env:
+          FRESH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/print_shop_erp_ci_fresh
+          FRESH_DATABASE_CONFIRM_DATABASE: print_shop_erp_ci_fresh
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE print_shop_erp_ci_fresh'
+          pnpm test:migrations:fresh
+
+      - name: Static quality gates
+        run: |
+          pnpm check:architecture
+          pnpm lint
+          pnpm typecheck
+
+      - name: Generate dead-code evidence
+        run: pnpm check:dead-code
+
+      - name: Prepare isolated database
+        run: |
+          pnpm exec prisma migrate deploy
+          pnpm db:seed
+
+      - name: Unit, regression, and PostgreSQL tests with coverage
+        run: pnpm exec vitest run --coverage --reporter=default
+
+      - name: Compile browser test inventory
+        run: pnpm exec playwright test --list
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Upload dead-code evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dead-code-evidence
+          path: .review/dead.json
+          if-no-files-found: ignore

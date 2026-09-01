@@ -72,6 +72,34 @@ function tierAmountErrorKey(index: number): string {
   return `rows.${index}.amount`;
 }
 
+function TierActivationControl({
+  active,
+  disabled,
+  quantity,
+  onChange,
+}: {
+  active: boolean;
+  disabled: boolean;
+  quantity: number;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex min-w-0 items-center justify-end">
+      <label
+        aria-label={`${quantityFormatter.format(quantity)} 个价格档${active ? '启用' : '停用'}`}
+        className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+      >
+        <Checkbox
+          checked={active}
+          disabled={disabled}
+          onCheckedChange={onChange}
+        />
+        <span>{active ? '启用' : '停用'}</span>
+      </label>
+    </div>
+  );
+}
+
 function parseAmount(value: string): Decimal | null {
   const trimmed = value.trim();
   if (!/^(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?$/.test(trimmed)) return null;
@@ -824,24 +852,19 @@ export function ExternalSalesPriceTierGroupEditor({
                   )}
                 </div>
 
-                <div className="flex min-w-0 items-center justify-end">
-                  <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-                    <Checkbox
-                      checked={active}
-                      disabled={pending}
-                      aria-label={`${quantityFormatter.format(tier.quantity)} 个价格档启用`}
-                      onCheckedChange={(checked) => {
-                        const nextActiveStates = [...draftState.activeStates];
-                        nextActiveStates[index] = checked;
-                        commitDraftState({
-                          amounts: draftState.amounts,
-                          activeStates: nextActiveStates,
-                        });
-                      }}
-                    />
-                    <span>{active ? '启用' : '停用'}</span>
-                  </label>
-                </div>
+                <TierActivationControl
+                  active={active}
+                  disabled={pending}
+                  quantity={tier.quantity}
+                  onChange={(checked) => {
+                    const nextActiveStates = [...draftState.activeStates];
+                    nextActiveStates[index] = checked;
+                    commitDraftState({
+                      amounts: draftState.amounts,
+                      activeStates: nextActiveStates,
+                    });
+                  }}
+                />
               </li>
             );
           })}

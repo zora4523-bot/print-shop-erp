@@ -116,6 +116,29 @@ describe('calculateCreateOrderQuote · 局部烫金黄金用例', () => {
     ).toMatchObject({ unitPrice: '0.1300' });
   });
 
+  it('损坏快照中的空白封单价超过列上限时失败关闭', () => {
+    const snapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      partial: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
+        blankUnitPrices: CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map(
+          (row) => ({ ...row, unitPrice: '1200000.0000' }),
+        ),
+      },
+    };
+
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([createGoldenOrderItem({ quantity: 1 })]),
+      snapshot,
+    );
+
+    expect(result).toMatchObject({ status: 'INVALID_INPUT', submittable: false });
+    expect(result.items[0]).toMatchObject({ unitPrice: null, amount: null });
+    expect(result.items[0]?.errors).toContain(
+      '局部烫金空白封单价超过可保存上限',
+    );
+  });
+
   it('空白封组合缺价时返回 typed manual，不取相近纸张', () => {
     const result = quoteSingle(
       createGoldenOrderItem({ paperType: '不存在的纸张' }),
@@ -457,6 +480,209 @@ describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () =
     expect(result.items[0]?.amount).toBeNull();
   });
 
+  it('基准纸与加价纸规则冲突时转人工，不重复叠加', () => {
+    const snapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      full: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.full,
+        paperSurcharges: [
+          ...CREATE_ORDER_GOLDEN_SNAPSHOT.full.paperSurcharges,
+          {
+            paperType: '珠光艳闪',
+            paperWeightGsm: 160,
+            unitSurcharge: '9.9999',
+          },
+        ],
+      },
+    };
+
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([fullItem()]),
+      snapshot,
+    );
+
+    expect(result.items[0]).toMatchObject({
+      status: 'MANUAL_PRICING_REQUIRED',
+      amount: null,
+    });
+    expect(result.manualReasons.map((reason) => reason.code)).toContain(
+      'FULL_PAPER_SURCHARGE_NOT_FOUND',
+    );
+  });
+
+  it('专版基础价与纸张加价之和超过单价列上限时失败关闭', () => {
+    const snapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      full: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.full,
+        unitPrices: [
+          {
+            tierCode: 'UNIT_OVERFLOW_BASE',
+            pricingGroup: 'LARGE',
+            minQuantity: 1,
+            maxQuantity: null,
+            unitPrice: '600000.0000',
+          },
+        ],
+        paperSurcharges: [
+          {
+            paperType: '触感纸',
+            paperWeightGsm: 200,
+            unitSurcharge: '600000.0000',
+          },
+        ],
+      },
+    };
+
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([
+        fullItem({
+          quantity: 1,
+          paperType: '触感纸',
+          paperWeightGsm: 200,
+        }),
+      ]),
+      snapshot,
+    );
+
+    expect(result).toMatchObject({ status: 'INVALID_INPUT', submittable: false });
+    expect(result.items[0]).toMatchObject({
+      status: 'INVALID_INPUT',
+      unitPrice: null,
+      amount: null,
+    });
+    expect(result.items[0]?.errors).toContain(
+      '专版烫金组合单价超过可保存上限',
+    );
+  });
+
+  it('专版阶梯端点非法时转人工，不把负起点当有效区间', () => {
+    const snapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      full: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.full,
+        unitPrices: [
+          {
+            tierCode: 'BROKEN_RANGE',
+            pricingGroup: 'LARGE',
+            minQuantity: -1,
+            maxQuantity: null,
+            unitPrice: '0.01',
+          },
+        ],
+      },
+    };
+
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([fullItem()]),
+      snapshot,
+    );
+
+    expect(result.items[0]).toMatchObject({
+      status: 'MANUAL_PRICING_REQUIRED',
+      amount: null,
+    });
+    expect(result.manualReasons.map((reason) => reason.code)).toContain(
+      'FULL_PRICE_NOT_FOUND',
+    );
+  });
+
+  it('分项金额各自可保存但款式合计越界时失败关闭', () => {
+    const target = CREATE_ORDER_GOLDEN_SNAPSHOT.print.foilPerOrderPrices.find(
+      (row) =>
+        row.mode === 'PARTIAL' &&
+        row.foilPassCount === 1 &&
+        row.tierQuantity === 1_000,
+    )!;
+    const snapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      print: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.print,
+        perOrderPrices: CREATE_ORDER_GOLDEN_SNAPSHOT.print.perOrderPrices.map(
+          (row) =>
+            row.paperType === '铜版纸' && row.tierQuantity === 1_000
+              ? { ...row, amount: '6000000000.00' }
+              : row,
+        ),
+        foilPerOrderPrices:
+          CREATE_ORDER_GOLDEN_SNAPSHOT.print.foilPerOrderPrices.map((row) =>
+            row === target ? { ...row, amount: '6000000000.00' } : row,
+          ),
+      },
+    };
+
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([
+        printItem({ frontColors: ['哑金'], printFoilMode: 'PARTIAL' }),
+      ]),
+      snapshot,
+    );
+
+    expect(result).toMatchObject({ status: 'INVALID_INPUT', submittable: false });
+    expect(result.items[0]).toMatchObject({
+      status: 'INVALID_INPUT',
+      amount: null,
+      knownAmount: '0.00',
+    });
+    expect(result.items[0]?.errors).toContain(
+      '彩印加工费合计超过可保存上限',
+    );
+  });
+
+  it('多款金额各自可保存但整单已知合计越界时不可提交', () => {
+    const snapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      print: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.print,
+        perOrderPrices: CREATE_ORDER_GOLDEN_SNAPSHOT.print.perOrderPrices.map(
+          (row) =>
+            row.paperType === '铜版纸' && row.tierQuantity === 1_000
+              ? { ...row, amount: '6000000000.00' }
+              : row,
+        ),
+      },
+      bagging: { standardPerBag: '0', mixedPerBag: '0' },
+    };
+    const first = printItem({ itemKey: 'style-1', fig: 1 });
+    const second = printItem({ itemKey: 'style-2', fig: 2 });
+
+    const result = calculateCreateOrderQuote(
+      {
+        ...createGoldenOrderInput([first, second], { isSfCollect: true }),
+        includeOrderCharges: false,
+      },
+      snapshot,
+    );
+
+    expect(result).toMatchObject({
+      status: 'INVALID_INPUT',
+      submittable: false,
+      total: null,
+    });
+    expect(result.errors).toContain('整单已知金额合计超过可保存上限');
+  });
+
+  it('损坏快照中的入袋费率超过列上限时失败关闭', () => {
+    const snapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      bagging: {
+        standardPerBag: '1200000.0000',
+        mixedPerBag: '1200000.0000',
+      },
+    };
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([createGoldenOrderItem()]),
+      snapshot,
+    );
+
+    expect(result).toMatchObject({ status: 'INVALID_INPUT', submittable: false });
+    expect(result.packagingGroups[0]).toMatchObject({
+      status: 'INVALID_INPUT',
+      amount: null,
+      errors: ['入袋费率超过可保存上限'],
+    });
+  });
+
   it('彩印单色烫金是 PER_ORDER 分项，不乘数量', () => {
     const result = quoteSingle(
       printItem({
@@ -702,6 +928,43 @@ describe('calculateCreateOrderQuote · 入袋、纸箱与快递', () => {
     expect(result.pendingReasons.map((reason) => reason.code)).toContain(
       'PLATE_AMOUNT_PENDING',
     );
+  });
+
+  it('多款整单数量超出安全整数时直接拒绝', () => {
+    const first = createGoldenOrderItem({
+      itemKey: 'style-1',
+      fig: 1,
+      quantity: Number.MAX_SAFE_INTEGER,
+    });
+    const second = createGoldenOrderItem({
+      itemKey: 'style-2',
+      fig: 2,
+      quantity: Number.MAX_SAFE_INTEGER,
+    });
+    const zeroSnapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      partial: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
+        blankUnitPrices:
+          CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map((row) => ({
+            ...row,
+            unitPrice: '0',
+          })),
+        machineFee: {
+          ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial.machineFee,
+          perPiecePerPass: '0',
+        },
+      },
+      bagging: { standardPerBag: '0', mixedPerBag: '0' },
+    };
+
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([first, second], { isSfCollect: true }),
+      zeroSnapshot,
+    );
+
+    expect(result).toMatchObject({ status: 'INVALID_INPUT', submittable: false });
+    expect(result.errors).toContain('整单总数量必须是大于 0 的安全整数');
   });
 });
 

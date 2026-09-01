@@ -6,6 +6,7 @@ import {
   OrderLamination,
   OrderProductStructure,
   OrderSettlementType,
+  ProductCategory,
 } from '@/generated/prisma/enums';
 
 vi.mock('next/navigation', () => ({
@@ -371,6 +372,87 @@ describe('OrderForm pricing routes', () => {
     expect(html).toContain('珠光纸艳闪');
     expect(html).not.toContain('纸张未标（烫金!B13）');
     expect(html).not.toContain('自定义纸张');
+  });
+
+  it('defaults to an available weight when an earlier sibling is out of stock', () => {
+    const mixedProducts = [
+      {
+        id: 'stock-pearl-160',
+        code: 'STOCK-PEARL-160',
+        name: '珠光大号 160g',
+        category: ProductCategory.BLANK_STOCK,
+        specification: '大号封90×165',
+        paperType: '160g珠光艳闪',
+        paperMaterialId: 'paper-pearl-160',
+        weight: 160,
+      },
+      {
+        id: 'stock-pearl-180',
+        code: 'STOCK-PEARL-180',
+        name: '珠光大号 180g',
+        category: ProductCategory.BLANK_STOCK,
+        specification: '大号封90×165',
+        paperType: '180g珠光艳闪',
+        paperMaterialId: 'paper-pearl-180',
+        weight: 180,
+      },
+    ] as const;
+    const html = renderToStaticMarkup(
+      <OrderForm
+        draftScope="mixed-paper-availability-test"
+        crafts={crafts}
+        products={mixedProducts}
+        settlementLabel="外部销售"
+        settlementType={OrderSettlementType.EXTERNAL_SALES}
+        externalCreateOrderOptions={{
+          products: mixedProducts,
+          papers: [
+            {
+              id: 'paper-pearl-160',
+              code: 'PAPER-PEARL-160',
+              name: '160g珠光艳闪',
+              specification: '160g',
+              unit: '张',
+              weight: 160,
+              outOfStock: true,
+              sortOrder: 1,
+            },
+            {
+              id: 'paper-pearl-180',
+              code: 'PAPER-PEARL-180',
+              name: '180g珠光艳闪',
+              specification: '180g',
+              unit: '张',
+              weight: 180,
+              outOfStock: false,
+              sortOrder: 2,
+            },
+          ],
+          specifications: [
+            {
+              specCode: '大号封90×165',
+              label: '大号封90×165',
+              widthMm: 90,
+              heightMm: 165,
+              productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+              productIds: mixedProducts.map((product) => product.id),
+              productCategories: [ProductCategory.BLANK_STOCK],
+            },
+          ],
+          foilColors: externalCreateOrderOptions.foilColors,
+        }}
+      />,
+    );
+
+    const unavailable = html.match(
+      /<button[^>]*id="[^"]*-weight-160"[^>]*>/,
+    )?.[0];
+    const available = html.match(
+      /<button[^>]*id="[^"]*-weight-180"[^>]*>/,
+    )?.[0];
+    expect(unavailable).toContain('disabled=""');
+    expect(unavailable).toContain('aria-pressed="false"');
+    expect(available).toContain('aria-pressed="true"');
   });
 
   it('does not expose quote SKU names in the B sales-entry UI', () => {

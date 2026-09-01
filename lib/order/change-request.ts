@@ -4,6 +4,7 @@ import {
   CustomerPriceBookPurpose,
   OrderBillingMode,
   OrderChangeRequestStatus,
+  OrderCustomerChargeStatus,
   OrderItemPricingRoute,
   OrderPackagingMode,
   OrderQuotedFeeCompleteness,
@@ -33,6 +34,11 @@ import {
 } from '../salary/cs-sales';
 import { MAX_ORDER_ITEMS_PER_ORDER } from './limits';
 import { orderCascadeLockKey } from './locks';
+import {
+  PendingPlateChargeError,
+  requireActivePlateCategoryIdInTx,
+  upsertPendingPlateChargeInTx,
+} from './pending-plate-charge';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
 import { ORDER_PRICING_STATUS } from './pricing-status';
 import {
@@ -1042,6 +1048,92 @@ async function refreshExternalLogisticsChargesAfterQuantityChange(input: {
   }
 }
 
+async function resetPendingPlateChargeAfterPricingChange(input: {
+  client: Prisma.TransactionClient;
+  orderId: string;
+  actorId: string;
+  reviewedAt: Date;
+  quote: CatalogCreateOrderQuoteCalculation['quote'];
+}): Promise<void> {
+  try {
+    const staleDetails = await input.client.orderItemPlateDetail.findMany({
+      where: {
+        isActive: true,
+        orderItem: { orderId: input.orderId },
+      },
+      select: { id: true, amount: true },
+    });
+    for (const detail of staleDetails) {
+      await input.client.orderItemPlateDetail.update({
+        where: { id: detail.id },
+        data: {
+          isActive: false,
+          removedById: input.actorId,
+          removedAt: input.reviewedAt,
+        },
+        select: { id: true },
+      });
+      await input.client.orderCustomerCharge.update({
+        where: {
+          orderId_businessKey: {
+            orderId: input.orderId,
+            businessKey: `PLATE_DETAIL:${detail.id}`,
+          },
+        },
+        data: {
+          status: OrderCustomerChargeStatus.WAIVED,
+          amount: '0.00',
+          pricingSnapshot: {
+            version: 1,
+            source: 'CHANGE_REQUEST_INVALIDATED_PLATE_DETAIL',
+            plateDetailId: detail.id,
+            removedAt: input.reviewedAt.toISOString(),
+            previousAmount: detail.amount.toString(),
+          },
+          overrideReason: '改单重算后需重新确认制版明细',
+          finalizedById: input.actorId,
+          finalizedAt: input.reviewedAt,
+        },
+        select: { id: true },
+      });
+    }
+    const categoryId = await requireActivePlateCategoryIdInTx(input.client);
+    await upsertPendingPlateChargeInTx({
+      tx: input.client,
+      orderId: input.orderId,
+      actorId: input.actorId,
+      categoryId,
+      quote: input.quote,
+      source: 'CHANGE_REQUEST_PENDING_PLATE',
+    });
+  } catch (error) {
+    if (error instanceof PendingPlateChargeError) {
+      throw new OrderChangeRequestError(error.message);
+    }
+    throw error;
+  }
+}
+
+async function refreshExternalChargesAfterPricingChange(input: {
+  client: Prisma.TransactionClient;
+  calculation: CatalogCreateOrderQuoteCalculation;
+  requestId: string;
+  reviewedAt: Date;
+  shipments: LogisticsProjectionShipment[];
+  customerCharges: LogisticsProjectionCharge[];
+  orderId: string;
+  actorId: string;
+}): Promise<void> {
+  await refreshExternalLogisticsChargesAfterQuantityChange(input);
+  await resetPendingPlateChargeAfterPricingChange({
+    client: input.client,
+    orderId: input.orderId,
+    actorId: input.actorId,
+    reviewedAt: input.reviewedAt,
+    quote: input.calculation.quote,
+  });
+}
+
 type PricingProjectionItem = {
   id: string;
   fig?: number | null;
@@ -1269,16 +1361,7 @@ async function calculateProjectedOrderQuote(input: {
     }
     throw error;
   }
-  const blockingPending = calculation.quote.pendingLineCodes.filter(
-    (code) => code !== 'PLATE_FEE',
-  );
-  if (
-    calculation.quote.status !== 'QUOTED' ||
-    calculation.quote.manualReasons.length > 0 ||
-    blockingPending.length > 0 ||
-    calculation.processing.items.some((item) => !item.complete) ||
-    calculation.processing.packaging.requiresAdminConfirmation
-  ) {
+  if (!isChangeRequestQuoteAutomaticallyApplicable(calculation)) {
     const reasons = [
       ...calculation.quote.manualReasons.map((reason) => reason.message),
       ...calculation.quote.pendingReasons
@@ -1291,6 +1374,39 @@ async function calculateProjectedOrderQuote(input: {
     );
   }
   return { calculation, projectedItems };
+}
+
+/**
+ * The pure engine always keeps the order-level plate fee pending until the
+ * factory confirms it. A change request may still safely apply every computed
+ * item/package/customer-charge amount when that is the sole incompleteness.
+ */
+export function isChangeRequestQuoteAutomaticallyApplicable(
+  calculation: Pick<
+    CatalogCreateOrderQuoteCalculation,
+    'quote' | 'processing'
+  >,
+): boolean {
+  const hasOnlyPendingPlateFee =
+    calculation.quote.pendingLineCodes.length === 1 &&
+    calculation.quote.pendingLineCodes[0] === 'PLATE_FEE';
+  const aggregateStatusAllowed =
+    (calculation.quote.status === 'QUOTED' &&
+      calculation.quote.pendingLineCodes.length === 0 &&
+      calculation.quote.pendingReasons.length === 0) ||
+    (calculation.quote.status === 'PARTIAL' &&
+      hasOnlyPendingPlateFee &&
+      calculation.quote.pendingReasons.length === 1 &&
+      calculation.quote.pendingReasons.every(
+        (reason) => reason.code === 'PLATE_AMOUNT_PENDING',
+      ));
+  return (
+    aggregateStatusAllowed &&
+    calculation.quote.manualReasons.length === 0 &&
+    calculation.quote.errors.length === 0 &&
+    calculation.processing.items.every((item) => item.complete) &&
+    !calculation.processing.packaging.requiresAdminConfirmation
+  );
 }
 
 type QuantityGuardItem = {
@@ -1741,16 +1857,21 @@ export async function previewOrderChangeRequestPricing(
       },
     );
 
-    const currentStandardCharges = request.order.customerCharges
+    const recalculatedChargeCodes = new Set([
+      'SHIPPING_FEE',
+      'PACKING_MATERIAL',
+      ...(request.order.settlementType === OrderSettlementType.EXTERNAL_SALES
+        ? ['PLATE_MAKING_FEE']
+        : []),
+    ]);
+    const currentRecalculatedCharges = request.order.customerCharges
       .filter((charge) =>
-        ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
-          String(charge.category.code),
-        ),
+        recalculatedChargeCodes.has(String(charge.category.code)),
       )
       .reduce((sum, charge) => sum.plus(charge.amount ?? 0), new Decimal(0));
     const preservedCharges = new Decimal(request.order.totalAmount)
       .minus(request.order.processingAmount)
-      .minus(currentStandardCharges);
+      .minus(currentRecalculatedCharges);
     const projectedTotal = new Decimal(projected.calculation.quote.knownTotal)
       .plus(preservedCharges);
     if (
@@ -2116,17 +2237,16 @@ export async function reviewOrderChangeRequest(
       await applyPackagingRepricePlans(tx, packagingReprice);
     }
 
-    if (
-      request.order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
-      projected
-    ) {
-      await refreshExternalLogisticsChargesAfterQuantityChange({
+    if (request.order.settlementType === OrderSettlementType.EXTERNAL_SALES && projected) {
+      await refreshExternalChargesAfterPricingChange({
         client: tx,
         calculation: projected.calculation,
         requestId: request.id,
         reviewedAt,
         shipments: request.order.shipments,
         customerCharges: request.order.customerCharges,
+        orderId: request.order.id,
+        actorId: actor.id,
       });
     }
 
@@ -2196,19 +2316,18 @@ export async function reviewOrderChangeRequest(
             actorId: actor.id,
             now: reviewedAt,
             expectedPriceRevision: request.order.priceRevision,
-            incrementOrderRevision: false,
-            remark: reviewRemark ?? request.reason,
+            incrementOrderRevision: false, remark: reviewRemark ?? request.reason,
+            orderFeeSnapshot: { quotedFee: nextTotal, confirmedFee: null, settledFee: null },
             metadata: {
               changeRequestId: request.id,
               engineVersion: 'CREATE_ORDER_PURE_V1',
               priceBooks: projected.calculation.quote.priceVersion,
               quotedFee: nextTotal,
-              quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+              quotedFeeCompleteness: OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
               pureQuote: {
                 status: projected.calculation.quote.status,
                 knownTotal: projected.calculation.quote.knownTotal,
-                pendingLineCodes:
-                  projected.calculation.quote.pendingLineCodes,
+                pendingLineCodes: projected.calculation.quote.pendingLineCodes,
               },
             },
           })
@@ -2239,8 +2358,9 @@ export async function reviewOrderChangeRequest(
         where: { id: request.order.id },
         data: {
           quotedFee: nextTotal,
-          quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+          quotedFeeCompleteness: OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
           quotedPricingRevisionId: pricingRevision.pricingRevisionId,
+          confirmedFee: null, settledFee: null,
         },
       });
     }

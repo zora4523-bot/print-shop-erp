@@ -288,13 +288,6 @@ async function readProductReferenceImpacts(
   return impacts;
 }
 
-export async function getProductReferenceImpacts(
-  productIds: readonly string[],
-  now: Date = new Date(),
-): Promise<Map<string, ProductReferenceImpact>> {
-  return readProductReferenceImpacts(db, productIds, now);
-}
-
 export async function getProductReferenceImpact(
   productId: string,
   now: Date = new Date(),

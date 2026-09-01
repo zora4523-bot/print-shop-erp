@@ -20,6 +20,7 @@ import { enqueueNotificationInTransaction } from './notification/transactional-o
 import type { EnqueueClient } from './background-jobs/repository';
 import { sortBySearchRelevance } from './search-ranking';
 import { parseCatalogPaperWeight } from './order/catalog-pricing-facts';
+import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
 
 export { MATERIAL_CATEGORY_LABELS } from './material-labels';
 
@@ -27,6 +28,13 @@ export class MaterialInvariantError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'MaterialInvariantError';
+  }
+}
+
+export class MaterialUnitChangeError extends MaterialInvariantError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MaterialUnitChangeError';
   }
 }
 
@@ -347,22 +355,28 @@ export type UpdateMaterialData = Omit<CreateMaterialData, 'code'> & {
   code: string;
 };
 
+export const MATERIAL_UNIT_IMMUTABLE_MESSAGE =
+  '计量单位决定库存与业务数量的含义，物料创建后不能修改；如需使用新单位，请新建物料。';
+
 export async function createMaterial(
   data: CreateMaterialData,
 ): Promise<MaterialSummary> {
   const code = await resolveBusinessCode('MATERIAL', data.code);
-  return db.material.create({
-    data: {
-      code,
-      name: data.name,
-      category: data.category,
-      specification: data.specification,
-      unit: data.unit,
-      safetyStock: data.safetyStock,
-      averageCost: data.averageCost,
-      isActive: true,
-    },
-    select: MATERIAL_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    return tx.material.create({
+      data: {
+        code,
+        name: data.name,
+        category: data.category,
+        specification: data.specification,
+        unit: data.unit,
+        safetyStock: data.safetyStock,
+        averageCost: data.averageCost,
+        isActive: true,
+      },
+      select: MATERIAL_SELECT,
+    });
   });
 }
 
@@ -370,21 +384,32 @@ export async function updateMaterial(
   id: string,
   data: UpdateMaterialData,
 ): Promise<MaterialSummary> {
-  const target = await getMaterialSummary(id);
-  if (!target) throw new MaterialInvariantError('目标物料不存在');
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const target = await tx.material.findUnique({
+      where: { id },
+      select: MATERIAL_SELECT,
+    });
+    if (!target) throw new MaterialInvariantError('目标物料不存在');
+    if (target.unit !== data.unit) {
+      throw new MaterialUnitChangeError(MATERIAL_UNIT_IMMUTABLE_MESSAGE);
+    }
 
-  return db.material.update({
-    where: { id },
-    data: {
-      code: data.code,
-      name: data.name,
-      category: data.category,
-      specification: data.specification,
-      unit: data.unit,
-      safetyStock: data.safetyStock,
-      averageCost: data.averageCost,
-    },
-    select: MATERIAL_SELECT,
+    return tx.material.update({
+      where: { id },
+      data: {
+        code: data.code,
+        name: data.name,
+        category: data.category,
+        specification: data.specification,
+        // Unit is an identity-level quantity contract, not editable metadata.
+        // It is deliberately omitted even after the equality check above, so a
+        // basic-details update can never write it back or race a quantity fact.
+        safetyStock: data.safetyStock,
+        averageCost: data.averageCost,
+      },
+      select: MATERIAL_SELECT,
+    });
   });
 }
 
@@ -392,14 +417,20 @@ export async function setMaterialActive(
   id: string,
   isActive: boolean,
 ): Promise<MaterialSummary> {
-  const target = await getMaterialSummary(id);
-  if (!target) throw new MaterialInvariantError('目标物料不存在');
-  if (target.isActive === isActive) return target;
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const target = await tx.material.findUnique({
+      where: { id },
+      select: MATERIAL_SELECT,
+    });
+    if (!target) throw new MaterialInvariantError('目标物料不存在');
+    if (target.isActive === isActive) return target;
 
-  return db.material.update({
-    where: { id },
-    data: { isActive },
-    select: MATERIAL_SELECT,
+    return tx.material.update({
+      where: { id },
+      data: { isActive },
+      select: MATERIAL_SELECT,
+    });
   });
 }
 

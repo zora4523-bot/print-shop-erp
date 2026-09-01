@@ -26,3 +26,21 @@ export async function databaseNow(client: ClockClient = db): Promise<Date> {
   }
   return at;
 }
+
+/**
+ * Read the database wall clock, even inside a long-running transaction.
+ * Use this only when the business event belongs to the instant the statement
+ * is about to write, rather than to the transaction start instant.
+ */
+export async function databaseClockNow(
+  client: ClockClient = db,
+): Promise<Date> {
+  const rows = await client.$queryRaw<Array<{ now: Date }>>`
+    SELECT clock_timestamp() AS "now"
+  `;
+  const at = rows[0]?.now;
+  if (!(at instanceof Date)) {
+    throw new Error('background jobs: database wall clock unavailable');
+  }
+  return at;
+}

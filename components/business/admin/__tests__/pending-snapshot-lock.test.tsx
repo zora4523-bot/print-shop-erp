@@ -75,6 +75,7 @@ function pendingForms(): Record<string, string> {
     EditOrderForm: renderToStaticMarkup(
       <EditOrderForm
         orderId="order-1"
+        expectedEditVersion={7}
         fieldset="FULL"
         initial={{
           customName: '测试工单',

@@ -76,6 +76,11 @@ const baseURL =
     ? 'http://localhost:3100'
     : 'http://localhost:3000');
 const webServerPort = new URL(baseURL).port || '3000';
+// The printable QR payload is part of committed visual snapshots. Keep its
+// public origin stable even when isolated runs move the test server to :3100.
+// derivePublicBaseUrl() deliberately gives APP_PUBLIC_URL priority over the
+// request Host, matching a production deployment behind a public origin.
+const stableE2ePublicUrl = 'http://localhost:3000';
 
 const workerViewportProjects = [
   { name: 'worker-375x667', width: 375, height: 667 },
@@ -102,9 +107,10 @@ const adminViewportProjects = [
 // safely cleaned out of a developer's working database.
 export default defineConfig({
   // Cover both end-to-end specs (./tests/e2e) and visual regression
-  // specs (./tests/visual) under one runner. testMatch defaults pick
-  // up *.spec.ts in either subdir.
+  // specs (./tests/visual) under one runner. Keep Vitest regression files in
+  // ./tests/regression out of Playwright's default *.test.* discovery.
   testDir: './tests',
+  testMatch: ['e2e/**/*.spec.ts', 'visual/**/*.spec.ts'],
   globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false, // share dev DB; serial keeps assertions stable
   forbidOnly: !!process.env.CI,
@@ -168,7 +174,12 @@ export default defineConfig({
     command: `pnpm run dev --port ${webServerPort}`,
     url: baseURL,
     ...(hasIsolatedE2eDatabase
-      ? { env: { DATABASE_URL: isolatedE2eDatabaseUrl } }
+      ? {
+          env: {
+            APP_PUBLIC_URL: stableE2ePublicUrl,
+            DATABASE_URL: isolatedE2eDatabaseUrl,
+          },
+        }
       : {}),
     reuseExistingServer: !hasIsolatedE2eDatabase && !process.env.CI,
     timeout: 120 * 1000,

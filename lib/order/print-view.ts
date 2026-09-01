@@ -10,7 +10,7 @@ import type {
   PrintPackagingGroup,
   PrintShipment,
   PrintTask,
-} from '../../components/business/order/OrderPrintLayout.types';
+} from './print-types';
 
 // Loads the narrow shape the production print layout needs. SALES uses the
 // customer-facing list drawer and must not receive a production sheet (it

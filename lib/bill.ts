@@ -4,6 +4,8 @@ import {
   BillStatus,
   OrderCostCategory,
   OrderBillingMode,
+  OrderCustomerChargeStatus,
+  OrderPricingStatus,
   OrderSettlementType,
   OrderStatus,
   Role,
@@ -22,8 +24,9 @@ import {
 
 // 外部销售对客应收账单（加工费 + 快递/耗材等对客收费）
 //
-// 生成规则：按 Shanghai 日历月汇总，每位外部销售一条 Bill，item
-// 列表是其在该月 `finishedAt` 的收费工单。月度自动生成对应上月。
+// 生成规则：按 Shanghai 日历月汇总，每位外部销售先有一张
+// sequence=1 月账单。已发账单不变，后续同月迟到工单进入下一序号的
+// 补充账单。item 列表是其在该月 `finishedAt` 的收费工单。
 //
 // 付款规则：累加式 paidAmount；当累计 = totalAmount 切 FULLY_PAID。
 // 内部员工提成与外部销售应收是两套结算账本，Bill 只记后者。
@@ -124,6 +127,120 @@ function assertBillAmountFits(value: Decimal): void {
   }
 }
 
+type BillableOrderFacts = {
+  id: string;
+  orderNo: string;
+  submitterId: string;
+  status: OrderStatus;
+  billingMode: OrderBillingMode;
+  settlementType: OrderSettlementType;
+  pricingStatus: OrderPricingStatus;
+  finishedAt: Date | null;
+  processingAmount: unknown;
+  totalAmount: unknown;
+  quotedFee: unknown | null;
+  confirmedFee: unknown | null;
+  settledFee: unknown | null;
+  customerCharges: Array<{
+    status: OrderCustomerChargeStatus;
+    amount: unknown | null;
+  }>;
+};
+
+const BILLABLE_ORDER_SELECT = {
+  id: true,
+  orderNo: true,
+  submitterId: true,
+  status: true,
+  billingMode: true,
+  settlementType: true,
+  pricingStatus: true,
+  finishedAt: true,
+  processingAmount: true,
+  totalAmount: true,
+  quotedFee: true,
+  confirmedFee: true,
+  settledFee: true,
+  customerCharges: {
+    select: { status: true, amount: true },
+  },
+} as const;
+
+const CONFIRMED_BILL_PRICING_STATUSES = new Set<OrderPricingStatus>([
+  OrderPricingStatus.ADMIN_CONFIRMED,
+  OrderPricingStatus.AUTO_CONFIRMED,
+  OrderPricingStatus.LEGACY_CONFIRMED,
+]);
+
+function safeBillDecimal(value: unknown): Decimal | null {
+  if (
+    typeof value !== 'string' &&
+    typeof value !== 'number' &&
+    !(
+      value !== null &&
+      typeof value === 'object' &&
+      'toString' in value &&
+      typeof value.toString === 'function'
+    )
+  ) {
+    return null;
+  }
+  try {
+    const parsed = new Decimal(value.toString());
+    return parsed.isFinite() ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function billableOrderIssue(order: BillableOrderFacts): string | null {
+  if (
+    order.status !== OrderStatus.FINISHED ||
+    order.billingMode !== OrderBillingMode.CHARGE ||
+    order.settlementType !== OrderSettlementType.EXTERNAL_SALES ||
+    order.finishedAt === null
+  ) {
+    return '工单不是已完工的外部销售收费单';
+  }
+  if (!CONFIRMED_BILL_PRICING_STATUSES.has(order.pricingStatus)) {
+    return '对客终价尚未确认';
+  }
+
+  const incompleteCharge = order.customerCharges.find(
+    (charge) =>
+      charge.amount === null ||
+      (charge.status !== OrderCustomerChargeStatus.FINAL &&
+        charge.status !== OrderCustomerChargeStatus.WAIVED),
+  );
+  if (incompleteCharge) return '存在未终审或缺少金额的对客收费明细';
+
+  // Cutover history deliberately kept its old aggregate and may have no
+  // structured charges. Do not invent/reconcile historical prices, but reject
+  // any incomplete charge rows that do exist (checked above).
+  if (order.pricingStatus === OrderPricingStatus.LEGACY_CONFIRMED) return null;
+  if (order.customerCharges.length === 0) return '缺少对客收费明细';
+
+  const processingAmount = safeBillDecimal(order.processingAmount);
+  const totalAmount = safeBillDecimal(order.totalAmount);
+  if (!processingAmount || !totalAmount) return '工单金额格式异常';
+  const chargeTotal = order.customerCharges.reduce(
+    (sum, charge) => sum.plus(safeBillDecimal(charge.amount) ?? Number.NaN),
+    new Decimal(0),
+  );
+  if (!chargeTotal.isFinite()) return '对客收费金额格式异常';
+  if (!processingAmount.plus(chargeTotal).eq(totalAmount)) {
+    return '工单总额与加工费及对客收费明细不一致';
+  }
+
+  const canonicalFee =
+    safeBillDecimal(order.settledFee) ??
+    safeBillDecimal(order.confirmedFee) ??
+    safeBillDecimal(order.quotedFee);
+  if (!canonicalFee) return '缺少对客金额快照';
+  if (!canonicalFee.eq(totalAmount)) return '对客金额快照与工单总额不一致';
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // 生成：月初扫描上月外部销售的 FINISHED 收费工单 → 每人一条账单
 // ─────────────────────────────────────────────────────────────────────
@@ -136,6 +253,8 @@ export type BillGenerationResult = {
     totalAmount: string;
     orderCount: number;
     isNew: boolean; // upsert: 首次生成 vs 已存在只补 items
+    sequence: number;
+    isSupplemental: boolean;
   }>;
   errors: Array<{ salesUserId: string; message: string }>;
 };
@@ -158,9 +277,8 @@ export class BillGenerationUnexpectedError extends Error {
   }
 }
 
-// 核心：扫上月外部销售 FINISHED 收费工单，按 submitterId 分组，每组 upsert 一条
-// DRAFT Bill。重跑该月（中途又有订单 FINISHED）会把新订单加到同一条
-// Bill 的 items 里，paidAmount 和 status 不动。
+// 核心：扫上月外部销售 FINISHED 收费工单，按 submitterId 分组。有草稿时
+// 只追加未入账工单；只有不可变的已发账单时，为迟到工单创建补充草稿。
 export async function generateBillsForPeriod(
   period: string,
   _actor: { id: string; role: Role },
@@ -174,20 +292,16 @@ export async function generateBillsForPeriod(
 
   // 只用工单创建时锁定的 settlementType 识别外部销售应收。
   // Role 只负责权限，不参与资金方向判定，避免账号调岗导致历史结算漂移。
-  let orders: Array<{ id: string; submitterId: string; totalAmount: unknown }>;
+  let candidates: BillableOrderFacts[];
   try {
-    orders = await db.order.findMany({
+    candidates = await db.order.findMany({
       where: {
         status: OrderStatus.FINISHED,
         billingMode: OrderBillingMode.CHARGE,
         settlementType: OrderSettlementType.EXTERNAL_SALES,
         finishedAt: { gte: start, lt: end },
       },
-      select: {
-        id: true,
-        submitterId: true,
-        totalAmount: true,
-      },
+      select: BILLABLE_ORDER_SELECT,
     });
   } catch (cause) {
     throw new BillGenerationUnexpectedError(
@@ -195,6 +309,25 @@ export async function generateBillsForPeriod(
       { period, generated, errors },
       cause,
     );
+  }
+
+  const orders: BillableOrderFacts[] = [];
+  const ineligibleBySubmitter = new Map<string, string[]>();
+  for (const order of candidates) {
+    const issue = billableOrderIssue(order);
+    if (!issue) {
+      orders.push(order);
+      continue;
+    }
+    const messages = ineligibleBySubmitter.get(order.submitterId) ?? [];
+    messages.push(`${order.orderNo || order.id}：${issue}`);
+    ineligibleBySubmitter.set(order.submitterId, messages);
+  }
+  for (const [salesUserId, messages] of ineligibleBySubmitter) {
+    errors.push({
+      salesUserId,
+      message: `未纳入账单（fail closed）：${messages.join('；')}`,
+    });
   }
 
   // 按 submitterId 分组
@@ -234,14 +367,14 @@ export async function generateBillsForPeriod(
 async function generateBillForSubmitter(
   period: string,
   submitterId: string,
-  orders: Array<{ id: string; totalAmount: unknown }>,
+  orders: BillableOrderFacts[],
   fence?: ExecutionFence,
 ): Promise<BillGenerationResult['generated'][number]> {
   return db.$transaction(async (tx) => {
     // Serialize two concurrent generate runs on the same (sales, period)
     // 对。Without this, both runs could read existing.items, both decide
-    // an orderId is missing, and both createMany a duplicate. The
-    // @@unique([billId, orderId]) index is the DB-level last-line
+    // an orderId is missing, and both createMany a duplicate. The global
+    // @@unique([orderId]) index is the DB-level last-line
     // guard; this lock turns the error into clean serialization
     // .
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${billGenerateLockKey(
@@ -249,58 +382,96 @@ async function generateBillForSubmitter(
       period,
     )}))`;
 
-    // Finance-of-record: 该月账单一旦进入 ISSUED / PAID / PARTIAL_PAID
-    // 就不再自动追加 items（owner 手动补单或新建月份账单）。自动
-    // 生成只覆盖 DRAFT 或首次创建。
-    let existing = await tx.bill.findUnique({
-      where: { salesUserId_period: { salesUserId: submitterId, period } },
-      select: {
-        id: true,
-        status: true,
-        openingAmount: true,
-        items: { select: { orderId: true, orderAmount: true } },
-      },
+    const billSelect = {
+      id: true,
+      sequence: true,
+      status: true,
+      openingAmount: true,
+      totalAmount: true,
+      items: { select: { orderId: true, orderAmount: true } },
+    } as const;
+    let monthBills = await tx.bill.findMany({
+      where: { salesUserId: submitterId, period },
+      orderBy: { sequence: 'asc' },
+      select: billSelect,
     });
 
-    // Once a concrete bill exists, join the lock used by issue/payment and
-    // re-read it. This prevents an issue action from freezing the bill while a
-    // concurrent generation run is still appending items.
-    if (existing) {
+    // Join every concrete bill lock in deterministic order, then re-read. The
+    // logical monthly lock prevents create/issue races; concrete locks also
+    // preserve the established lock order with payment operations.
+    for (const bill of [...monthBills].sort((a, b) => a.id.localeCompare(b.id))) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${billLockKey(
-        existing.id,
+        bill.id,
       )}))`;
-      existing = await tx.bill.findUnique({
-        where: { salesUserId_period: { salesUserId: submitterId, period } },
-        select: {
-          id: true,
-          status: true,
-          openingAmount: true,
-          items: { select: { orderId: true, orderAmount: true } },
-        },
+    }
+    if (monthBills.length > 0) {
+      monthBills = await tx.bill.findMany({
+        where: { salesUserId: submitterId, period },
+        orderBy: { sequence: 'asc' },
+        select: billSelect,
       });
     }
 
-    const orderTotal = orders
-      .reduce<Decimal>(
-        (acc, o) => acc.plus(new Decimal(o.totalAmount as Decimal.Value)),
-        new Decimal(0),
-      )
-      .toFixed(2);
+    const attachedItems =
+      orders.length === 0
+        ? []
+        : await tx.billItem.findMany({
+            where: { orderId: { in: orders.map((order) => order.id) } },
+            select: {
+              orderId: true,
+              billId: true,
+              bill: { select: { salesUserId: true, period: true } },
+            },
+          });
+    const misplacedItem = attachedItems.find(
+      (item) =>
+        item.bill.salesUserId !== submitterId || item.bill.period !== period,
+    );
+    if (misplacedItem) {
+      throw new BillError(
+        `工单 ${misplacedItem.orderId} 已归入 ${misplacedItem.bill.period} / ${misplacedItem.bill.salesUserId} 的账单，不能静默跳过`,
+      );
+    }
+    const attachedOrderIds = new Set(attachedItems.map((item) => item.orderId));
+    const unbilledOrders = orders.filter(
+      (order) => !attachedOrderIds.has(order.id),
+    );
+    const drafts = monthBills.filter((bill) => bill.status === BillStatus.DRAFT);
+    if (drafts.length > 1) {
+      throw new BillError(`${period} 存在多张补充账单草稿，请先进行财务核对`);
+    }
 
-    if (existing) {
-      if (existing.status !== BillStatus.DRAFT) {
-        throw new BillError(
-          `${period} 账单已 ${existing.status}，新完工订单请单独追加或开新账单`,
+    const existingDraft = drafts[0] ?? null;
+    if (existingDraft) {
+      const toAdd = unbilledOrders;
+      // DRAFT is still a mutable proposal. If an already-attached eligible
+      // order received a newly confirmed final price, refresh its frozen item
+      // amount during the explicit generate/rerun path. Once the statement is
+      // ISSUED this branch is unreachable and its BillItem remains immutable.
+      const currentEligibleById = new Map(
+        orders.map((order) => [order.id, order] as const),
+      );
+      const refreshedItems = existingDraft.items.map((item) => {
+        const currentOrder = currentEligibleById.get(item.orderId);
+        if (!currentOrder) return item;
+        return {
+          ...item,
+          orderAmount: new Decimal(
+            currentOrder.totalAmount as Decimal.Value,
+          ).toFixed(2),
+        };
+      });
+      const previousAmountByOrderId = new Map(
+        existingDraft.items.map((item) => [item.orderId, item.orderAmount]),
+      );
+      const changedItems = refreshedItems.filter((item) => {
+        const previousAmount = previousAmountByOrderId.get(item.orderId);
+        return (
+          previousAmount !== undefined &&
+          !new Decimal(previousAmount).eq(item.orderAmount)
         );
-      }
-      // DRAFT: 追加尚未包含的 orderIds 作为 BillItems，重算 totalAmount
-      const knownIds = new Set(existing.items.map((it) => it.orderId));
-      const toAdd = orders.filter((o) => !knownIds.has(o.id));
-      // Recompute from the immutable BillItem ledger, not from today's order
-      // query. A previously attached item remains financial history even if a
-      // later data repair changes the source order; using the query here would
-      // make totalAmount disagree with the rows shown on the bill.
-      const persistedItemTotal = existing.items.reduce(
+      });
+      const persistedItemTotal = refreshedItems.reduce(
         (sum, item) => sum.plus(item.orderAmount),
         new Decimal(0),
       );
@@ -308,23 +479,35 @@ async function generateBillForSubmitter(
         (sum, order) => sum.plus(order.totalAmount as Decimal.Value),
         new Decimal(0),
       );
-      const total = new Decimal(existing.openingAmount)
+      const total = new Decimal(existingDraft.openingAmount)
         .plus(persistedItemTotal)
         .plus(appendedItemTotal);
       assertBillAmountFits(total);
       const totalAmount = total.toFixed(2);
       await assertExecutionFence(fence);
+      for (const item of changedItems) {
+        await tx.billItem.update({
+          where: {
+            billId_orderId: {
+              billId: existingDraft.id,
+              orderId: item.orderId,
+            },
+          },
+          data: { orderAmount: item.orderAmount },
+          select: { id: true },
+        });
+      }
       if (toAdd.length > 0) {
         await tx.billItem.createMany({
           data: toAdd.map((o) => ({
-            billId: existing.id,
+            billId: existingDraft.id,
             orderId: o.id,
             orderAmount: new Decimal(o.totalAmount as Decimal.Value).toFixed(2),
           })),
         });
       }
       const updated = await tx.bill.update({
-        where: { id: existing.id },
+        where: { id: existingDraft.id },
         data: { totalAmount },
         select: { id: true },
       });
@@ -332,25 +515,55 @@ async function generateBillForSubmitter(
         billId: updated.id,
         salesUserId: submitterId,
         totalAmount,
-        orderCount: existing.items.length + toAdd.length,
+        orderCount: existingDraft.items.length + toAdd.length,
         isNew: false,
+        sequence: existingDraft.sequence,
+        isSupplemental: existingDraft.sequence > 1,
       };
     }
 
-    // 首次创建
-    const totalAmount = orderTotal;
+    // An idempotent rerun after every eligible order has already been attached
+    // returns the latest immutable statement without creating an empty
+    // supplemental bill.
+    if (unbilledOrders.length === 0) {
+      const latest = monthBills.at(-1);
+      if (!latest) {
+        throw new BillError('工单已归入其他账期的账单，不能重复归集');
+      }
+      return {
+        billId: latest.id,
+        salesUserId: submitterId,
+        totalAmount: new Decimal(latest.totalAmount).toFixed(2),
+        orderCount: latest.items.length,
+        isNew: false,
+        sequence: latest.sequence,
+        isSupplemental: latest.sequence > 1,
+      };
+    }
+
+    // No mutable draft remains. Preserve all issued statements and create the
+    // next explicit sequence containing only globally unbilled late orders.
+    const sequence = (monthBills.at(-1)?.sequence ?? 0) + 1;
+    const totalAmount = unbilledOrders
+      .reduce<Decimal>(
+        (acc, order) =>
+          acc.plus(new Decimal(order.totalAmount as Decimal.Value)),
+        new Decimal(0),
+      )
+      .toFixed(2);
     assertBillAmountFits(new Decimal(totalAmount));
     await assertExecutionFence(fence);
     const created = await tx.bill.create({
       data: {
         salesUserId: submitterId,
         period,
+        sequence,
         openingAmount: '0.00',
         totalAmount,
         paidAmount: '0.00',
         status: BillStatus.DRAFT,
         items: {
-          create: orders.map((o) => ({
+          create: unbilledOrders.map((o) => ({
             orderId: o.id,
             orderAmount: new Decimal(o.totalAmount as Decimal.Value).toFixed(2),
           })),
@@ -362,8 +575,10 @@ async function generateBillForSubmitter(
       billId: created.id,
       salesUserId: submitterId,
       totalAmount,
-      orderCount: orders.length,
+      orderCount: unbilledOrders.length,
       isNew: true,
+      sequence,
+      isSupplemental: sequence > 1,
     };
   });
 }
@@ -399,7 +614,20 @@ export async function issueBill(
 
     const bill = await tx.bill.findUnique({
       where: { id: billId },
-      select: { id: true, status: true, totalAmount: true },
+      select: {
+        id: true,
+        salesUserId: true,
+        period: true,
+        status: true,
+        openingAmount: true,
+        totalAmount: true,
+        items: {
+          select: {
+            orderAmount: true,
+            order: { select: BILLABLE_ORDER_SELECT },
+          },
+        },
+      },
     });
     if (!bill) throw new BillError('账单不存在');
     transitionBill(bill.status, BillStatus.ISSUED);
@@ -410,6 +638,54 @@ export async function issueBill(
     assertBillAmountFits(totalAmount);
     if (totalAmount.isZero()) {
       throw new BillError('空账单不能发单');
+    }
+    const openingAmount = parseFinanceDecimal(
+      bill.openingAmount as Decimal.Value,
+      '账单期初金额',
+    );
+    assertStoredDecimal(openingAmount, {
+      label: '账单期初金额',
+      decimalPlaces: 2,
+      max: DECIMAL_12_2_MAX,
+    });
+    let frozenItemTotal = new Decimal(0);
+    const periodRange = parseShanghaiMonthInstantRange(bill.period);
+    for (const item of bill.items) {
+      const orderIssue = billableOrderIssue(item.order);
+      const inBillPeriod =
+        item.order.finishedAt !== null &&
+        item.order.finishedAt >= periodRange.start &&
+        item.order.finishedAt < periodRange.end;
+      if (
+        orderIssue ||
+        item.order.submitterId !== bill.salesUserId ||
+        !inBillPeriod
+      ) {
+        throw new BillError(
+          `账单包含不可出账工单 ${item.order.orderNo || item.order.id}：${
+            orderIssue ??
+            (item.order.submitterId !== bill.salesUserId
+              ? '工单不属于该销售'
+              : '工单完工时间不在账期内')
+          }`,
+        );
+      }
+      const frozenOrderAmount = parseFinanceDecimal(
+        item.orderAmount as Decimal.Value,
+        `工单 ${item.order.orderNo || item.order.id} 的账单金额`,
+      );
+      const currentOrderAmount = safeBillDecimal(item.order.totalAmount);
+      if (!currentOrderAmount || !frozenOrderAmount.eq(currentOrderAmount)) {
+        throw new BillError(
+          `账单工单 ${item.order.orderNo || item.order.id} 的冻结金额与当前终价不一致，不能发单`,
+        );
+      }
+      frozenItemTotal = frozenItemTotal.plus(frozenOrderAmount);
+    }
+    if (!openingAmount.plus(frozenItemTotal).eq(totalAmount)) {
+      throw new BillError(
+        '账单总额与期初金额及工单明细合计不一致，不能发单',
+      );
     }
 
     const updated = await tx.bill.update({
@@ -650,11 +926,16 @@ export async function listBills(filter: {
       ...(filter.period ? { period: filter.period } : {}),
       ...(filter.status ? { status: filter.status } : {}),
     },
-    orderBy: [{ period: 'desc' }, { salesUserId: 'asc' }],
+    orderBy: [
+      { period: 'desc' },
+      { salesUserId: 'asc' },
+      { sequence: 'asc' },
+    ],
     select: {
       id: true,
       salesUserId: true,
       period: true,
+      sequence: true,
       openingAmount: true,
       totalAmount: true,
       paidAmount: true,
@@ -678,6 +959,7 @@ export async function getAdminBillDetail(id: string) {
       id: true,
       salesUserId: true,
       period: true,
+      sequence: true,
       openingAmount: true,
       totalAmount: true,
       paidAmount: true,
@@ -832,6 +1114,7 @@ export async function getSalesBillDetail(id: string, salesUserId: string) {
       id: true,
       salesUserId: true,
       period: true,
+      sequence: true,
       openingAmount: true,
       totalAmount: true,
       paidAmount: true,

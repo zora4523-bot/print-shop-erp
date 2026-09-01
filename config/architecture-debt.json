@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "longFunctionThreshold": 300,
+  "allowedReverseEdges": [],
+  "longFunctions": [
+    {
+      "id": "app/(admin)/orders/[id]/page.tsx::function:OrderDetailPage",
+      "maxLines": 1673
+    },
+    {
+      "id": "app/(admin)/owner/bills/[id]/page.tsx::function:OwnerBillDetailPage",
+      "maxLines": 372
+    },
+    {
+      "id": "app/(admin)/owner/notifications/page.tsx::function:OwnerNotificationsPage",
+      "maxLines": 388
+    },
+    {
+      "id": "app/(admin)/owner/pigsty/page.tsx::function:PigstyOpsPage",
+      "maxLines": 324
+    },
+    {
+      "id": "app/(admin)/owner/salary/cs/[id]/page.tsx::function:CsPeriodDetailPage",
+      "maxLines": 324
+    },
+    {
+      "id": "app/dev/showcase/page.tsx::function:ShowcasePage",
+      "maxLines": 441
+    },
+    {
+      "id": "components/business/material/InventoryCountClient.tsx::function:InventoryCountClient",
+      "maxLines": 512
+    },
+    {
+      "id": "components/business/order/ExternalSalesOrderFormRail.tsx::function:OrderFormBRail",
+      "maxLines": 344
+    },
+    {
+      "id": "components/business/order/order-form-b/ExternalSalesOrderFormB.tsx::function:OrderFormB",
+      "maxLines": 762
+    },
+    {
+      "id": "components/business/order/OrderForm.tsx::function:OrderForm",
+      "maxLines": 3106
+    },
+    {
+      "id": "components/business/order/OrderPricingReviewForm.tsx::function:OrderPricingReviewForm",
+      "maxLines": 723
+    },
+    {
+      "id": "components/business/order/OrdersTable.tsx::function:OrdersTable",
+      "maxLines": 347
+    },
+    {
+      "id": "components/business/order/SalesOrderDetailView.tsx::function:SalesOrderDetailView",
+      "maxLines": 361
+    },
+    {
+      "id": "components/business/order/ShipOrderForm.tsx::function:ShipOrderForm",
+      "maxLines": 378
+    },
+    {
+      "id": "components/business/price/ExternalSalesPriceBookDraftForms.tsx::function:CustomerPriceBookDraftRuleForm",
+      "maxLines": 690
+    },
+    {
+      "id": "components/business/price/ExternalSalesPriceTierGroupEditor.tsx::function:ExternalSalesPriceTierGroupEditor",
+      "maxLines": 420
+    },
+    {
+      "id": "lib/order.ts::function:createOrder",
+      "maxLines": 974
+    },
+    {
+      "id": "lib/order.ts::function:createOrder/variable:createOnce",
+      "maxLines": 899
+    },
+    {
+      "id": "lib/order.ts::function:createOrder/variable:createOnce/callback:db.$transaction[0]",
+      "maxLines": 896
+    },
+    {
+      "id": "lib/order.ts::function:setOrderSfCollect",
+      "maxLines": 438
+    },
+    {
+      "id": "lib/order.ts::function:setOrderSfCollect/callback:db.$transaction[0]",
+      "maxLines": 431
+    },
+    {
+      "id": "lib/order.ts::function:shipOrder",
+      "maxLines": 359
+    },
+    {
+      "id": "lib/order/change-request.ts::function:reviewOrderChangeRequest",
+      "maxLines": 544
+    },
+    {
+      "id": "lib/order/change-request.ts::function:reviewOrderChangeRequest/callback:db.$transaction[0]",
+      "maxLines": 529
+    },
+    {
+      "id": "lib/order/create-order-published-rule-adapter.ts::function:projectFull",
+      "maxLines": 312
+    },
+    {
+      "id": "lib/order/pricing-review.ts::function:finalizeOrderPricing",
+      "maxLines": 561
+    },
+    {
+      "id": "lib/order/pricing-review.ts::function:finalizeOrderPricing/callback:db.$transaction[0]",
+      "maxLines": 545
+    },
+    {
+      "id": "lib/order/print-layout.tsx::function:OrderPrintLayout",
+      "maxLines": 408
+    },
+    {
+      "id": "lib/order/rework.ts::function:createReworkOrder",
+      "maxLines": 833
+    },
+    {
+      "id": "lib/order/rework.ts::function:createReworkOrder/callback:db.$transaction[0]",
+      "maxLines": 782
+    },
+    {
+      "id": "lib/order/submit-external-order.ts::function:finalizeExternalOrderQuoteInTx",
+      "maxLines": 515
+    },
+    {
+      "id": "lib/price/customer-price-book-draft-validation.ts::function:logisticsIssues",
+      "maxLines": 315
+    },
+    {
+      "id": "lib/production/operation-materializer.ts::function:deriveProductionOperationPlan",
+      "maxLines": 306
+    }
+  ]
+}

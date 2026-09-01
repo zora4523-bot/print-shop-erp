@@ -118,6 +118,8 @@ export class OrderQuoteChangedError extends Error {
 
 const DECIMAL_10_4_MAX = new Decimal('999999.9999');
 const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
+const ORDER_TOTAL_LIMIT_MESSAGE =
+  '工单总金额超过系统上限 9,999,999,999.99 元';
 
 function assertOrderQuantity(quantity: number, itemName: string): void {
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 9_999_999) {
@@ -166,10 +168,16 @@ function assertStorableOrderTotal(value: string): void {
     total.decimalPlaces() > 2 ||
     total.gt(DECIMAL_12_2_MAX)
   ) {
-    throw new OrderInvariantError(
-      '工单总金额超过系统上限 9,999,999,999.99 元',
-    );
+    throw new OrderInvariantError(ORDER_TOTAL_LIMIT_MESSAGE);
   }
+}
+
+function rethrowCreateOrderQuoteError(error: unknown): never {
+  if (!(error instanceof CreateOrderQuoteError)) throw error;
+  if (error.message.includes('整单已知金额合计超过可保存上限')) {
+    throw new OrderInvariantError(ORDER_TOTAL_LIMIT_MESSAGE);
+  }
+  throw new OrderInvariantError(error.message);
 }
 
 // Decimal(12,2) column — 12 total digits, 2 after the point. Quantity is
@@ -328,6 +336,37 @@ type ShipOrderCommand = Omit<ShipOrderInput, 'shipments'> & {
       >
   >;
 };
+
+function normalizeShipOrderInput(
+  trackingInput: string | null | ShipOrderCommand,
+) {
+  const requestedShipments =
+    typeof trackingInput === 'object' && trackingInput !== null
+      ? trackingInput.shipments.map((shipment) => ({
+          shipmentId: shipment.shipmentId.trim(),
+          trackingNo: shipment.trackingNo?.trim() || null,
+          weightKg: shipment.weightKg,
+          destinationProvince: shipment.destinationProvince,
+          shippingFee: shipment.shippingFee,
+          packingMaterialFee: shipment.packingMaterialFee,
+          customerChargeOverrideReason: shipment.customerChargeOverrideReason,
+        }))
+      : [];
+  const legacyTrackingInput =
+    typeof trackingInput === 'object' && trackingInput !== null
+      ? trackingInput.trackingNo
+      : trackingInput;
+  // Treat both null AND whitespace-only as “no tracking number”. A blank
+  // tracking number must never be persisted as an empty string.
+  const trimmed = legacyTrackingInput?.trim() ?? '';
+  const tracking = trimmed.length > 0 ? trimmed : null;
+  const primaryTracking =
+    requestedShipments.length > 0
+      ? requestedShipments[0]?.trackingNo ?? null
+      : tracking;
+
+  return { requestedShipments, primaryTracking };
+}
 
 export type SfCollectChargeCorrection = {
   shipmentId: string;
@@ -611,10 +650,7 @@ export async function createOrder(
           },
         });
       } catch (error) {
-        if (error instanceof CreateOrderQuoteError) {
-          throw new OrderInvariantError(error.message);
-        }
-        throw error;
+        rethrowCreateOrderQuoteError(error);
       }
     }
 
@@ -2115,31 +2151,8 @@ export async function shipOrder(
   trackingInput: string | null | ShipOrderCommand,
   now: Date = new Date(),
 ): Promise<{ id: string; status: OrderStatus }> {
-  const requestedShipments =
-    typeof trackingInput === 'object' && trackingInput !== null
-      ? trackingInput.shipments.map((shipment) => ({
-          shipmentId: shipment.shipmentId.trim(),
-          trackingNo: shipment.trackingNo?.trim() || null,
-          weightKg: shipment.weightKg,
-          destinationProvince: shipment.destinationProvince,
-          shippingFee: shipment.shippingFee,
-          packingMaterialFee: shipment.packingMaterialFee,
-          customerChargeOverrideReason: shipment.customerChargeOverrideReason,
-        }))
-      : [];
-  const legacyTrackingInput =
-    typeof trackingInput === 'object' && trackingInput !== null
-      ? trackingInput.trackingNo
-      : trackingInput;
-  // Treat both null AND whitespace-only as &ldquo;no tracking number&rdquo;:
-  // `'   '.trim()` is `''`, not null, so a naive `?? null` would
-  // happily write an empty string to Order.trackingNo.
-  const trimmed = legacyTrackingInput?.trim() ?? '';
-  const tracking = trimmed.length > 0 ? trimmed : null;
-  const primaryTracking =
-    requestedShipments.length > 0
-      ? requestedShipments[0]?.trackingNo ?? null
-      : tracking;
+  const { requestedShipments, primaryTracking } =
+    normalizeShipOrderInput(trackingInput);
   let notificationQueued = false;
   const result = await transitionWithLog(
     orderId,
@@ -2394,7 +2407,15 @@ export async function shipOrder(
             assertStorableOrderTotal(receivableTotal);
             await prismaTx.order.update({
               where: { id },
-              data: { totalAmount: receivableTotal },
+              // Shipment finalization replaces the provisional logistics
+              // quote with carrier/administrator-confirmed facts. Keep the
+              // earlier quote and confirmation snapshots as history, while
+              // making the settled snapshot the canonical customer fee that
+              // read models select ahead of them.
+              data: {
+                totalAmount: receivableTotal,
+                settledFee: receivableTotal,
+              },
             });
           }
           for (const shipment of storedShipments) {
@@ -2565,6 +2586,7 @@ type EditTxClient = {
           promisedDate: Date | null;
           isUrgent: boolean;
           isSfCollect: boolean;
+          editVersion: number;
         }
       | null
     >;
@@ -2573,6 +2595,10 @@ type EditTxClient = {
       data: unknown;
       select?: unknown;
     }) => Promise<{ id: string; status: OrderStatus }>;
+    updateMany: (args: {
+      where: { id: string; editVersion: number };
+      data: unknown;
+    }) => Promise<{ count: number }>;
   };
   orderShipment: {
     updateMany: (args: {
@@ -2692,9 +2718,19 @@ export type UpdateOrderResult = {
   changedFields: string[];
 };
 
-export async function updateOrderFields(
+const STALE_ORDER_EDIT_MESSAGE = '工单已被其他人修改，请刷新页面后再编辑';
+const INVALID_ORDER_EDIT_TOKEN_MESSAGE = '编辑页面已过期，请刷新后重试';
+
+type OrderEditCommand =
+  | {
+      kind: 'full-form';
+      input: UpdateEditableOrderInput | UpdateShippingOrderInput;
+    }
+  | { kind: 'urgent-only'; isUrgent: boolean };
+
+async function updateOrderEditableFields(
   orderId: string,
-  input: UpdateEditableOrderInput | UpdateShippingOrderInput,
+  command: OrderEditCommand,
   actor: { id: string; role: Role },
 ): Promise<UpdateOrderResult> {
   return db.$transaction(async (tx) => {
@@ -2724,6 +2760,7 @@ export async function updateOrderFields(
         remark: true,
         promisedDate: true,
         isUrgent: true,
+        editVersion: true,
       },
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
@@ -2743,8 +2780,24 @@ export async function updateOrderFields(
     const allowed =
       fieldset === 'FULL' ? FULL_EDITABLE_FIELDS : SHIPPING_EDITABLE_FIELDS;
 
+    if (command.kind === 'full-form') {
+      const { expectedEditVersion } = command.input;
+      if (!Number.isSafeInteger(expectedEditVersion) || expectedEditVersion < 0) {
+        throw new OrderInvariantError(INVALID_ORDER_EDIT_TOKEN_MESSAGE);
+      }
+      // Reject a stale snapshot before calculating or writing any dependent
+      // Shipment / OrderLog state. The conditional UPDATE below repeats this
+      // guard to close the read-to-write race with writers that do not take
+      // our advisory lock.
+      if (order.editVersion !== expectedEditVersion) {
+        throw new OrderInvariantError(STALE_ORDER_EDIT_MESSAGE);
+      }
+    }
+
     const nextFields = pickEditableFields(
-      input as unknown as Record<string, unknown>,
+      command.kind === 'full-form'
+        ? (command.input as unknown as Record<string, unknown>)
+        : { isUrgent: command.isUrgent },
       allowed,
     );
     if ('receiverAddress' in nextFields) {
@@ -2770,11 +2823,29 @@ export async function updateOrderFields(
       };
     }
 
-    const updated = await txClient.order.update({
-      where: { id: orderId },
-      data: nextFields,
-      select: { id: true, status: true },
-    });
+    let updated: { id: string; status: OrderStatus };
+    if (command.kind === 'full-form') {
+      const persisted = await txClient.order.updateMany({
+        where: {
+          id: orderId,
+          editVersion: command.input.expectedEditVersion,
+        },
+        data: nextFields,
+      });
+      if (persisted.count !== 1) {
+        throw new OrderInvariantError(STALE_ORDER_EDIT_MESSAGE);
+      }
+      updated = { id: order.id, status: order.status };
+    } else {
+      // The one-click urgent command is serialized by the advisory lock and
+      // can write only isUrgent. It intentionally has no general-purpose
+      // optional version-token escape hatch for full-form edits.
+      updated = await txClient.order.update({
+        where: { id: orderId },
+        data: nextFields,
+        select: { id: true, status: true },
+      });
+    }
 
     const primaryShipmentChanges = Object.fromEntries(
       ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode']
@@ -2811,15 +2882,109 @@ export async function updateOrderFields(
   });
 }
 
+export async function updateOrderFields(
+  orderId: string,
+  input: UpdateEditableOrderInput | UpdateShippingOrderInput,
+  actor: { id: string; role: Role },
+): Promise<UpdateOrderResult> {
+  return updateOrderEditableFields(
+    orderId,
+    { kind: 'full-form', input },
+    actor,
+  );
+}
+
 // Quick one-click 急单 flip. Callable only while the order is in
-// DRAFT / SUBMITTED (isUrgent is not in the SHIPPING_ONLY set); delegates
-// to updateOrderFields so the same scope / OrderLog guarantees apply.
+// DRAFT / SUBMITTED (isUrgent is not in the SHIPPING_ONLY set). Its command
+// shape accepts only the target boolean while sharing scope / OrderLog rules.
 export async function setOrderUrgent(
   orderId: string,
   isUrgent: boolean,
   actor: { id: string; role: Role },
 ): Promise<UpdateOrderResult> {
-  return updateOrderFields(orderId, { isUrgent } as UpdateEditableOrderInput, actor);
+  return updateOrderEditableFields(
+    orderId,
+    { kind: 'urgent-only', isUrgent },
+    actor,
+  );
+}
+
+type SfCollectPricingRevision = Awaited<
+  ReturnType<typeof appendOrderPricingRevisionInTx>
+>;
+
+async function recordSfCollectOrderLog(
+  txClient: EditTxClient,
+  input: {
+    orderId: string;
+    actorId: string;
+    isSfCollect: boolean;
+    previous: {
+      isSfCollect: boolean;
+      totalAmount: Decimal.Value;
+      pricingStatus: string;
+      priceRevision: number;
+      revision: number;
+    };
+    nextTotalAmount: string;
+    corrections: readonly SfCollectChargeCorrection[];
+    pricingRevision: SfCollectPricingRevision | null;
+  },
+): Promise<void> {
+  await txClient.orderLog.create({
+    data: {
+      orderId: input.orderId,
+      operatorId: input.actorId,
+      action: 'UPDATE',
+      changedFields: {
+        isSfCollect: {
+          before: input.previous.isSfCollect,
+          after: input.isSfCollect,
+        },
+        ...(new Decimal(input.previous.totalAmount).equals(input.nextTotalAmount)
+          ? {}
+          : {
+              totalAmount: {
+                before: new Decimal(input.previous.totalAmount).toFixed(2),
+                after: input.nextTotalAmount,
+              },
+            }),
+        ...(input.corrections.length > 0
+          ? {
+              shipmentChargeCorrections: {
+                before: null,
+                after: input.corrections.map((correction) => ({
+                  shipmentId: correction.shipmentId,
+                  destinationProvince: correction.destinationProvince,
+                  weightKg: correction.weightKg,
+                  shippingFee: correction.shippingFee,
+                  overrideReason: correction.customerChargeOverrideReason,
+                })),
+              },
+            }
+          : {}),
+        ...(input.pricingRevision
+          ? {
+              pricingStatus: {
+                before: input.previous.pricingStatus,
+                after: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+              },
+              priceRevision: {
+                before: input.previous.priceRevision,
+                after: input.pricingRevision.priceRevision,
+              },
+              revision: {
+                before: input.previous.revision,
+                after: input.pricingRevision.orderRevision,
+              },
+            }
+          : {}),
+      },
+      remark: input.isSfCollect
+        ? '标记顺丰到付（自行预约）'
+        : '取消顺丰到付',
+    },
+  });
 }
 
 // 顺丰到付是可后补的履约标识。外部销售工单切换时必须同步免收/恢复
@@ -2900,6 +3065,7 @@ export async function setOrderSfCollect(
     }
 
     let nextTotalAmount = new Decimal(order.totalAmount).toFixed(2);
+    let nextQuotedFeeCompleteness: OrderQuotedFeeCompleteness | null = null;
     if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
       const prismaTx = tx as unknown as Prisma.TransactionClient;
       const chargeChangedAt = changedAt;
@@ -3179,11 +3345,32 @@ export async function setOrderSfCollect(
           .toFixed(2);
       }
       assertStorableOrderTotal(nextTotalAmount);
+      nextQuotedFeeCompleteness = repriced.requiresAdminConfirmation
+        ? OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS
+        : OrderQuotedFeeCompleteness.COMPLETE;
     }
 
     const updated = await txClient.order.update({
       where: { id: orderId },
-      data: { isSfCollect, totalAmount: nextTotalAmount },
+      data: {
+        isSfCollect,
+        totalAmount: nextTotalAmount,
+        ...(order.settlementType === OrderSettlementType.EXTERNAL_SALES
+          ? {
+              // Changing the fulfilment charging mode invalidates every
+              // previously confirmed/settled customer-fee snapshot. Persist
+              // the newly calculated amount as the current provisional quote
+              // so the shared selector cannot fall through to stale money
+              // while the pricing revision awaits administrator confirmation.
+              quotedFee: nextTotalAmount,
+              quotedFeeCompleteness:
+                nextQuotedFeeCompleteness ??
+                OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+              confirmedFee: null,
+              settledFee: null,
+            }
+          : {}),
+      },
       select: { id: true, status: true },
     });
     const pricingRevision =
@@ -3205,58 +3392,26 @@ export async function setOrderSfCollect(
             },
           )
         : null;
-    await txClient.orderLog.create({
-      data: {
-        orderId,
-        operatorId: actor.id,
-        action: 'UPDATE',
-        changedFields: {
-          isSfCollect: { before: order.isSfCollect, after: isSfCollect },
-          ...(new Decimal(order.totalAmount).equals(nextTotalAmount)
-            ? {}
-            : {
-                totalAmount: {
-                  before: new Decimal(order.totalAmount).toFixed(2),
-                  after: nextTotalAmount,
-                },
-              }),
-          ...(trustedCorrections.length > 0
-            ? {
-                shipmentChargeCorrections: {
-                  before: null,
-                  after: trustedCorrections.map((correction) => ({
-                    shipmentId: correction.shipmentId,
-                    destinationProvince: correction.destinationProvince,
-                    weightKg: correction.weightKg,
-                    shippingFee: correction.shippingFee,
-                    overrideReason:
-                      correction.customerChargeOverrideReason,
-                  })),
-                },
-              }
-            : {}),
-          ...(pricingRevision
-            ? {
-                pricingStatus: {
-                  before: order.pricingStatus,
-                  after:
-                    ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
-                },
-                priceRevision: {
-                  before: order.priceRevision,
-                  after: pricingRevision.priceRevision,
-                },
-                revision: {
-                  before: order.revision,
-                  after: pricingRevision.orderRevision,
-                },
-              }
-            : {}),
+    if (pricingRevision) {
+      // quotedFee above is the value represented by this newly appended
+      // immutable revision. Link it only after the revision row exists so the
+      // same-order FK/trigger can validate the reference in this transaction.
+      await txClient.order.update({
+        where: { id: orderId },
+        data: {
+          quotedPricingRevisionId: pricingRevision.pricingRevisionId,
         },
-        remark: isSfCollect
-          ? '标记顺丰到付（自行预约）'
-          : '取消顺丰到付',
-      },
+        select: { id: true, status: true },
+      });
+    }
+    await recordSfCollectOrderLog(txClient, {
+      orderId,
+      actorId: actor.id,
+      isSfCollect,
+      previous: order,
+      nextTotalAmount,
+      corrections: trustedCorrections,
+      pricingRevision,
     });
 
     return {

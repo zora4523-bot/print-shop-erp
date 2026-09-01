@@ -10,7 +10,7 @@ import type {
   PrintOrderItem,
   PrintPackagingGroup,
   PrintShipment,
-} from './OrderPrintLayout.types';
+} from './print-types';
 
 interface Props {
   order: PrintOrder;

@@ -41,7 +41,7 @@ export function ProductCategoryNodesTable({
           return (
             <TableRow
               key={node.id}
-              className={!node.isActive ? 'opacity-60' : undefined}
+              className={!node.isActive ? 'text-muted-foreground' : undefined}
             >
               <TableCell>
                 {prefix}

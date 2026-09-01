@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
+  databaseClockNowMock,
   lockPieceworkMock,
   readPieceworkDayMock,
   settleReadyCsMock,
@@ -11,6 +12,7 @@ const {
   dispatchMock,
   MockCsBatchUnexpectedError,
 } = vi.hoisted(() => ({
+  databaseClockNowMock: vi.fn(),
   lockPieceworkMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   readPieceworkDayMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   settleReadyCsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -28,6 +30,9 @@ const {
       this.partialResult = partialResult;
     }
   },
+}));
+vi.mock('@/lib/background-jobs/clock', () => ({
+  databaseClockNow: databaseClockNowMock,
 }));
 vi.mock('@/lib/salary/piecework-settlement', () => ({
   lockPieceworkSettlementsForDate: lockPieceworkMock,
@@ -59,6 +64,9 @@ import { POST as csPeriodEndingPost } from '../cs-period-ending/route';
 const SECRET = 'test-cron-secret-12345';
 
 beforeEach(() => {
+  databaseClockNowMock
+    .mockReset()
+    .mockResolvedValue(new Date('2026-04-28T04:00:00.000Z'));
   lockPieceworkMock.mockReset().mockResolvedValue({
     settled: [],
     errors: [],

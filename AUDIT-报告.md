@@ -117,7 +117,7 @@
 ### 2.3 续审：版本、取消与对账闭环
 
 - [一致性][P0·留人工] lib/order/print-view.ts:99 — 工单二维码仍是 `/wo/{woNo}`，扫码路由忽略 `v` 且不显示旧版红色作废页 — 与 §3 的纸质工单作废闭环直接冲突 — 动作：留人工；实现带版本短链、服务端比对和不泄露旧内容的作废页（VERSION-001）。
-- [一致性][P0·留人工] components/business/order/OrderPrintLayout.types.ts:101 — 打印 DTO 不含工单版本，PDF/页眉也没有 `vN` 契约 — 肉眼无法在二维码不可用时识别旧纸 — 动作：留人工；让 DTO、页眉、文件名与二维码共用同一版本（VERSION-002）。
+- [一致性][P0·留人工] lib/order/print-types.ts:101 — 打印 DTO 不含工单版本，PDF/页眉也没有 `vN` 契约 — 肉眼无法在二维码不可用时识别旧纸 — 动作：留人工；让 DTO、页眉、文件名与二维码共用同一版本（VERSION-002）。
 - [一致性][P0·留人工] lib/background-jobs/pdf.ts:21 — PDF durable job 的 payload、result 和领取校验只绑定工单/操作人，未绑定版本 — 排队期间升版后仍可领到旧产物 — 动作：留人工；在生成、存储和领取三处校验当前版本，补旧 `jobId` 竞态测试（VERSION-003）。
 - [一致性][P1·留人工] prisma/schema.prisma:426 — 不可变价格修订以独立 `priceRevision` 为键，不是完整的 WorkOrder 版本快照 — 尚不能证明每一版工单与锁定金额及全部打印事实一对一 — 动作：留人工；定义不可变工单版本快照边界（VERSION-004）。
 - [一致性][P0·留人工] lib/order/change-request.ts:2401 — 当前 `Order.revision` 不是纯纸质工单版本，核价、发货物流终审和顺丰到付变更也会递增 — `lib/order/pricing-review.ts:1154` 与 `lib/order.ts:2060,2816` 证明非纸质变更也占用版本号 — 动作：留人工；确认新增独立 `workOrderVersion` 或重定义全部递增语义（VERSION-005）。

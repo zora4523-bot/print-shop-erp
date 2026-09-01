@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { createHash } from 'node:crypto';
 import {
   PartyType,
   Prisma,
@@ -29,6 +30,7 @@ import type {
   CreatePurchaseOrderInput,
   CreatePurchaseReceiptInput,
 } from './auth/schemas';
+import { purchaseReceiptRequestLockKey } from './purchase-locks';
 
 export class PurchaseInvariantError extends Error {
   constructor(message: string) {
@@ -220,11 +222,147 @@ export async function getPurchaseOrderDetail(id: string) {
 }
 
 function parsePositiveDecimal(value: string, label: string): Decimal {
-  const decimal = new Decimal(value);
+  let decimal: Decimal;
+  try {
+    decimal = new Decimal(value);
+  } catch {
+    throw new PurchaseInvariantError(`${label}格式不合法`);
+  }
   if (!decimal.isFinite() || decimal.lte(0)) {
     throw new PurchaseInvariantError(`${label}必须大于 0`);
   }
   return decimal;
+}
+
+const PURCHASE_RECEIPT_QUANTITY_MAX = new Decimal('9999999999.99');
+const PURCHASE_RECEIPT_UNIT_COST_MAX = new Decimal('999999.9999');
+
+function normalizePurchaseReceiptQuantity(value: string): Decimal {
+  const quantity = parsePositiveDecimal(value, '入库数量');
+  if (quantity.decimalPlaces() > 2 || quantity.gt(PURCHASE_RECEIPT_QUANTITY_MAX)) {
+    throw new PurchaseInvariantError('入库数量超出可保存范围');
+  }
+  return quantity;
+}
+
+function normalizePurchaseReceiptUnitCost(value: string | null): string | null {
+  if (value === null) return null;
+  let unitCost: Decimal;
+  try {
+    unitCost = new Decimal(value);
+  } catch {
+    throw new PurchaseInvariantError('入库单价格式不合法');
+  }
+  if (
+    !unitCost.isFinite() ||
+    unitCost.isNegative() ||
+    unitCost.decimalPlaces() > 4 ||
+    unitCost.gt(PURCHASE_RECEIPT_UNIT_COST_MAX)
+  ) {
+    throw new PurchaseInvariantError('入库单价超出可保存范围');
+  }
+  return unitCost.toFixed(4);
+}
+
+type PurchaseReceiptRequestFacts = {
+  purchaseOrderId: string;
+  purchaseOrderItemId: string;
+  locationId: string | null;
+  quantity: string;
+  unitCost: string | null;
+  remark: string | null;
+  receivedById: string;
+};
+
+const PURCHASE_RECEIPT_REPLAY_SELECT = {
+  purchaseOrderId: true,
+  receivedById: true,
+  remark: true,
+  requestFingerprint: true,
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    select: {
+      purchaseOrderItemId: true,
+      quantity: true,
+      unitCost: true,
+      materialTransactions: {
+        where: {
+          direction: TxDirection.IN,
+          reasonType: 'PURCHASE_RECEIPT',
+        },
+        orderBy: { createdAt: 'asc' as const },
+        take: 1,
+        select: { locationId: true },
+      },
+    },
+  },
+} as const;
+
+type StoredPurchaseReceiptRequest = {
+  purchaseOrderId: string;
+  receivedById: string;
+  remark: string | null;
+  requestFingerprint: string | null;
+  items: Array<{
+    purchaseOrderItemId: string;
+    quantity: Decimal.Value;
+    unitCost: Decimal.Value | null;
+    materialTransactions: Array<{ locationId: string | null }>;
+  }>;
+};
+
+function purchaseReceiptRequestFingerprint(
+  facts: PurchaseReceiptRequestFacts,
+): string {
+  return createHash('sha256').update(JSON.stringify(facts)).digest('hex');
+}
+
+function assertPurchaseReceiptReplayMatches(
+  stored: StoredPurchaseReceiptRequest,
+  requested: PurchaseReceiptRequestFacts,
+  fingerprint: string,
+): void {
+  if (stored.purchaseOrderId !== requested.purchaseOrderId) {
+    throw new PurchaseInvariantError('入库请求标识已被其他采购单使用');
+  }
+  if (stored.requestFingerprint !== null) {
+    if (stored.requestFingerprint !== fingerprint) {
+      throw new PurchaseInvariantError(
+        '入库请求标识与原请求内容不一致，请刷新后重试',
+      );
+    }
+    return;
+  }
+
+  // Rows created before request fingerprints were introduced retain enough
+  // relational evidence for a compatibility comparison. A historical null
+  // location meant "the then-current default location"; that original input
+  // bit was not persisted, so null can only be compared to the recorded IN
+  // movement rather than reconstructed from today's default configuration.
+  const item = stored.items.length === 1 ? stored.items[0] : null;
+  const movement = item?.materialTransactions[0] ?? null;
+  const sameLocation =
+    requested.locationId === null
+      ? movement?.locationId != null
+      : movement?.locationId === requested.locationId;
+  const sameUnitCost =
+    item !== null &&
+    ((item.unitCost === null && requested.unitCost === null) ||
+      (item.unitCost !== null &&
+        requested.unitCost !== null &&
+        new Decimal(item.unitCost).eq(requested.unitCost)));
+  if (
+    stored.receivedById !== requested.receivedById ||
+    stored.remark !== requested.remark ||
+    item?.purchaseOrderItemId !== requested.purchaseOrderItemId ||
+    !new Decimal(item?.quantity ?? Number.NaN).eq(requested.quantity) ||
+    !sameUnitCost ||
+    !sameLocation
+  ) {
+    throw new PurchaseInvariantError(
+      '入库请求标识与原请求内容不一致，请刷新后重试',
+    );
+  }
 }
 
 function parseOptionalDate(value: string | null): Date | null {
@@ -321,16 +459,29 @@ export async function createPurchaseReceipt(
   actor: { id: string },
   now: Date = new Date(),
 ): Promise<PurchaseOrderDetail> {
-  const receiptQuantity = parsePositiveDecimal(input.quantity, '入库数量');
+  const receiptQuantity = normalizePurchaseReceiptQuantity(input.quantity);
+  const normalizedUnitCost = normalizePurchaseReceiptUnitCost(input.unitCost);
+  const requestFacts: PurchaseReceiptRequestFacts = {
+    purchaseOrderId,
+    purchaseOrderItemId: input.purchaseOrderItemId,
+    locationId: input.locationId,
+    quantity: receiptQuantity.toFixed(2),
+    unitCost: normalizedUnitCost,
+    remark: input.remark,
+    receivedById: actor.id,
+  };
+  const requestFingerprint = purchaseReceiptRequestFingerprint(requestFacts);
 
   const existingBeforeReservation = await db.purchaseReceipt.findUnique({
     where: { idempotencyKey: input.idempotencyKey },
-    select: { purchaseOrderId: true },
+    select: PURCHASE_RECEIPT_REPLAY_SELECT,
   });
   if (existingBeforeReservation) {
-    if (existingBeforeReservation.purchaseOrderId !== purchaseOrderId) {
-      throw new PurchaseInvariantError('入库请求标识已被其他采购单使用');
-    }
+    assertPurchaseReceiptReplayMatches(
+      existingBeforeReservation,
+      requestFacts,
+      requestFingerprint,
+    );
     const existingDetail = await getPurchaseOrderDetail(purchaseOrderId);
     if (!existingDetail) throw new PurchaseInvariantError('采购单不存在');
     return existingDetail;
@@ -341,6 +492,27 @@ export async function createPurchaseReceipt(
   const receiptNo = await reservePurchaseDocumentNumber('PURCHASE_RECEIPT', now);
 
   await db.$transaction(async (tx) => {
+    // The request-key lock must precede the purchase-order row lock. Two
+    // concurrent requests can reuse one key across different purchase orders;
+    // serializing by the key makes the loser compare facts and fail with a
+    // domain error instead of leaking a unique-index exception.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${purchaseReceiptRequestLockKey(
+      input.idempotencyKey,
+    )}))`;
+
+    const existingRequest = await tx.purchaseReceipt.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: PURCHASE_RECEIPT_REPLAY_SELECT,
+    });
+    if (existingRequest) {
+      assertPurchaseReceiptReplayMatches(
+        existingRequest,
+        requestFacts,
+        requestFingerprint,
+      );
+      return;
+    }
+
     const lockedOrders = await tx.$queryRaw<
       { id: string; status: PurchaseOrderStatus }[]
     >`SELECT id, status
@@ -351,17 +523,6 @@ export async function createPurchaseReceipt(
     if (!order) throw new PurchaseInvariantError('采购单不存在');
     if (order.status === PurchaseOrderStatus.CANCELLED) {
       throw new PurchaseInvariantError('已取消采购单不能入库');
-    }
-
-    const existingRequest = await tx.purchaseReceipt.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-      select: { purchaseOrderId: true },
-    });
-    if (existingRequest) {
-      if (existingRequest.purchaseOrderId !== purchaseOrderId) {
-        throw new PurchaseInvariantError('入库请求标识已被其他采购单使用');
-      }
-      return;
     }
 
     const lockedItems = await tx.$queryRaw<
@@ -391,6 +552,7 @@ export async function createPurchaseReceipt(
       data: {
         receiptNo,
         idempotencyKey: input.idempotencyKey,
+        requestFingerprint,
         purchaseOrderId,
         receivedById: actor.id,
         receivedAt: now,
@@ -404,7 +566,7 @@ export async function createPurchaseReceipt(
         purchaseOrderItemId: item.id,
         materialId: item.materialId,
         quantity: receiptQuantity.toFixed(2),
-        unitCost: input.unitCost,
+        unitCost: normalizedUnitCost,
       },
       select: { id: true },
     });
@@ -416,7 +578,7 @@ export async function createPurchaseReceipt(
       quantity: receiptQuantity.toFixed(2),
       reasonType: 'PURCHASE_RECEIPT',
       operatorId: actor.id,
-      unitCost: input.unitCost,
+      unitCost: normalizedUnitCost,
       remark: `采购入库 ${receiptNo}`,
       purchaseReceiptItemId: receiptItem.id,
     });

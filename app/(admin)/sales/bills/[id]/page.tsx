@@ -86,11 +86,12 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
-      <BreadcrumbEntity label={bill.period} />
+      <BreadcrumbEntity label={`${bill.period} #${bill.sequence}`} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="break-words text-xl font-semibold">
-            账单 · {bill.period}
+            {bill.sequence > 1 ? '补充账单' : '账单'} #{bill.sequence} ·{' '}
+            {bill.period}
           </h1>
           <p className="text-sm text-muted-foreground">
             {bill.issuedAt ? `发单 ${formatDateTimeShanghai(bill.issuedAt)}` : '尚未发单'}

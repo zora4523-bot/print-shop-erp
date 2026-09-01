@@ -471,7 +471,7 @@ function SidebarSubItem({
         <span
           data-menu-subgroup={subgroupLabel ?? undefined}
           className={cn(
-            'block px-2 pb-0.5 pt-2 text-[10px] font-semibold tracking-[0.08em] text-sidebar-foreground/50',
+            'block px-2 pb-0.5 pt-2 text-[10px] font-semibold tracking-[0.08em] text-sidebar-foreground/70',
             startsSubgroup &&
               'mt-1 border-t border-sidebar-border/70 pt-3',
           )}

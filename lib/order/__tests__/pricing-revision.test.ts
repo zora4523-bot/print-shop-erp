@@ -17,6 +17,9 @@ function freshOrder(overrides: Record<string, unknown> = {}) {
     processingAmount: "140.00",
     packagingAmount: "20.00",
     totalAmount: "145.80",
+    quotedFee: "142.00",
+    confirmedFee: "143.50",
+    settledFee: "145.80",
     items: [
       {
         id: "item-1",
@@ -153,6 +156,9 @@ describe("appendOrderPricingRevisionInTx", () => {
             processingAmount: "140.00",
             packagingAmount: "20.00",
             totalAmount: "145.80",
+            quotedFee: "142.00",
+            confirmedFee: "143.50",
+            settledFee: "145.80",
           }),
           items: [expect.objectContaining({ subtotal: "120.00" })],
           packagingGroups: [
@@ -230,6 +236,38 @@ describe("appendOrderPricingRevisionInTx", () => {
         amount: null,
       }),
     ]);
+  });
+
+  it("snapshots a newly produced quote before its revision foreign key can be linked", async () => {
+    const tx = txFor(
+      freshOrder({
+        quotedFee: null,
+        confirmedFee: "120.00",
+        settledFee: "118.00",
+      }),
+    );
+
+    const result = await appendOrderPricingRevisionInTx(
+      tx as unknown as Prisma.TransactionClient,
+      {
+        orderId: "order-1",
+        status: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+        source: "EXTERNAL_SUBMIT_QUOTE",
+        actorId: "sales-1",
+        now: new Date("2026-08-28T02:00:00.000Z"),
+        orderFeeSnapshot: {
+          quotedFee: "146.30",
+          confirmedFee: null,
+          settledFee: null,
+        },
+      },
+    );
+
+    expect(result.snapshot.order).toMatchObject({
+      quotedFee: "146.30",
+      confirmedFee: null,
+      settledFee: null,
+    });
   });
 
   it("requires an actor for an administrator-confirmed revision", async () => {

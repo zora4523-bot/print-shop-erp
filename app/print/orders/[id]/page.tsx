@@ -5,7 +5,7 @@ import { getOrderTitleRef } from '@/lib/page-title/refs';
 import { orderPrintTitle } from '@/lib/page-title/titles';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import { getSetting } from '@/lib/settings';
-import { OrderPrintLayout } from '@/components/business/order/OrderPrintLayout';
+import { OrderPrintLayout } from '@/lib/order/print-layout';
 import { AutoPrint } from '@/components/business/order/AutoPrint';
 
 type PageProps = {

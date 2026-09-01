@@ -5,6 +5,9 @@ import {
 } from '@/generated/prisma/enums';
 import {
   buildExternalOrderPapers,
+  externalOrderDefaultSpecification,
+  externalOrderSpecificationsForRoute,
+  externalOrderWeightOptionsForSelection,
   externalOrderWeightsForSelection,
   findExternalOrderCatalogProduct,
 } from '../external-order-b-catalog';
@@ -63,6 +66,97 @@ describe('external order B catalog', () => {
     ).toEqual([160]);
   });
 
+  it('keeps malformed legacy specifications out of every browser choice', () => {
+    const malformedAndValid = [
+      {
+        id: 'legacy-mixed-spec',
+        code: 'PRD-000002',
+        category: ProductCategory.BLANK_STOCK,
+        specification: '100×200,中号 / 中号封80×115',
+        paperType: '160g珠光纸',
+        weight: 160,
+      },
+    ];
+
+    const papers = buildExternalOrderPapers(malformedAndValid);
+    expect(papers.flatMap((paper) => paper.variants)).toEqual([
+      expect.objectContaining({ specification: '中号封80×115' }),
+    ]);
+    expect(
+      externalOrderSpecificationsForRoute(
+        malformedAndValid,
+        OrderItemPricingRoute.STOCK_BLANK,
+      ),
+    ).toEqual(['中号封80×115']);
+    expect(
+      externalOrderDefaultSpecification(
+        malformedAndValid,
+        OrderItemPricingRoute.STOCK_BLANK,
+      ),
+    ).toBe('中号封80×115');
+  });
+
+  it('disables only the exact weights whose configured materials are all out of stock', () => {
+    const customProduct = {
+      id: 'custom-large',
+      code: 'EXT-CUSTOM-LARGE',
+      category: ProductCategory.CUSTOM_FLAT_FOIL,
+      specification: '大号封90×165',
+      paperType: null,
+      weight: null,
+    };
+    const paper = buildExternalOrderPapers([customProduct], [
+      {
+        id: 'paper-pearl-160',
+        name: '160g珠光艳闪',
+        weight: 160,
+        outOfStock: true,
+      },
+      {
+        id: 'paper-pearl-180',
+        name: '180g珠光艳闪',
+        weight: 180,
+        outOfStock: false,
+      },
+    ]).find((candidate) => candidate.label === '珠光艳闪');
+
+    expect(paper).toBeDefined();
+    expect(
+      externalOrderWeightOptionsForSelection(
+        paper!,
+        OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+        '大号封90×165',
+      ),
+    ).toEqual([
+      { value: 160, disabled: true },
+      { value: 180, disabled: false },
+    ]);
+  });
+
+  it('disables a product whose linked paper is absent from the active material catalog', () => {
+    const paper = buildExternalOrderPapers(
+      [
+        {
+          id: 'stock-with-inactive-paper',
+          category: ProductCategory.BLANK_STOCK,
+          specification: '大号封90×165',
+          paperType: '160g珠光艳闪',
+          paperMaterialId: 'inactive-paper-160',
+          weight: 160,
+        },
+      ],
+      [],
+    )[0];
+
+    expect(
+      externalOrderWeightOptionsForSelection(
+        paper!,
+        OrderItemPricingRoute.STOCK_BLANK,
+        '大号封90×165',
+      ),
+    ).toEqual([{ value: 160, disabled: true }]);
+  });
+
   it('fails closed instead of substituting another product', () => {
     expect(
       findExternalOrderCatalogProduct(
@@ -74,8 +168,45 @@ describe('external order B catalog', () => {
     ).toBeNull();
   });
 
-  it('does not treat a missing product paper as a wildcard', () => {
+  it('resolves each configured choice from a multi-specification product', () => {
+    const aliased = {
+      id: 'multi-spec-stock',
+      code: 'EXT-STOCK-MULTI',
+      category: ProductCategory.BLANK_STOCK,
+      specification: '西封中号80×120 / 西封大号85×165',
+      paperType: '160g珠光艳闪',
+    };
+
+    for (const specification of ['西封中号80×120', '西封大号85×165']) {
+      expect(
+        findExternalOrderCatalogProduct(
+          [aliased],
+          OrderItemPricingRoute.STOCK_BLANK,
+          '160g珠光艳闪',
+          specification,
+        ),
+      ).toEqual(aliased);
+    }
+  });
+
+  it('uses one paper-agnostic CUSTOM product as the configured size owner', () => {
     const exact = products[2]!;
+    expect(
+      findExternalOrderCatalogProduct(
+        [
+          {
+            ...exact,
+            id: 'missing-paper',
+            code: 'PRD-MISSING-PAPER',
+            paperType: null,
+          },
+        ],
+        OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+        '160g珠光艳闪',
+        '大号封90×165',
+      ),
+    ).toEqual(expect.objectContaining({ id: 'missing-paper' }));
+
     expect(
       findExternalOrderCatalogProduct(
         [
@@ -92,6 +223,77 @@ describe('external order B catalog', () => {
         '大号封90×165',
       ),
     ).toEqual(exact);
+
+    expect(
+      findExternalOrderCatalogProduct(
+        [
+          {
+            ...exact,
+            id: 'missing-paper',
+            code: 'PRD-MISSING-PAPER',
+            category: ProductCategory.BLANK_STOCK,
+            paperType: null,
+          },
+        ],
+        OrderItemPricingRoute.STOCK_BLANK,
+        '160g珠光艳闪',
+        '大号封90×165',
+      ),
+    ).toBeNull();
+  });
+
+  it('derives CUSTOM paper choices from configured PAPER materials without inventing prices', () => {
+    const genericCustomProducts = [
+      {
+        id: 'custom-large',
+        code: 'EXT-CUSTOM-LARGE',
+        category: ProductCategory.CUSTOM_FLAT_FOIL,
+        specification: '大号封90×165',
+        paperType: null,
+        weight: null,
+      },
+      {
+        id: 'legacy-malformed',
+        code: 'PRD-000002',
+        category: ProductCategory.CUSTOM_FLAT_FOIL,
+        specification: '100×200,中号',
+        paperType: '珠光纸',
+        weight: null,
+      },
+    ];
+    const papers = buildExternalOrderPapers(genericCustomProducts, [
+      {
+        id: 'paper-pearl-160',
+        name: '160g珠光艳闪',
+        specification: null,
+        weight: 160,
+      },
+      {
+        id: 'paper-unresolved',
+        name: '未配置克重的纸',
+        specification: null,
+        weight: null,
+      },
+    ]);
+    const customPaper = papers.find((paper) => paper.label === '珠光艳闪');
+
+    expect(customPaper).toBeDefined();
+    expect(customPaper?.variants).toEqual([
+      expect.objectContaining({
+        route: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+        specification: '大号封90×165',
+        paperType: '160g珠光艳闪',
+        weight: 160,
+        paperMaterialId: 'paper-pearl-160',
+        outOfStock: false,
+      }),
+    ]);
+    expect(
+      papers
+        .flatMap((paper) => paper.variants)
+        .some((variant) => variant.specification === '100×200,中号'),
+    ).toBe(false);
+    expect(papers.some((paper) => paper.label === '未配置克重的纸')).toBe(false);
   });
 
   it('fails closed when two product ids have the same pricing facts', () => {

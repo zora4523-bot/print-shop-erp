@@ -112,13 +112,6 @@ const BOM_LIST_ORDER = [
   { id: 'asc' as const },
 ];
 
-export async function listBoms(): Promise<BomSummary[]> {
-  return db.billOfMaterial.findMany({
-    select: BOM_SUMMARY_SELECT,
-    orderBy: BOM_LIST_ORDER,
-  });
-}
-
 export async function listBomsPage(opts: {
   page: number;
   pageSize: number;

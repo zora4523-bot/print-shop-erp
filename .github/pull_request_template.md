@@ -9,7 +9,7 @@ Selected backlog item:
 ## Verification
 
 - [ ] `./node_modules/.bin/prisma validate`
-- [ ] `./node_modules/.bin/tsc --noEmit --pretty false`
+- [ ] `pnpm typecheck`
 - [ ] `./node_modules/.bin/eslint .`
 - [ ] `./node_modules/.bin/vitest run --reporter=dot --testTimeout=10000`
 - [ ] `./node_modules/.bin/next build` when applicable

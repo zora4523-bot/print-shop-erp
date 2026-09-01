@@ -117,7 +117,7 @@
 
 - **决策**：`/print/orders/[id]` 是独立的 top-level 路由段，不走 `/orders` 下的导航 layout。浏览器打印通道链接到 `?autoprint=1`，client 端 `AutoPrint` 组件 `useEffect` → `window.print()` → `afterprint` 关闭窗口。PDF 通道是 `GET /api/orders/[id]/pdf`，服务端 `renderToStaticMarkup(<OrderPrintLayout />)` 得到 HTML，Puppeteer `page.setContent(html, { waitUntil: 'networkidle0' })` → `page.pdf()`，不做本机 HTTP 二次 round trip，不用转发 session cookie。
 - **理由**：SPEC 附录 E.1 明确"两通道共用同一个 React 组件"。走 localhost hop 要解决 cookie 透传 + 自引用 URL 解析，复杂度高且重复鉴权。`setContent` 方案让 PDF 路由完全在进程内渲染，只有 OSS 图片 URL 会触发外部请求（由 `networkidle0` 等）。拆 `/print` 为独立 segment 是因为 Next.js App Router 没有"跳过父 layout"的正交开关。
-- **影响**：`components/business/order/OrderPrintLayout.tsx` 是纯函数组件，接收 `PrintOrder` 视图模型（craft IDs 在 page 层被解析成名字、role enum 解成中文 label）。`lib/pdf/render.ts` 是通用 wrapper，未来薪资单、账单都走同一个 `renderHtmlToPdf`。`lib/order/print-html.tsx` 的 `<title>` 注入用 `escapeHtml` 硬化（早期 review 确认 orderNo 目前是 ASCII，但加防御）。PDF route 回传 RFC 5987 双份 `Content-Disposition`（round 34）。`qrcode.react` SVG 变体用在 server-render 完全 OK。
+- **影响**：`lib/order/print-layout.tsx` 是纯函数组件，接收 `PrintOrder` 视图模型（craft IDs 在 page 层被解析成名字、role enum 解成中文 label）。`lib/pdf/render.ts` 是通用 wrapper，未来薪资单、账单都走同一个 `renderHtmlToPdf`。`lib/order/print-html.tsx` 的 `<title>` 注入用 `escapeHtml` 硬化（早期 review 确认 orderNo 目前是 ASCII，但加防御）。PDF route 回传 RFC 5987 双份 `Content-Disposition`（round 34）。`qrcode.react` SVG 变体用在 server-render 完全 OK。
 - **相关文档**：`app/print/orders/[id]/page.tsx`、`app/api/orders/[id]/pdf/route.ts`、`lib/pdf/render.ts`、SPEC 附录 E、Codex rounds 34–35。
 
 ---
@@ -1048,7 +1048,7 @@
 - **信息保留**：主页和重复页眉使用有界预览，完整客户名、生产团队、备注、地址和结构化事实保留在附页；不能以截断全文换取分页稳定。图稿附页对单图和少图设置最大宽高，避免纵向图片撑破 A4。
 - **确定性**：同一时间戳的图稿和任务使用稳定 ID 作为次级排序；分页权重、页码偏移和二维码位置在相同事实下必须可复现。
 - **验收边界**：至少覆盖 1–10 张图稿、20/50 款、正反面最长合法文本、10 个地址、50 个长姓名师傅、8 款/8 图密集主页，以及单图被长文本移入附页；每张 `.sheet` 高度不超过 A4，DOM 页数等于 Chromium 生成 PDF 页数。
-- **相关实现与验收**：`components/business/order/OrderPrintLayout.tsx`、`lib/order/print-view.ts`、`lib/order/print-html.tsx`、`tests/visual/order-print.spec.ts`。
+- **相关实现与验收**：`lib/order/print-layout.tsx`、`lib/order/print-types.ts`、`lib/order/print-view.ts`、`lib/order/print-html.tsx`、`tests/visual/order-print.spec.ts`。
 
 ---
 
@@ -1068,3 +1068,67 @@
 - **失败关闭**：规范化规则集与当前版完全相同时，预览和最终事务都拒绝发布，禁止制造空版本。预览的“通过”必须包含真实双价簿建单投影，不得只用结构校验冒充完整通过；最终发布在写入前重复投影。
 - **导航与历史**：发布差异和校验问题按持久化规则身份映射回所属业务板块并聚焦真实草稿输入，不再使用已废止的 `?item=#selected-charge-detail` 工作台深链，也不得按名称猜板块。历史版本按价目谱系分组但不显示内部 code；停用且未来从未生效的旧发布版本显示为“已取消”，不能冒充普通历史生效版本。
 - **取代关系**：本条取代 2026-08-09“每次发布都由管理员选择上海时间”和 2026-08-11 将预约状态作为日常发布主流程的交互口径；底层未来生效能力、版本窗口和历史兼容继续保留。
+
+---
+
+## 2026-08-30：考勤是时薪工资的源事实，已发月份冻结、未发快照随源变更失效
+
+- **决策**：`recordAttendance`、`removeAttendance`、时薪重算和标记已发共用唯一的 `(workerId, month)` PostgreSQL advisory transaction lock。当 `HourlyWorkerPayroll.isPaid=true` 时，该月考勤不得新增、覆盖或删除；考勤真实变更时，同一事务删除未发工资派生快照，由下次重算重建。
+- **理由**：只加 `isPaid` 查询会留下 TOCTOU；只锁考勤写入也会让“先修考勤、后把旧金额标已发”成立。未发工资是可重算的派生数据，考勤才是事实源。
+- **边界**：完全相同的幂等重录不使未发快照失效；删除只把真实 Prisma `P2025` 视为幂等不存在。直接 SQL 绕过应用仍不受 advisory lock 契约保护，如需开放直连写入必须另加数据库 trigger。
+- **相关实现与验收**：`lib/attendance.ts`、`lib/salary/hourly-lock.ts`、`lib/salary/hourly-aggregate.ts`及 PostgreSQL 并发测试。
+
+---
+
+## 2026-08-30：物料计量单位在创建后不可变
+
+- **决策**：物料创建后不再允许原地更换单位。要换单位必须新建物料，不自动换算任何数量。
+- **理由**：仅在“已有数量事实”后禁止修改，无法保护单位修改前已打开、修改后才提交的采购/BOM/库存表单；这些请求只携带 `materialId + quantity`，会把旧单位数量按新单位解释。创建后不可变从根本上消除该竞态。
+- **边界**：单位未变时仍允许修改名称、编码等字典属性；UI 中单位只读，领域层重复强制该约束。
+- **相关实现与验收**：`lib/material.ts`、`components/business/material/MaterialForm.tsx`及旧单位表单回归测试。
+
+---
+
+## 2026-08-30：工单全量编辑表单使用数据库递增版本，不自动合并过期快照
+
+- **决策**：编辑页加载时把 `Order.editVersion` 作为必填隐藏令牌。保存时先在事务内比较，最终通过 `WHERE id = ? AND editVersion = ?` CAS 写入；过期或 CAS 失败明确要求刷新，不写 Shipment/OrderLog，也不猜测字段级合并。
+- **版本所有权**：PostgreSQL `BEFORE UPDATE` trigger 对每次 `Order` 写入强制执行 `OLD.editVersion + 1`，不依赖应用时钟。`updatedAt TIMESTAMP(3)` 可在同一毫秒重复，不再用作严格 CAS 令牌。
+- **理由**：表单提交的是完整页面快照，无版本守卫时会用旧值覆盖另一个编辑者已保存的无关字段。`Order.revision` 是改单/计价业务语义，不复用为通用行版本。
+- **边界**：`setOrderUrgent` 等单一意图命令保持专用输入形状和同一工单锁，不提供“任意全量更新可省版本”的公共逃生口。
+- **相关实现与验收**：`app/(admin)/orders/[id]/edit/page.tsx`、`components/business/order/EditOrderForm.tsx`、`actions/order.ts`、`lib/order.ts` 及 PostgreSQL CAS 测试。
+
+---
+
+## 2026-08-30：客户自动计价对缺失、冲突和越界一律失败关闭
+
+- **决策**：建单、预览、提交与改单共用同一纯计价引擎和规范化事实。唯一键规则重复、阶梯重叠/空档/非法端点、金额或数量越界、逐票分配与整单数量不符时，不按数组顺序猜一条、不把缺价当零元，而是转人工核价或拒绝写入。
+- **纸张身份**：通用 `CUSTOM` 产品按规范化别名与克重唯一解析纸张；零个、多个、停用或无生效价格都失败关闭。提交顺序固定为价目快照共享锁后再锁所有纸张行；纸张创建、改价与停用先取快照排他锁，防止幻读和已预览价绕过复核。
+- **改单边界**：改价时旧制版费不得带入新已知合计；只剩制版费未定时保留唯一 `PENDING_AMOUNT` 行。`DRAFT` 历史报价不可在纸张停用或价格改变后直接复用。
+- **相关实现与验收**：`lib/price/create-order/`、`lib/order/create-order-quote-facts-adapter.ts`、`lib/order/submit-external-order.ts`、`lib/order/change-request.ts`、`lib/price/external-order-charges.ts` 及 42 个 §8 金门案例。
+
+---
+
+## 2026-08-30：源表空白价是人工核价边界，不是零元也不可回落前档
+
+- **决策**：彩印源表的明确空格使用末端 `COLOR_BASE` 空金额哨兵表示。它必须是绑定产品的 `BASE / FIXED_AMOUNT` 单点数量档，非阻断，且保留单一彩印路线、产品/规格/纸张身份和完整来源坐标。它命中后必须转人工，不得回落到上一个有价档。
+- **数据库边界**：`CustomerPriceRule_values_valid` 只对上述行结构开放 `amount IS NULL`，哨兵分支整体用 `COALESCE(..., FALSE)` 封住 PostgreSQL `CHECK` 三值逻辑；其他非 `REFERENCE` 空金额仍由同名约束拒绝。“唯一且末档”由发布校验和迁移后置断言保证。
+- **版本语义**：迁移 `20260830170000_external_processing_print_null_sentinel` 识别当前仍生效的真值修复谱系，兼容全新迁移链的 v5 和既有环境的 v7，闭合其半开区间并发布下一版本；原 144 条规则作为历史证据不改写，新版本复制后新增一条 Q2000 哨兵。
+- **相关实现与验收**：`prisma/migrations/20260830170000_external_processing_print_null_sentinel/`、`lib/price/external-sales-rule-validation.ts`、`lib/price/customer-price-book-draft-validation.ts` 及复刻生产约束的 PostgreSQL 回归测试。
+
+---
+
+## 2026-08-30：已出账单不回写，迟到应收进入唯一补充单
+
+- **决策**：同一销售与月份以 `sequence` 区分月结单和补充单。已签发/已收款账单不追加新工单；迟到的可收款工单进入下一个序号的草稿。`BillItem.orderId` 全局唯一，一张工单不能被两张账单重复收款。
+- **派生与幂等**：草稿合计只从已持久 `BillItem` 与本次新增项重算，不信任旧派生总额。采购收货以规范化业务命令 SHA-256 指纹校验请求键；同键异载荷拒绝，同键同载荷只回放原结果。收款、运费和手工成本的幂等回放同样校验完整审计载荷。
+- **边界**：应收、收款、成本和工资金额在进入 Prisma 前检查分精度、符号和 Decimal 上限，不依赖数据库静默舍入或溢出。
+- **相关实现与验收**：`lib/bill.ts`、`lib/purchase.ts`、`lib/purchase-locks.ts`、`prisma/migrations/20260830180000_financial_derivation_integrity/` 及 PostgreSQL 并发幂等测试。
+
+---
+
+## 2026-08-30：工资计算只使用受雇区间内事实，结算截止由数据库时钟判定
+
+- **决策**：`employmentStartDate` / `employmentEndDate` 是含首含尾的受雇区间。时薪、客服周期和计件资格只读区间内事实；完全不相交的月份/周期拒绝，不发明日均折算规则。`User_employment_dates_order_check` 防止直接 SQL 写入倒置区间。
+- **并发与时间**：账号身份/角色/工种/受雇日期变更与考勤、已发时薪、报工和计件结算取同一资格锁契约。计件结算日的“已截止”判断和批次发现使用数据库时钟，两种跨午夜提交顺序都不留遗漏报工。上海当月不可标记时薪已发。
+- **数值边界**：数据库工资列宽度覆盖已关闭规则输入的最大合法组合；应用在写入前仍校验费率精度和最终金额上限。
+- **相关实现与验收**：`lib/salary/employment.ts`、`lib/salary/hourly-lock.ts`、`lib/salary/piecework-lock.ts`、`lib/salary/hourly-aggregate.ts`、`lib/salary/cs.ts`、`prisma/migrations/20260830190000_salary_decimal_and_employment_guards/` 及双客户端 PostgreSQL 并发测试。

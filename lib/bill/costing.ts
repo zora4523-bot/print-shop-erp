@@ -199,9 +199,3 @@ export function listOrderCostEntryDetails(
     ),
   ];
 }
-
-export function isAutomaticOrderCostCategory(
-  category: OrderCostCategory,
-): boolean {
-  return AUTOMATIC_COST_CATEGORIES.has(category);
-}

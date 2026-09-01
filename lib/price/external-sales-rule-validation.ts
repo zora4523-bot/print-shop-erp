@@ -70,6 +70,50 @@ function ruleRateIsValid(
 }
 
 /**
+ * A blank source-table cell is not a zero price. COLOR_BASE may encode that
+ * boundary as one exact, terminal tier whose null amount deliberately turns
+ * the selector into manual pricing. Keep this exception narrow so no other
+ * charge can silently publish a missing amount.
+ */
+export function isColorBaseNullSentinel(
+  rule: ExternalSalesPriceRuleForValidation,
+): boolean {
+  if (
+    rule.amount !== null ||
+    rule.kind !== 'BASE' ||
+    rule.calculationType !== 'FIXED_AMOUNT' ||
+    rule.exclusiveGroup !== 'COLOR_BASE' ||
+    rule.blocksAutomaticQuote ||
+    rule.productId === null ||
+    rule.category.code !== 'BASE_PROCESSING' ||
+    !rule.sourceSheet?.trim() ||
+    !rule.sourceRange?.trim()
+  ) {
+    return false;
+  }
+  const tierMatch = /_Q(\d+)$/iu.exec(rule.code.trim());
+  const tierQuantity = tierMatch ? Number(tierMatch[1]) : Number.NaN;
+  if (
+    !Number.isSafeInteger(tierQuantity) ||
+    tierQuantity < 1 ||
+    rule.minQty !== tierQuantity ||
+    rule.maxQty !== tierQuantity
+  ) {
+    return false;
+  }
+  const parsed = parseCustomerRuleCondition(rule.triggerCondition).condition;
+  return Boolean(
+    parsed &&
+      parsed.target === 'ITEM' &&
+      parsed.pricingRoutes?.length === 1 &&
+      parsed.pricingRoutes[0] === 'COLOR_PRINT' &&
+      parsed.productCodes?.length === 1 &&
+      parsed.specifications?.length === 1 &&
+      parsed.paperTypes?.length === 1,
+  );
+}
+
+/**
  * Configuration-domain validation only. It intentionally has no quote input
  * and performs no customer calculation, so publishing a draft does not keep
  * the superseded runtime calculator alive.
@@ -119,7 +163,7 @@ export function validateExternalSalesPriceRules(
       errors.push(`收费项目“${label}”按张计价但未填写每张成品数`);
       continue;
     }
-    if (!ruleRateIsValid(rule)) {
+    if (!ruleRateIsValid(rule) && !isColorBaseNullSentinel(rule)) {
       errors.push(`收费项目“${label}”的金额设置无效`);
     }
   }

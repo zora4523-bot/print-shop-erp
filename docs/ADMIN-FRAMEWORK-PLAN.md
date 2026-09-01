@@ -229,7 +229,7 @@ Every framework task should include:
 - at least one migrated module as proof
 - E2E smoke if routing or shell UI changes
 - `prisma validate`
-- `tsc --noEmit --pretty false`
+- `pnpm typecheck`
 - `eslint .`
 - `vitest run --reporter=dot --testTimeout=10000`
 - `next build` when App Router pages or shared page components change

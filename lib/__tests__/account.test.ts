@@ -20,7 +20,12 @@ const { dbMock } = vi.hoisted(() => {
     salaryRule: { findFirst: ReturnType<typeof vi.fn> };
     salaryPeriod: {
       findFirst: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
       create: ReturnType<typeof vi.fn>;
+    };
+    hourlyWorkerPayroll: {
+      findMany: ReturnType<typeof vi.fn>;
+      deleteMany: ReturnType<typeof vi.fn>;
     };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
@@ -33,7 +38,8 @@ const { dbMock } = vi.hoisted(() => {
       count: vi.fn(),
     },
     salaryRule: { findFirst: vi.fn() },
-    salaryPeriod: { findFirst: vi.fn(), create: vi.fn() },
+    salaryPeriod: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    hourlyWorkerPayroll: { findMany: vi.fn(), deleteMany: vi.fn() },
     // $executeRaw is only used to acquire the advisory lock; no return value.
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     // $transaction runs the callback with the same mock as tx so every
@@ -70,6 +76,9 @@ const makeUser = (over: Partial<{
   workerType: WorkerType | null;
   machineType: MachineType | null;
   isActive: boolean;
+  employmentType: EmploymentType | null;
+  employmentStartDate: Date | null;
+  employmentEndDate: Date | null;
 }> = {}) => ({
   id: 'user-1',
   username: 'u1',
@@ -79,6 +88,9 @@ const makeUser = (over: Partial<{
   workerType: null,
   machineType: null,
   isActive: true,
+  employmentType: null,
+  employmentStartDate: null,
+  employmentEndDate: null,
   createdAt: new Date('2026-04-22T00:00:00Z'),
   updatedAt: new Date('2026-04-22T00:00:00Z'),
   ...over,
@@ -98,7 +110,12 @@ beforeEach(() => {
     },
   );
   dbMock.salaryPeriod.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.salaryPeriod.findMany.mockReset().mockResolvedValue([]);
   dbMock.salaryPeriod.create.mockReset().mockResolvedValue({ id: 'period-1' });
+  dbMock.hourlyWorkerPayroll.findMany.mockReset().mockResolvedValue([]);
+  dbMock.hourlyWorkerPayroll.deleteMany
+    .mockReset()
+    .mockResolvedValue({ count: 0 });
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -315,6 +332,53 @@ describe('createUser', () => {
     expect(data.periodStart.getUTCDate()).toBe(1);
   });
 
+  it('does not freeze current salary rules into a future employment month', async () => {
+    dbMock.user.create.mockResolvedValue(
+      makeUser({
+        id: 'cs-future',
+        role: Role.CUSTOMER_SERVICE,
+        employmentStartDate: new Date('2099-02-15T00:00:00.000Z'),
+        employmentEndDate: new Date('2099-03-10T00:00:00.000Z'),
+      }),
+    );
+
+    await createUser({
+      username: 'cs-future',
+      password: 'plaintext-9chars',
+      displayName: '未来客服',
+      role: Role.CUSTOMER_SERVICE,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: new Date('2099-02-15T00:00:00.000Z'),
+      employmentEndDate: new Date('2099-03-10T00:00:00.000Z'),
+    });
+
+    expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
+    expect(dbMock.salaryRule.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('does not create an initial period wholly after employment ended', async () => {
+    dbMock.user.create.mockResolvedValue(
+      makeUser({
+        id: 'cs-former',
+        role: Role.CUSTOMER_SERVICE,
+        employmentStartDate: new Date('2020-01-01T00:00:00.000Z'),
+        employmentEndDate: new Date('2020-12-31T00:00:00.000Z'),
+      }),
+    );
+
+    await createUser({
+      username: 'cs-former',
+      password: 'plaintext-9chars',
+      displayName: '历史客服',
+      role: Role.CUSTOMER_SERVICE,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: new Date('2020-01-01T00:00:00.000Z'),
+      employmentEndDate: new Date('2020-12-31T00:00:00.000Z'),
+    });
+
+    expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
+  });
+
   it('rolls back CS account creation when salary rules are missing', async () => {
     dbMock.user.create.mockResolvedValue(
       makeUser({ id: 'cs-1', role: Role.CUSTOMER_SERVICE }),
@@ -377,17 +441,13 @@ describe('createUser', () => {
         displayName: '客服',
         role: Role.CUSTOMER_SERVICE,
       }),
-    ).rejects.toThrow(/未覆盖今天/);
+    ).rejects.toThrow(/未覆盖目标雇佣月份/);
 
     expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
-    expect(dbMock.salaryPeriod.findFirst.mock.calls[0][0].where).toEqual(
-      expect.objectContaining({
-        csUserId: 'cs-1',
-        OR: expect.arrayContaining([
-          { status: SalaryPeriodStatus.IN_PROGRESS },
-        ]),
-      }),
-    );
+    expect(dbMock.salaryPeriod.findFirst.mock.calls[0][0].where).toEqual({
+      csUserId: 'cs-1',
+      status: SalaryPeriodStatus.IN_PROGRESS,
+    });
   });
 });
 
@@ -413,6 +473,12 @@ describe('updateUser invariants', () => {
     const firstCall = dbMock.$executeRaw.mock.calls[0];
     const templateText = (firstCall[0] as TemplateStringsArray).join('?');
     expect(templateText).toMatch(/pg_advisory_xact_lock/);
+    expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
+      'print-shop-erp:salary-identity:sales-1',
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]!).toBeLessThan(
+      dbMock.user.update.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('refuses to demote the last active ADMIN', async () => {
@@ -488,13 +554,203 @@ describe('updateUser invariants', () => {
       baseActor,
     );
 
-    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(3);
     expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
+      'print-shop-erp:salary-identity:cs-1',
+    );
+    expect(dbMock.$executeRaw.mock.calls[2]?.[1]).toBe(
       'print-shop-erp:cs-user:cs-1',
     );
     expect(dbMock.$executeRaw.mock.invocationCallOrder[1]!).toBeLessThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[2]!,
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[2]!).toBeLessThan(
       dbMock.user.update.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('invalidates every unpaid hourly derivative under identity then sorted month locks', async () => {
+    const worker = makeUser({
+      id: 'worker-1',
+      role: Role.WORKER,
+      workerType: WorkerType.CLEANER,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const updated = { ...worker, workerType: WorkerType.COOK };
+    const payrolls = [
+      { id: 'pay-june', month: '2026-06', isPaid: false },
+      { id: 'pay-may', month: '2026-05', isPaid: false },
+    ];
+    dbMock.user.findUnique.mockResolvedValue(worker);
+    dbMock.user.update.mockResolvedValue(updated);
+    dbMock.hourlyWorkerPayroll.findMany.mockResolvedValue(payrolls);
+    dbMock.hourlyWorkerPayroll.deleteMany.mockResolvedValue({ count: 2 });
+
+    await updateUser(
+      worker.id,
+      {
+        displayName: worker.displayName,
+        role: Role.WORKER,
+        workerType: WorkerType.COOK,
+        employmentType: worker.employmentType,
+        employmentStartDate: worker.employmentStartDate,
+      },
+      baseActor,
+    );
+
+    expect(dbMock.$executeRaw.mock.calls.slice(1).map((call) => call[1])).toEqual([
+      'print-shop-erp:salary-identity:worker-1',
+      'print-shop-erp:hourly:worker-1:2026-05',
+      'print-shop-erp:hourly:worker-1:2026-06',
+    ]);
+    expect(dbMock.hourlyWorkerPayroll.findMany).toHaveBeenCalledTimes(2);
+    expect(dbMock.hourlyWorkerPayroll.deleteMany).toHaveBeenCalledWith({
+      where: { workerId: 'worker-1', isPaid: false },
+    });
+    expect(
+      dbMock.hourlyWorkerPayroll.deleteMany.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(dbMock.user.update.mock.invocationCallOrder[0]!);
+  });
+
+  it('rejects a same-month employment edit that changes a paid payroll date intersection', async () => {
+    const worker = makeUser({
+      id: 'worker-1',
+      role: Role.WORKER,
+      workerType: WorkerType.CLEANER,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: new Date('2026-04-01T00:00:00.000Z'),
+      employmentEndDate: new Date('2026-06-30T00:00:00.000Z'),
+    });
+    dbMock.user.findUnique.mockResolvedValue(worker);
+    dbMock.hourlyWorkerPayroll.findMany.mockResolvedValue([
+      { id: 'paid-may', month: '2026-05', isPaid: true },
+    ]);
+
+    await expect(
+      updateUser(
+        worker.id,
+        {
+          displayName: worker.displayName,
+          role: Role.WORKER,
+          workerType: worker.workerType,
+          employmentType: worker.employmentType,
+          employmentStartDate: new Date('2026-05-15T00:00:00.000Z'),
+          employmentEndDate: worker.employmentEndDate,
+        },
+        baseActor,
+      ),
+    ).rejects.toThrow(/已发放的 2026-05 时薪工资所覆盖的雇佣日期会变化/);
+
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('rolls back a CS employment edit that would leave an active period outside employment', async () => {
+    const cs = makeUser({ id: 'cs-1', role: Role.CUSTOMER_SERVICE });
+    const updated = makeUser({
+      id: 'cs-1',
+      role: Role.CUSTOMER_SERVICE,
+      employmentStartDate: new Date('2099-02-15T00:00:00.000Z'),
+      employmentEndDate: new Date('2099-03-10T00:00:00.000Z'),
+    });
+    dbMock.user.findUnique.mockResolvedValue(cs);
+    dbMock.user.update.mockResolvedValue(updated);
+    dbMock.salaryPeriod.findFirst.mockResolvedValue({
+      id: 'too-long',
+      periodStart: new Date('2099-02-01T00:00:00.000Z'),
+      periodEnd: new Date('2099-06-30T00:00:00.000Z'),
+      status: SalaryPeriodStatus.IN_PROGRESS,
+    });
+
+    await expect(
+      updateUser(
+        'cs-1',
+        {
+          displayName: '客服',
+          role: Role.CUSTOMER_SERVICE,
+          employmentType: EmploymentType.FULL_TIME,
+          employmentStartDate: updated.employmentStartDate,
+          employmentEndDate: updated.employmentEndDate,
+        },
+        baseActor,
+      ),
+    ).rejects.toThrow(/超出新雇佣区间/);
+    expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a CS employment edit that contradicts a settled period', async () => {
+    const cs = makeUser({
+      id: 'cs-1',
+      role: Role.CUSTOMER_SERVICE,
+      isActive: false,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: new Date('2026-01-01T00:00:00.000Z'),
+      employmentEndDate: new Date('2026-12-31T00:00:00.000Z'),
+    });
+    dbMock.user.findUnique.mockResolvedValue(cs);
+    dbMock.salaryPeriod.findMany.mockResolvedValue([
+      {
+        id: 'settled-1',
+        periodStart: new Date('2026-01-01T00:00:00.000Z'),
+        periodEnd: new Date('2026-04-30T00:00:00.000Z'),
+        status: SalaryPeriodStatus.SETTLED,
+      },
+    ]);
+
+    await expect(
+      updateUser(
+        cs.id,
+        {
+          displayName: cs.displayName,
+          role: Role.CUSTOMER_SERVICE,
+          employmentType: cs.employmentType,
+          employmentStartDate: new Date('2026-05-01T00:00:00.000Z'),
+          employmentEndDate: cs.employmentEndDate,
+        },
+        baseActor,
+      ),
+    ).rejects.toThrow(/已有客服工资周期.*SETTLED.*超出新雇佣月份/);
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it('allows a same-month CS employment date edit because CS salary is monthly', async () => {
+    const cs = makeUser({
+      id: 'cs-1',
+      role: Role.CUSTOMER_SERVICE,
+      isActive: false,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: new Date('2026-05-01T00:00:00.000Z'),
+      employmentEndDate: new Date('2026-12-31T00:00:00.000Z'),
+    });
+    const updated = {
+      ...cs,
+      employmentStartDate: new Date('2026-05-15T00:00:00.000Z'),
+    };
+    dbMock.user.findUnique.mockResolvedValue(cs);
+    dbMock.user.update.mockResolvedValue(updated);
+    dbMock.salaryPeriod.findMany.mockResolvedValue([
+      {
+        id: 'settled-1',
+        periodStart: new Date('2026-05-01T00:00:00.000Z'),
+        periodEnd: new Date('2026-08-31T00:00:00.000Z'),
+        status: SalaryPeriodStatus.SETTLED,
+      },
+    ]);
+
+    await expect(
+      updateUser(
+        cs.id,
+        {
+          displayName: cs.displayName,
+          role: Role.CUSTOMER_SERVICE,
+          employmentType: cs.employmentType,
+          employmentStartDate: updated.employmentStartDate,
+          employmentEndDate: cs.employmentEndDate,
+        },
+        baseActor,
+      ),
+    ).resolves.toMatchObject({ employmentStartDate: updated.employmentStartDate });
   });
 
   it('throws when the target does not exist', async () => {
@@ -519,6 +775,9 @@ describe('setUserActive invariants', () => {
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
     const firstCall = dbMock.$executeRaw.mock.calls[0];
     expect((firstCall[0] as TemplateStringsArray).join('?')).toMatch(/pg_advisory_xact_lock/);
+    expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
+      'print-shop-erp:salary-identity:inactive',
+    );
   });
 
   it('serializes CS deactivation with settlement before updating the user', async () => {
@@ -532,13 +791,38 @@ describe('setUserActive invariants', () => {
 
     await setUserActive('cs-1', false, baseActor);
 
-    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(3);
     expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
+      'print-shop-erp:salary-identity:cs-1',
+    );
+    expect(dbMock.$executeRaw.mock.calls[2]?.[1]).toBe(
       'print-shop-erp:cs-user:cs-1',
     );
     expect(dbMock.$executeRaw.mock.invocationCallOrder[1]!).toBeLessThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[2]!,
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[2]!).toBeLessThan(
       dbMock.user.update.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('preserves unpaid hourly liabilities when only active state changes', async () => {
+    const worker = makeUser({
+      id: 'worker-1',
+      role: Role.WORKER,
+      workerType: WorkerType.COOK,
+      isActive: true,
+    });
+    dbMock.user.findUnique.mockResolvedValue(worker);
+    dbMock.user.update.mockResolvedValue({ ...worker, isActive: false });
+
+    await setUserActive(worker.id, false, baseActor);
+
+    expect(dbMock.$executeRaw.mock.calls.slice(1).map((call) => call[1])).toEqual([
+      'print-shop-erp:salary-identity:worker-1',
+    ]);
+    expect(dbMock.hourlyWorkerPayroll.findMany).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
   });
 
   it('refuses self-deactivation even when other OWNERs exist', async () => {

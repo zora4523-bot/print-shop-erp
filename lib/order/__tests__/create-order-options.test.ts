@@ -227,6 +227,28 @@ describe('external create-order options', () => {
     );
   });
 
+  it('does not expose a specification that the authoritative adapter cannot canonicalize', async () => {
+    txMock.product.findMany.mockResolvedValue([
+      ...products,
+      {
+        ...products[1],
+        id: 'legacy-malformed-spec',
+        code: 'PRD-000002',
+        specification: '100×200,中号',
+        paperType: '珠光纸',
+      },
+    ]);
+
+    const result = await readExternalCreateOrderOptions(txMock as never);
+
+    expect(result.products.map((product) => product.code)).toContain(
+      'PRD-000002',
+    );
+    expect(result.specifications.map((option) => option.label)).not.toContain(
+      '100×200,中号',
+    );
+  });
+
   it('fails closed if case-insensitive option codes are duplicated', async () => {
     txMock.product.findMany.mockResolvedValue([
       products[0],

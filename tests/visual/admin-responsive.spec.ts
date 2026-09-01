@@ -422,12 +422,20 @@ async function checkRoutes(
         await expect(page.locator('html')).not.toHaveClass(/\bdark\b/);
       }
       await route.prepareGateState?.(page);
+      // Server-rendered routes can create reduced-motion color transitions on
+      // the next paint. Wait across consecutive paints so axe never samples a
+      // half-switched palette (light foreground tokens on dark surfaces).
       await page.evaluate(async () => {
-        await Promise.all(
-          document
-            .getAnimations()
-            .map((animation) => animation.finished.catch(() => undefined)),
-        );
+        for (let paint = 0; paint < 3; paint += 1) {
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          );
+          await Promise.all(
+            document
+              .getAnimations()
+              .map((animation) => animation.finished.catch(() => undefined)),
+          );
+        }
       });
       await expectViewportGate(page, testInfo);
       await expectA11yGate(page);
@@ -561,12 +569,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'rule-center-product-categories',
       path: RULE_CENTER_HREFS.productCategories,
-      readyHeading: '产品结构分类',
+      readyHeading: '产品结构分类 / BOM 分类',
     },
     {
       name: 'rule-center-crafts',
       path: RULE_CENTER_HREFS.crafts,
-      readyHeading: '工艺与参数',
+      readyHeading: '建单工艺目录',
     },
     {
       name: 'rule-center-price-versions',
@@ -679,6 +687,19 @@ async function prepareOrderFiltersState(page: Page) {
   await expect(
     exportDialog.getByRole('button', { name: /导出筛选结果/ }),
   ).toBeVisible();
+  if (mobile) {
+    const viewportWidth = page.viewportSize()?.width ?? 0;
+    // Base UI 先挂载右侧抽屉，再在下一帧移除
+    // data-starting-style。只等 getAnimations() 有可能在 transition
+    // 创建前就返回，使门禁误把进场中的 40px 位移当成永久溢出。
+    await expect
+      .poll(async () => {
+        const box = await exportDialog.boundingBox();
+        if (!box) return Number.POSITIVE_INFINITY;
+        return Math.max(-box.x, box.x + box.width - viewportWidth, 0);
+      })
+      .toBeLessThanOrEqual(1);
+  }
 }
 
 function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {

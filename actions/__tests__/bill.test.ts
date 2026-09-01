@@ -107,13 +107,17 @@ describe('generateBillsAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     billMock.generateBillsForPeriod.mockResolvedValue({
       period: '2026-05',
-      generated: [{ billId: 'b1' }, { billId: 'b2' }],
+      generated: [
+        { billId: 'b1', isNew: true, isSupplemental: false },
+        { billId: 'b2', isNew: true, isSupplemental: true },
+      ],
       errors: [{ salesUserId: 'sales-3', message: '2026-05 账单已 ISSUED' }],
     });
     const r = await generateBillsAction(null, { period: '2026-05' });
     expect(r.status).toBe('success');
     if (r.status === 'success') {
       expect(r.generatedCount).toBe(2);
+      expect(r.supplementalCount).toBe(1);
       expect(r.errorCount).toBe(1);
       expect(r.errors[0].salesUserId).toBe('sales-3');
     }

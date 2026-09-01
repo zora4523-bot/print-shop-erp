@@ -1,9 +1,10 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { chmodMock, mkdirMock, readdirMock, statMock, unlinkMock } = vi.hoisted(
+const { chmodMock, mkdirMock, openMock, readdirMock, statMock, unlinkMock } = vi.hoisted(
   () => ({
     chmodMock: vi.fn(),
     mkdirMock: vi.fn(),
+    openMock: vi.fn(),
     readdirMock: vi.fn(),
     statMock: vi.fn(),
     unlinkMock: vi.fn(),
@@ -13,6 +14,7 @@ const { chmodMock, mkdirMock, readdirMock, statMock, unlinkMock } = vi.hoisted(
 vi.mock('node:fs/promises', () => ({
   chmod: chmodMock,
   mkdir: mkdirMock,
+  open: openMock,
   readdir: readdirMock,
   stat: statMock,
   unlink: unlinkMock,
@@ -21,6 +23,8 @@ vi.mock('node:fs/promises', () => ({
 import {
   cleanupUntrackedOrderExportArtifacts,
   deleteOrderExportArtifact,
+  InvalidOrderExportArtifactError,
+  openOrderExportArtifact,
 } from '../export-artifact';
 
 const originalArtifactDirectory = process.env.ORDER_EXPORT_ARTIFACT_DIR;
@@ -33,6 +37,7 @@ beforeEach(() => {
   process.env.ORDER_EXPORT_ARTIFACT_DIR = '/private/order-exports';
   chmodMock.mockReset();
   mkdirMock.mockReset();
+  openMock.mockReset();
   readdirMock.mockReset();
   statMock.mockReset();
   unlinkMock.mockReset();
@@ -99,6 +104,37 @@ describe('order export artifact filesystem errors', () => {
       }),
     ).rejects.toBe(error);
     expect(unlinkMock).not.toHaveBeenCalled();
+  });
+
+  it('closes the opened descriptor when the artifact is not a regular file', async () => {
+    const close = vi.fn().mockResolvedValue(undefined);
+    openMock.mockResolvedValue({
+      stat: vi.fn().mockResolvedValue({ isFile: () => false }),
+      createReadStream: vi.fn(),
+      close,
+    });
+
+    await expect(openOrderExportArtifact('export-1.xlsx')).rejects.toBeInstanceOf(
+      InvalidOrderExportArtifactError,
+    );
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the opened descriptor when stream creation fails', async () => {
+    const streamFailure = fileSystemError('EMFILE');
+    const close = vi.fn().mockResolvedValue(undefined);
+    openMock.mockResolvedValue({
+      stat: vi.fn().mockResolvedValue({ isFile: () => true, size: 100 }),
+      createReadStream: vi.fn(() => {
+        throw streamFailure;
+      }),
+      close,
+    });
+
+    await expect(openOrderExportArtifact('export-1.xlsx')).rejects.toBe(
+      streamFailure,
+    );
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('does not count a file another cleanup removed, and surfaces unlink failures', async () => {

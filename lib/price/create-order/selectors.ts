@@ -31,6 +31,11 @@ export function selectFullUnitPrice(
 ): FullFoilUnitPrice | null {
   const matches = snapshot.unitPrices.filter(
     (candidate) =>
+      Number.isSafeInteger(candidate.minQuantity) &&
+      candidate.minQuantity >= 1 &&
+      (candidate.maxQuantity === null ||
+        (Number.isSafeInteger(candidate.maxQuantity) &&
+          candidate.maxQuantity >= candidate.minQuantity)) &&
       candidate.pricingGroup === item.pricingGroup &&
       item.quantity >= candidate.minQuantity &&
       (candidate.maxQuantity === null ||

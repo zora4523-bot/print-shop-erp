@@ -28,6 +28,7 @@ import {
   presentCreateOrderProcessingQuote,
 } from './create-order-quote-presentation';
 import { createExternalOrderQuoteToken } from './create-order-quote-token';
+import { buildCreateOrderExternalChargeInput } from './create-order-charge-input';
 import {
   PublishedCreateOrderPriceAdapterError,
   readPublishedCreateOrderPriceSnapshot,
@@ -90,39 +91,8 @@ function trustedChargeQuote(
   input: PureCreateOrderQuoteInput,
   snapshot: Parameters<typeof calculateCreateOrderQuote>[1],
 ): ExternalOrderChargeQuote {
-  const itemsByKey = new Map(input.items.map((item) => [item.itemKey, item]));
   return calculateExternalOrderCharges(
-    {
-      isSfCollect: input.isSfCollect,
-      shipments: input.shipments.map((shipment) => {
-        const allocations = Object.entries(shipment.itemQuantities).filter(
-          ([, quantity]) => quantity > 0,
-        );
-        return {
-          shipmentKey: shipment.shipmentKey,
-          province: shipment.province,
-          billableWeightKg: shipment.trustedBillableWeightKg ?? null,
-          itemQuantity: allocations.reduce(
-            (sum, [, quantity]) => sum + quantity,
-            0,
-          ),
-          weightItems: allocations.flatMap(([itemKey, quantity]) => {
-            const item = itemsByKey.get(itemKey);
-            return item
-              ? [
-                  {
-                    itemKey,
-                    quantity,
-                    paperWeightGsm: item.paperWeightGsm,
-                    paperType: item.paperType,
-                    productStructure: item.productStructure,
-                  },
-                ]
-              : [];
-          }),
-        };
-      }),
-    },
+    buildCreateOrderExternalChargeInput(input),
     snapshot.orderCharges.rules,
     snapshot.orderCharges.logisticsPolicy,
   );

@@ -10,9 +10,9 @@ import {
 // P0 #7 CDR 汇总下载 — golden path E2E。
 //
 // 走完整 foreman flow：登录 → /foreman/cdr → 看到当天 1 条 CDR 工单
-// → 全选 → 生成下载包 → 看到成功提示 + downloadUrl + mock 警告（OSS
-// 未配置时）。然后访问 downloadUrl，断言 503（mock-mode 下系统拒绝
-// 真下载）。
+// → 全选 → 生成下载包 → 看到成功提示 + downloadUrl + 存储未就绪警告。
+// 然后访问 downloadUrl，断言 mock-mode 下以通用运维文案返回 503，
+// 不向用户泄露具体的存储供应商或配置细节。
 //
 // CRON_SECRET 用了同一份 .env；CDR 路由不需要 secret（24h cuid token
 // + Proxy 排除 api/cdr）。
@@ -75,7 +75,7 @@ test.describe('CDR 汇总下载 — golden path', () => {
     const res = await request.get(relativePath);
     expect(res.status()).toBe(503);
     const body = await res.json();
-    expect(body.error).toMatch(/OSS 未配置/);
+    expect(body.error).toBe('CDR 下载暂不可用，请联系管理员');
 
     // 不存在的 bundle id → 404（与&ldquo;过期&rdquo;不区分文案；round 119 medium）
     const fake = await request.get(

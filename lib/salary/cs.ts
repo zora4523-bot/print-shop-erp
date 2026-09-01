@@ -29,6 +29,12 @@ import {
   InvalidCsPeriodTransitionError,
 } from './cs/status-machine';
 import { csUserLockKey } from './cs-lock';
+import {
+  clampContinuousMonthlySalaryWindow,
+  computeMonthlyPeriodEnd,
+  monthlySalaryWindowWithinEmployment,
+} from './employment';
+import { salaryIdentityLockKey } from './hourly-lock';
 
 // Every mutation of a CS user's period, sales ledger, or payroll ledger uses
 // the same user-scoped lock. This serializes settlement against order sales
@@ -52,6 +58,7 @@ export class CsPeriodError extends Error {
 
 const DECIMAL_10_2_MAX = new Decimal('99999999.99');
 const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
+const DECIMAL_13_2_MAX = new Decimal('99999999999.99');
 
 function assertStoredMoney(
   value: Decimal,
@@ -69,29 +76,6 @@ function assertStoredMoney(
   }
 }
 
-// Advance a YYYY-MM-DD by N calendar months, keeping UTC midnight.
-// Used to compute periodEnd from (periodStart, durationMonths). We
-// clamp to the last day of the target month if the source day doesn't
-// exist there (e.g. 2026-01-31 + 1 month → 2026-02-28).
-function addMonthsUtc(date: Date, months: number): Date {
-  const y = date.getUTCFullYear();
-  const m = date.getUTCMonth();
-  const d = date.getUTCDate();
-  // Step 1: same-day in target month as if it always exists.
-  const candidate = new Date(Date.UTC(y, m + months, d));
-  // Step 2: detect JS's silent rollover — if candidate's month isn't
-  // the expected (m + months) mod 12, the target day didn't exist
-  // (e.g. Feb 31). Clamp to the last day of the intended month.
-  const expectedMonth = ((m + months) % 12 + 12) % 12;
-  if (candidate.getUTCMonth() !== expectedMonth) {
-    // last day of expected month = 0th day of the next
-    return new Date(
-      Date.UTC(y + Math.floor((m + months) / 12), expectedMonth + 1, 0),
-    );
-  }
-  return candidate;
-}
-
 // periodEnd is the *inclusive* last day of the period: it's
 // periodStart + durationMonths − 1 day. e.g. periodStart 2026-01-01,
 // durationMonths=4 → periodEnd 2026-04-30. This matches SPEC §7.3
@@ -100,8 +84,7 @@ export function computePeriodEnd(
   periodStart: Date,
   durationMonths: number,
 ): Date {
-  const plus = addMonthsUtc(periodStart, durationMonths);
-  return new Date(plus.getTime() - 24 * 60 * 60 * 1000);
+  return computeMonthlyPeriodEnd(periodStart, durationMonths);
 }
 
 export type StartCsPeriodInput = {
@@ -172,10 +155,15 @@ export async function startCsPeriod(
   if (baseMonthsAlreadyPaid > 0 && actor?.role !== Role.ADMIN) {
     throw new CsPeriodError('导入已发底薪需要管理员身份');
   }
-  const initialSales =
-    input.initialSales === undefined
-      ? new Decimal(0)
-      : new Decimal(input.initialSales as Decimal.Value);
+  let initialSales: Decimal;
+  try {
+    initialSales =
+      input.initialSales === undefined
+        ? new Decimal(0)
+        : new Decimal(input.initialSales as Decimal.Value);
+  } catch {
+    throw new CsPeriodError('期初业绩金额非法');
+  }
   if (
     !initialSales.isFinite() ||
     initialSales.isNegative() ||
@@ -186,10 +174,15 @@ export async function startCsPeriod(
       '期初业绩必须是两位小数，且在 0 到 9,999,999,999.99 元之间',
     );
   }
-  const monthlyBaseOverride =
-    input.monthlyBase === undefined
-      ? null
-      : new Decimal(input.monthlyBase as Decimal.Value);
+  let monthlyBaseOverride: Decimal | null;
+  try {
+    monthlyBaseOverride =
+      input.monthlyBase === undefined
+        ? null
+        : new Decimal(input.monthlyBase as Decimal.Value);
+  } catch {
+    throw new CsPeriodError('月底薪金额非法');
+  }
   if (
     monthlyBaseOverride &&
     (!monthlyBaseOverride.isFinite() ||
@@ -203,16 +196,24 @@ export async function startCsPeriod(
   }
 
   const created = await db.$transaction(async (tx) => {
-    // Serialize the overlap read and create with sales accrual / settlement for
-    // this customer-service user. Without the lock, two concurrent requests can
-    // both observe no overlap and both insert a period.
+    // Identity -> CS user is the global salary lock order. Account employment,
+    // role and active-state changes use the same pair before updating User.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
+      input.csUserId,
+    )}))`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
       input.csUserId,
     )}))`;
 
     const csUser = await tx.user.findUnique({
       where: { id: input.csUserId },
-      select: { id: true, role: true, isActive: true },
+      select: {
+        id: true,
+        role: true,
+        isActive: true,
+        employmentStartDate: true,
+        employmentEndDate: true,
+      },
     });
     if (!csUser) throw new CsPeriodError('客服不存在');
     if (csUser.role !== Role.CUSTOMER_SERVICE) {
@@ -274,13 +275,12 @@ export async function startCsPeriod(
     if (baseMonthsAlreadyPaid > durationMonths) {
       throw new CsPeriodError('已发底薪月数必须在 0 到周期月数之间');
     }
-    const periodBaseTotal = monthlyBaseFinal.times(durationMonths);
-    if (periodBaseTotal.gt(DECIMAL_10_2_MAX)) {
-      throw new CsPeriodError(
-        '月底薪 × 周期月数超过可保存上限 99,999,999.99 元',
-      );
-    }
     const end = computePeriodEnd(start, durationMonths);
+    if (!monthlySalaryWindowWithinEmployment(start, end, csUser)) {
+      throw new CsPeriodError('客服工资周期不能超出雇佣起止月份');
+    }
+    const periodBaseTotal = monthlyBaseFinal.times(durationMonths);
+    assertStoredMoney(periodBaseTotal, DECIMAL_12_2_MAX, '周期底薪合计');
 
     // Historical/settled periods are still finance-of-record. Reject overlap
     // with every status rather than allowing a new active row to cover the same
@@ -368,57 +368,142 @@ export type SettledCommission = {
   notificationQueued: boolean;
 };
 
+type CsSettlementPeriod = {
+  id: string;
+  csUserId: string;
+  periodStart: Date;
+  periodEnd: Date;
+  durationMonths: number;
+  totalSales: unknown;
+  initialSales: unknown;
+  monthlyBase: unknown;
+  status: SalaryPeriodStatus;
+};
+
+type CsSettlementUser = {
+  role: Role;
+  isActive: boolean;
+  displayName?: string;
+  employmentStartDate: Date | null;
+  employmentEndDate: Date | null;
+};
+
+type CsSettlementTx = SalaryRuleClient & {
+  $executeRaw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
+  salaryPeriod: {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<CsSettlementPeriod | null>;
+    findFirst: (args: {
+      where: unknown;
+      select?: unknown;
+    }) => Promise<{
+      id: string;
+      periodStart: Date;
+      periodEnd: Date;
+      status: SalaryPeriodStatus;
+    } | null>;
+    update: (args: {
+      where: { id: string };
+      data: unknown;
+      select?: unknown;
+    }) => Promise<unknown>;
+    create: (args: {
+      data: unknown;
+      select?: unknown;
+    }) => Promise<{ id: string }>;
+  };
+  customerServiceCommission: {
+    create: (args: {
+      data: unknown;
+      select?: unknown;
+    }) => Promise<{ id: string }>;
+  };
+  user: {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<CsSettlementUser | null>;
+  };
+  csPayrollPayment: {
+    aggregate: (args: {
+      where: unknown;
+      _sum: unknown;
+      _max?: unknown;
+    }) => Promise<{
+      _sum: { baseAmount: unknown; commissionAmount: unknown };
+      _max?: { paidAt: Date | null };
+    }>;
+  };
+};
+
+async function startNextCsPeriod(
+  txc: CsSettlementTx,
+  period: CsSettlementPeriod,
+  activeBase: { monthlyBase: number },
+  nextWindow: NonNullable<
+    ReturnType<typeof clampContinuousMonthlySalaryWindow>
+  >,
+): Promise<string> {
+  const nextStart = nextWindow.periodStart;
+  const nextEnd = nextWindow.periodEnd;
+  const nextOverlap = await txc.salaryPeriod.findFirst({
+    where: {
+      csUserId: period.csUserId,
+      id: { not: period.id },
+      periodStart: { lte: nextEnd },
+      periodEnd: { gte: nextStart },
+    },
+    select: {
+      id: true,
+      periodStart: true,
+      periodEnd: true,
+      status: true,
+    },
+  });
+  if (nextOverlap) {
+    const isExactPreparedPeriod =
+      nextOverlap.status === SalaryPeriodStatus.IN_PROGRESS &&
+      nextOverlap.periodStart.getTime() === nextStart.getTime() &&
+      nextOverlap.periodEnd.getTime() === nextEnd.getTime();
+    if (!isExactPreparedPeriod) {
+      throw new CsPeriodError(
+        `自动开启的下一周期与已有周期（${formatYmdUtc(nextOverlap.periodStart)} ~ ${formatYmdUtc(nextOverlap.periodEnd)}）重叠`,
+      );
+    }
+    return nextOverlap.id;
+  }
+
+  const next = await txc.salaryPeriod.create({
+    data: {
+      csUserId: period.csUserId,
+      periodStart: nextStart,
+      periodEnd: nextEnd,
+      durationMonths: nextWindow.durationMonths,
+      totalSales: '0.00',
+      initialSales: '0.00',
+      monthlyBase: new Decimal(activeBase.monthlyBase).toFixed(2),
+      status: SalaryPeriodStatus.IN_PROGRESS,
+    },
+    select: { id: true },
+  });
+  return next.id;
+}
+
 // Settles a single period: fetches active CS_TIERS, computes commission
 // on (totalSales + initialSales), records CustomerServiceCommission,
 // transitions period to SETTLED, and starts the next period so the CS
 // keeps earning uninterrupted (SPEC §3.7 "自动开启下一个周期").
-export async function settleCsPeriod(
+async function settleCsPeriodInTx(
+  txc: CsSettlementTx,
   periodId: string,
-  now: Date = new Date(),
+  now: Date,
   fence?: ExecutionFence,
 ): Promise<SettledCommission> {
-  return db.$transaction(async (tx) => {
-    const txc = tx as unknown as SalaryRuleClient & {
-      $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
-      salaryPeriod: {
-        findUnique: (args: { where: { id: string }; select?: unknown }) => Promise<{
-          id: string;
-          csUserId: string;
-          periodStart: Date;
-          periodEnd: Date;
-          durationMonths: number;
-          totalSales: unknown;
-          initialSales: unknown;
-          monthlyBase: unknown;
-          status: SalaryPeriodStatus;
-        } | null>;
-        findFirst: (args: { where: unknown; select?: unknown }) => Promise<{
-          id: string;
-          periodStart: Date;
-          periodEnd: Date;
-          status: SalaryPeriodStatus;
-        } | null>;
-        update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<unknown>;
-        create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string }>;
-      };
-      customerServiceCommission: {
-        create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string }>;
-      };
-      user: {
-        findUnique: (args: { where: { id: string }; select?: unknown }) => Promise<{
-          role: Role;
-          isActive: boolean;
-          displayName?: string;
-        } | null>;
-      };
-      csPayrollPayment: {
-        aggregate: (args: { where: unknown; _sum: unknown; _max?: unknown }) => Promise<{
-          _sum: { baseAmount: unknown; commissionAmount: unknown };
-          _max?: { paidAt: Date | null };
-        }>;
-      };
-    };
-
     // First look up csUserId (un-locked but ID is immutable, so no
     // race). Then acquire the user-scope lock BEFORE re-reading the
     // period in full, so accumulateCsSales and any concurrent
@@ -429,6 +514,9 @@ export async function settleCsPeriod(
     });
     if (!periodLight) throw new CsPeriodError('周期不存在');
 
+    await txc.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
+      periodLight.csUserId,
+    )}))`;
     await txc.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
       periodLight.csUserId,
     )}))`;
@@ -458,11 +546,23 @@ export async function settleCsPeriod(
 
     const csUser = await txc.user.findUnique({
       where: { id: period.csUserId },
-      select: { role: true, isActive: true, displayName: true },
+      select: {
+        role: true,
+        isActive: true,
+        displayName: true,
+        employmentStartDate: true,
+        employmentEndDate: true,
+      },
     });
     if (!csUser) throw new CsPeriodError('客服账号不存在');
+    const requestedNextStart = new Date(
+      (period.periodEnd as Date).getTime() + 24 * 60 * 60 * 1000,
+    );
     const shouldStartNextPeriod =
-      csUser.role === Role.CUSTOMER_SERVICE && csUser.isActive;
+      csUser.role === Role.CUSTOMER_SERVICE &&
+      csUser.isActive &&
+      clampContinuousMonthlySalaryWindow(requestedNextStart, 1, csUser) !==
+        null;
 
     await acquireSalaryRuleSnapshotReadLock(txc);
 
@@ -494,6 +594,9 @@ export async function settleCsPeriod(
         '缺少当前生效的客服底薪或周期规则，为避免结算后出现空档，本次结算已取消',
       );
     }
+    let nextWindow: ReturnType<
+      typeof clampContinuousMonthlySalaryWindow
+    > = null;
     if (shouldStartNextPeriod) {
       let nextMonthlyBase: Decimal;
       try {
@@ -509,9 +612,17 @@ export async function settleCsPeriod(
       ) {
         throw new CsPeriodError('当前客服周期月数规则必须是 1 到 24 的整数');
       }
+      nextWindow = clampContinuousMonthlySalaryWindow(
+        requestedNextStart,
+        activeDurationValue!.months,
+        csUser,
+      );
+      if (!nextWindow) {
+        throw new CsPeriodError('下一工资周期不在雇佣区间内');
+      }
       assertStoredMoney(
-        nextMonthlyBase.times(activeDurationValue!.months),
-        DECIMAL_10_2_MAX,
+        nextMonthlyBase.times(nextWindow.durationMonths),
+        DECIMAL_12_2_MAX,
         '下一周期底薪合计',
       );
     }
@@ -536,14 +647,14 @@ export async function settleCsPeriod(
       period.monthlyBase as unknown as string,
       period.durationMonths,
     );
-    assertStoredMoney(monthlyBaseTotal, DECIMAL_10_2_MAX, '周期底薪合计');
+    assertStoredMoney(monthlyBaseTotal, DECIMAL_12_2_MAX, '周期底薪合计');
     assertStoredMoney(
       commissionAmount,
       DECIMAL_12_2_MAX,
       '客服提成',
     );
     const totalIncome = calcCsTotalIncome(monthlyBaseTotal, commissionAmount);
-    assertStoredMoney(totalIncome, DECIMAL_12_2_MAX, '客服应发合计');
+    assertStoredMoney(totalIncome, DECIMAL_13_2_MAX, '客服应发合计');
     const paidBeforeSettlement = await txc.csPayrollPayment.aggregate({
       where: { salaryPeriodId: period.id },
       _sum: { baseAmount: true, commissionAmount: true },
@@ -611,63 +722,20 @@ export async function settleCsPeriod(
       select: { id: true },
     });
 
-    // Auto-start the next period. SPEC §3.7: next period begins the
-    // day after the previous one ends; durationMonths + monthlyBase
-    // come from currently active rules (so a rate change applies
-    // prospectively, as intended).
+    // Auto-start the next period only after the settled liability exists.
     let nextPeriodId: string | null = null;
-    const nextStart = new Date(
-      (period.periodEnd as Date).getTime() + 24 * 60 * 60 * 1000,
-    );
     if (
       shouldStartNextPeriod &&
       activeBase !== null &&
-      activeDurationValue !== null
+      activeDurationValue !== null &&
+      nextWindow !== null
     ) {
-      const nextEnd = computePeriodEnd(nextStart, activeDurationValue.months);
-      const nextOverlap = await txc.salaryPeriod.findFirst({
-        where: {
-          csUserId: period.csUserId,
-          id: { not: period.id },
-          periodStart: { lte: nextEnd },
-          periodEnd: { gte: nextStart },
-        },
-        select: {
-          id: true,
-          periodStart: true,
-          periodEnd: true,
-          status: true,
-        },
-      });
-      if (nextOverlap) {
-        const isExactPreparedPeriod =
-          nextOverlap.status === SalaryPeriodStatus.IN_PROGRESS &&
-          nextOverlap.periodStart.getTime() === nextStart.getTime() &&
-          nextOverlap.periodEnd.getTime() === nextEnd.getTime();
-        if (!isExactPreparedPeriod) {
-          throw new CsPeriodError(
-            `自动开启的下一周期与已有周期（${formatYmdUtc(nextOverlap.periodStart)} ~ ${formatYmdUtc(nextOverlap.periodEnd)}）重叠`,
-          );
-        }
-        // An owner may have prepared the exact next period in advance. Reuse
-        // it instead of inserting a duplicate finance period.
-        nextPeriodId = nextOverlap.id;
-      } else {
-        const next = await txc.salaryPeriod.create({
-          data: {
-            csUserId: period.csUserId,
-            periodStart: nextStart,
-            periodEnd: nextEnd,
-            durationMonths: activeDurationValue.months,
-            totalSales: '0.00',
-            initialSales: '0.00',
-            monthlyBase: new Decimal(activeBase.monthlyBase).toFixed(2),
-            status: SalaryPeriodStatus.IN_PROGRESS,
-          },
-          select: { id: true },
-        });
-        nextPeriodId = next.id;
-      }
+      nextPeriodId = await startNextCsPeriod(
+        txc,
+        period,
+        activeBase,
+        nextWindow,
+      );
     }
     // Disabled or reassigned accounts settle their historical period but do
     // not accrue a new salary obligation. Active CS accounts are guaranteed a
@@ -677,7 +745,7 @@ export async function settleCsPeriod(
     // enqueue fails the finance mutation rolls back, so a retry can never find
     // an already-SETTLED period whose notification was silently lost.
     const notificationQueued = await enqueueNotificationInTransaction(
-      tx as unknown as EnqueueClient,
+      txc as unknown as EnqueueClient,
       'CS_PERIOD_SETTLED',
       {
         settledCount: 1,
@@ -700,7 +768,16 @@ export async function settleCsPeriod(
       nextPeriodId,
       notificationQueued,
     };
-  });
+}
+
+export async function settleCsPeriod(
+  periodId: string,
+  now: Date = new Date(),
+  fence?: ExecutionFence,
+): Promise<SettledCommission> {
+  return db.$transaction((tx) =>
+    settleCsPeriodInTx(tx as unknown as CsSettlementTx, periodId, now, fence),
+  );
 }
 
 // Batch: finds every IN_PROGRESS period whose inclusive periodEnd is before
@@ -867,8 +944,14 @@ export async function recordCsPayrollPayment(
   if (Number.isNaN(input.paidAt.getTime())) {
     throw new CsPeriodError('发放时间不合法');
   }
-  const baseAmount = new Decimal(input.baseAmount);
-  const commissionAmount = new Decimal(input.commissionAmount);
+  let baseAmount: Decimal;
+  let commissionAmount: Decimal;
+  try {
+    baseAmount = new Decimal(input.baseAmount);
+    commissionAmount = new Decimal(input.commissionAmount);
+  } catch {
+    throw new CsPeriodError('底薪或提成发放金额非法');
+  }
   if (
     !baseAmount.isFinite() ||
     !commissionAmount.isFinite() ||

@@ -30,6 +30,7 @@ export type EditOrderInitialValues = {
 
 type Props = {
   orderId: string;
+  expectedEditVersion: number;
   fieldset: EditableFieldset;
   initial: EditOrderInitialValues;
 };
@@ -40,7 +41,12 @@ const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   'isUrgent',
 ]);
 
-export function EditOrderForm({ orderId, fieldset, initial }: Props) {
+export function EditOrderForm({
+  orderId,
+  expectedEditVersion,
+  fieldset,
+  initial,
+}: Props) {
   const boundAction = updateOrderAction.bind(null, orderId);
   const [state, formAction, pending] = useActionState<
     OrderMutationResult | null,
@@ -51,6 +57,11 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
 
   return (
     <form action={formAction} aria-busy={pending} className="space-y-6">
+      <input
+        type="hidden"
+        name="expectedEditVersion"
+        value={expectedEditVersion}
+      />
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
           工单已进入排产 / 生产，仅可修改收货信息与备注。

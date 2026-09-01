@@ -1,5 +1,12 @@
 import Decimal from 'decimal.js';
-import { decimalValue, money, safeMoney, sumMoney, unitPrice } from './money';
+import {
+  decimalValue,
+  safeMoney,
+  safeUnitPrice,
+  sumMoney,
+  sumMoneySafely,
+  unitPrice,
+} from './money';
 import {
   resolvePrintTierQuantity,
   selectFullUnitPrice,
@@ -65,7 +72,7 @@ function validateItem(item: CreateOrderQuoteItemInput): string[] {
   if (!item.specification.trim()) errors.push('规格不能为空');
   if (
     item.paperWeightGsm === null ||
-    !Number.isFinite(item.paperWeightGsm) ||
+    !Number.isSafeInteger(item.paperWeightGsm) ||
     item.paperWeightGsm <= 0
   ) {
     errors.push('纸张克重必须是正数');
@@ -201,9 +208,29 @@ function quotePartialProcessing(
       errors: ['局部烫金建议金额超过系统上限，无法保存'],
     };
   }
+  const amount = sumMoneySafely([blankAmount, machineAmount]);
+  if (amount === null) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [],
+      errors: ['局部烫金加工费合计超过可保存上限'],
+    };
+  }
+  const blankUnitPrice = safeUnitPrice(blankRate);
+  if (blankUnitPrice === null) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [],
+      errors: ['局部烫金空白封单价超过可保存上限'],
+    };
+  }
   return {
-    amount: sumMoney([blankAmount, machineAmount]),
-    unitPrice: unitPrice(blankRate),
+    amount,
+    unitPrice: blankUnitPrice,
     manualReasons: [],
     errors: [],
     lines: [
@@ -214,7 +241,7 @@ function quotePartialProcessing(
         amount: blankAmount,
         basis: {
           quantity: item.quantity,
-          unitPrice: unitPrice(blankRate),
+          unitPrice: blankUnitPrice,
           paperType: item.paperType,
           paperWeightGsm: item.paperWeightGsm,
           specification: item.specification,
@@ -285,6 +312,7 @@ function quoteFullProcessing(
   if (
     paperMatches.length > 1 ||
     basePaperMatches.length > 1 ||
+    (paperMatches.length === 1 && basePaperMatches.length === 1) ||
     (paperMatches.length === 0 && basePaperMatches.length !== 1) ||
     paperMatches[0]?.unitSurcharge === null
   ) {
@@ -391,6 +419,16 @@ function quoteFullProcessing(
     .plus(westEnvelopeRate)
     .plus(paperRate)
     .plus(effectRate);
+  const combinedUnitPrice = safeUnitPrice(combinedUnitRate);
+  if (combinedUnitPrice === null) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [],
+      errors: ['专版烫金组合单价超过可保存上限'],
+    };
+  }
   const lines: CreateOrderQuoteLine[] = [];
   const baseAmount = safeMoney(baseRate.times(item.quantity));
   if (baseAmount === null) {
@@ -454,20 +492,40 @@ function quoteFullProcessing(
     );
   }
   if (effect !== 'NONE') {
+    const setupAmount = safeMoney(setupFee);
+    if (setupAmount === null) {
+      return {
+        lines: [],
+        amount: null,
+        unitPrice: null,
+        manualReasons: [],
+        errors: ['专版烫金调版费超过可保存上限'],
+      };
+    }
     lines.push(
       quotedItemLine({
         itemKey: item.itemKey,
         code: 'FULL_SETUP',
         label: '调版费',
-        amount: money(setupFee),
+        amount: setupAmount,
         basis: { chargedOnce: true, effect },
       }),
     );
   }
+  const amount = sumMoneySafely(lines.map((line) => line.amount));
+  if (amount === null) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [],
+      errors: ['专版烫金加工费合计超过可保存上限'],
+    };
+  }
   return {
     lines,
-    amount: sumMoney(lines.map((line) => line.amount)),
-    unitPrice: unitPrice(combinedUnitRate),
+    amount,
+    unitPrice: combinedUnitPrice,
     manualReasons: [],
     errors: [],
   };
@@ -609,9 +667,19 @@ function quotePrintProcessing(
       }),
     );
   }
+  const totalAmount = sumMoneySafely(lines.map((line) => line.amount));
+  if (totalAmount === null) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [],
+      errors: ['彩印加工费合计超过可保存上限'],
+    };
+  }
   return {
     lines,
-    amount: sumMoney(lines.map((line) => line.amount)),
+    amount: totalAmount,
     unitPrice: null,
     manualReasons: [],
     errors: [],

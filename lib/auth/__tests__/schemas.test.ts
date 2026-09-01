@@ -45,7 +45,27 @@ import {
   createOrderChangeRequestSchema,
   createProductionTaskDisputeSchema,
   reviewProductionTaskDisputeSchema,
+  recordAttendanceSchema,
 } from '../schemas';
+
+describe('attendance schema', () => {
+  const attendance = {
+    workerId: 'worker-1',
+    date: '2026-08-30',
+    normalHours: 16,
+    otHours: 8,
+    spareHours: 0,
+    workUnits: 1,
+    leaveUnits: 0,
+  };
+
+  it('accepts 24 combined hours and rejects 25', () => {
+    expect(recordAttendanceSchema.safeParse(attendance).success).toBe(true);
+    expect(
+      recordAttendanceSchema.safeParse({ ...attendance, otHours: 9 }).success,
+    ).toBe(false);
+  });
+});
 
 describe('production task dispute schemas', () => {
   it('trims and accepts auditable create/review payloads', () => {
@@ -1472,8 +1492,12 @@ describe('createOrderSchema foil colors', () => {
     expect(checked.success).toBe(true);
     if (checked.success) expect(checked.data.isSfCollect).toBe(true);
 
-    const omitted = updateEditableOrderSchema.parse({ remark: '保持其他字段' });
+    const omitted = updateEditableOrderSchema.parse({
+      expectedEditVersion: '7',
+      remark: '保持其他字段',
+    });
     expect('receiverAddress' in omitted).toBe(false);
+    expect(omitted.expectedEditVersion).toBe(7);
     expect(setOrderSfCollectSchema.parse({ isSfCollect: 'false' })).toEqual({
       isSfCollect: false,
       shipments: [],
@@ -1487,7 +1511,10 @@ describe('createOrderSchema foil colors', () => {
   it.each([null, '', '   '])(
     '普通编辑只要携带收货地址，就拒绝空值 %#',
     (receiverAddress) => {
-      const result = updateEditableOrderSchema.safeParse({ receiverAddress });
+      const result = updateEditableOrderSchema.safeParse({
+        expectedEditVersion: '7',
+        receiverAddress,
+      });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.issues).toEqual(
@@ -1501,12 +1528,34 @@ describe('createOrderSchema foil colors', () => {
 
   it('普通编辑修剪地址，且不再解析专用的 isSfCollect 字段', () => {
     const parsed = updateEditableOrderSchema.parse({
+      expectedEditVersion: '7',
       receiverAddress: '  佛山市南海区测试路 1 号  ',
       isSfCollect: 'true',
     });
     expect(parsed.receiverAddress).toBe('佛山市南海区测试路 1 号');
     expect(parsed).not.toHaveProperty('isSfCollect');
   });
+
+  it.each([undefined, '', 'not-a-version', '-1', '1.5', '01', '9007199254740992'])(
+    '普通编辑友好拒绝缺失或非法的编辑版本令牌 %#',
+    (expectedEditVersion) => {
+      const result = updateEditableOrderSchema.safeParse({
+        expectedEditVersion,
+        remark: '测试',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              path: ['expectedEditVersion'],
+              message: '编辑页面已过期，请刷新后重试',
+            }),
+          ]),
+        );
+      }
+    },
+  );
 
   it('校验已发货顺丰取消时的逐票快递费更正', () => {
     const valid = setOrderSfCollectSchema.parse({

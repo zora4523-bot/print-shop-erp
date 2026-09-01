@@ -16,6 +16,7 @@ import type {
 } from './external-sales-rule-validation';
 import {
   EXTERNAL_SALES_PRICE_LIMITS,
+  isColorBaseNullSentinel,
   validateExternalSalesPriceRules,
 } from './external-sales-rule-validation';
 import { externalPriceBusinessText } from './external-price-display';
@@ -571,6 +572,192 @@ function processingAggregateIssues(
   return issues;
 }
 
+function processingUnitContribution(
+  rule: DraftPriceRuleForValidation,
+): Decimal | null {
+  if (rule.calculationType !== 'PER_PIECE') return new Decimal(0);
+  const amount = parsedDecimal(rule.amount);
+  return amount ? amount.times(processingColorMultiplier(rule)) : null;
+}
+
+function processingAggregateUnitPriceIssues(
+  active: DraftPriceRuleForValidation[],
+): DraftPriceBookValidationIssue[] {
+  const issues: DraftPriceBookValidationIssue[] = [];
+  const bases = active.filter((rule) => rule.kind === 'BASE');
+  const addOns = active.filter((rule) => rule.kind === 'ADD_ON');
+  for (const base of bases) {
+    const baseUnit = processingUnitContribution(base);
+    if (!baseUnit) continue;
+    const candidates = addOns.filter((addOn) =>
+      unconditionalAddOnCanApplyToBase(base, addOn),
+    );
+    let overflows = false;
+    for (const productId of processingProductScenarios(base, candidates)) {
+      for (const quantity of processingQuantitySamples(base, candidates)) {
+        const matched = candidates.filter(
+          (addOn) =>
+            (addOn.productId === null || addOn.productId === productId) &&
+            quantity >= (addOn.minQty ?? 1) &&
+            quantity <= (addOn.maxQty ?? QUANTITY_MAX),
+        );
+        let aggregate = matched
+          .filter((addOn) => !addOn.exclusiveGroup?.trim())
+          .reduce(
+            (sum, addOn) =>
+              sum.plus(processingUnitContribution(addOn) ?? 0),
+            baseUnit,
+          );
+        const groups = new Map<string, DraftPriceRuleForValidation[]>();
+        for (const addOn of matched) {
+          const group = addOn.exclusiveGroup?.trim();
+          if (!group) continue;
+          const groupCandidates = groups.get(group) ?? [];
+          groupCandidates.push(addOn);
+          groups.set(group, groupCandidates);
+        }
+        for (const groupCandidates of groups.values()) {
+          const highestPriority = Math.max(
+            ...groupCandidates.map((candidate) => candidate.priority),
+          );
+          const winnerUnits = groupCandidates
+            .filter((candidate) => candidate.priority === highestPriority)
+            .map(processingUnitContribution)
+            .filter((amount): amount is Decimal => amount !== null);
+          if (winnerUnits.length > 0) {
+            aggregate = aggregate.plus(Decimal.max(...winnerUnits));
+          }
+        }
+        if (aggregate.gt(PROCESSING_UNIT_PRICE_MAX)) {
+          overflows = true;
+          break;
+        }
+      }
+      if (overflows) break;
+    }
+    if (overflows) {
+      issues.push({
+        path: `rules.${base.id}.amount`,
+        ruleId: base.id,
+        message: `基础报价“${base.name}”与必然叠加收费的按个单价合计超过工单可保存上限 ${EXTERNAL_SALES_PRICE_LIMITS.unitPrice} 元`,
+      });
+    }
+  }
+  return issues;
+}
+
+function colorBaseTierQuantity(
+  rule: DraftPriceRuleForValidation,
+): number | null {
+  const match = /_Q(\d+)$/iu.exec(rule.code.trim());
+  const quantity = match ? Number(match[1]) : Number.NaN;
+  return Number.isSafeInteger(quantity) && quantity > 0 ? quantity : null;
+}
+
+/**
+ * The print selector intentionally carries the last known anchor forward.
+ * Every product therefore needs an explicit terminal fact: either a priced
+ * Q20000 anchor or a terminal null sentinel that marks the first blank source
+ * cell. Without it, an incomplete table silently becomes an automatic quote.
+ */
+function colorBaseClosureIssues(
+  active: DraftPriceRuleForValidation[],
+): DraftPriceBookValidationIssue[] {
+  const issues: DraftPriceBookValidationIssue[] = [];
+  const groups = new Map<string, DraftPriceRuleForValidation[]>();
+  for (const rule of active) {
+    if (rule.exclusiveGroup !== 'COLOR_BASE') continue;
+    const key = rule.productId ?? `missing-product:${rule.id}`;
+    const group = groups.get(key) ?? [];
+    group.push(rule);
+    groups.set(key, group);
+  }
+
+  for (const rules of groups.values()) {
+    const ordered = rules
+      .map((rule) => ({ rule, tierQuantity: colorBaseTierQuantity(rule) }))
+      .filter(
+        (entry): entry is {
+          rule: DraftPriceRuleForValidation;
+          tierQuantity: number;
+        } => entry.tierQuantity !== null,
+      )
+      .sort((left, right) => left.tierQuantity - right.tierQuantity);
+    if (ordered.length === 0) continue;
+
+    const terminal = ordered.at(-1)!;
+    const nullEntries = ordered.filter(({ rule }) => rule.amount === null);
+    for (const entry of nullEntries) {
+      const validationShape: ExternalSalesPriceRuleForValidation = {
+        id: entry.rule.id,
+        code: entry.rule.code,
+        name: entry.rule.name,
+        kind: entry.rule.kind as ExternalSalesPriceRuleForValidation['kind'],
+        calculationType:
+          entry.rule.calculationType as ExternalSalesPriceRuleForValidation['calculationType'],
+        amount: null,
+        minQty: entry.rule.minQty,
+        maxQty: entry.rule.maxQty,
+        triggerCondition: entry.rule.triggerCondition,
+        exclusiveGroup: entry.rule.exclusiveGroup,
+        priority: entry.rule.priority,
+        blocksAutomaticQuote: entry.rule.blocksAutomaticQuote,
+        sourceSheet: entry.rule.sourceSheet,
+        sourceRange: entry.rule.sourceRange,
+        note: entry.rule.note,
+        productId: entry.rule.productId,
+        category: {
+          code: entry.rule.category.code,
+          name: entry.rule.category.name,
+        },
+      };
+      if (!isColorBaseNullSentinel(validationShape)) {
+        issues.push({
+          path: `rules.${entry.rule.id}.amount`,
+          ruleId: entry.rule.id,
+          message: '彩印空价档必须是绑定产品、证据完整的单点 COLOR_BASE 截止档',
+        });
+      }
+      if (entry.rule.id !== terminal.rule.id) {
+        issues.push({
+          path: `rules.${entry.rule.id}.amount`,
+          ruleId: entry.rule.id,
+          message: '彩印空价档必须是该产品的末档，后续不能恢复自动报价',
+        });
+      }
+    }
+    if (nullEntries.length > 1) {
+      issues.push({
+        path: `rules.${nullEntries[1]!.rule.id}.amount`,
+        ruleId: nullEntries[1]!.rule.id,
+        message: '每个彩印产品只能配置一个末端空价截止档',
+      });
+    }
+    if (terminal.rule.amount !== null && terminal.tierQuantity < 20_000) {
+      issues.push({
+        path: `rules.${terminal.rule.id}.amount`,
+        ruleId: terminal.rule.id,
+        message: '彩印产品末档必须达到 Q20000，或以空价档显式转人工核价',
+      });
+    }
+
+    const productCode = rules[0]?.product?.code;
+    if (productCode === 'EXT-COLOR-ICE-WHITE-160-MID') {
+      const documentedBlank = ordered.find(
+        ({ tierQuantity }) => tierQuantity === 2_000,
+      );
+      if (!documentedBlank || documentedBlank.rule.amount !== null) {
+        issues.push({
+          path: `rules.${documentedBlank?.rule.id ?? terminal.rule.id}.amount`,
+          ruleId: documentedBlank?.rule.id ?? terminal.rule.id,
+          message: '冰白纸 160g 中号彩印 Q2000 是来源表空档，必须显式配置为人工核价截止点',
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 function processingIssues(
   rules: DraftPriceRuleForValidation[],
 ): DraftPriceBookValidationIssue[] {
@@ -767,6 +954,8 @@ function processingIssues(
     ...engineErrors.map((message) => ({ path: 'rules', message })),
   );
   issues.push(...processingAggregateIssues(itemRules));
+  issues.push(...processingAggregateUnitPriceIssues(itemRules));
+  issues.push(...colorBaseClosureIssues(itemRules));
 
   for (const [mode, modeLabel] of [
     ['SINGLE_STYLE', '单款装'],

@@ -341,6 +341,25 @@ describe('calculateExternalOrderCharges · 服务端重量估算', () => {
     });
   });
 
+  it('重量明细数量与逐票分配数量不一致时不低估运费', () => {
+    const result = calculateExternalOrderCharges({
+      isSfCollect: false,
+      shipments: [
+        oneShipment({
+          billableWeightKg: null,
+          itemQuantity: 1_000,
+          weightItems: [{ ...standard160gItem, quantity: 1 }],
+        }),
+      ],
+    });
+
+    expect(result.complete).toBe(false);
+    expect(result.suggestedShippingTotal).toBeNull();
+    expect(result.errors.join('；')).toContain(
+      '重量明细数量 1 与发货分配数量 1000 不一致',
+    );
+  });
+
   it.each([
     {
       label: '未配置克重',
@@ -638,6 +657,26 @@ describe('calculateExternalOrderCharges · 多地址与顺丰到付', () => {
     ]);
   });
 
+  it('逐票数量必须是正安全整数，不允许负数被另一票抵消', () => {
+    const result = calculateExternalOrderCharges({
+      isSfCollect: false,
+      shipments: [
+        oneShipment({ shipmentKey: 'negative', itemQuantity: -1 }),
+        oneShipment({ shipmentKey: 'offset', itemQuantity: 501 }),
+      ],
+    });
+
+    expect(result).toMatchObject({
+      complete: false,
+      suggestedShippingTotal: null,
+      suggestedPackagingTotal: null,
+      suggestedTotal: null,
+    });
+    expect(result.errors.join('；')).toContain(
+      '发货记录 negative·快递费：逐票款式数量必须是大于 0 的安全整数',
+    );
+  });
+
   it.each([
     { shipments: [], expected: '至少需要一个发货地址' },
     {
@@ -801,5 +840,107 @@ describe('calculateExternalOrderCharges · 规则注入与快照', () => {
     expect(result.shipments[0]?.packaging.errors).toContain(
       '纸箱数量档必须从 1 开始连续覆盖且金额有效',
     );
+  });
+
+  it('快递规则 code 冲突时失败关闭，不按数组顺序取错价', () => {
+    const source = {
+      ...ZTO_PRICE_SOURCE,
+      sourceRange: 'Z1:Z2',
+    };
+    const shippingRules: readonly ExternalOrderChargeRule[] = [
+      {
+        kind: 'SHIPPING',
+        code: 'DUPLICATE_CODE',
+        provinces: ['上海'],
+        firstWeightKg: '1',
+        firstFee: '999',
+        additionalUnitKg: '1',
+        additionalUnitFee: '999',
+        source,
+      },
+      {
+        kind: 'SHIPPING',
+        code: 'DUPLICATE_CODE',
+        provinces: ['广东'],
+        firstWeightKg: '1',
+        firstFee: '2.8',
+        additionalUnitKg: '1',
+        additionalUnitFee: '1.5',
+        source,
+      },
+      ...DEFAULT_EXTERNAL_ORDER_CHARGE_RULES.filter(
+        (rule) => rule.kind === 'PACKAGING',
+      ),
+    ];
+
+    const result = calculateExternalOrderCharges(
+      {
+        isSfCollect: false,
+        shipments: [oneShipment({ province: '广东' })],
+      },
+      shippingRules,
+    );
+
+    expect(result.complete).toBe(false);
+    expect(result.suggestedShippingTotal).toBeNull();
+    expect(result.shipments[0]?.shipping.errors).toContain(
+      '计费地区的中通规则不唯一或配置无效，请人工确认',
+    );
+  });
+
+  it('快递规则金额非法时返回不完整，不抛出 Decimal 异常', () => {
+    const rules = DEFAULT_EXTERNAL_ORDER_CHARGE_RULES.map((rule) =>
+      rule.kind === 'SHIPPING' && rule.code === 'ZTO_GUANGDONG'
+        ? { ...rule, firstFee: 'not-a-number' }
+        : rule,
+    );
+
+    expect(() =>
+      calculateExternalOrderCharges(
+        {
+          isSfCollect: false,
+          shipments: [oneShipment({ province: '广东' })],
+        },
+        rules,
+      ),
+    ).not.toThrow();
+    const result = calculateExternalOrderCharges(
+      {
+        isSfCollect: false,
+        shipments: [oneShipment({ province: '广东' })],
+      },
+      rules,
+    );
+    expect(result.complete).toBe(false);
+    expect(result.suggestedShippingTotal).toBeNull();
+  });
+
+  it('多地址单票金额可保存但快递合计越界时失败关闭', () => {
+    const rules = DEFAULT_EXTERNAL_ORDER_CHARGE_RULES.map((rule) =>
+      rule.kind === 'SHIPPING' && rule.code === 'ZTO_GUANGDONG'
+        ? {
+            ...rule,
+            firstFee: '6000000000.00',
+            additionalUnitFee: '0',
+          }
+        : rule,
+    );
+    const result = calculateExternalOrderCharges(
+      {
+        isSfCollect: false,
+        shipments: [
+          oneShipment({ shipmentKey: 'a', itemQuantity: 1 }),
+          oneShipment({ shipmentKey: 'b', itemQuantity: 1 }),
+        ],
+      },
+      rules,
+    );
+
+    expect(result).toMatchObject({
+      complete: false,
+      suggestedShippingTotal: null,
+      suggestedTotal: null,
+    });
+    expect(result.errors).toContain('快递费合计超过系统可保存上限');
   });
 });

@@ -49,7 +49,7 @@ type Props = CommonProps &
         fd: FormData,
       ) => Promise<MaterialMutationResult>;
       routeBase: MaterialRouteBase;
-      }
+    }
     | {
       mode: 'edit';
       action: (
@@ -58,7 +58,7 @@ type Props = CommonProps &
       ) => Promise<MaterialMutationResult>;
       initial: EditInitial;
       routeBase: MaterialRouteBase;
-      }
+    }
   );
 
 const CATEGORY_OPTIONS = [
@@ -233,14 +233,18 @@ export function MaterialForm(props: Props) {
         />
       )}
 
-      <TextField
-        id="unit"
-        label="单位"
-        required
-        disabled={pending}
-        error={errs.unit?.[0]}
-        defaultValue={initial?.unit ?? '张'}
-      />
+      {initial ? (
+        <LockedUnitField unit={initial.unit} />
+      ) : (
+        <TextField
+          id="unit"
+          label="单位"
+          required
+          disabled={pending}
+          error={errs.unit?.[0]}
+          defaultValue="张"
+        />
+      )}
 
       <TextField
         id="safetyStock"
@@ -280,6 +284,25 @@ export function MaterialForm(props: Props) {
         </Link>
       </div>
     </form>
+  );
+}
+
+function LockedUnitField({ unit }: { unit: string }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="unit">单位</Label>
+      <input type="hidden" name="unit" value={unit} />
+      <Input
+        id="unit"
+        type="text"
+        defaultValue={unit}
+        disabled
+        {...formMessageA11yProps('unit', 'hint')}
+      />
+      <FormMessage fieldId="unit" tone="hint" className="text-xs">
+        计量单位决定库存与业务数量的含义，物料创建后不能修改。如需使用新单位，请新建物料。
+      </FormMessage>
+    </div>
   );
 }
 

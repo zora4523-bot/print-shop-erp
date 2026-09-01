@@ -138,13 +138,24 @@ export async function readAndDeletePdfArtifact(name: string): Promise<Buffer> {
   return pdf;
 }
 
-async function writePdfArtifact(name: string, pdf: Buffer): Promise<void> {
+export async function writePdfArtifact(
+  name: string,
+  pdf: Buffer,
+): Promise<void> {
   const dir = artifactDir();
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const target = safeArtifactPath(name);
   const temporary = `${target}.${process.pid}.tmp`;
-  await writeFile(temporary, pdf, { mode: 0o600 });
-  await rename(temporary, target);
+  try {
+    await writeFile(temporary, pdf, { mode: 0o600 });
+    await rename(temporary, target);
+  } catch (error) {
+    // Preserve the primary write/rename failure. Cleanup is best-effort because
+    // a partial file may not exist, or the same filesystem failure may also
+    // prevent unlinking it. The hourly orphan sweep remains the final fallback.
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function cleanupOldPdfArtifacts(): Promise<void> {

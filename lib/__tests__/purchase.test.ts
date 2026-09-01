@@ -302,6 +302,16 @@ describe('createPurchaseReceipt', () => {
     expect(txMock.purchaseOrder.update.mock.calls[0][0].data.status).toBe(
       PurchaseOrderStatus.PARTIALLY_RECEIVED,
     );
+    expect(txMock.purchaseReceipt.create.mock.calls[0][0].data).toMatchObject({
+      idempotencyKey: '00000000-0000-4000-8000-000000000001',
+      requestFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      purchaseOrderId: 'po1',
+      receivedById: 'owner-1',
+      remark: '到货一部分',
+    });
+    expect(txMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.$queryRaw.mock.invocationCallOrder[0],
+    );
     expect(numberMock).toHaveBeenCalledWith('PURCHASE_RECEIPT', now);
   });
 
@@ -341,7 +351,20 @@ describe('createPurchaseReceipt', () => {
   });
 
   it('treats the same request key as an idempotent replay', async () => {
-    dbMock.purchaseReceipt.findUnique.mockResolvedValue({ purchaseOrderId: 'po1' });
+    dbMock.purchaseReceipt.findUnique.mockResolvedValue({
+      purchaseOrderId: 'po1',
+      receivedById: 'owner-1',
+      remark: null,
+      requestFingerprint: null,
+      items: [
+        {
+          purchaseOrderItemId: 'poi1',
+          quantity: '4.00',
+          unitCost: null,
+          materialTransactions: [{ locationId: 'loc-default' }],
+        },
+      ],
+    });
     dbMock.purchaseOrder.findUnique.mockResolvedValue(detail);
 
     await createPurchaseReceipt(
@@ -361,6 +384,43 @@ describe('createPurchaseReceipt', () => {
     expect(txMock.purchaseReceipt.create).not.toHaveBeenCalled();
     expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
     expect(numberMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a replay key is reused with a different business payload', async () => {
+    dbMock.purchaseReceipt.findUnique.mockResolvedValue({
+      purchaseOrderId: 'po1',
+      receivedById: 'owner-1',
+      remark: '原始备注',
+      requestFingerprint: null,
+      items: [
+        {
+          purchaseOrderItemId: 'poi1',
+          quantity: '4.00',
+          unitCost: '1.2300',
+          materialTransactions: [{ locationId: 'loc-a' }],
+        },
+      ],
+    });
+
+    await expect(
+      createPurchaseReceipt(
+        'po1',
+        {
+          idempotencyKey: '00000000-0000-4000-8000-000000000003',
+          purchaseOrderItemId: 'poi1',
+          locationId: 'loc-a',
+          quantity: '5.00',
+          unitCost: '1.2300',
+          remark: '原始备注',
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow(/原请求内容不一致/);
+    expect(numberMock).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(txMock.purchaseReceipt.create).not.toHaveBeenCalled();
+    expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
   });
 });
 

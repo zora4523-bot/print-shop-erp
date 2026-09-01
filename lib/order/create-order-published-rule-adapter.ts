@@ -6,7 +6,6 @@ import {
   CustomerPriceRuleKind,
   OrderSettlementType,
 } from '../../generated/prisma/enums';
-import { db } from '../db';
 import {
   canonicalizeCreateOrderPaperFact,
   canonicalizeCreateOrderSpecification,
@@ -1612,12 +1611,4 @@ export async function readPublishedCreateOrderPriceSnapshot(
   options: { now?: Date; snapshotLockHeld?: boolean } = {},
 ): Promise<CreateOrderPriceSnapshot> {
   return (await readPublishedCreateOrderPriceProjection(client, options)).snapshot;
-}
-
-export async function loadPublishedCreateOrderPriceSnapshot(
-  now: Date = new Date(),
-): Promise<CreateOrderPriceSnapshot> {
-  return db.$transaction((tx) =>
-    readPublishedCreateOrderPriceSnapshot(tx, { now }),
-  );
 }

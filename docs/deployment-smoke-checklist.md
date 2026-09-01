@@ -60,7 +60,7 @@ Required before `prisma migrate deploy`:
 NODE_ENV=production pnpm check:env
 pnpm prisma validate
 pnpm prisma migrate status
-pnpm tsc --noEmit --pretty false
+pnpm typecheck
 pnpm eslint .
 pnpm vitest run --reporter=dot --testTimeout=10000
 pnpm build

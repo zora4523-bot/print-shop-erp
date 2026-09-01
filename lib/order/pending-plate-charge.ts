@@ -38,7 +38,10 @@ export async function upsertPendingPlateChargeInTx(args: {
   actorId: string;
   categoryId: string;
   quote: CreateOrderQuoteResult;
-  source: 'EXTERNAL_SUBMIT_PENDING_PLATE' | 'INTERNAL_CREATE_PENDING_PLATE';
+  source:
+    | 'EXTERNAL_SUBMIT_PENDING_PLATE'
+    | 'INTERNAL_CREATE_PENDING_PLATE'
+    | 'CHANGE_REQUEST_PENDING_PLATE';
 }): Promise<void> {
   const plateLines = args.quote.order.lines.filter(
     (line) => line.code === 'PLATE_FEE',

@@ -214,7 +214,7 @@ export async function SalesOrdersListSection({
       query={displayedQuery}
       nowIso={new Date().toISOString()}
       footer={
-        <div className="border-t px-4 py-3">
+        <div key="sales-orders-pagination" className="border-t px-4 py-3">
           <AdminPagination
             basePath="/orders"
             page={page.page}

@@ -60,6 +60,7 @@ describe('bill detail visibility boundary', () => {
       id: 'bill-1',
       salesUserId: 'sales-1',
       period: '2026-08',
+      sequence: 2,
       openingAmount: '0.00',
       totalAmount: '500.00',
       paidAmount: '500.00',
@@ -179,6 +180,7 @@ describe('bill detail visibility boundary', () => {
     expect(html.match(/<th scope="col"/g)).toHaveLength(9);
     expect(html).not.toContain('已收');
     expect(html).toContain('对外结算备注');
+    expect(html).toContain('补充账单 #2');
     expect(html).toContain('加工费分项');
     expect(html).toContain('局部烫金');
     expect(html).toContain('¥ 88.00');
@@ -200,6 +202,7 @@ describe('bill detail visibility boundary', () => {
       id: 'bill-1',
       salesUserId: 'sales-1',
       period: '2026-08',
+      sequence: 1,
       openingAmount: '0.00',
       totalAmount: '500.00',
       paidAmount: '500.00',

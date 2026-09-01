@@ -22,7 +22,7 @@ Never auto-merge. Never apply production database operations from this backlog.
    itself to tests, docs, or read-only UI.
 3. For every code task, run:
    - `./node_modules/.bin/prisma validate`
-   - `./node_modules/.bin/tsc --noEmit --pretty false`
+   - `pnpm typecheck`
    - `./node_modules/.bin/eslint .`
    - `./node_modules/.bin/vitest run --reporter=dot --testTimeout=10000`
 4. Run `./node_modules/.bin/next build` when touching App Router pages,

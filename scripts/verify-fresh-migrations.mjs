@@ -142,8 +142,13 @@ try {
         AS "hasScheduledEvidence",
       repaired."version" AS "repairedVersion",
       five_tier."effectiveTo" = repaired."effectiveFrom" AS continuous,
-      repaired."effectiveTo" IS NULL AND repaired."isActive" = TRUE
-        AS "repairedCurrent",
+      repaired."effectiveTo" = sentinel."effectiveFrom"
+        AS "truthToSentinelContinuous",
+      repaired."effectiveTo" IS NOT NULL AND repaired."isActive" = TRUE
+        AS "repairedClosed",
+      sentinel."version" AS "sentinelVersion",
+      sentinel."effectiveTo" IS NULL AND sentinel."isActive" = TRUE
+        AS "sentinelCurrent",
       (
         SELECT COUNT(*)::INT FROM "CustomerPriceRule"
         WHERE "priceBookId" = five_tier."id"
@@ -152,6 +157,20 @@ try {
         SELECT COUNT(*)::INT FROM "CustomerPriceRule"
         WHERE "priceBookId" = repaired."id"
       ) AS "repairedRuleCount",
+      (
+        SELECT COUNT(*)::INT FROM "CustomerPriceRule"
+        WHERE "priceBookId" = sentinel."id"
+      ) AS "sentinelRuleCount",
+      (
+        SELECT COUNT(*)::INT
+        FROM "CustomerPriceRule" rule
+        WHERE rule."priceBookId" = sentinel."id"
+          AND rule."code"::TEXT =
+            'BASE_COLOR-ICE-WHITE-160-MID_Q2000'
+          AND rule."amount" IS NULL
+          AND rule."minQty" = 2000
+          AND rule."maxQty" = 2000
+      ) AS "sentinelNullTierCount",
       (
         SELECT COUNT(*)::INT
         FROM "CustomerPriceRule" rule
@@ -178,20 +197,27 @@ try {
       ) AS "unsupportedActiveProductCount"
     FROM "CustomerPriceBook" five_tier
     CROSS JOIN "CustomerPriceBook" repaired
+    CROSS JOIN "CustomerPriceBook" sentinel
     WHERE five_tier."id" = 'cpb_external_processing_rule_v4_five_tier'
       AND repaired."id" = 'cpb_external_processing_truth_repair_v1'
+      AND sentinel."id" = 'cpb_external_processing_print_sentinel_v1'
   `);
   if (pricing.rowCount !== 1) {
-    fail('缺少 fresh v4 五档版或后续真值修复版。');
+    fail('缺少 fresh v4 五档版、真值修复版或空档后继版。');
   }
   const row = pricing.rows[0];
   expectEqual(row.fiveTierVersion, 4, 'fresh 五档版版本');
   expectEqual(row.hasScheduledEvidence, false, '伪造计划版证据');
   expectEqual(row.repairedVersion, 5, 'fresh 真值修复版版本');
   expectEqual(row.continuous, true, '版本时间线连续性');
-  expectEqual(row.repairedCurrent, true, '真值修复版当前态');
+  expectEqual(row.truthToSentinelContinuous, true, '真值修复到空档版连续性');
+  expectEqual(row.repairedClosed, true, '真值修复版闭合态');
+  expectEqual(row.sentinelVersion, 6, 'fresh 空档版版本');
+  expectEqual(row.sentinelCurrent, true, '空档版当前态');
   expectEqual(row.fiveTierRuleCount, 145, '五档版规则数');
   expectEqual(row.repairedRuleCount, 144, '真值修复版规则数');
+  expectEqual(row.sentinelRuleCount, 145, '空档版规则数');
+  expectEqual(row.sentinelNullTierCount, 1, 'Q2000 空金额截断档数');
   expectEqual(row.correctedAmountCount, 2, '真值价格修复数');
   expectEqual(row.unsupportedRuleCount, 0, '无效触感纸方形规则数');
   expectEqual(
@@ -203,7 +229,7 @@ try {
   await verification.end();
 }
 
-info('通过：空库完整迁移链与加工费真值后置条件均正确。');
+info('通过：空库完整迁移链、加工费真值与空档后置条件均正确。');
 
 function runPrisma(args) {
   const result = spawnSync(join(root, 'node_modules', '.bin', 'prisma'), args, {

@@ -16,6 +16,9 @@ type FreshPricingOrder = {
   processingAmount: { toString(): string } | string;
   packagingAmount: { toString(): string } | string;
   totalAmount: { toString(): string } | string;
+  quotedFee: { toString(): string } | string | null;
+  confirmedFee: { toString(): string } | string | null;
+  settledFee: { toString(): string } | string | null;
   items: Array<{
     id: string;
     sequence: number;
@@ -80,6 +83,16 @@ export type AppendOrderPricingRevisionInput = {
   incrementOrderRevision?: boolean;
   remark?: string | null;
   metadata?: Prisma.InputJsonObject;
+  /**
+   * Canonical fee lifecycle values produced by the same operation but not yet
+   * linkable on Order (for example quotedFee needs this revision's new id).
+   * All three values are required so a caller cannot accidentally preserve a
+   * stale confirmed/settled snapshot while replacing only the quote.
+   */
+  orderFeeSnapshot?: Pick<
+    FreshPricingOrder,
+    'quotedFee' | 'confirmedFee' | 'settledFee'
+  >;
 };
 
 export class OrderPricingRevisionError extends Error {
@@ -127,6 +140,9 @@ export async function appendOrderPricingRevisionInTx(
       processingAmount: true,
       packagingAmount: true,
       totalAmount: true,
+      quotedFee: true,
+      confirmedFee: true,
+      settledFee: true,
       items: {
         orderBy: { sequence: "asc" },
         select: {
@@ -213,6 +229,7 @@ export async function appendOrderPricingRevisionInTx(
   if (isAdminConfirmed && !confirmedById) {
     throw new OrderPricingRevisionError("管理员确认修订缺少操作人");
   }
+  const orderFeeSnapshot = input.orderFeeSnapshot ?? order;
 
   const snapshot = {
     version: 2,
@@ -230,6 +247,9 @@ export async function appendOrderPricingRevisionInTx(
       processingAmount: text(order.processingAmount),
       packagingAmount: text(order.packagingAmount),
       totalAmount: text(order.totalAmount),
+      quotedFee: text(orderFeeSnapshot.quotedFee),
+      confirmedFee: text(orderFeeSnapshot.confirmedFee),
+      settledFee: text(orderFeeSnapshot.settledFee),
     },
     items: order.items.map((item) => ({
       id: item.id,

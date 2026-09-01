@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { enqueueCronJobMock } = vi.hoisted(() => ({
+const { databaseClockNowMock, enqueueCronJobMock } = vi.hoisted(() => ({
+  databaseClockNowMock: vi.fn(),
   enqueueCronJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
 }));
 
@@ -9,6 +10,9 @@ vi.mock('@/lib/background-jobs/mode', () => ({
 }));
 vi.mock('@/lib/background-jobs/cron', () => ({
   enqueueCronJob: enqueueCronJobMock,
+}));
+vi.mock('@/lib/background-jobs/clock', () => ({
+  databaseClockNow: databaseClockNowMock,
 }));
 vi.mock('@/lib/cron/schedule', () => ({
   isStrictYmd: (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value),
@@ -32,6 +36,7 @@ vi.mock('@/lib/salary/hourly-aggregate', () => ({
 }));
 
 import { BACKGROUND_JOB_TYPES } from '@/lib/background-jobs/types';
+import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 import { POST as csPeriodEndingPost } from '../cs-period-ending/route';
 import { POST as csSettlePost } from '../cs-settle/route';
 import { POST as dailySalaryPost } from '../daily-salary/route';
@@ -50,6 +55,9 @@ beforeEach(() => {
     created: true,
     requeued: false,
   });
+  databaseClockNowMock
+    .mockReset()
+    .mockResolvedValue(new Date('2026-07-17T04:00:00.000Z'));
 });
 
 function request(path: string, body: unknown = {}): Request {
@@ -174,6 +182,19 @@ describe('cron durable wires', () => {
 // 谓词来自 @/lib/dashboard/shanghai-clock（本文件没有 mock 它），所以上面
 // 那份 @/lib/cron/schedule 的 mock 工厂不需要跟着加导出。
 describe('salary cron wires refuse future-dated scopes before enqueuing', () => {
+  it('daily-salary rejects the still-open Shanghai day just like the ledger', async () => {
+    const date = todayShanghai(new Date('2026-07-17T04:00:00.000Z'));
+    const response = await dailySalaryPost(
+      request('/api/cron/daily-salary', { date }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: `open date: ${date}`,
+    });
+    expect(enqueueCronJobMock).not.toHaveBeenCalled();
+  });
+
   it('daily-salary answers 400 and does not enqueue', async () => {
     const response = await dailySalaryPost(
       request('/api/cron/daily-salary', { date: '2099-01-01' }),

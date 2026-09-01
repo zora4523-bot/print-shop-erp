@@ -63,6 +63,10 @@ function mutableOrder() {
     revision: 4,
     processingAmount: { toString: () => '100.00' },
     totalAmount: { toString: () => '120.00' },
+    quotedFee: { toString: () => '120.00' },
+    quotedPricingRevisionId: 'pricing-revision-2',
+    confirmedFee: { toString: () => '120.00' },
+    settledFee: { toString: () => '118.00' },
   };
 }
 
@@ -80,6 +84,7 @@ beforeEach(() => {
     _sum: { amount: { toString: () => '0.00' } },
   });
   appendRevisionMock.mockResolvedValue({
+    pricingRevisionId: 'pricing-revision-3',
     priceRevision: 3,
     orderRevision: 5,
     snapshot: {},
@@ -120,9 +125,92 @@ describe('saveOrderManualCharge', () => {
       }),
     );
     expect(dbMock.tx.order.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { totalAmount: '75.00' } }),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          totalAmount: '75.00',
+          confirmedFee: '75.00',
+          settledFee: null,
+        }),
+      }),
+    );
+    expect(appendRevisionMock).toHaveBeenCalledWith(
+      dbMock.tx,
+      expect.objectContaining({
+        status: OrderPricingStatus.ADMIN_CONFIRMED,
+        orderFeeSnapshot: {
+          quotedFee: '120.00',
+          confirmedFee: '75.00',
+          settledFee: null,
+        },
+      }),
     );
     expect(result).toMatchObject({ priceRevision: 3, totalAmount: '75.00' });
+  });
+
+  it('refreshes and links the quoted fee while administrator confirmation is pending', async () => {
+    dbMock.tx.order.findUnique.mockResolvedValue({
+      ...mutableOrder(),
+      pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
+    });
+    dbMock.tx.orderCustomerCharge.create.mockResolvedValue({ id: 'charge-1' });
+    dbMock.tx.orderCustomerCharge.aggregate.mockResolvedValue({
+      _sum: { amount: { toString: () => '-25.00' } },
+    });
+
+    await saveOrderManualCharge(
+      {
+        orderId: 'order-1',
+        chargeId: null,
+        expectedPriceRevision: 2,
+        categoryCode: 'APPROVED_ADJUSTMENT',
+        description: '售后折让',
+        amount: '-25.00',
+        reason: '交期延误',
+        approvalReference: '管理员审批单 AP-1',
+      },
+      actor,
+      new Date('2026-08-26T10:00:00.000Z'),
+    );
+
+    expect(dbMock.tx.order.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'order-1' },
+      data: {
+        totalAmount: '75.00',
+        quotedFee: '75.00',
+        confirmedFee: null,
+        settledFee: null,
+      },
+      select: { id: true },
+    });
+    expect(appendRevisionMock).toHaveBeenCalledWith(
+      dbMock.tx,
+      expect.objectContaining({
+        status: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
+        orderFeeSnapshot: {
+          quotedFee: '75.00',
+          confirmedFee: null,
+          settledFee: null,
+        },
+      }),
+    );
+    expect(dbMock.tx.order.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'order-1' },
+      data: { quotedPricingRevisionId: 'pricing-revision-3' },
+      select: { id: true },
+    });
+    expect(dbMock.tx.orderLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          changedFields: expect.objectContaining({
+            quotedFee: { before: '120.00', after: '75.00' },
+            quotedPricingRevisionId: {
+              before: 'pricing-revision-2',
+              after: 'pricing-revision-3',
+            },
+          }),
+        }),
+      }),
+    );
   });
 
   it('rejects a negative sample fee at the domain boundary', async () => {

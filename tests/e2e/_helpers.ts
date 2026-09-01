@@ -215,53 +215,97 @@ export async function seedFinishedOrder(opts: {
   // Prefix lets us spot test rows in the dev DB.
   const orderNo = `E2E-${randomBytes(4).toString('hex').toUpperCase()}`;
   await withDb(async (db) => {
-    await db.query(
-      `
-      INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-        status, "isUrgent", "customerRef", "totalAmount",
-        "submittedAt", "scheduledAt", "completedAt", "shippedAt", "finishedAt",
-        "createdAt", "updatedAt"
-      ) VALUES (
-        $1, $2, $3, $4::"Role",
-        CASE $4::"Role"
-          WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
-          WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
-          WHEN 'ADMIN'::"Role" THEN 'FACTORY_DIRECT'::"OrderSettlementType"
-        END,
-        $3,
-        'FINISHED'::"OrderStatus", FALSE, $5, $6,
-        $7, $7, $7, $7, $7,
-        NOW(), NOW()
-      )
-      `,
-      [
-        orderId,
-        orderNo,
-        opts.submitterId,
-        opts.submitterRole,
-        opts.customerRef,
-        opts.totalAmount,
-        opts.finishedAt.toISOString(),
-      ],
-    );
+    await db.query('BEGIN');
+    try {
+      // A FINISHED external-sales fixture must satisfy the same fail-closed
+      // bill eligibility contract as production data. Use the dedicated E2E
+      // owner as the final-price confirmer and persist one explicit waived
+      // shipping charge instead of relying on the pre-ledger aggregate shape.
+      let pricingConfirmedById: string | null = null;
+      if (opts.submitterRole === 'SALES') {
+        const confirmer = await db.query<{ id: string }>(
+          `SELECT id FROM "User"
+            WHERE username = $1 AND role = 'ADMIN'::"Role" AND "isActive" = TRUE`,
+          [E2E_USERS.owner.username],
+        );
+        if (confirmer.rowCount !== 1) {
+          throw new Error(
+            'seedFinishedOrder requires the active E2E owner fixture to confirm external-sales pricing',
+          );
+        }
+        pricingConfirmedById = confirmer.rows[0]!.id;
+      }
+
+      await db.query(
+        `
+        INSERT INTO "Order" (
+          id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
+          status, "isUrgent", "customerRef", "processingAmount", "totalAmount",
+          "confirmedFee", "pricingStatus", "pricingConfirmedAt", "pricingConfirmedById",
+          "submittedAt", "scheduledAt", "completedAt", "shippedAt", "finishedAt",
+          "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, $4::"Role",
+          CASE $4::"Role"
+            WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
+            WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
+          END,
+          $3,
+          'FINISHED'::"OrderStatus", FALSE, $5, $6, $6,
+          CASE WHEN $4::"Role" = 'SALES'::"Role" THEN $6::numeric ELSE NULL END,
+          CASE
+            WHEN $4::"Role" = 'SALES'::"Role"
+              THEN 'ADMIN_CONFIRMED'::"OrderPricingStatus"
+            ELSE 'AUTO_CONFIRMED'::"OrderPricingStatus"
+          END,
+          $7, $8,
+          $7, $7, $7, $7, $7,
+          NOW(), NOW()
+        )
+        `,
+        [
+          orderId,
+          orderNo,
+          opts.submitterId,
+          opts.submitterRole,
+          opts.customerRef,
+          opts.totalAmount,
+          opts.finishedAt.toISOString(),
+          pricingConfirmedById,
+        ],
+      );
+
+      if (pricingConfirmedById) {
+        await db.query(
+          `
+          INSERT INTO "OrderCustomerCharge" (
+            id, "orderId", "categoryId", "businessKey", status, description,
+            amount, "createdById", "finalizedById", "finalizedAt",
+            "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2, 'ccc_shipping_fee', 'ORDER:E2E:WAIVED_SHIPPING',
+            'WAIVED'::"OrderCustomerChargeStatus", 'E2E 顺丰到付，快递费已豁免',
+            0, $3, $4, $5, NOW(), NOW()
+          )
+          `,
+          [
+            `${orderId}-charge-shipping`,
+            orderId,
+            opts.submitterId,
+            pricingConfirmedById,
+            opts.finishedAt.toISOString(),
+          ],
+        );
+      }
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
   });
   return { orderId, orderNo };
 }
 
-// Seeds an Order + one OrderItem + N OrderItemDesigns for visual
-// regression tests of OrderPrintLayout. Deterministic across runs:
-// - Fixed orderId per design count (delete-then-insert idempotency)
-// - Stable customerRef / receiverName / item fields → render is
-//   pixel-identical regardless of clock or other state.
-// - Designs use a tiny inline data: PNG so no network fetch is needed
-//   and the image bytes are hashable. Without this the print page
-//   would 404 / hang on the placeholder fileUrl.
-//
-// Caller is responsible for providing submitterId (admin user works).
-// Returns the deterministic orderId so the spec can navigate to
-// /print/orders/<id> directly.
-//
 // 1×1 transparent PNG, base64. Renders as a tiny dot inside whatever
 // CSS sizing the design-grid imposes. Plenty for visual baseline.
 const PLACEHOLDER_PNG_DATA_URL =
@@ -282,81 +326,6 @@ const COLOR_ARTWORK_DATA_URL =
       '<rect x="285" y="545" width="330" height="26" rx="13" fill="#c91f37"/>' +
       '</svg>',
   ).toString('base64');
-
-export async function seedE2eOrderDesign(opts: {
-  orderId?: string;
-  expectedCustomName: string;
-}): Promise<{ orderId: string; orderNo: string; itemName: string }> {
-  return withDb(async (db) => {
-    const result = await db.query<{
-      orderId: string;
-      orderNo: string;
-      customName: string | null;
-      createdById: string;
-      creatorUsername: string;
-      itemId: string;
-      itemName: string;
-    }>(
-      `SELECT o.id AS "orderId",
-              o."orderNo" AS "orderNo",
-              o."customName" AS "customName",
-              o."createdById" AS "createdById",
-              creator.username AS "creatorUsername",
-              item.id AS "itemId",
-              item.name AS "itemName"
-         FROM "Order" o
-         JOIN "User" creator ON creator.id = o."createdById"
-         JOIN LATERAL (
-           SELECT oi.id, oi.name
-             FROM "OrderItem" oi
-            WHERE oi."orderId" = o.id
-            ORDER BY oi.sequence ASC
-            LIMIT 1
-         ) item ON TRUE
-        WHERE ($1::text IS NULL OR o.id = $1)
-          AND o."customName" = $2
-          AND o.status = 'DRAFT'
-        ORDER BY o."createdAt" DESC
-        LIMIT 2`,
-      [opts.orderId ?? null, opts.expectedCustomName],
-    );
-    const row = result.rows[0];
-    if (
-      result.rows.length !== 1 ||
-      !row ||
-      row.customName !== opts.expectedCustomName ||
-      !row.creatorUsername.startsWith('e2e-') ||
-      !opts.expectedCustomName.startsWith('E2E ')
-    ) {
-      throw new Error(
-        'seedE2eOrderDesign refuses an order outside the exact E2E fixture',
-      );
-    }
-
-    await db.query(
-      `INSERT INTO "OrderItemDesign" (
-         id, "orderItemId", "fileType", "fileUrl", "fileName",
-         "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
-       ) VALUES (
-         $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
-         $5, $3, $6, NOW()
-       )`,
-      [
-        `e2e-design-${randomBytes(8).toString('hex')}`,
-        row.itemId,
-        PLACEHOLDER_PNG_DATA_URL,
-        'e2e-production-design.png',
-        Buffer.byteLength(PLACEHOLDER_PNG_DATA_URL),
-        row.createdById,
-      ],
-    );
-    return {
-      orderId: row.orderId,
-      orderNo: row.orderNo,
-      itemName: row.itemName,
-    };
-  });
-}
 
 export async function seedPrintableOrder(opts: {
   submitterId: string;
@@ -1303,10 +1272,14 @@ export async function seedDashboardSnapshot(opts: {
     await db.query(
       `
       INSERT INTO "OrderItem" (
-        id, "orderId", sequence, name, quantity, crafts,
+        id, "orderId", sequence, name, "pricingRoute", craft,
+        "productStructure", quantity, crafts, "foilTechnique",
         "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, 1, 'E2E 外协款式', $3, ARRAY[]::text[], NOW(), NOW()
+        $1, $2, 1, 'E2E 外协款式',
+        'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute", 'FULL'::"OrderCraft",
+        'STANDARD_ENVELOPE'::"OrderProductStructure", $3, ARRAY[]::text[],
+        'FLAT'::"OrderFoilTechnique", NOW(), NOW()
       )
       `,
       [linkedOrderItemId, linkedOrderId, outsourceQuantity],
@@ -1582,20 +1555,56 @@ export async function seedDashboardSnapshot(opts: {
             submittedAt.toISOString(),
           ],
         );
+        const productId = spec.productSuffix
+          ? `e2e-dash-prod-${spec.productSuffix}`
+          : null;
+        const pricingFacts = spec.productSuffix?.startsWith('p-blank-')
+          ? {
+              route: 'STOCK_BLANK',
+              craft: 'PARTIAL',
+              structure: 'STANDARD_ENVELOPE',
+              foilTechnique: 'FLAT',
+            }
+          : spec.productSuffix?.startsWith('p-foil-')
+            ? {
+                route: 'CUSTOM_SINGLE_FLAT_FOIL',
+                craft: 'FULL',
+                structure: 'STANDARD_ENVELOPE',
+                foilTechnique: 'FLAT',
+              }
+            : spec.productSuffix?.startsWith('p-color-')
+              ? {
+                  route: 'COLOR_PRINT',
+                  craft: 'PRINT',
+                  structure: 'STANDARD_ENVELOPE',
+                  foilTechnique: 'NONE',
+                }
+              : {
+                  route: 'MANUAL_QUOTE',
+                  craft: null,
+                  structure: 'UNSPECIFIED',
+                  foilTechnique: 'UNSPECIFIED',
+                };
         await db.query(
           `
           INSERT INTO "OrderItem" (
-            id, "orderId", sequence, name, "productId",
-            quantity, crafts, "createdAt", "updatedAt"
+            id, "orderId", sequence, name, "productId", "pricingRoute", craft,
+            "productStructure", quantity, crafts, "foilTechnique",
+            "createdAt", "updatedAt"
           ) VALUES (
-            $1, $2, 1, '排行 fixture', $3,
-            5000, ARRAY[]::text[], NOW(), NOW()
+            $1, $2, 1, '排行 fixture', $3, $4::"OrderItemPricingRoute",
+            $5::"OrderCraft", $6::"OrderProductStructure",
+            5000, ARRAY[]::text[], $7::"OrderFoilTechnique", NOW(), NOW()
           )
           `,
           [
             `${orderId}-item`,
             orderId,
-            spec.productSuffix ? `e2e-dash-prod-${spec.productSuffix}` : null,
+            productId,
+            pricingFacts.route,
+            pricingFacts.craft,
+            pricingFacts.structure,
+            pricingFacts.foilTechnique,
           ],
         );
         rankingOrderIds.push(orderId);
@@ -1700,36 +1709,6 @@ export async function openFirstOrderItemEditor(page: Page): Promise<void> {
   await expect(
     form.getByRole('spinbutton', { name: '数量', exact: true }),
   ).toBeVisible();
-}
-
-// The external-sales B form has one visible page and never accepts a browser
-// weight or manual logistics amount. Production-flow E2E uses SF collect,
-// which produces a complete versioned quote without inventing carrier facts.
-// A design row is attached by seedE2eOrderDesign so local tests stay hermetic
-// and do not upload fixtures into the real OSS bucket.
-export async function fillExternalSalesOrderDraft(
-  page: Page,
-  opts: { customName: string; quantity?: number },
-): Promise<void> {
-  const form = page.locator('[data-slot="order-form-b"]');
-  await expect(form).toBeVisible();
-  await form
-    .getByRole('textbox', { name: '工单名称', exact: true })
-    .fill(opts.customName);
-  await form
-    .getByRole('spinbutton', { name: '数量', exact: true })
-    .fill(String(opts.quantity ?? 1000));
-  await form
-    .getByRole('textbox', { name: '收货地址', exact: true })
-    .fill('E2E 收货人 13800138000 广东省深圳市南山区测试路 1 号');
-  await form
-    .getByRole('checkbox', { name: '顺丰到付（本单不计快递费）' })
-    .check();
-  await expect(
-    form.getByRole('button', {
-      name: /^(创建并提交|提交并申请管理员终价)$/,
-    }),
-  ).toBeEnabled();
 }
 
 // ---- ProductionOperation scanner fixture ----
@@ -2157,7 +2136,7 @@ export async function cleanupE2eProductionOperationFixture(
 export async function submitDraftOrderAndWait(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^提交工单$/ }).click();
   await expect(page.getByRole('heading', { level: 1 })).toContainText(
-    /已提交|排产中/,
+    /待工厂确认|排产中/,
     { timeout: 20_000 },
   );
 }
@@ -2702,13 +2681,16 @@ export async function seedCdrOrder(opts: {
     await db.query(
       `
       INSERT INTO "OrderItem" (
-        id, "orderId", sequence, name, "specification", "paperType",
+        id, "orderId", sequence, name, "pricingRoute", craft,
+        "productStructure", "specification", "paperType",
         quantity, "foilColors", "isDoubleSided", "isDoubleColor",
-        crafts, "createdAt", "updatedAt"
+        crafts, "foilTechnique", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, 1, 'CDR 测试款', '9cm', '珠光纸',
+        $1, $2, 1, 'CDR 测试款',
+        'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute", 'FULL'::"OrderCraft",
+        'STANDARD_ENVELOPE'::"OrderProductStructure", '9cm', '珠光纸',
         5000, ARRAY['金色']::text[], FALSE, FALSE,
-        ARRAY[]::text[], NOW(), NOW()
+        ARRAY[]::text[], 'FLAT'::"OrderFoilTechnique", NOW(), NOW()
       )
       `,
       [orderItemId, orderId],

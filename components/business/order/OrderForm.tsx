@@ -93,10 +93,11 @@ import {
   externalOrderSpecificationsForRoute,
   externalOrderSpecificationLabel,
   externalOrderStyleName,
-  externalOrderWeightsForSelection,
+  externalOrderWeightOptionsForSelection,
   findExternalOrderCatalogProduct,
   type ExternalOrderPaper,
   type ExternalOrderPaperKey,
+  type ExternalOrderPaperMaterial,
 } from './external-order-b-catalog';
 import {
   collectOrderFormGaps,
@@ -420,6 +421,7 @@ function normalizeExternalOrderItem(args: {
   item: CreateOrderInput['items'][number];
   crafts: readonly CraftOption[];
   products: readonly ProductOption[];
+  paperMaterials?: readonly ExternalOrderPaperMaterial[];
   paperKey?: ExternalOrderPaperKey;
   resetPaper?: boolean;
   resetSpecification?: boolean;
@@ -435,23 +437,11 @@ function normalizeExternalOrderItem(args: {
       透明金: '透明色',
     })[color] ?? color;
   const route = args.item.pricingRoute;
-  const routePapers = externalOrderPapersForRoute(args.products, route);
-  const inferredPaper = externalOrderPaperFromType(
+  const routePapers = externalOrderPapersForRoute(
     args.products,
-    args.item.paperType,
+    route,
+    args.paperMaterials,
   );
-  const requestedPaper = args.paperKey
-    ? routePapers.find((paper) => paper.key === args.paperKey)
-    : undefined;
-  const paper =
-    requestedPaper ??
-    (!args.resetPaper &&
-    inferredPaper &&
-    routePapers.some((candidate) => candidate.key === inferredPaper.key)
-      ? inferredPaper
-      : routePapers[0]);
-  if (!paper) return args.item;
-
   const specifications = externalOrderSpecificationsForRoute(
     args.products,
     route,
@@ -463,17 +453,49 @@ function normalizeExternalOrderItem(args: {
       : externalOrderDefaultSpecification(args.products, route) ||
         specifications[0] ||
         '';
-  const allowedWeights = [
-    ...externalOrderWeightsForSelection(paper, route, specification),
-  ];
-  const currentWeight = args.item.paperWeightGsm ?? allowedWeights[0] ?? null;
-  const allowManualWeight =
-    route === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL;
+  const availableRoutePapers = routePapers.filter((candidate) =>
+    externalOrderWeightOptionsForSelection(
+      candidate,
+      route,
+      specification,
+    ).some((option) => !option.disabled),
+  );
+  const inferredPaper = externalOrderPaperFromType(
+    args.products,
+    args.item.paperType,
+    args.paperMaterials,
+  );
+  const requestedPaper = args.paperKey
+    ? availableRoutePapers.find((paper) => paper.key === args.paperKey)
+    : undefined;
+  const paper =
+    requestedPaper ??
+    (!args.resetPaper &&
+    inferredPaper &&
+    availableRoutePapers.some(
+      (candidate) => candidate.key === inferredPaper.key,
+    )
+      ? inferredPaper
+      : availableRoutePapers[0]);
+  if (!paper) return args.item;
+
+  const weightOptions = externalOrderWeightOptionsForSelection(
+    paper,
+    route,
+    specification,
+  );
+  const enabledWeights = weightOptions
+    .filter((option) => !option.disabled)
+    .map((option) => option.value);
+  const currentWeight = args.item.paperWeightGsm ?? enabledWeights[0] ?? null;
+  const configuredCurrentWeight = weightOptions.find(
+    (option) => option.value === currentWeight,
+  );
   const weight =
     currentWeight !== null &&
-    (allowedWeights.includes(currentWeight) || allowManualWeight)
+    configuredCurrentWeight && !configuredCurrentWeight.disabled
       ? currentWeight
-      : (allowedWeights[0] ?? currentWeight);
+      : (enabledWeights[0] ?? currentWeight);
   if (weight === null) return args.item;
   const paperType = externalOrderPaperType(
     paper,
@@ -584,6 +606,7 @@ function normalizeExternalOrderItem(args: {
 function createExternalOrderItem(
   crafts: readonly CraftOption[],
   products: readonly ProductOption[],
+  paperMaterials: readonly ExternalOrderPaperMaterial[],
   defaultFoilColor?: string | null,
 ): CreateOrderInput['items'][number] {
   const blank = {
@@ -595,6 +618,7 @@ function createExternalOrderItem(
     item: blank,
     crafts,
     products,
+    paperMaterials,
     resetPaper: true,
     resetSpecification: true,
   });
@@ -1006,12 +1030,13 @@ export function OrderForm({
   initialExternalPriceSnapshot,
   draftScope,
 }: Props) {
-  const usesExternalSalesPricing =
-    settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const usesExternalSalesPricing = settlementType === OrderSettlementType.EXTERNAL_SALES;
   const router = useRouter();
   const initialItem = useMemo(() => {
     const firstFoil = externalCreateOrderOptions?.foilColors[0]?.name;
-    const item = createExternalOrderItem(crafts, products, firstFoil);
+    const item = createExternalOrderItem(
+      crafts, products, externalCreateOrderOptions?.papers ?? [], firstFoil,
+    );
     if (!usesExternalSalesPricing) return item;
     return {
       ...item,
@@ -1024,6 +1049,7 @@ export function OrderForm({
   }, [
     crafts,
     externalCreateOrderOptions?.foilColors,
+    externalCreateOrderOptions?.papers,
     products,
     usesExternalSalesPricing,
   ]);
@@ -1746,6 +1772,7 @@ export function OrderForm({
       ...createExternalOrderItem(
         crafts,
         products,
+        externalCreateOrderOptions?.papers ?? [],
         externalCreateOrderOptions?.foilColors[0]?.name ?? null,
       ),
       fig: nextFig,
@@ -1841,6 +1868,7 @@ export function OrderForm({
         item,
         crafts,
         products,
+        paperMaterials: externalCreateOrderOptions?.papers,
         ...options,
         preserveCustomSize: options.preserveCustomSize ?? true,
       }),
@@ -1883,6 +1911,7 @@ export function OrderForm({
       item,
       crafts,
       products,
+      paperMaterials: externalCreateOrderOptions?.papers,
       ...normalizationOptions,
       preserveCustomSize: normalizationOptions.preserveCustomSize ?? true,
     });
@@ -2000,12 +2029,13 @@ export function OrderForm({
     const paper = externalOrderPapersForRoute(
       products,
       current.pricingRoute,
+      externalCreateOrderOptions?.papers,
     ).find(
       (candidate) => candidate.key === paperKey,
     );
     if (!paper) return;
     const nextWeight =
-      externalOrderWeightsForSelection(
+      externalOrderWeightOptionsForSelection(
         paper,
         current.pricingRoute,
         current.specification ??
@@ -2013,7 +2043,7 @@ export function OrderForm({
             products,
             current.pricingRoute,
           ),
-      )[0] ?? current.paperWeightGsm;
+      ).find((option) => !option.disabled)?.value ?? current.paperWeightGsm;
     commitOrderFormBItem(
       index,
       {
@@ -2268,6 +2298,7 @@ export function OrderForm({
         item,
         crafts,
         products,
+        paperMaterials: externalCreateOrderOptions?.papers,
         resetPaper: !item.paperType,
         resetSpecification: !item.specification,
         preserveCustomSize: true,
@@ -2291,6 +2322,7 @@ export function OrderForm({
     createdDraft,
     localDraftReady,
     products,
+    externalCreateOrderOptions?.papers,
     externalCreateOrderOptions?.foilColors,
     setValue,
     usesExternalSalesPricing,
@@ -2930,7 +2962,9 @@ export function OrderForm({
         );
         const unitsPerBag = packagingGroup?.itemUnitsPerBag[index] ?? 0;
         const quote = railQuoteItems[index];
-        const paper = externalOrderPaperFromType(products, item.paperType);
+        const paper = externalOrderPaperFromType(
+          products, item.paperType, externalCreateOrderOptions?.papers,
+        );
         const specification = externalOrderSpecificationLabel(
           item.specification ?? '—',
           item.pricingRoute,
@@ -3039,39 +3073,27 @@ export function OrderForm({
     watchedItems[expandedItem] ?? watchedItems[0] ?? initialItem;
   const internalAdditionalCraftOptions = additionalOrderCraftOptions(crafts);
   const activeExternalPaper = externalOrderPaperFromType(
-    products,
-    activeExternalItem.paperType,
+    products, activeExternalItem.paperType, externalCreateOrderOptions?.papers,
   );
   const externalPaperOptions: OrderPaperSwatchOption[] =
     externalOrderPapersForRoute(
       products,
       activeExternalItem.pricingRoute,
+      externalCreateOrderOptions?.papers,
     ).map(
       (paper) => ({
         value: paper.key,
         label: paper.label,
         texture: externalPaperSwatchTexture(paper.appearance),
         disabled: (() => {
-          const materialIds = [
-            ...new Set(
-              paper.variants
-                .filter(
-                  (variant) =>
-                    variant.route === activeExternalItem.pricingRoute,
-                )
-                .flatMap((variant) =>
-                  variant.paperMaterialId ? [variant.paperMaterialId] : [],
-                ),
-            ),
-          ];
+          const weightOptions = externalOrderWeightOptionsForSelection(
+            paper,
+            activeExternalItem.pricingRoute,
+            activeExternalItem.specification ?? '',
+          );
           return (
-            materialIds.length > 0 &&
-            materialIds.every(
-              (materialId) =>
-                externalCreateOrderOptions?.papers.find(
-                  (option) => option.id === materialId,
-                )?.outOfStock === true,
-            )
+            weightOptions.length === 0 ||
+            weightOptions.every((option) => option.disabled)
           );
         })(),
       }),
@@ -3084,13 +3106,11 @@ export function OrderForm({
       imageSrc: foil.displayImage,
     })) ?? [];
   const externalWeightOptions = activeExternalPaper
-    ? [
-        ...externalOrderWeightsForSelection(
-          activeExternalPaper,
-          activeExternalItem.pricingRoute,
-          activeExternalItem.specification ?? '',
-        ),
-      ]
+    ? externalOrderWeightOptionsForSelection(
+        activeExternalPaper,
+        activeExternalItem.pricingRoute,
+        activeExternalItem.specification ?? '',
+      )
     : [];
   const configuredExternalSpecifications = externalCreateOrderOptions
     ? externalCreateOrderOptions.specifications
@@ -3780,7 +3800,7 @@ export function OrderForm({
             weightOptions={externalWeightOptions}
             specificationOptions={externalSpecificationOptions}
             foilOptions={externalCreateOrderOptions ? externalFoilOptions : undefined}
-            allowManualWeight={usesExternalSalesPricing}
+            allowManualWeight={false}
             allowCustomSize={usesExternalSalesPricing}
             disabled={
               !localDraftReady ||

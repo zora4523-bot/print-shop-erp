@@ -4,6 +4,7 @@ import {
   Role,
   WorkerType,
 } from '../../generated/prisma/enums';
+import { Prisma } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {
@@ -15,7 +16,16 @@ const { dbMock } = vi.hoisted(() => {
       findMany: vi.fn(),
       groupBy: vi.fn(),
     },
+    hourlyWorkerPayroll: {
+      findUnique: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    $executeRaw: vi.fn(),
+    $transaction: vi.fn(),
   };
+  mock.$transaction.mockImplementation(
+    async (callback: (tx: typeof mock) => unknown) => callback(mock),
+  );
   return { dbMock: mock };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
@@ -37,6 +47,8 @@ function workerFixture(
     role: Role;
     isActive: boolean;
     employmentType: EmploymentType | null;
+    employmentStartDate: Date | null;
+    employmentEndDate: Date | null;
   }> = {},
 ) {
   return {
@@ -45,6 +57,8 @@ function workerFixture(
     workerType: WorkerType.PACKER,
     isActive: true,
     employmentType: EmploymentType.FULL_TIME,
+    employmentStartDate: null,
+    employmentEndDate: null,
     displayName: '打包阿姨',
     ...overrides,
   };
@@ -74,6 +88,14 @@ beforeEach(() => {
   dbMock.attendance.delete.mockReset();
   dbMock.attendance.findMany.mockReset().mockResolvedValue([]);
   dbMock.attendance.groupBy.mockReset().mockResolvedValue([]);
+  dbMock.hourlyWorkerPayroll.findUnique.mockReset().mockResolvedValue(null);
+  dbMock.hourlyWorkerPayroll.deleteMany
+    .mockReset()
+    .mockResolvedValue({ count: 1 });
+  dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$transaction.mockReset().mockImplementation(
+    async (callback: (tx: typeof dbMock) => unknown) => callback(dbMock),
+  );
 });
 
 describe('parseShanghaiMonth', () => {
@@ -218,6 +240,34 @@ describe('recordAttendance — worker validation', () => {
       ),
     ).rejects.toThrow(/不是可录考勤/);
   });
+
+  it.each([
+    ['2026-05-01', false],
+    ['2026-05-02', true],
+    ['2026-05-03', true],
+    ['2026-05-04', false],
+  ] as const)(
+    'enforces inclusive employment dates for attendance: %s',
+    async (date, accepted) => {
+      dbMock.user.findUnique.mockResolvedValue(
+        workerFixture({
+          employmentStartDate: new Date('2026-05-02T00:00:00.000Z'),
+          employmentEndDate: new Date('2026-05-03T00:00:00.000Z'),
+        }),
+      );
+      const promise = recordAttendance(
+        'worker-1',
+        date,
+        { normalHours: 8, otHours: 0 },
+        foremanActor,
+      );
+      if (accepted) {
+        await expect(promise).resolves.toBeDefined();
+      } else {
+        await expect(promise).rejects.toThrow(/雇佣区间/);
+      }
+    },
+  );
 });
 
 describe('recordAttendance — hours validation', () => {
@@ -263,6 +313,17 @@ describe('recordAttendance — hours validation', () => {
       foremanActor,
     );
     expect(r.normalHours).toBe('24.00');
+  });
+
+  it('rejects normal plus overtime above 24 hours', async () => {
+    await expect(
+      recordAttendance(
+        'worker-1',
+        '2026-05-01',
+        { normalHours: 16, otHours: 9 },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/合计超出 24 小时/);
   });
 
   it('accepts half-day work plus half-day leave and persists the leave reason', async () => {
@@ -362,6 +423,13 @@ describe('recordAttendance — upsert idempotency (注意事项 2)', () => {
     dbMock.attendance.findUnique.mockResolvedValue({
       roleSnapshot: Role.WORKER,
       workerTypeSnapshot: WorkerType.PACKER,
+      normalHours: '8.00',
+      otHours: '0.00',
+      spareHours: '0.00',
+      workUnits: '1.0',
+      leaveUnits: '0.0',
+      leaveType: null,
+      remark: null,
     });
 
     const result = await recordAttendance(
@@ -377,6 +445,119 @@ describe('recordAttendance — upsert idempotency (注意事项 2)', () => {
     expect(updateArg.spareHours).toBe('0.00');
     expect(result.workerType).toBe(WorkerType.PACKER);
     expect(result.workerRole).toBe(Role.WORKER);
+  });
+});
+
+describe('recordAttendance — paid payroll source lock', () => {
+  beforeEach(() => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+  });
+
+  it.each([
+    ['新增', null],
+    [
+      '覆盖',
+      {
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.CLEANER,
+        normalHours: '7.00',
+        otHours: '0.00',
+        spareHours: '0.00',
+        workUnits: '1.0',
+        leaveUnits: '0.0',
+        leaveType: null,
+        remark: null,
+      },
+    ],
+  ])('rejects %s when the worker-month payroll is paid', async (_label, existing) => {
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
+      id: 'payroll-paid',
+      isPaid: true,
+    });
+    dbMock.attendance.findUnique.mockResolvedValue(existing);
+
+    await expect(
+      recordAttendance(
+        'worker-1',
+        '2026-05-01',
+        { normalHours: 8, otHours: 0 },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/工资已发放/);
+
+    expect(dbMock.attendance.upsert).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('invalidates an unpaid derivative after a real attendance change', async () => {
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
+      id: 'payroll-unpaid',
+      isPaid: false,
+    });
+    dbMock.attendance.findUnique.mockResolvedValue({
+      roleSnapshot: Role.WORKER,
+      workerTypeSnapshot: WorkerType.PACKER,
+      normalHours: '7.00',
+      otHours: '0.00',
+      spareHours: '0.00',
+      workUnits: '1.0',
+      leaveUnits: '0.0',
+      leaveType: null,
+      remark: null,
+    });
+
+    await recordAttendance(
+      'worker-1',
+      '2026-05-01',
+      { normalHours: 8, otHours: 0 },
+      foremanActor,
+    );
+
+    expect(dbMock.hourlyWorkerPayroll.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'payroll-unpaid', isPaid: false },
+    });
+    expect(dbMock.$executeRaw.mock.calls[0]?.[1]).toBe(
+      'print-shop-erp:salary-identity:worker-1',
+    );
+    expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
+      'print-shop-erp:hourly:worker-1:2026-05',
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[1]!,
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      dbMock.hourlyWorkerPayroll.findUnique.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      dbMock.hourlyWorkerPayroll.findUnique.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.attendance.upsert.mock.invocationCallOrder[0]!);
+  });
+
+  it('keeps an unpaid derivative when a re-entry does not change any fact', async () => {
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
+      id: 'payroll-unpaid',
+      isPaid: false,
+    });
+    dbMock.attendance.findUnique.mockResolvedValue({
+      roleSnapshot: Role.WORKER,
+      workerTypeSnapshot: WorkerType.PACKER,
+      normalHours: '8.00',
+      otHours: '0.00',
+      spareHours: '0.00',
+      workUnits: '1.0',
+      leaveUnits: '0.0',
+      leaveType: null,
+      remark: null,
+    });
+
+    await recordAttendance(
+      'worker-1',
+      '2026-05-01',
+      { normalHours: 8, otHours: 0 },
+      foremanActor,
+    );
+
+    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
   });
 });
 
@@ -415,6 +596,7 @@ describe('recordAttendance — COOK spare hours', () => {
 
 describe('removeAttendance', () => {
   it('deletes the row and reports removed=true', async () => {
+    dbMock.attendance.findUnique.mockResolvedValue({ id: 'att-1' });
     dbMock.attendance.delete.mockResolvedValue({ id: 'att-1' });
     const r = await removeAttendance('worker-1', '2026-05-01', foremanActor);
     expect(r.removed).toBe(true);
@@ -428,10 +610,89 @@ describe('removeAttendance', () => {
     });
   });
 
-  it('idempotent: missing row returns removed=false, not an error', async () => {
-    dbMock.attendance.delete.mockRejectedValue(new Error('P2025'));
+  it('idempotent: an already missing row returns removed=false', async () => {
     const r = await removeAttendance('worker-1', '2026-05-01', foremanActor);
     expect(r.removed).toBe(false);
+    expect(dbMock.attendance.delete).not.toHaveBeenCalled();
+  });
+
+  it('only treats a real Prisma P2025 delete race as removed=false', async () => {
+    dbMock.attendance.findUnique.mockResolvedValue({ id: 'att-1' });
+    dbMock.attendance.delete.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('missing', {
+        code: 'P2025',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(
+      removeAttendance('worker-1', '2026-05-01', foremanActor),
+    ).resolves.toEqual({ removed: false });
+  });
+
+  it('rethrows non-P2025 database failures', async () => {
+    const databaseFailure = new Prisma.PrismaClientKnownRequestError(
+      'constraint failure',
+      { code: 'P2003', clientVersion: 'test' },
+    );
+    dbMock.attendance.findUnique.mockResolvedValue({ id: 'att-1' });
+    dbMock.attendance.delete.mockRejectedValue(databaseFailure);
+
+    await expect(
+      removeAttendance('worker-1', '2026-05-01', foremanActor),
+    ).rejects.toBe(databaseFailure);
+  });
+
+  it('does not mistake a generic error containing P2025 for Prisma not-found', async () => {
+    const genericFailure = new Error('P2025');
+    dbMock.attendance.findUnique.mockResolvedValue({ id: 'att-1' });
+    dbMock.attendance.delete.mockRejectedValue(genericFailure);
+
+    await expect(
+      removeAttendance('worker-1', '2026-05-01', foremanActor),
+    ).rejects.toBe(genericFailure);
+  });
+
+  it('rejects deletion when the worker-month payroll is paid', async () => {
+    dbMock.attendance.findUnique.mockResolvedValue({ id: 'att-1' });
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
+      id: 'payroll-paid',
+      isPaid: true,
+    });
+
+    await expect(
+      removeAttendance('worker-1', '2026-05-01', foremanActor),
+    ).rejects.toThrow(/工资已发放/);
+    expect(dbMock.attendance.delete).not.toHaveBeenCalled();
+  });
+
+  it('rejects a paid-month delete request even when the target row is absent', async () => {
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
+      id: 'payroll-paid',
+      isPaid: true,
+    });
+
+    await expect(
+      removeAttendance('worker-1', '2026-05-01', foremanActor),
+    ).rejects.toThrow(/工资已发放/);
+    expect(dbMock.attendance.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.attendance.delete).not.toHaveBeenCalled();
+  });
+
+  it('invalidates an unpaid payroll after a real deletion', async () => {
+    dbMock.attendance.findUnique.mockResolvedValue({ id: 'att-1' });
+    dbMock.attendance.delete.mockResolvedValue({ id: 'att-1' });
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
+      id: 'payroll-unpaid',
+      isPaid: false,
+    });
+
+    await expect(
+      removeAttendance('worker-1', '2026-05-01', foremanActor),
+    ).resolves.toEqual({ removed: true });
+    expect(dbMock.hourlyWorkerPayroll.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'payroll-unpaid', isPaid: false },
+    });
   });
 
   it('rejects invalid date format', async () => {

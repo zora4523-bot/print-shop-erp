@@ -253,11 +253,28 @@ function positiveDimension(
   return parsed.toNumber();
 }
 
-function configuredPaperFact(paper: CatalogPaper): CanonicalCreateOrderPaperFact | null {
+export function catalogPaperPricingFacts(paper: {
+  name: string;
+  specification: string | null;
+}): CanonicalCreateOrderPaperFact[] {
   const configuredWeight =
     parseCatalogPaperWeight(paper.specification) ??
     parseCatalogPaperWeight(paper.name);
-  return canonicalizeCreateOrderPaperFact(paper.name, configuredWeight);
+  if (configuredWeight === null) return [];
+  const facts = [paper.name, paper.specification]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .flatMap(catalogPricingFactChoices)
+    .flatMap((choice) => {
+      const fact = canonicalizeCreateOrderPaperFact(choice, configuredWeight);
+      return fact ? [fact] : [];
+    });
+  const byIdentity = new Map(
+    facts.map((fact) => [
+      `${normalizeCatalogPricingText(fact.paperType)}:${fact.paperWeightGsm}`,
+      fact,
+    ]),
+  );
+  return [...byIdentity.values()];
 }
 
 function samePaperType(left: string, right: string): boolean {
@@ -283,11 +300,22 @@ function matchesPaperFamily(
   paper: CatalogPaper,
   fact: CanonicalCreateOrderPaperFact,
 ): boolean {
-  const labels = [paper.name, paper.specification].filter(
-    (value): value is string => Boolean(value?.trim()),
-  );
-  return labels.some((label) =>
-    samePaperType(paperTypeWithoutRequiredWeight(label), fact.paperType),
+  return [paper.name, paper.specification]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .flatMap(catalogPricingFactChoices)
+    .some((label) =>
+      samePaperType(paperTypeWithoutRequiredWeight(label), fact.paperType),
+    );
+}
+
+function matchesPaperIdentity(
+  paper: CatalogPaper,
+  fact: CanonicalCreateOrderPaperFact,
+): boolean {
+  return catalogPaperPricingFacts(paper).some(
+    (candidate) =>
+      samePaperType(candidate.paperType, fact.paperType) &&
+      candidate.paperWeightGsm === fact.paperWeightGsm,
   );
 }
 
@@ -362,13 +390,16 @@ function resolvePaperFacts(args: {
       `款式 ${item.itemKey} 的纸张与产品关联纸张不一致`,
     );
   }
-  const linkedPaperFact = linkedPaper
-    ? configuredPaperFact(linkedPaper)
-    : null;
+  const linkedPaperFacts = linkedPaper
+    ? catalogPaperPricingFacts(linkedPaper)
+    : [];
   if (
-    linkedPaperFact &&
-    (!samePaperType(linkedPaperFact.paperType, submitted.paperType) ||
-      linkedPaperFact.paperWeightGsm !== submitted.paperWeightGsm)
+    linkedPaperFacts.length > 0 &&
+    !linkedPaperFacts.some(
+      (candidate) =>
+        samePaperType(candidate.paperType, submitted.paperType) &&
+        candidate.paperWeightGsm === submitted.paperWeightGsm,
+    )
   ) {
     return fail(
       'CATALOG_PRODUCT_MISMATCH',
@@ -382,10 +413,30 @@ function resolvePaperFacts(args: {
       !paper.outOfStock &&
       matchesPaperFamily(paper, submitted),
   );
+  if (
+    item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL &&
+    !product?.paperMaterialId
+  ) {
+    const identityMatches = papers.filter((paper) =>
+      matchesPaperIdentity(paper, submitted),
+    );
+    if (identityMatches.length !== 1) {
+      return fail(
+        'CATALOG_PAPER_CHANGED',
+        `款式 ${item.itemKey} 的纸张目录身份不存在或不唯一，请重新选择`,
+      );
+    }
+    const identityPaper = identityMatches[0]!;
+    if (!identityPaper.isActive || identityPaper.outOfStock) {
+      return fail(
+        'CATALOG_PAPER_CHANGED',
+        `款式 ${item.itemKey} 的纸张已停用或缺货`,
+      );
+    }
+  }
   const catalogPaper = linkedPaper ?? activeMatchingPapers[0] ?? null;
   const catalogWeightFacts = activeMatchingPapers
-    .map(configuredPaperFact)
-    .filter((fact): fact is CanonicalCreateOrderPaperFact => fact !== null);
+    .flatMap(catalogPaperPricingFacts);
   const hasCatalogWeight =
     declaredByProduct.some(
       (candidate) =>
