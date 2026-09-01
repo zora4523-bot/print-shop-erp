@@ -215,36 +215,93 @@ export async function seedFinishedOrder(opts: {
   // Prefix lets us spot test rows in the dev DB.
   const orderNo = `E2E-${randomBytes(4).toString('hex').toUpperCase()}`;
   await withDb(async (db) => {
-    await db.query(
-      `
-      INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-        status, "isUrgent", "customerRef", "totalAmount",
-        "submittedAt", "scheduledAt", "completedAt", "shippedAt", "finishedAt",
-        "createdAt", "updatedAt"
-      ) VALUES (
-        $1, $2, $3, $4::"Role",
-        CASE $4::"Role"
-          WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
-          WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
-          WHEN 'ADMIN'::"Role" THEN 'FACTORY_DIRECT'::"OrderSettlementType"
-        END,
-        $3,
-        'FINISHED'::"OrderStatus", FALSE, $5, $6,
-        $7, $7, $7, $7, $7,
-        NOW(), NOW()
-      )
-      `,
-      [
-        orderId,
-        orderNo,
-        opts.submitterId,
-        opts.submitterRole,
-        opts.customerRef,
-        opts.totalAmount,
-        opts.finishedAt.toISOString(),
-      ],
-    );
+    await db.query('BEGIN');
+    try {
+      // A FINISHED external-sales fixture must satisfy the same fail-closed
+      // bill eligibility contract as production data. Use the dedicated E2E
+      // owner as the final-price confirmer and persist one explicit waived
+      // shipping charge instead of relying on the pre-ledger aggregate shape.
+      let pricingConfirmedById: string | null = null;
+      if (opts.submitterRole === 'SALES') {
+        const confirmer = await db.query<{ id: string }>(
+          `SELECT id FROM "User"
+            WHERE username = $1 AND role = 'ADMIN'::"Role" AND "isActive" = TRUE`,
+          [E2E_USERS.owner.username],
+        );
+        if (confirmer.rowCount !== 1) {
+          throw new Error(
+            'seedFinishedOrder requires the active E2E owner fixture to confirm external-sales pricing',
+          );
+        }
+        pricingConfirmedById = confirmer.rows[0]!.id;
+      }
+
+      await db.query(
+        `
+        INSERT INTO "Order" (
+          id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
+          status, "isUrgent", "customerRef", "processingAmount", "totalAmount",
+          "confirmedFee", "pricingStatus", "pricingConfirmedAt", "pricingConfirmedById",
+          "submittedAt", "scheduledAt", "completedAt", "shippedAt", "finishedAt",
+          "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, $4::"Role",
+          CASE $4::"Role"
+            WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
+            WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
+          END,
+          $3,
+          'FINISHED'::"OrderStatus", FALSE, $5, $6, $6,
+          CASE WHEN $4::"Role" = 'SALES'::"Role" THEN $6::numeric ELSE NULL END,
+          CASE
+            WHEN $4::"Role" = 'SALES'::"Role"
+              THEN 'ADMIN_CONFIRMED'::"OrderPricingStatus"
+            ELSE 'AUTO_CONFIRMED'::"OrderPricingStatus"
+          END,
+          $7, $8,
+          $7, $7, $7, $7, $7,
+          NOW(), NOW()
+        )
+        `,
+        [
+          orderId,
+          orderNo,
+          opts.submitterId,
+          opts.submitterRole,
+          opts.customerRef,
+          opts.totalAmount,
+          opts.finishedAt.toISOString(),
+          pricingConfirmedById,
+        ],
+      );
+
+      if (pricingConfirmedById) {
+        await db.query(
+          `
+          INSERT INTO "OrderCustomerCharge" (
+            id, "orderId", "categoryId", "businessKey", status, description,
+            amount, "createdById", "finalizedById", "finalizedAt",
+            "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2, 'ccc_shipping_fee', 'ORDER:E2E:WAIVED_SHIPPING',
+            'WAIVED'::"OrderCustomerChargeStatus", 'E2E 顺丰到付，快递费已豁免',
+            0, $3, $4, $5, NOW(), NOW()
+          )
+          `,
+          [
+            `${orderId}-charge-shipping`,
+            orderId,
+            opts.submitterId,
+            pricingConfirmedById,
+            opts.finishedAt.toISOString(),
+          ],
+        );
+      }
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
   });
   return { orderId, orderNo };
 }
@@ -1215,10 +1272,14 @@ export async function seedDashboardSnapshot(opts: {
     await db.query(
       `
       INSERT INTO "OrderItem" (
-        id, "orderId", sequence, name, quantity, crafts,
+        id, "orderId", sequence, name, "pricingRoute", craft,
+        "productStructure", quantity, crafts, "foilTechnique",
         "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, 1, 'E2E 外协款式', $3, ARRAY[]::text[], NOW(), NOW()
+        $1, $2, 1, 'E2E 外协款式',
+        'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute", 'FULL'::"OrderCraft",
+        'STANDARD_ENVELOPE'::"OrderProductStructure", $3, ARRAY[]::text[],
+        'FLAT'::"OrderFoilTechnique", NOW(), NOW()
       )
       `,
       [linkedOrderItemId, linkedOrderId, outsourceQuantity],
@@ -1494,20 +1555,56 @@ export async function seedDashboardSnapshot(opts: {
             submittedAt.toISOString(),
           ],
         );
+        const productId = spec.productSuffix
+          ? `e2e-dash-prod-${spec.productSuffix}`
+          : null;
+        const pricingFacts = spec.productSuffix?.startsWith('p-blank-')
+          ? {
+              route: 'STOCK_BLANK',
+              craft: 'PARTIAL',
+              structure: 'STANDARD_ENVELOPE',
+              foilTechnique: 'FLAT',
+            }
+          : spec.productSuffix?.startsWith('p-foil-')
+            ? {
+                route: 'CUSTOM_SINGLE_FLAT_FOIL',
+                craft: 'FULL',
+                structure: 'STANDARD_ENVELOPE',
+                foilTechnique: 'FLAT',
+              }
+            : spec.productSuffix?.startsWith('p-color-')
+              ? {
+                  route: 'COLOR_PRINT',
+                  craft: 'PRINT',
+                  structure: 'STANDARD_ENVELOPE',
+                  foilTechnique: 'NONE',
+                }
+              : {
+                  route: 'MANUAL_QUOTE',
+                  craft: null,
+                  structure: 'UNSPECIFIED',
+                  foilTechnique: 'UNSPECIFIED',
+                };
         await db.query(
           `
           INSERT INTO "OrderItem" (
-            id, "orderId", sequence, name, "productId",
-            quantity, crafts, "createdAt", "updatedAt"
+            id, "orderId", sequence, name, "productId", "pricingRoute", craft,
+            "productStructure", quantity, crafts, "foilTechnique",
+            "createdAt", "updatedAt"
           ) VALUES (
-            $1, $2, 1, '排行 fixture', $3,
-            5000, ARRAY[]::text[], NOW(), NOW()
+            $1, $2, 1, '排行 fixture', $3, $4::"OrderItemPricingRoute",
+            $5::"OrderCraft", $6::"OrderProductStructure",
+            5000, ARRAY[]::text[], $7::"OrderFoilTechnique", NOW(), NOW()
           )
           `,
           [
             `${orderId}-item`,
             orderId,
-            spec.productSuffix ? `e2e-dash-prod-${spec.productSuffix}` : null,
+            productId,
+            pricingFacts.route,
+            pricingFacts.craft,
+            pricingFacts.structure,
+            pricingFacts.foilTechnique,
           ],
         );
         rankingOrderIds.push(orderId);
@@ -2039,7 +2136,7 @@ export async function cleanupE2eProductionOperationFixture(
 export async function submitDraftOrderAndWait(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^提交工单$/ }).click();
   await expect(page.getByRole('heading', { level: 1 })).toContainText(
-    /已提交|排产中/,
+    /待工厂确认|排产中/,
     { timeout: 20_000 },
   );
 }
@@ -2584,13 +2681,16 @@ export async function seedCdrOrder(opts: {
     await db.query(
       `
       INSERT INTO "OrderItem" (
-        id, "orderId", sequence, name, "specification", "paperType",
+        id, "orderId", sequence, name, "pricingRoute", craft,
+        "productStructure", "specification", "paperType",
         quantity, "foilColors", "isDoubleSided", "isDoubleColor",
-        crafts, "createdAt", "updatedAt"
+        crafts, "foilTechnique", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, 1, 'CDR 测试款', '9cm', '珠光纸',
+        $1, $2, 1, 'CDR 测试款',
+        'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute", 'FULL'::"OrderCraft",
+        'STANDARD_ENVELOPE'::"OrderProductStructure", '9cm', '珠光纸',
         5000, ARRAY['金色']::text[], FALSE, FALSE,
-        ARRAY[]::text[], NOW(), NOW()
+        ARRAY[]::text[], 'FLAT'::"OrderFoilTechnique", NOW(), NOW()
       )
       `,
       [orderItemId, orderId],

@@ -59,7 +59,11 @@ test.describe('owner notifications — admin UI', () => {
     ).toBeVisible();
 
     // ─── 2. 创建 channel ───
-    await page.getByRole('link', { name: '新建群' }).click();
+    await page
+      .getByRole('heading', { name: '企业微信群', exact: true })
+      .locator('..')
+      .getByRole('link', { name: '新建群', exact: true })
+      .click();
     await expect(page).toHaveURL(/\/owner\/notifications\/channels\/new/);
 
     await page.locator('#channelKey').fill(channelKey);

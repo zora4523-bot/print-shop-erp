@@ -379,7 +379,9 @@ test.describe('automation smoke', () => {
       .fill(fixture.supplierPartyCode.toLowerCase());
     await page.getByLabel('名称', { exact: true }).fill('重复供应商回归');
     await page.getByRole('button', { name: '创建客户/供应商' }).click();
-    await expect(page.getByText('该客户/供应商编码已被占用')).toBeVisible();
+    await expect(
+      page.getByText('该客户/供应商编码已被占用', { exact: true }),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/owner\/parties\/new\?/);
     await expectNoNextErrorOverlay(page);
 

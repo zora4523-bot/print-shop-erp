@@ -29,7 +29,7 @@ import {
 // Unit tests can mock either side independently; this flow proves the real
 // browser actions and PostgreSQL transactions preserve that separation.
 test.describe('客服业绩事件账本与外部销售应收分离', () => {
-  test('客服自动计价提交计入业绩，外部销售两次回款均不改写客服业绩', async ({
+  test('客服待核制版费工单提交计入已知业绩，外部销售两次回款均不改写客服业绩', async ({
     page,
   }) => {
     test.setTimeout(90_000);
@@ -60,7 +60,7 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
     expect(before?.periodId).toBe(periodId);
     expect(Number(before!.totalSales)).toBe(0);
 
-    await test.step('客服创建并提交自动计价工单，提交事件按工单金额计入业绩', async () => {
+    await test.step('客服创建并提交待核制版费工单，提交事件按当前已知金额计入业绩', async () => {
       await login(page, {
         from: '/orders/new',
         username: E2E_USERS.customerService.username,
@@ -127,7 +127,9 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
       });
       expect(pricing).not.toBeNull();
       expect(pricing!.settlementType).toBe('INTERNAL_SALES');
-      expect(pricing!.pricingStatus).toBe('AUTO_CONFIRMED');
+      // 局部烫金的材料与机烫费已自动计价，但制版费金额待工厂确认。
+      // 当前契约必须 fail closed，不能把“已知部分有价”误判为终价已确认。
+      expect(pricing!.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
       expect(Number(pricing!.totalAmount)).toBeGreaterThan(0);
       submittedCsOrderAmount = pricing!.totalAmount;
 
