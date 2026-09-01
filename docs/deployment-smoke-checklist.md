@@ -75,6 +75,7 @@ NODE_ENV=production \
 NOTIFICATION_MOCK_MODE=false \
 BACKGROUND_JOBS_MODE=durable \
 ORDER_EXPORT_ARTIFACT_DIR=/var/tmp/print-shop-erp/order-exports \
+AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR=/var/tmp/print-shop-erp/agent-monthly-bill-exports \
 PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
 DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn \
 pnpm deploy:smoke --skip-build --require-base-url

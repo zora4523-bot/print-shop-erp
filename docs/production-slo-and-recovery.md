@@ -29,7 +29,7 @@
 - 至少两个独立 repository：Pigsty 节点本地一份，异地对象存储一份。
 - 连续 WAL 归档同时写入两个 repository，以支持 PITR。
 - OSS `design/` 原稿开启版本化与跨区域复制；`bundles/` 为可再生成产物，可用生命周期规则清理。
-- 工单 XLSX 是可再生成的私有临时产物，不纳入备份；单机基线存在 `ORDER_EXPORT_ARTIFACT_DIR`。READY 产物生成完成后 24 小时过期；无账本 orphan 为避免误删刚落盘但事务结果尚不确定的文件，留出最多约 48 小时安全窗口后回收。`/api/cron/order-export-cleanup` 每次按 100 行一批、最多处理 500 行，剩余行由下一次调度继续；终态筛选收据只保留 scope，不保留参数或可枚举的确定性哈希。多机部署前必须迁往私有对象存储并保留本人授权与下载审计。
+- 工单与代理商月账单 XLSX 是可再生成的私有临时产物，不纳入备份；分别使用 `ORDER_EXPORT_ARTIFACT_DIR` 和 `AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR`，两者不得共用。READY 产物生成完成后 24 小时过期；无账本 orphan 为避免误删刚落盘但事务结果尚不确定的文件，留出最多约 48 小时安全窗口后回收。`/api/cron/order-export-cleanup` 同时回收两套账本，每套每次按 100 行一批、最多处理 500 行；终态月账单导出收据擦除全部筛选参数。多机部署前必须迁往私有对象存储并保留本人授权与下载审计。
 - 备份凭证不进入应用 `.env`、CI 或 Git，由 Pigsty 主机管理。
 
 每日由监控节点执行只读验收：

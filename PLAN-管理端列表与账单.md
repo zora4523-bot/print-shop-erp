@@ -2,26 +2,28 @@
 
 # PLAN-管理端列表与账单
 
-> 状态：等待确认，未开始业务实现。
+> 状态：两波业务实现、additive migrations 与验证均已完成；静态门禁、完整 Vitest、browser tests、生产构建和独立库迁移均已通过。第二次完整 Playwright（定位器修复前）为 98 passed、6 failed、12 skipped；其中 4 项移动端定位器竞争已修复，并以 375×667、393×852 亮/暗主题各重复 3 次定向验证，12/12 通过。最终可接受失败仅为 2 条已存档的既有基线签名，剩余工作为发布收口。
 >
-> 计划基线：`codex/gogndan@f04a5c041a7acec23ea8ac55f9532764b02c1c98`。
+> 实施分支：`codex/gogndan`；计划基线：`f04a5c041a7acec23ea8ac55f9532764b02c1c98`。
 >
 > 基线证据：`docs/audits/2026-09-02-admin-order-list-billing-baseline.md`。
 >
 > 真值优先级：规则文档 > 任务文档 > HTML demo 的布局与交互。demo 中的内存数据、状态映射和模拟按钮不是后端业务真值。
 
-## 1. 结论先行
+## 1. 执行结论
 
-当前 `/orders` 已具备服务端分页、稳定的新单优先排序、组合筛选、运单号搜索和异步全量/筛选导出，可以保留这些基础。但它仍是普通表格，不具备 demo 所要求的管理工作台队列、统计卡、费用合计、个人星标、版本化打印、批量命令、裁决抽屉、双工序进度和新月账单。
+原计划的两波功能已在同一实施分支完成。`/orders` 已从普通表格升级为管理工作台，具备六队列、六个工单信号卡与一个待收款卡、全集合计、个人星标、富行、深链抽屉、裁决、批量命令、版本化打印、双工序进度和异步导出；`/owner/agent-bills` 已提供按 `settledAt` 上海月归集的新月账单，旧账单留在只读归档入口。
 
-这不是单纯换 UI：当前订单只有 9 态，真值文档要求 11 态；打印没有持久化事实；变更申请没有 CANCEL 语义；`settledAt` 不存在；旧 Bill 按 `FINISHED + finishedAt + totalAmount` 归集且支持补充账单和部分收款。若直接照 demo 拼页面，会制造无法审计的派生状态和错误财务口径。
+本轮没有把 demo 的模拟状态当成业务真值。实现新增了 11 态工作流所需状态、独立 `workOrderVersion`、`settledAt`、MODIFY/CANCEL 变更裁决、append-only 打印事实、工单数量报工/扫码认领事实和并行的 v2 代理月账本；旧状态与旧 `Bill/BillItem/BillPayment` 继续兼容读取，没有删除或重解释历史财务事实。
 
-因此按两波实施：
+实施按原定两波完成：
 
-- 第一波先补工作流、结算和打印真值，再实现队列、裁决、批量、通知与新月账单。
-- 第二波接入已合入的扫码报工 ledger，补双进度、异常、停滞检测和对应通知。
+- 第一波完成工作流、结算和打印真值，以及队列、裁决、批量、通知与新月账单。
+- 第二波完成工单数量报工 ledger、扫码认领、双进度、异常、停滞检测和对应通知。
 
-报工引擎代码依赖现已合入当前基线，但其 `PACKING=PER_BAG` 和“认领运行时已删除”与本任务锁定真值冲突。它不是可改写的产品口径，而是依赖产出尚未满足契约的实现缺口；第二波必须补成“烫金/打包均以工单数量为进度上限、打包大于烫金实时提示、下发后无人扫码认领满 2 天标停滞”。
+报工的计薪单位仍保持原语义；新增 `workOrderProgressQuantity` 独立表达工单件数，FOILING/PACKING 分别以当前工单版本的订单数量为硬上限。首次有效扫码写入 append-only claim；打包进度大于烫金实时提示，下发后无认领满阈值进入停滞扫描。
+
+完整实施与验证证据见 `REPORT-管理端列表与账单.md`。
 
 ## 2. 前置三步完成情况
 
@@ -31,8 +33,11 @@
 2. 两组源/目标文件均通过 `cmp`；四份真值文档的 SHA-256 固定在本 PLAN 第一行。
 3. 已创建干净基线 commit：`f04a5c0 docs: pin admin work-order planning sources`。
 4. 已完成完整基线验证；唯一红项及全部通过项已存入基线审计，不在本任务顺手修复。
+5. 用户确认后已完成 W1-01 至 W1-07、W2-01 至 W2-02；共新增 9 个 expand-only migration，fresh migration chain 已通过 `132/132`。
 
-## 3. 当前实现与 demo 的差距
+## 3. 规划时实现与 demo 的差距（现已关闭）
+
+本节保留为实施前差距证据；表中的“当前”均指计划基线 `f04a5c0`，不代表实施后的代码状态。
 
 ### 3.1 可复用基础
 
@@ -111,7 +116,7 @@ demo 本身有以下已确认的不一致，执行时不能照抄其 JavaScript�
 - 批量命令按白名单实现：下发、创建打印任务/标记已打印、结算、导出所选。服务端逐单返回成功、跳过及稳定原因码，不采用全有或全无的浏览器假设。
 - `selected` 导出仍进入现有异步导出 job；服务端重新校验所选 ID 与权限。
 
-## 5. 第一波 PR 序列：管理工作台、裁决、通知、账单
+## 5. 第一波实施序列：管理工作台、裁决、通知、账单（已完成）
 
 ### W1-01 `feat(order-workflow): expand lifecycle and settlement foundations`
 
@@ -214,7 +219,7 @@ W1-01 工作流/结算基础 ─┬─> W1-02 队列读模型/UI
 - 标记已收由服务端写当前锁定总额，一次原子插入 Receipt 并 CONFIRMED→PAID；客户端不能传任意收款金额。
 - 月界使用固定锁序 `cutoff → agent-period → bill/source-item → idempotency request`，防止结算 writer 与月初扫描遗漏或 ABBA 死锁。
 
-## 7. 第二波 PR 序列：报工进度、异常、停滞通知
+## 7. 第二波实施序列：报工进度、异常、停滞通知（已完成）
 
 已合入事实：计件与无计件进度均为 append-only ledger，累计超过各自当前计划量会在写入时硬拒绝。尚未满足的锁定契约是：PACKING 当前按袋计量，不能证明“打包累计≤工单数量”；认领运行时已被删除，不能证明“下发后无人扫码认领”。第二波先补这两个依赖缺口，再接管理列表。
 
@@ -264,6 +269,16 @@ W1-05 通知配置与深链基础 ───────────────�
 
 ## 9. 验证与提交纪律
 
+### 9.0 当前执行结果
+
+- 真值文档 SHA-256 复核未变化。
+- Prisma format、validate、generate 通过；独立空库 fresh migration chain `132/132` 通过并可 seed。
+- `check:architecture` 通过：704 modules、2,612 dependencies、32 个既有 long-function debt。
+- lint、typecheck、`check:dead-code` 通过；dead-code 报告为 118 个 knip issue groups、656 个 ts-prune candidates、0 cycles，候选不等于授权删除。
+- 完整 Node Vitest 通过：490 files，4,509 passed、43 skipped，共 4,552 tests；同套用例在迁移并 seed 的独立数据库再次通过。
+- Vitest browser 通过：2 files、2 tests；production build 通过，Next.js 16.2.4 生成 59 个静态页面。
+- 第二次完整 Playwright（定位器修复前）共 116 项：98 passed、6 failed、12 skipped。4 项移动端失败来自测试在 RSC 导航尚未稳定时继续操作的定位器竞争；修复后对 375×667、393×852 的亮/暗主题执行 `--repeat-each=3`，12/12 通过（5.7 分钟）。其余 2 项分别匹配已存档的 `notification-cron.spec.ts:137` 固定逾期天数基线，以及 `[worker-1024x768] worker-responsive.spec.ts:41` dark-token 过渡帧对比度波动基线，均非本轮回归。
+
 ### 9.1 每个 PR 的通用门禁
 
 - 写任何 Next.js 页面/API 前，先阅读 `node_modules/next/dist/docs/` 中对应当前版本指南。
@@ -272,7 +287,7 @@ W1-05 通知配置与深链基础 ───────────────�
 - 定向 PostgreSQL 单元/集成测试，随后完整 Vitest + coverage 与 browser tests。
 - Playwright 相关功能项目和管理端视觉矩阵；每波结束跑完整 116 项基线矩阵。
 - production `next build`。
-- 唯一允许保留的红项是基线记录的逾期天数用例同签名失败；任何新增失败均阻止合并。
+- 可接受红项仅限两条已存档的同签名基线：`notification-cron.spec.ts:137` 的固定逾期天数，以及 `[worker-1024x768] worker-responsive.spec.ts:41` 的 dark-token 过渡帧对比度波动；任何其他失败均阻止合并。
 
 ### 9.2 关键验收
 
@@ -293,6 +308,8 @@ W1-05 通知配置与深链基础 ───────────────�
 - 本计划不授权删除 legacy 状态、Bill、公开 API、migration、动态 import、注册表、i18n key 或生产分支。
 - 若后续出现删除候选，先全仓 `rg` 检查配置、构建脚本、SQL、Prisma schema/migrations 和动态入口，记录实际引用；每一条删除后分别 build/test/typecheck，失败立即回滚该条删除。
 
-## 10. 停止点
+## 10. 完成状态与剩余发布步骤
 
-本文件仅完成差距分析、两波 PR 序列、additive migration 和默认决策。当前不实施业务代码、不改 schema、不生成 migration、不修复基线红项；等待用户确认本 PLAN 后再从 W1-01 开始。
+原“输出 PLAN 后停下等待确认”的停止点已由用户明确解除。业务实现、schema、9 个 additive migrations、领域测试与质量门禁均已完成；没有顺手修复或放宽两条既有基线断言。
+
+剩余发布步骤仅为：按逻辑边界拆分 commit、push、创建 PR、合并主分支，以及在主分支执行浏览器验收并启动本地 3000 端口开发服务器。任一不属于上述两条已存档基线签名的 E2E 回归仍须在合并前修复。
