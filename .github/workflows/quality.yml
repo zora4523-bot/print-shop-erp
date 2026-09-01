@@ -89,6 +89,9 @@ jobs:
           pnpm exec prisma migrate deploy
           pnpm db:seed
 
+      - name: Audit review data integrity
+        run: pnpm audit:review-data
+
       - name: Unit, regression, and PostgreSQL tests with coverage
         run: pnpm exec vitest run --coverage --reporter=default
 

@@ -15,7 +15,12 @@ function localBinary(rootDir, name) {
   return path.join(rootDir, 'node_modules', '.bin', `${name}${suffix}`);
 }
 
-export function executeTool({ rootDir, name, args }) {
+export function executeTool({
+  rootDir,
+  name,
+  args,
+  acceptedExitCodes = [0],
+}) {
   return new Promise((resolve, reject) => {
     const child = spawn(localBinary(rootDir, name), args, {
       cwd: rootDir,
@@ -34,7 +39,7 @@ export function executeTool({ rootDir, name, args }) {
     });
     child.on('error', reject);
     child.on('close', (code, signal) => {
-      if (code === 0) {
+      if (acceptedExitCodes.includes(code)) {
         resolve({ stdout, stderr });
         return;
       }
@@ -113,6 +118,9 @@ export async function collectDeadCodeReport({
     execute({
       rootDir,
       name: 'madge',
+      // madge uses exit 1 to report that --circular found cycles while still
+      // writing valid JSON. Other non-zero exits remain scanner failures.
+      acceptedExitCodes: [0, 1],
       args: [
         '--circular',
         '--json',

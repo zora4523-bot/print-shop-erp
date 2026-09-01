@@ -1,11 +1,23 @@
 import 'dotenv/config';
 
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 const databaseUrl = process.env.DATABASE_URL;
 const postgresDescribe = databaseUrl ? describe : describe.skip;
+const migration = readFileSync(
+  path.join(
+    process.cwd(),
+    'prisma',
+    'migrations',
+    '20260830160000_order_edit_version',
+    'migration.sql',
+  ),
+  'utf8',
+);
 
 function quoteIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
@@ -27,28 +39,17 @@ postgresDescribe.sequential('order edit monotonic-version CAS · PostgreSQL', ()
       await first.query(`CREATE SCHEMA ${quotedSchema}`);
       await first.query(`SET search_path TO ${quotedSchema}, public`);
       await second.query(`SET search_path TO ${quotedSchema}, public`);
+      await first.query(`SET statement_timeout TO '5s'`);
+      await second.query(`SET statement_timeout TO '5s'`);
       await first.query(`
         CREATE TABLE "Order" (
           "id" TEXT PRIMARY KEY,
           "settlementType" TEXT NOT NULL,
           "remark" TEXT,
-          "editVersion" INTEGER NOT NULL DEFAULT 0,
           "updatedAt" TIMESTAMPTZ(3) NOT NULL
-        );
-        CREATE FUNCTION bump_order_edit_version()
-        RETURNS trigger
-        LANGUAGE plpgsql
-        AS $$
-        BEGIN
-          NEW."editVersion" := OLD."editVersion" + 1;
-          RETURN NEW;
-        END;
-        $$;
-        CREATE TRIGGER order_edit_version_bump
-        BEFORE UPDATE ON "Order"
-        FOR EACH ROW
-        EXECUTE FUNCTION bump_order_edit_version()
+        )
       `);
+      await first.query(migration);
       await first.query(
         `INSERT INTO "Order" ("id", "settlementType", "remark", "updatedAt")
          VALUES ('order-1', 'EXTERNAL_SALES', NULL, '2026-08-30T00:00:00.000Z')`,
@@ -113,5 +114,5 @@ postgresDescribe.sequential('order edit monotonic-version CAS · PostgreSQL', ()
       await first.end();
       await second.end();
     }
-  });
+  }, 10_000);
 });

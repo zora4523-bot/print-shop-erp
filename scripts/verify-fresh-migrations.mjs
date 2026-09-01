@@ -135,6 +135,22 @@ try {
     }
   }
 
+  const orderEditTrigger = await verification.query(`
+    SELECT trigger.tgenabled AS enabled,
+           pg_get_triggerdef(trigger.oid) AS definition
+      FROM pg_trigger trigger
+     WHERE trigger.tgrelid = '"Order"'::regclass
+       AND trigger.tgname = 'order_edit_version_bump'
+       AND NOT trigger.tgisinternal
+  `);
+  expectEqual(orderEditTrigger.rowCount, 1, '最终 Order 编辑版本触发器数量');
+  expectEqual(orderEditTrigger.rows[0]?.enabled, 'O', 'Order 编辑版本触发器状态');
+  if (!/BEFORE UPDATE ON public\."Order"/u.test(
+    String(orderEditTrigger.rows[0]?.definition),
+  )) {
+    fail('Order 编辑版本触发器未在最终 schema 中保持 BEFORE UPDATE 语义。');
+  }
+
   const pricing = await verification.query(`
     SELECT
       five_tier."version" AS "fiveTierVersion",
