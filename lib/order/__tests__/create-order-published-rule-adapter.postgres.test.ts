@@ -18,12 +18,13 @@ import {
 import { readExternalCreateOrderPriceSnapshot } from '../create-order-price-snapshot';
 
 const databaseDescribe = process.env.DATABASE_URL ? describe : describe.skip;
-const FIXED_CURRENT_TIME = new Date('2026-08-28T08:00:00.000Z');
 const PROCESSING_BOOK_ID = 'cpb_external_processing_rule_v3';
 const FIVE_TIER_PROCESSING_BOOK_ID =
   'cpb_external_processing_rule_v4_five_tier';
 const RETIRED_INCOMPATIBLE_PROCESSING_BOOK_ID =
   'cpb_stock_local_foil_bef5f8d170b81d40ad1e338e';
+const FRESH_INCOMPATIBLE_PROCESSING_BOOK_ID =
+  'cpb_external_sales_processing_202608_v1';
 const LOGISTICS_BOOK_ID = 'cpb_external_logistics_weight_policy_v3';
 const PROCESSING_SOURCE_SHA =
   '3596993e283d1d06f01dd7048b6ccf2f1c0e4b27394541e004a37419c856d817';
@@ -36,10 +37,54 @@ const SHIPPING_SOURCE_SHA =
 const CARTON_SOURCE_SHA =
   '9f0c30333a737ab9d36398b8af2c84ece599317f9df21af5dacb8f365fa5401b';
 
-async function readCurrentProjectionInput(): Promise<PublishedCreateOrderPriceProjectionInput> {
+type ProjectionWindow = {
+  at: Date;
+  start: Date;
+  end: Date | null;
+};
+
+async function readProjectionWindow(
+  processingBookId: string,
+): Promise<ProjectionWindow> {
+  const books = await db.customerPriceBook.findMany({
+    where: { id: { in: [processingBookId, LOGISTICS_BOOK_ID] } },
+    select: { id: true, effectiveFrom: true, effectiveTo: true },
+  });
+  const processing = books.find((book) => book.id === processingBookId);
+  const logistics = books.find((book) => book.id === LOGISTICS_BOOK_ID);
+  if (!processing || !logistics) {
+    throw new Error('Published projection test books are missing');
+  }
+
+  const startMillis = Math.max(
+    processing.effectiveFrom.getTime(),
+    logistics.effectiveFrom.getTime(),
+  );
+  const finiteEnds = [processing.effectiveTo, logistics.effectiveTo]
+    .filter((value): value is Date => value !== null)
+    .map((value) => value.getTime());
+  const endMillis = finiteEnds.length === 0 ? null : Math.min(...finiteEnds);
+  if (endMillis !== null && startMillis >= endMillis) {
+    throw new Error('Published projection test books have no shared window');
+  }
+
+  return {
+    at: new Date(
+      endMillis === null
+        ? startMillis
+        : startMillis + Math.floor((endMillis - startMillis) / 2),
+    ),
+    start: new Date(startMillis),
+    end: endMillis === null ? null : new Date(endMillis),
+  };
+}
+
+async function readCurrentProjectionInput(
+  now: Date,
+): Promise<PublishedCreateOrderPriceProjectionInput> {
   return db.$transaction(async (tx) => {
     const priceVersion = await readExternalCreateOrderPriceSnapshot(tx, {
-      now: FIXED_CURRENT_TIME,
+      now,
     });
     const bookIds = [priceVersion.processing.id, priceVersion.logistics.id];
     const [books, rules] = await Promise.all([
@@ -88,9 +133,10 @@ async function readCurrentProjectionInput(): Promise<PublishedCreateOrderPricePr
 
 databaseDescribe.sequential('published create-order rule adapter · PostgreSQL contract', () => {
   it('projects the exact currently published v3 rows and evidence', async () => {
+    const { at } = await readProjectionWindow(PROCESSING_BOOK_ID);
     const { snapshot, audit } = await db.$transaction((tx) =>
       readPublishedCreateOrderPriceProjection(tx, {
-        now: FIXED_CURRENT_TIME,
+        now: at,
       }),
     );
 
@@ -171,17 +217,24 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
   });
 
   it('projects the published five-tier successor across the retired schedule boundary', async () => {
-    const repairedBook = await db.customerPriceBook.findUniqueOrThrow({
-      where: { id: FIVE_TIER_PROCESSING_BOOK_ID },
+    const window = await readProjectionWindow(FIVE_TIER_PROCESSING_BOOK_ID);
+    const retiredBook = await db.customerPriceBook.findUnique({
+      where: { id: RETIRED_INCOMPATIBLE_PROCESSING_BOOK_ID },
       select: { effectiveFrom: true },
     });
-    const repairedAt = new Date(repairedBook.effectiveFrom.getTime() + 1);
     const projected = await db.$transaction((tx) =>
-      readPublishedCreateOrderPriceProjection(tx, { now: repairedAt }),
+      readPublishedCreateOrderPriceProjection(tx, { now: window.at }),
     );
+    const retiredBoundary = retiredBook?.effectiveFrom;
+    const boundaryAt =
+      retiredBoundary &&
+      retiredBoundary >= window.start &&
+      (window.end === null || retiredBoundary < window.end)
+        ? retiredBoundary
+        : window.at;
     const afterRetiredSchedule = await db.$transaction((tx) =>
       readPublishedCreateOrderPriceProjection(tx, {
-        now: new Date('2026-08-29T09:59:00.000Z'),
+        now: boundaryAt,
       }),
     );
 
@@ -258,7 +311,9 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
   });
 
   it('projects the exact release candidate with its effective-time counterpart and rejects the retired incompatible candidate', async () => {
-    const effectiveFrom = new Date('2026-08-29T09:59:00.000Z');
+    const { at: effectiveFrom } = await readProjectionWindow(
+      FIVE_TIER_PROCESSING_BOOK_ID,
+    );
     const candidate = await db.$transaction((tx) =>
       readCandidatePublishedCreateOrderPriceProjection(tx, {
         candidatePriceBookId: FIVE_TIER_PROCESSING_BOOK_ID,
@@ -284,10 +339,15 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
       logistics: { id: LOGISTICS_BOOK_ID },
     });
 
+    const retiredCandidate = await db.customerPriceBook.findUnique({
+      where: { id: RETIRED_INCOMPATIBLE_PROCESSING_BOOK_ID },
+      select: { id: true },
+    });
     await expect(
       db.$transaction((tx) =>
         readCandidatePublishedCreateOrderPriceProjection(tx, {
-          candidatePriceBookId: RETIRED_INCOMPATIBLE_PROCESSING_BOOK_ID,
+          candidatePriceBookId:
+            retiredCandidate?.id ?? FRESH_INCOMPATIBLE_PROCESSING_BOOK_ID,
           effectiveFrom,
         }),
       ),
@@ -295,7 +355,8 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
   });
 
   it('preserves null versus zero and fails closed on duplicate or missing rules', async () => {
-    const input = await readCurrentProjectionInput();
+    const { at } = await readProjectionWindow(PROCESSING_BOOK_ID);
+    const input = await readCurrentProjectionInput(at);
     const blank = input.rules.find(
       (rule) => rule.code === 'BASE_STOCK-PEARL-FLASH-160-MID',
     )!;

@@ -3,6 +3,8 @@ name: Quality
 on:
   pull_request:
   push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -88,7 +90,7 @@ jobs:
           pnpm db:seed
 
       - name: Unit, regression, and PostgreSQL tests with coverage
-        run: pnpm exec vitest run --coverage --reporter=dot
+        run: pnpm exec vitest run --coverage --reporter=default
 
       - name: Compile browser test inventory
         run: pnpm exec playwright test --list
