@@ -1132,3 +1132,12 @@
 - **并发与时间**：账号身份/角色/工种/受雇日期变更与考勤、已发时薪、报工和计件结算取同一资格锁契约。计件结算日的“已截止”判断和批次发现使用数据库时钟，两种跨午夜提交顺序都不留遗漏报工。上海当月不可标记时薪已发。
 - **数值边界**：数据库工资列宽度覆盖已关闭规则输入的最大合法组合；应用在写入前仍校验费率精度和最终金额上限。
 - **相关实现与验收**：`lib/salary/employment.ts`、`lib/salary/hourly-lock.ts`、`lib/salary/piecework-lock.ts`、`lib/salary/hourly-aggregate.ts`、`lib/salary/cs.ts`、`prisma/migrations/20260830190000_salary_decimal_and_employment_guards/` 及双客户端 PostgreSQL 并发测试。
+
+---
+
+## 2026-09-01：报价纸张身份读取不再锁库存行
+
+- **决策**：外部销售提交仍先取价目快照共享 advisory lock，再读全量纸张完成失败关闭的身份判定，但不再对 `Material` 取 `FOR SHARE` 行锁。本条取代 2026-08-30 条目中“再锁所有纸张行”的并发实现约束，不改变零个、多个或停用纸张均失败关闭的业务语义。
+- **理由**：纸张创建、改名和停用都取同一把快照排他锁，共享锁已能防止幻读和身份漂移。库存移动不取该锁却会对 `Material` 取 `FOR UPDATE`；报价再取纸张行锁会在多物料事务中形成跨域 ABBA 死锁。
+- **边界**：库存数量不参与纸张身份匹配，`outOfStock` 当前也没有运行时写入方。未来新增纸张身份字段或 `outOfStock` 写入时，必须纳入价目快照排他锁；不能以恢复 `Material` 行锁代替。
+- **相关实现与验收**：`lib/order/submit-external-order.ts`、`lib/material.ts`、`lib/order/__tests__/submit-external-order.test.ts` 及 `lib/__tests__/material-price-snapshot-lock.postgres.test.ts`。

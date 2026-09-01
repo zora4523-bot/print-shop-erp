@@ -1011,6 +1011,10 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       ),
     ).rejects.toThrow('第 7 款纸张“150g莱尼纹 / 莱尼纹”已缺货或停用');
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const paperReadSql = (
+      tx.$queryRaw.mock.calls[0]![0] as TemplateStringsArray
+    ).join('?');
+    expect(paperReadSql).not.toMatch(/\bFOR\s+(?:KEY\s+)?(?:SHARE|UPDATE)\b/iu);
     expect(tx.$executeRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
       tx.$queryRaw.mock.invocationCallOrder[0]!,
     );
