@@ -76,6 +76,8 @@ jobs:
           pnpm test:migrations:fresh
 
       - name: Static quality gates
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           pnpm check:architecture
           pnpm lint
