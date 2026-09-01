@@ -1,0 +1,60 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+
+  // Framework, CLI, deployment and test files are entry points. Entry exports
+  // are intentionally not reported, which avoids treating test helpers and
+  // Next.js convention exports as dead public API.
+  "entry": [
+    "app/**/{page,layout,loading,error,global-error,not-found,default,template,route,sitemap,robots,manifest}.{ts,tsx}",
+    "instrumentation.ts",
+    "proxy.ts",
+    "prisma/seed.ts",
+    "scripts/**/*.{js,mjs,cjs,ts}",
+    "deploy/**/*.{js,mjs,cjs,ts}",
+    "*.config.{js,mjs,cjs,ts}",
+    "**/__tests__/**/*.test.{ts,tsx}",
+    "**/*.test.{ts,tsx}",
+    "tests/e2e/**/*.ts",
+    "tests/visual/**/*.ts"
+  ],
+  "project": [
+    "actions/**/*.{ts,tsx}",
+    "app/**/*.{ts,tsx}",
+    "components/**/*.{ts,tsx}",
+    "hooks/**/*.{ts,tsx}",
+    "lib/**/*.{ts,tsx}",
+    "scripts/**/*.{js,mjs,cjs,ts}",
+    "tests/**/*.{ts,tsx}",
+    "prisma/seed.ts",
+    "deploy/**/*.{js,mjs,cjs,ts}",
+    "*.{ts,mts,js,mjs,cjs}"
+  ],
+
+  // Generated Prisma clients and immutable migration history are evidence,
+  // not hand-maintained deletion candidates. Build/test artifacts and review
+  // output must not feed the next scan back into itself.
+  "ignore": [
+    "generated/**",
+    "prisma/migrations/**",
+    "**/*.d.ts"
+  ],
+  "ignoreIssues": {
+    "**/__tests__/**": ["files", "exports", "types"],
+    "**/*.test.{ts,tsx}": ["files", "exports", "types"],
+    "tests/**": ["files", "exports", "types"]
+  },
+
+  // Scanner binaries are invoked dynamically. Prisma's generated client and
+  // the Tailwind packages are referenced from generated code/CSS, both of
+  // which are deliberately outside Knip's TypeScript project graph.
+  "ignoreDependencies": [
+    "@prisma/client",
+    "knip",
+    "madge",
+    "tailwindcss",
+    "ts-prune",
+    "tw-animate-css"
+  ],
+  "ignoreBinaries": ["pgbackrest"],
+  "exclude": ["cycles"]
+}
