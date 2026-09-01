@@ -112,13 +112,11 @@ test.describe('owner notifications — admin UI', () => {
     await expect(orderSubmittedRow).toContainText('启用');
 
     // ─── 4. 测试按钮（mock-mode）触发 __TEST__ log ───
-    page.once('dialog', (d) => d.accept());
     await page
       .locator('tr', { has: page.locator(`text=${channelName}`) })
       .getByRole('button', { name: '测试' })
       .click();
-    // alert 弹完后会 reload；等&ldquo;最近推送日志&rdquo;表里出现测试记录
-    // —— Playwright 会自动等 page reload。
+    // 操作成功后页面会刷新；等“最近推送日志”表里出现测试记录。
     await expect(page.getByText('测试消息', { exact: true }).first()).toBeVisible({
       timeout: 5000,
     });
@@ -143,27 +141,34 @@ test.describe('owner notifications — admin UI', () => {
     const deleteBtn2 = channelRow.getByRole('button', { name: '删除' });
     await expect(deleteBtn2).not.toBeDisabled();
 
-    // 但点了之后会被 PG FK 拒（NotificationLog.__TEST__ 行还指着此
-    // channel）。Action 把 P2003 翻译成可读 alert：&ldquo;该群有历史推送
-    // 日志，无法删除。请改为停用&rdquo;。
-    let confirmAccepted = false;
-    let alertMessage = '';
-    page.on('dialog', async (d) => {
-      if (d.type() === 'confirm' && !confirmAccepted) {
-        confirmAccepted = true;
-        await d.accept();
-      } else if (d.type() === 'alert') {
-        alertMessage = d.message();
-        await d.accept();
-      } else {
-        await d.dismiss();
-      }
-    });
+    // 确认删除后，NotificationLog.__TEST__ 的外键会拒绝删除；
+    // 错误以页面内 ActionNotice 呈现，不是浏览器原生 alert。
     await deleteBtn2.click();
-    // 等到 alert 触发后填入 alertMessage
-    await expect.poll(() => alertMessage, { timeout: 5_000 }).toMatch(
-      /历史推送日志|无法删除/,
-    );
+
+    const deleteDialog = page.getByRole('alertdialog', {
+      name: `删除“${channelName}”？`,
+      exact: true,
+    });
+    await expect(deleteDialog).toBeVisible();
+    await expect(
+      deleteDialog.getByText('存在规则或历史投递记录时无法删除。', {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await deleteDialog
+      .getByRole('button', { name: '确认删除', exact: true })
+      .click();
+
+    const deleteError = channelRow.getByRole('alert', {
+      name: '删除失败',
+      exact: true,
+    });
+    await expect(deleteError).toBeVisible();
+    await expect(
+      deleteError.getByText('该群有历史推送记录，无法删除。请改为停用。', {
+        exact: true,
+      }),
+    ).toBeVisible();
     // 行仍在
     await expect(channelRow).toBeVisible();
 

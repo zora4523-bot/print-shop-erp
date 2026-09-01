@@ -414,7 +414,9 @@ test.describe('automation smoke', () => {
     }
 
     await page.goto('/owner/purchases');
-    await expect(page.getByRole('heading', { name: '采购单' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: '采购单', exact: true }),
+    ).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/purchases/new');
@@ -505,8 +507,10 @@ test.describe('automation smoke', () => {
     await expect(page.getByText(fixture.materialName)).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
-    await page.goto(`/owner/materials?q=${fixture.materialCode}`);
-    await expect(page.getByRole('heading', { name: '物料字典' })).toBeVisible();
+    await page.goto(`${RULE_CENTER_HREFS.papers}?q=${fixture.materialCode}`);
+    await expect(
+      page.getByRole('heading', { name: '纸张', exact: true }),
+    ).toBeVisible();
     await expect(page.getByText(fixture.materialCode)).toBeVisible();
     await expect(page.getByText(fixture.materialName)).toBeVisible();
     await expectNoNextErrorOverlay(page);
@@ -524,9 +528,19 @@ test.describe('automation smoke', () => {
     await expect(page.getByText('+1.00 张')).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
-    await page.goto(`/owner/materials?q=${fixture.materialCode}`);
-    await page.getByRole('link', { name: '编辑' }).first().click();
-    await expect(page.getByRole('heading', { name: /编辑物料/ })).toBeVisible();
+    await page.goto(`${RULE_CENTER_HREFS.papers}?q=${fixture.materialCode}`);
+    await page
+      .getByRole('link', {
+        name: `编辑纸张：${fixture.materialName}`,
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByRole('heading', {
+        name: `编辑纸张：${fixture.materialName}`,
+        exact: true,
+      }),
+    ).toBeVisible();
     await expect(page.getByText('库存出入库')).toBeVisible();
     await expect(page.getByRole('heading', { name: '库位库存' })).toBeVisible();
     await expectNoNextErrorOverlay(page);
