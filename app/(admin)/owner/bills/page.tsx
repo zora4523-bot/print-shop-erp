@@ -119,7 +119,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateBillsForm defaultPeriod={currentMonth} />
         <p className="mt-2 text-xs text-muted-foreground">
-          发单前请再次生成 / 追加，确认待入账工单已全部归集。发单后不再追加新工单，遗漏项目需另行处理。
+          未发布的草稿会追加新工单。已发布账单始终保持不变；同月迟到工单会自动归入下一序号的补充账单。
         </p>
       </section>
 
@@ -157,7 +157,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
           title="当前筛选条件下暂无账单"
           description={
             <>
-              若想新建本月账单，先在上方<strong>&ldquo;生成 / 追加月账单&rdquo;</strong>触发。
+              若想新建本月账单，先在上方<strong>&ldquo;生成月账单 / 归集补充账单&rdquo;</strong>触发。
             </>
           }
         />
@@ -182,7 +182,12 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
             <tbody className="divide-y">
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.period}</td>
+                  <td className="px-4 py-3 font-sans tabular-nums text-xs">
+                    {r.period}
+                    <span className="ml-2 text-muted-foreground">
+                      {r.sequence > 1 ? `· 补充${r.sequence}` : '· 主账单'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">{r.salesUser.displayName}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {ROLE_LABELS[r.salesUser.role] ?? '未识别角色'}

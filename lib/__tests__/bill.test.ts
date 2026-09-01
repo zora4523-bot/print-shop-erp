@@ -3,6 +3,8 @@ import {
   BillStatus,
   OrderCostCategory,
   OrderBillingMode,
+  OrderCustomerChargeStatus,
+  OrderPricingStatus,
   OrderSettlementType,
   OrderStatus,
   Role,
@@ -17,7 +19,7 @@ const { dbMock } = vi.hoisted(() => {
       create: vi.fn(),
       update: vi.fn(),
     },
-    billItem: { createMany: vi.fn() },
+    billItem: { findMany: vi.fn(), createMany: vi.fn(), update: vi.fn() },
     billPayment: { findUnique: vi.fn(), create: vi.fn() },
     orderCostEntry: { findUnique: vi.fn(), create: vi.fn() },
     salaryPeriod: {
@@ -60,7 +62,9 @@ beforeEach(() => {
   dbMock.bill.findMany.mockReset().mockResolvedValue([]);
   dbMock.bill.create.mockReset();
   dbMock.bill.update.mockReset();
+  dbMock.billItem.findMany.mockReset().mockResolvedValue([]);
   dbMock.billItem.createMany.mockReset().mockResolvedValue({ count: 0 });
+  dbMock.billItem.update.mockReset().mockResolvedValue({ id: 'bill-item-1' });
   dbMock.billPayment.create.mockReset().mockResolvedValue({ id: 'payment-1' });
   dbMock.billPayment.findUnique.mockReset().mockResolvedValue(null);
   dbMock.orderCostEntry.findUnique.mockReset().mockResolvedValue(null);
@@ -74,6 +78,38 @@ beforeEach(() => {
   });
 });
 
+function billableOrder(
+  input: {
+    id: string;
+    submitterId: string;
+    totalAmount: string;
+  } & Record<string, unknown>,
+) {
+  const { id, submitterId, totalAmount, ...overrides } = input;
+  return {
+    id,
+    orderNo: id,
+    submitterId,
+    status: OrderStatus.FINISHED,
+    billingMode: OrderBillingMode.CHARGE,
+    settlementType: OrderSettlementType.EXTERNAL_SALES,
+    pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
+    finishedAt: new Date('2026-05-15T00:00:00.000Z'),
+    processingAmount: totalAmount,
+    totalAmount,
+    quotedFee: totalAmount,
+    confirmedFee: totalAmount,
+    settledFee: totalAmount,
+    customerCharges: [
+      {
+        status: OrderCustomerChargeStatus.FINAL,
+        amount: '0.00',
+      },
+    ],
+    ...overrides,
+  };
+}
+
 describe('generateBillsForPeriod', () => {
   it('rejects bad period format (reuses parseShanghaiMonth)', async () => {
     await expect(
@@ -83,11 +119,10 @@ describe('generateBillsForPeriod', () => {
 
   it('groups external-sales FINISHED orders by submitter and creates one Bill per group', async () => {
     dbMock.order.findMany.mockResolvedValue([
-      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
-      { id: 'o2', submitterId: 'sales-a', totalAmount: '2500.00' },
-      { id: 'o3', submitterId: 'sales-b', totalAmount: '800.00' },
+      billableOrder({ id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' }),
+      billableOrder({ id: 'o2', submitterId: 'sales-a', totalAmount: '2500.00' }),
+      billableOrder({ id: 'o3', submitterId: 'sales-b', totalAmount: '800.00' }),
     ]);
-    dbMock.bill.findUnique.mockResolvedValue(null);
     let createdCount = 0;
     dbMock.bill.create.mockImplementation(async ({ data }: { data: { salesUserId: string } }) => {
       createdCount += 1;
@@ -123,27 +158,27 @@ describe('generateBillsForPeriod', () => {
 
   it('uses the locked settlement type instead of submitter role for receivables', async () => {
     const candidates = [
-      {
+      billableOrder({
         id: 'sales-order',
         submitterId: 'sales-a',
         submitterRole: Role.SALES,
         settlementType: OrderSettlementType.EXTERNAL_SALES,
         totalAmount: '1200.00',
-      },
-      {
+      }),
+      billableOrder({
         id: 'internal-sales-order',
         submitterId: 'cs-a',
         submitterRole: Role.CUSTOMER_SERVICE,
         settlementType: OrderSettlementType.INTERNAL_SALES,
         totalAmount: '800.00',
-      },
-      {
+      }),
+      billableOrder({
         id: 'admin-order',
         submitterId: 'admin-a',
         submitterRole: Role.ADMIN,
         settlementType: OrderSettlementType.FACTORY_DIRECT,
         totalAmount: '500.00',
-      },
+      }),
     ];
     dbMock.order.findMany.mockImplementation(
       async ({
@@ -154,25 +189,32 @@ describe('generateBillsForPeriod', () => {
           settlementType?: OrderSettlementType;
           submitterRole?: Role;
         };
-        select: Record<string, boolean>;
+        select: Record<string, unknown>;
       }) => {
         expect(where.settlementType).toBe(OrderSettlementType.EXTERNAL_SALES);
         expect(where).not.toHaveProperty('submitterRole');
         expect(select).toEqual({
           id: true,
+          orderNo: true,
           submitterId: true,
+          status: true,
+          billingMode: true,
+          settlementType: true,
+          pricingStatus: true,
+          finishedAt: true,
+          processingAmount: true,
           totalAmount: true,
+          quotedFee: true,
+          confirmedFee: true,
+          settledFee: true,
+          customerCharges: {
+            select: { status: true, amount: true },
+          },
         });
         return candidates
-          .filter((order) => order.settlementType === where.settlementType)
-          .map(({ id, submitterId, totalAmount }) => ({
-            id,
-            submitterId,
-            totalAmount,
-          }));
+          .filter((order) => order.settlementType === where.settlementType);
       },
     );
-    dbMock.bill.findUnique.mockResolvedValue(null);
     dbMock.bill.create.mockResolvedValue({ id: 'bill-sales-a' });
 
     const result = await generateBillsForPeriod('2026-05', ownerActor);
@@ -184,6 +226,8 @@ describe('generateBillsForPeriod', () => {
         totalAmount: '1200.00',
         orderCount: 1,
         isNew: true,
+        sequence: 1,
+        isSupplemental: false,
       },
     ]);
     expect(dbMock.bill.create).toHaveBeenCalledTimes(1);
@@ -191,23 +235,18 @@ describe('generateBillsForPeriod', () => {
   });
 
   it('does not infer external settlement from a mutable SALES role', async () => {
-    const roleOnlyOrder = {
+    const roleOnlyOrder = billableOrder({
       id: 'role-only-sales-order',
       submitterId: 'sales-a',
       submitterRole: Role.SALES,
       settlementType: OrderSettlementType.INTERNAL_SALES,
       totalAmount: '999.00',
-    };
+    });
     dbMock.order.findMany.mockImplementation(
       async ({ where }: { where: { settlementType?: OrderSettlementType } }) => {
         expect(where.settlementType).toBe(OrderSettlementType.EXTERNAL_SALES);
         return [roleOnlyOrder]
-          .filter((order) => order.settlementType === where.settlementType)
-          .map(({ id, submitterId, totalAmount }) => ({
-            id,
-            submitterId,
-            totalAmount,
-          }));
+          .filter((order) => order.settlementType === where.settlementType);
       },
     );
 
@@ -219,15 +258,24 @@ describe('generateBillsForPeriod', () => {
 
   it('re-run on existing DRAFT: appends only NEW orders, leaves paid state untouched', async () => {
     dbMock.order.findMany.mockResolvedValue([
-      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
-      { id: 'o2-new', submitterId: 'sales-a', totalAmount: '500.00' },
+      billableOrder({ id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' }),
+      billableOrder({ id: 'o2-new', submitterId: 'sales-a', totalAmount: '500.00' }),
     ]);
-    dbMock.bill.findUnique.mockResolvedValue({
+    dbMock.bill.findMany.mockResolvedValue([{
       id: 'bill-1',
+      sequence: 1,
       status: BillStatus.DRAFT,
       openingAmount: '0.00',
+      totalAmount: '1000.00',
       items: [{ orderId: 'o1', orderAmount: '1000.00' }], // o1 already on the bill
-    });
+    }]);
+    dbMock.billItem.findMany.mockResolvedValue([
+      {
+        orderId: 'o1',
+        billId: 'bill-1',
+        bill: { salesUserId: 'sales-a', period: '2026-05' },
+      },
+    ]);
     dbMock.bill.update.mockResolvedValue({ id: 'bill-1' });
     const r = await generateBillsForPeriod('2026-05', ownerActor);
     expect(r.generated[0].isNew).toBe(false);
@@ -240,33 +288,186 @@ describe('generateBillsForPeriod', () => {
     ]);
   });
 
-  it('refuses to update a non-DRAFT bill (ISSUED / PARTIAL_PAID / FULLY_PAID)', async () => {
-    dbMock.order.findMany.mockResolvedValue([
-      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
+  it('refreshes a DRAFT item after confirmed repricing so the rerun can be issued', async () => {
+    const repricedOrder = billableOrder({
+      id: 'o1',
+      submitterId: 'sales-a',
+      totalAmount: '1200.00',
+    });
+    dbMock.order.findMany.mockResolvedValue([repricedOrder]);
+    dbMock.bill.findMany.mockResolvedValue([{
+      id: 'bill-1',
+      sequence: 1,
+      status: BillStatus.DRAFT,
+      openingAmount: '0.00',
+      totalAmount: '1000.00',
+      items: [{ orderId: 'o1', orderAmount: '1000.00' }],
+    }]);
+    dbMock.billItem.findMany.mockResolvedValue([
+      {
+        orderId: 'o1',
+        billId: 'bill-1',
+        bill: { salesUserId: 'sales-a', period: '2026-05' },
+      },
     ]);
-    dbMock.bill.findUnique.mockResolvedValue({
+    dbMock.bill.update.mockResolvedValue({
       id: 'bill-1',
       status: BillStatus.ISSUED,
-      openingAmount: '0.00',
-      items: [],
     });
+
+    const regenerated = await generateBillsForPeriod('2026-05', ownerActor);
+
+    expect(regenerated.generated[0]?.totalAmount).toBe('1200.00');
+    expect(dbMock.billItem.update).toHaveBeenCalledWith({
+      where: { billId_orderId: { billId: 'bill-1', orderId: 'o1' } },
+      data: { orderAmount: '1200.00' },
+      select: { id: true },
+    });
+    expect(dbMock.bill.update).toHaveBeenCalledWith({
+      where: { id: 'bill-1' },
+      data: { totalAmount: '1200.00' },
+      select: { id: true },
+    });
+
+    dbMock.bill.findUnique
+      .mockResolvedValueOnce({ salesUserId: 'sales-a', period: '2026-05' })
+      .mockResolvedValueOnce({
+        id: 'bill-1',
+        salesUserId: 'sales-a',
+        period: '2026-05',
+        status: BillStatus.DRAFT,
+        openingAmount: '0.00',
+        totalAmount: '1200.00',
+        items: [{ orderAmount: '1200.00', order: repricedOrder }],
+      });
+
+    await expect(issueBill('bill-1', ownerActor)).resolves.toEqual({
+      id: 'bill-1',
+      status: BillStatus.ISSUED,
+    });
+  });
+
+  it('creates a sequenced supplemental draft for late orders without mutating an ISSUED bill', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      billableOrder({ id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' }),
+      billableOrder({ id: 'o2-late', submitterId: 'sales-a', totalAmount: '250.00' }),
+    ]);
+    dbMock.bill.findMany.mockResolvedValue([{
+      id: 'bill-1',
+      sequence: 1,
+      status: BillStatus.ISSUED,
+      openingAmount: '0.00',
+      totalAmount: '1000.00',
+      items: [{ orderId: 'o1', orderAmount: '1000.00' }],
+    }]);
+    dbMock.billItem.findMany.mockResolvedValue([
+      {
+        orderId: 'o1',
+        billId: 'bill-1',
+        bill: { salesUserId: 'sales-a', period: '2026-05' },
+      },
+    ]);
+    dbMock.bill.create.mockResolvedValue({ id: 'bill-2' });
+
     const r = await generateBillsForPeriod('2026-05', ownerActor);
-    expect(r.generated).toHaveLength(0);
-    expect(r.errors).toHaveLength(1);
-    expect(r.errors[0].salesUserId).toBe('sales-a');
-    expect(r.errors[0].message).toMatch(/ISSUED/);
+
+    expect(r.errors).toEqual([]);
+    expect(r.generated).toEqual([
+      {
+        billId: 'bill-2',
+        salesUserId: 'sales-a',
+        totalAmount: '250.00',
+        orderCount: 1,
+        isNew: true,
+        sequence: 2,
+        isSupplemental: true,
+      },
+    ]);
+    expect(dbMock.bill.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        salesUserId: 'sales-a',
+        period: '2026-05',
+        sequence: 2,
+        totalAmount: '250.00',
+        items: {
+          create: [{ orderId: 'o2-late', orderAmount: '250.00' }],
+        },
+      }),
+      select: { id: true },
+    });
+    expect(dbMock.bill.update).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when one candidate is attached to another sales period', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      billableOrder({ id: 'o-wrong', submitterId: 'sales-a', totalAmount: '1000.00' }),
+      billableOrder({ id: 'o-new', submitterId: 'sales-a', totalAmount: '250.00' }),
+    ]);
+    dbMock.bill.findMany.mockResolvedValue([]);
+    dbMock.billItem.findMany.mockResolvedValue([
+      {
+        orderId: 'o-wrong',
+        billId: 'bill-wrong',
+        bill: { salesUserId: 'sales-b', period: '2026-04' },
+      },
+    ]);
+
+    const result = await generateBillsForPeriod('2026-05', ownerActor);
+
+    expect(result.generated).toEqual([]);
+    expect(result.errors).toEqual([
+      {
+        salesUserId: 'sales-a',
+        message: expect.stringMatching(
+          /o-wrong.*2026-04.*sales-b.*不能静默跳过/,
+        ),
+      },
+    ]);
+    expect(dbMock.bill.create).not.toHaveBeenCalled();
+    expect(dbMock.billItem.createMany).not.toHaveBeenCalled();
+  });
+
+  it('does not create an empty supplemental bill when all orders are globally attached', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      billableOrder({ id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' }),
+    ]);
+    dbMock.bill.findMany.mockResolvedValue([{
+      id: 'bill-1',
+      sequence: 1,
+      status: BillStatus.ISSUED,
+      openingAmount: '0.00',
+      totalAmount: '1000.00',
+      items: [{ orderId: 'o1', orderAmount: '1000.00' }],
+    }]);
+    dbMock.billItem.findMany.mockResolvedValue([
+      {
+        orderId: 'o1',
+        billId: 'bill-1',
+        bill: { salesUserId: 'sales-a', period: '2026-05' },
+      },
+    ]);
+
+    const result = await generateBillsForPeriod('2026-05', ownerActor);
+
+    expect(result.generated[0]).toEqual(
+      expect.objectContaining({ billId: 'bill-1', isNew: false, sequence: 1 }),
+    );
+    expect(dbMock.bill.create).not.toHaveBeenCalled();
+    expect(dbMock.billItem.createMany).not.toHaveBeenCalled();
   });
 
   it('recomputes a draft from persisted bill items plus newly appended items', async () => {
     dbMock.order.findMany.mockResolvedValue([
-      { id: 'o2-new', submitterId: 'sales-a', totalAmount: '500.00' },
+      billableOrder({ id: 'o2-new', submitterId: 'sales-a', totalAmount: '500.00' }),
     ]);
-    dbMock.bill.findUnique.mockResolvedValue({
+    dbMock.bill.findMany.mockResolvedValue([{
       id: 'bill-1',
+      sequence: 1,
       status: BillStatus.DRAFT,
       openingAmount: '25.00',
+      totalAmount: '1025.00',
       items: [{ orderId: 'historical-o1', orderAmount: '1000.00' }],
-    });
+    }]);
     dbMock.bill.update.mockResolvedValue({ id: 'bill-1' });
 
     const result = await generateBillsForPeriod('2026-05', ownerActor);
@@ -281,14 +482,16 @@ describe('generateBillsForPeriod', () => {
 
   it('refuses a negative or overflowing draft total before updating finance state', async () => {
     dbMock.order.findMany.mockResolvedValue([
-      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
+      billableOrder({ id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' }),
     ]);
-    dbMock.bill.findUnique.mockResolvedValue({
+    dbMock.bill.findMany.mockResolvedValue([{
       id: 'bill-1',
+      sequence: 1,
       status: BillStatus.DRAFT,
       openingAmount: '-2000.00',
+      totalAmount: '-2000.00',
       items: [],
-    });
+    }]);
 
     const negative = await generateBillsForPeriod('2026-05', ownerActor);
     expect(negative.generated).toEqual([]);
@@ -296,24 +499,91 @@ describe('generateBillsForPeriod', () => {
     expect(dbMock.bill.update).not.toHaveBeenCalled();
 
     dbMock.order.findMany.mockResolvedValue([
-      {
+      billableOrder({
         id: 'o-max',
         submitterId: 'sales-a',
         totalAmount: '9999999999.99',
-      },
+      }),
     ]);
-    dbMock.bill.findUnique.mockResolvedValue({
+    dbMock.bill.findMany.mockResolvedValue([{
       id: 'bill-1',
+      sequence: 1,
       status: BillStatus.DRAFT,
       openingAmount: '0.01',
+      totalAmount: '0.01',
       items: [],
-    });
+    }]);
 
     const overflow = await generateBillsForPeriod('2026-05', ownerActor);
     expect(overflow.generated).toEqual([]);
     expect(overflow.errors[0]?.message).toMatch(/超过可保存上限/);
     expect(dbMock.bill.update).not.toHaveBeenCalled();
     expect(dbMock.billItem.createMany).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when pricing is pending or structured customer charges are incomplete', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      billableOrder({
+        id: 'pending-price',
+        submitterId: 'sales-a',
+        totalAmount: '100.00',
+        pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
+      }),
+      billableOrder({
+        id: 'missing-charges',
+        submitterId: 'sales-a',
+        totalAmount: '200.00',
+        customerCharges: [],
+      }),
+      billableOrder({
+        id: 'pending-charge',
+        submitterId: 'sales-a',
+        totalAmount: '300.00',
+        customerCharges: [
+          {
+            status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+            amount: null,
+          },
+        ],
+      }),
+    ]);
+
+    const result = await generateBillsForPeriod('2026-05', ownerActor);
+
+    expect(result.generated).toEqual([]);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.message).toMatch(/pending-price.*终价尚未确认/);
+    expect(result.errors[0]?.message).toMatch(/missing-charges.*缺少对客收费明细/);
+    expect(result.errors[0]?.message).toMatch(/pending-charge.*未终审或缺少金额/);
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.bill.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts LEGACY_CONFIRMED history without structured charge rows', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      billableOrder({
+        id: 'legacy-o1',
+        submitterId: 'sales-a',
+        totalAmount: '88.00',
+        pricingStatus: OrderPricingStatus.LEGACY_CONFIRMED,
+        customerCharges: [],
+        quotedFee: null,
+        confirmedFee: null,
+        settledFee: null,
+      }),
+    ]);
+    dbMock.bill.create.mockResolvedValue({ id: 'legacy-bill' });
+
+    const result = await generateBillsForPeriod('2026-05', ownerActor);
+
+    expect(result.errors).toEqual([]);
+    expect(result.generated[0]).toEqual(
+      expect.objectContaining({
+        billId: 'legacy-bill',
+        totalAmount: '88.00',
+        sequence: 1,
+      }),
+    );
   });
 
   it('empty month: no orders → generated=[] errors=[]', async () => {
@@ -325,9 +595,8 @@ describe('generateBillsForPeriod', () => {
 
   it('takes per-(salesUser, period) advisory lock before findUnique (Codex round 52 / P1)', async () => {
     dbMock.order.findMany.mockResolvedValue([
-      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
+      billableOrder({ id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' }),
     ]);
-    dbMock.bill.findUnique.mockResolvedValue(null);
     dbMock.bill.create.mockResolvedValue({ id: 'bill-1' });
     await generateBillsForPeriod('2026-05', ownerActor);
     expect(dbMock.$executeRaw).toHaveBeenCalled();
@@ -341,16 +610,13 @@ describe('generateBillsForPeriod', () => {
   it('rethrows an unexpected group failure with committed partial results', async () => {
     const databaseFailure = new Error('transaction connection lost');
     dbMock.order.findMany.mockResolvedValue([
-      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
-      { id: 'o2', submitterId: 'sales-b', totalAmount: '500.00' },
+      billableOrder({ id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' }),
+      billableOrder({ id: 'o2', submitterId: 'sales-b', totalAmount: '500.00' }),
     ]);
-    dbMock.bill.findUnique.mockImplementation(
+    dbMock.bill.findMany.mockImplementation(
       async ({ where }: { where: Record<string, unknown> }) => {
-        const identity = where.salesUserId_period as
-          | { salesUserId: string }
-          | undefined;
-        if (identity?.salesUserId === 'sales-b') throw databaseFailure;
-        return null;
+        if (where.salesUserId === 'sales-b') throw databaseFailure;
+        return [];
       },
     );
     dbMock.bill.create.mockImplementation(
@@ -402,8 +668,10 @@ describe('issueBill', () => {
     id: 'bill-1',
     salesUserId: 'sales-1',
     period: '2026-05',
+    openingAmount: '1000.00',
     totalAmount: '1000.00',
     status: BillStatus.DRAFT,
+    items: [],
   };
 
   it('throws when bill is missing', async () => {
@@ -446,6 +714,78 @@ describe('issueBill', () => {
       'print-shop-erp:bill-gen:sales-1:2026-05',
       'print-shop-erp:bill:bill-1',
     ]);
+  });
+
+  it('revalidates every order and refuses to issue a stale ineligible draft', async () => {
+    dbMock.bill.findUnique
+      .mockResolvedValueOnce({ salesUserId: 'sales-1', period: '2026-05' })
+      .mockResolvedValueOnce({
+        ...draftBill,
+        items: [
+          {
+            orderAmount: '1000.00',
+            order: billableOrder({
+              id: 'pending-price',
+              submitterId: 'sales-1',
+              totalAmount: '1000.00',
+              pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
+            }),
+          },
+        ],
+      });
+
+    await expect(issueBill('bill-1', ownerActor)).rejects.toThrow(
+      /pending-price.*终价尚未确认/,
+    );
+    expect(dbMock.bill.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to issue when a BillItem frozen amount no longer matches the current order total', async () => {
+    dbMock.bill.findUnique
+      .mockResolvedValueOnce({ salesUserId: 'sales-1', period: '2026-05' })
+      .mockResolvedValueOnce({
+        ...draftBill,
+        openingAmount: '0.00',
+        items: [
+          {
+            orderAmount: '900.00',
+            order: billableOrder({
+              id: 'repriced-order',
+              submitterId: 'sales-1',
+              totalAmount: '1000.00',
+            }),
+          },
+        ],
+      });
+
+    await expect(issueBill('bill-1', ownerActor)).rejects.toThrow(
+      /repriced-order.*冻结金额与当前终价不一致/,
+    );
+    expect(dbMock.bill.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to issue when bill total does not reconcile with opening plus frozen items', async () => {
+    dbMock.bill.findUnique
+      .mockResolvedValueOnce({ salesUserId: 'sales-1', period: '2026-05' })
+      .mockResolvedValueOnce({
+        ...draftBill,
+        openingAmount: '25.00',
+        items: [
+          {
+            orderAmount: '900.00',
+            order: billableOrder({
+              id: 'order-900',
+              submitterId: 'sales-1',
+              totalAmount: '900.00',
+            }),
+          },
+        ],
+      });
+
+    await expect(issueBill('bill-1', ownerActor)).rejects.toThrow(
+      /总额与期初金额及工单明细合计不一致/,
+    );
+    expect(dbMock.bill.update).not.toHaveBeenCalled();
   });
 
   it('rejects empty or negative bills and non-admin callers', async () => {
@@ -1067,6 +1407,13 @@ describe('listBills', () => {
       period: '2026-05',
       status: BillStatus.ISSUED,
     });
+    const query = dbMock.bill.findMany.mock.calls[0][0];
+    expect(query.orderBy).toEqual([
+      { period: 'desc' },
+      { salesUserId: 'asc' },
+      { sequence: 'asc' },
+    ]);
+    expect(query.select.sequence).toBe(true);
   });
 
   it('no filter returns everything', async () => {
@@ -1090,6 +1437,7 @@ describe('bill detail read models', () => {
     const r = await getAdminBillDetail('bill-1');
     expect(r).toBeTruthy();
     const query = dbMock.bill.findUnique.mock.calls[0][0];
+    expect(query.select.sequence).toBe(true);
     const orderSelect = query.select.items.select.order.select;
     expect(orderSelect.id).toBe(true);
     expect(orderSelect.settlementType).toBe(true);
@@ -1126,6 +1474,7 @@ describe('bill detail read models', () => {
 
     const query = dbMock.bill.findUnique.mock.calls[0][0];
     expect(query.where).toEqual({ id: 'bill-1', salesUserId: 'sales-1' });
+    expect(query.select.sequence).toBe(true);
     expect(query.select).not.toHaveProperty('salesUser');
     expect(query.select).not.toHaveProperty('createdAt');
     expect(query.select).not.toHaveProperty('updatedAt');

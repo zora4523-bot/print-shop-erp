@@ -41,11 +41,14 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
           />
         </div>
         <Button type="submit" disabled={pending}>
-          {pending ? '生成中…' : '生成 / 追加月账单'}
+          {pending ? '生成中…' : '生成月账单 / 归集补充账单'}
         </Button>
         {state?.status === 'success' ? (
           <span role="status" className="text-xs text-muted-foreground">
-            {state.period} 已生成 {state.generatedCount} 条
+            {state.period} 已处理 {state.generatedCount} 位销售
+            {state.supplementalCount > 0
+              ? ` · 新建 ${state.supplementalCount} 张补充账单`
+              : ''}
             {state.errorCount > 0 ? ` · ${state.errorCount} 个失败` : ''}
           </span>
         ) : null}

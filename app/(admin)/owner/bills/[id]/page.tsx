@@ -53,6 +53,33 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
+function BillIssuedNotice({
+  billId,
+  visible,
+}: {
+  billId: string;
+  visible: boolean;
+}) {
+  if (!visible) return null;
+
+  return (
+    <ActionNotice
+      tone="success"
+      title="账单已发布"
+      description="账单已进入可收款状态并保持不变；后续同月迟到工单会归入新的补充账单。"
+      action={
+        <Link
+          href={`/owner/bills/${billId}`}
+          prefetch={false}
+          className="text-sm font-medium underline underline-offset-2"
+        >
+          关闭提示
+        </Link>
+      }
+    />
+  );
+}
+
 export default async function OwnerBillDetailPage({
   params,
   searchParams,
@@ -110,29 +137,17 @@ export default async function OwnerBillDetailPage({
 
   return (
     <div className="space-y-6">
-      {sp.issued === '1' ? (
-        <ActionNotice
-          tone="success"
-          title="账单已发布"
-          description="账单已进入可收款状态，后续新完工工单不会再自动追加到本账单。"
-          action={
-            <Link
-              href={`/owner/bills/${bill.id}`}
-              prefetch={false}
-              className="text-sm font-medium underline underline-offset-2"
-            >
-              关闭提示
-            </Link>
-          }
-        />
-      ) : null}
+      <BillIssuedNotice billId={bill.id} visible={sp.issued === '1'} />
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
-      <BreadcrumbEntity label={`${bill.period} ${bill.salesUser.displayName}`} />
+      <BreadcrumbEntity
+        label={`${bill.period} #${bill.sequence} ${bill.salesUser.displayName}`}
+      />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="break-words text-xl font-semibold">
-            账单 · {bill.salesUser.displayName}
+            {bill.sequence > 1 ? '补充账单' : '账单'} #{bill.sequence} ·{' '}
+            {bill.salesUser.displayName}
           </h1>
           <p className="text-sm text-muted-foreground">
             周期 <span className="font-sans tabular-nums">{bill.period}</span> ·{' '}

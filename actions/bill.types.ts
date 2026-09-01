@@ -10,6 +10,7 @@ export type GenerateBillsResult =
       status: 'success';
       period: string;
       generatedCount: number;
+      supplementalCount: number;
       errorCount: number;
       errors: Array<{ salesUserId: string; message: string }>;
     }

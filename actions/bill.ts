@@ -61,6 +61,9 @@ export async function generateBillsAction(
       status: 'success',
       period: r.period,
       generatedCount: r.generated.length,
+      supplementalCount: r.generated.filter(
+        (bill) => bill.isNew && bill.isSupplemental,
+      ).length,
       errorCount: r.errors.length,
       errors: r.errors,
     };

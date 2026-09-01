@@ -67,11 +67,11 @@ test.describe('账单全链 — golden path', () => {
 
     await test.step('生成本月账单（GenerateBillsForm 默认 period=当月）', async () => {
       await page
-        .getByRole('button', { name: /^生成 \/ 追加月账单$/ })
+        .getByRole('button', { name: '生成月账单 / 归集补充账单' })
         .click();
-      // GenerateBillsForm 在 success 时渲染&ldquo;{period} 已生成 N 条&rdquo;
-      // 文案 —— 等到它出现，确认 action 跑完。
-      await expect(page.getByText(/已生成 \d+ 条/)).toBeVisible({
+      // GenerateBillsForm 在 success 时渲染处理销售数；等到状态出现，
+      // 确认 action 与补充账单归集都已完成。
+      await expect(page.getByRole('status')).toContainText(/已处理 \d+ 位销售/u, {
         timeout: 10_000,
       });
     });

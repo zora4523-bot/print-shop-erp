@@ -127,7 +127,12 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
             <tbody className="divide-y">
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.period}</td>
+                  <td className="px-4 py-3 font-sans tabular-nums text-xs">
+                    {r.period}
+                    <span className="ml-2 text-muted-foreground">
+                      {r.sequence > 1 ? `· 补充${r.sequence}` : '· 主账单'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {formatMoney(r.totalAmount)}
                   </td>

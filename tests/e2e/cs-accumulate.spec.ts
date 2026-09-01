@@ -173,9 +173,9 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
         password: ADMIN_PASSWORD,
       });
       await page
-        .getByRole('button', { name: /^生成 \/ 追加月账单$/ })
+        .getByRole('button', { name: '生成月账单 / 归集补充账单' })
         .click();
-      await expect(page.getByText(/已生成 \d+ 条/)).toBeVisible({
+      await expect(page.getByRole('status')).toContainText(/已处理 \d+ 位销售/u, {
         timeout: 10_000,
       });
 
