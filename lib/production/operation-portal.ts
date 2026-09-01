@@ -4,13 +4,14 @@ import {
   OrderStatus,
   PieceworkOperationType,
   ProductionOperationStatus,
+  ProductionWorkOrderStage,
   Role,
 } from '../../generated/prisma/enums';
 import { db } from '../db';
 import {
   OperationReportingError,
-  operationTypeForReporterAccount,
 } from './operation-reporting';
+import { operationTypeForReporterAccount } from './reporter-operation-lane';
 
 export type ReporterOperationListItem = {
   id: string;
@@ -28,6 +29,9 @@ export type ReporterOperationListItem = {
   reworkQty: string;
   passCount: number;
   sourceCount: number;
+  workOrderStage: ProductionWorkOrderStage;
+  workOrderTotalQty: string;
+  workOrderProgressQty: string;
 };
 
 export type ReporterOperationDetail = ReporterOperationListItem & {
@@ -208,6 +212,39 @@ function passCountForSources(
   return passCounts.size === 1 ? [...passCounts][0]! : 1;
 }
 
+function workOrderProgressForOperation(
+  operationType: PieceworkOperationType,
+  order: {
+    workOrderVersion?: number;
+    items?: Array<{ quantity: number }>;
+    productionWorkOrderProgress?: Array<{
+      workOrderVersion: number;
+      stage: ProductionWorkOrderStage;
+      workOrderProgressQuantity: { toString(): string };
+    }>;
+  },
+) {
+  const stage =
+    operationType === PieceworkOperationType.PACKING
+      ? ProductionWorkOrderStage.PACKING
+      : ProductionWorkOrderStage.FOILING;
+  const orderTotal = (order.items ?? []).reduce(
+    (total, item) => total.plus(item.quantity),
+    new Decimal(0),
+  );
+  const completed = (order.productionWorkOrderProgress ?? [])
+    .filter(
+      (row) =>
+        row.stage === stage &&
+        row.workOrderVersion === order.workOrderVersion,
+    )
+    .reduce(
+      (total, row) => total.plus(row.workOrderProgressQuantity.toString()),
+      new Decimal(0),
+    );
+  return { stage, orderTotal, completed };
+}
+
 /**
  * Replacement portal feed. Visibility is the account's fixed operation lane,
  * not a ProductionTask.workerId assignment, candidate score, or machine load.
@@ -227,12 +264,21 @@ export async function listProductionOperationsForReporter(
         ],
       },
       order: {
-        status: { in: [OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] },
+        status: {
+          in: [
+            OrderStatus.RELEASED,
+            OrderStatus.FOILING,
+            OrderStatus.PACKING,
+            OrderStatus.SCHEDULING,
+            OrderStatus.IN_PRODUCTION,
+          ],
+        },
       },
     },
     select: {
       id: true,
       orderId: true,
+      workOrderVersion: true,
       operationType: true,
       unit: true,
       status: true,
@@ -244,6 +290,15 @@ export async function listProductionOperationsForReporter(
           customName: true,
           isUrgent: true,
           promisedDate: true,
+          workOrderVersion: true,
+          items: { select: { quantity: true } },
+          productionWorkOrderProgress: {
+            select: {
+              workOrderVersion: true,
+              stage: true,
+              workOrderProgressQuantity: true,
+            },
+          },
         },
       },
       sources: {
@@ -268,7 +323,12 @@ export async function listProductionOperationsForReporter(
     ],
   });
 
-  return operations.map((operation) => {
+  return operations
+    .filter(
+      (operation) =>
+        operation.workOrderVersion === operation.order.workOrderVersion,
+    )
+    .map((operation) => {
     const passCount = passCountForSources(
       operation.operationType,
       operation.sources,
@@ -284,6 +344,10 @@ export async function listProductionOperationsForReporter(
     const reworkQty = operation.reports.reduce(
       (total, report) => total.plus(report.reworkQty),
       new Decimal(0),
+    );
+    const workOrderProgress = workOrderProgressForOperation(
+      operation.operationType,
+      operation.order,
     );
     return {
       id: operation.id,
@@ -303,6 +367,9 @@ export async function listProductionOperationsForReporter(
       reworkQty: reworkQty.toString(),
       passCount,
       sourceCount: operation.sources.length,
+      workOrderStage: workOrderProgress.stage,
+      workOrderTotalQty: workOrderProgress.orderTotal.toString(),
+      workOrderProgressQty: workOrderProgress.completed.toString(),
     };
   });
 }
@@ -321,6 +388,7 @@ export async function getProductionOperationForReporter(
     select: {
       id: true,
       orderId: true,
+      workOrderVersion: true,
       operationType: true,
       unit: true,
       status: true,
@@ -331,8 +399,17 @@ export async function getProductionOperationForReporter(
           customName: true,
           isUrgent: true,
           promisedDate: true,
+          workOrderVersion: true,
           packageRequirement: true,
           remark: true,
+          items: { select: { quantity: true } },
+          productionWorkOrderProgress: {
+            select: {
+              workOrderVersion: true,
+              stage: true,
+              workOrderProgressQuantity: true,
+            },
+          },
         },
       },
       sources: {
@@ -376,7 +453,12 @@ export async function getProductionOperationForReporter(
       },
     },
   });
-  if (!operation) return null;
+  if (
+    !operation ||
+    operation.workOrderVersion !== operation.order.workOrderVersion
+  ) {
+    return null;
+  }
 
   const passCount = passCountForSources(
     operation.operationType,
@@ -393,6 +475,10 @@ export async function getProductionOperationForReporter(
   const reworkQty = operation.reports.reduce(
     (total, report) => total.plus(report.reworkQty),
     new Decimal(0),
+  );
+  const workOrderProgress = workOrderProgressForOperation(
+    operation.operationType,
+    operation.order,
   );
 
   return {
@@ -413,6 +499,9 @@ export async function getProductionOperationForReporter(
     reworkQty: reworkQty.toString(),
     passCount,
     sourceCount: operation.sources.length,
+    workOrderStage: workOrderProgress.stage,
+    workOrderTotalQty: workOrderProgress.orderTotal.toString(),
+    workOrderProgressQty: workOrderProgress.completed.toString(),
     packageRequirement: operation.order.packageRequirement,
     orderRemark: operation.order.remark,
     sources: operation.sources.map((source) => ({
@@ -437,12 +526,21 @@ export async function listProductionProgressForReporter(
         ],
       },
       order: {
-        status: { in: [OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] },
+        status: {
+          in: [
+            OrderStatus.RELEASED,
+            OrderStatus.FOILING,
+            OrderStatus.PACKING,
+            OrderStatus.SCHEDULING,
+            OrderStatus.IN_PRODUCTION,
+          ],
+        },
       },
     },
     select: {
       id: true,
       orderId: true,
+      workOrderVersion: true,
       craftCode: true,
       craftName: true,
       status: true,
@@ -454,6 +552,7 @@ export async function listProductionProgressForReporter(
           customName: true,
           isUrgent: true,
           promisedDate: true,
+          workOrderVersion: true,
         },
       },
       orderItem: { select: { sequence: true, name: true } },
@@ -468,7 +567,9 @@ export async function listProductionProgressForReporter(
     ],
   });
 
-  return steps.map((step) => ({
+  return steps
+    .filter((step) => step.workOrderVersion === step.order.workOrderVersion)
+    .map((step) => ({
     id: step.id,
     orderId: step.orderId,
     orderNo: step.order.orderNo,
@@ -496,6 +597,7 @@ export async function getProductionProgressForReporter(
     select: {
       id: true,
       orderId: true,
+      workOrderVersion: true,
       craftCode: true,
       craftName: true,
       status: true,
@@ -506,6 +608,7 @@ export async function getProductionProgressForReporter(
           customName: true,
           isUrgent: true,
           promisedDate: true,
+          workOrderVersion: true,
           packageRequirement: true,
           remark: true,
         },
@@ -531,7 +634,9 @@ export async function getProductionProgressForReporter(
       },
     },
   });
-  if (!step) return null;
+  if (!step || step.workOrderVersion !== step.order.workOrderVersion) {
+    return null;
+  }
 
   return {
     id: step.id,

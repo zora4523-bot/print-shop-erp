@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import type { Prisma } from '../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import {
   DesignFileType,
   OrderStatus,
@@ -83,97 +83,164 @@ function operationOrderWhere(
   };
 }
 
+function currentVersionWorkerOrderPredicate(
+  operationType: PieceworkOperationType | null,
+): Prisma.Sql {
+  const paidLane = operationType
+    ? Prisma.sql`EXISTS (
+        SELECT 1
+          FROM "ProductionOperation" AS operation
+         WHERE operation."orderId" = current_order."id"
+           AND operation."workOrderVersion" = current_order."workOrderVersion"
+           AND operation."operationType" = ${operationType}::"PieceworkOperationType"
+      )`
+    : Prisma.sql`FALSE`;
+  return Prisma.sql`
+    current_order."status" <> ${OrderStatus.SUBMITTED}::"OrderStatus"
+    AND (
+      ${paidLane}
+      OR EXISTS (
+        SELECT 1
+          FROM "ProductionProgressStep" AS progress
+         WHERE progress."orderId" = current_order."id"
+           AND progress."workOrderVersion" = current_order."workOrderVersion"
+      )
+    )
+  `;
+}
+
 export async function listWorkerOrders(
   actor: WorkerActor,
   options?: { page?: number },
 ) {
   requireWorkerActor(actor);
   const operationType = await getReporterOperationTypeOrNull(actor);
-  // 计数与取行必须共用同一个 where，否则页码会指向不存在的行。
-  const where = operationOrderWhere(operationType);
-  const total = await db.order.count({ where });
-  const window = paginationWindow(
-    total,
-    options?.page ?? 1,
-    WORKER_ORDER_PAGE_SIZE,
-  );
+  const visibility = currentVersionWorkerOrderPredicate(operationType);
 
-  const orders = await db.order.findMany({
-    where,
-    // 最新的工单排最前。这个页面是归档/查询视图，不是待办队列。急单只
-    // 作为徽标呈现：如果继续把
-    // isUrgent 当第一排序键，老员工的历史急单会长期霸占第一页，今天的新单
-    // 反而翻不到。id 是稳定 tiebreaker，既保证翻页不重不漏，也命中 Order
-    // 上已有的 @@index([createdAt(sort: Desc), id(sort: Desc)])。
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    skip: window.skip,
-    take: window.take,
-    select: {
-      id: true,
-      orderNo: true,
-      customName: true,
-      status: true,
-      isUrgent: true,
-      customerRef: true,
-      promisedDate: true,
-      createdAt: true,
-      submitter: { select: { displayName: true } },
-      productionOperations: {
-        where: {
-          operationType: operationType ?? { in: [] },
-        },
+  return db.$transaction(
+    async (tx) => {
+      // Prisma relation filters cannot compare a child generation column with
+      // its parent Order.workOrderVersion. Keep count and page ids on the exact
+      // same SQL predicate, then hydrate those authorized ids in this repeatable
+      // read snapshot.
+      const countRows = await tx.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
+        SELECT COUNT(*)::bigint AS "total"
+          FROM "Order" AS current_order
+         WHERE ${visibility}
+      `);
+      const total = Number(countRows[0]?.total ?? BigInt(0));
+      const window = paginationWindow(
+        total,
+        options?.page ?? 1,
+        WORKER_ORDER_PAGE_SIZE,
+      );
+      const idRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT current_order."id"
+          FROM "Order" AS current_order
+         WHERE ${visibility}
+         ORDER BY current_order."createdAt" DESC, current_order."id" DESC
+         OFFSET ${window.skip}
+         LIMIT ${window.take}
+      `);
+      const orderedIds = idRows.map((row) => row.id);
+      if (orderedIds.length === 0) {
+        return paginatedResult([], total, window);
+      }
+
+      const orders = await tx.order.findMany({
+        where: { id: { in: orderedIds } },
+        // 最新的工单排最前。这个页面是归档/查询视图，不是待办队列。急单只
+        // 作为徽标呈现：如果继续把
+        // isUrgent 当第一排序键，老员工的历史急单会长期霸占第一页，今天的新单
+        // 反而翻不到。id 是稳定 tiebreaker，既保证翻页不重不漏，也命中 Order
+        // 上已有的 @@index([createdAt(sort: Desc), id(sort: Desc)])。
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: {
           id: true,
+          orderNo: true,
+          customName: true,
           status: true,
-          reports: {
-            where: { reporterId: actor.id },
+          isUrgent: true,
+          customerRef: true,
+          promisedDate: true,
+          createdAt: true,
+          workOrderVersion: true,
+          submitter: { select: { displayName: true } },
+          productionOperations: {
+            where: {
+              operationType: operationType ?? { in: [] },
+            },
             select: {
-              amount: true,
+              id: true,
+              workOrderVersion: true,
+              status: true,
+              reports: {
+                where: { reporterId: actor.id },
+                select: {
+                  amount: true,
+                },
+              },
             },
           },
+          productionProgressSteps: {
+            select: { id: true, workOrderVersion: true, status: true },
+          },
         },
-      },
-      productionProgressSteps: {
-        select: { id: true, status: true },
-      },
-    },
-  });
+      });
+      const orderRank = new Map(
+        orderedIds.map((id, index) => [id, index]),
+      );
 
-  return paginatedResult(
-    orders.map((order) => {
-      const operations = order.productionOperations;
-      const progressSteps = order.productionProgressSteps;
-      return {
-        id: order.id,
-        orderNo: order.orderNo,
-        customName: order.customName,
-        status: order.status,
-        isUrgent: order.isUrgent,
-        customerRef: order.customerRef,
-        promisedDate: order.promisedDate,
-        createdAt: order.createdAt,
-        submitterName: order.submitter?.displayName ?? '未记录',
-        operationCount: operations.length + progressSteps.length,
-        completedOperationCount:
-          operations.filter(
-            (operation) =>
-              operation.status === ProductionOperationStatus.COMPLETED,
-          ).length +
-          progressSteps.filter(
-            (step) => step.status === ProductionOperationStatus.COMPLETED,
-          ).length,
-        pieceworkAmount: operations
-          .flatMap((operation) => operation.reports)
-          .reduce(
-            (sum, report) =>
-              sum.plus(new Decimal(report.amount as Decimal.Value)),
-            new Decimal(0),
+      return paginatedResult(
+        orders
+          .sort(
+            (left, right) =>
+              (orderRank.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+              (orderRank.get(right.id) ?? Number.MAX_SAFE_INTEGER),
           )
-          .toFixed(2),
-      };
-    }),
-    total,
-    window,
+          .map((order) => {
+            const operations = order.productionOperations.filter(
+              (operation) =>
+                operation.workOrderVersion === order.workOrderVersion,
+            );
+            const progressSteps = order.productionProgressSteps.filter(
+              (step) => step.workOrderVersion === order.workOrderVersion,
+            );
+            return {
+              id: order.id,
+              orderNo: order.orderNo,
+              customName: order.customName,
+              status: order.status,
+              isUrgent: order.isUrgent,
+              customerRef: order.customerRef,
+              promisedDate: order.promisedDate,
+              createdAt: order.createdAt,
+              submitterName: order.submitter?.displayName ?? '未记录',
+              operationCount: operations.length + progressSteps.length,
+              completedOperationCount:
+                operations.filter(
+                  (operation) =>
+                    operation.status === ProductionOperationStatus.COMPLETED,
+                ).length +
+                progressSteps.filter(
+                  (step) =>
+                    step.status === ProductionOperationStatus.COMPLETED,
+                ).length,
+              pieceworkAmount: operations
+                .flatMap((operation) => operation.reports)
+                .reduce(
+                  (sum, report) =>
+                    sum.plus(new Decimal(report.amount as Decimal.Value)),
+                  new Decimal(0),
+                )
+                .toFixed(2),
+            };
+          }),
+        total,
+        window,
+      );
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
 }
 
@@ -183,7 +250,7 @@ export async function getWorkerOrderDetail(
 ) {
   requireWorkerActor(actor);
   const operationType = await getReporterOperationTypeOrNull(actor);
-  return db.order.findFirst({
+  const order = await db.order.findFirst({
     where: { id: orderId, ...operationOrderWhere(operationType) },
     select: {
       id: true,
@@ -196,6 +263,7 @@ export async function getWorkerOrderDetail(
       packageRequirement: true,
       remark: true,
       createdAt: true,
+      workOrderVersion: true,
       submitter: { select: { displayName: true } },
       items: {
         orderBy: { sequence: 'asc' },
@@ -228,6 +296,7 @@ export async function getWorkerOrderDetail(
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
+          workOrderVersion: true,
           operationType: true,
           unit: true,
           status: true,
@@ -256,6 +325,7 @@ export async function getWorkerOrderDetail(
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
+          workOrderVersion: true,
           craftCode: true,
           craftName: true,
           status: true,
@@ -277,6 +347,20 @@ export async function getWorkerOrderDetail(
       },
     },
   });
+  if (!order) return null;
+  const productionOperations = order.productionOperations.filter(
+    (operation) => operation.workOrderVersion === order.workOrderVersion,
+  );
+  const productionProgressSteps = order.productionProgressSteps.filter(
+    (step) => step.workOrderVersion === order.workOrderVersion,
+  );
+  if (
+    productionOperations.length === 0 &&
+    productionProgressSteps.length === 0
+  ) {
+    return null;
+  }
+  return { ...order, productionOperations, productionProgressSteps };
 }
 
 export async function listWorkerSalaries(

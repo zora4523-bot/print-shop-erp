@@ -1,6 +1,12 @@
+import Decimal from 'decimal.js';
 import { buildQrSvg } from './qr';
 import { db } from '../db';
-import { Role, TaskStatus } from '../../generated/prisma/enums';
+import {
+  PieceworkOperationType,
+  ProductionOperationStatus,
+  Role,
+  TaskStatus,
+} from '../../generated/prisma/enums';
 import { getOrderScopeFilter } from '../auth/order-scope';
 import { signDesignReadUrl } from '../oss/read-url';
 import type {
@@ -8,9 +14,180 @@ import type {
   PrintOrder,
   PrintOrderItem,
   PrintPackagingGroup,
+  PrintProductionStep,
   PrintShipment,
   PrintTask,
 } from './print-types';
+
+const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
+  [PieceworkOperationType.PARTIAL]: '局部烫金',
+  [PieceworkOperationType.FULL]: '专版烫金',
+  [PieceworkOperationType.PACKING]: '打包',
+};
+
+function partialPassCount(
+  sources: Array<{
+    orderItem: null | {
+      frontFoilColors: string[];
+      backFoilColors: string[];
+    };
+  }>,
+): number {
+  const counts = new Set(
+    sources
+      .map((source) =>
+        source.orderItem
+          ? source.orderItem.frontFoilColors.length +
+            source.orderItem.backFoilColors.length
+          : 0,
+      )
+      .filter((count) => count > 0),
+  );
+  return counts.size === 1 ? [...counts][0]! : 1;
+}
+
+type PrintOperationRow = {
+  id: string;
+  workOrderVersion: number;
+  operationType: PieceworkOperationType;
+  status: ProductionOperationStatus;
+  plannedQty: { toString(): string };
+  sources: Array<{
+    orderItem: null | {
+      sequence: number;
+      name: string;
+      frontFoilColors: string[];
+      backFoilColors: string[];
+    };
+  }>;
+  reports: Array<{
+    reportedCompletedQty: { toString(): string };
+    defectQty: { toString(): string };
+    reportedAt: Date;
+  }>;
+};
+
+type PrintProgressStepRow = {
+  id: string;
+  workOrderVersion: number;
+  craftName: string;
+  status: ProductionOperationStatus;
+  plannedQty: { toString(): string };
+  orderItem: { sequence: number; name: string };
+  reports: Array<{
+    completedQty: { toString(): string };
+    defectQty: { toString(): string };
+    reportedAt: Date;
+  }>;
+};
+
+function productionTaskQrUrl(
+  base: string,
+  orderNo: string,
+  workOrderVersion: number,
+  taskId: string,
+): string {
+  return `${base}/wo/${encodeURIComponent(orderNo)}?v=${workOrderVersion}&task=${encodeURIComponent(taskId)}`;
+}
+
+async function buildCurrentProductionSteps(input: {
+  base: string;
+  orderNo: string;
+  workOrderVersion: number;
+  operations: PrintOperationRow[];
+  progressSteps: PrintProgressStepRow[];
+}): Promise<PrintProductionStep[]> {
+  const currentOperations = input.operations.filter(
+    (operation) => operation.workOrderVersion === input.workOrderVersion,
+  );
+  const currentProgressSteps = input.progressSteps.filter(
+    (step) => step.workOrderVersion === input.workOrderVersion,
+  );
+  return Promise.all([
+    ...currentOperations.map(async (operation): Promise<PrintProductionStep> => {
+      const singleItem =
+        operation.sources.length === 1
+          ? operation.sources[0]?.orderItem ?? null
+          : null;
+      const passCount =
+        operation.operationType === PieceworkOperationType.PARTIAL
+          ? partialPassCount(operation.sources)
+          : 1;
+      const completedQty = operation.reports.reduce(
+        (total, report) => total.plus(report.reportedCompletedQty.toString()),
+        new Decimal(0),
+      );
+      const defectQty = operation.reports.reduce(
+        (total, report) => total.plus(report.defectQty.toString()),
+        new Decimal(0),
+      );
+      const latestReport = operation.reports.at(-1);
+      return {
+        id: operation.id,
+        source: 'OPERATION',
+        itemSequence: singleItem?.sequence ?? null,
+        itemName: singleItem?.name ?? null,
+        craftName: OPERATION_LABELS[operation.operationType],
+        plannedQty: new Decimal(operation.plannedQty.toString())
+          .div(passCount)
+          .toNumber(),
+        completedQty: completedQty.toNumber(),
+        defectQty: defectQty.toNumber(),
+        completedAt:
+          operation.status === ProductionOperationStatus.COMPLETED
+            ? latestReport?.reportedAt ?? null
+            : null,
+        taskQrSvg: await buildQrSvg(
+          productionTaskQrUrl(
+            input.base,
+            input.orderNo,
+            input.workOrderVersion,
+            operation.id,
+          ),
+          55,
+          { errorCorrectionLevel: 'Q' },
+        ),
+      };
+    }),
+    ...currentProgressSteps.map(
+      async (step): Promise<PrintProductionStep> => {
+        const completedQty = step.reports.reduce(
+          (total, report) => total.plus(report.completedQty.toString()),
+          new Decimal(0),
+        );
+        const defectQty = step.reports.reduce(
+          (total, report) => total.plus(report.defectQty.toString()),
+          new Decimal(0),
+        );
+        const latestReport = step.reports.at(-1);
+        return {
+          id: step.id,
+          source: 'PROGRESS',
+          itemSequence: step.orderItem.sequence,
+          itemName: step.orderItem.name,
+          craftName: step.craftName,
+          plannedQty: new Decimal(step.plannedQty.toString()).toNumber(),
+          completedQty: completedQty.toNumber(),
+          defectQty: defectQty.toNumber(),
+          completedAt:
+            step.status === ProductionOperationStatus.COMPLETED
+              ? latestReport?.reportedAt ?? null
+              : null,
+          taskQrSvg: await buildQrSvg(
+            productionTaskQrUrl(
+              input.base,
+              input.orderNo,
+              input.workOrderVersion,
+              step.id,
+            ),
+            55,
+            { errorCorrectionLevel: 'Q' },
+          ),
+        };
+      },
+    ),
+  ]);
+}
 
 // Loads the narrow shape the production print layout needs. SALES uses the
 // customer-facing list drawer and must not receive a production sheet (it
@@ -60,6 +237,58 @@ export async function getOrderForPrint(
           },
         },
       },
+      productionOperations: {
+        where: { status: { not: ProductionOperationStatus.CANCELLED } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          workOrderVersion: true,
+          operationType: true,
+          status: true,
+          plannedQty: true,
+          sources: {
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            select: {
+              orderItem: {
+                select: {
+                  sequence: true,
+                  name: true,
+                  frontFoilColors: true,
+                  backFoilColors: true,
+                },
+              },
+            },
+          },
+          reports: {
+            orderBy: [{ reportedAt: 'asc' }, { id: 'asc' }],
+            select: {
+              reportedCompletedQty: true,
+              defectQty: true,
+              reportedAt: true,
+            },
+          },
+        },
+      },
+      productionProgressSteps: {
+        where: { status: { not: ProductionOperationStatus.CANCELLED } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          workOrderVersion: true,
+          craftName: true,
+          status: true,
+          plannedQty: true,
+          orderItem: { select: { sequence: true, name: true } },
+          reports: {
+            orderBy: [{ reportedAt: 'asc' }, { id: 'asc' }],
+            select: {
+              completedQty: true,
+              defectQty: true,
+              reportedAt: true,
+            },
+          },
+        },
+      },
       items: {
         orderBy: { sequence: 'asc' },
         include: {
@@ -98,10 +327,18 @@ export async function getOrderForPrint(
 
   const base = baseUrl.replace(/\/+$/, '');
   const orderQrSvg = await buildQrSvg(
-    `${base}/wo/${encodeURIComponent(order.orderNo)}`,
+    `${base}/wo/${encodeURIComponent(order.orderNo)}?v=${order.workOrderVersion}`,
     95,
     { errorCorrectionLevel: 'Q' },
   );
+
+  const productionSteps = await buildCurrentProductionSteps({
+    base,
+    orderNo: order.orderNo,
+    workOrderVersion: order.workOrderVersion,
+    operations: order.productionOperations,
+    progressSteps: order.productionProgressSteps,
+  });
 
   const printItems: PrintOrderItem[] = await Promise.all(
     order.items.map(async (item) => ({
@@ -142,24 +379,27 @@ export async function getOrderForPrint(
             d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
         }),
       ),
-      tasks: await Promise.all(
-        item.tasks.map(
-          async (t): Promise<PrintTask> => ({
-            id: t.id,
-            craftName: t.craft.name,
-            workerDisplayName: t.worker?.displayName ?? null,
-            plannedQty: t.plannedQty,
-            completedQty: t.completedQty,
-            defectQty: t.defectQty,
-            completedAt: t.completedAt,
-            taskQrSvg: await buildQrSvg(
-              `${base}/worker/tasks/${encodeURIComponent(t.id)}`,
-              55,
-              { errorCorrectionLevel: 'Q' },
+      tasks:
+        productionSteps.length > 0
+          ? []
+          : await Promise.all(
+              item.tasks.map(
+                async (t): Promise<PrintTask> => ({
+                  id: t.id,
+                  craftName: t.craft.name,
+                  workerDisplayName: t.worker?.displayName ?? null,
+                  plannedQty: t.plannedQty,
+                  completedQty: t.completedQty,
+                  defectQty: t.defectQty,
+                  completedAt: t.completedAt,
+                  taskQrSvg: await buildQrSvg(
+                    `${base}/worker/tasks/${encodeURIComponent(t.id)}`,
+                    55,
+                    { errorCorrectionLevel: 'Q' },
+                  ),
+                }),
+              ),
             ),
-          }),
-        ),
-      ),
     })),
   );
   const printPackagingGroups: PrintPackagingGroup[] =
@@ -194,6 +434,7 @@ export async function getOrderForPrint(
   return {
     id: order.id,
     orderNo: order.orderNo,
+    workOrderVersion: order.workOrderVersion,
     customName: order.customName,
     kind: order.kind,
     sourceOrderNo: order.sourceOrder?.orderNo ?? null,
@@ -212,6 +453,7 @@ export async function getOrderForPrint(
     submittedAt: order.submittedAt,
     createdAt: order.createdAt,
     items: printItems,
+    productionSteps,
     packagingGroups: printPackagingGroups,
     shipments: printShipments,
     orderQrSvg,

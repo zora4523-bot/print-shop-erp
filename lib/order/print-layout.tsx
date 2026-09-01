@@ -529,7 +529,7 @@ function WorkOrderSheet({
     <article className={classNames('sheet', dense && 'dense')}>
       {children}
       <footer className="ft">
-        <span>{order.orderNo}</span>
+        <span>{order.orderNo} · v{order.workOrderVersion}</span>
         <span>{orderDate}</span>
         <span>
           {page} / {pageCount}
@@ -589,7 +589,7 @@ function WorkOrderHeader({
           aria-label={`工单 ${order.orderNo} 二维码`}
           dangerouslySetInnerHTML={{ __html: order.orderQrSvg }}
         />
-        <div className="no">{order.orderNo}</div>
+        <div className="no">{order.orderNo} · v{order.workOrderVersion}</div>
       </div>
     </header>
   );
@@ -936,11 +936,30 @@ function buildFlowRows(
   totalQuantity: number,
   totalBags: number | null,
 ): FlowRow[] {
-  const rows = order.items.flatMap((item) =>
-    item.tasks.length > 0
-      ? buildTaskRows(item)
-      : derivePlannedSteps(item),
-  );
+  // A current work-order generation is authoritative. Legacy ProductionTask
+  // rows remain a fallback for historical orders only; mixing both would put
+  // stale QR destinations beside the current version printed in the header.
+  const rows =
+    order.productionSteps.length > 0
+      ? order.productionSteps.map((step) => ({
+          key: `production-${step.source.toLowerCase()}-${step.id}`,
+          itemSequence: step.itemSequence ?? null,
+          itemName: step.itemName ?? null,
+          name: clean(step.craftName) ?? '工序未填',
+          worker: null,
+          planned: formatNumber(step.plannedQty),
+          completed: formatProgress(step.completedQty),
+          defect: formatProgress(step.defectQty),
+          completedAt: step.completedAt
+            ? formatDateInputShanghai(step.completedAt)
+            : '',
+          taskQrSvg: step.taskQrSvg,
+        }))
+      : order.items.flatMap((item) =>
+          item.tasks.length > 0
+            ? buildTaskRows(item)
+            : derivePlannedSteps(item),
+        );
   if (rows.length === 0) {
     rows.push({
       key: 'production-pending',

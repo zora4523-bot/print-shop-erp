@@ -1,4 +1,7 @@
-import type { OrderChangePricingPreview } from '@/lib/order/change-request';
+import type {
+  CancellationSettlementReference,
+  OrderChangePricingPreview,
+} from '@/lib/order/change-request';
 import type { OrderPricingReviewPreview } from '@/lib/order/pricing-review';
 import type { OrderPricingStatusValue } from '@/lib/order/pricing-status';
 import type { OrderQuotedFeeCompleteness } from '@/generated/prisma/enums';
@@ -50,8 +53,18 @@ export type ReviewOrderChangeRequestMutationResult =
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
 
+export type WithdrawOrderChangeRequestMutationResult =
+  | { status: 'success'; requestStatus: string }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };
+
 export type PreviewOrderChangeRequestPricingResult =
   | { status: 'success'; preview: OrderChangePricingPreview }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };
+
+export type PreviewOrderCancellationSettlementResult =
+  | { status: 'success'; preview: CancellationSettlementReference }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
 

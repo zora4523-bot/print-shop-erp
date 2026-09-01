@@ -189,6 +189,24 @@ export async function reconcileExpiredBackgroundJobLeases(input: {
          AND job."type" = 'ORDER_EXPORT'
     `);
 
+    await tx.$executeRaw(Prisma.sql`
+      WITH ${terminalJobsCte}
+      UPDATE "AgentMonthlyBillExport" AS bill_export
+         SET "status" = 'FAILED'::"AgentMonthlyBillExportStatus",
+             "lastErrorCode" = COALESCE(
+               job."lastErrorCode",
+               'WorkerLeaseExpired'
+             ),
+             "filters" = '{}'::jsonb,
+             "artifactName" = NULL,
+             "byteSize" = NULL,
+             "updatedAt" = now()
+        FROM "terminal_jobs" AS job
+       WHERE bill_export."backgroundJobId" = job."id"
+         AND bill_export."status" = 'PENDING'::"AgentMonthlyBillExportStatus"
+         AND job."type" = 'AGENT_MONTHLY_BILL_EXPORT'
+    `);
+
     return terminalJobs.length;
   });
 }

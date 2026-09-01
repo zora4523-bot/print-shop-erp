@@ -7,6 +7,7 @@ import {
   getAllSettings,
   type SettingKey,
 } from '@/lib/settings';
+import { listManagementNotificationChannels } from '@/lib/notification/management-routing';
 
 export const metadata = {
   title: '系统设置 · 红包印刷 ERP',
@@ -15,7 +16,10 @@ export const metadata = {
 export default async function OwnerSettingsPage() {
   // 页面级 authz（纵深防御：layout 的 gate 在软导航时不会重跑）
   await requirePermission('setting:manage');
-  const settings = await getAllSettings();
+  const [settings, notificationChannels] = await Promise.all([
+    getAllSettings(),
+    listManagementNotificationChannels(),
+  ]);
 
   const initialValues = Object.fromEntries(
     SETTING_KEYS.map((key) => [
@@ -27,7 +31,10 @@ export default async function OwnerSettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="系统设置" />
-      <SettingsForm initialValues={initialValues} />
+      <SettingsForm
+        initialValues={initialValues}
+        notificationChannels={notificationChannels}
+      />
     </div>
   );
 }

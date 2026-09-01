@@ -1,5 +1,7 @@
 import Decimal from 'decimal.js';
 import { Role } from '../../generated/prisma/enums';
+import { cleanupExpiredAgentMonthlyBillExports } from '../agent-monthly-billing/export';
+import { scrubTerminalAgentMonthlyBillExportFilters } from '../agent-monthly-billing/export-retention';
 import {
   BillGenerationUnexpectedError,
   generateBillsForPeriod,
@@ -336,10 +338,18 @@ export async function runOrderExportCleanupTask(
   const scrubbedFilterCount = await scrubTerminalOrderExportFilters();
   await assertExecutionFence(fence);
   const expiredCount = await cleanupExpiredOrderExports();
+  await assertExecutionFence(fence);
+  const agentBillScrubbedFilterCount =
+    await scrubTerminalAgentMonthlyBillExportFilters();
+  await assertExecutionFence(fence);
+  const agentBillExpiredCount =
+    await cleanupExpiredAgentMonthlyBillExports();
   return {
     status: 'ok' as const,
     runDate,
     expiredCount,
     scrubbedFilterCount,
+    agentBillExpiredCount,
+    agentBillScrubbedFilterCount,
   };
 }

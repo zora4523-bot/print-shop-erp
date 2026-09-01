@@ -46,13 +46,20 @@ export function editableFieldsetForStatus(status: OrderStatus): EditableFieldset
   switch (status) {
     case OrderStatus.DRAFT:
     case OrderStatus.PENDING_FACTORY:
+    case OrderStatus.REJECTED:
     case OrderStatus.SUBMITTED:
       return 'FULL';
+    case OrderStatus.CONFIRMED:
+    case OrderStatus.ON_HOLD:
+    case OrderStatus.RELEASED:
+    case OrderStatus.FOILING:
+    case OrderStatus.PACKING:
     case OrderStatus.SCHEDULING:
     case OrderStatus.IN_PRODUCTION:
       return 'SHIPPING_ONLY';
     case OrderStatus.COMPLETED:
     case OrderStatus.SHIPPED:
+    case OrderStatus.SETTLED:
     case OrderStatus.FINISHED:
     case OrderStatus.CANCELLED:
       return 'NONE';
@@ -79,5 +86,9 @@ export function isOrderEditable(status: OrderStatus): boolean {
 // 顺丰到付通过详情页专用 action 维护，因为外部销售工单必须同步重算
 // 对客快递应收；不能混入普通字段 UPDATE。FINISHED / CANCELLED 终态不变。
 export function canEditOrderSfCollect(status: OrderStatus): boolean {
-  return status !== OrderStatus.FINISHED && status !== OrderStatus.CANCELLED;
+  return (
+    status !== OrderStatus.SETTLED &&
+    status !== OrderStatus.FINISHED &&
+    status !== OrderStatus.CANCELLED
+  );
 }

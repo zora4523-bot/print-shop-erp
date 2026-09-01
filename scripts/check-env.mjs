@@ -26,7 +26,7 @@ const warnings = [];
 const REQUIRED = [
   ['DATABASE_URL', '数据库连不上，应用起不来'],
   ['AUTH_SECRET', '会话签名密钥缺失，Auth.js 拒启'],
-  ['CRON_SECRET', '8 个定时任务全部返回 503'],
+  ['CRON_SECRET', '9 个定时任务全部返回 503'],
 ];
 
 for (const [key, why] of REQUIRED) {
@@ -61,7 +61,11 @@ if (isProd && env.BACKGROUND_JOBS_MODE === 'inline') {
   );
 }
 
-for (const key of ['PDF_ARTIFACT_DIR', 'ORDER_EXPORT_ARTIFACT_DIR']) {
+for (const key of [
+  'PDF_ARTIFACT_DIR',
+  'ORDER_EXPORT_ARTIFACT_DIR',
+  'AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR',
+]) {
   const value = env[key]?.trim();
   if (value && !isAbsolute(value)) {
     errors.push(`${key} 必须是绝对路径 —— Web 与 HEAVY worker 需要访问同一个产物目录。`);

@@ -61,6 +61,13 @@ type Props = {
   items: ItemOption[];
 };
 
+const MODIFY_KINDS = [
+  ['QTY', '数量'],
+  ['DUE_DATE', '交期'],
+  ['CRAFT_PAPER', '工艺 / 纸张'],
+  ['OTHER', '其他'],
+] as const;
+
 function splitColors(value: string): string[] {
   return [
     ...new Set(
@@ -105,6 +112,111 @@ function StateMessage({
   );
 }
 
+function ExistingOrderItemChanges({
+  editable,
+  items,
+  pending,
+  updateItem,
+}: {
+  editable: Record<string, EditableItem>;
+  items: ItemOption[];
+  pending: boolean;
+  updateItem: (itemId: string, patch: Partial<EditableItem>) => void;
+}) {
+  return (
+    <fieldset className="min-w-0 space-y-3">
+      <legend className="sr-only">选择并修改现有款式</legend>
+      {items.map((item) => {
+        const current = editable[item.id];
+        return (
+          <div key={item.id} className="min-w-0 rounded-lg border p-3">
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+              <Checkbox
+                checked={current.selected}
+                disabled={pending}
+                aria-label={`选择款式 ${item.sequence}：${externalPriceBusinessText(item.name)}`}
+                onCheckedChange={(checked) =>
+                  updateItem(item.id, { selected: checked })
+                }
+              />
+              <span className="admin-wrap-anywhere min-w-0 font-medium">
+                #{item.sequence} · {externalPriceBusinessText(item.name)}
+              </span>
+            </label>
+            {current.selected ? (
+              <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 lg:grid-cols-2">
+                <label className="min-w-0 space-y-1 text-sm">
+                  <span>款式名称</span>
+                  <Input
+                    value={current.displayName}
+                    maxLength={64}
+                    required
+                    disabled={pending}
+                    onChange={(event) =>
+                      updateItem(item.id, {
+                        name: event.target.value,
+                        displayName: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label className="min-w-0 space-y-1 text-sm">
+                  <span>数量</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={current.quantity}
+                    required
+                    disabled={pending}
+                    onChange={(event) =>
+                      updateItem(item.id, {
+                        quantity: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <div className="min-w-0 space-y-1 text-sm">
+                  <span>规格</span>
+                  <p className="admin-wrap-anywhere min-h-11 min-w-0 rounded-md border bg-muted/30 px-3 py-2.5">
+                    {current.displaySpecification || '未填'}
+                  </p>
+                </div>
+                <label className="min-w-0 space-y-1 text-sm">
+                  <span>正面烫金颜色（多个用顿号分隔）</span>
+                  <Input
+                    value={current.frontFoilColors}
+                    maxLength={200}
+                    disabled={pending}
+                    onChange={(event) =>
+                      updateItem(item.id, {
+                        frontFoilColors: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label className="min-w-0 space-y-1 text-sm">
+                  <span>反面烫金颜色（多个用顿号分隔）</span>
+                  <Input
+                    value={current.backFoilColors}
+                    maxLength={200}
+                    disabled={pending}
+                    onChange={(event) =>
+                      updateItem(item.id, {
+                        backFoilColors: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </fieldset>
+  );
+}
+
 export function OrderChangeRequestForm({ orderId, items }: Props) {
   const [state, action] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
@@ -112,6 +224,8 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   >(createOrderChangeRequestAction, null);
   const [pending, startTransition] = useTransition();
   const [reason, setReason] = useState('');
+  const [modifyKind, setModifyKind] =
+    useState<(typeof MODIFY_KINDS)[number][0]>('QTY');
   const [editable, setEditable] = useState<Record<string, EditableItem>>(() =>
     Object.fromEntries(
       items.map((item) => [
@@ -185,6 +299,8 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
     startTransition(() =>
       action({
         orderId,
+        type: 'MODIFY',
+        modifyKind,
         reason,
         items: changes,
       }),
@@ -212,96 +328,12 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
         勾选要修改的款式；可改款式名、数量和正反面烫金颜色。已开工款式不能改数量。
         新增款式继承规格、纸张、工艺和计价参数。
       </p>
-      <fieldset className="min-w-0 space-y-3">
-        <legend className="sr-only">选择并修改现有款式</legend>
-        {items.map((item) => {
-          const current = editable[item.id];
-          return (
-            <div key={item.id} className="min-w-0 rounded-lg border p-3">
-              <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-                <Checkbox
-                  checked={current.selected}
-                  disabled={pending}
-                  aria-label={`选择款式 ${item.sequence}：${externalPriceBusinessText(item.name)}`}
-                  onCheckedChange={(checked) =>
-                    updateItem(item.id, { selected: checked })
-                  }
-                />
-                <span className="admin-wrap-anywhere min-w-0 font-medium">
-                  #{item.sequence} · {externalPriceBusinessText(item.name)}
-                </span>
-              </label>
-              {current.selected ? (
-                <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 lg:grid-cols-2">
-                  <label className="min-w-0 space-y-1 text-sm">
-                    <span>款式名称</span>
-                    <Input
-                      value={current.displayName}
-                      maxLength={64}
-                      required
-                      disabled={pending}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          name: event.target.value,
-                          displayName: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="min-w-0 space-y-1 text-sm">
-                    <span>数量</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={current.quantity}
-                      required
-                      disabled={pending}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          quantity: Number(event.target.value),
-                        })
-                      }
-                    />
-                  </label>
-                  <div className="min-w-0 space-y-1 text-sm">
-                    <span>规格</span>
-                    <p className="admin-wrap-anywhere min-h-11 min-w-0 rounded-md border bg-muted/30 px-3 py-2.5">
-                      {current.displaySpecification || '未填'}
-                    </p>
-                  </div>
-                  <label className="min-w-0 space-y-1 text-sm">
-                    <span>正面烫金颜色（多个用顿号分隔）</span>
-                    <Input
-                      value={current.frontFoilColors}
-                      maxLength={200}
-                      disabled={pending}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          frontFoilColors: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="min-w-0 space-y-1 text-sm">
-                    <span>反面烫金颜色（多个用顿号分隔）</span>
-                    <Input
-                      value={current.backFoilColors}
-                      maxLength={200}
-                      disabled={pending}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          backFoilColors: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </fieldset>
+      <ExistingOrderItemChanges
+        editable={editable}
+        items={items}
+        pending={pending}
+        updateItem={updateItem}
+      />
 
       <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
@@ -374,6 +406,24 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           </div>
         ) : null}
       </fieldset>
+
+      <label className="block min-w-0 space-y-1 text-sm">
+        <span className="font-medium">修改类别</span>
+        <select
+          value={modifyKind}
+          onChange={(event) =>
+            setModifyKind(event.target.value as typeof modifyKind)
+          }
+          disabled={pending}
+          className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
+        >
+          {MODIFY_KINDS.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <label className="block min-w-0 space-y-1 text-sm">
         <span className="font-medium">修改原因</span>

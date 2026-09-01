@@ -1,0 +1,287 @@
+import { randomUUID } from 'node:crypto';
+import Link from 'next/link';
+import {
+  Banknote,
+  FileClock,
+  Inbox,
+  ReceiptText,
+  TriangleAlert,
+} from 'lucide-react';
+import { AgentMonthlyBillStatus } from '@/generated/prisma/enums';
+import { requirePermission } from '@/lib/auth/permissions';
+import { previousShanghaiMonth } from '@/lib/cron/schedule';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
+import {
+  getAgentMonthlyBillingStats,
+  listAgentBillAccounts,
+  listAgentMonthlyBills,
+} from '@/lib/agent-monthly-billing/query';
+import { listRecentAgentMonthlyBillExports } from '@/lib/agent-monthly-billing/export';
+import { isAgentBillPeriod } from '@/lib/agent-monthly-billing/period';
+import { GenerateAgentMonthlyBillsForm } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
+import { AgentMonthlyBillExportControls } from '@/components/business/agent-monthly-billing/AgentMonthlyBillExportControls';
+import { Button, buttonVariants } from '@/components/ui/button';
+import {
+  EmptyState,
+  PageHeader,
+  StatCard,
+  StatusBadge,
+  TableScrollArea,
+} from '@/components/ui-business';
+import { formatMoney } from '@/lib/dashboard/format';
+import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+
+export const metadata = { title: '代理商月度账单' };
+
+type PageProps = {
+  searchParams: Promise<{
+    period?: string;
+    status?: string;
+    agentUserId?: string;
+    page?: string;
+  }>;
+};
+
+function parseStatus(value: string | undefined): AgentMonthlyBillStatus | undefined {
+  return value &&
+    (Object.values(AgentMonthlyBillStatus) as string[]).includes(value)
+    ? (value as AgentMonthlyBillStatus)
+    : undefined;
+}
+
+function parsePage(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export default async function AgentMonthlyBillsPage({ searchParams }: PageProps) {
+  const actor = await requirePermission('bill:view:all');
+  const raw = await searchParams;
+  const period = raw.period && isAgentBillPeriod(raw.period) ? raw.period : undefined;
+  const status = parseStatus(raw.status);
+  const agentUserId = raw.agentUserId?.trim() || undefined;
+  const page = parsePage(raw.page);
+  const [result, stats, accounts, recentExports] = await Promise.all([
+    listAgentMonthlyBills({ period, status, agentUserId, page }),
+    getAgentMonthlyBillingStats(),
+    listAgentBillAccounts(),
+    listRecentAgentMonthlyBillExports(actor.id),
+  ]);
+
+  return (
+    <div className="min-w-0 space-y-6">
+      <PageHeader
+        title="代理商月度账单"
+        subtitle="仅按 settledAt 上海日历月归集已结算的外部销售收费单；确认后永久冻结。"
+      />
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard
+          label="待收款"
+          value={`¥ ${formatMoney(stats.receivableAmount)}`}
+          icon={Banknote}
+          tone="warning"
+        />
+        <StatCard
+          label="待收账单"
+          value={`${stats.receivableBillCount} 张`}
+          icon={ReceiptText}
+          tone="primary"
+        />
+        <StatCard
+          label="未出账已结算工单"
+          value={`${stats.unbilledOrderCount} 单`}
+          icon={TriangleAlert}
+          tone={stats.unbilledOrderCount > 0 ? 'danger' : 'neutral'}
+        />
+      </div>
+
+      <section className="rounded-xl border bg-card p-4 shadow-sm">
+        <GenerateAgentMonthlyBillsForm defaultPeriod={previousShanghaiMonth()} />
+        <p className="mt-2 text-xs text-muted-foreground">
+          生成只接受已结束月份；重复执行会幂等同步 DRAFT，不会创建补充账单。
+        </p>
+      </section>
+
+      <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+        <label className="space-y-1 text-xs text-muted-foreground">
+          <span>账期</span>
+          <input
+            name="period"
+            type="month"
+            defaultValue={period}
+            className="block h-9 rounded-md border bg-background px-3 text-sm text-foreground"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-muted-foreground">
+          <span>状态</span>
+          <select
+            name="status"
+            defaultValue={status ?? ''}
+            className="block h-9 rounded-md border bg-background px-3 text-sm text-foreground"
+          >
+            <option value="">全部</option>
+            {Object.values(AgentMonthlyBillStatus).map((value) => (
+              <option key={value} value={value}>
+                {AGENT_MONTHLY_BILL_STATUS_REGISTRY[value].label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="min-w-0 max-w-full basis-full space-y-1 text-xs text-muted-foreground sm:w-auto sm:basis-auto">
+          <span>代理商</span>
+          <select
+            name="agentUserId"
+            defaultValue={agentUserId ?? ''}
+            className="block h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm text-foreground sm:min-w-44"
+          >
+            <option value="">全部</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.displayName} ({account.username})
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button type="submit" size="sm">
+          筛选
+        </Button>
+        <Link
+          href="/owner/agent-bills"
+          className={buttonVariants({ size: 'sm', variant: 'outline' })}
+        >
+          清空
+        </Link>
+        <Link
+          href="/owner/bills/archive"
+          className={buttonVariants({ size: 'sm', variant: 'ghost' })}
+        >
+          查看 legacy 只读归档
+        </Link>
+      </form>
+
+      <AgentMonthlyBillExportControls
+        requestKey={randomUUID()}
+        filter={{
+          ...(period ? { period } : {}),
+          ...(status ? { status } : {}),
+          ...(agentUserId ? { agentUserId } : {}),
+        }}
+        filteredTotal={result.total}
+        recent={recentExports.map((item) => ({
+          ...item,
+          expiresAt: item.expiresAt.toISOString(),
+          completedAt: item.completedAt?.toISOString() ?? null,
+          createdAt: item.createdAt.toISOString(),
+        }))}
+      />
+
+      {result.rows.length === 0 ? (
+        <EmptyState
+          icon={Inbox}
+          title="当前筛选无 v2 账单"
+          description="可在上方生成已结束月份的 DRAFT。"
+        />
+      ) : (
+        <TableScrollArea
+          label="代理商月度账单列表"
+          className="min-w-0 max-w-full rounded-xl border bg-card shadow-sm"
+        >
+          <table className="w-full min-w-[48rem] text-sm">
+            <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 text-left">账期</th>
+                <th className="px-4 py-2 text-left">代理商快照</th>
+                <th className="px-4 py-2 text-right">工单</th>
+                <th className="px-4 py-2 text-right">成员小计</th>
+                <th className="px-4 py-2 text-right">负项</th>
+                <th className="px-4 py-2 text-right">应收</th>
+                <th className="px-4 py-2 text-center">状态</th>
+                <th className="px-4 py-2 text-left">锁定 / 结清</th>
+                <th className="px-4 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {result.rows.map((bill) => (
+                <tr key={bill.id}>
+                  <td className="px-4 py-3 font-sans tabular-nums">{bill.period}</td>
+                  <td className="px-4 py-3">
+                    <div>{bill.agentDisplayNameSnapshot}</div>
+                    <div className="text-xs text-muted-foreground">{bill.agentUsernameSnapshot}</div>
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">{bill._count.items}</td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(bill.memberSubtotal)}</td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(bill.adjustmentAmount)}</td>
+                  <td className="px-4 py-3 text-right font-sans font-semibold tabular-nums">{formatMoney(bill.totalAmount)}</td>
+                  <td className="px-4 py-3 text-center">
+                    <StatusBadge
+                      tone={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}
+                      dot={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].dot}
+                    >
+                      {AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}
+                    </StatusBadge>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
+                    {bill.paidAt
+                      ? `结清 ${formatDateTimeShanghai(bill.paidAt)}`
+                      : bill.confirmedAt
+                        ? `锁定 ${formatDateTimeShanghai(bill.confirmedAt)}`
+                        : '尚未锁定'}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Link
+                      href={`/owner/agent-bills/${bill.id}`}
+                      className={buttonVariants({ size: 'sm', variant: 'outline' })}
+                    >
+                      详情
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScrollArea>
+      )}
+
+      <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <span>
+          第 {result.page} / {result.pageCount} 页 · 共 {result.total} 张
+        </span>
+        <div className="flex gap-2">
+          {result.page > 1 ? (
+            <Link
+              href={pageHref(raw, result.page - 1)}
+              className={buttonVariants({ size: 'sm', variant: 'outline' })}
+            >
+              上一页
+            </Link>
+          ) : null}
+          {result.page < result.pageCount ? (
+            <Link
+              href={pageHref(raw, result.page + 1)}
+              className={buttonVariants({ size: 'sm', variant: 'outline' })}
+            >
+              下一页
+            </Link>
+          ) : null}
+        </div>
+      </div>
+      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <FileClock className="size-4" />
+        legacy Bill 保留原 finishedAt / 部分收款语义，不与本页数字混算。
+      </p>
+    </div>
+  );
+}
+
+function pageHref(
+  raw: Awaited<PageProps['searchParams']>,
+  page: number,
+): string {
+  const params = new URLSearchParams();
+  if (raw.period) params.set('period', raw.period);
+  if (raw.status) params.set('status', raw.status);
+  if (raw.agentUserId) params.set('agentUserId', raw.agentUserId);
+  params.set('page', String(page));
+  return `/owner/agent-bills?${params.toString()}`;
+}

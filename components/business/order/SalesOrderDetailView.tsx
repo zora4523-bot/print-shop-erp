@@ -24,11 +24,55 @@ import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity'
 import { DesignUploadPanel } from './DesignUploadPanel';
 import { HighlightedRemark } from './HighlightedRemark';
 import { OrderChangeRequestForm } from './OrderChangeRequestForm';
+import { OrderCancellationRequestForm } from './OrderCancellationRequestForm';
+import { OrderChangeWithdrawButton } from './OrderChangeWithdrawButton';
 import { PromisedDateBadge } from './PromisedDateBadge';
 import { SfCollectToggleForm } from './SfCollectToggleForm';
 import { ShipmentStatusBadge } from './ShipmentStatusBadge';
 import { SubmitOrderButton } from './SubmitOrderButton';
 import { UrgentToggleForm } from './UrgentToggleForm';
+
+function SalesOrderChangeRequestSection({
+  canRequestCancellation,
+  order,
+}: {
+  canRequestCancellation: boolean;
+  order: SalesOrderDetail;
+}) {
+  return (
+    <section
+      id="change-request"
+      className="scroll-mt-24 space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6"
+    >
+      <div>
+        <h2 className="text-base font-semibold">申请修改工单</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          管理员批准后才会更新工单内容。
+        </p>
+      </div>
+      <OrderChangeRequestForm
+        orderId={order.id}
+        items={order.items.map((item) => ({
+          id: item.id,
+          sequence: item.sequence,
+          name: item.name,
+          quantity: item.quantity,
+          specification: item.specification,
+          frontFoilColors: item.frontFoilColors,
+          backFoilColors: item.backFoilColors,
+          foilColors: item.foilColors,
+          isDoubleSided: item.isDoubleSided,
+        }))}
+      />
+      {canRequestCancellation ? (
+        <div className="border-t pt-4">
+          <h3 className="mb-2 text-sm font-semibold">申请取消</h3>
+          <OrderCancellationRequestForm orderId={order.id} />
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
   const status = salesOrderStatusPresentation(order.status);
@@ -44,11 +88,21 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
   const pendingChangeRequest = order.changeRequests.find(
     (request) => request.status === OrderChangeRequestStatus.PENDING,
   );
-  const canRequestChange =
+  const canRequestModify =
     (order.status === OrderStatus.DRAFT ||
       order.status === OrderStatus.SUBMITTED ||
       order.status === OrderStatus.SCHEDULING ||
-      order.status === OrderStatus.IN_PRODUCTION) &&
+      order.status === OrderStatus.IN_PRODUCTION ||
+      order.status === OrderStatus.CONFIRMED ||
+      order.status === OrderStatus.RELEASED ||
+      order.status === OrderStatus.FOILING ||
+      order.status === OrderStatus.PACKING) &&
+    !pendingChangeRequest;
+  const canRequestCancellation =
+    (order.status === OrderStatus.CONFIRMED ||
+      order.status === OrderStatus.RELEASED ||
+      order.status === OrderStatus.FOILING ||
+      order.status === OrderStatus.PACKING) &&
     !pendingChangeRequest;
   const pricingPending =
     order.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
@@ -221,32 +275,11 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
             </ol>
           </section>
 
-          {canRequestChange ? (
-            <section
-              id="change-request"
-              className="scroll-mt-24 space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6"
-            >
-              <div>
-                <h2 className="text-base font-semibold">申请修改工单</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  管理员批准后才会更新工单内容。
-                </p>
-              </div>
-              <OrderChangeRequestForm
-                orderId={order.id}
-                items={order.items.map((item) => ({
-                  id: item.id,
-                  sequence: item.sequence,
-                  name: item.name,
-                  quantity: item.quantity,
-                  specification: item.specification,
-                  frontFoilColors: item.frontFoilColors,
-                  backFoilColors: item.backFoilColors,
-                  foilColors: item.foilColors,
-                  isDoubleSided: item.isDoubleSided,
-                }))}
-              />
-            </section>
+          {canRequestModify ? (
+            <SalesOrderChangeRequestSection
+              canRequestCancellation={canRequestCancellation}
+              order={order}
+            />
           ) : null}
         </div>
 
@@ -356,7 +389,7 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
 
           {order.changeRequests.length > 0 ? (
             <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-              <h2 className="text-base font-semibold">修改申请</h2>
+              <h2 className="text-base font-semibold">变更 / 取消申请</h2>
               <ol className="space-y-3">
                 {order.changeRequests.map((request) => {
                   const definition =
@@ -368,6 +401,7 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
                           {definition.label}
                         </UiStatusBadge>
                         <span className="text-xs text-muted-foreground">
+                          {request.type === 'CANCEL' ? '取消' : '修改'} ·{' '}
                           基于第 {request.baseRevision} 版 ·{' '}
                           {formatDateTimeShanghai(new Date(request.createdAt))}
                         </span>
@@ -379,6 +413,9 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
                         <p className="admin-wrap-anywhere mt-2 text-xs text-muted-foreground">
                           审核说明：{request.reviewRemark}
                         </p>
+                      ) : null}
+                      {request.canWithdraw ? (
+                        <OrderChangeWithdrawButton requestId={request.id} />
                       ) : null}
                     </li>
                   );

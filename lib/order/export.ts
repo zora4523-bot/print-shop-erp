@@ -43,6 +43,11 @@ import {
   type OrderListQuery,
 } from './list-query';
 import {
+  adminOrderExportParamsFromQuery,
+  isAdminOrderWorkspaceExportParams,
+  parseAdminOrderWorkspaceQuery,
+} from './admin-workspace-query';
+import {
   cleanupUntrackedOrderExportArtifacts,
   deleteOrderExportArtifact,
   ensureOrderExportArtifactDir,
@@ -59,8 +64,9 @@ export const ORDER_EXPORT_PARAMS_MAX_JSON_LENGTH = 10_000;
 const REQUEST_KEY_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export type OrderExportScope = 'all' | 'filtered';
+export type OrderExportScope = 'all' | 'filtered' | 'selected';
 export type OrderExportParams = Record<string, string>;
+export const ORDER_EXPORT_SELECTED_MAX = 5_000;
 
 export type OrderExportSummary = {
   id: string;
@@ -104,6 +110,7 @@ export async function requestOrderExport(input: {
   requestKey: string;
   scope: OrderExportScope;
   params: OrderExportParams;
+  selectedOrderIds?: readonly string[];
   durable: boolean;
   now?: Date;
 }): Promise<OrderExportSummary> {
@@ -115,10 +122,24 @@ export async function requestOrderExport(input: {
   }
 
   const stored = normalizeStoredFilter(input.scope, input.params);
+  const selectedOrderIds =
+    input.scope === 'selected'
+      ? normalizeSelectedOrderIds(input.selectedOrderIds ?? [])
+      : [];
   const existing = await db.orderExport.findUnique({
     where: { requestKey: input.requestKey },
   });
-  if (existing) return ownedSummary(existing, input.actor.id);
+  if (existing) {
+    const summary = ownedSummary(existing, input.actor.id);
+    if (stored.scope === 'selected') {
+      await assertSelectedExportReplay(
+        existing.id,
+        existing.filters,
+        selectedOrderIds,
+      );
+    }
+    return summary;
+  }
 
   const now = input.now ?? new Date();
   const fileName = buildExportFileName(now, input.requestKey);
@@ -135,6 +156,29 @@ export async function requestOrderExport(input: {
           expiresAt: new Date(now.getTime() + EXPORT_TTL_MS),
         },
       });
+
+      if (stored.scope === 'selected') {
+        const authorized = await tx.order.findMany({
+          where: { id: { in: selectedOrderIds } },
+          select: { id: true },
+        });
+        const authorizedIds = new Set(authorized.map((order) => order.id));
+        if (
+          authorizedIds.size !== selectedOrderIds.length ||
+          selectedOrderIds.some((orderId) => !authorizedIds.has(orderId))
+        ) {
+          throw new InvalidOrderExportRequestError(
+            '所选工单已变更或无权导出，请刷新后重试',
+          );
+        }
+        await tx.orderExportSelection.createMany({
+          data: selectedOrderIds.map((orderId, sequence) => ({
+            exportId: orderExport.id,
+            orderId,
+            sequence,
+          })),
+        });
+      }
 
       let backgroundJobId: string | null = null;
       if (input.durable) {
@@ -163,6 +207,9 @@ export async function requestOrderExport(input: {
         entityId: orderExport.id,
         after: {
           scope: stored.scope,
+          ...(stored.scope === 'selected'
+            ? { selectedOrderCount: selectedOrderIds.length }
+            : {}),
           schemaVersion: EXPORT_SCHEMA_VERSION,
           backgroundJobId: backgroundJobId ? '[QUEUED]' : null,
         },
@@ -176,7 +223,15 @@ export async function requestOrderExport(input: {
       where: { requestKey: input.requestKey },
     });
     if (!duplicate) throw error;
-    return ownedSummary(duplicate, input.actor.id);
+    const summary = ownedSummary(duplicate, input.actor.id);
+    if (stored.scope === 'selected') {
+      await assertSelectedExportReplay(
+        duplicate.id,
+        duplicate.filters,
+        selectedOrderIds,
+      );
+    }
+    return summary;
   }
 }
 
@@ -197,6 +252,13 @@ export async function processQueuedOrderExport(
           displayName: true,
           role: true,
           isActive: true,
+        },
+      },
+      selections: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          orderId: true,
+          order: { select: { id: true, orderNo: true, createdAt: true } },
         },
       },
     },
@@ -221,16 +283,40 @@ export async function processQueuedOrderExport(
   }
 
   const stored = parseStoredFilter(orderExport.filters);
-  const { query, issues } = parseOrderListQuery(stored.params);
-  if (issues.length > 0) throw new InvalidOrderExportStoredFilterError();
-  const filters = stored.scope === 'all' ? parseOrderListQuery({}).query.filters : query.filters;
-  const where = buildOrderWhere(
-    { id: orderExport.createdById, role: Role.ADMIN },
-    filters,
-  );
-  const snapshotWhere: Prisma.OrderWhereInput = {
-    AND: [where, { createdAt: { lte: orderExport.snapshotAt } }],
-  };
+  const actor = { id: orderExport.createdById, role: Role.ADMIN } as const;
+  let snapshotWhere: Prisma.OrderWhereInput | null = null;
+  if (stored.scope !== 'selected') {
+    let resultWhere: Prisma.OrderWhereInput;
+    if (
+      stored.scope === 'filtered' &&
+      isAdminOrderWorkspaceExportParams(stored.params)
+    ) {
+      const parsed = parseAdminOrderWorkspaceQuery(stored.params);
+      if (parsed.issues.length > 0) {
+        throw new InvalidOrderExportStoredFilterError();
+      }
+      const { resolveAdminWorkspaceResultWhere } = await import(
+        './admin-workspace'
+      );
+      resultWhere = await resolveAdminWorkspaceResultWhere(
+        actor,
+        parsed.query,
+        orderExport.snapshotAt,
+      );
+    } else {
+      const { query, issues } = parseOrderListQuery(stored.params);
+      if (issues.length > 0) throw new InvalidOrderExportStoredFilterError();
+      resultWhere = buildOrderWhere(
+        actor,
+        stored.scope === 'all'
+          ? parseOrderListQuery({}).query.filters
+          : query.filters,
+      );
+    }
+    snapshotWhere = {
+      AND: [resultWhere, { createdAt: { lte: orderExport.snapshotAt } }],
+    };
+  }
   // A lease reclaim can briefly leave two workers finishing the same export.
   // Each attempt must own its file so the worker that loses the READY CAS can
   // delete only its own artifact, never the winner's published workbook.
@@ -246,7 +332,24 @@ export async function processQueuedOrderExport(
   await ensureOrderExportArtifactDir();
   let matchedOrderCount = 0;
   try {
-    matchedOrderCount = await writeMembershipManifest(membershipPath, snapshotWhere);
+    if (stored.scope === 'selected') {
+      const membership = orderExport.selections.map(({ order }) => order);
+      if (
+        membership.length === 0 ||
+        membership.some((order) => order.createdAt > orderExport.snapshotAt)
+      ) {
+        throw new InvalidOrderExportStoredFilterError();
+      }
+      matchedOrderCount = await writeSelectedMembershipManifest(
+        membershipPath,
+        membership,
+      );
+    } else {
+      matchedOrderCount = await writeMembershipManifest(
+        membershipPath,
+        snapshotWhere!,
+      );
+    }
     const sheets = buildWorkbookSheets(membershipPath, rowCounts);
     const result = await writeXlsxFile({ filePath: artifactPath, sheets });
     await context.assertLease?.();
@@ -635,7 +738,7 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '工单名称', '状态', '类型', '计费方式', '结算路径', '来源重做单', '重做原因',
     '重做说明', '需外协', '急单', '顺丰到付', '客户名称/简称', '主收件人', '收件电话',
-    '主收货地址', '快递代码', '快递单号', '工单总额', '版本', '承诺交期', '包装要求',
+    '主收货地址', '快递代码', '快递单号', '工单总额', '数据修订版本', '工单版本', '承诺交期', '包装要求',
     '工单备注', '提交人', '提交人角色', '代建人', '代建人角色', '提交时间', '排产时间', '完工时间', '发货时间',
     '结束时间', '创建时间', '更新时间',
   ];
@@ -665,6 +768,7 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
         trackingNo: true,
         totalAmount: true,
         revision: true,
+        workOrderVersion: true,
         promisedDate: true,
         packageRequirement: true,
         remark: true,
@@ -708,6 +812,7 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
         row.trackingNo,
         decimal(row.totalAmount, 2),
         row.revision,
+        row.workOrderVersion,
         date(row.promisedDate),
         row.packageRequirement,
         row.remark,
@@ -1530,6 +1635,29 @@ async function writeMembershipManifest(
   }
 }
 
+async function writeSelectedMembershipManifest(
+  filePath: string,
+  membership: readonly MembershipKey[],
+): Promise<number> {
+  const output = createWriteStream(filePath, { flags: 'wx', mode: 0o600 });
+  try {
+    await once(output, 'open');
+    for (const row of membership) {
+      if (!output.write(`${JSON.stringify(row)}\n`)) {
+        await once(output, 'drain');
+      }
+    }
+    const finished = once(output, 'finish');
+    output.end();
+    await finished;
+    return membership.length;
+  } catch (error) {
+    output.destroy();
+    await unlink(filePath).catch(() => undefined);
+    throw error;
+  }
+}
+
 async function* membershipBatches(filePath: string): AsyncGenerator<MembershipKey[]> {
   const lines = createInterface({
     input: createReadStream(filePath, { encoding: 'utf8' }),
@@ -1553,14 +1681,26 @@ function normalizeStoredFilter(
   scope: OrderExportScope,
   params: OrderExportParams,
 ): StoredExportFilter {
-  if (scope !== 'all' && scope !== 'filtered') {
+  if (scope !== 'all' && scope !== 'filtered' && scope !== 'selected') {
     throw new InvalidOrderExportRequestError('导出范围不合法');
   }
-  if (scope === 'all') {
+  if (scope === 'all' || scope === 'selected') {
     const params: OrderExportParams = {};
     return { scope, params, filterHash: hashExportParams(params) };
   }
   const normalized = normalizeParams(params);
+  if (isAdminOrderWorkspaceExportParams(normalized)) {
+    const parsed = parseAdminOrderWorkspaceQuery(normalized);
+    if (parsed.issues.length > 0) {
+      throw new InvalidOrderExportRequestError(parsed.issues.join('；'));
+    }
+    const exportParams = adminOrderExportParamsFromQuery(parsed.query);
+    return {
+      scope,
+      params: exportParams,
+      filterHash: hashExportParams(exportParams),
+    };
+  }
   const parsed = parseOrderListQuery(normalized);
   if (parsed.issues.length > 0) {
     throw new InvalidOrderExportRequestError(parsed.issues.join('；'));
@@ -1573,7 +1713,10 @@ function parseStoredFilter(value: Prisma.JsonValue): StoredExportFilter {
   if (!isRecord(value)) throw new InvalidOrderExportStoredFilterError();
   const scope = value.scope;
   const params = value.params;
-  if ((scope !== 'all' && scope !== 'filtered') || !isRecord(params)) {
+  if (
+    (scope !== 'all' && scope !== 'filtered' && scope !== 'selected') ||
+    !isRecord(params)
+  ) {
     throw new InvalidOrderExportStoredFilterError();
   }
   try {
@@ -1852,7 +1995,57 @@ function buildExportFileName(now: Date, requestKey: string): string {
 
 function safeStoredScope(value: Prisma.JsonValue): OrderExportScope {
   if (isRecord(value) && value.scope === 'all') return 'all';
+  if (isRecord(value) && value.scope === 'selected') return 'selected';
   return 'filtered';
+}
+
+function normalizeSelectedOrderIds(values: readonly string[]): string[] {
+  if (values.length < 1 || values.length > ORDER_EXPORT_SELECTED_MAX) {
+    throw new InvalidOrderExportRequestError(
+      `所选工单数量必须为 1–${ORDER_EXPORT_SELECTED_MAX} 单`,
+    );
+  }
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = raw.trim();
+    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
+      throw new InvalidOrderExportRequestError('所选工单标识不合法');
+    }
+    if (seen.has(value)) {
+      throw new InvalidOrderExportRequestError('所选工单不能重复');
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+async function assertSelectedExportReplay(
+  exportId: string,
+  filters: Prisma.JsonValue,
+  selectedOrderIds: readonly string[],
+): Promise<void> {
+  if (safeStoredScope(filters) !== 'selected') {
+    throw new InvalidOrderExportRequestError(
+      '请求标识已用于其他导出范围',
+    );
+  }
+  const stored = await db.orderExportSelection.findMany({
+    where: { exportId },
+    orderBy: { sequence: 'asc' },
+    select: { orderId: true },
+  });
+  if (
+    stored.length !== selectedOrderIds.length ||
+    stored.some(
+      (selection, index) => selection.orderId !== selectedOrderIds[index],
+    )
+  ) {
+    throw new InvalidOrderExportRequestError(
+      '同一请求标识不能更换所选工单',
+    );
+  }
 }
 
 function isMembershipKey(value: unknown): value is MembershipKey {
@@ -1873,6 +2066,7 @@ function orderExportErrorCode(error: unknown): string {
 }
 
 const EXPORT_PARAM_KEYS = new Set([
+  'adminWorkspace', 'queue', 'signal', 'starred', 'unbilled',
   'q', 'orderNo', 'customName', 'customerRef', 'receiverName', 'receiverPhone',
   'receiverAddress', 'submitterId', 'workerId', 'status', 'kind', 'isUrgent',
   'isSfCollect', 'addressMode', 'amountMin', 'amountMax', 'createdFrom',
@@ -1953,6 +2147,8 @@ const OUTSOURCE_STATUS_LABELS: Record<OutsourceStatus, string> = {
 const CHANGE_REQUEST_STATUS_LABELS: Record<OrderChangeRequestStatus, string> = {
   PENDING: '待审核',
   APPROVED: '已同意',
+  DENIED: '已驳回',
+  WITHDRAWN: '已撤回',
   REJECTED: '已拒绝',
   CANCELLED: '已取消',
   STALE: '已过期',

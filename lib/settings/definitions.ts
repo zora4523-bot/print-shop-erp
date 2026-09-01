@@ -31,6 +31,27 @@ function define<T>(definition: SettingDefinition<T>): SettingDefinition<T> {
   return definition;
 }
 
+const notificationChannelIdsSchema = z
+  .array(z.string().trim().min(1, '接收群 ID 不能为空').max(128))
+  .max(20, '每个角色最多选择 20 个接收群')
+  .refine((ids) => new Set(ids).size === ids.length, '接收群不能重复');
+
+const managementNotificationRoleSchema = z
+  .object({
+    enabled: z.boolean(),
+    channelIds: notificationChannelIdsSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.enabled && value.channelIds.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['channelIds'],
+        message: '开启角色通知时至少选择 1 个接收群',
+      });
+    }
+  });
+
 export const SETTING_DEFINITIONS = {
   factory_name: define({
     ...SETTING_METADATA.factory_name,
@@ -88,6 +109,85 @@ export const SETTING_DEFINITIONS = {
         .max(10, '倍数最多 10 倍'),
     }),
     fallback: { multiple: 3 },
+  }),
+
+  production_stagnation_days: define({
+    ...SETTING_METADATA.production_stagnation_days,
+    remark: '生产下发后无人扫码认领的停滞阈值',
+    schema: z.object({
+      days: z.number().int('阈值必须是整数天').min(1).max(30),
+    }),
+    fallback: { days: 2 },
+  }),
+
+  production_alert_scan_batch_size: define({
+    ...SETTING_METADATA.production_alert_scan_batch_size,
+    remark: '生产异常与停滞通知每次扫描的活跃工单上限',
+    schema: z.object({
+      count: z.number().int('批量必须是整数单数').min(1).max(500),
+    }),
+    fallback: { count: 200 },
+  }),
+
+  pending_factory_backlog_threshold: define({
+    ...SETTING_METADATA.pending_factory_backlog_threshold,
+    remark: '待工厂确认工单积压提醒阈值',
+    schema: z.object({
+      count: z.number().int('阈值必须是整数单数').min(1).max(500),
+    }),
+    fallback: { count: 5 },
+  }),
+
+  management_notification_routing: define({
+    ...SETTING_METADATA.management_notification_routing,
+    remark: '管理通知的角色开关与企业微信群路由',
+    schema: z
+      .object({
+        factoryConfirmer: managementNotificationRoleSchema,
+        owner: managementNotificationRoleSchema,
+      })
+      .strict(),
+    // 新库/损坏配置下绝不猜测群，也不回退到可被事件规则
+    // 改写的 channelIds。迁移会用存量 active channel ID 显式初始化。
+    fallback: {
+      factoryConfirmer: { enabled: false, channelIds: [] },
+      owner: { enabled: false, channelIds: [] },
+    },
+  }),
+
+  notify_order_submitted_enabled: define({
+    ...SETTING_METADATA.notify_order_submitted_enabled,
+    remark: '新单提交通知开关',
+    schema: z.object({ enabled: z.boolean() }),
+    fallback: { enabled: true },
+  }),
+
+  notify_order_change_enabled: define({
+    ...SETTING_METADATA.notify_order_change_enabled,
+    remark: '工单变更与取消申请通知开关',
+    schema: z.object({ enabled: z.boolean() }),
+    fallback: { enabled: true },
+  }),
+
+  notify_production_anomaly_enabled: define({
+    ...SETTING_METADATA.notify_production_anomaly_enabled,
+    remark: '报工进度异常通知开关',
+    schema: z.object({ enabled: z.boolean() }),
+    fallback: { enabled: true },
+  }),
+
+  notify_production_stagnation_enabled: define({
+    ...SETTING_METADATA.notify_production_stagnation_enabled,
+    remark: '生产停滞通知开关',
+    schema: z.object({ enabled: z.boolean() }),
+    fallback: { enabled: true },
+  }),
+
+  notify_pending_factory_backlog_enabled: define({
+    ...SETTING_METADATA.notify_pending_factory_backlog_enabled,
+    remark: '待确认积压通知开关',
+    schema: z.object({ enabled: z.boolean() }),
+    fallback: { enabled: true },
   }),
 
 };
@@ -159,6 +259,12 @@ export function parseSettingInput<K extends SettingKey>(
       return { ok: false, message: `${definition.label}必须选择开启或关闭` };
     }
     candidate = { [field.name]: trimmed === 'true' };
+  } else if (field.kind === 'management-notification-routing') {
+    try {
+      candidate = JSON.parse(trimmed);
+    } catch {
+      return { ok: false, message: `${definition.label}格式损坏，请刷新后重试` };
+    }
   } else {
     candidate = { [field.name]: trimmed };
   }
@@ -179,5 +285,8 @@ export function formatSettingForInput<K extends SettingKey>(
   value: SettingValue<K>,
 ): string {
   const { field } = SETTING_DEFINITIONS[key];
+  if (field.kind === 'management-notification-routing') {
+    return JSON.stringify(value);
+  }
   return String((value as Record<string, unknown>)[field.name] ?? '');
 }

@@ -409,6 +409,8 @@ function configurationSnapshot() {
     ),
     pdfArtifactDir: process.env.PDF_ARTIFACT_DIR ?? '(unset)',
     orderExportArtifactDir: process.env.ORDER_EXPORT_ARTIFACT_DIR ?? '(unset)',
+    agentMonthlyBillExportArtifactDir:
+      process.env.AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR ?? '(unset)',
   };
 }
 

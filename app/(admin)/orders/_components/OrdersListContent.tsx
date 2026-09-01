@@ -7,6 +7,7 @@ import { OrderListFilters } from '@/components/business/order/OrderListFilters';
 import { SalesOrderListFilters } from '@/components/business/order/SalesOrderListFilters';
 import { SalesOrdersList } from '@/components/business/order/SalesOrdersList';
 import { OrdersTable } from '@/components/business/order/OrdersTable';
+import { AdminOrderWorkspace } from '@/components/business/order/AdminOrderWorkspace';
 import { OrderListScrollState } from '@/components/business/order/OrderListNavigationState';
 import { ErrorBoundary } from '@/components/ui-business';
 import {
@@ -18,6 +19,13 @@ import {
   serializeOrderListQuery,
   type OrderListSearchParams,
 } from '@/lib/order/list-query';
+import { loadAdminOrderWorkspace } from '@/lib/order/admin-workspace';
+import {
+  adminOrderExportParamsFromQuery,
+  parseAdminOrderWorkspaceQuery,
+} from '@/lib/order/admin-workspace-query';
+import { getAgentMonthlyBillingStats } from '@/lib/agent-monthly-billing/query';
+import { getSetting } from '@/lib/settings';
 import {
   getSalesOrderListPageWindow,
   getSalesOrderListSummary,
@@ -55,8 +63,16 @@ export async function OrdersListContent({
   user: OrdersActor;
 }) {
   const rawSearchParams = await searchParams;
-  const parsed = parseOrderListQuery(rawSearchParams);
   const actor = { id: user.id, role: user.role };
+  if (user.role === Role.ADMIN) {
+    return (
+      <AdminOrdersWorkspaceContent
+        user={actor}
+        rawSearchParams={rawSearchParams}
+      />
+    );
+  }
+  const parsed = parseOrderListQuery(rawSearchParams);
   if (user.role === Role.SALES) {
     return (
       <SalesOrdersListContent
@@ -75,11 +91,8 @@ export async function OrdersListContent({
     query,
     orderListPageWindowPromise,
   );
-  const filterOptionsPromise = getOrderListFilterOptions(actor);
-  const recentExportsPromise: RecentExportsPromise =
-    user.role === Role.ADMIN
-      ? listRecentOrderExports(user.id)
-      : Promise.resolve([]);
+  const filterOptionsPromise = loadOrderListFilterOptions(actor);
+  const recentExportsPromise: RecentExportsPromise = Promise.resolve([]);
   const advancedRequested = rawValueIncludes(rawSearchParams.advanced, '1');
 
   return (
@@ -120,6 +133,62 @@ export async function OrdersListContent({
       </ErrorBoundary>
     </>
   );
+}
+
+export async function AdminOrdersWorkspaceContent({
+  user,
+  rawSearchParams,
+}: {
+  user: OrdersActor;
+  rawSearchParams: OrderListSearchParams;
+}) {
+  const actor = user;
+  const parsed = parseAdminOrderWorkspaceQuery(rawSearchParams);
+  const stagnationSetting = getSetting('production_stagnation_days');
+  const [data, options, billingStats, recentExports] = await Promise.all([
+    stagnationSetting.then((setting) =>
+      loadAdminOrderWorkspace(
+        actor,
+        parsed.query,
+        new Date(),
+        setting.days,
+      ),
+    ),
+    loadOrderListFilterOptions(actor),
+    getAgentMonthlyBillingStats(),
+    listRecentOrderExports(user.id),
+  ]);
+  const exportParams = adminOrderExportParamsFromQuery(parsed.query);
+  return (
+    <AdminOrderWorkspace
+      data={data}
+      query={parsed.query}
+      issues={parsed.issues}
+      options={options}
+      billingStats={billingStats}
+      exportControls={
+        <OrderExportControls
+          params={exportParams}
+          filteredTotal={data.total}
+          hasFilters={Object.keys(exportParams).length > 0}
+          filteredRequestKey={randomUUID()}
+          allRequestKey={randomUUID()}
+          recent={recentExports.map((item) => ({
+            ...item,
+            createdAt: item.createdAt.toISOString(),
+            completedAt: item.completedAt?.toISOString() ?? null,
+            expiresAt: item.expiresAt.toISOString(),
+          }))}
+        />
+      }
+      selectedExportRequestKey={randomUUID()}
+    />
+  );
+}
+
+function loadOrderListFilterOptions(actor: OrdersActor): FilterOptionsPromise {
+  const filterOptionsPromise = getOrderListFilterOptions(actor);
+  return filterOptionsPromise;
 }
 
 export async function SalesOrdersListContent({

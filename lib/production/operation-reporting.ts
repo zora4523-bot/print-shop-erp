@@ -1,15 +1,14 @@
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
-  MachineType,
   OrderStatus,
   PieceworkOperationType,
   PieceworkPriceBookStatus,
   ProductionOperationStatus,
   ProductionReportEntryType,
   ProductionReportSource,
+  ProductionWorkOrderStage,
   Role,
-  WorkerType,
 } from '../../generated/prisma/enums';
 import { databaseClockNow } from '../background-jobs/clock';
 import { parseStrictYmd } from '../auth/schemas';
@@ -27,13 +26,31 @@ import {
   pieceworkSettlementLockKey,
 } from '../salary/piecework-lock';
 import { employmentCoversDate } from '../salary/employment';
+import {
+  operationTypeForReporterAccount,
+  type OperationReporterAccount,
+} from './reporter-operation-lane';
 import { salaryIdentityLockKey } from '../salary/hourly-lock';
+import {
+  appendWorkOrderProgressInTx,
+  assertWorkOrderProgressCapacityInTx,
+  ensureFirstProductionScanClaimInTx,
+  parseWorkOrderProgressQuantity,
+  workOrderStageForOperation,
+  WorkOrderProgressError,
+} from './work-order-progress';
 
 export type OperationReportInput = {
   operationId: string;
   completedQty: number;
   defectQty: number;
   reworkQty: number;
+  /**
+   * Independent work-order piece progress. It is required for canonical
+   * RELEASED/FOILING/PACKING orders and is never derived from payroll units.
+   * Optional only so legacy SCHEDULING/IN_PRODUCTION callers can drain safely.
+   */
+  workOrderProgressQuantity?: number;
   idempotencyKey: string;
 };
 
@@ -61,6 +78,8 @@ export type OperationReportingErrorCode =
   | 'ACCOUNT_NOT_AUTHORIZED'
   | 'PARTIAL_SOURCE_AMBIGUOUS'
   | 'OVER_REPORT'
+  | 'WORK_ORDER_PROGRESS_REQUIRED'
+  | 'OVER_WORK_ORDER_PROGRESS'
   | 'REPORTING_DAY_SETTLED'
   | 'PIECEWORK_RATE_UNAVAILABLE'
   | 'IDEMPOTENCY_CONFLICT';
@@ -79,11 +98,20 @@ export class OperationReportingError extends Error {
 const OPERATION_REPORT_SELECT = {
   id: true,
   orderId: true,
+  workOrderVersion: true,
   operationType: true,
   unit: true,
   status: true,
   plannedQty: true,
-  order: { select: { id: true, orderNo: true, status: true } },
+  order: {
+    select: {
+      id: true,
+      orderNo: true,
+      status: true,
+      scheduledAt: true,
+      workOrderVersion: true,
+    },
+  },
   sources: {
     select: {
       sourceType: true,
@@ -125,11 +153,18 @@ const IDEMPOTENT_REPORT_SELECT = {
   defectQty: true,
   reworkQty: true,
   amount: true,
+  workOrderProgress: {
+    select: {
+      stage: true,
+      workOrderProgressQuantity: true,
+      idempotencyKey: true,
+    },
+  },
   operation: {
     select: {
       status: true,
       orderId: true,
-      order: { select: { status: true } },
+      order: { select: { status: true, scheduledAt: true } },
     },
   },
 } satisfies Prisma.ProductionReportSelect;
@@ -178,13 +213,36 @@ function validateInput(input: OperationReportInput) {
   const completed = quantity(input.completedQty, '合格完成数');
   const defect = quantity(input.defectQty, '缺陷数');
   const rework = quantity(input.reworkQty, '返工数');
+  let workOrderProgress: Decimal | null = null;
+  if (input.workOrderProgressQuantity !== undefined) {
+    try {
+      workOrderProgress = parseWorkOrderProgressQuantity(
+        input.workOrderProgressQuantity,
+      );
+    } catch (error) {
+      if (error instanceof WorkOrderProgressError) {
+        throw new OperationReportingError(
+          'INVALID_INPUT',
+          error.message,
+          error.detail,
+        );
+      }
+      throw error;
+    }
+  }
   if (completed.plus(defect).plus(rework).eq(0)) {
     throw new OperationReportingError(
       'INVALID_INPUT',
       '合格、缺陷和返工数不能全为 0',
     );
   }
-  return { idempotencyKey, completed, defect, rework };
+  return {
+    idempotencyKey,
+    completed,
+    defect,
+    rework,
+    workOrderProgress,
+  };
 }
 
 function operationLockKey(operationId: string): string {
@@ -235,35 +293,7 @@ async function lockCurrentPieceworkReportingDay(
   );
 }
 
-export type OperationReporterAccount = {
-  role: Role;
-  isActive: boolean;
-  workerType: WorkerType | null;
-  machineType: MachineType | null;
-};
-
-/** One account has one fixed operation lane; capabilities never widen it. */
-export function operationTypeForReporterAccount(
-  account: OperationReporterAccount,
-): PieceworkOperationType | null {
-  if (account.role !== Role.WORKER || !account.isActive) return null;
-  if (account.workerType === WorkerType.PACKER) {
-    return PieceworkOperationType.PACKING;
-  }
-  if (
-    account.workerType === WorkerType.MACHINE &&
-    account.machineType === MachineType.HAND_PRESS
-  ) {
-    return PieceworkOperationType.PARTIAL;
-  }
-  if (
-    account.workerType === WorkerType.MACHINE &&
-    account.machineType === MachineType.WINDMILL
-  ) {
-    return PieceworkOperationType.FULL;
-  }
-  return null;
-}
+export { operationTypeForReporterAccount } from './reporter-operation-lane';
 
 function assertReporterCanPerform(
   operationType: PieceworkOperationType,
@@ -389,6 +419,11 @@ function sameIdempotentRequest(
     reportedCompletedQty: { toString(): string };
     defectQty: { toString(): string };
     reworkQty: { toString(): string };
+    workOrderProgress?: null | {
+      stage: ProductionWorkOrderStage;
+      workOrderProgressQuantity: { toString(): string };
+      idempotencyKey: string;
+    };
   },
   input: OperationReportInput,
   actor: OperationReportActor,
@@ -399,7 +434,12 @@ function sameIdempotentRequest(
     report.entryType === ProductionReportEntryType.REPORT &&
     report.reportedCompletedQty.toString() === String(input.completedQty) &&
     report.defectQty.toString() === String(input.defectQty) &&
-    report.reworkQty.toString() === String(input.reworkQty)
+    report.reworkQty.toString() === String(input.reworkQty) &&
+    (input.workOrderProgressQuantity === undefined
+      ? report.workOrderProgress == null
+      : report.workOrderProgress?.workOrderProgressQuantity.toString() ===
+          String(input.workOrderProgressQuantity) &&
+        report.workOrderProgress.idempotencyKey === input.idempotencyKey)
   );
 }
 
@@ -489,6 +529,12 @@ function replayIdempotentReport(
 }
 
 function assertOperationIsReportable(operation: ReportableOperation): void {
+  if (operation.workOrderVersion !== operation.order.workOrderVersion) {
+    throw new OperationReportingError(
+      'OPERATION_NOT_REPORTABLE',
+      `该工序属于已作废的工单 v${operation.workOrderVersion}`,
+    );
+  }
   if (
     operation.status === ProductionOperationStatus.COMPLETED ||
     operation.status === ProductionOperationStatus.CANCELLED
@@ -500,7 +546,10 @@ function assertOperationIsReportable(operation: ReportableOperation): void {
   }
   if (
     operation.order.status !== OrderStatus.SCHEDULING &&
-    operation.order.status !== OrderStatus.IN_PRODUCTION
+    operation.order.status !== OrderStatus.IN_PRODUCTION &&
+    operation.order.status !== OrderStatus.RELEASED &&
+    operation.order.status !== OrderStatus.FOILING &&
+    operation.order.status !== OrderStatus.PACKING
   ) {
     throw new OperationReportingError(
       'ORDER_NOT_REPORTABLE',
@@ -535,6 +584,65 @@ async function computeCompletedAggregate(
     );
   }
   return completedAggregate;
+}
+
+function isCanonicalProductionStatus(status: OrderStatus): boolean {
+  return (
+    status === OrderStatus.RELEASED ||
+    status === OrderStatus.FOILING ||
+    status === OrderStatus.PACKING
+  );
+}
+
+type PreparedWorkOrderProgress = {
+  stage: ProductionWorkOrderStage;
+  quantity: Decimal;
+  orderTotal: Decimal;
+  afterReport: Decimal;
+};
+
+async function prepareWorkOrderProgress(
+  tx: Prisma.TransactionClient,
+  operation: ReportableOperation,
+  parsed: ValidatedOperationReportInput,
+): Promise<PreparedWorkOrderProgress | null> {
+  if (
+    isCanonicalProductionStatus(operation.order.status) &&
+    parsed.workOrderProgress === null
+  ) {
+    throw new OperationReportingError(
+      'WORK_ORDER_PROGRESS_REQUIRED',
+      '已下发工单必须单独填写本次工单件数进度',
+    );
+  }
+  if (parsed.workOrderProgress === null) return null;
+
+  const stage = workOrderStageForOperation(operation.operationType);
+  try {
+    const capacity = await assertWorkOrderProgressCapacityInTx(tx, {
+      orderId: operation.orderId,
+      workOrderVersion: operation.workOrderVersion,
+      stage,
+      quantity: parsed.workOrderProgress,
+    });
+    return {
+      stage,
+      quantity: parsed.workOrderProgress,
+      orderTotal: capacity.orderTotal,
+      afterReport: capacity.afterReport,
+    };
+  } catch (error) {
+    if (error instanceof WorkOrderProgressError) {
+      throw new OperationReportingError(
+        error.code === 'OVER_WORK_ORDER_PROGRESS'
+          ? 'OVER_WORK_ORDER_PROGRESS'
+          : 'INVALID_INPUT',
+        error.message,
+        error.detail,
+      );
+    }
+    throw error;
+  }
 }
 
 async function appendPricedProductionReport(
@@ -650,6 +758,8 @@ async function appendPricedProductionReport(
           completedQty: priced.completedQty,
           defectQty: priced.excludedDefectQty,
           reworkQty: priced.excludedReworkQty,
+          workOrderProgressQuantity:
+            parsed.workOrderProgress?.toString() ?? null,
         },
         payroll: {
           defectAndReworkExcluded: true,
@@ -709,11 +819,49 @@ async function advanceProductionAfterReport(
       },
     });
     orderStatus = OrderStatus.IN_PRODUCTION;
+  } else if (isCanonicalProductionStatus(orderStatus)) {
+    const stage = workOrderStageForOperation(operation.operationType);
+    const targetStatus =
+      stage === ProductionWorkOrderStage.PACKING
+        ? OrderStatus.PACKING
+        : OrderStatus.FOILING;
+    const shouldAdvance =
+      (orderStatus === OrderStatus.RELEASED &&
+        (targetStatus === OrderStatus.FOILING ||
+          targetStatus === OrderStatus.PACKING)) ||
+      (orderStatus === OrderStatus.FOILING &&
+        targetStatus === OrderStatus.PACKING);
+    if (shouldAdvance) {
+      transitionOrder(orderStatus, targetStatus);
+      await tx.order.update({
+        where: { id: operation.orderId },
+        data: { status: targetStatus },
+      });
+      await tx.orderLog.create({
+        data: {
+          orderId: operation.orderId,
+          operatorId: account.id,
+          action: 'STATUS_CHANGE',
+          changedFields: {
+            status: { before: orderStatus, after: targetStatus },
+          },
+          remark: `${stage === ProductionWorkOrderStage.FOILING ? '烫金' : '打包'}工序首次有效扫码报工`,
+        },
+      });
+      orderStatus = targetStatus;
+    }
+  }
+
+  // The canonical workflow stays FOILING/PACKING until the explicit shipping
+  // command. COMPLETED is an expand-migration compatibility state only.
+  if (isCanonicalProductionStatus(orderStatus)) {
+    return { operationStatus, orderStatus };
   }
 
   const remainingOperations = await tx.productionOperation.count({
     where: {
       orderId: operation.orderId,
+      workOrderVersion: operation.workOrderVersion,
       status: {
         notIn: [
           ProductionOperationStatus.COMPLETED,
@@ -748,6 +896,11 @@ async function reportProductionOperationInTx(
 
   assertOperationIsReportable(operation);
   const plan = plannedCompletedPieces(operation);
+  const workOrderProgress = await prepareWorkOrderProgress(
+    tx,
+    operation,
+    parsed,
+  );
   const completedAggregate = await computeCompletedAggregate(
     tx,
     operation,
@@ -761,6 +914,49 @@ async function reportProductionOperationInTx(
     plan,
     parsed,
   );
+  if (workOrderProgress) {
+    await appendWorkOrderProgressInTx(tx, {
+      orderId: operation.orderId,
+      workOrderVersion: operation.workOrderVersion,
+      operationId: operation.id,
+      sourceReportId: reportId,
+      reporterId: account.id,
+      stage: workOrderProgress.stage,
+      quantity: workOrderProgress.quantity,
+      idempotencyKey: parsed.idempotencyKey,
+      reportedAt,
+    });
+  }
+  if (isCanonicalProductionStatus(operation.order.status)) {
+    try {
+      await ensureFirstProductionScanClaimInTx(
+        tx,
+        {
+          orderId: operation.orderId,
+          workOrderVersion: operation.order.workOrderVersion,
+          operationId: operation.id,
+          progressStepId: null,
+          reporterId: account.id,
+          idempotencyKey: parsed.idempotencyKey,
+          orderStatus: operation.order.status,
+          scheduledAt: operation.order.scheduledAt,
+          claimedAt: reportedAt,
+        },
+        { source: 'REPORT' },
+      );
+    } catch (error) {
+      if (error instanceof WorkOrderProgressError) {
+        throw new OperationReportingError(
+          error.code === 'IDEMPOTENCY_CONFLICT'
+            ? 'IDEMPOTENCY_CONFLICT'
+            : 'ORDER_NOT_REPORTABLE',
+          error.message,
+          error.detail,
+        );
+      }
+      throw error;
+    }
+  }
   const { operationStatus, orderStatus } = await advanceProductionAfterReport(
     tx,
     operation,

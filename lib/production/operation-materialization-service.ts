@@ -44,6 +44,7 @@ const ORDER_FACTS_SELECT = {
   settlementType: true,
   pricingStatus: true,
   scheduledAt: true,
+  workOrderVersion: true,
   requiresOutsource: true,
   items: {
     select: {
@@ -73,6 +74,7 @@ const ORDER_FACTS_SELECT = {
   productionOperations: {
     select: {
       id: true,
+      workOrderVersion: true,
       operationType: true,
       unit: true,
       status: true,
@@ -90,6 +92,7 @@ const ORDER_FACTS_SELECT = {
   productionProgressSteps: {
     select: {
       id: true,
+      workOrderVersion: true,
       orderItemId: true,
       craftId: true,
       craftCode: true,
@@ -231,6 +234,15 @@ export async function activateProductionOperationsInTx(
   orderId: string,
   actor: { id: string },
   at?: Date,
+  options: {
+    targetStatus?:
+      | typeof OrderStatus.SCHEDULING
+      | typeof OrderStatus.RELEASED
+      | typeof OrderStatus.FOILING
+      | typeof OrderStatus.PACKING;
+    /** Explicitly allows a version upgrade to append a new generation. */
+    allowVersionRematerialization?: boolean;
+  } = {},
 ): Promise<ActivateProductionOperationsResult> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
     orderId,
@@ -246,6 +258,12 @@ export async function activateProductionOperationsInTx(
       '工单不存在',
     );
   }
+  const currentProductionOperations = order.productionOperations.filter(
+    (operation) => operation.workOrderVersion === order.workOrderVersion,
+  );
+  const currentProductionProgressSteps = order.productionProgressSteps.filter(
+    (step) => step.workOrderVersion === order.workOrderVersion,
+  );
   if (
     order.settlementType === OrderSettlementType.NO_CHARGE &&
     order.kind !== OrderKind.REWORK
@@ -260,6 +278,27 @@ export async function activateProductionOperationsInTx(
       'PRICING_NOT_CONFIRMED',
       '工单价格尚未确认，不能投产',
     );
+  }
+
+  // External-sales orders now keep PENDING_FACTORY until an explicit factory
+  // decision. Legacy callers still invoke this helper after automatic/manual
+  // pricing confirmation; treating that invocation as a no-op preserves the
+  // call contract without silently skipping the new confirmation gate.
+  if (
+    options.targetStatus === undefined &&
+    order.status === OrderStatus.PENDING_FACTORY
+  ) {
+    return {
+      orderId,
+      orderStatus: order.status,
+      operationIds: currentProductionOperations.map(
+        (operation) => operation.id,
+      ),
+      operationsCreated: 0,
+      progressStepIds: currentProductionProgressSteps.map((step) => step.id),
+      progressStepsCreated: 0,
+      idempotentReplay: true,
+    };
   }
 
   const plan = deriveProductionOperationPlan({
@@ -301,43 +340,83 @@ export async function activateProductionOperationsInTx(
     );
   }
   const requiresOutsource = craftFacts.some((craft) => craft.isOutsource);
+  const targetStatus = options.targetStatus ?? OrderStatus.SCHEDULING;
 
   if (
-    order.productionOperations.length > 0 ||
-    order.productionProgressSteps.length > 0
+    currentProductionOperations.length > 0 ||
+    currentProductionProgressSteps.length > 0
   ) {
-    assertExistingOperationsMatch(plan.specs, order.productionOperations);
+    assertExistingOperationsMatch(plan.specs, currentProductionOperations);
     assertExistingProgressMatches(
       progressPlan.specs,
-      order.productionProgressSteps,
+      currentProductionProgressSteps,
     );
+    if (order.status !== targetStatus) {
+      transitionOrder(order.status, targetStatus);
+      const activatedAt = at ?? (await databaseNow(tx));
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: targetStatus,
+          scheduledAt: order.scheduledAt ?? activatedAt,
+          requiresOutsource,
+        },
+      });
+      await tx.orderLog.create({
+        data: {
+          orderId,
+          operatorId: actor.id,
+          action: 'OPERATIONS_RELEASED',
+          changedFields: {
+            status: { before: order.status, after: targetStatus },
+            requiresOutsource: {
+              before: order.requiresOutsource,
+              after: requiresOutsource,
+            },
+          },
+          remark: '复用已物化工序并下发生产',
+        },
+      });
+    }
     return {
       orderId,
-      orderStatus: order.status,
-      operationIds: order.productionOperations.map((operation) => operation.id),
+      orderStatus: targetStatus,
+      operationIds: currentProductionOperations.map(
+        (operation) => operation.id,
+      ),
       operationsCreated: 0,
-      progressStepIds: order.productionProgressSteps.map((step) => step.id),
+      progressStepIds: currentProductionProgressSteps.map((step) => step.id),
       progressStepsCreated: 0,
       idempotentReplay: true,
     };
   }
 
-  if (
-    order.status !== OrderStatus.PENDING_FACTORY &&
-    order.status !== OrderStatus.SUBMITTED
-  ) {
+  const statusCanMaterialize =
+    options.allowVersionRematerialization === true
+      ? currentProductionOperations.length === 0 &&
+        currentProductionProgressSteps.length === 0 &&
+        (order.status === OrderStatus.CONFIRMED ||
+          order.status === OrderStatus.RELEASED ||
+          order.status === OrderStatus.FOILING ||
+          order.status === OrderStatus.PACKING)
+      : targetStatus === OrderStatus.RELEASED
+      ? order.status === OrderStatus.CONFIRMED
+      : order.status === OrderStatus.PENDING_FACTORY ||
+        order.status === OrderStatus.SUBMITTED;
+  if (!statusCanMaterialize) {
     throw new ProductionOperationMaterializationError(
       'ORDER_STATUS_NOT_ACTIVATABLE',
       `工单状态 ${order.status} 不允许首次物化工序`,
     );
   }
-  transitionOrder(order.status, OrderStatus.SCHEDULING);
+  if (order.status !== targetStatus) transitionOrder(order.status, targetStatus);
 
   const operationIds: string[] = [];
   for (const spec of plan.specs) {
     const created = await tx.productionOperation.create({
       data: {
         orderId,
+        workOrderVersion: order.workOrderVersion,
         operationType: spec.operationType,
         unit: spec.unit,
         status: ProductionOperationStatus.PENDING,
@@ -361,6 +440,7 @@ export async function activateProductionOperationsInTx(
     const created = await tx.productionProgressStep.create({
       data: {
         orderId,
+        workOrderVersion: order.workOrderVersion,
         orderItemId: spec.orderItemId,
         craftId: spec.craftId,
         craftCode: spec.craftCode,
@@ -377,8 +457,14 @@ export async function activateProductionOperationsInTx(
   await tx.order.update({
     where: { id: orderId },
     data: {
-      status: OrderStatus.SCHEDULING,
-      scheduledAt: order.scheduledAt ?? activatedAt,
+      status: targetStatus,
+      // `scheduledAt` is the release boundary for the current work-order
+      // generation. A rematerialized version must start its own stagnation
+      // clock instead of inheriting the superseded paper's release time.
+      scheduledAt:
+        options.allowVersionRematerialization === true
+          ? activatedAt
+          : order.scheduledAt ?? activatedAt,
       requiresOutsource,
     },
   });
@@ -386,9 +472,11 @@ export async function activateProductionOperationsInTx(
     data: {
       orderId,
       operatorId: actor.id,
-      action: 'OPERATIONS_MATERIALIZED',
+        action: options.allowVersionRematerialization
+          ? 'OPERATIONS_REMATERIALIZED'
+          : 'OPERATIONS_MATERIALIZED',
       changedFields: {
-        status: { before: order.status, after: OrderStatus.SCHEDULING },
+        status: { before: order.status, after: targetStatus },
         requiresOutsource: {
           before: order.requiresOutsource,
           after: requiresOutsource,
@@ -396,6 +484,7 @@ export async function activateProductionOperationsInTx(
         productionOperations: {
           before: 0,
           after: plan.specs.map((spec) => ({
+            workOrderVersion: order.workOrderVersion,
             operationType: spec.operationType,
             unit: spec.unit,
             plannedQty: spec.plannedQty,
@@ -405,6 +494,7 @@ export async function activateProductionOperationsInTx(
         productionProgressSteps: {
           before: 0,
           after: progressPlan.specs.map((spec) => ({
+            workOrderVersion: order.workOrderVersion,
             orderItemId: spec.orderItemId,
             craftId: spec.craftId,
             craftCode: spec.craftCode,
@@ -413,13 +503,17 @@ export async function activateProductionOperationsInTx(
         },
       },
       remark:
-        '价格确认后自动物化计件工序与无计件进度步骤，未进行人员或机器匹配',
+        options.allowVersionRematerialization
+          ? `工单升至 v${order.workOrderVersion}，追加新生产代次；旧工序与报工事实保持只读`
+          : targetStatus === OrderStatus.RELEASED
+          ? '工厂确认后下发生产并物化工序，未进行人员或机器匹配'
+          : '价格确认后自动物化计件工序与无计件进度步骤，未进行人员或机器匹配',
     },
   });
 
   return {
     orderId,
-    orderStatus: OrderStatus.SCHEDULING,
+    orderStatus: targetStatus,
     operationIds,
     operationsCreated: operationIds.length,
     progressStepIds,

@@ -50,7 +50,6 @@ import { dispatchNotification } from './notification/dispatch';
 import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
 import type { EnqueueClient } from './background-jobs/repository';
 import { backgroundJobsMode } from './background-jobs/mode';
-import { formatMoneyPlain } from './dashboard/format';
 import {
   assertCsOrderSalesLedgerReconciledInTx,
   CsSalesLedgerError,
@@ -90,6 +89,7 @@ import {
   finalizeExternalOrderQuoteInTx,
 } from './order/submit-external-order';
 import { activateProductionOperationsInTx } from './production/operation-materialization-service';
+import { getSetting } from './settings';
 
 export {
   listOrders,
@@ -1556,13 +1556,13 @@ async function transitionWithLog(
     });
     if (!target_order) throw new OrderInvariantError('工单不存在');
 
-    if (opts.authz) opts.authz(target_order);
     const resolvedTarget =
       typeof target === 'function' ? target(target_order) : target;
 
     // status-machine.ts throws InvalidOrderTransitionError on bad moves —
     // we let it propagate (action layer maps to a generic error result).
     transitionOrder(target_order.status, resolvedTarget);
+    if (opts.authz) opts.authz(target_order);
     if (
       (resolvedTarget === OrderStatus.SHIPPED ||
         resolvedTarget === OrderStatus.FINISHED) &&
@@ -1634,7 +1634,15 @@ export async function submitOrder(
   quotedFee: string | null;
   quotedFeeCompleteness: OrderQuotedFeeCompleteness | null;
 }> {
-  let notificationsQueued = false;
+  // 设置读失败不能拦截提交；退回原有“发送”行为，后续投递
+  // 仍由 durable outbox 记录失败并重试。
+  const submittedNotificationEnabled = await getSetting(
+    'notify_order_submitted_enabled',
+  )
+    .then((setting) => setting.enabled)
+    .catch(() => true);
+  let submittedNotificationQueued = !submittedNotificationEnabled;
+  let urgentNotificationQueued = false;
   const finalizedExternalQuote: {
     current: Awaited<
       ReturnType<typeof finalizeExternalOrderQuoteInTx>
@@ -1776,29 +1784,28 @@ export async function submitOrder(
             id: true,
             orderNo: true,
             customerRef: true,
-            totalAmount: true,
             isUrgent: true,
             submitter: { select: { displayName: true } },
           },
         });
-        const totalAmount = formatMoneyPlain(
-          payload.totalAmount as unknown as Decimal.Value,
-        );
-        notificationsQueued = await enqueueNotificationInTransaction(
-          tx as unknown as EnqueueClient,
-          'ORDER_SUBMITTED',
-          {
-            orderId: payload.id,
-            orderNo: payload.orderNo,
-            submitterName: payload.submitter.displayName,
-            customerRef: payload.customerRef,
-            totalAmount,
-            urgentMark: payload.isUrgent ? '🚨 急单' : '',
-          },
-          { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
-        );
+        if (submittedNotificationEnabled) {
+          submittedNotificationQueued = await enqueueNotificationInTransaction(
+            tx as unknown as EnqueueClient,
+            'ORDER_SUBMITTED',
+            {
+              orderId: payload.id,
+              orderNo: payload.orderNo,
+              submitterName: payload.submitter.displayName,
+              customerRef: payload.customerRef,
+              urgentMark: payload.isUrgent ? '🚨 急单' : '',
+              summary: '新工单已提交，待工厂确认',
+              deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
+            },
+            { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
+          );
+        }
         if (payload.isUrgent) {
-          const urgentQueued = await enqueueNotificationInTransaction(
+          urgentNotificationQueued = await enqueueNotificationInTransaction(
             tx as unknown as EnqueueClient,
             'URGENT_ORDER',
             {
@@ -1809,7 +1816,8 @@ export async function submitOrder(
             },
             { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
           );
-          notificationsQueued = notificationsQueued && urgentQueued;
+        } else {
+          urgentNotificationQueued = true;
         }
         return activated ? { status: activated.orderStatus } : undefined;
       },
@@ -1819,40 +1827,40 @@ export async function submitOrder(
   // Notification wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit）。
   // 生产只 await 快速入库，webhook 由 LIGHT worker 重试；dev/test
   // 降级到 Next `after()`。详见 lib/notification/dispatch.ts。
-  const payload = notificationsQueued ? null : await db.order.findUnique({
+  const payload =
+    submittedNotificationQueued && urgentNotificationQueued
+      ? null
+      : await db.order.findUnique({
     where: { id: orderId },
     select: {
       id: true,
       orderNo: true,
       customerRef: true,
-      totalAmount: true,
       isUrgent: true,
       submitter: { select: { displayName: true } },
     },
-  });
+        });
   if (payload) {
-    // formatMoneyPlain：千分位 + 2 位小数，**不带 `¥ ` 前缀**。模板里
-    // 的 `金额：¥{totalAmount}` 自带 ¥ —— 再加会变成 `¥¥ 5,000.00`。
-    const totalAmount = formatMoneyPlain(
-      payload.totalAmount as unknown as Decimal.Value,
-    );
     const urgentMark = payload.isUrgent ? '🚨 急单' : '';
-    await dispatchNotification(
-      'ORDER_SUBMITTED',
-      {
-        orderId: payload.id,
-        orderNo: payload.orderNo,
-        submitterName: payload.submitter.displayName,
-        customerRef: payload.customerRef,
-        totalAmount,
-        urgentMark,
-      },
-      { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
-    );
+    if (submittedNotificationEnabled && !submittedNotificationQueued) {
+      await dispatchNotification(
+        'ORDER_SUBMITTED',
+        {
+          orderId: payload.id,
+          orderNo: payload.orderNo,
+          submitterName: payload.submitter.displayName,
+          customerRef: payload.customerRef,
+          urgentMark,
+          summary: '新工单已提交，待工厂确认',
+          deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
+        },
+        { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
+      );
+    }
     // SPEC §8.1：急单提交 → 排产群+管理员群（独立 rule，独立事件）。
     // 不是&ldquo;替代&rdquo; ORDER_SUBMITTED——两条都触发，管理员群从 URGENT_ORDER
     // 看到，排产群从 ORDER_SUBMITTED 看到。
-    if (payload.isUrgent) {
+    if (payload.isUrgent && !urgentNotificationQueued) {
       await dispatchNotification(
         'URGENT_ORDER',
         {
@@ -1892,6 +1900,21 @@ export async function cancelOrder(
   return transitionWithLog(orderId, OrderStatus.CANCELLED, actor, {
     remark: `取消：${normalizedReason}`,
     now,
+    // Direct cancellation is only the withdrawal path for an order that has
+    // not entered the confirmed production contract. Once confirmed, every
+    // cancellation must be an OrderChangeRequest so producedQty, settlement
+    // and the administrator decision are written atomically and auditable.
+    authz: (order) => {
+      if (
+        order.status !== OrderStatus.DRAFT &&
+        order.status !== OrderStatus.PENDING_FACTORY &&
+        order.status !== OrderStatus.REJECTED
+      ) {
+        throw new OrderInvariantError(
+          '已确认或已生产工单不能直接取消，请提交取消申请由管理员裁决',
+        );
+      }
+    },
     // Cancelling must close unstarted production in the SAME transaction.
     // Once any report exists we refuse to erase payroll facts; an operator
     // must handle those records explicitly before cancelling the order.
@@ -2407,14 +2430,14 @@ export async function shipOrder(
             assertStorableOrderTotal(receivableTotal);
             await prismaTx.order.update({
               where: { id },
-              // Shipment finalization replaces the provisional logistics
-              // quote with carrier/administrator-confirmed facts. Keep the
-              // earlier quote and confirmation snapshots as history, while
-              // making the settled snapshot the canonical customer fee that
-              // read models select ahead of them.
+              // Shipment finalization replaces provisional logistics with
+              // carrier/administrator-confirmed facts. It is still a pricing
+              // confirmation, not the financial settlement event: the later
+              // explicit SHIPPED -> SETTLED command is the sole v2 writer of
+              // settledFee/settledAt.
               data: {
                 totalAmount: receivableTotal,
-                settledFee: receivableTotal,
+                confirmedFee: receivableTotal,
               },
             });
           }
@@ -2505,51 +2528,20 @@ export async function shipOrder(
   return result;
 }
 
-// SHIPPED → FINISHED (terminal). The ledger close — used after delivery
-// is acknowledged so the order leaves the active workspace. Same
-// `order:ship` permission gate at the action layer (ADMIN);
-// no separate `order:finish` permission since today there's no business
-// rule that distinguishes the two transitions' authority.
+// Compatibility export only. The old SHIPPED → FINISHED writer bypassed
+// settlement v2 (settledFee/settledAt and the global cutoff lock), so both
+// direct domain callers and the Server Action now fail closed.
 export async function finishOrder(
-  orderId: string,
-  actor: { id: string; role: Role },
-  now: Date = new Date(),
-): Promise<{ id: string; status: OrderStatus }> {
-  return transitionWithLog(orderId, OrderStatus.FINISHED, actor, {
-    remark: '确认完工',
-    now,
-    cascade: async (tx, id) => {
-      const prismaTx = tx as unknown as Prisma.TransactionClient;
-      const order = await prismaTx.order.findUnique({
-        where: { id },
-        select: {
-          settlementType: true,
-          _count: { select: { shipments: true } },
-          customerCharges: {
-            where: {
-              category: {
-                code: { in: ['SHIPPING_FEE', 'PACKING_MATERIAL'] },
-              },
-            },
-            select: { status: true },
-          },
-        },
-      });
-      if (!order) throw new OrderInvariantError('工单不存在');
-      if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) return;
-      if (
-        order.customerCharges.length !== order._count.shipments * 2 ||
-        order.customerCharges.some(
-          (charge) =>
-            charge.status === OrderCustomerChargeStatus.ESTIMATED,
-        )
-      ) {
-        throw new OrderInvariantError(
-          '快递费与打包耗材费尚未全部确认，暂不能完结工单',
-        );
-      }
-    },
-  });
+  _orderId: string,
+  _actor: { id: string; role: Role },
+  _now: Date = new Date(),
+): Promise<never> {
+  void _orderId;
+  void _actor;
+  void _now;
+  throw new OrderInvariantError(
+    '旧版完结入口已停用，请使用管理端“结算”操作',
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────

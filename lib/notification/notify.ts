@@ -4,6 +4,7 @@ import { databaseNow } from '../background-jobs/clock';
 import {
   PRIVATE_EVENT_MAX_CHANNELS,
   isPrivatePerCsEvent,
+  sanitizeNotificationPayload,
   type NotificationEvent,
   type NotificationPayloadFor,
 } from './events';
@@ -21,6 +22,7 @@ import {
   NotificationDeliveryClaimConflictError,
   type DurableDeliveryClaim,
 } from './delivery-ledger';
+import { resolveManagementNotificationRoute } from './management-routing';
 
 // notify(event, payload) 是企业微信推送的**唯一公开入口**（CLAUDE.md
 // §7.1）。它把失败转写到 NotificationLog，并在 NotifyOutcome 上标出
@@ -87,7 +89,7 @@ export type NotifyOutcome = {
   failed: number; // 本次失败（含 channel inactive）
   retryable: boolean; // 存在值得由 durable job 再试一轮的失败
   unknown: number; // 已开始发送但没有可信终态；禁止自动重发
-  unlogged: number; // 仅兼容旧结果形状；durable 路径预留后恒为 0
+  unlogged: number; // 已知失败但无法落 NotificationLog（如路由引用缺失 FK）
   errorCodes: string[]; // 去重后的脱敏错误码，进 job result 给 ops 看
 };
 
@@ -137,8 +139,17 @@ async function sendToChannel(
     sender: WebhookSender;
     signal?: AbortSignal;
     inactiveChannelRetryable: boolean;
+    blockedReason?: string;
   },
 ): Promise<WebhookResult> {
+  if (input.blockedReason) {
+    return {
+      ok: false,
+      retries: 0,
+      errorMessage: input.blockedReason,
+      retryable: false,
+    };
+  }
   if (!input.channel.isActive) {
     return {
       ok: false,
@@ -245,6 +256,7 @@ async function deliverClaimedChannel(
     mock: boolean;
     signal?: AbortSignal;
     inactiveChannelRetryable: boolean;
+    blockedReason?: string;
   },
 ): Promise<void> {
   const result = await sendToChannel(outcome, input);
@@ -296,6 +308,7 @@ export async function notify<E extends NotificationEvent>(
 ): Promise<NotifyOutcome> {
   const outcome = emptyOutcome(event);
   try {
+    const safePayload = sanitizeNotificationPayload(event, payload);
     const mock = opts.mockMode ?? isMockMode();
     const sender: WebhookSender =
       opts.webhookSender ?? (mock ? mockWebhookSender : sendWebhook);
@@ -315,44 +328,79 @@ export async function notify<E extends NotificationEvent>(
       // 比如 STOCK_ALERT 在本波 P1 #2 是&ldquo;接口在但没配规则&rdquo;。
       return outcome;
     }
-    if (rule.channelIds.length === 0) {
+    const managementRoute = await resolveManagementNotificationRoute(event);
+    if (managementRoute && !managementRoute.enabled) {
+      // 管理事件的收件角色已明确关闭。不能回退到 rule.channelIds，
+      // 否则可以绕过角色开关，也会让事件→角色真值变成可配置。
+      return outcome;
+    }
+    const configuredChannelIds = managementRoute
+      ? managementRoute.channelIds
+      : rule.channelIds;
+    if (configuredChannelIds.length === 0) {
       // 配了规则但没绑 channel：等同&ldquo;开了 active 却没收件人&rdquo;。
       // 没法写 NotificationLog（channelId 是 FK 必填），只能打
       // console 让 ops 看到。Slice B 的 admin UI 会在 isActive=true
       // && channelIds=[] 时拒绝保存，杜绝这条路径。
       console.warn(
-        `[notify] rule active but channelIds empty event=${event}`,
+        `[notify] ${managementRoute ? `management role ${managementRoute.role}` : 'rule'} active but channelIds empty event=${event}`,
       );
       // 配置问题，重试一万次也还是没有收件人 → retryable 保持 false。
       return outcome;
     }
 
     // 渲染一次，所有 channel 共用同一份 content（同事件就是同消息）。
-    const content = renderTemplate(rule.messageTemplate, payload);
+    const content = renderTemplate(rule.messageTemplate, safePayload);
 
-    // **去重 + 保序**：rule.channelIds 可能含重复 id（schema String[]
+    // **去重 + 保序**：存量 rule.channelIds 可能含重复 id（schema String[]
     // 不强制 unique）。先 dedupe 出 unique 列表，
     // 后续 stale 比较和 reorder 都基于这条（避免 round 118 medium：
     // 用 raw rule.channelIds.length 做 stale 比较会把&ldquo;有重复&rdquo;误报成
     // &ldquo;有 stale id&rdquo;）。
-    const uniqueRuleChannelIds = Array.from(new Set(rule.channelIds));
+    const uniqueConfiguredChannelIds = Array.from(
+      new Set(configuredChannelIds),
+    );
 
     // 拉到所有引用的 channel——**不**过滤 isActive。下面分流：active
     // 真发送，inactive 写 FAILED log（避免&ldquo;启用 channel 又被关&rdquo;的
     // 静默漏推）。
     const fetched = await db.notificationChannel.findMany({
-      where: { id: { in: uniqueRuleChannelIds } },
+      where: { id: { in: uniqueConfiguredChannelIds } },
       select: { id: true, webhookUrl: true, isActive: true },
     });
-    // **PG `IN (...)` 不保证返回顺序**——必须按 uniqueRuleChannelIds 顺
+    // **PG `IN (...)` 不保证返回顺序**——必须按配置 ID 顺
     // 序重排。否则 CS_PERIOD_* runtime cap 的
     // slice(0, 1) 会随机选 channel：legacy `['owner-group', 'sales-
     // group']` 可能把客服金额发到 sales-group 而漏 owner-group。
     const byId = new Map(fetched.map((c) => [c.id, c]));
-    const channels = uniqueRuleChannelIds
+    const channels = uniqueConfiguredChannelIds
       .map((id) => byId.get(id))
       .filter((c): c is NonNullable<typeof c> => c !== undefined);
+    const missingChannelCount =
+      uniqueConfiguredChannelIds.length - channels.length;
+    const managementRouteBlocked = Boolean(
+      managementRoute &&
+        (missingChannelCount > 0 ||
+          channels.some((channel) => !channel.isActive)),
+    );
+
+    // 托管的五类管理事件用更严的 all-or-nothing 收件人契约：
+    // 任意 ID 已删除或已停用时整次不发，不把同一条管理通知只发给
+    // 半数收件群，也不回退到 NotificationRule.channelIds。已存在的
+    // channel 仍走下面的 ledger，落永久 FAILED；缺失 ID 因 FK 无法写
+    // NotificationLog，必须显式计入 durable job.result 的 failed/unlogged。
+    if (managementRoute && managementRouteBlocked) {
+      console.warn(
+        `[notify] management route fail-closed event=${event} role=${managementRoute.role} configured=${uniqueConfiguredChannelIds.length} found=${channels.length} inactive=${channels.filter((channel) => !channel.isActive).length}`,
+      );
+      if (missingChannelCount > 0) {
+        outcome.failed += missingChannelCount;
+        outcome.unlogged += missingChannelCount;
+        recordErrorCode(outcome, 'management channel missing');
+      }
+    }
     if (channels.length === 0) {
+      if (managementRouteBlocked) return outcome;
       // channelIds 全是 stale ID（指向已删 channel）。FK 不让我们
       // 写 NotificationLog，只能打 console。Slice B 的 channel 删
       // 除会拒绝&ldquo;有 active rule 引用&rdquo;的 channel，杜绝此路径。
@@ -362,11 +410,11 @@ export async function notify<E extends NotificationEvent>(
       // 同上：指向已删 channel 是配置问题，不该占用 job 的 attempts。
       return outcome;
     }
-    if (channels.length < uniqueRuleChannelIds.length) {
+    if (channels.length < uniqueConfiguredChannelIds.length) {
       // 部分 unique ID stale（其他还能用）—— 打 console 提示。
       // 用 unique 而非 raw rule.channelIds 比较，避免重复 id 误报。
       console.warn(
-        `[notify] some channelIds stale event=${event} have=${channels.length} expected=${uniqueRuleChannelIds.length}`,
+        `[notify] some channelIds stale event=${event} have=${channels.length} expected=${uniqueConfiguredChannelIds.length}`,
       );
     }
 
@@ -393,7 +441,7 @@ export async function notify<E extends NotificationEvent>(
     // payload.orderId / outsourceId / periodId 任一存在就关联到日志，
     // 让 dashboard 后期能 join 反查。仅 Order 是被 schema 显式索引的
     // (relatedOrderId)；其他 fk 暂留 null（schema 没建对应列）。
-    const relatedOrderId = extractOrderId(payload);
+    const relatedOrderId = extractOrderId(safePayload);
 
     // Durable 路径不是“发完再写日志”。每个 channel 都先用唯一键原子预留
     // SENDING + fencing token，只有拿到 token 的 attempt 才能做外部 I/O。
@@ -442,6 +490,9 @@ export async function notify<E extends NotificationEvent>(
           // A channel disabled before an initial delivery is a permanent
           // configuration failure, not a reason to burn the job retry budget.
           inactiveChannelRetryable: false,
+          ...(managementRouteBlocked && channel.isActive
+            ? { blockedReason: 'management route incomplete' }
+            : {}),
         });
         continue;
       }
@@ -452,6 +503,9 @@ export async function notify<E extends NotificationEvent>(
         sender,
         ...(opts.signal ? { signal: opts.signal } : {}),
         inactiveChannelRetryable: false,
+        ...(managementRouteBlocked && channel.isActive
+          ? { blockedReason: 'management route incomplete' }
+          : {}),
       });
       const recorded = recordWebhookResult(outcome, result, {
         durable: false,

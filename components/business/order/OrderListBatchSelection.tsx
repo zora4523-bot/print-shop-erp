@@ -73,9 +73,13 @@ export function reduceOrderListSelection(
 export function OrderListSelectionProvider({
   items,
   children,
+  renderBatchActions,
 }: {
   items: readonly OrderListSelectionItem[];
   children: ReactNode;
+  renderBatchActions?: (
+    selectedItems: readonly OrderListSelectionItem[],
+  ) => ReactNode;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const selectedIds = useMemo(() => new Set(selected), [selected]);
@@ -100,6 +104,7 @@ export function OrderListSelectionProvider({
       <OrderListBatchBar
         selectedItems={selectedItems}
         onClear={() => value.dispatch({ type: 'clear' })}
+        renderBatchActions={renderBatchActions}
       />
     </SelectionContext.Provider>
   );
@@ -146,9 +151,13 @@ export function OrderListPageSelection() {
 export function OrderListBatchBar({
   selectedItems,
   onClear,
+  renderBatchActions,
 }: {
   selectedItems: readonly OrderListSelectionItem[];
   onClear: () => void;
+  renderBatchActions?: (
+    selectedItems: readonly OrderListSelectionItem[],
+  ) => ReactNode;
 }) {
   const selectionKey = selectedItems.map((item) => item.id).join(':');
   const [feedback, setFeedback] = useState<
@@ -238,6 +247,7 @@ export function OrderListBatchBar({
             <ClipboardCopy aria-hidden="true" />
             复制工单号
           </Button>
+          {renderBatchActions?.(selectedItems)}
           <Button
             type="button"
             variant="ghost"

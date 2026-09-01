@@ -101,6 +101,46 @@ export async function updateSettings(
   // 一个事务：几项配置要么一起生效要么都不动，避免业主看到「厂名改了、阈值没改」
   // 这种半截状态。用 callback 形式（不是数组形式）才能把审计写在同一个 tx 里。
   await db.$transaction(async (tx) => {
+    const managementRoutingEntry = entries.find(
+      ([key]) => key === 'management_notification_routing',
+    );
+    if (managementRoutingEntry) {
+      const routing = managementRoutingEntry[1] as SettingValue<
+        'management_notification_routing'
+      >;
+      const channelIds = Array.from(
+        new Set([
+          ...routing.factoryConfirmer.channelIds,
+          ...routing.owner.channelIds,
+        ]),
+      ).sort();
+      if (channelIds.length > 0) {
+        // Lock the exact channel rows before validating. This serializes a
+        // settings save with channel deletion/deactivation long enough to
+        // ensure we never commit IDs that were already stale/inactive at the
+        // save point. A later deactivation remains allowed; notify() performs
+        // the same active check at send time and fails closed.
+        await tx.$queryRaw`
+          SELECT id FROM "NotificationChannel"
+          WHERE id = ANY(${channelIds}::text[])
+          ORDER BY id
+          FOR UPDATE
+        `;
+        const activeChannels = await tx.notificationChannel.findMany({
+          where: { id: { in: channelIds }, isActive: true },
+          select: { id: true },
+        });
+        const activeIds = new Set(activeChannels.map((channel) => channel.id));
+        const invalidIds = channelIds.filter((id) => !activeIds.has(id));
+        if (invalidIds.length > 0) {
+          throw new SettingValidationError(
+            'management_notification_routing',
+            '部分接收群已被删除或停用，请刷新后重新选择',
+          );
+        }
+      }
+    }
+
     const existing = await tx.setting.findMany({
       where: { key: { in: entries.map(([key]) => key) } },
       select: { key: true, value: true },

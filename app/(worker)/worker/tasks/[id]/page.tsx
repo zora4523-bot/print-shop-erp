@@ -60,6 +60,12 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
       new Decimal(operation.plannedCompletedQty).minus(operation.completedQty),
       0,
     ).toString();
+    const workOrderProgressRemainingQty = Decimal.max(
+      new Decimal(operation.workOrderTotalQty).minus(
+        operation.workOrderProgressQty,
+      ),
+      0,
+    ).toString();
     return (
       <div className="min-w-0 space-y-5">
         <header className="worker-wrap-anywhere min-w-0 space-y-1">
@@ -100,6 +106,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
               operationId={operation.id}
               idempotencyKey={randomUUID()}
               remainingQty={remainingQty}
+              workOrderProgressRemainingQty={workOrderProgressRemainingQty}
             />
           </section>
         ) : null}
@@ -111,6 +118,14 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             <Metric label="计划数量" value={operation.plannedCompletedQty} />
             <Metric label="缺陷记录" value={operation.defectQty} />
             <Metric label="返工记录" value={operation.reworkQty} />
+            <Metric
+              label={
+                operation.operationType === PieceworkOperationType.PACKING
+                  ? '打包工单进度'
+                  : '烫金工单进度'
+              }
+              value={`${operation.workOrderProgressQty} / ${operation.workOrderTotalQty}`}
+            />
           </dl>
         </section>
 

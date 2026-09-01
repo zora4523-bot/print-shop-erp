@@ -21,7 +21,8 @@ export function backgroundJobOperatorAction(job: {
       // the explicit delivered / confirmed-not-delivered resolution workflow.
       return 'RESOLVE_NOTIFICATION';
     }
-    return job.type === BACKGROUND_JOB_TYPES.ORDER_EXPORT
+    return job.type === BACKGROUND_JOB_TYPES.ORDER_EXPORT ||
+      job.type === BACKGROUND_JOB_TYPES.AGENT_MONTHLY_BILL_EXPORT
       ? 'REQUEST_NEW_EXPORT'
       : 'RETRY';
   }

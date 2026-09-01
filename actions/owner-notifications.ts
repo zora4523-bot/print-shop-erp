@@ -148,12 +148,18 @@ export async function deleteChannelAction(
     await deleteChannel(channelId);
   } catch (err) {
     if (err instanceof ChannelInUseError) {
-      const refs = err.referencingRules
-        .map((rule) => notificationEventLabel(rule.eventType))
+      const refs = err.references
+        .map((reference) =>
+          reference.kind === 'rule'
+            ? notificationEventLabel(reference.eventType)
+            : reference.role === 'factoryConfirmer'
+              ? '工厂确认人固定路由'
+              : '老板固定路由',
+        )
         .join('、');
       return {
         status: 'error',
-        message: `该群仍被 ${err.referencingRules.length} 条规则引用（含未启用：${refs}），先在规则里移除再删。`,
+        message: `该群仍被 ${err.references.length} 项通知配置引用（${refs}），先在规则或系统设置里移除再删。`,
       };
     }
     // PG FK from NotificationLog —— 历史 log 引用此 channel 时 PG 拒删

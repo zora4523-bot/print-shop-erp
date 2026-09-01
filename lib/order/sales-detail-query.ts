@@ -83,12 +83,14 @@ export type SalesOrderDetail = {
   }>;
   changeRequests: Array<{
     id: string;
+    type: 'MODIFY' | 'CANCEL';
     status: OrderChangeRequestStatus;
     baseRevision: number;
     reason: string;
     reviewRemark: string | null;
     reviewedAt: string | null;
     createdAt: string;
+    canWithdraw: boolean;
   }>;
 };
 
@@ -183,6 +185,8 @@ export const salesOrderDetailSelect = {
     take: 20,
     select: {
       id: true,
+      type: true,
+      requesterId: true,
       status: true,
       baseRevision: true,
       reason: true,
@@ -213,10 +217,13 @@ export async function getSalesOrderDetailById(
     },
     select: salesOrderDetailSelect,
   });
-  return row ? mapSalesOrderDetail(row) : null;
+  return row ? mapSalesOrderDetail(row, actor.id) : null;
 }
 
-function mapSalesOrderDetail(row: SalesOrderDetailRecord): SalesOrderDetail {
+function mapSalesOrderDetail(
+  row: SalesOrderDetailRecord,
+  viewerId: string,
+): SalesOrderDetail {
   const pendingPrice =
     row.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
   const feeLines: SalesOrderDetail['feeLines'] = [];
@@ -313,12 +320,16 @@ function mapSalesOrderDetail(row: SalesOrderDetailRecord): SalesOrderDetail {
     })),
     changeRequests: row.changeRequests.map((request) => ({
       id: request.id,
+      type: request.type,
       status: request.status,
       baseRevision: request.baseRevision,
       reason: request.reason,
       reviewRemark: request.reviewRemark,
       reviewedAt: request.reviewedAt?.toISOString() ?? null,
       createdAt: request.createdAt.toISOString(),
+      canWithdraw:
+        request.status === OrderChangeRequestStatus.PENDING &&
+        request.requesterId === viewerId,
     })),
   };
 }

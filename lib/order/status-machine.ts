@@ -14,13 +14,14 @@ export class InvalidOrderTransitionError extends Error {
   }
 }
 
-// Canonical transitions (SPEC §4.3):
-//   DRAFT → PENDING_FACTORY → SCHEDULING → IN_PRODUCTION → COMPLETED → SHIPPED → FINISHED
-// SUBMITTED remains a compatibility state for orders created before the
-// external-sales submission cutover and follows the same outbound path as
-// PENDING_FACTORY.
-// Any non-terminal state can also transition to CANCELLED.
-// FINISHED and CANCELLED are terminal — no outbound transitions.
+// Canonical work-order transitions:
+//   DRAFT → PENDING_FACTORY → CONFIRMED → RELEASED → FOILING → PACKING
+//         → SHIPPED → SETTLED
+// REJECTED can be corrected and resubmitted. ON_HOLD resumes to the exact
+// pre-hold state under the workflow service's persisted decision evidence.
+// SUBMITTED / SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED remain only
+// as expand-migration compatibility states; they are deliberately retained
+// until a later audited contract migration.
 export const ORDER_TRANSITIONS = {
   [OrderStatus.DRAFT]: [
     OrderStatus.PENDING_FACTORY,
@@ -28,20 +29,73 @@ export const ORDER_TRANSITIONS = {
     OrderStatus.CANCELLED,
   ],
   [OrderStatus.PENDING_FACTORY]: [
+    OrderStatus.REJECTED,
+    OrderStatus.CONFIRMED,
     OrderStatus.SCHEDULING,
     OrderStatus.CANCELLED,
   ],
-  [OrderStatus.SUBMITTED]: [OrderStatus.SCHEDULING, OrderStatus.CANCELLED],
+  [OrderStatus.REJECTED]: [
+    OrderStatus.PENDING_FACTORY,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.CONFIRMED]: [
+    OrderStatus.ON_HOLD,
+    OrderStatus.RELEASED,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.ON_HOLD]: [
+    OrderStatus.CONFIRMED,
+    OrderStatus.RELEASED,
+    OrderStatus.FOILING,
+    OrderStatus.PACKING,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.RELEASED]: [
+    OrderStatus.ON_HOLD,
+    OrderStatus.FOILING,
+    OrderStatus.PACKING,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.FOILING]: [
+    OrderStatus.ON_HOLD,
+    OrderStatus.PACKING,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.PACKING]: [
+    OrderStatus.ON_HOLD,
+    OrderStatus.SHIPPED,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.SETTLED]: [],
+  [OrderStatus.SUBMITTED]: [
+    OrderStatus.CONFIRMED,
+    OrderStatus.SCHEDULING,
+    OrderStatus.CANCELLED,
+  ],
   // Pure-outsource orders have no internal task to trigger IN_PRODUCTION;
   // receiving the last outsource order completes them directly.
   [OrderStatus.SCHEDULING]: [
+    OrderStatus.RELEASED,
     OrderStatus.IN_PRODUCTION,
     OrderStatus.COMPLETED,
     OrderStatus.CANCELLED,
   ],
-  [OrderStatus.IN_PRODUCTION]: [OrderStatus.COMPLETED, OrderStatus.CANCELLED],
-  [OrderStatus.COMPLETED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
-  [OrderStatus.SHIPPED]: [OrderStatus.FINISHED, OrderStatus.CANCELLED],
+  [OrderStatus.IN_PRODUCTION]: [
+    OrderStatus.FOILING,
+    OrderStatus.PACKING,
+    OrderStatus.COMPLETED,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.COMPLETED]: [
+    OrderStatus.PACKING,
+    OrderStatus.SHIPPED,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.SHIPPED]: [
+    OrderStatus.SETTLED,
+    OrderStatus.FINISHED,
+    OrderStatus.CANCELLED,
+  ],
   [OrderStatus.FINISHED]: [],
   [OrderStatus.CANCELLED]: [],
 } as const satisfies Record<OrderStatus, readonly OrderStatus[]>;
@@ -76,6 +130,12 @@ export function canAttachOutsource(status: OrderStatus): boolean {
   switch (status) {
     case OrderStatus.DRAFT:
     case OrderStatus.PENDING_FACTORY:
+    case OrderStatus.REJECTED:
+    case OrderStatus.CONFIRMED:
+    case OrderStatus.ON_HOLD:
+    case OrderStatus.RELEASED:
+    case OrderStatus.FOILING:
+    case OrderStatus.PACKING:
     case OrderStatus.SUBMITTED:
     case OrderStatus.SCHEDULING:
     case OrderStatus.IN_PRODUCTION:
@@ -83,6 +143,7 @@ export function canAttachOutsource(status: OrderStatus): boolean {
     case OrderStatus.COMPLETED:
     case OrderStatus.SHIPPED:
     case OrderStatus.FINISHED:
+    case OrderStatus.SETTLED:
     case OrderStatus.CANCELLED:
       return false;
   }

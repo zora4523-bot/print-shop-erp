@@ -24,7 +24,43 @@ export async function updateSettingsAction(
   const values: Record<string, unknown> = {};
 
   for (const key of SETTING_KEYS) {
-    const raw = formData.get(key);
+    let raw: FormDataEntryValue | null;
+    if (key === 'management_notification_routing') {
+      const factoryEnabled = formData.get(
+        `${key}.factoryConfirmer.enabled`,
+      );
+      const ownerEnabled = formData.get(`${key}.owner.enabled`);
+      if (
+        typeof factoryEnabled !== 'string' ||
+        typeof ownerEnabled !== 'string'
+      ) {
+        fieldErrors[key] = ['表单字段缺失，请刷新后重试'];
+        continue;
+      }
+      if (
+        !['true', 'false'].includes(factoryEnabled) ||
+        !['true', 'false'].includes(ownerEnabled)
+      ) {
+        fieldErrors[key] = ['角色开关必须选择开启或关闭'];
+        continue;
+      }
+      raw = JSON.stringify({
+        factoryConfirmer: {
+          enabled: factoryEnabled === 'true',
+          channelIds: formData
+            .getAll(`${key}.factoryConfirmer.channelIds`)
+            .filter((value): value is string => typeof value === 'string'),
+        },
+        owner: {
+          enabled: ownerEnabled === 'true',
+          channelIds: formData
+            .getAll(`${key}.owner.channelIds`)
+            .filter((value): value is string => typeof value === 'string'),
+        },
+      });
+    } else {
+      raw = formData.get(key);
+    }
     if (typeof raw !== 'string') {
       // 表单少字段只可能是前端被改过或请求被截断，不要当成「用户没填」
       // 而写入默认值——那会静默改掉一项业主没碰过的配置。
