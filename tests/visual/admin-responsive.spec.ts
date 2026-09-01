@@ -679,6 +679,19 @@ async function prepareOrderFiltersState(page: Page) {
   await expect(
     exportDialog.getByRole('button', { name: /导出筛选结果/ }),
   ).toBeVisible();
+  if (mobile) {
+    const viewportWidth = page.viewportSize()?.width ?? 0;
+    // Base UI 先挂载右侧抽屉，再在下一帧移除
+    // data-starting-style。只等 getAnimations() 有可能在 transition
+    // 创建前就返回，使门禁误把进场中的 40px 位移当成永久溢出。
+    await expect
+      .poll(async () => {
+        const box = await exportDialog.boundingBox();
+        if (!box) return Number.POSITIVE_INFINITY;
+        return Math.max(-box.x, box.x + box.width - viewportWidth, 0);
+      })
+      .toBeLessThanOrEqual(1);
+  }
 }
 
 function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {

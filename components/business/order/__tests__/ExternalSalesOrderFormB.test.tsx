@@ -256,6 +256,8 @@ describe('OrderFormB', () => {
     );
     expect(html).toContain('@min-[560px]:grid-cols-2');
     expect(html).toContain('has-[[data-disabled]]:cursor-not-allowed');
+    expect(html).toContain('dark:bg-foreground');
+    expect(html).toContain('dark:text-background');
     const htmlWithMissingSfCollect = render(undefined, {
       isSfCollect: undefined,
     });

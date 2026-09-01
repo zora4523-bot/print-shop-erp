@@ -64,6 +64,8 @@ describe('AppSidebar navigation feedback', () => {
     expect(source).toContain(
       'getActiveAdminMenuHref(pathname, allItems, searchParams)',
     );
+    expect(source).toContain('text-sidebar-foreground/70');
+    expect(source).not.toContain('text-sidebar-foreground/50');
     expect(source).not.toContain('data-menu-level="child-group"');
   });
 

@@ -825,11 +825,13 @@ export function ExternalSalesPriceTierGroupEditor({
                 </div>
 
                 <div className="flex min-w-0 items-center justify-end">
-                  <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                  <label
+                    aria-label={`${quantityFormatter.format(tier.quantity)} 个价格档${active ? '启用' : '停用'}`}
+                    className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+                  >
                     <Checkbox
                       checked={active}
                       disabled={pending}
-                      aria-label={`${quantityFormatter.format(tier.quantity)} 个价格档启用`}
                       onCheckedChange={(checked) => {
                         const nextActiveStates = [...draftState.activeStates];
                         nextActiveStates[index] = checked;

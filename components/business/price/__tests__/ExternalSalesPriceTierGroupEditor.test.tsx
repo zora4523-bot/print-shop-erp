@@ -120,7 +120,9 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('¥295');
     expect(html).toContain('折合单价自动计算');
     expect(html).toContain('保存（0 档）');
-    expect(html).toContain('aria-label="1,000 个价格档启用"');
+    expect(html).toMatch(
+      /<label[^>]*aria-label="1,000 个价格档启用"[^>]*>/,
+    );
     expect(html).toContain('data-slot="checkbox"');
     expect(html).toContain('data-slot="checkbox-indicator"');
     expect(html).toContain(

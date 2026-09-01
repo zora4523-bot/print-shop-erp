@@ -275,7 +275,7 @@ function PillPicker<T extends string | number>({
                 'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-[0.84375rem] font-semibold',
                 option.detail && 'flex-col gap-0 py-1',
                 selected &&
-                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background',
+                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
               )}
               onClick={() => onChange(option.value)}
             >
@@ -751,7 +751,7 @@ function SpecialTechnique({
               className={cn(
                 'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-[0.84375rem] font-semibold',
                 selected &&
-                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background',
+                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
               )}
               onClick={() =>
                 onChange(
@@ -995,7 +995,7 @@ export function OrderFormB({
             className={cn(
               'h-auto min-h-8 rounded-[9px] px-3.5 py-1.5 text-[0.8125rem] font-bold',
               safeActiveIndex === index &&
-                'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background',
+                'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
             )}
             onClick={() => onActiveIndexChange(index)}
           >

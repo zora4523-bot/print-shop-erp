@@ -132,7 +132,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           </section>
         ) : null}
 
-        <section className="space-y-3">
+        <section className="min-w-0 space-y-3">
           <h2 className="text-sm font-semibold">工序来源</h2>
           {operation.sources.map((source, index) =>
             source.item ? (
@@ -140,10 +140,10 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
                 key={source.item.id}
                 className="rounded-xl border bg-card p-4 shadow-sm"
               >
-                <h3 className="font-semibold">
+                <h3 className="worker-wrap-anywhere min-w-0 font-semibold">
                   #{source.item.sequence} · {source.item.name}
                 </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="worker-wrap-anywhere mt-1 min-w-0 text-xs text-muted-foreground">
                   {source.item.specification
                     ? externalPriceBusinessText(source.item.specification)
                     : '未填规格'}
@@ -266,11 +266,11 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           </section>
         ) : null}
 
-        <article className="rounded-xl border bg-card p-4 shadow-sm">
-          <h2 className="font-semibold">
+        <article className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
+          <h2 className="worker-wrap-anywhere min-w-0 font-semibold">
             #{progress.item.sequence} · {progress.item.name}
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="worker-wrap-anywhere mt-1 min-w-0 text-xs text-muted-foreground">
             {progress.item.specification
               ? externalPriceBusinessText(progress.item.specification)
               : '未填规格'}

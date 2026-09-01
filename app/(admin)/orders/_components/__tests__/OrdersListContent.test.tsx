@@ -248,7 +248,12 @@ describe('OrdersListContent', () => {
     const listSection = await SalesOrdersListSection(
       listSectionElement!.props as Parameters<typeof SalesOrdersListSection>[0],
     );
-    expect(findElement(listSection, salesOrdersListMock)).not.toBeNull();
+    const listElement = findElement(listSection, salesOrdersListMock);
+    expect(listElement).not.toBeNull();
+    expect(isValidElement(listElement?.props.footer)).toBe(true);
+    expect(
+      (listElement?.props.footer as { key: string | null }).key,
+    ).toBe('sales-orders-pagination');
   });
 
   it('keeps filters available when the independent order-row read fails', async () => {
