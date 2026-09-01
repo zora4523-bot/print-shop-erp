@@ -459,7 +459,7 @@ A09 cutover rollback plan.
 
 ```bash
 pnpm prisma validate
-pnpm tsc --noEmit --pretty false
+pnpm typecheck
 pnpm eslint .
 pnpm vitest run --reporter=dot --testTimeout=10000
 ```

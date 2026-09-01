@@ -623,7 +623,7 @@ describe('calcMachinePiecework', () => {
 ```bash
 pnpm dev                     # 开发服务器（:3000）
 pnpm build                   # 生产构建
-pnpm typecheck               # tsc --noEmit
+pnpm typecheck               # next typegen + tsc --noEmit
 pnpm lint                    # eslint（flat config，全仓库）
 
 pnpm test run                # 单测跑一遍就退出 ← agent 必须用这个

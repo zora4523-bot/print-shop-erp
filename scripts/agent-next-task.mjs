@@ -75,7 +75,7 @@ Execution rules:
 4. Do not execute production database operations or destructive git commands.
 5. Run verification:
    - ./node_modules/.bin/prisma validate
-   - ./node_modules/.bin/tsc --noEmit --pretty false
+   - pnpm typecheck
    - ./node_modules/.bin/eslint .
    - ./node_modules/.bin/vitest run --reporter=dot --testTimeout=10000
    - ./node_modules/.bin/next build when App Router, Prisma schema, migrations, or page components change

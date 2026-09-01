@@ -23,7 +23,7 @@
     "test:admin-ui": "playwright test tests/visual/admin-responsive.spec.ts --workers=4",
     "test:visual:update": "playwright test tests/visual --update-snapshots",
     "test:migrations:fresh": "node scripts/verify-fresh-migrations.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "deploy:smoke": "node scripts/deploy-smoke.mjs",
     "check:env": "node scripts/check-env.mjs",
     "check:backup": "node scripts/check-backup-readiness.mjs",
