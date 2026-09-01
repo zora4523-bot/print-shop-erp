@@ -127,6 +127,13 @@ describe('sales order detail query boundary', () => {
     expect(signDesignReadUrlMock).toHaveBeenCalledWith(
       'https://files.example.test/design.png',
     );
+    expect(result?.changeRequests).toEqual([
+      expect.objectContaining({
+        id: 'change-1',
+        type: 'MODIFY',
+        canWithdraw: true,
+      }),
+    ]);
   });
 });
 
@@ -221,6 +228,8 @@ function detailRecord() {
     changeRequests: [
       {
         id: 'change-1',
+        type: 'MODIFY',
+        requesterId: 'sales-1',
         status: OrderChangeRequestStatus.PENDING,
         baseRevision: 1,
         reason: '客户申请改数量',

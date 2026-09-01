@@ -35,8 +35,8 @@ describe('outsource payment ledger contract', () => {
       'recordedBy     User           @relation("OutsourcePaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)',
     );
     expect(schema).toContain('payments      OutsourcePayment[]');
-    expect(schema).toContain(
-      'recordedOutsourcePayments OutsourcePayment[]          @relation("OutsourcePaymentRecorder")',
+    expect(schema).toMatch(
+      /recordedOutsourcePayments\s+OutsourcePayment\[\]\s+@relation\("OutsourcePaymentRecorder"\)/,
     );
   });
 

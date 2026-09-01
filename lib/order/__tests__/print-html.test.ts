@@ -94,6 +94,7 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
   return {
     id: 'order-abc',
     orderNo: 'GD-260423-001',
+    workOrderVersion: 2,
     customName: '春节礼盒',
     kind: 'NORMAL',
     sourceOrderNo: null,
@@ -111,6 +112,7 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
     submittedAt: new Date('2026-04-23T02:00:00Z'),
     createdAt: new Date('2026-04-23T01:00:00Z'),
     items: [fixtureItem()],
+    productionSteps: [],
     packagingGroups: [fixturePackagingGroup()],
     shipments: [
       {
@@ -180,6 +182,41 @@ function supplementTextByLabel(html: string, label: string): string {
 }
 
 describe('buildPrintHtml', () => {
+  it('当前代次工序优先于历史任务，打印件只输出新报工码', async () => {
+    const html = await renderPrintHtml(
+      fixtureOrder({
+        productionSteps: [
+          {
+            id: 'operation-v3',
+            source: 'OPERATION',
+            itemSequence: 1,
+            itemName: '鸿运当头',
+            craftName: '局部烫金',
+            plannedQty: 5_000,
+            completedQty: 1_200,
+            defectQty: 3,
+            completedAt: null,
+            taskQrSvg: '<svg data-current-operation-qr="1"></svg>',
+          },
+        ],
+        items: [
+          fixtureItem({
+            tasks: [
+              fixtureTask({
+                id: 'legacy-task-v1',
+                taskQrSvg: '<svg data-legacy-task-qr="1"></svg>',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    expect(html).toContain('data-current-operation-qr="1"');
+    expect(html).toContain('局部烫金');
+    expect(html).not.toContain('data-legacy-task-qr="1"');
+  });
+
   it('静态 PDF shell 与浏览器打印共用完全相同的布局 DOM', async () => {
     const order = fixtureOrder();
     const layoutMarkup = renderToStaticMarkup(

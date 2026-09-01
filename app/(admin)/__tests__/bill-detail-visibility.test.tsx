@@ -36,6 +36,9 @@ vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {
     throw new Error('NEXT_NOT_FOUND');
   }),
+  redirect: vi.fn((target: string) => {
+    throw new Error(`NEXT_REDIRECT:${target}`);
+  }),
 }));
 
 import OwnerBillDetailPage from '@/app/(admin)/owner/bills/[id]/page';
@@ -193,7 +196,7 @@ describe('bill detail visibility boundary', () => {
     expect(html).not.toContain('收入与成本');
   });
 
-  it('keeps the complete internal cost audit on the administrator page', async () => {
+  it('moves legacy administrator deep links to the read-only archive', async () => {
     requirePermissionMock.mockResolvedValue({
       id: 'admin-1',
       role: Role.ADMIN,
@@ -308,31 +311,12 @@ describe('bill detail visibility boundary', () => {
       ],
     });
 
-    const html = renderToStaticMarkup(
-      await OwnerBillDetailPage({
+    await expect(
+      OwnerBillDetailPage({
         params: Promise.resolve({ id: 'bill-1' }),
       }),
-    );
-
-    expect(requirePermissionMock).toHaveBeenCalledWith('bill:view:all');
-    expect(getAdminBillDetailMock).toHaveBeenCalledWith('bill-1');
-    expect(getSalesBillDetailMock).not.toHaveBeenCalled();
-    expect(html).toContain('收入与成本');
-    expect(html).toContain('应收总额');
-    expect(html).toContain('对客应收');
-    expect(html).toContain('加工销售额');
-    expect(html).not.toContain('>销售额</dt>');
-    expect(html).toContain('grid-cols-1 gap-4 sm:grid-cols-3');
-    expect(html.match(/<th scope="col"/g)).toHaveLength(13);
-    expect(html).toContain('秘密材料成本');
-    expect(html).toContain('工厂内部成本备注');
-    expect(html).toContain('录入人：内部财务甲');
-    expect(html).toContain('重做内部单');
-    expect(html).toContain('对客快递');
-    expect(html).toContain('对客耗材');
-    expect(html).toContain('¥ 488.00');
-    expect(html).toContain('¥ 8.00');
-    expect(html).toContain('¥ 8.00（另有待定）');
-    expect(html).toContain('¥ 4.00');
+    ).rejects.toThrow('NEXT_REDIRECT:/owner/bills/archive/bill-1');
+    expect(requirePermissionMock).not.toHaveBeenCalled();
+    expect(getAdminBillDetailMock).not.toHaveBeenCalled();
   });
 });

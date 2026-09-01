@@ -21,16 +21,16 @@ describe('admin business copy contract', () => {
   });
 
   it('账单和工资页使用业务名称而非原始枚举或人员 ID', () => {
-    const bills = source('app/(admin)/owner/bills/page.tsx');
-    const billDetail = source('app/(admin)/owner/bills/[id]/page.tsx');
+    const bills = source('app/(admin)/owner/agent-bills/page.tsx');
+    const billDetail = source(
+      'app/(admin)/owner/agent-bills/[id]/page.tsx',
+    );
     const salary = source('app/(admin)/owner/salary/page.tsx');
     const hourly = source('app/(admin)/owner/salary/hourly/page.tsx');
 
     expect(bills).not.toContain('销售 / 客服 id');
     expect(bills).not.toContain('ISSUED / PARTIAL_PAID / FULLY_PAID');
-    expect(billDetail).toContain(
-      '历史期初/手工差额 + 工单明细 = 应收总额',
-    );
+    expect(billDetail).toContain('仅展示入账时快照；确认后不重算、不覆写。');
     expect(billDetail).not.toContain('该金额用于解释');
     expect(salary).not.toContain('hint="每位客服一条 IN_PROGRESS"');
     expect(salary).not.toContain('hint="periodEnd 已过"');

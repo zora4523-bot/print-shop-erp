@@ -7,6 +7,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    setting: { findUnique: vi.fn() },
     notificationChannel: {
       findMany: vi.fn(),
       delete: vi.fn(),
@@ -23,6 +24,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
       update: vi.fn(),
     },
     notificationRule: { findMany: vi.fn() },
+    setting: { findUnique: vi.fn() },
     notificationLog: { count: vi.fn(), findMany: vi.fn() },
     backgroundJob: { findMany: vi.fn() },
     $queryRaw: vi.fn(),
@@ -59,6 +61,7 @@ beforeEach(() => {
   dbMock.notificationChannel.create.mockReset();
   dbMock.notificationChannel.update.mockReset();
   dbMock.notificationRule.findMany.mockReset();
+  dbMock.setting.findUnique.mockReset().mockResolvedValue(null);
   dbMock.notificationLog.count.mockReset();
   dbMock.notificationLog.findMany.mockReset();
   dbMock.backgroundJob.findMany.mockReset().mockResolvedValue([]);
@@ -67,6 +70,7 @@ beforeEach(() => {
     .mockResolvedValue([{ now: new Date('2026-08-22T08:00:00Z') }]);
   dbMock.$transaction.mockClear();
   txMock.notificationRule.findMany.mockReset();
+  txMock.setting.findUnique.mockReset().mockResolvedValue(null);
   txMock.notificationRule.findUnique.mockReset();
   txMock.notificationRule.update.mockReset();
   txMock.notificationChannel.findMany.mockReset();
@@ -104,9 +108,9 @@ describe('listChannelsWithRefCount', () => {
     ]);
     const r = await listChannelsWithRefCount();
     expect(r[0]!.id).toBe('c1');
-    expect(r[0]!.referencingActiveRuleCount).toBe(2);
+    expect(r[0]!.referencingConfigurationCount).toBe(2);
     expect(r[1]!.id).toBe('c2');
-    expect(r[1]!.referencingActiveRuleCount).toBe(1);
+    expect(r[1]!.referencingConfigurationCount).toBe(1);
   });
 
   it('inactive rule 也算引用（Codex round 103 #1：避免悬空 channelIds）', async () => {
@@ -126,7 +130,7 @@ describe('listChannelsWithRefCount', () => {
       { channelIds: ['c1'] },
     ]);
     const r = await listChannelsWithRefCount();
-    expect(r[0]!.referencingActiveRuleCount).toBe(1);
+    expect(r[0]!.referencingConfigurationCount).toBe(1);
     // findMany 不再过滤 isActive
     const args = dbMock.notificationRule.findMany.mock.calls[0][0];
     expect(args.where).toBeUndefined();
@@ -168,7 +172,7 @@ describe('listNotificationConfiguration', () => {
       channels: [
         expect.objectContaining({
           id: 'c1',
-          referencingActiveRuleCount: 2,
+          referencingConfigurationCount: 2,
         }),
       ],
       rules,
@@ -205,6 +209,20 @@ describe('deleteChannel', () => {
     expect(txMock.notificationChannel.delete).toHaveBeenCalledWith({
       where: { id: 'c1' },
     });
+  });
+
+  it('被固定角色路由引用 → 拒绝删除', async () => {
+    txMock.notificationRule.findMany.mockResolvedValue([]);
+    txMock.setting.findUnique.mockResolvedValue({
+      value: {
+        factoryConfirmer: { enabled: true, channelIds: ['c1'] },
+        owner: { enabled: false, channelIds: [] },
+      },
+    });
+    await expect(deleteChannel('c1')).rejects.toBeInstanceOf(
+      ChannelInUseError,
+    );
+    expect(txMock.notificationChannel.delete).not.toHaveBeenCalled();
   });
 
   it('SELECT FOR UPDATE 锁 channel 行 + findMany rules（Codex round 107 #2）', async () => {
@@ -390,13 +408,25 @@ describe('updateRuleWithGuard', () => {
 
   it('isActive=true && channelIds=[] → EmptyChannelIdsError（不进 updateRule）', async () => {
     await expect(
-      updateRuleWithGuard('ORDER_SUBMITTED', {
+      updateRuleWithGuard('URGENT_ORDER', {
         messageTemplate: 'x',
         channelIds: [],
         isActive: true,
       }),
     ).rejects.toBeInstanceOf(EmptyChannelIdsError);
     expect(txMock.notificationRule.update).not.toHaveBeenCalled();
+  });
+
+  it('托管事件可在 NotificationRule 无群时启用，路由由角色设置接管', async () => {
+    await updateRuleWithGuard('ORDER_SUBMITTED', {
+      messageTemplate: 'x',
+      channelIds: [],
+      isActive: true,
+    });
+    expect(txMock.notificationRule.update).toHaveBeenCalledWith({
+      where: { eventType: 'ORDER_SUBMITTED' },
+      data: { messageTemplate: 'x', channelIds: [], isActive: true },
+    });
   });
 
   it('isActive=false && channelIds=[] → 允许（暂存草稿）', async () => {

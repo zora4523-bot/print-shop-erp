@@ -53,7 +53,7 @@ describe('notification form checkbox contracts', () => {
   it('keeps rule group names, values, checked state, and disabled policy', () => {
     const html = renderToStaticMarkup(
       <RuleForm
-        eventType="ORDER_SUBMITTED"
+        eventType="URGENT_ORDER"
         initial={{
           messageTemplate: '工单 {orderNo}',
           channelIds: ['inactive-selected'],
@@ -111,7 +111,7 @@ describe('notification form checkbox contracts', () => {
     );
     const ruleHtml = renderToStaticMarkup(
       <RuleForm
-        eventType="ORDER_SUBMITTED"
+        eventType="URGENT_ORDER"
         initial={{
           messageTemplate: '工单 {orderNo}',
           channelIds: [],
@@ -135,5 +135,31 @@ describe('notification form checkbox contracts', () => {
         root.includes('data-disabled=""'),
       ),
     ).toBe(true);
+  });
+
+  it('托管事件显示固定角色并保留 legacy binding 但不再可编辑', () => {
+    const html = renderToStaticMarkup(
+      <RuleForm
+        eventType="ORDER_SUBMITTED"
+        initial={{
+          messageTemplate: '工单 {orderNo}',
+          channelIds: ['legacy-channel'],
+          isActive: true,
+        }}
+        channels={[
+          { id: 'active-channel', channelName: '排产群', isActive: true },
+        ]}
+        payloadFields={['orderNo']}
+        action={action}
+      />,
+    );
+
+    expect(html).toContain('收件角色（固定）');
+    expect(html).toContain('工厂确认人');
+    expect(html).toContain('href="/owner/settings"');
+    expect(namedInputs(html, 'channelIds')).toEqual([
+      expect.stringContaining('value="legacy-channel"'),
+    ]);
+    expect(checkboxRoots(html)).toHaveLength(1);
   });
 });

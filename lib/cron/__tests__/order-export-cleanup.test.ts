@@ -1,8 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { cleanupExpiredMock, scrubTerminalMock } = vi.hoisted(() => ({
+const {
+  cleanupExpiredMock,
+  scrubTerminalMock,
+  cleanupAgentBillExpiredMock,
+  scrubAgentBillTerminalMock,
+} = vi.hoisted(() => ({
   cleanupExpiredMock: vi.fn(),
   scrubTerminalMock: vi.fn(),
+  cleanupAgentBillExpiredMock: vi.fn(),
+  scrubAgentBillTerminalMock: vi.fn(),
+}));
+
+vi.mock('@/lib/agent-monthly-billing/export', () => ({
+  cleanupExpiredAgentMonthlyBillExports: cleanupAgentBillExpiredMock,
+}));
+vi.mock('@/lib/agent-monthly-billing/export-retention', () => ({
+  scrubTerminalAgentMonthlyBillExportFilters: scrubAgentBillTerminalMock,
 }));
 
 vi.mock('@/lib/bill', () => ({
@@ -43,6 +57,8 @@ import { runOrderExportCleanupTask } from '../tasks';
 beforeEach(() => {
   cleanupExpiredMock.mockReset().mockResolvedValue(3);
   scrubTerminalMock.mockReset().mockResolvedValue(2);
+  cleanupAgentBillExpiredMock.mockReset().mockResolvedValue(4);
+  scrubAgentBillTerminalMock.mockReset().mockResolvedValue(1);
 });
 
 describe('runOrderExportCleanupTask', () => {
@@ -54,9 +70,13 @@ describe('runOrderExportCleanupTask', () => {
       runDate: '2026-08-07',
       expiredCount: 3,
       scrubbedFilterCount: 2,
+      agentBillExpiredCount: 4,
+      agentBillScrubbedFilterCount: 1,
     });
     expect(cleanupExpiredMock).toHaveBeenCalledOnce();
     expect(scrubTerminalMock).toHaveBeenCalledOnce();
+    expect(cleanupAgentBillExpiredMock).toHaveBeenCalledOnce();
+    expect(scrubAgentBillTerminalMock).toHaveBeenCalledOnce();
   });
 
   it('surfaces cleanup failures so the durable job retries', async () => {

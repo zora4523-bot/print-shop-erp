@@ -47,6 +47,18 @@ function formWith(overrides: Record<string, string> = {}): FormData {
     cdr_link_expire_hours: '24',
     outsource_overdue_days: '1',
     report_qty_max_multiple: '3',
+    production_stagnation_days: '2',
+    production_alert_scan_batch_size: '200',
+    pending_factory_backlog_threshold: '5',
+    management_notification_routing: JSON.stringify({
+      factoryConfirmer: { enabled: true, channelIds: ['factory-channel'] },
+      owner: { enabled: true, channelIds: ['owner-channel'] },
+    }),
+    notify_order_submitted_enabled: 'true',
+    notify_order_change_enabled: 'true',
+    notify_production_anomaly_enabled: 'true',
+    notify_production_stagnation_enabled: 'true',
+    notify_pending_factory_backlog_enabled: 'true',
   };
   for (const key of SETTING_KEYS) {
     const value = overrides[key] ?? valid[key];
@@ -57,7 +69,20 @@ function formWith(overrides: Record<string, string> = {}): FormData {
     if (value === undefined) {
       throw new Error(`formWith 缺少 ${key} 的合法值，请在 valid 里补上`);
     }
-    fd.set(key, value);
+    if (key === 'management_notification_routing') {
+      const routing = JSON.parse(value) as {
+        factoryConfirmer: { enabled: boolean; channelIds: string[] };
+        owner: { enabled: boolean; channelIds: string[] };
+      };
+      for (const role of ['factoryConfirmer', 'owner'] as const) {
+        fd.set(`${key}.${role}.enabled`, String(routing[role].enabled));
+        for (const channelId of routing[role].channelIds) {
+          fd.append(`${key}.${role}.channelIds`, channelId);
+        }
+      }
+    } else {
+      fd.set(key, value);
+    }
   }
   return fd;
 }
@@ -86,6 +111,21 @@ describe('updateSettingsAction', () => {
         cdr_link_expire_hours: { hours: 24 },
         outsource_overdue_days: { days: 1 },
         report_qty_max_multiple: { multiple: 3 },
+        production_stagnation_days: { days: 2 },
+        production_alert_scan_batch_size: { count: 200 },
+        pending_factory_backlog_threshold: { count: 5 },
+        management_notification_routing: {
+          factoryConfirmer: {
+            enabled: true,
+            channelIds: ['factory-channel'],
+          },
+          owner: { enabled: true, channelIds: ['owner-channel'] },
+        },
+        notify_order_submitted_enabled: { enabled: true },
+        notify_order_change_enabled: { enabled: true },
+        notify_production_anomaly_enabled: { enabled: true },
+        notify_production_stagnation_enabled: { enabled: true },
+        notify_pending_factory_backlog_enabled: { enabled: true },
       },
       ACTOR,
     );

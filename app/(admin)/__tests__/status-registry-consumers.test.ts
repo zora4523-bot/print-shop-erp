@@ -7,21 +7,25 @@ function source(relativePath: string): string {
 }
 
 describe('high-risk status registry consumers', () => {
-  it('uses one bill registry across owner, sales, list, and detail views', () => {
-    const files = [
-      'app/(admin)/owner/bills/page.tsx',
-      'app/(admin)/owner/bills/[id]/page.tsx',
+  it('uses centralized registries across v2 owner and legacy sales bills', () => {
+    const legacyFiles = [
       'app/(admin)/sales/bills/page.tsx',
       'app/(admin)/sales/bills/[id]/page.tsx',
     ];
 
-    for (const file of files) {
+    for (const file of legacyFiles) {
       expect(source(file), file).toContain('BILL_STATUS_REGISTRY');
     }
-    expect(source(files[1]!)).not.toContain(
-      '<Badge variant="destructive">{label}</Badge>',
-    );
-    expect(source(files[3]!)).not.toContain(
+    const v2Files = [
+      'app/(admin)/owner/agent-bills/page.tsx',
+      'app/(admin)/owner/agent-bills/[id]/page.tsx',
+    ];
+    for (const file of v2Files) {
+      expect(source(file), file).toContain(
+        'AGENT_MONTHLY_BILL_STATUS_REGISTRY',
+      );
+    }
+    expect(source(legacyFiles[1]!)).not.toContain(
       '<Badge variant="destructive">{label}</Badge>',
     );
   });

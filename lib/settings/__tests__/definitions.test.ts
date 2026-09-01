@@ -95,6 +95,18 @@ describe('resolveSetting', () => {
     });
   });
 
+  it('管理通知路由损坏时退回全关闭，不猜测 legacy 群', () => {
+    expect(
+      resolveSetting('management_notification_routing', {
+        factoryConfirmer: { enabled: true, channelIds: ['c1'] },
+        owner: { enabled: true, channelIds: [] },
+      }),
+    ).toEqual({
+      factoryConfirmer: { enabled: false, channelIds: [] },
+      owner: { enabled: false, channelIds: [] },
+    });
+  });
+
   it('超出范围的数值也退回默认值', () => {
     expect(resolveSetting('cdr_link_expire_hours', { hours: 0 })).toEqual({
       hours: 24,
@@ -158,6 +170,38 @@ describe('parseSettingInput', () => {
     const tooBig = parseSettingInput('report_qty_max_multiple', '11');
     expect(tooBig.ok).toBe(false);
     if (!tooBig.ok) expect(tooBig.message).toContain('10 倍');
+  });
+
+  it('管理通知路由只接受两个固定角色与 channel ID', () => {
+    const valid = {
+      factoryConfirmer: { enabled: true, channelIds: ['channel-factory'] },
+      owner: { enabled: false, channelIds: [] },
+    };
+    expect(
+      parseSettingInput(
+        'management_notification_routing',
+        JSON.stringify(valid),
+      ),
+    ).toEqual({ ok: true, value: valid });
+
+    expect(
+      parseSettingInput(
+        'management_notification_routing',
+        JSON.stringify({
+          ...valid,
+          owner: { enabled: true, channelIds: [] },
+        }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      parseSettingInput(
+        'management_notification_routing',
+        JSON.stringify({
+          ...valid,
+          arbitraryRole: { enabled: true, channelIds: ['channel-owner'] },
+        }),
+      ).ok,
+    ).toBe(false);
   });
 
   it('校验通过的值能原样写回输入框', () => {

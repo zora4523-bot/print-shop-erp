@@ -29,6 +29,7 @@ function orderFixture(overrides: Record<string, unknown> = {}) {
     settlementType: OrderSettlementType.EXTERNAL_SALES,
     pricingStatus: OrderPricingStatus.AUTO_CONFIRMED,
     scheduledAt: null,
+    workOrderVersion: 1,
     requiresOutsource: false,
     items: [
       {
@@ -91,6 +92,7 @@ describe('activateProductionOperationsInTx', () => {
       'order-1',
       { id: 'sales-1' },
       AT,
+      { targetStatus: OrderStatus.SCHEDULING },
     );
     expect(result).toEqual({
       orderId: 'order-1',
@@ -146,6 +148,42 @@ describe('activateProductionOperationsInTx', () => {
     });
   });
 
+  it('restarts the release clock when materializing a new work-order version', async () => {
+    const previousRelease = new Date('2026-08-20T08:00:00.000Z');
+    const tx = transactionMock(
+      orderFixture({
+        status: OrderStatus.RELEASED,
+        scheduledAt: previousRelease,
+        workOrderVersion: 2,
+      }),
+    );
+
+    await expect(
+      activateProductionOperationsInTx(
+        tx as never,
+        'order-1',
+        { id: 'admin-1' },
+        AT,
+        {
+          targetStatus: OrderStatus.RELEASED,
+          allowVersionRematerialization: true,
+        },
+      ),
+    ).resolves.toMatchObject({
+      orderStatus: OrderStatus.RELEASED,
+      operationsCreated: 2,
+      idempotentReplay: false,
+    });
+    expect(tx.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: {
+        status: OrderStatus.RELEASED,
+        scheduledAt: AT,
+        requiresOutsource: false,
+      },
+    });
+  });
+
   it('is an exact no-op after a matching ledger already exists', async () => {
     const tx = transactionMock(
       orderFixture({
@@ -153,6 +191,7 @@ describe('activateProductionOperationsInTx', () => {
         productionOperations: [
           {
             id: 'full-existing',
+            workOrderVersion: 1,
             operationType: 'FULL',
             unit: 'PER_PIECE',
             status: ProductionOperationStatus.PENDING,
@@ -168,6 +207,7 @@ describe('activateProductionOperationsInTx', () => {
           },
           {
             id: 'packing-existing',
+            workOrderVersion: 1,
             operationType: 'PACKING',
             unit: 'PER_BAG',
             status: ProductionOperationStatus.PENDING,
@@ -191,6 +231,7 @@ describe('activateProductionOperationsInTx', () => {
         'order-1',
         { id: 'admin-1' },
         AT,
+        { targetStatus: OrderStatus.SCHEDULING },
       ),
     ).resolves.toMatchObject({
       operationsCreated: 0,
@@ -208,6 +249,7 @@ describe('activateProductionOperationsInTx', () => {
         productionOperations: [
           {
             id: 'only-full',
+            workOrderVersion: 1,
             operationType: 'FULL',
             unit: 'PER_PIECE',
             status: ProductionOperationStatus.PENDING,
@@ -231,6 +273,7 @@ describe('activateProductionOperationsInTx', () => {
         'order-1',
         { id: 'admin-1' },
         AT,
+        { targetStatus: OrderStatus.SCHEDULING },
       ),
     ).rejects.toMatchObject({
       code: 'EXISTING_OPERATION_MISMATCH',
@@ -252,6 +295,7 @@ describe('activateProductionOperationsInTx', () => {
         'order-1',
         { id: 'admin-1' },
         AT,
+        { targetStatus: OrderStatus.SCHEDULING },
       ),
     ).rejects.toMatchObject({ code });
   });
@@ -270,6 +314,7 @@ describe('activateProductionOperationsInTx', () => {
         'order-1',
         { id: 'admin-1' },
         AT,
+        { targetStatus: OrderStatus.SCHEDULING },
       ),
     ).resolves.toMatchObject({
       orderStatus: OrderStatus.SCHEDULING,
@@ -333,6 +378,7 @@ describe('activateProductionOperationsInTx', () => {
         'order-1',
         { id: 'admin-1' },
         AT,
+        { targetStatus: OrderStatus.SCHEDULING },
       ),
     ).resolves.toMatchObject({
       progressStepIds: ['progress-1'],
@@ -341,6 +387,7 @@ describe('activateProductionOperationsInTx', () => {
     expect(tx.productionProgressStep.create).toHaveBeenCalledWith({
       data: {
         orderId: 'order-1',
+        workOrderVersion: 1,
         orderItemId: 'item-1',
         craftId: 'craft-gluing',
         craftCode: 'GLUING',
@@ -387,6 +434,7 @@ describe('activateProductionOperationsInTx', () => {
         'order-1',
         { id: 'admin-1' },
         AT,
+        { targetStatus: OrderStatus.SCHEDULING },
       ),
     ).rejects.toMatchObject({ code: 'CRAFT_FACTS_INCOMPLETE' });
     expect(tx.productionOperation.create).not.toHaveBeenCalled();

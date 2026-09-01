@@ -151,9 +151,13 @@ vi.mock('@/lib/auth/schemas', () => ({ parseStrictYmd: vi.fn() }));
 const { notifyMock } = vi.hoisted(() => ({
   notifyMock: vi.fn<(...args: unknown[]) => void>(() => undefined),
 }));
+const { getSettingMock } = vi.hoisted(() => ({
+  getSettingMock: vi.fn(),
+}));
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: notifyMock,
 }));
+vi.mock('@/lib/settings', () => ({ getSetting: getSettingMock }));
 const {
   assertCsOrderSalesLedgerReconciledMock,
   recordCsSalesEntryMock,
@@ -487,6 +491,7 @@ function baseItem(over: Partial<Record<string, unknown>> = {}) {
 }
 
 beforeEach(() => {
+  getSettingMock.mockReset().mockResolvedValue({ enabled: true });
   for (const fn of Object.values(dbMock.order)) fn.mockReset();
   dbMock.order.updateMany.mockResolvedValue({ count: 1 });
   dbMock.orderItem.findFirst.mockReset().mockResolvedValue(null);
@@ -2611,13 +2616,25 @@ describe('submitOrder', () => {
         orderNo: 'O-1',
         submitterName: '张三',
         customerRef: '苹果福',
-        // formatMoneyPlain 千分位 + 2 位小数，**不带 `¥ ` 前缀**——seed
-        // 模板 `金额：¥{totalAmount}` 已含 ¥（Codex round 109 P2）。
-        totalAmount: '5,000.00',
         urgentMark: '',
+        summary: '新工单已提交，待工厂确认',
+        deepLink: '/orders#wo=O-1',
       },
       { dedupeKey: 'notification:ORDER_SUBMITTED:o1' },
     );
+  });
+
+  it('新单通知关闭时不投递 ORDER_SUBMITTED', async () => {
+    getSettingMock.mockResolvedValue({ enabled: false });
+    dbMock.order.findUnique.mockResolvedValue(submittedRichRow);
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SUBMITTED,
+    });
+
+    await submitOrder('o1', salesActor);
+
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('submitOrder + isUrgent=true → 同时 fire URGENT_ORDER（独立事件，不替代 ORDER_SUBMITTED）', async () => {
@@ -2651,10 +2668,10 @@ describe('submitOrder', () => {
 });
 
 describe('cancelOrder', () => {
-  it('cancels a non-terminal order and logs with the reason', async () => {
+  it('directly cancels a rejected pre-confirmation order and logs the reason', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
@@ -2676,6 +2693,25 @@ describe('cancelOrder', () => {
     expect(dbMock.order.findUnique).not.toHaveBeenCalled();
   });
 
+  it.each([
+    OrderStatus.CONFIRMED,
+    OrderStatus.RELEASED,
+    OrderStatus.FOILING,
+    OrderStatus.PACKING,
+    OrderStatus.SHIPPED,
+  ])('fails closed for direct cancellation from %s', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status,
+      submitterId: 'sales-1',
+    });
+
+    await expect(cancelOrder('o1', ownerActor, '客户取消')).rejects.toThrow(
+      /取消申请/,
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
   it('refuses to cancel terminal states (FINISHED)', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
@@ -2690,7 +2726,7 @@ describe('cancelOrder', () => {
   it('bulk-cancels new PENDING operations without reading legacy tasks', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionOperation.findMany.mockResolvedValue([
@@ -2729,7 +2765,7 @@ describe('cancelOrder', () => {
   it('bulk-cancels PENDING no-pay progress with new operations in the same tx', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionOperation.findMany.mockResolvedValue([
@@ -2774,7 +2810,7 @@ describe('cancelOrder', () => {
   it('fails closed when no-pay progress exists without a new operation generation', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionProgressStep.findMany.mockResolvedValue([
@@ -2796,7 +2832,7 @@ describe('cancelOrder', () => {
   it('blocks cancellation when a no-pay progress step has any report', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionOperation.findMany.mockResolvedValue([
@@ -2828,7 +2864,7 @@ describe('cancelOrder', () => {
   ])('blocks cancellation for a %s no-pay progress step', async (status) => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.IN_PRODUCTION,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionOperation.findMany.mockResolvedValue([
@@ -2853,7 +2889,7 @@ describe('cancelOrder', () => {
   it('blocks cancellation when a new operation has any report', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionOperation.findMany.mockResolvedValue([
@@ -2878,7 +2914,7 @@ describe('cancelOrder', () => {
   ])('blocks cancellation for a %s new operation', async (status) => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.IN_PRODUCTION,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionOperation.findMany.mockResolvedValue([
@@ -2895,7 +2931,7 @@ describe('cancelOrder', () => {
   it('blocks cancellation unless every new operation is still PENDING', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionOperation.findMany.mockResolvedValue([
@@ -2925,7 +2961,7 @@ describe('cancelOrder', () => {
   it('voids every PENDING task to CANCELLED in the same cancel tx', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionTask.findMany.mockResolvedValue([
@@ -2955,7 +2991,7 @@ describe('cancelOrder', () => {
   it('取消工单时清理仍在抢单池的任务上下文', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionTask.findMany.mockResolvedValue([
@@ -2984,7 +3020,7 @@ describe('cancelOrder', () => {
   it('取消已抢但未开工任务时保留抢单时间与机型快照', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionTask.findMany.mockResolvedValue([
@@ -3009,7 +3045,7 @@ describe('cancelOrder', () => {
   it('blocks cancel when a task is already IN_PROGRESS — writes nothing (no half-cancel)', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.IN_PRODUCTION,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionTask.findMany.mockResolvedValue([
@@ -3030,7 +3066,7 @@ describe('cancelOrder', () => {
   it('blocks cancel when a task is already COMPLETED — no cascade, no order write', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.COMPLETED,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionTask.findMany.mockResolvedValue([
@@ -3047,7 +3083,7 @@ describe('cancelOrder', () => {
   it('blocks cancel when a linked outsource order is SENT/IN_PROGRESS (A1-A2) — no writes', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     // Tasks are all PENDING (task check passes); the outsource order is
@@ -3072,7 +3108,7 @@ describe('cancelOrder', () => {
   it('cancels normally when linked outsource orders are only RECEIVED/CANCELLED (A1-A2)', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionTask.findMany.mockResolvedValue([]);
@@ -3091,7 +3127,7 @@ describe('cancelOrder', () => {
   it('voids only PENDING tasks, leaving already-CANCELLED siblings untouched', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.REJECTED,
       submitterId: 'sales-1',
     });
     dbMock.productionTask.findMany.mockResolvedValue([
@@ -3148,7 +3184,7 @@ describe('cancelOrder', () => {
     const clock = new Date('2026-08-02T03:04:00.000Z');
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SUBMITTED,
+      status: OrderStatus.PENDING_FACTORY,
       submitterId: 'cs-1',
       submitterRole: Role.CUSTOMER_SERVICE,
       settlementType: OrderSettlementType.INTERNAL_SALES,
@@ -3191,7 +3227,7 @@ describe('cancelOrder', () => {
   it('rolls back cancellation when legacy CS sales cannot be reconciled', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SUBMITTED,
+      status: OrderStatus.PENDING_FACTORY,
       submitterId: 'cs-1',
       submitterRole: Role.CUSTOMER_SERVICE,
       settlementType: OrderSettlementType.INTERNAL_SALES,
@@ -3381,10 +3417,15 @@ describe('shipOrder', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           totalAmount: '512.75',
-          settledFee: '512.75',
+          confirmedFee: '512.75',
         }),
       }),
     ]);
+    expect(
+      dbMock.order.update.mock.calls.find(
+        (call) => call[0]?.data?.totalAmount === '512.75',
+      )?.[0]?.data,
+    ).not.toHaveProperty('settledFee');
     expect(dbMock.orderShipment.update).toHaveBeenCalledWith({
       where: { id: 'shipment-1' },
       data: {
@@ -3765,68 +3806,11 @@ describe('shipOrder', () => {
 });
 
 describe('finishOrder', () => {
-  it('SHIPPED → FINISHED, stamps finishedAt', async () => {
-    dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.SHIPPED,
-      submitterId: 'sales-1',
-    });
-    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.FINISHED });
-
-    const clock = new Date('2026-04-26T12:00:00Z');
-    const r = await finishOrder('o1', ownerActor, clock);
-    expect(r.status).toBe(OrderStatus.FINISHED);
-    const updateArg = dbMock.order.update.mock.calls[0][0];
-    expect(updateArg.data.status).toBe(OrderStatus.FINISHED);
-    expect(updateArg.data.finishedAt).toBe(clock);
-    expect(updateArg.data.shippedAt).toBeUndefined();
-    expect(dbMock.orderLog.create.mock.calls[0][0].data.remark).toBe('确认完工');
-  });
-
-  it('refuses non-SHIPPED source state (e.g. COMPLETED — must ship first)', async () => {
-    dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.COMPLETED,
-      submitterId: 'sales-1',
-    });
-    await expect(finishOrder('o1', ownerActor)).rejects.toBeInstanceOf(
-      InvalidOrderTransitionError,
-    );
-    expect(dbMock.order.update).not.toHaveBeenCalled();
-  });
-
-  it('refuses to finish an external order while any shipment charge is still estimated', async () => {
-    dbMock.order.findUnique
-      .mockResolvedValueOnce({
-        id: 'o1',
-        status: OrderStatus.SHIPPED,
-        submitterId: 'sales-1',
-      })
-      .mockResolvedValueOnce({
-        settlementType: OrderSettlementType.EXTERNAL_SALES,
-        _count: { shipments: 1 },
-        customerCharges: [{ status: 'FINAL' }, { status: 'ESTIMATED' }],
-      });
-
+  it('fails closed before any database read or settlement-bypassing write', async () => {
     await expect(finishOrder('o1', ownerActor)).rejects.toThrow(
-      /快递费与打包耗材费尚未全部确认/,
+      /旧版完结入口已停用.*结算/,
     );
-    expect(dbMock.order.update).not.toHaveBeenCalled();
-  });
-
-  it('refuses to finish while the price is pending administrator confirmation', async () => {
-    dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.SHIPPED,
-      submitterId: 'sales-1',
-      settlementType: OrderSettlementType.EXTERNAL_SALES,
-      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
-      priceRevision: 4,
-    });
-
-    await expect(finishOrder('o1', ownerActor)).rejects.toThrow(
-      /价格.*管理员.*不能.*完工/,
-    );
+    expect(dbMock.order.findUnique).not.toHaveBeenCalled();
     expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 });

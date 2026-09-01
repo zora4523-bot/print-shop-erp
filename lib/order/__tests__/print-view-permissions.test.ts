@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderStatus,
+  PieceworkOperationType,
+  ProductionOperationStatus,
   Role,
   TaskStatus,
 } from '../../../generated/prisma/enums';
@@ -117,13 +119,14 @@ describe('getOrderForPrint permissions', () => {
     expect(dbMock.craft.findMany).not.toHaveBeenCalled();
   });
 
-  it('将彩印烫金事实和每个任务的绝对 URL 二维码写入打印 DTO', async () => {
+  it('将当前工单版本的新工序与进度写入打印 DTO，不混入旧任务', async () => {
     dbMock.craft.findMany.mockResolvedValue([
       { id: 'craft-color-foil', name: '彩印加烫' },
     ]);
     dbMock.order.findFirst.mockResolvedValue({
       id: 'order-1',
       orderNo: 'GD-260827-001',
+      workOrderVersion: 3,
       customName: null,
       kind: 'NORMAL',
       sourceOrder: null,
@@ -142,6 +145,52 @@ describe('getOrderForPrint permissions', () => {
       createdAt: new Date('2026-08-27T00:00:00Z'),
       packagingGroups: [],
       shipments: [],
+      productionOperations: [
+        {
+          id: 'operation/old',
+          workOrderVersion: 2,
+          operationType: PieceworkOperationType.PARTIAL,
+          status: ProductionOperationStatus.CANCELLED,
+          plannedQty: '4000',
+          sources: [],
+          reports: [],
+        },
+        {
+          id: 'operation/3',
+          workOrderVersion: 3,
+          operationType: PieceworkOperationType.PARTIAL,
+          status: ProductionOperationStatus.IN_PROGRESS,
+          plannedQty: '4000',
+          sources: [
+            {
+              orderItem: {
+                sequence: 1,
+                name: '彩印烫金款',
+                frontFoilColors: ['哑金'],
+                backFoilColors: ['红金'],
+              },
+            },
+          ],
+          reports: [
+            {
+              reportedCompletedQty: '800',
+              defectQty: '2',
+              reportedAt: new Date('2026-08-27T02:00:00Z'),
+            },
+          ],
+        },
+      ],
+      productionProgressSteps: [
+        {
+          id: 'progress/3',
+          workOrderVersion: 3,
+          craftName: '覆膜',
+          status: ProductionOperationStatus.PENDING,
+          plannedQty: '2000',
+          orderItem: { sequence: 1, name: '彩印烫金款' },
+          reports: [],
+        },
+      ],
       items: [
         {
           id: 'item-1',
@@ -199,15 +248,39 @@ describe('getOrderForPrint permissions', () => {
         craftNames: ['彩印加烫'],
       }),
     );
-    expect(result?.items[0]?.tasks[0]?.taskQrSvg).toContain(
-      'https://erp.example.com/worker/tasks/task%2F1',
-    );
+    expect(result?.items[0]?.tasks).toEqual([]);
+    expect(result?.productionSteps).toEqual([
+      expect.objectContaining({
+        id: 'operation/3',
+        source: 'OPERATION',
+        craftName: '局部烫金',
+        plannedQty: 2_000,
+        completedQty: 800,
+        defectQty: 2,
+      }),
+      expect.objectContaining({
+        id: 'progress/3',
+        source: 'PROGRESS',
+        craftName: '覆膜',
+        plannedQty: 2_000,
+      }),
+    ]);
     expect(buildQrSvgMock).toHaveBeenCalledWith(
-      'https://erp.example.com/wo/GD-260827-001',
+      'https://erp.example.com/wo/GD-260827-001?v=3',
       95,
       { errorCorrectionLevel: 'Q' },
     );
     expect(buildQrSvgMock).toHaveBeenCalledWith(
+      'https://erp.example.com/wo/GD-260827-001?v=3&task=operation%2F3',
+      55,
+      { errorCorrectionLevel: 'Q' },
+    );
+    expect(buildQrSvgMock).toHaveBeenCalledWith(
+      'https://erp.example.com/wo/GD-260827-001?v=3&task=progress%2F3',
+      55,
+      { errorCorrectionLevel: 'Q' },
+    );
+    expect(buildQrSvgMock).not.toHaveBeenCalledWith(
       'https://erp.example.com/worker/tasks/task%2F1',
       55,
       { errorCorrectionLevel: 'Q' },

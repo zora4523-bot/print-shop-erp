@@ -37,6 +37,7 @@ beforeEach(() => {
     {
       id: 'packing-1',
       orderId: 'order-1',
+      workOrderVersion: 1,
       operationType: PieceworkOperationType.PACKING,
       unit: PieceworkRateUnit.PER_BAG,
       status: ProductionOperationStatus.IN_PROGRESS,
@@ -47,6 +48,7 @@ beforeEach(() => {
         customName: null,
         isUrgent: true,
         promisedDate: null,
+        workOrderVersion: 1,
       },
       sources: [{ orderItem: null }],
       reports: [
@@ -74,6 +76,7 @@ describe('no-pay production progress portal', () => {
       {
         id: 'progress-1',
         orderId: 'order-1',
+        workOrderVersion: 1,
         craftCode: 'CLEANING',
         craftName: '清废',
         status: ProductionOperationStatus.IN_PROGRESS,
@@ -84,6 +87,7 @@ describe('no-pay production progress portal', () => {
           customName: null,
           isUrgent: false,
           promisedDate: null,
+          workOrderVersion: 1,
         },
         orderItem: { sequence: 1, name: '款式一' },
         reports: [
@@ -119,6 +123,7 @@ describe('no-pay production progress portal', () => {
     dbMock.productionProgressStep.findFirst.mockResolvedValue({
       id: 'progress-1',
       orderId: 'order-1',
+      workOrderVersion: 1,
       craftCode: 'GLUING',
       craftName: '粘封',
       status: ProductionOperationStatus.PENDING,
@@ -128,6 +133,7 @@ describe('no-pay production progress portal', () => {
         customName: null,
         isUrgent: false,
         promisedDate: null,
+        workOrderVersion: 1,
         packageRequirement: null,
         remark: null,
       },
@@ -169,6 +175,7 @@ describe('getProductionOperationForReporter', () => {
     dbMock.productionOperation.findFirst.mockResolvedValue({
       id: 'packing-1',
       orderId: 'order-1',
+      workOrderVersion: 1,
       operationType: PieceworkOperationType.PACKING,
       unit: PieceworkRateUnit.PER_BAG,
       status: ProductionOperationStatus.IN_PROGRESS,
@@ -178,6 +185,7 @@ describe('getProductionOperationForReporter', () => {
         customName: null,
         isUrgent: false,
         promisedDate: null,
+        workOrderVersion: 1,
         packageRequirement: null,
         remark: null,
       },
@@ -201,6 +209,36 @@ describe('getProductionOperationForReporter', () => {
       operationType: PieceworkOperationType.PACKING,
     });
     expect(JSON.stringify(where)).not.toContain('workerId');
+  });
+
+  it('returns null for an operation from an obsolete work-order version', async () => {
+    dbMock.productionOperation.findFirst.mockResolvedValue({
+      id: 'packing-v1',
+      orderId: 'order-1',
+      workOrderVersion: 1,
+      operationType: PieceworkOperationType.PACKING,
+      unit: PieceworkRateUnit.PER_BAG,
+      status: ProductionOperationStatus.PENDING,
+      plannedQty: new Decimal(12),
+      order: {
+        orderNo: 'GD-1',
+        customName: null,
+        isUrgent: false,
+        promisedDate: null,
+        workOrderVersion: 2,
+        packageRequirement: null,
+        remark: null,
+      },
+      sources: [],
+      reports: [],
+    });
+
+    await expect(
+      getProductionOperationForReporter('packing-v1', {
+        id: 'packer-1',
+        role: Role.WORKER,
+      }),
+    ).resolves.toBeNull();
   });
 });
 
@@ -243,5 +281,36 @@ describe('listProductionOperationsForReporter', () => {
       listProductionOperationsForReporter({ id: 'packer-1', role: Role.WORKER }),
     ).rejects.toMatchObject({ code: 'ACCOUNT_NOT_AUTHORIZED' });
     expect(dbMock.productionOperation.findMany).not.toHaveBeenCalled();
+  });
+
+  it('omits obsolete generations from the worker queue', async () => {
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      {
+        id: 'packing-v1',
+        orderId: 'order-1',
+        workOrderVersion: 1,
+        operationType: PieceworkOperationType.PACKING,
+        unit: PieceworkRateUnit.PER_BAG,
+        status: ProductionOperationStatus.PENDING,
+        plannedQty: new Decimal(12),
+        createdAt: new Date('2026-08-28T00:00:00.000Z'),
+        order: {
+          orderNo: 'GD-1',
+          customName: null,
+          isUrgent: false,
+          promisedDate: null,
+          workOrderVersion: 2,
+        },
+        sources: [],
+        reports: [],
+      },
+    ]);
+
+    await expect(
+      listProductionOperationsForReporter({
+        id: 'packer-1',
+        role: Role.WORKER,
+      }),
+    ).resolves.toEqual([]);
   });
 });

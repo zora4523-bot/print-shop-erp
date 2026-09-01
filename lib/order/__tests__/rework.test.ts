@@ -22,6 +22,7 @@ const {
   modeMock,
   enqueueNotificationMock,
   activateOperationsMock,
+  getSettingMock,
 } = vi.hoisted(() => {
   const mock = {
     order: {
@@ -46,6 +47,7 @@ const {
     modeMock: vi.fn<() => 'inline' | 'durable'>(),
     enqueueNotificationMock: vi.fn<(...args: unknown[]) => Promise<boolean>>(),
     activateOperationsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+    getSettingMock: vi.fn(),
   };
 });
 
@@ -63,6 +65,7 @@ vi.mock('@/lib/production/operation-materialization-service', () => ({
   activateProductionOperationsInTx: activateOperationsMock,
   ProductionOperationMaterializationError: class extends Error {},
 }));
+vi.mock('@/lib/settings', () => ({ getSetting: getSettingMock }));
 
 import {
   createReworkOrder,
@@ -212,6 +215,7 @@ beforeEach(() => {
     operationsCreated: 2,
     progressStepsCreated: 1,
   });
+  getSettingMock.mockReset().mockResolvedValue({ enabled: true });
 });
 
 describe('createReworkOrder', () => {
@@ -395,7 +399,8 @@ describe('createReworkOrder', () => {
       'ORDER_SUBMITTED',
       expect.objectContaining({
         orderId: 'rework-1',
-        totalAmount: '0.00',
+        summary: '重做工单已提交，待工厂确认',
+        deepLink: '/orders#wo=GD-260731-001',
       }),
       { dedupeKey: 'notification:ORDER_SUBMITTED:rework-1' },
     );
@@ -410,6 +415,26 @@ describe('createReworkOrder', () => {
       { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
     );
     expect(notifyMock).toHaveBeenCalledTimes(2);
+    for (const [, payload] of notifyMock.mock.calls) {
+      expect(payload).not.toHaveProperty('totalAmount');
+    }
+  });
+
+  it('新单通知关闭时不投递非急单重做通知', async () => {
+    getSettingMock.mockResolvedValue({ enabled: false });
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({ ...sourceOrder, isUrgent: false })
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260731-001',
+        customerRef: '客户 A',
+        isUrgent: false,
+        submitter: { displayName: '管理员' },
+      });
+
+    await createReworkOrder(validInput, ownerActor);
+
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('只重做非计件工艺时不复制原单烫金计件事实', async () => {

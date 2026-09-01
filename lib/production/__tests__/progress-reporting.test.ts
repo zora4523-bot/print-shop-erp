@@ -19,6 +19,10 @@ const { dbMock, databaseNowMock, completionMock } = vi.hoisted(() => ({
       aggregate: vi.fn(),
       create: vi.fn(),
     },
+    productionScanClaim: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+    },
     user: { findUnique: vi.fn() },
     order: { update: vi.fn() },
     orderLog: { create: vi.fn() },
@@ -30,6 +34,7 @@ const { dbMock, databaseNowMock, completionMock } = vi.hoisted(() => ({
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/background-jobs/clock', () => ({
   databaseNow: databaseNowMock,
+  databaseClockNow: databaseNowMock,
 }));
 vi.mock('@/lib/production-completion', () => ({
   maybeCompleteProductionOrder: completionMock,
@@ -46,6 +51,7 @@ function stepFixture(overrides: Record<string, unknown> = {}) {
   return {
     id: 'progress-1',
     orderId: 'order-1',
+    workOrderVersion: 1,
     status: ProductionOperationStatus.PENDING,
     plannedQty: new Decimal(100),
     craftCode: 'GLUING',
@@ -55,6 +61,8 @@ function stepFixture(overrides: Record<string, unknown> = {}) {
       id: 'order-1',
       orderNo: 'GD-1',
       status: OrderStatus.SCHEDULING,
+      scheduledAt: null,
+      workOrderVersion: 1,
     },
     ...overrides,
   };
@@ -84,6 +92,7 @@ beforeEach(() => {
   for (const delegate of [
     dbMock.productionProgressStep,
     dbMock.productionProgressReport,
+    dbMock.productionScanClaim,
     dbMock.user,
     dbMock.order,
     dbMock.orderLog,
@@ -109,12 +118,49 @@ beforeEach(() => {
     _sum: { completedQty: null },
   });
   dbMock.productionProgressReport.create.mockResolvedValue({ id: 'report-1' });
+  dbMock.productionScanClaim.findUnique.mockResolvedValue(null);
+  dbMock.productionScanClaim.create.mockResolvedValue({
+    id: 'claim-1',
+    claimedAt: NOW,
+  });
   dbMock.productionProgressStep.update.mockResolvedValue({ id: 'progress-1' });
   dbMock.order.update.mockResolvedValue({ id: 'order-1' });
   dbMock.orderLog.create.mockResolvedValue({ id: 'log-1' });
 });
 
 describe('reportProductionProgress', () => {
+  it('已下发工单的无计件扫码也只写入真实首次认领', async () => {
+    arrangeStep(
+      stepFixture({
+        workOrderVersion: 2,
+        order: {
+          id: 'order-1',
+          orderNo: 'GD-1',
+          status: OrderStatus.RELEASED,
+          scheduledAt: new Date('2026-08-27T08:00:00.000Z'),
+          workOrderVersion: 2,
+        },
+      }),
+    );
+
+    await expect(reportProductionProgress(input(), ACTOR)).resolves.toMatchObject({
+      reportId: 'report-1',
+      orderStatus: OrderStatus.RELEASED,
+    });
+    expect(dbMock.productionScanClaim.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 'order-1',
+        workOrderVersion: 2,
+        operationId: null,
+        progressStepId: 'progress-1',
+        reporterId: ACTOR.id,
+        idempotencyKey: 'progress-scan-0001',
+        claimedAt: NOW,
+      }),
+      select: { id: true, claimedAt: true },
+    });
+  });
+
   it('记录合格/缺陷/返工进度，不产生任何工价或金额字段', async () => {
     await expect(
       reportProductionProgress(input(), ACTOR),
