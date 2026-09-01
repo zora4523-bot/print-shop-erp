@@ -99,6 +99,8 @@ jobs:
         run: pnpm exec playwright test --list
 
       - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm build
 
       - name: Upload dead-code evidence
