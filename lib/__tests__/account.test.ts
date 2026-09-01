@@ -806,6 +806,36 @@ describe('setUserActive invariants', () => {
     );
   });
 
+  it('accepts a mid-month CS period that overlaps the reactivation month', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-20T02:00:00.000Z'));
+    try {
+      const inactiveCs = makeUser({
+        id: 'cs-mid-month',
+        isActive: false,
+        role: Role.CUSTOMER_SERVICE,
+        employmentType: EmploymentType.FULL_TIME,
+        employmentStartDate: new Date('2026-09-15T00:00:00.000Z'),
+      });
+      dbMock.user.findUnique.mockResolvedValue(inactiveCs);
+      dbMock.user.update.mockResolvedValue({ ...inactiveCs, isActive: true });
+      dbMock.salaryPeriod.findFirst.mockResolvedValue({
+        id: 'period-mid-month',
+        periodStart: new Date('2026-09-15T00:00:00.000Z'),
+        periodEnd: new Date('2027-01-14T00:00:00.000Z'),
+        status: SalaryPeriodStatus.IN_PROGRESS,
+      });
+
+      await expect(
+        setUserActive(inactiveCs.id, true, baseActor),
+      ).resolves.toMatchObject({ isActive: true });
+
+      expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('preserves unpaid hourly liabilities when only active state changes', async () => {
     const worker = makeUser({
       id: 'worker-1',

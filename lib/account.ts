@@ -290,7 +290,7 @@ async function ensureInitialCsPeriodInTx(
     if (
       firstEligibleMonth === null ||
       (activePeriod.periodStart.getTime() <=
-        firstEligibleMonth.periodStart.getTime() &&
+        firstEligibleMonth.periodEnd.getTime() &&
         activePeriod.periodEnd.getTime() >=
           firstEligibleMonth.periodStart.getTime())
     ) {

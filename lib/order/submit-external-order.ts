@@ -305,11 +305,12 @@ async function assertSelectedPapersAvailable(
     isActive: boolean;
     outOfStock: boolean;
   };
-  // Lock every PAPER identity after the shared price-snapshot lock. Generic
-  // CUSTOM products persist only their canonical paper fact, so resolving the
-  // unique material row and protecting it from rename/deactivation must be one
-  // transaction step. The broad row lock also prevents a concurrent alias row
-  // from making an identity ambiguous before commit.
+  // The caller holds the shared price-snapshot advisory lock. Every supported
+  // PAPER identity writer takes its exclusive counterpart, so this full read
+  // cannot race create/rename/deactivation or gain a phantom alias. Do not add
+  // a Material row lock here: inventory movements lock and update Material
+  // rows without taking that advisory lock, and the two lock domains can form
+  // an ABBA deadlock. Inventory-only fields are not used for identity matching.
   const papers = await tx.$queryRaw<PaperAvailabilityRow[]>`
     SELECT
       material."id",
@@ -319,7 +320,6 @@ async function assertSelectedPapersAvailable(
       material."outOfStock"
     FROM "Material" AS material
     WHERE material."category" = 'PAPER'::"MaterialCategory"
-    FOR SHARE OF material
   `;
   const paperById = new Map(papers.map((paper) => [paper.id, paper]));
   const invalidSelections: string[] = [];

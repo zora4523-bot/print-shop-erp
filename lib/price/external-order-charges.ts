@@ -782,13 +782,17 @@ function quotePackaging(
   rules: readonly ExternalOrderChargeRule[],
 ): ExternalOrderChargeLine {
   if (!Number.isSafeInteger(shipment.itemQuantity) || shipment.itemQuantity < 1) {
+    const orderTotalInvalid =
+      !Number.isSafeInteger(orderTotalQuantity) || orderTotalQuantity < 1;
     return incompleteLine(
       shipment.shipmentKey,
       'PACKAGING',
       '打包耗材费',
       '纸箱费',
       [
-        '整单总数量必须是大于 0 的安全整数',
+        ...(orderTotalInvalid
+          ? ['整单总数量必须是大于 0 的安全整数']
+          : []),
         '逐票款式数量必须是大于 0 的安全整数',
       ],
       {
