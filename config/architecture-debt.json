@@ -8,10 +8,6 @@
       "maxLines": 1673
     },
     {
-      "id": "app/(admin)/owner/bills/[id]/page.tsx::function:OwnerBillDetailPage",
-      "maxLines": 372
-    },
-    {
       "id": "app/(admin)/owner/notifications/page.tsx::function:OwnerNotificationsPage",
       "maxLines": 388
     },
