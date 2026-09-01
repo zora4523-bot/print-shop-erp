@@ -17,10 +17,12 @@ export function OperationReportForm({
   operationId,
   idempotencyKey,
   remainingQty,
+  workOrderProgressRemainingQty,
 }: {
   operationId: string;
   idempotencyKey: string;
   remainingQty: string;
+  workOrderProgressRemainingQty: string;
 }) {
   const action = reportProductionOperationAction.bind(null, operationId);
   const [state, formAction, pending] = useActionState<
@@ -35,7 +37,8 @@ export function OperationReportForm({
       pending={pending}
       idempotencyKey={idempotencyKey}
       remainingQty={remainingQty}
-      explanation="只有合格完成数计入计件；缺陷数与返工数只留作生产记录。"
+      workOrderProgressRemainingQty={workOrderProgressRemainingQty}
+      explanation="工单件数进度单独用于烫金/打包进度；计件数量仍按工价单位计薪，两者不互相换算。"
       successMessage={
         state?.status === 'success'
           ? `已记录本次报工，计件金额 ¥ ${state.amount}`
@@ -67,6 +70,7 @@ export function ProgressReportForm({
       pending={pending}
       idempotencyKey={idempotencyKey}
       remainingQty={remainingQty}
+      workOrderProgressRemainingQty={null}
       explanation="合格数用于推进工序；缺陷数与返工数只做记录，此步骤不计薪。"
       successMessage={
         state?.status === 'success'
@@ -88,6 +92,7 @@ function ReportFields({
   pending,
   idempotencyKey,
   remainingQty,
+  workOrderProgressRemainingQty,
   explanation,
   successMessage,
 }: {
@@ -96,6 +101,7 @@ function ReportFields({
   pending: boolean;
   idempotencyKey: string;
   remainingQty: string;
+  workOrderProgressRemainingQty: string | null;
   explanation: string;
   successMessage: string | null;
 }) {
@@ -114,6 +120,14 @@ function ReportFields({
           defaultValue={remainingQty}
           disabled={pending}
         />
+        {workOrderProgressRemainingQty !== null ? (
+          <QuantityField
+            id="workOrderProgressQuantity"
+            label="本次工单件数进度"
+            defaultValue={workOrderProgressRemainingQty}
+            disabled={pending}
+          />
+        ) : null}
         <div className="grid grid-cols-2 gap-3">
           <QuantityField
             id="defectQty"

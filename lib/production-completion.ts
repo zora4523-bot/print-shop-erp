@@ -33,6 +33,7 @@ export type ProductionCompletionTx = {
       id: string;
       status: OrderStatus;
       requiresOutsource?: boolean;
+      workOrderVersion: number;
       orderNo: string;
       customerRef: string | null;
     } | null>;
@@ -141,6 +142,7 @@ export async function maybeCompleteProductionOrder(
       id: true,
       status: true,
       requiresOutsource: true,
+      workOrderVersion: true,
       orderNo: true,
       customerRef: true,
     },
@@ -155,7 +157,7 @@ export async function maybeCompleteProductionOrder(
   }
 
   const operations = await tx.productionOperation.findMany({
-    where: { orderId },
+    where: { orderId, workOrderVersion: order.workOrderVersion },
     select: { id: true, status: true },
   });
   const usesOperationGeneration = operations.length > 0;
@@ -167,7 +169,7 @@ export async function maybeCompleteProductionOrder(
     // This prevents the first completed operation from finishing an order
     // merely because the old task ledger has no rows.
     const progressSteps = await tx.productionProgressStep.findMany({
-      where: { orderId },
+      where: { orderId, workOrderVersion: order.workOrderVersion },
       select: { id: true, status: true },
     });
     const activeOperations = operations.filter(

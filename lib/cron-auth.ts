@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
-// 8 个 /api/cron/* 路由共用的 Bearer 认证守卫。
+// 9 个 /api/cron/* 路由共用的 Bearer 认证守卫。
 //
 // 契约（与原样板逐字节一致，勿改响应形状——外部调度器可能解析）：
 //   - CRON_SECRET 未配置 → 503 { error: 'CRON_SECRET not configured' }

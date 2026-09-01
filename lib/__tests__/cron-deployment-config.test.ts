@@ -13,6 +13,8 @@ const EXPECTED_ENDPOINTS = [
   'order-export-cleanup',
   'order-overdue',
   'outsource-overdue',
+  'pending-factory-backlog',
+  'production-alerts',
 ] as const;
 
 describe('cron deployment configuration', () => {

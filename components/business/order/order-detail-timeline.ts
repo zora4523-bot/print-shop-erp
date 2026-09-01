@@ -49,6 +49,13 @@ const FLOW: Array<{ key: string; label: string }> = [
 const FLOW_INDEX: Record<OrderStatus, number> = {
   [OrderStatus.DRAFT]: 0,
   [OrderStatus.PENDING_FACTORY]: 1,
+  [OrderStatus.REJECTED]: -1,
+  [OrderStatus.CONFIRMED]: 1,
+  [OrderStatus.ON_HOLD]: 2,
+  [OrderStatus.RELEASED]: 2,
+  [OrderStatus.FOILING]: 3,
+  [OrderStatus.PACKING]: 4,
+  [OrderStatus.SETTLED]: 6,
   [OrderStatus.SUBMITTED]: 1,
   [OrderStatus.SCHEDULING]: 2,
   [OrderStatus.IN_PRODUCTION]: 3,

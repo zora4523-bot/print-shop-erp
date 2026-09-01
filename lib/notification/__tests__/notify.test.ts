@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { dbMock, ledgerMock, DeliveryClaimConflictError } = vi.hoisted(() => {
+const { dbMock, ledgerMock, routingMock, DeliveryClaimConflictError } = vi.hoisted(() => {
   class DeliveryClaimConflictError extends Error {
     constructor(message: string) {
       super(message);
@@ -21,6 +21,7 @@ const { dbMock, ledgerMock, DeliveryClaimConflictError } = vi.hoisted(() => {
       finalize: vi.fn(),
       markUnknown: vi.fn(),
     },
+    routingMock: { resolve: vi.fn() },
   };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
@@ -29,6 +30,9 @@ vi.mock('@/lib/notification/delivery-ledger', () => ({
   finalizeDurableDelivery: ledgerMock.finalize,
   markDurableDeliveryUnknown: ledgerMock.markUnknown,
   NotificationDeliveryClaimConflictError: DeliveryClaimConflictError,
+}));
+vi.mock('@/lib/notification/management-routing', () => ({
+  resolveManagementNotificationRoute: routingMock.resolve,
 }));
 
 import {
@@ -51,6 +55,10 @@ beforeEach(() => {
   }));
   ledgerMock.finalize.mockReset().mockResolvedValue(undefined);
   ledgerMock.markUnknown.mockReset().mockResolvedValue(undefined);
+  // Existing delivery tests exercise the legacy NotificationRule path. The
+  // managed-role contract has focused cases below; production never returns
+  // null for its five fixed events.
+  routingMock.resolve.mockReset().mockResolvedValue(null);
 });
 
 describe('isMockMode', () => {
@@ -625,11 +633,11 @@ describe('notify', () => {
     expect(data.errorMessage).toBe('BuggyError');
   });
 
-  it('messageContent 写 log 是渲染后的 string（含 payload 字段）', async () => {
+  it('management messageContent 只渲染单号与安全摘要，不渲染提交人', async () => {
     dbMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'ORDER_SUBMITTED',
       channelIds: ['c1'],
-      messageTemplate: '工单 {orderNo} 由 {submitterName} 提交',
+      messageTemplate: '工单 {orderNo}\n{summary}\n{deepLink}',
       isActive: true,
     });
     dbMock.notificationChannel.findMany.mockResolvedValue([
@@ -649,7 +657,166 @@ describe('notify', () => {
       { mockMode: true },
     );
     const data = dbMock.notificationLog.create.mock.calls[0][0].data;
-    expect(data.messageContent).toBe('工单 O-99 由 李四 提交');
+    expect(data.messageContent).toBe(
+      '工单 O-99\n新工单已提交，待工厂确认\n/orders#wo=O-99',
+    );
+    expect(data.messageContent).not.toContain('李四');
+  });
+
+  it('托管事件只用固定角色路由，忽略 legacy rule.channelIds', async () => {
+    routingMock.resolve.mockResolvedValue({
+      role: 'factoryConfirmer',
+      enabled: true,
+      channelIds: ['factory-channel'],
+    });
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['legacy-owner-channel'],
+      messageTemplate: '工单 {orderNo}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      {
+        id: 'factory-channel',
+        webhookUrl: 'https://qy/factory',
+        isActive: true,
+      },
+    ]);
+
+    await notify(
+      'ORDER_SUBMITTED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        urgentMark: '',
+      },
+      { webhookSender: okSender, mockMode: false },
+    );
+
+    expect(dbMock.notificationChannel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ['factory-channel'] } },
+      }),
+    );
+    expect(okSender).toHaveBeenCalledWith(
+      'https://qy/factory',
+      expect.any(String),
+    );
+  });
+
+  it.each([
+    ['角色关闭', { role: 'owner', enabled: false, channelIds: ['owner-channel'] }],
+    ['角色空群', { role: 'owner', enabled: true, channelIds: [] }],
+  ])('%s时 fail-closed，不回退 legacy 群', async (_label, route) => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    routingMock.resolve.mockResolvedValue(route);
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'PRODUCTION_STAGNANT',
+      channelIds: ['legacy-channel'],
+      messageTemplate: '{summary}',
+      isActive: true,
+    });
+
+    const outcome = await notify('PRODUCTION_STAGNANT', {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      summary: '停滞',
+      deepLink: '/orders#wo=O-1',
+    }, { webhookSender: okSender, mockMode: false });
+
+    expect(outcome).toMatchObject({ attempted: 0, delivered: 0, failed: 0 });
+    expect(dbMock.notificationChannel.findMany).not.toHaveBeenCalled();
+    expect(okSender).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('托管路由含已停用群时整次 fail-closed，并写 FAILED log', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    routingMock.resolve.mockResolvedValue({
+      role: 'owner',
+      enabled: true,
+      channelIds: ['owner-channel'],
+    });
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'PRODUCTION_STAGNANT',
+      channelIds: ['legacy-channel'],
+      messageTemplate: '{summary}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      {
+        id: 'owner-channel',
+        webhookUrl: 'https://qy/owner',
+        isActive: false,
+      },
+    ]);
+
+    const outcome = await notify('PRODUCTION_STAGNANT', {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      summary: '停滞',
+      deepLink: '/orders#wo=O-1',
+    }, { webhookSender: okSender, mockMode: false });
+
+    expect(outcome).toMatchObject({
+      attempted: 0,
+      delivered: 0,
+      failed: 1,
+      unlogged: 0,
+      errorCodes: ['channel inactive'],
+    });
+    expect(okSender).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventType: 'PRODUCTION_STAGNANT',
+        channelId: 'owner-channel',
+        status: 'FAILED',
+        errorMessage: 'channel inactive',
+      }),
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('management route fail-closed'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('托管路由含缺失群时把无法落 FK 日志的失败写进 outcome', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    routingMock.resolve.mockResolvedValue({
+      role: 'owner',
+      enabled: true,
+      channelIds: ['missing-owner-channel'],
+    });
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'PRODUCTION_STAGNANT',
+      channelIds: ['legacy-channel'],
+      messageTemplate: '{summary}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([]);
+
+    const outcome = await notify('PRODUCTION_STAGNANT', {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      summary: '停滞',
+      deepLink: '/orders#wo=O-1',
+    }, { webhookSender: okSender, mockMode: false });
+
+    expect(outcome).toMatchObject({
+      attempted: 0,
+      delivered: 0,
+      failed: 1,
+      unlogged: 1,
+      errorCodes: ['management channel missing'],
+    });
+    expect(okSender).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('management route fail-closed'),
+    );
+    warnSpy.mockRestore();
   });
 });
 
@@ -760,6 +927,64 @@ describe('notify · durable delivery ledger', () => {
       failed: 1,
       retryable: false,
     });
+  });
+
+  it('托管路由失效时为所有仍存在的群预留并终结 FAILED ledger', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    routingMock.resolve.mockResolvedValue({
+      role: 'owner',
+      enabled: true,
+      channelIds: ['c-active', 'c-inactive'],
+    });
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'PRODUCTION_STAGNANT',
+      channelIds: ['legacy-channel'],
+      messageTemplate: '{summary}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c-active', webhookUrl: 'https://qy/active', isActive: true },
+      { id: 'c-inactive', webhookUrl: 'https://qy/inactive', isActive: false },
+    ]);
+    const sender: WebhookSender = vi.fn();
+
+    const outcome = await notify('PRODUCTION_STAGNANT', {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      summary: '停滞',
+      deepLink: '/orders#wo=O-1',
+    }, {
+      webhookSender: sender,
+      mockMode: false,
+      deliveryKey: 'dk-managed-route',
+      deliveryAttempt: 1,
+    });
+
+    expect(sender).not.toHaveBeenCalled();
+    expect(ledgerMock.claim).toHaveBeenCalledTimes(2);
+    expect(ledgerMock.finalize).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        channelId: 'c-active',
+        status: 'FAILED',
+        errorMessage: 'management route incomplete',
+      }),
+    );
+    expect(ledgerMock.finalize).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        channelId: 'c-inactive',
+        status: 'FAILED',
+        errorMessage: 'channel inactive',
+      }),
+    );
+    expect(outcome).toMatchObject({
+      attempted: 0,
+      delivered: 0,
+      failed: 2,
+      retryable: false,
+    });
+    warnSpy.mockRestore();
   });
 
   it('skips a prior SUCCESS without sending it again', async () => {

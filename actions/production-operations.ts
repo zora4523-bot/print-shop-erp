@@ -10,6 +10,10 @@ import {
   ProgressReportingError,
   reportProductionProgress,
 } from '@/lib/production/progress-reporting';
+import {
+  claimProductionOperationFromScan,
+  WorkOrderProgressError,
+} from '@/lib/production/work-order-progress';
 
 export type ReportProductionOperationActionResult =
   | {
@@ -28,6 +32,15 @@ export type ReportProductionProgressActionResult =
       reportId: string;
       progressStepId: string;
       orderId: string;
+      idempotentReplay: boolean;
+    }
+  | { status: 'invalid' | 'error'; message: string };
+
+export type ClaimProductionOperationActionResult =
+  | {
+      status: 'success';
+      claimId: string;
+      claimedAt: string;
       idempotentReplay: boolean;
     }
   | { status: 'invalid' | 'error'; message: string };
@@ -53,11 +66,16 @@ export async function reportProductionOperationAction(
   const completedQty = formInteger(formData, 'completedQty');
   const defectQty = formInteger(formData, 'defectQty');
   const reworkQty = formInteger(formData, 'reworkQty');
+  const workOrderProgressQuantity = formInteger(
+    formData,
+    'workOrderProgressQuantity',
+  );
   const idempotencyKey = formData.get('idempotencyKey');
   if (
     completedQty === null ||
     defectQty === null ||
     reworkQty === null ||
+    workOrderProgressQuantity === null ||
     typeof idempotencyKey !== 'string'
   ) {
     return { status: 'invalid', message: '报工数量或请求标识不合法' };
@@ -70,6 +88,7 @@ export async function reportProductionOperationAction(
         completedQty,
         defectQty,
         reworkQty,
+        workOrderProgressQuantity,
         idempotencyKey,
       },
       actor,
@@ -89,6 +108,42 @@ export async function reportProductionOperationAction(
     };
   } catch (error) {
     if (error instanceof OperationReportingError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Explicit scan claim. Merely opening a task page never invokes this action;
+ * reporter identity still comes only from the authorized session.
+ */
+export async function claimProductionOperationAction(
+  operationId: string,
+  _previous: ClaimProductionOperationActionResult | null,
+  formData: FormData,
+): Promise<ClaimProductionOperationActionResult> {
+  const actor = await requirePermission('task:report');
+  const idempotencyKey = formData.get('idempotencyKey');
+  if (typeof idempotencyKey !== 'string') {
+    return { status: 'invalid', message: '扫码认领请求标识不合法' };
+  }
+
+  try {
+    const result = await claimProductionOperationFromScan(
+      { operationId, idempotencyKey },
+      actor,
+    );
+    revalidatePath('/worker/tasks');
+    revalidatePath(`/worker/tasks/${operationId}`);
+    return {
+      status: 'success',
+      claimId: result.claimId,
+      claimedAt: result.claimedAt.toISOString(),
+      idempotentReplay: result.idempotentReplay,
+    };
+  } catch (error) {
+    if (error instanceof WorkOrderProgressError) {
       return { status: 'error', message: error.message };
     }
     throw error;

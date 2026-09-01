@@ -133,6 +133,33 @@ describe('dispatchNotification', () => {
     expect(notifyMock).not.toHaveBeenCalled();
   });
 
+  it('ORDER_SUBMITTED 在 durable 持久化前移除历史金额字段', async () => {
+    modeMock.mockReturnValue('durable');
+
+    await dispatchNotification('ORDER_SUBMITTED', {
+      orderId: 'o1',
+      orderNo: 'GD-260902-001',
+      submitterName: '张三',
+      customerRef: '苹果福',
+      totalAmount: '9,999.00',
+      urgentMark: '',
+      summary: '客户：苹果福 · 提交人：张三',
+      deepLink: '/orders#wo=GD-260902-001',
+    });
+
+    const queuedPayload = enqueueNotificationJobMock.mock.calls[0]?.[1] as
+      | Record<string, unknown>
+      | undefined;
+    expect(queuedPayload).not.toHaveProperty('totalAmount');
+    expect(queuedPayload).toMatchObject({
+      orderNo: 'GD-260902-001',
+      summary: '新工单已提交，待工厂确认',
+      deepLink: '/orders#wo=GD-260902-001',
+    });
+    expect(JSON.stringify(queuedPayload)).not.toContain('苹果福');
+    expect(JSON.stringify(queuedPayload)).not.toContain('张三');
+  });
+
   it('spreadIndex 原样透传给入队（批量扇出的限流节流）', async () => {
     modeMock.mockReturnValue('durable');
     await dispatchNotification(

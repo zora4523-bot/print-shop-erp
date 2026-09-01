@@ -100,6 +100,12 @@ vi.mock('@/components/business/order/ReworkOrderForm', () => ({
 vi.mock('@/components/business/order/OrderChangeRequestForm', () => ({
   OrderChangeRequestForm: () => null,
 }));
+vi.mock('@/components/business/order/OrderCancellationRequestForm', () => ({
+  OrderCancellationRequestForm: () => null,
+}));
+vi.mock('@/components/business/order/OrderChangeWithdrawButton', () => ({
+  OrderChangeWithdrawButton: () => null,
+}));
 vi.mock('@/components/business/order/OrderChangeReviewForm', () => ({
   OrderChangeReviewForm: () => null,
 }));

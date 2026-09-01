@@ -153,6 +153,7 @@ import {
   setOrderUrgentAction,
   setOrderSfCollectAction,
   shipOrderAction,
+  finishOrderAction,
   previewOrderChangeRequestPricingAction,
   previewOrderPricingReviewAction,
   finalizeOrderPricingAction,
@@ -909,6 +910,21 @@ describe('shipOrderAction', () => {
     const result = await shipOrderAction('order-1', null, formData);
     expect(result.status).toBe('invalid');
     expect(orderMock.shipOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('finishOrderAction', () => {
+  it('fails closed without calling the legacy SHIPPED to FINISHED writer', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+
+    await expect(finishOrderAction('order-1')).resolves.toEqual({
+      status: 'error',
+      message: '旧版完结入口已停用，请使用管理端“结算”操作',
+    });
+
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('order:ship');
+    expect(orderMock.finishOrder).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 });
 

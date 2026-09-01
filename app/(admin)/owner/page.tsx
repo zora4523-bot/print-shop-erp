@@ -171,10 +171,10 @@ export default async function OwnerDashboardPage() {
           tone="info"
         />
         <ActionShortcut
-          href="/owner/bills"
+          href="/owner/agent-bills"
           icon={Send}
-          label="销售应收账单"
-          description="月账单生成、发单"
+          label="代理商月度账单"
+          description="月账单生成、确认与收款"
           tone="warning"
         />
         <ActionShortcut

@@ -5,12 +5,14 @@ const {
   requirePermissionMock,
   reportMock,
   progressReportMock,
+  claimMock,
   revalidatePathMock,
 } = vi.hoisted(
   () => ({
     requirePermissionMock: vi.fn(),
     reportMock: vi.fn(),
     progressReportMock: vi.fn(),
+    claimMock: vi.fn(),
     revalidatePathMock: vi.fn(),
   }),
 );
@@ -33,9 +35,14 @@ vi.mock('@/lib/production/progress-reporting', () => ({
   },
   reportProductionProgress: progressReportMock,
 }));
+vi.mock('@/lib/production/work-order-progress', () => ({
+  WorkOrderProgressError: class WorkOrderProgressError extends Error {},
+  claimProductionOperationFromScan: claimMock,
+}));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 
 import {
+  claimProductionOperationAction,
   reportProductionOperationAction,
   reportProductionProgressAction,
 } from '../production-operations';
@@ -46,6 +53,7 @@ function formData() {
   data.set('completedQty', '100');
   data.set('defectQty', '2');
   data.set('reworkQty', '1');
+  data.set('workOrderProgressQuantity', '80');
   data.set('idempotencyKey', 'scan-request-0001');
   // An injected reporter must be ignored even if a future form adds one.
   data.set('workerId', 'attacker-selected-worker');
@@ -68,6 +76,11 @@ beforeEach(() => {
     reportId: 'progress-report-1',
     progressStepId: 'progress-1',
     orderId: 'order-1',
+    idempotentReplay: false,
+  });
+  claimMock.mockReset().mockResolvedValue({
+    claimId: 'claim-1',
+    claimedAt: new Date('2026-09-02T08:00:00.000Z'),
     idempotentReplay: false,
   });
   revalidatePathMock.mockReset();
@@ -107,6 +120,18 @@ describe('reportProductionProgressAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
   });
 
+  it('要求独立的工单件数进度', async () => {
+    const data = formData();
+    data.delete('workOrderProgressQuantity');
+    await expect(
+      reportProductionOperationAction('operation-1', null, data),
+    ).resolves.toEqual({
+      status: 'invalid',
+      message: '报工数量或请求标识不合法',
+    });
+    expect(reportMock).not.toHaveBeenCalled();
+  });
+
   it('权限拒绝时不解析也不写入进度', async () => {
     requirePermissionMock.mockRejectedValue(new Error('unauthorized'));
     await expect(
@@ -142,6 +167,27 @@ describe('reportProductionProgressAction', () => {
   });
 });
 
+describe('claimProductionOperationAction', () => {
+  it('只使用会话工人写入显式扫码认领', async () => {
+    await expect(
+      claimProductionOperationAction('operation-1', null, formData()),
+    ).resolves.toEqual({
+      status: 'success',
+      claimId: 'claim-1',
+      claimedAt: '2026-09-02T08:00:00.000Z',
+      idempotentReplay: false,
+    });
+    expect(requirePermissionMock).toHaveBeenCalledWith('task:report');
+    expect(claimMock).toHaveBeenCalledWith(
+      {
+        operationId: 'operation-1',
+        idempotencyKey: 'scan-request-0001',
+      },
+      { id: 'session-worker', role: Role.WORKER },
+    );
+  });
+});
+
 describe('reportProductionOperationAction', () => {
   it('checks task:report first and passes only the session reporter', async () => {
     await expect(
@@ -154,6 +200,7 @@ describe('reportProductionOperationAction', () => {
         completedQty: 100,
         defectQty: 2,
         reworkQty: 1,
+        workOrderProgressQuantity: 80,
         idempotencyKey: 'scan-request-0001',
       },
       { id: 'session-worker', role: Role.WORKER },

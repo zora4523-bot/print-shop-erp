@@ -1,5 +1,6 @@
 import { after } from 'next/server';
 import {
+  sanitizeNotificationPayload,
   type NotificationEvent,
   type NotificationPayloadFor,
 } from './events';
@@ -51,6 +52,7 @@ export async function dispatchNotification<E extends NotificationEvent>(
   // FANOUT_SPACING_MS）。inline 模式忽略它 —— dev/test 本来就不真发。
   options: { dedupeKey?: string; spreadIndex?: number } = {},
 ): Promise<void> {
+  const safePayload = sanitizeNotificationPayload(event, payload);
   if (backgroundJobsMode() === 'durable') {
     // Lazy import keeps the inline test/dev path free of lib/db side effects.
     // It also avoids loading Prisma into a process that only exercises the
@@ -62,12 +64,12 @@ export async function dispatchNotification<E extends NotificationEvent>(
     // after PostgreSQL committed; inline fallback would then send once while
     // the worker sends the already-created job again. Propagate the error so
     // callers and durable parent jobs can retry the stable dedupe key.
-    await enqueueNotificationJob(event, payload, options);
+    await enqueueNotificationJob(event, safePayload, options);
     return;
   }
 
   try {
-    after(() => notify(event, payload));
+    after(() => notify(event, safePayload));
   } catch (err) {
     if (!isExpectedNoScope(err)) {
       // 非预期错误——可能是 Next runtime 故障或 api 变更。打 console
@@ -82,6 +84,6 @@ export async function dispatchNotification<E extends NotificationEvent>(
     // No request scope (unit test / CLI script) OR unexpected failure
     // → fire-and-forget。notify 永不抛（best-effort 顶层 catch），
     // 这条 void promise 不会在 unhandled rejection 里冒头。
-    void notify(event, payload);
+    void notify(event, safePayload);
   }
 }

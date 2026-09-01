@@ -34,9 +34,9 @@ describe('detail no-data empty-state ownership', () => {
       title: '暂无支付流水',
     },
     {
-      file: ['owner', 'bills', '[id]'],
-      start: '结款明细（',
-      end: '工单明细（',
+      file: ['owner', 'bills', 'archive', '[id]'],
+      start: '历史收款记录</h2>',
+      end: '<Link href="/owner/bills/archive"',
       title: '暂无收款流水',
     },
     {

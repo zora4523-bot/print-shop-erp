@@ -25,6 +25,23 @@ export type PrintTask = {
   taskQrSvg: string;
 };
 
+// Current-generation production rows are separate from legacy
+// ProductionTask rows. A piecework operation can span several order items (or
+// a packaging group), so forcing it into one item's legacy task collection
+// would either duplicate progress or attach it to the wrong item.
+export type PrintProductionStep = {
+  id: string;
+  source: 'OPERATION' | 'PROGRESS';
+  itemSequence?: number | null;
+  itemName?: string | null;
+  craftName: string;
+  plannedQty: number;
+  completedQty: number;
+  defectQty: number;
+  completedAt?: Date | null;
+  taskQrSvg: string;
+};
+
 export type PrintFoilTechnique =
   | 'UNSPECIFIED'
   | 'NONE'
@@ -101,6 +118,7 @@ export type PrintPackagingGroup = {
 export type PrintOrder = {
   id: string;
   orderNo: string;
+  workOrderVersion: number;
   customName?: string | null;
   kind: 'NORMAL' | 'REWORK';
   sourceOrderNo?: string | null;
@@ -118,6 +136,10 @@ export type PrintOrder = {
   submittedAt?: Date | null;
   createdAt: Date;
   items: PrintOrderItem[];
+  // Only rows belonging to this exact workOrderVersion are exposed here.
+  // The renderer uses legacy item.tasks only when this current-generation
+  // collection is empty, preserving old records without mixing generations.
+  productionSteps: PrintProductionStep[];
   packagingGroups: PrintPackagingGroup[];
   shipments: PrintShipment[];
   // Pre-rendered so the browser print view and renderToStaticMarkup PDF

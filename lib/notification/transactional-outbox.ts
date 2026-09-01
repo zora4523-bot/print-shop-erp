@@ -1,4 +1,8 @@
-import type { NotificationEvent, NotificationPayloadFor } from './events';
+import {
+  sanitizeNotificationPayload,
+  type NotificationEvent,
+  type NotificationPayloadFor,
+} from './events';
 import { backgroundJobsMode } from '../background-jobs/mode';
 import type { EnqueueClient } from '../background-jobs/repository';
 
@@ -19,6 +23,11 @@ export async function enqueueNotificationInTransaction<
   const { enqueueNotificationJob } = await import(
     '../background-jobs/notification'
   );
-  await enqueueNotificationJob(event, payload, options, client);
+  await enqueueNotificationJob(
+    event,
+    sanitizeNotificationPayload(event, payload),
+    options,
+    client,
+  );
   return true;
 }

@@ -33,6 +33,7 @@ import {
   BACKGROUND_JOB_STATUS_REGISTRY,
   NOTIFICATION_STATUS_REGISTRY,
 } from '@/lib/ui/status-registry';
+import { managementNotificationRoleForEvent } from '@/lib/notification/events';
 
 export const metadata = { title: '推送配置 · 红包印刷 ERP' };
 
@@ -160,7 +161,7 @@ export default async function OwnerNotificationsPage({
                       )}
                     </td>
                     <td className="px-3 py-2 text-center font-mono text-xs">
-                      {c.referencingActiveRuleCount}
+                      {c.referencingConfigurationCount}
                     </td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -181,8 +182,8 @@ export default async function OwnerNotificationsPage({
                         <DeleteChannelButton
                           channelId={c.id}
                           channelName={c.channelName}
-                          disabled={c.referencingActiveRuleCount > 0}
-                          disabledReason={`被 ${c.referencingActiveRuleCount} 条规则引用（含未启用），先在规则里移除`}
+                          disabled={c.referencingConfigurationCount > 0}
+                          disabledReason={`被 ${c.referencingConfigurationCount} 项通知配置引用，先在规则或系统设置里移除`}
                         />
                       </div>
                     </td>
@@ -216,7 +217,7 @@ export default async function OwnerNotificationsPage({
                   <th className="px-3 py-2 text-left">事件</th>
                   <th className="px-3 py-2 text-left">模板（前 60 字）</th>
                   <th className="px-3 py-2 text-center">状态</th>
-                  <th className="px-3 py-2 text-center">绑群数</th>
+                  <th className="px-3 py-2 text-center">路由</th>
                   <th className="px-3 py-2 text-right">操作</th>
                 </tr>
               </thead>
@@ -236,8 +237,8 @@ export default async function OwnerNotificationsPage({
                         <Badge variant="outline">未启用</Badge>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-center font-mono text-xs">
-                      {r.channelIds.length}
+                    <td className="px-3 py-2 text-center text-xs">
+                      {notificationRouteLabel(r.eventType, r.channelIds.length)}
                     </td>
                     <td className="px-3 py-2 text-right">
                       <Link
@@ -479,4 +480,11 @@ function maskWebhookUrl(url: string): string {
 function firstLine(s: string): string {
   const line = s.split('\n')[0] ?? '';
   return line.length > 60 ? `${line.slice(0, 60)}…` : line;
+}
+
+function notificationRouteLabel(eventType: string, legacyCount: number): string {
+  const role = managementNotificationRoleForEvent(eventType);
+  if (role === 'factoryConfirmer') return '工厂确认人';
+  if (role === 'owner') return '老板';
+  return `${legacyCount} 个群`;
 }

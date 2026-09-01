@@ -40,6 +40,13 @@ const terminalJobs = [
     attempts: 3,
     lastErrorCode: 'WorkerLeaseExpired',
   },
+  {
+    id: 'job-agent-bill-export',
+    type: 'AGENT_MONTHLY_BILL_EXPORT',
+    dedupeKey: 'agent-monthly-bill-export:export-1',
+    attempts: 3,
+    lastErrorCode: 'WorkerLeaseExpired',
+  },
 ];
 
 beforeEach(() => {
@@ -84,10 +91,10 @@ describe('reconcileExpiredBackgroundJobLeases', () => {
         queue: BackgroundJobQueue.LIGHT,
         leaseMs: 300_000,
       }),
-    ).resolves.toBe(3);
+    ).resolves.toBe(4);
 
     expect(dbMock.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(4);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(5);
 
     const notificationFence = dbMock.$queryRaw.mock.calls[1]![0] as Sql;
     const notificationSql = notificationFence.strings.join('?');
@@ -101,7 +108,7 @@ describe('reconcileExpiredBackgroundJobLeases', () => {
       'RETURNING log."deliveryKey" AS "dedupeKey"',
     );
 
-    const [diagnosis, attempts, cdr, orderExport] =
+    const [diagnosis, attempts, cdr, orderExport, agentBillExport] =
       dbMock.$executeRaw.mock.calls.map((call) => call[0] as Sql);
     const diagnosisSql = diagnosis!.strings.join('?');
     expect(diagnosisSql).toContain('UPDATE "BackgroundJob" AS job');
@@ -118,6 +125,11 @@ describe('reconcileExpiredBackgroundJobLeases', () => {
     const exportSql = orderExport!.strings.join('?');
     expect(exportSql).toContain('UPDATE "OrderExport" AS order_export');
     expect(exportSql).toContain('"filters" = jsonb_build_object(');
+    const agentBillExportSql = agentBillExport!.strings.join('?');
+    expect(agentBillExportSql).toContain(
+      'UPDATE "AgentMonthlyBillExport" AS bill_export',
+    );
+    expect(agentBillExportSql).toContain('"filters" = \'{}\'::jsonb');
 
     for (const statement of [
       notificationFence,
@@ -125,6 +137,7 @@ describe('reconcileExpiredBackgroundJobLeases', () => {
       attempts!,
       cdr!,
       orderExport!,
+      agentBillExport!,
     ]) {
       expect(statement.strings.join('?')).toContain('"terminal_jobs"');
       expect(statement.values).toContain('job-notification');
@@ -132,6 +145,7 @@ describe('reconcileExpiredBackgroundJobLeases', () => {
     }
     expect(cdr!.values).toContain('job-cdr');
     expect(orderExport!.values).toContain('job-export');
+    expect(agentBillExport!.values).toContain('job-agent-bill-export');
   });
 
   it('does not diagnose UNKNOWN unless the log update returned a fenced row', async () => {
@@ -146,9 +160,9 @@ describe('reconcileExpiredBackgroundJobLeases', () => {
       }),
     ).resolves.toBe(1);
 
-    // attempt/CDR/export reconciliation still runs, but the job-facing UNKNOWN
+    // attempt/CDR/export reconciliations still run, but the job-facing UNKNOWN
     // diagnosis is absent because a concurrent finalizer won the ledger row.
-    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(3);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(4);
     for (const [statement] of dbMock.$executeRaw.mock.calls) {
       expect((statement as Prisma.Sql).strings.join('?')).not.toContain(
         'NotificationDeliveryUnknownError',

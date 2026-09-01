@@ -21,6 +21,7 @@ import {
   transitionBill,
   InvalidBillTransitionError,
 } from './bill/status-machine';
+import { generateAgentMonthlyBillsForPeriod } from './agent-monthly-billing/generation';
 
 // 外部销售对客应收账单（加工费 + 快递/耗材等对客收费）
 //
@@ -40,6 +41,13 @@ export class BillError extends Error {
     super(message);
     this.name = 'BillError';
   }
+}
+
+export const LEGACY_BILL_READ_ONLY_MESSAGE =
+  '旧账单已切换为永久只读归档，请使用代理商月度账单';
+
+function rejectLegacyBillWrite(): never {
+  throw new BillError(LEGACY_BILL_READ_ONLY_MESSAGE);
 }
 
 // Advisory-lock namespace: 并发付款 / 生成 / 发单到同一条 Bill 都
@@ -284,7 +292,27 @@ export async function generateBillsForPeriod(
   _actor: { id: string; role: Role },
   fence?: ExecutionFence,
 ): Promise<BillGenerationResult> {
-  void _actor;
+  // Stable cron/action entrypoint cutover: every caller writes the v2 ledger.
+  // Keeping this public name avoids changing the durable job wire contract;
+  // the legacy Bill tables below are now reachable only through read models.
+  const result = await generateAgentMonthlyBillsForPeriod(period, _actor, {
+    fence,
+  });
+  return {
+    period: result.period,
+    generated: result.generated.map((bill) => ({
+      billId: bill.billId,
+      salesUserId: bill.agentUserId,
+      totalAmount: bill.totalAmount,
+      orderCount: bill.orderCount,
+      isNew: bill.created,
+      sequence: 1,
+      isSupplemental: false,
+    })),
+    errors: [],
+  };
+
+  /* c8 ignore start -- preserved historical implementation for archive archaeology */
   const { start, end } = parseShanghaiMonthInstantRange(period);
 
   const generated: BillGenerationResult['generated'] = [];
@@ -350,7 +378,10 @@ export async function generateBillsForPeriod(
       generated.push(result);
     } catch (err) {
       if (err instanceof BillError) {
-        errors.push({ salesUserId: submitterId, message: err.message });
+        errors.push({
+          salesUserId: submitterId,
+          message: (err as BillError).message,
+        });
         continue;
       }
       throw new BillGenerationUnexpectedError(
@@ -362,6 +393,7 @@ export async function generateBillsForPeriod(
   }
 
   return { period, generated, errors };
+  /* c8 ignore stop */
 }
 
 async function generateBillForSubmitter(
@@ -592,6 +624,8 @@ export async function issueBill(
   _actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<{ id: string; status: BillStatus }> {
+  rejectLegacyBillWrite();
+  /* c8 ignore start -- preserved historical implementation for archive archaeology */
   if (_actor.role !== Role.ADMIN) {
     throw new BillError('只有管理员可以发布账单');
   }
@@ -695,6 +729,7 @@ export async function issueBill(
     });
     return updated;
   });
+  /* c8 ignore stop */
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -724,6 +759,8 @@ export async function recordPayment(
     remark?: string | null;
   },
 ): Promise<RecordPaymentResult> {
+  rejectLegacyBillWrite();
+  /* c8 ignore start -- preserved historical implementation for archive archaeology */
   if (_actor.role !== Role.ADMIN) {
     throw new BillError('只有管理员可以记录付款');
   }
@@ -906,6 +943,7 @@ export async function recordPayment(
       csAccumulated: false,
     };
   });
+  /* c8 ignore stop */
 }
 
 // ─────────────────────────────────────────────────────────────────────

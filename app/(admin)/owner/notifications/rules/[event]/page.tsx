@@ -8,6 +8,7 @@ import {
 } from '@/lib/notification/admin';
 import { NOTIFICATION_EVENTS } from '@/lib/notification';
 import { NOTIFICATION_PAYLOAD_FIELDS } from '@/lib/notification/payload-fields';
+import { managementNotificationRoleForEvent } from '@/lib/notification/events';
 
 export const metadata = { title: '编辑事件规则 · 推送配置' };
 
@@ -40,13 +41,16 @@ export default async function EditRulePage({
     ] ?? [];
 
   const action = updateRuleAction.bind(null, event);
+  const managementRole = managementNotificationRoleForEvent(event);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
         <h1 className="text-xl font-semibold">编辑事件规则</h1>
         <p className="text-sm text-muted-foreground">
-          模板支持 Markdown 和列出的占位符；至少选择一个群并启用后才会推送。
+          {managementRole
+            ? '模板和事件开关在此配置；接收群由系统设置中的固定角色路由决定。'
+            : '模板支持 Markdown 和列出的占位符；至少选择一个群并启用后才会推送。'}
         </p>
       </div>
       <RuleForm

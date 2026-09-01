@@ -4,25 +4,38 @@ import {
   CustomerPriceBookPurpose,
   OrderBillingMode,
   OrderChangeRequestStatus,
+  OrderChangeRequestType,
   OrderCustomerChargeStatus,
   OrderItemPricingRoute,
   OrderPackagingMode,
+  OrderPrintKind,
+  OutsourceStatus,
   OrderQuotedFeeCompleteness,
   OrderSettlementType,
   OrderStatus,
   Prisma,
+  ProductionOperationStatus,
   Role,
   TaskStatus,
 } from '../../generated/prisma/client';
 import type {
   CreateOrderChangeRequestInput,
+  PreviewOrderCancellationSettlementInput,
   ReviewOrderChangeRequestInput,
+  WithdrawOrderChangeRequestInput,
 } from '../auth/schemas';
 import {
   orderChangeRequestItemsSchema,
   orderItemPricingFactsSchema,
 } from '../auth/schemas';
 import { db } from '../db';
+import { databaseClockNow } from '../background-jobs/clock';
+import { lockSettlementCutoffShared } from '../finance/settlement-cutoff-lock';
+import type { EnqueueClient } from '../background-jobs/repository';
+import { dispatchNotification } from '../notification/dispatch';
+import type { NotificationPayloadFor } from '../notification/events';
+import { enqueueNotificationInTransaction } from '../notification/transactional-outbox';
+import { getSetting } from '../settings';
 import {
   OrderCustomerChargeError,
   resolveExternalOrderChargesForFinalization,
@@ -41,6 +54,11 @@ import {
 } from './pending-plate-charge';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
 import { ORDER_PRICING_STATUS } from './pricing-status';
+import { transitionOrder } from './status-machine';
+import {
+  createOrderPrintRequestInTx,
+  supersedeOlderOrderPrintRequestsInTx,
+} from './print-jobs';
 import {
   deriveLegacyOrderItemFoilFacts,
   isNewOrderPricingRoute,
@@ -50,17 +68,148 @@ import {
   type CatalogCreateOrderQuoteCalculation,
 } from './create-order-quote-service';
 import type { CreateOrderItemQuotePreview } from './create-order-quote-presentation';
+import { activateProductionOperationsInTx } from '../production/operation-materialization-service';
 
 const CHANGEABLE_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.DRAFT,
   OrderStatus.SUBMITTED,
   OrderStatus.SCHEDULING,
   OrderStatus.IN_PRODUCTION,
+  OrderStatus.CONFIRMED,
+  OrderStatus.RELEASED,
+  OrderStatus.FOILING,
+  OrderStatus.PACKING,
 ];
+const CANCELLABLE_BY_REQUEST_STATUSES: OrderStatus[] = [
+  OrderStatus.CONFIRMED,
+  OrderStatus.RELEASED,
+  OrderStatus.FOILING,
+  OrderStatus.PACKING,
+];
+const VERSIONED_CHANGE_STATUSES = new Set<OrderStatus>([
+  OrderStatus.CONFIRMED,
+  OrderStatus.RELEASED,
+  OrderStatus.FOILING,
+  OrderStatus.PACKING,
+]);
+const REPRINT_CHANGE_STATUSES = new Set<OrderStatus>([
+  OrderStatus.RELEASED,
+  OrderStatus.FOILING,
+  OrderStatus.PACKING,
+]);
+type ReprintChangeStatus =
+  | typeof OrderStatus.RELEASED
+  | typeof OrderStatus.FOILING
+  | typeof OrderStatus.PACKING;
+
+function isReprintChangeStatus(
+  status: OrderStatus,
+): status is ReprintChangeStatus {
+  return REPRINT_CHANGE_STATUSES.has(status);
+}
 const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
 const LEGACY_TASK_STATUS_SELECT = {
   status: true,
 } as const satisfies Prisma.ProductionTaskSelect;
+type CreatedOrderChangeRequest = Prisma.OrderChangeRequestGetPayload<{
+  include: {
+    requester: { select: { displayName: true } };
+    order: { select: { orderNo: true } };
+  };
+}>;
+
+const CANCELLATION_REQUEST_INCLUDE = {
+  order: {
+    include: {
+      items: { orderBy: { sequence: 'asc' as const } },
+      shipments: { orderBy: { sequence: 'asc' as const } },
+      packagingGroups: {
+        orderBy: { sequence: 'asc' as const },
+        include: {
+          lines: { select: { orderItemId: true, unitsPerBag: true } },
+        },
+      },
+      productionWorkOrderProgress: {
+        select: {
+          workOrderVersion: true,
+          stage: true,
+          workOrderProgressQuantity: true,
+        },
+      },
+      productionOperations: { select: { id: true, status: true } },
+      productionProgressSteps: { select: { id: true, status: true } },
+      outsourceOrders: {
+        where: {
+          status: { in: [OutsourceStatus.SENT, OutsourceStatus.IN_PROGRESS] },
+        },
+        select: { id: true },
+      },
+      customerCharges: {
+        select: { amount: true, category: { select: { code: true } } },
+      },
+    },
+  },
+} as const satisfies Prisma.OrderChangeRequestInclude;
+
+type CancellationRequest = Prisma.OrderChangeRequestGetPayload<{
+  include: typeof CANCELLATION_REQUEST_INCLUDE;
+}>;
+
+const MODIFICATION_REVIEW_REQUEST_INCLUDE = {
+  requester: { select: { id: true, displayName: true, role: true } },
+  order: {
+    include: {
+      items: {
+        orderBy: { sequence: 'asc' as const },
+        include: {
+          tasks: { select: LEGACY_TASK_STATUS_SELECT },
+          shipmentLines: {
+            include: {
+              shipment: { select: { id: true, sequence: true } },
+            },
+          },
+        },
+      },
+      shipments: {
+        orderBy: { sequence: 'asc' as const },
+        select: {
+          id: true,
+          sequence: true,
+          destinationProvince: true,
+          weightKg: true,
+        },
+      },
+      packagingGroups: {
+        orderBy: { sequence: 'asc' as const },
+        include: {
+          lines: { select: { orderItemId: true, unitsPerBag: true } },
+        },
+      },
+      customerCharges: {
+        select: {
+          id: true,
+          shipmentId: true,
+          businessKey: true,
+          priceBookId: true,
+          amount: true,
+          overrideReason: true,
+          category: { select: { code: true } },
+        },
+      },
+      productionOperations: {
+        take: 1,
+        select: {
+          id: true,
+          reports: { take: 1, select: { id: true } },
+        },
+      },
+    },
+  },
+} as const satisfies Prisma.OrderChangeRequestInclude;
+
+type ModificationReviewRequest = Prisma.OrderChangeRequestGetPayload<{
+  include: typeof MODIFICATION_REVIEW_REQUEST_INCLUDE;
+}>;
 
 export class OrderChangeRequestError extends Error {
   constructor(message: string) {
@@ -68,6 +217,17 @@ export class OrderChangeRequestError extends Error {
     this.name = 'OrderChangeRequestError';
   }
 }
+
+type ModifyChangeRequestInput = Extract<
+  CreateOrderChangeRequestInput,
+  { type: 'MODIFY' }
+>;
+type CreateOrderChangeRequestCommand =
+  | CreateOrderChangeRequestInput
+  | (Omit<ModifyChangeRequestInput, 'type' | 'modifyKind'> & {
+      type?: 'MODIFY';
+      modifyKind?: ModifyChangeRequestInput['modifyKind'];
+    });
 
 function assertCanRequest(
   actor: { id: string; role: Role },
@@ -92,11 +252,17 @@ function assertCanRequest(
  * approves it, so every client keeps seeing one authoritative revision.
  */
 export async function createOrderChangeRequest(
-  input: CreateOrderChangeRequestInput,
+  input: CreateOrderChangeRequestCommand,
   actor: { id: string; role: Role },
 ) {
+  const notificationEnabled = (
+    await getSetting('notify_order_change_enabled')
+  ).enabled;
+  let postCommitNotification: NotificationPayloadFor<'ORDER_CHANGE_REQUESTED'> | null =
+    null;
+  let createdRequest: CreatedOrderChangeRequest;
   try {
-    return await db.$transaction(async (tx) => {
+    createdRequest = await db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
         input.orderId,
       )}))`;
@@ -159,6 +325,14 @@ export async function createOrderChangeRequest(
       });
       if (!order) throw new OrderChangeRequestError('工单不存在');
       assertCanRequest(actor, order);
+      if (
+        input.type === 'CANCEL' &&
+        !CANCELLABLE_BY_REQUEST_STATUSES.includes(order.status)
+      ) {
+        throw new OrderChangeRequestError(
+          '只有已确认且未发货的工单可以提交取消申请',
+        );
+      }
       if (order.changeRequests.length > 0) {
         throw new OrderChangeRequestError('该工单已有待审核申请，请等待管理员处理');
       }
@@ -190,7 +364,10 @@ export async function createOrderChangeRequest(
         }
         assertSpecificationIdentityUnchanged(item, change);
         assertMergedPricingFactsValid(item, change);
-        if (change.operation === 'UPDATE') {
+        if (
+          change.operation === 'UPDATE' &&
+          !allowsProductionGenerationUpgrade(order.status)
+        ) {
           assertProductionFactsChangeAllowed(item, change);
         }
       }
@@ -198,17 +375,25 @@ export async function createOrderChangeRequest(
         changes: normalizedChanges,
         groups: order.packagingGroups ?? [],
       });
-      assertNoMaterializedProductionFactChange(
-        order.productionOperations ?? [],
-        normalizedChanges,
-        itemById,
-      );
+      if (!allowsProductionGenerationUpgrade(order.status)) {
+        assertNoMaterializedProductionFactChange(
+          order.productionOperations ?? [],
+          normalizedChanges,
+          itemById,
+        );
+      }
 
-      return tx.orderChangeRequest.create({
+      const created = await tx.orderChangeRequest.create({
         data: {
           orderId: order.id,
           requesterId: actor.id,
           baseRevision: order.revision,
+          type:
+            input.type === 'CANCEL'
+              ? OrderChangeRequestType.CANCEL
+              : OrderChangeRequestType.MODIFY,
+          modifyKind:
+            input.type !== 'CANCEL' ? (input.modifyKind ?? 'OTHER') : null,
           reason: input.reason,
           beforeSnapshot: {
             orderNo: order.orderNo,
@@ -225,6 +410,53 @@ export async function createOrderChangeRequest(
           order: { select: { orderNo: true } },
         },
       });
+      await tx.orderLog.create({
+        data: {
+          orderId: order.id,
+          operatorId: actor.id,
+          action: 'CHANGE_REQUEST_CREATED',
+          changedFields: {
+            requestId: created.id,
+            requestType:
+              input.type === 'CANCEL'
+                ? OrderChangeRequestType.CANCEL
+                : OrderChangeRequestType.MODIFY,
+            baseRevision: order.revision,
+            status: {
+              before: null,
+              after: OrderChangeRequestStatus.PENDING,
+            },
+          },
+          remark: input.reason,
+        },
+      });
+
+      if (notificationEnabled) {
+        const requestKind =
+          (input as CreateOrderChangeRequestInput & { type?: string }).type ===
+          'CANCEL'
+            ? '取消'
+            : '修改';
+        const payload: NotificationPayloadFor<'ORDER_CHANGE_REQUESTED'> = {
+          orderId: order.id,
+          orderNo: order.orderNo,
+          // Deliberately do not forward the free-text reason: it may contain a
+          // customer name, price, phone number, or other sensitive detail.
+          summary: `销售已提交${requestKind}申请，待工厂确认`,
+          deepLink: `/orders#wo=${encodeURIComponent(order.orderNo)}`,
+        };
+        const queued = await enqueueNotificationInTransaction(
+          tx as unknown as EnqueueClient,
+          'ORDER_CHANGE_REQUESTED',
+          payload,
+          {
+            dedupeKey: `notification:ORDER_CHANGE_REQUESTED:${created.id}`,
+          },
+        );
+        if (!queued) postCommitNotification = payload;
+      }
+
+      return created;
     });
   } catch (error) {
     if (
@@ -235,6 +467,81 @@ export async function createOrderChangeRequest(
     }
     throw error;
   }
+
+  if (postCommitNotification) {
+    await dispatchNotification(
+      'ORDER_CHANGE_REQUESTED',
+      postCommitNotification,
+      {
+        dedupeKey: `notification:ORDER_CHANGE_REQUESTED:${createdRequest.id}`,
+      },
+    );
+  }
+  return createdRequest;
+}
+
+export async function withdrawOrderChangeRequest(
+  input: WithdrawOrderChangeRequestInput,
+  actor: { id: string; role: Role },
+) {
+  if (actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE) {
+    throw new OrderChangeRequestError('只有申请人可以撤回工单变更申请');
+  }
+  const locator = await db.orderChangeRequest.findUnique({
+    where: { id: input.requestId },
+    select: { orderId: true },
+  });
+  if (!locator) throw new OrderChangeRequestError('变更申请不存在');
+
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      locator.orderId,
+    )}))`;
+    const request = await tx.orderChangeRequest.findUnique({
+      where: { id: input.requestId },
+      select: {
+        id: true,
+        orderId: true,
+        requesterId: true,
+        status: true,
+        type: true,
+      },
+    });
+    if (!request) throw new OrderChangeRequestError('变更申请不存在');
+    if (request.requesterId !== actor.id) {
+      throw new OrderChangeRequestError('只能撤回自己提交的申请');
+    }
+    if (request.status !== OrderChangeRequestStatus.PENDING) {
+      throw new OrderChangeRequestError('只有待审核申请可以撤回');
+    }
+    const withdrawnAt = await databaseClockNow(tx);
+    const withdrawn = await tx.orderChangeRequest.update({
+      where: { id: request.id },
+      data: {
+        status: OrderChangeRequestStatus.WITHDRAWN,
+        reviewedById: actor.id,
+        reviewedAt: withdrawnAt,
+        reviewRemark: '申请人撤回',
+      },
+    });
+    await tx.orderLog.create({
+      data: {
+        orderId: request.orderId,
+        operatorId: actor.id,
+        action: 'CHANGE_REQUEST_WITHDRAWN',
+        changedFields: {
+          requestId: request.id,
+          requestType: request.type,
+          status: {
+            before: OrderChangeRequestStatus.PENDING,
+            after: OrderChangeRequestStatus.WITHDRAWN,
+          },
+        },
+        remark: '申请人撤回待审核变更申请',
+      },
+    });
+    return withdrawn;
+  });
 }
 
 type ProposedItemChange = CreateOrderChangeRequestInput['items'][number];
@@ -1559,6 +1866,10 @@ function assertProductionFactsChangeAllowed(
   }
 }
 
+function allowsProductionGenerationUpgrade(status: OrderStatus): boolean {
+  return VERSIONED_CHANGE_STATUSES.has(status);
+}
+
 function assertNoMaterializedProductionFactChange(
   operations: readonly MaterializedProductionOperation[],
   changes: readonly NormalizedProposedItemChange[],
@@ -1585,8 +1896,9 @@ function assertNoMaterializedProductionFactChange(
 function assertQuantityChangeAllowed(
   item: QuantityGuardItem,
   nextQuantity: number,
+  allowStartedProduction = false,
 ): number {
-  if (hasStartedProductionTask(item)) {
+  if (!allowStartedProduction && hasStartedProductionTask(item)) {
     throw new OrderChangeRequestError(
       `款式“${item.name}”已有开工或完工记录，不能再修改数量`,
     );
@@ -1739,23 +2051,31 @@ export async function previewOrderChangeRequestPricing(
       assertSpecificationIdentityUnchanged(item, change);
       assertMergedPricingFactsValid(item, change);
       if (change.operation !== 'UPDATE') continue;
-      assertProductionFactsChangeAllowed(item, change);
+      if (!allowsProductionGenerationUpgrade(request.order.status)) {
+        assertProductionFactsChangeAllowed(item, change);
+      }
       if (
         change.quantity !== undefined &&
         change.quantity !== item.quantity
       ) {
-        assertQuantityChangeAllowed(item, change.quantity);
+        assertQuantityChangeAllowed(
+          item,
+          change.quantity,
+          allowsProductionGenerationUpgrade(request.order.status),
+        );
       }
     }
     assertPackagingChangeRequestSupported({
       changes,
       groups: request.order.packagingGroups ?? [],
     });
-    assertNoMaterializedProductionFactChange(
-      request.order.productionOperations ?? [],
-      changes,
-      itemById,
-    );
+    if (!allowsProductionGenerationUpgrade(request.order.status)) {
+      assertNoMaterializedProductionFactChange(
+        request.order.productionOperations ?? [],
+        changes,
+        itemById,
+      );
+    }
 
     const quotedAt = new Date();
     const pricingChanged = hasPricingFactChanges(changes, itemById);
@@ -1899,6 +2219,1264 @@ export async function previewOrderChangeRequestPricing(
   });
 }
 
+function requiredDenyReason(value: string | null | undefined): string {
+  const reason = value?.trim() ?? '';
+  if (!reason) {
+    throw new OrderChangeRequestError('拒绝必须填写原因');
+  }
+  if (reason.length > 500) {
+    throw new OrderChangeRequestError('拒绝原因不能超过 500 字');
+  }
+  return reason;
+}
+
+/**
+ * Reprices an already-submitted external order against the one currently
+ * published processing/logistics pair. It preserves the original quotedFee
+ * pointer and immutable quoted revision, then appends a distinct confirmed
+ * revision with the new version locks. Callers must hold the order lock.
+ */
+export async function confirmOrderPricingAtCurrentPublishedVersionInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    actorId: string;
+    now: Date;
+  },
+): Promise<{
+  confirmedFee: string;
+  pricingRevisionId: string | null;
+  versions: CatalogCreateOrderQuoteCalculation['quote']['priceVersion'] | null;
+}> {
+  const order = await tx.order.findUnique({
+    where: { id: input.orderId },
+    include: {
+      items: {
+        orderBy: { sequence: 'asc' },
+        include: {
+          shipmentLines: {
+            include: {
+              shipment: { select: { id: true, sequence: true } },
+            },
+          },
+        },
+      },
+      shipments: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          sequence: true,
+          destinationProvince: true,
+          weightKg: true,
+        },
+      },
+      packagingGroups: {
+        orderBy: { sequence: 'asc' },
+        include: {
+          lines: { select: { orderItemId: true, unitsPerBag: true } },
+        },
+      },
+      customerCharges: {
+        select: {
+          id: true,
+          shipmentId: true,
+          businessKey: true,
+          priceBookId: true,
+          amount: true,
+          overrideReason: true,
+          category: { select: { code: true } },
+        },
+      },
+    },
+  });
+  if (!order) throw new OrderChangeRequestError('工单不存在');
+  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
+    if (order.confirmedFee === null && order.totalAmount === null) {
+      throw new OrderChangeRequestError('工单缺少可确认费用');
+    }
+    return {
+      confirmedFee: new Decimal(
+        order.confirmedFee ?? order.totalAmount,
+      ).toFixed(2),
+      pricingRevisionId: null,
+      versions: null,
+    };
+  }
+  const primaryShipment = order.shipments.find(
+    (shipment) => shipment.sequence === 1,
+  );
+  if (!primaryShipment) {
+    throw new OrderChangeRequestError('工单缺少主收货地址，不能按当前版核价');
+  }
+  const projected = await calculateProjectedOrderQuote({
+    client: tx,
+    now: input.now,
+    settlementType: order.settlementType,
+    isSfCollect: order.isSfCollect,
+    items: order.items,
+    logisticsItems: order.items,
+    shipments: order.shipments,
+    primaryShipmentId: primaryShipment.id,
+    packagingGroups: order.packagingGroups,
+    changes: [],
+  });
+  if (projected.projectedItems.length !== projected.calculation.processing.items.length) {
+    throw new OrderChangeRequestError('当前发布价的款式结果不完整');
+  }
+  for (const [index, projectedItem] of projected.projectedItems.entries()) {
+    const quote = projected.calculation.processing.items[index];
+    if (!quote) throw new OrderChangeRequestError('当前发布价的款式结果缺失');
+    await tx.orderItem.update({
+      where: { id: projectedItem.sourceItemId },
+      data: resolvePureChangeRequestPricing({
+        quote,
+        quantity: projectedItem.quantity,
+        itemName: projectedItem.itemName,
+        itemKey: projectedItem.itemKey,
+        requestId: `factory-confirm:${order.id}`,
+        quotedAt: input.now,
+      }),
+    });
+  }
+  const packaging = packagingRepriceFromPureCalculation({
+    calculation: projected.calculation,
+    requestId: `factory-confirm:${order.id}`,
+    reviewedAt: input.now,
+    storedTotal: order.packagingAmount,
+    groups: order.packagingGroups,
+  });
+  await applyPackagingRepricePlans(tx, packaging);
+  // Refresh automatic logistics against the current published version, but
+  // preserve any already-confirmed manual plate amount. The pure engine marks
+  // that line pending by design; silently clearing it here would lose a real
+  // administrator-confirmed fact.
+  await refreshExternalLogisticsChargesAfterQuantityChange({
+    client: tx,
+    calculation: projected.calculation,
+    requestId: `factory-confirm:${order.id}`,
+    reviewedAt: input.now,
+    shipments: order.shipments,
+    customerCharges: order.customerCharges,
+  });
+  const refreshedItems = await tx.orderItem.findMany({
+    where: { orderId: order.id },
+    select: { subtotal: true },
+  });
+  const processingAmount = orderTotal(refreshedItems, packaging.total);
+  const customerChargeTotal = await tx.orderCustomerCharge.aggregate({
+    where: { orderId: order.id },
+    _sum: { amount: true },
+  });
+  const confirmedFee = new Decimal(processingAmount)
+    .plus(customerChargeTotal._sum.amount ?? 0)
+    .toFixed(2);
+  await tx.order.update({
+    where: { id: order.id },
+    data: {
+      packagingAmount: packaging.total,
+      processingAmount,
+      totalAmount: confirmedFee,
+      confirmedFee,
+    },
+    select: { id: true },
+  });
+  const revision = await appendOrderPricingRevisionInTx(tx, {
+    orderId: order.id,
+    status: ORDER_PRICING_STATUS.ADMIN_CONFIRMED,
+    source: 'FACTORY_CONFIRM_CURRENT_PUBLISHED',
+    actorId: input.actorId,
+    now: input.now,
+    expectedPriceRevision: order.priceRevision,
+    incrementOrderRevision: false,
+    orderFeeSnapshot: {
+      quotedFee: order.quotedFee,
+      confirmedFee,
+      settledFee: order.settledFee,
+    },
+    metadata: {
+      engineVersion: 'CREATE_ORDER_PURE_V1',
+      priceBooks: projected.calculation.quote.priceVersion,
+      quotedPricingRevisionId: order.quotedPricingRevisionId,
+      preservedQuotedFee: order.quotedFee?.toFixed(2) ?? null,
+      confirmedFee,
+    },
+  });
+  const versions = projected.calculation.quote.priceVersion;
+  await tx.orderPriceVersionLock.createMany({
+    data: [
+      {
+        pricingRevisionId: revision.pricingRevisionId,
+        purpose: CustomerPriceBookPurpose.PROCESSING,
+        priceBookId: versions.processing.id,
+        priceBookVersion: versions.processing.version,
+        sourceSha256: versions.processing.sourceSha256,
+        createdAt: input.now,
+      },
+      {
+        pricingRevisionId: revision.pricingRevisionId,
+        purpose: CustomerPriceBookPurpose.LOGISTICS,
+        priceBookId: versions.logistics.id,
+        priceBookVersion: versions.logistics.version,
+        sourceSha256: versions.logistics.sourceSha256,
+        createdAt: input.now,
+      },
+    ],
+  });
+  return {
+    confirmedFee,
+    pricingRevisionId: revision.pricingRevisionId,
+    versions,
+  };
+}
+
+type PriceVersionEvidence = {
+  processing: { id: string; version: number; sourceSha256: string } | null;
+  logistics: { id: string; version: number; sourceSha256: string } | null;
+};
+
+export type FactoryConfirmationPriceDiff = {
+  quoted: { amount: string | null; versions: PriceVersionEvidence };
+  current: { amount: string; versions: PriceVersionEvidence };
+  hasVersionDiff: boolean;
+};
+
+export async function previewFactoryConfirmationPriceDiff(
+  orderId: string,
+  actor: { id: string; role: Role },
+  now: Date = new Date(),
+): Promise<FactoryConfirmationPriceDiff> {
+  if (actor.role !== Role.ADMIN) {
+    throw new OrderChangeRequestError('只有管理员可以预览确认价差');
+  }
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      orderId,
+    )}))`;
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          orderBy: { sequence: 'asc' },
+          include: {
+            shipmentLines: {
+              include: {
+                shipment: { select: { id: true, sequence: true } },
+              },
+            },
+          },
+        },
+        shipments: {
+          orderBy: { sequence: 'asc' },
+          select: {
+            id: true,
+            sequence: true,
+            destinationProvince: true,
+            weightKg: true,
+          },
+        },
+        packagingGroups: {
+          orderBy: { sequence: 'asc' },
+          include: {
+            lines: { select: { orderItemId: true, unitsPerBag: true } },
+          },
+        },
+        customerCharges: {
+          select: {
+            amount: true,
+            category: { select: { code: true } },
+          },
+        },
+        quotedPricingRevision: {
+          select: {
+            priceVersionLocks: {
+              select: {
+                purpose: true,
+                priceBookId: true,
+                priceBookVersion: true,
+                sourceSha256: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!order) throw new OrderChangeRequestError('工单不存在');
+    if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
+      const amount = new Decimal(order.confirmedFee ?? order.totalAmount).toFixed(2);
+      const empty = { processing: null, logistics: null };
+      return {
+        quoted: {
+          amount: order.quotedFee?.toFixed(2) ?? null,
+          versions: empty,
+        },
+        current: { amount, versions: empty },
+        hasVersionDiff: false,
+      };
+    }
+    const primaryShipment = order.shipments.find(
+      (shipment) => shipment.sequence === 1,
+    );
+    if (!primaryShipment) {
+      throw new OrderChangeRequestError('工单缺少主收货地址');
+    }
+    const projected = await calculateProjectedOrderQuote({
+      client: tx,
+      now,
+      settlementType: order.settlementType,
+      isSfCollect: order.isSfCollect,
+      items: order.items,
+      logisticsItems: order.items,
+      shipments: order.shipments,
+      primaryShipmentId: primaryShipment.id,
+      packagingGroups: order.packagingGroups,
+      changes: [],
+    });
+    const preservedManualCharges = order.customerCharges
+      .filter(
+        (charge) =>
+          !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
+            String(charge.category.code),
+          ),
+      )
+      .reduce((sum, charge) => sum.plus(charge.amount ?? 0), new Decimal(0));
+    const currentAmount = new Decimal(projected.calculation.quote.knownTotal)
+      .plus(preservedManualCharges)
+      .toFixed(2);
+    const lockByPurpose = new Map(
+      (order.quotedPricingRevision?.priceVersionLocks ?? []).map((lock) => [
+        lock.purpose,
+        {
+          id: lock.priceBookId,
+          version: lock.priceBookVersion,
+          sourceSha256: lock.sourceSha256,
+        },
+      ]),
+    );
+    const quotedVersions: PriceVersionEvidence = {
+      processing:
+        lockByPurpose.get(CustomerPriceBookPurpose.PROCESSING) ?? null,
+      logistics:
+        lockByPurpose.get(CustomerPriceBookPurpose.LOGISTICS) ?? null,
+    };
+    const versions = projected.calculation.quote.priceVersion;
+    const currentVersions: PriceVersionEvidence = {
+      processing: versions.processing,
+      logistics: versions.logistics,
+    };
+    return {
+      quoted: {
+        amount: order.quotedFee?.toFixed(2) ?? null,
+        versions: quotedVersions,
+      },
+      current: { amount: currentAmount, versions: currentVersions },
+      hasVersionDiff:
+        quotedVersions.processing?.id !== currentVersions.processing?.id ||
+        quotedVersions.logistics?.id !== currentVersions.logistics?.id,
+    };
+  });
+}
+
+export type CancellationSettlementReference = {
+  referenceSettleFee: string;
+  calculation: 'CURRENT_PUBLISHED_ENGINE_V1' | 'PERSISTED_ITEM_FORMULA_V1' | 'ZERO_PRODUCTION';
+  components: {
+    itemProcessing: string;
+    bagging: string;
+    carton: string;
+    preservedManualCharges: string;
+    shipping: '0.00';
+  };
+  allocation: Array<{ orderItemId: string; producedQty: number }>;
+  priceVersions: PriceVersionEvidence;
+};
+
+/** Deterministic largest-remainder allocation for the aggregate producedQty. */
+export function allocateCancellationProducedQuantity(
+  items: readonly { id: string; sequence: number; quantity: number }[],
+  producedQty: number,
+): Array<{ orderItemId: string; producedQty: number }> {
+  const totalQty = items.reduce((sum, item) => sum + item.quantity, 0);
+  if (
+    totalQty < 1 ||
+    !Number.isSafeInteger(producedQty) ||
+    producedQty < 0 ||
+    producedQty > totalQty
+  ) {
+    throw new OrderChangeRequestError('已产数量不能超过工单总数量');
+  }
+  const rows = items.map((item) => {
+    const exact = new Decimal(producedQty).mul(item.quantity).div(totalQty);
+    const base = exact.floor().toNumber();
+    return { item, base, remainder: exact.minus(base) };
+  });
+  let remaining = producedQty - rows.reduce((sum, row) => sum + row.base, 0);
+  rows.sort(
+    (left, right) =>
+      right.remainder.comparedTo(left.remainder) ||
+      left.item.sequence - right.item.sequence ||
+      left.item.id.localeCompare(right.item.id),
+  );
+  for (const row of rows) {
+    if (remaining < 1) break;
+    if (row.base < row.item.quantity) {
+      row.base += 1;
+      remaining -= 1;
+    }
+  }
+  return rows
+    .sort(
+      (left, right) =>
+        left.item.sequence - right.item.sequence ||
+        left.item.id.localeCompare(right.item.id),
+    )
+    .map((row) => ({ orderItemId: row.item.id, producedQty: row.base }));
+}
+
+export function cancellationReferenceFromCalculation(input: {
+  calculation: CatalogCreateOrderQuoteCalculation;
+  preservedManualCharges: Decimal.Value;
+  allocation: CancellationSettlementReference['allocation'];
+}): CancellationSettlementReference {
+  const itemProcessing = input.calculation.quote.items.reduce((sum, item) => {
+    if (item.amount === null) {
+      throw new OrderChangeRequestError('已产款式无法自动核价，禁止猜测取消结算');
+    }
+    return sum.plus(item.amount);
+  }, new Decimal(0));
+  const bagging = input.calculation.quote.packagingGroups.reduce(
+    (sum, group) => {
+      if (group.amount === null) {
+        throw new OrderChangeRequestError('已产入袋费无法自动核价，禁止猜测取消结算');
+      }
+      return sum.plus(group.amount);
+    },
+    new Decimal(0),
+  );
+  const cartonLine = input.calculation.quote.order.lines.find(
+    (line) => line.code === 'CARTON',
+  );
+  if (!cartonLine?.amount) {
+    throw new OrderChangeRequestError('已产总量的纸箱耗材费无法核价');
+  }
+  const carton = new Decimal(cartonLine.amount);
+  const preservedManualCharges = new Decimal(input.preservedManualCharges);
+  const total = itemProcessing
+    .plus(bagging)
+    .plus(carton)
+    .plus(preservedManualCharges)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  if (!total.isFinite() || total.isNegative() || total.gt(DECIMAL_12_2_MAX)) {
+    throw new OrderChangeRequestError('取消结算参考金额超出系统允许范围');
+  }
+  const versions = input.calculation.quote.priceVersion;
+  return {
+    referenceSettleFee: total.toFixed(2),
+    calculation: 'CURRENT_PUBLISHED_ENGINE_V1',
+    components: {
+      itemProcessing: itemProcessing.toFixed(2),
+      bagging: bagging.toFixed(2),
+      carton: carton.toFixed(2),
+      preservedManualCharges: preservedManualCharges.toFixed(2),
+      // SHIPPING:* lines are intentionally never part of this sum.
+      shipping: '0.00',
+    },
+    allocation: input.allocation,
+    priceVersions: {
+      processing: versions.processing,
+      logistics: versions.logistics,
+    },
+  };
+}
+
+function validateCancellationProducedQuantity(
+  request: CancellationRequest,
+  producedQty: number | undefined,
+): number {
+  const totalQty = request.order.items.reduce(
+    (sum, item) => sum + item.quantity,
+    0,
+  );
+  const productionStarted =
+    request.order.status === OrderStatus.RELEASED ||
+    request.order.status === OrderStatus.FOILING ||
+    request.order.status === OrderStatus.PACKING;
+  const value = productionStarted ? producedQty : (producedQty ?? 0);
+  if (value === undefined) {
+    throw new OrderChangeRequestError('生产中取消必须核实已产数量');
+  }
+  if (!Number.isSafeInteger(value) || value < 0 || value > totalQty) {
+    throw new OrderChangeRequestError(`已产数量必须在 0–${totalQty} 之间`);
+  }
+  const progressByStage = new Map<string, Decimal>();
+  for (const progress of request.order.productionWorkOrderProgress) {
+    if (progress.workOrderVersion !== request.order.workOrderVersion) continue;
+    progressByStage.set(
+      progress.stage,
+      (progressByStage.get(progress.stage) ?? new Decimal(0)).plus(
+        progress.workOrderProgressQuantity,
+      ),
+    );
+  }
+  const reportedMinimum = Decimal.max(
+    ...[...progressByStage.values(), new Decimal(0)],
+  );
+  if (new Decimal(value).lt(reportedMinimum)) {
+    throw new OrderChangeRequestError(
+      `已产数量不能小于已报工 ${reportedMinimum.toString()}`,
+    );
+  }
+  return value;
+}
+
+async function cancellationSettlementReferenceInTx(
+  tx: Prisma.TransactionClient,
+  request: CancellationRequest,
+  producedQty: number,
+  now: Date,
+): Promise<CancellationSettlementReference> {
+  const allocation = allocateCancellationProducedQuantity(
+    request.order.items,
+    producedQty,
+  );
+  if (producedQty === 0) {
+    return {
+      referenceSettleFee: '0.00',
+      calculation: 'ZERO_PRODUCTION',
+      components: {
+        itemProcessing: '0.00',
+        bagging: '0.00',
+        carton: '0.00',
+        preservedManualCharges: '0.00',
+        shipping: '0.00',
+      },
+      allocation,
+      priceVersions: { processing: null, logistics: null },
+    };
+  }
+  const allocationById = new Map(
+    allocation.map((row) => [row.orderItemId, row.producedQty]),
+  );
+  if (request.order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
+    const itemProcessing = request.order.items.reduce((sum, item) => {
+      const quantity = allocationById.get(item.id) ?? 0;
+      return quantity > 0
+        ? sum.plus(new Decimal(item.unitPrice).mul(quantity).plus(item.fixedFee))
+        : sum;
+    }, new Decimal(0));
+    const bagging = request.order.packagingGroups.reduce((sum, group) => {
+      const bagCount = Math.max(
+        0,
+        ...group.lines.map((line) => {
+          const quantity = allocationById.get(line.orderItemId) ?? 0;
+          return line.unitsPerBag ? Math.ceil(quantity / line.unitsPerBag) : 0;
+        }),
+      );
+      return sum.plus(new Decimal(group.unitPrice).mul(bagCount));
+    }, new Decimal(0));
+    const total = itemProcessing.plus(bagging).toDecimalPlaces(2);
+    return {
+      referenceSettleFee: total.toFixed(2),
+      calculation: 'PERSISTED_ITEM_FORMULA_V1',
+      components: {
+        itemProcessing: itemProcessing.toFixed(2),
+        bagging: bagging.toFixed(2),
+        carton: '0.00',
+        preservedManualCharges: '0.00',
+        shipping: '0.00',
+      },
+      allocation,
+      priceVersions: { processing: null, logistics: null },
+    };
+  }
+  const primaryShipment = request.order.shipments.find(
+    (shipment) => shipment.sequence === 1,
+  );
+  if (!primaryShipment) throw new OrderChangeRequestError('工单缺少主收货地址');
+  const projected = projectedQuoteItems({ changes: [], items: request.order.items });
+  const active = projected.filter(
+    (item) => (allocationById.get(item.sourceItemId) ?? 0) > 0,
+  );
+  let calculation: CatalogCreateOrderQuoteCalculation;
+  try {
+    calculation = await calculateCreateOrderQuoteFromCatalogInTx(tx, {
+      now,
+      facts: {
+        items: active.map((item) => ({
+          ...item.facts,
+          quantity: allocationById.get(item.sourceItemId)!,
+        })),
+        packagingGroups: request.order.packagingGroups.flatMap((group) => {
+          const lines = group.lines.filter(
+            (line) => (allocationById.get(line.orderItemId) ?? 0) > 0,
+          );
+          return lines.length === 0
+            ? []
+            : [{
+                groupKey: group.id,
+                mode: group.mode,
+                items: lines.map((line) => ({
+                  itemKey: line.orderItemId,
+                  unitsPerBag: line.unitsPerBag,
+                })),
+              }];
+        }),
+        isSfCollect: request.order.isSfCollect,
+        shipments: [
+          {
+            shipmentKey: primaryShipment.id,
+            province: primaryShipment.destinationProvince,
+            trustedFulfilmentWeightKg: null,
+            itemQuantities: Object.fromEntries(
+              active.map((item) => [
+                item.itemKey,
+                allocationById.get(item.sourceItemId)!,
+              ]),
+            ),
+          },
+        ],
+      },
+      includeOrderCharges: true,
+    });
+  } catch (error) {
+    throw new OrderChangeRequestError(
+      `已产数量无法按当前发布价核算：${error instanceof Error ? error.message : '未知错误'}`,
+    );
+  }
+  const preservedManualCharges = request.order.customerCharges
+    .filter(
+      (charge) =>
+        !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
+          String(charge.category.code),
+        ),
+    )
+    .reduce((sum, charge) => sum.plus(charge.amount ?? 0), new Decimal(0));
+  return cancellationReferenceFromCalculation({
+    calculation,
+    preservedManualCharges,
+    allocation,
+  });
+}
+
+export async function previewOrderCancellationSettlement(
+  input: PreviewOrderCancellationSettlementInput,
+  actor: { id: string; role: Role },
+): Promise<CancellationSettlementReference> {
+  if (actor.role !== Role.ADMIN) {
+    throw new OrderChangeRequestError('只有管理员可以预览取消结算');
+  }
+  const locator = await db.orderChangeRequest.findUnique({
+    where: { id: input.requestId },
+    select: { orderId: true },
+  });
+  if (!locator) throw new OrderChangeRequestError('取消申请不存在');
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      locator.orderId,
+    )}))`;
+    const request = await tx.orderChangeRequest.findUnique({
+      where: { id: input.requestId },
+      include: CANCELLATION_REQUEST_INCLUDE,
+    });
+    if (!request || request.type !== OrderChangeRequestType.CANCEL) {
+      throw new OrderChangeRequestError('取消申请不存在');
+    }
+    if (request.status !== OrderChangeRequestStatus.PENDING) {
+      throw new OrderChangeRequestError('该申请已经处理');
+    }
+    const producedQty = validateCancellationProducedQuantity(
+      request,
+      input.producedQty,
+    );
+    return cancellationSettlementReferenceInTx(
+      tx,
+      request,
+      producedQty,
+      await databaseClockNow(tx),
+    );
+  });
+}
+
+async function reviewOrderCancellationRequest(
+  input: ReviewOrderChangeRequestInput,
+  actor: { id: string; role: Role },
+  locator: { orderId: string },
+) {
+  return db.$transaction(async (tx) => {
+    // Approved cancellation writes v2 settlement facts. The global shared
+    // cutoff lock must therefore be the first statement in this transaction.
+    await lockSettlementCutoffShared(tx);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      locator.orderId,
+    )}))`;
+
+    const request = await tx.orderChangeRequest.findUnique({
+      where: { id: input.requestId },
+      include: CANCELLATION_REQUEST_INCLUDE,
+    });
+    if (!request || request.type !== OrderChangeRequestType.CANCEL) {
+      throw new OrderChangeRequestError('取消申请不存在');
+    }
+    if (request.status !== OrderChangeRequestStatus.PENDING) {
+      throw new OrderChangeRequestError('该申请已经处理，不能重复审核');
+    }
+    const reviewedAt = await databaseClockNow(tx);
+    if (input.decision === 'DENY' || input.decision === 'REJECT') {
+      const denyReason = requiredDenyReason(input.reviewRemark);
+      const denied = await tx.orderChangeRequest.update({
+        where: { id: request.id },
+        data: {
+          status: OrderChangeRequestStatus.DENIED,
+          denyReason,
+          reviewedById: actor.id,
+          reviewRemark: denyReason,
+          reviewedAt,
+        },
+      });
+      await tx.orderLog.create({
+        data: {
+          orderId: request.order.id,
+          operatorId: actor.id,
+          action: 'CHANGE_REQUEST_DENIED',
+          changedFields: {
+            requestId: request.id,
+            requestType: request.type,
+            status: {
+              before: OrderChangeRequestStatus.PENDING,
+              after: OrderChangeRequestStatus.DENIED,
+            },
+          },
+          remark: denyReason,
+        },
+      });
+      return denied;
+    }
+    if (request.baseRevision !== request.order.revision) {
+      return tx.orderChangeRequest.update({
+        where: { id: request.id },
+        data: {
+          status: OrderChangeRequestStatus.STALE,
+          reviewedById: actor.id,
+          reviewRemark: `工单已从第 ${request.baseRevision} 版更新到第 ${request.order.revision} 版，请重新提交申请`,
+          reviewedAt,
+        },
+      });
+    }
+    if (!CANCELLABLE_BY_REQUEST_STATUSES.includes(request.order.status)) {
+      throw new OrderChangeRequestError('当前工单状态不允许批准取消');
+    }
+    if (request.order.outsourceOrders.length > 0) {
+      throw new OrderChangeRequestError(
+        '工单存在已发出或进行中的外协单，请先处理外协',
+      );
+    }
+
+    const producedQty = validateCancellationProducedQuantity(
+      request,
+      input.producedQty,
+    );
+    if (request.order.confirmedFee === null) {
+      throw new OrderChangeRequestError('工单缺少已确认费用，禁止猜测取消结算');
+    }
+    const reference = await cancellationSettlementReferenceInTx(
+      tx,
+      request,
+      producedQty,
+      reviewedAt,
+    );
+    const settleFee = new Decimal(
+      input.settleFee ?? reference.referenceSettleFee,
+    ).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    if (
+      !settleFee.isFinite() ||
+      settleFee.isNegative() ||
+      settleFee.gt(DECIMAL_12_2_MAX)
+    ) {
+      throw new OrderChangeRequestError('最终结算金额非法');
+    }
+    const settleFeeText = settleFee.toFixed(2);
+    const settlementDelta = settleFee.minus(reference.referenceSettleFee);
+    const adjustmentReason = input.settleFeeAdjustmentReason?.trim() || null;
+    if (!settlementDelta.isZero() && !adjustmentReason) {
+      throw new OrderChangeRequestError('调整参考结算金额必须填写原因');
+    }
+    transitionOrder(request.order.status, OrderStatus.CANCELLED);
+
+    await tx.productionOperation.updateMany({
+      where: {
+        orderId: request.order.id,
+        status: {
+          in: [
+            ProductionOperationStatus.PENDING,
+            ProductionOperationStatus.IN_PROGRESS,
+          ],
+        },
+      },
+      data: { status: ProductionOperationStatus.CANCELLED },
+    });
+    await tx.productionProgressStep.updateMany({
+      where: {
+        orderId: request.order.id,
+        status: {
+          in: [
+            ProductionOperationStatus.PENDING,
+            ProductionOperationStatus.IN_PROGRESS,
+          ],
+        },
+      },
+      data: { status: ProductionOperationStatus.CANCELLED },
+    });
+    await tx.order.update({
+      where: { id: request.order.id },
+      data: {
+        status: OrderStatus.CANCELLED,
+        settledFee: settleFeeText,
+        settledAt: reviewedAt,
+        settlementContractVersion: 2,
+        revision: { increment: 1 },
+      },
+      select: { id: true },
+    });
+    const reviewed = await tx.orderChangeRequest.update({
+      where: { id: request.id },
+      data: {
+        status: OrderChangeRequestStatus.APPROVED,
+        producedQty,
+        settleFee: settleFeeText,
+        workOrderVersionAfter: request.order.workOrderVersion,
+        reviewedById: actor.id,
+        reviewRemark: input.reviewRemark?.trim() || null,
+        reviewedAt,
+      },
+    });
+    await tx.orderLog.create({
+      data: {
+        orderId: request.order.id,
+        operatorId: actor.id,
+        action: 'CHANGE_REQUEST_CANCEL_APPROVED',
+        changedFields: {
+          status: { before: request.order.status, after: OrderStatus.CANCELLED },
+          producedQty: { before: null, after: producedQty },
+          referenceSettleFee: { before: null, after: reference.referenceSettleFee },
+          settledFee: { before: null, after: settleFeeText },
+          settlementDelta: { before: null, after: settlementDelta.toFixed(2) },
+          settlementAdjustmentReason: { before: null, after: adjustmentReason },
+          settledAt: { before: null, after: reviewedAt.toISOString() },
+          settlementContractVersion: { before: null, after: 2 },
+          calculation: {
+            before: null,
+            after: reference.calculation,
+          },
+          calculationComponents: { before: null, after: reference.components },
+          producedAllocation: { before: null, after: reference.allocation },
+          priceVersions: { before: null, after: reference.priceVersions },
+        },
+        remark:
+          adjustmentReason ?? input.reviewRemark?.trim() ?? request.reason,
+      },
+    });
+    return reviewed;
+  });
+}
+
+type ProjectedOrderQuote = Awaited<
+  ReturnType<typeof calculateProjectedOrderQuote>
+>;
+
+async function persistApprovedModificationPricingInTx(input: {
+  actor: { id: string; role: Role };
+  packagingReprice: PackagingRepriceResult | null;
+  projected: ProjectedOrderQuote | null;
+  request: ModificationReviewRequest;
+  reviewedAt: Date;
+  reviewRemark: string | null;
+  tx: Prisma.TransactionClient;
+}) {
+  const {
+    actor,
+    packagingReprice,
+    projected,
+    request,
+    reviewedAt,
+    reviewRemark,
+    tx,
+  } = input;
+  const versionedProductionChange = VERSIONED_CHANGE_STATUSES.has(
+    request.order.status,
+  );
+  if (
+    request.order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+    projected
+  ) {
+    if (versionedProductionChange) {
+      await refreshExternalLogisticsChargesAfterQuantityChange({
+        client: tx,
+        calculation: projected.calculation,
+        requestId: request.id,
+        reviewedAt,
+        shipments: request.order.shipments,
+        customerCharges: request.order.customerCharges,
+      });
+    } else {
+      await refreshExternalChargesAfterPricingChange({
+        client: tx,
+        calculation: projected.calculation,
+        requestId: request.id,
+        reviewedAt,
+        shipments: request.order.shipments,
+        customerCharges: request.order.customerCharges,
+        orderId: request.order.id,
+        actorId: actor.id,
+      });
+    }
+  }
+
+  const refreshedItems = await tx.orderItem.findMany({
+    where: { orderId: request.order.id },
+    select: { subtotal: true },
+  });
+  const nextRevision = request.order.revision + 1;
+  const currentWorkOrderVersion = request.order.workOrderVersion ?? 1;
+  const nextWorkOrderVersion =
+    currentWorkOrderVersion + (versionedProductionChange ? 1 : 0);
+  const nextPackagingAmount =
+    packagingReprice?.total ?? request.order.packagingAmount;
+  const nextProcessingAmount = orderTotal(
+    refreshedItems,
+    nextPackagingAmount,
+  );
+  if (projected) {
+    const pureProcessingAmount = projected.calculation.quote.items
+      .reduce((sum, item) => {
+        if (item.amount === null) {
+          throw new OrderChangeRequestError('纯引擎款式金额待定，禁止批准修改');
+        }
+        return sum.plus(item.amount);
+      }, new Decimal(0))
+      .plus(
+        projected.calculation.quote.packagingGroups.reduce((sum, group) => {
+          if (group.amount === null) {
+            throw new OrderChangeRequestError('纯引擎入袋金额待定，禁止批准修改');
+          }
+          return sum.plus(group.amount);
+        }, new Decimal(0)),
+      );
+    if (!pureProcessingAmount.equals(nextProcessingAmount)) {
+      throw new OrderChangeRequestError('持久化加工费与纯引擎输出不一致');
+    }
+  }
+  const customerChargeTotal = await tx.orderCustomerCharge.aggregate({
+    where: { orderId: request.order.id },
+    _sum: { amount: true },
+  });
+  const nextTotal = new Decimal(nextProcessingAmount)
+    .plus(customerChargeTotal._sum.amount ?? 0)
+    .toFixed(2);
+  const salesDelta = new Decimal(nextTotal).minus(request.order.totalAmount);
+  await tx.order.update({
+    where: { id: request.order.id },
+    data: {
+      revision: nextRevision,
+      ...(versionedProductionChange
+        ? {
+            workOrderVersion: nextWorkOrderVersion,
+            scheduledAt: reviewedAt,
+          }
+        : {}),
+      ...(packagingReprice && packagingReprice.plans.length > 0
+        ? { packagingAmount: nextPackagingAmount }
+        : {}),
+      processingAmount: nextProcessingAmount,
+      totalAmount: nextTotal,
+    },
+  });
+  const pureQuoteCompleteness = projected
+    ? projected.calculation.quote.status === 'QUOTED' &&
+      projected.calculation.quote.pendingLineCodes.length === 0
+      ? OrderQuotedFeeCompleteness.COMPLETE
+      : OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS
+    : null;
+  const pricingRevision =
+    request.order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+    projected
+      ? await appendOrderPricingRevisionInTx(tx, {
+          orderId: request.order.id,
+          status: versionedProductionChange
+            ? ORDER_PRICING_STATUS.ADMIN_CONFIRMED
+            : ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+          source: versionedProductionChange
+            ? 'CHANGE_REQUEST_APPROVED_CURRENT_PUBLISHED'
+            : 'CHANGE_REQUEST_APPLIED_PENDING',
+          actorId: actor.id,
+          now: reviewedAt,
+          expectedPriceRevision: request.order.priceRevision,
+          incrementOrderRevision: false,
+          remark: reviewRemark ?? request.reason,
+          orderFeeSnapshot: versionedProductionChange
+            ? {
+                quotedFee: request.order.quotedFee,
+                confirmedFee: nextTotal,
+                settledFee: null,
+              }
+            : {
+                quotedFee: nextTotal,
+                confirmedFee: null,
+                settledFee: null,
+              },
+          metadata: {
+            changeRequestId: request.id,
+            workOrderVersion: nextWorkOrderVersion,
+            engineVersion: 'CREATE_ORDER_PURE_V1',
+            priceBooks: projected.calculation.quote.priceVersion,
+            ...(versionedProductionChange
+              ? {
+                  preservedQuotedFee:
+                    request.order.quotedFee?.toFixed(2) ?? null,
+                  confirmedFee: nextTotal,
+                }
+              : { quotedFee: nextTotal }),
+            quotedFeeCompleteness: pureQuoteCompleteness!,
+            pureQuote: {
+              status: projected.calculation.quote.status,
+              knownTotal: projected.calculation.quote.knownTotal,
+              pendingLineCodes:
+                projected.calculation.quote.pendingLineCodes,
+            },
+          },
+        })
+      : null;
+  if (pricingRevision && projected) {
+    const versions = projected.calculation.quote.priceVersion;
+    await tx.orderPriceVersionLock.createMany({
+      data: [
+        {
+          pricingRevisionId: pricingRevision.pricingRevisionId,
+          purpose: CustomerPriceBookPurpose.PROCESSING,
+          priceBookId: versions.processing.id,
+          priceBookVersion: versions.processing.version,
+          sourceSha256: versions.processing.sourceSha256,
+          createdAt: reviewedAt,
+        },
+        {
+          pricingRevisionId: pricingRevision.pricingRevisionId,
+          purpose: CustomerPriceBookPurpose.LOGISTICS,
+          priceBookId: versions.logistics.id,
+          priceBookVersion: versions.logistics.version,
+          sourceSha256: versions.logistics.sourceSha256,
+          createdAt: reviewedAt,
+        },
+      ],
+    });
+    await tx.order.update({
+      where: { id: request.order.id },
+      data: versionedProductionChange
+        ? { confirmedFee: nextTotal, settledFee: null }
+        : {
+            quotedFee: nextTotal,
+            quotedFeeCompleteness: pureQuoteCompleteness!,
+            quotedPricingRevisionId: pricingRevision.pricingRevisionId,
+            confirmedFee: null,
+            settledFee: null,
+          },
+    });
+  }
+  return {
+    currentWorkOrderVersion,
+    nextPackagingAmount,
+    nextProcessingAmount,
+    nextRevision,
+    nextTotal,
+    nextWorkOrderVersion,
+    pricingRevision,
+    salesDelta,
+    versionedProductionChange,
+  };
+}
+
+type ApprovedModificationPricing = Awaited<
+  ReturnType<typeof persistApprovedModificationPricingInTx>
+>;
+
+async function finalizeApprovedModificationInTx(input: {
+  actor: { id: string; role: Role };
+  packagingReprice: PackagingRepriceResult | null;
+  pricing: ApprovedModificationPricing;
+  request: ModificationReviewRequest;
+  reviewedAt: Date;
+  reviewRemark: string | null;
+  tx: Prisma.TransactionClient;
+}) {
+  const { actor, packagingReprice, pricing, request, reviewedAt, reviewRemark, tx } =
+    input;
+  const {
+    currentWorkOrderVersion,
+    nextPackagingAmount,
+    nextProcessingAmount,
+    nextRevision,
+    nextTotal,
+    nextWorkOrderVersion,
+    pricingRevision,
+    salesDelta,
+    versionedProductionChange,
+  } = pricing;
+  const rematerializedProduction = isReprintChangeStatus(request.order.status)
+    ? await activateProductionOperationsInTx(
+        tx,
+        request.order.id,
+        actor,
+        reviewedAt,
+        {
+          targetStatus: request.order.status,
+          allowVersionRematerialization: true,
+        },
+      )
+    : null;
+  const supersededPrintJobs = versionedProductionChange
+    ? (
+        await supersedeOlderOrderPrintRequestsInTx(
+          tx,
+          {
+            orderId: request.order.id,
+            currentWorkOrderVersion: nextWorkOrderVersion,
+            reasonKey: `change:${request.id}:supersede`,
+          },
+          actor,
+        )
+      ).requestJobIds
+    : [];
+  const reprint = isReprintChangeStatus(request.order.status)
+    ? await createOrderPrintRequestInTx(
+        tx,
+        {
+          orderId: request.order.id,
+          workOrderVersion: nextWorkOrderVersion,
+          printKind: OrderPrintKind.REPRINT,
+          reason: '修改申请批准，旧版纸质工单作废',
+          idempotencyKey: `change:${request.id}:reprint:v${nextWorkOrderVersion}`,
+        },
+        actor,
+      )
+    : null;
+  const reviewed = await tx.orderChangeRequest.update({
+    where: { id: request.id },
+    data: {
+      status: OrderChangeRequestStatus.APPROVED,
+      workOrderVersionAfter: nextWorkOrderVersion,
+      reviewedById: actor.id,
+      reviewRemark,
+      reviewedAt,
+    },
+  });
+  await tx.orderLog.create({
+    data: {
+      orderId: request.order.id,
+      operatorId: actor.id,
+      action: 'CHANGE_REQUEST_APPROVED',
+      changedFields: {
+        revision: { before: request.baseRevision, after: nextRevision },
+        workOrderVersion: {
+          before: currentWorkOrderVersion,
+          after: nextWorkOrderVersion,
+        },
+        ...(versionedProductionChange
+          ? {
+              scheduledAt: {
+                before: request.order.scheduledAt?.toISOString() ?? null,
+                after: reviewedAt.toISOString(),
+              },
+            }
+          : {}),
+        processingAmount: {
+          before: String(request.order.processingAmount),
+          after: nextProcessingAmount,
+        },
+        totalAmount: {
+          before: String(request.order.totalAmount),
+          after: nextTotal,
+        },
+        ...(packagingReprice && packagingReprice.plans.length > 0
+          ? {
+              packagingAmount: {
+                before: String(request.order.packagingAmount),
+                after: nextPackagingAmount,
+              },
+              packagingGroups: packagingReprice.plans.map(
+                (plan) => plan.audit,
+              ),
+            }
+          : {}),
+        ...(pricingRevision
+          ? {
+              pricingStatus: {
+                before: request.order.pricingStatus,
+                after: versionedProductionChange
+                  ? ORDER_PRICING_STATUS.ADMIN_CONFIRMED
+                  : ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+              },
+              priceRevision: {
+                before: request.order.priceRevision,
+                after: pricingRevision.priceRevision,
+              },
+            }
+          : {}),
+        requestId: request.id,
+        ...(rematerializedProduction
+          ? {
+              productionGeneration: {
+                before: currentWorkOrderVersion,
+                after: nextWorkOrderVersion,
+                operationIds: rematerializedProduction.operationIds,
+                progressStepIds: rematerializedProduction.progressStepIds,
+              },
+            }
+          : {}),
+        ...(supersededPrintJobs.length > 0
+          ? {
+              supersededPrintJobs: {
+                before: supersededPrintJobs,
+                after: [],
+                reason: `工单版本已升级为 v${nextWorkOrderVersion}`,
+              },
+            }
+          : {}),
+        ...(reprint
+          ? { reprintJob: { before: null, after: reprint.jobId } }
+          : {}),
+      },
+      remark: reviewRemark ?? request.reason,
+    },
+  });
+
+  if (
+    request.order.settlementType === OrderSettlementType.INTERNAL_SALES &&
+    request.order.billingMode === OrderBillingMode.CHARGE &&
+    request.order.status !== OrderStatus.DRAFT
+  ) {
+    try {
+      await assertCsOrderSalesLedgerReconciledInTx(
+        tx,
+        request.order.id,
+        request.order.totalAmount,
+      );
+      await recordCsSalesEntryInTx(tx, {
+        eventKey: `order:${request.order.id}:revision:${nextRevision}:change`,
+        csUserId: request.order.submitterId,
+        orderId: request.order.id,
+        orderRevision: nextRevision,
+        type: CsSalesEntryType.ORDER_CHANGED,
+        amount: salesDelta,
+        occurredAt: reviewedAt,
+        remark: `工单修改申请 ${request.id} 审核通过`,
+      });
+    } catch (error) {
+      if (error instanceof CsSalesLedgerError) {
+        throw new OrderChangeRequestError(error.message);
+      }
+      throw error;
+    }
+  }
+  return reviewed;
+}
+
 /**
  * Applies an approved proposal under the same per-order advisory lock used by
  * production/status writers. A revision mismatch is persisted as STALE rather
@@ -1914,9 +3492,12 @@ export async function reviewOrderChangeRequest(
 
   const locator = await db.orderChangeRequest.findUnique({
     where: { id: input.requestId },
-    select: { orderId: true },
+    select: { orderId: true, type: true },
   });
   if (!locator) throw new OrderChangeRequestError('修改申请不存在');
+  if (locator.type === OrderChangeRequestType.CANCEL) {
+    return reviewOrderCancellationRequest(input, actor, locator);
+  }
 
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
@@ -1925,77 +3506,44 @@ export async function reviewOrderChangeRequest(
 
     const request = await tx.orderChangeRequest.findUnique({
       where: { id: input.requestId },
-      include: {
-        requester: { select: { id: true, displayName: true, role: true } },
-        order: {
-          include: {
-            items: {
-              orderBy: { sequence: 'asc' },
-              include: {
-                tasks: { select: LEGACY_TASK_STATUS_SELECT },
-                shipmentLines: {
-                  include: {
-                    shipment: { select: { id: true, sequence: true } },
-                  },
-                },
-              },
-            },
-            shipments: {
-              orderBy: { sequence: 'asc' },
-              select: {
-                id: true,
-                sequence: true,
-                destinationProvince: true,
-                weightKg: true,
-              },
-            },
-            packagingGroups: {
-              orderBy: { sequence: 'asc' },
-              include: {
-                lines: {
-                  select: { orderItemId: true, unitsPerBag: true },
-                },
-              },
-            },
-            customerCharges: {
-              select: {
-                id: true,
-                shipmentId: true,
-                businessKey: true,
-                priceBookId: true,
-                amount: true,
-                overrideReason: true,
-                category: { select: { code: true } },
-              },
-            },
-            productionOperations: {
-              take: 1,
-              select: {
-                id: true,
-                reports: { take: 1, select: { id: true } },
-              },
-            },
-          },
-        },
-      },
+      include: MODIFICATION_REVIEW_REQUEST_INCLUDE,
     });
     if (!request) throw new OrderChangeRequestError('修改申请不存在');
     if (request.status !== OrderChangeRequestStatus.PENDING) {
       throw new OrderChangeRequestError('该申请已经处理，不能重复审核');
     }
 
-    const reviewedAt = new Date();
+    const reviewedAt = await databaseClockNow(tx);
     const reviewRemark = input.reviewRemark?.trim() || null;
-    if (input.decision === 'REJECT') {
-      return tx.orderChangeRequest.update({
+    if (input.decision === 'REJECT' || input.decision === 'DENY') {
+      const denyReason = requiredDenyReason(input.reviewRemark);
+      const denied = await tx.orderChangeRequest.update({
         where: { id: request.id },
         data: {
-          status: OrderChangeRequestStatus.REJECTED,
+          status: OrderChangeRequestStatus.DENIED,
+          denyReason,
           reviewedById: actor.id,
-          reviewRemark,
+          reviewRemark: denyReason,
           reviewedAt,
         },
       });
+      await tx.orderLog.create({
+        data: {
+          orderId: request.order.id,
+          operatorId: actor.id,
+          action: 'CHANGE_REQUEST_DENIED',
+          changedFields: {
+            requestId: request.id,
+            requestType: request.type,
+            status: {
+              before: OrderChangeRequestStatus.PENDING,
+              after: OrderChangeRequestStatus.DENIED,
+            },
+          },
+          remark: denyReason,
+        },
+      });
+      return denied;
     }
 
     if (request.baseRevision !== request.order.revision) {
@@ -2043,7 +3591,10 @@ export async function reviewOrderChangeRequest(
       }
       assertSpecificationIdentityUnchanged(item, change);
       assertMergedPricingFactsValid(item, change);
-      if (change.operation === 'UPDATE') {
+      if (
+        change.operation === 'UPDATE' &&
+        !allowsProductionGenerationUpgrade(request.order.status)
+      ) {
         assertProductionFactsChangeAllowed(item, change);
       }
     }
@@ -2051,11 +3602,13 @@ export async function reviewOrderChangeRequest(
       changes,
       groups: request.order.packagingGroups ?? [],
     });
-    assertNoMaterializedProductionFactChange(
-      request.order.productionOperations ?? [],
-      changes,
-      itemById,
-    );
+    if (!allowsProductionGenerationUpgrade(request.order.status)) {
+      assertNoMaterializedProductionFactChange(
+        request.order.productionOperations ?? [],
+        changes,
+        itemById,
+      );
+    }
 
     const pricingChanged = hasPricingFactChanges(changes, itemById);
     const projected = pricingChanged
@@ -2121,6 +3674,7 @@ export async function reviewOrderChangeRequest(
           const extraShipmentQty = assertQuantityChangeAllowed(
             item,
             change.quantity,
+            allowsProductionGenerationUpgrade(request.order.status),
           );
           await tx.orderShipmentLine.upsert({
             where: {
@@ -2236,216 +3790,24 @@ export async function reviewOrderChangeRequest(
       await applyPackagingRepricePlans(tx, packagingReprice);
     }
 
-    if (request.order.settlementType === OrderSettlementType.EXTERNAL_SALES && projected) {
-      await refreshExternalChargesAfterPricingChange({
-        client: tx,
-        calculation: projected.calculation,
-        requestId: request.id,
-        reviewedAt,
-        shipments: request.order.shipments,
-        customerCharges: request.order.customerCharges,
-        orderId: request.order.id,
-        actorId: actor.id,
-      });
-    }
-
-    const refreshedItems = await tx.orderItem.findMany({
-      where: { orderId: request.order.id },
-      select: { subtotal: true },
+    const pricing = await persistApprovedModificationPricingInTx({
+      actor,
+      packagingReprice,
+      projected,
+      request,
+      reviewedAt,
+      reviewRemark,
+      tx,
     });
-    const nextRevision = request.order.revision + 1;
-    const nextPackagingAmount =
-      packagingReprice?.total ?? request.order.packagingAmount;
-    const nextProcessingAmount = orderTotal(
-      refreshedItems,
-      nextPackagingAmount,
-    );
-    if (projected) {
-      const pureProcessingAmount = projected.calculation.quote.items
-        .reduce(
-          (sum, item) => {
-            if (item.amount === null) {
-              throw new OrderChangeRequestError('纯引擎款式金额待定，禁止批准修改');
-            }
-            return sum.plus(item.amount);
-          },
-          new Decimal(0),
-        )
-        .plus(
-          projected.calculation.quote.packagingGroups.reduce(
-            (sum, group) => {
-              if (group.amount === null) {
-                throw new OrderChangeRequestError('纯引擎入袋金额待定，禁止批准修改');
-              }
-              return sum.plus(group.amount);
-            },
-            new Decimal(0),
-          ),
-        );
-      if (!pureProcessingAmount.equals(nextProcessingAmount)) {
-        throw new OrderChangeRequestError('持久化加工费与纯引擎输出不一致');
-      }
-    }
-    const customerChargeTotal = await tx.orderCustomerCharge.aggregate({
-      where: { orderId: request.order.id },
-      _sum: { amount: true },
+    return finalizeApprovedModificationInTx({
+      actor,
+      packagingReprice,
+      pricing,
+      request,
+      reviewedAt,
+      reviewRemark,
+      tx,
     });
-    const nextTotal = new Decimal(nextProcessingAmount)
-      .plus(customerChargeTotal._sum.amount ?? 0)
-      .toFixed(2);
-    const salesDelta = new Decimal(nextTotal).minus(request.order.totalAmount);
-    await tx.order.update({
-      where: { id: request.order.id },
-      data: {
-        revision: nextRevision,
-        ...(packagingReprice && packagingReprice.plans.length > 0
-          ? { packagingAmount: nextPackagingAmount }
-          : {}),
-        processingAmount: nextProcessingAmount,
-        totalAmount: nextTotal,
-      },
-    });
-    const pricingRevision =
-      request.order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
-      projected
-        ? await appendOrderPricingRevisionInTx(tx, {
-            orderId: request.order.id,
-            status: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
-            source: 'CHANGE_REQUEST_APPLIED_PENDING',
-            actorId: actor.id,
-            now: reviewedAt,
-            expectedPriceRevision: request.order.priceRevision,
-            incrementOrderRevision: false, remark: reviewRemark ?? request.reason,
-            orderFeeSnapshot: { quotedFee: nextTotal, confirmedFee: null, settledFee: null },
-            metadata: {
-              changeRequestId: request.id,
-              engineVersion: 'CREATE_ORDER_PURE_V1',
-              priceBooks: projected.calculation.quote.priceVersion,
-              quotedFee: nextTotal,
-              quotedFeeCompleteness: OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
-              pureQuote: {
-                status: projected.calculation.quote.status,
-                knownTotal: projected.calculation.quote.knownTotal,
-                pendingLineCodes: projected.calculation.quote.pendingLineCodes,
-              },
-            },
-          })
-        : null;
-    if (pricingRevision && projected) {
-      const versions = projected.calculation.quote.priceVersion;
-      await tx.orderPriceVersionLock.createMany({
-        data: [
-          {
-            pricingRevisionId: pricingRevision.pricingRevisionId,
-            purpose: CustomerPriceBookPurpose.PROCESSING,
-            priceBookId: versions.processing.id,
-            priceBookVersion: versions.processing.version,
-            sourceSha256: versions.processing.sourceSha256,
-            createdAt: reviewedAt,
-          },
-          {
-            pricingRevisionId: pricingRevision.pricingRevisionId,
-            purpose: CustomerPriceBookPurpose.LOGISTICS,
-            priceBookId: versions.logistics.id,
-            priceBookVersion: versions.logistics.version,
-            sourceSha256: versions.logistics.sourceSha256,
-            createdAt: reviewedAt,
-          },
-        ],
-      });
-      await tx.order.update({
-        where: { id: request.order.id },
-        data: {
-          quotedFee: nextTotal,
-          quotedFeeCompleteness: OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
-          quotedPricingRevisionId: pricingRevision.pricingRevisionId,
-          confirmedFee: null, settledFee: null,
-        },
-      });
-    }
-    const reviewed = await tx.orderChangeRequest.update({
-      where: { id: request.id },
-      data: {
-        status: OrderChangeRequestStatus.APPROVED,
-        reviewedById: actor.id,
-        reviewRemark,
-        reviewedAt,
-      },
-    });
-    await tx.orderLog.create({
-      data: {
-        orderId: request.order.id,
-        operatorId: actor.id,
-        action: 'CHANGE_REQUEST_APPROVED',
-        changedFields: {
-          revision: { before: request.baseRevision, after: nextRevision },
-          processingAmount: {
-            before: String(request.order.processingAmount),
-            after: nextProcessingAmount,
-          },
-          totalAmount: {
-            before: String(request.order.totalAmount),
-            after: nextTotal,
-          },
-          ...(packagingReprice && packagingReprice.plans.length > 0
-            ? {
-                packagingAmount: {
-                  before: String(request.order.packagingAmount),
-                  after: nextPackagingAmount,
-                },
-                packagingGroups: packagingReprice.plans.map(
-                  (plan) => plan.audit,
-                ),
-              }
-            : {}),
-          ...(pricingRevision
-            ? {
-                pricingStatus: {
-                  before: request.order.pricingStatus,
-                  after:
-                    ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
-                },
-                priceRevision: {
-                  before: request.order.priceRevision,
-                  after: pricingRevision.priceRevision,
-                },
-              }
-            : {}),
-          requestId: request.id,
-        },
-        remark: reviewRemark ?? request.reason,
-      },
-    });
-
-    if (
-      request.order.settlementType === OrderSettlementType.INTERNAL_SALES &&
-      request.order.billingMode === OrderBillingMode.CHARGE &&
-      request.order.status !== OrderStatus.DRAFT
-    ) {
-      try {
-        await assertCsOrderSalesLedgerReconciledInTx(
-          tx,
-          request.order.id,
-          request.order.totalAmount,
-        );
-        await recordCsSalesEntryInTx(tx, {
-          eventKey: `order:${request.order.id}:revision:${nextRevision}:change`,
-          csUserId: request.order.submitterId,
-          orderId: request.order.id,
-          orderRevision: nextRevision,
-          type: CsSalesEntryType.ORDER_CHANGED,
-          amount: salesDelta,
-          occurredAt: reviewedAt,
-          remark: `工单修改申请 ${request.id} 审核通过`,
-        });
-      } catch (error) {
-        if (error instanceof CsSalesLedgerError) {
-          throw new OrderChangeRequestError(error.message);
-        }
-        throw error;
-      }
-    }
-    return reviewed;
   });
 }
 

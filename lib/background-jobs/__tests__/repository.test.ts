@@ -15,6 +15,7 @@ const { dbMock } = vi.hoisted(() => ({
     notificationLog: { updateMany: vi.fn() },
     designBundle: { updateMany: vi.fn() },
     orderExport: { updateMany: vi.fn() },
+    agentMonthlyBillExport: { updateMany: vi.fn() },
     $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -24,6 +25,7 @@ const { dbMock } = vi.hoisted(() => ({
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
+  AgentMonthlyBillExportStatus,
   BackgroundJobQueue,
   BackgroundJobStatus,
   Prisma,
@@ -58,11 +60,13 @@ beforeEach(() => {
     dbMock.notificationLog,
     dbMock.designBundle,
     dbMock.orderExport,
+    dbMock.agentMonthlyBillExport,
   ]) {
     for (const fn of Object.values(group)) fn.mockReset();
   }
   dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
   dbMock.orderExport.updateMany.mockResolvedValue({ count: 0 });
+  dbMock.agentMonthlyBillExport.updateMany.mockResolvedValue({ count: 0 });
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
   dbMock.$queryRaw.mockReset().mockResolvedValue([{ now: DB_NOW }]);
   dbMock.$transaction.mockReset().mockImplementation(async (callback) =>
@@ -993,6 +997,86 @@ describe('terminal order export state', () => {
       'filterHash',
     );
     expect(scrubCall?.[1]).toBe('job-export');
+  });
+});
+
+describe('terminal agent monthly bill export state', () => {
+  const claimed: ClaimedBackgroundJob = {
+    id: 'job-agent-bill-export',
+    type: 'AGENT_MONTHLY_BILL_EXPORT',
+    queue: BackgroundJobQueue.HEAVY,
+    dedupeKey: 'agent-monthly-bill-export:export-1',
+    payload: { exportId: 'export-1' },
+    attempts: 3,
+    maxAttempts: 3,
+    workerId: 'worker-1',
+    claimedAt: new Date('2026-09-02T08:00:00Z'),
+  };
+
+  it('marks the independent export ledger FAILED only after exhaustion', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+    dbMock.agentMonthlyBillExport.updateMany.mockResolvedValue({ count: 1 });
+
+    await failBackgroundJob(
+      claimed,
+      Object.assign(new Error('private financial detail'), {
+        name: 'AgentBillExportError',
+      }),
+      new Date('2026-09-02T08:01:00Z'),
+    );
+
+    expect(dbMock.agentMonthlyBillExport.updateMany).toHaveBeenCalledWith({
+      where: {
+        backgroundJobId: claimed.id,
+        status: AgentMonthlyBillExportStatus.PENDING,
+      },
+      data: {
+        status: AgentMonthlyBillExportStatus.FAILED,
+        artifactName: null,
+        byteSize: null,
+        lastErrorCode: 'AgentBillExportError',
+      },
+    });
+    const scrubCall = dbMock.$executeRaw.mock.calls.at(-1);
+    expect((scrubCall?.[0] as TemplateStringsArray).join('?')).toContain(
+      'UPDATE "AgentMonthlyBillExport"',
+    );
+    expect(scrubCall?.[1]).toBe(claimed.id);
+  });
+
+  it('does not expose an invalid manual retry after filters are scrubbed', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'AGENT_MONTHLY_BILL_EXPORT',
+      attempts: 3,
+      maxAttempts: 3,
+    });
+    await expect(
+      retryDeadBackgroundJob('job-agent-bill-export'),
+    ).resolves.toBe(false);
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.$executeRaw).toHaveBeenCalled();
+  });
+
+  it('closes the export ledger when an operator cancels its pending job', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.agentMonthlyBillExport.updateMany.mockResolvedValue({ count: 1 });
+    await expect(
+      cancelPendingBackgroundJob('job-agent-bill-export'),
+    ).resolves.toBe(true);
+    expect(dbMock.agentMonthlyBillExport.updateMany).toHaveBeenCalledWith({
+      where: {
+        backgroundJobId: 'job-agent-bill-export',
+        status: AgentMonthlyBillExportStatus.PENDING,
+      },
+      data: {
+        status: AgentMonthlyBillExportStatus.FAILED,
+        artifactName: null,
+        byteSize: null,
+        lastErrorCode: 'CancelledByOperator',
+      },
+    });
   });
 });
 

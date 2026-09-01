@@ -306,6 +306,129 @@ export async function seedFinishedOrder(opts: {
   return { orderId, orderNo };
 }
 
+// Seeds one immutable v2 billing candidate for a fresh E2E-only external
+// sales identity. A new identity is intentional: CONFIRMED/PAID v2 bills are
+// protected from deletion by database triggers, so a repeatable golden-path
+// test must never weaken those production invariants just to recycle a fixed
+// (agent, period) unique key.
+export async function seedSettledExternalSalesOrder(opts: {
+  customerRef: string;
+  settledFee: string;
+  settledAt: Date;
+}): Promise<{
+  agentUserId: string;
+  agentUsername: string;
+  agentDisplayName: string;
+  orderId: string;
+  orderNo: string;
+  period: string;
+}> {
+  const suffix = randomBytes(6).toString('hex');
+  const agentUserId = `e2e-billing-agent-${suffix}`;
+  const agentUsername = `e2e-billing-agent-${suffix}`;
+  const agentDisplayName = `E2E 对账代理 ${suffix}`;
+  const orderId = `e2e-agent-bill-order-${suffix}`;
+  const orderNo = `E2E-AB-${suffix.toUpperCase()}`;
+  const period = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(opts.settledAt);
+
+  await withDb(async (db) => {
+    await db.query('BEGIN');
+    try {
+      const principals = await db.query<{
+        adminId: string;
+        password: string;
+      }>(
+        `SELECT owner.id AS "adminId", source.password
+           FROM "User" owner
+           JOIN "User" source ON source.username = $2
+          WHERE owner.username = $1
+            AND owner.role = 'ADMIN'::"Role"
+            AND owner."isActive" = TRUE`,
+        [E2E_USERS.owner.username, E2E_USERS.billingSales.username],
+      );
+      if (principals.rowCount !== 1) {
+        throw new Error(
+          'seedSettledExternalSalesOrder requires the owner and billing-sales global fixtures',
+        );
+      }
+      const principal = principals.rows[0]!;
+      await db.query(
+        `INSERT INTO "User" (
+           id, username, password, role, "displayName", "isActive",
+           "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, $3, 'SALES'::"Role", $4, TRUE, NOW(), NOW()
+         )`,
+        [agentUserId, agentUsername, principal.password, agentDisplayName],
+      );
+      await db.query(
+        `INSERT INTO "Order" (
+           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           "settlementType", "billingMode", status, "isUrgent",
+           "customerRef", "processingAmount", "totalAmount", "confirmedFee",
+           "settledFee", "settledAt", "settlementContractVersion",
+           "pricingStatus", "pricingConfirmedAt", "pricingConfirmedById",
+           "submittedAt", "scheduledAt", "completedAt", "shippedAt",
+           "finishedAt", "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, $3, 'SALES'::"Role", $3,
+           'EXTERNAL_SALES'::"OrderSettlementType",
+           'CHARGE'::"OrderBillingMode", 'SETTLED'::"OrderStatus", FALSE,
+           $4, $5::numeric, $5::numeric, $5::numeric,
+           $5::numeric, $6::timestamptz, 2,
+           'ADMIN_CONFIRMED'::"OrderPricingStatus", $6::timestamptz, $7,
+           $6::timestamptz, $6::timestamptz, $6::timestamptz,
+           $6::timestamptz, $6::timestamptz, NOW(), NOW()
+         )`,
+        [
+          orderId,
+          orderNo,
+          agentUserId,
+          opts.customerRef,
+          opts.settledFee,
+          opts.settledAt.toISOString(),
+          principal.adminId,
+        ],
+      );
+      await db.query(
+        `INSERT INTO "OrderCustomerCharge" (
+           id, "orderId", "categoryId", "businessKey", status, description,
+           amount, "createdById", "finalizedById", "finalizedAt",
+           "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, 'ccc_shipping_fee', 'ORDER:E2E:WAIVED_SHIPPING',
+           'WAIVED'::"OrderCustomerChargeStatus", 'E2E 顺丰到付，快递费已豁免',
+           0, $3, $4, $5::timestamptz, NOW(), NOW()
+         )`,
+        [
+          `${orderId}-charge-shipping`,
+          orderId,
+          agentUserId,
+          principal.adminId,
+          opts.settledAt.toISOString(),
+        ],
+      );
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+  });
+
+  return {
+    agentUserId,
+    agentUsername,
+    agentDisplayName,
+    orderId,
+    orderNo,
+    period,
+  };
+}
+
 // 1×1 transparent PNG, base64. Renders as a tiny dot inside whatever
 // CSS sizing the design-grid imposes. Plenty for visual baseline.
 const PLACEHOLDER_PNG_DATA_URL =
@@ -942,6 +1065,29 @@ export async function resetNotificationFixture(): Promise<void> {
       `UPDATE "NotificationRule"
          SET "channelIds" = ARRAY[]::text[], "isActive" = false
        WHERE "eventType" IN ('ORDER_SUBMITTED', 'URGENT_ORDER')`,
+    );
+    // Managed events no longer read NotificationRule.channelIds. Reset the
+    // role route as well, otherwise a previous urgent-wire run can leave the
+    // factory confirmer pointing at the e2e channel deleted above.
+    await db.query(
+      `INSERT INTO "Setting" (id, key, value, remark, "updatedAt")
+       VALUES (
+         'e2e-management-notification-routing',
+         'management_notification_routing',
+         $1::jsonb,
+         '管理通知的角色开关与企业微信群路由',
+         NOW()
+       )
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         remark = EXCLUDED.remark,
+         "updatedAt" = NOW()`,
+      [
+        JSON.stringify({
+          factoryConfirmer: { enabled: false, channelIds: [] },
+          owner: { enabled: false, channelIds: [] },
+        }),
+      ],
     );
   });
 }
@@ -1648,6 +1794,19 @@ export function midShanghaiMonth(now: Date = new Date()): Date {
   // 15th at 12:00 UTC = 20:00 Shanghai = comfortably inside both
   // UTC-month bounds and Shanghai-month bounds.
   return new Date(Date.UTC(yyyy!, mm! - 1, 15, 12, 0, 0));
+}
+
+// 15th 12:00 UTC in the previous Shanghai calendar month. V2 generation only
+// accepts closed months, so the billing golden path must not use the current
+// month helper retained above for legacy Bill tests.
+export function midPreviousShanghaiMonth(now: Date = new Date()): Date {
+  const ym = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(now);
+  const [yyyy, mm] = ym.split('-').map(Number);
+  return new Date(Date.UTC(yyyy!, mm! - 2, 15, 12, 0, 0));
 }
 
 // Seed admin credentials. We DON'T fall back to a hardcoded password:
@@ -2801,6 +2960,30 @@ export async function seedNotificationWireFixture(): Promise<{
        )
       `,
       [channelId],
+    );
+
+    // ORDER_SUBMITTED is one of the fixed-role management events. Its
+    // NotificationRule binding above is retained only for rollback
+    // compatibility; the runtime route must be configured explicitly.
+    await db.query(
+      `INSERT INTO "Setting" (id, key, value, remark, "updatedAt")
+       VALUES (
+         'e2e-management-notification-routing',
+         'management_notification_routing',
+         $1::jsonb,
+         '管理通知的角色开关与企业微信群路由',
+         NOW()
+       )
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         remark = EXCLUDED.remark,
+         "updatedAt" = NOW()`,
+      [
+        JSON.stringify({
+          factoryConfirmer: { enabled: true, channelIds: [channelId] },
+          owner: { enabled: false, channelIds: [] },
+        }),
+      ],
     );
 
     return { channelId };

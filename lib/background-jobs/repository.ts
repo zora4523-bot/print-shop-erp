@@ -1,4 +1,5 @@
 import {
+  AgentMonthlyBillExportStatus,
   BackgroundJobAttemptStatus,
   BackgroundJobStatus,
   OrderExportStatus,
@@ -7,11 +8,13 @@ import {
   type BackgroundJobQueue,
 } from '../../generated/prisma/client';
 import { db } from '../db';
+import { scrubAgentMonthlyBillExportFiltersForBackgroundJob } from '../agent-monthly-billing/export-retention';
 import { scrubOrderExportFiltersForBackgroundJob } from '../order/export-retention';
-import type {
-  BackgroundJobResult,
-  ClaimedBackgroundJob,
-  EnqueueBackgroundJobInput,
+import {
+  BACKGROUND_JOB_TYPES,
+  type BackgroundJobResult,
+  type ClaimedBackgroundJob,
+  type EnqueueBackgroundJobInput,
 } from './types';
 import { databaseNow } from './clock';
 import { backgroundJobErrorCode, retryDelayMs } from './policy';
@@ -376,6 +379,27 @@ export async function failBackgroundJob(
       }
     }
 
+    if (
+      exhausted &&
+      job.type === BACKGROUND_JOB_TYPES.AGENT_MONTHLY_BILL_EXPORT
+    ) {
+      const failed = await tx.agentMonthlyBillExport.updateMany({
+        where: {
+          backgroundJobId: job.id,
+          status: AgentMonthlyBillExportStatus.PENDING,
+        },
+        data: {
+          status: AgentMonthlyBillExportStatus.FAILED,
+          artifactName: null,
+          byteSize: null,
+          lastErrorCode: errorCode,
+        },
+      });
+      if (failed.count > 0) {
+        await scrubAgentMonthlyBillExportFiltersForBackgroundJob(job.id, tx);
+      }
+    }
+
     await tx.backgroundJobAttempt.update({
       where: {
         jobId_attempt: { jobId: job.id, attempt: job.attempts },
@@ -440,8 +464,15 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
     // Terminal export rows no longer retain their raw filter params. Reusing
     // the old job would therefore be both invalid and misleading; the admin
     // must request a fresh export from the order list with current filters.
-    if (job.type === 'ORDER_EXPORT') {
-      await scrubOrderExportFiltersForBackgroundJob(jobId, tx);
+    if (
+      job.type === BACKGROUND_JOB_TYPES.ORDER_EXPORT ||
+      job.type === BACKGROUND_JOB_TYPES.AGENT_MONTHLY_BILL_EXPORT
+    ) {
+      if (job.type === BACKGROUND_JOB_TYPES.ORDER_EXPORT) {
+        await scrubOrderExportFiltersForBackgroundJob(jobId, tx);
+      } else {
+        await scrubAgentMonthlyBillExportFiltersForBackgroundJob(jobId, tx);
+      }
       return false;
     }
     if (backgroundJobRequiresOwnerResolution(job)) {
@@ -533,6 +564,22 @@ export async function cancelPendingBackgroundJob(jobId: string): Promise<boolean
     });
     if (failedExports.count > 0) {
       await scrubOrderExportFiltersForBackgroundJob(jobId, tx);
+    }
+    const failedAgentBillExports =
+      await tx.agentMonthlyBillExport.updateMany({
+        where: {
+          backgroundJobId: jobId,
+          status: AgentMonthlyBillExportStatus.PENDING,
+        },
+        data: {
+          status: AgentMonthlyBillExportStatus.FAILED,
+          artifactName: null,
+          byteSize: null,
+          lastErrorCode: 'CancelledByOperator',
+        },
+      });
+    if (failedAgentBillExports.count > 0) {
+      await scrubAgentMonthlyBillExportFiltersForBackgroundJob(jobId, tx);
     }
     return true;
   });

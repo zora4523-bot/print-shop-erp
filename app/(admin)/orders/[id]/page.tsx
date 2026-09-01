@@ -23,10 +23,7 @@ import { getSession, requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
 import { getOrderTitleRef } from '@/lib/page-title/refs';
 import { orderDetailTitle } from '@/lib/page-title/titles';
-import {
-  canAttachOutsource,
-  isTerminalOrderStatus,
-} from '@/lib/order/status-machine';
+import { canAttachOutsource } from '@/lib/order/status-machine';
 import {
   canEditOrderSfCollect,
   editableFieldsetForStatus,
@@ -106,6 +103,41 @@ import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDeta
 
 type PageProps = { params: Promise<{ id: string }> };
 
+const DIRECT_CANCEL_STATUSES = new Set<OrderStatus>([
+  OrderStatus.DRAFT,
+  OrderStatus.PENDING_FACTORY,
+  OrderStatus.REJECTED,
+]);
+
+function canUseDirectCancel(role: Role, status: OrderStatus): boolean {
+  return role === Role.ADMIN && DIRECT_CANCEL_STATUSES.has(status);
+}
+
+function shippingAvailability(input: {
+  isAdministrator: boolean;
+  status: OrderStatus;
+  incompleteProductionCount: number;
+  hasLiveOutsource: boolean;
+  isPricingPending: boolean;
+}): { canShip: boolean; disabledReason: string | null } {
+  const productionReady =
+    input.status === OrderStatus.PACKING ||
+    input.status === OrderStatus.COMPLETED;
+  const disabledReason = input.isPricingPending
+    ? '价格待管理员确认'
+    : input.hasLiveOutsource
+      ? '仍有已发出或进行中的外协单'
+      : input.incompleteProductionCount > 0
+        ? `${input.incompleteProductionCount} 个工序未完工`
+        : !productionReady
+          ? '完工后才可发货'
+          : null;
+  return {
+    canShip: input.isAdministrator && disabledReason === null,
+    disabledReason,
+  };
+}
+
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
   // 用 getSession() 而不是 requireSession()：流式 metadata 下首屏可能
@@ -175,8 +207,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const canSubmit =
     order.status === OrderStatus.DRAFT &&
     (order.submitterId === user.id || user.role === Role.ADMIN);
-  const canCancel =
-    user.role === Role.ADMIN && !isTerminalOrderStatus(order.status);
+  const canCancel = canUseDirectCancel(user.role, order.status);
   // SHIPPED / FINISHED 转换权限：order:ship = ADMIN（见
   // permissions.ts）。这里 mirror 该闸口；action 层 requirePermission
   // 仍是真闸口。
@@ -205,15 +236,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
       row.status === OutsourceStatus.SENT ||
       row.status === OutsourceStatus.IN_PROGRESS,
   );
-  const canShip =
-    canShipOrFinish &&
-    order.status === OrderStatus.COMPLETED &&
-    !hasLiveOutsource &&
-    !isPricingPending;
-  const canFinish =
-    canShipOrFinish &&
-    order.status === OrderStatus.SHIPPED &&
-    !isPricingPending;
+  // FINISHED is a retained legacy read state. New work orders close through
+  // the explicit SHIPPED -> SETTLED command so no second writer can bypass
+  // settledFee/settledAt and monthly-billing cutoff locks.
+  const canFinish = false;
 
   // Editing follows SPEC §3.6. Ownership mirrors the action-layer
   // guard: SALES / CUSTOMER_SERVICE only their own; ADMIN
@@ -297,6 +323,14 @@ export default async function OrderDetailPage({ params }: PageProps) {
   ).length;
   const incompleteProductionCount =
     pendingProductionCount + inProgressProductionCount;
+  const { canShip, disabledReason: shipDisabledReason } =
+    shippingAvailability({
+      isAdministrator: canShipOrFinish,
+      status: order.status,
+      incompleteProductionCount,
+      hasLiveOutsource,
+      isPricingPending,
+    });
   const pendingChangeRequest = order.changeRequests.find(
     (request) => request.status === OrderChangeRequestStatus.PENDING,
   );
@@ -325,15 +359,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
     completedProductionCount,
     liveOutsourceCount,
   });
-  const shipDisabledReason = isPricingPending
-    ? '价格待管理员确认'
-    : hasLiveOutsource
-      ? '仍有已发出或进行中的外协单'
-    : incompleteProductionCount > 0
-      ? `${incompleteProductionCount} 个工序未完工`
-      : order.status !== OrderStatus.COMPLETED
-        ? '完工后才可发货'
-        : null;
   const canRequestChange =
     user.role === Role.CUSTOMER_SERVICE &&
     order.submitterId === user.id &&
@@ -544,6 +569,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
 
       {isChargeableOrder && pricingStatus ? (
         <section
+          id="pricing-review"
           className={
             isPricingPending
               ? 'space-y-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4 shadow-sm sm:p-6'
@@ -1640,7 +1666,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         >
           <h2 className="text-base font-semibold">标记发货</h2>
           <p className="text-xs text-muted-foreground">
-            所有生产工序已完工；标记发货后可填写运单号。
+            打包工序与其他生产工序已完工；录入运单后转为已发货。
           </p>
           <ShipOrderForm
             orderId={order.id}
@@ -1711,19 +1737,25 @@ export default async function OrderDetailPage({ params }: PageProps) {
       ) : null}
 
       {canShipOrFinish &&
-      order.status === OrderStatus.COMPLETED &&
-      hasLiveOutsource ? (
-        <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
+      (order.status === OrderStatus.PACKING ||
+        order.status === OrderStatus.COMPLETED) &&
+      !canShip ? (
+        <section
+          id="ship-order"
+          className="scroll-mt-28 space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6"
+        >
           <h2 className="text-base font-semibold">暂不能发货</h2>
           <p className="text-sm text-muted-foreground">
-            该工单仍有已发送或进行中的外协单。请先在外协管理中标记收货或取消，系统才会开放发货。
+            {shipDisabledReason ?? '请先补齐发货前置事实。'}
           </p>
-          <Link
-            href="/foreman/outsource"
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            查看外协单
-          </Link>
+          {hasLiveOutsource ? (
+            <Link
+              href="/foreman/outsource"
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              查看外协单
+            </Link>
+          ) : null}
         </section>
       ) : null}
 

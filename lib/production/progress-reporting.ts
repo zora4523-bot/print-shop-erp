@@ -13,6 +13,10 @@ import {
   maybeCompleteProductionOrder,
   type ProductionCompletionTx,
 } from '../production-completion';
+import {
+  ensureFirstProductionScanClaimInTx,
+  WorkOrderProgressError,
+} from './work-order-progress';
 
 export type ProgressReportInput = {
   progressStepId: string;
@@ -60,12 +64,21 @@ export class ProgressReportingError extends Error {
 const PROGRESS_REPORT_SELECT = {
   id: true,
   orderId: true,
+  workOrderVersion: true,
   status: true,
   plannedQty: true,
   craftCode: true,
   craftName: true,
   orderItem: { select: { id: true, sequence: true } },
-  order: { select: { id: true, orderNo: true, status: true } },
+  order: {
+    select: {
+      id: true,
+      orderNo: true,
+      status: true,
+      scheduledAt: true,
+      workOrderVersion: true,
+    },
+  },
 } satisfies Prisma.ProductionProgressStepSelect;
 
 const MAX_QUANTITY = new Decimal('99999999999.999');
@@ -191,7 +204,7 @@ export async function reportProductionProgress(
             select: {
               status: true,
               orderId: true,
-              order: { select: { status: true } },
+              order: { select: { status: true, scheduledAt: true } },
             },
           },
         },
@@ -238,6 +251,13 @@ export async function reportProductionProgress(
       };
     }
 
+    if (step.workOrderVersion !== step.order.workOrderVersion) {
+      throw new ProgressReportingError(
+        'PROGRESS_STEP_NOT_REPORTABLE',
+        `该生产进度属于已作废的工单 v${step.workOrderVersion}`,
+      );
+    }
+
     if (
       step.status === ProductionOperationStatus.COMPLETED ||
       step.status === ProductionOperationStatus.CANCELLED
@@ -249,7 +269,10 @@ export async function reportProductionProgress(
     }
     if (
       step.order.status !== OrderStatus.SCHEDULING &&
-      step.order.status !== OrderStatus.IN_PRODUCTION
+      step.order.status !== OrderStatus.IN_PRODUCTION &&
+      step.order.status !== OrderStatus.RELEASED &&
+      step.order.status !== OrderStatus.FOILING &&
+      step.order.status !== OrderStatus.PACKING
     ) {
       throw new ProgressReportingError(
         'ORDER_NOT_REPORTABLE',
@@ -291,6 +314,41 @@ export async function reportProductionProgress(
       },
       select: { id: true },
     });
+
+    if (
+      step.order.status === OrderStatus.RELEASED ||
+      step.order.status === OrderStatus.FOILING ||
+      step.order.status === OrderStatus.PACKING
+    ) {
+      try {
+        await ensureFirstProductionScanClaimInTx(
+          tx,
+          {
+            orderId: step.orderId,
+            workOrderVersion: step.order.workOrderVersion,
+            operationId: null,
+            progressStepId: step.id,
+            reporterId: account.id,
+            idempotencyKey: parsed.idempotencyKey,
+            orderStatus: step.order.status,
+            scheduledAt: step.order.scheduledAt,
+            claimedAt: reportedAt,
+          },
+          { source: 'REPORT' },
+        );
+      } catch (error) {
+        if (error instanceof WorkOrderProgressError) {
+          throw new ProgressReportingError(
+            error.code === 'IDEMPOTENCY_CONFLICT'
+              ? 'IDEMPOTENCY_CONFLICT'
+              : 'ORDER_NOT_REPORTABLE',
+            error.message,
+            error.detail,
+          );
+        }
+        throw error;
+      }
+    }
 
     const progressStatus = completedAggregate.eq(plannedQty)
       ? ProductionOperationStatus.COMPLETED

@@ -2315,35 +2315,105 @@ export const orderChangeRequestItemsSchema = z
     });
   });
 
-export const createOrderChangeRequestSchema = z.object({
+const orderChangeReason = z
+  .string()
+  .trim()
+  .min(1, '请填写申请说明')
+  .max(500, '申请说明过长');
+
+const modifyOrderChangeRequestSchema = z.object({
   orderId: orderChangeId,
-  reason: z
-    .string()
-    .trim()
-    .min(1, '请填写修改原因')
-    .max(500, '修改原因过长'),
+  type: z.literal('MODIFY'),
+  modifyKind: z.enum(['QTY', 'DUE_DATE', 'ADDRESS', 'CRAFT_PAPER', 'OTHER']),
+  reason: orderChangeReason,
   items: orderChangeRequestItemsSchema,
 });
+
+const cancelOrderChangeRequestSchema = z.object({
+  orderId: orderChangeId,
+  type: z.literal('CANCEL'),
+  reason: orderChangeReason,
+  items: z.array(z.never()).max(0).default([]),
+});
+
+// Existing callers predate the explicit type/kind columns. Normalize that
+// public input to MODIFY/OTHER while keeping CANCEL a distinct, item-free
+// command. No amount or settlement timestamp is accepted here.
+export const createOrderChangeRequestSchema = z.preprocess(
+  (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    const record = value as Record<string, unknown>;
+    if (record.type === 'CANCEL') return record;
+    return {
+      ...record,
+      type: 'MODIFY',
+      modifyKind: record.modifyKind ?? 'OTHER',
+    };
+  },
+  z.discriminatedUnion('type', [
+    modifyOrderChangeRequestSchema,
+    cancelOrderChangeRequestSchema,
+  ]),
+);
 
 export type CreateOrderChangeRequestInput = z.infer<
   typeof createOrderChangeRequestSchema
 >;
 
-export const reviewOrderChangeRequestSchema = z.object({
-  requestId: orderChangeId,
-  decision: z.enum(['APPROVE', 'REJECT']),
-  reviewRemark: optionalTrimmedText('审核备注', 500),
-});
+const reviewOrderChangeRequestBaseSchema = z.object({
+    requestId: orderChangeId,
+    decision: z.enum(['APPROVE', 'DENY', 'REJECT']),
+    reviewRemark: optionalTrimmedText('审核备注', 500),
+    producedQty: z.number().int().nonnegative().optional(),
+    settleFee: z
+      .string()
+      .trim()
+      .regex(/^\d{1,10}(?:\.\d{1,2})?$/, '结算金额格式错误')
+      .optional(),
+    settleFeeAdjustmentReason: z.string().trim().max(500).optional(),
+  });
+
+export const reviewOrderChangeRequestSchema =
+  reviewOrderChangeRequestBaseSchema
+  .superRefine((value, ctx) => {
+    if (
+      (value.decision === 'DENY' || value.decision === 'REJECT') &&
+      !value.reviewRemark?.trim()
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reviewRemark'],
+        message: '拒绝必须填写原因',
+      });
+    }
+  });
 
 export type ReviewOrderChangeRequestInput = z.infer<
   typeof reviewOrderChangeRequestSchema
 >;
 
 export const previewOrderChangeRequestPricingSchema =
-  reviewOrderChangeRequestSchema.pick({ requestId: true });
+  reviewOrderChangeRequestBaseSchema.pick({ requestId: true });
+
+export const previewOrderCancellationSettlementSchema =
+  reviewOrderChangeRequestBaseSchema
+    .pick({ requestId: true, producedQty: true })
+    .required({ producedQty: true });
+
+export type PreviewOrderCancellationSettlementInput = z.infer<
+  typeof previewOrderCancellationSettlementSchema
+>;
 
 export type PreviewOrderChangeRequestPricingInput = z.infer<
   typeof previewOrderChangeRequestPricingSchema
+>;
+
+export const withdrawOrderChangeRequestSchema = z.object({
+  requestId: orderChangeId,
+});
+
+export type WithdrawOrderChangeRequestInput = z.infer<
+  typeof withdrawOrderChangeRequestSchema
 >;
 
 // 工厂终价只接收管理员对待定行的确认值；价目簿 id、自动价和小计

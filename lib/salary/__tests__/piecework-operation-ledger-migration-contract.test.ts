@@ -46,7 +46,7 @@ describe('piecework operation-ledger migration contract', () => {
     )?.[1];
     expect(operation).toBeDefined();
     expect(operation).not.toMatch(/workerId|machineType/);
-    expect(operation).toContain('operationType PieceworkOperationType');
+    expect(operation).toMatch(/operationType\s+PieceworkOperationType/);
     expect(schema).toContain('model ProductionOperationSource {');
     expect(migration).toContain('"ProductionOperationSource_shape_check"');
   });

@@ -207,6 +207,7 @@ pnpm dev
 | `CRON_SECRET` | Web/worker 服务端校验 cron endpoints 的 `Authorization: Bearer <secret>` | 8 个 `/api/cron/*` 全部 503 |
 | `BACKGROUND_JOBS_MODE` | 生产设 `durable`，通知/cron/PDF/CDR/工单导出进 PostgreSQL 任务账本 | `inline` 会失去持久重试和资源隔离 |
 | `ORDER_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的私有 XLSX 目录，单机建议 `/var/tmp/print-shop-erp/order-exports` | 留空回退到系统临时目录；多机或临时目录清理后待下载文件会丢失 |
+| `AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的月账单 XLSX 私有目录，必须与工单导出目录分离 | 留空回退到独立系统临时目录；多机部署时会无法稳定下载 |
 | `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：**打印单二维码（师傅微信扫码报工）** 与 CDR 外协短链跟随访问域，split-origin 时师傅/外协拿到内网死链；单域名若 Nginx 漏传 `X-Forwarded-Proto` 也会退化成 localhost 死链 |
 | `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | 生产显式设 `"false"`，使 env 检查、smoke 与真实运行口径一致。留空在 `NODE_ENV=production` 下实际也是真发，但发布门禁会拒绝这种含糊配置；切勿设 `"true"` |
 | `CDR_BUNDLE_MOCK_MODE` | CDR 打包真跑开关 | 留空（按 NODE_ENV）。生产设 `"true"` 会让 CDR 汇总下载返回 mock 占位 URL |
@@ -264,6 +265,10 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 # 每日分批删除过期工单导出产物，终态只保留粗粒度 scope
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/order-export-cleanup
+
+# 报工超前与下发后无有效扫码认领提醒（幂等去重）
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/production-alerts
 ```
 
 **手工带 body 重跑日薪 / 月结时会多一个 400**（2026-08-21 起）：`daily-salary` 的
@@ -279,7 +284,7 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 角色可通过 `current_setting()` 读取数据库级设置。
 `pg_cron` + `pg_net` HTTP 调度已经退役，前向迁移会撤销遗留 ERP job 并清理旧设置。
 
-**8 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
+**10 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
 ### 3. 备份（pgBackRest）
 

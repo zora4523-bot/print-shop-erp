@@ -53,13 +53,18 @@ export async function GET(_req: Request, ctx: Params) {
       requestedJobId ??
       (await enqueueOrderPdfJob({
         orderId: id,
+        expectedWorkOrderVersion: order.workOrderVersion,
         actor: { id: session.user.id, role: session.user.role },
         baseUrl,
       }));
     const result = await waitForOrderPdfJob(jobId, {
       timeoutMs: Number(process.env.PDF_JOB_WAIT_MS) || 10_000,
       signal: _req.signal,
-      expected: { orderId: id, actorId: session.user.id },
+      expected: {
+        orderId: id,
+        actorId: session.user.id,
+        workOrderVersion: order.workOrderVersion,
+      },
     });
     if (result.status === 'timeout') {
       return pdfStatusPage({
@@ -123,6 +128,23 @@ export async function GET(_req: Request, ctx: Params) {
         { status: 500 },
       );
     }
+  }
+
+  const currentOrder = await getOrderForPrint(
+    id,
+    { id: session.user.id, role: session.user.role },
+    baseUrl,
+  );
+  if (
+    !currentOrder ||
+    currentOrder.workOrderVersion !== order.workOrderVersion
+  ) {
+    return pdfStatusPage({
+      title: '工单版本已更新',
+      message: '生成期间工单已升版，旧 PDF 已丢弃。请重新生成当前版。',
+      status: 409,
+      retryUrl: new URL(_req.url).pathname,
+    });
   }
 
   return new Response(new Uint8Array(pdf), {

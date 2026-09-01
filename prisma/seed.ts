@@ -29,6 +29,7 @@ import {
   SETTING_KEYS,
 } from '../lib/settings/definitions';
 import { seedPieceworkPriceBookV1Placeholder } from '../lib/salary/piecework-price-book-seed';
+import { NOTIFICATION_EVENTS } from '../lib/notification/events';
 
 // Prisma 7 要求显式指定 adapter
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
@@ -380,7 +381,23 @@ async function seedNotificationEvents() {
   const rules = [
     {
       eventType: 'ORDER_SUBMITTED',
-      messageTemplate: '**新工单提交**\n工单号：{orderNo}\n提交人：{submitterName}\n金额：¥{totalAmount}\n{urgentMark}',
+      messageTemplate: '**新工单提交**\n工单号：{orderNo}\n{summary}\n{deepLink}',
+    },
+    {
+      eventType: NOTIFICATION_EVENTS.ORDER_CHANGE_REQUESTED,
+      messageTemplate: '**工单变更/取消申请**\n工单号：{orderNo}\n{summary}\n{deepLink}',
+    },
+    {
+      eventType: NOTIFICATION_EVENTS.PRODUCTION_PROGRESS_ANOMALY,
+      messageTemplate: '⚠️ **报工进度异常**\n工单号：{orderNo}\n{summary}\n{deepLink}',
+    },
+    {
+      eventType: NOTIFICATION_EVENTS.PRODUCTION_STAGNANT,
+      messageTemplate: '⏳ **生产停滞**\n工单号：{orderNo}\n{summary}\n{deepLink}',
+    },
+    {
+      eventType: NOTIFICATION_EVENTS.PENDING_FACTORY_BACKLOG,
+      messageTemplate: '📋 **待确认积压**\n工单号：{orderNo}\n{summary}\n{deepLink}',
     },
     {
       eventType: 'URGENT_ORDER',

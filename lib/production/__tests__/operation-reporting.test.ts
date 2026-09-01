@@ -25,6 +25,15 @@ const { dbMock, databaseNowMock, completionMock } = vi.hoisted(() => ({
       aggregate: vi.fn(),
       create: vi.fn(),
     },
+    productionWorkOrderProgress: {
+      aggregate: vi.fn(),
+      create: vi.fn(),
+    },
+    productionScanClaim: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+    },
+    orderItem: { aggregate: vi.fn() },
     pieceworkSettlement: { findUnique: vi.fn() },
     pieceworkPriceBook: { findMany: vi.fn() },
     user: { findUnique: vi.fn() },
@@ -56,6 +65,7 @@ function operationFixture(
   return {
     id: 'operation-1',
     orderId: 'order-1',
+    workOrderVersion: 1,
     operationType: PieceworkOperationType.PARTIAL,
     unit: PieceworkRateUnit.PER_PASS,
     status: ProductionOperationStatus.PENDING,
@@ -64,6 +74,8 @@ function operationFixture(
       id: 'order-1',
       orderNo: 'GD-1',
       status: OrderStatus.SCHEDULING,
+      scheduledAt: null,
+      workOrderVersion: 1,
     },
     sources: [
       {
@@ -129,6 +141,9 @@ beforeEach(() => {
   for (const delegate of [
     dbMock.productionOperation,
     dbMock.productionReport,
+    dbMock.productionWorkOrderProgress,
+    dbMock.productionScanClaim,
+    dbMock.orderItem,
     dbMock.pieceworkSettlement,
     dbMock.pieceworkPriceBook,
     dbMock.user,
@@ -158,6 +173,18 @@ beforeEach(() => {
   dbMock.pieceworkSettlement.findUnique.mockResolvedValue(null);
   dbMock.pieceworkPriceBook.findMany.mockResolvedValue([publishedBook()]);
   dbMock.productionReport.create.mockResolvedValue({ id: 'report-1' });
+  dbMock.orderItem.aggregate.mockResolvedValue({ _sum: { quantity: 200 } });
+  dbMock.productionWorkOrderProgress.aggregate.mockResolvedValue({
+    _sum: { workOrderProgressQuantity: null },
+  });
+  dbMock.productionWorkOrderProgress.create.mockResolvedValue({
+    id: 'work-order-progress-1',
+  });
+  dbMock.productionScanClaim.findUnique.mockResolvedValue(null);
+  dbMock.productionScanClaim.create.mockResolvedValue({
+    id: 'claim-1',
+    claimedAt: NOW,
+  });
   dbMock.productionOperation.update.mockResolvedValue({ id: 'operation-1' });
   dbMock.productionOperation.count.mockResolvedValue(1);
   dbMock.order.update.mockResolvedValue({ id: 'order-1' });
@@ -176,6 +203,83 @@ function reportInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe('reportProductionOperation', () => {
+  it('对已下发工单原子写入独立件数进度和首次扫码认领', async () => {
+    arrangeOperation(
+      operationFixture({
+        workOrderVersion: 2,
+        order: {
+          id: 'order-1',
+          orderNo: 'GD-1',
+          status: OrderStatus.RELEASED,
+          scheduledAt: new Date('2026-08-27T08:00:00.000Z'),
+          workOrderVersion: 2,
+        },
+      }),
+    );
+
+    await expect(
+      reportProductionOperation(
+        reportInput({ workOrderProgressQuantity: 80 }),
+        ACTOR,
+      ),
+    ).resolves.toMatchObject({
+      reportId: 'report-1',
+      orderStatus: OrderStatus.FOILING,
+    });
+
+    expect(dbMock.productionWorkOrderProgress.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 'order-1',
+        operationId: 'operation-1',
+        sourceReportId: 'report-1',
+        reporterId: ACTOR.id,
+        stage: 'FOILING',
+        workOrderProgressQuantity: '80',
+        idempotencyKey: 'scan-request-0001',
+        reportedAt: NOW,
+      }),
+      select: { id: true },
+    });
+    expect(dbMock.productionScanClaim.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 'order-1',
+        workOrderVersion: 2,
+        operationId: 'operation-1',
+        progressStepId: null,
+        reporterId: ACTOR.id,
+        claimedAt: NOW,
+      }),
+      select: { id: true, claimedAt: true },
+    });
+  });
+
+  it('按工单总数量硬拒绝单道工序超报', async () => {
+    arrangeOperation(
+      operationFixture({
+        workOrderVersion: 2,
+        order: {
+          id: 'order-1',
+          orderNo: 'GD-1',
+          status: OrderStatus.RELEASED,
+          scheduledAt: new Date('2026-08-27T08:00:00.000Z'),
+          workOrderVersion: 2,
+        },
+      }),
+    );
+    dbMock.productionWorkOrderProgress.aggregate.mockResolvedValue({
+      _sum: { workOrderProgressQuantity: new Decimal(150) },
+    });
+
+    await expect(
+      reportProductionOperation(
+        reportInput({ workOrderProgressQuantity: 51 }),
+        ACTOR,
+      ),
+    ).rejects.toMatchObject({ code: 'OVER_WORK_ORDER_PROGRESS' });
+    expect(dbMock.productionReport.create).not.toHaveBeenCalled();
+    expect(dbMock.productionWorkOrderProgress.create).not.toHaveBeenCalled();
+  });
+
   it('records completed pieces and excludes defect/rework from PARTIAL pay', async () => {
     await expect(
       reportProductionOperation(reportInput(), ACTOR),

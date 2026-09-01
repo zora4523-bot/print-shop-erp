@@ -13,11 +13,11 @@ import {
 // 真页面跑通：
 //   1. /owner/notifications 显示 10 条 seeded rule + 0 条 channel
 //   2. 创建一个 channel → 列表多 1 行
-//   3. 编辑 ORDER_SUBMITTED rule → 绑入新 channel + 启用 → 保存
-//   4. 列表显示&ldquo;启用 / 绑群数 1&rdquo;
+//   3. 系统设置中把新 channel 配给工厂确认人
+//   4. ORDER_SUBMITTED rule 只编辑模板/开关，不可改写固定角色路由
 //   5. 测试按钮（mock-mode）→ NotificationLog 写一条 __TEST__ SUCCESS
 //   6. 删除被引用的 channel → 失败（带说明）
-//   7. 把 rule 取消引用 + 删除 channel → 成功
+//   7. 从固定角色路由解绑，历史投递仍拒绝物理删除
 //
 // helper resetNotificationFixture() 先清掉所有 e2e_ channelKey 前缀
 // 的 channel + 重置 ORDER_SUBMITTED / URGENT_ORDER 两条 rule 的状态，
@@ -82,7 +82,20 @@ test.describe('owner notifications — admin UI', () => {
       page.locator(`text=https://qyapi.weixin.qq.com/cgi-bin/webhook/send`),
     ).toBeVisible();
 
-    // ─── 3. 编辑 ORDER_SUBMITTED rule，绑新 channel + 启用 ───
+    // ─── 3. 系统设置配置工厂确认人固定路由 ───
+    await page.goto('/owner/settings');
+    const factoryRoute = page.getByRole('region', {
+      name: '工厂确认人通知路由',
+    });
+    await factoryRoute.getByLabel('角色开关').selectOption('true');
+    await factoryRoute
+      .getByRole('checkbox', { name: `工厂确认人：${channelName}` })
+      .check();
+    await page.getByRole('button', { name: '保存设置' }).click();
+    await expect(page.getByRole('status')).toContainText('设置已保存');
+
+    // ─── 4. 托管事件只编辑模板/开关 ───
+    await page.goto('/owner/notifications');
     await page
       .locator('tr', { has: page.getByText('工单已提交', { exact: true }) })
       .getByRole('link', { name: '编辑' })
@@ -91,10 +104,8 @@ test.describe('owner notifications — admin UI', () => {
       /\/owner\/notifications\/rules\/ORDER_SUBMITTED/,
     );
 
-    // 勾选新 channel
-    const channelCheckbox = page.getByRole('checkbox', { name: channelName });
-    await channelCheckbox.click();
-    await expect(channelCheckbox).toBeChecked();
+    await expect(page.getByText('此事件固定路由到')).toBeVisible();
+    await expect(page.getByRole('checkbox', { name: channelName })).toHaveCount(0);
     // 勾选&ldquo;启用此规则&rdquo;
     const ruleActiveCheckbox = page.getByRole('checkbox', {
       name: '启用此规则',
@@ -104,12 +115,12 @@ test.describe('owner notifications — admin UI', () => {
     await page.getByRole('button', { name: '保存修改' }).click();
 
     await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
-    // ORDER_SUBMITTED 行：绑群数应为 1（多个 rule 可能也显示 1，所以
-    // 直接断言整行包含相应文案）
+    // ORDER_SUBMITTED 行显示固定角色，而不是可编辑绑群数。
     const orderSubmittedRow = page.locator('tr', {
       has: page.getByText('工单已提交', { exact: true }),
     });
     await expect(orderSubmittedRow).toContainText('启用');
+    await expect(orderSubmittedRow).toContainText('工厂确认人');
 
     // ─── 4. 测试按钮（mock-mode）触发 __TEST__ log ───
     await page
@@ -128,17 +139,24 @@ test.describe('owner notifications — admin UI', () => {
     const deleteBtn = channelRow.getByRole('button', { name: '删除' });
     await expect(deleteBtn).toBeDisabled();
 
-    // ─── 6. 取消 rule 引用 + 关闭 → 删除按钮可点，但 FK 还会拦 ───
-    await orderSubmittedRow.getByRole('link', { name: '编辑' }).click();
-    await channelCheckbox.click();
-    await expect(channelCheckbox).not.toBeChecked();
-    await ruleActiveCheckbox.click();
-    await expect(ruleActiveCheckbox).not.toBeChecked();
-    await page.getByRole('button', { name: '保存修改' }).click();
-    await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
+    // ─── 6. 从固定角色路由解绑 → 删除按钮可点，但 FK 还会拦 ───
+    await page.goto('/owner/settings');
+    const factoryRouteAfter = page.getByRole('region', {
+      name: '工厂确认人通知路由',
+    });
+    await factoryRouteAfter
+      .getByRole('checkbox', { name: `工厂确认人：${channelName}` })
+      .uncheck();
+    await factoryRouteAfter.getByLabel('角色开关').selectOption('false');
+    await page.getByRole('button', { name: '保存设置' }).click();
+    await expect(page.getByRole('status')).toContainText('设置已保存');
+    await page.goto('/owner/notifications');
 
     // 现在 button 不再 disabled（rule 引用已解除）
-    const deleteBtn2 = channelRow.getByRole('button', { name: '删除' });
+    const channelRowAfter = page
+      .getByRole('region', { name: '企业微信群列表' })
+      .locator('tr', { hasText: channelName });
+    const deleteBtn2 = channelRowAfter.getByRole('button', { name: '删除' });
     await expect(deleteBtn2).not.toBeDisabled();
 
     // 确认删除后，NotificationLog.__TEST__ 的外键会拒绝删除；
@@ -159,7 +177,7 @@ test.describe('owner notifications — admin UI', () => {
       .getByRole('button', { name: '确认删除', exact: true })
       .click();
 
-    const deleteError = channelRow.getByRole('alert', {
+    const deleteError = channelRowAfter.getByRole('alert', {
       name: '删除失败',
       exact: true,
     });
@@ -170,7 +188,7 @@ test.describe('owner notifications — admin UI', () => {
       }),
     ).toBeVisible();
     // 行仍在
-    await expect(channelRow).toBeVisible();
+    await expect(channelRowAfter).toBeVisible();
 
     await expectNoNextErrorOverlay(page);
   });

@@ -12,6 +12,15 @@ describe('backgroundJobOperatorAction', () => {
     ).toBe('REQUEST_NEW_EXPORT');
   });
 
+  it('requires a fresh request for a dead monthly-bill export', () => {
+    expect(
+      backgroundJobOperatorAction({
+        type: 'AGENT_MONTHLY_BILL_EXPORT',
+        status: BackgroundJobStatus.DEAD,
+      }),
+    ).toBe('REQUEST_NEW_EXPORT');
+  });
+
   it('sends an ambiguous notification to the audited log workflow instead of offering a no-op retry', () => {
     expect(
       backgroundJobOperatorAction({

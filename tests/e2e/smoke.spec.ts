@@ -450,7 +450,10 @@ test.describe('automation smoke', () => {
     await expect(receiverAddress).toHaveAttribute('required', '');
     await expectNoNextErrorOverlay(page);
 
-    await page.goto(`/orders?q=${fixture.orderNo}`);
+    // The admin workspace defaults to the actionable TODO queue. This search
+    // fixture is intentionally a DRAFT, so search it through the explicit
+    // all-orders queue rather than weakening the queue boundary.
+    await page.goto(`/orders?queue=all&q=${fixture.orderNo}`);
     await expect(
       page
         .locator('[data-sidebar="sidebar"]')
@@ -463,33 +466,30 @@ test.describe('automation smoke', () => {
     await expect(matchedOrder).toContainText(fixture.customerRef);
     await expectNoNextErrorOverlay(page);
 
-    const detailFromList = page.locator(
-      `a[href="/orders/${fixture.orderId}"]:visible`,
-    );
-    await detailFromList.first().click();
+    // Admin rows open the hash-addressable decision drawer. Full-page detail
+    // remains available from the drawer footer.
+    await matchedOrder
+      .getByRole('button', { name: fixture.orderNo, exact: true })
+      .click();
+    await expect(page).toHaveURL((url) => url.hash === `#wo=${fixture.orderNo}`);
+    const drawer = page.getByRole('dialog');
+    await expect(
+      drawer.getByText(fixture.customerRef, { exact: true }).first(),
+    ).toBeVisible();
+    await drawer.getByRole('link', { name: '完整工单', exact: true }).click();
     await expect(page).toHaveURL(`/orders/${fixture.orderId}`);
     await page.goBack();
-    await expect(
-      page.getByRole('heading', { name: '工单', exact: true }),
-    ).toBeVisible();
     await expect(page).toHaveURL((url) => {
       return (
         url.pathname === '/orders' &&
+        url.searchParams.get('queue') === 'all' &&
         url.searchParams.get('q') === fixture.orderNo &&
-        url.searchParams.get('selected') === fixture.orderId
+        url.hash === `#wo=${fixture.orderNo}`
       );
     });
     await expect(
-      page.locator(
-        `[data-order-id="${fixture.orderId}"][data-state="selected"]:visible`,
-      ),
+      page.getByRole('dialog').getByText(fixture.orderNo, { exact: true }),
     ).toBeVisible();
-    const restoredScroll = new URL(page.url()).searchParams.get('scroll');
-    if (restoredScroll) {
-      await expect
-        .poll(() => page.evaluate(() => Math.round(window.scrollY)))
-        .toBe(Number(restoredScroll));
-    }
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`/orders/${fixture.orderId}`);

@@ -90,7 +90,7 @@ describe('bill mutation confirmations', () => {
     expect(html).not.toContain('账单状态已变化');
   });
 
-  it('uses the redirected page receipt instead of an unmounting inline success', () => {
+  it('keeps legacy success feedback out of the archived compatibility route', () => {
     actionState.current = { status: 'success' };
     const html = renderToStaticMarkup(
       <IssueBillButton
@@ -115,8 +115,8 @@ describe('bill mutation confirmations', () => {
       ),
       'utf8',
     );
-    expect(pageSource).toContain("sp.issued === '1'");
-    expect(pageSource).toContain('title="账单已发布"');
+    expect(pageSource).toContain('redirect(`/owner/bills/archive/');
+    expect(pageSource).not.toContain('title="账单已发布"');
   });
 
   it('builds an exact payment preview including the terminal transition', () => {

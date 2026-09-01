@@ -20,6 +20,7 @@ const ROLE_SET: ReadonlySet<string> = new Set(Object.values(Role));
 
 export async function enqueueOrderPdfJob(input: {
   orderId: string;
+  expectedWorkOrderVersion: number;
   actor: { id: string; role: Role };
   baseUrl: string;
 }): Promise<string> {
@@ -39,6 +40,9 @@ export async function handleOrderPdfJob(
 ): Promise<Prisma.InputJsonValue> {
   const payload = asRecord(job.payload);
   const orderId = requiredString(payload.orderId);
+  const expectedWorkOrderVersion = requiredPositiveInteger(
+    payload.expectedWorkOrderVersion,
+  );
   const baseUrl = requiredString(payload.baseUrl);
   const actor = asRecord(payload.actor);
   const actorId = requiredString(actor.id);
@@ -51,6 +55,9 @@ export async function handleOrderPdfJob(
     baseUrl,
   );
   if (!order) throw new OrderPdfNotFoundError();
+  if (order.workOrderVersion !== expectedWorkOrderVersion) {
+    throw new OrderPdfVersionStaleError();
+  }
 
   const { name: factoryName } = await getSetting('factory_name');
   const html = await buildPrintHtml(order, { factoryName });
@@ -66,7 +73,12 @@ export async function handleOrderPdfJob(
   await writePdfArtifact(artifactName, pdf);
   await job.assertLease?.();
   await cleanupOldPdfArtifacts();
-  return { artifactName, byteLength: pdf.byteLength, orderNo: order.orderNo };
+  return {
+    artifactName,
+    byteLength: pdf.byteLength,
+    orderNo: order.orderNo,
+    workOrderVersion: order.workOrderVersion,
+  };
 }
 
 export type OrderPdfJobWaitResult =
@@ -79,7 +91,11 @@ export async function waitForOrderPdfJob(
   options: {
     timeoutMs?: number;
     signal?: AbortSignal;
-    expected?: { orderId: string; actorId: string };
+    expected?: {
+      orderId: string;
+      actorId: string;
+      workOrderVersion: number;
+    };
   } = {},
 ): Promise<OrderPdfJobWaitResult> {
   const deadline = Date.now() + Math.max(1_000, options.timeoutMs ?? 120_000);
@@ -117,14 +133,20 @@ export async function waitForOrderPdfJob(
 
 function matchesExpectedPdfJob(
   job: { type: string; payload: Prisma.JsonValue },
-  expected: { orderId: string; actorId: string },
+  expected: {
+    orderId: string;
+    actorId: string;
+    workOrderVersion: number;
+  },
 ): boolean {
   if (job.type !== BACKGROUND_JOB_TYPES.ORDER_PDF) return false;
   try {
     const payload = asRecord(job.payload);
     const actor = asRecord(payload.actor);
     return (
-      payload.orderId === expected.orderId && actor.id === expected.actorId
+      payload.orderId === expected.orderId &&
+      actor.id === expected.actorId &&
+      payload.expectedWorkOrderVersion === expected.workOrderVersion
     );
   } catch {
     return false;
@@ -205,6 +227,13 @@ function requiredString(value: Prisma.JsonValue | undefined): string {
   return value;
 }
 
+function requiredPositiveInteger(value: Prisma.JsonValue | undefined): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw new InvalidOrderPdfJobPayloadError();
+  }
+  return Number(value);
+}
+
 async function delay(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolveDelay) => {
     const timer = setTimeout(resolveDelay, ms);
@@ -231,5 +260,12 @@ export class OrderPdfNotFoundError extends Error {
   constructor() {
     super('order PDF source not found');
     this.name = 'OrderPdfNotFoundError';
+  }
+}
+
+export class OrderPdfVersionStaleError extends Error {
+  constructor() {
+    super('order PDF work-order version changed');
+    this.name = 'OrderPdfVersionStaleError';
   }
 }

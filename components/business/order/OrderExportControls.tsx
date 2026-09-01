@@ -28,7 +28,7 @@ import {
 export type OrderExportView = {
   id: string;
   status: OrderExportStatus;
-  scope: 'all' | 'filtered';
+  scope: 'all' | 'filtered' | 'selected';
   fileName: string;
   matchedOrderCount: number;
   byteSize: string | null;
@@ -207,7 +207,11 @@ export function OrderExportControls({
                         {item.fileName}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {item.scope === 'all' ? '全部工单' : '当时筛选结果'} ·{' '}
+                        {item.scope === 'all'
+                          ? '全部工单'
+                          : item.scope === 'selected'
+                            ? '所选工单'
+                            : '当时筛选结果'} ·{' '}
                         {formatDateTimeShanghai(new Date(item.createdAt))} ·{' '}
                         <ExportStatusText item={item} />
                       </p>

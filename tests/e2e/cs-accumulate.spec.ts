@@ -11,11 +11,12 @@ import {
   resetCsSalaryStateForUser,
   seedActiveCsPeriod,
   readActiveCsTotalSales,
-  midShanghaiMonth,
+  midPreviousShanghaiMonth,
   ADMIN_USERNAME,
   ADMIN_PASSWORD,
   openFirstOrderItemEditor,
   readE2eOrderPricingSnapshot,
+  seedSettledExternalSalesOrder,
   submitDraftOrderAndWait,
 } from './_helpers';
 
@@ -23,13 +24,13 @@ import {
 //
 // - CS performance is credited when a charged order is submitted. Approved
 //   order changes and cancellations later append their own delta entries.
-// - Customer receipts append BillPayment rows and must never credit the same
-//   sales amount again.
+// - V2 agent-bill receipts settle the external receivable and must never
+//   credit the same amount into the independent CS performance ledger.
 //
 // Unit tests can mock either side independently; this flow proves the real
 // browser actions and PostgreSQL transactions preserve that separation.
 test.describe('客服业绩事件账本与外部销售应收分离', () => {
-  test('客服待核制版费工单提交计入已知业绩，外部销售两次回款均不改写客服业绩', async ({
+  test('客服待核制版费工单提交计入已知业绩，代理商整单收款不改写客服业绩', async ({
     page,
   }) => {
     test.setTimeout(90_000);
@@ -39,17 +40,12 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
     const internalFinishedCustomerRef = `e2e-bill-cs-internal-${suffix}`;
     const externalBilledCustomerRef = `e2e-bill-sales-${suffix}`;
     const billingFixtureAmount = '3000.00';
-    const halfBillingPayment = '1500.00';
     let submittedCsOrderAmount = '';
     const csUserId = await getUserIdByUsername(
       E2E_USERS.customerService.username,
     );
-    const salesUserId = await getUserIdByUsername(
-      E2E_USERS.billingSales.username,
-    );
 
     await resetBillsForUser(csUserId);
-    await resetBillsForUser(salesUserId);
     await resetCsSalaryStateForUser(csUserId);
 
     const { periodId } = await seedActiveCsPeriod({
@@ -149,23 +145,21 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
 
     await logout(page);
 
-    // Billing now intentionally scans EXTERNAL_SALES only. Seed one FINISHED
-    // internal-CS order and one external-sales order in the same month: the
-    // bill must contain only the external order, while the CS event ledger
-    // remains the 3000 recorded at submit time.
+    // V2 billing scans only explicitly settled EXTERNAL_SALES orders. Keep a
+    // legacy internal-CS FINISHED row in the same month, then add one v2
+    // settled external order: only the latter may enter the agent bill.
+    const settledAt = midPreviousShanghaiMonth();
     await seedFinishedOrder({
       submitterId: csUserId,
       submitterRole: 'CUSTOMER_SERVICE',
       customerRef: internalFinishedCustomerRef,
       totalAmount: billingFixtureAmount,
-      finishedAt: midShanghaiMonth(),
+      finishedAt: settledAt,
     });
-    await seedFinishedOrder({
-      submitterId: salesUserId,
-      submitterRole: 'SALES',
+    const billingFixture = await seedSettledExternalSalesOrder({
       customerRef: externalBilledCustomerRef,
-      totalAmount: billingFixtureAmount,
-      finishedAt: midShanghaiMonth(),
+      settledFee: billingFixtureAmount,
+      settledAt,
     });
 
     await test.step('管理员生成外部销售应收，内部客服单不进账单', async () => {
@@ -175,85 +169,42 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
         password: ADMIN_PASSWORD,
       });
       await page
-        .getByRole('button', { name: '生成月账单 / 归集补充账单' })
+        .getByRole('button', { name: '生成 / 同步 DRAFT' })
         .click();
-      await expect(page.getByRole('status')).toContainText(/已处理 \d+ 位销售/u, {
-        timeout: 10_000,
-      });
+      await expect(
+        page.getByText(
+          new RegExp(`^已同步 \\d+ 张 ${billingFixture.period} 账单$`, 'u'),
+        ),
+      ).toBeVisible({ timeout: 15_000 });
 
       const row = page
         .locator('table tbody tr')
-        .filter({ hasText: E2E_USERS.billingSales.displayName })
+        .filter({ hasText: billingFixture.agentDisplayName })
         .filter({ hasText: /¥ 3,000\.00\b/ })
         .first();
       await expect(row).toBeVisible({ timeout: 10_000 });
-      await row.getByRole('link', { name: /详情/ }).click();
-      await page.waitForURL(/\/owner\/bills\/[a-z0-9]+/);
+      await row.getByRole('link', { name: '详情', exact: true }).click();
+      await page.waitForURL(/\/owner\/agent-bills\/[a-z0-9_-]+$/i);
       await expect(page.getByText(externalBilledCustomerRef)).toBeVisible();
       await expect(page.getByText(internalFinishedCustomerRef)).toHaveCount(0);
 
-      await page
-        .getByRole('button', { name: /^发单给销售 \/ 客服$/ })
-        .click();
-      const publishDialog = page.getByRole('alertdialog', {
-        name: /^确认发布 .* 账单？$/,
-      });
-      await expect(publishDialog).toBeVisible();
-      await publishDialog
-        .getByRole('button', { name: '确认发单', exact: true })
-        .click();
-      await expect(page.locator('input[name="amount"]')).toBeVisible({
-        timeout: 10_000,
-      });
+      await page.getByRole('button', { name: '确认并冻结账单' }).click();
+      await expect(
+        page.locator('[data-slot="badge"]').filter({ hasText: /^已确认·待收$/ }),
+      ).toBeVisible({ timeout: 15_000 });
     });
 
-    await test.step('第一笔客户付款只更新应收，客服提交业绩保持不变', async () => {
-      await page.locator('input[name="amount"]').fill(halfBillingPayment);
-      await page
-        .getByRole('button', { name: '核对并录入付款', exact: true })
-        .click();
-      const paymentDialog = page.getByRole('alertdialog', {
-        name: '确认录入这笔收款？',
-        exact: true,
-      });
-      await expect(paymentDialog).toBeVisible();
-      await paymentDialog
-        .getByRole('button', { name: '确认录入付款', exact: true })
-        .click();
+    await test.step('代理商整单收款不改写客服提交业绩', async () => {
+      await page.getByLabel('收款方式').fill('银行转账');
+      await page.getByLabel('流水号').fill(`E2E-CS-${suffix}`);
+      await page.getByRole('button', { name: '标记已收' }).click();
       await expect(
-        page.locator('[data-slot="badge"]').filter({ hasText: /^部分结清$/ }),
-      ).toBeVisible({ timeout: 10_000 });
+        page.locator('[data-slot="badge"]').filter({ hasText: /^已收$/ }),
+      ).toBeVisible({ timeout: 15_000 });
 
-      const afterFirstPayment = await readActiveCsTotalSales(csUserId);
-      expect(afterFirstPayment?.periodId).toBe(periodId);
-      expect(Number(afterFirstPayment!.totalSales)).toBe(
-        Number(submittedCsOrderAmount),
-      );
-    });
-
-    await test.step('第二笔客户付款结清账单，客服提交业绩仍不变', async () => {
-      await expect(page.locator('input[name="amount"]')).toBeVisible({
-        timeout: 5_000,
-      });
-      await page.locator('input[name="amount"]').fill(halfBillingPayment);
-      await page
-        .getByRole('button', { name: '核对并录入付款', exact: true })
-        .click();
-      const paymentDialog = page.getByRole('alertdialog', {
-        name: '确认录入这笔收款？',
-        exact: true,
-      });
-      await expect(paymentDialog).toBeVisible();
-      await paymentDialog
-        .getByRole('button', { name: '确认录入付款', exact: true })
-        .click();
-      await expect(
-        page.locator('[data-slot="badge"]').filter({ hasText: /^已结清$/ }),
-      ).toBeVisible({ timeout: 10_000 });
-
-      const afterSecondPayment = await readActiveCsTotalSales(csUserId);
-      expect(afterSecondPayment?.periodId).toBe(periodId);
-      expect(Number(afterSecondPayment!.totalSales)).toBe(
+      const afterPayment = await readActiveCsTotalSales(csUserId);
+      expect(afterPayment?.periodId).toBe(periodId);
+      expect(Number(afterPayment!.totalSales)).toBe(
         Number(submittedCsOrderAmount),
       );
     });

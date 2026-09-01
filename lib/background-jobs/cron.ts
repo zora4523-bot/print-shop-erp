@@ -9,6 +9,8 @@ import {
   runOrderOverdueTask,
   runOutsourceOverdueTask,
 } from '../cron/tasks';
+import { runPendingFactoryBacklogTask } from '../cron/pending-factory-backlog';
+import { runProductionAlertNotificationTask } from '../notification/production-alerts';
 import { enqueueBackgroundJob } from './repository';
 import {
   BACKGROUND_JOB_TYPES,
@@ -24,6 +26,8 @@ const CRON_TYPES: ReadonlySet<string> = new Set([
   BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE,
   BACKGROUND_JOB_TYPES.CRON_CS_PERIOD_ENDING,
   BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE,
+  BACKGROUND_JOB_TYPES.CRON_PENDING_FACTORY_BACKLOG,
+  BACKGROUND_JOB_TYPES.CRON_PRODUCTION_ALERTS,
   BACKGROUND_JOB_TYPES.CRON_ORDER_EXPORT_CLEANUP,
 ]);
 
@@ -69,6 +73,14 @@ export async function handleCronJob(
       return runCsPeriodEndingTask(requiredString(payload.runDate), fence);
     case BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE:
       return runOrderOverdueTask(requiredString(payload.runDate), fence);
+    case BACKGROUND_JOB_TYPES.CRON_PENDING_FACTORY_BACKLOG:
+      return runPendingFactoryBacklogTask(requiredString(payload.runDate), fence);
+    case BACKGROUND_JOB_TYPES.CRON_PRODUCTION_ALERTS:
+      return runProductionAlertNotificationTask(
+        requiredString(payload.runDate),
+        undefined,
+        fence,
+      );
     case BACKGROUND_JOB_TYPES.CRON_ORDER_EXPORT_CLEANUP:
       return runOrderExportCleanupTask(requiredString(payload.runDate), fence);
     default:

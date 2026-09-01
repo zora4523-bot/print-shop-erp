@@ -12,14 +12,11 @@ import type { NotificationEvent } from './events';
 // 必须手维护。下方 PayloadFieldsCheck 类型是&ldquo;运行时 vs 类型同步&rdquo;的
 // 编译期闸——任何 NotificationPayloads 字段缺失会 typecheck 报错。
 export const NOTIFICATION_PAYLOAD_FIELDS = {
-  ORDER_SUBMITTED: [
-    'orderId',
-    'orderNo',
-    'submitterName',
-    'customerRef',
-    'totalAmount',
-    'urgentMark',
-  ],
+  ORDER_SUBMITTED: ['orderId', 'orderNo', 'summary', 'deepLink'],
+  ORDER_CHANGE_REQUESTED: ['orderId', 'orderNo', 'summary', 'deepLink'],
+  PRODUCTION_PROGRESS_ANOMALY: ['orderId', 'orderNo', 'summary', 'deepLink'],
+  PRODUCTION_STAGNANT: ['orderId', 'orderNo', 'summary', 'deepLink'],
+  PENDING_FACTORY_BACKLOG: ['orderId', 'orderNo', 'summary', 'deepLink'],
   URGENT_ORDER: ['orderId', 'orderNo', 'submitterName', 'customerRef'],
   ORDER_SCHEDULED: ['orderId', 'orderNo', 'taskCount'],
   ORDER_COMPLETED: ['orderId', 'orderNo', 'customerRef'],

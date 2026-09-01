@@ -6,8 +6,13 @@ import { db } from '../db';
  * contributed the quantity. No worker assignment or capacity fact is read.
  */
 export async function listOrderProductionOperations(orderId: string) {
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: { workOrderVersion: true },
+  });
+  if (!order) return [];
   return db.productionOperation.findMany({
-    where: { orderId },
+    where: { orderId, workOrderVersion: order.workOrderVersion },
     select: {
       id: true,
       operationType: true,
@@ -29,8 +34,13 @@ export async function listOrderProductionOperations(orderId: string) {
 
 /** Read-only no-pay progress for admin and normal order detail pages. */
 export async function listOrderProductionProgressSteps(orderId: string) {
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: { workOrderVersion: true },
+  });
+  if (!order) return [];
   return db.productionProgressStep.findMany({
-    where: { orderId },
+    where: { orderId, workOrderVersion: order.workOrderVersion },
     select: {
       id: true,
       craftCode: true,

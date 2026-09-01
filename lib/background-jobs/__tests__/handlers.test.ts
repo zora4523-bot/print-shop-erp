@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../agent-monthly-bill-export', () => ({
+  handleAgentMonthlyBillExportJob: vi.fn(),
+}));
 vi.mock('../cdr', () => ({ handleCdrBundleJob: vi.fn() }));
 vi.mock('../cron', () => ({ handleCronJob: vi.fn() }));
 vi.mock('../notification', () => ({ handleNotificationJob: vi.fn() }));

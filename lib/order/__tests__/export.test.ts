@@ -27,6 +27,7 @@ const {
   openArtifactMock,
   txMock,
   writeXlsxFileMock,
+  resolveAdminWorkspaceResultWhereMock,
 } = vi.hoisted(() => {
   const transactionClient = {
     orderExport: {
@@ -69,6 +70,7 @@ const {
     openArtifactMock: vi.fn(),
     txMock: transactionClient,
     writeXlsxFileMock: vi.fn(),
+    resolveAdminWorkspaceResultWhereMock: vi.fn(),
   };
 });
 
@@ -87,6 +89,9 @@ vi.mock('@/lib/order/export-artifact', () => ({
   ensureOrderExportArtifactDir: vi.fn(),
   openOrderExportArtifact: openArtifactMock,
   orderExportArtifactPath: vi.fn((name: string) => `/tmp/${name}`),
+}));
+vi.mock('@/lib/order/admin-workspace', () => ({
+  resolveAdminWorkspaceResultWhere: resolveAdminWorkspaceResultWhereMock,
 }));
 
 import {
@@ -194,6 +199,7 @@ beforeEach(() => {
   openArtifactMock.mockReset();
   deleteArtifactMock.mockReset().mockResolvedValue(undefined);
   writeXlsxFileMock.mockReset();
+  resolveAdminWorkspaceResultWhereMock.mockReset();
 });
 
 describe('requestOrderExport', () => {
@@ -346,6 +352,41 @@ describe('requestOrderExport', () => {
     });
   });
 
+  it('persists workspace-only queue, signal, star and billing filters canonically', async () => {
+    await requestOrderExport({
+      actor,
+      requestKey: REQUEST_KEY,
+      scope: 'filtered',
+      params: {
+        adminWorkspace: 'v1',
+        queue: 'production',
+        signal: 'overdue',
+        starred: 'yes',
+        unbilled: 'yes',
+        q: '客户甲',
+      },
+      durable: true,
+      now: NOW,
+    });
+
+    expect(txMock.orderExport.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        filters: {
+          scope: 'filtered',
+          params: {
+            q: '客户甲',
+            queue: 'production',
+            signal: 'overdue',
+            starred: 'yes',
+            unbilled: 'yes',
+            adminWorkspace: 'v1',
+          },
+          filterHash: expect.any(String),
+        },
+      }),
+    });
+  });
+
   it('rejects a direct domain request whose normalized params exceed 10,000 characters', async () => {
     await expect(
       requestOrderExport({
@@ -407,6 +448,34 @@ describe('requestOrderExport', () => {
 });
 
 describe('processQueuedOrderExport', () => {
+  it('rebuilds a workspace export through the shared workspace predicate at its snapshot time', async () => {
+    const stop = new Error('resolved workspace predicate');
+    resolveAdminWorkspaceResultWhereMock.mockRejectedValueOnce(stop);
+    dbMock.orderExport.findUnique.mockResolvedValue(
+      queuedExportRow({
+        snapshotAt: NOW,
+        filters: {
+          scope: 'filtered',
+          params: {
+            adminWorkspace: 'v1',
+            queue: 'production',
+            starred: 'yes',
+          },
+        },
+      }),
+    );
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toBe(stop);
+    expect(resolveAdminWorkspaceResultWhereMock).toHaveBeenCalledWith(
+      { id: actor.id, role: Role.ADMIN },
+      expect.objectContaining({
+        queue: 'production',
+        starred: true,
+      }),
+      NOW,
+    );
+  });
+
   it('returns an already-ready result without regenerating the workbook', async () => {
     dbMock.orderExport.findUnique.mockResolvedValue(
       queuedExportRow({
@@ -571,6 +640,7 @@ describe('processQueuedOrderExport', () => {
       trackingNo: 'SF123',
       totalAmount: new Prisma.Decimal('1234.56'),
       revision: 2,
+      workOrderVersion: 3,
       promisedDate: new Date('2026-08-10T00:00:00.000Z'),
       packageRequirement: '防水',
       remark: '重点跟单',
@@ -822,6 +892,11 @@ describe('processQueuedOrderExport', () => {
     expect(consumed.get('工单')?.[1]?.[18]).toEqual(
       xlsxDecimal('1234.56'),
     );
+    expect(consumed.get('工单')?.[0]?.slice(19, 21)).toEqual([
+      '数据修订版本',
+      '工单版本',
+    ]);
+    expect(consumed.get('工单')?.[1]?.slice(19, 21)).toEqual([2, 3]);
     expect(consumed.get('款式')).toHaveLength(2);
     expect(consumed.get('款式')?.[1]?.slice(0, 11)).toEqual([
       'GD-260807-001',

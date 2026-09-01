@@ -135,8 +135,10 @@ test.describe('notification urgent wire — golden path', () => {
     );
     expect(mineSubmitted).toHaveLength(1);
     expect(mineSubmitted[0]!.status).toBe('SUCCESS');
-    // 急单标记落到 messageContent（template 含 {urgentMark}）
-    expect(mineSubmitted[0]!.messageContent).toContain('🚨 急单');
+    // 托管的新单通知只携带管理工作台所需的安全摘要；急单语义由下面
+    // 独立的 URGENT_ORDER 事件承载，避免在固定角色消息里重复扩散字段。
+    expect(mineSubmitted[0]!.messageContent).toContain('新工单已提交');
+    expect(mineSubmitted[0]!.messageContent).not.toContain('🚨 急单');
 
     const urgentLogs = await readNotificationLogs({
       eventType: 'URGENT_ORDER',

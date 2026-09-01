@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { enqueueBackgroundJobMock, runOrderExportCleanupTaskMock } = vi.hoisted(
+const {
+  enqueueBackgroundJobMock,
+  runOrderExportCleanupTaskMock,
+  runPendingFactoryBacklogTaskMock,
+  runProductionAlertNotificationTaskMock,
+} = vi.hoisted(
   () => ({
     enqueueBackgroundJobMock: vi.fn(),
     runOrderExportCleanupTaskMock: vi.fn(),
+    runPendingFactoryBacklogTaskMock: vi.fn(),
+    runProductionAlertNotificationTaskMock: vi.fn(),
   }),
 );
 
@@ -19,6 +26,12 @@ vi.mock('@/lib/cron/tasks', () => ({
   runOrderExportCleanupTask: runOrderExportCleanupTaskMock,
   runOrderOverdueTask: vi.fn(),
   runOutsourceOverdueTask: vi.fn(),
+}));
+vi.mock('@/lib/cron/pending-factory-backlog', () => ({
+  runPendingFactoryBacklogTask: runPendingFactoryBacklogTaskMock,
+}));
+vi.mock('@/lib/notification/production-alerts', () => ({
+  runProductionAlertNotificationTask: runProductionAlertNotificationTaskMock,
 }));
 
 import { BackgroundJobQueue } from '../../../generated/prisma/enums';
@@ -40,6 +53,19 @@ beforeEach(() => {
     runDate: '2026-08-07',
     expiredCount: 3,
     scrubbedFilterCount: 2,
+  });
+  runPendingFactoryBacklogTaskMock.mockReset().mockResolvedValue({
+    status: 'ok',
+    runDate: '2026-08-07',
+    enabled: true,
+    pendingCount: 7,
+    notified: true,
+  });
+  runProductionAlertNotificationTaskMock.mockReset().mockResolvedValue({
+    status: 'ok',
+    runDate: '2026-08-07',
+    anomalyCount: 1,
+    stagnationCount: 2,
   });
 });
 
@@ -114,5 +140,54 @@ describe('order export cleanup cron job', () => {
       }),
     ).rejects.toBeInstanceOf(InvalidCronJobPayloadError);
     expect(enqueueBackgroundJobMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('pending factory backlog cron job', () => {
+  it('accepts the protected daily cron type and invokes the task through the worker', async () => {
+    await expect(
+      enqueueCronJob({
+        type: BACKGROUND_JOB_TYPES.CRON_PENDING_FACTORY_BACKLOG,
+        scope: '2026-08-07',
+        payload: { runDate: '2026-08-07' },
+      }),
+    ).resolves.toMatchObject({ jobId: 'job-cleanup-1', created: true });
+
+    const job = {
+      ...cleanupJob({ runDate: '2026-08-07' }),
+      type: BACKGROUND_JOB_TYPES.CRON_PENDING_FACTORY_BACKLOG,
+      dedupeKey: 'cron:CRON_PENDING_FACTORY_BACKLOG:2026-08-07',
+    } satisfies ClaimedBackgroundJob;
+    await handleCronJob(job);
+
+    expect(runPendingFactoryBacklogTaskMock).toHaveBeenCalledExactlyOnceWith(
+      '2026-08-07',
+      {},
+    );
+  });
+});
+
+describe('production alert cron job', () => {
+  it('每个扫描时间桶入队一个 durable LIGHT 任务并使用默认真实事实源', async () => {
+    await expect(
+      enqueueCronJob({
+        type: BACKGROUND_JOB_TYPES.CRON_PRODUCTION_ALERTS,
+        scope: '2026-08-07T09:00Z',
+        payload: { runDate: '2026-08-07' },
+      }),
+    ).resolves.toMatchObject({ jobId: 'job-cleanup-1', created: true });
+
+    const job = {
+      ...cleanupJob({ runDate: '2026-08-07' }),
+      type: BACKGROUND_JOB_TYPES.CRON_PRODUCTION_ALERTS,
+      dedupeKey: 'cron:CRON_PRODUCTION_ALERTS:2026-08-07',
+    } satisfies ClaimedBackgroundJob;
+    await handleCronJob(job);
+
+    expect(runProductionAlertNotificationTaskMock).toHaveBeenCalledExactlyOnceWith(
+      '2026-08-07',
+      undefined,
+      {},
+    );
   });
 });

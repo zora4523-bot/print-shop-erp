@@ -31,6 +31,12 @@ vi.mock('@/lib/cron/tasks', () => ({
   runOrderOverdueTask: vi.fn(),
   runOutsourceOverdueTask: vi.fn(),
 }));
+vi.mock('@/lib/cron/pending-factory-backlog', () => ({
+  runPendingFactoryBacklogTask: vi.fn(),
+}));
+vi.mock('@/lib/notification/production-alerts', () => ({
+  runProductionAlertNotificationTask: vi.fn(),
+}));
 vi.mock('@/lib/salary/hourly-aggregate', () => ({
   HourlyAggregateError: class HourlyAggregateError extends Error {},
 }));
@@ -45,6 +51,8 @@ import { POST as hourlyPayrollPost } from '../hourly-payroll/route';
 import { POST as orderExportCleanupPost } from '../order-export-cleanup/route';
 import { POST as orderOverduePost } from '../order-overdue/route';
 import { POST as outsourceOverduePost } from '../outsource-overdue/route';
+import { POST as pendingFactoryBacklogPost } from '../pending-factory-backlog/route';
+import { POST as productionAlertsPost } from '../production-alerts/route';
 
 const SECRET = 'test-cron-secret-12345';
 
@@ -143,6 +151,26 @@ describe('cron durable wires', () => {
       expected: {
         type: BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE,
         scope: '2026-07-17',
+        payload: { runDate: '2026-07-17' },
+      },
+    },
+    {
+      name: 'pending factory backlog',
+      post: pendingFactoryBacklogPost,
+      path: '/api/cron/pending-factory-backlog',
+      expected: {
+        type: BACKGROUND_JOB_TYPES.CRON_PENDING_FACTORY_BACKLOG,
+        scope: '2026-07-17',
+        payload: { runDate: '2026-07-17' },
+      },
+    },
+    {
+      name: 'production alerts',
+      post: productionAlertsPost,
+      path: '/api/cron/production-alerts',
+      expected: {
+        type: BACKGROUND_JOB_TYPES.CRON_PRODUCTION_ALERTS,
+        scope: '2026-07-17T04:00Z',
         payload: { runDate: '2026-07-17' },
       },
     },

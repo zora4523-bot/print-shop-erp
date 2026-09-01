@@ -480,7 +480,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: 'Dashboard',
       prepareGateState: prepareDashboardChartsState,
     },
-    { name: 'orders', path: '/orders', readyHeading: '工单' },
+    {
+      name: 'orders',
+      path: '/orders',
+      readyHeading: '工单管理',
+      prepareGateState: prepareAdminOrderWorkspaceState,
+    },
     {
       name: 'orders-filtered',
       path:
@@ -490,8 +495,8 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
         encodeURIComponent('广东省深圳市南山区科技园长地址压力测试大厦A座12345678901234567890') +
         '&foilColor=' +
         encodeURIComponent('哑金,透明金,客户特殊调色长名称'),
-      readyHeading: '工单',
-      prepareGateState: prepareOrderFiltersState,
+      readyHeading: '工单管理',
+      prepareGateState: prepareAdminOrderWorkspaceState,
     },
     {
       name: 'order-detail',
@@ -587,7 +592,16 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       path: RULE_CENTER_HREFS.employeePay,
       readyHeading: '员工工资规则',
     },
-    { name: 'bills', path: '/owner/bills', readyHeading: '销售应收账单' },
+    {
+      name: 'agent-monthly-bills-alias',
+      path: '/owner/bills',
+      readyHeading: '代理商月度账单',
+    },
+    {
+      name: 'legacy-bills-archive',
+      path: '/owner/bills/archive',
+      readyHeading: 'Legacy 账单只读归档',
+    },
     {
       name: 'order-changes',
       path: '/owner/order-changes',
@@ -631,50 +645,61 @@ function priceTierFixtureRoutes(): readonly AdminRoute[] {
   ];
 }
 
-async function prepareOrderFiltersState(page: Page) {
-  const filters = page.locator('section').filter({
-    has: page.getByRole('heading', { name: '筛选工单', exact: true }),
-  });
-  const mobile = (page.viewportSize()?.width ?? 1280) < 640;
-  if (mobile) {
-    const filterTrigger = filters.getByRole('button', {
-      name: /打开筛选条件/,
-    });
-    await expect(filterTrigger).toBeVisible();
-    await filterTrigger.click();
-    const filterDialog = page.getByRole('dialog', {
-      name: '筛选工单',
-      exact: true,
-    });
-    await expect(filterDialog).toBeVisible();
-    await expect(filterDialog.locator('details').first()).toHaveAttribute(
-      'open',
-      '',
-    );
-    const dialogBox = await filterDialog.boundingBox();
-    const viewportHeight = page.viewportSize()?.height ?? 0;
-    expect(dialogBox).not.toBeNull();
-    expect(dialogBox!.height).toBeLessThanOrEqual(viewportHeight * 0.8 + 1);
-    await page.keyboard.press('Escape');
-    await expect(filterDialog).toBeHidden();
-    await expect(filterTrigger).toBeFocused();
-  } else {
-    const filterPanel = filters.locator('#order-list-filter-controls');
-    await expect(filterPanel).not.toHaveAttribute('open', '');
-    await filterPanel.locator('summary').first().click();
-    await expect(filterPanel).toHaveAttribute('open', '');
-    await expect(filterPanel.locator('details').first()).toHaveAttribute(
-      'open',
-      '',
-    );
+async function prepareAdminOrderWorkspaceState(page: Page) {
+  const workspace = page
+    .locator('[data-slot="admin-order-workspace"]:visible')
+    .first();
+  await expect(workspace).toBeVisible();
+  await expect(
+    workspace.getByRole('navigation', { name: '工单队列', exact: true }),
+  ).toBeVisible();
+  for (const queue of [
+    '待办',
+    '待打印',
+    '生产中',
+    '已发货',
+    '已结算/取消',
+    '全部',
+  ]) {
+    await expect(
+      workspace.getByRole('link', { name: new RegExp(`^${queue}`) }),
+    ).toBeVisible();
   }
-  expect(
-    await filters
-      .getByLabel('已启用的筛选条件')
-      .getByRole('link')
-      .count(),
-  ).toBeGreaterThanOrEqual(5);
-  const exportTrigger = filters.getByRole('button', {
+  await expect(workspace.getByLabel('搜索工单')).toBeVisible();
+  await expect(workspace.getByLabel('按客户筛选')).toBeVisible();
+  await expect(workspace.getByLabel('按业务员筛选')).toBeVisible();
+  await expect(workspace.getByLabel('按工艺线筛选')).toBeVisible();
+
+  if (new URL(page.url()).search === '') {
+    await workspace
+      .getByRole('link', { name: /^全部/ })
+      .click();
+    await expect(page).toHaveURL(/(?:[?&])queue=all(?:&|$)/);
+    const firstOrder = page
+      .getByRole('list', { name: '管理端工单列表', exact: true })
+      .getByRole('button', { name: /^GD-/ })
+      .first();
+    await expect(firstOrder).toBeVisible();
+    await firstOrder.click();
+    const orderDrawer = page.getByRole('dialog').filter({
+      has: page.getByRole('heading', { name: '费用三段', exact: true }),
+    });
+    await expect(orderDrawer).toBeVisible();
+    await expect(orderDrawer.getByText('quotedFee', { exact: true })).toBeVisible();
+    await expect(orderDrawer.getByText('confirmedFee', { exact: true })).toBeVisible();
+    await expect(orderDrawer.getByText('settledFee', { exact: true })).toBeVisible();
+    const currentFeeStageCount = await orderDrawer
+      .locator('[aria-current="step"]')
+      .count();
+    expect(currentFeeStageCount).toBeLessThanOrEqual(1);
+    if (currentFeeStageCount === 0) {
+      await expect(orderDrawer).toContainText('不伪造三段快照');
+    }
+    await page.keyboard.press('Escape');
+    await expect(orderDrawer).toBeHidden();
+  }
+
+  const exportTrigger = workspace.getByRole('button', {
     name: /导出工单/,
   });
   await expect(exportTrigger).toBeVisible();
@@ -687,6 +712,10 @@ async function prepareOrderFiltersState(page: Page) {
   await expect(
     exportDialog.getByRole('button', { name: /导出筛选结果/ }),
   ).toBeVisible();
+  await expect(
+    exportDialog.getByRole('button', { name: '导出全部工单', exact: true }),
+  ).toBeVisible();
+  const mobile = (page.viewportSize()?.width ?? 1280) < 640;
   if (mobile) {
     const viewportWidth = page.viewportSize()?.width ?? 0;
     // Base UI 先挂载右侧抽屉，再在下一帧移除

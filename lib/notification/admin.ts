@@ -9,9 +9,12 @@ import {
   PRIVATE_EVENT_MAX_CHANNELS,
   TEST_EVENT_TYPE,
   isPrivatePerCsEvent,
+  managementNotificationRoleForEvent,
+  type ManagementNotificationRole,
   type NotificationEvent,
 } from './events';
 import { BACKGROUND_JOB_TYPES } from '../background-jobs/types';
+import { resolveSetting } from '../settings';
 
 // 推送配置 / 日志的 admin-side 读写。Prisma 调用集中在这里（CLAUDE.md
 // 三层架构：app → actions → lib → Prisma）。Server Actions 在
@@ -29,13 +32,13 @@ export type ChannelSummary = {
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
-  // 引用此 channel 的 active rule 数（>0 时禁删）
-  referencingActiveRuleCount: number;
+  // 引用此 channel 的规则或固定角色路由数（>0 时禁删）
+  referencingConfigurationCount: number;
 };
 
 type ChannelWithoutRefCount = Omit<
   ChannelSummary,
-  'referencingActiveRuleCount'
+  'referencingConfigurationCount'
 >;
 
 async function listChannels(): Promise<ChannelWithoutRefCount[]> {
@@ -56,6 +59,7 @@ async function listChannels(): Promise<ChannelWithoutRefCount[]> {
 function addChannelReferenceCounts(
   channels: readonly ChannelWithoutRefCount[],
   rules: readonly { channelIds: readonly string[] }[],
+  rawManagementRouting?: unknown,
 ): ChannelSummary[] {
   const refCount = new Map<string, number>();
   for (const rule of rules) {
@@ -63,14 +67,23 @@ function addChannelReferenceCounts(
       refCount.set(channelId, (refCount.get(channelId) ?? 0) + 1);
     }
   }
+  const routing = resolveSetting(
+    'management_notification_routing',
+    rawManagementRouting,
+  );
+  for (const role of [routing.factoryConfirmer, routing.owner]) {
+    for (const channelId of role.channelIds) {
+      refCount.set(channelId, (refCount.get(channelId) ?? 0) + 1);
+    }
+  }
   return channels.map((channel) => ({
     ...channel,
-    referencingActiveRuleCount: refCount.get(channel.id) ?? 0,
+    referencingConfigurationCount: refCount.get(channel.id) ?? 0,
   }));
 }
 
 /**
- * 列出全部 channel + 每个 channel 被多少 rule 引用（不管 isActive，
+ * 列出全部 channel + 每个 channel 被多少规则/固定角色路由引用，
  * 用于 UI 渲染&ldquo;删除前置&rdquo;红/灰按钮）。NotificationRule.channelIds 是
  * `String[]`，没 FK，得 JS 侧 cross-reference。
  *
@@ -79,14 +92,18 @@ function addChannelReferenceCounts(
  * 重启 rule 就拿到悬空配置。所以这里数所有 rule，不管 isActive。
  */
 export async function listChannelsWithRefCount(): Promise<ChannelSummary[]> {
-  const [channels, allRules] = await Promise.all([
+  const [channels, allRules, routingSetting] = await Promise.all([
     listChannels(),
     db.notificationRule.findMany({
       // 故意不过滤 isActive —— 见函数注释。
       select: { channelIds: true },
     }),
+    db.setting.findUnique({
+      where: { key: 'management_notification_routing' },
+      select: { value: true },
+    }),
   ]);
-  return addChannelReferenceCounts(channels, allRules);
+  return addChannelReferenceCounts(channels, allRules, routingSetting?.value);
 }
 
 export async function getChannel(id: string): Promise<ChannelSummary | null> {
@@ -103,9 +120,9 @@ export async function getChannel(id: string): Promise<ChannelSummary | null> {
     },
   });
   if (!c) return null;
-  // 单条详情不必做交叉引用，referencingActiveRuleCount 留 0（caller
+  // 单条详情不必做交叉引用，referencingConfigurationCount 留 0（caller
   // 会从 list 拿，或者编辑场景下不需要）。
-  return { ...c, referencingActiveRuleCount: 0 };
+  return { ...c, referencingConfigurationCount: 0 };
 }
 
 export type CreateChannelInput = {
@@ -161,16 +178,35 @@ export async function updateChannel(
 export class ChannelInUseError extends Error {
   constructor(
     public readonly channelId: string,
-    public readonly referencingRules: readonly { eventType: string }[],
+    public readonly references: readonly ChannelReference[],
   ) {
-    super(`channel ${channelId} 被 ${referencingRules.length} 个启用规则引用`);
+    super(`channel ${channelId} 被 ${references.length} 项通知配置引用`);
     this.name = 'ChannelInUseError';
   }
 }
 
+export type ChannelReference =
+  | { kind: 'rule'; eventType: string }
+  | { kind: 'management-route'; role: ManagementNotificationRole };
+
+function managementRouteReferences(
+  raw: unknown,
+  channelId: string,
+): ChannelReference[] {
+  const routing = resolveSetting('management_notification_routing', raw);
+  const references: ChannelReference[] = [];
+  if (routing.factoryConfirmer.channelIds.includes(channelId)) {
+    references.push({ kind: 'management-route', role: 'factoryConfirmer' });
+  }
+  if (routing.owner.channelIds.includes(channelId)) {
+    references.push({ kind: 'management-route', role: 'owner' });
+  }
+  return references;
+}
+
 /**
- * 删除 channel 前置检查：被任何 rule（不管 isActive）的 channelIds
- * 引用就拒绝。强一致性走 transaction：检查 + delete 在同一个 tx 内，
+ * 删除 channel 前置检查：被任何 rule（不管 isActive）或固定角色
+ * 路由引用就拒绝。强一致性走 transaction：检查 + delete 在同一个 tx 内，
  * 避免&ldquo;检查通过之后另一个 owner 把 rule 加上&rdquo;的 race。
  *
  * 之前只过滤 isActive=true 的 rule，导致 owner
@@ -200,15 +236,28 @@ export async function deleteChannel(id: string): Promise<void> {
       WHERE id = ${id}
       FOR UPDATE
     `;
-    const referencingRules = await tx.notificationRule.findMany({
-      where: {
-        // 故意不过滤 isActive —— 见函数注释。
-        channelIds: { has: id },
-      },
-      select: { eventType: true },
-    });
-    if (referencingRules.length > 0) {
-      throw new ChannelInUseError(id, referencingRules);
+    const [referencingRules, routingSetting] = await Promise.all([
+      tx.notificationRule.findMany({
+        where: {
+          // 故意不过滤 isActive —— 见函数注释。
+          channelIds: { has: id },
+        },
+        select: { eventType: true },
+      }),
+      tx.setting.findUnique({
+        where: { key: 'management_notification_routing' },
+        select: { value: true },
+      }),
+    ]);
+    const references: ChannelReference[] = [
+      ...referencingRules.map((rule) => ({
+        kind: 'rule' as const,
+        eventType: rule.eventType,
+      })),
+      ...managementRouteReferences(routingSetting?.value, id),
+    ];
+    if (references.length > 0) {
+      throw new ChannelInUseError(id, references);
     }
     await tx.notificationChannel.delete({ where: { id } });
   });
@@ -255,9 +304,20 @@ export async function listNotificationConfiguration(): Promise<{
   channels: ChannelSummary[];
   rules: RuleSummary[];
 }> {
-  const [channels, rules] = await Promise.all([listChannels(), listRules()]);
+  const [channels, rules, routingSetting] = await Promise.all([
+    listChannels(),
+    listRules(),
+    db.setting.findUnique({
+      where: { key: 'management_notification_routing' },
+      select: { value: true },
+    }),
+  ]);
   return {
-    channels: addChannelReferenceCounts(channels, rules),
+    channels: addChannelReferenceCounts(
+      channels,
+      rules,
+      routingSetting?.value,
+    ),
     rules,
   };
 }
@@ -424,7 +484,11 @@ export async function updateRuleWithGuard(
   eventType: string,
   input: UpdateRuleInput,
 ): Promise<void> {
-  if (input.isActive && input.channelIds.length === 0) {
+  if (
+    input.isActive &&
+    input.channelIds.length === 0 &&
+    !managementNotificationRoleForEvent(eventType)
+  ) {
     throw new EmptyChannelIdsError(eventType);
   }
   if (

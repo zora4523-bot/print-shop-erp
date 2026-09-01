@@ -13,7 +13,9 @@ import {
   setOrderSfCollectSchema,
   createOrderChangeRequestSchema,
   previewOrderChangeRequestPricingSchema,
+  previewOrderCancellationSettlementSchema,
   reviewOrderChangeRequestSchema,
+  withdrawOrderChangeRequestSchema,
   previewOrderPricingReviewSchema,
   finalizeOrderPricingSchema,
   saveOrderManualChargeSchema,
@@ -43,7 +45,9 @@ import {
   createOrderChangeRequest,
   OrderChangeRequestError,
   previewOrderChangeRequestPricing,
+  previewOrderCancellationSettlement,
   reviewOrderChangeRequest,
+  withdrawOrderChangeRequest,
 } from '@/lib/order/change-request';
 import {
   finalizeOrderPricing,
@@ -64,8 +68,10 @@ import type {
   CreateReworkOrderMutationResult,
   OrderMutationResult,
   PreviewOrderChangeRequestPricingResult,
+  PreviewOrderCancellationSettlementResult,
   PreviewOrderPricingReviewResult,
   ReviewOrderChangeRequestMutationResult,
+  WithdrawOrderChangeRequestMutationResult,
   FinalizeOrderPricingMutationResult,
   OrderCommercialDetailMutationResult,
   SubmitOrderMutationResult,
@@ -341,28 +347,20 @@ export async function shipOrderAction(
   return { status: 'success' };
 }
 
-// SHIPPED → FINISHED (terminal close). Same permission as ship for
-// MVP — no separate `order:finish` business rule today.
+// Compatibility export only. Settlement v2 is the sole terminal writer;
+// callers must use the explicit administrator settlement workflow.
 export async function finishOrderAction(
-  orderId: string,
+  _orderId: string,
 ): Promise<OrderMutationResult> {
-  const actor = await requirePermission('order:ship');
-
-  try {
-    await finishOrder(orderId, actor);
-  } catch (err) {
-    if (err instanceof OrderInvariantError) {
-      return { status: 'error', message: err.message };
-    }
-    if (err instanceof InvalidOrderTransitionError) {
-      return { status: 'error', message: err.message };
-    }
-    throw err;
-  }
-
-  revalidatePath('/orders');
-  revalidatePath(`/orders/${orderId}`);
-  return { status: 'success' };
+  // Keep the domain compatibility export in this module's contract surface,
+  // while proving that this action deliberately never invokes the writer.
+  void finishOrder;
+  void _orderId;
+  await requirePermission('order:ship');
+  return {
+    status: 'error',
+    message: '旧版完结入口已停用，请使用管理端“结算”操作',
+  };
 }
 
 // Accepts FormData (the edit form progressively enhances from a plain
@@ -557,6 +555,61 @@ export async function reviewOrderChangeRequestAction(
     revalidatePath('/worker/tasks');
     revalidatePath('/worker/orders');
     return { status: 'success', requestStatus: request.status };
+  } catch (error) {
+    if (error instanceof OrderChangeRequestError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function withdrawOrderChangeRequestAction(
+  _prev: WithdrawOrderChangeRequestMutationResult | null,
+  raw: unknown,
+): Promise<WithdrawOrderChangeRequestMutationResult> {
+  const actor = await requirePermission('order:change:request');
+  const parsed = withdrawOrderChangeRequestSchema.safeParse(
+    raw instanceof FormData
+      ? { requestId: raw.get('requestId') }
+      : raw,
+  );
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+  try {
+    const request = await withdrawOrderChangeRequest(parsed.data, actor);
+    revalidatePath('/orders');
+    revalidatePath(`/orders/${request.orderId}`);
+    revalidatePath('/owner/order-changes');
+    return { status: 'success', requestStatus: request.status };
+  } catch (error) {
+    if (error instanceof OrderChangeRequestError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function previewOrderCancellationSettlementAction(
+  _prev: PreviewOrderCancellationSettlementResult | null,
+  raw: unknown,
+): Promise<PreviewOrderCancellationSettlementResult> {
+  const actor = await requirePermission('order:change:review');
+  const parsed = previewOrderCancellationSettlementSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+  try {
+    return {
+      status: 'success',
+      preview: await previewOrderCancellationSettlement(parsed.data, actor),
+    };
   } catch (error) {
     if (error instanceof OrderChangeRequestError) {
       return { status: 'error', message: error.message };

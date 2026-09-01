@@ -14,6 +14,8 @@ const {
   getSettlementMock,
 } = vi.hoisted(() => ({
   dbMock: {
+    $queryRaw: vi.fn(),
+    $transaction: vi.fn(),
     order: { findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
     dailyWorkerSalary: { findMany: vi.fn(), findFirst: vi.fn() },
     hourlyWorkerPayroll: { findMany: vi.fn(), findFirst: vi.fn() },
@@ -56,6 +58,15 @@ const packer = {
 };
 
 beforeEach(() => {
+  dbMock.$queryRaw
+    .mockReset()
+    .mockResolvedValueOnce([{ total: BigInt(0) }])
+    .mockResolvedValueOnce([]);
+  dbMock.$transaction
+    .mockReset()
+    .mockImplementation(async (callback: (tx: typeof dbMock) => unknown) =>
+      callback(dbMock),
+    );
   dbMock.order.findMany.mockReset().mockResolvedValue([]);
   dbMock.order.findFirst.mockReset().mockResolvedValue(null);
   dbMock.order.count.mockReset().mockResolvedValue(0);
@@ -72,6 +83,10 @@ beforeEach(() => {
 
 describe('worker order visibility', () => {
   it('shows the account lane plus shared no-pay progress without personnel matching', async () => {
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ total: BigInt(1) }])
+      .mockResolvedValueOnce([{ id: 'order-1' }]);
     dbMock.order.findMany.mockResolvedValue([
       {
         id: 'order-1',
@@ -82,38 +97,39 @@ describe('worker order visibility', () => {
         customerRef: null,
         promisedDate: null,
         createdAt: new Date(),
+        workOrderVersion: 3,
         submitter: { displayName: '销售 A' },
         productionOperations: [
           {
+            id: 'operation-v2',
+            workOrderVersion: 2,
+            status: ProductionOperationStatus.COMPLETED,
+            reports: [{ amount: '999' }],
+          },
+          {
             id: 'operation-1',
+            workOrderVersion: 3,
             status: ProductionOperationStatus.COMPLETED,
             reports: [{ amount: '12' }],
           },
         ],
         productionProgressSteps: [
           {
+            id: 'progress-v2',
+            workOrderVersion: 2,
+            status: ProductionOperationStatus.COMPLETED,
+          },
+          {
             id: 'progress-1',
+            workOrderVersion: 3,
             status: ProductionOperationStatus.PENDING,
           },
         ],
       },
     ]);
-
-    dbMock.order.count.mockResolvedValue(1);
-
     const result = await listWorkerOrders(worker);
     const query = dbMock.order.findMany.mock.calls[0][0];
-    expect(query.where).toEqual({
-      status: { not: OrderStatus.SUBMITTED },
-      OR: [
-        {
-          productionOperations: {
-            some: { operationType: PieceworkOperationType.PARTIAL },
-          },
-        },
-        { productionProgressSteps: { some: {} } },
-      ],
-    });
+    expect(query.where).toEqual({ id: { in: ['order-1'] } });
     expect(query.select.productionOperations.where).toEqual({
       operationType: PieceworkOperationType.PARTIAL,
     });
@@ -126,6 +142,13 @@ describe('worker order visibility', () => {
       completedOperationCount: 1,
       pieceworkAmount: '12.00',
     });
+    const visibilitySql = dbMock.$queryRaw.mock.calls[0][0];
+    expect(visibilitySql.strings.join('')).toContain(
+      'operation."workOrderVersion" = current_order."workOrderVersion"',
+    );
+    expect(visibilitySql.strings.join('')).toContain(
+      'progress."workOrderVersion" = current_order."workOrderVersion"',
+    );
   });
 
   it('uses id plus lane-or-shared-progress in the detail query', async () => {
@@ -156,6 +179,35 @@ describe('worker order visibility', () => {
     expect(detailQuery.select.productionProgressSteps.where).toBeUndefined();
   });
 
+  it('详情只返回当前工单代次，仅有历史代次时拒绝可见', async () => {
+    dbMock.order.findFirst
+      .mockResolvedValueOnce({
+        id: 'order-1',
+        workOrderVersion: 3,
+        productionOperations: [
+          { id: 'operation-v2', workOrderVersion: 2 },
+          { id: 'operation-v3', workOrderVersion: 3 },
+        ],
+        productionProgressSteps: [
+          { id: 'progress-v2', workOrderVersion: 2 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        id: 'order-2',
+        workOrderVersion: 4,
+        productionOperations: [
+          { id: 'operation-v3', workOrderVersion: 3 },
+        ],
+        productionProgressSteps: [],
+      });
+
+    await expect(getWorkerOrderDetail('order-1', worker)).resolves.toMatchObject({
+      productionOperations: [{ id: 'operation-v3', workOrderVersion: 3 }],
+      productionProgressSteps: [],
+    });
+    await expect(getWorkerOrderDetail('order-2', worker)).resolves.toBeNull();
+  });
+
   it('lets an active worker without a paid lane see only shared progress orders', async () => {
     operationTypeMock.mockResolvedValue(null);
 
@@ -164,26 +216,25 @@ describe('worker order visibility', () => {
       role: Role.WORKER,
     });
 
-    const query = dbMock.order.findMany.mock.calls[0][0];
-    expect(query.where).toEqual({
-      status: { not: OrderStatus.SUBMITTED },
-      OR: [{ productionProgressSteps: { some: {} } }],
-    });
-    expect(query.select.productionOperations.where).toEqual({
-      operationType: { in: [] },
-    });
+    const visibilitySql = dbMock.$queryRaw.mock.calls[0][0];
+    expect(visibilitySql.strings.join('')).toContain('FALSE');
+    expect(visibilitySql.strings.join('')).toContain(
+      'FROM "ProductionProgressStep" AS progress',
+    );
   });
 });
 
 describe('worker order list pagination', () => {
   it('bounds the first page instead of streaming the whole history', async () => {
-    dbMock.order.count.mockResolvedValue(500);
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ total: BigInt(500) }])
+      .mockResolvedValueOnce([]);
 
     const result = await listWorkerOrders(worker);
-    const query = dbMock.order.findMany.mock.calls[0][0];
+    const pageSql = dbMock.$queryRaw.mock.calls[1][0];
 
-    expect(query.take).toBe(WORKER_ORDER_PAGE_SIZE);
-    expect(query.skip).toBe(0);
+    expect(pageSql.values.slice(-2)).toEqual([0, WORKER_ORDER_PAGE_SIZE]);
     expect(result.total).toBe(500);
     expect(result.page).toBe(1);
     expect(result.pageCount).toBe(500 / WORKER_ORDER_PAGE_SIZE);
@@ -192,58 +243,68 @@ describe('worker order list pagination', () => {
   it('puts the newest orders first with a stable id tiebreaker', async () => {
     await listWorkerOrders(worker);
 
-    expect(dbMock.order.findMany.mock.calls[0][0].orderBy).toEqual([
-      { createdAt: 'desc' },
-      { id: 'desc' },
-    ]);
+    const pageSql = dbMock.$queryRaw.mock.calls[1][0];
+    expect(pageSql.strings.join('')).toContain(
+      'ORDER BY current_order."createdAt" DESC, current_order."id" DESC',
+    );
   });
 
   it('counts with exactly the same ownership predicate as the row query', async () => {
     await listWorkerOrders(worker);
 
-    const rowWhere = dbMock.order.findMany.mock.calls[0][0].where;
-    expect(dbMock.order.count).toHaveBeenCalledWith({ where: rowWhere });
-    expect(rowWhere).toEqual({
-      status: { not: OrderStatus.SUBMITTED },
-      OR: [
-        {
-          productionOperations: {
-            some: { operationType: PieceworkOperationType.PARTIAL },
-          },
-        },
-        { productionProgressSteps: { some: {} } },
-      ],
-    });
+    const countSql = dbMock.$queryRaw.mock.calls[0][0];
+    const pageSql = dbMock.$queryRaw.mock.calls[1][0];
+    for (const query of [countSql, pageSql]) {
+      expect(query.strings.join('')).toContain(
+        'operation."workOrderVersion" = current_order."workOrderVersion"',
+      );
+      expect(query.strings.join('')).toContain(
+        'progress."workOrderVersion" = current_order."workOrderVersion"',
+      );
+      expect(query.values).toContain(PieceworkOperationType.PARTIAL);
+    }
   });
 
   it('skips to the requested page', async () => {
-    dbMock.order.count.mockResolvedValue(500);
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ total: BigInt(500) }])
+      .mockResolvedValueOnce([]);
 
     const result = await listWorkerOrders(worker, { page: 3 });
 
-    expect(dbMock.order.findMany.mock.calls[0][0].skip).toBe(
+    const pageSql = dbMock.$queryRaw.mock.calls[1][0];
+    expect(pageSql.values.slice(-2)).toEqual([
       WORKER_ORDER_PAGE_SIZE * 2,
-    );
+      WORKER_ORDER_PAGE_SIZE,
+    ]);
     expect(result.page).toBe(3);
   });
 
   it('clamps a hand-typed out-of-range page to the last page', async () => {
-    dbMock.order.count.mockResolvedValue(WORKER_ORDER_PAGE_SIZE + 5);
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([
+        { total: BigInt(WORKER_ORDER_PAGE_SIZE + 5) },
+      ])
+      .mockResolvedValueOnce([]);
 
     const result = await listWorkerOrders(worker, { page: 999 });
 
     expect(result.page).toBe(2);
     expect(result.pageCount).toBe(2);
-    expect(dbMock.order.findMany.mock.calls[0][0].skip).toBe(
+    const pageSql = dbMock.$queryRaw.mock.calls[1][0];
+    expect(pageSql.values.slice(-2)).toEqual([
       WORKER_ORDER_PAGE_SIZE,
-    );
+      WORKER_ORDER_PAGE_SIZE,
+    ]);
   });
 
   it('rejects non-worker actors before counting or reading orders', async () => {
     await expect(
       listWorkerOrders({ id: 'owner-1', role: Role.ADMIN }),
     ).rejects.toBeInstanceOf(WorkerPortalError);
-    expect(dbMock.order.count).not.toHaveBeenCalled();
+    expect(dbMock.$queryRaw).not.toHaveBeenCalled();
     expect(dbMock.order.findMany).not.toHaveBeenCalled();
   });
 });

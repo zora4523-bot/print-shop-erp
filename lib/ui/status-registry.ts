@@ -1,4 +1,6 @@
 import {
+  AgentMonthlyBillExportStatus,
+  AgentMonthlyBillStatus,
   BackgroundJobStatus,
   BillStatus,
   DesignBundleStatus,
@@ -49,6 +51,13 @@ export function statusFilterLabel(definition: StatusDefinition): string {
 export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
   [OrderStatus.PENDING_FACTORY]: { label: '待工厂确认', tone: 'info' },
+  [OrderStatus.REJECTED]: { label: '已驳回', tone: 'danger' },
+  [OrderStatus.CONFIRMED]: { label: '已确认', tone: 'success' },
+  [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'warning', dot: true },
+  [OrderStatus.RELEASED]: { label: '已下发', tone: 'info', dot: true },
+  [OrderStatus.FOILING]: { label: '烫金中', tone: 'info', dot: true },
+  [OrderStatus.PACKING]: { label: '打包中', tone: 'info', dot: true },
+  [OrderStatus.SETTLED]: { label: '已结算', tone: 'success' },
   [OrderStatus.SUBMITTED]: { label: '待工厂确认', tone: 'info' },
   [OrderStatus.SCHEDULING]: { label: '排产中', tone: 'info', dot: true },
   [OrderStatus.IN_PRODUCTION]: {
@@ -71,6 +80,27 @@ export const BILL_STATUS_REGISTRY: StatusRegistry<BillStatus> = {
     dot: true,
   },
   [BillStatus.FULLY_PAID]: { label: '已结清', tone: 'success' },
+};
+
+export const AGENT_MONTHLY_BILL_STATUS_REGISTRY: StatusRegistry<AgentMonthlyBillStatus> = {
+  [AgentMonthlyBillStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
+  [AgentMonthlyBillStatus.CONFIRMED]: {
+    label: '已确认·待收',
+    tone: 'warning',
+    dot: true,
+  },
+  [AgentMonthlyBillStatus.PAID]: { label: '已收', tone: 'success' },
+};
+
+export const AGENT_MONTHLY_BILL_EXPORT_STATUS_REGISTRY: StatusRegistry<AgentMonthlyBillExportStatus> = {
+  [AgentMonthlyBillExportStatus.PENDING]: {
+    label: '生成中',
+    tone: 'info',
+    dot: true,
+  },
+  [AgentMonthlyBillExportStatus.READY]: { label: '已生成', tone: 'success' },
+  [AgentMonthlyBillExportStatus.FAILED]: { label: '失败', tone: 'danger' },
+  [AgentMonthlyBillExportStatus.EXPIRED]: { label: '已过期', tone: 'neutral' },
 };
 
 export const NOTIFICATION_STATUS_REGISTRY: StatusRegistry<NotificationStatus> = {
@@ -192,6 +222,14 @@ export const ORDER_CHANGE_REQUEST_STATUS_REGISTRY: StatusRegistry<OrderChangeReq
   [OrderChangeRequestStatus.APPROVED]: {
     label: '已批准',
     tone: 'success',
+  },
+  [OrderChangeRequestStatus.DENIED]: {
+    label: '已驳回',
+    tone: 'danger',
+  },
+  [OrderChangeRequestStatus.WITHDRAWN]: {
+    label: '已撤回',
+    tone: 'neutral',
   },
   [OrderChangeRequestStatus.REJECTED]: {
     label: '已拒绝',

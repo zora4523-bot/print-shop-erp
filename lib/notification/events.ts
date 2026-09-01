@@ -16,6 +16,10 @@
 
 export const NOTIFICATION_EVENTS = {
   ORDER_SUBMITTED: 'ORDER_SUBMITTED',
+  ORDER_CHANGE_REQUESTED: 'ORDER_CHANGE_REQUESTED',
+  PRODUCTION_PROGRESS_ANOMALY: 'PRODUCTION_PROGRESS_ANOMALY',
+  PRODUCTION_STAGNANT: 'PRODUCTION_STAGNANT',
+  PENDING_FACTORY_BACKLOG: 'PENDING_FACTORY_BACKLOG',
   URGENT_ORDER: 'URGENT_ORDER',
   ORDER_SCHEDULED: 'ORDER_SCHEDULED',
   ORDER_COMPLETED: 'ORDER_COMPLETED',
@@ -31,6 +35,42 @@ export const NOTIFICATION_EVENTS = {
 export type NotificationEvent =
   (typeof NOTIFICATION_EVENTS)[keyof typeof NOTIFICATION_EVENTS];
 
+export const MANAGEMENT_NOTIFICATION_ROLES = {
+  FACTORY_CONFIRMER: 'factoryConfirmer',
+  OWNER: 'owner',
+} as const;
+
+export type ManagementNotificationRole =
+  (typeof MANAGEMENT_NOTIFICATION_ROLES)[keyof typeof MANAGEMENT_NOTIFICATION_ROLES];
+
+/**
+ * 管理工作台五类事件的收件角色是业务真值，不是可配置数据。
+ * SystemSetting 只能为这两个角色选开关和真实 channel ID，
+ * 不能把“新单”篡改成发给老板，也不能追加第三个任意角色。
+ */
+export const MANAGEMENT_NOTIFICATION_ROLE_BY_EVENT = {
+  [NOTIFICATION_EVENTS.ORDER_SUBMITTED]:
+    MANAGEMENT_NOTIFICATION_ROLES.FACTORY_CONFIRMER,
+  [NOTIFICATION_EVENTS.ORDER_CHANGE_REQUESTED]:
+    MANAGEMENT_NOTIFICATION_ROLES.FACTORY_CONFIRMER,
+  [NOTIFICATION_EVENTS.PRODUCTION_PROGRESS_ANOMALY]:
+    MANAGEMENT_NOTIFICATION_ROLES.OWNER,
+  [NOTIFICATION_EVENTS.PRODUCTION_STAGNANT]:
+    MANAGEMENT_NOTIFICATION_ROLES.OWNER,
+  [NOTIFICATION_EVENTS.PENDING_FACTORY_BACKLOG]:
+    MANAGEMENT_NOTIFICATION_ROLES.OWNER,
+} as const satisfies Partial<Record<NotificationEvent, ManagementNotificationRole>>;
+
+export function managementNotificationRoleForEvent(
+  eventType: string,
+): ManagementNotificationRole | null {
+  return (
+    (MANAGEMENT_NOTIFICATION_ROLE_BY_EVENT as Partial<
+      Record<string, ManagementNotificationRole>
+    >)[eventType] ?? null
+  );
+}
+
 // Per-event payload 形状。模板里能用的 placeholder 与这里对齐——
 // rule 里写 `{orderNo}` 时，对应 payload 必须有 orderNo 字段。
 //
@@ -38,12 +78,9 @@ export type NotificationEvent =
 // 一一对应—— 任何不一致会让模板渲染时留 raw
 // `{placeholder}` 文本流到群消息。修改字段名时同步改 seed.ts。
 //
-// 金额字段：用 string（千分位 + 2 位小数；走 lib/dashboard/format
-// `formatMoneyPlain`）。**不含** `¥ ` 前缀——seed 默认模板自带
-// `金额：¥{totalAmount}`，再让 payload 也带 ¥ 会变成 `¥¥ 5,000.00`
-// 双前缀。模板编辑器（Slice B
-// RuleForm）已加 hint 提示 owner&ldquo;金额占位符不含 ¥&rdquo;。改 contract
-// 时同步改：events.ts payload 注释 + RuleForm hint + seed.ts 模板。
+// 管理工作流新增事件只允许携带工单号、业务摘要和深链，不携带金额。
+// ORDER_SUBMITTED 的 totalAmount 仅作为旧调用方的编译兼容字段保留；三条
+// 运行时入口都会在持久化或渲染前移除它，后台模板字段列表也不再暴露它。
 //
 // 范围注：DECISIONS 2026-04-24 限定的是 cron HTTP 响应 / pg_cron stdout
 // 不漏金额；企业微信群消息是已认证收件人（管理员群 / 排产群），含金额
@@ -59,8 +96,35 @@ export type NotificationPayloads = {
     orderNo: string;
     submitterName: string;
     customerRef?: string | null;
-    totalAmount: string; // Decimal-string，已 formatMoney 千分位
+    /** @deprecated 管理工作流通知禁止携带金额；运行时会主动移除。 */
+    totalAmount?: string;
     urgentMark: string; // '🚨 急单' / ''
+    summary?: string;
+    deepLink?: string;
+  };
+  ORDER_CHANGE_REQUESTED: {
+    orderId: string;
+    orderNo: string;
+    summary: string;
+    deepLink: string;
+  };
+  PRODUCTION_PROGRESS_ANOMALY: {
+    orderId: string;
+    orderNo: string;
+    summary: string;
+    deepLink: string;
+  };
+  PRODUCTION_STAGNANT: {
+    orderId: string;
+    orderNo: string;
+    summary: string;
+    deepLink: string;
+  };
+  PENDING_FACTORY_BACKLOG: {
+    orderId: string;
+    orderNo: string;
+    summary: string;
+    deepLink: string;
   };
   URGENT_ORDER: {
     orderId: string;
@@ -140,6 +204,43 @@ export type NotificationPayloads = {
 // 出 payload 形状必须含 orderNo / submitterName 等。
 export type NotificationPayloadFor<E extends NotificationEvent> =
   NotificationPayloads[E];
+
+/** Remove forbidden commercial data before rendering or durable persistence. */
+export function sanitizeNotificationPayload<E extends NotificationEvent>(
+  event: E,
+  payload: NotificationPayloadFor<E>,
+): NotificationPayloadFor<E> {
+  const record = payload as unknown as Record<string, unknown>;
+  const orderNo = typeof record.orderNo === 'string' ? record.orderNo : '';
+  const canonicalDeepLink = `/orders#wo=${encodeURIComponent(orderNo)}`;
+  switch (event) {
+    case NOTIFICATION_EVENTS.ORDER_SUBMITTED:
+      return {
+        orderId: String(record.orderId ?? ''),
+        orderNo,
+        summary: '新工单已提交，待工厂确认',
+        deepLink: canonicalDeepLink,
+      } as NotificationPayloadFor<E>;
+    case NOTIFICATION_EVENTS.ORDER_CHANGE_REQUESTED:
+      return {
+        orderId: String(record.orderId ?? ''),
+        orderNo,
+        summary: '工单变更/取消申请已提交，待工厂确认',
+        deepLink: canonicalDeepLink,
+      } as NotificationPayloadFor<E>;
+    case NOTIFICATION_EVENTS.PRODUCTION_PROGRESS_ANOMALY:
+    case NOTIFICATION_EVENTS.PRODUCTION_STAGNANT:
+    case NOTIFICATION_EVENTS.PENDING_FACTORY_BACKLOG:
+      return {
+        orderId: String(record.orderId ?? ''),
+        orderNo,
+        summary: String(record.summary ?? ''),
+        deepLink: canonicalDeepLink,
+      } as NotificationPayloadFor<E>;
+    default:
+      return payload;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // 事件级策略常量 —— 定义在 events.ts（事件的"属性"跟事件枚举同住），
