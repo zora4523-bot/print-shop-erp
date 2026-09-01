@@ -103,7 +103,10 @@ export function PartiesTable({
       </TableHeader>
       <TableBody>
         {parties.map((party) => (
-          <TableRow key={party.id} className={!party.isActive ? 'opacity-60' : undefined}>
+          <TableRow
+            key={party.id}
+            className={!party.isActive ? 'text-muted-foreground' : undefined}
+          >
             <TableCell className="font-sans tabular-nums text-xs">{party.code}</TableCell>
             <TableCell>
               <div className="font-medium">{party.name}</div>

@@ -36,7 +36,10 @@ export function CraftsTable({
       </TableHeader>
       <TableBody>
         {crafts.map((c) => (
-          <TableRow key={c.id} className={!c.isActive ? 'opacity-60' : undefined}>
+          <TableRow
+            key={c.id}
+            className={!c.isActive ? 'text-muted-foreground' : undefined}
+          >
             <TableCell className="text-muted-foreground">{c.sortOrder}</TableCell>
             <TableCell>{c.name}</TableCell>
             <TableCell>

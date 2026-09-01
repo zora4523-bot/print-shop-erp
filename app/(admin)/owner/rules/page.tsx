@@ -65,7 +65,7 @@ export default async function RuleCenterPage() {
         subtitle="按业务边界管理客户计价、建单主数据与员工薪酬。"
       />
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-3">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
         {RULE_GROUPS.map((group) => {
           const Icon = group.icon;
           const items = RULE_CENTER_SIDEBAR_ITEMS.filter(

@@ -53,7 +53,10 @@ export function BomsTable({
       </TableHeader>
       <TableBody>
         {boms.map((bom) => (
-          <TableRow key={bom.id} className={!bom.isActive ? 'opacity-60' : undefined}>
+          <TableRow
+            key={bom.id}
+            className={!bom.isActive ? 'text-muted-foreground' : undefined}
+          >
             <TableCell>{externalPriceBusinessText(bom.name)}</TableCell>
             <TableCell className="text-muted-foreground">
               {targetLabel(bom, categoryLabelById)}

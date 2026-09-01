@@ -127,7 +127,7 @@ export function AccountsTable({
               return (
                 <TableRow
                   key={a.id}
-                  className={!a.isActive ? 'opacity-60' : undefined}
+                  className={!a.isActive ? 'text-muted-foreground' : undefined}
                 >
                   <TableCell className="font-mono">
                     <span className="block truncate" title={a.username}>
