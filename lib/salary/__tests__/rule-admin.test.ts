@@ -114,6 +114,23 @@ describe('salary rule editor validation', () => {
       ).toBe(false);
     }
   });
+
+  it('closes hourly rule input to HourlyWorkerPayroll Decimal(6,2)', () => {
+    for (const [hourlyRate, accepted] of [
+      ['9999.99', true],
+      ['10000', false],
+      ['99999999.99', false],
+    ] as const) {
+      const result = parseSalaryRuleVersionFormData(
+        form({
+          ruleKey: 'CLEANER_HOURLY',
+          effectiveFrom: '2026-08-07T09:30',
+          hourlyRate,
+        }),
+      );
+      expect(result.success, hourlyRate).toBe(accepted);
+    }
+  });
 });
 
 describe('createSalaryRuleVersion', () => {

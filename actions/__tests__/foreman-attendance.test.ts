@@ -181,7 +181,7 @@ describe('recordAttendanceAction', () => {
     if (r.status === 'error') expect(r.message).toMatch(/在职员工/);
   });
 
-  it('revalidates /foreman/attendance on success', async () => {
+  it('revalidates attendance and payroll reads on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(foremanActor);
     attendanceMock.recordAttendance.mockResolvedValue({});
     await recordAttendanceAction(null, {
@@ -192,6 +192,9 @@ describe('recordAttendanceAction', () => {
       spareHours: '0',
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/attendance');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/hourly');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/salary');
   });
 });
 
@@ -237,5 +240,37 @@ describe('removeAttendanceAction', () => {
       date: '2026-05-01',
     });
     expect(r.status).toBe('success');
+  });
+
+  it('maps a paid-payroll AttendanceError and does not revalidate', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    attendanceMock.removeAttendance.mockRejectedValue(
+      new MockAttendanceError('该员工 2026-05 月工资已发放；请先撤销发放再删除考勤'),
+    );
+
+    const result = await removeAttendanceAction(null, {
+      workerId: 'w-1',
+      date: '2026-05-01',
+    });
+
+    expect(result).toEqual({
+      status: 'error',
+      message: '该员工 2026-05 月工资已发放；请先撤销发放再删除考勤',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('rethrows unexpected delete failures', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    const databaseFailure = new Error('database unavailable');
+    attendanceMock.removeAttendance.mockRejectedValue(databaseFailure);
+
+    await expect(
+      removeAttendanceAction(null, {
+        workerId: 'w-1',
+        date: '2026-05-01',
+      }),
+    ).rejects.toBe(databaseFailure);
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 });

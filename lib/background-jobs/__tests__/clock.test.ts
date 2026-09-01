@@ -6,7 +6,7 @@ const { dbMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
-import { databaseNow, type ClockClient } from '../clock';
+import { databaseClockNow, databaseNow, type ClockClient } from '../clock';
 
 const DB_NOW = new Date('2026-07-17T08:00:00.000Z');
 
@@ -49,5 +49,25 @@ describe('databaseNow', () => {
     dbMock.$queryRaw.mockResolvedValue([{ now: '2026-07-17T08:00:00.000Z' }]);
 
     await expect(databaseNow()).rejects.toThrow('database clock unavailable');
+  });
+});
+
+describe('databaseClockNow', () => {
+  it('uses clock_timestamp so a long transaction sees the statement instant', async () => {
+    dbMock.$queryRaw.mockResolvedValue([{ now: DB_NOW }]);
+
+    await expect(databaseClockNow()).resolves.toBe(DB_NOW);
+
+    const sql = (
+      dbMock.$queryRaw.mock.calls[0]![0] as TemplateStringsArray
+    ).join('?');
+    expect(sql).toContain('clock_timestamp()');
+  });
+
+  it('fails closed when the database wall clock is unavailable', async () => {
+    dbMock.$queryRaw.mockResolvedValue([]);
+    await expect(databaseClockNow()).rejects.toThrow(
+      'database wall clock unavailable',
+    );
   });
 });

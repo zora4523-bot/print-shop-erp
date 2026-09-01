@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import type { Prisma } from '../../generated/prisma/client';
 import { Role, WorkerType } from '../../generated/prisma/enums';
 import { db } from '../db';
 import {
@@ -15,6 +16,14 @@ import {
   HourlyPayrollError,
   type HourlyPayrollRules,
 } from './hourly-payroll';
+import {
+  employmentCoversDate,
+  employmentOverlapsDateRange,
+} from './employment';
+import {
+  hourlyPayrollLockKey,
+  salaryIdentityLockKey,
+} from './hourly-lock';
 import {
   acquireSalaryRuleSnapshotReadLock,
   getActiveCleanerHourlyRate,
@@ -101,6 +110,43 @@ function dec(v: unknown): Decimal {
   return new Decimal(v as Decimal.Value);
 }
 
+const DECIMAL_6_2_MAX = new Decimal('9999.99');
+const DECIMAL_4_2_MAX = new Decimal('99.99');
+const DECIMAL_10_2_MAX = new Decimal('99999999.99');
+const DECIMAL_11_2_MAX = new Decimal('999999999.99');
+
+function assertStoredDecimal(
+  value: Decimal,
+  max: Decimal,
+  label: string,
+  options: { positive?: boolean } = {},
+): void {
+  if (
+    !value.isFinite() ||
+    (options.positive ? value.lte(0) : value.isNegative()) ||
+    value.decimalPlaces() > 2 ||
+    value.gt(max)
+  ) {
+    throw new HourlyAggregateError(`${label}超出可保存范围`);
+  }
+}
+
+function parseStoredDecimal(
+  value: unknown,
+  max: Decimal,
+  label: string,
+  options: { positive?: boolean } = {},
+): Decimal {
+  let parsed: Decimal;
+  try {
+    parsed = dec(value);
+  } catch {
+    throw new HourlyAggregateError(`${label}不是合法数值`);
+  }
+  assertStoredDecimal(parsed, max, label, options);
+  return parsed;
+}
+
 const ACTIVE_HOURLY_WORKER_TYPES = [
   WorkerType.CLEANER,
   WorkerType.COOK,
@@ -110,6 +156,47 @@ const HISTORICAL_HOURLY_WORKER_TYPES = [
   WorkerType.PACKER,
   ...ACTIVE_HOURLY_WORKER_TYPES,
 ] as const;
+
+const HOURLY_WORKER_SELECT = {
+  id: true,
+  role: true,
+  workerType: true,
+  isActive: true,
+  displayName: true,
+  employmentStartDate: true,
+  employmentEndDate: true,
+} satisfies Prisma.UserSelect;
+
+const HOURLY_ATTENDANCE_SELECT = {
+  date: true,
+  normalHours: true,
+  otHours: true,
+  spareHours: true,
+  roleSnapshot: true,
+  workerTypeSnapshot: true,
+} satisfies Prisma.AttendanceSelect;
+
+type HourlyWorker = Prisma.UserGetPayload<{
+  select: typeof HOURLY_WORKER_SELECT;
+}>;
+
+type HourlyAttendanceRow = Prisma.AttendanceGetPayload<{
+  select: typeof HOURLY_ATTENDANCE_SELECT;
+}>;
+
+type ActiveHourlyWorkerType = (typeof ACTIVE_HOURLY_WORKER_TYPES)[number];
+
+function isHistoricalHourlyAttendanceRow(
+  row: HourlyAttendanceRow,
+): row is HourlyAttendanceRow & {
+  roleSnapshot: typeof Role.WORKER;
+  workerTypeSnapshot: ActiveHourlyWorkerType;
+} {
+  return (
+    row.roleSnapshot === Role.WORKER &&
+    isActiveHourlyWorkerType(row.workerTypeSnapshot)
+  );
+}
 
 function isHourlyWorkerType(value: unknown): value is WorkerType {
   return (HISTORICAL_HOURLY_WORKER_TYPES as readonly unknown[]).includes(value);
@@ -133,10 +220,8 @@ export function getHourlyPayrollWorkerType(snapshot: unknown): WorkerType | null
 // 2. two concurrent recomputes for the same (worker, month) both
 //    passing the paid guard and double-writing.
 // markHourlyPayrollPaid takes the same lock so the check-and-update
-// pair is serialized end-to-end.
-function hourlyLockKey(workerId: string, month: string): string {
-  return `print-shop-erp:hourly:${workerId}:${month}`;
-}
+// pair is serialized end-to-end. Attendance writers use the same key and
+// invalidate an unpaid derivative whenever its source facts really change.
 
 // 与 lib/salary/daily.ts 的 assertNotFutureSalaryDate 同构、同理由：守卫必须
 // 落在 lib/，因为 owner action、/api/cron/hourly-payroll 的 inline 分支、
@@ -158,44 +243,158 @@ function assertNotFutureSalaryMonth(month: string, now: Date): void {
   }
 }
 
-// Monthly computation for a single hourly worker. @@unique([workerId,
-// month]) → upsert. Called per-worker from the cron batch and from
-// the owner's "重算" button. `now` pins both the rule-resolution
-// timestamp (so a batch sees a consistent rule version) AND the paidAt stamp when paths flip state.
-export async function computeHourlyPayroll(
+function resolveHourlyWorkerType(
+  worker: HourlyWorker,
+  historicalTypes: readonly WorkerType[],
+): WorkerType {
+  if (historicalTypes.length > 1) {
+    throw new HourlyAggregateError(
+      `同一月份存在多个历史时薪工种（${historicalTypes.join('、')}），请先拆分或核对考勤后再结算`,
+    );
+  }
+  if (historicalTypes.length === 1) return historicalTypes[0]!;
+  if (
+    worker.role === Role.WORKER &&
+    worker.isActive &&
+    isActiveHourlyWorkerType(worker.workerType)
+  ) {
+    return worker.workerType;
+  }
+  if (worker.role !== Role.WORKER) {
+    throw new HourlyAggregateError('不是工人（role != WORKER）');
+  }
+  if (!isActiveHourlyWorkerType(worker.workerType)) {
+    throw new HourlyAggregateError(
+      '只有清废和厨师继续走时薪月结；打包报工已切换为工序计件结算',
+    );
+  }
+  throw new HourlyAggregateError('工人已停用且本月没有历史时薪考勤');
+}
+
+function sumHourlyAttendance(rows: readonly HourlyAttendanceRow[]): {
+  totalNormal: Decimal;
+  totalOt: Decimal;
+  totalSpare: Decimal;
+} {
+  const totalNormal = rows.reduce(
+    (acc, row) => acc.plus(dec(row.normalHours)),
+    new Decimal(0),
+  );
+  const totalOt = rows.reduce(
+    (acc, row) => acc.plus(dec(row.otHours)),
+    new Decimal(0),
+  );
+  const totalSpare = rows.reduce(
+    (acc, row) => acc.plus(dec(row.spareHours)),
+    new Decimal(0),
+  );
+  assertStoredDecimal(totalNormal, DECIMAL_6_2_MAX, '月正常工时');
+  assertStoredDecimal(totalOt, DECIMAL_6_2_MAX, '月加班工时');
+  assertStoredDecimal(totalSpare, DECIMAL_6_2_MAX, '月空闲打包工时');
+  return { totalNormal, totalOt, totalSpare };
+}
+
+function resolveHourlyPayrollRules(
+  workerType: WorkerType,
+  bundle: HourlyRuleBundle,
+): {
+  rules: HourlyPayrollRules;
+  hourlyRateForSchema: Decimal;
+  effectiveOtMultiplier: Decimal;
+} {
+  const { cleanerRate, cookMonthly, cookSpareRate, otMultiplier } = bundle;
+  let rules: HourlyPayrollRules;
+  let hourlyRateForSchema: Decimal;
+  if (workerType === WorkerType.CLEANER) {
+    if (cleanerRate === null) {
+      throw new HourlyAggregateError('无当前生效的 CLEANER_HOURLY 规则');
+    }
+    rules = { hourlyRate: cleanerRate, otMultiplier: otMultiplier ?? 1 };
+    hourlyRateForSchema = parseStoredDecimal(
+      cleanerRate,
+      DECIMAL_6_2_MAX,
+      '清废时薪规则',
+    );
+  } else {
+    if (cookMonthly === null) {
+      throw new HourlyAggregateError('无当前生效的 COOK_MONTHLY 规则');
+    }
+    // A missing spare-duty rate deliberately means this cook has no paid
+    // packing duty (owner decision 2026-08-19).
+    rules = {
+      monthlyBase: cookMonthly,
+      spareHourlyRate: cookSpareRate ?? 0,
+      otMultiplier: otMultiplier ?? 1,
+    };
+    hourlyRateForSchema = parseStoredDecimal(
+      cookSpareRate ?? 0,
+      DECIMAL_6_2_MAX,
+      '厨师空闲打包时薪规则',
+    );
+    parseStoredDecimal(cookMonthly, DECIMAL_10_2_MAX, '厨师月薪规则');
+  }
+  const effectiveOtMultiplier = parseStoredDecimal(
+    otMultiplier ?? 1,
+    DECIMAL_4_2_MAX,
+    '加班倍率规则',
+    { positive: true },
+  );
+  return { rules, hourlyRateForSchema, effectiveOtMultiplier };
+}
+
+function calculateHourlyBreakdown(
+  workerType: WorkerType,
+  totalNormal: Decimal,
+  totalOt: Decimal,
+  totalSpare: Decimal,
+  rules: HourlyPayrollRules,
+) {
+  try {
+    return calcHourlyPayroll(
+      {
+        workerType,
+        totalNormalHours: totalNormal,
+        totalOtHours: totalOt,
+        totalSpareHours: totalSpare,
+      },
+      rules,
+    );
+  } catch (error) {
+    if (error instanceof HourlyPayrollError) {
+      throw new HourlyAggregateError(error.message);
+    }
+    throw error;
+  }
+}
+
+async function computeHourlyPayrollInTx(
+  tx: Prisma.TransactionClient,
   workerId: string,
   month: string,
-  now: Date = new Date(),
+  start: Date,
+  end: Date,
+  now: Date,
   pinnedRuleBundle?: HourlyRuleBundle,
   fence?: ExecutionFence,
 ): Promise<ComputeHourlyPayrollResult> {
-  const { start, end } = parseShanghaiMonth(month);
-  // `now` 在这个函数里同时是规则解析时点和 paidAt 时钟，这里直接复用它当
-  // 墙上时钟：批量调用方传的是整批钉住的那一个 now，单独重算走默认的
-  // new Date()。
-  assertNotFutureSalaryMonth(month, now);
-
-  const worker = await db.user.findUnique({
-    where: { id: workerId },
-    select: {
-      id: true,
-      role: true,
-      workerType: true,
-      isActive: true,
-      displayName: true,
-    },
-  });
-  if (!worker) throw new HourlyAggregateError('工人不存在');
-
-  // Everything past here runs in ONE transaction under the per-
-  // (worker, month) advisory lock so the paid-row guard and the
-  // upsert can't be interleaved with a concurrent mark-paid action
-  // .
-  return db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyLockKey(
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
+      workerId,
+    )}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyPayrollLockKey(
       workerId,
       month,
     )}))`;
+
+    const worker = await tx.user.findUnique({
+      where: { id: workerId },
+      select: HOURLY_WORKER_SELECT,
+    });
+    if (!worker) throw new HourlyAggregateError('工人不存在');
+    if (!employmentOverlapsDateRange(start, end, worker)) {
+      throw new HourlyAggregateError(
+        `${month} 月不在该员工的雇佣区间内，禁止计薪`,
+      );
+    }
 
     // finance-of-record: paid rows refuse recompute (same bedrock as
     // computeDailyWorkerSalary, DECISIONS 2026-04-24).
@@ -217,73 +416,33 @@ export async function computeHourlyPayroll(
         workerId,
         date: { gte: start, lt: end },
       },
-      select: {
-        date: true,
-        normalHours: true,
-        otHours: true,
-        spareHours: true,
-        roleSnapshot: true,
-        workerTypeSnapshot: true,
-      },
+      select: HOURLY_ATTENDANCE_SELECT,
       orderBy: { date: 'asc' },
     });
 
-    const historicalRows = rows.filter(
-      (row) =>
-        row.roleSnapshot === Role.WORKER &&
-        isActiveHourlyWorkerType(row.workerTypeSnapshot),
+    // Employment boundaries are inclusive. Filter the source facts before
+    // identity classification, aggregation and dailyDetail so every persisted
+    // derivative is built from the same eligible row set.
+    const employmentRows = rows.filter((row) =>
+      employmentCoversDate(row.date, worker),
+    );
+    const historicalRows = employmentRows.filter(
+      isHistoricalHourlyAttendanceRow,
     );
     const historicalTypes = [
       ...new Set(historicalRows.map((row) => row.workerTypeSnapshot)),
     ];
-    if (historicalTypes.length > 1) {
-      throw new HourlyAggregateError(
-        `同一月份存在多个历史时薪工种（${historicalTypes.join('、')}），请先拆分或核对考勤后再结算`,
-      );
-    }
-
     // Historical attendance owns historical payroll. Current identity is only
     // a fallback for an active hourly worker with no recorded hourly fact, so
     // existing zero-hour / COOK monthly-base behavior remains intact.
-    let workerType: WorkerType;
-    if (historicalTypes.length === 1) {
-      workerType = historicalTypes[0]!;
-    } else if (
-      worker.role === Role.WORKER &&
-      worker.isActive &&
-      isActiveHourlyWorkerType(worker.workerType)
-    ) {
-      workerType = worker.workerType;
-    } else {
-      if (worker.role !== Role.WORKER) {
-        throw new HourlyAggregateError('不是工人（role != WORKER）');
-      }
-      if (!isActiveHourlyWorkerType(worker.workerType)) {
-        throw new HourlyAggregateError(
-          '只有清废和厨师继续走时薪月结；打包报工已切换为工序计件结算',
-        );
-      }
-      throw new HourlyAggregateError(
-        '工人已停用且本月没有历史时薪考勤',
-      );
-    }
+    const workerType = resolveHourlyWorkerType(worker, historicalTypes);
 
     const payrollRows = historicalRows.filter(
       (row) => row.workerTypeSnapshot === workerType,
     );
 
-    const totalNormal = payrollRows.reduce(
-      (acc, r) => acc.plus(dec(r.normalHours)),
-      new Decimal(0),
-    );
-    const totalOt = payrollRows.reduce(
-      (acc, r) => acc.plus(dec(r.otHours)),
-      new Decimal(0),
-    );
-    const totalSpare = payrollRows.reduce(
-      (acc, r) => acc.plus(dec(r.spareHours)),
-      new Decimal(0),
-    );
+    const { totalNormal, totalOt, totalSpare } =
+      sumHourlyAttendance(payrollRows);
 
     // Standalone recomputes resolve all rule rows coherently inside this
     // transaction. Batch callers pass one already-frozen bundle so workers A
@@ -291,65 +450,19 @@ export async function computeHourlyPayroll(
     if (!pinnedRuleBundle) {
       await acquireSalaryRuleSnapshotReadLock(tx);
     }
-    const {
-      cleanerRate,
-      cookMonthly,
-      cookSpareRate,
-      otMultiplier,
-      workHours,
-    } = pinnedRuleBundle ?? (await readHourlyRuleBundle(now, tx));
-
-    let rules: HourlyPayrollRules;
-    let hourlyRateForSchema: Decimal; // DB column baseline — non-COOK uses
-    // the worker's own rate; COOK stores 0 (basepay is flat).
-
-    if (workerType === WorkerType.CLEANER) {
-      if (cleanerRate === null) {
-        throw new HourlyAggregateError('无当前生效的 CLEANER_HOURLY 规则');
-      }
-      rules = {
-        hourlyRate: cleanerRate,
-        otMultiplier: otMultiplier ?? 1,
-      };
-      hourlyRateForSchema = dec(cleanerRate);
-    } else {
-      // COOK
-      if (cookMonthly === null) {
-        throw new HourlyAggregateError('无当前生效的 COOK_MONTHLY 规则');
-      }
-      rules = {
-        monthlyBase: cookMonthly,
-        // `?? 0` 在这里是**有意的**，与上面三个分支的 throw 不同 ——
-        // 空闲打包对厨师是可选职责，没配 COOK_SPARE_HOURLY 更可能表示
-        // 「这个厨师不打包」而不是「配置漏了」，所以按 0 计空闲工资而不是
-        // 让整个月结失败。这是 CLAUDE.md §15.5「绝不 fallback 到 0」的
-        // 唯一显式例外（业主 2026-08-19 拍板，见 DECISIONS.md），行为由
-        // lib/salary/__tests__/hourly-payroll.test.ts:186 锁定。
-        spareHourlyRate: cookSpareRate ?? 0,
-        otMultiplier: otMultiplier ?? 1,
-      };
-      // Store spareHourlyRate in the hourlyRate column for COOK so the
-      // UI can show "按 ¥11/h 算打包兼职" without a separate field.
-      hourlyRateForSchema = dec(cookSpareRate ?? 0);
-    }
-
-    let breakdown;
-    try {
-      breakdown = calcHourlyPayroll(
-        {
-          workerType,
-          totalNormalHours: totalNormal,
-          totalOtHours: totalOt,
-          totalSpareHours: totalSpare,
-        },
-        rules,
-      );
-    } catch (err) {
-      if (err instanceof HourlyPayrollError) {
-        throw new HourlyAggregateError(err.message);
-      }
-      throw err;
-    }
+    const ruleBundle =
+      pinnedRuleBundle ?? (await readHourlyRuleBundle(now, tx));
+    const { cleanerRate, cookMonthly, cookSpareRate, otMultiplier, workHours } =
+      ruleBundle;
+    const { rules, hourlyRateForSchema, effectiveOtMultiplier } =
+      resolveHourlyPayrollRules(workerType, ruleBundle);
+    const breakdown = calculateHourlyBreakdown(
+      workerType,
+      totalNormal,
+      totalOt,
+      totalSpare,
+      rules,
+    );
 
     // Full rule snapshot + hour totals + WORK_HOURS config (注意事项 4).
     // Includes every rule we considered, even the ones this workerType
@@ -370,7 +483,13 @@ export async function computeHourlyPayroll(
       },
     };
 
-    const effectiveOtMultiplier = otMultiplier ?? 1;
+    const baseSalary = breakdown.monthlyBasePay.gt(0)
+      ? breakdown.monthlyBasePay
+      : breakdown.normalPay;
+    assertStoredDecimal(baseSalary, DECIMAL_11_2_MAX, '基本工资');
+    assertStoredDecimal(breakdown.otPay, DECIMAL_11_2_MAX, '加班工资');
+    assertStoredDecimal(breakdown.sparePay, DECIMAL_11_2_MAX, '空闲打包工资');
+    assertStoredDecimal(breakdown.totalSalary, DECIMAL_11_2_MAX, '工资合计');
 
     // dailyDetail is a per-day breakdown for the UI drill-down.
     const dailyDetail = payrollRows.map((r) => ({
@@ -392,10 +511,8 @@ export async function computeHourlyPayroll(
         totalOtHours: totalOt.toFixed(2),
         totalSpareHours: totalSpare.toFixed(2),
         hourlyRate: hourlyRateForSchema.toFixed(2),
-        otMultiplier: new Decimal(effectiveOtMultiplier).toFixed(2),
-        baseSalary: breakdown.monthlyBasePay.gt(0)
-          ? breakdown.monthlyBasePay.toFixed(2)
-          : breakdown.normalPay.toFixed(2),
+        otMultiplier: effectiveOtMultiplier.toFixed(2),
+        baseSalary: baseSalary.toFixed(2),
         otSalary: breakdown.otPay.toFixed(2),
         spareSalary: breakdown.sparePay.toFixed(2),
         totalSalary: breakdown.totalSalary.toFixed(2),
@@ -407,10 +524,8 @@ export async function computeHourlyPayroll(
         totalOtHours: totalOt.toFixed(2),
         totalSpareHours: totalSpare.toFixed(2),
         hourlyRate: hourlyRateForSchema.toFixed(2),
-        otMultiplier: new Decimal(effectiveOtMultiplier).toFixed(2),
-        baseSalary: breakdown.monthlyBasePay.gt(0)
-          ? breakdown.monthlyBasePay.toFixed(2)
-          : breakdown.normalPay.toFixed(2),
+        otMultiplier: effectiveOtMultiplier.toFixed(2),
+        baseSalary: baseSalary.toFixed(2),
         otSalary: breakdown.otPay.toFixed(2),
         spareSalary: breakdown.sparePay.toFixed(2),
         totalSalary: breakdown.totalSalary.toFixed(2),
@@ -432,15 +547,42 @@ export async function computeHourlyPayroll(
       totalOtHours: totalOt.toFixed(2),
       totalSpareHours: totalSpare.toFixed(2),
       hourlyRate: hourlyRateForSchema.toFixed(2),
-      otMultiplier: new Decimal(effectiveOtMultiplier).toFixed(2),
-      baseSalary: breakdown.monthlyBasePay.gt(0)
-        ? breakdown.monthlyBasePay.toFixed(2)
-        : breakdown.normalPay.toFixed(2),
+      otMultiplier: effectiveOtMultiplier.toFixed(2),
+      baseSalary: baseSalary.toFixed(2),
       otSalary: breakdown.otPay.toFixed(2),
       spareSalary: breakdown.sparePay.toFixed(2),
       totalSalary: breakdown.totalSalary.toFixed(2),
     };
-  });
+}
+
+// Monthly computation for a single hourly worker. @@unique([workerId,
+// month]) → upsert. Called per-worker from the cron batch and from
+// the owner's "重算" button. `now` pins both rule resolution and a batch's
+// shared wall-clock instant.
+export async function computeHourlyPayroll(
+  workerId: string,
+  month: string,
+  now: Date = new Date(),
+  pinnedRuleBundle?: HourlyRuleBundle,
+  fence?: ExecutionFence,
+): Promise<ComputeHourlyPayrollResult> {
+  const { start, end } = parseShanghaiMonth(month);
+  assertNotFutureSalaryMonth(month, now);
+
+  // Identity is locked before worker-month inside the same transaction, so
+  // account mutations cannot race a stale identity into a payroll snapshot.
+  return db.$transaction((tx) =>
+    computeHourlyPayrollInTx(
+      tx,
+      workerId,
+      month,
+      start,
+      end,
+      now,
+      pinnedRuleBundle,
+      fence,
+    ),
+  );
 }
 
 // Batch: compute for every active hourly worker in the given month.
@@ -482,20 +624,38 @@ export async function computeHourlyForAllInMonth(
   try {
     workers = await db.user.findMany({
       where: {
-        OR: [
+        AND: [
           {
-            role: Role.WORKER,
-            isActive: true,
-            workerType: { in: [...ACTIVE_HOURLY_WORKER_TYPES] },
+            OR: [
+              {
+                role: Role.WORKER,
+                isActive: true,
+                workerType: { in: [...ACTIVE_HOURLY_WORKER_TYPES] },
+              },
+              {
+                attendanceRecords: {
+                  some: {
+                    date: { gte: start, lt: end },
+                    roleSnapshot: Role.WORKER,
+                    workerTypeSnapshot: {
+                      in: [...ACTIVE_HOURLY_WORKER_TYPES],
+                    },
+                  },
+                },
+              },
+            ],
           },
           {
-            attendanceRecords: {
-              some: {
-                date: { gte: start, lt: end },
-                roleSnapshot: Role.WORKER,
-                workerTypeSnapshot: { in: [...ACTIVE_HOURLY_WORKER_TYPES] },
-              },
-            },
+            OR: [
+              { employmentStartDate: null },
+              { employmentStartDate: { lt: end } },
+            ],
+          },
+          {
+            OR: [
+              { employmentEndDate: null },
+              { employmentEndDate: { gte: start } },
+            ],
           },
         ],
       },
@@ -602,6 +762,27 @@ export async function markHourlyPayrollPaid(
   // mid-recompute blocks until the recompute's tx commits — no more
   // paid-row amount overwrite .
   return db.$transaction(async (tx) => {
+    // The first read only discovers the immutable lock coordinates. An
+    // attendance edit may delete an unpaid derivative while this operation is
+    // waiting for the lock, so this row is never trusted for the update.
+    const lockIdentity = await tx.hourlyWorkerPayroll.findUnique({
+      where: { id },
+      select: {
+        workerId: true,
+        month: true,
+      },
+    });
+    if (!lockIdentity) {
+      throw new HourlyAggregateError('月结记录不存在');
+    }
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyPayrollLockKey(
+      lockIdentity.workerId,
+      lockIdentity.month,
+    )}))`;
+
+    // Re-read after the shared lock. recordAttendance/removeAttendance delete
+    // unpaid payrolls under this same lock when source facts change; using the
+    // pre-lock object would let a stale amount be marked paid afterwards.
     const row = await tx.hourlyWorkerPayroll.findUnique({
       where: { id },
       select: {
@@ -612,7 +793,13 @@ export async function markHourlyPayrollPaid(
       },
     });
     if (!row) {
-      throw new HourlyAggregateError('月结记录不存在');
+      throw new HourlyAggregateError('考勤已变更，月结记录已失效，请重新计算');
+    }
+    if (
+      row.workerId !== lockIdentity.workerId ||
+      row.month !== lockIdentity.month
+    ) {
+      throw new HourlyAggregateError('月结归属已变化，请刷新后重试');
     }
     if (
       getHourlyPayrollWorkerType(row.salaryRuleSnapshot) === WorkerType.PACKER
@@ -621,10 +808,6 @@ export async function markHourlyPayrollPaid(
         '历史打包时薪快照只读保留；新打包报工已切换为工序计件结算',
       );
     }
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyLockKey(
-      row.workerId,
-      row.month,
-    )}))`;
     // 当月可以临时重算，但月末前不能标已发；特别是 COOK 的固定月薪
     // 不按进度折算，中途发放会冻结整月金额并阻断后续考勤重算。
     if (isPaid && row.month >= currentShanghaiMonth(now)) {

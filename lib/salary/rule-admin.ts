@@ -28,6 +28,7 @@ export { salaryRuleLockKey } from './rules';
 // rate from accidentally becoming a sales commission or vice versa.
 
 const MAX_MONEY = new Decimal('99999999.99');
+const MAX_HOURLY_RATE = new Decimal('9999.99');
 const MAX_RATE = new Decimal(1);
 const MAX_MULTIPLIER = new Decimal('99.99');
 
@@ -39,6 +40,20 @@ const moneyText = z
     const amount = new Decimal(value);
     if (amount.gt(MAX_MONEY)) {
       ctx.addIssue({ code: 'custom', message: '金额不能超过 99,999,999.99 元' });
+    }
+  });
+
+// HourlyWorkerPayroll.hourlyRate is Decimal(6,2). Keep the rule input inside
+// that exact storage domain; downstream combination fields are independently
+// bounded before persistence.
+const hourlyMoneyText = z
+  .string()
+  .trim()
+  .regex(/^\d{1,4}(?:\.\d{1,2})?$/, '请输入非负时薪，最多两位小数')
+  .superRefine((value, ctx) => {
+    const amount = new Decimal(value);
+    if (amount.gt(MAX_HOURLY_RATE)) {
+      ctx.addIssue({ code: 'custom', message: '时薪不能超过 9,999.99 元' });
     }
   });
 
@@ -141,8 +156,14 @@ const salaryRuleVersionRawSchema = z.discriminatedUnion('ruleKey', [
     tierMinSales: z.array(moneyText).min(1, '至少需要一个提成档位').max(20),
     tierRate: z.array(rateText).min(1, '至少需要一个提成档位').max(20),
   }),
-  baseInput.extend({ ruleKey: z.literal('CLEANER_HOURLY'), hourlyRate: moneyText }),
-  baseInput.extend({ ruleKey: z.literal('COOK_SPARE_HOURLY'), hourlyRate: moneyText }),
+  baseInput.extend({
+    ruleKey: z.literal('CLEANER_HOURLY'),
+    hourlyRate: hourlyMoneyText,
+  }),
+  baseInput.extend({
+    ruleKey: z.literal('COOK_SPARE_HOURLY'),
+    hourlyRate: hourlyMoneyText,
+  }),
   baseInput.extend({
     ruleKey: z.literal('OT_MULTIPLIER'),
     multiplier: multiplierText,

@@ -3189,6 +3189,10 @@ export const recordAttendanceSchema = z
   .refine((value) => value.workUnits + value.leaveUnits <= 1, {
     path: ['leaveUnits'],
     message: '上班天数与请假天数合计不能超过 1 天',
+  })
+  .refine((value) => value.normalHours + value.otHours <= 24, {
+    path: ['otHours'],
+    message: '正常工时与加班工时合计不能超过 24 小时',
   });
 
 export type RecordAttendanceInput = z.infer<typeof recordAttendanceSchema>;

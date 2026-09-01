@@ -2092,8 +2092,8 @@ model CustomerServiceCommission {
   totalSales         Decimal   @db.Decimal(12, 2)
   tierRate           Decimal   @db.Decimal(6, 4)
   commissionAmount   Decimal   @db.Decimal(12, 2)
-  monthlyBaseTotal   Decimal   @db.Decimal(10, 2)
-  totalIncome        Decimal   @db.Decimal(12, 2)
+  monthlyBaseTotal   Decimal   @db.Decimal(12, 2)
+  totalIncome        Decimal   @db.Decimal(13, 2)
   paidBase           Decimal   @default(0) @db.Decimal(12, 2)
   paidCommission     Decimal   @default(0) @db.Decimal(12, 2)
   isFullyPaid        Boolean   @default(false)
@@ -2149,10 +2149,10 @@ model HourlyWorkerPayroll {
   totalSpareHours    Decimal   @default(0) @db.Decimal(6, 2) // COOK 专用
   hourlyRate         Decimal   @db.Decimal(6, 2)
   otMultiplier       Decimal   @db.Decimal(4, 2)
-  baseSalary         Decimal   @db.Decimal(10, 2) // PACKER/CLEANER=hourlyRate×normal; COOK=monthlyBase
-  otSalary           Decimal   @default(0) @db.Decimal(10, 2) // PACKER/CLEANER only
-  spareSalary        Decimal   @default(0) @db.Decimal(10, 2) // COOK only
-  totalSalary        Decimal   @db.Decimal(10, 2)
+  baseSalary         Decimal   @db.Decimal(11, 2) // PACKER/CLEANER=hourlyRate×normal; COOK=monthlyBase
+  otSalary           Decimal   @default(0) @db.Decimal(11, 2) // PACKER/CLEANER only
+  spareSalary        Decimal   @default(0) @db.Decimal(11, 2) // COOK only
+  totalSalary        Decimal   @db.Decimal(11, 2)
   dailyDetail        Json? // 每日工时明细
   // Full rule snapshot at settlement time: hourlyRate / cookMonthly /
   // spareHourlyRate / otMultiplier / workHours config. Enough to

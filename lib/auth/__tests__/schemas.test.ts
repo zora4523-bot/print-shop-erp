@@ -45,7 +45,27 @@ import {
   createOrderChangeRequestSchema,
   createProductionTaskDisputeSchema,
   reviewProductionTaskDisputeSchema,
+  recordAttendanceSchema,
 } from '../schemas';
+
+describe('attendance schema', () => {
+  const attendance = {
+    workerId: 'worker-1',
+    date: '2026-08-30',
+    normalHours: 16,
+    otHours: 8,
+    spareHours: 0,
+    workUnits: 1,
+    leaveUnits: 0,
+  };
+
+  it('accepts 24 combined hours and rejects 25', () => {
+    expect(recordAttendanceSchema.safeParse(attendance).success).toBe(true);
+    expect(
+      recordAttendanceSchema.safeParse({ ...attendance, otHours: 9 }).success,
+    ).toBe(false);
+  });
+});
 
 describe('production task dispute schemas', () => {
   it('trims and accepts auditable create/review payloads', () => {

@@ -71,6 +71,8 @@ beforeEach(() => {
     id: 'cs-1',
     role: Role.CUSTOMER_SERVICE,
     isActive: true,
+    employmentStartDate: null,
+    employmentEndDate: null,
   });
   dbMock.salaryRule.findFirst.mockReset();
   dbMock.salaryPeriod.findFirst.mockReset().mockResolvedValue(null);
@@ -140,6 +142,8 @@ describe('startCsPeriod', () => {
     id: 'cs-1',
     role: Role.CUSTOMER_SERVICE,
     isActive: true,
+    employmentStartDate: null,
+    employmentEndDate: null,
   };
 
   it('rejects an invalid calendar date (2026-02-31)', async () => {
@@ -220,6 +224,62 @@ describe('startCsPeriod', () => {
     expect(r.durationMonths).toBe(3);
     // start 2026-02-01 + 3 months = 2026-05-01, end = 2026-04-30
     expect(r.periodEnd).toBe('2026-04-30');
+  });
+
+  it('allows full first/last employment months but rejects wholly disjoint CS periods', async () => {
+    dbMock.user.findUnique.mockResolvedValue({
+      ...csUser,
+      employmentStartDate: new Date('2026-08-15T00:00:00.000Z'),
+      employmentEndDate: new Date('2026-10-15T00:00:00.000Z'),
+    });
+    dbMock.salaryPeriod.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: 'period-employment',
+        ...data,
+      }),
+    );
+
+    await expect(
+      startCsPeriod({
+        csUserId: 'cs-1',
+        periodStart: '2026-08-01',
+        durationMonths: 3,
+      }),
+    ).resolves.toMatchObject({
+      periodStart: '2026-08-01',
+      periodEnd: '2026-10-31',
+      durationMonths: 3,
+    });
+
+    for (const periodStart of ['2026-07-01', '2026-11-01']) {
+      await expect(
+        startCsPeriod({
+          csUserId: 'cs-1',
+          periodStart,
+          durationMonths: 1,
+        }),
+      ).rejects.toThrow(/雇佣起止月份/);
+    }
+  });
+
+  it('stores the maximum CS base multiplied by 24 months in Decimal(12,2)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(csUser);
+    dbMock.salaryPeriod.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: 'period-max-base',
+        ...data,
+      }),
+    );
+
+    await expect(
+      startCsPeriod({
+        csUserId: 'cs-1',
+        periodStart: '2026-01-01',
+        durationMonths: 24,
+        monthlyBase: '99999999.99',
+      }),
+    ).resolves.toBeDefined();
+    expect(dbMock.salaryPeriod.create).toHaveBeenCalledOnce();
   });
 
   it('rejects fractional-cent import values at the domain boundary', async () => {
@@ -398,9 +458,15 @@ describe('startCsPeriod', () => {
     });
 
     expect(dbMock.$executeRaw.mock.calls[0][1]).toBe(
+      'print-shop-erp:salary-identity:cs-1',
+    );
+    expect(dbMock.$executeRaw.mock.calls[1][1]).toBe(
       'print-shop-erp:cs-user:cs-1',
     );
     expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[1],
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]).toBeLessThan(
       dbMock.salaryPeriod.findFirst.mock.invocationCallOrder[0],
     );
     expect(dbMock.salaryPeriod.findFirst.mock.invocationCallOrder[0]).toBeLessThan(
@@ -580,9 +646,13 @@ describe('settleCsPeriod', () => {
     const firstCall = dbMock.$executeRaw.mock.calls[0];
     const sql = (firstCall[0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
-    // Lock keyed on csUserId so it serializes with accumulateCsSales
-    // and any concurrent settler for the SAME user.
-    expect(firstCall[1]).toMatch(/print-shop-erp:cs-user:cs-1/);
+    expect(firstCall[1]).toMatch(/print-shop-erp:salary-identity:cs-1/);
+    expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toMatch(
+      /print-shop-erp:cs-user:cs-1/,
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[1],
+    );
   });
 
   it('adds initialSales to totalSales when picking the tier (SPEC §5.5 continuation)', async () => {
@@ -671,6 +741,101 @@ describe('settleCsPeriod', () => {
     );
     expect(nextCreate.status).toBe(SalaryPeriodStatus.IN_PROGRESS);
     expect(nextCreate.initialSales).toBe('0.00');
+  });
+
+  it('keeps a mid-month successor contiguous instead of moving it back to day 1', async () => {
+    dbMock.salaryPeriod.findUnique.mockResolvedValue({
+      ...periodFixture,
+      periodStart: new Date('2026-01-15T00:00:00.000Z'),
+      periodEnd: new Date('2026-05-14T00:00:00.000Z'),
+    });
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
+
+    await settleCsPeriod('period-1', new Date('2026-05-15T00:00:00.000Z'));
+
+    const nextCreate = dbMock.salaryPeriod.create.mock.calls[0][0].data;
+    expect((nextCreate.periodStart as Date).toISOString().slice(0, 10)).toBe(
+      '2026-05-15',
+    );
+    expect((nextCreate.periodEnd as Date).toISOString().slice(0, 10)).toBe(
+      '2026-09-14',
+    );
+  });
+
+  it('clamps an automatic successor to the inclusive final employment month', async () => {
+    dbMock.salaryPeriod.findUnique.mockResolvedValue(periodFixture);
+    dbMock.user.findUnique.mockResolvedValue({
+      id: 'cs-1',
+      role: Role.CUSTOMER_SERVICE,
+      isActive: true,
+      employmentStartDate: null,
+      employmentEndDate: new Date('2026-06-15T00:00:00.000Z'),
+    });
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
+
+    await settleCsPeriod('period-1');
+
+    const nextCreate = dbMock.salaryPeriod.create.mock.calls[0][0].data;
+    expect(nextCreate.durationMonths).toBe(2);
+    expect((nextCreate.periodStart as Date).toISOString().slice(0, 10)).toBe(
+      '2026-05-01',
+    );
+    expect((nextCreate.periodEnd as Date).toISOString().slice(0, 10)).toBe(
+      '2026-06-30',
+    );
+  });
+
+  it('does not create a successor wholly after employment ended', async () => {
+    dbMock.salaryPeriod.findUnique.mockResolvedValue(periodFixture);
+    dbMock.user.findUnique.mockResolvedValue({
+      id: 'cs-1',
+      role: Role.CUSTOMER_SERVICE,
+      isActive: true,
+      employmentStartDate: null,
+      employmentEndDate: new Date('2026-04-30T00:00:00.000Z'),
+    });
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
+
+    const result = await settleCsPeriod('period-1');
+
+    expect(result.nextPeriodId).toBeNull();
+    expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
+  });
+
+  it('stores the maximum closed CS combination in Decimal(13,2)', async () => {
+    dbMock.salaryPeriod.findUnique.mockResolvedValue({
+      ...periodFixture,
+      durationMonths: 24,
+      totalSales: '9999999999.99',
+      monthlyBase: '99999999.99',
+    });
+    dbMock.salaryRule.findFirst.mockImplementation(async (args: {
+      where: { ruleKey: string };
+    }) => {
+      if (args.where.ruleKey === 'CS_TIERS') {
+        return {
+          ruleValue: {
+            mode: 'FLAT',
+            tiers: [{ minSales: 0, rate: 1 }],
+          },
+        };
+      }
+      if (args.where.ruleKey === 'CS_BASE_SALARY') {
+        return { ruleValue: { monthlyBase: 99_999_999.99 } };
+      }
+      return { ruleValue: { months: 24 } };
+    });
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-max' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'next-max' });
+
+    const result = await settleCsPeriod('period-1');
+
+    expect(result.monthlyBaseTotal).toBe('2399999999.76');
+    expect(result.commissionAmount).toBe('9999999999.99');
+    expect(result.totalIncome).toBe('12399999999.75');
+    expect(dbMock.customerServiceCommission.create).toHaveBeenCalledOnce();
   });
 
   it('reuses an exact next period prepared in advance instead of duplicating it', async () => {

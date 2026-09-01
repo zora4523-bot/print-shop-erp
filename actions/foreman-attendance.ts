@@ -14,6 +14,15 @@ import {
 import type { AttendanceMutationResult } from './foreman-attendance.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
+function revalidateAttendanceAndPayrollPaths(): void {
+  revalidatePath('/foreman/attendance');
+  // A real attendance change invalidates the unpaid hourly derivative in the
+  // same transaction, so both owner and worker payroll reads must refresh.
+  revalidatePath('/owner/salary');
+  revalidatePath('/owner/salary/hourly');
+  revalidatePath('/worker/salary');
+}
+
 // Foreman records one (worker, date) attendance row. Idempotent by
 // design — same (worker, date) re-posts overwrite via upsert.
 //
@@ -52,7 +61,7 @@ export async function recordAttendanceAction(
     throw err;
   }
 
-  revalidatePath('/foreman/attendance');
+  revalidateAttendanceAndPayrollPaths();
   return { status: 'success' };
 }
 
@@ -78,6 +87,6 @@ export async function removeAttendanceAction(
     throw err;
   }
 
-  revalidatePath('/foreman/attendance');
+  revalidateAttendanceAndPayrollPaths();
   return { status: 'success' };
 }

@@ -25,6 +25,7 @@ const { dbMock, databaseNowMock, completionMock } = vi.hoisted(() => ({
       aggregate: vi.fn(),
       create: vi.fn(),
     },
+    pieceworkSettlement: { findUnique: vi.fn() },
     pieceworkPriceBook: { findMany: vi.fn() },
     user: { findUnique: vi.fn() },
     order: { update: vi.fn() },
@@ -36,7 +37,7 @@ const { dbMock, databaseNowMock, completionMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/background-jobs/clock', () => ({
-  databaseNow: databaseNowMock,
+  databaseClockNow: databaseNowMock,
 }));
 vi.mock('@/lib/production-completion', () => ({
   maybeCompleteProductionOrder: completionMock,
@@ -91,6 +92,8 @@ function accountFixture(overrides: Record<string, unknown> = {}) {
     isActive: true,
     workerType: WorkerType.MACHINE,
     machineType: MachineType.HAND_PRESS,
+    employmentStartDate: null,
+    employmentEndDate: null,
     ...overrides,
   };
 }
@@ -126,6 +129,7 @@ beforeEach(() => {
   for (const delegate of [
     dbMock.productionOperation,
     dbMock.productionReport,
+    dbMock.pieceworkSettlement,
     dbMock.pieceworkPriceBook,
     dbMock.user,
     dbMock.order,
@@ -151,6 +155,7 @@ beforeEach(() => {
       reworkQty: null,
     },
   });
+  dbMock.pieceworkSettlement.findUnique.mockResolvedValue(null);
   dbMock.pieceworkPriceBook.findMany.mockResolvedValue([publishedBook()]);
   dbMock.productionReport.create.mockResolvedValue({ id: 'report-1' });
   dbMock.productionOperation.update.mockResolvedValue({ id: 'operation-1' });
@@ -253,6 +258,39 @@ describe('reportProductionOperation', () => {
     expect(dbMock.productionReport.create).not.toHaveBeenCalled();
   });
 
+  it.each(['LOCKED', 'PAID'] as const)(
+    'rejects a %s reporter/day settlement after taking the shared day lock',
+    async (status) => {
+      dbMock.pieceworkSettlement.findUnique.mockResolvedValue({ status });
+
+      await expect(
+        reportProductionOperation(reportInput(), ACTOR),
+      ).rejects.toMatchObject({
+        code: 'REPORTING_DAY_SETTLED',
+        detail: {
+          workDate: '2026-08-28',
+          settlementStatus: status,
+        },
+      });
+
+      expect(dbMock.$executeRaw).toHaveBeenCalledTimes(6);
+      expect(dbMock.$executeRaw.mock.calls[3]?.[1]).toBe(
+        'print-shop-erp:salary-identity:worker-1',
+      );
+      expect(dbMock.$executeRaw.mock.calls[4]?.[1]).toBe(
+        'print-shop-erp:piecework-reporting-day:2026-08-28',
+      );
+      expect(dbMock.$executeRaw.mock.calls[5]?.[1]).toBe(
+        'print-shop-erp:piecework-settlement:worker-1:2026-08-28',
+      );
+      expect(dbMock.$executeRaw.mock.invocationCallOrder[5]).toBeLessThan(
+        dbMock.pieceworkSettlement.findUnique.mock.invocationCallOrder[0],
+      );
+      expect(dbMock.pieceworkPriceBook.findMany).not.toHaveBeenCalled();
+      expect(dbMock.productionReport.create).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects aggregate completed pieces above plan under the operation lock', async () => {
     dbMock.productionReport.aggregate.mockResolvedValue({
       _sum: {
@@ -270,7 +308,51 @@ describe('reportProductionOperation', () => {
       code: 'OVER_REPORT',
     });
     expect(dbMock.productionReport.create).not.toHaveBeenCalled();
-    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(3);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(4);
+  });
+
+  it('rejects a piecework report outside the locked employment dates', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      accountFixture({
+        employmentStartDate: new Date('2026-08-29T00:00:00.000Z'),
+        employmentEndDate: new Date('2026-09-30T00:00:00.000Z'),
+      }),
+    );
+
+    await expect(
+      reportProductionOperation(reportInput(), ACTOR),
+    ).rejects.toMatchObject({
+      code: 'ACCOUNT_NOT_AUTHORIZED',
+      detail: { workDate: '2026-08-28' },
+    });
+    expect(dbMock.productionReport.create).not.toHaveBeenCalled();
+  });
+
+  it('moves a delayed pre-midnight transaction to the post-midnight open day', async () => {
+    const beforeMidnight = new Date('2026-08-28T15:59:59.999Z');
+    const afterMidnight = new Date('2026-08-28T16:00:00.000Z');
+    databaseNowMock
+      .mockReset()
+      .mockResolvedValueOnce(beforeMidnight)
+      .mockResolvedValue(afterMidnight);
+
+    await reportProductionOperation(reportInput(), ACTOR);
+
+    const lockKeys = dbMock.$executeRaw.mock.calls.map((call) => call[1]);
+    expect(lockKeys).toContain(
+      'print-shop-erp:piecework-reporting-day:2026-08-28',
+    );
+    expect(lockKeys).toContain(
+      'print-shop-erp:piecework-reporting-day:2026-08-29',
+    );
+    expect(lockKeys.at(-1)).toBe(
+      'print-shop-erp:piecework-settlement:worker-1:2026-08-29',
+    );
+    expect(dbMock.productionReport.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ reportedAt: afterMidnight }),
+      }),
+    );
   });
 
   it('completes the operation and then the order when the last planned quantity lands', async () => {
