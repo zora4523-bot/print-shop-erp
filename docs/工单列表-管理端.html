@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>工单管理 · 管理后台</title>
+<style>
+:root{--ink:#17181c;--mute:#77746e;--paper:#faf9f7;--card:#fff;--rule:#e4e1dc;--rule-2:#f0eeea;
+ --seal:#a8121a;--seal-bg:#fdf3f3;--ok:#2f6b46;--gold:#c9a227}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+ background:var(--paper);color:var(--ink);font-variant-numeric:tabular-nums;
+ -webkit-font-smoothing:antialiased;padding-bottom:60px}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+.wrap{max-width:1180px;margin:0 auto;padding:22px 18px}
+
+.top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.top h1{font-size:21px;font-weight:800;letter-spacing:-.02em}
+.top .exp{margin-left:auto;font:inherit;font-size:12.5px;font-weight:800;padding:8px 16px;
+ border-radius:9px;border:1px solid var(--rule);background:var(--card);cursor:pointer}
+.top .exp:hover{border-color:var(--ink)}
+
+/* 看板条：每个数字都是一个队列入口 */
+.board{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:10px 16px;
+ cursor:pointer;min-width:104px}
+.stat:hover{border-color:var(--ink)}
+.stat .n{font-size:20px;font-weight:800;letter-spacing:-.02em}
+.stat .t{font-size:11px;font-weight:700;color:var(--mute);margin-top:2px}
+.stat.hot{border-color:var(--seal);background:linear-gradient(180deg,var(--seal-bg),var(--card))}
+.stat.hot .n{color:var(--seal)}
+
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.tab{font:inherit;font-size:13px;font-weight:700;padding:7px 14px;border-radius:99px;
+ border:1px solid var(--rule);background:var(--card);cursor:pointer;display:flex;gap:6px;align-items:center}
+.tab[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.tab .n{font-size:11px;font-weight:800;opacity:.65}
+.tab.hot .n{background:var(--seal);color:#fff;opacity:1;border-radius:99px;padding:1px 7px}
+.fsel{font:inherit;font-size:12px;font-weight:700;padding:7px 11px;border:1px solid var(--rule);
+ border-radius:99px;background:var(--card);color:var(--ink)}
+.search{margin-left:auto;min-width:200px;flex:0 1 240px}
+.search input{width:100%;font:inherit;font-size:13px;padding:8px 13px;border:1px solid var(--rule);
+ border-radius:99px;background:var(--card)}
+.search input:focus{outline:2px solid var(--ink);outline-offset:-1px}
+
+.list{display:flex;flex-direction:column;gap:8px}
+.row{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:11px 14px;
+ display:grid;grid-template-columns:20px 34px minmax(210px,1.35fr) minmax(150px,1fr) 96px 130px 120px auto;
+ gap:12px;align-items:center;cursor:pointer;transition:.12s}
+.row:hover{border-color:var(--ink)}
+.row.att{border-color:var(--seal);background:linear-gradient(90deg,var(--seal-bg),var(--card) 40%)}
+.thumb{width:34px;height:46px;border-radius:5px;position:relative;
+ background:linear-gradient(150deg,#8e1119,#c2181f)}
+.thumb::after{content:"";position:absolute;inset:16% 22% auto;height:26%;border-radius:2px;
+ background:rgba(232,205,131,.85)}
+.thumb .fig{position:absolute;right:-5px;bottom:-5px;background:var(--ink);color:#fff;
+ font-size:9px;font-weight:800;border-radius:99px;padding:1px 5px;border:1.5px solid var(--card)}
+
+.c1 .no{font-size:12px;font-weight:800;letter-spacing:.03em;cursor:copy}
+.c1 .no:hover{text-decoration:underline}
+.c1 .ver{font-size:9.5px;font-weight:800;background:var(--ink);color:#fff;border-radius:4px;
+ padding:1px 5px;margin-left:5px;vertical-align:1px}
+.c1 .nm{font-size:12.5px;font-weight:700;margin-top:3px}
+.c1 .who{font-size:11px;color:var(--mute);font-weight:600;margin-top:2px}
+.c2 .st{display:inline-block;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;
+ border:1px solid var(--rule);white-space:nowrap}
+.st.q{border-color:var(--ink)}          /* 待确认 */
+.st.hot{background:var(--seal);color:#fff;border-color:var(--seal)}
+.st.run{background:var(--ink);color:#fff;border-color:var(--ink)}
+.st.ship{color:var(--ok);border-color:var(--ok)}
+.st.dim{color:var(--mute);background:var(--rule-2);border-color:var(--rule-2)}
+.c2 .sub{font-size:11px;font-weight:700;margin-top:5px;line-height:1.4}
+.c2 .sub.bad{color:var(--seal)}
+.c2 .sub.ok{color:var(--ok)}
+.c2 .sub .chg{display:inline-block;border:1px solid var(--ink);border-radius:4px;
+ padding:0 6px;font-size:10px;font-weight:800;margin-right:5px}
+.due{font-size:12px;font-weight:800}
+.due small{display:block;font-size:10.5px;color:var(--mute);font-weight:600;margin-top:2px}
+.due.soon{color:var(--seal)}
+.due.over{color:#fff;background:var(--seal);border-radius:6px;padding:2px 8px;display:inline-block}
+.c4 .qn{font-size:12.5px;font-weight:800}
+.c4 .pg{margin-top:5px;font-size:10.5px;color:var(--mute);font-weight:700;line-height:1.5}
+.c4 .pgbar{height:3px;background:var(--rule-2);border-radius:2px;margin-top:3px;overflow:hidden}
+.c4 .pgbar i{display:block;height:100%;background:var(--ink)}
+.fee{text-align:right}
+.fee .amt{font-size:13.5px;font-weight:800;letter-spacing:-.01em}
+.fee .amt.pend{color:var(--seal);font-size:11.5px}
+.fee .seg{font-size:10px;color:var(--mute);font-weight:700;margin-top:2px;letter-spacing:.04em}
+.act{font:inherit;font-size:12px;font-weight:800;padding:6px 13px;border-radius:8px;
+ border:1px solid var(--rule);background:var(--card);cursor:pointer;white-space:nowrap}
+.act:hover{border-color:var(--ink)}
+.act.p{background:var(--ink);color:#fff;border-color:var(--ink)}
+.act.hot{background:var(--seal);color:#fff;border-color:var(--seal)}
+.empty{padding:60px 0;text-align:center;color:var(--mute);font-size:13.5px;font-weight:600}
+.pager{display:flex;gap:8px;justify-content:center;margin-top:16px;font-size:12px;color:var(--mute);font-weight:700}
+
+/* 抽屉 */
+.dmask{position:fixed;inset:0;background:rgba(23,24,28,.34);z-index:80;opacity:0;pointer-events:none;transition:.2s}
+.dmask.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(480px,100vw);background:var(--card);
+ z-index:90;transform:translateX(102%);transition:.24s;display:flex;flex-direction:column;
+ border-left:1px solid var(--rule);box-shadow:-8px 0 30px rgba(0,0,0,.08)}
+.drawer.on{transform:none}
+.dh{padding:16px 20px 13px;border-bottom:1px solid var(--rule)}
+.dh .r1{display:flex;gap:10px;align-items:center}
+.dh h2{font-size:16px;font-weight:800;flex:1;min-width:0}
+.dh .x{font:inherit;font-size:16px;border:none;background:none;cursor:pointer;color:var(--mute);padding:4px 8px}
+.dh .r2{display:flex;gap:10px;margin-top:5px;font-size:11.5px;color:var(--mute);font-weight:600;flex-wrap:wrap}
+.dbody{flex:1;overflow-y:auto;padding:16px 20px}
+.dsec{margin-bottom:20px}
+.dsec>.t{font-size:10.5px;letter-spacing:.18em;font-weight:800;color:var(--mute);
+ padding-bottom:6px;border-bottom:1px solid var(--rule);margin-bottom:11px}
+.audit{border-left:2.5px solid var(--ok);padding:9px 12px;font-size:12px;font-weight:700;
+ background:#f4f8f5;border-radius:0 8px 8px 0}
+.audit.bad{border-color:var(--seal);background:var(--seal-bg);color:var(--seal)}
+.dcard{border:1px solid var(--rule);border-radius:11px;padding:13px 15px;margin-bottom:10px}
+.dcard .h{font-size:12.5px;font-weight:800;margin-bottom:8px}
+.dcard textarea,.dcard input{width:100%;font:inherit;font-size:13px;padding:8px 11px;
+ border:1px solid var(--rule);border-radius:8px}
+.dcard textarea{min-height:52px;resize:vertical}
+.dcard .opts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.dcard .opt{font:inherit;font-size:12px;font-weight:700;padding:5px 12px;border-radius:99px;
+ border:1px solid var(--rule);background:var(--card);cursor:pointer}
+.dcard .opt[aria-pressed="true"]{background:var(--seal);color:#fff;border-color:var(--seal)}
+.dcard .go{display:flex;gap:8px;margin-top:9px}
+.dcard .go button{flex:1;font:inherit;font-size:12.5px;font-weight:800;padding:9px;border-radius:8px;
+ border:1px solid var(--rule);background:var(--card);cursor:pointer}
+.dcard .go .p{background:var(--ink);color:#fff;border-color:var(--ink)}
+.dcard .go .hot{background:var(--seal);color:#fff;border-color:var(--seal)}
+.fl{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;
+ border-bottom:1px solid var(--rule-2)}
+.fl span:first-child{color:var(--mute);font-weight:600}
+.fl b{font-weight:700}
+.fl.cur b{color:var(--ink)} .fl.dim,.fl.dim b{color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);
+ color:#fff;font-size:12.5px;font-weight:700;border-radius:99px;padding:9px 20px;opacity:0;
+ transition:.25s;pointer-events:none;z-index:200}
+.toast.on{opacity:1}
+@media(max-width:920px){
+ .row{grid-template-columns:20px 34px 1fr auto}
+ .c2,.due,.c4,.fee{grid-column:3/-1}
+ .fee{text-align:left}
+}
+:focus-visible{outline:2px solid var(--seal);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><h1>工单管理</h1>
+    <button class="exp" data-exp="1">导出当前筛选 ⇩</button></div>
+  <div class="board" id="board"></div>
+  <div class="bar" id="bar"></div>
+  <div class="list" id="list"></div>
+  <div class="pager">服务端分页 · 第 1 / 1 页 · 每页 50</div>
+</div>
+<div class="dmask" id="dmask"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ==================================================================
+   管理端与销售端的差别：
+   · 队列制——待确认/待核价/变更申请/已暂停是四个决定队列，不是筛选
+   · 队列内严格新单优先（既定决策），逾期靠颜色跳出，不跳序
+   · 11 态原生显示；audit 预检前置到行
+   · 裁决（确认/驳回/核价/变更批准/录运单/结算）在抽屉做；
+     编辑工单内容永远另页——裁决是工作流动作，不是编辑
+   ================================================================== */
+const TODAY=new Date('2026-08-28');
+const CUR_PV=5;                        // 当前生效价表版本
+let ORDERS=[
+ {no:'GD-20260828-3121',name:'新春平安封 四款',cust:'福明实业',sales:'代理·邱南京',styles:4,qty:4000,
+  status:'PENDING_FACTORY',due:'2026-09-06',created:'今天 11:02',craft:'局部烫金',
+  fee:{quoted:1104.3},audit:{ok:true},manual:null,priceVer:4,
+  log:[['今天 11:02','代理·邱南京','提交工单']]},
+ {no:'GD-20260828-3117',name:'龙年大吉 专版',cust:'张三commerce',sales:'代理·Lam',styles:1,qty:5000,
+  status:'PENDING_FACTORY',due:'2026-09-05',created:'今天 09:41',craft:'专版烫金',
+  fee:{},audit:{ok:true},manual:'专版三色，价目表只到双色'},
+ {no:'GD-20260827-3102',name:'囍字婚庆 两款',cust:'丽人婚庆',sales:'代理·王一',styles:2,qty:3000,
+  status:'PENDING_FACTORY',due:'2026-09-02',created:'昨天 16:20',craft:'专版烫金',
+  fee:{quoted:986.5},audit:{ok:false,issues:['第2款缺 CDR','第1款设计图与款名不符']}},
+ {no:'GD-20260826-3088',name:'新年快樂 六款',cust:'福明实业',sales:'代理·邱南京',styles:6,qty:6000,
+  status:'FOILING',due:'2026-08-30',created:'2天前',craft:'局部烫金',ver:2,
+  fee:{quoted:1902,confirmed:1924},prog:{foil:3600,pack:0},reprint:true,printed:true,star:true,
+  log:[['2天前','代理·邱南京','提交工单'],['2天前','老板','确认 · 锁定 ¥1,902'],
+       ['昨天','老板','批准变更 · v2 · 重算 ¥1,924'],['昨天','系统','生成重打印任务']]},
+ {no:'GD-20260826-3080',name:'乔迁之喜 两款',cust:'佛山味来餐饮',sales:'代理·王一',styles:2,qty:3000,
+  status:'CONFIRMED',due:'2026-09-08',created:'2天前',craft:'专版烫金',
+  fee:{quoted:812,confirmed:812},
+  change:{type:'MODIFY',want:'修改数量：3000 → 2000（客户砍单）',at:'今天 09:41'}},
+ {no:'GD-20260825-3061',name:'公司年会封',cust:'广州铭轩',sales:'代理·Lam',styles:1,qty:1000,
+  status:'FOILING',due:'2026-08-25',created:'3天前',craft:'局部烫金',
+  fee:{quoted:231.3,confirmed:231.3},prog:{foil:1000,pack:0},
+  change:{type:'CANCEL',want:'客户临时取消',at:'今天 10:20'}},
+ {no:'GD-20260824-3040',name:'端午定制',cust:'张三commerce',sales:'代理·Lam',styles:1,qty:2000,
+  status:'REJECTED',due:'2026-09-02',created:'4天前',craft:'局部烫金',
+  fee:{quoted:404.3},reject:{code:'纸张库存不足',note:'触感纸200g缺货，等9/2补货'}},
+ {no:'GD-20260823-3022',name:'囍上眉梢',cust:'丽人婚庆',sales:'代理·王一',styles:1,qty:2000,
+  status:'ON_HOLD',due:'2026-08-29',created:'5天前',craft:'专版烫金',
+  fee:{quoted:520,confirmed:520},hold:'设计图有误 · 第1款重传后待复核'},
+ {no:'GD-20260822-3001',name:'中秋礼盒配套 三款',cust:'福明实业',sales:'代理·邱南京',styles:3,qty:2000,
+  status:'PACKING',due:'2026-08-29',created:'6天前',craft:'彩印',
+  fee:{quoted:668.3,confirmed:668.3},prog:{foil:1500,pack:1800},printed:true},
+ {no:'GD-20260821-2990',name:'周年庆封',cust:'广州铭轩',sales:'代理·Lam',styles:1,qty:2000,
+  status:'RELEASED',due:'2026-09-01',created:'7天前',craft:'局部烫金',
+  fee:{quoted:446,confirmed:446},printed:false,stale:'下发 2 天无人扫码认领'},   // 阈值 2 天，进 SystemSetting
+ {no:'GD-20260819-2944',name:'开业红包',cust:'佛山味来餐饮',sales:'代理·王一',styles:1,qty:500,
+  status:'SHIPPED',due:'2026-08-22',created:'9天前',craft:'局部烫金',
+  fee:{quoted:130.8,confirmed:130.8},waybill:'中通 75312884629891'},
+ {no:'GD-20260815-2870',name:'试样 迷你封',cust:'个人客户',sales:'代理·Lam',styles:1,qty:300,
+  status:'CANCELLED',due:null,created:'13天前',craft:'局部烫金',
+  fee:{quoted:98,settled:36},note:'生产中取消 · 已产300按实结'},
+ {no:'GD-20260812-2801',name:'员工福利封',cust:'广州铭轩',sales:'代理·Lam',styles:1,qty:1000,
+  status:'SETTLED',due:'2026-08-16',created:'16天前',craft:'专版烫金',
+  fee:{quoted:325,confirmed:325,settled:325},waybill:'中通 75312880011223'},
+];
+
+const ST={
+ PENDING_FACTORY:{t:'待确认',c:'q'},
+ REJECTED:{t:'已驳回',c:'dim'},
+ CONFIRMED:{t:'已确认',c:'q'},
+ ON_HOLD:{t:'已暂停',c:'hot'},
+ RELEASED:{t:'已下发',c:'run'},
+ FOILING:{t:'烫金中',c:'run'},
+ PACKING:{t:'打包中',c:'run'},
+ SHIPPED:{t:'已发货',c:'ship'},
+ SETTLED:{t:'已结算',c:'dim'},
+ CANCELLED:{t:'已取消',c:'dim'},
+};
+const isManual=o=>!!o.manual&&o.fee.confirmed==null&&!o.manualFee;
+const needPrint=o=>['RELEASED','FOILING','PACKING'].includes(o.status)&&(o.printed===false||o.reprint);
+/* 扫码端硬拦：每道工序累计报工 ≤ 工单数量（不能超只能少），超出当场拒绝。
+   打包>烫金（两者均未超单量）不拦，仅提示——多为师傅漏报，补报后自动消失。 */
+const progBad=o=>{ if(!o.prog) return null;
+ if(o.prog.foil>o.qty||o.prog.pack>o.qty) return '报工超工单数量——扫码端硬拦失效，查数据';
+ if(o.prog.pack>o.prog.foil) return '打包 '+o.prog.pack.toLocaleString()+' > 烫金 '+o.prog.foil.toLocaleString()+'（提示：师傅漏报或打包错报）';
+ return null;};
+const needConfirm=o=>o.status==='PENDING_FACTORY';
+const hasChange=o=>!!o.change;
+
+const QUEUES=[
+ ['todo','待办',o=>needConfirm(o)||hasChange(o)||o.status==='ON_HOLD',1],
+ ['prod','生产中',o=>['CONFIRMED','RELEASED','FOILING','PACKING'].includes(o.status)&&!hasChange(o)],
+ ['print','待打印',o=>needPrint(o),1],
+ ['shipped','已发货',o=>o.status==='SHIPPED'],
+ ['done','已结算/取消',o=>['SETTLED','CANCELLED','REJECTED'].includes(o.status)],
+ ['all','全部',o=>true],
+];
+let TAB='todo', Q='', F_SALES='', F_CRAFT='', F_CUST='', F_STAR=false, OPEN=null, DEC={}, SEL=new Set();
+
+/* ---------- 看板 ---------- */
+function board(){
+ const n1=ORDERS.filter(needConfirm).length;
+ const n2=ORDERS.filter(o=>isManual(o)).length;
+ const n3=ORDERS.filter(hasChange).length;
+ const n4=ORDERS.filter(o=>o.status==='ON_HOLD').length;
+ const over=ORDERS.filter(o=>o.due&&!['SHIPPED','SETTLED','CANCELLED'].includes(o.status)
+   &&new Date(o.due)<TODAY).length;
+ const shipToday=ORDERS.filter(o=>o.status==='PACKING').length;
+ return [
+  ['待确认',n1,n1>0],['待核价',n2,n2>0],['变更申请',n3,n3>0],['已暂停',n4,n4>0],
+  ['已逾期',over,over>0],['今日待发',shipToday,false],
+ ].map(([t,n,hot])=>`<div class="stat ${hot?'hot':''}" data-tab="todo"><div class="n">${n}</div><div class="t">${t}</div></div>`).join('');
+}
+
+/* ---------- 行 ---------- */
+function dueCell(o){
+ if(!o.due) return '<span class="due" style="color:var(--mute)">—</span>';
+ const done=['SHIPPED','SETTLED','CANCELLED'].includes(o.status);
+ const d=Math.ceil((new Date(o.due)-TODAY)/86400000);
+ if(done) return `<span class="due" style="color:var(--mute)">${o.due.slice(5)}</span>`;
+ if(d<0) return `<span class="due over">${o.due.slice(5)} 超${-d}天</span>`;
+ if(d<=3) return `<span class="due soon">${o.due.slice(5)}<small>剩 ${d} 天</small></span>`;
+ return `<span class="due">${o.due.slice(5)}<small>剩 ${d} 天</small></span>`;
+}
+function feeCell(o){
+ const f=o.fee;
+ if(o.manualFee) return `<div class="amt">¥${o.manualFee.toLocaleString('zh-CN',{minimumFractionDigits:2})}</div><div class="seg">已核价 · 待确认锁定</div>`;
+ if(isManual(o)) return `<div class="amt pend">待核价</div><div class="seg">系统无法定价</div>`;
+ if(f.settled!=null) return `<div class="amt">¥${f.settled.toLocaleString('zh-CN',{minimumFractionDigits:2})}</div><div class="seg">结算</div>`;
+ if(f.confirmed!=null) return `<div class="amt">¥${f.confirmed.toLocaleString('zh-CN',{minimumFractionDigits:2})}</div><div class="seg">确认${o.ver?` · v${o.ver}`:''}</div>`;
+ if(f.quoted!=null) return `<div class="amt">¥${f.quoted.toLocaleString('zh-CN',{minimumFractionDigits:2})}</div><div class="seg">报价</div>`;
+ return `<div class="amt" style="color:var(--mute)">—</div>`;
+}
+function subLine(o){
+ const bad=progBad(o);
+ if(bad) return `<div class="sub bad">⚠ 报工异常：${bad}</div>`;
+ if(o.stale) return `<div class="sub bad">⚠ ${o.stale}</div>`;
+ if(needPrint(o)&&o.reprint) return `<div class="sub bad">v${o.ver} 已生效 · 旧版纸质工单待重打</div>`;
+ if(needPrint(o)) return `<div class="sub bad">工单未打印</div>`;
+ if(hasChange(o)) return `<div class="sub"><span class="chg">${o.change.type==='CANCEL'?'取消申请':'变更申请'}</span>${o.change.want}</div>`;
+ if(o.status==='PENDING_FACTORY'){
+  if(o.audit&&!o.audit.ok) return `<div class="sub bad">⚠ ${o.audit.issues.join('；')}</div>`;
+  if(isManual(o)) return `<div class="sub bad">待核价 · ${o.manual}</div>`;
+  if(o.manualFee) return `<div class="sub ok">已核 ¥${o.manualFee} · 可确认</div>`;
+  return `<div class="sub ok">✓ 预检通过，可确认</div>`;
+ }
+ if(o.status==='ON_HOLD') return `<div class="sub bad">${o.hold}</div>`;
+ if(o.reject) return `<div class="sub" style="color:var(--mute)">驳回：${o.reject.code} · ${o.reject.note}</div>`;
+ if(o.note) return `<div class="sub" style="color:var(--mute)">${o.note}</div>`;
+ if(o.waybill) return `<div class="sub" style="color:var(--mute)">${o.waybill}</div>`;
+ return '';
+}
+function progCell(o){
+ if(!o.prog) return '';
+ const f=Math.round(o.prog.foil/o.qty*100), p=Math.round(o.prog.pack/o.qty*100);
+ return `<div class="pg">烫 ${o.prog.foil.toLocaleString()} · 包 ${o.prog.pack.toLocaleString()}
+   <div class="pgbar"><i style="width:${f}%"></i></div>
+   <div class="pgbar" style="margin-top:2px"><i style="width:${p}%;background:var(--mute)"></i></div></div>`;
+}
+function rowAct(o){
+ if(needPrint(o)) return ['标记已打印','p'];
+ if(hasChange(o)) return ['裁决变更','hot'];
+ if(o.status==='PENDING_FACTORY'){
+  if(o.audit&&!o.audit.ok) return ['审核','hot'];
+  if(isManual(o)) return ['录价','hot'];
+  return ['确认','p'];
+ }
+ if(o.status==='ON_HOLD') return ['处理',''];
+ if(o.status==='CONFIRMED') return ['下发生产','p'];
+ if(o.status==='PACKING') return ['录运单发货','p'];
+ if(o.status==='SHIPPED') return ['结算',''];
+ return ['详情',''];
+}
+function row(o){
+ const st=ST[o.status], att=needConfirm(o)||hasChange(o)||o.status==='ON_HOLD';
+ const [al,ac]=rowAct(o);
+ return `<div class="row ${att?'att':''}" data-open="${o.no}">
+  <div style="display:flex;flex-direction:column;gap:6px;align-items:center">
+    <input type="checkbox" data-sel="${o.no}" ${SEL.has(o.no)?'checked':''} style="width:15px;height:15px;cursor:pointer">
+    <span data-star="${o.no}" style="cursor:pointer;font-size:13px;color:${o.star?'var(--gold)':'var(--rule)'}">★</span>
+  </div>
+  <div class="thumb">${o.styles>1?`<span class="fig">${o.styles}</span>`:''}</div>
+  <div class="c1"><span class="no mono" data-copy="${o.no}">${o.no}</span>${o.ver?`<span class="ver">v${o.ver}</span>`:''}
+    <div class="nm">${o.name}</div>
+    <div class="who"><span data-fcust="${o.cust}" style="cursor:pointer;text-decoration:underline dotted">${o.cust}</span> · ${o.sales} · ${o.craft} · ${o.created}</div></div>
+  <div class="c2"><span class="st ${st.c}">${st.t}</span>${subLine(o)}</div>
+  <div>${dueCell(o)}</div>
+  <div class="c4"><div class="qn">${o.styles}款 · ${o.qty.toLocaleString()}</div>${progCell(o)}</div>
+  <div class="fee">${feeCell(o)}</div>
+  <div><button class="act ${ac}" data-open="${o.no}">${al}</button></div>
+ </div>`;
+}
+
+/* ---------- 抽屉：裁决动作 ---------- */
+const REJ=['纸张库存不足','设计图有误'];
+function drawer(o){
+ if(!o) return '';
+ const st=ST[o.status];
+ const cards=[];
+ if(hasChange(o)){
+  cards.push(`<div class="dcard"><div class="h">${o.change.type==='CANCEL'?'取消申请':'变更申请'} · ${o.change.at}</div>
+   <div style="font-size:12.5px;font-weight:700;margin-bottom:6px">${o.change.want}</div>
+   <div style="font-size:11px;color:var(--mute);font-weight:600;line-height:1.6">
+     批准${o.change.type==='CANCEL'?'：工厂核已产数量，已产照结后转已取消'
+     :'：版本 +1，费用重算，旧版纸质工单作废并生成重打印任务'}。拒绝必须写原因，退回销售需处理。</div>
+   <textarea id="chgNote" placeholder="拒绝原因（批准可不填）"></textarea>
+   <div class="go"><button class="hot" data-chg="deny" data-no="${o.no}">拒绝</button>
+     <button class="p" data-chg="ok" data-no="${o.no}">批准${o.change.type==='MODIFY'?' · 版本+1':''}</button></div></div>`);
+ }
+ if(o.status==='PENDING_FACTORY'){
+  if(isManual(o))
+   cards.push(`<div class="dcard"><div class="h">人工核价</div>
+    <div style="font-size:12px;color:var(--seal);font-weight:700;margin-bottom:8px">${o.manual}</div>
+    <input id="mfee" type="number" min="0" placeholder="核定加工费合计（元）">
+    <div class="go"><button class="p" data-price="${o.no}">录入核价</button></div></div>`);
+  cards.push(`<div class="dcard"><div class="h">工厂确认</div>
+   ${o.audit&&!o.audit.ok?`<div class="audit bad" style="margin-bottom:9px">预检未过：${o.audit.issues.join('；')}——确认按钮已停用，先驳回或等销售补齐</div>`
+     :`<div class="audit" style="margin-bottom:9px">预检通过 ✓ 确认即锁定费用${o.manualFee?` ¥${o.manualFee}`:o.fee.quoted!=null?` ¥${o.fee.quoted}`:''}（confirmedFee 快照）</div>`}
+   ${o.priceVer&&o.priceVer<CUR_PV&&!isManual(o)?`<div class="audit bad" style="margin-bottom:9px;border-color:var(--gold);background:#fdf6e3;color:var(--ink)">
+     报价按价表 v${o.priceVer}（¥${o.fee.quoted}）；价表现已 v${CUR_PV}——<b>确认时将按当前版重算锁定</b>，金额可能与报价不同</div>`:''}
+   <div class="opts">${REJ.map(r=>`<button class="opt" aria-pressed="${DEC.rej===r}" data-rej="${r}">${r}</button>`).join('')}</div>
+   <textarea id="rejNote" placeholder="驳回备注（给销售看的具体说明）"></textarea>
+   <div class="go"><button class="hot" data-do="reject" data-no="${o.no}">驳回</button>
+     <button class="p" data-do="confirm" data-no="${o.no}" ${(o.audit&&!o.audit.ok)||(isManual(o)&&!o.manualFee)?'disabled style="opacity:.4"':''}>确认工单</button></div></div>`);
+ }
+ if(o.status==='CONFIRMED'&&!hasChange(o))
+  cards.push(`<div class="dcard"><div class="h">下发生产</div>
+   <div style="font-size:11.5px;color:var(--mute);font-weight:600;margin-bottom:8px">下发后进入车间可认领（RELEASED），并生成工单 PDF 打印任务。</div>
+   <div class="go"><button class="p" data-do="release" data-no="${o.no}">下发 · 打印工单</button></div></div>`);
+ if(o.status==='PACKING')
+  cards.push(`<div class="dcard"><div class="h">录运单发货</div>
+   <input id="wb" placeholder="运单号（中通）">
+   <div class="go"><button class="p" data-do="ship" data-no="${o.no}">发货</button></div></div>`);
+ if(o.status==='SHIPPED')
+  cards.push(`<div class="dcard"><div class="h">结算</div>
+   <div style="font-size:11.5px;color:var(--mute);font-weight:600;margin-bottom:8px">按 confirmedFee ¥${o.fee.confirmed} 结算入账。</div>
+   <div class="go"><button class="p" data-do="settle" data-no="${o.no}">结算</button></div></div>`);
+ const f=o.fee;
+ return `<div class="dh"><div class="r1"><h2>${o.name}</h2><span class="st ${st.c}">${st.t}</span>
+   <button class="x" data-close="1">✕</button></div>
+  <div class="r2"><span class="mono" data-copy="${o.no}" style="cursor:copy">${o.no}</span>
+   <span>${o.cust}</span><span>${o.sales}</span>${o.ver?`<span>版本 v${o.ver}</span>`:''}</div></div>
+ <div class="dbody">
+  ${cards.length?`<div class="dsec"><div class="t">待你处理</div>${cards.join('')}</div>`:''}
+  <div class="dsec"><div class="t">费用 三段</div>
+   <div class="fl ${f.confirmed==null&&f.settled==null?'cur':'dim'}"><span>报价 quotedFee</span><b>${f.quoted!=null?'¥'+f.quoted.toLocaleString('zh-CN',{minimumFractionDigits:2}):isManual(o)?'待核价':'—'}</b></div>
+   <div class="fl ${f.confirmed!=null&&f.settled==null?'cur':'dim'}"><span>确认 confirmedFee${o.ver?' · v'+o.ver:''}</span><b>${f.confirmed!=null?'¥'+f.confirmed.toLocaleString('zh-CN',{minimumFractionDigits:2}):'—'}</b></div>
+   <div class="fl ${f.settled!=null?'cur':'dim'}"><span>结算 settledFee</span><b>${f.settled!=null?'¥'+f.settled.toLocaleString('zh-CN',{minimumFractionDigits:2}):'—'}</b></div>
+  </div>
+  ${o.prog?`<div class="dsec"><div class="t">报工进度</div>
+   <div class="fl"><span>烫金（扫码报工）</span><b>${o.prog.foil.toLocaleString()} / ${o.qty.toLocaleString()}</b></div>
+   <div class="fl"><span>打包（扫码报工）</span><b>${o.prog.pack.toLocaleString()} / ${o.qty.toLocaleString()}</b></div></div>`:''}
+  ${o.log?`<div class="dsec"><div class="t">动态</div>
+   ${o.log.map(([t2,who,act])=>`<div class="fl"><span>${t2} · ${who}</span><b>${act}</b></div>`).join('')}</div>`:''}
+  <div class="dsec"><div class="t">操作</div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="act">查看完整工单</button><button class="act">下载工单 PDF</button>
+    <button class="act">编辑（另页）</button></div>
+   <div style="font-size:10.5px;color:var(--mute);font-weight:600;margin-top:8px">抽屉只做裁决；编辑工单内容另页进行。</div>
+  </div>
+ </div>`;
+}
+
+/* ---------- 渲染 ---------- */
+function render(){
+ document.getElementById('board').innerHTML=board();
+ const tab=QUEUES.find(t=>t[0]===TAB);
+ let rows=ORDERS.filter(tab[2]);
+ if(F_SALES) rows=rows.filter(o=>o.sales===F_SALES);
+ if(F_CRAFT) rows=rows.filter(o=>o.craft===F_CRAFT);
+ if(Q) rows=rows.filter(o=>(o.no+o.name+o.cust+(o.waybill||'')).toLowerCase().includes(Q.toLowerCase()));
+ /* 严格新单优先：不做需处理置顶——队列已经分流，序内只按时间 */
+ document.getElementById('bar').innerHTML=
+  QUEUES.map(([id,t,f,hot])=>{const n=ORDERS.filter(f).length;
+   return `<button class="tab ${hot&&n?'hot':''}" aria-pressed="${TAB===id}" data-tab="${id}">${t}${n?`<span class="n">${n}</span>`:''}</button>`}).join('')
+  +`<select class="fsel" data-fsales><option value="">全部销售</option>
+     ${[...new Set(ORDERS.map(o=>o.sales))].map(s=>`<option ${F_SALES===s?'selected':''}>${s}</option>`).join('')}</select>
+   <select class="fsel" data-fcraft><option value="">全部工艺线</option>
+     ${[...new Set(ORDERS.map(o=>o.craft))].map(s=>`<option ${F_CRAFT===s?'selected':''}>${s}</option>`).join('')}</select>
+   <div class="search"><input id="q" placeholder="搜单号 / 客户 / 名称" value="${Q}"></div>`;
+ if(F_CUST) rows=rows.filter(o=>o.cust===F_CUST);
+ if(F_STAR) rows=rows.filter(o=>o.star);
+ const sum={n:rows.length,qty:rows.reduce((a,o)=>a+o.qty,0),
+   fee:rows.reduce((a,o)=>a+(o.fee.settled??o.fee.confirmed??o.fee.quoted??0),0),
+   pend:rows.filter(o=>isManual(o)).length};
+ const chips=[F_CUST&&`<button class="tab" data-clrcust="1">客户：${F_CUST} ✕</button>`,
+   `<button class="tab" aria-pressed="${F_STAR}" data-togstar="1">★ 仅星标</button>`].filter(Boolean).join('');
+ const selBar=SEL.size?`<div style="display:flex;gap:9px;align-items:center;background:var(--ink);color:#fff;
+   border-radius:11px;padding:9px 14px;margin-bottom:9px;font-size:12px;font-weight:800">
+   已选 ${SEL.size} 单
+   <button class="act" data-batch="release">批量下发+打印</button>
+   <button class="act" data-batch="printed">标记已打印</button>
+   <button class="act" data-batch="settle">批量结算</button>
+   <button class="act" data-batch="export">导出所选</button>
+   <button class="act" data-batch="clear" style="margin-left:auto">清除</button></div>`:'';
+ document.getElementById('list').innerHTML=
+  selBar
+  +`<div style="display:flex;gap:14px;font-size:11.5px;font-weight:700;color:var(--mute);padding:2px 4px 8px">
+     <span>当前筛选 <b style="color:var(--ink)">${sum.n}</b> 单</span>
+     <span>共 <b style="color:var(--ink)">${sum.qty.toLocaleString()}</b> 个</span>
+     <span>金额合计 <b style="color:var(--ink)">¥${sum.fee.toLocaleString('zh-CN',{minimumFractionDigits:2})}</b>${sum.pend?`（另 ${sum.pend} 单待核价未计入）`:''}</span></div>`
+  +(rows.length?rows.map(row).join(''):'<div class="empty">这个队列清空了</div>');
+ document.getElementById('bar').insertAdjacentHTML('beforeend',chips);
+}
+function openDrawer(no){
+ OPEN=no; DEC={}; location.hash=no?'wo='+no:'';
+ const o=ORDERS.find(x=>x.no===no);
+ document.getElementById('drawer').innerHTML=drawer(o);
+ document.getElementById('drawer').classList.toggle('on',!!o);
+ document.getElementById('dmask').classList.toggle('on',!!o);
+}
+const toast=t=>{const x=document.getElementById('toast');x.textContent=t;
+ x.classList.add('on');setTimeout(()=>x.classList.remove('on'),1700);};
+
+/* ---------- 事件 ---------- */
+document.addEventListener('click',e=>{
+ const t=e.target.closest('[data-tab],[data-copy],[data-open],[data-close],[data-do],[data-rej],[data-chg],[data-price],[data-exp],[data-sel],[data-star],[data-fcust],[data-clrcust],[data-togstar],[data-batch],#dmask');
+ if(!t) return;
+ const o=t.dataset.no?ORDERS.find(x=>x.no===t.dataset.no):null;
+ if(t.dataset.sel){e.stopPropagation();
+  SEL.has(t.dataset.sel)?SEL.delete(t.dataset.sel):SEL.add(t.dataset.sel);render();return;}
+ if(t.dataset.star){e.stopPropagation();const s=ORDERS.find(x=>x.no===t.dataset.star);
+  s.star=!s.star;render();return;}
+ if(t.dataset.fcust){e.stopPropagation();F_CUST=t.dataset.fcust;render();return;}
+ if(t.dataset.clrcust){F_CUST='';render();return;}
+ if(t.dataset.togstar){F_STAR=!F_STAR;render();return;}
+ if(t.dataset.batch){
+  const b=t.dataset.batch, sel=[...SEL].map(no=>ORDERS.find(x=>x.no===no));
+  if(b==='clear'){SEL.clear();render();return;}
+  if(b==='export'){toast('已导出所选 '+sel.length+' 单');return;}
+  let done=0,skip=0;
+  sel.forEach(o=>{
+   if(b==='release'&&o.status==='CONFIRMED'&&!hasChange(o)){o.status='RELEASED';o.printed=true;done++;}
+   else if(b==='printed'&&needPrint(o)){o.printed=true;o.reprint=false;done++;}
+   else if(b==='settle'&&o.status==='SHIPPED'){o.status='SETTLED';o.fee.settled=o.fee.confirmed;done++;}
+   else skip++;});
+  SEL.clear();render();
+  toast(({release:'下发+打印',printed:'标记已打印',settle:'结算'})[b]+' '+done+' 单'+(skip?' · 跳过 '+skip+' 单（状态不符）':''));
+  return;}
+ if(t.dataset.copy){e.stopPropagation();navigator.clipboard?.writeText(t.dataset.copy);toast('已复制 '+t.dataset.copy);return;}
+ if(t.dataset.tab){TAB=t.dataset.tab;render();return;}
+ if(t.dataset.exp){toast('已加入导出队列 · 完成后站内通知');return;}
+ if(t.dataset.close!==undefined||t.id==='dmask'){openDrawer(null);return;}
+ if(t.dataset.rej){DEC.rej=t.dataset.rej;const note=document.getElementById('rejNote').value;
+  document.getElementById('drawer').innerHTML=drawer(ORDERS.find(x=>x.no===OPEN));
+  document.getElementById('rejNote').value=note;return;}
+ if(t.dataset.price){const v=parseFloat(document.getElementById('mfee').value);
+  if(!(v>0)){toast('核价金额要填');return;}
+  o.manualFee=v;render();openDrawer(o.no);toast('已录核价 ¥'+v+' · 可确认锁定');return;}
+ if(t.dataset.chg){
+  if(t.dataset.chg==='deny'){const note=document.getElementById('chgNote').value.trim();
+   if(!note){toast('拒绝必须写原因');return;}
+   delete o.change;render();openDrawer(o.no);toast('已拒绝，退回销售需处理');return;}
+  if(o.change.type==='MODIFY'){o.ver=(o.ver||1)+1;delete o.change;
+   render();openDrawer(o.no);toast('已批准 · 版本 v'+o.ver+' · 已生成重打印任务');}
+  else{o.status='CANCELLED';o.fee.settled=Math.round((o.fee.confirmed||0)*((o.prog?.foil||0)/o.qty)*100)/100;
+   o.note='生产中取消 · 已产'+(o.prog?.foil||0)+'按实结';delete o.change;
+   render();openDrawer(null);toast('已批准取消 · 已产部分照结');}
+  return;}
+ if(t.dataset.do){
+  const d=t.dataset.do;
+  if(d==='reject'){if(!DEC.rej){toast('先选驳回原因');return;}
+   o.status='REJECTED';o.reject={code:DEC.rej,note:document.getElementById('rejNote').value||''};
+   render();openDrawer(null);toast('已驳回 · '+DEC.rej);return;}
+  if(d==='confirm'){o.status='CONFIRMED';
+   o.fee.confirmed=o.manualFee??o.fee.quoted;delete o.manualFee;
+   render();openDrawer(o.no);toast('已确认 · confirmedFee 锁定 ¥'+o.fee.confirmed);return;}
+  if(d==='release'){o.status='RELEASED';render();openDrawer(null);toast('已下发 · 工单 PDF 已进打印队列');return;}
+  if(d==='ship'){const wb=document.getElementById('wb').value.trim();
+   if(!wb){toast('运单号要填');return;}
+   o.status='SHIPPED';o.waybill='中通 '+wb;render();openDrawer(null);toast('已发货 · '+wb);return;}
+  if(d==='settle'){o.status='SETTLED';o.fee.settled=o.fee.confirmed;
+   render();openDrawer(null);toast('已结算 ¥'+o.fee.settled);return;}
+ }
+ if(t.dataset.open){
+  const oo=ORDERS.find(x=>x.no===t.dataset.open);
+  if(t.classList.contains('act')&&needPrint(oo)){e.stopPropagation();
+   oo.printed=true;oo.reprint=false;render();toast(oo.no+' 已标记打印');return;}
+  openDrawer(t.dataset.open);return;}
+});
+document.addEventListener('input',e=>{
+ if(e.target.id==='q'){Q=e.target.value;const p=e.target.selectionStart;render();
+  const q=document.getElementById('q');q.focus();q.setSelectionRange(p,p);}
+});
+document.addEventListener('change',e=>{
+ if(e.target.dataset.fsales!==undefined){F_SALES=e.target.value;render();}
+ if(e.target.dataset.fcraft!==undefined){F_CRAFT=e.target.value;render();}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&OPEN)openDrawer(null);});
+if(location.hash.startsWith('#wo=')) setTimeout(()=>openDrawer(location.hash.slice(4)),0);
+render();
+</script>
+</body>
+</html>
