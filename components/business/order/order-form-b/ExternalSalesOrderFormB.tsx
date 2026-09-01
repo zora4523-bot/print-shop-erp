@@ -129,7 +129,10 @@ export type OrderFormBProps = {
   };
   paperOptions: readonly OrderPaperSwatchOption[];
   paperKey: string | null;
-  weightOptions: readonly number[];
+  weightOptions: readonly {
+    value: number;
+    disabled?: boolean;
+  }[];
   specificationOptions: readonly {
     value: string;
     label: string;
@@ -778,7 +781,7 @@ export function OrderFormB({
   pricingExtras,
   shippingExtras,
   afterShipping,
-  allowManualWeight = true,
+  allowManualWeight = false,
   allowCustomSize = true,
   items,
   itemFields,
@@ -1189,9 +1192,9 @@ export function OrderFormB({
                 id={`${uid}-weight`}
                 label="克重"
                 value={item.paperWeightGsm ?? 0}
-                options={weightOptions.map((weight) => ({
-                  value: weight,
-                  label: `${weight}g`,
+                options={weightOptions.map((option) => ({
+                  ...option,
+                  label: `${option.value}g`,
                 }))}
                 disabled={disabled}
                 error={itemErrors?.weight}
@@ -1212,7 +1215,7 @@ export function OrderFormB({
                       disabled={disabled}
                       value={
                         item.paperWeightGsm !== null &&
-                        !weightOptions.includes(item.paperWeightGsm)
+                        !weightOptions.some((option) => option.value === item.paperWeightGsm)
                           ? item.paperWeightGsm
                           : ''
                       }

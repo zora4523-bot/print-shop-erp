@@ -1,6 +1,6 @@
 import { OrderPackagingMode } from '../../../generated/prisma/enums';
 import { calculatePackagingBagCount } from '../../order/packaging-bag-count';
-import { decimalValue, safeMoney, unitPrice } from './money';
+import { decimalValue, safeMoney, safeUnitPrice } from './money';
 import type {
   CreateOrderPackagingGroupInput,
   CreateOrderPackagingGroupQuote,
@@ -130,6 +130,12 @@ function quoteGroup(args: {
       '入袋费超过可保存上限',
     ]);
   }
+  const storedRate = safeUnitPrice(rate);
+  if (storedRate === null) {
+    return pendingGroup(group.groupKey, itemKeys, group.mode, [
+      '入袋费率超过可保存上限',
+    ]);
+  }
 
   const excludedManual = itemKeys.some((itemKey) => manualItemKeys.has(itemKey));
   const status = excludedManual ? 'EXCLUDED_MANUAL' : 'QUOTED';
@@ -150,7 +156,7 @@ function quoteGroup(args: {
         mode: group.mode,
         itemKeys: itemKeys.join(','),
         bagCount: bagCountResult.bagCount,
-        rate: unitPrice(rate),
+        rate: storedRate,
       },
     }),
     errors: [],

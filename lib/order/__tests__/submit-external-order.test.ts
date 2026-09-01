@@ -259,6 +259,7 @@ function availabilityRows(order: ReturnType<typeof draftOrder>) {
     normalizedName: String(
       orderItem.paperType ?? '未知纸张',
     ).toLocaleLowerCase('zh-CN'),
+    specification: null,
     isActive: true,
     outOfStock: false,
   }));
@@ -525,7 +526,10 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       manualItemIds: [],
       reused: false,
     });
-    expect(mocks.readPublishedSnapshot).toHaveBeenCalledWith(tx, { now: NOW });
+    expect(mocks.readPublishedSnapshot).toHaveBeenCalledWith(tx, {
+      now: NOW,
+      snapshotLockHeld: true,
+    });
     expect(mocks.productFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -640,6 +644,11 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       tx,
       expect.objectContaining({
         status: 'PENDING_ADMIN_CONFIRMATION',
+        orderFeeSnapshot: {
+          quotedFee: '346.30',
+          confirmedFee: null,
+          settledFee: null,
+        },
         metadata: expect.objectContaining({
           engineVersion: 'CREATE_ORDER_PURE_V1',
           priceBooks: PRICE_VERSION,
@@ -653,6 +662,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         quotedFeeCompleteness:
           OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
         quotedPricingRevisionId: 'revision-2',
+        confirmedFee: null,
+        settledFee: null,
       },
       select: { id: true },
     });
@@ -946,6 +957,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         id: 'paper-out-of-stock',
         name: '160g珠光艳闪',
         normalizedName: '160g珠光艳闪',
+        specification: null,
         isActive: true,
         outOfStock: true,
       },
@@ -967,21 +979,23 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
   });
 
-  it('兼容未回填 paperMaterialId 的旧产品，按规范化纸名复核停用态', async () => {
+  it('通用 CUSTOM 产品按别名与克重唯一解析纸张，停用后失败关闭', async () => {
     const order = draftOrder({
       items: [
         item({
           fig: 7,
           product: { paperMaterialId: null },
-          paperType: '  160g珠光艳闪  ',
+          paperType: '莱尼纹',
+          paperWeightGsm: 150,
         }),
       ],
     });
     const tx = txFor(order, [
       {
         id: 'legacy-paper',
-        name: '160g珠光艳闪',
-        normalizedName: '160g珠光艳闪',
+        name: '150g莱尼纹 / 莱尼纹',
+        normalizedName: '150g莱尼纹 / 莱尼纹',
+        specification: null,
         isActive: false,
         outOfStock: false,
       },
@@ -995,10 +1009,69 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         NOW,
         null,
       ),
-    ).rejects.toThrow('第 7 款纸张“160g珠光艳闪”已缺货或停用');
+    ).rejects.toThrow('第 7 款纸张“150g莱尼纹 / 莱尼纹”已缺货或停用');
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$executeRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      tx.$queryRaw.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.readPublishedSnapshot).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  it('草稿改单留下的旧报价不能绕过纸张停用复核', async () => {
+    const order = draftOrder({
+      processingAmount: '300.00',
+      packagingAmount: '25.00',
+      totalAmount: '346.30',
+      quotedFee: '346.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+      quotedPricingRevisionId: 'revision-from-change-request',
+      quotedPricingRevision: {
+        id: 'revision-from-change-request',
+        revision: 2,
+        priceVersionLocks: [
+          {
+            purpose: CustomerPriceBookPurpose.PROCESSING,
+            priceBookId: PRICE_VERSION.processing.id,
+            priceBookVersion: PRICE_VERSION.processing.version,
+            sourceSha256: PRICE_VERSION.processing.sourceSha256,
+          },
+          {
+            purpose: CustomerPriceBookPurpose.LOGISTICS,
+            priceBookId: PRICE_VERSION.logistics.id,
+            priceBookVersion: PRICE_VERSION.logistics.version,
+            sourceSha256: PRICE_VERSION.logistics.sourceSha256,
+          },
+        ],
+      },
+      customerCharges: [
+        { amount: '41.30', category: { code: 'SHIPPING_FEE' } },
+        { amount: '5.00', category: { code: 'PACKING_MATERIAL' } },
+      ],
+    });
+    const tx = txFor(order, [
+      {
+        id: 'paper-pearl-160',
+        name: '160g珠光艳闪',
+        normalizedName: '160g珠光艳闪',
+        specification: null,
+        isActive: false,
+        outOfStock: false,
+      },
+    ]);
+
+    await expect(
+      finalizeExternalOrderQuoteInTx(
+        tx as unknown as Prisma.TransactionClient,
+        'order-1',
+        'sales-1',
+        NOW,
+      ),
+    ).rejects.toThrow(/第 1 款纸张.*已缺货或停用/);
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(mocks.readPublishedSnapshot).not.toHaveBeenCalled();
     expect(tx.order.update).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
   });
 
   it('历史已报价工单只读不可变快照，不重跑任何引擎', async () => {

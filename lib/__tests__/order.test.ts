@@ -3377,7 +3377,14 @@ describe('shipOrder', () => {
       dbMock.order.update.mock.calls.find(
         (call) => call[0]?.data?.totalAmount === '512.75',
       ),
-    ).toBeDefined();
+    ).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          totalAmount: '512.75',
+          settledFee: '512.75',
+        }),
+      }),
+    ]);
     expect(dbMock.orderShipment.update).toHaveBeenCalledWith({
       where: { id: 'shipment-1' },
       data: {
@@ -4930,7 +4937,14 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     });
     expect(dbMock.order.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { isSfCollect: true, totalAmount: '5007.00' },
+        data: expect.objectContaining({
+          isSfCollect: true,
+          totalAmount: '5007.00',
+          quotedFee: '5007.00',
+          quotedFeeCompleteness: 'COMPLETE',
+          confirmedFee: null,
+          settledFee: null,
+        }),
       }),
     );
     expect(appendPricingRevisionMock).toHaveBeenCalledWith(
@@ -4942,6 +4956,22 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         expectedPriceRevision: 4,
         incrementOrderRevision: true,
       }),
+    );
+    const quoteLinkIndex = dbMock.order.update.mock.calls.findIndex(
+      (call) =>
+        call[0]?.data?.quotedPricingRevisionId === 'pricing-revision-2',
+    );
+    expect(quoteLinkIndex).toBeGreaterThanOrEqual(0);
+    expect(dbMock.order.update.mock.calls[quoteLinkIndex]).toEqual([
+      expect.objectContaining({
+        where: { id: 'order-1' },
+        data: { quotedPricingRevisionId: 'pricing-revision-2' },
+      }),
+    ]);
+    expect(
+      appendPricingRevisionMock.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      dbMock.order.update.mock.invocationCallOrder[quoteLinkIndex]!,
     );
   });
 
@@ -5013,7 +5043,14 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     });
     expect(dbMock.order.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { isSfCollect: false, totalAmount: '5011.30' },
+        data: expect.objectContaining({
+          isSfCollect: false,
+          totalAmount: '5011.30',
+          quotedFee: '5011.30',
+          quotedFeeCompleteness: 'COMPLETE',
+          confirmedFee: null,
+          settledFee: null,
+        }),
       }),
     );
     expect(dbMock.orderLog.create).toHaveBeenCalledWith({

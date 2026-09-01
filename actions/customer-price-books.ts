@@ -6,6 +6,7 @@ import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
+  OrderItemPricingRoute,
   OrderFoilTechnique,
   OrderLamination,
   OrderPackagingMode,
@@ -383,6 +384,22 @@ const updateDraftRuleSchema = z
   })
   .strict()
   .superRefine((input, ctx) => {
+    const colorBaseNullSentinelCandidate =
+      input.amount === null &&
+      input.kind === CustomerPriceRuleKind.BASE &&
+      input.calculationType === CustomerPriceCalculationType.FIXED_AMOUNT &&
+      input.categoryId !== undefined &&
+      input.productId !== undefined &&
+      input.productId !== null &&
+      input.minQty !== undefined &&
+      input.minQty !== null &&
+      input.minQty === input.maxQty &&
+      input.blocksAutomaticQuote === false &&
+      input.match?.target === 'ITEM' &&
+      input.match.pricingRoutes.length === 1 &&
+      input.match.pricingRoutes[0] === OrderItemPricingRoute.COLOR_PRINT &&
+      input.match.specifications.length === 1 &&
+      input.match.paperTypes.length === 1;
     if (
       input.minQty !== undefined &&
       input.minQty !== null &&
@@ -398,7 +415,8 @@ const updateDraftRuleSchema = z
     }
     if (
       input.calculationType !== undefined &&
-      (input.calculationType === null) !== (input.amount === null)
+      (input.calculationType === null) !== (input.amount === null) &&
+      !colorBaseNullSentinelCandidate
     ) {
       ctx.addIssue({
         code: 'custom',

@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 
 const MAX_MONEY = new Decimal('9999999999.99');
+const MAX_UNIT_PRICE = new Decimal('999999.9999');
 
 export function decimalValue(value: string | number): Decimal | null {
   try {
@@ -24,7 +25,15 @@ export function unitPrice(value: Decimal.Value): string {
 }
 
 export function safeMoney(value: Decimal): string | null {
-  return value.lte(MAX_MONEY) ? money(value) : null;
+  return value.isFinite() && !value.isNegative() && value.lte(MAX_MONEY)
+    ? money(value)
+    : null;
+}
+
+export function safeUnitPrice(value: Decimal): string | null {
+  return value.isFinite() && !value.isNegative() && value.lte(MAX_UNIT_PRICE)
+    ? unitPrice(value)
+    : null;
 }
 
 export function sumMoney(values: readonly (string | null)[]): string {
@@ -35,4 +44,14 @@ export function sumMoney(values: readonly (string | null)[]): string {
       new Decimal(0),
     ),
   );
+}
+
+export function sumMoneySafely(
+  values: readonly (string | null)[],
+): string | null {
+  const total = values.reduce(
+    (result, value) => (value === null ? result : result.plus(value)),
+    new Decimal(0),
+  );
+  return safeMoney(total);
 }

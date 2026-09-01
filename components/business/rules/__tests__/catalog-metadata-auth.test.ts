@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { MaterialCategory, Role } from '@/generated/prisma/enums';
+import { MaterialForm } from '@/components/business/material/MaterialForm';
 
 const {
   getSessionMock,
@@ -172,4 +174,49 @@ describe('rule catalog metadata authorization', () => {
     expect(listActiveWarehouseLocationOptionsMock).not.toHaveBeenCalled();
     expect(listMaterialLocationStocksMock).not.toHaveBeenCalled();
   });
+
+  it('编辑页把已有单位作为不可变初始值传给表单', async () => {
+    getMaterialSummaryMock.mockResolvedValue({
+      id: 'foil-1',
+      code: 'FOIL-1',
+      name: '金色烫金纸',
+      category: MaterialCategory.FOIL,
+      specification: null,
+      unit: '卷',
+      currentStock: '0.00',
+      safetyStock: null,
+      averageCost: null,
+      isActive: true,
+      updatedAt: new Date('2026-08-30T00:00:00.000Z'),
+    });
+    listActiveWarehouseLocationOptionsMock.mockResolvedValue([]);
+    listMaterialLocationStocksMock.mockResolvedValue([]);
+
+    const tree = await EditMaterialCatalogItem({
+      params: Promise.resolve({ id: 'foil-1' }),
+      routeBase: '/owner/materials',
+    });
+    const materialForm = findElement(tree, MaterialForm);
+
+    expect(materialForm?.props).toMatchObject({
+      mode: 'edit',
+      initial: expect.objectContaining({ unit: '卷' }),
+    });
+  });
 });
+
+function findElement(
+  node: ReactNode,
+  type: typeof MaterialForm,
+): ReactElement<Record<string, unknown>> | null {
+  if (!isValidElement(node)) return null;
+  if (node.type === type) {
+    return node as ReactElement<Record<string, unknown>>;
+  }
+  const children = (node.props as { children?: ReactNode }).children;
+  for (const child of Children.toArray(children)) {
+    const match = findElement(child, type);
+    if (match) return match;
+  }
+  return null;
+}

@@ -180,6 +180,187 @@ describe('buildCreateOrderQuoteInputFromCatalog', () => {
     );
   });
 
+  it('专版尺寸产品可组合服务端 PAPER 事实，但只有已发布纸价才自动报价', async () => {
+    const customProduct = product({
+      id: 'custom-large',
+      code: 'EXT-CUSTOM-LARGE',
+      category: 'CUSTOM_FLAT_FOIL',
+      specification: '大号封90×165',
+      paperType: null,
+      paperMaterialId: null,
+      weight: null,
+    });
+    const fullCraft = craft({
+      id: 'craft-full',
+      code: 'FLAT_FOIL_SINGLE',
+    });
+    const customItem = item({
+      productId: customProduct.id,
+      pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+      productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+      quantity: 5_000,
+      crafts: [fullCraft.id],
+      paperType: '160g珠光艳闪',
+      paperWeightGsm: 160,
+      hasLocalFoil: false,
+    });
+    const configuredPearl = paper({
+      id: 'paper-pearl-160',
+      name: '160g珠光艳闪',
+      specification: null,
+    });
+    const catalogInput = await buildCreateOrderQuoteInputFromCatalog(
+      client({
+        products: [customProduct],
+        crafts: [fullCraft],
+        papers: [configuredPearl],
+      }),
+      input([customItem]),
+    );
+
+    expect(catalogInput.items[0]).toMatchObject({
+      craft: 'FULL',
+      paperType: '珠光艳闪',
+      paperWeightGsm: 160,
+      specification: '大号封',
+      configuration: {
+        paper: 'CATALOG',
+        paperWeight: 'CATALOG',
+        specification: 'CATALOG',
+        craft: 'CATALOG',
+      },
+    });
+    expect(
+      calculateCreateOrderQuote(catalogInput, CREATE_ORDER_GOLDEN_SNAPSHOT)
+        .items[0],
+    ).toMatchObject({ status: 'QUOTED', unitPrice: '0.2200' });
+
+    const unpricedPaperInput = await buildCreateOrderQuoteInputFromCatalog(
+      client({
+        products: [customProduct],
+        crafts: [fullCraft],
+        papers: [
+          paper({
+            id: 'paper-unpriced-140',
+            name: '140g云纹纸',
+            specification: null,
+          }),
+        ],
+      }),
+      input([
+        {
+          ...customItem,
+          paperType: '140g云纹纸',
+          paperWeightGsm: 140,
+        },
+      ]),
+    );
+    const unpricedQuote = calculateCreateOrderQuote(
+      unpricedPaperInput,
+      CREATE_ORDER_GOLDEN_SNAPSHOT,
+    );
+    expect(unpricedQuote.items[0]?.status).toBe('MANUAL_PRICING_REQUIRED');
+    expect(unpricedQuote.manualReasons.map((reason) => reason.code)).toContain(
+      'FULL_PAPER_SURCHARGE_NOT_FOUND',
+    );
+  });
+
+  it('通用专版产品按别名和克重唯一绑定 PAPER 身份', async () => {
+    const customProduct = product({
+      id: 'custom-large',
+      code: 'EXT-CUSTOM-LARGE',
+      category: 'CUSTOM_FLAT_FOIL',
+      paperType: null,
+      paperMaterialId: null,
+      weight: null,
+    });
+    const fullCraft = craft({ id: 'craft-full', code: 'FLAT_FOIL_SINGLE' });
+    const customItem = item({
+      productId: customProduct.id,
+      pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+      crafts: [fullCraft.id],
+      paperType: '莱尼纹',
+      paperWeightGsm: 150,
+      hasLocalFoil: false,
+    });
+    const aliasPaper = paper({
+      id: 'paper-linen-150',
+      name: '150g莱尼纹 / 莱尼纹',
+      specification: null,
+    });
+
+    const result = await buildCreateOrderQuoteInputFromCatalog(
+      client({
+        products: [customProduct],
+        crafts: [fullCraft],
+        papers: [aliasPaper],
+      }),
+      input([customItem]),
+    );
+
+    expect(result.items[0]).toMatchObject({
+      paperType: '莱尼纹',
+      paperWeightGsm: 150,
+      configuration: { paper: 'CATALOG', paperWeight: 'CATALOG' },
+    });
+  });
+
+  it.each([
+    {
+      label: '已停用',
+      papers: [
+        paper({
+          id: 'paper-linen-150',
+          name: '150g莱尼纹 / 莱尼纹',
+          specification: null,
+          isActive: false,
+        }),
+      ],
+    },
+    {
+      label: '别名重复',
+      papers: [
+        paper({
+          id: 'paper-linen-150-a',
+          name: '150g莱尼纹 / 莱尼纹',
+          specification: null,
+        }),
+        paper({
+          id: 'paper-linen-150-b',
+          name: '莱尼纹',
+          specification: '150g',
+        }),
+      ],
+    },
+  ])('通用专版纸张$label时失败关闭', async ({ papers }) => {
+    const customProduct = product({
+      id: 'custom-large',
+      code: 'EXT-CUSTOM-LARGE',
+      category: 'CUSTOM_FLAT_FOIL',
+      paperType: null,
+      paperMaterialId: null,
+      weight: null,
+    });
+    const fullCraft = craft({ id: 'craft-full', code: 'FLAT_FOIL_SINGLE' });
+    const customItem = item({
+      productId: customProduct.id,
+      pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+      crafts: [fullCraft.id],
+      paperType: '莱尼纹',
+      paperWeightGsm: 150,
+      hasLocalFoil: false,
+    });
+
+    const error = await adapterError(
+      buildCreateOrderQuoteInputFromCatalog(
+        client({ products: [customProduct], crafts: [fullCraft], papers }),
+        input([customItem]),
+      ),
+    );
+
+    expect(error.code).toBe('CATALOG_PAPER_CHANGED');
+  });
+
   it('把改尺寸、手工克重和自定义纸张只标成类型化人工核价事实', async () => {
     const items = [
       item({ actualWidthMm: 95, actualHeightMm: 170 }),

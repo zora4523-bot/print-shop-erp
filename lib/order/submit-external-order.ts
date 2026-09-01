@@ -15,7 +15,6 @@ import {
 } from '../price/order-charge-service';
 import {
   calculateExternalOrderCharges,
-  type ExternalOrderChargeInput,
   type ExternalOrderChargeLine,
   type ExternalOrderChargeQuote,
 } from '../price/external-order-charges';
@@ -27,11 +26,16 @@ import type {
 } from '../price/create-order/types';
 import {
   buildCreateOrderQuoteInputFromCatalog,
+  catalogPaperPricingFacts,
   type CreateOrderQuoteFactsAdapterInput,
   CreateOrderQuoteFactsAdapterError,
 } from './create-order-quote-facts-adapter';
+import { canonicalizeCreateOrderPaperFact } from '../price/create-order/canonical-facts';
+import { acquirePriceRuleSnapshotReadLock } from '../price/rule-snapshot-lock';
+import { normalizeCatalogPricingText } from './catalog-pricing-facts';
 import { presentCreateOrderQuote } from './create-order-quote-presentation';
 import { createExternalOrderQuoteToken } from './create-order-quote-token';
+import { buildCreateOrderExternalChargeInput } from './create-order-charge-input';
 import {
   PublishedCreateOrderPriceAdapterError,
   readPublishedCreateOrderPriceSnapshot,
@@ -292,63 +296,71 @@ async function assertSelectedPapersAvailable(
   tx: Prisma.TransactionClient,
   items: readonly FinalizeOrderItem[],
 ): Promise<void> {
-  const paperMaterialIds = [
-    ...new Set(
-      items.flatMap((item) =>
-        item.product?.paperMaterialId ? [item.product.paperMaterialId] : [],
-      ),
-    ),
-  ];
-  const fallbackNames = [
-    ...new Set(
-      items.flatMap((item) =>
-        !item.product?.paperMaterialId && item.paperType?.trim()
-          ? [item.paperType.trim().toLocaleLowerCase('zh-CN')]
-          : [],
-      ),
-    ),
-  ];
-  if (paperMaterialIds.length === 0 && fallbackNames.length === 0) return;
+  if (items.length === 0) return;
 
   type PaperAvailabilityRow = {
     id: string;
     name: string;
-    normalizedName: string;
+    specification: string | null;
     isActive: boolean;
     outOfStock: boolean;
   };
-  // The share lock closes the check/submit race: an operations update that
-  // marks this paper unavailable waits until the order transaction commits.
+  // Lock every PAPER identity after the shared price-snapshot lock. Generic
+  // CUSTOM products persist only their canonical paper fact, so resolving the
+  // unique material row and protecting it from rename/deactivation must be one
+  // transaction step. The broad row lock also prevents a concurrent alias row
+  // from making an identity ambiguous before commit.
   const papers = await tx.$queryRaw<PaperAvailabilityRow[]>`
     SELECT
       material."id",
       material."name",
-      lower(btrim(material."name")) AS "normalizedName",
+      material."specification",
       material."isActive",
       material."outOfStock"
     FROM "Material" AS material
     WHERE material."category" = 'PAPER'::"MaterialCategory"
-      AND (
-        material."id" = ANY(${paperMaterialIds}::text[])
-        OR lower(btrim(material."name")) = ANY(${fallbackNames}::text[])
-      )
     FOR SHARE OF material
   `;
   const paperById = new Map(papers.map((paper) => [paper.id, paper]));
-  const paperByName = new Map(
-    papers.map((paper) => [paper.normalizedName, paper]),
-  );
-  const unavailableSelections = items.flatMap((item) => {
-    const linkedId = item.product?.paperMaterialId;
-    const paper = linkedId
-      ? paperById.get(linkedId)
-      : item.paperType?.trim()
-        ? paperByName.get(item.paperType.trim().toLocaleLowerCase('zh-CN'))
-        : undefined;
-    if (!paper || (paper.isActive && !paper.outOfStock)) return [];
+  const invalidSelections: string[] = [];
+  const unavailableSelections: string[] = [];
+  for (const item of items) {
     const styleLabel = item.fig === null ? item.name : `第 ${item.fig} 款`;
-    return [`${styleLabel}纸张“${paper.name}”`];
-  });
+    const linkedId = item.product?.paperMaterialId;
+    let matches: PaperAvailabilityRow[];
+    if (linkedId) {
+      const linkedPaper = paperById.get(linkedId);
+      matches = linkedPaper ? [linkedPaper] : [];
+    } else {
+      const submitted = canonicalizeCreateOrderPaperFact(
+        item.paperType ?? '',
+        item.paperWeightGsm,
+      );
+      matches = submitted
+        ? papers.filter((paper) =>
+            catalogPaperPricingFacts(paper).some(
+              (fact) =>
+                normalizeCatalogPricingText(fact.paperType) ===
+                  normalizeCatalogPricingText(submitted.paperType) &&
+                fact.paperWeightGsm === submitted.paperWeightGsm,
+            ),
+          )
+        : [];
+    }
+    if (matches.length !== 1) {
+      invalidSelections.push(`${styleLabel}纸张目录身份不存在或不唯一`);
+      continue;
+    }
+    const paper = matches[0]!;
+    if (!paper.isActive || paper.outOfStock) {
+      unavailableSelections.push(`${styleLabel}纸张“${paper.name}”`);
+    }
+  }
+  if (invalidSelections.length > 0) {
+    throw new ExternalOrderQuoteFinalizeError(
+      `${invalidSelections.join('、')}，请重新选择纸张后再提交`,
+    );
+  }
   if (unavailableSelections.length > 0) {
     throw new ExternalOrderQuoteFinalizeError(
       `${unavailableSelections.join('、')}已缺货或停用，请重新选择纸张后再提交`,
@@ -439,65 +451,30 @@ function persistedQuoteFacts(
   };
 }
 
-function pureLogisticsInput(
-  input: CreateOrderQuoteInput,
-): ExternalOrderChargeInput {
-  const itemsByKey = new Map(input.items.map((item) => [item.itemKey, item]));
-  return {
-    isSfCollect: input.isSfCollect,
-    shipments: input.shipments.map((shipment) => {
-      const allocations = Object.entries(shipment.itemQuantities).filter(
-        ([, quantity]) => quantity > 0,
-      );
-      return {
-        shipmentKey: shipment.shipmentKey,
-        province: shipment.province,
-        billableWeightKg: shipment.trustedBillableWeightKg ?? null,
-        itemQuantity: allocations.reduce(
-          (sum, [, quantity]) => sum + quantity,
-          0,
-        ),
-        weightItems: allocations.flatMap(([itemKey, quantity]) => {
-          const item = itemsByKey.get(itemKey);
-          return item
-            ? [
-                {
-                  itemKey,
-                  quantity,
-                  paperWeightGsm: item.paperWeightGsm,
-                  paperType: item.paperType,
-                  productStructure: item.productStructure,
-                },
-              ]
-            : [];
-        }),
-      };
-    }),
-  };
-}
-
 function pureLogisticsQuote(
   input: CreateOrderQuoteInput,
   snapshot: CreateOrderPriceSnapshot,
 ): ExternalOrderChargeQuote {
   return calculateExternalOrderCharges(
-    pureLogisticsInput(input),
+    buildCreateOrderExternalChargeInput(input),
     snapshot.orderCharges.rules,
     snapshot.orderCharges.logisticsPolicy,
   );
 }
 
 function logisticsPersistenceInput(input: CreateOrderQuoteInput) {
-  return pureLogisticsInput(input).shipments.map((shipment) => ({
-    ...shipment,
-    billableWeightKg:
-      shipment.billableWeightKg === null
-        ? null
-        : String(shipment.billableWeightKg),
-    shippingFee: null,
-    packingMaterialFee: null,
-    overrideReason: null,
-  }));
+  return buildCreateOrderExternalChargeInput(input).shipments.map(
+    (shipment) => ({
+      ...shipment,
+      billableWeightKg:
+        shipment.billableWeightKg === null
+          ? null
+          : String(shipment.billableWeightKg),
+      shippingFee: null,
+      packingMaterialFee: null,
+      overrideReason: null,
+    }),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -695,6 +672,64 @@ async function readOrder(
   });
 }
 
+type PreparedExternalOrderQuote =
+  | { kind: 'REUSE'; result: FinalizeExternalOrderQuoteResult }
+  | { kind: 'REPRICE'; order: FinalizeOrderRow };
+
+async function prepareExternalOrderQuote(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<PreparedExternalOrderQuote> {
+  const order = await readOrder(tx, orderId);
+  if (!order) throw new ExternalOrderQuoteFinalizeError('工单不存在');
+  // A DRAFT may carry a quote produced by an approved change request. It is
+  // still mutable and must revalidate live paper/catalog facts at submission.
+  if (order.quotedPricingRevisionId && order.status !== OrderStatus.DRAFT) {
+    return { kind: 'REUSE', result: resultFromExisting(order) };
+  }
+  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
+    throw new ExternalOrderQuoteFinalizeError('仅外部销售工单需要生成提交报价');
+  }
+  if (order.status !== OrderStatus.DRAFT) {
+    throw new ExternalOrderQuoteFinalizeError('只能为草稿工单生成提交报价');
+  }
+  if (order.items.length === 0) {
+    throw new ExternalOrderQuoteFinalizeError('工单至少需要一个款式');
+  }
+  if (order.shipments.length === 0) {
+    throw new ExternalOrderQuoteFinalizeError('工单至少需要一个发货地址');
+  }
+  // Canonical lock order for every quote/catalog transaction:
+  // price snapshot -> PAPER rows. Material writers already use the same order.
+  await acquirePriceRuleSnapshotReadLock(tx);
+  await assertSelectedPapersAvailable(tx, order.items);
+  return { kind: 'REPRICE', order };
+}
+
+function freshQuoteFeeLifecycle(quotedFee: string) {
+  return { quotedFee, confirmedFee: null, settledFee: null } as const;
+}
+
+async function linkFinalizedQuoteRevision(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    quotedFee: string;
+    quotedFeeCompleteness: OrderQuotedFeeCompleteness;
+    pricingRevisionId: string;
+  },
+): Promise<void> {
+  await tx.order.update({
+    where: { id: input.orderId },
+    data: {
+      ...freshQuoteFeeLifecycle(input.quotedFee),
+      quotedFeeCompleteness: input.quotedFeeCompleteness,
+      quotedPricingRevisionId: input.pricingRevisionId,
+    },
+    select: { id: true },
+  });
+}
+
 /**
  * Finalize the server-owned external-sales quote inside the caller's order
  * submission transaction. The caller remains responsible for the subsequent
@@ -715,30 +750,17 @@ export async function finalizeExternalOrderQuoteInTx(
     orderId,
   )}))`;
 
-  const order = await readOrder(tx, orderId);
-  if (!order) throw new ExternalOrderQuoteFinalizeError('工单不存在');
-  if (order.quotedPricingRevisionId) return resultFromExisting(order);
-  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
-    throw new ExternalOrderQuoteFinalizeError('仅外部销售工单需要生成提交报价');
-  }
-  if (order.status !== OrderStatus.DRAFT) {
-    throw new ExternalOrderQuoteFinalizeError('只能为草稿工单生成提交报价');
-  }
-  if (order.items.length === 0) {
-    throw new ExternalOrderQuoteFinalizeError('工单至少需要一个款式');
-  }
-  if (order.shipments.length === 0) {
-    throw new ExternalOrderQuoteFinalizeError('工单至少需要一个发货地址');
-  }
-  // Paper stock is operational state, so the create-page snapshot is never
-  // authoritative at submit time. Re-read it through the persisted product
-  // selection in this transaction and fail before any financial write.
-  await assertSelectedPapersAvailable(tx, order.items);
+  const prepared = await prepareExternalOrderQuote(tx, orderId);
+  if (prepared.kind === 'REUSE') return prepared.result;
+  const { order } = prepared;
 
   let priceSnapshot: CreateOrderPriceSnapshot;
   let pureInput: CreateOrderQuoteInput;
   try {
-    priceSnapshot = await readPublishedCreateOrderPriceSnapshot(tx, { now });
+    priceSnapshot = await readPublishedCreateOrderPriceSnapshot(tx, {
+      now,
+      snapshotLockHeld: true,
+    });
     pureInput = await buildCreateOrderQuoteInputFromCatalog(
       tx,
       persistedQuoteFacts(order),
@@ -1151,6 +1173,7 @@ export async function finalizeExternalOrderQuoteInTx(
     actorId,
     now,
     expectedPriceRevision: order.priceRevision,
+    orderFeeSnapshot: freshQuoteFeeLifecycle(totalAmount),
     metadata: {
       engineVersion: 'CREATE_ORDER_PURE_V1',
       priceBooks: quote.priceVersion,
@@ -1192,14 +1215,11 @@ export async function finalizeExternalOrderQuoteInTx(
       },
     ],
   });
-  await tx.order.update({
-    where: { id: order.id },
-    data: {
-      quotedFee: totalAmount,
-      quotedFeeCompleteness,
-      quotedPricingRevisionId: revision.pricingRevisionId,
-    },
-    select: { id: true },
+  await linkFinalizedQuoteRevision(tx, {
+    orderId: order.id,
+    quotedFee: totalAmount,
+    quotedFeeCompleteness,
+    pricingRevisionId: revision.pricingRevisionId,
   });
 
   return {

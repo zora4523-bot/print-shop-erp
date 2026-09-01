@@ -4,16 +4,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderBillingMode,
   OrderChangeRequestStatus,
+  OrderCustomerChargeStatus,
   OrderFoilTechnique,
   OrderItemPricingRoute,
   OrderLamination,
   OrderPackagingMode,
   OrderProductStructure,
+  OrderQuotedFeeCompleteness,
   OrderSettlementType,
   OrderStatus,
   Role,
   TaskStatus,
 } from '../../../generated/prisma/enums';
+import { calculateCreateOrderQuote } from '../../price/create-order';
+import {
+  CREATE_ORDER_GOLDEN_SNAPSHOT,
+  createGoldenOrderInput,
+  createGoldenOrderItem,
+} from '../../price/__tests__/fixtures/create-order-golden-fixtures';
+import { presentCreateOrderProcessingQuote } from '../create-order-quote-presentation';
+import { PENDING_PLATE_BUSINESS_KEY } from '../pending-plate-charge';
 
 const mocks = vi.hoisted(() => {
   const db = {
@@ -21,9 +31,15 @@ const mocks = vi.hoisted(() => {
     $transaction: vi.fn(),
     order: { findUnique: vi.fn(), update: vi.fn() },
     orderItem: { update: vi.fn(), create: vi.fn(), findMany: vi.fn() },
+    orderItemPlateDetail: { findMany: vi.fn(), update: vi.fn() },
     orderPackagingGroup: { update: vi.fn() },
     orderShipmentLine: { upsert: vi.fn(), create: vi.fn() },
-    orderCustomerCharge: { aggregate: vi.fn(), update: vi.fn() },
+    orderCustomerCharge: {
+      aggregate: vi.fn(),
+      update: vi.fn(),
+      upsert: vi.fn(),
+    },
+    customerChargeCategory: { findUnique: vi.fn() },
     orderPriceVersionLock: { createMany: vi.fn() },
     orderChangeRequest: {
       findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), findMany: vi.fn(),
@@ -54,6 +70,7 @@ vi.mock('@/lib/price/order-charge-service', () => ({
 
 import {
   createOrderChangeRequest,
+  isChangeRequestQuoteAutomaticallyApplicable,
   previewOrderChangeRequestPricing,
   reviewOrderChangeRequest,
 } from '../change-request';
@@ -172,7 +189,7 @@ function pureResult(args: ServiceArgs) {
     snapshot: { priceVersion },
     quote: {
       priceVersion,
-      status: 'QUOTED' as const,
+      status: 'PARTIAL' as const,
       submittable: true,
       items: rawItems,
       packagingGroups: rawGroups,
@@ -196,7 +213,7 @@ function pureResult(args: ServiceArgs) {
         ],
         errors: [],
       },
-      total: knownTotal,
+      total: null,
       knownTotal,
       excludedManualItemKeys: [],
       pendingLineCodes: ['PLATE_FEE'],
@@ -226,6 +243,47 @@ function pureResult(args: ServiceArgs) {
     },
   };
 }
+
+describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
+  it('真实纯引擎仅剩 PLATE_FEE 待定时允许改单重算', () => {
+    const input = createGoldenOrderInput([
+      createGoldenOrderItem({ quantity: 1_200 }),
+    ]);
+    const quote = calculateCreateOrderQuote(
+      input,
+      CREATE_ORDER_GOLDEN_SNAPSHOT,
+    );
+    const processing = presentCreateOrderProcessingQuote({ input, quote });
+
+    expect(quote).toMatchObject({
+      status: 'PARTIAL',
+      total: null,
+      pendingLineCodes: ['PLATE_FEE'],
+      pendingReasons: [{ code: 'PLATE_AMOUNT_PENDING' }],
+    });
+    expect(
+      isChangeRequestQuoteAutomaticallyApplicable({ quote, processing }),
+    ).toBe(true);
+  });
+
+  it('不放过任何夹带其他 pending code 的 PARTIAL 报价', () => {
+    const input = createGoldenOrderInput([
+      createGoldenOrderItem({ quantity: 2_001 }),
+    ]);
+    const quote = calculateCreateOrderQuote(
+      input,
+      CREATE_ORDER_GOLDEN_SNAPSHOT,
+    );
+    const processing = presentCreateOrderProcessingQuote({ input, quote });
+
+    expect(quote.pendingLineCodes).toEqual(
+      expect.arrayContaining(['PLATE_FEE', 'SHIPPING:primary']),
+    );
+    expect(
+      isChangeRequestQuoteAutomaticallyApplicable({ quote, processing }),
+    ).toBe(false);
+  });
+});
 
 function item(overrides: Record<string, unknown> = {}) {
   return {
@@ -260,6 +318,9 @@ function request(overrides: Record<string, unknown> = {}) {
       settlementType: OrderSettlementType.EXTERNAL_SALES,
       billingMode: OrderBillingMode.CHARGE, revision: 2,
       pricingStatus: 'ADMIN_CONFIRMED', priceRevision: 5,
+      quotedFee: new Decimal(1008),
+      confirmedFee: new Decimal(1008),
+      settledFee: new Decimal(1008),
       status: OrderStatus.SUBMITTED, isSfCollect: false,
       packagingAmount: new Decimal(0), processingAmount: new Decimal(1000),
       totalAmount: new Decimal(1008), items: [item()],
@@ -332,7 +393,13 @@ beforeEach(() => {
     pricingRevisionId: 'pricing-revision-6', priceRevision: 6, orderRevision: 3, snapshot: {},
   });
   mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1200) }]);
+  mocks.db.orderItemPlateDetail.findMany.mockResolvedValue([]);
   mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: new Decimal(8) } });
+  mocks.db.orderCustomerCharge.upsert.mockResolvedValue({ id: 'plate-pending' });
+  mocks.db.customerChargeCategory.findUnique.mockResolvedValue({
+    id: 'plate-category',
+    isActive: true,
+  });
   mocks.db.orderChangeRequest.update.mockResolvedValue({ id: 'request-1' });
   mocks.db.orderItem.create.mockResolvedValue({ id: 'item-new' });
 });
@@ -406,6 +473,45 @@ describe('previewOrderChangeRequestPricing', () => {
     expect(mocks.calculate).not.toHaveBeenCalled();
   });
 
+  it('预览改价不把已确认的旧制版费带入新已知金额', async () => {
+    const value = request({
+      proposedChanges: {
+        items: [{
+          operation: 'ADD',
+          templateItemId: 'item-1',
+          name: '红包 B',
+          quantity: 300,
+          frontFoilColors: ['哑金'],
+          backFoilColors: [],
+        }],
+      },
+      order: {
+        ...request().order,
+        totalAmount: new Decimal(1108),
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-confirmed',
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            amount: new Decimal(100),
+            overrideReason: '工厂已确认',
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves
+      .toMatchObject({
+        oldTotal: '1108.00',
+        newTotal: '1308.00',
+        delta: '200.00',
+      });
+  });
+
   it('查不到价时失败关闭并指向工厂核价', async () => {
     const value = request();
     locate(value);
@@ -471,9 +577,205 @@ describe('reviewOrderChangeRequest', () => {
     ] });
     expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        quotedFee: '1708.00', quotedPricingRevisionId: 'pricing-revision-6',
+        quotedFee: '1708.00',
+        quotedFeeCompleteness:
+          OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+        quotedPricingRevisionId: 'pricing-revision-6',
       }),
     }));
+  });
+
+  it('已提交工单改价时将旧制版费重置为唯一待核价项', async () => {
+    const oldPlateAmount = new Decimal(100);
+    const value = request({
+      proposedChanges: {
+        items: [{
+          operation: 'ADD',
+          templateItemId: 'item-1',
+          name: '红包 B',
+          quantity: 300,
+          frontFoilColors: ['哑金'],
+          backFoilColors: [],
+        }],
+      },
+      order: {
+        ...request().order,
+        totalAmount: new Decimal(1108),
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-confirmed',
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            amount: oldPlateAmount,
+            overrideReason: '工厂已确认',
+            status: OrderCustomerChargeStatus.ESTIMATED,
+            pricingSnapshot: { status: 'ADMIN_CONFIRMED' },
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+    mocks.db.orderItem.findMany.mockResolvedValue([
+      { subtotal: new Decimal(1000) },
+      { subtotal: new Decimal(300) },
+    ]);
+    // The canonical upsert clears the old plate amount before aggregation.
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({
+      _sum: { amount: new Decimal(8) },
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+      admin,
+    );
+
+    expect(mocks.db.orderCustomerCharge.upsert).toHaveBeenCalledWith({
+      where: {
+        orderId_businessKey: {
+          orderId: 'order-1',
+          businessKey: PENDING_PLATE_BUSINESS_KEY,
+        },
+      },
+      create: expect.objectContaining({
+        orderId: 'order-1',
+        businessKey: PENDING_PLATE_BUSINESS_KEY,
+        status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+        amount: null,
+      }),
+      update: expect.objectContaining({
+        status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+        suggestedAmount: null,
+        amount: null,
+        finalizedById: null,
+        finalizedAt: null,
+        pricingSnapshot: expect.objectContaining({
+          source: 'CHANGE_REQUEST_PENDING_PLATE',
+        }),
+      }),
+    });
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        status: 'PENDING_ADMIN_CONFIRMATION',
+        orderFeeSnapshot: {
+          quotedFee: '1308.00',
+          confirmedFee: null,
+          settledFee: null,
+        },
+        metadata: expect.objectContaining({
+          quotedFee: '1308.00',
+          quotedFeeCompleteness:
+            OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+          pureQuote: expect.objectContaining({ knownTotal: '1308.00' }),
+        }),
+      }),
+    );
+    expect(mocks.db.order.update).toHaveBeenLastCalledWith({
+      where: { id: 'order-1' },
+      data: expect.objectContaining({
+        quotedFee: '1308.00',
+        quotedFeeCompleteness:
+          OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+        quotedPricingRevisionId: 'pricing-revision-6',
+        confirmedFee: null,
+        settledFee: null,
+      }),
+    });
+  });
+
+  it('改单重算时软移除结构化制版明细，再建立唯一待核价聚合项', async () => {
+    const value = request({
+      proposedChanges: {
+        items: [{
+          operation: 'ADD',
+          templateItemId: 'item-1',
+          name: '红包 B',
+          quantity: 300,
+          frontFoilColors: ['哑金'],
+          backFoilColors: [],
+        }],
+      },
+      order: {
+        ...request().order,
+        totalAmount: new Decimal(1108),
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-detail-charge',
+            shipmentId: null,
+            businessKey: 'PLATE_DETAIL:plate-detail-1',
+            priceBookId: null,
+            amount: new Decimal(100),
+            overrideReason: '管理员确认制版明细',
+            status: OrderCustomerChargeStatus.FINAL,
+            pricingSnapshot: { source: 'ORDER_ITEM_PLATE_DETAIL' },
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+    mocks.db.orderItemPlateDetail.findMany.mockResolvedValue([
+      { id: 'plate-detail-1', amount: new Decimal(100) },
+    ]);
+    mocks.db.orderItem.findMany.mockResolvedValue([
+      { subtotal: new Decimal(1000) },
+      { subtotal: new Decimal(300) },
+    ]);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({
+      _sum: { amount: new Decimal(8) },
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+      admin,
+    );
+
+    expect(mocks.db.orderItemPlateDetail.update).toHaveBeenCalledWith({
+      where: { id: 'plate-detail-1' },
+      data: expect.objectContaining({
+        isActive: false,
+        removedById: admin.id,
+        removedAt: expect.any(Date),
+      }),
+      select: { id: true },
+    });
+    expect(mocks.db.orderCustomerCharge.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          orderId_businessKey: {
+            orderId: 'order-1',
+            businessKey: 'PLATE_DETAIL:plate-detail-1',
+          },
+        },
+        data: expect.objectContaining({
+          status: OrderCustomerChargeStatus.WAIVED,
+          amount: '0.00',
+          pricingSnapshot: expect.objectContaining({
+            source: 'CHANGE_REQUEST_INVALIDATED_PLATE_DETAIL',
+            previousAmount: '100',
+          }),
+        }),
+      }),
+    );
+    expect(mocks.db.orderCustomerCharge.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          orderId_businessKey: {
+            orderId: 'order-1',
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+          },
+        },
+      }),
+    );
+    expect(mocks.db.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ totalAmount: '1308.00' }),
+      }),
+    );
   });
 
   it('包装组袋数与金额来自同一次纯引擎结果', async () => {

@@ -232,6 +232,52 @@ describe('customer price-book Server Actions', () => {
     );
   });
 
+  it('仅允许结构完整的 COLOR_BASE 单点空价候选进入锁定数据层', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.updateCustomerPriceRuleDraft.mockResolvedValue({
+      id: 'rule-v2-a',
+      priceBookId: 'book-v2-draft',
+    });
+    const sentinel = {
+      ...validRule,
+      calculationType: 'FIXED_AMOUNT' as const,
+      amount: null,
+      minQty: 2_000,
+      maxQty: 2_000,
+      match: {
+        ...validRule.match,
+        pricingRoutes: [OrderItemPricingRoute.COLOR_PRINT],
+        specifications: ['中号封'],
+        paperTypes: ['160g冰白纸'],
+      },
+    };
+
+    await expect(updateCustomerPriceRuleDraftAction(sentinel)).resolves
+      .toMatchObject({ status: 'success', ruleId: 'rule-v2-a' });
+    expect(adminMock.updateCustomerPriceRuleDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'BASE',
+        calculationType: 'FIXED_AMOUNT',
+        amount: null,
+        minQty: 2_000,
+        maxQty: 2_000,
+      }),
+      actor,
+    );
+  });
+
+  it('拒绝普通非 REFERENCE 规则把金额改为空', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await updateCustomerPriceRuleDraftAction({
+      ...validRule,
+      amount: null,
+    });
+
+    expect(result.status).toBe('invalid');
+    expect(adminMock.updateCustomerPriceRuleDraft).not.toHaveBeenCalled();
+  });
+
   it('将烫金道数条件和按道数乘算完整传入锁定数据层', async () => {
     permissionMock.requirePermission.mockResolvedValue(actor);
     adminMock.updateCustomerPriceRuleDraft.mockResolvedValue({

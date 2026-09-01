@@ -19,6 +19,7 @@ import {
   normalizeCatalogPricingText,
   parseCatalogDimensions,
 } from './catalog-pricing-facts';
+import { canonicalizeCreateOrderSpecification } from '../price/create-order/canonical-facts';
 
 export type ExternalCreateOrderSpecificationOption = {
   /** Deterministic identity derived from the configured specification label. */
@@ -99,6 +100,10 @@ function configuredSpecifications(
   const byCode = new Map<string, MutableSpecification>();
   for (const product of products) {
     for (const label of catalogPricingFactChoices(product.specification)) {
+      // A configured label must survive the same canonicalization used by the
+      // authoritative quote adapter. Do not expose a browser option that the
+      // server is guaranteed to reject (for example a leading dimension pair).
+      if (!canonicalizeCreateOrderSpecification(label)) continue;
       const specCode = normalizeCatalogPricingText(label);
       if (!specCode) continue;
       const dimensions = parseCatalogDimensions(label);

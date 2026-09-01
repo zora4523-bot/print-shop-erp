@@ -92,6 +92,7 @@ function render(
     isSfCollect?: boolean | undefined;
     onRemove?: (index: number) => void;
     onFoilSidesChange?: (front: string[], back: string[]) => void;
+    weightOptions?: readonly { value: number; disabled?: boolean }[];
   } = {},
 ) {
   const itemCount = options.itemCount ?? 1;
@@ -122,7 +123,9 @@ function render(
         { value: 'tbz', label: '铜版纸', texture: 'coated-white' },
       ]}
       paperKey={options.paperKey ?? 'touch'}
-      weightOptions={[160, 200]}
+      weightOptions={
+        options.weightOptions ?? [{ value: 160 }, { value: 200 }]
+      }
       specificationOptions={[
         { value: '中号封', label: '中号封' },
         { value: '大号封', label: '大号封' },
@@ -380,6 +383,30 @@ describe('OrderFormB', () => {
     expect(html).toContain('混装需两款以上');
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>[\s\S]*?混装/);
     expect(html).toContain('共 200 包');
+  });
+
+  it('disables an out-of-stock weight without blocking an available sibling', () => {
+    const html = render(undefined, {
+      weightOptions: [
+        { value: 160, disabled: true },
+        { value: 180, disabled: false },
+      ],
+    });
+
+    const unavailable = html.match(
+      /<button[^>]*id="[^"]*-weight-160"[^>]*>/,
+    )?.[0];
+    const available = html.match(
+      /<button[^>]*id="[^"]*-weight-180"[^>]*>/,
+    )?.[0];
+    expect(unavailable).toContain('disabled=""');
+    expect(available).not.toContain('disabled=""');
+  });
+
+  it('does not offer an unpersistable manual paper weight', () => {
+    expect(render(item(OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL))).not.toContain(
+      '手动输入克重',
+    );
   });
 
   it('cancels the final color and wires direct order editing without moving the palette', () => {

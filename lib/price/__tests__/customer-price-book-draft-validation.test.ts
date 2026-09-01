@@ -127,6 +127,49 @@ function packagingTiers(): DraftPriceRuleForValidation[] {
   );
 }
 
+function colorBase(
+  overrides: Partial<DraftPriceRuleForValidation> = {},
+): DraftPriceRuleForValidation {
+  return rule({
+    id: 'color-ice-mid-q2000',
+    code: 'BASE_COLOR-ICE-WHITE-160-MID_Q2000',
+    name: '冰白纸 160g 彩印 · 中号 · Q2000',
+    kind: 'BASE',
+    calculationType: 'FIXED_AMOUNT',
+    amount: null,
+    minQty: 2_000,
+    maxQty: 2_000,
+    triggerCondition: {
+      schemaVersion: 1,
+      target: 'ITEM',
+      productCodes: ['EXT-COLOR-ICE-WHITE-160-MID'],
+      pricingRoutes: ['COLOR_PRINT'],
+      productStructures: ['STANDARD_ENVELOPE'],
+      specifications: ['中号80×120'],
+      paperTypes: ['160g冰白纸'],
+      foilTechniques: ['NONE', 'FLAT'],
+    },
+    exclusiveGroup: 'COLOR_BASE',
+    priority: 100,
+    blocksAutomaticQuote: false,
+    sourceSheet: '加工费计费规则.md',
+    sourceRange: '§3',
+    sourceName: '加工费计费规则.md',
+    productId: 'ice-white-mid',
+    category: {
+      code: 'BASE_PROCESSING',
+      name: '基础加工费',
+      isActive: true,
+    },
+    product: {
+      code: 'EXT-COLOR-ICE-WHITE-160-MID',
+      category: 'COLOR_PRINT',
+      isActive: true,
+    },
+    ...overrides,
+  });
+}
+
 function bagging(
   overrides: Partial<DraftPriceRuleForValidation> = {},
 ): DraftPriceRuleForValidation {
@@ -398,6 +441,32 @@ describe('validateDraftPriceBookRules', () => {
     );
   });
 
+  it('rejects provably co-charged per-piece rules whose combined unit price overflows', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [
+        rule({ amount: '600000.0000', minQty: 1, maxQty: 1 }),
+        rule({
+          id: 'unit-add-on',
+          code: 'UNIT_ADD_ON',
+          name: '必收按个加价',
+          kind: 'ADD_ON',
+          amount: '600000.0000',
+          productId: null,
+          product: null,
+          minQty: 1,
+          maxQty: 1,
+          triggerCondition: {},
+          exclusiveGroup: null,
+        }),
+      ],
+    });
+
+    expect(issues.map((issue) => issue.message)).toContain(
+      '基础报价“基础报价 A”与必然叠加收费的按个单价合计超过工单可保存上限 999999.9999 元',
+    );
+  });
+
   it('checks aggregate overflow inside an ADD_ON quantity sub-range', () => {
     const issues = validateDraftPriceBookRules({
       purpose: 'PROCESSING',
@@ -636,6 +705,68 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message)).toContain('纸箱费金额不能为空');
+  });
+
+  it('allows only an evidenced terminal COLOR_BASE null sentinel', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [colorBase()],
+    });
+    const messages = issues.map((issue) => issue.message).join('\n');
+
+    expect(messages).not.toContain('金额设置无效');
+    expect(messages).not.toContain('空价档必须');
+    expect(messages).not.toContain('末档必须达到 Q20000');
+  });
+
+  it('rejects null amounts outside the narrow COLOR_BASE sentinel shape', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [rule({ amount: null })],
+    });
+
+    expect(issues.map((issue) => issue.message).join('\n')).toContain(
+      '金额设置无效',
+    );
+  });
+
+  it('rejects a print product that ends before Q20000 without a null sentinel', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [
+        colorBase({
+          id: 'color-ice-mid-q1000',
+          code: 'BASE_COLOR-ICE-WHITE-160-MID_Q1000',
+          amount: '320.0000',
+          minQty: 1_000,
+          maxQty: 1_000,
+        }),
+      ],
+    });
+    const messages = issues.map((issue) => issue.message).join('\n');
+
+    expect(messages).toContain('末档必须达到 Q20000');
+    expect(messages).toContain('Q2000 是来源表空档');
+  });
+
+  it('rejects a null print tier followed by a later automatic price', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [
+        colorBase(),
+        colorBase({
+          id: 'color-ice-mid-q20000',
+          code: 'BASE_COLOR-ICE-WHITE-160-MID_Q20000',
+          amount: '2500.0000',
+          minQty: 20_000,
+          maxQty: 20_000,
+        }),
+      ],
+    });
+
+    expect(issues.map((issue) => issue.message).join('\n')).toContain(
+      '空价档必须是该产品的末档',
+    );
   });
 
   it('rejects non-contiguous carton tiers and over-precision money', () => {

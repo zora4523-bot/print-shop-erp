@@ -1,6 +1,6 @@
 import { calculateExternalOrderCharges } from '../external-order-charges';
 import { quoteCreateOrderItem } from './item-quote';
-import { sumMoney } from './money';
+import { sumMoney, sumMoneySafely } from './money';
 import { quoteCreateOrderPackagingGroups } from './packaging-quote';
 import type {
   CreateOrderOrderQuote,
@@ -26,6 +26,16 @@ function validateOrderInput(input: CreateOrderQuoteInput): string[] {
   const duplicateFigs = figs.filter((fig, index) => figs.indexOf(fig) !== index);
   if (duplicateFigs.length > 0) {
     errors.push(`款式 fig 重复：${[...new Set(duplicateFigs)].join('、')}`);
+  }
+  if (
+    input.items.every(
+      (item) => Number.isSafeInteger(item.quantity) && item.quantity > 0,
+    ) &&
+    !Number.isSafeInteger(
+      input.items.reduce((total, item) => total + item.quantity, 0),
+    )
+  ) {
+    errors.push('整单总数量必须是大于 0 的安全整数');
   }
 
   const groupKeys = input.packagingGroups.map((group) => group.groupKey);
@@ -63,11 +73,24 @@ function validateOrderInput(input: CreateOrderQuoteInput): string[] {
     }
   }
   for (const item of input.items) {
-    const allocated = input.shipments.reduce(
-      (total, shipment) => total + (shipment.itemQuantities[item.itemKey] ?? 0),
-      0,
-    );
-    if (allocated !== item.quantity) {
+    let allocated = 0;
+    let allocationIsSafe = true;
+    for (const shipment of input.shipments) {
+      const quantity = shipment.itemQuantities[item.itemKey] ?? 0;
+      if (!Number.isSafeInteger(quantity) || quantity < 0) {
+        allocationIsSafe = false;
+        continue;
+      }
+      const nextAllocated = allocated + quantity;
+      if (!Number.isSafeInteger(nextAllocated)) {
+        allocationIsSafe = false;
+        continue;
+      }
+      allocated = nextAllocated;
+    }
+    if (!allocationIsSafe) {
+      errors.push(`款式 ${item.itemKey} 分配数量合计超出安全整数`);
+    } else if (allocated !== item.quantity) {
       errors.push(
         `款式 ${item.itemKey} 分配数量 ${allocated} 与款式数量 ${item.quantity} 不一致`,
       );
@@ -279,24 +302,30 @@ export function calculateCreateOrderQuote(
     items.some((item) => item.status === 'PARTIAL') ||
     packagingGroups.some((group) => group.status === 'PENDING_AMOUNT') ||
     order.amount === null;
-  const status = hasInvalidInput
+  const knownAmounts = [
+    ...items.map((item) => item.knownAmount),
+    ...packagingGroups.map((group) => group.knownAmount),
+    order.knownAmount,
+  ];
+  const knownTotal = sumMoney(knownAmounts);
+  const aggregateErrors =
+    sumMoneySafely(knownAmounts) === null
+      ? ['整单已知金额合计超过可保存上限']
+      : [];
+  const hasAnyInvalidInput = hasInvalidInput || aggregateErrors.length > 0;
+  const status = hasAnyInvalidInput
     ? 'INVALID_INPUT'
     : hasManual
       ? 'MANUAL_PRICING_REQUIRED'
       : hasBlockingPending
         ? 'PARTIAL'
         : 'QUOTED';
-  const knownTotal = sumMoney([
-    ...items.map((item) => item.knownAmount),
-    ...packagingGroups.map((group) => group.knownAmount),
-    order.knownAmount,
-  ]);
   const total = status === 'QUOTED' ? knownTotal : null;
 
   return {
     priceVersion: snapshot.priceVersion,
     status,
-    submittable: !hasInvalidInput,
+    submittable: !hasAnyInvalidInput,
     items,
     packagingGroups,
     order,
@@ -311,6 +340,7 @@ export function calculateCreateOrderQuote(
       ...invalidItemErrors,
       ...invalidPackagingErrors,
       ...order.errors,
+      ...aggregateErrors,
     ],
   };
 }
