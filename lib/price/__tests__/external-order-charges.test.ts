@@ -484,6 +484,9 @@ describe('calculateExternalOrderCharges · 整单纸箱费', () => {
       expect(result.shipments[0]?.packaging.errors).toContain(
         '整单总数量必须是大于 0 的安全整数',
       );
+      expect(result.shipments[0]?.packaging.errors).toContain(
+        '逐票款式数量必须是大于 0 的安全整数',
+      );
     },
   );
 
@@ -675,6 +678,9 @@ describe('calculateExternalOrderCharges · 多地址与顺丰到付', () => {
     expect(result.errors.join('；')).toContain(
       '发货记录 negative·快递费：逐票款式数量必须是大于 0 的安全整数',
     );
+    expect(result.shipments[0]?.packaging.errors).toEqual([
+      '逐票款式数量必须是大于 0 的安全整数',
+    ]);
   });
 
   it.each([

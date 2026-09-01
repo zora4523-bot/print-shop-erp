@@ -968,7 +968,6 @@ async function refreshExternalLogisticsChargesAfterQuantityChange(input: {
   }
   if (
     refreshed.requiresAdminConfirmation ||
-    input.calculation.quote.order.amount === null ||
     !new Decimal(refreshed.totalAmount).equals(
       input.calculation.quote.order.knownAmount,
     )

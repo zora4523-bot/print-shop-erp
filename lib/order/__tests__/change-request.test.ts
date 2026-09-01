@@ -194,7 +194,9 @@ function pureResult(args: ServiceArgs) {
       items: rawItems,
       packagingGroups: rawGroups,
       order: {
-        amount: orderAmount,
+        // The real engine always keeps the aggregate order amount unknown
+        // while the plate fee is pending. Only the known subtotal is usable.
+        amount: null,
         knownAmount: orderAmount,
         lines: [
           ...(args.includeOrderCharges ? [{
@@ -241,6 +243,37 @@ function pureResult(args: ServiceArgs) {
         errors: [],
       },
     },
+  };
+}
+
+function realEngineResult(args: ServiceArgs) {
+  const input = {
+    items: args.facts.items.map((candidate, index) =>
+      createGoldenOrderItem({
+        itemKey: candidate.itemKey,
+        fig: index + 1,
+        quantity: candidate.quantity,
+      }),
+    ),
+    packagingGroups: args.facts.packagingGroups,
+    isSfCollect: args.facts.isSfCollect,
+    shipments: args.facts.shipments.map((shipment) => ({
+      shipmentKey: shipment.shipmentKey,
+      province: shipment.province,
+      trustedBillableWeightKg: shipment.trustedFulfilmentWeightKg,
+      itemQuantities: shipment.itemQuantities,
+    })),
+    includeOrderCharges: args.includeOrderCharges,
+  };
+  const quote = calculateCreateOrderQuote(
+    input,
+    CREATE_ORDER_GOLDEN_SNAPSHOT,
+  );
+  return {
+    input,
+    snapshot: CREATE_ORDER_GOLDEN_SNAPSHOT,
+    quote,
+    processing: presentCreateOrderProcessingQuote({ input, quote }),
   };
 }
 
@@ -551,6 +584,124 @@ describe('reviewOrderChangeRequest', () => {
     locate(value);
     await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null }, admin))
       .rejects.toThrow(/已有开工或完工记录.*不能再修改数量/);
+  });
+
+  it('真实纯引擎仅剩制版费待定时仍可批准外部销售改单', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        packagingGroups: [
+          {
+            id: 'group-real-engine',
+            sequence: 1,
+            name: '单款入袋',
+            mode: OrderPackagingMode.SINGLE_STYLE,
+            actualBagCount: 100,
+            unitPrice: new Decimal('0.1'),
+            subtotal: new Decimal(10),
+            suggestedSubtotal: new Decimal(10),
+            pricingSnapshot: { engineVersion: 'OLD' },
+            priceOverrideReason: null,
+            lines: [{ orderItemId: 'item-1', unitsPerBag: 10 }],
+          },
+        ],
+      },
+    });
+    locate(value);
+    const state: {
+      calculation: ReturnType<typeof realEngineResult> | null;
+    } = { calculation: null };
+    mocks.calculate.mockImplementationOnce(async (_tx, args: ServiceArgs) => {
+      state.calculation = realEngineResult(args);
+      return state.calculation;
+    });
+    mocks.db.orderItem.findMany.mockImplementationOnce(async () => {
+      if (!state.calculation) throw new Error('预期先完成纯引擎计算');
+      return state.calculation.quote.items.map((quotedItem) => {
+        if (!quotedItem.amount) throw new Error('黄金款式应有完整金额');
+        return { subtotal: new Decimal(quotedItem.amount) };
+      });
+    });
+    mocks.finalizeCharges.mockImplementationOnce(async () => {
+      if (!state.calculation) throw new Error('预期先完成纯引擎计算');
+      const shipping = state.calculation.quote.order.lines.find((line) =>
+        line.code.startsWith('SHIPPING:'),
+      );
+      const carton = state.calculation.quote.order.lines.find(
+        (line) => line.code === 'CARTON',
+      );
+      if (!shipping?.amount || !carton?.amount) {
+        throw new Error('黄金价目应生成完整物流已知项');
+      }
+      const charges = [
+        {
+          shipmentKey: shipping.code.slice('SHIPPING:'.length),
+          categoryCode: 'SHIPPING_FEE',
+          categoryId: 'shipping-category',
+          priceBookId: CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.logistics.id,
+          sourceRuleId: 'shipping-rule',
+          businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+          status: 'ESTIMATED',
+          description: '快递费',
+          quantity: '1',
+          unit: 'kg',
+          suggestedAmount: shipping.amount,
+          amount: shipping.amount,
+          pricingSnapshot: {},
+          overrideReason: null,
+        },
+        {
+          shipmentKey: shipping.code.slice('SHIPPING:'.length),
+          categoryCode: 'PACKING_MATERIAL',
+          categoryId: 'packing-category',
+          priceBookId: CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.logistics.id,
+          sourceRuleId: 'packing-rule',
+          businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
+          status: 'ESTIMATED',
+          description: '纸箱耗材',
+          quantity: '1200',
+          unit: '个',
+          suggestedAmount: carton.amount,
+          amount: carton.amount,
+          pricingSnapshot: {},
+          overrideReason: null,
+        },
+      ];
+      return {
+        priceBook: {
+          ...CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.logistics,
+          name: '物流价目簿',
+          sourceName: 'golden',
+          policy: {},
+        },
+        charges,
+        totalAmount: state.calculation.quote.order.knownAmount,
+        requiresAdminConfirmation: false,
+      };
+    });
+
+    await expect(
+      reviewOrderChangeRequest(
+        {
+          requestId: value.id,
+          decision: 'APPROVE',
+          reviewRemark: null,
+        },
+        admin,
+      ),
+    ).resolves.toEqual({ id: 'request-1' });
+
+    expect(state.calculation?.quote.order).toMatchObject({
+      amount: null,
+      lines: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'PLATE_FEE',
+          status: 'PENDING_AMOUNT',
+          amount: null,
+        }),
+      ]),
+    });
+    expect(mocks.appendRevision).toHaveBeenCalledTimes(1);
   });
 
   it('整单一次纯计算，更新全部款式并冻结双价表证据', async () => {
