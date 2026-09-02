@@ -1831,6 +1831,11 @@ describe('external-sales shipment charge schemas', () => {
 
   it('accepts positive billed weights but rejects the legacy zero sentinel at ship time', () => {
     const input = (weightKg: string) => ({
+      expectedRevision: 4,
+      expectedEditVersion: 8,
+      expectedWorkOrderVersion: 2,
+      expectedPriceRevision: 3,
+      idempotencyKey: '00000000-0000-4000-8000-000000000101',
       trackingNo: null,
       shipments: [
         {
@@ -1841,6 +1846,12 @@ describe('external-sales shipment charge schemas', () => {
       ],
     });
     expect(shipOrderSchema.safeParse(input('0.5')).success).toBe(true);
+    expect(
+      shipOrderSchema.safeParse({
+        ...input('0.5'),
+        expectedEditVersion: '1e2',
+      }).success,
+    ).toBe(false);
     const zero = shipOrderSchema.safeParse(input('0'));
     expect(zero.success).toBe(false);
     if (!zero.success) {

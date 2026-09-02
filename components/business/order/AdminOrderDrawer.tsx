@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { FileDown, Pencil } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { FileDown, Link2, Pencil } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
+import { isOrderEditable } from '@/lib/order/editable-fields';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
@@ -128,6 +129,11 @@ export function AdminOrderDrawer({
               人工核价完成前不计入列表金额合计，不伪造三段快照。
             </p>
           ) : null}
+          {order.fee.source === 'INCOMPLETE' ? (
+            <p className="mt-2 text-xs font-medium text-destructive">
+              该工单保留了不完整报价事实，当前状态下不可核价，也不计入列表金额合计。
+            </p>
+          ) : null}
           {order.fee.source === 'SETTLED' ? (
             <p className="mt-2 text-xs text-muted-foreground">
               {order.billing
@@ -213,14 +219,17 @@ export function AdminOrderDrawer({
           <FileDown aria-hidden="true" />
           PDF
         </Link>
-        <Link
-          href={`/orders/${order.id}/edit`}
-          prefetch={false}
-          className={buttonVariants()}
-        >
-          <Pencil aria-hidden="true" />
-          编辑另页
-        </Link>
+        <OrderDeepLinkButton orderNo={order.orderNo} />
+        {shouldShowOrderEditLink(order.status) ? (
+          <Link
+            href={`/orders/${order.id}/edit`}
+            prefetch={false}
+            className={buttonVariants()}
+          >
+            <Pencil aria-hidden="true" />
+            编辑另页
+          </Link>
+        ) : null}
       </SheetFooter>
     </SheetContent>
   );
@@ -230,11 +239,13 @@ export function AdminOrderDrawerState({
   orderNo,
   loading,
   error,
+  onRetry,
   onClose,
 }: {
   orderNo: string;
   loading: boolean;
   error: string;
+  onRetry: () => void;
   onClose: () => void;
 }) {
   return (
@@ -255,13 +266,54 @@ export function AdminOrderDrawerState({
             <p role="alert" className="text-sm font-medium text-destructive">
               {error}
             </p>
-            <Button type="button" variant="outline" className="mt-4" onClick={onClose}>
-              返回工单列表
-            </Button>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button type="button" onClick={onRetry}>
+                重新加载
+              </Button>
+              <Button type="button" variant="outline" onClick={onClose}>
+                返回工单列表
+              </Button>
+            </div>
           </div>
         )}
       </div>
     </SheetContent>
+  );
+}
+
+export function shouldShowOrderEditLink(
+  status: AdminOrderWorkspaceRow['status'],
+): boolean {
+  return isOrderEditable(status);
+}
+
+function OrderDeepLinkButton({ orderNo }: { orderNo: string }) {
+  const [message, setMessage] = useState('');
+
+  async function copyDeepLink() {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('clipboard unavailable');
+      }
+      const url = new URL(window.location.href);
+      url.hash = `wo=${encodeURIComponent(orderNo)}`;
+      await navigator.clipboard.writeText(url.toString());
+      setMessage('工单链接已复制');
+    } catch {
+      setMessage('复制失败，请检查浏览器的剪贴板权限后重试');
+    }
+  }
+
+  return (
+    <>
+      <Button type="button" variant="outline" onClick={copyDeepLink}>
+        <Link2 aria-hidden="true" />
+        复制链接
+      </Button>
+      <span className="sr-only" role="status" aria-live="polite">
+        {message}
+      </span>
+    </>
   );
 }
 
@@ -393,6 +445,8 @@ function feeSourceLabel(source: AdminOrderWorkspaceRow['fee']['source']) {
       return '历史金额';
     case 'PENDING':
       return '人工核价';
+    case 'INCOMPLETE':
+      return '金额不完整（未计入）';
   }
 }
 

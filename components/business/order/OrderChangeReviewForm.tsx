@@ -4,9 +4,11 @@ import {
   useActionState,
   useCallback,
   useEffect,
+  useRef,
   useState,
   useTransition,
 } from 'react';
+import { useRouter } from 'next/navigation';
 import type { FormEvent } from 'react';
 import {
   previewOrderChangeRequestPricingAction,
@@ -81,10 +83,51 @@ export function orderChangeApprovalImpactItems(
 
 export function orderChangeRejectionImpactItems(): string[] {
   return [
-    '该修改申请会标记为已拒绝，并保存当前已填审核备注（如有）。',
+    '该修改申请会标记为已拒绝，并保存必填的拒绝原因。',
     '现有工单的款式、数量、计价与生产任务保持不变。',
     '已拒绝的申请不能再次审批；如仍需修改，需要重新发起申请。',
   ];
+}
+
+export function orderChangeReviewResultMessage(requestStatus: string): string {
+  if (requestStatus === 'STALE') {
+    return '申请未执行：工单版本已变化，该申请已标记为失效，请基于最新工单重新发起。';
+  }
+  if (requestStatus === 'DENIED' || requestStatus === 'REJECTED') {
+    return '申请已拒绝，工单内容未发生变化。';
+  }
+  if (requestStatus === 'CANCELLED') {
+    return '取消申请已批准，工单已按服务端结算结果取消。';
+  }
+  return '修改申请已批准，工单已按最新规则更新。';
+}
+
+export async function reviewOrderChangeRequestWithRecovery(
+  previousState: ReviewOrderChangeRequestMutationResult | null,
+  raw: unknown,
+): Promise<ReviewOrderChangeRequestMutationResult> {
+  try {
+    return await reviewOrderChangeRequestAction(previousState, raw);
+  } catch {
+    return {
+      status: 'error',
+      message: '审核请求未完成，请刷新工单后重试。',
+    };
+  }
+}
+
+export async function previewOrderChangeRequestPricingWithRecovery(
+  previousState: PreviewOrderChangeRequestPricingResult | null,
+  raw: unknown,
+): Promise<PreviewOrderChangeRequestPricingResult> {
+  try {
+    return await previewOrderChangeRequestPricingAction(previousState, raw);
+  } catch {
+    return {
+      status: 'error',
+      message: '计价预览请求未完成，请重试。',
+    };
+  }
 }
 
 export function OrderChangePricingPreviewPanel({
@@ -187,17 +230,19 @@ export function OrderChangePricingPreviewPanel({
 }
 
 export function OrderChangeReviewForm({ requestId }: Props) {
+  const router = useRouter();
   const [state, action] = useActionState<
     ReviewOrderChangeRequestMutationResult | null,
     unknown
-  >(reviewOrderChangeRequestAction, null);
+  >(reviewOrderChangeRequestWithRecovery, null);
   const [previewState, previewAction] = useActionState<
     PreviewOrderChangeRequestPricingResult | null,
     unknown
-  >(previewOrderChangeRequestPricingAction, null);
+  >(previewOrderChangeRequestPricingWithRecovery, null);
   const [pending, startTransition] = useTransition();
   const [previewPending, startPreviewTransition] = useTransition();
   const [reviewRemark, setReviewRemark] = useState('');
+  const refreshedResultRef = useRef<string | null>(null);
 
   const loadPreview = useCallback(() => {
     startPreviewTransition(() => previewAction({ requestId }));
@@ -206,6 +251,14 @@ export function OrderChangeReviewForm({ requestId }: Props) {
   useEffect(() => {
     loadPreview();
   }, [loadPreview]);
+
+  useEffect(() => {
+    if (state?.status !== 'success') return;
+    const resultKey = `${requestId}:${state.requestStatus}`;
+    if (refreshedResultRef.current === resultKey) return;
+    refreshedResultRef.current = resultKey;
+    router.refresh();
+  }, [requestId, router, state]);
 
   function submit(decision: 'APPROVE' | 'REJECT') {
     startTransition(() =>
@@ -236,15 +289,19 @@ export function OrderChangeReviewForm({ requestId }: Props) {
   const preview =
     previewState?.status === 'success' ? previewState.preview : null;
   const approvalNeedsRemark = preview?.requiresReviewRemark ?? false;
+  const reviewCompleted = state?.status === 'success';
   const approvalImpactItems = preview
     ? orderChangeApprovalImpactItems(preview)
     : [];
   const rejectionImpactItems = orderChangeRejectionImpactItems();
   const approveDisabled =
     pending ||
+    reviewCompleted ||
     previewPending ||
     preview === null ||
     (approvalNeedsRemark && reviewRemark.trim() === '');
+  const rejectDisabled =
+    pending || reviewCompleted || reviewRemark.trim() === '';
 
   return (
     <form
@@ -274,7 +331,7 @@ export function OrderChangeReviewForm({ requestId }: Props) {
         </div>
       ) : null}
       <label className="block space-y-1 text-sm">
-        <span>审核备注</span>
+        <span>审核备注 / 拒绝原因</span>
         <textarea
           aria-describedby={`change-review-remark-help-${requestId}`}
           value={reviewRemark}
@@ -287,12 +344,24 @@ export function OrderChangeReviewForm({ requestId }: Props) {
           id={`change-review-remark-help-${requestId}`}
           className="block text-xs text-muted-foreground"
         >
-          拒绝时选填；批准时若需沿用原成交价，此项必填。
+          拒绝时必填；批准时若需沿用原成交价，此项必填。
         </span>
       </label>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
+        </p>
+      ) : null}
+      {state?.status === 'success' ? (
+        <p
+          role={state.requestStatus === 'STALE' ? 'alert' : 'status'}
+          className={
+            state.requestStatus === 'STALE'
+              ? 'rounded-md border border-warning/40 bg-warning/10 p-2 text-sm font-medium'
+              : 'rounded-md border border-success/40 bg-success/10 p-2 text-sm font-medium'
+          }
+        >
+          {orderChangeReviewResultMessage(state.requestStatus)}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
@@ -316,7 +385,7 @@ export function OrderChangeReviewForm({ requestId }: Props) {
         />
         <ConfirmActionDialog
           level="L2"
-          disabled={pending}
+          disabled={rejectDisabled}
           trigger={
             <Button
               type="button"
@@ -327,7 +396,7 @@ export function OrderChangeReviewForm({ requestId }: Props) {
             </Button>
           }
           title="拒绝这项工单修改申请？"
-          description="拒绝后不会改动工单内容。如需说明原因，可在上方填写审核备注；拒绝时不强制填写。"
+          description="拒绝后不会改动工单内容。请先在上方填写拒绝原因，该原因会保存到审核记录。"
           impactItems={rejectionImpactItems}
           confirmLabel="确认拒绝申请"
           onConfirm={() => submit('REJECT')}

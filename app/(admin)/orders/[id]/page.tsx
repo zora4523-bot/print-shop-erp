@@ -49,7 +49,6 @@ import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
 import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
-import { FinishOrderButton } from '@/components/business/order/FinishOrderButton';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
 import { SfCollectToggleForm } from '@/components/business/order/SfCollectToggleForm';
 import { DesignUploadPanel } from '@/components/business/order/DesignUploadPanel';
@@ -100,6 +99,10 @@ import {
 } from '@/lib/production/operation-order-view';
 import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
+import {
+  buildShipOrderShipmentInputs,
+  orderShippingAvailability,
+} from '@/components/business/order/order-shipping-availability';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -111,31 +114,6 @@ const DIRECT_CANCEL_STATUSES = new Set<OrderStatus>([
 
 function canUseDirectCancel(role: Role, status: OrderStatus): boolean {
   return role === Role.ADMIN && DIRECT_CANCEL_STATUSES.has(status);
-}
-
-function shippingAvailability(input: {
-  isAdministrator: boolean;
-  status: OrderStatus;
-  incompleteProductionCount: number;
-  hasLiveOutsource: boolean;
-  isPricingPending: boolean;
-}): { canShip: boolean; disabledReason: string | null } {
-  const productionReady =
-    input.status === OrderStatus.PACKING ||
-    input.status === OrderStatus.COMPLETED;
-  const disabledReason = input.isPricingPending
-    ? '价格待管理员确认'
-    : input.hasLiveOutsource
-      ? '仍有已发出或进行中的外协单'
-      : input.incompleteProductionCount > 0
-        ? `${input.incompleteProductionCount} 个工序未完工`
-        : !productionReady
-          ? '完工后才可发货'
-          : null;
-  return {
-    canShip: input.isAdministrator && disabledReason === null,
-    disabledReason,
-  };
 }
 
 export async function generateMetadata({ params }: PageProps) {
@@ -208,11 +186,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
     order.status === OrderStatus.DRAFT &&
     (order.submitterId === user.id || user.role === Role.ADMIN);
   const canCancel = canUseDirectCancel(user.role, order.status);
-  // SHIPPED / FINISHED 转换权限：order:ship = ADMIN（见
-  // permissions.ts）。这里 mirror 该闸口；action 层 requirePermission
-  // 仍是真闸口。
-  const canShipOrFinish =
-    user.role === Role.ADMIN;
+  // 发货与结算权限：order:ship = ADMIN（见 permissions.ts）。
+  // action 层仍会重新校验，这里只控制界面入口。
+  const canShipOrSettle = user.role === Role.ADMIN;
   const isExternalSalesOrder =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
@@ -236,11 +212,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
       row.status === OutsourceStatus.SENT ||
       row.status === OutsourceStatus.IN_PROGRESS,
   );
-  // FINISHED is a retained legacy read state. New work orders close through
-  // the explicit SHIPPED -> SETTLED command so no second writer can bypass
-  // settledFee/settledAt and monthly-billing cutoff locks.
-  const canFinish = false;
-
   // Editing follows SPEC §3.6. Ownership mirrors the action-layer
   // guard: SALES / CUSTOMER_SERVICE only their own; ADMIN
   // any. Server still re-verifies on submit — this is UI-only.
@@ -323,17 +294,19 @@ export default async function OrderDetailPage({ params }: PageProps) {
   ).length;
   const incompleteProductionCount =
     pendingProductionCount + inProgressProductionCount;
+  const pendingChangeRequest = order.changeRequests.find(
+    (request) => request.status === OrderChangeRequestStatus.PENDING,
+  );
   const { canShip, disabledReason: shipDisabledReason } =
-    shippingAvailability({
-      isAdministrator: canShipOrFinish,
+    orderShippingAvailability({
+      isAdministrator: canShipOrSettle,
       status: order.status,
       incompleteProductionCount,
       hasLiveOutsource,
       isPricingPending,
+      hasShipment: order.shipments.length > 0,
+      hasPendingChange: Boolean(pendingChangeRequest),
     });
-  const pendingChangeRequest = order.changeRequests.find(
-    (request) => request.status === OrderChangeRequestStatus.PENDING,
-  );
   const timelineSteps = buildOrderDetailTimeline({
     status: order.status,
     createdAt: order.createdAt,
@@ -490,24 +463,24 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </Link>
             ) : null}
             {canSubmit ? <SubmitOrderButton orderId={order.id} /> : null}
-            {canFinish ? (
-              <Link
-                href="#finish-order"
-                className={buttonVariants({ size: 'sm' })}
-              >
-                确认完工
-              </Link>
-            ) : canShipOrFinish &&
-              order.status === OrderStatus.SHIPPED &&
+            {canShipOrSettle && order.status === OrderStatus.SHIPPED ? (
               isPricingPending ? (
-              <DisabledReason
-                cause="prerequisite"
-                reason="价格待管理员确认"
-              >
-                <Button type="button" disabled size="sm">
-                  确认完工（价格待确认）
-                </Button>
-              </DisabledReason>
+                <DisabledReason
+                  cause="prerequisite"
+                  reason="价格待管理员确认"
+                >
+                  <Button type="button" disabled size="sm">
+                    结算（价格待确认）
+                  </Button>
+                </DisabledReason>
+              ) : (
+                <Link
+                  href={`/orders#wo=${encodeURIComponent(order.orderNo)}`}
+                  className={buttonVariants({ size: 'sm' })}
+                >
+                  前往结算
+                </Link>
+              )
             ) : null}
             {canShip ? (
               <Link
@@ -516,7 +489,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               >
                 发货
               </Link>
-            ) : canShipOrFinish &&
+            ) : canShipOrSettle &&
               order.status !== OrderStatus.SHIPPED &&
               order.status !== OrderStatus.FINISHED &&
               order.status !== OrderStatus.CANCELLED ? (
@@ -1670,31 +1643,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </p>
           <ShipOrderForm
             orderId={order.id}
-            shipments={order.shipments.map((shipment) => ({
-              id: shipment.id,
-              sequence: shipment.sequence,
-              receiverName: shipment.receiverName,
-              receiverAddress: shipment.receiverAddress,
-              trackingNo: shipment.trackingNo,
-              weightKg: shipment.weightKg ? String(shipment.weightKg) : null,
-              destinationProvince: shipment.destinationProvince,
-              shippingFee:
-                customerChargeByShipmentAndCategory.get(
-                  `${shipment.id}:SHIPPING_FEE`,
-                )?.amount?.toString() ?? null,
-              packingMaterialFee:
-                customerChargeByShipmentAndCategory.get(
-                  `${shipment.id}:PACKING_MATERIAL`,
-                )?.amount?.toString() ?? null,
-              customerChargeOverrideReason:
-                customerChargeByShipmentAndCategory.get(
-                  `${shipment.id}:SHIPPING_FEE`,
-                )?.overrideReason ??
-                customerChargeByShipmentAndCategory.get(
-                  `${shipment.id}:PACKING_MATERIAL`,
-                )?.overrideReason ??
-                null,
-            }))}
+            expectedRevision={order.revision}
+            expectedEditVersion={order.editVersion}
+            expectedWorkOrderVersion={order.workOrderVersion}
+            expectedPriceRevision={priceRevision ?? 0}
+            initialIdempotencyKey={randomUUID()}
+            shipments={buildShipOrderShipmentInputs(
+              order.shipments,
+              customerChargeByShipmentAndCategory,
+            )}
             isExternalSales={
               'settlementType' in order &&
               order.settlementType === OrderSettlementType.EXTERNAL_SALES
@@ -1736,7 +1693,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {canShipOrFinish &&
+      {canShipOrSettle &&
       (order.status === OrderStatus.PACKING ||
         order.status === OrderStatus.COMPLETED) &&
       !canShip ? (
@@ -1759,26 +1716,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {canFinish ? (
-        <section
-          id="finish-order"
-          className="scroll-mt-28 space-y-3 rounded-xl border bg-card p-6 shadow-sm"
-        >
-          <h2 className="text-base font-semibold">确认完工</h2>
-          <p className="text-xs text-muted-foreground">
-            收件或对账后确认完工。工单结案后仍参与账单统计。
-          </p>
-          <FinishOrderButton orderId={order.id} />
-        </section>
-      ) : null}
-
-      {canShipOrFinish &&
+      {canShipOrSettle &&
       order.status === OrderStatus.SHIPPED &&
       isPricingPending ? (
         <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
-          <h2 className="text-base font-semibold">暂不能完工</h2>
+          <h2 className="text-base font-semibold">暂不能结算</h2>
           <p className="text-sm text-muted-foreground">
-            当前对客价格待管理员确认。请先完成整单重算并生成终价修订，再确认完工。
+            当前对客价格待管理员确认。请先完成整单重算并生成终价修订，再结算。
           </p>
         </section>
       ) : null}

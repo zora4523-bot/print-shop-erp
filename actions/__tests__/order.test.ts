@@ -815,6 +815,38 @@ describe('cancelOrderAction', () => {
 });
 
 describe('shipOrderAction', () => {
+  function appendShipCommandSnapshot(formData: FormData): void {
+    formData.set('expectedRevision', '4');
+    formData.set('expectedEditVersion', '8');
+    formData.set('expectedWorkOrderVersion', '2');
+    formData.set('expectedPriceRevision', '3');
+    formData.set(
+      'idempotencyKey',
+      '00000000-0000-4000-8000-000000000101',
+    );
+  }
+
+  it('fails closed when the command snapshot or request identity is absent', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    const formData = new FormData();
+    formData.append('shipmentId', 'shipment-1');
+    formData.append('shipmentTrackingNo', 'SF001');
+
+    const result = await shipOrderAction('order-1', null, formData);
+
+    expect(result).toMatchObject({
+      status: 'invalid',
+      fieldErrors: {
+        expectedRevision: expect.any(Array),
+        expectedEditVersion: expect.any(Array),
+        expectedWorkOrderVersion: expect.any(Array),
+        expectedPriceRevision: expect.any(Array),
+        idempotencyKey: expect.any(Array),
+      },
+    });
+    expect(orderMock.shipOrder).not.toHaveBeenCalled();
+  });
+
   it('passes every address id and its own trimmed tracking number', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.shipOrder.mockResolvedValue({
@@ -822,6 +854,7 @@ describe('shipOrderAction', () => {
       status: OrderStatus.SHIPPED,
     });
     const formData = new FormData();
+    appendShipCommandSnapshot(formData);
     formData.append('shipmentId', 'shipment-1');
     formData.append('shipmentTrackingNo', ' SF001 ');
     formData.append('shipmentId', 'shipment-2');
@@ -834,6 +867,11 @@ describe('shipOrderAction', () => {
       'order-1',
       salesActor,
       {
+        expectedRevision: 4,
+        expectedEditVersion: 8,
+        expectedWorkOrderVersion: 2,
+        expectedPriceRevision: 3,
+        idempotencyKey: '00000000-0000-4000-8000-000000000101',
         trackingNo: null,
         shipments: [
           {
@@ -864,6 +902,7 @@ describe('shipOrderAction', () => {
       status: OrderStatus.SHIPPED,
     });
     const formData = new FormData();
+    appendShipCommandSnapshot(formData);
     for (const [id, province, shipping, packing, reason] of [
       ['shipment-1', '广东', '2.80', '1.00', '首票确认'],
       ['shipment-2', '新疆', '17.30', '3.00', '第二票确认'],
@@ -882,6 +921,11 @@ describe('shipOrderAction', () => {
       'order-1',
       salesActor,
       {
+        expectedRevision: 4,
+        expectedEditVersion: 8,
+        expectedWorkOrderVersion: 2,
+        expectedPriceRevision: 3,
+        idempotencyKey: '00000000-0000-4000-8000-000000000101',
         trackingNo: null,
         shipments: [
           expect.objectContaining({
@@ -906,6 +950,7 @@ describe('shipOrderAction', () => {
   it('rejects mismatched shipment and tracking fields before the domain call', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     const formData = new FormData();
+    appendShipCommandSnapshot(formData);
     formData.append('shipmentId', 'shipment-1');
     const result = await shipOrderAction('order-1', null, formData);
     expect(result.status).toBe('invalid');

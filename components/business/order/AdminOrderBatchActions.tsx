@@ -1,6 +1,12 @@
 'use client';
 
-import { useActionState, useEffect, useState, useTransition } from 'react';
+import {
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import {
   runAdminOrderBatchAction,
@@ -26,6 +32,7 @@ export function AdminOrderBatchActions({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const inFlightRef = useRef(false);
   const [message, setMessage] = useState('');
   const [exportState, exportAction, exportPending] = useActionState<
     OrderExportActionResult | null,
@@ -44,6 +51,8 @@ export function AdminOrderBatchActions({
   }, [exportState, router]);
 
   function run(command: AdminOrderBatchCommand) {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setMessage('');
     const items = selectedItems.flatMap((selected) => {
       const order = orderById.get(selected.id);
@@ -60,17 +69,25 @@ export function AdminOrderBatchActions({
           ]
         : [];
     });
-    startTransition(() => {
-      void runAdminOrderBatchAction({
-        requestId: `workspace-${globalThis.crypto.randomUUID()}`,
-        command,
-        items,
-      }).then((result) => {
+    startTransition(async () => {
+      try {
+        const result = await runAdminOrderBatchAction({
+          requestId: `workspace-${globalThis.crypto.randomUUID()}`,
+          command,
+          items,
+        });
         setMessage(resultMessage(result));
-        if (result.status === 'success' && result.result.successCount > 0) {
+        if (
+          result.status === 'partial_failure' ||
+          (result.status === 'success' && result.result.successCount > 0)
+        ) {
           router.refresh();
         }
-      });
+      } catch {
+        setMessage('批量操作未完成，请刷新列表后重试');
+      } finally {
+        inFlightRef.current = false;
+      }
     });
   }
 
@@ -163,9 +180,12 @@ function exportResultMessage(result: OrderExportActionResult): string {
   }
 }
 
-function resultMessage(result: AdminOrderBatchActionResult): string {
+export function resultMessage(result: AdminOrderBatchActionResult): string {
   if (result.status === 'invalid') return '批量请求不合法，请刷新后重试';
   if (result.status === 'error') return result.message;
+  if (result.status === 'partial_failure') {
+    return `${result.message}；成功 ${result.result.successCount} 张，业务跳过 ${result.result.skippedCount} 张，结果未知 ${result.result.failedCount} 张，未执行 ${result.result.notAttemptedCount} 张`;
+  }
   const skipped = result.result.items.filter(
     (item) => item.status === 'skipped',
   );

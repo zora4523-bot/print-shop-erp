@@ -421,6 +421,9 @@ model Order {
   quotedFee                 Decimal?                    @db.Decimal(12, 2)
   confirmedFee              Decimal?                    @db.Decimal(12, 2)
   settledFee                Decimal?                    @db.Decimal(12, 2)
+  // PostgreSQL maintains the effective customer fee used by stable, paginated
+  // list ordering: settled > confirmed > quoted > legacy total.
+  effectiveCustomerFee      Decimal?                    @default(dbgenerated("COALESCE(\"settledFee\", \"confirmedFee\", \"quotedFee\", \"totalAmount\")")) @db.Decimal(12, 2)
   settledAt                 DateTime?                   @db.Timestamptz(3)
   settlementContractVersion Int?
   quotedFeeCompleteness     OrderQuotedFeeCompleteness?
@@ -487,6 +490,7 @@ model Order {
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@index([submitterId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([effectiveCustomerFee, createdAt(sort: Desc), id(sort: Desc)])
   // 交期预警：dashboard 关注列表 + 每日 cron 都按 promisedDate 范围扫
   @@index([promisedDate])
   // Dashboard KPI ranges hit these timestamp columns directly

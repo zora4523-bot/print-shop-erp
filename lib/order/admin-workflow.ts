@@ -344,6 +344,7 @@ export async function rejectFactoryOrder(
       };
     }
     const order = await readLockedOrder(tx, input.orderId);
+    assertNoPendingChange(order);
     assertFigsBelongToOrder(order, affectedFigs);
     transitionOrder(order.status, OrderStatus.REJECTED);
     await tx.orderWorkflowDecision.create({
@@ -413,6 +414,7 @@ export async function holdFactoryOrder(
       };
     }
     const order = await readLockedOrder(tx, input.orderId);
+    assertNoPendingChange(order);
     assertFigsBelongToOrder(order, affectedFigs);
     transitionOrder(order.status, OrderStatus.ON_HOLD);
     await tx.orderWorkflowDecision.create({
@@ -484,6 +486,7 @@ export async function resumeFactoryOrder(
       };
     }
     const order = await readLockedOrder(tx, input.orderId);
+    assertNoPendingChange(order);
     if (order.status !== OrderStatus.ON_HOLD) {
       throw new AdminOrderWorkflowError(
         'INVALID_STATUS',

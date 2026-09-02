@@ -319,6 +319,11 @@ export async function shipOrderAction(
           },
         ];
   const parsed = shipOrderSchema.safeParse({
+    expectedRevision: formData.get('expectedRevision'),
+    expectedEditVersion: formData.get('expectedEditVersion'),
+    expectedWorkOrderVersion: formData.get('expectedWorkOrderVersion'),
+    expectedPriceRevision: formData.get('expectedPriceRevision'),
+    idempotencyKey: formData.get('idempotencyKey'),
     trackingNo: formData.get('trackingNo'),
     shipments,
   });
@@ -330,7 +335,7 @@ export async function shipOrderAction(
     await shipOrder(
       orderId,
       actor,
-      parsed.data.shipments.length > 0 ? parsed.data : parsed.data.trackingNo,
+      parsed.data,
     );
   } catch (err) {
     if (err instanceof OrderInvariantError) {

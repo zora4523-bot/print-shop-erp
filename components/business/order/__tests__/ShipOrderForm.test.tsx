@@ -26,7 +26,13 @@ vi.mock('@/actions/order', () => ({
   shipOrderAction: vi.fn(),
 }));
 
-import { ShipOrderForm, shipOrderImpactItems } from '../ShipOrderForm';
+import { shipOrderAction } from '@/actions/order';
+import {
+  ShipOrderForm,
+  shipOrderFormFingerprint,
+  shipOrderImpactItems,
+  submitShipOrderWithRecovery,
+} from '../ShipOrderForm';
 
 const source = readFileSync(
   path.join(
@@ -76,7 +82,7 @@ describe('ShipOrderForm external-sales charge fields', () => {
     expect(impact).toContain('转为最终收费');
     expect(impact).toContain('重算应收总额');
     expect(impact).toContain('按工单创建时价格核价');
-    expect(impact).toContain('发货后仍需“确认完工”');
+    expect(impact).toContain('发货后仍需管理员完成结算');
     expect(impact).toContain('不会扣减库存');
   });
 
@@ -102,10 +108,77 @@ describe('ShipOrderForm external-sales charge fields', () => {
     );
   });
 
+  it('submits the captured order versions and a stable idempotency identity', () => {
+    const html = renderToStaticMarkup(
+      <ShipOrderForm
+        orderId="order-1"
+        expectedRevision={3}
+        expectedEditVersion={5}
+        expectedWorkOrderVersion={2}
+        expectedPriceRevision={4}
+        initialIdempotencyKey="11111111-1111-4111-8111-111111111111"
+        shipments={[shipment]}
+        isExternalSales
+        isSfCollect={false}
+      />,
+    );
+
+    expect(html).toContain('name="expectedRevision" value="3"');
+    expect(html).toContain('name="expectedEditVersion" value="5"');
+    expect(html).toContain('name="expectedWorkOrderVersion" value="2"');
+    expect(html).toContain('name="expectedPriceRevision" value="4"');
+    expect(html).toContain(
+      'name="idempotencyKey" value="11111111-1111-4111-8111-111111111111"',
+    );
+    expect(source).toContain(
+      'requestIdentityRef.current.fingerprint !== fingerprint',
+    );
+  });
+
+  it('fingerprints the business payload without binding it to the request key', () => {
+    const first = new FormData();
+    first.set('idempotencyKey', 'request-1');
+    first.set('expectedRevision', '3');
+    first.set('shipmentTrackingNo', 'ZTO-1');
+    const replay = new FormData();
+    replay.set('idempotencyKey', 'request-2');
+    replay.set('expectedRevision', '3');
+    replay.set('shipmentTrackingNo', 'ZTO-1');
+    const changed = new FormData();
+    changed.set('idempotencyKey', 'request-1');
+    changed.set('expectedRevision', '3');
+    changed.set('shipmentTrackingNo', 'ZTO-2');
+
+    expect(shipOrderFormFingerprint(first)).toBe(
+      shipOrderFormFingerprint(replay),
+    );
+    expect(shipOrderFormFingerprint(changed)).not.toBe(
+      shipOrderFormFingerprint(first),
+    );
+  });
+
+  it('turns an unexpected server rejection into visible, retryable form feedback', async () => {
+    vi.mocked(shipOrderAction).mockRejectedValueOnce(
+      new Error('connection interrupted'),
+    );
+
+    await expect(
+      submitShipOrderWithRecovery('order-1', null, new FormData()),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '发货请求未完成，请刷新工单后重试。',
+    });
+  });
+
   it('locks SF collect shipping inputs to zero while keeping packing material editable and required', () => {
     const html = renderToStaticMarkup(
       <ShipOrderForm
         orderId="order-1"
+        expectedRevision={3}
+        expectedEditVersion={5}
+        expectedWorkOrderVersion={2}
+        expectedPriceRevision={4}
+        initialIdempotencyKey="11111111-1111-4111-8111-111111111111"
         shipments={[shipment]}
         isExternalSales
         isSfCollect
@@ -137,6 +210,11 @@ describe('ShipOrderForm external-sales charge fields', () => {
     const html = renderToStaticMarkup(
       <ShipOrderForm
         orderId="order-1"
+        expectedRevision={3}
+        expectedEditVersion={5}
+        expectedWorkOrderVersion={2}
+        expectedPriceRevision={4}
+        initialIdempotencyKey="11111111-1111-4111-8111-111111111111"
         shipments={[shipment]}
         isExternalSales
         isSfCollect={false}
@@ -184,6 +262,11 @@ describe('ShipOrderForm external-sales charge fields', () => {
     const html = renderToStaticMarkup(
       <ShipOrderForm
         orderId="order-1"
+        expectedRevision={3}
+        expectedEditVersion={5}
+        expectedWorkOrderVersion={2}
+        expectedPriceRevision={4}
+        initialIdempotencyKey="11111111-1111-4111-8111-111111111111"
         shipments={[shipment]}
         isExternalSales
         isSfCollect={false}
@@ -211,6 +294,11 @@ describe('ShipOrderForm external-sales charge fields', () => {
     const html = renderToStaticMarkup(
       <ShipOrderForm
         orderId="order-1"
+        expectedRevision={3}
+        expectedEditVersion={5}
+        expectedWorkOrderVersion={2}
+        expectedPriceRevision={4}
+        initialIdempotencyKey="11111111-1111-4111-8111-111111111111"
         shipments={[shipment]}
         isExternalSales
         isSfCollect={false}

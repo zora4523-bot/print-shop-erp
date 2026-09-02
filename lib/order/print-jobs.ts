@@ -391,3 +391,54 @@ export async function createOrderPrintRequest(
     return createOrderPrintRequestInTx(tx, input, actor);
   });
 }
+
+/**
+ * Creates the next manual print request while deriving INITIAL/REPRINT from
+ * append-only print history under the canonical order lock. A work-order
+ * version is only an optimistic-concurrency token; it does not describe
+ * whether that version has already been printed.
+ */
+export async function createNextOrderPrintRequest(
+  input: {
+    orderId: string;
+    workOrderVersion: number;
+    reason: string;
+    idempotencyKey: string;
+  },
+  actor: OrderPrintActor,
+) {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      input.orderId,
+    )}))`;
+
+    // Preserve the original kind for an exact idempotent replay. Without this
+    // lookup, replaying an INITIAL request after it has been acknowledged as
+    // printed would be misclassified as a new REPRINT and conflict with itself.
+    const existingByKey = await tx.orderPrintJob.findUnique({
+      where: { idempotencyKey: input.idempotencyKey.trim() },
+      select: { printKind: true },
+    });
+    const printedHistory = existingByKey
+      ? null
+      : await tx.orderPrintJob.findFirst({
+          where: {
+            orderId: input.orderId,
+            workOrderVersion: input.workOrderVersion,
+            state: OrderPrintJobState.PRINTED,
+          },
+          select: { id: true },
+        });
+
+    return createOrderPrintRequestInTx(
+      tx,
+      {
+        ...input,
+        printKind:
+          existingByKey?.printKind ??
+          (printedHistory ? OrderPrintKind.REPRINT : OrderPrintKind.INITIAL),
+      },
+      actor,
+    );
+  });
+}

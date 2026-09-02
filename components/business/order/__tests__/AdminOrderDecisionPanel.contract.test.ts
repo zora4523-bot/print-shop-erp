@@ -20,4 +20,11 @@ describe('admin order decision reason contract', () => {
     expect(rejectReasons).not.toContain('PRICE_PENDING');
     expect(holdReasons).toContain('PRICE_PENDING');
   });
+
+  it('keeps transitions pending for the full request and handles rejected promises', () => {
+    expect(source).toContain('startTransition(async () =>');
+    expect(source).toContain('finish(await task())');
+    expect(source).toContain("setMessage('操作未完成，请刷新工单后重试。')");
+    expect(source).not.toContain('void task().then(finish)');
+  });
 });

@@ -3,7 +3,10 @@ import {
   Role,
 } from '../../../../generated/prisma/enums';
 import { db } from '../../../db';
-import { loadAdminOrderWorkspace } from '../../admin-workspace';
+import {
+  getAdminOrderByOrderNo,
+  loadAdminOrderWorkspace,
+} from '../../admin-workspace';
 import { parseAdminOrderWorkspaceQuery } from '../../admin-workspace-query';
 
 const warningFragment =
@@ -52,12 +55,20 @@ async function main() {
       2,
     );
 
+    const detail = await getAdminOrderByOrderNo(
+      { id: admin.id, role: Role.ADMIN },
+      fixtureOrderNo,
+      new Date('2026-09-02T00:00:00.000Z'),
+      2,
+    );
+
     await new Promise<void>((resolve) => setImmediate(resolve));
     console.log(
       `__PG_WARNING_PROBE__${JSON.stringify({
         rows: page.rows.length,
         total: page.total,
         fixtureFound: page.rows.some((row) => row.id === fixtureId),
+        detailFound: detail?.id === fixtureId,
         targetWarnings: warnings.filter((message) =>
           message.includes(warningFragment),
         ),

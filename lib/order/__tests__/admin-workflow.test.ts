@@ -212,6 +212,75 @@ describe('admin order workflow', () => {
     });
   });
 
+  it('rechecks pending changes under the lock before rejecting', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({ _count: { changeRequests: 1 } }),
+    );
+
+    await expect(
+      rejectFactoryOrder(
+        {
+          orderId: 'order-1',
+          reasonCode: OrderWorkflowReasonCode.DESIGN_ERROR,
+          reasonNote: '图稿待修正',
+          affectedFigs: [1],
+          idempotencyKey: 'reject-pending-change',
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(tx.orderWorkflowDecision.create).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  it('rechecks pending changes under the lock before holding', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        status: OrderStatus.CONFIRMED,
+        confirmedFee: new Decimal('128.50'),
+        _count: { changeRequests: 1 },
+      }),
+    );
+
+    await expect(
+      holdFactoryOrder(
+        {
+          orderId: 'order-1',
+          reasonCode: OrderWorkflowReasonCode.PRICE_PENDING,
+          reasonNote: '等待核价',
+          affectedFigs: [],
+          idempotencyKey: 'hold-pending-change',
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(tx.orderWorkflowDecision.create).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  it('rechecks pending changes under the lock before resuming', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        status: OrderStatus.ON_HOLD,
+        _count: { changeRequests: 1 },
+      }),
+    );
+
+    await expect(
+      resumeFactoryOrder(
+        {
+          orderId: 'order-1',
+          recoveryEvidence: { proof: '问题已复核' },
+          idempotencyKey: 'resume-pending-change',
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(tx.orderWorkflowDecision.findFirst).not.toHaveBeenCalled();
+    expect(tx.orderWorkflowDecision.create).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
   it('rejects PRICE_PENDING as a reject reason while keeping it available to hold', async () => {
     await expect(
       rejectFactoryOrder(

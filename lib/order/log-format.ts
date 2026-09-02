@@ -62,6 +62,11 @@ const UNKNOWN_FIELD_LABEL = '其他变更';
 const UNKNOWN_VALUE_LABEL = '未识别变更内容';
 const UNKNOWN_ACTION_LABEL = '其他操作';
 
+// Command replay metadata belongs in the immutable audit payload, but it is
+// not a user-facing field change. In particular, request identifiers and
+// fingerprints must not appear as a confusing “其他变更” row in the detail UI.
+const INTERNAL_AUDIT_FIELDS = new Set(['shipRequest']);
+
 function hasKnownField(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(FIELD_LABELS, name);
 }
@@ -116,6 +121,7 @@ export function formatOrderLogChanges(changedFields: unknown): LogChangeRow[] {
   if (!changedFields || typeof changedFields !== 'object') return [];
   const rows: LogChangeRow[] = [];
   for (const [field, entry] of Object.entries(changedFields as Record<string, unknown>)) {
+    if (INTERNAL_AUDIT_FIELDS.has(field)) continue;
     if (!entry || typeof entry !== 'object') continue;
     const e = entry as { before?: unknown; after?: unknown };
     if (!('before' in e) && !('after' in e)) continue;

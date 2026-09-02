@@ -2,7 +2,13 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useState, useTransition, type ReactNode } from 'react';
+import {
+  useCallback,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from 'react';
 import { FileImage, Star } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -91,6 +97,10 @@ function AdminOrderWorkspaceListInner({
     >
       {orders.length > 0 ? (
         <>
+          <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground 2xl:hidden">
+            <OrderListPageSelection />
+            <span>选择本页</span>
+          </div>
           <div className="hidden grid-cols-[2.75rem_3rem_minmax(15rem,1.4fr)_minmax(10rem,1fr)_7rem_8rem_8rem_auto] items-center gap-3 border-b bg-muted/30 px-3 py-2 text-[11px] font-semibold text-muted-foreground 2xl:grid">
             <OrderListPageSelection />
             <span aria-hidden="true" />
@@ -130,13 +140,22 @@ function AdminOrderWorkspaceListInner({
           if (!open) drawer.closeOrder();
         }}
       >
-        {drawer.openOrder ? (
+        {drawer.error && drawer.openOrderNo ? (
+          <AdminOrderDrawerState
+            orderNo={drawer.openOrderNo}
+            loading={false}
+            error={drawer.error}
+            onRetry={drawer.retryOrder}
+            onClose={drawer.closeOrder}
+          />
+        ) : drawer.openOrder ? (
           <AdminOrderDrawer order={drawer.openOrder} />
         ) : drawer.openOrderNo ? (
           <AdminOrderDrawerState
             orderNo={drawer.openOrderNo}
             loading={drawer.loading}
             error={drawer.error}
+            onRetry={drawer.retryOrder}
             onClose={drawer.closeOrder}
           />
         ) : null}
@@ -248,7 +267,9 @@ function AdminOrderRow({
           )}
         >
           {order.fee.amount === null
-            ? '待核价'
+            ? order.fee.source === 'INCOMPLETE'
+              ? '金额不完整'
+              : '待核价'
             : `¥${formatMoney(order.fee.amount)}`}
         </p>
         <p className="mt-0.5 text-[10px] text-muted-foreground">
@@ -284,22 +305,32 @@ function OrderStarButton({ order }: { order: AdminOrderWorkspaceRow }) {
   const [starred, setStarred] = useState(order.isStarred);
   const [message, setMessage] = useState('');
   const [pending, startTransition] = useTransition();
+  const inFlightRef = useRef(false);
 
   function toggle() {
+    if (inFlightRef.current) return;
     const next = !starred;
+    inFlightRef.current = true;
     setStarred(next);
     setMessage('');
-    startTransition(() => {
-      void setOrderStarredAction({ orderId: order.id, starred: next }).then(
-        (result) => {
-          if (result.status !== 'success') {
-            setStarred(!next);
-            setMessage(result.message);
-            return;
-          }
-          router.refresh();
-        },
-      );
+    startTransition(async () => {
+      try {
+        const result = await setOrderStarredAction({
+          orderId: order.id,
+          starred: next,
+        });
+        if (result.status !== 'success') {
+          setStarred(!next);
+          setMessage(result.message);
+          return;
+        }
+        router.refresh();
+      } catch {
+        setStarred(!next);
+        setMessage('星标更新失败，请重试');
+      } finally {
+        inFlightRef.current = false;
+      }
     });
   }
 
@@ -383,9 +414,11 @@ function rowActionLabel(order: AdminOrderWorkspaceRow): string {
   if (order.pendingChangeRequest) return '审查变更';
   if (order.fee.source === 'PENDING') return '查看待核价';
   if (order.printPending) return '查看待打印';
-  if (order.status === 'PENDING_FACTORY') return '审核';
+  if (order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED') {
+    return '审核';
+  }
   if (order.status === 'ON_HOLD') return '查看暂停';
-  if (order.status === 'PACKING') return '录运单发货';
+  if (order.capabilities.ship) return '录运单发货';
   return '详情';
 }
 
@@ -400,6 +433,8 @@ function feeSourceLabel(source: AdminOrderWorkspaceRow['fee']['source']) {
     case 'LEGACY':
       return '历史金额';
     case 'PENDING':
+      return '未计入合计';
+    case 'INCOMPLETE':
       return '未计入合计';
   }
 }

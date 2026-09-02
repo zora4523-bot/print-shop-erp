@@ -2067,7 +2067,8 @@ function orderExportErrorCode(error: unknown): string {
 
 const EXPORT_PARAM_KEYS = new Set([
   'adminWorkspace', 'queue', 'signal', 'starred', 'unbilled',
-  'q', 'orderNo', 'customName', 'customerRef', 'receiverName', 'receiverPhone',
+  'q', 'orderNo', 'customName', 'customerRef', 'customerPartyId',
+  'customerRefExact', 'receiverName', 'receiverPhone',
   'receiverAddress', 'submitterId', 'workerId', 'status', 'kind', 'isUrgent',
   'isSfCollect', 'addressMode', 'amountMin', 'amountMax', 'createdFrom',
   'createdTo', 'promisedFrom', 'promisedTo', 'trackingNo', 'expressCode',

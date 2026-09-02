@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { OrderChangePricingPreview } from '@/lib/order/change-request';
+import {
+  previewOrderChangeRequestPricingAction,
+  reviewOrderChangeRequestAction,
+} from '@/actions/order';
 
 vi.mock('@/actions/order', () => ({
   previewOrderChangeRequestPricingAction: vi.fn(),
@@ -13,6 +17,9 @@ import {
   OrderChangePricingPreviewPanel,
   orderChangeApprovalImpactItems,
   orderChangeRejectionImpactItems,
+  orderChangeReviewResultMessage,
+  previewOrderChangeRequestPricingWithRecovery,
+  reviewOrderChangeRequestWithRecovery,
 } from '../OrderChangeReviewForm';
 
 const source = readFileSync(
@@ -143,12 +150,21 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(impact.join('\n')).toContain('工单应收');
   });
 
-  it('does not turn the optional review remark into a new rejection requirement', () => {
+  it('states the server-side required rejection reason contract', () => {
     const impact = orderChangeRejectionImpactItems().join('\n');
 
-    expect(impact).toContain('审核备注（如有）');
+    expect(impact).toContain('必填的拒绝原因');
     expect(impact).toContain('工单的款式、数量、计价与生产任务保持不变');
-    expect(impact).not.toContain('必填');
+    expect(source).toContain('拒绝时必填');
+    expect(source).toContain('disabled={rejectDisabled}');
+  });
+
+  it('distinguishes a stale no-op from an applied approval and refreshes once', () => {
+    expect(orderChangeReviewResultMessage('STALE')).toContain('申请未执行');
+    expect(orderChangeReviewResultMessage('STALE')).toContain('已标记为失效');
+    expect(orderChangeReviewResultMessage('APPROVED')).toContain('已批准');
+    expect(source).toContain('refreshedResultRef.current === resultKey');
+    expect(source).toContain('router.refresh()');
   });
 
   it('routes both approval and rejection through L2 confirmation instead of direct mutation buttons', () => {
@@ -158,5 +174,32 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(source).toContain("onConfirm={() => submit('REJECT')}");
     expect(source).not.toContain("onClick={() => submit('APPROVE')}");
     expect(source).not.toContain("onClick={() => submit('REJECT')}");
+  });
+
+  it('turns unexpected preview and review rejections into retryable UI errors', async () => {
+    vi.mocked(previewOrderChangeRequestPricingAction).mockRejectedValueOnce(
+      new Error('preview connection lost'),
+    );
+    vi.mocked(reviewOrderChangeRequestAction).mockRejectedValueOnce(
+      new Error('review connection lost'),
+    );
+
+    await expect(
+      previewOrderChangeRequestPricingWithRecovery(null, {
+        requestId: 'request-1',
+      }),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '计价预览请求未完成，请重试。',
+    });
+    await expect(
+      reviewOrderChangeRequestWithRecovery(null, {
+        requestId: 'request-1',
+        decision: 'APPROVE',
+      }),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '审核请求未完成，请刷新工单后重试。',
+    });
   });
 });

@@ -35,6 +35,10 @@ const INTEGER_FILTER_RE = /^\d{1,10}$/;
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Reserved URL value used by clickable empty-state labels. It deliberately
+// cannot collide with a real Party/customer snapshot named “未填客户”.
+export const MISSING_ORDER_CUSTOMER_FILTER_VALUE = '__MISSING_CUSTOMER__';
+
 export const ORDER_LIST_SORT_KEYS = [
   'createdAt',
   'orderNo',
@@ -53,6 +57,10 @@ export type OrderListFilters = {
   orderNo?: string;
   customName?: string;
   customerRef?: string;
+  /** Stable exact identity used by clickable linked-customer filters. */
+  customerPartyId?: string;
+  /** Exact historical snapshot used by clickable unlinked-customer filters. */
+  customerRefExact?: string;
   receiverName?: string;
   receiverPhone?: string;
   receiverAddress?: string;
@@ -487,6 +495,18 @@ export function parseOrderListQuery(
         orderNo: parseText(params, 'orderNo', '工单号', issues),
         customName: parseText(params, 'customName', '工单名称', issues),
         customerRef: parseText(params, 'customerRef', '客户名称', issues),
+        customerPartyId: parseId(
+          params,
+          'customerPartyId',
+          '客户',
+          issues,
+        ),
+        customerRefExact: parseText(
+          params,
+          'customerRefExact',
+          '历史客户快照',
+          issues,
+        ),
         receiverName: parseText(params, 'receiverName', '收件人', issues),
         receiverPhone: parseText(params, 'receiverPhone', '收件电话', issues),
         receiverAddress: parseText(params, 'receiverAddress', '收件地址', issues),
@@ -640,6 +660,13 @@ function globalSearchFilter(query: string): Prisma.OrderWhereInput {
       { orderNo: contains },
       { customName: contains },
       { customerRef: contains },
+      {
+        customerParty: {
+          is: {
+            OR: [{ name: contains }, { shortName: contains }],
+          },
+        },
+      },
       { receiverName: contains },
       { receiverPhone: contains },
       { receiverAddress: contains },
@@ -686,6 +713,82 @@ function globalSearchFilter(query: string): Prisma.OrderWhereInput {
   };
 }
 
+/**
+ * The list presents the linked Party name ahead of the historical
+ * customerRef snapshot. Keep the filter broad enough to find either durable
+ * fact, while reserving the rendered empty-state label for orders that have
+ * neither one.
+ */
+function orderCustomerWhere(value: string): Prisma.OrderWhereInput {
+  if (value === MISSING_ORDER_CUSTOMER_FILTER_VALUE) {
+    return missingOrderCustomerWhere();
+  }
+  const contains = textContains(value);
+  return {
+    OR: [
+      { customerRef: contains },
+      {
+        customerParty: {
+          is: {
+            OR: [{ name: contains }, { shortName: contains }],
+          },
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Clickable customer labels must not reuse the broad text search above:
+ * linked customers have a durable Party identity, while unlinked legacy rows
+ * only have an immutable-at-display customerRef snapshot.
+ */
+function exactOrderCustomerSnapshotWhere(
+  value: string,
+): Prisma.OrderWhereInput {
+  if (value === MISSING_ORDER_CUSTOMER_FILTER_VALUE) {
+    return missingOrderCustomerWhere();
+  }
+  return {
+    customerParty: { is: null },
+    customerRef: { equals: value },
+  };
+}
+
+function missingOrderCustomerWhere(): Prisma.OrderWhereInput {
+  return {
+    customerParty: { is: null },
+    OR: [{ customerRef: null }, { customerRef: '' }],
+  };
+}
+
+/**
+ * Mirrors selectOrderCustomerFee's precedence in a Prisma predicate. A range
+ * must only test a lower-priority amount when every higher-priority snapshot
+ * is absent; otherwise an obsolete quote/legacy total could admit the row.
+ */
+function effectiveCustomerFeeWhere(
+  amount: Prisma.DecimalFilter,
+): Prisma.OrderWhereInput {
+  return {
+    OR: [
+      { settledFee: amount },
+      { settledFee: null, confirmedFee: amount },
+      {
+        settledFee: null,
+        confirmedFee: null,
+        quotedFee: amount,
+      },
+      {
+        settledFee: null,
+        confirmedFee: null,
+        quotedFee: null,
+        totalAmount: amount,
+      },
+    ],
+  };
+}
+
 export function buildOrderWhere(
   actor: { id: string; role: Role },
   filters: OrderListFilters,
@@ -695,7 +798,15 @@ export function buildOrderWhere(
   if (filters.q) conditions.push(globalSearchFilter(filters.q));
   if (filters.orderNo) conditions.push({ orderNo: textContains(filters.orderNo) });
   if (filters.customName) conditions.push({ customName: textContains(filters.customName) });
-  if (filters.customerRef) conditions.push({ customerRef: textContains(filters.customerRef) });
+  if (filters.customerRef) {
+    conditions.push(orderCustomerWhere(filters.customerRef));
+  }
+  if (filters.customerPartyId) {
+    conditions.push({ customerPartyId: filters.customerPartyId });
+  }
+  if (filters.customerRefExact) {
+    conditions.push(exactOrderCustomerSnapshotWhere(filters.customerRefExact));
+  }
   if (filters.submitterId) conditions.push({ submitterId: filters.submitterId });
   if (filters.statuses.length > 0) conditions.push({ status: { in: filters.statuses } });
   if (filters.kinds.length > 0) conditions.push({ kind: { in: filters.kinds } });
@@ -715,7 +826,7 @@ export function buildOrderWhere(
       filters.amountMin ? new Prisma.Decimal(filters.amountMin) : undefined,
       filters.amountMax ? new Prisma.Decimal(filters.amountMax) : undefined,
     );
-    if (amount) conditions.push({ totalAmount: amount });
+    if (amount) conditions.push(effectiveCustomerFeeWhere(amount));
   }
   const createdAt = dateRangeFilter(filters.createdFrom, filters.createdTo);
   if (createdAt) conditions.push({ createdAt });
@@ -795,6 +906,13 @@ export function orderListOrderBy(
   dir: SortDirection,
 ): Prisma.OrderOrderByWithRelationInput[] {
   if (sort === 'createdAt') return [{ createdAt: dir }, { id: dir }];
+  if (sort === 'totalAmount') {
+    return [
+      { effectiveCustomerFee: dir },
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ];
+  }
   if (sort === 'promisedDate') {
     return [
       { promisedDate: { sort: dir, nulls: 'last' } },
@@ -812,6 +930,8 @@ export function serializeOrderListQuery(query: OrderListQuery): TableHrefParams 
     orderNo: f.orderNo,
     customName: f.customName,
     customerRef: f.customerRef,
+    customerPartyId: f.customerPartyId,
+    customerRefExact: f.customerRefExact,
     receiverName: f.receiverName,
     receiverPhone: f.receiverPhone,
     receiverAddress: f.receiverAddress,
@@ -896,6 +1016,7 @@ export async function listOrdersPage(
       isUrgent: true,
       isSfCollect: true,
       customerRef: true,
+      customerParty: { select: { name: true, shortName: true } },
       receiverName: true,
       receiverPhone: true,
       receiverAddress: true,
@@ -972,7 +1093,11 @@ export async function listOrdersPage(
         kind: row.kind,
         isUrgent: row.isUrgent,
         isSfCollect: row.isSfCollect,
-        customerRef: row.customerRef,
+        customerRef:
+          row.customerParty?.shortName?.trim() ||
+          row.customerParty?.name.trim() ||
+          row.customerRef?.trim() ||
+          null,
         receiverName: row.receiverName,
         receiverPhone: row.receiverPhone,
         receiverAddress: row.receiverAddress,

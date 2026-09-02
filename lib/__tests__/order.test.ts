@@ -59,8 +59,12 @@ const { dbMock } = vi.hoisted(() => {
       upsert: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
     };
+    orderChangeRequest: { findFirst: ReturnType<typeof vi.fn> };
     orderPricingRevision: { create: ReturnType<typeof vi.fn> };
-    orderLog: { create: ReturnType<typeof vi.fn> };
+    orderLog: {
+      findFirst: ReturnType<typeof vi.fn>;
+      create: ReturnType<typeof vi.fn>;
+    };
     orderCostEntry: { aggregate: ReturnType<typeof vi.fn> };
     dailyWorkerSalaryItem: { groupBy: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
@@ -102,8 +106,9 @@ const { dbMock } = vi.hoisted(() => {
       upsert: vi.fn(),
       update: vi.fn(),
     },
+    orderChangeRequest: { findFirst: vi.fn() },
     orderPricingRevision: { create: vi.fn() },
-    orderLog: { create: vi.fn() },
+    orderLog: { findFirst: vi.fn(), create: vi.fn() },
     orderCostEntry: { aggregate: vi.fn() },
     dailyWorkerSalaryItem: { groupBy: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
@@ -224,6 +229,19 @@ import { InvalidOrderTransitionError } from '../order/status-machine';
 const salesActor = { id: 'sales-1', role: Role.SALES };
 const workerActor = { id: 'worker-1', role: Role.WORKER };
 const ownerActor = { id: 'owner-1', role: Role.ADMIN };
+const shipOrderVersionSnapshot = {
+  revision: 4,
+  editVersion: 8,
+  workOrderVersion: 2,
+  priceRevision: 3,
+};
+const shipOrderCommandSnapshot = {
+  expectedRevision: 4,
+  expectedEditVersion: 8,
+  expectedWorkOrderVersion: 2,
+  expectedPriceRevision: 3,
+  idempotencyKey: '00000000-0000-4000-8000-000000000101',
+};
 
 const testLogisticsSource = {
   sourceName: '测试物流报价表.xlsx',
@@ -578,7 +596,9 @@ beforeEach(() => {
   dbMock.orderCustomerCharge.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderCustomerCharge.upsert.mockReset().mockResolvedValue({});
   dbMock.orderCustomerCharge.update.mockReset().mockResolvedValue({});
+  dbMock.orderChangeRequest.findFirst.mockReset().mockResolvedValue(null);
   dbMock.orderPricingRevision.create.mockReset().mockResolvedValue({});
+  dbMock.orderLog.findFirst.mockReset().mockResolvedValue(null);
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.orderCostEntry.aggregate.mockReset().mockResolvedValue({
     _sum: { amount: null },
@@ -3251,12 +3271,262 @@ describe('cancelOrder', () => {
 });
 
 describe('shipOrder', () => {
+  beforeEach(() => {
+    dbMock.orderShipment.findMany.mockResolvedValue([
+      {
+        id: 'shipment-1',
+        sequence: 1,
+        destinationProvince: null,
+        weightKg: null,
+        lines: [],
+      },
+    ]);
+  });
+
+  function shippableOrder(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+      orderNo: 'O-1',
+      settlementType: OrderSettlementType.INTERNAL_SALES,
+      pricingStatus: 'AUTO_CONFIRMED',
+      ...shipOrderVersionSnapshot,
+      ...overrides,
+    };
+  }
+
+  const oneShipmentCommand = {
+    ...shipOrderCommandSnapshot,
+    trackingNo: 'SF001',
+    shipments: [{ shipmentId: 'shipment-1', trackingNo: 'SF001' }],
+  };
+
+  it.each([
+    OrderSettlementType.EXTERNAL_SALES,
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.FACTORY_DIRECT,
+    OrderSettlementType.NO_CHARGE,
+  ])('blocks %s shipping when the authoritative shipment set is empty', async (settlementType) => {
+    dbMock.order.findUnique.mockResolvedValue(
+      shippableOrder({ settlementType }),
+    );
+    dbMock.orderShipment.findMany.mockResolvedValue([]);
+
+    await expect(
+      shipOrder('o1', ownerActor, oneShipmentCommand),
+    ).rejects.toThrow(/没有发货地址/);
+    expect(dbMock.orderChangeRequest.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks a versioned command that omits the stored shipment details', async () => {
+    dbMock.order.findUnique.mockResolvedValue(shippableOrder());
+
+    await expect(
+      shipOrder('o1', ownerActor, {
+        ...shipOrderCommandSnapshot,
+        trackingNo: 'SF001',
+        shipments: [],
+      }),
+    ).rejects.toThrow(/缺少地址明细/);
+    expect(dbMock.orderChangeRequest.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps legacy external-sales callers from bypassing per-address charge finalization', async () => {
+    dbMock.order.findUnique.mockResolvedValue(
+      shippableOrder({ settlementType: OrderSettlementType.EXTERNAL_SALES }),
+    );
+
+    await expect(shipOrder('o1', ownerActor, 'SF001')).rejects.toThrow(
+      /外部销售工单发货前必须逐地址确认快递费与打包耗材费/,
+    );
+    expect(dbMock.orderChangeRequest.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(appendPricingRevisionMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks shipping when a pending change appears after the page snapshot', async () => {
+    dbMock.order.findUnique.mockResolvedValue(shippableOrder());
+    dbMock.orderChangeRequest.findFirst.mockResolvedValue({ id: 'change-1' });
+
+    await expect(
+      shipOrder('o1', ownerActor, oneShipmentCommand),
+    ).rejects.toThrow(/待裁决变更申请/);
+    expect(dbMock.productionOperation.findMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks shipping while a current W2 operation is incomplete', async () => {
+    dbMock.order.findUnique.mockResolvedValue(shippableOrder());
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      { status: ProductionOperationStatus.PENDING },
+    ]);
+
+    await expect(
+      shipOrder('o1', ownerActor, oneShipmentCommand),
+    ).rejects.toThrow(/未完成的生产工序/);
+    expect(dbMock.productionTask.findMany).not.toHaveBeenCalled();
+    expect(dbMock.outsourceOrder.findMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks shipping while a current W2 progress step is incomplete', async () => {
+    dbMock.order.findUnique.mockResolvedValue(shippableOrder());
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      { status: ProductionOperationStatus.COMPLETED },
+    ]);
+    dbMock.productionProgressStep.findMany.mockResolvedValue([
+      { status: ProductionOperationStatus.IN_PROGRESS },
+    ]);
+
+    await expect(
+      shipOrder('o1', ownerActor, oneShipmentCommand),
+    ).rejects.toThrow(/未完成的生产工序/);
+    expect(dbMock.productionTask.findMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks pre-cutover shipping while a legacy production task is incomplete', async () => {
+    dbMock.order.findUnique.mockResolvedValue(shippableOrder());
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { status: TaskStatus.IN_PROGRESS },
+    ]);
+
+    await expect(
+      shipOrder('o1', ownerActor, oneShipmentCommand),
+    ).rejects.toThrow(/未完成的生产工序/);
+    expect(dbMock.outsourceOrder.findMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a same-id shipment command after its source facts changed', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+      settlementType: OrderSettlementType.INTERNAL_SALES,
+      pricingStatus: 'AUTO_CONFIRMED',
+      revision: 4,
+      editVersion: 9,
+      workOrderVersion: 2,
+      priceRevision: 3,
+    });
+
+    await expect(
+      shipOrder('o1', ownerActor, {
+        ...shipOrderCommandSnapshot,
+        trackingNo: 'SF001',
+        shipments: [
+          { shipmentId: 'shipment-1', trackingNo: 'SF001' },
+        ],
+      }),
+    ).rejects.toThrow(/版本已变化/);
+
+    expect(dbMock.outsourceOrder.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('replays an identical request after response loss and rejects changed content under the same key', async () => {
+    const completedSnapshot = {
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+      orderNo: 'O-1',
+      settlementType: OrderSettlementType.INTERNAL_SALES,
+      pricingStatus: 'AUTO_CONFIRMED',
+      ...shipOrderVersionSnapshot,
+    };
+    const command = {
+      ...shipOrderCommandSnapshot,
+      trackingNo: 'SF001',
+      shipments: [{ shipmentId: 'shipment-1', trackingNo: 'SF001' }],
+    };
+    dbMock.order.findUnique.mockResolvedValue(completedSnapshot);
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SHIPPED,
+    });
+
+    await expect(shipOrder('o1', ownerActor, command)).resolves.toMatchObject({
+      status: OrderStatus.SHIPPED,
+      idempotentReplay: false,
+    });
+    expect(dbMock.orderLog.findFirst).toHaveBeenCalledWith({
+      where: {
+        orderId: 'o1',
+        action: 'STATUS_CHANGE',
+        changedFields: {
+          path: ['shipRequest', 'after', 'idempotencyKey'],
+          equals: shipOrderCommandSnapshot.idempotencyKey,
+        },
+      },
+      select: { changedFields: true },
+    });
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.orderLog.findFirst.mock.invocationCallOrder[0]!,
+    );
+    const firstAudit = dbMock.orderLog.create.mock.calls[0]?.[0].data
+      .changedFields;
+    expect(firstAudit).toMatchObject({
+      shipRequest: {
+        before: null,
+        after: {
+          idempotencyKey: shipOrderCommandSnapshot.idempotencyKey,
+          fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+          expectedRevision: 4,
+          expectedEditVersion: 8,
+          expectedWorkOrderVersion: 2,
+          expectedPriceRevision: 3,
+        },
+      },
+    });
+
+    const writesAfterFirst = {
+      orders: dbMock.order.update.mock.calls.length,
+      logs: dbMock.orderLog.create.mock.calls.length,
+      notifications: notifyMock.mock.calls.length,
+    };
+    dbMock.order.findUnique.mockReset().mockResolvedValue({
+      ...completedSnapshot,
+      status: OrderStatus.SHIPPED,
+      revision: 99,
+      priceRevision: 4,
+    });
+    dbMock.orderLog.findFirst.mockResolvedValue({ changedFields: firstAudit });
+
+    await expect(shipOrder('o1', ownerActor, command)).resolves.toMatchObject({
+      status: OrderStatus.SHIPPED,
+      idempotentReplay: true,
+    });
+    expect(dbMock.order.update).toHaveBeenCalledTimes(writesAfterFirst.orders);
+    expect(dbMock.orderLog.create).toHaveBeenCalledTimes(writesAfterFirst.logs);
+    expect(notifyMock).toHaveBeenCalledTimes(writesAfterFirst.notifications);
+
+    await expect(
+      shipOrder('o1', ownerActor, {
+        ...command,
+        shipments: [
+          { shipmentId: 'shipment-1', trackingNo: 'SF-CHANGED' },
+        ],
+      }),
+    ).rejects.toThrow(/同一发货请求标识已用于不同内容/);
+    expect(dbMock.order.update).toHaveBeenCalledTimes(writesAfterFirst.orders);
+    expect(dbMock.orderLog.create).toHaveBeenCalledTimes(writesAfterFirst.logs);
+  });
+
   it('ships every stored address atomically with its own tracking number', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
       status: OrderStatus.COMPLETED,
       submitterId: 'sales-1',
       orderNo: 'O-1',
+      ...shipOrderVersionSnapshot,
     });
     dbMock.orderShipment.findMany.mockResolvedValue([
       { id: 'shipment-1', sequence: 1 },
@@ -3272,6 +3542,7 @@ describe('shipOrder', () => {
       'o1',
       ownerActor,
       {
+        ...shipOrderCommandSnapshot,
         trackingNo: null,
         shipments: [
           { shipmentId: 'shipment-1', trackingNo: ' SF001 ' },
@@ -3305,6 +3576,48 @@ describe('shipOrder', () => {
     expect(dbMock.orderLog.create.mock.calls[0]![0].data.remark).toBe(
       '多地址发货：2 个地址',
     );
+    expect(
+      dbMock.orderShipment.findMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.orderChangeRequest.findFirst.mock.invocationCallOrder[0]!);
+    expect(
+      dbMock.orderChangeRequest.findFirst.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.productionOperation.findMany.mock.invocationCallOrder[0]!);
+    expect(
+      dbMock.productionOperation.findMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      dbMock.productionProgressStep.findMany.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      dbMock.productionProgressStep.findMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.productionTask.findMany.mock.invocationCallOrder[0]!);
+    expect(
+      dbMock.productionTask.findMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.outsourceOrder.findMany.mock.invocationCallOrder[0]!);
+    expect(dbMock.productionOperation.findMany).toHaveBeenCalledWith({
+      where: { orderId: 'o1', workOrderVersion: 2 },
+      select: { status: true },
+    });
+    expect(dbMock.productionProgressStep.findMany).toHaveBeenCalledWith({
+      where: { orderId: 'o1', workOrderVersion: 2 },
+      select: { status: true },
+    });
+  });
+
+  it('allows PACKING to ship after every authoritative guard passes', async () => {
+    dbMock.order.findUnique.mockResolvedValue(
+      shippableOrder({ status: OrderStatus.PACKING }),
+    );
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SHIPPED,
+    });
+
+    await expect(
+      shipOrder('o1', ownerActor, oneShipmentCommand),
+    ).resolves.toMatchObject({
+      status: OrderStatus.SHIPPED,
+      idempotentReplay: false,
+    });
   });
 
   it('finalizes administrator-entered actual shipment charges without discarding them', async () => {
@@ -3315,7 +3628,7 @@ describe('shipOrder', () => {
         submitterId: 'sales-1',
         settlementType: OrderSettlementType.EXTERNAL_SALES,
         pricingStatus: 'ADMIN_CONFIRMED',
-        priceRevision: 3,
+        ...shipOrderVersionSnapshot,
       })
       .mockResolvedValueOnce({
         settlementType: OrderSettlementType.EXTERNAL_SALES,
@@ -3365,6 +3678,7 @@ describe('shipOrder', () => {
       'o1',
       ownerActor,
       {
+        ...shipOrderCommandSnapshot,
         trackingNo: null,
         shipments: [
           {
@@ -3457,7 +3771,7 @@ describe('shipOrder', () => {
         submitterId: 'sales-1',
         settlementType: OrderSettlementType.EXTERNAL_SALES,
         pricingStatus: 'ADMIN_CONFIRMED',
-        priceRevision: 3,
+        ...shipOrderVersionSnapshot,
       })
       .mockResolvedValueOnce({
         settlementType: OrderSettlementType.EXTERNAL_SALES,
@@ -3502,6 +3816,7 @@ describe('shipOrder', () => {
       'o1',
       ownerActor,
       {
+        ...shipOrderCommandSnapshot,
         trackingNo: null,
         shipments: [
           {
@@ -3540,11 +3855,16 @@ describe('shipOrder', () => {
       submitterId: 'sales-1',
       settlementType: OrderSettlementType.EXTERNAL_SALES,
       pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      revision: 4,
+      editVersion: 8,
+      workOrderVersion: 2,
       priceRevision: 2,
     });
 
     await expect(
       shipOrder('o1', ownerActor, {
+        ...shipOrderCommandSnapshot,
+        expectedPriceRevision: 2,
         trackingNo: null,
         shipments: [{ shipmentId: 'shipment-1', trackingNo: 'SF001' }],
       }),
@@ -3559,6 +3879,7 @@ describe('shipOrder', () => {
         id: 'o1',
         status: OrderStatus.COMPLETED,
         submitterId: 'sales-1',
+        ...shipOrderVersionSnapshot,
       })
       .mockResolvedValueOnce({
         settlementType: OrderSettlementType.EXTERNAL_SALES,
@@ -3593,6 +3914,7 @@ describe('shipOrder', () => {
 
     await expect(
       shipOrder('o1', ownerActor, {
+        ...shipOrderCommandSnapshot,
         trackingNo: null,
         shipments: [
           {
@@ -3617,6 +3939,7 @@ describe('shipOrder', () => {
       id: 'o1',
       status: OrderStatus.COMPLETED,
       submitterId: 'sales-1',
+      ...shipOrderVersionSnapshot,
     });
     dbMock.orderShipment.findMany.mockResolvedValue([
       { id: 'shipment-1', sequence: 1 },
@@ -3625,12 +3948,14 @@ describe('shipOrder', () => {
 
     await expect(
       shipOrder('o1', ownerActor, {
+        ...shipOrderCommandSnapshot,
         trackingNo: null,
         shipments: [{ shipmentId: 'shipment-1', trackingNo: 'SF001' }],
       }),
     ).rejects.toThrow(/发货地址已变化/);
     await expect(
       shipOrder('o1', ownerActor, {
+        ...shipOrderCommandSnapshot,
         trackingNo: null,
         shipments: [
           { shipmentId: 'shipment-2', trackingNo: 'SF002' },
@@ -3823,6 +4148,15 @@ describe('transitionWithLog — per-order advisory lock (Codex round 87 / P2)', 
       submitterId: 'sales-1',
     });
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+    dbMock.orderShipment.findMany.mockResolvedValue([
+      {
+        id: 'shipment-1',
+        sequence: 1,
+        destinationProvince: null,
+        weightKg: null,
+        lines: [],
+      },
+    ]);
 
     await shipOrder('o1', ownerActor, null);
     expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
@@ -3873,6 +4207,21 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
             { orderNo: { contains: '苹果福', mode: 'insensitive' } },
             { customName: { contains: '苹果福', mode: 'insensitive' } },
             { customerRef: { contains: '苹果福', mode: 'insensitive' } },
+            {
+              customerParty: {
+                is: {
+                  OR: [
+                    { name: { contains: '苹果福', mode: 'insensitive' } },
+                    {
+                      shortName: {
+                        contains: '苹果福',
+                        mode: 'insensitive',
+                      },
+                    },
+                  ],
+                },
+              },
+            },
             { receiverName: { contains: '苹果福', mode: 'insensitive' } },
             { receiverPhone: { contains: '苹果福', mode: 'insensitive' } },
             { receiverAddress: { contains: '苹果福', mode: 'insensitive' } },

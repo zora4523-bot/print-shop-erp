@@ -100,6 +100,28 @@ describe('formatOrderLogChanges', () => {
     ]);
   });
 
+  it('keeps internal idempotency metadata out of the user-facing change list', () => {
+    expect(
+      formatOrderLogChanges({
+        status: { before: 'COMPLETED', after: 'SHIPPED' },
+        shipRequest: {
+          before: null,
+          after: {
+            idempotencyKey: 'request-key',
+            fingerprint: 'private-fingerprint',
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        field: 'status',
+        label: '状态',
+        before: '已完工',
+        after: '已发货',
+      },
+    ]);
+  });
+
   it('handles null / undefined changedFields by returning []', () => {
     expect(formatOrderLogChanges(null)).toEqual([]);
     expect(formatOrderLogChanges(undefined)).toEqual([]);

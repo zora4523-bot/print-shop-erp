@@ -75,6 +75,11 @@ const batchSchema = z.object({
 
 export type AdminOrderBatchActionResult =
   | { status: 'success'; result: AdminOrderBatchResult }
+  | {
+      status: 'partial_failure';
+      message: string;
+      result: AdminOrderBatchResult;
+    }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; code?: string; message: string };
 
@@ -240,6 +245,13 @@ export async function runAdminOrderBatchAction(
     if (parsed.data.command === 'SETTLE') {
       revalidatePath('/owner/bills');
       revalidatePath('/owner/agent-bills');
+    }
+    if (result.failedCount > 0) {
+      return {
+        status: 'partial_failure',
+        message: '批量操作发生系统异常，已刷新列表；请核对每张工单后再重试',
+        result,
+      };
     }
     return { status: 'success', result };
   } catch (error) {

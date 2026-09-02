@@ -11,6 +11,7 @@ type ProbeResult = {
   rows: number;
   total: number;
   fixtureFound: boolean;
+  detailFound: boolean;
   targetWarnings: string[];
 };
 
@@ -28,6 +29,7 @@ databaseDescribe('admin workspace PostgreSQL transaction integration', () => {
     ) as ProbeResult;
 
     expect(payload.fixtureFound).toBe(true);
+    expect(payload.detailFound).toBe(true);
     expect(payload.rows).toBe(1);
     expect(payload.total).toBe(1);
     expect(payload.targetWarnings).toEqual([]);

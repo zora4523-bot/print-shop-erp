@@ -2165,7 +2165,28 @@ export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
 
 // 标记发货：trackingNo 选填（运单号）。Order.trackingNo 是 nullable
 // text，用同一 optional-trimmed 收尾的 helper。
+const shipOrderVersionField = (label: string, minimum: number) =>
+  z.preprocess(
+    (value) => {
+      if (typeof value === 'number') return value;
+      if (typeof value !== 'string') return value;
+      const normalized = value.trim();
+      return /^\d+$/.test(normalized) ? Number(normalized) : undefined;
+    },
+    z
+      .number({ message: `${label}格式非法` })
+      .finite(`${label}格式非法`)
+      .safe(`${label}超出安全范围`)
+      .int(`${label}必须是整数`)
+      .min(minimum, `${label}不能小于 ${minimum}`),
+  );
+
 export const shipOrderSchema = z.object({
+  expectedRevision: shipOrderVersionField('工单修订号', 0),
+  expectedEditVersion: shipOrderVersionField('工单编辑版本', 0),
+  expectedWorkOrderVersion: shipOrderVersionField('纸质工单版本', 1),
+  expectedPriceRevision: shipOrderVersionField('价格版本', 0),
+  idempotencyKey: z.string().uuid('发货请求标识格式非法'),
   trackingNo: optionalTrimmedText('运单号', 64),
   shipments: z
     .array(

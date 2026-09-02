@@ -225,6 +225,8 @@ beforeEach(() => {
       totalQuantity: 0,
       effectiveFee: '0.00',
       manualPricingCount: 0,
+      incompleteFeeExcludedCount: 0,
+      legacyFeeExcludedCount: 0,
     },
   });
   getAgentMonthlyBillingStatsMock.mockReset().mockResolvedValue({
@@ -318,6 +320,42 @@ describe('OrdersListContent', () => {
       (workspaceElement?.props.exportControls as { props: { params: unknown } })
         .props.params,
     ).toEqual({ adminWorkspace: 'v1', queue: 'todo' });
+  });
+
+  it('keeps the admin workspace available when optional reads fail', async () => {
+    getOrderListFilterOptionsMock.mockRejectedValueOnce(
+      new Error('filter options unavailable'),
+    );
+    getAgentMonthlyBillingStatsMock.mockRejectedValueOnce(
+      new Error('billing stats unavailable'),
+    );
+    listRecentOrderExportsMock.mockRejectedValueOnce(
+      new Error('exports unavailable'),
+    );
+
+    const content = await AdminOrdersWorkspaceContent({
+      user: { id: 'admin-1', role: Role.ADMIN },
+      rawSearchParams: {},
+    });
+
+    const workspaceElement = findElement(content, adminOrderWorkspaceMock);
+    expect(workspaceElement?.props.options).toEqual({
+      submitters: [],
+      workers: [],
+      crafts: [],
+    });
+    expect(workspaceElement?.props.billingStats).toEqual({
+      receivableAmount: '0.00',
+      receivableBillCount: 0,
+      unbilledOrderCount: 0,
+      draftBillCount: 0,
+    });
+    expect(workspaceElement?.props.issues).toEqual([
+      '筛选选项暂时无法加载',
+      '账单统计暂时无法加载',
+      '最近导出记录暂时无法加载',
+    ]);
+    expect(isValidElement(workspaceElement?.props.exportControls)).toBe(true);
   });
 
   it('routes SALES through the role-specific safe query and card workspace', async () => {
