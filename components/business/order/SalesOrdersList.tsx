@@ -152,12 +152,9 @@ export function SalesOrdersList({
   }
 
   return (
-    <div
-      data-slot="sales-orders-list"
-      className="min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm"
-    >
+    <div data-slot="sales-orders-list" className="min-w-0">
       {orders.length > 0 ? (
-        <ul aria-label="销售工单列表" className="grid gap-2 p-2 sm:p-3">
+        <ul aria-label="销售工单列表" className="grid gap-2">
           {orders.map((order) => (
             <SalesOrderCard
               key={order.id}
@@ -169,7 +166,7 @@ export function SalesOrdersList({
           ))}
         </ul>
       ) : (
-        <div className="p-4">
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
           <EmptyState
             kind={query.filters.q || query.view ? 'no-result' : 'no-data'}
             noun="工单"
@@ -187,7 +184,11 @@ export function SalesOrdersList({
           />
         </div>
       )}
-      {footer}
+      {footer ? (
+        <div data-slot="sales-orders-pagination" className="mt-4">
+          {footer}
+        </div>
+      ) : null}
       <Sheet
         open={Boolean(openOrderNo)}
         onOpenChange={(open) => {

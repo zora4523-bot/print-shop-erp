@@ -163,6 +163,11 @@ test.describe('automation smoke', () => {
         ruleSubmenu.locator(`[data-menu-subgroup="${groupLabel}"]`).first(),
       ).toBeVisible();
     }
+    for (const redundantGroupLabel of ['客户计价规则', '建单主数据']) {
+      await expect(
+        ruleSubmenu.getByText(redundantGroupLabel, { exact: true }),
+      ).toHaveCount(0);
+    }
     for (const oldGroupLabel of ['对客计价', '基础事实', '内部结算']) {
       await expect(ruleSubmenu.getByText(oldGroupLabel, { exact: true })).toHaveCount(0);
     }

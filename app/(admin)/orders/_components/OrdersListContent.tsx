@@ -326,16 +326,15 @@ export async function SalesOrdersListSection({
       query={displayedQuery}
       nowIso={new Date().toISOString()}
       footer={
-        <div key="sales-orders-pagination" className="border-t px-4 py-3">
-          <AdminPagination
-            basePath="/orders"
-            page={page.page}
-            pageCount={page.pageCount}
-            total={page.total}
-            pageSize={page.pageSize}
-            queryParams={queryParams}
-          />
-        </div>
+        <AdminPagination
+          key="sales-orders-pagination"
+          basePath="/orders"
+          page={page.page}
+          pageCount={page.pageCount}
+          total={page.total}
+          pageSize={page.pageSize}
+          queryParams={queryParams}
+        />
       }
     />
   );

@@ -20,7 +20,14 @@ describe('SalesOrdersList', () => {
     );
 
     expect(html).toContain('data-slot="sales-orders-list"');
+    expect(html).toContain(
+      'data-slot="sales-orders-list" class="min-w-0"',
+    );
+    expect(html).toContain('aria-label="销售工单列表" class="grid gap-2"');
     expect(html).toContain('data-sales-order-card=""');
+    expect(html).toContain(
+      'data-slot="sales-orders-pagination" class="mt-4"',
+    );
     expect(html).toContain('端午定制');
     expect(html).toContain('张三商贸');
     expect(html).toContain('GD-260827-001');

@@ -146,7 +146,7 @@ export function SalesOrdersListSkeleton({
     <div
       aria-busy="true"
       aria-live={announce ? 'polite' : undefined}
-      className="space-y-2 rounded-xl border bg-card p-3 shadow-sm"
+      className="space-y-2"
     >
       {announce ? <span className="sr-only">正在加载销售工单列表</span> : null}
       <div className="space-y-2" aria-hidden="true">
