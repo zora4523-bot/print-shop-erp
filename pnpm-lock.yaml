@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@prisma/adapter-pg@7.7.0':
+    hash: de14e880d9cd68af91a6961b02b9e1b38fc13a14bc654eb4d9bc47ef19ee5736
+    path: patches/@prisma__adapter-pg@7.7.0.patch
+
 importers:
 
   .:
@@ -25,7 +30,7 @@ importers:
         version: 1.9.1
       '@prisma/adapter-pg':
         specifier: 7.7.0
-        version: 7.7.0
+        version: 7.7.0(patch_hash=de14e880d9cd68af91a6961b02b9e1b38fc13a14bc654eb4d9bc47ef19ee5736)
       '@prisma/client':
         specifier: 7.7.0
         version: 7.7.0(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3)
@@ -6820,7 +6825,7 @@ snapshots:
 
   '@polka/url@1.0.0-next.29': {}
 
-  '@prisma/adapter-pg@7.7.0':
+  '@prisma/adapter-pg@7.7.0(patch_hash=de14e880d9cd68af91a6961b02b9e1b38fc13a14bc654eb4d9bc47ef19ee5736)':
     dependencies:
       '@prisma/driver-adapter-utils': 7.7.0
       '@types/pg': 8.20.0

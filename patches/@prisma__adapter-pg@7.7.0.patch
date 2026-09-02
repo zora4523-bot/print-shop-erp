@@ -1,0 +1,92 @@
+diff --git a/dist/index.js b/dist/index.js
+index d595ae4e431481f48576c64ec986f15a3996a067..f1115943a9b566ab23048ed1f47230a970f75618 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -595,6 +595,12 @@ var PgQueryable = class {
+   }
+   provider = "postgres";
+   adapterName = name;
++  // pg.Client and pg.PoolClient each represent a single connection. Concurrent
++  // queries on them are deprecated in pg 8 and become an error in pg 9.
++  // PrismaPgAdapter overrides this for pg.Pool, which manages concurrency itself.
++  serializeQueries = true;
++  // Resolve-only lock: a rejected query must not poison the following queries.
++  #queryLock = Promise.resolve();
+   /**
+    * Execute a query given as SQL, interpolating the given parameters.
+    */
+@@ -648,6 +654,20 @@ var PgQueryable = class {
+    * marked as unhealthy.
+    */
+   async performIO(query) {
++    if (!this.serializeQueries) {
++      return this.#performIO(query);
++    }
++    const previous = this.#queryLock;
++    let release;
++    this.#queryLock = new Promise((resolve) => release = resolve);
++    await previous;
++    try {
++      return await this.#performIO(query);
++    } finally {
++      release();
++    }
++  }
++  async #performIO(query) {
+     const { sql, args } = query;
+     const values = args.map((arg, i) => mapArg(arg, query.argTypes[i]));
+     try {
+@@ -706,6 +726,7 @@ var PgTransaction = class extends PgQueryable {
+   }
+ };
+ var PrismaPgAdapter = class extends PgQueryable {
++  serializeQueries = false;
+   constructor(client, pgOptions, release) {
+     super(client);
+     this.pgOptions = pgOptions;
+diff --git a/dist/index.mjs b/dist/index.mjs
+index c7ae0dc8dc18701ce3d6c00d158e9bae3ae051e5..8f4e45f1ff1d4abafb2ff296bf98c33571cd0dfc 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -559,6 +559,12 @@ var PgQueryable = class {
+   }
+   provider = "postgres";
+   adapterName = name;
++  // pg.Client and pg.PoolClient each represent a single connection. Concurrent
++  // queries on them are deprecated in pg 8 and become an error in pg 9.
++  // PrismaPgAdapter overrides this for pg.Pool, which manages concurrency itself.
++  serializeQueries = true;
++  // Resolve-only lock: a rejected query must not poison the following queries.
++  #queryLock = Promise.resolve();
+   /**
+    * Execute a query given as SQL, interpolating the given parameters.
+    */
+@@ -612,6 +618,20 @@ var PgQueryable = class {
+    * marked as unhealthy.
+    */
+   async performIO(query) {
++    if (!this.serializeQueries) {
++      return this.#performIO(query);
++    }
++    const previous = this.#queryLock;
++    let release;
++    this.#queryLock = new Promise((resolve) => release = resolve);
++    await previous;
++    try {
++      return await this.#performIO(query);
++    } finally {
++      release();
++    }
++  }
++  async #performIO(query) {
+     const { sql, args } = query;
+     const values = args.map((arg, i) => mapArg(arg, query.argTypes[i]));
+     try {
+@@ -670,6 +690,7 @@ var PgTransaction = class extends PgQueryable {
+   }
+ };
+ var PrismaPgAdapter = class extends PgQueryable {
++  serializeQueries = false;
+   constructor(client, pgOptions, release) {
+     super(client);
+     this.pgOptions = pgOptions;
