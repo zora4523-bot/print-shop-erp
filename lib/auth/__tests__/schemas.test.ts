@@ -108,6 +108,8 @@ describe('order change request schemas', () => {
   it('接收正反面烫金明细且不要求旧聚合字段', () => {
     const result = createOrderChangeRequestSchema.safeParse({
       orderId: 'order-1',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 1,
       reason: '客户改为双面烫金',
       items: [
         {
@@ -132,6 +134,8 @@ describe('order change request schemas', () => {
   it('仅为历史客户端保留聚合烫金颜色入参', () => {
     const result = createOrderChangeRequestSchema.safeParse({
       orderId: 'order-1',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 1,
       reason: '历史客户端修改颜色',
       items: [
         {
@@ -153,6 +157,8 @@ describe('order change request schemas', () => {
   it('rejects duplicate UPDATE entries for one item to avoid approval-order ambiguity', () => {
     const result = createOrderChangeRequestSchema.safeParse({
       orderId: 'order-1',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 1,
       reason: '客户修改数量和规格',
       items: [
         { operation: 'UPDATE', itemId: 'item-1', quantity: 1200 },
@@ -170,6 +176,51 @@ describe('order change request schemas', () => {
           }),
         ]),
       );
+    }
+  });
+
+  it.each([
+    {
+      type: 'MODIFY',
+      modifyKind: 'QTY',
+      items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 }],
+    },
+    { type: 'CANCEL', items: [] },
+  ])('修改与取消申请都必须携带两类工单版本', (command) => {
+    const result = createOrderChangeRequestSchema.safeParse({
+      orderId: 'order-1',
+      reason: '客户确认调整',
+      ...command,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path[0])).toEqual(
+        expect.arrayContaining([
+          'expectedRevision',
+          'expectedWorkOrderVersion',
+        ]),
+      );
+    }
+  });
+
+  it('标准化表单中的双版本整数', () => {
+    const result = createOrderChangeRequestSchema.safeParse({
+      orderId: 'order-1',
+      expectedRevision: ' 3 ',
+      expectedWorkOrderVersion: '2',
+      reason: '客户修改数量',
+      items: [
+        { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toMatchObject({
+        expectedRevision: 3,
+        expectedWorkOrderVersion: 2,
+      });
     }
   });
 });

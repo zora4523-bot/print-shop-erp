@@ -1,6 +1,8 @@
 import type { Prisma } from '../../generated/prisma/client';
 import {
   OrderChangeRequestStatus,
+  OrderCustomerChargeStatus,
+  OrderItemQuoteDisposition,
   OrderPrintJobState,
   OrderPrintKind,
   OrderStatus,
@@ -9,9 +11,22 @@ import {
   Role,
 } from '../../generated/prisma/enums';
 import { databaseClockNow } from '../background-jobs/clock';
+import type { EnqueueClient } from '../background-jobs/repository';
 import { db } from '../db';
 import { lockSettlementCutoffShared } from '../finance/settlement-cutoff-lock';
+import { dispatchNotification } from '../notification/dispatch';
+import {
+  NOTIFICATION_EVENTS,
+  type NotificationPayloadFor,
+} from '../notification/events';
+import { enqueueNotificationInTransaction } from '../notification/transactional-outbox';
 import { activateProductionOperationsInTx } from '../production/operation-materialization-service';
+import {
+  dispatchProductionCompletionNotification,
+  maybeCompleteProductionOrder,
+  type ProductionCompletionNotification,
+  type ProductionCompletionTx,
+} from '../production-completion';
 import { orderCascadeLockKey } from './locks';
 import { createOrderPrintRequestInTx } from './print-jobs';
 import { transitionOrder } from './status-machine';
@@ -19,7 +34,11 @@ import {
   confirmOrderPricingAtCurrentPublishedVersionInTx,
   OrderChangeRequestError,
 } from './change-request';
-import { evaluateFactoryConfirmationPreflight } from './factory-confirmation-preflight';
+import { isTrustedAdminPricingSnapshot } from './admin-pricing-snapshot';
+import {
+  evaluateFactoryConfirmationPreflight,
+  isAwaitingFactoryConfirmation,
+} from './factory-confirmation-preflight';
 
 export type AdminWorkflowActor = { id: string; role: Role };
 
@@ -113,7 +132,19 @@ const workflowOrderSelect = {
   confirmedFee: true,
   totalAmount: true,
   billingMode: true,
-  items: { select: { fig: true, quantity: true } },
+  items: {
+    select: {
+      fig: true,
+      quantity: true,
+      quoteDisposition: true,
+      manualQuoteReason: true,
+      pricingSnapshot: true,
+    },
+  },
+  packagingGroups: { select: { pricingSnapshot: true } },
+  customerCharges: {
+    select: { status: true, amount: true, pricingSnapshot: true },
+  },
   _count: {
     select: {
       changeRequests: {
@@ -165,11 +196,64 @@ function assertNoPendingChange(order: WorkflowOrder): void {
   }
 }
 
+function jsonRecord(value: Prisma.JsonValue | null): Prisma.JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function snapshotText(value: Prisma.JsonValue | undefined): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : '';
+}
+
+function pricingSnapshotStillRequiresManual(
+  value: Prisma.JsonValue | null,
+): boolean {
+  const snapshot = jsonRecord(value);
+  const actual = jsonRecord(snapshot.actual ?? null);
+  const status = snapshotText(snapshot.status);
+  const source = snapshotText(snapshot.source);
+  return (
+    status === 'MANUAL_PRICING_REQUIRED' ||
+    status === 'PENDING_AMOUNT' ||
+    status === 'EXCLUDED_MANUAL' ||
+    snapshot.complete === false ||
+    actual.provisional === true ||
+    actual.requiresAdminConfirmation === true ||
+    source.includes('MANUAL_REQUIRED')
+  );
+}
+
+function hasUnresolvedManualPricing(order: WorkflowOrder): boolean {
+  const itemPending = order.items.some(
+    (item) =>
+      !isTrustedAdminPricingSnapshot(item.pricingSnapshot) &&
+      (item.quoteDisposition ===
+        OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED ||
+        Boolean(item.manualQuoteReason?.trim()) ||
+        pricingSnapshotStillRequiresManual(item.pricingSnapshot)),
+  );
+  const packagingPending = order.packagingGroups.some(
+    (group) =>
+      !isTrustedAdminPricingSnapshot(group.pricingSnapshot) &&
+      pricingSnapshotStillRequiresManual(group.pricingSnapshot),
+  );
+  const chargePending = order.customerCharges.some((charge) => {
+    if (charge.status === OrderCustomerChargeStatus.WAIVED) {
+      return charge.amount === null || !charge.amount.isZero();
+    }
+    if (charge.amount === null) return true;
+    if (isTrustedAdminPricingSnapshot(charge.pricingSnapshot)) return false;
+    return (
+      charge.status === OrderCustomerChargeStatus.PENDING_AMOUNT ||
+      pricingSnapshotStillRequiresManual(charge.pricingSnapshot)
+    );
+  });
+  return itemPending || packagingPending || chargePending;
+}
+
 function assertFactoryConfirmationPreflight(order: WorkflowOrder): void {
-  if (
-    order.status !== OrderStatus.PENDING_FACTORY &&
-    order.status !== OrderStatus.SUBMITTED
-  ) {
+  if (!isAwaitingFactoryConfirmation(order.status)) {
     throw new AdminOrderWorkflowError(
       'INVALID_STATUS',
       `工单当前状态 ${order.status} 不是待工厂确认`,
@@ -182,7 +266,7 @@ function assertFactoryConfirmationPreflight(order: WorkflowOrder): void {
     confirmedFee: order.confirmedFee,
     totalAmount: order.totalAmount,
     pendingChangeRequestCount: order._count.changeRequests,
-    manualPricingPending: false,
+    manualPricingPending: hasUnresolvedManualPricing(order),
   });
   if (!preflight.ok) {
     throw new AdminOrderWorkflowError(
@@ -471,7 +555,14 @@ export async function resumeFactoryOrder(
   if (note && note.length > 500) {
     throw new AdminOrderWorkflowError('INVALID_INPUT', '恢复说明不能超过 500 字');
   }
-  return db.$transaction(async (tx) => {
+  const committed: {
+    result: {
+      orderId: string;
+      status: OrderStatus;
+      idempotentReplay: boolean;
+    };
+    notification?: ProductionCompletionNotification;
+  } = await db.$transaction(async (tx) => {
     await lockOrder(tx, input.orderId);
     const replay = await findDecisionReplay(tx, {
       idempotencyKey,
@@ -480,9 +571,11 @@ export async function resumeFactoryOrder(
     });
     if (replay) {
       return {
-        orderId: input.orderId,
-        status: replay.toStatus,
-        idempotentReplay: true,
+        result: {
+          orderId: input.orderId,
+          status: replay.toStatus,
+          idempotentReplay: true,
+        },
       };
     }
     const order = await readLockedOrder(tx, input.orderId);
@@ -505,18 +598,6 @@ export async function resumeFactoryOrder(
       );
     }
     transitionOrder(order.status, hold.fromStatus);
-    await tx.orderWorkflowDecision.create({
-      data: {
-        orderId: order.id,
-        fromStatus: order.status,
-        toStatus: hold.fromStatus,
-        action: OrderWorkflowAction.RESUME,
-        reasonNote: note,
-        recoveryEvidence,
-        actorId: actor.id,
-        idempotencyKey,
-      },
-    });
     await tx.order.update({
       where: { id: order.id },
       data: { status: hold.fromStatus, revision: { increment: 1 } },
@@ -534,12 +615,52 @@ export async function resumeFactoryOrder(
         remark: note ?? '已验证恢复证据并继续生产',
       },
     });
+    let notification: ProductionCompletionNotification | undefined;
+    let finalStatus = hold.fromStatus;
+    if (
+      hold.fromStatus === OrderStatus.RELEASED ||
+      hold.fromStatus === OrderStatus.FOILING ||
+      hold.fromStatus === OrderStatus.PACKING
+    ) {
+      // Outsource receipt is allowed while an order is paused. If that closes
+      // the final production dependency, the completion gate intentionally
+      // ignores ON_HOLD; re-check immediately after restoring the exact
+      // production state so the ready notification cannot be lost forever.
+      const completion = await maybeCompleteProductionOrder(
+        tx as unknown as ProductionCompletionTx,
+        order.id,
+        actor.id,
+        await databaseClockNow(tx),
+      );
+      notification = completion.notification;
+      finalStatus = completion.orderStatus ?? finalStatus;
+    }
+    // Persist the actual post-resume status for idempotent replay. A paused
+    // RELEASED/FOILING order can become fully ready while on hold; the shared
+    // gate then advances it to PACKING in this same transaction.
+    await tx.orderWorkflowDecision.create({
+      data: {
+        orderId: order.id,
+        fromStatus: order.status,
+        toStatus: finalStatus,
+        action: OrderWorkflowAction.RESUME,
+        reasonNote: note,
+        recoveryEvidence,
+        actorId: actor.id,
+        idempotencyKey,
+      },
+    });
     return {
-      orderId: order.id,
-      status: hold.fromStatus,
-      idempotentReplay: false,
+      result: {
+        orderId: order.id,
+        status: finalStatus,
+        idempotentReplay: false,
+      },
+      ...(notification ? { notification } : {}),
     };
   });
+  await dispatchProductionCompletionNotification(committed.notification);
+  return committed.result;
 }
 
 export async function releaseFactoryOrder(
@@ -558,7 +679,15 @@ export async function releaseFactoryOrder(
 }> {
   assertAdmin(actor);
   const printIdempotencyKey = checkedIdempotencyKey(input.printIdempotencyKey);
-  return db.$transaction(async (tx) => {
+  const transactionResult: {
+    result: {
+      orderId: string;
+      status: OrderStatus;
+      printJobId: string;
+      idempotentReplay: boolean;
+    };
+    postCommitNotification: NotificationPayloadFor<'ORDER_SCHEDULED'> | null;
+  } = await db.$transaction(async (tx) => {
     await lockOrder(tx, input.orderId);
     const order = await readLockedOrder(tx, input.orderId);
     const replay = await tx.orderPrintJob.findUnique({
@@ -588,14 +717,18 @@ export async function releaseFactoryOrder(
         );
       }
       return {
-        orderId: order.id,
-        status: OrderStatus.RELEASED,
-        printJobId: replay.id,
-        idempotentReplay: true,
+        result: {
+          orderId: order.id,
+          status: OrderStatus.RELEASED,
+          printJobId: replay.id,
+          idempotentReplay: true,
+        },
+        postCommitNotification: null,
       };
     }
     assertExpectedVersion(order, input);
     assertNoPendingChange(order);
+    let releaseResult = null;
     if (order.status !== OrderStatus.RELEASED) {
       if (order.status !== OrderStatus.CONFIRMED) {
         throw new AdminOrderWorkflowError(
@@ -603,9 +736,13 @@ export async function releaseFactoryOrder(
           `工单当前状态 ${order.status} 不允许下发`,
         );
       }
-      await activateProductionOperationsInTx(tx, order.id, actor, undefined, {
-        targetStatus: OrderStatus.RELEASED,
-      });
+      releaseResult = await activateProductionOperationsInTx(
+        tx,
+        order.id,
+        actor,
+        undefined,
+        { targetStatus: OrderStatus.RELEASED },
+      );
     }
     const print = await createOrderPrintRequestInTx(
       tx,
@@ -618,13 +755,59 @@ export async function releaseFactoryOrder(
       },
       actor,
     );
+    if (releaseResult) {
+      // ORDER_SCHEDULED is the historical external event name. In the
+      // canonical workflow its business edge is CONFIRMED -> RELEASED: all
+      // materialized work for this work-order generation has been released to
+      // production, without implying a worker assignment. Count both
+      // piecework operations and non-piecework progress steps; the ID arrays
+      // remain correct when materialization reuses an exact existing ledger,
+      // whereas *Created would incorrectly report zero.
+      const notificationPayload: NotificationPayloadFor<'ORDER_SCHEDULED'> = {
+        orderId: order.id,
+        orderNo: order.orderNo,
+        taskCount:
+          releaseResult.operationIds.length +
+          releaseResult.progressStepIds.length,
+      };
+      const dedupeKey = `notification:${NOTIFICATION_EVENTS.ORDER_SCHEDULED}:${order.id}`;
+      const queued = await enqueueNotificationInTransaction(
+        tx as unknown as EnqueueClient,
+        NOTIFICATION_EVENTS.ORDER_SCHEDULED,
+        notificationPayload,
+        { dedupeKey },
+      );
+      return {
+        result: {
+          orderId: order.id,
+          status: OrderStatus.RELEASED,
+          printJobId: print.jobId,
+          idempotentReplay: print.idempotentReplay,
+        },
+        postCommitNotification: queued ? null : notificationPayload,
+      };
+    }
     return {
-      orderId: order.id,
-      status: OrderStatus.RELEASED,
-      printJobId: print.jobId,
-      idempotentReplay: print.idempotentReplay,
+      result: {
+        orderId: order.id,
+        status: OrderStatus.RELEASED,
+        printJobId: print.jobId,
+        idempotentReplay: print.idempotentReplay,
+      },
+      postCommitNotification: null,
     };
   });
+
+  if (transactionResult.postCommitNotification) {
+    await dispatchNotification(
+      NOTIFICATION_EVENTS.ORDER_SCHEDULED,
+      transactionResult.postCommitNotification,
+      {
+        dedupeKey: `notification:${NOTIFICATION_EVENTS.ORDER_SCHEDULED}:${transactionResult.postCommitNotification.orderId}`,
+      },
+    );
+  }
+  return transactionResult.result;
 }
 
 export async function settleFactoryOrder(

@@ -52,6 +52,8 @@ function SalesOrderChangeRequestSection({
       </div>
       <OrderChangeRequestForm
         orderId={order.id}
+        expectedRevision={order.revision}
+        expectedWorkOrderVersion={order.workOrderVersion}
         items={order.items.map((item) => ({
           id: item.id,
           sequence: item.sequence,
@@ -67,7 +69,11 @@ function SalesOrderChangeRequestSection({
       {canRequestCancellation ? (
         <div className="border-t pt-4">
           <h3 className="mb-2 text-sm font-semibold">申请取消</h3>
-          <OrderCancellationRequestForm orderId={order.id} />
+          <OrderCancellationRequestForm
+            orderId={order.id}
+            expectedRevision={order.revision}
+            expectedWorkOrderVersion={order.workOrderVersion}
+          />
         </div>
       ) : null}
     </section>
@@ -402,7 +408,15 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
                         </UiStatusBadge>
                         <span className="text-xs text-muted-foreground">
                           {request.type === 'CANCEL' ? '取消' : '修改'} ·{' '}
-                          基于第 {request.baseRevision} 版 ·{' '}
+                          基于业务第 {request.baseRevision} 版 · 基于生产版本{' '}
+                          {request.baseWorkOrderVersion == null
+                            ? '历史未记录'
+                            : `v${request.baseWorkOrderVersion}`}{' '}
+                          · 批准后生产版本{' '}
+                          {request.workOrderVersionAfter == null
+                            ? '未生成'
+                            : `v${request.workOrderVersionAfter}`}{' '}
+                          ·{' '}
                           {formatDateTimeShanghai(new Date(request.createdAt))}
                         </span>
                       </div>

@@ -92,6 +92,8 @@ function pendingForms(): Record<string, string> {
     OrderChangeRequestForm: renderToStaticMarkup(
       <OrderChangeRequestForm
         orderId="order-1"
+        expectedRevision={3}
+        expectedWorkOrderVersion={2}
         items={[
           {
             id: 'item-1',

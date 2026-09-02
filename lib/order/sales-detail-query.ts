@@ -27,6 +27,7 @@ export type SalesOrderDetail = {
   isUrgent: boolean;
   isSfCollect: boolean;
   revision: number;
+  workOrderVersion: number;
   pricingStatus: OrderPricingStatus;
   totalAmount: string;
   promisedDate: string | null;
@@ -86,6 +87,8 @@ export type SalesOrderDetail = {
     type: 'MODIFY' | 'CANCEL';
     status: OrderChangeRequestStatus;
     baseRevision: number;
+    baseWorkOrderVersion: number | null;
+    workOrderVersionAfter: number | null;
     reason: string;
     reviewRemark: string | null;
     reviewedAt: string | null;
@@ -108,6 +111,7 @@ export const salesOrderDetailSelect = {
   isUrgent: true,
   isSfCollect: true,
   revision: true,
+  workOrderVersion: true,
   pricingStatus: true,
   processingAmount: true,
   packagingAmount: true,
@@ -189,6 +193,8 @@ export const salesOrderDetailSelect = {
       requesterId: true,
       status: true,
       baseRevision: true,
+      baseWorkOrderVersion: true,
+      workOrderVersionAfter: true,
       reason: true,
       reviewRemark: true,
       reviewedAt: true,
@@ -266,6 +272,7 @@ function mapSalesOrderDetail(
     isUrgent: row.isUrgent,
     isSfCollect: row.isSfCollect,
     revision: row.revision,
+    workOrderVersion: row.workOrderVersion,
     pricingStatus: row.pricingStatus,
     totalAmount: selectOrderCustomerFee(row).amount,
     promisedDate: row.promisedDate?.toISOString().slice(0, 10) ?? null,
@@ -323,6 +330,8 @@ function mapSalesOrderDetail(
       type: request.type,
       status: request.status,
       baseRevision: request.baseRevision,
+      baseWorkOrderVersion: request.baseWorkOrderVersion,
+      workOrderVersionAfter: request.workOrderVersionAfter,
       reason: request.reason,
       reviewRemark: request.reviewRemark,
       reviewedAt: request.reviewedAt?.toISOString() ?? null,

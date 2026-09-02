@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => {
     $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
+    backgroundJob: { updateMany: vi.fn() },
+    notificationLog: { updateMany: vi.fn() },
     order: { findUnique: vi.fn(), update: vi.fn() },
     orderItem: { update: vi.fn(), create: vi.fn(), findMany: vi.fn() },
     orderItemPlateDetail: { findMany: vi.fn(), update: vi.fn() },
@@ -40,6 +42,7 @@ const mocks = vi.hoisted(() => {
     productionProgressStep: { updateMany: vi.fn() },
     orderCustomerCharge: {
       aggregate: vi.fn(),
+      findUnique: vi.fn(),
       update: vi.fn(),
       upsert: vi.fn(),
     },
@@ -99,6 +102,7 @@ import {
   confirmOrderPricingAtCurrentPublishedVersionInTx,
   createOrderChangeRequest,
   isChangeRequestQuoteAutomaticallyApplicable,
+  previewFactoryConfirmationPriceDiff,
   previewOrderChangeRequestPricing,
   reviewOrderChangeRequest,
   withdrawOrderChangeRequest,
@@ -135,7 +139,11 @@ type ServiceArgs = {
   };
 };
 
-function pureResult(args: ServiceArgs) {
+function pureResult(
+  args: ServiceArgs,
+  options: { plateApplies?: boolean; atomicBundledPlate?: boolean } = {},
+) {
+  const plateApplies = options.plateApplies ?? true;
   const canonicalItems = args.facts.items.map((item, index) => ({
     itemKey: item.itemKey,
     fig: index + 1,
@@ -155,16 +163,37 @@ function pureResult(args: ServiceArgs) {
       craft: 'CATALOG' as const,
     },
   }));
-  const rawItems = canonicalItems.map((item) => ({
-    itemKey: item.itemKey,
-    fig: item.fig,
-    status: 'QUOTED' as const,
-    unitPrice: '1.0000',
-    processingAmount: new Decimal(item.quantity).toFixed(2),
-    amount: new Decimal(item.quantity).toFixed(2),
-    knownAmount: new Decimal(item.quantity).toFixed(2),
-    lines: [], manualReasons: [], errors: [],
-  }));
+  const rawItems = canonicalItems.map((item, index) => {
+    const hasAtomicBundle = options.atomicBundledPlate && index === 0;
+    const amount = new Decimal(item.quantity)
+      .plus(hasAtomicBundle ? 200 : 0)
+      .toFixed(2);
+    return {
+      itemKey: item.itemKey,
+      fig: item.fig,
+      status: 'QUOTED' as const,
+      unitPrice: '1.0000',
+      processingAmount: amount,
+      amount,
+      knownAmount: amount,
+      lines: hasAtomicBundle
+        ? [{
+            layer: 'ITEM' as const,
+            itemKey: item.itemKey,
+            groupKey: null,
+            code: 'PRINT_FOIL_PER_ORDER',
+            label: '彩印单色烫金（含制版费）',
+            status: 'QUOTED' as const,
+            amount: '200.00',
+            includedInKnownTotal: true,
+            basis: { plateTreatment: 'INCLUDED_IN_ATOMIC_BUNDLE' },
+            errors: [],
+          }]
+        : [],
+      manualReasons: [],
+      errors: [],
+    };
+  });
   const quantityByKey = new Map(canonicalItems.map((item) => [item.itemKey, item.quantity]));
   const rawGroups = args.facts.packagingGroups.map((group) => {
     const bagCount = Math.max(...group.items.map((line) =>
@@ -215,17 +244,17 @@ function pureResult(args: ServiceArgs) {
         itemQuantities: shipment.itemQuantities,
       })),
     },
-    snapshot: { priceVersion },
+    snapshot: { ...CREATE_ORDER_GOLDEN_SNAPSHOT, priceVersion },
     quote: {
       priceVersion,
-      status: 'PARTIAL' as const,
+      status: plateApplies ? ('PARTIAL' as const) : ('QUOTED' as const),
       submittable: true,
       items: rawItems,
       packagingGroups: rawGroups,
       order: {
         // The real engine always keeps the aggregate order amount unknown
         // while the plate fee is pending. Only the known subtotal is usable.
-        amount: null,
+        amount: plateApplies ? null : orderAmount,
         knownAmount: orderAmount,
         lines: [
           ...(args.includeOrderCharges ? [{
@@ -235,27 +264,32 @@ function pureResult(args: ServiceArgs) {
             basis: {}, errors: [],
           }] : []),
           ...shippingLines,
-          {
+          ...(plateApplies ? [{
             layer: 'ORDER' as const,
             itemKey: null, groupKey: null, code: 'PLATE_FEE', label: '制版费',
             status: 'PENDING_AMOUNT' as const, amount: null,
-            includedInKnownTotal: false, basis: {}, errors: [],
-          },
+            includedInKnownTotal: false,
+            basis: { pricingPolicy: 'ADMIN_MANUAL_ONLY' }, errors: [],
+          }] : []),
         ],
         errors: [],
       },
-      total: null,
+      total: plateApplies ? null : knownTotal,
       knownTotal,
       excludedManualItemKeys: [],
-      pendingLineCodes: ['PLATE_FEE'],
+      pendingLineCodes: plateApplies ? ['PLATE_FEE'] : [],
       manualReasons: [],
-      pendingReasons: [{ code: 'PLATE_AMOUNT_PENDING' as const, message: '制版费待定' }],
+      pendingReasons: plateApplies
+        ? [{ code: 'PLATE_AMOUNT_PENDING' as const, message: '制版费待定' }]
+        : [],
       errors: [],
     },
     processing: {
-      items: rawItems.map((item) => ({
+      items: rawItems.map((item, index) => ({
         components: [],
-        suggestedUnitPrice: '1.0000', suggestedFixedFee: '0.00',
+        suggestedUnitPrice: '1.0000',
+        suggestedFixedFee:
+          options.atomicBundledPlate && index === 0 ? '200.00' : '0.00',
         suggestedSubtotal: item.amount, complete: true, errors: [],
         snapshot: { engineVersion: 'CREATE_ORDER_PURE_V1', priceVersion },
       })),
@@ -271,6 +305,177 @@ function pureResult(args: ServiceArgs) {
         requiresAdminConfirmation: false,
         errors: [],
       },
+    },
+  };
+}
+
+function manualItemResult(args: ServiceArgs, manualIndex = 0) {
+  const base = pureResult(args, { plateApplies: false });
+  const manualItem = base.quote.items[manualIndex];
+  if (!manualItem) throw new Error('测试缺少待人工核价款式');
+  const reason = {
+    code: 'PRINT_PRICE_NOT_FOUND' as const,
+    message: '彩印基础价需人工确认',
+    itemKey: manualItem.itemKey,
+  };
+  return {
+    ...base,
+    quote: {
+      ...base.quote,
+      status: 'MANUAL_PRICING_REQUIRED' as const,
+      total: null,
+      items: base.quote.items.map((candidate, index) =>
+        index === manualIndex
+          ? {
+              ...candidate,
+              status: 'MANUAL_PRICING_REQUIRED' as const,
+              unitPrice: null,
+              processingAmount: null,
+              amount: null,
+              knownAmount: '0.00',
+              manualReasons: [
+                { code: reason.code, message: reason.message },
+              ],
+            }
+          : candidate,
+      ),
+      excludedManualItemKeys: [manualItem.itemKey],
+      manualReasons: [reason],
+    },
+    processing: {
+      ...base.processing,
+      items: base.processing.items.map((candidate, index) =>
+        index === manualIndex
+          ? {
+              ...candidate,
+              suggestedUnitPrice: null,
+              suggestedFixedFee: null,
+              suggestedSubtotal: null,
+              complete: false,
+              errors: [reason.message],
+            }
+          : candidate,
+      ),
+    },
+  };
+}
+
+function manualPrintFoilResult(args: ServiceArgs) {
+  const base = manualItemResult(args);
+  const manual = base.quote.manualReasons[0]!;
+  const reason = {
+    ...manual,
+    code: 'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE' as const,
+    message: '彩印烫金整款人工价必须包含制版费',
+  };
+  return {
+    ...base,
+    quote: {
+      ...base.quote,
+      items: base.quote.items.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              manualReasons: [
+                { code: reason.code, message: reason.message },
+              ],
+            }
+          : item,
+      ),
+      manualReasons: [reason],
+    },
+    processing: {
+      ...base.processing,
+      items: base.processing.items.map((item, index) =>
+        index === 0 ? { ...item, errors: [reason.message] } : item,
+      ),
+    },
+  };
+}
+
+function manualPackagingResult(args: ServiceArgs, groupKey: string) {
+  const base = pureResult(args, { plateApplies: false });
+  const rawGroups = base.quote.packagingGroups.map((group) =>
+    group.groupKey === groupKey
+      ? {
+          ...group,
+          status: 'PENDING_AMOUNT' as const,
+          bagCount: null,
+          amount: null,
+          knownAmount: '0.00',
+          line: {
+            ...group.line,
+            status: 'PENDING_AMOUNT' as const,
+            amount: null,
+            includedInKnownTotal: false,
+          },
+        }
+      : group,
+  );
+  return {
+    ...base,
+    quote: {
+      ...base.quote,
+      status: 'PARTIAL' as const,
+      total: null,
+      packagingGroups: rawGroups,
+      pendingLineCodes: [`${groupKey}:BAGGING`],
+      pendingReasons: [{
+        code: 'BAGGING_INPUT_PENDING' as const,
+        message: '入袋金额待定',
+        groupKey,
+      }],
+    },
+    processing: {
+      ...base.processing,
+      packaging: {
+        ...base.processing.packaging,
+        groups: base.processing.packaging.groups.map((group) =>
+          group.groupKey === groupKey
+            ? {
+                ...group,
+                complete: false,
+                suggestedUnitPrice: null,
+                suggestedSubtotal: null,
+                errors: ['入袋金额待人工核价'],
+              }
+            : group,
+        ),
+        suggestedTotal: null,
+        requiresAdminConfirmation: true,
+      },
+    },
+  };
+}
+
+function pendingShippingResult(args: ServiceArgs, shipmentKey: string) {
+  const base = pureResult(args, { plateApplies: false });
+  return {
+    ...base,
+    quote: {
+      ...base.quote,
+      status: 'PARTIAL' as const,
+      total: null,
+      order: {
+        ...base.quote.order,
+        amount: null,
+        lines: base.quote.order.lines.map((line) =>
+          line.code === `SHIPPING:${shipmentKey}`
+            ? {
+                ...line,
+                status: 'PENDING_AMOUNT' as const,
+                amount: null,
+                includedInKnownTotal: false,
+              }
+            : line,
+        ),
+      },
+      pendingLineCodes: [`SHIPPING:${shipmentKey}`],
+      pendingReasons: [{
+        code: 'FREIGHT_QUOTE_PENDING' as const,
+        message: '快递费待定',
+        shipmentKey,
+      }],
     },
   };
 }
@@ -307,6 +512,32 @@ function realEngineResult(args: ServiceArgs) {
 }
 
 describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
+  it('真实纯引擎的彩印含版费原子套餐是完整可应用报价', () => {
+    const input = createGoldenOrderInput([
+      createGoldenOrderItem({
+        craft: 'PRINT',
+        paperType: '铜版纸',
+        paperWeightGsm: 200,
+        specification: '大号封',
+        frontColors: ['哑金'],
+        backColors: [],
+        printFoilMode: 'PARTIAL',
+      }),
+    ]);
+    const quote = calculateCreateOrderQuote(input, CREATE_ORDER_GOLDEN_SNAPSHOT);
+    const processing = presentCreateOrderProcessingQuote({ input, quote });
+
+    expect(quote).toMatchObject({
+      status: 'QUOTED',
+      pendingLineCodes: [],
+      manualReasons: [],
+    });
+    expect(quote.order.lines.map((line) => line.code)).not.toContain('PLATE_FEE');
+    expect(
+      isChangeRequestQuoteAutomaticallyApplicable({ quote, processing }),
+    ).toBe(true);
+  });
+
   it('真实纯引擎仅剩 PLATE_FEE 待定时允许改单重算', () => {
     const input = createGoldenOrderInput([
       createGoldenOrderItem({ quantity: 1_200 }),
@@ -369,9 +600,59 @@ function item(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function adminConfirmedSnapshot(
+  actual: Record<string, unknown> = {},
+) {
+  return {
+    source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+    status: 'ADMIN_CONFIRMED',
+    actual: {
+      ...actual,
+      provisional: false,
+      requiresAdminConfirmation: false,
+      automatic: false,
+    },
+    confirmation: {
+      actorId: 'admin-1',
+      confirmedAt: '2026-09-02T02:00:00.000Z',
+    },
+  };
+}
+
+function plainPrintItem(overrides: Record<string, unknown> = {}) {
+  return item({
+    productId: 'product-print',
+    pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+    paperType: '铜版纸',
+    paperWeightGsm: 200,
+    crafts: ['craft-print'],
+    frontFoilColors: [],
+    backFoilColors: [],
+    foilColors: [],
+    foilTechnique: OrderFoilTechnique.NONE,
+    hasLocalFoil: false,
+    printColors: ['CMYK'],
+    isDoubleSided: false,
+    isDoubleColor: false,
+    ...overrides,
+  });
+}
+
+function bundledPrintItem(overrides: Record<string, unknown> = {}) {
+  return plainPrintItem({
+    crafts: ['craft-print-foil'],
+    frontFoilColors: ['哑金'],
+    foilColors: ['哑金'],
+    foilTechnique: OrderFoilTechnique.FLAT,
+    hasLocalFoil: true,
+    ...overrides,
+  });
+}
+
 function request(overrides: Record<string, unknown> = {}) {
   return {
     id: 'request-1', orderId: 'order-1', requesterId: 'sales-1', baseRevision: 2,
+    baseWorkOrderVersion: null,
     type: OrderChangeRequestType.MODIFY,
     status: OrderChangeRequestStatus.PENDING, reason: '客户变更',
     proposedChanges: { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 }] },
@@ -379,7 +660,7 @@ function request(overrides: Record<string, unknown> = {}) {
     order: {
       id: 'order-1', orderNo: 'GD-260828-001', submitterId: 'sales-1', submitterRole: Role.SALES,
       settlementType: OrderSettlementType.EXTERNAL_SALES,
-      billingMode: OrderBillingMode.CHARGE, revision: 2,
+      billingMode: OrderBillingMode.CHARGE, revision: 2, workOrderVersion: 1,
       pricingStatus: 'ADMIN_CONFIRMED', priceRevision: 5,
       quotedFee: new Decimal(1008),
       confirmedFee: new Decimal(1008),
@@ -393,12 +674,16 @@ function request(overrides: Record<string, unknown> = {}) {
         {
           id: 'shipping-1', shipmentId: 'shipment-1',
           businessKey: 'SHIPMENT:1:SHIPPING_FEE', priceBookId: 'old-logistics',
-          amount: new Decimal(3), overrideReason: null, category: { code: 'SHIPPING_FEE' },
+          status: OrderCustomerChargeStatus.ESTIMATED,
+          amount: new Decimal(3), pricingSnapshot: {}, overrideReason: null,
+          category: { code: 'SHIPPING_FEE' },
         },
         {
           id: 'packing-1', shipmentId: 'shipment-1',
           businessKey: 'SHIPMENT:1:PACKING_MATERIAL', priceBookId: 'old-logistics',
-          amount: new Decimal(5), overrideReason: null, category: { code: 'PACKING_MATERIAL' },
+          status: OrderCustomerChargeStatus.ESTIMATED,
+          amount: new Decimal(5), pricingSnapshot: {}, overrideReason: null,
+          category: { code: 'PACKING_MATERIAL' },
         },
       ],
     },
@@ -422,7 +707,7 @@ function locateCancellation(value: ReturnType<typeof request>) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.getSetting.mockResolvedValue({ enabled: true });
   mocks.enqueueNotification.mockResolvedValue(false);
   mocks.dispatchNotification.mockResolvedValue(undefined);
@@ -435,14 +720,25 @@ beforeEach(() => {
     async (_tx: unknown, args: ServiceArgs) => pureResult(args),
   );
   mocks.finalizeCharges.mockImplementation(
-    async (_tx: unknown, input: { shipments: Array<{ shipmentKey: string }> }) => {
+    async (
+      _tx: unknown,
+      input: {
+        shipments: Array<{
+          shipmentKey: string;
+          shippingFee: string | null;
+          packingMaterialFee: string | null;
+          overrideReason: string | null;
+        }>;
+      },
+    ) => {
       const charges = input.shipments.flatMap((shipment, index) => [
         {
           shipmentKey: shipment.shipmentKey, categoryCode: 'SHIPPING_FEE',
           categoryId: 'shipping-category', priceBookId: priceVersion.logistics.id,
           sourceRuleId: 'shipping-rule', businessKey: `SHIPMENT:${shipment.shipmentKey}:SHIPPING_FEE`,
           status: 'ESTIMATED', description: '快递费', quantity: '1', unit: 'kg',
-          suggestedAmount: '3.00', amount: '3.00', pricingSnapshot: {}, overrideReason: null,
+          suggestedAmount: '3.00', amount: shipment.shippingFee ?? '3.00',
+          pricingSnapshot: {}, overrideReason: shipment.overrideReason,
         },
         {
           shipmentKey: shipment.shipmentKey, categoryCode: 'PACKING_MATERIAL',
@@ -450,7 +746,9 @@ beforeEach(() => {
           sourceRuleId: 'packing-rule', businessKey: `SHIPMENT:${shipment.shipmentKey}:PACKING_MATERIAL`,
           status: 'ESTIMATED', description: '纸箱耗材', quantity: '1200', unit: '个',
           suggestedAmount: index === 0 ? '5.00' : '0.00',
-          amount: index === 0 ? '5.00' : '0.00', pricingSnapshot: {}, overrideReason: null,
+          amount:
+            shipment.packingMaterialFee ?? (index === 0 ? '5.00' : '0.00'),
+          pricingSnapshot: {}, overrideReason: shipment.overrideReason,
         },
       ]);
       return {
@@ -483,8 +781,11 @@ beforeEach(() => {
     idempotentReplay: false,
   });
   mocks.db.orderPrintJob.findMany.mockResolvedValue([]);
+  mocks.db.backgroundJob.updateMany.mockResolvedValue({ count: 0 });
+  mocks.db.notificationLog.updateMany.mockResolvedValue({ count: 0 });
   mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1200) }]);
   mocks.db.orderItemPlateDetail.findMany.mockResolvedValue([]);
+  mocks.db.orderCustomerCharge.findUnique.mockResolvedValue(null);
   mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: new Decimal(8) } });
   mocks.db.orderCustomerCharge.upsert.mockResolvedValue({ id: 'plate-pending' });
   mocks.db.customerChargeCategory.findUnique.mockResolvedValue({
@@ -499,15 +800,29 @@ describe('createOrderChangeRequest', () => {
   it('只保存提案，不改写工单或历史快照', async () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
-      status: OrderStatus.SUBMITTED, revision: 2, items: [item()],
+      status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
+      items: [item()],
       changeRequests: [], packagingGroups: [], productionOperations: [],
     });
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
     await expect(createOrderChangeRequest({
-      orderId: 'order-1', reason: '改数量',
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      reason: '改数量',
       items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 }],
     }, sales)).resolves.toEqual({ id: 'request-1' });
     expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.db.orderChangeRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          baseRevision: 2,
+          baseWorkOrderVersion: 1,
+          beforeSnapshot: expect.objectContaining({
+            revision: 2,
+            workOrderVersion: 1,
+          }),
+        }),
+      }),
+    );
     expect(mocks.db.orderLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         orderId: 'order-1',
@@ -537,17 +852,69 @@ describe('createOrderChangeRequest', () => {
     );
   });
 
+  it.each([
+    {
+      label: '业务版本',
+      expectedRevision: 1,
+      expectedWorkOrderVersion: 3,
+    },
+    {
+      label: '纸质工单版本',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 2,
+    },
+  ])('在工单锁内拒绝过期的$label快照', async ({
+    expectedRevision,
+    expectedWorkOrderVersion,
+  }) => {
+    mocks.db.order.findUnique.mockResolvedValue({
+      id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 3,
+      items: [item()], changeRequests: [], packagingGroups: [],
+      productionOperations: [],
+    });
+
+    await expect(createOrderChangeRequest({
+      orderId: 'order-1',
+      expectedRevision,
+      expectedWorkOrderVersion,
+      reason: '改数量',
+      items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 }],
+    }, sales)).rejects.toThrow(/工单版本已更新.*请刷新后重新提交/u);
+    expect(mocks.db.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('拒绝与当前款式语义相同的 UPDATE', async () => {
+    mocks.db.order.findUnique.mockResolvedValue({
+      id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
+      items: [item()], changeRequests: [], packagingGroups: [],
+      productionOperations: [],
+    });
+
+    await expect(createOrderChangeRequest({
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      reason: '重复提交',
+      items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1_000 }],
+    }, sales)).rejects.toThrow(/没有实际变化/u);
+    expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
   it('持久模式在申请事务内落 outbox，且不持久自由文本原因或金额', async () => {
     mocks.enqueueNotification.mockResolvedValue(true);
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
-      status: OrderStatus.SUBMITTED, revision: 2, items: [item()],
+      status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
+      items: [item()],
       changeRequests: [], packagingGroups: [], productionOperations: [],
     });
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
 
     await createOrderChangeRequest({
       orderId: 'order-1',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 1,
       reason: '客户说价格改成 9999 元，电话 13800000000',
       items: [{ operation: 'UPDATE', itemId: 'item-1', name: '新名' }],
     }, sales);
@@ -570,13 +937,15 @@ describe('createOrderChangeRequest', () => {
     mocks.getSetting.mockResolvedValue({ enabled: false });
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
-      status: OrderStatus.SUBMITTED, revision: 2, items: [item()],
+      status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
+      items: [item()],
       changeRequests: [], packagingGroups: [], productionOperations: [],
     });
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-off' });
 
     await expect(createOrderChangeRequest({
-      orderId: 'order-1', reason: '改名',
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      reason: '改名',
       items: [{ operation: 'UPDATE', itemId: 'item-1', name: '新名' }],
     }, sales)).resolves.toEqual({ id: 'request-off' });
     expect(mocks.enqueueNotification).not.toHaveBeenCalled();
@@ -586,19 +955,22 @@ describe('createOrderChangeRequest', () => {
   it('已有新工序/报工时阻断生产事实变更，名称修改仍可提交', async () => {
     const order = {
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
-      status: OrderStatus.IN_PRODUCTION, revision: 2, items: [item()],
+      status: OrderStatus.IN_PRODUCTION, revision: 2, workOrderVersion: 1,
+      items: [item()],
       changeRequests: [], packagingGroups: [],
       productionOperations: [{ id: 'op-1', reports: [{ id: 'report-1' }] }],
     };
     mocks.db.order.findUnique.mockResolvedValue(order);
     await expect(createOrderChangeRequest({
-      orderId: 'order-1', reason: '改数量',
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      reason: '改数量',
       items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 }],
     }, sales)).rejects.toThrow(/已有新报工记录/);
 
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-name' });
     await expect(createOrderChangeRequest({
-      orderId: 'order-1', reason: '改名',
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      reason: '改名',
       items: [{ operation: 'UPDATE', itemId: 'item-1', name: '新名' }],
     }, sales)).resolves.toEqual({ id: 'request-name' });
   });
@@ -610,6 +982,7 @@ describe('createOrderChangeRequest', () => {
       submitterId: 'sales-1',
       status: OrderStatus.RELEASED,
       revision: 4,
+      workOrderVersion: 4,
       items: [item()],
       changeRequests: [],
       packagingGroups: [],
@@ -623,6 +996,8 @@ describe('createOrderChangeRequest', () => {
       createOrderChangeRequest(
         {
           orderId: 'order-1',
+          expectedRevision: 4,
+          expectedWorkOrderVersion: 4,
           type: 'CANCEL',
           reason: '客户终止项目',
           items: [],
@@ -637,6 +1012,8 @@ describe('createOrderChangeRequest', () => {
         data: expect.objectContaining({
           type: OrderChangeRequestType.CANCEL,
           modifyKind: null,
+          baseRevision: 4,
+          baseWorkOrderVersion: 4,
         }),
       }),
     );
@@ -771,6 +1148,261 @@ describe('previewOrderChangeRequestPricing', () => {
       });
   });
 
+  it('内部非生产态预览与批准一致：旧制版 aggregate 归入重算而不保留', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        settlementType: OrderSettlementType.INTERNAL_SALES,
+        billingMode: OrderBillingMode.CHARGE,
+        status: OrderStatus.DRAFT,
+        processingAmount: new Decimal('1000.00'),
+        totalAmount: new Decimal('1100.00'),
+        customerCharges: [
+          {
+            id: 'plate-old',
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            amount: new Decimal('100.00'),
+            overrideReason: '历史人工核价',
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves
+      .toMatchObject({
+        oldTotal: '1100.00',
+        newTotal: '1200.00',
+        delta: '100.00',
+      });
+  });
+
+  it('已确认生产版本预览保留已发生制版费', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        status: OrderStatus.CONFIRMED,
+        processingAmount: new Decimal('1000.00'),
+        totalAmount: new Decimal('1108.00'),
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-final',
+            shipmentId: null,
+            businessKey: 'PLATE_DETAIL:already-consumed',
+            priceBookId: null,
+            amount: new Decimal('100.00'),
+            overrideReason: '已发生制版费',
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves
+      .toMatchObject({
+        oldTotal: '1108.00',
+        newTotal: '1308.00',
+        delta: '200.00',
+      });
+  });
+
+  it('生产版本仅命中含版费原子套餐时，若仍有非零独立版费则预览失败关闭', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        status: OrderStatus.CONFIRMED,
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-final',
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            amount: new Decimal('100.00'),
+            overrideReason: '已发生制版费',
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: false, atomicBundledPlate: true }),
+    );
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).rejects
+      .toThrow(/含版费彩印烫金原子套餐.*重复收费风险/u);
+  });
+
+  it('生产版本的混合订单缺少版费款式归属时失败关闭', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        status: OrderStatus.CONFIRMED,
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-final',
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            amount: new Decimal('100.00'),
+            overrideReason: '普通烫金已发生制版费',
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: true, atomicBundledPlate: true }),
+    );
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).rejects
+      .toThrow(/含版费彩印烫金原子套餐.*重复收费风险/u);
+  });
+
+  it('生产版本存在待定历史独立版费且新价命中原子套餐时失败关闭', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        status: OrderStatus.CONFIRMED,
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-pending',
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+            amount: null,
+            pricingSnapshot: {},
+            overrideReason: null,
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: true, atomicBundledPlate: true }),
+    );
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).rejects
+      .toThrow(/待定或非零的独立制版费.*重复收费风险/u);
+  });
+
+  it('历史生产中工单预览价格修改时直接失败关闭', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        status: OrderStatus.IN_PRODUCTION,
+      },
+    });
+    locate(value);
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin))
+      .rejects.toThrow(/历史“生产中”.*请新建工单/u);
+    expect(mocks.calculate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: '新增普通烫金款',
+      change: {
+        operation: 'ADD' as const,
+        templateItemId: 'item-1',
+        name: '红包 B',
+        quantity: 300,
+        frontFoilColors: ['亮金'],
+        backFoilColors: [],
+      },
+    },
+    {
+      label: '更换普通烫金颜色',
+      change: {
+        operation: 'UPDATE' as const,
+        itemId: 'item-1',
+        frontFoilColors: ['亮金'],
+        backFoilColors: [],
+      },
+    },
+  ])('生产版本 $label 时不沿用历史版费', async ({ change }) => {
+    const value = request({
+      proposedChanges: { items: [change] },
+      order: { ...request().order, status: OrderStatus.CONFIRMED },
+    });
+    locate(value);
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).rejects
+      .toThrow(/生产版本新增、移除或变更.*不能自动替换或重新计价/u);
+    expect(mocks.calculate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    OrderStatus.CONFIRMED,
+    OrderStatus.RELEASED,
+    OrderStatus.FOILING,
+    OrderStatus.PACKING,
+  ])('生产状态 %s 的彩印烫金改色或移除均失败关闭', async (status) => {
+    for (const frontFoilColors of [['亮金'], []] as const) {
+      vi.clearAllMocks();
+      mocks.db.$transaction.mockImplementation(
+        async (callback: (tx: typeof mocks.db) => unknown) => callback(mocks.db),
+      );
+      const value = request({
+        proposedChanges: {
+          items: [{
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            frontFoilColors,
+            backFoilColors: [],
+          }],
+        },
+        order: {
+          ...request().order,
+          status,
+          items: [bundledPrintItem()],
+        },
+      });
+      locate(value);
+
+      await expect(previewOrderChangeRequestPricing(value.id, admin)).rejects
+        .toThrow(
+          /生产版本新增、移除或变更.*不能自动替换或重新计价|计价事实不合法/u,
+        );
+      expect(mocks.calculate).not.toHaveBeenCalled();
+    }
+  });
+
+  it('生产状态的彩印烫金仅改数量仍按新原子套餐预览', async () => {
+    const value = request({
+      proposedChanges: {
+        items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 }],
+      },
+      order: {
+        ...request().order,
+        status: OrderStatus.RELEASED,
+        items: [bundledPrintItem()],
+      },
+    });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: false, atomicBundledPlate: true }),
+    );
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves
+      .toMatchObject({ newTotal: '1408.00' });
+  });
+
   it('查不到价时失败关闭并指向工厂核价', async () => {
     const value = request();
     locate(value);
@@ -783,6 +1415,13 @@ describe('previewOrderChangeRequestPricing', () => {
 describe('confirmOrderPricingAtCurrentPublishedVersionInTx', () => {
   it('首次工厂确认按当前发布双价表重算，保留原 quoted 指针', async () => {
     const quotedFee = new Decimal('1008.00');
+    mocks.db.orderItem.findMany.mockResolvedValueOnce([
+      { subtotal: new Decimal('1000.00') },
+    ]);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: false }),
+    );
     mocks.db.order.findUnique.mockResolvedValueOnce({
       ...request().order,
       quotedFee,
@@ -798,7 +1437,7 @@ describe('confirmOrderPricingAtCurrentPublishedVersionInTx', () => {
         now: new Date('2026-09-02T02:00:00.000Z'),
       }),
     ).resolves.toMatchObject({
-      confirmedFee: '1208.00',
+      confirmedFee: '1008.00',
       pricingRevisionId: 'pricing-revision-6',
       versions: priceVersion,
     });
@@ -810,13 +1449,13 @@ describe('confirmOrderPricingAtCurrentPublishedVersionInTx', () => {
         source: 'FACTORY_CONFIRM_CURRENT_PUBLISHED',
         orderFeeSnapshot: {
           quotedFee,
-          confirmedFee: '1208.00',
+          confirmedFee: '1008.00',
           settledFee: null,
         },
         metadata: expect.objectContaining({
           quotedPricingRevisionId: 'quoted-revision-v1',
           preservedQuotedFee: '1008.00',
-          confirmedFee: '1208.00',
+          confirmedFee: '1008.00',
         }),
       }),
     );
@@ -835,8 +1474,8 @@ describe('confirmOrderPricingAtCurrentPublishedVersionInTx', () => {
     expect(mocks.db.order.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          totalAmount: '1208.00',
-          confirmedFee: '1208.00',
+          totalAmount: '1008.00',
+          confirmedFee: '1008.00',
         }),
       }),
     );
@@ -845,6 +1484,430 @@ describe('confirmOrderPricingAtCurrentPublishedVersionInTx', () => {
         ([call]) => call.data?.quotedFee !== undefined,
       ),
     ).toBe(false);
+  });
+
+  it('工厂确认保留管理员已锁定的历史人工报价款式', async () => {
+    mocks.db.orderItem.findMany.mockResolvedValueOnce([
+      { subtotal: new Decimal('1000.00') },
+    ]);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => manualItemResult(args),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...request().order,
+      items: [
+        item({
+          pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
+          pricingSnapshot: {
+            ...adminConfirmedSnapshot(),
+            input: {
+              pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+            },
+          },
+        }),
+      ],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({
+      confirmedFee: '1008.00',
+      pricingRevisionId: 'pricing-revision-6',
+    });
+
+    expect(mocks.calculate).toHaveBeenCalledOnce();
+    expect(mocks.calculate).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        facts: expect.objectContaining({
+          items: [
+            expect.objectContaining({
+              pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+  });
+
+  it('工厂确认拒绝尚未管理员锁定的当前计价路线人工款式', async () => {
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => manualItemResult(args),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...request().order,
+      items: [
+        plainPrintItem({
+          pricingSnapshot: {
+            status: 'MANUAL_PRICING_REQUIRED',
+            complete: false,
+            actual: { requiresAdminConfirmation: true },
+          },
+        }),
+      ],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).rejects.toThrow(/仍需人工核价|需要人工核价/u);
+    expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+
+  it('工厂确认保留已人工确认的包装组金额', async () => {
+    const group = {
+      id: 'group-1',
+      sequence: 1,
+      name: '单款装',
+      mode: OrderPackagingMode.SINGLE_STYLE,
+      actualBagCount: 100,
+      unitPrice: new Decimal('0.2500'),
+      subtotal: new Decimal('25.00'),
+      suggestedSubtotal: null,
+      pricingSnapshot: adminConfirmedSnapshot({
+        unitPrice: '0.2500',
+        subtotal: '25.00',
+      }),
+      priceOverrideReason: '人工确认入袋费',
+      lines: [{ orderItemId: 'item-1', unitsPerBag: 10 }],
+    };
+    mocks.db.orderItem.findMany.mockResolvedValueOnce([
+      { subtotal: new Decimal('1000.00') },
+    ]);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValueOnce({
+      _sum: { amount: new Decimal('8.00') },
+    });
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        manualPackagingResult(args, group.id),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...request().order,
+      packagingAmount: new Decimal('25.00'),
+      packagingGroups: [group],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({ confirmedFee: '1033.00' });
+
+    expect(mocks.db.orderPackagingGroup.update).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ packagingAmount: '25.00' }),
+      }),
+    );
+  });
+
+  it('工厂确认保留已人工确认的快递费，仅刷新自动耗材费', async () => {
+    const order = request().order;
+    const trustedShipping = {
+      ...order.customerCharges[0]!,
+      amount: new Decimal('9.00'),
+      overrideReason: '物流商人工报价',
+      pricingSnapshot: adminConfirmedSnapshot({ amount: '9.00' }),
+    };
+    mocks.db.orderItem.findMany.mockResolvedValueOnce([
+      { subtotal: new Decimal('1000.00') },
+    ]);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValueOnce({
+      _sum: { amount: new Decimal('14.00') },
+    });
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pendingShippingResult(args, '1'),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...order,
+      customerCharges: [trustedShipping, order.customerCharges[1]!],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({ confirmedFee: '1014.00' });
+
+    expect(mocks.finalizeCharges).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        shipments: [expect.objectContaining({ shippingFee: '9.00' })],
+      }),
+      priceVersion.logistics.id,
+      expect.any(Date),
+    );
+    expect(mocks.db.orderCustomerCharge.update).toHaveBeenCalledTimes(1);
+    expect(mocks.db.orderCustomerCharge.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'packing-1' } }),
+    );
+  });
+
+  it('当前混合单仅为普通烫金保留人工版费，不与彩印原子套餐叠加', async () => {
+    const order = request().order;
+    const plateCharge = {
+      id: 'plate-confirmed',
+      shipmentId: null,
+      businessKey: PENDING_PLATE_BUSINESS_KEY,
+      priceBookId: null,
+      status: OrderCustomerChargeStatus.ESTIMATED,
+      amount: new Decimal('100.00'),
+      pricingSnapshot: adminConfirmedSnapshot({ amount: '100.00' }),
+      overrideReason: '普通烫金制版费人工确认',
+      category: { code: 'PLATE_MAKING_FEE' },
+    };
+    mocks.db.orderItem.findMany.mockResolvedValueOnce([
+      { subtotal: new Decimal('1200.00') },
+      { subtotal: new Decimal('500.00') },
+    ]);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValueOnce({
+      _sum: { amount: new Decimal('108.00') },
+    });
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: true, atomicBundledPlate: true }),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...order,
+      items: [
+        bundledPrintItem(),
+        item({
+          id: 'item-2',
+          sequence: 2,
+          fig: 2,
+          name: '普通烫金款',
+          quantity: 500,
+          subtotal: new Decimal('500.00'),
+          shipmentLines: [{
+            quantity: 500,
+            shipment: { id: 'shipment-1', sequence: 1 },
+          }],
+        }),
+      ],
+      customerCharges: [...order.customerCharges, plateCharge],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({ confirmedFee: '1808.00' });
+    expect(
+      mocks.db.orderCustomerCharge.update.mock.calls.some(
+        ([call]) => call.where?.id === plateCharge.id,
+      ),
+    ).toBe(false);
+  });
+
+  it('当前单仅命中彩印含版费原子套餐时拒绝叠加历史独立版费', async () => {
+    const order = request().order;
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: false, atomicBundledPlate: true }),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...order,
+      customerCharges: [
+        ...order.customerCharges,
+        {
+          id: 'plate-old',
+          shipmentId: null,
+          businessKey: PENDING_PLATE_BUSINESS_KEY,
+          priceBookId: null,
+          status: OrderCustomerChargeStatus.ESTIMATED,
+          amount: new Decimal('100.00'),
+          pricingSnapshot: adminConfirmedSnapshot({ amount: '100.00' }),
+          overrideReason: '历史独立版费',
+          category: { code: 'PLATE_MAKING_FEE' },
+        },
+      ],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).rejects.toThrow(/含版费彩印烫金原子套餐.*重复收费风险/u);
+    expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+  });
+
+  it('工厂确认允许可信逐款明细覆盖订单级待定版费', async () => {
+    const order = request().order;
+    const aggregate = {
+      id: 'plate-aggregate',
+      shipmentId: null,
+      businessKey: PENDING_PLATE_BUSINESS_KEY,
+      priceBookId: null,
+      status: OrderCustomerChargeStatus.WAIVED,
+      amount: new Decimal('0.00'),
+      pricingSnapshot: {
+        source: 'PLATE_DETAIL_BREAKDOWN_SUPERSEDES_AGGREGATE',
+      },
+      overrideReason: '逐款制版明细替代订单级金额',
+      category: { code: 'PLATE_MAKING_FEE' },
+    };
+    const detail = {
+      id: 'plate-detail-charge',
+      shipmentId: null,
+      businessKey: 'PLATE_DETAIL:plate-1',
+      priceBookId: null,
+      status: OrderCustomerChargeStatus.FINAL,
+      amount: new Decimal('100.00'),
+      pricingSnapshot: {
+        source: 'ORDER_ITEM_PLATE_DETAIL',
+        plateDetailId: 'plate-1',
+        orderItemId: 'item-1',
+        actual: { quantity: 2, unitPrice: '50.00', amount: '100.00' },
+      },
+      overrideReason: '管理员确认逐款制版成本',
+      category: { code: 'PLATE_MAKING_FEE' },
+    };
+    mocks.db.orderItem.findMany.mockResolvedValueOnce([
+      { subtotal: new Decimal('1000.00') },
+    ]);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValueOnce({
+      _sum: { amount: new Decimal('108.00') },
+    });
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...order,
+      customerCharges: [...order.customerCharges, aggregate, detail],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({ confirmedFee: '1108.00' });
+    expect(
+      mocks.db.orderCustomerCharge.update.mock.calls.some(
+        ([call]) => call.where?.id === detail.id,
+      ),
+    ).toBe(false);
+  });
+
+  it('彩印烫金整款人工价与历史独立版费重叠时失败关闭', async () => {
+    const order = request().order;
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => manualPrintFoilResult(args),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...order,
+      items: [
+        bundledPrintItem({
+          pricingSnapshot: adminConfirmedSnapshot({
+            unitPrice: '1.0000',
+            fixedFee: '0.00',
+            subtotal: '1000.00',
+          }),
+        }),
+      ],
+      customerCharges: [
+        ...order.customerCharges,
+        {
+          id: 'plate-old',
+          shipmentId: null,
+          businessKey: PENDING_PLATE_BUSINESS_KEY,
+          priceBookId: null,
+          status: OrderCustomerChargeStatus.ESTIMATED,
+          amount: new Decimal('100.00'),
+          pricingSnapshot: adminConfirmedSnapshot({ amount: '100.00' }),
+          overrideReason: '历史独立版费',
+          category: { code: 'PLATE_MAKING_FEE' },
+        },
+      ],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).rejects.toThrow(/含版费彩印烫金原子套餐.*重复收费风险/u);
+    expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+  });
+
+  it('工厂确认仍拒绝未经管理员锁定的历史人工报价款式', async () => {
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...request().order,
+      items: [
+        item({
+          pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
+          pricingSnapshot: { source: 'LEGACY_MANUAL_QUOTE' },
+        }),
+      ],
+    });
+
+    await expect(
+      confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+        orderId: 'order-1',
+        actorId: admin.id,
+        now: new Date('2026-09-02T02:00:00.000Z'),
+      }),
+    ).rejects.toThrow(/历史人工报价路线/u);
+
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('previewFactoryConfirmationPriceDiff', () => {
+  it('价差预览与确认使用同一套人工快照保留规则', async () => {
+    const order = request().order;
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => manualItemResult(args),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...order,
+      items: [
+        plainPrintItem({
+          pricingSnapshot: adminConfirmedSnapshot({
+            unitPrice: '1.0000',
+            fixedFee: '0.00',
+            subtotal: '1000.00',
+          }),
+        }),
+      ],
+      customerCharges: order.customerCharges.map((charge) => ({
+        ...charge,
+        pricingSnapshot: adminConfirmedSnapshot({
+          amount: charge.amount?.toFixed(2),
+        }),
+      })),
+      quotedPricingRevision: null,
+    });
+
+    await expect(
+      previewFactoryConfirmationPriceDiff(
+        'order-1',
+        admin,
+        new Date('2026-09-02T02:00:00.000Z'),
+      ),
+    ).resolves.toMatchObject({
+      quoted: { amount: '1008.00' },
+      current: { amount: '1008.00' },
+    });
+    expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.update).not.toHaveBeenCalled();
   });
 });
 
@@ -980,6 +2043,42 @@ describe('cancellation settlement reference', () => {
       }),
       select: { id: true },
     });
+    expect(mocks.db.backgroundJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        dedupeKey: 'notification:ORDER_COMPLETED:order-1:v2',
+        status: 'PENDING',
+      },
+      data: {
+        status: 'CANCELLED',
+        finishedAt: new Date('2026-09-02T02:00:00.000Z'),
+        lockedBy: null,
+        lockedAt: null,
+        heartbeatAt: null,
+        lastErrorCode: 'OrderCancelledBeforeCompletionNotification',
+      },
+    });
+    expect(mocks.db.notificationLog.updateMany).toHaveBeenCalledWith({
+      where: {
+        deliveryKey: 'notification:ORDER_COMPLETED:order-1:v2',
+        status: 'RETRYING',
+      },
+      data: {
+        status: 'FAILED',
+        errorMessage: 'notification superseded before webhook send',
+        sentAt: null,
+        deliveryAttemptId: null,
+        deliveryJobAttempt: null,
+        deliveryStateVersion: { increment: 1 },
+        lastAttemptAt: new Date('2026-09-02T02:00:00.000Z'),
+      },
+    });
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith({
+      where: { id: value.id },
+      data: expect.objectContaining({
+        status: OrderChangeRequestStatus.APPROVED,
+        workOrderVersionAfter: 2,
+      }),
+    });
     expect(mocks.db.orderLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         action: 'CHANGE_REQUEST_CANCEL_APPROVED',
@@ -1090,6 +2189,9 @@ describe('reviewOrderChangeRequest', () => {
       },
     });
     locate(value);
+    mocks.db.orderItemPlateDetail.findMany.mockResolvedValueOnce([
+      { id: 'already-consumed-plate', amount: new Decimal('100.00') },
+    ]);
 
     await reviewOrderChangeRequest(
       { requestId: value.id, decision: 'APPROVE', reviewRemark: '确认改量' },
@@ -1135,6 +2237,7 @@ describe('reviewOrderChangeRequest', () => {
         data: expect.objectContaining({
           workOrderVersion: 3,
           scheduledAt: new Date('2026-09-02T02:00:00.000Z'),
+          completedAt: null,
         }),
       }),
     );
@@ -1142,12 +2245,85 @@ describe('reviewOrderChangeRequest', () => {
       where: { id: 'order-1' },
       data: { confirmedFee: '1208.00', settledFee: null },
     });
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith({
+      where: { id: value.id },
+      data: expect.objectContaining({
+        status: OrderChangeRequestStatus.APPROVED,
+        workOrderVersionAfter: 3,
+      }),
+    });
     expect(
       mocks.db.order.update.mock.calls.some(
         ([call]) => call.data?.quotedFee !== undefined,
       ),
     ).toBe(false);
     expect(mocks.createPrint).not.toHaveBeenCalled();
+    expect(mocks.db.orderItemPlateDetail.findMany).not.toHaveBeenCalled();
+    expect(mocks.db.orderItemPlateDetail.update).not.toHaveBeenCalled();
+    expect(mocks.db.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+  });
+
+  it('生产版本的含版费原子套餐与旧独立版费重叠时拒绝批准', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        status: OrderStatus.CONFIRMED,
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-final',
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            amount: new Decimal('100.00'),
+            overrideReason: '已发生制版费',
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: false, atomicBundledPlate: true }),
+    );
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+        admin,
+      ),
+    ).rejects.toThrow(/含版费彩印烫金原子套餐.*重复收费风险/u);
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.update).not.toHaveBeenCalled();
+  });
+
+  it('生产版本变更普通烫金事实时拒绝批准，不沿用历史版费', async () => {
+    const value = request({
+      proposedChanges: {
+        items: [{
+          operation: 'UPDATE',
+          itemId: 'item-1',
+          frontFoilColors: ['亮金'],
+          backFoilColors: [],
+        }],
+      },
+      order: { ...request().order, status: OrderStatus.CONFIRMED },
+    });
+    locate(value);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+        admin,
+      ),
+    ).rejects.toThrow(
+      /生产版本新增、移除或变更.*不能自动替换或重新计价/u,
+    );
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.update).not.toHaveBeenCalled();
   });
 
   it('已下发 MODIFY 在同一事务升版、记录旧打印作废证据并创建 REPRINT', async () => {
@@ -1157,6 +2333,7 @@ describe('reviewOrderChangeRequest', () => {
         status: OrderStatus.RELEASED,
         workOrderVersion: 4,
         scheduledAt: new Date('2026-08-31T03:00:00.000Z'),
+        completedAt: new Date('2026-09-01T08:00:00.000Z'),
         settledFee: null,
         productionOperations: [
           { id: 'operation-v4', reports: [{ id: 'report-v4' }] },
@@ -1203,6 +2380,43 @@ describe('reviewOrderChangeRequest', () => {
         allowVersionRematerialization: true,
       },
     );
+    expect(mocks.db.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          workOrderVersion: 5,
+          completedAt: null,
+        }),
+      }),
+    );
+    expect(mocks.db.backgroundJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        dedupeKey: 'notification:ORDER_COMPLETED:order-1:v4',
+        status: 'PENDING',
+      },
+      data: {
+        status: 'CANCELLED',
+        finishedAt: new Date('2026-09-02T02:00:00.000Z'),
+        lockedBy: null,
+        lockedAt: null,
+        heartbeatAt: null,
+        lastErrorCode: 'SupersededWorkOrderVersion',
+      },
+    });
+    expect(mocks.db.notificationLog.updateMany).toHaveBeenCalledWith({
+      where: {
+        deliveryKey: 'notification:ORDER_COMPLETED:order-1:v4',
+        status: 'RETRYING',
+      },
+      data: {
+        status: 'FAILED',
+        errorMessage: 'notification superseded before webhook send',
+        sentAt: null,
+        deliveryAttemptId: null,
+        deliveryJobAttempt: null,
+        deliveryStateVersion: { increment: 1 },
+        lastAttemptAt: new Date('2026-09-02T02:00:00.000Z'),
+      },
+    });
     expect(mocks.db.orderLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1231,6 +2445,93 @@ describe('reviewOrderChangeRequest', () => {
       data: expect.objectContaining({ status: OrderChangeRequestStatus.STALE }),
     }));
     expect(mocks.calculate).not.toHaveBeenCalled();
+  });
+
+  it('纸质工单版本变化时标记 STALE，不更新工单或重打', async () => {
+    const value = request({
+      baseWorkOrderVersion: 2,
+      order: { ...request().order, workOrderVersion: 3 },
+    });
+    locate(value);
+
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+      admin,
+    );
+
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith({
+      where: { id: value.id },
+      data: expect.objectContaining({
+        status: OrderChangeRequestStatus.STALE,
+        reviewRemark: expect.stringMatching(/纸质工单版本 2 → 3/u),
+      }),
+    });
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.createPrint).not.toHaveBeenCalled();
+    expect(mocks.supersedePrint).not.toHaveBeenCalled();
+  });
+
+  it('工单自然完工但双版本未变化时标记 STALE，不更新工单或重打', async () => {
+    const value = request({
+      baseRevision: 2,
+      baseWorkOrderVersion: 1,
+      order: {
+        ...request().order,
+        status: OrderStatus.COMPLETED,
+        revision: 2,
+        workOrderVersion: 1,
+      },
+    });
+    locate(value);
+
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+      admin,
+    );
+
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith({
+      where: { id: value.id },
+      data: expect.objectContaining({
+        status: OrderChangeRequestStatus.STALE,
+        reviewedById: admin.id,
+        reviewRemark: expect.stringMatching(/不再允许修改.*自动失效/u),
+      }),
+    });
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.createPrint).not.toHaveBeenCalled();
+    expect(mocks.supersedePrint).not.toHaveBeenCalled();
+  });
+
+  it('历史 no-op 申请安全标记 STALE，不升版或重打', async () => {
+    const value = request({
+      proposedChanges: {
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', quantity: 1_000 },
+        ],
+      },
+    });
+    locate(value);
+
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+      admin,
+    );
+
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith({
+      where: { id: value.id },
+      data: expect.objectContaining({
+        status: OrderChangeRequestStatus.STALE,
+        reviewRemark: expect.stringMatching(/没有可应用的实际变化/u),
+      }),
+    });
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
+    expect(mocks.createPrint).not.toHaveBeenCalled();
+    expect(mocks.supersedePrint).not.toHaveBeenCalled();
   });
 
   it('新工序/报工在锁内阻断事实变更', async () => {
@@ -1630,15 +2931,18 @@ describe('reviewOrderChangeRequest', () => {
       charges: [], totalAmount: '99.00', requiresAdminConfirmation: false,
     });
     await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null }, admin))
-      .rejects.toThrow(/金额与纯引擎输出不一致/);
+      .rejects.toThrow(/物流分项与纯引擎输出不一致/);
     expect(mocks.appendRevision).not.toHaveBeenCalled();
   });
 
-  it('内部改单使用同一引擎但关闭对客收费层', async () => {
+  it.each([
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.FACTORY_DIRECT,
+  ])('%s 改单关闭对客物流层，但同步制版 pending 与价格修订', async (settlementType) => {
     const value = request({ order: {
       ...request().order,
-      settlementType: OrderSettlementType.INTERNAL_SALES,
-      billingMode: OrderBillingMode.NO_CHARGE,
+      settlementType,
+      billingMode: OrderBillingMode.CHARGE,
       status: OrderStatus.DRAFT,
       totalAmount: new Decimal(1000), customerCharges: [],
     } });
@@ -1649,7 +2953,209 @@ describe('reviewOrderChangeRequest', () => {
       includeOrderCharges: false,
     }));
     expect(mocks.finalizeCharges).not.toHaveBeenCalled();
-    expect(mocks.appendRevision).not.toHaveBeenCalled();
+    expect(mocks.db.customerChargeCategory.findUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.db.orderCustomerCharge.upsert).toHaveBeenCalledTimes(1);
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        status: 'PENDING_ADMIN_CONFIRMATION',
+        source: 'CHANGE_REQUEST_APPLIED_PENDING',
+      }),
+    );
+    expect(mocks.appendRevision.mock.calls[0]?.[1]).not.toHaveProperty(
+      'orderFeeSnapshot',
+    );
+    expect(mocks.db.orderPriceVersionLock.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('外部销售纯彩印无烫金改单不查制版类目，并自动确认完整报价', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+        confirmedFee: null,
+        settledFee: null,
+        items: [plainPrintItem()],
+      },
+    });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: false }),
+    );
+
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+      admin,
+    );
+
+    expect(mocks.db.orderItemPlateDetail.findMany).toHaveBeenCalledTimes(1);
+    expect(mocks.db.orderCustomerCharge.findUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.db.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        status: 'AUTO_CONFIRMED',
+        source: 'CHANGE_REQUEST_APPLIED_AUTO_CONFIRMED',
+        orderFeeSnapshot: {
+          quotedFee: '1208.00',
+          confirmedFee: null,
+          settledFee: null,
+        },
+        metadata: expect.objectContaining({
+          quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+          pureQuote: expect.objectContaining({
+            status: 'QUOTED',
+            pendingLineCodes: [],
+          }),
+        }),
+      }),
+    );
+    expect(mocks.db.order.update).toHaveBeenLastCalledWith({
+      where: { id: 'order-1' },
+      data: expect.objectContaining({
+        quotedFee: '1208.00',
+        quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+        confirmedFee: null,
+      }),
+    });
+    expect(mocks.db.orderLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'CHANGE_REQUEST_APPROVED',
+          changedFields: expect.objectContaining({
+            pricingStatus: {
+              before: 'PENDING_ADMIN_CONFIRMATION',
+              after: 'AUTO_CONFIRMED',
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('非生产态彩印含版费原子套餐改单可直接批准为 AUTO，不查独立制版类目', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+        confirmedFee: null,
+        settledFee: null,
+        items: [bundledPrintItem()],
+      },
+    });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: false, atomicBundledPlate: true }),
+    );
+    mocks.db.orderItem.findMany.mockResolvedValueOnce([
+      { subtotal: new Decimal('1400.00') },
+    ]);
+
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+      admin,
+    );
+
+    expect(mocks.db.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        status: 'AUTO_CONFIRMED',
+        source: 'CHANGE_REQUEST_APPLIED_AUTO_CONFIRMED',
+        metadata: expect.objectContaining({
+          quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+          pureQuote: expect.objectContaining({
+            status: 'QUOTED',
+            pendingLineCodes: [],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('无烫金改单将历史 aggregate 审计豁免，不删除也不改写旧快照', async () => {
+    const previousSnapshot = {
+      source: 'ADMIN_CONFIRMED_PLATE',
+      actual: { amount: '100.00' },
+    };
+    const existingPlate = {
+      id: 'plate-existing',
+      status: OrderCustomerChargeStatus.FINAL,
+      amount: new Decimal('100.00'),
+      pricingSnapshot: previousSnapshot,
+    };
+    const value = request({
+      order: {
+        ...request().order,
+        totalAmount: new Decimal('1108.00'),
+        items: [plainPrintItem()],
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            ...existingPlate,
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            overrideReason: '历史人工确认',
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) =>
+        pureResult(args, { plateApplies: false }),
+    );
+    mocks.db.orderCustomerCharge.findUnique.mockResolvedValueOnce(existingPlate);
+
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+      admin,
+    );
+
+    expect(mocks.db.orderCustomerCharge.update).toHaveBeenCalledWith({
+      where: { id: 'plate-existing' },
+      data: expect.objectContaining({
+        status: OrderCustomerChargeStatus.WAIVED,
+        amount: '0.00',
+        finalizedById: admin.id,
+        finalizedAt: expect.any(Date),
+        pricingSnapshot: expect.objectContaining({
+          source: 'CHANGE_REQUEST_PLATE_NOT_APPLICABLE',
+          previousStatus: OrderCustomerChargeStatus.FINAL,
+          previousAmount: '100',
+          previousSnapshot,
+        }),
+      }),
+      select: { id: true },
+    });
+    expect(mocks.db.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+  });
+
+  it('历史生产中工单的价格事实修改失败关闭，不重写已发生制版费', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        status: OrderStatus.IN_PRODUCTION,
+      },
+    });
+    locate(value);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: value.id, decision: 'APPROVE', reviewRemark: null },
+        admin,
+      ),
+    ).rejects.toThrow(/历史“生产中”.*请新建工单/u);
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.db.orderItemPlateDetail.findMany).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
   });
 
   it('新增款式进入整单投影，不复制旧任务/人员分配', async () => {
@@ -1670,8 +3176,12 @@ describe('reviewOrderChangeRequest', () => {
     expect(mocks.db).not.toHaveProperty('productionTask');
   });
 
-  it('仅改名不调引擎、不追加价格版本、不替换快照', async () => {
+  it('历史生产中工单仅改名仍允许，不调引擎或改写制版费', async () => {
     const value = request({
+      order: {
+        ...request().order,
+        status: OrderStatus.IN_PRODUCTION,
+      },
       proposedChanges: { items: [{ operation: 'UPDATE', itemId: 'item-1', name: '新名' }] },
     });
     locate(value);
@@ -1679,6 +3189,9 @@ describe('reviewOrderChangeRequest', () => {
     await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null }, admin);
     expect(mocks.calculate).not.toHaveBeenCalled();
     expect(mocks.appendRevision).not.toHaveBeenCalled();
+    expect(mocks.db.orderItemPlateDetail.findMany).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.update).not.toHaveBeenCalled();
     expect(mocks.db.orderItem.update).toHaveBeenCalledWith({
       where: { id: 'item-1' },
       data: expect.not.objectContaining({ pricingSnapshot: expect.anything() }),

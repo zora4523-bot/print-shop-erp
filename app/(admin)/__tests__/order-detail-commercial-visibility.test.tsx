@@ -27,6 +27,7 @@ const {
   reworkCraftOptionsMock,
   productionOperationsMock,
   productionProgressStepsMock,
+  commercialDetailsPropsMock,
 } = vi.hoisted(() => ({
   getOrderDetailMock: vi.fn(),
   getSalesOrderDetailByIdMock: vi.fn(),
@@ -38,6 +39,7 @@ const {
   reworkCraftOptionsMock: vi.fn(),
   productionOperationsMock: vi.fn(),
   productionProgressStepsMock: vi.fn(),
+  commercialDetailsPropsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/session', () => ({
@@ -113,7 +115,10 @@ vi.mock('@/components/business/order/OrderPricingReviewForm', () => ({
   OrderPricingReviewForm: () => <div>factory-pricing-review</div>,
 }));
 vi.mock('@/components/business/order/OrderCommercialDetailsManager', () => ({
-  OrderCommercialDetailsManager: () => null,
+  OrderCommercialDetailsManager: (props: unknown) => {
+    commercialDetailsPropsMock(props);
+    return <div>commercial-details-manager</div>;
+  },
 }));
 vi.mock('@/components/business/bill/OrderCostEntryForm', () => ({
   OrderCostEntryForm: () => null,
@@ -159,6 +164,7 @@ beforeEach(() => {
   reworkCraftOptionsMock.mockReset().mockResolvedValue([]);
   productionOperationsMock.mockReset().mockResolvedValue([]);
   productionProgressStepsMock.mockReset().mockResolvedValue([]);
+  commercialDetailsPropsMock.mockReset();
 });
 
 describe('order detail commercial visibility', () => {
@@ -172,7 +178,7 @@ describe('order detail commercial visibility', () => {
     });
     getOrderDetailMock.mockResolvedValue({
       ...orderFixture(),
-      status: OrderStatus.IN_PRODUCTION,
+      status: OrderStatus.PENDING_FACTORY,
       settlementType,
       pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
       priceRevision: 2,
@@ -187,13 +193,110 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('factory-pricing-review');
   });
 
+  it('兼容态 SUBMITTED 仍显示工厂核价表单', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      status: OrderStatus.SUBMITTED,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      priceRevision: 2,
+      pricingRevisions: [],
+    });
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).toContain('factory-pricing-review');
+    expect(html).toContain('commercial-details-manager');
+    expect(commercialDetailsPropsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ allowPlateDetailMaintenance: false }),
+    );
+  });
+
+  it.each([
+    OrderStatus.DRAFT,
+    OrderStatus.REJECTED,
+    OrderStatus.CONFIRMED,
+    OrderStatus.ON_HOLD,
+    OrderStatus.RELEASED,
+    OrderStatus.FOILING,
+    OrderStatus.PACKING,
+    OrderStatus.SCHEDULING,
+    OrderStatus.IN_PRODUCTION,
+    OrderStatus.COMPLETED,
+    OrderStatus.SHIPPED,
+    OrderStatus.SETTLED,
+    OrderStatus.FINISHED,
+    OrderStatus.CANCELLED,
+  ])('工单状态 %s 不显示工厂核价表单', async (status) => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      status,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      priceRevision: 2,
+      pricingRevisions: [],
+    });
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).toContain('工单价格状态');
+    expect(html).not.toContain('factory-pricing-review');
+    if (
+      status === OrderStatus.SETTLED ||
+      status === OrderStatus.FINISHED ||
+      status === OrderStatus.CANCELLED
+    ) {
+      expect(html).not.toContain('commercial-details-manager');
+    } else {
+      expect(html).toContain('commercial-details-manager');
+    }
+  });
+
+  it.each(['AUTO_CONFIRMED', 'ADMIN_CONFIRMED', 'LEGACY_CONFIRMED'])(
+    '已确认状态 %s 不再渲染可提交核价表单',
+    async (pricingStatus) => {
+      requireSessionMock.mockResolvedValue({
+        user: { id: 'admin-1', role: Role.ADMIN },
+      });
+      getOrderDetailMock.mockResolvedValue({
+        ...orderFixture(),
+        status: OrderStatus.IN_PRODUCTION,
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        pricingStatus,
+        priceRevision: 2,
+        pricingRevisions: [],
+      });
+
+      const html = renderToStaticMarkup(
+        await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+      );
+
+      expect(html).toContain('工单价格状态');
+      expect(html).not.toContain('factory-pricing-review');
+      expect(html).toContain('commercial-details-manager');
+      expect(commercialDetailsPropsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ allowPlateDetailMaintenance: true }),
+      );
+    },
+  );
+
   it('免费工单不显示工厂核价入口', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },
     });
     getOrderDetailMock.mockResolvedValue({
       ...orderFixture(),
-      status: OrderStatus.IN_PRODUCTION,
+      status: OrderStatus.PENDING_FACTORY,
       settlementType: OrderSettlementType.NO_CHARGE,
       pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
       priceRevision: 2,
@@ -329,6 +432,9 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('¥ 0.2000 / 袋');
     expect(html).toContain('入袋小计');
     expect(html).toContain('¥ 25.00');
+    expect(html).toContain('基于业务第 1 版');
+    expect(html).toContain('基于生产版本 历史未记录');
+    expect(html).toContain('批准后生产版本 v2');
     expect(html).toContain('系统建议小计');
     expect(html).toContain('入袋费改价说明');
     expect(html).toContain('包装协议改价机密');
@@ -531,6 +637,7 @@ function salesDetailFixture() {
     isUrgent: false,
     isSfCollect: false,
     revision: 2,
+    workOrderVersion: 3,
     pricingStatus: 'AUTO_CONFIRMED',
     totalAmount: '98765.43',
     promisedDate: '2026-08-30',
@@ -638,6 +745,7 @@ function orderFixture() {
     packagingAmount: '25.00',
     totalAmount: '98765.43',
     revision: 1,
+    workOrderVersion: 2,
     promisedDate: null,
     createdAt,
     submitter: {
@@ -743,6 +851,8 @@ function orderFixture() {
         id: 'change-1',
         status: OrderChangeRequestStatus.APPROVED,
         baseRevision: 1,
+        baseWorkOrderVersion: null,
+        workOrderVersionAfter: 2,
         reason: '客户调整数量',
         proposedChanges: { items: [] },
         reviewRemark: '沿用原价 87654.32',

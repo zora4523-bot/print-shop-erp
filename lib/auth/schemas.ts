@@ -32,6 +32,11 @@ import {
   resolveOrderItemFoilSides,
 } from '../order/pricing-route';
 import { calculatePackagingBagCount } from '../order/packaging-bag-count';
+import {
+  WECOM_MARKDOWN_MAX_BYTES,
+  wecomMarkdownByteLength,
+} from '../notification/limits';
+import { isValidWecomGroupBotWebhookUrl } from '../notification/webhook-url';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -2344,6 +2349,8 @@ const orderChangeReason = z
 
 const modifyOrderChangeRequestSchema = z.object({
   orderId: orderChangeId,
+  expectedRevision: shipOrderVersionField('工单修订号', 1),
+  expectedWorkOrderVersion: shipOrderVersionField('纸质工单版本', 1),
   type: z.literal('MODIFY'),
   modifyKind: z.enum(['QTY', 'DUE_DATE', 'ADDRESS', 'CRAFT_PAPER', 'OTHER']),
   reason: orderChangeReason,
@@ -2352,6 +2359,8 @@ const modifyOrderChangeRequestSchema = z.object({
 
 const cancelOrderChangeRequestSchema = z.object({
   orderId: orderChangeId,
+  expectedRevision: shipOrderVersionField('工单修订号', 1),
+  expectedWorkOrderVersion: shipOrderVersionField('纸质工单版本', 1),
   type: z.literal('CANCEL'),
   reason: orderChangeReason,
   items: z.array(z.never()).max(0).default([]),
@@ -3479,17 +3488,15 @@ const channelNameField = z
   .max(64, '群名过长（最多 64 个字符）');
 
 // 企业微信 webhook URL 的官方格式：
-//   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<uuid>
-// 严格 origin 检查：避免管理员把任意 URL 粘进来踩 SSRF / 误投递。
-// HTTPS 强制——HTTP 在 prod 会被 reject 但本地 mock URL 也走 https://...
-// 所以不放宽。query 参数允许任意（key、可能的扩展字段）。
+//   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<非空>
+// 严格限制协议、主机、路径和唯一 query，避免 SSRF、凭据泄漏与误投递。
 const channelWebhookUrlField = z
   .string()
   .trim()
   .min(1, '请填写企业微信 Webhook URL')
   .max(512, 'Webhook URL 过长')
   .refine(
-    (v) => /^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?/.test(v),
+    isValidWecomGroupBotWebhookUrl,
     'Webhook URL 必须形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
   );
 
@@ -3530,8 +3537,27 @@ export const updateNotificationRuleSchema = z.object({
   messageTemplate: z
     .string()
     .trim()
-    .min(1, '请填写消息模板')
-    .max(4000, '模板过长（企业微信单条 markdown 上限 4096 字节，留余量）'),
+    .superRefine((value, ctx) => {
+      if (value.length === 0) {
+        ctx.addIssue({ code: 'custom', message: '请填写消息模板' });
+        return;
+      }
+      // One UTF-16 code unit always occupies at least one UTF-8 byte. This
+      // cheap guard bounds the TextEncoder allocation for hostile form input.
+      if (value.length > WECOM_MARKDOWN_MAX_BYTES) {
+        ctx.addIssue({
+          code: 'custom',
+          message: '模板过长（企业微信单条 markdown 上限 4096 字节）',
+        });
+        return;
+      }
+      if (wecomMarkdownByteLength(value) > WECOM_MARKDOWN_MAX_BYTES) {
+        ctx.addIssue({
+          code: 'custom',
+          message: '模板过长（企业微信单条 markdown 上限 4096 字节）',
+        });
+      }
+    }),
   // FormData 里多选 checkbox 走 getAll('channelIds'); 这里接 string[]。
   // 允许空数组——但 isActive=true && empty 在 server action 里业务校验
   // 拒绝（schema 不能跨字段拒，留给 action 层）。

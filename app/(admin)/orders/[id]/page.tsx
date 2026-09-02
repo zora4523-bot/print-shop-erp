@@ -66,7 +66,7 @@ import {
 } from '@/lib/order/rework';
 import { ReworkOrderForm } from '@/components/business/order/ReworkOrderForm';
 import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
-import { OrderChangeReviewForm } from '@/components/business/order/OrderChangeReviewForm';
+import { OrderCancellationRequestForm } from '@/components/business/order/OrderCancellationRequestForm';
 import { OrderPricingReviewForm } from '@/components/business/order/OrderPricingReviewForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
 import { OrderChangeFieldDiff } from '@/components/business/order/OrderChangeFieldDiff';
@@ -76,11 +76,16 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { formatUnitPrice } from '@/lib/format/unit-price';
 import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import {
+  isOrderPricingReviewAllowedStatus,
   ORDER_PRICING_STATUS,
   orderPricingStatusLabel,
 } from '@/lib/order/pricing-status';
 import { orderPricingSourceLabel } from '@/lib/order/pricing-source';
-import { ORDER_PRICING_ROUTE_LABELS } from '@/lib/order/pricing-route';
+import {
+  deriveLegacyOrderItemFoilFacts,
+  ORDER_PRICING_ROUTE_LABELS,
+} from '@/lib/order/pricing-route';
+import { isTrustedAdminPricingSnapshot } from '@/lib/order/admin-pricing-snapshot';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
@@ -220,11 +225,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
-  const canAdminReviewPricing =
+  const canAdminManageCommercialDetails =
     user.role === Role.ADMIN &&
     isChargeableOrder &&
+    order.status !== OrderStatus.SETTLED &&
     order.status !== OrderStatus.FINISHED &&
     order.status !== OrderStatus.CANCELLED;
+  const canShowPricingReviewForm =
+    user.role === Role.ADMIN &&
+    isChargeableOrder &&
+    isPricingPending &&
+    isOrderPricingReviewAllowedStatus(order.status);
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
     isExternalSalesOrder;
@@ -311,6 +322,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
     status: order.status,
     createdAt: order.createdAt,
     submittedAt: order.submittedAt ?? null,
+    completedAt: order.completedAt ?? null,
     promisedDate: order.promisedDate,
     submitterName: order.submitter.displayName,
     logs: order.logs.map((log) => ({
@@ -338,7 +350,19 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (order.status === OrderStatus.DRAFT ||
       order.status === OrderStatus.SUBMITTED ||
       order.status === OrderStatus.SCHEDULING ||
-      order.status === OrderStatus.IN_PRODUCTION) &&
+      order.status === OrderStatus.IN_PRODUCTION ||
+      order.status === OrderStatus.CONFIRMED ||
+      order.status === OrderStatus.RELEASED ||
+      order.status === OrderStatus.FOILING ||
+      order.status === OrderStatus.PACKING) &&
+    !pendingChangeRequest;
+  const canRequestCancellation =
+    user.role === Role.CUSTOMER_SERVICE &&
+    order.submitterId === user.id &&
+    (order.status === OrderStatus.CONFIRMED ||
+      order.status === OrderStatus.RELEASED ||
+      order.status === OrderStatus.FOILING ||
+      order.status === OrderStatus.PACKING) &&
     !pendingChangeRequest;
   const customerChargeByShipmentAndCategory = new Map(
     order.customerCharges.flatMap((charge) =>
@@ -584,18 +608,24 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </dd>
             </div>
           </dl>
-          {canAdminReviewPricing ? (
+          {canShowPricingReviewForm ? (
             <div className="border-t pt-4">
-              <OrderPricingReviewForm orderId={order.id} />
+              <OrderPricingReviewForm
+                key={`pricing-review-${priceRevision ?? 'unknown'}`}
+                orderId={order.id}
+              />
             </div>
           ) : null}
         </section>
       ) : null}
 
-      {canAdminReviewPricing && isExternalSalesOrder && priceRevision !== null ? (
+      {canAdminManageCommercialDetails &&
+      isExternalSalesOrder &&
+      priceRevision !== null ? (
         <OrderCommercialDetailsManager
           orderId={order.id}
           priceRevision={priceRevision}
+          allowPlateDetailMaintenance={!isPricingPending}
           manualCharges={manualCustomerCharges.map((charge) => ({
             id: charge.id,
             status: String(charge.status),
@@ -610,26 +640,33 @@ export default async function OrderDetailPage({ params }: PageProps) {
             finalizedBy: charge.finalizedBy,
             finalizedAt: charge.finalizedAt,
           }))}
-          items={order.items.map((item) => ({
-            id: item.id,
-            sequence: item.sequence,
-            name: item.name,
-            plateDetails:
-              'plateDetails' in item
-                ? item.plateDetails.map((detail) => ({
-                    id: detail.id,
-                    sequence: detail.sequence,
-                    name: detail.name,
-                    plateGroupId: detail.plateGroupId,
-                    specification: detail.specification,
-                    quantity: detail.quantity,
-                    unitPrice: String(detail.unitPrice),
-                    amount: String(detail.amount),
-                    remark: detail.remark,
-                    isActive: detail.isActive,
-                  }))
-                : [],
-          }))}
+          items={order.items.map((item) => {
+            const foil = deriveLegacyOrderItemFoilFacts(item);
+            return {
+              id: item.id,
+              sequence: item.sequence,
+              name: item.name,
+              independentPlateEligible:
+                item.pricingRoute !== OrderItemPricingRoute.COLOR_PRINT &&
+                (foil.frontFoilColors.length > 0 ||
+                  foil.backFoilColors.length > 0),
+              plateDetails:
+                'plateDetails' in item
+                  ? item.plateDetails.map((detail) => ({
+                      id: detail.id,
+                      sequence: detail.sequence,
+                      name: detail.name,
+                      plateGroupId: detail.plateGroupId,
+                      specification: detail.specification,
+                      quantity: detail.quantity,
+                      unitPrice: String(detail.unitPrice),
+                      amount: String(detail.amount),
+                      remark: detail.remark,
+                      isActive: detail.isActive,
+                    }))
+                  : [],
+            };
+          })}
         />
       ) : null}
 
@@ -775,11 +812,16 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   </div>
                   <Badge
                     variant={
-                      charge.status === 'FINAL' ? 'secondary' : 'outline'
+                      charge.status === 'FINAL' ||
+                      isTrustedAdminPricingSnapshot(charge.pricingSnapshot)
+                        ? 'secondary'
+                        : 'outline'
                     }
                   >
                     {charge.status === 'FINAL'
                       ? '已确认'
+                      : isTrustedAdminPricingSnapshot(charge.pricingSnapshot)
+                        ? '管理员已确认（待结算）'
                       : charge.status === 'WAIVED'
                         ? '已免收'
                         : charge.status === 'PENDING_AMOUNT'
@@ -1365,6 +1407,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </div>
           <OrderChangeRequestForm
             orderId={order.id}
+            expectedRevision={order.revision}
+            expectedWorkOrderVersion={order.workOrderVersion}
             items={order.items.map((item) => ({
               id: item.id,
               sequence: item.sequence,
@@ -1377,6 +1421,16 @@ export default async function OrderDetailPage({ params }: PageProps) {
               isDoubleSided: item.isDoubleSided,
             }))}
           />
+          {canRequestCancellation ? (
+            <div className="border-t pt-4">
+              <h3 className="mb-2 text-sm font-semibold">申请取消</h3>
+              <OrderCancellationRequestForm
+                orderId={order.id}
+                expectedRevision={order.revision}
+                expectedWorkOrderVersion={order.workOrderVersion}
+              />
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -1404,7 +1458,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
                       : '—'}
                   </span>
                   <span className="text-muted-foreground">
-                    基于第 {request.baseRevision} 版 ·{' '}
+                    基于业务第 {request.baseRevision} 版 · 基于生产版本{' '}
+                    {request.baseWorkOrderVersion == null
+                      ? '历史未记录'
+                      : `v${request.baseWorkOrderVersion}`}{' '}
+                    · 批准后生产版本{' '}
+                    {request.workOrderVersionAfter == null
+                      ? '未生成'
+                      : `v${request.workOrderVersionAfter}`}{' '}
+                    ·{' '}
                     {formatDateTimeShanghai(request.createdAt)}
                   </span>
                 </div>
@@ -1423,7 +1485,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 {user.role === Role.ADMIN &&
                 request.status === OrderChangeRequestStatus.PENDING ? (
                   <div className="mt-3 border-t pt-3">
-                    <OrderChangeReviewForm requestId={request.id} />
+                    <Link
+                      href={`/orders?queue=all&signal=pending-change#wo=${encodeURIComponent(order.orderNo)}`}
+                      prefetch={false}
+                      className={buttonVariants({ size: 'sm' })}
+                    >
+                      前往新版工单工作台审核
+                    </Link>
                   </div>
                 ) : null}
               </li>

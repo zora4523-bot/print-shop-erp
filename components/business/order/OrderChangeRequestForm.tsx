@@ -58,6 +58,8 @@ type OrderItemChangePayload =
 
 type Props = {
   orderId: string;
+  expectedRevision: number;
+  expectedWorkOrderVersion: number;
   items: ItemOption[];
 };
 
@@ -68,6 +70,34 @@ const MODIFY_KINDS = [
   ['OTHER', '其他'],
 ] as const;
 
+type ModifyKind = (typeof MODIFY_KINDS)[number][0];
+
+export function buildOrderChangeRequestPayload({
+  orderId,
+  expectedRevision,
+  expectedWorkOrderVersion,
+  modifyKind,
+  reason,
+  items,
+}: {
+  orderId: string;
+  expectedRevision: number;
+  expectedWorkOrderVersion: number;
+  modifyKind: ModifyKind;
+  reason: string;
+  items: OrderItemChangePayload[];
+}) {
+  return {
+    orderId,
+    expectedRevision,
+    expectedWorkOrderVersion,
+    type: 'MODIFY' as const,
+    modifyKind,
+    reason,
+    items,
+  };
+}
+
 function splitColors(value: string): string[] {
   return [
     ...new Set(
@@ -77,6 +107,19 @@ function splitColors(value: string): string[] {
         .filter(Boolean),
     ),
   ];
+}
+
+function hasSameColorSet(left: readonly string[], right: readonly string[]) {
+  const normalizedLeft = new Set(
+    left.map((color) => color.trim()).filter(Boolean),
+  );
+  const normalizedRight = new Set(
+    right.map((color) => color.trim()).filter(Boolean),
+  );
+  return (
+    normalizedLeft.size === normalizedRight.size &&
+    [...normalizedLeft].every((color) => normalizedRight.has(color))
+  );
 }
 
 export function createOrderChangeEditableItem(item: ItemOption): EditableItem {
@@ -93,6 +136,50 @@ export function createOrderChangeEditableItem(item: ItemOption): EditableItem {
     frontFoilColors: foilSides.frontFoilColors.join('、'),
     backFoilColors: foilSides.backFoilColors.join('、'),
   };
+}
+
+export function hasOrderItemSemanticChange(
+  item: ItemOption,
+  editableItem: EditableItem,
+): boolean {
+  const foilSides = resolveOrderItemFoilSides(item);
+  return (
+    editableItem.name.trim() !== item.name.trim() ||
+    editableItem.quantity !== item.quantity ||
+    !hasSameColorSet(
+      splitColors(editableItem.frontFoilColors),
+      foilSides.frontFoilColors,
+    ) ||
+    !hasSameColorSet(
+      splitColors(editableItem.backFoilColors),
+      foilSides.backFoilColors,
+    )
+  );
+}
+
+export function buildSelectedOrderItemChanges(
+  items: ItemOption[],
+  editable: Record<string, EditableItem>,
+): OrderItemChangePayload[] {
+  return items.flatMap((item) => {
+    const current = editable[item.id];
+    if (
+      !current?.selected ||
+      !hasOrderItemSemanticChange(item, current)
+    ) {
+      return [];
+    }
+    return [
+      {
+        operation: 'UPDATE' as const,
+        itemId: item.id,
+        name: current.name,
+        quantity: current.quantity,
+        frontFoilColors: splitColors(current.frontFoilColors),
+        backFoilColors: splitColors(current.backFoilColors),
+      },
+    ];
+  });
 }
 
 function StateMessage({
@@ -217,15 +304,19 @@ function ExistingOrderItemChanges({
   );
 }
 
-export function OrderChangeRequestForm({ orderId, items }: Props) {
+export function OrderChangeRequestForm({
+  orderId,
+  expectedRevision,
+  expectedWorkOrderVersion,
+  items,
+}: Props) {
   const [state, action] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
     unknown
   >(createOrderChangeRequestAction, null);
   const [pending, startTransition] = useTransition();
   const [reason, setReason] = useState('');
-  const [modifyKind, setModifyKind] =
-    useState<(typeof MODIFY_KINDS)[number][0]>('QTY');
+  const [modifyKind, setModifyKind] = useState<ModifyKind>('QTY');
   const [editable, setEditable] = useState<Record<string, EditableItem>>(() =>
     Object.fromEntries(
       items.map((item) => [
@@ -244,21 +335,26 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   const selectedCount = Object.values(editable).filter(
     (item) => item.selected,
   ).length;
+  const selectedChanges = useMemo(
+    () => buildSelectedOrderItemChanges(items, editable),
+    [editable, items],
+  );
+  const unchangedSelectedCount = selectedCount - selectedChanges.length;
+  const hasValidAddedItem =
+    addEnabled &&
+    Boolean(templateItemId) &&
+    newName.trim().length > 0 &&
+    newQuantity > 0;
   const canSubmit = useMemo(
     () =>
       reason.trim().length > 0 &&
-      (selectedCount > 0 ||
-        (addEnabled &&
-          Boolean(templateItemId) &&
-          newName.trim().length > 0 &&
-          newQuantity > 0)),
+      (selectedChanges.length > 0 || hasValidAddedItem) &&
+      (!addEnabled || hasValidAddedItem),
     [
       addEnabled,
-      newName,
-      newQuantity,
+      hasValidAddedItem,
       reason,
-      selectedCount,
-      templateItemId,
+      selectedChanges.length,
     ],
   );
 
@@ -272,20 +368,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending || !canSubmit) return;
-    const changes: OrderItemChangePayload[] = items.flatMap((item) => {
-      const current = editable[item.id];
-      if (!current.selected) return [];
-      return [
-        {
-          operation: 'UPDATE' as const,
-          itemId: item.id,
-          name: current.name,
-          quantity: current.quantity,
-          frontFoilColors: splitColors(current.frontFoilColors),
-          backFoilColors: splitColors(current.backFoilColors),
-        },
-      ];
-    });
+    const changes = buildSelectedOrderItemChanges(items, editable);
     if (addEnabled) {
       changes.push({
         operation: 'ADD',
@@ -297,13 +380,14 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
       });
     }
     startTransition(() =>
-      action({
+      action(buildOrderChangeRequestPayload({
         orderId,
-        type: 'MODIFY',
+        expectedRevision,
+        expectedWorkOrderVersion,
         modifyKind,
         reason,
         items: changes,
-      }),
+      })),
     );
   }
 
@@ -334,6 +418,24 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
         pending={pending}
         updateItem={updateItem}
       />
+      {unchangedSelectedCount > 0 ? (
+        <p
+          role={
+            selectedChanges.length === 0 && !hasValidAddedItem
+              ? 'alert'
+              : 'status'
+          }
+          className={
+            selectedChanges.length === 0 && !hasValidAddedItem
+              ? 'text-sm text-destructive'
+              : 'text-sm text-muted-foreground'
+          }
+        >
+          {selectedChanges.length === 0 && !hasValidAddedItem
+            ? '已勾选的款式内容未发生变化，请修改名称、数量或正反面烫金颜色。'
+            : `${unchangedSelectedCount} 款内容未发生变化，本次不会提交。`}
+        </p>
+      ) : null}
 
       <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
@@ -440,7 +542,9 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
       </label>
       <StateMessage state={state} />
       <Button type="submit" disabled={pending || !canSubmit} className="min-h-11">
-        {pending ? '提交中…' : `提交修改申请${selectedCount ? `（${selectedCount} 款）` : ''}`}
+        {pending
+          ? '提交中…'
+          : `提交修改申请${selectedChanges.length ? `（${selectedChanges.length} 款）` : ''}`}
       </Button>
     </form>
   );
