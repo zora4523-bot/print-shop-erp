@@ -194,62 +194,43 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
 - 导出文件只允许发起人本人且下载时仍为启用 ADMIN 时获取，响应使用 `private, no-store`，生成后 24 小时过期；请求、完成和下载均写审计记录。
 - 导出筛选参数只在 PENDING 生成期保留并用哈希校验完整性；READY / FAILED / EXPIRED 终态只保留 `scope`，不保留原值或可枚举的确定性哈希。
 
-### 3.2 排产与外协（管理员）
+### 3.2 生产下发与外协（管理员）
 
 ```
-管理员查看"已提交"工单
-→ 待排产列表展示款式/数量、具体工艺、纯外协/外协+回厂、交期、提交人与阻断原因
-→ 对每个款式的每个工艺：
-    ├─ 纯外协：加入外协清单，不派内部师傅
-    ├─ 纯内部：创建生产任务，优先推荐已登记该工艺能力的师傅
-    └─ 外协+回厂加工：先加入外协清单，同时按 Craft.inHouseMachineTypes
-       从开机仔/风车机中选择回厂烫金师傅并创建内部任务
-→ 可勾选多个工艺，一次应用同一位师傅；所有启用师傅可搜索：
-    ├─ 岗位与设备能力匹配、且登记了该工艺能力：优先推荐
-    ├─ 岗位与设备能力匹配、但未登记该工艺能力：允许管理员分配，但必须填写原因
-    └─ 停用账号、岗位不匹配、缺必要设备、纯外协工艺：硬阻断
-→ 也可先选师傅，再跨工单勾选最多 30 张，把该师傅兼容的剩余工艺批量分配：
-    ├─ 混合岗位/机型工单允许分步派给不同师傅，并展示“已排/待排”进度
-    ├─ 分步产生的 PENDING 任务属于排产草稿，工单仍保持 SUBMITTED
-    ├─ 草稿任务不向师傅端展示，也不能开始生产
-    ├─ 纯外协、外协单未创建、停用/缺失工艺仍显示明确阻断原因
-    ├─ 选择器显示师傅当前在制任务数，并区分推荐项与“需说明”项
-    └─ 每张工单独立事务执行；最后一个内部工艺分配完成后才原子切换 SCHEDULING
-→ 若有外协工艺 → 创建外协单 → 发印刷厂 → 等回货
-→ 外协回货后 → 工单可排产
-→ 确认所有任务派师傅完毕 → 工单状态：SUBMITTED → SCHEDULING，草稿任务对师傅开放
-→ 企业微信机器人推送对应师傅群
+管理员查看 PENDING_FACTORY 工单
+→ 完成价格、变更申请等前置校验后确认：PENDING_FACTORY → CONFIRMED
+→ 管理员下发生产：
+    ├─ 按当前 workOrderVersion 物化 ProductionOperation 与 ProductionProgressStep
+    ├─ 创建首次打印任务
+    ├─ 工单状态：CONFIRMED → RELEASED
+    └─ durable 模式在同一事务写入 ORDER_SCHEDULED 通知任务；inline 模式在提交后派发
+→ ORDER_SCHEDULED 的 taskCount = 计件工序数 + 非计件进度步骤数
+→ 有外协工艺时另行创建、发出并收货外协单，完成闸口还会校验覆盖
+→ 当前 runtime 不做师傅派工；ORDER_SCHEDULED 只能发往事件规则绑定的共享群，尚无对应师傅个人/专属群路由
 ```
 
 ### 3.3 师傅报工
 
 ```
-师傅手机H5 → 扫工单/任务二维码
-→ 任务按“急单优先、同组按工单创建时间升序”排列
-→ 详情展示效果图和接单人，避免同名工单认错
-→ 可单项或多选“一键开始生产”
-    └─ status: PENDING → IN_PROGRESS，记录开始时间
-→ 生产完成 → 单项“完工”或多选“一键完工”
-    ├─ 填：合格数、不良数、返工数
-    ├─ 一键完工：合格数=计划数，不良/返工=0；异常数量必须单项报工
-    ├─ 系统自动：
-    │    ├─ 抓取师傅当前机器类型的薪资规则
-    │    ├─ 计算本任务计件金额
-    │    ├─ 将规则快照写入任务记录
-    │    └─ 更新当日日薪记录（所在日期的DailyWorkerSalary）
-    └─ status: IN_PROGRESS → COMPLETED
-→ 当工单所有任务完工 → 工单状态：SCHEDULING/IN_PRODUCTION → COMPLETED
+师傅手机 H5 → 扫当前版本工单/工序二维码
+→ 认领并对 ProductionOperation 或 ProductionProgressStep 报工
+→ 计件工序填合格数、不良数、返工数，工资使用持久化规则快照
+→ 计件 FOILING / PACKING 工序的首次有效阶段报工使 canonical 状态从 RELEASED 按阶段推进
+→ 当前 workOrderVersion 的所有有效计件工序、非计件步骤及必需外协通过完成闸口
+    ├─ 写入 completedAt 和生产完成审计记录
+    ├─ 按 workOrderVersion 幂等产生 ORDER_COMPLETED
+    └─ canonical 工单原子收口到 PACKING，直到管理员显式发货
 ```
 
 ### 3.4 发货
 
 ```
-工单COMPLETED → 管理员打包 → 按收货地址分别填写快递单号
+工单通过生产完成闸口（completedAt 已写入）→ 管理员打包 → 按收货地址分别填写快递单号
   ├─ 单地址：记录一条发货记录
   ├─ 多地址：每个地址独立记录款式数量、运单号与发货状态
   └─ 顺丰到付：全部由内部自行预约，物流费用不计入工单金额
-→ 所有地址在同一事务中确认发货，状态：COMPLETED → SHIPPED
-→ 企业微信推送给提交人（可选）
+→ 所有地址在同一事务中确认发货，canonical 状态进入 SHIPPED
+→ 产生 ORDER_SHIPPED，发往事件规则绑定的共享群
 ```
 
 ### 3.4.1 售后重做
@@ -423,7 +404,7 @@ completedAt
 
 ### 4.3 状态机
 
-**工单**：DRAFT → SUBMITTED → SCHEDULING → IN_PRODUCTION → COMPLETED → SHIPPED → FINISHED
+**工单（canonical）**：DRAFT → PENDING_FACTORY → CONFIRMED → RELEASED → FOILING → PACKING → SHIPPED → SETTLED。`SUBMITTED / SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED` 仅作扩展迁移兼容状态保留。
 
 **生产任务**：PENDING → IN_PROGRESS → COMPLETED
 
@@ -701,24 +682,36 @@ def calc_hourly_payroll(worker, month):
 
 ### 8.1 事件-渠道映射
 
-| eventType | 触发时机 | 默认渠道 |
+| eventType | 触发时机 | 收件配置（当前实现） |
 |---|---|---|
-| ORDER_SUBMITTED | 新工单提交 | 排产群 |
-| URGENT_ORDER | 急单提交 | 排产群+管理员群 |
-| ORDER_SCHEDULED | 工单排产完成 | 对应师傅群 |
-| ORDER_COMPLETED | 工单所有任务完工 | 发货群 |
-| ORDER_SHIPPED | 工单发货 | 管理员群 |
-| OUTSOURCE_OVERDUE | 外协超预计回货日 | 管理群 |
-| STOCK_ALERT | 物料低于安全库存（P1） | 管理群 |
-| CS_PERIOD_ENDING | 客服周期前7天预警 | 管理员群+对应客服 |
-| CS_PERIOD_SETTLED | 客服周期结算 | 管理员群+对应客服 |
-| DAILY_WORKER_SALARY | 师傅日薪结算 | 车间群 |
+| ORDER_SUBMITTED | 新工单提交待工厂确认 | 系统设置：工厂确认人共享群 |
+| ORDER_CHANGE_REQUESTED | 变更/取消申请提交 | 系统设置：工厂确认人共享群 |
+| PRODUCTION_PROGRESS_ANOMALY | 报工进度出现异常 | 系统设置：老板共享群 |
+| PRODUCTION_STAGNANT | 下发超配置天数仍无有效扫码认领 | 系统设置：老板共享群 |
+| PENDING_FACTORY_BACKLOG | 待工厂确认工单达到阈值 | 系统设置：老板共享群 |
+| URGENT_ORDER | 急单提交 | 事件规则绑定群（可手工绑定排产/管理员群） |
+| ORDER_SCHEDULED | 管理员下发：`CONFIRMED → RELEASED` | 事件规则绑定共享群；尚无对应师傅路由 |
+| ORDER_COMPLETED | 当前 work-order generation 通过内部工作 + 必需外协完成闸口 | 事件规则绑定的发货共享群 |
+| ORDER_SHIPPED | 工单发货 | 事件规则绑定群 |
+| OUTSOURCE_OVERDUE | 外协超预计回货日 | 事件规则绑定群 |
+| ORDER_OVERDUE | 承诺交期已过仍未发货 | 事件规则绑定群 |
+| STOCK_ALERT | 库存从安全线上方跌破安全线 | 事件规则绑定群 |
+| CS_PERIOD_ENDING | 客服周期前 7 天预警 | 事件规则最多 1 个授权共享群；尚无 per-CS 路由 |
+| CS_PERIOD_SETTLED | 客服周期结算 | 事件规则最多 1 个授权共享群；尚无 per-CS 路由 |
+| DAILY_WORKER_SALARY | 师傅日薪结算 | 事件规则绑定的车间共享群 |
+
+上表 15 个事件会预置 `NotificationRule`，但 seed 默认不启用、不猜测真实收件群。生产必须由管理员显式创建 channel，按业务启用规则并配置路由。对应客服/师傅的个人或专属群 Webhook 映射尚未实现，不得宣称已达成原始&ldquo;管理员群 + 对应客服&rdquo;或&ldquo;对应师傅群&rdquo;的路由目标。
 
 ### 8.2 消息模板
 
-所有消息使用Markdown格式，推送到企业微信机器人Webhook。消息模板存在`NotificationRule.messageTemplate`字段，支持占位符`{orderNo}`、`{submitterName}`、`{amount}`等。
+所有消息使用 Markdown 格式，推送到企业微信群机器人 Webhook。消息模板存在 `NotificationRule.messageTemplate` 字段，可用占位符取自每个事件的允许字段。
 
-失败重试3次，3次后写入`NotificationLog.status=FAILED`，管理员Dashboard显示告警。
+[企业微信「消息推送」官方文档](https://developer.work.weixin.qq.com/document/path/99110)规定：
+
+- `markdown.content` 最大 4096 UTF-8 字节；模板保存与真实/mock 发送前均按此上限校验。
+- 每个机器人 Webhook 最多 20 条/分钟。除单次 cron 批量扇出按 `index × 3500ms` 摊开外，真实 `sendWebhook` 还会通过 PostgreSQL 全局 permit 表，以「固定端点 + 解码后 key」的 SHA-256 摘要为键，按 3500ms 安全间隔对共享 Webhook 跨事件、跨进程原子串行；不持久化明文 webhook/key，mock 或测试注入 sender 不触发该表。生产真发前须先应用 `20260902121100_notification_webhook_global_throttle` migration。
+
+生产使用 durable `BackgroundJob`（当前 `maxAttempts=4`，即首次投递 + 3 次退避重试，不做进程内紧密连续重发）：可恢复的明确限流失败写 `RETRYING` 并由任务退避；永久性内容/配置错误写 `FAILED`；无法判定是否已送达时写 `UNKNOWN` 且禁止自动重发。重试耗尽的 job 进入 `DEAD`，通知后台的告警与待人工处理队列负责暴露这些状态。
 
 ---
 
@@ -745,7 +738,7 @@ def calc_hourly_payroll(worker, month):
 - 管理员汇总下载、24小时链接
 
 **推送**
-- 企业微信Webhook配置、10个预置事件、推送日志
+- 企业微信 Webhook 配置、15 个预置事件、推送日志
 
 **统计**
 - 管理员Dashboard、基础生产和销售报表

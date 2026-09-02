@@ -120,7 +120,7 @@ pnpm dev
 
 8. **推送与Dashboard**（1周）
    - 企业微信Webhook配置
-   - 10个预置事件
+   - 15个预置事件
    - 管理员Dashboard
 
 9. **测试与上线准备**（3天）
@@ -204,7 +204,7 @@ pnpm dev
 | `DATABASE_URL` | Pigsty PG 连接串 | 应用起不来 |
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
-| `CRON_SECRET` | Web/worker 服务端校验 cron endpoints 的 `Authorization: Bearer <secret>` | 8 个 `/api/cron/*` 全部 503 |
+| `CRON_SECRET` | Web/worker 服务端校验 cron endpoints 的 `Authorization: Bearer <secret>` | 10 个 `/api/cron/*` 全部 503 |
 | `BACKGROUND_JOBS_MODE` | 生产设 `durable`，通知/cron/PDF/CDR/工单导出进 PostgreSQL 任务账本 | `inline` 会失去持久重试和资源隔离 |
 | `ORDER_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的私有 XLSX 目录，单机建议 `/var/tmp/print-shop-erp/order-exports` | 留空回退到系统临时目录；多机或临时目录清理后待下载文件会丢失 |
 | `AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的月账单 XLSX 私有目录，必须与工单导出目录分离 | 留空回退到独立系统临时目录；多机部署时会无法稳定下载 |
@@ -212,6 +212,16 @@ pnpm dev
 | `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | 生产显式设 `"false"`，使 env 检查、smoke 与真实运行口径一致。留空在 `NODE_ENV=production` 下实际也是真发，但发布门禁会拒绝这种含糊配置；切勿设 `"true"` |
 | `CDR_BUNDLE_MOCK_MODE` | CDR 打包真跑开关 | 留空（按 NODE_ENV）。生产设 `"true"` 会让 CDR 汇总下载返回 mock 占位 URL |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 ADMIN | 详见文件顶注释 |
+
+> [企业微信「消息推送」官方文档](https://developer.work.weixin.qq.com/document/path/99110)
+> 规定群机器人 `markdown.content` 最大为 **4096 UTF-8 字节**，每个机器人
+> Webhook 最多 **20 条/分钟**。当前保存模板和发送前均会按 UTF-8 字节守卫单条上限；
+> 真实 `sendWebhook` 已通过 PostgreSQL `NotificationWebhookSendSlot` 按共享
+> Webhook 跨事件、跨进程串行预留 3.5 秒 permit（约 17 条/分钟）。表键只保存
+> 「固定端点 + 解码后 key」的 SHA-256 摘要，不复制明文 webhook/key；mock 与注入
+> sender 不访问该表。生产真发前必须先执行 migration
+> `20260902121100_notification_webhook_global_throttle`。响应按[官方全局错误码文档](https://developer.work.weixin.qq.com/document/path/90313)
+> 的 `errcode` 判定；新通知任务最多执行 1 次初始投递 + 3 次退避重试。
 
 选填但生产建议：
 | `SENTRY_DSN` | 错误监控 | 留空 → instrumentation.ts no-op，错误只进 Next 默认日志 |
@@ -222,7 +232,7 @@ pnpm dev
 
 ### 2. Cron 调度：服务端环境 + root-only 发送文件
 
-P0 + P1 #2 期间建立的 cron 通道现有 8 个 endpoints，用 shared-secret + 外部 cron 调用。
+P0 + P1 #2 期间建立的 cron 通道现有 10 个 endpoints，用 shared-secret + 外部 cron 调用。
 
 > 调度时间的唯一事实源是 `deploy/crontab.example`。下方命令仅用于人工触发示例，
 > 不定义生产执行时间。
@@ -242,7 +252,7 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/hourly-payroll
 
-# 扫描已到期客服周期（每条结算推 CS_PERIOD_SETTLED 到管理员群+客服）
+# 扫描已到期客服周期（每条结算推 CS_PERIOD_SETTLED 到规则绑定的单个授权共享群）
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/cs-settle
 
@@ -254,7 +264,7 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/outsource-overdue
 
-# P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到管理员群
+# P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到规则绑定的单个授权共享群
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/cs-period-ending
 
@@ -265,6 +275,10 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 # 每日分批删除过期工单导出产物，终态只保留粗粒度 scope
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/order-export-cleanup
+
+# 待工厂确认积压提醒（按日期/工单去重）
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/pending-factory-backlog
 
 # 报工超前与下发后无有效扫码认领提醒（幂等去重）
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
@@ -360,12 +374,14 @@ fc-list :lang=zh | head
 - [ ] `CI=true NODE_ENV=production NOTIFICATION_MOCK_MODE=false BACKGROUND_JOBS_MODE=durable PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn pnpm deploy:smoke --skip-build --require-base-url`
 - [ ] 管理员登录 `/owner/accounts` 改默认密码
 - [ ] 销售 / 客服 / 师傅各创一个测试账号
-- [ ] 跑通 工单创建 → 排产 → 报工 → 完工 一条链
+- [ ] 跑通 工单创建 → 工厂确认 → 下发（`CONFIRMED → RELEASED`）→ 报工 → 生产完成 → 发货一条链
 - [ ] 触发一次 `/api/cron/daily-salary` 验证 shared-secret + 入库
 - [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
 - [ ] ADMIN 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
 - [ ] 用受控测试错误确认 Sentry 收到事件；生产未配置 `SENTRY_DSN` 时此项明确不通过，禁止临时破坏真实业务 action
-- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 启用 9 条 rule + 用&ldquo;测试&rdquo;按钮验证 webhook 通**（DECISIONS 2026-04-27 / P1 #2）。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
+- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 逐项核对 15 条预置 rule + 按业务启用并绑定收件群 + 用&ldquo;测试&rdquo;按钮验证 webhook 通**。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
+- [ ] 真实触发一次 `ORDER_SCHEDULED`（下发 `RELEASED`）与 `ORDER_COMPLETED`（当前 work-order generation 通过生产完成闸口），核对群消息和投递日志各只有一次。
+- [ ] `CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED` 当前最多只能绑定 1 个授权共享群；尚未实现&ldquo;管理员群 + 对应客服&rdquo;按人双路由，不得按已完成验收。
 - [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
 - [ ] `pm2 status` 显示 Web、LIGHT worker、HEAVY worker 三个进程都 online
 - [ ] `/api/health/ready` 返回 200，且两类 worker 心跳存在
