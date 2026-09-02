@@ -665,6 +665,7 @@ model OrderChangeRequest {
   orderId               String
   requesterId           String
   baseRevision          Int
+  baseWorkOrderVersion  Int?
   type                  OrderChangeRequestType   @default(MODIFY)
   modifyKind            OrderChangeModifyKind?
   status                OrderChangeRequestStatus @default(PENDING)
@@ -2718,6 +2719,17 @@ model OrderCostEntry {
 // 企业微信推送
 // ============================================================
 
+// Cross-process permit cursor for the real WeCom webhook transport. The key is
+// a SHA-256 digest of the fixed endpoint identity plus its decoded key, so
+// equivalent URL encodings share one bucket; the secret is never copied here.
+model NotificationWebhookSendSlot {
+  webhookDigest   String   @id @db.Char(64)
+  nextAvailableAt DateTime @db.Timestamptz(3)
+  updatedAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([updatedAt])
+}
+
 model NotificationChannel {
   id          String   @id @default(cuid())
   channelKey  String   @unique // scheduling_group / owner_group / etc
@@ -2736,7 +2748,7 @@ model NotificationRule {
   eventType       String   @unique // ORDER_SUBMITTED / URGENT_ORDER / etc
   channelIds      String[]
   messageTemplate String
-  isActive        Boolean  @default(true)
+  isActive        Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
