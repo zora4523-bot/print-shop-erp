@@ -16,7 +16,7 @@ import { NOTIFICATION_PAYLOAD_FIELDS } from '../payload-fields';
 
 type SeedTemplate = { eventType: string; placeholders: string[] };
 
-function extractSeedTemplates(): SeedTemplate[] {
+function notificationSeedSection(): string {
   const seedPath = join(
     process.cwd(),
     'prisma',
@@ -27,18 +27,22 @@ function extractSeedTemplates(): SeedTemplate[] {
   const start = src.indexOf('async function seedNotificationEvents');
   if (start < 0) throw new Error('seedNotificationEvents 函数找不到');
   const end = src.indexOf('\n}\n', start);
-  const body = src.slice(start, end);
+  if (end < 0) throw new Error('seedNotificationEvents 函数结尾找不到');
+  return src.slice(start, end);
+}
+
+function extractSeedTemplates(body: string): SeedTemplate[] {
 
   // 在函数体内匹配 `eventType: 'X'` + 紧跟的 `messageTemplate: '...'`
   // （单行；多行模板会用 backtick / 反斜杠续行——seed.ts 当前都是单
   // 行的 + \n 转义，正则够用）
   const ruleRe =
-    /eventType:\s*'([A-Z_]+)'\s*,\s*messageTemplate:\s*'((?:[^'\\]|\\.)*)'/g;
+    /eventType:\s*(?:'([A-Z_]+)'|NOTIFICATION_EVENTS\.([A-Z_]+))\s*,\s*messageTemplate:\s*'((?:[^'\\]|\\.)*)'/g;
   const out: SeedTemplate[] = [];
   let m: RegExpExecArray | null;
   while ((m = ruleRe.exec(body))) {
-    const eventType = m[1]!;
-    const tmpl = m[2]!;
+    const eventType = m[1] ?? m[2]!;
+    const tmpl = m[3]!;
     const phRe = /\{([a-zA-Z][a-zA-Z0-9_]*)\}/g;
     const placeholders: string[] = [];
     let pm: RegExpExecArray | null;
@@ -49,10 +53,23 @@ function extractSeedTemplates(): SeedTemplate[] {
 }
 
 describe('seed.ts notification templates ⊆ NOTIFICATION_PAYLOAD_FIELDS', () => {
-  const seeds = extractSeedTemplates();
+  const seedSection = notificationSeedSection();
+  const seeds = extractSeedTemplates(seedSection);
 
-  it('能从 seed.ts 抽出 11 条 rule', () => {
-    expect(seeds.length).toBe(11);
+  it('完整覆盖通知事件 registry 且无重复', () => {
+    expect(seeds.map((seed) => seed.eventType).sort()).toEqual(
+      [...Object.values(NOTIFICATION_EVENTS)].sort(),
+    );
+  });
+
+  it('只补齐缺失默认规则，不覆盖管理员配置', () => {
+    expect(seedSection).toContain('db.notificationRule.createMany');
+    expect(seedSection).toContain('skipDuplicates: true');
+    expect(seedSection).toContain('channelIds: []');
+    expect(seedSection).toContain('isActive: false');
+    expect(seedSection).not.toMatch(
+      /notificationRule\.(?:upsert|update|updateMany)\s*\(/,
+    );
   });
 
   it('每条 rule 的 eventType 都是 NOTIFICATION_EVENTS 已定义的', () => {

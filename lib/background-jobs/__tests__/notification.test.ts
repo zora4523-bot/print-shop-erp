@@ -168,6 +168,7 @@ describe('handleNotificationJob', () => {
       deliveryKey: 'notification:ORDER_SUBMITTED:o1',
       deliveryAttempt: 6,
       targets: [{ logId: 'log-c2', stateVersion: 4 }],
+      payload: PAYLOAD.payload,
     });
     expect(notifyMock).not.toHaveBeenCalled();
   });
@@ -374,7 +375,9 @@ describe('enqueueNotificationJob', () => {
     });
     const input = enqueueBackgroundJobMock.mock.calls[0]![0];
     expect(input.availableAt).toBeUndefined();
-    expect(input.maxAttempts).toBe(5);
+    // One initial delivery plus at most three retries (official errcode -1
+    // guidance).
+    expect(input.maxAttempts).toBe(4);
     expect(input.queue).toBe(BackgroundJobQueue.LIGHT);
     expect(databaseNowMock).not.toHaveBeenCalled();
   });

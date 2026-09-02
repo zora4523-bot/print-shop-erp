@@ -37,6 +37,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import { BackgroundJobStatus } from '../../../generated/prisma/enums';
+import { SUPERSEDED_BEFORE_SEND_ERROR } from '../events';
 import {
   ChannelInUseError,
   EmptyChannelIdsError,
@@ -662,6 +663,7 @@ describe('countRecentFailures', () => {
       BackgroundJobStatus.DEAD,
       24,
       '__TEST__',
+      SUPERSEDED_BEFORE_SEND_ERROR,
     ]);
   });
 
@@ -677,6 +679,7 @@ describe('countRecentFailures', () => {
       BackgroundJobStatus.DEAD,
       1,
       '__TEST__',
+      SUPERSEDED_BEFORE_SEND_ERROR,
     ]);
   });
 
@@ -687,7 +690,18 @@ describe('countRecentFailures', () => {
     const strings = call[0] as unknown as readonly string[];
     const values = call.slice(1);
     expect(Array.from(strings).join(' ')).toContain('"eventType" <>');
-    expect(values.at(-1)).toBe('__TEST__');
+    expect(values).toContain('__TEST__');
+  });
+
+  it('排除被新工单代次取代的未发送 FAILED 终态', async () => {
+    dbMock.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
+    await countRecentFailures(24);
+    const call = dbMock.$queryRaw.mock.calls[0]!;
+    const sql = Array.from(
+      call[0] as unknown as readonly string[],
+    ).join(' ');
+    expect(sql).toContain('"errorMessage" IS DISTINCT FROM');
+    expect(call.slice(1)).toContain(SUPERSEDED_BEFORE_SEND_ERROR);
   });
 
   it('数据库查询错误原样上抛，不回退到 Node 时钟', async () => {

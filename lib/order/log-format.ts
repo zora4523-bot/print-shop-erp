@@ -2,6 +2,8 @@
 // page so both the UI render and tests can share the same label /
 // value-formatting rules.
 
+import { formatDateTimeShanghai } from '../format/dates';
+
 const FIELD_LABELS: Record<string, string> = {
   // Top-level Order fields the edit form can touch
   customName: '工单名称',
@@ -13,6 +15,8 @@ const FIELD_LABELS: Record<string, string> = {
   packageRequirement: '包装要求',
   remark: '工单备注',
   promisedDate: '承诺交期',
+  completedAt: '生产完成时间',
+  workOrderVersion: '纸质工单版本',
   isUrgent: '急单',
   isSfCollect: '顺丰到付',
   // Status changes land in the same log table under action='STATUS_CHANGE'
@@ -102,6 +106,17 @@ export function formatLogValue(
     if (value instanceof Date) return value.toISOString().slice(0, 10);
     if (typeof value === 'string') return value.slice(0, 10);
   }
+  if (fieldName === 'completedAt') {
+    const completedAt =
+      value instanceof Date
+        ? value
+        : typeof value === 'string'
+          ? new Date(value)
+          : null;
+    return completedAt && !Number.isNaN(completedAt.getTime())
+      ? formatDateTimeShanghai(completedAt)
+      : UNKNOWN_VALUE_LABEL;
+  }
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   return UNKNOWN_VALUE_LABEL;
 }
@@ -157,6 +172,7 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_PLATE_DETAIL_CREATED: '新增制版明细',
   ORDER_PLATE_DETAIL_UPDATED: '修改制版明细',
   ORDER_PLATE_DETAIL_REMOVED: '移除制版明细',
+  PRODUCTION_COMPLETED: '生产完成',
 };
 
 export function actionLabel(action: string): string {

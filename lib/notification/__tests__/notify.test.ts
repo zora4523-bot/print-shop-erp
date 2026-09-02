@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { dbMock, ledgerMock, routingMock, DeliveryClaimConflictError } = vi.hoisted(() => {
+const {
+  dbMock,
+  ledgerMock,
+  routingMock,
+  waitForSlotMock,
+  DeliveryClaimConflictError,
+} = vi.hoisted(() => {
   class DeliveryClaimConflictError extends Error {
     constructor(message: string) {
       super(message);
@@ -8,6 +14,7 @@ const { dbMock, ledgerMock, routingMock, DeliveryClaimConflictError } = vi.hoist
     }
   }
   const mock = {
+    order: { findUnique: vi.fn() },
     notificationRule: { findUnique: vi.fn() },
     notificationChannel: { findMany: vi.fn() },
     notificationLog: { create: vi.fn(), findUnique: vi.fn() },
@@ -22,6 +29,7 @@ const { dbMock, ledgerMock, routingMock, DeliveryClaimConflictError } = vi.hoist
       markUnknown: vi.fn(),
     },
     routingMock: { resolve: vi.fn() },
+    waitForSlotMock: vi.fn(),
   };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
@@ -34,6 +42,9 @@ vi.mock('@/lib/notification/delivery-ledger', () => ({
 vi.mock('@/lib/notification/management-routing', () => ({
   resolveManagementNotificationRoute: routingMock.resolve,
 }));
+vi.mock('@/lib/notification/webhook-throttle', () => ({
+  waitForWebhookSendSlot: waitForSlotMock,
+}));
 
 import {
   notify,
@@ -42,8 +53,10 @@ import {
   replayDurableNotificationLogs,
 } from '../notify';
 import type { WebhookSender } from '../webhook';
+import type { NotificationPayloadFor } from '../events';
 
 beforeEach(() => {
+  dbMock.order.findUnique.mockReset();
   dbMock.notificationRule.findUnique.mockReset();
   dbMock.notificationChannel.findMany.mockReset();
   dbMock.notificationLog.create.mockReset().mockResolvedValue({});
@@ -55,6 +68,7 @@ beforeEach(() => {
   }));
   ledgerMock.finalize.mockReset().mockResolvedValue(undefined);
   ledgerMock.markUnknown.mockReset().mockResolvedValue(undefined);
+  waitForSlotMock.mockReset().mockResolvedValue(undefined);
   // Existing delivery tests exercise the legacy NotificationRule path. The
   // managed-role contract has focused cases below; production never returns
   // null for its five fixed events.
@@ -260,6 +274,405 @@ describe('notify', () => {
       (c) => c[0].data.channelId,
     );
     expect(channels).toEqual(['c1', 'c2']);
+  });
+
+  it('旧版 ORDER_COMPLETED 已被新纸质工单升版覆盖 → 跳过且不发 webhook', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_COMPLETED',
+      channelIds: ['c1'],
+      messageTemplate: '工单 {orderNo} 已完工',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+    ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      status: 'PACKING',
+      workOrderVersion: 3,
+      completedAt: new Date('2026-09-02T08:00:00.000Z'),
+    });
+
+    await expect(
+      notify(
+        'ORDER_COMPLETED',
+        {
+          orderId: 'o1',
+          orderNo: 'O-1',
+          workOrderVersion: 2,
+          customerRef: null,
+        },
+        { webhookSender: okSender, mockMode: false },
+      ),
+    ).resolves.toMatchObject({
+      attempted: 0,
+      delivered: 0,
+      skipped: 1,
+      failed: 0,
+    });
+    expect(okSender).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
+    expect(ledgerMock.claim).not.toHaveBeenCalled();
+  });
+
+  it('ORDER_COMPLETED 排队后订单已取消 → 即使版本和 completedAt 未变也不发送', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_COMPLETED',
+      channelIds: ['c1'],
+      messageTemplate: '工单 {orderNo} 已完工',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+    ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      status: 'CANCELLED',
+      workOrderVersion: 2,
+      completedAt: new Date('2026-09-02T08:00:00.000Z'),
+    });
+
+    const outcome = await notify(
+      'ORDER_COMPLETED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        workOrderVersion: 2,
+        customerRef: null,
+      },
+      { webhookSender: okSender, mockMode: false },
+    );
+
+    expect(outcome).toMatchObject({ attempted: 0, skipped: 1, failed: 0 });
+    expect(okSender).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
+  });
+
+  it('durable 真实发送先等 permit，再写 SENDING，并在 fetch 前重验 lease', async () => {
+    const sequence: string[] = [];
+    const current = {
+      status: 'PACKING',
+      workOrderVersion: 2,
+      completedAt: new Date('2026-09-02T08:00:00.000Z'),
+    };
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_COMPLETED',
+      channelIds: ['c1'],
+      messageTemplate: '工单 {orderNo} 生产已完成',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      {
+        id: 'c1',
+        webhookUrl:
+          'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=shared',
+        isActive: true,
+      },
+    ]);
+    dbMock.order.findUnique.mockImplementation(async () => {
+      sequence.push('freshness');
+      return current;
+    });
+    waitForSlotMock.mockImplementationOnce(async () => {
+      sequence.push('permit');
+    });
+    ledgerMock.claim.mockImplementationOnce(async () => {
+      sequence.push('claim');
+      return { claimed: true, attemptId: 'attempt:c1' };
+    });
+    const assertLease = vi.fn(async () => {
+      sequence.push('lease');
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        sequence.push('fetch');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ errcode: 0, errmsg: 'ok' }),
+        };
+      }),
+    );
+
+    try {
+      await expect(
+        notify(
+          'ORDER_COMPLETED',
+          {
+            orderId: 'o1',
+            orderNo: 'O-1',
+            workOrderVersion: 2,
+            customerRef: null,
+          },
+          {
+            mockMode: false,
+            now: new Date('2026-09-02T08:01:00.000Z'),
+            deliveryKey: 'notification:ORDER_COMPLETED:o1:v2',
+            deliveryAttempt: 1,
+            assertLease,
+          },
+        ),
+      ).resolves.toMatchObject({ delivered: 1, unknown: 0 });
+      expect(sequence).toEqual([
+        'lease',
+        'freshness',
+        'permit',
+        'freshness',
+        'lease',
+        'claim',
+        'lease',
+        'freshness',
+        'fetch',
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('ORDER_COMPLETED 等 permit 期间升版时，在 SENDING/fetch 前安全跳过', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_COMPLETED',
+      channelIds: ['c1'],
+      messageTemplate: '工单 {orderNo} 生产已完成',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      {
+        id: 'c1',
+        webhookUrl:
+          'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=shared',
+        isActive: true,
+      },
+    ]);
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        status: 'PACKING',
+        workOrderVersion: 2,
+        completedAt: new Date('2026-09-02T08:00:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        status: 'PACKING',
+        workOrderVersion: 3,
+        completedAt: new Date('2026-09-02T08:00:00.000Z'),
+      });
+    vi.stubGlobal('fetch', vi.fn());
+
+    try {
+      await expect(
+        notify(
+          'ORDER_COMPLETED',
+          {
+            orderId: 'o1',
+            orderNo: 'O-1',
+            workOrderVersion: 2,
+            customerRef: null,
+          },
+          {
+            mockMode: false,
+            now: new Date('2026-09-02T08:01:00.000Z'),
+            deliveryKey: 'notification:ORDER_COMPLETED:o1:v2',
+            deliveryAttempt: 1,
+          },
+        ),
+      ).resolves.toMatchObject({
+        attempted: 0,
+        delivered: 0,
+        skipped: 1,
+        unknown: 0,
+      });
+      expect(waitForSlotMock).toHaveBeenCalledOnce();
+      expect(ledgerMock.claim).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('ORDER_COMPLETED claim 后再升版时终结账本，不遗留 SENDING/UNKNOWN 或自动重发', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_COMPLETED',
+      channelIds: ['c1'],
+      messageTemplate: '工单 {orderNo} 生产已完成',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      {
+        id: 'c1',
+        webhookUrl:
+          'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=shared',
+        isActive: true,
+      },
+    ]);
+    const current = {
+      status: 'PACKING',
+      workOrderVersion: 2,
+      completedAt: new Date('2026-09-02T08:00:00.000Z'),
+    };
+    dbMock.order.findUnique
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce({ ...current, workOrderVersion: 3 });
+    vi.stubGlobal('fetch', vi.fn());
+
+    try {
+      await expect(
+        notify(
+          'ORDER_COMPLETED',
+          {
+            orderId: 'o1',
+            orderNo: 'O-1',
+            workOrderVersion: 2,
+            customerRef: null,
+          },
+          {
+            mockMode: false,
+            now: new Date('2026-09-02T08:01:00.000Z'),
+            deliveryKey: 'notification:ORDER_COMPLETED:o1:v2',
+            deliveryAttempt: 1,
+          },
+        ),
+      ).resolves.toMatchObject({
+        attempted: 0,
+        delivered: 0,
+        skipped: 1,
+        failed: 0,
+        retryable: false,
+        unknown: 0,
+      });
+      expect(ledgerMock.claim).toHaveBeenCalledOnce();
+      expect(ledgerMock.finalize).toHaveBeenCalledExactlyOnceWith({
+        deliveryKey: 'notification:ORDER_COMPLETED:o1:v2',
+        channelId: 'c1',
+        attemptId: 'attempt:c1',
+        jobAttempt: 1,
+        status: 'FAILED',
+        errorMessage: 'notification superseded before webhook send',
+        retryCount: 0,
+        sent: false,
+      });
+      expect(ledgerMock.markUnknown).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('ORDER_COMPLETED durable mock 在 claim 后升版时不会误记 SUCCESS', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_COMPLETED',
+      channelIds: ['c1'],
+      messageTemplate: '工单 {orderNo} 生产已完成',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+    ]);
+    const current = {
+      status: 'PACKING',
+      workOrderVersion: 2,
+      completedAt: new Date('2026-09-02T08:00:00.000Z'),
+    };
+    dbMock.order.findUnique
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce({ ...current, workOrderVersion: 3 });
+
+    const outcome = await notify(
+      'ORDER_COMPLETED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        workOrderVersion: 2,
+        customerRef: null,
+      },
+      {
+        mockMode: true,
+        now: new Date('2026-09-02T08:01:00.000Z'),
+        deliveryKey: 'notification:ORDER_COMPLETED:o1:v2',
+        deliveryAttempt: 1,
+      },
+    );
+
+    expect(ledgerMock.claim).toHaveBeenCalledOnce();
+    expect(ledgerMock.finalize).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        errorMessage: 'notification superseded before webhook send',
+      }),
+    );
+    expect(outcome).toMatchObject({
+      attempted: 0,
+      delivered: 0,
+      skipped: 1,
+      failed: 0,
+    });
+  });
+
+  it.each(['PACKING', 'ON_HOLD'])(
+    'ORDER_COMPLETED 当前版本且状态为 %s → 发送；暂停不否定生产已完成事实',
+    async (status) => {
+      dbMock.notificationRule.findUnique.mockResolvedValue({
+        eventType: 'ORDER_COMPLETED',
+        channelIds: ['c1'],
+        messageTemplate: '工单 {orderNo} 生产已完成',
+        isActive: true,
+      });
+      dbMock.notificationChannel.findMany.mockResolvedValue([
+        { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+      ]);
+      dbMock.order.findUnique.mockResolvedValue({
+        status,
+        workOrderVersion: 2,
+        completedAt: new Date('2026-09-02T08:00:00.000Z'),
+      });
+
+      const outcome = await notify(
+        'ORDER_COMPLETED',
+        {
+          orderId: 'o1',
+          orderNo: 'O-1',
+          workOrderVersion: 2,
+          customerRef: null,
+        },
+        { webhookSender: okSender, mockMode: false },
+      );
+
+      expect(outcome).toMatchObject({
+        attempted: 1,
+        delivered: 1,
+        skipped: 0,
+      });
+      expect(okSender).toHaveBeenCalledTimes(1);
+      expect(dbMock.notificationLog.create).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('历史无 workOrderVersion 的 ORDER_COMPLETED payload 仅在 legacy COMPLETED 状态兼容发送', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_COMPLETED',
+      channelIds: ['c1'],
+      messageTemplate: '工单 {orderNo} 生产已完成',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+    ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      status: 'COMPLETED',
+      workOrderVersion: 1,
+      completedAt: new Date('2026-09-02T08:00:00.000Z'),
+    });
+    const legacyPayload = {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      customerRef: null,
+    } as unknown as NotificationPayloadFor<'ORDER_COMPLETED'>;
+
+    const outcome = await notify('ORDER_COMPLETED', legacyPayload, {
+      webhookSender: okSender,
+      mockMode: false,
+    });
+
+    expect(outcome).toMatchObject({ attempted: 1, delivered: 1, skipped: 0 });
+    expect(okSender).toHaveBeenCalledTimes(1);
   });
 
   it('inactive channel 写 FAILED log（不 send；Codex round 101 P2）', async () => {
@@ -1139,6 +1552,34 @@ describe('replayDurableNotificationLogs', () => {
     },
   };
 
+  it('人工确认未送达也不能重放已被新纸质工单版本覆盖的完工消息', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      status: 'PACKING',
+      workOrderVersion: 3,
+      completedAt: new Date('2026-09-02T08:00:00.000Z'),
+    });
+    const sender: WebhookSender = vi.fn();
+
+    const outcome = await replayDurableNotificationLogs('ORDER_COMPLETED', {
+      deliveryKey: 'notification:ORDER_COMPLETED:o1:v2',
+      deliveryAttempt: 6,
+      targets: [{ logId: 'log-c2', stateVersion: 4 }],
+      payload: {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        workOrderVersion: 2,
+        customerRef: null,
+      },
+      webhookSender: sender,
+      mockMode: false,
+    });
+
+    expect(outcome).toMatchObject({ attempted: 0, skipped: 1, failed: 0 });
+    expect(dbMock.notificationLog.findUnique).not.toHaveBeenCalled();
+    expect(ledgerMock.claim).not.toHaveBeenCalled();
+    expect(sender).not.toHaveBeenCalled();
+  });
+
   it('钉住原 channelId + 原渲染内容，不读当前 rule/channelIds/template', async () => {
     dbMock.notificationLog.findUnique.mockResolvedValue(retryingLog);
     const sender: WebhookSender = vi.fn(async () => ({ ok: true, retries: 0 }));
@@ -1237,6 +1678,54 @@ describe('replayDurableNotificationLogs', () => {
       }),
     );
     expect(outcome).toMatchObject({ retryable: true, failed: 1, delivered: 0 });
+  });
+
+  it('ORDER_COMPLETED 人工重放 claim 后升版且原群停用时落 superseded，不落 RETRYING', async () => {
+    const completionDeliveryKey = 'notification:ORDER_COMPLETED:o1:v2';
+    dbMock.notificationLog.findUnique.mockResolvedValue({
+      ...retryingLog,
+      deliveryKey: completionDeliveryKey,
+      eventType: 'ORDER_COMPLETED',
+      channel: { ...retryingLog.channel, isActive: false },
+    });
+    const current = {
+      status: 'PACKING',
+      workOrderVersion: 2,
+      completedAt: new Date('2026-09-02T08:00:00.000Z'),
+    };
+    dbMock.order.findUnique
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce({ ...current, workOrderVersion: 3 });
+    const sender: WebhookSender = vi.fn();
+
+    const outcome = await replayDurableNotificationLogs('ORDER_COMPLETED', {
+      deliveryKey: completionDeliveryKey,
+      deliveryAttempt: 6,
+      targets: [{ logId: 'log-c2', stateVersion: 4 }],
+      payload: {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        workOrderVersion: 2,
+        customerRef: null,
+      },
+      webhookSender: sender,
+      mockMode: false,
+    });
+
+    expect(ledgerMock.claim).toHaveBeenCalledOnce();
+    expect(sender).not.toHaveBeenCalled();
+    expect(ledgerMock.finalize).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        errorMessage: 'notification superseded before webhook send',
+      }),
+    );
+    expect(outcome).toMatchObject({
+      attempted: 0,
+      skipped: 1,
+      failed: 0,
+      retryable: false,
+    });
   });
 
   it('中间一个 job attempt 未轮到该目标时，后续新 generation 仍能安全续传', async () => {

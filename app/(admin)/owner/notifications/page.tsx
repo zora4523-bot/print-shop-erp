@@ -34,6 +34,7 @@ import {
   NOTIFICATION_STATUS_REGISTRY,
 } from '@/lib/ui/status-registry';
 import { managementNotificationRoleForEvent } from '@/lib/notification/events';
+import { maskWecomGroupBotWebhookUrl } from '@/lib/notification/webhook-url';
 
 export const metadata = { title: '推送配置 · 红包印刷 ERP' };
 
@@ -151,7 +152,7 @@ export default async function OwnerNotificationsPage({
                   <tr key={c.id}>
                     <td className="px-3 py-2">{c.channelName}</td>
                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                      {maskWebhookUrl(c.webhookUrl)}
+                      {maskWecomGroupBotWebhookUrl(c.webhookUrl)}
                     </td>
                     <td className="px-3 py-2 text-center">
                       {c.isActive ? (
@@ -195,7 +196,7 @@ export default async function OwnerNotificationsPage({
         )}
       </section>
 
-      {/* ─── 事件规则（11 条固定） ─── */}
+      {/* ─── 事件规则（跟随 NOTIFICATION_EVENTS，当前 15 条） ─── */}
       <section id="notification-rules" className="space-y-3">
         <h2 className="text-base font-semibold">事件规则</h2>
         {rules.length === 0 ? (
@@ -465,16 +466,6 @@ function BackgroundJobStatusBadge({
       {definition.label}
     </UiStatusBadge>
   );
-}
-
-function maskWebhookUrl(url: string): string {
-  // qyapi 形如 .../send?key=<uuid>
-  const m = url.match(/key=([a-zA-Z0-9-]+)/);
-  if (!m) return url;
-  const key = m[1]!;
-  const masked =
-    key.length > 8 ? `${key.slice(0, 4)}…${key.slice(-4)}` : '****';
-  return url.replace(/key=[a-zA-Z0-9-]+/, `key=${masked}`);
 }
 
 function firstLine(s: string): string {

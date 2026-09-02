@@ -239,6 +239,7 @@ export async function finalizeDurableDelivery(
        AND "channelId" = ${input.channelId}
        AND "status" = 'SENDING'::"NotificationStatus"
        AND "deliveryAttemptId" = ${input.attemptId}
+       AND "deliveryJobAttempt" = ${input.jobAttempt}
   `);
   if (updated !== 1) {
     throw new NotificationDeliveryLedgerError('delivery fencing token was lost');

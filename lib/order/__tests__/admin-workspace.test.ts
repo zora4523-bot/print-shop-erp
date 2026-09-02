@@ -179,6 +179,23 @@ describe('admin order workspace predicates', () => {
     });
   });
 
+  it('uses the same canonical + legacy awaiting-confirmation set for dashboard queues', () => {
+    const pendingStatuses = {
+      in: [OrderStatus.PENDING_FACTORY, OrderStatus.SUBMITTED],
+    };
+    expect(adminSignalWhere('pending-confirmation')).toEqual({
+      status: pendingStatuses,
+    });
+    expect(adminQueueWhere('todo')).toMatchObject({
+      OR: [
+        { status: pendingStatuses },
+        expect.any(Object),
+        expect.any(Object),
+        { status: OrderStatus.ON_HOLD },
+      ],
+    });
+  });
+
   it('keeps REJECTED out of done and resolves the print queue with a correlated snapshot', () => {
     expect(adminQueueWhere('done')).toEqual({
       status: {

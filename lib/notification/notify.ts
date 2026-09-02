@@ -1,8 +1,14 @@
 import { db } from '../db';
-import { NotificationStatus } from '../../generated/prisma/enums';
+import {
+  NotificationStatus,
+  OrderStatus,
+} from '../../generated/prisma/enums';
 import { databaseNow } from '../background-jobs/clock';
+import { assertExecutionFence } from '../execution-fence';
 import {
   PRIVATE_EVENT_MAX_CHANNELS,
+  NOTIFICATION_EVENTS,
+  SUPERSEDED_BEFORE_SEND_ERROR,
   isPrivatePerCsEvent,
   sanitizeNotificationPayload,
   type NotificationEvent,
@@ -11,7 +17,9 @@ import {
 import { renderTemplate } from './render';
 import {
   mockWebhookSender,
+  prepareWebhookSend,
   sendWebhook,
+  type PreparedWebhookSend,
   type WebhookResult,
   type WebhookSender,
 } from './webhook';
@@ -32,7 +40,8 @@ import { resolveManagementNotificationRoute } from './management-routing';
 // 流程：
 //   1. 查 active rule by eventType；不存在 → 早 return（不写 log）
 //   2. 渲染 messageTemplate（render.ts 留缺失 placeholder 原样）
-//   3. durable 路径逐 channel 原子写 SENDING + fencing token，再发送 webhook
+//   3. 真实路径先等待共享 webhook permit；durable 路径随后逐
+//      channel 原子写 SENDING + fencing token，再立即发送 webhook
 //   4. 只有持有 token 的 worker 才能落 SUCCESS/FAILED/RETRYING/UNKNOWN；
 //      已有 SUCCESS/FAILED/UNKNOWN/SENDING 的 channel 都不会被再次发送
 //   5. 顶层 try/catch 兜底：连 DB 查 rule 都炸的极端场景 → console.error
@@ -46,7 +55,6 @@ import { resolveManagementNotificationRoute } from './management-routing';
 // 接受。Mock 下不真 fetch，只写 status=SUCCESS errorMessage='MOCK' log。
 
 const MOCK_ERROR_MESSAGE = 'MOCK';
-
 export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
   // dev/test 默认 mock；prod 显式开关。
   if (env.NOTIFICATION_MOCK_MODE === 'true') return true;
@@ -125,6 +133,38 @@ function recordErrorCode(outcome: NotifyOutcome, code: string): void {
   if (!outcome.errorCodes.includes(code)) outcome.errorCodes.push(code);
 }
 
+async function completionDeliveryIsCurrent(
+  event: NotificationEvent,
+  payload: Readonly<Record<string, unknown>>,
+): Promise<boolean> {
+  if (event !== NOTIFICATION_EVENTS.ORDER_COMPLETED) return true;
+  const orderId = payload.orderId;
+  if (typeof orderId !== 'string' || !orderId) return false;
+
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: { status: true, workOrderVersion: true, completedAt: true },
+  });
+  if (!order?.completedAt) return false;
+  // Cancellation does not create a new paper-work-order version and may keep
+  // the historical completion timestamp. It must nevertheless suppress a
+  // queued "completed" announcement that has not started external I/O yet.
+  if (order.status === OrderStatus.CANCELLED) return false;
+
+  const payloadVersion = payload.workOrderVersion;
+  if (
+    typeof payloadVersion === 'number' &&
+    Number.isSafeInteger(payloadVersion) &&
+    payloadVersion > 0
+  ) {
+    return order.workOrderVersion === payloadVersion;
+  }
+
+  // Compatibility for an already-enqueued pre-version payload. Only the
+  // legacy terminal production state is safe to deliver without a generation.
+  return order.status === OrderStatus.COMPLETED;
+}
+
 type DeliveryChannel = {
   id: string;
   webhookUrl: string;
@@ -138,10 +178,37 @@ async function sendToChannel(
     messageContent: string;
     sender: WebhookSender;
     signal?: AbortSignal;
+    assertLease?: () => Promise<void>;
+    beforeRequest?: () => Promise<boolean>;
+    preparedSend?: PreparedWebhookSend;
     inactiveChannelRetryable: boolean;
     blockedReason?: string;
   },
 ): Promise<WebhookResult> {
+  if (input.blockedReason || !input.channel.isActive) {
+    try {
+      // Local no-I/O outcomes still happen after a durable claim. Apply the
+      // same post-claim business fence so an inactive replay cannot turn a
+      // superseded completion into RETRYING.
+      await assertExecutionFence({
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.assertLease ? { assertLease: input.assertLease } : {}),
+      });
+      if (input.beforeRequest && !(await input.beforeRequest())) {
+        outcome.skipped += 1;
+        return { ok: false, retries: 0, skipped: true };
+      }
+      input.signal?.throwIfAborted();
+    } catch (error) {
+      if (input.signal?.aborted && error === input.signal.reason) throw error;
+      return {
+        ok: false,
+        retries: 0,
+        errorMessage: 'webhook pre-send check unavailable',
+        retryable: true,
+      };
+    }
+  }
   if (input.blockedReason) {
     return {
       ok: false,
@@ -162,12 +229,31 @@ async function sendToChannel(
   input.signal?.throwIfAborted();
   outcome.attempted += 1;
   try {
-    return input.signal
+    const hasOptions = Boolean(
+      input.signal ||
+        input.assertLease ||
+        input.beforeRequest ||
+        input.preparedSend,
+    );
+    const result = hasOptions
       ? await input.sender(input.channel.webhookUrl, input.messageContent, {
-          signal: input.signal,
+          ...(input.signal ? { signal: input.signal } : {}),
+          ...(input.assertLease ? { assertLease: input.assertLease } : {}),
+          ...(input.beforeRequest
+            ? { beforeRequest: input.beforeRequest }
+            : {}),
+          ...(input.preparedSend
+            ? { preparedSend: input.preparedSend }
+            : {}),
         })
       : await input.sender(input.channel.webhookUrl, input.messageContent);
+    if (result.skipped) {
+      outcome.attempted -= 1;
+      outcome.skipped += 1;
+    }
+    return result;
   } catch (error) {
+    if (input.signal?.aborted && error === input.signal.reason) throw error;
     // The sender normally catches its own errors. An unexpected throw after
     // starting external I/O is ambiguous and must never become an auto-resend.
     return {
@@ -255,11 +341,31 @@ async function deliverClaimedChannel(
     sender: WebhookSender;
     mock: boolean;
     signal?: AbortSignal;
+    assertLease?: () => Promise<void>;
+    beforeRequest?: () => Promise<boolean>;
+    preparedSend?: PreparedWebhookSend;
     inactiveChannelRetryable: boolean;
     blockedReason?: string;
   },
 ): Promise<void> {
   const result = await sendToChannel(outcome, input);
+  if (result.skipped) {
+    // The business fact changed after the global-permit wait but before fetch.
+    // Close the fenced SENDING row as a permanent, explicitly superseded
+    // terminal record. No external request occurred and the owning job must
+    // succeed without an automatic resend.
+    await finalizeDurableDelivery({
+      deliveryKey: input.deliveryKey,
+      channelId: input.channel.id,
+      attemptId: input.attemptId,
+      jobAttempt: input.deliveryAttempt,
+      status: NotificationStatus.FAILED,
+      errorMessage: SUPERSEDED_BEFORE_SEND_ERROR,
+      retryCount: 0,
+      sent: false,
+    });
+    return;
+  }
   const recorded = recordWebhookResult(outcome, result, {
     durable: true,
     mock: input.mock,
@@ -298,6 +404,50 @@ async function deliverClaimedChannel(
       );
     }
     throw error;
+  }
+}
+
+async function persistInlineDeliveryLog(
+  outcome: NotifyOutcome,
+  input: {
+    event: NotificationEvent;
+    channelId: string;
+    messageContent: string;
+    result: WebhookResult;
+    recorded: ReturnType<typeof recordWebhookResult>;
+    relatedOrderId: string | null;
+    now: Date;
+  },
+): Promise<void> {
+  // Inline/dev path has no durable retry key and retains best-effort log
+  // semantics. Any missing log is returned as an explicit unknown outcome.
+  try {
+    await db.notificationLog.create({
+      data: {
+        eventType: input.event,
+        channelId: input.channelId,
+        messageContent: input.messageContent,
+        status: input.recorded.status,
+        errorMessage: input.recorded.errorMessage,
+        retryCount: input.result.retries,
+        relatedOrderId: input.relatedOrderId,
+        sentAt: input.result.ok ? input.now : null,
+        lastAttemptAt: input.now,
+      },
+    });
+  } catch {
+    // log 写入失败不能再抛（业务已成功）。落到 console.error 让
+    // ops 能从 stdout 抓到。
+    console.error(
+      `[notify] failed to write NotificationLog event=${input.event} channel=${input.channelId}`,
+    );
+    // 送达了却没留下凭证 = 下一次 attempt 认不出这个 channel 已经成功，
+    // 会重复推一条。计数上报到 job result，让 ops 能把「群里看到两条」
+    // 对上号。这是本方案 at-least-once 的已知边界。
+    if (input.result.ok || input.recorded.unknown) {
+      outcome.unlogged += 1;
+      outcome.unknown += input.recorded.unknown ? 0 : 1;
+    }
   }
 }
 
@@ -443,10 +593,19 @@ export async function notify<E extends NotificationEvent>(
     // (relatedOrderId)；其他 fk 暂留 null（schema 没建对应列）。
     const relatedOrderId = extractOrderId(safePayload);
 
-    // Durable 路径不是“发完再写日志”。每个 channel 都先用唯一键原子预留
+    // Durable 路径不是“发完再写日志”。真实发送先在不写
+    // SENDING 的情况下等待全局 permit；随后用唯一键原子预留
     // SENDING + fencing token，只有拿到 token 的 attempt 才能做外部 I/O。
     // SUCCESS/FAILED/UNKNOWN 都是单调终态；只有明确未送达的 RETRYING 可重领。
     const deliveryKey = opts.deliveryKey;
+    const beforeRequest =
+      event === NOTIFICATION_EVENTS.ORDER_COMPLETED
+        ? () =>
+            completionDeliveryIsCurrent(
+              event,
+              safePayload as Readonly<Record<string, unknown>>,
+            )
+        : undefined;
 
     // 顺序处理（不并行）：单 server action 触发 1-2 channel 不并行无
     // 影响；并行会让 NotificationLog 写入顺序乱，dashboard 显示&ldquo;时
@@ -457,6 +616,48 @@ export async function notify<E extends NotificationEvent>(
       // not begin a webhook request.
       await opts.assertLease?.();
       opts.signal?.throwIfAborted();
+
+      // An ORDER_COMPLETED job can wait behind other LIGHT work while an
+      // approved change creates a newer paper-work-order generation. Re-read
+      // immediately before each external request; the stale generation is a
+      // deliberate skip, not a delivery failure worth retrying.
+      if (
+        !(await completionDeliveryIsCurrent(
+          event,
+          safePayload as Readonly<Record<string, unknown>>,
+        ))
+      ) {
+        outcome.skipped += 1;
+        continue;
+      }
+
+      const blockedReason =
+        managementRouteBlocked && channel.isActive
+          ? 'management route incomplete'
+          : undefined;
+      let preparedSend: PreparedWebhookSend | undefined;
+      if (sender === sendWebhook && channel.isActive && !blockedReason) {
+        // The only potentially long wait happens before a durable SENDING row
+        // exists. Lease loss here therefore cannot create a false UNKNOWN.
+        preparedSend = await prepareWebhookSend(channel.webhookUrl, content, {
+          ...(opts.signal ? { signal: opts.signal } : {}),
+        });
+
+        // ORDER_COMPLETED may become stale while waiting behind another event
+        // for this same webhook. Recheck the business generation and durable
+        // lease after the permit, before claiming the delivery ledger.
+        if (
+          !(await completionDeliveryIsCurrent(
+            event,
+            safePayload as Readonly<Record<string, unknown>>,
+          ))
+        ) {
+          outcome.skipped += 1;
+          continue;
+        }
+        await opts.assertLease?.();
+        opts.signal?.throwIfAborted();
+      }
 
       if (deliveryKey) {
         if (
@@ -487,12 +688,13 @@ export async function notify<E extends NotificationEvent>(
           sender,
           mock,
           ...(opts.signal ? { signal: opts.signal } : {}),
+          ...(opts.assertLease ? { assertLease: opts.assertLease } : {}),
+          ...(beforeRequest ? { beforeRequest } : {}),
+          ...(preparedSend ? { preparedSend } : {}),
           // A channel disabled before an initial delivery is a permanent
           // configuration failure, not a reason to burn the job retry budget.
           inactiveChannelRetryable: false,
-          ...(managementRouteBlocked && channel.isActive
-            ? { blockedReason: 'management route incomplete' }
-            : {}),
+          ...(blockedReason ? { blockedReason } : {}),
         });
         continue;
       }
@@ -502,46 +704,26 @@ export async function notify<E extends NotificationEvent>(
         messageContent: content,
         sender,
         ...(opts.signal ? { signal: opts.signal } : {}),
+        ...(opts.assertLease ? { assertLease: opts.assertLease } : {}),
+        ...(beforeRequest ? { beforeRequest } : {}),
+        ...(preparedSend ? { preparedSend } : {}),
         inactiveChannelRetryable: false,
-        ...(managementRouteBlocked && channel.isActive
-          ? { blockedReason: 'management route incomplete' }
-          : {}),
+        ...(blockedReason ? { blockedReason } : {}),
       });
+      if (result.skipped) continue;
       const recorded = recordWebhookResult(outcome, result, {
         durable: false,
         mock,
       });
-      const logData = {
-        eventType: event,
+      await persistInlineDeliveryLog(outcome, {
+        event,
         channelId: channel.id,
         messageContent: content,
-        status: recorded.status,
-        errorMessage: recorded.errorMessage,
-        retryCount: result.retries,
+        result,
+        recorded,
         relatedOrderId,
-        sentAt: result.ok ? now : null,
-      };
-
-      // Inline/dev path has no durable retry key and retains best-effort log
-      // semantics. Any missing log is returned as an explicit unknown outcome.
-      try {
-        await db.notificationLog.create({
-          data: { ...logData, lastAttemptAt: now },
-        });
-      } catch {
-        // log 写入失败不能再抛（业务已成功）。落到 console.error 让
-        // ops 能从 stdout 抓到。
-        console.error(
-          `[notify] failed to write NotificationLog event=${event} channel=${channel.id}`,
-        );
-        // 送达了却没留下凭证 = 下一次 attempt 认不出这个 channel 已经成功，
-        // 会重复推一条。计数上报到 job result，让 ops 能把「群里看到两条」
-        // 对上号。这是本方案 at-least-once 的已知边界。
-        if (result.ok || recorded.unknown) {
-          outcome.unlogged += 1;
-          outcome.unknown += recorded.unknown ? 0 : 1;
-        }
-      }
+        now,
+      });
     }
     return outcome;
   } catch (err) {
@@ -579,6 +761,8 @@ export async function replayDurableNotificationLogs(
     deliveryKey: string;
     deliveryAttempt: number;
     targets: readonly ManualNotificationReplayTarget[];
+    /** Original job payload, used to reject stale order generations. */
+    payload?: Readonly<Record<string, unknown>>;
     signal?: AbortSignal;
     assertLease?: () => Promise<void>;
     webhookSender?: WebhookSender;
@@ -601,6 +785,17 @@ export async function replayDurableNotificationLogs(
     for (const target of options.targets) {
       await options.assertLease?.();
       options.signal?.throwIfAborted();
+
+      // An owner confirming "not delivered" authorizes a transport retry,
+      // not delivery of business information that has since become false.
+      // Reuse the normal ORDER_COMPLETED generation/cancellation fence before
+      // every replay target and before reading/claiming its delivery ledger.
+      if (
+        !(await completionDeliveryIsCurrent(event, options.payload ?? {}))
+      ) {
+        outcome.skipped += 1;
+        continue;
+      }
 
       const log = await db.notificationLog.findUnique({
         where: { id: target.logId },
@@ -658,6 +853,23 @@ export async function replayDurableNotificationLogs(
         );
       }
 
+      const beforeRequest = () =>
+        completionDeliveryIsCurrent(event, options.payload ?? {});
+      let preparedSend: PreparedWebhookSend | undefined;
+      if (sender === sendWebhook && log.channel.isActive) {
+        preparedSend = await prepareWebhookSend(
+          log.channel.webhookUrl,
+          log.messageContent,
+          { ...(options.signal ? { signal: options.signal } : {}) },
+        );
+        if (!(await beforeRequest())) {
+          outcome.skipped += 1;
+          continue;
+        }
+        await options.assertLease?.();
+        options.signal?.throwIfAborted();
+      }
+
       let claim: DurableDeliveryClaim;
       try {
         claim = await claimDurableDelivery({
@@ -694,6 +906,11 @@ export async function replayDurableNotificationLogs(
         sender,
         mock,
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.assertLease ? { assertLease: options.assertLease } : {}),
+        ...(event === NOTIFICATION_EVENTS.ORDER_COMPLETED
+          ? { beforeRequest }
+          : {}),
+        ...(preparedSend ? { preparedSend } : {}),
         // The owner explicitly chose the original recipient. Keep it pinned
         // and retry only after that same channel is re-enabled.
         inactiveChannelRetryable: true,

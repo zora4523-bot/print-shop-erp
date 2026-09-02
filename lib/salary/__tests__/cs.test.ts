@@ -4,7 +4,11 @@ import {
   SalaryPeriodStatus,
 } from '../../../generated/prisma/enums';
 
-const { dbMock, enqueueNotificationInTransactionMock } = vi.hoisted(() => {
+const {
+  dbMock,
+  enqueueNotificationInTransactionMock,
+  dispatchNotificationMock,
+} = vi.hoisted(() => {
   const mock = {
     user: { findUnique: vi.fn() },
     salaryRule: { findFirst: vi.fn() },
@@ -34,9 +38,13 @@ const { dbMock, enqueueNotificationInTransactionMock } = vi.hoisted(() => {
   return {
     dbMock: mock,
     enqueueNotificationInTransactionMock: vi.fn(),
+    dispatchNotificationMock: vi.fn(),
   };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/notification/dispatch', () => ({
+  dispatchNotification: dispatchNotificationMock,
+}));
 vi.mock('@/lib/notification/transactional-outbox', () => ({
   enqueueNotificationInTransaction: enqueueNotificationInTransactionMock,
 }));
@@ -67,6 +75,7 @@ const TIERS_RULE_VALUE = {
 
 beforeEach(() => {
   enqueueNotificationInTransactionMock.mockReset().mockResolvedValue(false);
+  dispatchNotificationMock.mockReset().mockResolvedValue(undefined);
   dbMock.user.findUnique.mockReset().mockResolvedValue({
     id: 'cs-1',
     role: Role.CUSTOMER_SERVICE,
@@ -709,6 +718,45 @@ describe('settleCsPeriod', () => {
       {
         settledCount: 1,
         csName: 'cs-1',
+        totalSales: '550000.00',
+        commission: '33000.00',
+      },
+      { dedupeKey: 'notification:CS_PERIOD_SETTLED:period-1' },
+    );
+    expect(dispatchNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches the inline notification exactly once after settlement commits', async () => {
+    dbMock.user.findUnique.mockResolvedValue({
+      id: 'cs-1',
+      role: Role.CUSTOMER_SERVICE,
+      isActive: true,
+      displayName: '客服一',
+      employmentStartDate: null,
+      employmentEndDate: null,
+    });
+    dbMock.salaryPeriod.findUnique.mockResolvedValue(periodFixture);
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
+    enqueueNotificationInTransactionMock.mockResolvedValue(false);
+    let transactionCommitted = false;
+    dbMock.$transaction.mockImplementationOnce(async (fn: unknown) => {
+      const result = await (fn as (tx: unknown) => unknown)(dbMock);
+      transactionCommitted = true;
+      return result;
+    });
+    dispatchNotificationMock.mockImplementationOnce(async () => {
+      expect(transactionCommitted).toBe(true);
+    });
+
+    const result = await settleCsPeriod('period-1');
+
+    expect(result.notificationQueued).toBe(false);
+    expect(dispatchNotificationMock).toHaveBeenCalledExactlyOnceWith(
+      'CS_PERIOD_SETTLED',
+      {
+        settledCount: 1,
+        csName: '客服一',
         totalSales: '550000.00',
         commission: '33000.00',
       },

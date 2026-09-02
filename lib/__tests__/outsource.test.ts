@@ -264,6 +264,21 @@ describe('createOutsourceOrder', () => {
     ).resolves.toEqual({ id: 'o1' });
   });
 
+  it.each([OrderStatus.PACKING, OrderStatus.ON_HOLD])(
+    'refuses new outsource after canonical production readiness is recorded in %s',
+    async (status) => {
+    dbMock.order.findUnique.mockResolvedValue({
+      status,
+      completedAt: new Date('2026-09-02T03:00:00.000Z'),
+    });
+
+    await expect(
+      createOutsourceOrder(baseInput, foremanActor),
+    ).rejects.toThrow(/已完成生产.*工单变更/);
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
+    },
+  );
+
   // Codex round 88 / P2: status check + insert must be atomic vs.
   // ship/cancel on the same order. Lock taken inside the same tx.
   it('takes the per-order advisory lock as the first DB call', async () => {
@@ -926,17 +941,14 @@ describe('markOutsourceReceived', () => {
       },
     ]);
     dbMock.productionTask.findMany.mockResolvedValue([]);
-    dbMock.order.findUnique
-      .mockResolvedValueOnce({
-        id: 'order-1',
-        status: OrderStatus.SCHEDULING,
-        requiresOutsource: true,
-      })
-      .mockResolvedValueOnce({
-        id: 'order-1',
-        orderNo: 'O-OUT',
-        customerRef: null,
-      });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SCHEDULING,
+      requiresOutsource: true,
+      workOrderVersion: 1,
+      orderNo: 'O-OUT',
+      customerRef: '苹果福',
+    });
 
     const result = await markOutsourceReceived(
       'outsource-1',
@@ -949,9 +961,26 @@ describe('markOutsourceReceived', () => {
         data: expect.objectContaining({ status: OrderStatus.COMPLETED }),
       }),
     );
+    expect(dbMock.order.findUnique).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      select: {
+        id: true,
+        status: true,
+        requiresOutsource: true,
+        workOrderVersion: true,
+        orderNo: true,
+        customerRef: true,
+        completedAt: true,
+      },
+    });
     expect(notifyMock).toHaveBeenCalledWith(
       'ORDER_COMPLETED',
-      expect.objectContaining({ orderId: 'order-1', orderNo: 'O-OUT' }),
+      {
+        orderId: 'order-1',
+        orderNo: 'O-OUT',
+        workOrderVersion: 1,
+        customerRef: '苹果福',
+      },
       { dedupeKey: 'notification:ORDER_COMPLETED:order-1' },
     );
   });
@@ -1039,17 +1068,14 @@ describe('markOutsourceReceived', () => {
       },
     ]);
     dbMock.productionTask.findMany.mockResolvedValue([]);
-    dbMock.order.findUnique
-      .mockResolvedValueOnce({
-        id: 'order-1',
-        status: OrderStatus.SCHEDULING,
-        requiresOutsource: true,
-      })
-      .mockResolvedValueOnce({
-        id: 'order-1',
-        orderNo: 'O-OUT',
-        customerRef: null,
-      });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SCHEDULING,
+      requiresOutsource: true,
+      workOrderVersion: 1,
+      orderNo: 'O-OUT',
+      customerRef: null,
+    });
 
     const result = await markOutsourceReceived(
       'outsource-1',

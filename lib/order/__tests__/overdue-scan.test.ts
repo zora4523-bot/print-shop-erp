@@ -33,7 +33,20 @@ describe('scanOverdueOrders', () => {
     await scanOverdueOrders(NOW);
     const args = dbMock.order.findMany.mock.calls[0][0];
     expect(args.where.status).toEqual({
-      in: ['DRAFT', 'SUBMITTED', 'SCHEDULING', 'IN_PRODUCTION', 'COMPLETED'],
+      in: [
+        'DRAFT',
+        'PENDING_FACTORY',
+        'REJECTED',
+        'CONFIRMED',
+        'ON_HOLD',
+        'RELEASED',
+        'FOILING',
+        'PACKING',
+        'SUBMITTED',
+        'SCHEDULING',
+        'IN_PRODUCTION',
+        'COMPLETED',
+      ],
     });
     // 今日（上海 07-07）的日界 = UTC 07-06T16:00 —— 今天到期（due-soon）
     // 的行在 SQL 层就进不来，不需要再在 JS 里 filter。

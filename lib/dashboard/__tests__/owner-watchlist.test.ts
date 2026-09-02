@@ -54,11 +54,15 @@ describe('getPendingShipments', () => {
     expect(r.hasMore).toBe(false);
   });
 
-  it('查询 status=COMPLETED + orderBy 急单 desc / 完工时间 asc', async () => {
+  it('按 completedAt 查 PACKING / legacy COMPLETED，排除未收口与暂停工单', async () => {
     dbMock.order.findMany.mockResolvedValue([]);
     await getPendingShipments();
     const args = dbMock.order.findMany.mock.calls[0][0];
-    expect(args.where.status).toBe('COMPLETED');
+    expect(args.where).toEqual({
+      completedAt: { not: null },
+      shippedAt: null,
+      status: { in: ['PACKING', 'COMPLETED'] },
+    });
     expect(args.orderBy).toEqual([
       { isUrgent: 'desc' },
       { completedAt: 'asc' },
@@ -120,7 +124,20 @@ describe('getDueOrders', () => {
     await getDueOrders(NOW);
     const args = dbMock.order.findMany.mock.calls[0][0];
     expect(args.where.status).toEqual({
-      in: ['DRAFT', 'SUBMITTED', 'SCHEDULING', 'IN_PRODUCTION', 'COMPLETED'],
+      in: [
+        'DRAFT',
+        'PENDING_FACTORY',
+        'REJECTED',
+        'CONFIRMED',
+        'ON_HOLD',
+        'RELEASED',
+        'FOILING',
+        'PACKING',
+        'SUBMITTED',
+        'SCHEDULING',
+        'IN_PRODUCTION',
+        'COMPLETED',
+      ],
     });
     // todayStart = UTC 2026-07-06T16:00；horizon = +4 天 = 07-10T16:00
     expect((args.where.promisedDate.lt as Date).toISOString()).toBe(

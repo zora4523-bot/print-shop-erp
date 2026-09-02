@@ -179,6 +179,14 @@ describe('durable delivery finalization', () => {
         sent: true,
       }),
     ).resolves.toBeUndefined();
+    const sql = dbMock.$executeRaw.mock.calls[0]![0] as {
+      strings: readonly string[];
+      values: readonly unknown[];
+    };
+    expect(sql.strings.join('?')).toContain(
+      '"deliveryJobAttempt" = ?',
+    );
+    expect(sql.values).toContain(claimInput.jobAttempt);
 
     dbMock.$executeRaw.mockResolvedValue(0);
     await expect(

@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotificationStatus } from '../../../generated/prisma/enums';
 
-const { dbMock } = vi.hoisted(() => ({
+const { dbMock, waitForSlotMock } = vi.hoisted(() => ({
   dbMock: {
     notificationChannel: { findUnique: vi.fn() },
     notificationLog: { create: vi.fn() },
   },
+  waitForSlotMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/notification/webhook-throttle', () => ({
+  waitForWebhookSendSlot: waitForSlotMock,
+}));
 vi.mock('server-only', () => ({}));
 
 import type { WebhookResult, WebhookSender } from '../webhook';
@@ -21,6 +25,7 @@ function senderReturning(result: WebhookResult): WebhookSender {
 }
 
 beforeEach(() => {
+  waitForSlotMock.mockReset().mockResolvedValue(undefined);
   dbMock.notificationChannel.findUnique.mockReset().mockResolvedValue({
     id: 'channel-1',
     webhookUrl: 'https://qy.example.test/webhook',
@@ -74,6 +79,35 @@ describe('testChannel', () => {
       },
     });
     expect(fetch).not.toHaveBeenCalled();
+    expect(waitForSlotMock).not.toHaveBeenCalled();
+  });
+
+  it('真实测试发送与业务事件共用 webhook 全局 permit', async () => {
+    const webhookUrl =
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key';
+    dbMock.notificationChannel.findUnique.mockResolvedValueOnce({
+      id: 'channel-1',
+      webhookUrl,
+      isActive: true,
+    });
+    vi.mocked(fetch)
+      .mockReset()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await expect(
+      testChannel('channel-1', {
+        mockMode: false,
+        now: attemptedAt,
+      }),
+    ).resolves.toEqual({ ok: true, mock: false });
+
+    expect(waitForSlotMock).toHaveBeenCalledExactlyOnceWith(webhookUrl, {});
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it('uses an injected real-mode sender without marking the successful log MOCK', async () => {
@@ -94,6 +128,7 @@ describe('testChannel', () => {
       sentAt: attemptedAt,
     });
     expect(fetch).not.toHaveBeenCalled();
+    expect(waitForSlotMock).not.toHaveBeenCalled();
   });
 
   it.each([

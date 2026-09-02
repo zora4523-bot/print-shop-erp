@@ -5,10 +5,18 @@
 // const，没用 PG enum，所以这里改名要小心（要写 migration 改 historic
 // log 行）。
 //
-// SPEC §8.1 列了 10 个事件，现已全部接线。STOCK_ALERT 的 wire 点在
-// lib/material.ts createMaterialTransaction 与 lib/purchase.ts
-// cancelPurchaseReceipt（跨越检测：库存从 >=安全库存 跌破那一次变动
-// 才触发，持续低位不重复；见 DECISIONS 2026-07-05）。
+// 当前 registry 有 15 个事件：SPEC §8.1 的原始 10 个，加上
+// ORDER_CHANGE_REQUESTED / PRODUCTION_PROGRESS_ANOMALY /
+// PRODUCTION_STAGNANT / PENDING_FACTORY_BACKLOG / ORDER_OVERDUE。
+// STOCK_ALERT 的 wire 点在 lib/material.ts createMaterialTransaction 与
+// lib/purchase.ts cancelPurchaseReceipt（跨越检测：库存从 >=安全库存
+// 跌破那一次变动才触发，持续低位不重复）。
+//
+// ORDER_SCHEDULED 保留历史 eventType，canonical 触发边界是管理员将
+// CONFIRMED 工单下发为 RELEASED；taskCount 是当前 work-order generation
+// 的 ProductionOperation + ProductionProgressStep 总数，不表示已指派给具体师傅。
+// ORDER_COMPLETED 表示当前代次所有有效内部工作与必需外协已通过
+// 生产完成闸口；canonical 工单会收口到 PACKING，直到显式发货。
 //
 // ORDER_OVERDUE 是 SPEC 之外的业主新增需求（2026-07-07 拍板）：工单
 // 承诺交期已过仍未发货，每日 cron 扫描推送管理群；口径与 dashboard
@@ -135,11 +143,13 @@ export type NotificationPayloads = {
   ORDER_SCHEDULED: {
     orderId: string;
     orderNo: string;
+    // 当前代次的计件工序 + 非计件进度步骤，不是按人派工数。
     taskCount: number;
   };
   ORDER_COMPLETED: {
     orderId: string;
     orderNo: string;
+    workOrderVersion: number;
     customerRef?: string | null;
   };
   ORDER_SHIPPED: {
@@ -269,3 +279,9 @@ export const PRIVATE_EVENT_MAX_CHANNELS = 1;
 // 必须引用同一常量：两处字符串一旦漂移，24h 失败告警会把测试失败
 // 误计入生产推送健康度。
 export const TEST_EVENT_TYPE = '__TEST__';
+
+// ORDER_COMPLETED 在共享 permit/账本 claim 窗口内被新工单代次取代：
+// 没有发生传输，FAILED 只是 durable ledger 的单调终态，不是推送故障。
+// 写入方、24h 告警查询与 UI 翻译必须引用同一常量。
+export const SUPERSEDED_BEFORE_SEND_ERROR =
+  'notification superseded before webhook send';

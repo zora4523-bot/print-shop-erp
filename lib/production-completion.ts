@@ -10,6 +10,7 @@ import {
   findUndercoveredOutsourceItems,
   outsourceCoverageApplies,
 } from './outsource/coverage';
+import type { NotificationPayloadFor } from './notification/events';
 import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
 import type { EnqueueClient } from './background-jobs/repository';
 
@@ -36,6 +37,7 @@ export type ProductionCompletionTx = {
       workOrderVersion: number;
       orderNo: string;
       customerRef: string | null;
+      completedAt: Date | null;
     } | null>;
     update: (args: {
       where: { id: string };
@@ -110,13 +112,27 @@ export type ProductionCompletionBlocker =
   | 'OUTSOURCE_COVERAGE';
 
 export type ProductionCompletionOutcome = {
+  /** True when this call newly persisted production readiness. */
   completed: boolean;
+  /** Persisted order status after a successful completion decision. */
+  orderStatus?: OrderStatus;
   // null 表示「不适用」（工单不存在 / 已完工 / 不在生产态），不等于
   // 「可以完工」。completed === true 时同样为 null。
   blockedBy: ProductionCompletionBlocker | null;
   // 仅 blockedBy === 'OUTSOURCE_COVERAGE' 时非空。给 UI 用，让主管知道
   // 缺的是哪几个款式，而不是面对一个静默不动的工单。
   uncoveredItems: Array<{ id: string; sequence: number; name: string }>;
+  /**
+   * Present exactly when every current production unit and required outsource
+   * row is ready. Canonical work orders end in PACKING until explicit shipping.
+   */
+  notification?: ProductionCompletionNotification;
+};
+
+export type ProductionCompletionNotification = {
+  payload: NotificationPayloadFor<'ORDER_COMPLETED'>;
+  dedupeKey: string;
+  queued: boolean;
 };
 
 function notApplicable(): ProductionCompletionOutcome {
@@ -145,14 +161,27 @@ export async function maybeCompleteProductionOrder(
       workOrderVersion: true,
       orderNo: true,
       customerRef: true,
+      completedAt: true,
     },
   });
   if (!order) return notApplicable();
   if (order.status === OrderStatus.COMPLETED) return notApplicable();
-  if (
-    order.status !== OrderStatus.SCHEDULING &&
-    order.status !== OrderStatus.IN_PRODUCTION
-  ) {
+  const isLegacyCompletionState =
+    order.status === OrderStatus.SCHEDULING ||
+    order.status === OrderStatus.IN_PRODUCTION;
+  const isCanonicalProductionState =
+    order.status === OrderStatus.RELEASED ||
+    order.status === OrderStatus.FOILING ||
+    order.status === OrderStatus.PACKING;
+  if (!isLegacyCompletionState && !isCanonicalProductionState) {
+    return notApplicable();
+  }
+  // Canonical statuses deliberately use completedAt rather than the legacy
+  // COMPLETED enum. A ready RELEASED/FOILING order is advanced to PACKING
+  // below because the shipping state machine only permits PACKING -> SHIPPED.
+  // completedAt is therefore the durable, per-generation readiness marker;
+  // the version-change writer clears it before rematerializing new work.
+  if (isCanonicalProductionState && order.completedAt) {
     return notApplicable();
   }
 
@@ -160,7 +189,19 @@ export async function maybeCompleteProductionOrder(
     where: { orderId, workOrderVersion: order.workOrderVersion },
     select: { id: true, status: true },
   });
-  const usesOperationGeneration = operations.length > 0;
+  // A valid canonical generation may contain only no-pay progress steps (for
+  // example, a process with no piecework operation). Query both ledgers before
+  // deciding whether to fall back to legacy ProductionTask rows; otherwise an
+  // empty operation list would make pending progress invisible and announce
+  // completion too early.
+  const progressSteps = await tx.productionProgressStep.findMany({
+    where: { orderId, workOrderVersion: order.workOrderVersion },
+    select: { id: true, status: true },
+  });
+  const usesOperationGeneration =
+    isCanonicalProductionState ||
+    operations.length > 0 ||
+    progressSteps.length > 0;
   let internalReady: boolean;
   let internalWorkCount: number;
   if (usesOperationGeneration) {
@@ -168,10 +209,6 @@ export async function maybeCompleteProductionOrder(
     // legacy ProductionTask rows (including an empty legacy set) are ignored.
     // This prevents the first completed operation from finishing an order
     // merely because the old task ledger has no rows.
-    const progressSteps = await tx.productionProgressStep.findMany({
-      where: { orderId, workOrderVersion: order.workOrderVersion },
-      select: { id: true, status: true },
-    });
     const activeOperations = operations.filter(
       (operation) => operation.status !== ProductionOperationStatus.CANCELLED,
     );
@@ -274,37 +311,112 @@ export async function maybeCompleteProductionOrder(
   // 只有此刻最容易修复的履约缺口，直到最后一个内部任务报工才暴露。
   if (!internalReady) return blocked('INTERNAL_TASKS');
 
-  transitionOrder(order.status, OrderStatus.COMPLETED);
-  await tx.order.update({
-    where: { id: orderId },
-    data: { status: OrderStatus.COMPLETED, completedAt: now },
-    select: { id: true, status: true },
-  });
-  await tx.orderLog.create({
-    data: {
-      orderId,
-      operatorId: actorId,
-      action: 'STATUS_CHANGE',
-      changedFields: {
-        status: { before: order.status, after: OrderStatus.COMPLETED },
+  if (isLegacyCompletionState) {
+    transitionOrder(order.status, OrderStatus.COMPLETED);
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: OrderStatus.COMPLETED, completedAt: now },
+      select: { id: true, status: true },
+    });
+    await tx.orderLog.create({
+      data: {
+        orderId,
+        operatorId: actorId,
+        action: 'STATUS_CHANGE',
+        changedFields: {
+          status: { before: order.status, after: OrderStatus.COMPLETED },
+        },
+        remark:
+          internalWorkCount === 0
+            ? '外协全部收货，工单完工'
+            : coverageApplies
+              ? '内部生产步骤与外协全部完成'
+              : '全部生产步骤完工',
       },
-      remark:
-        internalWorkCount === 0
-          ? '外协全部收货，工单完工'
-          : coverageApplies
-            ? '内部生产步骤与外协全部完成'
-            : '全部生产步骤完工',
-    },
-  });
-  await enqueueNotificationInTransaction(
+    });
+  } else {
+    const statusChanged = order.status !== OrderStatus.PACKING;
+    if (statusChanged) transitionOrder(order.status, OrderStatus.PACKING);
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        ...(statusChanged ? { status: OrderStatus.PACKING } : {}),
+        completedAt: now,
+      },
+      select: { id: true, status: true },
+    });
+    await tx.orderLog.create({
+      data: {
+        orderId,
+        operatorId: actorId,
+        action: 'PRODUCTION_COMPLETED',
+        changedFields: {
+          ...(statusChanged
+            ? {
+                status: {
+                  before: order.status,
+                  after: OrderStatus.PACKING,
+                },
+              }
+            : {}),
+          completedAt: { before: null, after: now.toISOString() },
+          workOrderVersion: {
+            before: order.workOrderVersion,
+            after: order.workOrderVersion,
+          },
+        },
+        remark:
+          internalWorkCount === 0
+            ? '外协全部收货，生产完成'
+            : coverageApplies
+              ? '内部生产步骤与外协全部完成'
+              : '全部生产步骤完成',
+      },
+    });
+  }
+
+  const payload: NotificationPayloadFor<'ORDER_COMPLETED'> = {
+    orderId,
+    orderNo: order.orderNo,
+    workOrderVersion: order.workOrderVersion,
+    customerRef: order.customerRef,
+  };
+  // Legacy delivery keys stay unchanged so an in-flight pre-cutover job cannot
+  // be duplicated after deploy. Canonical generations include workOrderVersion:
+  // an approved production-changing revision represents a new completion.
+  const dedupeKey = isLegacyCompletionState
+    ? `notification:ORDER_COMPLETED:${orderId}`
+    : `notification:ORDER_COMPLETED:${orderId}:v${order.workOrderVersion}`;
+  const queued = await enqueueNotificationInTransaction(
     tx as unknown as EnqueueClient,
     'ORDER_COMPLETED',
-    {
-      orderId,
-      orderNo: order.orderNo,
-      customerRef: order.customerRef,
-    },
-    { dedupeKey: `notification:ORDER_COMPLETED:${orderId}` },
+    payload,
+    { dedupeKey },
   );
-  return { completed: true, blockedBy: null, uncoveredItems: [] };
+  return {
+    completed: true,
+    orderStatus: isLegacyCompletionState
+      ? OrderStatus.COMPLETED
+      : OrderStatus.PACKING,
+    blockedBy: null,
+    uncoveredItems: [],
+    notification: { payload, dedupeKey, queued },
+  };
+}
+
+/** Deliver the inline/dev fallback only after the surrounding mutation commits. */
+export async function dispatchProductionCompletionNotification(
+  notification: ProductionCompletionNotification | undefined,
+): Promise<void> {
+  if (!notification || notification.queued) return;
+  // The completion gate is also used as a dependency-injected domain module
+  // by unit tests and transaction callers. Loading the Next `after()`
+  // dispatcher eagerly would pull the notification delivery ledger (and its
+  // server-only database runtime) into every gate import, even when no
+  // post-commit fallback is needed. Keep that boundary lazy and pay for it
+  // only on the inline delivery path.
+  const { dispatchNotification } = await import('./notification/dispatch');
+  await dispatchNotification('ORDER_COMPLETED', notification.payload, {
+    dedupeKey: notification.dedupeKey,
+  });
 }

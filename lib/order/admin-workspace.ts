@@ -43,7 +43,9 @@ import {
   type FactoryConfirmationPriceDiff,
 } from './change-request';
 import {
+  FACTORY_CONFIRMATION_PENDING_STATUSES,
   evaluateFactoryConfirmationPreflight,
+  isAwaitingFactoryConfirmation,
   type FactoryConfirmationPreflight,
 } from './factory-confirmation-preflight';
 import type {
@@ -334,7 +336,7 @@ export function adminIncompleteCustomerFeeWhere(): Prisma.OrderWhereInput {
  */
 export function adminManualPricingWhere(): Prisma.OrderWhereInput {
   return {
-    status: { in: [OrderStatus.PENDING_FACTORY, OrderStatus.SUBMITTED] },
+    status: { in: [...FACTORY_CONFIRMATION_PENDING_STATUSES] },
     ...adminIncompleteCustomerFeeWhere(),
   };
 }
@@ -354,7 +356,7 @@ export function adminQueueWhere(
         OR: [
           {
             status: {
-              in: [OrderStatus.PENDING_FACTORY, OrderStatus.SUBMITTED],
+              in: [...FACTORY_CONFIRMATION_PENDING_STATUSES],
             },
           },
           adminManualPricingWhere(),
@@ -398,7 +400,7 @@ export function adminSignalWhere(
     case 'pending-confirmation':
       return {
         status: {
-          in: [OrderStatus.PENDING_FACTORY, OrderStatus.SUBMITTED],
+          in: [...FACTORY_CONFIRMATION_PENDING_STATUSES],
         },
       };
     case 'pending-pricing':
@@ -610,9 +612,7 @@ export function resolveAdminOrderCapabilities(input: {
   hasIncompleteProduction: boolean;
   printFacts: AdminPrintFacts;
 }): AdminOrderWorkspaceRow['capabilities'] {
-  const awaitingFactory =
-    input.status === OrderStatus.PENDING_FACTORY ||
-    input.status === OrderStatus.SUBMITTED;
+  const awaitingFactory = isAwaitingFactoryConfirmation(input.status);
   const productionActive = new Set<OrderStatus>([
     OrderStatus.CONFIRMED,
     OrderStatus.RELEASED,
@@ -903,10 +903,7 @@ export async function getAdminOrderByOrderNo(
       now,
       stagnationDays,
     );
-    if (
-      row.status !== OrderStatus.PENDING_FACTORY &&
-      row.status !== OrderStatus.SUBMITTED
-    ) {
+    if (!isAwaitingFactoryConfirmation(row.status)) {
       return mapped;
     }
 
@@ -1224,10 +1221,7 @@ function isManualPricingRecord(
   row: AdminOrderRecord,
   incompleteCustomerFee = isIncompleteCustomerFeeRecord(row),
 ): boolean {
-  if (
-    row.status !== OrderStatus.PENDING_FACTORY &&
-    row.status !== OrderStatus.SUBMITTED
-  ) {
+  if (!isAwaitingFactoryConfirmation(row.status)) {
     return false;
   }
   return incompleteCustomerFee;
@@ -1274,10 +1268,7 @@ function statusSummary(
   if (row.status === OrderStatus.ON_HOLD) {
     return row.workflowDecisions[0]?.reasonNote ?? '工单已暂停';
   }
-  if (
-    row.status === OrderStatus.PENDING_FACTORY ||
-    row.status === OrderStatus.SUBMITTED
-  ) {
+  if (isAwaitingFactoryConfirmation(row.status)) {
     return confirmationPreflight.ok
       ? '✓ 预检通过，可确认'
       : `⚠ ${confirmationPreflight.issues.join('；')}`;

@@ -6,9 +6,15 @@ import {
   Role,
 } from '../../../generated/prisma/enums';
 
-const { dbMock, databaseNowMock, completionMock } = vi.hoisted(() => ({
+const {
+  dbMock,
+  databaseNowMock,
+  completionMock,
+  completionDispatchMock,
+} = vi.hoisted(() => ({
   databaseNowMock: vi.fn(),
   completionMock: vi.fn(),
+  completionDispatchMock: vi.fn(),
   dbMock: {
     productionProgressStep: {
       findUnique: vi.fn(),
@@ -38,6 +44,7 @@ vi.mock('@/lib/background-jobs/clock', () => ({
 }));
 vi.mock('@/lib/production-completion', () => ({
   maybeCompleteProductionOrder: completionMock,
+  dispatchProductionCompletionNotification: completionDispatchMock,
 }));
 
 import {
@@ -107,6 +114,7 @@ beforeEach(() => {
     blockedBy: 'INTERNAL_TASKS',
     uncoveredItems: [],
   });
+  completionDispatchMock.mockReset().mockResolvedValue(undefined);
   arrangeStep();
   dbMock.user.findUnique.mockResolvedValue({
     id: ACTOR.id,
@@ -192,10 +200,27 @@ describe('reportProductionProgress', () => {
   });
 
   it('最后一次进度报工完成步骤并调用统一完工闸口', async () => {
+    const notification = {
+      payload: {
+        orderId: 'order-1',
+        orderNo: 'GD-1',
+        workOrderVersion: 1,
+        customerRef: null,
+      },
+      dedupeKey: 'notification:ORDER_COMPLETED:order-1',
+      queued: false,
+    };
     completionMock.mockResolvedValue({
       completed: true,
+      orderStatus: OrderStatus.COMPLETED,
       blockedBy: null,
       uncoveredItems: [],
+      notification,
+    });
+    dbMock.$transaction.mockImplementationOnce(async (callback) => {
+      const transactionResult = await callback(dbMock);
+      expect(completionDispatchMock).not.toHaveBeenCalled();
+      return transactionResult;
     });
 
     await expect(
@@ -214,6 +239,53 @@ describe('reportProductionProgress', () => {
       ACTOR.id,
       NOW,
     );
+    expect(completionDispatchMock).toHaveBeenCalledWith(notification);
+  });
+
+  it('canonical 最后一个非计件步骤完成后保持 PACKING 并在事务提交后发送当前代次通知', async () => {
+    arrangeStep(
+      stepFixture({
+        workOrderVersion: 2,
+        order: {
+          id: 'order-1',
+          orderNo: 'GD-1',
+          status: OrderStatus.PACKING,
+          scheduledAt: NOW,
+          workOrderVersion: 2,
+        },
+      }),
+    );
+    const notification = {
+      payload: {
+        orderId: 'order-1',
+        orderNo: 'GD-1',
+        workOrderVersion: 2,
+        customerRef: null,
+      },
+      dedupeKey: 'notification:ORDER_COMPLETED:order-1:v2',
+      queued: false,
+    };
+    completionMock.mockResolvedValue({
+      completed: true,
+      orderStatus: OrderStatus.PACKING,
+      blockedBy: null,
+      uncoveredItems: [],
+      notification,
+    });
+
+    await expect(
+      reportProductionProgress(input({ completedQty: 100 }), ACTOR),
+    ).resolves.toMatchObject({
+      progressStatus: ProductionOperationStatus.COMPLETED,
+      orderStatus: OrderStatus.PACKING,
+    });
+    expect(completionMock).toHaveBeenCalledWith(
+      dbMock,
+      'order-1',
+      ACTOR.id,
+      NOW,
+    );
+    expect(completionDispatchMock).toHaveBeenCalledWith(notification);
   });
 
   it('累计合格数超过计划时拒绝写入', async () => {

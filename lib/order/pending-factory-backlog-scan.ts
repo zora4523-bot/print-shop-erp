@@ -1,5 +1,5 @@
 import { Prisma } from '../../generated/prisma/client';
-import { OrderStatus } from '../../generated/prisma/enums';
+import { FACTORY_CONFIRMATION_PENDING_STATUSES } from './factory-confirmation-preflight';
 
 export type PendingFactoryBacklogCandidate = {
   count: number;
@@ -17,19 +17,25 @@ export type PendingFactoryBacklogRepository = {
   }>;
 };
 
+export function pendingFactoryBacklogWhere(): Prisma.OrderWhereInput {
+  return {
+    status: { in: [...FACTORY_CONFIRMATION_PENDING_STATUSES] },
+  };
+}
+
 const databaseRepository: PendingFactoryBacklogRepository = {
   readSnapshot: async (threshold) => {
     const { db } = await import('../db');
     return db.$transaction(
       async (tx) => {
         const count = await tx.order.count({
-          where: { status: OrderStatus.PENDING_FACTORY },
+          where: pendingFactoryBacklogWhere(),
         });
         if (count < threshold) {
           return { count, representativeOrder: null };
         }
         const representativeOrder = await tx.order.findFirst({
-          where: { status: OrderStatus.PENDING_FACTORY },
+          where: pendingFactoryBacklogWhere(),
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           select: { id: true, orderNo: true },
         });

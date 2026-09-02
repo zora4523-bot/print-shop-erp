@@ -11,9 +11,15 @@ import {
   WorkerType,
 } from '../../../generated/prisma/enums';
 
-const { dbMock, databaseNowMock, completionMock } = vi.hoisted(() => ({
+const {
+  dbMock,
+  databaseNowMock,
+  completionMock,
+  completionDispatchMock,
+} = vi.hoisted(() => ({
   databaseNowMock: vi.fn(),
   completionMock: vi.fn(),
+  completionDispatchMock: vi.fn(),
   dbMock: {
     productionOperation: {
       findUnique: vi.fn(),
@@ -50,6 +56,7 @@ vi.mock('@/lib/background-jobs/clock', () => ({
 }));
 vi.mock('@/lib/production-completion', () => ({
   maybeCompleteProductionOrder: completionMock,
+  dispatchProductionCompletionNotification: completionDispatchMock,
 }));
 
 import {
@@ -160,6 +167,7 @@ beforeEach(() => {
     blockedBy: 'INTERNAL_TASKS',
     uncoveredItems: [],
   });
+  completionDispatchMock.mockReset().mockResolvedValue(undefined);
   arrangeOperation();
   dbMock.user.findUnique.mockResolvedValue(accountFixture());
   dbMock.productionReport.findUnique.mockResolvedValue(null);
@@ -468,10 +476,27 @@ describe('reportProductionOperation', () => {
       },
     });
     dbMock.productionOperation.count.mockResolvedValue(0);
+    const notification = {
+      payload: {
+        orderId: 'order-1',
+        orderNo: 'GD-1',
+        workOrderVersion: 1,
+        customerRef: null,
+      },
+      dedupeKey: 'notification:ORDER_COMPLETED:order-1',
+      queued: false,
+    };
     completionMock.mockResolvedValue({
       completed: true,
+      orderStatus: OrderStatus.COMPLETED,
       blockedBy: null,
       uncoveredItems: [],
+      notification,
+    });
+    dbMock.$transaction.mockImplementationOnce(async (callback) => {
+      const transactionResult = await callback(dbMock);
+      expect(completionDispatchMock).not.toHaveBeenCalled();
+      return transactionResult;
     });
 
     const result = await reportProductionOperation(
@@ -490,6 +515,66 @@ describe('reportProductionOperation', () => {
       ACTOR.id,
       NOW,
     );
+    expect(completionDispatchMock).toHaveBeenCalledWith(notification);
+  });
+
+  it('canonical 最后一道计件工序完成后保持阶段状态并在提交后发送当前代次通知', async () => {
+    arrangeOperation(
+      operationFixture({
+        workOrderVersion: 2,
+        order: {
+          id: 'order-1',
+          orderNo: 'GD-1',
+          status: OrderStatus.PACKING,
+          scheduledAt: NOW,
+          workOrderVersion: 2,
+        },
+      }),
+    );
+    dbMock.productionReport.aggregate.mockResolvedValue({
+      _sum: {
+        reportedCompletedQty: new Decimal(100),
+        defectQty: new Decimal(0),
+        reworkQty: new Decimal(0),
+      },
+    });
+    const notification = {
+      payload: {
+        orderId: 'order-1',
+        orderNo: 'GD-1',
+        workOrderVersion: 2,
+        customerRef: null,
+      },
+      dedupeKey: 'notification:ORDER_COMPLETED:order-1:v2',
+      queued: false,
+    };
+    completionMock.mockResolvedValue({
+      completed: true,
+      orderStatus: OrderStatus.PACKING,
+      blockedBy: null,
+      uncoveredItems: [],
+      notification,
+    });
+
+    const result = await reportProductionOperation(
+      reportInput({
+        completedQty: 100,
+        defectQty: 0,
+        reworkQty: 0,
+        workOrderProgressQuantity: 100,
+      }),
+      ACTOR,
+    );
+
+    expect(result.operationStatus).toBe(ProductionOperationStatus.COMPLETED);
+    expect(result.orderStatus).toBe(OrderStatus.PACKING);
+    expect(completionMock).toHaveBeenCalledWith(
+      dbMock,
+      'order-1',
+      ACTOR.id,
+      NOW,
+    );
+    expect(completionDispatchMock).toHaveBeenCalledWith(notification);
   });
 
   it('serializes concurrent identical requests and inserts only once', async () => {

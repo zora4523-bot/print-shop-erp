@@ -18,6 +18,7 @@ import type { EnqueueClient } from '../../background-jobs/repository';
 const payload = {
   orderId: 'order-1',
   orderNo: 'O-1',
+  workOrderVersion: 1,
   customerRef: null,
 };
 const tx = { backgroundJob: {}, $queryRaw: vi.fn() } as unknown as EnqueueClient;

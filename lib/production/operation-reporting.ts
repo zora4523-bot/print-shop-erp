@@ -17,7 +17,9 @@ import { db } from '../db';
 import { orderCascadeLockKey } from '../order/locks';
 import { transitionOrder } from '../order/status-machine';
 import {
+  dispatchProductionCompletionNotification,
   maybeCompleteProductionOrder,
+  type ProductionCompletionNotification,
   type ProductionCompletionTx,
 } from '../production-completion';
 import { calculatePieceworkAmount } from '../salary/piecework-pricing';
@@ -786,7 +788,11 @@ async function advanceProductionAfterReport(
   plan: OperationCompletionPlan,
   completedAggregate: Decimal,
   reportedAt: Date,
-): Promise<{ operationStatus: ProductionOperationStatus; orderStatus: OrderStatus }> {
+): Promise<{
+  operationStatus: ProductionOperationStatus;
+  orderStatus: OrderStatus;
+  notification?: ProductionCompletionNotification;
+}> {
   const operationStatus = completedAggregate.eq(plan.plannedPieces)
     ? ProductionOperationStatus.COMPLETED
     : ProductionOperationStatus.IN_PROGRESS;
@@ -852,46 +858,40 @@ async function advanceProductionAfterReport(
     }
   }
 
-  // The canonical workflow stays FOILING/PACKING until the explicit shipping
-  // command. COMPLETED is an expand-migration compatibility state only.
-  if (isCanonicalProductionStatus(orderStatus)) {
-    return { operationStatus, orderStatus };
-  }
-
-  const remainingOperations = await tx.productionOperation.count({
-    where: {
-      orderId: operation.orderId,
-      workOrderVersion: operation.workOrderVersion,
-      status: {
-        notIn: [
-          ProductionOperationStatus.COMPLETED,
-          ProductionOperationStatus.CANCELLED,
-        ],
-      },
-    },
-  });
-  if (remainingOperations === 0) {
+  let notification: ProductionCompletionNotification | undefined;
+  // The shared gate now has two effects: legacy orders still transition to
+  // COMPLETED, while canonical orders converge on PACKING and emit the
+  // production-ready notification once every current unit and outsource row
+  // is complete. Calling it only when this operation reaches terminal state
+  // avoids redundant reads on partial reports.
+  if (operationStatus === ProductionOperationStatus.COMPLETED) {
     const completion = await maybeCompleteProductionOrder(
       tx as unknown as ProductionCompletionTx,
       operation.orderId,
       account.id,
       reportedAt,
     );
-    if (completion.completed) orderStatus = OrderStatus.COMPLETED;
+    if (completion.orderStatus) orderStatus = completion.orderStatus;
+    notification = completion.notification;
   }
-  return { operationStatus, orderStatus };
+  return { operationStatus, orderStatus, notification };
 }
+
+type OperationReportTransactionResult = {
+  result: OperationReportResult;
+  notification?: ProductionCompletionNotification;
+};
 
 async function reportProductionOperationInTx(
   tx: Prisma.TransactionClient,
   input: OperationReportInput,
   actor: OperationReportActor,
   parsed: ValidatedOperationReportInput,
-): Promise<OperationReportResult> {
+): Promise<OperationReportTransactionResult> {
   const { operation, account, existingReport } =
     await loadLockedOperationContext(tx, input, actor, parsed);
   if (existingReport) {
-    return replayIdempotentReport(existingReport, input, actor);
+    return { result: replayIdempotentReport(existingReport, input, actor) };
   }
 
   assertOperationIsReportable(operation);
@@ -957,23 +957,27 @@ async function reportProductionOperationInTx(
       throw error;
     }
   }
-  const { operationStatus, orderStatus } = await advanceProductionAfterReport(
-    tx,
-    operation,
-    account,
-    plan,
-    completedAggregate,
-    reportedAt,
-  );
+  const { operationStatus, orderStatus, notification } =
+    await advanceProductionAfterReport(
+      tx,
+      operation,
+      account,
+      plan,
+      completedAggregate,
+      reportedAt,
+    );
   return {
-    reportId,
-    operationId: operation.id,
-    orderId: operation.orderId,
-    operationStatus,
-    orderStatus,
-    completedAggregate: completedAggregate.toString(),
-    amount,
-    idempotentReplay: false,
+    result: {
+      reportId,
+      operationId: operation.id,
+      orderId: operation.orderId,
+      operationStatus,
+      orderStatus,
+      completedAggregate: completedAggregate.toString(),
+      amount,
+      idempotentReplay: false,
+    },
+    ...(notification ? { notification } : {}),
   };
 }
 
@@ -987,7 +991,9 @@ export async function reportProductionOperation(
   actor: OperationReportActor,
 ): Promise<OperationReportResult> {
   const parsed = validateInput(input);
-  return db.$transaction((tx) =>
+  const committed = await db.$transaction((tx) =>
     reportProductionOperationInTx(tx, input, actor, parsed),
   );
+  await dispatchProductionCompletionNotification(committed.notification);
+  return committed.result;
 }

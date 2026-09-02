@@ -11,6 +11,8 @@ import {
 } from '../execution-fence';
 import { parseStrictYmd } from '../auth/schemas';
 import { todayShanghai } from '../dashboard/shanghai-clock';
+import { dispatchNotification } from '../notification/dispatch';
+import type { NotificationPayloadFor } from '../notification/events';
 import { enqueueNotificationInTransaction } from '../notification/transactional-outbox';
 import type { EnqueueClient } from '../background-jobs/repository';
 import {
@@ -388,6 +390,14 @@ type CsSettlementUser = {
   employmentEndDate: Date | null;
 };
 
+type CsSettlementTransactionResult = {
+  settlement: SettledCommission;
+  postCommitNotification: {
+    payload: NotificationPayloadFor<'CS_PERIOD_SETTLED'>;
+    dedupeKey: string;
+  } | null;
+};
+
 type CsSettlementTx = SalaryRuleClient & {
   $executeRaw: (
     strings: TemplateStringsArray,
@@ -503,7 +513,7 @@ async function settleCsPeriodInTx(
   periodId: string,
   now: Date,
   fence?: ExecutionFence,
-): Promise<SettledCommission> {
+): Promise<CsSettlementTransactionResult> {
     // First look up csUserId (un-locked but ID is immutable, so no
     // race). Then acquire the user-scope lock BEFORE re-reading the
     // period in full, so accumulateCsSales and any concurrent
@@ -744,29 +754,39 @@ async function settleCsPeriodInTx(
     // Durable mode uses the settlement transaction as an outbox boundary. If
     // enqueue fails the finance mutation rolls back, so a retry can never find
     // an already-SETTLED period whose notification was silently lost.
+    const notificationPayload: NotificationPayloadFor<'CS_PERIOD_SETTLED'> = {
+      settledCount: 1,
+      csName: csUser.displayName ?? period.csUserId,
+      totalSales: totalForTier.toFixed(2),
+      commission: commissionAmount.toFixed(2),
+    };
+    const notificationDedupeKey = `notification:CS_PERIOD_SETTLED:${period.id}`;
     const notificationQueued = await enqueueNotificationInTransaction(
       txc as unknown as EnqueueClient,
       'CS_PERIOD_SETTLED',
-      {
-        settledCount: 1,
-        csName: csUser.displayName ?? period.csUserId,
-        totalSales: totalForTier.toFixed(2),
-        commission: commissionAmount.toFixed(2),
-      },
-      { dedupeKey: `notification:CS_PERIOD_SETTLED:${period.id}` },
+      notificationPayload,
+      { dedupeKey: notificationDedupeKey },
     );
 
     return {
-      commissionId: commission.id,
-      periodId: period.id,
-      csUserId: period.csUserId,
-      totalSales: totalForTier.toFixed(2),
-      tierRate: breakdown.tierRate.toFixed(4),
-      commissionAmount: commissionAmount.toFixed(2),
-      monthlyBaseTotal: monthlyBaseTotal.toFixed(2),
-      totalIncome: totalIncome.toFixed(2),
-      nextPeriodId,
-      notificationQueued,
+      settlement: {
+        commissionId: commission.id,
+        periodId: period.id,
+        csUserId: period.csUserId,
+        totalSales: totalForTier.toFixed(2),
+        tierRate: breakdown.tierRate.toFixed(4),
+        commissionAmount: commissionAmount.toFixed(2),
+        monthlyBaseTotal: monthlyBaseTotal.toFixed(2),
+        totalIncome: totalIncome.toFixed(2),
+        nextPeriodId,
+        notificationQueued,
+      },
+      postCommitNotification: notificationQueued
+        ? null
+        : {
+            payload: notificationPayload,
+            dedupeKey: notificationDedupeKey,
+          },
     };
 }
 
@@ -775,9 +795,17 @@ export async function settleCsPeriod(
   now: Date = new Date(),
   fence?: ExecutionFence,
 ): Promise<SettledCommission> {
-  return db.$transaction((tx) =>
+  const committed = await db.$transaction((tx) =>
     settleCsPeriodInTx(tx as unknown as CsSettlementTx, periodId, now, fence),
   );
+  if (committed.postCommitNotification) {
+    await dispatchNotification(
+      'CS_PERIOD_SETTLED',
+      committed.postCommitNotification.payload,
+      { dedupeKey: committed.postCommitNotification.dedupeKey },
+    );
+  }
+  return committed.settlement;
 }
 
 // Batch: finds every IN_PROGRESS period whose inclusive periodEnd is before
@@ -790,8 +818,9 @@ export type BatchSettleResult = {
 const MAX_CS_PERIODS_PER_SETTLEMENT_RUN = 10_000;
 
 // A batch can commit earlier periods before a later database/programming
-// failure occurs. Preserve those committed results so the cron layer can emit
-// their idempotent notifications, then rethrow this error for Sentry/job retry.
+// failure occurs. Each committed period already owns its notification through
+// the transaction outbox or post-commit inline fallback; preserve the partial
+// result only for progress reporting, then rethrow for Sentry/job retry.
 export class CsBatchUnexpectedError extends Error {
   readonly partialResult: BatchSettleResult;
 

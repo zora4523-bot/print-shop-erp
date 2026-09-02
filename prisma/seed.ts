@@ -405,11 +405,13 @@ async function seedNotificationEvents() {
     },
     {
       eventType: 'ORDER_SCHEDULED',
-      messageTemplate: '**工单已排产**\n工单号：{orderNo}\n分配任务数：{taskCount}',
+      messageTemplate:
+        '**工单已下发**\n工单号：{orderNo}\n当前生产步骤数：{taskCount}',
     },
     {
       eventType: 'ORDER_COMPLETED',
-      messageTemplate: '**工单完工**\n工单号：{orderNo}\n可以安排发货',
+      messageTemplate:
+        '**生产已完成**\n工单号：{orderNo}\n请在系统核对当前状态后处理',
     },
     {
       eventType: 'ORDER_SHIPPED',
@@ -445,21 +447,24 @@ async function seedNotificationEvents() {
     },
   ];
 
-  for (const rule of rules) {
-    await db.notificationRule.upsert({
-      where: { eventType: rule.eventType },
-      update: {
-        messageTemplate: rule.messageTemplate,
-      },
-      create: {
-        eventType: rule.eventType,
-        channelIds: [], // 上线后管理员自己配置
-        messageTemplate: rule.messageTemplate,
-        isActive: false, // 默认关闭，配好Webhook再开启
-      },
-    });
-  }
-  console.log(`  ✓ 推送事件规则 ${rules.length} 条（默认未启用，配好Webhook后启用）`);
+  // NotificationRule is administrator-owned configuration after its first
+  // creation. A deploy-time seed must never restore the default template,
+  // activation switch or channel routing over an existing row. eventType is
+  // the only registry identity and is unique, so createMany + ON CONFLICT DO
+  // NOTHING safely fills newly introduced events without updating any
+  // configurable field.
+  const created = await db.notificationRule.createMany({
+    data: rules.map((rule) => ({
+      eventType: rule.eventType,
+      channelIds: [], // 上线后管理员自己配置
+      messageTemplate: rule.messageTemplate,
+      isActive: false, // 默认关闭，配好 Webhook 再开启
+    })),
+    skipDuplicates: true,
+  });
+  console.log(
+    `  ✓ 推送事件规则 ${rules.length} 条（新建 ${created.count}，保留已有 ${rules.length - created.count}）`,
+  );
 }
 
 // ============================================================

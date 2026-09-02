@@ -99,6 +99,7 @@ describe('dispatchNotification', () => {
     dispatchNotification('ORDER_COMPLETED', {
       orderId: 'o1',
       orderNo: 'O-1',
+      workOrderVersion: 1,
       customerRef: null,
     });
     expect(notifyMock).toHaveBeenCalledTimes(1);
@@ -192,6 +193,7 @@ describe('dispatchNotification', () => {
       dispatchNotification('ORDER_COMPLETED', {
         orderId: 'o1',
         orderNo: 'O-1',
+        workOrderVersion: 1,
         customerRef: null,
       }),
     ).rejects.toMatchObject({ name: 'DatabaseUnavailableError' });
@@ -224,6 +226,7 @@ describe('dispatchNotification · notify 返回可重试 outcome 时不带崩同
   const payload = {
     orderId: 'o1',
     orderNo: 'O-1',
+    workOrderVersion: 1,
     customerRef: null,
   } as const;
 

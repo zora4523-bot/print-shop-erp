@@ -72,6 +72,7 @@ import {
   DailySalaryBatchIncompleteError,
   runGenerateBillsTask,
   runHourlyPayrollTask,
+  runCsSettleTask,
 } from '../tasks';
 
 beforeEach(() => {
@@ -174,5 +175,19 @@ describe('cron task partial batch failures', () => {
       '[cron:generate-bills] unexpected failure after partial progress:',
       { committedCount: 1, businessErrorCount: 1 },
     );
+  });
+
+  it('does not dispatch CS settlement notifications a second time', async () => {
+    settleReadyCsMock.mockResolvedValue({
+      settled: [{ periodId: 'period-1', notificationQueued: false }],
+      errors: [],
+    });
+
+    await expect(runCsSettleTask()).resolves.toEqual({
+      status: 'ok',
+      settledCount: 1,
+      errorCount: 0,
+    });
+    expect(dispatchMock).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import { db } from '../db';
 import {
   NOTIFICATION_EVENTS,
   PRIVATE_EVENT_MAX_CHANNELS,
+  SUPERSEDED_BEFORE_SEND_ERROR,
   TEST_EVENT_TYPE,
   isPrivatePerCsEvent,
   managementNotificationRoleForEvent,
@@ -264,7 +265,7 @@ export async function deleteChannel(id: string): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Rule 列表 / 详情 / 更新（lazy upsert 默认 10 条）
+// Rule 列表 / 详情 / 更新（seed 默认 15 条）
 // ─────────────────────────────────────────────────────────────────────
 
 export type RuleSummary = {
@@ -276,8 +277,8 @@ export type RuleSummary = {
 };
 
 /**
- * 列出全部 10 条 rule（按 eventType 字母序固定，让 UI 顺序稳定）。
- * 兼容场景：seed.ts 把 10 条 rule upsert 出来；如果某条因为 schema
+ * 列出全部 15 条 rule（按 eventType 字母序固定，让 UI 顺序稳定）。
+ * 兼容场景：seed.ts 把 15 条 rule 首次创建出来；如果某条因为 schema
  * 飘忽缺失，这里仍然返已有的（UI 显示&ldquo;未配置&rdquo;空槽）。
  */
 export async function listRules(): Promise<RuleSummary[]> {
@@ -741,6 +742,7 @@ export async function countRecentFailures(
            - (${windowHours}::double precision * INTERVAL '1 hour')
        )
        AND log."eventType" <> ${TEST_EVENT_TYPE}
+       AND log."errorMessage" IS DISTINCT FROM ${SUPERSEDED_BEFORE_SEND_ERROR}
   `;
   const count = rows[0]?.count;
   if (typeof count !== 'bigint') {
