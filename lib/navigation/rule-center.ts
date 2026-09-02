@@ -84,7 +84,7 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
     menuParentId: 'overview',
     menuGroupLabel: '客户计价规则',
     label: '局部烫金机烫费',
-    description: '维护局部烫金的费率、固定费、跳变点与制版费。',
+    description: '维护局部烫金的机烫费参数；制版费始终由管理员人工核价。',
     impact: '新建工单计价',
     effect: 'versioned',
     href: `${RULE_CENTER_HREFS.customerPricing}?section=machine`,

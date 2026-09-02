@@ -180,4 +180,65 @@ describe('quoteInternalCreateOrder', () => {
       suggestedSubtotal: null,
     });
   });
+
+  it('纯彩印无烫金时返回完整总价且不展示制版待核价', async () => {
+    mocks.productFindMany.mockResolvedValue([
+      {
+        id: 'product-print-large',
+        code: 'PRINT-COATED-200-LARGE',
+        category: 'COLOR_PRINT',
+        specification: '大号封90×165',
+        paperType: '200g铜版纸',
+        paperMaterialId: 'paper-coated-200',
+        weight: 200,
+        isActive: true,
+      },
+    ]);
+    mocks.craftFindMany.mockResolvedValue([
+      { id: 'craft-print', code: 'COATED_COLOR_PRINT', isActive: true },
+    ]);
+    mocks.materialFindMany.mockResolvedValue([
+      {
+        id: 'paper-coated-200',
+        name: '铜版纸',
+        specification: '200g',
+        outOfStock: false,
+        isActive: true,
+      },
+    ]);
+
+    const result = await quoteInternalCreateOrder(
+      input({
+        items: [
+          {
+            ...automaticItem,
+            productId: 'product-print-large',
+            pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+            paperType: '200g铜版纸',
+            paperWeightGsm: 200,
+            crafts: ['craft-print'],
+            frontFoilColors: [],
+            backFoilColors: [],
+            foilColors: [],
+            foilTechnique: OrderFoilTechnique.NONE,
+            hasLocalFoil: false,
+            lamination: OrderLamination.NONE,
+            printColors: ['CMYK'],
+          },
+        ],
+      }),
+      now,
+    );
+
+    expect(result.items[0]?.errors).toEqual([]);
+    expect(result.items[0]).toMatchObject({ complete: true });
+    expect(result.packaging).toMatchObject({ requiresAdminConfirmation: false });
+    expect(result).toMatchObject({
+      knownTotal: '320.00',
+      total: '320.00',
+      hasManualPricing: false,
+      totalSemantics: 'COMPLETE',
+      plateFee: null,
+    });
+  });
 });

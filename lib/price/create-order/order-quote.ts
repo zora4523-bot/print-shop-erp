@@ -10,6 +10,20 @@ import type {
   CreateOrderQuoteResult,
 } from './types';
 
+export const CREATE_ORDER_PLATE_PRICING_POLICY = 'ADMIN_MANUAL_ONLY' as const;
+export const CREATE_ORDER_PLATE_PENDING_REASON =
+  '制烫金版费金额待管理员人工核价' as const;
+
+export function createOrderHasIndependentPlateFeeFacts(
+  input: CreateOrderQuoteInput,
+): boolean {
+  return input.items.some(
+    (item) =>
+      item.craft !== 'PRINT' &&
+      (item.frontColors.length > 0 || item.backColors.length > 0),
+  );
+}
+
 function validateOrderInput(input: CreateOrderQuoteInput): string[] {
   const errors: string[] = [];
   if (input.items.length === 0) errors.push('至少需要一个款式');
@@ -109,7 +123,11 @@ function pendingPlateLine(snapshot: CreateOrderPriceSnapshot): CreateOrderQuoteL
     status: 'PENDING_AMOUNT',
     amount: null,
     includedInKnownTotal: false,
-    basis: { displayAmount: '待定', granularity: 'PER_ORDER' },
+    basis: {
+      displayAmount: '待定',
+      granularity: 'PER_ORDER',
+      pricingPolicy: CREATE_ORDER_PLATE_PRICING_POLICY,
+    },
     errors: [],
   };
 }
@@ -117,12 +135,14 @@ function pendingPlateLine(snapshot: CreateOrderPriceSnapshot): CreateOrderQuoteL
 function quoteOrderLayer(
   input: CreateOrderQuoteInput,
   snapshot: CreateOrderPriceSnapshot,
+  plateFeeApplies: boolean,
 ): CreateOrderOrderQuote {
   if (input.includeOrderCharges === false) {
+    const lines = plateFeeApplies ? [pendingPlateLine(snapshot)] : [];
     return {
-      amount: null,
+      amount: plateFeeApplies ? null : '0.00',
       knownAmount: '0.00',
-      lines: [pendingPlateLine(snapshot)],
+      lines,
       errors: [],
     };
   }
@@ -201,7 +221,11 @@ function quoteOrderLayer(
       errors: shipment.shipping.errors,
     }),
   );
-  const lines = [carton, ...shipping, pendingPlateLine(snapshot)];
+  const lines = [
+    carton,
+    ...shipping,
+    ...(plateFeeApplies ? [pendingPlateLine(snapshot)] : []),
+  ];
   const knownAmount = sumMoney(
     lines.map((line) =>
       line.includedInKnownTotal ? line.amount : null,
@@ -245,14 +269,15 @@ export function calculateCreateOrderQuote(
     orderInputErrors.length > 0 ||
     items.some((item) => item.status === 'INVALID_INPUT') ||
     packagingGroups.some((group) => group.status === 'INVALID_INPUT');
+  const plateFeeApplies = createOrderHasIndependentPlateFeeFacts(input);
 
   const order =
     orderInputErrors.length === 0
-      ? quoteOrderLayer(input, snapshot)
+      ? quoteOrderLayer(input, snapshot, plateFeeApplies)
       : {
           amount: null,
           knownAmount: '0.00',
-          lines: [pendingPlateLine(snapshot)],
+          lines: plateFeeApplies ? [pendingPlateLine(snapshot)] : [],
           errors: orderInputErrors,
         };
   const manualReasons = items.flatMap((item) =>
@@ -292,10 +317,12 @@ export function calculateCreateOrderQuote(
         message: '快递或物流金额待定',
         shipmentKey: line.code.slice('SHIPPING:'.length),
       })),
-    {
-      code: 'PLATE_AMOUNT_PENDING' as const,
-      message: '制烫金版费金额待定',
-    },
+    ...order.lines
+      .filter((line) => line.code === 'PLATE_FEE')
+      .map(() => ({
+        code: 'PLATE_AMOUNT_PENDING' as const,
+        message: CREATE_ORDER_PLATE_PENDING_REASON,
+      })),
   ];
   const hasManual = manualReasons.length > 0;
   const hasBlockingPending =

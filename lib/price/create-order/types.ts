@@ -32,7 +32,8 @@ export type CreateOrderManualReasonCode =
   | 'PRINT_PRICE_NOT_FOUND'
   | 'PRINT_QUANTITY_OVER_LIMIT'
   | 'PRINT_FINISHING_PRICE_NOT_FOUND'
-  | 'PRINT_FOIL_PRICE_NOT_FOUND';
+  | 'PRINT_FOIL_PRICE_NOT_FOUND'
+  | 'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE';
 
 export type CreateOrderManualReason = {
   code: CreateOrderManualReasonCode;
@@ -164,6 +165,14 @@ export type PrintFoilPerOrderPrice = {
   amount: string | null;
 };
 
+/**
+ * Published color-print foil amounts are indivisible processing-plus-plate
+ * bundles. An explicitly versioned bundle may be quoted atomically, but its
+ * plate component must never also create an order-level plate charge.
+ */
+export const CREATE_ORDER_PRINT_FOIL_PRICING_POLICY =
+  'ATOMIC_BUNDLE_INCLUDES_PLATE' as const;
+
 export type CreateOrderPriceVersionEvidence = {
   id: string;
   code: string;
@@ -200,6 +209,8 @@ export type CreateOrderPriceSnapshot = {
   };
   print: {
     perOrderPrices: readonly PrintPerOrderPrice[];
+    foilPricingPolicy: typeof CREATE_ORDER_PRINT_FOIL_PRICING_POLICY;
+    /** Atomic processing-plus-plate totals, selected only at an exact published tier. */
     foilPerOrderPrices: readonly PrintFoilPerOrderPrice[];
   };
   bagging: {
@@ -208,6 +219,14 @@ export type CreateOrderPriceSnapshot = {
   };
   plate: {
     label: string;
+    /**
+     * Plate making cannot be inferred reliably from order facts or a price
+     * book rule. It always exits automatic pricing through the administrator
+     * confirmation workflow.
+     */
+    pricingPolicy: 'ADMIN_MANUAL_ONLY';
+    /** A configured amount must never become part of an automatic snapshot. */
+    amount?: never;
   };
   orderCharges: {
     rules: readonly ExternalOrderChargeRule[];

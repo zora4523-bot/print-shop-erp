@@ -182,7 +182,44 @@ function editableBagRule(): CustomerPriceSectionRuleDto {
   };
 }
 
+function editablePrintFoilRule(): CustomerPriceSectionRuleDto {
+  return {
+    id: 'print-foil-q1000-draft',
+    purpose: CustomerPriceBookPurpose.PROCESSING,
+    code: 'COLOR_SINGLE_FRONT_FOIL_Q1000',
+    current: null,
+    draft: {
+      id: 'print-foil-q1000-draft',
+      code: 'COLOR_SINGLE_FRONT_FOIL_Q1000',
+      amount: '200',
+      exclusiveGroup: 'COLOR_SINGLE_FRONT_FOIL',
+      product: null,
+    } as NonNullable<CustomerPriceSectionRuleDto['draft']>,
+    changed: false,
+    expectedUpdatedAt: '2026-08-29T00:00:00.000Z',
+  };
+}
+
 describe('CustomerPricingDedicatedSection', () => {
+  it('彩印含版费原子套餐属于彩印草稿，可编辑并随表单发布', () => {
+    const html = renderToStaticMarkup(
+      <CustomerPricingDedicatedSection
+        workspace={workspace(
+          'print',
+          [source(CustomerPriceBookPurpose.PROCESSING, 'draft')],
+          [editablePrintFoilRule()],
+        )}
+        createDraftPurpose={null}
+      />,
+    );
+
+    expect(html).toContain('data-section-draft-form="true"');
+    expect(html).toMatch(
+      /<input\b[^>]*aria-label="单色烫金1千档含版费原子套餐价"[^>]*value="200"/u,
+    );
+    expect(html).toContain('name="print.foil.Q1000"');
+  });
+
   it('只将受信草稿规则 id 解析到所属价格输入框', () => {
     const html = renderToStaticMarkup(
       <CustomerPricingDedicatedSection

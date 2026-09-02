@@ -75,6 +75,7 @@ import {
 import { appendOrderPricingRevisionInTx } from './order/pricing-revision';
 import {
   PendingPlateChargeError,
+  quoteHasPendingPlateCharge,
   requireActivePlateCategoryIdInTx,
   upsertPendingPlateChargeInTx,
 } from './order/pending-plate-charge';
@@ -1096,7 +1097,10 @@ export async function createOrder(
       ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
       : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
     let internalPlateCategoryId: string | null = null;
-    if (!isExternalSalesDraft) {
+    const internalHasPendingPlate =
+      !isExternalSalesDraft &&
+      quoteHasPendingPlateCharge(internalQuote!.quote);
+    if (internalHasPendingPlate) {
       try {
         internalPlateCategoryId = await requireActivePlateCategoryIdInTx(tx);
       } catch (error) {
@@ -1215,7 +1219,7 @@ export async function createOrder(
       },
     });
 
-    if (!isExternalSalesDraft) {
+    if (internalHasPendingPlate) {
       try {
         await upsertPendingPlateChargeInTx({
           tx,

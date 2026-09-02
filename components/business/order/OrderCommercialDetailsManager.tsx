@@ -48,6 +48,7 @@ type ItemWithPlateDetails = {
   id: string;
   sequence: number;
   name: string;
+  independentPlateEligible: boolean;
   plateDetails: PlateDetail[];
 };
 
@@ -56,6 +57,7 @@ type Props = {
   priceRevision: number;
   manualCharges: ManualCharge[];
   items: ItemWithPlateDetails[];
+  allowPlateDetailMaintenance: boolean;
 };
 
 const MANUAL_CHARGE_OPTIONS: Array<{
@@ -505,6 +507,7 @@ export function OrderCommercialDetailsManager({
   priceRevision,
   manualCharges,
   items,
+  allowPlateDetailMaintenance,
 }: Props) {
   return (
     <section className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -535,31 +538,43 @@ export function OrderCommercialDetailsManager({
 
       <div className="space-y-3 border-t pt-4">
         <h3 className="text-sm font-semibold">按款式制版明细</h3>
-        <ol className="space-y-4">
-          {items.map((item) => (
-            <li key={item.id} className="space-y-3 rounded-lg border p-3">
-              <p className="text-sm font-medium">
-                #{item.sequence} · {item.name}
-              </p>
-              {item.plateDetails.map((detail) => (
-                <PlateDetailEditor
-                  key={detail.id}
-                  orderId={orderId}
-                  orderItemId={item.id}
-                  priceRevision={priceRevision}
-                  detail={detail}
-                />
-              ))}
-              <PlateDetailEditor
-                key={`new-plate-${item.id}-${priceRevision}`}
-                orderId={orderId}
-                orderItemId={item.id}
-                priceRevision={priceRevision}
-                detail={null}
-              />
-            </li>
-          ))}
-        </ol>
+        {allowPlateDetailMaintenance ? (
+          <ol className="space-y-4">
+            {items.map((item) => (
+              <li key={item.id} className="space-y-3 rounded-lg border p-3">
+                <p className="text-sm font-medium">
+                  #{item.sequence} · {item.name}
+                </p>
+                {item.plateDetails.map((detail) => (
+                  <PlateDetailEditor
+                    key={detail.id}
+                    orderId={orderId}
+                    orderItemId={item.id}
+                    priceRevision={priceRevision}
+                    detail={detail}
+                  />
+                ))}
+                {item.independentPlateEligible ? (
+                  <PlateDetailEditor
+                    key={`new-plate-${item.id}-${priceRevision}`}
+                    orderId={orderId}
+                    orderItemId={item.id}
+                    priceRevision={priceRevision}
+                    detail={null}
+                  />
+                ) : (
+                  <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+                    该款式没有独立制版费：无烫金款不能录入；彩印烫金已包含在整款价中。
+                  </p>
+                )}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+            当前价格待管理员确认，请在上方“工厂核价确认”中直接填写制烫金版费；确认后才能维护逐款明细。
+          </p>
+        )}
       </div>
     </section>
   );

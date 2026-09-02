@@ -46,6 +46,7 @@ import { isNewOrderPricingRoute } from './pricing-route';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
 import {
   PendingPlateChargeError,
+  quoteHasPendingPlateCharge,
   requireActivePlateCategoryIdInTx,
   upsertPendingPlateChargeInTx,
 } from './pending-plate-charge';
@@ -841,14 +842,17 @@ export async function finalizeExternalOrderQuoteInTx(
     quote,
     snapshot: priceSnapshot,
   });
-  let plateCategoryId: string;
-  try {
-    plateCategoryId = await requireActivePlateCategoryIdInTx(tx);
-  } catch (error) {
-    if (error instanceof PendingPlateChargeError) {
-      throw new ExternalOrderQuoteFinalizeError(error.message);
+  const hasPendingPlate = quoteHasPendingPlateCharge(quote);
+  let plateCategoryId: string | null = null;
+  if (hasPendingPlate) {
+    try {
+      plateCategoryId = await requireActivePlateCategoryIdInTx(tx);
+    } catch (error) {
+      if (error instanceof PendingPlateChargeError) {
+        throw new ExternalOrderQuoteFinalizeError(error.message);
+      }
+      throw error;
     }
-    throw error;
   }
   const manualItemIds: string[] = [];
   let knownItemAmount = new Decimal(0);
@@ -1103,20 +1107,22 @@ export async function finalizeExternalOrderQuoteInTx(
       },
     });
   }
-  try {
-    await upsertPendingPlateChargeInTx({
-      tx,
-      orderId: order.id,
-      actorId,
-      categoryId: plateCategoryId,
-      quote,
-      source: 'EXTERNAL_SUBMIT_PENDING_PLATE',
-    });
-  } catch (error) {
-    if (error instanceof PendingPlateChargeError) {
-      throw new ExternalOrderQuoteFinalizeError(error.message);
+  if (hasPendingPlate) {
+    try {
+      await upsertPendingPlateChargeInTx({
+        tx,
+        orderId: order.id,
+        actorId,
+        categoryId: plateCategoryId!,
+        quote,
+        source: 'EXTERNAL_SUBMIT_PENDING_PLATE',
+      });
+    } catch (error) {
+      if (error instanceof PendingPlateChargeError) {
+        throw new ExternalOrderQuoteFinalizeError(error.message);
+      }
+      throw error;
     }
-    throw error;
   }
 
   const knownProcessingAmount = knownItemAmount.plus(knownPackagingAmount);
@@ -1135,9 +1141,6 @@ export async function finalizeExternalOrderQuoteInTx(
   const logisticsAmount = knownLogisticsAmount.toFixed(2);
   const totalAmount = knownTotalAmount.toFixed(2);
   const hasManual = presentation.hasManualPricing;
-  const hasPendingPlate = quote.order.lines.some(
-    (line) => line.code === 'PLATE_FEE' && line.status === 'PENDING_AMOUNT',
-  );
   if (
     hasManual !==
     (manualItemIds.length > 0 ||

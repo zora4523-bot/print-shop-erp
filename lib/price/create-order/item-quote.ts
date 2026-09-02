@@ -13,6 +13,7 @@ import {
   selectPartialUnitPrice,
   selectPrintPerOrderPrice,
 } from './selectors';
+import { CREATE_ORDER_PRINT_FOIL_PRICING_POLICY } from './types';
 import type {
   CreateOrderItemQuote,
   CreateOrderManualReason,
@@ -59,6 +60,49 @@ function manualReason(
   return { code, message };
 }
 
+function printFoilValidationErrors(
+  item: CreateOrderQuoteItemInput,
+): string[] {
+  if (item.craft !== 'PRINT') return [];
+  const errors: string[] = [];
+  const foilMode = item.printFoilMode ?? 'NONE';
+  const foilPassCount = item.frontColors.length + item.backColors.length;
+  if (foilMode === 'FULL' && item.backColors.length > 0) {
+    errors.push('彩印叠加专版烫金只能使用正面');
+  }
+  if (foilMode === 'NONE' && foilPassCount > 0) {
+    errors.push('彩印未叠加烫金时不能携带烫金颜色');
+  }
+  if (foilMode !== 'NONE' && foilPassCount === 0) {
+    errors.push('彩印叠加烫金时必须选择至少一种烫金颜色');
+  }
+  return errors;
+}
+
+function appendPrintFoilManualPricePolicy(
+  item: CreateOrderQuoteItemInput,
+  reasons: readonly CreateOrderManualReason[],
+): CreateOrderManualReason[] {
+  const hasPrintFoilFacts =
+    item.craft === 'PRINT' &&
+    item.frontColors.length + item.backColors.length > 0;
+  if (
+    !hasPrintFoilFacts ||
+    reasons.some(
+      (reason) => reason.code === 'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+    )
+  ) {
+    return [...reasons];
+  }
+  return [
+    ...reasons,
+    manualReason(
+      'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+      '彩印烫金款的人工整款价必须包含制烫金版费，不再另收独立制版费',
+    ),
+  ];
+}
+
 function validateItem(item: CreateOrderQuoteItemInput): string[] {
   const errors: string[] = [];
   if (!item.itemKey.trim()) errors.push('款式标识不能为空');
@@ -86,20 +130,7 @@ function validateItem(item: CreateOrderQuoteItemInput): string[] {
   if (item.craft === 'FULL' && item.backColors.length > 0) {
     errors.push('专版烫金只能使用正面');
   }
-  if (
-    item.craft === 'PRINT' &&
-    (item.printFoilMode ?? 'NONE') === 'FULL' &&
-    item.backColors.length > 0
-  ) {
-    errors.push('彩印叠加专版烫金只能使用正面');
-  }
-  if (
-    item.craft === 'PRINT' &&
-    (item.printFoilMode ?? 'NONE') === 'NONE' &&
-    item.frontColors.length + item.backColors.length > 0
-  ) {
-    errors.push('彩印未叠加烫金时不能携带烫金颜色');
-  }
+  errors.push(...printFoilValidationErrors(item));
   return errors;
 }
 
@@ -624,11 +655,14 @@ function quotePrintProcessing(
         candidate.foilPassCount === passCount &&
         candidate.tierQuantity === tierQuantity,
     );
-    const addOn =
-      matches.length === 1 && matches[0]!.amount !== null
+    const bundledAmount =
+      snapshot.print.foilPricingPolicy ===
+        CREATE_ORDER_PRINT_FOIL_PRICING_POLICY &&
+      matches.length === 1 &&
+      matches[0]!.amount !== null
         ? decimalValue(matches[0]!.amount!)
         : null;
-    if (!addOn) {
+    if (bundledAmount === null) {
       return {
         lines,
         amount: null,
@@ -636,30 +670,32 @@ function quotePrintProcessing(
         manualReasons: [
           manualReason(
             'PRINT_FOIL_PRICE_NOT_FOUND',
-            '彩印叠加烫金的当前模式、过版数或数量档没有价格',
+            '彩印单色烫金含版费原子套餐的当前模式、过版数或数量档没有唯一明确价格',
           ),
         ],
         errors: [],
       };
     }
-    const addOnAmount = safeMoney(addOn);
-    if (addOnAmount === null) {
+    const safeBundledAmount = safeMoney(bundledAmount);
+    if (safeBundledAmount === null) {
       return {
         lines: [],
         amount: null,
         unitPrice: null,
         manualReasons: [],
-        errors: ['彩印烫金加价超过可保存上限'],
+        errors: ['彩印烫金含版费套餐价超过可保存上限'],
       };
     }
     lines.push(
       quotedItemLine({
         itemKey: item.itemKey,
         code: 'PRINT_FOIL_PER_ORDER',
-        label: '彩印叠加烫金',
-        amount: addOnAmount,
+        label: '彩印单色烫金（含制版费）',
+        amount: safeBundledAmount,
         basis: {
           pricingModel: 'PER_ORDER',
+          pricingPolicy: CREATE_ORDER_PRINT_FOIL_PRICING_POLICY,
+          plateTreatment: 'INCLUDED_IN_ATOMIC_BUNDLE',
           mode: foilMode,
           passCount,
           tierQuantity,
@@ -714,6 +750,7 @@ export function quoteCreateOrderItem(
     if (!Number.isSafeInteger(item.quantity) || item.quantity < 1) {
       basicErrors.push('数量必须是正整数');
     }
+    basicErrors.push(...printFoilValidationErrors(item));
     if (basicErrors.length > 0) {
       return {
         itemKey: item.itemKey,
@@ -737,12 +774,12 @@ export function quoteCreateOrderItem(
       amount: null,
       knownAmount: '0.00',
       lines: [],
-      manualReasons: [
+      manualReasons: appendPrintFoilManualPricePolicy(item, [
         manualReason(
           'CONFIGURATION_OUTSIDE_NOTE',
           `配置外项目：${manualPricingReason}`,
         ),
-      ],
+      ]),
       errors: [],
     };
   }
@@ -770,10 +807,14 @@ export function quoteCreateOrderItem(
       : item.craft === 'FULL'
         ? quoteFullProcessing(item, snapshot)
         : quotePrintProcessing(item, snapshot);
-  const manualReasons = [
+  const baseManualReasons = [
     ...inheritedManualReasons,
     ...processing.manualReasons,
   ];
+  const manualReasons =
+    baseManualReasons.length > 0
+      ? appendPrintFoilManualPricePolicy(item, baseManualReasons)
+      : baseManualReasons;
   const errors = [
     ...processing.errors,
   ];

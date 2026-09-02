@@ -16,6 +16,7 @@ import type {
   CreateOrderPriceVersionBundle,
   CreateOrderPricingGroup,
 } from '../price/create-order/types';
+import { CREATE_ORDER_PRINT_FOIL_PRICING_POLICY } from '../price/create-order/types';
 import { parseCustomerRuleCondition } from '../price/customer-rule-condition';
 import type {
   ExternalOrderChargeRule,
@@ -79,6 +80,8 @@ export type PublishedCreateOrderPriceProjectionAudit = {
     printFoil: readonly string[];
     bagging: readonly string[];
     logistics: readonly string[];
+    /** Published legacy/configured plate rules retained only as audit evidence. */
+    manualOnlyPlate: readonly string[];
   };
 };
 
@@ -128,6 +131,13 @@ function ruleIdentity(rule: PublishedCreateOrderRuleRow): {
   code: string;
 } {
   return { id: rule.id, code: textCode(rule.code) };
+}
+
+function isManualOnlyPlateRule(rule: PublishedCreateOrderRuleRow): boolean {
+  return (
+    textCode(rule.category.code).toLocaleUpperCase('en-US') ===
+    'PLATE_MAKING_FEE'
+  );
 }
 
 function invalidRule(
@@ -919,6 +929,7 @@ function projectPrint(
             `${right.paperType}:${right.paperWeightGsm}:${right.specification}`,
           ) || left.tierQuantity - right.tierQuantity,
       ),
+      foilPricingPolicy: CREATE_ORDER_PRINT_FOIL_PRICING_POLICY,
       foilPerOrderPrices: foilPerOrderPrices.sort(
         (left, right) =>
           left.tierQuantity - right.tierQuantity ||
@@ -1294,6 +1305,15 @@ export function projectPublishedCreateOrderPriceSnapshot(
     (rule) =>
       rule.isActive && rule.priceBookId === input.priceVersion.logistics.id,
   );
+  const manualOnlyPlateRules = [...processingRules, ...logisticsRules].filter(
+    isManualOnlyPlateRule,
+  );
+  const automaticProcessingRules = processingRules.filter(
+    (rule) => !isManualOnlyPlateRule(rule),
+  );
+  const automaticLogisticsRules = logisticsRules.filter(
+    (rule) => !isManualOnlyPlateRule(rule),
+  );
   if (processingRules.length === 0 || logisticsRules.length === 0) {
     throw new PublishedCreateOrderPriceAdapterError(
       'MISSING_RULE',
@@ -1304,11 +1324,15 @@ export function projectPublishedCreateOrderPriceSnapshot(
   assertUniqueCodes(logisticsRules);
 
   const consumed = new Set<string>();
-  const partial = projectPartial(processingRules, consumed);
-  const full = projectFull(processingRules, input.processingNotes, consumed);
-  const print = projectPrint(processingRules, consumed);
-  const bagging = projectBagging(processingRules, consumed);
-  for (const rule of processingRules) {
+  const partial = projectPartial(automaticProcessingRules, consumed);
+  const full = projectFull(
+    automaticProcessingRules,
+    input.processingNotes,
+    consumed,
+  );
+  const print = projectPrint(automaticProcessingRules, consumed);
+  const bagging = projectBagging(automaticProcessingRules, consumed);
+  for (const rule of automaticProcessingRules) {
     if (consumed.has(rule.id)) continue;
     const code = textCode(rule.code);
     if (
@@ -1325,7 +1349,10 @@ export function projectPublishedCreateOrderPriceSnapshot(
       ruleIdentity(rule),
     );
   }
-  const logistics = projectLogistics(logisticsRules, input.logisticsNotes);
+  const logistics = projectLogistics(
+    automaticLogisticsRules,
+    input.logisticsNotes,
+  );
   const processingRuleCodes = processingRules
     .map((rule) => textCode(rule.code))
     .sort(compareText);
@@ -1340,7 +1367,10 @@ export function projectPublishedCreateOrderPriceSnapshot(
       full: full.snapshot,
       print: print.snapshot,
       bagging: bagging.snapshot,
-      plate: { label: '\u5236\u70eb\u91d1\u7248\u8d39' },
+      plate: {
+        label: '\u5236\u70eb\u91d1\u7248\u8d39',
+        pricingPolicy: 'ADMIN_MANUAL_ONLY',
+      },
       orderCharges: {
         rules: logistics.rules,
         logisticsPolicy: logistics.policy,
@@ -1361,6 +1391,9 @@ export function projectPublishedCreateOrderPriceSnapshot(
         printFoil: print.foilCodes,
         bagging: bagging.codes,
         logistics: logistics.codes,
+        manualOnlyPlate: manualOnlyPlateRules
+          .map((rule) => textCode(rule.code))
+          .sort(compareText),
       },
     },
   };

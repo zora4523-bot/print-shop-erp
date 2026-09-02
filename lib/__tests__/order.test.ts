@@ -1400,6 +1400,98 @@ describe('createOrder', () => {
     );
   });
 
+  it('内部纯彩印无烫金建单不查也不写制版收费，价格自动确认', async () => {
+    dbMock.product.findMany.mockResolvedValue([
+      {
+        id: 'product-print',
+        code: 'PRINT-COATED-200-LARGE',
+        category: 'COLOR_PRINT',
+        specification: '大号封90×165',
+        paperType: '200g铜版纸',
+        paperMaterialId: null,
+        weight: 200,
+        isActive: true,
+      },
+    ]);
+    dbMock.craft.findMany.mockResolvedValue([
+      { id: 'craft-print', code: 'COATED_COLOR_PRINT', isActive: true },
+    ]);
+    dbMock.material.findMany.mockImplementation(
+      async ({ where }: { where: { category?: string; name?: { in: string[] } } }) =>
+        where.category
+          ? [
+              {
+                id: 'paper-coated-200',
+                name: '铜版纸',
+                specification: '200g',
+                outOfStock: false,
+                isActive: true,
+              },
+            ]
+          : (where.name?.in ?? []).map((name) => ({ name })),
+    );
+
+    const result = await createOrderDomain(
+      {
+        customerRef: null,
+        receiverName: null,
+        receiverPhone: null,
+        receiverAddress: '广东佛山测试收货地址',
+        expressCode: null,
+        packageRequirement: null,
+        remark: null,
+        promisedDate: null,
+        isUrgent: false,
+        isSfCollect: false,
+        items: [
+          baseItem({
+            name: '纯彩印款',
+            productId: 'product-print',
+            pricingRoute: 'COLOR_PRINT',
+            specification: '大号封90×165',
+            actualWidthMm: 90,
+            actualHeightMm: 165,
+            pricingGroup: 'LARGE',
+            paperType: '200g铜版纸',
+            paperWeightGsm: 200,
+            crafts: ['craft-print'],
+            frontFoilColors: [],
+            backFoilColors: [],
+            foilColors: [],
+            foilTechnique: 'NONE',
+            hasLocalFoil: false,
+            printColors: ['CMYK'],
+          }),
+        ],
+        packagingGroups: [
+          {
+            name: '纯彩印包装组',
+            mode: OrderPackagingMode.SINGLE_STYLE,
+            actualBagCount: 100,
+            itemUnitsPerBag: [10],
+          },
+        ],
+      },
+      ownerActor,
+      new Date('2026-04-23T09:00:00+08:00'),
+    );
+
+    expect(result.pricingStatus).toBe('AUTO_CONFIRMED');
+    expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
+      pricingStatus: 'AUTO_CONFIRMED',
+      processingAmount: '320.00',
+      totalAmount: '320.00',
+    });
+    expect(dbMock.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        status: 'AUTO_CONFIRMED',
+        source: 'ORDER_CREATED_AUTO',
+      }),
+    });
+  });
+
   it('ignores external-sales weight and fee overrides at order creation', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {

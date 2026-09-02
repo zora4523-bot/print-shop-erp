@@ -3828,6 +3828,7 @@ export function OrderForm({
                 settlementLabel={settlementLabel}
                 knownTotal={currentCreateOrderQuote?.knownTotal}
                 totalSemantics={currentCreateOrderQuote?.totalSemantics}
+                plateFee={currentCreateOrderQuote?.plateFee ?? null}
                 gaps={orderFormBGaps}
                 busy={
                   pendingState.busy ||
@@ -4079,8 +4080,12 @@ export function OrderForm({
             uploadError ??
             serverGeneralError ??
             (railLogistics?.status === 'complete'
-              ? '不含制版费。'
-              : '不含制版费与快递费。')
+              ? currentCreateOrderQuote?.plateFee
+                ? '不含制版费。'
+                : '当前已知费用已完整。'
+              : currentCreateOrderQuote?.plateFee
+                ? '不含制版费与快递费。'
+                : '不含快递费。')
           }
           confirmLabel={
             createdDraft && uploadError

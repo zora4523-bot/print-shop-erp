@@ -23,7 +23,9 @@ import {
 } from './create-order-quote-facts-adapter';
 import {
   type CreateOrderProcessingPresentation,
+  type CreateOrderPlateFeePreview,
   type CreateOrderQuotePresentation,
+  presentCreateOrderPlateFee,
   presentCreateOrderQuote,
   presentCreateOrderProcessingQuote,
 } from './create-order-quote-presentation';
@@ -72,12 +74,7 @@ export type InternalCreateOrderQuoteResult =
     total: string | null;
     hasManualPricing: boolean;
     totalSemantics: 'COMPLETE' | 'EXCLUDES_MANUAL_ITEMS';
-    plateFee: {
-      status: 'PENDING';
-      amount: null;
-      displayAmount: '待定';
-      label: '制版费';
-    };
+    plateFee: CreateOrderPlateFeePreview | null;
   };
 
 export class CreateOrderQuoteError extends Error {
@@ -332,12 +329,7 @@ export async function quoteInternalCreateOrder(
         totalSemantics: hasManualPricing
           ? 'EXCLUDES_MANUAL_ITEMS'
           : 'COMPLETE',
-        plateFee: {
-          status: 'PENDING',
-          amount: null,
-          displayAmount: '待定',
-          label: '制版费',
-        },
+        plateFee: presentCreateOrderPlateFee(calculated.quote),
       };
     });
   } catch (error) {

@@ -385,6 +385,7 @@ export const CREATE_ORDER_GOLDEN_SNAPSHOT = {
         amount: null,
       },
     ],
+    foilPricingPolicy: 'ATOMIC_BUNDLE_INCLUDES_PLATE',
     foilPerOrderPrices: [
       ...([
         [1_000, '200.00'],
@@ -416,6 +417,7 @@ export const CREATE_ORDER_GOLDEN_SNAPSHOT = {
   },
   plate: {
     label: '制烫金版费',
+    pricingPolicy: 'ADMIN_MANUAL_ONLY',
   },
   orderCharges: {
     logisticsPolicy: {

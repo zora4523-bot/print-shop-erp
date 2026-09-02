@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
   OrderCustomerChargeStatus,
+  OrderItemPricingRoute,
   OrderSettlementType,
   OrderStatus,
   Role,
@@ -16,6 +17,7 @@ import type {
 } from '@/lib/auth/schemas';
 import { orderCascadeLockKey } from '@/lib/order/locks';
 import { appendOrderPricingRevisionInTx } from '@/lib/order/pricing-revision';
+import { itemAllowsIndependentPlateDetail } from '@/lib/order/plate-charge-integrity';
 import {
   ORDER_PRICING_STATUS,
   type OrderPricingStatusValue,
@@ -117,14 +119,28 @@ async function lockAndReadOrder(
   }
   if (
     order.status === OrderStatus.CANCELLED ||
-    order.status === OrderStatus.FINISHED
+    order.status === OrderStatus.FINISHED ||
+    order.status === OrderStatus.SETTLED
   ) {
-    throw new OrderCommercialDetailsError('已作废或已结算工单不能修改价格明细');
+    throw new OrderCommercialDetailsError('已作废、已结算或已归档工单不能修改价格明细');
   }
   if (order.priceRevision !== input.expectedPriceRevision) {
     throw new OrderCommercialDetailsError('工单价格已更新，请刷新后重试');
   }
   return order as MutableCommercialOrder;
+}
+
+function assertPlateDetailMaintenanceAllowed(
+  order: MutableCommercialOrder,
+): void {
+  if (
+    order.pricingStatus ===
+    ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
+  ) {
+    throw new OrderCommercialDetailsError(
+      '价格待管理员确认时，请在工单价格复核中直接填写制烫金版费；终价确认后才能维护逐款制版明细',
+    );
+  }
 }
 
 async function requireCategory(
@@ -434,11 +450,27 @@ export async function saveOrderPlateDetail(
   assertAdmin(actor);
   return db.$transaction(async (tx) => {
     const order = await lockAndReadOrder(tx, input);
+    assertPlateDetailMaintenanceAllowed(order);
     const item = await tx.orderItem.findFirst({
       where: { id: input.orderItemId, orderId: order.id },
-      select: { id: true, name: true },
+      select: {
+        id: true,
+        name: true,
+        pricingRoute: true,
+        frontFoilColors: true,
+        backFoilColors: true,
+        foilColors: true,
+        isDoubleSided: true,
+      },
     });
     if (!item) throw new OrderCommercialDetailsError('款式不存在或不属于该工单');
+    if (!itemAllowsIndependentPlateDetail(item)) {
+      throw new OrderCommercialDetailsError(
+        item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT
+          ? '彩印烫金按含版费整款价核对，不能另行添加独立制版费'
+          : '该款式没有烫金事实，不能添加制版费明细',
+      );
+    }
     const unitPrice = checkedMoney(input.unitPrice, '制版单价', false);
     const amount = unitPrice
       .times(input.quantity)
@@ -615,6 +647,7 @@ export async function deleteOrderPlateDetail(
   assertAdmin(actor);
   return db.$transaction(async (tx) => {
     const order = await lockAndReadOrder(tx, input);
+    assertPlateDetailMaintenanceAllowed(order);
     const detail = await tx.orderItemPlateDetail.findFirst({
       where: {
         id: input.plateDetailId,

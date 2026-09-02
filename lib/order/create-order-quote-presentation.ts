@@ -66,13 +66,15 @@ export type CreateOrderQuotePresentation = {
   total: string | null;
   hasManualPricing: boolean;
   totalSemantics: 'COMPLETE' | 'EXCLUDES_MANUAL_ITEMS';
-  plateFee: {
-    status: 'PENDING';
-    amount: null;
-    displayAmount: '待定';
-    label: '制版费';
-  };
+  plateFee: CreateOrderPlateFeePreview | null;
   quoteToken: string;
+};
+
+export type CreateOrderPlateFeePreview = {
+  status: 'PENDING';
+  amount: null;
+  displayAmount: '待定';
+  label: string;
 };
 
 export type CreateOrderProcessingPresentation = {
@@ -257,14 +259,23 @@ export function presentCreateOrderQuote(args: {
     totalSemantics: hasManualPricing
       ? 'EXCLUDES_MANUAL_ITEMS'
       : 'COMPLETE',
-    plateFee: {
-      status: 'PENDING',
-      amount: null,
-      displayAmount: '待定',
-      label: '制版费',
-    },
+    plateFee: presentCreateOrderPlateFee(args.quote),
     quoteToken: args.quoteToken,
   };
+}
+
+export function presentCreateOrderPlateFee(
+  quote: PureCreateOrderQuoteResult,
+): CreateOrderPlateFeePreview | null {
+  const plateLine = quote.order.lines.find((line) => line.code === 'PLATE_FEE');
+  return plateLine
+    ? {
+        status: 'PENDING',
+        amount: null,
+        displayAmount: '待定',
+        label: plateLine.label,
+      }
+    : null;
 }
 
 /**

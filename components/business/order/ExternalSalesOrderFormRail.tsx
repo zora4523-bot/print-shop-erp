@@ -35,6 +35,13 @@ export type ExternalSalesPackagingQuote = {
   message?: string | null;
 };
 
+export type OrderFormBRailPlateFee = {
+  status: 'PENDING';
+  amount: null;
+  displayAmount: '待定';
+  label: string;
+};
+
 export type OrderFormBRailTotalSemantics =
   | 'COMPLETE'
   | 'EXCLUDES_MANUAL_ITEMS';
@@ -152,6 +159,7 @@ export function OrderFormBRail({
   settlementLabel,
   knownTotal,
   totalSemantics,
+  plateFee,
   gaps,
   busy,
   onAttemptSubmit,
@@ -164,6 +172,7 @@ export function OrderFormBRail({
   settlementLabel: string;
   knownTotal?: string | null;
   totalSemantics?: OrderFormBRailTotalSemantics;
+  plateFee?: OrderFormBRailPlateFee | null;
   gaps: readonly string[];
   busy: boolean;
   onAttemptSubmit: (intent: 'draft' | 'submit') => void;
@@ -232,7 +241,9 @@ export function OrderFormBRail({
             </p>
             <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
               {requiresFactoryPricing
-                ? '不含待核价款与制版费；提交后由工厂确认'
+                ? plateFee
+                  ? '不含待核价款与制版费；提交后由工厂确认'
+                  : '不含待核价款；提交后由工厂确认'
                 : '提交时服务端会重新核价'}
             </p>
           </div>
@@ -294,6 +305,13 @@ export function OrderFormBRail({
     knownTotal,
   });
   const excludesManualItems = totalSemantics === 'EXCLUDES_MANUAL_ITEMS';
+  const hasNonPlateManualPricing =
+    quoteItems.some(
+      (item) => item.status === 'incomplete' || item.status === 'error',
+    ) ||
+    packaging.status === 'incomplete' ||
+    packaging.status === 'error' ||
+    (excludesManualItems && !plateFee);
   const manualMessages = [
     ...quoteItems.flatMap((item, index) =>
       item.status === 'incomplete' || item.status === 'error'
@@ -306,17 +324,19 @@ export function OrderFormBRail({
     ...(logistics?.status === 'incomplete' || logistics?.status === 'error'
       ? [logistics.message || STATUS_LABELS[logistics.status]]
       : []),
-    ...(excludesManualItems ? ['制版费金额待工厂确认'] : []),
+    ...(plateFee ? [`${plateFee.label}金额待工厂确认`] : []),
   ];
   const needsAdminPrice = manualMessages.length > 0;
-  const hasExcludedAmounts = excludesManualItems || needsAdminPrice;
-  const totalNote = hasExcludedAmounts
-    ? logistics?.status === 'complete'
-      ? '不含待核价款与制版费'
-      : '不含待核价款、制版费与快递费'
-    : logistics?.status === 'complete'
-      ? '不含制版费'
-      : '不含制版费与快递费';
+  const excludedLabels = [
+    ...(hasNonPlateManualPricing ? ['待核价款'] : []),
+    ...(plateFee ? ['制版费'] : []),
+    ...(logistics?.status === 'complete' ? [] : ['快递费']),
+  ];
+  const hasExcludedAmounts = excludedLabels.length > 0;
+  const totalNote =
+    hasExcludedAmounts
+      ? `不含${excludedLabels.join('、')}`
+      : '当前已知费用已完整';
 
   return (
     <section
@@ -397,10 +417,14 @@ export function OrderFormBRail({
                 : STATUS_LABELS[packaging.status]}
             </b>
           </div>
-          <div className="flex justify-between gap-3 border-b py-2 text-[13px]">
-            <span className="font-semibold text-muted-foreground">制烫金版费</span>
-            <b className="text-destructive">待定</b>
-          </div>
+          {plateFee ? (
+            <div className="flex justify-between gap-3 border-b py-2 text-[13px]">
+              <span className="font-semibold text-muted-foreground">
+                {plateFee.label}
+              </span>
+              <b className="text-destructive">{plateFee.displayAmount}</b>
+            </div>
+          ) : null}
           <div className="flex justify-between gap-3 border-b py-2 text-[13px]">
             <span className="font-semibold text-muted-foreground">
               {logistics?.packagingLabel ?? '纸箱耗材'}

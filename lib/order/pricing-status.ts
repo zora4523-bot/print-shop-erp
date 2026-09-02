@@ -1,3 +1,5 @@
+import { OrderStatus } from "../../generated/prisma/enums";
+
 export const ORDER_PRICING_STATUS = {
   LEGACY_CONFIRMED: "LEGACY_CONFIRMED",
   AUTO_CONFIRMED: "AUTO_CONFIRMED",
@@ -25,5 +27,18 @@ export function orderPricingStatusLabel(
   return (
     ORDER_PRICING_STATUS_LABELS[status as OrderPricingStatusValue] ??
     "未识别状态"
+  );
+}
+
+/**
+ * Factory pricing confirmation is part of the pre-production hand-off only.
+ * SUBMITTED remains accepted while legacy orders are migrated to
+ * PENDING_FACTORY.
+ */
+export function isOrderPricingReviewAllowedStatus(
+  status: string | null | undefined,
+): boolean {
+  return (
+    status === OrderStatus.PENDING_FACTORY || status === OrderStatus.SUBMITTED
   );
 }
