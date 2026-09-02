@@ -29,6 +29,13 @@ import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -364,26 +371,99 @@ function SalesOrderCard({
 }
 
 function OrderThumbnail({ order }: { order: SalesOrderListRow }) {
+  const stylePhotos = order.items.flatMap((item) =>
+    item.thumbnail && isStylePhotoFileName(item.thumbnail.fileName)
+      ? [
+          {
+            id: item.id,
+            sequence: item.sequence,
+            name: item.name,
+            url: item.thumbnail.url,
+          },
+        ]
+      : [],
+  );
+  const coverPhoto = stylePhotos[0];
+
   return (
     <div className="relative h-16 w-12 shrink-0 overflow-visible rounded-md border bg-muted sm:h-[4.5rem] sm:w-[3.25rem]">
-      {order.thumbnail ? (
-        <img
-          src={order.thumbnail.url}
-          alt={order.thumbnail.fileName}
-          className="size-full rounded-md object-cover"
-        />
+      {coverPhoto ? (
+        <Dialog>
+          <DialogTrigger
+            type="button"
+            aria-label={`预览款式照片：${order.customName ?? order.orderNo}，共 ${stylePhotos.length} 款`}
+            title="点击查看款式照片"
+            data-sales-order-thumbnail-trigger=""
+            className="group block size-full cursor-zoom-in overflow-hidden rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+          >
+            <img
+              src={coverPhoto.url}
+              alt=""
+              className="size-full rounded-md object-cover transition-transform duration-200 group-hover:scale-105 motion-reduce:transition-none"
+            />
+          </DialogTrigger>
+          <DialogContent
+            data-sales-order-image-preview=""
+            className="grid max-h-[calc(100dvh-1rem)] max-w-5xl grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden p-3 sm:max-h-[calc(100dvh-3rem)] sm:gap-3 sm:p-4"
+          >
+            <DialogTitle className="admin-wrap-anywhere pr-10 text-sm">
+              款式照片
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              已上传 {stylePhotos.length} / {order.itemCount} 款，按款式展示代表照片。
+            </DialogDescription>
+            <ul
+              aria-label="款式照片列表"
+              className={cn(
+                'grid min-h-0 gap-3 overflow-y-auto overscroll-contain',
+                stylePhotos.length > 1 && 'sm:grid-cols-2',
+              )}
+            >
+              {stylePhotos.map((photo) => (
+                <li key={photo.id} className="min-w-0">
+                  <figure className="overflow-hidden rounded-lg border bg-card">
+                    <div className="flex h-[min(56dvh,32rem)] items-center justify-center overflow-hidden bg-muted/40 p-2">
+                      <img
+                        src={photo.url}
+                        alt={`第 ${photo.sequence} 款 ${photo.name} 的款式照片`}
+                        decoding="async"
+                        draggable={false}
+                        data-sales-order-preview-image=""
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    </div>
+                    <figcaption className="admin-wrap-anywhere border-t px-3 py-2 text-xs">
+                      <span className="font-semibold">第 {photo.sequence} 款</span>
+                      <span className="ml-1 text-muted-foreground">
+                        · {photo.name}
+                      </span>
+                    </figcaption>
+                  </figure>
+                </li>
+              ))}
+            </ul>
+          </DialogContent>
+        </Dialog>
       ) : (
         <span className="flex size-full items-center justify-center text-muted-foreground">
           <FileImage aria-hidden="true" className="size-5" />
-          <span className="sr-only">暂无设计图</span>
+          <span className="sr-only">暂无款式照片</span>
         </span>
       )}
       {order.itemCount > 1 ? (
-        <span className="absolute -bottom-1.5 -right-1.5 rounded-full border-2 border-background bg-foreground px-1.5 py-0.5 text-[9px] font-semibold text-background">
+        <span className="pointer-events-none absolute -right-1.5 -bottom-1.5 rounded-full border-2 border-background bg-foreground px-1.5 py-0.5 text-[9px] font-semibold text-background">
           {order.itemCount}款
         </span>
       ) : null}
     </div>
+  );
+}
+
+function isStylePhotoFileName(fileName: string) {
+  // Playwright 打印视觉基线曾被误传到验收工单的款式图槽位。
+  // 只隔离可明确识别的生成快照，不根据一般文件名猜测照片内容。
+  return !/^order-print-.+-chromium-(?:darwin|linux|win32)\.png$/iu.test(
+    fileName,
   );
 }
 

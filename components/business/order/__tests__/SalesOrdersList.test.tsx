@@ -64,6 +64,83 @@ describe('SalesOrdersList', () => {
     expect(html).not.toContain('¥待定');
     expect(html).not.toContain('NaN');
   });
+
+  it('有款式照片时提供可访问的画廊预览入口', () => {
+    const firstPhoto = {
+      url: 'https://static.example.com/styles/dragon-boat-front.jpg',
+      fileName: '端午正面.jpg',
+    };
+    const order = {
+      ...row(),
+      thumbnail: {
+        url: 'https://static.example.com/orders/work-order.png',
+        fileName: '工单.png',
+      },
+      items: [
+        {
+          ...row().items[0]!,
+          thumbnail: firstPhoto,
+        },
+        {
+          ...row().items[0]!,
+          id: 'item-2',
+          sequence: 2,
+          name: '端午定制 图2',
+          thumbnail: {
+            url: 'https://static.example.com/styles/dragon-boat-back.jpg',
+            fileName: '端午背面.jpg',
+          },
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <SalesOrdersList
+        orders={[order]}
+        query={query()}
+        nowIso="2026-08-27T08:00:00.000Z"
+      />,
+    );
+
+    expect(html).toContain('data-sales-order-thumbnail-trigger=""');
+    expect(html).toContain('type="button"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('预览款式照片：端午定制，共 2 款');
+    expect(html).toContain('title="点击查看款式照片"');
+    expect(html).toContain(
+      'src="https://static.example.com/styles/dragon-boat-front.jpg"',
+    );
+    expect(html).not.toContain(
+      'https://static.example.com/orders/work-order.png',
+    );
+  });
+
+  it('不把打印视觉基线快照当成款式照片', () => {
+    const printSnapshot = {
+      url: 'https://static.example.com/orders/order-print.png',
+      fileName: 'order-print-1-designs-chromium-darwin.png',
+    };
+    const order = {
+      ...row(),
+      thumbnail: printSnapshot,
+      items: [
+        {
+          ...row().items[0]!,
+          thumbnail: printSnapshot,
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <SalesOrdersList
+        orders={[order]}
+        query={query()}
+        nowIso="2026-08-27T08:00:00.000Z"
+      />,
+    );
+
+    expect(html).not.toContain('data-sales-order-thumbnail-trigger=""');
+    expect(html).not.toContain(printSnapshot.url);
+    expect(html).toContain('暂无款式照片');
+  });
 });
 
 function row(): SalesOrderListRow {
