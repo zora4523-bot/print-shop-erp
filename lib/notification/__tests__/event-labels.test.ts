@@ -43,6 +43,14 @@ describe('notification event business labels', () => {
       ),
     ).toBe('消息内容超过企业微信限制');
     expect(notificationDeliveryMessage('TimeoutError')).toBe('推送超时');
+    expect(
+      notificationDeliveryMessage('wecom smart bot not authenticated'),
+    ).toBe('智能机器人长连接尚未认证');
+    expect(
+      notificationDeliveryMessage(
+        'wecom smart bot acknowledgement unavailable',
+      ),
+    ).toBe('送达结果不明');
     expect(notificationDeliveryMessage('SOME_RAW_ERROR')).toBe('推送失败');
     expect(notificationDeliveryMessage(null)).toBeNull();
   });

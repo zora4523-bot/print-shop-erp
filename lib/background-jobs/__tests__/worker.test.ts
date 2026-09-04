@@ -5,12 +5,16 @@ const {
   completeBackgroundJobMock,
   failBackgroundJobMock,
   heartbeatBackgroundJobMock,
+  releaseUndispatchedBackgroundJobClaimMock,
   reconcileExpiredBackgroundJobLeasesMock,
 } = vi.hoisted(() => ({
   claimNextBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   completeBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
   failBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
   heartbeatBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  releaseUndispatchedBackgroundJobClaimMock: vi.fn<
+    (...args: unknown[]) => Promise<void>
+  >(),
   reconcileExpiredBackgroundJobLeasesMock: vi.fn<
     (...args: unknown[]) => Promise<number>
   >(),
@@ -21,6 +25,8 @@ vi.mock('../repository', () => ({
   completeBackgroundJob: completeBackgroundJobMock,
   failBackgroundJob: failBackgroundJobMock,
   heartbeatBackgroundJob: heartbeatBackgroundJobMock,
+  releaseUndispatchedBackgroundJobClaim:
+    releaseUndispatchedBackgroundJobClaimMock,
 }));
 vi.mock('../lease-reaper', () => ({
   reconcileExpiredBackgroundJobLeases:
@@ -51,6 +57,9 @@ beforeEach(() => {
   completeBackgroundJobMock.mockReset().mockResolvedValue(undefined);
   failBackgroundJobMock.mockReset().mockResolvedValue(undefined);
   heartbeatBackgroundJobMock.mockReset().mockResolvedValue(undefined);
+  releaseUndispatchedBackgroundJobClaimMock
+    .mockReset()
+    .mockResolvedValue(undefined);
   reconcileExpiredBackgroundJobLeasesMock.mockReset().mockResolvedValue(0);
 });
 
@@ -110,6 +119,42 @@ describe('runBackgroundWorker', () => {
       knownJob,
       { ok: true },
     );
+    expect(failBackgroundJobMock).not.toHaveBeenCalled();
+  });
+
+  it('releases a claim returned after shutdown without dispatching its handler', async () => {
+    const controller = new AbortController();
+    const knownJob = { ...job, type: 'KNOWN', maxAttempts: 5 };
+    let resolveClaim!: (claimed: ClaimedBackgroundJob) => void;
+    claimNextBackgroundJobMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveClaim = resolve;
+        }),
+    );
+    const handler = vi.fn(async () => ({ ok: true }));
+
+    const running = runBackgroundWorker({
+      queue: BackgroundJobQueue.LIGHT,
+      workerId: 'worker-1',
+      handlers: { KNOWN: handler },
+      concurrency: 1,
+      leaseMs: 3_000,
+      signal: controller.signal,
+    });
+    expect(claimNextBackgroundJobMock).toHaveBeenCalledOnce();
+
+    controller.abort();
+    resolveClaim(knownJob);
+    await running;
+
+    expect(releaseUndispatchedBackgroundJobClaimMock).toHaveBeenCalledOnce();
+    expect(releaseUndispatchedBackgroundJobClaimMock).toHaveBeenCalledWith(
+      knownJob,
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(heartbeatBackgroundJobMock).not.toHaveBeenCalled();
+    expect(completeBackgroundJobMock).not.toHaveBeenCalled();
     expect(failBackgroundJobMock).not.toHaveBeenCalled();
   });
 

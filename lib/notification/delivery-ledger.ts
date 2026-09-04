@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '../../generated/prisma/client';
 import {
   NotificationStatus,
@@ -18,6 +18,11 @@ type FinalNotificationStatus = Exclude<
   typeof NotificationStatus.SENDING
 >;
 
+export type DurableDeliveryFinalState = Readonly<{
+  status: FinalNotificationStatus;
+  errorMessage: string | null;
+}>;
+
 export type DurableDeliveryClaim =
   | { claimed: true; attemptId: string }
   | {
@@ -31,6 +36,7 @@ type ClaimInput = {
   jobAttempt: number;
   eventType: string;
   channelId: string;
+  destinationFingerprint?: string;
   messageContent: string;
   relatedOrderId: string | null;
   // Optional read-version CAS used by manual replay. The caller reads the
@@ -38,6 +44,38 @@ type ClaimInput = {
   // through another UNKNOWN -> RETRYING cycle before the webhook starts.
   expectedStateVersion?: number;
 };
+
+/**
+ * Before a new job generation makes any business-rule early return, expose
+ * reservations left by an older generation. Returning channel IDs lets the
+ * caller count them exactly once even if it later inspects the same rows.
+ */
+export async function reconcileAbandonedDurableDeliveries(input: {
+  deliveryKey: string;
+  jobAttempt: number;
+}): Promise<string[]> {
+  if (!Number.isSafeInteger(input.jobAttempt) || input.jobAttempt < 1) {
+    throw new NotificationDeliveryLedgerError('invalid background job attempt');
+  }
+  const rows = await db.$queryRaw<Array<{ channelId: string }>>(Prisma.sql`
+    UPDATE "NotificationLog"
+       SET "status" = 'UNKNOWN'::"NotificationStatus",
+           "errorMessage" = 'worker lease ended before delivery was finalized',
+           "deliveryAttemptId" = NULL,
+           "deliveryJobAttempt" = NULL,
+           "deliveryStateVersion" = "deliveryStateVersion" + 1,
+           "lastAttemptAt" = clock_timestamp(),
+           "updatedAt" = clock_timestamp()
+     WHERE "deliveryKey" = ${input.deliveryKey}
+       AND "status" = 'SENDING'::"NotificationStatus"
+       AND (
+         "deliveryJobAttempt" IS NULL
+         OR "deliveryJobAttempt" < ${input.jobAttempt}
+       )
+    RETURNING "channelId"
+  `);
+  return rows.map((row) => row.channelId);
+}
 
 /**
  * Atomically reserves a channel before any external I/O. Only a definitive
@@ -56,6 +94,15 @@ export async function claimDurableDelivery(
       input.expectedStateVersion < 0)
   ) {
     throw new NotificationDeliveryLedgerError('invalid delivery state version');
+  }
+  const destinationFingerprint =
+    input.destinationFingerprint ??
+    createHash('sha256')
+      .update('legacy-notification-channel\0', 'utf8')
+      .update(input.channelId, 'utf8')
+      .digest('hex');
+  if (!/^[a-f0-9]{64}$/.test(destinationFingerprint)) {
+    throw new NotificationDeliveryLedgerError('invalid destination fingerprint');
   }
 
   // A later BackgroundJob generation is proof that the prior lease expired.
@@ -114,6 +161,7 @@ export async function claimDurableDelivery(
       "eventType",
       "channelId",
       "deliveryKey",
+      "destinationFingerprint",
       "messageContent",
       "status",
       "errorMessage",
@@ -131,6 +179,7 @@ export async function claimDurableDelivery(
       ${input.eventType},
       ${input.channelId},
       ${input.deliveryKey},
+      ${destinationFingerprint},
       ${input.messageContent},
       'SENDING'::"NotificationStatus",
       NULL,
@@ -146,6 +195,7 @@ export async function claimDurableDelivery(
        OR EXISTS (SELECT 1 FROM "manual_claim_guard")
     ON CONFLICT ("deliveryKey", "channelId") DO UPDATE
       SET "eventType" = EXCLUDED."eventType",
+          "destinationFingerprint" = EXCLUDED."destinationFingerprint",
           "messageContent" = EXCLUDED."messageContent",
           "relatedOrderId" = EXCLUDED."relatedOrderId",
           "status" = 'SENDING'::"NotificationStatus",
@@ -247,30 +297,83 @@ export async function finalizeDurableDelivery(
 }
 
 /**
- * Best effort only in the narrow sense that the original error is still
- * propagated. If this write also fails, the durable SENDING reservation itself
- * remains an observable do-not-resend marker.
+ * Retry an uncertain finalization without overwriting a terminal commit.
+ *
+ * The first UPDATE may have committed even when its database response was
+ * lost. This single statement writes the same intended state only while the
+ * caller still owns SENDING; otherwise it returns the already-authoritative
+ * terminal state.
  */
+export async function recoverDurableDeliveryFinalization(
+  input: FinalizeInput,
+): Promise<DurableDeliveryFinalState> {
+  const rows = await db.$queryRaw<
+    Array<{
+      status: NotificationStatusType;
+      errorMessage: string | null;
+    }>
+  >(Prisma.sql`
+    WITH "recovered_finalization" AS (
+      UPDATE "NotificationLog"
+         SET "status" = ${input.status}::"NotificationStatus",
+             "errorMessage" = ${input.errorMessage},
+             "retryCount" = ${input.retryCount},
+             "sentAt" = CASE
+               WHEN ${input.sent}::boolean THEN clock_timestamp()
+               ELSE NULL
+             END,
+             "deliveryAttemptId" = NULL,
+             "deliveryJobAttempt" = CASE
+               WHEN ${input.status}::"NotificationStatus" = 'RETRYING'::"NotificationStatus"
+               THEN ${input.jobAttempt}
+               ELSE NULL
+             END,
+             "deliveryStateVersion" = "deliveryStateVersion" + 1,
+             "lastAttemptAt" = clock_timestamp(),
+             "updatedAt" = clock_timestamp()
+       WHERE "deliveryKey" = ${input.deliveryKey}
+         AND "channelId" = ${input.channelId}
+         AND "status" = 'SENDING'::"NotificationStatus"
+         AND "deliveryAttemptId" = ${input.attemptId}
+         AND "deliveryJobAttempt" = ${input.jobAttempt}
+      RETURNING "status", "errorMessage"
+    )
+    SELECT "status", "errorMessage"
+      FROM "recovered_finalization"
+    UNION ALL
+    SELECT current."status", current."errorMessage"
+      FROM "NotificationLog" AS current
+     WHERE current."deliveryKey" = ${input.deliveryKey}
+       AND current."channelId" = ${input.channelId}
+       AND NOT EXISTS (SELECT 1 FROM "recovered_finalization")
+    LIMIT 1
+  `);
+  const current = rows[0];
+  if (!current || current.status === NotificationStatus.SENDING) {
+    throw new NotificationDeliveryLedgerError(
+      'delivery finalization state could not be recovered',
+    );
+  }
+  return {
+    status: current.status as FinalNotificationStatus,
+    errorMessage: current.errorMessage,
+  };
+}
+
+/** Preserve the explicit UNKNOWN helper for callers that already classified ambiguity. */
 export async function markDurableDeliveryUnknown(input: {
   deliveryKey: string;
   channelId: string;
   attemptId: string;
+  jobAttempt: number;
   errorMessage: string;
-}): Promise<void> {
-  await db.$executeRaw(Prisma.sql`
-    UPDATE "NotificationLog"
-       SET "status" = 'UNKNOWN'::"NotificationStatus",
-           "errorMessage" = ${input.errorMessage},
-           "deliveryAttemptId" = NULL,
-           "deliveryJobAttempt" = NULL,
-           "deliveryStateVersion" = "deliveryStateVersion" + 1,
-           "lastAttemptAt" = clock_timestamp(),
-           "updatedAt" = clock_timestamp()
-     WHERE "deliveryKey" = ${input.deliveryKey}
-       AND "channelId" = ${input.channelId}
-       AND "status" = 'SENDING'::"NotificationStatus"
-       AND "deliveryAttemptId" = ${input.attemptId}
-  `);
+}): Promise<DurableDeliveryFinalState> {
+  return recoverDurableDeliveryFinalization({
+    ...input,
+    status: NotificationStatus.UNKNOWN,
+    retryCount: 0,
+    sent: false,
+  });
 }
 
 export class NotificationDeliveryLedgerError extends Error {

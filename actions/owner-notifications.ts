@@ -11,11 +11,17 @@ import {
 } from '@/lib/auth/schemas';
 import {
   ChannelInUseError,
+  ChannelTransportMismatchError,
   EmptyChannelIdsError,
   InactiveChannelBindError,
+  IneligibleChannelBindError,
   RuleNotFoundError,
+  SmartBotBindingError,
+  SmartBotIdentityMismatchError,
   StaleChannelIdsError,
   TooManyChannelsForPrivateEventError,
+  UnboundSmartBotChannelError,
+  createSmartBotBindingCode,
   createChannel,
   deleteChannel,
   updateChannel,
@@ -26,6 +32,7 @@ import {
   resolveUnknownNotification,
 } from '@/lib/notification/resolve';
 import {
+  enqueueSmartBotChannelTest,
   TestChannelError,
   testChannel,
 } from '@/lib/notification/test-channel';
@@ -33,6 +40,7 @@ import type {
   ChannelTestResult,
   NotificationMutationResult,
   NotificationResolutionResult,
+  SmartBotBindingCodeResult,
 } from './owner-notifications.types';
 import { collectFieldErrors } from '@/lib/admin/action-helpers';
 import { notificationEventLabel } from '@/lib/notification/event-labels';
@@ -83,6 +91,7 @@ export async function createChannelAction(
   const parsed = createNotificationChannelSchema.safeParse({
     channelKey: formData.get('channelKey'),
     channelName: formData.get('channelName'),
+    transport: formData.get('transport'),
     webhookUrl: formData.get('webhookUrl'),
     isActive: formData.get('isActive'),
   });
@@ -116,6 +125,7 @@ export async function updateChannelAction(
 
   const parsed = updateNotificationChannelSchema.safeParse({
     channelName: formData.get('channelName'),
+    transport: formData.get('transport'),
     webhookUrl: formData.get('webhookUrl'),
     isActive: formData.get('isActive'),
   });
@@ -129,6 +139,25 @@ export async function updateChannelAction(
   try {
     await updateChannel(channelId, parsed.data);
   } catch (err) {
+    if (err instanceof ChannelTransportMismatchError) {
+      return {
+        status: 'error',
+        message: '传输方式创建后不可修改；请新建一个通知目标。',
+      };
+    }
+    if (err instanceof UnboundSmartBotChannelError) {
+      return {
+        status: 'invalid',
+        fieldErrors: { isActive: ['请先完成企业微信群绑定再启用'] },
+      };
+    }
+    if (err instanceof SmartBotIdentityMismatchError) {
+      return {
+        status: 'error',
+        message:
+          '当前 Bot ID 与该群绑定时不一致；请使用原机器人，或新建通知目标重新绑定。',
+      };
+    }
     const mapped = mapPrismaError(err);
     if (mapped) return mapped;
     // Unknown error — rethrow to onRequestError → Sentry.
@@ -138,6 +167,46 @@ export async function updateChannelAction(
   revalidatePath('/owner/notifications');
   revalidatePath(`/owner/notifications/channels/${channelId}`);
   redirect('/owner/notifications');
+}
+
+export async function createSmartBotBindingCodeAction(
+  channelId: string,
+): Promise<SmartBotBindingCodeResult> {
+  await requirePermission('notification:config');
+  try {
+    const receipt = await createSmartBotBindingCode(channelId);
+    revalidatePath(`/owner/notifications/channels/${channelId}`);
+    return {
+      status: 'success',
+      bindingCode: receipt.bindingCode,
+      expiresAt: receipt.expiresAt.toISOString(),
+    };
+  } catch (error) {
+    if (!(error instanceof SmartBotBindingError)) throw error;
+    switch (error.code) {
+      case 'CHANNEL_NOT_FOUND':
+        return { status: 'error', message: '该通知目标不存在' };
+      case 'NOT_SMART_BOT':
+        return { status: 'error', message: '该通知目标不是智能机器人通道' };
+      case 'ALREADY_BOUND':
+        return {
+          status: 'error',
+          message: '该通知目标已经绑定。更换群聊请新建通知目标，避免历史消息误投。',
+        };
+      case 'CREDENTIALS_NOT_CONFIGURED':
+        return {
+          status: 'error',
+          message: '服务端尚未配置完整的 Bot ID 与新 Secret，请先联系运维配置。',
+        };
+      case 'WORKER_UNAVAILABLE':
+        return {
+          status: 'error',
+          message: '智能机器人连接尚未就绪，或检测到多个 LIGHT worker；请先处理运行状态再生成绑定码。',
+        };
+      case 'CONFLICT':
+        return { status: 'error', message: '绑定状态已变化，请刷新页面后重试' };
+    }
+  }
 }
 
 export async function deleteChannelAction(
@@ -239,6 +308,16 @@ export async function updateRuleAction(
         fieldErrors: {
           channelIds: [
             '不能新绑定已停用的群，请先到群配置启用。',
+          ],
+        },
+      };
+    }
+    if (err instanceof IneligibleChannelBindError) {
+      return {
+        status: 'invalid',
+        fieldErrors: {
+          channelIds: [
+            '部分所选通知目标与当前 Bot 配置不一致或配置不完整，不能新绑定。请先到通知目标中修复。',
           ],
         },
       };
@@ -443,6 +522,20 @@ export async function testChannelAction(
   try {
     outcome = await testChannel(channelId);
   } catch (error) {
+    if (
+      error instanceof TestChannelError &&
+      error.code === 'SMART_BOT_WORKER_REQUIRED'
+    ) {
+      try {
+        const queued = await enqueueSmartBotChannelTest(channelId);
+        revalidatePath('/owner/notifications');
+        return { status: 'queued', mock: queued.mock };
+      } catch (queueError) {
+        const mappedQueueError = mapTestChannelError(queueError);
+        if (mappedQueueError) return mappedQueueError;
+        throw queueError;
+      }
+    }
     const mapped = mapTestChannelError(error);
     if (mapped) return mapped;
     throw error;
@@ -462,6 +555,22 @@ function mapTestChannelError(error: unknown): ChannelTestResult | null {
       return { status: 'error', message: '该群不存在' };
     case 'CHANNEL_INACTIVE':
       return { status: 'error', message: '该群已停用，请先启用再测试' };
+    case 'SMART_BOT_NOT_BOUND':
+      return { status: 'error', message: '智能机器人尚未绑定企业微信群' };
+    case 'SMART_BOT_IDENTITY_MISMATCH':
+      return {
+        status: 'error',
+        message: '当前 Bot ID 与该群绑定时不一致；请使用原机器人，或新建通知目标重新绑定',
+      };
+    case 'SMART_BOT_WORKER_REQUIRED':
+      return { status: 'error', message: '智能机器人测试必须由后台 worker 执行' };
+    case 'SMART_BOT_WORKER_UNAVAILABLE':
+      return {
+        status: 'error',
+        message: '智能机器人连接尚未就绪，或检测到多个 LIGHT worker，请检查后台任务状态',
+      };
+    case 'CHANNEL_CONFIGURATION_INVALID':
+      return { status: 'error', message: '通知目标配置不完整' };
     case 'LOG_WRITE_FAILED':
       return {
         status: 'error',

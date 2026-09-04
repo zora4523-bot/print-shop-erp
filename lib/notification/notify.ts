@@ -1,7 +1,11 @@
+import { createHash } from 'node:crypto';
 import { db } from '../db';
 import {
+  NotificationChannelTransport,
   NotificationStatus,
   OrderStatus,
+  type NotificationChannelTransport as NotificationChannelTransportType,
+  type NotificationSmartBotChatType,
 } from '../../generated/prisma/enums';
 import { databaseNow } from '../background-jobs/clock';
 import { assertExecutionFence } from '../execution-fence';
@@ -26,11 +30,23 @@ import {
 import {
   claimDurableDelivery,
   finalizeDurableDelivery,
-  markDurableDeliveryUnknown,
+  reconcileAbandonedDurableDeliveries,
+  recoverDurableDeliveryFinalization,
   NotificationDeliveryClaimConflictError,
+  type DurableDeliveryFinalState,
   type DurableDeliveryClaim,
 } from './delivery-ledger';
 import { resolveManagementNotificationRoute } from './management-routing';
+import {
+  mockSmartBotSender,
+  configuredSmartBotIdDigest,
+  prepareSmartBotSend,
+  sendSmartBot,
+  smartBotDestinationFingerprint,
+  type PreparedSmartBotSend,
+  type SmartBotSender,
+  type SmartBotTarget,
+} from './smart-bot';
 
 // notify(event, payload) 是企业微信推送的**唯一公开入口**（CLAUDE.md
 // §7.1）。它把失败转写到 NotificationLog，并在 NotifyOutcome 上标出
@@ -66,6 +82,7 @@ export type NotifyOptions = {
   // 测试 / debug 注入：覆盖 webhook sender / mock 判定 / 时钟。
   // 普通调用方完全不传。
   webhookSender?: WebhookSender;
+  smartBotSender?: SmartBotSender;
   mockMode?: boolean;
   now?: Date;
   signal?: AbortSignal;
@@ -167,22 +184,95 @@ async function completionDeliveryIsCurrent(
 
 type DeliveryChannel = {
   id: string;
-  webhookUrl: string;
+  transport?: NotificationChannelTransportType;
+  webhookUrl: string | null;
+  smartBotBotDigest: string | null;
+  smartBotTargetId: string | null;
+  smartBotChatType: NotificationSmartBotChatType | null;
+  smartBotBoundAt: Date | null;
   isActive: boolean;
 };
+
+type PreparedChannelSend =
+  | { transport: 'WECOM_GROUP_WEBHOOK'; value: PreparedWebhookSend }
+  | { transport: 'WECOM_SMART_BOT'; value: PreparedSmartBotSend };
+
+function smartBotTarget(channel: DeliveryChannel): SmartBotTarget | null {
+  const configuredBotDigest = configuredSmartBotIdDigest();
+  if (
+    channel.transport !== NotificationChannelTransport.WECOM_SMART_BOT ||
+    !configuredBotDigest ||
+    channel.smartBotBotDigest !== configuredBotDigest ||
+    !channel.smartBotTargetId ||
+    !channel.smartBotChatType ||
+    !channel.smartBotBoundAt
+  ) {
+    return null;
+  }
+  return {
+    targetId: channel.smartBotTargetId,
+    chatType: channel.smartBotChatType,
+  };
+}
+
+type ChannelConfigurationFailure = Readonly<{
+  reason: string;
+  retryable: boolean;
+}>;
+
+function channelConfigurationFailure(
+  channel: DeliveryChannel,
+): ChannelConfigurationFailure | undefined {
+  if (channel.transport !== NotificationChannelTransport.WECOM_SMART_BOT) {
+    return channel.webhookUrl
+      ? undefined
+      : { reason: 'webhook endpoint missing', retryable: false };
+  }
+  if (
+    channel.smartBotBotDigest &&
+    channel.smartBotBotDigest !== configuredSmartBotIdDigest()
+  ) {
+    // Never hand this target to the currently configured Bot ID. The mismatch
+    // is nevertheless recoverable by restoring the original Bot ID, so a
+    // durable delivery must remain eligible for a later safe attempt.
+    return { reason: 'smart bot identity changed', retryable: true };
+  }
+  return smartBotTarget(channel)
+    ? undefined
+    : { reason: 'smart bot target not bound', retryable: false };
+}
+
+function channelDestinationFingerprint(channel: DeliveryChannel): string {
+  if (channel.transport === NotificationChannelTransport.WECOM_SMART_BOT) {
+    const target = smartBotTarget(channel);
+    const botId = process.env.WECOM_SMART_BOT_ID?.trim();
+    if (target && botId) return smartBotDestinationFingerprint(botId, target);
+  }
+  return createHash('sha256')
+    .update('notification-destination\0', 'utf8')
+    .update(
+      channel.transport ?? NotificationChannelTransport.WECOM_GROUP_WEBHOOK,
+      'utf8',
+    )
+    .update('\0', 'utf8')
+    .update(channel.webhookUrl ?? channel.smartBotTargetId ?? 'unconfigured', 'utf8')
+    .digest('hex');
+}
 
 async function sendToChannel(
   outcome: NotifyOutcome,
   input: {
     channel: DeliveryChannel;
     messageContent: string;
-    sender: WebhookSender;
+    webhookSender: WebhookSender;
+    smartBotSender: SmartBotSender;
     signal?: AbortSignal;
     assertLease?: () => Promise<void>;
     beforeRequest?: () => Promise<boolean>;
-    preparedSend?: PreparedWebhookSend;
+    preparedSend?: PreparedChannelSend;
     inactiveChannelRetryable: boolean;
     blockedReason?: string;
+    blockedReasonRetryable?: boolean;
   },
 ): Promise<WebhookResult> {
   if (input.blockedReason || !input.channel.isActive) {
@@ -214,7 +304,7 @@ async function sendToChannel(
       ok: false,
       retries: 0,
       errorMessage: input.blockedReason,
-      retryable: false,
+      retryable: input.blockedReasonRetryable === true,
     };
   }
   if (!input.channel.isActive) {
@@ -235,18 +325,55 @@ async function sendToChannel(
         input.beforeRequest ||
         input.preparedSend,
     );
-    const result = hasOptions
-      ? await input.sender(input.channel.webhookUrl, input.messageContent, {
-          ...(input.signal ? { signal: input.signal } : {}),
-          ...(input.assertLease ? { assertLease: input.assertLease } : {}),
-          ...(input.beforeRequest
-            ? { beforeRequest: input.beforeRequest }
-            : {}),
-          ...(input.preparedSend
-            ? { preparedSend: input.preparedSend }
-            : {}),
-        })
-      : await input.sender(input.channel.webhookUrl, input.messageContent);
+    const commonOptions = {
+      ...(input.signal ? { signal: input.signal } : {}),
+      ...(input.assertLease ? { assertLease: input.assertLease } : {}),
+      ...(input.beforeRequest ? { beforeRequest: input.beforeRequest } : {}),
+    };
+    let result: WebhookResult;
+    if (input.channel.transport === NotificationChannelTransport.WECOM_SMART_BOT) {
+      const target = smartBotTarget(input.channel);
+      if (!target) {
+        return {
+          ok: false,
+          retries: 0,
+          errorMessage: 'smart bot target not bound',
+          retryable: false,
+        };
+      }
+      const prepared =
+        input.preparedSend?.transport === 'WECOM_SMART_BOT'
+          ? input.preparedSend.value
+          : undefined;
+      result = hasOptions
+        ? await input.smartBotSender(target, input.messageContent, {
+            ...commonOptions,
+            ...(prepared ? { preparedSend: prepared } : {}),
+          })
+        : await input.smartBotSender(target, input.messageContent);
+    } else {
+      if (!input.channel.webhookUrl) {
+        return {
+          ok: false,
+          retries: 0,
+          errorMessage: 'webhook endpoint missing',
+          retryable: false,
+        };
+      }
+      const prepared =
+        input.preparedSend?.transport === 'WECOM_GROUP_WEBHOOK'
+          ? input.preparedSend.value
+          : undefined;
+      result = hasOptions
+        ? await input.webhookSender(input.channel.webhookUrl, input.messageContent, {
+            ...commonOptions,
+            ...(prepared ? { preparedSend: prepared } : {}),
+          })
+        : await input.webhookSender(
+            input.channel.webhookUrl,
+            input.messageContent,
+          );
+    }
     if (result.skipped) {
       outcome.attempted -= 1;
       outcome.skipped += 1;
@@ -266,14 +393,14 @@ async function sendToChannel(
   }
 }
 
-function recordWebhookResult(
-  outcome: NotifyOutcome,
+function classifyWebhookResult(
   result: WebhookResult,
   options: { durable: boolean; mock: boolean },
 ): {
   status: Exclude<NotificationStatus, 'SENDING'>;
   errorMessage: string | null;
   unknown: boolean;
+  retryable: boolean;
 } {
   const unknown = !result.ok && result.unknown === true;
   const retryable = !unknown && !result.ok && result.retryable === true;
@@ -290,22 +417,79 @@ function recordWebhookResult(
       : null
     : (result.errorMessage ?? 'unknown error');
 
-  if (result.ok) {
+  return { status, errorMessage, unknown, retryable };
+}
+
+function applyRecordedWebhookResult(
+  outcome: NotifyOutcome,
+  recorded: ReturnType<typeof classifyWebhookResult>,
+): void {
+  if (recorded.status === NotificationStatus.SUCCESS) {
     outcome.delivered += 1;
-  } else if (unknown) {
+  } else if (recorded.status === NotificationStatus.UNKNOWN) {
     outcome.unknown += 1;
-    recordErrorCode(outcome, errorMessage ?? 'delivery outcome unknown');
+    recordErrorCode(
+      outcome,
+      recorded.errorMessage ?? 'delivery outcome unknown',
+    );
   } else {
     outcome.failed += 1;
-    if (retryable) outcome.retryable = true;
-    recordErrorCode(outcome, errorMessage ?? 'unknown error');
+    if (recorded.retryable) {
+      outcome.retryable = true;
+    }
+    recordErrorCode(outcome, recorded.errorMessage ?? 'unknown error');
   }
-  return { status, errorMessage, unknown };
+}
+
+function recordWebhookResult(
+  outcome: NotifyOutcome,
+  result: WebhookResult,
+  options: { durable: boolean; mock: boolean },
+): ReturnType<typeof classifyWebhookResult> {
+  const recorded = classifyWebhookResult(result, options);
+  applyRecordedWebhookResult(outcome, recorded);
+  return recorded;
+}
+
+function recordFromFinalState(
+  finalState: DurableDeliveryFinalState,
+): ReturnType<typeof classifyWebhookResult> {
+  return {
+    status: finalState.status,
+    errorMessage: finalState.errorMessage,
+    unknown: finalState.status === NotificationStatus.UNKNOWN,
+    retryable: finalState.status === NotificationStatus.RETRYING,
+  };
+}
+
+async function finalizeClaimedDelivery(
+  event: NotificationEvent,
+  input: Parameters<typeof finalizeDurableDelivery>[0],
+): Promise<DurableDeliveryFinalState> {
+  try {
+    await finalizeDurableDelivery(input);
+    return { status: input.status, errorMessage: input.errorMessage };
+  } catch (error) {
+    try {
+      const recovered = await recoverDurableDeliveryFinalization(input);
+      console.warn(
+        `[notify] recovered delivery finalization event=${event} channel=${input.channelId} status=${recovered.status}`,
+      );
+      return recovered;
+    } catch (recoveryError) {
+      console.error(
+        `[notify] failed to recover delivery finalization event=${event} channel=${input.channelId}`,
+        recoveryError instanceof Error ? recoveryError.name : 'UnknownError',
+      );
+      throw error;
+    }
+  }
 }
 
 function recordUnclaimedDelivery(
   outcome: NotifyOutcome,
   claim: Exclude<DurableDeliveryClaim, { claimed: true }>,
+  unknownAlreadyRecorded = false,
 ): void {
   if (claim.status === NotificationStatus.SUCCESS) {
     outcome.skipped += 1;
@@ -322,6 +506,9 @@ function recordUnclaimedDelivery(
 
   // SENDING may be a genuinely concurrent owner or a process that died after
   // HTTP. UNKNOWN is already terminal. Neither may be sent automatically.
+  if (unknownAlreadyRecorded && claim.status === NotificationStatus.UNKNOWN) {
+    return;
+  }
   outcome.unknown += 1;
   recordErrorCode(
     outcome,
@@ -338,14 +525,16 @@ async function deliverClaimedChannel(
     deliveryKey: string;
     deliveryAttempt: number;
     attemptId: string;
-    sender: WebhookSender;
+    webhookSender: WebhookSender;
+    smartBotSender: SmartBotSender;
     mock: boolean;
     signal?: AbortSignal;
     assertLease?: () => Promise<void>;
     beforeRequest?: () => Promise<boolean>;
-    preparedSend?: PreparedWebhookSend;
+    preparedSend?: PreparedChannelSend;
     inactiveChannelRetryable: boolean;
     blockedReason?: string;
+    blockedReasonRetryable?: boolean;
   },
 ): Promise<void> {
   const result = await sendToChannel(outcome, input);
@@ -354,7 +543,7 @@ async function deliverClaimedChannel(
     // Close the fenced SENDING row as a permanent, explicitly superseded
     // terminal record. No external request occurred and the owning job must
     // succeed without an automatic resend.
-    await finalizeDurableDelivery({
+    const finalState = await finalizeClaimedDelivery(input.event, {
       deliveryKey: input.deliveryKey,
       channelId: input.channel.id,
       attemptId: input.attemptId,
@@ -364,15 +553,23 @@ async function deliverClaimedChannel(
       retryCount: 0,
       sent: false,
     });
+    if (
+      finalState.status !== NotificationStatus.FAILED ||
+      finalState.errorMessage !== SUPERSEDED_BEFORE_SEND_ERROR
+    ) {
+      outcome.skipped -= 1;
+      applyRecordedWebhookResult(outcome, recordFromFinalState(finalState));
+    }
     return;
   }
-  const recorded = recordWebhookResult(outcome, result, {
+  const recorded = classifyWebhookResult(result, {
     durable: true,
     mock: input.mock,
   });
 
+  let finalState: DurableDeliveryFinalState;
   try {
-    await finalizeDurableDelivery({
+    finalState = await finalizeClaimedDelivery(input.event, {
       deliveryKey: input.deliveryKey,
       channelId: input.channel.id,
       attemptId: input.attemptId,
@@ -383,28 +580,18 @@ async function deliverClaimedChannel(
       sent: result.ok,
     });
   } catch (error) {
-    // HTTP may already have succeeded. Preserve the pre-send reservation as a
-    // do-not-resend marker and make the ambiguity explicit.
-    outcome.unknown += recorded.unknown ? 0 : 1;
+    // External I/O already started. If neither finalization statement can
+    // establish a terminal row, keep the job retryable rather than terminating
+    // it before a later generation can reconcile SENDING into visible UNKNOWN.
+    // The reservation itself remains a durable do-not-resend fence.
+    outcome.retryable = true;
     recordErrorCode(
       outcome,
       error instanceof Error ? error.name : 'NotificationLedgerError',
     );
-    try {
-      await markDurableDeliveryUnknown({
-        deliveryKey: input.deliveryKey,
-        channelId: input.channel.id,
-        attemptId: input.attemptId,
-        errorMessage: 'delivery finalization failed',
-      });
-    } catch (markError) {
-      console.error(
-        `[notify] failed to mark UNKNOWN event=${input.event} channel=${input.channel.id}`,
-        markError instanceof Error ? markError.name : 'UnknownError',
-      );
-    }
     throw error;
   }
+  applyRecordedWebhookResult(outcome, recordFromFinalState(finalState));
 }
 
 async function persistInlineDeliveryLog(
@@ -416,6 +603,7 @@ async function persistInlineDeliveryLog(
     result: WebhookResult;
     recorded: ReturnType<typeof recordWebhookResult>;
     relatedOrderId: string | null;
+    destinationFingerprint: string;
     now: Date;
   },
 ): Promise<void> {
@@ -426,6 +614,7 @@ async function persistInlineDeliveryLog(
       data: {
         eventType: input.event,
         channelId: input.channelId,
+        destinationFingerprint: input.destinationFingerprint,
         messageContent: input.messageContent,
         status: input.recorded.status,
         errorMessage: input.recorded.errorMessage,
@@ -460,9 +649,34 @@ export async function notify<E extends NotificationEvent>(
   try {
     const safePayload = sanitizeNotificationPayload(event, payload);
     const mock = opts.mockMode ?? isMockMode();
-    const sender: WebhookSender =
+    const webhookSender: WebhookSender =
       opts.webhookSender ?? (mock ? mockWebhookSender : sendWebhook);
+    const smartBotSender: SmartBotSender =
+      opts.smartBotSender ?? (mock ? mockSmartBotSender : sendSmartBot);
     const now = opts.now ?? (await databaseNow());
+    const deliveryKey = opts.deliveryKey;
+    let reconciledChannelIds = new Set<string>();
+    if (deliveryKey) {
+      if (
+        !Number.isSafeInteger(opts.deliveryAttempt) ||
+        (opts.deliveryAttempt ?? 0) < 1
+      ) {
+        throw new Error('durable notification delivery attempt is missing');
+      }
+      reconciledChannelIds = new Set(
+        await reconcileAbandonedDurableDeliveries({
+          deliveryKey,
+          jobAttempt: opts.deliveryAttempt!,
+        }),
+      );
+      if (reconciledChannelIds.size > 0) {
+        outcome.unknown += reconciledChannelIds.size;
+        recordErrorCode(
+          outcome,
+          'worker lease ended before delivery was finalized',
+        );
+      }
+    }
 
     const rule = await db.notificationRule.findUnique({
       where: { eventType: event },
@@ -516,7 +730,16 @@ export async function notify<E extends NotificationEvent>(
     // 静默漏推）。
     const fetched = await db.notificationChannel.findMany({
       where: { id: { in: uniqueConfiguredChannelIds } },
-      select: { id: true, webhookUrl: true, isActive: true },
+      select: {
+        id: true,
+        transport: true,
+        webhookUrl: true,
+        smartBotBotDigest: true,
+        smartBotTargetId: true,
+        smartBotChatType: true,
+        smartBotBoundAt: true,
+        isActive: true,
+      },
     });
     // **PG `IN (...)` 不保证返回顺序**——必须按配置 ID 顺
     // 序重排。否则 CS_PERIOD_* runtime cap 的
@@ -531,7 +754,10 @@ export async function notify<E extends NotificationEvent>(
     const managementRouteBlocked = Boolean(
       managementRoute &&
         (missingChannelCount > 0 ||
-          channels.some((channel) => !channel.isActive)),
+          channels.some(
+            (channel) =>
+              !channel.isActive || Boolean(channelConfigurationFailure(channel)),
+          )),
     );
 
     // 托管的五类管理事件用更严的 all-or-nothing 收件人契约：
@@ -597,7 +823,6 @@ export async function notify<E extends NotificationEvent>(
     // SENDING 的情况下等待全局 permit；随后用唯一键原子预留
     // SENDING + fencing token，只有拿到 token 的 attempt 才能做外部 I/O。
     // SUCCESS/FAILED/UNKNOWN 都是单调终态；只有明确未送达的 RETRYING 可重领。
-    const deliveryKey = opts.deliveryKey;
     const beforeRequest =
       event === NOTIFICATION_EVENTS.ORDER_COMPLETED
         ? () =>
@@ -631,21 +856,59 @@ export async function notify<E extends NotificationEvent>(
         continue;
       }
 
+      const configurationFailure = channelConfigurationFailure(channel);
       const blockedReason =
         managementRouteBlocked && channel.isActive
           ? 'management route incomplete'
-          : undefined;
-      let preparedSend: PreparedWebhookSend | undefined;
-      if (sender === sendWebhook && channel.isActive && !blockedReason) {
+          : configurationFailure?.reason;
+      const blockedReasonRetryable =
+        !managementRouteBlocked && configurationFailure?.retryable === true;
+      let preparedSend: PreparedChannelSend | undefined;
+      if (
+        webhookSender === sendWebhook &&
+        channel.transport !== NotificationChannelTransport.WECOM_SMART_BOT &&
+        channel.webhookUrl &&
+        channel.isActive &&
+        !blockedReason
+      ) {
         // The only potentially long wait happens before a durable SENDING row
         // exists. Lease loss here therefore cannot create a false UNKNOWN.
-        preparedSend = await prepareWebhookSend(channel.webhookUrl, content, {
-          ...(opts.signal ? { signal: opts.signal } : {}),
-        });
+        preparedSend = {
+          transport: 'WECOM_GROUP_WEBHOOK',
+          value: await prepareWebhookSend(channel.webhookUrl, content, {
+            ...(opts.signal ? { signal: opts.signal } : {}),
+          }),
+        };
 
         // ORDER_COMPLETED may become stale while waiting behind another event
-        // for this same webhook. Recheck the business generation and durable
-        // lease after the permit, before claiming the delivery ledger.
+        // for this same destination. Recheck before claiming the ledger.
+        if (
+          !(await completionDeliveryIsCurrent(
+            event,
+            safePayload as Readonly<Record<string, unknown>>,
+          ))
+        ) {
+          outcome.skipped += 1;
+          continue;
+        }
+        await opts.assertLease?.();
+        opts.signal?.throwIfAborted();
+      } else if (
+        smartBotSender === sendSmartBot &&
+        channel.transport === NotificationChannelTransport.WECOM_SMART_BOT &&
+        channel.isActive &&
+        !blockedReason
+      ) {
+        const target = smartBotTarget(channel);
+        if (target) {
+          preparedSend = {
+            transport: 'WECOM_SMART_BOT',
+            value: await prepareSmartBotSend(target, content, {
+              ...(opts.signal ? { signal: opts.signal } : {}),
+            }),
+          };
+        }
+
         if (
           !(await completionDeliveryIsCurrent(
             event,
@@ -659,6 +922,8 @@ export async function notify<E extends NotificationEvent>(
         opts.signal?.throwIfAborted();
       }
 
+      const destinationFingerprint = channelDestinationFingerprint(channel);
+
       if (deliveryKey) {
         if (
           !Number.isSafeInteger(opts.deliveryAttempt) ||
@@ -671,11 +936,16 @@ export async function notify<E extends NotificationEvent>(
           jobAttempt: opts.deliveryAttempt!,
           eventType: event,
           channelId: channel.id,
+          destinationFingerprint,
           messageContent: content,
           relatedOrderId,
         });
         if (!claim.claimed) {
-          recordUnclaimedDelivery(outcome, claim);
+          recordUnclaimedDelivery(
+            outcome,
+            claim,
+            reconciledChannelIds.has(channel.id),
+          );
           continue;
         }
         await deliverClaimedChannel(outcome, {
@@ -685,7 +955,8 @@ export async function notify<E extends NotificationEvent>(
           deliveryKey,
           deliveryAttempt: opts.deliveryAttempt!,
           attemptId: claim.attemptId,
-          sender,
+          webhookSender,
+          smartBotSender,
           mock,
           ...(opts.signal ? { signal: opts.signal } : {}),
           ...(opts.assertLease ? { assertLease: opts.assertLease } : {}),
@@ -694,7 +965,9 @@ export async function notify<E extends NotificationEvent>(
           // A channel disabled before an initial delivery is a permanent
           // configuration failure, not a reason to burn the job retry budget.
           inactiveChannelRetryable: false,
-          ...(blockedReason ? { blockedReason } : {}),
+          ...(blockedReason
+            ? { blockedReason, blockedReasonRetryable }
+            : {}),
         });
         continue;
       }
@@ -702,13 +975,14 @@ export async function notify<E extends NotificationEvent>(
       const result = await sendToChannel(outcome, {
         channel,
         messageContent: content,
-        sender,
+        webhookSender,
+        smartBotSender,
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(opts.assertLease ? { assertLease: opts.assertLease } : {}),
         ...(beforeRequest ? { beforeRequest } : {}),
         ...(preparedSend ? { preparedSend } : {}),
         inactiveChannelRetryable: false,
-        ...(blockedReason ? { blockedReason } : {}),
+        ...(blockedReason ? { blockedReason, blockedReasonRetryable } : {}),
       });
       if (result.skipped) continue;
       const recorded = recordWebhookResult(outcome, result, {
@@ -722,6 +996,7 @@ export async function notify<E extends NotificationEvent>(
         result,
         recorded,
         relatedOrderId,
+        destinationFingerprint,
         now,
       });
     }
@@ -753,7 +1028,8 @@ export type ManualNotificationReplayTarget = {
 /**
  * Replay owner-confirmed-not-delivered rows without consulting the current
  * rule, channel list or message template. The original log pins the recipient
- * and rendered content; only the channel's current webhook endpoint is read.
+ * and rendered content. A destination fingerprint prevents a changed endpoint
+ * or rebound bot target from silently receiving an old replay.
  */
 export async function replayDurableNotificationLogs(
   event: NotificationEvent,
@@ -766,6 +1042,7 @@ export async function replayDurableNotificationLogs(
     signal?: AbortSignal;
     assertLease?: () => Promise<void>;
     webhookSender?: WebhookSender;
+    smartBotSender?: SmartBotSender;
     mockMode?: boolean;
   },
 ): Promise<NotifyOutcome> {
@@ -779,8 +1056,10 @@ export async function replayDurableNotificationLogs(
       throw new Error('invalid manual notification replay target');
     }
     const mock = options.mockMode ?? isMockMode();
-    const sender =
+    const webhookSender =
       options.webhookSender ?? (mock ? mockWebhookSender : sendWebhook);
+    const smartBotSender =
+      options.smartBotSender ?? (mock ? mockSmartBotSender : sendSmartBot);
 
     for (const target of options.targets) {
       await options.assertLease?.();
@@ -804,12 +1083,22 @@ export async function replayDurableNotificationLogs(
           deliveryKey: true,
           eventType: true,
           status: true,
+          destinationFingerprint: true,
           messageContent: true,
           relatedOrderId: true,
           deliveryStateVersion: true,
           deliveryJobAttempt: true,
           channel: {
-            select: { id: true, webhookUrl: true, isActive: true },
+            select: {
+              id: true,
+              transport: true,
+              webhookUrl: true,
+              smartBotBotDigest: true,
+              smartBotTargetId: true,
+              smartBotChatType: true,
+              smartBotBoundAt: true,
+              isActive: true,
+            },
           },
         },
       });
@@ -840,6 +1129,21 @@ export async function replayDurableNotificationLogs(
         continue;
       }
 
+      const destinationFingerprint = channelDestinationFingerprint(log.channel);
+      // Rows created before destination pinning cannot prove which historical
+      // recipient the owner reviewed. Fail closed instead of filling the new
+      // column from today's channel and potentially replaying an old message
+      // into a different group.
+      if (
+        !log.destinationFingerprint ||
+        log.destinationFingerprint !== destinationFingerprint
+      ) {
+        throw new NotificationReplayConflictError(
+          'manual notification replay destination changed',
+          outcome,
+        );
+      }
+
       const exactOwnerResolution =
         log.deliveryStateVersion === target.stateVersion;
       const safeAutomaticContinuation =
@@ -855,13 +1159,43 @@ export async function replayDurableNotificationLogs(
 
       const beforeRequest = () =>
         completionDeliveryIsCurrent(event, options.payload ?? {});
-      let preparedSend: PreparedWebhookSend | undefined;
-      if (sender === sendWebhook && log.channel.isActive) {
-        preparedSend = await prepareWebhookSend(
-          log.channel.webhookUrl,
-          log.messageContent,
-          { ...(options.signal ? { signal: options.signal } : {}) },
-        );
+      let preparedSend: PreparedChannelSend | undefined;
+      if (
+        webhookSender === sendWebhook &&
+        log.channel.transport !== NotificationChannelTransport.WECOM_SMART_BOT &&
+        log.channel.webhookUrl &&
+        log.channel.isActive
+      ) {
+        preparedSend = {
+          transport: 'WECOM_GROUP_WEBHOOK',
+          value: await prepareWebhookSend(
+            log.channel.webhookUrl,
+            log.messageContent,
+            { ...(options.signal ? { signal: options.signal } : {}) },
+          ),
+        };
+        if (!(await beforeRequest())) {
+          outcome.skipped += 1;
+          continue;
+        }
+        await options.assertLease?.();
+        options.signal?.throwIfAborted();
+      } else if (
+        smartBotSender === sendSmartBot &&
+        log.channel.transport === NotificationChannelTransport.WECOM_SMART_BOT &&
+        log.channel.isActive
+      ) {
+        const smartTarget = smartBotTarget(log.channel);
+        if (smartTarget) {
+          preparedSend = {
+            transport: 'WECOM_SMART_BOT',
+            value: await prepareSmartBotSend(
+              smartTarget,
+              log.messageContent,
+              { ...(options.signal ? { signal: options.signal } : {}) },
+            ),
+          };
+        }
         if (!(await beforeRequest())) {
           outcome.skipped += 1;
           continue;
@@ -877,6 +1211,7 @@ export async function replayDurableNotificationLogs(
           jobAttempt: options.deliveryAttempt,
           eventType: event,
           channelId: log.channel.id,
+          destinationFingerprint,
           // This is the content the owner inspected before choosing resend.
           messageContent: log.messageContent,
           relatedOrderId: log.relatedOrderId,
@@ -896,6 +1231,7 @@ export async function replayDurableNotificationLogs(
         continue;
       }
 
+      const configurationFailure = channelConfigurationFailure(log.channel);
       await deliverClaimedChannel(outcome, {
         event,
         channel: log.channel,
@@ -903,7 +1239,8 @@ export async function replayDurableNotificationLogs(
         deliveryKey: options.deliveryKey,
         deliveryAttempt: options.deliveryAttempt,
         attemptId: claim.attemptId,
-        sender,
+        webhookSender,
+        smartBotSender,
         mock,
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.assertLease ? { assertLease: options.assertLease } : {}),
@@ -914,6 +1251,12 @@ export async function replayDurableNotificationLogs(
         // The owner explicitly chose the original recipient. Keep it pinned
         // and retry only after that same channel is re-enabled.
         inactiveChannelRetryable: true,
+        ...(configurationFailure
+          ? {
+              blockedReason: configurationFailure.reason,
+              blockedReasonRetryable: configurationFailure.retryable,
+            }
+          : {}),
       });
     }
     return outcome;

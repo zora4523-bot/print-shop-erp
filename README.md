@@ -209,7 +209,8 @@ pnpm dev
 | `ORDER_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的私有 XLSX 目录，单机建议 `/var/tmp/print-shop-erp/order-exports` | 留空回退到系统临时目录；多机或临时目录清理后待下载文件会丢失 |
 | `AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的月账单 XLSX 私有目录，必须与工单导出目录分离 | 留空回退到独立系统临时目录；多机部署时会无法稳定下载 |
 | `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：**打印单二维码（师傅微信扫码报工）** 与 CDR 外协短链跟随访问域，split-origin 时师傅/外协拿到内网死链；单域名若 Nginx 漏传 `X-Forwarded-Proto` 也会退化成 localhost 死链 |
-| `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | 生产显式设 `"false"`，使 env 检查、smoke 与真实运行口径一致。留空在 `NODE_ENV=production` 下实际也是真发，但发布门禁会拒绝这种含糊配置；切勿设 `"true"` |
+| `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | 生产显式设 `"false"`，使 env 检查、smoke 与真实运行口径一致。留空在 `NODE_ENV=production` 下实际也是真发，但 `deploy:smoke` 会拒绝这种含糊配置；切勿设 `"true"` |
+| `WECOM_SMART_BOT_ID` / `WECOM_SMART_BOT_SECRET` | Bot ID + Secret 智能机器人长连接凭据 | 只使用旧群 Webhook 时两项都留空；启用智能机器人时必须成对配置，且生产必须 `BACKGROUND_JOBS_MODE=durable` |
 | `CDR_BUNDLE_MOCK_MODE` | CDR 打包真跑开关 | 留空（按 NODE_ENV）。生产设 `"true"` 会让 CDR 汇总下载返回 mock 占位 URL |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 ADMIN | 详见文件顶注释 |
 
@@ -222,6 +223,19 @@ pnpm dev
 > sender 不访问该表。生产真发前必须先执行 migration
 > `20260902121100_notification_webhook_global_throttle`。响应按[官方全局错误码文档](https://developer.work.weixin.qq.com/document/path/90313)
 > 的 `errcode` 判定；新通知任务最多执行 1 次初始投递 + 3 次退避重试。
+
+Bot ID + Secret 智能机器人使用企业微信官方的
+[长连接协议](https://developer.work.weixin.qq.com/document/path/101833)，并与上述群 Webhook
+通道并存。运维时必须遵守以下边界：
+
+- 本次用于接入的 Secret 曾在对话中明文暴露，已视为泄露。先在企业微信后台轮换 Secret，再把新值注入生产密钥管理/受限 `.env`；不要复用已发出的旧值，也不要把新值写入 Git、命令行或日志。
+- `WECOM_SMART_BOT_ID` 和 `WECOM_SMART_BOT_SECRET` 要么都留空，要么都配置。部署前运行 `pnpm check:env`，半配置会直接阻断上线。
+- 长连接只由常驻 LIGHT worker 持有；生产必须使用 `BACKGROUND_JOBS_MODE=durable`，PM2 只能运行 **1 个 LIGHT worker 进程实例**。`LIGHT_WORKER_CONCURRENCY=2` 是该单进程内的任务并发，不是启动两个机器人连接。
+- 绑定群会锁定绑定时的 Bot ID。轮换同一 Bot ID 的 Secret 不需重绑；如果更换 Bot ID，必须新建通知目标并在目标群重新绑定，不会把旧 `chatid` 交给新机器人。
+- 仅配置 Bot ID + Secret 还不知道收件群。LIGHT worker 认证成功后，在 `/owner/notifications` 创建智能机器人通知目标、生成一次性绑定码，再由群成员在目标企业微信群中 `@机器人` 并发送该码。后台显示已绑定后再启用通道并点“测试”；测试会由 LIGHT worker 入队真发。
+- 匿名 `/api/health/jobs` 只暴露 `required` / `configurationValid` / `identityMatch` / `operational` 布尔状态，不暴露 Bot ID、摘要、群 ID 或 worker 身份。只要存在启用中的智能机器人目标，发布门禁就要求当前版本唯一 LIGHT worker 身份一致且稳定 `CONNECTED`；`CONNECTING` / `DISCONNECTED` 超过观察期也会拒绝发布。
+
+协议和绑定前置条件以[企业微信智能机器人官方文档](https://developer.work.weixin.qq.com/document/path/101785)为准。
 
 选填但生产建议：
 | `SENTRY_DSN` | 错误监控 | 留空 → instrumentation.ts no-op，错误只进 Next 默认日志 |
@@ -379,7 +393,7 @@ fc-list :lang=zh | head
 - [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
 - [ ] ADMIN 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
 - [ ] 用受控测试错误确认 Sentry 收到事件；生产未配置 `SENTRY_DSN` 时此项明确不通过，禁止临时破坏真实业务 action
-- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 逐项核对 15 条预置 rule + 按业务启用并绑定收件群 + 用&ldquo;测试&rdquo;按钮验证 webhook 通**。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
+- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 逐项核对 15 条预置 rule + 按业务启用并绑定收件群 + 用&ldquo;测试&rdquo;按钮验证真发**。Webhook 通道核对 URL；智能机器人通道先轮换已暴露 Secret，成对注入两个 `WECOM_SMART_BOT_*` 变量，确认只有一个 LIGHT worker 进程，再于目标群 `@机器人` 并发送一次性绑定码。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
 - [ ] 真实触发一次 `ORDER_SCHEDULED`（下发 `RELEASED`）与 `ORDER_COMPLETED`（当前 work-order generation 通过生产完成闸口），核对群消息和投递日志各只有一次。
 - [ ] `CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED` 当前最多只能绑定 1 个授权共享群；尚未实现&ldquo;管理员群 + 对应客服&rdquo;按人双路由，不得按已完成验收。
 - [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）

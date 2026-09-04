@@ -2730,17 +2730,73 @@ model NotificationWebhookSendSlot {
   @@index([updatedAt])
 }
 
+// Cross-process rate-limit cursor for one smart-bot conversation. The key is
+// SHA-256(botId + chat type + target id); neither the Bot Secret nor a raw
+// chatid is copied into this coordination table.
+model NotificationSmartBotSendSlot {
+  targetDigest    String   @id @db.Char(64)
+  nextAvailableAt DateTime @db.Timestamptz(3)
+  updatedAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([updatedAt])
+}
+
+// Only binding-code callbacks are retained. `msgId` is provider supplied and
+// may be delivered more than once, so (botDigest, msgId) is the durable
+// idempotency key. Message content and Bot Secret are deliberately absent.
+model NotificationSmartBotBindingReceipt {
+  id         String   @id @default(cuid())
+  botDigest  String   @db.Char(64)
+  msgId      String   @db.VarChar(128)
+  receivedAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([botDigest, msgId])
+  @@index([receivedAt])
+}
+
+enum NotificationChannelTransport {
+  WECOM_GROUP_WEBHOOK
+  WECOM_SMART_BOT
+}
+
+enum NotificationSmartBotChatType {
+  SINGLE
+  GROUP
+}
+
+enum SmartBotConnectionStatus {
+  NOT_CONFIGURED
+  CONNECTING
+  CONNECTED
+  DISCONNECTED
+  AUTH_FAILED
+  CONNECTION_CONFLICT
+}
+
 model NotificationChannel {
-  id          String   @id @default(cuid())
-  channelKey  String   @unique // scheduling_group / owner_group / etc
-  channelName String
-  webhookUrl  String
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                       String                        @id @default(cuid())
+  channelKey               String                        @unique // scheduling_group / owner_group / etc
+  channelName              String
+  transport                NotificationChannelTransport  @default(WECOM_GROUP_WEBHOOK)
+  webhookUrl               String?
+  // SHA-256 of the Bot ID that produced the group callback. A raw chatid must
+  // never be reused under a different robot identity after credential changes.
+  smartBotBotDigest        String?                       @db.Char(64)
+  smartBotTargetId         String?
+  smartBotChatType         NotificationSmartBotChatType?
+  smartBotBoundAt          DateTime?                     @db.Timestamptz(3)
+  // One-time group binding. Only SHA-256(code) is persisted; plaintext is
+  // returned once to the authorized owner and never enters a URL or job.
+  smartBotBindingCodeHash  String?                       @db.Char(64)
+  smartBotBindingExpiresAt DateTime?                     @db.Timestamptz(3)
+  isActive                 Boolean                       @default(true)
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
 
   rules NotificationRule[] @relation("ChannelRules")
   logs  NotificationLog[]
+
+  @@unique([smartBotBotDigest, smartBotTargetId])
 }
 
 model NotificationRule {
@@ -2764,9 +2820,9 @@ enum NotificationStatus {
 }
 
 model NotificationLog {
-  id                   String             @id @default(cuid())
-  eventType            String
-  channelId            String
+  id                     String             @id @default(cuid())
+  eventType              String
+  channelId              String
   // 一次「逻辑投递」的稳定标识 = BackgroundJob.dedupeKey，跨 job attempt 不变。
   // durable worker 在 HTTP 前先原子预留 (deliveryKey, channelId) 并写
   // SENDING + deliveryAttemptId。只有持有 fencing token 的 worker 能落终态；
@@ -2775,26 +2831,29 @@ model NotificationLog {
   //
   // 可空：inline/dev 路径与 owner 的「测试发送」不带 key。PG 唯一索引默认
   // NULLS DISTINCT，任意多条 NULL 行互不冲突，所以存量数据与老路径零影响。
-  deliveryKey          String?
-  messageContent       String
-  status               NotificationStatus
-  errorMessage         String?
-  retryCount           Int                @default(0)
-  relatedOrderId       String?
-  sentAt               DateTime?
+  deliveryKey            String?
+  // Hash of the transport and exact destination at claim time. Manual replay
+  // refuses to send if a channel was rebound or its endpoint changed.
+  destinationFingerprint String?            @db.Char(64)
+  messageContent         String
+  status                 NotificationStatus
+  errorMessage           String?
+  retryCount             Int                @default(0)
+  relatedOrderId         String?
+  sentAt                 DateTime?
   // Unique fencing token for the process that atomically claimed this
   // channel delivery. A stale worker cannot overwrite a later terminal state.
-  deliveryAttemptId    String?
+  deliveryAttemptId      String?
   // BackgroundJob.attempts generation that owns SENDING. A later generation
   // may fence an abandoned reservation to UNKNOWN; the same generation may
   // only observe it and must never steal it.
-  deliveryJobAttempt   Int?
+  deliveryJobAttempt     Int?
   // Monotonic CAS generation for owner resolution. Status alone cannot prevent
   // UNKNOWN -> RETRYING -> SENDING -> UNKNOWN ABA from accepting a stale form.
-  deliveryStateVersion Int                @default(0)
-  lastAttemptAt        DateTime           @default(now())
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @default(now()) @updatedAt
+  deliveryStateVersion   Int                @default(0)
+  lastAttemptAt          DateTime           @default(now())
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @default(now()) @updatedAt
 
   channel NotificationChannel @relation(fields: [channelId], references: [id])
 
@@ -2882,11 +2941,13 @@ model BackgroundJobAttempt {
 }
 
 model BackgroundWorkerHeartbeat {
-  workerId   String             @id
-  queue      BackgroundJobQueue
-  version    String
-  startedAt  DateTime
-  lastSeenAt DateTime
+  workerId          String                    @id
+  queue             BackgroundJobQueue
+  version           String
+  smartBotStatus    SmartBotConnectionStatus?
+  smartBotBotDigest String?                   @db.Char(64)
+  startedAt         DateTime
+  lastSeenAt        DateTime
 
   @@index([queue, lastSeenAt])
 }

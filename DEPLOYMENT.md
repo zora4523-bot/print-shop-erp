@@ -39,6 +39,7 @@ applies_to: repository deployment workflow at last_verified
 - 生产调度使用系统 crontab 和 root-only secret file；不要恢复 `pg_cron + pg_net` HTTP 调度。
 - Web、LIGHT worker、HEAVY worker 和健康检查都通过后，才能把发布标为成功。
 - 打印 PDF、OSS 直传、企业微信真发和备份恢复能力需要真实环境验证，接口 `200` 或 mock 成功不能替代。
+- 启用企业微信 Bot ID + Secret 智能机器人前，必须先轮换本次已明文暴露的 Secret；`WECOM_SMART_BOT_ID` / `WECOM_SMART_BOT_SECRET` 成对注入受限环境，`BACKGROUND_JOBS_MODE=durable`，且 PM2 只运行 **1 个 LIGHT worker 进程实例**。重启后还必须在目标群完成一次性绑定，不能用“凭据已配”代替群真发验证。发布脚本会要求启用目标、Web 配置与当前版本 LIGHT worker 的 Bot ID 摘要一致，并等待 `CONNECTED` 稳定后才解除停写保护；持续断连会拒绝发布。
 - 密钥不进入 Git、shell history、进程参数、数据库自定义 GUC 或共享日志。
 
 ## 使用方式

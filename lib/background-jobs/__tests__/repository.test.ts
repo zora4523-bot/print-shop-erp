@@ -31,6 +31,7 @@ import {
   Prisma,
 } from '../../../generated/prisma/client';
 import {
+  BACKGROUND_JOB_UNDISPATCHED_CLAIM_ERROR_CODE,
   BackgroundJobLeaseLostError,
   cancelPendingBackgroundJob,
   claimNextBackgroundJob,
@@ -38,6 +39,7 @@ import {
   enqueueBackgroundJob,
   failBackgroundJob,
   heartbeatBackgroundJob,
+  releaseUndispatchedBackgroundJobClaim,
   retryDeadBackgroundJob,
 } from '../repository';
 import { backgroundJobErrorCode, retryDelayMs } from '../policy';
@@ -67,6 +69,7 @@ beforeEach(() => {
   dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
   dbMock.orderExport.updateMany.mockResolvedValue({ count: 0 });
   dbMock.agentMonthlyBillExport.updateMany.mockResolvedValue({ count: 0 });
+  dbMock.notificationLog.updateMany.mockResolvedValue({ count: 0 });
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
   dbMock.$queryRaw.mockReset().mockResolvedValue([{ now: DB_NOW }]);
   dbMock.$transaction.mockReset().mockImplementation(async (callback) =>
@@ -471,6 +474,63 @@ describe('claim and lease lifecycle', () => {
     expect(values.some((value) => value instanceof Date)).toBe(false);
   });
 
+  it('releases an undispatched claim without reusing its fencing generation or run budget', async () => {
+    const undispatched = {
+      ...claimed,
+      attempts: 5,
+      maxAttempts: 5,
+      claimedAt: new Date('2026-07-17T07:59:59.250Z'),
+    };
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await releaseUndispatchedBackgroundJobClaim(undispatched);
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: undispatched.id,
+        status: BackgroundJobStatus.RUNNING,
+        lockedBy: undispatched.workerId,
+        attempts: 5,
+        maxAttempts: 5,
+      },
+      data: {
+        status: BackgroundJobStatus.PENDING,
+        maxAttempts: 6,
+        availableAt: DB_NOW,
+        finishedAt: null,
+        lockedBy: null,
+        lockedAt: null,
+        heartbeatAt: null,
+        lastErrorCode: BACKGROUND_JOB_UNDISPATCHED_CLAIM_ERROR_CODE,
+      },
+    });
+    expect(dbMock.backgroundJobAttempt.update).toHaveBeenCalledWith({
+      where: {
+        jobId_attempt: { jobId: undispatched.id, attempt: 5 },
+      },
+      data: {
+        status: 'ABANDONED',
+        errorCode: BACKGROUND_JOB_UNDISPATCHED_CLAIM_ERROR_CODE,
+        finishedAt: DB_NOW,
+        durationMs: 750,
+      },
+    });
+    expect(
+      dbMock.backgroundJob.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.backgroundJobAttempt.update.mock.invocationCallOrder[0]!);
+  });
+
+  it('does not abandon another worker generation when release loses its lease CAS', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      releaseUndispatchedBackgroundJobClaim(claimed, DB_NOW),
+    ).rejects.toBeInstanceOf(BackgroundJobLeaseLostError);
+
+    expect(dbMock.backgroundJobAttempt.update).not.toHaveBeenCalled();
+  });
+
   it('completes the owned job and its attempt atomically', async () => {
     const finishedAt = new Date('2026-07-17T08:00:01Z');
     dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
@@ -621,9 +681,14 @@ describe('claim and lease lifecycle', () => {
           }),
         }),
       );
-      // NotificationLog 在 notify 阶段已经是 RETRYING。job 耗尽只终结
-      // BackgroundJob，不得把日志改成 FAILED 或其他状态。
-      expect(dbMock.notificationLog.updateMany).not.toHaveBeenCalled();
+      // 只允许兜底仍卡在 SENDING 的账本；已经落好的 RETRYING 不匹配，
+      // 不得被改成 FAILED 或 UNKNOWN。
+      expect(dbMock.notificationLog.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'SENDING' }),
+          data: expect.objectContaining({ status: 'UNKNOWN' }),
+        }),
+      );
     },
   );
 
@@ -654,6 +719,68 @@ describe('claim and lease lifecycle', () => {
           finishedAt: DB_NOW,
           lastErrorCode: 'NotificationDeliveryUnknownError',
           result: partialResult,
+        }),
+      }),
+    );
+  });
+
+  it('makes a stranded SENDING delivery owner-visible and terminal atomically', async () => {
+    const strandedJob = { ...claimed, attempts: 1, maxAttempts: 5 };
+    const partialResult = {
+      event: 'ORDER_SUBMITTED',
+      attempted: 1,
+      delivered: 0,
+      failed: 0,
+      unknown: 0,
+      errorCodes: ['NotificationDeliveryLedgerError'],
+    };
+    dbMock.notificationLog.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await failBackgroundJob(
+      strandedJob,
+      Object.assign(new Error('database unavailable'), {
+        name: 'NotificationDeliveryFailedError',
+        partialResult,
+      }),
+      DB_NOW,
+    );
+
+    expect(dbMock.notificationLog.updateMany).toHaveBeenCalledWith({
+      where: {
+        deliveryKey: strandedJob.dedupeKey,
+        status: 'SENDING',
+        OR: [
+          { deliveryJobAttempt: null },
+          { deliveryJobAttempt: { lte: strandedJob.attempts } },
+        ],
+      },
+      data: expect.objectContaining({
+        status: 'UNKNOWN',
+        deliveryAttemptId: null,
+        deliveryJobAttempt: null,
+        deliveryStateVersion: { increment: 1 },
+      }),
+    });
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BackgroundJobStatus.DEAD,
+          lastErrorCode: 'NotificationDeliveryUnknownError',
+          result: expect.objectContaining({
+            unknown: 1,
+            errorCodes: expect.arrayContaining([
+              'background job ended before delivery finalization could be persisted',
+            ]),
+          }),
+        }),
+      }),
+    );
+    expect(dbMock.backgroundJobAttempt.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          errorCode: 'NotificationDeliveryUnknownError',
         }),
       }),
     );
@@ -690,9 +817,13 @@ describe('claim and lease lifecycle', () => {
         }),
       }),
     );
-    // The already-finalized 429 row remains RETRYING. B5 joins it to this
-    // DEAD owner job; the terminal classifier must never rewrite the ledger.
-    expect(dbMock.notificationLog.updateMany).not.toHaveBeenCalled();
+    // The already-finalized 429 row remains RETRYING. The terminal fallback
+    // targets only stranded SENDING rows, so it cannot rewrite this evidence.
+    expect(dbMock.notificationLog.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: 'SENDING' }),
+      }),
+    );
   });
 
   it('does not burn the remaining retry budget for a pure replay conflict', async () => {

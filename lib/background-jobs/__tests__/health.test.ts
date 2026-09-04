@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/db', () => ({ db: {} }));
-import { BackgroundJobQueue } from '../../../generated/prisma/enums';
+import {
+  BackgroundJobQueue,
+  SmartBotConnectionStatus,
+} from '../../../generated/prisma/enums';
 import {
   assessBackgroundJobHealth,
   classifyBackgroundJobAlerts,
+  summarizeSmartBotConnection,
+  summarizeSmartBotOperationalHealth,
   type BackgroundJobHealth,
 } from '../health';
 
@@ -18,9 +23,22 @@ function fixture(): BackgroundJobHealth {
   return {
     observedAt: now,
     activeWorkers: [
-      { queue: BackgroundJobQueue.LIGHT, version: 'v1', lastSeenAt: now },
-      { queue: BackgroundJobQueue.HEAVY, version: 'v1', lastSeenAt: now },
+      {
+        queue: BackgroundJobQueue.LIGHT,
+        version: 'v1',
+        smartBotStatus: SmartBotConnectionStatus.CONNECTED,
+        smartBotBotDigest: null,
+        lastSeenAt: now,
+      },
+      {
+        queue: BackgroundJobQueue.HEAVY,
+        version: 'v1',
+        smartBotStatus: null,
+        smartBotBotDigest: null,
+        lastSeenAt: now,
+      },
     ],
+    activeSmartBotChannels: [],
     pending: { LIGHT: 0, HEAVY: 0 },
     oldestPendingAt: { LIGHT: null, HEAVY: null },
     running: 0,
@@ -86,6 +104,259 @@ describe('assessBackgroundJobHealth', () => {
         'light-worker-version-mismatch',
         'heavy-worker-version-mismatch',
       ]),
+    });
+  });
+
+  it('smart-bot reconnecting is visible degradation but never makes ready unavailable', () => {
+    const health = fixture();
+    health.activeWorkers[0]!.smartBotStatus =
+      SmartBotConnectionStatus.DISCONNECTED;
+
+    expect(assessBackgroundJobHealth(health, { requireWorkers: true })).toEqual({
+      available: true,
+      status: 'degraded',
+      warnings: ['smart-bot-disconnected'],
+    });
+  });
+
+  it('smart-bot auth failure is actionable for jobs while ready stays available', () => {
+    const health = fixture();
+    health.activeWorkers[0]!.smartBotStatus =
+      SmartBotConnectionStatus.AUTH_FAILED;
+    const assessment = assessBackgroundJobHealth(health, {
+      requireWorkers: true,
+    });
+
+    expect(assessment).toMatchObject({
+      available: true,
+      status: 'degraded',
+      warnings: ['smart-bot-auth-failed'],
+    });
+    expect(classifyBackgroundJobAlerts(assessment.warnings)).toEqual({
+      level: 'alert',
+      alerts: ['smart-bot-auth-failed'],
+      warnings: [],
+    });
+  });
+
+  it('does not let a newer healthy LIGHT heartbeat hide a same-version auth failure', () => {
+    const health = fixture();
+    health.activeWorkers.splice(1, 0, {
+      queue: BackgroundJobQueue.LIGHT,
+      version: 'v1',
+      smartBotStatus: SmartBotConnectionStatus.AUTH_FAILED,
+      smartBotBotDigest: null,
+      lastSeenAt: new Date(now.getTime() - 1_000),
+    });
+
+    expect(
+      summarizeSmartBotConnection(health, { expectedVersion: 'v1' }),
+    ).toEqual({
+      status: SmartBotConnectionStatus.AUTH_FAILED,
+      lastSeenAt: new Date(now.getTime() - 1_000),
+    });
+
+    const assessment = assessBackgroundJobHealth(health, {
+      requireWorkers: true,
+      expectedVersion: 'v1',
+    });
+    expect(assessment).toEqual({
+      available: true,
+      status: 'degraded',
+      warnings: ['duplicate-light-workers', 'smart-bot-auth-failed'],
+    });
+    expect(classifyBackgroundJobAlerts(assessment.warnings)).toEqual({
+      level: 'alert',
+      alerts: ['duplicate-light-workers', 'smart-bot-auth-failed'],
+      warnings: [],
+    });
+  });
+
+  it('surfaces a same-version connection conflict and ignores old-release failures', () => {
+    const health = fixture();
+    health.activeWorkers.splice(
+      1,
+      0,
+      {
+        queue: BackgroundJobQueue.LIGHT,
+        version: 'v1',
+        smartBotStatus: SmartBotConnectionStatus.CONNECTION_CONFLICT,
+        smartBotBotDigest: null,
+        lastSeenAt: new Date(now.getTime() - 1_000),
+      },
+      {
+        queue: BackgroundJobQueue.LIGHT,
+        version: 'old',
+        smartBotStatus: SmartBotConnectionStatus.AUTH_FAILED,
+        smartBotBotDigest: null,
+        lastSeenAt: new Date(now.getTime() - 500),
+      },
+    );
+
+    expect(
+      summarizeSmartBotConnection(health, { expectedVersion: 'v1' }).status,
+    ).toBe(SmartBotConnectionStatus.CONNECTION_CONFLICT);
+
+    const assessment = assessBackgroundJobHealth(health, {
+      requireWorkers: true,
+      expectedVersion: 'v1',
+    });
+    expect(assessment.warnings).toEqual([
+      'duplicate-light-workers',
+      'smart-bot-connection-conflict',
+    ]);
+    expect(classifyBackgroundJobAlerts(assessment.warnings)).toMatchObject({
+      level: 'alert',
+      alerts: [
+        'duplicate-light-workers',
+        'smart-bot-connection-conflict',
+      ],
+    });
+  });
+
+  it('requires one connected current-version worker with the same Bot ID as every active destination', () => {
+    const health = fixture();
+    const digest = 'a'.repeat(64);
+    health.activeWorkers[0]!.smartBotBotDigest = digest;
+    health.activeSmartBotChannels = [
+      {
+        smartBotBotDigest: digest,
+        smartBotTargetId: 'group-1',
+        smartBotChatType: 'GROUP',
+        smartBotBoundAt: now,
+      },
+    ];
+
+    expect(
+      summarizeSmartBotOperationalHealth(health, {
+        expectedVersion: 'v1',
+        expectedBotDigest: digest,
+      }),
+    ).toEqual({
+      required: true,
+      configurationValid: true,
+      identityMatch: true,
+      operational: true,
+    });
+
+    health.activeWorkers[0]!.smartBotBotDigest = 'b'.repeat(64);
+    const assessment = assessBackgroundJobHealth(health, {
+      requireWorkers: true,
+      expectedVersion: 'v1',
+      expectedSmartBotDigest: digest,
+    });
+    expect(assessment.warnings).toContain('smart-bot-identity-mismatch');
+    expect(classifyBackgroundJobAlerts(assessment.warnings).alerts).toContain(
+      'smart-bot-identity-mismatch',
+    );
+  });
+
+  it('makes missing credentials actionable when an active destination requires the bot', () => {
+    const health = fixture();
+    const digest = 'a'.repeat(64);
+    health.activeWorkers[0]!.smartBotStatus =
+      SmartBotConnectionStatus.NOT_CONFIGURED;
+    health.activeWorkers[0]!.smartBotBotDigest = digest;
+    health.activeSmartBotChannels = [
+      {
+        smartBotBotDigest: digest,
+        smartBotTargetId: 'group-1',
+        smartBotChatType: 'GROUP',
+        smartBotBoundAt: now,
+      },
+    ];
+
+    const assessment = assessBackgroundJobHealth(health, {
+      requireWorkers: true,
+      expectedVersion: 'v1',
+      expectedSmartBotDigest: digest,
+    });
+    expect(assessment.warnings).toContain('smart-bot-not-configured');
+    expect(classifyBackgroundJobAlerts(assessment.warnings).alerts).toContain(
+      'smart-bot-not-configured',
+    );
+  });
+
+  it('treats a matching destination without a current worker as not-yet-observed, not an identity mismatch', () => {
+    const health = fixture();
+    const digest = 'a'.repeat(64);
+    health.activeWorkers = health.activeWorkers.filter(
+      (worker) => worker.queue !== BackgroundJobQueue.LIGHT,
+    );
+    health.activeSmartBotChannels = [
+      {
+        smartBotBotDigest: digest,
+        smartBotTargetId: 'group-1',
+        smartBotChatType: 'GROUP',
+        smartBotBoundAt: now,
+      },
+    ];
+
+    expect(
+      summarizeSmartBotOperationalHealth(health, {
+        expectedVersion: 'v1',
+        expectedBotDigest: digest,
+      }),
+    ).toMatchObject({
+      required: true,
+      identityMatch: null,
+      operational: false,
+    });
+    expect(
+      assessBackgroundJobHealth(health, {
+        requireWorkers: true,
+        expectedVersion: 'v1',
+        expectedSmartBotDigest: digest,
+      }).warnings,
+    ).not.toContain('smart-bot-identity-mismatch');
+  });
+
+  it('never treats a current worker as exclusive while an old-release LIGHT heartbeat is active', () => {
+    const health = fixture();
+    const digest = 'a'.repeat(64);
+    health.activeWorkers[0]!.smartBotBotDigest = digest;
+    health.activeWorkers.splice(1, 0, {
+      queue: BackgroundJobQueue.LIGHT,
+      version: 'old',
+      smartBotStatus: SmartBotConnectionStatus.CONNECTED,
+      smartBotBotDigest: digest,
+      lastSeenAt: new Date(now.getTime() - 1_000),
+    });
+    health.activeSmartBotChannels = [
+      {
+        smartBotBotDigest: digest,
+        smartBotTargetId: 'group-1',
+        smartBotChatType: 'GROUP',
+        smartBotBoundAt: now,
+      },
+    ];
+
+    expect(
+      summarizeSmartBotOperationalHealth(health, {
+        expectedVersion: 'v1',
+        expectedBotDigest: digest,
+      }),
+    ).toMatchObject({ identityMatch: true, operational: false });
+    const assessment = assessBackgroundJobHealth(health, {
+      requireWorkers: true,
+      expectedVersion: 'v1',
+      expectedSmartBotDigest: digest,
+    });
+    expect(assessment.warnings).toContain('duplicate-light-workers');
+    expect(classifyBackgroundJobAlerts(assessment.warnings).alerts).toContain(
+      'duplicate-light-workers',
+    );
+  });
+
+  it('an intentionally unconfigured optional smart bot does not degrade queues', () => {
+    const health = fixture();
+    health.activeWorkers[0]!.smartBotStatus =
+      SmartBotConnectionStatus.NOT_CONFIGURED;
+
+    expect(assessBackgroundJobHealth(health, { requireWorkers: true })).toEqual({
+      available: true,
+      status: 'ok',
+      warnings: [],
     });
   });
 });
@@ -157,6 +428,24 @@ describe('classifyBackgroundJobAlerts', () => {
       requireWorkers: true,
     });
     expect(assessment.warnings).toEqual(['dead-notification-jobs-last-24h']);
+    expect(classifyBackgroundJobAlerts(assessment.warnings)).toEqual({
+      level: 'degraded',
+      alerts: [],
+      warnings: ['dead-notification-jobs-last-24h'],
+    });
+  });
+
+  it('一次性通道测试死信只降级，不让 jobs 探针持续返回 503', () => {
+    // SQL 层把 NOTIFICATION_CHANNEL_TEST 计入 deadNotificationLast24h。
+    // 这里钉死健康分类：测试没有 provider 幂等键，失败后应重新
+    // 由管理员发起，不应用普通 dead-jobs 报警要求重试旧 job。
+    const health = fixture();
+    health.deadLast24h = 1;
+    health.deadNotificationLast24h = 1;
+    const assessment = assessBackgroundJobHealth(health, {
+      requireWorkers: true,
+    });
+
     expect(classifyBackgroundJobAlerts(assessment.warnings)).toEqual({
       level: 'degraded',
       alerts: [],

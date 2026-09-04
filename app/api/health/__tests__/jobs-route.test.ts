@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getBackgroundJobHealthMock } = vi.hoisted(() => ({
+const { getBackgroundJobHealthMock, botDigest } = vi.hoisted(() => ({
   getBackgroundJobHealthMock: vi.fn(),
+  botDigest: 'a'.repeat(64),
 }));
 
 // 本路由不碰 db，但 health.ts 会 import lib/db；桩掉避免建真实 PrismaClient。
@@ -16,8 +17,14 @@ vi.mock('@/lib/background-jobs/health', async (importOriginal) => {
 vi.mock('@/lib/background-jobs/mode', () => ({
   backgroundJobsMode: () => 'durable',
 }));
+vi.mock('@/lib/notification/smart-bot-identity', () => ({
+  configuredSmartBotIdDigest: () => botDigest,
+}));
 
-import { BackgroundJobQueue } from '@/generated/prisma/enums';
+import {
+  BackgroundJobQueue,
+  SmartBotConnectionStatus,
+} from '@/generated/prisma/enums';
 import type { BackgroundJobHealth } from '@/lib/background-jobs/health';
 import { GET } from '../jobs/route';
 
@@ -28,8 +35,28 @@ function fixture(): BackgroundJobHealth {
   return {
     observedAt: now,
     activeWorkers: [
-      { queue: BackgroundJobQueue.LIGHT, version: VERSION, lastSeenAt: now },
-      { queue: BackgroundJobQueue.HEAVY, version: VERSION, lastSeenAt: now },
+      {
+        queue: BackgroundJobQueue.LIGHT,
+        version: VERSION,
+        smartBotStatus: SmartBotConnectionStatus.CONNECTED,
+        smartBotBotDigest: botDigest,
+        lastSeenAt: now,
+      },
+      {
+        queue: BackgroundJobQueue.HEAVY,
+        version: VERSION,
+        smartBotStatus: null,
+        smartBotBotDigest: null,
+        lastSeenAt: now,
+      },
+    ],
+    activeSmartBotChannels: [
+      {
+        smartBotBotDigest: botDigest,
+        smartBotTargetId: 'group-1',
+        smartBotChatType: 'GROUP',
+        smartBotBoundAt: now,
+      },
     ],
     pending: { LIGHT: 0, HEAVY: 0 },
     oldestPendingAt: { LIGHT: null, HEAVY: null },
@@ -56,6 +83,13 @@ describe('GET /api/health/jobs', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ status: 'ok', mode: 'durable' });
+    expect(body.smartBot).toEqual({
+      status: 'CONNECTED',
+      required: true,
+      configurationValid: true,
+      identityMatch: true,
+      operational: true,
+    });
     expect(body.alerts).toEqual([]);
     expect(body.warnings).toEqual([]);
   });
@@ -116,6 +150,57 @@ describe('GET /api/health/jobs', () => {
     expect(JSON.stringify(body)).not.toMatch(/connection refused|密码/);
   });
 
+  it('智能机器人普通断线仅 degraded，状态码保持 200', async () => {
+    const health = fixture();
+    health.activeWorkers[0]!.smartBotStatus =
+      SmartBotConnectionStatus.DISCONNECTED;
+    getBackgroundJobHealthMock.mockResolvedValue(health);
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      status: 'degraded',
+      smartBot: { status: 'DISCONNECTED', required: true, operational: false },
+      alerts: [],
+    });
+    expect(body.warnings).toContain('smart-bot-disconnected');
+  });
+
+  it('worker Bot ID 与启用目标不一致时匿名返回安全布尔值并报警', async () => {
+    const health = fixture();
+    health.activeWorkers[0]!.smartBotBotDigest = 'b'.repeat(64);
+    getBackgroundJobHealthMock.mockResolvedValue(health);
+
+    const res = await GET();
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.smartBot).toMatchObject({
+      required: true,
+      identityMatch: false,
+      operational: false,
+    });
+    expect(body.alerts).toContain('smart-bot-identity-mismatch');
+    expect(JSON.stringify(body)).not.toContain('a'.repeat(64));
+    expect(JSON.stringify(body)).not.toContain('b'.repeat(64));
+  });
+
+  it('智能机器人认证失败是可操作告警，jobs 返回 503', async () => {
+    const health = fixture();
+    health.activeWorkers[0]!.smartBotStatus =
+      SmartBotConnectionStatus.AUTH_FAILED;
+    getBackgroundJobHealthMock.mockResolvedValue(health);
+
+    const res = await GET();
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      status: 'alert',
+      smartBot: { status: 'AUTH_FAILED' },
+      alerts: ['smart-bot-auth-failed'],
+    });
+  });
+
   it('匿名 surface 收敛：只回计数与告警码，不回 worker 明细', async () => {
     getBackgroundJobHealthMock.mockResolvedValue(fixture());
     const res = await GET();
@@ -124,6 +209,7 @@ describe('GET /api/health/jobs', () => {
       'alerts',
       'jobs',
       'mode',
+      'smartBot',
       'status',
       'time',
       'warnings',

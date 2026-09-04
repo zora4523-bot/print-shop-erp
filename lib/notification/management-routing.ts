@@ -4,6 +4,14 @@ import {
   managementNotificationRoleForEvent,
   type ManagementNotificationRole,
 } from './events';
+import {
+  configuredSmartBotIdDigest,
+  smartBotCredentialsConfigured,
+} from './smart-bot-identity';
+import {
+  notificationChannelSelectionIssue,
+  type NotificationChannelSelectionIssue,
+} from './channel-selection';
 
 export type ManagementNotificationRoute = {
   role: ManagementNotificationRole;
@@ -37,19 +45,37 @@ export type ManagementNotificationChannelOption = {
   channelKey: string;
   channelName: string;
   isActive: boolean;
+  selectionIssue: NotificationChannelSelectionIssue | null;
 };
 
 /** Settings UI read model; webhookUrl is deliberately never sent to the form. */
 export async function listManagementNotificationChannels(): Promise<
   ManagementNotificationChannelOption[]
 > {
-  return db.notificationChannel.findMany({
+  const channels = await db.notificationChannel.findMany({
     orderBy: [{ isActive: 'desc' }, { channelName: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
       channelKey: true,
       channelName: true,
+      transport: true,
+      webhookUrl: true,
+      smartBotBotDigest: true,
+      smartBotTargetId: true,
+      smartBotChatType: true,
+      smartBotBoundAt: true,
       isActive: true,
     },
   });
+  const context = {
+    smartBotCredentialsConfigured: smartBotCredentialsConfigured(),
+    configuredSmartBotDigest: configuredSmartBotIdDigest(),
+  };
+  return channels.map((channel) => ({
+    id: channel.id,
+    channelKey: channel.channelKey,
+    channelName: channel.channelName,
+    isActive: channel.isActive,
+    selectionIssue: notificationChannelSelectionIssue(channel, context),
+  }));
 }

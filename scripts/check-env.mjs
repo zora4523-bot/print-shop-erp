@@ -61,6 +61,30 @@ if (isProd && env.BACKGROUND_JOBS_MODE === 'inline') {
   );
 }
 
+// —— 企业微信智能机器人：凭据必须成对，且长连接只能由 durable LIGHT worker 持有 ——
+const WECOM_SMART_BOT_KEYS = ['WECOM_SMART_BOT_ID', 'WECOM_SMART_BOT_SECRET'];
+const wecomSmartBotSet = WECOM_SMART_BOT_KEYS.filter(
+  (key) => env[key] && env[key].trim() !== '',
+);
+if (wecomSmartBotSet.length === 1) {
+  const missing = WECOM_SMART_BOT_KEYS.filter(
+    (key) => !wecomSmartBotSet.includes(key),
+  );
+  errors.push(
+    `企业微信智能机器人凭据只配了一部分（缺 ${missing.join(', ')}）—— ` +
+      'WECOM_SMART_BOT_ID 与 WECOM_SMART_BOT_SECRET 必须成对配置或成对留空。',
+  );
+} else if (
+  isProd &&
+  wecomSmartBotSet.length === WECOM_SMART_BOT_KEYS.length &&
+  env.BACKGROUND_JOBS_MODE !== 'durable'
+) {
+  errors.push(
+    '生产已配置企业微信智能机器人，但 BACKGROUND_JOBS_MODE 不是 "durable" —— ' +
+      'Bot ID + Secret 长连接只能由单个常驻 LIGHT worker 持有，不能回落到 Web/inline 执行。',
+  );
+}
+
 for (const key of [
   'PDF_ARTIFACT_DIR',
   'ORDER_EXPORT_ARTIFACT_DIR',

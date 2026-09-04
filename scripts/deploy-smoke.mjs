@@ -4,6 +4,10 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  assessDeployJobsGate,
+  deployJobsGateFailureMessage,
+} from './deploy-jobs-gate.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = new Set(process.argv.slice(2));
@@ -122,15 +126,24 @@ async function checkRoutes() {
     }
   }
 
-  // 队列探针是发布时的「看一眼」项，不是门禁：死信多半是上一版留下的
-  // 历史事实，让它 fail 会把昨天失败的月结任务变成今天不能发布。
+  // 历史非通知死信仍只告警，不能让前向迁移后的新版无法发布。
+  // 机器人鉴权/连接所有权故障不会自愈，是通知功能的发布门禁。
   const jobsProbe = await request('/api/health/jobs');
+  let jobsBody;
+  try {
+    jobsBody = await jobsProbe.json();
+  } catch {
+    fail('/api/health/jobs returned invalid JSON');
+  }
+  const jobsGate = assessDeployJobsGate(jobsBody);
+  if (!jobsGate.ok || !jobsGate.ready) {
+    fail(`/api/health/jobs ${deployJobsGateFailureMessage(jobsGate)}`);
+  }
   if (jobsProbe.status === 200) {
     info('/api/health/jobs ok');
   } else {
-    const jobsBody = await jobsProbe.text();
     info(
-      `WARNING: /api/health/jobs returned ${jobsProbe.status}; 队列需要人工处理: ${jobsBody}`,
+      `WARNING: /api/health/jobs returned ${jobsProbe.status}; 队列需要人工处理: ${JSON.stringify(jobsBody)}`,
     );
   }
 

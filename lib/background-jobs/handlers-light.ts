@@ -1,5 +1,6 @@
 import { handleCronJob } from './cron';
 import { handleNotificationJob } from './notification';
+import { handleNotificationChannelTestJob } from './notification-channel-test';
 import { BACKGROUND_JOB_TYPES } from './types';
 import type { BackgroundJobHandlers } from './worker';
 
@@ -9,6 +10,8 @@ import type { BackgroundJobHandlers } from './worker';
 // condition because it needs the normal `react-dom/server` export.
 export const lightBackgroundJobHandlers: BackgroundJobHandlers = {
   [BACKGROUND_JOB_TYPES.NOTIFICATION]: handleNotificationJob,
+  [BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST]:
+    handleNotificationChannelTestJob,
   [BACKGROUND_JOB_TYPES.CRON_DAILY_SALARY]: handleCronJob,
   [BACKGROUND_JOB_TYPES.CRON_HOURLY_PAYROLL]: handleCronJob,
   [BACKGROUND_JOB_TYPES.CRON_CS_SETTLE]: handleCronJob,

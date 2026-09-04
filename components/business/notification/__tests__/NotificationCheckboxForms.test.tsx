@@ -37,17 +37,51 @@ describe('notification form checkbox contracts', () => {
     actionState.pending = false;
   });
 
-  it('keeps channel activation checked by default on create', () => {
+  it('defaults new targets to an inactive smart-bot transport until binding', () => {
     const html = renderToStaticMarkup(
       <ChannelForm mode="create" action={action} />,
     );
 
     expect(checkboxRoots(html)).toHaveLength(1);
     expect(html).toContain('data-slot="checkbox"');
-    expect(html).toContain('aria-checked="true"');
+    expect(html).toContain('aria-checked="false"');
+    expect(checkboxRoots(html)[0]).toContain('data-disabled=""');
     expect(html).toContain('aria-label="启用"');
     expect(namedInputs(html, 'isActive')).toHaveLength(1);
     expect(namedInputs(html, 'isActive')[0]).not.toContain('value=');
+    expect(html).toContain('name="transport"');
+    expect(html).toContain(
+      '<option value="WECOM_SMART_BOT" selected="">Bot ID + Secret 智能机器人</option>',
+    );
+    expect(html).not.toContain('name="webhookUrl"');
+    expect(html).toContain('智能机器人通道会先以停用状态保存');
+  });
+
+  it('allows an already-bound smart-bot target to keep its active state', () => {
+    const html = renderToStaticMarkup(
+      <ChannelForm
+        mode="edit"
+        action={action}
+        initial={{
+          channelKey: 'scheduling_group',
+          channelName: '排产群',
+          transport: 'WECOM_SMART_BOT',
+          webhookUrl: null,
+          smartBotTargetMasked: '••••a1b2',
+          smartBotChatType: 'GROUP',
+          smartBotBoundAt: '2026-09-03T00:00:00.000Z',
+          smartBotBotMatchesConfigured: true,
+          isActive: true,
+        }}
+      />,
+    );
+
+    expect(html).toContain('value="Bot ID + Secret 智能机器人"');
+    expect(html).toContain('name="transport" value="WECOM_SMART_BOT"');
+    expect(html).toContain('已绑定群聊');
+    expect(html).toContain('••••a1b2');
+    expect(html).toContain('aria-checked="true"');
+    expect(checkboxRoots(html)[0]).not.toContain('data-disabled=""');
   });
 
   it('keeps rule group names, values, checked state, and disabled policy', () => {
@@ -60,16 +94,23 @@ describe('notification form checkbox contracts', () => {
           isActive: true,
         }}
         channels={[
-          { id: 'active-channel', channelName: '排产群', isActive: true },
+          {
+            id: 'active-channel',
+            channelName: '排产群',
+            isActive: true,
+            selectionIssue: null,
+          },
           {
             id: 'inactive-selected',
             channelName: '旧群',
             isActive: false,
+            selectionIssue: 'INACTIVE',
           },
           {
             id: 'inactive-unselected',
             channelName: '停用群',
             isActive: false,
+            selectionIssue: 'INACTIVE',
           },
         ]}
         payloadFields={['orderNo']}
@@ -103,6 +144,42 @@ describe('notification form checkbox contracts', () => {
     expect(namedInputs(html, 'isActive')[0]).not.toContain('value=');
   });
 
+  it('显示 Bot 身份不一致原因并禁止新绑，但允许保留旧绑定', () => {
+    const render = (selected: boolean) =>
+      renderToStaticMarkup(
+        <RuleForm
+          eventType="URGENT_ORDER"
+          initial={{
+            messageTemplate: '工单 {orderNo}',
+            channelIds: selected ? ['smart-old'] : [],
+            isActive: false,
+          }}
+          channels={[
+            {
+              id: 'smart-old',
+              channelName: '旧机器人群',
+              isActive: true,
+              selectionIssue: 'SMART_BOT_IDENTITY_MISMATCH',
+            },
+          ]}
+          payloadFields={['orderNo']}
+          action={action}
+        />,
+      );
+
+    const newBindingHtml = render(false);
+    expect(newBindingHtml).toContain('绑定时 Bot ID 与当前配置不一致，不可新绑');
+    expect(namedInputs(newBindingHtml, 'channelIds')[0]).toContain(
+      'disabled=""',
+    );
+
+    const existingBindingHtml = render(true);
+    expect(existingBindingHtml).toContain('请取消勾选或修复');
+    expect(namedInputs(existingBindingHtml, 'channelIds')[0]).not.toContain(
+      'disabled=""',
+    );
+  });
+
   it('disables every notification checkbox while a form is pending', () => {
     actionState.pending = true;
 
@@ -118,7 +195,12 @@ describe('notification form checkbox contracts', () => {
           isActive: false,
         }}
         channels={[
-          { id: 'active-channel', channelName: '排产群', isActive: true },
+          {
+            id: 'active-channel',
+            channelName: '排产群',
+            isActive: true,
+            selectionIssue: null,
+          },
         ]}
         payloadFields={['orderNo']}
         action={action}
@@ -147,7 +229,12 @@ describe('notification form checkbox contracts', () => {
           isActive: true,
         }}
         channels={[
-          { id: 'active-channel', channelName: '排产群', isActive: true },
+          {
+            id: 'active-channel',
+            channelName: '排产群',
+            isActive: true,
+            selectionIssue: null,
+          },
         ]}
         payloadFields={['orderNo']}
         action={action}

@@ -3500,7 +3500,7 @@ const channelWebhookUrlField = z
     'Webhook URL 必须形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
   );
 
-export const createNotificationChannelSchema = z.object({
+const notificationChannelIdentityFields = {
   channelKey: z
     .string()
     .trim()
@@ -3511,9 +3511,26 @@ export const createNotificationChannelSchema = z.object({
       'channelKey 必须以小写字母开头，仅允许小写字母 / 数字 / 下划线',
     ),
   channelName: channelNameField,
-  webhookUrl: channelWebhookUrlField,
-  isActive: formBoolean,
-});
+};
+
+export const createNotificationChannelSchema = z.preprocess(
+  defaultLegacyWebhookTransport,
+  z.discriminatedUnion('transport', [
+    z.object({
+      ...notificationChannelIdentityFields,
+      transport: z.literal('WECOM_GROUP_WEBHOOK'),
+      webhookUrl: channelWebhookUrlField,
+      isActive: formBoolean,
+    }),
+    z.object({
+      ...notificationChannelIdentityFields,
+      transport: z.literal('WECOM_SMART_BOT'),
+      // A smart-bot destination is deliberately born inactive and without a
+      // target. The target can only be learned from a signed WS group callback.
+      isActive: z.unknown().transform(() => false),
+    }),
+  ]),
+);
 
 export type CreateNotificationChannelInput = z.infer<
   typeof createNotificationChannelSchema
@@ -3521,11 +3538,34 @@ export type CreateNotificationChannelInput = z.infer<
 
 // 编辑场景下不让 owner 改 channelKey（key 是稳定标识，被 audit log
 // 引用；改 key 等同于&ldquo;新建+删除&rdquo;）—— UI 把 key 渲染成只读。
-export const updateNotificationChannelSchema = z.object({
-  channelName: channelNameField,
-  webhookUrl: channelWebhookUrlField,
-  isActive: formBoolean,
-});
+export const updateNotificationChannelSchema = z.preprocess(
+  defaultLegacyWebhookTransport,
+  z.discriminatedUnion('transport', [
+    z.object({
+      transport: z.literal('WECOM_GROUP_WEBHOOK'),
+      channelName: channelNameField,
+      webhookUrl: channelWebhookUrlField,
+      isActive: formBoolean,
+    }),
+    z.object({
+      transport: z.literal('WECOM_SMART_BOT'),
+      channelName: channelNameField,
+      isActive: formBoolean,
+    }),
+  ]),
+);
+
+function defaultLegacyWebhookTransport(value: unknown): unknown {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !('transport' in value)
+  ) {
+    return { ...value, transport: 'WECOM_GROUP_WEBHOOK' };
+  }
+  return value;
+}
 
 export type UpdateNotificationChannelInput = z.infer<
   typeof updateNotificationChannelSchema

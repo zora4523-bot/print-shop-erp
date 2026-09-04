@@ -1,10 +1,16 @@
 import { notFound } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import { ChannelForm } from '@/components/business/notification/ChannelForm';
+import { SmartBotBindingPanel } from '@/components/business/notification/SmartBotBindingPanel';
 import { updateChannelAction } from '@/actions/owner-notifications';
 import { getChannel } from '@/lib/notification/admin';
 
-export const metadata = { title: '编辑群 · 推送配置' };
+export const metadata = { title: '编辑通知目标 · 推送配置' };
+
+function maskSmartBotTarget(targetId: string | null): string | null {
+  if (!targetId) return null;
+  return `••••${targetId.slice(-4)}`;
+}
 
 export default async function EditChannelPage({
   params,
@@ -18,13 +24,16 @@ export default async function EditChannelPage({
 
   // bind id 进 server action（同 owner-accounts/[id] 的 .bind() 模式）
   const action = updateChannelAction.bind(null, id);
+  const smartBot = channel.transport === 'WECOM_SMART_BOT';
+  const targetMasked = maskSmartBotTarget(channel.smartBotTargetId);
+  const boundAt = channel.smartBotBoundAt?.toISOString() ?? null;
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">编辑群</h1>
+        <h1 className="text-xl font-semibold">编辑通知目标</h1>
         <p className="text-sm text-muted-foreground">
-          修改群名和推送地址，或调整启停状态。群标识不可修改。
+          修改展示名称和启停状态。通知目标标识与传输方式不可修改。
         </p>
       </div>
       <ChannelForm
@@ -33,10 +42,24 @@ export default async function EditChannelPage({
         initial={{
           channelKey: channel.channelKey,
           channelName: channel.channelName,
+          transport: channel.transport,
           webhookUrl: channel.webhookUrl,
+          smartBotTargetMasked: targetMasked,
+          smartBotChatType: channel.smartBotChatType,
+          smartBotBoundAt: boundAt,
+          smartBotBotMatchesConfigured:
+            channel.smartBotBotMatchesConfigured,
           isActive: channel.isActive,
         }}
       />
+      {smartBot ? (
+        <SmartBotBindingPanel
+          channelId={channel.id}
+          isBound={Boolean(channel.smartBotTargetId && channel.smartBotBoundAt)}
+          targetMasked={targetMasked}
+          boundAt={boundAt}
+        />
+      ) : null}
     </div>
   );
 }

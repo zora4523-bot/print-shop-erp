@@ -1,8 +1,12 @@
 import {
   BackgroundJobStatus,
+  NotificationChannelTransport,
   NotificationStatus,
+  type NotificationChannelTransport as NotificationChannelTransportType,
+  type NotificationSmartBotChatType,
   type NotificationStatus as NotificationStatusType,
 } from '../../generated/prisma/enums';
+import { randomBytes } from 'node:crypto';
 import { db } from '../db';
 import {
   NOTIFICATION_EVENTS,
@@ -16,6 +20,17 @@ import {
 } from './events';
 import { BACKGROUND_JOB_TYPES } from '../background-jobs/types';
 import { resolveSetting } from '../settings';
+import { databaseNow } from '../background-jobs/clock';
+import { hasExclusiveConnectedSmartBotWorker } from '../background-jobs/smart-bot-availability';
+import {
+  configuredSmartBotIdDigest,
+  hashSmartBotBindingCode,
+  smartBotCredentialsConfigured,
+} from './smart-bot';
+import {
+  notificationChannelSelectionIssue,
+  type NotificationChannelSelectionIssue,
+} from './channel-selection';
 
 // 推送配置 / 日志的 admin-side 读写。Prisma 调用集中在这里（CLAUDE.md
 // 三层架构：app → actions → lib → Prisma）。Server Actions 在
@@ -29,7 +44,13 @@ export type ChannelSummary = {
   id: string;
   channelKey: string;
   channelName: string;
-  webhookUrl: string;
+  transport: NotificationChannelTransportType;
+  webhookUrl: string | null;
+  smartBotTargetId: string | null;
+  smartBotChatType: NotificationSmartBotChatType | null;
+  smartBotBoundAt: Date | null;
+  smartBotBotMatchesConfigured: boolean;
+  selectionIssue: NotificationChannelSelectionIssue | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -43,17 +64,40 @@ type ChannelWithoutRefCount = Omit<
 >;
 
 async function listChannels(): Promise<ChannelWithoutRefCount[]> {
-  return db.notificationChannel.findMany({
+  const channels = await db.notificationChannel.findMany({
     orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
     select: {
       id: true,
       channelKey: true,
       channelName: true,
+      transport: true,
       webhookUrl: true,
+      smartBotBotDigest: true,
+      smartBotTargetId: true,
+      smartBotChatType: true,
+      smartBotBoundAt: true,
       isActive: true,
       createdAt: true,
       updatedAt: true,
     },
+  });
+  const configuredDigest = configuredSmartBotIdDigest();
+  const selectionContext = {
+    smartBotCredentialsConfigured: smartBotCredentialsConfigured(),
+    configuredSmartBotDigest: configuredDigest,
+  };
+  return channels.map((channel) => {
+    const { smartBotBotDigest, ...safeChannel } = channel;
+    return {
+      ...safeChannel,
+      smartBotBotMatchesConfigured:
+        channel.transport !== NotificationChannelTransport.WECOM_SMART_BOT ||
+        (configuredDigest !== null && smartBotBotDigest === configuredDigest),
+      selectionIssue: notificationChannelSelectionIssue(
+        channel,
+        selectionContext,
+      ),
+    };
   });
 }
 
@@ -108,46 +152,118 @@ export async function listChannelsWithRefCount(): Promise<ChannelSummary[]> {
 }
 
 export async function getChannel(id: string): Promise<ChannelSummary | null> {
-  const c = await db.notificationChannel.findUnique({
+  const channel = await db.notificationChannel.findUnique({
     where: { id },
     select: {
       id: true,
       channelKey: true,
       channelName: true,
+      transport: true,
       webhookUrl: true,
+      smartBotBotDigest: true,
+      smartBotTargetId: true,
+      smartBotChatType: true,
+      smartBotBoundAt: true,
       isActive: true,
       createdAt: true,
       updatedAt: true,
     },
   });
-  if (!c) return null;
+  if (!channel) return null;
+  const { smartBotBotDigest, ...safeChannel } = channel;
+  const configuredDigest = configuredSmartBotIdDigest();
+  const selectionContext = {
+    smartBotCredentialsConfigured: smartBotCredentialsConfigured(),
+    configuredSmartBotDigest: configuredDigest,
+  };
   // 单条详情不必做交叉引用，referencingConfigurationCount 留 0（caller
   // 会从 list 拿，或者编辑场景下不需要）。
-  return { ...c, referencingConfigurationCount: 0 };
+  return {
+    ...safeChannel,
+    smartBotBotMatchesConfigured:
+      channel.transport !== NotificationChannelTransport.WECOM_SMART_BOT ||
+      (configuredDigest !== null && smartBotBotDigest === configuredDigest),
+    selectionIssue: notificationChannelSelectionIssue(
+      channel,
+      selectionContext,
+    ),
+    referencingConfigurationCount: 0,
+  };
 }
 
-export type CreateChannelInput = {
-  channelKey: string;
-  channelName: string;
-  webhookUrl: string;
-  isActive: boolean;
-};
+export type CreateChannelInput =
+  | {
+      channelKey: string;
+      channelName: string;
+      transport: 'WECOM_GROUP_WEBHOOK';
+      webhookUrl: string;
+      isActive: boolean;
+    }
+  | {
+      channelKey: string;
+      channelName: string;
+      transport: 'WECOM_SMART_BOT';
+      isActive: boolean;
+    };
 
 export async function createChannel(
   input: CreateChannelInput,
 ): Promise<{ id: string }> {
   const created = await db.notificationChannel.create({
-    data: input,
+    data:
+      input.transport === NotificationChannelTransport.WECOM_GROUP_WEBHOOK
+        ? {
+            channelKey: input.channelKey,
+            channelName: input.channelName,
+            transport: input.transport,
+            webhookUrl: input.webhookUrl,
+            isActive: input.isActive,
+          }
+        : {
+            channelKey: input.channelKey,
+            channelName: input.channelName,
+            transport: input.transport,
+            webhookUrl: null,
+            isActive: false,
+          },
     select: { id: true },
   });
   return created;
 }
 
-export type UpdateChannelInput = {
-  channelName: string;
-  webhookUrl: string;
-  isActive: boolean;
-};
+export type UpdateChannelInput =
+  | {
+      transport: 'WECOM_GROUP_WEBHOOK';
+      channelName: string;
+      webhookUrl: string;
+      isActive: boolean;
+    }
+  | {
+      transport: 'WECOM_SMART_BOT';
+      channelName: string;
+      isActive: boolean;
+    };
+
+export class ChannelTransportMismatchError extends Error {
+  constructor() {
+    super('notification channel transport is immutable');
+    this.name = 'ChannelTransportMismatchError';
+  }
+}
+
+export class UnboundSmartBotChannelError extends Error {
+  constructor() {
+    super('unbound smart bot channel cannot be activated');
+    this.name = 'UnboundSmartBotChannelError';
+  }
+}
+
+export class SmartBotIdentityMismatchError extends Error {
+  constructor() {
+    super('smart bot channel belongs to another Bot ID');
+    this.name = 'SmartBotIdentityMismatchError';
+  }
+}
 
 /**
  * 编辑 channel：name / webhookUrl / isActive。
@@ -170,9 +286,123 @@ export async function updateChannel(
   id: string,
   input: UpdateChannelInput,
 ): Promise<void> {
-  await db.notificationChannel.update({
-    where: { id },
-    data: input,
+  await db.$transaction(async (tx) => {
+    const channel = await tx.notificationChannel.findUnique({
+      where: { id },
+      select: {
+        transport: true,
+        smartBotBotDigest: true,
+        smartBotTargetId: true,
+        smartBotBoundAt: true,
+      },
+    });
+    if (!channel) {
+      await tx.notificationChannel.update({ where: { id }, data: {} });
+      return;
+    }
+    if (channel.transport !== input.transport) {
+      throw new ChannelTransportMismatchError();
+    }
+    if (
+      channel.transport === NotificationChannelTransport.WECOM_SMART_BOT &&
+      input.isActive &&
+      (!channel.smartBotTargetId || !channel.smartBotBoundAt)
+    ) {
+      throw new UnboundSmartBotChannelError();
+    }
+    if (
+      channel.transport === NotificationChannelTransport.WECOM_SMART_BOT &&
+      input.isActive &&
+      channel.smartBotBotDigest !== configuredSmartBotIdDigest()
+    ) {
+      throw new SmartBotIdentityMismatchError();
+    }
+    await tx.notificationChannel.update({
+      where: { id },
+      data:
+        input.transport === NotificationChannelTransport.WECOM_GROUP_WEBHOOK
+          ? {
+              channelName: input.channelName,
+              webhookUrl: input.webhookUrl,
+              isActive: input.isActive,
+            }
+          : {
+              channelName: input.channelName,
+              isActive: input.isActive,
+            },
+    });
+  });
+}
+
+export type SmartBotBindingCodeReceipt = {
+  bindingCode: string;
+  expiresAt: Date;
+};
+
+export type SmartBotBindingErrorCode =
+  | 'CHANNEL_NOT_FOUND'
+  | 'NOT_SMART_BOT'
+  | 'ALREADY_BOUND'
+  | 'CREDENTIALS_NOT_CONFIGURED'
+  | 'WORKER_UNAVAILABLE'
+  | 'CONFLICT';
+
+export class SmartBotBindingError extends Error {
+  constructor(public readonly code: SmartBotBindingErrorCode) {
+    super(`cannot create smart bot binding code: ${code}`);
+    this.name = 'SmartBotBindingError';
+  }
+}
+
+/**
+ * Creates a short-lived code for an unbound logical destination. Plaintext is
+ * returned once; PostgreSQL only receives its domain-separated SHA-256 hash.
+ */
+export async function createSmartBotBindingCode(
+  channelId: string,
+): Promise<SmartBotBindingCodeReceipt> {
+  if (!smartBotCredentialsConfigured()) {
+    throw new SmartBotBindingError('CREDENTIALS_NOT_CONFIGURED');
+  }
+  if (
+    !(await hasExclusiveConnectedSmartBotWorker(configuredSmartBotIdDigest()))
+  ) {
+    throw new SmartBotBindingError('WORKER_UNAVAILABLE');
+  }
+  const bindingCode = `ERP-BIND-${randomBytes(24).toString('base64url')}`;
+  const bindingCodeHash = hashSmartBotBindingCode(bindingCode);
+
+  return db.$transaction(async (tx) => {
+    const channel = await tx.notificationChannel.findUnique({
+      where: { id: channelId },
+      select: { transport: true, smartBotTargetId: true },
+    });
+    if (!channel) throw new SmartBotBindingError('CHANNEL_NOT_FOUND');
+    if (channel.transport !== NotificationChannelTransport.WECOM_SMART_BOT) {
+      throw new SmartBotBindingError('NOT_SMART_BOT');
+    }
+    // A Channel ID is a durable recipient identity. Rebinding it would make an
+    // owner-approved replay target a different group; create a new channel.
+    if (channel.smartBotTargetId) {
+      throw new SmartBotBindingError('ALREADY_BOUND');
+    }
+
+    const now = await databaseNow(tx);
+    const expiresAt = new Date(now.getTime() + 10 * 60_000);
+    const updated = await tx.notificationChannel.updateMany({
+      where: {
+        id: channelId,
+        transport: NotificationChannelTransport.WECOM_SMART_BOT,
+        smartBotTargetId: null,
+      },
+      data: {
+        smartBotBindingCodeHash: bindingCodeHash,
+        smartBotBindingExpiresAt: expiresAt,
+        isActive: false,
+      },
+    });
+    if (updated.count !== 1) throw new SmartBotBindingError('CONFLICT');
+    return { bindingCode, expiresAt };
   });
 }
 
@@ -365,6 +595,22 @@ export class InactiveChannelBindError extends Error {
   }
 }
 
+export class IneligibleChannelBindError extends Error {
+  constructor(
+    public readonly channels: readonly {
+      id: string;
+      issue: Exclude<NotificationChannelSelectionIssue, 'INACTIVE'>;
+    }[],
+  ) {
+    super(
+      `不能新绑定当前不可用的 channel：${channels
+        .map(({ id, issue }) => `${id}(${issue})`)
+        .join(', ')}`,
+    );
+    this.name = 'IneligibleChannelBindError';
+  }
+}
+
 /**
  * 更新 rule。校验：
  * 1. eventType 必须是 NOTIFICATION_EVENTS 已定义的（防 owner 通过
@@ -393,7 +639,7 @@ export async function updateRule(
     //    OLD channelIds 用于"新增的 channelId 必须 active"校验
     const rule = await tx.notificationRule.findUnique({
       where: { eventType },
-      select: { eventType: true, channelIds: true },
+      select: { eventType: true, channelIds: true, isActive: true },
     });
     if (!rule) {
       throw new RuleNotFoundError(eventType);
@@ -416,7 +662,16 @@ export async function updateRule(
       `;
       const found = await tx.notificationChannel.findMany({
         where: { id: { in: input.channelIds } },
-        select: { id: true, isActive: true },
+        select: {
+          id: true,
+          transport: true,
+          webhookUrl: true,
+          smartBotBotDigest: true,
+          smartBotTargetId: true,
+          smartBotChatType: true,
+          smartBotBoundAt: true,
+          isActive: true,
+        },
       });
       const foundIds = new Set(found.map((c) => c.id));
       const invalid = input.channelIds.filter((id) => !foundIds.has(id));
@@ -430,11 +685,33 @@ export async function updateRule(
       // （round 103 #2 承诺&ldquo;停用 channel 不丢现有 binding&rdquo;），仅
       // 拒&ldquo;新增的 inactive&rdquo;。
       const oldBound = new Set(rule.channelIds);
+      // 从停用切到启用会让全部保留绑定重新成为实际发送目标，因此与
+      // 新增绑定等价，不能借 oldBound 绕过可用性校验。
+      const activatesRule = input.isActive && !rule.isActive;
       const newlyAddedInactive = found
-        .filter((c) => !c.isActive && !oldBound.has(c.id))
+        .filter(
+          (c) => !c.isActive && (activatesRule || !oldBound.has(c.id)),
+        )
         .map((c) => c.id);
       if (newlyAddedInactive.length > 0) {
         throw new InactiveChannelBindError(newlyAddedInactive);
+      }
+      const selectionContext = {
+        smartBotCredentialsConfigured: smartBotCredentialsConfigured(),
+        configuredSmartBotDigest: configuredSmartBotIdDigest(),
+      };
+      const newlyAddedIneligible = found.flatMap((channel) => {
+        if (!activatesRule && oldBound.has(channel.id)) return [];
+        const issue = notificationChannelSelectionIssue(
+          channel,
+          selectionContext,
+        );
+        return issue && issue !== 'INACTIVE'
+          ? [{ id: channel.id, issue }]
+          : [];
+      });
+      if (newlyAddedIneligible.length > 0) {
+        throw new IneligibleChannelBindError(newlyAddedIneligible);
       }
     }
 

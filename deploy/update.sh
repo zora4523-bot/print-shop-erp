@@ -21,6 +21,7 @@
 set -euo pipefail
 
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/api/health/ready}"
+JOBS_HEALTH_URL="${JOBS_HEALTH_URL:-${HEALTH_URL%/ready}/jobs}"
 WEB_APP_NAME="print-shop-erp"
 LIGHT_WORKER_NAME="print-shop-erp-worker-light"
 HEAVY_WORKER_NAME="print-shop-erp-worker-heavy"
@@ -77,6 +78,69 @@ assert_web_loopback_binding() {
     echo >&2 "拒绝发布：非回环监听会让客户端绕过 Nginx 登录/PDF 限流。"
     return 1
   fi
+}
+
+assert_deploy_jobs_gate() {
+  # Do not use curl -f here: /jobs can legitimately return 503 for an old
+  # non-notification dead letter. The JSON gate blocks only an unobservable or
+  # operator-actionable smart-bot state.
+  # A bad Secret can spend about 31s in SDK auth backoff, then wait up to the
+  # maximum supported 60s heartbeat interval before AUTH_FAILED is persisted.
+  # Keep a bounded observation window beyond both delays. CONNECTED must also
+  # remain visible briefly so an immediate duplicate-connection kick is seen.
+  local max_seconds="${DEPLOY_JOBS_GATE_MAX_SECONDS:-120}"
+  local interval_seconds="${DEPLOY_JOBS_GATE_INTERVAL_SECONDS:-2}"
+  local connected_settle_seconds="${DEPLOY_JOBS_GATE_CONNECTED_SETTLE_SECONDS:-6}"
+  local deadline=$((SECONDS + max_seconds))
+  local connected_since=-1
+  local last_transient_status=""
+  local last_observation_valid=0
+  local gate_output=""
+  local gate_code=0
+
+  while [ "$SECONDS" -le "$deadline" ]; do
+    gate_code=0
+    if gate_output="$(curl --connect-timeout 2 --max-time 5 -sS "$JOBS_HEALTH_URL" | node scripts/deploy-jobs-gate.mjs --status-only)"; then
+      last_observation_valid=1
+      case "$gate_output" in
+        NOT_REQUIRED)
+          echo "==> 通知门禁：当前没有启用的智能机器人通知目标"
+          return 0
+          ;;
+        CONNECTED)
+          last_transient_status="$gate_output"
+          if [ "$connected_since" -lt 0 ]; then
+            connected_since=$SECONDS
+          elif [ $((SECONDS - connected_since)) -ge "$connected_settle_seconds" ]; then
+            echo "==> 通知门禁：智能机器人状态 $gate_output（稳定观察已通过）"
+            return 0
+          fi
+          ;;
+        WAITING_*)
+          last_transient_status="${gate_output#WAITING_}"
+          connected_since=-1
+          ;;
+      esac
+    else
+      gate_code=$?
+      last_observation_valid=0
+      connected_since=-1
+      if [ "$gate_code" = "1" ]; then
+        echo >&2 "拒绝发布：企业微信智能机器人需要人工修复。"
+        return 1
+      fi
+    fi
+
+    if [ "$SECONDS" -lt "$deadline" ]; then sleep "$interval_seconds"; fi
+  done
+
+  if [ "$last_observation_valid" = "1" ] && [ -n "$last_transient_status" ]; then
+    echo >&2 "拒绝发布：启用中的企业微信智能机器人在观察期结束时仍为 $last_transient_status。"
+    return 1
+  fi
+
+  echo >&2 "拒绝发布：后台队列在观察期内未返回可识别的智能机器人状态。"
+  return 1
 }
 
 trap on_exit EXIT
@@ -139,8 +203,9 @@ done
 
 if [ "$ok" = "1" ]; then
   assert_web_loopback_binding
+  assert_deploy_jobs_gate
   DEPLOYMENT_QUIESCED=0
-  echo "✅ 部署成功：$PREV_COMMIT → $NEW_COMMIT，健康检查通过。"
+  echo "✅ 部署成功：$PREV_COMMIT → $NEW_COMMIT，就绪与通知门禁通过。"
 else
   echo >&2 "❌ 健康检查未通过。查日志：pm2 logs print-shop-erp --lines 50"
   false

@@ -15,6 +15,8 @@ import {
   claimDurableDelivery,
   finalizeDurableDelivery,
   markDurableDeliveryUnknown,
+  reconcileAbandonedDurableDeliveries,
+  recoverDurableDeliveryFinalization,
   NotificationDeliveryClaimConflictError,
   NotificationDeliveryLedgerError,
 } from '../delivery-ledger';
@@ -35,6 +37,29 @@ beforeEach(() => {
 });
 
 describe('claimDurableDelivery', () => {
+  it('reconciles every older-generation SENDING row before rule early returns', async () => {
+    dbMock.$queryRaw.mockResolvedValue([
+      { channelId: 'channel-1' },
+      { channelId: 'channel-2' },
+    ]);
+
+    await expect(
+      reconcileAbandonedDurableDeliveries({
+        deliveryKey: claimInput.deliveryKey,
+        jobAttempt: claimInput.jobAttempt,
+      }),
+    ).resolves.toEqual(['channel-1', 'channel-2']);
+
+    const sql = dbMock.$queryRaw.mock.calls[0]![0] as {
+      strings: readonly string[];
+      values: readonly unknown[];
+    };
+    expect(sql.strings.join('?')).toContain("'SENDING'::\"NotificationStatus\"");
+    expect(sql.strings.join('?')).toContain("'UNKNOWN'::\"NotificationStatus\"");
+    expect(sql.strings.join('?')).toContain('RETURNING "channelId"');
+    expect(sql.values).toContain(claimInput.jobAttempt);
+  });
+
   it('returns a fencing token only when the atomic reservation returned a row', async () => {
     dbMock.$queryRaw.mockResolvedValue([{ id: 'log-1' }]);
     const claim = await claimDurableDelivery(claimInput);
@@ -204,18 +229,90 @@ describe('durable delivery finalization', () => {
   });
 
   it('can turn an owned SENDING reservation into an explicit UNKNOWN marker', async () => {
-    dbMock.$executeRaw.mockResolvedValue(1);
+    dbMock.$queryRaw.mockResolvedValue([
+      { status: 'UNKNOWN', errorMessage: 'response lost' },
+    ]);
     await expect(
       markDurableDeliveryUnknown({
         deliveryKey: claimInput.deliveryKey,
         channelId: claimInput.channelId,
         attemptId: 'attempt-1',
+        jobAttempt: claimInput.jobAttempt,
         errorMessage: 'response lost',
       }),
-    ).resolves.toBeUndefined();
-    const sql = dbMock.$executeRaw.mock.calls[0]![0] as {
+    ).resolves.toEqual({
+      status: 'UNKNOWN',
+      errorMessage: 'response lost',
+    });
+    const sql = dbMock.$queryRaw.mock.calls[0]![0] as {
       strings: readonly string[];
+      values: readonly unknown[];
     };
-    expect(sql.strings.join('?')).toContain("'UNKNOWN'::\"NotificationStatus\"");
+    expect(sql.values).toContain('UNKNOWN');
+    expect(sql.strings.join('?')).toContain('RETURNING "status", "errorMessage"');
+    expect(sql.strings.join('?')).toContain('UNION ALL');
+    expect(sql.strings.join('?')).toContain('"deliveryJobAttempt" = ?');
+    expect(sql.values).toContain(claimInput.jobAttempt);
+  });
+
+  it('returns an already-committed final state instead of overwriting it', async () => {
+    dbMock.$queryRaw.mockResolvedValue([
+      { status: 'RETRYING', errorMessage: 'wecom smart bot errcode 45009' },
+    ]);
+
+    await expect(
+      markDurableDeliveryUnknown({
+        deliveryKey: claimInput.deliveryKey,
+        channelId: claimInput.channelId,
+        attemptId: 'attempt-1',
+        jobAttempt: claimInput.jobAttempt,
+        errorMessage: 'response lost',
+      }),
+    ).resolves.toEqual({
+      status: 'RETRYING',
+      errorMessage: 'wecom smart bot errcode 45009',
+    });
+  });
+
+  it('retries the original definitive RETRYING state when the first response is lost', async () => {
+    dbMock.$queryRaw.mockResolvedValue([
+      { status: 'RETRYING', errorMessage: 'wecom smart bot errcode 846609' },
+    ]);
+
+    await expect(
+      recoverDurableDeliveryFinalization({
+        deliveryKey: claimInput.deliveryKey,
+        channelId: claimInput.channelId,
+        attemptId: 'attempt-1',
+        jobAttempt: claimInput.jobAttempt,
+        status: 'RETRYING',
+        errorMessage: 'wecom smart bot errcode 846609',
+        retryCount: 0,
+        sent: false,
+      }),
+    ).resolves.toEqual({
+      status: 'RETRYING',
+      errorMessage: 'wecom smart bot errcode 846609',
+    });
+
+    const sql = dbMock.$queryRaw.mock.calls[0]![0] as {
+      values: readonly unknown[];
+    };
+    expect(sql.values).toContain('RETRYING');
+    expect(sql.values).toContain('wecom smart bot errcode 846609');
+  });
+
+  it('fails closed when no authoritative final state can be read', async () => {
+    dbMock.$queryRaw.mockResolvedValue([]);
+
+    await expect(
+      markDurableDeliveryUnknown({
+        deliveryKey: claimInput.deliveryKey,
+        channelId: claimInput.channelId,
+        attemptId: 'attempt-1',
+        jobAttempt: claimInput.jobAttempt,
+        errorMessage: 'response lost',
+      }),
+    ).rejects.toThrow('delivery finalization state could not be recovered');
   });
 });
