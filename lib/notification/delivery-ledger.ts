@@ -279,7 +279,9 @@ export async function finalizeDurableDelivery(
            "deliveryAttemptId" = NULL,
            "deliveryJobAttempt" = CASE
              WHEN ${input.status}::"NotificationStatus" = 'RETRYING'::"NotificationStatus"
-             THEN ${input.jobAttempt}
+             -- CASE resolves an otherwise untyped parameter + NULL to text,
+             -- even when the selected branch is NULL. Pin the integer type.
+             THEN ${input.jobAttempt}::integer
              ELSE NULL
            END,
            "deliveryStateVersion" = "deliveryStateVersion" + 1,
@@ -325,7 +327,7 @@ export async function recoverDurableDeliveryFinalization(
              "deliveryAttemptId" = NULL,
              "deliveryJobAttempt" = CASE
                WHEN ${input.status}::"NotificationStatus" = 'RETRYING'::"NotificationStatus"
-               THEN ${input.jobAttempt}
+               THEN ${input.jobAttempt}::integer
                ELSE NULL
              END,
              "deliveryStateVersion" = "deliveryStateVersion" + 1,

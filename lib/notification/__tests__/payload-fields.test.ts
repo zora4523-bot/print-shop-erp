@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NOTIFICATION_EVENTS } from '../events';
 import { NOTIFICATION_PAYLOAD_FIELDS } from '../payload-fields';
+import ts from 'typescript';
 
 // 防回归闸：seed.ts 默认模板里 placeholder 必须 ⊆ 该事件的 payload 字段。
 // Codex round 101/102 分别为 ORDER_SUBMITTED / ORDER_SHIPPED 暴露了
@@ -95,6 +96,34 @@ describe('seed.ts notification templates ⊆ NOTIFICATION_PAYLOAD_FIELDS', () =>
             `→ 要么 seed.ts 模板拿掉这个 placeholder，要么 events.ts 给 ${s.eventType} payload 加 ${ph} 字段（同时改 payload-fields.ts）。`,
         ).toBe(true);
       }
+    }
+  });
+
+  it('默认模板执行后包含真实换行，不向企业微信输出字面反斜杠 n', () => {
+    const source = ts.createSourceFile(
+      'notification-seed.ts',
+      seedSection,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const templates: string[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isPropertyAssignment(node) &&
+        node.name.getText(source) === 'messageTemplate' &&
+        ts.isStringLiteral(node.initializer)
+      ) {
+        // The parser decodes TS string escapes exactly as the seed runtime
+        // does, including detecting an accidentally double-escaped newline.
+        templates.push(node.initializer.text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    expect(templates).toHaveLength(Object.keys(NOTIFICATION_EVENTS).length);
+    for (const template of templates) {
+      expect(template).toContain('\n');
+      expect(template).not.toContain('\\n');
     }
   });
 });

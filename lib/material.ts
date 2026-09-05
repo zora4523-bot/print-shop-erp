@@ -21,6 +21,7 @@ import type { EnqueueClient } from './background-jobs/repository';
 import { sortBySearchRelevance } from './search-ranking';
 import { parseCatalogPaperWeight } from './order/catalog-pricing-facts';
 import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
+import { materialStockAlertForCrossing } from './material-stock-alert';
 
 export { MATERIAL_CATEGORY_LABELS } from './material-labels';
 
@@ -650,16 +651,12 @@ export async function applyMaterialStockMovement(
     }),
   ]);
 
-  const safety =
-    material.safetyStock == null ? null : new Decimal(material.safetyStock);
-  const stockAlert =
-    safety && current.gte(safety) && next.lt(safety)
-      ? {
-          materialName: material.name,
-          currentStock: next.toFixed(2),
-          safetyStock: safety.toFixed(2),
-        }
-      : null;
+  const stockAlert = materialStockAlertForCrossing({
+    materialName: material.name,
+    before: current,
+    after: next,
+    safetyStock: material.safetyStock,
+  });
 
   return { material, transaction, stockAlert };
 }

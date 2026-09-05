@@ -75,6 +75,7 @@ function webhookDestinationFingerprint(webhookUrl: string): string {
 }
 
 beforeEach(() => {
+  vi.stubEnv('APP_PUBLIC_URL', '');
   vi.stubEnv('WECOM_SMART_BOT_ID', 'bot-id-placeholder');
   vi.stubEnv('WECOM_SMART_BOT_SECRET', 'secret-placeholder');
   dbMock.order.findUnique.mockReset();
@@ -1237,7 +1238,11 @@ describe('notify', () => {
     expect(data.errorMessage).toBe('BuggyError');
   });
 
-  it('management messageContent 只渲染单号与安全摘要，不渲染提交人', async () => {
+  it.each([
+    ['', '/orders#wo=O-99'],
+    ['https://erp.example.com/', 'https://erp.example.com/orders#wo=O-99'],
+  ])('management messageContent 只渲染单号与安全摘要，并使用公网配置 %s', async (publicUrl, expectedLink) => {
+    vi.stubEnv('APP_PUBLIC_URL', publicUrl);
     dbMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'ORDER_SUBMITTED',
       channelIds: ['c1'],
@@ -1262,7 +1267,7 @@ describe('notify', () => {
     );
     const data = dbMock.notificationLog.create.mock.calls[0][0].data;
     expect(data.messageContent).toBe(
-      '工单 O-99\n新工单已提交，待工厂确认\n/orders#wo=O-99',
+      `工单 O-99\n新工单已提交，待工厂确认\n${expectedLink}`,
     );
     expect(data.messageContent).not.toContain('李四');
   });

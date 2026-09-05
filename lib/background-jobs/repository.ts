@@ -54,6 +54,10 @@ export async function enqueueBackgroundJob(
   input: EnqueueBackgroundJobInput,
   client: EnqueueClient = db,
 ): Promise<EnqueueBackgroundJobResult> {
+  // Ad-hoc tests have no provider idempotency key or durable send reservation.
+  // One request authorizes one execution, including after an operator retry.
+  const singleAttempt = input.type === BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST;
+  const retryBudget = singleAttempt ? 1 : (input.maxAttempts ?? 5);
   // Do not use create -> catch P2002 here.  PostgreSQL marks an interactive
   // transaction aborted after a unique violation, so the duplicate lookup
   // itself fails when this helper is used as a transactional outbox.  Prisma's
@@ -66,7 +70,7 @@ export async function enqueueBackgroundJob(
       dedupeKey: input.dedupeKey,
       payload: input.payload,
       priority: input.priority ?? 100,
-      maxAttempts: input.maxAttempts ?? 5,
+      maxAttempts: retryBudget,
       availableAt: input.availableAt,
     }],
     skipDuplicates: true,
@@ -93,7 +97,6 @@ export async function enqueueBackgroundJob(
     if (backgroundJobRequiresOwnerResolution(job)) {
       return { job, created: false, requeued: false };
     }
-    const retryBudget = input.maxAttempts ?? 5;
     const updated = await client.backgroundJob.updateMany({
       where: {
         id: job.id,
@@ -110,7 +113,9 @@ export async function enqueueBackgroundJob(
         queue: input.queue,
         payload: input.payload,
         priority: input.priority ?? 100,
-        maxAttempts: Math.max(job.maxAttempts, job.attempts + retryBudget),
+        maxAttempts: singleAttempt
+          ? job.attempts + 1
+          : Math.max(job.maxAttempts, job.attempts + retryBudget),
         // 库时钟，不是 new Date()：这一行写下的 availableAt 之后要被
         // claimNextBackgroundJob 拿 `availableAt <= now()` 比较（同文件
         // 的 SQL）。用 Node 时钟写、用库时钟读，就是本模块专门要消除的
@@ -591,7 +596,12 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
       },
       data: {
         status: BackgroundJobStatus.PENDING,
-        maxAttempts: Math.max(job.maxAttempts, job.attempts + 3),
+        // Do not retain a historically expanded budget for channel tests:
+        // losing an ACK or the success write cannot authorize another send.
+        maxAttempts:
+          job.type === BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST
+            ? job.attempts + 1
+            : Math.max(job.maxAttempts, job.attempts + 3),
         availableAt: at,
         finishedAt: null,
         lockedBy: null,

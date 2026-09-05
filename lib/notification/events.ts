@@ -8,9 +8,10 @@
 // 当前 registry 有 15 个事件：SPEC §8.1 的原始 10 个，加上
 // ORDER_CHANGE_REQUESTED / PRODUCTION_PROGRESS_ANOMALY /
 // PRODUCTION_STAGNANT / PENDING_FACTORY_BACKLOG / ORDER_OVERDUE。
-// STOCK_ALERT 的 wire 点在 lib/material.ts createMaterialTransaction 与
-// lib/purchase.ts cancelPurchaseReceipt（跨越检测：库存从 >=安全库存
-// 跌破那一次变动才触发，持续低位不重复）。
+// STOCK_ALERT 的 wire 点在 lib/material.ts createMaterialTransaction、
+// lib/purchase.ts cancelPurchaseReceipt 与 lib/inventory-count-posting.ts
+// postInventoryCount（跨越检测：全局库存从 >=安全库存 跌破的那一次
+// 变动才触发，持续低位不重复；同次盘点按物料汇总全部有效库位差额）。
 //
 // ORDER_SCHEDULED 保留历史 eventType，canonical 触发边界是管理员将
 // CONFIRMED 工单下发为 RELEASED；taskCount 是当前 work-order generation

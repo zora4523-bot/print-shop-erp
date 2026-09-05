@@ -27,6 +27,9 @@ export function backgroundJobRequiresOwnerResolution(
 export function isTerminalNotificationFailure(
   job: BackgroundJobTerminalIdentity,
 ): boolean {
+  // A test can fail after the provider received it (ACK loss, log persistence,
+  // or job completion failure). Only a fresh operator action may send again.
+  if (job.type === BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST) return true;
   return (
     job.type === BACKGROUND_JOB_TYPES.NOTIFICATION &&
     (job.lastErrorCode === NOTIFICATION_DELIVERY_UNKNOWN_ERROR_CODE ||

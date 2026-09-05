@@ -88,6 +88,52 @@ function input() {
 }
 
 describe('enqueueBackgroundJob', () => {
+  it('caps a channel test at one execution even when a caller requests retries', async () => {
+    dbMock.backgroundJob.createMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      id: 'test-1',
+      status: BackgroundJobStatus.PENDING,
+    });
+
+    await enqueueBackgroundJob({
+      ...input(),
+      type: 'NOTIFICATION_CHANNEL_TEST',
+      payload: { channelId: 'channel-1' },
+      maxAttempts: 5,
+    });
+
+    expect(dbMock.backgroundJob.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ maxAttempts: 1 })],
+      skipDuplicates: true,
+    });
+  });
+
+  it('re-arms a channel test for one execution and discards a legacy retry budget', async () => {
+    const terminal = {
+      id: 'test-1',
+      type: 'NOTIFICATION_CHANNEL_TEST',
+      status: BackgroundJobStatus.DEAD,
+      attempts: 2,
+      maxAttempts: 5,
+    };
+    dbMock.backgroundJob.createMany.mockResolvedValue({ count: 0 });
+    dbMock.backgroundJob.findUnique.mockResolvedValue(terminal);
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await enqueueBackgroundJob({
+      ...input(),
+      type: 'NOTIFICATION_CHANNEL_TEST',
+      payload: { channelId: 'channel-1' },
+      maxAttempts: 5,
+    });
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ maxAttempts: 3 }),
+      }),
+    );
+  });
+
   it('creates a fresh ledger row', async () => {
     const job = { id: 'job-1', status: BackgroundJobStatus.PENDING };
     dbMock.backgroundJob.createMany.mockResolvedValue({ count: 1 });
@@ -724,6 +770,35 @@ describe('claim and lease lifecycle', () => {
     );
   });
 
+  it('never schedules another channel test after an unconfirmed send, even with a legacy retry budget', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await failBackgroundJob(
+      {
+        ...claimed,
+        type: 'NOTIFICATION_CHANNEL_TEST',
+        payload: { channelId: 'channel-1' },
+        attempts: 2,
+        maxAttempts: 4,
+      },
+      Object.assign(new Error('notification channel test delivery failed'), {
+        name: 'NotificationChannelTestDeliveryError',
+      }),
+      DB_NOW,
+    );
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BackgroundJobStatus.DEAD,
+          finishedAt: DB_NOW,
+          lastErrorCode: 'NotificationChannelTestDeliveryError',
+        }),
+      }),
+    );
+  });
+
   it('makes a stranded SENDING delivery owner-visible and terminal atomically', async () => {
     const strandedJob = { ...claimed, attempts: 1, maxAttempts: 5 };
     const partialResult = {
@@ -924,6 +999,28 @@ describe('claim and lease lifecycle', () => {
     await expect(retryDeadBackgroundJob(claimed.id)).resolves.toBe(false);
 
     expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('an operator channel-test retry authorizes exactly one more execution', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'NOTIFICATION_CHANNEL_TEST',
+      attempts: 2,
+      maxAttempts: 5,
+      lastErrorCode: 'NotificationChannelTestDeliveryError',
+    });
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(retryDeadBackgroundJob('test-1')).resolves.toBe(true);
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BackgroundJobStatus.PENDING,
+          maxAttempts: 3,
+        }),
+      }),
+    );
   });
 
   it('loses a concurrent DEAD retry CAS without resetting the new owner or child ledger', async () => {

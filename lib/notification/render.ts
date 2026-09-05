@@ -11,6 +11,8 @@
 // - `{key}` 处 payload 有 key 且不是 null/undefined → 替换为 String(value)
 // - `{key}` 处 payload 没 key（或 null/undefined）→ 保留 `{key}` 原样
 // - 同一 key 多次出现 → 全部替换
+// - `{deepLink}` 的规范工单路径在 APP_PUBLIC_URL 有效时转成完整 URL；
+//   payload 本身保持相对路径，未配置时保持原值。
 // - 嵌套 `{` `}` 不支持 —— 仅 ASCII letter / digit / underscore 的 key
 //   匹配（`{foo_bar}` ✓，`{foo.bar}` ✗，`{foo-bar}` ✗）
 
@@ -29,9 +31,45 @@ export function renderTemplate(
     if (value === null || value === undefined) {
       return match;
     }
+    if (key === 'deepLink' && typeof value === 'string') {
+      return resolveNotificationDeepLink(value);
+    }
     // String() 包装：兼容 number / boolean / Decimal-string / Date.toString
     // 避免 "[object Object]" 出现：调用方负责把对象/数组在 payload 里
     // 拍平成 string（events.ts 类型已约束）。
     return String(value);
   });
+}
+
+function resolveNotificationDeepLink(value: string): string {
+  const prefix = '/orders#wo=';
+  if (!value.startsWith(prefix) || value.length === prefix.length) return value;
+  const configured = process.env.APP_PUBLIC_URL?.trim();
+  if (!configured || /[\s\\]/.test(configured)) return value;
+
+  try {
+    const orderNo = value.slice(prefix.length);
+    // The payload sanitizer owns this canonical path. Do not make arbitrary
+    // payload URLs or malformed encodings clickable as a side effect.
+    if (encodeURIComponent(decodeURIComponent(orderNo)) !== orderNo) return value;
+    const base = new URL(configured);
+    if (
+      !['https:', 'http:'].includes(base.protocol) ||
+      base.username ||
+      base.password ||
+      base.pathname !== '/' ||
+      base.search ||
+      base.hash
+    ) {
+      return value;
+    }
+    // Workers have no request headers. Using derivePublicBaseUrl() here would
+    // invent localhost:3000 when configuration is absent, so only use the
+    // explicit public origin. Keep this as a URL for custom Markdown templates.
+    return `${base.origin}${value}`.replace(/[()]/g, (character) =>
+      character === '(' ? '%28' : '%29',
+    );
+  } catch {
+    return value;
+  }
 }
