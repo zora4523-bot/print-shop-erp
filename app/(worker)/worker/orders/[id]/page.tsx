@@ -81,7 +81,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
       {order.packageRequirement || order.remark ? (
         <section className="worker-wrap-anywhere min-w-0 rounded-xl border bg-card p-4 text-sm shadow-sm">
           <h2 className="mb-2 font-semibold">生产备注</h2>
-          <p>包装要求：{order.packageRequirement ?? '—'}</p>
+          <p>包装补充说明：{order.packageRequirement ?? '—'}</p>
           <p className="mt-1">工单备注：{order.remark ?? '—'}</p>
         </section>
       ) : null}

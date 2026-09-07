@@ -8,6 +8,7 @@ import {
 import type { SalesOrderDetail } from '@/lib/order/sales-detail-query';
 import {
   canEditOrderSfCollect,
+  ORDER_MODIFIABLE_STATUSES,
   editableFieldsetForStatus,
   isOrderEditable,
 } from '@/lib/order/editable-fields';
@@ -96,28 +97,21 @@ export function SalesOrderDetailView({
   order: SalesOrderDetail;
 }) {
   const status = salesOrderStatusPresentation(order.status);
-  const canEdit = isOrderEditable(order.status);
+  const pendingChangeRequest = order.changeRequests.find(
+    (request) => request.status === OrderChangeRequestStatus.PENDING,
+  );
+  const canEdit = !pendingChangeRequest && isOrderEditable(order.status);
   const canToggleUrgent =
-    editableFieldsetForStatus(order.status) === 'FULL';
+    !pendingChangeRequest && editableFieldsetForStatus(order.status) === 'FULL';
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
   const canToggleSfCollect =
     canEditOrderSfCollect(order.status) && !isFinalizedExternalShipment;
-  const canEditDesigns = order.status === OrderStatus.DRAFT;
-  const pendingChangeRequest = order.changeRequests.find(
-    (request) => request.status === OrderChangeRequestStatus.PENDING,
-  );
+  const canEditDesigns =
+    !pendingChangeRequest && order.status === OrderStatus.DRAFT;
   const canRequestModify =
-    (order.status === OrderStatus.DRAFT ||
-      order.status === OrderStatus.SUBMITTED ||
-      order.status === OrderStatus.SCHEDULING ||
-      order.status === OrderStatus.IN_PRODUCTION ||
-      order.status === OrderStatus.CONFIRMED ||
-      order.status === OrderStatus.RELEASED ||
-      order.status === OrderStatus.FOILING ||
-      order.status === OrderStatus.PACKING) &&
-    !pendingChangeRequest;
+    ORDER_MODIFIABLE_STATUSES.includes(order.status) && !pendingChangeRequest;
   const canRequestCancellation =
     (order.status === OrderStatus.CONFIRMED ||
       order.status === OrderStatus.RELEASED ||
@@ -137,8 +131,12 @@ export function SalesOrderDetailView({
                 {order.orderNo}
               </h1>
               <SalesDetailStatusBadge label={status.label} tone={status.tone} />
-              {order.isUrgent ? <Badge variant="destructive">急单</Badge> : null}
-              {order.isSfCollect ? <Badge variant="outline">顺丰到付</Badge> : null}
+              {order.isUrgent ? (
+                <Badge variant="destructive">急单</Badge>
+              ) : null}
+              {order.isSfCollect ? (
+                <Badge variant="outline">顺丰到付</Badge>
+              ) : null}
             </div>
             <p className="admin-wrap-anywhere mt-2 text-base font-semibold">
               {order.customName ?? '未命名工单'}
@@ -232,15 +230,7 @@ export function SalesOrderDetailView({
                   .filter(Boolean)
                   .join(' · ')}
               />
-              <SalesDetailRow
-                label="收货地址"
-                value={order.receiver.address}
-              />
-              <SalesDetailRow
-                label="包装要求"
-                value={order.packageRequirement}
-                full
-              />
+              <SalesDetailRow label="收货地址" value={order.receiver.address} />
               <SalesDetailRow label="备注" value={order.remark} full />
             </dl>
           </section>
@@ -295,6 +285,49 @@ export function SalesOrderDetailView({
                 </li>
               ))}
             </ol>
+          </section>
+
+          <section
+            aria-label="包装明细"
+            className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6"
+          >
+            <h2 className="text-base font-semibold">
+              包装明细（{order.packagingGroups.length}）
+            </h2>
+            {order.packagingGroups.length === 0 ? (
+              <p className="text-sm text-muted-foreground">未记录分袋明细。</p>
+            ) : (
+              <ol className="space-y-3">
+                {order.packagingGroups.map((group) => (
+                  <li
+                    key={group.id}
+                    className="admin-wrap-anywhere rounded-lg border p-3 text-sm"
+                  >
+                    <h3 className="font-medium">
+                      包装组 #{group.sequence}
+                      {group.name ? ` · ${group.name}` : ''} ·{' '}
+                      {group.mode === 'MIXED_STYLE' ? '混装' : '单款装'}
+                    </h3>
+                    <p className="mt-1">
+                      实际 {group.actualBagCount.toLocaleString('zh-CN')} 袋
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      {group.lines
+                        .map(
+                          (line) =>
+                            `#${line.itemSequence} ${line.itemName} · 每袋 ${line.unitsPerBag} 个`,
+                        )
+                        .join('；') || '未记录每袋组成'}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            )}
+            {order.packageRequirement ? (
+              <p className="admin-wrap-anywhere whitespace-pre-wrap text-sm">
+                包装补充说明：{order.packageRequirement}
+              </p>
+            ) : null}
           </section>
 
           {canRequestModify ? (

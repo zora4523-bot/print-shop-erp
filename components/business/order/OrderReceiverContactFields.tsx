@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 
 type Props = {
   idPrefix?: string;
+  controlled?: boolean;
   receiverName: string | null;
   receiverPhone: string | null;
   nameField?: string;
@@ -22,6 +23,7 @@ type Props = {
 /** Shared by create and edit: the contact fields are separate persisted facts. */
 export function OrderReceiverContactFields({
   idPrefix = '',
+  controlled = false,
   receiverName,
   receiverPhone,
   nameField = 'receiverName',
@@ -46,7 +48,7 @@ export function OrderReceiverContactFields({
             id: idPrefix ? `${idPrefix}-receiver-name` : nameField,
             name: nameField,
             label: '收件人',
-            value: name,
+            value: controlled ? receiverName ?? '' : name,
             setValue: setName,
             required: nameRequired,
             error: errors?.receiverName,
@@ -58,7 +60,7 @@ export function OrderReceiverContactFields({
             id: idPrefix ? `${idPrefix}-receiver-phone` : phoneField,
             name: phoneField,
             label: '收货电话',
-            value: phone,
+            value: controlled ? receiverPhone ?? '' : phone,
             setValue: setPhone,
             required: phoneRequired,
             error: errors?.receiverPhone,

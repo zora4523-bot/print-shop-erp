@@ -14,7 +14,10 @@ import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request
 import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
 import { isOrderPricingReviewAllowedStatus } from '@/lib/order/pricing-status';
 import { EditOrderForm } from '@/components/business/order/EditOrderForm';
-import { OrderSavedConfiguration } from '@/components/business/order/OrderSavedConfiguration';
+import {
+  OrderSavedConfiguration,
+  OrderSavedPackaging,
+} from '@/components/business/order/OrderSavedConfiguration';
 import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
 import { OrderChangeWithdrawButton } from '@/components/business/order/OrderChangeWithdrawButton';
 import { OrderPricingReviewForm } from '@/components/business/order/OrderPricingReviewForm';
@@ -110,6 +113,7 @@ export default async function EditOrderPage({ params }: PageProps) {
         fieldset={fieldset}
         customers={customers}
         shipments={order.shipments}
+        packagingDetails={<OrderSavedPackaging order={order} />}
         isExternalSales={external}
         isSfCollect={order.isSfCollect}
         blocked={Boolean(pending)}

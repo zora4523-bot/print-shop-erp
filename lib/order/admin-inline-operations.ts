@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 import { UnauthorizedError } from '@/lib/auth/errors';
 import { isOrderPricingReviewAllowedStatus } from './pricing-status';
 import { isFulfillmentPricingStatus } from './fulfillment-pricing-policy';
-import { buildShipOrderShipmentInputs } from '@/components/business/order/order-shipping-availability';
+import { buildShipOrderShipmentInputs } from '@/lib/order/shipping-availability';
 import type { AdminOrdersActor, AdminOrderWorkspaceRow } from './admin-workspace';
 import type { AdminOrderInlineOperationsData } from './admin-inline-types';
 

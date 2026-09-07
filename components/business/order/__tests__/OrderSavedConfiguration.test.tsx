@@ -22,7 +22,10 @@ vi.mock('../DesignUploadPanel', () => ({
     </div>
   ),
 }));
-import { OrderSavedConfiguration } from '../OrderSavedConfiguration';
+import {
+  OrderSavedConfiguration,
+  OrderSavedPackaging,
+} from '../OrderSavedConfiguration';
 
 function savedOrder() {
   // A deliberately historical paper/specification and non-default packing
@@ -144,7 +147,10 @@ function savedOrder() {
 describe('saved order facts in editor', () => {
   it('retains historical item configuration, all shipments, packing, fees and design references', () => {
     const html = renderToStaticMarkup(
-      <OrderSavedConfiguration order={savedOrder()} canEditDesigns={false} />,
+      <>
+        <OrderSavedConfiguration order={savedOrder()} canEditDesigns={false} />
+        <OrderSavedPackaging order={savedOrder()} />
+      </>,
     );
     for (const fact of [
       '历史纸张 157g',
@@ -184,10 +190,13 @@ describe('saved order facts in editor', () => {
       confirmedFee: null,
     };
     const html = renderToStaticMarkup(
-      <OrderSavedConfiguration order={order} canEditDesigns={false} />,
+      <>
+        <OrderSavedConfiguration order={order} canEditDesigns={false} />
+        <OrderSavedPackaging order={order} />
+      </>,
     );
     expect(html).toContain('未记录款式');
-    expect(html).toContain('未记录结构化包装组');
+    expect(html).toContain('未记录分袋明细');
     expect(html).toContain('待核定');
   });
 });

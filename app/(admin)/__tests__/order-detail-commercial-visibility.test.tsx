@@ -383,6 +383,13 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('z-[9]');
   });
 
+  it.each([OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED])('exposes the permitted sales modification flow in %s', async (status) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'sales-1', role: Role.SALES } });
+    getSalesOrderDetailByIdMock.mockResolvedValue({ ...salesDetailFixture(), status });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).toContain('申请修改工单');
+  });
+
   it('routes SALES through the narrow detail contract without exposing factory data', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'sales-1', role: Role.SALES },
@@ -402,6 +409,9 @@ describe('order detail commercial visibility', () => {
     expect(getOrderDetailMock).not.toHaveBeenCalled();
     expect(html).toContain('款式加工费');
     expect(html).toContain('入袋加工费');
+    expect(html).toContain('礼盒包装');
+    expect(html).toContain('每袋 10 个');
+    expect(html).toContain('包装补充说明');
     expect(html).toContain('外部销售快递费');
     expect(html).toContain('外部销售打包耗材费');
     expect(html).toContain('制烫金版费');
@@ -743,6 +753,10 @@ function salesDetailFixture() {
         designs: [],
       },
     ],
+    packagingGroups: [{
+      id: 'packing-1', sequence: 1, name: '礼盒包装', mode: 'SINGLE_STYLE', actualBagCount: 100,
+      lines: [{ itemSequence: 1, itemName: '礼盒款', unitsPerBag: 10 }],
+    }],
     shipments: [
       {
         id: 'shipment-1',

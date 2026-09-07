@@ -1,4 +1,4 @@
-import type { ShipmentInput } from '@/components/business/order/ShipOrderFields';
+import type { ShipmentInput } from '@/lib/order/shipping-fields';
 
 /** Only populated by the administrator's individual-order read. */
 export type AdminOrderInlineOperationsData = {

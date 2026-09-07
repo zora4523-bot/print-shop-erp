@@ -104,6 +104,7 @@ const CARRIER_LABEL: Record<string, string> = {
 export function OrderPrintLayout({ order, factoryName }: Props) {
   const totalQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const itemPackaging = buildItemPackaging(order.packagingGroups);
+  const packagingComplete = hasCompleteBagFacts(order, itemPackaging);
   const totalBags = calculateTotalBags(order, itemPackaging);
   const artworks = buildArtworks(order);
   const { mainItems, itemAnnexPages } = paginateItems(order.items);
@@ -285,7 +286,9 @@ export function OrderPrintLayout({ order, factoryName }: Props) {
               />
               <Fact
                 label="包装要求"
-                value={packageRequirement}
+                value={
+                  packageRequirement ?? (packagingComplete ? '见分袋明细' : null)
+                }
                 emphasis="l1"
               />
             </div>
@@ -1028,12 +1031,25 @@ function derivePlannedSteps(item: PrintOrderItem): FlowRow[] {
     }));
 }
 
+function hasCompleteBagFacts(
+  order: PrintOrder,
+  packaging: Map<string, ItemPackaging>,
+): boolean {
+  return order.items.length > 0 && order.items.every(
+    (item) => (packaging.get(item.id)?.unitsPerBag ?? 0) > 0,
+  );
+}
+
 function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>, team: string | null): string[] {
   const warnings: string[] = [];
   if (!clean(order.customerName)) warnings.push('客户未填');
   if (!order.promisedDate) warnings.push('交货日期未填');
   if (!team) warnings.push('生产团队待排产');
-  if (!clean(order.packageRequirement)) warnings.push('包装要求未填');
+  // Keep the legacy paper warning only when both the note and bag facts are
+  // missing. Complete structured packaging needs no additional free-text note.
+  if (!clean(order.packageRequirement) && !hasCompleteBagFacts(order, packaging)) {
+    warnings.push('包装要求未填');
+  }
   if (order.items.length === 0) warnings.push('无生产明细');
   for (const item of order.items) {
     const prefix = `图 ${item.sequence}`;

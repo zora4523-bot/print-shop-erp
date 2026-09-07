@@ -4963,6 +4963,27 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     expect(dbMock.order.updateMany).not.toHaveBeenCalled();
   });
 
+  it.each([null, '', '   '])('rejects clearing an external order name (%j)', async (customName) => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ settlementType: OrderSettlementType.EXTERNAL_SALES, customName: '原工单' }));
+    await expect(updateOrderFields('order-1', editInput({ customName }), ownerActor)).rejects.toThrow('必须填写工单名称');
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps partial historical edits possible and normalizes an explicit external name', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ settlementType: OrderSettlementType.EXTERNAL_SALES }));
+    await updateOrderFields('order-1', editInput({ remark: '补充说明' }), ownerActor);
+    expect(dbMock.order.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: { remark: '补充说明' } }));
+    await updateOrderFields('order-1', editInput({ customName: '  正式名称  ' }), ownerActor);
+    expect(dbMock.order.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: { customName: '正式名称' } }));
+  });
+
+  it('allows an optional internal name and saves packaging notes without changing bag or price facts', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ settlementType: OrderSettlementType.INTERNAL_SALES, customName: '原工单' }));
+    await updateOrderFields('order-1', editInput({ customName: null, packageRequirement: '贴客户标签' }), ownerActor);
+    expect(dbMock.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { customName: null, packageRequirement: '贴客户标签' } }));
+  });
+
   it('validates a changed customer association and logs the actual relationship change', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       snapshot({ customerPartyId: 'old-customer' }),

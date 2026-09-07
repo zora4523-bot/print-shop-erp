@@ -12,7 +12,7 @@ const FIELD_LABELS: Record<string, string> = {
   receiverPhone: '收货电话',
   receiverAddress: '收货地址',
   expressCode: '快递代码',
-  packageRequirement: '包装要求',
+  packageRequirement: '包装补充说明',
   remark: '工单备注',
   promisedDate: '承诺交期',
   completedAt: '生产完成时间',

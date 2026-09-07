@@ -20,6 +20,7 @@ async function readSavedOrder(id: string) {
         editVersion: number;
         receiverName: string | null;
         receiverPhone: string | null;
+        packageRequirement: string | null;
       };
       facts: unknown;
       shipments: Array<{
@@ -80,6 +81,7 @@ test.describe('创建工单 — golden path', () => {
     // 暴露给建单端。所有选择都 scope 到对应 fieldset，避免同名
     // 工艺按钮造成假阳性。
     await openFirstOrderItemEditor(page);
+    await page.getByLabel('包装补充说明（选填）').fill('创建时贴客户标签');
     const form = page.locator('[data-slot="order-form-b"]');
     const routes = form.getByRole('group', { name: '工艺类型' });
     for (const route of ['局部烫金', '专版烫金', '彩印']) {
@@ -180,6 +182,7 @@ test.describe('创建工单 — golden path', () => {
 
     const orderId = new URL(page.url()).pathname.split('/')[2];
     const before = await readSavedOrder(orderId);
+    expect(before.order.packageRequirement).toBe('创建时贴客户标签');
     await page.goto(`/orders/${orderId}/edit`);
     await expect(page.getByLabel('工单名称', { exact: true })).toHaveValue(
       customName,
@@ -204,6 +207,7 @@ test.describe('创建工单 — golden path', () => {
     await expect(stalePage.getByLabel('工单名称', { exact: true })).toHaveValue(
       customName,
     );
+    await page.getByLabel('包装补充说明（选填）').fill('封口后贴客户标签');
     await page.getByLabel('收件人', { exact: true }).fill('修改后的收件人');
     await page.getByLabel('收货电话', { exact: true }).fill('13900139000');
     await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -212,6 +216,7 @@ test.describe('创建工单 — golden path', () => {
     const after = await readSavedOrder(orderId);
     expect(after.order.receiverName).toBe('修改后的收件人');
     expect(after.order.receiverPhone).toBe('13900139000');
+    expect(after.order.packageRequirement).toBe('封口后贴客户标签');
     expect(after.shipments[0]).toMatchObject({
       receiverName: '修改后的收件人',
       receiverPhone: '13900139000',

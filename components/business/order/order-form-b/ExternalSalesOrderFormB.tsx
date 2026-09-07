@@ -116,6 +116,7 @@ export type OrderFormBProps = {
   materialExtras?: ReactNode;
   pricingExtras?: ReactNode;
   shippingExtras?: ReactNode;
+  packagingExtras?: ReactNode;
   afterShipping?: ReactNode;
   allowManualWeight?: boolean;
   allowCustomSize?: boolean;
@@ -782,6 +783,7 @@ export function OrderFormB({
   materialExtras,
   pricingExtras,
   shippingExtras,
+  packagingExtras,
   afterShipping,
   allowManualWeight = false,
   allowCustomSize = true,
@@ -1347,6 +1349,8 @@ export function OrderFormB({
               />
             </div>
           </Group>
+
+          {packagingExtras}
 
           {pricingExtras}
 

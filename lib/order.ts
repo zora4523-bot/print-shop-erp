@@ -3149,6 +3149,18 @@ async function updateOrderEditableFields(
         : { isUrgent: command.isUrgent },
       allowed,
     );
+    if (
+      'customName' in nextFields &&
+      order.settlementType === OrderSettlementType.EXTERNAL_SALES
+    ) {
+      if (
+        typeof nextFields.customName !== 'string' ||
+        !nextFields.customName.trim()
+      ) {
+        throw new OrderInvariantError('外部销售工单必须填写工单名称');
+      }
+      nextFields.customName = nextFields.customName.trim();
+    }
     if ('receiverAddress' in nextFields) {
       const receiverAddress = nextFields.receiverAddress;
       if (typeof receiverAddress !== 'string' || !receiverAddress.trim()) {

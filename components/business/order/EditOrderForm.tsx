@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useState, type ReactNode } from 'react';
 import type { CustomerPartyOption } from '@/lib/party';
 import type { EditableShipment } from '@/lib/order/edit-shipment-fields';
 import { OrderReceiverContactFields } from './OrderReceiverContactFields';
@@ -41,6 +41,7 @@ type Props = {
   isExternalSales?: boolean;
   isSfCollect?: boolean;
   blocked?: boolean;
+  packagingDetails?: ReactNode;
 };
 
 const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set([
@@ -59,6 +60,7 @@ export function EditOrderForm({
   isExternalSales = false,
   isSfCollect = false,
   blocked = false,
+  packagingDetails,
 }: Props) {
   const boundAction = updateOrderAction.bind(null, orderId);
   const [state, formAction, pending] = useActionState<
@@ -68,6 +70,10 @@ export function EditOrderForm({
 
   const isShippingOnly = fieldset === 'SHIPPING_ONLY';
   const [customerId, setCustomerId] = useState(initial.customerPartyId ?? '');
+  const [customerRef, setCustomerRef] = useState(initial.customerRef ?? '');
+  const selectedCustomer = customers.find(
+    (customer) => customer.id === customerId,
+  );
   const [urgent, setUrgent] = useState(initial.isUrgent);
   const [delivery, setDelivery] = useState(() =>
     shipments?.map((row) => ({
@@ -141,7 +147,7 @@ export function EditOrderForm({
       ) : null}
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
-          工单已进入排产 / 生产，仅可修改收货信息与备注。
+          工单已确认，仅可修改配送信息、包装补充说明与工单备注。
         </div>
       )}
 
@@ -153,6 +159,8 @@ export function EditOrderForm({
           <Field
             name="customName"
             label="工单名称"
+            required={isExternalSales && !isShippingOnly}
+            maxLength={100}
             full
             disabled={
               pendingLocked ||
@@ -169,6 +177,9 @@ export function EditOrderForm({
               (FULL_ONLY_FIELDS.has('customerRef') && isShippingOnly)
             }
             initial={initial.customerRef}
+            value={customerRef}
+            onValueChange={setCustomerRef}
+            maxLength={64}
             errors={fieldErrors(state, 'customerRef')}
           />
           <div className="min-w-0 space-y-1.5">
@@ -177,6 +188,10 @@ export function EditOrderForm({
               id="customerPartyId"
               name="customerPartyId"
               value={customerId}
+              aria-describedby={fieldErrors(state, 'customerPartyId').length > 0
+                ? 'customer-association-hint customerPartyId-error'
+                : 'customer-association-hint'}
+              aria-invalid={fieldErrors(state, 'customerPartyId').length > 0}
               onChange={(event) => setCustomerId(event.target.value)}
               disabled={pendingLocked || isShippingOnly}
               className="min-h-11 w-full rounded-md border bg-background px-3 text-sm"
@@ -184,7 +199,7 @@ export function EditOrderForm({
               <option value="">未关联客户</option>
               {unknownCustomer ? (
                 <option value={initial.customerPartyId!}>
-                  当前客户（已停用）
+                  当前关联客户（信息不可用）
                 </option>
               ) : null}
               {customers.map((customer) => (
@@ -194,8 +209,30 @@ export function EditOrderForm({
                 </option>
               ))}
             </select>
+            <p
+              id="customer-association-hint"
+              className="text-xs text-muted-foreground"
+            >
+              更换关联客户会保留已填简称和各票收货信息。
+            </p>
+            {selectedCustomer && !isShippingOnly ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-11"
+                disabled={pendingLocked}
+                onClick={() =>
+                  setCustomerRef(
+                    selectedCustomer.shortName || selectedCustomer.name,
+                  )
+                }
+              >
+                采用客户简称
+              </Button>
+            ) : null}
             {fieldErrors(state, 'customerPartyId')[0] ? (
-              <p role="alert" className="text-xs text-destructive">
+              <p id="customerPartyId-error" role="alert" className="text-xs text-destructive">
                 {fieldErrors(state, 'customerPartyId')[0]}
               </p>
             ) : null}
@@ -234,16 +271,9 @@ export function EditOrderForm({
             </>
           ) : null}
           <Field
-            name="packageRequirement"
-            label="包装要求"
-            full
-            disabled={pendingLocked}
-            initial={initial.packageRequirement}
-            errors={fieldErrors(state, 'packageRequirement')}
-          />
-          <Field
             name="remark"
             label="工单备注"
+            maxLength={1000}
             full
             multiline
             disabled={pendingLocked}
@@ -308,8 +338,45 @@ export function EditOrderForm({
                     {row.sequence === 1 ? ' · 主收货地址' : ''}
                     {row.status === 'SHIPPED' ? ' · 已发货' : ''}
                   </legend>
+                  {row.sequence === 1 &&
+                  selectedCustomer &&
+                  (selectedCustomer.receiverName ||
+                    selectedCustomer.receiverPhone ||
+                    selectedCustomer.receiverAddress) ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11"
+                      disabled={disabled}
+                      onClick={() =>
+                        setDelivery((rows) =>
+                          rows?.map((candidate) =>
+                            candidate.id === row.id
+                              ? {
+                                  ...candidate,
+                                  receiverName:
+                                    selectedCustomer.receiverName ||
+                                    candidate.receiverName,
+                                  receiverPhone:
+                                    selectedCustomer.receiverPhone ||
+                                    candidate.receiverPhone,
+                                  receiverAddress:
+                                    selectedCustomer.receiverAddress ||
+                                    candidate.receiverAddress,
+                                  sameDestination: false,
+                                }
+                              : candidate,
+                          ),
+                        )
+                      }
+                    >
+                      采用客户默认收货信息
+                    </Button>
+                  ) : null}
                   <OrderReceiverContactFields
                     idPrefix={`edit-shipment-${index}`}
+                    controlled
                     receiverName={row.receiverName}
                     receiverPhone={row.receiverPhone}
                     disabled={disabled}
@@ -433,6 +500,25 @@ export function EditOrderForm({
         </Card>
       ) : null}
 
+      <Card aria-label="分货与包装" id="saved-packaging">
+        <CardHeader>
+          <h2 className="text-base font-semibold">分货与包装</h2>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {packagingDetails}
+          <Field
+            name="packageRequirement"
+            label="包装补充说明（选填）"
+            initial={initial.packageRequirement}
+            errors={fieldErrors(state, 'packageRequirement')}
+            disabled={pendingLocked}
+            multiline
+            maxLength={500}
+            description="用于封口、贴标等补充要求；分袋数量和费用以包装明细为准。"
+          />
+        </CardContent>
+      </Card>
+
       {state?.status === 'error' && (
         <p role="alert" className="text-sm text-destructive">
           {state.message}
@@ -475,6 +561,10 @@ function Field({
   required,
   disabled,
   type = 'text',
+  value: controlledValue,
+  onValueChange,
+  maxLength,
+  description,
 }: {
   name: string;
   label: string;
@@ -485,9 +575,19 @@ function Field({
   required?: boolean;
   disabled?: boolean;
   type?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
+  maxLength?: number;
+  description?: string;
 }) {
-  const [value, setValue] = useState(initial ?? '');
+  const [localValue, setLocalValue] = useState(initial ?? '');
+  const value = controlledValue ?? localValue;
+  const setValue = onValueChange ?? setLocalValue;
   const hasError = errors.length > 0;
+  const describedBy =
+    [description ? `${name}-hint` : null, hasError ? `${name}-error` : null]
+      .filter(Boolean)
+      .join(' ') || undefined;
   const errorId = `${name}-error`;
   return (
     <div className={full ? 'sm:col-span-2' : undefined}>
@@ -505,11 +605,12 @@ function Field({
           name={name}
           disabled={disabled}
           required={required}
+          maxLength={maxLength}
           aria-required={required ? true : undefined}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           aria-invalid={hasError}
-          aria-describedby={hasError ? errorId : undefined}
+          aria-describedby={describedBy}
           className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
           rows={3}
         />
@@ -520,14 +621,20 @@ function Field({
           type={type}
           disabled={disabled}
           required={required}
+          maxLength={maxLength}
           aria-required={required ? true : undefined}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           aria-invalid={hasError}
-          aria-describedby={hasError ? errorId : undefined}
+          aria-describedby={describedBy}
           className="mt-1 min-h-11"
         />
       )}
+      {description ? (
+        <p id={`${name}-hint`} className="mt-1 text-xs text-muted-foreground">
+          {description}
+        </p>
+      ) : null}
       {hasError && (
         // 不用 role="alert"：逐字段错误靠 aria-describedby 与控件关联，
         // 用户聚焦到该字段时读屏器自然读出来。标 alert 会在每次校验时

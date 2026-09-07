@@ -288,12 +288,23 @@ describe('buildPrintHtml', () => {
     ]) {
       expect(html).toContain(`<div class="lbl">${label}</div>`);
     }
-    expect(html.match(/class="l[01] miss">未填<\/div>/g)?.length).toBeGreaterThanOrEqual(3);
+    // Only missing paper and delivery date are required facts; the supplement is optional.
+    expect(html.match(/class="l[01] miss">未填<\/div>/g)).toHaveLength(2);
     expect(html).toContain('数据不完整：');
     expect(html).toContain('交货日期未填');
-    expect(html).toContain('包装要求未填');
+    expect(html).not.toContain('包装要求未填');
+    expect(html).not.toContain('包装数量未填');
+    expect(html).toContain('见分袋明细');
     expect(html).toContain('图 1 纸张未填');
     expect(html).toContain('图 1 烫金颜色未填');
+  });
+
+  it('reports missing bag facts even when a packaging supplement is present', async () => {
+    const html = await renderPrintHtml(fixtureOrder({
+      packagingGroups: [], packageRequirement: '贴客户标签',
+    }));
+    expect(html).toContain('包装数量未填');
+    expect(html).not.toContain('包装要求未填');
   });
 
   it('生产工艺只来自任务或工艺事实，不把客户计价路线冒充工序', async () => {

@@ -212,77 +212,6 @@ export function OrderSavedConfiguration({
           })}
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-semibold">分货与包装</h2>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-3">
-            {order.shipments.map((shipment) => (
-              <div key={shipment.id} className="min-w-0 rounded-lg border p-3">
-                <h3 className="text-sm font-medium">
-                  第 {shipment.sequence} 票 ·{' '}
-                  {shipment.receiverName ?? '未填收件人'}
-                </h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {shipment.lines
-                    .map(
-                      (line) =>
-                        `#${line.orderItem.sequence} ${readable(line.orderItem.name)} × ${qty(line.quantity)}`,
-                    )
-                    .join('；') || '未记录分货数量'}
-                </p>
-                <dl className="mt-3 grid gap-3 sm:grid-cols-3">
-                  <Fact label="配送省份">{shipment.destinationProvince}</Fact>
-                  <Fact label="预估重量">
-                    {shipment.quotedWeightKg === null
-                      ? '未记录'
-                      : `${shipment.quotedWeightKg} kg`}
-                  </Fact>
-                  <Fact label="实际计费重量">
-                    {shipment.weightKg === null
-                      ? '未记录'
-                      : `${shipment.weightKg} kg`}
-                  </Fact>
-                  <Fact label="运单号">{shipment.trackingNo}</Fact>
-                </dl>
-              </div>
-            ))}
-          </div>
-          {order.packagingGroups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              未记录结构化包装组。
-            </p>
-          ) : null}
-          {order.packagingGroups.map((group) => (
-            <div key={group.id} className="min-w-0 rounded-lg border p-3">
-              <h3 className="text-sm font-medium">
-                包装组 #{group.sequence}
-                {group.name ? ` · ${group.name}` : ''} ·{' '}
-                {group.mode === 'MIXED_STYLE' ? '混装' : '单款装'}
-              </h3>
-              <p className="mt-1 text-sm">
-                实际 {qty(group.actualBagCount)} 袋 ·{' '}
-                {group.lines
-                  .map(
-                    (line) =>
-                      `#${line.orderItem.sequence} 每袋 ${qty(line.unitsPerBag)} 个`,
-                  )
-                  .join('；') || '未记录每袋组成'}
-              </p>
-              {'subtotal' in group ? (
-                <p className="mt-1 text-sm text-muted-foreground">
-                  入袋单价 {formatUnitPrice(String(group.unitPrice))} · 小计{' '}
-                  {money(group.subtotal)}
-                  {group.priceOverrideReason
-                    ? ` · ${group.priceOverrideReason}`
-                    : ''}
-                </p>
-              ) : null}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
       <Card id="saved-fees">
         <CardHeader>
           <h2 className="text-base font-semibold">已保存费用</h2>
@@ -335,6 +264,76 @@ export function OrderSavedConfiguration({
           </ul>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/** Saved allocations and bag quantities remain read-only during basic edits. */
+export function OrderSavedPackaging({ order }: { order: Order }) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        {order.shipments.map((shipment) => (
+          <div key={shipment.id} className="min-w-0 rounded-lg border p-3">
+            <h3 className="text-sm font-medium">
+              第 {shipment.sequence} 票 ·{' '}
+              {shipment.receiverName ?? '未填收件人'}
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {shipment.lines
+                .map(
+                  (line) =>
+                    `#${line.orderItem.sequence} ${readable(line.orderItem.name)} × ${qty(line.quantity)}`,
+                )
+                .join('；') || '未记录分货数量'}
+            </p>
+            <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+              <Fact label="配送省份">{shipment.destinationProvince}</Fact>
+              <Fact label="预估重量">
+                {shipment.quotedWeightKg === null
+                  ? '未记录'
+                  : `${shipment.quotedWeightKg} kg`}
+              </Fact>
+              <Fact label="实际计费重量">
+                {shipment.weightKg === null
+                  ? '未记录'
+                  : `${shipment.weightKg} kg`}
+              </Fact>
+              <Fact label="运单号">{shipment.trackingNo}</Fact>
+            </dl>
+          </div>
+        ))}
+      </div>
+      {order.packagingGroups.length === 0 ? (
+        <p className="text-sm text-muted-foreground">未记录分袋明细。</p>
+      ) : null}
+      {order.packagingGroups.map((group) => (
+        <div key={group.id} className="min-w-0 rounded-lg border p-3">
+          <h3 className="text-sm font-medium">
+            包装组 #{group.sequence}
+            {group.name ? ` · ${group.name}` : ''} ·{' '}
+            {group.mode === 'MIXED_STYLE' ? '混装' : '单款装'}
+          </h3>
+          <p className="mt-1 text-sm">
+            实际 {qty(group.actualBagCount)} 袋 ·{' '}
+            {group.lines
+              .map(
+                (line) =>
+                  `#${line.orderItem.sequence} 每袋 ${qty(line.unitsPerBag)} 个`,
+              )
+              .join('；') || '未记录每袋组成'}
+          </p>
+          {'subtotal' in group ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              入袋单价 {formatUnitPrice(String(group.unitPrice))} · 小计{' '}
+              {money(group.subtotal)}
+              {group.priceOverrideReason
+                ? ` · ${group.priceOverrideReason}`
+                : ''}
+            </p>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }

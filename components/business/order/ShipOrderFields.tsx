@@ -2,18 +2,8 @@ import type { OrderMutationResult } from '@/actions/order.types';
 import { Input } from '@/components/ui/input';
 import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 
-export type ShipmentInput = {
-  id: string;
-  sequence: number;
-  receiverName: string | null;
-  receiverAddress: string | null;
-  trackingNo: string | null;
-  weightKg: string | null;
-  destinationProvince: string | null;
-  shippingFee: string | null;
-  packingMaterialFee: string | null;
-  customerChargeOverrideReason: string | null;
-};
+import type { ShipmentInput } from '@/lib/order/shipping-fields';
+export type { ShipmentInput } from '@/lib/order/shipping-fields';
 
 export function ShipOrderVersionFields({
   expectedRevision,

@@ -3355,7 +3355,7 @@ export function OrderForm({
                   className="mt-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2"
                 >
                   <div>
-                    <Label htmlFor="customerPartyId">客户主数据（选填）</Label>
+                    <Label htmlFor="customerPartyId">关联客户（选填）</Label>
                     <select
                       id="customerPartyId"
                       className={`${selectClass} mt-2`}
@@ -3555,6 +3555,30 @@ export function OrderForm({
                 </section>
               ) : undefined
             }
+            packagingExtras={
+              <div className="space-y-2">
+                <Label htmlFor="packageRequirement">包装补充说明（选填）</Label>
+                <Input
+                  id="packageRequirement"
+                  maxLength={500}
+                  disabled={orderFormControlsDisabled}
+                  aria-describedby="packageRequirement-hint"
+                  aria-invalid={Boolean(errors.packageRequirement)}
+                  {...register('packageRequirement')}
+                />
+                <p
+                  id="packageRequirement-hint"
+                  className="text-xs text-muted-foreground"
+                >
+                  用于封口、贴标等补充要求；分袋数量和费用以包装明细为准。
+                </p>
+                {errors.packageRequirement?.message ? (
+                  <p role="alert" className="text-xs text-destructive">
+                    {errors.packageRequirement.message}
+                  </p>
+                ) : null}
+              </div>
+            }
             shippingExtras={
               !usesExternalSalesPricing ? (
                 <div className="mb-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
@@ -3564,14 +3588,6 @@ export function OrderForm({
                       id="expressCode"
                       className="mt-2 h-10"
                       {...register('expressCode')}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="packageRequirement">包装要求</Label>
-                    <Input
-                      id="packageRequirement"
-                      className="mt-2 h-10"
-                      {...register('packageRequirement')}
                     />
                   </div>
                 </div>

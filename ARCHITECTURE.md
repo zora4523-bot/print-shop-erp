@@ -77,6 +77,14 @@ App Router 页面
 
 权限与输入校验是两道独立门。UI 的 disabled、隐藏按钮或确认框都不能代替服务端授权和领域不变量。
 
+### 工单页面与领域契约
+
+- 创建、编辑、详情和审批分别负责录入、基础资料更正、查看已保存事实和变更审批；普通编辑不重新套用当前创建默认值，也不重建款式、分货、包装或价格快照。
+- 修改状态窗口统一使用 `lib/order/editable-fields.ts`。详情按钮与编辑页遵循待审批锁定，服务端继续独立校验所有权、状态和版本。
+- 发货可用性与配送 DTO 分别放在 `lib/order/shipping-availability.ts`、`lib/order/shipping-fields.ts`。详情、抽屉及服务端操作查询消费这些纯契约；UI 目录保留兼容导出，不再由领域代码引用组件。
+- 销售详情使用 `sales-detail-query.ts` 的显式 select 和映射；包装只传模式、实际袋数、每袋组成等客户可见事实，不附带内部规则、生产工资或成本快照。
+- 本次跨页审查范围与证据见 [工单页面审查记录](./docs/order-pages-audit-2026-09-07.md)。
+
 ### HTTP Route Handler
 
 HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查询；页面内写操作主要使用 Server Actions。当前端点、认证方式与响应约定见 [API.md](./API.md)。

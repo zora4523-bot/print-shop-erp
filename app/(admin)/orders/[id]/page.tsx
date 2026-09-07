@@ -27,6 +27,7 @@ import { orderDetailTitle } from '@/lib/page-title/titles';
 import { canAttachOutsource } from '@/lib/order/status-machine';
 import {
   canEditOrderSfCollect,
+  canRequestOrderModification,
   editableFieldsetForStatus,
   isOrderEditable,
 } from '@/lib/order/editable-fields';
@@ -112,7 +113,7 @@ import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDeta
 import {
   buildShipOrderShipmentInputs,
   orderShippingAvailability,
-} from '@/components/business/order/order-shipping-availability';
+} from '@/lib/order/shipping-availability';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -230,7 +231,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // Editing follows SPEC §3.6. Ownership mirrors the action-layer
   // guard: SALES / CUSTOMER_SERVICE only their own; ADMIN
   // any. Server still re-verifies on submit — this is UI-only.
+  const pendingChangeRequest = order.changeRequests.find(
+    (request) => request.status === OrderChangeRequestStatus.PENDING,
+  );
   const canEdit =
+    !pendingChangeRequest &&
     isOrderEditable(order.status) &&
     (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
@@ -319,9 +324,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
   ).length;
   const incompleteProductionCount =
     pendingProductionCount + inProgressProductionCount;
-  const pendingChangeRequest = order.changeRequests.find(
-    (request) => request.status === OrderChangeRequestStatus.PENDING,
-  );
   const { canShip, disabledReason: shipDisabledReason } =
     orderShippingAvailability({
       isAdministrator: canShipOrSettle,
@@ -360,16 +362,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   });
   const canRequestChange =
     user.role === Role.CUSTOMER_SERVICE &&
-    order.submitterId === user.id &&
-    (order.status === OrderStatus.DRAFT ||
-      order.status === OrderStatus.SUBMITTED ||
-      order.status === OrderStatus.SCHEDULING ||
-      order.status === OrderStatus.IN_PRODUCTION ||
-      order.status === OrderStatus.CONFIRMED ||
-      order.status === OrderStatus.RELEASED ||
-      order.status === OrderStatus.FOILING ||
-      order.status === OrderStatus.PACKING) &&
-    !pendingChangeRequest;
+    canRequestOrderModification(user, order, Boolean(pendingChangeRequest));
   const canRequestCancellation =
     user.role === Role.CUSTOMER_SERVICE &&
     order.submitterId === user.id &&
@@ -774,7 +767,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
             value={order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'}
           />
           <Row label="收货信息" value={formatReceiverInfo(order)} full />
-          <Row label="包装要求" value={order.packageRequirement} full />
           <Row label="备注" value={order.remark} full />
           <div>
             <dt className="text-muted-foreground">承诺交期</dt>
@@ -1785,6 +1777,11 @@ function OrderPackagingGroupsSection({ order, canViewCommercialAmounts }: {
       <h2 className="text-base font-semibold">
         包装组（{order.packagingGroups.length}）
       </h2>
+      {order.packageRequirement ? (
+        <p className="admin-wrap-anywhere whitespace-pre-wrap text-sm">
+          包装补充说明：{order.packageRequirement}
+        </p>
+      ) : null}
       {order.packagingGroups.length === 0 ? (
         <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
           暂无包装组。

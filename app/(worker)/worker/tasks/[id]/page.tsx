@@ -134,7 +134,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             <h2 className="font-semibold">包装与工单备注</h2>
             <dl className="mt-3 space-y-2">
               <div>
-                <dt className="text-xs text-muted-foreground">包装要求</dt>
+                <dt className="text-xs text-muted-foreground">包装补充说明</dt>
                 <dd className="break-words">
                   {operation.packageRequirement ?? '—'}
                 </dd>
@@ -268,7 +268,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             <h2 className="font-semibold">包装与工单备注</h2>
             <dl className="mt-3 space-y-2">
               <div>
-                <dt className="text-xs text-muted-foreground">包装要求</dt>
+                <dt className="text-xs text-muted-foreground">包装补充说明</dt>
                 <dd className="break-words">
                   {progress.packageRequirement ?? '—'}
                 </dd>

@@ -59,6 +59,25 @@ test.describe('administrator workspace', () => {
     await expect(page.getByRole('region', { name: '工单决定看板' }).getByRole('link', { name: /待下发生产/ })).toHaveAttribute('aria-current', 'page');
   });
 
+  test('order creation, detail and editing pass focused light and dark gates', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(90_000);
+    page.on('dialog', (dialog) => dialog.accept());
+    const routes: AdminRoute[] = [
+      ...ownerRoutes(fixture).filter(
+        (route) => route.path === '/orders/new' || route.path === `/orders/${fixture.orderId}`,
+      ),
+      {
+        name: 'order-edit',
+        path: `/orders/${fixture.orderId}/edit`,
+        readyHeading: /^编辑工单 /,
+      },
+    ];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
   test('critical routes pass responsive and accessibility gates', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'light');
   });
@@ -1309,7 +1328,19 @@ async function prepareConfiguredLocalFoilStyle(page: Page) {
       .first(),
   ).toHaveAttribute('aria-pressed', 'true');
 
+  // A second theme visit encounters the local draft from the first visit.
+  // Resolve that real recovery state before operating the protected form.
+  const discardDraft = page.getByRole('button', {
+    name: '放弃本地草稿', exact: true,
+  });
   const routePicker = form.getByRole('group', { name: '工艺类型' });
+  const localFoil = routePicker.getByRole('button', {
+    name: '局部烫金', exact: true,
+  });
+  await expect.poll(async () =>
+    (await discardDraft.isVisible()) || (await localFoil.isEnabled()),
+  ).toBe(true);
+  if (await discardDraft.isVisible()) await discardDraft.click();
   for (const route of ['局部烫金', '专版烫金', '彩印']) {
     await expect(
       routePicker.getByRole('button', { name: route, exact: true }),

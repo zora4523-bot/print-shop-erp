@@ -1943,7 +1943,7 @@ export const createOrderSchema = z
       .transform((value) => value ?? null),
     expressCode: optionalTrimmedText('快递代码', 32),
     ...shipmentChargeFields,
-    packageRequirement: optionalTrimmedText('包装要求', 500),
+    packageRequirement: optionalTrimmedText('包装补充说明', 500),
     remark: optionalTrimmedText('工单备注', 1000),
     promisedDate: optionalDateField,
     isUrgent: formBoolean,
@@ -2880,7 +2880,7 @@ export const updateEditableOrderSchema = z.object({
   // 普通编辑允许不传该 key（partial update），但只要传了就不能清空。
   receiverAddress: requiredTrimmedText('收货地址', 256).optional(),
   expressCode: optionalTrimmedText('快递代码', 32).optional(),
-  packageRequirement: optionalTrimmedText('包装要求', 500).optional(),
+  packageRequirement: optionalTrimmedText('包装补充说明', 500).optional(),
   remark: optionalTrimmedText('工单备注', 1000).optional(),
   promisedDate: optionalDateFieldPartial,
   isUrgent: optionalFormBoolean,
@@ -2894,7 +2894,7 @@ export const updateShippingOrderSchema = z.object({
   receiverPhone: optionalTrimmedText('收货电话', 32),
   receiverAddress: requiredTrimmedText('收货地址', 256),
   expressCode: optionalTrimmedText('快递代码', 32),
-  packageRequirement: optionalTrimmedText('包装要求', 500),
+  packageRequirement: optionalTrimmedText('包装补充说明', 500),
   remark: optionalTrimmedText('工单备注', 1000),
 });
 

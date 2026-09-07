@@ -193,6 +193,91 @@ describe('complete order editing', () => {
       )
       .toHaveValue('13700137000');
   });
+  it('requires an external name and keeps packaging supplements out of basic information', async () => {
+    mount();
+    const name = page.getByRole('textbox', { name: '工单名称', exact: true });
+    await name.fill('');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    expect(save).not.toHaveBeenCalled();
+    expect(
+      (host.querySelector('#customName') as HTMLInputElement).validity
+        .valueMissing,
+    ).toBe(true);
+    expect(
+      host
+        .querySelector('#packageRequirement')
+        ?.closest('[aria-label="分货与包装"]'),
+    ).not.toBeNull();
+    await name.fill('外部礼盒');
+    await page
+      .getByRole('textbox', { name: '包装补充说明（选填）' })
+      .fill('封口后贴标签');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save.mock.calls[0]?.[2].get('packageRequirement')).toBe(
+      '封口后贴标签',
+    );
+  });
+
+  it('adopts customer defaults only on request, preserving other shipments and resetting the province check', async () => {
+    mount({
+      customers: [
+        {
+          id: 'customer-2',
+          code: 'C002',
+          name: '新客户公司',
+          shortName: '新客户',
+          receiverName: '王五',
+          receiverPhone: '13600136000',
+          receiverAddress: '广东省深圳市新地址',
+        },
+      ],
+    });
+    await page
+      .getByRole('combobox', { name: '关联客户' })
+      .selectOptions('customer-2');
+    await expect
+      .element(page.getByRole('textbox', { name: '客户名称/简称（选填）' }))
+      .toHaveValue('客户简称');
+    await expect
+      .element(
+        page.getByRole('textbox', { name: '收货地址', exact: true }).nth(0),
+      )
+      .toHaveValue('广东省佛山市原地址');
+    await page.getByRole('button', { name: '采用客户简称' }).click();
+    await page.getByRole('button', { name: '采用客户默认收货信息' }).click();
+    await expect
+      .element(page.getByRole('textbox', { name: '客户名称/简称（选填）' }))
+      .toHaveValue('新客户');
+    await expect
+      .element(
+        page.getByRole('textbox', { name: '收货地址', exact: true }).nth(0),
+      )
+      .toHaveValue('广东省深圳市新地址');
+    await expect
+      .element(
+        page.getByRole('textbox', { name: '收件人', exact: true }).nth(0),
+      )
+      .toHaveValue('王五');
+    await expect
+      .element(
+        page.getByRole('textbox', { name: '收货电话', exact: true }).nth(0),
+      )
+      .toHaveValue('13600136000');
+    await expect
+      .element(
+        page.getByRole('textbox', { name: '收货地址', exact: true }).nth(1),
+      )
+      .toHaveValue('浙江省杭州市第二地址');
+    await expect
+      .element(
+        page.getByRole('checkbox', {
+          name: '配送省份仍为广东，运费计费条件未变',
+        }),
+      )
+      .not.toBeChecked();
+  });
+
   it('requires rechecking the province after every further address edit', async () => {
     mount();
     const address = page

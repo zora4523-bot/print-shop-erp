@@ -45,21 +45,9 @@ describe('工单变更申请 UI 集成契约', () => {
       'const canRequestChange =',
       'const customerChargeByShipmentAndCategory =',
     );
-    for (const status of [
-      'DRAFT',
-      'SUBMITTED',
-      'SCHEDULING',
-      'IN_PRODUCTION',
-      'CONFIRMED',
-      'RELEASED',
-      'FOILING',
-      'PACKING',
-    ]) {
-      expect(requestPolicy).toContain(`order.status === OrderStatus.${status}`);
-    }
+    expect(requestPolicy).toContain('canRequestOrderModification(user, order, Boolean(pendingChangeRequest))');
     expect(requestPolicy).toContain('user.role === Role.CUSTOMER_SERVICE');
-    expect(requestPolicy).toContain('order.submitterId === user.id');
-    expect(requestPolicy).toContain('!pendingChangeRequest');
+    expect(salesDetailSource).toContain('ORDER_MODIFIABLE_STATUSES.includes(order.status)');
     expect(requestPolicy).toContain('const canRequestCancellation =');
     expect(detailSource).toContain('<OrderCancellationRequestForm');
   });
