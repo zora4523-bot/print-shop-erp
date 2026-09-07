@@ -7,6 +7,8 @@ import {
   uniqueSuffix,
   expectNoNextErrorOverlay,
   openFirstOrderItemEditor,
+  getUserIdByUsername,
+  seedDashboardSnapshot,
 } from './_helpers';
 
 const owner = E2E_USERS.owner!;
@@ -54,6 +56,49 @@ async function readSavedOrder(id: string) {
 }
 
 test.describe('创建工单 — golden path', () => {
+  test('历史工单缺少计价明细时，纯交期申请审批保留全部原价', async ({ page }) => {
+    test.setTimeout(90_000);
+    test.skip(process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1', '历史工单回归仅使用独立测试数据库');
+    const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
+    const { urgentOrderId: orderId } = await seedDashboardSnapshot({ salesUserId });
+    // Only this invocation's fresh legacy fixture is changed. Its recorded
+    // historical price intentionally cannot be rebuilt from missing line items.
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    await db.connect();
+    try {
+      await db.query(
+        `UPDATE "Order" SET "processingAmount" = 2800, "totalAmount" = 3000,
+          "confirmedFee" = 3000 WHERE id = $1`,
+        [orderId],
+      );
+    } finally {
+      await db.end();
+    }
+    const before = await readSavedOrder(orderId);
+    await login(page, { from: `/orders/${orderId}/edit`, username: owner.username, password: E2E_PASSWORD });
+    const form = page.locator('#modify-order');
+    await form.getByLabel('修改类别').selectOption('DUE_DATE');
+    await form.getByLabel(/^新的承诺交期/).fill('2026-10-20');
+    await form.getByLabel('修改原因').fill('历史工单仅调整交期，费用不变');
+    await form.getByRole('button', { name: /提交修改申请/ }).click();
+    await expect(page.getByText('修改申请待处理', { exact: true })).toBeVisible();
+    expect((await readSavedOrder(orderId)).facts).toEqual(before.facts);
+
+    await page.goto(`/orders/${orderId}`);
+    // The legacy detail page starts its pricing preview on hydration. Wait for
+    // that action to settle before navigating away through its review link.
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('link', { name: '前往新版工单工作台审核', exact: true }).click();
+    await expect(page).toHaveURL(/\/orders\?queue=all&signal=pending-change#wo=/);
+    await page.getByRole('button', { name: '批准变更', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '确认批准并同步工单', exact: true }).click();
+    await expect.poll(async () => (await readSavedOrder(orderId)).order.promisedDate).toContain('2026-10-20');
+    const after = await readSavedOrder(orderId);
+    expect(after.facts).toEqual(before.facts);
+    expect(after.order.pricingStatus).toBe(before.order.pricingStatus);
+    await expectNoNextErrorOverlay(page);
+  });
+
   // 这条用例存在的具体理由：手动测试时这里炸了
   // PrismaClientKnownRequestError "Failed to deserialize column of
   // type 'void'" —— $queryRaw + pg_advisory_xact_lock 在 Prisma 7 不

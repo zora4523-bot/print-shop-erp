@@ -4981,21 +4981,22 @@ async function persistApprovedModificationPricingInTx(input: {
     });
   }
 
-  const refreshedItems = await tx.orderItem.findMany({
-    where: { orderId: request.order.id },
-    select: { subtotal: true },
-  });
   const nextRevision = request.order.revision + 1;
   const currentWorkOrderVersion = request.order.workOrderVersion ?? 1;
   const nextWorkOrderVersion =
     currentWorkOrderVersion + (versionedProductionChange ? 1 : 0);
   const nextPackagingAmount =
     packagingReprice?.total ?? request.order.packagingAmount;
-  const nextProcessingAmount = orderTotal(
-    refreshedItems,
-    nextPackagingAmount,
-  );
+  // Metadata-only approval must agree with buildUnchangedPricingPreview.
+  // Historical item/charge rows may not reconstruct the confirmed order price.
+  let nextProcessingAmount = new Decimal(request.order.processingAmount).toFixed(2);
+  let nextTotal = new Decimal(request.order.totalAmount).toFixed(2);
   if (projected) {
+    const refreshedItems = await tx.orderItem.findMany({
+      where: { orderId: request.order.id },
+      select: { subtotal: true },
+    });
+    nextProcessingAmount = orderTotal(refreshedItems, nextPackagingAmount);
     const pureProcessingAmount = projected.calculation.quote.items
       .reduce((sum, item) => {
         if (item.amount === null) {
@@ -5014,16 +5015,14 @@ async function persistApprovedModificationPricingInTx(input: {
     if (!pureProcessingAmount.equals(nextProcessingAmount)) {
       throw new OrderChangeRequestError('持久化加工费与纯引擎输出不一致');
     }
+    const customerChargeTotal = await tx.orderCustomerCharge.aggregate({
+      where: { orderId: request.order.id },
+      _sum: { amount: true },
+    });
+    nextTotal = checkedOrderTotal(
+      new Decimal(nextProcessingAmount).plus(customerChargeTotal._sum.amount ?? 0),
+    );
   }
-  const customerChargeTotal = await tx.orderCustomerCharge.aggregate({
-    where: { orderId: request.order.id },
-    _sum: { amount: true },
-  });
-  const nextTotal = checkedOrderTotal(
-    new Decimal(nextProcessingAmount).plus(
-      customerChargeTotal._sum.amount ?? 0,
-    ),
-  );
   const salesDelta = new Decimal(nextTotal).minus(request.order.totalAmount);
   await tx.order.update({
     where: { id: request.order.id },
@@ -5043,8 +5042,9 @@ async function persistApprovedModificationPricingInTx(input: {
       ...(packagingReprice && packagingReprice.plans.length > 0
         ? { packagingAmount: nextPackagingAmount }
         : {}),
-      processingAmount: nextProcessingAmount,
-      totalAmount: nextTotal,
+      ...(projected
+        ? { processingAmount: nextProcessingAmount, totalAmount: nextTotal }
+        : {}),
     },
   });
   if (versionedProductionChange) {

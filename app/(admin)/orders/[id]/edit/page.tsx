@@ -59,12 +59,10 @@ export default async function EditOrderPage({ params }: PageProps) {
   const pending = order.changeRequests.find(
     (request) => request.status === 'PENDING',
   );
-  const canModify =
-    order.items.length > 0 &&
-    canRequestOrderModification(user, order, Boolean(pending));
+  const canModify = canRequestOrderModification(user, order, Boolean(pending));
   const [customers, products] = await Promise.all([
     listCustomerPartyOptions(order.customerPartyId),
-    canModify ? listActiveOrderChangeCatalogProducts() : Promise.resolve([]),
+    canModify && order.items.length > 0 ? listActiveOrderChangeCatalogProducts() : Promise.resolve([]),
   ]);
   const external =
     'settlementType' in order &&
@@ -160,9 +158,9 @@ export default async function EditOrderPage({ params }: PageProps) {
       {canModify ? (
         <Card id="modify-order">
           <CardHeader>
-            <h2 className="text-base font-semibold">申请修改款式</h2>
+            <h2 className="text-base font-semibold">申请修改工单</h2>
             <p className="text-sm text-muted-foreground">
-              选择需要调整的款式；批准后更新工单及相应计价。
+              可申请调整款式或交期，管理员批准后生效。
             </p>
           </CardHeader>
           <CardContent>

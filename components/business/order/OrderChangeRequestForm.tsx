@@ -87,6 +87,7 @@ export function orderChangeRequestDraftIdentity({
   expectedWorkOrderVersion,
   items,
   catalogProducts,
+  promisedDate = null,
 }: Pick<
   Props,
   | 'orderId'
@@ -94,6 +95,7 @@ export function orderChangeRequestDraftIdentity({
   | 'expectedWorkOrderVersion'
   | 'items'
   | 'catalogProducts'
+  | 'promisedDate'
 >): string {
   const catalogFacts = catalogProducts
     .map((product) => ({
@@ -121,6 +123,7 @@ export function orderChangeRequestDraftIdentity({
     orderId,
     expectedRevision,
     expectedWorkOrderVersion,
+    promisedDate,
     items: items.map((item) => ({
       id: item.id,
       sequence: item.sequence,
@@ -481,7 +484,8 @@ export function OrderChangeRequestForm(props: Props) {
   );
 }
 
-function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason, pending, dueDate, setDueDate }: {
+function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason, pending, dueDate, setDueDate, hasItems }: {
+  hasItems: boolean;
   dueDate: string;
   setDueDate: (value: string) => void;
   modifyKind: ModifyKind;
@@ -502,7 +506,7 @@ function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason,
           disabled={pending}
           className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
         >
-          {MODIFY_KINDS.map(([value, label]) => (
+          {MODIFY_KINDS.filter(([value]) => hasItems || value === 'DUE_DATE').map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
@@ -556,7 +560,8 @@ function OrderChangeRequestDraftForm({
   >(createOrderChangeRequestAction, null);
   const [pending, startTransition] = useTransition();
   const [reason, setReason] = useState('');
-  const [modifyKind, setModifyKind] = useState<ModifyKind>('QTY');
+  const hasItems = items.length > 0;
+  const [modifyKind, setModifyKind] = useState<ModifyKind>(hasItems ? 'QTY' : 'DUE_DATE');
   const [dueDate, setDueDate] = useState(promisedDate ?? '');
   const dueDateChanged = modifyKind === 'DUE_DATE' && (dueDate || null) !== promisedDate;
   const [editable, setEditable] = useState<Record<string, EditableItem>>(() =>
@@ -674,17 +679,19 @@ function OrderChangeRequestDraftForm({
       className="min-w-0 space-y-4"
     >
       <p className="text-xs text-muted-foreground">
-        勾选要修改的款式；可改款式名、数量、目录规格和正反面烫金颜色。
-        规格只显示与当前计价路线、纸张和克重一致的活动目录选项。
-        已产数量将在改版后承接，历史报工和工资保留。
+        {hasItems ? <>
+          勾选要修改的款式；可改款式名、数量、目录规格和正反面烫金颜色。
+          规格只显示与当前计价路线、纸张和克重一致的活动目录选项。
+          已产数量将在改版后承接，历史报工和工资保留。
+        </> : '未记录款式，本次可申请调整交期。'}
       </p>
-      <ExistingOrderItemChanges
+      {hasItems ? <ExistingOrderItemChanges
         catalogProducts={catalogProducts}
         editable={editable}
         items={items}
         pending={pending}
         updateItem={updateItem}
-      />
+      /> : null}
       {unchangedSelectedCount > 0 ? (
         <p
           role={
@@ -704,7 +711,7 @@ function OrderChangeRequestDraftForm({
         </p>
       ) : null}
 
-      <fieldset className="min-w-0 rounded-lg border p-3">
+      {hasItems ? <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
         <label className="flex min-h-11 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
           <Checkbox
@@ -812,9 +819,10 @@ function OrderChangeRequestDraftForm({
             </label>
           </div>
         ) : null}
-      </fieldset>
+      </fieldset> : null}
 
       <OrderChangeReasonFields
+        hasItems={hasItems}
         dueDate={dueDate}
         setDueDate={setDueDate}
         modifyKind={modifyKind}

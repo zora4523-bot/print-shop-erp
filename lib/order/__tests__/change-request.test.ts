@@ -3595,6 +3595,61 @@ describe('cancellation settlement reference', () => {
 });
 
 describe('reviewOrderChangeRequest', () => {
+  it.each([
+    OrderSettlementType.EXTERNAL_SALES,
+    OrderSettlementType.INTERNAL_SALES,
+  ])('%s 纯交期批准保留历史金额，不从不完整明细重建费用或业绩', async (settlementType) => {
+    const value = request({
+      proposedChanges: { items: [], promisedDate: '2026-09-20' },
+      order: {
+        ...request().order,
+        settlementType,
+        promisedDate: null,
+        items: [],
+        shipments: [],
+        customerCharges: [],
+        processingAmount: new Decimal('2800.00'),
+        totalAmount: new Decimal('3000.00'),
+        quotedFee: new Decimal('2900.00'),
+        quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+        quotedPricingRevisionId: 'historical-quote',
+        confirmedFee: new Decimal('3000.00'),
+        settledFee: null,
+      },
+    });
+    locate(value);
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({
+      oldTotal: '3000.00',
+      newTotal: '3000.00',
+      delta: '0.00',
+      quoteToken: null,
+    });
+    locate(value);
+    mocks.db.orderItem.findMany.mockResolvedValue([]);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: null } });
+    mocks.db.csSalesEntry.aggregate.mockResolvedValue({ _sum: { amount: new Decimal('3000.00') } });
+
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+
+    expect(mocks.db.order.update).toHaveBeenCalledWith({
+      where: { id: value.orderId },
+      data: { revision: 3, promisedDate: new Date('2026-09-20T00:00:00Z') },
+    });
+    expect(mocks.db.orderItem.findMany).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.aggregate).not.toHaveBeenCalled();
+    expect(mocks.db.csSalesEntry.create).not.toHaveBeenCalled();
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
+    expect(mocks.db.orderLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'CHANGE_REQUEST_APPROVED',
+        changedFields: expect.objectContaining({
+          processingAmount: { before: '2800', after: '2800.00' },
+          totalAmount: { before: '3000', after: '3000.00' },
+        }),
+      }),
+    });
+  });
   it.each(['2026-09-20', null])('交期提案 %s 的预览与审批一致，不重新计价或要求配送信息', async (promisedDate) => {
     const value = request({ proposedChanges: { items: [], promisedDate },
       order: { ...request().order, promisedDate: new Date('2026-09-10T00:00:00Z'), shipments: [] } });
@@ -3606,7 +3661,7 @@ describe('reviewOrderChangeRequest', () => {
     mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
     await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
     expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
-      promisedDate: promisedDate ? new Date(`${promisedDate}T00:00:00Z`) : null, totalAmount: '1008.00', revision: 3,
+      promisedDate: promisedDate ? new Date(`${promisedDate}T00:00:00Z`) : null, revision: 3,
     }) }));
     expect(mocks.calculate).not.toHaveBeenCalled();
     expect(mocks.appendRevision).not.toHaveBeenCalled();
