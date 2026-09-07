@@ -1,3 +1,4 @@
+import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
@@ -2911,6 +2912,9 @@ type EditTxClient = {
           totalAmount: Decimal.Value;
           customName: string | null;
           customerRef: string | null;
+          customerPartyId: string | null;
+          shipments: EditableShipment[];
+          changeRequests: { id: string }[];
           receiverName: string | null;
           receiverPhone: string | null;
           receiverAddress: string | null;
@@ -2936,7 +2940,7 @@ type EditTxClient = {
   };
   orderShipment: {
     updateMany: (args: {
-      where: { orderId: string; sequence: number };
+      where: { orderId: string; sequence: number; id?: string };
       data: {
         receiverName?: string | null;
         receiverPhone?: string | null;
@@ -2959,6 +2963,7 @@ type EditTxClient = {
 type EditableOrderFieldValue = string | boolean | Date | null;
 
 type EditableOrderSnapshot = {
+  customerPartyId: string | null;
   customName: string | null;
   customerRef: string | null;
   receiverName: string | null;
@@ -3067,6 +3072,9 @@ async function updateOrderEditableFields(
   command: OrderEditCommand,
   actor: { id: string; role: Role },
 ): Promise<UpdateOrderResult> {
+  if (![Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE].some((role) => role === actor.role)) {
+    throw new OrderInvariantError('无权编辑工单');
+  }
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as EditTxClient;
     await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
@@ -3086,6 +3094,10 @@ async function updateOrderEditableFields(
         totalAmount: true,
         customName: true,
         customerRef: true,
+        customerPartyId: true,
+        isSfCollect: true,
+        changeRequests: { where: { status: 'PENDING' }, select: { id: true } },
+        shipments: { select: { id: true, sequence: true, status: true, receiverName: true, receiverPhone: true, receiverAddress: true, expressCode: true, destinationProvince: true } },
         receiverName: true,
         receiverPhone: true,
         receiverAddress: true,
@@ -3099,14 +3111,17 @@ async function updateOrderEditableFields(
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
 
-    // SALES / CUSTOMER_SERVICE can only edit their own orders. ADMIN /
-    // ADMIN have a global override so they can correct field data for
+    // SALES / CUSTOMER_SERVICE can only edit their own orders. ADMIN
+    // has a global override so they can correct field data for
     // anyone. Same pattern as submitOrder's ownership guard.
     const globalOverride = actor.role === Role.ADMIN;
     if (!globalOverride && order.submitterId !== actor.id) {
       throw new OrderInvariantError('只能修改自己创建的工单');
     }
 
+    if (order.changeRequests?.length) {
+      throw new OrderInvariantError('工单存在待审批申请，请处理后再编辑');
+    }
     const fieldset = editableFieldsetForStatus(order.status);
     if (fieldset === 'NONE') {
       throw new OrderInvariantError('当前状态不可编辑');
@@ -3143,12 +3158,61 @@ async function updateOrderEditableFields(
       // 避免测试/脚本等直接调用者把首尾空格持久化。
       nextFields.receiverAddress = receiverAddress.trim();
     }
+    if ('customerPartyId' in nextFields && nextFields.customerPartyId !== (order.customerPartyId ?? null)) {
+      const customerId = nextFields.customerPartyId;
+      if (typeof customerId === 'string') {
+        const customer = await tx.party.findUnique({
+          where: { id: customerId },
+          select: { id: true, isActive: true, type: true },
+        });
+        if (!customer || !customer.isActive ||
+          (customer.type !== PartyType.CUSTOMER && customer.type !== PartyType.BOTH)) {
+          throw new OrderInvariantError('所选客户不存在、已停用或不是客户，请重新选择');
+        }
+      }
+    }
+    const shipmentInput = command.kind === 'full-form' && 'shipments' in command.input ? command.input.shipments : undefined;
+    let shipmentEdits: ReturnType<typeof planOrderShipmentEdits> = [];
+    if (shipmentInput) {
+      try {
+        shipmentEdits = planOrderShipmentEdits(
+          order.shipments, shipmentInput, order.isSfCollect,
+          order.settlementType === OrderSettlementType.EXTERNAL_SALES,
+        );
+      } catch (error) {
+        if (error instanceof OrderShipmentEditError) throw new OrderInvariantError(error.message);
+        throw error;
+      }
+      const primary = shipmentInput.find((row) => order.shipments.find((shipment) => shipment.id === row.id)?.sequence === 1);
+      if (primary) {
+        for (const key of ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode'] as const) {
+          nextFields[key] = primary[key]?.trim() || null;
+        }
+      }
+    } else if ('receiverAddress' in nextFields && nextFields.receiverAddress !== order.receiverAddress && order.settlementType === OrderSettlementType.EXTERNAL_SALES && !order.isSfCollect) {
+      throw new OrderInvariantError('请从完整编辑页核对配送省份后修改收货地址');
+    }
     const changes = diffEditableFields(order, nextFields);
+    const primaryShipmentChanges = Object.fromEntries(
+      ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode']
+        .filter((field) => field in changes)
+        .map((field) => [field, nextFields[field] as string | null]),
+    );
+    if (!shipmentInput && Object.keys(primaryShipmentChanges).length > 0) {
+      if (order.shipments?.some((shipment) => shipment.sequence === 1 && shipment.status === 'SHIPPED')) {
+        throw new OrderInvariantError('主配送记录已发货，不能修改收货信息');
+      }
+      if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
+        const name = 'receiverName' in nextFields ? nextFields.receiverName : order.receiverName;
+        const phone = 'receiverPhone' in nextFields ? nextFields.receiverPhone : order.receiverPhone;
+        if (!name || !phone) throw new OrderInvariantError('请填写收件人和收货电话');
+      }
+    }
 
     // No-op edit — skip the UPDATE and the log entry. Keeps the
     // OrderLog feed clean for users who open the edit form and save
     // without changing anything.
-    if (Object.keys(changes).length === 0) {
+    if (Object.keys(changes).length === 0 && shipmentEdits.length === 0) {
       return {
         id: order.id,
         status: order.status,
@@ -3164,7 +3228,7 @@ async function updateOrderEditableFields(
           id: orderId,
           editVersion: command.input.expectedEditVersion,
         },
-        data: nextFields,
+        data: { ...nextFields, ...(shipmentEdits.length ? { updatedAt: new Date() } : {}) },
       });
       if (persisted.count !== 1) {
         throw new OrderInvariantError(STALE_ORDER_EDIT_MESSAGE);
@@ -3181,12 +3245,7 @@ async function updateOrderEditableFields(
       });
     }
 
-    const primaryShipmentChanges = Object.fromEntries(
-      ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode']
-        .filter((field) => field in changes)
-        .map((field) => [field, nextFields[field] as string | null]),
-    );
-    if (Object.keys(primaryShipmentChanges).length > 0) {
+    if (!shipmentInput && Object.keys(primaryShipmentChanges).length > 0) {
       const synchronized = await txClient.orderShipment.updateMany({
         where: { orderId, sequence: 1 },
         data: primaryShipmentChanges,
@@ -3198,12 +3257,21 @@ async function updateOrderEditableFields(
       }
     }
 
+    for (const edit of shipmentEdits) {
+      const updatedShipment = await txClient.orderShipment.updateMany({
+        where: { orderId, id: edit.id, sequence: edit.sequence },
+        data: edit.data,
+      });
+      if (updatedShipment.count !== 1) {
+        throw new OrderInvariantError('配送记录已变化，请刷新页面后重试');
+      }
+    }
     await txClient.orderLog.create({
       data: {
         orderId,
         operatorId: actor.id,
         action: 'UPDATE',
-        changedFields: changes,
+        changedFields: { ...changes, ...(shipmentEdits.length ? { shipments: shipmentEdits.map((edit) => ({ sequence: edit.sequence, before: edit.before, after: edit.data })) } : {}) },
       },
     });
 
@@ -3211,7 +3279,7 @@ async function updateOrderEditableFields(
       id: updated.id,
       status: updated.status,
       changed: true,
-      changedFields: Object.keys(changes),
+      changedFields: [...Object.keys(changes), ...(shipmentEdits.length ? ['shipments'] : [])],
     };
   });
 }

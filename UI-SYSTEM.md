@@ -290,6 +290,12 @@ PageHeader
 - 事件规则与系统设置隐藏未绑定的旧目标，已有选中项保留并可取消，避免保存其他字段时静默改写存量路由。
 - 新建表单与只读历史块由 `NotificationConfiguration.browser.spec.tsx` 覆盖六视口、明暗主题、overflow、44px touch、axe 和键盘/提交契约。
 
+## 工单编辑与创建数据一致性
+
+- 编辑页读取原单事实；`OrderSavedConfiguration` 展示保存的款式、纸张规格、工艺、设计文件、每票分货、结构化包装和分阶段费用，不从当前创建默认值补写历史记录。缺失记录明确提示。
+- 创建与编辑共用 `OrderReceiverContactFields`。编辑展示全部配送联系人；修改基本信息与配送后直接保存，款式变更及费用通过已有申请、审批和核价组件处理。生产后锁定基本生产事实，待审批时锁定普通保存；终态返回详情页。
+- 款式、包装与费用以共享 Card / Disclosure 分区；逐款详情折叠，保存冲突保留用户输入。`EditOrderForm.browser.spec.tsx` 覆盖六视口、明暗主题、overflow、44px 控件、axe 及多地址/失败/状态交互；创建到编辑的真实数据往返由 `tests/e2e/order-create.spec.ts` 验证。
+
 ## 当前采用状态
 
 共享 token、基础组件、结构化反馈和跨视口门禁已经建立。工单列表批量选择/行菜单、变更审批逐字段差异、CDR 同条件重新生成、通知 transport/job 状态拆分与 UNKNOWN 人工决策已经落地。业务 UI 生产代码由 ESLint 和结构测试禁止新增原生 `alert/confirm`。

@@ -1,3 +1,4 @@
+import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
 import Link from 'next/link';
 import Decimal from 'decimal.js';
 import { DESIGN_GRID_WARN_THRESHOLD } from '@/components/business/order/design-grid';
@@ -108,9 +109,6 @@ import {
 } from '@/lib/production/operation-order-view';
 import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
-import { listExternalCreateOrderProductOptions } from '@/lib/product';
-import { listExternalCreateOrderPaperOptions } from '@/lib/material';
-import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
 import {
   buildShipOrderShipmentInputs,
   orderShippingAvailability,
@@ -126,36 +124,6 @@ const DIRECT_CANCEL_STATUSES = new Set<OrderStatus>([
 
 function canUseDirectCancel(role: Role, status: OrderStatus): boolean {
   return role === Role.ADMIN && DIRECT_CANCEL_STATUSES.has(status);
-}
-
-async function listActiveOrderChangeCatalogProducts(): Promise<
-  OrderChangeCatalogProduct[]
-> {
-  const [products, papers] = await Promise.all([
-    listExternalCreateOrderProductOptions(),
-    listExternalCreateOrderPaperOptions(),
-  ]);
-  const paperById = new Map(papers.map((paper) => [paper.id, paper]));
-  return products.map((product) => {
-    const paper = product.paperMaterialId
-      ? paperById.get(product.paperMaterialId)
-      : null;
-    return {
-      id: product.id,
-      category: product.category,
-      specification: product.specification,
-      paperType: product.paperType,
-      weight: product.weight,
-      // The source query includes only active products whose category node is
-      // active. Keep the explicit bit in the client DTO so the shared resolver
-      // remains fail-closed for every other caller.
-      isActive: true,
-      paperMaterialId: product.paperMaterialId,
-      linkedPaper: paper
-        ? { isActive: true, outOfStock: paper.outOfStock }
-        : null,
-    };
-  });
 }
 
 export async function generateMetadata({ params }: PageProps) {

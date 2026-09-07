@@ -48,6 +48,8 @@ const {
   listExternalCreateOrderPaperOptionsMock: vi.fn(),
 }));
 
+vi.mock('server-only', () => ({}));
+
 vi.mock('@/lib/auth/session', () => ({
   requireSession: requireSessionMock,
   getSession: vi.fn(),

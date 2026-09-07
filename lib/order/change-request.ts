@@ -1,3 +1,4 @@
+import { ORDER_MODIFIABLE_STATUSES } from './editable-fields';
 import Decimal from 'decimal.js';
 import {
   BackgroundJobStatus,
@@ -102,16 +103,7 @@ import {
   type OrderChangeCatalogProduct,
 } from './change-request-catalog-identity';
 
-const CHANGEABLE_ORDER_STATUSES: OrderStatus[] = [
-  OrderStatus.DRAFT,
-  OrderStatus.SUBMITTED,
-  OrderStatus.SCHEDULING,
-  OrderStatus.IN_PRODUCTION,
-  OrderStatus.CONFIRMED,
-  OrderStatus.RELEASED,
-  OrderStatus.FOILING,
-  OrderStatus.PACKING,
-];
+const CHANGEABLE_ORDER_STATUSES = ORDER_MODIFIABLE_STATUSES;
 const CANCELLABLE_BY_REQUEST_STATUSES: OrderStatus[] = [
   OrderStatus.CONFIRMED,
   OrderStatus.RELEASED,
@@ -301,14 +293,16 @@ type CreateOrderChangeRequestCommand =
 function assertCanRequest(
   actor: { id: string; role: Role },
   order: { submitterId: string; status: OrderStatus },
+  isModification: boolean,
 ): void {
   if (
+    !(actor.role === Role.ADMIN && isModification) &&
     actor.role !== Role.SALES &&
     actor.role !== Role.CUSTOMER_SERVICE
   ) {
-    throw new OrderChangeRequestError('只有销售和客服可以提交工单修改申请');
+    throw new OrderChangeRequestError('当前账号无权提交此类工单申请');
   }
-  if (order.submitterId !== actor.id) {
+  if (actor.role !== Role.ADMIN && order.submitterId !== actor.id) {
     throw new OrderChangeRequestError('只能修改自己提交的工单');
   }
   if (!CHANGEABLE_ORDER_STATUSES.includes(order.status)) {
@@ -496,7 +490,7 @@ export async function createOrderChangeRequest(
       )}))`;
 
       const order = await readChangeRequestOrderInTx(tx, input.orderId);
-      assertCanRequest(actor, order);
+      assertCanRequest(actor, order, input.type !== 'CANCEL');
       assertExpectedOrderVersions(input, order);
       if (
         input.type === 'CANCEL' &&
@@ -650,7 +644,7 @@ export async function createOrderChangeRequest(
           orderNo: order.orderNo,
           // Deliberately do not forward the free-text reason: it may contain a
           // customer name, price, phone number, or other sensitive detail.
-          summary: `销售已提交${requestKind}申请，待工厂确认`,
+          summary: `${actor.role === Role.ADMIN ? '管理员' : '销售'}已提交${requestKind}申请，待工厂确认`,
           deepLink: `/orders#wo=${encodeURIComponent(order.orderNo)}`,
         };
         const queued = await enqueueNotificationInTransaction(
@@ -692,7 +686,7 @@ export async function withdrawOrderChangeRequest(
   input: WithdrawOrderChangeRequestInput,
   actor: { id: string; role: Role },
 ) {
-  if (actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE) {
+  if (actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE && actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有申请人可以撤回工单变更申请');
   }
   const locator = await db.orderChangeRequest.findUnique({

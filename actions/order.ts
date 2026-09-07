@@ -397,6 +397,18 @@ export async function updateOrderAction(
     raw[key] = value;
   }
 
+  const shipmentPayload = formData.get('shipments');
+  if (shipmentPayload !== null) {
+    if (typeof shipmentPayload !== 'string' || shipmentPayload.length > 30_000) {
+      return { status: 'invalid', fieldErrors: { shipments: ['配送信息格式非法'] } };
+    }
+    try {
+      raw.shipments = JSON.parse(shipmentPayload);
+    } catch {
+      return { status: 'invalid', fieldErrors: { shipments: ['配送信息格式非法'] } };
+    }
+  }
+
   const parsed = updateEditableOrderSchema.safeParse(raw);
   if (!parsed.success) {
     const tokenIssue = parsed.error.issues.find(
@@ -561,6 +573,7 @@ export async function createOrderChangeRequestAction(
     const request = await createOrderChangeRequest(parsed.data, actor);
     revalidatePath('/orders');
     revalidatePath(`/orders/${parsed.data.orderId}`);
+    revalidatePath(`/orders/${parsed.data.orderId}/edit`);
     revalidatePath('/owner/order-changes');
     return { status: 'success', requestId: request.id };
   } catch (error) {
@@ -620,6 +633,7 @@ export async function withdrawOrderChangeRequestAction(
     const request = await withdrawOrderChangeRequest(parsed.data, actor);
     revalidatePath('/orders');
     revalidatePath(`/orders/${request.orderId}`);
+    revalidatePath(`/orders/${request.orderId}/edit`);
     revalidatePath('/owner/order-changes');
     return { status: 'success', requestStatus: request.status };
   } catch (error) {

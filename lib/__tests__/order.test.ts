@@ -4941,6 +4941,128 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     };
   }
 
+  it('blocks ordinary editing while an approval is pending', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ changeRequests: [{ id: 'request' }] }),
+    );
+    await expect(
+      updateOrderFields('order-1', editInput({ remark: 'changed' }), ownerActor),
+    ).rejects.toThrow('待审批');
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('cannot bypass shipped-contact restrictions by omitting the shipment JSON', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ shipments: [{ sequence: 1, status: 'SHIPPED' }] }));
+    await expect(updateOrderFields('order-1', editInput({ receiverName: 'changed' }), ownerActor)).rejects.toThrow('已发货');
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('cannot clear required external contacts through a legacy basic-fields payload', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ settlementType: OrderSettlementType.EXTERNAL_SALES }));
+    await expect(updateOrderFields('order-1', editInput({ receiverPhone: null }), ownerActor)).rejects.toThrow('收件人和收货电话');
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('validates a changed customer association and logs the actual relationship change', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ customerPartyId: 'old-customer' }),
+    );
+    dbMock.party.findUnique.mockResolvedValue({
+      id: 'new-customer',
+      isActive: true,
+      type: PartyType.CUSTOMER,
+    });
+    await updateOrderFields(
+      'order-1',
+      editInput({ customerPartyId: 'new-customer' }),
+      ownerActor,
+    );
+    expect(dbMock.order.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { customerPartyId: 'new-customer' } }),
+    );
+    expect(dbMock.orderLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          changedFields: {
+            customerPartyId: { before: 'old-customer', after: 'new-customer' },
+          },
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    null,
+    { id: 'supplier', isActive: true, type: PartyType.SUPPLIER },
+    { id: 'inactive', isActive: false, type: PartyType.CUSTOMER },
+  ])(
+    'rejects an invalid customer without changing the order',
+    async (customer) => {
+      dbMock.order.findFirst.mockResolvedValue(snapshot());
+      dbMock.party.findUnique.mockResolvedValue(customer);
+      await expect(
+        updateOrderFields(
+          'order-1',
+          editInput({ customerPartyId: 'new-customer' }),
+          ownerActor,
+        ),
+      ).rejects.toThrow('所选客户');
+      expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('writes secondary shipment contacts under the order version without changing prices or allocations', async () => {
+    const primary = {
+      id: 's1',
+      sequence: 1,
+      status: 'PLANNED',
+      receiverName: '张三',
+      receiverPhone: '13800000000',
+      receiverAddress: '佛山市…',
+      expressCode: null,
+      destinationProvince: '广东',
+    };
+    const secondary = { ...primary, id: 's2', sequence: 2 };
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ shipments: [primary, secondary] }),
+    );
+    await updateOrderFields(
+      'order-1',
+      editInput({
+        shipments: [primary, { ...secondary, receiverName: '李四' }].map(
+          (row) => ({
+            id: row.id,
+            receiverName: row.receiverName,
+            receiverPhone: row.receiverPhone,
+            receiverAddress: row.receiverAddress,
+            expressCode: row.expressCode,
+            expectedDestinationProvince: row.destinationProvince,
+            sameDestination: false,
+          }),
+        ),
+      }),
+      ownerActor,
+    );
+    expect(dbMock.orderShipment.updateMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.orderShipment.updateMany).toHaveBeenCalledWith({
+      where: { orderId: 'order-1', id: 's2', sequence: 2 },
+      data: {
+        receiverName: '李四',
+        receiverPhone: '13800000000',
+        receiverAddress: '佛山市…',
+        expressCode: null,
+      },
+    });
+    const data = dbMock.order.updateMany.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty('totalAmount');
+    expect(data).not.toHaveProperty('pricingStatus');
+    expect(dbMock.order.updateMany.mock.calls[0][0].where).toEqual({
+      id: 'order-1',
+      editVersion: 7,
+    });
+  });
+
+
   it('throws when the order cannot be seen (scope filter returns null)', async () => {
     dbMock.order.findFirst.mockResolvedValue(null);
     await expect(

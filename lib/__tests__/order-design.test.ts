@@ -89,6 +89,18 @@ beforeEach(() => {
 });
 
 describe('assertCanUploadDesign', () => {
+  it('blocks uploads while a modification approval is pending', async () => {
+    const item = draftItem();
+    dbMock.orderItem.findFirst.mockResolvedValue({
+      ...item,
+      order: { ...item.order, _count: { changeRequests: 1 } },
+    });
+    await expect(
+      assertCanUploadDesign('order-1', 'item-1', salesActor),
+    ).rejects.toThrow('待审批');
+  });
+
+
   it('款式不存在 / 非 DRAFT / 非本人 → 拒绝；ADMIN 放行', async () => {
     dbMock.orderItem.findFirst.mockResolvedValue(null);
     await expect(

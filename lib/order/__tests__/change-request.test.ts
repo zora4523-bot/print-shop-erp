@@ -1063,6 +1063,64 @@ beforeEach(() => {
 });
 
 describe('createOrderChangeRequest', () => {
+  it.each([OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED, OrderStatus.DRAFT])(
+    '管理员可为 %s 工单提交修改提案但不能直接改写款式和费用',
+    async (status) => {
+      mocks.db.order.findUnique.mockResolvedValue({
+        ...createRequestOrder(),
+        status,
+      });
+      mocks.db.orderChangeRequest.create.mockResolvedValue({
+        id: 'admin-request',
+      });
+      await expect(
+        createOrderChangeRequest(
+          {
+            orderId: 'order-1',
+            expectedRevision: 2,
+            expectedWorkOrderVersion: 1,
+            type: 'MODIFY',
+            modifyKind: 'OTHER',
+            reason: '核对名称',
+            items: [
+              { operation: 'UPDATE', itemId: 'item-1', name: '修正款式名称' },
+            ],
+          },
+          admin,
+        ),
+      ).resolves.toEqual({ id: 'admin-request' });
+      expect(mocks.db.order.update).not.toHaveBeenCalled();
+      expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+      expect(mocks.db.orderChangeRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requesterId: admin.id,
+            baseRevision: 2,
+          }),
+        }),
+      );
+    },
+  );
+
+  it('管理员的修改权限不能变成取消申请权限', async () => {
+    mocks.db.order.findUnique.mockResolvedValue(createRequestOrder());
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          expectedRevision: 2,
+          expectedWorkOrderVersion: 1,
+          type: 'CANCEL',
+          reason: '取消',
+          items: [],
+        },
+        admin,
+      ),
+    ).rejects.toThrow('当前账号无权');
+    expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+
   it('只保存提案，不改写工单或历史快照', async () => {
     mocks.db.order.findUnique.mockResolvedValue(createRequestOrder());
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
@@ -1533,6 +1591,38 @@ describe('createOrderChangeRequest', () => {
 });
 
 describe('withdrawOrderChangeRequest', () => {
+  it.each([true, false])(
+    '管理员只能撤回自己提交的待审修改：本人 %s',
+    async (own) => {
+      mocks.db.orderChangeRequest.findUnique
+        .mockResolvedValueOnce({ orderId: 'order-1' })
+        .mockResolvedValueOnce({
+          id: 'request-1',
+          orderId: 'order-1',
+          requesterId: own ? admin.id : 'sales-1',
+          status: OrderChangeRequestStatus.PENDING,
+          type: OrderChangeRequestType.MODIFY,
+        });
+      mocks.db.orderChangeRequest.update.mockResolvedValueOnce({
+        id: 'request-1',
+        status: OrderChangeRequestStatus.WITHDRAWN,
+      });
+      const result = withdrawOrderChangeRequest(
+        { requestId: 'request-1' },
+        admin,
+      );
+      if (own)
+        await expect(result).resolves.toMatchObject({
+          status: OrderChangeRequestStatus.WITHDRAWN,
+        });
+      else {
+        await expect(result).rejects.toThrow('只能撤回自己');
+        expect(mocks.db.orderChangeRequest.update).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+
   it('lets only the requester withdraw a pending request and writes an audit log', async () => {
     mocks.db.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })

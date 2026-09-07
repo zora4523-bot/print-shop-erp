@@ -1000,6 +1000,21 @@ describe('updateOrderAction', () => {
     expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
   });
 
+  it('rejects malformed shipment JSON before invoking the domain', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    const result = await updateOrderAction(
+      'o1',
+      null,
+      editFd({ shipments: '{invalid' }),
+    );
+    expect(result).toMatchObject({
+      status: 'invalid',
+      fieldErrors: { shipments: ['配送信息格式非法'] },
+    });
+    expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
+  });
+
+
   it('forwards parsed text fields to updateOrderFields', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.updateOrderFields.mockResolvedValue({

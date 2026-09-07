@@ -2859,8 +2859,20 @@ const expectedOrderEditVersionField = z
   )
   .pipe(z.number().int().nonnegative());
 
+export const editOrderShipmentSchema = z.object({
+  id: z.string().trim().min(1).max(128),
+  receiverName: optionalTrimmedText('收件人', 64),
+  receiverPhone: optionalTrimmedText('收货电话', 32),
+  receiverAddress: requiredTrimmedText('收货地址', 256),
+  expressCode: optionalTrimmedText('快递代码', 32),
+  expectedDestinationProvince: optionalTrimmedText('配送省份', 32),
+  sameDestination: z.boolean(),
+}).strict();
+
 export const updateEditableOrderSchema = z.object({
   expectedEditVersion: expectedOrderEditVersionField,
+  customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
+  shipments: z.array(editOrderShipmentSchema).max(10, '单工单不超过 10 个收货地址').optional().refine((rows) => !rows || new Set(rows.map((row) => row.id)).size === rows.length, '收货地址不能重复'),
   customName: optionalTrimmedText('工单名称', 100).optional(),
   customerRef: optionalTrimmedText('客户名称/简称', 64).optional(),
   receiverName: optionalTrimmedText('收货人', 64).optional(),
