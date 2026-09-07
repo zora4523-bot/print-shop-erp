@@ -93,7 +93,7 @@ export function AdminOrderWorkspace({
       : query.list.filters.customerRefExact;
 
   return (
-    <div data-slot="admin-order-workspace" className="w-full min-w-0 max-w-none space-y-4">
+    <div data-slot="admin-order-workspace" style={{ backgroundColor: 'transparent' }} className="w-full min-w-0 max-w-none space-y-4">
       <AdminOrderDecisionDashboard
         query={query}
         counts={data.counts.signals}

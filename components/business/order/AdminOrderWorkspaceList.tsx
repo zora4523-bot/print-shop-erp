@@ -112,6 +112,7 @@ function AdminOrderWorkspaceListInner({
   return (
     <section
       data-slot="admin-order-workspace-list"
+      style={{ backgroundColor: 'transparent' }}
       className="min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm"
     >
       {orders.length > 0 ? (
