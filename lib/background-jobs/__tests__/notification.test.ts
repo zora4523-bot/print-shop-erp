@@ -319,6 +319,38 @@ describe('handleNotificationJob', () => {
     errSpy.mockRestore();
   });
 
+  it('第 4 次仍可恢复时继续抛给统一任务状态机，由既有预算收口 DEAD', async () => {
+    const errSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    notifyMock.mockResolvedValue(
+      outcome({
+        attempted: 0,
+        delivered: 0,
+        failed: 2,
+        retryable: true,
+        errorCodes: ['management route incomplete'],
+      }),
+    );
+
+    await expect(
+      handleNotificationJob(job({ attempts: 4, maxAttempts: 4 })),
+    ).rejects.toMatchObject({
+      name: 'NotificationDeliveryFailedError',
+      partialResult: expect.objectContaining({
+        attempted: 0,
+        failed: 2,
+        errorCodes: ['management route incomplete'],
+      }),
+    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_SUBMITTED',
+      expect.any(Object),
+      expect.objectContaining({ deliveryAttempt: 4 }),
+    );
+    errSpy.mockRestore();
+  });
+
   it('永久性失败 → 不抛，但 failed / errorCodes 落进 job.result', async () => {
     // 群被关停、webhook key 失效：重试 5 次结果一模一样，抛只会白耗
     // attempts 把死信队列灌满 ops 无法处置的行。

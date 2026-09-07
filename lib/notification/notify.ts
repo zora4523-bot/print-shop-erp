@@ -242,6 +242,41 @@ function channelConfigurationFailure(
     : { reason: 'smart bot target not bound', retryable: false };
 }
 
+type ManagementRouteBlockAssessment = Readonly<{
+  blocked: boolean;
+  retryable: boolean;
+}>;
+
+function assessManagementRouteBlock(
+  channels: readonly DeliveryChannel[],
+  missingChannelCount: number,
+): ManagementRouteBlockAssessment {
+  let blocked = missingChannelCount > 0;
+  let allBlockingFailuresRetryable = missingChannelCount === 0;
+
+  for (const channel of channels) {
+    // A Bot ID mismatch can coexist with a broken binding. Restoring the ID
+    // cannot repair absent ownership/target evidence, so check that permanent
+    // condition independently before the identity helper's early return.
+    const bindingIncomplete = channel.transport === NotificationChannelTransport.WECOM_SMART_BOT &&
+      (!channel.smartBotBotDigest || !channel.smartBotTargetId || !channel.smartBotChatType || !channel.smartBotBoundAt);
+    if (!channel.isActive || bindingIncomplete) {
+      blocked = true;
+      allBlockingFailuresRetryable = false;
+      continue;
+    }
+    const failure = channelConfigurationFailure(channel);
+    if (!failure) continue;
+    blocked = true;
+    if (!failure.retryable) allBlockingFailuresRetryable = false;
+  }
+
+  return {
+    blocked,
+    retryable: blocked && allBlockingFailuresRetryable,
+  };
+}
+
 function channelDestinationFingerprint(channel: DeliveryChannel): string {
   if (channel.transport === NotificationChannelTransport.WECOM_SMART_BOT) {
     const target = smartBotTarget(channel);
@@ -751,20 +786,19 @@ export async function notify<E extends NotificationEvent>(
       .filter((c): c is NonNullable<typeof c> => c !== undefined);
     const missingChannelCount =
       uniqueConfiguredChannelIds.length - channels.length;
-    const managementRouteBlocked = Boolean(
-      managementRoute &&
-        (missingChannelCount > 0 ||
-          channels.some(
-            (channel) =>
-              !channel.isActive || Boolean(channelConfigurationFailure(channel)),
-          )),
-    );
+    const managementRouteBlock = managementRoute
+      ? assessManagementRouteBlock(channels, missingChannelCount)
+      : { blocked: false, retryable: false };
+    const managementRouteBlocked = managementRouteBlock.blocked;
 
     // 托管的五类管理事件用更严的 all-or-nothing 收件人契约：
     // 任意 ID 已删除或已停用时整次不发，不把同一条管理通知只发给
     // 半数收件群，也不回退到 NotificationRule.channelIds。已存在的
-    // channel 仍走下面的 ledger，落永久 FAILED；缺失 ID 因 FK 无法写
-    // NotificationLog，必须显式计入 durable job.result 的 failed/unlogged。
+    // channel 仍走下面的 ledger。只有当全部阻塞都可恢复（当前仅 Bot
+    // 身份暂时不匹配）时，所有现存收件群统一落 RETRYING；只要混有删除、
+    // 停用或绑定不完整等永久问题，整条路由仍落 FAILED。缺失 ID 因 FK
+    // 无法写 NotificationLog，必须显式计入 durable job.result 的
+    // failed/unlogged。
     if (managementRoute && managementRouteBlocked) {
       console.warn(
         `[notify] management route fail-closed event=${event} role=${managementRoute.role} configured=${uniqueConfiguredChannelIds.length} found=${channels.length} inactive=${channels.filter((channel) => !channel.isActive).length}`,
@@ -862,7 +896,9 @@ export async function notify<E extends NotificationEvent>(
           ? 'management route incomplete'
           : configurationFailure?.reason;
       const blockedReasonRetryable =
-        !managementRouteBlocked && configurationFailure?.retryable === true;
+        managementRouteBlocked
+          ? managementRouteBlock.retryable && channel.isActive
+          : configurationFailure?.retryable === true;
       let preparedSend: PreparedChannelSend | undefined;
       if (
         webhookSender === sendWebhook &&

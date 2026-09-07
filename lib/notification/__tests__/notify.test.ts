@@ -60,10 +60,67 @@ import {
   replayDurableNotificationLogs,
 } from '../notify';
 import type { WebhookSender } from '../webhook';
-import type { NotificationPayloadFor } from '../events';
+import type { NotificationEvent, NotificationPayloadFor } from '../events';
 import { smartBotIdDigest } from '../smart-bot';
 
 const smartBotDigest = smartBotIdDigest('bot-id-placeholder');
+const recoverableManagementEventCases = [
+  {
+    event: 'ORDER_SUBMITTED',
+    role: 'factoryConfirmer',
+    payload: {
+      orderId: 'o-managed',
+      orderNo: 'O-MANAGED',
+      submitterName: '张三',
+      customerRef: null,
+      urgentMark: '',
+    },
+  },
+  {
+    event: 'ORDER_CHANGE_REQUESTED',
+    role: 'factoryConfirmer',
+    payload: {
+      orderId: 'o-managed',
+      orderNo: 'O-MANAGED',
+      summary: '申请修改工单',
+      deepLink: '/orders#wo=O-MANAGED',
+    },
+  },
+  {
+    event: 'PRODUCTION_PROGRESS_ANOMALY',
+    role: 'owner',
+    payload: {
+      orderId: 'o-managed',
+      orderNo: 'O-MANAGED',
+      summary: '报工进度异常',
+      deepLink: '/orders#wo=O-MANAGED',
+    },
+  },
+  {
+    event: 'PRODUCTION_STAGNANT',
+    role: 'owner',
+    payload: {
+      orderId: 'o-managed',
+      orderNo: 'O-MANAGED',
+      summary: '生产停滞',
+      deepLink: '/orders#wo=O-MANAGED',
+    },
+  },
+  {
+    event: 'PENDING_FACTORY_BACKLOG',
+    role: 'owner',
+    payload: {
+      orderId: 'o-managed',
+      orderNo: 'O-MANAGED',
+      summary: '待确认积压',
+      deepLink: '/orders#wo=O-MANAGED',
+    },
+  },
+] as const satisfies ReadonlyArray<{
+  event: NotificationEvent;
+  role: 'factoryConfirmer' | 'owner';
+  payload: NotificationPayloadFor<NotificationEvent>;
+}>;
 
 function webhookDestinationFingerprint(webhookUrl: string): string {
   return createHash('sha256')
@@ -1454,6 +1511,306 @@ describe('notify · durable delivery ledger', () => {
       { id: 'c2', webhookUrl: 'https://qy/2', isActive: true },
     ]);
   }
+
+  it.each(recoverableManagementEventCases)(
+    '$event 在 Bot ID 暂缺时整条管理路由零发送，且所有现存群保留 RETRYING',
+    async ({ event, role, payload }) => {
+      vi.stubEnv('WECOM_SMART_BOT_ID', '');
+      const expectedBotDigest = smartBotIdDigest('expected-bot-id');
+      routingMock.resolve.mockResolvedValue({
+        role,
+        enabled: true,
+        channelIds: ['managed-webhook', 'managed-smart-bot'],
+      });
+      dbMock.notificationRule.findUnique.mockResolvedValue({
+        eventType: event,
+        channelIds: ['legacy-channel'],
+        messageTemplate: '工单 {orderNo}',
+        isActive: true,
+      });
+      dbMock.notificationChannel.findMany.mockResolvedValue([
+        {
+          id: 'managed-webhook',
+          transport: 'WECOM_GROUP_WEBHOOK',
+          webhookUrl: 'https://qy.example/managed-webhook',
+          smartBotBotDigest: null,
+          smartBotTargetId: null,
+          smartBotChatType: null,
+          smartBotBoundAt: null,
+          isActive: true,
+        },
+        {
+          id: 'managed-smart-bot',
+          transport: 'WECOM_SMART_BOT',
+          webhookUrl: null,
+          smartBotBotDigest: expectedBotDigest,
+          smartBotTargetId: 'managed-group',
+          smartBotChatType: 'GROUP',
+          smartBotBoundAt: new Date('2026-09-05T00:00:00Z'),
+          isActive: true,
+        },
+      ]);
+      const webhookSender: WebhookSender = vi.fn();
+      const smartBotSender = vi.fn();
+
+      const outcome = await notify(event, payload, {
+        deliveryKey: `notification:${event}:o-managed`,
+        deliveryAttempt: 1,
+        webhookSender,
+        smartBotSender,
+        mockMode: false,
+      });
+
+      expect(webhookSender).not.toHaveBeenCalled();
+      expect(smartBotSender).not.toHaveBeenCalled();
+      expect(ledgerMock.claim).toHaveBeenCalledTimes(2);
+      expect(ledgerMock.finalize).toHaveBeenCalledTimes(2);
+      for (const [input] of ledgerMock.finalize.mock.calls) {
+        expect(input).toEqual(
+          expect.objectContaining({
+            status: 'RETRYING',
+            errorMessage: 'management route incomplete',
+            sent: false,
+          }),
+        );
+      }
+      expect(outcome).toMatchObject({
+        attempted: 0,
+        delivered: 0,
+        skipped: 0,
+        failed: 2,
+        unknown: 0,
+        retryable: true,
+      });
+    },
+  );
+
+  it('错误 Bot ID 恢复后只投递未成功群，并保留既有 SUCCESS 去重', async () => {
+    const expectedBotId = 'expected-bot-id';
+    vi.stubEnv('WECOM_SMART_BOT_ID', 'wrong-bot-id');
+    routingMock.resolve.mockResolvedValue({
+      role: 'owner',
+      enabled: true,
+      channelIds: ['already-success', 'pending-webhook', 'pending-smart-bot'],
+    });
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'PRODUCTION_STAGNANT',
+      channelIds: ['legacy-channel'],
+      messageTemplate: '{summary}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      {
+        id: 'already-success',
+        transport: 'WECOM_GROUP_WEBHOOK',
+        webhookUrl: 'https://qy.example/already-success',
+        smartBotBotDigest: null,
+        smartBotTargetId: null,
+        smartBotChatType: null,
+        smartBotBoundAt: null,
+        isActive: true,
+      },
+      {
+        id: 'pending-webhook',
+        transport: 'WECOM_GROUP_WEBHOOK',
+        webhookUrl: 'https://qy.example/pending-webhook',
+        smartBotBotDigest: null,
+        smartBotTargetId: null,
+        smartBotChatType: null,
+        smartBotBoundAt: null,
+        isActive: true,
+      },
+      {
+        id: 'pending-smart-bot',
+        transport: 'WECOM_SMART_BOT',
+        webhookUrl: null,
+        smartBotBotDigest: smartBotIdDigest(expectedBotId),
+        smartBotTargetId: 'owner-group',
+        smartBotChatType: 'GROUP',
+        smartBotBoundAt: new Date('2026-09-05T00:00:00Z'),
+        isActive: true,
+      },
+    ]);
+    ledgerMock.claim
+      .mockResolvedValueOnce({
+        claimed: false,
+        status: 'SUCCESS',
+        errorMessage: null,
+      })
+      .mockResolvedValueOnce({ claimed: true, attemptId: 'attempt:pending-webhook:1' })
+      .mockResolvedValueOnce({ claimed: true, attemptId: 'attempt:pending-smart-bot:1' });
+    const webhookSender: WebhookSender = vi.fn(async () => ({ ok: true, retries: 0 }));
+    const smartBotSender = vi.fn(async () => ({ ok: true, retries: 0 }));
+    const payload = {
+      orderId: 'o-managed',
+      orderNo: 'O-MANAGED',
+      summary: '生产停滞',
+      deepLink: '/orders#wo=O-MANAGED',
+    } as const;
+
+    const blocked = await notify('PRODUCTION_STAGNANT', payload, {
+      deliveryKey: 'notification:PRODUCTION_STAGNANT:o-managed',
+      deliveryAttempt: 1,
+      webhookSender,
+      smartBotSender,
+      mockMode: false,
+    });
+
+    expect(webhookSender).not.toHaveBeenCalled();
+    expect(smartBotSender).not.toHaveBeenCalled();
+    expect(blocked).toMatchObject({
+      skipped: 1,
+      failed: 2,
+      retryable: true,
+    });
+    expect(
+      ledgerMock.finalize.mock.calls.map(([input]) => input.status),
+    ).toEqual(['RETRYING', 'RETRYING']);
+
+    vi.stubEnv('WECOM_SMART_BOT_ID', expectedBotId);
+    ledgerMock.claim.mockReset();
+    ledgerMock.claim
+      .mockResolvedValueOnce({
+        claimed: false,
+        status: 'SUCCESS',
+        errorMessage: null,
+      })
+      .mockResolvedValueOnce({ claimed: true, attemptId: 'attempt:pending-webhook:2' })
+      .mockResolvedValueOnce({ claimed: true, attemptId: 'attempt:pending-smart-bot:2' });
+    ledgerMock.finalize.mockClear();
+
+    const recovered = await notify('PRODUCTION_STAGNANT', payload, {
+      deliveryKey: 'notification:PRODUCTION_STAGNANT:o-managed',
+      deliveryAttempt: 2,
+      webhookSender,
+      smartBotSender,
+      mockMode: false,
+    });
+
+    expect(webhookSender).toHaveBeenCalledExactlyOnceWith(
+      'https://qy.example/pending-webhook',
+      '生产停滞',
+    );
+    expect(smartBotSender).toHaveBeenCalledExactlyOnceWith(
+      { targetId: 'owner-group', chatType: 'GROUP' },
+      '生产停滞',
+    );
+    expect(ledgerMock.finalize).toHaveBeenCalledTimes(2);
+    expect(
+      ledgerMock.finalize.mock.calls.map(([input]) => input.status),
+    ).toEqual(['SUCCESS', 'SUCCESS']);
+    expect(recovered).toMatchObject({
+      attempted: 2,
+      delivered: 2,
+      skipped: 1,
+      failed: 0,
+      unknown: 0,
+      retryable: false,
+    });
+  });
+
+  it('身份错配与停用群并存时按永久阻塞处理，不放宽整条管理路由', async () => {
+    vi.stubEnv('WECOM_SMART_BOT_ID', 'wrong-bot-id');
+    routingMock.resolve.mockResolvedValue({
+      role: 'owner',
+      enabled: true,
+      channelIds: ['healthy-webhook', 'mismatched-bot', 'inactive-webhook'],
+    });
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'PRODUCTION_STAGNANT',
+      channelIds: ['legacy-channel'],
+      messageTemplate: '{summary}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      {
+        id: 'healthy-webhook',
+        transport: 'WECOM_GROUP_WEBHOOK',
+        webhookUrl: 'https://qy.example/healthy',
+        smartBotBotDigest: null,
+        smartBotTargetId: null,
+        smartBotChatType: null,
+        smartBotBoundAt: null,
+        isActive: true,
+      },
+      {
+        id: 'mismatched-bot',
+        transport: 'WECOM_SMART_BOT',
+        webhookUrl: null,
+        smartBotBotDigest: smartBotIdDigest('expected-bot-id'),
+        smartBotTargetId: 'owner-group',
+        smartBotChatType: 'GROUP',
+        smartBotBoundAt: new Date('2026-09-05T00:00:00Z'),
+        isActive: true,
+      },
+      {
+        id: 'inactive-webhook',
+        transport: 'WECOM_GROUP_WEBHOOK',
+        webhookUrl: 'https://qy.example/inactive',
+        smartBotBotDigest: null,
+        smartBotTargetId: null,
+        smartBotChatType: null,
+        smartBotBoundAt: null,
+        isActive: false,
+      },
+    ]);
+    const webhookSender: WebhookSender = vi.fn();
+    const smartBotSender = vi.fn();
+
+    const outcome = await notify(
+      'PRODUCTION_STAGNANT',
+      {
+        orderId: 'o-managed',
+        orderNo: 'O-MANAGED',
+        summary: '生产停滞',
+        deepLink: '/orders#wo=O-MANAGED',
+      },
+      {
+        deliveryKey: 'notification:PRODUCTION_STAGNANT:o-managed',
+        deliveryAttempt: 1,
+        webhookSender,
+        smartBotSender,
+        mockMode: false,
+      },
+    );
+
+    expect(webhookSender).not.toHaveBeenCalled();
+    expect(smartBotSender).not.toHaveBeenCalled();
+    expect(ledgerMock.claim).toHaveBeenCalledTimes(3);
+    expect(
+      ledgerMock.finalize.mock.calls.map(([input]) => input.status),
+    ).toEqual(['FAILED', 'FAILED', 'FAILED']);
+    expect(outcome).toMatchObject({
+      attempted: 0,
+      delivered: 0,
+      failed: 3,
+      unknown: 0,
+      retryable: false,
+    });
+  });
+
+  it.each(['smartBotTargetId', 'smartBotChatType', 'smartBotBoundAt'])(
+    '同一机器人身份错配且 %s 缺失时，永久绑定错误优先', async (missingField) => {
+      vi.stubEnv('WECOM_SMART_BOT_ID', 'wrong-bot-id');
+      routingMock.resolve.mockResolvedValue({ role: 'owner', enabled: true, channelIds: ['bot'] });
+      dbMock.notificationRule.findUnique.mockResolvedValue({
+        eventType: 'PRODUCTION_STAGNANT', channelIds: [], messageTemplate: '{summary}', isActive: true,
+      });
+      dbMock.notificationChannel.findMany.mockResolvedValue([{
+        id: 'bot', transport: 'WECOM_SMART_BOT', webhookUrl: null, isActive: true,
+        smartBotBotDigest: smartBotIdDigest('expected-bot-id'), smartBotTargetId: 'group',
+        smartBotChatType: 'GROUP', smartBotBoundAt: new Date('2026-09-05T00:00:00Z'),
+        [missingField]: null,
+      }]);
+      const smartBotSender = vi.fn();
+      const outcome = await notify('PRODUCTION_STAGNANT', {
+        orderId: 'o1', orderNo: 'O-1', summary: '停滞', deepLink: '/orders#wo=O-1',
+      }, { deliveryKey: 'notification:PRODUCTION_STAGNANT:o1', deliveryAttempt: 1, smartBotSender, mockMode: false });
+      expect(smartBotSender).not.toHaveBeenCalled();
+      expect(outcome.retryable).toBe(false);
+      expect(ledgerMock.finalize).toHaveBeenCalledWith(expect.objectContaining({ status: 'FAILED' }));
+    },
+  );
 
   it('surfaces an older SENDING row before an inactive-rule early return', async () => {
     ledgerMock.reconcile.mockResolvedValueOnce(['c1']);
