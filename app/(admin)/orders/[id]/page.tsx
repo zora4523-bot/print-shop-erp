@@ -1360,124 +1360,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </ol>
       </section>
 
-      <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-        <h2 className="text-base font-semibold">
-          包装组（{order.packagingGroups.length}）
-        </h2>
-        {order.packagingGroups.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
-            暂无包装组。
-          </p>
-        ) : (
-          <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
-            {order.packagingGroups.map((group) => {
-              const unitsPerBag = group.lines.reduce(
-                (sum, line) => sum + line.unitsPerBag,
-                0,
-              );
-              return (
-                <li
-                  key={group.id}
-                  className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h3 className="font-medium">
-                        包装组 #{group.sequence}
-                        {group.name ? ` · ${group.name}` : ''}
-                      </h3>
-                      <p className="mt-1 font-sans tabular-nums text-muted-foreground">
-                        实际 {formatQuantity(group.actualBagCount)} 袋
-                        {unitsPerBag > 0
-                          ? ` · 每袋共 ${formatQuantity(unitsPerBag)} 个`
-                          : ''}
-                      </p>
-                    </div>
-                    <Badge variant="outline">
-                      {PACKAGING_MODE_LABELS[group.mode]}
-                    </Badge>
-                  </div>
-                  {canViewCommercialAmounts &&
-                  'unitPrice' in group &&
-                  'subtotal' in group ? (
-                    <>
-                      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border bg-muted/20 p-3 text-xs">
-                        <div>
-                          <dt className="text-muted-foreground">入袋单价</dt>
-                          <dd className="font-sans font-medium tabular-nums">
-                            {formatUnitPrice(String(group.unitPrice))} / 袋
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">入袋小计</dt>
-                          <dd className="font-sans font-medium tabular-nums">
-                            {formatMoney(String(group.subtotal))}
-                          </dd>
-                        </div>
-                        {'suggestedSubtotal' in group ? (
-                          <div>
-                            <dt className="text-muted-foreground">
-                              系统建议小计
-                            </dt>
-                            <dd className="font-sans tabular-nums">
-                              {group.suggestedSubtotal === null
-                                ? '未形成完整建议价'
-                                : formatMoney(String(group.suggestedSubtotal))}
-                            </dd>
-                          </div>
-                        ) : null}
-                        {'priceOverrideReason' in group &&
-                        group.priceOverrideReason ? (
-                          <div className="col-span-2">
-                            <dt className="text-muted-foreground">
-                              入袋费改价说明
-                            </dt>
-                            <dd className="admin-wrap-anywhere mt-0.5">
-                              {String(group.priceOverrideReason)}
-                            </dd>
-                          </div>
-                        ) : null}
-                      </dl>
-                      {'pricingSnapshot' in group ? (
-                        <PricingSnapshotBreakdown
-                          pricingSnapshot={group.pricingSnapshot}
-                          title="入袋计价明细"
-                          className="mt-3"
-                        />
-                      ) : null}
-                    </>
-                  ) : null}
-                  {group.lines.length === 0 ? (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      未记录每袋款式组成
-                    </p>
-                  ) : (
-                    <ul className="mt-3 space-y-2">
-                      {group.lines.map((line) => (
-                        <li
-                          key={line.id}
-                          className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 rounded-md bg-muted/40 px-3 py-2"
-                        >
-                          <span className="min-w-0">
-                            #{line.orderItem.sequence} {line.orderItem.name}
-                          </span>
-                          <span className="font-sans text-xs tabular-nums text-muted-foreground">
-                            每袋 {formatQuantity(line.unitsPerBag)} 个 · 全组{' '}
-                            {formatQuantity(
-                              line.unitsPerBag * group.actualBagCount,
-                            )}{' '}
-                            个
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </section>
+      <OrderPackagingGroupsSection
+        order={order}
+        canViewCommercialAmounts={canViewCommercialAmounts}
+      />
 
       {canRequestChange ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -1919,6 +1805,132 @@ export default async function OrderDetailPage({ params }: PageProps) {
       </div>
       </OrderDetailStickyScope>
     </div>
+  );
+}
+
+function OrderPackagingGroupsSection({ order, canViewCommercialAmounts }: {
+  order: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;
+  canViewCommercialAmounts: boolean;
+}) {
+  return (
+    <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <h2 className="text-base font-semibold">
+        包装组（{order.packagingGroups.length}）
+      </h2>
+      {order.packagingGroups.length === 0 ? (
+        <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
+          暂无包装组。
+        </p>
+      ) : (
+        <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+          {order.packagingGroups.map((group) => {
+            const unitsPerBag = group.lines.reduce(
+              (sum, line) => sum + line.unitsPerBag,
+              0,
+            );
+            return (
+              <li
+                key={group.id}
+                className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-medium">
+                      包装组 #{group.sequence}
+                      {group.name ? ` · ${group.name}` : ''}
+                    </h3>
+                    <p className="mt-1 font-sans tabular-nums text-muted-foreground">
+                      实际 {formatQuantity(group.actualBagCount)} 袋
+                      {unitsPerBag > 0
+                        ? ` · 每袋共 ${formatQuantity(unitsPerBag)} 个`
+                        : ''}
+                    </p>
+                  </div>
+                  <Badge variant="outline">
+                    {PACKAGING_MODE_LABELS[group.mode]}
+                  </Badge>
+                </div>
+                {canViewCommercialAmounts &&
+                  'unitPrice' in group &&
+                  'subtotal' in group ? (
+                  <>
+                    <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border bg-muted/20 p-3 text-xs">
+                      <div>
+                        <dt className="text-muted-foreground">入袋单价</dt>
+                        <dd className="font-sans font-medium tabular-nums">
+                          {formatUnitPrice(String(group.unitPrice))} / 袋
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">入袋小计</dt>
+                        <dd className="font-sans font-medium tabular-nums">
+                          {formatMoney(String(group.subtotal))}
+                        </dd>
+                      </div>
+                      {'suggestedSubtotal' in group ? (
+                        <div>
+                          <dt className="text-muted-foreground">
+                            系统建议小计
+                          </dt>
+                          <dd className="font-sans tabular-nums">
+                            {group.suggestedSubtotal === null
+                              ? '未形成完整建议价'
+                              : formatMoney(String(group.suggestedSubtotal))}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {'priceOverrideReason' in group &&
+                        group.priceOverrideReason ? (
+                        <div className="col-span-2">
+                          <dt className="text-muted-foreground">
+                            入袋费改价说明
+                          </dt>
+                          <dd className="admin-wrap-anywhere mt-0.5">
+                            {String(group.priceOverrideReason)}
+                          </dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                    {'pricingSnapshot' in group ? (
+                      <PricingSnapshotBreakdown
+                        pricingSnapshot={group.pricingSnapshot}
+                        title="入袋计价明细"
+                        className="mt-3"
+                      />
+                    ) : null}
+                  </>
+                ) : null}
+                {group.lines.length === 0 ? (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    未记录每袋款式组成
+                  </p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {group.lines.map((line) => (
+                      <li
+                        key={line.id}
+                        className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 rounded-md bg-muted/40 px-3 py-2"
+                      >
+                        <span className="min-w-0">
+                          #{line.orderItem.sequence} {line.orderItem.name}
+                        </span>
+                        <span className="font-sans text-xs tabular-nums text-muted-foreground">
+                          每袋 {formatQuantity(line.unitsPerBag)} 个 · 全组{' '}
+                          {formatQuantity(
+                            line.unitsPerBag * group.actualBagCount,
+                          )}{' '}
+                          个
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 

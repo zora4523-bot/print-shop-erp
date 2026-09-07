@@ -590,6 +590,141 @@ export function OrderChangePendingChargeEditor({
   );
 }
 
+function OrderChangeReviewDecisionFields({
+  requestId, reviewRemark, setReviewRemark, error, state, approveDisabled,
+  rejectDisabled, pending, pendingChargesVerified, hasPendingCharges, preview, submit,
+}: {
+  requestId: string;
+  reviewRemark: string;
+  setReviewRemark: (value: string) => void;
+  error: string | null | undefined;
+  state: ReviewOrderChangeRequestMutationResult | null;
+  approveDisabled: boolean;
+  rejectDisabled: boolean;
+  pending: boolean;
+  pendingChargesVerified: boolean;
+  hasPendingCharges: boolean;
+  preview: OrderChangePricingPreviewWithCharges | null;
+  submit: (decision: "APPROVE" | "DENY") => void;
+}) {
+  const approvalImpactItems = preview
+    ? orderChangeApprovalImpactItems(preview)
+    : [];
+  const rejectionImpactItems = orderChangeRejectionImpactItems();
+  return (
+    <>
+      <label className="block space-y-1 text-sm">
+        <span>审核备注 / 拒绝原因</span>
+        <Textarea
+          aria-describedby={`change-review-remark-help-${requestId}`}
+          value={reviewRemark}
+          onChange={(event) => setReviewRemark(event.target.value)}
+          rows={2}
+          maxLength={500}
+          className="w-full rounded-md border bg-background px-3 py-2"
+        />
+        <span
+          id={`change-review-remark-help-${requestId}`}
+          className="block text-xs text-muted-foreground"
+        >
+          拒绝时必填；批准备注可选。人工运费的金额与依据请在上方逐票填写。
+        </span>
+      </label>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {state?.status === 'success' ? (
+        <p
+          role={state.requestStatus === 'STALE' ? 'alert' : 'status'}
+          className={
+            state.requestStatus === 'STALE'
+              ? 'rounded-md border border-warning/40 bg-warning/10 p-2 text-sm font-medium'
+              : 'rounded-md border border-success/40 bg-success/10 p-2 text-sm font-medium'
+          }
+        >
+          {orderChangeReviewResultMessage(state.requestStatus)}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <ConfirmActionDialog
+          level="L2"
+          disabled={approveDisabled}
+          trigger={
+            <Button type="button" className="min-h-11">
+              {pending
+                ? '处理中…'
+                : hasPendingCharges && !pendingChargesVerified
+                  ? '请先补齐运费并重新预览'
+                  : !preview?.complete
+                    ? '自动计价未完成'
+                    : preview?.totalExcludesPendingPlateFee
+                      ? '批准自动计价结果（版费后补）'
+                      : '批准并按最新规则同步工单'}
+            </Button>
+          }
+          title="批准这项工单修改申请？"
+          description="请核对拟变更款式、自动计价预览和逐票运费。批准时会校验价格版本并重算。"
+          impactItems={approvalImpactItems}
+          confirmLabel="确认批准并同步工单"
+          onConfirm={() => submit('APPROVE')}
+        />
+        <ConfirmActionDialog
+          level="L2"
+          disabled={rejectDisabled}
+          trigger={
+            <Button
+              type="button"
+              variant="destructive"
+              className="min-h-11"
+            >
+              拒绝申请
+            </Button>
+          }
+          title="拒绝这项工单修改申请？"
+          description="拒绝后不会改动工单内容。请先在上方填写拒绝原因，该原因会保存到审核记录。"
+          impactItems={rejectionImpactItems}
+          confirmLabel="确认拒绝申请"
+          onConfirm={() => submit('DENY')}
+        />
+      </div>
+    </>
+  );
+}
+
+function OrderChangePreviewFeedback({ previewPending, hasPreview, previewError, loadPreview }: {
+  previewPending: boolean;
+  hasPreview: boolean;
+  previewError: string | null | undefined;
+  loadPreview: () => void;
+}) {
+  return (
+    <>
+      {previewPending && !hasPreview ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          正在按当前价格规则生成审批预览…
+        </p>
+      ) : null}
+      {previewError ? (
+        <div className="space-y-2 rounded-md border border-destructive/40 p-2">
+          <p role="alert" className="text-sm text-destructive">
+            计价预览失败：{previewError}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={previewPending}
+            onClick={loadPreview}
+          >
+            重新加载最新计价预览
+          </Button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function OrderChangeReviewForm({
   requestId,
   currentItems = [],
@@ -786,10 +921,6 @@ export function OrderChangeReviewForm({
         : null;
   const preview = lastPreview;
   const reviewCompleted = state?.status === 'success';
-  const approvalImpactItems = preview
-    ? orderChangeApprovalImpactItems(preview)
-    : [];
-  const rejectionImpactItems = orderChangeRejectionImpactItems();
   const approveDisabled =
     pending ||
     reviewCompleted ||
@@ -826,26 +957,12 @@ export function OrderChangeReviewForm({
           ) : null}
         </div>
       ) : null}
-      {previewPending && !preview ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          正在按当前价格规则生成审批预览…
-        </p>
-      ) : null}
-      {previewError ? (
-        <div className="space-y-2 rounded-md border border-destructive/40 p-2">
-          <p role="alert" className="text-sm text-destructive">
-            计价预览失败：{previewError}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={previewPending}
-            onClick={loadPreview}
-          >
-            重新加载最新计价预览
-          </Button>
-        </div>
-      ) : null}
+      <OrderChangePreviewFeedback
+        previewPending={previewPending}
+        hasPreview={preview !== null}
+        previewError={previewError}
+        loadPreview={loadPreview}
+      />
       <OrderChangePendingChargeEditor
         charges={pendingCharges}
         drafts={pendingChargeDrafts}
@@ -882,82 +999,20 @@ export function OrderChangeReviewForm({
           )}
         </div>
       ) : null}
-      <label className="block space-y-1 text-sm">
-        <span>审核备注 / 拒绝原因</span>
-        <Textarea
-          aria-describedby={`change-review-remark-help-${requestId}`}
-          value={reviewRemark}
-          onChange={(event) => setReviewRemark(event.target.value)}
-          rows={2}
-          maxLength={500}
-          className="w-full rounded-md border bg-background px-3 py-2"
-        />
-        <span
-          id={`change-review-remark-help-${requestId}`}
-          className="block text-xs text-muted-foreground"
-        >
-          拒绝时必填；批准备注可选。人工运费的金额与依据请在上方逐票填写。
-        </span>
-      </label>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {state?.status === 'success' ? (
-        <p
-          role={state.requestStatus === 'STALE' ? 'alert' : 'status'}
-          className={
-            state.requestStatus === 'STALE'
-              ? 'rounded-md border border-warning/40 bg-warning/10 p-2 text-sm font-medium'
-              : 'rounded-md border border-success/40 bg-success/10 p-2 text-sm font-medium'
-          }
-        >
-          {orderChangeReviewResultMessage(state.requestStatus)}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        <ConfirmActionDialog
-          level="L2"
-          disabled={approveDisabled}
-          trigger={
-            <Button type="button" className="min-h-11">
-              {pending
-                ? '处理中…'
-                : pendingCharges.length > 0 && !pendingChargesVerified
-                  ? '请先补齐运费并重新预览'
-                  : !preview?.complete
-                    ? '自动计价未完成'
-                    : preview?.totalExcludesPendingPlateFee
-                      ? '批准自动计价结果（版费后补）'
-                      : '批准并按最新规则同步工单'}
-            </Button>
-          }
-          title="批准这项工单修改申请？"
-          description="请核对拟变更款式、自动计价预览和逐票运费。批准时会校验价格版本并重算。"
-          impactItems={approvalImpactItems}
-          confirmLabel="确认批准并同步工单"
-          onConfirm={() => submit('APPROVE')}
-        />
-        <ConfirmActionDialog
-          level="L2"
-          disabled={rejectDisabled}
-          trigger={
-            <Button
-              type="button"
-              variant="destructive"
-              className="min-h-11"
-            >
-              拒绝申请
-            </Button>
-          }
-          title="拒绝这项工单修改申请？"
-          description="拒绝后不会改动工单内容。请先在上方填写拒绝原因，该原因会保存到审核记录。"
-          impactItems={rejectionImpactItems}
-          confirmLabel="确认拒绝申请"
-          onConfirm={() => submit('DENY')}
-        />
-      </div>
+      <OrderChangeReviewDecisionFields
+        requestId={requestId}
+        reviewRemark={reviewRemark}
+        setReviewRemark={setReviewRemark}
+        error={error}
+        state={state}
+        approveDisabled={approveDisabled}
+        rejectDisabled={rejectDisabled}
+        pending={pending}
+        pendingChargesVerified={pendingChargesVerified}
+        hasPendingCharges={pendingCharges.length > 0}
+        preview={preview}
+        submit={submit}
+      />
     </form>
   );
 }

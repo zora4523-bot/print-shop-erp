@@ -418,6 +418,104 @@ function AdminDecisionForm({
   );
 }
 
+function submitAdminOrderDecision({
+  mode, order, reasonCode, note, figs, producedQty,
+  settleFee, settleFeeAdjustmentReason, run, setMessage,
+}: {
+  mode: FormMode;
+  order: AdminOrderWorkspaceRow;
+  reasonCode: ReasonCode;
+  note: string;
+  figs: string;
+  producedQty: string;
+  settleFee: string;
+  settleFeeAdjustmentReason: string;
+  run: (task: DecisionTask) => void;
+  setMessage: (value: string) => void;
+}) {
+  if (mode === 'reject' || mode === 'hold') {
+    const parsedFigs = parseStrictPositiveIntegerList(figs);
+    if (!parsedFigs.ok) {
+      setMessage('涉及款号只能填写正整数，并用逗号或空格分隔');
+      return;
+    }
+    if (!note.trim()) {
+      setMessage(mode === 'reject' ? '请填写驳回理由' : '请填写暂停理由');
+      return;
+    }
+    const payload = {
+      orderId: order.id,
+      reasonCode,
+      reasonNote: note.trim(),
+      affectedFigs: parsedFigs.values,
+      idempotencyKey: operationKey(`drawer-${mode}`),
+    };
+    run(() =>
+      mode === 'reject'
+        ? rejectFactoryOrderAction(payload)
+        : holdFactoryOrderAction(payload),
+    );
+    return;
+  }
+  if (mode === 'resume') {
+    if (!note.trim()) {
+      setMessage('请填写已排除问题的证据');
+      return;
+    }
+    run(() =>
+      resumeFactoryOrderAction({
+        orderId: order.id,
+        recoveryEvidence: { resolution: note.trim() },
+        note: note.trim(),
+        idempotencyKey: operationKey('drawer-resume'),
+      }),
+    );
+    return;
+  }
+  const change = order.pendingChangeRequest;
+  if (
+    !change ||
+    change.type !== 'CANCEL' ||
+    (mode !== 'change-approve' && mode !== 'change-deny')
+  ) {
+    return;
+  }
+  if (mode === 'change-deny' && !note.trim()) {
+    setMessage('请填写拒绝申请的原因');
+    return;
+  }
+  if (mode === 'change-approve') {
+    const parsedProduced = parseStrictNonNegativeInteger(producedQty);
+    if (parsedProduced === null || parsedProduced > order.totalQuantity) {
+      setMessage(`已产数量必须是 0–${order.totalQuantity} 之间的整数`);
+      return;
+    }
+    run(() =>
+      reviewOrderChangeRequestAction(null, {
+        requestId: change.id,
+        decision: 'APPROVE',
+        reviewRemark: note.trim() || null,
+        producedQty: parsedProduced,
+        ...(settleFee.trim() ? { settleFee: settleFee.trim() } : {}),
+        ...(settleFeeAdjustmentReason.trim()
+          ? {
+            settleFeeAdjustmentReason:
+              settleFeeAdjustmentReason.trim(),
+          }
+          : {}),
+      }),
+    );
+    return;
+  }
+  run(() =>
+    reviewOrderChangeRequestAction(null, {
+      requestId: change.id,
+      decision: 'DENY',
+      reviewRemark: note.trim() || null,
+    }),
+  );
+}
+
 export function AdminOrderDecisionPanel({
   order,
 }: {
@@ -600,87 +698,8 @@ export function AdminOrderDecisionPanel({
   }
 
   function submitDecision() {
-    if (mode === 'reject' || mode === 'hold') {
-      const parsedFigs = parseStrictPositiveIntegerList(figs);
-      if (!parsedFigs.ok) {
-        setMessage('涉及款号只能填写正整数，并用逗号或空格分隔');
-        return;
-      }
-      if (!note.trim()) {
-        setMessage(mode === 'reject' ? '请填写驳回理由' : '请填写暂停理由');
-        return;
-      }
-      const payload = {
-        orderId: order.id,
-        reasonCode,
-        reasonNote: note.trim(),
-        affectedFigs: parsedFigs.values,
-        idempotencyKey: operationKey(`drawer-${mode}`),
-      };
-      run(() =>
-        mode === 'reject'
-          ? rejectFactoryOrderAction(payload)
-          : holdFactoryOrderAction(payload),
-      );
-      return;
-    }
-    if (mode === 'resume') {
-      if (!note.trim()) {
-        setMessage('请填写已排除问题的证据');
-        return;
-      }
-      run(() =>
-        resumeFactoryOrderAction({
-          orderId: order.id,
-          recoveryEvidence: { resolution: note.trim() },
-          note: note.trim(),
-          idempotencyKey: operationKey('drawer-resume'),
-        }),
-      );
-      return;
-    }
-    const change = order.pendingChangeRequest;
-    if (
-      !change ||
-      change.type !== 'CANCEL' ||
-      (mode !== 'change-approve' && mode !== 'change-deny')
-    ) {
-      return;
-    }
-    if (mode === 'change-deny' && !note.trim()) {
-      setMessage('请填写拒绝申请的原因');
-      return;
-    }
-    if (mode === 'change-approve') {
-      const parsedProduced = parseStrictNonNegativeInteger(producedQty);
-      if (parsedProduced === null || parsedProduced > order.totalQuantity) {
-        setMessage(`已产数量必须是 0–${order.totalQuantity} 之间的整数`);
-        return;
-      }
-      run(() =>
-        reviewOrderChangeRequestAction(null, {
-          requestId: change.id,
-          decision: 'APPROVE',
-          reviewRemark: note.trim() || null,
-          producedQty: parsedProduced,
-          ...(settleFee.trim() ? { settleFee: settleFee.trim() } : {}),
-          ...(settleFeeAdjustmentReason.trim()
-            ? {
-                settleFeeAdjustmentReason:
-                  settleFeeAdjustmentReason.trim(),
-              }
-            : {}),
-        }),
-      );
-      return;
-    }
-    run(() =>
-      reviewOrderChangeRequestAction(null, {
-        requestId: change.id,
-        decision: 'DENY',
-        reviewRemark: note.trim() || null,
-      }),
-    );
+    submitAdminOrderDecision({ mode, order, reasonCode, note, figs, producedQty,
+      settleFee, settleFeeAdjustmentReason, run, setMessage });
   }
 
   return (

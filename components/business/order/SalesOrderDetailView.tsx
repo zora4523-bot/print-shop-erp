@@ -124,11 +124,6 @@ export function SalesOrderDetailView({
       order.status === OrderStatus.FOILING ||
       order.status === OrderStatus.PACKING) &&
     !pendingChangeRequest;
-  const pricingPending =
-    order.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
-  const totalEstimated =
-    !pricingPending && order.feeLines.some((line) => line.estimated);
-  const hasPendingAmount = order.feeLines.some((line) => line.amount === null);
 
   return (
     <div data-slot="sales-order-detail" className="space-y-4">
@@ -312,65 +307,7 @@ export function SalesOrderDetailView({
         </div>
 
         <div className="min-w-0 space-y-4">
-          <section
-            className={cn(
-              'space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6',
-              pricingPending && 'border-destructive/40 bg-destructive/5',
-            )}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-semibold">费用</h2>
-              {pricingPending ? (
-                <Badge variant="destructive">待管理员确认价格</Badge>
-              ) : null}
-            </div>
-            {order.feeLines.length > 0 ? (
-              <dl className="divide-y text-sm">
-                {order.feeLines.map((line) => (
-                  <div
-                    key={line.id}
-                    className="flex min-w-0 justify-between gap-3 py-2"
-                  >
-                    <dt className="admin-wrap-anywhere min-w-0 text-muted-foreground">
-                      {line.label}
-                    </dt>
-                    <dd className="shrink-0 font-sans font-medium tabular-nums">
-                      {line.amount === null ? '待定' : formatMoney(line.amount)}
-                      {line.estimated ? (
-                        <span className="ml-1 text-[10px] text-muted-foreground">
-                          估
-                        </span>
-                      ) : null}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ) : (
-              <p className="text-sm text-muted-foreground">暂无费用分项</p>
-            )}
-            <div className="flex items-baseline justify-between gap-3 border-t-2 border-foreground pt-3">
-              <span className="text-sm font-medium">
-                {!pricingPending && hasPendingAmount
-                  ? '已知合计（不含待定）'
-                  : '合计'}
-              </span>
-              <strong
-                className={cn(
-                  'font-sans text-xl tabular-nums',
-                  pricingPending && 'text-sm text-destructive',
-                )}
-              >
-                {pricingPending
-                  ? '待管理员确认价格'
-                  : formatMoney(order.totalAmount)}
-                {totalEstimated ? (
-                  <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                    估
-                  </span>
-                ) : null}
-              </strong>
-            </div>
-          </section>
+          <SalesOrderFeesSection order={order} />
 
           <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
             <h2 className="text-base font-semibold">
@@ -462,6 +399,73 @@ export function SalesOrderDetailView({
         </div>
       </div>
     </div>
+  );
+}
+
+function SalesOrderFeesSection({ order }: { order: SalesOrderDetail }) {
+  const pricingPending = order.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
+  const totalEstimated = !pricingPending && order.feeLines.some((line) => line.estimated);
+  const hasPendingAmount = order.feeLines.some((line) => line.amount === null);
+  return (
+    <section
+      className={cn(
+        'space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6',
+        pricingPending && 'border-destructive/40 bg-destructive/5',
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">费用</h2>
+        {pricingPending ? (
+          <Badge variant="destructive">待管理员确认价格</Badge>
+        ) : null}
+      </div>
+      {order.feeLines.length > 0 ? (
+        <dl className="divide-y text-sm">
+          {order.feeLines.map((line) => (
+            <div
+              key={line.id}
+              className="flex min-w-0 justify-between gap-3 py-2"
+            >
+              <dt className="admin-wrap-anywhere min-w-0 text-muted-foreground">
+                {line.label}
+              </dt>
+              <dd className="shrink-0 font-sans font-medium tabular-nums">
+                {line.amount === null ? '待定' : formatMoney(line.amount)}
+                {line.estimated ? (
+                  <span className="ml-1 text-[10px] text-muted-foreground">
+                    估
+                  </span>
+                ) : null}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="text-sm text-muted-foreground">暂无费用分项</p>
+      )}
+      <div className="flex items-baseline justify-between gap-3 border-t-2 border-foreground pt-3">
+        <span className="text-sm font-medium">
+          {!pricingPending && hasPendingAmount
+            ? '已知合计（不含待定）'
+            : '合计'}
+        </span>
+        <strong
+          className={cn(
+            'font-sans text-xl tabular-nums',
+            pricingPending && 'text-sm text-destructive',
+          )}
+        >
+          {pricingPending
+            ? '待管理员确认价格'
+            : formatMoney(order.totalAmount)}
+          {totalEstimated ? (
+            <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+              估
+            </span>
+          ) : null}
+        </strong>
+      </div>
+    </section>
   );
 }
 

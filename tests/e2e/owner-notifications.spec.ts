@@ -8,7 +8,7 @@ import {
   uniqueSuffix,
 } from './_helpers';
 
-// P1 #2 Slice B — owner notifications admin UI
+// 企业微信通知目标管理：兼容 Webhook 通道的真实页面回归。
 //
 // 真页面跑通：
 //   1. /owner/notifications 显示 10 条 seeded rule + 0 条 channel
@@ -60,20 +60,28 @@ test.describe('owner notifications — admin UI', () => {
 
     // ─── 2. 创建 channel ───
     await page
-      .getByRole('heading', { name: '企业微信群', exact: true })
+      .getByRole('heading', { name: '企业微信通知目标', exact: true })
       .locator('..')
-      .getByRole('link', { name: '新建群', exact: true })
+      .getByRole('link', { name: '新建通知目标', exact: true })
       .click();
     await expect(page).toHaveURL(/\/owner\/notifications\/channels\/new/);
 
     await page.locator('#channelKey').fill(channelKey);
     await page.locator('#channelName').fill(channelName);
+    // 新建默认是未绑定的智能机器人，不得误启用。此用例明确选择
+    // Webhook 兼容路径，避免把历史默认值当成当前 UI 契约。
+    const transport = page.getByRole('combobox', { name: '传输方式' });
+    await expect(transport).toHaveValue('WECOM_SMART_BOT');
+    const activeCheckbox = page.getByRole('checkbox', { name: '启用' });
+    await expect(activeCheckbox).toBeDisabled();
+    await transport.selectOption('WECOM_GROUP_WEBHOOK');
+    await expect(activeCheckbox).toBeChecked();
     await page
       .locator('#webhookUrl')
       .fill(
         `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-${suffix}`,
       );
-    await page.getByRole('button', { name: '创建群' }).click();
+    await page.getByRole('button', { name: '创建通知目标', exact: true }).click();
 
     await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
     await expect(page.locator(`text=${channelName}`).first()).toBeVisible();
@@ -134,7 +142,7 @@ test.describe('owner notifications — admin UI', () => {
 
     // ─── 5. 删除 channel（被引用 → disabled / 提示） ───
     const channelRow = page
-      .getByRole('region', { name: '企业微信群列表' })
+      .getByRole('region', { name: '企业微信通知目标列表' })
       .locator('tr', { hasText: channelName });
     const deleteBtn = channelRow.getByRole('button', { name: '删除' });
     await expect(deleteBtn).toBeDisabled();
@@ -154,7 +162,7 @@ test.describe('owner notifications — admin UI', () => {
 
     // 现在 button 不再 disabled（rule 引用已解除）
     const channelRowAfter = page
-      .getByRole('region', { name: '企业微信群列表' })
+      .getByRole('region', { name: '企业微信通知目标列表' })
       .locator('tr', { hasText: channelName });
     const deleteBtn2 = channelRowAfter.getByRole('button', { name: '删除' });
     await expect(deleteBtn2).not.toBeDisabled();

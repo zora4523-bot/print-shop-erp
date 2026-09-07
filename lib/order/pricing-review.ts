@@ -1007,6 +1007,164 @@ function sameNullableDecimal(left: string | null, right: string | null): boolean
   }
 }
 
+function validateFinalPricingSubmissions(
+  input: FinalizeOrderPricingCommand,
+  order: PricingOrder,
+) {
+  const includesShipmentCharges = reviewsShipmentCustomerCharges(order);
+  const shipmentChargeByBusinessKey = includesShipmentCharges
+    ? assertShipmentCustomerChargeIdentity(order)
+    : new Map<string, PricingCustomerCharge>();
+
+  const submittedItems = validateUniqueIds(
+    input.items,
+    (item) => item.itemId,
+    "同一款式不能重复提交终价",
+  );
+  if (
+    [...submittedItems.keys()].some(
+      (id) => !order.items.some((item) => item.id === id),
+    )
+  ) {
+    throw new OrderPricingReviewError("终价明细包含不属于该工单的款式");
+  }
+  const submittedGroups = validateUniqueIds(
+    input.packagingGroups,
+    (group) => group.packagingGroupId,
+    "同一包装组不能重复提交终价",
+  );
+  if (
+    submittedGroups.size !== order.packagingGroups.length ||
+    order.packagingGroups.some((group) => !submittedGroups.has(group.id))
+  ) {
+    throw new OrderPricingReviewError("请完整确认每一个包装组的入袋费");
+  }
+  for (const group of order.packagingGroups) {
+    const submitted = submittedGroups.get(group.id)!;
+    if (
+      submitted.expectedMode !== group.mode ||
+      submitted.expectedActualBagCount !== group.actualBagCount
+    ) {
+      throw new OrderPricingReviewError(
+        `包装组 ${group.sequence} 的模式或实际袋数已变更，请刷新后按当前快照重新核价`,
+      );
+    }
+  }
+  if (!includesShipmentCharges && input.shipments.length > 0) {
+    throw new OrderPricingReviewError(
+      "快递费与打包耗材应收仅适用于外部销售结算工单",
+    );
+  }
+  const submittedShipments = validateUniqueIds(
+    input.shipments,
+    (shipment) => shipment.shipmentId,
+    "同一发货地址不能重复提交收费",
+  );
+  if (
+    includesShipmentCharges &&
+    (submittedShipments.size !== order.shipments.length ||
+      order.shipments.some((shipment) => !submittedShipments.has(shipment.id)))
+  ) {
+    throw new OrderPricingReviewError(
+      "请完整确认每一个发货地址的快递费和打包耗材费",
+    );
+  }
+  for (const shipment of includesShipmentCharges ? order.shipments : []) {
+    const submitted = submittedShipments.get(shipment.id)!;
+    const shipping = chargeByShipmentAndCode(
+      shipmentChargeByBusinessKey,
+      shipment,
+      "SHIPPING_FEE",
+    );
+    if (
+      submitted.expectedDestinationProvince !== shipment.destinationProvince ||
+      !sameNullableDecimal(
+        submitted.expectedBillableWeightKg,
+        snapshotBillableWeightKg(shipment, shipping),
+      )
+    ) {
+      throw new OrderPricingReviewError(
+        `地址 ${shipment.sequence} 的计费省份或重量已变更，请刷新后按当前快照重新核价`,
+      );
+    }
+  }
+
+  const expectedOrderCharges = order.customerCharges.filter(
+    (charge) =>
+      charge.shipmentId === null &&
+      !isShipmentCustomerCharge(charge) &&
+      chargeRequiresManual(charge),
+  );
+  const submittedOrderCharges = validateUniqueIds(
+    input.orderCharges,
+    (charge) => charge.chargeId,
+    "同一订单级待核价费用不能重复提交",
+  );
+  if (
+    submittedOrderCharges.size !== expectedOrderCharges.length ||
+    expectedOrderCharges.some(
+      (charge) => !submittedOrderCharges.has(charge.id),
+    )
+  ) {
+    throw new OrderPricingReviewError("请完整确认每一项订单级待核价费用");
+  }
+  for (const charge of expectedOrderCharges) {
+    const submitted = submittedOrderCharges.get(charge.id)!;
+    if (submitted.expectedBusinessKey !== charge.businessKey) {
+      throw new OrderPricingReviewError(
+        `订单级收费“${charge.description}”已变更，请刷新后重新核价`,
+      );
+    }
+  }
+
+  const manualItems = order.items.flatMap((item) => {
+    if (!itemRequiresManual(item)) return [];
+    const submitted = submittedItems.get(item.id);
+    const unitPrice = parseManualMoney(
+      submitted?.unitPrice,
+      `款式“${item.name}”的客户单价`,
+      DECIMAL_10_4_MAX,
+      4,
+    );
+    const fixedFee = parseManualMoney(
+      submitted?.fixedFee,
+      `款式“${item.name}”的一次性费用`,
+      DECIMAL_12_2_MAX,
+      2,
+    );
+    const reason = requiredReason(
+      submitted?.reason,
+      `款式“${item.name}”需人工核价`,
+    );
+    const subtotal = unitPrice
+      .times(item.quantity)
+      .plus(fixedFee)
+      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    if (subtotal.gt(DECIMAL_12_2_MAX)) {
+      throw new OrderPricingReviewError(
+        `款式“${item.name}”的小计超出系统允许范围`,
+      );
+    }
+    return [{
+      item,
+      unitPrice: unitPrice.toFixed(4),
+      fixedFee: fixedFee.toFixed(2),
+      subtotal: subtotal.toFixed(2),
+      reason,
+    }];
+  });
+  const manualItemIds = new Set(manualItems.map(({ item }) => item.id));
+  if ([...submittedItems.keys()].some((id) => !manualItemIds.has(id))) {
+    throw new OrderPricingReviewError(
+      "已锁定快照价的款式不接受人工改价，请刷新后重试",
+    );
+  }
+
+  return { includesShipmentCharges, shipmentChargeByBusinessKey,
+    submittedGroups, submittedShipments, expectedOrderCharges,
+    submittedOrderCharges, manualItems };
+}
+
 export async function finalizeOrderPricing(
   input: FinalizeOrderPricingCommand,
   actor: { id: string; role: Role },
@@ -1040,154 +1198,10 @@ export async function finalizeOrderPricing(
         "工单款式、数量或发货信息已变更，请刷新并按当前快照重新核价",
       );
     }
-    const includesShipmentCharges = reviewsShipmentCustomerCharges(order);
-    const shipmentChargeByBusinessKey = includesShipmentCharges
-      ? assertShipmentCustomerChargeIdentity(order)
-      : new Map<string, PricingCustomerCharge>();
-
-    const submittedItems = validateUniqueIds(
-      input.items,
-      (item) => item.itemId,
-      "同一款式不能重复提交终价",
-    );
-    if (
-      [...submittedItems.keys()].some(
-        (id) => !order.items.some((item) => item.id === id),
-      )
-    ) {
-      throw new OrderPricingReviewError("终价明细包含不属于该工单的款式");
-    }
-    const submittedGroups = validateUniqueIds(
-      input.packagingGroups,
-      (group) => group.packagingGroupId,
-      "同一包装组不能重复提交终价",
-    );
-    if (
-      submittedGroups.size !== order.packagingGroups.length ||
-      order.packagingGroups.some((group) => !submittedGroups.has(group.id))
-    ) {
-      throw new OrderPricingReviewError("请完整确认每一个包装组的入袋费");
-    }
-    for (const group of order.packagingGroups) {
-      const submitted = submittedGroups.get(group.id)!;
-      if (
-        submitted.expectedMode !== group.mode ||
-        submitted.expectedActualBagCount !== group.actualBagCount
-      ) {
-        throw new OrderPricingReviewError(
-          `包装组 ${group.sequence} 的模式或实际袋数已变更，请刷新后按当前快照重新核价`,
-        );
-      }
-    }
-    if (!includesShipmentCharges && input.shipments.length > 0) {
-      throw new OrderPricingReviewError(
-        "快递费与打包耗材应收仅适用于外部销售结算工单",
-      );
-    }
-    const submittedShipments = validateUniqueIds(
-      input.shipments,
-      (shipment) => shipment.shipmentId,
-      "同一发货地址不能重复提交收费",
-    );
-    if (
-      includesShipmentCharges &&
-      (submittedShipments.size !== order.shipments.length ||
-        order.shipments.some((shipment) => !submittedShipments.has(shipment.id)))
-    ) {
-      throw new OrderPricingReviewError(
-        "请完整确认每一个发货地址的快递费和打包耗材费",
-      );
-    }
-    for (const shipment of includesShipmentCharges ? order.shipments : []) {
-      const submitted = submittedShipments.get(shipment.id)!;
-      const shipping = chargeByShipmentAndCode(
-        shipmentChargeByBusinessKey,
-        shipment,
-        "SHIPPING_FEE",
-      );
-      if (
-        submitted.expectedDestinationProvince !== shipment.destinationProvince ||
-        !sameNullableDecimal(
-          submitted.expectedBillableWeightKg,
-          snapshotBillableWeightKg(shipment, shipping),
-        )
-      ) {
-        throw new OrderPricingReviewError(
-          `地址 ${shipment.sequence} 的计费省份或重量已变更，请刷新后按当前快照重新核价`,
-        );
-      }
-    }
-
-    const expectedOrderCharges = order.customerCharges.filter(
-      (charge) =>
-        charge.shipmentId === null &&
-        !isShipmentCustomerCharge(charge) &&
-        chargeRequiresManual(charge),
-    );
-    const submittedOrderCharges = validateUniqueIds(
-      input.orderCharges,
-      (charge) => charge.chargeId,
-      "同一订单级待核价费用不能重复提交",
-    );
-    if (
-      submittedOrderCharges.size !== expectedOrderCharges.length ||
-      expectedOrderCharges.some(
-        (charge) => !submittedOrderCharges.has(charge.id),
-      )
-    ) {
-      throw new OrderPricingReviewError("请完整确认每一项订单级待核价费用");
-    }
-    for (const charge of expectedOrderCharges) {
-      const submitted = submittedOrderCharges.get(charge.id)!;
-      if (submitted.expectedBusinessKey !== charge.businessKey) {
-        throw new OrderPricingReviewError(
-          `订单级收费“${charge.description}”已变更，请刷新后重新核价`,
-        );
-      }
-    }
-
-    const manualItems = order.items.flatMap((item) => {
-      if (!itemRequiresManual(item)) return [];
-      const submitted = submittedItems.get(item.id);
-      const unitPrice = parseManualMoney(
-        submitted?.unitPrice,
-        `款式“${item.name}”的客户单价`,
-        DECIMAL_10_4_MAX,
-        4,
-      );
-      const fixedFee = parseManualMoney(
-        submitted?.fixedFee,
-        `款式“${item.name}”的一次性费用`,
-        DECIMAL_12_2_MAX,
-        2,
-      );
-      const reason = requiredReason(
-        submitted?.reason,
-        `款式“${item.name}”需人工核价`,
-      );
-      const subtotal = unitPrice
-        .times(item.quantity)
-        .plus(fixedFee)
-        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-      if (subtotal.gt(DECIMAL_12_2_MAX)) {
-        throw new OrderPricingReviewError(
-          `款式“${item.name}”的小计超出系统允许范围`,
-        );
-      }
-      return [{
-        item,
-        unitPrice: unitPrice.toFixed(4),
-        fixedFee: fixedFee.toFixed(2),
-        subtotal: subtotal.toFixed(2),
-        reason,
-      }];
-    });
-    const manualItemIds = new Set(manualItems.map(({ item }) => item.id));
-    if ([...submittedItems.keys()].some((id) => !manualItemIds.has(id))) {
-      throw new OrderPricingReviewError(
-        "已锁定快照价的款式不接受人工改价，请刷新后重试",
-      );
-    }
+    const { includesShipmentCharges, shipmentChargeByBusinessKey,
+      submittedGroups, submittedShipments, expectedOrderCharges,
+      submittedOrderCharges, manualItems } =
+      validateFinalPricingSubmissions(input, order);
 
     const manualGroups = order.packagingGroups.flatMap((group) => {
       if (!packagingRequiresManual(group)) return [];

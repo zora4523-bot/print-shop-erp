@@ -675,6 +675,149 @@ async function persistInlineDeliveryLog(
   }
 }
 
+async function prepareNotificationRoute<E extends NotificationEvent>(
+  event: E,
+  safePayload: NotificationPayloadFor<E>,
+  outcome: NotifyOutcome,
+) {
+  const rule = await db.notificationRule.findUnique({
+    where: { eventType: event },
+    select: {
+      eventType: true,
+      channelIds: true,
+      messageTemplate: true,
+      isActive: true,
+    },
+  });
+  if (!rule || !rule.isActive) {
+    // 没规则 / 关闭了：不写 log。"事件根本没配置"是一种正常状态——
+    // 比如 STOCK_ALERT 在本波 P1 #2 是&ldquo;接口在但没配规则&rdquo;。
+    return null;
+  }
+  const managementRoute = await resolveManagementNotificationRoute(event);
+  if (managementRoute && !managementRoute.enabled) {
+    // 管理事件的收件角色已明确关闭。不能回退到 rule.channelIds，
+    // 否则可以绕过角色开关，也会让事件→角色真值变成可配置。
+    return null;
+  }
+  const configuredChannelIds = managementRoute
+    ? managementRoute.channelIds
+    : rule.channelIds;
+  if (configuredChannelIds.length === 0) {
+    // 配了规则但没绑 channel：等同&ldquo;开了 active 却没收件人&rdquo;。
+    // 没法写 NotificationLog（channelId 是 FK 必填），只能打
+    // console 让 ops 看到。Slice B 的 admin UI 会在 isActive=true
+    // && channelIds=[] 时拒绝保存，杜绝这条路径。
+    console.warn(
+      `[notify] ${managementRoute ? `management role ${managementRoute.role}` : 'rule'} active but channelIds empty event=${event}`,
+    );
+    // 配置问题，重试一万次也还是没有收件人 → retryable 保持 false。
+    return null;
+  }
+
+  // 渲染一次，所有 channel 共用同一份 content（同事件就是同消息）。
+  const content = renderTemplate(rule.messageTemplate, safePayload);
+
+  // **去重 + 保序**：存量 rule.channelIds 可能含重复 id（schema String[]
+  // 不强制 unique）。先 dedupe 出 unique 列表，
+  // 后续 stale 比较和 reorder 都基于这条（避免 round 118 medium：
+  // 用 raw rule.channelIds.length 做 stale 比较会把&ldquo;有重复&rdquo;误报成
+  // &ldquo;有 stale id&rdquo;）。
+  const uniqueConfiguredChannelIds = Array.from(
+    new Set(configuredChannelIds),
+  );
+
+  // 拉到所有引用的 channel——**不**过滤 isActive。下面分流：active
+  // 真发送，inactive 写 FAILED log（避免&ldquo;启用 channel 又被关&rdquo;的
+  // 静默漏推）。
+  const fetched = await db.notificationChannel.findMany({
+    where: { id: { in: uniqueConfiguredChannelIds } },
+    select: {
+      id: true,
+      transport: true,
+      webhookUrl: true,
+      smartBotBotDigest: true,
+      smartBotTargetId: true,
+      smartBotChatType: true,
+      smartBotBoundAt: true,
+      isActive: true,
+    },
+  });
+  // **PG `IN (...)` 不保证返回顺序**——必须按配置 ID 顺
+  // 序重排。否则 CS_PERIOD_* runtime cap 的
+  // slice(0, 1) 会随机选 channel：legacy `['owner-group', 'sales-
+  // group']` 可能把客服金额发到 sales-group 而漏 owner-group。
+  const byId = new Map(fetched.map((c) => [c.id, c]));
+  const channels = uniqueConfiguredChannelIds
+    .map((id) => byId.get(id))
+    .filter((c): c is NonNullable<typeof c> => c !== undefined);
+  const missingChannelCount =
+    uniqueConfiguredChannelIds.length - channels.length;
+  const managementRouteBlock = managementRoute
+    ? assessManagementRouteBlock(channels, missingChannelCount)
+    : { blocked: false, retryable: false };
+  const managementRouteBlocked = managementRouteBlock.blocked;
+
+  // 托管的五类管理事件用更严的 all-or-nothing 收件人契约：
+  // 任意 ID 已删除或已停用时整次不发，不把同一条管理通知只发给
+  // 半数收件群，也不回退到 NotificationRule.channelIds。已存在的
+  // channel 仍走下面的 ledger。只有当全部阻塞都可恢复（当前仅 Bot
+  // 身份暂时不匹配）时，所有现存收件群统一落 RETRYING；只要混有删除、
+  // 停用或绑定不完整等永久问题，整条路由仍落 FAILED。缺失 ID 因 FK
+  // 无法写 NotificationLog，必须显式计入 durable job.result 的
+  // failed/unlogged。
+  if (managementRoute && managementRouteBlocked) {
+    console.warn(
+      `[notify] management route fail-closed event=${event} role=${managementRoute.role} configured=${uniqueConfiguredChannelIds.length} found=${channels.length} inactive=${channels.filter((channel) => !channel.isActive).length}`,
+    );
+    if (missingChannelCount > 0) {
+      outcome.failed += missingChannelCount;
+      outcome.unlogged += missingChannelCount;
+      recordErrorCode(outcome, 'management channel missing');
+    }
+  }
+  if (channels.length === 0) {
+    if (managementRouteBlocked) return null;
+    // channelIds 全是 stale ID（指向已删 channel）。FK 不让我们
+    // 写 NotificationLog，只能打 console。Slice B 的 channel 删
+    // 除会拒绝&ldquo;有 active rule 引用&rdquo;的 channel，杜绝此路径。
+    console.warn(
+      `[notify] rule active but all channelIds stale event=${event}`,
+    );
+    // 同上：指向已删 channel 是配置问题，不该占用 job 的 attempts。
+    return null;
+  }
+  if (channels.length < uniqueConfiguredChannelIds.length) {
+    // 部分 unique ID stale（其他还能用）—— 打 console 提示。
+    // 用 unique 而非 raw rule.channelIds 比较，避免重复 id 误报。
+    console.warn(
+      `[notify] some channelIds stale event=${event} have=${channels.length} expected=${uniqueConfiguredChannelIds.length}`,
+    );
+  }
+
+  // **Runtime privacy cap for CS_PERIOD_***：
+  // updateRuleWithGuard 是写时校验，对升级前已存在的多 channel 行
+  // 无效。这里 send-side cap 兜底——CS_PERIOD_* 含具体客服业绩 /
+  // 提成数据，绑多 channel 会让所有群看到所有客服金额。运行时 slice
+  // 到 PRIVATE_EVENT_MAX_CHANNELS 并 console.warn，让 ops 知道有
+  // legacy 配置该 owner 手动清理（schema 加 per-user 路由前的兜底）。
+  let effectiveChannels = channels;
+  if (
+    isPrivatePerCsEvent(event) &&
+    effectiveChannels.length > PRIVATE_EVENT_MAX_CHANNELS
+  ) {
+    console.warn(
+      `[notify] CS_PERIOD privacy cap event=${event} configured=${effectiveChannels.length} sending_to=${PRIVATE_EVENT_MAX_CHANNELS} (legacy config; owner please trim in /owner/notifications)`,
+    );
+    effectiveChannels = effectiveChannels.slice(
+      0,
+      PRIVATE_EVENT_MAX_CHANNELS,
+    );
+  }
+
+  return { content, effectiveChannels, managementRouteBlocked, managementRouteBlock };
+}
+
 export async function notify<E extends NotificationEvent>(
   event: E,
   payload: NotificationPayloadFor<E>,
@@ -713,140 +856,9 @@ export async function notify<E extends NotificationEvent>(
       }
     }
 
-    const rule = await db.notificationRule.findUnique({
-      where: { eventType: event },
-      select: {
-        eventType: true,
-        channelIds: true,
-        messageTemplate: true,
-        isActive: true,
-      },
-    });
-    if (!rule || !rule.isActive) {
-      // 没规则 / 关闭了：不写 log。"事件根本没配置"是一种正常状态——
-      // 比如 STOCK_ALERT 在本波 P1 #2 是&ldquo;接口在但没配规则&rdquo;。
-      return outcome;
-    }
-    const managementRoute = await resolveManagementNotificationRoute(event);
-    if (managementRoute && !managementRoute.enabled) {
-      // 管理事件的收件角色已明确关闭。不能回退到 rule.channelIds，
-      // 否则可以绕过角色开关，也会让事件→角色真值变成可配置。
-      return outcome;
-    }
-    const configuredChannelIds = managementRoute
-      ? managementRoute.channelIds
-      : rule.channelIds;
-    if (configuredChannelIds.length === 0) {
-      // 配了规则但没绑 channel：等同&ldquo;开了 active 却没收件人&rdquo;。
-      // 没法写 NotificationLog（channelId 是 FK 必填），只能打
-      // console 让 ops 看到。Slice B 的 admin UI 会在 isActive=true
-      // && channelIds=[] 时拒绝保存，杜绝这条路径。
-      console.warn(
-        `[notify] ${managementRoute ? `management role ${managementRoute.role}` : 'rule'} active but channelIds empty event=${event}`,
-      );
-      // 配置问题，重试一万次也还是没有收件人 → retryable 保持 false。
-      return outcome;
-    }
-
-    // 渲染一次，所有 channel 共用同一份 content（同事件就是同消息）。
-    const content = renderTemplate(rule.messageTemplate, safePayload);
-
-    // **去重 + 保序**：存量 rule.channelIds 可能含重复 id（schema String[]
-    // 不强制 unique）。先 dedupe 出 unique 列表，
-    // 后续 stale 比较和 reorder 都基于这条（避免 round 118 medium：
-    // 用 raw rule.channelIds.length 做 stale 比较会把&ldquo;有重复&rdquo;误报成
-    // &ldquo;有 stale id&rdquo;）。
-    const uniqueConfiguredChannelIds = Array.from(
-      new Set(configuredChannelIds),
-    );
-
-    // 拉到所有引用的 channel——**不**过滤 isActive。下面分流：active
-    // 真发送，inactive 写 FAILED log（避免&ldquo;启用 channel 又被关&rdquo;的
-    // 静默漏推）。
-    const fetched = await db.notificationChannel.findMany({
-      where: { id: { in: uniqueConfiguredChannelIds } },
-      select: {
-        id: true,
-        transport: true,
-        webhookUrl: true,
-        smartBotBotDigest: true,
-        smartBotTargetId: true,
-        smartBotChatType: true,
-        smartBotBoundAt: true,
-        isActive: true,
-      },
-    });
-    // **PG `IN (...)` 不保证返回顺序**——必须按配置 ID 顺
-    // 序重排。否则 CS_PERIOD_* runtime cap 的
-    // slice(0, 1) 会随机选 channel：legacy `['owner-group', 'sales-
-    // group']` 可能把客服金额发到 sales-group 而漏 owner-group。
-    const byId = new Map(fetched.map((c) => [c.id, c]));
-    const channels = uniqueConfiguredChannelIds
-      .map((id) => byId.get(id))
-      .filter((c): c is NonNullable<typeof c> => c !== undefined);
-    const missingChannelCount =
-      uniqueConfiguredChannelIds.length - channels.length;
-    const managementRouteBlock = managementRoute
-      ? assessManagementRouteBlock(channels, missingChannelCount)
-      : { blocked: false, retryable: false };
-    const managementRouteBlocked = managementRouteBlock.blocked;
-
-    // 托管的五类管理事件用更严的 all-or-nothing 收件人契约：
-    // 任意 ID 已删除或已停用时整次不发，不把同一条管理通知只发给
-    // 半数收件群，也不回退到 NotificationRule.channelIds。已存在的
-    // channel 仍走下面的 ledger。只有当全部阻塞都可恢复（当前仅 Bot
-    // 身份暂时不匹配）时，所有现存收件群统一落 RETRYING；只要混有删除、
-    // 停用或绑定不完整等永久问题，整条路由仍落 FAILED。缺失 ID 因 FK
-    // 无法写 NotificationLog，必须显式计入 durable job.result 的
-    // failed/unlogged。
-    if (managementRoute && managementRouteBlocked) {
-      console.warn(
-        `[notify] management route fail-closed event=${event} role=${managementRoute.role} configured=${uniqueConfiguredChannelIds.length} found=${channels.length} inactive=${channels.filter((channel) => !channel.isActive).length}`,
-      );
-      if (missingChannelCount > 0) {
-        outcome.failed += missingChannelCount;
-        outcome.unlogged += missingChannelCount;
-        recordErrorCode(outcome, 'management channel missing');
-      }
-    }
-    if (channels.length === 0) {
-      if (managementRouteBlocked) return outcome;
-      // channelIds 全是 stale ID（指向已删 channel）。FK 不让我们
-      // 写 NotificationLog，只能打 console。Slice B 的 channel 删
-      // 除会拒绝&ldquo;有 active rule 引用&rdquo;的 channel，杜绝此路径。
-      console.warn(
-        `[notify] rule active but all channelIds stale event=${event}`,
-      );
-      // 同上：指向已删 channel 是配置问题，不该占用 job 的 attempts。
-      return outcome;
-    }
-    if (channels.length < uniqueConfiguredChannelIds.length) {
-      // 部分 unique ID stale（其他还能用）—— 打 console 提示。
-      // 用 unique 而非 raw rule.channelIds 比较，避免重复 id 误报。
-      console.warn(
-        `[notify] some channelIds stale event=${event} have=${channels.length} expected=${uniqueConfiguredChannelIds.length}`,
-      );
-    }
-
-    // **Runtime privacy cap for CS_PERIOD_***：
-    // updateRuleWithGuard 是写时校验，对升级前已存在的多 channel 行
-    // 无效。这里 send-side cap 兜底——CS_PERIOD_* 含具体客服业绩 /
-    // 提成数据，绑多 channel 会让所有群看到所有客服金额。运行时 slice
-    // 到 PRIVATE_EVENT_MAX_CHANNELS 并 console.warn，让 ops 知道有
-    // legacy 配置该 owner 手动清理（schema 加 per-user 路由前的兜底）。
-    let effectiveChannels = channels;
-    if (
-      isPrivatePerCsEvent(event) &&
-      effectiveChannels.length > PRIVATE_EVENT_MAX_CHANNELS
-    ) {
-      console.warn(
-        `[notify] CS_PERIOD privacy cap event=${event} configured=${effectiveChannels.length} sending_to=${PRIVATE_EVENT_MAX_CHANNELS} (legacy config; owner please trim in /owner/notifications)`,
-      );
-      effectiveChannels = effectiveChannels.slice(
-        0,
-        PRIVATE_EVENT_MAX_CHANNELS,
-      );
-    }
+    const route = await prepareNotificationRoute(event, safePayload, outcome);
+    if (!route) return outcome;
+    const { content, effectiveChannels, managementRouteBlocked, managementRouteBlock } = route;
 
     // payload.orderId / outsourceId / periodId 任一存在就关联到日志，
     // 让 dashboard 后期能 join 反查。仅 Order 是被 schema 显式索引的

@@ -482,6 +482,69 @@ export type SfCollectChargeCorrection = {
 //   4. verify the optional productId (if any) exists + is active while locked
 //   5. compute subtotals + totalAmount in Decimal.js
 //   6. nested-create Order + items + initial OrderLog("CREATE") in one call
+async function resolveCreationCraftsInTx(
+  txClient: Prisma.TransactionClient,
+  input: CreateOrderCommand,
+) {
+  // (2) craft FK + activation check — surfaces a clean invariant error
+  // instead of a Prisma FK error.
+  const craftIds = [...new Set(input.items.flatMap((it) => it.crafts))];
+  const foundCrafts = await txClient.craft.findMany({
+    where: { id: { in: craftIds } },
+    select: { id: true, code: true, isActive: true },
+  });
+  if (foundCrafts.length !== craftIds.length) {
+    const missing = craftIds.filter((id) => !foundCrafts.some((c) => c.id === id));
+    throw new OrderInvariantError(
+      `工艺不存在：${missing.join(', ')}`,
+    );
+  }
+
+  const craftById = new Map(foundCrafts.map((craft) => [craft.id, craft]));
+  for (const item of input.items) {
+    const unavailable = item.crafts.filter((craftId) => {
+      const craft = craftById.get(craftId);
+      if (!craft || craft.isActive) return false;
+      return !(
+        item.pricingRoute === 'STOCK_BLANK' &&
+        craft.code === LEGACY_STOCK_FOIL_CRAFT_CODE
+      );
+    });
+    if (unavailable.length > 0) {
+      throw new OrderInvariantError(
+        `工艺已停用：${unavailable.join(', ')}`,
+      );
+    }
+  }
+
+  const hasStockLocalFoilItem = input.items.some(
+    (item) => item.pricingRoute === 'STOCK_BLANK',
+  );
+  let canonicalStockLocalFoilCraft = foundCrafts.find(
+    (craft) =>
+      craft.code === STOCK_LOCAL_FOIL_CRAFT_CODE && craft.isActive,
+  );
+  if (hasStockLocalFoilItem && !canonicalStockLocalFoilCraft) {
+    const canonicalCrafts = await txClient.craft.findMany({
+      where: {
+        code: STOCK_LOCAL_FOIL_CRAFT_CODE,
+        isActive: true,
+      },
+      select: { id: true, code: true, isActive: true },
+    });
+    canonicalStockLocalFoilCraft = canonicalCrafts[0];
+  }
+  if (hasStockLocalFoilItem && !canonicalStockLocalFoilCraft) {
+    throw new OrderInvariantError(
+      '当前没有启用的“局部烫金”工艺，无法创建通版现货工单',
+    );
+  }
+  const craftCodeById = new Map(
+    foundCrafts.map((craft) => [craft.id, craft.code]),
+  );
+  return { canonicalStockLocalFoilCraft, craftCodeById };
+}
+
 export async function createOrder(
   input: CreateOrderCommand,
   actor: { id: string; role: Role },
@@ -560,62 +623,8 @@ export async function createOrder(
     // (1) allocate a fresh GD-YYMMDD-XXX (advisory lock inside).
     const orderNo = await nextOrderNumber(txClient, now);
 
-    // (2) craft FK + activation check — surfaces a clean invariant error
-    // instead of a Prisma FK error.
-    const craftIds = [...new Set(input.items.flatMap((it) => it.crafts))];
-    const foundCrafts = await txClient.craft.findMany({
-      where: { id: { in: craftIds } },
-      select: { id: true, code: true, isActive: true },
-    });
-    if (foundCrafts.length !== craftIds.length) {
-      const missing = craftIds.filter((id) => !foundCrafts.some((c) => c.id === id));
-      throw new OrderInvariantError(
-        `工艺不存在：${missing.join(', ')}`,
-      );
-    }
-
-    const craftById = new Map(foundCrafts.map((craft) => [craft.id, craft]));
-    for (const item of input.items) {
-      const unavailable = item.crafts.filter((craftId) => {
-        const craft = craftById.get(craftId);
-        if (!craft || craft.isActive) return false;
-        return !(
-          item.pricingRoute === 'STOCK_BLANK' &&
-          craft.code === LEGACY_STOCK_FOIL_CRAFT_CODE
-        );
-      });
-      if (unavailable.length > 0) {
-        throw new OrderInvariantError(
-          `工艺已停用：${unavailable.join(', ')}`,
-        );
-      }
-    }
-
-    const hasStockLocalFoilItem = input.items.some(
-      (item) => item.pricingRoute === 'STOCK_BLANK',
-    );
-    let canonicalStockLocalFoilCraft = foundCrafts.find(
-      (craft) =>
-        craft.code === STOCK_LOCAL_FOIL_CRAFT_CODE && craft.isActive,
-    );
-    if (hasStockLocalFoilItem && !canonicalStockLocalFoilCraft) {
-      const canonicalCrafts = await txClient.craft.findMany({
-        where: {
-          code: STOCK_LOCAL_FOIL_CRAFT_CODE,
-          isActive: true,
-        },
-        select: { id: true, code: true, isActive: true },
-      });
-      canonicalStockLocalFoilCraft = canonicalCrafts[0];
-    }
-    if (hasStockLocalFoilItem && !canonicalStockLocalFoilCraft) {
-      throw new OrderInvariantError(
-        '当前没有启用的“局部烫金”工艺，无法创建通版现货工单',
-      );
-    }
-    const craftCodeById = new Map(
-      foundCrafts.map((craft) => [craft.id, craft.code]),
-    );
+    const { canonicalStockLocalFoilCraft, craftCodeById } =
+      await resolveCreationCraftsInTx(txClient, input);
     const items = input.items.map((item) => {
       const foilFacts = deriveLegacyOrderItemFoilFacts(item);
       if (item.pricingRoute !== 'STOCK_BLANK') {
@@ -3312,6 +3321,118 @@ async function recordSfCollectOrderLog(
   });
 }
 
+// The caller must hold the order cascade lock and authorize corrections before
+// reading this context; all reads remain on that caller's transaction.
+async function readSfCollectChargeContextInTx(
+  prismaTx: Prisma.TransactionClient,
+  orderId: string,
+  orderStatus: OrderStatus,
+  isSfCollect: boolean,
+  trustedCorrections: readonly SfCollectChargeCorrection[],
+) {
+  const chargeContext = await prismaTx.order.findUnique({
+    where: { id: orderId },
+    select: {
+      items: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          quantity: true,
+          paperWeightGsm: true,
+          paperType: true,
+          productStructure: true,
+        },
+      },
+      shipments: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          sequence: true,
+          status: true,
+          destinationProvince: true,
+          weightKg: true,
+          lines: { select: { orderItemId: true, quantity: true } },
+        },
+      },
+      customerCharges: {
+        select: {
+          id: true,
+          businessKey: true,
+          amount: true,
+          overrideReason: true,
+          priceBookId: true,
+          shipmentId: true,
+          category: { select: { code: true } },
+        },
+      },
+    },
+  });
+  if (!chargeContext) throw new OrderInvariantError('工单不存在');
+  const standardCharges = chargeContext.customerCharges.filter((charge) =>
+    ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
+      String(charge.category.code),
+    ),
+  );
+  if (standardCharges.length !== chargeContext.shipments.length * 2) {
+    throw new OrderInvariantError(
+      '快递/耗材收费明细不完整，无法切换顺丰到付标识',
+    );
+  }
+
+  const priceBookIds = [
+    ...new Set(
+      standardCharges.flatMap((charge) =>
+        charge.priceBookId ? [charge.priceBookId] : [],
+      ),
+    ),
+  ];
+  if (priceBookIds.length !== 1) {
+    throw new OrderInvariantError(
+      '快递/耗材收费未绑定唯一价目簿，无法切换顺丰到付标识',
+    );
+  }
+  const chargeByShipmentAndCategory = new Map(
+    standardCharges.map((charge) => [
+      `${charge.shipmentId}:${String(charge.category.code)}`,
+      charge,
+    ]),
+  );
+  const correctionByShipmentId = new Map(
+    trustedCorrections.map((correction) => [
+      correction.shipmentId,
+      correction,
+    ]),
+  );
+  if (correctionByShipmentId.size !== trustedCorrections.length) {
+    throw new OrderInvariantError('顺丰到付更正包含重复的发货地址');
+  }
+  if (
+    trustedCorrections.some(
+      (correction) =>
+        !chargeContext.shipments.some(
+          (shipment) => shipment.id === correction.shipmentId,
+        ),
+    )
+  ) {
+    throw new OrderInvariantError('顺丰到付更正包含不属于该工单的发货地址');
+  }
+  if (
+    !isSfCollect &&
+    orderStatus === OrderStatus.SHIPPED &&
+    (trustedCorrections.length !== chargeContext.shipments.length ||
+      chargeContext.shipments.some(
+        (shipment) => !correctionByShipmentId.has(shipment.id),
+      ))
+  ) {
+    throw new OrderInvariantError(
+      '已发货工单取消顺丰到付时，必须补齐每个地址的计费信息',
+    );
+  }
+
+  return { chargeContext, standardCharges, priceBookIds,
+    chargeByShipmentAndCategory, correctionByShipmentId };
+}
+
 // 顺丰到付是可后补的履约标识。外部销售工单切换时必须同步免收/恢复
 // 对客快递费并重算 totalAmount；打包耗材费始终保留。独立事务仍保留
 // 权限、所有权、串行化和完整修改日志。
@@ -3415,104 +3536,11 @@ export async function setOrderSfCollect(
     if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
       const prismaTx = tx as unknown as Prisma.TransactionClient;
       const chargeChangedAt = changedAt;
-      const chargeContext = await prismaTx.order.findUnique({
-        where: { id: orderId },
-        select: {
-          items: {
-            orderBy: { sequence: 'asc' },
-            select: {
-              id: true,
-              quantity: true,
-              paperWeightGsm: true,
-              paperType: true,
-              productStructure: true,
-            },
-          },
-          shipments: {
-            orderBy: { sequence: 'asc' },
-            select: {
-              id: true,
-              sequence: true,
-              status: true,
-              destinationProvince: true,
-              weightKg: true,
-              lines: { select: { orderItemId: true, quantity: true } },
-            },
-          },
-          customerCharges: {
-            select: {
-              id: true,
-              businessKey: true,
-              amount: true,
-              overrideReason: true,
-              priceBookId: true,
-              shipmentId: true,
-              category: { select: { code: true } },
-            },
-          },
-        },
-      });
-      if (!chargeContext) throw new OrderInvariantError('工单不存在');
-      const standardCharges = chargeContext.customerCharges.filter((charge) =>
-        ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
-          String(charge.category.code),
-        ),
-      );
-      if (standardCharges.length !== chargeContext.shipments.length * 2) {
-        throw new OrderInvariantError(
-          '快递/耗材收费明细不完整，无法切换顺丰到付标识',
+      const { chargeContext, standardCharges, priceBookIds,
+        chargeByShipmentAndCategory, correctionByShipmentId } =
+        await readSfCollectChargeContextInTx(
+          prismaTx, orderId, order.status, isSfCollect, trustedCorrections,
         );
-      }
-
-      const priceBookIds = [
-        ...new Set(
-          standardCharges.flatMap((charge) =>
-            charge.priceBookId ? [charge.priceBookId] : [],
-          ),
-        ),
-      ];
-      if (priceBookIds.length !== 1) {
-        throw new OrderInvariantError(
-          '快递/耗材收费未绑定唯一价目簿，无法切换顺丰到付标识',
-        );
-      }
-      const chargeByShipmentAndCategory = new Map(
-        standardCharges.map((charge) => [
-          `${charge.shipmentId}:${String(charge.category.code)}`,
-          charge,
-        ]),
-      );
-      const correctionByShipmentId = new Map(
-        trustedCorrections.map((correction) => [
-          correction.shipmentId,
-          correction,
-        ]),
-      );
-      if (correctionByShipmentId.size !== trustedCorrections.length) {
-        throw new OrderInvariantError('顺丰到付更正包含重复的发货地址');
-      }
-      if (
-        trustedCorrections.some(
-          (correction) =>
-            !chargeContext.shipments.some(
-              (shipment) => shipment.id === correction.shipmentId,
-            ),
-        )
-      ) {
-        throw new OrderInvariantError('顺丰到付更正包含不属于该工单的发货地址');
-      }
-      if (
-        !isSfCollect &&
-        order.status === OrderStatus.SHIPPED &&
-        (trustedCorrections.length !== chargeContext.shipments.length ||
-          chargeContext.shipments.some(
-            (shipment) => !correctionByShipmentId.has(shipment.id),
-          ))
-      ) {
-        throw new OrderInvariantError(
-          '已发货工单取消顺丰到付时，必须补齐每个地址的计费信息',
-        );
-      }
 
       let repriced: Awaited<
         ReturnType<typeof resolveExternalOrderChargesForFinalization>

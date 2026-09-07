@@ -366,6 +366,115 @@ function changeRequestVersionMismatchReason(
   return `工单版本已更新（${changes.join('，')}），请重新提交申请`;
 }
 
+async function readChangeRequestOrderInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+) {
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      orderNo: true,
+      submitterId: true,
+      status: true,
+      revision: true,
+      workOrderVersion: true,
+      settlementType: true,
+      isSfCollect: true,
+      items: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          orderId: true,
+          sequence: true,
+          fig: true,
+          name: true,
+          productId: true,
+          pricingRoute: true,
+          craft: true,
+          productStructure: true,
+          artworkVersion: true,
+          plateGroupId: true,
+          pricingGroup: true,
+          manualQuoteReason: true,
+          quantity: true,
+          pack: true,
+          specification: true,
+          actualWidthMm: true,
+          actualHeightMm: true,
+          paperType: true,
+          paperWeightGsm: true,
+          crafts: true,
+          frontFoilColors: true,
+          backFoilColors: true,
+          foilColors: true,
+          foilTechnique: true,
+          hasLocalFoil: true,
+          lamination: true,
+          printColors: true,
+          printColorsKnown: true,
+          isDoubleSided: true,
+          isDoubleColor: true,
+          unitPrice: true,
+          fixedFee: true,
+          subtotal: true,
+          quoteDisposition: true,
+          pricingSnapshot: true,
+          priceOverrideReason: true,
+          tasks: { select: { status: true } },
+          shipmentLines: {
+            select: {
+              quantity: true,
+              shipment: { select: { id: true, sequence: true } },
+            },
+          },
+        },
+      },
+      changeRequests: {
+        where: { status: OrderChangeRequestStatus.PENDING },
+        take: 1,
+        select: { id: true },
+      },
+      packagingGroups: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          orderId: true,
+          sequence: true,
+          name: true,
+          mode: true,
+          actualBagCount: true,
+          unitPrice: true,
+          subtotal: true,
+          pricingSnapshot: true,
+          priceOverrideReason: true,
+          lines: {
+            select: { orderItemId: true, unitsPerBag: true },
+          },
+        },
+      },
+      shipments: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          sequence: true,
+          destinationProvince: true,
+          weightKg: true,
+        },
+      },
+      productionOperations: {
+        take: 1,
+        select: {
+          id: true,
+          reports: { take: 1, select: { id: true } },
+        },
+      },
+    },
+  });
+  if (!order) throw new OrderChangeRequestError('工单不存在');
+  return order;
+}
+
 /**
  * Records a proposal only. The live order remains unchanged until an ADMIN
  * approves it, so every client keeps seeing one authoritative revision.
@@ -386,108 +495,7 @@ export async function createOrderChangeRequest(
         input.orderId,
       )}))`;
 
-      const order = await tx.order.findUnique({
-        where: { id: input.orderId },
-        select: {
-          id: true,
-          orderNo: true,
-          submitterId: true,
-          status: true,
-          revision: true,
-          workOrderVersion: true,
-          settlementType: true,
-          isSfCollect: true,
-          items: {
-            orderBy: { sequence: 'asc' },
-            select: {
-              id: true,
-              orderId: true,
-              sequence: true,
-              fig: true,
-              name: true,
-              productId: true,
-              pricingRoute: true,
-              craft: true,
-              productStructure: true,
-              artworkVersion: true,
-              plateGroupId: true,
-              pricingGroup: true,
-              manualQuoteReason: true,
-              quantity: true,
-              pack: true,
-              specification: true,
-              actualWidthMm: true,
-              actualHeightMm: true,
-              paperType: true,
-              paperWeightGsm: true,
-              crafts: true,
-              frontFoilColors: true,
-              backFoilColors: true,
-              foilColors: true,
-              foilTechnique: true,
-              hasLocalFoil: true,
-              lamination: true,
-              printColors: true,
-              printColorsKnown: true,
-              isDoubleSided: true,
-              isDoubleColor: true,
-              unitPrice: true,
-              fixedFee: true,
-              subtotal: true,
-              quoteDisposition: true,
-              pricingSnapshot: true,
-              priceOverrideReason: true,
-              tasks: { select: { status: true } },
-              shipmentLines: {
-                select: {
-                  quantity: true,
-                  shipment: { select: { id: true, sequence: true } },
-                },
-              },
-            },
-          },
-          changeRequests: {
-            where: { status: OrderChangeRequestStatus.PENDING },
-            take: 1,
-            select: { id: true },
-          },
-          packagingGroups: {
-            orderBy: { sequence: 'asc' },
-            select: {
-              id: true,
-              orderId: true,
-              sequence: true,
-              name: true,
-              mode: true,
-              actualBagCount: true,
-              unitPrice: true,
-              subtotal: true,
-              pricingSnapshot: true,
-              priceOverrideReason: true,
-              lines: {
-                select: { orderItemId: true, unitsPerBag: true },
-              },
-            },
-          },
-          shipments: {
-            orderBy: { sequence: 'asc' },
-            select: {
-              id: true,
-              sequence: true,
-              destinationProvince: true,
-              weightKg: true,
-            },
-          },
-          productionOperations: {
-            take: 1,
-            select: {
-              id: true,
-              reports: { take: 1, select: { id: true } },
-            },
-          },
-        },
-      });
-      if (!order) throw new OrderChangeRequestError('工单不存在');
+      const order = await readChangeRequestOrderInTx(tx, input.orderId);
       assertCanRequest(actor, order);
       assertExpectedOrderVersions(input, order);
       if (
@@ -3532,6 +3540,145 @@ export type OrderChangePricingPreview = {
   pendingCharges: OrderChangePendingChargePreview[];
 };
 
+async function readReviewableChangeRequestInTx(
+  tx: Prisma.TransactionClient,
+  requestId: string,
+  expectedPriceRevision: number | undefined,
+) {
+  const request = await tx.orderChangeRequest.findUnique({
+    where: { id: requestId },
+    include: {
+      order: {
+        include: {
+          items: {
+            orderBy: { sequence: 'asc' },
+            include: {
+              tasks: { select: LEGACY_TASK_STATUS_SELECT },
+              shipmentLines: {
+                include: {
+                  shipment: { select: { id: true, sequence: true } },
+                },
+              },
+            },
+          },
+          shipments: {
+            orderBy: { sequence: 'asc' },
+            select: {
+              id: true,
+              sequence: true,
+              destinationProvince: true,
+              weightKg: true,
+            },
+          },
+          packagingGroups: {
+            orderBy: { sequence: 'asc' },
+            include: {
+              lines: {
+                select: { orderItemId: true, unitsPerBag: true },
+              },
+            },
+          },
+          productionOperations: {
+            take: 1,
+            select: {
+              id: true,
+              reports: { take: 1, select: { id: true } },
+            },
+          },
+          customerCharges: {
+            select: LOGISTICS_PROJECTION_CHARGE_SELECT,
+          },
+        },
+      },
+    },
+  });
+  if (!request) throw new OrderChangeRequestError('修改申请不存在');
+  if (request.status !== OrderChangeRequestStatus.PENDING) {
+    throw new OrderChangeRequestError('该申请已经处理，无需再预览计价');
+  }
+  const versionMismatchReason = changeRequestVersionMismatchReason(request);
+  if (versionMismatchReason) {
+    throw new OrderChangeRequestError(versionMismatchReason);
+  }
+  if (!CHANGEABLE_ORDER_STATUSES.includes(request.order.status)) {
+    throw new OrderChangeRequestError('工单已完工，不能预览修改计价');
+  }
+  if (
+    expectedPriceRevision !== undefined &&
+    expectedPriceRevision !== request.order.priceRevision
+  ) {
+    throw new OrderChangeRequestError(
+      `价格版本已从 v${expectedPriceRevision} 更新为 v${request.order.priceRevision}，请刷新预览`,
+    );
+  }
+
+  return request;
+}
+
+function buildUnchangedPricingPreview(
+  request: Awaited<ReturnType<typeof readReviewableChangeRequestInTx>>,
+  changes: readonly ResolvedProposedItemChange[],
+  itemById: ReadonlyMap<string, Awaited<ReturnType<typeof readReviewableChangeRequestInTx>>["order"]["items"][number]>,
+  quotedAt: Date,
+): OrderChangePricingPreview {
+  const items = changes.map((change, changeIndex) => {
+    const source = itemById.get(
+      change.operation === 'UPDATE' ? change.itemId : change.templateItemId,
+    );
+    if (!source) throw new OrderChangeRequestError('款式已不存在，请重新申请');
+    const subtotal = new Decimal(source.subtotal).toFixed(2);
+    const previousFoilFacts = deriveLegacyOrderItemFoilFacts(source);
+    const nextFoilFacts = change.foilFactsProvided
+      ? change
+      : previousFoilFacts;
+    return {
+      changeIndex,
+      operation: change.operation,
+      sourceItemId: source.id,
+      previousName: source.name,
+      name: change.name ?? source.name,
+      previousQuantity: source.quantity,
+      quantity: change.operation === 'ADD'
+        ? change.quantity
+        : (change.quantity ?? source.quantity),
+      previousSpecification: source.specification,
+      specification: change.specification ?? source.specification,
+      previousFrontFoilColors:
+        change.operation === 'UPDATE'
+          ? previousFoilFacts.frontFoilColors
+          : null,
+      frontFoilColors: nextFoilFacts.frontFoilColors,
+      previousBackFoilColors:
+        change.operation === 'UPDATE'
+          ? previousFoilFacts.backFoilColors
+          : null,
+      backFoilColors: nextFoilFacts.backFoilColors,
+      priceImpact: 'UNCHANGED' as const,
+      oldSubtotal: subtotal,
+      newSubtotal: subtotal,
+      suggestedUnitPrice: null,
+      suggestedFixedFee: null,
+      errors: [],
+    };
+  });
+  return {
+    requestId: request.id,
+    orderId: request.orderId,
+    baseRevision: request.baseRevision,
+    priceRevision: request.order.priceRevision,
+    quoteToken: null,
+    quotedAt: quotedAt.toISOString(),
+    complete: true,
+    requiresReviewRemark: false,
+    totalExcludesPendingPlateFee: false,
+    oldTotal: new Decimal(request.order.totalAmount).toFixed(2),
+    newTotal: new Decimal(request.order.totalAmount).toFixed(2),
+    delta: '0.00',
+    items,
+    pendingCharges: [],
+  };
+}
+
 /**
  * Read-only approval preview. It deliberately uses the same merged business
  * facts and quote service as approval, but its amounts are informational:
@@ -3560,72 +3707,9 @@ export async function previewOrderChangeRequestPricing(
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       locator.orderId,
     )}))`;
-    const request = await tx.orderChangeRequest.findUnique({
-      where: { id: requestId },
-      include: {
-        order: {
-          include: {
-            items: {
-              orderBy: { sequence: 'asc' },
-              include: {
-                tasks: { select: LEGACY_TASK_STATUS_SELECT },
-                shipmentLines: {
-                  include: {
-                    shipment: { select: { id: true, sequence: true } },
-                  },
-                },
-              },
-            },
-            shipments: {
-              orderBy: { sequence: 'asc' },
-              select: {
-                id: true,
-                sequence: true,
-                destinationProvince: true,
-                weightKg: true,
-              },
-            },
-            packagingGroups: {
-              orderBy: { sequence: 'asc' },
-              include: {
-                lines: {
-                  select: { orderItemId: true, unitsPerBag: true },
-                },
-              },
-            },
-            productionOperations: {
-              take: 1,
-              select: {
-                id: true,
-                reports: { take: 1, select: { id: true } },
-              },
-            },
-            customerCharges: {
-              select: LOGISTICS_PROJECTION_CHARGE_SELECT,
-            },
-          },
-        },
-      },
-    });
-    if (!request) throw new OrderChangeRequestError('修改申请不存在');
-    if (request.status !== OrderChangeRequestStatus.PENDING) {
-      throw new OrderChangeRequestError('该申请已经处理，无需再预览计价');
-    }
-    const versionMismatchReason = changeRequestVersionMismatchReason(request);
-    if (versionMismatchReason) {
-      throw new OrderChangeRequestError(versionMismatchReason);
-    }
-    if (!CHANGEABLE_ORDER_STATUSES.includes(request.order.status)) {
-      throw new OrderChangeRequestError('工单已完工，不能预览修改计价');
-    }
-    if (
-      options.expectedPriceRevision !== undefined &&
-      options.expectedPriceRevision !== request.order.priceRevision
-    ) {
-      throw new OrderChangeRequestError(
-        `价格版本已从 v${options.expectedPriceRevision} 更新为 v${request.order.priceRevision}，请刷新预览`,
-      );
-    }
+    const request = await readReviewableChangeRequestInTx(
+      tx, requestId, options.expectedPriceRevision,
+    );
 
     const proposedChanges = readProposedChanges(request.proposedChanges);
     const itemById = new Map(request.order.items.map((item) => [item.id, item]));
@@ -3695,62 +3779,7 @@ export async function previewOrderChangeRequestPricing(
       pricingChanged,
     );
     if (!pricingChanged) {
-      const items = changes.map((change, changeIndex) => {
-        const source = itemById.get(
-          change.operation === 'UPDATE' ? change.itemId : change.templateItemId,
-        );
-        if (!source) throw new OrderChangeRequestError('款式已不存在，请重新申请');
-        const subtotal = new Decimal(source.subtotal).toFixed(2);
-        const previousFoilFacts = deriveLegacyOrderItemFoilFacts(source);
-        const nextFoilFacts = change.foilFactsProvided
-          ? change
-          : previousFoilFacts;
-        return {
-          changeIndex,
-          operation: change.operation,
-          sourceItemId: source.id,
-          previousName: source.name,
-          name: change.name ?? source.name,
-          previousQuantity: source.quantity,
-          quantity: change.operation === 'ADD'
-            ? change.quantity
-            : (change.quantity ?? source.quantity),
-          previousSpecification: source.specification,
-          specification: change.specification ?? source.specification,
-          previousFrontFoilColors:
-            change.operation === 'UPDATE'
-              ? previousFoilFacts.frontFoilColors
-              : null,
-          frontFoilColors: nextFoilFacts.frontFoilColors,
-          previousBackFoilColors:
-            change.operation === 'UPDATE'
-              ? previousFoilFacts.backFoilColors
-              : null,
-          backFoilColors: nextFoilFacts.backFoilColors,
-          priceImpact: 'UNCHANGED' as const,
-          oldSubtotal: subtotal,
-          newSubtotal: subtotal,
-          suggestedUnitPrice: null,
-          suggestedFixedFee: null,
-          errors: [],
-        };
-      });
-      return {
-        requestId: request.id,
-        orderId: request.orderId,
-        baseRevision: request.baseRevision,
-        priceRevision: request.order.priceRevision,
-        quoteToken: null,
-        quotedAt: quotedAt.toISOString(),
-        complete: true,
-        requiresReviewRemark: false,
-        totalExcludesPendingPlateFee: false,
-        oldTotal: new Decimal(request.order.totalAmount).toFixed(2),
-        newTotal: new Decimal(request.order.totalAmount).toFixed(2),
-        delta: '0.00',
-        items,
-        pendingCharges: [],
-      };
+      return buildUnchangedPricingPreview(request, changes, itemById, quotedAt);
     }
 
     const primaryShipment = request.order.shipments.find(

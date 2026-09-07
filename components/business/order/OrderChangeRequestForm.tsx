@@ -477,6 +477,53 @@ export function OrderChangeRequestForm(props: Props) {
   );
 }
 
+function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason, pending }: {
+  modifyKind: ModifyKind;
+  setModifyKind: (value: ModifyKind) => void;
+  reason: string;
+  setReason: (value: string) => void;
+  pending: boolean;
+}) {
+  return (
+    <>
+      <label className="block min-w-0 space-y-1 text-sm">
+        <span className="font-medium">修改类别</span>
+        <select
+          value={modifyKind}
+          onChange={(event) =>
+            setModifyKind(event.target.value as typeof modifyKind)
+          }
+          disabled={pending}
+          className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
+        >
+          {MODIFY_KINDS.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <span className="block text-xs text-muted-foreground">
+          此处仅用于审批归类；本表只修改上方勾选的款式事实，不会直接更改承诺交期或收货地址。
+        </span>
+      </label>
+
+      <label className="block min-w-0 space-y-1 text-sm">
+        <span className="font-medium">修改原因</span>
+        <textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          rows={3}
+          maxLength={500}
+          required
+          disabled={pending}
+          className="w-full min-w-0 rounded-md border bg-background px-3 py-2"
+          placeholder="写明客户要求、交期影响等，方便管理员审核"
+        />
+      </label>
+    </>
+  );
+}
+
 function OrderChangeRequestDraftForm({
   orderId,
   expectedRevision,
@@ -744,40 +791,13 @@ function OrderChangeRequestDraftForm({
         ) : null}
       </fieldset>
 
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span className="font-medium">修改类别</span>
-        <select
-          value={modifyKind}
-          onChange={(event) =>
-            setModifyKind(event.target.value as typeof modifyKind)
-          }
-          disabled={pending}
-          className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
-        >
-          {MODIFY_KINDS.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <span className="block text-xs text-muted-foreground">
-          此处仅用于审批归类；本表只修改上方勾选的款式事实，不会直接更改承诺交期或收货地址。
-        </span>
-      </label>
-
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span className="font-medium">修改原因</span>
-        <textarea
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          rows={3}
-          maxLength={500}
-          required
-          disabled={pending}
-          className="w-full min-w-0 rounded-md border bg-background px-3 py-2"
-          placeholder="写明客户要求、交期影响等，方便管理员审核"
-        />
-      </label>
+      <OrderChangeReasonFields
+        modifyKind={modifyKind}
+        setModifyKind={setModifyKind}
+        reason={reason}
+        setReason={setReason}
+        pending={pending}
+      />
       <StateMessage state={state} />
       <Button type="submit" disabled={pending || !canSubmit} className="min-h-11">
         {pending

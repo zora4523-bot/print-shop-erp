@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  type Dispatch,
+  type SetStateAction,
   useActionState,
   useCallback,
   useEffect,
@@ -75,6 +77,156 @@ function priceBookLabel(
 
 function hasValue(value: string | null | undefined): boolean {
   return Boolean(value?.trim());
+}
+
+function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDrafts }: {
+  preview: OrderPricingReviewPreview;
+  shipmentDrafts: Record<string, ShipmentDraft>;
+  setShipmentDrafts: Dispatch<SetStateAction<Record<string, ShipmentDraft>>>;
+}) {
+  return (
+    <>
+      {preview.shipments.length > 0 ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">逐票物流与耗材收费</h3>
+          <ol className="grid gap-3 lg:grid-cols-2">
+            {preview.shipments.map((shipment) => {
+              const defaultDraft: ShipmentDraft = {
+                shippingFee:
+                  shipment.shipping.currentAmount ??
+                  shipment.shipping.suggestedAmount ??
+                  "",
+                packingMaterialFee:
+                  shipment.packaging.currentAmount ??
+                  shipment.packaging.suggestedAmount ??
+                  "",
+                reason: shipment.currentReason ?? "",
+              };
+              const draft =
+                shipmentDrafts[shipment.shipmentId] ?? defaultDraft;
+              const shippingAutomatic =
+                shipment.shipping.complete && !shipment.shipping.advisory;
+              const packagingAutomatic =
+                shipment.packaging.complete && !shipment.packaging.advisory;
+              const needsReason = !shippingAutomatic || !packagingAutomatic;
+              return (
+                <li
+                  id={`pricing-review-shipment-${shipment.shipmentId}`}
+                  key={shipment.shipmentId}
+                  className="scroll-mt-24 space-y-3 rounded-md border p-3 text-sm"
+                >
+                  <p className="font-medium">
+                    地址 {shipment.sequence} ·{" "}
+                    {shipment.itemQuantity.toLocaleString("zh-CN")} 个
+                  </p>
+                  {[
+                    ...shipment.shipping.errors,
+                    ...shipment.packaging.errors,
+                  ].length > 0 ? (
+                    <p className="text-xs text-destructive">
+                      {[
+                        ...shipment.shipping.errors,
+                        ...shipment.packaging.errors,
+                      ]
+                        .filter((value, index, values) =>
+                          values.indexOf(value) === index,
+                        )
+                        .join("；")}
+                    </p>
+                  ) : null}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1 text-xs">
+                      <span>计费省份</span>
+                      <Input
+                        value={shipment.destinationProvince ?? ""}
+                        readOnly
+                        aria-readonly="true"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span>计费重量（kg）</span>
+                      <Input
+                        inputMode="decimal"
+                        value={shipment.billableWeightKg ?? ""}
+                        readOnly
+                        aria-readonly="true"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span>
+                        快递费（快照建议{" "}
+                        {shipment.shipping.suggestedAmount ?? "无"}）
+                      </span>
+                      <Input
+                        required={!shippingAutomatic}
+                        inputMode="decimal"
+                        value={draft.shippingFee}
+                        readOnly={shippingAutomatic}
+                        aria-readonly={shippingAutomatic}
+                        onChange={(event) =>
+                          setShipmentDrafts((current) => ({
+                            ...current,
+                            [shipment.shipmentId]: {
+                              ...(current[shipment.shipmentId] ??
+                                defaultDraft),
+                              shippingFee: event.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span>
+                        打包耗材费（快照参考{" "}
+                        {shipment.packaging.suggestedAmount ?? "无"}）
+                      </span>
+                      <Input
+                        required={!packagingAutomatic}
+                        inputMode="decimal"
+                        value={draft.packingMaterialFee}
+                        readOnly={packagingAutomatic}
+                        aria-readonly={packagingAutomatic}
+                        onChange={(event) =>
+                          setShipmentDrafts((current) => ({
+                            ...current,
+                            [shipment.shipmentId]: {
+                              ...(current[shipment.shipmentId] ??
+                                defaultDraft),
+                              packingMaterialFee: event.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  {needsReason ? (
+                    <label className="block space-y-1 text-xs">
+                      <span>收费确认说明（人工/参考价必填）</span>
+                      <Textarea
+                        required
+                        maxLength={500}
+                        value={draft.reason}
+                        onChange={(event) =>
+                          setShipmentDrafts((current) => ({
+                            ...current,
+                            [shipment.shipmentId]: {
+                              ...(current[shipment.shipmentId] ??
+                                defaultDraft),
+                              reason: event.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 export function OrderPricingReviewForm({ orderId }: Props) {
@@ -715,145 +867,11 @@ export function OrderPricingReviewForm({ orderId }: Props) {
             </div>
           ) : null}
 
-          {preview.shipments.length > 0 ? (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold">逐票物流与耗材收费</h3>
-              <ol className="grid gap-3 lg:grid-cols-2">
-                {preview.shipments.map((shipment) => {
-                const defaultDraft: ShipmentDraft = {
-                  shippingFee:
-                    shipment.shipping.currentAmount ??
-                    shipment.shipping.suggestedAmount ??
-                    "",
-                  packingMaterialFee:
-                    shipment.packaging.currentAmount ??
-                    shipment.packaging.suggestedAmount ??
-                    "",
-                  reason: shipment.currentReason ?? "",
-                };
-                const draft =
-                  shipmentDrafts[shipment.shipmentId] ?? defaultDraft;
-                const shippingAutomatic =
-                  shipment.shipping.complete && !shipment.shipping.advisory;
-                const packagingAutomatic =
-                  shipment.packaging.complete && !shipment.packaging.advisory;
-                const needsReason = !shippingAutomatic || !packagingAutomatic;
-                return (
-                  <li
-                    id={`pricing-review-shipment-${shipment.shipmentId}`}
-                    key={shipment.shipmentId}
-                    className="scroll-mt-24 space-y-3 rounded-md border p-3 text-sm"
-                  >
-                    <p className="font-medium">
-                      地址 {shipment.sequence} ·{" "}
-                      {shipment.itemQuantity.toLocaleString("zh-CN")} 个
-                    </p>
-                    {[
-                      ...shipment.shipping.errors,
-                      ...shipment.packaging.errors,
-                    ].length > 0 ? (
-                      <p className="text-xs text-destructive">
-                        {[
-                          ...shipment.shipping.errors,
-                          ...shipment.packaging.errors,
-                        ]
-                          .filter((value, index, values) =>
-                            values.indexOf(value) === index,
-                          )
-                          .join("；")}
-                      </p>
-                    ) : null}
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="space-y-1 text-xs">
-                        <span>计费省份</span>
-                        <Input
-                          value={shipment.destinationProvince ?? ""}
-                          readOnly
-                          aria-readonly="true"
-                        />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span>计费重量（kg）</span>
-                        <Input
-                          inputMode="decimal"
-                          value={shipment.billableWeightKg ?? ""}
-                          readOnly
-                          aria-readonly="true"
-                        />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span>
-                          快递费（快照建议{" "}
-                          {shipment.shipping.suggestedAmount ?? "无"}）
-                        </span>
-                        <Input
-                          required={!shippingAutomatic}
-                          inputMode="decimal"
-                          value={draft.shippingFee}
-                          readOnly={shippingAutomatic}
-                          aria-readonly={shippingAutomatic}
-                          onChange={(event) =>
-                            setShipmentDrafts((current) => ({
-                              ...current,
-                              [shipment.shipmentId]: {
-                                ...(current[shipment.shipmentId] ??
-                                  defaultDraft),
-                                shippingFee: event.target.value,
-                              },
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span>
-                          打包耗材费（快照参考{" "}
-                          {shipment.packaging.suggestedAmount ?? "无"}）
-                        </span>
-                        <Input
-                          required={!packagingAutomatic}
-                          inputMode="decimal"
-                          value={draft.packingMaterialFee}
-                          readOnly={packagingAutomatic}
-                          aria-readonly={packagingAutomatic}
-                          onChange={(event) =>
-                            setShipmentDrafts((current) => ({
-                              ...current,
-                              [shipment.shipmentId]: {
-                                ...(current[shipment.shipmentId] ??
-                                  defaultDraft),
-                                packingMaterialFee: event.target.value,
-                              },
-                            }))
-                          }
-                        />
-                      </label>
-                    </div>
-                    {needsReason ? (
-                      <label className="block space-y-1 text-xs">
-                        <span>收费确认说明（人工/参考价必填）</span>
-                        <Textarea
-                          required
-                          maxLength={500}
-                          value={draft.reason}
-                          onChange={(event) =>
-                            setShipmentDrafts((current) => ({
-                              ...current,
-                              [shipment.shipmentId]: {
-                                ...(current[shipment.shipmentId] ??
-                                  defaultDraft),
-                                reason: event.target.value,
-                              },
-                            }))
-                          }
-                        />
-                      </label>
-                    ) : null}
-                  </li>
-                );
-              })}
-              </ol>
-            </div>
-          ) : null}
+          <PricingReviewShipmentFields
+            preview={preview}
+            shipmentDrafts={shipmentDrafts}
+            setShipmentDrafts={setShipmentDrafts}
+          />
 
           <label className="block space-y-1 text-sm">
             <span>整单终价备注（可选）</span>

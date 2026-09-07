@@ -144,13 +144,64 @@ type InventoryCountStockNotification = {
   spreadIndex: number;
 };
 
-export async function postInventoryCount(
-  input: PostInventoryCountInput,
-  actor: { id: string },
-  now: Date = new Date(),
-): Promise<InventoryCountPostResult> {
+async function enqueueInventoryCountStockAlerts(
+  tx: Prisma.TransactionClient,
+  changedRows: readonly { materialId: string; difference: Decimal }[],
+  materialById: ReadonlyMap<string, {
+    name: string;
+    currentStock: Prisma.Decimal;
+    safetyStock: Prisma.Decimal | null;
+  }>,
+  inventoryCountId: string,
+): Promise<InventoryCountStockNotification[]> {
+  // Material rows remain locked throughout posting. Aggregate only the
+  // accepted location adjustments, then compare the final global balance
+  // with the locked pre-count balance. This emits one crossing per material
+  // and ignores temporary dips that another counted location offsets.
+  const differenceByMaterial = new Map<string, Decimal>();
+  for (const row of changedRows) {
+    differenceByMaterial.set(
+      row.materialId,
+      (differenceByMaterial.get(row.materialId) ?? new Decimal(0)).plus(
+        row.difference,
+      ),
+    );
+  }
+  const postCommitNotifications: InventoryCountStockNotification[] = [];
+  let spreadIndex = 0;
+  for (const [materialId, difference] of differenceByMaterial) {
+    const material = materialById.get(materialId)!;
+    if (material.safetyStock == null) continue;
+    const payload = materialStockAlertForCrossing({
+      materialName: material.name,
+      before: material.currentStock,
+      after: new Decimal(material.currentStock).plus(difference),
+      safetyStock: material.safetyStock,
+    });
+    if (!payload) continue;
+    const notification = {
+      payload,
+      dedupeKey: `notification:STOCK_ALERT:inventory-count:${inventoryCountId}:${materialId}`,
+      spreadIndex,
+    };
+    const queued = await enqueueNotificationInTransaction(
+      tx as unknown as EnqueueClient,
+      'STOCK_ALERT',
+      payload,
+      { dedupeKey: notification.dedupeKey, spreadIndex },
+    );
+    if (!queued) postCommitNotifications.push(notification);
+    spreadIndex += 1;
+  }
+
+  return postCommitNotifications;
+}
+
+function normalizeInventoryCountItems(
+  rawItems: PostInventoryCountInput["items"],
+): NormalizedCountItem[] {
   const uniqueKeys = new Set<string>();
-  const items: NormalizedCountItem[] = input.items
+  const items: NormalizedCountItem[] = rawItems
     .map((item) => ({
       ...item,
       counted: new Decimal(item.countedQuantity),
@@ -173,6 +224,16 @@ export async function postInventoryCount(
       );
     }
   }
+
+  return items;
+}
+
+export async function postInventoryCount(
+  input: PostInventoryCountInput,
+  actor: { id: string },
+  now: Date = new Date(),
+): Promise<InventoryCountPostResult> {
+  const items = normalizeInventoryCountItems(input.items);
 
   const existingBeforeReservation = await db.inventoryCount.findUnique({
     where: { idempotencyKey: input.idempotencyKey },
@@ -418,45 +479,9 @@ export async function postInventoryCount(
         });
       }
 
-      // Material rows remain locked throughout posting. Aggregate only the
-      // accepted location adjustments, then compare the final global balance
-      // with the locked pre-count balance. This emits one crossing per material
-      // and ignores temporary dips that another counted location offsets.
-      const differenceByMaterial = new Map<string, Decimal>();
-      for (const row of changedRows) {
-        differenceByMaterial.set(
-          row.materialId,
-          (differenceByMaterial.get(row.materialId) ?? new Decimal(0)).plus(
-            row.difference,
-          ),
-        );
-      }
-      const postCommitNotifications: InventoryCountStockNotification[] = [];
-      let spreadIndex = 0;
-      for (const [materialId, difference] of differenceByMaterial) {
-        const material = materialById.get(materialId)!;
-        if (material.safetyStock == null) continue;
-        const payload = materialStockAlertForCrossing({
-          materialName: material.name,
-          before: material.currentStock,
-          after: new Decimal(material.currentStock).plus(difference),
-          safetyStock: material.safetyStock,
-        });
-        if (!payload) continue;
-        const notification = {
-          payload,
-          dedupeKey: `notification:STOCK_ALERT:inventory-count:${inventoryCount.id}:${materialId}`,
-          spreadIndex,
-        };
-        const queued = await enqueueNotificationInTransaction(
-          tx as unknown as EnqueueClient,
-          'STOCK_ALERT',
-          payload,
-          { dedupeKey: notification.dedupeKey, spreadIndex },
-        );
-        if (!queued) postCommitNotifications.push(notification);
-        spreadIndex += 1;
-      }
+      const postCommitNotifications = await enqueueInventoryCountStockAlerts(
+        tx, changedRows, materialById, inventoryCount.id,
+      );
 
       return {
         id: inventoryCount.id,
