@@ -17,6 +17,7 @@ vi.mock('@/lib/background-jobs/clock', () => ({
 }));
 
 import {
+  createNextOrderPrintRequest,
   createOrderPrintRequestInTx,
   markOrderPrintRequestPrinted,
   markOrderPrintRequestPrintedInTx,
@@ -47,6 +48,91 @@ beforeEach(() => {
 });
 
 describe('versioned order print jobs', () => {
+  it('derives REPRINT from same-version printed history under the order lock', async () => {
+    const tx = txMock();
+    dbMock.$transaction.mockImplementationOnce(
+      async (callback: (client: typeof tx) => unknown) => callback(tx),
+    );
+    tx.orderPrintJob.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    tx.orderPrintJob.findFirst
+      .mockResolvedValueOnce({ id: 'printed-receipt-v1' })
+      .mockResolvedValueOnce(null);
+    tx.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.FOILING,
+      workOrderVersion: 1,
+    });
+    tx.orderPrintJob.create.mockResolvedValue({ id: 'reprint-request-v1' });
+
+    await expect(
+      createNextOrderPrintRequest(
+        {
+          orderId: 'order-1',
+          workOrderVersion: 1,
+          reason: '管理端批量创建打印任务',
+          idempotencyKey: 'batch-print-order-1-v1-again',
+        },
+        admin,
+      ),
+    ).resolves.toMatchObject({ jobId: 'reprint-request-v1' });
+
+    expect(tx.$executeRaw).toHaveBeenCalledOnce();
+    expect(tx.orderPrintJob.findFirst).toHaveBeenNthCalledWith(1, {
+      where: {
+        orderId: 'order-1',
+        workOrderVersion: 1,
+        state: OrderPrintJobState.PRINTED,
+      },
+      select: { id: true },
+    });
+    expect(tx.orderPrintJob.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        workOrderVersion: 1,
+        printKind: OrderPrintKind.REPRINT,
+      }),
+      select: { id: true },
+    });
+  });
+
+  it('derives INITIAL for a higher version with no printed history', async () => {
+    const tx = txMock();
+    dbMock.$transaction.mockImplementationOnce(
+      async (callback: (client: typeof tx) => unknown) => callback(tx),
+    );
+    tx.orderPrintJob.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    tx.orderPrintJob.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    tx.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.RELEASED,
+      workOrderVersion: 7,
+    });
+    tx.orderPrintJob.create.mockResolvedValue({ id: 'initial-request-v7' });
+
+    await createNextOrderPrintRequest(
+      {
+        orderId: 'order-1',
+        workOrderVersion: 7,
+        reason: '管理端批量创建打印任务',
+        idempotencyKey: 'batch-print-order-1-v7-first',
+      },
+      admin,
+    );
+
+    expect(tx.orderPrintJob.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        workOrderVersion: 7,
+        printKind: OrderPrintKind.INITIAL,
+      }),
+      select: { id: true },
+    });
+  });
+
   it('creates one unresolved current-version request under the caller lock', async () => {
     const tx = txMock();
     tx.orderPrintJob.findUnique.mockResolvedValue(null);

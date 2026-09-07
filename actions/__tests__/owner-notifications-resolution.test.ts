@@ -20,6 +20,7 @@ vi.mock('@/lib/notification/admin', () => {
     ChannelInUseError: DomainError,
     EmptyChannelIdsError: DomainError,
     InactiveChannelBindError: DomainError,
+    IneligibleChannelBindError: DomainError,
     RuleNotFoundError: DomainError,
     StaleChannelIdsError: DomainError,
     TooManyChannelsForPrivateEventError: DomainError,

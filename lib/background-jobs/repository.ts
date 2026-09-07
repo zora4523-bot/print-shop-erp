@@ -2,6 +2,7 @@ import {
   AgentMonthlyBillExportStatus,
   BackgroundJobAttemptStatus,
   BackgroundJobStatus,
+  NotificationStatus,
   OrderExportStatus,
   Prisma,
   type BackgroundJob,
@@ -19,6 +20,7 @@ import {
 import { databaseNow } from './clock';
 import { backgroundJobErrorCode, retryDelayMs } from './policy';
 import {
+  NOTIFICATION_DELIVERY_UNKNOWN_ERROR_CODE,
   backgroundJobRequiresOwnerResolution,
   isTerminalNotificationFailure,
 } from './terminal-policy';
@@ -43,10 +45,19 @@ export class BackgroundJobLeaseLostError extends Error {
   }
 }
 
+export const BACKGROUND_JOB_UNDISPATCHED_CLAIM_ERROR_CODE =
+  'WorkerStoppedBeforeDispatch';
+const STRANDED_NOTIFICATION_DELIVERY_ERROR =
+  'background job ended before delivery finalization could be persisted';
+
 export async function enqueueBackgroundJob(
   input: EnqueueBackgroundJobInput,
   client: EnqueueClient = db,
 ): Promise<EnqueueBackgroundJobResult> {
+  // Ad-hoc tests have no provider idempotency key or durable send reservation.
+  // One request authorizes one execution, including after an operator retry.
+  const singleAttempt = input.type === BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST;
+  const retryBudget = singleAttempt ? 1 : (input.maxAttempts ?? 5);
   // Do not use create -> catch P2002 here.  PostgreSQL marks an interactive
   // transaction aborted after a unique violation, so the duplicate lookup
   // itself fails when this helper is used as a transactional outbox.  Prisma's
@@ -59,7 +70,7 @@ export async function enqueueBackgroundJob(
       dedupeKey: input.dedupeKey,
       payload: input.payload,
       priority: input.priority ?? 100,
-      maxAttempts: input.maxAttempts ?? 5,
+      maxAttempts: retryBudget,
       availableAt: input.availableAt,
     }],
     skipDuplicates: true,
@@ -86,7 +97,6 @@ export async function enqueueBackgroundJob(
     if (backgroundJobRequiresOwnerResolution(job)) {
       return { job, created: false, requeued: false };
     }
-    const retryBudget = input.maxAttempts ?? 5;
     const updated = await client.backgroundJob.updateMany({
       where: {
         id: job.id,
@@ -103,7 +113,9 @@ export async function enqueueBackgroundJob(
         queue: input.queue,
         payload: input.payload,
         priority: input.priority ?? 100,
-        maxAttempts: Math.max(job.maxAttempts, job.attempts + retryBudget),
+        maxAttempts: singleAttempt
+          ? job.attempts + 1
+          : Math.max(job.maxAttempts, job.attempts + retryBudget),
         // 库时钟，不是 new Date()：这一行写下的 availableAt 之后要被
         // claimNextBackgroundJob 拿 `availableAt <= now()` 比较（同文件
         // 的 SQL）。用 Node 时钟写、用库时钟读，就是本模块专门要消除的
@@ -262,6 +274,59 @@ export async function heartbeatBackgroundJob(
   if (updated !== 1) throw new BackgroundJobLeaseLostError(job.id);
 }
 
+/**
+ * Return a claim that was acquired after process shutdown had already begun.
+ *
+ * `attempts` is an immutable fencing generation and the attempt row is durable
+ * audit evidence, so neither may be deleted or decremented. Compensating
+ * `maxAttempts` by one preserves the configured number of real handler runs;
+ * the next claim receives a fresh, strictly larger fencing token.
+ */
+export async function releaseUndispatchedBackgroundJobClaim(
+  job: ClaimedBackgroundJob,
+  /** 仅供测试注入时钟；生产留空，与 completeBackgroundJob 一致。 */
+  now?: Date,
+): Promise<void> {
+  await db.$transaction(async (tx) => {
+    const at = now ?? (await databaseNow(tx));
+    const updated = await tx.backgroundJob.updateMany({
+      where: {
+        id: job.id,
+        status: BackgroundJobStatus.RUNNING,
+        lockedBy: job.workerId,
+        attempts: job.attempts,
+        maxAttempts: job.maxAttempts,
+      },
+      data: {
+        status: BackgroundJobStatus.PENDING,
+        // The claim consumed one fencing generation but never invoked the
+        // handler. Restore that one unit of execution budget without reusing
+        // the attempt number or weakening notification-ledger fencing.
+        maxAttempts: job.maxAttempts + 1,
+        availableAt: at,
+        finishedAt: null,
+        lockedBy: null,
+        lockedAt: null,
+        heartbeatAt: null,
+        lastErrorCode: BACKGROUND_JOB_UNDISPATCHED_CLAIM_ERROR_CODE,
+      },
+    });
+    if (updated.count !== 1) throw new BackgroundJobLeaseLostError(job.id);
+
+    await tx.backgroundJobAttempt.update({
+      where: {
+        jobId_attempt: { jobId: job.id, attempt: job.attempts },
+      },
+      data: {
+        status: BackgroundJobAttemptStatus.ABANDONED,
+        errorCode: BACKGROUND_JOB_UNDISPATCHED_CLAIM_ERROR_CODE,
+        finishedAt: at,
+        durationMs: durationMs(job.claimedAt, at),
+      },
+    });
+  });
+}
+
 export async function completeBackgroundJob(
   job: ClaimedBackgroundJob,
   result?: BackgroundJobResult,
@@ -313,22 +378,57 @@ export async function failBackgroundJob(
   /** 仅供测试注入时钟；生产留空，见 completeBackgroundJob。 */
   now?: Date,
 ): Promise<void> {
-  const errorCode = backgroundJobErrorCode(error);
-  const partialResult = backgroundJobPartialResult(error);
+  const initialErrorCode = backgroundJobErrorCode(error);
+  const initialPartialResult = backgroundJobPartialResult(error);
   // UNKNOWN and stale manual-replay authorization are not retryable transport
   // failures. Retrying either payload cannot make it safe or current, so keep
   // the ledger evidence and terminate the owning job without burning attempts.
   const terminalNotificationFailure = isTerminalNotificationFailure({
     type: job.type,
-    lastErrorCode: errorCode,
+    lastErrorCode: initialErrorCode,
   });
-  const exhausted =
+  let exhausted =
     job.attempts >= job.maxAttempts || terminalNotificationFailure;
 
   await db.$transaction(async (tx) => {
     // availableAt 之后要被 claim 拿 `availableAt <= now()` 比较，所以退避
     // 的锚点必须是库时钟；偏移量本身是常数，在 JS 里加没有问题。
     const at = now ?? (await databaseNow(tx));
+    let errorCode = initialErrorCode;
+    let partialResult = initialPartialResult;
+    if (job.type === BACKGROUND_JOB_TYPES.NOTIFICATION) {
+      // If both finalization attempts failed during a database outage, the
+      // handler deliberately leaves SENDING as a no-resend fence. Once this
+      // transaction can move the owning job, atomically make those rows
+      // owner-visible and terminate it as requiring manual resolution.
+      const stranded = await tx.notificationLog.updateMany({
+        where: {
+          deliveryKey: job.dedupeKey,
+          status: NotificationStatus.SENDING,
+          OR: [
+            { deliveryJobAttempt: null },
+            { deliveryJobAttempt: { lte: job.attempts } },
+          ],
+        },
+        data: {
+          status: NotificationStatus.UNKNOWN,
+          errorMessage: STRANDED_NOTIFICATION_DELIVERY_ERROR,
+          deliveryAttemptId: null,
+          deliveryJobAttempt: null,
+          deliveryStateVersion: { increment: 1 },
+          lastAttemptAt: at,
+          updatedAt: at,
+        },
+      });
+      if (stranded.count > 0) {
+        exhausted = true;
+        errorCode = NOTIFICATION_DELIVERY_UNKNOWN_ERROR_CODE;
+        partialResult = addStrandedUnknowns(
+          partialResult,
+          stranded.count,
+        );
+      }
+    }
     const updated = await tx.backgroundJob.updateMany({
       where: {
         id: job.id,
@@ -496,7 +596,12 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
       },
       data: {
         status: BackgroundJobStatus.PENDING,
-        maxAttempts: Math.max(job.maxAttempts, job.attempts + 3),
+        // Do not retain a historically expanded budget for channel tests:
+        // losing an ACK or the success write cannot authorize another send.
+        maxAttempts:
+          job.type === BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST
+            ? job.attempts + 1
+            : Math.max(job.maxAttempts, job.attempts + 3),
         availableAt: at,
         finishedAt: null,
         lockedBy: null,
@@ -531,6 +636,33 @@ function backgroundJobPartialResult(
   // errors (batch results and notification delivery counts). Persist that
   // snapshot on the authoritative job row before retrying or marking DEAD.
   return error.partialResult as Prisma.InputJsonValue;
+}
+
+function addStrandedUnknowns(
+  partialResult: Prisma.InputJsonValue | undefined,
+  count: number,
+): Prisma.InputJsonObject {
+  const base: Prisma.InputJsonObject =
+    partialResult &&
+    typeof partialResult === 'object' &&
+    !Array.isArray(partialResult) &&
+    !('toJSON' in partialResult)
+      ? (partialResult as Prisma.InputJsonObject)
+      : {};
+  const priorUnknown =
+    typeof base.unknown === 'number' && Number.isSafeInteger(base.unknown)
+      ? base.unknown
+      : 0;
+  const priorErrorCodes = Array.isArray(base.errorCodes)
+    ? base.errorCodes.filter((code): code is string => typeof code === 'string')
+    : [];
+  return {
+    ...base,
+    unknown: priorUnknown + count,
+    errorCodes: priorErrorCodes.includes(STRANDED_NOTIFICATION_DELIVERY_ERROR)
+      ? priorErrorCodes
+      : [...priorErrorCodes, STRANDED_NOTIFICATION_DELIVERY_ERROR],
+  };
 }
 
 export async function cancelPendingBackgroundJob(jobId: string): Promise<boolean> {

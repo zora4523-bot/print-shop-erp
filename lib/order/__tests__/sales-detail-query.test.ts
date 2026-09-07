@@ -58,6 +58,9 @@ describe('sales order detail query boundary', () => {
     );
 
     const select = dbMock.order.findFirst.mock.calls[0]![0].select;
+    expect(select.workOrderVersion).toBe(true);
+    expect(select.editVersion).toBe(true);
+    expect(select.priceRevision).toBe(true);
     const serializedSelect = JSON.stringify(select);
     for (const forbidden of [
       'tasks',
@@ -107,6 +110,9 @@ describe('sales order detail query boundary', () => {
         estimated: false,
       },
     ]);
+    expect(result?.workOrderVersion).toBe(3);
+    expect(result?.editVersion).toBe(2);
+    expect(result?.priceRevision).toBe(5);
     expect(result?.items[0]?.designs).toEqual([
       {
         id: 'design-image',
@@ -131,6 +137,8 @@ describe('sales order detail query boundary', () => {
       expect.objectContaining({
         id: 'change-1',
         type: 'MODIFY',
+        baseWorkOrderVersion: 2,
+        workOrderVersionAfter: null,
         canWithdraw: true,
       }),
     ]);
@@ -148,6 +156,9 @@ function detailRecord() {
     isUrgent: false,
     isSfCollect: false,
     revision: 1,
+    editVersion: 2,
+    workOrderVersion: 3,
+    priceRevision: 5,
     pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
     processingAmount: '100.00',
     packagingAmount: '10.00',
@@ -232,6 +243,8 @@ function detailRecord() {
         requesterId: 'sales-1',
         status: OrderChangeRequestStatus.PENDING,
         baseRevision: 1,
+        baseWorkOrderVersion: 2,
+        workOrderVersionAfter: null,
         reason: '客户申请改数量',
         reviewRemark: null,
         reviewedAt: null,

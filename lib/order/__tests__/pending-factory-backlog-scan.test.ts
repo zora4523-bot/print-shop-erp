@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { OrderStatus } from '@/generated/prisma/enums';
 import {
+  pendingFactoryBacklogWhere,
   scanPendingFactoryBacklog,
   type PendingFactoryBacklogRepository,
 } from '../pending-factory-backlog-scan';
@@ -20,6 +22,14 @@ function repository(
 }
 
 describe('scanPendingFactoryBacklog', () => {
+  it('scans canonical and legacy awaiting-confirmation rows only', () => {
+    expect(pendingFactoryBacklogWhere()).toEqual({
+      status: {
+        in: [OrderStatus.PENDING_FACTORY, OrderStatus.SUBMITTED],
+      },
+    });
+  });
+
   it('returns no candidate before the configured threshold is reached', async () => {
     const repo = repository(4);
 

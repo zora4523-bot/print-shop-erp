@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   CustomerBlankPricingSectionView,
+  CustomerMachinePricingSectionView,
   CustomerPrintPricingSectionView,
   CustomerTiersPricingSectionView,
   type CustomerTierPricingRow,
@@ -70,6 +71,26 @@ function readonlyMarkup(html: string, priceLabel: string): string {
 }
 
 describe('CustomerPricingSectionViews', () => {
+  it('制烫金版费始终显示人工核价策略，不渲染历史数值配置', () => {
+    const html = renderToStaticMarkup(
+      <CustomerMachinePricingSectionView
+        rate={field('machine-rate', '0.04')}
+        flatFee={field('machine-flat', '40')}
+        jumpQuantity={field('machine-jump', 1_000)}
+        plateFee={field('legacy-plate-fee', '999.99')}
+      />,
+    );
+    const text = visibleText(html);
+
+    expect(text).toContain('局部烫金 · 机烫费与制版费');
+    expect(text).toContain('制烫金版费');
+    expect(text).toContain('始终人工核价');
+    expect(text).toContain('不设置自动单价，不参与计价引擎计算');
+    expect(html).not.toContain('aria-label="价格参数"');
+    expect(html).not.toContain('value="999.99"');
+    expect(text).not.toContain('元/版');
+  });
+
   it('renders tiers as the single design-spec ladder with derived ranges and paired prices', () => {
     const rows = [
       tier('q500', '500个档', 750, 0.48, 0.52),
@@ -236,9 +257,15 @@ describe('CustomerPricingSectionViews', () => {
     expect(text).toContain('元 / 单 · PER_ORDER · 整单总价不乘数量');
     expect(text).toContain('查到的直接就是整单总价');
     expect(text).toContain('该档无报价转人工，不是 0 元');
+    expect(text).toContain('单色烫金原子套餐');
+    expect(text).toContain('含制版费 · 按不可拆套餐总价计价');
+    expect(text).toContain('不再另收订单级制版费');
     expect(text).toContain('冰白中号 2千起为空就是现状');
     expect(inputMarkup(html, '冰白160g 中号2千档整单总价')).toContain(
       'placeholder="—"',
     );
+    expect(
+      inputMarkup(html, '单色烫金1千档含版费原子套餐价'),
+    ).toContain('value="200"');
   });
 });

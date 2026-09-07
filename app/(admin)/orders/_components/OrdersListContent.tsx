@@ -55,6 +55,23 @@ type SalesOrderListSummaryPromise = ReturnType<
   typeof getSalesOrderListSummary
 >;
 
+type OptionalAdminRead<T> = {
+  value: T;
+  issue: string | null;
+};
+
+async function optionalAdminRead<T>(
+  promise: Promise<T>,
+  fallback: T,
+  issue: string,
+): Promise<OptionalAdminRead<T>> {
+  try {
+    return { value: await promise, issue: null };
+  } catch {
+    return { value: fallback, issue };
+  }
+}
+
 export async function OrdersListContent({
   searchParams,
   user,
@@ -145,25 +162,51 @@ export async function AdminOrdersWorkspaceContent({
   const actor = user;
   const parsed = parseAdminOrderWorkspaceQuery(rawSearchParams);
   const stagnationSetting = getSetting('production_stagnation_days');
-  const [data, options, billingStats, recentExports] = await Promise.all([
-    stagnationSetting.then((setting) =>
-      loadAdminOrderWorkspace(
-        actor,
-        parsed.query,
-        new Date(),
-        setting.days,
+  const [data, optionsRead, billingStatsRead, recentExportsRead] =
+    await Promise.all([
+      stagnationSetting.then((setting) =>
+        loadAdminOrderWorkspace(
+          actor,
+          parsed.query,
+          new Date(),
+          setting.days,
+        ),
       ),
-    ),
-    loadOrderListFilterOptions(actor),
-    getAgentMonthlyBillingStats(),
-    listRecentOrderExports(user.id),
-  ]);
+      optionalAdminRead(
+        loadOrderListFilterOptions(actor),
+        { submitters: [], workers: [], crafts: [] },
+        '筛选选项暂时无法加载',
+      ),
+      optionalAdminRead(
+        getAgentMonthlyBillingStats(),
+        {
+          receivableAmount: '0.00',
+          receivableBillCount: 0,
+          unbilledOrderCount: 0,
+          draftBillCount: 0,
+        },
+        '账单统计暂时无法加载',
+      ),
+      optionalAdminRead(
+        listRecentOrderExports(user.id),
+        [],
+        '最近导出记录暂时无法加载',
+      ),
+    ]);
+  const runtimeIssues = [
+    optionsRead.issue,
+    billingStatsRead.issue,
+    recentExportsRead.issue,
+  ].filter((issue): issue is string => issue !== null);
+  const options = optionsRead.value;
+  const billingStats = billingStatsRead.value;
+  const recentExports = recentExportsRead.value;
   const exportParams = adminOrderExportParamsFromQuery(parsed.query);
   return (
     <AdminOrderWorkspace
       data={data}
       query={parsed.query}
-      issues={parsed.issues}
+      issues={[...parsed.issues, ...runtimeIssues]}
       options={options}
       billingStats={billingStats}
       exportControls={
@@ -283,16 +326,15 @@ export async function SalesOrdersListSection({
       query={displayedQuery}
       nowIso={new Date().toISOString()}
       footer={
-        <div key="sales-orders-pagination" className="border-t px-4 py-3">
-          <AdminPagination
-            basePath="/orders"
-            page={page.page}
-            pageCount={page.pageCount}
-            total={page.total}
-            pageSize={page.pageSize}
-            queryParams={queryParams}
-          />
-        </div>
+        <AdminPagination
+          key="sales-orders-pagination"
+          basePath="/orders"
+          page={page.page}
+          pageCount={page.pageCount}
+          total={page.total}
+          pageSize={page.pageSize}
+          queryParams={queryParams}
+        />
       }
     />
   );

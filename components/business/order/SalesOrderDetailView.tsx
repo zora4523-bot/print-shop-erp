@@ -15,6 +15,7 @@ import { salesOrderStatusPresentation } from '@/lib/order/sales-list-presentatio
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -33,9 +34,11 @@ import { SubmitOrderButton } from './SubmitOrderButton';
 import { UrgentToggleForm } from './UrgentToggleForm';
 
 function SalesOrderChangeRequestSection({
+  catalogProducts,
   canRequestCancellation,
   order,
 }: {
+  catalogProducts: OrderChangeCatalogProduct[];
   canRequestCancellation: boolean;
   order: SalesOrderDetail;
 }) {
@@ -52,12 +55,19 @@ function SalesOrderChangeRequestSection({
       </div>
       <OrderChangeRequestForm
         orderId={order.id}
+        expectedRevision={order.revision}
+        expectedWorkOrderVersion={order.workOrderVersion}
+        catalogProducts={catalogProducts}
         items={order.items.map((item) => ({
           id: item.id,
           sequence: item.sequence,
           name: item.name,
           quantity: item.quantity,
+          productId: item.productId,
+          pricingRoute: item.pricingRoute,
           specification: item.specification,
+          paperType: item.paperType,
+          paperWeightGsm: item.paperWeightGsm,
           frontFoilColors: item.frontFoilColors,
           backFoilColors: item.backFoilColors,
           foilColors: item.foilColors,
@@ -67,14 +77,24 @@ function SalesOrderChangeRequestSection({
       {canRequestCancellation ? (
         <div className="border-t pt-4">
           <h3 className="mb-2 text-sm font-semibold">申请取消</h3>
-          <OrderCancellationRequestForm orderId={order.id} />
+          <OrderCancellationRequestForm
+            orderId={order.id}
+            expectedRevision={order.revision}
+            expectedWorkOrderVersion={order.workOrderVersion}
+          />
         </div>
       ) : null}
     </section>
   );
 }
 
-export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
+export function SalesOrderDetailView({
+  catalogProducts,
+  order,
+}: {
+  catalogProducts: OrderChangeCatalogProduct[];
+  order: SalesOrderDetail;
+}) {
   const status = salesOrderStatusPresentation(order.status);
   const canEdit = isOrderEditable(order.status);
   const canToggleUrgent =
@@ -104,11 +124,6 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
       order.status === OrderStatus.FOILING ||
       order.status === OrderStatus.PACKING) &&
     !pendingChangeRequest;
-  const pricingPending =
-    order.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
-  const totalEstimated =
-    !pricingPending && order.feeLines.some((line) => line.estimated);
-  const hasPendingAmount = order.feeLines.some((line) => line.amount === null);
 
   return (
     <div data-slot="sales-order-detail" className="space-y-4">
@@ -161,12 +176,19 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
             ) : null}
             {canToggleSfCollect ? (
               <SfCollectToggleForm
+                key={`sf-${order.id}-${order.revision}-${order.priceRevision}`}
                 orderId={order.id}
                 currentValue={order.isSfCollect}
                 status={order.status}
                 isExternalSales={
                   order.settlementType === OrderSettlementType.EXTERNAL_SALES
                 }
+                mutationGuard={{
+                  expectedOrderRevision: order.revision,
+                  expectedEditVersion: order.editVersion,
+                  expectedWorkOrderVersion: order.workOrderVersion,
+                  expectedPriceRevision: order.priceRevision,
+                }}
                 shipments={order.shipments.map((shipment) => ({
                   id: shipment.id,
                   sequence: shipment.sequence,
@@ -277,6 +299,7 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
 
           {canRequestModify ? (
             <SalesOrderChangeRequestSection
+              catalogProducts={catalogProducts}
               canRequestCancellation={canRequestCancellation}
               order={order}
             />
@@ -284,65 +307,7 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
         </div>
 
         <div className="min-w-0 space-y-4">
-          <section
-            className={cn(
-              'space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6',
-              pricingPending && 'border-destructive/40 bg-destructive/5',
-            )}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-semibold">费用</h2>
-              {pricingPending ? (
-                <Badge variant="destructive">待管理员确认价格</Badge>
-              ) : null}
-            </div>
-            {order.feeLines.length > 0 ? (
-              <dl className="divide-y text-sm">
-                {order.feeLines.map((line) => (
-                  <div
-                    key={line.id}
-                    className="flex min-w-0 justify-between gap-3 py-2"
-                  >
-                    <dt className="admin-wrap-anywhere min-w-0 text-muted-foreground">
-                      {line.label}
-                    </dt>
-                    <dd className="shrink-0 font-sans font-medium tabular-nums">
-                      {line.amount === null ? '待定' : formatMoney(line.amount)}
-                      {line.estimated ? (
-                        <span className="ml-1 text-[10px] text-muted-foreground">
-                          估
-                        </span>
-                      ) : null}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ) : (
-              <p className="text-sm text-muted-foreground">暂无费用分项</p>
-            )}
-            <div className="flex items-baseline justify-between gap-3 border-t-2 border-foreground pt-3">
-              <span className="text-sm font-medium">
-                {!pricingPending && hasPendingAmount
-                  ? '已知合计（不含待定）'
-                  : '合计'}
-              </span>
-              <strong
-                className={cn(
-                  'font-sans text-xl tabular-nums',
-                  pricingPending && 'text-sm text-destructive',
-                )}
-              >
-                {pricingPending
-                  ? '待管理员确认价格'
-                  : formatMoney(order.totalAmount)}
-                {totalEstimated ? (
-                  <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                    估
-                  </span>
-                ) : null}
-              </strong>
-            </div>
-          </section>
+          <SalesOrderFeesSection order={order} />
 
           <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
             <h2 className="text-base font-semibold">
@@ -402,7 +367,15 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
                         </UiStatusBadge>
                         <span className="text-xs text-muted-foreground">
                           {request.type === 'CANCEL' ? '取消' : '修改'} ·{' '}
-                          基于第 {request.baseRevision} 版 ·{' '}
+                          基于业务第 {request.baseRevision} 版 · 基于生产版本{' '}
+                          {request.baseWorkOrderVersion == null
+                            ? '历史未记录'
+                            : `v${request.baseWorkOrderVersion}`}{' '}
+                          · 批准后生产版本{' '}
+                          {request.workOrderVersionAfter == null
+                            ? '未生成'
+                            : `v${request.workOrderVersionAfter}`}{' '}
+                          ·{' '}
                           {formatDateTimeShanghai(new Date(request.createdAt))}
                         </span>
                       </div>
@@ -426,6 +399,73 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function SalesOrderFeesSection({ order }: { order: SalesOrderDetail }) {
+  const pricingPending = order.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
+  const totalEstimated = !pricingPending && order.feeLines.some((line) => line.estimated);
+  const hasPendingAmount = order.feeLines.some((line) => line.amount === null);
+  return (
+    <section
+      className={cn(
+        'space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6',
+        pricingPending && 'border-destructive/40 bg-destructive/5',
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">费用</h2>
+        {pricingPending ? (
+          <Badge variant="destructive">待管理员确认价格</Badge>
+        ) : null}
+      </div>
+      {order.feeLines.length > 0 ? (
+        <dl className="divide-y text-sm">
+          {order.feeLines.map((line) => (
+            <div
+              key={line.id}
+              className="flex min-w-0 justify-between gap-3 py-2"
+            >
+              <dt className="admin-wrap-anywhere min-w-0 text-muted-foreground">
+                {line.label}
+              </dt>
+              <dd className="shrink-0 font-sans font-medium tabular-nums">
+                {line.amount === null ? '待定' : formatMoney(line.amount)}
+                {line.estimated ? (
+                  <span className="ml-1 text-[10px] text-muted-foreground">
+                    估
+                  </span>
+                ) : null}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="text-sm text-muted-foreground">暂无费用分项</p>
+      )}
+      <div className="flex items-baseline justify-between gap-3 border-t-2 border-foreground pt-3">
+        <span className="text-sm font-medium">
+          {!pricingPending && hasPendingAmount
+            ? '已知合计（不含待定）'
+            : '合计'}
+        </span>
+        <strong
+          className={cn(
+            'font-sans text-xl tabular-nums',
+            pricingPending && 'text-sm text-destructive',
+          )}
+        >
+          {pricingPending
+            ? '待管理员确认价格'
+            : formatMoney(order.totalAmount)}
+          {totalEstimated ? (
+            <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+              估
+            </span>
+          ) : null}
+        </strong>
+      </div>
+    </section>
   );
 }
 

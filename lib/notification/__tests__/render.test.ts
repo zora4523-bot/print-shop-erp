@@ -1,7 +1,76 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { renderTemplate } from '../render';
 
+beforeEach(() => vi.stubEnv('APP_PUBLIC_URL', ''));
+afterEach(() => vi.unstubAllEnvs());
+
 describe('renderTemplate', () => {
+  it('resolves a work-order deep link against the configured public origin', () => {
+    vi.stubEnv('APP_PUBLIC_URL', 'https://erp.example.com/');
+
+    expect(
+      renderTemplate('工单 {orderNo}\n{deepLink}', {
+        orderNo: 'GD 001/02',
+        deepLink: '/orders#wo=GD%20001%2F02',
+      }),
+    ).toBe('工单 GD 001/02\nhttps://erp.example.com/orders#wo=GD%20001%2F02');
+  });
+
+  it('keeps a custom Markdown link clickable without nesting another link', () => {
+    vi.stubEnv('APP_PUBLIC_URL', 'https://erp.example.com');
+
+    expect(
+      renderTemplate('[查看工单]({deepLink})', {
+        deepLink: '/orders#wo=GD-001',
+      }),
+    ).toBe('[查看工单](https://erp.example.com/orders#wo=GD-001)');
+  });
+
+  it('escapes order-number parentheses in Markdown link destinations', () => {
+    vi.stubEnv('APP_PUBLIC_URL', 'https://erp.example.com');
+
+    expect(
+      renderTemplate('[查看工单]({deepLink})', {
+        deepLink: '/orders#wo=GD-(001)',
+      }),
+    ).toBe('[查看工单](https://erp.example.com/orders#wo=GD-%28001%29)');
+  });
+
+  it.each([
+    '',
+    'not-a-url',
+    'javascript:alert(1)',
+    'https://user:password@erp.example.com',
+    'https://erp.example.com/internal',
+    'https://erp.example.com?token=private',
+    'https://erp.example.com#fragment',
+  ])('retains the relative path for an absent or invalid public origin %s', (origin) => {
+    vi.stubEnv('APP_PUBLIC_URL', origin);
+
+    expect(renderTemplate('{deepLink}', { deepLink: '/orders#wo=GD-001' })).toBe(
+      '/orders#wo=GD-001',
+    );
+  });
+
+  it('supports an explicitly configured local development origin', () => {
+    vi.stubEnv('APP_PUBLIC_URL', 'http://localhost:3127');
+
+    expect(renderTemplate('{deepLink}', { deepLink: '/orders#wo=GD-001' })).toBe(
+      'http://localhost:3127/orders#wo=GD-001',
+    );
+  });
+
+  it('does not rewrite unrelated fields or noncanonical deep links', () => {
+    vi.stubEnv('APP_PUBLIC_URL', 'https://erp.example.com');
+
+    expect(
+      renderTemplate('{summary}\n{deepLink}', {
+        summary: '/orders#wo=GD-001',
+        deepLink: '//other.example.com/orders#wo=GD-001',
+      }),
+    ).toBe('/orders#wo=GD-001\n//other.example.com/orders#wo=GD-001');
+  });
+
   it('replaces a single placeholder', () => {
     expect(renderTemplate('工单 {orderNo} 提交', { orderNo: 'O-1' })).toBe(
       '工单 O-1 提交',

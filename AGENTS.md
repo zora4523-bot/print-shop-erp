@@ -1,13 +1,11 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# 项目约束
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+- 涉及 Next.js 版本敏感的 API、路由或构建行为时，核对当前安装版 `node_modules/next/dist/docs/` 中的对应文档。
+- 服务端授权、资源所有权、金额精度、历史快照及数据库迁移约束见 [CONTRIBUTING.md](./CONTRIBUTING.md) 对应章节；这些业务与安全边界不因流程精简而改变。
 
-## 代码审查
+## 删除、验证与提交
 
-- 删代码前必须用 `rg` 全仓库确认无引用，检查范围包含配置文件、构建脚本、SQL、Prisma schema 与迁移。
-- 判定依据必须写实际引用位置，不写“看起来没用”或其他推测。
-- 每条删除后分别运行 build、test、typecheck；任一失败即回滚该条删除。
-- 清理改动与功能改动不得进入同一个 commit。
-- 动态 `import`、装饰器或注册表、i18n key、仅生产环境分支、对外公开 API 与迁移脚本默认保留，并列入人工复核清单。
+- 删除依据应包含实际引用、消费方或调用链证据；检查受影响的配置、构建脚本、SQL、Prisma schema 与迁移，不以静态搜索无命中单独判定可删。
+- 动态加载、注册表、i18n、生产专用入口和公开 API 需确认运行时或外部消费方；依赖不明时保留并说明待确认项。已应用的迁移不修改或删除。
+- 按 [测试要求](./CONTRIBUTING.md#测试要求) 对完整变更批次做与风险相称的验证，不要求每条删除重复全量检查。失败时区分本次回归、既存问题和环境故障；修复或撤销本次回归，不覆盖无关改动。
+- 无关清理单独提交；完成当前功能所必需的重构可与该功能一起审查、验证和提交。

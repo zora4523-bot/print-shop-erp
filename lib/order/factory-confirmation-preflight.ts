@@ -1,5 +1,23 @@
 import { OrderPricingStatus, OrderStatus } from '../../generated/prisma/enums';
 
+/**
+ * Both statuses mean "submitted and waiting for an explicit factory decision".
+ * PENDING_FACTORY is canonical; SUBMITTED remains readable/writable during the
+ * expand-migrate-contract window. Keeping this list shared prevents the admin
+ * queue and the backlog notifier from counting different work orders.
+ */
+export const FACTORY_CONFIRMATION_PENDING_STATUSES = [
+  OrderStatus.PENDING_FACTORY,
+  OrderStatus.SUBMITTED,
+] as const;
+
+const FACTORY_CONFIRMATION_PENDING_STATUS_SET: ReadonlySet<OrderStatus> =
+  new Set(FACTORY_CONFIRMATION_PENDING_STATUSES);
+
+export function isAwaitingFactoryConfirmation(status: OrderStatus): boolean {
+  return FACTORY_CONFIRMATION_PENDING_STATUS_SET.has(status);
+}
+
 export type FactoryConfirmationPreflightFacts = {
   status: OrderStatus;
   itemQuantities: readonly number[];
@@ -25,10 +43,7 @@ export function evaluateFactoryConfirmationPreflight(
 ): FactoryConfirmationPreflight {
   const issues: string[] = [];
 
-  if (
-    facts.status !== OrderStatus.PENDING_FACTORY &&
-    facts.status !== OrderStatus.SUBMITTED
-  ) {
+  if (!isAwaitingFactoryConfirmation(facts.status)) {
     issues.push('当前不是待工厂确认状态');
   }
   if (facts.pendingChangeRequestCount > 0) {

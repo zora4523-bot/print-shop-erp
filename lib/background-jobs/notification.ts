@@ -45,7 +45,9 @@ export async function enqueueNotificationJob<E extends NotificationEvent>(
     dedupeKey:
       options.dedupeKey ?? `notification:${event}:${randomUUID()}`,
     payload: body,
-    maxAttempts: 5,
+    // Official common-error guidance caps retries for errcode -1 at three.
+    // maxAttempts includes the first delivery, so 4 = initial + 3 retries.
+    maxAttempts: 4,
     priority: 200,
     // availableAt 最终由 claim 的数据库 now() 判断，因此排队节流的基准也
     // 必须来自数据库。Web 主机慢 5 分钟时，Date.now()+slot 会让前约 85 个
@@ -94,6 +96,7 @@ export async function handleNotificationJob(
         deliveryKey: job.dedupeKey,
         deliveryAttempt: job.attempts,
         targets: replayTargets,
+        payload: payload as Record<string, unknown>,
         ...(job.signal ? { signal: job.signal } : {}),
         ...(job.assertLease ? { assertLease: job.assertLease } : {}),
       });
@@ -170,7 +173,7 @@ export async function handleNotificationJob(
     throw new NotificationDeliveryFailedError(result);
   }
 
-  // 永久性失败（群被关停 / webhook key 失效 / 内容被拒）**不**抛：重试 5 次
+  // 永久性失败（群被关停 / webhook key 失效 / 内容被拒）**不**抛：重试多少次
   // 结果一模一样，只会白耗 attempts、把死信队列灌满 ops 无法处置的行。证据
   // 留在 NotificationLog(status=FAILED)，owner 的 24h 失败告警条和
   // /owner/notifications 日志列表就是这条路径的通报渠道；job.result 里的

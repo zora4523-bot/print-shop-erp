@@ -20,7 +20,7 @@ import { shanghaiDayBoundary, todayShanghai } from './shanghai-clock';
 // Owner dashboard watchlists — 3 read-only lists that surface things
 // the owner needs to do or notice "right now":
 //
-//   - getPendingShipments — COMPLETED orders waiting to ship
+//   - getPendingShipments — completedAt 已落、尚未发货的工单
 //   - getOverdueOutsourcing — outsource orders past expectedDate
 //   - getEndingPeriods — CS salary periods with periodEnd in the
 //                        next 7 days (with predicted commission)
@@ -32,7 +32,7 @@ import { shanghaiDayBoundary, todayShanghai } from './shanghai-clock';
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 // ─────────────────────────────────────────────────────────────────────
-// 待发货 — COMPLETED 工单按 (急单优先, 完工时间正序) 排列
+// 待发货 — 已完成生产但尚未发货，按 (急单优先, 完工时间正序) 排列
 // ─────────────────────────────────────────────────────────────────────
 
 export type PendingShipmentRow = {
@@ -50,8 +50,10 @@ export type PendingShipmentsResult = {
 };
 
 /**
- * 完工但未发货的工单。SHIPPED / FINISHED / CANCELLED 不算（COMPLETED
- * 是&ldquo;待发货&rdquo;唯一状态——见 lib/order/status-machine.ts）。急单优先，
+ * 完工但未发货的工单。统一完工闸口以 completedAt 作为事实标记，并将
+ * canonical 工单收口到 PACKING；legacy 工单仍使用 COMPLETED。暂停中的
+ * ON_HOLD 仍是生产完成事实，但当前不可发货，
+ * 因此也不进入本操作队列。急单优先，
  * 同优先级里完工早的排前面（&ldquo;最该催的在最上&rdquo;）。
  *
  * `take: limit + 1` 是&ldquo;hasMore&rdquo; 探针：取 11 条，前 10 条入 rows，
@@ -63,7 +65,11 @@ export async function getPendingShipments(
 ): Promise<PendingShipmentsResult> {
   void _now;
   const raw = await db.order.findMany({
-    where: { status: OrderStatus.COMPLETED },
+    where: {
+      completedAt: { not: null },
+      shippedAt: null,
+      status: { in: [OrderStatus.PACKING, OrderStatus.COMPLETED] },
+    },
     orderBy: [{ isUrgent: 'desc' }, { completedAt: 'asc' }],
     take: limit + 1,
     select: {
@@ -81,8 +87,7 @@ export async function getPendingShipments(
     orderNo: r.orderNo,
     customerRef: r.customerRef,
     isUrgent: r.isUrgent,
-    // status=COMPLETED guarantees completedAt is set (status-machine
-    // always stamps it on transition); narrow the type for downstream.
+    // where.completedAt != null guarantees this projection is present.
     completedAt: r.completedAt as Date,
     submitterDisplayName: r.submitter.displayName,
   }));

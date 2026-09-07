@@ -19,7 +19,12 @@ export const NOTIFICATION_PAYLOAD_FIELDS = {
   PENDING_FACTORY_BACKLOG: ['orderId', 'orderNo', 'summary', 'deepLink'],
   URGENT_ORDER: ['orderId', 'orderNo', 'submitterName', 'customerRef'],
   ORDER_SCHEDULED: ['orderId', 'orderNo', 'taskCount'],
-  ORDER_COMPLETED: ['orderId', 'orderNo', 'customerRef'],
+  ORDER_COMPLETED: [
+    'orderId',
+    'orderNo',
+    'workOrderVersion',
+    'customerRef',
+  ],
   ORDER_SHIPPED: ['orderId', 'orderNo', 'trackingNo'],
   OUTSOURCE_OVERDUE: [
     'outsourceId',

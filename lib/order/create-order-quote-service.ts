@@ -23,7 +23,9 @@ import {
 } from './create-order-quote-facts-adapter';
 import {
   type CreateOrderProcessingPresentation,
+  type CreateOrderPlateFeePreview,
   type CreateOrderQuotePresentation,
+  presentCreateOrderPlateFee,
   presentCreateOrderQuote,
   presentCreateOrderProcessingQuote,
 } from './create-order-quote-presentation';
@@ -72,12 +74,7 @@ export type InternalCreateOrderQuoteResult =
     total: string | null;
     hasManualPricing: boolean;
     totalSemantics: 'COMPLETE' | 'EXCLUDES_MANUAL_ITEMS';
-    plateFee: {
-      status: 'PENDING';
-      amount: null;
-      displayAmount: '待定';
-      label: '制版费';
-    };
+    plateFee: CreateOrderPlateFeePreview | null;
   };
 
 export class CreateOrderQuoteError extends Error {
@@ -136,6 +133,12 @@ export type CatalogCreateOrderQuoteCalculation = {
   snapshot: CreateOrderPriceSnapshot;
   quote: ReturnType<typeof calculateCreateOrderQuote>;
   processing: CreateOrderProcessingPresentation;
+  /**
+   * Binds the canonical catalog facts, published price-book versions and the
+   * complete pure-engine result. Callers can use it as a server-verifiable
+   * preview/apply handshake without trusting browser-supplied amounts.
+   */
+  quoteToken: string;
 };
 
 /**
@@ -168,11 +171,26 @@ export async function calculateCreateOrderQuoteFromCatalogInTx(
         quote.errors.join('；') || '报价业务事实无效',
       );
     }
+    const quoteToken = createExternalOrderQuoteToken({
+      items: input.items,
+      packagingGroups: input.packagingGroups,
+      logistics: {
+        isSfCollect: input.isSfCollect,
+        shipments: input.shipments,
+      },
+      priceVersion: quote.priceVersion,
+      result: {
+        items: quote.items,
+        packaging: quote.packagingGroups,
+        logistics: quote.order,
+      },
+    });
     return {
       input,
       snapshot,
       quote,
       processing: presentCreateOrderProcessingQuote({ input, quote }),
+      quoteToken,
     };
   } catch (error) {
     if (error instanceof CreateOrderQuoteError) throw error;
@@ -235,26 +253,12 @@ export async function quoteExternalCreateOrder(
       const pureInput = calculated.input;
       const quote = calculated.quote;
       const logistics = trustedChargeQuote(pureInput, calculated.snapshot);
-      const quoteToken = createExternalOrderQuoteToken({
-        items: pureInput.items,
-        packagingGroups: pureInput.packagingGroups,
-        logistics: {
-          isSfCollect: pureInput.isSfCollect,
-          shipments: pureInput.shipments,
-        },
-        priceVersion: quote.priceVersion,
-        result: {
-          items: quote.items,
-          packaging: quote.packagingGroups,
-          logistics: quote.order,
-        },
-      });
       return presentCreateOrderQuote({
         factsKey: input.factsKey,
         input: pureInput,
         quote,
         logistics,
-        quoteToken,
+        quoteToken: calculated.quoteToken,
       });
     });
   } catch (error) {
@@ -332,12 +336,7 @@ export async function quoteInternalCreateOrder(
         totalSemantics: hasManualPricing
           ? 'EXCLUDES_MANUAL_ITEMS'
           : 'COMPLETE',
-        plateFee: {
-          status: 'PENDING',
-          amount: null,
-          displayAmount: '待定',
-          label: '制版费',
-        },
+        plateFee: presentCreateOrderPlateFee(calculated.quote),
       };
     });
   } catch (error) {

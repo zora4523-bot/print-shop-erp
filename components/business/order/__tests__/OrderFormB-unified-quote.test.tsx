@@ -312,6 +312,12 @@ describe('OrderForm B unified external-sales quote', () => {
           packagingLabel: '纸箱耗材',
           shippingLabel: '快递费 · 上海 12kg',
         }}
+        plateFee={{
+          status: 'PENDING',
+          amount: null,
+          displayAmount: '待定',
+          label: '制烫金版费',
+        }}
         usesExternalSalesPricing
         settlementLabel="外部销售应付工厂"
         knownTotal="566.30"

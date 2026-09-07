@@ -45,12 +45,14 @@ describe('SettingsForm management notification routing', () => {
             channelKey: 'factory_group',
             channelName: '工厂确认群',
             isActive: true,
+            selectionIssue: null,
           },
           {
             id: 'channel-owner',
             channelKey: 'owner_group',
             channelName: '老板群',
             isActive: true,
+            selectionIssue: null,
           },
         ]}
       />,
@@ -69,5 +71,37 @@ describe('SettingsForm management notification routing', () => {
     );
     expect(html).toContain('value="channel-factory"');
     expect(html).not.toContain('name="management_notification_routing.role"');
+  });
+
+  it('不可用目标在原角色中可保留，在其他角色中禁止新绑并显示原因', () => {
+    const values = initialValues();
+    values.management_notification_routing = JSON.stringify({
+      factoryConfirmer: { enabled: true, channelIds: ['smart-old'] },
+      owner: { enabled: false, channelIds: [] },
+    });
+    const html = renderToStaticMarkup(
+      <SettingsForm
+        initialValues={values}
+        notificationChannels={[
+          {
+            id: 'smart-old',
+            channelKey: 'smart_old',
+            channelName: '旧机器人群',
+            isActive: true,
+            selectionIssue: 'SMART_BOT_IDENTITY_MISMATCH',
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('绑定时 Bot ID 与当前配置不一致，不可新绑');
+    const inputs = html.match(/<input[^>]*value="smart-old"[^>]*>/g) ?? [];
+    expect(inputs).toHaveLength(2);
+    expect(
+      inputs.some(
+        (input) => input.includes('checked=""') && !input.includes('disabled=""'),
+      ),
+    ).toBe(true);
+    expect(inputs.some((input) => input.includes('disabled=""'))).toBe(true);
   });
 });

@@ -27,6 +27,7 @@ import {
   getOrderListFilterOptions,
   getOrderListPageWindow,
   listOrdersPage,
+  MISSING_ORDER_CUSTOMER_FILTER_VALUE,
   orderListOrderBy,
   parseOrderListQuery,
   sanitizeOrderListQueryForActor,
@@ -58,6 +59,8 @@ describe('parseOrderListQuery', () => {
         orderNo: undefined,
         customName: undefined,
         customerRef: undefined,
+        customerPartyId: undefined,
+        customerRefExact: undefined,
         receiverName: undefined,
         receiverPhone: undefined,
         receiverAddress: undefined,
@@ -195,6 +198,8 @@ describe('parseOrderListQuery', () => {
         orderNo: 'GD-260807',
         customName: '中秋礼盒',
         customerRef: '客户甲',
+        customerPartyId: undefined,
+        customerRefExact: undefined,
         receiverName: '张三',
         receiverPhone: '138',
         receiverAddress: '佛山',
@@ -388,10 +393,38 @@ describe('worker commercial-query boundary', () => {
       AND: [
         { submitterId: 'sales-1' },
         {
-          totalAmount: {
-            gte: new Prisma.Decimal('10.00'),
-            lte: new Prisma.Decimal('500.00'),
-          },
+          OR: [
+            {
+              settledFee: {
+                gte: new Prisma.Decimal('10.00'),
+                lte: new Prisma.Decimal('500.00'),
+              },
+            },
+            {
+              settledFee: null,
+              confirmedFee: {
+                gte: new Prisma.Decimal('10.00'),
+                lte: new Prisma.Decimal('500.00'),
+              },
+            },
+            {
+              settledFee: null,
+              confirmedFee: null,
+              quotedFee: {
+                gte: new Prisma.Decimal('10.00'),
+                lte: new Prisma.Decimal('500.00'),
+              },
+            },
+            {
+              settledFee: null,
+              confirmedFee: null,
+              quotedFee: null,
+              totalAmount: {
+                gte: new Prisma.Decimal('10.00'),
+                lte: new Prisma.Decimal('500.00'),
+              },
+            },
+          ],
         },
       ],
     });
@@ -399,6 +432,134 @@ describe('worker commercial-query boundary', () => {
 });
 
 describe('buildOrderWhere', () => {
+  it('uses Party identity and unlinked snapshots for exact clickable customer filters', () => {
+    const byParty = parseOrderListQuery({
+      customerPartyId: 'party-1',
+    }).query;
+    const byLegacySnapshot = parseOrderListQuery({
+      customerRefExact: '苹果福',
+    }).query;
+    const missing = parseOrderListQuery({
+      customerRefExact: MISSING_ORDER_CUSTOMER_FILTER_VALUE,
+    }).query;
+
+    expect(serializeOrderListQuery(byParty)).toEqual(
+      expect.objectContaining({
+        customerPartyId: 'party-1',
+        customerRefExact: undefined,
+        customerRef: undefined,
+      }),
+    );
+    expect(buildOrderWhere(adminActor, byParty.filters)).toEqual({
+      AND: [{}, { customerPartyId: 'party-1' }],
+    });
+    expect(buildOrderWhere(adminActor, byLegacySnapshot.filters)).toEqual({
+      AND: [
+        {},
+        {
+          customerParty: { is: null },
+          customerRef: { equals: '苹果福' },
+        },
+      ],
+    });
+    expect(buildOrderWhere(adminActor, missing.filters)).toEqual({
+      AND: [
+        {},
+        {
+          customerParty: { is: null },
+          OR: [{ customerRef: null }, { customerRef: '' }],
+        },
+      ],
+    });
+  });
+
+  it('matches displayed Party names and reserves an unambiguous missing-customer sentinel', () => {
+    const byParty = parseOrderListQuery({
+      customerRef: '苹果福',
+    }).query.filters;
+    const missing = parseOrderListQuery({
+      customerRef: MISSING_ORDER_CUSTOMER_FILTER_VALUE,
+    }).query.filters;
+    const literalSameAsLabel = parseOrderListQuery({
+      customerRef: '未填客户',
+    }).query.filters;
+
+    expect(buildOrderWhere(adminActor, byParty)).toEqual({
+      AND: [
+        {},
+        {
+          OR: [
+            {
+              customerRef: { contains: '苹果福', mode: 'insensitive' },
+            },
+            {
+              customerParty: {
+                is: {
+                  OR: [
+                    { name: { contains: '苹果福', mode: 'insensitive' } },
+                    {
+                      shortName: {
+                        contains: '苹果福',
+                        mode: 'insensitive',
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(buildOrderWhere(adminActor, missing)).toEqual({
+      AND: [
+        {},
+        {
+          customerParty: { is: null },
+          OR: [{ customerRef: null }, { customerRef: '' }],
+        },
+      ],
+    });
+    expect(buildOrderWhere(adminActor, literalSameAsLabel)).toEqual(
+      expect.objectContaining({
+        AND: [
+          {},
+          expect.objectContaining({ OR: expect.any(Array) }),
+        ],
+      }),
+    );
+    expect(JSON.stringify(buildOrderWhere(adminActor, literalSameAsLabel))).not
+      .toContain('"customerParty":{"is":null}');
+  });
+
+  it('includes linked Party names in global search', () => {
+    const filters = parseOrderListQuery({ q: '苹果福' }).query.filters;
+    expect(buildOrderWhere(adminActor, filters)).toEqual({
+      AND: [
+        {},
+        expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              customerParty: {
+                is: {
+                  OR: [
+                    { name: { contains: '苹果福', mode: 'insensitive' } },
+                    {
+                      shortName: {
+                        contains: '苹果福',
+                        mode: 'insensitive',
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ]),
+        }),
+      ],
+    });
+  });
+
   it('round-trips a created custom foil color containing commas into the exact Prisma predicate', () => {
     const createdFoilColors = ['红,金渐变', 'PANTONE\\871 C', '哑金'];
     const formValue = encodeFoilColorFilterValues(createdFoilColors);
@@ -599,6 +760,7 @@ describe('listOrdersPage', () => {
         isUrgent: false,
         isSfCollect: false,
         customerRef: null,
+        customerParty: { name: '客户全称', shortName: '苹果福' },
         receiverName: null,
         receiverPhone: null,
         receiverAddress: null,
@@ -651,6 +813,7 @@ describe('listOrdersPage', () => {
         isUrgent: false,
         isSfCollect: false,
         customerRef: null,
+        customerParty: { name: '客户全称', shortName: '苹果福' },
         receiverName: null,
         receiverPhone: null,
         receiverAddress: null,
@@ -697,6 +860,7 @@ describe('listOrdersPage', () => {
       rows: [
         expect.objectContaining({
           id: 'order-21',
+          customerRef: '苹果福',
           shipmentCount: 2,
           workerNames: ['张师傅'],
           pieceworkCost: '12.30',
@@ -735,6 +899,8 @@ describe('order list URL and options', () => {
       orderNo: undefined,
       customName: undefined,
       customerRef: undefined,
+      customerPartyId: undefined,
+      customerRefExact: undefined,
       receiverName: undefined,
       receiverPhone: undefined,
       receiverAddress: undefined,
@@ -862,7 +1028,7 @@ describe('order list URL and options', () => {
       { id: 'desc' },
     ]);
     expect(orderListOrderBy('totalAmount', 'asc')).toEqual([
-      { totalAmount: 'asc' },
+      { effectiveCustomerFee: 'asc' },
       { createdAt: 'desc' },
       { id: 'desc' },
     ]);

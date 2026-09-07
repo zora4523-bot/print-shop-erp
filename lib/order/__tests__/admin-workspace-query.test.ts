@@ -70,6 +70,33 @@ describe('admin order workspace query', () => {
     );
   });
 
+  it('round-trips additive exact-customer filters through workspace and export URLs', () => {
+    const party = parseAdminOrderWorkspaceQuery({
+      queue: 'all',
+      customerPartyId: 'party-1',
+    });
+    const legacy = parseAdminOrderWorkspaceQuery({
+      queue: 'all',
+      customerRefExact: '旧客户',
+    });
+
+    expect(party.issues).toEqual([]);
+    expect(legacy.issues).toEqual([]);
+    expect(serializeAdminOrderWorkspaceQuery(party.query)).toEqual(
+      expect.objectContaining({
+        customerPartyId: 'party-1',
+        customerRefExact: undefined,
+        customerRef: undefined,
+      }),
+    );
+    expect(adminOrderExportParamsFromQuery(legacy.query)).toEqual(
+      expect.objectContaining({
+        customerRefExact: '旧客户',
+        adminWorkspace: 'v1',
+      }),
+    );
+  });
+
   it('reports forged workspace keys without reflecting them', () => {
     const parsed = parseAdminOrderWorkspaceQuery({
       queue: 'secret',

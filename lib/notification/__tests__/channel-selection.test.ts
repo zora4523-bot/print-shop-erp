@@ -1,0 +1,82 @@
+import { describe, expect, it } from 'vitest';
+import {
+  notificationChannelSelectionIssue,
+  notificationChannelSelectionIssueMessage,
+  type NotificationChannelSelectionCandidate,
+} from '../channel-selection';
+
+const currentBotDigest = 'a'.repeat(64);
+const configured = {
+  smartBotCredentialsConfigured: true,
+  configuredSmartBotDigest: currentBotDigest,
+};
+
+function smartBot(
+  overrides: Partial<NotificationChannelSelectionCandidate> = {},
+): NotificationChannelSelectionCandidate {
+  return {
+    transport: 'WECOM_SMART_BOT',
+    webhookUrl: null,
+    smartBotBotDigest: currentBotDigest,
+    smartBotTargetId: 'group-1',
+    smartBotChatType: 'GROUP',
+    smartBotBoundAt: new Date('2026-09-04T00:00:00.000Z'),
+    isActive: true,
+    ...overrides,
+  };
+}
+
+describe('notificationChannelSelectionIssue', () => {
+  it('accepts a complete active webhook or a smart-bot target bound to the current Bot ID', () => {
+    expect(
+      notificationChannelSelectionIssue(
+        {
+          transport: 'WECOM_GROUP_WEBHOOK',
+          webhookUrl: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=placeholder',
+          smartBotBotDigest: null,
+          smartBotTargetId: null,
+          smartBotChatType: null,
+          smartBotBoundAt: null,
+          isActive: true,
+        },
+        configured,
+      ),
+    ).toBeNull();
+    expect(notificationChannelSelectionIssue(smartBot(), configured)).toBeNull();
+  });
+
+  it('rejects inactive, incomplete, missing-credential, and Bot-ID-mismatched targets', () => {
+    expect(
+      notificationChannelSelectionIssue(
+        smartBot({ isActive: false }),
+        configured,
+      ),
+    ).toBe('INACTIVE');
+    expect(
+      notificationChannelSelectionIssue(
+        smartBot({ smartBotTargetId: null }),
+        configured,
+      ),
+    ).toBe('CHANNEL_CONFIGURATION_INCOMPLETE');
+    expect(
+      notificationChannelSelectionIssue(smartBot(), {
+        smartBotCredentialsConfigured: false,
+        configuredSmartBotDigest: null,
+      }),
+    ).toBe('SMART_BOT_CREDENTIALS_NOT_CONFIGURED');
+    expect(
+      notificationChannelSelectionIssue(
+        smartBot({ smartBotBotDigest: 'b'.repeat(64) }),
+        configured,
+      ),
+    ).toBe('SMART_BOT_IDENTITY_MISMATCH');
+  });
+
+  it('provides operator-safe UI copy without destination identifiers', () => {
+    expect(
+      notificationChannelSelectionIssueMessage(
+        'SMART_BOT_IDENTITY_MISMATCH',
+      ),
+    ).toBe('绑定时 Bot ID 与当前配置不一致');
+  });
+});

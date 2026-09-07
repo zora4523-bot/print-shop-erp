@@ -6,10 +6,40 @@ vi.mock('../AdminOrderWorkspaceList', () => ({
   AdminOrderWorkspaceList: () => <div data-testid="rich-list">富行列表</div>,
 }));
 
-import { AdminOrderWorkspace } from '../AdminOrderWorkspace';
+import {
+  AdminOrderWorkspace,
+  adminCustomerExactFilterParams,
+} from '../AdminOrderWorkspace';
 import { parseAdminOrderWorkspaceQuery } from '@/lib/order/admin-workspace-query';
 
 describe('AdminOrderWorkspace', () => {
+  it('builds exact customer filters from Party IDs or legacy snapshots', () => {
+    expect(
+      adminCustomerExactFilterParams({
+        id: 'party-1',
+        name: '客户甲',
+        filterValue: '客户甲',
+      }),
+    ).toEqual({
+      customerRef: undefined,
+      customerPartyId: 'party-1',
+      customerRefExact: undefined,
+      page: undefined,
+    });
+    expect(
+      adminCustomerExactFilterParams({
+        id: null,
+        name: '旧客户',
+        filterValue: '旧客户',
+      }),
+    ).toEqual({
+      customerRef: undefined,
+      customerPartyId: undefined,
+      customerRefExact: '旧客户',
+      page: undefined,
+    });
+  });
+
   it('renders decision and receivable cards, six queues and the whole-result summary', () => {
     const query = parseAdminOrderWorkspaceQuery({}).query;
     const html = renderToStaticMarkup(
@@ -58,6 +88,8 @@ describe('AdminOrderWorkspace', () => {
             totalQuantity: 12345,
             effectiveFee: '4567.80',
             manualPricingCount: 1,
+            incompleteFeeExcludedCount: 3,
+            legacyFeeExcludedCount: 2,
           },
         }}
       />,
@@ -84,6 +116,8 @@ describe('AdminOrderWorkspace', () => {
     expect(html).toContain('12,345');
     expect(html).toContain('¥4,567.80');
     expect(html).toContain('另 1 单待核价未计入');
+    expect(html).toContain('另 3 单金额不完整未计入');
+    expect(html).toContain('另 2 单历史金额未计入');
     expect(html).toContain('待收款 · 2 张');
     expect(html).toContain('¥998.50');
     expect(html).toContain('仅未出账');

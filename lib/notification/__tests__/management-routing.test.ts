@@ -58,8 +58,23 @@ describe('management notification fixed role map', () => {
     ).resolves.toBeNull();
   });
 
-  it('设置页只读群 ID/名称/状态，不把 webhook 传到客户端', async () => {
-    await listManagementNotificationChannels();
+  it('设置页内部判定 eligibility，但只把安全读模型传到客户端', async () => {
+    dbMock.notificationChannel.findMany.mockResolvedValueOnce([
+      {
+        id: 'channel-1',
+        channelKey: 'factory',
+        channelName: '工厂群',
+        transport: 'WECOM_GROUP_WEBHOOK',
+        webhookUrl: 'https://qy.example.test/private-webhook',
+        smartBotBotDigest: null,
+        smartBotTargetId: null,
+        smartBotChatType: null,
+        smartBotBoundAt: null,
+        isActive: true,
+      },
+    ]);
+
+    const channels = await listManagementNotificationChannels();
     expect(dbMock.notificationChannel.findMany).toHaveBeenCalledWith({
       orderBy: [
         { isActive: 'desc' },
@@ -70,8 +85,24 @@ describe('management notification fixed role map', () => {
         id: true,
         channelKey: true,
         channelName: true,
+        transport: true,
+        webhookUrl: true,
+        smartBotBotDigest: true,
+        smartBotTargetId: true,
+        smartBotChatType: true,
+        smartBotBoundAt: true,
         isActive: true,
       },
     });
+    expect(channels).toEqual([
+      {
+        id: 'channel-1',
+        channelKey: 'factory',
+        channelName: '工厂群',
+        isActive: true,
+        selectionIssue: null,
+      },
+    ]);
+    expect(JSON.stringify(channels)).not.toContain('private-webhook');
   });
 });

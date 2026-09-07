@@ -2,25 +2,15 @@
 
 import { useActionState, useRef, useState, useTransition } from 'react';
 import type { FormEvent } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ConfirmActionDialog } from '@/components/ui-business';
 import { shipOrderAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
-import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
-
-type ShipmentInput = {
-  id: string;
-  sequence: number;
-  receiverName: string | null;
-  receiverAddress: string | null;
-  trackingNo: string | null;
-  weightKg: string | null;
-  destinationProvince: string | null;
-  shippingFee: string | null;
-  packingMaterialFee: string | null;
-  customerChargeOverrideReason: string | null;
-};
+import { Button } from '@/components/ui/button';
+import { ConfirmActionDialog } from '@/components/ui-business';
+import {
+  ShipOrderShipmentFields,
+  ShipOrderVersionFields,
+  type ShipmentInput,
+} from '@/components/business/order/ShipOrderFields';
 
 type ShipOrderConfirmationValues = {
   trackingNos?: readonly string[];
@@ -70,31 +60,60 @@ export function shipOrderImpactItems({
     isExternalSales
       ? '发货后，快递费和耗材费将按工单创建时价格核价，转为最终收费并重算应收总额。'
       : '本次发货不处理对客快递费或耗材费。',
-    '发货后仍需“确认完工”。',
+    '发货后仍需管理员完成结算。',
     '本次发货不会扣减库存。',
   ];
+}
+
+export async function submitShipOrderWithRecovery(
+  orderId: string,
+  previousState: OrderMutationResult | null,
+  formData: FormData,
+): Promise<OrderMutationResult> {
+  try {
+    return await shipOrderAction(orderId, previousState, formData);
+  } catch {
+    return {
+      status: 'error',
+      message: '发货请求未完成，请刷新工单后重试。',
+    };
+  }
 }
 
 // COMPLETED → SHIPPED 的入口。多地址分别记录运单号，业务层会在同一
 // 事务里确认这些 shipment 都属于目标工单，再统一切换发货状态。
 export function ShipOrderForm({
   orderId,
+  expectedRevision,
+  expectedEditVersion,
+  expectedWorkOrderVersion,
+  expectedPriceRevision,
+  initialIdempotencyKey,
   shipments,
   isExternalSales,
   isSfCollect,
 }: {
   orderId: string;
+  expectedRevision: number;
+  expectedEditVersion: number;
+  expectedWorkOrderVersion: number;
+  expectedPriceRevision: number;
+  initialIdempotencyKey: string;
   shipments: ShipmentInput[];
   isExternalSales: boolean;
   isSfCollect: boolean;
 }) {
-  const bound = shipOrderAction.bind(null, orderId);
   const [state, action] = useActionState<OrderMutationResult | null, FormData>(
-    bound,
+    (previousState, formData) =>
+      submitShipOrderWithRecovery(orderId, previousState, formData),
     null,
   );
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
+  const requestIdentityRef = useRef({
+    fingerprint: null as string | null,
+    key: initialIdempotencyKey,
+  });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [confirmationImpactItems, setConfirmationImpactItems] = useState(() =>
@@ -132,7 +151,17 @@ export function ShipOrderForm({
   function confirmShipment() {
     const form = formRef.current;
     if (!form) return;
-    startTransition(() => action(new FormData(form)));
+    const formData = new FormData(form);
+    const fingerprint = shipOrderFormFingerprint(formData);
+    if (
+      requestIdentityRef.current.fingerprint !== null &&
+      requestIdentityRef.current.fingerprint !== fingerprint
+    ) {
+      requestIdentityRef.current.key = globalThis.crypto.randomUUID();
+    }
+    requestIdentityRef.current.fingerprint = fingerprint;
+    formData.set('idempotencyKey', requestIdentityRef.current.key);
+    startTransition(() => action(formData));
   }
 
   return (
@@ -142,280 +171,19 @@ export function ShipOrderForm({
       aria-busy={pending}
       className="space-y-2"
     >
-      <ol className="space-y-3">
-        {shipments.map((shipment, index) => {
-          const fieldError = (field: string) =>
-            visibleState?.status === 'invalid'
-              ? visibleState.fieldErrors[`shipments.${index}.${field}`]?.join('；')
-              : undefined;
-          const trackingError = fieldError('trackingNo');
-          const weightError = fieldError('weightKg');
-          const provinceError = fieldError('destinationProvince');
-          const shippingError = fieldError('shippingFee');
-          const packingError = fieldError('packingMaterialFee');
-          const reasonError = fieldError('customerChargeOverrideReason');
-
-          return (
-            <li
-              key={shipment.id}
-              className="grid min-w-0 gap-3 rounded-lg border p-3 sm:grid-cols-2"
-            >
-            <div className="admin-wrap-anywhere min-w-0 text-sm sm:col-span-2">
-              <p className="font-medium">地址 {shipment.sequence}</p>
-              <p className="text-xs text-muted-foreground">
-                {shipment.receiverName ?? '未填收货人'} ·{' '}
-                {shipment.receiverAddress ?? '未填地址'}
-              </p>
-            </div>
-            <div>
-              <label
-                htmlFor={`shipment-${shipment.id}-tracking`}
-                className="mb-1 block text-xs font-medium"
-              >
-                运单号（选填）
-              </label>
-              <input type="hidden" name="shipmentId" value={shipment.id} />
-              <Input
-                id={`shipment-${shipment.id}-tracking`}
-                type="text"
-                name="shipmentTrackingNo"
-                defaultValue={shipment.trackingNo ?? ''}
-                placeholder="填写该地址的运单号"
-                maxLength={64}
-                aria-invalid={Boolean(trackingError)}
-                aria-describedby={
-                  trackingError
-                    ? `shipment-${shipment.id}-tracking-error`
-                    : undefined
-                }
-              />
-              <FieldError
-                id={`shipment-${shipment.id}-tracking-error`}
-                message={trackingError}
-              />
-            </div>
-            <div>
-              <label
-                htmlFor={`shipment-${shipment.id}-weight`}
-                className="mb-1 block text-xs font-medium"
-              >
-                {isExternalSales ? '承运商计费重量（kg）' : '快递重量（kg）'}{' '}
-                {isExternalSales && !isSfCollect ? (
-                  <span aria-hidden="true" className="text-destructive">
-                    *
-                  </span>
-                ) : null}
-              </label>
-              {isSfCollect ? (
-                <input type="hidden" name="shipmentWeightKg" value="" />
-              ) : null}
-              <Input
-                id={`shipment-${shipment.id}-weight`}
-                type="text"
-                inputMode="decimal"
-                name={isSfCollect ? undefined : 'shipmentWeightKg'}
-                defaultValue={isSfCollect ? '' : shipment.weightKg ?? ''}
-                disabled={isSfCollect}
-                required={isExternalSales && !isSfCollect}
-                aria-required={isExternalSales && !isSfCollect}
-                placeholder={isSfCollect ? '顺丰到付无需填写' : '例如 12.5'}
-                aria-invalid={Boolean(weightError)}
-                aria-describedby={
-                  weightError
-                    ? `shipment-${shipment.id}-weight-error`
-                    : `shipment-${shipment.id}-weight-hint`
-                }
-              />
-              <FieldError
-                id={`shipment-${shipment.id}-weight-error`}
-                message={weightError}
-              />
-              {!weightError ? (
-                <p
-                  id={`shipment-${shipment.id}-weight-hint`}
-                  className="mt-1 text-xs text-muted-foreground"
-                >
-                  {isSfCollect
-                    ? '顺丰到付的计费重量不计入工单应收。'
-                    : '填写承运商最终计费重量。'}
-                </p>
-              ) : null}
-            </div>
-            {isExternalSales ? (
-              <>
-                <div>
-                  <label
-                    htmlFor={`shipment-${shipment.id}-province`}
-                    className="mb-1 block text-xs font-medium"
-                  >
-                    中通计费省份
-                  </label>
-                  <select
-                    id={`shipment-${shipment.id}-province`}
-                    name={isSfCollect ? undefined : 'shipmentDestinationProvince'}
-                    defaultValue={
-                      isSfCollect ? '' : shipment.destinationProvince ?? ''
-                    }
-                    disabled={isSfCollect}
-                    aria-invalid={Boolean(provinceError)}
-                    aria-describedby={
-                      provinceError
-                        ? `shipment-${shipment.id}-province-error`
-                        : `shipment-${shipment.id}-province-hint`
-                    }
-                    className="flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="">— 人工确认 —</option>
-                    {ZTO_PROVINCE_OPTIONS.map((province) => (
-                      <option key={province} value={province}>
-                        {province}
-                      </option>
-                    ))}
-                  </select>
-                  {isSfCollect ? (
-                    <input
-                      type="hidden"
-                      name="shipmentDestinationProvince"
-                      value=""
-                    />
-                  ) : null}
-                  <FieldError
-                    id={`shipment-${shipment.id}-province-error`}
-                    message={provinceError}
-                  />
-                  {!provinceError ? (
-                    <p
-                      id={`shipment-${shipment.id}-province-hint`}
-                      className="mt-1 text-xs text-muted-foreground"
-                    >
-                      {isSfCollect
-                        ? '顺丰到付无需选择中通计费省份。'
-                        : '不在价目表内时留空并人工确认。'}
-                    </p>
-                  ) : null}
-                </div>
-                <div>
-                  <label
-                    htmlFor={`shipment-${shipment.id}-shipping-fee`}
-                    className="mb-1 block text-xs font-medium"
-                  >
-                    对客快递费（元）{' '}
-                    {!isSfCollect ? (
-                      <span aria-hidden="true" className="text-destructive">
-                        *
-                      </span>
-                    ) : null}
-                  </label>
-                  {isSfCollect ? (
-                    <input
-                      type="hidden"
-                      name="shipmentShippingFee"
-                      value="0.00"
-                    />
-                  ) : null}
-                  <Input
-                    id={`shipment-${shipment.id}-shipping-fee`}
-                    type="text"
-                    inputMode="decimal"
-                    name={isSfCollect ? undefined : 'shipmentShippingFee'}
-                    defaultValue={isSfCollect ? '0.00' : shipment.shippingFee ?? ''}
-                    disabled={isSfCollect}
-                    required={!isSfCollect}
-                    aria-required={!isSfCollect}
-                    placeholder={isSfCollect ? '顺丰到付固定为 0' : '确认实际收费'}
-                    aria-invalid={Boolean(shippingError)}
-                    aria-describedby={
-                      shippingError
-                        ? `shipment-${shipment.id}-shipping-error`
-                        : `shipment-${shipment.id}-shipping-hint`
-                    }
-                  />
-                  <FieldError
-                    id={`shipment-${shipment.id}-shipping-error`}
-                    message={shippingError}
-                  />
-                  {!shippingError ? (
-                    <p
-                      id={`shipment-${shipment.id}-shipping-hint`}
-                      className="mt-1 text-xs text-muted-foreground"
-                    >
-                      {isSfCollect
-                        ? '顺丰到付固定提交 0 元。'
-                        : '必填；以实际对客收费为准。'}
-                    </p>
-                  ) : null}
-                </div>
-                <div>
-                  <label
-                    htmlFor={`shipment-${shipment.id}-packing-fee`}
-                    className="mb-1 block text-xs font-medium"
-                  >
-                    打包耗材费（元）{' '}
-                    <span aria-hidden="true" className="text-destructive">
-                      *
-                    </span>
-                  </label>
-                  <Input
-                    id={`shipment-${shipment.id}-packing-fee`}
-                    type="text"
-                    inputMode="decimal"
-                    name="shipmentPackingMaterialFee"
-                    defaultValue={shipment.packingMaterialFee ?? ''}
-                    required
-                    aria-required="true"
-                    placeholder="确认纸箱等耗材收费"
-                    aria-invalid={Boolean(packingError)}
-                    aria-describedby={
-                      packingError
-                        ? `shipment-${shipment.id}-packing-error`
-                        : `shipment-${shipment.id}-packing-hint`
-                    }
-                  />
-                  <FieldError
-                    id={`shipment-${shipment.id}-packing-error`}
-                    message={packingError}
-                  />
-                  {!packingError ? (
-                    <p
-                      id={`shipment-${shipment.id}-packing-hint`}
-                      className="mt-1 text-xs text-muted-foreground"
-                    >
-                      顺丰到付也需单独确认纸箱等打包耗材费。
-                    </p>
-                  ) : null}
-                </div>
-                <div className="sm:col-span-2">
-                  <label
-                    htmlFor={`shipment-${shipment.id}-charge-reason`}
-                    className="mb-1 block text-xs font-medium"
-                  >
-                    收费调整说明
-                  </label>
-                  <textarea
-                    id={`shipment-${shipment.id}-charge-reason`}
-                    name="shipmentChargeOverrideReason"
-                    defaultValue={shipment.customerChargeOverrideReason ?? ''}
-                    rows={2}
-                    className="flex min-h-20 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    placeholder="实际收费与报价建议不同时必填"
-                    aria-invalid={Boolean(reasonError)}
-                    aria-describedby={
-                      reasonError
-                        ? `shipment-${shipment.id}-reason-error`
-                        : undefined
-                    }
-                  />
-                  <FieldError
-                    id={`shipment-${shipment.id}-reason-error`}
-                    message={reasonError}
-                  />
-                </div>
-              </>
-            ) : null}
-            </li>
-          );
-        })}
-      </ol>
+      <ShipOrderVersionFields
+        expectedRevision={expectedRevision}
+        expectedEditVersion={expectedEditVersion}
+        expectedWorkOrderVersion={expectedWorkOrderVersion}
+        expectedPriceRevision={expectedPriceRevision}
+        initialIdempotencyKey={initialIdempotencyKey}
+      />
+      <ShipOrderShipmentFields
+        shipments={shipments}
+        isExternalSales={isExternalSales}
+        isSfCollect={isSfCollect}
+        result={visibleState}
+      />
       <Button
         ref={triggerRef}
         type="submit"
@@ -456,11 +224,10 @@ export function ShipOrderForm({
   );
 }
 
-function FieldError({ id, message }: { id: string; message?: string }) {
-  if (!message) return null;
-  return (
-    <p id={id} role="alert" className="mt-1 text-xs text-destructive">
-      {message}
-    </p>
+export function shipOrderFormFingerprint(formData: FormData): string {
+  return JSON.stringify(
+    [...formData.entries()]
+      .filter(([name]) => name !== 'idempotencyKey')
+      .map(([name, value]) => [name, String(value)]),
   );
 }

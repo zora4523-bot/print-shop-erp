@@ -29,7 +29,7 @@ vi.mock('../print-jobs', () => {
   }
   return {
     OrderPrintJobError,
-    createOrderPrintRequest: mocks.createPrint,
+    createNextOrderPrintRequest: mocks.createPrint,
     markOrderPrintRequestPrinted: mocks.markPrinted,
   };
 });
@@ -149,5 +149,76 @@ describe('admin order batch whitelist', () => {
       code: 'INVALID_INPUT',
     });
     expect(mocks.markPrinted).not.toHaveBeenCalled();
+  });
+
+  it('delegates print kind selection to the lock-protected history reader', async () => {
+    await runAdminOrderBatch(
+      {
+        requestId: 'batch-create-print-history',
+        command: 'CREATE_PRINT',
+        items: [item('order-1')],
+      },
+      admin,
+    );
+
+    expect(mocks.createPrint).toHaveBeenCalledWith(
+      {
+        orderId: 'order-1',
+        workOrderVersion: 2,
+        reason: '管理端批量创建打印任务',
+        idempotencyKey: expect.stringMatching(/^admin-order-batch:/),
+      },
+      admin,
+    );
+    expect(mocks.createPrint.mock.calls[0]?.[0]).not.toHaveProperty('printKind');
+  });
+
+  it('preserves prior successes and stops with a distinct observable failure on unknown errors', async () => {
+    const databaseFailure = new Error('connection terminated unexpectedly');
+    mocks.release
+      .mockResolvedValueOnce({ status: OrderStatus.RELEASED })
+      .mockRejectedValueOnce(databaseFailure);
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    const result = await runAdminOrderBatch(
+      {
+        requestId: 'batch-release-unknown-error',
+        command: 'RELEASE_AND_CREATE_PRINT',
+        items: [item('order-1'), item('order-2'), item('order-3')],
+      },
+      admin,
+    );
+
+    expect(result).toMatchObject({
+      successCount: 1,
+      skippedCount: 0,
+      failedCount: 1,
+      notAttemptedCount: 1,
+      items: [
+        { orderId: 'order-1', status: 'success', code: 'OK' },
+        {
+          orderId: 'order-2',
+          status: 'failed',
+          code: 'UNEXPECTED_ERROR',
+        },
+        {
+          orderId: 'order-3',
+          status: 'not_attempted',
+          code: 'ABORTED_AFTER_FAILURE',
+        },
+      ],
+    });
+    expect(mocks.release).toHaveBeenCalledTimes(2);
+    expect(consoleError).toHaveBeenCalledWith(
+      '[admin-order-batch] unexpected item failure',
+      expect.objectContaining({
+        requestId: 'batch-release-unknown-error',
+        orderId: 'order-2',
+        error: databaseFailure,
+      }),
+    );
+    consoleError.mockRestore();
   });
 });

@@ -3,7 +3,10 @@ import path from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
-import { OrderStatus } from '@/generated/prisma/enums';
+import {
+  OrderItemPricingRoute,
+  OrderStatus,
+} from '@/generated/prisma/enums';
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>();
@@ -92,16 +95,23 @@ function pendingForms(): Record<string, string> {
     OrderChangeRequestForm: renderToStaticMarkup(
       <OrderChangeRequestForm
         orderId="order-1"
+        expectedRevision={3}
+        expectedWorkOrderVersion={2}
         items={[
           {
             id: 'item-1',
             sequence: 1,
             name: '纸盒',
             quantity: 100,
+            productId: null,
+            pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
             specification: null,
+            paperType: null,
+            paperWeightGsm: null,
             foilColors: [],
           },
         ]}
+        catalogProducts={[]}
       />,
     ),
     ReworkOrderForm: renderToStaticMarkup(

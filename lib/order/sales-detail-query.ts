@@ -5,6 +5,7 @@ import {
   DesignFileType,
   OrderChangeRequestStatus,
   OrderCustomerChargeStatus,
+  OrderItemPricingRoute,
   OrderPricingStatus,
   OrderSettlementType,
   OrderStatus,
@@ -27,6 +28,9 @@ export type SalesOrderDetail = {
   isUrgent: boolean;
   isSfCollect: boolean;
   revision: number;
+  editVersion: number;
+  workOrderVersion: number;
+  priceRevision: number;
   pricingStatus: OrderPricingStatus;
   totalAmount: string;
   promisedDate: string | null;
@@ -49,7 +53,11 @@ export type SalesOrderDetail = {
     sequence: number;
     name: string;
     quantity: number;
+    productId: string | null;
+    pricingRoute: OrderItemPricingRoute;
     specification: string | null;
+    paperType: string | null;
+    paperWeightGsm: number | null;
     paper: string | null;
     frontFoilColors: string[];
     backFoilColors: string[];
@@ -86,6 +94,8 @@ export type SalesOrderDetail = {
     type: 'MODIFY' | 'CANCEL';
     status: OrderChangeRequestStatus;
     baseRevision: number;
+    baseWorkOrderVersion: number | null;
+    workOrderVersionAfter: number | null;
     reason: string;
     reviewRemark: string | null;
     reviewedAt: string | null;
@@ -108,6 +118,9 @@ export const salesOrderDetailSelect = {
   isUrgent: true,
   isSfCollect: true,
   revision: true,
+  editVersion: true,
+  workOrderVersion: true,
+  priceRevision: true,
   pricingStatus: true,
   processingAmount: true,
   packagingAmount: true,
@@ -129,6 +142,8 @@ export const salesOrderDetailSelect = {
       sequence: true,
       name: true,
       quantity: true,
+      productId: true,
+      pricingRoute: true,
       specification: true,
       paperType: true,
       paperWeightGsm: true,
@@ -189,6 +204,8 @@ export const salesOrderDetailSelect = {
       requesterId: true,
       status: true,
       baseRevision: true,
+      baseWorkOrderVersion: true,
+      workOrderVersionAfter: true,
       reason: true,
       reviewRemark: true,
       reviewedAt: true,
@@ -266,6 +283,9 @@ function mapSalesOrderDetail(
     isUrgent: row.isUrgent,
     isSfCollect: row.isSfCollect,
     revision: row.revision,
+    editVersion: row.editVersion,
+    workOrderVersion: row.workOrderVersion,
+    priceRevision: row.priceRevision,
     pricingStatus: row.pricingStatus,
     totalAmount: selectOrderCustomerFee(row).amount,
     promisedDate: row.promisedDate?.toISOString().slice(0, 10) ?? null,
@@ -283,7 +303,11 @@ function mapSalesOrderDetail(
       sequence: item.sequence,
       name: item.name,
       quantity: item.quantity,
+      productId: item.productId,
+      pricingRoute: item.pricingRoute,
       specification: item.specification,
+      paperType: item.paperType,
+      paperWeightGsm: item.paperWeightGsm,
       paper: formatPaper(item.paperType, item.paperWeightGsm),
       frontFoilColors: [...item.frontFoilColors],
       backFoilColors: [...item.backFoilColors],
@@ -323,6 +347,8 @@ function mapSalesOrderDetail(
       type: request.type,
       status: request.status,
       baseRevision: request.baseRevision,
+      baseWorkOrderVersion: request.baseWorkOrderVersion,
+      workOrderVersionAfter: request.workOrderVersionAfter,
       reason: request.reason,
       reviewRemark: request.reviewRemark,
       reviewedAt: request.reviewedAt?.toISOString() ?? null,

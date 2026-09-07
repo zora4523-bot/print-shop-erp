@@ -13,7 +13,7 @@ describe('production APP_PUBLIC_URL transport guard', () => {
     ' https://erp.example.com',
     'not a URL',
   ])('fail-closes an unsafe URL: %s', async (url) => {
-    const result = await runCheckEnv(url);
+    const result = await runCheckEnv({ APP_PUBLIC_URL: url });
     expect(result.code).toBe(1);
     expect(result.stdout).toContain('APP_PUBLIC_URL 必须是不带路径');
   });
@@ -24,12 +24,59 @@ describe('production APP_PUBLIC_URL transport guard', () => {
     'http://127.0.0.1:3000',
     'http://[::1]:3000',
   ])('accepts TLS or an explicit loopback URL: %s', async (url) => {
-    const result = await runCheckEnv(url);
+    const result = await runCheckEnv({ APP_PUBLIC_URL: url });
     expect(result.code).toBe(0);
   });
 });
 
-function runCheckEnv(url: string): Promise<{ code: number | null; stdout: string }> {
+describe('WeCom smart bot credential guard', () => {
+  it.each([
+    {
+      configured: { WECOM_SMART_BOT_ID: 'bot-id-placeholder' },
+      missing: 'WECOM_SMART_BOT_SECRET',
+    },
+    {
+      configured: { WECOM_SMART_BOT_SECRET: 'rotated-secret-placeholder' },
+      missing: 'WECOM_SMART_BOT_ID',
+    },
+  ])('rejects a partial credential pair missing $missing', async ({ configured, missing }) => {
+    const result = await runCheckEnv(configured);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain(`缺 ${missing}`);
+    expect(result.stdout).toContain('必须成对配置或成对留空');
+  });
+
+  it.each(['', 'inline'])('requires durable jobs in production when mode is %j', async (mode) => {
+    const result = await runCheckEnv({
+      BACKGROUND_JOBS_MODE: mode,
+      WECOM_SMART_BOT_ID: 'bot-id-placeholder',
+      WECOM_SMART_BOT_SECRET: 'rotated-secret-placeholder',
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain('长连接只能由单个常驻 LIGHT worker 持有');
+  });
+
+  it('accepts a complete credential pair with durable jobs in production', async () => {
+    const result = await runCheckEnv({
+      WECOM_SMART_BOT_ID: 'bot-id-placeholder',
+      WECOM_SMART_BOT_SECRET: 'rotated-secret-placeholder',
+    });
+
+    expect(result.code).toBe(0);
+  });
+
+  it('keeps the legacy webhook-only deployment valid when both values are empty', async () => {
+    const result = await runCheckEnv();
+
+    expect(result.code).toBe(0);
+  });
+});
+
+function runCheckEnv(
+  overrides: Record<string, string | undefined> = {},
+): Promise<{ code: number | null; stdout: string }> {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(process.execPath, [resolve('scripts/check-env.mjs')], {
       env: {
@@ -41,10 +88,13 @@ function runCheckEnv(url: string): Promise<{ code: number | null; stdout: string
         AUTH_TRUST_HOST: 'true',
         BACKGROUND_JOBS_MODE: 'durable',
         NOTIFICATION_MOCK_MODE: 'false',
-        APP_PUBLIC_URL: url,
+        WECOM_SMART_BOT_ID: '',
+        WECOM_SMART_BOT_SECRET: '',
+        APP_PUBLIC_URL: 'https://erp.example.com',
         APP_VERSION: 'test',
         PDF_ARTIFACT_DIR: '/tmp/print-shop-erp-pdf-test',
         ORDER_EXPORT_ARTIFACT_DIR: '/tmp/print-shop-erp-export-test',
+        ...overrides,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

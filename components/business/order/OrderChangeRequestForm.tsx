@@ -7,12 +7,17 @@ import {
   useTransition,
 } from 'react';
 import type { FormEvent } from 'react';
+import type { OrderItemPricingRoute } from '@/generated/prisma/enums';
 import { createOrderChangeRequestAction } from '@/actions/order';
 import type { CreateOrderChangeRequestMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
+import {
+  listOrderChangeSpecificationOptions,
+  type OrderChangeCatalogProduct,
+} from '@/lib/order/change-request-catalog-identity';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type ItemOption = {
@@ -20,7 +25,11 @@ type ItemOption = {
   sequence: number;
   name: string;
   quantity: number;
+  productId: string | null;
+  pricingRoute: OrderItemPricingRoute;
   specification: string | null;
+  paperType: string | null;
+  paperWeightGsm: number | null;
   frontFoilColors?: string[];
   backFoilColors?: string[];
   foilColors: string[];
@@ -33,6 +42,9 @@ type EditableItem = {
   name: string;
   displayName: string;
   quantity: number;
+  targetProductId: string | null;
+  specification: string;
+  specificationSelectionKey: string;
   displaySpecification: string;
   frontFoilColors: string;
   backFoilColors: string;
@@ -44,6 +56,8 @@ type OrderItemChangePayload =
       itemId: string;
       name: string;
       quantity: number;
+      targetProductId?: string;
+      specification?: string;
       frontFoilColors: string[];
       backFoilColors: string[];
     }
@@ -52,14 +66,78 @@ type OrderItemChangePayload =
       templateItemId: string;
       name: string;
       quantity: number;
+      targetProductId?: string;
+      specification?: string;
       frontFoilColors: string[];
       backFoilColors: string[];
     };
 
 type Props = {
   orderId: string;
+  expectedRevision: number;
+  expectedWorkOrderVersion: number;
   items: ItemOption[];
+  catalogProducts: OrderChangeCatalogProduct[];
 };
+
+export function orderChangeRequestDraftIdentity({
+  orderId,
+  expectedRevision,
+  expectedWorkOrderVersion,
+  items,
+  catalogProducts,
+}: Pick<
+  Props,
+  | 'orderId'
+  | 'expectedRevision'
+  | 'expectedWorkOrderVersion'
+  | 'items'
+  | 'catalogProducts'
+>): string {
+  const catalogFacts = catalogProducts
+    .map((product) => ({
+      id: product.id,
+      category: product.category,
+      specification: product.specification,
+      paperType: product.paperType,
+      weight: product.weight,
+      isActive: product.isActive,
+      paperMaterialId: product.paperMaterialId ?? null,
+      linkedPaper: product.linkedPaper
+        ? {
+            isActive: product.linkedPaper.isActive,
+            outOfStock: product.linkedPaper.outOfStock,
+          }
+        : null,
+    }))
+    .sort((left, right) => {
+      const leftKey = JSON.stringify(left);
+      const rightKey = JSON.stringify(right);
+      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    });
+
+  return JSON.stringify({
+    orderId,
+    expectedRevision,
+    expectedWorkOrderVersion,
+    items: items.map((item) => ({
+      id: item.id,
+      sequence: item.sequence,
+      name: item.name,
+      quantity: item.quantity,
+      productId: item.productId,
+      pricingRoute: item.pricingRoute,
+      specification: item.specification,
+      paperType: item.paperType,
+      paperWeightGsm: item.paperWeightGsm,
+      frontFoilColors: item.frontFoilColors ?? [],
+      backFoilColors: item.backFoilColors ?? [],
+      foilColors: item.foilColors,
+      isDoubleSided: item.isDoubleSided ?? false,
+    })),
+    catalogProducts: catalogFacts,
+  });
+}
 
 const MODIFY_KINDS = [
   ['QTY', '数量'],
@@ -67,6 +145,34 @@ const MODIFY_KINDS = [
   ['CRAFT_PAPER', '工艺 / 纸张'],
   ['OTHER', '其他'],
 ] as const;
+
+type ModifyKind = (typeof MODIFY_KINDS)[number][0];
+
+export function buildOrderChangeRequestPayload({
+  orderId,
+  expectedRevision,
+  expectedWorkOrderVersion,
+  modifyKind,
+  reason,
+  items,
+}: {
+  orderId: string;
+  expectedRevision: number;
+  expectedWorkOrderVersion: number;
+  modifyKind: ModifyKind;
+  reason: string;
+  items: OrderItemChangePayload[];
+}) {
+  return {
+    orderId,
+    expectedRevision,
+    expectedWorkOrderVersion,
+    type: 'MODIFY' as const,
+    modifyKind,
+    reason,
+    items,
+  };
+}
 
 function splitColors(value: string): string[] {
   return [
@@ -79,20 +185,109 @@ function splitColors(value: string): string[] {
   ];
 }
 
-export function createOrderChangeEditableItem(item: ItemOption): EditableItem {
+function hasSameColorSet(left: readonly string[], right: readonly string[]) {
+  const normalizedLeft = new Set(
+    left.map((color) => color.trim()).filter(Boolean),
+  );
+  const normalizedRight = new Set(
+    right.map((color) => color.trim()).filter(Boolean),
+  );
+  return (
+    normalizedLeft.size === normalizedRight.size &&
+    [...normalizedLeft].every((color) => normalizedRight.has(color))
+  );
+}
+
+export function createOrderChangeEditableItem(
+  item: ItemOption,
+  catalogProducts: readonly OrderChangeCatalogProduct[] = [],
+): EditableItem {
   const specification = item.specification ?? '';
   const foilSides = resolveOrderItemFoilSides(item);
+  const currentOption = listOrderChangeSpecificationOptions({
+    sourceItem: item,
+    products: catalogProducts,
+  }).find(
+    (option) =>
+      option.productId === item.productId &&
+      option.specification === specification,
+  );
   return {
     selected: false,
     name: item.name,
     displayName: externalPriceBusinessText(item.name),
     quantity: item.quantity,
+    targetProductId: item.productId,
+    specification,
+    specificationSelectionKey: currentOption?.selectionKey ?? '',
     displaySpecification: specification
       ? externalPriceBusinessText(specification)
       : '',
     frontFoilColors: foilSides.frontFoilColors.join('、'),
     backFoilColors: foilSides.backFoilColors.join('、'),
   };
+}
+
+export function hasOrderItemSemanticChange(
+  item: ItemOption,
+  editableItem: EditableItem,
+): boolean {
+  const foilSides = resolveOrderItemFoilSides(item);
+  return (
+    editableItem.name.trim() !== item.name.trim() ||
+    editableItem.quantity !== item.quantity ||
+    editableItem.targetProductId !== item.productId ||
+    editableItem.specification !== (item.specification ?? '') ||
+    !hasSameColorSet(
+      splitColors(editableItem.frontFoilColors),
+      foilSides.frontFoilColors,
+    ) ||
+    !hasSameColorSet(
+      splitColors(editableItem.backFoilColors),
+      foilSides.backFoilColors,
+    )
+  );
+}
+
+export function buildSelectedOrderItemChanges(
+  items: ItemOption[],
+  editable: Record<string, EditableItem>,
+): OrderItemChangePayload[] {
+  return items.flatMap((item) => {
+    const current = editable[item.id];
+    if (
+      !current?.selected ||
+      !hasOrderItemSemanticChange(item, current)
+    ) {
+      return [];
+    }
+    const specificationChanged =
+      current.targetProductId !== item.productId ||
+      current.specification !== (item.specification ?? '');
+    const targetProductId = current.targetProductId;
+    if (
+      specificationChanged &&
+      (!targetProductId || !current.specification.trim())
+    ) {
+      return [];
+    }
+    return [
+      {
+        operation: 'UPDATE' as const,
+        itemId: item.id,
+        name: current.name,
+        quantity: current.quantity,
+        ...(specificationChanged && targetProductId
+          ? {
+              targetProductId,
+              specification: current.specification,
+            }
+          : {}),
+        frontFoilColors: splitColors(current.frontFoilColors),
+        backFoilColors: splitColors(current.backFoilColors),
+      },
+    ];
+  });
 }
 
 function StateMessage({
@@ -113,11 +308,13 @@ function StateMessage({
 }
 
 function ExistingOrderItemChanges({
+  catalogProducts,
   editable,
   items,
   pending,
   updateItem,
 }: {
+  catalogProducts: readonly OrderChangeCatalogProduct[];
   editable: Record<string, EditableItem>;
   items: ItemOption[];
   pending: boolean;
@@ -128,6 +325,15 @@ function ExistingOrderItemChanges({
       <legend className="sr-only">选择并修改现有款式</legend>
       {items.map((item) => {
         const current = editable[item.id];
+        const specificationOptions = listOrderChangeSpecificationOptions({
+          sourceItem: item,
+          products: catalogProducts,
+        });
+        const sourceHasCatalogOption = specificationOptions.some(
+          (option) =>
+            option.productId === item.productId &&
+            option.specification === (item.specification ?? ''),
+        );
         return (
           <div key={item.id} className="min-w-0 rounded-lg border p-3">
             <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
@@ -176,12 +382,57 @@ function ExistingOrderItemChanges({
                     }
                   />
                 </label>
-                <div className="min-w-0 space-y-1 text-sm">
+                <label className="min-w-0 space-y-1 text-sm">
                   <span>规格</span>
-                  <p className="admin-wrap-anywhere min-h-11 min-w-0 rounded-md border bg-muted/30 px-3 py-2.5">
-                    {current.displaySpecification || '未填'}
-                  </p>
-                </div>
+                  <select
+                    value={current.specificationSelectionKey}
+                    disabled={pending || specificationOptions.length === 0}
+                    onChange={(event) => {
+                      const selected = specificationOptions.find(
+                        (option) => option.selectionKey === event.target.value,
+                      );
+                      if (!selected) {
+                        updateItem(item.id, {
+                          targetProductId: item.productId,
+                          specification: item.specification ?? '',
+                          specificationSelectionKey: '',
+                          displaySpecification: item.specification
+                            ? externalPriceBusinessText(item.specification)
+                            : '',
+                        });
+                        return;
+                      }
+                      updateItem(item.id, {
+                        targetProductId: selected.productId,
+                        specification: selected.specification,
+                        specificationSelectionKey: selected.selectionKey,
+                        displaySpecification: externalPriceBusinessText(
+                          selected.specification,
+                        ),
+                      });
+                    }}
+                    className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
+                  >
+                    {!sourceHasCatalogOption ? (
+                      <option value="">
+                        {current.specificationSelectionKey
+                          ? '选择目录规格'
+                          : current.displaySpecification || '原规格（未匹配活动目录）'}
+                      </option>
+                    ) : null}
+                    {specificationOptions.map((option) => (
+                      <option
+                        key={option.selectionKey}
+                        value={option.selectionKey}
+                      >
+                        {externalPriceBusinessText(option.specification)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-xs text-muted-foreground">
+                    仅显示与当前计价路线、纸张和克重一致的活动目录规格。
+                  </span>
+                </label>
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>正面烫金颜色（多个用顿号分隔）</span>
                   <Input
@@ -217,20 +468,81 @@ function ExistingOrderItemChanges({
   );
 }
 
-export function OrderChangeRequestForm({ orderId, items }: Props) {
+export function OrderChangeRequestForm(props: Props) {
+  return (
+    <OrderChangeRequestDraftForm
+      key={orderChangeRequestDraftIdentity(props)}
+      {...props}
+    />
+  );
+}
+
+function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason, pending }: {
+  modifyKind: ModifyKind;
+  setModifyKind: (value: ModifyKind) => void;
+  reason: string;
+  setReason: (value: string) => void;
+  pending: boolean;
+}) {
+  return (
+    <>
+      <label className="block min-w-0 space-y-1 text-sm">
+        <span className="font-medium">修改类别</span>
+        <select
+          value={modifyKind}
+          onChange={(event) =>
+            setModifyKind(event.target.value as typeof modifyKind)
+          }
+          disabled={pending}
+          className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
+        >
+          {MODIFY_KINDS.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <span className="block text-xs text-muted-foreground">
+          此处仅用于审批归类；本表只修改上方勾选的款式事实，不会直接更改承诺交期或收货地址。
+        </span>
+      </label>
+
+      <label className="block min-w-0 space-y-1 text-sm">
+        <span className="font-medium">修改原因</span>
+        <textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          rows={3}
+          maxLength={500}
+          required
+          disabled={pending}
+          className="w-full min-w-0 rounded-md border bg-background px-3 py-2"
+          placeholder="写明客户要求、交期影响等，方便管理员审核"
+        />
+      </label>
+    </>
+  );
+}
+
+function OrderChangeRequestDraftForm({
+  orderId,
+  expectedRevision,
+  expectedWorkOrderVersion,
+  items,
+  catalogProducts,
+}: Props) {
   const [state, action] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
     unknown
   >(createOrderChangeRequestAction, null);
   const [pending, startTransition] = useTransition();
   const [reason, setReason] = useState('');
-  const [modifyKind, setModifyKind] =
-    useState<(typeof MODIFY_KINDS)[number][0]>('QTY');
+  const [modifyKind, setModifyKind] = useState<ModifyKind>('QTY');
   const [editable, setEditable] = useState<Record<string, EditableItem>>(() =>
     Object.fromEntries(
       items.map((item) => [
         item.id,
-        createOrderChangeEditableItem(item),
+        createOrderChangeEditableItem(item, catalogProducts),
       ]),
     ),
   );
@@ -238,27 +550,47 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   const [templateItemId, setTemplateItemId] = useState(items[0]?.id ?? '');
   const [newName, setNewName] = useState('');
   const [newQuantity, setNewQuantity] = useState(1);
+  const [newSpecificationSelectionKey, setNewSpecificationSelectionKey] =
+    useState('');
+  const [newTargetProductId, setNewTargetProductId] = useState<string | null>(
+    null,
+  );
+  const [newSpecification, setNewSpecification] = useState<string | null>(
+    null,
+  );
   const [newFrontFoilColors, setNewFrontFoilColors] = useState('');
   const [newBackFoilColors, setNewBackFoilColors] = useState('');
 
   const selectedCount = Object.values(editable).filter(
     (item) => item.selected,
   ).length;
+  const selectedChanges = useMemo(
+    () => buildSelectedOrderItemChanges(items, editable),
+    [editable, items],
+  );
+  const selectedTemplate = items.find((item) => item.id === templateItemId);
+  const newSpecificationOptions = selectedTemplate
+    ? listOrderChangeSpecificationOptions({
+        sourceItem: selectedTemplate,
+        products: catalogProducts,
+      })
+    : [];
+  const unchangedSelectedCount = selectedCount - selectedChanges.length;
+  const hasValidAddedItem =
+    addEnabled &&
+    Boolean(templateItemId) &&
+    newName.trim().length > 0 &&
+    newQuantity > 0;
   const canSubmit = useMemo(
     () =>
       reason.trim().length > 0 &&
-      (selectedCount > 0 ||
-        (addEnabled &&
-          Boolean(templateItemId) &&
-          newName.trim().length > 0 &&
-          newQuantity > 0)),
+      (selectedChanges.length > 0 || hasValidAddedItem) &&
+      (!addEnabled || hasValidAddedItem),
     [
       addEnabled,
-      newName,
-      newQuantity,
+      hasValidAddedItem,
       reason,
-      selectedCount,
-      templateItemId,
+      selectedChanges.length,
     ],
   );
 
@@ -272,38 +604,32 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending || !canSubmit) return;
-    const changes: OrderItemChangePayload[] = items.flatMap((item) => {
-      const current = editable[item.id];
-      if (!current.selected) return [];
-      return [
-        {
-          operation: 'UPDATE' as const,
-          itemId: item.id,
-          name: current.name,
-          quantity: current.quantity,
-          frontFoilColors: splitColors(current.frontFoilColors),
-          backFoilColors: splitColors(current.backFoilColors),
-        },
-      ];
-    });
+    const changes = buildSelectedOrderItemChanges(items, editable);
     if (addEnabled) {
       changes.push({
         operation: 'ADD',
         templateItemId,
         name: newName,
         quantity: newQuantity,
+        ...(newTargetProductId && newSpecification
+          ? {
+              targetProductId: newTargetProductId,
+              specification: newSpecification,
+            }
+          : {}),
         frontFoilColors: splitColors(newFrontFoilColors),
         backFoilColors: splitColors(newBackFoilColors),
       });
     }
     startTransition(() =>
-      action({
+      action(buildOrderChangeRequestPayload({
         orderId,
-        type: 'MODIFY',
+        expectedRevision,
+        expectedWorkOrderVersion,
         modifyKind,
         reason,
         items: changes,
-      }),
+      })),
     );
   }
 
@@ -325,15 +651,35 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
       className="min-w-0 space-y-4"
     >
       <p className="text-xs text-muted-foreground">
-        勾选要修改的款式；可改款式名、数量和正反面烫金颜色。已开工款式不能改数量。
-        新增款式继承规格、纸张、工艺和计价参数。
+        勾选要修改的款式；可改款式名、数量、目录规格和正反面烫金颜色。
+        规格只显示与当前计价路线、纸张和克重一致的活动目录选项。
+        已开工款式不能改数量或生产计价事实。
       </p>
       <ExistingOrderItemChanges
+        catalogProducts={catalogProducts}
         editable={editable}
         items={items}
         pending={pending}
         updateItem={updateItem}
       />
+      {unchangedSelectedCount > 0 ? (
+        <p
+          role={
+            selectedChanges.length === 0 && !hasValidAddedItem
+              ? 'alert'
+              : 'status'
+          }
+          className={
+            selectedChanges.length === 0 && !hasValidAddedItem
+              ? 'text-sm text-destructive'
+              : 'text-sm text-muted-foreground'
+          }
+        >
+          {selectedChanges.length === 0 && !hasValidAddedItem
+            ? '已勾选的款式内容未发生变化，请修改名称、数量、目录规格或正反面烫金颜色。'
+            : `${unchangedSelectedCount} 款内容未发生变化，本次不会提交。`}
+        </p>
+      ) : null}
 
       <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
@@ -349,11 +695,16 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
         {addEnabled ? (
           <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 lg:grid-cols-2">
             <label className="min-w-0 space-y-1 text-sm">
-              <span>参考现有款式（继承规格、纸张、工艺和计价参数）</span>
+              <span>参考现有款式（继承纸张、工艺和计价路线）</span>
               <select
                 value={templateItemId}
                 disabled={pending}
-                onChange={(event) => setTemplateItemId(event.target.value)}
+                onChange={(event) => {
+                  setTemplateItemId(event.target.value);
+                  setNewSpecificationSelectionKey('');
+                  setNewTargetProductId(null);
+                  setNewSpecification(null);
+                }}
                 className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
               >
                 {items.map((item) => (
@@ -385,6 +736,39 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 onChange={(event) => setNewQuantity(Number(event.target.value))}
               />
             </label>
+            <label className="min-w-0 space-y-1 text-sm">
+              <span>规格</span>
+              <select
+                value={newSpecificationSelectionKey}
+                disabled={pending || !selectedTemplate}
+                onChange={(event) => {
+                  const selected = newSpecificationOptions.find(
+                    (option) => option.selectionKey === event.target.value,
+                  );
+                  setNewSpecificationSelectionKey(
+                    selected?.selectionKey ?? '',
+                  );
+                  setNewTargetProductId(selected?.productId ?? null);
+                  setNewSpecification(selected?.specification ?? null);
+                }}
+                className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
+              >
+                <option value="">
+                  继承参考款式规格
+                  {selectedTemplate?.specification
+                    ? `：${externalPriceBusinessText(selectedTemplate.specification)}`
+                    : ''}
+                </option>
+                {newSpecificationOptions.map((option) => (
+                  <option
+                    key={option.selectionKey}
+                    value={option.selectionKey}
+                  >
+                    {externalPriceBusinessText(option.specification)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="min-w-0 space-y-1 text-sm lg:col-span-2">
               <span>正面烫金颜色（可多色）</span>
               <Input
@@ -407,40 +791,18 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
         ) : null}
       </fieldset>
 
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span className="font-medium">修改类别</span>
-        <select
-          value={modifyKind}
-          onChange={(event) =>
-            setModifyKind(event.target.value as typeof modifyKind)
-          }
-          disabled={pending}
-          className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
-        >
-          {MODIFY_KINDS.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="block min-w-0 space-y-1 text-sm">
-        <span className="font-medium">修改原因</span>
-        <textarea
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          rows={3}
-          maxLength={500}
-          required
-          disabled={pending}
-          className="w-full min-w-0 rounded-md border bg-background px-3 py-2"
-          placeholder="写明客户要求、交期影响等，方便管理员审核"
-        />
-      </label>
+      <OrderChangeReasonFields
+        modifyKind={modifyKind}
+        setModifyKind={setModifyKind}
+        reason={reason}
+        setReason={setReason}
+        pending={pending}
+      />
       <StateMessage state={state} />
       <Button type="submit" disabled={pending || !canSubmit} className="min-h-11">
-        {pending ? '提交中…' : `提交修改申请${selectedCount ? `（${selectedCount} 款）` : ''}`}
+        {pending
+          ? '提交中…'
+          : `提交修改申请${selectedChanges.length ? `（${selectedChanges.length} 款）` : ''}`}
       </Button>
     </form>
   );

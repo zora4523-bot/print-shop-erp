@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { artifactMock, auditMock, clockMock, dbMock, enqueueMock, xlsxMock } = vi.hoisted(
   () => ({
@@ -63,6 +63,7 @@ import {
 } from '../../../generated/prisma/client';
 import {
   AgentMonthlyBillExportActorInvalidError,
+  AgentMonthlyBillExportExpiredError,
   AgentMonthlyBillExportNotFoundError,
   InvalidAgentMonthlyBillExportRequestError,
   prepareAgentMonthlyBillExportDownload,
@@ -150,6 +151,10 @@ function snapshotSource(
 }
 
 beforeEach(() => {
+  // Keep the worker clock aligned with the persisted export fixture. Only
+  // Date is faked so stream consumption and asynchronous timers remain real.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
   vi.clearAllMocks();
   clockMock.mockResolvedValue(NOW);
   dbMock.$transaction.mockImplementation(async (callback) => callback(dbMock));
@@ -168,6 +173,10 @@ beforeEach(() => {
     }
     return { byteLength: 321, sheetCount: sheets.length };
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('requestAgentMonthlyBillExport', () => {
@@ -236,6 +245,45 @@ describe('requestAgentMonthlyBillExport', () => {
 });
 
 describe('processQueuedAgentMonthlyBillExport', () => {
+  it('rejects an export at its expiry boundary before opening an artifact', async () => {
+    dbMock.agentMonthlyBillExport.findUnique.mockResolvedValue(
+      exportRow({
+        expiresAt: NOW,
+        createdBy: { ...actor, isActive: true },
+      }),
+    );
+
+    await expect(
+      processQueuedAgentMonthlyBillExport('export-1'),
+    ).rejects.toBeInstanceOf(AgentMonthlyBillExportExpiredError);
+    expect(artifactMock.ensureAgentMonthlyBillExportArtifactDir).not.toHaveBeenCalled();
+    expect(xlsxMock).not.toHaveBeenCalled();
+    expect(dbMock.agentMonthlyBillExport.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: AgentMonthlyBillExportStatus.EXPIRED }),
+      }),
+    );
+  });
+
+  it('does not publish an export that expires while the workbook is generated', async () => {
+    const expiresAt = new Date(NOW.getTime() + 1_000);
+    dbMock.agentMonthlyBillExport.findUnique.mockResolvedValue(
+      exportRow({ expiresAt, createdBy: { ...actor, isActive: true } }),
+    );
+    dbMock.agentMonthlyBillExportSnapshot.findMany.mockResolvedValue([]);
+    xlsxMock.mockImplementationOnce(async () => {
+      vi.setSystemTime(expiresAt);
+      return { byteLength: 321, sheetCount: 1 };
+    });
+
+    await expect(
+      processQueuedAgentMonthlyBillExport('export-1'),
+    ).rejects.toBeInstanceOf(AgentMonthlyBillExportExpiredError);
+    expect(artifactMock.deleteAgentMonthlyBillExportArtifact).toHaveBeenCalled();
+    expect(dbMock.agentMonthlyBillExport.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
   it('re-authorizes the requester before touching an artifact', async () => {
     dbMock.agentMonthlyBillExport.findUnique.mockResolvedValue(
       exportRow({

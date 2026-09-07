@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderCustomerChargeStatus,
+  OrderItemPricingRoute,
   OrderPricingStatus,
   OrderSettlementType,
   OrderStatus,
@@ -51,6 +52,18 @@ import {
 } from '@/lib/order/commercial-details';
 
 const actor = { id: 'admin-1', role: Role.ADMIN };
+
+function plateEligibleItem() {
+  return {
+    id: 'item-1',
+    name: '款式 A',
+    pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+    frontFoilColors: ['哑金'],
+    backFoilColors: [],
+    foilColors: ['哑金'],
+    isDoubleSided: false,
+  };
+}
 
 function mutableOrder() {
   return {
@@ -234,10 +247,7 @@ describe('saveOrderManualCharge', () => {
 
 describe('order plate details', () => {
   it('appends a plate row and mirrors its calculated amount to customer charges', async () => {
-    dbMock.tx.orderItem.findFirst.mockResolvedValue({
-      id: 'item-1',
-      name: '款式 A',
-    });
+    dbMock.tx.orderItem.findFirst.mockResolvedValue(plateEligibleItem());
     dbMock.tx.orderItemPlateDetail.aggregate.mockResolvedValue({
       _max: { sequence: 1 },
     });
@@ -287,10 +297,7 @@ describe('order plate details', () => {
   });
 
   it('waives the aggregate pending plate fee before structured plate rows become authoritative', async () => {
-    dbMock.tx.orderItem.findFirst.mockResolvedValue({
-      id: 'item-1',
-      name: '款式 A',
-    });
+    dbMock.tx.orderItem.findFirst.mockResolvedValue(plateEligibleItem());
     dbMock.tx.orderItemPlateDetail.aggregate.mockResolvedValue({
       _max: { sequence: 0 },
     });
@@ -381,4 +388,114 @@ describe('order plate details', () => {
       }),
     );
   });
+
+  it.each(['save', 'delete'] as const)(
+    'rejects plate-detail %s while administrator pricing is pending',
+    async (operation) => {
+      dbMock.tx.order.findUnique.mockResolvedValue({
+        ...mutableOrder(),
+        pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
+      });
+
+      const result =
+        operation === 'save'
+          ? saveOrderPlateDetail(
+              {
+                orderId: 'order-1',
+                orderItemId: 'item-1',
+                plateDetailId: null,
+                expectedPriceRevision: 2,
+                name: '烫金版',
+                plateGroupId: null,
+                specification: null,
+                quantity: 1,
+                unitPrice: '30.00',
+                remark: null,
+              },
+              actor,
+            )
+          : deleteOrderPlateDetail(
+              {
+                orderId: 'order-1',
+                orderItemId: 'item-1',
+                plateDetailId: 'plate-1',
+                expectedPriceRevision: 2,
+                reason: '纠正错误明细',
+              },
+              actor,
+            );
+
+      await expect(result).rejects.toThrow(/工单价格复核中直接填写制烫金版费/u);
+      expect(dbMock.tx.orderItemPlateDetail.create).not.toHaveBeenCalled();
+      expect(dbMock.tx.orderItemPlateDetail.update).not.toHaveBeenCalled();
+      expect(dbMock.tx.orderCustomerCharge.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      label: 'a non-foil item',
+      item: {
+        ...plateEligibleItem(),
+        frontFoilColors: [],
+        foilColors: [],
+      },
+      message: /没有烫金事实/u,
+    },
+    {
+      label: 'a color-print item whose whole price includes plate cost',
+      item: {
+        ...plateEligibleItem(),
+        pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+      },
+      message: /彩印烫金按含版费整款价/u,
+    },
+  ])('rejects an independent plate detail for $label', async ({ item, message }) => {
+    dbMock.tx.orderItem.findFirst.mockResolvedValue(item);
+
+    await expect(
+      saveOrderPlateDetail(
+        {
+          orderId: 'order-1',
+          orderItemId: 'item-1',
+          plateDetailId: null,
+          expectedPriceRevision: 2,
+          name: '错误版费',
+          plateGroupId: null,
+          specification: null,
+          quantity: 1,
+          unitPrice: '30.00',
+          remark: null,
+        },
+        actor,
+      ),
+    ).rejects.toThrow(message);
+    expect(dbMock.tx.orderItemPlateDetail.create).not.toHaveBeenCalled();
+    expect(dbMock.tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+  });
+});
+
+it('rejects commercial amount mutations after settlement', async () => {
+  dbMock.tx.order.findUnique.mockResolvedValue({
+    ...mutableOrder(),
+    status: OrderStatus.SETTLED,
+  });
+
+  await expect(
+    saveOrderManualCharge(
+      {
+        orderId: 'order-1',
+        chargeId: null,
+        expectedPriceRevision: 2,
+        categoryCode: 'SAMPLE_FEE',
+        description: '打样费',
+        amount: '10.00',
+        reason: '已结算后不应写入',
+        approvalReference: null,
+      },
+      actor,
+    ),
+  ).rejects.toThrow(/已结算/u);
+  expect(dbMock.tx.orderCustomerCharge.create).not.toHaveBeenCalled();
+  expect(dbMock.tx.order.update).not.toHaveBeenCalled();
 });

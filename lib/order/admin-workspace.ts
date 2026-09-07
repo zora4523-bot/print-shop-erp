@@ -8,12 +8,16 @@ import {
   OrderChangeRequestStatus,
   OrderCustomerChargeStatus,
   OrderItemQuoteDisposition,
+  OrderPricingStatus,
   OrderPrintJobState,
   OrderQuotedFeeCompleteness,
   OrderStatus,
   OrderSettlementType,
+  OutsourceStatus,
   Prisma,
+  ProductionOperationStatus,
   Role,
+  TaskStatus,
 } from '../../generated/prisma/client';
 import { paginationWindow } from '../admin/table';
 import { UnauthorizedError } from '../auth/errors';
@@ -28,7 +32,10 @@ import {
   type WorkOrderProgressProjection,
 } from '../production/work-order-progress-query';
 import { selectOrderCustomerFee } from './customer-fee';
-import { buildOrderWhere } from './list-query';
+import {
+  buildOrderWhere,
+  MISSING_ORDER_CUSTOMER_FILTER_VALUE,
+} from './list-query';
 import { overdueCutoff, promisedDaysLeft } from './promised-date';
 import {
   OrderChangeRequestError,
@@ -36,7 +43,9 @@ import {
   type FactoryConfirmationPriceDiff,
 } from './change-request';
 import {
+  FACTORY_CONFIRMATION_PENDING_STATUSES,
   evaluateFactoryConfirmationPreflight,
+  isAwaitingFactoryConfirmation,
   type FactoryConfirmationPreflight,
 } from './factory-confirmation-preflight';
 import type {
@@ -52,6 +61,8 @@ export type AdminOrderWorkspaceSummary = {
   totalQuantity: number;
   effectiveFee: string;
   manualPricingCount: number;
+  incompleteFeeExcludedCount: number;
+  legacyFeeExcludedCount: number;
 };
 
 export type AdminOrderWorkspaceCounts = {
@@ -92,14 +103,26 @@ export type AdminOrderWorkspaceRow = {
   }>;
   fee: {
     amount: string | null;
-    source: 'SETTLED' | 'CONFIRMED' | 'QUOTED' | 'LEGACY' | 'PENDING';
+    source:
+      | 'SETTLED'
+      | 'CONFIRMED'
+      | 'QUOTED'
+      | 'LEGACY'
+      | 'PENDING'
+      | 'INCOMPLETE';
     estimated: boolean;
   };
   feeStages: {
     quoted: string | null;
     confirmed: string | null;
     settled: string | null;
-    active: 'QUOTED' | 'CONFIRMED' | 'SETTLED' | 'PENDING' | 'LEGACY';
+    active:
+      | 'QUOTED'
+      | 'CONFIRMED'
+      | 'SETTLED'
+      | 'PENDING'
+      | 'LEGACY'
+      | 'INCOMPLETE';
   };
   priceComparison: FactoryConfirmationPriceDiff | null;
   priceComparisonError: string | null;
@@ -217,7 +240,10 @@ export function resolveAdminPrintFacts(input: {
     (request) => request.resolution?.state === OrderPrintJobState.PRINTED,
   );
   return {
-    printPending: printable && !hasPrinted,
+    // A same-version reprint is represented by a new unresolved request next
+    // to the immutable PRINTED receipt of an earlier request. That new request
+    // must put the order back into the print queue.
+    printPending: printable && (Boolean(pendingRequest) || !hasPrinted),
     pendingPrintJobId: pendingRequest?.id ?? null,
     canCreatePrint: printable && !pendingRequest,
     canMarkPrinted: Boolean(pendingRequest),
@@ -241,28 +267,44 @@ async function loadCurrentPrintOrderIds(
       'FOILING'::"OrderStatus",
       'PACKING'::"OrderStatus"
     )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM "OrderPrintJob" request
-        INNER JOIN "OrderPrintJob" resolution
-          ON resolution."requestJobId" = request."id"
-        WHERE request."orderId" = orders."id"
-          AND request."workOrderVersion" = orders."workOrderVersion"
-          AND request."state" = 'PENDING'::"OrderPrintJobState"
-          AND request."requestJobId" IS NULL
-          AND resolution."state" = 'PRINTED'::"OrderPrintJobState"
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM "OrderPrintJob" request
+          WHERE request."orderId" = orders."id"
+            AND request."workOrderVersion" = orders."workOrderVersion"
+            AND request."state" = 'PENDING'::"OrderPrintJobState"
+            AND request."requestJobId" IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "OrderPrintJob" resolution
+              WHERE resolution."requestJobId" = request."id"
+            )
+        )
+        OR NOT EXISTS (
+          SELECT 1
+          FROM "OrderPrintJob" request
+          INNER JOIN "OrderPrintJob" resolution
+            ON resolution."requestJobId" = request."id"
+          WHERE request."orderId" = orders."id"
+            AND request."workOrderVersion" = orders."workOrderVersion"
+            AND request."state" = 'PENDING'::"OrderPrintJobState"
+            AND request."requestJobId" IS NULL
+            AND resolution."state" = 'PRINTED'::"OrderPrintJobState"
+        )
       )
   `;
   return rows.map((row) => row.id);
 }
 
 /**
- * Manual pricing is a persisted business fact, never inferred from a zero
- * amount or from the broad PENDING_ADMIN_CONFIRMATION pricing state.
+ * An incomplete customer fee is a persisted business fact, never inferred
+ * from a zero amount or from the broad PENDING_ADMIN_CONFIRMATION state. This
+ * predicate intentionally has no workflow-status restriction: partial quotes
+ * remain excluded from totals after an order is rejected or cancelled.
  */
-export function adminManualPricingWhere(): Prisma.OrderWhereInput {
+export function adminIncompleteCustomerFeeWhere(): Prisma.OrderWhereInput {
   return {
-    status: { in: [OrderStatus.PENDING_FACTORY, OrderStatus.SUBMITTED] },
     confirmedFee: null,
     settledFee: null,
     OR: [
@@ -287,6 +329,18 @@ export function adminManualPricingWhere(): Prisma.OrderWhereInput {
   };
 }
 
+/**
+ * Actionable manual-pricing work is the intersection of an incomplete fee
+ * fact and a status in which an administrator can resolve it. Keep this
+ * predicate aligned with the row's pending-pricing presentation.
+ */
+export function adminManualPricingWhere(): Prisma.OrderWhereInput {
+  return {
+    status: { in: [...FACTORY_CONFIRMATION_PENDING_STATUSES] },
+    ...adminIncompleteCustomerFeeWhere(),
+  };
+}
+
 function printableWhere(): Prisma.OrderWhereInput {
   return {
     status: { in: [...PRINTABLE_STATUSES] },
@@ -302,7 +356,7 @@ export function adminQueueWhere(
         OR: [
           {
             status: {
-              in: [OrderStatus.PENDING_FACTORY, OrderStatus.SUBMITTED],
+              in: [...FACTORY_CONFIRMATION_PENDING_STATUSES],
             },
           },
           adminManualPricingWhere(),
@@ -346,7 +400,7 @@ export function adminSignalWhere(
     case 'pending-confirmation':
       return {
         status: {
-          in: [OrderStatus.PENDING_FACTORY, OrderStatus.SUBMITTED],
+          in: [...FACTORY_CONFIRMATION_PENDING_STATUSES],
         },
       };
     case 'pending-pricing':
@@ -431,6 +485,8 @@ const adminOrderSelect = {
   orderNo: true,
   revision: true,
   workOrderVersion: true,
+  priceRevision: true,
+  updatedAt: true,
   customName: true,
   customerRef: true,
   status: true,
@@ -448,6 +504,7 @@ const adminOrderSelect = {
   trackingNo: true,
   submitter: { select: { id: true, displayName: true } },
   customerParty: { select: { id: true, name: true, shortName: true } },
+  _count: { select: { shipments: true } },
   stars: { select: { userId: true } },
   items: {
     orderBy: { sequence: 'asc' },
@@ -462,6 +519,7 @@ const adminOrderSelect = {
       paperWeightGsm: true,
       crafts: true,
       quoteDisposition: true,
+      tasks: { select: { status: true } },
       designs: {
         where: { fileType: DesignFileType.IMAGE },
         orderBy: [{ uploadedAt: 'desc' }, { id: 'desc' }],
@@ -513,6 +571,15 @@ const adminOrderSelect = {
     take: 1,
     select: { reasonNote: true },
   },
+  productionOperations: {
+    select: { workOrderVersion: true, status: true },
+  },
+  productionProgressSteps: {
+    select: { workOrderVersion: true, status: true },
+  },
+  outsourceOrders: {
+    select: { status: true },
+  },
   logs: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: 8,
@@ -529,6 +596,61 @@ const adminOrderSelect = {
 type AdminOrderRecord = Prisma.OrderGetPayload<{
   select: typeof adminOrderSelect;
 }>;
+
+type AdminPrintFacts = ReturnType<typeof resolveAdminPrintFacts>;
+
+export function resolveAdminOrderCapabilities(input: {
+  status: OrderStatus;
+  hasPendingChange: boolean;
+  manualPricing: boolean;
+  confirmationPreflightOk: boolean;
+  currentPricePreviewFailed?: boolean;
+  confirmedFeePresent: boolean;
+  pricingPending: boolean;
+  hasShipment: boolean;
+  hasLiveOutsource: boolean;
+  hasIncompleteProduction: boolean;
+  printFacts: AdminPrintFacts;
+}): AdminOrderWorkspaceRow['capabilities'] {
+  const awaitingFactory = isAwaitingFactoryConfirmation(input.status);
+  const productionActive = new Set<OrderStatus>([
+    OrderStatus.CONFIRMED,
+    OrderStatus.RELEASED,
+    OrderStatus.FOILING,
+    OrderStatus.PACKING,
+  ]).has(input.status);
+  const productionReady =
+    input.status === OrderStatus.PACKING ||
+    input.status === OrderStatus.COMPLETED;
+
+  return {
+    confirm:
+      awaitingFactory &&
+      !input.manualPricing &&
+      input.confirmationPreflightOk &&
+      !input.currentPricePreviewFailed,
+    reject: awaitingFactory && !input.hasPendingChange,
+    hold: productionActive && !input.hasPendingChange,
+    resume:
+      input.status === OrderStatus.ON_HOLD && !input.hasPendingChange,
+    release:
+      input.status === OrderStatus.CONFIRMED && !input.hasPendingChange,
+    ship:
+      productionReady &&
+      !input.pricingPending &&
+      input.hasShipment &&
+      !input.hasLiveOutsource &&
+      !input.hasIncompleteProduction &&
+      !input.hasPendingChange,
+    settle:
+      input.status === OrderStatus.SHIPPED &&
+      input.confirmedFeePresent &&
+      !input.hasPendingChange,
+    createPrint: input.printFacts.canCreatePrint,
+    markPrinted: input.printFacts.canMarkPrinted,
+    reviewChange: input.hasPendingChange,
+  };
+}
 
 export async function loadAdminOrderWorkspace(
   actor: AdminOrdersActor,
@@ -570,6 +692,8 @@ export async function loadAdminOrderWorkspace(
         signalCounts,
         quantity,
         manualPricingCount,
+        incompleteFeeExcludedCount,
+        legacyFeeExcludedCount,
         settled,
         confirmed,
         quoted,
@@ -617,6 +741,25 @@ export async function loadAdminOrderWorkspace(
         tx.order.count({
           where: andWhere(resultWhere, adminManualPricingWhere()),
         }),
+        tx.order.count({
+          where: andWhere(
+            resultWhere,
+            adminIncompleteCustomerFeeWhere(),
+            { NOT: adminManualPricingWhere() },
+          ),
+        }),
+        tx.order.count({
+          where: andWhere(
+            resultWhere,
+            {
+              settledFee: null,
+              confirmedFee: null,
+              quotedFee: null,
+              totalAmount: { not: 0 },
+            },
+            { NOT: adminIncompleteCustomerFeeWhere() },
+          ),
+        }),
         tx.order.aggregate({
           where: andWhere(resultWhere, { settledFee: { not: null } }),
           _sum: { settledFee: true },
@@ -636,7 +779,7 @@ export async function loadAdminOrderWorkspace(
               confirmedFee: null,
               quotedFee: { not: null },
             },
-            { NOT: adminManualPricingWhere() },
+            { NOT: adminIncompleteCustomerFeeWhere() },
           ),
           _sum: { quotedFee: true },
         }),
@@ -656,6 +799,8 @@ export async function loadAdminOrderWorkspace(
         signalCounts,
         totalQuantity: quantity._sum.quantity ?? 0,
         manualPricingCount,
+        incompleteFeeExcludedCount,
+        legacyFeeExcludedCount,
         effectiveFee: new Decimal(settled._sum.settledFee?.toString() ?? 0)
           .plus(confirmed._sum.confirmedFee?.toString() ?? 0)
           .plus(quoted._sum.quotedFee?.toString() ?? 0)
@@ -704,6 +849,8 @@ export async function loadAdminOrderWorkspace(
       totalQuantity: snapshot.totalQuantity,
       effectiveFee: snapshot.effectiveFee,
       manualPricingCount: snapshot.manualPricingCount,
+      incompleteFeeExcludedCount: snapshot.incompleteFeeExcludedCount,
+      legacyFeeExcludedCount: snapshot.legacyFeeExcludedCount,
     },
   };
 }
@@ -717,46 +864,108 @@ export async function getAdminOrderByOrderNo(
   assertAdmin(actor);
   const normalized = orderNo.trim();
   if (!normalized || normalized.length > 128) return null;
-  const row = await db.order.findFirst({
-    where: andWhere(buildOrderWhere(actor, emptyFilters()), {
-      orderNo: normalized,
-    }),
-    select: adminOrderSelect,
-  });
-  if (!row) return null;
-  const [craftNames, progressByOrder] = await Promise.all([
-    loadCraftNames([row]),
-    getWorkOrderProgressByOrderIds([row.id]),
-  ]);
-  const mapped = mapAdminOrderRow(
-    row,
-    actor.id,
-    craftNames,
-    progressByOrder.get(row.id),
-    now,
-    stagnationDays,
-  );
-  if (
-    row.status !== OrderStatus.PENDING_FACTORY &&
-    row.status !== OrderStatus.SUBMITTED
-  ) {
-    return mapped;
-  }
-  try {
-    return {
-      ...mapped,
-      priceComparison: await previewFactoryConfirmationPriceDiff(
+  const loadSnapshot = () =>
+    db.$transaction(
+      async (tx) => {
+        const row = await tx.order.findFirst({
+          where: andWhere(buildOrderWhere(actor, emptyFilters()), {
+            orderNo: normalized,
+          }),
+          select: adminOrderSelect,
+        });
+        if (!row) return null;
+        // Prisma's pg adapter owns one client per interactive transaction.
+        // Keep these reads sequential; concurrent client.query() calls are
+        // deprecated by pg and will fail once pg@9 removes that behavior.
+        const craftNames = await loadCraftNames([row], tx);
+        const progressByOrder = await getWorkOrderProgressByOrderIds(
+          [row.id],
+          tx,
+        );
+        return { row, craftNames, progressByOrder };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  // The current-price preview owns its advisory-locked transaction. Keep the
+  // row/craft/progress read in one repeatable-read snapshot, then verify the
+  // order version after preview. A concurrent mutation causes one complete
+  // retry instead of returning a cross-version drawer payload.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const snapshot = await loadSnapshot();
+    if (!snapshot) return null;
+
+    const { row, craftNames, progressByOrder } = snapshot;
+    const mapped = mapAdminOrderRow(
+      row,
+      actor.id,
+      craftNames,
+      progressByOrder.get(row.id),
+      now,
+      stagnationDays,
+    );
+    if (!isAwaitingFactoryConfirmation(row.status)) {
+      return mapped;
+    }
+
+    let priceComparison: FactoryConfirmationPriceDiff | null = null;
+    let priceComparisonError: string | null = null;
+    try {
+      priceComparison = await previewFactoryConfirmationPriceDiff(
         row.id,
         actor,
         now,
-      ),
-    };
-  } catch (error) {
-    if (error instanceof OrderChangeRequestError) {
-      return { ...mapped, priceComparisonError: error.message };
+      );
+    } catch (error) {
+      if (!(error instanceof OrderChangeRequestError)) throw error;
+      priceComparisonError = error.message;
     }
-    throw error;
+
+    const currentVersion = await db.order.findUnique({
+      where: { id: row.id },
+      select: {
+        revision: true,
+        workOrderVersion: true,
+        priceRevision: true,
+        updatedAt: true,
+      },
+    });
+    if (!currentVersion) return null;
+    const versionStable =
+      currentVersion.revision === row.revision &&
+      currentVersion.workOrderVersion === row.workOrderVersion &&
+      currentVersion.priceRevision === row.priceRevision &&
+      currentVersion.updatedAt.getTime() === row.updatedAt.getTime();
+    if (!versionStable) {
+      if (attempt === 0) continue;
+      const latestSnapshot = await loadSnapshot();
+      if (!latestSnapshot) return null;
+      const latestMapped = mapAdminOrderRow(
+        latestSnapshot.row,
+        actor.id,
+        latestSnapshot.craftNames,
+        latestSnapshot.progressByOrder.get(latestSnapshot.row.id),
+        now,
+        stagnationDays,
+      );
+      return {
+        ...latestMapped,
+        priceComparison: null,
+        priceComparisonError: '工单数据刚刚发生变更，请刷新后重试',
+        capabilities: { ...latestMapped.capabilities, confirm: false },
+      };
+    }
+
+    return {
+      ...mapped,
+      priceComparison,
+      priceComparisonError,
+      capabilities: priceComparisonError
+        ? { ...mapped.capabilities, confirm: false }
+        : mapped.capabilities,
+    };
   }
+
+  return null;
 }
 
 function emptyFilters(): AdminOrderWorkspaceQuery['list']['filters'] {
@@ -797,7 +1006,8 @@ function mapAdminOrderRow(
   now: Date,
   stagnationDays: number,
 ): AdminOrderWorkspaceRow {
-  const manualPricing = isManualPricingRecord(row);
+  const incompleteCustomerFee = isIncompleteCustomerFeeRecord(row);
+  const manualPricing = isManualPricingRecord(row, incompleteCustomerFee);
   const items = row.items.map((item) => {
     const design = item.designs[0];
     return {
@@ -832,7 +1042,13 @@ function mapAdminOrderRow(
         source: 'PENDING' as const,
         estimated: false,
       }
-    : selectOrderCustomerFee(row);
+    : incompleteCustomerFee
+      ? {
+          amount: null,
+          source: 'INCOMPLETE' as const,
+          estimated: false,
+        }
+      : selectOrderCustomerFee(row);
   const daysLeft = row.promisedDate
     ? promisedDaysLeft(row.promisedDate, now)
     : null;
@@ -848,15 +1064,6 @@ function mapAdminOrderRow(
         : { kind: 'due-soon' as const, days: daysLeft }
       : null;
   const hasPendingChange = Boolean(pendingChange);
-  const awaitingFactory =
-    row.status === OrderStatus.PENDING_FACTORY ||
-    row.status === OrderStatus.SUBMITTED;
-  const productionActive = new Set<OrderStatus>([
-    OrderStatus.CONFIRMED,
-    OrderStatus.RELEASED,
-    OrderStatus.FOILING,
-    OrderStatus.PACKING,
-  ]).has(row.status);
   const confirmationPreflight = evaluateFactoryConfirmationPreflight({
     status: row.status,
     itemQuantities: row.items.map((item) => item.quantity),
@@ -866,6 +1073,42 @@ function mapAdminOrderRow(
     pendingChangeRequestCount: row.changeRequests.length,
     manualPricingPending: manualPricing,
   });
+  const currentProductionOperations = row.productionOperations.filter(
+    (operation) => operation.workOrderVersion === row.workOrderVersion,
+  );
+  const currentProductionProgressSteps = row.productionProgressSteps.filter(
+    (step) => step.workOrderVersion === row.workOrderVersion,
+  );
+  // Mirror the normal detail page's expand/migrate/contract rule: current W2
+  // operations are authoritative when present; otherwise read legacy tasks.
+  const productionUnits =
+    currentProductionOperations.length > 0
+      ? [...currentProductionOperations, ...currentProductionProgressSteps]
+      : [
+          ...currentProductionProgressSteps,
+          ...row.items.flatMap((item) => item.tasks),
+        ];
+  const incompleteProductionStatuses = new Set<string>([
+    ProductionOperationStatus.PENDING,
+    ProductionOperationStatus.IN_PROGRESS,
+    TaskStatus.PENDING,
+    TaskStatus.IN_PROGRESS,
+  ]);
+  const hasIncompleteProduction = productionUnits.some((unit) =>
+    incompleteProductionStatuses.has(unit.status),
+  );
+  const hasLiveOutsource = row.outsourceOrders.some(
+    (outsource) =>
+      outsource.status === OutsourceStatus.SENT ||
+      outsource.status === OutsourceStatus.IN_PROGRESS,
+  );
+  const customerName =
+    row.customerParty?.shortName?.trim() ||
+    row.customerParty?.name.trim() ||
+    row.customerRef?.trim() ||
+    '未填客户';
+  const customerMissing =
+    row.customerParty === null && !row.customerRef?.trim();
   const firstClaimedAt = progress?.firstClaimedAt ?? null;
   const stagnant = isProductionStagnant({
     status: row.status,
@@ -882,19 +1125,12 @@ function mapAdminOrderRow(
     customName: row.customName,
     customer: {
       id: row.customerParty?.id ?? null,
-      name:
-        row.customerParty?.shortName ??
-        row.customerParty?.name ??
-        row.customerRef ??
-        '未填客户',
-      // The current filter is backed by Order.customerRef rather than Party
-      // identity. Preserve that exact persisted value so a shortName label
-      // never creates a link that filters the selected order out.
-      filterValue:
-        row.customerRef ??
-        row.customerParty?.name ??
-        row.customerParty?.shortName ??
-        '未填客户',
+      name: customerName,
+      filterValue: customerMissing
+        ? MISSING_ORDER_CUSTOMER_FILTER_VALUE
+        : row.customerParty
+          ? customerName
+          : row.customerRef!,
     },
     submitter: { id: row.submitter.id, name: row.submitter.displayName },
     status: row.status,
@@ -931,18 +1167,20 @@ function mapAdminOrderRow(
     priceComparison: null,
     priceComparisonError: null,
     confirmationPreflight,
-    capabilities: {
-      confirm: awaitingFactory && !manualPricing && confirmationPreflight.ok,
-      reject: awaitingFactory && !hasPendingChange,
-      hold: productionActive && !hasPendingChange,
-      resume: row.status === OrderStatus.ON_HOLD && !hasPendingChange,
-      release: row.status === OrderStatus.CONFIRMED && !hasPendingChange,
-      ship: row.status === OrderStatus.PACKING && !hasPendingChange,
-      settle: row.status === OrderStatus.SHIPPED && !hasPendingChange,
-      createPrint: printFacts.canCreatePrint,
-      markPrinted: printFacts.canMarkPrinted,
-      reviewChange: hasPendingChange,
-    },
+    capabilities: resolveAdminOrderCapabilities({
+      status: row.status,
+      hasPendingChange,
+      manualPricing,
+      confirmationPreflightOk: confirmationPreflight.ok,
+      confirmedFeePresent: row.confirmedFee !== null,
+      pricingPending:
+        row.pricingStatus ===
+        OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
+      hasShipment: row._count.shipments > 0,
+      hasLiveOutsource,
+      hasIncompleteProduction,
+      printFacts,
+    }),
     billing: row.agentMonthlyBillItem?.bill ?? null,
     pendingChangeRequest: pendingChange
       ? {
@@ -979,7 +1217,17 @@ function mapAdminOrderRow(
   };
 }
 
-function isManualPricingRecord(row: AdminOrderRecord): boolean {
+function isManualPricingRecord(
+  row: AdminOrderRecord,
+  incompleteCustomerFee = isIncompleteCustomerFeeRecord(row),
+): boolean {
+  if (!isAwaitingFactoryConfirmation(row.status)) {
+    return false;
+  }
+  return incompleteCustomerFee;
+}
+
+function isIncompleteCustomerFeeRecord(row: AdminOrderRecord): boolean {
   if (row.confirmedFee !== null || row.settledFee !== null) return false;
   return (
     row.quotedFeeCompleteness ===
@@ -1020,10 +1268,7 @@ function statusSummary(
   if (row.status === OrderStatus.ON_HOLD) {
     return row.workflowDecisions[0]?.reasonNote ?? '工单已暂停';
   }
-  if (
-    row.status === OrderStatus.PENDING_FACTORY ||
-    row.status === OrderStatus.SUBMITTED
-  ) {
+  if (isAwaitingFactoryConfirmation(row.status)) {
     return confirmationPreflight.ok
       ? '✓ 预检通过，可确认'
       : `⚠ ${confirmationPreflight.issues.join('；')}`;

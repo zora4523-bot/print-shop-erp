@@ -3,8 +3,12 @@ import {
   assessBackgroundJobHealth,
   classifyBackgroundJobAlerts,
   getBackgroundJobHealth,
+  summarizeSmartBotConnection,
+  summarizeSmartBotOperationalHealth,
+  smartBotRecoveryWaitMs,
 } from '@/lib/background-jobs/health';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
+import { configuredSmartBotIdDigest } from '@/lib/notification/smart-bot-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,7 +26,7 @@ export const dynamic = 'force-dynamic';
 //   200 {status:'ok'}       → 队列健康
 //   200 {status:'degraded'} → 只有会自愈的积压，或只有通知类死信
 //   503 {status:'alert'}    → 必须有人处理：非通知类死信 / 卡死 RUNNING /
-//                             worker 心跳缺失或版本不一致
+//                             worker 心跳异常 / 智能机器人配置、身份或连接故障
 //   503 {status:'error', db:'down'} → 库不通
 //
 // 通知类死信刻意只降级不报警：企业微信中断一次就能一口气产出上百条
@@ -41,11 +45,20 @@ export async function GET(): Promise<Response> {
 
   try {
     const health = await getBackgroundJobHealth();
+    const expectedBotDigest = configuredSmartBotIdDigest();
     const assessment = assessBackgroundJobHealth(health, {
       requireWorkers: mode === 'durable',
       expectedVersion: version,
+      expectedSmartBotDigest: expectedBotDigest,
     });
     const report = classifyBackgroundJobAlerts(assessment.warnings);
+    const smartBot = summarizeSmartBotConnection(health, {
+      expectedVersion: version,
+    });
+    const smartBotOperational = summarizeSmartBotOperationalHealth(health, {
+      expectedVersion: version,
+      expectedBotDigest,
+    });
 
     return NextResponse.json(
       {
@@ -58,6 +71,14 @@ export async function GET(): Promise<Response> {
           staleRunning: health.staleRunning,
           deadLast24h: health.deadLast24h,
           deadNotificationLast24h: health.deadNotificationLast24h,
+        },
+        smartBot: {
+          status: smartBot.status,
+          required: smartBotOperational.required,
+          configurationValid: smartBotOperational.configurationValid,
+          identityMatch: smartBotOperational.identityMatch,
+          operational: smartBotOperational.operational,
+          recoveryWaitMs: smartBotRecoveryWaitMs(health),
         },
         alerts: report.alerts,
         warnings: report.warnings,

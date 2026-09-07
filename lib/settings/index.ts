@@ -7,6 +7,11 @@ import {
   type SettingKey,
   type SettingValue,
 } from './definitions';
+import {
+  configuredSmartBotIdDigest,
+  smartBotCredentialsConfigured,
+} from '../notification/smart-bot-identity';
+import { notificationChannelSelectionIssue } from '../notification/channel-selection';
 
 export {
   SETTING_DEFINITIONS,
@@ -101,6 +106,12 @@ export async function updateSettings(
   // 一个事务：几项配置要么一起生效要么都不动，避免业主看到「厂名改了、阈值没改」
   // 这种半截状态。用 callback 形式（不是数组形式）才能把审计写在同一个 tx 里。
   await db.$transaction(async (tx) => {
+    const existing = await tx.setting.findMany({
+      where: { key: { in: entries.map(([key]) => key) } },
+      select: { key: true, value: true },
+    });
+    const byKey = new Map(existing.map((row) => [row.key, row.value]));
+
     const managementRoutingEntry = entries.find(
       ([key]) => key === 'management_notification_routing',
     );
@@ -108,6 +119,10 @@ export async function updateSettings(
       const routing = managementRoutingEntry[1] as SettingValue<
         'management_notification_routing'
       >;
+      const previousRouting = resolveSetting(
+        'management_notification_routing',
+        byKey.get('management_notification_routing'),
+      );
       const channelIds = Array.from(
         new Set([
           ...routing.factoryConfirmer.channelIds,
@@ -116,36 +131,67 @@ export async function updateSettings(
       ).sort();
       if (channelIds.length > 0) {
         // Lock the exact channel rows before validating. This serializes a
-        // settings save with channel deletion/deactivation long enough to
-        // ensure we never commit IDs that were already stale/inactive at the
-        // save point. A later deactivation remains allowed; notify() performs
-        // the same active check at send time and fails closed.
+        // settings save with channel deletion/deactivation. Existing bindings
+        // may remain after a channel becomes unavailable, but a new role →
+        // channel association must be fully usable at this save point.
         await tx.$queryRaw`
           SELECT id FROM "NotificationChannel"
           WHERE id = ANY(${channelIds}::text[])
           ORDER BY id
           FOR UPDATE
         `;
-        const activeChannels = await tx.notificationChannel.findMany({
-          where: { id: { in: channelIds }, isActive: true },
-          select: { id: true },
+        const channels = await tx.notificationChannel.findMany({
+          where: { id: { in: channelIds } },
+          select: {
+            id: true,
+            transport: true,
+            webhookUrl: true,
+            smartBotBotDigest: true,
+            smartBotTargetId: true,
+            smartBotChatType: true,
+            smartBotBoundAt: true,
+            isActive: true,
+          },
         });
-        const activeIds = new Set(activeChannels.map((channel) => channel.id));
-        const invalidIds = channelIds.filter((id) => !activeIds.has(id));
-        if (invalidIds.length > 0) {
+        const foundIds = new Set(channels.map((channel) => channel.id));
+        const missingIds = channelIds.filter((id) => !foundIds.has(id));
+        if (missingIds.length > 0) {
           throw new SettingValidationError(
             'management_notification_routing',
-            '部分接收群已被删除或停用，请刷新后重新选择',
+            '部分接收群已被删除，请刷新后重新选择',
+          );
+        }
+        const newlyAddedIds = new Set<string>();
+        for (const role of ['factoryConfirmer', 'owner'] as const) {
+          const previouslyBound = new Set(previousRouting[role].channelIds);
+          // disabled -> enabled 会让保留的 channel 首次成为实际发送目标，
+          // 必须与新角色绑定一样重新校验，不能因 ID 已存在而放行。
+          const roleBecameEnabled =
+            routing[role].enabled && !previousRouting[role].enabled;
+          for (const channelId of routing[role].channelIds) {
+            if (roleBecameEnabled || !previouslyBound.has(channelId)) {
+              newlyAddedIds.add(channelId);
+            }
+          }
+        }
+        const selectionContext = {
+          smartBotCredentialsConfigured: smartBotCredentialsConfigured(),
+          configuredSmartBotDigest: configuredSmartBotIdDigest(),
+        };
+        const newlyAddedIneligible = channels.filter(
+          (channel) =>
+            newlyAddedIds.has(channel.id) &&
+            notificationChannelSelectionIssue(channel, selectionContext) !==
+              null,
+        );
+        if (newlyAddedIneligible.length > 0) {
+          throw new SettingValidationError(
+            'management_notification_routing',
+            '不能新绑定已停用、与当前 Bot 身份不一致或配置不完整的接收群；请先到推送配置中修复',
           );
         }
       }
     }
-
-    const existing = await tx.setting.findMany({
-      where: { key: { in: entries.map(([key]) => key) } },
-      select: { key: true, value: true },
-    });
-    const byKey = new Map(existing.map((row) => [row.key, row.value]));
 
     for (const [key, value] of entries) {
       const before = resolveSetting(key, byKey.get(key));

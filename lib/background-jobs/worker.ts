@@ -5,6 +5,7 @@ import {
   completeBackgroundJob,
   failBackgroundJob,
   heartbeatBackgroundJob,
+  releaseUndispatchedBackgroundJobClaim,
 } from './repository';
 import type {
   BackgroundJobResult,
@@ -62,6 +63,15 @@ async function runLane(
       });
       if (!job) {
         await abortableDelay(pollIntervalMs, options.signal);
+        continue;
+      }
+
+      // Shutdown may arrive while the database claim is in flight. Recheck at
+      // the last await boundary before dispatch so a draining worker never
+      // starts new business side effects. The repository keeps the consumed
+      // fencing generation as ABANDONED evidence and restores its run budget.
+      if (options.signal?.aborted) {
+        await releaseUndispatchedBackgroundJobClaim(job);
         continue;
       }
 

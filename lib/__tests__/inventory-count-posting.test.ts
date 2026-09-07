@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TxDirection } from '../../generated/prisma/enums';
 
-const { dbMock, txMock, numberMock } = vi.hoisted(() => {
+const { dbMock, txMock, numberMock, enqueueMock, dispatchMock } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
@@ -13,6 +13,8 @@ const { dbMock, txMock, numberMock } = vi.hoisted(() => {
   return {
     txMock: tx,
     numberMock: vi.fn(),
+    enqueueMock: vi.fn(),
+    dispatchMock: vi.fn(),
     dbMock: {
       $transaction: vi.fn(
         (cb: (client: typeof tx) => unknown, options?: unknown) => {
@@ -32,6 +34,12 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/daily-document-number', () => ({
   nextDailyDocumentNumber: numberMock,
   DailyDocumentNumberExhaustedError: class DailyDocumentNumberExhaustedError extends Error {},
+}));
+vi.mock('@/lib/notification/transactional-outbox', () => ({
+  enqueueNotificationInTransaction: enqueueMock,
+}));
+vi.mock('@/lib/notification/dispatch', () => ({
+  dispatchNotification: dispatchMock,
 }));
 
 import {
@@ -77,6 +85,8 @@ beforeEach(() => {
   dbMock.material.findMany.mockReset().mockResolvedValue([]);
   dbMock.warehouseLocation.findMany.mockReset().mockResolvedValue([]);
   numberMock.mockReset().mockResolvedValue('IC20260717-0001');
+  enqueueMock.mockReset().mockResolvedValue(true);
+  dispatchMock.mockReset().mockResolvedValue(undefined);
 });
 
 function arrangeSingleRowPosting() {
@@ -481,5 +491,228 @@ describe('postInventoryCount 账面回声守卫', () => {
     expect(error).toBeInstanceOf(InventoryCountStaleSnapshotError);
     expect((error as Error).message).toContain('另有 2 个库位同样有变动');
     expect((error as InventoryCountStaleSnapshotError).staleKeys).toHaveLength(5);
+  });
+});
+
+describe('postInventoryCount 安全库存通知', () => {
+  function arrangeCount(options: {
+    globalStock: string;
+    safetyStock: string | null;
+    locations: { book: string; counted: string; actual?: string }[];
+  }) {
+    dbMock.inventoryCount.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(summary);
+    txMock.inventoryCount.findUnique.mockResolvedValue(null);
+    txMock.inventoryCount.create.mockResolvedValue({ id: 'count1' });
+    txMock.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          id: 'mat1',
+          code: 'M-001',
+          name: '白卡纸',
+          isActive: true,
+          currentStock: options.globalStock,
+          safetyStock: options.safetyStock,
+        },
+      ])
+      .mockResolvedValueOnce(
+        options.locations.map((location, index) => ({
+          id: `stock${index}`,
+          materialId: 'mat1',
+          locationId: `loc${index}`,
+          currentStock: location.actual ?? location.book,
+        })),
+      );
+    txMock.warehouseLocation.findMany.mockResolvedValue(
+      options.locations.map((_, index) => ({
+        id: `loc${index}`,
+        warehouseId: 'wh1',
+        name: `货架${index}`,
+        isActive: true,
+        warehouse: { name: '默认仓库', isActive: true },
+      })),
+    );
+    txMock.inventoryCountItem.createManyAndReturn.mockImplementation(
+      (args: { data: { materialId: string; locationId: string }[] }) =>
+        args.data.map((row, index) => ({ id: `item${index}`, ...row })),
+    );
+    const acceptedChanges = options.locations.filter(
+      (location) =>
+        (location.actual ?? location.book) === location.book &&
+        location.book !== location.counted,
+    ).length;
+    txMock.$executeRaw.mockResolvedValue(acceptedChanges);
+    return {
+      ...input,
+      items: options.locations.map((location, index) => ({
+        materialId: 'mat1',
+        locationId: `loc${index}`,
+        bookQuantity: location.book,
+        countedQuantity: location.counted,
+      })),
+    };
+  }
+
+  it('同物料多库位盘亏以最终全局余额只入队一次，并与盘点同事务提交', async () => {
+    const request = arrangeCount({
+      globalStock: '100.00',
+      safetyStock: '50.00',
+      locations: [
+        { book: '60.00', counted: '10.00' },
+        { book: '40.00', counted: '10.00' },
+      ],
+    });
+    let committed = false;
+    dbMock.$transaction.mockImplementation(async (run) => {
+      const result = await run(txMock);
+      committed = true;
+      return result;
+    });
+    enqueueMock.mockImplementation(async () => {
+      expect(committed).toBe(false);
+      expect(txMock.materialTransaction.createMany).toHaveBeenCalledOnce();
+      return true;
+    });
+
+    await postInventoryCount(request, { id: 'owner1' });
+
+    expect(enqueueMock).toHaveBeenCalledExactlyOnceWith(
+      txMock,
+      'STOCK_ALERT',
+      { materialName: '白卡纸', currentStock: '20.00', safetyStock: '50.00' },
+      {
+        dedupeKey: 'notification:STOCK_ALERT:inventory-count:count1:mat1',
+        spreadIndex: 0,
+      },
+    );
+    expect(committed).toBe(true);
+    expect(dispatchMock).not.toHaveBeenCalled();
+
+    // A replay returns the committed count without reserving another delivery.
+    dbMock.inventoryCount.findUnique.mockResolvedValue(summary);
+    await postInventoryCount(request, { id: 'owner1' });
+    expect(enqueueMock).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { label: '持续低位', globalStock: '30.00', book: '30.00', counted: '20.00', safetyStock: '50.00' },
+    { label: '库位低但其他库位仍充足', globalStock: '100.00', book: '30.00', counted: '20.00', safetyStock: '50.00' },
+    { label: '刚好安全线', globalStock: '100.00', book: '80.00', counted: '30.00', safetyStock: '50.00' },
+    { label: '盘盈回补', globalStock: '30.00', book: '20.00', counted: '50.00', safetyStock: '50.00' },
+    { label: '无安全线', globalStock: '100.00', book: '100.00', counted: '0.00', safetyStock: null },
+  ])('$label 不发预警', async ({ globalStock, safetyStock, book, counted }) => {
+    const request = arrangeCount({
+      globalStock,
+      safetyStock,
+      locations: [{ book, counted }],
+    });
+    await postInventoryCount(request, { id: 'owner1' });
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(dispatchMock).not.toHaveBeenCalled();
+  });
+
+  it('库位盘亏被同物料另一库位盘盈抵消时不因中间余额告警', async () => {
+    const request = arrangeCount({
+      globalStock: '100.00',
+      safetyStock: '80.00',
+      locations: [
+        { book: '60.00', counted: '10.00' },
+        { book: '40.00', counted: '90.00' },
+      ],
+    });
+    await postInventoryCount(request, { id: 'owner1' });
+    expect(enqueueMock).not.toHaveBeenCalled();
+  });
+
+  it('部分过账只汇总通过CAS的库位差额', async () => {
+    const request = arrangeCount({
+      globalStock: '100.00',
+      safetyStock: '75.00',
+      locations: [
+        { book: '80.00', actual: '60.00', counted: '10.00' },
+        { book: '40.00', counted: '0.00' },
+      ],
+    });
+    const result = await postInventoryCount(request, { id: 'owner1' });
+    expect(result.staleKeys).toEqual(['mat1:loc0']);
+    expect(enqueueMock).toHaveBeenCalledExactlyOnceWith(
+      txMock,
+      'STOCK_ALERT',
+      { materialName: '白卡纸', currentStock: '60.00', safetyStock: '75.00' },
+      expect.objectContaining({
+        dedupeKey: 'notification:STOCK_ALERT:inventory-count:count1:mat1',
+      }),
+    );
+  });
+
+  it('inline fallback只在事务提交后发送', async () => {
+    const request = arrangeCount({
+      globalStock: '100.00',
+      safetyStock: '50.00',
+      locations: [{ book: '100.00', counted: '20.00' }],
+    });
+    let committed = false;
+    dbMock.$transaction.mockImplementation(async (run) => {
+      const result = await run(txMock);
+      committed = true;
+      return result;
+    });
+    enqueueMock.mockResolvedValue(false);
+    dispatchMock.mockImplementation(async () => {
+      expect(committed).toBe(true);
+    });
+    await postInventoryCount(request, { id: 'owner1' });
+    expect(dispatchMock).toHaveBeenCalledExactlyOnceWith(
+      'STOCK_ALERT',
+      { materialName: '白卡纸', currentStock: '20.00', safetyStock: '50.00' },
+      {
+        dedupeKey: 'notification:STOCK_ALERT:inventory-count:count1:mat1',
+        spreadIndex: 0,
+      },
+    );
+  });
+
+  it('通知入队失败使整个盘点事务拒绝，不落入提交后发送', async () => {
+    const request = arrangeCount({
+      globalStock: '100.00',
+      safetyStock: '50.00',
+      locations: [{ book: '100.00', counted: '20.00' }],
+    });
+    enqueueMock.mockRejectedValue(new Error('outbox unavailable'));
+    await expect(postInventoryCount(request, { id: 'owner1' })).rejects.toThrow(
+      'outbox unavailable',
+    );
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(dbMock.inventoryCount.findUnique).toHaveBeenCalledOnce();
+  });
+
+  it('并发重放在事务锁后发现已过账时不重复入队', async () => {
+    const request = arrangeCount({
+      globalStock: '100.00',
+      safetyStock: '50.00',
+      locations: [{ book: '100.00', counted: '20.00' }],
+    });
+    txMock.inventoryCount.findUnique.mockResolvedValue(summary);
+    await postInventoryCount(request, { id: 'owner1' });
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(dispatchMock).not.toHaveBeenCalled();
+  });
+
+  it('盘点提交失败时不会提前执行inline fallback', async () => {
+    const request = arrangeCount({
+      globalStock: '100.00',
+      safetyStock: '50.00',
+      locations: [{ book: '100.00', counted: '20.00' }],
+    });
+    enqueueMock.mockResolvedValue(false);
+    dbMock.$transaction.mockImplementation(async (run) => {
+      await run(txMock);
+      throw new Error('commit failed');
+    });
+    await expect(postInventoryCount(request, { id: 'owner1' })).rejects.toThrow(
+      'commit failed',
+    );
+    expect(dispatchMock).not.toHaveBeenCalled();
   });
 });

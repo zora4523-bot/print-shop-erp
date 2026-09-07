@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { requirePermissionMock, revalidatePathMock, testChannelMock } =
+const {
+  requirePermissionMock,
+  revalidatePathMock,
+  testChannelMock,
+  enqueueSmartBotChannelTestMock,
+} =
   vi.hoisted(() => ({
     requirePermissionMock: vi.fn(),
     revalidatePathMock: vi.fn(),
     testChannelMock: vi.fn(),
+    enqueueSmartBotChannelTestMock: vi.fn(),
   }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -18,6 +24,7 @@ vi.mock('@/lib/notification/admin', () => {
     ChannelInUseError: DomainError,
     EmptyChannelIdsError: DomainError,
     InactiveChannelBindError: DomainError,
+    IneligibleChannelBindError: DomainError,
     RuleNotFoundError: DomainError,
     StaleChannelIdsError: DomainError,
     TooManyChannelsForPrivateEventError: DomainError,
@@ -40,6 +47,7 @@ vi.mock('@/lib/notification/test-channel', () => {
   return {
     TestChannelError: TestError,
     testChannel: testChannelMock,
+    enqueueSmartBotChannelTest: enqueueSmartBotChannelTestMock,
   };
 });
 
@@ -50,6 +58,10 @@ beforeEach(() => {
   requirePermissionMock.mockReset().mockResolvedValue({ id: 'owner-1' });
   revalidatePathMock.mockReset();
   testChannelMock.mockReset().mockResolvedValue({ ok: true, mock: true });
+  enqueueSmartBotChannelTestMock.mockReset().mockResolvedValue({
+    queued: true,
+    mock: false,
+  });
 });
 
 describe('testChannelAction', () => {
@@ -84,9 +96,49 @@ describe('testChannelAction', () => {
     );
   });
 
+  it('queues a real smart-bot test instead of connecting from the Web action', async () => {
+    testChannelMock.mockRejectedValue(
+      new TestChannelError('SMART_BOT_WORKER_REQUIRED'),
+    );
+
+    await expect(testChannelAction('smart-1')).resolves.toEqual({
+      status: 'queued',
+      mock: false,
+    });
+    expect(enqueueSmartBotChannelTestMock).toHaveBeenCalledExactlyOnceWith(
+      'smart-1',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/notifications');
+  });
+
+  it('reports when the connected LIGHT worker is unavailable at enqueue time', async () => {
+    testChannelMock.mockRejectedValue(
+      new TestChannelError('SMART_BOT_WORKER_REQUIRED'),
+    );
+    enqueueSmartBotChannelTestMock.mockRejectedValue(
+      new TestChannelError('SMART_BOT_WORKER_UNAVAILABLE'),
+    );
+
+    await expect(testChannelAction('smart-1')).resolves.toEqual({
+      status: 'error',
+      message:
+        '智能机器人连接尚未就绪，或检测到多个 LIGHT worker，请检查后台任务状态',
+    });
+    expect(enqueueSmartBotChannelTestMock).toHaveBeenCalledExactlyOnceWith(
+      'smart-1',
+    );
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['CHANNEL_NOT_FOUND', '该群不存在'],
     ['CHANNEL_INACTIVE', '该群已停用，请先启用再测试'],
+    ['SMART_BOT_NOT_BOUND', '智能机器人尚未绑定企业微信群'],
+    [
+      'SMART_BOT_IDENTITY_MISMATCH',
+      '当前 Bot ID 与该群绑定时不一致；请使用原机器人，或新建通知目标重新绑定',
+    ],
+    ['CHANNEL_CONFIGURATION_INVALID', '通知目标配置不完整'],
     [
       'LOG_WRITE_FAILED',
       '测试推送结果未能写入日志，请检查数据库后再核对群消息',

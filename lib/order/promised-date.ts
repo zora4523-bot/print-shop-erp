@@ -4,8 +4,9 @@ import { shanghaiDayBoundary, todayShanghai } from '../dashboard/shanghai-clock'
 // 承诺交期的预警口径（详情页徽标 / dashboard 关注列表 / 每日 cron 推送
 // 三处共用，避免"页面说逾期、推送说没逾期"的口径分裂）：
 //
-//   - 只对"还没发货"的工单预警：DRAFT..COMPLETED。SHIPPED/FINISHED
-//     视为已履约，CANCELLED 已终止。
+//   - 只对"还没发货"的工单预警：覆盖 canonical 与存量 legacy
+//     流程的全部发货前状态。SHIPPED / SETTLED / FINISHED 已履约，
+//     CANCELLED 已终止，都不应进入预警或每日通知。
 //   - 日界按 Asia/Shanghai 日历日算；promisedDate 存的是该日历日的
 //     UTC 零点（parseStrictYmd 口径）。
 //   - 剩余 0 天 = 今天到期（due-soon）；负数 = 已逾期。
@@ -16,6 +17,13 @@ export const DUE_SOON_DAYS = 3;
 // 方便直接塞进 Prisma `in`）。
 export const PROMISE_ALERT_STATUSES = [
   OrderStatus.DRAFT,
+  OrderStatus.PENDING_FACTORY,
+  OrderStatus.REJECTED,
+  OrderStatus.CONFIRMED,
+  OrderStatus.ON_HOLD,
+  OrderStatus.RELEASED,
+  OrderStatus.FOILING,
+  OrderStatus.PACKING,
   OrderStatus.SUBMITTED,
   OrderStatus.SCHEDULING,
   OrderStatus.IN_PRODUCTION,

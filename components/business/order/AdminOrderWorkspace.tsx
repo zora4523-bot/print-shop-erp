@@ -3,6 +3,7 @@ import { Search, Star } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { AdminOrderWorkspacePage } from '@/lib/order/admin-workspace';
 import type { OrderListFilterOptions } from '@/lib/order/list-query';
+import { MISSING_ORDER_CUSTOMER_FILTER_VALUE } from '@/lib/order/list-query';
 import {
   serializeAdminOrderWorkspaceQuery,
   updateAdminOrderWorkspaceQuery,
@@ -71,6 +72,18 @@ export function AdminOrderWorkspace({
       value !== undefined &&
       value !== '',
   );
+  const exactCustomerFilterActive = Boolean(
+    query.list.filters.customerPartyId ||
+      query.list.filters.customerRefExact,
+  );
+  const exactCustomerFilterLabel = query.list.filters.customerPartyId
+    ? data.rows.find(
+        (order) => order.customer.id === query.list.filters.customerPartyId,
+      )?.customer.name ?? '已选客户'
+    : query.list.filters.customerRefExact ===
+        MISSING_ORDER_CUSTOMER_FILTER_VALUE
+      ? '未填客户'
+      : query.list.filters.customerRefExact;
 
   return (
     <div data-slot="admin-order-workspace" className="min-w-0 space-y-4">
@@ -130,13 +143,34 @@ export function AdminOrderWorkspace({
               className="pl-9"
             />
           </div>
-          <Input
-            name="customerRef"
-            defaultValue={query.list.filters.customerRef}
-            placeholder="客户"
-            aria-label="按客户筛选"
-            className="xl:w-40"
-          />
+          {exactCustomerFilterActive ? (
+            <Link
+              href={buildTableHref('/orders', params, {
+                customerPartyId: undefined,
+                customerRefExact: undefined,
+                page: undefined,
+              })}
+              prefetch={false}
+              aria-label={`清除精确客户筛选：${exactCustomerFilterLabel}`}
+              className={cn(
+                buttonVariants({ variant: 'outline' }),
+                'min-w-0 justify-start xl:w-48',
+              )}
+            >
+              <span className="truncate">
+                客户：{exactCustomerFilterLabel}（精确）
+              </span>
+              <span aria-hidden="true">×</span>
+            </Link>
+          ) : (
+            <Input
+              name="customerRef"
+              defaultValue={query.list.filters.customerRef}
+              placeholder="客户"
+              aria-label="按客户筛选"
+              className="xl:w-40"
+            />
+          )}
           <select
             name="submitterId"
             defaultValue={query.list.filters.submitterId ?? ''}
@@ -259,6 +293,18 @@ export function AdminOrderWorkspace({
               （另 {data.summary.manualPricingCount.toLocaleString('zh-CN')} 单待核价未计入）
             </span>
           ) : null}
+          {data.summary.incompleteFeeExcludedCount > 0 ? (
+            <span>
+              （另{' '}
+              {data.summary.incompleteFeeExcludedCount.toLocaleString('zh-CN')}{' '}
+              单金额不完整未计入）
+            </span>
+          ) : null}
+          {data.summary.legacyFeeExcludedCount > 0 ? (
+            <span>
+              （另 {data.summary.legacyFeeExcludedCount.toLocaleString('zh-CN')} 单历史金额未计入）
+            </span>
+          ) : null}
         </span>
       </section>
 
@@ -268,10 +314,11 @@ export function AdminOrderWorkspace({
         customerFilterHrefs={Object.fromEntries(
           data.rows.map((order) => [
             order.id,
-            buildTableHref('/orders', params, {
-              customerRef: order.customer.filterValue,
-              page: undefined,
-            }),
+            buildTableHref(
+              '/orders',
+              params,
+              adminCustomerExactFilterParams(order.customer),
+            ),
           ]),
         )}
         footer={
@@ -379,6 +426,17 @@ function hiddenFilterInputs(
       <input key={key} type="hidden" name={key} value={String(value)} />
     ),
   );
+}
+
+export function adminCustomerExactFilterParams(
+  customer: AdminOrderWorkspacePage['rows'][number]['customer'],
+): Record<string, string | undefined> {
+  return {
+    customerRef: undefined,
+    customerPartyId: customer.id ?? undefined,
+    customerRefExact: customer.id ? undefined : customer.filterValue,
+    page: undefined,
+  };
 }
 
 function formatMoney(value: string): string {

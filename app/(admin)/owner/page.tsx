@@ -62,6 +62,7 @@ import { PROMISE_ALERT_STATUSES } from '@/lib/order/promised-date';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { countRecentFailures } from '@/lib/notification/admin';
 
 export const metadata = { title: '管理员 Dashboard' };
 
@@ -90,6 +91,7 @@ export default async function OwnerDashboardPage() {
   const dueOrdersPromise = getDueOrders();
   const overReportsPromise = getRecentOverReports();
   const endingPeriodsPromise = getEndingPeriods();
+  const recentNotificationFailuresPromise = countRecentFailures(24);
 
   return (
     <div className="space-y-6">
@@ -126,6 +128,7 @@ export default async function OwnerDashboardPage() {
             dueOrdersPromise={dueOrdersPromise}
             overReportsPromise={overReportsPromise}
             endingPeriodsPromise={endingPeriodsPromise}
+            recentNotificationFailuresPromise={recentNotificationFailuresPromise}
           />
         </Suspense>
       </ErrorBoundary>
@@ -312,6 +315,9 @@ type OverdueOutsourcingPromise = ReturnType<typeof getOverdueOutsourcing>;
 type DueOrdersPromise = ReturnType<typeof getDueOrders>;
 type OverReportsPromise = ReturnType<typeof getRecentOverReports>;
 type EndingPeriodsPromise = ReturnType<typeof getEndingPeriods>;
+type RecentNotificationFailuresPromise = ReturnType<
+  typeof countRecentFailures
+>;
 
 async function DashboardHeaderMetadata({
   displayName,
@@ -401,13 +407,14 @@ async function MonthlyStatsSection({
   );
 }
 
-async function DashboardQueueSection({
+export async function DashboardQueueSection({
   todayPromise,
   pendingShipmentsPromise,
   overdueOutsourcingPromise,
   dueOrdersPromise,
   overReportsPromise,
   endingPeriodsPromise,
+  recentNotificationFailuresPromise,
 }: {
   todayPromise: TodayStatsPromise;
   pendingShipmentsPromise: PendingShipmentsPromise;
@@ -415,6 +422,7 @@ async function DashboardQueueSection({
   dueOrdersPromise: DueOrdersPromise;
   overReportsPromise: OverReportsPromise;
   endingPeriodsPromise: EndingPeriodsPromise;
+  recentNotificationFailuresPromise: RecentNotificationFailuresPromise;
 }) {
   const [
     today,
@@ -423,6 +431,7 @@ async function DashboardQueueSection({
     dueOrders,
     overReports,
     endingPeriods,
+    recentNotificationFailures,
   ] = await Promise.all([
     todayPromise,
     pendingShipmentsPromise,
@@ -430,9 +439,23 @@ async function DashboardQueueSection({
     dueOrdersPromise,
     overReportsPromise,
     endingPeriodsPromise,
+    recentNotificationFailuresPromise,
   ]);
   const dueOrdersHref = dueOrdersListHref(dueOrders.promisedThroughYmd);
   const queueItems: DashboardQueueItem[] = [
+    recentNotificationFailures > 0
+      ? {
+          id: 'notification-failures',
+          kind: '推送异常',
+          title: '企业微信推送需要核查',
+          detail: '失败、结果不明或自动重试已耗尽',
+          countLabel: String(recentNotificationFailures),
+          dueLabel: '过去 24 小时',
+          dueUrgent: true,
+          href: '/owner/notifications',
+          actionLabel: '去处理',
+        }
+      : null,
     pendingShipments.rows.length > 0 || pendingShipments.hasMore
       ? {
           id: 'shipments',

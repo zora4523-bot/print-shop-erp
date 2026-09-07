@@ -15,6 +15,7 @@ const { harness } = vi.hoisted(() => ({
     previewAction: vi.fn(),
     finalizeAction: vi.fn(),
     onConfirm: null as (() => void) | null,
+    confirmDisabled: null as boolean | null,
     refresh: vi.fn(),
   },
 }));
@@ -30,6 +31,7 @@ vi.mock('react', async (importOriginal) => {
         : [harness.finalizeState, harness.finalizeAction];
     },
     useTransition: () => [false, (callback: () => void) => callback()],
+    useEffect: (callback: () => void) => callback(),
   };
 });
 
@@ -43,8 +45,15 @@ vi.mock('@/actions/order', () => ({
 }));
 
 vi.mock('@/components/ui-business', () => ({
-  ConfirmActionDialog: ({ onConfirm }: { onConfirm: () => void }) => {
+  ConfirmActionDialog: ({
+    disabled,
+    onConfirm,
+  }: {
+    disabled?: boolean;
+    onConfirm: () => void;
+  }) => {
     harness.onConfirm = onConfirm;
+    harness.confirmDisabled = disabled ?? false;
     return null;
   },
 }));
@@ -153,6 +162,7 @@ beforeEach(() => {
   harness.previewAction.mockReset();
   harness.finalizeAction.mockReset();
   harness.onConfirm = null;
+  harness.confirmDisabled = null;
   harness.refresh.mockReset();
 });
 
@@ -201,12 +211,180 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
 
     expect(html).toContain('工厂核价确认');
     expect(html).toContain('仅核对工单已保存的报价快照');
-    expect(html).toContain('已锁定快照价');
+    expect(html).toContain('报价快照（只读）');
     expect(html).toContain('建单转人工原因：客户自带纸，建单时转人工');
     expect(html).toContain('订单级待核价费用');
     expect(html).toContain('制版费待工厂确认');
+    expect(html).toContain('待管理员补录');
+    expect(html).toContain('href="#pricing-review-item-item-manual"');
+    expect(html).toContain('href="#pricing-review-charge-plate-pending"');
     expect(html).not.toContain('按最新价格');
     expect(html).not.toContain('最新规则自动价');
+  });
+
+  it('待人工款式和包装的兼容占位金额保持空白', () => {
+    const data = preview();
+    data.items[0] = {
+      ...data.items[0]!,
+      currentUnitPrice: '',
+      currentFixedFee: '',
+      currentSubtotal: '',
+    };
+    data.packagingGroups[1] = {
+      ...data.packagingGroups[1]!,
+      currentUnitPrice: '',
+      currentSubtotal: '',
+    };
+    harness.previewState = { status: 'success', preview: data };
+
+    const html = render();
+
+    expect(html).toContain('还需完成 3 个必填项');
+    expect(html).toContain('款式 #1 客户单价');
+    expect(html).toContain('款式 #1 每款一次性费用');
+    expect(html).toContain('包装组 #2 每袋入袋费');
+    expect(harness.confirmDisabled).toBe(true);
+
+    harness.onConfirm?.();
+    expect(harness.finalizeAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            itemId: 'item-manual',
+            unitPrice: '',
+            fixedFee: '',
+          }),
+        ],
+        packagingGroups: expect.arrayContaining([
+          expect.objectContaining({
+            packagingGroupId: 'packaging-manual',
+            unitPrice: '',
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('未知物流金额保持空白，并明确列出阻塞确认的必填项', () => {
+    const data = preview();
+    data.shipments = [
+      {
+        shipmentId: 'shipment-manual',
+        sequence: 1,
+        destinationProvince: '广东',
+        billableWeightKg: null,
+        itemQuantity: 100,
+        shipping: {
+          complete: false,
+          waived: false,
+          advisory: true,
+          suggestedAmount: null,
+          errors: ['快递费待人工确认'],
+          currentAmount: null,
+        },
+        packaging: {
+          complete: false,
+          waived: false,
+          advisory: true,
+          suggestedAmount: null,
+          errors: ['耗材费待人工确认'],
+          currentAmount: null,
+        },
+        currentReason: null,
+      },
+    ];
+    harness.previewState = { status: 'success', preview: data };
+
+    const html = render();
+
+    expect(html).not.toContain('value="0.00"');
+    expect(html).toContain('还需完成 3 个必填项');
+    expect(html).toContain('地址 1 快递费');
+    expect(html).toContain('地址 1 打包耗材费');
+    expect(html).toContain('地址 1 收费确认说明');
+    expect(harness.confirmDisabled).toBe(true);
+
+    harness.onConfirm?.();
+    expect(harness.finalizeAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shipments: [
+          expect.objectContaining({
+            shipmentId: 'shipment-manual',
+            shippingFee: '',
+            packingMaterialFee: '',
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('制烫金版费没有建议值时保持空白，并要求金额和依据', () => {
+    const data = preview();
+    data.orderCharges[0] = {
+      ...data.orderCharges[0]!,
+      suggestedAmount: null,
+      currentAmount: null,
+      currentReason: null,
+    };
+    harness.previewState = { status: 'success', preview: data };
+
+    const html = render();
+
+    expect(html).not.toContain('value="0.00"');
+    expect(html).toContain('还需完成 2 个必填项');
+    expect(html).toContain('制版费 确认金额');
+    expect(html).toContain('制版费 定价依据');
+    expect(harness.confirmDisabled).toBe(true);
+
+    harness.onConfirm?.();
+    expect(harness.finalizeAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderCharges: [
+          expect.objectContaining({
+            chargeId: 'plate-pending',
+            amount: '',
+            reason: '',
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('全自动物流快照不提供无效的说明编辑框', () => {
+    const data = preview();
+    data.shipments = [
+      {
+        shipmentId: 'shipment-auto',
+        sequence: 1,
+        destinationProvince: '广东',
+        billableWeightKg: '2.000',
+        itemQuantity: 100,
+        shipping: {
+          complete: true,
+          waived: false,
+          advisory: false,
+          suggestedAmount: '8.00',
+          errors: [],
+          currentAmount: '8.00',
+        },
+        packaging: {
+          complete: true,
+          waived: false,
+          advisory: false,
+          suggestedAmount: '4.00',
+          errors: [],
+          currentAmount: '4.00',
+        },
+        currentReason: '旧版自动报价说明',
+      },
+    ];
+    harness.previewState = { status: 'success', preview: data };
+
+    const html = render();
+
+    expect(html).not.toContain('收费确认说明');
+    expect(html).not.toContain('地址 1 快递/耗材费');
+    expect(harness.confirmDisabled).toBe(false);
   });
 
   it('shows the finalized packaging total returned by the server action', () => {
@@ -225,5 +403,9 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     expect(html).toContain('终价已确认：入袋费 20.00');
     expect(html).toContain('加工费合计 150.00');
     expect(html).toContain('工单总额 185.00');
+    expect(html).toContain('终价已确认，正在刷新工单状态');
+    expect(harness.confirmDisabled).toBe(true);
+    expect(harness.previewAction).toHaveBeenCalledTimes(1);
+    expect(harness.refresh).toHaveBeenCalledTimes(1);
   });
 });

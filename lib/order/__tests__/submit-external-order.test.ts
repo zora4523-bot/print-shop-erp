@@ -669,6 +669,230 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     });
   });
 
+  it('纯彩印无烫金提交时不查不写制版费且自动确认完整报价', async () => {
+    const order = draftOrder({
+      items: [
+        item({
+          id: 'item-print',
+          productId: 'product-print-large',
+          pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+          paperType: '200g铜版纸',
+          paperWeightGsm: 200,
+          quantity: 2_000,
+          crafts: ['craft-print'],
+          foilColors: [],
+          frontFoilColors: [],
+          backFoilColors: [],
+          foilTechnique: OrderFoilTechnique.NONE,
+          hasLocalFoil: false,
+          printColors: ['CMYK'],
+          product: { paperMaterialId: 'paper-coated-200' },
+        }),
+      ],
+      packagingGroups: [
+        {
+          id: 'pack-1',
+          sequence: 1,
+          name: '单装',
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          actualBagCount: 200,
+          lines: [{ orderItemId: 'item-print', unitsPerBag: 10 }],
+        },
+      ],
+      shipments: [
+        {
+          id: 'shipment-1',
+          sequence: 1,
+          destinationProvince: '上海',
+          weightKg: '12.000',
+          lines: [{ orderItemId: 'item-print', quantity: 2_000 }],
+        },
+      ],
+    });
+    mocks.productFindMany.mockResolvedValue([
+      catalogProduct({
+        id: 'product-print-large',
+        code: 'PRINT-COATED-200-LARGE',
+        category: 'COLOR_PRINT',
+        paperType: '200g铜版纸',
+        paperMaterialId: 'paper-coated-200',
+        weight: 200,
+      }),
+    ]);
+    mocks.craftFindMany.mockResolvedValue([
+      { id: 'craft-print', code: 'COATED_COLOR_PRINT', isActive: true },
+    ]);
+    mocks.materialFindMany.mockResolvedValue([
+      catalogPaper({
+        id: 'paper-coated-200',
+        name: '铜版纸',
+        specification: '200g',
+      }),
+    ]);
+
+    const expectedQuoteToken = await currentQuoteToken(order);
+    const tx = txFor(order);
+    const result = await finalizeExternalOrderQuoteInTx(
+      tx as unknown as Prisma.TransactionClient,
+      order.id,
+      'sales-1',
+      NOW,
+      expectedQuoteToken,
+    );
+
+    expect(result).toMatchObject({
+      quotedFee: '516.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+      processingAmount: '470.00',
+      logisticsAmount: '46.30',
+      totalAmount: '516.30',
+      manualItemIds: [],
+    });
+    expect(tx.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenCalledTimes(2);
+    expect(tx.orderCustomerCharge.upsert.mock.calls).not.toEqual(
+      expect.arrayContaining([
+        [
+          expect.objectContaining({
+            where: {
+              orderId_businessKey: {
+                orderId: order.id,
+                businessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
+              },
+            },
+          }),
+        ],
+      ]),
+    );
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        status: 'AUTO_CONFIRMED',
+        orderFeeSnapshot: {
+          quotedFee: '516.30',
+          confirmedFee: null,
+          settledFee: null,
+        },
+        metadata: expect.objectContaining({
+          quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+          pureQuote: expect.objectContaining({
+            pendingLineCodes: [],
+            pendingReasons: [],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('彩印单色烫金以含版费原子套餐提交，不再写独立制版费', async () => {
+    const order = draftOrder({
+      items: [
+        item({
+          id: 'item-print-foil',
+          productId: 'product-print-large',
+          pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+          paperType: '200g铜版纸',
+          paperWeightGsm: 200,
+          quantity: 2_000,
+          crafts: ['craft-print-foil'],
+          foilColors: ['哑金'],
+          frontFoilColors: ['哑金'],
+          backFoilColors: [],
+          foilTechnique: OrderFoilTechnique.FLAT,
+          hasLocalFoil: true,
+          printColors: ['CMYK'],
+          product: { paperMaterialId: 'paper-coated-200' },
+        }),
+      ],
+      packagingGroups: [
+        {
+          id: 'pack-1',
+          sequence: 1,
+          name: '单装',
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          actualBagCount: 200,
+          lines: [{ orderItemId: 'item-print-foil', unitsPerBag: 10 }],
+        },
+      ],
+      shipments: [
+        {
+          id: 'shipment-1',
+          sequence: 1,
+          destinationProvince: '上海',
+          weightKg: '12.000',
+          lines: [{ orderItemId: 'item-print-foil', quantity: 2_000 }],
+        },
+      ],
+    });
+    mocks.productFindMany.mockResolvedValue([
+      catalogProduct({
+        id: 'product-print-large',
+        code: 'PRINT-COATED-200-LARGE',
+        category: 'COLOR_PRINT',
+        paperType: '200g铜版纸',
+        paperMaterialId: 'paper-coated-200',
+        weight: 200,
+      }),
+    ]);
+    mocks.craftFindMany.mockResolvedValue([
+      {
+        id: 'craft-print-foil',
+        code: 'COATED_COLOR_PRINT_FOIL',
+        isActive: true,
+      },
+    ]);
+    mocks.materialFindMany.mockResolvedValue([
+      catalogPaper({
+        id: 'paper-coated-200',
+        name: '铜版纸',
+        specification: '200g',
+      }),
+    ]);
+
+    const expectedQuoteToken = await currentQuoteToken(order);
+    const tx = txFor(order);
+    const result = await finalizeExternalOrderQuoteInTx(
+      tx as unknown as Prisma.TransactionClient,
+      order.id,
+      'sales-1',
+      NOW,
+      expectedQuoteToken,
+    );
+
+    expect(result).toMatchObject({
+      quotedFee: '766.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+      processingAmount: '720.00',
+      logisticsAmount: '46.30',
+      totalAmount: '766.30',
+      manualItemIds: [],
+    });
+    expect(tx.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenCalledTimes(2);
+    expect(tx.orderItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'item-print-foil' },
+        data: expect.objectContaining({
+          quotedAmount: '700.00',
+          quoteDisposition: OrderItemQuoteDisposition.PRICED,
+        }),
+      }),
+    );
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        status: 'AUTO_CONFIRMED',
+        metadata: expect.objectContaining({
+          quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+          pureQuote: expect.objectContaining({
+            pendingLineCodes: [],
+            manualReasons: [],
+          }),
+        }),
+      }),
+    );
+  });
+
   it('查不到价时款式、包装和物流均转人工，不把 0 元当作报价', async () => {
     const order = draftOrder({
       items: [

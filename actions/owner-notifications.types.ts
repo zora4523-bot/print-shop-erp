@@ -11,6 +11,11 @@ export type NotificationMutationResult =
 
 export type ChannelTestResult =
   | { status: 'success'; mock: boolean }
+  | { status: 'queued'; mock: boolean }
+  | { status: 'error'; message: string };
+
+export type SmartBotBindingCodeResult =
+  | { status: 'success'; bindingCode: string; expiresAt: string }
   | { status: 'error'; message: string };
 
 export type NotificationResolutionResult =

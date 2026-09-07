@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const DRAWER_HISTORY_KEY = '__orderDrawer';
 
@@ -12,8 +12,40 @@ export type OrderHashDrawerState<T extends OrderIdentity> = {
   loading: boolean;
   error: string;
   showOrder: (orderNo: string) => void;
+  retryOrder: () => void;
   closeOrder: () => void;
 };
+
+type DrawerRemoteResult<T> = {
+  orderNo: string;
+  order?: T;
+  error?: string;
+};
+
+export function resolveOrderHashDrawerView<T extends OrderIdentity>({
+  openOrderNo,
+  pageOrder,
+  remoteResult,
+  alwaysFetchDetail,
+}: {
+  openOrderNo: string | null;
+  pageOrder: T | null;
+  remoteResult: DrawerRemoteResult<T> | null;
+  alwaysFetchDetail: boolean;
+}): { openOrder: T | null; loading: boolean; error: string } {
+  const matchingRemoteResult =
+    remoteResult?.orderNo === openOrderNo ? remoteResult : null;
+  const error = matchingRemoteResult?.error ?? '';
+  const loading = Boolean(
+    openOrderNo &&
+      !matchingRemoteResult &&
+      (alwaysFetchDetail || !pageOrder),
+  );
+  const openOrder = error
+    ? null
+    : matchingRemoteResult?.order ?? (loading ? null : pageOrder);
+  return { openOrder, loading, error };
+}
 
 export function useOrderHashDrawer<T extends OrderIdentity>({
   pageOrders,
@@ -27,24 +59,25 @@ export function useOrderHashDrawer<T extends OrderIdentity>({
   alwaysFetchDetail?: boolean;
 }): OrderHashDrawerState<T> {
   const [openOrderNo, setOpenOrderNo] = useState<string | null>(null);
-  const [remoteResult, setRemoteResult] = useState<{
-    orderNo: string;
-    order?: T;
-    error?: string;
-  } | null>(null);
+  const [remoteResult, setRemoteResult] =
+    useState<DrawerRemoteResult<T> | null>(null);
+  const [retryVersion, setRetryVersion] = useState(0);
+  const requestGenerationRef = useRef(0);
   const pageOrder = useMemo(
     () => pageOrders.find((order) => order.orderNo === openOrderNo) ?? null,
     [openOrderNo, pageOrders],
   );
-  const remoteOrder =
-    remoteResult?.orderNo === openOrderNo ? remoteResult.order ?? null : null;
-  const error =
-    remoteResult?.orderNo === openOrderNo ? remoteResult.error ?? '' : '';
-  const openOrder = remoteOrder ?? pageOrder;
+  const { openOrder, loading, error } = resolveOrderHashDrawerView({
+    openOrderNo,
+    pageOrder,
+    remoteResult,
+    alwaysFetchDetail,
+  });
 
   useEffect(() => {
     const syncFromLocation = () => {
       const nextOrderNo = orderNoFromHash(window.location.hash);
+      requestGenerationRef.current += 1;
       setRemoteResult((current) =>
         current?.orderNo === nextOrderNo ? current : null,
       );
@@ -62,6 +95,7 @@ export function useOrderHashDrawer<T extends OrderIdentity>({
   useEffect(() => {
     if (!openOrderNo || (pageOrder && !alwaysFetchDetail)) return;
     const controller = new AbortController();
+    const requestGeneration = ++requestGenerationRef.current;
     void fetch(detailEndpoint(openOrderNo), {
       cache: 'no-store',
       headers: { Accept: 'application/json' },
@@ -78,19 +112,38 @@ export function useOrderHashDrawer<T extends OrderIdentity>({
         if (payload.order.orderNo !== openOrderNo) {
           throw new Error('工单明细响应与请求不匹配');
         }
+        if (requestGenerationRef.current !== requestGeneration) return;
         setRemoteResult({ orderNo: openOrderNo, order: payload.order });
       })
       .catch((reason: unknown) => {
-        if (controller.signal.aborted) return;
+        if (
+          controller.signal.aborted ||
+          requestGenerationRef.current !== requestGeneration
+        ) {
+          return;
+        }
         setRemoteResult({
           orderNo: openOrderNo,
           error: reason instanceof Error ? reason.message : fallbackError,
         });
       });
-    return () => controller.abort();
-  }, [alwaysFetchDetail, detailEndpoint, fallbackError, openOrderNo, pageOrder]);
+    return () => {
+      if (requestGenerationRef.current === requestGeneration) {
+        requestGenerationRef.current += 1;
+      }
+      controller.abort();
+    };
+  }, [
+    alwaysFetchDetail,
+    detailEndpoint,
+    fallbackError,
+    openOrderNo,
+    pageOrder,
+    retryVersion,
+  ]);
 
   const showOrder = useCallback((orderNo: string) => {
+    requestGenerationRef.current += 1;
     const url = new URL(window.location.href);
     url.hash = `wo=${encodeURIComponent(orderNo)}`;
     window.history.pushState(
@@ -102,7 +155,15 @@ export function useOrderHashDrawer<T extends OrderIdentity>({
     setOpenOrderNo(orderNo);
   }, []);
 
+  const retryOrder = useCallback(() => {
+    if (!openOrderNo) return;
+    requestGenerationRef.current += 1;
+    setRemoteResult(null);
+    setRetryVersion((current) => current + 1);
+  }, [openOrderNo]);
+
   const closeOrder = useCallback(() => {
+    requestGenerationRef.current += 1;
     if (drawerEntryOrderNo(window.history.state) === openOrderNo) {
       setOpenOrderNo(null);
       window.history.back();
@@ -117,9 +178,10 @@ export function useOrderHashDrawer<T extends OrderIdentity>({
   return {
     openOrderNo,
     openOrder,
-    loading: Boolean(openOrderNo && !openOrder && !error),
+    loading,
     error,
     showOrder,
+    retryOrder,
     closeOrder,
   };
 }

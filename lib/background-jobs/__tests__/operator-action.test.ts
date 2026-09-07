@@ -3,6 +3,14 @@ import { BackgroundJobStatus } from '../../../generated/prisma/enums';
 import { backgroundJobOperatorAction } from '../operator-action';
 
 describe('backgroundJobOperatorAction', () => {
+  it('does not offer an unsafe retry for an ad-hoc notification test', () => {
+    expect(
+      backgroundJobOperatorAction({
+        status: BackgroundJobStatus.DEAD,
+        type: 'NOTIFICATION_CHANNEL_TEST',
+      }),
+    ).toBe('NONE');
+  });
   it('sends a dead export back to the order list instead of offering an invalid retry', () => {
     expect(
       backgroundJobOperatorAction({

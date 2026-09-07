@@ -10,7 +10,9 @@ import { db } from '../db';
 import { orderCascadeLockKey } from '../order/locks';
 import { transitionOrder } from '../order/status-machine';
 import {
+  dispatchProductionCompletionNotification,
   maybeCompleteProductionOrder,
+  type ProductionCompletionNotification,
   type ProductionCompletionTx,
 } from '../production-completion';
 import {
@@ -39,6 +41,11 @@ export type ProgressReportResult = {
   orderStatus: OrderStatus;
   completedAggregate: string;
   idempotentReplay: boolean;
+};
+
+type ProgressReportTransactionResult = {
+  result: ProgressReportResult;
+  notification?: ProductionCompletionNotification;
 };
 
 export type ProgressReportingErrorCode =
@@ -150,17 +157,12 @@ function sameIdempotentRequest(
   );
 }
 
-/**
- * Append one no-pay progress report. The verified session actor is the only
- * reporter identity; any active WORKER may report it because there is no
- * personnel-to-order matching for these steps.
- */
-export async function reportProductionProgress(
+async function reportProductionProgressInTx(
+  tx: Prisma.TransactionClient,
   input: ProgressReportInput,
   actor: ProgressReportActor,
-): Promise<ProgressReportResult> {
-  const parsed = validateInput(input);
-  return db.$transaction(async (tx) => {
+  parsed: ReturnType<typeof validateInput>,
+): Promise<ProgressReportTransactionResult> {
     const locator = await tx.productionProgressStep.findUnique({
       where: { id: input.progressStepId },
       select: { id: true, orderId: true },
@@ -240,14 +242,16 @@ export async function reportProductionProgress(
         _sum: { completedQty: true },
       });
       return {
-        reportId: existingReport.id,
-        progressStepId: existingReport.progressStepId,
-        orderId: existingReport.progressStep.orderId,
-        progressStatus: existingReport.progressStep.status,
-        orderStatus: existingReport.progressStep.order.status,
-        completedAggregate:
-          aggregate._sum.completedQty?.toString() ?? '0',
-        idempotentReplay: true,
+        result: {
+          reportId: existingReport.id,
+          progressStepId: existingReport.progressStepId,
+          orderId: existingReport.progressStep.orderId,
+          progressStatus: existingReport.progressStep.status,
+          orderStatus: existingReport.progressStep.order.status,
+          completedAggregate:
+            aggregate._sum.completedQty?.toString() ?? '0',
+          idempotentReplay: true,
+        },
       };
     }
 
@@ -384,6 +388,7 @@ export async function reportProductionProgress(
       orderStatus = OrderStatus.IN_PRODUCTION;
     }
 
+    let notification: ProductionCompletionNotification | undefined;
     if (progressStatus === ProductionOperationStatus.COMPLETED) {
       const completion = await maybeCompleteProductionOrder(
         tx as unknown as ProductionCompletionTx,
@@ -391,17 +396,37 @@ export async function reportProductionProgress(
         account.id,
         reportedAt,
       );
-      if (completion.completed) orderStatus = OrderStatus.COMPLETED;
+      if (completion.orderStatus) orderStatus = completion.orderStatus;
+      notification = completion.notification;
     }
 
     return {
-      reportId: report.id,
-      progressStepId: step.id,
-      orderId: step.orderId,
-      progressStatus,
-      orderStatus,
-      completedAggregate: completedAggregate.toString(),
-      idempotentReplay: false,
+      result: {
+        reportId: report.id,
+        progressStepId: step.id,
+        orderId: step.orderId,
+        progressStatus,
+        orderStatus,
+        completedAggregate: completedAggregate.toString(),
+        idempotentReplay: false,
+      },
+      ...(notification ? { notification } : {}),
     };
-  });
+}
+
+/**
+ * Append one no-pay progress report. The verified session actor is the only
+ * reporter identity; any active WORKER may report it because there is no
+ * personnel-to-order matching for these steps.
+ */
+export async function reportProductionProgress(
+  input: ProgressReportInput,
+  actor: ProgressReportActor,
+): Promise<ProgressReportResult> {
+  const parsed = validateInput(input);
+  const committed = await db.$transaction((tx) =>
+    reportProductionProgressInTx(tx, input, actor, parsed),
+  );
+  await dispatchProductionCompletionNotification(committed.notification);
+  return committed.result;
 }

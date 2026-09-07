@@ -1,6 +1,6 @@
 // 企业微信 Webhook 适配器。
 //
-// 文档参考：https://developer.work.weixin.qq.com/document/path/91770
+// 文档参考：https://developer.work.weixin.qq.com/document/path/99110
 // 文本消息格式：
 //   {
 //     "msgtype": "markdown",
@@ -25,7 +25,19 @@
 // 状态码 + 异常类型字符串，**不**放 messageContent（避免业务字段冗余
 // 流到日志 / errorMessage）。
 
+import { assertExecutionFence } from '../execution-fence';
+import { isWecomMarkdownWithinLimit } from './limits';
+import { waitForWebhookSendSlot } from './webhook-throttle';
+import { isValidWecomGroupBotWebhookUrl } from './webhook-url';
+
+export { WECOM_MARKDOWN_MAX_BYTES } from './limits';
+
 const TIMEOUT_MS = 10_000;
+const MARKDOWN_TOO_LONG_ERROR =
+  'wecom markdown content exceeds 4096 bytes';
+const INVALID_WEBHOOK_URL_ERROR = 'invalid wecom webhook url';
+const THROTTLE_UNAVAILABLE_ERROR = 'webhook throttle unavailable';
+const PRE_SEND_CHECK_UNAVAILABLE_ERROR = 'webhook pre-send check unavailable';
 
 // 限流类失败在 200ms / 800ms 之后必然还是限流，交给 durable
 // job 的 30s 起步退避（lib/background-jobs/policy.ts retryDelayMs）。
@@ -55,19 +67,155 @@ export type WebhookResult = {
   // Request may have reached the provider, but no valid acknowledgement was
   // observed. Callers must persist UNKNOWN and must not automatically resend.
   unknown?: boolean;
+  // A fact that was current before waiting for the shared permit became stale
+  // before fetch. No external request was attempted and durable callers may
+  // safely terminalize their pre-send delivery claim.
+  skipped?: boolean;
 };
+
+/** Opaque, single-use proof that the real transport passed its global gate. */
+export type PreparedWebhookSend = Readonly<{
+  kind: 'prepared-wecom-webhook-send';
+}>;
+
+type PreparedWebhookSendState = {
+  url: string;
+  content: string;
+  result: WebhookResult | null;
+};
+
+const preparedWebhookSends = new WeakMap<
+  PreparedWebhookSend,
+  PreparedWebhookSendState
+>();
 
 export type WebhookSender = (
   url: string,
   content: string,
-  options?: { signal?: AbortSignal },
+  options?: {
+    signal?: AbortSignal;
+    assertLease?: () => Promise<void>;
+    beforeRequest?: () => Promise<boolean>;
+    preparedSend?: PreparedWebhookSend;
+  },
 ) => Promise<WebhookResult>;
+
+function validateMarkdownContent(content: string): WebhookResult | null {
+  if (isWecomMarkdownWithinLimit(content)) {
+    return null;
+  }
+  return {
+    ok: false,
+    retries: 0,
+    errorMessage: MARKDOWN_TOO_LONG_ERROR,
+    retryable: false,
+  };
+}
+
+function preparedWebhookSend(
+  url: string,
+  content: string,
+  result: WebhookResult | null,
+): PreparedWebhookSend {
+  const prepared = Object.freeze({
+    kind: 'prepared-wecom-webhook-send' as const,
+  });
+  preparedWebhookSends.set(prepared, { url, content, result });
+  return prepared;
+}
+
+/**
+ * Completes every potentially long pre-send step without creating a durable
+ * SENDING ledger row. `notify` uses this before claiming; direct callers let
+ * `sendWebhook` call it internally (including the owner test-channel action).
+ */
+export async function prepareWebhookSend(
+  url: string,
+  content: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<PreparedWebhookSend> {
+  options.signal?.throwIfAborted();
+  if (!isValidWecomGroupBotWebhookUrl(url)) {
+    return preparedWebhookSend(url, content, {
+      ok: false,
+      retries: 0,
+      errorMessage: INVALID_WEBHOOK_URL_ERROR,
+      retryable: false,
+    });
+  }
+  const validationFailure = validateMarkdownContent(content);
+  if (validationFailure) {
+    return preparedWebhookSend(url, content, validationFailure);
+  }
+
+  try {
+    await waitForWebhookSendSlot(url, {
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+  } catch (error) {
+    if (options.signal?.aborted && error === options.signal.reason) {
+      throw error;
+    }
+    // Reservation failed before any external I/O, so a durable retry is safe.
+    return preparedWebhookSend(url, content, {
+      ok: false,
+      retries: 0,
+      errorMessage: THROTTLE_UNAVAILABLE_ERROR,
+      retryable: true,
+    });
+  }
+  return preparedWebhookSend(url, content, null);
+}
 
 /**
  * 真实 fetch 实现。Mock-mode 下走 `mockWebhookSender` 而不是这个。
  */
 export const sendWebhook: WebhookSender = async (url, content, options) => {
   options?.signal?.throwIfAborted();
+  const prepared =
+    options?.preparedSend ??
+    (await prepareWebhookSend(url, content, {
+      ...(options?.signal ? { signal: options.signal } : {}),
+    }));
+  const preparedState = preparedWebhookSends.get(prepared);
+  preparedWebhookSends.delete(prepared);
+  const preparedResult: WebhookResult | null =
+    !preparedState ||
+    preparedState.url !== url ||
+    preparedState.content !== content
+      ? {
+          ok: false,
+          retries: 0,
+          errorMessage: PRE_SEND_CHECK_UNAVAILABLE_ERROR,
+          retryable: true,
+        }
+      : preparedState.result;
+  try {
+    options?.signal?.throwIfAborted();
+    // Waiting can outlive a durable heartbeat. Prove ownership first; the
+    // business freshness read below must remain the final await before fetch,
+    // otherwise an async lease refresh could hide a generation change.
+    await assertExecutionFence(options);
+    if (options?.beforeRequest && !(await options.beforeRequest())) {
+      return { ok: false, retries: 0, skipped: true };
+    }
+    options?.signal?.throwIfAborted();
+  } catch (error) {
+    if (options?.signal?.aborted && error === options.signal.reason) {
+      throw error;
+    }
+    return {
+      ok: false,
+      retries: 0,
+      errorMessage: PRE_SEND_CHECK_UNAVAILABLE_ERROR,
+      retryable: true,
+    };
+  }
+
+  // Even a locally prepared failure must yield to a stale business fact: a
+  // superseded ORDER_COMPLETED delivery is terminal, not RETRYING.
+  if (preparedResult) return preparedResult;
+
   const result = await sendOnce(url, content, options?.signal);
   if (result.kind === 'ok') {
     return { ok: true, retries: 0 };
@@ -82,11 +230,37 @@ export const sendWebhook: WebhookSender = async (url, content, options) => {
 };
 
 /**
- * Mock-mode 实现：不真发 HTTP，立刻返成功。NotificationLog 仍写
- * status=SUCCESS（caller 决定 errorMessage='MOCK'）。
+ * Mock-mode 实现：不真发 HTTP；合法内容立刻返成功，超长内容与真实发送
+ * 使用同一校验。成功时 NotificationLog 仍写 status=SUCCESS（caller 决定
+ * errorMessage='MOCK'）。
  */
-export const mockWebhookSender: WebhookSender = async () => {
-  return { ok: true, retries: 0 };
+export const mockWebhookSender: WebhookSender = async (
+  _url,
+  content,
+  options,
+) => {
+  options?.signal?.throwIfAborted();
+  try {
+    // Mock durable deliveries still own a real ledger claim. Preserve the
+    // same fence -> freshness ordering as the real adapter so a superseded
+    // completion cannot be recorded as a successful mock delivery.
+    await assertExecutionFence(options);
+    if (options?.beforeRequest && !(await options.beforeRequest())) {
+      return { ok: false, retries: 0, skipped: true };
+    }
+    options?.signal?.throwIfAborted();
+  } catch (error) {
+    if (options?.signal?.aborted && error === options.signal.reason) {
+      throw error;
+    }
+    return {
+      ok: false,
+      retries: 0,
+      errorMessage: PRE_SEND_CHECK_UNAVAILABLE_ERROR,
+      retryable: true,
+    };
+  }
+  return validateMarkdownContent(content) ?? { ok: true, retries: 0 };
 };
 
 // ─── internals ───
@@ -110,6 +284,9 @@ async function sendOnce(
     // 不需要手动 setTimeout(controller.abort)。
     const res = await fetch(url, {
       method: 'POST',
+      // 官方端点没有重定向契约；禁止 fetch 自动把含 key 的 URL 跟到
+      // 其他 origin，3xx 会在下面作为永久 HTTP 失败处理。
+      redirect: 'manual',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         msgtype: 'markdown',

@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "worker:light": "tsx scripts/background-worker.ts --queue=LIGHT",
+    "worker:light": "node --conditions=react-server --import tsx scripts/background-worker.ts --queue=LIGHT",
     "worker:heavy": "tsx scripts/background-worker.ts --queue=HEAVY",
     "piecework:publish-v1": "tsx scripts/publish-piecework-price-book-v1.ts",
     "lint": "eslint",
@@ -44,6 +44,7 @@
     "@prisma/adapter-pg": "7.7.0",
     "@prisma/client": "7.7.0",
     "@sentry/nextjs": "^10.49.0",
+    "@wecom/aibot-node-sdk": "1.0.7",
     "ali-oss": "^6.23.0",
     "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
@@ -98,7 +99,10 @@
       "prisma",
       "protobufjs",
       "@sentry/cli"
-    ]
+    ],
+    "patchedDependencies": {
+      "@prisma/adapter-pg@7.7.0": "patches/@prisma__adapter-pg@7.7.0.patch"
+    }
   },
   "engines": {
     "node": ">=24"

@@ -2,6 +2,8 @@ import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderBillingMode,
+  OrderCustomerChargeStatus,
+  OrderItemQuoteDisposition,
   OrderPricingStatus,
   OrderStatus,
   OrderWorkflowAction,
@@ -9,8 +11,18 @@ import {
   Role,
 } from '../../../generated/prisma/enums';
 
-const { dbMock, tx, databaseClockNowMock, activateMock, createPrintMock, currentPriceMock } =
-  vi.hoisted(() => {
+const {
+  dbMock,
+  tx,
+  databaseClockNowMock,
+  activateMock,
+  createPrintMock,
+  currentPriceMock,
+  enqueueNotificationMock,
+  dispatchNotificationMock,
+  completionMock,
+  completionDispatchMock,
+} = vi.hoisted(() => {
     const transaction = {
       $executeRaw: vi.fn(),
       order: {
@@ -40,6 +52,10 @@ const { dbMock, tx, databaseClockNowMock, activateMock, createPrintMock, current
       activateMock: vi.fn(),
       createPrintMock: vi.fn(),
       currentPriceMock: vi.fn(),
+      enqueueNotificationMock: vi.fn(),
+      dispatchNotificationMock: vi.fn(),
+      completionMock: vi.fn(),
+      completionDispatchMock: vi.fn(),
     };
   });
 
@@ -63,6 +79,16 @@ vi.mock('@/lib/order/change-request', () => ({
   OrderChangeRequestError: class OrderChangeRequestError extends Error {},
   confirmOrderPricingAtCurrentPublishedVersionInTx: currentPriceMock,
 }));
+vi.mock('@/lib/notification/transactional-outbox', () => ({
+  enqueueNotificationInTransaction: enqueueNotificationMock,
+}));
+vi.mock('@/lib/notification/dispatch', () => ({
+  dispatchNotification: dispatchNotificationMock,
+}));
+vi.mock('@/lib/production-completion', () => ({
+  maybeCompleteProductionOrder: completionMock,
+  dispatchProductionCompletionNotification: completionDispatchMock,
+}));
 
 import {
   AdminOrderWorkflowError,
@@ -73,10 +99,16 @@ import {
   resumeFactoryOrder,
   settleFactoryOrder,
 } from '../admin-workflow';
+import {
+  buildTrustedAdminChargePricingSnapshot,
+  buildTrustedAdminItemPricingSnapshot,
+  buildTrustedAdminPackagingPricingSnapshot,
+} from '../admin-pricing-snapshot';
 
 const admin = { id: 'admin-1', role: Role.ADMIN };
 const sales = { id: 'sales-1', role: Role.SALES };
 const settledAt = new Date('2026-09-02T03:04:05.000Z');
+const factoryQuoteToken = `create-order-quote-v2:${'a'.repeat(64)}`;
 
 function order(overrides: Record<string, unknown> = {}) {
   return {
@@ -91,9 +123,123 @@ function order(overrides: Record<string, unknown> = {}) {
     confirmedFee: null,
     totalAmount: new Decimal('128.50'),
     billingMode: OrderBillingMode.CHARGE,
-    items: [{ fig: 1, quantity: 1_000 }],
+    items: [
+      {
+        fig: 1,
+        quantity: 1_000,
+        quoteDisposition: OrderItemQuoteDisposition.PRICED,
+        manualQuoteReason: null,
+        pricingSnapshot: {
+          status: 'QUOTED',
+          actual: { requiresAdminConfirmation: false },
+        },
+      },
+    ],
+    packagingGroups: [],
+    customerCharges: [],
     _count: { changeRequests: 0 },
     ...overrides,
+  };
+}
+
+function trustedManualItem() {
+  const item = {
+    id: 'item-manual',
+    orderId: 'order-1',
+    fig: 1,
+    productId: null,
+    pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
+    craft: null,
+    productStructure: 'STANDARD_ENVELOPE',
+    plateGroupId: null,
+    pricingGroup: 'MID',
+    manualQuoteReason: '特殊工艺人工核价',
+    specification: '中号封',
+    actualWidthMm: null,
+    actualHeightMm: null,
+    paperType: '珠光纸',
+    paperWeightGsm: 160,
+    quantity: 1_000,
+    pack: null,
+    crafts: ['craft-foil'],
+    frontFoilColors: ['哑金'],
+    backFoilColors: [],
+    foilColors: ['哑金'],
+    foilTechnique: 'FLAT',
+    hasLocalFoil: true,
+    lamination: 'NONE',
+    printColors: [],
+    printColorsKnown: true,
+    isDoubleSided: false,
+    isDoubleColor: false,
+    unitPrice: new Decimal('0.1000'),
+    fixedFee: new Decimal('0.00'),
+    subtotal: new Decimal('100.00'),
+    priceOverrideReason: '特殊工艺人工核价',
+    quoteDisposition: OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
+  };
+  return {
+    ...item,
+    pricingSnapshot: buildTrustedAdminItemPricingSnapshot({
+      previous: null,
+      now: settledAt,
+      actorId: admin.id,
+      previousPriceRevision: 3,
+      item,
+    }),
+  };
+}
+
+function trustedManualPackaging() {
+  const group = {
+    id: 'group-manual',
+    orderId: 'order-1',
+    mode: 'SINGLE_STYLE',
+    actualBagCount: 100,
+    unitPrice: new Decimal('0.1050'),
+    subtotal: new Decimal('10.50'),
+    priceOverrideReason: '人工确认入袋费',
+    lines: [{ orderItemId: 'item-manual', unitsPerBag: 10 }],
+  };
+  return {
+    ...group,
+    pricingSnapshot: buildTrustedAdminPackagingPricingSnapshot({
+      previous: null,
+      now: settledAt,
+      actorId: admin.id,
+      previousPriceRevision: 3,
+      group,
+    }),
+  };
+}
+
+function trustedManualCharge() {
+  const charge = {
+    orderId: 'order-1',
+    businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+    shipmentId: 'shipment-1',
+    status: OrderCustomerChargeStatus.ESTIMATED,
+    priceBookId: 'logistics-v2',
+    sourceRuleId: 'shipping-rule-1',
+    quantity: new Decimal('2.000'),
+    unit: 'kg',
+    unitPrice: new Decimal('9.0000'),
+    suggestedAmount: new Decimal('18.00'),
+    amount: new Decimal('18.00'),
+    isAdjustment: false,
+    approvalReference: null,
+    overrideReason: null,
+    category: { code: 'SHIPPING_FEE' },
+  };
+  return {
+    ...charge,
+    pricingSnapshot: buildTrustedAdminChargePricingSnapshot({
+      previous: null,
+      now: settledAt,
+      actorId: admin.id,
+      previousPriceRevision: 3,
+      charge: { ...charge, categoryCode: charge.category.code },
+    }),
   };
 }
 
@@ -110,6 +256,11 @@ beforeEach(() => {
   activateMock.mockResolvedValue({
     orderId: 'order-1',
     orderStatus: OrderStatus.RELEASED,
+    operationIds: ['operation-1'],
+    operationsCreated: 1,
+    progressStepIds: ['progress-step-1'],
+    progressStepsCreated: 1,
+    idempotentReplay: false,
   });
   createPrintMock.mockResolvedValue({
     jobId: 'print-1',
@@ -120,6 +271,14 @@ beforeEach(() => {
     pricingRevisionId: 'pricing-confirmed-1',
     versions: null,
   });
+  enqueueNotificationMock.mockResolvedValue(true);
+  dispatchNotificationMock.mockResolvedValue(undefined);
+  completionMock.mockResolvedValue({
+    completed: false,
+    blockedBy: 'INTERNAL_TASKS',
+    uncoveredItems: [],
+  });
+  completionDispatchMock.mockResolvedValue(undefined);
 });
 
 describe('admin order workflow', () => {
@@ -130,6 +289,7 @@ describe('admin order workflow', () => {
           orderId: 'order-1',
           expectedRevision: 4,
           expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
         },
         sales,
       ),
@@ -144,6 +304,7 @@ describe('admin order workflow', () => {
           orderId: 'order-1',
           expectedRevision: 4,
           expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
         },
         admin,
       ),
@@ -164,6 +325,12 @@ describe('admin order workflow', () => {
     expect(tx.order.update.mock.calls[0]?.[0].data).not.toHaveProperty(
       'settledFee',
     );
+    expect(currentPriceMock).toHaveBeenCalledWith(tx, {
+      orderId: 'order-1',
+      actorId: admin.id,
+      now: settledAt,
+      expectedQuoteToken: factoryQuoteToken,
+    });
   });
 
   it('fails factory confirmation while a pricing or change review is pending', async () => {
@@ -179,11 +346,327 @@ describe('admin order workflow', () => {
           orderId: 'order-1',
           expectedRevision: 4,
           expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
         },
         admin,
       ),
     ).rejects.toBeInstanceOf(AdminOrderWorkflowError);
     expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a drifted confirmed status while a customer charge is still pending', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
+        confirmedFee: new Decimal('128.50'),
+        customerCharges: [
+          {
+            status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+            amount: null,
+            pricingSnapshot: {
+              status: 'PENDING_AMOUNT',
+              actual: { requiresAdminConfirmation: true },
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      confirmFactoryOrder(
+        {
+          orderId: 'order-1',
+          expectedRevision: 4,
+          expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(currentPriceMock).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects unresolved item or packaging pricing even if the top-level status drifted', async () => {
+    for (const unresolved of [
+      {
+        items: [
+          {
+            fig: 1,
+            quantity: 1_000,
+            quoteDisposition:
+              OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
+            manualQuoteReason: '特殊工艺未配置价格',
+            pricingSnapshot: {
+              status: 'MANUAL_PRICING_REQUIRED',
+              actual: { requiresAdminConfirmation: true },
+            },
+          },
+        ],
+      },
+      {
+        packagingGroups: [
+          {
+            pricingSnapshot: {
+              status: 'PENDING_AMOUNT',
+              complete: false,
+              actual: { requiresAdminConfirmation: true },
+            },
+          },
+        ],
+      },
+    ]) {
+      vi.clearAllMocks();
+      tx.$executeRaw.mockResolvedValue(0);
+      tx.order.findUnique.mockResolvedValueOnce(
+        order({
+          ...unresolved,
+          pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
+          confirmedFee: new Decimal('128.50'),
+        }),
+      );
+
+      await expect(
+        confirmFactoryOrder(
+          {
+            orderId: 'order-1',
+            expectedRevision: 4,
+            expectedWorkOrderVersion: 2,
+            expectedQuoteToken: factoryQuoteToken,
+          },
+          admin,
+        ),
+      ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+      expect(currentPriceMock).not.toHaveBeenCalled();
+      expect(tx.order.update).not.toHaveBeenCalled();
+    }
+  });
+
+  it('rejects every explicit unresolved detail signal instead of trusting a non-null placeholder amount', async () => {
+    for (const unresolved of [
+      {
+        items: [
+          {
+            fig: 1,
+            quantity: 1_000,
+            quoteDisposition: OrderItemQuoteDisposition.PRICED,
+            manualQuoteReason: '仍需管理员核价',
+            pricingSnapshot: {
+              status: 'QUOTED',
+              actual: { requiresAdminConfirmation: false },
+            },
+          },
+        ],
+      },
+      {
+        packagingGroups: [
+          {
+            pricingSnapshot: {
+              status: 'EXCLUDED_MANUAL',
+              actual: { amount: '0.00' },
+            },
+          },
+        ],
+      },
+      {
+        customerCharges: [
+          {
+            status: OrderCustomerChargeStatus.ESTIMATED,
+            amount: new Decimal('0.00'),
+            pricingSnapshot: {
+              status: 'MANUAL_PRICING_REQUIRED',
+              actual: { requiresAdminConfirmation: true },
+            },
+          },
+        ],
+      },
+      {
+        customerCharges: [
+          {
+            status: OrderCustomerChargeStatus.WAIVED,
+            amount: new Decimal('12.00'),
+            pricingSnapshot: null,
+          },
+        ],
+      },
+      {
+        items: [
+          {
+            fig: 1,
+            quantity: 1_000,
+            quoteDisposition: OrderItemQuoteDisposition.PRICED,
+            manualQuoteReason: null,
+            pricingSnapshot: { status: 'ADMIN_CONFIRMED' },
+          },
+        ],
+      },
+      {
+        packagingGroups: [
+          { pricingSnapshot: { source: 'ADMIN_SNAPSHOT_CONFIRMATION' } },
+        ],
+      },
+      {
+        customerCharges: [
+          {
+            orderId: 'order-1',
+            businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+            shipmentId: 'shipment-1',
+            status: OrderCustomerChargeStatus.ESTIMATED,
+            amount: new Decimal('18.00'),
+            overrideReason: null,
+            category: { code: 'SHIPPING_FEE' },
+            pricingSnapshot: { status: 'ADMIN_CONFIRMED' },
+          },
+        ],
+      },
+    ]) {
+      vi.clearAllMocks();
+      tx.$executeRaw.mockResolvedValue(0);
+      tx.order.findUnique.mockResolvedValueOnce(
+        order({
+          ...unresolved,
+          pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
+          confirmedFee: new Decimal('128.50'),
+        }),
+      );
+
+      await expect(
+        confirmFactoryOrder(
+          {
+            orderId: 'order-1',
+            expectedRevision: 4,
+            expectedWorkOrderVersion: 2,
+            expectedQuoteToken: factoryQuoteToken,
+          },
+          admin,
+        ),
+      ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+      expect(currentPriceMock).not.toHaveBeenCalled();
+      expect(tx.order.update).not.toHaveBeenCalled();
+    }
+  });
+
+  it('accepts manually-priced details only with trusted admin confirmation snapshots', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
+        confirmedFee: new Decimal('128.50'),
+        items: [trustedManualItem()],
+        packagingGroups: [trustedManualPackaging()],
+        customerCharges: [trustedManualCharge()],
+      }),
+    );
+
+    await expect(
+      confirmFactoryOrder(
+        {
+          orderId: 'order-1',
+          expectedRevision: 4,
+          expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
+        },
+        admin,
+      ),
+    ).resolves.toMatchObject({ status: OrderStatus.CONFIRMED });
+    expect(currentPriceMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      label: '款式小计',
+      details: {
+        items: [
+          {
+            fig: 1,
+            quantity: 1_000,
+            unitPrice: new Decimal('0.1000'),
+            fixedFee: new Decimal('0.00'),
+            subtotal: new Decimal('101.00'),
+            priceOverrideReason: '特殊工艺人工核价',
+            quoteDisposition:
+              OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
+            manualQuoteReason: '特殊工艺人工核价',
+            pricingSnapshot: {
+              source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+              status: 'ADMIN_CONFIRMED',
+              previousPriceRevision: 3,
+              actual: {
+                quantity: 1_000,
+                unitPrice: '0.1000',
+                fixedFee: '0.00',
+                subtotal: '100.00',
+                overrideReason: '特殊工艺人工核价',
+                provisional: false,
+                requiresAdminConfirmation: false,
+                automatic: false,
+              },
+              confirmation: {
+                actorId: admin.id,
+                confirmedAt: settledAt.toISOString(),
+                reason: '特殊工艺人工核价',
+              },
+            },
+          },
+        ],
+      },
+    },
+    {
+      label: '包装袋数',
+      details: {
+        packagingGroups: [
+          {
+            actualBagCount: 101,
+            unitPrice: new Decimal('0.1000'),
+            subtotal: new Decimal('10.00'),
+            priceOverrideReason: '人工确认入袋费',
+            pricingSnapshot: {
+              source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+              status: 'ADMIN_CONFIRMED',
+              previousPriceRevision: 3,
+              actual: {
+                actualBagCount: 100,
+                unitPrice: '0.1000',
+                subtotal: '10.00',
+                overrideReason: '人工确认入袋费',
+                provisional: false,
+                requiresAdminConfirmation: false,
+                automatic: false,
+              },
+              confirmation: {
+                actorId: admin.id,
+                confirmedAt: settledAt.toISOString(),
+                reason: '人工确认入袋费',
+              },
+            },
+          },
+        ],
+      },
+    },
+  ])('管理员快照与实时$label不一致时在任何写入前失败关闭', async ({
+    details,
+  }) => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        ...details,
+        pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
+        confirmedFee: new Decimal('128.50'),
+      }),
+    );
+
+    await expect(
+      confirmFactoryOrder(
+        {
+          orderId: 'order-1',
+          expectedRevision: 4,
+          expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(currentPriceMock).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(tx.orderLog.create).not.toHaveBeenCalled();
   });
 
   it('records a typed immutable reject decision with affected figs', async () => {
@@ -210,6 +693,75 @@ describe('admin order workflow', () => {
         affectedFigs: [1],
       }),
     });
+  });
+
+  it('rechecks pending changes under the lock before rejecting', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({ _count: { changeRequests: 1 } }),
+    );
+
+    await expect(
+      rejectFactoryOrder(
+        {
+          orderId: 'order-1',
+          reasonCode: OrderWorkflowReasonCode.DESIGN_ERROR,
+          reasonNote: '图稿待修正',
+          affectedFigs: [1],
+          idempotencyKey: 'reject-pending-change',
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(tx.orderWorkflowDecision.create).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  it('rechecks pending changes under the lock before holding', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        status: OrderStatus.CONFIRMED,
+        confirmedFee: new Decimal('128.50'),
+        _count: { changeRequests: 1 },
+      }),
+    );
+
+    await expect(
+      holdFactoryOrder(
+        {
+          orderId: 'order-1',
+          reasonCode: OrderWorkflowReasonCode.PRICE_PENDING,
+          reasonNote: '等待核价',
+          affectedFigs: [],
+          idempotencyKey: 'hold-pending-change',
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(tx.orderWorkflowDecision.create).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  it('rechecks pending changes under the lock before resuming', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        status: OrderStatus.ON_HOLD,
+        _count: { changeRequests: 1 },
+      }),
+    );
+
+    await expect(
+      resumeFactoryOrder(
+        {
+          orderId: 'order-1',
+          recoveryEvidence: { proof: '问题已复核' },
+          idempotencyKey: 'resume-pending-change',
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(tx.orderWorkflowDecision.findFirst).not.toHaveBeenCalled();
+    expect(tx.orderWorkflowDecision.create).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
   });
 
   it('rejects PRICE_PENDING as a reject reason while keeping it available to hold', async () => {
@@ -250,6 +802,92 @@ describe('admin order workflow', () => {
         data: expect.objectContaining({ status: OrderStatus.FOILING }),
       }),
     );
+    expect(completionMock).toHaveBeenCalledWith(
+      tx,
+      'order-1',
+      'admin-1',
+      settledAt,
+    );
+  });
+
+  it('rechecks production completion after commit when outsource closes during hold', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({ status: OrderStatus.ON_HOLD }),
+    );
+    tx.orderWorkflowDecision.findFirst.mockResolvedValueOnce({
+      fromStatus: OrderStatus.PACKING,
+    });
+    const notification = {
+      payload: {
+        orderId: 'order-1',
+        orderNo: 'GD-260902-001',
+        workOrderVersion: 2,
+        customerRef: null,
+      },
+      dedupeKey: 'notification:ORDER_COMPLETED:order-1:v2',
+      queued: false,
+    };
+    completionMock.mockResolvedValueOnce({
+      completed: true,
+      orderStatus: OrderStatus.PACKING,
+      blockedBy: null,
+      uncoveredItems: [],
+      notification,
+    });
+    dbMock.$transaction.mockImplementationOnce(async (callback) => {
+      const result = await callback(tx);
+      expect(completionDispatchMock).not.toHaveBeenCalled();
+      return result;
+    });
+
+    await resumeFactoryOrder(
+      {
+        orderId: 'order-1',
+        recoveryEvidence: { proof: '外协已回货并复核' },
+        idempotencyKey: 'resume-after-outsource-v2',
+      },
+      admin,
+    );
+
+    expect(completionDispatchMock).toHaveBeenCalledExactlyOnceWith(notification);
+  });
+
+  it('persists PACKING as the actual resume result when readiness closes from RELEASED', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({ status: OrderStatus.ON_HOLD }),
+    );
+    tx.orderWorkflowDecision.findFirst.mockResolvedValueOnce({
+      fromStatus: OrderStatus.RELEASED,
+    });
+    completionMock.mockResolvedValueOnce({
+      completed: true,
+      orderStatus: OrderStatus.PACKING,
+      blockedBy: null,
+      uncoveredItems: [],
+    });
+
+    await expect(
+      resumeFactoryOrder(
+        {
+          orderId: 'order-1',
+          recoveryEvidence: { proof: '停工期间外协已回货并复核' },
+          idempotencyKey: 'resume-ready-order-1-v2',
+        },
+        admin,
+      ),
+    ).resolves.toEqual({
+      orderId: 'order-1',
+      status: OrderStatus.PACKING,
+      idempotentReplay: false,
+    });
+    expect(tx.orderWorkflowDecision.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        fromStatus: OrderStatus.ON_HOLD,
+        toStatus: OrderStatus.PACKING,
+        action: OrderWorkflowAction.RESUME,
+        idempotencyKey: 'resume-ready-order-1-v2',
+      }),
+    });
   });
 
   it('releases production before creating the initial versioned print request', async () => {
@@ -259,6 +897,15 @@ describe('admin order workflow', () => {
         confirmedFee: new Decimal('128.50'),
       }),
     );
+    activateMock.mockResolvedValueOnce({
+      orderId: 'order-1',
+      orderStatus: OrderStatus.RELEASED,
+      operationIds: ['operation-1', 'operation-2'],
+      operationsCreated: 0,
+      progressStepIds: ['progress-step-1'],
+      progressStepsCreated: 0,
+      idempotentReplay: true,
+    });
     await releaseFactoryOrder(
       {
         orderId: 'order-1',
@@ -286,6 +933,76 @@ describe('admin order workflow', () => {
     expect(activateMock.mock.invocationCallOrder[0]).toBeLessThan(
       createPrintMock.mock.invocationCallOrder[0]!,
     );
+    expect(enqueueNotificationMock).toHaveBeenCalledExactlyOnceWith(
+      tx,
+      'ORDER_SCHEDULED',
+      {
+        orderId: 'order-1',
+        orderNo: 'GD-260902-001',
+        taskCount: 3,
+      },
+      { dedupeKey: 'notification:ORDER_SCHEDULED:order-1' },
+    );
+    expect(createPrintMock.mock.invocationCallOrder[0]).toBeLessThan(
+      enqueueNotificationMock.mock.invocationCallOrder[0]!,
+    );
+    expect(dispatchNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches ORDER_SCHEDULED after the transaction in inline mode', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        status: OrderStatus.CONFIRMED,
+        confirmedFee: new Decimal('128.50'),
+      }),
+    );
+    enqueueNotificationMock.mockResolvedValueOnce(false);
+
+    await releaseFactoryOrder(
+      {
+        orderId: 'order-1',
+        expectedRevision: 4,
+        expectedWorkOrderVersion: 2,
+        printIdempotencyKey: 'release-print-inline-v2',
+      },
+      admin,
+    );
+
+    expect(dispatchNotificationMock).toHaveBeenCalledExactlyOnceWith(
+      'ORDER_SCHEDULED',
+      {
+        orderId: 'order-1',
+        orderNo: 'GD-260902-001',
+        taskCount: 2,
+      },
+      { dedupeKey: 'notification:ORDER_SCHEDULED:order-1' },
+    );
+    expect(enqueueNotificationMock.mock.invocationCallOrder[0]).toBeLessThan(
+      dispatchNotificationMock.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('does not emit ORDER_SCHEDULED without a CONFIRMED to RELEASED transition', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        status: OrderStatus.RELEASED,
+        confirmedFee: new Decimal('128.50'),
+      }),
+    );
+
+    await releaseFactoryOrder(
+      {
+        orderId: 'order-1',
+        expectedRevision: 4,
+        expectedWorkOrderVersion: 2,
+        printIdempotencyKey: 'released-print-recovery-v2',
+      },
+      admin,
+    );
+
+    expect(activateMock).not.toHaveBeenCalled();
+    expect(enqueueNotificationMock).not.toHaveBeenCalled();
+    expect(dispatchNotificationMock).not.toHaveBeenCalled();
   });
 
   it('rejects a stale release request even when the order is already released', async () => {
@@ -368,6 +1085,8 @@ describe('admin order workflow', () => {
     });
     expect(activateMock).not.toHaveBeenCalled();
     expect(createPrintMock).not.toHaveBeenCalled();
+    expect(enqueueNotificationMock).not.toHaveBeenCalled();
+    expect(dispatchNotificationMock).not.toHaveBeenCalled();
   });
 
   it('takes the global shared cutoff lock as the first settlement statement', async () => {

@@ -2,6 +2,8 @@
 // page so both the UI render and tests can share the same label /
 // value-formatting rules.
 
+import { formatDateTimeShanghai } from '../format/dates';
+
 const FIELD_LABELS: Record<string, string> = {
   // Top-level Order fields the edit form can touch
   customName: '工单名称',
@@ -13,6 +15,8 @@ const FIELD_LABELS: Record<string, string> = {
   packageRequirement: '包装要求',
   remark: '工单备注',
   promisedDate: '承诺交期',
+  completedAt: '生产完成时间',
+  workOrderVersion: '纸质工单版本',
   isUrgent: '急单',
   isSfCollect: '顺丰到付',
   // Status changes land in the same log table under action='STATUS_CHANGE'
@@ -36,6 +40,9 @@ const FIELD_LABELS: Record<string, string> = {
   priceRevision: '价格修订',
   priceBooks: '本次价目簿',
   totalAmount: '对客应收总额',
+  confirmedFee: '已确认应收',
+  revision: '工单修订',
+  shipmentChargeCorrections: '物流费用明细',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -61,6 +68,11 @@ const UNKNOWN_PRICING_STATUS_LABEL = '未识别价格状态';
 const UNKNOWN_FIELD_LABEL = '其他变更';
 const UNKNOWN_VALUE_LABEL = '未识别变更内容';
 const UNKNOWN_ACTION_LABEL = '其他操作';
+
+// Command replay metadata belongs in the immutable audit payload, but it is
+// not a user-facing field change. In particular, request identifiers and
+// fingerprints must not appear as a confusing “其他变更” row in the detail UI.
+const INTERNAL_AUDIT_FIELDS = new Set(['shipRequest', 'fulfillmentRequest']);
 
 function hasKnownField(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(FIELD_LABELS, name);
@@ -97,6 +109,20 @@ export function formatLogValue(
     if (value instanceof Date) return value.toISOString().slice(0, 10);
     if (typeof value === 'string') return value.slice(0, 10);
   }
+  if (fieldName === 'completedAt') {
+    const completedAt =
+      value instanceof Date
+        ? value
+        : typeof value === 'string'
+          ? new Date(value)
+          : null;
+    return completedAt && !Number.isNaN(completedAt.getTime())
+      ? formatDateTimeShanghai(completedAt)
+      : UNKNOWN_VALUE_LABEL;
+  }
+  if (fieldName === 'shipmentChargeCorrections' && Array.isArray(value)) {
+    return `${value.length} 个地址的费用更正`;
+  }
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   return UNKNOWN_VALUE_LABEL;
 }
@@ -116,6 +142,7 @@ export function formatOrderLogChanges(changedFields: unknown): LogChangeRow[] {
   if (!changedFields || typeof changedFields !== 'object') return [];
   const rows: LogChangeRow[] = [];
   for (const [field, entry] of Object.entries(changedFields as Record<string, unknown>)) {
+    if (INTERNAL_AUDIT_FIELDS.has(field)) continue;
     if (!entry || typeof entry !== 'object') continue;
     const e = entry as { before?: unknown; after?: unknown };
     if (!('before' in e) && !('after' in e)) continue;
@@ -145,12 +172,15 @@ const ACTION_LABELS: Record<string, string> = {
   TASK_DISPUTE_RESOLVED: '任务异议已解决',
   TASK_DISPUTE_REJECTED: '任务异议已驳回',
   PRICING_ADMIN_CONFIRMED: '管理员终价确认',
+  FULFILLMENT_PRICING_CONFIRMED: '确认物流费用',
+  SF_COLLECT_FULFILLMENT_CHANGED: '提交到付费用更正',
   ORDER_MANUAL_CHARGE_CREATED: '新增对客费用',
   ORDER_MANUAL_CHARGE_UPDATED: '修改对客费用',
   ORDER_MANUAL_CHARGE_REMOVED: '移除对客费用',
   ORDER_PLATE_DETAIL_CREATED: '新增制版明细',
   ORDER_PLATE_DETAIL_UPDATED: '修改制版明细',
   ORDER_PLATE_DETAIL_REMOVED: '移除制版明细',
+  PRODUCTION_COMPLETED: '生产完成',
 };
 
 export function actionLabel(action: string): string {

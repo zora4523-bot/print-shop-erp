@@ -17,6 +17,7 @@ export type OrderTimelineInput = {
   status: OrderStatus;
   createdAt: Date;
   submittedAt: Date | null;
+  completedAt: Date | null;
   promisedDate: Date | null;
   submitterName: string;
   logs: OrderTimelineLog[];
@@ -75,6 +76,10 @@ function logForStatus(logs: OrderTimelineLog[], status: OrderStatus) {
   });
 }
 
+function logForAction(logs: OrderTimelineLog[], action: string) {
+  return logs.find((log) => log.action === action);
+}
+
 function stamp(
   date: Date | null | undefined,
   who?: string,
@@ -100,7 +105,25 @@ export function buildOrderDetailTimeline(
     logForStatus(input.logs, OrderStatus.SUBMITTED);
   const scheduledLog = logForStatus(input.logs, OrderStatus.SCHEDULING);
   const productionLog = logForStatus(input.logs, OrderStatus.IN_PRODUCTION);
-  const completedLog = logForStatus(input.logs, OrderStatus.COMPLETED);
+  // A production-changing revision clears completedAt but deliberately keeps
+  // the prior generation's immutable audit rows. Never let an old canonical
+  // log make the reopened generation look complete; completedAt is the current
+  // generation's source of truth. Legacy terminal statuses remain compatible
+  // with their historical STATUS_CHANGE row.
+  const canonicalCompletedLog = input.completedAt
+    ? logForAction(input.logs, 'PRODUCTION_COMPLETED')
+    : undefined;
+  const legacyCompletedLog = logForStatus(input.logs, OrderStatus.COMPLETED);
+  const legacyProductionCompleted =
+    input.status === OrderStatus.COMPLETED ||
+    input.status === OrderStatus.SHIPPED ||
+    input.status === OrderStatus.FINISHED ||
+    input.status === OrderStatus.SETTLED;
+  const productionCompleted =
+    input.completedAt !== null || legacyProductionCompleted;
+  const completedLog =
+    canonicalCompletedLog ??
+    (legacyProductionCompleted ? legacyCompletedLog : undefined);
   const shippedLog = logForStatus(input.logs, OrderStatus.SHIPPED);
   const finishedLog = logForStatus(input.logs, OrderStatus.FINISHED);
   const cancelledLog = logForStatus(input.logs, OrderStatus.CANCELLED);
@@ -139,9 +162,13 @@ export function buildOrderDetailTimeline(
       : input.productionUnits.length > 0
         ? `已完工 ${completedUnits} / ${input.productionUnits.length} 个工序`
         : '尚未生成生产工序',
-    completedLog
-      ? stamp(completedLog.createdAt, completedLog.operatorName)
-      : uncovered ?? '内部工序完工后转入',
+    input.completedAt
+      ? stamp(input.completedAt, completedLog?.operatorName)
+      : completedLog
+        ? stamp(completedLog.createdAt, completedLog.operatorName)
+        : productionCompleted
+          ? '已记录生产完成'
+          : uncovered ?? '内部工序完工后转入',
     shippedLog
       ? stamp(shippedLog.createdAt, shippedLog.operatorName)
       : input.promisedDate
@@ -205,8 +232,10 @@ export function buildOrderDetailTimeline(
     return {
       key: step.key,
       label:
-        step.key === 'complete' && input.status === OrderStatus.COMPLETED
-          ? '已完工'
+        step.key === 'complete' && productionCompleted
+          ? input.status === OrderStatus.COMPLETED && !canonicalCompletedLog
+            ? '已完工'
+            : '生产已完成'
           : step.key === 'producing' && isCurrent
             ? orderStatusZh(OrderStatus.IN_PRODUCTION)
             : step.label,

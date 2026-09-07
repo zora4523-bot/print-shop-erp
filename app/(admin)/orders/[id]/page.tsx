@@ -49,9 +49,10 @@ import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
 import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
-import { FinishOrderButton } from '@/components/business/order/FinishOrderButton';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
 import { SfCollectToggleForm } from '@/components/business/order/SfCollectToggleForm';
+import { FulfillmentPricingReviewForm } from '@/components/business/order/FulfillmentPricingReviewForm';
+import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
 import { DesignUploadPanel } from '@/components/business/order/DesignUploadPanel';
 import { PromisedDateBadge } from '@/components/business/order/PromisedDateBadge';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
@@ -67,7 +68,7 @@ import {
 } from '@/lib/order/rework';
 import { ReworkOrderForm } from '@/components/business/order/ReworkOrderForm';
 import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
-import { OrderChangeReviewForm } from '@/components/business/order/OrderChangeReviewForm';
+import { OrderCancellationRequestForm } from '@/components/business/order/OrderCancellationRequestForm';
 import { OrderPricingReviewForm } from '@/components/business/order/OrderPricingReviewForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
 import { OrderChangeFieldDiff } from '@/components/business/order/OrderChangeFieldDiff';
@@ -77,11 +78,18 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { formatUnitPrice } from '@/lib/format/unit-price';
 import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import {
+  isOrderPricingReviewAllowedStatus,
   ORDER_PRICING_STATUS,
   orderPricingStatusLabel,
 } from '@/lib/order/pricing-status';
 import { orderPricingSourceLabel } from '@/lib/order/pricing-source';
-import { ORDER_PRICING_ROUTE_LABELS } from '@/lib/order/pricing-route';
+import {
+  deriveLegacyOrderItemFoilFacts,
+  ORDER_PRICING_ROUTE_LABELS,
+} from '@/lib/order/pricing-route';
+import {
+  isTrustedAdminChargePricingSnapshot,
+} from '@/lib/order/admin-pricing-snapshot';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
@@ -100,6 +108,13 @@ import {
 } from '@/lib/production/operation-order-view';
 import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
+import { listExternalCreateOrderProductOptions } from '@/lib/product';
+import { listExternalCreateOrderPaperOptions } from '@/lib/material';
+import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
+import {
+  buildShipOrderShipmentInputs,
+  orderShippingAvailability,
+} from '@/components/business/order/order-shipping-availability';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -113,29 +128,34 @@ function canUseDirectCancel(role: Role, status: OrderStatus): boolean {
   return role === Role.ADMIN && DIRECT_CANCEL_STATUSES.has(status);
 }
 
-function shippingAvailability(input: {
-  isAdministrator: boolean;
-  status: OrderStatus;
-  incompleteProductionCount: number;
-  hasLiveOutsource: boolean;
-  isPricingPending: boolean;
-}): { canShip: boolean; disabledReason: string | null } {
-  const productionReady =
-    input.status === OrderStatus.PACKING ||
-    input.status === OrderStatus.COMPLETED;
-  const disabledReason = input.isPricingPending
-    ? '价格待管理员确认'
-    : input.hasLiveOutsource
-      ? '仍有已发出或进行中的外协单'
-      : input.incompleteProductionCount > 0
-        ? `${input.incompleteProductionCount} 个工序未完工`
-        : !productionReady
-          ? '完工后才可发货'
-          : null;
-  return {
-    canShip: input.isAdministrator && disabledReason === null,
-    disabledReason,
-  };
+async function listActiveOrderChangeCatalogProducts(): Promise<
+  OrderChangeCatalogProduct[]
+> {
+  const [products, papers] = await Promise.all([
+    listExternalCreateOrderProductOptions(),
+    listExternalCreateOrderPaperOptions(),
+  ]);
+  const paperById = new Map(papers.map((paper) => [paper.id, paper]));
+  return products.map((product) => {
+    const paper = product.paperMaterialId
+      ? paperById.get(product.paperMaterialId)
+      : null;
+    return {
+      id: product.id,
+      category: product.category,
+      specification: product.specification,
+      paperType: product.paperType,
+      weight: product.weight,
+      // The source query includes only active products whose category node is
+      // active. Keep the explicit bit in the client DTO so the shared resolver
+      // remains fail-closed for every other caller.
+      isActive: true,
+      paperMaterialId: product.paperMaterialId,
+      linkedPaper: paper
+        ? { isActive: true, outOfStock: paper.outOfStock }
+        : null,
+    };
+  });
 }
 
 export async function generateMetadata({ params }: PageProps) {
@@ -157,12 +177,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // pricing snapshots and internal costs, so SALES must branch before that
   // query runs. Keep real draft/design/change actions on the safe surface.
   if (user.role === Role.SALES) {
-    const salesOrder = await getSalesOrderDetailById(
-      { id: user.id, role: user.role },
-      id,
-    );
+    const [salesOrder, catalogProducts] = await Promise.all([
+      getSalesOrderDetailById({ id: user.id, role: user.role }, id),
+      listActiveOrderChangeCatalogProducts(),
+    ]);
     if (!salesOrder) notFound();
-    return <SalesOrderDetailView order={salesOrder} />;
+    return (
+      <SalesOrderDetailView
+        order={salesOrder}
+        catalogProducts={catalogProducts}
+      />
+    );
   }
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   // 打印网格是按款式排的，所以阈值也按「单个款式的设计图数」判定，
@@ -208,11 +233,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
     order.status === OrderStatus.DRAFT &&
     (order.submitterId === user.id || user.role === Role.ADMIN);
   const canCancel = canUseDirectCancel(user.role, order.status);
-  // SHIPPED / FINISHED 转换权限：order:ship = ADMIN（见
-  // permissions.ts）。这里 mirror 该闸口；action 层 requirePermission
-  // 仍是真闸口。
-  const canShipOrFinish =
-    user.role === Role.ADMIN;
+  // 发货与结算权限：order:ship = ADMIN（见 permissions.ts）。
+  // action 层仍会重新校验，这里只控制界面入口。
+  const canShipOrSettle = user.role === Role.ADMIN;
   const isExternalSalesOrder =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
@@ -236,11 +259,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
       row.status === OutsourceStatus.SENT ||
       row.status === OutsourceStatus.IN_PROGRESS,
   );
-  // FINISHED is a retained legacy read state. New work orders close through
-  // the explicit SHIPPED -> SETTLED command so no second writer can bypass
-  // settledFee/settledAt and monthly-billing cutoff locks.
-  const canFinish = false;
-
   // Editing follows SPEC §3.6. Ownership mirrors the action-layer
   // guard: SALES / CUSTOMER_SERVICE only their own; ADMIN
   // any. Server still re-verifies on submit — this is UI-only.
@@ -249,11 +267,21 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
-  const canAdminReviewPricing =
+  const canAdminManageCommercialDetails =
     user.role === Role.ADMIN &&
     isChargeableOrder &&
+    order.status !== OrderStatus.SETTLED &&
     order.status !== OrderStatus.FINISHED &&
     order.status !== OrderStatus.CANCELLED;
+  const canShowPricingReviewForm =
+    user.role === Role.ADMIN &&
+    isChargeableOrder &&
+    isPricingPending &&
+    isOrderPricingReviewAllowedStatus(order.status);
+  const canReviewFulfillmentPricing =
+    user.role === Role.ADMIN &&
+    isExternalSalesOrder &&
+    isFulfillmentPricingStatus(order.status);
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
     isExternalSalesOrder;
@@ -323,21 +351,24 @@ export default async function OrderDetailPage({ params }: PageProps) {
   ).length;
   const incompleteProductionCount =
     pendingProductionCount + inProgressProductionCount;
+  const pendingChangeRequest = order.changeRequests.find(
+    (request) => request.status === OrderChangeRequestStatus.PENDING,
+  );
   const { canShip, disabledReason: shipDisabledReason } =
-    shippingAvailability({
-      isAdministrator: canShipOrFinish,
+    orderShippingAvailability({
+      isAdministrator: canShipOrSettle,
       status: order.status,
       incompleteProductionCount,
       hasLiveOutsource,
       isPricingPending,
+      hasShipment: order.shipments.length > 0,
+      hasPendingChange: Boolean(pendingChangeRequest),
     });
-  const pendingChangeRequest = order.changeRequests.find(
-    (request) => request.status === OrderChangeRequestStatus.PENDING,
-  );
   const timelineSteps = buildOrderDetailTimeline({
     status: order.status,
     createdAt: order.createdAt,
     submittedAt: order.submittedAt ?? null,
+    completedAt: order.completedAt ?? null,
     promisedDate: order.promisedDate,
     submitterName: order.submitter.displayName,
     logs: order.logs.map((log) => ({
@@ -365,8 +396,23 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (order.status === OrderStatus.DRAFT ||
       order.status === OrderStatus.SUBMITTED ||
       order.status === OrderStatus.SCHEDULING ||
-      order.status === OrderStatus.IN_PRODUCTION) &&
+      order.status === OrderStatus.IN_PRODUCTION ||
+      order.status === OrderStatus.CONFIRMED ||
+      order.status === OrderStatus.RELEASED ||
+      order.status === OrderStatus.FOILING ||
+      order.status === OrderStatus.PACKING) &&
     !pendingChangeRequest;
+  const canRequestCancellation =
+    user.role === Role.CUSTOMER_SERVICE &&
+    order.submitterId === user.id &&
+    (order.status === OrderStatus.CONFIRMED ||
+      order.status === OrderStatus.RELEASED ||
+      order.status === OrderStatus.FOILING ||
+      order.status === OrderStatus.PACKING) &&
+    !pendingChangeRequest;
+  const orderChangeCatalogProducts = canRequestChange
+    ? await listActiveOrderChangeCatalogProducts()
+    : [];
   const customerChargeByShipmentAndCategory = new Map(
     order.customerCharges.flatMap((charge) =>
       charge.shipment
@@ -465,12 +511,23 @@ export default async function OrderDetailPage({ params }: PageProps) {
             {canToggleUrgent ? (
               <UrgentToggleForm orderId={order.id} currentValue={order.isUrgent} />
             ) : null}
-            {canToggleSfCollect ? (
+            {canReviewFulfillmentPricing ? (
+              <Link href="#fulfillment-pricing" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                {isPricingPending ? '确认物流费用' : '更正物流费用'}
+              </Link>
+            ) : canToggleSfCollect ? (
               <SfCollectToggleForm
+                key={`sf-${order.id}-${order.revision}-${priceRevision}`}
                 orderId={order.id}
                 currentValue={order.isSfCollect}
                 status={order.status}
                 isExternalSales={isExternalSalesOrder}
+                mutationGuard={priceRevision !== null ? {
+                  expectedOrderRevision: order.revision,
+                  expectedEditVersion: order.editVersion,
+                  expectedWorkOrderVersion: order.workOrderVersion,
+                  expectedPriceRevision: priceRevision,
+                } : undefined}
                 shipments={order.shipments.map((shipment) => ({
                   id: shipment.id,
                   sequence: shipment.sequence,
@@ -490,24 +547,24 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </Link>
             ) : null}
             {canSubmit ? <SubmitOrderButton orderId={order.id} /> : null}
-            {canFinish ? (
-              <Link
-                href="#finish-order"
-                className={buttonVariants({ size: 'sm' })}
-              >
-                确认完工
-              </Link>
-            ) : canShipOrFinish &&
-              order.status === OrderStatus.SHIPPED &&
+            {canShipOrSettle && order.status === OrderStatus.SHIPPED ? (
               isPricingPending ? (
-              <DisabledReason
-                cause="prerequisite"
-                reason="价格待管理员确认"
-              >
-                <Button type="button" disabled size="sm">
-                  确认完工（价格待确认）
-                </Button>
-              </DisabledReason>
+                <DisabledReason
+                  cause="prerequisite"
+                  reason="价格待管理员确认"
+                >
+                  <Button type="button" disabled size="sm">
+                    结算（价格待确认）
+                  </Button>
+                </DisabledReason>
+              ) : (
+                <Link
+                  href={`/orders#wo=${encodeURIComponent(order.orderNo)}`}
+                  className={buttonVariants({ size: 'sm' })}
+                >
+                  前往结算
+                </Link>
+              )
             ) : null}
             {canShip ? (
               <Link
@@ -516,7 +573,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               >
                 发货
               </Link>
-            ) : canShipOrFinish &&
+            ) : canShipOrSettle &&
               order.status !== OrderStatus.SHIPPED &&
               order.status !== OrderStatus.FINISHED &&
               order.status !== OrderStatus.CANCELLED ? (
@@ -581,7 +638,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
               <h2 className="text-base font-semibold">工单价格状态</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {isPricingPending
-                  ? '价格待管理员确认，确认前不可排产。'
+                  ? canReviewFulfillmentPricing
+                    ? '物流费用待管理员核对，确认前不能发货或结算；已审核款式价格不变。'
+                    : '价格待管理员确认，确认前不可排产。'
                   : '价格已确认。'}
               </p>
             </div>
@@ -611,18 +670,38 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </dd>
             </div>
           </dl>
-          {canAdminReviewPricing ? (
+          {canShowPricingReviewForm ? (
             <div className="border-t pt-4">
-              <OrderPricingReviewForm orderId={order.id} />
+              <OrderPricingReviewForm
+                key={`pricing-review-${priceRevision ?? 'unknown'}`}
+                orderId={order.id}
+              />
             </div>
+          ) : null}
+          {canReviewFulfillmentPricing ? (
+            <FulfillmentPricingReviewForm
+              key={`fulfillment-${order.id}-${order.revision}-${priceRevision}`}
+              orderId={order.id}
+              currentValue={order.isSfCollect}
+              isPricingPending={isPricingPending}
+              shipments={order.shipments.map((shipment) => ({
+                id: shipment.id,
+                sequence: shipment.sequence,
+                destinationProvince: shipment.destinationProvince,
+                weightKg: shipment.weightKg?.toString() ?? null,
+              }))}
+            />
           ) : null}
         </section>
       ) : null}
 
-      {canAdminReviewPricing && isExternalSalesOrder && priceRevision !== null ? (
+      {canAdminManageCommercialDetails &&
+      isExternalSalesOrder &&
+      priceRevision !== null ? (
         <OrderCommercialDetailsManager
           orderId={order.id}
           priceRevision={priceRevision}
+          allowPlateDetailMaintenance={!isPricingPending}
           manualCharges={manualCustomerCharges.map((charge) => ({
             id: charge.id,
             status: String(charge.status),
@@ -637,26 +716,33 @@ export default async function OrderDetailPage({ params }: PageProps) {
             finalizedBy: charge.finalizedBy,
             finalizedAt: charge.finalizedAt,
           }))}
-          items={order.items.map((item) => ({
-            id: item.id,
-            sequence: item.sequence,
-            name: item.name,
-            plateDetails:
-              'plateDetails' in item
-                ? item.plateDetails.map((detail) => ({
-                    id: detail.id,
-                    sequence: detail.sequence,
-                    name: detail.name,
-                    plateGroupId: detail.plateGroupId,
-                    specification: detail.specification,
-                    quantity: detail.quantity,
-                    unitPrice: String(detail.unitPrice),
-                    amount: String(detail.amount),
-                    remark: detail.remark,
-                    isActive: detail.isActive,
-                  }))
-                : [],
-          }))}
+          items={order.items.map((item) => {
+            const foil = deriveLegacyOrderItemFoilFacts(item);
+            return {
+              id: item.id,
+              sequence: item.sequence,
+              name: item.name,
+              independentPlateEligible:
+                item.pricingRoute !== OrderItemPricingRoute.COLOR_PRINT &&
+                (foil.frontFoilColors.length > 0 ||
+                  foil.backFoilColors.length > 0),
+              plateDetails:
+                'plateDetails' in item
+                  ? item.plateDetails.map((detail) => ({
+                      id: detail.id,
+                      sequence: detail.sequence,
+                      name: detail.name,
+                      plateGroupId: detail.plateGroupId,
+                      specification: detail.specification,
+                      quantity: detail.quantity,
+                      unitPrice: String(detail.unitPrice),
+                      amount: String(detail.amount),
+                      remark: detail.remark,
+                      isActive: detail.isActive,
+                    }))
+                  : [],
+            };
+          })}
         />
       ) : null}
 
@@ -802,11 +888,22 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   </div>
                   <Badge
                     variant={
-                      charge.status === 'FINAL' ? 'secondary' : 'outline'
+                      charge.status === 'FINAL' ||
+                      isTrustedAdminChargePricingSnapshot(
+                        charge.pricingSnapshot,
+                        charge,
+                      )
+                        ? 'secondary'
+                        : 'outline'
                     }
                   >
                     {charge.status === 'FINAL'
                       ? '已确认'
+                      : isTrustedAdminChargePricingSnapshot(
+                            charge.pricingSnapshot,
+                            charge,
+                          )
+                        ? '管理员已确认（待结算）'
                       : charge.status === 'WAIVED'
                         ? '已免收'
                         : charge.status === 'PENDING_AMOUNT'
@@ -1263,124 +1360,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </ol>
       </section>
 
-      <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-        <h2 className="text-base font-semibold">
-          包装组（{order.packagingGroups.length}）
-        </h2>
-        {order.packagingGroups.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
-            暂无包装组。
-          </p>
-        ) : (
-          <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
-            {order.packagingGroups.map((group) => {
-              const unitsPerBag = group.lines.reduce(
-                (sum, line) => sum + line.unitsPerBag,
-                0,
-              );
-              return (
-                <li
-                  key={group.id}
-                  className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h3 className="font-medium">
-                        包装组 #{group.sequence}
-                        {group.name ? ` · ${group.name}` : ''}
-                      </h3>
-                      <p className="mt-1 font-sans tabular-nums text-muted-foreground">
-                        实际 {formatQuantity(group.actualBagCount)} 袋
-                        {unitsPerBag > 0
-                          ? ` · 每袋共 ${formatQuantity(unitsPerBag)} 个`
-                          : ''}
-                      </p>
-                    </div>
-                    <Badge variant="outline">
-                      {PACKAGING_MODE_LABELS[group.mode]}
-                    </Badge>
-                  </div>
-                  {canViewCommercialAmounts &&
-                  'unitPrice' in group &&
-                  'subtotal' in group ? (
-                    <>
-                      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border bg-muted/20 p-3 text-xs">
-                        <div>
-                          <dt className="text-muted-foreground">入袋单价</dt>
-                          <dd className="font-sans font-medium tabular-nums">
-                            {formatUnitPrice(String(group.unitPrice))} / 袋
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">入袋小计</dt>
-                          <dd className="font-sans font-medium tabular-nums">
-                            {formatMoney(String(group.subtotal))}
-                          </dd>
-                        </div>
-                        {'suggestedSubtotal' in group ? (
-                          <div>
-                            <dt className="text-muted-foreground">
-                              系统建议小计
-                            </dt>
-                            <dd className="font-sans tabular-nums">
-                              {group.suggestedSubtotal === null
-                                ? '未形成完整建议价'
-                                : formatMoney(String(group.suggestedSubtotal))}
-                            </dd>
-                          </div>
-                        ) : null}
-                        {'priceOverrideReason' in group &&
-                        group.priceOverrideReason ? (
-                          <div className="col-span-2">
-                            <dt className="text-muted-foreground">
-                              入袋费改价说明
-                            </dt>
-                            <dd className="admin-wrap-anywhere mt-0.5">
-                              {String(group.priceOverrideReason)}
-                            </dd>
-                          </div>
-                        ) : null}
-                      </dl>
-                      {'pricingSnapshot' in group ? (
-                        <PricingSnapshotBreakdown
-                          pricingSnapshot={group.pricingSnapshot}
-                          title="入袋计价明细"
-                          className="mt-3"
-                        />
-                      ) : null}
-                    </>
-                  ) : null}
-                  {group.lines.length === 0 ? (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      未记录每袋款式组成
-                    </p>
-                  ) : (
-                    <ul className="mt-3 space-y-2">
-                      {group.lines.map((line) => (
-                        <li
-                          key={line.id}
-                          className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 rounded-md bg-muted/40 px-3 py-2"
-                        >
-                          <span className="min-w-0">
-                            #{line.orderItem.sequence} {line.orderItem.name}
-                          </span>
-                          <span className="font-sans text-xs tabular-nums text-muted-foreground">
-                            每袋 {formatQuantity(line.unitsPerBag)} 个 · 全组{' '}
-                            {formatQuantity(
-                              line.unitsPerBag * group.actualBagCount,
-                            )}{' '}
-                            个
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </section>
+      <OrderPackagingGroupsSection
+        order={order}
+        canViewCommercialAmounts={canViewCommercialAmounts}
+      />
 
       {canRequestChange ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -1392,18 +1375,35 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </div>
           <OrderChangeRequestForm
             orderId={order.id}
+            expectedRevision={order.revision}
+            expectedWorkOrderVersion={order.workOrderVersion}
+            catalogProducts={orderChangeCatalogProducts}
             items={order.items.map((item) => ({
               id: item.id,
               sequence: item.sequence,
               name: item.name,
               quantity: item.quantity,
+              productId: item.productId,
+              pricingRoute: item.pricingRoute,
               specification: item.specification,
+              paperType: item.paperType,
+              paperWeightGsm: item.paperWeightGsm,
               frontFoilColors: item.frontFoilColors,
               backFoilColors: item.backFoilColors,
               foilColors: item.foilColors,
               isDoubleSided: item.isDoubleSided,
             }))}
           />
+          {canRequestCancellation ? (
+            <div className="border-t pt-4">
+              <h3 className="mb-2 text-sm font-semibold">申请取消</h3>
+              <OrderCancellationRequestForm
+                orderId={order.id}
+                expectedRevision={order.revision}
+                expectedWorkOrderVersion={order.workOrderVersion}
+              />
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -1431,7 +1431,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
                       : '—'}
                   </span>
                   <span className="text-muted-foreground">
-                    基于第 {request.baseRevision} 版 ·{' '}
+                    基于业务第 {request.baseRevision} 版 · 基于生产版本{' '}
+                    {request.baseWorkOrderVersion == null
+                      ? '历史未记录'
+                      : `v${request.baseWorkOrderVersion}`}{' '}
+                    · 批准后生产版本{' '}
+                    {request.workOrderVersionAfter == null
+                      ? '未生成'
+                      : `v${request.workOrderVersionAfter}`}{' '}
+                    ·{' '}
                     {formatDateTimeShanghai(request.createdAt)}
                   </span>
                 </div>
@@ -1450,7 +1458,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 {user.role === Role.ADMIN &&
                 request.status === OrderChangeRequestStatus.PENDING ? (
                   <div className="mt-3 border-t pt-3">
-                    <OrderChangeReviewForm requestId={request.id} />
+                    <Link
+                      href={`/orders?queue=all&signal=pending-change#wo=${encodeURIComponent(order.orderNo)}`}
+                      prefetch={false}
+                      className={buttonVariants({ size: 'sm' })}
+                    >
+                      前往新版工单工作台审核
+                    </Link>
                   </div>
                 ) : null}
               </li>
@@ -1670,31 +1684,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </p>
           <ShipOrderForm
             orderId={order.id}
-            shipments={order.shipments.map((shipment) => ({
-              id: shipment.id,
-              sequence: shipment.sequence,
-              receiverName: shipment.receiverName,
-              receiverAddress: shipment.receiverAddress,
-              trackingNo: shipment.trackingNo,
-              weightKg: shipment.weightKg ? String(shipment.weightKg) : null,
-              destinationProvince: shipment.destinationProvince,
-              shippingFee:
-                customerChargeByShipmentAndCategory.get(
-                  `${shipment.id}:SHIPPING_FEE`,
-                )?.amount?.toString() ?? null,
-              packingMaterialFee:
-                customerChargeByShipmentAndCategory.get(
-                  `${shipment.id}:PACKING_MATERIAL`,
-                )?.amount?.toString() ?? null,
-              customerChargeOverrideReason:
-                customerChargeByShipmentAndCategory.get(
-                  `${shipment.id}:SHIPPING_FEE`,
-                )?.overrideReason ??
-                customerChargeByShipmentAndCategory.get(
-                  `${shipment.id}:PACKING_MATERIAL`,
-                )?.overrideReason ??
-                null,
-            }))}
+            expectedRevision={order.revision}
+            expectedEditVersion={order.editVersion}
+            expectedWorkOrderVersion={order.workOrderVersion}
+            expectedPriceRevision={priceRevision ?? 0}
+            initialIdempotencyKey={randomUUID()}
+            shipments={buildShipOrderShipmentInputs(
+              order.shipments,
+              customerChargeByShipmentAndCategory,
+            )}
             isExternalSales={
               'settlementType' in order &&
               order.settlementType === OrderSettlementType.EXTERNAL_SALES
@@ -1736,7 +1734,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {canShipOrFinish &&
+      {canShipOrSettle &&
       (order.status === OrderStatus.PACKING ||
         order.status === OrderStatus.COMPLETED) &&
       !canShip ? (
@@ -1759,26 +1757,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {canFinish ? (
-        <section
-          id="finish-order"
-          className="scroll-mt-28 space-y-3 rounded-xl border bg-card p-6 shadow-sm"
-        >
-          <h2 className="text-base font-semibold">确认完工</h2>
-          <p className="text-xs text-muted-foreground">
-            收件或对账后确认完工。工单结案后仍参与账单统计。
-          </p>
-          <FinishOrderButton orderId={order.id} />
-        </section>
-      ) : null}
-
-      {canShipOrFinish &&
+      {canShipOrSettle &&
       order.status === OrderStatus.SHIPPED &&
       isPricingPending ? (
         <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
-          <h2 className="text-base font-semibold">暂不能完工</h2>
+          <h2 className="text-base font-semibold">暂不能结算</h2>
           <p className="text-sm text-muted-foreground">
-            当前对客价格待管理员确认。请先完成整单重算并生成终价修订，再确认完工。
+            当前对客价格待管理员确认。请先完成整单重算并生成终价修订，再结算。
           </p>
         </section>
       ) : null}
@@ -1820,6 +1805,132 @@ export default async function OrderDetailPage({ params }: PageProps) {
       </div>
       </OrderDetailStickyScope>
     </div>
+  );
+}
+
+function OrderPackagingGroupsSection({ order, canViewCommercialAmounts }: {
+  order: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;
+  canViewCommercialAmounts: boolean;
+}) {
+  return (
+    <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <h2 className="text-base font-semibold">
+        包装组（{order.packagingGroups.length}）
+      </h2>
+      {order.packagingGroups.length === 0 ? (
+        <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
+          暂无包装组。
+        </p>
+      ) : (
+        <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+          {order.packagingGroups.map((group) => {
+            const unitsPerBag = group.lines.reduce(
+              (sum, line) => sum + line.unitsPerBag,
+              0,
+            );
+            return (
+              <li
+                key={group.id}
+                className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-medium">
+                      包装组 #{group.sequence}
+                      {group.name ? ` · ${group.name}` : ''}
+                    </h3>
+                    <p className="mt-1 font-sans tabular-nums text-muted-foreground">
+                      实际 {formatQuantity(group.actualBagCount)} 袋
+                      {unitsPerBag > 0
+                        ? ` · 每袋共 ${formatQuantity(unitsPerBag)} 个`
+                        : ''}
+                    </p>
+                  </div>
+                  <Badge variant="outline">
+                    {PACKAGING_MODE_LABELS[group.mode]}
+                  </Badge>
+                </div>
+                {canViewCommercialAmounts &&
+                  'unitPrice' in group &&
+                  'subtotal' in group ? (
+                  <>
+                    <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border bg-muted/20 p-3 text-xs">
+                      <div>
+                        <dt className="text-muted-foreground">入袋单价</dt>
+                        <dd className="font-sans font-medium tabular-nums">
+                          {formatUnitPrice(String(group.unitPrice))} / 袋
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">入袋小计</dt>
+                        <dd className="font-sans font-medium tabular-nums">
+                          {formatMoney(String(group.subtotal))}
+                        </dd>
+                      </div>
+                      {'suggestedSubtotal' in group ? (
+                        <div>
+                          <dt className="text-muted-foreground">
+                            系统建议小计
+                          </dt>
+                          <dd className="font-sans tabular-nums">
+                            {group.suggestedSubtotal === null
+                              ? '未形成完整建议价'
+                              : formatMoney(String(group.suggestedSubtotal))}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {'priceOverrideReason' in group &&
+                        group.priceOverrideReason ? (
+                        <div className="col-span-2">
+                          <dt className="text-muted-foreground">
+                            入袋费改价说明
+                          </dt>
+                          <dd className="admin-wrap-anywhere mt-0.5">
+                            {String(group.priceOverrideReason)}
+                          </dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                    {'pricingSnapshot' in group ? (
+                      <PricingSnapshotBreakdown
+                        pricingSnapshot={group.pricingSnapshot}
+                        title="入袋计价明细"
+                        className="mt-3"
+                      />
+                    ) : null}
+                  </>
+                ) : null}
+                {group.lines.length === 0 ? (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    未记录每袋款式组成
+                  </p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {group.lines.map((line) => (
+                      <li
+                        key={line.id}
+                        className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 rounded-md bg-muted/40 px-3 py-2"
+                      >
+                        <span className="min-w-0">
+                          #{line.orderItem.sequence} {line.orderItem.name}
+                        </span>
+                        <span className="font-sans text-xs tabular-nums text-muted-foreground">
+                          每袋 {formatQuantity(line.unitsPerBag)} 个 · 全组{' '}
+                          {formatQuantity(
+                            line.unitsPerBag * group.actualBagCount,
+                          )}{' '}
+                          个
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 

@@ -8,7 +8,7 @@
 
 ## 最后更新
 
-2026-08-24（UI/UX 整改批次：状态/确认/错误恢复、工单/通知/CDR/产品域收口；全量单测、构建和视觉门禁通过；未 commit/未部署）
+2026-09-03（企业微信通知、人工制版费、改单并发与管理端列表收口；已拆分 commit、未部署，真实群验收与按人路由仍待完成）
 
 ## 已完成
 
@@ -27,7 +27,23 @@
 ### P1（2026-04-26 → 2026-05-05）
 
 - [x] **P1 #1 老板 Dashboard** 三层：KPI 卡 + 关注列表 + recharts 图表（累计 870 单测）
-- [x] **P1 #2 企业微信推送** 四切片：notify 引擎（mock-mode）→ admin UI → 5 状态机事件 wire → cron 事件 + 2 新端点；SPEC §8.1 9/10 事件接通（STOCK_ALERT 依赖物料模型，现已具备 wire 条件）（累计 1011 单测）
+- [x] **P1 #2 企业微信推送** 四切片：notify 引擎（mock-mode）→ admin UI → 业务事件 wire → cron 端点。当时的 SPEC 基线是 10 个事件；当前 registry 已扩展为 15 个，不再用历史的&ldquo;9/10&rdquo;表示现状。（累计 1011 单测）
+
+### 企业微信通知现状（2026-09-02）
+
+- [x] **canonical 通知接线收口**：保留历史 eventType `ORDER_SCHEDULED`，将触发边界收到 `CONFIRMED → RELEASED`，任务数按当前代次的计件工序 + 非计件进度步骤计数；`ORDER_COMPLETED` 在当前代次所有内部工作与必需外协通过闸口时按代次幂等发送，canonical 工单会原子收口到 `PACKING` 直到显式发货。
+- [x] **企业微信单条字节守卫**：按[官方消息推送文档](https://developer.work.weixin.qq.com/document/path/99110)在模板保存和真实/mock 发送前均限制 `markdown.content ≤ 4096 UTF-8 字节`。
+- [x] **共享 Webhook 全局节流**：真实 `sendWebhook` 以规范化 endpoint/key 的 SHA-256 摘要为键，由 PostgreSQL 原子预留 3500ms permit，同 URL 跨事件、跨 worker 进程串行；等待可被 durable lease signal 中止，mock/注入 sender 不触库。未部署 migration `20260902121100_notification_webhook_global_throttle` 前不得开启生产真发。
+- [ ] **企业微信仍未完成的项**：尚未做 per-CS / 对应师傅的按人路由；真实企微群与 durable LIGHT worker 仍需在应用新 migration 后做生产人工验收。
+
+### 2026-09-03 提交记录
+
+- `677a638` `feat(db): add workflow and notification safety state`：增加改单生产版本约束、共享 Webhook 限流台账及通知模板语义迁移。
+- `df812c9` `fix(notification): harden WeCom production delivery`：收口 canonical 生产事件、跨进程限流、过期代次拦截、模板保护和失败告警。
+- `165df27` `fix(pricing): require manual confirmation for plate fees`：独立制烫金版费改为管理员人工终价，禁止自动推导并防止彩印含版费套餐重复收费。
+- `7a4a1ab` `fix(orders): harden change review lifecycle`：增加改单双版本并发守卫、取消/审核队列、价格确认门禁和生产代次时间线。
+- `f140362` `fix(admin-ui): simplify order list navigation`：移除工单列表重复容器与侧栏冗余子组标题。
+- 提交前门禁：503 个测试文件通过、4820 项通过、44 项按配置跳过；`typecheck`、`lint`、`prisma validate`、生产 `build` 与 `git diff --check` 通过。未向真实企业微信群发送消息，未部署；生产启用前必须先应用本批 3 个 migration。
 
 ### 生产硬化审查修复（2026-07-17）
 
@@ -50,7 +66,7 @@
 - [x] **2026-07-05 全量验证**：prisma validate / tsc / eslint / next build / migrate deploy（16 个新 migration）/ **21 Playwright E2E + 视觉** 全绿
 - [x] **2026-07-05 大批次提交固化**：按模块拆成 12 个 commit（`c84162f → accb713`），随时可按提交粒度回滚
 - [x] **A09 分区 cutover 计划**（plan-only）：`docs/partition-cutover-plan.md`，Codex 2 findings 已闭合
-- [x] **STOCK_ALERT 接线**（`3184a26` + `4f76a85`）：出库跨越检测，SPEC §8.1 **10/10 事件全接通**
+- [x] **STOCK_ALERT 接线**（`3184a26` + `4f76a85`）：出库跨越检测，完成当时 SPEC 的原始 10 事件基线；当前通知事件总数为 15。
 - [x] **A06 OSS STS 真实接入**（`968b131` + `d65804f` + `89b1302`）：ali-oss AssumeRole（session policy 收缩到单 objectKey）+ CDR 真打包（流式 zip → bundles/* + 24h 预签 URL）；`webhongbao` 对象策略已补齐，真实上传、越权护栏、CDR 打包、预签下载与 ZIP 校验 **6 / 6 全通**；**1229 单测**。
 
 ## 进行中
@@ -75,7 +91,7 @@
 - [x] **单条报工数量守卫**：`合格 + 不良 + 返工` 的合计 **达到** `计划数 × N` 一律硬拒；N 进新 `Setting` 键 `report_qty_max_multiple`（默认 3、范围收在 1–10）。判据用 `>=` 而不是 `>`：默认 10 倍配严格大于时，「多打一个零」恰好等于上限、一次都挡不住。超过计划数但未达上限由师傅勾选「确认超出计划数」通过并双处留痕（`ProductionTask.remark` + `OrderLog(action='TASK_OVER_REPORT')`）；**计件仍按实际合计数全额付**（业主拍板，算钱链路未改）。配套老板看板新增「超计划报工」表作为知情通道——**守卫与看板是一个决策的两半**，因为批准权落在被发钱的人手上。数量框刻意不设 `max`，上限判定只在服务端（否则零 JS 下只弹原生气泡，中文提示永远看不到）。
 - [x] **工单完工闸口收紧为款式级外协覆盖**：由「有外协单且全部 `RECEIVED`」改为「每个含外协工艺的款式都被至少一张本工单未取消的外协单覆盖」。不改表，复用 `OrderItem.crafts` 与 `OutsourceOrder.orderItemIds`；新增共用谓词 `outsourceCoverageApplies` 让闸口与工单详情页横幅口径一致（`requiresOutsource` 是排产快照且无重算路径，不共用会出现「页面说不能完工、闸口照样完工」的反向漂移）。`ProductionCompletionTx` 返回值由 `boolean` 改为对象，五个调用点改取 `.completed`。**残留缺口（同款式两道外协工艺只发一道时仍放行）已显式接受，别当 bug 修**。
 - [x] **盘点并发守卫改用逐行账面回声 CAS**：页面把「录入这一格时看到的账面数」钉在该行回传，服务端行锁后比对；冲突行剔除后**部分过账**余下的，一条不剩才整单回滚；另加事务外预检避免每次驳回白烧一个当日 IC 号。原「时间戳基线」方案的 4 条 blocking/major 全部源自那一个设计，整体否决。**零 schema 变更、零 migration、零新 `Setting`**。
-- [x] **通知投递失败可重试并进死信**：`NotificationLog` 新增 `deliveryKey`（取 `BackgroundJob.dedupeKey`）与 `@@unique([deliveryKey, channelId])`，重试时 upsert 就地翻状态、跳过已成功的 channel；明确未送达的瞬时失败写 `RETRYING`，job 耗尽后日志仍保持 `RETRYING` 并通过 owning `DEAD` job 进入业主告警 / 待处理队列 / “重试耗尽”徽章；永久性投递失败仍让 job 判 `SUCCEEDED`。批量扇出按 `index × 3500ms` 摊开以压在企业微信 20 条/分钟限额之下。`/api/health/jobs` 新增 `deadNotificationLast24h` 与告警码 `dead-notification-jobs-last-24h`，通知类死信只 200 `degraded`；`/api/health/ready` 状态码语义不变。**+2 项 migration，累计 77 项**，尾项 `20260821120100_notification_log_delivery_key_unique`。
+- [x] **通知投递失败可重试并进死信**：`NotificationLog` 新增 `deliveryKey`（取 `BackgroundJob.dedupeKey`）与 `@@unique([deliveryKey, channelId])`，重试时 upsert 就地翻状态、跳过已成功的 channel；明确未送达的瞬时失败写 `RETRYING`，job 耗尽后日志仍保持 `RETRYING` 并通过 owning `DEAD` job 进入业主告警 / 待处理队列 / “重试耗尽”徽章；永久性投递失败仍让 job 判 `SUCCEEDED`。单次 cron 批量扇出按 `index × 3500ms` 摊开；2026-09-02 又增加了真实 webhook 出口的 PostgreSQL 跨事件/跨进程全局 permit，共享 URL 不再仅依赖批次内摊开。`/api/health/jobs` 新增 `deadNotificationLast24h` 与告警码 `dead-notification-jobs-last-24h`，通知类死信只 200 `degraded`；`/api/health/ready` 状态码语义不变。**+2 项 migration，累计 77 项**，尾项 `20260821120100_notification_log_delivery_key_unique`。
 - [x] 文档同步：`DECISIONS.md` 追加 6 条；新增 `docs/上线前置操作清单.md`（外协覆盖的两段部署前只读 SQL、唯一索引 `indisvalid` 验收、单向门、上线后人工验证、OSS 未来实施的前置项）；`README.md`、`docs/部署指南.md`、`docs/production-slo-and-recovery.md` 同步 migration 计数与告警语义。**CLAUDE.md 未改**（配置文件，留给业主）。
 - [ ] **明确不做**：OSS「临时 key + 服务端 copy」（业主决定保持 STS 单 key + 15 分钟过期的现有缓解，**已知接受的风险**，两个必踩陷阱已写进 DECISIONS）；盘点的逐行 `snapshotAt` + ledger scan（只解决「净额为零的往返」，已拆出单独设计评审）。
 - [ ] 本批同样**未跑**全量 typecheck / `pnpm test run` / Playwright（并发多 agent 改同一仓库，全量门禁结果无意义），合并前需补一次完整门禁 + `pnpm vitest run --coverage` + `pnpm test:admin-ui`。
@@ -258,7 +274,7 @@
    （`245be5c → dd648c0`）。生产的 `aa42ba0` 已是 `main` 的祖先，可从 `main` 重建。
    （开发机 SSH 被本地网络劫持，remote 用 HTTPS，见 `docs/部署指南.md` §3。）
 3. **生产运维收尾**：补 Pigsty 异地 `repo2`、30 天保留和恢复演练；配置 `SENTRY_DSN / APP_VERSION`；把应用机升级到至少 4 GiB RAM；完成真实 OSS 图片 PDF、企业微信和 cron 入队的人工验收。
-4. **A07 推送按人路由**（P2）— 需确认客服/师傅是否有私有 webhook
+4. **企微通知剩余项**：A07 按客服/师傅的个人路由（P2，需确认是否有私有 webhook）；共享 Webhook 的跨事件/跨进程全局节流已完成，但仍需先在生产应用 `20260902121100_notification_webhook_global_throttle` migration，再做真实群 + durable LIGHT worker 人工验收。
 5. **A20 生产单拆分**（P1）— 需确认生产单粒度与发料时机
 6. **A21 供应商自动定价**（P1）— 独立应付、金额更正、逐笔付款和防超付已完成；如需自动算供应商价，须先提供“供应商 × 工艺 × 数量/单位 × 有效期”的合同口径，禁止套用对客报价表
 6b. **OSS 直传重放加固**（2026-08-21 暂缓）— 「临时 key + 服务端 copy」。前置动作全在阿里云控制台且**顺序不能反**（RAM 前缀权限 + `upload-tmp/` 生命周期规则必须先于代码上线），清单见 `docs/上线前置操作清单.md` §六

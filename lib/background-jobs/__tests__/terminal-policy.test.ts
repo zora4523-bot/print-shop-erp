@@ -7,6 +7,19 @@ import {
 } from '../terminal-policy';
 
 describe('background job terminal policy', () => {
+  it.each([
+    'NotificationChannelTestDeliveryError',
+    'TestChannelError',
+    'UnexpectedSenderError',
+  ])('never automatically retries a channel test after %s', (lastErrorCode) => {
+    expect(
+      isTerminalNotificationFailure({
+        type: 'NOTIFICATION_CHANNEL_TEST',
+        lastErrorCode,
+      }),
+    ).toBe(true);
+  });
+
   it('reserves UNKNOWN notification jobs for audited owner resolution', () => {
     expect(
       backgroundJobRequiresOwnerResolution({

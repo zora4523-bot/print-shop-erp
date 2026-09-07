@@ -58,6 +58,37 @@ describe('createNotificationChannelSchema', () => {
     expect(r.success).toBe(false);
   });
 
+  it.each([
+    ['缺少 key', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send'],
+    ['key 为空', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key='],
+    [
+      '额外 query',
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x&debug=1',
+    ],
+    [
+      '重复 key',
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x&key=y',
+    ],
+    [
+      'fragment',
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x#fragment',
+    ],
+    [
+      '用户信息',
+      'https://user@qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x',
+    ],
+    [
+      '错误路径',
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send/?key=x',
+    ],
+  ])('webhookUrl %s → 拒', (_case, webhookUrl) => {
+    const r = createNotificationChannelSchema.safeParse({
+      ...valid,
+      webhookUrl,
+    });
+    expect(r.success).toBe(false);
+  });
+
   it('channelName 空 → 拒', () => {
     const r = createNotificationChannelSchema.safeParse({
       ...valid,
@@ -101,6 +132,16 @@ describe('updateNotificationChannelSchema', () => {
     });
     expect(r.success).toBe(true);
   });
+
+  it('与新建共用严格 Webhook URL 校验', () => {
+    const r = updateNotificationChannelSchema.safeParse({
+      channelName: '排产群',
+      webhookUrl:
+        'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x&debug=1',
+      isActive: true,
+    });
+    expect(r.success).toBe(false);
+  });
 });
 
 describe('updateNotificationRuleSchema', () => {
@@ -131,13 +172,39 @@ describe('updateNotificationRuleSchema', () => {
     expect(r.success).toBe(false);
   });
 
-  it('messageTemplate 超 4000 字 → 拒', () => {
+  it('messageTemplate 恰好 4096 个 ASCII 字节 → ok', () => {
     const r = updateNotificationRuleSchema.safeParse({
-      messageTemplate: 'a'.repeat(4001),
+      messageTemplate: 'a'.repeat(4096),
       channelIds: [],
       isActive: false,
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
+  });
+
+  it('messageTemplate 超过 4096 个 UTF-8 字节 → 拒', () => {
+    const ascii = updateNotificationRuleSchema.safeParse({
+      messageTemplate: 'a'.repeat(4097),
+      channelIds: [],
+      isActive: false,
+    });
+    const chinese = updateNotificationRuleSchema.safeParse({
+      // 1366 个中文字符是 4098 个 UTF-8 字节。
+      messageTemplate: '中'.repeat(1366),
+      channelIds: [],
+      isActive: false,
+    });
+
+    expect(ascii.success).toBe(false);
+    expect(chinese.success).toBe(false);
+  });
+
+  it('messageTemplate 4095 个中文 UTF-8 字节 → ok', () => {
+    const r = updateNotificationRuleSchema.safeParse({
+      messageTemplate: '中'.repeat(1365),
+      channelIds: [],
+      isActive: false,
+    });
+    expect(r.success).toBe(true);
   });
 
   it('channelIds 含空 string → 拒（每个元素至少 1 字符）', () => {

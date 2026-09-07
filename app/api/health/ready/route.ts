@@ -3,8 +3,11 @@ import { db } from '@/lib/db';
 import {
   assessBackgroundJobHealth,
   getBackgroundJobHealth,
+  summarizeSmartBotConnection,
+  summarizeSmartBotOperationalHealth,
 } from '@/lib/background-jobs/health';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
+import { configuredSmartBotIdDigest } from '@/lib/notification/smart-bot-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,8 +15,8 @@ export const dynamic = 'force-dynamic';
 // 就绪探针 —— 回答的是「这个实例能不能接流量」，不是「后台队列健不健康」。
 //
 // 状态码只由 assessment.available 决定（DB 通 + durable 模式下两个队列都有
-// 当前版本的 worker 心跳）。死信、卡死的 RUNNING、积压年龄一律只进
-// `warnings` 与 `jobs` 计数，**刻意不影响状态码**：
+// 当前版本的 worker 心跳）。死信、卡死的 RUNNING、积压年龄，以及企业微信
+// 智能机器人连接状态一律只进 `warnings` 与响应体，**刻意不影响状态码**：
 //   - deploy/update.sh 第 9 步 `curl -fsS` 本端点判定发布成败，此刻
 //     DEPLOYMENT_QUIESCED=1，非 200 会让 Web 与两个 worker 保持停止并禁止
 //     回滚。一条昨天失败的月结死信不该有这种杀伤力。
@@ -38,9 +41,18 @@ export async function GET(): Promise<Response> {
       `,
       getBackgroundJobHealth(),
     ]);
+    const expectedBotDigest = configuredSmartBotIdDigest();
     const assessment = assessBackgroundJobHealth(jobs, {
       requireWorkers: backgroundJobsMode() === 'durable',
       expectedVersion: version,
+      expectedSmartBotDigest: expectedBotDigest,
+    });
+    const smartBot = summarizeSmartBotConnection(jobs, {
+      expectedVersion: version,
+    });
+    const smartBotOperational = summarizeSmartBotOperationalHealth(jobs, {
+      expectedVersion: version,
+      expectedBotDigest,
     });
     const inventoryMismatchCount = Number(
       integrityRows[0]?.mismatchCount ?? 0,
@@ -66,6 +78,15 @@ export async function GET(): Promise<Response> {
           running: jobs.running,
           staleRunning: jobs.staleRunning,
           deadLast24h: jobs.deadLast24h,
+        },
+        // Connection state is safe operational metadata. Do not expose worker
+        // identity or heartbeat timestamps from this anonymous endpoint.
+        smartBot: {
+          status: smartBot.status,
+          required: smartBotOperational.required,
+          configurationValid: smartBotOperational.configurationValid,
+          identityMatch: smartBotOperational.identityMatch,
+          operational: smartBotOperational.operational,
         },
         warnings,
       },

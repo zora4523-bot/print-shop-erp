@@ -121,6 +121,104 @@ describe('create-order pure quote presentation', () => {
       suggestedFixedFee: '310.00',
       suggestedSubtotal: '310.00',
     });
+    expect(presentation).toMatchObject({
+      plateFee: null,
+      hasManualPricing: false,
+      totalSemantics: 'COMPLETE',
+    });
+    expect(presentation.total).toBe(presentation.knownTotal);
+  });
+
+  it('彩印单色烫金展示含版费原子固定费，不再展示独立制版待核价', () => {
+    const input = createGoldenOrderInput([
+      createGoldenOrderItem({
+        craft: 'PRINT',
+        paperType: '铜版纸',
+        paperWeightGsm: 200,
+        specification: '大号封',
+        frontColors: ['哑金'],
+        backColors: [],
+        printFoilMode: 'PARTIAL',
+        quantity: 1_000,
+      }),
+    ]);
+    const quote = calculateCreateOrderQuote(
+      input,
+      CREATE_ORDER_GOLDEN_SNAPSHOT,
+    );
+    const presentation = presentCreateOrderQuote({
+      factsKey: 'facts-print-foil-bundle',
+      input,
+      quote,
+      logistics: quoteLogistics(input),
+      quoteToken: 'token-print-foil-bundle',
+    });
+
+    expect(presentation.items[0]).toMatchObject({
+      complete: true,
+      suggestedUnitPrice: '0.0000',
+      suggestedFixedFee: '510.00',
+      suggestedSubtotal: '510.00',
+    });
+    expect(presentation.items[0]?.components.map((line) => line.ruleCode)).toEqual(
+      ['PRINT_PER_ORDER', 'PRINT_FOIL_PER_ORDER'],
+    );
+    expect(presentation).toMatchObject({
+      plateFee: null,
+      hasManualPricing: false,
+      totalSemantics: 'COMPLETE',
+    });
+  });
+
+  it('彩印烫金转人工时在展示快照中明确整款价含制版费', () => {
+    const input = createGoldenOrderInput([
+      createGoldenOrderItem({
+        craft: 'PRINT',
+        paperType: '铜版纸',
+        paperWeightGsm: 200,
+        specification: '大号封',
+        frontColors: ['哑金'],
+        backColors: [],
+        printFoilMode: 'PARTIAL',
+        printFinishing: 'TACTILE',
+        quantity: 1_000,
+      }),
+    ]);
+    const quote = calculateCreateOrderQuote(
+      input,
+      CREATE_ORDER_GOLDEN_SNAPSHOT,
+    );
+    const presentation = presentCreateOrderQuote({
+      factsKey: 'facts-print-foil-manual',
+      input,
+      quote,
+      logistics: quoteLogistics(input),
+      quoteToken: 'token-print-foil-manual',
+    });
+
+    expect(presentation.items[0]).toMatchObject({
+      complete: false,
+      suggestedUnitPrice: null,
+      suggestedFixedFee: null,
+      suggestedSubtotal: null,
+      errors: [
+        '彩印触感膜、新光膜或雷射膜加价待定',
+        '彩印烫金款的人工整款价必须包含制烫金版费，不再另收独立制版费',
+      ],
+    });
+    expect(presentation.items[0]?.snapshot).toMatchObject({
+      status: 'MANUAL_PRICING_REQUIRED',
+      manualReasons: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+        }),
+      ]),
+    });
+    expect(presentation).toMatchObject({
+      plateFee: null,
+      hasManualPricing: true,
+      totalSemantics: 'EXCLUDES_MANUAL_ITEMS',
+    });
   });
 
   it('does not fabricate item or packaging amounts for manual pricing', () => {

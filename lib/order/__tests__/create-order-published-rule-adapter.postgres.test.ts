@@ -198,6 +198,9 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
     expect(snapshot.print.perOrderPrices).toContainEqual(
       expect.objectContaining({ paperType: '铜版纸', paperWeightGsm: 200 }),
     );
+    expect(snapshot.print.foilPricingPolicy).toBe(
+      'ATOMIC_BUNDLE_INCLUDES_PLATE',
+    );
 
     const chargeRules = snapshot.orderCharges.rules;
     const shippingRules = chargeRules.filter((rule) => rule.kind === 'SHIPPING');
@@ -434,5 +437,101 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
         ),
       }),
     ).toThrow(expect.objectContaining({ code: 'MISSING_RULE' }));
+  });
+
+  it('保留已发布制版费规则作为审计证据，但绝不投影成自动金额', async () => {
+    const { at } = await readProjectionWindow(PROCESSING_BOOK_ID);
+    const input = await readCurrentProjectionInput(at);
+    const template = input.rules.find(
+      (rule) => rule.priceBookId === PROCESSING_BOOK_ID,
+    )!;
+    const configuredPlateRule: PublishedCreateOrderRuleRow = {
+      ...template,
+      id: 'configured-plate-fee-must-stay-manual',
+      code: 'PLATE_FEE_CONFIGURED_PER_ORDER',
+      name: '已配置但不得自动计算的制版费',
+      category: { code: 'PLATE_MAKING_FEE', name: '制版费' },
+      amount: '999.99',
+      isActive: true,
+    };
+    const baseline = projectPublishedCreateOrderPriceSnapshot(input);
+    const projected = projectPublishedCreateOrderPriceSnapshot({
+      ...input,
+      rules: [...input.rules, configuredPlateRule],
+    });
+    const quoteInput = createGoldenOrderInput([createGoldenOrderItem()]);
+    const baselineQuote = calculateCreateOrderQuote(
+      quoteInput,
+      baseline.snapshot,
+    );
+    const quote = calculateCreateOrderQuote(quoteInput, projected.snapshot);
+    const plateLine = quote.order.lines.find(
+      (line) => line.code === 'PLATE_FEE',
+    );
+
+    expect(projected.snapshot.plate).toEqual({
+      label: '制烫金版费',
+      pricingPolicy: 'ADMIN_MANUAL_ONLY',
+    });
+    expect(projected.audit.projectedRuleCodes.manualOnlyPlate).toEqual([
+      'PLATE_FEE_CONFIGURED_PER_ORDER',
+    ]);
+    expect(plateLine).toMatchObject({
+      status: 'PENDING_AMOUNT',
+      amount: null,
+      includedInKnownTotal: false,
+      basis: { pricingPolicy: 'ADMIN_MANUAL_ONLY' },
+    });
+    expect(quote.knownTotal).toBe(baselineQuote.knownTotal);
+    expect(quote.pendingReasons.map((reason) => reason.code)).toContain(
+      'PLATE_AMOUNT_PENDING',
+    );
+  });
+
+  it('数据库已发布的彩印烫金含版费套餐作为原子总价报价，不重复生成制版费', async () => {
+    const { at } = await readProjectionWindow(FIVE_TIER_PROCESSING_BOOK_ID);
+    const projected = await db.$transaction((tx) =>
+      readPublishedCreateOrderPriceProjection(tx, { now: at }),
+    );
+    const input = createGoldenOrderInput([
+      createGoldenOrderItem({
+        craft: 'PRINT',
+        paperType: '铜版纸',
+        paperWeightGsm: 200,
+        specification: '大号封',
+        frontColors: ['哑金'],
+        backColors: [],
+        printFoilMode: 'PARTIAL',
+      }),
+    ]);
+    const quote = calculateCreateOrderQuote(input, projected.snapshot);
+    const bundleLine = quote.items[0]?.lines.find(
+      (line) => line.code === 'PRINT_FOIL_PER_ORDER',
+    );
+
+    expect(projected.snapshot.print.foilPricingPolicy).toBe(
+      'ATOMIC_BUNDLE_INCLUDES_PLATE',
+    );
+    expect(quote.items[0]).toMatchObject({
+      status: 'QUOTED',
+      amount: '510.00',
+      knownAmount: '510.00',
+    });
+    expect(bundleLine).toMatchObject({
+      status: 'QUOTED',
+      amount: '200.00',
+      includedInKnownTotal: true,
+      basis: {
+        pricingPolicy: 'ATOMIC_BUNDLE_INCLUDES_PLATE',
+        plateTreatment: 'INCLUDED_IN_ATOMIC_BUNDLE',
+      },
+    });
+    expect(quote.order.lines.map((line) => line.code)).not.toContain(
+      'PLATE_FEE',
+    );
+    expect(quote.pendingReasons.map((reason) => reason.code)).not.toContain(
+      'PLATE_AMOUNT_PENDING',
+    );
+    expect(quote.manualReasons).toEqual([]);
   });
 });

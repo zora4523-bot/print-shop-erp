@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DisabledReason } from '@/components/ui-business';
 import { updateSettingsAction } from '@/actions/owner-settings';
 import type { SettingsMutationResult } from '@/actions/owner-settings.types';
 import {
@@ -12,6 +13,10 @@ import {
   SETTING_METADATA,
   type SettingKey,
 } from '@/lib/settings/metadata';
+import {
+  notificationChannelSelectionIssueMessage,
+  type NotificationChannelSelectionIssue,
+} from '@/lib/notification/channel-selection';
 
 type Props = {
   // 由 Server Component 读好当前值传进来（页面层不直连 Prisma 之外的东西，
@@ -22,6 +27,7 @@ type Props = {
     channelKey: string;
     channelName: string;
     isActive: boolean;
+    selectionIssue: NotificationChannelSelectionIssue | null;
   }[];
 };
 
@@ -295,10 +301,15 @@ function ManagementNotificationRoutingField({
                 >
                   {channels.map((channel) => {
                     const isSelected = selected.has(channel.id);
-                    const disabled = !channel.isActive && !isSelected;
-                    return (
+                    const disabled =
+                      channel.selectionIssue !== null && !isSelected;
+                    const issueMessage = channel.selectionIssue
+                      ? notificationChannelSelectionIssueMessage(
+                          channel.selectionIssue,
+                        )
+                      : null;
+                    const option = (
                       <label
-                        key={channel.id}
                         className="flex min-h-10 cursor-pointer items-center gap-1 rounded-md pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
                       >
                         <Checkbox
@@ -313,13 +324,28 @@ function ManagementNotificationRoutingField({
                           <span className="ml-1 font-mono text-xs text-muted-foreground">
                             {channel.channelKey}
                           </span>
-                          {!channel.isActive ? (
+                          {issueMessage ? (
                             <span className="ml-1 text-destructive">
-                              （已停用，请取消勾选）
+                              （{issueMessage}
+                              {isSelected ? '，请取消勾选或修复' : ''}）
                             </span>
                           ) : null}
                         </span>
                       </label>
+                    );
+                    return disabled ? (
+                      <DisabledReason
+                        key={channel.id}
+                        cause="prerequisite"
+                        reason={`${issueMessage ?? '该通知目标当前不可用'}，不可新绑`}
+                        fixHref={`/owner/notifications/channels/${channel.id}`}
+                        fixLabel="查看通知目标"
+                        className="[&_[data-slot=disabled-reason-copy]]:text-xs"
+                      >
+                        {option}
+                      </DisabledReason>
+                    ) : (
+                      <div key={channel.id}>{option}</div>
                     );
                   })}
                 </div>

@@ -1,26 +1,53 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotificationStatus } from '../../../generated/prisma/enums';
 
-const { dbMock } = vi.hoisted(() => ({
+const { dbMock, waitForSlotMock, enqueueMock, smartBotWorkerAvailableMock } = vi.hoisted(() => ({
   dbMock: {
     notificationChannel: { findUnique: vi.fn() },
     notificationLog: { create: vi.fn() },
   },
+  waitForSlotMock: vi.fn(),
+  enqueueMock: vi.fn(),
+  smartBotWorkerAvailableMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/notification/webhook-throttle', () => ({
+  waitForWebhookSendSlot: waitForSlotMock,
+}));
+vi.mock('@/lib/background-jobs/repository', () => ({
+  enqueueBackgroundJob: enqueueMock,
+}));
+vi.mock('@/lib/background-jobs/smart-bot-availability', () => ({
+  hasExclusiveConnectedSmartBotWorker: smartBotWorkerAvailableMock,
+}));
 vi.mock('server-only', () => ({}));
 
 import type { WebhookResult, WebhookSender } from '../webhook';
-import { TestChannelError, testChannel } from '../test-channel';
+import { smartBotIdDigest } from '../smart-bot';
+import {
+  enqueueSmartBotChannelTest,
+  TestChannelError,
+  testChannel,
+} from '../test-channel';
 
 const attemptedAt = new Date('2026-08-23T06:00:00.000Z');
+const smartBotDigest = smartBotIdDigest('bot-id-placeholder');
 
 function senderReturning(result: WebhookResult): WebhookSender {
   return vi.fn(async () => result);
 }
 
 beforeEach(() => {
+  vi.stubEnv('WECOM_SMART_BOT_ID', 'bot-id-placeholder');
+  vi.stubEnv('WECOM_SMART_BOT_SECRET', 'secret-placeholder');
+  waitForSlotMock.mockReset().mockResolvedValue(undefined);
+  enqueueMock.mockReset().mockResolvedValue({
+    job: { id: 'test-job-1' },
+    created: true,
+    requeued: false,
+  });
+  smartBotWorkerAvailableMock.mockReset().mockResolvedValue(true);
   dbMock.notificationChannel.findUnique.mockReset().mockResolvedValue({
     id: 'channel-1',
     webhookUrl: 'https://qy.example.test/webhook',
@@ -36,6 +63,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -54,7 +82,16 @@ describe('testChannel', () => {
 
     expect(dbMock.notificationChannel.findUnique).toHaveBeenCalledWith({
       where: { id: 'channel-1' },
-      select: { id: true, webhookUrl: true, isActive: true },
+      select: {
+        id: true,
+        transport: true,
+        webhookUrl: true,
+        smartBotBotDigest: true,
+        smartBotTargetId: true,
+        smartBotChatType: true,
+        smartBotBoundAt: true,
+        isActive: true,
+      },
     });
     expect(sender).toHaveBeenCalledExactlyOnceWith(
       'https://qy.example.test/webhook',
@@ -64,6 +101,7 @@ describe('testChannel', () => {
       data: {
         eventType: '__TEST__',
         channelId: 'channel-1',
+        destinationFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
         messageContent: expect.stringContaining('ERP 后台'),
         status: NotificationStatus.SUCCESS,
         errorMessage: 'MOCK',
@@ -74,6 +112,137 @@ describe('testChannel', () => {
       },
     });
     expect(fetch).not.toHaveBeenCalled();
+    expect(waitForSlotMock).not.toHaveBeenCalled();
+  });
+
+  it('requires the LIGHT worker for a real smart-bot test', async () => {
+    dbMock.notificationChannel.findUnique.mockResolvedValue({
+      id: 'smart-1',
+      transport: 'WECOM_SMART_BOT',
+      webhookUrl: null,
+      smartBotBotDigest: smartBotDigest,
+      smartBotTargetId: 'group-chat-1',
+      smartBotChatType: 'GROUP',
+      smartBotBoundAt: attemptedAt,
+      isActive: true,
+    });
+    const smartBotSender = vi.fn();
+
+    await expect(
+      testChannel('smart-1', {
+        mockMode: false,
+        smartBotSender,
+        now: attemptedAt,
+      }),
+    ).rejects.toMatchObject({ code: 'SMART_BOT_WORKER_REQUIRED' });
+    expect(smartBotSender).not.toHaveBeenCalled();
+  });
+
+  it('sends a smart-bot test from the worker and persists its result', async () => {
+    dbMock.notificationChannel.findUnique.mockResolvedValue({
+      id: 'smart-1',
+      transport: 'WECOM_SMART_BOT',
+      webhookUrl: null,
+      smartBotBotDigest: smartBotDigest,
+      smartBotTargetId: 'group-chat-1',
+      smartBotChatType: 'GROUP',
+      smartBotBoundAt: attemptedAt,
+      isActive: true,
+    });
+    const smartBotSender = vi.fn(async () => ({ ok: true, retries: 0 }));
+
+    await expect(
+      testChannel('smart-1', {
+        mockMode: false,
+        runInWorker: true,
+        smartBotSender,
+        now: attemptedAt,
+      }),
+    ).resolves.toEqual({ ok: true, mock: false });
+    expect(smartBotSender).toHaveBeenCalledExactlyOnceWith(
+      { targetId: 'group-chat-1', chatType: 'GROUP' },
+      expect.stringContaining('[测试推送]'),
+    );
+    expect(dbMock.notificationLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        channelId: 'smart-1',
+        status: 'SUCCESS',
+      }),
+    });
+  });
+
+  it('queues a one-attempt smart-bot test without putting credentials in payload', async () => {
+    vi.stubEnv('NOTIFICATION_MOCK_MODE', 'false');
+    dbMock.notificationChannel.findUnique.mockResolvedValue({
+      transport: 'WECOM_SMART_BOT',
+      smartBotBotDigest: smartBotDigest,
+      smartBotTargetId: 'group-chat-1',
+      smartBotChatType: 'GROUP',
+      smartBotBoundAt: attemptedAt,
+      isActive: true,
+    });
+
+    await expect(enqueueSmartBotChannelTest('smart-1')).resolves.toMatchObject({
+      queued: true,
+    });
+    expect(smartBotWorkerAvailableMock).toHaveBeenCalledExactlyOnceWith(
+      smartBotDigest,
+    );
+    expect(enqueueMock).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        type: 'NOTIFICATION_CHANNEL_TEST',
+        queue: 'LIGHT',
+        payload: { channelId: 'smart-1' },
+        maxAttempts: 1,
+      }),
+    );
+    expect(JSON.stringify(enqueueMock.mock.calls)).not.toContain('secret');
+  });
+
+  it('refuses to queue a real smart-bot test without one connected LIGHT owner', async () => {
+    vi.stubEnv('NOTIFICATION_MOCK_MODE', 'false');
+    smartBotWorkerAvailableMock.mockResolvedValue(false);
+    dbMock.notificationChannel.findUnique.mockResolvedValue({
+      transport: 'WECOM_SMART_BOT',
+      smartBotBotDigest: smartBotDigest,
+      smartBotTargetId: 'group-chat-1',
+      smartBotChatType: 'GROUP',
+      smartBotBoundAt: attemptedAt,
+      isActive: true,
+    });
+
+    await expect(enqueueSmartBotChannelTest('smart-1')).rejects.toMatchObject({
+      code: 'SMART_BOT_WORKER_UNAVAILABLE',
+    });
+    expect(enqueueMock).not.toHaveBeenCalled();
+  });
+
+  it('真实测试发送与业务事件共用 webhook 全局 permit', async () => {
+    const webhookUrl =
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key';
+    dbMock.notificationChannel.findUnique.mockResolvedValueOnce({
+      id: 'channel-1',
+      webhookUrl,
+      isActive: true,
+    });
+    vi.mocked(fetch)
+      .mockReset()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await expect(
+      testChannel('channel-1', {
+        mockMode: false,
+        now: attemptedAt,
+      }),
+    ).resolves.toEqual({ ok: true, mock: false });
+
+    expect(waitForSlotMock).toHaveBeenCalledExactlyOnceWith(webhookUrl, {});
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it('uses an injected real-mode sender without marking the successful log MOCK', async () => {
@@ -94,6 +263,7 @@ describe('testChannel', () => {
       sentAt: attemptedAt,
     });
     expect(fetch).not.toHaveBeenCalled();
+    expect(waitForSlotMock).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -9,11 +9,16 @@ import { DisabledReason, PendingButton } from '@/components/ui-business';
 import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
 import { notificationEventLabel } from '@/lib/notification/event-labels';
 import { managementNotificationRoleForEvent } from '@/lib/notification/events';
+import {
+  notificationChannelSelectionIssueMessage,
+  type NotificationChannelSelectionIssue,
+} from '@/lib/notification/channel-selection';
 
 type ChannelOption = {
   id: string;
   channelName: string;
   isActive: boolean;
+  selectionIssue: NotificationChannelSelectionIssue | null;
 };
 
 type Props = {
@@ -155,15 +160,14 @@ export function RuleForm({
           <div className="space-y-2 rounded-md border bg-card p-3">
             {channels.map((c) => {
               const isSelected = selected.has(c.id);
-              // inactive channel
-              // 的 checkbox 三态语义：
-              //   - active → enabled，正常勾/反勾
-              //   - inactive 已绑定 → enabled，让 owner 看到现状、决定
-              //     保留还是手动取消（保留 round 103 修的"停用 channel
-              //     不丢现有 binding"承诺）
-              //   - inactive 未绑定 → disabled，禁止新绑（否则 notify()
-              //     必失败，dashboard 永红）
-              const disabled = !c.isActive && !isSelected;
+              // 不可用渠道的 checkbox 三态语义：
+              //   - 可用 → enabled，正常勾/反勾
+              //   - 不可用但已绑定 → enabled，让 owner 保留或取消旧绑定
+              //   - 不可用且未绑定 → disabled，禁止新绑
+              const disabled = c.selectionIssue !== null && !isSelected;
+              const issueMessage = c.selectionIssue
+                ? notificationChannelSelectionIssueMessage(c.selectionIssue)
+                : null;
               const option = (
                 <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
                   <Checkbox
@@ -175,13 +179,18 @@ export function RuleForm({
                   />
                   <span
                     className={
-                      c.isActive
-                        ? 'min-w-0 py-2'
-                        : 'min-w-0 py-2 text-muted-foreground'
+                      issueMessage
+                        ? 'min-w-0 py-2 text-muted-foreground'
+                        : 'min-w-0 py-2'
                     }
                   >
                     {c.channelName}
-                    {!c.isActive ? '（已停用）' : ''}
+                    {issueMessage ? (
+                      <span className="ml-1 text-destructive">
+                        （{issueMessage}
+                        {isSelected ? '，请取消勾选或修复' : ''}）
+                      </span>
+                    ) : null}
                   </span>
                 </label>
               );
@@ -189,9 +198,9 @@ export function RuleForm({
                 <DisabledReason
                   key={c.id}
                   cause="prerequisite"
-                  reason="该群已停用，不可新绑"
+                  reason={`${issueMessage ?? '该通知目标当前不可用'}，不可新绑`}
                   fixHref={`/owner/notifications/channels/${c.id}`}
-                  fixLabel="去启用群"
+                  fixLabel="查看通知目标"
                   className="[&_[data-slot=disabled-reason-copy]]:text-xs"
                 >
                   {option}

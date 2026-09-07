@@ -150,8 +150,8 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
   });
 });
 
-describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
-  it('settled[N] → N 条 CS_PERIOD_SETTLED notify（每条 csName/totalSales/commission）', async () => {
+describe('POST /api/cron/cs-settle → settlement service owns CS_PERIOD_SETTLED', () => {
+  it('返回结算数量，不在 cron 层重复派发已由结算事务处理的通知', async () => {
     settleReadyCsMock.mockResolvedValue({
       settled: [
         {
@@ -186,29 +186,13 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
 
     const res = await csSettlePost(authedReq('http://x/api/cron/cs-settle'));
     expect(res.status).toBe(200);
-    expect(dispatchMock).toHaveBeenCalledTimes(2);
-    expect(dispatchMock).toHaveBeenNthCalledWith(
-      1,
-      'CS_PERIOD_SETTLED',
-      {
-        settledCount: 1,
-        csName: 'CS 张',
-        totalSales: '300,000.00',
-        commission: '9,000.00',
-      },
-      { dedupeKey: 'notification:CS_PERIOD_SETTLED:p1' },
-    );
-    expect(dispatchMock).toHaveBeenNthCalledWith(
-      2,
-      'CS_PERIOD_SETTLED',
-      {
-        settledCount: 1,
-        csName: 'CS 李',
-        totalSales: '50,000.00',
-        commission: '250.00',
-      },
-      { dedupeKey: 'notification:CS_PERIOD_SETTLED:p2' },
-    );
+    expect(await res.json()).toEqual({
+      status: 'ok',
+      settledCount: 2,
+      errorCount: 0,
+    });
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(dbMock.user.findMany).not.toHaveBeenCalled();
   });
 
   it('settled empty → 不触发推送 + 不查 user', async () => {
@@ -219,7 +203,7 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
     expect(dbMock.user.findMany).not.toHaveBeenCalled();
   });
 
-  it('user 查不到（数据漂移）→ 用 csUserId 当 csName fallback，仍触发', async () => {
+  it('不在 cron 层重做客服名查询或 fallback，避免绕过结算服务的唯一投递边界', async () => {
     settleReadyCsMock.mockResolvedValue({
       settled: [
         {
@@ -237,13 +221,15 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
       errors: [],
     });
     dbMock.user.findMany.mockResolvedValue([]);
-    await csSettlePost(authedReq('http://x/api/cron/cs-settle'));
-    expect(dispatchMock).toHaveBeenCalledTimes(1);
-    const payload = dispatchMock.mock.calls[0]![1] as { csName: string };
-    expect(payload.csName).toBe('ghost-user');
+    const response = await csSettlePost(
+      authedReq('http://x/api/cron/cs-settle'),
+    );
+    expect(response.status).toBe(200);
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(dbMock.user.findMany).not.toHaveBeenCalled();
   });
 
-  it('partial batch failure still queues notifications for committed periods before retrying', async () => {
+  it('部分失败时保留 500 语义，不对已提交周期二次派发', async () => {
     const settled = [
       {
         commissionId: 'c1',
@@ -269,14 +255,11 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
     );
 
     expect(response.status).toBe(500);
-    expect(dispatchMock).toHaveBeenCalledWith(
-      'CS_PERIOD_SETTLED',
-      expect.objectContaining({ csName: 'CS 张' }),
-      { dedupeKey: 'notification:CS_PERIOD_SETTLED:p1' },
-    );
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(dbMock.user.findMany).not.toHaveBeenCalled();
   });
 
-  it('partial failure plus user lookup failure still notifies by user id and preserves retry', async () => {
+  it('部分失败不会在 cron 层额外查人或用 user id 再发一次', async () => {
     const settled = [
       {
         commissionId: 'c1',
@@ -294,25 +277,13 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
       new MockCsBatchUnexpectedError({ settled, errors: [] }),
     );
     dbMock.user.findMany.mockRejectedValue(new Error('database unavailable'));
-    const consoleError = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-
     const response = await csSettlePost(
       authedReq('http://x/api/cron/cs-settle'),
     );
 
     expect(response.status).toBe(500);
-    expect(dispatchMock).toHaveBeenCalledWith(
-      'CS_PERIOD_SETTLED',
-      expect.objectContaining({ csName: 'u1' }),
-      { dedupeKey: 'notification:CS_PERIOD_SETTLED:p1' },
-    );
-    expect(consoleError).toHaveBeenCalledWith(
-      '[cs-settle] user display-name lookup failed; using user ids:',
-      'Error',
-    );
-    consoleError.mockRestore();
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(dbMock.user.findMany).not.toHaveBeenCalled();
   });
 });
 

@@ -1,23 +1,45 @@
 import Decimal from "decimal.js";
 import type { Prisma } from "../../generated/prisma/client";
 import {
+  CsSalesEntryType,
+  OrderBillingMode,
   OrderChangeRequestStatus,
   OrderCustomerChargeStatus,
   OrderItemQuoteDisposition,
+  OrderItemPricingRoute,
   OrderPackagingMode,
   OrderSettlementType,
   OrderStatus,
   Role,
 } from "../../generated/prisma/enums";
 import { db } from "../db";
+import {
+  ADMIN_SNAPSHOT_CONFIRMATION_SOURCE,
+  buildTrustedAdminChargePricingSnapshot,
+  buildTrustedAdminItemPricingSnapshot,
+  buildTrustedAdminPackagingPricingSnapshot,
+  hasAdminPricingConfirmationMarker,
+  isTrustedAdminChargePricingSnapshot,
+  isTrustedAdminItemPricingSnapshot,
+  isTrustedAdminPackagingPricingSnapshot,
+  isTrustedAdminPricingSnapshot,
+} from "./admin-pricing-snapshot";
+import { hasExclusiveTrustedStructuredPlateCoverage } from "./plate-charge-integrity";
 import { orderCascadeLockKey } from "./locks";
-import { ORDER_PRICING_STATUS } from "./pricing-status";
+import {
+  isOrderPricingReviewAllowedStatus,
+  ORDER_PRICING_STATUS,
+} from "./pricing-status";
 import { appendOrderPricingRevisionInTx } from "./pricing-revision";
 import { activateProductionOperationsInTx } from "../production/operation-materialization-service";
+import {
+  assertCsOrderSalesLedgerReconciledInTx,
+  CsSalesLedgerError,
+  recordCsSalesEntryInTx,
+} from "../salary/cs-sales";
 
 const DECIMAL_10_4_MAX = new Decimal("999999.9999");
 const DECIMAL_12_2_MAX = new Decimal("9999999999.99");
-const CONFIRM_SOURCE = "ADMIN_SNAPSHOT_CONFIRMATION";
 
 type ShipmentChargeCode = "SHIPPING_FEE" | "PACKING_MATERIAL";
 type MoneyLike = { toString(): string } | string | number;
@@ -147,11 +169,35 @@ export type OrderPricingReviewPreview = {
 
 type PricingItem = {
   id: string;
+  orderId: string;
   sequence: number;
   name: string;
   manualQuoteReason: string | null;
   quantity: number;
   quoteDisposition: OrderItemQuoteDisposition | null;
+  pricingRoute: OrderItemPricingRoute;
+  productId: string | null;
+  craft: string | null;
+  productStructure: string;
+  plateGroupId: string | null;
+  pricingGroup: string | null;
+  specification: string | null;
+  actualWidthMm: MoneyLike | null;
+  actualHeightMm: MoneyLike | null;
+  paperType: string | null;
+  paperWeightGsm: number | null;
+  pack: number | null;
+  crafts: string[];
+  frontFoilColors: string[];
+  backFoilColors: string[];
+  foilColors: string[];
+  foilTechnique: string;
+  hasLocalFoil: boolean | null;
+  lamination: string;
+  printColors: string[];
+  printColorsKnown: boolean;
+  isDoubleSided: boolean;
+  isDoubleColor: boolean;
   unitPrice: MoneyLike;
   fixedFee: MoneyLike;
   subtotal: MoneyLike;
@@ -162,6 +208,7 @@ type PricingItem = {
 
 type PricingPackagingGroup = {
   id: string;
+  orderId: string;
   sequence: number;
   name: string | null;
   mode: OrderPackagingMode;
@@ -171,6 +218,7 @@ type PricingPackagingGroup = {
   suggestedSubtotal: MoneyLike | null;
   pricingSnapshot: unknown;
   priceOverrideReason: string | null;
+  lines: Array<{ orderItemId: string; unitsPerBag: number }>;
 };
 
 type PricingShipment = {
@@ -183,11 +231,13 @@ type PricingShipment = {
 
 type PricingCustomerCharge = {
   id: string;
+  orderId: string;
   shipmentId: string | null;
   businessKey: string;
   description: string;
   quantity: MoneyLike | null;
   unit: string | null;
+  unitPrice: MoneyLike | null;
   suggestedAmount: MoneyLike | null;
   amount: MoneyLike | null;
   pricingSnapshot: unknown;
@@ -195,13 +245,17 @@ type PricingCustomerCharge = {
   status: string;
   priceBookId: string | null;
   sourceRuleId: string | null;
+  isAdjustment: boolean;
+  approvalReference: string | null;
   category: { code: string; name: string };
 };
 
 type PricingOrder = {
   id: string;
   orderNo: string;
+  submitterId: string;
   status: string;
+  billingMode: string;
   settlementType: string;
   revision: number;
   pricingStatus: string;
@@ -221,7 +275,9 @@ type PricingOrder = {
 const pricingOrderSelect = {
   id: true,
   orderNo: true,
+  submitterId: true,
   status: true,
+  billingMode: true,
   settlementType: true,
   revision: true,
   pricingStatus: true,
@@ -236,11 +292,35 @@ const pricingOrderSelect = {
     orderBy: { sequence: "asc" },
     select: {
       id: true,
+      orderId: true,
       sequence: true,
       name: true,
       manualQuoteReason: true,
       quantity: true,
       quoteDisposition: true,
+      pricingRoute: true,
+      productId: true,
+      craft: true,
+      productStructure: true,
+      plateGroupId: true,
+      pricingGroup: true,
+      specification: true,
+      actualWidthMm: true,
+      actualHeightMm: true,
+      paperType: true,
+      paperWeightGsm: true,
+      pack: true,
+      crafts: true,
+      frontFoilColors: true,
+      backFoilColors: true,
+      foilColors: true,
+      foilTechnique: true,
+      hasLocalFoil: true,
+      lamination: true,
+      printColors: true,
+      printColorsKnown: true,
+      isDoubleSided: true,
+      isDoubleColor: true,
       unitPrice: true,
       fixedFee: true,
       subtotal: true,
@@ -253,6 +333,7 @@ const pricingOrderSelect = {
     orderBy: { sequence: "asc" },
     select: {
       id: true,
+      orderId: true,
       sequence: true,
       name: true,
       mode: true,
@@ -262,6 +343,7 @@ const pricingOrderSelect = {
       suggestedSubtotal: true,
       pricingSnapshot: true,
       priceOverrideReason: true,
+      lines: { select: { orderItemId: true, unitsPerBag: true } },
     },
   },
   shipments: {
@@ -278,11 +360,13 @@ const pricingOrderSelect = {
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
+      orderId: true,
       shipmentId: true,
       businessKey: true,
       description: true,
       quantity: true,
       unit: true,
+      unitPrice: true,
       suggestedAmount: true,
       amount: true,
       pricingSnapshot: true,
@@ -290,6 +374,8 @@ const pricingOrderSelect = {
       status: true,
       priceBookId: true,
       sourceRuleId: true,
+      isAdjustment: true,
+      approvalReference: true,
       category: { select: { code: true, name: true } },
     },
   },
@@ -305,12 +391,16 @@ function assertReviewable(order: PricingOrder): void {
   if (order.settlementType === OrderSettlementType.NO_CHARGE) {
     throw new OrderPricingReviewError("免费工单不进入工厂核价流程");
   }
+  if (!isOrderPricingReviewAllowedStatus(order.status)) {
+    throw new OrderPricingReviewError(
+      "工单未处于待工厂确认阶段，不能确认终价",
+    );
+  }
   if (
-    order.status === OrderStatus.FINISHED ||
-    order.status === OrderStatus.CANCELLED
+    order.pricingStatus !== ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
   ) {
     throw new OrderPricingReviewError(
-      "工单已完成结算或已取消，不能再确认终价",
+      "工单价格不处于待管理员确认状态，不能重复确认终价",
     );
   }
 }
@@ -349,11 +439,9 @@ function snapshotStatus(snapshot: unknown): string | null {
 }
 
 function snapshotIsConfirmed(snapshot: unknown): boolean {
-  const data = record(snapshot);
   return (
-    data.source === CONFIRM_SOURCE ||
-    snapshotStatus(snapshot) === "ADMIN_CONFIRMED" ||
-    isRecord(data.confirmation)
+    isTrustedAdminPricingSnapshot(snapshot) ||
+    hasAdminPricingConfirmationMarker(snapshot)
   );
 }
 
@@ -374,10 +462,31 @@ function snapshotRequiresManual(snapshot: unknown): boolean {
   );
 }
 
+/**
+ * New-engine manual rows keep legacy non-null decimal columns at zero only to
+ * satisfy the compatibility schema. The snapshot is the canonical signal that
+ * no amount exists yet; those placeholders must never become an editable
+ * default. Older manually priced rows without this explicit pending envelope
+ * keep their persisted values for operator review.
+ */
+function snapshotHasUnknownManualAmount(snapshot: unknown): boolean {
+  if (!snapshotRequiresManual(snapshot)) return false;
+  const actual = record(record(snapshot).actual);
+  return (
+    actual.amount === null ||
+    actual.provisional === true ||
+    actual.requiresAdminConfirmation === true
+  );
+}
+
 function snapshotErrors(snapshot: unknown): string[] {
   const data = record(snapshot);
   const quote = record(data.quote);
   const values: string[] = [];
+  const pendingReason =
+    optionalText(data.pendingReason) ??
+    optionalText(record(data.pendingReason).message);
+  if (pendingReason) values.push(pendingReason);
   for (const candidate of [data.errors, quote.errors]) {
     if (!Array.isArray(candidate)) continue;
     for (const error of candidate) {
@@ -398,8 +507,11 @@ function snapshotErrors(snapshot: unknown): string[] {
 }
 
 function itemRequiresManual(item: PricingItem): boolean {
-  if (snapshotIsConfirmed(item.pricingSnapshot)) return false;
+  if (isTrustedAdminItemPricingSnapshot(item.pricingSnapshot, item)) {
+    return false;
+  }
   return (
+    snapshotIsConfirmed(item.pricingSnapshot) ||
     item.quoteDisposition ===
       OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED ||
     Boolean(item.manualQuoteReason?.trim()) ||
@@ -407,13 +519,58 @@ function itemRequiresManual(item: PricingItem): boolean {
   );
 }
 
-function chargeRequiresManual(charge: PricingCustomerCharge | undefined): boolean {
-  if (!charge) return true;
-  if (snapshotIsConfirmed(charge.pricingSnapshot)) return false;
+function packagingRequiresManual(group: PricingPackagingGroup): boolean {
+  if (
+    isTrustedAdminPackagingPricingSnapshot(group.pricingSnapshot, group)
+  ) {
+    return false;
+  }
   return (
+    snapshotIsConfirmed(group.pricingSnapshot) ||
+    snapshotRequiresManual(group.pricingSnapshot)
+  );
+}
+
+function chargeRequiresManual(
+  charge: PricingCustomerCharge | undefined,
+): boolean {
+  if (!charge) return true;
+  if (charge.status === OrderCustomerChargeStatus.WAIVED) {
+    return (
+      charge.amount === null ||
+      !new Decimal(charge.amount.toString()).isZero()
+    );
+  }
+  if (charge.amount === null) return true;
+  if (isTrustedAdminChargePricingSnapshot(charge.pricingSnapshot, charge)) {
+    return false;
+  }
+  if (isTrustedAdminPricingSnapshot(charge.pricingSnapshot)) return true;
+  return (
+    snapshotIsConfirmed(charge.pricingSnapshot) ||
     charge.status === OrderCustomerChargeStatus.PENDING_AMOUNT ||
     snapshotRequiresManual(charge.pricingSnapshot)
   );
+}
+
+function assertStructuredPlateChargesConsistent(order: PricingOrder): void {
+  const hasActiveStructuredPlateCharge = order.customerCharges.some(
+    (charge) =>
+      charge.category.code === "PLATE_MAKING_FEE" &&
+      charge.businessKey.startsWith("PLATE_DETAIL:") &&
+      charge.status !== OrderCustomerChargeStatus.WAIVED,
+  );
+  if (
+    hasActiveStructuredPlateCharge &&
+    !hasExclusiveTrustedStructuredPlateCoverage({
+      items: order.items,
+      charges: order.customerCharges,
+    })
+  ) {
+    throw new OrderPricingReviewError(
+      "逐款制版明细与订单级制烫金版费不一致，请先由管理员清理重复或无效明细",
+    );
+  }
 }
 
 function parseVersionEvidence(
@@ -478,17 +635,99 @@ function shipmentChargeKey(sequence: number, code: ShipmentChargeCode): string {
 }
 
 function chargeByShipmentAndCode(
-  order: PricingOrder,
+  chargeByBusinessKey: ReadonlyMap<string, PricingCustomerCharge>,
   shipment: PricingShipment,
   code: ShipmentChargeCode,
 ): PricingCustomerCharge | undefined {
-  const key = shipmentChargeKey(shipment.sequence, code);
-  return order.customerCharges.find(
-    (charge) =>
-      String(charge.businessKey).toUpperCase() === key ||
-      (charge.shipmentId === shipment.id &&
-        String(charge.category.code).toUpperCase() === code),
-  );
+  return chargeByBusinessKey.get(shipmentChargeKey(shipment.sequence, code));
+}
+
+function isShipmentCustomerCharge(charge: PricingCustomerCharge): boolean {
+  const code = String(charge.category.code).toUpperCase();
+  return code === "SHIPPING_FEE" || code === "PACKING_MATERIAL";
+}
+
+function reviewsShipmentCustomerCharges(order: PricingOrder): boolean {
+  return order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+}
+
+/**
+ * Shipment charges are persisted accounting rows, so neither their display
+ * key nor their relation alone is sufficient identity. Require one canonical
+ * row for every (order, shipment, category) tuple before previewing or writing
+ * a final price. This also prevents one corrupt row from being reused for two
+ * shipment inputs.
+ */
+function assertShipmentCustomerChargeIdentity(
+  order: PricingOrder,
+): ReadonlyMap<string, PricingCustomerCharge> {
+  const expectedByBusinessKey = new Map<
+    string,
+    { shipmentId: string; categoryCode: ShipmentChargeCode }
+  >();
+  for (const shipment of order.shipments) {
+    for (const categoryCode of [
+      "SHIPPING_FEE",
+      "PACKING_MATERIAL",
+    ] as const) {
+      expectedByBusinessKey.set(
+        shipmentChargeKey(shipment.sequence, categoryCode),
+        { shipmentId: shipment.id, categoryCode },
+      );
+    }
+  }
+  if (expectedByBusinessKey.size !== order.shipments.length * 2) {
+    throw new OrderPricingReviewError(
+      "工单发货记录序号重复，无法安全核对快递费和打包耗材费",
+    );
+  }
+
+  const shipmentCharges = order.customerCharges.filter(isShipmentCustomerCharge);
+  if (shipmentCharges.length !== expectedByBusinessKey.size) {
+    throw new OrderPricingReviewError(
+      "每个发货地址必须且只能保存一条快递费和一条打包耗材费",
+    );
+  }
+
+  const chargeByBusinessKey = new Map<string, PricingCustomerCharge>();
+  const seenTargets = new Set<string>();
+  for (const charge of shipmentCharges) {
+    const businessKey = String(charge.businessKey);
+    const categoryCode = String(charge.category.code);
+    const expected = expectedByBusinessKey.get(businessKey);
+    const targetKey = `${charge.shipmentId ?? ""}:${categoryCode}`;
+    if (
+      charge.orderId !== order.id ||
+      !expected ||
+      categoryCode !== expected.categoryCode ||
+      charge.shipmentId !== expected.shipmentId
+    ) {
+      throw new OrderPricingReviewError(
+        `收费明细 ${charge.businessKey} 与工单、发货地址或收费类目不一致，请先修复收费数据`,
+      );
+    }
+    if (
+      chargeByBusinessKey.has(businessKey) ||
+      seenTargets.has(targetKey)
+    ) {
+      throw new OrderPricingReviewError(
+        `收费明细 ${charge.businessKey} 重复，无法确认工单终价`,
+      );
+    }
+    chargeByBusinessKey.set(businessKey, charge);
+    seenTargets.add(targetKey);
+  }
+
+  if (
+    [...expectedByBusinessKey.keys()].some(
+      (businessKey) => !chargeByBusinessKey.has(businessKey),
+    )
+  ) {
+    throw new OrderPricingReviewError(
+      "工单快递费或打包耗材费缺失，无法确认工单终价",
+    );
+  }
+  return chargeByBusinessKey;
 }
 
 function snapshotBillableWeightKg(
@@ -562,38 +801,6 @@ function requiredReason(value: string | null | undefined, label: string): string
   return reason;
 }
 
-function confirmedSnapshot(args: {
-  previous: unknown;
-  now: Date;
-  actorId: string;
-  previousPriceRevision: number;
-  actual: JsonRecord;
-  manualQuoteReason?: string | null;
-}): Prisma.InputJsonObject {
-  const previous = record(args.previous);
-  return {
-    ...previous,
-    source: CONFIRM_SOURCE,
-    status: "ADMIN_CONFIRMED",
-    previousPriceRevision: args.previousPriceRevision,
-    ...(args.manualQuoteReason
-      ? { manualQuoteReason: args.manualQuoteReason }
-      : {}),
-    actual: {
-      ...record(previous.actual),
-      ...args.actual,
-      provisional: false,
-      requiresAdminConfirmation: false,
-      automatic: false,
-    },
-    confirmation: {
-      actorId: args.actorId,
-      confirmedAt: args.now.toISOString(),
-      reason: optionalText(args.actual.overrideReason),
-    },
-  } as Prisma.InputJsonObject;
-}
-
 async function readPricingOrder(
   tx: Prisma.TransactionClient,
   orderId: string,
@@ -617,6 +824,11 @@ export async function previewOrderPricingReview(
     const order = await readPricingOrder(tx, orderId);
     if (!order) throw new OrderPricingReviewError("工单不存在");
     assertReviewable(order);
+    assertStructuredPlateChargesConsistent(order);
+    const includesShipmentCharges = reviewsShipmentCustomerCharges(order);
+    const shipmentChargeByBusinessKey = includesShipmentCharges
+      ? assertShipmentCustomerChargeIdentity(order)
+      : new Map<string, PricingCustomerCharge>();
 
     return {
       orderId: order.id,
@@ -633,13 +845,19 @@ export async function previewOrderPricingReview(
         ],
         "processing",
       ),
-      logisticsPriceBook: firstVersionEvidence(
-        order.customerCharges.map((charge) => charge.pricingSnapshot),
-        "logistics",
-      ),
+      logisticsPriceBook: includesShipmentCharges
+        ? firstVersionEvidence(
+            order.customerCharges
+              .filter(isShipmentCustomerCharge)
+              .map((charge) => charge.pricingSnapshot),
+            "logistics",
+          )
+        : null,
       items: order.items.map((item) => {
         const complete = !itemRequiresManual(item);
         const snapshot = record(item.pricingSnapshot);
+        const hasUnknownManualAmount =
+          !complete && snapshotHasUnknownManualAmount(item.pricingSnapshot);
         const errors = snapshotErrors(item.pricingSnapshot);
         if (!complete && errors.length === 0) {
           errors.push("该款式的报价快照标记为待人工核价");
@@ -652,9 +870,11 @@ export async function previewOrderPricingReview(
           complete,
           errors: [...new Set(errors)],
           manualQuoteReason: item.manualQuoteReason,
-          currentUnitPrice: money(item.unitPrice, 4)!,
-          currentFixedFee: money(item.fixedFee)!,
-          currentSubtotal: money(item.subtotal)!,
+          currentUnitPrice: hasUnknownManualAmount
+            ? ""
+            : money(item.unitPrice, 4)!,
+          currentFixedFee: hasUnknownManualAmount ? "" : money(item.fixedFee)!,
+          currentSubtotal: hasUnknownManualAmount ? "" : money(item.subtotal)!,
           suggestedUnitPrice: complete
             ? (snapshotMoney(snapshot.suggestedUnitPrice, 4) ??
               money(item.unitPrice, 4))
@@ -671,8 +891,10 @@ export async function previewOrderPricingReview(
         };
       }),
       packagingGroups: order.packagingGroups.map((group) => {
-        const complete = !snapshotRequiresManual(group.pricingSnapshot);
+        const complete = !packagingRequiresManual(group);
         const snapshot = record(group.pricingSnapshot);
+        const hasUnknownManualAmount =
+          !complete && snapshotHasUnknownManualAmount(group.pricingSnapshot);
         const actual = record(snapshot.actual);
         const basis = record(record(snapshot.line).basis);
         const errors = snapshotErrors(group.pricingSnapshot);
@@ -687,8 +909,12 @@ export async function previewOrderPricingReview(
           actualBagCount: group.actualBagCount,
           complete,
           errors,
-          currentUnitPrice: money(group.unitPrice, 4)!,
-          currentSubtotal: money(group.subtotal)!,
+          currentUnitPrice: hasUnknownManualAmount
+            ? ""
+            : money(group.unitPrice, 4)!,
+          currentSubtotal: hasUnknownManualAmount
+            ? ""
+            : money(group.subtotal)!,
           suggestedUnitPrice: complete
             ? (snapshotMoney(snapshot.suggestedUnitPrice, 4) ??
               snapshotMoney(actual.unitPrice, 4) ??
@@ -705,7 +931,9 @@ export async function previewOrderPricingReview(
       orderCharges: order.customerCharges
         .filter(
           (charge) =>
-            charge.shipmentId === null && chargeRequiresManual(charge),
+            charge.shipmentId === null &&
+            !isShipmentCustomerCharge(charge) &&
+            chargeRequiresManual(charge),
         )
         .map((charge) => {
           const errors = snapshotErrors(charge.pricingSnapshot);
@@ -724,32 +952,34 @@ export async function previewOrderPricingReview(
             currentReason: charge.overrideReason,
           };
         }),
-      shipments: order.shipments.map((shipment) => {
-        const shipping = chargeByShipmentAndCode(
-          order,
-          shipment,
-          "SHIPPING_FEE",
-        );
-        const packaging = chargeByShipmentAndCode(
-          order,
-          shipment,
-          "PACKING_MATERIAL",
-        );
-        return {
-          shipmentId: shipment.id,
-          sequence: shipment.sequence,
-          destinationProvince: shipment.destinationProvince,
-          billableWeightKg: snapshotBillableWeightKg(shipment, shipping),
-          itemQuantity: shipment.lines.reduce(
-            (sum, line) => sum + line.quantity,
-            0,
-          ),
-          shipping: previewCharge(shipping),
-          packaging: previewCharge(packaging),
-          currentReason:
-            packaging?.overrideReason ?? shipping?.overrideReason ?? null,
-        };
-      }),
+      shipments: includesShipmentCharges
+        ? order.shipments.map((shipment) => {
+            const shipping = chargeByShipmentAndCode(
+              shipmentChargeByBusinessKey,
+              shipment,
+              "SHIPPING_FEE",
+            );
+            const packaging = chargeByShipmentAndCode(
+              shipmentChargeByBusinessKey,
+              shipment,
+              "PACKING_MATERIAL",
+            );
+            return {
+              shipmentId: shipment.id,
+              sequence: shipment.sequence,
+              destinationProvince: shipment.destinationProvince,
+              billableWeightKg: snapshotBillableWeightKg(shipment, shipping),
+              itemQuantity: shipment.lines.reduce(
+                (sum, line) => sum + line.quantity,
+                0,
+              ),
+              shipping: previewCharge(shipping),
+              packaging: previewCharge(packaging),
+              currentReason:
+                packaging?.overrideReason ?? shipping?.overrideReason ?? null,
+            };
+          })
+        : [],
     };
   });
 }
@@ -777,6 +1007,164 @@ function sameNullableDecimal(left: string | null, right: string | null): boolean
   }
 }
 
+function validateFinalPricingSubmissions(
+  input: FinalizeOrderPricingCommand,
+  order: PricingOrder,
+) {
+  const includesShipmentCharges = reviewsShipmentCustomerCharges(order);
+  const shipmentChargeByBusinessKey = includesShipmentCharges
+    ? assertShipmentCustomerChargeIdentity(order)
+    : new Map<string, PricingCustomerCharge>();
+
+  const submittedItems = validateUniqueIds(
+    input.items,
+    (item) => item.itemId,
+    "同一款式不能重复提交终价",
+  );
+  if (
+    [...submittedItems.keys()].some(
+      (id) => !order.items.some((item) => item.id === id),
+    )
+  ) {
+    throw new OrderPricingReviewError("终价明细包含不属于该工单的款式");
+  }
+  const submittedGroups = validateUniqueIds(
+    input.packagingGroups,
+    (group) => group.packagingGroupId,
+    "同一包装组不能重复提交终价",
+  );
+  if (
+    submittedGroups.size !== order.packagingGroups.length ||
+    order.packagingGroups.some((group) => !submittedGroups.has(group.id))
+  ) {
+    throw new OrderPricingReviewError("请完整确认每一个包装组的入袋费");
+  }
+  for (const group of order.packagingGroups) {
+    const submitted = submittedGroups.get(group.id)!;
+    if (
+      submitted.expectedMode !== group.mode ||
+      submitted.expectedActualBagCount !== group.actualBagCount
+    ) {
+      throw new OrderPricingReviewError(
+        `包装组 ${group.sequence} 的模式或实际袋数已变更，请刷新后按当前快照重新核价`,
+      );
+    }
+  }
+  if (!includesShipmentCharges && input.shipments.length > 0) {
+    throw new OrderPricingReviewError(
+      "快递费与打包耗材应收仅适用于外部销售结算工单",
+    );
+  }
+  const submittedShipments = validateUniqueIds(
+    input.shipments,
+    (shipment) => shipment.shipmentId,
+    "同一发货地址不能重复提交收费",
+  );
+  if (
+    includesShipmentCharges &&
+    (submittedShipments.size !== order.shipments.length ||
+      order.shipments.some((shipment) => !submittedShipments.has(shipment.id)))
+  ) {
+    throw new OrderPricingReviewError(
+      "请完整确认每一个发货地址的快递费和打包耗材费",
+    );
+  }
+  for (const shipment of includesShipmentCharges ? order.shipments : []) {
+    const submitted = submittedShipments.get(shipment.id)!;
+    const shipping = chargeByShipmentAndCode(
+      shipmentChargeByBusinessKey,
+      shipment,
+      "SHIPPING_FEE",
+    );
+    if (
+      submitted.expectedDestinationProvince !== shipment.destinationProvince ||
+      !sameNullableDecimal(
+        submitted.expectedBillableWeightKg,
+        snapshotBillableWeightKg(shipment, shipping),
+      )
+    ) {
+      throw new OrderPricingReviewError(
+        `地址 ${shipment.sequence} 的计费省份或重量已变更，请刷新后按当前快照重新核价`,
+      );
+    }
+  }
+
+  const expectedOrderCharges = order.customerCharges.filter(
+    (charge) =>
+      charge.shipmentId === null &&
+      !isShipmentCustomerCharge(charge) &&
+      chargeRequiresManual(charge),
+  );
+  const submittedOrderCharges = validateUniqueIds(
+    input.orderCharges,
+    (charge) => charge.chargeId,
+    "同一订单级待核价费用不能重复提交",
+  );
+  if (
+    submittedOrderCharges.size !== expectedOrderCharges.length ||
+    expectedOrderCharges.some(
+      (charge) => !submittedOrderCharges.has(charge.id),
+    )
+  ) {
+    throw new OrderPricingReviewError("请完整确认每一项订单级待核价费用");
+  }
+  for (const charge of expectedOrderCharges) {
+    const submitted = submittedOrderCharges.get(charge.id)!;
+    if (submitted.expectedBusinessKey !== charge.businessKey) {
+      throw new OrderPricingReviewError(
+        `订单级收费“${charge.description}”已变更，请刷新后重新核价`,
+      );
+    }
+  }
+
+  const manualItems = order.items.flatMap((item) => {
+    if (!itemRequiresManual(item)) return [];
+    const submitted = submittedItems.get(item.id);
+    const unitPrice = parseManualMoney(
+      submitted?.unitPrice,
+      `款式“${item.name}”的客户单价`,
+      DECIMAL_10_4_MAX,
+      4,
+    );
+    const fixedFee = parseManualMoney(
+      submitted?.fixedFee,
+      `款式“${item.name}”的一次性费用`,
+      DECIMAL_12_2_MAX,
+      2,
+    );
+    const reason = requiredReason(
+      submitted?.reason,
+      `款式“${item.name}”需人工核价`,
+    );
+    const subtotal = unitPrice
+      .times(item.quantity)
+      .plus(fixedFee)
+      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    if (subtotal.gt(DECIMAL_12_2_MAX)) {
+      throw new OrderPricingReviewError(
+        `款式“${item.name}”的小计超出系统允许范围`,
+      );
+    }
+    return [{
+      item,
+      unitPrice: unitPrice.toFixed(4),
+      fixedFee: fixedFee.toFixed(2),
+      subtotal: subtotal.toFixed(2),
+      reason,
+    }];
+  });
+  const manualItemIds = new Set(manualItems.map(({ item }) => item.id));
+  if ([...submittedItems.keys()].some((id) => !manualItemIds.has(id))) {
+    throw new OrderPricingReviewError(
+      "已锁定快照价的款式不接受人工改价，请刷新后重试",
+    );
+  }
+
+  return { includesShipmentCharges, shipmentChargeByBusinessKey,
+    submittedGroups, submittedShipments, expectedOrderCharges,
+    submittedOrderCharges, manualItems };
+}
+
 export async function finalizeOrderPricing(
   input: FinalizeOrderPricingCommand,
   actor: { id: string; role: Role },
@@ -799,6 +1187,7 @@ export async function finalizeOrderPricing(
     const order = await readPricingOrder(tx, input.orderId);
     if (!order) throw new OrderPricingReviewError("工单不存在");
     assertReviewable(order);
+    assertStructuredPlateChargesConsistent(order);
     if (order.priceRevision !== input.expectedPriceRevision) {
       throw new OrderPricingReviewError(
         "工单价格已被其他人更新，请刷新后重新核对",
@@ -809,144 +1198,13 @@ export async function finalizeOrderPricing(
         "工单款式、数量或发货信息已变更，请刷新并按当前快照重新核价",
       );
     }
-
-    const submittedItems = validateUniqueIds(
-      input.items,
-      (item) => item.itemId,
-      "同一款式不能重复提交终价",
-    );
-    if (
-      [...submittedItems.keys()].some(
-        (id) => !order.items.some((item) => item.id === id),
-      )
-    ) {
-      throw new OrderPricingReviewError("终价明细包含不属于该工单的款式");
-    }
-    const submittedGroups = validateUniqueIds(
-      input.packagingGroups,
-      (group) => group.packagingGroupId,
-      "同一包装组不能重复提交终价",
-    );
-    if (
-      submittedGroups.size !== order.packagingGroups.length ||
-      order.packagingGroups.some((group) => !submittedGroups.has(group.id))
-    ) {
-      throw new OrderPricingReviewError("请完整确认每一个包装组的入袋费");
-    }
-    for (const group of order.packagingGroups) {
-      const submitted = submittedGroups.get(group.id)!;
-      if (
-        submitted.expectedMode !== group.mode ||
-        submitted.expectedActualBagCount !== group.actualBagCount
-      ) {
-        throw new OrderPricingReviewError(
-          `包装组 ${group.sequence} 的模式或实际袋数已变更，请刷新后按当前快照重新核价`,
-        );
-      }
-    }
-    const submittedShipments = validateUniqueIds(
-      input.shipments,
-      (shipment) => shipment.shipmentId,
-      "同一发货地址不能重复提交收费",
-    );
-    if (
-      submittedShipments.size !== order.shipments.length ||
-      order.shipments.some((shipment) => !submittedShipments.has(shipment.id))
-    ) {
-      throw new OrderPricingReviewError(
-        "请完整确认每一个发货地址的快递费和打包耗材费",
-      );
-    }
-    for (const shipment of order.shipments) {
-      const submitted = submittedShipments.get(shipment.id)!;
-      const shipping = chargeByShipmentAndCode(
-        order,
-        shipment,
-        "SHIPPING_FEE",
-      );
-      if (
-        submitted.expectedDestinationProvince !== shipment.destinationProvince ||
-        !sameNullableDecimal(
-          submitted.expectedBillableWeightKg,
-          snapshotBillableWeightKg(shipment, shipping),
-        )
-      ) {
-        throw new OrderPricingReviewError(
-          `地址 ${shipment.sequence} 的计费省份或重量已变更，请刷新后按当前快照重新核价`,
-        );
-      }
-    }
-
-    const expectedOrderCharges = order.customerCharges.filter(
-      (charge) => charge.shipmentId === null && chargeRequiresManual(charge),
-    );
-    const submittedOrderCharges = validateUniqueIds(
-      input.orderCharges,
-      (charge) => charge.chargeId,
-      "同一订单级待核价费用不能重复提交",
-    );
-    if (
-      submittedOrderCharges.size !== expectedOrderCharges.length ||
-      expectedOrderCharges.some(
-        (charge) => !submittedOrderCharges.has(charge.id),
-      )
-    ) {
-      throw new OrderPricingReviewError("请完整确认每一项订单级待核价费用");
-    }
-    for (const charge of expectedOrderCharges) {
-      const submitted = submittedOrderCharges.get(charge.id)!;
-      if (submitted.expectedBusinessKey !== charge.businessKey) {
-        throw new OrderPricingReviewError(
-          `订单级收费“${charge.description}”已变更，请刷新后重新核价`,
-        );
-      }
-    }
-
-    const manualItems = order.items.flatMap((item) => {
-      if (!itemRequiresManual(item)) return [];
-      const submitted = submittedItems.get(item.id);
-      const unitPrice = parseManualMoney(
-        submitted?.unitPrice,
-        `款式“${item.name}”的客户单价`,
-        DECIMAL_10_4_MAX,
-        4,
-      );
-      const fixedFee = parseManualMoney(
-        submitted?.fixedFee,
-        `款式“${item.name}”的一次性费用`,
-        DECIMAL_12_2_MAX,
-        2,
-      );
-      const reason = requiredReason(
-        submitted?.reason,
-        `款式“${item.name}”需人工核价`,
-      );
-      const subtotal = unitPrice
-        .times(item.quantity)
-        .plus(fixedFee)
-        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-      if (subtotal.gt(DECIMAL_12_2_MAX)) {
-        throw new OrderPricingReviewError(
-          `款式“${item.name}”的小计超出系统允许范围`,
-        );
-      }
-      return [{
-        item,
-        unitPrice: unitPrice.toFixed(4),
-        fixedFee: fixedFee.toFixed(2),
-        subtotal: subtotal.toFixed(2),
-        reason,
-      }];
-    });
-    const manualItemIds = new Set(manualItems.map(({ item }) => item.id));
-    if ([...submittedItems.keys()].some((id) => !manualItemIds.has(id))) {
-      throw new OrderPricingReviewError(
-        "已锁定快照价的款式不接受人工改价，请刷新后重试",
-      );
-    }
+    const { includesShipmentCharges, shipmentChargeByBusinessKey,
+      submittedGroups, submittedShipments, expectedOrderCharges,
+      submittedOrderCharges, manualItems } =
+      validateFinalPricingSubmissions(input, order);
 
     const manualGroups = order.packagingGroups.flatMap((group) => {
-      if (!snapshotRequiresManual(group.pricingSnapshot)) return [];
+      if (!packagingRequiresManual(group)) return [];
       const submitted = submittedGroups.get(group.id)!;
       const unitPrice = parseManualMoney(
         submitted.unitPrice,
@@ -999,14 +1257,20 @@ export async function finalizeOrderPricing(
       reason: string;
     };
     const manualCharges: ManualCharge[] = [];
-    for (const shipment of order.shipments) {
+    for (const shipment of includesShipmentCharges ? order.shipments : []) {
       const submitted = submittedShipments.get(shipment.id)!;
       const pairs: Array<[ShipmentChargeCode, string, string]> = [
         ["SHIPPING_FEE", submitted.shippingFee, "快递费"],
         ["PACKING_MATERIAL", submitted.packingMaterialFee, "打包耗材费"],
       ];
       const needsManual = pairs.some(([code]) =>
-        chargeRequiresManual(chargeByShipmentAndCode(order, shipment, code)),
+        chargeRequiresManual(
+          chargeByShipmentAndCode(
+            shipmentChargeByBusinessKey,
+            shipment,
+            code,
+          ),
+        ),
       );
       const reason = needsManual
         ? requiredReason(
@@ -1015,7 +1279,11 @@ export async function finalizeOrderPricing(
           )
         : "";
       for (const [code, rawAmount, label] of pairs) {
-        const previous = chargeByShipmentAndCode(order, shipment, code);
+        const previous = chargeByShipmentAndCode(
+          shipmentChargeByBusinessKey,
+          shipment,
+          code,
+        );
         if (!chargeRequiresManual(previous)) continue;
         const amount = parseManualMoney(
           rawAmount,
@@ -1053,22 +1321,60 @@ export async function finalizeOrderPricing(
         ),
       ],
     );
-    const existingChargeTotal = order.customerCharges.reduce((sum, charge) => {
-      const amount = chargeAmountById.get(charge.id) ?? money(charge.amount);
-      return amount === null ? sum : sum.plus(amount);
-    }, new Decimal(0));
+    const existingChargeTotal = order.customerCharges
+      .filter(
+        (charge) =>
+          includesShipmentCharges || !isShipmentCustomerCharge(charge),
+      )
+      .reduce((sum, charge) => {
+        const amount = chargeAmountById.get(charge.id) ?? money(charge.amount);
+        return amount === null ? sum : sum.plus(amount);
+      }, new Decimal(0));
     const createdChargeTotal = manualCharges
       .filter((charge) => !charge.previous)
       .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
     const customerChargeTotal = existingChargeTotal.plus(createdChargeTotal);
     const processingTotal = itemAmount.plus(packagingTotal);
     const total = processingTotal.plus(customerChargeTotal);
+    if (total.isNegative()) {
+      throw new OrderPricingReviewError("工单总额不能为负数");
+    }
     if (total.gt(DECIMAL_12_2_MAX)) {
       throw new OrderPricingReviewError("工单总额超出系统允许范围");
     }
     const packagingAmount = packagingTotal.toFixed(2);
     const processingAmount = processingTotal.toFixed(2);
     const totalAmount = total.toFixed(2);
+    const csSalesDelta = total.minus(order.totalAmount.toString());
+    if (
+      order.settlementType === OrderSettlementType.INTERNAL_SALES &&
+      order.billingMode === OrderBillingMode.CHARGE &&
+      !csSalesDelta.isZero()
+    ) {
+      const nextOrderRevision = order.revision + 1;
+      try {
+        await assertCsOrderSalesLedgerReconciledInTx(
+          tx,
+          order.id,
+          order.totalAmount.toString(),
+        );
+        await recordCsSalesEntryInTx(tx, {
+          eventKey: `order:${order.id}:revision:${nextOrderRevision}:change`,
+          csUserId: order.submitterId,
+          orderId: order.id,
+          orderRevision: nextOrderRevision,
+          type: CsSalesEntryType.ORDER_CHANGED,
+          amount: csSalesDelta,
+          occurredAt: now,
+          remark: "管理员确认工单终价",
+        });
+      } catch (error) {
+        if (error instanceof CsSalesLedgerError) {
+          throw new OrderPricingReviewError(error.message);
+        }
+        throw error;
+      }
+    }
 
     for (const manual of manualItems) {
       await tx.orderItem.update({
@@ -1078,17 +1384,17 @@ export async function finalizeOrderPricing(
           fixedFee: manual.fixedFee,
           subtotal: manual.subtotal,
           priceOverrideReason: manual.reason,
-          pricingSnapshot: confirmedSnapshot({
+          pricingSnapshot: buildTrustedAdminItemPricingSnapshot({
             previous: manual.item.pricingSnapshot,
             now,
             actorId: actor.id,
             previousPriceRevision: order.priceRevision,
-            manualQuoteReason: manual.item.manualQuoteReason,
-            actual: {
+            item: {
+              ...manual.item,
               unitPrice: manual.unitPrice,
               fixedFee: manual.fixedFee,
               subtotal: manual.subtotal,
-              overrideReason: manual.reason,
+              priceOverrideReason: manual.reason,
             },
           }),
         },
@@ -1101,15 +1407,16 @@ export async function finalizeOrderPricing(
           unitPrice: manual.unitPrice,
           subtotal: manual.subtotal,
           priceOverrideReason: manual.reason,
-          pricingSnapshot: confirmedSnapshot({
+          pricingSnapshot: buildTrustedAdminPackagingPricingSnapshot({
             previous: manual.group.pricingSnapshot,
             now,
             actorId: actor.id,
             previousPriceRevision: order.priceRevision,
-            actual: {
+            group: {
+              ...manual.group,
               unitPrice: manual.unitPrice,
               subtotal: manual.subtotal,
-              overrideReason: manual.reason,
+              priceOverrideReason: manual.reason,
             },
           }),
         },
@@ -1118,21 +1425,35 @@ export async function finalizeOrderPricing(
 
     for (const manual of manualOrderCharges) {
       const isShipped = order.status === OrderStatus.SHIPPED;
+      const status = isShipped
+        ? OrderCustomerChargeStatus.FINAL
+        : OrderCustomerChargeStatus.ESTIMATED;
       await tx.orderCustomerCharge.update({
         where: { id: manual.charge.id },
         data: {
           amount: manual.amount,
-          status: isShipped
-            ? OrderCustomerChargeStatus.FINAL
-            : OrderCustomerChargeStatus.ESTIMATED,
+          status,
           overrideReason: manual.reason,
-          pricingSnapshot: confirmedSnapshot({
+          pricingSnapshot: buildTrustedAdminChargePricingSnapshot({
             previous: manual.charge.pricingSnapshot,
             now,
             actorId: actor.id,
             previousPriceRevision: order.priceRevision,
-            actual: {
+            charge: {
+              orderId: order.id,
+              businessKey: manual.charge.businessKey,
+              shipmentId: manual.charge.shipmentId,
+              categoryCode: manual.charge.category.code,
+              status,
+              priceBookId: manual.charge.priceBookId,
+              sourceRuleId: manual.charge.sourceRuleId,
+              quantity: manual.charge.quantity,
+              unit: manual.charge.unit,
+              unitPrice: manual.charge.unitPrice,
+              suggestedAmount: manual.charge.suggestedAmount,
               amount: manual.amount,
+              isAdjustment: manual.charge.isAdjustment,
+              approvalReference: manual.charge.approvalReference,
               overrideReason: manual.reason,
             },
           }),
@@ -1152,12 +1473,28 @@ export async function finalizeOrderPricing(
       const status = isShipped
         ? OrderCustomerChargeStatus.FINAL
         : OrderCustomerChargeStatus.ESTIMATED;
-      const pricingSnapshot = confirmedSnapshot({
+      const pricingSnapshot = buildTrustedAdminChargePricingSnapshot({
         previous: manual.previous?.pricingSnapshot,
         now,
         actorId: actor.id,
         previousPriceRevision: order.priceRevision,
-        actual: { amount: manual.amount, overrideReason: manual.reason },
+        charge: {
+          orderId: order.id,
+          businessKey: shipmentChargeKey(manual.shipment.sequence, manual.code),
+          shipmentId: manual.shipment.id,
+          categoryCode: manual.code,
+          status,
+          priceBookId: manual.previous?.priceBookId ?? null,
+          sourceRuleId: manual.previous?.sourceRuleId ?? null,
+          quantity: manual.previous?.quantity ?? null,
+          unit: manual.previous?.unit ?? null,
+          unitPrice: manual.previous?.unitPrice ?? null,
+          suggestedAmount: manual.previous?.suggestedAmount ?? null,
+          amount: manual.amount,
+          isAdjustment: manual.previous?.isAdjustment ?? false,
+          approvalReference: manual.previous?.approvalReference ?? null,
+          overrideReason: manual.reason,
+        },
       });
       if (manual.previous) {
         await tx.orderCustomerCharge.update({
@@ -1246,14 +1583,18 @@ export async function finalizeOrderPricing(
       ],
       "processing",
     );
-    const logisticsPriceBook = firstVersionEvidence(
-      order.customerCharges.map((charge) => charge.pricingSnapshot),
-      "logistics",
-    );
+    const logisticsPriceBook = includesShipmentCharges
+      ? firstVersionEvidence(
+          order.customerCharges
+            .filter(isShipmentCustomerCharge)
+            .map((charge) => charge.pricingSnapshot),
+          "logistics",
+        )
+      : null;
     const revision = await appendOrderPricingRevisionInTx(tx, {
       orderId: order.id,
       status: ORDER_PRICING_STATUS.ADMIN_CONFIRMED,
-      source: CONFIRM_SOURCE,
+      source: ADMIN_SNAPSHOT_CONFIRMATION_SOURCE,
       actorId: actor.id,
       now,
       expectedPriceRevision: order.priceRevision,

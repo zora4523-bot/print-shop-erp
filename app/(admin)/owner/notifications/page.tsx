@@ -28,12 +28,18 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 import type {
   BackgroundJobStatus,
   NotificationStatus,
+  SmartBotConnectionStatus,
 } from '@/generated/prisma/enums';
 import {
   BACKGROUND_JOB_STATUS_REGISTRY,
   NOTIFICATION_STATUS_REGISTRY,
 } from '@/lib/ui/status-registry';
 import { managementNotificationRoleForEvent } from '@/lib/notification/events';
+import { maskWecomGroupBotWebhookUrl } from '@/lib/notification/webhook-url';
+import {
+  getBackgroundJobHealth,
+  summarizeSmartBotConnection,
+} from '@/lib/background-jobs/health';
 
 export const metadata = { title: '推送配置 · 红包印刷 ERP' };
 
@@ -61,6 +67,7 @@ export default async function OwnerNotificationsPage({
     recentFailures,
     unresolvedLogs,
     unresolvedCount,
+    backgroundHealth,
   ] = await Promise.all([
     listNotificationConfiguration(),
     listLogs({ limit: 20 }),
@@ -70,9 +77,18 @@ export default async function OwnerNotificationsPage({
       skip: (unknownPage - 1) * UNKNOWN_PAGE_SIZE,
     }),
     countUnresolvedNotifications(),
+    getBackgroundJobHealth().catch(() => null),
   ]);
   const { channels, rules } = notificationConfiguration;
   const mock = isMockMode();
+  const hasSmartBotChannel = channels.some(
+    (channel) => channel.transport === 'WECOM_SMART_BOT',
+  );
+  const smartBotConnection = backgroundHealth
+    ? summarizeSmartBotConnection(backgroundHealth, {
+        expectedVersion: process.env.APP_VERSION ?? 'dev',
+      })
+    : { status: null, lastSeenAt: null };
   const unknownPageCount = Math.max(
     1,
     Math.ceil(unresolvedCount / UNKNOWN_PAGE_SIZE),
@@ -82,7 +98,7 @@ export default async function OwnerNotificationsPage({
     <div className="space-y-8">
       <PageHeader
         title="推送配置"
-        subtitle="管理企业微信群、通知规则和投递记录。"
+        subtitle="管理企业微信通知目标、通知规则和投递记录。"
       />
 
       {mock ? (
@@ -91,6 +107,14 @@ export default async function OwnerNotificationsPage({
             当前为测试模式，通知不会发送到企业微信。
           </EnvNotice>
         </div>
+      ) : null}
+
+      {hasSmartBotChannel ? (
+        <SmartBotConnectionPanel
+          status={smartBotConnection.status}
+          lastSeenAt={smartBotConnection.lastSeenAt}
+          mock={mock}
+        />
       ) : null}
 
       {recentFailures > 0 ? (
@@ -104,160 +128,11 @@ export default async function OwnerNotificationsPage({
         </div>
       ) : null}
 
-      {/* ─── 群配置 ─── */}
-      <section className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-base font-semibold">企业微信群</h2>
-          <Link
-            href="/owner/notifications/channels/new"
-            className={buttonVariants({ size: 'sm' })}
-          >
-            新建群
-          </Link>
-        </div>
-        {channels.length === 0 ? (
-          <TableEmptyState
-            variant="compact"
-            title="尚未配置企业微信群"
-            description="新建群并验证 Webhook 后，才能把通知规则投递到对应群。"
-            action={
-              <Link
-                href="/owner/notifications/channels/new"
-                className={buttonVariants({ size: 'sm' })}
-              >
-                新建群
-              </Link>
-            }
-          />
-        ) : (
-          <div
-            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            role="region"
-            aria-label="企业微信群列表"
-            tabIndex={0}
-          >
-            <table className="w-full text-sm">
-              <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-left">群名</th>
-                  <th className="px-3 py-2 text-left">Webhook</th>
-                  <th className="px-3 py-2 text-center">状态</th>
-                  <th className="px-3 py-2 text-center">引用规则</th>
-                  <th className="px-3 py-2 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {channels.map((c) => (
-                  <tr key={c.id}>
-                    <td className="px-3 py-2">{c.channelName}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                      {maskWebhookUrl(c.webhookUrl)}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {c.isActive ? (
-                        <Badge>启用</Badge>
-                      ) : (
-                        <Badge variant="outline">已停用</Badge>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-center font-mono text-xs">
-                      {c.referencingConfigurationCount}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <TestChannelButton
-                          channelId={c.id}
-                          disabled={!c.isActive}
-                          disabledReason="该群已停用，请先启用"
-                        />
-                        <Link
-                          href={`/owner/notifications/channels/${c.id}`}
-                          className={buttonVariants({
-                            size: 'sm',
-                            variant: 'outline',
-                          })}
-                        >
-                          编辑
-                        </Link>
-                        <DeleteChannelButton
-                          channelId={c.id}
-                          channelName={c.channelName}
-                          disabled={c.referencingConfigurationCount > 0}
-                          disabledReason={`被 ${c.referencingConfigurationCount} 项通知配置引用，先在规则或系统设置里移除`}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {/* ─── 通知目标 ─── */}
+      <NotificationChannelsSection channels={channels} />
 
-      {/* ─── 事件规则（11 条固定） ─── */}
-      <section id="notification-rules" className="space-y-3">
-        <h2 className="text-base font-semibold">事件规则</h2>
-        {rules.length === 0 ? (
-          <ErrorState
-            blocking
-            title="默认通知规则尚未初始化"
-            description="请联系运维人员完成初始化，然后刷新本页。"
-          />
-        ) : (
-          <div
-            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            role="region"
-            aria-label="通知事件规则"
-            tabIndex={0}
-          >
-            <table className="w-full text-sm">
-              <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-left">事件</th>
-                  <th className="px-3 py-2 text-left">模板（前 60 字）</th>
-                  <th className="px-3 py-2 text-center">状态</th>
-                  <th className="px-3 py-2 text-center">路由</th>
-                  <th className="px-3 py-2 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {rules.map((r) => (
-                  <tr key={r.eventType}>
-                    <td className="px-3 py-2 text-xs">
-                      {notificationEventLabel(r.eventType)}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {firstLine(r.messageTemplate)}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {r.isActive ? (
-                        <Badge>启用</Badge>
-                      ) : (
-                        <Badge variant="outline">未启用</Badge>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-center text-xs">
-                      {notificationRouteLabel(r.eventType, r.channelIds.length)}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <Link
-                        href={`/owner/notifications/rules/${r.eventType}`}
-                        className={buttonVariants({
-                          size: 'sm',
-                          variant: 'outline',
-                        })}
-                      >
-                        编辑
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {/* ─── 事件规则（跟随 NOTIFICATION_EVENTS，当前 15 条） ─── */}
+      <NotificationRulesSection rules={rules} />
 
       {/* UNKNOWN 与 RETRYING + DEAD 都不能只混在最近 20 条中：
           新日志会把它们挤走，而它们都是 owner 的持久化待办。 */}
@@ -433,6 +308,308 @@ export default async function OwnerNotificationsPage({
   );
 }
 
+function NotificationChannelsSection({ channels }: {
+  channels: Awaited<ReturnType<typeof listNotificationConfiguration>>['channels'];
+}) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-base font-semibold">企业微信通知目标</h2>
+        <Link
+          href="/owner/notifications/channels/new"
+          className={buttonVariants({ size: 'sm' })}
+        >
+          新建通知目标
+        </Link>
+      </div>
+      {channels.length === 0 ? (
+        <TableEmptyState
+          variant="compact"
+          title="尚未配置企业微信通知目标"
+          description="新建智能机器人通知目标并完成群绑定后，才能把通知规则投递到对应群。"
+          action={
+            <Link
+              href="/owner/notifications/channels/new"
+              className={buttonVariants({ size: 'sm' })}
+            >
+              新建通知目标
+            </Link>
+          }
+        />
+      ) : (
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="企业微信通知目标列表"
+          tabIndex={0}
+        >
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left">通知目标</th>
+                <th className="px-3 py-2 text-left">传输</th>
+                <th className="px-3 py-2 text-left">目的地</th>
+                <th className="px-3 py-2 text-center">状态</th>
+                <th className="px-3 py-2 text-center">引用规则</th>
+                <th className="px-3 py-2 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {channels.map((c) => {
+                const smartBot = c.transport === 'WECOM_SMART_BOT';
+                const smartBotUnbound =
+                  smartBot && (!c.smartBotTargetId || !c.smartBotBoundAt);
+                const smartBotIdentityMismatch =
+                  smartBot &&
+                  !smartBotUnbound &&
+                  !c.smartBotBotMatchesConfigured;
+                const testDisabled =
+                  smartBotUnbound || smartBotIdentityMismatch || !c.isActive;
+
+                return (
+                  <tr key={c.id}>
+                    <td className="px-3 py-2">{c.channelName}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {smartBot
+                        ? 'Bot ID + Secret 智能机器人'
+                        : '群机器人 Webhook'}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                      {smartBot
+                        ? c.smartBotTargetId
+                          ? `群聊 ••••${c.smartBotTargetId.slice(-4)}`
+                          : '待绑定群聊'
+                        : c.webhookUrl
+                          ? maskWecomGroupBotWebhookUrl(c.webhookUrl)
+                          : '未配置'}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {smartBotUnbound ? (
+                        <Badge variant="outline">未绑定</Badge>
+                      ) : smartBotIdentityMismatch ? (
+                        <Badge variant="destructive">Bot ID 已变更</Badge>
+                      ) : c.isActive ? (
+                        <Badge>启用</Badge>
+                      ) : (
+                        <Badge variant="outline">已停用</Badge>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-center font-mono text-xs">
+                      {c.referencingConfigurationCount}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <TestChannelButton
+                          channelId={c.id}
+                          disabled={testDisabled}
+                          disabledReason={
+                            smartBotUnbound
+                              ? '智能机器人尚未绑定企业微信群'
+                              : smartBotIdentityMismatch
+                                ? '当前 Bot ID 与该群绑定时不一致'
+                                : '该通知目标已停用，请先启用'
+                          }
+                          disabledFixLabel={
+                            smartBotUnbound
+                              ? '去绑定企业微信群'
+                              : smartBotIdentityMismatch
+                                ? '查看处理方式'
+                                : undefined
+                          }
+                        />
+                        <Link
+                          href={`/owner/notifications/channels/${c.id}`}
+                          className={buttonVariants({
+                            size: 'sm',
+                            variant: 'outline',
+                          })}
+                        >
+                          编辑
+                        </Link>
+                        <DeleteChannelButton
+                          channelId={c.id}
+                          channelName={c.channelName}
+                          disabled={c.referencingConfigurationCount > 0}
+                          disabledReason={`被 ${c.referencingConfigurationCount} 项通知配置引用，先在规则或系统设置里移除`}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function NotificationRulesSection({ rules }: {
+  rules: Awaited<ReturnType<typeof listNotificationConfiguration>>['rules'];
+}) {
+  return (
+    <section id="notification-rules" className="space-y-3">
+      <h2 className="text-base font-semibold">事件规则</h2>
+      {rules.length === 0 ? (
+        <ErrorState
+          blocking
+          title="默认通知规则尚未初始化"
+          description="请联系运维人员完成初始化，然后刷新本页。"
+        />
+      ) : (
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="通知事件规则"
+          tabIndex={0}
+        >
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left">事件</th>
+                <th className="px-3 py-2 text-left">模板（前 60 字）</th>
+                <th className="px-3 py-2 text-center">状态</th>
+                <th className="px-3 py-2 text-center">路由</th>
+                <th className="px-3 py-2 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {rules.map((r) => (
+                <tr key={r.eventType}>
+                  <td className="px-3 py-2 text-xs">
+                    {notificationEventLabel(r.eventType)}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {firstLine(r.messageTemplate)}
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    {r.isActive ? (
+                      <Badge>启用</Badge>
+                    ) : (
+                      <Badge variant="outline">未启用</Badge>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-center text-xs">
+                    {notificationRouteLabel(r.eventType, r.channelIds.length)}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Link
+                      href={`/owner/notifications/rules/${r.eventType}`}
+                      className={buttonVariants({
+                        size: 'sm',
+                        variant: 'outline',
+                      })}
+                    >
+                      编辑
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SmartBotConnectionPanel({
+  status,
+  lastSeenAt,
+  mock,
+}: {
+  status: SmartBotConnectionStatus | null;
+  lastSeenAt: Date | null;
+  mock: boolean;
+}) {
+  const presentation = smartBotConnectionPresentation(status);
+  return (
+    <div
+      data-slot="notifications-smart-bot-connection"
+      className={`rounded-md border px-3 py-2 text-sm ${presentation.danger ? 'border-destructive/40 bg-destructive/5' : 'bg-card'}`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <strong>智能机器人长连接</strong>
+        <Badge variant={presentation.badgeVariant}>{presentation.label}</Badge>
+        {lastSeenAt ? (
+          <span className="text-xs text-muted-foreground">
+            最近心跳 {formatDateTimeShanghai(lastSeenAt)}
+          </span>
+        ) : null}
+      </div>
+      <p className={presentation.danger ? 'mt-1 text-destructive' : 'mt-1 text-muted-foreground'}>
+        {presentation.description}
+        {mock ? ' 当前为测试模式，不会向企业微信真实发送。' : ''}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        此状态来自当前版本 LIGHT worker 的数据库心跳，不是 Web 进程根据环境变量推断。
+      </p>
+    </div>
+  );
+}
+
+function smartBotConnectionPresentation(
+  status: SmartBotConnectionStatus | null,
+): {
+  label: string;
+  description: string;
+  badgeVariant: 'default' | 'outline' | 'destructive';
+  danger: boolean;
+} {
+  switch (status) {
+    case 'CONNECTED':
+      return {
+        label: '已连接',
+        description: 'LIGHT worker 已通过企业微信认证，可以接收群绑定消息并主动推送。',
+        badgeVariant: 'default',
+        danger: false,
+      };
+    case 'CONNECTING':
+      return {
+        label: '连接中',
+        description: 'LIGHT worker 正在连接企业微信，请稍后刷新查看。',
+        badgeVariant: 'outline',
+        danger: false,
+      };
+    case 'DISCONNECTED':
+      return {
+        label: '暂时断开',
+        description: '企业微信连接暂时中断，worker 会自动重连；Web 服务仍可正常使用。',
+        badgeVariant: 'outline',
+        danger: false,
+      };
+    case 'AUTH_FAILED':
+      return {
+        label: '认证失败',
+        description: '请立即轮换或核对 Bot Secret，更新受限环境中的凭据，并重启唯一的 LIGHT worker。',
+        badgeVariant: 'destructive',
+        danger: true,
+      };
+    case 'CONNECTION_CONFLICT':
+      return {
+        label: '连接冲突',
+        description: '同一 Bot ID 被另一条长连接占用。请确认只运行一个 LIGHT worker，并排查其他连接者。',
+        badgeVariant: 'destructive',
+        danger: true,
+      };
+    case 'NOT_CONFIGURED':
+      return {
+        label: '未配置',
+        description: 'LIGHT worker 尚未获得成对的 Bot ID 与轮换后 Secret，当前不能绑定或真实推送。',
+        badgeVariant: 'destructive',
+        danger: true,
+      };
+    default:
+      return {
+        label: '状态未知',
+        description: '未读到当前版本 LIGHT worker 的连接心跳，请检查 worker 是否运行及版本是否一致。',
+        badgeVariant: 'destructive',
+        danger: true,
+      };
+  }
+}
+
 function NotificationStatusBadge({
   status,
 }: {
@@ -465,16 +642,6 @@ function BackgroundJobStatusBadge({
       {definition.label}
     </UiStatusBadge>
   );
-}
-
-function maskWebhookUrl(url: string): string {
-  // qyapi 形如 .../send?key=<uuid>
-  const m = url.match(/key=([a-zA-Z0-9-]+)/);
-  if (!m) return url;
-  const key = m[1]!;
-  const masked =
-    key.length > 8 ? `${key.slice(0, 4)}…${key.slice(-4)}` : '****';
-  return url.replace(/key=[a-zA-Z0-9-]+/, `key=${masked}`);
 }
 
 function firstLine(s: string): string {

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { OrderStatus } from '../../../generated/prisma/enums';
 import {
   DUE_SOON_DAYS,
+  PROMISE_ALERT_STATUSES,
   overdueCutoff,
   promisedDateAlert,
   promisedDaysLeft,
@@ -70,9 +71,33 @@ describe('promisedDateAlert', () => {
     ).toBeNull();
   });
 
-  it('已发货/已完结/已取消不预警；未填交期不预警', () => {
+  it('canonical 与 legacy 的全部发货前状态都会预警', () => {
+    expect(PROMISE_ALERT_STATUSES).toEqual([
+      OrderStatus.DRAFT,
+      OrderStatus.PENDING_FACTORY,
+      OrderStatus.REJECTED,
+      OrderStatus.CONFIRMED,
+      OrderStatus.ON_HOLD,
+      OrderStatus.RELEASED,
+      OrderStatus.FOILING,
+      OrderStatus.PACKING,
+      OrderStatus.SUBMITTED,
+      OrderStatus.SCHEDULING,
+      OrderStatus.IN_PRODUCTION,
+      OrderStatus.COMPLETED,
+    ]);
+    for (const status of PROMISE_ALERT_STATUSES) {
+      expect(promisedDateAlert(d('2026-07-01'), status, NOW)).toEqual({
+        kind: 'overdue',
+        days: 6,
+      });
+    }
+  });
+
+  it('已发货/已结算/已完结/已取消不预警；未填交期不预警', () => {
     for (const status of [
       OrderStatus.SHIPPED,
+      OrderStatus.SETTLED,
       OrderStatus.FINISHED,
       OrderStatus.CANCELLED,
     ]) {

@@ -43,6 +43,8 @@ import {
   recordBillPaymentSchema,
   createOrderCostEntrySchema,
   createOrderChangeRequestSchema,
+  previewOrderChangeRequestPricingSchema,
+  reviewOrderChangeRequestSchema,
   createProductionTaskDisputeSchema,
   reviewProductionTaskDisputeSchema,
   recordAttendanceSchema,
@@ -108,6 +110,8 @@ describe('order change request schemas', () => {
   it('接收正反面烫金明细且不要求旧聚合字段', () => {
     const result = createOrderChangeRequestSchema.safeParse({
       orderId: 'order-1',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 1,
       reason: '客户改为双面烫金',
       items: [
         {
@@ -132,6 +136,8 @@ describe('order change request schemas', () => {
   it('仅为历史客户端保留聚合烫金颜色入参', () => {
     const result = createOrderChangeRequestSchema.safeParse({
       orderId: 'order-1',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 1,
       reason: '历史客户端修改颜色',
       items: [
         {
@@ -150,9 +156,61 @@ describe('order change request schemas', () => {
     }
   });
 
+  it('规格修改必须携带成对的目标产品和目录规格', () => {
+    const valid = createOrderChangeRequestSchema.safeParse({
+      orderId: 'order-1',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 1,
+      reason: '客户改为中号封',
+      items: [
+        {
+          operation: 'UPDATE',
+          itemId: 'item-1',
+          targetProductId: 'product-mid',
+          specification: '中号封80×115',
+        },
+      ],
+    });
+    expect(valid.success).toBe(true);
+
+    for (const item of [
+      {
+        operation: 'UPDATE',
+        itemId: 'item-1',
+        specification: '中号封80×115',
+      },
+      {
+        operation: 'UPDATE',
+        itemId: 'item-1',
+        targetProductId: 'product-mid',
+      },
+    ]) {
+      const result = createOrderChangeRequestSchema.safeParse({
+        orderId: 'order-1',
+        expectedRevision: 2,
+        expectedWorkOrderVersion: 1,
+        reason: '客户改为中号封',
+        items: [item],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              message:
+                '修改规格必须同时提交目标报价产品与产品目录规格',
+            }),
+          ]),
+        );
+      }
+    }
+  });
+
   it('rejects duplicate UPDATE entries for one item to avoid approval-order ambiguity', () => {
     const result = createOrderChangeRequestSchema.safeParse({
       orderId: 'order-1',
+      expectedRevision: 2,
+      expectedWorkOrderVersion: 1,
       reason: '客户修改数量和规格',
       items: [
         { operation: 'UPDATE', itemId: 'item-1', quantity: 1200 },
@@ -167,6 +225,222 @@ describe('order change request schemas', () => {
           expect.objectContaining({
             path: ['items', 1, 'itemId'],
             message: '同一款式不能重复提交修改',
+          }),
+        ]),
+      );
+    }
+  });
+
+  it.each([
+    {
+      type: 'MODIFY',
+      modifyKind: 'QTY',
+      items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 }],
+    },
+    { type: 'CANCEL', items: [] },
+  ])('修改与取消申请都必须携带两类工单版本', (command) => {
+    const result = createOrderChangeRequestSchema.safeParse({
+      orderId: 'order-1',
+      reason: '客户确认调整',
+      ...command,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path[0])).toEqual(
+        expect.arrayContaining([
+          'expectedRevision',
+          'expectedWorkOrderVersion',
+        ]),
+      );
+    }
+  });
+
+  it('标准化表单中的双版本整数', () => {
+    const result = createOrderChangeRequestSchema.safeParse({
+      orderId: 'order-1',
+      expectedRevision: ' 3 ',
+      expectedWorkOrderVersion: '2',
+      reason: '客户修改数量',
+      items: [
+        { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toMatchObject({
+        expectedRevision: 3,
+        expectedWorkOrderVersion: 2,
+      });
+    }
+  });
+
+  it('首次预览可省略价格版本，且待核收费默认为空', () => {
+    expect(
+      previewOrderChangeRequestPricingSchema.parse({
+        requestId: 'request-1',
+      }),
+    ).toEqual({
+      requestId: 'request-1',
+      pendingChargeResolutions: [],
+    });
+
+    expect(
+      reviewOrderChangeRequestSchema.parse({
+        requestId: 'request-1',
+        decision: 'DENY',
+        reviewRemark: '价格需要重新确认',
+      }),
+    ).toMatchObject({
+      requestId: 'request-1',
+      decision: 'DENY',
+      pendingChargeResolutions: [],
+    });
+  });
+
+  it('标准化改单价格版本与逐票人工物流收费决议', () => {
+    const result = previewOrderChangeRequestPricingSchema.parse({
+      requestId: 'request-1',
+      expectedPriceRevision: ' 7 ',
+      pendingChargeResolutions: [
+        {
+          businessKey: ' shipment:1:shipping_fee ',
+          shipmentId: ' shipment-1 ',
+          expectedSequence: ' 1 ',
+          expectedProjectedQuantity: ' 1200 ',
+          expectedDestinationProvince: ' 广东省 ',
+          amount: ' 12.30 ',
+          reason: ' 超出价表重量阈值，按承运方报价 ',
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      requestId: 'request-1',
+      expectedPriceRevision: 7,
+      pendingChargeResolutions: [
+        {
+          businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+          shipmentId: 'shipment-1',
+          expectedSequence: 1,
+          expectedProjectedQuantity: 1200,
+          expectedDestinationProvince: '广东省',
+          amount: '12.30',
+          reason: '超出价表重量阈值，按承运方报价',
+        },
+      ],
+    });
+  });
+
+  it('改单审批凭证只接受专用 v1 sha256 格式', () => {
+    const expectedQuoteToken = `order-change-approval-v1:${'a'.repeat(64)}`;
+    expect(
+      reviewOrderChangeRequestSchema.parse({
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        expectedPriceRevision: 7,
+        expectedQuoteToken,
+        reviewRemark: null,
+      }),
+    ).toMatchObject({ expectedQuoteToken });
+
+    expect(
+      reviewOrderChangeRequestSchema.safeParse({
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        expectedPriceRevision: 7,
+        expectedQuoteToken: 'order-change-approval-v1:forged',
+        reviewRemark: null,
+      }).success,
+    ).toBe(false);
+
+    expect(
+      reviewOrderChangeRequestSchema.safeParse({
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        expectedPriceRevision: 7,
+        expectedQuoteToken: `create-order-quote-v2:${'a'.repeat(64)}`,
+        reviewRemark: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('拒绝非字符串、超过两位小数精度的金额和重复决议', () => {
+    const base = {
+      businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+      shipmentId: 'shipment-1',
+      expectedSequence: 1,
+      expectedProjectedQuantity: 1200,
+      expectedDestinationProvince: null,
+      amount: '12.30',
+      reason: '按承运方报价',
+    };
+
+    for (const amount of [
+      '',
+      -1,
+      12.3,
+      '-1',
+      '12.345',
+      '10000000000.00',
+    ]) {
+      expect(
+        previewOrderChangeRequestPricingSchema.safeParse({
+          requestId: 'request-1',
+          pendingChargeResolutions: [{ ...base, amount }],
+        }).success,
+      ).toBe(false);
+    }
+
+    const duplicate = previewOrderChangeRequestPricingSchema.safeParse({
+      requestId: 'request-1',
+      pendingChargeResolutions: [
+        base,
+        {
+          ...base,
+          businessKey: base.businessKey.toLowerCase(),
+        },
+      ],
+    });
+    expect(duplicate.success).toBe(false);
+    if (!duplicate.success) {
+      expect(duplicate.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['pendingChargeResolutions', 1, 'businessKey'],
+            message: '同一物流收费不能重复提交',
+          }),
+          expect.objectContaining({
+            path: ['pendingChargeResolutions', 1, 'shipmentId'],
+            message: '同一发货记录不能重复提交人工物流收费',
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('限制单次人工物流收费决议为十票', () => {
+    const result = previewOrderChangeRequestPricingSchema.safeParse({
+      requestId: 'request-1',
+      pendingChargeResolutions: Array.from({ length: 11 }, (_, index) => ({
+        businessKey: `SHIPMENT:${index + 1}:SHIPPING_FEE`,
+        shipmentId: `shipment-${index + 1}`,
+        expectedSequence: index + 1,
+        expectedProjectedQuantity: 1,
+        expectedDestinationProvince: null,
+        amount: '1.00',
+        reason: '按承运方报价',
+      })),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['pendingChargeResolutions'],
+            message: '单次改单待核物流费不超过 10 项',
           }),
         ]),
       );
@@ -1831,6 +2105,11 @@ describe('external-sales shipment charge schemas', () => {
 
   it('accepts positive billed weights but rejects the legacy zero sentinel at ship time', () => {
     const input = (weightKg: string) => ({
+      expectedRevision: 4,
+      expectedEditVersion: 8,
+      expectedWorkOrderVersion: 2,
+      expectedPriceRevision: 3,
+      idempotencyKey: '00000000-0000-4000-8000-000000000101',
       trackingNo: null,
       shipments: [
         {
@@ -1841,6 +2120,12 @@ describe('external-sales shipment charge schemas', () => {
       ],
     });
     expect(shipOrderSchema.safeParse(input('0.5')).success).toBe(true);
+    expect(
+      shipOrderSchema.safeParse({
+        ...input('0.5'),
+        expectedEditVersion: '1e2',
+      }).success,
+    ).toBe(false);
     const zero = shipOrderSchema.safeParse(input('0'));
     expect(zero.success).toBe(false);
     if (!zero.success) {

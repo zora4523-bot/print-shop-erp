@@ -18,6 +18,13 @@ const quoteItems = [
   },
 ];
 
+const pendingPlateFee = {
+  status: 'PENDING' as const,
+  amount: null,
+  displayAmount: '待定' as const,
+  label: '制烫金版费',
+};
+
 describe('OrderFormBRail', () => {
   it('uses the internal settlement rail without external packaging or logistics fees', () => {
     const html = renderToStaticMarkup(
@@ -78,6 +85,7 @@ describe('OrderFormBRail', () => {
         settlementLabel="工厂直接业务"
         knownTotal="180.00"
         totalSemantics="EXCLUDES_MANUAL_ITEMS"
+        plateFee={pendingPlateFee}
         gaps={[]}
         busy={false}
         onAttemptSubmit={vi.fn()}
@@ -125,7 +133,8 @@ describe('OrderFormBRail', () => {
     expect(html).toContain('1 款');
     expect(html).toContain('纸箱耗材');
     expect(html).toContain('¥3.00');
-    expect(html).toContain('不含制版费与快递费');
+    expect(html).toContain('不含快递费');
+    expect(html).not.toContain('制烫金版费');
     expect(html).toContain('创建并提交');
     expect(html).not.toContain('保存草稿');
     expect(html).not.toContain('这张单需要管理员终价');
@@ -172,13 +181,14 @@ describe('OrderFormBRail', () => {
         settlementLabel="外部销售应付工厂"
         knownTotal="188.00"
         totalSemantics="EXCLUDES_MANUAL_ITEMS"
+        plateFee={pendingPlateFee}
         gaps={[]}
         busy={false}
         onAttemptSubmit={vi.fn()}
       />,
     );
 
-    expect(html).toContain('制版费金额待工厂确认');
+    expect(html).toContain('制烫金版费金额待工厂确认');
     expect(html).toContain('这张单需要管理员终价');
     expect(html).toContain('提交并申请管理员终价');
   });
@@ -225,6 +235,7 @@ describe('OrderFormBRail', () => {
         settlementLabel="外部销售应付工厂"
         knownTotal="188.00"
         totalSemantics="EXCLUDES_MANUAL_ITEMS"
+        plateFee={pendingPlateFee}
         gaps={[]}
         busy={false}
         onAttemptSubmit={vi.fn()}

@@ -208,4 +208,154 @@ describe('quoteExternalCreateOrder', () => {
     expect(second.quoteToken).toBe(first.quoteToken);
     expect(second.factsKey).toBe('another-browser-request-key');
   });
+
+  it('已发布价目版本变化时生成新 token', async () => {
+    const nextSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      priceVersion: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion,
+        processing: {
+          ...CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.processing,
+          id: 'processing-v-next',
+          version:
+            CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.processing.version + 1,
+          sourceSha256: 'f'.repeat(64),
+        },
+      },
+    };
+    mocks.readSnapshot
+      .mockResolvedValueOnce(CREATE_ORDER_GOLDEN_SNAPSHOT)
+      .mockResolvedValueOnce(nextSnapshot);
+
+    const before = await quoteExternalCreateOrder(input(), now);
+    const after = await quoteExternalCreateOrder(input(), now);
+
+    expect(after.priceVersion.processing).toMatchObject({
+      id: 'processing-v-next',
+      version:
+        CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.processing.version + 1,
+    });
+    expect(after.quoteToken).not.toBe(before.quoteToken);
+  });
+
+  it('纯彩印无烫金时对外报价不携带制版费人工语义', async () => {
+    mocks.productFindMany.mockResolvedValue([
+      {
+        id: 'product-print-large',
+        code: 'PRINT-COATED-200-LARGE',
+        category: 'COLOR_PRINT',
+        specification: '大号封90×165',
+        paperType: '200g铜版纸',
+        paperMaterialId: 'paper-coated-200',
+        weight: 200,
+        isActive: true,
+      },
+    ]);
+    mocks.craftFindMany.mockResolvedValue([
+      { id: 'craft-print', code: 'COATED_COLOR_PRINT', isActive: true },
+    ]);
+    mocks.materialFindMany.mockResolvedValue([
+      {
+        id: 'paper-coated-200',
+        name: '铜版纸',
+        specification: '200g',
+        outOfStock: false,
+        isActive: true,
+      },
+    ]);
+    const plainPrint = {
+      ...item,
+      productId: 'product-print-large',
+      pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+      paperType: '200g铜版纸',
+      paperWeightGsm: 200,
+      quantity: 2_000,
+      crafts: ['craft-print'],
+      frontFoilColors: [],
+      backFoilColors: [],
+      foilColors: [],
+      foilTechnique: OrderFoilTechnique.NONE,
+      hasLocalFoil: false,
+      lamination: OrderLamination.NONE,
+      printColors: ['CMYK'],
+    };
+
+    const result = await quoteExternalCreateOrder(
+      input({ items: [plainPrint] }),
+      now,
+    );
+
+    expect(result).toMatchObject({
+      plateFee: null,
+      hasManualPricing: false,
+      totalSemantics: 'COMPLETE',
+    });
+    expect(result.total).toBe(result.knownTotal);
+  });
+
+  it('彩印单色烫金命中含版费原子套餐时报价完整，不携带独立制版费', async () => {
+    mocks.productFindMany.mockResolvedValue([
+      {
+        id: 'product-print-large',
+        code: 'PRINT-COATED-200-LARGE',
+        category: 'COLOR_PRINT',
+        specification: '大号封90×165',
+        paperType: '200g铜版纸',
+        paperMaterialId: 'paper-coated-200',
+        weight: 200,
+        isActive: true,
+      },
+    ]);
+    mocks.craftFindMany.mockResolvedValue([
+      {
+        id: 'craft-print-foil',
+        code: 'COATED_COLOR_PRINT_FOIL',
+        isActive: true,
+      },
+    ]);
+    mocks.materialFindMany.mockResolvedValue([
+      {
+        id: 'paper-coated-200',
+        name: '铜版纸',
+        specification: '200g',
+        outOfStock: false,
+        isActive: true,
+      },
+    ]);
+    const bundledPrint = {
+      ...item,
+      productId: 'product-print-large',
+      pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+      paperType: '200g铜版纸',
+      paperWeightGsm: 200,
+      crafts: ['craft-print-foil'],
+      frontFoilColors: ['哑金'],
+      backFoilColors: [],
+      foilColors: ['哑金'],
+      foilTechnique: OrderFoilTechnique.FLAT,
+      hasLocalFoil: true,
+      lamination: OrderLamination.NONE,
+      printColors: ['CMYK'],
+    };
+
+    const result = await quoteExternalCreateOrder(
+      input({ items: [bundledPrint] }),
+      now,
+    );
+
+    expect(result.items[0]).toMatchObject({
+      complete: true,
+      suggestedFixedFee: '700.00',
+      suggestedSubtotal: '700.00',
+    });
+    expect(result.items[0]?.components.map((line) => line.ruleCode)).toEqual([
+      'PRINT_PER_ORDER',
+      'PRINT_FOIL_PER_ORDER',
+    ]);
+    expect(result).toMatchObject({
+      plateFee: null,
+      hasManualPricing: false,
+      totalSemantics: 'COMPLETE',
+    });
+  });
 });

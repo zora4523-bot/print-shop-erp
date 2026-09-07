@@ -524,7 +524,7 @@ export function CustomerMachinePricingSectionView({
       : 999 < jumpNumber
         ? 3 * flatNumber
         : 999 * 3 * rateNumber;
-  const platePending = plateFee.value === null || plateFee.value === '';
+  const platePolicyDescriptionId = `${plateFee.id}-manual-only-description`;
 
   return (
     <section
@@ -584,21 +584,29 @@ export function CustomerMachinePricingSectionView({
       </Card>
 
       <Card className="min-w-0 gap-0 rounded-[14px] py-0 shadow-none">
-        <CardContent className="px-4 sm:px-5">
-          <ParameterRow
-            label={
-              <>
-                制烫金版费{' '}
-                {platePending ? (
-                  <span className="text-destructive">· 待定</span>
-                ) : null}
-              </>
-            }
-            description="烫金线不含此费；缺失时烫金单总价无法完整计算"
-            field={plateFee}
-            unit="元/版"
-            placeholder="待定"
-          />
+        <CardContent className="px-4 py-3 sm:px-5">
+          <div
+            id={plateFee.id}
+            role="note"
+            aria-describedby={platePolicyDescriptionId}
+            className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+          >
+            <div className="min-w-0">
+              <div className="text-[13px] font-bold">制烫金版费</div>
+              <p
+                id={platePolicyDescriptionId}
+                className="mt-0.5 text-[11px] font-medium leading-4 text-muted-foreground"
+              >
+                不设置自动单价，不参与计价引擎计算；工单提交后由管理员录入实际金额和核价依据。
+              </p>
+            </div>
+            <Badge
+              variant="outline"
+              className="h-auto w-fit shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold text-destructive"
+            >
+              始终人工核价
+            </Badge>
+          </div>
         </CardContent>
       </Card>
     </section>
@@ -893,7 +901,10 @@ export function CustomerPrintPricingSectionView({
               ))}
               <TableRow className="hover:bg-transparent">
                 <TableCell className="px-4 py-2 text-[13px] font-bold">
-                  ＋单色烫金 附加
+                  <span className="block">单色烫金原子套餐</span>
+                  <span className="mt-0.5 block text-[10px] font-semibold text-primary">
+                    含制版费 · 按不可拆套餐总价计价
+                  </span>
                 </TableCell>
                 {columns.map((column) => {
                   const field = matrixCell(
@@ -905,7 +916,7 @@ export function CustomerPrintPricingSectionView({
                     <TableCell key={column.key} className="p-1">
                       <PricingNumericInput
                         {...field}
-                        ariaLabel={`单色烫金${column.label}档附加总价`}
+                        ariaLabel={`单色烫金${column.label}档含版费原子套餐价`}
                         className="h-8 w-14 px-1.5 text-xs"
                       />
                     </TableCell>
@@ -916,8 +927,8 @@ export function CustomerPrintPricingSectionView({
           </Table>
           <div className="px-4 pb-4 pt-3 sm:px-5">
             <FormulaNote>
-              清空一个格子 = 该档无报价转人工，
-              <strong className="text-destructive">不是 0 元</strong>。冰白中号 2千起为空就是现状。
+              彩印基础价清空一个格子 = 该档无报价转人工，
+              <strong className="text-destructive">不是 0 元</strong>。单色烫金套餐价已包含制版费，有唯一明确档位时作为不可拆原子总价计入款式，不再另收订单级制版费；缺档时整款转人工核价。冰白中号 2千起为空就是现状，不会按 0 元处理。
             </FormulaNote>
           </div>
         </CardContent>

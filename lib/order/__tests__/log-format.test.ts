@@ -17,6 +17,8 @@ describe('fieldLabel', () => {
     expect(fieldLabel('pricingStatus')).toBe('对客价格状态');
     expect(fieldLabel('priceRevision')).toBe('价格修订');
     expect(fieldLabel('priceBooks')).toBe('本次价目簿');
+    expect(fieldLabel('completedAt')).toBe('生产完成时间');
+    expect(fieldLabel('workOrderVersion')).toBe('纸质工单版本');
   });
 
   it('does not expose unknown field names', () => {
@@ -68,6 +70,22 @@ describe('formatLogValue', () => {
 
   it('coerces numeric values through String()', () => {
     expect(formatLogValue('trackingNo', 12345)).toBe('12345');
+    expect(formatLogValue('workOrderVersion', 7)).toBe('7');
+  });
+
+  it('renders production completion timestamps in Shanghai time', () => {
+    expect(
+      formatLogValue('completedAt', '2026-09-02T02:03:00.000Z'),
+    ).toBe('2026/09/02 10:03');
+    expect(
+      formatLogValue(
+        'completedAt',
+        new Date('2026-09-02T02:03:00.000Z'),
+      ),
+    ).toBe('2026/09/02 10:03');
+    expect(formatLogValue('completedAt', 'not-a-date')).toBe(
+      '未识别变更内容',
+    );
   });
 });
 
@@ -100,6 +118,53 @@ describe('formatOrderLogChanges', () => {
     ]);
   });
 
+  it('formats a canonical production-completion audit row', () => {
+    expect(
+      formatOrderLogChanges({
+        completedAt: {
+          before: null,
+          after: '2026-09-02T02:03:00.000Z',
+        },
+        workOrderVersion: { before: 7, after: 7 },
+      }),
+    ).toEqual([
+      {
+        field: 'completedAt',
+        label: '生产完成时间',
+        before: '—',
+        after: '2026/09/02 10:03',
+      },
+      {
+        field: 'workOrderVersion',
+        label: '纸质工单版本',
+        before: '7',
+        after: '7',
+      },
+    ]);
+  });
+
+  it('keeps internal idempotency metadata out of the user-facing change list', () => {
+    expect(
+      formatOrderLogChanges({
+        status: { before: 'COMPLETED', after: 'SHIPPED' },
+        shipRequest: {
+          before: null,
+          after: {
+            idempotencyKey: 'request-key',
+            fingerprint: 'private-fingerprint',
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        field: 'status',
+        label: '状态',
+        before: '已完工',
+        after: '已发货',
+      },
+    ]);
+  });
+
   it('handles null / undefined changedFields by returning []', () => {
     expect(formatOrderLogChanges(null)).toEqual([]);
     expect(formatOrderLogChanges(undefined)).toEqual([]);
@@ -122,7 +187,7 @@ describe('formatOrderLogChanges', () => {
 });
 
 describe('actionLabel', () => {
-  it('maps the four known actions', () => {
+  it('maps known actions', () => {
     expect(actionLabel('CREATE')).toBe('创建');
     expect(actionLabel('UPDATE')).toBe('编辑');
     expect(actionLabel('STATUS_CHANGE')).toBe('状态变更');
@@ -132,6 +197,7 @@ describe('actionLabel', () => {
     expect(actionLabel('PRICING_ADMIN_CONFIRMED')).toBe('管理员终价确认');
     expect(actionLabel('ORDER_MANUAL_CHARGE_CREATED')).toBe('新增对客费用');
     expect(actionLabel('ORDER_PLATE_DETAIL_REMOVED')).toBe('移除制版明细');
+    expect(actionLabel('PRODUCTION_COMPLETED')).toBe('生产完成');
   });
 
   it('does not expose unknown actions', () => {

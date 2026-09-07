@@ -408,11 +408,6 @@ function SidebarItem({
           data-menu-level="children"
         >
           {groupSidebarChildren(item.children).map((group, groupIndex) => {
-            const mergeLabelIntoOnlyItem =
-              group.label !== null &&
-              group.items.length === 1 &&
-              group.items[0]?.label === group.label;
-
             return (
               <Fragment key={group.label ?? `ungrouped-${groupIndex}`}>
                 {group.items.map((child, childIndex) => (
@@ -425,11 +420,6 @@ function SidebarItem({
                     onLeave={onLeave}
                     onNavigate={onNavigate}
                     subgroupLabel={group.label}
-                    showSubgroupLabel={
-                      Boolean(group.label) &&
-                      !mergeLabelIntoOnlyItem &&
-                      childIndex === 0
-                    }
                     startsSubgroup={groupIndex > 0 && childIndex === 0}
                   />
                 ))}
@@ -450,7 +440,6 @@ function SidebarSubItem({
   onLeave,
   onNavigate,
   subgroupLabel,
-  showSubgroupLabel,
   startsSubgroup,
 }: {
   item: AdminMenuItem;
@@ -460,30 +449,15 @@ function SidebarSubItem({
   onLeave: (href?: string) => void;
   onNavigate: (href: string) => void;
   subgroupLabel: string | null;
-  showSubgroupLabel: boolean;
   startsSubgroup: boolean;
 }) {
   const active = item.href === activeHref;
 
   return (
     <SidebarMenuSubItem data-menu-level="child">
-      {showSubgroupLabel ? (
-        <span
-          data-menu-subgroup={subgroupLabel ?? undefined}
-          className={cn(
-            'block px-2 pb-0.5 pt-2 text-[10px] font-semibold tracking-[0.08em] text-sidebar-foreground/70',
-            startsSubgroup &&
-              'mt-1 border-t border-sidebar-border/70 pt-3',
-          )}
-        >
-          {subgroupLabel}
-        </span>
-      ) : null}
       <SidebarMenuSubButton
         isActive={active}
-        data-menu-subgroup={
-          subgroupLabel && !showSubgroupLabel ? subgroupLabel : undefined
-        }
+        data-menu-subgroup={subgroupLabel ?? undefined}
         render={
           <Link
             href={item.href}
@@ -496,7 +470,7 @@ function SidebarSubItem({
         }
         className={cn(
           'h-10 text-sidebar-foreground/75 md:h-8',
-          startsSubgroup && !showSubgroupLabel &&
+          startsSubgroup &&
             'mt-1 border-t border-sidebar-border/70 pt-2',
           active &&
             'font-semibold text-sidebar-accent-foreground shadow-sm before:absolute before:-left-[11px] before:h-4 before:w-0.5 before:rounded-full before:bg-sidebar-primary',

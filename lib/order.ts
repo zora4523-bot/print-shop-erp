@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
   CsSalesEntryType,
   CustomerPriceBookPurpose,
   DesignFileType,
   OrderBillingMode,
+  OrderChangeRequestStatus,
   OrderCraft,
   OrderCustomerChargeStatus,
   OrderCostCategory,
@@ -72,7 +74,16 @@ import {
 } from './order/pricing-status';
 import { appendOrderPricingRevisionInTx } from './order/pricing-revision';
 import {
+  FulfillmentPricingError,
+  finalizeConfirmedFulfillmentChargesForShipmentInTx,
+  hasFulfillmentPricingConfirmation,
+  isFulfillmentPricingStatus,
+  recordFulfillmentSfCollectChangeInTx,
+  type FulfillmentPricingMutationGuard,
+} from './order/fulfillment-pricing';
+import {
   PendingPlateChargeError,
+  quoteHasPendingPlateCharge,
   requireActivePlateCategoryIdInTx,
   upsertPendingPlateChargeInTx,
 } from './order/pending-plate-charge';
@@ -365,7 +376,95 @@ function normalizeShipOrderInput(
       ? requestedShipments[0]?.trackingNo ?? null
       : tracking;
 
-  return { requestedShipments, primaryTracking };
+  const command =
+    typeof trackingInput === 'object' && trackingInput !== null
+      ? {
+          expectedRevision: trackingInput.expectedRevision,
+          expectedEditVersion: trackingInput.expectedEditVersion,
+          expectedWorkOrderVersion: trackingInput.expectedWorkOrderVersion,
+          expectedPriceRevision: trackingInput.expectedPriceRevision,
+          idempotencyKey: trackingInput.idempotencyKey.trim(),
+        }
+      : null;
+
+  return { requestedShipments, primaryTracking, command };
+}
+
+type ShipOrderCommandGuard = {
+  expectedRevision: number;
+  expectedEditVersion: number;
+  expectedWorkOrderVersion: number;
+  expectedPriceRevision: number;
+  idempotencyKey: string;
+  fingerprint: string;
+};
+
+function assertValidShipOrderCommand(
+  command: Omit<ShipOrderCommandGuard, 'fingerprint'>,
+): void {
+  if (
+    !Number.isSafeInteger(command.expectedRevision) ||
+    command.expectedRevision < 0
+  ) {
+    throw new OrderInvariantError('工单修订号格式非法，请刷新后重试');
+  }
+  if (
+    !Number.isSafeInteger(command.expectedEditVersion) ||
+    command.expectedEditVersion < 0
+  ) {
+    throw new OrderInvariantError('工单编辑版本格式非法，请刷新后重试');
+  }
+  if (
+    !Number.isSafeInteger(command.expectedWorkOrderVersion) ||
+    command.expectedWorkOrderVersion < 1
+  ) {
+    throw new OrderInvariantError('纸质工单版本格式非法，请刷新后重试');
+  }
+  if (
+    !Number.isSafeInteger(command.expectedPriceRevision) ||
+    command.expectedPriceRevision < 0
+  ) {
+    throw new OrderInvariantError('价格版本格式非法，请刷新后重试');
+  }
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+      command.idempotencyKey,
+    )
+  ) {
+    throw new OrderInvariantError('发货请求标识格式非法，请刷新后重试');
+  }
+}
+
+function shipOrderFingerprint(input: {
+  orderId: string;
+  command: Omit<ShipOrderCommandGuard, 'fingerprint'>;
+  primaryTracking: string | null;
+  requestedShipments: ReturnType<
+    typeof normalizeShipOrderInput
+  >['requestedShipments'];
+}): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        orderId: input.orderId,
+        expectedRevision: input.command.expectedRevision,
+        expectedEditVersion: input.command.expectedEditVersion,
+        expectedWorkOrderVersion: input.command.expectedWorkOrderVersion,
+        expectedPriceRevision: input.command.expectedPriceRevision,
+        trackingNo: input.primaryTracking,
+        shipments: input.requestedShipments.map((shipment) => ({
+          shipmentId: shipment.shipmentId,
+          trackingNo: shipment.trackingNo,
+          weightKg: shipment.weightKg ?? null,
+          destinationProvince: shipment.destinationProvince ?? null,
+          shippingFee: shipment.shippingFee ?? null,
+          packingMaterialFee: shipment.packingMaterialFee ?? null,
+          customerChargeOverrideReason:
+            shipment.customerChargeOverrideReason ?? null,
+        })),
+      }),
+    )
+    .digest('hex');
 }
 
 export type SfCollectChargeCorrection = {
@@ -383,6 +482,69 @@ export type SfCollectChargeCorrection = {
 //   4. verify the optional productId (if any) exists + is active while locked
 //   5. compute subtotals + totalAmount in Decimal.js
 //   6. nested-create Order + items + initial OrderLog("CREATE") in one call
+async function resolveCreationCraftsInTx(
+  txClient: Prisma.TransactionClient,
+  input: CreateOrderCommand,
+) {
+  // (2) craft FK + activation check — surfaces a clean invariant error
+  // instead of a Prisma FK error.
+  const craftIds = [...new Set(input.items.flatMap((it) => it.crafts))];
+  const foundCrafts = await txClient.craft.findMany({
+    where: { id: { in: craftIds } },
+    select: { id: true, code: true, isActive: true },
+  });
+  if (foundCrafts.length !== craftIds.length) {
+    const missing = craftIds.filter((id) => !foundCrafts.some((c) => c.id === id));
+    throw new OrderInvariantError(
+      `工艺不存在：${missing.join(', ')}`,
+    );
+  }
+
+  const craftById = new Map(foundCrafts.map((craft) => [craft.id, craft]));
+  for (const item of input.items) {
+    const unavailable = item.crafts.filter((craftId) => {
+      const craft = craftById.get(craftId);
+      if (!craft || craft.isActive) return false;
+      return !(
+        item.pricingRoute === 'STOCK_BLANK' &&
+        craft.code === LEGACY_STOCK_FOIL_CRAFT_CODE
+      );
+    });
+    if (unavailable.length > 0) {
+      throw new OrderInvariantError(
+        `工艺已停用：${unavailable.join(', ')}`,
+      );
+    }
+  }
+
+  const hasStockLocalFoilItem = input.items.some(
+    (item) => item.pricingRoute === 'STOCK_BLANK',
+  );
+  let canonicalStockLocalFoilCraft = foundCrafts.find(
+    (craft) =>
+      craft.code === STOCK_LOCAL_FOIL_CRAFT_CODE && craft.isActive,
+  );
+  if (hasStockLocalFoilItem && !canonicalStockLocalFoilCraft) {
+    const canonicalCrafts = await txClient.craft.findMany({
+      where: {
+        code: STOCK_LOCAL_FOIL_CRAFT_CODE,
+        isActive: true,
+      },
+      select: { id: true, code: true, isActive: true },
+    });
+    canonicalStockLocalFoilCraft = canonicalCrafts[0];
+  }
+  if (hasStockLocalFoilItem && !canonicalStockLocalFoilCraft) {
+    throw new OrderInvariantError(
+      '当前没有启用的“局部烫金”工艺，无法创建通版现货工单',
+    );
+  }
+  const craftCodeById = new Map(
+    foundCrafts.map((craft) => [craft.id, craft.code]),
+  );
+  return { canonicalStockLocalFoilCraft, craftCodeById };
+}
+
 export async function createOrder(
   input: CreateOrderCommand,
   actor: { id: string; role: Role },
@@ -461,62 +623,8 @@ export async function createOrder(
     // (1) allocate a fresh GD-YYMMDD-XXX (advisory lock inside).
     const orderNo = await nextOrderNumber(txClient, now);
 
-    // (2) craft FK + activation check — surfaces a clean invariant error
-    // instead of a Prisma FK error.
-    const craftIds = [...new Set(input.items.flatMap((it) => it.crafts))];
-    const foundCrafts = await txClient.craft.findMany({
-      where: { id: { in: craftIds } },
-      select: { id: true, code: true, isActive: true },
-    });
-    if (foundCrafts.length !== craftIds.length) {
-      const missing = craftIds.filter((id) => !foundCrafts.some((c) => c.id === id));
-      throw new OrderInvariantError(
-        `工艺不存在：${missing.join(', ')}`,
-      );
-    }
-
-    const craftById = new Map(foundCrafts.map((craft) => [craft.id, craft]));
-    for (const item of input.items) {
-      const unavailable = item.crafts.filter((craftId) => {
-        const craft = craftById.get(craftId);
-        if (!craft || craft.isActive) return false;
-        return !(
-          item.pricingRoute === 'STOCK_BLANK' &&
-          craft.code === LEGACY_STOCK_FOIL_CRAFT_CODE
-        );
-      });
-      if (unavailable.length > 0) {
-        throw new OrderInvariantError(
-          `工艺已停用：${unavailable.join(', ')}`,
-        );
-      }
-    }
-
-    const hasStockLocalFoilItem = input.items.some(
-      (item) => item.pricingRoute === 'STOCK_BLANK',
-    );
-    let canonicalStockLocalFoilCraft = foundCrafts.find(
-      (craft) =>
-        craft.code === STOCK_LOCAL_FOIL_CRAFT_CODE && craft.isActive,
-    );
-    if (hasStockLocalFoilItem && !canonicalStockLocalFoilCraft) {
-      const canonicalCrafts = await txClient.craft.findMany({
-        where: {
-          code: STOCK_LOCAL_FOIL_CRAFT_CODE,
-          isActive: true,
-        },
-        select: { id: true, code: true, isActive: true },
-      });
-      canonicalStockLocalFoilCraft = canonicalCrafts[0];
-    }
-    if (hasStockLocalFoilItem && !canonicalStockLocalFoilCraft) {
-      throw new OrderInvariantError(
-        '当前没有启用的“局部烫金”工艺，无法创建通版现货工单',
-      );
-    }
-    const craftCodeById = new Map(
-      foundCrafts.map((craft) => [craft.id, craft.code]),
-    );
+    const { canonicalStockLocalFoilCraft, craftCodeById } =
+      await resolveCreationCraftsInTx(txClient, input);
     const items = input.items.map((item) => {
       const foilFacts = deriveLegacyOrderItemFoilFacts(item);
       if (item.pricingRoute !== 'STOCK_BLANK') {
@@ -1006,7 +1114,10 @@ export async function createOrder(
       ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
       : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
     let internalPlateCategoryId: string | null = null;
-    if (!isExternalSalesDraft) {
+    const internalHasPendingPlate =
+      !isExternalSalesDraft &&
+      quoteHasPendingPlateCharge(internalQuote!.quote);
+    if (internalHasPendingPlate) {
       try {
         internalPlateCategoryId = await requireActivePlateCategoryIdInTx(tx);
       } catch (error) {
@@ -1125,7 +1236,7 @@ export async function createOrder(
       },
     });
 
-    if (!isExternalSalesDraft) {
+    if (internalHasPendingPlate) {
       try {
         await upsertPendingPlateChargeInTx({
           tx,
@@ -1382,6 +1493,9 @@ type StatusTxClient = {
           receiverPhone: string | null;
           settlementType: OrderSettlementType;
           pricingStatus: string;
+          revision: number;
+          editVersion: number;
+          workOrderVersion: number;
           priceRevision: number;
         }
       | null
@@ -1392,6 +1506,10 @@ type StatusTxClient = {
     }>;
   };
   orderLog: {
+    findFirst: (args: {
+      where: unknown;
+      select: { changedFields: true };
+    }) => Promise<{ changedFields: Prisma.JsonValue | null } | null>;
     create: (args: { data: unknown }) => Promise<unknown>;
   };
 };
@@ -1490,6 +1608,11 @@ type TransitionOptions = {
   // transition. Each call site is responsible for keeping the keys
   // valid Prisma update fields.
   extraData?: Record<string, unknown>;
+  // Version and request identity captured by a client-side command snapshot.
+  // The lookup runs under the same per-order lock as the transition: an
+  // acknowledged-response loss can replay the exact command, while reusing a
+  // key for altered content fails closed before any status or shipment write.
+  commandGuard?: ShipOrderCommandGuard;
   // Optional cascade to related rows, run INSIDE the same tx + advisory
   // lock, AFTER the Order row + OrderLog are written. Throwing here
   // rolls the whole transition back (so a block condition leaves no
@@ -1500,6 +1623,7 @@ type TransitionOptions = {
     order: {
       settlementType: OrderSettlementType;
       pricingStatus: string;
+      workOrderVersion: number;
       priceRevision: number;
     },
   ) => Promise<void>;
@@ -1526,7 +1650,7 @@ async function transitionWithLog(
   target: TransitionTarget,
   actor: { id: string; role: Role },
   opts: TransitionOptions,
-): Promise<{ id: string; status: OrderStatus }> {
+): Promise<{ id: string; status: OrderStatus; idempotentReplay?: boolean }> {
   const now = opts.now ?? new Date();
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as StatusTxClient;
@@ -1551,10 +1675,69 @@ async function transitionWithLog(
         receiverPhone: true,
         settlementType: true,
         pricingStatus: true,
+        revision: true,
+        editVersion: true,
+        workOrderVersion: true,
         priceRevision: true,
       },
     });
     if (!target_order) throw new OrderInvariantError('工单不存在');
+
+    if (opts.commandGuard) {
+      const guard = opts.commandGuard;
+      const replay = await txClient.orderLog.findFirst({
+        where: {
+          orderId,
+          action: 'STATUS_CHANGE',
+          changedFields: {
+            path: ['shipRequest', 'after', 'idempotencyKey'],
+            equals: guard.idempotencyKey,
+          },
+        },
+        select: { changedFields: true },
+      });
+      if (replay) {
+        const changedFields = replay.changedFields;
+        const shipRequest =
+          changedFields &&
+          typeof changedFields === 'object' &&
+          !Array.isArray(changedFields) &&
+          'shipRequest' in changedFields &&
+          changedFields.shipRequest &&
+          typeof changedFields.shipRequest === 'object' &&
+          !Array.isArray(changedFields.shipRequest)
+            ? changedFields.shipRequest
+            : null;
+        const after =
+          shipRequest &&
+          'after' in shipRequest &&
+          shipRequest.after &&
+          typeof shipRequest.after === 'object' &&
+          !Array.isArray(shipRequest.after)
+            ? shipRequest.after
+            : null;
+        if (!after || after.fingerprint !== guard.fingerprint) {
+          throw new OrderInvariantError(
+            '同一发货请求标识已用于不同内容，请刷新页面后重新提交',
+          );
+        }
+        return {
+          id: target_order.id,
+          status: target_order.status,
+          idempotentReplay: true,
+        };
+      }
+      if (
+        target_order.revision !== guard.expectedRevision ||
+        target_order.editVersion !== guard.expectedEditVersion ||
+        target_order.workOrderVersion !== guard.expectedWorkOrderVersion ||
+        target_order.priceRevision !== guard.expectedPriceRevision
+      ) {
+        throw new OrderInvariantError(
+          '工单、纸质工单或价格版本已变化，请刷新后重新发货',
+        );
+      }
+    }
 
     const resolvedTarget =
       typeof target === 'function' ? target(target_order) : target;
@@ -1606,6 +1789,24 @@ async function transitionWithLog(
         action: 'STATUS_CHANGE',
         changedFields: {
           status: { before: target_order.status, after: resolvedTarget },
+          ...(opts.commandGuard
+            ? {
+                shipRequest: {
+                  before: null,
+                  after: {
+                    idempotencyKey: opts.commandGuard.idempotencyKey,
+                    fingerprint: opts.commandGuard.fingerprint,
+                    expectedRevision: opts.commandGuard.expectedRevision,
+                    expectedEditVersion:
+                      opts.commandGuard.expectedEditVersion,
+                    expectedWorkOrderVersion:
+                      opts.commandGuard.expectedWorkOrderVersion,
+                    expectedPriceRevision:
+                      opts.commandGuard.expectedPriceRevision,
+                  },
+                },
+              }
+            : {}),
         },
         remark: opts.remark,
       },
@@ -2164,6 +2365,388 @@ export async function cancelOrder(
   });
 }
 
+type RequestedShipOrderShipment = ReturnType<
+  typeof normalizeShipOrderInput
+>['requestedShipments'][number];
+
+type StoredShipOrderShipment = {
+  id: string;
+  sequence: number;
+  destinationProvince: string | null;
+  weightKg: Prisma.Decimal | null;
+  lines: Array<{ quantity: number }>;
+};
+
+async function assertShipOrderReadinessInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    workOrderVersion: number;
+    settlementType: OrderSettlementType;
+    isVersionedCommand: boolean;
+    hasSubmittedShipmentDetails: boolean;
+  },
+): Promise<StoredShipOrderShipment[]> {
+  const storedShipments = await tx.orderShipment.findMany({
+    where: { orderId: input.orderId },
+    select: {
+      id: true,
+      sequence: true,
+      destinationProvince: true,
+      weightKg: true,
+      lines: { select: { quantity: true } },
+    },
+    orderBy: { sequence: 'asc' },
+  });
+  if (storedShipments.length === 0) {
+    throw new OrderInvariantError('工单没有发货地址，暂不能发货');
+  }
+  if (input.isVersionedCommand && !input.hasSubmittedShipmentDetails) {
+    throw new OrderInvariantError(
+      '发货请求缺少地址明细，请刷新页面后重新提交',
+    );
+  }
+  if (
+    input.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+    !input.hasSubmittedShipmentDetails
+  ) {
+    throw new OrderInvariantError(
+      '外部销售工单发货前必须逐地址确认快递费与打包耗材费',
+    );
+  }
+
+  const pendingChange = await tx.orderChangeRequest.findFirst({
+    where: {
+      orderId: input.orderId,
+      status: OrderChangeRequestStatus.PENDING,
+    },
+    select: { id: true },
+  });
+  if (pendingChange) {
+    throw new OrderInvariantError('工单存在待裁决变更申请，暂不能发货');
+  }
+
+  // W2 production facts are version-isolated. Keep these reads serial:
+  // Prisma's pg adapter does not support concurrent queries on one
+  // transaction client. When no current operation exists, fall back to
+  // the pre-cutover ProductionTask ledger, matching the admin read model.
+  const currentOperations = await tx.productionOperation.findMany({
+    where: {
+      orderId: input.orderId,
+      workOrderVersion: input.workOrderVersion,
+    },
+    select: { status: true },
+  });
+  const currentProgressSteps = await tx.productionProgressStep.findMany({
+    where: {
+      orderId: input.orderId,
+      workOrderVersion: input.workOrderVersion,
+    },
+    select: { status: true },
+  });
+  const legacyTasks =
+    currentOperations.length === 0
+      ? await tx.productionTask.findMany({
+          where: { orderItem: { orderId: input.orderId } },
+          select: { status: true },
+        })
+      : [];
+  const productionUnits =
+    currentOperations.length > 0
+      ? [...currentOperations, ...currentProgressSteps]
+      : [...currentProgressSteps, ...legacyTasks];
+  const incompleteProductionStatuses = new Set<string>([
+    ProductionOperationStatus.PENDING,
+    ProductionOperationStatus.IN_PROGRESS,
+    TaskStatus.PENDING,
+    TaskStatus.IN_PROGRESS,
+  ]);
+  if (
+    productionUnits.some((unit) =>
+      incompleteProductionStatuses.has(unit.status),
+    )
+  ) {
+    throw new OrderInvariantError(
+      '工单仍有未完成的生产工序，全部完工后才能发货',
+    );
+  }
+
+  const liveOutsource = await tx.outsourceOrder.findMany({
+    where: {
+      orderId: input.orderId,
+      status: { in: [OutsourceStatus.SENT, OutsourceStatus.IN_PROGRESS] },
+    },
+    select: { id: true },
+  });
+  if (liveOutsource.length > 0) {
+    throw new OrderInvariantError(
+      '该工单仍有已发送或进行中的外协单，收货或取消后才能发货',
+    );
+  }
+  return storedShipments;
+}
+
+async function finalizeExternalShipmentChargesInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    actorId: string;
+    now: Date;
+    storedShipments: readonly StoredShipOrderShipment[];
+    requestByShipmentId: ReadonlyMap<string, RequestedShipOrderShipment>;
+    trustedWeightByShipmentId: ReadonlyMap<string, string | null>;
+  },
+): Promise<void> {
+  const chargeOrder = await tx.order.findUnique({
+    where: { id: input.orderId },
+    select: {
+      settlementType: true,
+      isSfCollect: true,
+      processingAmount: true,
+      customerCharges: {
+        select: {
+          id: true,
+          businessKey: true,
+          amount: true,
+          priceBookId: true,
+          pricingSnapshot: true,
+          category: { select: { code: true } },
+        },
+      },
+    },
+  });
+  if (!chargeOrder) throw new OrderInvariantError('工单不存在');
+  if (chargeOrder.settlementType !== OrderSettlementType.EXTERNAL_SALES) return;
+
+  const standardCustomerCharges = chargeOrder.customerCharges.filter((charge) =>
+    ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(String(charge.category.code)),
+  );
+  const expectedChargeCount = input.storedShipments.length * 2;
+  if (standardCustomerCharges.length !== expectedChargeCount) {
+    throw new OrderInvariantError(
+      '外部销售工单的快递/耗材收费明细不完整，暂不能发货',
+    );
+  }
+  if (standardCustomerCharges.some((charge) => hasFulfillmentPricingConfirmation(charge.pricingSnapshot))) {
+    if (!chargeOrder.isSfCollect && input.storedShipments.some((shipment) => !input.trustedWeightByShipmentId.get(shipment.id))) {
+      throw new OrderInvariantError('外部销售工单发货前必须填写每个地址的承运商最终计费重量');
+    }
+    try {
+      await finalizeConfirmedFulfillmentChargesForShipmentInTx(tx, {
+        orderId: input.orderId, actorId: input.actorId, now: input.now,
+        shipments: input.storedShipments.map((shipment) => {
+          const requested = input.requestByShipmentId.get(shipment.id);
+          if (!requested) throw new OrderInvariantError(`找不到地址 ${shipment.sequence} 的发货收费信息`);
+          return {
+            shipmentId: shipment.id,
+            destinationProvince: requested.destinationProvince ?? shipment.destinationProvince,
+            weightKg: input.trustedWeightByShipmentId.get(shipment.id) ?? null,
+            shippingFee: requested.shippingFee,
+            packingMaterialFee: requested.packingMaterialFee,
+          };
+        }),
+      });
+      return;
+    } catch (error) {
+      if (error instanceof FulfillmentPricingError) throw new OrderInvariantError(error.message);
+      throw error;
+    }
+  }
+  const priceBookIds = [
+    ...new Set(
+      standardCustomerCharges.flatMap((charge) =>
+        charge.priceBookId ? [charge.priceBookId] : [],
+      ),
+    ),
+  ];
+  if (priceBookIds.length !== 1) {
+    throw new OrderInvariantError('快递/耗材收费未绑定唯一价目簿，暂不能发货');
+  }
+  if (
+    !chargeOrder.isSfCollect &&
+    input.storedShipments.some(
+      (shipment) => !input.trustedWeightByShipmentId.get(shipment.id),
+    )
+  ) {
+    throw new OrderInvariantError(
+      '外部销售工单发货前必须填写每个地址的承运商最终计费重量',
+    );
+  }
+
+  let finalizedCharges: Awaited<
+    ReturnType<typeof resolveExternalOrderChargesForFinalization>
+  >;
+  try {
+    finalizedCharges = await resolveExternalOrderChargesForFinalization(
+      tx,
+      {
+        isSfCollect: chargeOrder.isSfCollect,
+        shipments: input.storedShipments.map((shipment) => {
+          const requested = input.requestByShipmentId.get(shipment.id);
+          if (!requested) {
+            throw new OrderInvariantError(
+              `找不到地址 ${shipment.sequence} 的发货收费信息`,
+            );
+          }
+          return {
+            shipmentKey: String(shipment.sequence),
+            province:
+              requested.destinationProvince ?? shipment.destinationProvince,
+            billableWeightKg: chargeOrder.isSfCollect
+              ? null
+              : input.trustedWeightByShipmentId.get(shipment.id) ?? null,
+            itemQuantity: shipment.lines.reduce(
+              (sum, line) => sum + line.quantity,
+              0,
+            ),
+            shippingFee: requested.shippingFee ?? null,
+            packingMaterialFee: requested.packingMaterialFee ?? null,
+            overrideReason: requested.customerChargeOverrideReason ?? null,
+          };
+        }),
+      },
+      priceBookIds[0]!,
+      input.now,
+    );
+  } catch (error) {
+    if (error instanceof OrderCustomerChargeError) {
+      throw new OrderInvariantError(error.message);
+    }
+    throw error;
+  }
+
+  const existingByBusinessKey = new Map(
+    standardCustomerCharges.map((charge) => [String(charge.businessKey), charge]),
+  );
+  for (const charge of finalizedCharges.charges) {
+    const existing = existingByBusinessKey.get(charge.businessKey);
+    if (!existing) {
+      throw new OrderInvariantError(
+        `找不到收费明细 ${charge.businessKey}，暂不能发货`,
+      );
+    }
+    await tx.orderCustomerCharge.update({
+      where: { id: existing.id },
+      data: {
+        categoryId: charge.categoryId,
+        sourceRuleId: charge.sourceRuleId,
+        status:
+          charge.status === OrderCustomerChargeStatus.WAIVED
+            ? OrderCustomerChargeStatus.WAIVED
+            : OrderCustomerChargeStatus.FINAL,
+        description: charge.description,
+        quantity: charge.quantity,
+        unit: charge.unit,
+        suggestedAmount: charge.suggestedAmount,
+        amount: charge.amount,
+        pricingSnapshot: charge.pricingSnapshot,
+        overrideReason: charge.overrideReason,
+        finalizedById: input.actorId,
+        finalizedAt: input.now,
+      },
+    });
+  }
+  const receivableTotal = new Decimal(chargeOrder.processingAmount)
+    .plus(finalizedCharges.totalAmount)
+    .plus(
+      chargeOrder.customerCharges
+        .filter(
+          (charge) =>
+            !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
+              String(charge.category.code),
+            ),
+        )
+        .reduce(
+          (sum, charge) =>
+            charge.amount === null ? sum : sum.plus(charge.amount),
+          new Decimal(0),
+        ),
+    )
+    .toFixed(2);
+  assertStorableOrderTotal(receivableTotal);
+  await tx.order.update({
+    where: { id: input.orderId },
+    // Shipment finalization replaces provisional logistics with
+    // carrier/administrator-confirmed facts. It is still a pricing
+    // confirmation, not the financial settlement event: the later explicit
+    // SHIPPED -> SETTLED command is the sole v2 writer of settledFee/settledAt.
+    data: { totalAmount: receivableTotal, confirmedFee: receivableTotal },
+  });
+}
+
+async function applyShipOrderShipmentFactsInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    actorId: string;
+    now: Date;
+    storedShipments: readonly StoredShipOrderShipment[];
+    requestedShipments: readonly RequestedShipOrderShipment[];
+  },
+): Promise<void> {
+  const requestedIds = input.requestedShipments.map(
+    (shipment) => shipment.shipmentId,
+  );
+  if (new Set(requestedIds).size !== requestedIds.length) {
+    throw new OrderInvariantError('发货地址重复，请刷新页面后重试');
+  }
+  if (
+    input.storedShipments.length !== input.requestedShipments.length ||
+    input.storedShipments.some(
+      (shipment, index) => requestedIds[index] !== shipment.id,
+    )
+  ) {
+    throw new OrderInvariantError('发货地址已变化，请刷新工单后重新填写运单号');
+  }
+  const trackingByShipmentId = new Map(
+    input.requestedShipments.map((shipment) => [
+      shipment.shipmentId,
+      shipment.trackingNo,
+    ]),
+  );
+  const requestByShipmentId = new Map(
+    input.requestedShipments.map((shipment) => [shipment.shipmentId, shipment]),
+  );
+  // A positive weight submitted through this administrator-owned fulfilment
+  // command replaces the stored carrier fact. Omitted/null values (including
+  // the hidden empty field used by SF collect) preserve the trusted weight.
+  const trustedWeightByShipmentId = new Map(
+    input.storedShipments.map((shipment) => {
+      const submitted = requestByShipmentId.get(shipment.id)?.weightKg;
+      return [shipment.id, submitted ?? shipment.weightKg?.toString() ?? null];
+    }),
+  );
+
+  await finalizeExternalShipmentChargesInTx(tx, {
+    orderId: input.orderId,
+    actorId: input.actorId,
+    now: input.now,
+    storedShipments: input.storedShipments,
+    requestByShipmentId,
+    trustedWeightByShipmentId,
+  });
+  for (const shipment of input.storedShipments) {
+    const requested = requestByShipmentId.get(shipment.id);
+    const submittedWeight = requested?.weightKg;
+    await tx.orderShipment.update({
+      where: { id: shipment.id },
+      data: {
+        trackingNo: trackingByShipmentId.get(shipment.id) ?? null,
+        ...(submittedWeight != null ? { weightKg: submittedWeight } : {}),
+        ...(requested?.destinationProvince !== undefined
+          ? {
+              destinationProvince:
+                requested.destinationProvince ?? shipment.destinationProvince,
+            }
+          : {}),
+        status: ShipmentStatus.SHIPPED,
+        shippedAt: input.now,
+      },
+      select: { id: true },
+    });
+  }
+}
+
 // COMPLETED → SHIPPED. Permission `order:ship` (ADMIN) is
 // enforced at the action layer. Optional trackingNo lands on the same
 // Order row via the transition's extraData so the audit OrderLog and
@@ -2173,9 +2756,22 @@ export async function shipOrder(
   actor: { id: string; role: Role },
   trackingInput: string | null | ShipOrderCommand,
   now: Date = new Date(),
-): Promise<{ id: string; status: OrderStatus }> {
-  const { requestedShipments, primaryTracking } =
+): Promise<{ id: string; status: OrderStatus; idempotentReplay: boolean }> {
+  const { requestedShipments, primaryTracking, command } =
     normalizeShipOrderInput(trackingInput);
+  let commandGuard: ShipOrderCommandGuard | undefined;
+  if (command) {
+    assertValidShipOrderCommand(command);
+    commandGuard = {
+      ...command,
+      fingerprint: shipOrderFingerprint({
+        orderId,
+        command,
+        primaryTracking,
+        requestedShipments,
+      }),
+    };
+  }
   let notificationQueued = false;
   const result = await transitionWithLog(
     orderId,
@@ -2191,282 +2787,24 @@ export async function shipOrder(
       now,
       extraData:
         primaryTracking !== null ? { trackingNo: primaryTracking } : undefined,
+      commandGuard,
       cascade: async (tx, id, pricingOrder) => {
-        const liveOutsource = await tx.outsourceOrder.findMany({
-          where: {
-            orderId: id,
-            status: {
-              in: [OutsourceStatus.SENT, OutsourceStatus.IN_PROGRESS],
-            },
-          },
-          select: { id: true },
+        const prismaTx = tx as unknown as Prisma.TransactionClient;
+        const storedShipments = await assertShipOrderReadinessInTx(prismaTx, {
+          orderId: id,
+          workOrderVersion: pricingOrder.workOrderVersion,
+          settlementType: pricingOrder.settlementType,
+          isVersionedCommand: Boolean(command),
+          hasSubmittedShipmentDetails: requestedShipments.length > 0,
         });
-        if (liveOutsource.length > 0) {
-          throw new OrderInvariantError(
-            '该工单仍有已发送或进行中的外协单，收货或取消后才能发货',
-          );
-        }
-        if (
-          pricingOrder.settlementType ===
-            OrderSettlementType.EXTERNAL_SALES &&
-          requestedShipments.length === 0
-        ) {
-          throw new OrderInvariantError(
-            '外部销售工单发货前必须逐地址确认快递费与打包耗材费',
-          );
-        }
         if (requestedShipments.length > 0) {
-          const prismaTx = tx as unknown as Prisma.TransactionClient;
-          const storedShipments = await prismaTx.orderShipment.findMany({
-            where: { orderId: id },
-            select: {
-              id: true,
-              sequence: true,
-              destinationProvince: true,
-              weightKg: true,
-              lines: { select: { quantity: true } },
-            },
-            orderBy: { sequence: 'asc' },
+          await applyShipOrderShipmentFactsInTx(prismaTx, {
+            orderId: id,
+            actorId: actor.id,
+            now,
+            storedShipments,
+            requestedShipments,
           });
-          const requestedIds = requestedShipments.map(
-            (shipment) => shipment.shipmentId,
-          );
-          if (new Set(requestedIds).size !== requestedIds.length) {
-            throw new OrderInvariantError('发货地址重复，请刷新页面后重试');
-          }
-          if (
-            storedShipments.length !== requestedShipments.length ||
-            storedShipments.some(
-              (shipment, index) =>
-                requestedIds[index] !== shipment.id,
-            )
-          ) {
-            throw new OrderInvariantError(
-              '发货地址已变化，请刷新工单后重新填写运单号',
-            );
-          }
-          const trackingByShipmentId = new Map(
-            requestedShipments.map((shipment) => [
-              shipment.shipmentId,
-              shipment.trackingNo,
-            ]),
-          );
-          const requestByShipmentId = new Map(
-            requestedShipments.map((shipment) => [
-              shipment.shipmentId,
-              shipment,
-            ]),
-          );
-          // A positive weight submitted through this administrator-owned
-          // fulfilment command replaces the stored carrier fact. Omitted/null
-          // values (including the hidden empty field used by SF collect) mean
-          // "no new fact" and preserve the trusted weight already on the
-          // shipment. Browser quotedWeightKg is intentionally never a fallback.
-          const trustedWeightByShipmentId = new Map(
-            storedShipments.map((shipment) => {
-              const submitted = requestByShipmentId.get(shipment.id)?.weightKg;
-              return [
-                shipment.id,
-                submitted ?? shipment.weightKg?.toString() ?? null,
-              ];
-            }),
-          );
-          const chargeOrder = await prismaTx.order.findUnique({
-            where: { id },
-            select: {
-              settlementType: true,
-              isSfCollect: true,
-              processingAmount: true,
-              customerCharges: {
-                select: {
-                  id: true,
-                  businessKey: true,
-                  amount: true,
-                  priceBookId: true,
-                  category: { select: { code: true } },
-                },
-              },
-            },
-          });
-          if (!chargeOrder) {
-            throw new OrderInvariantError('工单不存在');
-          }
-          if (
-            chargeOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
-          ) {
-            const standardCustomerCharges =
-              chargeOrder.customerCharges.filter((charge) =>
-                ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
-                  String(charge.category.code),
-                ),
-              );
-            const expectedChargeCount = storedShipments.length * 2;
-            if (standardCustomerCharges.length !== expectedChargeCount) {
-              throw new OrderInvariantError(
-                '外部销售工单的快递/耗材收费明细不完整，暂不能发货',
-              );
-            }
-            const priceBookIds = [
-              ...new Set(
-                standardCustomerCharges.flatMap((charge) =>
-                  charge.priceBookId ? [charge.priceBookId] : [],
-                ),
-              ),
-            ];
-            if (priceBookIds.length !== 1) {
-              throw new OrderInvariantError(
-                '快递/耗材收费未绑定唯一价目簿，暂不能发货',
-              );
-            }
-            if (
-              !chargeOrder.isSfCollect &&
-              storedShipments.some(
-                (shipment) => !trustedWeightByShipmentId.get(shipment.id),
-              )
-            ) {
-              throw new OrderInvariantError(
-                '外部销售工单发货前必须填写每个地址的承运商最终计费重量',
-              );
-            }
-            let finalizedCharges: Awaited<
-              ReturnType<typeof resolveExternalOrderChargesForFinalization>
-            >;
-            try {
-              finalizedCharges =
-                await resolveExternalOrderChargesForFinalization(
-                  prismaTx,
-                  {
-                    isSfCollect: chargeOrder.isSfCollect,
-                    shipments: storedShipments.map((shipment) => {
-                      const requested = requestByShipmentId.get(shipment.id);
-                      if (!requested) {
-                        throw new OrderInvariantError(
-                          `找不到地址 ${shipment.sequence} 的发货收费信息`,
-                        );
-                      }
-                      return {
-                        shipmentKey: String(shipment.sequence),
-                        province:
-                          requested.destinationProvince ??
-                          shipment.destinationProvince,
-                        billableWeightKg: chargeOrder.isSfCollect
-                          ? null
-                          : trustedWeightByShipmentId.get(shipment.id) ?? null,
-                        itemQuantity: shipment.lines.reduce(
-                          (sum, line) => sum + line.quantity,
-                          0,
-                        ),
-                        shippingFee: requested.shippingFee ?? null,
-                        packingMaterialFee:
-                          requested.packingMaterialFee ?? null,
-                        overrideReason:
-                          requested.customerChargeOverrideReason ?? null,
-                      };
-                    }),
-                  },
-                  priceBookIds[0]!,
-                  now,
-                );
-            } catch (error) {
-              if (error instanceof OrderCustomerChargeError) {
-                throw new OrderInvariantError(error.message);
-              }
-              throw error;
-            }
-
-            const existingByBusinessKey = new Map(
-              standardCustomerCharges.map((charge) => [
-                String(charge.businessKey),
-                charge,
-              ]),
-            );
-            for (const charge of finalizedCharges.charges) {
-              const existing = existingByBusinessKey.get(charge.businessKey);
-              if (!existing) {
-                throw new OrderInvariantError(
-                  `找不到收费明细 ${charge.businessKey}，暂不能发货`,
-                );
-              }
-              await prismaTx.orderCustomerCharge.update({
-                where: { id: existing.id },
-                data: {
-                  categoryId: charge.categoryId,
-                  sourceRuleId: charge.sourceRuleId,
-                  status:
-                    charge.status === OrderCustomerChargeStatus.WAIVED
-                      ? OrderCustomerChargeStatus.WAIVED
-                      : OrderCustomerChargeStatus.FINAL,
-                  description: charge.description,
-                  quantity: charge.quantity,
-                  unit: charge.unit,
-                  suggestedAmount: charge.suggestedAmount,
-                  amount: charge.amount,
-                  pricingSnapshot: charge.pricingSnapshot,
-                  overrideReason: charge.overrideReason,
-                  finalizedById: actor.id,
-                  finalizedAt: now,
-                },
-              });
-            }
-            const receivableTotal = new Decimal(
-              chargeOrder.processingAmount,
-            )
-              .plus(finalizedCharges.totalAmount)
-              .plus(
-                chargeOrder.customerCharges
-                  .filter(
-                    (charge) =>
-                      !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
-                        String(charge.category.code),
-                      ),
-                  )
-                  .reduce(
-                    (sum, charge) =>
-                      charge.amount === null ? sum : sum.plus(charge.amount),
-                    new Decimal(0),
-                  ),
-              )
-              .toFixed(2);
-            assertStorableOrderTotal(receivableTotal);
-            await prismaTx.order.update({
-              where: { id },
-              // Shipment finalization replaces provisional logistics with
-              // carrier/administrator-confirmed facts. It is still a pricing
-              // confirmation, not the financial settlement event: the later
-              // explicit SHIPPED -> SETTLED command is the sole v2 writer of
-              // settledFee/settledAt.
-              data: {
-                totalAmount: receivableTotal,
-                confirmedFee: receivableTotal,
-              },
-            });
-          }
-          for (const shipment of storedShipments) {
-            const requested = requestByShipmentId.get(shipment.id);
-            const submittedWeight = requested?.weightKg;
-            await prismaTx.orderShipment.update({
-              where: { id: shipment.id },
-              data: {
-                trackingNo: trackingByShipmentId.get(shipment.id) ?? null,
-                // null/undefined is absence, not an instruction to erase a
-                // carrier-confirmed weight. Clearing requires a dedicated,
-                // audited fulfilment correction rather than the ship action.
-                ...(submittedWeight != null
-                  ? { weightKg: submittedWeight }
-                  : {}),
-                ...(requested?.destinationProvince !== undefined
-                  ? {
-                      destinationProvince:
-                        requested.destinationProvince ??
-                        shipment.destinationProvince,
-                    }
-                  : {}),
-                status: ShipmentStatus.SHIPPED,
-                shippedAt: now,
-              },
-              select: { id: true },
-            });
-          }
         }
       },
       afterTransition: async (tx, id, pricingOrder) => {
@@ -2504,6 +2842,10 @@ export async function shipOrder(
     },
   );
 
+  if (result.idempotentReplay) {
+    return { ...result, idempotentReplay: true };
+  }
+
   // Notification wire ─ ORDER_SHIPPED（tx 已 commit；生产入持久化队列）。
   // **关键 null 映射**：events.ts:ORDER_SHIPPED.trackingNo 必填 string，
   // 如果传入 null/undefined，renderTemplate 会把 `{trackingNo}` 留成
@@ -2525,7 +2867,7 @@ export async function shipOrder(
     );
   }
 
-  return result;
+  return { ...result, idempotentReplay: false };
 }
 
 // Compatibility export only. The old SHIPPED → FINISHED writer bypassed
@@ -2979,6 +3321,118 @@ async function recordSfCollectOrderLog(
   });
 }
 
+// The caller must hold the order cascade lock and authorize corrections before
+// reading this context; all reads remain on that caller's transaction.
+async function readSfCollectChargeContextInTx(
+  prismaTx: Prisma.TransactionClient,
+  orderId: string,
+  orderStatus: OrderStatus,
+  isSfCollect: boolean,
+  trustedCorrections: readonly SfCollectChargeCorrection[],
+) {
+  const chargeContext = await prismaTx.order.findUnique({
+    where: { id: orderId },
+    select: {
+      items: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          quantity: true,
+          paperWeightGsm: true,
+          paperType: true,
+          productStructure: true,
+        },
+      },
+      shipments: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          sequence: true,
+          status: true,
+          destinationProvince: true,
+          weightKg: true,
+          lines: { select: { orderItemId: true, quantity: true } },
+        },
+      },
+      customerCharges: {
+        select: {
+          id: true,
+          businessKey: true,
+          amount: true,
+          overrideReason: true,
+          priceBookId: true,
+          shipmentId: true,
+          category: { select: { code: true } },
+        },
+      },
+    },
+  });
+  if (!chargeContext) throw new OrderInvariantError('工单不存在');
+  const standardCharges = chargeContext.customerCharges.filter((charge) =>
+    ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
+      String(charge.category.code),
+    ),
+  );
+  if (standardCharges.length !== chargeContext.shipments.length * 2) {
+    throw new OrderInvariantError(
+      '快递/耗材收费明细不完整，无法切换顺丰到付标识',
+    );
+  }
+
+  const priceBookIds = [
+    ...new Set(
+      standardCharges.flatMap((charge) =>
+        charge.priceBookId ? [charge.priceBookId] : [],
+      ),
+    ),
+  ];
+  if (priceBookIds.length !== 1) {
+    throw new OrderInvariantError(
+      '快递/耗材收费未绑定唯一价目簿，无法切换顺丰到付标识',
+    );
+  }
+  const chargeByShipmentAndCategory = new Map(
+    standardCharges.map((charge) => [
+      `${charge.shipmentId}:${String(charge.category.code)}`,
+      charge,
+    ]),
+  );
+  const correctionByShipmentId = new Map(
+    trustedCorrections.map((correction) => [
+      correction.shipmentId,
+      correction,
+    ]),
+  );
+  if (correctionByShipmentId.size !== trustedCorrections.length) {
+    throw new OrderInvariantError('顺丰到付更正包含重复的发货地址');
+  }
+  if (
+    trustedCorrections.some(
+      (correction) =>
+        !chargeContext.shipments.some(
+          (shipment) => shipment.id === correction.shipmentId,
+        ),
+    )
+  ) {
+    throw new OrderInvariantError('顺丰到付更正包含不属于该工单的发货地址');
+  }
+  if (
+    !isSfCollect &&
+    orderStatus === OrderStatus.SHIPPED &&
+    (trustedCorrections.length !== chargeContext.shipments.length ||
+      chargeContext.shipments.some(
+        (shipment) => !correctionByShipmentId.has(shipment.id),
+      ))
+  ) {
+    throw new OrderInvariantError(
+      '已发货工单取消顺丰到付时，必须补齐每个地址的计费信息',
+    );
+  }
+
+  return { chargeContext, standardCharges, priceBookIds,
+    chargeByShipmentAndCategory, correctionByShipmentId };
+}
+
 // 顺丰到付是可后补的履约标识。外部销售工单切换时必须同步免收/恢复
 // 对客快递费并重算 totalAmount；打包耗材费始终保留。独立事务仍保留
 // 权限、所有权、串行化和完整修改日志。
@@ -2987,6 +3441,7 @@ export async function setOrderSfCollect(
   isSfCollect: boolean,
   actor: { id: string; role: Role },
   corrections: readonly SfCollectChargeCorrection[] = [],
+  fulfillmentGuard?: FulfillmentPricingMutationGuard,
 ): Promise<UpdateOrderResult> {
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as EditTxClient;
@@ -3037,6 +3492,26 @@ export async function setOrderSfCollect(
         '外部销售工单发货后的顺丰到付更正只能由管理员处理',
       );
     }
+    if (
+      order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+      isFulfillmentPricingStatus(order.status)
+    ) {
+      if (!fulfillmentGuard) {
+        throw new OrderInvariantError('履约更正缺少订单版本，请刷新后重新提交');
+      }
+      try {
+        return await recordFulfillmentSfCollectChangeInTx(
+          tx,
+          { orderId, isSfCollect, ...fulfillmentGuard },
+          actor,
+        );
+      } catch (error) {
+        if (error instanceof FulfillmentPricingError) {
+          throw new OrderInvariantError(error.message);
+        }
+        throw error;
+      }
+    }
     if (order.isSfCollect === isSfCollect) {
       return {
         id: order.id,
@@ -3061,104 +3536,11 @@ export async function setOrderSfCollect(
     if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
       const prismaTx = tx as unknown as Prisma.TransactionClient;
       const chargeChangedAt = changedAt;
-      const chargeContext = await prismaTx.order.findUnique({
-        where: { id: orderId },
-        select: {
-          items: {
-            orderBy: { sequence: 'asc' },
-            select: {
-              id: true,
-              quantity: true,
-              paperWeightGsm: true,
-              paperType: true,
-              productStructure: true,
-            },
-          },
-          shipments: {
-            orderBy: { sequence: 'asc' },
-            select: {
-              id: true,
-              sequence: true,
-              status: true,
-              destinationProvince: true,
-              weightKg: true,
-              lines: { select: { orderItemId: true, quantity: true } },
-            },
-          },
-          customerCharges: {
-            select: {
-              id: true,
-              businessKey: true,
-              amount: true,
-              overrideReason: true,
-              priceBookId: true,
-              shipmentId: true,
-              category: { select: { code: true } },
-            },
-          },
-        },
-      });
-      if (!chargeContext) throw new OrderInvariantError('工单不存在');
-      const standardCharges = chargeContext.customerCharges.filter((charge) =>
-        ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
-          String(charge.category.code),
-        ),
-      );
-      if (standardCharges.length !== chargeContext.shipments.length * 2) {
-        throw new OrderInvariantError(
-          '快递/耗材收费明细不完整，无法切换顺丰到付标识',
+      const { chargeContext, standardCharges, priceBookIds,
+        chargeByShipmentAndCategory, correctionByShipmentId } =
+        await readSfCollectChargeContextInTx(
+          prismaTx, orderId, order.status, isSfCollect, trustedCorrections,
         );
-      }
-
-      const priceBookIds = [
-        ...new Set(
-          standardCharges.flatMap((charge) =>
-            charge.priceBookId ? [charge.priceBookId] : [],
-          ),
-        ),
-      ];
-      if (priceBookIds.length !== 1) {
-        throw new OrderInvariantError(
-          '快递/耗材收费未绑定唯一价目簿，无法切换顺丰到付标识',
-        );
-      }
-      const chargeByShipmentAndCategory = new Map(
-        standardCharges.map((charge) => [
-          `${charge.shipmentId}:${String(charge.category.code)}`,
-          charge,
-        ]),
-      );
-      const correctionByShipmentId = new Map(
-        trustedCorrections.map((correction) => [
-          correction.shipmentId,
-          correction,
-        ]),
-      );
-      if (correctionByShipmentId.size !== trustedCorrections.length) {
-        throw new OrderInvariantError('顺丰到付更正包含重复的发货地址');
-      }
-      if (
-        trustedCorrections.some(
-          (correction) =>
-            !chargeContext.shipments.some(
-              (shipment) => shipment.id === correction.shipmentId,
-            ),
-        )
-      ) {
-        throw new OrderInvariantError('顺丰到付更正包含不属于该工单的发货地址');
-      }
-      if (
-        !isSfCollect &&
-        order.status === OrderStatus.SHIPPED &&
-        (trustedCorrections.length !== chargeContext.shipments.length ||
-          chargeContext.shipments.some(
-            (shipment) => !correctionByShipmentId.has(shipment.id),
-          ))
-      ) {
-        throw new OrderInvariantError(
-          '已发货工单取消顺丰到付时，必须补齐每个地址的计费信息',
-        );
-      }
 
       let repriced: Awaited<
         ReturnType<typeof resolveExternalOrderChargesForFinalization>

@@ -15,6 +15,7 @@ const {
   getProductionTrendMock,
   getSalesRankingMock,
   getCategoryDistributionMock,
+  countRecentFailuresMock,
 } = vi.hoisted(() => ({
   requirePermissionMock: vi.fn(),
   getTodayOrderStatsMock: vi.fn(),
@@ -27,6 +28,7 @@ const {
   getProductionTrendMock: vi.fn(),
   getSalesRankingMock: vi.fn(),
   getCategoryDistributionMock: vi.fn(),
+  countRecentFailuresMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -53,8 +55,13 @@ vi.mock('@/lib/dashboard/owner-charts', () => ({
   getCategoryDistribution: getCategoryDistributionMock,
 }));
 
+vi.mock('@/lib/notification/admin', () => ({
+  countRecentFailures: countRecentFailuresMock,
+}));
+
 import OwnerDashboardPage, {
   CategoryDistributionChartSection,
+  DashboardQueueSection,
   ProductionTrendChartSection,
   SalesRankingChartSection,
 } from '@/app/(admin)/owner/page';
@@ -94,6 +101,7 @@ beforeEach(() => {
   getProductionTrendMock.mockReset();
   getSalesRankingMock.mockReset();
   getCategoryDistributionMock.mockReset();
+  countRecentFailuresMock.mockReset();
 
   requirePermissionMock.mockResolvedValue({
     id: 'admin-1',
@@ -111,6 +119,7 @@ beforeEach(() => {
     getDueOrdersMock,
     getRecentOverReportsMock,
     getEndingPeriodsMock,
+    countRecentFailuresMock,
   ]) {
     read.mockReturnValue(neverSettles());
   }
@@ -153,6 +162,7 @@ describe('owner dashboard fault isolation', () => {
       getDueOrdersMock,
       getRecentOverReportsMock,
       getEndingPeriodsMock,
+      countRecentFailuresMock,
     ]) {
       expect(read).toHaveBeenCalledOnce();
       expect(requirePermissionMock.mock.invocationCallOrder[0]).toBeLessThan(
@@ -172,6 +182,7 @@ describe('owner dashboard fault isolation', () => {
       'getDueOrders()',
       'getRecentOverReports()',
       'getEndingPeriods()',
+      'countRecentFailures(24)',
       'getProductionTrend()',
       'getSalesRanking()',
       'getCategoryDistribution()',
@@ -209,6 +220,79 @@ describe('owner dashboard fault isolation', () => {
 
     expect(page).not.toMatch(/const \[\s*today,\s*monthly,/);
     expect(page).not.toMatch(/\bcatch\s*\(/);
+  });
+
+  it('surfaces recent notification failures as an actionable queue entry', async () => {
+    const result = await DashboardQueueSection({
+      todayPromise: Promise.resolve({
+        date: '2026-09-02',
+        submittedToday: 0,
+        urgentSubmittedToday: 0,
+        completedToday: 0,
+        completedYesterday: 0,
+        shippedToday: 0,
+      }),
+      pendingShipmentsPromise: Promise.resolve({ rows: [], hasMore: false }),
+      overdueOutsourcingPromise: Promise.resolve([]),
+      dueOrdersPromise: Promise.resolve({
+        rows: [],
+        total: 0,
+        promisedThroughYmd: '2026-09-05',
+      }),
+      overReportsPromise: Promise.resolve({
+        rows: [],
+        total: 0,
+        sinceYmd: '2026-08-27',
+      }),
+      endingPeriodsPromise: Promise.resolve([]),
+      recentNotificationFailuresPromise: Promise.resolve(3),
+    });
+
+    expect(isValidElement(result)).toBe(true);
+    if (!isValidElement(result)) return;
+
+    const items = (result.props as { items: Array<Record<string, unknown>> })
+      .items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: 'notification-failures',
+      kind: '推送异常',
+      countLabel: '3',
+      dueUrgent: true,
+      href: '/owner/notifications',
+      actionLabel: '去处理',
+    });
+  });
+
+  it('does not add a notification queue entry when the recent count is zero', async () => {
+    const result = await DashboardQueueSection({
+      todayPromise: Promise.resolve({
+        date: '2026-09-02',
+        submittedToday: 0,
+        urgentSubmittedToday: 0,
+        completedToday: 0,
+        completedYesterday: 0,
+        shippedToday: 0,
+      }),
+      pendingShipmentsPromise: Promise.resolve({ rows: [], hasMore: false }),
+      overdueOutsourcingPromise: Promise.resolve([]),
+      dueOrdersPromise: Promise.resolve({
+        rows: [],
+        total: 0,
+        promisedThroughYmd: '2026-09-05',
+      }),
+      overReportsPromise: Promise.resolve({
+        rows: [],
+        total: 0,
+        sinceYmd: '2026-08-27',
+      }),
+      endingPeriodsPromise: Promise.resolve([]),
+      recentNotificationFailuresPromise: Promise.resolve(0),
+    });
+
+    expect(isValidElement(result)).toBe(true);
+    if (!isValidElement(result)) return;
+    expect((result.props as { items: unknown[] }).items).toEqual([]);
   });
 
   it('lets healthy charts render when a sibling chart read fails', async () => {

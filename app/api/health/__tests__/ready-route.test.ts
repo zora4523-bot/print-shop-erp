@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { dbMock, getBackgroundJobHealthMock } = vi.hoisted(() => ({
+const { dbMock, getBackgroundJobHealthMock, botDigest } = vi.hoisted(() => ({
   dbMock: { $queryRaw: vi.fn() },
   getBackgroundJobHealthMock: vi.fn(),
+  botDigest: 'a'.repeat(64),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
@@ -14,8 +15,14 @@ vi.mock('@/lib/background-jobs/health', async (importOriginal) => {
 vi.mock('@/lib/background-jobs/mode', () => ({
   backgroundJobsMode: () => 'durable',
 }));
+vi.mock('@/lib/notification/smart-bot-identity', () => ({
+  configuredSmartBotIdDigest: () => botDigest,
+}));
 
-import { BackgroundJobQueue } from '@/generated/prisma/enums';
+import {
+  BackgroundJobQueue,
+  SmartBotConnectionStatus,
+} from '@/generated/prisma/enums';
 import type { BackgroundJobHealth } from '@/lib/background-jobs/health';
 import { GET } from '../ready/route';
 
@@ -26,8 +33,28 @@ function fixture(): BackgroundJobHealth {
   return {
     observedAt: now,
     activeWorkers: [
-      { queue: BackgroundJobQueue.LIGHT, version: VERSION, lastSeenAt: now },
-      { queue: BackgroundJobQueue.HEAVY, version: VERSION, lastSeenAt: now },
+      {
+        queue: BackgroundJobQueue.LIGHT,
+        version: VERSION,
+        smartBotStatus: SmartBotConnectionStatus.CONNECTED,
+        smartBotBotDigest: botDigest,
+        lastSeenAt: now,
+      },
+      {
+        queue: BackgroundJobQueue.HEAVY,
+        version: VERSION,
+        smartBotStatus: null,
+        smartBotBotDigest: null,
+        lastSeenAt: now,
+      },
+    ],
+    activeSmartBotChannels: [
+      {
+        smartBotBotDigest: botDigest,
+        smartBotTargetId: 'group-1',
+        smartBotChatType: 'GROUP',
+        smartBotBoundAt: now,
+      },
     ],
     pending: { LIGHT: 0, HEAVY: 0 },
     oldestPendingAt: { LIGHT: null, HEAVY: null },
@@ -82,5 +109,38 @@ describe('GET /api/health/ready', () => {
     const body = await res.json();
     expect(body.status).toBe('error');
     expect(body.warnings).toContain('heavy-worker-missing');
+  });
+
+  it('智能机器人普通断线只降级并暴露状态，不让 ready 返回 503', async () => {
+    const health = fixture();
+    health.activeWorkers[0]!.smartBotStatus =
+      SmartBotConnectionStatus.DISCONNECTED;
+    getBackgroundJobHealthMock.mockResolvedValue(health);
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      status: 'degraded',
+      smartBot: { status: 'DISCONNECTED' },
+    });
+    expect(body.warnings).toContain('smart-bot-disconnected');
+  });
+
+  it('智能机器人认证失败仍不改变 Web ready 可用性', async () => {
+    const health = fixture();
+    health.activeWorkers[0]!.smartBotStatus =
+      SmartBotConnectionStatus.AUTH_FAILED;
+    getBackgroundJobHealthMock.mockResolvedValue(health);
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.smartBot).toMatchObject({
+      status: 'AUTH_FAILED',
+      required: true,
+      operational: false,
+    });
+    expect(body.warnings).toContain('smart-bot-auth-failed');
   });
 });

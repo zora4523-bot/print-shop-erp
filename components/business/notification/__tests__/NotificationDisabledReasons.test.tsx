@@ -26,7 +26,7 @@ describe('notification disabled actions', () => {
 
     expect(html).toContain('该群已停用，请先启用');
     expect(html).toContain('/owner/notifications/channels/channel-1');
-    expect(html).toContain('去启用群');
+    expect(html).toContain('去启用通知目标');
     expect(html).not.toContain('title="该群已停用');
   });
 
@@ -64,5 +64,7 @@ describe('notification disabled actions', () => {
     }
     expect(sources[0]).toContain('ConfirmActionDialog');
     expect(sources[1]).toContain('ConfirmActionDialog');
+    expect(sources[2]).toContain("result?.status === 'queued'");
+    expect(sources[2]).toContain('测试消息已排队');
   });
 });

@@ -335,6 +335,113 @@ describe('calculateCreateOrderQuote · 彩印 PER_ORDER 黄金用例', () => {
     );
   });
 
+  it.each([
+    [
+      '配置外说明',
+      () =>
+        printItem({
+          frontColors: ['哑金'],
+          printFoilMode: 'PARTIAL',
+          manualPricingReason: '异形制作',
+        }),
+      'CONFIGURATION_OUTSIDE_NOTE',
+    ],
+    [
+      '非默认覆膜',
+      () =>
+        printItem({
+          frontColors: ['哑金'],
+          printFoilMode: 'PARTIAL',
+          printFinishing: 'TACTILE',
+        }),
+      'PRINT_FINISHING_PRICE_NOT_FOUND',
+    ],
+    [
+      '超过自动报价数量',
+      () =>
+        printItem({
+          frontColors: ['哑金'],
+          printFoilMode: 'PARTIAL',
+          quantity: 20_001,
+        }),
+      'PRINT_QUANTITY_OVER_LIMIT',
+    ],
+    [
+      '彩印基础价缺档',
+      () =>
+        printItem({
+          frontColors: ['哑金'],
+          printFoilMode: 'PARTIAL',
+          paperType: '未配置纸张',
+        }),
+      'PRINT_PRICE_NOT_FOUND',
+    ],
+    [
+      '自定义纸张',
+      () => {
+        const item = printItem({
+          frontColors: ['哑金'],
+          printFoilMode: 'PARTIAL',
+        });
+        return {
+          ...item,
+          configuration: { ...item.configuration, paper: 'CUSTOM' as const },
+        };
+      },
+      'CUSTOM_PAPER',
+    ],
+  ] as const)(
+    '彩印烫金因%s转人工时统一声明整款价含制版费',
+    (_label, createItem, triggeringReason) => {
+      const result = quoteSingle(createItem());
+      const policyReasons = result.manualReasons.filter(
+        (reason) =>
+          reason.code === 'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+      );
+
+      expect(result.items[0]).toMatchObject({
+        status: 'MANUAL_PRICING_REQUIRED',
+        amount: null,
+      });
+      expect(result.manualReasons.map((reason) => reason.code)).toContain(
+        triggeringReason,
+      );
+      expect(policyReasons).toHaveLength(1);
+      expect(policyReasons[0]).toMatchObject({
+        code: 'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+        message:
+          '彩印烫金款的人工整款价必须包含制烫金版费，不再另收独立制版费',
+      });
+      expect(result.order.lines.map((line) => line.code)).not.toContain(
+        'PLATE_FEE',
+      );
+    },
+  );
+
+  it.each([
+    ['常规报价', {}],
+    ['配置外人工报价', { manualPricingReason: '异形制作' }],
+  ] as const)(
+    '%s不能放过有烫金模式但没有颜色的非法事实',
+    (_label, overrides) => {
+      const result = quoteSingle(
+        printItem({
+          ...overrides,
+          frontColors: [],
+          backColors: [],
+          printFoilMode: 'PARTIAL',
+        }),
+      );
+
+      expect(result.items[0]).toMatchObject({
+        status: 'INVALID_INPUT',
+        amount: null,
+        manualReasons: [],
+        errors: ['彩印叠加烫金时必须选择至少一种烫金颜色'],
+      });
+    },
+  );
+
 });
 
 describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () => {
@@ -587,7 +694,7 @@ describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () =
     );
   });
 
-  it('分项金额各自可保存但款式合计越界时失败关闭', () => {
+  it('彩印烫金含版费套餐与基础价合计越界时失败关闭', () => {
     const target = CREATE_ORDER_GOLDEN_SNAPSHOT.print.foilPerOrderPrices.find(
       (row) =>
         row.mode === 'PARTIAL' &&
@@ -624,9 +731,9 @@ describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () =
       amount: null,
       knownAmount: '0.00',
     });
-    expect(result.items[0]?.errors).toContain(
+    expect(result.items[0]?.errors).toEqual([
       '彩印加工费合计超过可保存上限',
-    );
+    ]);
   });
 
   it('多款金额各自可保存但整单已知合计越界时不可提交', () => {
@@ -683,21 +790,69 @@ describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () =
     });
   });
 
-  it('彩印单色烫金是 PER_ORDER 分项，不乘数量', () => {
+  it('彩印单色烫金命中明确档位时按含版费原子套餐计价，不再生成独立制版费', () => {
     const result = quoteSingle(
       printItem({
         frontColors: ['哑金'],
         printFoilMode: 'PARTIAL',
       }),
     );
-    expect(result.items[0]?.processingAmount).toBe('510.00');
+    expect(result.items[0]).toMatchObject({
+      status: 'QUOTED',
+      processingAmount: '510.00',
+      amount: '510.00',
+      knownAmount: '510.00',
+    });
     expect(itemLine(result, 'PRINT_FOIL_PER_ORDER')).toMatchObject({
       amount: '200.00',
-      basis: { pricingModel: 'PER_ORDER', passCount: 1, tierQuantity: 1_000 },
+      includedInKnownTotal: true,
+      basis: {
+        pricingPolicy: 'ATOMIC_BUNDLE_INCLUDES_PLATE',
+        plateTreatment: 'INCLUDED_IN_ATOMIC_BUNDLE',
+        passCount: 1,
+        tierQuantity: 1_000,
+      },
     });
+    expect(result.manualReasons).toEqual([]);
+    expect(result.order.lines.map((line) => line.code)).not.toContain(
+      'PLATE_FEE',
+    );
+    expect(result.pendingReasons.map((reason) => reason.code)).not.toContain(
+      'PLATE_AMOUNT_PENDING',
+    );
   });
 
-  it('彩印烫金附加价 0 元可报价，null 必须转人工', () => {
+  it('彩印原子套餐与普通烫金混合时，只为普通烫金生成一条独立制版费', () => {
+    const printBundle = printItem({
+      itemKey: 'print-bundle',
+      fig: 1,
+      frontColors: ['哑金'],
+      printFoilMode: 'PARTIAL',
+    });
+    const partial = createGoldenOrderItem({
+      itemKey: 'partial-foil',
+      fig: 2,
+    });
+
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([printBundle, partial]),
+      CREATE_ORDER_GOLDEN_SNAPSHOT,
+    );
+
+    expect(
+      result.items
+        .flatMap((item) => item.lines)
+        .filter((line) => line.code === 'PRINT_FOIL_PER_ORDER'),
+    ).toHaveLength(1);
+    expect(
+      result.order.lines.filter((line) => line.code === 'PLATE_FEE'),
+    ).toHaveLength(1);
+    expect(result.pendingReasons).toContainEqual(
+      expect.objectContaining({ code: 'PLATE_AMOUNT_PENDING' }),
+    );
+  });
+
+  it('彩印烫金套餐明确 0 元可报价，空值或缺少 policy 则转人工且不伪造制版费', () => {
     const target = CREATE_ORDER_GOLDEN_SNAPSHOT.print.foilPerOrderPrices.find(
       (row) =>
         row.mode === 'PARTIAL' &&
@@ -719,11 +874,32 @@ describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () =
     ]);
     const zero = calculateCreateOrderQuote(input, snapshotFor('0'));
     const blank = calculateCreateOrderQuote(input, snapshotFor(null));
-    expect(zero.items[0]?.status).toBe('QUOTED');
+    const legacyWithoutPolicy = calculateCreateOrderQuote(input, {
+      ...snapshotFor('200.00'),
+      print: {
+        ...snapshotFor('200.00').print,
+        foilPricingPolicy: undefined,
+      },
+    } as unknown as CreateOrderPriceSnapshot);
+    expect(zero.items[0]).toMatchObject({
+      status: 'QUOTED',
+      amount: '310.00',
+    });
     expect(itemLine(zero, 'PRINT_FOIL_PER_ORDER').amount).toBe('0.00');
     expect(blank.items[0]?.status).toBe('MANUAL_PRICING_REQUIRED');
-    expect(blank.manualReasons.map((reason) => reason.code)).toContain(
-      'PRINT_FOIL_PRICE_NOT_FOUND',
+    expect(legacyWithoutPolicy.items[0]?.status).toBe(
+      'MANUAL_PRICING_REQUIRED',
+    );
+    for (const quote of [zero, blank, legacyWithoutPolicy]) {
+      expect(quote.order.lines.map((line) => line.code)).not.toContain(
+        'PLATE_FEE',
+      );
+    }
+    expect(blank.manualReasons).toContainEqual(
+      expect.objectContaining({ code: 'PRINT_FOIL_PRICE_NOT_FOUND' }),
+    );
+    expect(legacyWithoutPolicy.manualReasons).toContainEqual(
+      expect.objectContaining({ code: 'PRINT_FOIL_PRICE_NOT_FOUND' }),
     );
   });
 
@@ -928,6 +1104,58 @@ describe('calculateCreateOrderQuote · 入袋、纸箱与快递', () => {
     expect(result.pendingReasons.map((reason) => reason.code)).toContain(
       'PLATE_AMOUNT_PENDING',
     );
+  });
+
+  it('纯彩印无烫金事实时不生成制版费，也不因此阻断完整总价', () => {
+    const result = quoteSingle(printItem());
+
+    expect(result.items[0]?.status).toBe('QUOTED');
+    expect(result.order.lines.some((line) => line.code === 'PLATE_FEE')).toBe(
+      false,
+    );
+    expect(result.pendingLineCodes).not.toContain('PLATE_FEE');
+    expect(result.pendingReasons.map((reason) => reason.code)).not.toContain(
+      'PLATE_AMOUNT_PENDING',
+    );
+    expect(result.status).toBe('QUOTED');
+    expect(result.total).toBe(result.knownTotal);
+  });
+
+  it('即使历史快照携带制版费规则金额也始终转管理员人工核价', () => {
+    const legacySnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      plate: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.plate,
+        configuredRule: {
+          code: 'LEGACY_PLATE_FEE_PER_ORDER',
+          amount: '999.99',
+        },
+      },
+    } as unknown as CreateOrderPriceSnapshot;
+    const snapshotBeforeQuote = JSON.stringify(legacySnapshot);
+    const input = createGoldenOrderInput([createGoldenOrderItem()]);
+    const baseline = calculateCreateOrderQuote(
+      input,
+      CREATE_ORDER_GOLDEN_SNAPSHOT,
+    );
+    const result = calculateCreateOrderQuote(input, legacySnapshot);
+
+    expect(orderLine(result, 'PLATE_FEE')).toMatchObject({
+      status: 'PENDING_AMOUNT',
+      amount: null,
+      includedInKnownTotal: false,
+      basis: {
+        displayAmount: '待定',
+        granularity: 'PER_ORDER',
+        pricingPolicy: 'ADMIN_MANUAL_ONLY',
+      },
+    });
+    expect(result.knownTotal).toBe(baseline.knownTotal);
+    expect(result.pendingReasons).toContainEqual({
+      code: 'PLATE_AMOUNT_PENDING',
+      message: '制烫金版费金额待管理员人工核价',
+    });
+    expect(JSON.stringify(legacySnapshot)).toBe(snapshotBeforeQuote);
   });
 
   it('多款整单数量超出安全整数时直接拒绝', () => {

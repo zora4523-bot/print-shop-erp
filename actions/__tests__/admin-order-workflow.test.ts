@@ -4,6 +4,7 @@ import { Role } from '@/generated/prisma/enums';
 const mocks = vi.hoisted(() => ({
   requirePermission: vi.fn(),
   revalidatePath: vi.fn(),
+  confirm: vi.fn(),
   settle: vi.fn(),
   batch: vi.fn(),
 }));
@@ -16,7 +17,7 @@ vi.mock('@/lib/order/admin-workflow', () => ({
   AdminOrderWorkflowError: class AdminOrderWorkflowError extends Error {
     code = 'INVALID_INPUT';
   },
-  confirmFactoryOrder: vi.fn(),
+  confirmFactoryOrder: mocks.confirm,
   holdFactoryOrder: vi.fn(),
   rejectFactoryOrder: vi.fn(),
   releaseFactoryOrder: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock('@/lib/production/operation-materialization-service', () => ({
 }));
 
 import {
+  confirmFactoryOrderAction,
   runAdminOrderBatchAction,
   settleFactoryOrderAction,
 } from '../admin-order-workflow';
@@ -57,14 +59,62 @@ const actor = { id: 'admin-1', role: Role.ADMIN };
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requirePermission.mockResolvedValue(actor);
+  mocks.confirm.mockResolvedValue({ orderId: 'order-1' });
   mocks.settle.mockResolvedValue({ orderId: 'order-1' });
   mocks.batch.mockResolvedValue({
     command: 'SETTLE',
+    successCount: 1,
+    skippedCount: 0,
+    failedCount: 0,
+    notAttemptedCount: 0,
     items: [{ orderId: 'order-1', status: 'success', code: 'OK' }],
   });
 });
 
 describe('admin order workflow cache invalidation', () => {
+  it('工厂确认要求合法的当前价预览凭证并原样传入领域命令', async () => {
+    const expectedQuoteToken = `create-order-quote-v2:${'a'.repeat(64)}`;
+
+    await expect(
+      confirmFactoryOrderAction({
+        orderId: 'order-1',
+        expectedRevision: 4,
+        expectedWorkOrderVersion: 2,
+        expectedQuoteToken,
+      }),
+    ).resolves.toEqual({ status: 'success', orderId: 'order-1' });
+
+    expect(mocks.confirm).toHaveBeenCalledWith(
+      {
+        orderId: 'order-1',
+        expectedRevision: 4,
+        expectedWorkOrderVersion: 2,
+        expectedQuoteToken,
+      },
+      actor,
+    );
+  });
+
+  it('工厂确认缺少或伪造当前价凭证时不进入领域写流程', async () => {
+    for (const expectedQuoteToken of [
+      undefined,
+      'create-order-quote-v2:forged',
+    ]) {
+      vi.clearAllMocks();
+      mocks.requirePermission.mockResolvedValue(actor);
+
+      await expect(
+        confirmFactoryOrderAction({
+          orderId: 'order-1',
+          expectedRevision: 4,
+          expectedWorkOrderVersion: 2,
+          expectedQuoteToken,
+        }),
+      ).resolves.toMatchObject({ status: 'invalid' });
+      expect(mocks.confirm).not.toHaveBeenCalled();
+    }
+  });
+
   it('revalidates the canonical agent bill route after one settlement', async () => {
     await expect(
       settleFactoryOrderAction({
@@ -93,6 +143,72 @@ describe('admin order workflow cache invalidation', () => {
       }),
     ).resolves.toMatchObject({ status: 'success' });
 
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/owner/agent-bills');
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/owner/bills');
+  });
+
+  it('does not convert an unknown batch failure into a successful response', async () => {
+    const databaseFailure = new Error('database unavailable');
+    mocks.batch.mockRejectedValueOnce(databaseFailure);
+
+    await expect(
+      runAdminOrderBatchAction({
+        requestId: 'batch-settle-unknown-error',
+        command: 'SETTLE',
+        items: [
+          {
+            orderId: 'order-1',
+            expectedRevision: 4,
+            expectedWorkOrderVersion: 2,
+          },
+        ],
+      }),
+    ).rejects.toBe(databaseFailure);
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('returns structured partial progress and revalidates every affected surface', async () => {
+    mocks.batch.mockResolvedValueOnce({
+      command: 'SETTLE',
+      successCount: 1,
+      skippedCount: 0,
+      failedCount: 1,
+      notAttemptedCount: 1,
+      items: [
+        { orderId: 'order-1', status: 'success', code: 'OK' },
+        {
+          orderId: 'order-2',
+          status: 'failed',
+          code: 'UNEXPECTED_ERROR',
+          message: '系统异常，该工单的处理结果未知；请刷新后核对',
+        },
+        {
+          orderId: 'order-3',
+          status: 'not_attempted',
+          code: 'ABORTED_AFTER_FAILURE',
+          message: '前序工单发生系统异常，本次未继续处理',
+        },
+      ],
+    });
+
+    await expect(
+      runAdminOrderBatchAction({
+        requestId: 'batch-settle-partial-error',
+        command: 'SETTLE',
+        items: [
+          {
+            orderId: 'order-1',
+            expectedRevision: 4,
+            expectedWorkOrderVersion: 2,
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      status: 'partial_failure',
+      result: { successCount: 1, failedCount: 1, notAttemptedCount: 1 },
+    });
+
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/orders');
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/owner/agent-bills');
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/owner/bills');
   });

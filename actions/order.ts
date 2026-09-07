@@ -80,6 +80,7 @@ import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { FULL_EDITABLE_FIELDS } from '@/lib/order/editable-fields';
 import { settlementTypeForOrderCreator } from '@/lib/order/settlement';
 import { parseExternalCreateOrderCommand } from '@/lib/order/external-create-order-command';
+import { fulfillmentPricingGuardSchema } from '@/lib/order/fulfillment-pricing-input';
 import { OrderSettlementType } from '@/generated/prisma/enums';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
@@ -319,6 +320,11 @@ export async function shipOrderAction(
           },
         ];
   const parsed = shipOrderSchema.safeParse({
+    expectedRevision: formData.get('expectedRevision'),
+    expectedEditVersion: formData.get('expectedEditVersion'),
+    expectedWorkOrderVersion: formData.get('expectedWorkOrderVersion'),
+    expectedPriceRevision: formData.get('expectedPriceRevision'),
+    idempotencyKey: formData.get('idempotencyKey'),
     trackingNo: formData.get('trackingNo'),
     shipments,
   });
@@ -330,7 +336,7 @@ export async function shipOrderAction(
     await shipOrder(
       orderId,
       actor,
-      parsed.data.shipments.length > 0 ? parsed.data : parsed.data.trackingNo,
+      parsed.data,
     );
   } catch (err) {
     if (err instanceof OrderInvariantError) {
@@ -488,13 +494,43 @@ export async function setOrderSfCollectAction(
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
+  const rawFulfillmentGuard = {
+    expectedOrderRevision: formData.get('expectedOrderRevision'),
+    expectedEditVersion: formData.get('expectedEditVersion'),
+    expectedWorkOrderVersion: formData.get('expectedWorkOrderVersion'),
+    expectedPriceRevision: formData.get('expectedPriceRevision'),
+    idempotencyKey: formData.get('idempotencyKey'),
+  };
+  const hasFulfillmentGuard = Object.values(rawFulfillmentGuard).some(
+    (value) => value !== null,
+  );
+  const parsedFulfillmentGuard = hasFulfillmentGuard
+    ? fulfillmentPricingGuardSchema.safeParse(rawFulfillmentGuard)
+    : null;
+  if (parsedFulfillmentGuard && !parsedFulfillmentGuard.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsedFulfillmentGuard.error.issues),
+    };
+  }
+
   try {
-    await setOrderSfCollect(
-      orderId,
-      parsed.data.isSfCollect,
-      actor,
-      parsed.data.shipments,
-    );
+    if (parsedFulfillmentGuard?.success) {
+      await setOrderSfCollect(
+        orderId,
+        parsed.data.isSfCollect,
+        actor,
+        parsed.data.shipments,
+        parsedFulfillmentGuard.data,
+      );
+    } else {
+      await setOrderSfCollect(
+        orderId,
+        parsed.data.isSfCollect,
+        actor,
+        parsed.data.shipments,
+      );
+    }
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
@@ -635,6 +671,10 @@ export async function previewOrderChangeRequestPricingAction(
     const preview = await previewOrderChangeRequestPricing(
       parsed.data.requestId,
       actor,
+      {
+        expectedPriceRevision: parsed.data.expectedPriceRevision,
+        pendingChargeResolutions: parsed.data.pendingChargeResolutions,
+      },
     );
     return { status: 'success', preview };
   } catch (error) {

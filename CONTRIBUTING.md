@@ -17,8 +17,8 @@ applies_to: repository source at last_verified
    [`SPEC-v1.2.md`](./SPEC-v1.2.md) 和与改动相关的
    [`DECISIONS.md`](./DECISIONS.md) 条目。
 2. 检查 `git status --short`。工作区可能已有他人改动；只修改任务范围内文件，不重置、不覆盖无关内容。
-3. 对 Next.js API、约定或目录结构有任何修改前，阅读当前安装版本
-   `node_modules/next/dist/docs/` 中对应文档。项目使用 Next.js 16.2.4，旧版本经验不能作为依据。
+3. 涉及 Next.js 版本敏感的 API、路由或构建行为时，核对当前安装版本
+   `node_modules/next/dist/docs/` 中对应文档；具体版本以 `package.json` 与安装结果为准。
 4. 先写清业务不变量、权限、失败方式和验证范围，再开始实现。
 
 ## 分支与提交

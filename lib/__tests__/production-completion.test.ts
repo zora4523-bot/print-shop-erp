@@ -19,8 +19,10 @@ type FakeOrderRow = {
   id: string;
   status: OrderStatus;
   requiresOutsource?: boolean;
+  workOrderVersion?: number;
   orderNo?: string;
   customerRef?: string | null;
+  completedAt?: Date | null;
 };
 
 type FakeOutsourceRow = {
@@ -52,8 +54,10 @@ function makeTx(opts: {
     return {
       id: 'order-1',
       status: OrderStatus.IN_PRODUCTION,
+      workOrderVersion: 1,
       orderNo: 'O-1',
       customerRef: null,
+      completedAt: null,
       ...(opts.order ?? {}),
     };
   });
@@ -220,6 +224,38 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
     expect(h.orderUpdate).not.toHaveBeenCalled();
   });
 
+  it('当前代次只有非计件进度且尚未完成时，不回退空的 legacy 任务提前完工', async () => {
+    const h = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.RELEASED,
+        requiresOutsource: false,
+        workOrderVersion: 3,
+      },
+      tasks: [],
+      operations: [],
+      progressSteps: [
+        { id: 'progress-1', status: ProductionOperationStatus.IN_PROGRESS },
+      ],
+    });
+
+    const out = await maybeCompleteProductionOrder(
+      h.tx,
+      'order-1',
+      'user-1',
+      NOW,
+    );
+
+    expect(out).toEqual({
+      completed: false,
+      blockedBy: 'INTERNAL_TASKS',
+      uncoveredItems: [],
+    });
+    expect(h.taskFindMany).not.toHaveBeenCalled();
+    expect(h.orderUpdate).not.toHaveBeenCalled();
+    expect(h.logCreate).not.toHaveBeenCalled();
+  });
+
   it('新代计件与无计件步骤全完成后放行，不受旧任务影响', async () => {
     const h = makeTx({
       order: {
@@ -247,6 +283,84 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
     expect(h.taskFindMany).not.toHaveBeenCalled();
   });
 
+  it('canonical PACKING 保持原状态并为当前工单版本发完工通知', async () => {
+    const h = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.PACKING,
+        requiresOutsource: false,
+        workOrderVersion: 7,
+      },
+      operations: [
+        { id: 'operation-1', status: ProductionOperationStatus.COMPLETED },
+      ],
+      progressSteps: [
+        { id: 'progress-1', status: ProductionOperationStatus.COMPLETED },
+      ],
+    });
+
+    const out = await maybeCompleteProductionOrder(
+      h.tx,
+      'order-1',
+      'user-1',
+      NOW,
+    );
+
+    expect(out).toEqual({
+      completed: true,
+      orderStatus: OrderStatus.PACKING,
+      blockedBy: null,
+      uncoveredItems: [],
+      notification: {
+        payload: {
+          orderId: 'order-1',
+          orderNo: 'O-1',
+          workOrderVersion: 7,
+          customerRef: null,
+        },
+        dedupeKey: 'notification:ORDER_COMPLETED:order-1:v7',
+        queued: false,
+      },
+    });
+    expect(h.orderUpdate).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: { completedAt: NOW },
+      select: { id: true, status: true },
+    });
+    expect(h.logCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 'order-1',
+        action: 'PRODUCTION_COMPLETED',
+      }),
+    });
+  });
+
+  it('canonical 当前版本已落 completedAt 时不重复推送', async () => {
+    const completedAt = new Date('2026-09-02T02:00:00.000Z');
+    const h = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.PACKING,
+        workOrderVersion: 7,
+        completedAt,
+      },
+      operations: [
+        { id: 'operation-1', status: ProductionOperationStatus.COMPLETED },
+      ],
+    });
+
+    await expect(
+      maybeCompleteProductionOrder(h.tx, 'order-1', 'user-1', NOW),
+    ).resolves.toEqual({
+      completed: false,
+      blockedBy: null,
+      uncoveredItems: [],
+    });
+    expect(h.operationFindMany).not.toHaveBeenCalled();
+    expect(h.orderUpdate).not.toHaveBeenCalled();
+    expect(h.logCreate).not.toHaveBeenCalled();
+  });
+
   it('requiresOutsource=false 且内部任务全完 → 完工，且外协/款式/工艺三条查询全不跑', async () => {
     const h = makeTx({
       order: {
@@ -257,7 +371,22 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
       tasks: [{ id: 'task-1', status: TaskStatus.COMPLETED }],
     });
     const out = await maybeCompleteProductionOrder(h.tx, 'order-1', 'user-1', NOW);
-    expect(out).toEqual({ completed: true, blockedBy: null, uncoveredItems: [] });
+    expect(out).toEqual({
+      completed: true,
+      orderStatus: OrderStatus.COMPLETED,
+      blockedBy: null,
+      uncoveredItems: [],
+      notification: {
+        payload: {
+          orderId: 'order-1',
+          orderNo: 'O-1',
+          workOrderVersion: 1,
+          customerRef: null,
+        },
+        dedupeKey: 'notification:ORDER_COMPLETED:order-1',
+        queued: false,
+      },
+    });
     expect(h.outsourceFindMany).not.toHaveBeenCalled();
     expect(h.itemFindMany).not.toHaveBeenCalled();
     expect(h.craftFindMany).not.toHaveBeenCalled();
@@ -287,6 +416,67 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
     expect(out.blockedBy).toBe('OUTSOURCE_MISSING');
     expect(h.itemFindMany).not.toHaveBeenCalled();
     expect(h.craftFindMany).not.toHaveBeenCalled();
+  });
+
+  it('canonical 纯外协代次不受遗留 ProductionTask 阻塞，收货后按当前版本完工', async () => {
+    const h = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.RELEASED,
+        requiresOutsource: true,
+        workOrderVersion: 3,
+      },
+      tasks: [{ id: 'legacy-pending', status: TaskStatus.PENDING }],
+      outsourceOrders: [
+        {
+          id: 'os-1',
+          status: OutsourceStatus.RECEIVED,
+          orderItemIds: ['item-1'],
+        },
+      ],
+      items: [
+        {
+          id: 'item-1',
+          sequence: 1,
+          name: '纯外协款式',
+          crafts: ['craft-outsource'],
+        },
+      ],
+      crafts: [{ id: 'craft-outsource', isOutsource: true }],
+    });
+
+    const out = await maybeCompleteProductionOrder(
+      h.tx,
+      'order-1',
+      'user-1',
+      NOW,
+    );
+
+    expect(out.notification).toMatchObject({
+      payload: { workOrderVersion: 3 },
+      dedupeKey: 'notification:ORDER_COMPLETED:order-1:v3',
+    });
+    expect(h.taskFindMany).not.toHaveBeenCalled();
+    expect(h.orderUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { status: OrderStatus.PACKING, completedAt: NOW },
+      }),
+    );
+    expect(out).toMatchObject({
+      completed: true,
+      orderStatus: OrderStatus.PACKING,
+    });
+    expect(h.logCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'PRODUCTION_COMPLETED',
+        changedFields: expect.objectContaining({
+          status: {
+            before: OrderStatus.RELEASED,
+            after: OrderStatus.PACKING,
+          },
+        }),
+      }),
+    });
   });
 
   it('还有外协单没收货 → OUTSOURCE_NOT_RECEIVED，不查款式/工艺', async () => {
@@ -338,7 +528,22 @@ describe('maybeCompleteProductionOrder — 款式级覆盖闸口', () => {
       ],
     });
     const out = await maybeCompleteProductionOrder(h.tx, 'order-1', 'user-1', NOW);
-    expect(out).toEqual({ completed: true, blockedBy: null, uncoveredItems: [] });
+    expect(out).toEqual({
+      completed: true,
+      orderStatus: OrderStatus.COMPLETED,
+      blockedBy: null,
+      uncoveredItems: [],
+      notification: {
+        payload: {
+          orderId: 'order-1',
+          orderNo: 'O-1',
+          workOrderVersion: 1,
+          customerRef: null,
+        },
+        dedupeKey: 'notification:ORDER_COMPLETED:order-1',
+        queued: false,
+      },
+    });
     expect(h.orderUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'order-1' },

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { OrderPricingStatus, OrderStatus } from '@/generated/prisma/enums';
-import { evaluateFactoryConfirmationPreflight } from '../factory-confirmation-preflight';
+import {
+  FACTORY_CONFIRMATION_PENDING_STATUSES,
+  evaluateFactoryConfirmationPreflight,
+  isAwaitingFactoryConfirmation,
+} from '../factory-confirmation-preflight';
 
 function facts(
   patch: Partial<
@@ -20,6 +24,19 @@ function facts(
 }
 
 describe('factory confirmation preflight', () => {
+  it('defines only canonical PENDING_FACTORY and legacy SUBMITTED as awaiting confirmation', () => {
+    expect(FACTORY_CONFIRMATION_PENDING_STATUSES).toEqual([
+      OrderStatus.PENDING_FACTORY,
+      OrderStatus.SUBMITTED,
+    ]);
+    for (const status of Object.values(OrderStatus)) {
+      expect(isAwaitingFactoryConfirmation(status)).toBe(
+        status === OrderStatus.PENDING_FACTORY ||
+          status === OrderStatus.SUBMITTED,
+      );
+    }
+  });
+
   it('shares an affirmative result for canonical and legacy pending rows', () => {
     expect(evaluateFactoryConfirmationPreflight(facts())).toEqual({
       ok: true,

@@ -1,8 +1,5 @@
 import { createHash } from 'node:crypto';
-import {
-  OrderPrintKind,
-  Role,
-} from '../../generated/prisma/enums';
+import { Role } from '../../generated/prisma/enums';
 import { ProductionOperationMaterializationError } from '../production/operation-materialization-service';
 import {
   AdminOrderWorkflowError,
@@ -11,7 +8,7 @@ import {
   type AdminWorkflowActor,
 } from './admin-workflow';
 import {
-  createOrderPrintRequest,
+  createNextOrderPrintRequest,
   markOrderPrintRequestPrinted,
   OrderPrintJobError,
 } from './print-jobs';
@@ -36,12 +33,26 @@ export type AdminOrderBatchItem = {
 
 export type AdminOrderBatchItemResult =
   | { orderId: string; status: 'success'; code: 'OK' }
-  | { orderId: string; status: 'skipped'; code: string; message: string };
+  | { orderId: string; status: 'skipped'; code: string; message: string }
+  | {
+      orderId: string;
+      status: 'failed';
+      code: 'UNEXPECTED_ERROR';
+      message: string;
+    }
+  | {
+      orderId: string;
+      status: 'not_attempted';
+      code: 'ABORTED_AFTER_FAILURE';
+      message: string;
+    };
 
 export type AdminOrderBatchResult = {
   command: AdminOrderBatchCommand;
   successCount: number;
   skippedCount: number;
+  failedCount: number;
+  notAttemptedCount: number;
   items: AdminOrderBatchItemResult[];
 };
 
@@ -102,7 +113,7 @@ function assertInput(
 function skipped(
   orderId: string,
   error: unknown,
-): AdminOrderBatchItemResult {
+): AdminOrderBatchItemResult | null {
   if (
     error instanceof AdminOrderWorkflowError ||
     error instanceof OrderPrintJobError ||
@@ -123,12 +134,7 @@ function skipped(
       message: error.message,
     };
   }
-  return {
-    orderId,
-    status: 'skipped',
-    code: 'UNEXPECTED_ERROR',
-    message: '工单处理失败，请单独重试',
-  };
+  return null;
 }
 
 /**
@@ -148,7 +154,7 @@ export async function runAdminOrderBatch(
   assertInput(input.requestId, input.items, actor);
   const results: AdminOrderBatchItemResult[] = [];
 
-  for (const item of input.items) {
+  for (const [itemIndex, item] of input.items.entries()) {
     const idempotencyKey = operationKey(
       input.requestId.trim(),
       input.command,
@@ -168,14 +174,10 @@ export async function runAdminOrderBatch(
           );
           break;
         case 'CREATE_PRINT':
-          await createOrderPrintRequest(
+          await createNextOrderPrintRequest(
             {
               orderId: item.orderId,
               workOrderVersion: item.expectedWorkOrderVersion,
-              printKind:
-                item.expectedWorkOrderVersion === 1
-                  ? OrderPrintKind.INITIAL
-                  : OrderPrintKind.REPRINT,
               reason: '管理端批量创建打印任务',
               idempotencyKey,
             },
@@ -207,15 +209,54 @@ export async function runAdminOrderBatch(
       }
       results.push({ orderId: item.orderId, status: 'success', code: 'OK' });
     } catch (error) {
-      results.push(skipped(item.orderId, error));
+      const businessSkip = skipped(item.orderId, error);
+      if (businessSkip) {
+        results.push(businessSkip);
+        continue;
+      }
+
+      // A row command can fail after earlier independent transactions already
+      // committed. Preserve those facts, fail closed for the remaining rows,
+      // and emit the original exception only to server logs/monitoring. The UI
+      // receives a generic "result unknown" status and must refresh before the
+      // operator decides whether to retry.
+      console.error('[admin-order-batch] unexpected item failure', {
+        requestId: input.requestId.trim(),
+        command: input.command,
+        orderId: item.orderId,
+        completedItemCount: results.length,
+        error,
+      });
+      results.push({
+        orderId: item.orderId,
+        status: 'failed',
+        code: 'UNEXPECTED_ERROR',
+        message: '系统异常，该工单的处理结果未知；请刷新后核对',
+      });
+      for (const remaining of input.items.slice(itemIndex + 1)) {
+        results.push({
+          orderId: remaining.orderId,
+          status: 'not_attempted',
+          code: 'ABORTED_AFTER_FAILURE',
+          message: '前序工单发生系统异常，本次未继续处理',
+        });
+      }
+      break;
     }
   }
 
   const successCount = results.filter((item) => item.status === 'success').length;
+  const skippedCount = results.filter((item) => item.status === 'skipped').length;
+  const failedCount = results.filter((item) => item.status === 'failed').length;
+  const notAttemptedCount = results.filter(
+    (item) => item.status === 'not_attempted',
+  ).length;
   return {
     command: input.command,
     successCount,
-    skippedCount: results.length - successCount,
+    skippedCount,
+    failedCount,
+    notAttemptedCount,
     items: results,
   };
 }

@@ -64,6 +64,7 @@ export default async function EditRulePage({
           id: c.id,
           channelName: c.channelName,
           isActive: c.isActive,
+          selectionIssue: c.selectionIssue,
         }))}
         payloadFields={payloadFields}
         action={action}

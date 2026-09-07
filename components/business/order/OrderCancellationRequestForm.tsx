@@ -5,7 +5,33 @@ import { createOrderChangeRequestAction } from '@/actions/order';
 import type { CreateOrderChangeRequestMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
 
-export function OrderCancellationRequestForm({ orderId }: { orderId: string }) {
+type Props = {
+  orderId: string;
+  expectedRevision: number;
+  expectedWorkOrderVersion: number;
+};
+
+export function buildOrderCancellationRequestPayload({
+  orderId,
+  expectedRevision,
+  expectedWorkOrderVersion,
+  reason,
+}: Props & { reason: string }) {
+  return {
+    orderId,
+    expectedRevision,
+    expectedWorkOrderVersion,
+    type: 'CANCEL' as const,
+    reason,
+    items: [],
+  };
+}
+
+export function OrderCancellationRequestForm({
+  orderId,
+  expectedRevision,
+  expectedWorkOrderVersion,
+}: Props) {
   const [reason, setReason] = useState('');
   const [state, action, pending] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
@@ -34,12 +60,12 @@ export function OrderCancellationRequestForm({ orderId }: { orderId: string }) {
       className="space-y-3"
       aria-busy={pending}
       action={() =>
-        action({
+        action(buildOrderCancellationRequestPayload({
           orderId,
-          type: 'CANCEL',
+          expectedRevision,
+          expectedWorkOrderVersion,
           reason,
-          items: [],
-        })
+        }))
       }
     >
       <label className="block space-y-1 text-sm">

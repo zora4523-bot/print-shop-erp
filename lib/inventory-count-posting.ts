@@ -6,6 +6,11 @@ import {
   DailyDocumentNumberExhaustedError,
   nextDailyDocumentNumber,
 } from './daily-document-number';
+import { materialStockAlertForCrossing } from './material-stock-alert';
+import { dispatchNotification } from './notification/dispatch';
+import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
+import type { NotificationPayloadFor } from './notification/events';
+import type { EnqueueClient } from './background-jobs/repository';
 
 export class InventoryCountInvariantError extends Error {
   constructor(message: string) {
@@ -133,13 +138,70 @@ const INVENTORY_COUNT_TRANSACTION_OPTIONS = {
   timeout: 30_000,
 } as const;
 
-export async function postInventoryCount(
-  input: PostInventoryCountInput,
-  actor: { id: string },
-  now: Date = new Date(),
-): Promise<InventoryCountPostResult> {
+type InventoryCountStockNotification = {
+  payload: NotificationPayloadFor<'STOCK_ALERT'>;
+  dedupeKey: string;
+  spreadIndex: number;
+};
+
+async function enqueueInventoryCountStockAlerts(
+  tx: Prisma.TransactionClient,
+  changedRows: readonly { materialId: string; difference: Decimal }[],
+  materialById: ReadonlyMap<string, {
+    name: string;
+    currentStock: Prisma.Decimal;
+    safetyStock: Prisma.Decimal | null;
+  }>,
+  inventoryCountId: string,
+): Promise<InventoryCountStockNotification[]> {
+  // Material rows remain locked throughout posting. Aggregate only the
+  // accepted location adjustments, then compare the final global balance
+  // with the locked pre-count balance. This emits one crossing per material
+  // and ignores temporary dips that another counted location offsets.
+  const differenceByMaterial = new Map<string, Decimal>();
+  for (const row of changedRows) {
+    differenceByMaterial.set(
+      row.materialId,
+      (differenceByMaterial.get(row.materialId) ?? new Decimal(0)).plus(
+        row.difference,
+      ),
+    );
+  }
+  const postCommitNotifications: InventoryCountStockNotification[] = [];
+  let spreadIndex = 0;
+  for (const [materialId, difference] of differenceByMaterial) {
+    const material = materialById.get(materialId)!;
+    if (material.safetyStock == null) continue;
+    const payload = materialStockAlertForCrossing({
+      materialName: material.name,
+      before: material.currentStock,
+      after: new Decimal(material.currentStock).plus(difference),
+      safetyStock: material.safetyStock,
+    });
+    if (!payload) continue;
+    const notification = {
+      payload,
+      dedupeKey: `notification:STOCK_ALERT:inventory-count:${inventoryCountId}:${materialId}`,
+      spreadIndex,
+    };
+    const queued = await enqueueNotificationInTransaction(
+      tx as unknown as EnqueueClient,
+      'STOCK_ALERT',
+      payload,
+      { dedupeKey: notification.dedupeKey, spreadIndex },
+    );
+    if (!queued) postCommitNotifications.push(notification);
+    spreadIndex += 1;
+  }
+
+  return postCommitNotifications;
+}
+
+function normalizeInventoryCountItems(
+  rawItems: PostInventoryCountInput["items"],
+): NormalizedCountItem[] {
   const uniqueKeys = new Set<string>();
-  const items: NormalizedCountItem[] = input.items
+  const items: NormalizedCountItem[] = rawItems
     .map((item) => ({
       ...item,
       counted: new Decimal(item.countedQuantity),
@@ -162,6 +224,16 @@ export async function postInventoryCount(
       );
     }
   }
+
+  return items;
+}
+
+export async function postInventoryCount(
+  input: PostInventoryCountInput,
+  actor: { id: string },
+  now: Date = new Date(),
+): Promise<InventoryCountPostResult> {
+  const items = normalizeInventoryCountItems(input.items);
 
   const existingBeforeReservation = await db.inventoryCount.findUnique({
     where: { idempotencyKey: input.idempotencyKey },
@@ -190,15 +262,23 @@ export async function postInventoryCount(
           id: existing.id,
           staleKeys: existing.staleKeys,
           staleMessage: existing.staleMessage,
+          postCommitNotifications: [] as InventoryCountStockNotification[],
         };
       }
 
       // code/name 是给冲突提示用的（「白卡纸(M-001) 默认仓库/A货架 账面数已从
       // 5.00 变为 8.00」）。搭在这条已有的 FOR UPDATE 上，happy path 零新增查询。
       const lockedMaterials = await tx.$queryRaw<
-        { id: string; code: string; name: string; isActive: boolean }[]
+        {
+          id: string;
+          code: string;
+          name: string;
+          isActive: boolean;
+          currentStock: Prisma.Decimal;
+          safetyStock: Prisma.Decimal | null;
+        }[]
       >(Prisma.sql`
-        SELECT id, code, name, "isActive"
+        SELECT id, code, name, "isActive", "currentStock", "safetyStock"
           FROM "Material"
          WHERE id IN (${Prisma.join(materialIds)})
          ORDER BY id
@@ -399,10 +479,26 @@ export async function postInventoryCount(
         });
       }
 
-      return { id: inventoryCount.id, staleKeys, staleMessage };
+      const postCommitNotifications = await enqueueInventoryCountStockAlerts(
+        tx, changedRows, materialById, inventoryCount.id,
+      );
+
+      return {
+        id: inventoryCount.id,
+        staleKeys,
+        staleMessage,
+        postCommitNotifications,
+      };
     },
     INVENTORY_COUNT_TRANSACTION_OPTIONS,
   );
+
+  for (const notification of posted.postCommitNotifications) {
+    await dispatchNotification('STOCK_ALERT', notification.payload, {
+      dedupeKey: notification.dedupeKey,
+      spreadIndex: notification.spreadIndex,
+    });
+  }
 
   return {
     count: await readInventoryCount(posted.id),

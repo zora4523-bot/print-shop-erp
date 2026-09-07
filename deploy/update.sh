@@ -21,6 +21,7 @@
 set -euo pipefail
 
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/api/health/ready}"
+JOBS_HEALTH_URL="${JOBS_HEALTH_URL:-${HEALTH_URL%/ready}/jobs}"
 WEB_APP_NAME="print-shop-erp"
 LIGHT_WORKER_NAME="print-shop-erp-worker-light"
 HEAVY_WORKER_NAME="print-shop-erp-worker-heavy"
@@ -79,6 +80,13 @@ assert_web_loopback_binding() {
   fi
 }
 
+assert_deploy_jobs_gate() {
+  # One tested monotonic-clock policy owns startup, heartbeat-expiry recovery,
+  # and the hard deadline. Environment overrides are read by the same runner.
+  # A nonzero result still reaches on_exit while DEPLOYMENT_QUIESCED remains 1.
+  node scripts/deploy-jobs-gate.mjs --wait "$JOBS_HEALTH_URL"
+}
+
 trap on_exit EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
@@ -103,6 +111,8 @@ CI=true pnpm install --frozen-lockfile
 
 echo "==> [3/9] 环境变量预检"
 NODE_ENV=production node scripts/check-env.mjs
+# Validate changed timing overrides/URL while the previous release is online.
+node scripts/deploy-jobs-gate.mjs --check-config "$JOBS_HEALTH_URL"
 if ! command -v pm2 >/dev/null 2>&1; then
   echo >&2 "未找到 pm2，停止发布（尚未进入停机窗口）"
   exit 1
@@ -139,8 +149,9 @@ done
 
 if [ "$ok" = "1" ]; then
   assert_web_loopback_binding
+  assert_deploy_jobs_gate
   DEPLOYMENT_QUIESCED=0
-  echo "✅ 部署成功：$PREV_COMMIT → $NEW_COMMIT，健康检查通过。"
+  echo "✅ 部署成功：$PREV_COMMIT → $NEW_COMMIT，就绪与通知门禁通过。"
 else
   echo >&2 "❌ 健康检查未通过。查日志：pm2 logs print-shop-erp --lines 50"
   false

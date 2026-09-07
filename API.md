@@ -90,6 +90,18 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 5. 只 revalidate 受影响路径；
 6. 为成功、字段错误、权限拒绝、状态冲突和重复提交补契约测试。
 
+### 工单修改与价格确认
+
+实现见 [`actions/order.ts`](./actions/order.ts)、
+[`actions/admin-order-workflow.ts`](./actions/admin-order-workflow.ts) 和
+[`lib/order/change-request.ts`](./lib/order/change-request.ts)。
+
+- 修改申请中的规格变更须同时提交 `specification` 与 `targetProductId`；服务端从活动产品目录重新解析计价身份，不接受仅改规格文字而沿用旧产品的输入。
+- `previewOrderChangeRequestPricingAction` 接受 `requestId`、可选的 `expectedPriceRevision` 与 `pendingChargeResolutions`。人工物流决议只适用于本次预览实际待核的收费，需携带收费业务键、发货记录、预览数量、省份、金额和依据。
+- 批准修改须提交 `expectedPriceRevision`；涉及重新计价时，还须将预览返回的 `quoteToken` 作为 `expectedQuoteToken` 提交（`order-change-approval-v1:` 前缀）。服务端持有订单锁后重新核对报价、版本及人工收费内容，变化时拒绝写入并要求刷新预览。无需重新计价的修改不提交报价令牌；拒绝申请不依赖价格版本，取消申请保留独立结算流程。
+- `confirmFactoryOrderAction` 除工单修订号与生产版本外，要求提交 `expectedQuoteToken`：外部销售工单使用当前价预览的 `create-order-quote-v2:` 令牌，其他结算类型显式传 `null`。
+- 以上令牌是预览一致性证据，不授予权限，也不替代资源范围、状态机及服务端金额校验。
+
 ## 兼容性规则
 
 - 已被系统 cron、下载链接或浏览器流程使用的状态码和字段视为兼容性契约。

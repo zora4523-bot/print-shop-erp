@@ -15,12 +15,14 @@ type Props = {
   channelId: string;
   disabled?: boolean;
   disabledReason?: string;
+  disabledFixLabel?: string;
 };
 
 export function TestChannelButton({
   channelId,
   disabled,
   disabledReason,
+  disabledFixLabel,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -32,7 +34,7 @@ export function TestChannelButton({
         cause="prerequisite"
         reason={disabledReason ?? '当前群不可测试'}
         fixHref={`/owner/notifications/channels/${channelId}`}
-        fixLabel="去启用群"
+        fixLabel={disabledFixLabel ?? '去启用通知目标'}
         className="items-end text-right"
       >
         <Button type="button" size="sm" variant="secondary" disabled>
@@ -56,7 +58,10 @@ export function TestChannelButton({
           startTransition(async () => {
             const nextResult = await testChannelAction(channelId);
             setResult(nextResult);
-            if (nextResult.status === 'success') {
+            if (
+              nextResult.status === 'success' ||
+              nextResult.status === 'queued'
+            ) {
               // Refresh the recent-log table after the direct action call.
               router.refresh();
             }
@@ -73,6 +78,18 @@ export function TestChannelButton({
             result.mock
               ? '当前为测试模式，未向企业微信群发送消息。'
               : '请到对应企业微信群核对消息。'
+          }
+          className="max-w-sm p-2 text-left"
+        />
+      ) : null}
+      {result?.status === 'queued' ? (
+        <ActionNotice
+          tone="info"
+          title={result.mock ? '测试任务已记录' : '测试消息已排队'}
+          description={
+            result.mock
+              ? '当前为测试模式，后台 worker 不会向企业微信实际发送。'
+              : '智能机器人将由后台 worker 发送，请稍后刷新并查看最近推送日志。'
           }
           className="max-w-sm p-2 text-left"
         />

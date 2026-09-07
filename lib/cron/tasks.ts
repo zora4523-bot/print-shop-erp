@@ -7,7 +7,6 @@ import {
   generateBillsForPeriod,
   type BillGenerationResult,
 } from '../bill';
-import { db } from '../db';
 import { formatMoneyPlain } from '../dashboard/format';
 import {
   getEndingPeriods,
@@ -30,7 +29,6 @@ import {
   CsBatchUnexpectedError,
   settleReadyCsPeriods,
   type BatchSettleResult,
-  type SettledCommission,
 } from '../salary/cs';
 import {
   getPieceworkSettlementDay,
@@ -135,53 +133,6 @@ export async function runHourlyPayrollTask(month: string, fence?: ExecutionFence
   };
 }
 
-async function dispatchCsSettlementNotifications(
-  settled: SettledCommission[],
-  fence?: ExecutionFence,
-): Promise<void> {
-  const needsPostCommitDispatch = settled.filter(
-    (row) => !row.notificationQueued,
-  );
-  if (needsPostCommitDispatch.length > 0) {
-    const csIds = Array.from(
-      new Set(needsPostCommitDispatch.map((row) => row.csUserId)),
-    );
-    // The name is presentation-only. A settlement may already be committed
-    // when this best-effort lookup runs, so a transient read failure must not
-    // prevent its durable, deduplicated notification from being enqueued.
-    // Falling back to the immutable user id also preserves the original batch
-    // failure below, which is the error the worker must retry and report.
-    const users = await db.user
-      .findMany({
-        where: { id: { in: csIds } },
-        select: { id: true, displayName: true },
-      })
-      .catch((error: unknown) => {
-        console.error(
-          '[cs-settle] user display-name lookup failed; using user ids:',
-          error instanceof Error ? error.name : 'UnknownError',
-        );
-        return [];
-      });
-    const nameById = new Map(users.map((user) => [user.id, user.displayName]));
-    for (const row of needsPostCommitDispatch) {
-      await assertExecutionFence(fence);
-      await dispatchNotification(
-        'CS_PERIOD_SETTLED',
-        {
-          settledCount: 1,
-          csName: nameById.get(row.csUserId) ?? row.csUserId,
-          totalSales: formatMoneyPlain(row.totalSales),
-          commission: formatMoneyPlain(row.commissionAmount),
-        },
-        {
-          dedupeKey: `notification:CS_PERIOD_SETTLED:${row.periodId}`,
-        },
-      );
-    }
-  }
-}
-
 export async function runCsSettleTask(fence?: ExecutionFence) {
   let unexpected: CsBatchUnexpectedError | null = null;
   let result: BatchSettleResult;
@@ -193,10 +144,11 @@ export async function runCsSettleTask(fence?: ExecutionFence) {
     result = error.partialResult;
   }
   const { settled, errors } = result;
-  await dispatchCsSettlementNotifications(settled, fence);
-  // The successful rows are already committed and their deduplicated
-  // notifications have now been queued. Rethrow so Sentry and the durable job
-  // retry the unprocessed tail rather than silently marking a partial run OK.
+  // settleReadyCsPeriods performs each inline fallback immediately after that
+  // period commits; durable mode already owns a transactionally inserted
+  // notification job. Do not dispatch the returned rows again here.
+  // Rethrow so Sentry and the durable cron job retry the unprocessed tail
+  // rather than silently marking a partial run OK.
   if (unexpected) throw unexpected;
   return {
     status: 'ok' as const,

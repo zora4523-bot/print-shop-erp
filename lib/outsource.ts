@@ -7,9 +7,9 @@ import {
 } from './outsource/status-machine';
 import { canAttachOutsource } from './order/status-machine';
 import { orderCascadeLockKey } from './order/locks';
-import { dispatchNotification } from './notification/dispatch';
 import { writeAuditLogInTx, type AuditActor } from './audit-log';
 import {
+  dispatchProductionCompletionNotification,
   maybeCompleteProductionOrder,
   type ProductionCompletionTx,
 } from './production-completion';
@@ -19,7 +19,6 @@ import type {
   MarkOutsourceReceivedInput,
   RecordOutsourcePaymentInput,
 } from './auth/schemas';
-import { backgroundJobsMode } from './background-jobs/mode';
 import { readFrozenOutsourceTotal } from './outsource/frozen-total';
 
 export class OutsourceError extends Error {
@@ -128,7 +127,7 @@ type OutsourceTxClient = {
     findUnique: (args: {
       where: { id: string };
       select?: unknown;
-    }) => Promise<{ status: OrderStatus } | null>;
+    }) => Promise<{ status: OrderStatus; completedAt: Date | null } | null>;
   };
   orderItem: {
     findMany: (args: {
@@ -288,12 +287,17 @@ export async function createOutsourceOrder(
 
     const order = await txClient.order.findUnique({
       where: { id: input.orderId },
-      select: { status: true },
+      select: { status: true, completedAt: true },
     });
     if (!order) throw new OutsourceError('工单不存在');
     if (!canAttachOutsource(order.status)) {
       throw new OutsourceError(
         `工单状态 ${order.status} 不允许新建外协（已发货 / 已完成 / 已取消）`,
+      );
+    }
+    if (order.completedAt) {
+      throw new OutsourceError(
+        '当前纸质工单已完成生产，不能再追加外协；请通过工单变更生成新版本',
       );
     }
 
@@ -717,30 +721,13 @@ export async function markOutsourceReceived(
           ? completion.uncoveredItems
           : [],
       orderId: fresh.orderId,
+      completionNotification: completion?.notification,
     };
   });
 
-  if (
-    result.orderCompleted &&
-    result.orderId &&
-    backgroundJobsMode() !== 'durable'
-  ) {
-    const order = await db.order.findUnique({
-      where: { id: result.orderId },
-      select: { id: true, orderNo: true, customerRef: true },
-    });
-    if (order) {
-      await dispatchNotification(
-        'ORDER_COMPLETED',
-        {
-          orderId: order.id,
-          orderNo: order.orderNo,
-          customerRef: order.customerRef,
-        },
-        { dedupeKey: `notification:ORDER_COMPLETED:${order.id}` },
-      );
-    }
-  }
+  await dispatchProductionCompletionNotification(
+    result.completionNotification,
+  );
 
   return {
     id: result.id,
@@ -797,31 +784,19 @@ export async function cancelOutsourceOrder(
       ...updated,
       orderId: fresh.orderId,
       orderCompleted: completion?.completed ?? false,
+      completionNotification: completion?.notification,
     };
   });
 
-  if (
-    result.orderCompleted &&
-    result.orderId &&
-    backgroundJobsMode() !== 'durable'
-  ) {
-    const order = await db.order.findUnique({
-      where: { id: result.orderId },
-      select: { id: true, orderNo: true, customerRef: true },
-    });
-    if (order) {
-      await dispatchNotification(
-        'ORDER_COMPLETED',
-        {
-          orderId: order.id,
-          orderNo: order.orderNo,
-          customerRef: order.customerRef,
-        },
-        { dedupeKey: `notification:ORDER_COMPLETED:${order.id}` },
-      );
-    }
-  }
-  return result;
+  await dispatchProductionCompletionNotification(
+    result.completionNotification,
+  );
+  return {
+    id: result.id,
+    status: result.status,
+    orderId: result.orderId,
+    orderCompleted: result.orderCompleted,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────

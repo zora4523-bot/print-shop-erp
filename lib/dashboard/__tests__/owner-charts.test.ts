@@ -57,7 +57,7 @@ describe('getProductionTrend', () => {
     expect(byDay.get('2026-04-25')).toBe(1);
   });
 
-  it('raw query 用 status IN [COMPLETED, SHIPPED, FINISHED]', async () => {
+  it('raw query 以 completedAt 为完工事实并只排除 CANCELLED', async () => {
     dbMock.$queryRaw.mockResolvedValue([]);
     await getProductionTrend(new Date('2026-04-25T08:00:00Z'));
     // Tagged template — prisma.$queryRaw`...` 即 strings + values
@@ -67,7 +67,10 @@ describe('getProductionTrend', () => {
     const sql = Array.from(strings).join(' ');
     expect(sql).toContain('AT TIME ZONE');
     expect(sql).toContain("'Asia/Shanghai'");
-    expect(sql).toContain("status IN ('COMPLETED', 'SHIPPED', 'FINISHED')");
+    expect(sql).toContain('"completedAt" >=');
+    expect(sql).toContain('"completedAt" <');
+    expect(sql).toContain("status != 'CANCELLED'");
+    expect(sql).not.toContain('status IN');
   });
 
   it('raw query 走两层 AT TIME ZONE（UTC → Shanghai）防 PG 时区陷阱（round 100 high）', async () => {

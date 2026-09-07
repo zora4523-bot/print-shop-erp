@@ -155,6 +155,7 @@ import {
   shipOrderAction,
   finishOrderAction,
   previewOrderChangeRequestPricingAction,
+  reviewOrderChangeRequestAction,
   previewOrderPricingReviewAction,
   finalizeOrderPricingAction,
   saveOrderManualChargeAction,
@@ -815,6 +816,38 @@ describe('cancelOrderAction', () => {
 });
 
 describe('shipOrderAction', () => {
+  function appendShipCommandSnapshot(formData: FormData): void {
+    formData.set('expectedRevision', '4');
+    formData.set('expectedEditVersion', '8');
+    formData.set('expectedWorkOrderVersion', '2');
+    formData.set('expectedPriceRevision', '3');
+    formData.set(
+      'idempotencyKey',
+      '00000000-0000-4000-8000-000000000101',
+    );
+  }
+
+  it('fails closed when the command snapshot or request identity is absent', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    const formData = new FormData();
+    formData.append('shipmentId', 'shipment-1');
+    formData.append('shipmentTrackingNo', 'SF001');
+
+    const result = await shipOrderAction('order-1', null, formData);
+
+    expect(result).toMatchObject({
+      status: 'invalid',
+      fieldErrors: {
+        expectedRevision: expect.any(Array),
+        expectedEditVersion: expect.any(Array),
+        expectedWorkOrderVersion: expect.any(Array),
+        expectedPriceRevision: expect.any(Array),
+        idempotencyKey: expect.any(Array),
+      },
+    });
+    expect(orderMock.shipOrder).not.toHaveBeenCalled();
+  });
+
   it('passes every address id and its own trimmed tracking number', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.shipOrder.mockResolvedValue({
@@ -822,6 +855,7 @@ describe('shipOrderAction', () => {
       status: OrderStatus.SHIPPED,
     });
     const formData = new FormData();
+    appendShipCommandSnapshot(formData);
     formData.append('shipmentId', 'shipment-1');
     formData.append('shipmentTrackingNo', ' SF001 ');
     formData.append('shipmentId', 'shipment-2');
@@ -834,6 +868,11 @@ describe('shipOrderAction', () => {
       'order-1',
       salesActor,
       {
+        expectedRevision: 4,
+        expectedEditVersion: 8,
+        expectedWorkOrderVersion: 2,
+        expectedPriceRevision: 3,
+        idempotencyKey: '00000000-0000-4000-8000-000000000101',
         trackingNo: null,
         shipments: [
           {
@@ -864,6 +903,7 @@ describe('shipOrderAction', () => {
       status: OrderStatus.SHIPPED,
     });
     const formData = new FormData();
+    appendShipCommandSnapshot(formData);
     for (const [id, province, shipping, packing, reason] of [
       ['shipment-1', '广东', '2.80', '1.00', '首票确认'],
       ['shipment-2', '新疆', '17.30', '3.00', '第二票确认'],
@@ -882,6 +922,11 @@ describe('shipOrderAction', () => {
       'order-1',
       salesActor,
       {
+        expectedRevision: 4,
+        expectedEditVersion: 8,
+        expectedWorkOrderVersion: 2,
+        expectedPriceRevision: 3,
+        idempotencyKey: '00000000-0000-4000-8000-000000000101',
         trackingNo: null,
         shipments: [
           expect.objectContaining({
@@ -906,6 +951,7 @@ describe('shipOrderAction', () => {
   it('rejects mismatched shipment and tracking fields before the domain call', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     const formData = new FormData();
+    appendShipCommandSnapshot(formData);
     formData.append('shipmentId', 'shipment-1');
     const result = await shipOrderAction('order-1', null, formData);
     expect(result.status).toBe('invalid');
@@ -1175,6 +1221,14 @@ describe('setOrderUrgentAction', () => {
 });
 
 describe('setOrderSfCollectAction', () => {
+  const fulfillmentGuardFormFields = {
+    expectedOrderRevision: '4',
+    expectedEditVersion: '2',
+    expectedWorkOrderVersion: '3',
+    expectedPriceRevision: '5',
+    idempotencyKey: '11111111-1111-4111-8111-111111111111',
+  };
+
   it("requires order:create before changing the flag", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
@@ -1194,7 +1248,7 @@ describe('setOrderSfCollectAction', () => {
     expect(orderMock.setOrderSfCollect).not.toHaveBeenCalled();
   });
 
-  it('forwards an explicit target value and revalidates list + detail', async () => {
+  it('keeps the legacy four-argument call when every fulfillment guard field is absent', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.setOrderSfCollect.mockResolvedValue({
       id: 'o1',
@@ -1219,6 +1273,62 @@ describe('setOrderSfCollectAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
   });
+
+  it('parses and forwards the complete fulfillment pricing guard', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.setOrderSfCollect.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SUBMITTED,
+      changed: true,
+      changedFields: ['isSfCollect'],
+    });
+
+    const result = await setOrderSfCollectAction(
+      'o1',
+      null,
+      fd({ isSfCollect: 'true', ...fulfillmentGuardFormFields }),
+    );
+
+    expect(result).toEqual({ status: 'success' });
+    expect(orderMock.setOrderSfCollect).toHaveBeenCalledWith(
+      'o1',
+      true,
+      expect.anything(),
+      [],
+      {
+        expectedOrderRevision: 4,
+        expectedEditVersion: 2,
+        expectedWorkOrderVersion: 3,
+        expectedPriceRevision: 5,
+        idempotencyKey: '11111111-1111-4111-8111-111111111111',
+      },
+    );
+  });
+
+  it.each([
+    ['partial', { expectedOrderRevision: '4' }],
+    [
+      'invalid',
+      {
+        ...fulfillmentGuardFormFields,
+        expectedPriceRevision: '5.5',
+      },
+    ],
+  ])(
+    'rejects a %s fulfillment guard instead of treating it as missing',
+    async (_case, guardFields) => {
+      permissionsMock.requirePermission.mockResolvedValue(salesActor);
+
+      const result = await setOrderSfCollectAction(
+        'o1',
+        null,
+        fd({ isSfCollect: 'true', ...guardFields }),
+      );
+
+      expect(result.status).toBe('invalid');
+      expect(orderMock.setOrderSfCollect).not.toHaveBeenCalled();
+    },
+  );
 
   it('maps the business terminal-state error to the form', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
@@ -1389,8 +1499,65 @@ describe('previewOrderChangeRequestPricingAction', () => {
     expect(result).toEqual({ status: 'success', preview });
     expect(
       changeRequestMock.previewOrderChangeRequestPricing,
-    ).toHaveBeenCalledWith('request-1', adminActor);
+    ).toHaveBeenCalledWith('request-1', adminActor, {
+      expectedPriceRevision: undefined,
+      pendingChargeResolutions: [],
+    });
     expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('parses and forwards the price revision and manual shipment charge resolutions', async () => {
+    const adminActor = { ...salesActor, role: Role.ADMIN };
+    const preview = {
+      requestId: 'request-1',
+      orderId: 'order-1',
+      baseRevision: 2,
+      quotedAt: '2026-08-07T08:00:00.000Z',
+      complete: true,
+      requiresReviewRemark: false,
+      oldTotal: '1000.00',
+      newTotal: '980.00',
+      delta: '-20.00',
+      items: [],
+    };
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    changeRequestMock.previewOrderChangeRequestPricing.mockResolvedValue(
+      preview,
+    );
+
+    const result = await previewOrderChangeRequestPricingAction(null, {
+      requestId: 'request-1',
+      expectedPriceRevision: '7',
+      pendingChargeResolutions: [
+        {
+          businessKey: ' shipment:shipment-1:shipping ',
+          shipmentId: ' shipment-1 ',
+          expectedSequence: '2',
+          expectedProjectedQuantity: '1200',
+          expectedDestinationProvince: ' 广东 ',
+          amount: ' 18.50 ',
+          reason: ' 承运商实际报价 ',
+        },
+      ],
+    });
+
+    expect(result).toEqual({ status: 'success', preview });
+    expect(
+      changeRequestMock.previewOrderChangeRequestPricing,
+    ).toHaveBeenCalledWith('request-1', adminActor, {
+      expectedPriceRevision: 7,
+      pendingChargeResolutions: [
+        {
+          businessKey: 'SHIPMENT:SHIPMENT-1:SHIPPING',
+          shipmentId: 'shipment-1',
+          expectedSequence: 2,
+          expectedProjectedQuantity: 1200,
+          expectedDestinationProvince: '广东',
+          amount: '18.50',
+          reason: '承运商实际报价',
+        },
+      ],
+    });
   });
 
   it('maps preview business failures without returning stale amounts', async () => {
@@ -1407,6 +1574,94 @@ describe('previewOrderChangeRequestPricingAction', () => {
         requestId: 'request-1',
       }),
     ).resolves.toEqual({ status: 'error', message: '工单版本已过期' });
+  });
+});
+
+describe('reviewOrderChangeRequestAction', () => {
+  it('parses and forwards optimistic price and shipment charge evidence', async () => {
+    const adminActor = { ...salesActor, role: Role.ADMIN };
+    const expectedQuoteToken = `order-change-approval-v1:${'a'.repeat(64)}`;
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    changeRequestMock.reviewOrderChangeRequest.mockResolvedValue({
+      orderId: 'order-1',
+      status: 'APPROVED',
+    });
+
+    const result = await reviewOrderChangeRequestAction(null, {
+      requestId: 'request-1',
+      expectedPriceRevision: '7',
+      expectedQuoteToken: ` ${expectedQuoteToken} `,
+      pendingChargeResolutions: [
+        {
+          businessKey: ' shipment:shipment-1:shipping ',
+          shipmentId: ' shipment-1 ',
+          expectedSequence: '2',
+          expectedProjectedQuantity: '1200',
+          expectedDestinationProvince: ' 广东 ',
+          amount: ' 18.50 ',
+          reason: ' 承运商实际报价 ',
+        },
+      ],
+      decision: 'APPROVE',
+      reviewRemark: ' 已复核物流报价 ',
+    });
+
+    expect(changeRequestMock.reviewOrderChangeRequest).toHaveBeenCalledWith(
+      {
+        requestId: 'request-1',
+        expectedPriceRevision: 7,
+        expectedQuoteToken,
+        pendingChargeResolutions: [
+          {
+            businessKey: 'SHIPMENT:SHIPMENT-1:SHIPPING',
+            shipmentId: 'shipment-1',
+            expectedSequence: 2,
+            expectedProjectedQuantity: 1200,
+            expectedDestinationProvince: '广东',
+            amount: '18.50',
+            reason: '承运商实际报价',
+          },
+        ],
+        decision: 'APPROVE',
+        reviewRemark: '已复核物流报价',
+      },
+      adminActor,
+    );
+    expect(result).toEqual({
+      status: 'success',
+      requestStatus: 'APPROVED',
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/order-changes');
+  });
+
+  it('rejects an invalid manual charge resolution before entering the domain', async () => {
+    permissionsMock.requirePermission.mockResolvedValue({
+      ...salesActor,
+      role: Role.ADMIN,
+    });
+
+    const result = await reviewOrderChangeRequestAction(null, {
+      requestId: 'request-1',
+      expectedPriceRevision: '7',
+      pendingChargeResolutions: [
+        {
+          businessKey: 'shipment:shipment-1:shipping',
+          shipmentId: 'shipment-1',
+          expectedSequence: '2',
+          expectedProjectedQuantity: '1200',
+          expectedDestinationProvince: '广东',
+          amount: '18.505',
+          reason: '承运商实际报价',
+        },
+      ],
+      decision: 'APPROVE',
+      reviewRemark: null,
+    });
+
+    expect(result.status).toBe('invalid');
+    expect(changeRequestMock.reviewOrderChangeRequest).not.toHaveBeenCalled();
   });
 });
 

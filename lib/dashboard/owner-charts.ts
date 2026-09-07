@@ -66,7 +66,7 @@ export async function getProductionTrend(
     FROM "Order"
     WHERE "completedAt" >= ${startExclusive}
       AND "completedAt" < ${endExclusive}
-      AND status IN ('COMPLETED', 'SHIPPED', 'FINISHED')
+      AND status != 'CANCELLED'
     GROUP BY day
     ORDER BY day ASC
   `;

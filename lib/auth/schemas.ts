@@ -32,6 +32,11 @@ import {
   resolveOrderItemFoilSides,
 } from '../order/pricing-route';
 import { calculatePackagingBagCount } from '../order/packaging-bag-count';
+import {
+  WECOM_MARKDOWN_MAX_BYTES,
+  wecomMarkdownByteLength,
+} from '../notification/limits';
+import { isValidWecomGroupBotWebhookUrl } from '../notification/webhook-url';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -2165,7 +2170,28 @@ export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
 
 // 标记发货：trackingNo 选填（运单号）。Order.trackingNo 是 nullable
 // text，用同一 optional-trimmed 收尾的 helper。
+const shipOrderVersionField = (label: string, minimum: number) =>
+  z.preprocess(
+    (value) => {
+      if (typeof value === 'number') return value;
+      if (typeof value !== 'string') return value;
+      const normalized = value.trim();
+      return /^\d+$/.test(normalized) ? Number(normalized) : undefined;
+    },
+    z
+      .number({ message: `${label}格式非法` })
+      .finite(`${label}格式非法`)
+      .safe(`${label}超出安全范围`)
+      .int(`${label}必须是整数`)
+      .min(minimum, `${label}不能小于 ${minimum}`),
+  );
+
 export const shipOrderSchema = z.object({
+  expectedRevision: shipOrderVersionField('工单修订号', 0),
+  expectedEditVersion: shipOrderVersionField('工单编辑版本', 0),
+  expectedWorkOrderVersion: shipOrderVersionField('纸质工单版本', 1),
+  expectedPriceRevision: shipOrderVersionField('价格版本', 0),
+  idempotencyKey: z.string().uuid('发货请求标识格式非法'),
   trackingNo: optionalTrimmedText('运单号', 64),
   shipments: z
     .array(
@@ -2262,6 +2288,7 @@ const updateOrderItemChangeSchema = z
     name: z.string().trim().min(1).max(64).optional(),
     quantity: orderItemQuantityField.optional(),
     specification: optionalTrimmedText('规格', 64).optional(),
+    targetProductId: orderChangeId.optional(),
     frontFoilColors: orderItemFoilSideColorsField.optional(),
     backFoilColors: orderItemFoilSideColorsField.optional(),
     // Historical clients only submitted one aggregate array. It remains
@@ -2274,6 +2301,7 @@ const updateOrderItemChangeSchema = z
       value.name !== undefined ||
       value.quantity !== undefined ||
       value.specification !== undefined ||
+      value.targetProductId !== undefined ||
       value.frontFoilColors !== undefined ||
       value.backFoilColors !== undefined ||
       value.foilColors !== undefined,
@@ -2286,6 +2314,7 @@ const addOrderItemChangeSchema = z.object({
   name: z.string().trim().min(1, '请填写新增款式名').max(64),
   quantity: orderItemQuantityField,
   specification: optionalTrimmedText('规格', 64).optional(),
+  targetProductId: orderChangeId.optional(),
   frontFoilColors: orderItemFoilSideColorsField.optional(),
   backFoilColors: orderItemFoilSideColorsField.optional(),
   foilColors: orderItemFoilColorsField.optional(),
@@ -2321,16 +2350,120 @@ const orderChangeReason = z
   .min(1, '请填写申请说明')
   .max(500, '申请说明过长');
 
-const modifyOrderChangeRequestSchema = z.object({
-  orderId: orderChangeId,
-  type: z.literal('MODIFY'),
-  modifyKind: z.enum(['QTY', 'DUE_DATE', 'ADDRESS', 'CRAFT_PAPER', 'OTHER']),
-  reason: orderChangeReason,
-  items: orderChangeRequestItemsSchema,
+const MAX_ORDER_CHANGE_PENDING_CHARGE_RESOLUTIONS = 10;
+
+const orderChangeProjectedQuantityField = z.preprocess(
+  (value) => {
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string') return value;
+    const normalized = value.trim();
+    return /^\d+$/.test(normalized) ? Number(normalized) : undefined;
+  },
+  z
+    .number({ message: '投影分货数量格式非法' })
+    .finite('投影分货数量格式非法')
+    .safe('投影分货数量超出安全范围')
+    .int('投影分货数量必须是整数')
+    .min(0, '投影分货数量不能小于 0')
+    .max(
+      MAX_ORDER_ITEMS_PER_ORDER * 9_999_999,
+      '投影分货数量过大',
+    ),
+);
+
+const orderChangeResolutionAmountField = shipmentChargeMoneyField.refine(
+  (value): value is string => value !== null,
+  '请填写人工确认收费',
+);
+
+/**
+ * An administrator may resolve only the shipment charge rows returned by the
+ * proposed-change preview. These expected facts are optimistic-concurrency
+ * evidence; the domain service still has to recompute and match every field
+ * under the order lock before trusting the submitted amount.
+ */
+export const orderChangePendingChargeResolutionSchema = z.object({
+  businessKey: z
+    .string()
+    .trim()
+    .min(1, '收费业务键不能为空')
+    .max(128, '收费业务键过长')
+    .transform((value) => value.toUpperCase()),
+  shipmentId: orderChangeId,
+  expectedSequence: shipOrderVersionField('发货记录序号', 1),
+  expectedProjectedQuantity: orderChangeProjectedQuantityField,
+  expectedDestinationProvince: optionalShipmentText('预览计费省份', 32),
+  amount: orderChangeResolutionAmountField,
+  reason: requiredTrimmedText('人工物流定价依据', 500),
 });
+
+export type OrderChangePendingChargeResolutionInput = z.infer<
+  typeof orderChangePendingChargeResolutionSchema
+>;
+
+const orderChangePendingChargeResolutionsSchema = z
+  .array(orderChangePendingChargeResolutionSchema)
+  .max(
+    MAX_ORDER_CHANGE_PENDING_CHARGE_RESOLUTIONS,
+    `单次改单待核物流费不超过 ${MAX_ORDER_CHANGE_PENDING_CHARGE_RESOLUTIONS} 项`,
+  )
+  .default([])
+  .superRefine((resolutions, ctx) => {
+    const businessKeys = new Set<string>();
+    const shipmentIds = new Set<string>();
+    resolutions.forEach((resolution, index) => {
+      const normalizedBusinessKey = resolution.businessKey.toUpperCase();
+      if (businessKeys.has(normalizedBusinessKey)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [index, 'businessKey'],
+          message: '同一物流收费不能重复提交',
+        });
+      }
+      businessKeys.add(normalizedBusinessKey);
+      if (shipmentIds.has(resolution.shipmentId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [index, 'shipmentId'],
+          message: '同一发货记录不能重复提交人工物流收费',
+        });
+      }
+      shipmentIds.add(resolution.shipmentId);
+    });
+  });
+
+const modifyOrderChangeRequestSchema = z
+  .object({
+    orderId: orderChangeId,
+    expectedRevision: shipOrderVersionField('工单修订号', 1),
+    expectedWorkOrderVersion: shipOrderVersionField('纸质工单版本', 1),
+    type: z.literal('MODIFY'),
+    modifyKind: z.enum(['QTY', 'DUE_DATE', 'ADDRESS', 'CRAFT_PAPER', 'OTHER']),
+    reason: orderChangeReason,
+    items: orderChangeRequestItemsSchema,
+  })
+  .superRefine((value, ctx) => {
+    value.items.forEach((item, index) => {
+      const hasSpecification = typeof item.specification === 'string';
+      const hasTargetProduct = item.targetProductId !== undefined;
+      if (hasSpecification === hasTargetProduct) return;
+      ctx.addIssue({
+        code: 'custom',
+        path: [
+          'items',
+          index,
+          hasSpecification ? 'targetProductId' : 'specification',
+        ],
+        message:
+          '修改规格必须同时提交目标报价产品与产品目录规格',
+      });
+    });
+  });
 
 const cancelOrderChangeRequestSchema = z.object({
   orderId: orderChangeId,
+  expectedRevision: shipOrderVersionField('工单修订号', 1),
+  expectedWorkOrderVersion: shipOrderVersionField('纸质工单版本', 1),
   type: z.literal('CANCEL'),
   reason: orderChangeReason,
   items: z.array(z.never()).max(0).default([]),
@@ -2361,20 +2494,31 @@ export type CreateOrderChangeRequestInput = z.infer<
 >;
 
 const reviewOrderChangeRequestBaseSchema = z.object({
-    requestId: orderChangeId,
-    decision: z.enum(['APPROVE', 'DENY', 'REJECT']),
-    reviewRemark: optionalTrimmedText('审核备注', 500),
-    producedQty: z.number().int().nonnegative().optional(),
-    settleFee: z
-      .string()
-      .trim()
-      .regex(/^\d{1,10}(?:\.\d{1,2})?$/, '结算金额格式错误')
-      .optional(),
-    settleFeeAdjustmentReason: z.string().trim().max(500).optional(),
-  });
+  requestId: orderChangeId,
+  // Rejection does not depend on a price revision. Approval must require and
+  // compare this value in the locked domain command.
+  expectedPriceRevision: shipOrderVersionField('价格版本', 0).optional(),
+  expectedQuoteToken: z
+    .string()
+    .trim()
+    .regex(
+      /^order-change-approval-v1:[a-f\d]{64}$/u,
+      '计价预览凭证格式错误',
+    )
+    .optional(),
+  pendingChargeResolutions: orderChangePendingChargeResolutionsSchema,
+  decision: z.enum(['APPROVE', 'DENY', 'REJECT']),
+  reviewRemark: optionalTrimmedText('审核备注', 500),
+  producedQty: z.number().int().nonnegative().optional(),
+  settleFee: z
+    .string()
+    .trim()
+    .regex(/^\d{1,10}(?:\.\d{1,2})?$/, '结算金额格式错误')
+    .optional(),
+  settleFeeAdjustmentReason: z.string().trim().max(500).optional(),
+});
 
-export const reviewOrderChangeRequestSchema =
-  reviewOrderChangeRequestBaseSchema
+export const reviewOrderChangeRequestSchema = reviewOrderChangeRequestBaseSchema
   .superRefine((value, ctx) => {
     if (
       (value.decision === 'DENY' || value.decision === 'REJECT') &&
@@ -2388,12 +2532,22 @@ export const reviewOrderChangeRequestSchema =
     }
   });
 
-export type ReviewOrderChangeRequestInput = z.infer<
+type ParsedReviewOrderChangeRequestInput = z.infer<
   typeof reviewOrderChangeRequestSchema
 >;
+export type ReviewOrderChangeRequestInput = Omit<
+  ParsedReviewOrderChangeRequestInput,
+  'pendingChargeResolutions'
+> & {
+  pendingChargeResolutions?: OrderChangePendingChargeResolutionInput[];
+};
 
 export const previewOrderChangeRequestPricingSchema =
-  reviewOrderChangeRequestBaseSchema.pick({ requestId: true });
+  reviewOrderChangeRequestBaseSchema.pick({
+    requestId: true,
+    expectedPriceRevision: true,
+    pendingChargeResolutions: true,
+  });
 
 export const previewOrderCancellationSettlementSchema =
   reviewOrderChangeRequestBaseSchema
@@ -2404,9 +2558,15 @@ export type PreviewOrderCancellationSettlementInput = z.infer<
   typeof previewOrderCancellationSettlementSchema
 >;
 
-export type PreviewOrderChangeRequestPricingInput = z.infer<
+type ParsedPreviewOrderChangeRequestPricingInput = z.infer<
   typeof previewOrderChangeRequestPricingSchema
 >;
+export type PreviewOrderChangeRequestPricingInput = Omit<
+  ParsedPreviewOrderChangeRequestPricingInput,
+  'pendingChargeResolutions'
+> & {
+  pendingChargeResolutions?: OrderChangePendingChargeResolutionInput[];
+};
 
 export const withdrawOrderChangeRequestSchema = z.object({
   requestId: orderChangeId,
@@ -3458,21 +3618,19 @@ const channelNameField = z
   .max(64, '群名过长（最多 64 个字符）');
 
 // 企业微信 webhook URL 的官方格式：
-//   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<uuid>
-// 严格 origin 检查：避免管理员把任意 URL 粘进来踩 SSRF / 误投递。
-// HTTPS 强制——HTTP 在 prod 会被 reject 但本地 mock URL 也走 https://...
-// 所以不放宽。query 参数允许任意（key、可能的扩展字段）。
+//   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<非空>
+// 严格限制协议、主机、路径和唯一 query，避免 SSRF、凭据泄漏与误投递。
 const channelWebhookUrlField = z
   .string()
   .trim()
   .min(1, '请填写企业微信 Webhook URL')
   .max(512, 'Webhook URL 过长')
   .refine(
-    (v) => /^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?/.test(v),
+    isValidWecomGroupBotWebhookUrl,
     'Webhook URL 必须形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
   );
 
-export const createNotificationChannelSchema = z.object({
+const notificationChannelIdentityFields = {
   channelKey: z
     .string()
     .trim()
@@ -3483,9 +3641,26 @@ export const createNotificationChannelSchema = z.object({
       'channelKey 必须以小写字母开头，仅允许小写字母 / 数字 / 下划线',
     ),
   channelName: channelNameField,
-  webhookUrl: channelWebhookUrlField,
-  isActive: formBoolean,
-});
+};
+
+export const createNotificationChannelSchema = z.preprocess(
+  defaultLegacyWebhookTransport,
+  z.discriminatedUnion('transport', [
+    z.object({
+      ...notificationChannelIdentityFields,
+      transport: z.literal('WECOM_GROUP_WEBHOOK'),
+      webhookUrl: channelWebhookUrlField,
+      isActive: formBoolean,
+    }),
+    z.object({
+      ...notificationChannelIdentityFields,
+      transport: z.literal('WECOM_SMART_BOT'),
+      // A smart-bot destination is deliberately born inactive and without a
+      // target. The target can only be learned from a signed WS group callback.
+      isActive: z.unknown().transform(() => false),
+    }),
+  ]),
+);
 
 export type CreateNotificationChannelInput = z.infer<
   typeof createNotificationChannelSchema
@@ -3493,11 +3668,34 @@ export type CreateNotificationChannelInput = z.infer<
 
 // 编辑场景下不让 owner 改 channelKey（key 是稳定标识，被 audit log
 // 引用；改 key 等同于&ldquo;新建+删除&rdquo;）—— UI 把 key 渲染成只读。
-export const updateNotificationChannelSchema = z.object({
-  channelName: channelNameField,
-  webhookUrl: channelWebhookUrlField,
-  isActive: formBoolean,
-});
+export const updateNotificationChannelSchema = z.preprocess(
+  defaultLegacyWebhookTransport,
+  z.discriminatedUnion('transport', [
+    z.object({
+      transport: z.literal('WECOM_GROUP_WEBHOOK'),
+      channelName: channelNameField,
+      webhookUrl: channelWebhookUrlField,
+      isActive: formBoolean,
+    }),
+    z.object({
+      transport: z.literal('WECOM_SMART_BOT'),
+      channelName: channelNameField,
+      isActive: formBoolean,
+    }),
+  ]),
+);
+
+function defaultLegacyWebhookTransport(value: unknown): unknown {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !('transport' in value)
+  ) {
+    return { ...value, transport: 'WECOM_GROUP_WEBHOOK' };
+  }
+  return value;
+}
 
 export type UpdateNotificationChannelInput = z.infer<
   typeof updateNotificationChannelSchema
@@ -3509,8 +3707,27 @@ export const updateNotificationRuleSchema = z.object({
   messageTemplate: z
     .string()
     .trim()
-    .min(1, '请填写消息模板')
-    .max(4000, '模板过长（企业微信单条 markdown 上限 4096 字节，留余量）'),
+    .superRefine((value, ctx) => {
+      if (value.length === 0) {
+        ctx.addIssue({ code: 'custom', message: '请填写消息模板' });
+        return;
+      }
+      // One UTF-16 code unit always occupies at least one UTF-8 byte. This
+      // cheap guard bounds the TextEncoder allocation for hostile form input.
+      if (value.length > WECOM_MARKDOWN_MAX_BYTES) {
+        ctx.addIssue({
+          code: 'custom',
+          message: '模板过长（企业微信单条 markdown 上限 4096 字节）',
+        });
+        return;
+      }
+      if (wecomMarkdownByteLength(value) > WECOM_MARKDOWN_MAX_BYTES) {
+        ctx.addIssue({
+          code: 'custom',
+          message: '模板过长（企业微信单条 markdown 上限 4096 字节）',
+        });
+      }
+    }),
   // FormData 里多选 checkbox 走 getAll('channelIds'); 这里接 string[]。
   // 允许空数组——但 isActive=true && empty 在 server action 里业务校验
   // 拒绝（schema 不能跨字段拒，留给 action 层）。

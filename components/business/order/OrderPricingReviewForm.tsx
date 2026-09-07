@@ -1,12 +1,15 @@
 "use client";
 
 import {
+  type Dispatch,
+  type SetStateAction,
   useActionState,
   useCallback,
   useEffect,
   useState,
   useTransition,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   finalizeOrderPricingAction,
   previewOrderPricingReviewAction,
@@ -72,7 +75,162 @@ function priceBookLabel(
     : "历史金额（无版本快照）";
 }
 
+function hasValue(value: string | null | undefined): boolean {
+  return Boolean(value?.trim());
+}
+
+function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDrafts }: {
+  preview: OrderPricingReviewPreview;
+  shipmentDrafts: Record<string, ShipmentDraft>;
+  setShipmentDrafts: Dispatch<SetStateAction<Record<string, ShipmentDraft>>>;
+}) {
+  return (
+    <>
+      {preview.shipments.length > 0 ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">逐票物流与耗材收费</h3>
+          <ol className="grid gap-3 lg:grid-cols-2">
+            {preview.shipments.map((shipment) => {
+              const defaultDraft: ShipmentDraft = {
+                shippingFee:
+                  shipment.shipping.currentAmount ??
+                  shipment.shipping.suggestedAmount ??
+                  "",
+                packingMaterialFee:
+                  shipment.packaging.currentAmount ??
+                  shipment.packaging.suggestedAmount ??
+                  "",
+                reason: shipment.currentReason ?? "",
+              };
+              const draft =
+                shipmentDrafts[shipment.shipmentId] ?? defaultDraft;
+              const shippingAutomatic =
+                shipment.shipping.complete && !shipment.shipping.advisory;
+              const packagingAutomatic =
+                shipment.packaging.complete && !shipment.packaging.advisory;
+              const needsReason = !shippingAutomatic || !packagingAutomatic;
+              return (
+                <li
+                  id={`pricing-review-shipment-${shipment.shipmentId}`}
+                  key={shipment.shipmentId}
+                  className="scroll-mt-24 space-y-3 rounded-md border p-3 text-sm"
+                >
+                  <p className="font-medium">
+                    地址 {shipment.sequence} ·{" "}
+                    {shipment.itemQuantity.toLocaleString("zh-CN")} 个
+                  </p>
+                  {[
+                    ...shipment.shipping.errors,
+                    ...shipment.packaging.errors,
+                  ].length > 0 ? (
+                    <p className="text-xs text-destructive">
+                      {[
+                        ...shipment.shipping.errors,
+                        ...shipment.packaging.errors,
+                      ]
+                        .filter((value, index, values) =>
+                          values.indexOf(value) === index,
+                        )
+                        .join("；")}
+                    </p>
+                  ) : null}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1 text-xs">
+                      <span>计费省份</span>
+                      <Input
+                        value={shipment.destinationProvince ?? ""}
+                        readOnly
+                        aria-readonly="true"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span>计费重量（kg）</span>
+                      <Input
+                        inputMode="decimal"
+                        value={shipment.billableWeightKg ?? ""}
+                        readOnly
+                        aria-readonly="true"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span>
+                        快递费（快照建议{" "}
+                        {shipment.shipping.suggestedAmount ?? "无"}）
+                      </span>
+                      <Input
+                        required={!shippingAutomatic}
+                        inputMode="decimal"
+                        value={draft.shippingFee}
+                        readOnly={shippingAutomatic}
+                        aria-readonly={shippingAutomatic}
+                        onChange={(event) =>
+                          setShipmentDrafts((current) => ({
+                            ...current,
+                            [shipment.shipmentId]: {
+                              ...(current[shipment.shipmentId] ??
+                                defaultDraft),
+                              shippingFee: event.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span>
+                        打包耗材费（快照参考{" "}
+                        {shipment.packaging.suggestedAmount ?? "无"}）
+                      </span>
+                      <Input
+                        required={!packagingAutomatic}
+                        inputMode="decimal"
+                        value={draft.packingMaterialFee}
+                        readOnly={packagingAutomatic}
+                        aria-readonly={packagingAutomatic}
+                        onChange={(event) =>
+                          setShipmentDrafts((current) => ({
+                            ...current,
+                            [shipment.shipmentId]: {
+                              ...(current[shipment.shipmentId] ??
+                                defaultDraft),
+                              packingMaterialFee: event.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  {needsReason ? (
+                    <label className="block space-y-1 text-xs">
+                      <span>收费确认说明（人工/参考价必填）</span>
+                      <Textarea
+                        required
+                        maxLength={500}
+                        value={draft.reason}
+                        onChange={(event) =>
+                          setShipmentDrafts((current) => ({
+                            ...current,
+                            [shipment.shipmentId]: {
+                              ...(current[shipment.shipmentId] ??
+                                defaultDraft),
+                              reason: event.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function OrderPricingReviewForm({ orderId }: Props) {
+  const router = useRouter();
   const [previewState, previewAction] = useActionState<
     PreviewOrderPricingReviewResult | null,
     unknown
@@ -108,11 +266,13 @@ export function OrderPricingReviewForm({ orderId }: Props) {
 
   useEffect(() => {
     if (finalizeState?.status !== "success") return;
-    loadPreview();
-  }, [finalizeState, loadPreview]);
+    // 确认成功后工单已不再是“待管理员确认”。刷新服务端页面
+    // 以移除表单，不再重复请求已被服务端禁止的核价预览。
+    router.refresh();
+  }, [finalizeState, router]);
 
   function submit() {
-    if (!preview) return;
+    if (!preview || finalizeState?.status === "success") return;
     startFinalizeTransition(() =>
       finalizeAction({
         orderId,
@@ -162,12 +322,12 @@ export function OrderPricingReviewForm({ orderId }: Props) {
             shipmentDrafts[shipment.shipmentId]?.shippingFee ??
             shipment.shipping.currentAmount ??
             shipment.shipping.suggestedAmount ??
-            "0.00",
+            "",
           packingMaterialFee:
             shipmentDrafts[shipment.shipmentId]?.packingMaterialFee ??
             shipment.packaging.currentAmount ??
             shipment.packaging.suggestedAmount ??
-            "0.00",
+            "",
           reason:
             shipmentDrafts[shipment.shipmentId]?.reason ??
             shipment.currentReason ??
@@ -180,70 +340,120 @@ export function OrderPricingReviewForm({ orderId }: Props) {
 
   const previewError = resultError(previewState);
   const finalizeError = resultError(finalizeState);
-  const draftsReady =
-    preview !== null &&
-    preview.items
-      .filter((item) => !item.complete)
-      .every((item) => {
-        const draft = itemDrafts[item.itemId];
-        return Boolean(
-          (draft?.unitPrice ?? item.currentUnitPrice).trim() &&
-          (draft?.fixedFee ?? item.currentFixedFee).trim() &&
-          (draft?.reason ?? item.currentReason ?? "").trim(),
-        );
-      }) &&
-    preview.packagingGroups.every((group) => {
-      const draft = packagingGroupDrafts[group.packagingGroupId];
-      return Boolean(
-        (
-          group.complete
-            ? group.suggestedUnitPrice
-            : (draft?.unitPrice ?? group.currentUnitPrice)
-        )?.trim() &&
-          (group.complete ||
-            (draft?.reason ?? group.currentReason ?? "").trim()),
-      );
-    }) &&
-    preview.orderCharges.every((charge) => {
-      const draft = orderChargeDrafts[charge.chargeId];
-      return Boolean(
-        (
-          draft?.amount ??
-          charge.currentAmount ??
-          charge.suggestedAmount ??
-          ""
-        ).trim() &&
-          (draft?.reason ?? charge.currentReason ?? "").trim(),
-      );
-    }) &&
-    preview.shipments.every((shipment) => {
-      const draft = shipmentDrafts[shipment.shipmentId];
-      const needsReason =
-        !shipment.shipping.complete ||
-        shipment.shipping.advisory ||
-        !shipment.packaging.complete ||
-        shipment.packaging.advisory;
-      return Boolean(
-        (
-          draft?.shippingFee ??
-          shipment.shipping.currentAmount ??
-          shipment.shipping.suggestedAmount ??
-          ""
-        ).trim() &&
-        (
-          draft?.packingMaterialFee ??
-          shipment.packaging.currentAmount ??
-          shipment.packaging.suggestedAmount ??
-          ""
-        ).trim() &&
-        (!needsReason ||
-          (draft?.reason ?? shipment.currentReason ?? "").trim()),
-      );
-    });
   const incompleteItemCount =
     preview?.items.filter((item) => !item.complete).length ?? 0;
   const incompletePackagingGroupCount =
     preview?.packagingGroups.filter((group) => !group.complete).length ?? 0;
+  const pendingReviewTargets = preview
+    ? [
+        ...preview.items
+          .filter((item) => !item.complete)
+          .map((item) => ({
+            href: `#pricing-review-item-${item.itemId}`,
+            label: `款式 #${item.sequence} ${externalPriceBusinessText(item.name)}`,
+          })),
+        ...preview.packagingGroups
+          .filter((group) => !group.complete)
+          .map((group) => ({
+            href: `#pricing-review-packaging-${group.packagingGroupId}`,
+            label: `包装组 #${group.sequence} 入袋费`,
+          })),
+        ...preview.orderCharges.map((charge) => ({
+          href: `#pricing-review-charge-${charge.chargeId}`,
+          label: charge.description,
+        })),
+        ...preview.shipments
+          .filter(
+            (shipment) =>
+              !shipment.shipping.complete ||
+              shipment.shipping.advisory ||
+              !shipment.packaging.complete ||
+              shipment.packaging.advisory,
+          )
+          .map((shipment) => ({
+            href: `#pricing-review-shipment-${shipment.shipmentId}`,
+            label: `地址 ${shipment.sequence} 快递/耗材费`,
+          })),
+      ]
+    : [];
+  const missingRequirements = preview
+    ? [
+        ...preview.items.flatMap((item) => {
+          if (item.complete) return [];
+          const draft = itemDrafts[item.itemId];
+          const label = `款式 #${item.sequence}`;
+          return [
+            ...(!hasValue(draft?.unitPrice ?? item.currentUnitPrice)
+              ? [`${label} 客户单价`]
+              : []),
+            ...(!hasValue(draft?.fixedFee ?? item.currentFixedFee)
+              ? [`${label} 每款一次性费用`]
+              : []),
+            ...(!hasValue(draft?.reason ?? item.currentReason)
+              ? [`${label} 定价依据`]
+              : []),
+          ];
+        }),
+        ...preview.packagingGroups.flatMap((group) => {
+          if (group.complete) return [];
+          const draft = packagingGroupDrafts[group.packagingGroupId];
+          const label = `包装组 #${group.sequence}`;
+          return [
+            ...(!hasValue(draft?.unitPrice ?? group.currentUnitPrice)
+              ? [`${label} 每袋入袋费`]
+              : []),
+            ...(!hasValue(draft?.reason ?? group.currentReason)
+              ? [`${label} 定价依据`]
+              : []),
+          ];
+        }),
+        ...preview.orderCharges.flatMap((charge) => {
+          const draft = orderChargeDrafts[charge.chargeId];
+          return [
+            ...(!hasValue(
+              draft?.amount ?? charge.currentAmount ?? charge.suggestedAmount,
+            )
+              ? [`${charge.description} 确认金额`]
+              : []),
+            ...(!hasValue(draft?.reason ?? charge.currentReason)
+              ? [`${charge.description} 定价依据`]
+              : []),
+          ];
+        }),
+        ...preview.shipments.flatMap((shipment) => {
+          const draft = shipmentDrafts[shipment.shipmentId];
+          const needsReason =
+            !shipment.shipping.complete ||
+            shipment.shipping.advisory ||
+            !shipment.packaging.complete ||
+            shipment.packaging.advisory;
+          const label = `地址 ${shipment.sequence}`;
+          return [
+            ...(!hasValue(
+              draft?.shippingFee ??
+                shipment.shipping.currentAmount ??
+                shipment.shipping.suggestedAmount,
+            )
+              ? [`${label} 快递费`]
+              : []),
+            ...(!hasValue(
+              draft?.packingMaterialFee ??
+                shipment.packaging.currentAmount ??
+                shipment.packaging.suggestedAmount,
+            )
+              ? [`${label} 打包耗材费`]
+              : []),
+            ...(needsReason && !hasValue(draft?.reason ?? shipment.currentReason)
+              ? [`${label} 收费确认说明`]
+              : []),
+          ];
+        }),
+      ]
+    : [];
+  const draftsReady = preview !== null && missingRequirements.length === 0;
+  const pricingFinalized = finalizeState?.status === "success";
+  const submissionDisabled =
+    !draftsReady || finalizePending || previewPending || pricingFinalized;
 
   return (
     <section
@@ -253,7 +463,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
       <div>
         <h2 className="text-base font-semibold">工厂核价确认</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          仅核对工单已保存的报价快照；已锁定金额不会重新计算。
+          仅核对工单已保存的报价快照；自动报价只读，仅补录待人工核价项。
         </p>
       </div>
 
@@ -280,19 +490,63 @@ export function OrderPricingReviewForm({ orderId }: Props) {
 
       {preview ? (
         <>
-          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold">待管理员补录</h3>
+              <Badge
+                variant={
+                  pendingReviewTargets.length > 0 ? "destructive" : "secondary"
+                }
+              >
+                {pendingReviewTargets.length} 项
+              </Badge>
+            </div>
+            {pendingReviewTargets.length > 0 ? (
+              <>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  点击项目可直接定位到待填字段。
+                </p>
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {pendingReviewTargets.map((target) => (
+                    <li key={target.href}>
+                      <a
+                        href={target.href}
+                        className="inline-flex rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium underline-offset-4 hover:underline"
+                      >
+                        {target.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">
+                当前报价快照没有需要补录的人工金额。
+              </p>
+            )}
+          </div>
+
+          <dl
+            className={`grid gap-2 text-sm ${
+              preview.logisticsPriceBook || preview.shipments.length > 0
+                ? "sm:grid-cols-2"
+                : "sm:grid-cols-1"
+            }`}
+          >
             <div className="rounded-md border p-3">
               <dt className="text-xs text-muted-foreground">加工费报价快照</dt>
               <dd className="mt-1 font-medium">
                 {priceBookLabel(preview.processingPriceBook)}
               </dd>
             </div>
-            <div className="rounded-md border p-3">
-              <dt className="text-xs text-muted-foreground">物流报价快照</dt>
-              <dd className="mt-1 font-medium">
-                {priceBookLabel(preview.logisticsPriceBook)}
-              </dd>
-            </div>
+            {preview.logisticsPriceBook || preview.shipments.length > 0 ? (
+              <div className="rounded-md border p-3">
+                <dt className="text-xs text-muted-foreground">物流报价快照</dt>
+                <dd className="mt-1 font-medium">
+                  {priceBookLabel(preview.logisticsPriceBook)}
+                </dd>
+              </div>
+            ) : null}
           </dl>
 
           <div className="space-y-2">
@@ -303,12 +557,16 @@ export function OrderPricingReviewForm({ orderId }: Props) {
               >
                 {incompleteItemCount > 0
                   ? `${incompleteItemCount} 款需人工终价`
-                  : "全部已有锁定金额"}
+                  : "全部已有报价快照"}
               </Badge>
             </div>
             <ol className="space-y-2">
               {preview.items.map((item) => (
-                <li key={item.itemId} className="rounded-md border p-3 text-sm">
+                <li
+                  id={`pricing-review-item-${item.itemId}`}
+                  key={item.itemId}
+                  className="scroll-mt-24 rounded-md border p-3 text-sm"
+                >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <p className="font-medium">
                       #{item.sequence} · {externalPriceBusinessText(item.name)} ·{" "}
@@ -317,7 +575,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                     <Badge
                       variant={item.complete ? "secondary" : "destructive"}
                     >
-                      {item.complete ? "已锁定快照价" : "待人工核价"}
+                      {item.complete ? "报价快照（只读）" : "待人工核价"}
                     </Badge>
                   </div>
                   {item.complete ? (
@@ -441,7 +699,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                 >
                   {incompletePackagingGroupCount > 0
                     ? `${incompletePackagingGroupCount} 组需人工终价`
-                    : "全部已有锁定金额"}
+                    : "全部已有报价快照"}
                 </Badge>
               </div>
               <ol className="space-y-2">
@@ -454,8 +712,9 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                     packagingGroupDrafts[group.packagingGroupId] ?? defaultDraft;
                   return (
                     <li
+                      id={`pricing-review-packaging-${group.packagingGroupId}`}
                       key={group.packagingGroupId}
-                      className="space-y-3 rounded-md border p-3 text-sm"
+                      className="scroll-mt-24 space-y-3 rounded-md border p-3 text-sm"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <p className="font-medium">
@@ -466,7 +725,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                         <Badge
                           variant={group.complete ? "secondary" : "destructive"}
                         >
-                          {group.complete ? "已锁定快照价" : "待人工核价"}
+                          {group.complete ? "报价快照（只读）" : "待人工核价"}
                         </Badge>
                       </div>
                       {group.errors.length > 0 ? (
@@ -478,7 +737,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                         <label className="space-y-1 text-xs">
                           <span>每袋入袋费（元）</span>
                           <Input
-                            required
+                            required={!group.complete}
                             inputMode="decimal"
                             readOnly={group.complete}
                             aria-readonly={group.complete}
@@ -552,8 +811,9 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                     orderChargeDrafts[charge.chargeId] ?? defaultDraft;
                   return (
                     <li
+                      id={`pricing-review-charge-${charge.chargeId}`}
                       key={charge.chargeId}
-                      className="space-y-3 rounded-md border p-3 text-sm"
+                      className="scroll-mt-24 space-y-3 rounded-md border p-3 text-sm"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <p className="font-medium">{charge.description}</p>
@@ -607,142 +867,11 @@ export function OrderPricingReviewForm({ orderId }: Props) {
             </div>
           ) : null}
 
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold">逐票物流与耗材收费</h3>
-            <ol className="grid gap-3 lg:grid-cols-2">
-              {preview.shipments.map((shipment) => {
-                const defaultDraft: ShipmentDraft = {
-                  shippingFee:
-                    shipment.shipping.currentAmount ??
-                    shipment.shipping.suggestedAmount ??
-                    "0.00",
-                  packingMaterialFee:
-                    shipment.packaging.currentAmount ??
-                    shipment.packaging.suggestedAmount ??
-                    "0.00",
-                  reason: shipment.currentReason ?? "",
-                };
-                const draft =
-                  shipmentDrafts[shipment.shipmentId] ?? defaultDraft;
-                const shippingAutomatic =
-                  shipment.shipping.complete && !shipment.shipping.advisory;
-                const packagingAutomatic =
-                  shipment.packaging.complete && !shipment.packaging.advisory;
-                const needsReason = !shippingAutomatic || !packagingAutomatic;
-                return (
-                  <li
-                    key={shipment.shipmentId}
-                    className="space-y-3 rounded-md border p-3 text-sm"
-                  >
-                    <p className="font-medium">
-                      地址 {shipment.sequence} ·{" "}
-                      {shipment.itemQuantity.toLocaleString("zh-CN")} 个
-                    </p>
-                    {[
-                      ...shipment.shipping.errors,
-                      ...shipment.packaging.errors,
-                    ].length > 0 ? (
-                      <p className="text-xs text-destructive">
-                        {[
-                          ...shipment.shipping.errors,
-                          ...shipment.packaging.errors,
-                        ]
-                          .filter((value, index, values) =>
-                            values.indexOf(value) === index,
-                          )
-                          .join("；")}
-                      </p>
-                    ) : null}
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="space-y-1 text-xs">
-                        <span>计费省份</span>
-                        <Input
-                          value={shipment.destinationProvince ?? ""}
-                          readOnly
-                          aria-readonly="true"
-                        />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span>计费重量（kg）</span>
-                        <Input
-                          inputMode="decimal"
-                          value={shipment.billableWeightKg ?? ""}
-                          readOnly
-                          aria-readonly="true"
-                        />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span>
-                          快递费（快照建议{" "}
-                          {shipment.shipping.suggestedAmount ?? "无"}）
-                        </span>
-                        <Input
-                          required
-                          inputMode="decimal"
-                          value={draft.shippingFee}
-                          readOnly={shippingAutomatic}
-                          aria-readonly={shippingAutomatic}
-                          onChange={(event) =>
-                            setShipmentDrafts((current) => ({
-                              ...current,
-                              [shipment.shipmentId]: {
-                                ...(current[shipment.shipmentId] ??
-                                  defaultDraft),
-                                shippingFee: event.target.value,
-                              },
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span>
-                          打包耗材费（快照参考{" "}
-                          {shipment.packaging.suggestedAmount ?? "无"}）
-                        </span>
-                        <Input
-                          required
-                          inputMode="decimal"
-                          value={draft.packingMaterialFee}
-                          readOnly={packagingAutomatic}
-                          aria-readonly={packagingAutomatic}
-                          onChange={(event) =>
-                            setShipmentDrafts((current) => ({
-                              ...current,
-                              [shipment.shipmentId]: {
-                                ...(current[shipment.shipmentId] ??
-                                  defaultDraft),
-                                packingMaterialFee: event.target.value,
-                              },
-                            }))
-                          }
-                        />
-                      </label>
-                    </div>
-                    <label className="block space-y-1 text-xs">
-                      <span>
-                        收费确认说明
-                        {needsReason ? "（人工/参考价必填）" : "（可选）"}
-                      </span>
-                      <Textarea
-                        required={needsReason}
-                        maxLength={500}
-                        value={draft.reason}
-                        onChange={(event) =>
-                          setShipmentDrafts((current) => ({
-                            ...current,
-                            [shipment.shipmentId]: {
-                              ...(current[shipment.shipmentId] ?? defaultDraft),
-                              reason: event.target.value,
-                            },
-                          }))
-                        }
-                      />
-                    </label>
-                  </li>
-                );
-              })}
-            </ol>
-          </div>
+          <PricingReviewShipmentFields
+            preview={preview}
+            shipmentDrafts={shipmentDrafts}
+            setShipmentDrafts={setShipmentDrafts}
+          />
 
           <label className="block space-y-1 text-sm">
             <span>整单终价备注（可选）</span>
@@ -766,15 +895,43 @@ export function OrderPricingReviewForm({ orderId }: Props) {
             </p>
           ) : null}
 
+          <div
+            aria-live="polite"
+            className={`rounded-md border p-3 text-sm ${
+              missingRequirements.length > 0
+                ? "border-destructive/40 bg-destructive/5"
+                : "bg-muted/30"
+            }`}
+          >
+            {missingRequirements.length > 0 ? (
+              <>
+                <p className="font-medium">
+                  还需完成 {missingRequirements.length} 个必填项后才能确认：
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                  {missingRequirements.map((requirement, index) => (
+                    <li key={`${index}-${requirement}`}>{requirement}</li>
+                  ))}
+                </ul>
+              </>
+            ) : pricingFinalized ? (
+              <p className="font-medium">终价已确认，正在刷新工单状态…</p>
+            ) : (
+              <p className="font-medium">待核价必填项已完成，可以确认终价。</p>
+            )}
+          </div>
+
           <ConfirmActionDialog
             level="L2"
-            disabled={!draftsReady || finalizePending || previewPending}
+            disabled={submissionDisabled}
             trigger={
               <Button
                 type="button"
-                disabled={!draftsReady || finalizePending || previewPending}
+                disabled={submissionDisabled}
               >
-                {finalizePending
+                {pricingFinalized
+                  ? "终价已确认"
+                  : finalizePending
                   ? "正在确认报价快照…"
                   : "确认工厂核价"}
               </Button>
