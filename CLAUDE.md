@@ -105,8 +105,8 @@ print-shop-erp/
 └── package.json
 ```
 
-> `AGENTS.md` 是硬约束：本仓库的 Next.js 16 与训练数据差异较大，**动 App Router 相关代码前先读
-> `node_modules/next/dist/docs/` 里的对应文档**，不要凭记忆写。
+> Next.js 版本敏感的 API、路由或构建行为按 `AGENTS.md` 核对当前安装版
+> `node_modules/next/dist/docs/` 中的对应文档。
 
 **三层架构约束**（简化版，独立开发者友好）：
 
