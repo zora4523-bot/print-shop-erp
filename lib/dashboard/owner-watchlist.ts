@@ -8,6 +8,11 @@ import {
 } from '../../generated/prisma/enums';
 import { db } from '../db';
 import {
+  paginatedResult,
+  paginationWindow,
+  type PaginatedResult,
+} from '../admin/table';
+import {
   DUE_SOON_DAYS,
   PROMISE_ALERT_STATUSES,
   promisedDaysLeft,
@@ -41,11 +46,12 @@ export type PendingShipmentRow = {
   customerRef: string | null;
   isUrgent: boolean;
   completedAt: Date;
+  promisedDate: Date | null;
+  // 工单提交人，不代表生产跟进人或当前负责人。
   submitterDisplayName: string;
 };
 
-export type PendingShipmentsResult = {
-  rows: PendingShipmentRow[];
+export type PendingShipmentsResult = PaginatedResult<PendingShipmentRow> & {
   hasMore: boolean;
 };
 
@@ -62,37 +68,47 @@ export type PendingShipmentsResult = {
 export async function getPendingShipments(
   _now: Date = new Date(),
   limit = 10,
+  page = 1,
 ): Promise<PendingShipmentsResult> {
   void _now;
+  const where: Prisma.OrderWhereInput = {
+    completedAt: { not: null },
+    shippedAt: null,
+    status: { in: [OrderStatus.PACKING, OrderStatus.COMPLETED] },
+  };
+  const total = await db.order.count({ where });
+  const window = paginationWindow(total, page, limit);
   const raw = await db.order.findMany({
-    where: {
-      completedAt: { not: null },
-      shippedAt: null,
-      status: { in: [OrderStatus.PACKING, OrderStatus.COMPLETED] },
-    },
-    orderBy: [{ isUrgent: 'desc' }, { completedAt: 'asc' }],
-    take: limit + 1,
+    where,
+    orderBy: [{ isUrgent: 'desc' }, { completedAt: 'asc' }, { orderNo: 'asc' }],
+    skip: window.skip,
+    take: window.take + 1,
     select: {
       id: true,
       orderNo: true,
       customerRef: true,
       isUrgent: true,
       completedAt: true,
+      promisedDate: true,
       submitter: { select: { displayName: true } },
     },
   });
 
-  const rows: PendingShipmentRow[] = raw.slice(0, limit).map((r) => ({
+  const rows: PendingShipmentRow[] = raw.slice(0, window.take).map((r) => ({
     id: r.id,
     orderNo: r.orderNo,
     customerRef: r.customerRef,
     isUrgent: r.isUrgent,
     // where.completedAt != null guarantees this projection is present.
     completedAt: r.completedAt as Date,
+    promisedDate: r.promisedDate,
     submitterDisplayName: r.submitter.displayName,
   }));
 
-  return { rows, hasMore: raw.length > limit };
+  return {
+    ...paginatedResult(rows, total, window),
+    hasMore: raw.length > window.take,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -141,7 +157,7 @@ export async function getOverdueOutsourcing(
       expectedDate: { lt: cutoff },
       NOT: { expectedDate: null },
     },
-    orderBy: { expectedDate: 'asc' },
+    orderBy: [{ expectedDate: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
       supplierName: true,
@@ -183,21 +199,18 @@ export type DueOrderRow = {
   daysLeft: number;
 };
 
-export type DueOrdersResult = {
-  rows: DueOrderRow[];
+export type DueOrdersResult = PaginatedResult<DueOrderRow> & {
   // 满足条件的总数（不受 limit 影响）。看板只渲染前 limit 条，footer 用
   // total 说明「一共积了多少」——这正是这张表最该暴露的信号：没闭环的
   // 逾期单（尤其被遗忘的 DRAFT）会一直挂在这个窗口里，不报总数就只能
   // 看到冰山尖。
-  total: number;
   // 窗口右界的上海日历日（YYYY-MM-DD）。页面拼「查看全部」链接的
   // promisedTo 参数时直接用它，保证列表页筛出来的和这里查的是同一批；
   // 时区运算留在 lib 侧，页面不自己再算一遍。
   promisedThroughYmd: string;
 };
 
-// 看板一屏能看完的条数。和 getPendingShipments 取同一个数：两张表在同
-// 一个 grid 里并排，行数不一致会让人以为其中一张「没数据了」。
+// 兼容现有调用的默认窗口；首页预览和完整关注列表可分别传入所需页大小。
 export const DUE_ORDERS_DEFAULT_LIMIT = 10;
 
 /**
@@ -224,6 +237,7 @@ export const DUE_ORDERS_DEFAULT_LIMIT = 10;
 export async function getDueOrders(
   now: Date = new Date(),
   limit = DUE_ORDERS_DEFAULT_LIMIT,
+  page = 1,
 ): Promise<DueOrdersResult> {
   const today = todayShanghai(now);
   const { start: todayStart } = shanghaiDayBoundary(today);
@@ -239,40 +253,43 @@ export async function getDueOrders(
     NOT: { promisedDate: null },
   };
 
-  const [raw, total] = await Promise.all([
-    db.order.findMany({
-      where,
-      // orderNo 兜底：同交期同急单时 Postgres 不保证行序，加了它相邻两次
-      // 渲染截断掉的才是同一批（不加会出现「刷新一下这单就没了」）。
-      orderBy: [
-        { promisedDate: 'asc' },
-        { isUrgent: 'desc' },
-        { orderNo: 'asc' },
-      ],
-      take: limit,
-      select: {
-        id: true,
-        orderNo: true,
-        customerRef: true,
-        status: true,
-        isUrgent: true,
-        promisedDate: true,
-      },
-    }),
-    db.order.count({ where }),
-  ]);
+  const total = await db.order.count({ where });
+  const window = paginationWindow(total, page, limit);
+  const raw = await db.order.findMany({
+    where,
+    // orderNo 兜底：同交期同急单时 Postgres 不保证行序，加了它相邻两次
+    // 渲染截断掉的才是同一批（不加会出现「刷新一下这单就没了」）。
+    orderBy: [
+      { promisedDate: 'asc' },
+      { isUrgent: 'desc' },
+      { orderNo: 'asc' },
+    ],
+    skip: window.skip,
+    take: window.take,
+    select: {
+      id: true,
+      orderNo: true,
+      customerRef: true,
+      status: true,
+      isUrgent: true,
+      promisedDate: true,
+    },
+  });
 
   return {
-    rows: raw.map((r) => ({
-      id: r.id,
-      orderNo: r.orderNo,
-      customerRef: r.customerRef,
-      status: r.status,
-      isUrgent: r.isUrgent,
-      promisedDate: r.promisedDate as Date,
-      daysLeft: promisedDaysLeft(r.promisedDate as Date, now),
-    })),
-    total,
+    ...paginatedResult(
+      raw.map((r) => ({
+        id: r.id,
+        orderNo: r.orderNo,
+        customerRef: r.customerRef,
+        status: r.status,
+        isUrgent: r.isUrgent,
+        promisedDate: r.promisedDate as Date,
+        daysLeft: promisedDaysLeft(r.promisedDate as Date, now),
+      })),
+      total,
+      window,
+    ),
     // todayStart 是「今日上海 0:00」的那个瞬间，+N 天再按上海格式化就是
     // 今日+N 的日历日（上海无夏令时，日长恒定 24h）。
     promisedThroughYmd: todayShanghai(
@@ -292,12 +309,17 @@ export type OverReportRow = {
   operatorDisplayName: string;
   remark: string | null;
   createdAt: Date;
+  quantities: OverReportQuantities | null;
 };
 
-export type OverReportsResult = {
-  rows: OverReportRow[];
-  // 窗口内的总条数（不受 limit 影响）。看板 footer 用它说「共 N 条」。
-  total: number;
+export type OverReportQuantities = {
+  completedQty: number;
+  defectQty: number;
+  reworkQty: number;
+  totalQty: number;
+};
+
+export type OverReportsResult = PaginatedResult<OverReportRow> & {
   // 窗口左界的上海日历日（YYYY-MM-DD），页面直接显示，不自己再算一遍。
   sinceYmd: string;
 };
@@ -310,13 +332,13 @@ export const OVER_REPORTS_DEFAULT_LIMIT = 10;
 /**
  * 超计划报工的知情通道（业主 2026-08-21 拍板）。
  *
- * 单条报工的数量守卫允许师傅自己勾「确认超出计划数」就通过，而计件金额按
- * 合计数全额付（lib/production.ts 的 reportTask）。批准权在被发钱的人手里，
- * 所以必须有一条老板**不用主动去翻工单时间线**就能看见的通道 —— 就是这张表。
+ * 历史任务允许师傅确认超计划报工，因此保留老板直接查看的知情通道。
  *
- * 数据源是 OrderLog 里 action='TASK_OVER_REPORT' 的行，由 reportTask 在同一个
- * 事务里写。刻意**不**新增 NOTIFICATION_EVENTS：那要同步改 lib/notification/
- * events.ts 与 prisma/seed.ts 的默认模板，成本远高于在看板上多一张表。
+ * 数据源是历史 reportTask 在事务中写入的 OrderLog。该 legacy 写入口已退役；
+ * 当前 ProductionOperation / ProgressStep 报工直接拒绝累计合格数超计划。
+ * 保留这些审计记录的可见性，不把被拒绝的报工或工单进度异常混成同一类事件。
+ * changedFields 只保存三项实际数量，计划数和款式仅存在于历史备注文本，
+ * 因而不从自由备注推导计划量、超出量或任务归属。
  *
  * findMany 与 count 共用同一个 where 对象：分开写一旦漂移，footer 会报一个
  * 和列表对不上的数字，而且没人看得出来（同 getDueOrders）。
@@ -324,6 +346,7 @@ export const OVER_REPORTS_DEFAULT_LIMIT = 10;
 export async function getRecentOverReports(
   now: Date = new Date(),
   limit = OVER_REPORTS_DEFAULT_LIMIT,
+  page = 1,
 ): Promise<OverReportsResult> {
   const today = todayShanghai(now);
   const { start: todayStart } = shanghaiDayBoundary(today);
@@ -336,36 +359,70 @@ export async function getRecentOverReports(
     createdAt: { gte: since },
   };
 
-  const [raw, total] = await Promise.all([
-    db.orderLog.findMany({
-      where,
-      // 最近的排最前：超报是「刚发生的事」，越新越该先看到。
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      select: {
-        id: true,
-        orderId: true,
-        remark: true,
-        createdAt: true,
-        order: { select: { orderNo: true } },
-        operator: { select: { displayName: true } },
-      },
-    }),
-    db.orderLog.count({ where }),
-  ]);
+  const total = await db.orderLog.count({ where });
+  const window = paginationWindow(total, page, limit);
+  const raw = await db.orderLog.findMany({
+    where,
+    // 最近的排最前，同时间用 id 保持分页顺序稳定。
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    skip: window.skip,
+    take: window.take,
+    select: {
+      id: true,
+      orderId: true,
+      remark: true,
+      changedFields: true,
+      createdAt: true,
+      order: { select: { orderNo: true } },
+      operator: { select: { displayName: true } },
+    },
+  });
 
   return {
-    rows: raw.map((r) => ({
-      id: r.id,
-      orderId: r.orderId,
-      orderNo: r.order.orderNo,
-      operatorDisplayName: r.operator.displayName,
-      remark: r.remark,
-      createdAt: r.createdAt,
-    })),
-    total,
+    ...paginatedResult(
+      raw.map((r) => ({
+        id: r.id,
+        orderId: r.orderId,
+        orderNo: r.order.orderNo,
+        operatorDisplayName: r.operator.displayName,
+        remark: r.remark,
+        createdAt: r.createdAt,
+        quantities: overReportQuantities(r.changedFields),
+      })),
+      total,
+      window,
+    ),
     sinceYmd: todayShanghai(since),
   };
+}
+
+/** Historical TASK_OVER_REPORT audit snapshots use non-negative integer after values. */
+function overReportQuantities(
+  changedFields: Prisma.JsonValue,
+): OverReportQuantities | null {
+  if (
+    !changedFields ||
+    typeof changedFields !== 'object' ||
+    Array.isArray(changedFields)
+  ) {
+    return null;
+  }
+  const readQuantity = (field: string): number | null => {
+    const change = changedFields[field];
+    if (!change || typeof change !== 'object' || Array.isArray(change)) return null;
+    const value = change.after;
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+      ? value
+      : null;
+  };
+  const completedQty = readQuantity('completedQty');
+  const defectQty = readQuantity('defectQty');
+  const reworkQty = readQuantity('reworkQty');
+  if (completedQty === null || defectQty === null || reworkQty === null) return null;
+  const totalQty = completedQty + defectQty + reworkQty;
+  return Number.isSafeInteger(totalQty)
+    ? { completedQty, defectQty, reworkQty, totalQty }
+    : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -417,7 +474,7 @@ export async function getEndingPeriods(
       status: SalaryPeriodStatus.IN_PROGRESS,
       periodEnd: { gte: todayStart, lt: sevenDaysOut },
     },
-    orderBy: { periodEnd: 'asc' },
+    orderBy: [{ periodEnd: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
       csUserId: true,

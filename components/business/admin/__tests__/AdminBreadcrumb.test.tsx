@@ -26,6 +26,8 @@ describe('resolveSegmentLabel', () => {
 
   it('已知段名走中文标签表', () => {
     expect(resolveSegmentLabel('orders', null)).toBe('工单');
+    expect(resolveSegmentLabel('attention', null)).toBe('关注事项');
+    expect(resolveSegmentLabel('analytics', null)).toBe('经营概览');
   });
 
   it('/orders/<id>/edit 的最后一段不再显示英文 edit', () => {

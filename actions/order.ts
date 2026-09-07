@@ -82,6 +82,7 @@ import { settlementTypeForOrderCreator } from '@/lib/order/settlement';
 import { parseExternalCreateOrderCommand } from '@/lib/order/external-create-order-command';
 import { fulfillmentPricingGuardSchema } from '@/lib/order/fulfillment-pricing-input';
 import { OrderSettlementType } from '@/generated/prisma/enums';
+import { ProductionOperationMaterializationError } from '@/lib/production/operation-materialization-service';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
 // items is a nested array and `FormData` flattens poorly. The UI layer
@@ -740,6 +741,17 @@ export async function finalizeOrderPricingAction(
   } catch (error) {
     if (error instanceof OrderPricingReviewError) {
       return { status: 'error', message: error.message };
+    }
+    // Legacy submitted orders activate production during price confirmation.
+    // The transaction has rolled back; keep expected production blockers in
+    // the pricing form without exposing internal materialization details.
+    if (error instanceof ProductionOperationMaterializationError) {
+      return {
+        status: 'error',
+        message: error.code === 'CANONICAL_FACTS_INCOMPLETE'
+          ? '工单款式或生产信息不完整，无法完成核价。请先核对款式、数量及包装信息。'
+          : error.message,
+      };
     }
     throw error;
   }

@@ -78,6 +78,7 @@ describe('AdminOrderWorkspace', () => {
               'pending-confirmation': 2,
               'pending-pricing': 1,
               'pending-change': 1,
+              'pending-release': 0,
               'on-hold': 1,
               overdue: 2,
               'due-today': 3,

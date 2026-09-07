@@ -61,7 +61,11 @@ import {
   resolveAdminPrintFacts,
   resolveAdminWorkspaceResultWhere,
 } from '../admin-workspace';
-import { parseAdminOrderWorkspaceQuery } from '../admin-workspace-query';
+import {
+  ADMIN_ORDER_QUEUES,
+  ADMIN_ORDER_SIGNALS,
+  parseAdminOrderWorkspaceQuery,
+} from '../admin-workspace-query';
 import { OrderChangeRequestError } from '../change-request';
 import { MISSING_ORDER_CUSTOMER_FILTER_VALUE } from '../list-query';
 
@@ -131,6 +135,7 @@ beforeEach(() => {
     async (callback: (tx: typeof dbMock) => unknown) => callback(dbMock),
   );
   dbMock.order.findMany.mockResolvedValue([]);
+  dbMock.order.count.mockReset().mockResolvedValue(0);
   dbMock.order.findFirst.mockResolvedValue(null);
   dbMock.order.findUnique.mockResolvedValue(null);
   dbMock.$queryRaw.mockResolvedValue([]);
@@ -192,9 +197,51 @@ describe('admin order workspace predicates', () => {
         { status: pendingStatuses },
         expect.any(Object),
         expect.any(Object),
+        expect.any(Object),
         { status: OrderStatus.ON_HOLD },
       ],
     });
+  });
+
+  it('limits pending release to confirmed work with no unresolved change and includes it in todo', async () => {
+    const pendingRelease = {
+      status: OrderStatus.CONFIRMED,
+      NOT: {
+        changeRequests: {
+          some: { status: OrderChangeRequestStatus.PENDING },
+        },
+      },
+    };
+    expect(adminSignalWhere('pending-release')).toEqual(pendingRelease);
+    expect(adminQueueWhere('todo')).toMatchObject({
+      OR: expect.arrayContaining([pendingRelease]),
+    });
+
+    const query = parseAdminOrderWorkspaceQuery({
+      signal: 'pending-release',
+      customerPartyId: 'party-1',
+      starred: 'yes',
+    }).query;
+    const now = new Date('2026-09-07T00:00:00.000Z');
+    const where = buildAdminWorkspaceResultWhere(actor, query, now);
+    expect(where).toMatchObject({
+      AND: [
+        {
+          AND: [
+            expect.any(Object),
+            { stars: { some: { userId: actor.id } } },
+            {},
+          ],
+        },
+        adminQueueWhere('todo'),
+        pendingRelease,
+      ],
+    });
+    expect(JSON.stringify(where)).toContain('party-1');
+    // Exports must retain the same status, change-request and user filters.
+    await expect(resolveAdminWorkspaceResultWhere(actor, query, now)).resolves.toEqual(
+      where,
+    );
   });
 
   it('keeps REJECTED out of done and resolves the print queue with a correlated snapshot', () => {
@@ -454,10 +501,6 @@ describe('admin order workspace predicates', () => {
       expect.objectContaining({ AND: expect.any(Array) }),
     );
 
-    dbMock.order.count.mockResolvedValueOnce(0);
-    for (let index = 0; index < 13; index += 1) {
-      dbMock.order.count.mockResolvedValueOnce(index);
-    }
     await loadAdminOrderWorkspace(actor, query);
     expect(dbMock.order.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -471,20 +514,27 @@ describe('admin order workspace predicates', () => {
 
   it('aggregates the whole filtered set and excludes manual pending quotes', async () => {
     const query = parseAdminOrderWorkspaceQuery({ queue: 'all' }).query;
+    const now = new Date('2026-09-07T00:00:00.000Z');
+    const queueCounts = {
+      todo: 3, print: 1, production: 2, shipped: 1, done: 2, all: 9,
+    };
+    const signalCounts = {
+      'pending-confirmation': 2,
+      'pending-pricing': 1,
+      'pending-release': 4,
+      'pending-change': 3,
+      'on-hold': 5,
+      overdue: 6,
+      'due-today': 7,
+    };
+    dbMock.order.count.mockResolvedValueOnce(5);
+    for (const queue of ADMIN_ORDER_QUEUES) {
+      dbMock.order.count.mockResolvedValueOnce(queueCounts[queue]);
+    }
+    for (const signal of ADMIN_ORDER_SIGNALS) {
+      dbMock.order.count.mockResolvedValueOnce(signalCounts[signal]);
+    }
     dbMock.order.count
-      .mockResolvedValueOnce(5)
-      .mockResolvedValueOnce(3)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(2)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(2)
-      .mockResolvedValueOnce(9)
-      .mockResolvedValueOnce(2)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(1)
       .mockResolvedValueOnce(2)
       .mockResolvedValueOnce(3)
       .mockResolvedValueOnce(4);
@@ -496,7 +546,14 @@ describe('admin order workspace predicates', () => {
       .mockResolvedValueOnce({ _sum: { confirmedFee: '20.25' } })
       .mockResolvedValueOnce({ _sum: { quotedFee: '3.75' } });
 
-    const page = await loadAdminOrderWorkspace(actor, query);
+    const page = await loadAdminOrderWorkspace(actor, query, now);
+    expect(page.counts).toEqual({ queues: queueCounts, signals: signalCounts });
+    const signalCountStart = 1 + ADMIN_ORDER_QUEUES.length;
+    for (const [index, signal] of ADMIN_ORDER_SIGNALS.entries()) {
+      expect(dbMock.order.count.mock.calls[signalCountStart + index]?.[0]).toEqual({
+        where: { AND: [expect.any(Object), adminSignalWhere(signal, now)] },
+      });
+    }
     expect(page.summary).toEqual({
       orderCount: 5,
       totalQuantity: 12345,
@@ -510,12 +567,13 @@ describe('admin order workspace predicates', () => {
       _sum: { quantity: true },
     });
     expect(dbMock.order.aggregate).toHaveBeenCalledTimes(3);
-    expect(dbMock.order.count.mock.calls[13]?.[0]).toEqual({
+    const summaryCountStart = signalCountStart + ADMIN_ORDER_SIGNALS.length;
+    expect(dbMock.order.count.mock.calls[summaryCountStart]?.[0]).toEqual({
       where: {
         AND: [expect.any(Object), adminManualPricingWhere()],
       },
     });
-    expect(dbMock.order.count.mock.calls[14]?.[0]).toEqual({
+    expect(dbMock.order.count.mock.calls[summaryCountStart + 1]?.[0]).toEqual({
       where: {
         AND: [
           expect.any(Object),
@@ -524,7 +582,7 @@ describe('admin order workspace predicates', () => {
         ],
       },
     });
-    expect(dbMock.order.count.mock.calls[15]?.[0]).toEqual({
+    expect(dbMock.order.count.mock.calls[summaryCountStart + 2]?.[0]).toEqual({
       where: {
         AND: [
           expect.any(Object),

@@ -98,7 +98,7 @@ test.describe('automation smoke', () => {
       sidebar.locator('[data-menu-group="概览"]'),
     ).toHaveCount(0);
     const dashboardLink = sidebar.getByRole('link', {
-      name: 'Dashboard',
+      name: '工作台',
       exact: true,
     });
     await expect(dashboardLink).toHaveCount(1);
@@ -286,7 +286,7 @@ test.describe('automation smoke', () => {
     ).toHaveCount(0);
     await expect(
       mobileSidebar.getByRole('link', {
-        name: 'Dashboard',
+        name: '工作台',
         exact: true,
       }),
     ).toHaveAttribute('href', '/owner');

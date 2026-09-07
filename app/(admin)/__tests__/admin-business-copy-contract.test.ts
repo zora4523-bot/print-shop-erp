@@ -13,7 +13,7 @@ describe('admin business copy contract', () => {
       'components/business/dashboard/DashboardChartsContent.tsx',
     );
 
-    expect(dashboard).toContain('label="建单产品"');
+    expect(dashboard).not.toContain('label="建单产品"');
     expect(dashboard).not.toContain('建单产品 / 规格');
     expect(dashboard).not.toContain('periodEnd ·');
     expect(charts).not.toContain('COMPLETED / SHIPPED / FINISHED');

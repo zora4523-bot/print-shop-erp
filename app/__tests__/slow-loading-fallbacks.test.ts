@@ -8,21 +8,6 @@ function source(relativePath: string): string {
   return readFileSync(join(root, relativePath), 'utf8');
 }
 
-function functionBlock(
-  contents: string,
-  functionName: string,
-  nextFunctionName?: string,
-): string {
-  const start = contents.indexOf(`function ${functionName}`);
-  const end = nextFunctionName
-    ? contents.indexOf(`function ${nextFunctionName}`, start + 1)
-    : contents.length;
-
-  expect(start).toBeGreaterThan(-1);
-  expect(end).toBeGreaterThan(start);
-  return contents.slice(start, end);
-}
-
 describe('custom loading fallback slow-loading contract', () => {
   it.each([
     ['app/(worker)/worker/loading.tsx', '正在加载师傅工作台'],
@@ -75,21 +60,14 @@ describe('custom loading fallback slow-loading contract', () => {
     ).toHaveLength(5);
   });
 
-  it('keeps one delayed hint in every independent Dashboard fallback', () => {
-    const dashboard = source('app/(admin)/owner/page.tsx');
-    const fallbacks = [
-      ['DashboardHeaderLoading', 'DashboardQueueLoading'],
-      ['DashboardQueueLoading', 'DashboardStatsLoading'],
-      ['DashboardStatsLoading', 'DashboardWatchlistLoading'],
-      ['DashboardWatchlistLoading', 'ProductionTrendChartSection'],
-      ['DashboardChartLoading', undefined],
-    ] as const;
-
-    for (const [name, nextName] of fallbacks) {
-      const block = functionBlock(dashboard, name, nextName);
-      expect(block.match(/<SlowLoadingHint/g)).toHaveLength(1);
-      expect(block).toContain('aria-live=');
-      expect(block).not.toContain('className="contents"');
-    }
+  it('keeps delayed loading feedback for dashboard and analytics sections', () => {
+    const dashboard = source('components/business/dashboard/DashboardSectionLoading.tsx');
+    expect(dashboard).toContain('<SlowLoadingHint');
+    expect(dashboard).toContain('aria-live="polite"');
+    const attention = source('components/business/dashboard/OrderAttentionSection.tsx');
+    expect(attention).toContain('<SlowLoadingHint');
+    const analytics = source('components/business/dashboard/OwnerAnalytics.tsx');
+    expect(analytics).toContain('<SlowLoadingHint');
   });
+
 });

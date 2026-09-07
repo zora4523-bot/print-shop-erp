@@ -48,10 +48,11 @@ import {
   isAwaitingFactoryConfirmation,
   type FactoryConfirmationPreflight,
 } from './factory-confirmation-preflight';
-import type {
-  AdminOrderQueue,
-  AdminOrderSignal,
-  AdminOrderWorkspaceQuery,
+import {
+  ADMIN_ORDER_SIGNALS,
+  type AdminOrderQueue,
+  type AdminOrderSignal,
+  type AdminOrderWorkspaceQuery,
 } from './admin-workspace-query';
 
 export type AdminOrdersActor = { id: string; role: Role };
@@ -341,6 +342,19 @@ export function adminManualPricingWhere(): Prisma.OrderWhereInput {
   };
 }
 
+/**
+ * Confirmed work awaits the canonical production-release command. Legacy
+ * SCHEDULING orders have already entered production, while SUBMITTED orders
+ * still require factory confirmation. Pending changes must be decided first.
+ * Membership is a workflow queue, not a replacement for release preflight.
+ */
+function pendingReleaseWhere(): Prisma.OrderWhereInput {
+  return {
+    status: OrderStatus.CONFIRMED,
+    NOT: PENDING_CHANGE_WHERE,
+  };
+}
+
 function printableWhere(): Prisma.OrderWhereInput {
   return {
     status: { in: [...PRINTABLE_STATUSES] },
@@ -360,6 +374,7 @@ export function adminQueueWhere(
             },
           },
           adminManualPricingWhere(),
+          pendingReleaseWhere(),
           PENDING_CHANGE_WHERE,
           { status: OrderStatus.ON_HOLD },
         ],
@@ -405,6 +420,8 @@ export function adminSignalWhere(
       };
     case 'pending-pricing':
       return adminManualPricingWhere();
+    case 'pending-release':
+      return pendingReleaseWhere();
     case 'pending-change':
       return PENDING_CHANGE_WHERE;
     case 'on-hold':
@@ -719,16 +736,7 @@ export async function loadAdminOrderWorkspace(
           ),
         ),
         Promise.all(
-          (
-            [
-              'pending-confirmation',
-              'pending-pricing',
-              'pending-change',
-              'on-hold',
-              'overdue',
-              'due-today',
-            ] as const
-          ).map((signal) =>
+          ADMIN_ORDER_SIGNALS.map((signal) =>
             tx.order.count({
               where: andWhere(baseWhere, adminSignalWhere(signal, now)),
             }),
@@ -833,14 +841,7 @@ export async function loadAdminOrderWorkspace(
         snapshot.queueCounts,
       ),
       signals: mapCounts(
-        [
-          'pending-confirmation',
-          'pending-pricing',
-          'pending-change',
-          'on-hold',
-          'overdue',
-          'due-today',
-        ],
+        ADMIN_ORDER_SIGNALS,
         snapshot.signalCounts,
       ),
     },

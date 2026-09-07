@@ -58,14 +58,14 @@ export function WatchlistTable<T>({
       data-slot={slot}
       className="scroll-mt-24 rounded-xl border bg-card shadow-sm"
     >
-      <header className="flex items-baseline justify-between gap-2 border-b px-4 py-3">
+      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b px-4 py-3">
         <h2 className="text-base font-semibold">{title}</h2>
         {description ? (
           <p className="text-xs text-muted-foreground">{description}</p>
         ) : null}
       </header>
       {rows.length === 0 ? (
-        <div className="px-4 py-6 text-sm text-muted-foreground">
+        <div className="px-4 py-3 text-sm text-muted-foreground">
           {emptyText}
         </div>
       ) : (

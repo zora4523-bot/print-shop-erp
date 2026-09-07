@@ -43,6 +43,22 @@ test.describe('administrator workspace', () => {
     });
   });
 
+  test('owner dashboard focused light and dark gates', async ({ page }, testInfo) => {
+    const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention') || route.path === `/owner/salary/cs/${fixture.csPeriodId}`);
+    expect(routes).toHaveLength(8);
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
+  test('owner pending release link opens the matching order filter', async ({ page }) => {
+    await page.goto('/owner');
+    const entry = page.getByRole('region', { name: '工单待办' }).getByRole('link', { name: /待下发生产/ });
+    await expect(entry).toHaveAttribute('href', '/orders?queue=all&signal=pending-release');
+    await entry.click();
+    await expect(page).toHaveURL(/queue=all&signal=pending-release/, { timeout: 30_000 });
+    await expect(page.getByRole('region', { name: '工单决定看板' }).getByRole('link', { name: /待下发生产/ })).toHaveAttribute('aria-current', 'page');
+  });
+
   test('critical routes pass responsive and accessibility gates', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'light');
   });
@@ -455,20 +471,15 @@ async function checkRoutes(
 // 对占位骨架做断言，图表本身（含 recharts 生成的 SVG）从未被 axe 或裁切
 // 检查看过。滚到容器可见并等 surface 出现，把这块真正纳入门禁。
 async function prepareDashboardChartsState(page: Page): Promise<void> {
-  // .first()：流式渲染期间 Suspense 的占位副本和已解析内容会同时命中这个
-  // data-slot，不加会触发 strict mode violation（移动视口尤其容易撞上）。
-  const deferred = page
-    .locator('[data-slot="dashboard-charts-deferred"]')
-    .first();
-  if ((await deferred.count()) === 0) return;
-  await deferred.scrollIntoViewIfNeeded();
-  // 图表有数据时会渲染 recharts surface；数据为空时组件走「暂无数据」
-  // 分支，占位块会消失——两种情况都算就绪，不要在空库上把门禁卡死。
-  await page
-    .locator('.recharts-surface, [data-slot="dashboard-chart-trend"]')
-    .first()
-    .waitFor({ state: 'visible', timeout: 15_000 })
-    .catch(() => undefined);
+  const deferred = page.locator('[data-slot="dashboard-chart-deferred"]:visible');
+  await expect(deferred).toHaveCount(3);
+  for (const [index, kind] of ['trend', 'ranking', 'category'].entries()) {
+    const chart = deferred.nth(index);
+    await chart.scrollIntoViewIfNeeded();
+    // Empty-data states render the same actual card; loading skeletons do not.
+    await expect(chart.locator(`[data-slot="dashboard-chart-${kind}-card"]`)).toBeVisible();
+    await expect(chart.locator('[data-slot="dashboard-chart-placeholder"]')).toHaveCount(0);
+  }
   await page.evaluate(() => window.scrollTo(0, 0));
 }
 
@@ -477,8 +488,27 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'dashboard',
       path: '/owner',
-      readyHeading: 'Dashboard',
+      readyHeading: '工作台',
+      prepareGateState: async (page) => {
+        await expect(page.locator('[data-slot="dashboard-watchlist-shipments"]:visible')).toHaveCount(1);
+        await expect(page.locator('[data-slot="dashboard-kpi"]:visible')).toHaveCount(4);
+      },
+    },
+    {
+      name: 'owner-analytics', path: '/owner/analytics', readyHeading: '经营概览',
       prepareGateState: prepareDashboardChartsState,
+    },
+    ...(['due', 'shipments', 'outsource', 'over-reports', 'settlements'] as const).map(kind => ({
+      name: `owner-attention-${kind}`, path: `/owner/attention?kind=${kind}`, readyHeading: '关注事项',
+      prepareGateState: async (page: Page) => {
+        await expect(page.getByText(/共 \d+ 条 · 每页/).and(page.locator(':visible'))).toHaveCount(1);
+      },
+    })),
+    {
+      name: 'owner-cs-forecast', path: `/owner/salary/cs/${data.csPeriodId}`, readyHeading: '客服周期 · 响应式客服',
+      prepareGateState: async (page) => {
+        await expect(page.locator('[data-slot="cs-period-forecast"]:visible')).toHaveCount(1);
+      },
     },
     {
       name: 'orders',

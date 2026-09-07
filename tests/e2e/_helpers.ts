@@ -28,6 +28,22 @@ async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   }
 }
 
+// Use for append-only fixture populations: retries create new ownership scopes,
+// and a failed seed must not leave part of a ledger behind.
+async function withFixtureTransaction<T>(fn: (db: Client) => Promise<T>): Promise<T> {
+  return withDb(async (db) => {
+    await db.query('BEGIN');
+    try {
+      const result = await fn(db);
+      await db.query('COMMIT');
+      return result;
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+  });
+}
+
 export async function cleanupPrintableOrderStressFixture(): Promise<void> {
   await withDb(async (db) => {
     await db.query('BEGIN');
@@ -1112,12 +1128,14 @@ export async function resetNotificationFixture(): Promise<void> {
 //     - 1 SalaryPeriod (e2e-cs) periodEnd=今日 + 3d, IN_PROGRESS
 //                                           → 即将结算客服周期 list
 //
-// Cleanup follows fixture ownership, not user ownership: all non-bill rows use
-// deterministic e2e-dash-* ids. Bills are unique per (sales user, period), so
-// those are reset by the dedicated e2e-* sales account after an explicit guard.
-// This keeps reruns deterministic without deleting another spec's production
-// or payroll history.
+// Every invocation appends a separate fixture population. Dedicated inactive
+// E2E principals isolate bill and salary-period ownership; a run prefix isolates
+// order numbers and related entities. Existing pricing revisions, bill/payment
+// ledgers, and payroll history are never deleted or rewritten by this helper.
 export type DashboardSnapshot = {
+  fixtureRunId: string;
+  salesUserId: string;
+  csUserId: string | null;
   submittedOrderIds: string[];
   urgentOrderId: string;
   completedOrderIds: string[];
@@ -1137,10 +1155,10 @@ export type DashboardSnapshot = {
 };
 
 export async function seedDashboardSnapshot(opts: {
-  // 业绩归属：bill 的销售人。e2e-sales 是 globalSetup 建好的固定 SALES 用户。
+  // 克隆销售 fixture 的来源：必须是 globalSetup 建好的 e2e-* SALES 用户。
   salesUserId: string;
-  // CS 周期归属：e2e-cs 是 globalSetup 的 CUSTOMER_SERVICE 用户。
-  // 没传时 Slice B 的 ending-period fixture 不 seed（只渲染空 list）。
+  // 克隆客服 fixture 的来源：必须是 e2e-* CUSTOMER_SERVICE 用户。
+  // 没传时不新增 Slice B 的 ending-period fixture。
   csUserId?: string;
   // Slice C 图表 fixture：seed 30 天产量曲线 + 销售排行 + 产品分布。
   // 默认 false（Slice A/B E2E 不需要图表数据，节省运行时）。
@@ -1152,6 +1170,8 @@ export async function seedDashboardSnapshot(opts: {
   // ADMIN 角色，用其 id 喂入则角色色用 muted 同色板。
   ownerUserId?: string;
 }): Promise<DashboardSnapshot> {
+  const fixtureRunId = randomBytes(8).toString('hex');
+  const fixturePrefix = `e2e-dash-${fixtureRunId}`;
   const now = new Date();
   // Shanghai 中午 12:00 = UTC 04:00 —— 离日界 (UTC 16:00 / Shanghai
   // 00:00) 远，运行时刻在月初/月末附近也不会落到隔壁日 / 隔壁月。
@@ -1182,121 +1202,37 @@ export async function seedDashboardSnapshot(opts: {
   // date. We pass `'YYYY-MM-DD'` strings; date-add via JS Date.UTC.
   const csPeriodEndUtcMidnight = new Date(Date.UTC(yyyy!, mm! - 1, dd! + 3));
 
-  return withDb(async (db) => {
-    const salesOwner = await db.query<{ username: string }>(
-      `SELECT username FROM "User" WHERE id = $1`,
-      [opts.salesUserId],
-    );
-    if (
-      salesOwner.rowCount === 0 ||
-      !salesOwner.rows[0]!.username.startsWith('e2e-')
-    ) {
-      throw new Error(
-        'seedDashboardSnapshot refuses to reset bills for a non-E2E sales user',
+  return withFixtureTransaction(async (db) => {
+    async function createFixturePrincipal(
+      sourceId: string,
+      role: 'SALES' | 'CUSTOMER_SERVICE',
+    ): Promise<string> {
+      const id = `${fixturePrefix}-${role.toLowerCase()}`;
+      const result = await db.query(
+        `INSERT INTO "User" (
+           id, username, password, role, "displayName", "isActive",
+           "createdAt", "updatedAt"
+         )
+         SELECT $1::text, $1::text::citext, password, role, "displayName", FALSE, NOW(), NOW()
+           FROM "User"
+          WHERE id = $2 AND username LIKE 'e2e-%' AND role = $3::"Role"`,
+        [id, sourceId, role],
       );
+      if (result.rowCount !== 1) {
+        throw new Error(
+          'seedDashboardSnapshot requires an E2E source user with the expected role',
+        );
+      }
+      return id;
     }
 
-    // Step 1: wipe only this helper's e2e-dash-* fixtures.
-    // Bills are the one exception to the id-prefix rule: production enforces
-    // one bill per (sales user, period), and bill-flow creates its id inside
-    // the server action. The e2e-* account guard above makes a full bill reset
-    // safe while avoiding a unique-key collision between independent specs.
-    // Delete BillPayment/BillItem → Bill, then prefixed Orders, then Slice
-    // B aux state. OutsourceOrder.orderId → ON DELETE SET NULL so a
-    // wide Order delete leaves orphaned OutsourceOrder rows pointing
-    // at no order — those would still surface in 超期外协 list. Wipe
-    // them by id-prefix instead.
-    await db.query(
-      `DELETE FROM "BillPayment" WHERE "billId" IN (
-         SELECT b.id FROM "Bill" b WHERE b."salesUserId" = $1
-       )`,
-      [opts.salesUserId],
-    );
-    await db.query(
-      `DELETE FROM "BillItem" WHERE "billId" IN (
-         SELECT b.id FROM "Bill" b WHERE b."salesUserId" = $1
-       )`,
-      [opts.salesUserId],
-    );
-    await db.query(
-      `DELETE FROM "Bill" WHERE "salesUserId" = $1`,
-      [opts.salesUserId],
-    );
-    // Delete every E2E outsource ledger before its linked order. Immutable
-    // snapshots reference OrderItem with ON DELETE RESTRICT, while deleting
-    // the outsource order itself cascades to those snapshots. Amount/payment
-    // ledgers are restrictive children, so they must go first. The dashboard
-    // id prefix is the fixture ownership boundary; other specs' e2e ledgers
-    // remain intact.
-    await db.query(
-      `DELETE FROM "OutsourcePayment"
-        WHERE "outsourceOrderId" IN (
-          SELECT id FROM "OutsourceOrder" WHERE id LIKE 'e2e-dash-os-%'
-        )`,
-    );
-    await db.query(
-      `DELETE FROM "OutsourceAmountChange"
-        WHERE "outsourceOrderId" IN (
-          SELECT id FROM "OutsourceOrder" WHERE id LIKE 'e2e-dash-os-%'
-        )`,
-    );
-    await db.query(
-      `DELETE FROM "OutsourceOrder" WHERE id LIKE 'e2e-dash-os-%'`,
-    );
-    // Commercial charges restrict both their Order and optional Shipment.
-    // Delete only charges belonging to the exact dashboard order population.
-    await db.query(
-      `DELETE FROM "OrderCustomerCharge" charge
-        USING "Order" target
-       WHERE charge."orderId" = target.id
-         AND target.id LIKE 'e2e-dash-%'`,
-    );
-    // Slice C ranking may be owned by a non-e2e admin, so submitter identity
-    // is not an ownership boundary. The deterministic prefix is.
-    await db.query(`DELETE FROM "Order" WHERE id LIKE 'e2e-dash-%'`);
-    // Slice C: nuke prior chart-fixture products (used to back
-    // OrderItem.productId for category distribution). Same id-prefix
-    // contract as outsource so other specs' products stay intact.
-    if (opts.chartFixture) {
-      await db.query(
-        `DELETE FROM "Product" WHERE id LIKE 'e2e-dash-prod-%'`,
-      );
-    }
-    // Slice B: remove only the prior dashboard CS period. The shared e2e-cs
-    // account also owns fixtures for cs-accumulate.spec; deleting by user
-    // would corrupt that independent ledger.
-    if (opts.csUserId) {
-      await db.query(
-        `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
-           SELECT id FROM "SalaryPeriod"
-            WHERE "csUserId" = $1 AND id LIKE 'e2e-dash-csp-%'
-         )`,
-        [opts.csUserId],
-      );
-      await db.query(
-        `DELETE FROM "CsSalesEntry" WHERE "salaryPeriodId" IN (
-           SELECT id FROM "SalaryPeriod"
-            WHERE "csUserId" = $1 AND id LIKE 'e2e-dash-csp-%'
-         )`,
-        [opts.csUserId],
-      );
-      await db.query(
-        `DELETE FROM "CustomerServiceCommission" WHERE "salaryPeriodId" IN (
-           SELECT id FROM "SalaryPeriod"
-            WHERE "csUserId" = $1 AND id LIKE 'e2e-dash-csp-%'
-         )`,
-        [opts.csUserId],
-      );
-      await db.query(
-        `DELETE FROM "SalaryPeriod"
-          WHERE "csUserId" = $1 AND id LIKE 'e2e-dash-csp-%'`,
-        [opts.csUserId],
-      );
-    }
+    const salesUserId = await createFixturePrincipal(opts.salesUserId, 'SALES');
+    const csUserId = opts.csUserId
+      ? await createFixturePrincipal(opts.csUserId, 'CUSTOMER_SERVICE')
+      : null;
 
-    // Step 2: seed orders. ids are deterministic per-shape so a re-run
-    // of the dashboard spec without a wipe in between would idempotent-
-    // upsert (we don't bother — the wipe above is the contract).
+    // All rows below belong to this invocation. Roll back the entire seed on
+    // failure so a retry cannot inherit a half-written fixture population.
     const submittedOrderIds: string[] = [];
     const submittedSpecs = [
       { suffix: 'sub-1', urgent: false },
@@ -1304,8 +1240,8 @@ export async function seedDashboardSnapshot(opts: {
       { suffix: 'sub-3-urgent', urgent: true },
     ];
     for (const spec of submittedSpecs) {
-      const orderId = `e2e-dash-${spec.suffix}`;
-      const orderNo = `E2E-DASH-${spec.suffix.toUpperCase()}`;
+      const orderId = `${fixturePrefix}-${spec.suffix}`;
+      const orderNo = `E2E-DASH-${fixtureRunId}-${spec.suffix.toUpperCase()}`;
       await db.query(
         `
         INSERT INTO "Order" (
@@ -1321,7 +1257,7 @@ export async function seedDashboardSnapshot(opts: {
         [
           orderId,
           orderNo,
-          opts.salesUserId,
+          salesUserId,
           spec.urgent,
           todayShanghaiNoonUtc.toISOString(),
         ],
@@ -1331,8 +1267,8 @@ export async function seedDashboardSnapshot(opts: {
 
     const completedOrderIds: string[] = [];
     for (const i of [1, 2]) {
-      const orderId = `e2e-dash-completed-${i}`;
-      const orderNo = `E2E-DASH-COMPLETED-${i}`;
+      const orderId = `${fixturePrefix}-completed-${i}`;
+      const orderNo = `E2E-DASH-${fixtureRunId}-COMPLETED-${i}`;
       await db.query(
         `
         INSERT INTO "Order" (
@@ -1350,14 +1286,14 @@ export async function seedDashboardSnapshot(opts: {
         [
           orderId,
           orderNo,
-          opts.salesUserId,
+          salesUserId,
           todayShanghaiNoonUtc.toISOString(),
         ],
       );
       completedOrderIds.push(orderId);
     }
 
-    const shippedOrderId = 'e2e-dash-shipped-1';
+    const shippedOrderId = `${fixturePrefix}-shipped-1`;
     await db.query(
       `
       INSERT INTO "Order" (
@@ -1366,13 +1302,13 @@ export async function seedDashboardSnapshot(opts: {
         "submittedAt", "scheduledAt", "completedAt", "shippedAt",
         "createdAt", "updatedAt"
       ) VALUES (
-        $1, 'E2E-DASH-SHIPPED-1', $2, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $2,
+        $1, $1, $2, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $2,
         'SHIPPED'::"OrderStatus", FALSE, 0,
         $3, $3, $3, $3,
         $3, $3
       )
       `,
-      [shippedOrderId, opts.salesUserId, todayShanghaiNoonUtc.toISOString()],
+      [shippedOrderId, salesUserId, todayShanghaiNoonUtc.toISOString()],
     );
 
     // Step 3: seed one bill in the current Shanghai month.
@@ -1380,7 +1316,7 @@ export async function seedDashboardSnapshot(opts: {
     // 状态 PARTIAL_PAID（已发 + 部分付款），issuedAt 必填——dashboard
     // getMonthlyBillStats 排除 DRAFT（Codex round 98 P1）。DRAFT 状态
     // 不会进 KPI；只有 ISSUED / PARTIAL_PAID / FULLY_PAID 算&ldquo;应收&rdquo;。
-    const billId = `e2e-dash-bill-${randomBytes(4).toString('hex')}`;
+    const billId = `${fixturePrefix}-bill`;
     const monthlyTotal = '5000.00';
     const monthlyPaid = '2000.00';
     await db.query(
@@ -1393,7 +1329,7 @@ export async function seedDashboardSnapshot(opts: {
         'PARTIAL_PAID'::"BillStatus", NOW(), NOW(), NOW()
       )
       `,
-      [billId, opts.salesUserId, period, monthlyTotal, monthlyPaid],
+      [billId, salesUserId, period, monthlyTotal, monthlyPaid],
     );
     // A material/issued bill must have a provenance row.  Besides matching
     // the production ledger, this lets settlement migrations prove that the
@@ -1411,7 +1347,7 @@ export async function seedDashboardSnapshot(opts: {
     // Step 4 (Slice B): seed one overdue outsource order linked to the
     // first completed order, so 超期外协 list has one row with a real
     // orderNo (more useful UI signal than orphaned).
-    const outsourceId = 'e2e-dash-os-1';
+    const outsourceId = `${fixturePrefix}-os-1`;
     const linkedOrderId = completedOrderIds[0]!;
     const linkedOrderItemId = `${linkedOrderId}-outsource-item`;
     const outsourceQuantity = 100;
@@ -1455,7 +1391,7 @@ export async function seedDashboardSnapshot(opts: {
       ) VALUES ($1, $2, $3, $4)
       `,
       [
-        'e2e-dash-osis-1',
+        `${fixturePrefix}-osis-1`,
         outsourceId,
         linkedOrderItemId,
         outsourceQuantity,
@@ -1468,8 +1404,8 @@ export async function seedDashboardSnapshot(opts: {
     // visible in UI as a non-"—" non-"未达档位" value).
     let csPeriodId = '';
     const csPeriodDaysUntilEnd = 3;
-    if (opts.csUserId) {
-      csPeriodId = `e2e-dash-csp-${randomBytes(4).toString('hex')}`;
+    if (csUserId) {
+      csPeriodId = `${fixturePrefix}-csp`;
       await db.query(
         `
         WITH target AS (
@@ -1508,7 +1444,7 @@ export async function seedDashboardSnapshot(opts: {
         `,
         [
           csPeriodId,
-          opts.csUserId,
+          csUserId,
           csPeriodEndUtcMidnight.toISOString().slice(0, 10),
         ],
       );
@@ -1525,8 +1461,7 @@ export async function seedDashboardSnapshot(opts: {
     //     pointing at one of the seeded products + 1 with null
     //     productId (UNCATEGORIZED).
     //
-    // ids all live under e2e-dash-* prefix so the next run's wipe
-    // (above) re-bases cleanly.
+    // Chart entities share the same per-run prefix as the KPI fixtures.
     const chartProductIds: string[] = [];
     const trendCompletedOrderIds: string[] = [];
     const rankingOrderIds: string[] = [];
@@ -1550,8 +1485,8 @@ export async function seedDashboardSnapshot(opts: {
           Date.UTC(yyyy!, mm! - 1, dd! - daysBack, 4, 0),
         );
         for (let i = 0; i < count; i++) {
-          const orderId = `e2e-dash-trend-${daysBack}-${i}`;
-          const orderNo = `E2E-TREND-${daysBack}-${i}`;
+          const orderId = `${fixturePrefix}-trend-${daysBack}-${i}`;
+          const orderNo = `E2E-TREND-${fixtureRunId}-${daysBack}-${i}`;
           await db.query(
             `
             INSERT INTO "Order" (
@@ -1566,7 +1501,7 @@ export async function seedDashboardSnapshot(opts: {
               $4, $4
             )
             `,
-            [orderId, orderNo, opts.salesUserId, completedAt.toISOString()],
+            [orderId, orderNo, salesUserId, completedAt.toISOString()],
           );
           trendCompletedOrderIds.push(orderId);
         }
@@ -1603,7 +1538,7 @@ export async function seedDashboardSnapshot(opts: {
         },
       ];
       for (const spec of productSpecs) {
-        const id = `e2e-dash-prod-${spec.idSuffix}`;
+        const id = `${fixturePrefix}-prod-${spec.idSuffix}`;
         chartProductIds.push(id);
         await db.query(
           `
@@ -1632,16 +1567,16 @@ export async function seedDashboardSnapshot(opts: {
         productSuffix: string | null; // null → UNCATEGORIZED
       }> = [
         {
-          submitterId: opts.salesUserId,
+          submitterId: salesUserId,
           submitterRole: 'SALES',
           amount: '5000.00',
           daysOffset: -10,
           productSuffix: 'p-blank-1',
         },
       ];
-      if (opts.csUserId) {
+      if (csUserId) {
         rankingSpecs.push({
-          submitterId: opts.csUserId,
+          submitterId: csUserId,
           submitterRole: 'CUSTOMER_SERVICE',
           amount: '3000.00',
           daysOffset: -5,
@@ -1660,7 +1595,7 @@ export async function seedDashboardSnapshot(opts: {
       // Plus one more SALES order from salesUserId with a COLOR_PRINT
       // product so pie chart has all three filled categories.
       rankingSpecs.push({
-        submitterId: opts.salesUserId,
+        submitterId: salesUserId,
         submitterRole: 'SALES',
         amount: '2500.00',
         daysOffset: -7,
@@ -1669,8 +1604,8 @@ export async function seedDashboardSnapshot(opts: {
 
       let rankIdx = 0;
       for (const spec of rankingSpecs) {
-        const orderId = `e2e-dash-rank-${rankIdx}`;
-        const orderNo = `E2E-RANK-${rankIdx}`;
+        const orderId = `${fixturePrefix}-rank-${rankIdx}`;
+        const orderNo = `E2E-RANK-${fixtureRunId}-${rankIdx}`;
         const submittedAt = new Date(
           monthlyMidUtc.getTime() + spec.daysOffset * dayMs,
         );
@@ -1702,7 +1637,7 @@ export async function seedDashboardSnapshot(opts: {
           ],
         );
         const productId = spec.productSuffix
-          ? `e2e-dash-prod-${spec.productSuffix}`
+          ? `${fixturePrefix}-prod-${spec.productSuffix}`
           : null;
         const pricingFacts = spec.productSuffix?.startsWith('p-blank-')
           ? {
@@ -1759,8 +1694,11 @@ export async function seedDashboardSnapshot(opts: {
     }
 
     return {
+      fixtureRunId,
+      salesUserId,
+      csUserId,
       submittedOrderIds,
-      urgentOrderId: 'e2e-dash-sub-3-urgent',
+      urgentOrderId: `${fixturePrefix}-sub-3-urgent`,
       completedOrderIds,
       shippedOrderId,
       billId,
@@ -3022,8 +2960,7 @@ export async function seedOrderOverdueForCron(): Promise<{
 }
 
 // Seeds 1 overdue OutsourceOrder for /api/cron/outsource-overdue tests.
-// id-prefixed `e2e-cron-os-` so seedDashboardSnapshot's wipe scope
-// (`e2e-dash-os-%`) doesn't accidentally clobber it.
+// The `e2e-cron-os-` namespace keeps these fixtures distinct from dashboard rows.
 export async function seedOverdueOutsourceForCron(): Promise<{
   outsourceId: string;
 }> {

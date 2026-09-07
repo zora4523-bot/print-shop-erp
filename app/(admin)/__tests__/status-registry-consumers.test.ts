@@ -82,7 +82,7 @@ describe('high-risk status registry consumers', () => {
         'app/(admin)/foreman/outsource/[id]/page.tsx',
         'OUTSOURCE_STATUS_REGISTRY',
       ],
-      ['app/(admin)/owner/page.tsx', 'OUTSOURCE_STATUS_REGISTRY'],
+      ['components/business/dashboard/OwnerWatchlists.tsx', 'OUTSOURCE_STATUS_REGISTRY'],
       [
         'app/(worker)/worker/tasks/[id]/page.tsx',
         'PRODUCTION_OPERATION_STATUS_REGISTRY',

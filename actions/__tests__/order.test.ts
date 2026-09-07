@@ -23,6 +23,7 @@ const {
   MockReworkOrderError,
   MockOrderChangeRequestError,
   MockOrderPricingReviewError,
+  MockProductionOperationMaterializationError,
 } = vi.hoisted(() => ({
   permissionsMock: { requirePermission: vi.fn() },
   orderMock: {
@@ -103,6 +104,16 @@ const {
       this.name = 'OrderPricingReviewError';
     }
   },
+  MockProductionOperationMaterializationError: class extends Error {
+    constructor(
+      public readonly code: string,
+      message: string,
+      public readonly detail: unknown = null,
+    ) {
+      super(message);
+      this.name = 'ProductionOperationMaterializationError';
+    }
+  },
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -136,6 +147,9 @@ vi.mock('@/lib/order/pricing-review', () => ({
   previewOrderPricingReview: pricingReviewMock.previewOrderPricingReview,
   finalizeOrderPricing: pricingReviewMock.finalizeOrderPricing,
   OrderPricingReviewError: MockOrderPricingReviewError,
+}));
+vi.mock('@/lib/production/operation-materialization-service', () => ({
+  ProductionOperationMaterializationError: MockProductionOperationMaterializationError,
 }));
 vi.mock('@/lib/order/commercial-details', () => ({
   ...commercialDetailsMock,
@@ -1749,6 +1763,77 @@ describe('order pricing review actions', () => {
       status: 'error',
       message: '工单价格已被其他人更新',
     });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('returns an actionable pricing error for incomplete production facts without exposing internal details', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    pricingReviewMock.finalizeOrderPricing.mockRejectedValueOnce(
+      new MockProductionOperationMaterializationError(
+        'CANONICAL_FACTS_INCOMPLETE',
+        '工单生产事实不完整，不能自动生成工序',
+        [{ code: 'NO_ITEMS', path: 'items', internalOrderId: 'private-order-id' }],
+      ),
+    );
+
+    const result = await finalizeOrderPricingAction(null, {
+      orderId: 'order-1',
+      expectedOrderRevision: 1,
+      expectedPriceRevision: 1,
+      items: [],
+      packagingGroups: [],
+      shipments: [],
+      remark: null,
+    });
+
+    expect(result).toEqual({
+      status: 'error',
+      message: '工单款式或生产信息不完整，无法完成核价。请先核对款式、数量及包装信息。',
+    });
+    expect(JSON.stringify(result)).not.toContain('NO_ITEMS');
+    expect(JSON.stringify(result)).not.toContain('private-order-id');
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('returns other expected production activation failures as local errors without revalidation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    pricingReviewMock.finalizeOrderPricing.mockRejectedValueOnce(
+      new MockProductionOperationMaterializationError(
+        'PRICING_NOT_CONFIRMED',
+        '工单价格尚未确认，不能投产',
+        { internalVersion: 'private-version' },
+      ),
+    );
+
+    await expect(finalizeOrderPricingAction(null, {
+      orderId: 'order-1',
+      expectedOrderRevision: 1,
+      expectedPriceRevision: 1,
+      items: [],
+      packagingGroups: [],
+      shipments: [],
+      remark: null,
+    })).resolves.toEqual({
+      status: 'error',
+      message: '工单价格尚未确认，不能投产',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('does not conceal unexpected pricing failures as recoverable business errors', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    const failure = new Error('unexpected database failure');
+    pricingReviewMock.finalizeOrderPricing.mockRejectedValueOnce(failure);
+
+    await expect(finalizeOrderPricingAction(null, {
+      orderId: 'order-1',
+      expectedOrderRevision: 1,
+      expectedPriceRevision: 1,
+      items: [],
+      packagingGroups: [],
+      shipments: [],
+      remark: null,
+    })).rejects.toBe(failure);
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 

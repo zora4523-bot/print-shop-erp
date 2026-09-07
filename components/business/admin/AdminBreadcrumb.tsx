@@ -43,6 +43,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   adjustments: '加价规则',
   tiers: '价格阶梯',
   notifications: '推送配置',
+  attention: '关注事项',
   pigsty: 'Pigsty 运维',
   salary: '薪资',
   daily: '计件工资',

@@ -31,6 +31,7 @@ const SIGNALS: Array<{ key: AdminOrderSignal; label: string }> = [
   { key: 'pending-confirmation', label: '待确认' },
   { key: 'pending-pricing', label: '待核价' },
   { key: 'pending-change', label: '变更申请' },
+  { key: 'pending-release', label: '待下发生产' },
   { key: 'on-hold', label: '已暂停' },
   { key: 'overdue', label: '已逾期' },
   { key: 'due-today', label: '今日待发' },
