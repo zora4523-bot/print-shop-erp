@@ -18,10 +18,10 @@ describe('internal create pure quote contract', () => {
     );
 
     expect(result).toMatchObject({
-      status: 'PARTIAL',
+      status: 'QUOTED',
       submittable: true,
       knownTotal: '180.00',
-      total: null,
+      total: '180.00',
     });
     expect(result.packagingGroups[0]).toMatchObject({
       status: 'QUOTED',
@@ -30,11 +30,11 @@ describe('internal create pure quote contract', () => {
     expect(result.order.lines).toEqual([
       expect.objectContaining({
         code: 'PLATE_FEE',
-        status: 'PENDING_AMOUNT',
-        amount: null,
+        status: 'QUOTED',
+        amount: '0.00',
       }),
     ]);
-    expect(result.pendingReasons.map((reason) => reason.code)).toContain(
+    expect(result.pendingReasons.map((reason) => reason.code)).not.toContain(
       'PLATE_AMOUNT_PENDING',
     );
   });

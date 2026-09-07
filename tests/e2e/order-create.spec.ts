@@ -18,6 +18,8 @@ async function readSavedOrder(id: string) {
     const { rows } = await db.query<{
       order: {
         editVersion: number;
+        pricingStatus: string;
+        promisedDate: string | null;
         receiverName: string | null;
         receiverPhone: string | null;
         packageRequirement: string | null;
@@ -183,6 +185,7 @@ test.describe('创建工单 — golden path', () => {
     const orderId = new URL(page.url()).pathname.split('/')[2];
     const before = await readSavedOrder(orderId);
     expect(before.order.packageRequirement).toBe('创建时贴客户标签');
+    expect(before.order.pricingStatus).toBe('AUTO_CONFIRMED');
     await page.goto(`/orders/${orderId}/edit`);
     await expect(page.getByLabel('工单名称', { exact: true })).toHaveValue(
       customName,
@@ -268,5 +271,22 @@ test.describe('创建工单 — golden path', () => {
       page.getByRole('button', { name: '保存', exact: true }),
     ).toBeEnabled();
     expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
+
+    // Date-only proposal must reach APPROVED and preserve all price/production facts.
+    await page.goto(`/orders/${orderId}/edit`);
+    const dueChange = page.locator('#modify-order');
+    await dueChange.getByLabel('修改类别').selectOption('DUE_DATE');
+    await dueChange.getByLabel(/^新的承诺交期/).fill('2026-10-20');
+    await dueChange.getByLabel('修改原因').fill('客户确认延期，仅变更交期');
+    await dueChange.getByRole('button', { name: /提交修改申请/ }).click();
+    await expect(page.getByText('修改申请待处理', { exact: true })).toBeVisible();
+    expect((await readSavedOrder(orderId)).order.promisedDate).toBe(after.order.promisedDate);
+    await page.goto(`/orders/${orderId}`);
+    await page.getByRole('link', { name: '前往新版工单工作台审核', exact: true }).click();
+    await page.getByRole('button', { name: '批准变更', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '确认批准并同步工单', exact: true }).click();
+    await expect.poll(async () => (await readSavedOrder(orderId)).order.promisedDate).toContain('2026-10-20');
+    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
+    await expectNoNextErrorOverlay(page);
   });
 });

@@ -597,14 +597,14 @@ export function CustomerMachinePricingSectionView({
                 id={platePolicyDescriptionId}
                 className="mt-0.5 text-[11px] font-medium leading-4 text-muted-foreground"
               >
-                不设置自动单价，不参与计价引擎计算；工单提交后由管理员录入实际金额和核价依据。
+                版费默认 0 元；需要收费时，管理员可在工单中添加制版明细，录入金额和依据。
               </p>
             </div>
             <Badge
               variant="outline"
               className="h-auto w-fit shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold text-destructive"
             >
-              始终人工核价
+              默认 0 元 · 可人工添加
             </Badge>
           </div>
         </CardContent>

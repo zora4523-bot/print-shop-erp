@@ -34,6 +34,7 @@ import {
   createOrderChangeApprovalToken,
   type OrderChangeApprovalResolutionEvidence,
 } from '../order-change-approval-token';
+import { createOrderChangeRequestSchema } from '../../auth/schemas';
 import { PENDING_PLATE_BUSINESS_KEY } from '../pending-plate-charge';
 
 const mocks = vi.hoisted(() => {
@@ -44,6 +45,7 @@ const mocks = vi.hoisted(() => {
     backgroundJob: { updateMany: vi.fn() },
     notificationLog: { updateMany: vi.fn() },
     order: { findUnique: vi.fn(), update: vi.fn() },
+    orderWorkflowDecision: { findFirst: vi.fn() },
     product: { findMany: vi.fn() },
     material: { findMany: vi.fn() },
     orderItem: { update: vi.fn(), create: vi.fn(), findMany: vi.fn() },
@@ -70,6 +72,8 @@ const mocks = vi.hoisted(() => {
   };
   return {
     db,
+    completion: vi.fn().mockResolvedValue({ completed: false }),
+    completionDispatch: vi.fn(),
     calculate: vi.fn(),
     finalizeCharges: vi.fn(),
     appendRevision: vi.fn(),
@@ -93,8 +97,13 @@ vi.mock('@/lib/order/print-jobs', () => ({
   createOrderPrintRequestInTx: mocks.createPrint,
   supersedeOlderOrderPrintRequestsInTx: mocks.supersedePrint,
 }));
-vi.mock('@/lib/production/operation-materialization-service', () => ({
+vi.mock('@/lib/production/operation-materialization-service', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/production/operation-materialization-service')>(),
   activateProductionOperationsInTx: mocks.activateProduction,
+}));
+vi.mock('@/lib/production-completion', () => ({
+  maybeCompleteProductionOrder: mocks.completion,
+  dispatchProductionCompletionNotification: mocks.completionDispatch,
 }));
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: mocks.dispatchNotification,
@@ -602,7 +611,7 @@ describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
     ).toBe(true);
   });
 
-  it('真实纯引擎仅剩 PLATE_FEE 待定时允许改单重算', () => {
+  it('真实纯引擎默认零版费时允许完整自动计价', () => {
     const input = createGoldenOrderInput([
       createGoldenOrderItem({ quantity: 1_200 }),
     ]);
@@ -613,10 +622,10 @@ describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
     const processing = presentCreateOrderProcessingQuote({ input, quote });
 
     expect(quote).toMatchObject({
-      status: 'PARTIAL',
-      total: null,
-      pendingLineCodes: ['PLATE_FEE'],
-      pendingReasons: [{ code: 'PLATE_AMOUNT_PENDING' }],
+      status: 'QUOTED',
+      total: quote.knownTotal,
+      pendingLineCodes: [],
+      pendingReasons: [],
     });
     expect(
       isChangeRequestQuoteAutomaticallyApplicable({ quote, processing }),
@@ -634,7 +643,7 @@ describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
     const processing = presentCreateOrderProcessingQuote({ input, quote });
 
     expect(quote.pendingLineCodes).toEqual(
-      expect.arrayContaining(['PLATE_FEE', 'SHIPPING:primary']),
+      expect.arrayContaining(['SHIPPING:primary']),
     );
     expect(
       isChangeRequestQuoteAutomaticallyApplicable({ quote, processing }),
@@ -972,6 +981,7 @@ function expectNoApprovalMutation(): void {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.completion.mockResolvedValue({ completed: false });
   mocks.getSetting.mockResolvedValue({ enabled: true });
   mocks.enqueueNotification.mockResolvedValue(false);
   mocks.dispatchNotification.mockResolvedValue(undefined);
@@ -1063,6 +1073,29 @@ beforeEach(() => {
 });
 
 describe('createOrderChangeRequest', () => {
+  it('只改交期保存真实日期提案和原值，未审批前不写原单', async () => {
+    mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'due-date-request' });
+    const oldDate = new Date('2026-09-10T00:00:00Z');
+    mocks.db.order.findUnique.mockResolvedValue(createRequestOrder({ promisedDate: oldDate }));
+    const payload = createOrderChangeRequestSchema.parse({
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      type: 'MODIFY', modifyKind: 'DUE_DATE', reason: '客户确认延期', items: [], promisedDate: '2026-09-12',
+    });
+    await createOrderChangeRequest(payload, sales);
+    expect(mocks.db.orderChangeRequest.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      proposedChanges: expect.objectContaining({ items: [], promisedDate: '2026-09-12' }),
+      beforeSnapshot: expect.objectContaining({ promisedDate: '2026-09-10' }),
+    }) }));
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(createOrderChangeRequestSchema.safeParse({ ...payload, promisedDate: '2026-02-30' }).success).toBe(false);
+  });
+  it('无实际交期变化且没有款式修改时拒绝空申请', async () => {
+    mocks.db.order.findUnique.mockResolvedValue(createRequestOrder({ promisedDate: null }));
+    await expect(createOrderChangeRequest({ orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      type: 'MODIFY', modifyKind: 'DUE_DATE', reason: '没有变化', items: [], promisedDate: null }, sales)).rejects.toThrow(/实际/);
+    expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
   it.each([OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED, OrderStatus.DRAFT])(
     '管理员可为 %s 工单提交修改提案但不能直接改写款式和费用',
     async (status) => {
@@ -3309,6 +3342,34 @@ describe('previewFactoryConfirmationPriceDiff', () => {
 });
 
 describe('cancellation settlement reference', () => {
+  it('取消结算的已产数量包含新版承接进度，不重复计算旧版', async () => {
+    const value = request({
+      type: OrderChangeRequestType.CANCEL,
+      proposedChanges: { items: [] },
+      order: {
+        ...request().order,
+        status: OrderStatus.FOILING,
+        workOrderVersion: 2,
+        productionOperations: [
+          { id: 'old-op', status: 'COMPLETED', workOrderVersion: 1, operationType: 'PARTIAL', carriedWorkOrderProgressQty: new Decimal(900) },
+          { id: 'current-op', status: 'IN_PROGRESS', workOrderVersion: 2, operationType: 'PARTIAL', carriedWorkOrderProgressQty: new Decimal(300) },
+        ],
+        productionWorkOrderProgress: [
+          { workOrderVersion: 1, stage: 'FOILING', workOrderProgressQuantity: new Decimal(900) },
+          { workOrderVersion: 2, stage: 'FOILING', workOrderProgressQuantity: new Decimal(200) },
+        ],
+        productionProgressSteps: [],
+        outsourceOrders: [],
+      },
+    });
+    locateCancellation(value);
+    await expect(reviewOrderChangeRequest({
+      requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      producedQty: 499, settleFee: '505.00',
+    }, admin)).rejects.toThrow('已产数量不能小于已报工 500');
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+
   it('按最大余数法稳定分摊整单已产数量', () => {
     expect(
       allocateCancellationProducedQuantity(
@@ -3534,6 +3595,36 @@ describe('cancellation settlement reference', () => {
 });
 
 describe('reviewOrderChangeRequest', () => {
+  it.each(['2026-09-20', null])('交期提案 %s 的预览与审批一致，不重新计价或要求配送信息', async (promisedDate) => {
+    const value = request({ proposedChanges: { items: [], promisedDate },
+      order: { ...request().order, promisedDate: new Date('2026-09-10T00:00:00Z'), shipments: [] } });
+    locate(value);
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({
+      promisedDateChange: { before: '2026-09-10', after: promisedDate }, newTotal: '1008.00', quoteToken: null,
+    });
+    locate(value);
+    mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+    expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      promisedDate: promisedDate ? new Date(`${promisedDate}T00:00:00Z`) : null, totalAmount: '1008.00', revision: 3,
+    }) }));
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('生产中仅改交期仍升版；暂停=%s 时保持暂停，未暂停时重新检查完工', async (paused) => {
+    const value = request({ baseWorkOrderVersion: 2, proposedChanges: { items: [], promisedDate: '2026-09-20' },
+      order: { ...request().order, status: paused ? OrderStatus.ON_HOLD : OrderStatus.FOILING, workOrderVersion: 2, promisedDate: null } });
+    locate(value);
+    mocks.db.orderWorkflowDecision.findFirst.mockResolvedValue({ fromStatus: OrderStatus.FOILING });
+    mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+    expect(mocks.activateProduction).toHaveBeenCalledWith(mocks.db, 'order-1', admin, expect.any(Date), {
+      targetStatus: paused ? OrderStatus.ON_HOLD : OrderStatus.FOILING, allowVersionRematerialization: true,
+    });
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'APPROVED', workOrderVersionAfter: 3 }) }));
+    expect(mocks.completion).toHaveBeenCalledTimes(paused ? 0 : 1);
+  });
+
   it('persists DENIED with a mandatory reason and writes the rejection audit', async () => {
     const value = request();
     locate(value);
@@ -4770,7 +4861,7 @@ describe('reviewOrderChangeRequest', () => {
       .rejects.toThrow(/已有开工或完工记录.*不能再修改数量/);
   });
 
-  it('真实纯引擎仅剩制版费待定时仍可批准外部销售改单', async () => {
+  it.each([0, 88])('真实纯引擎默认零版费重算，保留人工版费 %s 元并确认完整金额', async (manualPlateFee) => {
     const value = request({
       order: {
         ...request().order,
@@ -4791,12 +4882,21 @@ describe('reviewOrderChangeRequest', () => {
         ],
       },
     });
+    if (manualPlateFee > 0) {
+      const charge = { ...EMPTY_CHARGE_BASIS, id: 'manual-plate', orderId: 'order-1', shipmentId: null,
+        businessKey: PENDING_PLATE_BUSINESS_KEY, priceBookId: null, status: OrderCustomerChargeStatus.ESTIMATED,
+        amount: new Decimal(manualPlateFee), category: { code: 'PLATE_MAKING_FEE' }, pricingSnapshot: {}, overrideReason: '实际制版费',
+      };
+      Object.assign(value.order, { customerCharges: [...value.order.customerCharges, charge] });
+      mocks.db.orderCustomerCharge.findUnique.mockResolvedValue(charge);
+    }
     locate(value);
     const state: {
       calculation: ReturnType<typeof realEngineResult> | null;
     } = { calculation: null };
     mocks.calculate.mockImplementationOnce(async (_tx, args: ServiceArgs) => {
       state.calculation = realEngineResult(args);
+      mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: new Decimal(state.calculation.quote.order.knownAmount).plus(manualPlateFee) } });
       return state.calculation;
     });
     mocks.db.orderItem.findMany.mockImplementationOnce(async () => {
@@ -4878,16 +4978,26 @@ describe('reviewOrderChangeRequest', () => {
     ).resolves.toEqual({ id: 'request-1' });
 
     expect(state.calculation?.quote.order).toMatchObject({
-      amount: null,
+      amount: state.calculation?.quote.order.knownAmount,
       lines: expect.arrayContaining([
         expect.objectContaining({
           code: 'PLATE_FEE',
-          status: 'PENDING_AMOUNT',
-          amount: null,
+          status: 'QUOTED',
+          amount: '0.00',
         }),
       ]),
     });
+    expect(mocks.db.orderItemPlateDetail.update).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.update.mock.calls.some(([arg]) => arg.where.id === 'manual-plate')).toBe(false);
+    const expectedTotal = new Decimal(state.calculation!.quote.knownTotal).plus(manualPlateFee).toFixed(2);
+    expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ totalAmount: expectedTotal }) }));
+    if (manualPlateFee) {
+      expect(mocks.appendRevision).toHaveBeenCalledWith(mocks.db, expect.objectContaining({ orderFeeSnapshot: {
+        quotedFee: value.order.quotedFee, confirmedFee: expectedTotal, settledFee: null,
+      } }));
+    }
     expect(mocks.appendRevision).toHaveBeenCalledTimes(1);
+    expect(mocks.appendRevision).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: manualPlateFee ? 'ADMIN_CONFIRMED' : 'AUTO_CONFIRMED' }));
   });
 
   it('整单一次纯计算，更新全部款式并冻结双价表证据', async () => {

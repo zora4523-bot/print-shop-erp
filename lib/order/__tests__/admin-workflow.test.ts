@@ -716,7 +716,7 @@ describe('admin order workflow', () => {
     expect(tx.order.update).not.toHaveBeenCalled();
   });
 
-  it('rechecks pending changes under the lock before holding', async () => {
+  it('allows factory hold during review without invalidating the proposal', async () => {
     tx.order.findUnique.mockResolvedValueOnce(
       order({
         status: OrderStatus.CONFIRMED,
@@ -736,12 +736,12 @@ describe('admin order workflow', () => {
         },
         admin,
       ),
-    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
-    expect(tx.orderWorkflowDecision.create).not.toHaveBeenCalled();
-    expect(tx.order.update).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ status: OrderStatus.ON_HOLD });
+    expect(tx.orderWorkflowDecision.create).toHaveBeenCalledTimes(1);
+    expect(tx.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: OrderStatus.ON_HOLD } }));
   });
 
-  it('rechecks pending changes under the lock before resuming', async () => {
+  it('allows verified resume during review without invalidating the proposal', async () => {
     tx.order.findUnique.mockResolvedValueOnce(
       order({
         status: OrderStatus.ON_HOLD,
@@ -749,6 +749,7 @@ describe('admin order workflow', () => {
       }),
     );
 
+    tx.orderWorkflowDecision.findFirst.mockResolvedValueOnce({ fromStatus: OrderStatus.CONFIRMED });
     await expect(
       resumeFactoryOrder(
         {
@@ -758,10 +759,9 @@ describe('admin order workflow', () => {
         },
         admin,
       ),
-    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
-    expect(tx.orderWorkflowDecision.findFirst).not.toHaveBeenCalled();
-    expect(tx.orderWorkflowDecision.create).not.toHaveBeenCalled();
-    expect(tx.order.update).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ status: OrderStatus.CONFIRMED });
+    expect(tx.orderWorkflowDecision.findFirst).toHaveBeenCalledTimes(1);
+    expect(tx.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: OrderStatus.CONFIRMED } }));
   });
 
   it('rejects PRICE_PENDING as a reject reason while keeping it available to hold', async () => {

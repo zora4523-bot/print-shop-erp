@@ -78,6 +78,7 @@ type Props = {
   expectedWorkOrderVersion: number;
   items: ItemOption[];
   catalogProducts: OrderChangeCatalogProduct[];
+  promisedDate?: string | null;
 };
 
 export function orderChangeRequestDraftIdentity({
@@ -155,6 +156,7 @@ export function buildOrderChangeRequestPayload({
   modifyKind,
   reason,
   items,
+  promisedDate,
 }: {
   orderId: string;
   expectedRevision: number;
@@ -162,11 +164,13 @@ export function buildOrderChangeRequestPayload({
   modifyKind: ModifyKind;
   reason: string;
   items: OrderItemChangePayload[];
+  promisedDate?: string | null;
 }) {
   return {
     orderId,
     expectedRevision,
     expectedWorkOrderVersion,
+    ...(promisedDate !== undefined ? { promisedDate } : {}),
     type: 'MODIFY' as const,
     modifyKind,
     reason,
@@ -477,7 +481,9 @@ export function OrderChangeRequestForm(props: Props) {
   );
 }
 
-function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason, pending }: {
+function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason, pending, dueDate, setDueDate }: {
+  dueDate: string;
+  setDueDate: (value: string) => void;
   modifyKind: ModifyKind;
   setModifyKind: (value: ModifyKind) => void;
   reason: string;
@@ -503,9 +509,21 @@ function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason,
           ))}
         </select>
         <span className="block text-xs text-muted-foreground">
-          此处仅用于审批归类；本表只修改上方勾选的款式事实，不会直接更改承诺交期或收货地址。
+          选择交期时填写新的承诺交期；收货地址通过工单资料编辑修改。
         </span>
       </label>
+
+      {modifyKind === 'DUE_DATE' ? <label className="block min-w-0 space-y-1 text-sm">
+        <span className="font-medium">新的承诺交期</span>
+        <Input
+          type="date"
+          className="h-11 text-foreground sm:h-8"
+          value={dueDate}
+          onChange={(event) => setDueDate(event.target.value)}
+          disabled={pending}
+        />
+        <span className="text-xs text-muted-foreground">留空表示清除交期，批准后生效。</span>
+      </label> : null}
 
       <label className="block min-w-0 space-y-1 text-sm">
         <span className="font-medium">修改原因</span>
@@ -530,6 +548,7 @@ function OrderChangeRequestDraftForm({
   expectedWorkOrderVersion,
   items,
   catalogProducts,
+  promisedDate = null,
 }: Props) {
   const [state, action] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
@@ -538,6 +557,8 @@ function OrderChangeRequestDraftForm({
   const [pending, startTransition] = useTransition();
   const [reason, setReason] = useState('');
   const [modifyKind, setModifyKind] = useState<ModifyKind>('QTY');
+  const [dueDate, setDueDate] = useState(promisedDate ?? '');
+  const dueDateChanged = modifyKind === 'DUE_DATE' && (dueDate || null) !== promisedDate;
   const [editable, setEditable] = useState<Record<string, EditableItem>>(() =>
     Object.fromEntries(
       items.map((item) => [
@@ -584,12 +605,13 @@ function OrderChangeRequestDraftForm({
   const canSubmit = useMemo(
     () =>
       reason.trim().length > 0 &&
-      (selectedChanges.length > 0 || hasValidAddedItem) &&
+      (selectedChanges.length > 0 || hasValidAddedItem || dueDateChanged) &&
       (!addEnabled || hasValidAddedItem),
     [
       addEnabled,
       hasValidAddedItem,
       reason,
+      dueDateChanged,
       selectedChanges.length,
     ],
   );
@@ -629,6 +651,7 @@ function OrderChangeRequestDraftForm({
         modifyKind,
         reason,
         items: changes,
+        ...(dueDateChanged ? { promisedDate: dueDate || null } : {}),
       })),
     );
   }
@@ -653,7 +676,7 @@ function OrderChangeRequestDraftForm({
       <p className="text-xs text-muted-foreground">
         勾选要修改的款式；可改款式名、数量、目录规格和正反面烫金颜色。
         规格只显示与当前计价路线、纸张和克重一致的活动目录选项。
-        已开工款式不能改数量或生产计价事实。
+        已产数量将在改版后承接，历史报工和工资保留。
       </p>
       <ExistingOrderItemChanges
         catalogProducts={catalogProducts}
@@ -792,6 +815,8 @@ function OrderChangeRequestDraftForm({
       </fieldset>
 
       <OrderChangeReasonFields
+        dueDate={dueDate}
+        setDueDate={setDueDate}
         modifyKind={modifyKind}
         setModifyKind={setModifyKind}
         reason={reason}

@@ -128,12 +128,13 @@ function progressTotals(
     defectQty: { toString(): string };
     reworkQty: { toString(): string };
   }>,
+  carriedCompletedQty?: { toString(): string },
 ) {
   return {
     completedQty: reports
       .reduce(
         (total, report) => total.plus(report.completedQty.toString()),
-        new Decimal(0),
+        new Decimal(carriedCompletedQty?.toString() ?? 0),
       )
       .toString(),
     defectQty: reports
@@ -217,6 +218,7 @@ function workOrderProgressForOperation(
   order: {
     workOrderVersion?: number;
     items?: Array<{ quantity: number }>;
+    productionOperations?: Array<{ workOrderVersion: number; operationType: PieceworkOperationType; carriedWorkOrderProgressQty: { toString(): string } }>;
     productionWorkOrderProgress?: Array<{
       workOrderVersion: number;
       stage: ProductionWorkOrderStage;
@@ -242,7 +244,8 @@ function workOrderProgressForOperation(
       (total, row) => total.plus(row.workOrderProgressQuantity.toString()),
       new Decimal(0),
     );
-  return { stage, orderTotal, completed };
+  const carried = (order.productionOperations ?? []).filter((row) => row.workOrderVersion === order.workOrderVersion && (row.operationType === PieceworkOperationType.PACKING) === (stage === ProductionWorkOrderStage.PACKING)).reduce((sum, row) => sum.plus(row.carriedWorkOrderProgressQty.toString()), new Decimal(0));
+  return { stage, orderTotal, completed: completed.plus(carried) };
 }
 
 /**
@@ -283,6 +286,7 @@ export async function listProductionOperationsForReporter(
       unit: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       createdAt: true,
       order: {
         select: {
@@ -292,6 +296,7 @@ export async function listProductionOperationsForReporter(
           promisedDate: true,
           workOrderVersion: true,
           items: { select: { quantity: true } },
+          productionOperations: { where: { carriedWorkOrderProgressQty: { gt: 0 } }, select: { workOrderVersion: true, operationType: true, carriedWorkOrderProgressQty: true } },
           productionWorkOrderProgress: {
             select: {
               workOrderVersion: true,
@@ -335,7 +340,7 @@ export async function listProductionOperationsForReporter(
     );
     const completedQty = operation.reports.reduce(
       (total, report) => total.plus(report.reportedCompletedQty),
-      new Decimal(0),
+      new Decimal(operation.carriedCompletedQty?.toString() ?? 0),
     );
     const defectQty = operation.reports.reduce(
       (total, report) => total.plus(report.defectQty),
@@ -393,6 +398,7 @@ export async function getProductionOperationForReporter(
       unit: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       order: {
         select: {
           orderNo: true,
@@ -403,6 +409,7 @@ export async function getProductionOperationForReporter(
           packageRequirement: true,
           remark: true,
           items: { select: { quantity: true } },
+          productionOperations: { where: { carriedWorkOrderProgressQty: { gt: 0 } }, select: { workOrderVersion: true, operationType: true, carriedWorkOrderProgressQty: true } },
           productionWorkOrderProgress: {
             select: {
               workOrderVersion: true,
@@ -466,7 +473,7 @@ export async function getProductionOperationForReporter(
   );
   const completedQty = operation.reports.reduce(
     (total, report) => total.plus(report.reportedCompletedQty),
-    new Decimal(0),
+    new Decimal(operation.carriedCompletedQty?.toString() ?? 0),
   );
   const defectQty = operation.reports.reduce(
     (total, report) => total.plus(report.defectQty),
@@ -545,6 +552,7 @@ export async function listProductionProgressForReporter(
       craftName: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       createdAt: true,
       order: {
         select: {
@@ -580,7 +588,7 @@ export async function listProductionProgressForReporter(
     craftName: step.craftName,
     status: step.status,
     plannedQty: step.plannedQty.toString(),
-    ...progressTotals(step.reports),
+    ...progressTotals(step.reports, step.carriedCompletedQty),
     orderItemSequence: step.orderItem.sequence,
     orderItemName: step.orderItem.name,
   }));
@@ -602,6 +610,7 @@ export async function getProductionProgressForReporter(
       craftName: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       order: {
         select: {
           orderNo: true,
@@ -649,7 +658,7 @@ export async function getProductionProgressForReporter(
     craftName: step.craftName,
     status: step.status,
     plannedQty: step.plannedQty.toString(),
-    ...progressTotals(step.reports),
+    ...progressTotals(step.reports, step.carriedCompletedQty),
     orderItemSequence: step.orderItem.sequence,
     orderItemName: step.orderItem.name,
     packageRequirement: step.order.packageRequirement,

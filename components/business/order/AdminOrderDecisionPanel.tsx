@@ -921,6 +921,11 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
         run={run}
         runOneBatch={runOneBatch}
       />}
+      {compact && order.pendingChangeRequest?.type === 'MODIFY' && (order.capabilities.hold || order.capabilities.resume) ? (
+        <Button className="mt-3" type="button" size="sm" variant="outline" disabled={pending} onClick={() => openMode(order.capabilities.hold ? 'hold' : 'resume')}>
+          {order.capabilities.hold ? '暂停生产' : '恢复生产'}
+        </Button>
+      ) : null}
 
       {mode ? (
         <AdminDecisionForm

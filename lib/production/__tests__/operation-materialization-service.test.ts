@@ -85,6 +85,27 @@ function transactionMock(
 }
 
 describe('activateProductionOperationsInTx', () => {
+  it('改版承接已产件数，不生成报工；暂停状态保持，完成量恰好等于计划则完成工序', async () => {
+    const tx = transactionMock(orderFixture({
+      status: OrderStatus.ON_HOLD, workOrderVersion: 2,
+      productionOperations: [{
+        id: 'old-op', workOrderVersion: 1, operationType: 'FULL', unit: 'PER_PIECE',
+        carriedCompletedQty: new Decimal(20), carriedWorkOrderProgressQty: new Decimal(20),
+        sources: [{ orderItemId: 'item-1', packagingGroupId: null, sourceQty: new Decimal(100) }],
+        reports: [{ reportedCompletedQty: new Decimal(80) }],
+        workOrderProgress: [{ workOrderProgressQuantity: new Decimal(80) }],
+      }],
+    }));
+    await activateProductionOperationsInTx(tx as never, 'order-1', { id: 'admin' }, AT,
+      { targetStatus: OrderStatus.ON_HOLD, allowVersionRematerialization: true });
+    expect(tx.productionOperation.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      workOrderVersion: 2, operationType: 'FULL', carriedCompletedQty: '100', carriedWorkOrderProgressQty: '100', status: 'COMPLETED',
+    }) }));
+    expect(tx.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: OrderStatus.ON_HOLD }) }));
+    expect(JSON.stringify(tx.orderLog.create.mock.calls)).toContain('payrollEntriesCreated');
+    // No report delegate exists in this transaction double: carryover must never create wages.
+  });
+
   it('atomically creates deterministic operations and activates the order', async () => {
     const tx = transactionMock();
     const result = await activateProductionOperationsInTx(

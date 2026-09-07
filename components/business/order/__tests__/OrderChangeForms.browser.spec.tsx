@@ -1,3 +1,5 @@
+import '@/app/globals.css';
+import { page, commands } from 'vitest/browser';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import type { ReactNode } from 'react';
@@ -623,6 +625,48 @@ it('切换或关闭裁决模式会清空上一模式的表单、预览和消息'
       host.querySelector<HTMLInputElement>('[placeholder^="涉及款号"]')?.value,
     ).toBe('');
   } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+  }
+});
+
+
+it.each([
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+])('交期申请在 %s×%s 可独立提交，并保持响应式布局与无障碍', async (width, height) => {
+  await page.viewport(width, height);
+  const host = document.createElement('main');
+  host.id = 'date-change-fixture';
+  document.body.append(host);
+  const root = createRoot(host);
+  createActionMock.mockResolvedValue({ status: 'success', requestId: 'date-request' });
+  try {
+    flushSync(() => root.render(<OrderChangeRequestForm orderId="order-1" expectedRevision={4}
+      expectedWorkOrderVersion={2} promisedDate="2026-09-10" items={[requestItem]} catalogProducts={[]} />));
+    const category = host.querySelector<HTMLSelectElement>('select')!;
+    category.value = 'DUE_DATE';
+    category.dispatchEvent(new Event('change', { bubbles: true }));
+    await settleEffects();
+    setValue(host.querySelector<HTMLInputElement>('input[type="date"]')!, '2026-09-20');
+    setValue(host.querySelector<HTMLTextAreaElement>('textarea')!, '客户确认新交期');
+    await settleEffects();
+    const submit = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    expect(submit.disabled).toBe(false);
+    for (const dark of [false, true]) {
+      document.documentElement.classList.toggle('dark', dark);
+      await settleEffects();
+      await Promise.all(host.getAnimations({ subtree: true }).map((animation) => animation.finished));
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
+      if (width < 640) {
+        expect(host.querySelector('input[type="date"]')!.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      }
+      expect(await commands.checkShellAccessibility('#date-change-fixture')).toEqual([]);
+    }
+    submit.click();
+    await settleEffects();
+    expect(createActionMock).toHaveBeenCalledWith(null, expect.objectContaining({ promisedDate: '2026-09-20', items: [] }));
+  } finally {
+    document.documentElement.classList.remove('dark');
     flushSync(() => root.unmount());
     host.remove();
   }

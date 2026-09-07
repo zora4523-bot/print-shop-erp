@@ -74,6 +74,7 @@ const PROGRESS_REPORT_SELECT = {
   workOrderVersion: true,
   status: true,
   plannedQty: true,
+  carriedCompletedQty: true,
   craftCode: true,
   craftName: true,
   orderItem: { select: { id: true, sequence: true } },
@@ -205,6 +206,7 @@ async function reportProductionProgressInTx(
           progressStep: {
             select: {
               status: true,
+              carriedCompletedQty: true,
               orderId: true,
               order: { select: { status: true, scheduledAt: true } },
             },
@@ -249,7 +251,8 @@ async function reportProductionProgressInTx(
           progressStatus: existingReport.progressStep.status,
           orderStatus: existingReport.progressStep.order.status,
           completedAggregate:
-            aggregate._sum.completedQty?.toString() ?? '0',
+            new Decimal(aggregate._sum.completedQty?.toString() ?? 0)
+              .plus(existingReport.progressStep.carriedCompletedQty?.toString() ?? 0).toString(),
           idempotentReplay: true,
         },
       };
@@ -290,7 +293,7 @@ async function reportProductionProgressInTx(
     });
     const alreadyCompleted = new Decimal(
       aggregate._sum.completedQty?.toString() ?? 0,
-    );
+    ).plus(step.carriedCompletedQty?.toString() ?? 0);
     const completedAggregate = alreadyCompleted.plus(parsed.completed);
     const plannedQty = new Decimal(step.plannedQty.toString());
     if (completedAggregate.gt(plannedQty)) {

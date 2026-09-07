@@ -667,9 +667,9 @@ export function resolveAdminOrderCapabilities(input: AdminOrderCapabilityFacts):
       input.confirmationPreflightOk &&
       !input.currentPricePreviewFailed,
     reject: awaitingFactory && !input.hasPendingChange,
-    hold: productionActive && !input.hasPendingChange,
+    hold: productionActive,
     resume:
-      input.status === OrderStatus.ON_HOLD && !input.hasPendingChange,
+      input.status === OrderStatus.ON_HOLD,
     release:
       input.status === OrderStatus.CONFIRMED && !input.hasPendingChange,
     ship: resolveAdminOrderShipDisabledReason(input) === null,
@@ -1250,6 +1250,7 @@ export function summarizeAdminOrderChange(
   const parsed = orderChangeRequestItemsSchema.safeParse(proposedChanges.items);
   if (!parsed.success) return null;
   const facts: string[] = [];
+  if ('promisedDate' in proposedChanges && (proposedChanges.promisedDate === null || typeof proposedChanges.promisedDate === 'string')) facts.push(`交期调整为 ${proposedChanges.promisedDate ?? '未设置'}`);
   for (const change of parsed.data) {
     if (change.operation === 'ADD') {
       facts.push(`新增款式 ${change.quantity.toLocaleString('zh-CN')} 个`);

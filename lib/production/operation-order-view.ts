@@ -19,6 +19,7 @@ export async function listOrderProductionOperations(orderId: string) {
       unit: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       sources: {
         select: {
           orderItemId: true,
@@ -47,6 +48,7 @@ export async function listOrderProductionProgressSteps(orderId: string) {
       craftName: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       orderItemId: true,
       orderItem: { select: { sequence: true, name: true } },
       reports: {

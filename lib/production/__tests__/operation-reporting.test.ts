@@ -22,6 +22,7 @@ const {
   completionDispatchMock: vi.fn(),
   dbMock: {
     productionOperation: {
+      aggregate: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
       count: vi.fn(),
@@ -168,6 +169,7 @@ beforeEach(() => {
     uncoveredItems: [],
   });
   completionDispatchMock.mockReset().mockResolvedValue(undefined);
+  dbMock.productionOperation.aggregate.mockResolvedValue({ _sum: { carriedWorkOrderProgressQty: null } });
   arrangeOperation();
   dbMock.user.findUnique.mockResolvedValue(accountFixture());
   dbMock.productionReport.findUnique.mockResolvedValue(null);
@@ -211,6 +213,24 @@ function reportInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe('reportProductionOperation', () => {
+  it('承接已产后只为新增合格数记工资，累计数量包含承接量', async () => {
+    arrangeOperation(operationFixture({ carriedCompletedQty: new Decimal(150) }));
+    const result = await reportProductionOperation(reportInput({ completedQty: 50 }), ACTOR);
+    expect(result).toMatchObject({ completedAggregate: '200', operationStatus: ProductionOperationStatus.COMPLETED });
+    expect(dbMock.productionReport.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reportedCompletedQty: '50', chargeableQty: '100' }) }));
+  });
+  it('承接量加新增量超过工序计划时拒绝，不写工资', async () => {
+    arrangeOperation(operationFixture({ carriedCompletedQty: new Decimal(151) }));
+    await expect(reportProductionOperation(reportInput({ completedQty: 50 }), ACTOR)).rejects.toThrow(/超过/);
+    expect(dbMock.productionReport.create).not.toHaveBeenCalled();
+  });
+  it('独立工单件数上限包含承接量', async () => {
+    arrangeOperation(operationFixture({ order: { id: 'order-1', orderNo: 'GD-1', status: OrderStatus.FOILING, workOrderVersion: 1, scheduledAt: NOW } }));
+    dbMock.productionOperation.aggregate.mockResolvedValue({ _sum: { carriedWorkOrderProgressQty: new Decimal(190) } });
+    await expect(reportProductionOperation(reportInput({ completedQty: 20, workOrderProgressQuantity: 11 }), ACTOR)).rejects.toMatchObject({ code: 'OVER_WORK_ORDER_PROGRESS' });
+    expect(dbMock.productionReport.create).not.toHaveBeenCalled();
+  });
+
   it('对已下发工单原子写入独立件数进度和首次扫码认领', async () => {
     arrangeOperation(
       operationFixture({

@@ -477,13 +477,13 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
       'PLATE_FEE_CONFIGURED_PER_ORDER',
     ]);
     expect(plateLine).toMatchObject({
-      status: 'PENDING_AMOUNT',
-      amount: null,
-      includedInKnownTotal: false,
-      basis: { pricingPolicy: 'ADMIN_MANUAL_ONLY' },
+      status: 'QUOTED',
+      amount: '0.00',
+      includedInKnownTotal: true,
+      basis: { pricingPolicy: 'DEFAULT_ZERO_ADMIN_OPTIONAL' },
     });
     expect(quote.knownTotal).toBe(baselineQuote.knownTotal);
-    expect(quote.pendingReasons.map((reason) => reason.code)).toContain(
+    expect(quote.pendingReasons.map((reason) => reason.code)).not.toContain(
       'PLATE_AMOUNT_PENDING',
     );
   });

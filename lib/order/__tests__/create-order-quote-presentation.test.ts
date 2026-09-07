@@ -83,10 +83,10 @@ describe('create-order pure quote presentation', () => {
       requiresAdminConfirmation: false,
     });
     expect(presentation).toMatchObject({
-      total: null,
-      hasManualPricing: true,
-      totalSemantics: 'EXCLUDES_MANUAL_ITEMS',
-      plateFee: { status: 'PENDING', amount: null },
+      total: presentation.knownTotal,
+      hasManualPricing: false,
+      totalSemantics: 'COMPLETE',
+      plateFee: null,
     });
     expect(presentation.quoteToken).toBe('token-1');
   });

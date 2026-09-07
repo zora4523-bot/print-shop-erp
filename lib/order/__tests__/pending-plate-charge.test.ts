@@ -16,11 +16,24 @@ import {
   waivePendingPlateChargeWhenNotApplicableInTx,
 } from '../pending-plate-charge';
 
-function plateQuote() {
+function currentPlateQuote() {
   return calculateCreateOrderQuote(
     createGoldenOrderInput([createGoldenOrderItem()]),
     CREATE_ORDER_GOLDEN_SNAPSHOT,
   );
+}
+
+// Historical quotes still round-trip through the compatibility reader.
+function legacyPlateQuote() {
+  const quote = currentPlateQuote();
+  return { ...quote, status: 'PARTIAL' as const, total: null,
+    order: { ...quote.order, amount: null, lines: quote.order.lines.map((line) => line.code === 'PLATE_FEE' ? {
+      ...line, status: 'PENDING_AMOUNT' as const, amount: null, includedInKnownTotal: false,
+      basis: { ...line.basis, pricingPolicy: 'ADMIN_MANUAL_ONLY' },
+    } : line) },
+    pendingLineCodes: ['PLATE_FEE'],
+    pendingReasons: [{ code: 'PLATE_AMOUNT_PENDING' as const, message: '历史版费待核价' }],
+  };
 }
 
 function plainPrintQuote() {
@@ -133,14 +146,21 @@ function txWithChargeMocks(input: {
 }
 
 describe('pending plate charge persistence', () => {
+  it('默认零元报价不生成待核版费，已人工录入的版费保持原值', async () => {
+    const quote = currentPlateQuote();
+    expect(quoteHasPendingPlateCharge(quote)).toBe(false);
+    const {tx, update} = txWithChargeMocks({ existing: { id: 'plate-1', status: OrderCustomerChargeStatus.FINAL, amount: new Decimal(88), pricingSnapshot: {} } });
+    await waivePendingPlateChargeWhenNotApplicableInTx({ tx, orderId: 'order-1', actorId: 'admin-1', now: new Date(), quote });
+    expect(update).not.toHaveBeenCalled();
+  });
   it('仅把纯引擎的唯一订单级制版 pending 视为可持久化证据', () => {
-    expect(quoteHasPendingPlateCharge(plateQuote())).toBe(true);
+    expect(quoteHasPendingPlateCharge(legacyPlateQuote())).toBe(true);
     expect(quoteHasPendingPlateCharge(plainPrintQuote())).toBe(false);
   });
 
   it('有烫金时以固定 business key 写入唯一 pending，不伪造金额', async () => {
     const { tx, upsert } = txWithChargeMocks();
-    const quote = plateQuote();
+    const quote = legacyPlateQuote();
 
     await upsertPendingPlateChargeInTx({
       tx,
@@ -377,7 +397,7 @@ describe('pending plate charge persistence', () => {
         orderId: 'order-1',
         actorId: 'admin-1',
         now: new Date('2026-09-02T04:00:00.000Z'),
-        quote: plateQuote(),
+        quote: legacyPlateQuote(),
       }),
     ).rejects.toBeInstanceOf(PendingPlateChargeError);
     expect(findUnique).not.toHaveBeenCalled();

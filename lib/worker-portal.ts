@@ -301,6 +301,7 @@ export async function getWorkerOrderDetail(
           unit: true,
           status: true,
           plannedQty: true,
+          carriedCompletedQty: true,
           sources: {
             orderBy: { createdAt: 'asc' },
             select: {
@@ -330,6 +331,7 @@ export async function getWorkerOrderDetail(
           craftName: true,
           status: true,
           plannedQty: true,
+          carriedCompletedQty: true,
           orderItemId: true,
           orderItem: {
             select: { sequence: true, name: true },

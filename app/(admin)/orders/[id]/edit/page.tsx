@@ -167,6 +167,7 @@ export default async function EditOrderPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             <OrderChangeRequestForm
+              promisedDate={order.promisedDate?.toISOString().slice(0, 10) ?? null}
               orderId={order.id}
               expectedRevision={order.revision}
               expectedWorkOrderVersion={order.workOrderVersion}

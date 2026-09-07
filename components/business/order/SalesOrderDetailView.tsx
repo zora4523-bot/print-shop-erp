@@ -55,6 +55,7 @@ function SalesOrderChangeRequestSection({
         </p>
       </div>
       <OrderChangeRequestForm
+        promisedDate={order.promisedDate?.slice(0, 10) ?? null}
         orderId={order.id}
         expectedRevision={order.revision}
         expectedWorkOrderVersion={order.workOrderVersion}

@@ -293,6 +293,12 @@ export function OrderChangeFieldDiff({
   proposedChanges: unknown;
 }) {
   const groups = buildDiffGroups(beforeSnapshot, proposedChanges);
+  if (proposedChanges && typeof proposedChanges === 'object' && 'promisedDate' in proposedChanges &&
+      (proposedChanges.promisedDate === null || typeof proposedChanges.promisedDate === 'string')) {
+    const before = beforeSnapshot && typeof beforeSnapshot === 'object' && 'promisedDate' in beforeSnapshot && typeof beforeSnapshot.promisedDate === 'string'
+      ? beforeSnapshot.promisedDate : '未设置';
+    groups.unshift({ key: 'promised-date', title: '承诺交期', operation: '修改', rows: [{ key: 'promised-date', field: '承诺交期', before, after: proposedChanges.promisedDate ?? '未设置', pricingImpact: '不影响计价', productionImpact: '更新交期，已产数量保留' }] });
+  }
 
   if (groups.length === 0) {
     return (

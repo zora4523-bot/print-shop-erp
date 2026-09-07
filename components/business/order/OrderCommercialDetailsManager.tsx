@@ -538,6 +538,7 @@ export function OrderCommercialDetailsManager({
 
       <div className="space-y-3 border-t pt-4">
         <h3 className="text-sm font-semibold">按款式制版明细</h3>
+        <p className="text-sm text-muted-foreground">版费默认 0 元；需要收费时，由管理员添加制版明细。</p>
         {allowPlateDetailMaintenance ? (
           <ol className="space-y-4">
             {items.map((item) => (

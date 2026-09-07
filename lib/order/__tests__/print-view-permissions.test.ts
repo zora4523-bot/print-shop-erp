@@ -158,6 +158,7 @@ describe('getOrderForPrint permissions', () => {
         {
           id: 'operation/3',
           workOrderVersion: 3,
+          carriedCompletedQty: '100',
           operationType: PieceworkOperationType.PARTIAL,
           status: ProductionOperationStatus.IN_PROGRESS,
           plannedQty: '4000',
@@ -184,6 +185,7 @@ describe('getOrderForPrint permissions', () => {
         {
           id: 'progress/3',
           workOrderVersion: 3,
+          carriedCompletedQty: '50',
           craftName: '覆膜',
           status: ProductionOperationStatus.PENDING,
           plannedQty: '2000',
@@ -255,7 +257,7 @@ describe('getOrderForPrint permissions', () => {
         source: 'OPERATION',
         craftName: '局部烫金',
         plannedQty: 2_000,
-        completedQty: 800,
+        completedQty: 900,
         defectQty: 2,
       }),
       expect.objectContaining({

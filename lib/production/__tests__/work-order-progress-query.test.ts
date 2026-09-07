@@ -47,6 +47,16 @@ beforeEach(() => {
 });
 
 describe('getWorkOrderProgressByOrderIds', () => {
+  it('当前代次承接量与新增报工合并，旧代承接量不再重复加入', async () => {
+    dbMock.order.findMany.mockResolvedValue([{ id: 'order-1', workOrderVersion: 3, scheduledAt: null, productionOperations: [
+      { workOrderVersion: 2, operationType: 'PARTIAL', carriedWorkOrderProgressQty: new Decimal(60) },
+      { workOrderVersion: 3, operationType: 'PARTIAL', carriedWorkOrderProgressQty: new Decimal(70) },
+    ] }]);
+    dbMock.orderItem.groupBy.mockResolvedValue([{ orderId: 'order-1', _sum: { quantity: 100 } }]);
+    dbMock.productionWorkOrderProgress.groupBy.mockResolvedValue([{ orderId: 'order-1', workOrderVersion: 3, stage: ProductionWorkOrderStage.FOILING, _sum: { workOrderProgressQuantity: new Decimal(10) } }]);
+    expect((await getWorkOrderProgressByOrderIds(['order-1'])).get('order-1')).toMatchObject({ foilingProgress: '80', packingProgress: '0' });
+  });
+
   it('批量投影两道工单件数进度，打包超前只派生提示', async () => {
     dbMock.order.findMany.mockResolvedValue([
       {

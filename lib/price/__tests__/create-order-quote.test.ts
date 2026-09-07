@@ -847,7 +847,7 @@ describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () =
     expect(
       result.order.lines.filter((line) => line.code === 'PLATE_FEE'),
     ).toHaveLength(1);
-    expect(result.pendingReasons).toContainEqual(
+    expect(result.pendingReasons).not.toContainEqual(
       expect.objectContaining({ code: 'PLATE_AMOUNT_PENDING' }),
     );
   });
@@ -1089,21 +1089,16 @@ describe('calculateCreateOrderQuote · 入袋、纸箱与快递', () => {
     });
   });
 
-  it('制烫金版费待定时保留已知合计，但阻断完整总价', () => {
+  it('版费默认零元，自动报价包含完整总价', () => {
     const result = quoteSingle(createGoldenOrderItem());
     expect(orderLine(result, 'PLATE_FEE')).toMatchObject({
-      status: 'PENDING_AMOUNT',
-      amount: null,
-      includedInKnownTotal: false,
-      basis: { displayAmount: '待定', granularity: 'PER_ORDER' },
+      status: 'QUOTED', amount: '0.00', includedInKnownTotal: true,
+      basis: { pricingPolicy: 'DEFAULT_ZERO_ADMIN_OPTIONAL', granularity: 'PER_ORDER' },
     });
-    expect(result.status).toBe('PARTIAL');
-    expect(result.total).toBeNull();
-    expect(Number(result.knownTotal)).toBeGreaterThan(0);
-    expect(result.pendingLineCodes).toContain('PLATE_FEE');
-    expect(result.pendingReasons.map((reason) => reason.code)).toContain(
-      'PLATE_AMOUNT_PENDING',
-    );
+    expect(result.status).toBe('QUOTED');
+    expect(result.total).toBe(result.knownTotal);
+    expect(Number(result.total)).toBeGreaterThan(0);
+    expect(result.pendingLineCodes).not.toContain('PLATE_FEE');
   });
 
   it('纯彩印无烫金事实时不生成制版费，也不因此阻断完整总价', () => {
@@ -1121,7 +1116,7 @@ describe('calculateCreateOrderQuote · 入袋、纸箱与快递', () => {
     expect(result.total).toBe(result.knownTotal);
   });
 
-  it('即使历史快照携带制版费规则金额也始终转管理员人工核价', () => {
+  it('即使历史快照携带制版费规则金额也按默认零元报价，不自动套用旧版费', () => {
     const legacySnapshot = {
       ...CREATE_ORDER_GOLDEN_SNAPSHOT,
       plate: {
@@ -1141,17 +1136,17 @@ describe('calculateCreateOrderQuote · 入袋、纸箱与快递', () => {
     const result = calculateCreateOrderQuote(input, legacySnapshot);
 
     expect(orderLine(result, 'PLATE_FEE')).toMatchObject({
-      status: 'PENDING_AMOUNT',
-      amount: null,
-      includedInKnownTotal: false,
+      status: 'QUOTED',
+      amount: '0.00',
+      includedInKnownTotal: true,
       basis: {
-        displayAmount: '待定',
+        displayAmount: '0.00',
         granularity: 'PER_ORDER',
-        pricingPolicy: 'ADMIN_MANUAL_ONLY',
+        pricingPolicy: 'DEFAULT_ZERO_ADMIN_OPTIONAL',
       },
     });
     expect(result.knownTotal).toBe(baseline.knownTotal);
-    expect(result.pendingReasons).toContainEqual({
+    expect(result.pendingReasons).not.toContainEqual({
       code: 'PLATE_AMOUNT_PENDING',
       message: '制烫金版费金额待管理员人工核价',
     });

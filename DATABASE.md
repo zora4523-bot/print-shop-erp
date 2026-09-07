@@ -167,3 +167,19 @@ pnpm db:studio
 ```
 
 错误处理见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)。
+
+
+## 2026-09-08：工单改版生产承接量
+
+迁移 `20260908003000_order_version_carryover` 为 `ProductionOperation` 增加
+`carriedCompletedQty`（合格件/袋数）、`carriedWorkOrderProgressQty`（工单独立件数），
+为 `ProductionProgressStep` 增加 `carriedCompletedQty`。历史行默认 0，历史报工、工资和结算不回填、不改写。
+
+承接量仅在生成新版工序时保存，上代承接量加上上代实际新增报工形成新基数；不生成虚构报工。
+字段受非负、计划上限与不可更新触发器保护；工单件数触发器将当前版本的承接量加入累计上限。
+业务事务仍持有工单 advisory lock，并核对来源映射和分款减量歧义。
+
+已应用迁移保持原样。此次 `migrate dev --create-only` 的 shadow replay 被历史并发索引迁移阻断，
+因此使用 HEAD schema 到当前 schema 的 `prisma migrate diff --script` 生成加列 SQL，再加入约束。
+随后在专用库、本地开发库部署，并在新建空库通过完整 `verify-fresh-migrations.mjs` 检查。
+已部署 SQL 原文含一个末尾空行，`git diff --check` 会提示 `new blank line at EOF`；为保持已应用迁移的校验和，不再改写该文件。其余任务文件通过格式检查。

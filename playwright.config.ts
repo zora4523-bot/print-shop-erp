@@ -30,21 +30,20 @@ function postgresDatabaseTarget(value: string): string | null {
   }
 }
 
-function pointsAtSameDatabase(left: string, right: string): boolean {
-  if (left === right) return true;
-  const leftTarget = postgresDatabaseTarget(left);
-  const rightTarget = postgresDatabaseTarget(right);
-  return leftTarget !== null && leftTarget === rightTarget;
-}
+// Playwright evaluates this config again inside workers after DATABASE_URL was
+// replaced below. Preserve the initial target (without credentials), otherwise
+// workers mistake the isolated database for the regular one and use :3000.
+const defaultDatabaseTarget = process.env.E2E_ORIGINAL_DATABASE_TARGET ??
+  (defaultDatabaseUrl ? postgresDatabaseTarget(defaultDatabaseUrl) ?? '' : '');
+process.env.E2E_ORIGINAL_DATABASE_TARGET = defaultDatabaseTarget;
 
 const requestedE2eDatabaseTarget = requestedE2eDatabaseUrl
   ? postgresDatabaseTarget(requestedE2eDatabaseUrl)
   : null;
 const e2eDatabaseMatchesDefault = Boolean(
   requestedE2eDatabaseTarget &&
-    requestedE2eDatabaseUrl &&
-    defaultDatabaseUrl &&
-    pointsAtSameDatabase(requestedE2eDatabaseUrl, defaultDatabaseUrl),
+    defaultDatabaseTarget &&
+    requestedE2eDatabaseTarget === defaultDatabaseTarget,
 );
 const isolatedE2eDatabaseUrl =
   requestedE2eDatabaseTarget && !e2eDatabaseMatchesDefault

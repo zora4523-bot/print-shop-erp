@@ -52,6 +52,7 @@ type PrintOperationRow = {
   operationType: PieceworkOperationType;
   status: ProductionOperationStatus;
   plannedQty: { toString(): string };
+  carriedCompletedQty?: { toString(): string };
   sources: Array<{
     orderItem: null | {
       sequence: number;
@@ -73,6 +74,7 @@ type PrintProgressStepRow = {
   craftName: string;
   status: ProductionOperationStatus;
   plannedQty: { toString(): string };
+  carriedCompletedQty?: { toString(): string };
   orderItem: { sequence: number; name: string };
   reports: Array<{
     completedQty: { toString(): string };
@@ -115,7 +117,7 @@ async function buildCurrentProductionSteps(input: {
           : 1;
       const completedQty = operation.reports.reduce(
         (total, report) => total.plus(report.reportedCompletedQty.toString()),
-        new Decimal(0),
+        new Decimal(operation.carriedCompletedQty?.toString() ?? 0),
       );
       const defectQty = operation.reports.reduce(
         (total, report) => total.plus(report.defectQty.toString()),
@@ -153,7 +155,7 @@ async function buildCurrentProductionSteps(input: {
       async (step): Promise<PrintProductionStep> => {
         const completedQty = step.reports.reduce(
           (total, report) => total.plus(report.completedQty.toString()),
-          new Decimal(0),
+          new Decimal(step.carriedCompletedQty?.toString() ?? 0),
         );
         const defectQty = step.reports.reduce(
           (total, report) => total.plus(report.defectQty.toString()),
@@ -246,6 +248,7 @@ export async function getOrderForPrint(
           operationType: true,
           status: true,
           plannedQty: true,
+          carriedCompletedQty: true,
           sources: {
             orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             select: {
@@ -278,6 +281,7 @@ export async function getOrderForPrint(
           craftName: true,
           status: true,
           plannedQty: true,
+          carriedCompletedQty: true,
           orderItem: { select: { sequence: true, name: true } },
           reports: {
             orderBy: [{ reportedAt: 'asc' }, { id: 'asc' }],

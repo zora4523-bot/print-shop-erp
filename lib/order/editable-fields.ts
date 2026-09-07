@@ -96,6 +96,7 @@ export const ORDER_MODIFIABLE_STATUSES: readonly OrderStatus[] = [
   OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED, OrderStatus.SUBMITTED,
   OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION, OrderStatus.CONFIRMED,
   OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING,
+  OrderStatus.ON_HOLD,
 ];
 
 export function canRequestOrderModification(actor: { id: string; role: Role }, order: { submitterId: string; status: OrderStatus }, hasPendingRequest = false) {

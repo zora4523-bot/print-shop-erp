@@ -1,7 +1,7 @@
 import type { Prisma } from '../../generated/prisma/client';
 import { OrderCustomerChargeStatus } from '../../generated/prisma/enums';
 import type { CreateOrderQuoteResult } from '../price/create-order/types';
-import { CREATE_ORDER_PLATE_PRICING_POLICY } from '../price/create-order/order-quote';
+import { CREATE_ORDER_PLATE_PRICING_POLICY, CREATE_ORDER_PLATE_DEFAULT_POLICY } from '../price/create-order/order-quote';
 
 export const PENDING_PLATE_BUSINESS_KEY =
   'ORDER:PLATE_MAKING_FEE:PENDING' as const;
@@ -11,6 +11,12 @@ export class PendingPlateChargeError extends Error {
     super(message);
     this.name = 'PendingPlateChargeError';
   }
+}
+
+export function quoteHasDefaultZeroPlateCharge(quote: CreateOrderQuoteResult): boolean {
+  return quote.order.lines.some((line) => line.code === 'PLATE_FEE' &&
+    line.status === 'QUOTED' && line.amount === '0.00' && line.includedInKnownTotal &&
+    line.basis.pricingPolicy === CREATE_ORDER_PLATE_DEFAULT_POLICY);
 }
 
 function pendingPlateEvidence(quote: CreateOrderQuoteResult): {
@@ -31,6 +37,12 @@ function pendingPlateEvidence(quote: CreateOrderQuoteResult): {
   }
 
   const plateLine = plateLines[0];
+  if (plateLines.length === 1 && pendingReasons.length === 0 &&
+      plateLine?.status === 'QUOTED' && plateLine.amount === '0.00' &&
+      plateLine.includedInKnownTotal &&
+      plateLine.basis.pricingPolicy === CREATE_ORDER_PLATE_DEFAULT_POLICY) {
+    return null;
+  }
   if (
     plateLines.length !== 1 ||
     pendingReasons.length !== 1 ||
@@ -184,7 +196,10 @@ export async function preparePendingPlateChargeWaiverInTx(args: {
       '仍有独立制版费待核价的工单不能豁免订单级制版费',
     );
   }
-  const reason = quoteUsesPrintFoilAtomicBundleScope(args.quote)
+  const defaultZero = quoteHasDefaultZeroPlateCharge(args.quote);
+  const reason = defaultZero
+    ? '版费默认 0 元，管理员可另行添加制版明细'
+    : quoteUsesPrintFoilAtomicBundleScope(args.quote)
     ? '制版费已包含在不可拆彩印烫金原子套餐，不再另收'
     : '改单后已无烫金事实，制版费不再适用';
   const existing = await args.tx.orderCustomerCharge.findUnique({
@@ -201,7 +216,8 @@ export async function preparePendingPlateChargeWaiverInTx(args: {
       pricingSnapshot: true,
     },
   });
-  return { existing, reason };
+  // A default is not an instruction to erase an administrator's recorded fee.
+  return { existing: defaultZero && existing?.status !== OrderCustomerChargeStatus.PENDING_AMOUNT ? null : existing, reason };
 }
 
 export async function applyPendingPlateChargeWaiverInTx(args: {

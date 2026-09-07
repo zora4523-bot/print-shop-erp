@@ -586,7 +586,6 @@ export async function holdFactoryOrder(
       };
     }
     const order = await readLockedOrder(tx, input.orderId);
-    assertNoPendingChange(order);
     assertFigsBelongToOrder(order, affectedFigs);
     transitionOrder(order.status, OrderStatus.ON_HOLD);
     await tx.orderWorkflowDecision.create({
@@ -604,7 +603,7 @@ export async function holdFactoryOrder(
     });
     await tx.order.update({
       where: { id: order.id },
-      data: { status: OrderStatus.ON_HOLD, revision: { increment: 1 } },
+      data: { status: OrderStatus.ON_HOLD, ...(order._count.changeRequests === 0 ? { revision: { increment: 1 } } : {}) },
       select: { id: true },
     });
     await tx.orderLog.create({
@@ -667,7 +666,6 @@ export async function resumeFactoryOrder(
       };
     }
     const order = await readLockedOrder(tx, input.orderId);
-    assertNoPendingChange(order);
     if (order.status !== OrderStatus.ON_HOLD) {
       throw new AdminOrderWorkflowError(
         'INVALID_STATUS',
@@ -688,7 +686,7 @@ export async function resumeFactoryOrder(
     transitionOrder(order.status, hold.fromStatus);
     await tx.order.update({
       where: { id: order.id },
-      data: { status: hold.fromStatus, revision: { increment: 1 } },
+      data: { status: hold.fromStatus, ...(order._count.changeRequests === 0 ? { revision: { increment: 1 } } : {}) },
       select: { id: true },
     });
     await tx.orderLog.create({

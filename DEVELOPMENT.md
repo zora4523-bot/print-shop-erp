@@ -86,12 +86,15 @@ pnpm dev
 
 - Vitest 排除 `tests/e2e`、`tests/visual`、`.next` 和 `generated`。
 - Playwright 默认 `baseURL` 是 `http://localhost:3000`，可用 `E2E_BASE_URL` 覆盖。
+- 指定与日常库不同的 `E2E_DATABASE_URL` 时，默认端口改为 `3100`，测试服务和 worker 使用同一隔离库，且不复用日常开发服务器。配置会保存不含凭据的原数据库目标，确保 worker 重新加载配置时不会退回 `3000`；不要手工设置内部的 `E2E_ORIGINAL_DATABASE_TARGET` 标记。
 - Playwright 当前会操作开发数据库，并依靠每次运行的唯一 fixture 降低冲突；它不是生产只读测试。禁止让 `DATABASE_URL` 指向生产。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
+- 报工会产生不可删除的历史记录，必须使用隔离库及已发布的测试工价。重复运行时保留既有报工，按已有累计量断言；合格量与工单件数进度分别填写。打印基线所用提交人名称也须与固定 fixture 一致。
+- 同一工作树内，先完成全量单测，再启动 E2E 开发服务器；避免路由/配置回归测试的临时文件被 Next 文件监听器读入。发生测试期间路由缓存异常时，停止该隔离服务器并重建它的 `.next`，不要清理日常工作区或重置数据库。
 - `tests/e2e/owner-notifications.spec.ts` 仅在本地可丢弃库（库名 `notif_ui_e2e_*`，通过 `E2E_DATABASE_URL` 指定）且 `NOTIFICATION_MOCK_MODE=true` 时运行。先对该独立库应用完整迁移，使用占位 Bot ID/Secret；绑定回调由 fixture 模拟，不连接真实企业微信。测试命令为 `pnpm exec playwright test tests/e2e/owner-notifications.spec.ts --project=chromium`。已有开发服务器运行时，使用独立源码快照及端口，避免共用 `.next` 开发锁；不要为跑测试重置日常开发库。
 - `test:admin-ui` 与 `test:worker-ui` 分别覆盖六个视口、明暗主题、overflow/touch/axe 等契约。
 - 只有打印规格保存了像素截图基线。管理端和师傅端门禁不是设计稿像素 diff，不能据此声称全站逐页还原。
-- 打印二维码包含 origin；运行打印视觉测试时保持固定 `E2E_BASE_URL`，避免把 host 变化误判为版式变化。
+- 打印二维码包含 origin；隔离模式通过测试服务的 `APP_PUBLIC_URL` 保持基线 origin 为 `http://localhost:3000`，避免把测试端口变化误判为版式变化。
 
 ## 数据库开发
 

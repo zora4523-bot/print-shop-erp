@@ -94,7 +94,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
           {order.productionOperations.map((operation) => {
           const completed = operation.reports.reduce(
             (sum, report) => sum.plus(report.reportedCompletedQty),
-            new Decimal(0),
+            new Decimal(operation.carriedCompletedQty),
           );
           const myAmount = operation.reports
             .filter((report) => report.reporterId === user.id)
@@ -138,7 +138,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
           {order.productionProgressSteps.map((step) => {
             const completed = step.reports.reduce(
               (sum, report) => sum.plus(report.completedQty),
-              new Decimal(0),
+              new Decimal(step.carriedCompletedQty),
             );
             return (
               <Link

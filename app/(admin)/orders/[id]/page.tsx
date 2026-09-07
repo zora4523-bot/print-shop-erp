@@ -1239,7 +1239,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                         .map((step) => {
                           const completed = step.reports.reduce(
                             (sum, report) => sum.plus(report.completedQty),
-                            new Decimal(0),
+                            new Decimal(step.carriedCompletedQty?.toString() ?? 0),
                           );
                           return `${step.craftName}：${productionOperationStatusLabel(step.status)}（${completed.toString()}/${step.plannedQty.toString()}）`;
                         })
@@ -1334,6 +1334,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             </p>
           </div>
           <OrderChangeRequestForm
+            promisedDate={order.promisedDate?.toISOString().slice(0, 10) ?? null}
             orderId={order.id}
             expectedRevision={order.revision}
             expectedWorkOrderVersion={order.workOrderVersion}

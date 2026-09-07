@@ -1291,7 +1291,7 @@ describe('createOrder', () => {
     );
   });
 
-  it('creates a pending plate charge and blocks auto-confirmation for an internal order', async () => {
+  it('defaults plate fees to zero and automatically quotes an internal order', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1344,7 +1344,7 @@ describe('createOrder', () => {
     );
 
     expect(dbMock.order.create.mock.calls[0]![0].data.pricingStatus).toBe(
-      'PENDING_ADMIN_CONFIRMATION',
+      'AUTO_CONFIRMED',
     );
     expect(
       dbMock.order.create.mock.calls[0]![0].data.items.create[0]
@@ -1356,28 +1356,8 @@ describe('createOrder', () => {
       suggestedSubtotal: '170.00',
       source: 'INTERNAL_CREATE_AUTO',
     });
-    expect(result.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
-    expect(dbMock.orderCustomerCharge.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          orderId_businessKey: {
-            orderId: 'order-created',
-            businessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
-          },
-        },
-        create: expect.objectContaining({
-          categoryId: 'cat-plate',
-          status: 'PENDING_AMOUNT',
-          amount: null,
-          pricingSnapshot: expect.objectContaining({
-            source: 'INTERNAL_CREATE_PENDING_PLATE',
-            pendingReason: expect.objectContaining({
-              code: 'PLATE_AMOUNT_PENDING',
-            }),
-          }),
-        }),
-      }),
-    );
+    expect(result.pricingStatus).toBe('AUTO_CONFIRMED');
+    expect(dbMock.orderCustomerCharge.upsert).not.toHaveBeenCalled();
     expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       maxWait: 10_000,
       timeout: 30_000,
@@ -1393,8 +1373,8 @@ describe('createOrder', () => {
     expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         revision: 1,
-        status: 'PENDING_ADMIN_CONFIRMATION',
-        source: 'ORDER_CREATED_PROVISIONAL',
+        status: 'AUTO_CONFIRMED',
+        source: 'ORDER_CREATED_AUTO',
       }),
     });
     expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith(

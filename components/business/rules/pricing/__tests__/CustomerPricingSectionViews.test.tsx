@@ -71,7 +71,7 @@ function readonlyMarkup(html: string, priceLabel: string): string {
 }
 
 describe('CustomerPricingSectionViews', () => {
-  it('制烫金版费始终显示人工核价策略，不渲染历史数值配置', () => {
+  it('制烫金版费显示默认零与人工选项，不渲染历史数值配置', () => {
     const html = renderToStaticMarkup(
       <CustomerMachinePricingSectionView
         rate={field('machine-rate', '0.04')}
@@ -84,8 +84,8 @@ describe('CustomerPricingSectionViews', () => {
 
     expect(text).toContain('局部烫金 · 机烫费与制版费');
     expect(text).toContain('制烫金版费');
-    expect(text).toContain('始终人工核价');
-    expect(text).toContain('不设置自动单价，不参与计价引擎计算');
+    expect(text).toContain('默认 0 元 · 可人工添加');
+    expect(text).toContain('版费默认 0 元');
     expect(html).not.toContain('aria-label="价格参数"');
     expect(html).not.toContain('value="999.99"');
     expect(text).not.toContain('元/版');

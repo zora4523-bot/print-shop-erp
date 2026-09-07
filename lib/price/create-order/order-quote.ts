@@ -11,6 +11,7 @@ import type {
 } from './types';
 
 export const CREATE_ORDER_PLATE_PRICING_POLICY = 'ADMIN_MANUAL_ONLY' as const;
+export const CREATE_ORDER_PLATE_DEFAULT_POLICY = 'DEFAULT_ZERO_ADMIN_OPTIONAL' as const;
 export const CREATE_ORDER_PLATE_PENDING_REASON =
   '制烫金版费金额待管理员人工核价' as const;
 
@@ -113,20 +114,20 @@ function validateOrderInput(input: CreateOrderQuoteInput): string[] {
   return errors;
 }
 
-function pendingPlateLine(snapshot: CreateOrderPriceSnapshot): CreateOrderQuoteLine {
+function defaultPlateLine(snapshot: CreateOrderPriceSnapshot): CreateOrderQuoteLine {
   return {
     layer: 'ORDER',
     itemKey: null,
     groupKey: null,
     code: 'PLATE_FEE',
     label: snapshot.plate.label,
-    status: 'PENDING_AMOUNT',
-    amount: null,
-    includedInKnownTotal: false,
+    status: 'QUOTED',
+    amount: '0.00',
+    includedInKnownTotal: true,
     basis: {
-      displayAmount: '待定',
+      displayAmount: '0.00',
       granularity: 'PER_ORDER',
-      pricingPolicy: CREATE_ORDER_PLATE_PRICING_POLICY,
+      pricingPolicy: CREATE_ORDER_PLATE_DEFAULT_POLICY,
     },
     errors: [],
   };
@@ -138,9 +139,9 @@ function quoteOrderLayer(
   plateFeeApplies: boolean,
 ): CreateOrderOrderQuote {
   if (input.includeOrderCharges === false) {
-    const lines = plateFeeApplies ? [pendingPlateLine(snapshot)] : [];
+    const lines = plateFeeApplies ? [defaultPlateLine(snapshot)] : [];
     return {
-      amount: plateFeeApplies ? null : '0.00',
+      amount: '0.00',
       knownAmount: '0.00',
       lines,
       errors: [],
@@ -224,7 +225,7 @@ function quoteOrderLayer(
   const lines = [
     carton,
     ...shipping,
-    ...(plateFeeApplies ? [pendingPlateLine(snapshot)] : []),
+    ...(plateFeeApplies ? [defaultPlateLine(snapshot)] : []),
   ];
   const knownAmount = sumMoney(
     lines.map((line) =>
@@ -277,7 +278,7 @@ export function calculateCreateOrderQuote(
       : {
           amount: null,
           knownAmount: '0.00',
-          lines: plateFeeApplies ? [pendingPlateLine(snapshot)] : [],
+          lines: plateFeeApplies ? [defaultPlateLine(snapshot)] : [],
           errors: orderInputErrors,
         };
   const manualReasons = items.flatMap((item) =>
@@ -318,7 +319,7 @@ export function calculateCreateOrderQuote(
         shipmentKey: line.code.slice('SHIPPING:'.length),
       })),
     ...order.lines
-      .filter((line) => line.code === 'PLATE_FEE')
+      .filter((line) => line.code === 'PLATE_FEE' && line.status === 'PENDING_AMOUNT')
       .map(() => ({
         code: 'PLATE_AMOUNT_PENDING' as const,
         message: CREATE_ORDER_PLATE_PENDING_REASON,

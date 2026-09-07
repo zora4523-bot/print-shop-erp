@@ -32,6 +32,7 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
 
     const { fixture } = seeded;
     const reportedQty = E2E_PRODUCTION_REPORT_INCREMENT;
+    const completedQtyBefore = String(Number(fixture.completedQtyBefore));
     const expectedCompletedQty = String(
       Number(fixture.completedQtyBefore) + reportedQty,
     );
@@ -54,7 +55,7 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
       await expect(operationLink).toContainText(fixture.orderNo);
       await expect(operationLink).toContainText('局部烫金');
       await expect(operationLink).toContainText(
-        `已完成 ${fixture.completedQtyBefore} / ${fixture.plannedCompletedQty}`,
+        `已完成 ${completedQtyBefore} / ${fixture.plannedCompletedQty}`,
       );
       await operationLink.click();
       await expect(page).toHaveURL(`/worker/tasks/${fixture.operationId}`);
@@ -63,11 +64,16 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
         has: page.getByRole('heading', { name: '扫码报工', exact: true }),
       });
       await expect(reportSection).toContainText(
-        `累计合格 ${fixture.completedQtyBefore} / ${fixture.plannedCompletedQty}`,
+        `累计合格 ${completedQtyBefore} / ${fixture.plannedCompletedQty}`,
       );
       await reportSection
         .getByRole('spinbutton', { name: '本次合格完成数', exact: true })
         .fill(String(reportedQty));
+      // This durable fixture tests wage-bearing output, independently of
+      // order-piece progress; do not submit its entire remaining order count.
+      await reportSection
+        .getByRole('spinbutton', { name: '本次工单件数进度', exact: true })
+        .fill('0');
       await reportSection
         .getByRole('spinbutton', { name: '缺陷数', exact: true })
         .fill('0');

@@ -167,6 +167,13 @@ function orderChangePreviewFactDescriptions(
 export function orderChangeApprovalImpactItems(
   preview: OrderChangePricingPreviewWithCharges,
 ): string[] {
+  if (preview.items.length === 0 && preview.promisedDateChange) {
+    return [
+      `承诺交期：${preview.promisedDateChange.before ?? '未设置'} → ${preview.promisedDateChange.after ?? '未设置'}。`,
+      '批准后交期生效，款式、数量和费用保持不变；不重新计价。',
+      '已下发的工单按版本规则生成新版，已产数量与历史报工保留。',
+    ];
+  }
   const addedCount = preview.items.filter(
     (item) => item.operation === 'ADD',
   ).length;
@@ -220,6 +227,7 @@ export function orderChangeApprovalImpactItems(
 
   return [
     `申请基于工单第 ${preview.baseRevision} 版，共 ${preview.items.length} 项款式变更${changeSummary ? `（${changeSummary}）` : ''}。`,
+    ...(preview.promisedDateChange ? [`承诺交期：${preview.promisedDateChange.before ?? '未设置'} → ${preview.promisedDateChange.after ?? '未设置'}。`] : []),
     ...itemChanges,
     `${pricingSummary}批准时会按最新规则重算，并校验结果与本次预览一致；若规则或工单已变化，本次批准不会执行，需刷新后重试。`,
     ...(pendingChargeSummary ? [pendingChargeSummary] : []),
@@ -301,6 +309,9 @@ export function OrderChangePricingPreviewPanel({
         </p>
       </div>
 
+      {preview.promisedDateChange ? (
+        <p className="text-sm">承诺交期：{preview.promisedDateChange.before ?? '未设置'} → {preview.promisedDateChange.after ?? '未设置'}</p>
+      ) : null}
       <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
         <div className="rounded-md border bg-background p-2">
           <dt className="text-xs text-muted-foreground">当前工单总额</dt>
@@ -524,6 +535,7 @@ export function OrderChangeCompactPreview({ preview, currentItems }: {
         ))}
       </ul>
       <dl data-slot="order-change-amounts" className="space-y-2 text-sm">
+        {preview.promisedDateChange ? <div className="flex justify-between gap-3"><dt>承诺交期</dt><dd>{preview.promisedDateChange.before ?? '未设置'} → {preview.promisedDateChange.after ?? '未设置'}</dd></div> : null}
         <div className="flex justify-between gap-3"><dt>原金额</dt><dd className="font-semibold">{money(preview.oldTotal)}</dd></div>
         <div className="flex justify-between gap-3"><dt>{preview.totalExcludesPendingPlateFee ? '修改后已知费用（不含版费）' : '修改后金额'}</dt><dd className="font-semibold">{preview.newTotal === null ? '待核定' : money(preview.newTotal)}</dd></div>
         {!preview.totalExcludesPendingPlateFee && preview.delta !== null && <div className="flex justify-between gap-3"><dt>差额</dt><dd>{deltaMoney(preview.delta)}</dd></div>}

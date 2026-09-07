@@ -105,6 +105,7 @@ const OPERATION_REPORT_SELECT = {
   unit: true,
   status: true,
   plannedQty: true,
+  carriedCompletedQty: true,
   order: {
     select: {
       id: true,
@@ -572,7 +573,7 @@ async function computeCompletedAggregate(
   });
   const alreadyCompleted = new Decimal(
     aggregate._sum.reportedCompletedQty?.toString() ?? 0,
-  );
+  ).plus(operation.carriedCompletedQty?.toString() ?? 0);
   const completedAggregate = alreadyCompleted.plus(parsed.completed);
   if (completedAggregate.gt(plan.plannedPieces)) {
     throw new OperationReportingError(

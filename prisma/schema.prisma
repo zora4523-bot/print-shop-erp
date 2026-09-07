@@ -1055,15 +1055,18 @@ model PieceworkPriceRule {
 // 生产工序只记业务类型和计划数，不记工人或机型。来源行只用于
 // 追溯数量事实，不参与工价键的选择。
 model ProductionOperation {
-  id               String                    @id @default(cuid())
-  orderId          String
-  workOrderVersion Int                       @default(1)
-  operationType    PieceworkOperationType
-  unit             PieceworkRateUnit
-  status           ProductionOperationStatus @default(PENDING)
-  plannedQty       Decimal                   @db.Decimal(14, 3)
-  createdAt        DateTime                  @default(now()) @db.Timestamptz(3)
-  updatedAt        DateTime                  @updatedAt @db.Timestamptz(3)
+  id                          String                    @id @default(cuid())
+  orderId                     String
+  workOrderVersion            Int                       @default(1)
+  operationType               PieceworkOperationType
+  unit                        PieceworkRateUnit
+  status                      ProductionOperationStatus @default(PENDING)
+  plannedQty                  Decimal                   @db.Decimal(14, 3)
+  // 改版承接的合格量与工单件数，只参与进度，不生成计件工资。
+  carriedCompletedQty         Decimal                   @default(0) @db.Decimal(14, 3)
+  carriedWorkOrderProgressQty Decimal                   @default(0) @db.Decimal(14, 3)
+  createdAt                   DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt                   DateTime                  @updatedAt @db.Timestamptz(3)
 
   order             Order                         @relation(fields: [orderId], references: [id], onDelete: Restrict)
   sources           ProductionOperationSource[]
@@ -1186,17 +1189,18 @@ model ProductionScanClaim {
 // 三类计件工序之外的内制工艺只保留生产进度，不存人员/机型/
 // 工价。工艺编码和名称在投产时冻结，字典后续改名不改变历史。
 model ProductionProgressStep {
-  id               String                    @id @default(cuid())
-  orderId          String
-  workOrderVersion Int                       @default(1)
-  orderItemId      String
-  craftId          String
-  craftCode        String                    @db.VarChar(64)
-  craftName        String                    @db.VarChar(128)
-  status           ProductionOperationStatus @default(PENDING)
-  plannedQty       Decimal                   @db.Decimal(14, 3)
-  createdAt        DateTime                  @default(now()) @db.Timestamptz(3)
-  updatedAt        DateTime                  @updatedAt @db.Timestamptz(3)
+  id                  String                    @id @default(cuid())
+  orderId             String
+  workOrderVersion    Int                       @default(1)
+  orderItemId         String
+  craftId             String
+  craftCode           String                    @db.VarChar(64)
+  craftName           String                    @db.VarChar(128)
+  status              ProductionOperationStatus @default(PENDING)
+  plannedQty          Decimal                   @db.Decimal(14, 3)
+  carriedCompletedQty Decimal                   @default(0) @db.Decimal(14, 3)
+  createdAt           DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime                  @updatedAt @db.Timestamptz(3)
 
   order      Order                      @relation(fields: [orderId], references: [id], onDelete: Restrict)
   orderItem  OrderItem                  @relation(fields: [orderId, orderItemId], references: [orderId, id], onDelete: Restrict)

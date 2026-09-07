@@ -124,10 +124,10 @@ describe('quoteInternalCreateOrder', () => {
     expect(result).toMatchObject({
       factsKey: 'internal-facts-v1',
       knownTotal: '180.00',
-      total: null,
-      hasManualPricing: true,
-      totalSemantics: 'EXCLUDES_MANUAL_ITEMS',
-      plateFee: { status: 'PENDING', amount: null },
+      total: '180.00',
+      hasManualPricing: false,
+      totalSemantics: 'COMPLETE',
+      plateFee: null,
     });
     expect(result.items[0]?.snapshot).toMatchObject({
       engineVersion: 'CREATE_ORDER_PURE_V1',

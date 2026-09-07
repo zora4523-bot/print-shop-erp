@@ -2326,7 +2326,6 @@ export const orderChangeRequestItemsSchema = z
       addOrderItemChangeSchema,
     ]),
   )
-  .min(1, '至少填写一项修改')
   .max(50, '单次修改不超过 50 项')
   .superRefine((value, ctx) => {
     const updatedItemIds = new Set<string>();
@@ -2440,8 +2439,12 @@ const modifyOrderChangeRequestSchema = z
     modifyKind: z.enum(['QTY', 'DUE_DATE', 'ADDRESS', 'CRAFT_PAPER', 'OTHER']),
     reason: orderChangeReason,
     items: orderChangeRequestItemsSchema,
+    promisedDate: optionalDateFieldPartial,
   })
   .superRefine((value, ctx) => {
+    if (value.items.length === 0 && value.promisedDate === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['items'], message: '至少填写一项款式或交期修改' });
+    }
     value.items.forEach((item, index) => {
       const hasSpecification = typeof item.specification === 'string';
       const hasTargetProduct = item.targetProductId !== undefined;

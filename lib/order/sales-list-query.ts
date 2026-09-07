@@ -108,11 +108,22 @@ export type SalesOrderListRow = {
 export type SalesOrderListPageWindow = PaginationWindow & { total: number };
 
 const ACTIVE_SALES_STATUSES = [
+  OrderStatus.PENDING_FACTORY,
+  OrderStatus.REJECTED,
+  OrderStatus.CONFIRMED,
+  OrderStatus.ON_HOLD,
+  OrderStatus.RELEASED,
+  OrderStatus.FOILING,
+  OrderStatus.PACKING,
   OrderStatus.SUBMITTED,
   OrderStatus.SCHEDULING,
   OrderStatus.IN_PRODUCTION,
   OrderStatus.COMPLETED,
 ] as const;
+
+const FINISHED_SALES_STATUSES = [OrderStatus.SETTLED, OrderStatus.FINISHED, OrderStatus.CANCELLED] as const;
+const isRejectedChange = (status: OrderChangeRequestStatus) =>
+  status === OrderChangeRequestStatus.DENIED || status === OrderChangeRequestStatus.REJECTED;
 
 type SalesOrderPageWindow = SalesOrderListPageWindow & {
   latestRejectedOrderIds: string[];
@@ -123,13 +134,10 @@ function salesNeedsActionWhere(
 ): Prisma.OrderWhereInput {
   return {
     status: {
-      in: [
-        OrderStatus.SUBMITTED,
-        OrderStatus.SCHEDULING,
-        OrderStatus.IN_PRODUCTION,
-      ],
+      in: [...ACTIVE_SALES_STATUSES],
     },
     OR: [
+      { status: { in: [OrderStatus.REJECTED, OrderStatus.ON_HOLD] } },
       { pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION },
       ...(latestRejectedOrderIds.length > 0
         ? [{ id: { in: [...latestRejectedOrderIds] } }]
@@ -249,7 +257,7 @@ function salesViewWhere(
   if (view === 'shipped') return { status: OrderStatus.SHIPPED };
   if (view === 'done') {
     return {
-      status: { in: [OrderStatus.FINISHED, OrderStatus.CANCELLED] },
+      status: { in: [...FINISHED_SALES_STATUSES] },
     };
   }
   if (view === 'draft') return { status: OrderStatus.DRAFT };
@@ -303,11 +311,7 @@ export async function getSalesLatestRejectedOrderIds(actor: {
             getOrderScopeFilter(actor),
             {
               status: {
-                in: [
-                  OrderStatus.SUBMITTED,
-                  OrderStatus.SCHEDULING,
-                  OrderStatus.IN_PRODUCTION,
-                ],
+                in: [...ACTIVE_SALES_STATUSES],
               },
             },
           ],
@@ -322,7 +326,7 @@ export async function getSalesLatestRejectedOrderIds(actor: {
   for (const row of rows) {
     if (seen.has(row.orderId)) continue;
     seen.add(row.orderId);
-    if (row.status === OrderChangeRequestStatus.REJECTED) {
+    if (isRejectedChange(row.status)) {
       rejectedOrderIds.push(row.orderId);
     }
   }
@@ -504,7 +508,7 @@ export async function getSalesOrderListSummary(
         AND: [
           scope,
           {
-            status: { in: [OrderStatus.SHIPPED, OrderStatus.FINISHED] },
+            status: { in: [OrderStatus.SHIPPED, OrderStatus.SETTLED, OrderStatus.FINISHED] },
             shippedAt: { gte: start, lt: end },
           },
         ],
@@ -521,7 +525,7 @@ export async function getSalesOrderListSummary(
     todo,
     doing: count(...ACTIVE_SALES_STATUSES),
     shipped: count(OrderStatus.SHIPPED),
-    done: count(OrderStatus.FINISHED, OrderStatus.CANCELLED),
+    done: count(...FINISHED_SALES_STATUSES),
     draft: count(OrderStatus.DRAFT),
     shippedThisMonth,
   };
@@ -535,7 +539,7 @@ function mapSalesOrderRow(
     (request) => request.status === OrderChangeRequestStatus.PENDING,
   );
   const rejectedChange = row.changeRequests.find(
-    (request) => request.status === OrderChangeRequestStatus.REJECTED,
+    (request) => isRejectedChange(request.status),
   );
   const pricingAttentionReason =
     row.status !== OrderStatus.DRAFT &&
@@ -620,7 +624,8 @@ function mapSalesOrderRow(
           additionalCount: Math.max(0, trackingShipments.length - 1),
         }
       : null,
-    needsAction: Boolean(pricingAttentionReason || rejectedChange),
+    needsAction: ACTIVE_SALES_STATUSES.some((status) => status === row.status) &&
+      Boolean(pricingAttentionReason || rejectedChange || row.status === OrderStatus.REJECTED || row.status === OrderStatus.ON_HOLD),
   };
 }
 
