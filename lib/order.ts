@@ -74,6 +74,14 @@ import {
 } from './order/pricing-status';
 import { appendOrderPricingRevisionInTx } from './order/pricing-revision';
 import {
+  FulfillmentPricingError,
+  finalizeConfirmedFulfillmentChargesForShipmentInTx,
+  hasFulfillmentPricingConfirmation,
+  isFulfillmentPricingStatus,
+  recordFulfillmentSfCollectChangeInTx,
+  type FulfillmentPricingMutationGuard,
+} from './order/fulfillment-pricing';
+import {
   PendingPlateChargeError,
   quoteHasPendingPlateCharge,
   requireActivePlateCategoryIdInTx,
@@ -2492,6 +2500,7 @@ async function finalizeExternalShipmentChargesInTx(
           businessKey: true,
           amount: true,
           priceBookId: true,
+          pricingSnapshot: true,
           category: { select: { code: true } },
         },
       },
@@ -2508,6 +2517,31 @@ async function finalizeExternalShipmentChargesInTx(
     throw new OrderInvariantError(
       '外部销售工单的快递/耗材收费明细不完整，暂不能发货',
     );
+  }
+  if (standardCustomerCharges.some((charge) => hasFulfillmentPricingConfirmation(charge.pricingSnapshot))) {
+    if (!chargeOrder.isSfCollect && input.storedShipments.some((shipment) => !input.trustedWeightByShipmentId.get(shipment.id))) {
+      throw new OrderInvariantError('外部销售工单发货前必须填写每个地址的承运商最终计费重量');
+    }
+    try {
+      await finalizeConfirmedFulfillmentChargesForShipmentInTx(tx, {
+        orderId: input.orderId, actorId: input.actorId, now: input.now,
+        shipments: input.storedShipments.map((shipment) => {
+          const requested = input.requestByShipmentId.get(shipment.id);
+          if (!requested) throw new OrderInvariantError(`找不到地址 ${shipment.sequence} 的发货收费信息`);
+          return {
+            shipmentId: shipment.id,
+            destinationProvince: requested.destinationProvince ?? shipment.destinationProvince,
+            weightKg: input.trustedWeightByShipmentId.get(shipment.id) ?? null,
+            shippingFee: requested.shippingFee,
+            packingMaterialFee: requested.packingMaterialFee,
+          };
+        }),
+      });
+      return;
+    } catch (error) {
+      if (error instanceof FulfillmentPricingError) throw new OrderInvariantError(error.message);
+      throw error;
+    }
   }
   const priceBookIds = [
     ...new Set(
@@ -3286,6 +3320,7 @@ export async function setOrderSfCollect(
   isSfCollect: boolean,
   actor: { id: string; role: Role },
   corrections: readonly SfCollectChargeCorrection[] = [],
+  fulfillmentGuard?: FulfillmentPricingMutationGuard,
 ): Promise<UpdateOrderResult> {
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as EditTxClient;
@@ -3335,6 +3370,26 @@ export async function setOrderSfCollect(
       throw new OrderInvariantError(
         '外部销售工单发货后的顺丰到付更正只能由管理员处理',
       );
+    }
+    if (
+      order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+      isFulfillmentPricingStatus(order.status)
+    ) {
+      if (!fulfillmentGuard) {
+        throw new OrderInvariantError('履约更正缺少订单版本，请刷新后重新提交');
+      }
+      try {
+        return await recordFulfillmentSfCollectChangeInTx(
+          tx,
+          { orderId, isSfCollect, ...fulfillmentGuard },
+          actor,
+        );
+      } catch (error) {
+        if (error instanceof FulfillmentPricingError) {
+          throw new OrderInvariantError(error.message);
+        }
+        throw error;
+      }
     }
     if (order.isSfCollect === isSfCollect) {
       return {

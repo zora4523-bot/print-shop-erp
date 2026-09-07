@@ -1220,6 +1220,14 @@ describe('setOrderUrgentAction', () => {
 });
 
 describe('setOrderSfCollectAction', () => {
+  const fulfillmentGuardFormFields = {
+    expectedOrderRevision: '4',
+    expectedEditVersion: '2',
+    expectedWorkOrderVersion: '3',
+    expectedPriceRevision: '5',
+    idempotencyKey: '11111111-1111-4111-8111-111111111111',
+  };
+
   it("requires order:create before changing the flag", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
@@ -1239,7 +1247,7 @@ describe('setOrderSfCollectAction', () => {
     expect(orderMock.setOrderSfCollect).not.toHaveBeenCalled();
   });
 
-  it('forwards an explicit target value and revalidates list + detail', async () => {
+  it('keeps the legacy four-argument call when every fulfillment guard field is absent', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.setOrderSfCollect.mockResolvedValue({
       id: 'o1',
@@ -1264,6 +1272,62 @@ describe('setOrderSfCollectAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
   });
+
+  it('parses and forwards the complete fulfillment pricing guard', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.setOrderSfCollect.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SUBMITTED,
+      changed: true,
+      changedFields: ['isSfCollect'],
+    });
+
+    const result = await setOrderSfCollectAction(
+      'o1',
+      null,
+      fd({ isSfCollect: 'true', ...fulfillmentGuardFormFields }),
+    );
+
+    expect(result).toEqual({ status: 'success' });
+    expect(orderMock.setOrderSfCollect).toHaveBeenCalledWith(
+      'o1',
+      true,
+      expect.anything(),
+      [],
+      {
+        expectedOrderRevision: 4,
+        expectedEditVersion: 2,
+        expectedWorkOrderVersion: 3,
+        expectedPriceRevision: 5,
+        idempotencyKey: '11111111-1111-4111-8111-111111111111',
+      },
+    );
+  });
+
+  it.each([
+    ['partial', { expectedOrderRevision: '4' }],
+    [
+      'invalid',
+      {
+        ...fulfillmentGuardFormFields,
+        expectedPriceRevision: '5.5',
+      },
+    ],
+  ])(
+    'rejects a %s fulfillment guard instead of treating it as missing',
+    async (_case, guardFields) => {
+      permissionsMock.requirePermission.mockResolvedValue(salesActor);
+
+      const result = await setOrderSfCollectAction(
+        'o1',
+        null,
+        fd({ isSfCollect: 'true', ...guardFields }),
+      );
+
+      expect(result.status).toBe('invalid');
+      expect(orderMock.setOrderSfCollect).not.toHaveBeenCalled();
+    },
+  );
 
   it('maps the business terminal-state error to the form', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);

@@ -167,12 +167,19 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
             ) : null}
             {canToggleSfCollect ? (
               <SfCollectToggleForm
+                key={`sf-${order.id}-${order.revision}-${order.priceRevision}`}
                 orderId={order.id}
                 currentValue={order.isSfCollect}
                 status={order.status}
                 isExternalSales={
                   order.settlementType === OrderSettlementType.EXTERNAL_SALES
                 }
+                mutationGuard={{
+                  expectedOrderRevision: order.revision,
+                  expectedEditVersion: order.editVersion,
+                  expectedWorkOrderVersion: order.workOrderVersion,
+                  expectedPriceRevision: order.priceRevision,
+                }}
                 shipments={order.shipments.map((shipment) => ({
                   id: shipment.id,
                   sequence: shipment.sequence,

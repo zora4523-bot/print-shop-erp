@@ -1,18 +1,25 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
+import { useActionState, useRef, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { setOrderSfCollectAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
 import { OrderStatus } from '@/generated/prisma/enums';
 import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
+import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
 
 type Props = {
   orderId: string;
   currentValue: boolean;
   status: OrderStatus;
   isExternalSales: boolean;
+  mutationGuard?: {
+    expectedOrderRevision: number;
+    expectedEditVersion: number;
+    expectedWorkOrderVersion: number;
+    expectedPriceRevision: number;
+  };
   shipments: Array<{
     id: string;
     sequence: number;
@@ -28,6 +35,7 @@ export function SfCollectToggleForm({
   currentValue,
   status,
   isExternalSales,
+  mutationGuard,
   shipments,
 }: Props) {
   const bound = setOrderSfCollectAction.bind(null, orderId);
@@ -36,6 +44,8 @@ export function SfCollectToggleForm({
     null,
   );
   const [pending, startTransition] = useTransition();
+  const idempotencyKey = useRef<string | null>(null);
+  const awaitsLogisticsReview = isExternalSales && isFulfillmentPricingStatus(status);
   const target = !currentValue;
   const requiresShippedChargeCorrection =
     currentValue &&
@@ -52,6 +62,10 @@ export function SfCollectToggleForm({
       action={(formData) => {
         if (pending) return;
         formData.set('isSfCollect', String(target));
+        if (mutationGuard) {
+          idempotencyKey.current ??= crypto.randomUUID();
+          formData.set('idempotencyKey', idempotencyKey.current);
+        }
         startTransition(() => action(formData));
       }}
       aria-busy={pending}
@@ -67,6 +81,9 @@ export function SfCollectToggleForm({
       }
     >
       <input type="hidden" name="isSfCollect" value={String(target)} />
+      {mutationGuard ? Object.entries(mutationGuard).map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      )) : null}
       {requiresShippedChargeCorrection ? (
         <>
           <div>
@@ -225,6 +242,11 @@ export function SfCollectToggleForm({
               ? '取消顺丰到付'
               : '标记顺丰到付'}
       </Button>
+      {awaitsLogisticsReview ? (
+        <p className="w-full text-xs text-muted-foreground">
+          更正后需管理员确认物流费用，确认前不能发货或结算；已审核款式价格不变。
+        </p>
+      ) : null}
       {state?.status === 'error' ? (
         <span role="alert" className="text-xs text-destructive">
           {state.message}

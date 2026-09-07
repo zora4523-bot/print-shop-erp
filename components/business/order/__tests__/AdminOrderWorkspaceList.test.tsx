@@ -155,7 +155,7 @@ describe('AdminOrderWorkspaceList', () => {
     );
 
     expect(html).toContain('暂不能结算：工单缺少确认金额');
-    expect(html).toContain('前往完整工单核价');
+    expect(html).toContain('前往工单核对物流费用与确认依据');
     expect(html).toContain('/orders/order-1#pricing-review');
   });
 

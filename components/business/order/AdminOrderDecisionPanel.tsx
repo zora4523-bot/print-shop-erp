@@ -99,7 +99,7 @@ function MissingConfirmedFeeNotice({
         prefetch={false}
         className="mt-2 inline-flex font-medium underline underline-offset-2"
       >
-        前往完整工单核价
+        前往工单核对物流费用与确认依据
       </Link>
     </div>
   );

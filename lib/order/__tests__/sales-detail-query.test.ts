@@ -59,6 +59,8 @@ describe('sales order detail query boundary', () => {
 
     const select = dbMock.order.findFirst.mock.calls[0]![0].select;
     expect(select.workOrderVersion).toBe(true);
+    expect(select.editVersion).toBe(true);
+    expect(select.priceRevision).toBe(true);
     const serializedSelect = JSON.stringify(select);
     for (const forbidden of [
       'tasks',
@@ -109,6 +111,8 @@ describe('sales order detail query boundary', () => {
       },
     ]);
     expect(result?.workOrderVersion).toBe(3);
+    expect(result?.editVersion).toBe(2);
+    expect(result?.priceRevision).toBe(5);
     expect(result?.items[0]?.designs).toEqual([
       {
         id: 'design-image',
@@ -152,7 +156,9 @@ function detailRecord() {
     isUrgent: false,
     isSfCollect: false,
     revision: 1,
+    editVersion: 2,
     workOrderVersion: 3,
+    priceRevision: 5,
     pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
     processingAmount: '100.00',
     packagingAmount: '10.00',

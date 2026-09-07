@@ -51,6 +51,8 @@ import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
 import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
 import { SfCollectToggleForm } from '@/components/business/order/SfCollectToggleForm';
+import { FulfillmentPricingReviewForm } from '@/components/business/order/FulfillmentPricingReviewForm';
+import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
 import { DesignUploadPanel } from '@/components/business/order/DesignUploadPanel';
 import { PromisedDateBadge } from '@/components/business/order/PromisedDateBadge';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
@@ -236,6 +238,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
     isChargeableOrder &&
     isPricingPending &&
     isOrderPricingReviewAllowedStatus(order.status);
+  const canReviewFulfillmentPricing =
+    user.role === Role.ADMIN &&
+    isExternalSalesOrder &&
+    isFulfillmentPricingStatus(order.status);
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
     isExternalSalesOrder;
@@ -462,12 +468,23 @@ export default async function OrderDetailPage({ params }: PageProps) {
             {canToggleUrgent ? (
               <UrgentToggleForm orderId={order.id} currentValue={order.isUrgent} />
             ) : null}
-            {canToggleSfCollect ? (
+            {canReviewFulfillmentPricing ? (
+              <Link href="#fulfillment-pricing" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                {isPricingPending ? '确认物流费用' : '更正物流费用'}
+              </Link>
+            ) : canToggleSfCollect ? (
               <SfCollectToggleForm
+                key={`sf-${order.id}-${order.revision}-${priceRevision}`}
                 orderId={order.id}
                 currentValue={order.isSfCollect}
                 status={order.status}
                 isExternalSales={isExternalSalesOrder}
+                mutationGuard={priceRevision !== null ? {
+                  expectedOrderRevision: order.revision,
+                  expectedEditVersion: order.editVersion,
+                  expectedWorkOrderVersion: order.workOrderVersion,
+                  expectedPriceRevision: priceRevision,
+                } : undefined}
                 shipments={order.shipments.map((shipment) => ({
                   id: shipment.id,
                   sequence: shipment.sequence,
@@ -578,7 +595,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
               <h2 className="text-base font-semibold">工单价格状态</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {isPricingPending
-                  ? '价格待管理员确认，确认前不可排产。'
+                  ? canReviewFulfillmentPricing
+                    ? '物流费用待管理员核对，确认前不能发货或结算；已审核款式价格不变。'
+                    : '价格待管理员确认，确认前不可排产。'
                   : '价格已确认。'}
               </p>
             </div>
@@ -615,6 +634,20 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 orderId={order.id}
               />
             </div>
+          ) : null}
+          {canReviewFulfillmentPricing ? (
+            <FulfillmentPricingReviewForm
+              key={`fulfillment-${order.id}-${order.revision}-${priceRevision}`}
+              orderId={order.id}
+              currentValue={order.isSfCollect}
+              isPricingPending={isPricingPending}
+              shipments={order.shipments.map((shipment) => ({
+                id: shipment.id,
+                sequence: shipment.sequence,
+                destinationProvince: shipment.destinationProvince,
+                weightKg: shipment.weightKg?.toString() ?? null,
+              }))}
+            />
           ) : null}
         </section>
       ) : null}

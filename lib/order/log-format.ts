@@ -40,6 +40,9 @@ const FIELD_LABELS: Record<string, string> = {
   priceRevision: '价格修订',
   priceBooks: '本次价目簿',
   totalAmount: '对客应收总额',
+  confirmedFee: '已确认应收',
+  revision: '工单修订',
+  shipmentChargeCorrections: '物流费用明细',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -69,7 +72,7 @@ const UNKNOWN_ACTION_LABEL = '其他操作';
 // Command replay metadata belongs in the immutable audit payload, but it is
 // not a user-facing field change. In particular, request identifiers and
 // fingerprints must not appear as a confusing “其他变更” row in the detail UI.
-const INTERNAL_AUDIT_FIELDS = new Set(['shipRequest']);
+const INTERNAL_AUDIT_FIELDS = new Set(['shipRequest', 'fulfillmentRequest']);
 
 function hasKnownField(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(FIELD_LABELS, name);
@@ -116,6 +119,9 @@ export function formatLogValue(
     return completedAt && !Number.isNaN(completedAt.getTime())
       ? formatDateTimeShanghai(completedAt)
       : UNKNOWN_VALUE_LABEL;
+  }
+  if (fieldName === 'shipmentChargeCorrections' && Array.isArray(value)) {
+    return `${value.length} 个地址的费用更正`;
   }
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   return UNKNOWN_VALUE_LABEL;
@@ -166,6 +172,8 @@ const ACTION_LABELS: Record<string, string> = {
   TASK_DISPUTE_RESOLVED: '任务异议已解决',
   TASK_DISPUTE_REJECTED: '任务异议已驳回',
   PRICING_ADMIN_CONFIRMED: '管理员终价确认',
+  FULFILLMENT_PRICING_CONFIRMED: '确认物流费用',
+  SF_COLLECT_FULFILLMENT_CHANGED: '提交到付费用更正',
   ORDER_MANUAL_CHARGE_CREATED: '新增对客费用',
   ORDER_MANUAL_CHARGE_UPDATED: '修改对客费用',
   ORDER_MANUAL_CHARGE_REMOVED: '移除对客费用',

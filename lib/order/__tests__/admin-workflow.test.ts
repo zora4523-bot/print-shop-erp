@@ -411,6 +411,7 @@ describe('admin order workflow', () => {
             manualQuoteReason: '特殊工艺人工核价',
             pricingSnapshot: {
               source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+              previousPriceRevision: 0,
               status: 'ADMIN_CONFIRMED',
               actual: {
                 provisional: false,
@@ -428,6 +429,7 @@ describe('admin order workflow', () => {
           {
             pricingSnapshot: {
               source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+              previousPriceRevision: 0,
               status: 'ADMIN_CONFIRMED',
               actual: {
                 provisional: false,
@@ -447,6 +449,7 @@ describe('admin order workflow', () => {
             amount: new Decimal('18.00'),
             pricingSnapshot: {
               source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+              previousPriceRevision: 0,
               status: 'ADMIN_CONFIRMED',
               actual: {
                 provisional: false,

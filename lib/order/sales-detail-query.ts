@@ -27,7 +27,9 @@ export type SalesOrderDetail = {
   isUrgent: boolean;
   isSfCollect: boolean;
   revision: number;
+  editVersion: number;
   workOrderVersion: number;
+  priceRevision: number;
   pricingStatus: OrderPricingStatus;
   totalAmount: string;
   promisedDate: string | null;
@@ -111,7 +113,9 @@ export const salesOrderDetailSelect = {
   isUrgent: true,
   isSfCollect: true,
   revision: true,
+  editVersion: true,
   workOrderVersion: true,
+  priceRevision: true,
   pricingStatus: true,
   processingAmount: true,
   packagingAmount: true,
@@ -272,7 +276,9 @@ function mapSalesOrderDetail(
     isUrgent: row.isUrgent,
     isSfCollect: row.isSfCollect,
     revision: row.revision,
+    editVersion: row.editVersion,
     workOrderVersion: row.workOrderVersion,
+    priceRevision: row.priceRevision,
     pricingStatus: row.pricingStatus,
     totalAmount: selectOrderCustomerFee(row).amount,
     promisedDate: row.promisedDate?.toISOString().slice(0, 10) ?? null,

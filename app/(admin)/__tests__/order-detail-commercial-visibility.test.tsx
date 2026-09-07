@@ -22,6 +22,7 @@ const {
   requireSessionMock,
   estimateMaterialUsageMock,
   sfCollectTogglePropsMock,
+  fulfillmentPricingPropsMock,
   pieceworkSummaryMock,
   taskDisputesMock,
   reworkCraftOptionsMock,
@@ -34,6 +35,7 @@ const {
   requireSessionMock: vi.fn(),
   estimateMaterialUsageMock: vi.fn(),
   sfCollectTogglePropsMock: vi.fn(),
+  fulfillmentPricingPropsMock: vi.fn(),
   pieceworkSummaryMock: vi.fn(),
   taskDisputesMock: vi.fn(),
   reworkCraftOptionsMock: vi.fn(),
@@ -91,6 +93,12 @@ vi.mock('@/components/business/order/SfCollectToggleForm', () => ({
   SfCollectToggleForm: (props: unknown) => {
     sfCollectTogglePropsMock(props);
     return <span data-testid="sf-collect-toggle" />;
+  },
+}));
+vi.mock('@/components/business/order/FulfillmentPricingReviewForm', () => ({
+  FulfillmentPricingReviewForm: (props: unknown) => {
+    fulfillmentPricingPropsMock(props);
+    return <div>fulfillment-pricing-review</div>;
   },
 }));
 vi.mock('@/components/business/production/TaskDisputeAdminPanel', () => ({
@@ -159,6 +167,7 @@ beforeEach(() => {
   requireSessionMock.mockReset();
   estimateMaterialUsageMock.mockReset().mockResolvedValue(null);
   sfCollectTogglePropsMock.mockReset();
+  fulfillmentPricingPropsMock.mockReset();
   pieceworkSummaryMock.mockReset().mockResolvedValue(null);
   taskDisputesMock.mockReset().mockResolvedValue([]);
   reworkCraftOptionsMock.mockReset().mockResolvedValue([]);
@@ -479,6 +488,7 @@ describe('order detail commercial visibility', () => {
     );
 
     expect(sfCollectTogglePropsMock).not.toHaveBeenCalled();
+    expect(fulfillmentPricingPropsMock).not.toHaveBeenCalled();
   });
 
   it('仅向管理员传递承运商实际重量，不回退创建时报价重量', async () => {
@@ -489,6 +499,9 @@ describe('order detail commercial visibility', () => {
       ...orderFixture(),
       status: OrderStatus.SHIPPED,
       isSfCollect: true,
+      pricingStatus: 'ADMIN_CONFIRMED',
+      priceRevision: 1,
+      pricingRevisions: [],
     };
     getOrderDetailMock.mockResolvedValue(order);
 
@@ -498,12 +511,11 @@ describe('order detail commercial visibility', () => {
       }),
     );
 
-    expect(sfCollectTogglePropsMock).toHaveBeenCalledWith(
+    expect(sfCollectTogglePropsMock).not.toHaveBeenCalled();
+    expect(fulfillmentPricingPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         orderId: 'order-1',
         currentValue: true,
-        status: OrderStatus.SHIPPED,
-        isExternalSales: true,
         shipments: [
           expect.objectContaining({
             id: 'shipment-1',
@@ -514,6 +526,25 @@ describe('order detail commercial visibility', () => {
         ],
       }),
     );
+  });
+
+  it.each([
+    OrderStatus.CONFIRMED, OrderStatus.ON_HOLD, OrderStatus.RELEASED,
+    OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING,
+    OrderStatus.IN_PRODUCTION, OrderStatus.COMPLETED, OrderStatus.SHIPPED,
+  ])('履约状态 %s 的待确认单进入物流复核，而非工厂全单重算', async (status) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(), status, pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      priceRevision: 1, pricingRevisions: [],
+    });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).toContain('fulfillment-pricing-review');
+    expect(html).not.toContain('factory-pricing-review');
+    expect(html).toContain('物流费用待管理员核对');
+    expect(html).toContain('href="#fulfillment-pricing"');
+    expect(sfCollectTogglePropsMock).not.toHaveBeenCalled();
+    expect(fulfillmentPricingPropsMock).toHaveBeenCalledWith(expect.objectContaining({ isPricingPending: true }));
   });
 
   it('管理员工单详情只读展示无计件进度及完成数', async () => {

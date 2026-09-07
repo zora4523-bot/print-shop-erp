@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import Decimal from 'decimal.js';
 import {
   DesignFileType,
   OrderCostCategory,
@@ -60,14 +61,16 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
     };
     orderChangeRequest: { findFirst: ReturnType<typeof vi.fn> };
-    orderPricingRevision: { create: ReturnType<typeof vi.fn> };
+    orderPricingRevision: { create: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
     orderLog: {
       findFirst: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
       create: ReturnType<typeof vi.fn>;
     };
     orderCostEntry: { aggregate: ReturnType<typeof vi.fn> };
     dailyWorkerSalaryItem: { groupBy: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
+    $queryRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   } = {
     order: {
@@ -107,11 +110,12 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
     },
     orderChangeRequest: { findFirst: vi.fn() },
-    orderPricingRevision: { create: vi.fn() },
-    orderLog: { findFirst: vi.fn(), create: vi.fn() },
+    orderPricingRevision: { create: vi.fn(), findMany: vi.fn() },
+    orderLog: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
     orderCostEntry: { aggregate: vi.fn() },
     dailyWorkerSalaryItem: { groupBy: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
       return fn;
@@ -225,6 +229,7 @@ import {
   OrderQuoteChangedError,
 } from '../order';
 import { InvalidOrderTransitionError } from '../order/status-machine';
+import { previewFulfillmentPricing, finalizeFulfillmentPricing } from '../order/fulfillment-pricing';
 
 const salesActor = { id: 'sales-1', role: Role.SALES };
 const workerActor = { id: 'worker-1', role: Role.WORKER };
@@ -598,7 +603,9 @@ beforeEach(() => {
   dbMock.orderCustomerCharge.update.mockReset().mockResolvedValue({});
   dbMock.orderChangeRequest.findFirst.mockReset().mockResolvedValue(null);
   dbMock.orderPricingRevision.create.mockReset().mockResolvedValue({});
+  dbMock.orderPricingRevision.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderLog.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.orderLog.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.orderCostEntry.aggregate.mockReset().mockResolvedValue({
     _sum: { amount: null },
@@ -606,6 +613,7 @@ beforeEach(() => {
   dbMock.order.count.mockReset().mockResolvedValue(0);
   dbMock.dailyWorkerSalaryItem.groupBy.mockReset().mockResolvedValue([]);
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$queryRaw.mockReset().mockResolvedValue([{ now: new Date('2026-09-06T03:00:00Z') }]);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
@@ -3396,6 +3404,152 @@ describe('shipOrder', () => {
     shipments: [{ shipmentId: 'shipment-1', trackingNo: 'SF001' }],
   };
 
+  function fulfillmentShippingStore() {
+    const makeCharge = (id: string, code: string, amount: string) => ({
+      id, orderId: 'o1', shipmentId: code === 'OTHER' ? null : 'shipment-1',
+      businessKey: code === 'OTHER' ? 'ORDER:OTHER' : `SHIPMENT:1:${code}`,
+      categoryId: `category-${code}`, category: { code }, priceBookId: null,
+      sourceRuleId: null, status: 'ESTIMATED', quantity: new Decimal('2'),
+      unit: 'kg', unitPrice: null, suggestedAmount: new Decimal(amount), amount: new Decimal(amount),
+      overrideReason: '已审核人工收费', isAdjustment: false, approvalReference: null,
+      pricingSnapshot: { source: 'ORIGINAL_APPROVED' } as Record<string, unknown>,
+    });
+    const current = {
+      id: 'o1', orderNo: 'O-1', submitterId: 'sales-1', ...shipOrderVersionSnapshot,
+      settlementType: OrderSettlementType.EXTERNAL_SALES, status: OrderStatus.COMPLETED as OrderStatus,
+      pricingStatus: 'ADMIN_CONFIRMED', isSfCollect: false, settledAt: null, settledFee: null,
+      processingAmount: new Decimal('112'), packagingAmount: new Decimal('12'),
+      totalAmount: new Decimal('155'), confirmedFee: new Decimal('155'), quotedFee: new Decimal('150'),
+      quotedPricingRevisionId: 'original-quote', _count: { changeRequests: 0 },
+      items: [{ id: 'item-1', sequence: 1, quantity: 1000, unitPrice: new Decimal('0.09'), fixedFee: new Decimal('10'), subtotal: new Decimal('100'), pricingSnapshot: { source: 'MANUAL_LOCKED' } }],
+      packagingGroups: [{ id: 'group-1', mode: 'SINGLE_STYLE', actualBagCount: 100, unitPrice: new Decimal('0.12'), subtotal: new Decimal('12'), pricingSnapshot: { source: 'PACKING_LOCKED' } }],
+      customerCharges: [makeCharge('shipping-1', 'SHIPPING_FEE', '8'), makeCharge('packing-1', 'PACKING_MATERIAL', '5'), makeCharge('other-1', 'OTHER', '30')],
+      shipments: [{ id: 'shipment-1', sequence: 1, destinationProvince: '广东', weightKg: new Decimal('2'), lines: [{ orderItemId: 'item-1', quantity: 1000 }] }],
+    };
+    const snapshot = (source: string) => ({
+      id: `revision-${current.priceRevision}`, orderId: current.id, revision: current.priceRevision,
+      status: current.pricingStatus, source, createdById: ownerActor.id,
+      snapshot: JSON.parse(JSON.stringify({ order: current, items: current.items,
+        packagingGroups: current.packagingGroups,
+        customerCharges: current.customerCharges.map((charge) => ({ ...charge, categoryCode: charge.category.code })),
+      })),
+    });
+    const revisions = [snapshot('FACTORY_CONFIRM_CURRENT_PUBLISHED')];
+    const copy = () => ({ ...current, customerCharges: current.customerCharges.map((charge) => ({ ...charge })),
+      shipments: current.shipments.map((shipment) => ({ ...shipment })) });
+    const logs: Array<{ changedFields: unknown }> = [];
+    dbMock.order.findFirst.mockImplementation(async () => copy());
+    dbMock.order.findUnique.mockImplementation(async () => copy());
+    dbMock.orderLog.create.mockImplementation(async ({ data }) => { logs.push(data); return data; });
+    dbMock.orderLog.findMany.mockImplementation(async () => logs);
+    dbMock.orderPricingRevision.findMany.mockImplementation(async () => [...revisions]);
+    dbMock.order.update.mockImplementation(async ({ data }) => {
+      Object.assign(current, data);
+      for (const key of ['totalAmount', 'confirmedFee', 'quotedFee'] as const) {
+        if (data[key] != null) current[key] = new Decimal(data[key]);
+      }
+      return copy();
+    });
+    dbMock.orderCustomerCharge.update.mockImplementation(async ({ where, data }) => {
+      const charge = current.customerCharges.find((row) => row.id === where.id)!;
+      Object.assign(charge, data);
+      for (const key of ['amount', 'suggestedAmount', 'quantity'] as const) {
+        if (data[key] != null) charge[key] = new Decimal(data[key]);
+      }
+      return charge;
+    });
+    dbMock.orderShipment.update.mockImplementation(async ({ where, data }) => {
+      const shipment = current.shipments.find((row) => row.id === where.id)!;
+      Object.assign(shipment, data);
+      if (data.weightKg != null) shipment.weightKg = new Decimal(data.weightKg);
+      return shipment;
+    });
+    dbMock.orderShipment.findMany.mockImplementation(async () => current.shipments.map((shipment) => ({ ...shipment })));
+    appendPricingRevisionMock.mockImplementation(async (_tx, input) => {
+      current.priceRevision += 1;
+      current.revision += 1;
+      current.pricingStatus = input.status;
+      revisions.unshift(snapshot(input.source));
+      return { priceRevision: current.priceRevision, orderRevision: current.revision, pricingRevisionId: revisions[0]!.id };
+    });
+    return current;
+  }
+
+  async function confirmFulfillmentForShipping(isSfCollect: boolean) {
+    const current = fulfillmentShippingStore();
+    const input = { orderId: current.id, isSfCollect, shipments: isSfCollect ? [] : [{
+      shipmentId: 'shipment-1', destinationProvince: '广东', weightKg: '2',
+      shippingFee: '19.50', customerChargeOverrideReason: '承运商实际账单',
+    }] };
+    const preview = await previewFulfillmentPricing(input, ownerActor);
+    const result = await finalizeFulfillmentPricing({ ...input, ...preview,
+      idempotencyKey: 'd1111111-2222-4333-8444-555555555555', shipments: input.shipments,
+    }, ownerActor);
+    return { current, result };
+  }
+
+  it.each([true, false])('ships after real fulfilment confirmation (SF=%s), preserving approved manual freight, packaging and other charges', async (isSfCollect) => {
+    const { current, result } = await confirmFulfillmentForShipping(isSfCollect);
+    expect(result.confirmedFee).toBe(isSfCollect ? '147.00' : '166.50');
+    dbMock.orderCustomerCharge.update.mockClear();
+    dbMock.order.update.mockClear();
+    await expect(shipOrder(current.id, ownerActor, {
+      ...oneShipmentCommand, expectedRevision: result.revision, expectedPriceRevision: result.priceRevision,
+    })).resolves.toMatchObject({ status: OrderStatus.SHIPPED });
+    expect(current.totalAmount.toFixed(2)).toBe(result.confirmedFee);
+    expect(current.confirmedFee.toFixed(2)).toBe(result.confirmedFee);
+    expect(current.customerCharges.map((row) => row.amount.toFixed(2))).toEqual([isSfCollect ? '0.00' : '19.50', '5.00', '30.00']);
+    expect(current.customerCharges.map((row) => row.status)).toEqual([isSfCollect ? 'WAIVED' : 'FINAL', 'FINAL', 'ESTIMATED']);
+    expect(current.processingAmount.toFixed(2)).toBe('112.00');
+    expect(current.packagingGroups[0]!.unitPrice.toFixed(2)).toBe('0.12');
+    expect(current.workOrderVersion).toBe(shipOrderVersionSnapshot.workOrderVersion);
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+    for (const [call] of dbMock.orderCustomerCharge.update.mock.calls) expect(call.data).not.toHaveProperty('amount');
+    for (const [call] of dbMock.order.update.mock.calls) expect(call.data).not.toHaveProperty('totalAmount');
+  });
+
+  it('retains manual freight across sales SF on/off pending changes and the real UI confirmation payload', async () => {
+    const { current } = await confirmFulfillmentForShipping(false);
+    for (const [index, isSfCollect] of [true, false].entries()) {
+      await setOrderSfCollect(current.id, isSfCollect, salesActor, [], {
+        expectedOrderRevision: current.revision, expectedEditVersion: current.editVersion,
+        expectedWorkOrderVersion: current.workOrderVersion, expectedPriceRevision: current.priceRevision,
+        idempotencyKey: `a1111111-2222-4333-8444-55555555555${index}`,
+      });
+      expect(current.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
+      expect(current.confirmedFee).toBeNull();
+    }
+    const input = { orderId: current.id, isSfCollect: false, shipments: [{
+      shipmentId: 'shipment-1', destinationProvince: '广东', weightKg: '2',
+      shippingFee: null, customerChargeOverrideReason: null,
+    }] };
+    const preview = await previewFulfillmentPricing(input, ownerActor);
+    expect(preview).toMatchObject({ canConfirm: true, newTotal: '166.50' });
+    await expect(finalizeFulfillmentPricing({ ...input, ...preview, shipments: input.shipments,
+      idempotencyKey: 'a1111111-2222-4333-8444-555555555553',
+    }, ownerActor)).resolves.toMatchObject({ confirmedFee: '166.50' });
+    expect(current.customerCharges[0]!.amount.toFixed(2)).toBe('19.50');
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { weightKg: '3' },
+    { destinationProvince: '浙江' },
+    { shippingFee: '20.00' },
+    { packingMaterialFee: '9.00' },
+  ])('requires another fulfilment review when shipping changes approved facts: %j', async (changedFacts) => {
+    const { current, result } = await confirmFulfillmentForShipping(false);
+    dbMock.orderCustomerCharge.update.mockClear();
+    dbMock.orderShipment.update.mockClear();
+    await expect(shipOrder(current.id, ownerActor, {
+      ...oneShipmentCommand, expectedRevision: result.revision, expectedPriceRevision: result.priceRevision,
+      shipments: [{ shipmentId: 'shipment-1', trackingNo: 'ZTO001', ...changedFacts }],
+    })).rejects.toThrow(/履约/);
+    expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
+    expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
+    expect(current.status).toBe(OrderStatus.COMPLETED);
+  });
+
   it.each([
     OrderSettlementType.EXTERNAL_SALES,
     OrderSettlementType.INTERNAL_SALES,
@@ -5140,6 +5294,18 @@ describe('setOrderUrgent — quick toggle', () => {
 });
 
 describe('setOrderSfCollect — 后期履约标识', () => {
+  it('rejects an unversioned external fulfilment correction before changing financial facts', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      sfSnapshot(OrderStatus.COMPLETED, false, 'sales-1', OrderSettlementType.EXTERNAL_SALES),
+    );
+    dbMock.order.findUnique.mockResolvedValue(externalChargeContext());
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.COMPLETED });
+
+    await expect(setOrderSfCollect('order-1', true, ownerActor)).rejects.toThrow(/版本/);
+    expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
   function sfSnapshot(
     status: OrderStatus,
     isSfCollect = false,
@@ -5314,10 +5480,10 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     expect(dbMock.orderCostEntry.aggregate).not.toHaveBeenCalled();
   });
 
-  it('refreshes the complete external shipping charge snapshot when enabling SF collect', async () => {
+  it('refreshes the pre-factory external quote snapshot when enabling SF collect', async () => {
     dbMock.order.findFirst.mockResolvedValue({
       ...sfSnapshot(
-        OrderStatus.SHIPPED,
+        OrderStatus.SUBMITTED,
         false,
         'sales-1',
         OrderSettlementType.EXTERNAL_SALES,
@@ -5400,10 +5566,10 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     );
   });
 
-  it('lets an admin cancel SF collect after shipping only with complete per-shipment facts', async () => {
+  it('lets an admin cancel SF collect before factory review with complete per-shipment facts', async () => {
     dbMock.order.findFirst.mockResolvedValue({
       ...sfSnapshot(
-        OrderStatus.SHIPPED,
+        OrderStatus.SUBMITTED,
         true,
         'sales-1',
         OrderSettlementType.EXTERNAL_SALES,
@@ -5442,10 +5608,10 @@ describe('setOrderSfCollect — 后期履约标识', () => {
           expect.objectContaining({
             where: { id: 'charge-shipping' },
             data: expect.objectContaining({
-              status: 'FINAL',
+              status: 'ESTIMATED',
               suggestedAmount: '4.30',
               amount: '4.30',
-              finalizedById: 'owner-1',
+              finalizedById: null,
             }),
           }),
         ],
@@ -5453,7 +5619,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
           expect.objectContaining({
             where: { id: 'charge-packing' },
             data: expect.objectContaining({
-              status: 'FINAL',
+              status: 'ESTIMATED',
               suggestedAmount: '0.00',
               amount: '0.00',
             }),
@@ -5495,7 +5661,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     });
   });
 
-  it('rejects an incomplete post-shipment SF cancellation without mutating charges', async () => {
+  it('rejects an unversioned post-shipment SF cancellation without mutating charges', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       sfSnapshot(
         OrderStatus.SHIPPED,
@@ -5508,7 +5674,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
 
     await expect(
       setOrderSfCollect('order-1', false, ownerActor),
-    ).rejects.toThrow(/必须补齐每个地址的计费信息/);
+    ).rejects.toThrow(/缺少订单版本/);
 
     expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
     expect(dbMock.order.update).not.toHaveBeenCalled();
@@ -5548,10 +5714,10 @@ describe('setOrderSfCollect — 后期履约标识', () => {
       ],
       expected: /不属于该工单/,
     },
-  ])('拒绝$label的收费更正', async ({ corrections, expected }) => {
+  ])('在工厂审核前仍拒绝$label的收费更正', async ({ corrections, expected }) => {
     dbMock.order.findFirst.mockResolvedValue(
       sfSnapshot(
-        OrderStatus.SHIPPED,
+        OrderStatus.SUBMITTED,
         true,
         'sales-1',
         OrderSettlementType.EXTERNAL_SALES,

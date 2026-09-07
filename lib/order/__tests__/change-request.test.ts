@@ -605,6 +605,7 @@ function adminConfirmedSnapshot(
 ) {
   return {
     source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+    previousPriceRevision: 0,
     status: 'ADMIN_CONFIRMED',
     actual: {
       ...actual,
