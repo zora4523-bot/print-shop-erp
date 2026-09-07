@@ -518,8 +518,10 @@ function submitAdminOrderDecision({
 
 export function AdminOrderDecisionPanel({
   order,
+  compact = false,
 }: {
   order: AdminOrderWorkspaceRow;
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -704,19 +706,37 @@ export function AdminOrderDecisionPanel({
 
   return (
     <section
+      data-slot="admin-order-decision-panel"
+      data-compact={compact || undefined}
       aria-labelledby="admin-order-decision-title"
       className="mb-6 rounded-xl border border-foreground/15 bg-muted/20 p-3"
     >
       <h3 id="admin-order-decision-title" className="text-sm font-semibold">
-        工厂裁决
+        {compact ? '待你处理' : '工厂裁决'}
       </h3>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {order.pendingChangeRequest?.type === 'MODIFY'
-          ? '管理员确认的是是否接受变更；款式与费用由服务端按最新规则自动合并和重算。'
-          : '价表版本与结算时间由服务端在锁内重读；取消结算可由管理员在引擎参考价上调整，差额必须留原因。'}
-      </p>
-
-      <ConfirmationPreflightNotice order={order} />
+      <div data-slot={compact ? 'admin-order-decision-card' : undefined}>
+      {compact ? (
+        <>
+          <h4 data-slot="admin-order-decision-heading" className="text-[12.5px] font-extrabold">
+            {order.pendingChangeRequest ? (order.pendingChangeRequest.type === 'MODIFY' ? '变更申请' : '取消申请')
+              : awaitingConfirmation ? '工厂确认'
+              : order.status === 'ON_HOLD' ? '暂停处理'
+              : order.capabilities.release ? '下发生产'
+              : order.capabilities.ship ? '录运单发货'
+              : order.capabilities.settle || settlementBlockedByMissingFee ? '结算'
+              : '工单处理'}
+          </h4>
+          {order.pendingChangeRequest ? <p className="mt-2 text-[12.5px] font-semibold">{order.pendingChangeRequest.reason}</p> : null}
+        </>
+      ) : null}
+      {!compact ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {order.pendingChangeRequest?.type === 'MODIFY'
+            ? '管理员确认的是是否接受变更；款式与费用由服务端按最新规则自动合并和重算。'
+            : '取消结算可调整参考金额，差额必须填写原因。'}
+        </p>
+      ) : null}
+      {!order.pendingChangeRequest && <ConfirmationPreflightNotice order={order} />}
       <MissingConfirmedFeeNotice
         orderId={order.id}
         visible={settlementBlockedByMissingFee}
@@ -727,6 +747,7 @@ export function AdminOrderDecisionPanel({
           <OrderChangeReviewForm
             key={order.pendingChangeRequest.id}
             requestId={order.pendingChangeRequest.id}
+            compact={compact}
             currentItems={order.items.map((item) => ({
               id: item.id,
               sequence: item.sequence,
@@ -736,13 +757,13 @@ export function AdminOrderDecisionPanel({
           />
         </div>
       ) : null}
-      <AdminDecisionActions
+      {!(compact && order.pendingChangeRequest?.type === 'MODIFY') && <AdminDecisionActions
         openMode={openMode}
         order={order}
         pending={pending}
         run={run}
         runOneBatch={runOneBatch}
-      />
+      />}
 
       {mode ? (
         <AdminDecisionForm
@@ -776,6 +797,7 @@ export function AdminOrderDecisionPanel({
       <p role="status" aria-live="polite" className={message ? 'mt-3 text-xs font-medium' : 'sr-only'}>
         {pending ? '正在按服务端最新事实处理…' : message}
       </p>
+      </div>
     </section>
   );
 }

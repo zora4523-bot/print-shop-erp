@@ -14,6 +14,7 @@ vi.mock('@/actions/order', () => ({
 }));
 
 import {
+  OrderChangeCompactPreview,
   OrderChangePendingChargeEditor,
   OrderChangePricingPreviewPanel,
   buildOrderChangePendingChargeResolutions,
@@ -419,5 +420,27 @@ describe('OrderChangePricingPreviewPanel', () => {
       status: 'error',
       message: '审核请求未完成，请刷新工单后重试。',
     });
+  });
+});
+
+
+describe('compact approval preview', () => {
+  it('keeps quantity and amount changes visible while folding calculation details', () => {
+    const html = renderToStaticMarkup(<OrderChangeCompactPreview preview={preview()} currentItems={[]} />);
+    const visible = html.split('<details')[0];
+    expect(visible).toContain('1,000 → 1,200');
+    expect(visible).toContain('修改后金额');
+    expect(visible).not.toContain('自动单价');
+    const disclosureTag = html.match(/<details\b[^>]*>/)?.[0];
+    expect(disclosureTag).toContain('data-slot="disclosure"');
+    expect(disclosureTag).not.toMatch(/\sopen(?:[\s=>])/);
+  });
+  it('does not present incomplete amounts as comparable final totals', () => {
+    const html = renderToStaticMarkup(<OrderChangeCompactPreview preview={preview({ totalExcludesPendingPlateFee: true, complete: false, newTotal: null, delta: null })} currentItems={[]} />);
+    const visible = html.split('<details')[0];
+    expect(visible).toContain('不含版费');
+    expect(visible).toContain('待核定');
+    expect(visible).toContain('批准后仍需补核版费');
+    expect(visible).not.toContain('<dt>差额</dt>');
   });
 });

@@ -417,7 +417,7 @@ it('目录规格可用性刷新后重建草稿', async () => {
   }
 });
 
-it('逐票运费必须以完整事实重新预览，任何编辑都会重新锁定批准', async () => {
+it.each([false, true])('逐票运费重新预览与审批门禁（精简视图：%s）', async (compact) => {
   const unresolvedCharge = {
     businessKey: 'shipping:shipment-2',
     categoryCode: 'SHIPPING_FEE' as const,
@@ -454,7 +454,7 @@ it('逐票运费必须以完整事实重新预览，任何编辑都会重新锁�
 
   try {
     flushSync(() =>
-      root.render(<OrderChangeReviewForm requestId="request-1" />),
+      root.render(<OrderChangeReviewForm requestId="request-1" compact={compact} />),
     );
 
     await vi.waitFor(() => {
@@ -464,6 +464,12 @@ it('逐票运费必须以完整事实重新预览，任何编辑都会重新锁�
         ),
       ).not.toBeNull();
     });
+    if (compact) {
+      const shippingDetails = host.querySelector<HTMLInputElement>('[aria-label="第 2 票运费金额"]')?.closest('details');
+      expect(shippingDetails?.open).toBe(true);
+      expect(host.textContent).toContain('请补齐运费金额和依据，并按录入运费重新预览');
+    }
+
     const approve = host.querySelector<HTMLButtonElement>(
       '[data-testid="approve-change"]',
     )!;

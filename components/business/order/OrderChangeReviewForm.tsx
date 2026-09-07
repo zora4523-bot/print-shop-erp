@@ -22,6 +22,7 @@ import type {
   OrderChangePricingPreview,
 } from '@/lib/order/change-request';
 import { Button } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ConfirmActionDialog } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -30,6 +31,7 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 type Props = {
   requestId: string;
   currentItems?: CurrentOrderItem[];
+  compact?: boolean;
 };
 
 type CurrentOrderItem = {
@@ -502,6 +504,40 @@ export function OrderChangePricingPreviewPanel({
   );
 }
 
+export function OrderChangeCompactPreview({ preview, currentItems }: {
+  preview: OrderChangePricingPreviewWithCharges;
+  currentItems: CurrentOrderItem[];
+}) {
+  return (
+    <section aria-label="审批计价预览" className="space-y-3">
+      <ul data-slot="order-change-summary" className="space-y-2 text-sm">
+        {preview.items.map((item) => (
+          <li key={`${item.changeIndex}-${item.sourceItemId}`} className="rounded-lg border p-3">
+            <p className="admin-wrap-anywhere font-medium">{item.operation === 'ADD' ? '新增款式' : '修改款式'} · {externalPriceBusinessText(item.name)}</p>
+            <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+              <li>数量 {item.operation === 'ADD' ? '' : `${(item.previousQuantity ?? currentItems.find((current) => current.id === item.sourceItemId)?.quantity ?? 0).toLocaleString('zh-CN')} → `}{item.quantity.toLocaleString('zh-CN')} 个</li>
+              {item.previousName && item.previousName !== item.name && <li>名称 {externalPriceBusinessText(item.previousName)} → {externalPriceBusinessText(item.name)}</li>}
+              {orderChangePreviewFactDescriptions(item).map((fact) => <li key={fact}>{fact}</li>)}
+            </ul>
+            {item.errors.length > 0 && <p className="mt-2 text-xs text-warning-foreground">{item.errors.join('；')}</p>}
+          </li>
+        ))}
+      </ul>
+      <dl data-slot="order-change-amounts" className="space-y-2 text-sm">
+        <div className="flex justify-between gap-3"><dt>原金额</dt><dd className="font-semibold">{money(preview.oldTotal)}</dd></div>
+        <div className="flex justify-between gap-3"><dt>{preview.totalExcludesPendingPlateFee ? '修改后已知费用（不含版费）' : '修改后金额'}</dt><dd className="font-semibold">{preview.newTotal === null ? '待核定' : money(preview.newTotal)}</dd></div>
+        {!preview.totalExcludesPendingPlateFee && preview.delta !== null && <div className="flex justify-between gap-3"><dt>差额</dt><dd>{deltaMoney(preview.delta)}</dd></div>}
+      </dl>
+      {preview.totalExcludesPendingPlateFee && <p className="text-xs text-warning-foreground">版费待核定，暂不计算整单差额；批准后仍需补核版费。</p>}
+      {!preview.complete && <p role="status" className="text-xs text-warning-foreground">费用未完整确定，请补齐下方运费或处理计价问题后重新预览。</p>}
+      <Disclosure className="rounded-lg border p-3">
+        <DisclosureSummary>费用明细</DisclosureSummary>
+        <div className="mt-3"><OrderChangePricingPreviewPanel preview={preview} currentItems={currentItems} /></div>
+      </Disclosure>
+    </section>
+  );
+}
+
 export function OrderChangePendingChargeEditor({
   charges,
   drafts,
@@ -555,7 +591,7 @@ export function OrderChangePendingChargeEditor({
                 ))}
               </ul>
             ) : null}
-            <div className="grid gap-2 sm:grid-cols-[minmax(8rem,0.65fr)_minmax(12rem,1.35fr)]">
+            <div data-slot="order-change-charge-fields" className="grid gap-2 sm:grid-cols-[minmax(8rem,0.65fr)_minmax(12rem,1.35fr)]">
               <label className="space-y-1 text-xs">
                 <span>运费金额（元）</span>
                 <Input
@@ -591,19 +627,18 @@ export function OrderChangePendingChargeEditor({
 }
 
 function OrderChangeReviewDecisionFields({
-  requestId, reviewRemark, setReviewRemark, error, state, approveDisabled,
-  rejectDisabled, pending, pendingChargesVerified, hasPendingCharges, preview, submit,
+  requestId, compact, reviewRemark, setReviewRemark, error, state, approveDisabled,
+  rejectDisabled, approvalDisabledReason, preview, submit,
 }: {
   requestId: string;
+  compact: boolean;
   reviewRemark: string;
   setReviewRemark: (value: string) => void;
   error: string | null | undefined;
   state: ReviewOrderChangeRequestMutationResult | null;
   approveDisabled: boolean;
   rejectDisabled: boolean;
-  pending: boolean;
-  pendingChargesVerified: boolean;
-  hasPendingCharges: boolean;
+  approvalDisabledReason: string | null;
   preview: OrderChangePricingPreviewWithCharges | null;
   submit: (decision: "APPROVE" | "DENY") => void;
 }) {
@@ -613,7 +648,9 @@ function OrderChangeReviewDecisionFields({
   const rejectionImpactItems = orderChangeRejectionImpactItems();
   return (
     <>
-      <label className="block space-y-1 text-sm">
+      <Disclosure open={compact ? undefined : true} className="rounded-lg border p-3">
+        <DisclosureSummary>填写拒绝原因 / 审核备注</DisclosureSummary>
+      <label className="mt-2 block space-y-1 text-sm">
         <span>审核备注 / 拒绝原因</span>
         <Textarea
           aria-describedby={`change-review-remark-help-${requestId}`}
@@ -630,6 +667,7 @@ function OrderChangeReviewDecisionFields({
           拒绝时必填；批准备注可选。人工运费的金额与依据请在上方逐票填写。
         </span>
       </label>
+      </Disclosure>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -647,21 +685,18 @@ function OrderChangeReviewDecisionFields({
           {orderChangeReviewResultMessage(state.requestStatus)}
         </p>
       ) : null}
-      <div className="flex flex-wrap gap-2">
+      {approvalDisabledReason ? (
+        <p id={`change-approval-help-${requestId}`} role="status" className="text-xs text-muted-foreground">
+          {approvalDisabledReason}
+        </p>
+      ) : null}
+      <div data-slot={compact ? 'order-change-decision-actions' : undefined} className="flex flex-wrap gap-2">
         <ConfirmActionDialog
           level="L2"
           disabled={approveDisabled}
           trigger={
-            <Button type="button" className="min-h-11">
-              {pending
-                ? '处理中…'
-                : hasPendingCharges && !pendingChargesVerified
-                  ? '请先补齐运费并重新预览'
-                  : !preview?.complete
-                    ? '自动计价未完成'
-                    : preview?.totalExcludesPendingPlateFee
-                      ? '批准自动计价结果（版费后补）'
-                      : '批准并按最新规则同步工单'}
+            <Button type="button" className="min-h-11" aria-describedby={approvalDisabledReason ? `change-approval-help-${requestId}` : undefined}>
+              批准变更
             </Button>
           }
           title="批准这项工单修改申请？"
@@ -727,6 +762,7 @@ function OrderChangePreviewFeedback({ previewPending, hasPreview, previewError, 
 
 export function OrderChangeReviewForm({
   requestId,
+  compact = false,
   currentItems = [],
 }: Props) {
   const router = useRouter();
@@ -930,39 +966,19 @@ export function OrderChangeReviewForm({
     !Number.isSafeInteger(preview.priceRevision) ||
     !preview.complete ||
     !pendingChargesVerified;
+  const approvalDisabledReason = !approveDisabled ? null
+    : pending ? '正在提交审批，请稍候。'
+    : reviewCompleted ? '该申请已处理，不能重复审批。'
+    : previewPending ? '正在生成计价预览，请稍候。'
+    : previewError || !preview || !Number.isSafeInteger(preview.priceRevision)
+      ? '计价预览不可用，请重新加载后再批准。'
+    : !pendingChargesVerified ? '请补齐运费金额和依据，并按录入运费重新预览。'
+    : '计价尚未完成，请处理费用缺项后重新预览。';
   const rejectDisabled =
     pending || reviewCompleted || reviewRemark.trim() === '';
 
-  return (
-    <form
-      onSubmit={handleSubmit}
-      aria-busy={pending || previewPending}
-      className="space-y-2"
-    >
-      {preview ? (
-        <div className="space-y-2">
-          <OrderChangePricingPreviewPanel
-            preview={preview}
-            currentItems={currentItems}
-          />
-          {!previewError ? (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={pending || previewPending || reviewCompleted}
-              onClick={loadPreview}
-            >
-              {previewPending ? '正在刷新…' : '刷新最新计价预览'}
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      <OrderChangePreviewFeedback
-        previewPending={previewPending}
-        hasPreview={preview !== null}
-        previewError={previewError}
-        loadPreview={loadPreview}
-      />
+  const pendingChargeFields = (
+    <>
       <OrderChangePendingChargeEditor
         charges={pendingCharges}
         drafts={pendingChargeDrafts}
@@ -999,17 +1015,56 @@ export function OrderChangeReviewForm({
           )}
         </div>
       ) : null}
+    </>
+  );
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      aria-busy={pending || previewPending}
+      className="space-y-2"
+    >
+      {preview ? (
+        <div className="space-y-2">
+          {compact ? (
+            <OrderChangeCompactPreview preview={preview} currentItems={currentItems} />
+          ) : (
+            <OrderChangePricingPreviewPanel preview={preview} currentItems={currentItems} />
+          )}
+          {!previewError ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || previewPending || reviewCompleted}
+              onClick={loadPreview}
+            >
+              {previewPending ? '正在刷新…' : '刷新最新计价预览'}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      <OrderChangePreviewFeedback
+        previewPending={previewPending}
+        hasPreview={preview !== null}
+        previewError={previewError}
+        loadPreview={loadPreview}
+      />
+      {compact && pendingCharges.length > 0 ? (
+        <Disclosure open={!pendingChargesVerified} className="rounded-lg border p-3">
+          <DisclosureSummary>补录运费 · {pendingCharges.length} 票</DisclosureSummary>
+          <div className="mt-3 space-y-2">{pendingChargeFields}</div>
+        </Disclosure>
+      ) : pendingChargeFields}
       <OrderChangeReviewDecisionFields
         requestId={requestId}
+        compact={compact}
         reviewRemark={reviewRemark}
         setReviewRemark={setReviewRemark}
         error={error}
         state={state}
         approveDisabled={approveDisabled}
         rejectDisabled={rejectDisabled}
-        pending={pending}
-        pendingChargesVerified={pendingChargesVerified}
-        hasPendingCharges={pendingCharges.length > 0}
+        approvalDisabledReason={approvalDisabledReason}
         preview={preview}
         submit={submit}
       />

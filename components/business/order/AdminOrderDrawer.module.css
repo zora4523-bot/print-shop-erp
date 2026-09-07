@@ -1,0 +1,228 @@
+/* Scoped to the order drawer: dimensions and hierarchy follow the supplied HTML.
+   Existing order approvals and shared dialogs retain their behavior. */
+.drawer {
+  --background: #fff;
+  --foreground: #17181c;
+  --card: #fff;
+  --card-foreground: #17181c;
+  --border: #e4e1dc;
+  --muted: #f0eeea;
+  --muted-foreground: #716e68;
+  --primary: #a8121a;
+  --primary-foreground: #fff;
+  --success-foreground: #2f6b46;
+  width: min(480px, 100vw) !important;
+  max-width: 480px !important;
+  gap: 0;
+  overflow: hidden;
+  background: var(--card);
+  color: var(--foreground);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 30px rgb(0 0 0 / 8%);
+  font-size: 13px;
+  transition: transform 240ms ease;
+}
+
+:global(.dark) .drawer {
+  --background: #242426;
+  --foreground: #f4f2ef;
+  --card: #242426;
+  --card-foreground: #f4f2ef;
+  --border: #48474b;
+  --muted: #323236;
+  --muted-foreground: #bab6b0;
+  --primary: #e96670;
+  --primary-foreground: #1b1012;
+  --success-foreground: #9aceab;
+}
+
+.drawer[data-starting-style],
+.drawer[data-ending-style] {
+  opacity: 1;
+  translate: none;
+  transform: translateX(102%);
+}
+
+.overlay {
+  background: rgb(23 24 28 / 34%);
+  backdrop-filter: none;
+  transition: opacity 200ms ease;
+}
+
+:global(.dark) .overlay {
+  background: rgb(0 0 0 / 50%);
+}
+
+.header {
+  flex-shrink: 0;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  padding: max(16px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 13px max(20px, env(safe-area-inset-left));
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 32px;
+  padding-right: 40px;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  margin-top: 5px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.drawer :global([data-slot="sheet-close"]) {
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  color: var(--muted-foreground);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px max(20px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+}
+
+.section,
+.progress {
+  margin-bottom: 20px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.sectionTitle,
+.drawer :global([data-slot="admin-order-decision-panel"] > h3) {
+  margin-bottom: 11px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .18em;
+}
+
+.drawer :global([data-slot="admin-order-decision-panel"]) {
+  margin-bottom: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.drawer :global([data-slot="admin-order-decision-card"]) {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 13px 15px;
+}
+
+.drawer :global([data-slot="admin-order-decision-heading"]) {
+  margin-bottom: 8px;
+}
+
+.drawer :global([data-slot="order-change-summary"]) {
+  font-size: 12.5px;
+}
+
+.drawer :global([data-slot="order-change-summary"] > li) {
+  padding: 0 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--muted);
+  border-radius: 0;
+}
+
+.drawer :global([data-slot="order-change-amounts"]) {
+  font-size: 12px;
+}
+
+.drawer :global([data-slot="order-change-charge-fields"]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lines > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--muted);
+  font-size: 12px;
+}
+
+.lines dt { font-weight: 600; }
+.lines dd { font-weight: 700; }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.drawer .body :is(button, a[href], summary) {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.drawer .body :is(input, textarea, select) {
+  font-size: 13px;
+}
+
+/* Map existing semantic button variants only inside this drawer. */
+.drawer .body :is(button, a)[class~="bg-primary"]:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--foreground);
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.drawer .body button[class~="text-destructive"]:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.drawer :global([data-slot="order-change-decision-actions"]) {
+  flex-direction: row-reverse;
+  flex-wrap: nowrap;
+  margin-top: 9px;
+}
+
+.drawer :global([data-slot="order-change-decision-actions"] > button) {
+  flex: 1;
+  min-width: 0;
+}
+
+.drawer :global([data-slot="disclosure"]) {
+  padding: 0 10px;
+  border-color: var(--border);
+}
+
+.drawer :global([data-slot="disclosure"][open]) {
+  padding-bottom: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .overlay { transition: none; }
+}
