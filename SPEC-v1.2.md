@@ -700,13 +700,17 @@ def calc_hourly_payroll(worker, month):
 | CS_PERIOD_SETTLED | 客服周期结算 | 事件规则最多 1 个授权共享群；尚无 per-CS 路由 |
 | DAILY_WORKER_SALARY | 师傅日薪结算 | 事件规则绑定的车间共享群 |
 
-上表 15 个事件会预置 `NotificationRule`，但 seed 默认不启用、不猜测真实收件群。生产必须由管理员显式创建 channel，按业务启用规则并配置路由。对应客服/师傅的个人或专属群 Webhook 映射尚未实现，不得宣称已达成原始&ldquo;管理员群 + 对应客服&rdquo;或&ldquo;对应师傅群&rdquo;的路由目标。
+上表 15 个事件会预置 `NotificationRule`，但 seed 默认不启用、不猜测真实收件群。生产必须由管理员显式创建智能机器人通知目标，完成群绑定后，按业务启用规则并配置路由。对应客服/师傅的个人或专属群通知目标映射尚未实现，不得宣称已达成原始&ldquo;管理员群 + 对应客服&rdquo;或&ldquo;对应师傅群&rdquo;的路由目标。
 
 ### 8.2 消息模板
 
-所有消息使用 Markdown 格式，推送到企业微信群机器人 Webhook。消息模板存在 `NotificationRule.messageTemplate` 字段，可用占位符取自每个事件的允许字段。
+所有消息使用 Markdown 格式。当前后台只允许配置 Bot ID + Secret 智能机器人目标；凭据由服务端环境变量管理，由唯一持有长连接的 LIGHT worker 投递。新目标默认停用，完成一次性绑定码的群绑定后才能启用。消息模板存在 `NotificationRule.messageTemplate` 字段，可用占位符取自每个事件的允许字段。本系统模板和发送入口统一限制最终内容为 4096 UTF-8 字节。
 
-[企业微信「消息推送」官方文档](https://developer.work.weixin.qq.com/document/path/99110)规定：
+旧 Webhook 不再提供创建、编辑、测试和新增路由绑定入口；原目标仅展示只读历史元数据，不向客户端返回 Webhook。已有启用路由可以保留或解绑，但关闭后不能携旧目标重新启用。管理员应先绑定新的智能机器人目标，再迁移规则和固定角色路由。历史日志、已应用迁移以及仍被历史任务/存量路由消费的兼容投递代码保留，不批量删除数据或自动改变真实收件群。
+
+托管事件规则保留的旧 `channelIds` 仅作历史兼容，不是实际路由，也不阻止事件启用。其投递始终取角色设置且不回退；真正的角色路由新增或重新启用仍须校验接收目标。
+
+存量 Webhook 兼容发送仍遵循[企业微信「消息推送」文档](https://developer.work.weixin.qq.com/document/path/99110)的原有约束（不将其限流规则作为智能机器人协议的声明）：
 
 - `markdown.content` 最大 4096 UTF-8 字节；模板保存与真实/mock 发送前均按此上限校验。
 - 每个机器人 Webhook 最多 20 条/分钟。除单次 cron 批量扇出按 `index × 3500ms` 摊开外，真实 `sendWebhook` 还会通过 PostgreSQL 全局 permit 表，以「固定端点 + 解码后 key」的 SHA-256 摘要为键，按 3500ms 安全间隔对共享 Webhook 跨事件、跨进程原子串行；不持久化明文 webhook/key，mock 或测试注入 sender 不触发该表。生产真发前须先应用 `20260902121100_notification_webhook_global_throttle` migration。
@@ -738,7 +742,7 @@ def calc_hourly_payroll(worker, month):
 - 管理员汇总下载、24小时链接
 
 **推送**
-- 企业微信 Webhook 配置、15 个预置事件、推送日志
+- 企业微信智能机器人群绑定配置、15 个预置事件、推送日志
 
 **统计**
 - 管理员Dashboard、基础生产和销售报表

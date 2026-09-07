@@ -262,6 +262,9 @@ function ManagementNotificationRoutingField({
         {roles.map((role) => {
           const current = routing[role.key];
           const selected = new Set(current.channelIds);
+          const visibleChannels = channels.filter(
+            (channel) => channel.selectionIssue !== 'LEGACY_TRANSPORT' || selected.has(channel.id),
+          );
           const prefix = `${settingKey}.${role.key}`;
           return (
             <section
@@ -289,7 +292,7 @@ function ManagementNotificationRoutingField({
                   <option value="false">关闭</option>
                 </select>
               </div>
-              {channels.length === 0 ? (
+              {visibleChannels.length === 0 ? (
                 <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
                   暂无企业微信群，请先到“推送配置”新建并验证群。
                 </p>
@@ -299,7 +302,7 @@ function ManagementNotificationRoutingField({
                   role="group"
                   aria-label={`${role.label}接收群`}
                 >
-                  {channels.map((channel) => {
+                  {visibleChannels.map((channel) => {
                     const isSelected = selected.has(channel.id);
                     const disabled =
                       channel.selectionIssue !== null && !isSelected;

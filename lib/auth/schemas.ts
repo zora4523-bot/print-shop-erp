@@ -36,7 +36,6 @@ import {
   WECOM_MARKDOWN_MAX_BYTES,
   wecomMarkdownByteLength,
 } from '../notification/limits';
-import { isValidWecomGroupBotWebhookUrl } from '../notification/webhook-url';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -3617,19 +3616,6 @@ const channelNameField = z
   .min(1, '请填写群名（如 排产群）')
   .max(64, '群名过长（最多 64 个字符）');
 
-// 企业微信 webhook URL 的官方格式：
-//   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<非空>
-// 严格限制协议、主机、路径和唯一 query，避免 SSRF、凭据泄漏与误投递。
-const channelWebhookUrlField = z
-  .string()
-  .trim()
-  .min(1, '请填写企业微信 Webhook URL')
-  .max(512, 'Webhook URL 过长')
-  .refine(
-    isValidWecomGroupBotWebhookUrl,
-    'Webhook URL 必须形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
-  );
-
 const notificationChannelIdentityFields = {
   channelKey: z
     .string()
@@ -3643,24 +3629,17 @@ const notificationChannelIdentityFields = {
   channelName: channelNameField,
 };
 
-export const createNotificationChannelSchema = z.preprocess(
-  defaultLegacyWebhookTransport,
-  z.discriminatedUnion('transport', [
-    z.object({
-      ...notificationChannelIdentityFields,
-      transport: z.literal('WECOM_GROUP_WEBHOOK'),
-      webhookUrl: channelWebhookUrlField,
-      isActive: formBoolean,
-    }),
-    z.object({
-      ...notificationChannelIdentityFields,
-      transport: z.literal('WECOM_SMART_BOT'),
-      // A smart-bot destination is deliberately born inactive and without a
-      // target. The target can only be learned from a signed WS group callback.
-      isActive: z.unknown().transform(() => false),
-    }),
-  ]),
-);
+const smartBotTransportField = z.literal('WECOM_SMART_BOT', {
+  error: '仅支持 Bot ID + Secret 智能机器人，请刷新页面后重新配置',
+});
+
+export const createNotificationChannelSchema = z.object({
+  ...notificationChannelIdentityFields,
+  transport: smartBotTransportField,
+  webhookUrl: z.never({ error: '旧版 Webhook 配置已停止维护' }).optional(),
+  // Only the authenticated group callback can establish the destination.
+  isActive: z.unknown().transform(() => false),
+});
 
 export type CreateNotificationChannelInput = z.infer<
   typeof createNotificationChannelSchema
@@ -3668,34 +3647,12 @@ export type CreateNotificationChannelInput = z.infer<
 
 // 编辑场景下不让 owner 改 channelKey（key 是稳定标识，被 audit log
 // 引用；改 key 等同于&ldquo;新建+删除&rdquo;）—— UI 把 key 渲染成只读。
-export const updateNotificationChannelSchema = z.preprocess(
-  defaultLegacyWebhookTransport,
-  z.discriminatedUnion('transport', [
-    z.object({
-      transport: z.literal('WECOM_GROUP_WEBHOOK'),
-      channelName: channelNameField,
-      webhookUrl: channelWebhookUrlField,
-      isActive: formBoolean,
-    }),
-    z.object({
-      transport: z.literal('WECOM_SMART_BOT'),
-      channelName: channelNameField,
-      isActive: formBoolean,
-    }),
-  ]),
-);
-
-function defaultLegacyWebhookTransport(value: unknown): unknown {
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    !('transport' in value)
-  ) {
-    return { ...value, transport: 'WECOM_GROUP_WEBHOOK' };
-  }
-  return value;
-}
+export const updateNotificationChannelSchema = z.object({
+  transport: smartBotTransportField,
+  webhookUrl: z.never({ error: '旧版 Webhook 配置已停止维护' }).optional(),
+  channelName: channelNameField,
+  isActive: formBoolean,
+});
 
 export type UpdateNotificationChannelInput = z.infer<
   typeof updateNotificationChannelSchema

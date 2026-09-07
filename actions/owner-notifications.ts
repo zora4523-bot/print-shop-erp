@@ -23,6 +23,7 @@ import {
   UnboundSmartBotChannelError,
   createSmartBotBindingCode,
   createChannel,
+  getChannel,
   deleteChannel,
   updateChannel,
   updateRuleWithGuard,
@@ -92,7 +93,7 @@ export async function createChannelAction(
     channelKey: formData.get('channelKey'),
     channelName: formData.get('channelName'),
     transport: formData.get('transport'),
-    webhookUrl: formData.get('webhookUrl'),
+    ...(formData.has('webhookUrl') ? { webhookUrl: formData.get('webhookUrl') } : {}),
     isActive: formData.get('isActive'),
   });
   if (!parsed.success) {
@@ -126,7 +127,7 @@ export async function updateChannelAction(
   const parsed = updateNotificationChannelSchema.safeParse({
     channelName: formData.get('channelName'),
     transport: formData.get('transport'),
-    webhookUrl: formData.get('webhookUrl'),
+    ...(formData.has('webhookUrl') ? { webhookUrl: formData.get('webhookUrl') } : {}),
     isActive: formData.get('isActive'),
   });
   if (!parsed.success) {
@@ -142,7 +143,7 @@ export async function updateChannelAction(
     if (err instanceof ChannelTransportMismatchError) {
       return {
         status: 'error',
-        message: '传输方式创建后不可修改；请新建一个通知目标。',
+        message: '仅支持编辑智能机器人目标；旧版目标请新建智能机器人目标后迁移路由。',
       };
     }
     if (err instanceof UnboundSmartBotChannelError) {
@@ -317,7 +318,7 @@ export async function updateRuleAction(
         status: 'invalid',
         fieldErrors: {
           channelIds: [
-            '部分所选通知目标与当前 Bot 配置不一致或配置不完整，不能新绑定。请先到通知目标中修复。',
+            '不能新绑定旧版 Webhook、与当前 Bot 配置不一致或配置不完整的目标，请选择已绑定的智能机器人。',
           ],
         },
       };
@@ -517,6 +518,15 @@ export async function testChannelAction(
   channelId: string,
 ): Promise<ChannelTestResult> {
   await requirePermission('notification:config');
+
+  const channel = await getChannel(channelId);
+  if (!channel) return { status: 'error', message: '该群不存在' };
+  if (channel.transport !== 'WECOM_SMART_BOT') {
+    return {
+      status: 'error',
+      message: '旧版 Webhook 已停止配置和测试，请改用智能机器人目标。',
+    };
+  }
 
   let outcome: Awaited<ReturnType<typeof testChannel>>;
   try {

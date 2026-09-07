@@ -9,8 +9,7 @@ describe('createNotificationChannelSchema', () => {
   const valid = {
     channelKey: 'scheduling_group',
     channelName: '排产群',
-    webhookUrl:
-      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcd-1234',
+    transport: 'WECOM_SMART_BOT',
     isActive: true,
   };
 
@@ -42,7 +41,7 @@ describe('createNotificationChannelSchema', () => {
     expect(r.success).toBe(false);
   });
 
-  it('webhookUrl 非 qyapi.weixin.qq.com → 拒', () => {
+  it('拒绝混入旧 webhookUrl 字段，无论目的地址是什么', () => {
     const r = createNotificationChannelSchema.safeParse({
       ...valid,
       webhookUrl: 'https://attacker.example.com/cgi-bin/webhook/send?key=x',
@@ -50,7 +49,7 @@ describe('createNotificationChannelSchema', () => {
     expect(r.success).toBe(false);
   });
 
-  it('webhookUrl HTTP（非 https）→ 拒', () => {
+  it('旧表单字段不会被忽略后继续保存', () => {
     const r = createNotificationChannelSchema.safeParse({
       ...valid,
       webhookUrl: 'http://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x',
@@ -59,6 +58,7 @@ describe('createNotificationChannelSchema', () => {
   });
 
   it.each([
+    ['合法旧 URL', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=legacy'],
     ['缺少 key', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send'],
     ['key 为空', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key='],
     [
@@ -81,7 +81,7 @@ describe('createNotificationChannelSchema', () => {
       '错误路径',
       'https://qyapi.weixin.qq.com/cgi-bin/webhook/send/?key=x',
     ],
-  ])('webhookUrl %s → 拒', (_case, webhookUrl) => {
+  ])('旧 webhookUrl 字段 %s → 拒', (_case, webhookUrl) => {
     const r = createNotificationChannelSchema.safeParse({
       ...valid,
       webhookUrl,
@@ -97,7 +97,7 @@ describe('createNotificationChannelSchema', () => {
     expect(r.success).toBe(false);
   });
 
-  it('isActive 缺省 (FormData "on" / "true") → 接受', () => {
+  it('接受 FormData 的启用值，但新目标仍保持停用', () => {
     expect(
       createNotificationChannelSchema.safeParse({
         ...valid,
@@ -112,7 +112,7 @@ describe('createNotificationChannelSchema', () => {
     ).toBe(true);
   });
 
-  it('isActive 未传 → 视为 false（formBoolean 行为）', () => {
+  it('isActive 未传 → 仍为 false', () => {
     const r = createNotificationChannelSchema.safeParse({
       ...valid,
       isActive: undefined,
@@ -126,22 +126,28 @@ describe('updateNotificationChannelSchema', () => {
   it('合法 → ok（不含 channelKey 字段）', () => {
     const r = updateNotificationChannelSchema.safeParse({
       channelName: '排产群',
-      webhookUrl:
-        'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x',
+      transport: 'WECOM_SMART_BOT',
       isActive: true,
     });
     expect(r.success).toBe(true);
   });
 
-  it('与新建共用严格 Webhook URL 校验', () => {
+  it('编辑也拒绝旧 Webhook 字段', () => {
     const r = updateNotificationChannelSchema.safeParse({
       channelName: '排产群',
+      transport: 'WECOM_SMART_BOT',
       webhookUrl:
         'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x&debug=1',
       isActive: true,
     });
     expect(r.success).toBe(false);
   });
+});
+
+it.each([undefined, null, 'WECOM_GROUP_WEBHOOK'])('新建和编辑都拒绝旧版或缺失传输方式：%s', (transport) => {
+  const input = { channelKey: 'legacy', channelName: '旧群', transport, isActive: true };
+  expect(createNotificationChannelSchema.safeParse(input).success).toBe(false);
+  expect(updateNotificationChannelSchema.safeParse(input).success).toBe(false);
 });
 
 describe('updateNotificationRuleSchema', () => {

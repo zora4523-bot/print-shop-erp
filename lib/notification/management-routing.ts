@@ -59,7 +59,6 @@ export async function listManagementNotificationChannels(): Promise<
       channelKey: true,
       channelName: true,
       transport: true,
-      webhookUrl: true,
       smartBotBotDigest: true,
       smartBotTargetId: true,
       smartBotChatType: true,

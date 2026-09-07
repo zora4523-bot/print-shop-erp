@@ -1,4 +1,5 @@
 export type NotificationChannelSelectionIssue =
+  | 'LEGACY_TRANSPORT'
   | 'INACTIVE'
   | 'CHANNEL_CONFIGURATION_INCOMPLETE'
   | 'SMART_BOT_CREDENTIALS_NOT_CONFIGURED'
@@ -6,7 +7,7 @@ export type NotificationChannelSelectionIssue =
 
 export type NotificationChannelSelectionCandidate = Readonly<{
   transport: 'WECOM_GROUP_WEBHOOK' | 'WECOM_SMART_BOT';
-  webhookUrl: string | null;
+  webhookUrl?: string | null;
   smartBotBotDigest: string | null;
   smartBotTargetId: string | null;
   smartBotChatType: 'SINGLE' | 'GROUP' | null;
@@ -29,13 +30,10 @@ export function notificationChannelSelectionIssue(
   channel: NotificationChannelSelectionCandidate,
   context: NotificationChannelSelectionContext,
 ): NotificationChannelSelectionIssue | null {
-  if (!channel.isActive) return 'INACTIVE';
-
   if (channel.transport === 'WECOM_GROUP_WEBHOOK') {
-    return channel.webhookUrl?.trim()
-      ? null
-      : 'CHANNEL_CONFIGURATION_INCOMPLETE';
+    return 'LEGACY_TRANSPORT';
   }
+  if (!channel.isActive) return 'INACTIVE';
 
   if (
     !context.smartBotCredentialsConfigured ||
@@ -60,6 +58,8 @@ export function notificationChannelSelectionIssueMessage(
   issue: NotificationChannelSelectionIssue,
 ): string {
   switch (issue) {
+    case 'LEGACY_TRANSPORT':
+      return '旧版 Webhook 已停止配置，请迁移到智能机器人';
     case 'INACTIVE':
       return '该群已停用';
     case 'CHANNEL_CONFIGURATION_INCOMPLETE':

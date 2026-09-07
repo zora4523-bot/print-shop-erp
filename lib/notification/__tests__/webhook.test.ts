@@ -13,10 +13,7 @@ import {
   mockWebhookSender,
   sendWebhook,
 } from '../webhook';
-import {
-  isValidWecomGroupBotWebhookUrl,
-  maskWecomGroupBotWebhookUrl,
-} from '../webhook-url';
+import { isValidWecomGroupBotWebhookUrl } from '../webhook-url';
 
 const VALID_WEBHOOK_URL =
   'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key';
@@ -42,17 +39,6 @@ describe('isValidWecomGroupBotWebhookUrl', () => {
     }
   });
 
-  it('管理列表始终脱敏 key，存量异常值也不回显', () => {
-    expect(
-      maskWecomGroupBotWebhookUrl(
-        'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcd_1234-secret',
-      ),
-    ).toBe(
-      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcd…cret',
-    );
-    expect(maskWecomGroupBotWebhookUrl('https://attacker.example/?key=secret'))
-      .toBe('企业微信 Webhook（格式异常，已隐藏）');
-  });
 });
 
 describe('mockWebhookSender', () => {

@@ -86,7 +86,6 @@ describe('management notification fixed role map', () => {
         channelKey: true,
         channelName: true,
         transport: true,
-        webhookUrl: true,
         smartBotBotDigest: true,
         smartBotTargetId: true,
         smartBotChatType: true,
@@ -100,7 +99,7 @@ describe('management notification fixed role map', () => {
         channelKey: 'factory',
         channelName: '工厂群',
         isActive: true,
-        selectionIssue: null,
+        selectionIssue: 'LEGACY_TRANSPORT',
       },
     ]);
     expect(JSON.stringify(channels)).not.toContain('private-webhook');

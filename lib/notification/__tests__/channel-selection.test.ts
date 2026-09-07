@@ -27,7 +27,7 @@ function smartBot(
 }
 
 describe('notificationChannelSelectionIssue', () => {
-  it('accepts a complete active webhook or a smart-bot target bound to the current Bot ID', () => {
+  it('rejects even a complete active legacy webhook, accepting only a correctly bound smart bot', () => {
     expect(
       notificationChannelSelectionIssue(
         {
@@ -41,7 +41,7 @@ describe('notificationChannelSelectionIssue', () => {
         },
         configured,
       ),
-    ).toBeNull();
+    ).toBe('LEGACY_TRANSPORT');
     expect(notificationChannelSelectionIssue(smartBot(), configured)).toBeNull();
   });
 

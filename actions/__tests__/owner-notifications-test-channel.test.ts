@@ -4,12 +4,14 @@ const {
   requirePermissionMock,
   revalidatePathMock,
   testChannelMock,
+  getChannelMock,
   enqueueSmartBotChannelTestMock,
 } =
   vi.hoisted(() => ({
     requirePermissionMock: vi.fn(),
     revalidatePathMock: vi.fn(),
     testChannelMock: vi.fn(),
+    getChannelMock: vi.fn(),
     enqueueSmartBotChannelTestMock: vi.fn(),
   }));
 
@@ -29,6 +31,7 @@ vi.mock('@/lib/notification/admin', () => {
     StaleChannelIdsError: DomainError,
     TooManyChannelsForPrivateEventError: DomainError,
     createChannel: vi.fn(),
+    getChannel: getChannelMock,
     deleteChannel: vi.fn(),
     updateChannel: vi.fn(),
     updateRuleWithGuard: vi.fn(),
@@ -57,6 +60,7 @@ import { testChannelAction } from '../owner-notifications';
 beforeEach(() => {
   requirePermissionMock.mockReset().mockResolvedValue({ id: 'owner-1' });
   revalidatePathMock.mockReset();
+  getChannelMock.mockReset().mockResolvedValue({ transport: 'WECOM_SMART_BOT' });
   testChannelMock.mockReset().mockResolvedValue({ ok: true, mock: true });
   enqueueSmartBotChannelTestMock.mockReset().mockResolvedValue({
     queued: true,
@@ -65,6 +69,21 @@ beforeEach(() => {
 });
 
 describe('testChannelAction', () => {
+  it('blocks stale or forged legacy test requests without sending or queueing', async () => {
+    getChannelMock.mockResolvedValue({ transport: 'WECOM_GROUP_WEBHOOK' });
+    await expect(testChannelAction('legacy')).resolves.toEqual({
+      status: 'error',
+      message: '旧版 Webhook 已停止配置和测试，请改用智能机器人目标。',
+    });
+    expect(testChannelMock).not.toHaveBeenCalled();
+    expect(enqueueSmartBotChannelTestMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a deleted target before attempting to send', async () => {
+    getChannelMock.mockResolvedValue(null);
+    await expect(testChannelAction('missing')).resolves.toEqual({ status: 'error', message: '该群不存在' });
+    expect(testChannelMock).not.toHaveBeenCalled();
+  });
   it('authorizes, delegates to lib and revalidates the owner log page', async () => {
     await expect(testChannelAction('channel-1')).resolves.toEqual({
       status: 'success',
@@ -166,6 +185,7 @@ describe('testChannelAction', () => {
     requirePermissionMock.mockRejectedValue(new Error('forbidden'));
 
     await expect(testChannelAction('channel-1')).rejects.toThrow('forbidden');
+    expect(getChannelMock).not.toHaveBeenCalled();
     expect(testChannelMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });

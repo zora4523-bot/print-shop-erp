@@ -90,6 +90,20 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 5. 只 revalidate 受影响路径；
 6. 为成功、字段错误、权限拒绝、状态冲突和重复提交补契约测试。
 
+### 企业微信通知目标配置
+
+实现见 [`actions/owner-notifications.ts`](./actions/owner-notifications.ts)、
+[`lib/notification/admin.ts`](./lib/notification/admin.ts) 和
+[`lib/settings/index.ts`](./lib/settings/index.ts)。
+
+- 所有通知配置写操作先校验 `notification:config`；系统设置仍使用其自身权限边界。
+- 新建/编辑明确要求 `transport=WECOM_SMART_BOT`。省略协议、提交旧 `WECOM_GROUP_WEBHOOK` 或携带 `webhookUrl` 字段均返回字段错误；不再静默默认到旧协议。
+- 新建目标强制停用，不接受客户端启用未绑定目标；编辑时领域层重验已存协议、群绑定与 Bot ID 身份，不能把旧目标伪装成智能机器人覆盖。
+- Bot ID/Secret 仅从服务端配置读取，通知配置读模型不查询或返回 Webhook；客户端只接收脱敏绑定信息。
+- 旧目标的 `testChannelAction` 返回明确错误，不发送消息、不入队。智能机器人真发测试仍由 LIGHT worker 完成，Web 进程不建立长连接。
+- 规则和固定角色路由拒绝新选旧目标；存量启用路由可保留或解除，关闭后携旧目标重新启用会被拒绝。历史日志与存量兼容投递不受 UI 退役影响。
+- 托管事件规则中保留的旧 `channelIds` 不参与实际投递，启用事件时不重验这些隐藏历史字段；实际接收群只能从角色设置取得，其新增/重新启用校验不变。
+
 ### 工单修改与价格确认
 
 实现见 [`actions/order.ts`](./actions/order.ts)、

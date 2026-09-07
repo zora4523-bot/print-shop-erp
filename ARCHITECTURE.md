@@ -23,7 +23,7 @@ Next.js Web（页面、Server Actions、Route Handlers）
         |
         +---- PostgreSQL（Prisma 7 + @prisma/adapter-pg）
         +---- 阿里云 OSS（设计图、CDR 等文件）
-        +---- 企业微信 Webhook（通知）
+        +---- 企业微信智能机器人（LIGHT worker 长连接通知）
         |
         +---- PostgreSQL 后台任务账本
                     |---- LIGHT worker（通知、cron）
@@ -121,7 +121,7 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 |---|---|---|
 | PostgreSQL | 主数据、业务账本、后台任务 | 应用或就绪检查失败 |
 | 阿里云 OSS | 设计图直传、CDR 产物 | 上传入口禁用或下载返回明确不可用状态；不得假成功 |
-| 企业微信 Webhook | 业务通知 | 开发默认 mock；生产是否真发由环境和配置共同决定 |
+| 企业微信智能机器人 | 业务通知（Bot ID + Secret，LIGHT worker 长连接） | 开发默认 mock；真发由环境、绑定与路由共同决定；旧 Webhook 仅兼容存量投递，后台只读 |
 | Chromium | 工单 PDF | 生成失败并返回诊断；生产需系统 Chromium 与中文字体 |
 | Sentry / OTel | 错误与追踪 | `SENTRY_DSN` 留空时不初始化 Sentry；版本标签来自 `APP_VERSION` |
 

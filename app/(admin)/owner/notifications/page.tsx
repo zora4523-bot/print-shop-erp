@@ -16,6 +16,7 @@ import {
 } from '@/lib/notification/event-labels';
 import { DeleteChannelButton } from '@/components/business/notification/DeleteChannelButton';
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
+import { LegacyNotificationChannels } from '@/components/business/notification/LegacyNotificationChannels';
 import { UnknownNotificationActions } from '@/components/business/notification/UnknownNotificationActions';
 import {
   EnvNotice,
@@ -35,7 +36,6 @@ import {
   NOTIFICATION_STATUS_REGISTRY,
 } from '@/lib/ui/status-registry';
 import { managementNotificationRoleForEvent } from '@/lib/notification/events';
-import { maskWecomGroupBotWebhookUrl } from '@/lib/notification/webhook-url';
 import {
   getBackgroundJobHealth,
   summarizeSmartBotConnection,
@@ -81,9 +81,6 @@ export default async function OwnerNotificationsPage({
   ]);
   const { channels, rules } = notificationConfiguration;
   const mock = isMockMode();
-  const hasSmartBotChannel = channels.some(
-    (channel) => channel.transport === 'WECOM_SMART_BOT',
-  );
   const smartBotConnection = backgroundHealth
     ? summarizeSmartBotConnection(backgroundHealth, {
         expectedVersion: process.env.APP_VERSION ?? 'dev',
@@ -109,13 +106,11 @@ export default async function OwnerNotificationsPage({
         </div>
       ) : null}
 
-      {hasSmartBotChannel ? (
-        <SmartBotConnectionPanel
-          status={smartBotConnection.status}
-          lastSeenAt={smartBotConnection.lastSeenAt}
-          mock={mock}
-        />
-      ) : null}
+      <SmartBotConnectionPanel
+        status={smartBotConnection.status}
+        lastSeenAt={smartBotConnection.lastSeenAt}
+        mock={mock}
+      />
 
       {recentFailures > 0 ? (
         <div
@@ -129,7 +124,15 @@ export default async function OwnerNotificationsPage({
       ) : null}
 
       {/* ─── 通知目标 ─── */}
-      <NotificationChannelsSection channels={channels} />
+      <NotificationChannelsSection channels={channels.filter((c) => c.transport === 'WECOM_SMART_BOT')} />
+      <LegacyNotificationChannels
+        channels={channels.filter((c) => c.transport === 'WECOM_GROUP_WEBHOOK').map((c) => ({
+          id: c.id,
+          channelName: c.channelName,
+          isActive: c.isActive,
+          referencingConfigurationCount: c.referencingConfigurationCount,
+        }))}
+      />
 
       {/* ─── 事件规则（跟随 NOTIFICATION_EVENTS，当前 15 条） ─── */}
       <NotificationRulesSection rules={rules} />
@@ -347,20 +350,17 @@ function NotificationChannelsSection({ channels }: {
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left">通知目标</th>
-                <th className="px-3 py-2 text-left">传输</th>
                 <th className="px-3 py-2 text-left">目的地</th>
                 <th className="px-3 py-2 text-center">状态</th>
-                <th className="px-3 py-2 text-center">引用规则</th>
+                <th className="px-3 py-2 text-center">配置引用</th>
                 <th className="px-3 py-2 text-right">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {channels.map((c) => {
-                const smartBot = c.transport === 'WECOM_SMART_BOT';
                 const smartBotUnbound =
-                  smartBot && (!c.smartBotTargetId || !c.smartBotBoundAt);
+                  !c.smartBotTargetId || !c.smartBotBoundAt;
                 const smartBotIdentityMismatch =
-                  smartBot &&
                   !smartBotUnbound &&
                   !c.smartBotBotMatchesConfigured;
                 const testDisabled =
@@ -369,19 +369,10 @@ function NotificationChannelsSection({ channels }: {
                 return (
                   <tr key={c.id}>
                     <td className="px-3 py-2">{c.channelName}</td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {smartBot
-                        ? 'Bot ID + Secret 智能机器人'
-                        : '群机器人 Webhook'}
-                    </td>
                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                      {smartBot
-                        ? c.smartBotTargetId
-                          ? `群聊 ••••${c.smartBotTargetId.slice(-4)}`
-                          : '待绑定群聊'
-                        : c.webhookUrl
-                          ? maskWecomGroupBotWebhookUrl(c.webhookUrl)
-                          : '未配置'}
+                      {c.smartBotTargetId
+                        ? `群聊 ••••${c.smartBotTargetId.slice(-4)}`
+                        : '待绑定群聊'}
                     </td>
                     <td className="px-3 py-2 text-center">
                       {smartBotUnbound ? (

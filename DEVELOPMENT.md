@@ -88,6 +88,7 @@ pnpm dev
 - Playwright 默认 `baseURL` 是 `http://localhost:3000`，可用 `E2E_BASE_URL` 覆盖。
 - Playwright 当前会操作开发数据库，并依靠每次运行的唯一 fixture 降低冲突；它不是生产只读测试。禁止让 `DATABASE_URL` 指向生产。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
+- `tests/e2e/owner-notifications.spec.ts` 仅在本地可丢弃库（库名 `notif_ui_e2e_*`，通过 `E2E_DATABASE_URL` 指定）且 `NOTIFICATION_MOCK_MODE=true` 时运行。先对该独立库应用完整迁移，使用占位 Bot ID/Secret；绑定回调由 fixture 模拟，不连接真实企业微信。测试命令为 `pnpm exec playwright test tests/e2e/owner-notifications.spec.ts --project=chromium`。已有开发服务器运行时，使用独立源码快照及端口，避免共用 `.next` 开发锁；不要为跑测试重置日常开发库。
 - `test:admin-ui` 与 `test:worker-ui` 分别覆盖六个视口、明暗主题、overflow/touch/axe 等契约。
 - 只有打印规格保存了像素截图基线。管理端和师傅端门禁不是设计稿像素 diff，不能据此声称全站逐页还原。
 - 打印二维码包含 origin；运行打印视觉测试时保持固定 `E2E_BASE_URL`，避免把 host 变化误判为版式变化。

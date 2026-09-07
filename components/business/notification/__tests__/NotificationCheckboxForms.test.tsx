@@ -51,8 +51,10 @@ describe('notification form checkbox contracts', () => {
     expect(namedInputs(html, 'isActive')[0]).not.toContain('value=');
     expect(html).toContain('name="transport"');
     expect(html).toContain(
-      '<option value="WECOM_SMART_BOT" selected="">Bot ID + Secret 智能机器人</option>',
+      'name="transport" value="WECOM_SMART_BOT"',
     );
+    expect(html).not.toContain('<select');
+    expect(html).not.toContain('WECOM_GROUP_WEBHOOK');
     expect(html).not.toContain('name="webhookUrl"');
     expect(html).toContain('智能机器人通道会先以停用状态保存');
   });
@@ -65,8 +67,6 @@ describe('notification form checkbox contracts', () => {
         initial={{
           channelKey: 'scheduling_group',
           channelName: '排产群',
-          transport: 'WECOM_SMART_BOT',
-          webhookUrl: null,
           smartBotTargetMasked: '••••a1b2',
           smartBotChatType: 'GROUP',
           smartBotBoundAt: '2026-09-03T00:00:00.000Z',
@@ -217,6 +217,27 @@ describe('notification form checkbox contracts', () => {
         root.includes('data-disabled=""'),
       ),
     ).toBe(true);
+  });
+
+  it('旧版目标不再作为新选项出现，已有选中项仍可取消', () => {
+    const render = (selected: boolean) => renderToStaticMarkup(
+      <RuleForm eventType="URGENT_ORDER" initial={{ messageTemplate: 'x', channelIds: selected ? ['legacy'] : [], isActive: false }}
+        channels={[{ id: 'legacy', channelName: '历史群', isActive: true, selectionIssue: 'LEGACY_TRANSPORT' }]}
+        payloadFields={[]} action={action} />,
+    );
+    expect(namedInputs(render(false), 'channelIds')).toHaveLength(0);
+    const existing = namedInputs(render(true), 'channelIds');
+    expect(existing).toHaveLength(1);
+    expect(existing[0]).toContain('checked=""');
+    expect(existing[0]).not.toContain('disabled=""');
+    expect(render(true)).toContain('请迁移到智能机器人');
+  });
+
+  it('启用校验失败显示服务端字段错误', () => {
+    actionState.current = { status: 'invalid', fieldErrors: { isActive: ['请先完成企业微信群绑定再启用'] } };
+    const html = renderToStaticMarkup(<ChannelForm mode="create" action={action} />);
+    expect(html).toContain('id="isActive-error"');
+    expect(html).toContain('请先完成企业微信群绑定再启用');
   });
 
   it('托管事件显示固定角色并保留 legacy binding 但不再可编辑', () => {
