@@ -65,12 +65,15 @@ applies_to: repository source at last_verified
 | 方法与路径 | 认证 | 输入 | 主要响应 |
 |---|---|---|---|
 | `GET /api/admin/inventory-count/materials` | Permission `material:manage` | query `q`、`limit` | `200 {materials}`；未授权 `401` |
+| `GET /api/orders/admin/:orderNo` | Permission `order:view:all` + ADMIN | path `orderNo` | `200 {order}`；未授权 `401`，非管理员 `403`，不可见或不存在 `404`；响应 `private, no-store` |
 | `GET /api/cdr/bundles/:id` | Capability URL | cuid 风格 bundle id | 就绪后 `302` 到产物；生成中 `409` + `Retry-After`；失效或不存在统一 `404`；OSS 不可用 `503` |
 | `GET /api/orders/:id/pdf` | Session + order scope | path `id`；durable 重试可带 query `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；未授权 `401`；不可见 `404` |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
 | `GET /api/salary/piecework/export` | Permission `salary:view:all` | query `date` 或 `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 
 下载响应使用 `private, no-store`；文件名同时提供安全的 ASCII fallback 和 UTF-8 名称（适用的端点）。新增下载接口时保持内容类型、长度、缓存和 `nosniff` 语义。
+
+管理端单笔工单响应的 `order.inlineOperations` 提供核价类型、逐票发货字段和四个提交版本，金额/重量序列化为十进制字符串。只在单笔读取附加，列表 DTO 不携带地址及可编辑收费。准备表单时再次匹配工单修订、编辑版本、生产版本、状态与无待审变更；信息已变化时返回 `null`，不把新表单附在旧抽屉快照。写入继续使用既有核价、物流确认和发货 Action 的授权、版本及幂等校验。
 
 ## Server Actions
 

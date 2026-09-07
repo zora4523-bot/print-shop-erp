@@ -20,10 +20,12 @@ vi.mock('next/link', () => ({
   },
 }));
 vi.mock('@/actions/order', () => ({
+  previewOrderPricingReviewAction: vi.fn(), finalizeOrderPricingAction: vi.fn(), shipOrderAction: vi.fn(),
   previewOrderChangeRequestPricingAction: previewAction,
   previewOrderCancellationSettlementAction: vi.fn(),
   reviewOrderChangeRequestAction: vi.fn(),
 }));
+vi.mock('@/actions/order-fulfillment-pricing', () => ({ previewFulfillmentPricingAction: vi.fn(), finalizeFulfillmentPricingAction: vi.fn() }));
 vi.mock('@/actions/admin-order-workflow', () => ({
   confirmFactoryOrderAction: vi.fn(),
   holdFactoryOrderAction: vi.fn(),

@@ -9,14 +9,14 @@ import {
   useTransition,
   type ReactNode,
 } from 'react';
-import { FileImage, Star } from 'lucide-react';
+import { Copy, FileImage, Star } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { setOrderStarredAction } from '@/actions/order-workspace';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
-import { EmptyState } from '@/components/ui-business';
+import { ActionNotice, TableEmptyState } from '@/components/ui-business';
 import { cn } from '@/lib/utils';
 import {
   OrderListPageSelection,
@@ -31,52 +31,70 @@ import {
 import { useOrderHashDrawer } from './use-order-hash-drawer';
 import { AdminOrderBatchActions } from './AdminOrderBatchActions';
 import { AdminOrderProgress } from './AdminOrderProgress';
+import { AdminOrderBatchResultProvider } from './AdminOrderBatchResultProvider';
 
 export function AdminOrderWorkspaceList({
   orders,
   customerFilterHrefs,
   selectedExportRequestKey,
+  hasFilters = false,
+  clearFiltersHref = '/orders',
   footer,
 }: {
   orders: AdminOrderWorkspaceRow[];
   customerFilterHrefs: Record<string, string>;
   selectedExportRequestKey: string;
+  hasFilters?: boolean;
+  clearFiltersHref?: string;
   footer?: ReactNode;
 }) {
   const selectionKey = orders.map((order) => order.id).join(':');
+  const [feedback, setFeedback] = useState<OrderRowFeedback | null>(null);
   return (
-    <OrderListSelectionProvider
-      key={selectionKey}
-      items={orders.map((order) => ({
-        id: order.id,
-        orderNo: order.orderNo,
-        status: order.status,
-        canSchedule: false,
-      }))}
-      renderBatchActions={(selectedItems) => (
-        <AdminOrderBatchActions
+    <AdminOrderBatchResultProvider>
+      {feedback ? <ActionNotice tone={feedback.tone} title={feedback.message} className="mb-2" /> : null}
+      <OrderListSelectionProvider
+        key={selectionKey}
+        items={orders.map((order) => ({
+          id: order.id,
+          orderNo: order.orderNo,
+          status: order.status,
+          canSchedule: false,
+        }))}
+        renderBatchActions={(selectedItems) => (
+          <AdminOrderBatchActions
+            orders={orders}
+            selectedItems={selectedItems}
+            selectedExportRequestKey={selectedExportRequestKey}
+          />
+        )}
+      >
+        <AdminOrderWorkspaceListInner
           orders={orders}
-          selectedItems={selectedItems}
-          selectedExportRequestKey={selectedExportRequestKey}
+          customerFilterHrefs={customerFilterHrefs}
+          hasFilters={hasFilters}
+          clearFiltersHref={clearFiltersHref}
+          onFeedback={setFeedback}
+          footer={footer}
         />
-      )}
-    >
-      <AdminOrderWorkspaceListInner
-        orders={orders}
-        customerFilterHrefs={customerFilterHrefs}
-        footer={footer}
-      />
-    </OrderListSelectionProvider>
+      </OrderListSelectionProvider>
+    </AdminOrderBatchResultProvider>
   );
 }
 
 function AdminOrderWorkspaceListInner({
   orders,
   customerFilterHrefs,
+  hasFilters,
+  clearFiltersHref,
+  onFeedback,
   footer,
 }: {
   orders: AdminOrderWorkspaceRow[];
   customerFilterHrefs: Record<string, string>;
+  hasFilters: boolean;
+  clearFiltersHref: string;
+  onFeedback: (feedback: OrderRowFeedback) => void;
   footer?: ReactNode;
 }) {
   const detailEndpoint = useCallback(
@@ -120,15 +138,19 @@ function AdminOrderWorkspaceListInner({
                   customerFilterHrefs[order.id] ?? '/orders'
                 }
                 onOpen={() => drawer.showOrder(order.orderNo)}
+                onFeedback={onFeedback}
               />
             ))}
           </ul>
         </>
       ) : (
         <div className="p-4">
-          <EmptyState
-            title="这个队列清空了"
-            description="可以切换队列或清除筛选查看其他工单。"
+          <TableEmptyState
+            variant="compact"
+            title={hasFilters ? '没有符合筛选条件的工单' : '这个队列清空了'}
+            action={<Link href={hasFilters ? clearFiltersHref : '/orders?queue=all'} prefetch={false} className={buttonVariants({ variant: 'outline' })}>
+              {hasFilters ? '清除筛选' : '查看全部工单'}
+            </Link>}
           />
         </div>
       )}
@@ -164,14 +186,18 @@ function AdminOrderWorkspaceListInner({
   );
 }
 
+type OrderRowFeedback = { tone: 'success' | 'error'; message: string };
+
 function AdminOrderRow({
   order,
   customerFilterHref,
   onOpen,
+  onFeedback,
 }: {
   order: AdminOrderWorkspaceRow;
   customerFilterHref: string;
   onOpen: () => void;
+  onFeedback: (feedback: OrderRowFeedback) => void;
 }) {
   return (
     <li
@@ -186,32 +212,35 @@ function AdminOrderRow({
     >
       <div className="flex flex-col items-center gap-1">
         <OrderListRowSelection orderId={order.id} orderNo={order.orderNo} />
-        <OrderStarButton order={order} />
+        <OrderStarButton order={order} onFeedback={onFeedback} />
       </div>
       <OrderThumbnail order={order} />
 
       <div className="min-w-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <Button
-            type="button"
-            variant="link"
-            onClick={onOpen}
-            className="admin-wrap-anywhere h-auto min-w-0 max-w-full shrink justify-start whitespace-normal p-0 text-left font-sans text-xs font-semibold tabular-nums"
-          >
-            {order.orderNo}
-          </Button>
-          <span className="rounded bg-foreground px-1.5 py-0.5 text-[9px] font-semibold text-background">
-            v{order.workOrderVersion}
+        <div className="flex min-w-0 flex-col items-start gap-1">
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Button type="button" variant="link" aria-label={`复制工单号：${order.orderNo}`}
+              onClick={async () => {
+                try {
+                  if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+                  await navigator.clipboard.writeText(order.orderNo);
+                  onFeedback({ tone: 'success', message: `已复制工单号 ${order.orderNo}` });
+                } catch {
+                  onFeedback({ tone: 'error', message: '复制失败，请检查浏览器的剪贴板权限后重试' });
+                }
+              }}
+              className="h-auto max-w-full gap-1 whitespace-normal p-0 text-left text-foreground">
+              <span className="admin-wrap-anywhere font-mono text-xs font-extrabold tracking-wide">{order.orderNo}</span>
+              <Copy aria-hidden="true" className="size-3" />
+            </Button>
+            <span className="rounded bg-foreground px-1.5 py-0.5 text-[9px] font-bold text-background">v{order.workOrderVersion}</span>
+            {order.isUrgent && <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[9px] font-bold text-destructive">急单</span>}
           </span>
-          {order.isUrgent ? (
-            <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[9px] font-semibold text-destructive dark:bg-destructive/20">
-              急单
-            </span>
-          ) : null}
+          <Button type="button" variant="link" onClick={onOpen} aria-label={order.orderNo}
+            className="admin-wrap-anywhere h-auto max-w-full whitespace-normal p-0 text-left text-[12.5px] font-bold text-foreground">
+            {order.customName ?? '未命名工单'}
+          </Button>
         </div>
-        <p className="admin-wrap-anywhere mt-1 text-sm font-semibold">
-          {order.customName ?? '未命名工单'}
-        </p>
         <p className="mt-1 flex min-w-0 flex-wrap gap-x-1.5 text-[11px] text-muted-foreground">
           <Link
             href={customerFilterHref}
@@ -232,7 +261,12 @@ function AdminOrderRow({
 
       <div className="min-w-0 text-right 2xl:text-left">
         <AdminWorkspaceStatusBadge status={order.status} />
-        {order.statusSummary ? (
+        {order.pendingChangeRequest ? (
+          <p className="mt-1 text-[11px] font-semibold">
+            <span className="mr-1 rounded border border-foreground px-1 text-[10px]">{order.pendingChangeRequest.type === 'CANCEL' ? '取消申请' : '变更申请'}</span>
+            {order.pendingChangeRequest.summary ?? order.pendingChangeRequest.reason}
+          </p>
+        ) : order.statusSummary ? (
           <p
             className={cn(
               'mt-1 max-w-64 text-[11px] font-medium text-muted-foreground 2xl:max-w-none',
@@ -300,10 +334,9 @@ function AdminOrderRow({
   );
 }
 
-function OrderStarButton({ order }: { order: AdminOrderWorkspaceRow }) {
+function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow; onFeedback: (feedback: OrderRowFeedback) => void }) {
   const router = useRouter();
   const [starred, setStarred] = useState(order.isStarred);
-  const [message, setMessage] = useState('');
   const [pending, startTransition] = useTransition();
   const inFlightRef = useRef(false);
 
@@ -312,7 +345,6 @@ function OrderStarButton({ order }: { order: AdminOrderWorkspaceRow }) {
     const next = !starred;
     inFlightRef.current = true;
     setStarred(next);
-    setMessage('');
     startTransition(async () => {
       try {
         const result = await setOrderStarredAction({
@@ -321,13 +353,14 @@ function OrderStarButton({ order }: { order: AdminOrderWorkspaceRow }) {
         });
         if (result.status !== 'success') {
           setStarred(!next);
-          setMessage(result.message);
+          onFeedback({ tone: 'error', message: result.message });
           return;
         }
+        onFeedback({ tone: 'success', message: `${order.orderNo} ${next ? '已添加星标' : '已取消星标'}` });
         router.refresh();
       } catch {
         setStarred(!next);
-        setMessage('星标更新失败，请重试');
+        onFeedback({ tone: 'error', message: '星标更新失败，请重试' });
       } finally {
         inFlightRef.current = false;
       }
@@ -348,9 +381,6 @@ function OrderStarButton({ order }: { order: AdminOrderWorkspaceRow }) {
       >
         <Star aria-hidden="true" className={cn(starred && 'fill-current')} />
       </Button>
-      <span className="sr-only" role="status" aria-live="polite">
-        {message}
-      </span>
     </>
   );
 }
@@ -389,6 +419,7 @@ function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
   }
   const date = order.promisedDate.slice(5);
   const alert = order.dueAlert;
+  const daysLeft = order.promisedDaysLeft ?? (alert?.kind === 'due-soon' ? alert.days : null);
   return (
     <p
       className={cn(
@@ -397,13 +428,13 @@ function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
       )}
     >
       {date}
-      {alert ? (
+      {alert?.kind === 'overdue' ? (
+        <span className="mt-0.5 block text-[10px]">超 {alert.days} 天</span>
+      ) : daysLeft !== null && daysLeft >= 0 ? (
         <span className="mt-0.5 block text-[10px]">
-          {alert.kind === 'overdue'
-            ? `超 ${alert.days} 天`
-            : alert.days === 0
+          {daysLeft === 0
               ? '今天待发'
-              : `剩 ${alert.days} 天`}
+              : `剩 ${daysLeft} 天`}
         </span>
       ) : null}
     </p>

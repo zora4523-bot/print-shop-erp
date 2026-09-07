@@ -1,6 +1,43 @@
 import { Skeleton } from '@/components/ui/skeleton';
 import { SlowLoadingHint } from '@/components/ui-business';
 
+export function AdminOrdersWorkspaceSkeleton() {
+  return (
+    <section data-slot="admin-orders-workspace-skeleton" aria-busy="true" aria-live="polite" className="@container mx-auto min-w-0 max-w-[1180px] space-y-3.5">
+      <span className="sr-only">正在加载管理端工单</span>
+      <div aria-hidden="true" className="flex flex-wrap gap-2.5">
+        {Array.from({ length: 8 }, (_, index) => (
+          <Skeleton key={index} className="h-[72px] w-[104px] rounded-xl motion-reduce:animate-none" />
+        ))}
+      </div>
+      <div aria-hidden="true" className="flex flex-wrap items-center gap-2">
+        {Array.from({ length: 6 }, (_, index) => (
+          <Skeleton key={index} className="h-11 w-20 rounded-full motion-reduce:animate-none" />
+        ))}
+        <Skeleton className="ml-auto h-11 w-52 max-w-full rounded-full motion-reduce:animate-none" />
+        <Skeleton className="h-11 w-full rounded-full motion-reduce:animate-none" />
+      </div>
+      <Skeleton aria-hidden="true" className="h-5 w-80 max-w-full motion-reduce:animate-none" />
+      <div aria-hidden="true" className="space-y-2">
+        {Array.from({ length: 6 }, (_, index) => (
+          <div key={index} className="flex min-h-[84px] items-center gap-3 rounded-xl border bg-card px-3.5 py-[11px]">
+            <Skeleton className="size-6 shrink-0 motion-reduce:animate-none" />
+            <Skeleton className="h-[46px] w-[34px] shrink-0 rounded-md motion-reduce:animate-none" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-4 w-40 max-w-full motion-reduce:animate-none" />
+              <Skeleton className="h-3 w-60 max-w-full motion-reduce:animate-none" />
+            </div>
+            <Skeleton className="hidden h-6 w-40 rounded-full motion-reduce:animate-none @min-[960px]:block" />
+            <Skeleton className="hidden h-4 w-24 motion-reduce:animate-none @min-[960px]:block" />
+            <Skeleton className="hidden h-8 w-20 rounded-lg motion-reduce:animate-none @min-[960px]:block" />
+          </div>
+        ))}
+      </div>
+      <SlowLoadingHint />
+    </section>
+  );
+}
+
 export function OrdersListContentSkeleton() {
   return (
     <section aria-busy="true" aria-live="polite" className="space-y-6">

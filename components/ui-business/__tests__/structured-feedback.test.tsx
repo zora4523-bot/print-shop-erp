@@ -110,6 +110,25 @@ describe('form feedback', () => {
 });
 
 describe('BatchActionResult', () => {
+  it('distinguishes skipped, unknown and unattempted items without declaring them confirmed failures', () => {
+    const html = renderToStaticMarkup(
+      <BatchActionResult
+        status="partial" succeededCount={0} failedCount={0}
+        summary="跳过 1 张，结果未知 1 张，未执行 1 张"
+        items={[
+          { id: 'skip', label: '工单甲', outcome: 'skipped', reason: '先完成工厂确认' },
+          { id: 'unknown', label: '工单乙', outcome: 'unknown', reason: '打开工单核对实际结果' },
+          { id: 'pending', label: '工单丙', outcome: 'not-attempted', reason: '核对后重新选择' },
+        ]}
+      />,
+    );
+    expect(html).toContain('跳过 1 张，结果未知 1 张，未执行 1 张');
+    expect(html).not.toContain('项失败');
+    expect(html).not.toContain('text-destructive');
+    expect(html).toContain('data-outcome="unknown"');
+    expect(html).toContain('data-outcome="not-attempted"');
+  });
+
   it('uses a polite success result when every item completes', () => {
     const html = renderToStaticMarkup(
       <BatchActionResult

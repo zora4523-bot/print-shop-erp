@@ -8,6 +8,7 @@ import { isOrderEditable } from '@/lib/order/editable-fields';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
+import { ActionNotice } from '@/components/ui-business';
 import {
   SheetContent,
   SheetDescription,
@@ -168,6 +169,7 @@ export function shouldShowOrderEditLink(
 
 function OrderDeepLinkButton({ orderNo }: { orderNo: string }) {
   const [message, setMessage] = useState('');
+  const [failed, setFailed] = useState(false);
 
   async function copyDeepLink() {
     try {
@@ -177,8 +179,10 @@ function OrderDeepLinkButton({ orderNo }: { orderNo: string }) {
       const url = new URL(window.location.href);
       url.hash = `wo=${encodeURIComponent(orderNo)}`;
       await navigator.clipboard.writeText(url.toString());
+      setFailed(false);
       setMessage('工单链接已复制');
     } catch {
+      setFailed(true);
       setMessage('复制失败，请检查浏览器的剪贴板权限后重试');
     }
   }
@@ -189,9 +193,7 @@ function OrderDeepLinkButton({ orderNo }: { orderNo: string }) {
         <Link2 aria-hidden="true" />
         复制链接
       </Button>
-      <span className="sr-only" role="status" aria-live="polite">
-        {message}
-      </span>
+      {message ? <ActionNotice className="basis-full p-2.5 text-xs" tone={failed ? 'error' : 'success'} title={message} /> : null}
     </>
   );
 }

@@ -1,0 +1,14 @@
+.form {
+  min-width: 0;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+/* These are drawer forms, regardless of the surrounding browser's width. */
+.form :global(.grid) { grid-template-columns: minmax(0, 1fr); }
+.form :global(.grid) > * { min-width: 0; grid-column: auto; }
+.form :is(input, select, textarea, button, a[href]) { min-height: 44px; }
+.form :is(button, a[href]) { white-space: normal; }
+.form :global([data-slot="action-notice"]) { font-size: 12px; padding: 10px; }

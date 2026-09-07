@@ -11,6 +11,7 @@ import {
 } from './_helpers';
 
 type PricingState = {
+  orderNo: string;
   status: string;
   pricingStatus: string;
   revision: number;
@@ -32,7 +33,7 @@ async function readPricingState(orderId: string): Promise<PricingState> {
   await db.connect();
   try {
     const result = await db.query<PricingState>(
-      `SELECT o.status, o."pricingStatus", o.revision, o."priceRevision",
+      `SELECT o."orderNo", o.status, o."pricingStatus", o.revision, o."priceRevision",
               o."confirmedFee", o."settledFee", o."quotedFee", o."totalAmount",
               o."processingAmount", o."packagingAmount",
               (SELECT COUNT(*)::int FROM "OrderPricingRevision" r
@@ -102,4 +103,30 @@ test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍�
   await page.getByRole('link', { name: '工作台', exact: true }).first().click();
   await expect(page).toHaveURL(/\/owner$/);
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
+});
+
+test('管理端抽屉内核价失败保留表单与列表，且不会改写工单', async ({ page }) => {
+  test.setTimeout(90_000);
+  const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
+  const seeded = await seedDashboardSnapshot({ salesUserId });
+  const before = await readPricingState(seeded.urgentOrderId);
+  await login(page, {
+    from: `/orders?queue=all#wo=${encodeURIComponent(before.orderNo)}`,
+    username: ADMIN_USERNAME,
+    password: ADMIN_PASSWORD,
+  });
+  const drawer = page.locator('[data-order-drawer]');
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole('button', { name: '录入人工核价', exact: true }).click();
+  const pricing = drawer.locator('[data-slot="order-pricing-review"]');
+  const trigger = pricing.getByRole('button', { name: '确认工厂核价', exact: true });
+  await expect(trigger).toBeEnabled();
+  await trigger.click();
+  const confirm = page.getByRole('alertdialog', { name: '确认工厂核价并锁定终价？' });
+  await confirm.getByRole('button', { name: '确认工厂核价', exact: true }).click();
+  await expect(pricing.getByRole('alert')).toHaveText('工单款式或生产信息不完整，无法完成核价。请先核对款式、数量及包装信息。');
+  await expect(trigger).toBeEnabled();
+  await expect(page).toHaveURL(/\/orders\?queue=all#wo=/);
+  expect(await readPricingState(seeded.urgentOrderId)).toEqual(before);
+  await expectNoNextErrorOverlay(page);
 });

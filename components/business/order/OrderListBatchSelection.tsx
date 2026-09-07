@@ -241,7 +241,7 @@ export function OrderListBatchBar({
           <Button
             type="button"
             variant="secondary"
-            className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
+            className="min-h-11 flex-1 sm:flex-none"
             onClick={copyOrderNumbers}
           >
             <ClipboardCopy aria-hidden="true" />
@@ -251,7 +251,7 @@ export function OrderListBatchBar({
           <Button
             type="button"
             variant="ghost"
-            className="min-h-11 flex-1 text-background hover:bg-background/10 hover:text-background sm:min-h-8 sm:flex-none"
+            className="min-h-11 flex-1 text-background hover:bg-background/10 hover:text-background sm:flex-none"
             onClick={onClear}
           >
             <X aria-hidden="true" />

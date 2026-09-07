@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Search, Star } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { OrderStatus } from '@/generated/prisma/enums';
 import type { AdminOrderWorkspacePage } from '@/lib/order/admin-workspace';
 import type { OrderListFilterOptions } from '@/lib/order/list-query';
 import { MISSING_ORDER_CUSTOMER_FILTER_VALUE } from '@/lib/order/list-query';
@@ -77,6 +78,11 @@ export function AdminOrderWorkspace({
     query.list.filters.customerPartyId ||
       query.list.filters.customerRefExact,
   );
+  const rejectedFilterActive = query.list.filters.statuses.length === 1
+    && query.list.filters.statuses[0] === OrderStatus.REJECTED;
+  const clearFiltersHref = buildTableHref('/orders', {}, {
+    queue: query.queue === 'todo' ? undefined : query.queue,
+  });
   const exactCustomerFilterLabel = query.list.filters.customerPartyId
     ? data.rows.find(
         (order) => order.customer.id === query.list.filters.customerPartyId,
@@ -129,7 +135,7 @@ export function AdminOrderWorkspace({
           })}
         </nav>
 
-        <form action="/orders" className="flex min-w-0 flex-col gap-2 xl:flex-row">
+        <form key={JSON.stringify(params)} action="/orders" className="flex min-w-0 flex-col gap-2 xl:flex-row">
           {hiddenFilterInputs(params)}
           <div className="relative min-w-0 flex-1">
             <Search
@@ -200,6 +206,14 @@ export function AdminOrderWorkspace({
           </select>
           <Button type="submit">应用筛选</Button>
           <Link
+            href={buildTableHref('/orders', {}, adminRejectedFilterParams(query))}
+            prefetch={false}
+            aria-current={rejectedFilterActive ? 'true' : undefined}
+            className={buttonVariants({ variant: rejectedFilterActive ? 'secondary' : 'outline' })}
+          >
+            {rejectedFilterActive ? '取消已驳回筛选' : '已驳回 / 待补正'}
+          </Link>
+          <Link
             href={buildTableHref(
               '/orders',
               {},
@@ -246,9 +260,7 @@ export function AdminOrderWorkspace({
           </Link>
           {hasUserFilters ? (
             <Link
-              href={buildTableHref('/orders', {}, {
-                queue: query.queue === 'todo' ? undefined : query.queue,
-              })}
+              href={clearFiltersHref}
               prefetch={false}
               className={buttonVariants({ variant: 'ghost' })}
             >
@@ -311,6 +323,8 @@ export function AdminOrderWorkspace({
 
       <AdminOrderWorkspaceList
         orders={data.rows}
+        hasFilters={hasUserFilters}
+        clearFiltersHref={clearFiltersHref}
         selectedExportRequestKey={selectedExportRequestKey}
         customerFilterHrefs={Object.fromEntries(
           data.rows.map((order) => [
@@ -438,6 +452,22 @@ export function adminCustomerExactFilterParams(
     customerRefExact: customer.id ? undefined : customer.filterValue,
     page: undefined,
   };
+}
+
+export function adminRejectedFilterParams(query: AdminOrderWorkspaceQuery) {
+  const active = query.list.filters.statuses.length === 1
+    && query.list.filters.statuses[0] === OrderStatus.REJECTED;
+  return serializeAdminOrderWorkspaceQuery({
+    ...query,
+    queue: 'all',
+    signal: undefined,
+    unbilled: false,
+    list: {
+      ...query.list,
+      page: 1,
+      filters: { ...query.list.filters, statuses: active ? [] : [OrderStatus.REJECTED] },
+    },
+  });
 }
 
 function formatMoney(value: string): string {

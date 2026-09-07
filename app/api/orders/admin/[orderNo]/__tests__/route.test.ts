@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
 import { UnauthorizedError } from '@/lib/auth/errors';
 
-const { requireSessionPermissionMock, getAdminOrderByOrderNoMock, getSettingMock } = vi.hoisted(
+const { requireSessionPermissionMock, getAdminOrderByOrderNoMock, getSettingMock, inlineOperationsMock } = vi.hoisted(
   () => ({
     requireSessionPermissionMock: vi.fn(),
     getAdminOrderByOrderNoMock: vi.fn(),
     getSettingMock: vi.fn(),
+    inlineOperationsMock: vi.fn(),
   }),
 );
 
@@ -20,6 +21,7 @@ vi.mock('@/lib/order/admin-workspace', () => ({
   getAdminOrderByOrderNo: getAdminOrderByOrderNoMock,
 }));
 vi.mock('@/lib/settings', () => ({ getSetting: getSettingMock }));
+vi.mock('@/lib/order/admin-inline-operations', () => ({ getAdminOrderInlineOperations: inlineOperationsMock }));
 
 import { handleAdminOrderWorkspaceDetail } from '../route';
 
@@ -34,6 +36,7 @@ beforeEach(() => {
     orderNo: 'GD-260902-001',
   });
   getSettingMock.mockResolvedValue({ days: 2 });
+  inlineOperationsMock.mockResolvedValue(null);
 });
 
 describe('admin order workspace detail route', () => {
@@ -47,6 +50,7 @@ describe('admin order workspace detail route', () => {
     );
     expect(response.status).toBe(401);
     expect(getAdminOrderByOrderNoMock).not.toHaveBeenCalled();
+    expect(inlineOperationsMock).not.toHaveBeenCalled();
   });
 
   it('defends the ADMIN-only boundary after permission resolution', async () => {
@@ -60,6 +64,7 @@ describe('admin order workspace detail route', () => {
     );
     expect(response.status).toBe(403);
     expect(getAdminOrderByOrderNoMock).not.toHaveBeenCalled();
+    expect(inlineOperationsMock).not.toHaveBeenCalled();
   });
 
   it('returns only the explicit safe DTO with no-store headers', async () => {
@@ -80,7 +85,7 @@ describe('admin order workspace detail route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(await response.json()).toEqual({
-      order: { id: 'order-1', orderNo: 'GD-260902-001' },
+      order: { id: 'order-1', orderNo: 'GD-260902-001', inlineOperations: null },
     });
   });
 

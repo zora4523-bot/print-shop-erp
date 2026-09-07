@@ -27,7 +27,7 @@ import { ConfirmActionDialog } from "@/components/ui-business";
 import { OrderPackagingMode } from "@/generated/prisma/enums";
 import { externalPriceBusinessText } from "@/lib/price/external-price-display";
 
-type Props = { orderId: string };
+type Props = { orderId: string; variant?: 'page' | 'drawer'; onSuccess?: () => void };
 
 type ItemDraft = {
   unitPrice: string;
@@ -79,10 +79,11 @@ function hasValue(value: string | null | undefined): boolean {
   return Boolean(value?.trim());
 }
 
-function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDrafts }: {
+function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDrafts, showReadOnly }: {
   preview: OrderPricingReviewPreview;
   shipmentDrafts: Record<string, ShipmentDraft>;
   setShipmentDrafts: Dispatch<SetStateAction<Record<string, ShipmentDraft>>>;
+  showReadOnly: boolean;
 }) {
   return (
     <>
@@ -90,7 +91,7 @@ function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDraft
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">逐票物流与耗材收费</h3>
           <ol className="grid gap-3 lg:grid-cols-2">
-            {preview.shipments.map((shipment) => {
+            {preview.shipments.filter((shipment) => showReadOnly || !shipment.shipping.complete || shipment.shipping.advisory || !shipment.packaging.complete || shipment.packaging.advisory).map((shipment) => {
               const defaultDraft: ShipmentDraft = {
                 shippingFee:
                   shipment.shipping.currentAmount ??
@@ -229,7 +230,7 @@ function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDraft
   );
 }
 
-export function OrderPricingReviewForm({ orderId }: Props) {
+export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }: Props) {
   const router = useRouter();
   const [previewState, previewAction] = useActionState<
     PreviewOrderPricingReviewResult | null,
@@ -252,6 +253,8 @@ export function OrderPricingReviewForm({ orderId }: Props) {
     Record<string, OrderChargeDraft>
   >({});
   const [remark, setRemark] = useState("");
+  const [expandedReadOnly, setExpandedReadOnly] = useState(false);
+  const showReadOnly = variant !== 'drawer' || expandedReadOnly;
 
   const loadPreview = useCallback(() => {
     startPreviewTransition(() => previewAction({ orderId }));
@@ -268,8 +271,9 @@ export function OrderPricingReviewForm({ orderId }: Props) {
     if (finalizeState?.status !== "success") return;
     // 确认成功后工单已不再是“待管理员确认”。刷新服务端页面
     // 以移除表单，不再重复请求已被服务端禁止的核价预览。
-    router.refresh();
-  }, [finalizeState, router]);
+    if (onSuccess) onSuccess();
+    else router.refresh();
+  }, [finalizeState, router, onSuccess]);
 
   function submit() {
     if (!preview || finalizeState?.status === "success") return;
@@ -458,14 +462,16 @@ export function OrderPricingReviewForm({ orderId }: Props) {
   return (
     <section
       className="space-y-4"
+      data-slot="order-pricing-review"
+      data-variant={variant}
       aria-busy={previewPending || finalizePending}
     >
-      <div>
+      {variant !== 'drawer' ? <div>
         <h2 className="text-base font-semibold">工厂核价确认</h2>
         <p className="mt-1 text-xs text-muted-foreground">
           仅核对工单已保存的报价快照；自动报价只读，仅补录待人工核价项。
         </p>
-      </div>
+      </div> : null}
 
       {previewPending && !preview ? (
         <p role="status" className="text-sm text-muted-foreground">
@@ -490,13 +496,14 @@ export function OrderPricingReviewForm({ orderId }: Props) {
 
       {preview ? (
         <>
-          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          {variant === 'drawer' ? <Button type="button" variant="outline" aria-expanded={expandedReadOnly} onClick={() => setExpandedReadOnly(!expandedReadOnly)}>
+            {expandedReadOnly ? '收起已确定费用' : '查看已确定费用'}
+          </Button> : null}
+          <div className="rounded-md border bg-muted/30 p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-semibold">待管理员补录</h3>
               <Badge
-                variant={
-                  pendingReviewTargets.length > 0 ? "destructive" : "secondary"
-                }
+                variant="secondary"
               >
                 {pendingReviewTargets.length} 项
               </Badge>
@@ -511,6 +518,11 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                     <li key={target.href}>
                       <a
                         href={target.href}
+                        onClick={(event) => {
+                          if (variant !== 'drawer') return;
+                          event.preventDefault();
+                          document.getElementById(target.href.slice(1))?.scrollIntoView({ block: 'nearest' });
+                        }}
                         className="inline-flex rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium underline-offset-4 hover:underline"
                       >
                         {target.label}
@@ -526,7 +538,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
             )}
           </div>
 
-          <dl
+          {showReadOnly ? <dl
             className={`grid gap-2 text-sm ${
               preview.logisticsPriceBook || preview.shipments.length > 0
                 ? "sm:grid-cols-2"
@@ -547,13 +559,13 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                 </dd>
               </div>
             ) : null}
-          </dl>
+          </dl> : null}
 
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold">款式加工费</h3>
               <Badge
-                variant={incompleteItemCount > 0 ? "destructive" : "secondary"}
+                variant="secondary"
               >
                 {incompleteItemCount > 0
                   ? `${incompleteItemCount} 款需人工终价`
@@ -561,7 +573,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
               </Badge>
             </div>
             <ol className="space-y-2">
-              {preview.items.map((item) => (
+              {preview.items.filter((item) => showReadOnly || !item.complete).map((item) => (
                 <li
                   id={`pricing-review-item-${item.itemId}`}
                   key={item.itemId}
@@ -573,7 +585,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                       {item.quantity.toLocaleString("zh-CN")} 个
                     </p>
                     <Badge
-                      variant={item.complete ? "secondary" : "destructive"}
+                      variant="secondary"
                     >
                       {item.complete ? "报价快照（只读）" : "待人工核价"}
                     </Badge>
@@ -686,16 +698,12 @@ export function OrderPricingReviewForm({ orderId }: Props) {
             </ol>
           </div>
 
-          {preview.packagingGroups.length > 0 ? (
+          {preview.packagingGroups.some((group) => showReadOnly || !group.complete) ? (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">包装组入袋费</h3>
                 <Badge
-                  variant={
-                    incompletePackagingGroupCount > 0
-                      ? "destructive"
-                      : "secondary"
-                  }
+                  variant="secondary"
                 >
                   {incompletePackagingGroupCount > 0
                     ? `${incompletePackagingGroupCount} 组需人工终价`
@@ -703,7 +711,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                 </Badge>
               </div>
               <ol className="space-y-2">
-                {preview.packagingGroups.map((group) => {
+                {preview.packagingGroups.filter((group) => showReadOnly || !group.complete).map((group) => {
                   const defaultDraft: PackagingGroupDraft = {
                     unitPrice: group.currentUnitPrice,
                     reason: group.currentReason ?? "",
@@ -723,7 +731,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                           {group.actualBagCount.toLocaleString("zh-CN")} 袋
                         </p>
                         <Badge
-                          variant={group.complete ? "secondary" : "destructive"}
+                          variant="secondary"
                         >
                           {group.complete ? "报价快照（只读）" : "待人工核价"}
                         </Badge>
@@ -796,7 +804,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">订单级待核价费用</h3>
-                <Badge variant="destructive">
+                <Badge variant="secondary">
                   {preview.orderCharges.length} 项待人工终价
                 </Badge>
               </div>
@@ -817,7 +825,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <p className="font-medium">{charge.description}</p>
-                        <Badge variant="destructive">待人工核价</Badge>
+                        <Badge variant="secondary">待人工核价</Badge>
                       </div>
                       {charge.errors.length > 0 ? (
                         <p className="text-xs text-destructive">
@@ -868,6 +876,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
           ) : null}
 
           <PricingReviewShipmentFields
+            showReadOnly={showReadOnly}
             preview={preview}
             shipmentDrafts={shipmentDrafts}
             setShipmentDrafts={setShipmentDrafts}

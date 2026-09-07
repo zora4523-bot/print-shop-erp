@@ -33,6 +33,7 @@ describe('custom loading fallback slow-loading contract', () => {
     );
 
     expect(page).toContain('<SalesOrdersListContentSkeleton />');
+    expect(page).toContain('<AdminOrdersWorkspaceSkeleton />');
     expect(page).toContain('<OrdersListContentSkeleton />');
     expect(content).toContain('fallback={<OrdersListFiltersSkeleton />}');
     expect(content).toContain('fallback={<OrdersListTableSkeleton />}');
@@ -54,7 +55,9 @@ describe('custom loading fallback slow-loading contract', () => {
     expect(skeletons).toContain(
       '<SalesOrdersListSkeleton announce={false} />',
     );
-    expect(skeletons.match(/<SlowLoadingHint/g)).toHaveLength(7);
+    expect(skeletons.match(/<SlowLoadingHint/g)).toHaveLength(8);
+    const adminSkeleton = skeletons.split('export function AdminOrdersWorkspaceSkeleton')[1]?.split('\nexport function ')[0];
+    expect(adminSkeleton?.match(/<SlowLoadingHint/g)).toHaveLength(1);
     expect(
       skeletons.match(/aria-live=\{announce \? 'polite' : undefined\}/g),
     ).toHaveLength(5);

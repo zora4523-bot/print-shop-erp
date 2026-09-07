@@ -49,6 +49,7 @@ vi.mock('@/actions/admin-order-workflow', () => ({
   runAdminOrderBatchAction: vi.fn(),
   settleFactoryOrderAction: vi.fn(),
 }));
+vi.mock('@/components/business/order/AdminOrderInlineOperations', () => ({ AdminOrderInlineOperations: () => null }));
 
 vi.mock('@/components/ui-business', () => ({
   ConfirmActionDialog: ({
@@ -558,7 +559,7 @@ it('切换或关闭裁决模式会清空上一模式的表单、预览和消息'
     setValue(figs, '非法款号');
     setValue(note, '上一个驳回理由');
     await settleEffects();
-    buttonWithText(host, '确认提交')?.click();
+    expect(buttonWithText(host, '确认驳回工单')?.disabled).toBe(true);
     await vi.waitFor(() => {
       expect(host.textContent).toContain('涉及款号只能填写正整数');
     });
@@ -598,7 +599,7 @@ it('切换或关闭裁决模式会清空上一模式的表单、预览和消息'
 
     buttonWithText(host, '取消')?.click();
     await settleEffects();
-    expect(host.textContent).not.toContain('已按服务端当前发布价计算参考结算价');
+    expect(host.textContent).not.toContain('参考价已更新，请核对最终结算金额。');
     buttonWithText(host, '批准取消')?.click();
     await settleEffects();
 

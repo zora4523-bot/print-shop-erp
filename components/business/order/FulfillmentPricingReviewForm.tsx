@@ -15,11 +15,14 @@ import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ConfirmActionDialog } from '@/components/ui-business';
 
 type Props = {
   orderId: string;
   currentValue: boolean;
   isPricingPending: boolean;
+  variant?: 'page' | 'drawer';
+  onSuccess?: () => void;
   shipments: Array<{
     id: string;
     sequence: number;
@@ -54,7 +57,7 @@ function readCommand(form: HTMLFormElement, orderId: string, isSfCollect: boolea
   };
 }
 
-export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingPending, shipments }: Props) {
+export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingPending, shipments, variant = 'page', onSuccess }: Props) {
   const router = useRouter();
   const [target, setTarget] = useState(currentValue);
   const [edited, setEdited] = useState(false);
@@ -122,7 +125,8 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
         });
         if (result.status === 'success') {
           setConfirmed(true);
-          router.refresh();
+          if (onSuccess) onSuccess();
+          else router.refresh();
         } else {
           setError(failureText(result));
           setAccepted(null);
@@ -139,10 +143,10 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
   return (
     <section id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-4">
       <h3 className="text-sm font-semibold">物流费用确认</h3>
-      <p className="mt-1 text-xs text-muted-foreground">
+      {variant !== 'drawer' ? <p className="mt-1 text-xs text-muted-foreground">
         仅更正物流费用，保留已审核款式价格、版费、包装及其他费用，不改变生产状态。
         {isPricingPending ? ' 如待确认并非源于到付更正，系统会拒绝此入口，请核对原始审核记录。' : ' 先选择更正方式并预览差额，再明确确认。'}
-      </p>
+      </p> : null}
       {confirmed ? (
         <p role="status" className="mt-3 text-sm">物流费用已确认，工单已刷新。</p>
       ) : (
@@ -210,7 +214,20 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
               </ul>
               {quote.issues.length > 0 ? <ul role="alert" className="list-inside list-disc text-sm text-destructive">{quote.issues.map((issue, index) => <li key={`${index}-${issue}`}>{issue}</li>)}</ul> : null}
               <p className="text-xs text-muted-foreground">确认将记录本次物流金额及审核人；不会结算工单或重新生成生产工单。</p>
-              <Button type="button" onClick={confirmPricing} disabled={pending || !quote.canConfirm}>确认物流费用</Button>
+              <ConfirmActionDialog
+                level="L2"
+                disabled={pending || !quote.canConfirm}
+                trigger={<Button type="button" disabled={pending || !quote.canConfirm}>确认物流费用</Button>}
+                title="确认物流费用？"
+                description="请核对本次物流收费及工单金额。"
+                impactItems={[
+                  `更正前合计 ${formatMoney(quote.oldTotal)}，更正后合计 ${quote.newTotal === null ? '待核定' : formatMoney(quote.newTotal)}。`,
+                  `本次差额 ${quote.delta === null ? '待核定' : formatMoney(quote.delta)}。`,
+                  '记录本次物流金额及审核人；工单生产状态保持不变。',
+                ]}
+                confirmLabel="确认物流费用"
+                onConfirm={confirmPricing}
+              />
             </div>
           ) : null}
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}

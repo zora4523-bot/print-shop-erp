@@ -25,7 +25,17 @@ vi.mock('@/actions/order', () => ({
   previewOrderChangeRequestPricingAction: vi.fn(),
   previewOrderCancellationSettlementAction: vi.fn(),
   reviewOrderChangeRequestAction: vi.fn(),
+  finalizeOrderPricingAction: vi.fn(),
+  previewOrderPricingReviewAction: vi.fn(),
+  shipOrderAction: vi.fn(),
 }));
+vi.mock('@/actions/order-fulfillment-pricing', () => ({
+  finalizeFulfillmentPricingAction: vi.fn(),
+  previewFulfillmentPricingAction: vi.fn(),
+}));
+vi.mock('../OrderPricingReviewForm', () => ({ OrderPricingReviewForm: () => null }));
+vi.mock('../FulfillmentPricingReviewForm', () => ({ FulfillmentPricingReviewForm: () => null }));
+vi.mock('../ShipOrderForm', () => ({ ShipOrderForm: () => null }));
 
 import { AdminOrderWorkspaceList } from '../AdminOrderWorkspaceList';
 import {
@@ -37,6 +47,32 @@ import { shouldShowOrderEditLink } from '../AdminOrderDrawer';
 import { resultMessage } from '../AdminOrderBatchActions';
 
 describe('AdminOrderWorkspaceList', () => {
+  it('distinguishes a filtered empty result from an empty queue with working recovery links', () => {
+    const props = { orders: [], customerFilterHrefs: {}, selectedExportRequestKey: 'empty-export' };
+    const filtered = renderToStaticMarkup(<AdminOrderWorkspaceList {...props} hasFilters clearFiltersHref="/orders?queue=all" />);
+    expect(filtered).toContain('没有符合筛选条件的工单');
+    expect(filtered).toContain('href="/orders?queue=all"');
+    expect(filtered).toContain('清除筛选');
+    const emptyQueue = renderToStaticMarkup(<AdminOrderWorkspaceList {...props} />);
+    expect(emptyQueue).toContain('这个队列清空了');
+    expect(emptyQueue).toContain('查看全部工单');
+    expect(emptyQueue).not.toContain('清除筛选');
+  });
+
+  it('keeps copying the order number separate from opening the order and shows future countdowns', () => {
+    const order = { ...row(), promisedDaysLeft: 8, dueAlert: null };
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="copy-export" />);
+    expect(html).toContain(`aria-label="复制工单号：${order.orderNo}"`);
+    expect(html).toContain(`aria-label="${order.orderNo}"`);
+    expect(html).toContain('剩 8 天');
+  });
+
+  it('shows validated change facts in the row while preserving the request reason as fallback', () => {
+    const order = { ...row(), pendingChangeRequest: { id: 'request-1', type: 'MODIFY' as const, reason: '修改数量', summary: '第 2 款数量 1,000 → 2,000', createdAt: '2026-09-07T01:00:00.000Z' } };
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="change-export" />);
+    expect(html).toContain('第 2 款数量 1,000 → 2,000');
+  });
+
   it('renders the rich row and the two persisted work-order progress bars', () => {
     const html = renderToStaticMarkup(
       <AdminOrderWorkspaceList

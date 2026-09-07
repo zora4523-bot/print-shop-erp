@@ -58,6 +58,8 @@ import {
   getAdminOrderByOrderNo,
   loadAdminOrderWorkspace,
   resolveAdminOrderCapabilities,
+  resolveAdminOrderShipDisabledReason,
+  summarizeAdminOrderChange,
   resolveAdminPrintFacts,
   resolveAdminWorkspaceResultWhere,
 } from '../admin-workspace';
@@ -70,6 +72,27 @@ import { OrderChangeRequestError } from '../change-request';
 import { MISSING_ORDER_CUSTOMER_FILTER_VALUE } from '../list-query';
 
 const actor = { id: 'admin-1', role: Role.ADMIN };
+
+describe('admin change-request summary', () => {
+  const items = [{ id: 'item-1', sequence: 2, quantity: 1000, name: '原款式', specification: '中号封' }];
+
+  it('summarizes validated quantity and specification changes without leaking internal fields', () => {
+    expect(summarizeAdminOrderChange({ items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 2000, targetProductId: 'product-secret-1' }] }, items))
+      .toBe('第 2 款数量 1,000 → 2,000；第 2 款调整规格');
+  });
+
+  it('limits long requests and reports additions without depending on current quantities', () => {
+    const summary = summarizeAdminOrderChange({ items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 2000, specification: '大号封', name: '新款式' }, { operation: 'ADD', templateItemId: 'item-1', name: '新增款式', quantity: 500 }] }, items);
+    expect(summary).toBe('第 2 款数量 1,000 → 2,000；第 2 款调整规格；另 2 项变更');
+    expect(summarizeAdminOrderChange({ items: [{ operation: 'ADD', templateItemId: 'item-1', name: '新增款式', quantity: 500 }] }, items)).toBe('新增款式 500 个');
+  });
+
+  it('falls back to the request reason for malformed, unknown, or unchanged facts', () => {
+    for (const patch of [null, { items: 'unsafe' }, { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: -1 }] }, { items: [{ operation: 'UPDATE', itemId: 'missing-item', quantity: 2000 }] }, { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1000 }] }]) {
+      expect(summarizeAdminOrderChange(patch, items)).toBeNull();
+    }
+  });
+});
 
 function adminOrderRecord(overrides: Record<string, unknown> = {}) {
   const updatedAt = new Date('2026-09-02T08:00:00.000Z');
@@ -388,7 +411,10 @@ describe('admin order workspace predicates', () => {
           status: OrderStatus.COMPLETED,
         }).ship,
       ).toBe(false);
+      expect(resolveAdminOrderShipDisabledReason({ ...base, ...blocked, status: OrderStatus.COMPLETED })).toBeTruthy();
     }
+    expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.PACKING })).toBeNull();
+    expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.CONFIRMED })).toBe('当前工单状态不支持发货');
     expect(
       resolveAdminOrderCapabilities({
         ...base,
@@ -445,6 +471,42 @@ describe('admin order workspace predicates', () => {
     const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
 
     expect(detail?.capabilities.ship).toBe(false);
+    expect(detail?.shipDisabledReason).toBe('生产工序尚未完成，请先核对报工');
+  });
+
+  it.each([
+    OrderStatus.PENDING_FACTORY,
+    OrderStatus.REJECTED,
+    OrderStatus.CONFIRMED,
+    OrderStatus.FOILING,
+    OrderStatus.ON_HOLD,
+    OrderStatus.SHIPPED,
+    OrderStatus.SETTLED,
+    OrderStatus.FINISHED,
+    OrderStatus.CANCELLED,
+  ])('does not describe %s as waiting for shipment', async (status) => {
+    const row = adminOrderRecord({ status });
+    dbMock.order.findFirst.mockResolvedValue(row);
+    dbMock.order.findUnique.mockResolvedValue({
+      revision: row.revision,
+      workOrderVersion: row.workOrderVersion,
+      priceRevision: row.priceRevision,
+      updatedAt: row.updatedAt,
+    });
+
+    const detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+
+    expect(detail?.capabilities.ship).toBe(false);
+    expect(detail?.shipDisabledReason).toBeNull();
+  });
+
+  it('keeps missing-delivery guidance actionable in packing', async () => {
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({ status: OrderStatus.PACKING, _count: { shipments: 0 } }));
+
+    const detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+
+    expect(detail?.capabilities.ship).toBe(false);
+    expect(detail?.shipDisabledReason).toBe('尚未填写配送信息，请先补齐配送');
   });
 
   it('resolves print-export membership from unresolved current-version requests', async () => {
@@ -626,11 +688,32 @@ describe('admin order workspace predicates', () => {
 
     expect(detail).toMatchObject({
       status: OrderStatus.REJECTED,
-      statusSummary: null,
+      statusSummary: '等待销售补正后重新提交',
       fee: { amount: null, source: 'INCOMPLETE' },
       feeStages: { quoted: '12.34', active: 'INCOMPLETE' },
       capabilities: { confirm: false },
     });
+  });
+
+  it('shows the immutable rejection reason and future Shanghai calendar days', async () => {
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({
+      status: OrderStatus.REJECTED,
+      promisedDate: new Date('2026-09-10T00:00:00.000Z'),
+      workflowDecisions: [{ toStatus: OrderStatus.REJECTED, reasonCode: 'DESIGN_ERROR', reasonNote: '第二款需重传设计图' }],
+    }));
+    const detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001', new Date('2026-09-01T16:00:00.000Z'));
+    expect(detail?.statusSummary).toBe('驳回：设计图有误 · 第二款需重传设计图');
+    expect(detail?.promisedDaysLeft).toBe(8);
+  });
+
+  it('does not use an unrelated workflow reason or keep countdowns on shipped orders', async () => {
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({
+      status: OrderStatus.REJECTED,
+      workflowDecisions: [{ toStatus: OrderStatus.ON_HOLD, reasonCode: 'PAPER_OUT', reasonNote: '以前的暂停原因' }],
+    }));
+    expect((await getAdminOrderByOrderNo(actor, 'GD-260902-001'))?.statusSummary).toBe('等待销售补正后重新提交');
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({ status: OrderStatus.SHIPPED, promisedDate: new Date('2026-09-10T00:00:00.000Z') }));
+    expect((await getAdminOrderByOrderNo(actor, 'GD-260902-001'))?.promisedDaysLeft).toBeNull();
   });
 
   it('keeps an actionable incomplete quote aligned with the pending-pricing signal', async () => {
