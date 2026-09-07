@@ -205,11 +205,7 @@ function AdminOrderRow({
     <li
       data-order-id={order.id}
       className={cn(
-        'grid min-w-0 grid-cols-[2.75rem_3rem_minmax(0,1fr)_auto] gap-3 px-3 py-3 transition-colors hover:bg-muted/20 2xl:grid-cols-[2.75rem_3rem_minmax(15rem,1.4fr)_minmax(10rem,1fr)_7rem_8rem_8rem_auto] 2xl:items-center',
-        (order.status === 'PENDING_FACTORY' ||
-          order.pendingChangeRequest ||
-          order.status === 'ON_HOLD') &&
-          'bg-destructive/[0.025]',
+        'grid min-w-0 bg-card grid-cols-[2.75rem_3rem_minmax(0,1fr)_auto] gap-3 px-3 py-3 transition-colors hover:bg-muted/20 2xl:grid-cols-[2.75rem_3rem_minmax(15rem,1.4fr)_minmax(10rem,1fr)_7rem_8rem_8rem_auto] 2xl:items-center',
       )}
     >
       <div className="flex flex-col items-center gap-1">
