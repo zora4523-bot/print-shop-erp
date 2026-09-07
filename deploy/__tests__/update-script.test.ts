@@ -8,14 +8,14 @@ describe('production deploy acceptance', () => {
 
     expect(script).toContain("ss -H -ltn 'sport = :3000'");
     expect(script).toContain('listeners" != "127.0.0.1:3000"');
-    expect(script).toContain('node scripts/deploy-jobs-gate.mjs');
+    expect(script).toContain('node scripts/deploy-jobs-gate.mjs --wait "$JOBS_HEALTH_URL"');
     expect(script).toContain('JOBS_HEALTH_URL');
-    expect(script).toContain('DEPLOY_JOBS_GATE_MAX_SECONDS:-120');
-    expect(script).toContain('curl --connect-timeout 2 --max-time 5');
-    expect(script).toContain('DEPLOY_JOBS_GATE_CONNECTED_SETTLE_SECONDS:-6');
-    expect(script).toContain('NOT_REQUIRED)');
-    expect(script).toContain('WAITING_*)');
-    expect(script).toContain('观察期结束时仍为');
+    const preflight = script.indexOf('node scripts/deploy-jobs-gate.mjs --check-config "$JOBS_HEALTH_URL"');
+    expect(preflight).toBeGreaterThan(-1);
+    expect(preflight).toBeLessThan(script.indexOf('\nDEPLOYMENT_QUIESCED=1'));
+    expect(script).toContain('pm2 stop "$WEB_APP_NAME"');
+    expect(script).toContain('pm2 stop "$LIGHT_WORKER_NAME"');
+    expect(script).toContain('pm2 stop "$HEAVY_WORKER_NAME"');
     expect(script).not.toContain('该状态会自动重连，发布继续');
     expect(script).toMatch(
       /if \[ "\$ok" = "1" \]; then\s+assert_web_loopback_binding\s+assert_deploy_jobs_gate\s+DEPLOYMENT_QUIESCED=0/,

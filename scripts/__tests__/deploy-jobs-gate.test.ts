@@ -204,17 +204,33 @@ describe('deploy jobs health gate', () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('identity');
   });
+
+  it('CLI validates default wait configuration without probing a server', async () => {
+    const result = await runGateCli('', ['--check-config', 'http://127.0.0.1:1/api/health/jobs']);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('wait configuration accepted');
+    expect(result.stderr).toBe('');
+  });
+
+  it.each(['120', '240', '601'])('CLI rejects unsafe explicit hard limit %s before deployment', async (limit) => {
+    const result = await runGateCli('', ['--check-config', 'http://127.0.0.1:1/api/health/jobs'], {
+      DEPLOY_JOBS_GATE_MAX_SECONDS: limit,
+    });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('invalid wait configuration');
+  });
 });
 
 function runGateCli(
   input: string,
   args: string[] = [],
+  env: Record<string, string> = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(
       process.execPath,
       [resolve('scripts/deploy-jobs-gate.mjs'), ...args],
-      { stdio: ['pipe', 'pipe', 'pipe'] },
+      { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...env } },
     );
     let stdout = '';
     let stderr = '';

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { waitForDeployJobsGate } from '../../../scripts/deploy-jobs-gate.mjs';
+import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS } from '../heartbeat-policy';
 
 vi.mock('@/lib/db', () => ({ db: {} }));
 import {
@@ -10,10 +12,72 @@ import {
   classifyBackgroundJobAlerts,
   summarizeSmartBotConnection,
   summarizeSmartBotOperationalHealth,
+  smartBotRecoveryWaitMs,
   type BackgroundJobHealth,
 } from '../health';
 
 const now = new Date('2026-07-17T08:00:00.000Z');
+
+describe('smart-bot heartbeat recovery observation', () => {
+  it('uses the second newest LIGHT heartbeat and the database observation clock', () => {
+    const health = fixture();
+    const light = health.activeWorkers[0]!;
+    health.activeWorkers.push(
+      { ...light, lastSeenAt: new Date(now.getTime() - 90_000) },
+      { ...light, version: 'previous-release', lastSeenAt: new Date(now.getTime() - 40_000) },
+    );
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2035-01-01T00:00:00Z'));
+    expect(smartBotRecoveryWaitMs(health)).toBe(140_000);
+    expect(smartBotRecoveryWaitMs({ ...health, observedAt: new Date(now.getTime() + 140_001) })).toBe(0);
+  });
+
+  it('does not grant duplicate-worker grace for a single LIGHT worker', () => {
+    expect(smartBotRecoveryWaitMs(fixture())).toBe(0);
+  });
+
+  it.each([0, 268_000])('recovers real health snapshots after a worker dies at %i ms', async (crashedAt) => {
+    let elapsedMs = 0;
+    const digest = 'a'.repeat(64);
+    const result = await waitForDeployJobsGate({
+      nowMs: () => elapsedMs,
+      sleep: async (durationMs) => { elapsedMs += durationMs; },
+      readHealth: async () => {
+        const health = fixture();
+        health.observedAt = new Date(now.getTime() + elapsedMs);
+        health.activeSmartBotChannels = [{
+          smartBotBotDigest: digest, smartBotTargetId: 'group-1',
+          smartBotChatType: 'GROUP', smartBotBoundAt: now,
+        }];
+        health.activeWorkers[0] = {
+          ...health.activeWorkers[0]!, smartBotBotDigest: digest,
+          smartBotStatus: SmartBotConnectionStatus.CONNECTING,
+          lastSeenAt: new Date(now.getTime() + Math.min(elapsedMs, crashedAt)),
+        };
+        if (elapsedMs >= crashedAt) {
+          health.activeWorkers.push({
+            ...health.activeWorkers[0], smartBotStatus: SmartBotConnectionStatus.CONNECTED,
+            lastSeenAt: health.observedAt,
+          });
+        }
+        health.activeWorkers = health.activeWorkers.filter((worker) =>
+          health.observedAt.getTime() - worker.lastSeenAt.getTime() <= WORKER_HEARTBEAT_ACTIVE_WINDOW_MS);
+        const operational = summarizeSmartBotOperationalHealth(health, {
+          expectedVersion: 'v1', expectedBotDigest: digest,
+        });
+        if (elapsedMs <= crashedAt + WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) {
+          expect(operational.operational).toBe(false);
+        }
+        return { smartBot: {
+          status: summarizeSmartBotConnection(health, { expectedVersion: 'v1' }).status,
+          ...operational, recoveryWaitMs: smartBotRecoveryWaitMs(health),
+        } };
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(elapsedMs).toBe(crashedAt + WORKER_HEARTBEAT_ACTIVE_WINDOW_MS + 8_000);
+  });
+});
 
 afterEach(() => {
   vi.useRealTimers();

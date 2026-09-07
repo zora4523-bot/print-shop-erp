@@ -89,6 +89,7 @@ describe('GET /api/health/jobs', () => {
       configurationValid: true,
       identityMatch: true,
       operational: true,
+      recoveryWaitMs: 0,
     });
     expect(body.alerts).toEqual([]);
     expect(body.warnings).toEqual([]);
@@ -217,5 +218,23 @@ describe('GET /api/health/jobs', () => {
     expect(JSON.stringify(body)).not.toMatch(
       /activeWorkers|workerId|lastSeenAt/,
     );
+  });
+
+  it('only exposes a relative recovery wait for a still-active old worker', async () => {
+    const health = fixture();
+    health.activeWorkers.push({
+      ...health.activeWorkers[0]!,
+      version: 'previous-release',
+      lastSeenAt: new Date(health.observedAt.getTime() - 50_000),
+    });
+    getBackgroundJobHealthMock.mockResolvedValue(health);
+    const response = await GET();
+    const body = await response.json();
+    expect(body.smartBot).toMatchObject({
+      status: 'CONNECTED', identityMatch: true, operational: false,
+      recoveryWaitMs: 130_000,
+    });
+    expect(JSON.stringify(body)).not.toMatch(/previous-release|lastSeenAt|workerId|group-1/);
+    expect(JSON.stringify(body)).not.toContain(botDigest);
   });
 });

@@ -5,6 +5,7 @@ import {
   getBackgroundJobHealth,
   summarizeSmartBotConnection,
   summarizeSmartBotOperationalHealth,
+  smartBotRecoveryWaitMs,
 } from '@/lib/background-jobs/health';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { configuredSmartBotIdDigest } from '@/lib/notification/smart-bot-identity';
@@ -77,6 +78,7 @@ export async function GET(): Promise<Response> {
           configurationValid: smartBotOperational.configurationValid,
           identityMatch: smartBotOperational.identityMatch,
           operational: smartBotOperational.operational,
+          recoveryWaitMs: smartBotRecoveryWaitMs(health),
         },
         alerts: report.alerts,
         warnings: report.warnings,

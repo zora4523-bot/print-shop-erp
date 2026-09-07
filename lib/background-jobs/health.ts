@@ -204,6 +204,23 @@ function activeLightWorkers(
   );
 }
 
+/**
+ * Relative wait until all but the newest LIGHT heartbeat could expire if the
+ * others stop refreshing. This is only a bounded observation hint, never proof
+ * that another worker is dead. No worker identity or timestamp leaves the API.
+ */
+export function smartBotRecoveryWaitMs(health: BackgroundJobHealth): number {
+  const seen = activeLightWorkers(health)
+    .map((worker) => worker.lastSeenAt.getTime())
+    .sort((left, right) => right - left);
+  const extraHeartbeat = seen[1];
+  if (extraHeartbeat === undefined) return 0;
+  return Math.max(0, Math.min(
+    WORKER_HEARTBEAT_ACTIVE_WINDOW_MS,
+    extraHeartbeat + WORKER_HEARTBEAT_ACTIVE_WINDOW_MS - health.observedAt.getTime(),
+  ));
+}
+
 const SMART_BOT_STATUS_PRIORITY: readonly SmartBotConnectionStatusType[] = [
   SmartBotConnectionStatus.CONNECTION_CONFLICT,
   SmartBotConnectionStatus.AUTH_FAILED,

@@ -81,66 +81,10 @@ assert_web_loopback_binding() {
 }
 
 assert_deploy_jobs_gate() {
-  # Do not use curl -f here: /jobs can legitimately return 503 for an old
-  # non-notification dead letter. The JSON gate blocks only an unobservable or
-  # operator-actionable smart-bot state.
-  # A bad Secret can spend about 31s in SDK auth backoff, then wait up to the
-  # maximum supported 60s heartbeat interval before AUTH_FAILED is persisted.
-  # Keep a bounded observation window beyond both delays. CONNECTED must also
-  # remain visible briefly so an immediate duplicate-connection kick is seen.
-  local max_seconds="${DEPLOY_JOBS_GATE_MAX_SECONDS:-120}"
-  local interval_seconds="${DEPLOY_JOBS_GATE_INTERVAL_SECONDS:-2}"
-  local connected_settle_seconds="${DEPLOY_JOBS_GATE_CONNECTED_SETTLE_SECONDS:-6}"
-  local deadline=$((SECONDS + max_seconds))
-  local connected_since=-1
-  local last_transient_status=""
-  local last_observation_valid=0
-  local gate_output=""
-  local gate_code=0
-
-  while [ "$SECONDS" -le "$deadline" ]; do
-    gate_code=0
-    if gate_output="$(curl --connect-timeout 2 --max-time 5 -sS "$JOBS_HEALTH_URL" | node scripts/deploy-jobs-gate.mjs --status-only)"; then
-      last_observation_valid=1
-      case "$gate_output" in
-        NOT_REQUIRED)
-          echo "==> 通知门禁：当前没有启用的智能机器人通知目标"
-          return 0
-          ;;
-        CONNECTED)
-          last_transient_status="$gate_output"
-          if [ "$connected_since" -lt 0 ]; then
-            connected_since=$SECONDS
-          elif [ $((SECONDS - connected_since)) -ge "$connected_settle_seconds" ]; then
-            echo "==> 通知门禁：智能机器人状态 $gate_output（稳定观察已通过）"
-            return 0
-          fi
-          ;;
-        WAITING_*)
-          last_transient_status="${gate_output#WAITING_}"
-          connected_since=-1
-          ;;
-      esac
-    else
-      gate_code=$?
-      last_observation_valid=0
-      connected_since=-1
-      if [ "$gate_code" = "1" ]; then
-        echo >&2 "拒绝发布：企业微信智能机器人需要人工修复。"
-        return 1
-      fi
-    fi
-
-    if [ "$SECONDS" -lt "$deadline" ]; then sleep "$interval_seconds"; fi
-  done
-
-  if [ "$last_observation_valid" = "1" ] && [ -n "$last_transient_status" ]; then
-    echo >&2 "拒绝发布：启用中的企业微信智能机器人在观察期结束时仍为 $last_transient_status。"
-    return 1
-  fi
-
-  echo >&2 "拒绝发布：后台队列在观察期内未返回可识别的智能机器人状态。"
-  return 1
+  # One tested monotonic-clock policy owns startup, heartbeat-expiry recovery,
+  # and the hard deadline. Environment overrides are read by the same runner.
+  # A nonzero result still reaches on_exit while DEPLOYMENT_QUIESCED remains 1.
+  node scripts/deploy-jobs-gate.mjs --wait "$JOBS_HEALTH_URL"
 }
 
 trap on_exit EXIT
@@ -167,6 +111,8 @@ CI=true pnpm install --frozen-lockfile
 
 echo "==> [3/9] 环境变量预检"
 NODE_ENV=production node scripts/check-env.mjs
+# Validate changed timing overrides/URL while the previous release is online.
+node scripts/deploy-jobs-gate.mjs --check-config "$JOBS_HEALTH_URL"
 if ! command -v pm2 >/dev/null 2>&1; then
   echo >&2 "未找到 pm2，停止发布（尚未进入停机窗口）"
   exit 1

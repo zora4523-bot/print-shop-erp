@@ -233,7 +233,7 @@ Bot ID + Secret 智能机器人使用企业微信官方的
 - 长连接只由常驻 LIGHT worker 持有；生产必须使用 `BACKGROUND_JOBS_MODE=durable`，PM2 只能运行 **1 个 LIGHT worker 进程实例**。`LIGHT_WORKER_CONCURRENCY=2` 是该单进程内的任务并发，不是启动两个机器人连接。
 - 绑定群会锁定绑定时的 Bot ID。轮换同一 Bot ID 的 Secret 不需重绑；如果更换 Bot ID，必须新建通知目标并在目标群重新绑定，不会把旧 `chatid` 交给新机器人。
 - 仅配置 Bot ID + Secret 还不知道收件群。LIGHT worker 认证成功后，在 `/owner/notifications` 创建智能机器人通知目标、生成一次性绑定码，再由群成员在目标企业微信群中 `@机器人` 并发送该码。后台显示已绑定后再启用通道并点“测试”；测试会由 LIGHT worker 入队真发。
-- 匿名 `/api/health/jobs` 只暴露 `required` / `configurationValid` / `identityMatch` / `operational` 布尔状态，不暴露 Bot ID、摘要、群 ID 或 worker 身份。只要存在启用中的智能机器人目标，发布门禁就要求当前版本唯一 LIGHT worker 身份一致且稳定 `CONNECTED`；`CONNECTING` / `DISCONNECTED` 超过观察期也会拒绝发布。
+- 匿名 `/api/health/jobs` 暴露 `required` / `configurationValid` / `identityMatch` / `operational` 安全状态，以及额外 LIGHT 心跳的相对过期等待提示 `recoveryWaitMs`（0–180 秒），不暴露 Bot ID、摘要、群 ID 或 worker 身份。只要存在启用中的智能机器人目标，发布门禁就要求当前版本唯一 LIGHT worker 身份一致且稳定 `CONNECTED` 6 秒；暂态恢复采用有限观察预算，默认总上限 600 秒，持续双实例不会放行。时间策略和可配置项见 [部署指南](docs/部署指南.md)。
 
 协议和绑定前置条件以[企业微信智能机器人官方文档](https://developer.work.weixin.qq.com/document/path/101785)为准。
 
