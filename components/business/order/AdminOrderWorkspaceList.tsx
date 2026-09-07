@@ -55,6 +55,7 @@ export function AdminOrderWorkspaceList({
       {feedback ? <ActionNotice tone={feedback.tone} title={feedback.message} className="mb-2" /> : null}
       <OrderListSelectionProvider
         key={selectionKey}
+        batchBarLayout="inline"
         items={orders.map((order) => ({
           id: order.id,
           orderNo: order.orderNo,

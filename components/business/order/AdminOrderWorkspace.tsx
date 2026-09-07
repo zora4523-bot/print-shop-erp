@@ -93,7 +93,7 @@ export function AdminOrderWorkspace({
       : query.list.filters.customerRefExact;
 
   return (
-    <div data-slot="admin-order-workspace" className="min-w-0 space-y-4">
+    <div data-slot="admin-order-workspace" className="w-full min-w-0 max-w-none space-y-4">
       <AdminOrderDecisionDashboard
         query={query}
         counts={data.counts.signals}
@@ -224,7 +224,7 @@ export function AdminOrderWorkspace({
               ),
             )}
             prefetch={false}
-            aria-pressed={query.starred}
+            aria-current={query.starred ? 'true' : undefined}
             className={cn(
               buttonVariants({
                 variant: query.starred ? 'secondary' : 'outline',
@@ -251,7 +251,7 @@ export function AdminOrderWorkspace({
               ),
             )}
             prefetch={false}
-            aria-pressed={query.unbilled}
+            aria-current={query.unbilled ? 'true' : undefined}
             className={buttonVariants({
               variant: query.unbilled ? 'secondary' : 'outline',
             })}

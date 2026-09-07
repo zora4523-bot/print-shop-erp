@@ -40,6 +40,8 @@ type SelectionContextValue = {
 
 const SelectionContext = createContext<SelectionContextValue | null>(null);
 
+type BatchBarLayout = 'floating' | 'inline';
+
 /**
  * Keeps selection changes deterministic and page-scoped. The list remounts this
  * provider when the server-side page/filter result changes, so IDs from a
@@ -74,9 +76,11 @@ export function OrderListSelectionProvider({
   items,
   children,
   renderBatchActions,
+  batchBarLayout = 'floating',
 }: {
   items: readonly OrderListSelectionItem[];
   children: ReactNode;
+  batchBarLayout?: BatchBarLayout;
   renderBatchActions?: (
     selectedItems: readonly OrderListSelectionItem[],
   ) => ReactNode;
@@ -95,17 +99,23 @@ export function OrderListSelectionProvider({
     [items, selectedIds],
   );
 
+  const batchBar = (
+    <OrderListBatchBar
+      selectedItems={selectedItems}
+      onClear={() => value.dispatch({ type: 'clear' })}
+      renderBatchActions={renderBatchActions}
+      layout={batchBarLayout}
+    />
+  );
+
   return (
     <SelectionContext.Provider value={value}>
+      {batchBarLayout === 'inline' ? batchBar : null}
       {children}
       <p className="sr-only" role="status" aria-live="polite">
         已选 {selectedItems.length} 项工单
       </p>
-      <OrderListBatchBar
-        selectedItems={selectedItems}
-        onClear={() => value.dispatch({ type: 'clear' })}
-        renderBatchActions={renderBatchActions}
-      />
+      {batchBarLayout === 'floating' ? batchBar : null}
     </SelectionContext.Provider>
   );
 }
@@ -152,9 +162,11 @@ export function OrderListBatchBar({
   selectedItems,
   onClear,
   renderBatchActions,
+  layout = 'floating',
 }: {
   selectedItems: readonly OrderListSelectionItem[];
   onClear: () => void;
+  layout?: BatchBarLayout;
   renderBatchActions?: (
     selectedItems: readonly OrderListSelectionItem[],
   ) => ReactNode;
@@ -170,7 +182,7 @@ export function OrderListBatchBar({
 
   useEffect(() => {
     const batchBar = batchBarRef.current;
-    if (!batchBar || selectedItems.length === 0) return;
+    if (layout !== 'floating' || !batchBar || selectedItems.length === 0) return;
 
     const syncHeight = () => {
       const nextHeight = Math.ceil(batchBar.getBoundingClientRect().height);
@@ -190,7 +202,7 @@ export function OrderListBatchBar({
       window.removeEventListener('resize', syncHeight);
       observer?.disconnect();
     };
-  }, [selectedItems.length, selectionKey]);
+  }, [layout, selectedItems.length, selectionKey]);
 
   if (selectedItems.length === 0) return null;
 
@@ -216,28 +228,35 @@ export function OrderListBatchBar({
 
   return (
     <>
-      <div
-        data-slot="order-list-batch-placeholder"
-        aria-hidden="true"
-        className="pointer-events-none pb-[calc(1rem_+_env(safe-area-inset-bottom,0px))]"
-      >
+      {layout === 'floating' ? (
         <div
-          data-slot="order-list-batch-placeholder-height"
-          className="h-32 sm:h-16"
-          style={{ height: batchBarHeight ?? undefined }}
-        />
-      </div>
+          data-slot="order-list-batch-placeholder"
+          aria-hidden="true"
+          className="pointer-events-none pb-[calc(1rem_+_env(safe-area-inset-bottom,0px))]"
+        >
+          <div
+            data-slot="order-list-batch-placeholder-height"
+            className="h-32 sm:h-16"
+            style={{ height: batchBarHeight ?? undefined }}
+          />
+        </div>
+      ) : null}
       <section
         ref={batchBarRef}
         role="region"
         aria-label="工单批量操作"
-        className="fixed bottom-[calc(1rem_+_env(safe-area-inset-bottom,0px))] left-1/2 z-40 flex w-[calc(100%_-_1rem)] max-w-3xl -translate-x-1/2 flex-col gap-2 rounded-xl bg-foreground px-3 py-3 text-background shadow-xl sm:w-auto sm:min-w-[28rem] sm:flex-row sm:items-center"
+        className={cn(
+          'flex flex-col rounded-xl bg-foreground py-3 text-background sm:flex-row sm:items-center',
+          layout === 'inline'
+            ? 'w-full min-w-0 gap-3 px-3.5'
+            : 'fixed bottom-[calc(1rem_+_env(safe-area-inset-bottom,0px))] left-1/2 z-40 w-[calc(100%_-_1rem)] max-w-3xl -translate-x-1/2 gap-2 px-3 shadow-xl sm:w-auto sm:min-w-[28rem]',
+        )}
       >
         <p className="shrink-0 text-sm font-semibold tabular-nums">
           已选 {selectedItems.length} 项
         </p>
         <div className="hidden h-5 w-px bg-background/20 sm:block" aria-hidden="true" />
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <div className={cn('flex min-w-0 flex-1 flex-wrap gap-2', layout === 'inline' ? 'items-start' : 'items-center')}>
           <Button
             type="button"
             variant="secondary"
@@ -251,7 +270,7 @@ export function OrderListBatchBar({
           <Button
             type="button"
             variant="ghost"
-            className="min-h-11 flex-1 text-background hover:bg-background/10 hover:text-background sm:flex-none"
+            className={cn('min-h-11 flex-1 text-background hover:bg-background/10 hover:text-background sm:flex-none', layout === 'inline' && 'sm:ml-auto')}
             onClick={onClear}
           >
             <X aria-hidden="true" />

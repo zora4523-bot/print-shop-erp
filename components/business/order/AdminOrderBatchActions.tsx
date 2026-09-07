@@ -103,53 +103,37 @@ export function AdminOrderBatchActions({
     });
   }
 
-  return (
-    <>
-      {(Object.keys(BATCH_COMMAND_CONFIG) as AdminOrderBatchCommand[]).map((command) => {
-        const config = BATCH_COMMAND_CONFIG[command];
-        const reviewedOrders = snapshotBatchSelection(command, selectedItems, orders);
-        const count = reviewedOrders.filter((order) => order.eligible).length;
-        const button = (
-          <Button
-            type="button"
-            variant="secondary"
-            className="min-h-11"
-            disabled={busy || count === 0}
-            onClick={(event) => {
-              focusReturnRef.current = event.currentTarget;
-              setConfirmation({ command, orders: reviewedOrders });
-            }}
-          >
-            {config.label}（{count}）
-          </Button>
-        );
-        return count > 0 ? <span key={command}>{button}</span> : (
-          <DisabledReason
-            key={command}
-            cause="prerequisite"
-            reason={config.prerequisite}
-            className="[&_[data-slot=disabled-reason-copy]]:text-xs [&_[data-slot=disabled-reason-copy]]:text-background/80"
-          >
-            {button}
-          </DisabledReason>
-        );
-      })}
-      <ConfirmActionDialog
-        level="L2"
-        open={confirmation !== null}
-        onOpenChange={(open) => { if (!open) setConfirmation(null); }}
-        focusReturnRef={focusReturnRef}
-        title={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认批量操作'}
-        description={confirmation ? `已选 ${confirmation.orders.length} 张，本次可处理 ${confirmation.orders.filter((order) => order.eligible).length} 张，其余不纳入处理。` : ''}
-        impactItems={confirmation ? batchConfirmationImpact(confirmation.command, confirmation.orders) : []}
-        confirmLabel={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认操作'}
-        disabled={busy}
-        className="[&_button]:min-h-11"
-        onConfirm={() => {
-          if (confirmation) run(confirmation.command, confirmation.orders);
-          setConfirmation(null);
-        }}
-      />
+  const commandOptions = (Object.keys(BATCH_COMMAND_CONFIG) as AdminOrderBatchCommand[])
+    .map((command) => {
+      const reviewedOrders = snapshotBatchSelection(command, selectedItems, orders);
+      return {
+        command,
+        config: BATCH_COMMAND_CONFIG[command],
+        reviewedOrders,
+        count: reviewedOrders.filter((order) => order.eligible).length,
+      };
+    });
+  const unavailableReason = commandOptions
+    .filter(({ count }) => count === 0)
+    .map(({ config }) => `${config.label}：${config.prerequisite}`)
+    .join('；');
+  const controls = (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {commandOptions.map(({ command, config, reviewedOrders, count }) => (
+        <Button
+          key={command}
+          type="button"
+          variant="secondary"
+          className="min-h-11"
+          disabled={busy || count === 0}
+          onClick={(event) => {
+            focusReturnRef.current = event.currentTarget;
+            setConfirmation({ command, orders: reviewedOrders });
+          }}
+        >
+          {config.label}（{count}）
+        </Button>
+      ))}
       <form action={exportAction} aria-busy={exportPending}>
         <input type="hidden" name="scope" value="selected" />
         <input
@@ -170,6 +154,38 @@ export function AdminOrderBatchActions({
           {exportPending ? '正在提交…' : '导出所选'}
         </Button>
       </form>
+    </div>
+  );
+
+  return (
+    <>
+      {unavailableReason ? (
+        <DisabledReason
+          cause="prerequisite"
+          reason={unavailableReason}
+          className="basis-full sm:min-w-0 sm:flex-1 sm:basis-auto [&_[data-slot=disabled-reason-copy]]:text-xs [&_[data-slot=disabled-reason-copy]]:leading-relaxed [&_[data-slot=disabled-reason-copy]]:text-background/80"
+        >
+          {controls}
+        </DisabledReason>
+      ) : (
+        <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">{controls}</div>
+      )}
+      <ConfirmActionDialog
+        level="L2"
+        open={confirmation !== null}
+        onOpenChange={(open) => { if (!open) setConfirmation(null); }}
+        focusReturnRef={focusReturnRef}
+        title={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认批量操作'}
+        description={confirmation ? `已选 ${confirmation.orders.length} 张，本次可处理 ${confirmation.orders.filter((order) => order.eligible).length} 张，其余不纳入处理。` : ''}
+        impactItems={confirmation ? batchConfirmationImpact(confirmation.command, confirmation.orders) : []}
+        confirmLabel={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认操作'}
+        disabled={busy}
+        className="[&_button]:min-h-11"
+        onConfirm={() => {
+          if (confirmation) run(confirmation.command, confirmation.orders);
+          setConfirmation(null);
+        }}
+      />
       <p
         role="status"
         aria-live="polite"
