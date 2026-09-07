@@ -155,6 +155,7 @@ import {
   shipOrderAction,
   finishOrderAction,
   previewOrderChangeRequestPricingAction,
+  reviewOrderChangeRequestAction,
   previewOrderPricingReviewAction,
   finalizeOrderPricingAction,
   saveOrderManualChargeAction,
@@ -1498,8 +1499,65 @@ describe('previewOrderChangeRequestPricingAction', () => {
     expect(result).toEqual({ status: 'success', preview });
     expect(
       changeRequestMock.previewOrderChangeRequestPricing,
-    ).toHaveBeenCalledWith('request-1', adminActor);
+    ).toHaveBeenCalledWith('request-1', adminActor, {
+      expectedPriceRevision: undefined,
+      pendingChargeResolutions: [],
+    });
     expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('parses and forwards the price revision and manual shipment charge resolutions', async () => {
+    const adminActor = { ...salesActor, role: Role.ADMIN };
+    const preview = {
+      requestId: 'request-1',
+      orderId: 'order-1',
+      baseRevision: 2,
+      quotedAt: '2026-08-07T08:00:00.000Z',
+      complete: true,
+      requiresReviewRemark: false,
+      oldTotal: '1000.00',
+      newTotal: '980.00',
+      delta: '-20.00',
+      items: [],
+    };
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    changeRequestMock.previewOrderChangeRequestPricing.mockResolvedValue(
+      preview,
+    );
+
+    const result = await previewOrderChangeRequestPricingAction(null, {
+      requestId: 'request-1',
+      expectedPriceRevision: '7',
+      pendingChargeResolutions: [
+        {
+          businessKey: ' shipment:shipment-1:shipping ',
+          shipmentId: ' shipment-1 ',
+          expectedSequence: '2',
+          expectedProjectedQuantity: '1200',
+          expectedDestinationProvince: ' 广东 ',
+          amount: ' 18.50 ',
+          reason: ' 承运商实际报价 ',
+        },
+      ],
+    });
+
+    expect(result).toEqual({ status: 'success', preview });
+    expect(
+      changeRequestMock.previewOrderChangeRequestPricing,
+    ).toHaveBeenCalledWith('request-1', adminActor, {
+      expectedPriceRevision: 7,
+      pendingChargeResolutions: [
+        {
+          businessKey: 'SHIPMENT:SHIPMENT-1:SHIPPING',
+          shipmentId: 'shipment-1',
+          expectedSequence: 2,
+          expectedProjectedQuantity: 1200,
+          expectedDestinationProvince: '广东',
+          amount: '18.50',
+          reason: '承运商实际报价',
+        },
+      ],
+    });
   });
 
   it('maps preview business failures without returning stale amounts', async () => {
@@ -1516,6 +1574,94 @@ describe('previewOrderChangeRequestPricingAction', () => {
         requestId: 'request-1',
       }),
     ).resolves.toEqual({ status: 'error', message: '工单版本已过期' });
+  });
+});
+
+describe('reviewOrderChangeRequestAction', () => {
+  it('parses and forwards optimistic price and shipment charge evidence', async () => {
+    const adminActor = { ...salesActor, role: Role.ADMIN };
+    const expectedQuoteToken = `order-change-approval-v1:${'a'.repeat(64)}`;
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    changeRequestMock.reviewOrderChangeRequest.mockResolvedValue({
+      orderId: 'order-1',
+      status: 'APPROVED',
+    });
+
+    const result = await reviewOrderChangeRequestAction(null, {
+      requestId: 'request-1',
+      expectedPriceRevision: '7',
+      expectedQuoteToken: ` ${expectedQuoteToken} `,
+      pendingChargeResolutions: [
+        {
+          businessKey: ' shipment:shipment-1:shipping ',
+          shipmentId: ' shipment-1 ',
+          expectedSequence: '2',
+          expectedProjectedQuantity: '1200',
+          expectedDestinationProvince: ' 广东 ',
+          amount: ' 18.50 ',
+          reason: ' 承运商实际报价 ',
+        },
+      ],
+      decision: 'APPROVE',
+      reviewRemark: ' 已复核物流报价 ',
+    });
+
+    expect(changeRequestMock.reviewOrderChangeRequest).toHaveBeenCalledWith(
+      {
+        requestId: 'request-1',
+        expectedPriceRevision: 7,
+        expectedQuoteToken,
+        pendingChargeResolutions: [
+          {
+            businessKey: 'SHIPMENT:SHIPMENT-1:SHIPPING',
+            shipmentId: 'shipment-1',
+            expectedSequence: 2,
+            expectedProjectedQuantity: 1200,
+            expectedDestinationProvince: '广东',
+            amount: '18.50',
+            reason: '承运商实际报价',
+          },
+        ],
+        decision: 'APPROVE',
+        reviewRemark: '已复核物流报价',
+      },
+      adminActor,
+    );
+    expect(result).toEqual({
+      status: 'success',
+      requestStatus: 'APPROVED',
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/order-changes');
+  });
+
+  it('rejects an invalid manual charge resolution before entering the domain', async () => {
+    permissionsMock.requirePermission.mockResolvedValue({
+      ...salesActor,
+      role: Role.ADMIN,
+    });
+
+    const result = await reviewOrderChangeRequestAction(null, {
+      requestId: 'request-1',
+      expectedPriceRevision: '7',
+      pendingChargeResolutions: [
+        {
+          businessKey: 'shipment:shipment-1:shipping',
+          shipmentId: 'shipment-1',
+          expectedSequence: '2',
+          expectedProjectedQuantity: '1200',
+          expectedDestinationProvince: '广东',
+          amount: '18.505',
+          reason: '承运商实际报价',
+        },
+      ],
+      decision: 'APPROVE',
+      reviewRemark: null,
+    });
+
+    expect(result.status).toBe('invalid');
+    expect(changeRequestMock.reviewOrderChangeRequest).not.toHaveBeenCalled();
   });
 });
 

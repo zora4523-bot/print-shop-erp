@@ -22,6 +22,7 @@ vi.mock('@/actions/admin-order-workflow', () => ({
   settleFactoryOrderAction: vi.fn(),
 }));
 vi.mock('@/actions/order', () => ({
+  previewOrderChangeRequestPricingAction: vi.fn(),
   previewOrderCancellationSettlementAction: vi.fn(),
   reviewOrderChangeRequestAction: vi.fn(),
 }));
@@ -143,6 +144,43 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).toContain('处理核价');
   });
 
+  it('只有加载到当前价凭证后才允许点击确认工单', () => {
+    const submitted = row();
+    submitted.status = OrderStatus.SUBMITTED;
+    submitted.confirmationPreflight = { ok: true, issues: [] };
+    submitted.capabilities = {
+      ...submitted.capabilities,
+      confirm: true,
+      hold: false,
+      release: false,
+    };
+
+    const withoutPreview = renderToStaticMarkup(
+      <AdminOrderDecisionPanel order={submitted} />,
+    );
+    expect(withoutPreview).toMatch(
+      /<button[^>]*disabled=""[^>]*>确认工单<\/button>/,
+    );
+
+    submitted.priceComparison = {
+      quoted: {
+        amount: '1200.00',
+        versions: { processing: null, logistics: null },
+      },
+      current: {
+        amount: '1234.50',
+        versions: { processing: null, logistics: null },
+      },
+      quoteToken: `create-order-quote-v2:${'a'.repeat(64)}`,
+      hasVersionDiff: false,
+    };
+    const withPreview = renderToStaticMarkup(
+      <AdminOrderDecisionPanel order={submitted} />,
+    );
+    expect(withPreview).toContain('>确认工单</button>');
+    expect(withPreview).not.toMatch(/<button[^>]*\sdisabled=""/);
+  });
+
   it('explains how to unblock settlement when a shipped order has no confirmed fee', () => {
     const shipped = row();
     shipped.status = OrderStatus.SHIPPED;
@@ -198,6 +236,53 @@ describe('AdminOrderDecisionPanel strict integer parsing', () => {
     for (const value of ['1.5', '1e2', '1x', '0', '-1']) {
       expect(parseStrictPositiveIntegerList(value), value).toEqual({ ok: false });
     }
+  });
+});
+
+describe('AdminOrderDecisionPanel change request integration', () => {
+  it('mounts automatic pricing review for MODIFY instead of direct approve buttons', () => {
+    const pendingModify = row();
+    pendingModify.capabilities = {
+      ...pendingModify.capabilities,
+      reviewChange: true,
+    };
+    pendingModify.pendingChangeRequest = {
+      id: 'change-request-1',
+      type: 'MODIFY',
+      reason: '修改数量',
+      createdAt: '2026-09-03T02:00:00.000Z',
+    };
+
+    const html = renderToStaticMarkup(
+      <AdminOrderDecisionPanel order={pendingModify} />,
+    );
+
+    expect(html).toContain('管理员确认的是是否接受变更');
+    expect(html).toContain('款式与费用由服务端按最新规则自动合并和重算');
+    expect(html).toContain('审核备注 / 拒绝原因');
+    expect(html).not.toContain('批准修改');
+  });
+
+  it('keeps the existing produced-quantity settlement flow for CANCEL', () => {
+    const pendingCancel = row();
+    pendingCancel.capabilities = {
+      ...pendingCancel.capabilities,
+      reviewChange: true,
+    };
+    pendingCancel.pendingChangeRequest = {
+      id: 'cancel-request-1',
+      type: 'CANCEL',
+      reason: '客户取消',
+      createdAt: '2026-09-03T02:00:00.000Z',
+    };
+
+    const html = renderToStaticMarkup(
+      <AdminOrderDecisionPanel order={pendingCancel} />,
+    );
+
+    expect(html).toContain('批准取消');
+    expect(html).toContain('拒绝申请');
+    expect(html).not.toContain('审核备注 / 拒绝原因');
   });
 });
 

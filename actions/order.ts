@@ -671,6 +671,10 @@ export async function previewOrderChangeRequestPricingAction(
     const preview = await previewOrderChangeRequestPricing(
       parsed.data.requestId,
       actor,
+      {
+        expectedPriceRevision: parsed.data.expectedPriceRevision,
+        pendingChargeResolutions: parsed.data.pendingChargeResolutions,
+      },
     );
     return { status: 'success', preview };
   } catch (error) {

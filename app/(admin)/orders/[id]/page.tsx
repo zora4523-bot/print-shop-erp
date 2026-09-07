@@ -87,7 +87,9 @@ import {
   deriveLegacyOrderItemFoilFacts,
   ORDER_PRICING_ROUTE_LABELS,
 } from '@/lib/order/pricing-route';
-import { isTrustedAdminPricingSnapshot } from '@/lib/order/admin-pricing-snapshot';
+import {
+  isTrustedAdminChargePricingSnapshot,
+} from '@/lib/order/admin-pricing-snapshot';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
@@ -106,6 +108,9 @@ import {
 } from '@/lib/production/operation-order-view';
 import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
+import { listExternalCreateOrderProductOptions } from '@/lib/product';
+import { listExternalCreateOrderPaperOptions } from '@/lib/material';
+import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
 import {
   buildShipOrderShipmentInputs,
   orderShippingAvailability,
@@ -121,6 +126,36 @@ const DIRECT_CANCEL_STATUSES = new Set<OrderStatus>([
 
 function canUseDirectCancel(role: Role, status: OrderStatus): boolean {
   return role === Role.ADMIN && DIRECT_CANCEL_STATUSES.has(status);
+}
+
+async function listActiveOrderChangeCatalogProducts(): Promise<
+  OrderChangeCatalogProduct[]
+> {
+  const [products, papers] = await Promise.all([
+    listExternalCreateOrderProductOptions(),
+    listExternalCreateOrderPaperOptions(),
+  ]);
+  const paperById = new Map(papers.map((paper) => [paper.id, paper]));
+  return products.map((product) => {
+    const paper = product.paperMaterialId
+      ? paperById.get(product.paperMaterialId)
+      : null;
+    return {
+      id: product.id,
+      category: product.category,
+      specification: product.specification,
+      paperType: product.paperType,
+      weight: product.weight,
+      // The source query includes only active products whose category node is
+      // active. Keep the explicit bit in the client DTO so the shared resolver
+      // remains fail-closed for every other caller.
+      isActive: true,
+      paperMaterialId: product.paperMaterialId,
+      linkedPaper: paper
+        ? { isActive: true, outOfStock: paper.outOfStock }
+        : null,
+    };
+  });
 }
 
 export async function generateMetadata({ params }: PageProps) {
@@ -142,12 +177,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // pricing snapshots and internal costs, so SALES must branch before that
   // query runs. Keep real draft/design/change actions on the safe surface.
   if (user.role === Role.SALES) {
-    const salesOrder = await getSalesOrderDetailById(
-      { id: user.id, role: user.role },
-      id,
-    );
+    const [salesOrder, catalogProducts] = await Promise.all([
+      getSalesOrderDetailById({ id: user.id, role: user.role }, id),
+      listActiveOrderChangeCatalogProducts(),
+    ]);
     if (!salesOrder) notFound();
-    return <SalesOrderDetailView order={salesOrder} />;
+    return (
+      <SalesOrderDetailView
+        order={salesOrder}
+        catalogProducts={catalogProducts}
+      />
+    );
   }
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   // 打印网格是按款式排的，所以阈值也按「单个款式的设计图数」判定，
@@ -370,6 +410,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
       order.status === OrderStatus.FOILING ||
       order.status === OrderStatus.PACKING) &&
     !pendingChangeRequest;
+  const orderChangeCatalogProducts = canRequestChange
+    ? await listActiveOrderChangeCatalogProducts()
+    : [];
   const customerChargeByShipmentAndCategory = new Map(
     order.customerCharges.flatMap((charge) =>
       charge.shipment
@@ -846,14 +889,20 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   <Badge
                     variant={
                       charge.status === 'FINAL' ||
-                      isTrustedAdminPricingSnapshot(charge.pricingSnapshot)
+                      isTrustedAdminChargePricingSnapshot(
+                        charge.pricingSnapshot,
+                        charge,
+                      )
                         ? 'secondary'
                         : 'outline'
                     }
                   >
                     {charge.status === 'FINAL'
                       ? '已确认'
-                      : isTrustedAdminPricingSnapshot(charge.pricingSnapshot)
+                      : isTrustedAdminChargePricingSnapshot(
+                            charge.pricingSnapshot,
+                            charge,
+                          )
                         ? '管理员已确认（待结算）'
                       : charge.status === 'WAIVED'
                         ? '已免收'
@@ -1442,12 +1491,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
             orderId={order.id}
             expectedRevision={order.revision}
             expectedWorkOrderVersion={order.workOrderVersion}
+            catalogProducts={orderChangeCatalogProducts}
             items={order.items.map((item) => ({
               id: item.id,
               sequence: item.sequence,
               name: item.name,
               quantity: item.quantity,
+              productId: item.productId,
+              pricingRoute: item.pricingRoute,
               specification: item.specification,
+              paperType: item.paperType,
+              paperWeightGsm: item.paperWeightGsm,
               frontFoilColors: item.frontFoilColors,
               backFoilColors: item.backFoilColors,
               foilColors: item.foilColors,

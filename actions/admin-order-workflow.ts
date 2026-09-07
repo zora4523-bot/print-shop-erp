@@ -38,6 +38,17 @@ const versionedSchema = z.object({
   expectedWorkOrderVersion,
 });
 
+const factoryConfirmationSchema = versionedSchema.extend({
+  expectedQuoteToken: z
+    .string()
+    .trim()
+    .regex(
+      /^create-order-quote-v2:[a-f\d]{64}$/u,
+      '当前价预览凭证格式错误',
+    )
+    .nullable(),
+});
+
 const decisionSchema = z.object({
   orderId,
   reasonCode: z.nativeEnum(OrderWorkflowReasonCode),
@@ -119,7 +130,7 @@ export async function confirmFactoryOrderAction(
   raw: unknown,
 ): Promise<AdminOrderWorkflowActionResult> {
   const actor = await requirePermission('order:change:review');
-  const parsed = versionedSchema.safeParse(raw);
+  const parsed = factoryConfirmationSchema.safeParse(raw);
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: fieldErrors(parsed.error) };
   }

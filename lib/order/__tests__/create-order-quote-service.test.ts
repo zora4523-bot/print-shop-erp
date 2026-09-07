@@ -209,6 +209,35 @@ describe('quoteExternalCreateOrder', () => {
     expect(second.factsKey).toBe('another-browser-request-key');
   });
 
+  it('已发布价目版本变化时生成新 token', async () => {
+    const nextSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      priceVersion: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion,
+        processing: {
+          ...CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.processing,
+          id: 'processing-v-next',
+          version:
+            CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.processing.version + 1,
+          sourceSha256: 'f'.repeat(64),
+        },
+      },
+    };
+    mocks.readSnapshot
+      .mockResolvedValueOnce(CREATE_ORDER_GOLDEN_SNAPSHOT)
+      .mockResolvedValueOnce(nextSnapshot);
+
+    const before = await quoteExternalCreateOrder(input(), now);
+    const after = await quoteExternalCreateOrder(input(), now);
+
+    expect(after.priceVersion.processing).toMatchObject({
+      id: 'processing-v-next',
+      version:
+        CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion.processing.version + 1,
+    });
+    expect(after.quoteToken).not.toBe(before.quoteToken);
+  });
+
   it('纯彩印无烫金时对外报价不携带制版费人工语义', async () => {
     mocks.productFindMany.mockResolvedValue([
       {

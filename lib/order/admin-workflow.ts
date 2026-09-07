@@ -34,7 +34,13 @@ import {
   confirmOrderPricingAtCurrentPublishedVersionInTx,
   OrderChangeRequestError,
 } from './change-request';
-import { isTrustedAdminPricingSnapshot } from './admin-pricing-snapshot';
+import {
+  hasAdminPricingConfirmationMarker,
+  isTrustedAdminChargePricingSnapshot,
+  isTrustedAdminItemPricingSnapshot,
+  isTrustedAdminPackagingPricingSnapshot,
+  isTrustedAdminPricingSnapshot,
+} from './admin-pricing-snapshot';
 import {
   evaluateFactoryConfirmationPreflight,
   isAwaitingFactoryConfirmation,
@@ -134,16 +140,74 @@ const workflowOrderSelect = {
   billingMode: true,
   items: {
     select: {
+      id: true,
+      orderId: true,
       fig: true,
+      productId: true,
+      pricingRoute: true,
+      craft: true,
+      productStructure: true,
+      plateGroupId: true,
+      pricingGroup: true,
+      specification: true,
+      actualWidthMm: true,
+      actualHeightMm: true,
+      paperType: true,
+      paperWeightGsm: true,
       quantity: true,
+      pack: true,
+      crafts: true,
+      frontFoilColors: true,
+      backFoilColors: true,
+      foilColors: true,
+      foilTechnique: true,
+      hasLocalFoil: true,
+      lamination: true,
+      printColors: true,
+      printColorsKnown: true,
+      isDoubleSided: true,
+      isDoubleColor: true,
+      unitPrice: true,
+      fixedFee: true,
+      subtotal: true,
+      priceOverrideReason: true,
       quoteDisposition: true,
       manualQuoteReason: true,
       pricingSnapshot: true,
     },
   },
-  packagingGroups: { select: { pricingSnapshot: true } },
+  packagingGroups: {
+    select: {
+      id: true,
+      orderId: true,
+      mode: true,
+      actualBagCount: true,
+      unitPrice: true,
+      subtotal: true,
+      priceOverrideReason: true,
+      pricingSnapshot: true,
+      lines: { select: { orderItemId: true, unitsPerBag: true } },
+    },
+  },
   customerCharges: {
-    select: { status: true, amount: true, pricingSnapshot: true },
+    select: {
+      orderId: true,
+      businessKey: true,
+      shipmentId: true,
+      priceBookId: true,
+      sourceRuleId: true,
+      status: true,
+      quantity: true,
+      unit: true,
+      unitPrice: true,
+      suggestedAmount: true,
+      amount: true,
+      isAdjustment: true,
+      approvalReference: true,
+      overrideReason: true,
+      pricingSnapshot: true,
+      category: { select: { code: true } },
+    },
   },
   _count: {
     select: {
@@ -225,25 +289,47 @@ function pricingSnapshotStillRequiresManual(
 }
 
 function hasUnresolvedManualPricing(order: WorkflowOrder): boolean {
-  const itemPending = order.items.some(
-    (item) =>
-      !isTrustedAdminPricingSnapshot(item.pricingSnapshot) &&
-      (item.quoteDisposition ===
+  const itemPending = order.items.some((item) => {
+    if (isTrustedAdminItemPricingSnapshot(item.pricingSnapshot, item)) {
+      return false;
+    }
+    return (
+      isTrustedAdminPricingSnapshot(item.pricingSnapshot) ||
+      hasAdminPricingConfirmationMarker(item.pricingSnapshot) ||
+      item.quoteDisposition ===
         OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED ||
-        Boolean(item.manualQuoteReason?.trim()) ||
-        pricingSnapshotStillRequiresManual(item.pricingSnapshot)),
-  );
-  const packagingPending = order.packagingGroups.some(
-    (group) =>
-      !isTrustedAdminPricingSnapshot(group.pricingSnapshot) &&
-      pricingSnapshotStillRequiresManual(group.pricingSnapshot),
-  );
+      Boolean(item.manualQuoteReason?.trim()) ||
+      pricingSnapshotStillRequiresManual(item.pricingSnapshot)
+    );
+  });
+  const packagingPending = order.packagingGroups.some((group) => {
+    if (
+      isTrustedAdminPackagingPricingSnapshot(group.pricingSnapshot, group)
+    ) {
+      return false;
+    }
+    return (
+      isTrustedAdminPricingSnapshot(group.pricingSnapshot) ||
+      hasAdminPricingConfirmationMarker(group.pricingSnapshot) ||
+      pricingSnapshotStillRequiresManual(group.pricingSnapshot)
+    );
+  });
   const chargePending = order.customerCharges.some((charge) => {
     if (charge.status === OrderCustomerChargeStatus.WAIVED) {
       return charge.amount === null || !charge.amount.isZero();
     }
     if (charge.amount === null) return true;
-    if (isTrustedAdminPricingSnapshot(charge.pricingSnapshot)) return false;
+    if (
+      isTrustedAdminChargePricingSnapshot(charge.pricingSnapshot, charge)
+    ) {
+      return false;
+    }
+    if (
+      isTrustedAdminPricingSnapshot(charge.pricingSnapshot) ||
+      hasAdminPricingConfirmationMarker(charge.pricingSnapshot)
+    ) {
+      return true;
+    }
     return (
       charge.status === OrderCustomerChargeStatus.PENDING_AMOUNT ||
       pricingSnapshotStillRequiresManual(charge.pricingSnapshot)
@@ -317,6 +403,7 @@ export async function confirmFactoryOrder(
     orderId: string;
     expectedRevision: number;
     expectedWorkOrderVersion: number;
+    expectedQuoteToken: string | null;
   },
   actor: AdminWorkflowActor,
 ): Promise<{ orderId: string; status: OrderStatus; confirmedFee: string }> {
@@ -348,6 +435,7 @@ export async function confirmFactoryOrder(
           orderId: order.id,
           actorId: actor.id,
           now: confirmedAt,
+          expectedQuoteToken: input.expectedQuoteToken,
         },
       );
     } catch (error) {

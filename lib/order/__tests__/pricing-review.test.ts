@@ -10,6 +10,7 @@ import {
   Role,
 } from "../../../generated/prisma/enums";
 import type { FinalizeOrderPricingCommand } from "../pricing-review";
+import { buildTrustedAdminChargePricingSnapshot } from "../admin-pricing-snapshot";
 
 const {
   dbMock,
@@ -101,8 +102,21 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
     items: [
       {
         id: "item-auto",
+        orderId: "order-1",
         sequence: 1,
         name: "快照自动价款",
+        productId: "product-auto",
+        craft: null,
+        productStructure: "STANDARD_ENVELOPE",
+        plateGroupId: null,
+        pricingGroup: "MID",
+        specification: "中号封",
+        actualWidthMm: null,
+        actualHeightMm: null,
+        paperType: "珠光纸",
+        paperWeightGsm: 160,
+        pack: null,
+        crafts: ["craft-foil"],
         manualQuoteReason: null,
         quantity: 1_000,
         quoteDisposition: OrderItemQuoteDisposition.PRICED,
@@ -110,7 +124,13 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         frontFoilColors: ["亮金"],
         backFoilColors: [],
         foilColors: ["亮金"],
+        foilTechnique: "FLAT",
+        hasLocalFoil: true,
+        lamination: "NONE",
+        printColors: [],
+        printColorsKnown: true,
         isDoubleSided: false,
+        isDoubleColor: false,
         unitPrice: "0.1000",
         fixedFee: "10.00",
         subtotal: "110.00",
@@ -135,8 +155,21 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
       },
       {
         id: "item-manual",
+        orderId: "order-1",
         sequence: 2,
         name: "配置外纸张",
+        productId: null,
+        craft: null,
+        productStructure: "STANDARD_ENVELOPE",
+        plateGroupId: null,
+        pricingGroup: "MID",
+        specification: "中号封",
+        actualWidthMm: null,
+        actualHeightMm: null,
+        paperType: "客户来纸",
+        paperWeightGsm: null,
+        pack: null,
+        crafts: ["craft-foil"],
         manualQuoteReason: "客户自带特殊纸，转人工核价",
         quantity: 100,
         quoteDisposition: OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
@@ -144,7 +177,13 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         frontFoilColors: ["亮金"],
         backFoilColors: [],
         foilColors: ["亮金"],
+        foilTechnique: "FLAT",
+        hasLocalFoil: true,
+        lamination: "NONE",
+        printColors: [],
+        printColorsKnown: true,
         isDoubleSided: false,
+        isDoubleColor: false,
         unitPrice: "0.0000",
         fixedFee: "0.00",
         subtotal: "0.00",
@@ -165,6 +204,7 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
     packagingGroups: [
       {
         id: "group-auto",
+        orderId: "order-1",
         sequence: 1,
         name: "单款装",
         mode: OrderPackagingMode.SINGLE_STYLE,
@@ -184,9 +224,11 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
           suggestedSubtotal: "2.00",
         },
         priceOverrideReason: null,
+        lines: [{ orderItemId: "item-auto", unitsPerBag: 50 }],
       },
       {
         id: "group-manual",
+        orderId: "order-1",
         sequence: 2,
         name: "特殊混装",
         mode: OrderPackagingMode.MIXED_STYLE,
@@ -202,6 +244,7 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
           actual: { amount: null, provisional: true },
         },
         priceOverrideReason: null,
+        lines: [{ orderItemId: "item-manual", unitsPerBag: 10 }],
       },
     ],
     orderCharges: [],
@@ -220,11 +263,13 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
     customerCharges: [
       {
         id: "shipping-auto",
+        orderId: "order-1",
         shipmentId: "shipment-1",
         businessKey: "SHIPMENT:1:SHIPPING_FEE",
         description: "顺丰到付",
         quantity: "2.000",
         unit: "kg",
+        unitPrice: "0.0000",
         suggestedAmount: "0.00",
         amount: "0.00",
         pricingSnapshot: {
@@ -241,15 +286,19 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         status: "WAIVED",
         priceBookId: "logistics-v2",
         sourceRuleId: "sf-waiver",
+        isAdjustment: false,
+        approvalReference: null,
         category: { code: "SHIPPING_FEE", name: "快递费" },
       },
       {
         id: "packing-manual",
+        orderId: "order-1",
         shipmentId: "shipment-1",
         businessKey: "SHIPMENT:1:PACKING_MATERIAL",
         description: "打包耗材",
         quantity: "1",
         unit: "票",
+        unitPrice: null,
         suggestedAmount: null,
         amount: null,
         pricingSnapshot: {
@@ -266,15 +315,19 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         status: "PENDING_AMOUNT",
         priceBookId: "logistics-v2",
         sourceRuleId: null,
+        isAdjustment: false,
+        approvalReference: null,
         category: { code: "PACKING_MATERIAL", name: "打包耗材费" },
       },
       {
         id: "other-charge",
+        orderId: "order-1",
         shipmentId: null,
         businessKey: "ORDER:OTHER",
         description: "其他费用",
         quantity: null,
         unit: null,
+        unitPrice: null,
         suggestedAmount: null,
         amount: "7.00",
         pricingSnapshot: null,
@@ -282,6 +335,8 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         status: "FINAL",
         priceBookId: null,
         sourceRuleId: null,
+        isAdjustment: false,
+        approvalReference: null,
         category: { code: "OTHER", name: "其他费用" },
       },
     ],
@@ -334,6 +389,140 @@ function command(
     remark: "工厂核价确认",
     ...overrides,
   };
+}
+
+function trustedChargeSnapshot(
+  charge: Omit<
+    Parameters<
+      typeof buildTrustedAdminChargePricingSnapshot
+    >[0]["charge"],
+    "categoryCode"
+  > & {
+    category: { code: string };
+    pricingSnapshot: unknown;
+  },
+  overrides: Partial<
+    Parameters<
+      typeof buildTrustedAdminChargePricingSnapshot
+    >[0]["charge"]
+  > = {},
+) {
+  return buildTrustedAdminChargePricingSnapshot({
+    previous: charge.pricingSnapshot,
+    now,
+    actorId: admin.id,
+    previousPriceRevision: 3,
+    charge: {
+      orderId: charge.orderId,
+      businessKey: charge.businessKey,
+      shipmentId: charge.shipmentId,
+      categoryCode: charge.category.code,
+      status: charge.status,
+      priceBookId: charge.priceBookId,
+      sourceRuleId: charge.sourceRuleId,
+      quantity: charge.quantity,
+      unit: charge.unit,
+      unitPrice: charge.unitPrice,
+      suggestedAmount: charge.suggestedAmount,
+      amount: charge.amount ?? "0.00",
+      isAdjustment: charge.isAdjustment,
+      approvalReference: charge.approvalReference,
+      overrideReason: charge.overrideReason,
+      ...overrides,
+    },
+  });
+}
+
+function twoShipmentPricingOrder() {
+  const order = pricingOrder();
+  const shipping = order.customerCharges.find(
+    (charge) => charge.id === "shipping-auto",
+  )!;
+  const packing = order.customerCharges.find(
+    (charge) => charge.id === "packing-manual",
+  )!;
+  const other = order.customerCharges.find(
+    (charge) => charge.id === "other-charge",
+  )!;
+  return {
+    ...order,
+    shipments: [
+      {
+        ...order.shipments[0]!,
+        lines: [
+          { orderItemId: "item-auto", quantity: 500 },
+          { orderItemId: "item-manual", quantity: 50 },
+        ],
+      },
+      {
+        id: "shipment-2",
+        sequence: 2,
+        destinationProvince: "湖南",
+        weightKg: "3.000",
+        lines: [
+          { orderItemId: "item-auto", quantity: 500 },
+          { orderItemId: "item-manual", quantity: 50 },
+        ],
+      },
+    ],
+    customerCharges: [
+      shipping,
+      packing,
+      {
+        ...shipping,
+        id: "shipping-auto-2",
+        shipmentId: "shipment-2",
+        businessKey: "SHIPMENT:2:SHIPPING_FEE",
+        pricingSnapshot: {
+          ...shipping.pricingSnapshot,
+          quote: {
+            amount: "0.00",
+            basis: { billableWeightKg: "3.000" },
+            errors: [],
+          },
+        },
+      },
+      {
+        ...packing,
+        id: "packing-manual-2",
+        shipmentId: "shipment-2",
+        businessKey: "SHIPMENT:2:PACKING_MATERIAL",
+      },
+      other,
+    ],
+  };
+}
+
+function twoShipmentCommand(
+  overrides: Partial<FinalizeOrderPricingCommand> = {},
+): FinalizeOrderPricingCommand {
+  return command({
+    shipments: [
+      command().shipments[0]!,
+      {
+        shipmentId: "shipment-2",
+        expectedDestinationProvince: "湖南",
+        expectedBillableWeightKg: "3",
+        shippingFee: "0.00",
+        packingMaterialFee: "9.00",
+        reason: "工厂确认第二票特殊纸箱",
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function expectNoPricingWrites(): void {
+  expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+  expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
+  expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
+  expect(dbMock.orderCustomerCharge.create).not.toHaveBeenCalled();
+  expect(dbMock.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+  expect(dbMock.orderChangeRequest.updateMany).not.toHaveBeenCalled();
+  expect(dbMock.order.update).not.toHaveBeenCalled();
+  expect(appendPricingRevisionMock).not.toHaveBeenCalled();
+  expect(activateOperationsMock).not.toHaveBeenCalled();
+  expect(dbMock.orderLog.create).not.toHaveBeenCalled();
 }
 
 beforeEach(() => {
@@ -776,6 +965,154 @@ describe("snapshot-only order pricing review", () => {
     );
   });
 
+  it("keeps status-only confirmed markers editable until row-bound envelopes are complete", async () => {
+    const order = pricingOrder();
+    dbMock.order.findUnique.mockResolvedValue({
+      ...order,
+      items: order.items.map((item) =>
+        item.id === "item-auto"
+          ? { ...item, pricingSnapshot: { status: "ADMIN_CONFIRMED" } }
+          : item,
+      ),
+      packagingGroups: order.packagingGroups.map((group) =>
+        group.id === "group-auto"
+          ? { ...group, pricingSnapshot: { status: "ADMIN_CONFIRMED" } }
+          : group,
+      ),
+      customerCharges: order.customerCharges.map((charge) =>
+        charge.id === "packing-manual"
+          ? {
+              ...charge,
+              status: "ESTIMATED",
+              amount: "5.00",
+              pricingSnapshot: { status: "ADMIN_CONFIRMED" },
+            }
+          : charge,
+      ),
+    });
+
+    const preview = await previewOrderPricingReview("order-1", admin, now);
+
+    expect(preview.items.find((item) => item.itemId === "item-auto")?.complete)
+      .toBe(false);
+    expect(
+      preview.packagingGroups.find(
+        (group) => group.packagingGroupId === "group-auto",
+      )?.complete,
+    ).toBe(false);
+    expect(preview.shipments[0]?.packaging).toMatchObject({
+      complete: false,
+      advisory: true,
+      currentAmount: "5.00",
+    });
+  });
+
+  it.each([
+    ["order", { orderId: "order-forged" }],
+    ["business key", { businessKey: "SHIPMENT:2:PACKING_MATERIAL" }],
+    ["shipment", { shipmentId: "shipment-forged" }],
+    ["category", { categoryCode: "SHIPPING_FEE" }],
+  ])(
+    "rejects a same-amount/reason charge snapshot copied from another %s with zero writes",
+    async (_label, snapshotOverrides) => {
+      const order = pricingOrder();
+      const packing = order.customerCharges.find(
+        (charge) => charge.id === "packing-manual",
+      )!;
+      const livePacking = {
+        ...packing,
+        status: "ESTIMATED",
+        amount: "8.00",
+        overrideReason: "已核定耗材费",
+      };
+      dbMock.order.findUnique.mockResolvedValue({
+        ...order,
+        customerCharges: order.customerCharges.map((charge) =>
+          charge.id === packing.id
+            ? {
+                ...livePacking,
+                pricingSnapshot: trustedChargeSnapshot(livePacking, {
+                  ...snapshotOverrides,
+                  amount: "8.00",
+                  overrideReason: "已核定耗材费",
+                }),
+              }
+            : charge,
+        ),
+      });
+
+      await expect(
+        finalizeOrderPricing(
+          command({
+            shipments: [
+              {
+                shipmentId: "shipment-1",
+                expectedDestinationProvince: "广东",
+                expectedBillableWeightKg: "2",
+                shippingFee: "0.00",
+                packingMaterialFee: "8.00",
+                reason: "",
+              },
+            ],
+          }),
+          admin,
+          now,
+        ),
+      ).rejects.toThrow(/存在待人工确认收费/u);
+
+      expectNoPricingWrites();
+    },
+  );
+
+  it("accepts a row-bound trusted shipment charge without reopening it", async () => {
+    const order = pricingOrder();
+    const packing = order.customerCharges.find(
+      (charge) => charge.id === "packing-manual",
+    )!;
+    const livePacking = {
+      ...packing,
+      status: "ESTIMATED",
+      amount: "8.00",
+      overrideReason: "已核定耗材费",
+    };
+    dbMock.order.findUnique.mockResolvedValue({
+      ...order,
+      customerCharges: order.customerCharges.map((charge) =>
+        charge.id === packing.id
+          ? {
+              ...livePacking,
+              pricingSnapshot: trustedChargeSnapshot(livePacking),
+            }
+          : charge,
+      ),
+    });
+
+    const preview = await previewOrderPricingReview("order-1", admin, now);
+    expect(preview.shipments[0]?.packaging.complete).toBe(true);
+
+    await expect(
+      finalizeOrderPricing(
+        command({
+          shipments: [
+            {
+              shipmentId: "shipment-1",
+              expectedDestinationProvince: "广东",
+              expectedBillableWeightKg: "2",
+              shippingFee: "0.00",
+              packingMaterialFee: "999.00",
+              reason: "",
+            },
+          ],
+        }),
+        admin,
+        now,
+      ),
+    ).resolves.toMatchObject({ confirmedFee: "155.00" });
+    expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "packing-manual" } }),
+    );
+  });
+
   it.each([
     ["a missing amount", null],
     ["a non-zero amount", "1.00"],
@@ -808,6 +1145,7 @@ describe("snapshot-only order pricing review", () => {
         ...order.customerCharges,
         {
           id: "plate-pending",
+          orderId: "order-1",
           shipmentId: null,
           businessKey: "ORDER:PLATE_MAKING_FEE:PENDING",
           description: "制版费",
@@ -832,6 +1170,9 @@ describe("snapshot-only order pricing review", () => {
           status: "PENDING_AMOUNT",
           priceBookId: null,
           sourceRuleId: null,
+          unitPrice: null,
+          isAdjustment: false,
+          approvalReference: null,
           category: { code: "PLATE_MAKING_FEE", name: "制版费" },
         },
       ],
@@ -957,6 +1298,72 @@ describe("snapshot-only order pricing review", () => {
     expect(preview.orderCharges).toEqual([
       expect.objectContaining({ chargeId: "plate-partial-marker" }),
     ]);
+  });
+
+  it("reopens administrator item and packaging snapshots when live facts drift", async () => {
+    const order = pricingOrder();
+    const confirmation = {
+      actorId: "admin-old",
+      confirmedAt: "2026-08-27T02:00:00.000Z",
+      reason: null,
+    };
+    dbMock.order.findUnique.mockResolvedValue({
+      ...order,
+      items: order.items.map((item) =>
+        item.id === "item-auto"
+          ? {
+              ...item,
+              pricingSnapshot: {
+                source: "ADMIN_SNAPSHOT_CONFIRMATION",
+                status: "ADMIN_CONFIRMED",
+                actual: {
+                  quantity: item.quantity,
+                  unitPrice: item.unitPrice,
+                  fixedFee: item.fixedFee,
+                  subtotal: "109.00",
+                  overrideReason: null,
+                  provisional: false,
+                  requiresAdminConfirmation: false,
+                  automatic: false,
+                },
+                confirmation,
+              },
+            }
+          : item,
+      ),
+      packagingGroups: order.packagingGroups.map((group) =>
+        group.id === "group-auto"
+          ? {
+              ...group,
+              pricingSnapshot: {
+                source: "ADMIN_SNAPSHOT_CONFIRMATION",
+                status: "ADMIN_CONFIRMED",
+                actual: {
+                  actualBagCount: group.actualBagCount - 1,
+                  unitPrice: group.unitPrice,
+                  subtotal: group.subtotal,
+                  overrideReason: null,
+                  provisional: false,
+                  requiresAdminConfirmation: false,
+                  automatic: false,
+                },
+                confirmation,
+              },
+            }
+          : group,
+      ),
+    });
+
+    const preview = await previewOrderPricingReview("order-1", admin, now);
+
+    expect(
+      preview.items.find((item) => item.itemId === "item-auto")?.complete,
+    ).toBe(false);
+    expect(
+      preview.packagingGroups.find(
+        (group) => group.packagingGroupId === "group-auto",
+      )?.complete,
+    ).toBe(false);
   });
 
   it("accepts only an internally consistent structured plate breakdown", async () => {
@@ -1210,6 +1617,7 @@ describe("snapshot-only order pricing review", () => {
           status: "ADMIN_CONFIRMED",
           manualQuoteReason: "客户自带特殊纸，转人工核价",
           actual: expect.objectContaining({
+            quantity: 100,
             subtotal: "25.00",
             provisional: false,
           }),
@@ -1218,6 +1626,16 @@ describe("snapshot-only order pricing review", () => {
             confirmedAt: now.toISOString(),
             reason: "工厂核对特殊纸后确认",
           },
+        }),
+      }),
+    });
+    expect(dbMock.orderPackagingGroup.update).toHaveBeenCalledWith({
+      where: { id: "group-manual" },
+      data: expect.objectContaining({
+        pricingSnapshot: expect.objectContaining({
+          source: "ADMIN_SNAPSHOT_CONFIRMATION",
+          status: "ADMIN_CONFIRMED",
+          actual: expect.objectContaining({ actualBagCount: 15 }),
         }),
       }),
     });
@@ -1351,34 +1769,103 @@ describe("snapshot-only order pricing review", () => {
     );
   });
 
-  it("creates a missing manual charge by category code without reading price rules", async () => {
-    const order = pricingOrder();
-    dbMock.order.findUnique.mockResolvedValue({
-      ...order,
-      customerCharges: order.customerCharges.filter(
-        (charge) => charge.category.code !== "PACKING_MATERIAL",
-      ),
-    });
-
-    await finalizeOrderPricing(command(), admin, now);
-
-    expect(dbMock.customerChargeCategory.findUnique).toHaveBeenCalledWith({
-      where: { code: "PACKING_MATERIAL" },
-      select: { id: true, name: true },
-    });
-    expect(dbMock.orderCustomerCharge.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        businessKey: "SHIPMENT:1:PACKING_MATERIAL",
-        categoryId: "packing_material-category",
-        priceBookId: null,
-        sourceRuleId: null,
-        amount: "8.00",
+  it.each([
+    {
+      label: "two shipments swap shipping relations",
+      mutate: (order: ReturnType<typeof twoShipmentPricingOrder>) => ({
+        ...order,
+        customerCharges: order.customerCharges.map((charge) =>
+          charge.id === "shipping-auto"
+            ? { ...charge, shipmentId: "shipment-2" }
+            : charge.id === "shipping-auto-2"
+              ? { ...charge, shipmentId: "shipment-1" }
+              : charge,
+        ),
       }),
-      select: { id: true },
-    });
+    },
+    {
+      label: "canonical business key points at the wrong shipment",
+      mutate: (order: ReturnType<typeof twoShipmentPricingOrder>) => ({
+        ...order,
+        customerCharges: order.customerCharges.map((charge) =>
+          charge.id === "shipping-auto"
+            ? { ...charge, shipmentId: "shipment-2" }
+            : charge,
+        ),
+      }),
+    },
+    {
+      label: "canonical shipment charge points at the wrong order",
+      mutate: (order: ReturnType<typeof twoShipmentPricingOrder>) => ({
+        ...order,
+        customerCharges: order.customerCharges.map((charge) =>
+          charge.id === "shipping-auto"
+            ? { ...charge, orderId: "order-forged" }
+            : charge,
+        ),
+      }),
+    },
+    {
+      label: "shipment charge uses a non-canonical business-key case",
+      mutate: (order: ReturnType<typeof twoShipmentPricingOrder>) => ({
+        ...order,
+        customerCharges: order.customerCharges.map((charge) =>
+          charge.id === "shipping-auto"
+            ? { ...charge, businessKey: "shipment:1:shipping_fee" }
+            : charge,
+        ),
+      }),
+    },
+    {
+      label: "one shipment charge is missing",
+      mutate: (order: ReturnType<typeof twoShipmentPricingOrder>) => ({
+        ...order,
+        customerCharges: order.customerCharges.filter(
+          (charge) => charge.id !== "packing-manual-2",
+        ),
+      }),
+    },
+    {
+      label: "one shipment charge row is duplicated",
+      mutate: (order: ReturnType<typeof twoShipmentPricingOrder>) => ({
+        ...order,
+        customerCharges: order.customerCharges.map((charge) =>
+          charge.id === "shipping-auto-2"
+            ? {
+                ...charge,
+                shipmentId: "shipment-1",
+                businessKey: "SHIPMENT:1:SHIPPING_FEE",
+              }
+            : charge,
+        ),
+      }),
+    },
+  ])("fails closed before writes when $label", async ({ mutate }) => {
+    dbMock.order.findUnique.mockResolvedValue(mutate(twoShipmentPricingOrder()));
+
+    await expect(
+      finalizeOrderPricing(twoShipmentCommand(), admin, now),
+    ).rejects.toThrow(/必须且只能|不一致|重复/u);
+
+    expectNoPricingWrites();
   });
 
-  it("creates each missing external-sales shipment charge once and aggregates each amount once", async () => {
+  it("keeps each row distinct when two shipments have canonical charge identities", async () => {
+    dbMock.order.findUnique.mockResolvedValue(twoShipmentPricingOrder());
+
+    const result = await finalizeOrderPricing(twoShipmentCommand(), admin, now);
+
+    expect(result.totalAmount).toBe("164.00");
+    expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledTimes(2);
+    expect(
+      dbMock.orderCustomerCharge.update.mock.calls.map(
+        ([args]) => args.where.id,
+      ),
+    ).toEqual(["packing-manual", "packing-manual-2"]);
+    expect(dbMock.orderCustomerCharge.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses to preview an external-sales order with missing shipment charges", async () => {
     const order = pricingOrder();
     dbMock.order.findUnique.mockResolvedValue({
       ...order,
@@ -1389,42 +1876,10 @@ describe("snapshot-only order pricing review", () => {
       ),
     });
 
-    const result = await finalizeOrderPricing(
-      command({
-        shipments: command().shipments.map((shipment) => ({
-          ...shipment,
-          shippingFee: "6.00",
-          packingMaterialFee: "8.00",
-          reason: "工厂逐票确认物流与耗材",
-        })),
-      }),
-      admin,
-      now,
-    );
-
-    expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
-    expect(dbMock.orderCustomerCharge.create).toHaveBeenCalledTimes(2);
-    expect(
-      dbMock.orderCustomerCharge.create.mock.calls.map(
-        ([args]) => args.data.businessKey,
-      ),
-    ).toEqual([
-      "SHIPMENT:1:SHIPPING_FEE",
-      "SHIPMENT:1:PACKING_MATERIAL",
-    ]);
-    expect(result.totalAmount).toBe("161.00");
-    expect(appendPricingRevisionMock).toHaveBeenCalledWith(
-      dbMock,
-      expect.objectContaining({
-        metadata: expect.objectContaining({
-          manualCustomerChargeKeys: [
-            "SHIPMENT:1:SHIPPING_FEE",
-            "SHIPMENT:1:PACKING_MATERIAL",
-          ],
-          customerChargeAmount: "21.00",
-        }),
-      }),
-    );
+    await expect(
+      previewOrderPricingReview("order-1", admin, now),
+    ).rejects.toThrow(/必须且只能/u);
+    expectNoPricingWrites();
   });
 
   it("propagates revision failure so the database transaction rolls back", async () => {

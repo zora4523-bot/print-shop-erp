@@ -27,4 +27,11 @@ describe('admin order decision reason contract', () => {
     expect(source).toContain("setMessage('操作未完成，请刷新工单后重试。')");
     expect(source).not.toContain('void task().then(finish)');
   });
+
+  it('把当前价预览凭证传入工厂确认动作', () => {
+    expect(source).toContain(
+      'expectedQuoteToken: order.priceComparison?.quoteToken',
+    );
+    expect(source).toContain('!order.priceComparison ||');
+  });
 });

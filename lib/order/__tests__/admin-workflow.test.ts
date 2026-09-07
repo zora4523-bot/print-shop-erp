@@ -99,10 +99,16 @@ import {
   resumeFactoryOrder,
   settleFactoryOrder,
 } from '../admin-workflow';
+import {
+  buildTrustedAdminChargePricingSnapshot,
+  buildTrustedAdminItemPricingSnapshot,
+  buildTrustedAdminPackagingPricingSnapshot,
+} from '../admin-pricing-snapshot';
 
 const admin = { id: 'admin-1', role: Role.ADMIN };
 const sales = { id: 'sales-1', role: Role.SALES };
 const settledAt = new Date('2026-09-02T03:04:05.000Z');
+const factoryQuoteToken = `create-order-quote-v2:${'a'.repeat(64)}`;
 
 function order(overrides: Record<string, unknown> = {}) {
   return {
@@ -133,6 +139,107 @@ function order(overrides: Record<string, unknown> = {}) {
     customerCharges: [],
     _count: { changeRequests: 0 },
     ...overrides,
+  };
+}
+
+function trustedManualItem() {
+  const item = {
+    id: 'item-manual',
+    orderId: 'order-1',
+    fig: 1,
+    productId: null,
+    pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
+    craft: null,
+    productStructure: 'STANDARD_ENVELOPE',
+    plateGroupId: null,
+    pricingGroup: 'MID',
+    manualQuoteReason: '特殊工艺人工核价',
+    specification: '中号封',
+    actualWidthMm: null,
+    actualHeightMm: null,
+    paperType: '珠光纸',
+    paperWeightGsm: 160,
+    quantity: 1_000,
+    pack: null,
+    crafts: ['craft-foil'],
+    frontFoilColors: ['哑金'],
+    backFoilColors: [],
+    foilColors: ['哑金'],
+    foilTechnique: 'FLAT',
+    hasLocalFoil: true,
+    lamination: 'NONE',
+    printColors: [],
+    printColorsKnown: true,
+    isDoubleSided: false,
+    isDoubleColor: false,
+    unitPrice: new Decimal('0.1000'),
+    fixedFee: new Decimal('0.00'),
+    subtotal: new Decimal('100.00'),
+    priceOverrideReason: '特殊工艺人工核价',
+    quoteDisposition: OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
+  };
+  return {
+    ...item,
+    pricingSnapshot: buildTrustedAdminItemPricingSnapshot({
+      previous: null,
+      now: settledAt,
+      actorId: admin.id,
+      previousPriceRevision: 3,
+      item,
+    }),
+  };
+}
+
+function trustedManualPackaging() {
+  const group = {
+    id: 'group-manual',
+    orderId: 'order-1',
+    mode: 'SINGLE_STYLE',
+    actualBagCount: 100,
+    unitPrice: new Decimal('0.1050'),
+    subtotal: new Decimal('10.50'),
+    priceOverrideReason: '人工确认入袋费',
+    lines: [{ orderItemId: 'item-manual', unitsPerBag: 10 }],
+  };
+  return {
+    ...group,
+    pricingSnapshot: buildTrustedAdminPackagingPricingSnapshot({
+      previous: null,
+      now: settledAt,
+      actorId: admin.id,
+      previousPriceRevision: 3,
+      group,
+    }),
+  };
+}
+
+function trustedManualCharge() {
+  const charge = {
+    orderId: 'order-1',
+    businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+    shipmentId: 'shipment-1',
+    status: OrderCustomerChargeStatus.ESTIMATED,
+    priceBookId: 'logistics-v2',
+    sourceRuleId: 'shipping-rule-1',
+    quantity: new Decimal('2.000'),
+    unit: 'kg',
+    unitPrice: new Decimal('9.0000'),
+    suggestedAmount: new Decimal('18.00'),
+    amount: new Decimal('18.00'),
+    isAdjustment: false,
+    approvalReference: null,
+    overrideReason: null,
+    category: { code: 'SHIPPING_FEE' },
+  };
+  return {
+    ...charge,
+    pricingSnapshot: buildTrustedAdminChargePricingSnapshot({
+      previous: null,
+      now: settledAt,
+      actorId: admin.id,
+      previousPriceRevision: 3,
+      charge: { ...charge, categoryCode: charge.category.code },
+    }),
   };
 }
 
@@ -182,6 +289,7 @@ describe('admin order workflow', () => {
           orderId: 'order-1',
           expectedRevision: 4,
           expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
         },
         sales,
       ),
@@ -196,6 +304,7 @@ describe('admin order workflow', () => {
           orderId: 'order-1',
           expectedRevision: 4,
           expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
         },
         admin,
       ),
@@ -216,6 +325,12 @@ describe('admin order workflow', () => {
     expect(tx.order.update.mock.calls[0]?.[0].data).not.toHaveProperty(
       'settledFee',
     );
+    expect(currentPriceMock).toHaveBeenCalledWith(tx, {
+      orderId: 'order-1',
+      actorId: admin.id,
+      now: settledAt,
+      expectedQuoteToken: factoryQuoteToken,
+    });
   });
 
   it('fails factory confirmation while a pricing or change review is pending', async () => {
@@ -231,6 +346,7 @@ describe('admin order workflow', () => {
           orderId: 'order-1',
           expectedRevision: 4,
           expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
         },
         admin,
       ),
@@ -262,6 +378,7 @@ describe('admin order workflow', () => {
           orderId: 'order-1',
           expectedRevision: 4,
           expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
         },
         admin,
       ),
@@ -315,6 +432,7 @@ describe('admin order workflow', () => {
             orderId: 'order-1',
             expectedRevision: 4,
             expectedWorkOrderVersion: 2,
+            expectedQuoteToken: factoryQuoteToken,
           },
           admin,
         ),
@@ -371,6 +489,36 @@ describe('admin order workflow', () => {
           },
         ],
       },
+      {
+        items: [
+          {
+            fig: 1,
+            quantity: 1_000,
+            quoteDisposition: OrderItemQuoteDisposition.PRICED,
+            manualQuoteReason: null,
+            pricingSnapshot: { status: 'ADMIN_CONFIRMED' },
+          },
+        ],
+      },
+      {
+        packagingGroups: [
+          { pricingSnapshot: { source: 'ADMIN_SNAPSHOT_CONFIRMATION' } },
+        ],
+      },
+      {
+        customerCharges: [
+          {
+            orderId: 'order-1',
+            businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+            shipmentId: 'shipment-1',
+            status: OrderCustomerChargeStatus.ESTIMATED,
+            amount: new Decimal('18.00'),
+            overrideReason: null,
+            category: { code: 'SHIPPING_FEE' },
+            pricingSnapshot: { status: 'ADMIN_CONFIRMED' },
+          },
+        ],
+      },
     ]) {
       vi.clearAllMocks();
       tx.$executeRaw.mockResolvedValue(0);
@@ -388,6 +536,7 @@ describe('admin order workflow', () => {
             orderId: 'order-1',
             expectedRevision: 4,
             expectedWorkOrderVersion: 2,
+            expectedQuoteToken: factoryQuoteToken,
           },
           admin,
         ),
@@ -402,67 +551,9 @@ describe('admin order workflow', () => {
       order({
         pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
         confirmedFee: new Decimal('128.50'),
-        items: [
-          {
-            fig: 1,
-            quantity: 1_000,
-            quoteDisposition:
-              OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
-            manualQuoteReason: '特殊工艺人工核价',
-            pricingSnapshot: {
-              source: 'ADMIN_SNAPSHOT_CONFIRMATION',
-              previousPriceRevision: 0,
-              status: 'ADMIN_CONFIRMED',
-              actual: {
-                provisional: false,
-                requiresAdminConfirmation: false,
-                automatic: false,
-              },
-              confirmation: {
-                actorId: admin.id,
-                confirmedAt: settledAt.toISOString(),
-              },
-            },
-          },
-        ],
-        packagingGroups: [
-          {
-            pricingSnapshot: {
-              source: 'ADMIN_SNAPSHOT_CONFIRMATION',
-              previousPriceRevision: 0,
-              status: 'ADMIN_CONFIRMED',
-              actual: {
-                provisional: false,
-                requiresAdminConfirmation: false,
-                automatic: false,
-              },
-              confirmation: {
-                actorId: admin.id,
-                confirmedAt: settledAt.toISOString(),
-              },
-            },
-          },
-        ],
-        customerCharges: [
-          {
-            status: OrderCustomerChargeStatus.ESTIMATED,
-            amount: new Decimal('18.00'),
-            pricingSnapshot: {
-              source: 'ADMIN_SNAPSHOT_CONFIRMATION',
-              previousPriceRevision: 0,
-              status: 'ADMIN_CONFIRMED',
-              actual: {
-                provisional: false,
-                requiresAdminConfirmation: false,
-                automatic: false,
-              },
-              confirmation: {
-                actorId: admin.id,
-                confirmedAt: settledAt.toISOString(),
-              },
-            },
-          },
-        ],
+        items: [trustedManualItem()],
+        packagingGroups: [trustedManualPackaging()],
+        customerCharges: [trustedManualCharge()],
       }),
     );
 
@@ -472,11 +563,110 @@ describe('admin order workflow', () => {
           orderId: 'order-1',
           expectedRevision: 4,
           expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
         },
         admin,
       ),
     ).resolves.toMatchObject({ status: OrderStatus.CONFIRMED });
     expect(currentPriceMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      label: '款式小计',
+      details: {
+        items: [
+          {
+            fig: 1,
+            quantity: 1_000,
+            unitPrice: new Decimal('0.1000'),
+            fixedFee: new Decimal('0.00'),
+            subtotal: new Decimal('101.00'),
+            priceOverrideReason: '特殊工艺人工核价',
+            quoteDisposition:
+              OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
+            manualQuoteReason: '特殊工艺人工核价',
+            pricingSnapshot: {
+              source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+              status: 'ADMIN_CONFIRMED',
+              previousPriceRevision: 3,
+              actual: {
+                quantity: 1_000,
+                unitPrice: '0.1000',
+                fixedFee: '0.00',
+                subtotal: '100.00',
+                overrideReason: '特殊工艺人工核价',
+                provisional: false,
+                requiresAdminConfirmation: false,
+                automatic: false,
+              },
+              confirmation: {
+                actorId: admin.id,
+                confirmedAt: settledAt.toISOString(),
+                reason: '特殊工艺人工核价',
+              },
+            },
+          },
+        ],
+      },
+    },
+    {
+      label: '包装袋数',
+      details: {
+        packagingGroups: [
+          {
+            actualBagCount: 101,
+            unitPrice: new Decimal('0.1000'),
+            subtotal: new Decimal('10.00'),
+            priceOverrideReason: '人工确认入袋费',
+            pricingSnapshot: {
+              source: 'ADMIN_SNAPSHOT_CONFIRMATION',
+              status: 'ADMIN_CONFIRMED',
+              previousPriceRevision: 3,
+              actual: {
+                actualBagCount: 100,
+                unitPrice: '0.1000',
+                subtotal: '10.00',
+                overrideReason: '人工确认入袋费',
+                provisional: false,
+                requiresAdminConfirmation: false,
+                automatic: false,
+              },
+              confirmation: {
+                actorId: admin.id,
+                confirmedAt: settledAt.toISOString(),
+                reason: '人工确认入袋费',
+              },
+            },
+          },
+        ],
+      },
+    },
+  ])('管理员快照与实时$label不一致时在任何写入前失败关闭', async ({
+    details,
+  }) => {
+    tx.order.findUnique.mockResolvedValueOnce(
+      order({
+        ...details,
+        pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
+        confirmedFee: new Decimal('128.50'),
+      }),
+    );
+
+    await expect(
+      confirmFactoryOrder(
+        {
+          orderId: 'order-1',
+          expectedRevision: 4,
+          expectedWorkOrderVersion: 2,
+          expectedQuoteToken: factoryQuoteToken,
+        },
+        admin,
+      ),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
+    expect(currentPriceMock).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(tx.orderLog.create).not.toHaveBeenCalled();
   });
 
   it('records a typed immutable reject decision with affected figs', async () => {

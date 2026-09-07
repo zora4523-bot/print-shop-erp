@@ -29,6 +29,8 @@ const {
   productionOperationsMock,
   productionProgressStepsMock,
   commercialDetailsPropsMock,
+  listExternalCreateOrderProductOptionsMock,
+  listExternalCreateOrderPaperOptionsMock,
 } = vi.hoisted(() => ({
   getOrderDetailMock: vi.fn(),
   getSalesOrderDetailByIdMock: vi.fn(),
@@ -42,6 +44,8 @@ const {
   productionOperationsMock: vi.fn(),
   productionProgressStepsMock: vi.fn(),
   commercialDetailsPropsMock: vi.fn(),
+  listExternalCreateOrderProductOptionsMock: vi.fn(),
+  listExternalCreateOrderPaperOptionsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/session', () => ({
@@ -53,6 +57,13 @@ vi.mock('@/lib/order', () => ({
 }));
 vi.mock('@/lib/order/sales-detail-query', () => ({
   getSalesOrderDetailById: getSalesOrderDetailByIdMock,
+}));
+vi.mock('@/lib/product', () => ({
+  listExternalCreateOrderProductOptions:
+    listExternalCreateOrderProductOptionsMock,
+}));
+vi.mock('@/lib/material', () => ({
+  listExternalCreateOrderPaperOptions: listExternalCreateOrderPaperOptionsMock,
 }));
 // 标题取数模块直连 Prisma；不 mock 的话 import 链会拉起 lib/db，
 // 在没有 DATABASE_URL 的 node 测试环境里模块加载即抛。
@@ -174,6 +185,8 @@ beforeEach(() => {
   productionOperationsMock.mockReset().mockResolvedValue([]);
   productionProgressStepsMock.mockReset().mockResolvedValue([]);
   commercialDetailsPropsMock.mockReset();
+  listExternalCreateOrderProductOptionsMock.mockReset().mockResolvedValue([]);
+  listExternalCreateOrderPaperOptionsMock.mockReset().mockResolvedValue([]);
 });
 
 describe('order detail commercial visibility', () => {

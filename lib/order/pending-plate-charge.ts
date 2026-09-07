@@ -159,13 +159,26 @@ export async function upsertPendingPlateChargeInTx(args: {
   });
 }
 
-export async function waivePendingPlateChargeWhenNotApplicableInTx(args: {
+export type PendingPlateChargeWaiverPlan = {
+  existing: {
+    id: string;
+    status: OrderCustomerChargeStatus;
+    amount: { toString(): string } | null;
+    pricingSnapshot: Prisma.JsonValue | null;
+  } | null;
+  reason: string;
+};
+
+/**
+ * Resolve and validate a plate-fee waiver without mutating the order. Change
+ * approval uses this preflight before it writes any item, packaging, shipment,
+ * or charge row, so a malformed quote cannot fail only after partial work.
+ */
+export async function preparePendingPlateChargeWaiverInTx(args: {
   tx: Prisma.TransactionClient;
   orderId: string;
-  actorId: string;
-  now: Date;
   quote: CreateOrderQuoteResult;
-}): Promise<void> {
+}): Promise<PendingPlateChargeWaiverPlan> {
   if (quoteHasPendingPlateCharge(args.quote)) {
     throw new PendingPlateChargeError(
       '仍有独立制版费待核价的工单不能豁免订单级制版费',
@@ -188,6 +201,17 @@ export async function waivePendingPlateChargeWhenNotApplicableInTx(args: {
       pricingSnapshot: true,
     },
   });
+  return { existing, reason };
+}
+
+export async function applyPendingPlateChargeWaiverInTx(args: {
+  tx: Prisma.TransactionClient;
+  actorId: string;
+  now: Date;
+  quote: CreateOrderQuoteResult;
+  plan: PendingPlateChargeWaiverPlan;
+}): Promise<void> {
+  const { existing, reason } = args.plan;
   if (!existing || existing.status === OrderCustomerChargeStatus.WAIVED) return;
 
   await args.tx.orderCustomerCharge.update({
@@ -219,5 +243,22 @@ export async function waivePendingPlateChargeWhenNotApplicableInTx(args: {
       finalizedAt: args.now,
     },
     select: { id: true },
+  });
+}
+
+export async function waivePendingPlateChargeWhenNotApplicableInTx(args: {
+  tx: Prisma.TransactionClient;
+  orderId: string;
+  actorId: string;
+  now: Date;
+  quote: CreateOrderQuoteResult;
+}): Promise<void> {
+  const plan = await preparePendingPlateChargeWaiverInTx(args);
+  await applyPendingPlateChargeWaiverInTx({
+    tx: args.tx,
+    actorId: args.actorId,
+    now: args.now,
+    quote: args.quote,
+    plan,
   });
 }

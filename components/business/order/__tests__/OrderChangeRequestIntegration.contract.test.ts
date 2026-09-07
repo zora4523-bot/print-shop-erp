@@ -13,6 +13,13 @@ const salesDetailSource = readFileSync(
   ),
   'utf8',
 );
+const adminDecisionSource = readFileSync(
+  path.join(
+    process.cwd(),
+    'components/business/order/AdminOrderDecisionPanel.tsx',
+  ),
+  'utf8',
+);
 
 function sourceBlock(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -57,10 +64,19 @@ describe('工单变更申请 UI 集成契约', () => {
     expect(detailSource).toContain('<OrderCancellationRequestForm');
   });
 
-  it('管理员待审记录跳转新版工作台，不再挂载旧审核表单', () => {
+  it('管理员待审记录跳转新版工作台，并由工作台挂载修改计价审核', () => {
     expect(detailSource).toContain(
       '/orders?queue=all&signal=pending-change#wo=${encodeURIComponent(order.orderNo)}',
     );
     expect(detailSource).not.toContain('OrderChangeReviewForm');
+    expect(adminDecisionSource).toContain("=== 'MODIFY'");
+    expect(adminDecisionSource).toContain('<OrderChangeReviewForm');
+    expect(adminDecisionSource).toContain(
+      'requestId={order.pendingChangeRequest.id}',
+    );
+    expect(adminDecisionSource).toContain('currentItems={order.items.map');
+    expect(adminDecisionSource).toContain(
+      "order.pendingChangeRequest?.type === 'CANCEL'",
+    );
   });
 });

@@ -2288,6 +2288,7 @@ const updateOrderItemChangeSchema = z
     name: z.string().trim().min(1).max(64).optional(),
     quantity: orderItemQuantityField.optional(),
     specification: optionalTrimmedText('规格', 64).optional(),
+    targetProductId: orderChangeId.optional(),
     frontFoilColors: orderItemFoilSideColorsField.optional(),
     backFoilColors: orderItemFoilSideColorsField.optional(),
     // Historical clients only submitted one aggregate array. It remains
@@ -2300,6 +2301,7 @@ const updateOrderItemChangeSchema = z
       value.name !== undefined ||
       value.quantity !== undefined ||
       value.specification !== undefined ||
+      value.targetProductId !== undefined ||
       value.frontFoilColors !== undefined ||
       value.backFoilColors !== undefined ||
       value.foilColors !== undefined,
@@ -2312,6 +2314,7 @@ const addOrderItemChangeSchema = z.object({
   name: z.string().trim().min(1, '请填写新增款式名').max(64),
   quantity: orderItemQuantityField,
   specification: optionalTrimmedText('规格', 64).optional(),
+  targetProductId: orderChangeId.optional(),
   frontFoilColors: orderItemFoilSideColorsField.optional(),
   backFoilColors: orderItemFoilSideColorsField.optional(),
   foilColors: orderItemFoilColorsField.optional(),
@@ -2347,15 +2350,115 @@ const orderChangeReason = z
   .min(1, '请填写申请说明')
   .max(500, '申请说明过长');
 
-const modifyOrderChangeRequestSchema = z.object({
-  orderId: orderChangeId,
-  expectedRevision: shipOrderVersionField('工单修订号', 1),
-  expectedWorkOrderVersion: shipOrderVersionField('纸质工单版本', 1),
-  type: z.literal('MODIFY'),
-  modifyKind: z.enum(['QTY', 'DUE_DATE', 'ADDRESS', 'CRAFT_PAPER', 'OTHER']),
-  reason: orderChangeReason,
-  items: orderChangeRequestItemsSchema,
+const MAX_ORDER_CHANGE_PENDING_CHARGE_RESOLUTIONS = 10;
+
+const orderChangeProjectedQuantityField = z.preprocess(
+  (value) => {
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string') return value;
+    const normalized = value.trim();
+    return /^\d+$/.test(normalized) ? Number(normalized) : undefined;
+  },
+  z
+    .number({ message: '投影分货数量格式非法' })
+    .finite('投影分货数量格式非法')
+    .safe('投影分货数量超出安全范围')
+    .int('投影分货数量必须是整数')
+    .min(0, '投影分货数量不能小于 0')
+    .max(
+      MAX_ORDER_ITEMS_PER_ORDER * 9_999_999,
+      '投影分货数量过大',
+    ),
+);
+
+const orderChangeResolutionAmountField = shipmentChargeMoneyField.refine(
+  (value): value is string => value !== null,
+  '请填写人工确认收费',
+);
+
+/**
+ * An administrator may resolve only the shipment charge rows returned by the
+ * proposed-change preview. These expected facts are optimistic-concurrency
+ * evidence; the domain service still has to recompute and match every field
+ * under the order lock before trusting the submitted amount.
+ */
+export const orderChangePendingChargeResolutionSchema = z.object({
+  businessKey: z
+    .string()
+    .trim()
+    .min(1, '收费业务键不能为空')
+    .max(128, '收费业务键过长')
+    .transform((value) => value.toUpperCase()),
+  shipmentId: orderChangeId,
+  expectedSequence: shipOrderVersionField('发货记录序号', 1),
+  expectedProjectedQuantity: orderChangeProjectedQuantityField,
+  expectedDestinationProvince: optionalShipmentText('预览计费省份', 32),
+  amount: orderChangeResolutionAmountField,
+  reason: requiredTrimmedText('人工物流定价依据', 500),
 });
+
+export type OrderChangePendingChargeResolutionInput = z.infer<
+  typeof orderChangePendingChargeResolutionSchema
+>;
+
+const orderChangePendingChargeResolutionsSchema = z
+  .array(orderChangePendingChargeResolutionSchema)
+  .max(
+    MAX_ORDER_CHANGE_PENDING_CHARGE_RESOLUTIONS,
+    `单次改单待核物流费不超过 ${MAX_ORDER_CHANGE_PENDING_CHARGE_RESOLUTIONS} 项`,
+  )
+  .default([])
+  .superRefine((resolutions, ctx) => {
+    const businessKeys = new Set<string>();
+    const shipmentIds = new Set<string>();
+    resolutions.forEach((resolution, index) => {
+      const normalizedBusinessKey = resolution.businessKey.toUpperCase();
+      if (businessKeys.has(normalizedBusinessKey)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [index, 'businessKey'],
+          message: '同一物流收费不能重复提交',
+        });
+      }
+      businessKeys.add(normalizedBusinessKey);
+      if (shipmentIds.has(resolution.shipmentId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [index, 'shipmentId'],
+          message: '同一发货记录不能重复提交人工物流收费',
+        });
+      }
+      shipmentIds.add(resolution.shipmentId);
+    });
+  });
+
+const modifyOrderChangeRequestSchema = z
+  .object({
+    orderId: orderChangeId,
+    expectedRevision: shipOrderVersionField('工单修订号', 1),
+    expectedWorkOrderVersion: shipOrderVersionField('纸质工单版本', 1),
+    type: z.literal('MODIFY'),
+    modifyKind: z.enum(['QTY', 'DUE_DATE', 'ADDRESS', 'CRAFT_PAPER', 'OTHER']),
+    reason: orderChangeReason,
+    items: orderChangeRequestItemsSchema,
+  })
+  .superRefine((value, ctx) => {
+    value.items.forEach((item, index) => {
+      const hasSpecification = typeof item.specification === 'string';
+      const hasTargetProduct = item.targetProductId !== undefined;
+      if (hasSpecification === hasTargetProduct) return;
+      ctx.addIssue({
+        code: 'custom',
+        path: [
+          'items',
+          index,
+          hasSpecification ? 'targetProductId' : 'specification',
+        ],
+        message:
+          '修改规格必须同时提交目标报价产品与产品目录规格',
+      });
+    });
+  });
 
 const cancelOrderChangeRequestSchema = z.object({
   orderId: orderChangeId,
@@ -2391,20 +2494,31 @@ export type CreateOrderChangeRequestInput = z.infer<
 >;
 
 const reviewOrderChangeRequestBaseSchema = z.object({
-    requestId: orderChangeId,
-    decision: z.enum(['APPROVE', 'DENY', 'REJECT']),
-    reviewRemark: optionalTrimmedText('审核备注', 500),
-    producedQty: z.number().int().nonnegative().optional(),
-    settleFee: z
-      .string()
-      .trim()
-      .regex(/^\d{1,10}(?:\.\d{1,2})?$/, '结算金额格式错误')
-      .optional(),
-    settleFeeAdjustmentReason: z.string().trim().max(500).optional(),
-  });
+  requestId: orderChangeId,
+  // Rejection does not depend on a price revision. Approval must require and
+  // compare this value in the locked domain command.
+  expectedPriceRevision: shipOrderVersionField('价格版本', 0).optional(),
+  expectedQuoteToken: z
+    .string()
+    .trim()
+    .regex(
+      /^order-change-approval-v1:[a-f\d]{64}$/u,
+      '计价预览凭证格式错误',
+    )
+    .optional(),
+  pendingChargeResolutions: orderChangePendingChargeResolutionsSchema,
+  decision: z.enum(['APPROVE', 'DENY', 'REJECT']),
+  reviewRemark: optionalTrimmedText('审核备注', 500),
+  producedQty: z.number().int().nonnegative().optional(),
+  settleFee: z
+    .string()
+    .trim()
+    .regex(/^\d{1,10}(?:\.\d{1,2})?$/, '结算金额格式错误')
+    .optional(),
+  settleFeeAdjustmentReason: z.string().trim().max(500).optional(),
+});
 
-export const reviewOrderChangeRequestSchema =
-  reviewOrderChangeRequestBaseSchema
+export const reviewOrderChangeRequestSchema = reviewOrderChangeRequestBaseSchema
   .superRefine((value, ctx) => {
     if (
       (value.decision === 'DENY' || value.decision === 'REJECT') &&
@@ -2418,12 +2532,22 @@ export const reviewOrderChangeRequestSchema =
     }
   });
 
-export type ReviewOrderChangeRequestInput = z.infer<
+type ParsedReviewOrderChangeRequestInput = z.infer<
   typeof reviewOrderChangeRequestSchema
 >;
+export type ReviewOrderChangeRequestInput = Omit<
+  ParsedReviewOrderChangeRequestInput,
+  'pendingChargeResolutions'
+> & {
+  pendingChargeResolutions?: OrderChangePendingChargeResolutionInput[];
+};
 
 export const previewOrderChangeRequestPricingSchema =
-  reviewOrderChangeRequestBaseSchema.pick({ requestId: true });
+  reviewOrderChangeRequestBaseSchema.pick({
+    requestId: true,
+    expectedPriceRevision: true,
+    pendingChargeResolutions: true,
+  });
 
 export const previewOrderCancellationSettlementSchema =
   reviewOrderChangeRequestBaseSchema
@@ -2434,9 +2558,15 @@ export type PreviewOrderCancellationSettlementInput = z.infer<
   typeof previewOrderCancellationSettlementSchema
 >;
 
-export type PreviewOrderChangeRequestPricingInput = z.infer<
+type ParsedPreviewOrderChangeRequestPricingInput = z.infer<
   typeof previewOrderChangeRequestPricingSchema
 >;
+export type PreviewOrderChangeRequestPricingInput = Omit<
+  ParsedPreviewOrderChangeRequestPricingInput,
+  'pendingChargeResolutions'
+> & {
+  pendingChargeResolutions?: OrderChangePendingChargeResolutionInput[];
+};
 
 export const withdrawOrderChangeRequestSchema = z.object({
   requestId: orderChangeId,

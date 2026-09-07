@@ -52,6 +52,11 @@ export function AdminOrderDrawer({
             {order.statusSummary}
           </div>
         ) : null}
+        {order.pendingChangeRequest?.type === 'MODIFY' ? (
+          <p className="mb-5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-muted-foreground">
+            下方“基本信息、款式、费用三段”是当前已生效工单；申请后的数量、规格和重算金额请以“修改审批计价预览”为准。
+          </p>
+        ) : null}
 
         <DrawerSection title="基本信息">
           <DrawerLines

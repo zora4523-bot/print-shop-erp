@@ -21,6 +21,7 @@ import type { CancellationSettlementReference } from '@/lib/order/change-request
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { OrderChangeReviewForm } from './OrderChangeReviewForm';
 
 type FormMode =
   | 'reject'
@@ -124,6 +125,7 @@ function AdminDecisionActions({
     pending ||
     !order.capabilities.confirm ||
     !order.confirmationPreflight.ok ||
+    !order.priceComparison ||
     Boolean(order.priceComparisonError);
   return (
     <div className="mt-3 flex flex-wrap gap-2">
@@ -149,6 +151,7 @@ function AdminDecisionActions({
                 orderId: order.id,
                 expectedRevision: order.revision,
                 expectedWorkOrderVersion: order.workOrderVersion,
+                expectedQuoteToken: order.priceComparison?.quoteToken,
               }),
             )
           }
@@ -227,10 +230,11 @@ function AdminDecisionActions({
           结算
         </Button>
       ) : null}
-      {order.capabilities.reviewChange && order.pendingChangeRequest ? (
+      {order.capabilities.reviewChange &&
+      order.pendingChangeRequest?.type === 'CANCEL' ? (
         <>
           <Button type="button" size="sm" disabled={pending} onClick={() => openMode('change-approve')}>
-            批准{order.pendingChangeRequest.type === 'CANCEL' ? '取消' : '修改'}
+            批准取消
           </Button>
           <Button type="button" size="sm" variant="destructive" disabled={pending} onClick={() => openMode('change-deny')}>
             拒绝申请
@@ -444,9 +448,26 @@ export function AdminOrderDecisionPanel({
     settlementBlockedByMissingFee;
   if (!hasAnyAction) return null;
 
+  function clearDecisionFields() {
+    setReasonCode('PAPER_OUT');
+    setNote('');
+    setFigs('');
+    setProducedQty('');
+    setSettlementPreview(null);
+    setSettleFee('');
+    setSettleFeeAdjustmentReason('');
+  }
+
+  function closeMode() {
+    clearDecisionFields();
+    setMessage('');
+    setMode(null);
+  }
+
   function finish(result: AdminOrderWorkflowActionResult | ReviewResult) {
     if (result.status === 'success') {
       if ('requestStatus' in result && result.requestStatus === 'STALE') {
+        clearDecisionFields();
         setMessage(
           '申请未执行：工单版本已变化，该申请已标记为失效，请基于最新工单重新发起。',
         );
@@ -454,6 +475,7 @@ export function AdminOrderDecisionPanel({
         router.refresh();
         return;
       }
+      clearDecisionFields();
       setMessage('操作成功；服务端已记录裁决与最新版本。');
       setMode(null);
       router.refresh();
@@ -485,9 +507,8 @@ export function AdminOrderDecisionPanel({
   }
 
   function openMode(nextMode: Exclude<FormMode, null>) {
-    if (nextMode === 'reject' || nextMode === 'hold') {
-      setReasonCode('PAPER_OUT');
-    }
+    clearDecisionFields();
+    setMessage('');
     setMode(nextMode);
   }
 
@@ -561,6 +582,7 @@ export function AdminOrderDecisionPanel({
         if (result.status === 'success') {
           setSettlementPreview(result.preview);
           setSettleFee(result.preview.referenceSettleFee);
+          setSettleFeeAdjustmentReason('');
           setMessage('已按服务端当前发布价计算参考结算价');
           return;
         }
@@ -618,12 +640,18 @@ export function AdminOrderDecisionPanel({
       return;
     }
     const change = order.pendingChangeRequest;
-    if (!change || (mode !== 'change-approve' && mode !== 'change-deny')) return;
+    if (
+      !change ||
+      change.type !== 'CANCEL' ||
+      (mode !== 'change-approve' && mode !== 'change-deny')
+    ) {
+      return;
+    }
     if (mode === 'change-deny' && !note.trim()) {
       setMessage('请填写拒绝申请的原因');
       return;
     }
-    if (change.type === 'CANCEL' && mode === 'change-approve') {
+    if (mode === 'change-approve') {
       const parsedProduced = parseStrictNonNegativeInteger(producedQty);
       if (parsedProduced === null || parsedProduced > order.totalQuantity) {
         setMessage(`已产数量必须是 0–${order.totalQuantity} 之间的整数`);
@@ -649,7 +677,7 @@ export function AdminOrderDecisionPanel({
     run(() =>
       reviewOrderChangeRequestAction(null, {
         requestId: change.id,
-        decision: mode === 'change-approve' ? 'APPROVE' : 'DENY',
+        decision: 'DENY',
         reviewRemark: note.trim() || null,
       }),
     );
@@ -664,7 +692,9 @@ export function AdminOrderDecisionPanel({
         工厂裁决
       </h3>
       <p className="mt-1 text-xs text-muted-foreground">
-        价表版本与结算时间由服务端在锁内重读；取消结算可由管理员在引擎参考价上调整，差额必须留原因。
+        {order.pendingChangeRequest?.type === 'MODIFY'
+          ? '管理员确认的是是否接受变更；款式与费用由服务端按最新规则自动合并和重算。'
+          : '价表版本与结算时间由服务端在锁内重读；取消结算可由管理员在引擎参考价上调整，差额必须留原因。'}
       </p>
 
       <ConfirmationPreflightNotice order={order} />
@@ -672,6 +702,21 @@ export function AdminOrderDecisionPanel({
         orderId={order.id}
         visible={settlementBlockedByMissingFee}
       />
+      {order.capabilities.reviewChange &&
+      order.pendingChangeRequest?.type === 'MODIFY' ? (
+        <div className="mt-3">
+          <OrderChangeReviewForm
+            key={order.pendingChangeRequest.id}
+            requestId={order.pendingChangeRequest.id}
+            currentItems={order.items.map((item) => ({
+              id: item.id,
+              sequence: item.sequence,
+              name: item.name,
+              quantity: item.quantity,
+            }))}
+          />
+        </div>
+      ) : null}
       <AdminDecisionActions
         openMode={openMode}
         order={order}
@@ -698,13 +743,14 @@ export function AdminOrderDecisionPanel({
           clearSettlementPreview={() => {
             setSettlementPreview(null);
             setSettleFee('');
+            setSettleFeeAdjustmentReason('');
           }}
           setSettleFee={setSettleFee}
           setSettleFeeAdjustmentReason={setSettleFeeAdjustmentReason}
           setNote={setNote}
           previewCancellation={previewCancellation}
           submitDecision={submitDecision}
-          close={() => setMode(null)}
+          close={closeMode}
         />
       ) : null}
 

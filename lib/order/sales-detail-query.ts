@@ -5,6 +5,7 @@ import {
   DesignFileType,
   OrderChangeRequestStatus,
   OrderCustomerChargeStatus,
+  OrderItemPricingRoute,
   OrderPricingStatus,
   OrderSettlementType,
   OrderStatus,
@@ -52,7 +53,11 @@ export type SalesOrderDetail = {
     sequence: number;
     name: string;
     quantity: number;
+    productId: string | null;
+    pricingRoute: OrderItemPricingRoute;
     specification: string | null;
+    paperType: string | null;
+    paperWeightGsm: number | null;
     paper: string | null;
     frontFoilColors: string[];
     backFoilColors: string[];
@@ -137,6 +142,8 @@ export const salesOrderDetailSelect = {
       sequence: true,
       name: true,
       quantity: true,
+      productId: true,
+      pricingRoute: true,
       specification: true,
       paperType: true,
       paperWeightGsm: true,
@@ -296,7 +303,11 @@ function mapSalesOrderDetail(
       sequence: item.sequence,
       name: item.name,
       quantity: item.quantity,
+      productId: item.productId,
+      pricingRoute: item.pricingRoute,
       specification: item.specification,
+      paperType: item.paperType,
+      paperWeightGsm: item.paperWeightGsm,
       paper: formatPaper(item.paperType, item.paperWeightGsm),
       frontFoilColors: [...item.frontFoilColors],
       backFoilColors: [...item.backFoilColors],

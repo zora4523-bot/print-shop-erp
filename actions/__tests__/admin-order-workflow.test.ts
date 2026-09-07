@@ -4,6 +4,7 @@ import { Role } from '@/generated/prisma/enums';
 const mocks = vi.hoisted(() => ({
   requirePermission: vi.fn(),
   revalidatePath: vi.fn(),
+  confirm: vi.fn(),
   settle: vi.fn(),
   batch: vi.fn(),
 }));
@@ -16,7 +17,7 @@ vi.mock('@/lib/order/admin-workflow', () => ({
   AdminOrderWorkflowError: class AdminOrderWorkflowError extends Error {
     code = 'INVALID_INPUT';
   },
-  confirmFactoryOrder: vi.fn(),
+  confirmFactoryOrder: mocks.confirm,
   holdFactoryOrder: vi.fn(),
   rejectFactoryOrder: vi.fn(),
   releaseFactoryOrder: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock('@/lib/production/operation-materialization-service', () => ({
 }));
 
 import {
+  confirmFactoryOrderAction,
   runAdminOrderBatchAction,
   settleFactoryOrderAction,
 } from '../admin-order-workflow';
@@ -57,6 +59,7 @@ const actor = { id: 'admin-1', role: Role.ADMIN };
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requirePermission.mockResolvedValue(actor);
+  mocks.confirm.mockResolvedValue({ orderId: 'order-1' });
   mocks.settle.mockResolvedValue({ orderId: 'order-1' });
   mocks.batch.mockResolvedValue({
     command: 'SETTLE',
@@ -69,6 +72,49 @@ beforeEach(() => {
 });
 
 describe('admin order workflow cache invalidation', () => {
+  it('工厂确认要求合法的当前价预览凭证并原样传入领域命令', async () => {
+    const expectedQuoteToken = `create-order-quote-v2:${'a'.repeat(64)}`;
+
+    await expect(
+      confirmFactoryOrderAction({
+        orderId: 'order-1',
+        expectedRevision: 4,
+        expectedWorkOrderVersion: 2,
+        expectedQuoteToken,
+      }),
+    ).resolves.toEqual({ status: 'success', orderId: 'order-1' });
+
+    expect(mocks.confirm).toHaveBeenCalledWith(
+      {
+        orderId: 'order-1',
+        expectedRevision: 4,
+        expectedWorkOrderVersion: 2,
+        expectedQuoteToken,
+      },
+      actor,
+    );
+  });
+
+  it('工厂确认缺少或伪造当前价凭证时不进入领域写流程', async () => {
+    for (const expectedQuoteToken of [
+      undefined,
+      'create-order-quote-v2:forged',
+    ]) {
+      vi.clearAllMocks();
+      mocks.requirePermission.mockResolvedValue(actor);
+
+      await expect(
+        confirmFactoryOrderAction({
+          orderId: 'order-1',
+          expectedRevision: 4,
+          expectedWorkOrderVersion: 2,
+          expectedQuoteToken,
+        }),
+      ).resolves.toMatchObject({ status: 'invalid' });
+      expect(mocks.confirm).not.toHaveBeenCalled();
+    }
+  });
+
   it('revalidates the canonical agent bill route after one settlement', async () => {
     await expect(
       settleFactoryOrderAction({

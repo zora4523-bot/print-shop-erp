@@ -142,6 +142,7 @@ beforeEach(() => {
   previewMock.mockReset().mockResolvedValue({
     quoted: { amount: '100.00', versions: { processing: null, logistics: null } },
     current: { amount: '100.00', versions: { processing: null, logistics: null } },
+    quoteToken: `create-order-quote-v2:${'a'.repeat(64)}`,
     hasVersionDiff: false,
   });
 });

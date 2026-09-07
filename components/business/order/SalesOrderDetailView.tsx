@@ -15,6 +15,7 @@ import { salesOrderStatusPresentation } from '@/lib/order/sales-list-presentatio
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -33,9 +34,11 @@ import { SubmitOrderButton } from './SubmitOrderButton';
 import { UrgentToggleForm } from './UrgentToggleForm';
 
 function SalesOrderChangeRequestSection({
+  catalogProducts,
   canRequestCancellation,
   order,
 }: {
+  catalogProducts: OrderChangeCatalogProduct[];
   canRequestCancellation: boolean;
   order: SalesOrderDetail;
 }) {
@@ -54,12 +57,17 @@ function SalesOrderChangeRequestSection({
         orderId={order.id}
         expectedRevision={order.revision}
         expectedWorkOrderVersion={order.workOrderVersion}
+        catalogProducts={catalogProducts}
         items={order.items.map((item) => ({
           id: item.id,
           sequence: item.sequence,
           name: item.name,
           quantity: item.quantity,
+          productId: item.productId,
+          pricingRoute: item.pricingRoute,
           specification: item.specification,
+          paperType: item.paperType,
+          paperWeightGsm: item.paperWeightGsm,
           frontFoilColors: item.frontFoilColors,
           backFoilColors: item.backFoilColors,
           foilColors: item.foilColors,
@@ -80,7 +88,13 @@ function SalesOrderChangeRequestSection({
   );
 }
 
-export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
+export function SalesOrderDetailView({
+  catalogProducts,
+  order,
+}: {
+  catalogProducts: OrderChangeCatalogProduct[];
+  order: SalesOrderDetail;
+}) {
   const status = salesOrderStatusPresentation(order.status);
   const canEdit = isOrderEditable(order.status);
   const canToggleUrgent =
@@ -290,6 +304,7 @@ export function SalesOrderDetailView({ order }: { order: SalesOrderDetail }) {
 
           {canRequestModify ? (
             <SalesOrderChangeRequestSection
+              catalogProducts={catalogProducts}
               canRequestCancellation={canRequestCancellation}
               order={order}
             />
