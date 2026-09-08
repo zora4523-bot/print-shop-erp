@@ -136,7 +136,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         <div className={styles.main}>
           {model.vdiff ? <section className={styles.diff} aria-label="最新变更差异">
             <div className={styles.sectionHeading}><h2>变更已生效 · v{model.vdiff.from} → v{model.vdiff.to}</h2><span>批准于 {model.vdiff.at}</span></div>
-            <div className={styles.diffItems}>{model.vdiff.items.map((entry) => <Button key={entry.id} type="button" variant="outline"
+            <div className={styles.diffItems}>{model.vdiff.items.map((entry) => <Button key={entry.id} type="button" variant="ghost"
               onClick={() => locate(entry.targetItemId ? `order-detail-item-${entry.targetItemId}` : entry.targetSection === 'items' ? 'order-detail-items-title' : entry.targetSection === 'overview' ? 'order-detail-overview' : 'order-detail-fees')}>
               <span>{entry.label}<span><del>{entry.before}</del> → <strong>{entry.after}</strong></span></span>
             </Button>)}</div>
@@ -160,7 +160,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
                       <strong className={cn(styles.quantity, item.isNew && styles.newQuantity)}>{item.qty.toLocaleString('zh-CN')} 个<small>{item.pack}</small></strong></div>
                     <dl className={styles.specs}>{item.specs.map((spec) => <div key={spec.label}><dt>{spec.label}</dt><dd>{spec.value}</dd></div>)}</dl>
                     <div className={styles.fileStatus}><StatusBadge tone={item.hasCdr ? 'success' : 'warning'}>{item.hasCdr ? 'CDR 已上传' : '未上传 CDR'}</StatusBadge>
-                      <Button type="button" variant="ghost" onClick={() => locate('detail-design-files')}>查看设计文件</Button></div>
+                      <Button type="button" variant="ghost" onClick={() => locate(document.getElementById(`detail-design-item-${item.id}`) ? `detail-design-item-${item.id}` : 'detail-design-files')}>查看设计文件</Button></div>
                     {item.progress.map((progress) => <Progress key={progress.label} {...progress} />)}
                     {item.remark ? <p className={styles.remark}>{item.remark}</p> : null}
                     <dl className={styles.feeLines}>{item.fees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount)}</dd></div>)}</dl>
@@ -168,23 +168,24 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
                 </article>;
               })}
             </div>
-            <section className={cn(styles.card, styles.orderFees)} aria-label="订单级费用">
-              <dl className={styles.feeLines}>{model.orderFees.map((fee) => <div key={fee.id}><dt>{fee.label}<small>订单级</small></dt><dd>{amount(fee.amount)}</dd></div>)}</dl>
-              <div className={styles.total}><span>{model.feeSource === 'LEGACY' ? '历史金额' : `当前${model.feeStages.find((stage) => stage.current)?.title ?? '金额'}`}</span><strong>{amount(model.total)}</strong></div>
-            </section>
           </section>
 
-          <section id="order-detail-fees" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-fees' && styles.highlight)}>
-            <div className={styles.sectionHeading}><h2>费用记录</h2><span>以各阶段保存金额为准</span></div>
+          <section id="order-detail-fees" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-fees' && styles.highlight)} aria-label="工单费用">
+            <div className={styles.sectionHeading}><h2>工单费用</h2></div>
+            <section className={styles.orderFees} aria-label="订单级费用">
+              <dl className={styles.feeLines}>{model.orderFees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount)}</dd></div>)}</dl>
+              <div className={styles.total}><span>{model.feeSource === 'LEGACY' ? '历史金额' : `当前${model.feeStages.find((stage) => stage.current)?.title ?? '金额'}`}</span><strong>{amount(model.total)}</strong></div>
+            </section>
+            <h3 className={styles.feeHistoryHeading}>费用记录</h3>
             <div className={styles.feeStages}>{model.feeStages.map((stage) => <div key={stage.key} className={cn(styles.feeStage, stage.current && styles.currentFee)}>
               <p>{stage.title}{stage.current ? <span>当前</span> : null}</p><strong>{stage.total === null ? '—' : amount(stage.total)}</strong>
               {stage.total === null ? <small>{stage.key === 'confirmed' ? '费用核定后显示' : stage.key === 'settled' ? '结算后显示' : '尚未形成报价'}</small> : null}
             </div>)}</div>
           </section>
 
-          <section className={styles.card} aria-label="变更历史">
+          <section className={styles.ledger} aria-label="变更历史">
             <div className={styles.sectionHeading}><h2>变更历史</h2><span>{model.changes.length} 次申请</span></div>
-            {model.changes.length === 0 ? <TableEmptyState variant="compact" title="暂无变更" description="批准修改后，按实际变更更新工单版本。" /> : <ol className={styles.history}>{model.changes.map((change) => <li key={change.id}>
+            {model.changes.length === 0 ? <p className={styles.emptyHint}>暂无变更</p> : <ol className={styles.history}>{model.changes.map((change) => <li key={change.id}>
               <div className={styles.sectionHeading}><strong>{change.reason}</strong><StatusBadge tone={ORDER_CHANGE_REQUEST_STATUS_REGISTRY[change.status].tone}>{ORDER_CHANGE_REQUEST_STATUS_REGISTRY[change.status].label}</StatusBadge></div>
               <p>{change.requester} · {change.at}{change.reviewedAt ? ` · ${change.reviewer ?? '管理员'}审核于 ${change.reviewedAt}` : ''}</p>
               <div className={styles.changeRows}>{change.diffs.map((entry) => <div key={entry.id}><span>{entry.label}</span><del>{entry.before}</del><span>→</span><strong>{entry.after}</strong></div>)}</div>
@@ -193,14 +194,14 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
 
           <section className={styles.ledger} aria-label="报工流水">
             <div className={styles.sectionHeading}><h2>报工流水</h2><span>当前版本 · 最近 {model.works.length} 条</span></div>
-            {model.works.length === 0 ? <TableEmptyState variant="compact" title="暂无报工记录" description="生产开始后显示，报工数量以生产记录为准。" /> : <ol>{model.works.map((work) => <li key={work.id} className={styles.workRow}>
+            {model.works.length === 0 ? <p className={styles.emptyHint}>暂无报工记录</p> : <ol>{model.works.map((work) => <li key={work.id} className={styles.workRow}>
               <time>{work.at}</time><span>{work.label}{work.cumulative !== null ? <small>累计 {work.cumulative} {work.unit}</small> : null}</span><b>{work.actor}</b><strong>{work.quantity === null ? '—' : `${work.quantity} ${work.unit}`}</strong>
             </li>)}</ol>}
           </section>
 
           <section className={styles.ledger} aria-label="动态">
             <div className={styles.sectionHeading}><h2>动态</h2><span>最近 {model.logs.length} 条</span></div>
-            {model.logs.length === 0 ? <TableEmptyState variant="compact" title="暂无动态" /> : <ol>{model.logs.map((log) => <li key={log.id} className={styles.logRow}>
+            {model.logs.length === 0 ? <p className={styles.emptyHint}>暂无动态</p> : <ol>{model.logs.map((log) => <li key={log.id} className={styles.logRow}>
               <time>{log.at}</time><div><strong>{log.label}</strong>{log.remark ? <p>{log.remark}</p> : null}
               {log.changes.filter((change) => change.label !== '其他变更').map((change, index) => <p key={`${change.label}-${index}`}>{change.label}：{change.before} → {change.after}</p>)}</div><b>{log.actor}</b>
             </li>)}</ol>}
@@ -216,18 +217,18 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           <section id="order-detail-actions" tabIndex={-1} className={cn(styles.card, styles.decision)} aria-label="当前待办"><div className={styles.eyebrow}>当前待办</div>
             {decision ?? <p>{ORDER_STATUS_REGISTRY[model.status].label} · 暂无待办</p>}
           </section>
-          <section id="order-detail-overview" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-overview' && styles.highlight)}><h2 className={styles.eyebrow}>概览</h2><p className={styles.orderName}>{model.name}</p>
+          <section id="order-detail-overview" tabIndex={-1} className={cn(styles.asideSection, highlighted === 'order-detail-overview' && styles.highlight)}><h2 className={styles.eyebrow}>概览</h2>
             <div className={styles.stats}><div><strong>{model.due ?? '未设置'}</strong><span>{model.due ? model.dueLeft : '交货日期'}</span></div><div><strong>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')}</strong><span>工单总量（个）</span></div></div>
-            {hasProgress ? <div className={styles.progressList}><Progress label="烫金" done={model.progress.foilingProgress} total={model.progress.orderTotal} /><Progress label="打包" done={model.progress.packingProgress} total={model.progress.orderTotal} /></div> : <p className={styles.emptyHint}>确认并下发生产后，报工进度在此显示</p>}
+            {hasProgress ? <div className={styles.progressList}><Progress label="烫金" done={model.progress.foilingProgress} total={model.progress.orderTotal} /><Progress label="打包" done={model.progress.packingProgress} total={model.progress.orderTotal} /></div> : null}
           </section>
-          <section className={styles.card}><h2 className={styles.eyebrow}>版本与打印</h2>
+          <section className={styles.asideSection}><h2 className={styles.eyebrow}>版本与打印</h2>
             {prints.length ? <ol className={styles.prints}>{prints.map((print) => <li key={print.id}><span>工单 v{print.version}<small>{print.at}</small></span><StatusBadge tone={print.version !== model.version || print.state === 'SUPERSEDED' ? 'danger' : print.state === 'PRINTED' ? 'success' : 'warning'}>
               {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : <p className={styles.emptyHint}>未生成打印任务 · 下发生产后生成</p>}
             {versionChanged ? <p className={styles.emptyHint}>旧版纸质工单已失效，请使用 v{model.version}。</p> : null}
             {printHint ? <p className={styles.emptyHint}>{printHint}</p> : null}
             <Link href={`/print/orders/${model.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</Link>
           </section>
-          <section className={styles.card}><h2 className={styles.eyebrow}>收货</h2>{model.shipments.length ? <ol className={styles.shipments}>{model.shipments.map((shipment) => <li key={shipment.id}>
+          <section className={styles.asideSection}><h2 className={styles.eyebrow}>收货</h2>{model.shipments.length ? <ol className={styles.shipments}>{model.shipments.map((shipment) => <li key={shipment.id}>
             <p>{model.shipments.length > 1 ? `第 ${shipment.sequence} 票 · ` : ''}{shipment.name} {shipment.phone}</p><strong>{shipment.address || '未填写收货地址'}</strong>
             {shipment.trackingNo ? <p>{shipment.carrier} · {shipment.trackingNo}</p> : null}<small>{shipment.items.join(' · ')}</small>
           </li>)}</ol> : <p className={styles.emptyHint}>未填写收货地址{canEdit ? <> · <Link href={`/orders/${model.id}/edit`}>去编辑页补充</Link></> : null}</p>}</section>

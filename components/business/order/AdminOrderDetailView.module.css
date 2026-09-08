@@ -8,7 +8,7 @@
 .meta { flex-basis: 100%; color: var(--muted-foreground); overflow-wrap: anywhere; font-size: 12px; }
 .headerActions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 .columns { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; padding-top: 6px; }
-.main { min-width: 0; flex: 999 1 560px; display: flex; flex-direction: column; gap: 22px; }
+.main { min-width: 0; flex: 999 1 560px; display: flex; flex-direction: column; gap: 28px; }
 .aside { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 14px; position: sticky; top: var(--order-detail-timeline-top); }
 .sectionHeading { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .sectionHeading > span { color: var(--muted-foreground); font-size: 12px; }
@@ -29,32 +29,33 @@
 .quantity small { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--muted-foreground); font-weight: 500; }
 .newQuantity { padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--warning) 15%, var(--card)); }
 .specs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 2px 18px; margin-top: 10px; }
-.specs > div { min-width: 0; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+.specs > div { min-width: 0; padding: 6px 0; }
 .specs dt { font-size: 11px; color: var(--muted-foreground); margin-bottom: 2px; }
 .specs dd { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .fileStatus { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 .fileStatus button { font-size: 12px; }
 .remark { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; color: var(--muted-foreground); }
-.feeLines { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 7px; }
+.feeLines { margin-top: 10px; padding-top: 7px; }
 .feeLines > div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
 .feeLines dt { color: var(--muted-foreground); overflow-wrap: anywhere; }
 .feeLines dd { flex-shrink: 0; font-family: var(--font-mono), monospace; font-weight: 600; }
 .feeLines small { margin-left: 8px; font-size: 10px; }
 .feeLines > div:last-child { font-weight: 700; }
-.orderFees { margin-top: 12px; }
+.orderFees { margin-top: 0; }
+.feeHistoryHeading { margin: 24px 0 12px; font-size: 12px; font-weight: 600; color: var(--muted-foreground); }
 .orderFees .feeLines { margin-top: 0; padding-top: 0; border: 0; }
 .total { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--border); font-weight: 800; }
 .total strong { font-size: 22px; font-family: var(--font-mono), monospace; }
 .feeStages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.feeStage { border: 1px solid var(--border); border-radius: 10px; padding: 12px; min-width: 0; color: var(--muted-foreground); }
-.feeStage > p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; font-size: 12px; }
+.feeStage { padding: 0; min-width: 0; color: var(--muted-foreground); }
+.feeStage > p { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; }
 .feeStage p span { font-size: 10px; }
 .feeStage strong { display: block; font-family: var(--font-mono), monospace; font-size: 17px; margin-top: 10px; overflow-wrap: anywhere; }
 .feeStage small { display: block; font-size: 11px; margin-top: 6px; }
-.currentFee { color: var(--foreground); border-color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--card)); }
+.currentFee { color: var(--foreground); font-weight: 600; }
 .diff { padding: 14px 18px; border: 1px solid var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--card)); border-radius: 12px; }
 .diffItems { display: flex; flex-wrap: wrap; gap: 8px; }
-.diffItems button { min-height: 44px; height: auto; flex: 1 1 200px; padding: 8px 12px; text-align: left; justify-content: flex-start; white-space: normal; overflow-wrap: anywhere; background: var(--card); }
+.diffItems button { min-height: 44px; height: auto; flex: 1 1 200px; padding: 8px 12px; text-align: left; justify-content: flex-start; white-space: normal; overflow-wrap: anywhere; background: transparent; }
 .diffItems button > span > span { display: block; margin-top: 2px; }
 .diffItems del, .changeRows del { color: var(--muted-foreground); }
 .highlight { box-shadow: 0 0 0 3px var(--warning); }
@@ -65,7 +66,7 @@
 .history p { font-size: 11px; color: var(--muted-foreground); }
 .changeRows { display: grid; gap: 6px; margin-top: 10px; }
 .changeRows > div { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; overflow-wrap: anywhere; }
-.ledger { border-top: 1.5px solid var(--foreground); padding-top: 12px; }
+.ledger { min-width: 0; }
 .workRow { display: grid; grid-template-columns: 116px minmax(0, 1fr) 80px 84px; gap: 10px; }
 .logRow { display: grid; grid-template-columns: 116px minmax(0, 1fr) 90px; gap: 10px; }
 .ledger li { padding: 11px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
@@ -74,14 +75,14 @@
 .ledger strong { font-weight: 600; }
 .ledger small { display: block; color: var(--muted-foreground); }
 .ledger p { font-size: 12px; margin-top: 3px; color: var(--muted-foreground); }
-.eyebrow { font-size: 11px !important; letter-spacing: .1em; color: var(--muted-foreground); border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 10px; }
+.eyebrow { font-size: 11px !important; letter-spacing: .1em; color: var(--muted-foreground); margin-bottom: 12px; }
 .decision > div + section { margin: 0; box-shadow: none; border: 0; padding: 0; }
 .decision p { overflow-wrap: anywhere; }
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
-.stats > div { padding: 10px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.stats > div { min-width: 0; }
+.asideSection { min-width: 0; padding: 12px 16px; }
 .stats strong { font-size: 17px; font-weight: 800; overflow-wrap: anywhere; }
 .stats span { display: block; color: var(--muted-foreground); font-size: 11px; margin-top: 4px; }
-.orderName { font-weight: 700; margin-bottom: 12px; overflow-wrap: anywhere; }
 .progressList { display: grid; gap: 10px; margin-top: 12px; }
 .progress { margin-top: 10px; }
 .progress > div:first-child { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted-foreground); margin-bottom: 5px; }
@@ -98,10 +99,10 @@
 .shipments p, .shipments small { font-size: 12px; color: var(--muted-foreground); }
 .shipments strong { display: block; line-height: 1.7; font-weight: 600; margin: 3px 0; }
 .supplementary { display: grid; gap: 10px; }
-.extra { min-width: 0; border: 1px solid var(--border); background: var(--card); border-radius: 12px; }
+.extra { min-width: 0; border-top: 1px solid var(--border); }
 .extra > summary { min-height: 44px; padding: 12px 16px; font-size: 13px; font-weight: 600; }
 .extra > div { padding: 0 12px 12px; min-width: 0; display: grid; gap: 12px; }
-.extra > div > section { box-shadow: none; }
+.extra > div > section { box-shadow: none; border: 0; border-radius: 0; padding: 0; }
 .lightbox { max-width: 920px !important; padding: 0 !important; gap: 0 !important; grid-template-columns: minmax(0, 1fr) 260px; }
 .previewImage { position: relative; min-width: 0; min-height: 420px; background: var(--muted); display: flex; align-items: center; justify-content: center; }
 .previewImage img { max-height: min(70dvh, 700px); width: 100%; object-fit: contain; }
@@ -149,3 +150,11 @@
 .decision button[class~='text-destructive']:not(:disabled):not([aria-disabled='true']) {
   background: var(--primary); color: var(--primary-foreground); border-color: var(--primary);
 }
+
+/* Embedded review content shares the decision panel boundary; controls retain theirs. */
+.decision [data-slot='order-change-summary'] > li { border: 0; border-radius: 0; padding: 4px 0; }
+.decision [data-slot='order-change-summary'] > li + li { border-top: 1px solid var(--border); padding-top: 12px; }
+.decision [data-slot='disclosure'] { border: 0; border-radius: 0; padding: 0; }
+.decision [data-slot='order-change-pricing-preview'] { border: 0; border-radius: 0; padding: 0; background: transparent; }
+.decision [data-slot='order-change-pricing-preview'] > dl { grid-template-columns: minmax(0, 1fr); }
+.decision [data-slot='order-change-pricing-preview'] > dl > div { border: 0; border-radius: 0; padding: 0; background: transparent; }

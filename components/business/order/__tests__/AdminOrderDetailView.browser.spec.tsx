@@ -327,3 +327,25 @@ describe('admin order detail design and interaction gates', () => {
     await expect.element(page.getByRole('heading', { name: '待核价费用明细', exact: true })).toBeVisible();
   });
 });
+
+it('opens the selected style supplement and preserves fee and print destinations', async () => {
+  await page.viewport(1280, 900);
+  const model = detailModel();
+  flushSync(() => root.render(<AdminOrderDetailView model={model} canEdit prints={[]} decision={null}
+    supplementary={[{ id: 'detail-design-files', title: '设计文件', content: <>
+      {model.items.map((item) => <Disclosure key={item.id} id={`detail-design-item-${item.id}`}>
+        <DisclosureSummary>{item.name}补充资料</DisclosureSummary><p>{item.name}原稿</p>
+      </Disclosure>)}
+    </> }]} />));
+  await page.getByRole('button', { name: '查看设计文件', exact: true }).nth(1).click();
+  const selected = document.getElementById('detail-design-item-item-2') as HTMLDetailsElement;
+  expect(selected.open).toBe(true);
+  expect((document.getElementById('detail-design-item-item-1') as HTMLDetailsElement).open).toBe(false);
+  await expect.poll(() => document.activeElement).toBe(selected);
+  const fees = document.getElementById('order-detail-fees')!;
+  expect(fees.textContent).toContain('入袋费');
+  expect(fees.textContent).toContain('费用记录');
+  expect(fees.textContent).toContain('¥ 570.00');
+  expect(host.querySelector('a[href="/print/orders/detail-order-1?autoprint=1"]')).not.toBeNull();
+  expect(geometryFailures(host, 1280)).toEqual([]);
+});

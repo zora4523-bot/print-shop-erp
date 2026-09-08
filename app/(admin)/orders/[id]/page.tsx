@@ -962,12 +962,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
           ) : null}
         </section>
       ) : null}</>),
-    designFiles: (<><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-        <h2 className="text-base font-semibold">款式（{order.items.length}）</h2>
+    designFiles: (<><section className={user.role === Role.ADMIN ? "space-y-3" : "space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6"}>
+        {user.role !== Role.ADMIN ? <h2 className="text-base font-semibold">款式（{order.items.length}）</h2> : null}
         <ol className="space-y-3">
           {order.items.map((item) => (
-            <li key={item.id} className="min-w-0 rounded-lg border text-sm">
-              <Disclosure className="min-w-0">
+            <li key={item.id} className={user.role === Role.ADMIN ? "min-w-0 text-sm" : "min-w-0 rounded-lg border text-sm"}>
+              <Disclosure id={`detail-design-item-${item.id}`} className="min-w-0">
                 <DisclosureSummary className="flex-wrap items-start justify-between gap-2 px-4 py-3">
                   <span className="admin-wrap-anywhere min-w-0 font-medium">
                     <span className="text-muted-foreground">#{item.sequence}</span>
@@ -990,7 +990,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     <span className="ml-2 hidden group-open:inline">收起</span>
                   </span>
                 </DisclosureSummary>
-              <div className="space-y-3 border-t px-4 py-4">
+              <div className={user.role === Role.ADMIN ? "space-y-3 px-4 pb-4" : "space-y-3 border-t px-4 py-4"}>
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <h3 className="sr-only">
                   #{item.sequence} {item.name}
@@ -1046,6 +1046,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                       : null
                   }
                 />
+                {user.role !== Role.ADMIN ? <>
                 <Row
                   label="规格"
                   value={
@@ -1079,6 +1080,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   }
                   tabular
                 />
+                </> : null}
                 <Row label="稿件版本" value={item.artworkVersion} />
                 <Row label="版组 / 模具组 ID" value={item.plateGroupId} />
                 <Row label="专版计价组" value={item.pricingGroup} />
