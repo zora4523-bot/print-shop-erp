@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth/session';
+import type { NextAuthRequest } from 'next-auth';
+import { auth } from '@/lib/auth/config';
+import { requireVerifiedSession } from '@/lib/auth/session';
+import { UnauthorizedError } from '@/lib/auth/errors';
 import { getOrderForPrint } from '@/lib/order/print-view';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import {
@@ -24,13 +27,18 @@ export const dynamic = 'force-dynamic';
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, ctx: Params) {
-  const session = await getSession();
-  if (!session) {
-    // API routes excluded from the page-redirect Proxy return
-    // JSON 401 so a failed download is an obvious error in the
-    // download manager / devtools instead of a silent empty file.
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Promise<Response> {
+  let session;
+  try {
+    session = await requireVerifiedSession(_req.auth);
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json(
+        { error: '未登录或登录状态已失效，请重新登录' },
+        { status: 401, headers: { 'Cache-Control': 'private, no-store' } },
+      );
+    }
+    throw error;
   }
   const requestUrl = new URL(_req.url);
   const modes = requestUrl.searchParams.getAll('mode');
@@ -83,7 +91,7 @@ export async function GET(_req: Request, ctx: Params) {
     if (result.status === 'failed') {
       return pdfStatusPage({
         title: 'PDF 生成失败',
-        message: `错误码：${result.errorCode ?? 'UnknownError'}。请点击下方按钮重新生成。`,
+        message: '生成失败，请重新生成；如仍失败，请联系管理员。错误码：PDF_GENERATION_FAILED。',
         status: 500,
         retryUrl: pdfRetryUrl(_req.url),
       });
@@ -103,35 +111,16 @@ export async function GET(_req: Request, ctx: Params) {
       const { name: factoryName } = await getSetting('factory_name');
       const html = await buildPrintHtml(order, { factoryName });
       pdf = await renderHtmlToPdf({ html });
-    } catch (err) {
-      // Most likely cause here is Chromium not yet installed on the
-      // host (pnpm may skip puppeteer's postinstall). Return a 500 with
-      // a hint so the owner knows to run `npx puppeteer browsers install`
-      // instead of guessing at the browser side.
-      // Puppeteer's "no browser" error wording varies by version: older
-      // releases said "Could not find Chromium", current ones say
-      // "Could not find Chrome". The SAME error covers two distinct
-      // causes — (a) the browser was never downloaded on this host /
-      // user, or (b) it WAS downloaded but at a path the runtime can't
-      // see (split build/runtime container, different user's
-      // ~/.cache/puppeteer, custom PUPPETEER_CACHE_DIR). Steering
-      // operators at only (a) hides (b) — the regex fires for both
-      // cases now and the hint mentions both .
-      const hint =
-        err instanceof Error &&
-        /Could not find (Chrome|Chromium|browser)/i.test(err.message)
-          ? '未找到 Puppeteer 期望的浏览器。两种典型原因：' +
-            '(1) 当前用户 / 容器还没下载——跑 `npx puppeteer browsers install chrome`；' +
-            '(2) 已下载但路径错配——核对 PUPPETEER_CACHE_DIR 或运行时用户的 ~/.cache/puppeteer 与下载位置是否一致。' +
-            '错误正文里 Puppeteer 已经打印了它实际查的路径。'
-          : null;
+    } catch {
+      // Log a fixed event only: renderer exceptions can contain paths, URLs and secrets.
+      console.error('[order-pdf] PDF_GENERATION_FAILED');
       return NextResponse.json(
         {
           error: 'PDF 生成失败',
-          message: err instanceof Error ? err.message : String(err),
-          hint,
+          code: 'PDF_GENERATION_FAILED',
+          message: '请重新生成；如仍失败，请联系管理员',
         },
-        { status: 500 },
+        { status: 500, headers: { 'Cache-Control': 'private, no-store' } },
       );
     }
   }
@@ -163,6 +152,8 @@ export async function GET(_req: Request, ctx: Params) {
     },
   });
 }
+
+export const GET = auth(handleOrderPdfGet);
 
 function pdfRetryUrl(requestUrl: string, jobId?: string): string {
   const url = new URL(requestUrl);

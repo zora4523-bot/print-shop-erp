@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { requirePermission } from '@/lib/auth/permissions';
+import type { NextAuthRequest } from 'next-auth';
+import { auth } from '@/lib/auth/config';
+import { requireSessionPermission } from '@/lib/auth/permissions';
+import { UnauthorizedError } from '@/lib/auth/errors';
 import {
   buildPieceworkSettlementWorkbook,
   loadPieceworkSettlementExportData,
@@ -9,8 +12,18 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
-  await requirePermission('salary:view:all');
+export async function handlePieceworkSettlementExportGet(request: NextAuthRequest): Promise<Response> {
+  try {
+    await requireSessionPermission('salary:view:all', request.auth);
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json(
+        { error: '无权导出计件结算，请使用有权限的账号登录' },
+        { status: 401, headers: { 'Cache-Control': 'private, no-store' } },
+      );
+    }
+    throw error;
+  }
   const url = new URL(request.url);
   const from = url.searchParams.get('from') ?? '';
   const to = url.searchParams.get('to') ?? from;
@@ -38,3 +51,5 @@ export async function GET(request: Request) {
     throw error;
   }
 }
+
+export const GET = auth(handlePieceworkSettlementExportGet);
