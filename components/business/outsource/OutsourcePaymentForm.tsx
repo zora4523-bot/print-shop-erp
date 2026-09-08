@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   FormErrorSummary,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
@@ -248,27 +248,19 @@ export function OutsourcePaymentForm({
           {pending ? '正在记录…' : '核对并记录外协付款'}
         </Button>
       </div>
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         formId={formId}
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={triggerRef}
         disabled={pending || preview === null}
-        title={`确认向${supplierName}记录这笔外协付款？`}
-        description={
-          orderNo
-            ? `关联工单 ${orderNo}，提交前未付金额为 ¥ ${remainingAmount}。`
-            : `提交前未付金额为 ¥ ${remainingAmount}。`
-        }
-        impactItems={
-          preview ? outsourcePaymentImpactItems(preview, remainingAmount) : []
-        }
-        confirmLabel="确认记录付款"
         onConfirm={() => {
           confirmedRef.current = true;
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action={`向${supplierName}记录外协付款${orderNo ? ` · ${orderNo}` : ''}`} changes={[]} consequences={
+          preview ? outsourcePaymentImpactItems(preview, remainingAmount) : []
+        } confirmText="确认记录付款" />
+      </ConfirmActionController>
 
       {visibleState?.status === 'success' ? (
         <ActionNotice

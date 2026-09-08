@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
   BatchActionResult,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
 } from '@/components/ui-business';
 
 export type CsReadySettlementPreview = {
@@ -75,8 +75,7 @@ export function SettleReadyCsButton({
     <div className="space-y-3">
       <form id={formId} action={action} aria-busy={pending} />
       {/* 批量结算当前不持久 reason，因此保持 L2，不新增未授权审计字段。 */}
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         trigger={
           <Button
             type="button"
@@ -88,17 +87,14 @@ export function SettleReadyCsButton({
             {pending ? '扫描结算中…' : '核对并结算已到期周期'}
           </Button>
         }
-        title={
+        formId={formId}
+        disabled={pending}>
+        <ConfirmActionDialog action={
           preview.duePeriodCount > 0
             ? `确认扫描并结算 ${preview.duePeriodCount} 个当前到期周期？`
             : '确认按最新数据扫描已到期周期？'
-        }
-        description="这是可部分成功的批处理。请核对当前人员、周期、金额和后续周期影响。"
-        impactItems={readyCsSettlementImpactItems(preview)}
-        confirmLabel="确认扫描并批量结算"
-        formId={formId}
-        disabled={pending}
-      />
+        } changes={[]} consequences={readyCsSettlementImpactItems(preview)} confirmText="确认扫描并批量结算" />
+      </ConfirmActionController>
 
       {visibleState?.status === 'success' ? (
         <BatchActionResult

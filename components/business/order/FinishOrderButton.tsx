@@ -3,7 +3,7 @@
 import { useActionState, useRef, useState, useTransition } from 'react';
 import type { FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { finishOrderAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
 
@@ -46,18 +46,14 @@ export function FinishOrderButton({ orderId }: { orderId: string }) {
       >
         {pending ? '处理中…' : '确认完工'}
       </Button>
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={triggerRef}
         disabled={pending}
-        title="确认关闭工单并标记为已完成？"
-        description="确认后工单完成且不能恢复。"
-        impactItems={finishOrderImpactItems}
-        confirmLabel="确认关闭并完成"
-        onConfirm={confirmFinish}
-      />
+        onConfirm={confirmFinish}>
+        <ConfirmActionDialog action="确认关闭工单并标记为已完成？" changes={[]} consequences={finishOrderImpactItems} confirmText="确认关闭并完成" />
+      </ConfirmActionController>
       {visibleState?.status === 'error' ? (
         <p role="alert" className="text-xs text-destructive">
           {visibleState.message}

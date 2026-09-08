@@ -6,7 +6,7 @@ import { LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   DisabledReason,
 } from '@/components/ui-business';
 import { deleteChannelAction } from '@/actions/owner-notifications';
@@ -46,8 +46,7 @@ export function DeleteChannelButton({
 
   return (
     <div className="flex flex-col items-end gap-2" aria-busy={pending}>
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         disabled={pending}
         trigger={
           <Button type="button" size="sm" variant="destructive" disabled={pending}>
@@ -61,13 +60,6 @@ export function DeleteChannelButton({
             )}
           </Button>
         }
-        title={`删除“${channelName}”？`}
-        description="删除后无法撤销，请确认这不是暂时停用。"
-        impactItems={[
-          '该群配置会从系统中永久删除。',
-          '存在规则或历史投递记录时无法删除。',
-        ]}
-        confirmLabel="确认删除"
         onConfirm={() => {
           setErrorMessage(null);
           startTransition(async () => {
@@ -80,8 +72,12 @@ export function DeleteChannelButton({
             // themselves; fetch the list again so the removed row disappears.
             router.refresh();
           });
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action={`删除“${channelName}”？`} changes={[]} consequences={[
+          '该群配置会从系统中永久删除。',
+          '存在规则或历史投递记录时无法删除。',
+        ]} confirmText="确认删除" />
+      </ConfirmActionController>
       {errorMessage ? (
         <ActionNotice
           tone="error"

@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   FormErrorSummary,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
@@ -222,23 +222,19 @@ export function RecordPaymentForm({
           {pending ? '正在录入…' : '核对并录入付款'}
         </Button>
       </div>
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         formId={formId}
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={triggerRef}
         disabled={pending || preview === null}
-        title="确认录入这笔收款？"
-        description={`提交前未收金额为 ¥ ${remainingAmount}。请逐项核对金额、时间和流水信息。`}
-        impactItems={
-          preview ? paymentImpactItems(preview, remainingAmount) : []
-        }
-        confirmLabel="确认录入付款"
         onConfirm={() => {
           confirmedRef.current = true;
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action="确认录入这笔收款？" changes={[]} consequences={
+          preview ? paymentImpactItems(preview, remainingAmount) : []
+        } confirmText="确认录入付款" />
+      </ConfirmActionController>
       {visibleState?.status === 'success' ? (
         <ActionNotice
           tone="success"

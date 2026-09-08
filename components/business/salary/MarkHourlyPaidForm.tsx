@@ -4,7 +4,7 @@ import { useActionState, useId } from 'react';
 import { setHourlyPayrollPaidAction } from '@/actions/owner-salary';
 import type { SalaryMutationResult } from '@/actions/owner-salary.types';
 import { Button } from '@/components/ui/button';
-import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 
 type Props = {
   id: string;
@@ -70,8 +70,7 @@ export function MarkHourlyPaidForm({
       </form>
       {/* 当前 mutation 只存 isPaid / paidAt，不接收审计理由。
           这里必须停在 L2，不能为了 UI 自行添加假 reason。 */}
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         trigger={
           <Button
             type="button"
@@ -84,26 +83,19 @@ export function MarkHourlyPaidForm({
             {pending ? '处理中…' : currentPaid ? '撤销发放' : '标记已发'}
           </Button>
         }
-        title={
+        formId={formId}
+        disabled={pending}>
+        <ConfirmActionDialog action={
           currentPaid
             ? `撤销 ${workerName} ${month} 的发放标记？`
             : `确认 ${workerName} ${month} 的月结已发？`
-        }
-        description={
-          currentPaid
-            ? '这不是退款操作。请先核对线下资金状态。'
-            : '标记已发后会锁定该月结，请确认线下已完成付款。'
-        }
-        impactItems={hourlyPaidImpactItems({
+        } changes={[]} consequences={hourlyPaidImpactItems({
           currentPaid,
           workerName,
           month,
           totalSalary,
-        })}
-        confirmLabel={currentPaid ? '确认撤销发放标记' : '确认标记已发'}
-        formId={formId}
-        disabled={pending}
-      />
+        })} confirmText={currentPaid ? '确认撤销发放标记' : '确认标记已发'} />
+      </ConfirmActionController>
       {error ? (
         <ActionNotice
           tone="error"

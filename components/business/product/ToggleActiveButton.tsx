@@ -2,7 +2,7 @@
 
 import { useActionState, useId } from 'react';
 import { Button } from '@/components/ui/button';
-import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { setQuoteProductActiveAction } from '@/actions/owner-products';
 import type { ProductMutationResult } from '@/actions/owner-products.types';
 import type { ProductReferenceImpact } from '@/lib/product';
@@ -37,8 +37,7 @@ export function ToggleActiveButton({
   return (
     <div className="space-y-2">
       <form id={formId} action={formAction} aria-busy={pending} />
-      <ConfirmActionDialog
-        level={currentlyActive ? 'L3' : 'L2'}
+      <ConfirmActionController level={currentlyActive ? 'L3' : 'L2'}
         trigger={
           <Button
             variant={currentlyActive ? 'destructive' : 'default'}
@@ -53,20 +52,13 @@ export function ToggleActiveButton({
                 : '启用组合'}
           </Button>
         }
-        title={currentlyActive ? '停用该组合？' : '重新启用该组合？'}
-        description={
-          currentlyActive
-            ? '停用后，该组合不再参与新建工单的隐式匹配。请核对下列引用并填写停用理由。'
-            : '启用后，该组合会重新参与新建工单的隐式匹配。请核对下列影响。'
-        }
-        impactItems={productActiveChangeImpactItems(impact, nextActive)}
-        confirmLabel={currentlyActive ? '确认停用' : '确认启用'}
         formId={formId}
         reasonLabel="停用理由"
         reasonName="reason"
         reasonPlaceholder="例如：旧款停产，已由新产品替代"
-        disabled={pending}
-      />
+        disabled={pending}>
+        <ConfirmActionDialog action={currentlyActive ? '停用该组合？' : '重新启用该组合？'} changes={[]} consequences={productActiveChangeImpactItems(impact, nextActive)} confirmText={currentlyActive ? '确认停用' : '确认启用'} />
+      </ConfirmActionController>
       {error ? (
         <ActionNotice
           tone="error"

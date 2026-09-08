@@ -4,7 +4,7 @@ import { useActionState, useId, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
 } from '@/components/ui-business';
 import { issueBillAction } from '@/actions/bill';
 import type { BillMutationResult } from '@/actions/bill.types';
@@ -39,25 +39,21 @@ export function IssueBillButton({
         action={() => startTransition(() => action())}
         aria-busy={pending}
       />
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         formId={formId}
         disabled={pending}
         trigger={
           <Button type="button" disabled={pending} aria-busy={pending}>
             {pending ? '正在发单…' : '发单给销售 / 客服'}
           </Button>
-        }
-        title={`确认发布 ${period} 账单？`}
-        description="发单会把草稿转为可收款账单。此状态单向流转，发布后不能退回草稿。"
-        impactItems={[
+        }>
+        <ConfirmActionDialog action={`确认发布 ${period} 账单？`} changes={[]} consequences={[
           `接收对象：${recipientLabel}`,
           `当前应收：¥ ${totalAmount}，包含 ${orderCount} 张工单`,
           '发布后可以录入付款；达到应收总额时账单进入已结清终态。',
           '发布后本账单保持不变；同月迟到工单会归入新的补充账单。',
-        ]}
-        confirmLabel="确认发单"
-      />
+        ]} confirmText="确认发单" />
+      </ConfirmActionController>
       {visibleState?.status === 'error' ? (
         <ActionNotice
           tone="error"

@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { ConfirmActionDialog } from "@/components/ui-business";
+import { ConfirmActionController, ConfirmActionDialog } from "@/components/ui-business";
 import { OrderPackagingMode } from "@/generated/prisma/enums";
 import { externalPriceBusinessText } from "@/lib/price/external-price-display";
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
@@ -943,32 +943,28 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
             )}
           </div>
 
-          <ConfirmActionDialog
-            level="L2"
-            disabled={submissionDisabled}
-            trigger={
-              <Button
-                type="button"
-                disabled={submissionDisabled}
-              >
-                {pricingFinalized
-                  ? "费用已确认"
-                  : finalizePending
-                  ? "正在确认报价快照…"
-                  : "确认工厂核价"}
-              </Button>
-            }
-            title="保存本次核价？"
-            description="确认仅使用工单已有报价快照；只会补录待人工核价金额。"
-            impactItems={[
-              '若工单或价格已变化，本次操作会停止并提示刷新。',
-              `已有快照价 ${preview.items.length - incompleteItemCount} 款保持不变，${incompleteItemCount} 款需录入人工核价。`,
-              `${preview.packagingGroups.length - incompletePackagingGroupCount} 个包装组保持已有金额，${incompletePackagingGroupCount} 组需录入人工核价。`,
-              `${preview.shipments.length} 票快递/耗材费仅确认已有快照或补录待核价金额。`,
-            ]}
-            confirmLabel="确认工厂核价"
-            onConfirm={submit}
-          />
+            <ConfirmActionController level="L2"
+              disabled={submissionDisabled}
+              trigger={
+                <Button
+                  type="button"
+                  disabled={submissionDisabled}
+                >
+                  {pricingFinalized
+                    ? "费用已确认"
+                    : finalizePending
+                      ? "正在确认报价快照…"
+                      : "确认工厂核价"}
+                </Button>
+              }
+              onConfirm={submit}>
+              <ConfirmActionDialog action="保存本次核价？" changes={[]} consequences={[
+                '若工单或价格已变化，本次操作会停止并提示刷新。',
+                `已有快照价 ${preview.items.length - incompleteItemCount} 款保持不变，${incompleteItemCount} 款需录入人工核价。`,
+                `${preview.packagingGroups.length - incompletePackagingGroupCount} 个包装组保持已有金额，${incompletePackagingGroupCount} 组需录入人工核价。`,
+                `${preview.shipments.length} 票快递/耗材费仅确认已有快照或补录待核价金额。`,
+              ]} confirmText="确认工厂核价" />
+            </ConfirmActionController>
         </>
       ) : null}
       </fieldset>

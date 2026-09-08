@@ -23,7 +23,7 @@ import type {
 } from '@/lib/order/change-request';
 import { Button } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
@@ -703,22 +703,17 @@ function OrderChangeReviewDecisionFields({
         </p>
       ) : null}
       <div data-slot={compact ? 'order-change-decision-actions' : undefined} className="flex flex-wrap gap-2">
-        <ConfirmActionDialog
-          level="L2"
+        <ConfirmActionController level="L2"
           disabled={approveDisabled}
           trigger={
             <Button type="button" className="min-h-11" aria-describedby={approvalDisabledReason ? `change-approval-help-${requestId}` : undefined}>
               批准变更
             </Button>
           }
-          title="批准这项工单修改申请？"
-          description="请核对拟变更款式、自动计价预览和逐票运费。批准时会校验价格版本并重算。"
-          impactItems={approvalImpactItems}
-          confirmLabel="确认批准并同步工单"
-          onConfirm={() => submit('APPROVE')}
-        />
-        <ConfirmActionDialog
-          level="L2"
+          onConfirm={() => submit('APPROVE')}>
+          <ConfirmActionDialog action="批准这项工单修改申请？" changes={[]} consequences={approvalImpactItems} confirmText="确认批准并同步工单" />
+        </ConfirmActionController>
+        <ConfirmActionController level="L2"
           disabled={rejectDisabled}
           trigger={
             <Button
@@ -729,12 +724,9 @@ function OrderChangeReviewDecisionFields({
               拒绝申请
             </Button>
           }
-          title="拒绝这项工单修改申请？"
-          description="拒绝后不会改动工单内容。请先在上方填写拒绝原因，该原因会保存到审核记录。"
-          impactItems={rejectionImpactItems}
-          confirmLabel="确认拒绝申请"
-          onConfirm={() => submit('DENY')}
-        />
+          onConfirm={() => submit('DENY')}>
+          <ConfirmActionDialog action="拒绝这项工单修改申请？" changes={[]} consequences={rejectionImpactItems} confirmText="确认拒绝申请" />
+        </ConfirmActionController>
       </div>
     </>
   );

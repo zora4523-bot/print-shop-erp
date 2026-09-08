@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { ConfirmActionDialog } from './ConfirmActionDialog';
+import { ConfirmActionController, ConfirmActionDialog } from './ConfirmActionDialog';
 
 export type PendingButtonProps = Omit<
   React.ComponentProps<typeof Button>,
@@ -134,25 +134,21 @@ export function PendingButton({
           {groupNote}
         </p>
       ) : null}
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         open={pending && pendingNavigationHref !== null}
         onOpenChange={(open) => {
           if (!open) setPendingNavigationHref(null);
         }}
         focusReturnRef={navigationSourceRef}
-        title="当前操作仍在提交，仍要离开？"
-        description="离开后当前页面将停止等待结果。"
-        impactItems={[
-          '操作可能已经到达服务器，返回后请先核对结果。',
-          '在确认结果前不要重复提交同一操作。',
-        ]}
-        confirmLabel="仍要离开"
         cancelLabel="留在当前页面"
         onConfirm={() => {
           if (pendingNavigationHref) window.location.assign(pendingNavigationHref);
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action="当前操作仍在提交，仍要离开？" changes={[]} consequences={[
+          '操作可能已经到达服务器，返回后请先核对结果。',
+          '在确认结果前不要重复提交同一操作。',
+        ]} confirmText="仍要离开" />
+      </ConfirmActionController>
     </div>
   );
 }

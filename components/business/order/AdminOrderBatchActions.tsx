@@ -20,7 +20,7 @@ import type { AdminOrderBatchCommand } from '@/lib/order/admin-batch';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import type { OrderListSelectionItem } from './OrderListBatchSelection';
 import { Button } from '@/components/ui/button';
-import { ConfirmActionDialog, DisabledReason } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog, DisabledReason } from '@/components/ui-business';
 import { useAdminOrderBatchResult } from './AdminOrderBatchResultProvider';
 import {
   BATCH_COMMAND_CONFIG,
@@ -170,22 +170,18 @@ export function AdminOrderBatchActions({
       ) : (
         <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">{controls}</div>
       )}
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         open={confirmation !== null}
         onOpenChange={(open) => { if (!open) setConfirmation(null); }}
         focusReturnRef={focusReturnRef}
-        title={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认批量操作'}
-        description={confirmation ? `已选 ${confirmation.orders.length} 张，本次可处理 ${confirmation.orders.filter((order) => order.eligible).length} 张，其余不纳入处理。` : ''}
-        impactItems={confirmation ? batchConfirmationImpact(confirmation.command, confirmation.orders) : []}
-        confirmLabel={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认操作'}
         disabled={busy}
         className="[&_button]:min-h-11"
         onConfirm={() => {
           if (confirmation) run(confirmation.command, confirmation.orders);
           setConfirmation(null);
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认批量操作'} changes={[]} consequences={confirmation ? batchConfirmationImpact(confirmation.command, confirmation.orders) : []} confirmText={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认操作'} />
+      </ConfirmActionController>
       <p
         role="status"
         aria-live="polite"

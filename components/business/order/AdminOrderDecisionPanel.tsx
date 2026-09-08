@@ -20,7 +20,7 @@ import type { CancellationSettlementReference } from '@/lib/order/change-request
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { ActionNotice } from '@/components/ui-business/ActionNotice';
 import { DisabledReason } from '@/components/ui-business/DisabledReason';
 import { OrderChangeReviewForm } from './OrderChangeReviewForm';
@@ -49,12 +49,11 @@ type DecisionTask = () => Promise<AdminOrderWorkflowActionResult | ReviewResult>
 type DecisionReceipt = { text: string; tone: 'success' | 'warning' };
 
 function DecisionConfirmation({
-  label, title, description, impactItems, confirmLabel, disabled,
+  label, title, impactItems, confirmLabel, disabled,
   onConfirm, describedBy, variant = 'default',
 }: {
   label: string;
   title: string;
-  description: string;
   impactItems: string[];
   confirmLabel: string;
   disabled: boolean;
@@ -62,16 +61,12 @@ function DecisionConfirmation({
   describedBy?: string;
   variant?: 'default' | 'destructive' | 'outline';
 }) {
-  return <ConfirmActionDialog
-    level="L2"
+  return <ConfirmActionController level="L2"
     disabled={disabled}
     trigger={<Button type="button" size="sm" variant={variant} aria-describedby={describedBy}>{label}</Button>}
-    title={title}
-    description={description}
-    impactItems={impactItems}
-    confirmLabel={confirmLabel}
-    onConfirm={onConfirm}
-  />;
+    onConfirm={onConfirm}>
+    <ConfirmActionDialog action={title} changes={[]} consequences={impactItems} confirmText={confirmLabel} />
+  </ConfirmActionController>;
 }
 
 function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow }) {
@@ -161,10 +156,9 @@ function AdminDecisionActions({
         <DecisionConfirmation
           label="下发 + 打印"
           title="下发这张工单到生产？"
-          description="下发后车间可以扫码报工，并生成当前版本的打印任务。"
           impactItems={[
             `${order.customName ?? '未命名工单'}，版本 v${order.workOrderVersion}，共 ${order.totalQuantity.toLocaleString('zh-CN')} 个。`,
-            '沿用已核定费用；后续费用调整另行保存，不影响原报价记录。',
+            '车间可扫码报工，并生成打印任务。',
           ]}
           confirmLabel="确认下发并创建打印"
           disabled={pending}
@@ -194,11 +188,10 @@ function AdminDecisionActions({
         <DecisionConfirmation
           label="结算"
           title="结算这张工单？"
-          description="请核对本次入账金额，结算后工单进入只读状态。"
           impactItems={[
             `工单 ${order.orderNo}，版本 v${order.workOrderVersion}。`,
             `按已确认金额 ${order.feeStages.confirmed === null ? '待核定' : `¥${formatMoney(order.feeStages.confirmed)}`} 结算。`,
-            '保存结算金额和结算时间，后续账单将采用这笔已结算金额。',
+            '结算后不可编辑，账单将采用本次结算金额。',
           ]}
           confirmLabel="确认结算入账"
           disabled={pending}
@@ -437,7 +430,6 @@ function AdminDecisionForm({
         <DecisionConfirmation
           label={pending ? '提交中…' : `确认${actionLabel}`}
           title={`${actionLabel}？`}
-          description="请核对本次处理内容，确认后将更新工单。"
           impactItems={impactItems}
           confirmLabel={`确认${actionLabel}`}
           disabled={pending || Boolean(formIssue)}

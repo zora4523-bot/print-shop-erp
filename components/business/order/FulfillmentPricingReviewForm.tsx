@@ -15,7 +15,7 @@ import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type Props = {
@@ -227,20 +227,16 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
               </ul>
               {quote.issues.length > 0 ? <ul role="alert" className="list-inside list-disc text-sm text-destructive">{quote.issues.map((issue, index) => <li key={`${index}-${issue}`}>{issue}</li>)}</ul> : null}
               <p className="text-xs text-muted-foreground">确认将记录本次物流金额及审核人；不会结算工单或重新生成生产工单。</p>
-              <ConfirmActionDialog
-                level="L2"
-                disabled={pending || auxiliary.blocked || !quote.canConfirm}
-                trigger={<Button type="button" disabled={pending || auxiliary.blocked || !quote.canConfirm}>确认物流费用</Button>}
-                title="确认物流费用？"
-                description="请核对本次物流收费及工单金额。"
-                impactItems={[
-                  `更正前合计 ${formatMoney(quote.oldTotal)}，更正后合计 ${quote.newTotal === null ? '待核定' : formatMoney(quote.newTotal)}。`,
-                  `本次差额 ${quote.delta === null ? '待核定' : formatMoney(quote.delta)}。`,
-                  '记录本次物流金额及审核人；工单生产状态保持不变。',
-                ]}
-                confirmLabel="确认物流费用"
-                onConfirm={confirmPricing}
-              />
+                <ConfirmActionController level="L2"
+                  disabled={pending || auxiliary.blocked || !quote.canConfirm}
+                  trigger={<Button type="button" disabled={pending || auxiliary.blocked || !quote.canConfirm}>确认物流费用</Button>}
+                  onConfirm={confirmPricing}>
+                  <ConfirmActionDialog action="确认物流费用？" changes={[]} consequences={[
+                    `更正前合计 ${formatMoney(quote.oldTotal)}，更正后合计 ${quote.newTotal === null ? '待核定' : formatMoney(quote.newTotal)}。`,
+                    `本次差额 ${quote.delta === null ? '待核定' : formatMoney(quote.delta)}。`,
+                    '记录本次物流金额及审核人；工单生产状态保持不变。',
+                  ]} confirmText="确认物流费用" />
+                </ConfirmActionController>
             </div>
           ) : null}
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}

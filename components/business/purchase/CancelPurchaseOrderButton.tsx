@@ -4,7 +4,7 @@ import { useActionState, useId } from 'react';
 import { cancelPurchaseOrderAction } from '@/actions/owner-purchases';
 import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
 import { Button } from '@/components/ui/button';
-import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 
 export type PurchaseOrderCancelItem = {
   materialCode: string;
@@ -65,8 +65,7 @@ export function CancelPurchaseOrderButton({
   return (
     <div className="space-y-3">
       <form id={formId} action={formAction} aria-busy={pending} />
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         trigger={
           <Button
             type="button"
@@ -77,17 +76,14 @@ export function CancelPurchaseOrderButton({
             {pending ? '正在取消采购单…' : '取消采购单'}
           </Button>
         }
-        title={`取消采购单 ${purchaseNo}？`}
-        description="这是单向状态变更。请核对供应商和全部采购明细后再继续。"
-        impactItems={purchaseOrderCancelImpactItems({
+        formId={formId}
+        disabled={pending}>
+        <ConfirmActionDialog action={`取消采购单 ${purchaseNo}？`} changes={[]} consequences={purchaseOrderCancelImpactItems({
           purchaseNo,
           supplierName,
           items,
-        })}
-        confirmLabel="确认取消采购单"
-        formId={formId}
-        disabled={pending}
-      />
+        })} confirmText="确认取消采购单" />
+      </ConfirmActionController>
       {error ? (
         <ActionNotice
           tone="error"

@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { OrderEditorAuxiliaryContext, useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type ManualChargeCode =
@@ -274,37 +274,33 @@ function ManualChargeEditor({
                   {resultError(deleteState)}
                 </p>
               ) : null}
-              <ConfirmActionDialog
-                level="L2"
-                disabled={!removeReason.trim() || disabled}
-                trigger={
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
+                  <ConfirmActionController level="L2"
                     disabled={!removeReason.trim() || disabled}
-                  >
-                    {deletePending ? '移除中…' : '移除并保留历史'}
-                  </Button>
-                }
-                title="确认移除这项对客费用？"
-                description="费用会归零，原记录、确认人和移除原因仍会保留。"
-                impactItems={[
-                  '对客应收总额将立即重算',
-                  '原金额、确认人和移除原因继续保留',
-                ]}
-                confirmLabel="确认移除"
-                onConfirm={() =>
-                  startDelete(() =>
-                    deleteAction({
-                      orderId,
-                      chargeId: charge.id,
-                      expectedPriceRevision: priceRevision,
-                      reason: removeReason,
-                    }),
-                  )
-                }
-              />
+                    trigger={
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!removeReason.trim() || disabled}
+                      >
+                        {deletePending ? '移除中…' : '移除并保留历史'}
+                      </Button>
+                    }
+                    onConfirm={() =>
+                      startDelete(() =>
+                        deleteAction({
+                          orderId,
+                          chargeId: charge.id,
+                          expectedPriceRevision: priceRevision,
+                          reason: removeReason,
+                        }),
+                      )
+                    }>
+                    <ConfirmActionDialog action="确认移除这项对客费用？" changes={[]} consequences={[
+                      '对客应收总额将立即重算',
+                      '原金额、确认人和移除原因继续保留',
+                    ]} confirmText="确认移除" />
+                  </ConfirmActionController>
             </div>
           ) : null}
         </>
@@ -496,38 +492,34 @@ function PlateDetailEditor({
               {resultError(deleteState)}
             </p>
           ) : null}
-          <ConfirmActionDialog
-            level="L2"
-            disabled={!removeReason.trim() || disabled}
-            trigger={
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!removeReason.trim() || disabled}
-              >
-                {deletePending ? '移除中…' : '移除并保留历史'}
-              </Button>
-            }
-            title="确认移除这条制版明细？"
-            description="对应制版费会归零，原明细、操作人和原因仍会保留。"
-            impactItems={[
-              '对应制版费归零并重算工单总额',
-              '制版明细保留为已移除历史记录',
-            ]}
-            confirmLabel="确认移除"
-            onConfirm={() =>
-              startDelete(() =>
-                deleteAction({
-                  orderId,
-                  orderItemId,
-                  plateDetailId: detail.id,
-                  expectedPriceRevision: priceRevision,
-                  reason: removeReason,
-                }),
-              )
-            }
-          />
+            <ConfirmActionController level="L2"
+              disabled={!removeReason.trim() || disabled}
+              trigger={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!removeReason.trim() || disabled}
+                >
+                  {deletePending ? '移除中…' : '移除并保留历史'}
+                </Button>
+              }
+              onConfirm={() =>
+                startDelete(() =>
+                  deleteAction({
+                    orderId,
+                    orderItemId,
+                    plateDetailId: detail.id,
+                    expectedPriceRevision: priceRevision,
+                    reason: removeReason,
+                  }),
+                )
+              }>
+              <ConfirmActionDialog action="确认移除这条制版明细？" changes={[]} consequences={[
+                '对应制版费归零并重算工单总额',
+                '制版明细保留为已移除历史记录',
+              ]} confirmText="确认移除" />
+            </ConfirmActionController>
         </div>
       ) : null}
       </fieldset>

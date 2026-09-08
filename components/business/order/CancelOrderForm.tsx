@@ -7,7 +7,7 @@ import type { OrderMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   FormErrorSummary,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
@@ -70,8 +70,7 @@ export function CancelOrderForm({
         noValidate
       />
 
-      <ConfirmActionDialog
-        level="L3"
+      <ConfirmActionController level="L3"
         formId={formId}
         disabled={pending || impactItems.length === 0}
         trigger={
@@ -92,13 +91,10 @@ export function CancelOrderForm({
             {pending ? '正在取消…' : '取消工单'}
           </Button>
         }
-        title={orderNo ? `取消工单 ${orderNo}？` : '取消这张工单？'}
-        description="工单取消后不能恢复，也不再参与排产、生产和账单归集；已发生成本与工资不会冲销。"
-        impactItems={impactItems}
-        confirmLabel="填写原因并取消工单"
         reasonLabel="取消原因"
-        reasonPlaceholder="例如：客户书面确认取消订单"
-      />
+        reasonPlaceholder="例如：客户书面确认取消订单">
+        <ConfirmActionDialog action={orderNo ? `取消工单 ${orderNo}？` : '取消这张工单？'} changes={[]} consequences={impactItems} confirmText="填写原因并取消工单" />
+      </ConfirmActionController>
 
       {impactItems.length === 0 ? (
         <ActionNotice

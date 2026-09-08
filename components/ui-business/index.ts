@@ -94,6 +94,7 @@ export { TableEmptyState } from './TableEmptyState';
 export type { TableEmptyStateProps } from './TableEmptyState';
 
 export {
+  ConfirmActionController,
   ConfirmActionDialog,
   confirmationCanSubmit,
 } from './ConfirmActionDialog';

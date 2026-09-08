@@ -5,7 +5,7 @@ import type { FormEvent } from 'react';
 import { shipOrderAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
-import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import {
   ShipOrderShipmentFields,
   ShipOrderVersionFields,
@@ -199,24 +199,16 @@ export function ShipOrderForm({
       >
         {pending ? '处理中…' : state?.status === 'success' ? '已发货' : `确认 ${shipments.length} 个地址已发货`}
       </Button>
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={triggerRef}
         disabled={pending || shipments.length === 0}
-        title={`确认 ${shipments.length} 个地址已发货？`}
-        description={
-          isExternalSales
-            ? '请核对运单信息和最终收费。'
-            : '请核对运单信息。'
-        }
-        impactItems={confirmationImpactItems}
-        confirmLabel={
+        onConfirm={confirmShipment}>
+        <ConfirmActionDialog action={`确认 ${shipments.length} 个地址已发货？`} changes={[]} consequences={confirmationImpactItems} confirmText={
           isExternalSales ? '确认发货并重算应收' : '确认标记已发货'
-        }
-        onConfirm={confirmShipment}
-      />
+        } />
+      </ConfirmActionController>
       {visibleState?.status === 'success' ? <ActionNotice tone="success" title="工单已发货" /> : null}
       {visibleState?.status === 'error' ? (
         <p role="alert" className="text-xs text-destructive">

@@ -34,7 +34,7 @@ describe('OutsourceReceiveFeedback', () => {
   it('回货与取消都经过 L2 影响确认，不从原按钮直接提交', () => {
     expect(actionsSource.match(/<ConfirmActionDialog/g)).toHaveLength(2);
     expect(
-      actionsSource.match(/<ConfirmActionDialog\s+level="L2"/g),
+      actionsSource.match(/<ConfirmActionController\s+level="L2"/g),
     ).toHaveLength(2);
     expect(actionsSource).toContain('formId={receiveFormId}');
     expect(actionsSource).toContain('formId={cancelFormId}');

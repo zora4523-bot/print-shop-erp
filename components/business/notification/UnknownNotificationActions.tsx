@@ -10,7 +10,7 @@ import type { NotificationResolutionResult } from '@/actions/owner-notifications
 import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   DisabledReason,
 } from '@/components/ui-business';
 
@@ -67,8 +67,7 @@ export function UnknownNotificationActions({
       </form>
 
       <div className="flex flex-wrap items-center justify-end gap-1.5">
-        <ConfirmActionDialog
-          level="L2"
+        <ConfirmActionController level="L2"
           formId={deliveredFormId}
           disabled={pending}
           trigger={
@@ -76,19 +75,15 @@ export function UnknownNotificationActions({
               {deliveredPending ? '处理中…' : '确认已送达'}
             </Button>
           }
-          title="确认该消息已送达？"
-          description="仅在你已在对应企业微信群中看到这条消息时选择。"
-          impactItems={[
+          onConfirm={() => setActiveDecision('delivered')}>
+          <ConfirmActionDialog action="确认该消息已送达？" changes={[]} consequences={[
             '投递状态会从“待人工核对”改为“成功”。',
             '该决策会记录操作人和时间，且不再重发该条消息。',
-          ]}
-          confirmLabel="确认已送达"
-          onConfirm={() => setActiveDecision('delivered')}
-        />
+          ]} confirmText="确认已送达" />
+        </ConfirmActionController>
 
         {canRetry ? (
-          <ConfirmActionDialog
-            level="L2"
+          <ConfirmActionController level="L2"
             formId={retryFormId}
             disabled={pending}
             trigger={
@@ -96,15 +91,12 @@ export function UnknownNotificationActions({
                 {retryPending ? '入队中…' : '确认未送达并重发'}
               </Button>
             }
-            title="确认未送达并安全重发？"
-            description="请先在对应群中确认消息确实不存在。"
-            impactItems={[
+            onConfirm={() => setActiveDecision('retry')}>
+            <ConfirmActionDialog action="确认未送达并安全重发？" changes={[]} consequences={[
               '使用原消息内容和原投递目标，不套用当前规则。',
               '同一任务的所有结果不明项核对完成后，才会重新入队。',
-            ]}
-            confirmLabel="确认未送达并重发"
-            onConfirm={() => setActiveDecision('retry')}
-          />
+            ]} confirmText="确认未送达并重发" />
+          </ConfirmActionController>
         ) : (
           <DisabledReason
             cause="status"
@@ -117,8 +109,7 @@ export function UnknownNotificationActions({
           </DisabledReason>
         )}
 
-        <ConfirmActionDialog
-          level="L3"
+        <ConfirmActionController level="L3"
           formId={ignoredFormId}
           disabled={pending}
           trigger={
@@ -126,17 +117,14 @@ export function UnknownNotificationActions({
               {ignoredPending ? '处理中…' : '忽略'}
             </Button>
           }
-          title="忽略该条结果不明的消息？"
-          description="忽略表示不再确认是否送达，也不重发该条消息。"
-          impactItems={[
-            '投递状态会记为“失败”并移出待人工处理队列。',
-            '系统会保留操作人、时间、理由、变更前后状态和原消息记录。',
-          ]}
-          confirmLabel="确认忽略"
           reasonLabel="忽略理由"
           reasonPlaceholder="例如：业务已通过电话确认，无需再补发"
-          onConfirm={() => setActiveDecision('ignored')}
-        />
+          onConfirm={() => setActiveDecision('ignored')}>
+          <ConfirmActionDialog action="忽略该条结果不明的消息？" changes={[]} consequences={[
+            '投递状态会记为“失败”并移出待人工处理队列。',
+            '系统会保留操作人、时间、理由、变更前后状态和原消息记录。',
+          ]} confirmText="确认忽略" />
+        </ConfirmActionController>
       </div>
 
       {state ? (

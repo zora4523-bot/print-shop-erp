@@ -45,7 +45,8 @@ vi.mock('@/actions/order', () => ({
 }));
 
 vi.mock('@/components/ui-business', () => ({
-  ConfirmActionDialog: ({
+  ConfirmActionDialog: () => null,
+  ConfirmActionController: ({
     disabled,
     onConfirm,
   }: {

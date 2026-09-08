@@ -4,7 +4,7 @@ import { useActionState, useId } from 'react';
 import { settleCsPeriodAction } from '@/actions/owner-salary';
 import type { SettleCsPeriodResult } from '@/actions/owner-salary.types';
 import { Button } from '@/components/ui/button';
-import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 
 export type CsPeriodSettlementContext = {
   csUserName: string;
@@ -50,8 +50,7 @@ export function SettleCsPeriodButton({
     <div className="space-y-3">
       <form id={formId} action={action} aria-busy={pending} />
       {/* 结算 action 没有可持久的 reason 字段，所以不能伪造 L3。 */}
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         trigger={
           <Button
             type="button"
@@ -62,13 +61,10 @@ export function SettleCsPeriodButton({
             {pending ? '结算中…' : '核对并立即结算'}
           </Button>
         }
-        title={`确认结算 ${context.csUserName} 的这个工资周期？`}
-        description="结算会锁定周期业绩和提成档位，并把周期转为已结算终态。请核对人员、月期、金额和下一周期影响。"
-        impactItems={csPeriodSettlementImpactItems(context)}
-        confirmLabel="确认生成提成并结算"
         formId={formId}
-        disabled={pending}
-      />
+        disabled={pending}>
+        <ConfirmActionDialog action={`确认结算 ${context.csUserName} 的这个工资周期？`} changes={[]} consequences={csPeriodSettlementImpactItems(context)} confirmText="确认生成提成并结算" />
+      </ConfirmActionController>
 
       {visibleState?.status === 'success' ? (
         <ActionNotice
