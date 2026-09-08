@@ -6,8 +6,6 @@
 //   3. The same shape can be serialized for Puppeteer's page.evaluate
 //      hand-off later if we ever render server-side.
 
-export type PrintDocumentMode = 'order' | 'tasks';
-
 export type PrintDesign = {
   id: string;
   fileType: 'IMAGE' | 'CDR';
@@ -22,9 +20,6 @@ export type PrintTask = {
   completedQty: number;
   defectQty: number;
   completedAt?: Date | null;
-  // Pre-rendered absolute-URL QR. Keeping this in the DTO makes the browser
-  // print and both PDF paths consume exactly the same task destination.
-  taskQrSvg: string;
 };
 
 // Current-generation production rows are separate from legacy
@@ -44,7 +39,6 @@ export type PrintProductionStep = {
   completedQty: number;
   defectQty: number;
   completedAt?: Date | null;
-  taskQrSvg: string;
 };
 
 export type PrintFoilTechnique =

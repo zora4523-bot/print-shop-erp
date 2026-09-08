@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { Client } from 'pg';
 import qrcode from 'qrcode';
 import { buildQrSvg } from '../../lib/order/qr';
-import type { PrintDocumentMode, PrintOrder } from '../../lib/order/print-types';
+import type { PrintOrder } from '../../lib/order/print-types';
 import {
   cleanupPrintableOrderStressFixture,
   login,
@@ -201,8 +201,7 @@ async function standaloneOrderFixture(): Promise<PrintOrder> {
     }],
     tasks: [],
   }));
-  const productionSteps: PrintOrder['productionSteps'] = await Promise.all(
-    Array.from({ length: 5 }, async (_, index) => ({
+  const productionSteps: PrintOrder['productionSteps'] = Array.from({ length: 5 }, (_, index) => ({
       id: `operation-${index + 1}-${'long-task-identifier-'.repeat(4)}`,
       source: 'OPERATION' as const,
       itemSequence: index < 4 ? index + 1 : null,
@@ -213,9 +212,7 @@ async function standaloneOrderFixture(): Promise<PrintOrder> {
       plannedQty: index < 4 ? 1000 : 500,
       completedQty: 0,
       defectQty: 0,
-      taskQrSvg: await buildQrSvg(`${base}&task=operation-${index + 1}-${'long-task-identifier-'.repeat(4)}`, 55, { errorCorrectionLevel: 'Q' }),
-    })),
-  );
+    }));
   return {
     id: 'standalone-order', orderNo, workOrderVersion: 3, customName: '新春平安封四款',
     kind: 'NORMAL', isUrgent: true, isSfCollect: false,
@@ -238,17 +235,17 @@ async function standaloneOrderFixture(): Promise<PrintOrder> {
   };
 }
 
-function buildStandaloneHtml(order: PrintOrder, mode: PrintDocumentMode = 'order'): string {
+function buildStandaloneHtml(order: PrintOrder): string {
   // Playwright replaces JSX with component placeholders. Plain Node/tsx keeps
   // this regression on real React SSR and the actual serialized paginator.
   return execFileSync(process.execPath, ['--import', 'tsx', '-e', `
     const { readFileSync } = require('node:fs');
     const { buildPrintHtml } = require('./lib/order/print-html.tsx');
-    const { order, mode } = JSON.parse(readFileSync(0, 'utf8'));
+    const { order } = JSON.parse(readFileSync(0, 'utf8'));
     order.createdAt = new Date(order.createdAt);
     order.promisedDate = new Date(order.promisedDate);
-    buildPrintHtml(order, { factoryName: '佛山印刷厂', mode }).then((html) => process.stdout.write(html));
-  `], { input: JSON.stringify({ order, mode }), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+    buildPrintHtml(order, { factoryName: '佛山印刷厂' }).then((html) => process.stdout.write(html));
+  `], { input: JSON.stringify({ order }), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
 }
 
 async function expectEverySheetFitsOneA4Page(page: Page) {
@@ -302,57 +299,41 @@ function textPreview(value: string, maxCharacters: number): string {
 }
 
 test.describe('OrderPrintLayout 截图回归', () => {
-  test('standalone HTML 真实执行分页脚本并生成主单与长工序码 PDF', async ({ page }) => {
+  test('standalone HTML 真实执行分页脚本并保留一个主码和完整工序', async ({ page }) => {
     const order = await standaloneOrderFixture();
     const base = `https://print-regression.example.com/wo/${order.orderNo}?v=3`;
-    for (const mode of ['order', 'tasks'] as const) {
-      const html = buildStandaloneHtml(order, mode);
-      await page.setContent(html);
-      await waitForPrintReady(page, mode === 'order' ? 1 : undefined);
-      await expectQrPayload(page, '.scan .qr svg', base);
-      await expect(page.locator('.flow tbody > tr')).toHaveCount(5);
-      if (mode === 'order') {
-        await expectSingleOrderQrPerSheet(page);
-        await expect(page.locator('.items tbody > tr')).toHaveCount(4);
-        await expect(page.locator('.ship-list')).toContainText(order.shipments[0]!.receiverAddress!);
-        await expect(page.locator('.art .thumb')).toHaveCount(4);
-      } else {
-        await expect(page.locator('.task-qr')).toHaveCount(5);
-        const packingRow = page.locator('.flow tbody > tr').filter({ hasText: '包装组 1 · 图 1、2、3、4' });
-        await expect(packingRow).toHaveCount(1);
-        await expect(packingRow).toContainText('500 袋');
-        for (let index = 0; index < order.productionSteps.length; index++) {
-          await expectQrPayload(page, `.task-qr svg >> nth=${index}`, `${base}&task=${order.productionSteps[index]!.id}`);
-        }
-      }
-      await expectDeclaredPagination(page);
-      const screenshot = test.info().outputPath(`standalone-${mode}.png`);
-      await page.locator('.work-order-document').screenshot({ path: screenshot });
-      await test.info().attach(`standalone-${mode}.png`, { path: screenshot, contentType: 'image/png' });
-    }
+    await page.setContent(buildStandaloneHtml(order));
+    await waitForPrintReady(page, 1);
+    await expectQrPayload(page, '.scan .qr svg', base);
+    await expect(page.locator('.flow tbody > tr')).toHaveCount(5);
+    await expectSingleOrderQrPerSheet(page);
+    await expect(page.locator('.items tbody > tr')).toHaveCount(4);
+    await expect(page.locator('.ship-list')).toContainText(order.shipments[0]!.receiverAddress!);
+    await expect(page.locator('.art .thumb')).toHaveCount(4);
+    const packingRow = page.locator('.flow tbody > tr').filter({ hasText: '包装组 1 · 图 1、2、3、4' });
+    await expect(packingRow).toHaveCount(1);
+    await expect(packingRow).toContainText('500 袋');
+    await expectDeclaredPagination(page);
+    const screenshot = test.info().outputPath('standalone-order.png');
+    await page.locator('.work-order-document').screenshot({ path: screenshot });
+    await test.info().attach('standalone-order.png', { path: screenshot, contentType: 'image/png' });
   });
 
-  test('50 款长名称聚合单工序保留明细且两种 PDF 模式页数一致', async ({ page }) => {
+  test('50 款长名称聚合工序保留明细且 PDF 物理页数与页脚一致', async ({ page }) => {
     const order = await standaloneOrderFixture();
     const firstItem = order.items[0]!;
     order.items = Array.from({ length: 50 }, (_, index) => ({ ...firstItem, id: `aggregate-item-${index + 1}`, sequence: index + 1, name: `款${String(index + 1).padStart(2, '0')}${'长'.repeat(61)}`, designs: [] }));
     order.packagingGroups = [];
     order.shipments = [];
     order.productionSteps = [{ ...order.productionSteps[0]!, itemName: null, itemSequence: null, craftName: '专版烫金', scopeLabel: `图 ${order.items.map((item) => item.sequence).join('、')}`, plannedQty: 50_000 }];
-    for (const mode of ['order', 'tasks'] as const) {
-      await page.setContent(buildStandaloneHtml(order, mode));
-      await waitForPrintReady(page);
-      await expect(page.locator('.flow tbody > tr')).toHaveCount(1);
-      if (mode === 'order') {
-        await expectSingleOrderQrPerSheet(page);
-        await expect(page.locator('.items tbody > tr')).toHaveCount(50);
-        for (const item of order.items) await expect(page.locator('.items').getByText(item.name, { exact: true })).toHaveCount(1);
-      } else {
-        await expect(page.locator('.task-qr')).toHaveCount(1);
-        await expect(page.locator('.flow')).toContainText(order.productionSteps[0]!.scopeLabel!);
-      }
-      await expectDeclaredPagination(page);
-    }
+    await page.setContent(buildStandaloneHtml(order));
+    await waitForPrintReady(page);
+    await expect(page.locator('.flow tbody > tr')).toHaveCount(1);
+    await expectSingleOrderQrPerSheet(page);
+    await expect(page.locator('.items tbody > tr')).toHaveCount(50);
+    for (const item of order.items) await expect(page.locator('.items').getByText(item.name, { exact: true })).toHaveCount(1);
+    await expect(page.locator('.flow')).toContainText(order.productionSteps[0]!.scopeLabel!);
+    await expectDeclaredPagination(page);
   });
 
   test('单票合法多行长地址完整续页且没有额外空白 PDF 页', async ({ page }) => {
@@ -472,7 +453,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
   }
 
   for (const taskCount of [1, 6, 12]) {
-    test(`${taskCount} 条工序按需打印保留全部独立二维码`, async ({ page }) => {
+    test(`${taskCount} 条工序保留主单明细且仅有工单主码`, async ({ page }) => {
       const adminId = await getUserIdByUsername(ADMIN_USERNAME);
       const { orderId } = await seedPrintableOrder({ submitterId: adminId, designCount: 1, variant: 'task-qr', taskCount });
       await login(page, { from: `/print/orders/${orderId}`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
@@ -483,16 +464,14 @@ test.describe('OrderPrintLayout 截图回归', () => {
       await expect(page.locator('.item-process')).toContainText('局部浮雕 · 正面 哑金 / 反面 红金');
       await expectDeclaredPagination(page);
 
-      await page.goto(`/print/orders/${orderId}?mode=tasks`);
-      await waitForPrintReady(page);
-      await expect(page.locator('.task-document')).toHaveCount(1);
-      await expect(page.locator('.flow tbody > tr')).toHaveCount(taskCount);
-      await expect(page.locator('.task-qr')).toHaveCount(taskCount);
-      await expect(page.getByLabel('图 1 · VR 款式 E2E 局部烫金 任务报工二维码')).toHaveCount(taskCount);
-      await expectQrPayload(page, '.task-qr svg', Array.from({ length: taskCount }, (_, index) => `http://localhost:3000/worker/tasks/${orderId}-task-${index + 1}`));
-      await expectDeclaredPagination(page);
-      const screenshot = taskCount === 1 ? 'task-qr' : taskCount === 6 ? 'task-boundary' : 'task-overflow';
-      await expect(page.locator('.work-order-document')).toHaveScreenshot(`order-print-${screenshot}.png`);
+      await expect(page.locator('.work-order-document')).toHaveScreenshot(`order-print-main-flow-${taskCount}.png`);
+      if (taskCount === 1) {
+        const retiredPdf = await page.request.get(`/api/orders/${orderId}/pdf?mode=tasks`);
+        expect(retiredPdf.status()).toBe(400);
+        const retiredPrint = await page.request.get(`/print/orders/${orderId}?mode=tasks`);
+        expect(retiredPrint.status()).toBe(404);
+        expect(await retiredPrint.text()).not.toContain('<main class="work-order-document');
+      }
     });
   }
 

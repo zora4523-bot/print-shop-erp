@@ -49,40 +49,39 @@ describe('order PDF route', () => {
     expect(mocks.render).not.toHaveBeenCalled();
   });
 
-  it.each(['?mode=invalid', '?mode=order&mode=tasks'])('rejects invalid or ambiguous mode %s', async (query) => {
+  it.each(['?mode=tasks', '?mode=invalid', '?mode=order&mode=tasks'])('rejects invalid or ambiguous mode %s', async (query) => {
     const response = await request(query);
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'Invalid print mode' });
     expect(mocks.enqueue).not.toHaveBeenCalled();
   });
 
-  it.each(['order', 'tasks'])('renders the selected %s mode and labels its download', async (mode) => {
-    const response = await request(`?mode=${mode}`);
+  it.each(['', '?mode=order'])('renders only the production order (%s)', async (query) => {
+    const response = await request(query);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('application/pdf');
-    expect(mocks.html).toHaveBeenCalledWith(expect.anything(), { factoryName: '测试工厂', mode });
-    expect(decodeURIComponent(response.headers.get('content-disposition') ?? ''))
-      .toContain(mode === 'tasks' ? '_工序流转单.pdf' : '_客户.pdf');
+    expect(mocks.html).toHaveBeenCalledWith(expect.anything(), { factoryName: '测试工厂' });
+    expect(decodeURIComponent(response.headers.get('content-disposition') ?? '')).toContain('_客户.pdf');
   });
 
-  it('binds a queued task PDF to its mode and preserves it on retries', async () => {
+  it('binds a queued PDF to the actor, order and version on retries', async () => {
     mocks.mode.mockReturnValue('durable');
-    const response = await request('?mode=tasks');
+    const response = await request();
     expect(response.status).toBe(202);
-    expect(mocks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ mode: 'tasks' }));
+    expect(mocks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'order-1', expectedWorkOrderVersion: 3 }));
     expect(mocks.wait).toHaveBeenCalledWith('job-1', expect.objectContaining({
-      expected: { orderId: 'order-1', actorId: 'admin-1', workOrderVersion: 3, mode: 'tasks' },
+      expected: { orderId: 'order-1', actorId: 'admin-1', workOrderVersion: 3 },
     }));
-    expect(response.headers.get('refresh')).toBe('5;url=/api/orders/order-1/pdf?mode=tasks&jobId=job-1');
+    expect(response.headers.get('refresh')).toBe('5;url=/api/orders/order-1/pdf?jobId=job-1');
   });
 
-  it('retries a failed task document without reusing its failed job', async () => {
+  it('retries a failed PDF without reusing its failed job', async () => {
     mocks.mode.mockReturnValue('durable');
     mocks.wait.mockResolvedValue({ status: 'failed', errorCode: 'PrintLayoutOverflowError' });
-    const response = await request('?mode=tasks&jobId=job-old');
+    const response = await request('?jobId=job-old');
     expect(response.status).toBe(500);
     const html = await response.text();
-    expect(html).toContain('href="/api/orders/order-1/pdf?mode=tasks"');
+    expect(html).toContain('href="/api/orders/order-1/pdf"');
     expect(html).not.toContain('job-old');
     expect(mocks.enqueue).not.toHaveBeenCalled();
   });
@@ -90,8 +89,8 @@ describe('order PDF route', () => {
   it('discards a PDF if the work order changed during rendering', async () => {
     mocks.order.mockResolvedValueOnce({ id: 'order-1', orderNo: 'GD-001', workOrderVersion: 3 })
       .mockResolvedValueOnce({ id: 'order-1', workOrderVersion: 4 });
-    const response = await request('?mode=tasks');
+    const response = await request();
     expect(response.status).toBe(409);
-    expect(await response.text()).toContain('href="/api/orders/order-1/pdf?mode=tasks"');
+    expect(await response.text()).toContain('href="/api/orders/order-1/pdf"');
   });
 });

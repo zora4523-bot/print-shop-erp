@@ -3,7 +3,6 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type {
-  PrintDocumentMode,
   PrintOrder,
   PrintPackagingGroup,
 } from '../print-types';
@@ -37,7 +36,6 @@ function fixtureTask(overrides: Partial<FixtureTask> = {}): FixtureTask {
     completedQty: 0,
     defectQty: 0,
     completedAt: null,
-    taskQrSvg: '<svg data-stub-task-qr="1"></svg>',
     ...overrides,
   };
 }
@@ -161,8 +159,8 @@ function fixtureItems(count: number): FixtureItem[] {
   });
 }
 
-function renderPrintHtml(order: PrintOrder, mode: PrintDocumentMode = 'order'): Promise<string> {
-  return buildPrintHtml(order, { factoryName: TEST_FACTORY_NAME, mode });
+function renderPrintHtml(order: PrintOrder): Promise<string> {
+  return buildPrintHtml(order, { factoryName: TEST_FACTORY_NAME });
 }
 
 function visibleText(html: string): string {
@@ -235,7 +233,6 @@ describe('buildPrintHtml', () => {
         plannedQty: index === 0 ? 3_000 : 25,
         completedQty: 0,
         defectQty: 0,
-        taskQrSvg: '<svg width="109" height="109" data-task-qr="1"></svg>',
       })),
       shipments: [{ id: 'shipping', sequence: 1, receiverName: '张三', receiverPhone: '13800000000', receiverAddress, lines: [] }],
     }));
@@ -251,31 +248,7 @@ describe('buildPrintHtml', () => {
     expect(html).toContain('<span>1 / 1</span>');
   });
 
-  it('工序流转单根据实际二维码尺寸分页，不按15mm最小值估算', async () => {
-    const order = (size: number) => fixtureOrder({
-      items: [fixtureItem({ tasks: Array.from({ length: 6 }, (_, index) => fixtureTask({
-        id: `task-${index}`,
-        taskQrSvg: `<svg width="${size}" height="${size}" data-task="${index}"></svg>`,
-      })) })],
-    });
-    const compactCodes = await renderPrintHtml(order(70), 'tasks');
-    const actualCodes = await renderPrintHtml(order(109), 'tasks');
-    expect(compactCodes.match(/<article class="sheet"/g)).toHaveLength(1);
-    expect(actualCodes.match(/<article class="sheet"/g)).toHaveLength(2);
-    expect(actualCodes.match(/class="task-qr"/g)).toHaveLength(6);
-    expect(actualCodes.match(/data-stub-qr="1"/g)).toHaveLength(2);
-    expect(actualCodes).toContain('<span>2 / 2</span>');
-    expect(actualCodes).not.toContain('class="items"');
-  });
-
-  it('没有实际任务时工序流转单给出空状态，不伪造报工码', async () => {
-    const html = await renderPrintHtml(fixtureOrder({ items: [fixtureItem({ tasks: [] })] }), 'tasks');
-    expect(html).toContain('暂无可扫码的生产工序');
-    expect(html).not.toContain('class="task-qr"');
-    expect(html).toContain('<span>1 / 1</span>');
-  });
-
-  it('当前代次工序优先于历史任务，工序流转单只输出新报工码', async () => {
+  it('当前代次工序优先于历史任务，主单不混入旧工序', async () => {
     const html = await renderPrintHtml(
       fixtureOrder({
         productionSteps: [
@@ -289,7 +262,6 @@ describe('buildPrintHtml', () => {
             completedQty: 1_200,
             defectQty: 3,
             completedAt: null,
-            taskQrSvg: '<svg data-current-operation-qr="1"></svg>',
           },
         ],
         items: [
@@ -297,18 +269,19 @@ describe('buildPrintHtml', () => {
             tasks: [
               fixtureTask({
                 id: 'legacy-task-v1',
-                taskQrSvg: '<svg data-legacy-task-qr="1"></svg>',
+                craftName: '旧版工序',
               }),
             ],
           }),
         ],
       }),
-      'tasks',
     );
 
-    expect(html).toContain('data-current-operation-qr="1"');
     expect(html).toContain('局部烫金');
-    expect(html).not.toContain('data-legacy-task-qr="1"');
+    const flowTables = html.match(/<table class="flow flow-compact">[\s\S]*?<\/table>/g)?.join('') ?? '';
+    expect(flowTables).not.toContain('旧版工序');
+    expect(html.match(/<td class="step">/g)).toHaveLength(2);
+    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(1);
   });
 
   it('静态 PDF shell 与浏览器打印共用完全相同的布局 DOM', async () => {
@@ -603,7 +576,7 @@ describe('buildPrintHtml', () => {
     expect(html).not.toContain('<td class="num">240</td>');
   });
 
-  it('工序流转单保留每个任务的数量、师傅和独立报工二维码', async () => {
+  it('主单保留每个任务的数量与师傅，仅使用工单主码', async () => {
     const items = [
       fixtureItem({
         tasks: [
@@ -626,7 +599,7 @@ describe('buildPrintHtml', () => {
         ],
       }),
     ];
-    const html = await renderPrintHtml(fixtureOrder({ items }), 'tasks');
+    const html = await renderPrintHtml(fixtureOrder({ items }));
 
     expect(html).toContain('李师傅 / 王师傅');
     expect(html).toContain(
@@ -635,10 +608,8 @@ describe('buildPrintHtml', () => {
     expect(html).toContain(
       '<td class="step"><small class="flow-item">图 1 · 鸿运当头</small>烫金<small class="flow-worker">王师傅</small></td><td class="num">2,000</td><td class="num">500</td><td class="num">3</td><td>2026-04-24</td>',
     );
-    expect(html).toContain(
-      'aria-label="图 1 · 鸿运当头 烫金 任务报工二维码"',
-    );
-    expect(html.match(/data-stub-task-qr="1"/g)).toHaveLength(2);
+    expect(html).not.toContain('任务报工二维码');
+    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(1);
   });
 
   it('逐款优先打印实际任务，未派工款式继续打印明确计划工序', async () => {

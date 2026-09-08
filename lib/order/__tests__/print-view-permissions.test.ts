@@ -343,20 +343,6 @@ describe('getOrderForPrint permissions', () => {
       95,
       { errorCorrectionLevel: 'Q' },
     );
-    expect(buildQrSvgMock).toHaveBeenCalledWith(
-      'https://erp.example.com/wo/GD-260827-001?v=3&task=operation%2F3',
-      55,
-      { errorCorrectionLevel: 'Q' },
-    );
-    expect(buildQrSvgMock).toHaveBeenCalledWith(
-      'https://erp.example.com/wo/GD-260827-001?v=3&task=progress%2F3',
-      55,
-      { errorCorrectionLevel: 'Q' },
-    );
-    expect(buildQrSvgMock).not.toHaveBeenCalledWith(
-      'https://erp.example.com/worker/tasks/task%2F1',
-      55,
-      { errorCorrectionLevel: 'Q' },
-    );
+    expect(buildQrSvgMock).toHaveBeenCalledTimes(1);
   });
 });

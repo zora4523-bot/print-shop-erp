@@ -4,7 +4,6 @@ import { formatDateInputShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 import type {
-  PrintDocumentMode,
   PrintFoilTechnique,
   PrintLamination,
   PrintOrder,
@@ -16,7 +15,6 @@ import type {
 interface Props {
   order: PrintOrder;
   factoryName: string;
-  mode?: PrintDocumentMode;
 }
 
 type Artwork = {
@@ -44,7 +42,6 @@ type FlowRow = {
   completed: string;
   defect: string;
   completedAt: string;
-  taskQrSvg: string | null;
 };
 
 type SupplementPage = {
@@ -105,7 +102,7 @@ const CARRIER_LABEL: Record<string, string> = {
   DEPPON: '德邦',
 };
 
-export function OrderPrintLayout({ order, factoryName, mode = 'order' }: Props) {
+export function OrderPrintLayout({ order, factoryName }: Props) {
   const totalQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const itemPackaging = buildItemPackaging(order.packagingGroups);
   const packagingComplete = hasCompleteBagFacts(order, itemPackaging);
@@ -258,39 +255,8 @@ export function OrderPrintLayout({ order, factoryName, mode = 'order' }: Props) 
     order.items.length >= 2 ||
     artworks.length >= 5 ||
     order.shipments.length > 1 ||
-    flowRows.some((row) => row.taskQrSvg !== null);
-
-  if (mode === 'tasks') {
-    const taskRows = flowRows.filter((row) => row.taskQrSvg !== null);
-    const taskPages = paginateByWeight(taskRows, ANNEX_FLOW_HEIGHT_MM, estimateTaskRowHeightMm);
-    if (taskPages.length === 0) taskPages.push([]);
-    return (
-      <>
-        <style>{PRINT_CSS}</style>
-        <main className="work-order-document task-document" data-print-mode="tasks">
-          {taskPages.map((rows, index) => (
-            <WorkOrderSheet
-              key={`tasks-${index}`}
-              order={order}
-              page={index + 1}
-              pageCount={taskPages.length}
-              orderDate={orderDate}
-            >
-              <WorkOrderHeader order={order} team={team} factoryName={factoryName} />
-              <section className="sec flow-annex">
-                <div className="annex-title">工序流转单{index > 0 ? '（续）' : ''}</div>
-                {rows.length > 0 ? (
-                  <FlowTable rows={rows} showTaskQr />
-                ) : (
-                  <p className="task-empty">暂无可扫码的生产工序</p>
-                )}
-              </section>
-            </WorkOrderSheet>
-          ))}
-        </main>
-      </>
-    );
-  }
+    order.productionSteps.length > 0 ||
+    order.items.some((item) => item.tasks.length > 0);
 
   return (
     <>
@@ -804,9 +770,9 @@ function ArtworkGrid({ artworks, onAnnex }: { artworks: Artwork[]; onAnnex: bool
   );
 }
 
-function FlowTable({ rows, showTaskQr = false }: { rows: FlowRow[]; showTaskQr?: boolean }) {
+function FlowTable({ rows }: { rows: FlowRow[] }) {
   return (
-    <table className={classNames('flow', !showTaskQr && 'flow-compact')}>
+    <table className="flow flow-compact">
       <thead>
         <tr>
           <th className="flow-step-col">工序</th>
@@ -814,15 +780,11 @@ function FlowTable({ rows, showTaskQr = false }: { rows: FlowRow[]; showTaskQr?:
           <th className="num flow-number-col">完成数</th>
           <th className="num flow-defect-col">不良数</th>
           <th className="flow-date-col">完成日期</th>
-          {showTaskQr ? <th className="flow-qr-col">报工</th> : null}
         </tr>
       </thead>
       <tbody>
         {rows.map((row) => {
           const itemLabel = formatFlowItemLabel(row);
-          const taskQrLabel = [itemLabel, row.name, '任务报工二维码']
-            .filter(Boolean)
-            .join(' ');
           return (
             <tr key={row.key}>
               <td className="step">
@@ -838,17 +800,6 @@ function FlowTable({ rows, showTaskQr = false }: { rows: FlowRow[]; showTaskQr?:
               <td className="num">{row.completed}</td>
               <td className="num">{row.defect}</td>
               <td>{row.completedAt}</td>
-              {showTaskQr ? <td className="task-qr-cell">
-                {row.taskQrSvg ? (
-                  <div
-                    className="task-qr"
-                    aria-label={taskQrLabel}
-                    dangerouslySetInnerHTML={{ __html: row.taskQrSvg }}
-                  />
-                ) : (
-                  <span className="task-qr-empty">—</span>
-                )}
-              </td> : null}
             </tr>
           );
         })}
@@ -981,8 +932,8 @@ function buildFlowRows(
   totalBags: number | null,
 ): FlowRow[] {
   // A current work-order generation is authoritative. Legacy ProductionTask
-  // rows remain a fallback for historical orders only; mixing both would put
-  // stale QR destinations beside the current version printed in the header.
+  // rows remain a fallback for historical orders only; mixing both would
+  // duplicate outdated quantities beside the current production facts.
   const rows =
     order.productionSteps.length > 0
       ? order.productionSteps.map((step) => ({
@@ -998,7 +949,6 @@ function buildFlowRows(
           completedAt: step.completedAt
             ? formatDateInputShanghai(step.completedAt)
             : '',
-          taskQrSvg: step.taskQrSvg,
         }))
       : order.items.flatMap((item) =>
           item.tasks.length > 0
@@ -1016,7 +966,6 @@ function buildFlowRows(
       completed: '',
       defect: '',
       completedAt: '',
-      taskQrSvg: null,
     });
   }
   if (
@@ -1033,7 +982,6 @@ function buildFlowRows(
       completed: '',
       defect: '',
       completedAt: '',
-      taskQrSvg: null,
     });
   }
   return rows;
@@ -1052,7 +1000,6 @@ function buildTaskRows(item: PrintOrderItem): FlowRow[] {
     completedAt: task.completedAt
       ? formatDateInputShanghai(task.completedAt)
       : '',
-    taskQrSvg: task.taskQrSvg,
   }));
 }
 
@@ -1069,7 +1016,6 @@ function derivePlannedSteps(item: PrintOrderItem): FlowRow[] {
       completed: '',
       defect: '',
       completedAt: '',
-      taskQrSvg: null,
     }));
 }
 
@@ -1397,19 +1343,6 @@ function estimateCompactFlowRowHeightMm(row: FlowRow): number {
     estimateTextLines(row.worker, 30) * 2.8;
 }
 
-function estimateTaskRowHeightMm(row: FlowRow): number {
-  const width = Number(row.taskQrSvg?.match(/\bwidth=["']([\d.]+)["']/)?.[1] ?? 0);
-  const height = Number(row.taskQrSvg?.match(/\bheight=["']([\d.]+)["']/)?.[1] ?? 0);
-  // SVG width grows with URL length to protect module size. Use that actual
-  // physical size, not the 15mm CSS minimum, when assigning task annex pages.
-  const qrHeightMm = Math.max(15, width * 25.4 / 96, height * 25.4 / 96);
-  const textHeightMm =
-    estimateTextLines(formatFlowItemLabel(row), 15) * 3.3 +
-    estimateTextLines(row.name, 9) * 4.8 +
-    estimateTextLines(row.worker, 15) * 3.3;
-  return Math.max(qrHeightMm, textHeightMm) + 4;
-}
-
 function paginateByWeight<T>(
   values: T[],
   maxUnits: number,
@@ -1650,11 +1583,7 @@ tfoot td{ border-top:.4mm solid var(--rule); border-bottom:none; font-size:11.5p
 .flow-compact .step small{ font-size:6.8pt; line-height:1.2; }
 .flow-compact .step .flow-item{ display:inline; margin-bottom:0; margin-right:2mm; }
 .flow-compact .step .flow-worker{ display:inline; margin-top:0; margin-left:2mm; }
-.flow-step-col{ width:30mm; }.flow-number-col{ width:24mm; }.flow-defect-col{ width:20mm; }.flow-date-col{ width:26mm; }.flow-qr-col{ width:32mm; }
-.task-qr-cell{ text-align:right; padding-right:0; vertical-align:middle; }
-.task-qr{ display:inline-flex; min-width:15mm; min-height:15mm; justify-content:flex-end; }
-.task-qr svg{ min-width:15mm; min-height:15mm; display:block; }
-.task-qr-empty{ color:var(--mute); }
+.flow-step-col{ width:30mm; }.flow-number-col{ width:24mm; }.flow-defect-col{ width:20mm; }.flow-date-col{ width:26mm; }
 .flow-annex{ flex:1; }
 .annex-title{ font-size:15pt; font-weight:800; margin-bottom:4mm; }
 .item-annex,.warning-annex,.supplement-annex,.shipment-annex{ flex:1; }

@@ -221,7 +221,6 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
             {versionChanged ? <p className={styles.emptyHint}>旧版纸质工单已失效，请使用 v{model.version}。</p> : null}
             {printHint ? <p className={styles.emptyHint}>{printHint}</p> : null}
             <Link href={`/print/orders/${model.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</Link>
-            <Link href={`/print/orders/${model.id}?mode=tasks&autoprint=1`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'ghost' }), styles.printLink)}>打印工序流转单</Link>
           </section>
           <section className={styles.card}><h2 className={styles.eyebrow}>收货</h2>{model.shipments.length ? <ol className={styles.shipments}>{model.shipments.map((shipment) => <li key={shipment.id}>
             <p>{model.shipments.length > 1 ? `第 ${shipment.sequence} 票 · ` : ''}{shipment.name} {shipment.phone}</p><strong>{shipment.address || '未填写收货地址'}</strong>

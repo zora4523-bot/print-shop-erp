@@ -35,7 +35,7 @@ export async function GET(_req: Request, ctx: Params) {
   const requestUrl = new URL(_req.url);
   const modes = requestUrl.searchParams.getAll('mode');
   const mode = modes[0] ?? 'order';
-  if (modes.length > 1 || (mode !== 'order' && mode !== 'tasks')) {
+  if (modes.length > 1 || mode !== 'order') {
     return NextResponse.json({ error: 'Invalid print mode' }, { status: 400 });
   }
   const { id } = await ctx.params;
@@ -62,7 +62,6 @@ export async function GET(_req: Request, ctx: Params) {
         expectedWorkOrderVersion: order.workOrderVersion,
         actor: { id: session.user.id, role: session.user.role },
         baseUrl,
-        mode,
       }));
     const result = await waitForOrderPdfJob(jobId, {
       timeoutMs: Number(process.env.PDF_JOB_WAIT_MS) || 10_000,
@@ -71,7 +70,6 @@ export async function GET(_req: Request, ctx: Params) {
         orderId: id,
         actorId: session.user.id,
         workOrderVersion: order.workOrderVersion,
-        mode,
       },
     });
     if (result.status === 'timeout') {
@@ -103,7 +101,7 @@ export async function GET(_req: Request, ctx: Params) {
   } else {
     try {
       const { name: factoryName } = await getSetting('factory_name');
-      const html = await buildPrintHtml(order, { factoryName, mode });
+      const html = await buildPrintHtml(order, { factoryName });
       pdf = await renderHtmlToPdf({ html });
     } catch (err) {
       // Most likely cause here is Chromium not yet installed on the
@@ -159,7 +157,7 @@ export async function GET(_req: Request, ctx: Params) {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order, mode)),
+      'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',
     },
@@ -168,9 +166,7 @@ export async function GET(_req: Request, ctx: Params) {
 
 function pdfRetryUrl(requestUrl: string, jobId?: string): string {
   const url = new URL(requestUrl);
-  const mode = url.searchParams.get('mode');
   url.search = '';
-  if (mode === 'tasks') url.searchParams.set('mode', mode);
   if (jobId) url.searchParams.set('jobId', jobId);
   return `${url.pathname}${url.search}`;
 }

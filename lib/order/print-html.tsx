@@ -1,5 +1,5 @@
 import { OrderPrintLayout } from './print-layout';
-import type { PrintDocumentMode, PrintOrder } from './print-types';
+import type { PrintOrder } from './print-types';
 import { printPaginationScript } from './print-pagination';
 
 const MAX_FILENAME_COMPONENT_LENGTH = 80;
@@ -77,11 +77,11 @@ const STANDALONE_PRINT_READY_SCRIPT = String.raw`
 // negligible vs. Puppeteer cold start that comes right after.
 export async function buildPrintHtml(
   order: PrintOrder,
-  options: { factoryName: string; mode?: PrintDocumentMode },
+  options: { factoryName: string },
 ): Promise<string> {
   const { renderToStaticMarkup } = await import('react-dom/server');
   const body = renderToStaticMarkup(
-    <OrderPrintLayout order={order} factoryName={options.factoryName} mode={options.mode} />,
+    <OrderPrintLayout order={order} factoryName={options.factoryName} />,
   );
 
   // Minimal doc shell — the layout injects its own <style>, and all
@@ -100,11 +100,10 @@ export async function buildPrintHtml(
 
 export function buildOrderPdfFilename(
   order: Pick<PrintOrder, 'orderNo' | 'customerName'>,
-  mode: PrintDocumentMode = 'order',
 ): string {
   const orderNo = sanitizeFilenameComponent(order.orderNo) || '工单';
   const customerName = sanitizeFilenameComponent(order.customerName ?? '');
-  return `${orderNo}${customerName ? `_${customerName}` : ''}${mode === 'tasks' ? '_工序流转单' : ''}.pdf`;
+  return `${orderNo}${customerName ? `_${customerName}` : ''}.pdf`;
 }
 
 function sanitizeFilenameComponent(value: string): string {
