@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { fixedCustomTierIssue } from '@/lib/price/fixed-custom-tiers';
+
 import { cloneElement, type ReactElement, type ReactNode } from 'react';
 import { AlertTriangle, Info } from 'lucide-react';
 import {
@@ -938,36 +940,14 @@ function renderTiers(
     ]),
   );
   const canonical = byProduct.get('EXT-CUSTOM-MID') ?? [];
-  const structurallyAligned = CUSTOM_PRODUCT_CODES.every((code) => {
-    const rules = byProduct.get(code) ?? [];
-    return (
-      rules.length === canonical.length &&
-      rules.every((rule, index) => {
-        const selected = effectiveRule(rule);
-        const anchor = effectiveRule(canonical[index]!);
-        return (
-          selected?.minQty === anchor?.minQty &&
-          selected?.maxQty === anchor?.maxQty
-        );
-      })
-    );
-  });
-  const isNineTierPublishedShape = structurallyAligned && canonical.length === 9;
-  const isDesignTenTierShape =
-    structurallyAligned &&
-    canonical.length === 10 &&
-    effectiveRule(canonical[8]!)?.maxQty === 40_000 &&
-    effectiveRule(canonical[9]!)?.minQty === 40_001;
-  if (isNineTierPublishedShape) {
-    assembly.warnings.add(
-      '当前已发布价目只有 9 档，缺少设计稿规定的 5万档（≥ 40,001：中号 0.16 元/个、大号 0.18 元/个）。为避免改写生效中的报价，本区暂时只读。',
-    );
-  } else if (!isDesignTenTierShape) {
-    assembly.warnings.add(
-      '专版中号/方形/西封中号与大号/西封大号的档位边界未形成设计所需的同步 10 档，已禁止合并修改。',
-    );
-  }
-  const allowEdit = isDesignTenTierShape;
+  const tierIssue = fixedCustomTierIssue(CUSTOM_PRODUCT_CODES.map(code =>
+    (byProduct.get(code) ?? []).map(rule => ({
+      minQty: effectiveRule(rule)?.minQty ?? null,
+      maxQty: effectiveRule(rule)?.maxQty ?? null,
+    })),
+  ));
+  if (tierIssue) assembly.warnings.add(tierIssue);
+  const allowEdit = tierIssue === null;
   const rows: CustomerTierPricingRow[] = canonical.map((anchor, index) => {
     const sameTierRules = CUSTOM_PRODUCT_CODES.map(
       (code) => byProduct.get(code)?.[index],

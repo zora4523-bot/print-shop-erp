@@ -174,7 +174,17 @@
 
 ## 第四批：价格阶梯业务条件
 
-待完成。固定十档、可编辑上界、单调性必须依据真值文档裁决，不能删除提示或简单放开禁用。
+已完成业务逻辑修复，单独提交。
+
+- 真值：`docs/加工费计费规则.md:92` 明确默认上界可在配置中心修改；固定十档，不固定第九档的默认上界 40,000。
+- [第四批] `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:942` — 仅 max=40,000 / next min=40,001 才能编辑 → 五个规格各十档、档位连续、范围一致时可编辑；九档、缺失或错位仍拒绝编辑，不靠删提示绕过。
+- [第四批] `lib/price/fixed-custom-tiers.ts:5` — 新增共用校验：从 1 起、整数上界、连续且严格递增、末档不限、各规格一致。按现有档位顺序检查，拒绝通过交换区间重排档位。
+- [第四批] `lib/price/customer-price-book-admin.ts:2498` — 保存前按现有档位顺序校验全部提交范围；身份、资源归属、完整行集合、expectedUpdatedAt、事务和金额校验不变。
+- [第四批 fixture] `lib/price/__tests__/fixed-custom-tiers.test.ts` — 默认上界与 42,000 / 30,000 合法上界、缺规格、九档、断层、重叠、小数、错误首档、有限末档、跨规格不一致、档位互换。
+- [第四批 fixture] `lib/price/__tests__/customer-price-book-admin.test.ts` — 改为 42,000 时仅写入五个规格的本档上界及下一档下界，共 10 行；存在断层时零写入、零审计记录。
+- [第四批 fixture] `components/business/rules/pricing/__tests__/CustomerPricingDedicatedSection.test.tsx` — 默认 40,000 和自定义 42,000 的上界输入均可编辑。
+
+隔离全量验证：554 文件，548 通过、3 失败、3 跳过；5832 测试，5773 通过、4 失败、55 跳过。新增 17 个测试通过，失败集合与基线一致。类型检查通过。没有修改数据库数据、schema 或已应用迁移。
 
 ## Lint 与豁免
 
