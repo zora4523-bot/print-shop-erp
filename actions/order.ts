@@ -783,6 +783,7 @@ function commercialMutationFailure(
 function revalidateOrderCommercialDetail(orderId: string): void {
   revalidatePath('/orders');
   revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/orders/${orderId}/edit`);
   revalidatePath('/owner/bills');
 }
 

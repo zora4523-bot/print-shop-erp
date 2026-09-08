@@ -22,6 +22,7 @@ async function readSavedOrder(id: string) {
         editVersion: number;
         pricingStatus: string;
         promisedDate: string | null;
+        isUrgent: boolean;
         receiverName: string | null;
         receiverPhone: string | null;
         packageRequirement: string | null;
@@ -233,9 +234,24 @@ test.describe('创建工单 — golden path', () => {
     await expect(page).toHaveTitle(/^GD-\d{6}-\d{3} · 工单$/);
 
     const orderId = new URL(page.url()).pathname.split('/')[2];
+    // Give only this freshly created fixture existing optional facts. Editing
+    // unrelated fields must never interpret omitted values as a request to clear them.
+    const originalPromisedDate = '2026-10-15';
+    const fixtureDb = new Client({ connectionString: process.env.DATABASE_URL });
+    await fixtureDb.connect();
+    try {
+      await fixtureDb.query(
+        `UPDATE "Order" SET "promisedDate" = $2::date, "isUrgent" = true WHERE id = $1`,
+        [orderId, originalPromisedDate],
+      );
+    } finally {
+      await fixtureDb.end();
+    }
     const before = await readSavedOrder(orderId);
     expect(before.order.packageRequirement).toBe('创建时贴客户标签');
     expect(before.order.pricingStatus).toBe('AUTO_CONFIRMED');
+    expect(before.order.promisedDate).toContain(originalPromisedDate);
+    expect(before.order.isUrgent).toBe(true);
     await page.goto(`/orders/${orderId}/edit`);
     await expect(page.getByLabel('工单名称', { exact: true })).toHaveValue(
       customName,
@@ -250,8 +266,17 @@ test.describe('创建工单 — golden path', () => {
       before.order.receiverPhone ?? '',
     );
     await page.getByText('更多生产信息', { exact: true }).click();
-    await expect(page.locator('#edit-items')).toContainText('160g珠光艳闪');
-    await expect(page.locator('#edit-items')).toContainText('大号封90×165');
+    const productionDetails = page.getByRole('dialog', {
+      name: '第 1 款生产信息',
+      exact: true,
+    });
+    await expect(productionDetails).toBeVisible();
+    await expect(productionDetails).toContainText('160g珠光艳闪');
+    await expect(productionDetails).toContainText('大号封90×165');
+    await productionDetails
+      .getByRole('button', { name: '关闭', exact: true })
+      .click();
+    await expect(productionDetails).not.toBeVisible();
     await expect(page.getByLabel('数量（个）', { exact: true })).toHaveValue(
       '1000',
     );
@@ -275,6 +300,8 @@ test.describe('创建工单 — golden path', () => {
     expect(after.order.receiverName).toBe('修改后的收件人');
     expect(after.order.receiverPhone).toBe('13900139000');
     expect(after.order.packageRequirement).toBe('封口后贴客户标签');
+    expect(after.order.promisedDate).toBe(before.order.promisedDate);
+    expect(after.order.isUrgent).toBe(true);
     expect(after.shipments[0]).toMatchObject({
       receiverName: '修改后的收件人',
       receiverPhone: '13900139000',
@@ -314,6 +341,8 @@ test.describe('创建工单 — golden path', () => {
     await page.getByRole('button', { name: '确认保存', exact: true }).click();
     await expect(page).toHaveURL(`/orders/${orderId}`);
     const modified = await readSavedOrder(orderId);
+    expect(modified.order.promisedDate).toBe(before.order.promisedDate);
+    expect(modified.order.isUrgent).toBe(true);
     const facts = modified.facts as {
       items: Array<{
         quantity: number;
@@ -348,6 +377,7 @@ test.describe('创建工单 — golden path', () => {
       .poll(async () => (await readSavedOrder(orderId)).order.promisedDate)
       .toContain('2026-10-20');
     expect((await readSavedOrder(orderId)).facts).toEqual(modified.facts);
+    expect((await readSavedOrder(orderId)).order.isUrgent).toBe(true);
     await expectNoNextErrorOverlay(page);
   });
 });

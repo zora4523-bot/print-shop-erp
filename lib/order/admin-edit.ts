@@ -1,6 +1,6 @@
 import 'server-only';
 import { db } from '../db';
-import { Role } from '../../generated/prisma/enums';
+import { OrderStatus, Role } from '../../generated/prisma/enums';
 import { updateOrderFields, OrderInvariantError } from '../order';
 import { orderCascadeLockKey } from './locks';
 import { proposedDueDateText, readProposedDueDate } from './change-due-date';
@@ -51,6 +51,9 @@ export async function editAdminOrder(
           throw new OrderInvariantError(
             '工单已被其他人修改，请刷新页面后再编辑',
           );
+        }
+        if (before.status !== OrderStatus.DRAFT && input.items.some((item) => item.operation === 'ADD')) {
+          throw new OrderInvariantError('仅草稿工单支持在编辑页新增款式；已提交工单请新建完整工单，以便上传设计图和 CDR');
         }
         // A date change shares the same proposal as the item changes. Never silently
         // bypass the confirmed-order date policy through the basic-field whitelist.

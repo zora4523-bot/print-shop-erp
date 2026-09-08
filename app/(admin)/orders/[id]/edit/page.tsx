@@ -14,6 +14,7 @@ import {
   canRequestOrderModification,
   editableFieldsetForStatus,
 } from '@/lib/order/editable-fields';
+import { listExternalCreateOrderFoilOptions } from '@/lib/material';
 import { listCustomerPartyOptions } from '@/lib/party';
 import { getOrderExternalSalesAssociation } from '@/lib/order/external-sales-association';
 import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
@@ -67,7 +68,7 @@ export default async function EditOrderPage({ params }: PageProps) {
     (request) => request.status === 'PENDING',
   );
   const canModify = canRequestOrderModification(user, order, Boolean(pending));
-  const [customers, products, externalSalesAssociation] = await Promise.all([
+  const [customers, products, externalSalesAssociation, foilColors] = await Promise.all([
     user.role === Role.ADMIN
       ? Promise.resolve([])
       : listCustomerPartyOptions(order.customerPartyId),
@@ -75,6 +76,7 @@ export default async function EditOrderPage({ params }: PageProps) {
       ? listActiveOrderChangeCatalogProducts()
       : Promise.resolve([]),
     getOrderExternalSalesAssociation(order.id, user),
+    user.role === Role.ADMIN ? listExternalCreateOrderFoilOptions() : Promise.resolve([]),
   ]);
   const external =
     'settlementType' in order &&
@@ -113,10 +115,11 @@ export default async function EditOrderPage({ params }: PageProps) {
           revision={order.revision}
           workOrderVersion={order.workOrderVersion}
           canModify={canModify}
-          canAdd={canModify && order.packagingGroups.length === 0}
+          canAdd={canModify && order.status === OrderStatus.DRAFT && order.packagingGroups.length === 0}
           canEditDesigns={order.status === OrderStatus.DRAFT && !pending}
           productionLocked={productionLocked}
           products={products}
+          foilColors={foilColors.map((color) => color.name)}
           items={order.items.map((item) => ({
             id: item.id,
             sequence: item.sequence,

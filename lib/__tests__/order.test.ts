@@ -5399,6 +5399,64 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     expect(data.remark).toBeNull();
   });
 
+  it('explicit undefined preserves a FULL form’s existing date, urgent flag and optional text', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({
+      promisedDate: new Date('2026-09-20T00:00:00Z'),
+      isUrgent: true,
+      packageRequirement: '十个一袋',
+    }));
+    await updateOrderFields(
+      'order-1',
+      editInput({
+        remark: '只改备注',
+        promisedDate: undefined,
+        isUrgent: undefined,
+        packageRequirement: undefined,
+      }),
+      ownerActor,
+    );
+    expect(dbMock.order.updateMany.mock.calls[0][0].data).toEqual({
+      remark: '只改备注',
+    });
+    expect(dbMock.orderLog.create.mock.calls[0][0].data.changedFields).toEqual({
+      remark: { before: null, after: '只改备注' },
+    });
+  });
+
+  it('undefined-only partial input is a no-op instead of clearing persisted values', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({
+      promisedDate: new Date('2026-09-20T00:00:00Z'),
+      isUrgent: true,
+      remark: '原备注',
+    }));
+    const result = await updateOrderFields(
+      'order-1',
+      editInput({ promisedDate: undefined, isUrgent: undefined, remark: undefined }),
+      ownerActor,
+    );
+    expect(result.changed).toBe(false);
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('explicit false, null and empty string remain intentional field changes', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({
+      promisedDate: new Date('2026-09-20T00:00:00Z'),
+      isUrgent: true,
+      remark: '原备注',
+    }));
+    await updateOrderFields(
+      'order-1',
+      editInput({ promisedDate: null, isUrgent: false, remark: '' }),
+      ownerActor,
+    );
+    expect(dbMock.order.updateMany.mock.calls[0][0].data).toEqual({
+      promisedDate: null,
+      isUrgent: false,
+      remark: null,
+    });
+  });
+
   it('promisedDate 修改写入 Date 并记 diff；等值 Date 不算改动（时间戳比较）', async () => {
     const promised = new Date('2026-07-15T00:00:00Z');
     // 等值但不同实例的 Date：=== 恒 false，必须按时间戳比较判 no-op

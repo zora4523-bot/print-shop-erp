@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   orderChangeRequestItemsSchema,
+  parseStrictYmd,
   previewOrderChangeRequestPricingSchema,
   updateEditableOrderSchema,
 } from '../auth/schemas';
@@ -10,11 +11,11 @@ export const adminOrderEditSchema = z.object({
   requestId: z.string().uuid(),
   expectedRevision: z.number().int().nonnegative(),
   expectedWorkOrderVersion: z.number().int().positive(),
-  fields: updateEditableOrderSchema,
+  fields: updateEditableOrderSchema.partial({ promisedDate: true, isUrgent: true }),
   items: orderChangeRequestItemsSchema,
   promisedDate: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine((value) => parseStrictYmd(value) !== null, '请填写有效的承诺交期')
     .nullable()
     .optional(),
   pendingChargeResolutions:

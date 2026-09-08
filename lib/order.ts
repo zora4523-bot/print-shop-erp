@@ -2997,10 +2997,9 @@ async function assertNoShippingCostBeforeSfCollect(
   }
 }
 
-// Optional edit fields may arrive as undefined / blank from direct callers;
-// normalize them to explicit null so diffing and persistence treat "user
-// cleared the field" the same as the DB's null state. receiverAddress is
-// checked separately and never reaches persistence as null.
+// Blank optional fields mean an explicit clear. Undefined fields are omitted
+// by pickEditableFields so partial updates preserve the saved value.
+// receiverAddress is checked separately and never reaches persistence as null.
 function normalizeEditableValue(raw: unknown): EditableOrderFieldValue {
   if (raw === undefined || raw === '') return null;
   if (raw instanceof Date) return raw;
@@ -3032,7 +3031,7 @@ function pickEditableFields(
 ): Record<string, EditableOrderFieldValue> {
   const out: Record<string, EditableOrderFieldValue> = {};
   for (const key of allowed) {
-    if (!(key in input)) continue;
+    if (!(key in input) || input[key] === undefined) continue;
     out[key] = normalizeEditableValue(input[key]);
   }
   return out;

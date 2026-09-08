@@ -45,6 +45,7 @@ type Props = {
   isExternalSales?: boolean;
   isSfCollect?: boolean;
   blocked?: boolean;
+  busy?: boolean;
   packagingDetails?: ReactNode;
   /** Admin workspace coordinates metadata and production facts in one review. */
   onReview?: (data: FormData) => void;
@@ -71,6 +72,7 @@ export function EditOrderForm({
   isExternalSales = false,
   isSfCollect = false,
   blocked = false,
+  busy = false,
   packagingDetails,
   onReview,
   onFormChange,
@@ -79,11 +81,12 @@ export function EditOrderForm({
   designFields,
 }: Props) {
   const boundAction = updateOrderAction.bind(null, orderId);
-  const [state, formAction, pending] = useActionState<
+  const [state, formAction, actionPending] = useActionState<
     OrderMutationResult | null,
     FormData
   >(boundAction, null);
 
+  const pending = actionPending || busy;
   const isShippingOnly = fieldset === 'SHIPPING_ONLY';
   const [customerId, setCustomerId] = useState(initial.customerPartyId ?? '');
   const [customerRef, setCustomerRef] = useState(initial.customerRef ?? '');
@@ -135,7 +138,7 @@ export function EditOrderForm({
           : undefined
       }
       aria-busy={pending}
-      className={designLayout ? 'space-y-4' : 'space-y-6'}
+      className={designLayout ? 'space-y-0 rounded-xl border bg-card [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:border-0 [&_[data-slot=card]]:bg-transparent [&_[data-slot=card]]:shadow-none' : 'space-y-6'}
     >
       <input
         type="hidden"

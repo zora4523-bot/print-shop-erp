@@ -1,8 +1,8 @@
 import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Role } from '@/generated/prisma/enums';
+import { OrderStatus, Role } from '@/generated/prisma/enums';
 import { adminOrderEditSchema } from '../admin-edit-schema';
-import type { AdminOrderEditCommand } from '../admin-edit-schema';
+import type { AdminOrderEditCommand, AdminOrderEditInput } from '../admin-edit-schema';
 vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
@@ -45,6 +45,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.transaction.mockImplementation(async (work) => work(tx));
   mocks.find.mockResolvedValue({
+    status: OrderStatus.DRAFT,
     editVersion: 7,
     revision: 2,
     workOrderVersion: 1,
@@ -65,7 +66,7 @@ beforeEach(() => {
 });
 describe('atomic administrator edit', () => {
   it('parses the browser command through the original form token contract', () => {
-    const raw = {
+    const raw: AdminOrderEditInput = {
       ...input(),
       fields: { expectedEditVersion: '0', remark: '修改备注' },
     };
@@ -81,11 +82,52 @@ describe('atomic administrator edit', () => {
     ).toBe(false);
   });
 
+  it.each(['2026-02-29', '2026-02-31', '2026-13-01', '09/20/2026'])(
+    'rejects invalid business dates before entering an edit transaction: %s',
+    (promisedDate) => {
+      const result = adminOrderEditSchema.safeParse({
+        ...input(), fields: { expectedEditVersion: '7' }, promisedDate,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toContainEqual(expect.objectContaining({
+          path: ['promisedDate'],
+          message: '请填写有效的承诺交期',
+        }));
+      }
+    },
+  );
+
+  it.each(['2028-02-29', null, undefined])(
+    'preserves valid date, clear and omitted date semantics: %s',
+    (promisedDate) => {
+      expect(adminOrderEditSchema.parse({
+        ...input(), fields: { expectedEditVersion: '7' }, promisedDate,
+      }).promisedDate)
+        .toBe(promisedDate);
+    },
+  );
+
   it('rejects non-admin before reading or writing', async () => {
     await expect(
       editAdminOrder(input(), { ...admin, role: Role.SALES }, 'save'),
     ).rejects.toThrow('只有管理员');
     expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+  it('allows a new style in a draft where design uploads remain available', async () => {
+    const data = input();
+    data.items = [{ operation: 'ADD', templateItemId: 'item-1', name: '新款', quantity: 1000 }];
+    await editAdminOrder(data, admin, 'preview');
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ items: data.items }), admin, expect.anything());
+  });
+  it.each([OrderStatus.PENDING_FACTORY, OrderStatus.CONFIRMED])('rejects a new style after submission before any write: %s', async (status) => {
+    const before = await mocks.find();
+    mocks.find.mockResolvedValue({ ...before, status });
+    const data = input();
+    data.items = [{ operation: 'ADD', templateItemId: 'item-1', name: '新款', quantity: 1000 }];
+    await expect(editAdminOrder(data, admin, 'save')).rejects.toThrow('仅草稿工单支持');
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
   });
   it('preview rolls its callback back and never approves or dispatches', async () => {
     let rollback = false;

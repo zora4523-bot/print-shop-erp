@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState, useTransition } from 'react';
+import { useActionState, useContext, useState, useTransition } from 'react';
 import {
   deleteOrderManualChargeAction,
   deleteOrderPlateDetailAction,
@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ConfirmActionDialog } from '@/components/ui-business';
+import { OrderEditorAuxiliaryContext, useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type ManualChargeCode =
   | 'SAMPLE_FEE'
@@ -112,6 +113,21 @@ function ManualChargeEditor({
   const [deletePending, startDelete] = useTransition();
 
   const removed = charge?.status === 'WAIVED';
+  const dirty = !removed && (
+    categoryCode !== initialCategory || description !== (charge?.description ?? '') ||
+    amount !== (charge?.amount ?? '') || reason !== (charge?.overrideReason ?? '') ||
+    approvalReference !== (charge?.approvalReference ?? '') || removeReason !== ''
+  );
+  const auxiliary = useOrderEditorAuxiliary({ dirty, pending: savePending || deletePending });
+  const disabled = auxiliary.blocked || savePending || deletePending;
+  function resetDraft() {
+    setCategoryCode(initialCategory);
+    setDescription(charge?.description ?? '');
+    setAmount(charge?.amount ?? '');
+    setReason(charge?.overrideReason ?? '');
+    setApprovalReference(charge?.approvalReference ?? '');
+    setRemoveReason('');
+  }
   const ready =
     description.trim().length > 0 &&
     amount.trim().length > 0 &&
@@ -121,6 +137,7 @@ function ManualChargeEditor({
 
   return (
     <div className="space-y-3 rounded-lg border p-3">
+      <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">
           {charge ? charge.category.name : '新增订单级费用'}
@@ -224,7 +241,7 @@ function ManualChargeEditor({
           <Button
             type="button"
             size="sm"
-            disabled={!ready || savePending || deletePending}
+            disabled={!ready || disabled}
             onClick={() =>
               startSave(() =>
                 saveAction({
@@ -259,13 +276,13 @@ function ManualChargeEditor({
               ) : null}
               <ConfirmActionDialog
                 level="L2"
-                disabled={!removeReason.trim() || deletePending}
+                disabled={!removeReason.trim() || disabled}
                 trigger={
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={!removeReason.trim() || deletePending}
+                    disabled={!removeReason.trim() || disabled}
                   >
                     {deletePending ? '移除中…' : '移除并保留历史'}
                   </Button>
@@ -292,6 +309,8 @@ function ManualChargeEditor({
           ) : null}
         </>
       )}
+      </fieldset>
+      {auxiliary.managed && dirty ? <Button type="button" variant="outline" size="sm" disabled={savePending || deletePending || auxiliary.pending} onClick={resetDraft}>还原费用输入</Button> : null}
     </div>
   );
 }
@@ -328,6 +347,22 @@ function PlateDetailEditor({
   >(deleteOrderPlateDetailAction, null);
   const [savePending, startSave] = useTransition();
   const [deletePending, startDelete] = useTransition();
+  const dirty = (!detail || detail.isActive) && (
+    name !== (detail?.name ?? '') || plateGroupId !== (detail?.plateGroupId ?? '') ||
+    specification !== (detail?.specification ?? '') || quantity !== String(detail?.quantity ?? 1) ||
+    unitPrice !== (detail?.unitPrice ?? '') || remark !== (detail?.remark ?? '') || removeReason !== ''
+  );
+  const auxiliary = useOrderEditorAuxiliary({ dirty, pending: savePending || deletePending });
+  const disabled = auxiliary.blocked || savePending || deletePending;
+  function resetDraft() {
+    setName(detail?.name ?? '');
+    setPlateGroupId(detail?.plateGroupId ?? '');
+    setSpecification(detail?.specification ?? '');
+    setQuantity(String(detail?.quantity ?? 1));
+    setUnitPrice(detail?.unitPrice ?? '');
+    setRemark(detail?.remark ?? '');
+    setRemoveReason('');
+  }
 
   if (detail && !detail.isActive) {
     return (
@@ -352,6 +387,7 @@ function PlateDetailEditor({
 
   return (
     <div className="space-y-3 rounded-md border p-3">
+      <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium">
           {detail ? `制版明细 #${detail.sequence}` : '新增制版明细'}
@@ -425,7 +461,7 @@ function PlateDetailEditor({
       <Button
         type="button"
         size="sm"
-        disabled={!ready || savePending || deletePending}
+        disabled={!ready || disabled}
         onClick={() =>
           startSave(() =>
             saveAction({
@@ -462,13 +498,13 @@ function PlateDetailEditor({
           ) : null}
           <ConfirmActionDialog
             level="L2"
-            disabled={!removeReason.trim() || deletePending}
+            disabled={!removeReason.trim() || disabled}
             trigger={
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={!removeReason.trim() || deletePending}
+                disabled={!removeReason.trim() || disabled}
               >
                 {deletePending ? '移除中…' : '移除并保留历史'}
               </Button>
@@ -494,6 +530,8 @@ function PlateDetailEditor({
           />
         </div>
       ) : null}
+      </fieldset>
+      {auxiliary.managed && dirty ? <Button type="button" variant="outline" size="sm" disabled={savePending || deletePending || auxiliary.pending} onClick={resetDraft}>还原费用输入</Button> : null}
     </div>
   );
 }
@@ -509,6 +547,8 @@ export function OrderCommercialDetailsManager({
   items,
   allowPlateDetailMaintenance,
 }: Props) {
+  const scope = useContext(OrderEditorAuxiliaryContext);
+  const hasActiveEditor = scope?.mainBlocked || Object.values(scope?.entries ?? {}).some((entry) => entry.dirty || entry.pending);
   return (
     <section className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <div>
@@ -516,6 +556,7 @@ export function OrderCommercialDetailsManager({
         <p className="mt-1 text-xs text-muted-foreground">
           增改或移除后会自动重算工单总额。
         </p>
+        {hasActiveEditor ? <p className="mt-1 text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}
       </div>
 
       <div className="space-y-3">

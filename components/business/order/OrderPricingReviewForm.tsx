@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { ConfirmActionDialog } from "@/components/ui-business";
 import { OrderPackagingMode } from "@/generated/prisma/enums";
 import { externalPriceBusinessText } from "@/lib/price/external-price-display";
+import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type Props = { orderId: string; variant?: 'page' | 'drawer'; onSuccess?: () => void };
 
@@ -253,6 +254,16 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
     Record<string, OrderChargeDraft>
   >({});
   const [remark, setRemark] = useState("");
+  const dirty = remark !== '' || [itemDrafts, shipmentDrafts, packagingGroupDrafts, orderChargeDrafts]
+    .some((drafts) => Object.keys(drafts).length > 0);
+  const auxiliary = useOrderEditorAuxiliary({ dirty, pending: previewPending || finalizePending });
+  function resetDraft() {
+    setItemDrafts({});
+    setShipmentDrafts({});
+    setPackagingGroupDrafts({});
+    setOrderChargeDrafts({});
+    setRemark('');
+  }
   const [expandedReadOnly, setExpandedReadOnly] = useState(false);
   const showReadOnly = variant !== 'drawer' || expandedReadOnly;
 
@@ -276,7 +287,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
   }, [finalizeState, router, onSuccess]);
 
   function submit() {
-    if (!preview || finalizeState?.status === "success") return;
+    if (!preview || finalizeState?.status === "success" || auxiliary.blocked || finalizePending || previewPending) return;
     startFinalizeTransition(() =>
       finalizeAction({
         orderId,
@@ -457,7 +468,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
   const draftsReady = preview !== null && missingRequirements.length === 0;
   const pricingFinalized = finalizeState?.status === "success";
   const submissionDisabled =
-    !draftsReady || finalizePending || previewPending || pricingFinalized;
+    !draftsReady || finalizePending || previewPending || pricingFinalized || auxiliary.blocked;
 
   return (
     <section
@@ -466,6 +477,8 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
       data-variant={variant}
       aria-busy={previewPending || finalizePending}
     >
+      {auxiliary.blocked ? <p className="text-xs text-muted-foreground">请先保存或还原正在编辑的工单资料或费用。</p> : null}
+      <fieldset disabled={auxiliary.blocked || finalizePending || previewPending} className="min-w-0 space-y-4">
       {variant !== 'drawer' ? <div>
         <h2 className="text-base font-semibold">工厂核价确认</h2>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -487,7 +500,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
             type="button"
             variant="outline"
             onClick={loadPreview}
-            disabled={previewPending}
+            disabled={previewPending || auxiliary.blocked}
           >
             重新加载
           </Button>
@@ -958,6 +971,8 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           />
         </>
       ) : null}
+      </fieldset>
+      {auxiliary.managed && dirty ? <Button type="button" variant="outline" disabled={previewPending || finalizePending || auxiliary.pending} onClick={resetDraft}>还原核价输入</Button> : null}
     </section>
   );
 }

@@ -10,8 +10,32 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, RotateCcw, Save, X } from 'lucide-react';
+import Link from 'next/link';
+import {
+  ArrowLeft,
+  FileImage,
+  FileType,
+  Plus,
+  RotateCcw,
+  Save,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import styles from './AdminOrderEditor.module.css';
+import { useAdminOrderLeaveGuard } from './use-admin-order-leave-guard';
+import {
+  OrderEditorAuxiliaryContext,
+  useOrderEditorAuxiliaryController,
+} from './use-order-editor-auxiliary';
+import { OrderFoilColorPicker } from './OrderFoilColorPicker';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -24,7 +48,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ActionNotice } from '@/components/ui-business';
-import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { EditOrderForm } from './EditOrderForm';
 import {
@@ -92,6 +115,7 @@ type Props = {
   workOrderVersion: number;
   items: AdminEditorItem[];
   products: OrderChangeCatalogProduct[];
+  foilColors?: string[];
   form: Omit<
     EditFormProps,
     'onReview' | 'onFormChange' | 'formId' | 'designLayout'
@@ -161,7 +185,34 @@ export function changedAdminOrderFields(
 
 export function AdminOrderEditor(props: Props) {
   const router = useRouter();
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  const fileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const detailsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [filesFor, setFilesFor] = useState<string | null>(null);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  const addTemplate = props.items.find(
+    (item) => item.pricingRoute !== 'MANUAL_QUOTE',
+  );
+  const fileItem = props.items.find((item) => item.id === filesFor);
+  const detailItem = props.items.find((item) => item.id === detailsFor);
   const formId = 'admin-order-edit-form';
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    const shell = surface?.closest('main');
+    const header = shell?.querySelector<HTMLElement>(':scope > header');
+    if (!surface || !header) return;
+    const update = () =>
+      surface.style.setProperty(
+        '--editor-header-offset',
+        `${header.getBoundingClientRect().height}px`,
+      );
+    const observer = new ResizeObserver(update);
+    observer.observe(header);
+    update();
+    return () => observer.disconnect();
+  }, []);
   const [drafts, setDrafts] = useState(() => props.items.map(initialDraft));
   const [date, setDate] = useState(props.form.initial.promisedDate ?? '');
   const baseline = useRef<Record<string, string> | null>(null);
@@ -178,14 +229,12 @@ export function AdminOrderEditor(props: Props) {
   const [chargeDrafts, setChargeDrafts] =
     useState<OrderChangePendingChargeDrafts>({});
   const [leaving, setLeaving] = useState(false);
+  const pendingNavigation = useRef<(() => void) | null>(null);
   const destination = useRef(`/orders/${props.orderId}`);
   const readForm = () => {
     const element = document.getElementById(formId) as HTMLFormElement | null;
     return element ? formValues(new FormData(element)) : {};
   };
-  useEffect(() => {
-    if (ready) baseline.current = readForm();
-  }, [ready]);
   const itemChanges: AdminOrderEditInput['items'] = [];
   const differences: Difference[] = [...metadataChanges];
   for (const draft of drafts) {
@@ -277,50 +326,17 @@ export function AdminOrderEditor(props: Props) {
       after: date || '未设置',
     });
   const dirty = differences.length > 0;
-  const dirtyRef = useRef(dirty);
-  useEffect(() => {
-    dirtyRef.current = dirty;
-  }, [dirty]);
-  useEffect(() => {
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (dirtyRef.current) {
-        event.preventDefault();
-        event.returnValue = '';
-      }
-    };
-    const interceptLink = (event: MouseEvent) => {
-      const link = (event.target as Element).closest<HTMLAnchorElement>(
-        'a[href]',
-      );
-      if (
-        !dirtyRef.current ||
-        !link ||
-        link.target === '_blank' ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey ||
-        link.hasAttribute('download')
-      )
-        return;
-      const url = new URL(link.href);
-      if (
-        url.origin !== location.origin ||
-        (url.pathname === location.pathname && url.search === location.search)
-      )
-        return;
-      event.preventDefault();
-      event.stopPropagation();
-      destination.current = url.pathname + url.search + url.hash;
+  const auxiliary = useOrderEditorAuxiliaryController(
+    !ready || dirty || pending || fileBusy || Boolean(props.form.blocked),
+  );
+  const { allowNavigation } = useAdminOrderLeaveGuard({
+    protectedLeave: dirty || fileBusy || auxiliary.dirty || auxiliary.pending,
+    onBlocked: (navigation) => {
+      if (pending || fileBusy || auxiliary.pending) return;
+      pendingNavigation.current = navigation.resume;
       setLeaving(true);
-    };
-    window.addEventListener('beforeunload', beforeUnload);
-    document.addEventListener('click', interceptLink, true);
-    return () => {
-      window.removeEventListener('beforeunload', beforeUnload);
-      document.removeEventListener('click', interceptLink, true);
-    };
-  }, []);
+    },
+  });
   function updateDraft(key: string, changes: Partial<DraftItem>) {
     setDrafts((items) =>
       items.map((item) => (item.key === key ? { ...item, ...changes } : item)),
@@ -423,8 +439,6 @@ export function AdminOrderEditor(props: Props) {
       formValues(data),
     );
     const fields: AdminOrderEditInput['fields'] = {
-      promisedDate: undefined,
-      isUrgent: undefined,
       ...changed,
       expectedEditVersion: String(props.form.expectedEditVersion),
     };
@@ -512,7 +526,7 @@ export function AdminOrderEditor(props: Props) {
           return;
         }
         if (result.status === 'saved') {
-          dirtyRef.current = false;
+          allowNavigation();
           router.push(`/orders/${props.orderId}`);
           router.refresh();
         }
@@ -522,19 +536,37 @@ export function AdminOrderEditor(props: Props) {
       }
     });
   }
-  const locked = !ready || pending || Boolean(props.form.blocked);
+  const locked =
+    !ready ||
+    pending ||
+    fileBusy ||
+    auxiliary.dirty ||
+    auxiliary.pending ||
+    Boolean(props.form.blocked);
+  useEffect(() => {
+    if (!locked && baseline.current === null) baseline.current = readForm();
+  }, [locked]);
   return (
-    <div className="mx-auto min-w-0 max-w-[880px] space-y-4 pb-8 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:shadow-none [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11">
-      <header className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center justify-between gap-3 border-b bg-background/95 px-1 py-3 backdrop-blur-sm">
+    <div
+      ref={surfaceRef}
+      className={`${styles.surface} mx-auto min-w-0 max-w-[880px] space-y-3 pb-8 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:shadow-none [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11`}
+    >
+      <header
+        aria-label="编辑工单操作"
+        className={`${styles.toolbar} sticky z-20 -mx-1 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-1 py-3`}
+      >
         <div className="flex min-w-0 items-center gap-3">
           <Button
             variant="ghost"
             size="icon"
             className="size-11 shrink-0"
             aria-label="返回工单"
+            disabled={pending || fileBusy || auxiliary.pending}
             onClick={() => {
               destination.current = `/orders/${props.orderId}`;
-              if (dirty) setLeaving(true);
+              pendingNavigation.current = () =>
+                router.push(destination.current);
+              if (dirty || auxiliary.dirty) setLeaving(true);
               else router.push(destination.current);
             }}
           >
@@ -550,25 +582,43 @@ export function AdminOrderEditor(props: Props) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground" aria-live="polite">
-            {dirty ? `已改 ${differences.length} 处` : '未修改'}
+            {auxiliary.pending
+              ? '费用处理中…'
+              : auxiliary.dirty
+                ? '费用有未保存修改'
+                : dirty
+                  ? `已改 ${differences.length} 处`
+                  : '未修改'}
           </span>
           <Button
             variant="outline"
             disabled={!dirty || locked}
             onClick={() => {
               destination.current = `/orders/${props.orderId}`;
+              pendingNavigation.current = () =>
+                router.push(destination.current);
               setLeaving(true);
             }}
           >
             放弃
           </Button>
-          <Button type="submit" form={formId} disabled={!dirty || locked}>
+          <Button
+            ref={saveButtonRef}
+            type="submit"
+            form={formId}
+            disabled={!dirty || locked}
+          >
             <Save className="size-4" />
             {pending ? '处理中…' : '保存修改…'}
           </Button>
         </div>
       </header>
       {props.pendingNotice}
+      {auxiliary.dirty ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          请先保存或还原下方费用输入，再修改工单资料与款式。
+        </p>
+      ) : null}
       {error ? (
         <ActionNotice tone="error" title="未完成保存" description={error} />
       ) : null}
@@ -604,6 +654,12 @@ export function AdminOrderEditor(props: Props) {
               locked ||
               !props.canModify ||
               (props.productionLocked && !draft.added);
+            const factsLocked =
+              stylesLocked || source.pricingRoute === 'MANUAL_QUOTE';
+            const plainPrint =
+              source.pricingRoute === 'COLOR_PRINT' &&
+              source.frontFoilColors.length + source.backFoilColors.length ===
+                0;
             const original = initialDraft(source);
             const changed =
               draft.added || JSON.stringify(draft) !== JSON.stringify(original);
@@ -614,10 +670,10 @@ export function AdminOrderEditor(props: Props) {
             return (
               <section
                 key={draft.key}
-                className="min-w-0 space-y-4 rounded-xl border p-3 sm:p-4"
+                className={styles.item}
                 aria-label={`第 ${index + 1} 款`}
               >
-                <div className="flex items-center gap-2">
+                <div className={styles.itemHeader}>
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-xs text-background">
                     {index + 1}
                   </span>
@@ -629,7 +685,7 @@ export function AdminOrderEditor(props: Props) {
                     onChange={(event) =>
                       updateDraft(draft.key, { name: event.target.value })
                     }
-                    className="min-w-0 flex-1 font-medium"
+                    className="min-w-0 flex-1 border-transparent bg-transparent px-1 font-semibold shadow-none hover:border-input focus-visible:border-input"
                   />
                   {changed ? (
                     <span className="shrink-0 rounded border px-2 py-1 text-xs">
@@ -664,7 +720,7 @@ export function AdminOrderEditor(props: Props) {
                     </Button>
                   ) : null}
                 </div>
-                <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className={styles.fields}>
                   <EditorField label="工艺">
                     <div className="flex min-h-11 items-center rounded-md border bg-muted/30 px-3 text-sm">
                       {ORDER_PRICING_ROUTE_LABELS[source.pricingRoute]}
@@ -701,7 +757,7 @@ export function AdminOrderEditor(props: Props) {
                             option.specification === draft.specification,
                         )?.selectionKey ?? ''
                       }
-                      disabled={stylesLocked || !options.length}
+                      disabled={factsLocked || !options.length}
                       onChange={(event) => {
                         const option = options.find(
                           (item) => item.selectionKey === event.target.value,
@@ -751,7 +807,7 @@ export function AdminOrderEditor(props: Props) {
                       max={9999999}
                       step={1}
                       value={draft.quantity}
-                      disabled={stylesLocked}
+                      disabled={factsLocked}
                       onChange={(event) =>
                         updateDraft(draft.key, { quantity: event.target.value })
                       }
@@ -774,102 +830,140 @@ export function AdminOrderEditor(props: Props) {
                       value={draft.pack}
                       placeholder="未记录"
                       disabled={
-                        stylesLocked || !source.packagingEditable || draft.added
+                        factsLocked || !source.packagingEditable || draft.added
                       }
                       onChange={(event) =>
                         updateDraft(draft.key, { pack: event.target.value })
                       }
                     />
                   </EditorField>
-                  <EditorField label="正面烫金" htmlFor={`front-${draft.key}`}>
-                    <Input
-                      id={`front-${draft.key}`}
-                      value={draft.front}
-                      disabled={
-                        stylesLocked || source.pricingRoute === 'COLOR_PRINT'
-                      }
-                      placeholder="多个颜色用顿号分隔"
-                      onChange={(event) =>
-                        updateDraft(draft.key, { front: event.target.value })
+                  <EditorField label="正面烫金">
+                    <OrderFoilColorPicker
+                      label={`第 ${index + 1} 款正面烫金`}
+                      allowNone={plainPrint || colors(draft.back).length > 0}
+                      selected={colors(draft.front)}
+                      options={[
+                        ...source.frontFoilColors,
+                        ...(props.foilColors ?? []),
+                      ]}
+                      disabled={factsLocked || plainPrint}
+                      onChange={(selected) =>
+                        updateDraft(draft.key, { front: selected.join('、') })
                       }
                     />
                   </EditorField>
-                  <EditorField label="反面烫金" htmlFor={`back-${draft.key}`}>
-                    <Input
-                      id={`back-${draft.key}`}
-                      value={draft.back}
-                      disabled={
-                        stylesLocked || source.pricingRoute === 'COLOR_PRINT'
-                      }
-                      placeholder="无反面烫金可留空"
-                      onChange={(event) =>
-                        updateDraft(draft.key, { back: event.target.value })
+                  <EditorField label="反面烫金">
+                    <OrderFoilColorPicker
+                      label={`第 ${index + 1} 款反面烫金`}
+                      allowNone={plainPrint || colors(draft.front).length > 0}
+                      collapsedCount={1}
+                      selected={colors(draft.back)}
+                      options={[
+                        ...source.backFoilColors,
+                        ...(props.foilColors ?? []),
+                      ]}
+                      disabled={factsLocked || plainPrint}
+                      onChange={(selected) =>
+                        updateDraft(draft.key, { back: selected.join('、') })
                       }
                     />
                   </EditorField>
                 </div>
-                {draft.pack && Number(draft.pack) > 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    每包 {draft.pack} 个；袋数与入袋费按已保存的常规装 /
-                    混装组成自动重算。
+                {plainPrint ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    纯彩印不含烫金；如需新增烫金工艺，请新建对应工单。
+                  </p>
+                ) : null}
+                {!source.packagingEditable || draft.added ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {draft.added
+                      ? '新增款式暂不支持同步分袋，请核对包装安排。'
+                      : '分袋记录缺失或存在多组分货，当前不能直接修改每包数量。'}
+                  </p>
+                ) : null}
+                {source.pricingRoute === 'MANUAL_QUOTE' ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    历史人工报价款仅可修改名称；其他生产参数请核对后新建完整工单。
                   </p>
                 ) : null}
                 {!draft.added ? (
-                  <Disclosure>
-                    <DisclosureSummary className="text-sm">
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={(event) => {
+                        fileButtonRef.current = event.currentTarget;
+                        setFilesFor(source.id);
+                      }}
+                    >
+                      <FileImage className="size-3.5" />
                       设计图{' '}
                       {
                         source.designs.filter(
                           (design) => design.fileType === 'IMAGE',
                         ).length
-                      }{' '}
-                      · CDR{' '}
+                      }
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={(event) => {
+                        fileButtonRef.current = event.currentTarget;
+                        setFilesFor(source.id);
+                      }}
+                    >
+                      <FileType className="size-3.5" />
+                      CDR{' '}
                       {
                         source.designs.filter(
                           (design) => design.fileType === 'CDR',
                         ).length
-                      }{' '}
-                      · 查看 / 管理文件
-                    </DisclosureSummary>
-                    <DesignUploadPanel
-                      orderId={props.orderId}
-                      orderItemId={source.id}
-                      designs={source.designs}
-                      canEdit={props.canEditDesigns && !dirty && !pending}
-                    />
-                  </Disclosure>
+                      }
+                    </Button>
+                  </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="mt-2 text-xs text-muted-foreground">
                     保存新增款式后上传该款设计文件。
                   </p>
                 )}
-                {!draft.added && source.details ? (
-                  <Disclosure>
-                    <DisclosureSummary className="text-sm">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 border-t border-dashed pt-1 text-xs">
+                  {!draft.added && source.details ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="px-1 text-xs text-muted-foreground"
+                      onClick={(event) => {
+                        detailsButtonRef.current = event.currentTarget;
+                        setDetailsFor(source.id);
+                      }}
+                    >
                       更多生产信息
-                    </DisclosureSummary>
-                    {source.details}
-                  </Disclosure>
-                ) : null}
-                <div className="border-t pt-3 text-right text-sm">
-                  <span className="mr-2 text-muted-foreground">
-                    {changed ? '修改前加工费' : '本款加工费'}
-                  </span>
-                  <span className="font-medium tabular-nums">
-                    {draft.added ? '保存前自动核价' : money(source.subtotal)}
-                  </span>
+                    </Button>
+                  ) : (
+                    <span />
+                  )}
+                  <p className="ml-auto py-2 text-right">
+                    <span className="mr-2 text-muted-foreground">
+                      {changed ? '修改前加工费' : '本款加工费'}
+                    </span>
+                    <span className="font-medium tabular-nums">
+                      {draft.added ? '保存前自动核价' : money(source.subtotal)}
+                    </span>
+                  </p>
                 </div>
               </section>
             );
           })}
-          {props.canAdd && props.items.length ? (
+          {props.status === 'DRAFT' && props.canAdd && addTemplate ? (
             <Button
               type="button"
               variant="outline"
               className="w-full border-dashed"
               disabled={locked || drafts.length >= 50}
               onClick={() => {
-                const source = props.items[0];
+                const source = addTemplate;
                 setDrafts((items) => [
                   ...items,
                   {
@@ -882,8 +976,20 @@ export function AdminOrderEditor(props: Props) {
               }}
             >
               <Plus className="size-4" />
-              新增款式（沿用第 1 款工艺和纸张）
+              新增款式（沿用第 {addTemplate.sequence} 款工艺和纸张）
             </Button>
+          ) : null}
+          {props.status !== 'DRAFT' && props.canModify ? (
+            <p className="text-xs text-muted-foreground">
+              已提交工单的新款需要独立上传设计图与生产文件，请
+              <Link
+                href="/orders/new"
+                className="ml-1 underline underline-offset-2"
+              >
+                新建完整工单
+              </Link>
+              。
+            </p>
           ) : null}
           {props.items.length > 0 && !props.productionLocked ? (
             <p className="text-xs text-muted-foreground">
@@ -912,99 +1018,116 @@ export function AdminOrderEditor(props: Props) {
         formId={formId}
         onFormChange={metadataChanged}
         onReview={preview}
-        blocked={locked}
+        blocked={props.form.blocked}
+        busy={
+          !ready || pending || fileBusy || auxiliary.dirty || auxiliary.pending
+        }
       />
-      <section aria-label="费用核对" className="space-y-3">
-        {dirty ? (
-          <p className="text-xs text-muted-foreground">
-            请先保存当前修改，再核定人工费用或维护制版明细。
-          </p>
-        ) : null}
-        <fieldset disabled={dirty || pending} className="min-w-0 space-y-3">
-          {props.fees}
-        </fieldset>
-      </section>
-      <Dialog
+      <OrderEditorAuxiliaryContext.Provider value={auxiliary.context}>
+        <section aria-label="费用核对" className="space-y-3">
+          {dirty ? (
+            <p className="text-xs text-muted-foreground">
+              请先保存当前修改，再核定人工费用或维护制版明细。
+            </p>
+          ) : null}
+          <fieldset
+            disabled={
+              dirty || pending || fileBusy || Boolean(props.form.blocked)
+            }
+            className="min-w-0 space-y-3"
+          >
+            {props.fees}
+          </fieldset>
+        </section>
+      </OrderEditorAuxiliaryContext.Provider>
+      <Sheet
         open={review !== null}
         onOpenChange={(open) => {
           if (!open && !pending) setReview(null);
         }}
       >
-        <DialogContent className="max-w-[620px] [&_button]:min-h-11 [&_input]:min-h-11">
-          <DialogHeader>
-            <DialogTitle>确认保存修改</DialogTitle>
-            <DialogDescription>
+        <SheetContent
+          side="bottom"
+          finalFocus={saveButtonRef}
+          showCloseButton={false}
+          className={`${styles.reviewSheet} [&_button]:min-h-11 [&_input]:min-h-11`}
+        >
+          <SheetHeader className="px-5 pt-5 pb-3">
+            <SheetTitle>确认保存修改</SheetTitle>
+            <SheetDescription>
               请核对以下 {differences.length}{' '}
               处修改。所有资料与款式变更将一起保存。
-            </DialogDescription>
-          </DialogHeader>
-          <ul className="divide-y">
-            {differences.map((diff, index) => (
-              <li key={index} className="space-y-1 py-3">
-                <p className="text-sm font-medium">{diff.label}</p>
-                <div className="grid min-w-0 grid-cols-[1fr_auto_1fr] items-start gap-3 text-sm">
-                  <span className="break-words text-muted-foreground [overflow-wrap:anywhere]">
-                    {diff.before || '未填写'}
-                  </span>
-                  <span aria-label="修改为">→</span>
-                  <span className="break-words [overflow-wrap:anywhere]">
-                    {diff.after || '未填写'}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-          {review ? (
-            <div className="space-y-3 rounded-xl border p-4">
-              <div className="flex flex-wrap justify-between gap-3 text-sm">
-                <span>当前金额 {money(review.oldTotal)}</span>
-                <strong>保存后 {money(review.newTotal)}</strong>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {review.changesRevision
-                  ? '保存后更新工单版本，并保留修改记录与原报价快照。'
-                  : '本次仅修改资料，保留当前工单版本与费用。'}
-              </p>
-              {review.blockers.map((text, index) => (
-                <p key={index} className="text-sm text-destructive">
-                  {text}
-                </p>
+            </SheetDescription>
+          </SheetHeader>
+          <div className={styles.reviewBody}>
+            <ul className="divide-y">
+              {differences.map((diff, index) => (
+                <li key={index} className="space-y-1 py-2">
+                  <p className="text-sm font-medium">{diff.label}</p>
+                  <div className="grid min-w-0 grid-cols-[1fr_auto_1fr] items-start gap-3 text-sm">
+                    <span className="break-words text-muted-foreground [overflow-wrap:anywhere]">
+                      {diff.before || '未填写'}
+                    </span>
+                    <span aria-label="修改为">→</span>
+                    <span className="break-words [overflow-wrap:anywhere]">
+                      {diff.after || '未填写'}
+                    </span>
+                  </div>
+                </li>
               ))}
-            </div>
-          ) : null}
-          {review?.pendingCharges?.length ? (
-            <div className="space-y-3">
-              <OrderChangePendingChargeEditor
-                charges={review.pendingCharges}
-                drafts={chargeDrafts}
-                disabled={pending}
-                onChange={(key, field, value) =>
-                  setChargeDrafts((drafts) => ({
-                    ...drafts,
-                    [key]: {
-                      ...(drafts[key] ?? { amount: '', reason: '' }),
-                      [field]: value,
-                    },
-                  }))
-                }
+            </ul>
+            {review ? (
+              <div className="space-y-3 rounded-xl border p-4">
+                <div className="flex flex-wrap justify-between gap-3 text-sm">
+                  <span>当前金额 {money(review.oldTotal)}</span>
+                  <strong>保存后 {money(review.newTotal)}</strong>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {review.changesRevision
+                    ? `工单版本 v${props.revision} → v${props.revision + 1}，保留修改记录与原报价快照。`
+                    : '本次仅修改资料，保留当前工单版本与费用。'}
+                </p>
+                {review.blockers.map((text, index) => (
+                  <p key={index} className="text-sm text-destructive">
+                    {text}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            {review?.pendingCharges?.length ? (
+              <div className="space-y-3">
+                <OrderChangePendingChargeEditor
+                  charges={review.pendingCharges}
+                  drafts={chargeDrafts}
+                  disabled={pending}
+                  onChange={(key, field, value) =>
+                    setChargeDrafts((drafts) => ({
+                      ...drafts,
+                      [key]: {
+                        ...(drafts[key] ?? { amount: '', reason: '' }),
+                        [field]: value,
+                      },
+                    }))
+                  }
+                />
+                <Button
+                  variant="outline"
+                  disabled={pending || chargeBuild.missing.length > 0}
+                  onClick={repriceCharges}
+                >
+                  补齐运费并重新核价
+                </Button>
+              </div>
+            ) : null}
+            {error ? (
+              <ActionNotice
+                tone="error"
+                title="请检查本次修改"
+                description={error}
               />
-              <Button
-                variant="outline"
-                disabled={pending || chargeBuild.missing.length > 0}
-                onClick={repriceCharges}
-              >
-                补齐运费并重新核价
-              </Button>
-            </div>
-          ) : null}
-          {error ? (
-            <ActionNotice
-              tone="error"
-              title="请检查本次修改"
-              description={error}
-            />
-          ) : null}
-          <DialogFooter>
+            ) : null}
+          </div>
+          <SheetFooter className="grid grid-cols-2 border-t px-5 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <Button
               variant="outline"
               disabled={pending}
@@ -1018,7 +1141,55 @@ export function AdminOrderEditor(props: Props) {
             >
               {pending ? '保存中…' : '确认保存'}
             </Button>
-          </DialogFooter>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+      <Dialog
+        open={Boolean(fileItem)}
+        onOpenChange={(open) => {
+          if (!open && !fileBusy) setFilesFor(null);
+        }}
+      >
+        <DialogContent finalFocus={fileButtonRef} showCloseButton={!fileBusy}>
+          <DialogHeader>
+            <DialogTitle>第 {fileItem?.sequence} 款设计文件</DialogTitle>
+            <DialogDescription>
+              {dirty || auxiliary.dirty
+                ? '请先保存或还原当前修改，再上传或删除文件。'
+                : props.canEditDesigns
+                  ? '上传与删除立即保存到该款式。'
+                  : '当前工单阶段仅可查看已有文件。'}
+            </DialogDescription>
+          </DialogHeader>
+          {fileItem ? (
+            <DesignUploadPanel
+              orderId={props.orderId}
+              orderItemId={fileItem.id}
+              designs={fileItem.designs}
+              canEdit={
+                props.canEditDesigns &&
+                !dirty &&
+                !pending &&
+                !auxiliary.dirty &&
+                !auxiliary.pending
+              }
+              onBusyChange={setFileBusy}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(detailItem)}
+        onOpenChange={(open) => {
+          if (!open) setDetailsFor(null);
+        }}
+      >
+        <DialogContent finalFocus={detailsButtonRef}>
+          <DialogHeader>
+            <DialogTitle>第 {detailItem?.sequence} 款生产信息</DialogTitle>
+            <DialogDescription>已保存的工艺与生产事实</DialogDescription>
+          </DialogHeader>
+          {detailItem?.details}
         </DialogContent>
       </Dialog>
       <Dialog open={leaving} onOpenChange={setLeaving}>
@@ -1036,8 +1207,8 @@ export function AdminOrderEditor(props: Props) {
             <Button
               variant="destructive"
               onClick={() => {
-                dirtyRef.current = false;
-                router.push(destination.current);
+                allowNavigation();
+                pendingNavigation.current?.();
               }}
             >
               放弃并离开

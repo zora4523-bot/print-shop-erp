@@ -173,6 +173,9 @@ import {
   previewOrderPricingReviewAction,
   finalizeOrderPricingAction,
   saveOrderManualChargeAction,
+  deleteOrderManualChargeAction,
+  saveOrderPlateDetailAction,
+  deleteOrderPlateDetailAction,
 } from '../order';
 
 const salesActor = {
@@ -1978,5 +1981,43 @@ describe('structured order commercial detail actions', () => {
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/bills');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1/edit');
+  });
+
+  it.each([
+    {
+      label: 'removes a manual charge',
+      action: deleteOrderManualChargeAction,
+      mutate: commercialDetailsMock.deleteOrderManualCharge,
+      raw: { chargeId: 'charge-1', reason: '移除重复收费' },
+      saved: { chargeId: 'charge-1' },
+    },
+    {
+      label: 'saves a plate detail',
+      action: saveOrderPlateDetailAction,
+      mutate: commercialDetailsMock.saveOrderPlateDetail,
+      raw: { orderItemId: 'item-1', name: '正面版', quantity: 1, unitPrice: '25.00' },
+      saved: { plateDetailId: 'plate-1' },
+    },
+    {
+      label: 'removes a plate detail',
+      action: deleteOrderPlateDetailAction,
+      mutate: commercialDetailsMock.deleteOrderPlateDetail,
+      raw: { orderItemId: 'item-1', plateDetailId: 'plate-1', reason: '无需额外制版' },
+      saved: { plateDetailId: 'plate-1' },
+    },
+  ])('$label and refreshes the embedded editor’s amounts and version', async ({ action, mutate, raw, saved }) => {
+    const actor = { ...salesActor, role: Role.ADMIN };
+    permissionsMock.requirePermission.mockResolvedValue(actor);
+    mutate.mockResolvedValue({ ...saved, priceRevision: 5, totalAmount: '980.00' });
+
+    const result = await action(null, { orderId: 'order-1', expectedPriceRevision: 4, ...raw });
+
+    expect(result).toMatchObject({ status: 'success', priceRevision: 5 });
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('order:price:confirm');
+    expect(mutate).toHaveBeenCalledWith(expect.objectContaining(raw), actor);
+    expect(revalidatePathMock.mock.calls).toEqual([
+      ['/orders'], ['/orders/order-1'], ['/orders/order-1/edit'], ['/owner/bills'],
+    ]);
   });
 });

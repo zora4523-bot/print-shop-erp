@@ -16,6 +16,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ConfirmActionDialog } from '@/components/ui-business';
+import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type Props = {
   orderId: string;
@@ -71,6 +72,17 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
+  const dirty = !confirmed && (edited || target !== currentValue || accepted !== null);
+  const auxiliary = useOrderEditorAuxiliary({ dirty, pending });
+  function resetDraft() {
+    generation.current += 1;
+    setTarget(currentValue);
+    setEdited(false);
+    setAccepted(null);
+    setError(null);
+    setFormVersion((value) => value + 1);
+  }
 
   function invalidatePreview() {
     generation.current += 1;
@@ -81,7 +93,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
 
   function preview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy.current || confirmed) return;
+    if (busy.current || confirmed || auxiliary.blocked) return;
     const command = readCommand(event.currentTarget, orderId, target);
     const currentGeneration = ++generation.current;
     setAccepted(null);
@@ -105,7 +117,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
   }
 
   function confirmPricing() {
-    if (busy.current || confirmed || !accepted?.preview.canConfirm) return;
+    if (busy.current || confirmed || auxiliary.blocked || !accepted?.preview.canConfirm) return;
     // The accepted request is immutable: editing any field clears it. A
     // network retry keeps this request's key, so a lost response cannot
     // authorize a second financial revision.
@@ -142,6 +154,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
   const quote = accepted?.preview;
   return (
     <section id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-4">
+      {auxiliary.blocked ? <p className="text-xs text-muted-foreground">请先保存或还原正在编辑的工单资料或费用。</p> : null}
       <h3 className="text-sm font-semibold">物流费用确认</h3>
       {variant !== 'drawer' ? <p className="mt-1 text-xs text-muted-foreground">
         仅更正物流费用，保留已审核款式价格、版费、包装及其他费用，不改变生产状态。
@@ -150,8 +163,8 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
       {confirmed ? (
         <p role="status" className="mt-3 text-sm">物流费用已确认，工单已刷新。</p>
       ) : (
-        <form onSubmit={preview} onChange={invalidatePreview} aria-busy={pending} className="mt-4 min-w-0 space-y-4">
-          <fieldset disabled={pending} className="min-w-0 space-y-4">
+        <form key={formVersion} onSubmit={preview} onChange={invalidatePreview} aria-busy={pending} className="mt-4 min-w-0 space-y-4">
+          <fieldset disabled={pending || auxiliary.blocked} className="min-w-0 space-y-4">
             <div className="max-w-sm space-y-1">
               <label htmlFor={`fulfillment-mode-${orderId}`} className="text-sm font-medium">更正后的物流方式</label>
               <select
@@ -194,7 +207,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
                 </fieldset>
               );
             })}
-            <Button type="submit" variant="outline" disabled={pending || (!isPricingPending && target === currentValue && (target || !edited))}>
+            <Button type="submit" variant="outline" disabled={pending || auxiliary.blocked || (!isPricingPending && target === currentValue && (target || !edited))}>
               {pending ? '处理中…' : '预览费用差额'}
             </Button>
           </fieldset>
@@ -216,8 +229,8 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
               <p className="text-xs text-muted-foreground">确认将记录本次物流金额及审核人；不会结算工单或重新生成生产工单。</p>
               <ConfirmActionDialog
                 level="L2"
-                disabled={pending || !quote.canConfirm}
-                trigger={<Button type="button" disabled={pending || !quote.canConfirm}>确认物流费用</Button>}
+                disabled={pending || auxiliary.blocked || !quote.canConfirm}
+                trigger={<Button type="button" disabled={pending || auxiliary.blocked || !quote.canConfirm}>确认物流费用</Button>}
                 title="确认物流费用？"
                 description="请核对本次物流收费及工单金额。"
                 impactItems={[
@@ -233,6 +246,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         </form>
       )}
+      {auxiliary.managed && dirty ? <Button type="button" variant="outline" className="mt-3" disabled={pending || auxiliary.pending} onClick={resetDraft}>还原物流输入</Button> : null}
     </section>
   );
 }
