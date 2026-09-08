@@ -40,6 +40,25 @@ pnpm dev
 
 打开 <http://localhost:3000>。同一工作区只运行一个开发服务器；Playwright 默认会复用已经监听 `E2E_BASE_URL` 的实例。
 
+### 补齐工作台演示工单
+
+已有 `e2e-dash-<16位runId>-sub-1/sub-2/sub-3-urgent` 空工单可使用
+[`complete-dashboard-order-fixtures.ts`](./scripts/complete-dashboard-order-fixtures.ts) 原位补齐。
+它只接受本机非生产数据库和停用的工作台测试销售账号，保留编号、归属、状态和已有基本资料；
+有业务明细、金额、快照或账本引用的记录会跳过。默认运行完整计价事务后回滚：
+
+```bash
+node --conditions=react-server --import tsx scripts/complete-dashboard-order-fixtures.ts --all
+# 核对预览后写入；备份必须为仓库外尚不存在的绝对路径（0600 权限）。
+node --conditions=react-server --import tsx scripts/complete-dashboard-order-fixtures.ts --all --apply --admin=e2e-owner --backup=/tmp/dashboard-orders-before.json
+```
+
+可用 `--id=<完整测试工单ID>` 代替 `--all`。重复执行会跳过已补齐记录。
+脚本创建 1/2/4 款、分袋、单票分货和标有“不可生产”的 SVG 演示图，
+复用当前建单计价服务生成加工、包装、物流报价及不可变价格快照；版费默认 0。
+它不会伪造 CDR、实称重量或确认/结算金额，也不会执行确认、排产、发货或发送通知。
+原始工作台 E2E helper 继续保留空明细场景，不被该脚本替换。
+
 ### 管理员 seed
 
 [`prisma/seed.ts`](./prisma/seed.ts) 不再提供固定默认密码：
