@@ -696,6 +696,16 @@ describe('admin order workspace predicates', () => {
     });
   });
 
+  it('aggregates canonical craft types independently of display dictionary names', async () => {
+    const record = adminOrderRecord();
+    const crafts = ['PRINT', 'PARTIAL', 'FULL', 'PARTIAL', null];
+    dbMock.order.findFirst.mockResolvedValue({ ...record, items: crafts.map((craft, index) => ({ ...record.items[0], id: `item-${index}`, craft })) });
+    const detail = await getAdminOrderByOrderNo(actor, record.orderNo);
+    expect(detail?.craftTags).toEqual(['局部烫金', '专版烫金', '彩印']);
+    expect(detail?.craftSummary).toBe('工艺待补');
+    expect(dbMock.order.findFirst.mock.calls[0][0].select.items.select.craft).toBe(true);
+  });
+
   it('shows the immutable rejection reason and future Shanghai calendar days', async () => {
     dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({
       status: OrderStatus.REJECTED,

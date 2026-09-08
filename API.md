@@ -173,3 +173,7 @@ pnpm test --run
 - `releaseFactoryOrderAction` 与批量 `RELEASE_AND_CREATE_PRINT` 接受满足准备校验的 `PENDING_FACTORY / SUBMITTED` 存量单，在单一事务完成准备、下发和首次打印；仍限 ADMIN，保留 revision、workOrderVersion、幂等键检查。
 - `confirmFactoryOrderAction` 保留兼容：使用已保存费用进入待下发；`expectedQuoteToken` 仅为旧请求兼容字段，不触发最新目录报价，工单版本仍须匹配。新 UI 不再展示独立确认步骤。
 - 下发不形成财务结算；后续费用沿用既有更正接口，已结算记录不能覆盖。
+
+### 管理端工单读取的工艺标识
+
+`GET /api/orders/admin/[orderNo]` 与管理端列表共用的工单读取模型增加可选 `craftTags` 字段，值为“局部烫金”“专版烫金”“彩印”的去重数组，来源为各款式 `craft` 类型，缺少类型返回空数组。原 `craftSummary`、工单标识及权限校验保持不变。

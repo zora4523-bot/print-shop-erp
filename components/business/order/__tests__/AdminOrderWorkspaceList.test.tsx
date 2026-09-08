@@ -65,12 +65,21 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).toContain('href="/orders/order-1"');
     expect(html).toContain('端午定制');
     expect(html).toContain('客户甲');
-    expect(html).toContain('剩 8 天');
+    expect(html).toContain('2026-09-05');
+    expect(html).not.toContain('剩 8 天');
     expect(html).not.toContain(order.orderNo);
     expect(html).not.toContain('复制工单号');
     expect(html).not.toContain('业务员甲');
     expect(html).not.toContain('局部烫金');
     expect(html).not.toContain('v2');
+  });
+
+  it('shows canonical craft tags and the full distant delivery date without a countdown', () => {
+    const order: AdminOrderWorkspaceRow = { ...row(), craftTags: ['局部烫金', '专版烫金', '彩印'], promisedDate: '2099-12-31', promisedDaysLeft: 26777, dueAlert: null };
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="signals-export" />);
+    for (const tag of order.craftTags!) expect(html).toContain(tag);
+    expect(html).toContain('2099-12-31');
+    expect(html).not.toContain('26777');
   });
 
   it('keeps duplicate names linked to separate records and uses a readable empty-name fallback', () => {

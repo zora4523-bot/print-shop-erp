@@ -80,6 +80,8 @@ describe('admin name-first order list', () => {
         expect(host.textContent).not.toContain('GD-260902-001');
         expect(host.textContent).not.toContain('INTERNAL-SECOND');
         expect(host.textContent).not.toContain('业务员甲');
+        for (const label of ['局部烫金', '专版烫金', '彩印', '2099-12-31']) expect(host.textContent).toContain(label);
+        expect(host.textContent).not.toContain('26777');
         await page.getByRole('checkbox', { name: '选择本页 2 项工单', exact: true }).click();
         await expect.element(page.getByRole('region', { name: '工单批量操作' })).toBeVisible();
         expect(host.textContent).not.toContain('复制工单号');
@@ -134,11 +136,13 @@ function row(): AdminOrderWorkspaceRow {
     isStarred: true,
     createdAt: '2026-09-02T01:00:00.000Z',
     submittedAt: '2026-09-02T01:00:00.000Z',
-    promisedDate: '2026-09-05',
-    dueAlert: { kind: 'due-soon', days: 3 },
+    promisedDate: '2099-12-31',
+    promisedDaysLeft: 26777,
+    dueAlert: null,
     itemCount: 2,
     totalQuantity: 2000,
     craftSummary: '局部烫金',
+    craftTags: ['局部烫金', '专版烫金', '彩印'],
     thumbnail: null,
     items: [
       {

@@ -1,5 +1,6 @@
 import { inspectOrderProductionReadinessInTx } from './production-readiness';
 import 'server-only';
+import { adminOrderCraftTags, type AdminOrderCraftTag } from './admin-list-presentation';
 
 import Decimal from 'decimal.js';
 import {
@@ -94,6 +95,7 @@ export type AdminOrderWorkspaceRow = {
   itemCount: number;
   totalQuantity: number;
   craftSummary: string;
+  craftTags?: AdminOrderCraftTag[];
   thumbnail: { url: string; fileName: string } | null;
   items: Array<{
     id: string;
@@ -540,6 +542,7 @@ const adminOrderSelect = {
       specification: true,
       paperType: true,
       paperWeightGsm: true,
+      craft: true,
       crafts: true,
       quoteDisposition: true,
       tasks: { select: { status: true } },
@@ -1118,6 +1121,7 @@ function mapAdminOrderRow(
       : null,
     itemCount: items.length,
     totalQuantity: row.items.reduce((sum, item) => sum + item.quantity, 0),
+    craftTags: adminOrderCraftTags(row.items.map((item) => item.craft)),
     craftSummary:
       [...new Set(items.flatMap((item) => item.crafts))].join(' · ') ||
       '工艺待补',

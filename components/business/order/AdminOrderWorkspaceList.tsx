@@ -13,6 +13,7 @@ import { FileImage, Star } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { setOrderStarredAction } from '@/actions/order-workspace';
+import { adminOrderDueHint } from '@/lib/order/admin-list-presentation';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
@@ -238,6 +239,11 @@ function AdminOrderRow({
           >
             {order.customer.name}
           </Link>
+          {order.craftTags?.map((tag) => (
+            <span key={tag} className="my-0.5 inline-block whitespace-nowrap rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              {tag}
+            </span>
+          ))}
         </p>
       </div>
 
@@ -392,9 +398,9 @@ function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
       </p>
     );
   }
-  const date = order.promisedDate.slice(5);
+  const date = order.promisedDate;
   const alert = order.dueAlert;
-  const daysLeft = order.promisedDaysLeft ?? (alert?.kind === 'due-soon' ? alert.days : null);
+  const hint = adminOrderDueHint(alert);
   return (
     <p
       className={cn(
@@ -402,16 +408,8 @@ function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
         alert?.kind === 'overdue' ? 'text-destructive' : alert && 'text-warning-foreground',
       )}
     >
-      <span className={cn(alert?.kind === 'overdue' && 'inline-block rounded-md bg-destructive/10 px-2 py-0.5 text-destructive')}>
-        {date}{alert?.kind === 'overdue' ? ` 超${alert.days}天` : ''}
-      </span>
-      {alert?.kind !== 'overdue' && daysLeft !== null && daysLeft >= 0 ? (
-        <span className="mt-0.5 block text-[10px]">
-          {daysLeft === 0
-              ? '今天待发'
-              : `剩 ${daysLeft} 天`}
-        </span>
-      ) : null}
+      <time dateTime={date}>{date}</time>
+      {hint ? <span className="mt-0.5 block text-[10px]">{hint}</span> : null}
     </p>
   );
 }
