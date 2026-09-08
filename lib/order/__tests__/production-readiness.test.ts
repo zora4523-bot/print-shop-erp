@@ -4,7 +4,7 @@ import type { Prisma } from '@/generated/prisma/client';
 import { OrderStatus, OrderPricingStatus, OrderSettlementType } from '@/generated/prisma/enums';
 const { append } = vi.hoisted(() => ({ append: vi.fn() }));
 vi.mock('../pricing-revision', () => ({ appendOrderPricingRevisionInTx: append }));
-import { prepareOrderForProductionInTx } from '../production-readiness';
+import { inspectOrderProductionReadinessInTx, prepareOrderForProductionInTx } from '../production-readiness';
 const amount = (value: string) => new Decimal(value);
 const now = new Date('2026-09-08T02:00:00Z');
 function fixture() {
@@ -12,7 +12,7 @@ function fixture() {
     id: 'order-1', status: OrderStatus.PENDING_FACTORY as OrderStatus, revision: 2, workOrderVersion: 1, priceRevision: 3,
     pricingStatus: OrderPricingStatus.AUTO_CONFIRMED as OrderPricingStatus, settlementType: OrderSettlementType.EXTERNAL_SALES,
     processingAmount: amount('12.30'), packagingAmount: amount('2.20'), totalAmount: amount('15.60'),
-    quotedFee: amount('15.60'), confirmedFee: null, settledAt: null, settledFee: null,
+    quotedFee: amount('15.60'), confirmedFee: null, settledAt: null as Date | null, settledFee: null as Decimal | null,
     receiverAddress: '广东省广州市测试路', receiverPhone: '13800000000',
     items: [{ id: 'item-1', sequence: 1, craft: 'PARTIAL', crafts: [] as string[], hasLocalFoil: true, frontFoilColors: ['亚金'], backFoilColors: [], quantity: 100, subtotal: amount('10.10'), pricingSnapshot: {}, quoteDisposition: 'AUTO', manualQuoteReason: null }],
     packagingGroups: [{ id: 'pack-1', sequence: 1, actualBagCount: 10, lines: [{ orderItemId: 'item-1', unitsPerBag: 10 }], subtotal: amount('2.20'), pricingSnapshot: {} }],
@@ -73,5 +73,51 @@ describe('automatic preparation for production', () => {
     const { tx, call } = client({ ...fixture(), status });
     expect((await call()).status).toBe(status);
     expect(tx.order.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('readiness inspection and financial boundaries', () => {
+  it('inspects a complete order without locks, status writes or pricing history writes', async () => {
+    const order = fixture();
+    const { tx } = client(order);
+    const result = await inspectOrderProductionReadinessInTx(
+      tx as unknown as Prisma.TransactionClient,
+      order.id,
+    );
+    expect(result).toMatchObject({ ready: true, status: OrderStatus.PENDING_FACTORY, issues: [] });
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(tx.orderLog.create).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it('rechecks pending amendments when preparing after an earlier successful inspection', async () => {
+    const order = fixture();
+    const { tx, call } = client(order);
+    const preview = await inspectOrderProductionReadinessInTx(
+      tx as unknown as Prisma.TransactionClient,
+      order.id,
+    );
+    expect(preview.ready).toBe(true);
+    tx.order.findUniqueOrThrow.mockResolvedValueOnce({ ...order, _count: { changeRequests: 1 } });
+    await expect(call()).resolves.toMatchObject({ ready: false, issues: ['存在待裁决变更申请'] });
+    expect(tx.order.findUniqueOrThrow).toHaveBeenCalledTimes(2);
+    expect(tx.$executeRaw).toHaveBeenCalledOnce();
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { settledAt: now, settledFee: null },
+    { settledAt: null, settledFee: amount('15.60') },
+    { settledAt: null, settledFee: amount('0.00') },
+  ])('rejects settlement evidence even when the legacy status is pending: %j', async (settlement) => {
+    const { tx, call } = client({ ...fixture(), ...settlement });
+    const result = await call();
+    expect(result.ready).toBe(false);
+    expect(result.issues).toContain('已结算工单不能重新进入待下发');
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(tx.orderLog.create).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
   });
 });

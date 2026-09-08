@@ -740,6 +740,22 @@ describe('submitOrderAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
   });
 
+  it.each([
+    [OrderStatus.CONFIRMED, true],
+    [OrderStatus.SUBMITTED, false],
+    [OrderStatus.PENDING_FACTORY, false],
+  ])('reports production readiness from the committed status %s', async (status, readyForProduction) => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.submitOrder.mockResolvedValueOnce({
+      id: 'o1', status, quotedFee: '566.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+    });
+    await expect(submitOrderAction('o1')).resolves.toEqual({
+      status: 'success', readyForProduction, quotedFee: '566.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+    });
+  });
+
   it('报价变化时返回稳定 QUOTE_CHANGED 结果且不刷新路由', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.submitOrder.mockRejectedValueOnce(
