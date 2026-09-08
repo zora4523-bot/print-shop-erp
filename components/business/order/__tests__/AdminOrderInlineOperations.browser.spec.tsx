@@ -5,9 +5,6 @@ import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page } from 'vitest/browser';
 import type { OrderPricingReviewPreview } from '@/lib/order/pricing-review';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { Button } from '@/components/ui/button';
-import drawerStyles from '../AdminOrderDrawer.module.css';
 
 const { previewAction, finalizeAction, shipAction, refresh, completed } = vi.hoisted(() => ({
   previewAction: vi.fn(), finalizeAction: vi.fn(), shipAction: vi.fn(), refresh: vi.fn(), completed: vi.fn(),
@@ -54,13 +51,10 @@ afterEach(() => {
   document.documentElement.classList.remove('dark'); history.replaceState(null, '', location.pathname);
 });
 async function open(kind: 'pricing' | 'shipping', onCompleted?: (message: string) => void) {
-  flushSync(() => root.render(<Sheet><SheetTrigger render={<Button />}>打开工单</SheetTrigger><SheetContent className={drawerStyles.drawer} data-order-drawer="">
-    <SheetHeader className={drawerStyles.header}><SheetTitle>工单处理</SheetTitle><SheetDescription>GD-INLINE-001</SheetDescription></SheetHeader>
-    <div className={drawerStyles.body} data-slot="admin-order-drawer-body"><AdminOrderInlineOperations order={order(kind)} onCompleted={onCompleted} /></div>
-  </SheetContent></Sheet>));
-  await page.getByRole('button', { name: '打开工单', exact: true }).click();
-  await expect.poll(() => document.querySelector('[data-order-drawer]')?.hasAttribute('data-starting-style')).toBe(false);
-  await Promise.all(document.querySelector('[data-order-drawer]')!.getAnimations().map((animation) => animation.finished));
+  flushSync(() => root.render(<section data-order-operations="" className="admin-viewport m-4 min-w-0 rounded-lg border p-4">
+    <h2>工单处理</h2>
+    <div data-slot="order-operations-body"><AdminOrderInlineOperations order={order(kind)} onCompleted={onCompleted} /></div>
+  </section>));
   const trigger = page.getByRole('button', { name: kind === 'pricing' ? '录入人工核价' : '录运单发货', exact: true });
   await trigger.click();
   await expect.element(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -70,11 +64,11 @@ async function open(kind: 'pricing' | 'shipping', onCompleted?: (message: string
 for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
   for (const theme of ['light', 'dark']) {
     for (const kind of ['pricing', 'shipping'] as const) {
-      it(`${kind} ${width}×${height} ${theme}: inline form is accessible and fits drawer`, async () => {
+      it(`${kind} ${width}×${height} ${theme}: inline form is accessible and fits detail page`, async () => {
         await page.viewport(width, height); document.documentElement.classList.toggle('dark', theme === 'dark');
         await open(kind);
-        const drawer = document.querySelector<HTMLElement>('[data-order-drawer]')!;
-        const body = document.querySelector<HTMLElement>('[data-slot="admin-order-drawer-body"]')!;
+        const drawer = document.querySelector<HTMLElement>('[data-order-operations]')!;
+        const body = document.querySelector<HTMLElement>('[data-slot="order-operations-body"]')!;
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
         expect(body.scrollWidth).toBeLessThanOrEqual(body.clientWidth);
         for (const control of drawer.querySelectorAll<HTMLElement>('button, a[href], input:not([type="hidden"]), select, textarea')) {
@@ -85,17 +79,17 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
           expect(rect.right).toBeLessThanOrEqual(width + 1);
           expect(rect.left).toBeGreaterThanOrEqual(drawer.getBoundingClientRect().left - 1);
         }
-        expect(await commands.checkShellAccessibility('[data-order-drawer]')).toEqual([]);
+        expect(await commands.checkShellAccessibility('[data-order-operations]')).toEqual([]);
       });
     }
   }
 }
 
-it('pricing links preserve the drawer hash; confirmation retains errors and draft values', async () => {
-  await page.viewport(1280, 800); history.replaceState(null, '', `${location.pathname}#wo=GD-INLINE-001`);
+it('pricing links preserve the current detail anchor; confirmation retains errors and draft values', async () => {
+  await page.viewport(1280, 800); history.replaceState(null, '', `${location.pathname}#order-detail-actions`);
   await open('pricing');
   await page.getByRole('link', { name: '制版费', exact: true }).click();
-  expect(location.hash).toBe('#wo=GD-INLINE-001');
+  expect(location.hash).toBe('#order-detail-actions');
   await page.getByLabelText('确认金额（元）').fill('45.50');
   await page.getByLabelText('定价依据', { exact: true }).fill('工厂报价已核对');
   await page.getByRole('button', { name: '确认工厂核价', exact: true }).click();
@@ -106,7 +100,7 @@ it('pricing links preserve the drawer hash; confirmation retains errors and draf
   await expect.element(page.getByLabelText('确认金额（元）')).toHaveValue('45.50');
 });
 
-it('shipping waits for confirmation and refreshes the list without leaving the drawer', async () => {
+it('shipping waits for confirmation and refreshes the list without leaving the detail', async () => {
   await page.viewport(393, 852); await open('shipping');
   await page.getByLabelText('运单号（选填）').fill('ZTO-123456');
   await page.getByRole('button', { name: '确认 1 个地址已发货', exact: true }).click();

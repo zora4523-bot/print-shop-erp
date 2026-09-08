@@ -139,3 +139,14 @@
 .decision [data-slot='admin-order-decision-panel'] { border: 0; padding: 0; margin: 0; background: transparent; }
 .decision [data-slot='admin-order-decision-panel'] > h3 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .decision [data-slot='admin-order-decision-heading'] { font-size: 16px; }
+
+/* Retain compact approval controls in the full-detail decision column. */
+.decision [data-slot='order-change-charge-fields'] { grid-template-columns: minmax(0, 1fr); }
+.decision [data-slot='order-change-decision-actions'] { flex-direction: row-reverse; flex-wrap: nowrap; }
+.decision [data-slot='order-change-decision-actions'] > button { flex: 1; min-width: 0; }
+.decision button[class~='bg-primary']:not(:disabled):not([aria-disabled='true']) {
+  background: var(--foreground); color: var(--background); border-color: var(--foreground);
+}
+.decision button[class~='text-destructive']:not(:disabled):not([aria-disabled='true']) {
+  background: var(--primary); color: var(--primary-foreground); border-color: var(--primary);
+}

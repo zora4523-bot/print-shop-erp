@@ -590,7 +590,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 </DisabledReason>
               ) : (
                 <Link
-                  href={`/orders#wo=${encodeURIComponent(order.orderNo)}`}
+                  href="#detail-delivery-records"
                   className={buttonVariants({ size: 'sm' })}
                 >
                   前往结算
@@ -1344,11 +1344,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 request.status === OrderChangeRequestStatus.PENDING ? (
                   <div className="mt-3 border-t pt-3">
                     <Link
-                      href={`/orders?queue=all&signal=pending-change#wo=${encodeURIComponent(order.orderNo)}`}
+                      href="#order-detail-actions"
                       prefetch={false}
                       className={buttonVariants({ size: 'sm' })}
                     >
-                      前往新版工单工作台审核
+                      前往工单处理区审核
                     </Link>
                   </div>
                 ) : null}

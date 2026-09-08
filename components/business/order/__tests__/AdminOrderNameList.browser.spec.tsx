@@ -6,9 +6,8 @@ import type { ComponentProps } from 'react';
 import { OrderStatus } from '@/generated/prisma/enums';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import '@/app/globals.css';
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
-}));
+const { router } = vi.hoisted(() => ({ router: { refresh: vi.fn(), push: vi.fn(), replace: vi.fn() } }));
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 vi.mock('@/actions/order-workspace', () => ({
   setOrderStarredAction: vi.fn(),
 }));
@@ -103,7 +102,7 @@ describe('admin name-first order list', () => {
       });
     }
   }
-  it('retains stable record ids for duplicate names, stars, selection and processing drawer', async () => {
+  it('retains stable record ids for duplicate names, stars, selection and full detail navigation', async () => {
     await page.viewport(1280, 800);
     vi.mocked(setOrderStarredAction).mockResolvedValue({ status: 'success', orderId: 'order-2', starred: false });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ message: '暂时无法加载' }) }));
@@ -116,9 +115,13 @@ describe('admin name-first order list', () => {
     second.querySelector<HTMLButtonElement>('button[aria-pressed]')!.click();
     await expect.poll(() => vi.mocked(setOrderStarredAction).mock.calls).toEqual([[{ orderId: 'order-2', starred: false }]]);
     expect(host.textContent).not.toContain('OTHER-ID');
-    await page.getByRole('button', { name: '查看处理', exact: true }).nth(1).click();
-    await expect.poll(() => location.hash).toContain('wo=OTHER-ID');
-    await expect.element(page.getByRole('dialog')).toBeVisible();
+    expect(router.push).not.toHaveBeenCalled();
+    expect(second.querySelector('a[href="/orders/order-2"]')).not.toBeNull();
+    expect(page.getByRole('link', { name: '查看处理', exact: true }).nth(1).element().getAttribute('href')).toBe('/orders/order-2');
+    second.click();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith('/orders/order-2');
+    expect(fetch).not.toHaveBeenCalled();
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
   });
 });
 function row(): AdminOrderWorkspaceRow {

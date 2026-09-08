@@ -2,13 +2,12 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commands, page, userEvent } from 'vitest/browser';
+import { commands, page } from 'vitest/browser';
 import { OrderStatus } from '@/generated/prisma/enums';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import type { OrderChangePricingPreview } from '@/lib/order/change-request';
-import { Sheet, SheetTrigger } from '@/components/ui/sheet';
-import { Button } from '@/components/ui/button';
 import '@/app/globals.css';
+import styles from '../AdminOrderDetailView.module.css';
 
 const { previewAction } = vi.hoisted(() => ({ previewAction: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -41,7 +40,7 @@ vi.mock('@/generated/prisma/client', async () => ({
 }));
 vi.mock('@/lib/db', () => ({ db: {} }));
 
-import { AdminOrderDrawer } from '../AdminOrderDrawer';
+import { AdminOrderDecisionPanel } from '../AdminOrderDecisionPanel';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -62,19 +61,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function openDrawer() {
-  flushSync(() => root.render(
-    <Sheet>
-      <SheetTrigger render={<Button />}>打开工单</SheetTrigger>
-      <AdminOrderDrawer order={orderFixture()} />
-    </Sheet>,
-  ));
-  await page.getByRole('button', { name: '打开工单', exact: true }).click();
-  await expect.element(page.getByRole('dialog')).toBeVisible();
+async function openDecision() {
+  flushSync(() => root.render(<section data-order-decision="" className={`${styles.decision} mx-auto max-w-lg`}><AdminOrderDecisionPanel order={orderFixture()} compact /></section>));
   await expect.element(page.getByRole('button', { name: '刷新最新计价预览', exact: true })).toBeVisible();
-  await expect.poll(() => document.querySelector('[data-order-drawer]')?.hasAttribute('data-starting-style')).toBe(false);
-  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-  await Promise.all(requiredElement('[data-order-drawer]').getAnimations().map((animation) => animation.finished));
 }
 
 function requiredElement(selector: string): HTMLElement {
@@ -87,8 +76,6 @@ function assertControlsAndOverflow(drawer: HTMLElement, viewportWidth: number) {
   const drawerRect = drawer.getBoundingClientRect();
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(viewportWidth);
   expect(drawer.scrollWidth).toBeLessThanOrEqual(drawer.clientWidth);
-  const body = requiredElement('[data-slot="admin-order-drawer-body"]');
-  expect(body.scrollWidth).toBeLessThanOrEqual(body.clientWidth);
   for (const element of drawer.querySelectorAll<HTMLElement>('a[href], button, summary, input:not([type="hidden"]):not([aria-hidden="true"]), select, textarea, [role="checkbox"]')) {
     const rect = element.getBoundingClientRect();
     if (!rect.width || !rect.height || !element.checkVisibility()) continue;
@@ -105,39 +92,15 @@ const viewports = [
   [1024, 768], [1280, 800], [1920, 1080],
 ] as const;
 
-describe('admin order drawer reference layout', () => {
+describe('admin order detail decision layout', () => {
   for (const [width, height] of viewports) {
     for (const theme of ['light', 'dark']) {
       it(`${width}×${height} ${theme}: width, section spacing, controls and accessibility`, async () => {
         await page.viewport(width, height);
         document.documentElement.classList.toggle('dark', theme === 'dark');
-        await openDrawer();
+        await openDecision();
 
-        const drawer = requiredElement('[data-order-drawer]');
-        expect(drawer.dataset.slot).toBe('sheet-content');
-        const header = requiredElement('[data-order-drawer] [data-slot="sheet-header"]');
-        const title = requiredElement('[data-order-drawer] [data-slot="sheet-title"]');
-        const body = requiredElement('[data-slot="admin-order-drawer-body"]');
-        const actions = requiredElement('[data-slot="admin-order-drawer-actions"]');
-        const decision = requiredElement('[data-slot="admin-order-decision-panel"]');
-        const rect = drawer.getBoundingClientRect();
-
-        expect(rect.width).toBeCloseTo(Math.min(480, width), 1);
-        expect(rect.left).toBeGreaterThanOrEqual(0);
-        expect(rect.right).toBeCloseTo(width, 1);
-        expect(rect.height).toBeLessThanOrEqual(height);
-        expect(getComputedStyle(title).fontSize).toBe('16px');
-        expect(getComputedStyle(title).fontWeight).toBe('800');
-        for (const element of [header, body]) {
-          expect(getComputedStyle(element).paddingLeft).toBe('20px');
-          expect(getComputedStyle(element).paddingRight).toBe('20px');
-        }
-        expect(body.contains(actions)).toBe(true);
-        expect(actions.closest('[data-slot="admin-order-drawer-section"]')).toBe(body.lastElementChild);
-        expect(decision.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(['fixed', 'sticky']).not.toContain(getComputedStyle(actions).position);
-        expect(drawer.querySelector('[data-slot="sheet-footer"]')).toBeNull();
-        expect(body.querySelectorAll('[data-slot="admin-order-drawer-section"], [data-slot="admin-order-decision-panel"]').length).toBeGreaterThanOrEqual(2);
+        const drawer = requiredElement('[data-order-decision]');
         assertControlsAndOverflow(drawer, width);
         const amount = requiredElement('input[aria-label="第 1 票运费金额"]');
         const basis = requiredElement('textarea[aria-label="第 1 票运费依据"]');
@@ -148,28 +111,10 @@ describe('admin order drawer reference layout', () => {
         expect(basisRect.top).toBeGreaterThan(amountRect.bottom);
         expect(basisRect.left).toBeCloseTo(amountRect.left, 1);
         expect(basisRect.width).toBeCloseTo(amountRect.width, 1);
-        expect(await commands.checkShellAccessibility('[data-order-drawer]')).toEqual([]);
+        expect(await commands.checkShellAccessibility('[data-order-decision]')).toEqual([]);
       });
     }
   }
-
-  it('auxiliary actions scroll with the body and stay after the decision content', async () => {
-    await page.viewport(1280, 800);
-    previewAction.mockResolvedValue({ status: 'success', preview: pricingPreview(12) });
-    await openDrawer();
-    const body = requiredElement('[data-slot="admin-order-drawer-body"]');
-    const actions = requiredElement('[data-slot="admin-order-drawer-actions"]');
-    const header = requiredElement('[data-order-drawer] [data-slot="sheet-header"]');
-    body.scrollTop = 0;
-    const beforeTop = actions.getBoundingClientRect().top;
-    const headerTop = header.getBoundingClientRect().top;
-    expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
-    body.scrollTop = body.scrollHeight;
-    await expect.poll(() => body.scrollTop).toBeGreaterThan(0);
-    expect(actions.getBoundingClientRect().top).toBeLessThan(beforeTop);
-    expect(actions.getBoundingClientRect().bottom).toBeLessThanOrEqual(body.getBoundingClientRect().bottom);
-    expect(header.getBoundingClientRect().top).toBe(headerTop);
-  });
 
   it('enabled rejection stays red on the left and approval stays dark on the right', async () => {
     await page.viewport(1280, 800);
@@ -177,7 +122,7 @@ describe('admin order drawer reference layout', () => {
       status: 'success',
       preview: { ...pricingPreview(), complete: true, newTotal: '1200.00', delta: '200.00', pendingCharges: [] },
     });
-    await openDrawer();
+    await openDecision();
     await page.getByText('填写拒绝原因 / 审核备注', { exact: true }).click();
     await page.getByLabelText('审核备注 / 拒绝原因', { exact: false }).fill('请核对客户确认的规格。');
     const approve = page.getByRole('button', { name: '批准变更', exact: true });
@@ -185,28 +130,12 @@ describe('admin order drawer reference layout', () => {
     await expect.element(approve).toBeEnabled();
     await expect.element(reject).toBeEnabled();
     expect(reject.element().getBoundingClientRect().right).toBeLessThan(approve.element().getBoundingClientRect().left);
-    expect(getComputedStyle(reject.element()).backgroundColor).toBe('rgb(168, 18, 26)');
-    expect(getComputedStyle(approve.element()).backgroundColor).toBe('rgb(23, 24, 28)');
-    expect(await commands.checkShellAccessibility('[data-order-drawer]')).toEqual([]);
+    expect(getComputedStyle(reject.element()).backgroundColor).toBe(getComputedStyle(reject.element()).getPropertyValue('--primary').trim());
+    expect(getComputedStyle(approve.element()).backgroundColor).toBe(getComputedStyle(approve.element()).getPropertyValue('--foreground').trim());
+    expect(await commands.checkShellAccessibility('[data-order-decision]')).toEqual([]);
   });
 
-  it.each(['close', 'escape', 'backdrop'] as const)('%s closes the drawer and restores trigger focus', async (method) => {
-    await page.viewport(1280, 800);
-    await openDrawer();
-    const drawer = requiredElement('[data-order-drawer]');
-    await expect.poll(() => drawer.contains(document.activeElement)).toBe(true);
-    await userEvent.tab();
-    expect(drawer.contains(document.activeElement)).toBe(true);
-    if (method === 'close') {
-      await page.getByRole('button', { name: '关闭', exact: true }).click();
-    } else if (method === 'escape') {
-      await userEvent.keyboard('{Escape}');
-    } else {
-      await userEvent.click(requiredElement('[data-slot="sheet-overlay"]'), { position: { x: 10, y: 10 } });
-    }
-    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
-    await expect.element(page.getByRole('button', { name: '打开工单', exact: true })).toHaveFocus();
-  });
+
 });
 
 function pricingPreview(itemCount = 2): OrderChangePricingPreview {

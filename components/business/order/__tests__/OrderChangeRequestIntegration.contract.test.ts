@@ -54,7 +54,7 @@ describe('工单变更申请 UI 集成契约', () => {
 
   it('管理员待审记录跳转新版工作台，并由工作台挂载修改计价审核', () => {
     expect(detailSource).toContain(
-      '/orders?queue=all&signal=pending-change#wo=${encodeURIComponent(order.orderNo)}',
+      '#order-detail-actions',
     );
     expect(detailSource).not.toContain('OrderChangeReviewForm');
     expect(adminDecisionSource).toContain("=== 'MODIFY'");

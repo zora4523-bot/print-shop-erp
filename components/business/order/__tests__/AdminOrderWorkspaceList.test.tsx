@@ -43,7 +43,7 @@ import {
   parseStrictNonNegativeInteger,
   parseStrictPositiveIntegerList,
 } from '../AdminOrderDecisionPanel';
-import { shouldShowOrderEditLink } from '../AdminOrderDrawer';
+import { isOrderEditable } from '@/lib/order/editable-fields';
 import { resultMessage } from '../AdminOrderBatchActions';
 
 describe('AdminOrderWorkspaceList', () => {
@@ -154,7 +154,7 @@ describe('AdminOrderWorkspaceList', () => {
       />,
     );
 
-    expect(html).toContain('>查看处理</button>');
+    expect(html).toContain('>查看处理</a>');
   });
 
   it('shows rejected incomplete fees as excluded without exposing pricing actions', () => {
@@ -186,7 +186,7 @@ describe('AdminOrderWorkspaceList', () => {
 
     expect(listHtml).toContain('金额不完整');
     expect(listHtml).toContain('未计入合计');
-    expect(listHtml).toContain('>详情</button>');
+    expect(listHtml).toContain('>详情</a>');
     expect(listHtml).not.toContain('查看待核价');
     expect(actionsHtml).not.toContain('录入人工核价');
   });
@@ -320,7 +320,7 @@ describe('AdminOrderDecisionPanel change request integration', () => {
   });
 });
 
-describe('AdminOrderDrawer edit entry', () => {
+describe('order edit eligibility', () => {
   it('hides the dead edit route for every non-editable terminal state', () => {
     for (const status of [
       OrderStatus.COMPLETED,
@@ -329,10 +329,10 @@ describe('AdminOrderDrawer edit entry', () => {
       OrderStatus.FINISHED,
       OrderStatus.CANCELLED,
     ]) {
-      expect(shouldShowOrderEditLink(status), status).toBe(false);
+      expect(isOrderEditable(status), status).toBe(false);
     }
-    expect(shouldShowOrderEditLink(OrderStatus.SUBMITTED)).toBe(true);
-    expect(shouldShowOrderEditLink(OrderStatus.IN_PRODUCTION)).toBe(true);
+    expect(isOrderEditable(OrderStatus.SUBMITTED)).toBe(true);
+    expect(isOrderEditable(OrderStatus.IN_PRODUCTION)).toBe(true);
   });
 });
 

@@ -208,7 +208,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         </div>
 
         <aside className={styles.aside} aria-label="工单概览与操作">
-          <section className={cn(styles.card, styles.decision)} aria-label="当前待办"><div className={styles.eyebrow}>当前待办</div>
+          <section id="order-detail-actions" tabIndex={-1} className={cn(styles.card, styles.decision)} aria-label="当前待办"><div className={styles.eyebrow}>当前待办</div>
             {decision ?? <p>{ORDER_STATUS_REGISTRY[model.status].label} · 暂无待办</p>}
           </section>
           <section id="order-detail-overview" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-overview' && styles.highlight)}><h2 className={styles.eyebrow}>概览</h2><p className={styles.orderName}>{model.name}</p>

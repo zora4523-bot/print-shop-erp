@@ -104,7 +104,7 @@ test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍�
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
 });
 
-test('管理端抽屉内核价失败保留表单与列表，且不会改写工单', async ({ page }) => {
+test('管理端旧链接进入详情后核价失败保留表单，且不会改写工单', async ({ page }) => {
   test.setTimeout(90_000);
   const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
   const seeded = await seedDashboardSnapshot({ salesUserId });
@@ -114,7 +114,8 @@ test('管理端抽屉内核价失败保留表单与列表，且不会改写工�
     username: ADMIN_USERNAME,
     password: ADMIN_PASSWORD,
   });
-  const drawer = page.locator('[data-order-drawer]');
+  await expect(page).toHaveURL(`/orders/${seeded.urgentOrderId}`);
+  const drawer = page.locator('[data-testid="admin-order-detail"]');
   await expect(drawer).toBeVisible();
   await drawer.getByRole('button', { name: '录入人工核价', exact: true }).click();
   const pricing = drawer.locator('[data-slot="order-pricing-review"]');
@@ -125,7 +126,7 @@ test('管理端抽屉内核价失败保留表单与列表，且不会改写工�
   await confirm.getByRole('button', { name: '确认工厂核价', exact: true }).click();
   await expect(pricing.getByRole('alert')).toContainText('核价未完成：');
   await expect(trigger).toBeEnabled();
-  await expect(page).toHaveURL(/\/orders\?queue=all#wo=/);
+  await expect(page).toHaveURL(`/orders/${seeded.urgentOrderId}`);
   expect(await readPricingState(seeded.urgentOrderId)).toEqual(before);
   await expectNoNextErrorOverlay(page);
 });

@@ -154,7 +154,7 @@ export function SalesOrderDetailView({
 
           <div className="flex min-w-0 flex-wrap items-start gap-2 lg:justify-end">
             <Link
-              href={`/orders#wo=${encodeURIComponent(order.orderNo)}`}
+              href="/orders"
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               返回工单列表

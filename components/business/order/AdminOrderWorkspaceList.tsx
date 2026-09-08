@@ -3,7 +3,6 @@
 /* eslint-disable @next/next/no-img-element */
 
 import {
-  useCallback,
   useRef,
   useState,
   useTransition,
@@ -16,7 +15,6 @@ import { setOrderStarredAction } from '@/actions/order-workspace';
 import { adminOrderDueHint } from '@/lib/order/admin-list-presentation';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Sheet } from '@/components/ui/sheet';
 import { ActionNotice, TableEmptyState } from '@/components/ui-business';
 import { cn } from '@/lib/utils';
 import {
@@ -24,12 +22,8 @@ import {
   OrderListRowSelection,
   OrderListSelectionProvider,
 } from './OrderListBatchSelection';
-import {
-  AdminOrderDrawer,
-  AdminOrderDrawerState,
-  AdminWorkspaceStatusBadge,
-} from './AdminOrderDrawer';
-import { useOrderHashDrawer } from './use-order-hash-drawer';
+import { AdminWorkspaceStatusBadge } from './AdminWorkspaceStatusBadge';
+import { LegacyOrderDetailRedirect } from './LegacyOrderDetailRedirect';
 import { AdminOrderBatchActions } from './AdminOrderBatchActions';
 import { AdminOrderProgress } from './AdminOrderProgress';
 import { AdminOrderBatchResultProvider } from './AdminOrderBatchResultProvider';
@@ -100,16 +94,7 @@ function AdminOrderWorkspaceListInner({
   onFeedback: (feedback: OrderRowFeedback) => void;
   footer?: ReactNode;
 }) {
-  const detailEndpoint = useCallback(
-    (orderNo: string) =>
-      `/api/orders/admin/${encodeURIComponent(orderNo)}`,
-    [],
-  );
-  const drawer = useOrderHashDrawer({
-    pageOrders: orders,
-    detailEndpoint,
-    alwaysFetchDetail: true,
-  });
+  const router = useRouter();
 
   return (
     <section
@@ -141,7 +126,7 @@ function AdminOrderWorkspaceListInner({
                 customerFilterHref={
                   customerFilterHrefs[order.id] ?? '/orders'
                 }
-                onOpen={() => drawer.showOrder(order.orderNo)}
+                onOpen={() => router.push(`/orders/${encodeURIComponent(order.id)}`)}
                 onFeedback={onFeedback}
               />
             ))}
@@ -160,32 +145,7 @@ function AdminOrderWorkspaceListInner({
       )}
       {footer ? <div className="border-t px-4 py-3">{footer}</div> : null}
 
-      <Sheet
-        open={Boolean(drawer.openOrderNo)}
-        onOpenChange={(open) => {
-          if (!open) drawer.closeOrder();
-        }}
-      >
-        {drawer.error && drawer.openOrderNo ? (
-          <AdminOrderDrawerState
-            orderNo={drawer.openOrderNo}
-            loading={false}
-            error={drawer.error}
-            onRetry={drawer.retryOrder}
-            onClose={drawer.closeOrder}
-          />
-        ) : drawer.openOrder ? (
-          <AdminOrderDrawer order={drawer.openOrder} />
-        ) : drawer.openOrderNo ? (
-          <AdminOrderDrawerState
-            orderNo={drawer.openOrderNo}
-            loading={drawer.loading}
-            error={drawer.error}
-            onRetry={drawer.retryOrder}
-            onClose={drawer.closeOrder}
-          />
-        ) : null}
-      </Sheet>
+      <LegacyOrderDetailRedirect orders={orders} />
     </section>
   );
 }
@@ -206,6 +166,11 @@ function AdminOrderRow({
   return (
     <li
       data-order-id={order.id}
+      onClick={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest('button, a, input, [role="checkbox"]')) return;
+        onOpen();
+      }}
       className={cn(
         'grid min-w-0 bg-card grid-cols-[2.75rem_3rem_minmax(0,1fr)_auto] gap-3 px-3 py-3 transition-colors hover:bg-muted/20 2xl:grid-cols-[2.75rem_3rem_minmax(15rem,1.4fr)_minmax(10rem,1fr)_7rem_8rem_8rem_auto] 2xl:items-center',
         'border border-border hover:border-muted-foreground/50 hover:bg-card has-[[data-batch-checkbox][aria-checked=true]]:bg-muted/50',
@@ -306,15 +271,13 @@ function AdminOrderRow({
             编辑草稿
           </Link>
         ) : (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className={rowActionClassName(order)}
-            onClick={onOpen}
+          <Link
+            href={`/orders/${encodeURIComponent(order.id)}`}
+            prefetch={false}
+            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), rowActionClassName(order))}
           >
             {rowActionLabel(order)}
-          </Button>
+          </Link>
         )}
       </div>
     </li>
