@@ -28,7 +28,7 @@ export function purchaseReceiptCancelImpactItems({
       (item) =>
         `反向出库：${item.materialName}（${item.materialCode}）${item.quantity} ${item.unit}。`,
     ),
-    `采购单 ${purchaseNo} 的已收货数量会同步扣回，并按剩余已收数量重新计算采购单状态。`,
+    `采购单 ${purchaseNo} 的已收货数量将扣回，采购单状态随剩余已收数量更新。`,
     '系统会写入与原收货对应的反向库存流水；若库存不足以扣回，整个操作会失败。',
     '反向出库若让库存跌破安全线，可能触发库存预警通知。',
   ];
@@ -86,7 +86,7 @@ export function CancelPurchaseReceiptButton({
           receiptNo,
           purchaseNo,
           items,
-        })} confirmText="确认取消并反向出库" />
+        })} confirmText="取消并反向出库" />
       </ConfirmActionController>
       {error ? (
         <ActionNotice

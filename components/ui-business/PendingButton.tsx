@@ -144,7 +144,7 @@ export function PendingButton({
         onConfirm={() => {
           if (pendingNavigationHref) window.location.assign(pendingNavigationHref);
         }}>
-        <ConfirmActionDialog action="当前操作仍在提交，仍要离开？" changes={[]} consequences={[
+        <ConfirmActionDialog action="当前操作仍在提交，仍要离开" changes={[]} consequences={[
           '操作可能已经到达服务器，返回后请先核对结果。',
           '在确认结果前不要重复提交同一操作。',
         ]} confirmText="仍要离开" />

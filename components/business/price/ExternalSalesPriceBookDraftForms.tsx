@@ -918,9 +918,8 @@ export function DiscardCustomerPriceBookDraftForm({
           </Button>
         }
         cancelLabel="返回检查">
-        <ConfirmActionDialog action="放弃这份价目草稿？" changes={[]} consequences={[
+        <ConfirmActionDialog action="放弃这份价目草稿" changes={[]} consequences={[
           '草稿及其中所有未发布修改将永久删除。',
-          '当前已发布版本、历史版本与既有工单不受影响。',
         ]} confirmText="确认放弃草稿" />
       </ConfirmActionController>
       <MutationFeedback
@@ -974,15 +973,13 @@ export function CancelScheduledCustomerPriceBookForm({
         }
         cancelLabel="保留计划">
         <ConfirmActionDialog action={`取消第 ${version} 版的生效计划？`} changes={[]} consequences={[
-          '计划版本和全部规则保留作为审计证据。',
           '前一版价格将延续覆盖原计划时段。',
-          '已建工单和历史价格快照不变。',
-        ]} confirmText="填写原因并取消计划" />
+        ]} confirmText="取消计划" />
       </ConfirmActionController>
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}
-        successMessage="计划版本已取消，版本与规则证据已保留。"
+        successMessage="生效计划已取消。"
       />
     </form>
   );
@@ -1006,6 +1003,7 @@ export function RescheduleCustomerPriceBookForm({
   );
   const formId = useId();
   const inputId = useId();
+  const [effectiveFrom, setEffectiveFrom] = useState(defaultEffectiveFrom);
   const errorId = `${inputId}-error`;
   const errors = mutationFieldErrors(state);
 
@@ -1031,7 +1029,8 @@ export function RescheduleCustomerPriceBookForm({
           name="effectiveFrom"
           type="datetime-local"
           className="min-h-11"
-          defaultValue={defaultEffectiveFrom}
+          value={effectiveFrom}
+          onChange={(event) => setEffectiveFrom(event.target.value)}
           required
           aria-invalid={Boolean(errors.effectiveFrom?.length)}
           aria-describedby={errors.effectiveFrom?.length ? errorId : undefined}
@@ -1049,11 +1048,9 @@ export function RescheduleCustomerPriceBookForm({
           </Button>
         }
         cancelLabel="保持原时间">
-        <ConfirmActionDialog action={`调整第 ${version} 版的生效时间？`} changes={[]} consequences={[
-          '价目版本、规则、版本号与哈希保持不变。',
+        <ConfirmActionDialog action={`调整第 ${version} 版生效时间`} changes={[{label: "生效时间", old: defaultEffectiveFrom.replace("T", " "), new: effectiveFrom.replace("T", " ")}]} consequences={[
           '新生效时间之后的新建或重新报价工单受影响。',
-          '已建工单的历史快照不会重算。',
-        ]} confirmText="填写原因并确认改期" />
+        ]} confirmText="确认改期" />
       </ConfirmActionController>
       <MutationFeedback
         state={state}

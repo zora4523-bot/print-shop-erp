@@ -28,11 +28,11 @@ export function LegacyNotificationChannels({
     >
       <DisclosureSummary className="gap-2">
         <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
-        旧版通知记录（{channels.length}）· 只读
+        旧版通知记录（{channels.length}）· 已归档
       </DisclosureSummary>
       <div className="space-y-3 pb-4 text-sm">
         <p className="text-muted-foreground">
-          Webhook 不再支持创建、编辑、测试或新增绑定。存量投递和历史日志仍保留；已有路由请改绑到智能机器人，不能直接更换旧目标的传输方式。
+          如需继续接收通知，请新建通知目标并调整推送规则。
         </p>
         <ul className="space-y-2">
           {channels.map((channel) => (

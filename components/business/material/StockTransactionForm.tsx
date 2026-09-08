@@ -50,7 +50,7 @@ export function stockTransactionImpactItems(
     `数量：${preview.quantity} ${preview.unit}`,
     `单位成本：${preview.unitCost || '未填写'}`,
     `原因：${preview.reasonLabel}`,
-    '系统会写入一条库存流水，并同步更新该库位与物料汇总库存；提交时会再次校验库位和库存。',
+    '该库位库存将按本次数量增减。',
   ];
 }
 

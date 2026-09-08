@@ -76,7 +76,7 @@ export function DeleteChannelButton({
         <ConfirmActionDialog action={`删除“${channelName}”？`} changes={[]} consequences={[
           '该群配置会从系统中永久删除。',
           '存在规则或历史投递记录时无法删除。',
-        ]} confirmText="确认删除" />
+        ]} confirmText="删除" />
       </ConfirmActionController>
       {errorMessage ? (
         <ActionNotice

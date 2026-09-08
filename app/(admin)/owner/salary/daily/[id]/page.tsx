@@ -56,7 +56,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title={`${salary.worker.displayName} · ${formatDateShanghai(salary.date)}`}
-        subtitle="只读核对切换前的任务、计件、保底与调整快照；本页不重算或修改历史财务事实。"
+        subtitle="历史日薪明细"
         actions={
           <div className="flex gap-2">
             <Link

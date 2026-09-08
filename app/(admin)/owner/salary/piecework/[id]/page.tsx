@@ -59,7 +59,7 @@ export default async function PieceworkSettlementDetailPage({
     <div className="space-y-6">
       <PageHeader
         title={`${settlement.reporter.displayName} · ${workDate}`}
-        subtitle="该页只解析已锁定的 ProductionReport 与工价版本快照，不执行重算。"
+        subtitle="已结算报工明细"
         actions={
           <div className="flex flex-wrap gap-2">
             <Link

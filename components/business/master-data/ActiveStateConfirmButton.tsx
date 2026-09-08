@@ -50,9 +50,9 @@ export function ActiveStateConfirmButton({
       }
       formId={formId}
       disabled={pending}>
-      <ConfirmActionDialog action={`确认${actionLabel}？`} changes={[]} consequences={
+      <ConfirmActionDialog action={actionLabel} changes={[{label: "状态", old: currentlyActive ? "已启用" : "已停用", new: currentlyActive ? "已停用" : "已启用"}]} consequences={
         currentlyActive ? deactivateImpactItems : activateImpactItems
-      } confirmText={`确认${actionLabel}`} />
+      } confirmText={actionLabel} />
     </ConfirmActionController>
   );
 }

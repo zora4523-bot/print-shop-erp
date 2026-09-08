@@ -82,7 +82,7 @@ export function CancelPurchaseOrderButton({
           purchaseNo,
           supplierName,
           items,
-        })} confirmText="确认取消采购单" />
+        })} confirmText="取消采购单" />
       </ConfirmActionController>
       {error ? (
         <ActionNotice

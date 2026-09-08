@@ -68,7 +68,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="历史开机师傅日薪档案"
-        subtitle="只读展示切换前 DailyWorkerSalary 与任务快照；不重算、不修改、不与新工序结算叠加。"
+        subtitle="历史日薪记录"
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -83,7 +83,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
               className={buttonVariants({ variant: 'outline' })}
             >
               <Download className="mr-2 size-4" />
-              导出历史快照
+              导出历史记录
             </Link>
           </div>
         }
@@ -97,7 +97,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
           tone="neutral"
         />
         <StatCard
-          label="快照实发合计"
+          label="历史实发合计"
           value={`¥ ${totalActual}`}
           icon={Calculator}
           tone="neutral"
@@ -120,7 +120,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
       {rows.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title={`${selectedDate} 暂无历史日薪快照`}
+          title={`${selectedDate} 暂无历史日薪记录`}
           description="该页不再生成或重算日薪。"
         />
       ) : (
@@ -135,7 +135,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
               <tr>
                 <th className="px-4 py-2 text-left">日期</th>
                 <th className="px-4 py-2 text-left">师傅</th>
-                <th className="px-4 py-2 text-left">快照机型</th>
+                <th className="px-4 py-2 text-left">机型</th>
                 <th className="px-4 py-2 text-right">计件合计</th>
                 <th className="px-4 py-2 text-right">保底</th>
                 <th className="px-4 py-2 text-right">调整</th>
@@ -194,7 +194,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                         variant: 'outline',
                       })}
                     >
-                      核对快照
+                      查看明细
                     </Link>
                   </td>
                 </tr>

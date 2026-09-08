@@ -76,9 +76,8 @@ export function UnknownNotificationActions({
             </Button>
           }
           onConfirm={() => setActiveDecision('delivered')}>
-          <ConfirmActionDialog action="确认该消息已送达？" changes={[]} consequences={[
-            '投递状态会从“待人工核对”改为“成功”。',
-            '该决策会记录操作人和时间，且不再重发该条消息。',
+          <ConfirmActionDialog action="确认该消息已送达" changes={[]} consequences={[
+            '该消息不再重发。',
           ]} confirmText="确认已送达" />
         </ConfirmActionController>
 
@@ -92,9 +91,9 @@ export function UnknownNotificationActions({
               </Button>
             }
             onConfirm={() => setActiveDecision('retry')}>
-            <ConfirmActionDialog action="确认未送达并安全重发？" changes={[]} consequences={[
+            <ConfirmActionDialog action="确认未送达并安全重发" changes={[]} consequences={[
               '使用原消息内容和原投递目标，不套用当前规则。',
-              '同一任务的所有结果不明项核对完成后，才会重新入队。',
+              '其余结果不明的投递核对完成后重发。',
             ]} confirmText="确认未送达并重发" />
           </ConfirmActionController>
         ) : (
@@ -120,10 +119,9 @@ export function UnknownNotificationActions({
           reasonLabel="忽略理由"
           reasonPlaceholder="例如：业务已通过电话确认，无需再补发"
           onConfirm={() => setActiveDecision('ignored')}>
-          <ConfirmActionDialog action="忽略该条结果不明的消息？" changes={[]} consequences={[
-            '投递状态会记为“失败”并移出待人工处理队列。',
-            '系统会保留操作人、时间、理由、变更前后状态和原消息记录。',
-          ]} confirmText="确认忽略" />
+          <ConfirmActionDialog action="忽略该条结果不明的消息" changes={[]} consequences={[
+            '该消息移出待处理列表。',
+          ]} confirmText="忽略" />
         </ConfirmActionController>
       </div>
 

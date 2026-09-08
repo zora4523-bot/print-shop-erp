@@ -59,11 +59,9 @@ export function LockPieceworkSettlementForm({
         }
         formId={formId}
         disabled={pending}>
-        <ConfirmActionDialog action={`锁定 ${reporterName} ${workDate} 的计件结算？`} changes={[]} consequences={[
-          `${reporterName} · ${workDate} · ${reportCount} 条报工 · ¥ ${amount}。`,
-          '只纳入尚未结算的 ProductionReport，不读取或叠加旧 ProductionTask 工资。',
+        <ConfirmActionDialog action={`结算 ${reporterName} ${workDate} 的计件工资`} changes={[{label: `${reportCount} 条报工`, old: "未结算", new: `¥ ${amount}`}]} consequences={[
           '锁定后不能删除或重建明细；更正须通过追加冲正报工处理。',
-        ]} confirmText="确认锁定" />
+        ]} confirmText="锁定" />
       </ConfirmActionController>
       {error ? (
         <ActionNotice tone="error" title="锁定失败" description={error} />
@@ -102,8 +100,8 @@ export function LockPieceworkSettlementDayForm({
         formId={formId}
         disabled={pending || candidateCount === 0}>
         <ConfirmActionDialog action={`锁定 ${workDate} 的全部待结算报工？`} changes={[]} consequences={[
-          `本次最多产生 ${candidateCount} 条按人、按日的不可变结算。`,
-          '金额直接汇总报工时已锁定的工价快照。',
+          `结算 ${candidateCount} 人的当日报工，结算明细不可修改。`,
+          '结算金额以各条报工金额为准。',
         ]} confirmText="确认批量锁定" />
       </ConfirmActionController>
       {error ? (
@@ -146,10 +144,9 @@ export function MarkPieceworkSettlementPaidForm({
         }
         formId={formId}
         disabled={pending}>
-        <ConfirmActionDialog action={`确认 ${reporterName} 的这笔计件工资已发？`} changes={[]} consequences={[
-          `${reporterName} · ${workDate} · ¥ ${amount}。`,
-          '已发放结算受数据库不可变约束保护，不提供撤销或覆盖入口。',
-        ]} confirmText="确认标记已发" />
+        <ConfirmActionDialog action={`标记 ${reporterName} ${workDate} 的工资已发`} changes={[{label: `¥ ${amount}`, old: "未发放", new: "已发放"}]} consequences={[
+          '发放记录不能撤销。',
+        ]} confirmText="标记已发" />
       </ConfirmActionController>
       {error ? (
         <ActionNotice tone="error" title="标记发放失败" description={error} />

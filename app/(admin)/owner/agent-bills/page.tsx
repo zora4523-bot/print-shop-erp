@@ -72,7 +72,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
     <div className="min-w-0 space-y-6">
       <PageHeader
         title="代理商月度账单"
-        subtitle="仅按 settledAt 上海日历月归集已结算的外部销售收费单；确认后永久冻结。"
+        subtitle="按结算月份归集外部销售工单。"
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -99,7 +99,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateAgentMonthlyBillsForm defaultPeriod={previousShanghaiMonth()} />
         <p className="mt-2 text-xs text-muted-foreground">
-          生成只接受已结束月份；重复执行会幂等同步 DRAFT，不会创建补充账单。
+          仅可选择已结束的月份。
         </p>
       </section>
 
@@ -156,7 +156,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
           href="/owner/bills/archive"
           className={buttonVariants({ size: 'sm', variant: 'ghost' })}
         >
-          查看 legacy 只读归档
+          历史账单
         </Link>
       </form>
 
@@ -180,7 +180,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         <EmptyState
           icon={Inbox}
           title="当前筛选无 v2 账单"
-          description="可在上方生成已结束月份的 DRAFT。"
+          description="请选择已结束的月份生成账单。"
         />
       ) : (
         <TableScrollArea
@@ -191,7 +191,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">账期</th>
-                <th className="px-4 py-2 text-left">代理商快照</th>
+                <th className="px-4 py-2 text-left">外部销售</th>
                 <th className="px-4 py-2 text-right">工单</th>
                 <th className="px-4 py-2 text-right">成员小计</th>
                 <th className="px-4 py-2 text-right">负项</th>

@@ -139,7 +139,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       ) : null}
       <PageHeader
         title="时薪工月结"
-        subtitle="新结算仅汇总清废和厨师；切换前打包月结快照只读展示，不再重算或发放。"
+        subtitle="清废与厨师的时薪月结；历史打包工资见归档记录。"
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
@@ -182,7 +182,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
         <EmptyState
           icon={FileText}
           title={`${selectedMonth} 暂无月结记录`}
-          description="清废与厨师可使用上方重算生成月结；历史打包记录只在已有快照时显示。"
+          description="暂无记录。请选择月份生成清废与厨师的月结。"
         />
       ) : (
         <div
@@ -251,7 +251,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                     <td className="px-4 py-3 text-right">
                       {wt === WorkerType.PACKER ? (
                         <span className="text-xs text-muted-foreground">
-                          历史只读
+                          已归档
                         </span>
                       ) : (
                         <MarkHourlyPaidForm

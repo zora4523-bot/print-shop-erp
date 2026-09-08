@@ -279,7 +279,7 @@ function PricingNumericInput({
         />
       ) : (
         <>
-          <span className="sr-only">{label}，只读：</span>
+          <span className="sr-only">{label}，当前值：</span>
           <span
             id={id}
             data-price-label={label}
@@ -386,7 +386,7 @@ export function CustomerBlankPricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="局部烫金 · 空白封现货单价"
-        basis="元 / 个 · PER_UNIT"
+        basis="元 / 个"
         description={
           <>
             空白封 = 局部烫金的材料价。空格是“— 转人工”显式状态；
@@ -649,13 +649,8 @@ export function CustomerTiersPricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="专版烫金 · 阶梯单价"
-        basis="元 / 个 · PER_UNIT"
-        description={
-          <>
-            只编辑<strong className="text-foreground">上界</strong>，适用范围由相邻档自动推导——
-            手填范围容易产生缝隙或重叠。末档上界锁定为无穷；无起订量，1 个也落进首档。
-          </>
-        }
+        basis="元 / 个"
+        description="上界为正整数，须大于上一档且小于下一档；末档不限。"
         actions={headingActions}
       />
       {statusContent}
@@ -803,7 +798,7 @@ export function CustomerAddsPricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="专版烫金 · 加价"
-        basis="元 / 个 · PER_UNIT"
+        basis="元 / 个"
         description={
           <>
             全部仅作用于专版烫金，叠加到阶梯单价上；基准 160g 艳闪 / 红卡 = 0，

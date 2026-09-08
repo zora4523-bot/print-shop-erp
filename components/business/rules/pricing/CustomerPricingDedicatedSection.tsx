@@ -343,7 +343,7 @@ function buildFormAssembly(
       )
     ) {
       assembly.warnings.add(
-        `${source.purpose === CustomerPriceBookPurpose.LOGISTICS ? '物流' : '加工费'}草稿缺少完整的规则时间戳，本次已降级为只读。`,
+        `${source.purpose === CustomerPriceBookPurpose.LOGISTICS ? '物流' : '加工费'}草稿资料不完整，暂不可编辑。请刷新后重试。`,
       );
       continue;
     }
@@ -785,9 +785,9 @@ function WarningBlocks({
       {shippingPolicyReadOnly ? (
         <Alert variant="info" role="status">
           <Info aria-hidden="true" />
-          <AlertTitle>重量策略当前只读</AlertTitle>
+          <AlertTitle>物流重量参数</AlertTitle>
           <AlertDescription>
-            红包单重与快递数量上限按物流价目版本管理；当前页先只读展示，避免保存价格时覆盖重量规则。
+            红包单重与快递数量上限
           </AlertDescription>
         </Alert>
       ) : null}
@@ -879,7 +879,7 @@ function renderMachine(
   const high = ruleByCode(workspace.rules, 'STOCK_LOCAL_FOIL_GTE_1000_PER_PASS');
   if (!low || !high) {
     assembly.warnings.add(
-      '机烫费的低于跳变点/达到跳变点两条规则不完整，本区已降级为只读。',
+      '机烫计费档位不完整，暂不可编辑。请补齐两档规则。',
     );
   }
   const jumpTargets: FieldTarget[] = [];
@@ -1232,7 +1232,7 @@ function renderShip(
     const safeZone = provinces.length > 0 && Number.isFinite(incrementKilograms) && incrementKilograms > 0;
     if (!safeZone) {
       assembly.warnings.add(
-        '一条中通地区规则缺少可信的省份或续重单位，已降级为只读。',
+        '中通计费省份或续重单位缺失，暂不可编辑。请补齐该地区规则。',
       );
     }
     return {

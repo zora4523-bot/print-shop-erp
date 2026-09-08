@@ -46,7 +46,7 @@ export function purchaseReceiptImpactItems(
     `本次数量：${preview.quantity} ${preview.unit}`,
     `单位成本：${preview.unitCost || '未填写'}`,
     `提交前剩余：${remainingQuantity} ${preview.unit}`,
-    '系统会创建采购收货记录和库存流水，并同步更新采购明细的已收数量；提交时会再次校验剩余数量。',
+    '本次收货数量计入库存和采购单的已收数量。',
   ];
 }
 
@@ -233,9 +233,9 @@ export function PurchaseReceiptForm({
         onConfirm={() => {
           confirmedRef.current = true;
         }}>
-        <ConfirmActionDialog action="确认采购收货过账？" changes={[]} consequences={
+        <ConfirmActionDialog action="确认采购收货过账" changes={[]} consequences={
           preview ? purchaseReceiptImpactItems(preview, remainingQuantity) : []
-        } confirmText="确认收货过账" />
+        } confirmText="收货过账" />
       </ConfirmActionController>
     </form>
   );

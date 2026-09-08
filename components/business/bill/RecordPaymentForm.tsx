@@ -231,9 +231,9 @@ export function RecordPaymentForm({
         onConfirm={() => {
           confirmedRef.current = true;
         }}>
-        <ConfirmActionDialog action="确认录入这笔收款？" changes={[]} consequences={
+        <ConfirmActionDialog action="录入这笔收款" changes={[]} consequences={
           preview ? paymentImpactItems(preview, remainingAmount) : []
-        } confirmText="确认录入付款" />
+        } confirmText="录入付款" />
       </ConfirmActionController>
       {visibleState?.status === 'success' ? (
         <ActionNotice

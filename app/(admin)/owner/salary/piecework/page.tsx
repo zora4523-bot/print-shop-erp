@@ -72,7 +72,7 @@ export default async function PieceworkSettlementPage({
         <ActionNotice
           tone="success"
           title="计件结算已锁定"
-          description={`${sp.locked} 的报工快照已锁定。`}
+          description={`${sp.locked} 的报工已结算。`}
         />
       ) : null}
       {sp.lockedCount !== undefined ? (
@@ -92,7 +92,7 @@ export default async function PieceworkSettlementPage({
 
       <PageHeader
         title="工序计件结算"
-        subtitle="按报工人与上海日历日锁定 ProductionReport 金额；不与历史任务日薪叠加。"
+        subtitle="按员工和日期查看计件工资。"
         actions={
           <div className="flex flex-wrap gap-2">
             <Link

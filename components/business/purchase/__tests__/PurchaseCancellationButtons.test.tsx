@@ -104,7 +104,7 @@ describe('purchase cancellation confirmation contracts', () => {
     expect(impact).toContain('PO20260824-0001');
     expect(impact).toContain('大红油墨（INK-RED）3.50 千克');
     expect(impact).toContain('反向库存流水');
-    expect(impact).toContain('已收货数量会同步扣回');
+    expect(impact).toContain('已收货数量将扣回');
     expect(impact).toContain('可能触发库存预警通知');
   });
 

@@ -111,7 +111,66 @@
 
 ## 第三批：账单、工资、通知与其他模块
 
-待完成。
+已完成。仅调整展示内容与复核结构，账单冻结、收款金额、通知绑定条件和工资结算操作保护不变。
+
+- [第三批] `app/(admin)/owner/agent-bills/[id]/page.tsx:107` — 客户快照 → 客户。
+- [第三批] `app/(admin)/owner/agent-bills/[id]/page.tsx:99` — 仅展示入账时快照；确认后不重算、不覆写。 → 删除与“账单明细”重复的副标题。
+- [第三批] `app/(admin)/owner/agent-bills/[id]/page.tsx:97` — 结算成员快照 → 账单明细。
+- [第三批] `app/(admin)/owner/agent-bills/[id]/page.tsx:58` — 当前为可重新同步的 DRAFT → 草稿。
+- [第三批] `app/(admin)/owner/agent-bills/[id]/page.tsx:38` — 账号快照 → 账单账号。
+- [第三批] `app/(admin)/owner/agent-bills/page.tsx:194` — 代理商快照 → 外部销售。
+- [第三批] `app/(admin)/owner/agent-bills/page.tsx:183` — 可在上方生成已结束月份的 DRAFT。 → 请选择已结束的月份生成账单。。
+- [第三批] `app/(admin)/owner/agent-bills/page.tsx:159` — 查看 legacy 只读归档 → 历史账单。
+- [第三批] `app/(admin)/owner/agent-bills/page.tsx:102` — 生成只接受已结束月份；重复执行会幂等同步 DRAFT，不会创建补充账单。 → 仅可选择已结束的月份。。
+- [第三批] `app/(admin)/owner/agent-bills/page.tsx:75` — 仅按 settledAt 上海日历月归集已结算的外部销售收费单；确认后永久冻结。 → 按结算月份归集外部销售工单。。
+- [第三批] `app/(admin)/owner/bills/archive/[id]/page.tsx:21` — ← Legacy 只读归档 → ← 历史账单。
+- [第三批] `app/(admin)/owner/bills/archive/page.tsx:26` — Legacy 账单只读归档 → 历史账单。
+- [第三批] `app/(admin)/owner/salary/daily/[id]/page.tsx:59` — 只读核对切换前的任务、计件、保底与调整快照；本页不重算或修改历史财务事实。 → 历史日薪明细。
+- [第三批] `app/(admin)/owner/salary/daily/page.tsx:197` — 核对快照 → 查看明细。
+- [第三批] `app/(admin)/owner/salary/daily/page.tsx:138` — 快照机型 → 机型。
+- [第三批] `app/(admin)/owner/salary/daily/page.tsx:123` —  暂无历史日薪快照 →  暂无历史日薪记录。
+- [第三批] `app/(admin)/owner/salary/daily/page.tsx:100` — 快照实发合计 → 历史实发合计。
+- [第三批] `app/(admin)/owner/salary/daily/page.tsx:86` — 导出历史快照 → 导出历史记录。
+- [第三批] `app/(admin)/owner/salary/daily/page.tsx:71` — 只读展示切换前 DailyWorkerSalary 与任务快照；不重算、不修改、不与新工序结算叠加。 → 历史日薪记录。
+- [第三批] `app/(admin)/owner/salary/hourly/page.tsx:254` — 历史只读 → 已归档。
+- [第三批] `app/(admin)/owner/salary/hourly/page.tsx:185` — 清废与厨师可使用上方重算生成月结；历史打包记录只在已有快照时显示。 → 暂无记录。请选择月份生成清废与厨师的月结。。
+- [第三批] `app/(admin)/owner/salary/hourly/page.tsx:142` — 新结算仅汇总清废和厨师；切换前打包月结快照只读展示，不再重算或发放。 → 清废与厨师的时薪月结；历史打包工资见归档记录。。
+- [第三批] `app/(admin)/owner/salary/page.tsx:171` — 切换前已生成的打包时薪快照仍在历史列表中只读可见；新打包报工只进入工序计件结算。 → 历史打包时薪记录。
+- [第三批] `app/(admin)/owner/salary/page.tsx:83` — 快照合计 ¥ → 历史金额合计 ¥。
+- [第三批] `app/(admin)/owner/salary/page.tsx:75` — 仅读展示切换前 DailyWorkerSalary 快照；不与新工序账本合并或重算。 → 历史日薪记录。
+- [第三批] `app/(admin)/owner/salary/piecework/[id]/page.tsx:62` — 该页只解析已锁定的 ProductionReport 与工价版本快照，不执行重算。 → 已结算报工明细。
+- [第三批] `app/(admin)/owner/salary/piecework/page.tsx:75` —  的报工快照已锁定。 →  的报工已结算。。
+- [第三批] `app/(worker)/worker/salary/page.tsx:278` — 切换前已生成的 HourlyWorkerPayroll 只读快照，不与上方新账本合并。 → 历史时薪记录。
+- [第三批] `app/(worker)/worker/salary/page.tsx:186` — 切换前已生成的 DailyWorkerSalary 只读快照，不与上方新账本合并。 → 历史日薪记录。
+- [第三批] `app/(worker)/worker/salary/page.tsx:111` — 新工序报工账本 · 按日锁定，点击日期查看报工和工价快照。 → 按日期查看报工明细。。
+- [第三批] `components/business/agent-monthly-billing/AgentMonthlyBillExportControls.tsx:117` — 使用当前账期、状态和代理商筛选快照生成 XLSX；文件 24 小时后过期。 → 导出当前筛选结果。下载文件保留 24 小时。。
+- [第三批] `components/business/agent-monthly-billing/AgentMonthlyBillForms.tsx:105` — 本次将按服务端锁定总额收款： → 本次收款金额：。
+- [第三批] `components/business/agent-monthly-billing/AgentMonthlyBillForms.tsx:54` — 同步中… → 生成中…。
+- [第三批] `components/business/agent-monthly-billing/AgentMonthlyBillForms.tsx:54` — 生成 / 同步 DRAFT → 生成或更新草稿。
+- [第三批] `components/business/notification/LegacyNotificationChannels.tsx:31` — ）· 只读 → ）· 已归档。
+- [第三批] `components/business/price/ExternalSalesPriceBookDraftForms.tsx:1055` — 已建工单的历史快照不会重算。 → 删除无变化说明，保留实际生效范围。
+- [第三批] `components/business/price/ExternalSalesPriceBookDraftForms.tsx:979` — 已建工单和历史价格快照不变。 → 删除无变化说明，保留实际生效范围。
+- [第三批] `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:1235` — 一条中通地区规则缺少可信的省份或续重单位，已降级为只读。 → 中通计费省份或续重单位缺失，暂不可编辑。请补齐该地区规则。。
+- [第三批] `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:882` — 机烫费的低于跳变点/达到跳变点两条规则不完整，本区已降级为只读。 → 机烫计费档位不完整，暂不可编辑。请补齐两档规则。。
+- [第三批] `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:790` — 红包单重与快递数量上限按物流价目版本管理；当前页先只读展示，避免保存价格时覆盖重量规则。 → 红包单重与快递数量上限。
+- [第三批] `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:788` — 重量策略当前只读 → 物流重量参数。
+- [第三批] `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:346` — 草稿缺少完整的规则时间戳，本次已降级为只读。 → 草稿资料不完整，暂不可编辑。请刷新后重试。。
+- [第三批] `components/business/rules/pricing/CustomerPricingSectionViews.tsx:282` — ，只读： → ，当前值：。
+- [第三批] `components/business/rules/salary/EmployeePayRulesPage.tsx:25` — 新版本按生效时间用于后续工资快照，不回算已结算记录。 → 员工工价与生效日期。
+- [第三批] `components/business/salary/PieceworkSettlementActions.tsx:106` — 金额直接汇总报工时已锁定的工价快照。 → 结算金额以各条报工金额为准。。
+
+- [第三批] `components/business/notification/ChannelForm.tsx:102` — Bot ID / Secret 通道、连接配置导语 → 企业微信群、保存名称后生成绑定码的步骤；隐藏 transport 值及绑定后启用条件不变。
+- [第三批] `components/business/notification/SmartBotBindingPanel.tsx:77` — 连接部署说明与重复预告 → 生成码、在目标群发送、绑定状态；旧码失效只写在重新生成动作旁。
+- [第三批] `components/business/notification/LegacyNotificationChannels.tsx:35` — Webhook 实现与兼容说明 → 新建目标并调整推送规则的恢复步骤。
+- [第三批] `components/business/notification/UnknownNotificationActions.tsx` — 状态机制与审计介绍 → 投递状态旧值 / 新值及是否重发；原权限、重发限制、忽略理由保留。
+- [第三批] `components/business/salary/PieceworkSettlementActions.tsx` — 数据库不可变约束 / 表名 → 报工数量、金额、结算 / 发放状态；不可撤销后果保留。
+- [第三批] `components/business/price/ExternalSalesPriceBookDraftForms.tsx` — 改期时保持哈希等说明 → 原生效时间与拟定生效时间；必填理由、历史版本不可原地编辑、并发保护不变。
+- [第三批] `components/business/material/StockTransactionForm.tsx`、`components/business/purchase/PurchaseReceiptForm.tsx`、`components/business/purchase/CancelPurchaseReceiptButton.tsx` — 写流水 / 再校验机制 → 库存、已收数量的实际增减；原数量校验及事务不变。
+- [第三批] `components/business/rules/pricing/CustomerPricingSectionViews.tsx:650` — 手填产生缝隙的讲解 → 上界正整数与相邻范围条件；删除单价单位旁的 PER_UNIT。
+- [第三批] 共享确认调用的按钮 / 标题删去多余“确认”“填写原因并”和问号；删除、付款等确认保留，理由字段仍由 Controller 执行原必填校验。
+
+验证：隔离候选全量 553 文件、5815 测试，仍为基线的 4 个失败，未新增失败；类型检查及本批 ESLint 通过。通知绑定在 6 个视口完成布局、axe、键盘焦点和未绑定 / 已绑定两态检查。更新的旧测试仅对应展示契约；禁用、隐藏枚举值、绑定目标遮罩及操作参数断言保留。
+
 
 ## 第四批：价格阶梯业务条件
 

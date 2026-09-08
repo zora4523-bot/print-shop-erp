@@ -557,7 +557,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
                   '无冲突的行会更新库位库存并写入盘点流水；实盘数为 0 表示该库位全部盘亏。',
                   '若部分库位的账面数在盘点期间发生变化，那些行不会过账，但其他无冲突行仍可能成功。',
                 ]
-            } confirmText="填写原因并确认过账" />
+            } confirmText="确认过账" />
           </ConfirmActionController>
           {submittedItems.length === 0 ? (
             <p className="mt-2 text-xs text-muted-foreground">

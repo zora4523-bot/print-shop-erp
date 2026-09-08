@@ -72,7 +72,7 @@ export default async function SalaryIndexPage() {
       <section className="space-y-3">
         <h2 className="text-base font-semibold">历史开机师傅日薪档案</h2>
         <p className="text-sm text-muted-foreground">
-          仅读展示切换前 DailyWorkerSalary 快照；不与新工序账本合并或重算。
+          历史日薪记录
         </p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
@@ -80,7 +80,7 @@ export default async function SalaryIndexPage() {
             value={`${s.dailyToday.count} 条`}
             icon={Archive}
             tone="neutral"
-            hint={`快照合计 ¥${s.dailyToday.actualTotal}`}
+            hint={`历史金额合计 ¥${s.dailyToday.actualTotal}`}
           />
           <StatCard
             label="历史累计未发"
@@ -168,7 +168,7 @@ export default async function SalaryIndexPage() {
           </Link>
         </div>
         <p className="text-xs text-muted-foreground">
-          切换前已生成的打包时薪快照仍在历史列表中只读可见；新打包报工只进入工序计件结算。
+          历史打包时薪记录
         </p>
       </section>
     </div>

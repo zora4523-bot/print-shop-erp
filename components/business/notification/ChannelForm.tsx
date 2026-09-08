@@ -54,7 +54,7 @@ export function ChannelForm(props: Props) {
   return (
     <form action={formAction} aria-busy={pending} className="space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="channelKey">通知目标标识（创建后不可修改）</Label>
+        <Label htmlFor="channelKey">通知目标标识</Label>
         {isCreate ? (
           <Input
             id="channelKey"
@@ -82,7 +82,7 @@ export function ChannelForm(props: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="channelName">通知目标名称（用于后台展示）</Label>
+        <Label htmlFor="channelName">通知目标名称</Label>
         <Input
           id="channelName"
           name="channelName"
@@ -99,11 +99,11 @@ export function ChannelForm(props: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="transport">传输方式</Label>
+        <Label htmlFor="transport">通知方式</Label>
         <input type="hidden" name="transport" value="WECOM_SMART_BOT" />
         <Input
           id="transport"
-          value="Bot ID + Secret 智能机器人"
+          value="企业微信群"
           readOnly
           className="bg-muted/30"
         />
@@ -112,24 +112,21 @@ export function ChannelForm(props: Props) {
             {m}
           </p>
         ))}
-        <p className="text-xs text-muted-foreground">
-          传输方式创建后不可修改。
-        </p>
       </div>
 
       <div className="space-y-2 rounded-xl border bg-muted/20 p-4 text-sm">
-        <p className="font-medium">智能机器人长连接</p>
+        <p className="font-medium">群聊绑定</p>
         {isCreate ? (
           <p className="text-muted-foreground">
-            Bot ID 与 Secret 由运维通过服务端环境变量统一配置。创建后需要在目标企业微信群中发送一次性绑定码，绑定完成前不能启用或测试。
+            先保存通知目标，再生成绑定码并发送到目标企业微信群。
           </p>
         ) : smartBotBound && !smartBotBotMatchesConfigured ? (
           <div className="space-y-1 text-destructive">
             <p>
-              当前 Bot ID 与该群绑定时不一致，已阻止推送。
+              机器人账号已变更，当前群暂停推送。
             </p>
             <p>
-              请恢复原 Bot ID，或新建通知目标并重新绑定。当前目标只能停用，不能换绑。
+              请联系管理员恢复原机器人账号，或新建通知目标绑定当前机器人。
             </p>
           </div>
         ) : smartBotBound ? (
@@ -141,7 +138,7 @@ export function ChannelForm(props: Props) {
               </span>
             </p>
             <p>
-              绑定目标不可更改；如需切换企业微信群，请新建通知目标并重新配置事件规则。
+              如需换群，请新建通知目标。
             </p>
           </div>
         ) : (
@@ -181,7 +178,7 @@ export function ChannelForm(props: Props) {
         <p className="text-xs text-muted-foreground">
           {smartBotBound && !smartBotBotMatchesConfigured
             ? '当前 Bot ID 不匹配，该目标不能再次启用。'
-            : '智能机器人通道会先以停用状态保存；绑定企业微信群后才可启用。'}
+            : '请完成群聊绑定后启用。'}
         </p>
       ) : null}
 

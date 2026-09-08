@@ -77,8 +77,8 @@ export function SmartBotBindingPanel({
         </h2>
         <p className="text-sm text-muted-foreground">
           {isBound
-            ? '当前企业微信群已作为该通知目标的固定收件方。'
-            : '生成一次性绑定码，再由群成员在目标群 @该智能机器人并发送完整绑定码。机器人会自动识别并绑定当前群聊。'}
+            ? '通知发往以下群聊。'
+            : '生成绑定码，在目标企业微信群 @机器人并发送完整绑定码。'}
         </p>
       </div>
 
@@ -101,14 +101,13 @@ export function SmartBotBindingPanel({
             }
           />
           <p className="text-xs text-muted-foreground">
-            为保证历史消息和人工重放仍发往原收件群，该绑定不可更改。如需换群，请新建通知目标。
+            如需换群，请新建通知目标。
           </p>
         </div>
       ) : (
         <ActionNotice
           tone="warning"
           title="尚未绑定"
-          description="绑定完成前，该通知目标不能启用或发送测试消息。"
         />
       )}
 
@@ -121,7 +120,7 @@ export function SmartBotBindingPanel({
             </code>
             <p className="text-xs text-muted-foreground">
               请在 {formatDateTimeShanghai(new Date(receipt.expiresAt))}{' '}
-              前在目标群 @该智能机器人并发送。新生成的绑定码会使旧绑定码失效；页面关闭后不再显示本次明文。
+              前在目标群 @机器人并发送。
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -162,9 +161,7 @@ export function SmartBotBindingPanel({
         ) : null}
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        这里不显示 Bot ID 或 Secret。凭证由服务端长连接 worker 读取。
-      </p>
+      {receipt && !isBound ? <p className="text-xs text-muted-foreground">重新生成绑定码后，旧码失效。</p> : null}
     </section>
   );
 }

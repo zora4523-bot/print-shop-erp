@@ -22,7 +22,7 @@ export default async function EmployeePayRulesPage() {
       <RuleCenterPageHeader
         title="员工工资规则"
         effect="effective-dated"
-        subtitle="新版本按生效时间用于后续工资快照，不回算已结算记录。"
+        subtitle="员工工价与生效日期"
       />
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h2 className="font-semibold">新增规则版本</h2>

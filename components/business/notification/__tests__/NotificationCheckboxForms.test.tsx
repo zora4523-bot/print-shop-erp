@@ -56,7 +56,7 @@ describe('notification form checkbox contracts', () => {
     expect(html).not.toContain('<select');
     expect(html).not.toContain('WECOM_GROUP_WEBHOOK');
     expect(html).not.toContain('name="webhookUrl"');
-    expect(html).toContain('智能机器人通道会先以停用状态保存');
+    expect(html).toContain('先保存通知目标，再生成绑定码');
   });
 
   it('allows an already-bound smart-bot target to keep its active state', () => {
@@ -76,7 +76,7 @@ describe('notification form checkbox contracts', () => {
       />,
     );
 
-    expect(html).toContain('value="Bot ID + Secret 智能机器人"');
+    expect(html).toContain('value="企业微信群"');
     expect(html).toContain('name="transport" value="WECOM_SMART_BOT"');
     expect(html).toContain('已绑定群聊');
     expect(html).toContain('••••a1b2');
