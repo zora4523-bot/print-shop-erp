@@ -5,10 +5,10 @@ import { FileDown, Link2, Pencil } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { isOrderEditable } from '@/lib/order/editable-fields';
-import { Badge } from '@/components/ui/badge';
+import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ActionNotice } from '@/components/ui-business';
+import { ActionNotice, StatusBadge } from '@/components/ui-business';
 import {
   SheetContent,
   SheetDescription,
@@ -203,13 +203,10 @@ export function AdminWorkspaceStatusBadge({
 }: {
   status: AdminOrderWorkspaceRow['status'];
 }) {
-  return <Badge variant="outline" className={cn(
-    'h-auto rounded-full border-foreground px-2.5 py-0.5 text-[11px] font-extrabold',
-    ['RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'].includes(status) && 'bg-foreground text-background',
-    status === 'ON_HOLD' && 'border-primary bg-primary text-primary-foreground',
-    status === 'SHIPPED' && 'border-success-foreground text-success-foreground',
-    ['DRAFT', 'SETTLED', 'CANCELLED', 'FINISHED', 'REJECTED'].includes(status) && 'border-muted bg-muted text-muted-foreground',
-  )}>{STATUS_LABELS[status]}</Badge>;
+  return <StatusBadge
+    tone={ORDER_STATUS_REGISTRY[status].tone}
+    className="h-auto rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
+  >{STATUS_LABELS[status]}</StatusBadge>;
 }
 
 function DrawerSection({

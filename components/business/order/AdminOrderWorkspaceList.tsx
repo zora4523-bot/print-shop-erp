@@ -206,6 +206,7 @@ function AdminOrderRow({
       data-order-id={order.id}
       className={cn(
         'grid min-w-0 bg-card grid-cols-[2.75rem_3rem_minmax(0,1fr)_auto] gap-3 px-3 py-3 transition-colors hover:bg-muted/20 2xl:grid-cols-[2.75rem_3rem_minmax(15rem,1.4fr)_minmax(10rem,1fr)_7rem_8rem_8rem_auto] 2xl:items-center',
+        'border border-border hover:border-muted-foreground/50 hover:bg-card has-[[data-batch-checkbox][aria-checked=true]]:bg-muted/50',
       )}
     >
       <div className="flex flex-col items-center gap-1">
@@ -232,7 +233,7 @@ function AdminOrderRow({
               <Copy aria-hidden="true" className="size-3" />
             </Button>
             <span className="rounded bg-foreground px-1.5 py-0.5 text-[9px] font-bold text-background">v{order.workOrderVersion}</span>
-            {order.isUrgent && <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[9px] font-bold text-destructive">急单</span>}
+            {order.isUrgent && <span className="rounded bg-warning/10 px-1.5 py-0.5 text-[9px] font-bold text-warning-foreground">急单</span>}
           </span>
           <Button type="button" variant="link" onClick={onOpen} aria-label={order.orderNo}
             className="admin-wrap-anywhere h-auto max-w-full whitespace-normal p-0 text-left text-[12.5px] font-bold text-foreground">
@@ -268,11 +269,7 @@ function AdminOrderRow({
           <p
             className={cn(
               'mt-1 max-w-64 text-[11px] font-medium text-muted-foreground 2xl:max-w-none',
-              (order.pendingChangeRequest ||
-                order.fee.source === 'PENDING' ||
-                order.printPending ||
-                order.status === 'ON_HOLD') &&
-                'text-destructive',
+              rowSummaryClassName(order),
             )}
           >
             {order.statusSummary}
@@ -295,7 +292,7 @@ function AdminOrderRow({
         <p
           className={cn(
             'font-sans text-sm font-semibold tabular-nums',
-            order.fee.amount === null && 'text-xs text-destructive',
+            order.fee.amount === null && 'text-xs text-warning-foreground',
           )}
         >
           {order.fee.amount === null
@@ -317,12 +314,9 @@ function AdminOrderRow({
       <div className="col-span-2 text-right 2xl:col-span-1">
         <Button
           type="button"
-          variant={
-            order.pendingChangeRequest || order.fee.source === 'PENDING'
-              ? 'destructive'
-              : 'outline'
-          }
+          variant="outline"
           size="sm"
+          className={rowActionClassName(order)}
           onClick={onOpen}
         >
           {rowActionLabel(order)}
@@ -422,13 +416,13 @@ function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
     <p
       className={cn(
         'col-span-2 pl-[3.75rem] text-xs font-semibold 2xl:col-span-1 2xl:pl-0',
-        alert && 'text-destructive',
+        alert?.kind === 'overdue' ? 'text-destructive' : alert && 'text-warning-foreground',
       )}
     >
-      {date}
-      {alert?.kind === 'overdue' ? (
-        <span className="mt-0.5 block text-[10px]">超 {alert.days} 天</span>
-      ) : daysLeft !== null && daysLeft >= 0 ? (
+      <span className={cn(alert?.kind === 'overdue' && 'inline-block rounded-md bg-destructive/10 px-2 py-0.5 text-destructive')}>
+        {date}{alert?.kind === 'overdue' ? ` 超${alert.days}天` : ''}
+      </span>
+      {alert?.kind !== 'overdue' && daysLeft !== null && daysLeft >= 0 ? (
         <span className="mt-0.5 block text-[10px]">
           {daysLeft === 0
               ? '今天待发'
@@ -437,6 +431,22 @@ function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
       ) : null}
     </p>
   );
+}
+
+function rowSummaryClassName(order: AdminOrderWorkspaceRow): string {
+  if (order.status === 'REJECTED' || order.progress.foilingOverLimit || order.progress.packingOverLimit) return 'text-destructive';
+  if (order.statusSummary?.startsWith('✓')) return 'text-success-foreground';
+  if (order.fee.source === 'PENDING' || order.status === 'ON_HOLD' || order.statusSummary?.startsWith('⚠')) return 'text-warning-foreground';
+  return 'text-muted-foreground';
+}
+
+function rowActionClassName(order: AdminOrderWorkspaceRow): string {
+  const actionable = order.pendingChangeRequest || order.fee.source === 'PENDING' ||
+    ['PENDING_FACTORY', 'SUBMITTED'].includes(order.status) ||
+    order.capabilities.confirm || order.capabilities.release || order.capabilities.ship || order.printPending;
+  return actionable
+    ? 'border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:bg-foreground dark:hover:bg-foreground/90'
+    : '';
 }
 
 function rowActionLabel(order: AdminOrderWorkspaceRow): string {

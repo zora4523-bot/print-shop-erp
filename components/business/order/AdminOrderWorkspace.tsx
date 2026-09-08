@@ -384,14 +384,15 @@ function AdminOrderDecisionDashboard({
             aria-current={active ? 'page' : undefined}
             className={cn(
               'rounded-xl border bg-card px-4 py-3 shadow-sm transition-colors hover:border-foreground/50',
-              count > 0 && 'border-destructive/40',
+              'border-border hover:border-muted-foreground/50',
               active && 'border-foreground bg-muted/40',
             )}
           >
             <span
               className={cn(
                 'block font-sans text-xl font-semibold tabular-nums',
-                count > 0 && 'text-destructive',
+                count > 0 && signal.key === 'overdue' && 'text-destructive',
+                count > 0 && ['pending-pricing', 'pending-change', 'on-hold', 'due-today'].includes(signal.key) && 'text-warning-foreground',
               )}
             >
               {count.toLocaleString('zh-CN')}
@@ -407,13 +408,12 @@ function AdminOrderDecisionDashboard({
         prefetch={false}
         className={cn(
           'rounded-xl border bg-card px-4 py-3 shadow-sm transition-colors hover:border-foreground/50',
-          billingStats.receivableBillCount > 0 && 'border-destructive/40',
+          'border-border hover:border-muted-foreground/50',
         )}
       >
         <span
           className={cn(
             'block font-sans text-base font-semibold tabular-nums',
-            billingStats.receivableBillCount > 0 && 'text-destructive',
           )}
         >
           ¥{formatMoney(billingStats.receivableAmount)}
