@@ -49,12 +49,13 @@ type DecisionTask = () => Promise<AdminOrderWorkflowActionResult | ReviewResult>
 type DecisionReceipt = { text: string; tone: 'success' | 'warning' };
 
 function DecisionConfirmation({
-  label, title, impactItems, confirmLabel, disabled,
+  label, title, impactItems, changes = [], confirmLabel, disabled,
   onConfirm, describedBy, variant = 'default',
 }: {
   label: string;
   title: string;
   impactItems: string[];
+  changes?: {label: string; old: string; new: string}[];
   confirmLabel: string;
   disabled: boolean;
   onConfirm: () => void;
@@ -65,7 +66,7 @@ function DecisionConfirmation({
     disabled={disabled}
     trigger={<Button type="button" size="sm" variant={variant} aria-describedby={describedBy}>{label}</Button>}
     onConfirm={onConfirm}>
-    <ConfirmActionDialog action={title} changes={[]} consequences={impactItems} confirmText={confirmLabel} />
+    <ConfirmActionDialog action={title} changes={changes} consequences={impactItems} confirmText={confirmLabel} />
   </ConfirmActionController>;
 }
 
@@ -155,12 +156,12 @@ function AdminDecisionActions({
       {order.capabilities.release ? (
         <DecisionConfirmation
           label="下发 + 打印"
-          title="下发这张工单到生产？"
+          title="下发生产"
+          changes={[{label: order.customName ?? "未命名工单", old: "待下发", new: `${order.totalQuantity.toLocaleString("zh-CN")} 个待生产`}]}
           impactItems={[
-            `${order.customName ?? '未命名工单'}，版本 v${order.workOrderVersion}，共 ${order.totalQuantity.toLocaleString('zh-CN')} 个。`,
             '车间可扫码报工，并生成打印任务。',
           ]}
-          confirmLabel="确认下发并创建打印"
+          confirmLabel="下发并打印"
           disabled={pending}
           onConfirm={() =>
             run(() =>
@@ -187,13 +188,12 @@ function AdminDecisionActions({
       {order.capabilities.settle ? (
         <DecisionConfirmation
           label="结算"
-          title="结算这张工单？"
+          title="结算工单"
+          changes={[{label: order.customName ?? "未命名工单", old: "未结算", new: order.feeStages.confirmed === null ? "待核价" : `¥${formatMoney(order.feeStages.confirmed)}`}]}
           impactItems={[
-            `工单 ${order.orderNo}，版本 v${order.workOrderVersion}。`,
-            `按已确认金额 ${order.feeStages.confirmed === null ? '待核定' : `¥${formatMoney(order.feeStages.confirmed)}`} 结算。`,
             '结算后不可编辑，账单将采用本次结算金额。',
           ]}
-          confirmLabel="确认结算入账"
+          confirmLabel="结算"
           disabled={pending}
           onConfirm={() =>
             run(() =>
@@ -826,7 +826,7 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
       {!compact ? (
         <p className="mt-1 text-xs text-muted-foreground">
           {order.pendingChangeRequest?.type === 'MODIFY'
-            ? '管理员确认的是是否接受变更；款式与费用由服务端按最新规则自动合并和重算。'
+            ? '核对本次变更'
             : '取消结算可调整参考金额，差额必须填写原因。'}
         </p>
       ) : null}

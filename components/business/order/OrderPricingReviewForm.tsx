@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { ConfirmActionController, ConfirmActionDialog } from "@/components/ui-business";
 import { OrderPackagingMode } from "@/generated/prisma/enums";
 import { externalPriceBusinessText } from "@/lib/price/external-price-display";
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
@@ -73,7 +72,7 @@ function priceBookLabel(
 ): string {
   return book
     ? `${book.name} · 第 ${book.version} 版`
-    : "历史金额（无版本快照）";
+    : "历史金额";
 }
 
 function hasValue(value: string | null | undefined): boolean {
@@ -156,7 +155,7 @@ function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDraft
                     </label>
                     <label className="space-y-1 text-xs">
                       <span>
-                        快递费（快照建议{" "}
+                        快递费（已报{" "}
                         {shipment.shipping.suggestedAmount ?? "无"}）
                       </span>
                       <Input
@@ -179,7 +178,7 @@ function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDraft
                     </label>
                     <label className="space-y-1 text-xs">
                       <span>
-                        打包耗材费（快照参考{" "}
+                        打包耗材费（已报{" "}
                         {shipment.packaging.suggestedAmount ?? "无"}）
                       </span>
                       <Input
@@ -482,13 +481,13 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
       {variant !== 'drawer' ? <div>
         <h2 className="text-base font-semibold">工厂核价确认</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          仅核对工单已保存的报价快照；自动报价只读，仅补录待人工核价项。
+          请补录待核价项。
         </p>
       </div> : null}
 
       {previewPending && !preview ? (
         <p role="status" className="text-sm text-muted-foreground">
-          正在读取工单报价快照…
+          正在加载费用…
         </p>
       ) : null}
       {previewError ? (
@@ -546,7 +545,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
               </>
             ) : (
               <p className="mt-1 text-xs text-muted-foreground">
-                当前报价快照没有需要补录的人工金额。
+                无待补录金额。
               </p>
             )}
           </div>
@@ -559,14 +558,14 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
             }`}
           >
             <div className="rounded-md border p-3">
-              <dt className="text-xs text-muted-foreground">加工费报价快照</dt>
+              <dt className="text-xs text-muted-foreground">加工费报价</dt>
               <dd className="mt-1 font-medium">
                 {priceBookLabel(preview.processingPriceBook)}
               </dd>
             </div>
             {preview.logisticsPriceBook || preview.shipments.length > 0 ? (
               <div className="rounded-md border p-3">
-                <dt className="text-xs text-muted-foreground">物流报价快照</dt>
+                <dt className="text-xs text-muted-foreground">物流报价</dt>
                 <dd className="mt-1 font-medium">
                   {priceBookLabel(preview.logisticsPriceBook)}
                 </dd>
@@ -582,7 +581,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
               >
                 {incompleteItemCount > 0
                   ? `${incompleteItemCount} 款需人工核价`
-                  : "全部已有报价快照"}
+                  : "已报价"}
               </Badge>
             </div>
             <ol className="space-y-2">
@@ -600,7 +599,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                     <Badge
                       variant="secondary"
                     >
-                      {item.complete ? "报价快照（只读）" : "待人工核价"}
+                      {item.complete ? "已报价" : "待人工核价"}
                     </Badge>
                   </div>
                   {item.complete ? (
@@ -720,7 +719,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                 >
                   {incompletePackagingGroupCount > 0
                     ? `${incompletePackagingGroupCount} 组需人工核价`
-                    : "全部已有报价快照"}
+                    : "已报价"}
                 </Badge>
               </div>
               <ol className="space-y-2">
@@ -746,7 +745,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                         <Badge
                           variant="secondary"
                         >
-                          {group.complete ? "报价快照（只读）" : "待人工核价"}
+                          {group.complete ? "已报价" : "待人工核价"}
                         </Badge>
                       </div>
                       {group.errors.length > 0 ? (
@@ -943,28 +942,9 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
             )}
           </div>
 
-            <ConfirmActionController level="L2"
-              disabled={submissionDisabled}
-              trigger={
-                <Button
-                  type="button"
-                  disabled={submissionDisabled}
-                >
-                  {pricingFinalized
-                    ? "费用已确认"
-                    : finalizePending
-                      ? "正在确认报价快照…"
-                      : "确认工厂核价"}
-                </Button>
-              }
-              onConfirm={submit}>
-              <ConfirmActionDialog action="保存本次核价？" changes={[]} consequences={[
-                '若工单或价格已变化，本次操作会停止并提示刷新。',
-                `已有快照价 ${preview.items.length - incompleteItemCount} 款保持不变，${incompleteItemCount} 款需录入人工核价。`,
-                `${preview.packagingGroups.length - incompletePackagingGroupCount} 个包装组保持已有金额，${incompletePackagingGroupCount} 组需录入人工核价。`,
-                `${preview.shipments.length} 票快递/耗材费仅确认已有快照或补录待核价金额。`,
-              ]} confirmText="确认工厂核价" />
-            </ConfirmActionController>
+            <Button type="button" data-slot="pricing-submit" disabled={submissionDisabled} onClick={submit}>
+              {pricingFinalized ? '费用已确认' : finalizePending ? '正在保存核价…' : '确认工厂核价'}
+            </Button>
         </>
       ) : null}
       </fieldset>

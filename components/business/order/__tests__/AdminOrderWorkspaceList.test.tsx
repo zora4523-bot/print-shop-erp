@@ -291,8 +291,8 @@ describe('AdminOrderDecisionPanel change request integration', () => {
       <AdminOrderDecisionPanel order={pendingModify} />,
     );
 
-    expect(html).toContain('管理员确认的是是否接受变更');
-    expect(html).toContain('款式与费用由服务端按最新规则自动合并和重算');
+    expect(html).toContain('核对本次变更');
+    expect(html).not.toContain('服务端');
     expect(html).toContain('审核备注 / 拒绝原因');
     expect(html).not.toContain('批准修改');
   });

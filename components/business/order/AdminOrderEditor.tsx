@@ -863,7 +863,7 @@ export function AdminOrderEditor(props: Props) {
                 {!source.packagingEditable || draft.added ? (
                   <p className="mt-2 text-xs text-muted-foreground">
                     {draft.added
-                      ? '新增款式暂不支持同步分袋，请核对包装安排。'
+                      ? '新增款式的分袋安排待补充，请核对包装明细。'
                       : '分袋记录缺失或存在多组分货，当前不能直接修改每包数量。'}
                   </p>
                 ) : null}
@@ -1070,7 +1070,7 @@ export function AdminOrderEditor(props: Props) {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {review.changesRevision
-                    ? `工单版本 v${props.workOrderVersion} → v${props.workOrderVersion + 1}，保留修改记录与原报价快照。`
+                    ? `工单版本 v${props.workOrderVersion} → v${props.workOrderVersion + 1}。`
                     : '本次仅修改资料，保留当前工单版本与费用。'}
                 </p>
                 {review.blockers.map((text, index) => (

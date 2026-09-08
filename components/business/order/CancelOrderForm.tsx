@@ -93,7 +93,7 @@ export function CancelOrderForm({
         }
         reasonLabel="取消原因"
         reasonPlaceholder="例如：客户书面确认取消订单">
-        <ConfirmActionDialog action={orderNo ? `取消工单 ${orderNo}？` : '取消这张工单？'} changes={[]} consequences={impactItems} confirmText="填写原因并取消工单" />
+        <ConfirmActionDialog action={orderNo ? `取消工单 ${orderNo}？` : '取消这张工单？'} changes={[]} consequences={impactItems} confirmText="取消工单" />
       </ConfirmActionController>
 
       {impactItems.length === 0 ? (

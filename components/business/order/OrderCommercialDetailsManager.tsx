@@ -296,7 +296,7 @@ function ManualChargeEditor({
                         }),
                       )
                     }>
-                    <ConfirmActionDialog action="确认移除这项对客费用？" changes={[]} consequences={[
+                    <ConfirmActionDialog action="确认移除这项对客费用" changes={[]} consequences={[
                       '对客应收总额将立即重算',
                       '原金额、确认人和移除原因继续保留',
                     ]} confirmText="确认移除" />
@@ -515,7 +515,7 @@ function PlateDetailEditor({
                   }),
                 )
               }>
-              <ConfirmActionDialog action="确认移除这条制版明细？" changes={[]} consequences={[
+              <ConfirmActionDialog action="确认移除这条制版明细" changes={[]} consequences={[
                 '对应制版费归零并重算工单总额',
                 '制版明细保留为已移除历史记录',
               ]} confirmText="确认移除" />

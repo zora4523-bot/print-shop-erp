@@ -15,7 +15,6 @@ import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type Props = {
@@ -144,7 +143,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
           setAccepted(null);
         }
       } catch {
-        setError('确认结果暂时无法获取，请使用同一预览重试，系统会防止重复确认。');
+        setError('暂未收到确认结果，请重试。');
       } finally {
         busy.current = false;
       }
@@ -153,13 +152,10 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
 
   const quote = accepted?.preview;
   return (
-    <section id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-4">
+    <section data-variant={variant} id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-4">
       {auxiliary.blocked ? <p className="text-xs text-muted-foreground">请先保存或还原正在编辑的工单资料或费用。</p> : null}
       <h3 className="text-sm font-semibold">物流费用确认</h3>
-      {variant !== 'drawer' ? <p className="mt-1 text-xs text-muted-foreground">
-        仅更正物流费用，保留已审核款式价格、版费、包装及其他费用，不改变生产状态。
-        {isPricingPending ? ' 如待确认并非源于到付更正，系统会拒绝此入口，请核对原始审核记录。' : ' 先选择更正方式并预览差额，再明确确认。'}
-      </p> : null}
+
       {confirmed ? (
         <p role="status" className="mt-3 text-sm">物流费用已确认，工单已刷新。</p>
       ) : (
@@ -226,17 +222,10 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
                 ))}
               </ul>
               {quote.issues.length > 0 ? <ul role="alert" className="list-inside list-disc text-sm text-destructive">{quote.issues.map((issue, index) => <li key={`${index}-${issue}`}>{issue}</li>)}</ul> : null}
-              <p className="text-xs text-muted-foreground">确认将记录本次物流金额及审核人；不会结算工单或重新生成生产工单。</p>
-                <ConfirmActionController level="L2"
-                  disabled={pending || auxiliary.blocked || !quote.canConfirm}
-                  trigger={<Button type="button" disabled={pending || auxiliary.blocked || !quote.canConfirm}>确认物流费用</Button>}
-                  onConfirm={confirmPricing}>
-                  <ConfirmActionDialog action="确认物流费用？" changes={[]} consequences={[
-                    `更正前合计 ${formatMoney(quote.oldTotal)}，更正后合计 ${quote.newTotal === null ? '待核定' : formatMoney(quote.newTotal)}。`,
-                    `本次差额 ${quote.delta === null ? '待核定' : formatMoney(quote.delta)}。`,
-                    '记录本次物流金额及审核人；工单生产状态保持不变。',
-                  ]} confirmText="确认物流费用" />
-                </ConfirmActionController>
+              <p className="text-xs text-muted-foreground">确认后采用上方物流金额。</p>
+              <Button type="button" disabled={pending || auxiliary.blocked || !quote.canConfirm} onClick={confirmPricing}>
+                确认物流费用
+              </Button>
             </div>
           ) : null}
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}

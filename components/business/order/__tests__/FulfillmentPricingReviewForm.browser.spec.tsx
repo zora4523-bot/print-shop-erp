@@ -131,12 +131,15 @@ async function waitForPreview(host: HTMLElement) {
 }
 
 async function confirmPreview(host: HTMLElement, doubleClick = false) {
-  buttonWithText(host, '确认物流费用')?.click();
-  const dialog = page.getByRole('alertdialog');
-  await expect.element(dialog).toBeVisible();
-  const confirmation = document.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')!;
+  // This page already reviews per-shipment amounts and the total difference.
+  // Submit directly from that review; no second generic confirmation layer.
+  expect(host.textContent).toContain('更正前合计');
+  expect(host.textContent).toContain('更正后合计');
+  expect(host.textContent).toContain('本次差额');
+  const confirmation = buttonWithText(host, '确认物流费用')!;
   confirmation.click();
   if (doubleClick) confirmation.click();
+  await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
 }
 
 beforeEach(() => {
@@ -409,7 +412,7 @@ describe('FulfillmentPricingReviewForm browser contract', () => {
       await confirmPreview(host);
 
       await vi.waitFor(() => {
-        expect(host.textContent).toContain('确认结果暂时无法获取');
+        expect(host.textContent).toContain('暂未收到确认结果，请重试');
         expect(finalizeActionMock).toHaveBeenCalledTimes(1);
       });
       const firstPayload = finalizeActionMock.mock.calls[0]![1];

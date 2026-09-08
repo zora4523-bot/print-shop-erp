@@ -18,7 +18,7 @@ import {
   OrderChangePendingChargeEditor,
   OrderChangePricingPreviewPanel,
   buildOrderChangePendingChargeResolutions,
-  orderChangeApprovalImpactItems,
+  orderChangeApprovalConfirmation,
   orderChangeRejectionImpactItems,
   orderChangeReviewResultMessage,
   previewOrderChangeRequestPricingWithRecovery,
@@ -118,13 +118,13 @@ describe('OrderChangePricingPreviewPanel', () => {
       <OrderChangePricingPreviewPanel preview={preview()} />,
     );
 
-    expect(html).toContain('修改审批计价预览（只读）');
+    expect(html).toContain('变更费用');
     expect(html).toContain('¥1000.00');
     expect(html).toContain('¥960.00');
     expect(html).toContain('-¥40.00');
     expect(html).toContain('自动单价 ¥0.8000');
-    expect(html).toContain('由系统按最新规则自动重算');
-    expect(html).toContain('当前预览仅供核对');
+    expect(html).toContain('核对数量与金额');
+    expect(html).toContain('变更费用');
   });
 
   it('withholds incomplete totals and requires the pricing gaps to be resolved', () => {
@@ -166,7 +166,7 @@ describe('OrderChangePricingPreviewPanel', () => {
 
     expect(html).toContain('待补全价格规则');
     expect(html).toContain('暂无法计算');
-    expect(html).toContain('自动计价规则尚未得出完整结果');
+    expect(html).toContain('费用尚未核齐，请补录待核价项或修正计价规则');
     expect(html).toContain('未找到适用的价格阶梯');
     expect(html).not.toContain('¥960.00');
   });
@@ -210,23 +210,18 @@ describe('OrderChangePricingPreviewPanel', () => {
     const html = renderToStaticMarkup(
       <OrderChangePricingPreviewPanel preview={withDeferredPlateFee} />,
     );
-    const impact = orderChangeApprovalImpactItems(withDeferredPlateFee).join(
-      '\n',
-    );
+    const confirmation = orderChangeApprovalConfirmation(withDeferredPlateFee);
+    const impact = JSON.stringify(confirmation);
 
-    expect(html).toContain('制烫金版费不自动计算');
+    expect(html).toContain('版费待核价');
     expect(html).toContain('新总额（暂不含版费）');
     expect(html).toContain('整单差额');
     expect(html).toContain('版费核定后可计算');
-    expect(html).toContain('口径不同');
-    expect(html).toContain('不会自动记为 0 元');
+    expect(html).toContain('新总额（暂不含版费）');
+    expect(html).toContain('版费核定后可计算');
     expect(html).not.toContain('-¥960.30');
-    expect(impact).toContain('已知费用预览');
-    expect(impact).toContain('不展示整单差额');
-    expect(impact).toContain('批准修改后会进入后续管理员核价');
-    expect(impact).toContain('核定版费后才能比较整单差额');
-    expect(impact).toContain('制烫金版费保持待核价');
-    expect(impact).toContain('核定后再补入工单应收');
+    expect(confirmation.consequences).toContain('修改后已知费用 ¥39.70（不含版费）；版费核定后计入工单应收，整单差额待定。');
+    expect(confirmation.changes.some(change => change.label.startsWith('工单金额'))).toBe(false);
     expect(impact).not.toContain('-¥960.30');
   });
 
@@ -277,7 +272,7 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(html).toContain('逐票运费核对');
     expect(html).toContain('第 2 票 · 广东省 · 400 个');
     expect(html).toContain('未匹配到唯一物流规则');
-    expect(html).toContain('不会替代款式自动计价');
+    expect(html).toContain('金额不小于 0，必填核价依据');
     expect(html).toContain('第 2 票运费金额');
     expect(html).toContain('第 2 票运费依据');
   });
@@ -307,13 +302,13 @@ describe('OrderChangePricingPreviewPanel', () => {
       />,
     );
 
-    expect(unresolvedHtml).toContain('需逐票补录后重新预览');
-    expect(resolvedHtml).toContain('1 票物流费已按录入金额纳入本次预览');
-    expect(resolvedHtml).not.toContain('需逐票补录后重新预览');
+    expect(unresolvedHtml).toContain('补录金额后刷新预览');
+    expect(resolvedHtml).toContain('1 票运费已核价');
+    expect(resolvedHtml).not.toContain('补录金额后刷新预览');
   });
 
-  it('builds an approval confirmation from the current revision, diff and non-authoritative quote', () => {
-    const impact = orderChangeApprovalImpactItems(
+  it('builds a structured approval from actual quantities, amounts and necessary consequences', () => {
+    const impact = orderChangeApprovalConfirmation(
       preview({
         items: [
           preview().items[0]!,
@@ -334,20 +329,17 @@ describe('OrderChangePricingPreviewPanel', () => {
       }),
     );
 
-    expect(impact).toContain(
-      '申请基于工单第 2 版，共 2 项款式变更（修改 1 项、新增 1 项）。',
-    );
-    expect(impact.join('\n')).toContain(
-      '修改款式“红包 A”：1,200 个；款式小计 ¥1000.00 → ¥960.00',
-    );
-    expect(impact.join('\n')).toContain(
-      '新增款式“红包 B”：1,200 个',
-    );
-    expect(impact.join('\n')).toContain('¥1000.00 → ¥960.00');
-    expect(impact.join('\n')).toContain('正面烫金 金色');
-    expect(impact.join('\n')).toContain('校验结果与本次预览一致');
-    expect(impact.join('\n')).toContain('本次批准不会执行');
-    expect(impact.join('\n')).toContain('工单应收');
+    expect(impact.changes).toEqual(expect.arrayContaining([
+      { label: '红包 A · 数量', old: '1,000 个', new: '1,200 个' },
+      { label: '红包 A · 加工费', old: '¥1000.00', new: '¥960.00' },
+      { label: '红包 B · 数量', old: '新增', new: '1,200 个' },
+      { label: '红包 B · 正面烫金', old: '新增', new: '金色' },
+      { label: '工单金额（差额 -¥40.00）', old: '¥1000.00', new: '¥960.00' },
+    ]));
+    expect(impact.consequences).toEqual(['待开工任务将采用本次款式和数量。']);
+    // Version and quote-token protection is asserted in the mutation-binding test below,
+    // not by expecting an implementation explanation in user-facing copy.
+
   });
 
   it('states the server-side required rejection reason contract', () => {

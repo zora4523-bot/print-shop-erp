@@ -18,25 +18,6 @@ vi.mock('@/actions/order', () => ({
   finalizeOrderPricingAction: finalizeActionMock,
 }));
 
-vi.mock('@/components/ui-business', () => ({
-  ConfirmActionDialog: ({
-    disabled,
-    onConfirm,
-  }: {
-    disabled?: boolean;
-    onConfirm: () => void;
-  }) => (
-    <button
-      type="button"
-      data-testid="confirm-pricing"
-      data-native-button-reason="browser test confirmation harness"
-      disabled={disabled}
-      onClick={onConfirm}
-    >
-      确认终价
-    </button>
-  ),
-}));
 
 import { OrderPricingReviewForm } from '../OrderPricingReviewForm';
 
@@ -111,7 +92,7 @@ it('管理员可从空白制烫金版费录入金额和依据后提交', async (
     const amount = host.querySelector<HTMLInputElement>('input[inputmode="decimal"]');
     const reason = host.querySelector<HTMLTextAreaElement>('textarea');
     const confirm = host.querySelector<HTMLButtonElement>(
-      '[data-testid="confirm-pricing"]',
+      '[data-slot="pricing-submit"]',
     );
     expect(amount?.value).toBe('');
     expect(reason?.value).toBe('');

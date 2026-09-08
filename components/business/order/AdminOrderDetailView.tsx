@@ -175,7 +175,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           </section>
 
           <section id="order-detail-fees" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-fees' && styles.highlight)}>
-            <div className={styles.sectionHeading}><h2>费用快照</h2><span>以各阶段保存金额为准</span></div>
+            <div className={styles.sectionHeading}><h2>费用记录</h2><span>以各阶段保存金额为准</span></div>
             <div className={styles.feeStages}>{model.feeStages.map((stage) => <div key={stage.key} className={cn(styles.feeStage, stage.current && styles.currentFee)}>
               <p>{stage.title}{stage.current ? <span>当前</span> : null}</p><strong>{stage.total === null ? '—' : amount(stage.total)}</strong>
               {stage.total === null ? <small>{stage.key === 'confirmed' ? '费用核定后显示' : stage.key === 'settled' ? '结算后显示' : '尚未形成报价'}</small> : null}

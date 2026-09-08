@@ -164,76 +164,47 @@ function orderChangePreviewFactDescriptions(
   return facts;
 }
 
-export function orderChangeApprovalImpactItems(
+export function orderChangeApprovalConfirmation(
   preview: OrderChangePricingPreviewWithCharges,
-): string[] {
-  if (preview.items.length === 0 && preview.promisedDateChange) {
-    return [
-      `承诺交期：${preview.promisedDateChange.before ?? '未设置'} → ${preview.promisedDateChange.after ?? '未设置'}。`,
-      '批准后交期生效，款式、数量和费用保持不变；不重新计价。',
-      '已下发的工单按版本规则生成新版，已产数量与历史报工保留。',
-    ];
+): {
+  changes: { label: string; old: string; new: string }[];
+  consequences: string[];
+} {
+  const changes: { label: string; old: string; new: string }[] = [];
+  for (const item of preview.items) {
+    const label = externalPriceBusinessText(item.name);
+    if (item.previousQuantity !== item.quantity) {
+      changes.push({ label: `${label} · 数量`, old: item.previousQuantity === null ? '新增' : `${item.previousQuantity.toLocaleString('zh-CN')} 个`, new: `${item.quantity.toLocaleString('zh-CN')} 个` });
+    }
+    if (item.previousName && item.previousName !== item.name) {
+      changes.push({ label: '款式名称', old: externalPriceBusinessText(item.previousName), new: label });
+    }
+    if (item.previousSpecification !== item.specification) {
+      changes.push({ label: `${label} · 规格`, old: item.previousSpecification ?? '待录', new: item.specification ?? '待录' });
+    }
+    for (const [side, before, after] of [
+      ['正面烫金', item.previousFrontFoilColors, item.frontFoilColors],
+      ['反面烫金', item.previousBackFoilColors, item.backFoilColors],
+    ] as const) {
+      if (item.operation === 'ADD' || !hasSameTextSet(before ?? [], after ?? [])) {
+        changes.push({ label: `${label} · ${side}`, old: item.operation === 'ADD' ? '新增' : foilColorText(before ?? []), new: foilColorText(after ?? []) });
+      }
+    }
+    if (item.oldSubtotal !== item.newSubtotal) {
+      changes.push({ label: `${label} · 加工费`, old: item.oldSubtotal === null ? '新增' : money(item.oldSubtotal), new: item.newSubtotal === null ? '待核价' : money(item.newSubtotal) });
+    }
   }
-  const addedCount = preview.items.filter(
-    (item) => item.operation === 'ADD',
-  ).length;
-  const updatedCount = preview.items.length - addedCount;
-  const changeSummary = [
-    updatedCount > 0 ? `修改 ${updatedCount} 项` : null,
-    addedCount > 0 ? `新增 ${addedCount} 项` : null,
-  ]
-    .filter((item): item is string => item !== null)
-    .join('、');
-  const pricingSummary = preview.totalExcludesPendingPlateFee
-    ? preview.newTotal === null
-      ? `已知费用预览不完整：当前工单总额 ${money(preview.oldTotal)}；修改后已知费用与整单差额暂无法计算。`
-      : `已知费用预览：修改后当前可确定费用为 ${money(preview.newTotal)}（暂不含制烫金版费）。当前工单总额与该已知费用口径不同，不展示整单差额。`
-    : preview.newTotal === null || preview.delta === null
-      ? `计价预览不完整：当前总额 ${money(preview.oldTotal)}，新总额和差额暂无法计算。`
-      : `计价预览：${money(preview.oldTotal)} → ${money(preview.newTotal)}（差额 ${deltaMoney(preview.delta)}）。`;
-  const itemChanges = preview.items.map((item) => {
-    const itemLabel =
-      item.operation === 'ADD'
-        ? `新增款式“${externalPriceBusinessText(item.name)}”`
-        : `修改款式“${externalPriceBusinessText(item.previousName ?? item.name)}”${item.previousName && item.previousName !== item.name ? ` → “${externalPriceBusinessText(item.name)}”` : ''}`;
-    const subtotal = `${item.oldSubtotal === null ? '新增' : money(item.oldSubtotal)} → ${item.newSubtotal === null ? '待补全规则' : money(item.newSubtotal)}`;
-    const pricingImpact =
-      item.priceImpact === 'UNCHANGED'
-        ? '不影响计价'
-        : item.priceImpact === 'QUOTED'
-          ? '已按当前规则计价'
-          : '当前无法计价';
-    const errors =
-      item.errors.length > 0
-        ? `；计价提示：${item.errors.join('；')}`
-        : '';
-    const factDescriptions = orderChangePreviewFactDescriptions(item);
-    const factSummary =
-      factDescriptions.length > 0
-        ? `；变更事实：${factDescriptions.join('；')}`
-        : '';
-    return `${itemLabel}：${item.quantity.toLocaleString('zh-CN')} 个${factSummary}；款式小计 ${subtotal}，${pricingImpact}${errors}。`;
-  });
-
-  const pendingChargeSummary = preview.pendingCharges?.length
-    ? `逐票运费共 ${preview.pendingCharges.length} 项，将使用本次预览中已核对的人工运费金额与依据。`
-    : null;
-  const deferredPlateFeeSummary = preview.totalExcludesPendingPlateFee
-    ? '制烫金版费不在本次已知费用合计中；批准修改后会进入后续管理员核价，不会被当作 0 元。核定版费后才能比较整单差额。'
-    : null;
-  const approvalWriteSummary = preview.totalExcludesPendingPlateFee
-    ? '批准后会更新相关款式、数量、待开工任务与当前可确定费用；制烫金版费保持待核价，核定后再补入工单应收。'
-    : '批准后会更新相关款式、数量、待开工任务和工单应收。';
-
-  return [
-    `申请基于工单第 ${preview.baseRevision} 版，共 ${preview.items.length} 项款式变更${changeSummary ? `（${changeSummary}）` : ''}。`,
-    ...(preview.promisedDateChange ? [`承诺交期：${preview.promisedDateChange.before ?? '未设置'} → ${preview.promisedDateChange.after ?? '未设置'}。`] : []),
-    ...itemChanges,
-    `${pricingSummary}批准时会按最新规则重算，并校验结果与本次预览一致；若规则或工单已变化，本次批准不会执行，需刷新后重试。`,
-    ...(pendingChargeSummary ? [pendingChargeSummary] : []),
-    ...(deferredPlateFeeSummary ? [deferredPlateFeeSummary] : []),
-    approvalWriteSummary,
-  ];
+  if (preview.promisedDateChange) {
+    changes.push({ label: '承诺交期', old: preview.promisedDateChange.before ?? '待定', new: preview.promisedDateChange.after ?? '待定' });
+  }
+  const consequences: string[] = [];
+  if (preview.totalExcludesPendingPlateFee) {
+    consequences.push(`修改后已知费用 ${preview.newTotal === null ? '待核价' : money(preview.newTotal)}（不含版费）；版费核定后计入工单应收，整单差额待定。`);
+  } else if (preview.items.length > 0) {
+    changes.push({ label: `工单金额${preview.delta === null ? '' : `（差额 ${deltaMoney(preview.delta)}）`}`, old: money(preview.oldTotal), new: preview.newTotal === null ? '待核价' : money(preview.newTotal) });
+  }
+  if (preview.items.length > 0) consequences.push('待开工任务将采用本次款式和数量。');
+  return { changes, consequences };
 }
 
 export function orderChangeRejectionImpactItems(): string[] {
@@ -252,7 +223,7 @@ export function orderChangeReviewResultMessage(requestStatus: string): string {
     return '申请已拒绝，工单内容未发生变化。';
   }
   if (requestStatus === 'CANCELLED') {
-    return '取消申请已批准，工单已按服务端结算结果取消。';
+    return '取消申请已批准，工单已取消。';
   }
   return '修改申请已批准，工单已按最新规则更新。';
 }
@@ -303,9 +274,9 @@ export function OrderChangePricingPreviewPanel({
       className="space-y-3 rounded-lg border bg-muted/20 p-3"
     >
       <div>
-        <h3 className="text-sm font-semibold">修改审批计价预览（只读）</h3>
+        <h3 className="text-sm font-semibold">变更费用</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          管理员确认的是是否接受变更；款式加工费由系统按最新规则自动重算，当前预览仅供核对。
+          核对数量与金额
         </p>
       </div>
 
@@ -346,13 +317,13 @@ export function OrderChangePricingPreviewPanel({
           role="alert"
           className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
         >
-          自动计价规则尚未得出完整结果，请先补齐下方待处理费用或修正价格规则，再批准变更。
+          费用尚未核齐，请补录待核价项或修正计价规则。
         </p>
       ) : null}
 
       {preview.totalExcludesPendingPlateFee ? (
         <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning-foreground">
-          制烫金版费不自动计算，当前新总额只是暂不含版费的已知费用。它与当前工单总额口径不同，因此在版费核定前不展示整单差额。批准修改后会保持“待管理员核价”，不会自动记为 0 元。
+          版费待核价
         </p>
       ) : null}
 
@@ -365,8 +336,8 @@ export function OrderChangePricingPreviewPanel({
           }`}
         >
           {unresolvedPendingChargeCount > 0
-            ? `款式加工费已自动计算；以下 ${unresolvedPendingChargeCount} 票物流费因配送条件无法由规则唯一确定，需逐票补录后重新预览。`
-            : `款式加工费已自动计算；${pendingCharges.length} 票物流费已按录入金额纳入本次预览。`}
+            ? `${unresolvedPendingChargeCount} 票运费待核价，请补录金额后刷新预览。`
+            : `${pendingCharges.length} 票运费已核价。`}
         </p>
       ) : null}
 
@@ -574,7 +545,7 @@ export function OrderChangePendingChargeEditor({
     >
       <legend className="px-1 text-sm font-semibold">逐票运费核对</legend>
       <p className="text-xs text-muted-foreground">
-        自动加工费已完成。这里只补录无法由配送规则唯一确定的运费，不会替代款式自动计价。
+        金额不小于 0，必填核价依据。
       </p>
       {charges.map((charge) => {
         const draft = drafts[charge.businessKey] ?? {
@@ -654,9 +625,9 @@ function OrderChangeReviewDecisionFields({
   preview: OrderChangePricingPreviewWithCharges | null;
   submit: (decision: "APPROVE" | "DENY") => void;
 }) {
-  const approvalImpactItems = preview
-    ? orderChangeApprovalImpactItems(preview)
-    : [];
+  const approval = preview
+    ? orderChangeApprovalConfirmation(preview)
+    : { changes: [], consequences: [] };
   const rejectionImpactItems = orderChangeRejectionImpactItems();
   return (
     <>
@@ -711,7 +682,7 @@ function OrderChangeReviewDecisionFields({
             </Button>
           }
           onConfirm={() => submit('APPROVE')}>
-          <ConfirmActionDialog action="批准这项工单修改申请？" changes={[]} consequences={approvalImpactItems} confirmText="确认批准并同步工单" />
+          <ConfirmActionDialog action="批准变更" changes={approval.changes} consequences={approval.consequences} confirmText="批准" />
         </ConfirmActionController>
         <ConfirmActionController level="L2"
           disabled={rejectDisabled}
@@ -725,7 +696,7 @@ function OrderChangeReviewDecisionFields({
             </Button>
           }
           onConfirm={() => submit('DENY')}>
-          <ConfirmActionDialog action="拒绝这项工单修改申请？" changes={[]} consequences={rejectionImpactItems} confirmText="确认拒绝申请" />
+          <ConfirmActionDialog action="拒绝这项工单修改申请" changes={[]} consequences={rejectionImpactItems} confirmText="确认拒绝申请" />
         </ConfirmActionController>
       </div>
     </>
@@ -1010,7 +981,7 @@ export function OrderChangeReviewForm({
             </p>
           ) : pendingChargesVerified ? (
             <p role="status" className="text-xs text-success-foreground">
-              该组逐票运费已通过服务端重新预览，批准时将提交同一组数据。
+              运费已核对。
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">

@@ -52,7 +52,7 @@ export function FinishOrderButton({ orderId }: { orderId: string }) {
         focusReturnRef={triggerRef}
         disabled={pending}
         onConfirm={confirmFinish}>
-        <ConfirmActionDialog action="确认关闭工单并标记为已完成？" changes={[]} consequences={finishOrderImpactItems} confirmText="确认关闭并完成" />
+        <ConfirmActionDialog action="关闭工单并标记为已完成" changes={[]} consequences={finishOrderImpactItems} confirmText="关闭并完成" />
       </ConfirmActionController>
       {visibleState?.status === 'error' ? (
         <p role="alert" className="text-xs text-destructive">

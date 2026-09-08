@@ -44,18 +44,13 @@ vi.mock('@/actions/order', () => ({
   finalizeOrderPricingAction: vi.fn(),
 }));
 
-vi.mock('@/components/ui-business', () => ({
-  ConfirmActionDialog: () => null,
-  ConfirmActionController: ({
-    disabled,
-    onConfirm,
-  }: {
-    disabled?: boolean;
-    onConfirm: () => void;
-  }) => {
-    harness.onConfirm = onConfirm;
-    harness.confirmDisabled = disabled ?? false;
-    return null;
+vi.mock('@/components/ui/button', () => ({
+  Button: ({children, ...props}: React.ComponentProps<'button'> & {'data-slot'?: string}) => {
+    if (props['data-slot'] === 'pricing-submit') {
+      harness.onConfirm = props.onClick as (() => void) | null;
+      harness.confirmDisabled = props.disabled ?? false;
+    }
+    return <button data-native-button-reason="captures pricing submit control in unit test" {...props}>{children}</button>;
   },
 }));
 
@@ -211,8 +206,8 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     const html = render();
 
     expect(html).toContain('工厂核价确认');
-    expect(html).toContain('仅核对工单已保存的报价快照');
-    expect(html).toContain('报价快照（只读）');
+    expect(html).toContain('请补录待核价项。');
+    expect(html).toContain('已报价');
     expect(html).toContain('建单转人工原因：客户自带纸，建单时转人工');
     expect(html).toContain('订单级待核价费用');
     expect(html).toContain('制版费待工厂确认');

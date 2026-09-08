@@ -75,7 +75,39 @@
 
 ## 第二批：工单与计价
 
-待完成。
+已完成。审批复核展示款式数量、规格、烫金颜色、加工费与工单金额的旧值 → 新值；缺失版费时不拿部分费用与整单金额比较。权限、版本、报价凭据和提交校验保持原逻辑。
+
+- [第二批] `components/business/order/OrderChangeReviewForm.tsx:157` — 冗长审批说明 → 实际变更行、金额差额、待开工任务调整；拒绝仍保留理由必填及状态保护。
+- [第二批] `components/business/order/FulfillmentPricingReviewForm.tsx:218` — 移除第二层确认：逐票金额、总额与差额已在完整复核区呈现；按钮直接调用原确认函数，旧预览失效、版本凭据、重复点击和失败重试保护不变。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:946` — 移除“保存本次核价”泛化弹窗：页面已逐项核价；原 submit、必填检查、金额与版本校验不变。
+- [第二批] `components/business/order/OrderChangeFieldDiff.tsx` — 删除“计价影响 / 生产影响”通用预测列，保留字段旧值、新值与数量。后果在批准复核层显示一次。
+- [第二批] `components/business/order/AdminOrderDecisionPanel.tsx` — 下发、结算改为工单名称、数量 / 金额、状态变更；不再把内部工单号和版本作为确认主文案。
+
+- [第二批] `components/business/order/AdminOrderDecisionPanel.tsx:829` — 管理员确认的是是否接受变更；款式与费用由服务端按最新规则自动合并和重算。 → 核对本次变更。
+- [第二批] `components/business/order/AdminOrderDetailView.tsx:178` — 费用快照 → 费用记录。
+- [第二批] `components/business/order/AdminOrderEditor.tsx:1073` — ，保留修改记录与原报价快照。 → 。。
+- [第二批] `components/business/order/ExternalSalesOrderFormRail.tsx:226` — 提交时服务端会重新核价 → 预估费用。
+- [第二批] `components/business/order/OrderChangeReviewForm.tsx:1013` — 该组逐票运费已通过服务端重新预览，批准时将提交同一组数据。 → 运费已核对。。
+- [第二批] `components/business/order/OrderChangeReviewForm.tsx:306` — 修改审批计价预览（只读） → 变更费用。
+- [第二批] `components/business/order/OrderChangeReviewForm.tsx:255` — 取消申请已批准，工单已按服务端结算结果取消。 → 取消申请已批准，工单已取消。。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:965` —  票快递/耗材费仅确认已有快照或补录待核价金额。 →  票物流费用。。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:963` — 已有快照价  → 已报价 。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:956` — 正在确认报价快照… → 正在保存核价…。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:749` — 报价快照（只读） → 已报价。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:723` — 全部已有报价快照 → 已报价。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:603` — 报价快照（只读） → 已报价。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:585` — 全部已有报价快照 → 已报价。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:569` — 物流报价快照 → 物流报价。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:562` — 加工费报价快照 → 加工费报价。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:549` — 当前报价快照没有需要补录的人工金额。 → 无待补录金额。。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:491` — 正在读取工单报价快照… → 正在加载费用…。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:485` — 仅核对工单已保存的报价快照；自动报价只读，仅补录待人工核价项。 → 请补录待核价项。。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:182` — 打包耗材费（快照参考 → 打包耗材费（已报。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:159` — 快递费（快照建议 → 快递费（已报。
+- [第二批] `components/business/order/OrderPricingReviewForm.tsx:76` — 历史金额（无版本快照） → 历史金额。
+
+验证：隔离候选 553 文件，547 通过、3 失败、3 跳过；5815 测试，5756 通过、4 失败、55 跳过，失败集合与基线一致。类型检查通过。工单审批 6 视口浏览器测试、物流确认 9 个用例、核价提交 1 个用例通过。测试中的过时呈现断言更新为新的显示契约，金额 / 版本 / 重试断言保留。
+
 
 ## 第三批：账单、工资、通知与其他模块
 
