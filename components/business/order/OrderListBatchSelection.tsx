@@ -77,10 +77,12 @@ export function OrderListSelectionProvider({
   children,
   renderBatchActions,
   batchBarLayout = 'floating',
+  showCopyOrderNumbers = true,
 }: {
   items: readonly OrderListSelectionItem[];
   children: ReactNode;
   batchBarLayout?: BatchBarLayout;
+  showCopyOrderNumbers?: boolean;
   renderBatchActions?: (
     selectedItems: readonly OrderListSelectionItem[],
   ) => ReactNode;
@@ -105,6 +107,7 @@ export function OrderListSelectionProvider({
       onClear={() => value.dispatch({ type: 'clear' })}
       renderBatchActions={renderBatchActions}
       layout={batchBarLayout}
+      showCopyOrderNumbers={showCopyOrderNumbers}
     />
   );
 
@@ -123,15 +126,17 @@ export function OrderListSelectionProvider({
 export function OrderListRowSelection({
   orderId,
   orderNo,
+  displayName,
 }: {
   orderId: string;
   orderNo: string;
+  displayName?: string;
 }) {
   const selection = useOrderListSelection();
   return (
     <SelectionCheckbox
       checked={selection.selectedIds.has(orderId)}
-      label={`选择工单 ${orderNo}`}
+      label={`选择工单 ${displayName ?? orderNo}`}
       onChange={() => selection.dispatch({ type: 'toggle', orderId })}
     />
   );
@@ -163,10 +168,12 @@ export function OrderListBatchBar({
   onClear,
   renderBatchActions,
   layout = 'floating',
+  showCopyOrderNumbers = true,
 }: {
   selectedItems: readonly OrderListSelectionItem[];
   onClear: () => void;
   layout?: BatchBarLayout;
+  showCopyOrderNumbers?: boolean;
   renderBatchActions?: (
     selectedItems: readonly OrderListSelectionItem[],
   ) => ReactNode;
@@ -257,7 +264,7 @@ export function OrderListBatchBar({
         </p>
         <div className="hidden h-5 w-px bg-background/20 sm:block" aria-hidden="true" />
         <div className={cn('flex min-w-0 flex-1 flex-wrap gap-2', layout === 'inline' ? 'items-start' : 'items-center')}>
-          <Button
+          {showCopyOrderNumbers ? <Button
             type="button"
             variant="secondary"
             className="min-h-11 flex-1 sm:flex-none"
@@ -265,7 +272,7 @@ export function OrderListBatchBar({
           >
             <ClipboardCopy aria-hidden="true" />
             复制工单号
-          </Button>
+          </Button> : null}
           {renderBatchActions?.(selectedItems)}
           <Button
             type="button"
@@ -276,7 +283,7 @@ export function OrderListBatchBar({
             <X aria-hidden="true" />
             取消选择
           </Button>
-          <OrderListBatchFeedback feedback={visibleFeedback} />
+          {showCopyOrderNumbers ? <OrderListBatchFeedback feedback={visibleFeedback} /> : null}
         </div>
       </section>
     </>

@@ -59,12 +59,26 @@ describe('AdminOrderWorkspaceList', () => {
     expect(emptyQueue).not.toContain('清除筛选');
   });
 
-  it('keeps copying the order number separate from opening the order and shows future countdowns', () => {
+  it('uses the name as a detail link and hides identifiers and redundant metadata', () => {
     const order = { ...row(), promisedDaysLeft: 8, dueAlert: null };
-    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="copy-export" />);
-    expect(html).toContain(`aria-label="复制工单号：${order.orderNo}"`);
-    expect(html).toContain(`aria-label="${order.orderNo}"`);
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="name-export" />);
+    expect(html).toContain('href="/orders/order-1"');
+    expect(html).toContain('端午定制');
+    expect(html).toContain('客户甲');
     expect(html).toContain('剩 8 天');
+    expect(html).not.toContain(order.orderNo);
+    expect(html).not.toContain('复制工单号');
+    expect(html).not.toContain('业务员甲');
+    expect(html).not.toContain('局部烫金');
+    expect(html).not.toContain('v2');
+  });
+
+  it('keeps duplicate names linked to separate records and uses a readable empty-name fallback', () => {
+    const orders = [row(), { ...row(), id: 'order-2', orderNo: 'OTHER-ID' }, { ...row(), id: 'order-3', customName: '  ' }];
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={orders} customerFilterHrefs={{}} selectedExportRequestKey="duplicate-export" />);
+    for (const order of orders) expect(html).toContain(`href="/orders/${order.id}"`);
+    expect(html).toContain('未命名工单');
+    expect(html).not.toContain('OTHER-ID');
   });
 
   it('shows validated change facts in the row while preserving the request reason as fallback', () => {
@@ -86,13 +100,13 @@ describe('AdminOrderWorkspaceList', () => {
     );
 
     expect(html).toContain('data-slot="admin-order-workspace-list"');
-    expect(html).toContain('GD-260902-001');
+    expect(html).not.toContain('GD-260902-001');
     expect(html).toContain('/orders?customerRef=%E5%AE%A2%E6%88%B7%E7%94%B2');
-    expect(html).toContain('v2');
+    expect(html).not.toContain('v2');
     expect(html).toContain('端午定制');
     expect(html).toContain('客户甲');
-    expect(html).toContain('业务员甲');
-    expect(html).toContain('局部烫金');
+    expect(html).not.toContain('业务员甲');
+    expect(html).not.toContain('局部烫金');
     expect(html).toContain('2 款 · 2,000');
     expect(html).toContain('烫金');
     expect(html).toContain('1,200 / 2,000');

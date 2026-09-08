@@ -9,7 +9,7 @@ import {
   useTransition,
   type ReactNode,
 } from 'react';
-import { Copy, FileImage, Star } from 'lucide-react';
+import { FileImage, Star } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { setOrderStarredAction } from '@/actions/order-workspace';
@@ -56,6 +56,7 @@ export function AdminOrderWorkspaceList({
       <OrderListSelectionProvider
         key={selectionKey}
         batchBarLayout="inline"
+        showCopyOrderNumbers={false}
         items={orders.map((order) => ({
           id: order.id,
           orderNo: order.orderNo,
@@ -210,35 +211,23 @@ function AdminOrderRow({
       )}
     >
       <div className="flex flex-col items-center gap-1">
-        <OrderListRowSelection orderId={order.id} orderNo={order.orderNo} />
+        <OrderListRowSelection orderId={order.id} orderNo={order.orderNo} displayName={order.customName?.trim() || '未命名工单'} />
         <OrderStarButton order={order} onFeedback={onFeedback} />
       </div>
       <OrderThumbnail order={order} />
 
       <div className="min-w-0">
         <div className="flex min-w-0 flex-col items-start gap-1">
-          <span className="flex flex-wrap items-center gap-1.5">
-            <Button type="button" variant="link" aria-label={`复制工单号：${order.orderNo}`}
-              onClick={async () => {
-                try {
-                  if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
-                  await navigator.clipboard.writeText(order.orderNo);
-                  onFeedback({ tone: 'success', message: `已复制工单号 ${order.orderNo}` });
-                } catch {
-                  onFeedback({ tone: 'error', message: '复制失败，请检查浏览器的剪贴板权限后重试' });
-                }
-              }}
-              className="h-auto max-w-full gap-1 whitespace-normal p-0 text-left text-foreground">
-              <span className="admin-wrap-anywhere font-mono text-xs font-extrabold tracking-wide">{order.orderNo}</span>
-              <Copy aria-hidden="true" className="size-3" />
-            </Button>
-            <span className="rounded bg-foreground px-1.5 py-0.5 text-[9px] font-bold text-background">v{order.workOrderVersion}</span>
-            {order.isUrgent && <span className="rounded bg-warning/10 px-1.5 py-0.5 text-[9px] font-bold text-warning-foreground">急单</span>}
-          </span>
-          <Button type="button" variant="link" onClick={onOpen} aria-label={order.orderNo}
-            className="admin-wrap-anywhere h-auto max-w-full whitespace-normal p-0 text-left text-[12.5px] font-bold text-foreground">
-            {order.customName ?? '未命名工单'}
-          </Button>
+          <h3 className="m-0 flex min-w-0 max-w-full items-start gap-2">
+            <Link
+              href={`/orders/${order.id}`}
+              prefetch={false}
+              className="admin-wrap-anywhere inline-flex min-h-11 min-w-11 items-center rounded-sm text-left text-sm font-semibold text-foreground underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+            >
+              {order.customName?.trim() || '未命名工单'}
+            </Link>
+            {order.isUrgent && <span className="mt-2 shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-bold text-warning-foreground">急单</span>}
+          </h3>
         </div>
         <p className="mt-1 flex min-w-0 flex-wrap gap-x-1.5 text-[11px] text-muted-foreground">
           <Link
@@ -249,12 +238,6 @@ function AdminOrderRow({
           >
             {order.customer.name}
           </Link>
-          <span aria-hidden="true">·</span>
-          <span>{order.submitter.name}</span>
-          <span aria-hidden="true">·</span>
-          <span>{order.craftSummary}</span>
-          <span aria-hidden="true">·</span>
-          <span>{formatShanghai(order.submittedAt ?? order.createdAt)}</span>
         </p>
       </div>
 
@@ -348,7 +331,7 @@ function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow;
           onFeedback({ tone: 'error', message: result.message });
           return;
         }
-        onFeedback({ tone: 'success', message: `${order.orderNo} ${next ? '已添加星标' : '已取消星标'}` });
+        onFeedback({ tone: 'success', message: `${order.customName?.trim() || '未命名工单'} ${next ? '已添加星标' : '已取消星标'}` });
         router.refresh();
       } catch {
         setStarred(!next);
@@ -367,7 +350,7 @@ function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow;
         size="icon-xs"
         disabled={pending}
         aria-pressed={starred}
-        aria-label={`${starred ? '取消' : '添加'}星标：${order.orderNo}`}
+        aria-label={`${starred ? '取消' : '添加'}星标：${order.customName?.trim() || '未命名工单'}`}
         onClick={toggle}
         className={cn(starred && 'text-warning hover:text-warning-foreground')}
       >
@@ -484,15 +467,4 @@ function formatMoney(value: string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-function formatShanghai(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(value));
 }

@@ -9,6 +9,14 @@ import {
 import { orderRowSecondaryActions } from '../OrderRowActions';
 
 describe('order-list page selection contract', () => {
+  it('can omit the copy control and feedback while preserving batch actions', () => {
+    const html = renderToStaticMarkup(<OrderListBatchBar selectedItems={[{ id: 'order-1', orderNo: 'HIDDEN-ID', status: OrderStatus.CONFIRMED, canSchedule: false }]} onClear={() => {}} showCopyOrderNumbers={false} renderBatchActions={() => <button>下发生产</button>} />);
+    expect(html).not.toContain('复制工单号');
+    expect(html).not.toContain('order-list-batch-feedback');
+    expect(html).toContain('下发生产');
+    expect(html).toContain('取消选择');
+  });
+
   it('toggles one row, the current page, and clear without retaining stale IDs', () => {
     expect(
       reduceOrderListSelection([], { type: 'toggle', orderId: 'order-1' }),
