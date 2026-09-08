@@ -27,6 +27,7 @@ const { dbMock } = vi.hoisted(() => {
     orderItem: { findFirst: ReturnType<typeof vi.fn> };
     craft: { findMany: ReturnType<typeof vi.fn> };
     party: { findUnique: ReturnType<typeof vi.fn> };
+    user: { findUnique: ReturnType<typeof vi.fn> };
     product: { findMany: ReturnType<typeof vi.fn> };
     material: { findMany: ReturnType<typeof vi.fn> };
     customerPriceBook: { findMany: ReturnType<typeof vi.fn> };
@@ -85,6 +86,7 @@ const { dbMock } = vi.hoisted(() => {
     orderItem: { findFirst: vi.fn() },
     craft: { findMany: vi.fn() },
     party: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn() },
     product: { findMany: vi.fn() },
     material: { findMany: vi.fn() },
     customerPriceBook: { findMany: vi.fn() },
@@ -520,6 +522,7 @@ beforeEach(() => {
   dbMock.orderItem.findFirst.mockReset().mockResolvedValue(null);
   dbMock.craft.findMany.mockReset();
   dbMock.party.findUnique.mockReset();
+  dbMock.user.findUnique.mockReset();
   dbMock.product.findMany.mockReset();
   dbMock.material.findMany.mockReset().mockImplementation(
     async ({ where }: { where: { category?: string; name?: { in: string[] } } }) =>
@@ -4920,6 +4923,78 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       ...overrides,
     };
   }
+
+  describe('admin external sales association', () => {
+    const original = { id: 'sales-1', displayName: '原销售', username: 'old-sales' };
+    const target = { id: 'sales-2', displayName: '新销售', username: 'new-sales' };
+    const association = {
+      submitterId: original.id, submitter: original,
+      settlementType: OrderSettlementType.EXTERNAL_SALES, status: OrderStatus.DRAFT,
+      settledAt: null, settledFee: null, shippedAt: null, finishedAt: null,
+      sourceOrderId: null, agentMonthlyBillItem: null,
+      _count: { billItems: 0, csSalesEntries: 0, reworkOrders: 0, changeRequests: 0 },
+    };
+    beforeEach(() => {
+      dbMock.order.findFirst.mockResolvedValue(snapshot({ settlementType: OrderSettlementType.EXTERNAL_SALES }));
+      dbMock.order.findUnique.mockResolvedValue(association);
+      dbMock.user.findUnique.mockResolvedValue({ ...target, role: Role.SALES, isActive: true });
+    });
+    it('updates only ownership under CAS and records readable before/after account snapshots', async () => {
+      await updateOrderFields('order-1', editInput({ externalSalesUserId: ' sales-2 ' }), ownerActor);
+      expect(dbMock.order.updateMany).toHaveBeenCalledWith({
+        where: { id: 'order-1', editVersion: 7 }, data: { submitterId: 'sales-2' },
+      });
+      expect(dbMock.orderLog.create).toHaveBeenCalledWith({ data: {
+        orderId: 'order-1', operatorId: ownerActor.id, action: 'UPDATE',
+        changedFields: { submitterId: { before: original, after: target } },
+      } });
+      expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
+      expect(dbMock.orderShipment.updateMany).not.toHaveBeenCalled();
+    });
+    it.each([Role.SALES, Role.CUSTOMER_SERVICE])('rejects reassignment from %s even for an owned order', async (role) => {
+      await expect(updateOrderFields('order-1', editInput({ externalSalesUserId: 'sales-2' }), { id: 'sales-1', role })).rejects.toThrow('只有管理员');
+      expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    });
+    it.each([null, { ...target, role: Role.ADMIN, isActive: true }, { ...target, role: Role.CUSTOMER_SERVICE, isActive: true }, { ...target, role: Role.SALES, isActive: false }])('rejects inactive, absent or non-sales target %j', async (account) => {
+      dbMock.user.findUnique.mockResolvedValue(account);
+      await expect(updateOrderFields('order-1', editInput({ externalSalesUserId: 'sales-2' }), ownerActor)).rejects.toThrow('所选账号');
+      expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    });
+    it.each([
+      { settlementType: OrderSettlementType.INTERNAL_SALES },
+      { settlementType: OrderSettlementType.FACTORY_DIRECT },
+      { settlementType: OrderSettlementType.NO_CHARGE },
+      { status: OrderStatus.CONFIRMED },
+      { settledAt: new Date() }, { settledFee: new Decimal(0) }, { shippedAt: new Date() },
+      { agentMonthlyBillItem: { id: 'bill-item' } },
+      { _count: { ...association._count, billItems: 1 } },
+      { _count: { ...association._count, csSalesEntries: 1 } },
+      { _count: { ...association._count, changeRequests: 1 } },
+      { _count: { ...association._count, reworkOrders: 1 } },
+      { sourceOrderId: 'source' },
+    ])('rejects frozen financial or related-order facts %j', async (overrides) => {
+      dbMock.order.findUnique.mockResolvedValue({ ...association, ...overrides });
+      await expect(updateOrderFields('order-1', editInput({ externalSalesUserId: 'sales-2' }), ownerActor)).rejects.toBeInstanceOf(OrderInvariantError);
+      expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+      expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+    });
+    it('keeps an unchanged historical account without revalidating its current role', async () => {
+      dbMock.user.findUnique.mockResolvedValue(null);
+      const result = await updateOrderFields('order-1', editInput({ externalSalesUserId: 'sales-1' }), ownerActor);
+      expect(result.changed).toBe(false);
+      expect(dbMock.user.findUnique).not.toHaveBeenCalled();
+    });
+    it('rejects a stale reassignment before querying accounts', async () => {
+      await expect(updateOrderFields('order-1', { expectedEditVersion: 6, externalSalesUserId: 'sales-2' }, ownerActor)).rejects.toThrow('刷新');
+      expect(dbMock.user.findUnique).not.toHaveBeenCalled();
+      expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    });
+    it('does not allow direct submitter or settlement fields through the general whitelist', async () => {
+      const result = await updateOrderFields('order-1', editInput({ submitterId: 'sales-2', settlementType: 'INTERNAL_SALES', createdById: 'sales-2' }), ownerActor);
+      expect(result.changed).toBe(false);
+      expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    });
+  });
 
   it('blocks ordinary editing while an approval is pending', async () => {
     dbMock.order.findFirst.mockResolvedValue(

@@ -2,6 +2,8 @@
 
 import { useActionState, useState, type ReactNode } from 'react';
 import type { CustomerPartyOption } from '@/lib/party';
+import type { OrderExternalSalesAssociation } from '@/lib/order/external-sales-association';
+import { OrderExternalSalesField } from './OrderExternalSalesField';
 import type { EditableShipment } from '@/lib/order/edit-shipment-fields';
 import { OrderReceiverContactFields } from './OrderReceiverContactFields';
 import { ActionNotice } from '@/components/ui-business';
@@ -37,6 +39,7 @@ type Props = {
   fieldset: EditableFieldset;
   initial: EditOrderInitialValues;
   customers?: readonly CustomerPartyOption[];
+  externalSalesAssociation?: OrderExternalSalesAssociation;
   shipments?: readonly EditableShipment[];
   isExternalSales?: boolean;
   isSfCollect?: boolean;
@@ -56,6 +59,7 @@ export function EditOrderForm({
   fieldset,
   initial,
   customers = [],
+  externalSalesAssociation,
   shipments,
   isExternalSales = false,
   isSfCollect = false,
@@ -71,7 +75,7 @@ export function EditOrderForm({
   const isShippingOnly = fieldset === 'SHIPPING_ONLY';
   const [customerId, setCustomerId] = useState(initial.customerPartyId ?? '');
   const [customerRef, setCustomerRef] = useState(initial.customerRef ?? '');
-  const selectedCustomer = customers.find(
+  const selectedCustomer = externalSalesAssociation ? undefined : customers.find(
     (customer) => customer.id === customerId,
   );
   const [urgent, setUrgent] = useState(initial.isUrgent);
@@ -182,7 +186,13 @@ export function EditOrderForm({
             maxLength={64}
             errors={fieldErrors(state, 'customerRef')}
           />
-          <div className="min-w-0 space-y-1.5">
+          {externalSalesAssociation ? (
+            <OrderExternalSalesField
+              association={externalSalesAssociation}
+              disabled={pendingLocked || isShippingOnly}
+              error={fieldErrors(state, 'externalSalesUserId')[0]}
+            />
+          ) : <div className="min-w-0 space-y-1.5">
             <Label htmlFor="customerPartyId">关联客户</Label>
             <select
               id="customerPartyId"
@@ -236,7 +246,7 @@ export function EditOrderForm({
                 {fieldErrors(state, 'customerPartyId')[0]}
               </p>
             ) : null}
-          </div>
+          </div>}
           {delivery === undefined ? (
             <>
               <div className="sm:col-span-2">

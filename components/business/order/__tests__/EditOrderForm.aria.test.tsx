@@ -53,6 +53,20 @@ function render(isUrgent = false) {
 }
 
 describe('EditOrderForm 字段错误的 aria 连线', () => {
+  it('connects the external sales account field error to its control', () => {
+    const previous = actionState.current.fieldErrors;
+    actionState.current.fieldErrors = { externalSalesUserId: ['请选择关联外部销售'] };
+    try {
+      const html = renderToStaticMarkup(<EditOrderForm orderId="order-1" expectedEditVersion={7} fieldset="FULL" initial={initial}
+        externalSalesAssociation={{ current: { id: 'sales-1', displayName: '渠道张先生', username: 'sales-one' }, options: [], blockedReason: null }} />);
+      expect(html).toMatch(/id="externalSalesUserId"[^>]*aria-invalid="true"/);
+      expect(html).toContain('aria-describedby="external-sales-hint external-sales-error"');
+      expect(html).toContain('id="external-sales-error"');
+      expect(html).not.toContain('name="customerPartyId"');
+    } finally {
+      actionState.current.fieldErrors = previous;
+    }
+  });
   it('出错的字段标 aria-invalid，未出错的不标', () => {
     const html = render();
     // customName 有错

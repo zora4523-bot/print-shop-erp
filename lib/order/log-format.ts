@@ -8,6 +8,7 @@ const FIELD_LABELS: Record<string, string> = {
   // Top-level Order fields the edit form can touch
   customName: '工单名称',
   customerRef: '客户名称/简称',
+  submitterId: '关联外部销售',
   receiverName: '收货人',
   receiverPhone: '收货电话',
   receiverAddress: '收货地址',
@@ -97,6 +98,15 @@ export function formatLogValue(
 ): string {
   if (value === null || value === undefined || value === '') return '—';
   if (!hasKnownField(fieldName)) return UNKNOWN_VALUE_LABEL;
+  if (fieldName === 'submitterId') {
+    if (typeof value === 'object') {
+      const account = value as { displayName?: unknown; username?: unknown };
+      if (typeof account.displayName === 'string' && typeof account.username === 'string') {
+        return `${account.displayName} · ${account.username}`;
+      }
+    }
+    return '账号信息未记录';
+  }
   if (typeof value === 'boolean') return value ? '是' : '否';
   if (fieldName === 'status' && typeof value === 'string') {
     return STATUS_LABELS[value] ?? UNKNOWN_ORDER_STATUS_LABEL;

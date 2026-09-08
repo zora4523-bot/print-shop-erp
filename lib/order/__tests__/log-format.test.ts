@@ -27,6 +27,11 @@ describe('fieldLabel', () => {
 });
 
 describe('formatLogValue', () => {
+  it('shows external account snapshots without exposing internal user ids', () => {
+    expect(fieldLabel('submitterId')).toBe('关联外部销售');
+    expect(formatLogValue('submitterId', { id: 'internal-id', displayName: '渠道张先生', username: 'zhang' })).toBe('渠道张先生 · zhang');
+    expect(formatLogValue('submitterId', 'internal-id')).toBe('账号信息未记录');
+  });
   it('renders booleans as 是 / 否', () => {
     expect(formatLogValue('isUrgent', true)).toBe('是');
     expect(formatLogValue('isUrgent', false)).toBe('否');

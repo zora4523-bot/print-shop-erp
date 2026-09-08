@@ -10,6 +10,7 @@ import {
   editableFieldsetForStatus,
 } from '@/lib/order/editable-fields';
 import { listCustomerPartyOptions } from '@/lib/party';
+import { getOrderExternalSalesAssociation } from '@/lib/order/external-sales-association';
 import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
 import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
 import { isOrderPricingReviewAllowedStatus } from '@/lib/order/pricing-status';
@@ -60,9 +61,10 @@ export default async function EditOrderPage({ params }: PageProps) {
     (request) => request.status === 'PENDING',
   );
   const canModify = canRequestOrderModification(user, order, Boolean(pending));
-  const [customers, products] = await Promise.all([
-    listCustomerPartyOptions(order.customerPartyId),
+  const [customers, products, externalSalesAssociation] = await Promise.all([
+    user.role === Role.ADMIN ? Promise.resolve([]) : listCustomerPartyOptions(order.customerPartyId),
     canModify && order.items.length > 0 ? listActiveOrderChangeCatalogProducts() : Promise.resolve([]),
+    getOrderExternalSalesAssociation(order.id, user),
   ]);
   const external =
     'settlementType' in order &&
@@ -110,6 +112,7 @@ export default async function EditOrderPage({ params }: PageProps) {
         expectedEditVersion={order.editVersion}
         fieldset={fieldset}
         customers={customers}
+        externalSalesAssociation={externalSalesAssociation}
         shipments={order.shipments}
         packagingDetails={<OrderSavedPackaging order={order} />}
         isExternalSales={external}

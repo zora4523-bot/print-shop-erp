@@ -29,6 +29,14 @@ const initial = {
   promisedDate: '2026-09-10',
   isUrgent: true,
 };
+const externalSalesAssociation = {
+  current: { id: 'sales-1', displayName: '原外部销售', username: 'sales-one' },
+  options: [
+    { id: 'sales-1', displayName: '原外部销售', username: 'sales-one' },
+    { id: 'sales-2', displayName: '新外部销售', username: 'sales-two' },
+  ],
+  blockedReason: null,
+};
 const shipments = [
   {
     id: 'shipment-1',
@@ -133,7 +141,7 @@ describe('complete order editing', () => {
       it(`${width}×${height} ${theme}: all delivery fields remain accessible`, async () => {
         await page.viewport(width, height);
         document.documentElement.classList.toggle('dark', theme === 'dark');
-        mount();
+        mount({ externalSalesAssociation });
         await expect
           .element(page.getByRole('button', { name: '保存', exact: true }))
           .toBeVisible();
@@ -192,6 +200,27 @@ describe('complete order editing', () => {
         page.getByRole('textbox', { name: '收货电话', exact: true }).nth(1),
       )
       .toHaveValue('13700137000');
+  });
+  it('admin changes an external sales account without overwriting customer or delivery data', async () => {
+    mount({ externalSalesAssociation });
+    expect(host.querySelector('[name="customerPartyId"]')).toBeNull();
+    await page.getByRole('combobox', { name: '关联外部销售' }).selectOptions('sales-2');
+    await expect.element(page.getByRole('textbox', { name: '客户名称/简称（选填）' })).toHaveValue('客户简称');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const data = save.mock.calls[0][2] as FormData;
+    expect(data.get('externalSalesUserId')).toBe('sales-2');
+    expect(data.has('customerPartyId')).toBe(false);
+    expect(data.get('customerRef')).toBe('客户简称');
+    expect(JSON.parse(String(data.get('shipments'))).map((row: { receiverAddress: string }) => row.receiverAddress)).toEqual(shipments.map((row) => row.receiverAddress));
+    await expect.element(page.getByRole('combobox', { name: '关联外部销售' })).toHaveValue('sales-2');
+  });
+  it('retains a historical unavailable account and explains a frozen association', async () => {
+    mount({ externalSalesAssociation: { ...externalSalesAssociation, options: [], blockedReason: '工单已确认，不能更换关联外部销售。' } });
+    const field = page.getByRole('combobox', { name: '关联外部销售' });
+    await expect.element(field).toBeDisabled();
+    await expect.element(field).toHaveValue('sales-1');
+    await expect.element(page.getByText('工单已确认，不能更换关联外部销售。')).toBeVisible();
   });
   it('requires an external name and keeps packaging supplements out of basic information', async () => {
     mount();

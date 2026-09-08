@@ -989,6 +989,26 @@ describe('finishOrderAction', () => {
 });
 
 describe('updateOrderAction', () => {
+  it('forwards the external sales account separately from customer master data', async () => {
+    permissionsMock.requirePermission.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+    await expect(updateOrderAction('o1', null, editFd({ externalSalesUserId: ' sales-2 ' }))).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(orderMock.updateOrderFields).toHaveBeenCalledWith('o1', {
+      expectedEditVersion: 7, externalSalesUserId: 'sales-2',
+    }, expect.objectContaining({ role: Role.ADMIN }));
+  });
+
+  it('rejects an empty external sales account instead of clearing ownership', async () => {
+    const result = await updateOrderAction('o1', null, editFd({ externalSalesUserId: '' }));
+    expect(result).toMatchObject({ status: 'invalid', fieldErrors: { externalSalesUserId: expect.any(Array) } });
+    expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
+  });
+
+  it('shows domain authorization failures for attempted account reassignment', async () => {
+    orderMock.updateOrderFields.mockRejectedValue(new MockOrderInvariantError('只有管理员可以更换关联外部销售'));
+    const result = await updateOrderAction('o1', null, editFd({ externalSalesUserId: 'sales-2' }));
+    expect(result).toEqual({ status: 'error', message: '只有管理员可以更换关联外部销售' });
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
   it("first-line requirePermission('order:create')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');

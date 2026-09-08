@@ -39,6 +39,11 @@ import type {
 import { getOrderScopeFilter } from './auth/order-scope';
 import { orderCascadeLockKey } from './order/locks';
 import {
+  externalSalesAssociationBlockReason,
+  externalSalesAssociationSelect,
+  type ExternalSalesAccountOption,
+} from './order/external-sales-association';
+import {
   collectOutsourceCraftIds,
   findUndercoveredOutsourceItems,
   outsourceCoverageApplies,
@@ -3149,6 +3154,44 @@ async function updateOrderEditableFields(
         : { isUrgent: command.isUrgent },
       allowed,
     );
+    let externalSalesChange: { before: ExternalSalesAccountOption; after: ExternalSalesAccountOption } | undefined;
+    if (command.kind === 'full-form' && 'externalSalesUserId' in command.input) {
+      if (actor.role !== Role.ADMIN) {
+        throw new OrderInvariantError('只有管理员可以更换关联外部销售');
+      }
+      const targetId = command.input.externalSalesUserId;
+      if (typeof targetId !== 'string' || !targetId.trim() || targetId.trim().length > 64) {
+        throw new OrderInvariantError('请选择关联外部销售账号');
+      }
+      if (targetId.trim() !== order.submitterId) {
+        // Serialize against writers outside the cascade lock before checking
+        // financial relationships. The final editVersion CAS still applies.
+        await tx.$executeRaw`SELECT id FROM "Order" WHERE id = ${orderId} FOR UPDATE`;
+        const associationOrder = await tx.order.findUnique({
+          where: { id: orderId },
+          select: externalSalesAssociationSelect,
+        });
+        if (!associationOrder) throw new OrderInvariantError('工单不存在或无权访问');
+        const reason = externalSalesAssociationBlockReason(associationOrder);
+        if (reason) throw new OrderInvariantError(reason);
+        // Prevent deactivation / role changes between validation and commit.
+        await tx.$executeRaw`SELECT id FROM "User" WHERE id = ${targetId.trim()} FOR SHARE`;
+        const target = await tx.user.findUnique({
+          where: { id: targetId.trim() },
+          select: { id: true, role: true, isActive: true, displayName: true, username: true },
+        });
+        if (!target || !target.isActive || target.role !== Role.SALES) {
+          throw new OrderInvariantError('所选账号不存在、已停用或不是外部销售，请重新选择');
+        }
+        // Ownership and future billing share submitterId. Preserve the creator,
+        // role snapshot, settlement direction, customer data and all prices.
+        nextFields.submitterId = target.id;
+        externalSalesChange = {
+          before: associationOrder.submitter,
+          after: { id: target.id, displayName: target.displayName, username: target.username },
+        };
+      }
+    }
     if (
       'customName' in nextFields &&
       order.settlementType === OrderSettlementType.EXTERNAL_SALES
@@ -3283,7 +3326,7 @@ async function updateOrderEditableFields(
         orderId,
         operatorId: actor.id,
         action: 'UPDATE',
-        changedFields: { ...changes, ...(shipmentEdits.length ? { shipments: shipmentEdits.map((edit) => ({ sequence: edit.sequence, before: edit.before, after: edit.data })) } : {}) },
+        changedFields: { ...changes, ...(externalSalesChange ? { submitterId: externalSalesChange } : {}), ...(shipmentEdits.length ? { shipments: shipmentEdits.map((edit) => ({ sequence: edit.sequence, before: edit.before, after: edit.data })) } : {}) },
       },
     });
 

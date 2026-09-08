@@ -2874,6 +2874,7 @@ export const editOrderShipmentSchema = z.object({
 
 export const updateEditableOrderSchema = z.object({
   expectedEditVersion: expectedOrderEditVersionField,
+  externalSalesUserId: requiredTrimmedText('关联外部销售', 64).optional(),
   customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
   shipments: z.array(editOrderShipmentSchema).max(10, '单工单不超过 10 个收货地址').optional().refine((rows) => !rows || new Set(rows.map((row) => row.id)).size === rows.length, '收货地址不能重复'),
   customName: optionalTrimmedText('工单名称', 100).optional(),

@@ -383,7 +383,7 @@ export async function updateOrderAction(
   const raw: Record<string, unknown> = {
     expectedEditVersion: formData.get('expectedEditVersion'),
   };
-  for (const key of FULL_EDITABLE_FIELDS) {
+  for (const key of [...FULL_EDITABLE_FIELDS, 'externalSalesUserId']) {
     const value = formData.get(key);
     // Reject non-string uploads at the action boundary so File / Blob
     // can't slip into fields the schema expects text for.
