@@ -271,6 +271,7 @@ export function OrderChangePricingPreviewPanel({
   return (
     <section
       aria-label="审批计价预览"
+      data-slot="order-change-pricing-preview"
       className="space-y-3 rounded-lg border bg-muted/20 p-3"
     >
       <div>
