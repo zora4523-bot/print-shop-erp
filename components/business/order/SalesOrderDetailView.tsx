@@ -19,6 +19,7 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { StatusBadge as UiStatusBadge } from '@/components/ui-business';
@@ -129,7 +130,7 @@ export function SalesOrderDetailView({
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h1 className="admin-wrap-anywhere min-w-0 font-sans text-xl font-semibold tabular-nums">
-                {order.orderNo}
+                {order.customName?.trim() || '未命名工单'}
               </h1>
               <SalesDetailStatusBadge label={status.label} tone={status.tone} />
               {order.isUrgent ? (
@@ -139,9 +140,9 @@ export function SalesOrderDetailView({
                 <Badge variant="outline">顺丰到付</Badge>
               ) : null}
             </div>
-            <p className="admin-wrap-anywhere mt-2 text-base font-semibold">
-              {order.customName ?? '未命名工单'}
-            </p>
+            <Disclosure className="mt-2"><DisclosureSummary>工单信息</DisclosureSummary>
+              <p className="admin-wrap-anywhere pb-3">{order.orderNo}</p>
+            </Disclosure>
             <p className="admin-wrap-anywhere mt-1 text-sm text-muted-foreground">
               {order.customerRef ?? '未填客户'} · 第 {order.revision} 版 ·{' '}
               {order.items.length} 款{' '}
@@ -153,12 +154,6 @@ export function SalesOrderDetailView({
           </div>
 
           <div className="flex min-w-0 flex-wrap items-start gap-2 lg:justify-end">
-            <Link
-              href="/orders"
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              返回工单列表
-            </Link>
             {canEdit ? (
               <Link
                 href={`/orders/${order.id}/edit`}

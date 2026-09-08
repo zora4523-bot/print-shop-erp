@@ -1,11 +1,3 @@
-.surface {
-  --editor-header-offset: 0px;
-}
-
-.toolbar {
-  top: var(--editor-header-offset);
-}
-
 .item {
   min-width: 0;
   padding: 12px 15px;

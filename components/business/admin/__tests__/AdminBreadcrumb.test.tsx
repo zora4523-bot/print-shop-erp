@@ -98,3 +98,21 @@ describe('AdminBreadcrumb SSR', () => {
     expect(text).not.toContain('员工工资规则');
   });
 });
+
+
+describe('order navigation hierarchy', () => {
+  it.each(['/orders/cmtsnmyzk0000sv0rluj2fo5m', '/orders/e2e-custom-id', '/orders/e2e-custom-id/edit'])('uses a generic detail label at %s', (path) => {
+    usePathnameMock.mockReturnValue(path);
+    const html = renderToStaticMarkup(<AdminBreadcrumb />);
+    expect(html).toContain('工单详情');
+    expect(html).toContain('href="/orders"');
+    expect(visibleText(html)).not.toContain('e2e-custom-id');
+    expect(html).not.toContain('hidden shrink-0 lg:inline-flex');
+  });
+  it('keeps creation distinct from detail', () => {
+    usePathnameMock.mockReturnValue('/orders/new');
+    const html = renderToStaticMarkup(<AdminBreadcrumb />);
+    expect(html).toContain('创建工单');
+    expect(html).not.toContain('工单详情');
+  });
+});

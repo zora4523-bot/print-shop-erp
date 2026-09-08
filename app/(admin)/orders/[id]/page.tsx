@@ -1718,7 +1718,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <div className="min-w-0">
             <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
               <span className="admin-wrap-anywhere min-w-0 font-sans tabular-nums">
-                {order.orderNo}
+                {order.customName?.trim() || '未命名工单'}
               </span>
               <OrderStatusBadge status={order.status} />
               {order.isUrgent ? (
@@ -1747,11 +1747,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 <Badge variant="outline">重做单</Badge>
               ) : null}
             </h1>
-            {order.customName ? (
-              <p className="admin-wrap-anywhere mt-1 text-base font-semibold text-foreground">
-                {order.customName}
-              </p>
-            ) : null}
+            <details className="mt-2"><summary className="flex min-h-11 cursor-pointer items-center">工单信息</summary>
+              <p className="admin-wrap-anywhere py-2">{order.orderNo} · v{order.workOrderVersion}</p>
+            </details>
             <p className="admin-wrap-anywhere text-sm text-muted-foreground">
               提交人 {order.submitter.displayName}（{roleLabel(order.submitter.role)}）
               {order.promisedDate

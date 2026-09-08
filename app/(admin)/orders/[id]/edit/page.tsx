@@ -322,7 +322,7 @@ export default async function EditOrderPage({ params }: PageProps) {
         <div className="min-w-0">
           <h1 className="break-words text-xl font-semibold">
             编辑工单{' '}
-            <span className="text-base tabular-nums">{order.orderNo}</span>
+            <span className="text-base">{order.customName?.trim() || '未命名工单'}</span>
           </h1>
           <div className="mt-2">
             <OrderStatusBadge status={order.status} />

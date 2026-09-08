@@ -129,11 +129,9 @@ async function expectHashTargetUnobscured(target: HTMLElement) {
     previousTop = top;
   }
   expect(stableFrames, '锚点滚动应当停止后再检查遮挡').toBe(4);
-  const stickyHeader = [...host.querySelectorAll<HTMLElement>('div')].find((element) =>
-    getComputedStyle(element).position === 'sticky' && Boolean(element.querySelector('[aria-label="复制工单号"]')));
-  expect(stickyHeader, '工单吸顶标题栏').toBeDefined();
+  expect(getComputedStyle(host.querySelector('[data-slot="order-page-heading"]')!).position).toBe('static');
   const targetRect = target.getBoundingClientRect();
-  expect(targetRect.top, '目标不能被吸顶标题栏遮住').toBeGreaterThanOrEqual(stickyHeader!.getBoundingClientRect().bottom - 1);
+  expect(targetRect.top, '目标不能被全局导航遮挡').toBeGreaterThanOrEqual(0);
   const title = target.querySelector<HTMLElement>('h3')!;
   const titleRect = title.getBoundingClientRect();
   expect(titleRect.bottom, '定位后的标题完整处于视口内').toBeLessThanOrEqual(window.innerHeight);
@@ -203,6 +201,9 @@ describe('admin order detail design and interaction gates', () => {
     await page.viewport(1280, 900);
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     renderDetail();
+    await expect.element(page.getByRole('heading', { name: '中秋礼品红包', exact: true })).toBeVisible();
+    expect(host.querySelector<HTMLElement>('[aria-label="复制工单号"]')!.checkVisibility()).toBe(false);
+    await page.getByText('工单信息', { exact: true }).click();
     await page.getByRole('button', { name: '复制工单号', exact: true }).click();
     expect(writeText).toHaveBeenCalledExactlyOnceWith('GD-260908-DETAIL-001');
   });

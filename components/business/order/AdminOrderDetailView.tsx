@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ChevronLeft, ChevronRight, Copy, FileDown, ImageOff, Pencil } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, FileDown, ImageOff, Pencil } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
@@ -109,17 +109,22 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
     locate(id);
   }}>
     <OrderDetailStickyScope header={<div className={styles.header}>
-      <Link href="/orders" className={cn(buttonVariants({ variant: 'ghost' }), styles.back)}><ArrowLeft aria-hidden="true" />工单列表</Link>
       <div className={styles.identity}>
-        <h1><Button type="button" variant="ghost" aria-label="复制工单号" className={styles.number}
-          onClick={async () => {
-            try { await navigator.clipboard.writeText(model.no); setCopyNotice({ text: '工单号已复制', failed: false }); }
-            catch { setCopyNotice({ text: '复制失败，请手动复制工单号', failed: true }); }
-          }}>{model.no}<Copy aria-hidden="true" className="size-3.5 shrink-0" /></Button></h1>
-        <span className={styles.version}>v{model.version}</span>
+        <h1 className="admin-wrap-anywhere text-xl font-semibold">{model.name?.trim() || '未命名工单'}</h1>
         <StatusBadge tone={ORDER_STATUS_REGISTRY[model.status].tone}>{ORDER_STATUS_REGISTRY[model.status].label}</StatusBadge>
         {model.isUrgent ? <StatusBadge tone="warning">急单</StatusBadge> : null}
         <p className={styles.meta}>{model.customer} · {model.sales} · {model.craft}</p>
+        <Disclosure className="basis-full">
+          <DisclosureSummary>工单信息</DisclosureSummary>
+          <div className="flex flex-wrap items-center gap-3 pb-3">
+            <Button type="button" variant="ghost" aria-label="复制工单号" className={styles.number}
+              onClick={async () => {
+                try { await navigator.clipboard.writeText(model.no); setCopyNotice({ text: '工单号已复制', failed: false }); }
+                catch { setCopyNotice({ text: '复制失败，请手动复制工单号', failed: true }); }
+              }}>{model.no}<Copy aria-hidden="true" className="size-3.5 shrink-0" /></Button>
+            <span className={styles.version}>版本 v{model.version}</span>
+          </div>
+        </Disclosure>
       </div>
       <div className={styles.headerActions}>
         <Link href={`/api/orders/${model.id}/pdf`} className={buttonVariants({ variant: 'outline' })}><FileDown aria-hidden="true" />工单 PDF</Link>

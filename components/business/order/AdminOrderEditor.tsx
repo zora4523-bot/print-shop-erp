@@ -1,5 +1,7 @@
 'use client';
 
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
+
 import {
   useEffect,
   useRef,
@@ -185,7 +187,6 @@ export function changedAdminOrderFields(
 
 export function AdminOrderEditor(props: Props) {
   const router = useRouter();
-  const surfaceRef = useRef<HTMLDivElement>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
   const fileButtonRef = useRef<HTMLButtonElement | null>(null);
   const detailsButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -198,21 +199,6 @@ export function AdminOrderEditor(props: Props) {
   const fileItem = props.items.find((item) => item.id === filesFor);
   const detailItem = props.items.find((item) => item.id === detailsFor);
   const formId = 'admin-order-edit-form';
-  useEffect(() => {
-    const surface = surfaceRef.current;
-    const shell = surface?.closest('main');
-    const header = shell?.querySelector<HTMLElement>(':scope > header');
-    if (!surface || !header) return;
-    const update = () =>
-      surface.style.setProperty(
-        '--editor-header-offset',
-        `${header.getBoundingClientRect().height}px`,
-      );
-    const observer = new ResizeObserver(update);
-    observer.observe(header);
-    update();
-    return () => observer.disconnect();
-  }, []);
   const [drafts, setDrafts] = useState(() => props.items.map(initialDraft));
   const [date, setDate] = useState(props.form.initial.promisedDate ?? '');
   const baseline = useRef<Record<string, string> | null>(null);
@@ -548,12 +534,11 @@ export function AdminOrderEditor(props: Props) {
   }, [locked]);
   return (
     <div
-      ref={surfaceRef}
-      className={`${styles.surface} mx-auto min-w-0 max-w-[880px] space-y-3 pb-8 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:shadow-none [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11`}
+      className={`mx-auto min-w-0 max-w-[880px] space-y-3 pb-8 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:shadow-none [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11`}
     >
       <header
         aria-label="编辑工单操作"
-        className={`${styles.toolbar} sticky z-20 -mx-1 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-1 py-3`}
+        className={`-mx-1 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-1 py-3`}
       >
         <div className="flex min-w-0 items-center gap-3">
           <Button
@@ -575,8 +560,9 @@ export function AdminOrderEditor(props: Props) {
           <div className="min-w-0">
             <h1 className="text-lg font-semibold">编辑工单</h1>
             <p className="break-all font-mono text-xs text-muted-foreground">
-              {props.orderNo} · v{props.workOrderVersion}
+              {props.form.initial.customName?.trim() || '未命名工单'}
             </p>
+            <Disclosure><DisclosureSummary>工单信息</DisclosureSummary><p className="break-all pb-3 text-xs">{props.orderNo} · v{props.workOrderVersion}</p></Disclosure>
           </div>
           <OrderStatusBadge status={props.status} />
         </div>

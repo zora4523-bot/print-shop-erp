@@ -202,6 +202,7 @@ afterEach(() => {
 describe('administrator edit design', () => {
   it('shows the same work-order version as detail and print, not the concurrency revision', async () => {
     mount({ revision: 7, workOrderVersion: 3 });
+    await page.getByText('工单信息', { exact: true }).click();
     await expect.element(page.getByText('GD-260908-001 · v3', { exact: true })).toBeVisible();
     expect(host.textContent).not.toContain('GD-260908-001 · v7');
   });
@@ -848,11 +849,13 @@ describe('administrator edit design', () => {
       const editorHeader = host.querySelector<HTMLElement>('#admin-main header:not([data-slot="admin-header"])')!;
       window.scrollTo(0, 400);
       await expect.poll(() => window.scrollY).toBeGreaterThan(100);
-      await expect.poll(() => editorHeader.getBoundingClientRect().top).toBeGreaterThanOrEqual(shellHeader.getBoundingClientRect().bottom);
+      expect(getComputedStyle(editorHeader).position).toBe('static');
+      expect(editorHeader.getBoundingClientRect().top).toBeLessThan(shellHeader.getBoundingClientRect().bottom);
       // Safe-area or enlarged text can change the shared header's actual height.
       shellHeader.style.minHeight = '88px';
       await expect.poll(() => shellHeader.getBoundingClientRect().height).toBeGreaterThanOrEqual(88);
-      await expect.poll(() => editorHeader.getBoundingClientRect().top).toBeGreaterThanOrEqual(shellHeader.getBoundingClientRect().bottom);
+      expect(getComputedStyle(editorHeader).position).toBe('static');
+      expect(editorHeader.getBoundingClientRect().top).toBeLessThan(shellHeader.getBoundingClientRect().bottom);
       const account = page.getByRole('button', { name: '用户菜单：编辑核验管理员', exact: true });
       const accountRect = account.element().getBoundingClientRect();
       const hit = document.elementFromPoint(accountRect.left + accountRect.width / 2, accountRect.top + accountRect.height / 2);
