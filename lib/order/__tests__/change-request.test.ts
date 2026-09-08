@@ -51,6 +51,7 @@ const mocks = vi.hoisted(() => {
     orderItem: { update: vi.fn(), create: vi.fn(), findMany: vi.fn() },
     orderItemPlateDetail: { findMany: vi.fn(), update: vi.fn() },
     orderPackagingGroup: { update: vi.fn() },
+    orderPackagingGroupLine: { updateMany: vi.fn() },
     orderShipmentLine: { upsert: vi.fn(), create: vi.fn() },
     productionOperation: { updateMany: vi.fn() },
     productionProgressStep: { updateMany: vi.fn() },
@@ -5374,6 +5375,40 @@ describe('reviewOrderChangeRequest', () => {
       where: { id: 'group-1' },
       data: expect.objectContaining({
         actualBagCount: 120, unitPrice: '0.1000', subtotal: '12.00',
+        pricingSnapshot: expect.objectContaining({ source: 'CHANGE_REQUEST_PURE_REQUOTE' }),
+      }),
+    });
+  });
+
+  it('每包数量修改参与整单报价并与包装明细原子保存', async () => {
+    const value = request({ proposedChanges: { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1200, pack: 20 }] }, order: {
+      ...request().order,
+      packagingAmount: new Decimal(10), processingAmount: new Decimal(1010),
+      totalAmount: new Decimal(1018),
+      packagingGroups: [{
+        id: 'group-1', sequence: 1, name: '单款入袋',
+        mode: OrderPackagingMode.SINGLE_STYLE,
+        actualBagCount: 100, unitPrice: new Decimal('0.1'), subtotal: new Decimal(10),
+        suggestedSubtotal: new Decimal(10), pricingSnapshot: { engineVersion: 'OLD' },
+        priceOverrideReason: null,
+        lines: [{ orderItemId: 'item-1', unitsPerBag: 10 }],
+      }],
+    } });
+    locate(value);
+    await reviewOrderChangeRequest({
+      requestId: value.id,
+      decision: 'APPROVE',
+      reviewRemark: null,
+      expectedPriceRevision: 5,
+      expectedQuoteToken: quoteToken,
+    }, admin);
+    expect(mocks.calculate.mock.calls[0][1].facts.packagingGroups[0].items).toEqual([{ itemKey: 'item-1', unitsPerBag: 20 }]);
+    expect(mocks.db.orderItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pack: 20, quoteDisposition: 'PRICED', quotedAmount: '1200.00', pricingSnapshot: expect.objectContaining({ version: 1, engineVersion: 'CREATE_ORDER_PURE_V1' }) }) }));
+    expect(mocks.db.orderPackagingGroupLine.updateMany).toHaveBeenCalledWith({ where: { orderId: 'order-1', orderItemId: 'item-1' }, data: { unitsPerBag: 20 } });
+    expect(mocks.db.orderPackagingGroup.update).toHaveBeenCalledWith({
+      where: { id: 'group-1' },
+      data: expect.objectContaining({
+        actualBagCount: 60, unitPrice: '0.1000', subtotal: '6.00',
         pricingSnapshot: expect.objectContaining({ source: 'CHANGE_REQUEST_PURE_REQUOTE' }),
       }),
     });

@@ -11,6 +11,7 @@ import {
   OrderChangeRequestType,
   OrderCustomerChargeStatus,
   OrderItemPricingRoute,
+  OrderItemQuoteDisposition,
   OrderPackagingMode,
   OrderPrintKind,
   OutsourceStatus,
@@ -472,6 +473,20 @@ async function readChangeRequestOrderInTx(
   return { ...order, status, actualStatus };
 }
 
+/** Internal transaction context for atomic administrator edits. Never accepted from an action payload. */
+export type OrderChangeTransactionContext = {
+  tx: Prisma.TransactionClient;
+  requestId?: string;
+  onCompletion?: (notification: ProductionCompletionNotification | undefined) => void;
+};
+
+function inOrderChangeTransaction<T>(
+  context: OrderChangeTransactionContext | undefined,
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return context ? work(context.tx) : db.$transaction(work);
+}
+
 /**
  * Records a proposal only. The live order remains unchanged until an ADMIN
  * approves it, so every client keeps seeing one authoritative revision.
@@ -479,15 +494,16 @@ async function readChangeRequestOrderInTx(
 export async function createOrderChangeRequest(
   input: CreateOrderChangeRequestCommand,
   actor: { id: string; role: Role },
+  context?: OrderChangeTransactionContext,
 ) {
-  const notificationEnabled = (
+  const notificationEnabled = !context && (
     await getSetting('notify_order_change_enabled')
   ).enabled;
   let postCommitNotification: NotificationPayloadFor<'ORDER_CHANGE_REQUESTED'> | null =
     null;
   let createdRequest: CreatedOrderChangeRequest;
   try {
-    createdRequest = await db.$transaction(async (tx) => {
+    createdRequest = await inOrderChangeTransaction(context, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
         input.orderId,
       )}))`;
@@ -555,6 +571,7 @@ export async function createOrderChangeRequest(
       assertPackagingChangeRequestSupported({
         changes: resolvedChanges,
         groups: order.packagingGroups ?? [],
+        status: order.status,
       });
       if (!allowsProductionGenerationUpgrade(order.status)) {
         assertNoMaterializedProductionFactChange(
@@ -592,6 +609,7 @@ export async function createOrderChangeRequest(
 
       const created = await tx.orderChangeRequest.create({
         data: {
+          ...(context?.requestId ? { id: context.requestId } : {}),
           orderId: order.id,
           requesterId: actor.id,
           baseRevision: order.revision,
@@ -1030,6 +1048,8 @@ function resolvePureChangeRequestPricing(input: {
   unitPrice: string;
   fixedFee: string;
   subtotal: string;
+  quoteDisposition: typeof OrderItemQuoteDisposition.PRICED;
+  quotedAmount: string;
   suggestedSubtotal: string | null;
   pricingSnapshot: Prisma.InputJsonObject;
   priceOverrideReason: string | null;
@@ -1071,9 +1091,13 @@ function resolvePureChangeRequestPricing(input: {
     unitPrice,
     fixedFee,
     subtotal,
+    quoteDisposition: OrderItemQuoteDisposition.PRICED,
+    quotedAmount: subtotal,
     suggestedSubtotal: quote.suggestedSubtotal,
     pricingSnapshot: {
       ...quote.snapshot,
+      // Keep the DB compatibility envelope while retaining the pure engine schema.
+      version: 1,
       source: 'CHANGE_REQUEST_PURE_REQUOTE',
       itemKey,
       requestId,
@@ -1201,7 +1225,21 @@ function assertNoCrossGroupItemMembership(
 function assertPackagingChangeRequestSupported(input: {
   changes: readonly NormalizedProposedItemChange[];
   groups: readonly PackagingMembershipGroup[];
+  status: OrderStatus;
 }): void {
+  const changesPackaging = input.changes.some(
+    (change) => change.operation === 'UPDATE' && change.pack !== undefined,
+  );
+  const packagingEditable = [
+    OrderStatus.DRAFT,
+    OrderStatus.PENDING_FACTORY,
+    OrderStatus.REJECTED,
+    OrderStatus.SUBMITTED,
+    OrderStatus.CONFIRMED,
+  ].some((status) => status === input.status);
+  if (changesPackaging && !packagingEditable) {
+    throw new OrderChangeRequestError('已进入生产的工单不能直接修改分袋组成');
+  }
   if (
     input.groups.length > 0 &&
     input.changes.some((change) => change.operation === 'ADD')
@@ -2449,6 +2487,7 @@ function changeAffectsPricing(
   change: ResolvedProposedItemChange,
   item: FoilFactSource & {
     quantity: number;
+    pack?: number | null;
     productId: string | null;
     specification: string | null;
     productStructure: PricingProjectionItem['productStructure'];
@@ -2472,6 +2511,7 @@ function changeAffectsPricing(
   );
   return (
     (change.quantity !== undefined && change.quantity !== item.quantity) ||
+    (change.pack !== undefined && change.pack !== item.pack) ||
     catalogIdentityChanged ||
     (change.foilFactsProvided &&
       (!sameStringSet(change.frontFoilColors, foil.frontFoilColors) ||
@@ -2482,6 +2522,7 @@ function changeAffectsPricing(
 type SemanticChangeItem = FoilFactSource & {
   name: string;
   quantity: number;
+  pack?: number | null;
   productId: string | null;
   specification: string | null;
   productStructure: PricingProjectionItem['productStructure'];
@@ -2854,6 +2895,33 @@ function projectedQuoteItems(input: {
   return projected;
 }
 
+function projectPackagingUnits(
+  groups: readonly PackagingProjectionGroup[],
+  changes: readonly ResolvedProposedItemChange[],
+): PackagingProjectionGroup[] {
+  const updates = new Map(
+    changes.flatMap((change) =>
+      change.operation === 'UPDATE' && change.pack !== undefined
+        ? [[change.itemId, change.pack] as const]
+        : [],
+    ),
+  );
+  for (const itemId of updates.keys()) {
+    const memberships = groups.flatMap((group) =>
+      group.lines.filter((line) => line.orderItemId === itemId),
+    );
+    if (memberships.length !== 1) {
+      throw new OrderChangeRequestError('款式缺少唯一包装明细，不能仅凭每包数量重建分袋记录');
+    }
+  }
+  return groups.map((group) => ({
+    ...group,
+    lines: group.lines.map((line) => ({
+      ...line, unitsPerBag: updates.get(line.orderItemId) ?? line.unitsPerBag,
+    })),
+  }));
+}
+
 async function calculateProjectedOrderQuote(input: {
   client: Prisma.TransactionClient;
   now: Date;
@@ -2889,7 +2957,7 @@ async function calculateProjectedOrderQuote(input: {
       now: input.now,
       facts: {
         items: projectedItems.map((item) => item.facts),
-        packagingGroups: input.packagingGroups.map((group) => ({
+        packagingGroups: projectPackagingUnits(input.packagingGroups, input.changes).map((group) => ({
           groupKey: group.id,
           mode: group.mode,
           items: group.lines.map((line) => ({
@@ -3699,18 +3767,19 @@ export async function previewOrderChangeRequestPricing(
     expectedPriceRevision?: number;
     pendingChargeResolutions?: readonly OrderChangePendingChargeResolutionInput[];
   } = {},
+  context?: OrderChangeTransactionContext,
 ): Promise<OrderChangePricingPreview> {
   if (actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有管理员可以预览工单修改计价');
   }
 
-  const locator = await db.orderChangeRequest.findUnique({
+  const locator = await (context?.tx ?? db).orderChangeRequest.findUnique({
     where: { id: requestId },
     select: { orderId: true },
   });
   if (!locator) throw new OrderChangeRequestError('修改申请不存在');
 
-  return db.$transaction(async (tx) => {
+  return inOrderChangeTransaction(context, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       locator.orderId,
     )}))`;
@@ -3765,6 +3834,7 @@ export async function previewOrderChangeRequestPricing(
     assertPackagingChangeRequestSupported({
       changes,
       groups: request.order.packagingGroups ?? [],
+      status: request.order.status,
     });
     if (!allowsProductionGenerationUpgrade(request.order.status)) {
       assertNoMaterializedProductionFactChange(
@@ -5455,22 +5525,26 @@ async function finalizeApprovedModificationInTx(input: {
 export async function reviewOrderChangeRequest(
   input: ReviewOrderChangeRequestInput,
   actor: { id: string; role: Role },
+  context?: OrderChangeTransactionContext,
 ) {
   if (actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有管理员可以审核工单修改申请');
   }
 
-  const locator = await db.orderChangeRequest.findUnique({
+  const locator = await (context?.tx ?? db).orderChangeRequest.findUnique({
     where: { id: input.requestId },
     select: { orderId: true, type: true },
   });
   if (!locator) throw new OrderChangeRequestError('修改申请不存在');
+  if (context && locator.type === OrderChangeRequestType.CANCEL) {
+    throw new OrderChangeRequestError('编辑工单不能执行取消审批');
+  }
   if (locator.type === OrderChangeRequestType.CANCEL) {
     return reviewOrderCancellationRequest(input, actor, locator);
   }
 
   let completionNotification: ProductionCompletionNotification | undefined;
-  const result = await db.$transaction(async (tx) => {
+  const result = await inOrderChangeTransaction(context, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       locator.orderId,
     )}))`;
@@ -5627,6 +5701,7 @@ export async function reviewOrderChangeRequest(
     assertPackagingChangeRequestSupported({
       changes,
       groups: request.order.packagingGroups ?? [],
+      status: request.order.status,
     });
     if (!allowsProductionGenerationUpgrade(request.order.status)) {
       assertNoMaterializedProductionFactChange(
@@ -5870,6 +5945,7 @@ export async function reviewOrderChangeRequest(
           data: {
             name: change.name,
             quantity: change.quantity,
+            pack: change.pack,
             ...(catalogIdentity
               ? {
                   productId: catalogIdentity.productId,
@@ -5892,6 +5968,12 @@ export async function reviewOrderChangeRequest(
             ...(pricing ?? {}),
           },
         });
+        if (change.pack !== undefined) {
+          await tx.orderPackagingGroupLine.updateMany({
+            where: { orderId: request.order.id, orderItemId: item.id },
+            data: { unitsPerBag: change.pack },
+          });
+        }
         continue;
       }
 
@@ -6002,7 +6084,8 @@ export async function reviewOrderChangeRequest(
     }
     throw error;
   });
-  await dispatchProductionCompletionNotification(completionNotification);
+  if (context) context.onCompletion?.(completionNotification);
+  else await dispatchProductionCompletionNotification(completionNotification);
   return result;
 }
 

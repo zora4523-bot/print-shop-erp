@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import type { ReactNode } from 'react';
 import type { getOrderDetail } from '@/lib/order';
@@ -35,186 +36,147 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 export function OrderSavedConfiguration({
   order,
   canEditDesigns,
+  feesOnly = false,
 }: {
   order: Order;
   canEditDesigns: boolean;
+  feesOnly?: boolean;
 }) {
-  return (
-    <div className="min-w-0 space-y-4">
-      <Card id="saved-items">
-        <CardHeader>
-          <h2 className="text-base font-semibold">
-            款式与设计 · {order.items.length} 款
-          </h2>
+  if (feesOnly) {
+    return (
+      <Card id="saved-fees">
+        <CardHeader className="border-b pb-3">
+          <h2 className="text-sm font-semibold">费用</h2>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {order.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              未记录款式，无法核对生产和计价信息。
-            </p>
-          ) : null}
-          {order.items.map((item) => {
-            const foil = deriveLegacyOrderItemFoilFacts(item);
-            return (
-              <Disclosure key={item.id} className="min-w-0 rounded-lg border">
-                <DisclosureSummary className="min-h-11 flex-wrap px-3 py-3">
+        <CardContent className="space-y-4">
+          <div className="divide-y">
+            {order.items.map((item) => (
+              <Disclosure key={item.id}>
+                <DisclosureSummary className="justify-between gap-3 py-3 text-sm">
                   <span className="min-w-0 break-words">
-                    #{item.sequence} · {readable(item.name)}
+                    第 {item.sequence} 款 · {readable(item.name)}
                   </span>
-                  <span className="ml-auto text-sm tabular-nums">
-                    {qty(item.quantity)} 个
-                  </span>
+                  <strong className="ml-auto shrink-0 tabular-nums">
+                    {'subtotal' in item ? money(item.subtotal) : '待核定'}
+                  </strong>
                 </DisclosureSummary>
-                <div className="space-y-4 border-t p-3 sm:p-4">
-                  <dl className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <Fact label="产品组合">{readable(item.product?.name)}</Fact>
-                    <Fact label="计价路线">
-                      {ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]}
-                    </Fact>
-                    <Fact label="产品结构">
-                      {
-                        {
-                          UNSPECIFIED: '未明确',
-                          STANDARD_ENVELOPE: '普通封',
-                          WESTERN_ENVELOPE: '西封',
-                          TEN_THOUSAND_ENVELOPE: '万元封',
-                        }[item.productStructure]
-                      }
-                    </Fact>
-                    <Fact label="规格">{readable(item.specification)}</Fact>
-                    <Fact label="实际尺寸">
-                      {item.actualWidthMm !== null &&
-                      item.actualHeightMm !== null
-                        ? `${item.actualWidthMm} × ${item.actualHeightMm} mm`
-                        : '未设置'}
-                    </Fact>
-                    <Fact label="纸张与克重">
-                      {readable(item.paperType)}
-                      {item.paperWeightGsm !== null
-                        ? ` · ${item.paperWeightGsm} g/㎡`
-                        : ''}
-                    </Fact>
-                    <Fact label="版组">{item.plateGroupId}</Fact>
-                    <Fact label="覆膜">
-                      {
-                        {
-                          NONE: '不覆膜',
-                          MATTE: '覆哑膜',
-                          SOFT_TOUCH: '触感膜',
-                          NEW_GLOSS: '新光膜',
-                          LASER: '镭射膜',
-                        }[item.lamination]
-                      }
-                    </Fact>
-                    <Fact label="每袋数量（历史记录）">
-                      {item.pack === null ? '未记录' : qty(item.pack)}
-                    </Fact>
-                    <Fact label="稿件版本">{item.artworkVersion}</Fact>
-                    <Fact label="专版计价组">
-                      {item.pricingGroup === 'MID'
-                        ? '中封组'
-                        : item.pricingGroup === 'LARGE'
-                          ? '大封组'
-                          : readable(item.pricingGroup)}
-                    </Fact>
-                    <Fact label="烫金方式">
-                      {
-                        {
-                          UNSPECIFIED: '未明确',
-                          NONE: '不烫金',
-                          FLAT: '平烫',
-                          RELIEF: '浮雕',
-                          RAISED: '激凸',
-                        }[item.foilTechnique]
-                      }
-                    </Fact>
-                    <Fact label="正面烫金">
-                      {foil.frontFoilColors.length
-                        ? formatFoilColors(foil.frontFoilColors)
-                        : '无'}
-                    </Fact>
-                    <Fact label="反面烫金">
-                      {foil.backFoilColors.length
-                        ? formatFoilColors(foil.backFoilColors)
-                        : '无'}
-                    </Fact>
-                    <Fact label="局部烫金">
-                      {item.hasLocalFoil === null
-                        ? '未明确'
-                        : item.hasLocalFoil
-                          ? '是'
-                          : '否'}
-                    </Fact>
-                    <Fact label="彩印颜色">
-                      {item.printColorsKnown
-                        ? item.printColors.join('、') || '无'
-                        : '未明确'}
-                    </Fact>
-                    <Fact label="工艺">
-                      {item.craftNames.join('、') || '未记录'}
-                    </Fact>
-                    <Fact label="款式备注">{item.remark}</Fact>
-                    {'unitPrice' in item ? (
-                      <Fact label="加工单价">
-                        {formatUnitPrice(String(item.unitPrice))}
-                      </Fact>
-                    ) : null}
-                    {'fixedFee' in item ? (
-                      <Fact label="一次性费用">{money(item.fixedFee)}</Fact>
-                    ) : null}
-                    {'subtotal' in item ? (
-                      <Fact label="款式小计">{money(item.subtotal)}</Fact>
-                    ) : null}
-                    {'manualQuoteReason' in item && item.manualQuoteReason ? (
-                      <Fact label="人工报价原因">
-                        {String(item.manualQuoteReason)}
-                      </Fact>
-                    ) : null}
-                    {'priceOverrideReason' in item &&
-                    item.priceOverrideReason ? (
-                      <Fact label="改价说明">
-                        {String(item.priceOverrideReason)}
-                      </Fact>
-                    ) : null}
-                  </dl>
-                  {'plateDetails' in item && item.plateDetails.length ? (
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium">制版明细</h3>
-                      {item.plateDetails.map((plate) => (
-                        <p key={plate.id} className="break-words text-sm">
-                          {plate.name}
-                          {plate.isActive ? '' : '（已移除）'} ·{' '}
-                          {readable(plate.specification)} · {plate.quantity} ×{' '}
-                          {money(plate.unitPrice)} · {money(plate.amount)}
-                          {plate.remark ? ` · ${plate.remark}` : ''}
-                        </p>
-                      ))}
-                    </div>
-                  ) : null}
-                  <DesignUploadPanel
-                    orderId={order.id}
-                    orderItemId={item.id}
-                    canEdit={canEditDesigns}
-                    designs={item.designs.map((design) => ({
-                      id: design.id,
-                      fileName: design.fileName,
-                      fileType: design.fileType,
-                      fileUrl:
-                        design.fileType === 'IMAGE'
-                          ? signDesignReadUrl(design.fileUrl)
-                          : '',
-                      fileSize: String(design.fileSize),
-                    }))}
-                  />
-                </div>
+                <dl className="grid gap-3 pb-4 sm:grid-cols-3">
+                  <Fact label="数量">{qty(item.quantity)} 个</Fact>
+                  <Fact label="加工单价">
+                    {'unitPrice' in item
+                      ? formatUnitPrice(String(item.unitPrice))
+                      : '待核定'}
+                  </Fact>
+                  <Fact label="一次性费用">
+                    {'fixedFee' in item ? money(item.fixedFee) : '待核定'}
+                  </Fact>
+                </dl>
               </Disclosure>
-            );
-          })}
+            ))}
+            <div className="flex justify-between gap-3 py-3 text-sm">
+              <span>入袋费</span>
+              <span>
+                {order.items.length && 'packagingAmount' in order
+                  ? money(order.packagingAmount)
+                  : '未计价'}
+              </span>
+            </div>
+            {order.customerCharges.map((charge) => (
+              <div
+                key={charge.id}
+                className="flex flex-wrap justify-between gap-2 py-3 text-sm"
+              >
+                <span>
+                  {charge.category.name}
+                  {charge.shipment
+                    ? ` · 第 ${charge.shipment.sequence} 票`
+                    : ''}
+                </span>
+                <span className="tabular-nums">{money(charge.amount)}</span>
+                {charge.overrideReason ? (
+                  <p className="basis-full text-xs text-muted-foreground">
+                    {charge.overrideReason}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+            {order.items.length === 0 ? (
+              <p className="py-3 text-sm text-muted-foreground">
+                未记录款式，暂不能计算生产费用。
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-baseline justify-between gap-3 border-t pt-4">
+            <span className="text-sm font-medium">当前工单金额</span>
+            <strong className="text-lg tabular-nums">
+              {'totalAmount' in order ? money(order.totalAmount) : '待核定'}
+            </strong>
+          </div>
+          <Disclosure>
+            <DisclosureSummary className="text-xs text-muted-foreground">
+              报价与结算记录
+            </DisclosureSummary>
+            <dl className="grid grid-cols-1 gap-3 pt-3 sm:grid-cols-3">
+              <Fact label="原始报价">{money(order.quotedFee)}</Fact>
+              <Fact label="当前确认金额">{money(order.confirmedFee)}</Fact>
+              <Fact label="结算金额">
+                {order.settledFee === null ? '未结算' : money(order.settledFee)}
+              </Fact>
+            </dl>
+          </Disclosure>
+          <p className="text-xs text-muted-foreground">
+            修改后的费用在保存确认中核对。
+            {'settlementType' in order &&
+            order.settlementType === 'EXTERNAL_SALES'
+              ? '版费默认 0，管理员可在下方补充制版明细。'
+              : ''}
+          </p>
         </CardContent>
       </Card>
+    );
+  }
+  return (
+    <div className="min-w-0 space-y-4">
+      {!feesOnly ? (
+        <Card id="saved-items">
+          <CardHeader>
+            <h2 className="text-base font-semibold">
+              款式与设计 · {order.items.length} 款
+            </h2>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {order.items.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                未记录款式，无法核对生产和计价信息。
+              </p>
+            ) : null}
+            {order.items.map((item) => {
+              return (
+                <Disclosure key={item.id} className="min-w-0 rounded-lg border">
+                  <DisclosureSummary className="min-h-11 flex-wrap px-3 py-3">
+                    <span className="min-w-0 break-words">
+                      #{item.sequence} · {readable(item.name)}
+                    </span>
+                    <span className="ml-auto text-sm tabular-nums">
+                      {qty(item.quantity)} 个
+                    </span>
+                  </DisclosureSummary>
+                  <OrderSavedItemDetails
+                    order={order}
+                    item={item}
+                    canEditDesigns={canEditDesigns}
+                  />
+                </Disclosure>
+              );
+            })}
+          </CardContent>
+        </Card>
+      ) : null}
       <Card id="saved-fees">
         <CardHeader>
-          <h2 className="text-base font-semibold">已保存费用</h2>
+          <h2 className="text-base font-semibold">
+            {feesOnly ? '费用' : '已保存费用'}
+          </h2>
         </CardHeader>
         <CardContent className="space-y-4">
           <dl className="grid gap-4 sm:grid-cols-3">
@@ -226,13 +188,31 @@ export function OrderSavedConfiguration({
               </Fact>
             ) : null}
             <Fact label="配送方式">
-              {order.isSfCollect ? '顺丰到付' : '寄付'}
+              {order.shipments.length === 0
+                ? '未记录'
+                : order.isSfCollect
+                  ? '顺丰到付'
+                  : '寄付'}
             </Fact>
             {'processingAmount' in order ? (
-              <Fact label="加工费">{money(order.processingAmount)}</Fact>
+              <Fact label="加工费">
+                {order.items.length
+                  ? money(
+                      new Decimal(String(order.processingAmount))
+                        .minus(
+                          'packagingAmount' in order
+                            ? String(order.packagingAmount)
+                            : '0',
+                        )
+                        .toFixed(2),
+                    )
+                  : '未计价'}
+              </Fact>
             ) : null}
             {'packagingAmount' in order ? (
-              <Fact label="入袋费">{money(order.packagingAmount)}</Fact>
+              <Fact label="入袋费">
+                {order.items.length ? money(order.packagingAmount) : '未计价'}
+              </Fact>
             ) : null}
             <Fact label="报价">{money(order.quotedFee)}</Fact>
             <Fact label="确认金额">{money(order.confirmedFee)}</Fact>
@@ -264,6 +244,156 @@ export function OrderSavedConfiguration({
           </ul>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+export function OrderSavedItemDetails({
+  order,
+  item,
+  canEditDesigns = false,
+  includeDesigns = true,
+}: {
+  order: Order;
+  item: Order['items'][number];
+  canEditDesigns?: boolean;
+  includeDesigns?: boolean;
+}) {
+  const foil = deriveLegacyOrderItemFoilFacts(item);
+  return (
+    <div className="space-y-4 border-t p-3 sm:p-4">
+      <dl className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Fact label="产品组合">{readable(item.product?.name)}</Fact>
+        <Fact label="计价路线">
+          {ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]}
+        </Fact>
+        <Fact label="产品结构">
+          {
+            {
+              UNSPECIFIED: '未明确',
+              STANDARD_ENVELOPE: '普通封',
+              WESTERN_ENVELOPE: '西封',
+              TEN_THOUSAND_ENVELOPE: '万元封',
+            }[item.productStructure]
+          }
+        </Fact>
+        <Fact label="规格">{readable(item.specification)}</Fact>
+        <Fact label="实际尺寸">
+          {item.actualWidthMm !== null && item.actualHeightMm !== null
+            ? `${item.actualWidthMm} × ${item.actualHeightMm} mm`
+            : '未设置'}
+        </Fact>
+        <Fact label="纸张与克重">
+          {readable(item.paperType)}
+          {item.paperWeightGsm !== null ? ` · ${item.paperWeightGsm} g/㎡` : ''}
+        </Fact>
+        <Fact label="版组">{item.plateGroupId}</Fact>
+        <Fact label="覆膜">
+          {
+            {
+              NONE: '不覆膜',
+              MATTE: '覆哑膜',
+              SOFT_TOUCH: '触感膜',
+              NEW_GLOSS: '新光膜',
+              LASER: '镭射膜',
+            }[item.lamination]
+          }
+        </Fact>
+        <Fact label="每袋数量（历史记录）">
+          {item.pack === null ? '未记录' : qty(item.pack)}
+        </Fact>
+        <Fact label="稿件版本">{item.artworkVersion}</Fact>
+        <Fact label="专版计价组">
+          {item.pricingGroup === 'MID'
+            ? '中封组'
+            : item.pricingGroup === 'LARGE'
+              ? '大封组'
+              : readable(item.pricingGroup)}
+        </Fact>
+        <Fact label="烫金方式">
+          {
+            {
+              UNSPECIFIED: '未明确',
+              NONE: '不烫金',
+              FLAT: '平烫',
+              RELIEF: '浮雕',
+              RAISED: '激凸',
+            }[item.foilTechnique]
+          }
+        </Fact>
+        <Fact label="正面烫金">
+          {foil.frontFoilColors.length
+            ? formatFoilColors(foil.frontFoilColors)
+            : '无'}
+        </Fact>
+        <Fact label="反面烫金">
+          {foil.backFoilColors.length
+            ? formatFoilColors(foil.backFoilColors)
+            : '无'}
+        </Fact>
+        <Fact label="局部烫金">
+          {item.hasLocalFoil === null
+            ? '未明确'
+            : item.hasLocalFoil
+              ? '是'
+              : '否'}
+        </Fact>
+        <Fact label="彩印颜色">
+          {item.printColorsKnown
+            ? item.printColors.join('、') || '无'
+            : '未明确'}
+        </Fact>
+        <Fact label="工艺">{item.craftNames.join('、') || '未记录'}</Fact>
+        <Fact label="款式备注">{item.remark}</Fact>
+        {'unitPrice' in item ? (
+          <Fact label="加工单价">
+            {formatUnitPrice(String(item.unitPrice))}
+          </Fact>
+        ) : null}
+        {'fixedFee' in item ? (
+          <Fact label="一次性费用">{money(item.fixedFee)}</Fact>
+        ) : null}
+        {'subtotal' in item ? (
+          <Fact label="款式小计">{money(item.subtotal)}</Fact>
+        ) : null}
+        {'manualQuoteReason' in item && item.manualQuoteReason ? (
+          <Fact label="人工报价原因">{String(item.manualQuoteReason)}</Fact>
+        ) : null}
+        {'priceOverrideReason' in item && item.priceOverrideReason ? (
+          <Fact label="改价说明">{String(item.priceOverrideReason)}</Fact>
+        ) : null}
+      </dl>
+      {'plateDetails' in item && item.plateDetails.length ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium">制版明细</h3>
+          {item.plateDetails.map((plate) => (
+            <p key={plate.id} className="break-words text-sm">
+              {plate.name}
+              {plate.isActive ? '' : '（已移除）'} ·{' '}
+              {readable(plate.specification)} · {plate.quantity} ×{' '}
+              {money(plate.unitPrice)} · {money(plate.amount)}
+              {plate.remark ? ` · ${plate.remark}` : ''}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {includeDesigns ? (
+        <DesignUploadPanel
+          orderId={order.id}
+          orderItemId={item.id}
+          canEdit={canEditDesigns}
+          designs={item.designs.map((design) => ({
+            id: design.id,
+            fileName: design.fileName,
+            fileType: design.fileType,
+            fileUrl:
+              design.fileType === 'IMAGE'
+                ? signDesignReadUrl(design.fileUrl)
+                : '',
+            fileSize: String(design.fileSize),
+          }))}
+        />
+      ) : null}
     </div>
   );
 }

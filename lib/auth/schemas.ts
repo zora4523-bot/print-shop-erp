@@ -2286,6 +2286,7 @@ const updateOrderItemChangeSchema = z
     itemId: orderChangeId,
     name: z.string().trim().min(1).max(64).optional(),
     quantity: orderItemQuantityField.optional(),
+    pack: z.number().int().min(1).max(9_999_999).optional(),
     specification: optionalTrimmedText('规格', 64).optional(),
     targetProductId: orderChangeId.optional(),
     frontFoilColors: orderItemFoilSideColorsField.optional(),
@@ -2299,6 +2300,7 @@ const updateOrderItemChangeSchema = z
     (value) =>
       value.name !== undefined ||
       value.quantity !== undefined ||
+      value.pack !== undefined ||
       value.specification !== undefined ||
       value.targetProductId !== undefined ||
       value.frontFoilColors !== undefined ||

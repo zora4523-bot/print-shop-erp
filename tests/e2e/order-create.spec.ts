@@ -56,11 +56,18 @@ async function readSavedOrder(id: string) {
 }
 
 test.describe('创建工单 — golden path', () => {
-  test('历史工单缺少计价明细时，纯交期申请审批保留全部原价', async ({ page }) => {
+  test('历史工单缺少计价明细时，纯交期申请审批保留全部原价', async ({
+    page,
+  }) => {
     test.setTimeout(90_000);
-    test.skip(process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1', '历史工单回归仅使用独立测试数据库');
+    test.skip(
+      process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1',
+      '历史工单回归仅使用独立测试数据库',
+    );
     const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
-    const { urgentOrderId: orderId } = await seedDashboardSnapshot({ salesUserId });
+    const { urgentOrderId: orderId } = await seedDashboardSnapshot({
+      salesUserId,
+    });
     // Only this invocation's fresh legacy fixture is changed. Its recorded
     // historical price intentionally cannot be rebuilt from missing line items.
     const db = new Client({ connectionString: process.env.DATABASE_URL });
@@ -75,24 +82,19 @@ test.describe('创建工单 — golden path', () => {
       await db.end();
     }
     const before = await readSavedOrder(orderId);
-    await login(page, { from: `/orders/${orderId}/edit`, username: owner.username, password: E2E_PASSWORD });
-    const form = page.locator('#modify-order');
-    await form.getByLabel('修改类别').selectOption('DUE_DATE');
-    await form.getByLabel(/^新的承诺交期/).fill('2026-10-20');
-    await form.getByLabel('修改原因').fill('历史工单仅调整交期，费用不变');
-    await form.getByRole('button', { name: /提交修改申请/ }).click();
-    await expect(page.getByText('修改申请待处理', { exact: true })).toBeVisible();
+    await login(page, {
+      from: `/orders/${orderId}/edit`,
+      username: owner.username,
+      password: E2E_PASSWORD,
+    });
+    await page.getByLabel('承诺交期', { exact: true }).fill('2026-10-20');
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
     expect((await readSavedOrder(orderId)).facts).toEqual(before.facts);
-
-    await page.goto(`/orders/${orderId}`);
-    // The legacy detail page starts its pricing preview on hydration. Wait for
-    // that action to settle before navigating away through its review link.
-    await page.waitForLoadState('networkidle');
-    await page.getByRole('link', { name: '前往新版工单工作台审核', exact: true }).click();
-    await expect(page).toHaveURL(/\/orders\?queue=all&signal=pending-change#wo=/);
-    await page.getByRole('button', { name: '批准变更', exact: true }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: '确认批准并同步工单', exact: true }).click();
-    await expect.poll(async () => (await readSavedOrder(orderId)).order.promisedDate).toContain('2026-10-20');
+    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await expect
+      .poll(async () => (await readSavedOrder(orderId)).order.promisedDate)
+      .toContain('2026-10-20');
     const after = await readSavedOrder(orderId);
     expect(after.facts).toEqual(before.facts);
     expect(after.order.pricingStatus).toBe(before.order.pricingStatus);
@@ -169,6 +171,9 @@ test.describe('创建工单 — golden path', () => {
     await form
       .getByRole('spinbutton', { name: '数量', exact: true })
       .fill('1000');
+    await form
+      .getByRole('spinbutton', { name: '每包数量', exact: true })
+      .fill('10');
     await expect(form.getByRole('combobox', { name: '报价产品' })).toHaveCount(
       0,
     );
@@ -244,10 +249,12 @@ test.describe('创建工单 — golden path', () => {
     await expect(page.getByLabel('收货电话', { exact: true })).toHaveValue(
       before.order.receiverPhone ?? '',
     );
-    await page.locator('#saved-items summary').click();
-    await expect(page.locator('#saved-items')).toContainText('160g珠光艳闪');
-    await expect(page.locator('#saved-items')).toContainText('大号封90×165');
-    await expect(page.locator('#saved-items')).toContainText('1,000 个');
+    await page.getByText('更多生产信息', { exact: true }).click();
+    await expect(page.locator('#edit-items')).toContainText('160g珠光艳闪');
+    await expect(page.locator('#edit-items')).toContainText('大号封90×165');
+    await expect(page.getByLabel('数量（个）', { exact: true })).toHaveValue(
+      '1000',
+    );
 
     // Two tabs share the same starting version. Only the first may save.
     const stalePage = await context.newPage();
@@ -258,7 +265,10 @@ test.describe('创建工单 — golden path', () => {
     await page.getByLabel('包装补充说明（选填）').fill('封口后贴客户标签');
     await page.getByLabel('收件人', { exact: true }).fill('修改后的收件人');
     await page.getByLabel('收货电话', { exact: true }).fill('13900139000');
-    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    expect((await readSavedOrder(orderId)).facts).toEqual(before.facts);
+    await page.getByRole('button', { name: '确认保存', exact: true }).click();
     await expect(page).toHaveURL(`/orders/${orderId}`);
     await expect(page.getByText(customName).first()).toBeVisible();
     const after = await readSavedOrder(orderId);
@@ -274,7 +284,9 @@ test.describe('创建工单 — golden path', () => {
     expect(after.updateLogs).toBe(before.updateLogs + 1);
 
     await stalePage.getByLabel('收货电话', { exact: true }).fill('13700137000');
-    await stalePage.getByRole('button', { name: '保存', exact: true }).click();
+    await stalePage
+      .getByRole('button', { name: '保存修改…', exact: true })
+      .click();
     await expect(
       stalePage.getByRole('alert').filter({ hasText: '工单已被其他人修改' }),
     ).toBeVisible();
@@ -285,53 +297,57 @@ test.describe('创建工单 — golden path', () => {
       '13900139000',
     );
     await expectNoNextErrorOverlay(page);
-    await expect(page.locator('#modify-order')).toBeVisible();
+    await expect(page.locator('#edit-items')).toBeVisible();
     await page.screenshot({
       path: test.info().outputPath('edit-order.png'),
       fullPage: true,
     });
 
-    const modification = page.locator('#modify-order');
-    await modification.getByRole('checkbox', { name: /E2E 测试款式/ }).check();
-    await modification
-      .getByRole('spinbutton', { name: '数量', exact: true })
-      .fill('1200');
-    await modification
-      .getByRole('textbox', { name: '修改原因' })
-      .fill('客户增加数量，等待审核');
-    await modification
-      .getByRole('button', { name: '提交修改申请（1 款）', exact: true })
-      .click();
-    await expect(
-      page.getByText('修改申请待处理', { exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: '保存', exact: true }),
-    ).toBeDisabled();
-    const proposed = await readSavedOrder(orderId);
-    expect(proposed.facts).toEqual(after.facts);
-    expect(proposed.order.receiverPhone).toBe('13900139000');
-    await page.getByRole('button', { name: '撤回申请', exact: true }).click();
-    await expect(
-      page.getByRole('button', { name: '保存', exact: true }),
-    ).toBeEnabled();
+    await page.getByLabel('数量（个）', { exact: true }).fill('1200');
+    await page.getByLabel('包装（个/包）', { exact: true }).fill('20');
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
     expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
-
-    // Date-only proposal must reach APPROVED and preserve all price/production facts.
+    await page.getByRole('button', { name: '再改改', exact: true }).click();
+    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await expect(page).toHaveURL(`/orders/${orderId}`);
+    const modified = await readSavedOrder(orderId);
+    const facts = modified.facts as {
+      items: Array<{
+        quantity: number;
+        pack: number;
+        pricingSnapshot: {
+          version: number;
+          schemaVersion: number;
+          complete: boolean;
+        };
+        subtotal: number;
+        quotedAmount: number;
+      }>;
+      packaging: Array<{ actualBagCount: number }>;
+      packagingLines: Array<{ unitsPerBag: number }>;
+    };
+    expect(facts.items[0]).toMatchObject({ quantity: 1200, pack: 20 });
+    expect(facts.items[0].pricingSnapshot).toMatchObject({
+      version: 1,
+      schemaVersion: 2,
+      complete: true,
+    });
+    expect(facts.items[0].quotedAmount).toBe(facts.items[0].subtotal);
+    expect(facts.packaging[0].actualBagCount).toBe(60);
+    expect(facts.packagingLines[0].unitsPerBag).toBe(20);
+    // Date-only save preserves the newly established production/financial snapshots.
     await page.goto(`/orders/${orderId}/edit`);
-    const dueChange = page.locator('#modify-order');
-    await dueChange.getByLabel('修改类别').selectOption('DUE_DATE');
-    await dueChange.getByLabel(/^新的承诺交期/).fill('2026-10-20');
-    await dueChange.getByLabel('修改原因').fill('客户确认延期，仅变更交期');
-    await dueChange.getByRole('button', { name: /提交修改申请/ }).click();
-    await expect(page.getByText('修改申请待处理', { exact: true })).toBeVisible();
-    expect((await readSavedOrder(orderId)).order.promisedDate).toBe(after.order.promisedDate);
-    await page.goto(`/orders/${orderId}`);
-    await page.getByRole('link', { name: '前往新版工单工作台审核', exact: true }).click();
-    await page.getByRole('button', { name: '批准变更', exact: true }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: '确认批准并同步工单', exact: true }).click();
-    await expect.poll(async () => (await readSavedOrder(orderId)).order.promisedDate).toContain('2026-10-20');
-    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
+    await page.getByLabel('承诺交期', { exact: true }).fill('2026-10-20');
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await expect(page).toHaveURL(`/orders/${orderId}`);
+    await expect
+      .poll(async () => (await readSavedOrder(orderId)).order.promisedDate)
+      .toContain('2026-10-20');
+    expect((await readSavedOrder(orderId)).facts).toEqual(modified.facts);
     await expectNoNextErrorOverlay(page);
   });
 });

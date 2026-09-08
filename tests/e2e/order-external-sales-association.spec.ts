@@ -42,7 +42,8 @@ test('管理员更换关联外部销售：保存归属、审计与访问范围�
   await expect(page.getByRole('combobox', { name: '关联客户', exact: true })).toHaveCount(0);
   await association.selectOption(targetId);
   await page.screenshot({ path: testInfo.outputPath('external-sales-selection.png'), fullPage: true });
-  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+  await page.getByRole('button', { name: '确认保存', exact: true }).click();
   await expect(page).toHaveURL(`/orders/${orderId}`);
   const after = await orderSnapshot(orderId);
   expect(after.order.submitterId).toBe(targetId);

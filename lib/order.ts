@@ -3076,11 +3076,12 @@ async function updateOrderEditableFields(
   orderId: string,
   command: OrderEditCommand,
   actor: { id: string; role: Role },
+  transaction?: Prisma.TransactionClient,
 ): Promise<UpdateOrderResult> {
   if (![Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE].some((role) => role === actor.role)) {
     throw new OrderInvariantError('无权编辑工单');
   }
-  return db.$transaction(async (tx) => {
+  const work = async (tx: Prisma.TransactionClient): Promise<UpdateOrderResult> => {
     const txClient = tx as unknown as EditTxClient;
     await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       orderId,
@@ -3336,18 +3337,21 @@ async function updateOrderEditableFields(
       changed: true,
       changedFields: [...Object.keys(changes), ...(shipmentEdits.length ? ['shipments'] : [])],
     };
-  });
+  };
+  return transaction ? work(transaction) : db.$transaction(work);
 }
 
 export async function updateOrderFields(
   orderId: string,
   input: UpdateEditableOrderInput | UpdateShippingOrderInput,
   actor: { id: string; role: Role },
+  transaction?: Prisma.TransactionClient,
 ): Promise<UpdateOrderResult> {
   return updateOrderEditableFields(
     orderId,
     { kind: 'full-form', input },
     actor,
+    transaction,
   );
 }
 

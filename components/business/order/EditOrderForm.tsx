@@ -6,6 +6,7 @@ import type { OrderExternalSalesAssociation } from '@/lib/order/external-sales-a
 import { OrderExternalSalesField } from './OrderExternalSalesField';
 import type { EditableShipment } from '@/lib/order/edit-shipment-fields';
 import { OrderReceiverContactFields } from './OrderReceiverContactFields';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ActionNotice } from '@/components/ui-business';
 import Link from 'next/link';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -45,6 +46,12 @@ type Props = {
   isSfCollect?: boolean;
   blocked?: boolean;
   packagingDetails?: ReactNode;
+  /** Admin workspace coordinates metadata and production facts in one review. */
+  onReview?: (data: FormData) => void;
+  onFormChange?: () => void;
+  formId?: string;
+  designLayout?: boolean;
+  designFields?: ReactNode;
 };
 
 const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set([
@@ -65,6 +72,11 @@ export function EditOrderForm({
   isSfCollect = false,
   blocked = false,
   packagingDetails,
+  onReview,
+  onFormChange,
+  formId,
+  designLayout = false,
+  designFields,
 }: Props) {
   const boundAction = updateOrderAction.bind(null, orderId);
   const [state, formAction, pending] = useActionState<
@@ -75,9 +87,9 @@ export function EditOrderForm({
   const isShippingOnly = fieldset === 'SHIPPING_ONLY';
   const [customerId, setCustomerId] = useState(initial.customerPartyId ?? '');
   const [customerRef, setCustomerRef] = useState(initial.customerRef ?? '');
-  const selectedCustomer = externalSalesAssociation ? undefined : customers.find(
-    (customer) => customer.id === customerId,
-  );
+  const selectedCustomer = externalSalesAssociation
+    ? undefined
+    : customers.find((customer) => customer.id === customerId);
   const [urgent, setUrgent] = useState(initial.isUrgent);
   const [delivery, setDelivery] = useState(() =>
     shipments?.map((row) => ({
@@ -109,7 +121,22 @@ export function EditOrderForm({
   }
 
   return (
-    <form action={formAction} aria-busy={pending} className="space-y-6">
+    <form
+      id={formId}
+      noValidate={Boolean(onReview)}
+      action={onReview ? undefined : formAction}
+      onChange={onFormChange}
+      onSubmit={
+        onReview
+          ? (event) => {
+              event.preventDefault();
+              onReview(new FormData(event.currentTarget));
+            }
+          : undefined
+      }
+      aria-busy={pending}
+      className={designLayout ? 'space-y-4' : 'space-y-6'}
+    >
       <input
         type="hidden"
         name="expectedEditVersion"
@@ -151,13 +178,17 @@ export function EditOrderForm({
       ) : null}
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
-          工单已确认，仅可修改配送信息、包装补充说明与工单备注。
+          {designLayout
+            ? '已确认资料中的客户归属保持锁定；款式与交期变更将更新工单版本。'
+            : '工单已确认，仅可修改配送信息、包装补充说明与工单备注。'}
         </div>
       )}
 
       <Card>
         <CardHeader>
-          <h2 className="text-base font-semibold">基本信息</h2>
+          <h2 className="text-base font-semibold">
+            {designLayout ? '订单信息' : '基本信息'}
+          </h2>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field
@@ -192,61 +223,69 @@ export function EditOrderForm({
               disabled={pendingLocked || isShippingOnly}
               error={fieldErrors(state, 'externalSalesUserId')[0]}
             />
-          ) : <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="customerPartyId">关联客户</Label>
-            <select
-              id="customerPartyId"
-              name="customerPartyId"
-              value={customerId}
-              aria-describedby={fieldErrors(state, 'customerPartyId').length > 0
-                ? 'customer-association-hint customerPartyId-error'
-                : 'customer-association-hint'}
-              aria-invalid={fieldErrors(state, 'customerPartyId').length > 0}
-              onChange={(event) => setCustomerId(event.target.value)}
-              disabled={pendingLocked || isShippingOnly}
-              className="min-h-11 w-full rounded-md border bg-background px-3 text-sm"
-            >
-              <option value="">未关联客户</option>
-              {unknownCustomer ? (
-                <option value={initial.customerPartyId!}>
-                  当前关联客户（信息不可用）
-                </option>
-              ) : null}
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.name}
-                  {customer.shortName ? ` · ${customer.shortName}` : ''}
-                </option>
-              ))}
-            </select>
-            <p
-              id="customer-association-hint"
-              className="text-xs text-muted-foreground"
-            >
-              更换关联客户会保留已填简称和各票收货信息。
-            </p>
-            {selectedCustomer && !isShippingOnly ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="min-h-11"
-                disabled={pendingLocked}
-                onClick={() =>
-                  setCustomerRef(
-                    selectedCustomer.shortName || selectedCustomer.name,
-                  )
+          ) : (
+            <div className="min-w-0 space-y-1.5">
+              <Label htmlFor="customerPartyId">关联客户</Label>
+              <select
+                id="customerPartyId"
+                name="customerPartyId"
+                value={customerId}
+                aria-describedby={
+                  fieldErrors(state, 'customerPartyId').length > 0
+                    ? 'customer-association-hint customerPartyId-error'
+                    : 'customer-association-hint'
                 }
+                aria-invalid={fieldErrors(state, 'customerPartyId').length > 0}
+                onChange={(event) => setCustomerId(event.target.value)}
+                disabled={pendingLocked || isShippingOnly}
+                className="min-h-11 w-full rounded-md border bg-background px-3 text-sm"
               >
-                采用客户简称
-              </Button>
-            ) : null}
-            {fieldErrors(state, 'customerPartyId')[0] ? (
-              <p id="customerPartyId-error" role="alert" className="text-xs text-destructive">
-                {fieldErrors(state, 'customerPartyId')[0]}
+                <option value="">未关联客户</option>
+                {unknownCustomer ? (
+                  <option value={initial.customerPartyId!}>
+                    当前关联客户（信息不可用）
+                  </option>
+                ) : null}
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                    {customer.shortName ? ` · ${customer.shortName}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p
+                id="customer-association-hint"
+                className="text-xs text-muted-foreground"
+              >
+                更换关联客户会保留已填简称和各票收货信息。
               </p>
-            ) : null}
-          </div>}
+              {selectedCustomer && !isShippingOnly ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11"
+                  disabled={pendingLocked}
+                  onClick={() =>
+                    setCustomerRef(
+                      selectedCustomer.shortName || selectedCustomer.name,
+                    )
+                  }
+                >
+                  采用客户简称
+                </Button>
+              ) : null}
+              {fieldErrors(state, 'customerPartyId')[0] ? (
+                <p
+                  id="customerPartyId-error"
+                  role="alert"
+                  className="text-xs text-destructive"
+                >
+                  {fieldErrors(state, 'customerPartyId')[0]}
+                </p>
+              ) : null}
+            </div>
+          )}
           {delivery === undefined ? (
             <>
               <div className="sm:col-span-2">
@@ -280,6 +319,7 @@ export function EditOrderForm({
               />
             </>
           ) : null}
+          {designFields}
           <Field
             name="remark"
             label="工单备注"
@@ -290,7 +330,7 @@ export function EditOrderForm({
             initial={initial.remark}
             errors={fieldErrors(state, 'remark')}
           />
-          {!isShippingOnly && (
+          {!designLayout && !isShippingOnly && (
             <Field
               name="promisedDate"
               label="承诺交期"
@@ -512,10 +552,19 @@ export function EditOrderForm({
 
       <Card aria-label="分货与包装" id="saved-packaging">
         <CardHeader>
-          <h2 className="text-base font-semibold">分货与包装</h2>
+          <h2 className="text-base font-semibold">
+            {designLayout ? '包装补充说明' : '分货与包装'}
+          </h2>
         </CardHeader>
         <CardContent className="space-y-4">
-          {packagingDetails}
+          {designLayout && packagingDetails ? (
+            <Disclosure>
+              <DisclosureSummary>分货与包装明细</DisclosureSummary>
+              <div className="pt-3">{packagingDetails}</div>
+            </Disclosure>
+          ) : (
+            packagingDetails
+          )}
           <Field
             name="packageRequirement"
             label="包装补充说明（选填）"
@@ -535,20 +584,22 @@ export function EditOrderForm({
         </p>
       )}
 
-      <div className="flex items-center gap-3">
-        <Button type="submit" className="min-h-11" disabled={pendingLocked}>
-          {pending ? '保存中…' : '保存'}
-        </Button>
-        <Link
-          href={`/orders/${orderId}`}
-          className={buttonVariants({
-            variant: 'outline',
-            className: 'min-h-11',
-          })}
-        >
-          取消
-        </Link>
-      </div>
+      {!designLayout ? (
+        <div className="flex items-center gap-3">
+          <Button type="submit" className="min-h-11" disabled={pendingLocked}>
+            {pending ? '保存中…' : '保存'}
+          </Button>
+          <Link
+            href={`/orders/${orderId}`}
+            className={buttonVariants({
+              variant: 'outline',
+              className: 'min-h-11',
+            })}
+          >
+            取消
+          </Link>
+        </div>
+      ) : null}
     </form>
   );
 }

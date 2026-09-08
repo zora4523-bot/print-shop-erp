@@ -1,3 +1,8 @@
+import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
+import { AdminOrderEditor } from '@/components/business/order/AdminOrderEditor';
+import { deriveLegacyOrderItemFoilFacts } from '@/lib/order/pricing-route';
+import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -18,6 +23,7 @@ import { EditOrderForm } from '@/components/business/order/EditOrderForm';
 import {
   OrderSavedConfiguration,
   OrderSavedPackaging,
+  OrderSavedItemDetails,
 } from '@/components/business/order/OrderSavedConfiguration';
 import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
 import { OrderChangeWithdrawButton } from '@/components/business/order/OrderChangeWithdrawButton';
@@ -62,8 +68,12 @@ export default async function EditOrderPage({ params }: PageProps) {
   );
   const canModify = canRequestOrderModification(user, order, Boolean(pending));
   const [customers, products, externalSalesAssociation] = await Promise.all([
-    user.role === Role.ADMIN ? Promise.resolve([]) : listCustomerPartyOptions(order.customerPartyId),
-    canModify && order.items.length > 0 ? listActiveOrderChangeCatalogProducts() : Promise.resolve([]),
+    user.role === Role.ADMIN
+      ? Promise.resolve([])
+      : listCustomerPartyOptions(order.customerPartyId),
+    canModify && order.items.length > 0
+      ? listActiveOrderChangeCatalogProducts()
+      : Promise.resolve([]),
     getOrderExternalSalesAssociation(order.id, user),
   ]);
   const external =
@@ -83,6 +93,225 @@ export default async function EditOrderPage({ params }: PageProps) {
     external &&
     isFulfillmentPricingStatus(order.status) &&
     order.settledAt === null;
+  if (user.role === Role.ADMIN) {
+    const productionLocked = [
+      OrderStatus.RELEASED,
+      OrderStatus.FOILING,
+      OrderStatus.PACKING,
+      OrderStatus.IN_PRODUCTION,
+      OrderStatus.SCHEDULING,
+      OrderStatus.ON_HOLD,
+    ].some((status) => status === order.status);
+    return (
+      <>
+        <BreadcrumbEntity label={order.orderNo} />
+        <AdminOrderEditor
+          key={`${order.id}:${order.editVersion}`}
+          orderId={order.id}
+          orderNo={order.orderNo}
+          status={order.status}
+          revision={order.revision}
+          workOrderVersion={order.workOrderVersion}
+          canModify={canModify}
+          canAdd={canModify && order.packagingGroups.length === 0}
+          canEditDesigns={order.status === OrderStatus.DRAFT && !pending}
+          productionLocked={productionLocked}
+          products={products}
+          items={order.items.map((item) => ({
+            id: item.id,
+            sequence: item.sequence,
+            name: item.name,
+            quantity: item.quantity,
+            pack: item.pack,
+            productId: item.productId,
+            pricingRoute: item.pricingRoute,
+            specification: item.specification,
+            paperType: item.paperType,
+            paperWeightGsm: item.paperWeightGsm,
+            ...deriveLegacyOrderItemFoilFacts(item),
+            subtotal: 'subtotal' in item ? String(item.subtotal) : null,
+            details: (
+              <OrderSavedItemDetails
+                order={order}
+                item={item}
+                includeDesigns={false}
+              />
+            ),
+            packagingEditable:
+              order.packagingGroups
+                .flatMap((group) => group.lines)
+                .filter((line) => line.orderItem.id === item.id).length === 1,
+            designs: item.designs.map((design) => ({
+              id: design.id,
+              fileName: design.fileName,
+              fileType: design.fileType,
+              fileSize: String(design.fileSize),
+              fileUrl:
+                design.fileType === 'IMAGE'
+                  ? signDesignReadUrl(design.fileUrl)
+                  : '',
+            })),
+          }))}
+          form={{
+            orderId: order.id,
+            expectedEditVersion: order.editVersion,
+            fieldset,
+            customers,
+            externalSalesAssociation,
+            shipments: order.shipments.map((row) => ({
+              id: row.id,
+              sequence: row.sequence,
+              status: row.status,
+              receiverName: row.receiverName,
+              receiverPhone: row.receiverPhone,
+              receiverAddress: row.receiverAddress,
+              expressCode: row.expressCode,
+              destinationProvince: row.destinationProvince,
+            })),
+            packagingDetails: <OrderSavedPackaging order={order} />,
+            isExternalSales: external,
+            isSfCollect: order.isSfCollect,
+            blocked: Boolean(pending),
+            initial: {
+              customName: order.customName,
+              customerRef: order.customerRef,
+              customerPartyId: order.customerPartyId,
+              receiverName: order.receiverName,
+              receiverPhone: order.receiverPhone,
+              receiverAddress: order.receiverAddress,
+              expressCode: order.expressCode,
+              packageRequirement: order.packageRequirement,
+              remark: order.remark,
+              promisedDate:
+                order.promisedDate?.toISOString().slice(0, 10) ?? null,
+              isUrgent: order.isUrgent,
+            },
+          }}
+          pendingNotice={
+            pending ? (
+              <ActionNotice
+                tone="info"
+                title="修改申请待处理"
+                description={pending.reason}
+                action={
+                  <Link
+                    href={`/orders/${id}`}
+                    className={buttonVariants({ variant: 'outline' })}
+                  >
+                    查看并处理申请
+                  </Link>
+                }
+              />
+            ) : null
+          }
+          fees={
+            <>
+              <OrderSavedConfiguration
+                order={order}
+                canEditDesigns={false}
+                feesOnly
+              />
+              {external && !pending && 'priceRevision' in order ? (
+                <Disclosure className="rounded-xl border bg-card">
+                  <DisclosureSummary className="px-4 py-3">
+                    版费与其他费用
+                  </DisclosureSummary>
+                  <div className="border-t p-4">
+                    <OrderCommercialDetailsManager
+                      orderId={order.id}
+                      priceRevision={Number(order.priceRevision)}
+                      allowPlateDetailMaintenance={!pricingPending}
+                      manualCharges={order.customerCharges
+                        .filter((charge) =>
+                          [
+                            'SAMPLE_FEE',
+                            'OTHER_PACKAGING_FEE',
+                            'APPROVED_ADJUSTMENT',
+                          ].includes(String(charge.category.code)),
+                        )
+                        .map((charge) => ({
+                          id: charge.id,
+                          status: String(charge.status),
+                          description: charge.description,
+                          amount: String(charge.amount),
+                          overrideReason: charge.overrideReason,
+                          approvalReference: charge.approvalReference,
+                          category: {
+                            code: String(charge.category.code),
+                            name: charge.category.name,
+                          },
+                          finalizedBy: charge.finalizedBy,
+                          finalizedAt: charge.finalizedAt,
+                        }))}
+                      items={order.items.map((item) => ({
+                        id: item.id,
+                        sequence: item.sequence,
+                        name: item.name,
+                        independentPlateEligible:
+                          item.pricingRoute !== 'COLOR_PRINT' &&
+                          deriveLegacyOrderItemFoilFacts(item).foilColors
+                            .length > 0,
+                        plateDetails:
+                          'plateDetails' in item
+                            ? item.plateDetails.map((detail) => ({
+                                id: detail.id,
+                                sequence: detail.sequence,
+                                name: detail.name,
+                                plateGroupId: detail.plateGroupId,
+                                specification: detail.specification,
+                                quantity: detail.quantity,
+                                unitPrice: String(detail.unitPrice),
+                                amount: String(detail.amount),
+                                remark: detail.remark,
+                                isActive: detail.isActive,
+                              }))
+                            : [],
+                      }))}
+                    />
+                  </div>
+                </Disclosure>
+              ) : null}
+              {canPrice ? (
+                <Disclosure className="rounded-xl border bg-card">
+                  <DisclosureSummary className="px-4 py-3">
+                    核对自动报价与待核费用
+                  </DisclosureSummary>
+                  <div className="border-t p-4">
+                    <p className="text-xs text-muted-foreground">
+                      人工费用单独核定，完成后页面将读取最新金额。请先保存其他修改。
+                    </p>
+
+                    <OrderPricingReviewForm
+                      key={`${order.revision}:${order.editVersion}`}
+                      orderId={order.id}
+                    />
+                  </div>
+                </Disclosure>
+              ) : null}
+              {canCorrectFreight ? (
+                <Card>
+                  <CardContent className="pt-4">
+                    <FulfillmentPricingReviewForm
+                      key={`${order.revision}:${order.editVersion}`}
+                      orderId={order.id}
+                      currentValue={order.isSfCollect}
+                      isPricingPending={pricingPending}
+                      shipments={order.shipments.map((shipment) => ({
+                        id: shipment.id,
+                        sequence: shipment.sequence,
+                        destinationProvince: shipment.destinationProvince,
+                        weightKg: shipment.weightKg?.toString() ?? null,
+                      }))}
+                    />
+                  </CardContent>
+                </Card>
+              ) : null}
+            </>
+          }
+        />
+      </>
+    );
+  }
   return (
     <div className="mx-auto min-w-0 max-w-6xl space-y-5 [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11">
       <BreadcrumbEntity label={order.orderNo} />
@@ -168,7 +397,9 @@ export default async function EditOrderPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             <OrderChangeRequestForm
-              promisedDate={order.promisedDate?.toISOString().slice(0, 10) ?? null}
+              promisedDate={
+                order.promisedDate?.toISOString().slice(0, 10) ?? null
+              }
               orderId={order.id}
               expectedRevision={order.revision}
               expectedWorkOrderVersion={order.workOrderVersion}
