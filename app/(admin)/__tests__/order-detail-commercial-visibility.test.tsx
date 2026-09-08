@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { batchOrder } from '@/components/business/order/__tests__/admin-order-batch-fixture';
 import {
   OrderKind,
   OrderChangeRequestStatus,
@@ -31,6 +32,7 @@ const {
   commercialDetailsPropsMock,
   listExternalCreateOrderProductOptionsMock,
   listExternalCreateOrderPaperOptionsMock,
+  getAdminOrderDetailPresentationMock,
 } = vi.hoisted(() => ({
   getOrderDetailMock: vi.fn(),
   getSalesOrderDetailByIdMock: vi.fn(),
@@ -46,6 +48,7 @@ const {
   commercialDetailsPropsMock: vi.fn(),
   listExternalCreateOrderProductOptionsMock: vi.fn(),
   listExternalCreateOrderPaperOptionsMock: vi.fn(),
+  getAdminOrderDetailPresentationMock: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -59,6 +62,17 @@ vi.mock('@/lib/order', () => ({
 }));
 vi.mock('@/lib/order/sales-detail-query', () => ({
   getSalesOrderDetailById: getSalesOrderDetailByIdMock,
+}));
+vi.mock('@/lib/order/admin-detail-query', () => ({
+  getAdminOrderDetailPresentation: getAdminOrderDetailPresentationMock,
+}));
+// Workflow mutation behavior is covered by its own browser/action tests. This
+// suite renders the real detail surface and guards commercial form visibility.
+vi.mock('@/components/business/order/AdminOrderDecisionPanel', () => ({
+  AdminOrderDecisionPanel: () => null,
+}));
+vi.mock('@/components/business/order/AdminOrderDetailDecision', () => ({
+  AdminOrderDetailDecision: () => null,
 }));
 vi.mock('@/lib/product', () => ({
   listExternalCreateOrderProductOptions:
@@ -189,6 +203,21 @@ beforeEach(() => {
   commercialDetailsPropsMock.mockReset();
   listExternalCreateOrderProductOptionsMock.mockReset().mockResolvedValue([]);
   listExternalCreateOrderPaperOptionsMock.mockReset().mockResolvedValue([]);
+  getAdminOrderDetailPresentationMock.mockReset().mockImplementation(async (_actor, version) => {
+    const order = await getOrderDetailMock.mock.results.at(-1)?.value;
+    return {
+      workspace: batchOrder({
+        ...version, status: order.status, customName: order.customName,
+        customer: { id: null, name: order.customerRef, filterValue: order.customerRef },
+        submitter: { id: order.submitter.id, name: order.submitter.displayName },
+        totalQuantity: order.items.reduce((total: number, item: { quantity: number }) => total + item.quantity, 0),
+        itemCount: order.items.length, promisedDate: order.promisedDate?.toISOString() ?? null,
+        fee: { amount: order.totalAmount, source: 'LEGACY', estimated: false },
+        feeStages: { quoted: null, confirmed: null, settled: null, active: 'LEGACY' },
+      }),
+      prints: [], workReports: [],
+    };
+  });
 });
 
 describe('order detail commercial visibility', () => {
@@ -351,6 +380,7 @@ describe('order detail commercial visibility', () => {
       id: 'worker-1',
       role: Role.WORKER,
     });
+    expect(getAdminOrderDetailPresentationMock).not.toHaveBeenCalled();
     expect(html).not.toContain('结算路径');
     expect(html).not.toContain('对客应收总额');
     expect(html).not.toContain('款式加工费');
@@ -407,6 +437,7 @@ describe('order detail commercial visibility', () => {
       'order-1',
     );
     expect(getOrderDetailMock).not.toHaveBeenCalled();
+    expect(getAdminOrderDetailPresentationMock).not.toHaveBeenCalled();
     expect(html).toContain('款式加工费');
     expect(html).toContain('入袋加工费');
     expect(html).toContain('礼盒包装');
@@ -805,6 +836,7 @@ function orderFixture() {
     packagingAmount: '25.00',
     totalAmount: '98765.43',
     revision: 1,
+    editVersion: 1,
     workOrderVersion: 2,
     promisedDate: null,
     createdAt,
@@ -827,6 +859,7 @@ function orderFixture() {
         weightKg: null,
         expressCode: null,
         trackingNo: null,
+        carrierCode: null,
         lines: [],
       },
     ],
@@ -866,6 +899,7 @@ function orderFixture() {
     customerCharges: [
       {
         id: 'charge-shipping-1',
+        businessKey: 'SHIPPING_FEE:shipment-1',
         amount: '8.00',
         suggestedAmount: '8.00',
         quantity: '2.000',
@@ -883,6 +917,7 @@ function orderFixture() {
       },
       {
         id: 'charge-packing-1',
+        businessKey: 'PACKING_MATERIAL:shipment-1',
         amount: '4.00',
         suggestedAmount: '4.00',
         quantity: '1000.000',
