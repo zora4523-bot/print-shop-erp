@@ -1,3 +1,4 @@
+import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
@@ -37,6 +38,11 @@ import type {
 } from './auth/schemas';
 import { getOrderScopeFilter } from './auth/order-scope';
 import { orderCascadeLockKey } from './order/locks';
+import {
+  externalSalesAssociationBlockReason,
+  externalSalesAssociationSelect,
+  type ExternalSalesAccountOption,
+} from './order/external-sales-association';
 import {
   collectOutsourceCraftIds,
   findUndercoveredOutsourceItems,
@@ -99,7 +105,7 @@ import {
   ExternalOrderQuoteFinalizeError,
   finalizeExternalOrderQuoteInTx,
 } from './order/submit-external-order';
-import { activateProductionOperationsInTx } from './production/operation-materialization-service';
+import { prepareOrderForProductionInTx } from './order/production-readiness';
 import { getSetting } from './settings';
 
 export {
@@ -1966,18 +1972,9 @@ export async function submitOrder(
           },
         });
         if (!currentPricing) throw new OrderInvariantError('工单不存在');
-        const activated =
-          currentPricing.billingMode === OrderBillingMode.CHARGE &&
-          currentPricing.pricingStatus === ORDER_PRICING_STATUS.AUTO_CONFIRMED
-            ? await activateProductionOperationsInTx(
-                tx,
-                lockedOrderId,
-                actor,
-                now,
-              )
-            : null;
+        const prepared = await prepareOrderForProductionInTx(tx, lockedOrderId, actor, now);
         if (backgroundJobsMode() !== 'durable') {
-          return activated ? { status: activated.orderStatus } : undefined;
+          return { status: prepared.status };
         }
         const payload = await tx.order.findUniqueOrThrow({
           where: { id: lockedOrderId },
@@ -1999,7 +1996,7 @@ export async function submitOrder(
               submitterName: payload.submitter.displayName,
               customerRef: payload.customerRef,
               urgentMark: payload.isUrgent ? '🚨 急单' : '',
-              summary: '新工单已提交，待工厂确认',
+              summary: prepared.ready ? '新工单已提交，待下发生产' : '新工单已提交，待处理资料或费用',
               deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
             },
             { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
@@ -2020,7 +2017,7 @@ export async function submitOrder(
         } else {
           urgentNotificationQueued = true;
         }
-        return activated ? { status: activated.orderStatus } : undefined;
+        return { status: prepared.status };
       },
     },
   );
@@ -2052,7 +2049,7 @@ export async function submitOrder(
           submitterName: payload.submitter.displayName,
           customerRef: payload.customerRef,
           urgentMark,
-          summary: '新工单已提交，待工厂确认',
+          summary: result.status === OrderStatus.CONFIRMED ? '新工单已提交，待下发生产' : '新工单已提交，待处理资料或费用',
           deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
         },
         { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
@@ -2911,6 +2908,9 @@ type EditTxClient = {
           totalAmount: Decimal.Value;
           customName: string | null;
           customerRef: string | null;
+          customerPartyId: string | null;
+          shipments: EditableShipment[];
+          changeRequests: { id: string }[];
           receiverName: string | null;
           receiverPhone: string | null;
           receiverAddress: string | null;
@@ -2936,7 +2936,7 @@ type EditTxClient = {
   };
   orderShipment: {
     updateMany: (args: {
-      where: { orderId: string; sequence: number };
+      where: { orderId: string; sequence: number; id?: string };
       data: {
         receiverName?: string | null;
         receiverPhone?: string | null;
@@ -2959,6 +2959,7 @@ type EditTxClient = {
 type EditableOrderFieldValue = string | boolean | Date | null;
 
 type EditableOrderSnapshot = {
+  customerPartyId: string | null;
   customName: string | null;
   customerRef: string | null;
   receiverName: string | null;
@@ -2987,10 +2988,9 @@ async function assertNoShippingCostBeforeSfCollect(
   }
 }
 
-// Optional edit fields may arrive as undefined / blank from direct callers;
-// normalize them to explicit null so diffing and persistence treat "user
-// cleared the field" the same as the DB's null state. receiverAddress is
-// checked separately and never reaches persistence as null.
+// Blank optional fields mean an explicit clear. Undefined fields are omitted
+// by pickEditableFields so partial updates preserve the saved value.
+// receiverAddress is checked separately and never reaches persistence as null.
 function normalizeEditableValue(raw: unknown): EditableOrderFieldValue {
   if (raw === undefined || raw === '') return null;
   if (raw instanceof Date) return raw;
@@ -3022,7 +3022,7 @@ function pickEditableFields(
 ): Record<string, EditableOrderFieldValue> {
   const out: Record<string, EditableOrderFieldValue> = {};
   for (const key of allowed) {
-    if (!(key in input)) continue;
+    if (!(key in input) || input[key] === undefined) continue;
     out[key] = normalizeEditableValue(input[key]);
   }
   return out;
@@ -3066,8 +3066,12 @@ async function updateOrderEditableFields(
   orderId: string,
   command: OrderEditCommand,
   actor: { id: string; role: Role },
+  transaction?: Prisma.TransactionClient,
 ): Promise<UpdateOrderResult> {
-  return db.$transaction(async (tx) => {
+  if (![Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE].some((role) => role === actor.role)) {
+    throw new OrderInvariantError('无权编辑工单');
+  }
+  const work = async (tx: Prisma.TransactionClient): Promise<UpdateOrderResult> => {
     const txClient = tx as unknown as EditTxClient;
     await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       orderId,
@@ -3086,6 +3090,10 @@ async function updateOrderEditableFields(
         totalAmount: true,
         customName: true,
         customerRef: true,
+        customerPartyId: true,
+        isSfCollect: true,
+        changeRequests: { where: { status: 'PENDING' }, select: { id: true } },
+        shipments: { select: { id: true, sequence: true, status: true, receiverName: true, receiverPhone: true, receiverAddress: true, expressCode: true, destinationProvince: true } },
         receiverName: true,
         receiverPhone: true,
         receiverAddress: true,
@@ -3099,14 +3107,17 @@ async function updateOrderEditableFields(
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
 
-    // SALES / CUSTOMER_SERVICE can only edit their own orders. ADMIN /
-    // ADMIN have a global override so they can correct field data for
+    // SALES / CUSTOMER_SERVICE can only edit their own orders. ADMIN
+    // has a global override so they can correct field data for
     // anyone. Same pattern as submitOrder's ownership guard.
     const globalOverride = actor.role === Role.ADMIN;
     if (!globalOverride && order.submitterId !== actor.id) {
       throw new OrderInvariantError('只能修改自己创建的工单');
     }
 
+    if (order.changeRequests?.length) {
+      throw new OrderInvariantError('工单存在待审批申请，请处理后再编辑');
+    }
     const fieldset = editableFieldsetForStatus(order.status);
     if (fieldset === 'NONE') {
       throw new OrderInvariantError('当前状态不可编辑');
@@ -3134,6 +3145,56 @@ async function updateOrderEditableFields(
         : { isUrgent: command.isUrgent },
       allowed,
     );
+    let externalSalesChange: { before: ExternalSalesAccountOption; after: ExternalSalesAccountOption } | undefined;
+    if (command.kind === 'full-form' && 'externalSalesUserId' in command.input) {
+      if (actor.role !== Role.ADMIN) {
+        throw new OrderInvariantError('只有管理员可以更换关联外部销售');
+      }
+      const targetId = command.input.externalSalesUserId;
+      if (typeof targetId !== 'string' || !targetId.trim() || targetId.trim().length > 64) {
+        throw new OrderInvariantError('请选择关联外部销售账号');
+      }
+      if (targetId.trim() !== order.submitterId) {
+        // Serialize against writers outside the cascade lock before checking
+        // financial relationships. The final editVersion CAS still applies.
+        await tx.$executeRaw`SELECT id FROM "Order" WHERE id = ${orderId} FOR UPDATE`;
+        const associationOrder = await tx.order.findUnique({
+          where: { id: orderId },
+          select: externalSalesAssociationSelect,
+        });
+        if (!associationOrder) throw new OrderInvariantError('工单不存在或无权访问');
+        const reason = externalSalesAssociationBlockReason(associationOrder);
+        if (reason) throw new OrderInvariantError(reason);
+        // Prevent deactivation / role changes between validation and commit.
+        await tx.$executeRaw`SELECT id FROM "User" WHERE id = ${targetId.trim()} FOR SHARE`;
+        const target = await tx.user.findUnique({
+          where: { id: targetId.trim() },
+          select: { id: true, role: true, isActive: true, displayName: true, username: true },
+        });
+        if (!target || !target.isActive || target.role !== Role.SALES) {
+          throw new OrderInvariantError('所选账号不存在、已停用或不是外部销售，请重新选择');
+        }
+        // Ownership and future billing share submitterId. Preserve the creator,
+        // role snapshot, settlement direction, customer data and all prices.
+        nextFields.submitterId = target.id;
+        externalSalesChange = {
+          before: associationOrder.submitter,
+          after: { id: target.id, displayName: target.displayName, username: target.username },
+        };
+      }
+    }
+    if (
+      'customName' in nextFields &&
+      order.settlementType === OrderSettlementType.EXTERNAL_SALES
+    ) {
+      if (
+        typeof nextFields.customName !== 'string' ||
+        !nextFields.customName.trim()
+      ) {
+        throw new OrderInvariantError('外部销售工单必须填写工单名称');
+      }
+      nextFields.customName = nextFields.customName.trim();
+    }
     if ('receiverAddress' in nextFields) {
       const receiverAddress = nextFields.receiverAddress;
       if (typeof receiverAddress !== 'string' || !receiverAddress.trim()) {
@@ -3143,12 +3204,61 @@ async function updateOrderEditableFields(
       // 避免测试/脚本等直接调用者把首尾空格持久化。
       nextFields.receiverAddress = receiverAddress.trim();
     }
+    if ('customerPartyId' in nextFields && nextFields.customerPartyId !== (order.customerPartyId ?? null)) {
+      const customerId = nextFields.customerPartyId;
+      if (typeof customerId === 'string') {
+        const customer = await tx.party.findUnique({
+          where: { id: customerId },
+          select: { id: true, isActive: true, type: true },
+        });
+        if (!customer || !customer.isActive ||
+          (customer.type !== PartyType.CUSTOMER && customer.type !== PartyType.BOTH)) {
+          throw new OrderInvariantError('所选客户不存在、已停用或不是客户，请重新选择');
+        }
+      }
+    }
+    const shipmentInput = command.kind === 'full-form' && 'shipments' in command.input ? command.input.shipments : undefined;
+    let shipmentEdits: ReturnType<typeof planOrderShipmentEdits> = [];
+    if (shipmentInput) {
+      try {
+        shipmentEdits = planOrderShipmentEdits(
+          order.shipments, shipmentInput, order.isSfCollect,
+          order.settlementType === OrderSettlementType.EXTERNAL_SALES,
+        );
+      } catch (error) {
+        if (error instanceof OrderShipmentEditError) throw new OrderInvariantError(error.message);
+        throw error;
+      }
+      const primary = shipmentInput.find((row) => order.shipments.find((shipment) => shipment.id === row.id)?.sequence === 1);
+      if (primary) {
+        for (const key of ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode'] as const) {
+          nextFields[key] = primary[key]?.trim() || null;
+        }
+      }
+    } else if ('receiverAddress' in nextFields && nextFields.receiverAddress !== order.receiverAddress && order.settlementType === OrderSettlementType.EXTERNAL_SALES && !order.isSfCollect) {
+      throw new OrderInvariantError('请从完整编辑页核对配送省份后修改收货地址');
+    }
     const changes = diffEditableFields(order, nextFields);
+    const primaryShipmentChanges = Object.fromEntries(
+      ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode']
+        .filter((field) => field in changes)
+        .map((field) => [field, nextFields[field] as string | null]),
+    );
+    if (!shipmentInput && Object.keys(primaryShipmentChanges).length > 0) {
+      if (order.shipments?.some((shipment) => shipment.sequence === 1 && shipment.status === 'SHIPPED')) {
+        throw new OrderInvariantError('主配送记录已发货，不能修改收货信息');
+      }
+      if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
+        const name = 'receiverName' in nextFields ? nextFields.receiverName : order.receiverName;
+        const phone = 'receiverPhone' in nextFields ? nextFields.receiverPhone : order.receiverPhone;
+        if (!name || !phone) throw new OrderInvariantError('请填写收件人和收货电话');
+      }
+    }
 
     // No-op edit — skip the UPDATE and the log entry. Keeps the
     // OrderLog feed clean for users who open the edit form and save
     // without changing anything.
-    if (Object.keys(changes).length === 0) {
+    if (Object.keys(changes).length === 0 && shipmentEdits.length === 0) {
       return {
         id: order.id,
         status: order.status,
@@ -3164,7 +3274,7 @@ async function updateOrderEditableFields(
           id: orderId,
           editVersion: command.input.expectedEditVersion,
         },
-        data: nextFields,
+        data: { ...nextFields, ...(shipmentEdits.length ? { updatedAt: new Date() } : {}) },
       });
       if (persisted.count !== 1) {
         throw new OrderInvariantError(STALE_ORDER_EDIT_MESSAGE);
@@ -3181,12 +3291,7 @@ async function updateOrderEditableFields(
       });
     }
 
-    const primaryShipmentChanges = Object.fromEntries(
-      ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode']
-        .filter((field) => field in changes)
-        .map((field) => [field, nextFields[field] as string | null]),
-    );
-    if (Object.keys(primaryShipmentChanges).length > 0) {
+    if (!shipmentInput && Object.keys(primaryShipmentChanges).length > 0) {
       const synchronized = await txClient.orderShipment.updateMany({
         where: { orderId, sequence: 1 },
         data: primaryShipmentChanges,
@@ -3198,12 +3303,21 @@ async function updateOrderEditableFields(
       }
     }
 
+    for (const edit of shipmentEdits) {
+      const updatedShipment = await txClient.orderShipment.updateMany({
+        where: { orderId, id: edit.id, sequence: edit.sequence },
+        data: edit.data,
+      });
+      if (updatedShipment.count !== 1) {
+        throw new OrderInvariantError('配送记录已变化，请刷新页面后重试');
+      }
+    }
     await txClient.orderLog.create({
       data: {
         orderId,
         operatorId: actor.id,
         action: 'UPDATE',
-        changedFields: changes,
+        changedFields: { ...changes, ...(externalSalesChange ? { submitterId: externalSalesChange } : {}), ...(shipmentEdits.length ? { shipments: shipmentEdits.map((edit) => ({ sequence: edit.sequence, before: edit.before, after: edit.data })) } : {}) },
       },
     });
 
@@ -3211,20 +3325,23 @@ async function updateOrderEditableFields(
       id: updated.id,
       status: updated.status,
       changed: true,
-      changedFields: Object.keys(changes),
+      changedFields: [...Object.keys(changes), ...(shipmentEdits.length ? ['shipments'] : [])],
     };
-  });
+  };
+  return transaction ? work(transaction) : db.$transaction(work);
 }
 
 export async function updateOrderFields(
   orderId: string,
   input: UpdateEditableOrderInput | UpdateShippingOrderInput,
   actor: { id: string; role: Role },
+  transaction?: Prisma.TransactionClient,
 ): Promise<UpdateOrderResult> {
   return updateOrderEditableFields(
     orderId,
     { kind: 'full-form', input },
     actor,
+    transaction,
   );
 }
 

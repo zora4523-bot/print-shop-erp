@@ -25,7 +25,17 @@ vi.mock('@/actions/order', () => ({
   previewOrderChangeRequestPricingAction: vi.fn(),
   previewOrderCancellationSettlementAction: vi.fn(),
   reviewOrderChangeRequestAction: vi.fn(),
+  finalizeOrderPricingAction: vi.fn(),
+  previewOrderPricingReviewAction: vi.fn(),
+  shipOrderAction: vi.fn(),
 }));
+vi.mock('@/actions/order-fulfillment-pricing', () => ({
+  finalizeFulfillmentPricingAction: vi.fn(),
+  previewFulfillmentPricingAction: vi.fn(),
+}));
+vi.mock('../OrderPricingReviewForm', () => ({ OrderPricingReviewForm: () => null }));
+vi.mock('../FulfillmentPricingReviewForm', () => ({ FulfillmentPricingReviewForm: () => null }));
+vi.mock('../ShipOrderForm', () => ({ ShipOrderForm: () => null }));
 
 import { AdminOrderWorkspaceList } from '../AdminOrderWorkspaceList';
 import {
@@ -33,10 +43,73 @@ import {
   parseStrictNonNegativeInteger,
   parseStrictPositiveIntegerList,
 } from '../AdminOrderDecisionPanel';
-import { shouldShowOrderEditLink } from '../AdminOrderDrawer';
+import { isOrderEditable } from '@/lib/order/editable-fields';
 import { resultMessage } from '../AdminOrderBatchActions';
 
 describe('AdminOrderWorkspaceList', () => {
+  it('distinguishes a filtered empty result from an empty queue with working recovery links', () => {
+    const props = { orders: [], customerFilterHrefs: {}, selectedExportRequestKey: 'empty-export' };
+    const filtered = renderToStaticMarkup(<AdminOrderWorkspaceList {...props} hasFilters clearFiltersHref="/orders?queue=all" />);
+    expect(filtered).toContain('没有符合筛选条件的工单');
+    expect(filtered).toContain('href="/orders?queue=all"');
+    expect(filtered).toContain('清除筛选');
+    const emptyQueue = renderToStaticMarkup(<AdminOrderWorkspaceList {...props} />);
+    expect(emptyQueue).toContain('这个队列清空了');
+    expect(emptyQueue).toContain('查看全部工单');
+    expect(emptyQueue).not.toContain('清除筛选');
+  });
+
+  it('uses the name as a detail link and hides identifiers and redundant metadata', () => {
+    const order = { ...row(), promisedDaysLeft: 8, dueAlert: null };
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="name-export" />);
+    expect(html).toContain('href="/orders/order-1"');
+    expect(html).toContain('端午定制');
+    expect(html).toContain('客户甲');
+    expect(html).toContain('2026-09-05');
+    expect(html).not.toContain('剩 8 天');
+    expect(html.replace(/<[^>]*>/g, '')).not.toContain(order.orderNo);
+    expect(html).toContain(`aria-label="选择工单 端午定制（${order.orderNo}）"`);
+    expect(html).toContain(`aria-label="${order.isStarred ? '取消' : '添加'}星标：端午定制（${order.orderNo}）"`);
+    expect(html).not.toContain('复制工单号');
+    expect(html).not.toContain('业务员甲');
+    expect(html).not.toContain('局部烫金');
+    expect(html).not.toContain('v2');
+  });
+
+  it('labels an unquoted draft without implying a failed pricing rule', () => {
+    const order: AdminOrderWorkspaceRow = { ...row(), status: OrderStatus.DRAFT, fee: { source: 'PENDING', amount: null, estimated: false } };
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="draft-export" />);
+    expect(html).toContain('未报价');
+    expect(html).toContain('提交后报价');
+    expect(html).toContain('href="/orders/order-1/edit"');
+    expect(html).toContain('编辑草稿');
+    expect(html).not.toContain('系统无法定价');
+  });
+
+  it('shows canonical craft tags and the full distant delivery date without a countdown', () => {
+    const order: AdminOrderWorkspaceRow = { ...row(), craftTags: ['局部烫金', '专版烫金', '彩印'], promisedDate: '2099-12-31', promisedDaysLeft: 26777, dueAlert: null };
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="signals-export" />);
+    for (const tag of order.craftTags!) expect(html).toContain(tag);
+    expect(html).toContain('2099-12-31');
+    expect(html).not.toContain('26777');
+  });
+
+  it('keeps duplicate names linked to separate records and uses a readable empty-name fallback', () => {
+    const orders = [row(), { ...row(), id: 'order-2', orderNo: 'OTHER-ID' }, { ...row(), id: 'order-3', customName: '  ' }];
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={orders} customerFilterHrefs={{}} selectedExportRequestKey="duplicate-export" />);
+    for (const order of orders) expect(html).toContain(`href="/orders/${order.id}"`);
+    expect(html).toContain('未命名工单');
+    expect(html.replace(/<[^>]*>/g, '')).not.toContain('OTHER-ID');
+    expect(html).toContain('aria-label="选择工单 端午定制（OTHER-ID）"');
+    expect(html).toContain(`aria-label="选择工单 未命名工单（${orders[2].orderNo}）"`);
+  });
+
+  it('shows validated change facts in the row while preserving the request reason as fallback', () => {
+    const order = { ...row(), pendingChangeRequest: { id: 'request-1', type: 'MODIFY' as const, reason: '修改数量', summary: '第 2 款数量 1,000 → 2,000', createdAt: '2026-09-07T01:00:00.000Z' } };
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="change-export" />);
+    expect(html).toContain('第 2 款数量 1,000 → 2,000');
+  });
+
   it('renders the rich row and the two persisted work-order progress bars', () => {
     const html = renderToStaticMarkup(
       <AdminOrderWorkspaceList
@@ -50,13 +123,13 @@ describe('AdminOrderWorkspaceList', () => {
     );
 
     expect(html).toContain('data-slot="admin-order-workspace-list"');
-    expect(html).toContain('GD-260902-001');
+    expect(html.replace(/<[^>]*>/g, '')).not.toContain('GD-260902-001');
     expect(html).toContain('/orders?customerRef=%E5%AE%A2%E6%88%B7%E7%94%B2');
-    expect(html).toContain('v2');
+    expect(html).not.toContain('v2');
     expect(html).toContain('端午定制');
     expect(html).toContain('客户甲');
-    expect(html).toContain('业务员甲');
-    expect(html).toContain('局部烫金');
+    expect(html).not.toContain('业务员甲');
+    expect(html).not.toContain('局部烫金');
     expect(html).toContain('2 款 · 2,000');
     expect(html).toContain('烫金');
     expect(html).toContain('1,200 / 2,000');
@@ -85,7 +158,7 @@ describe('AdminOrderWorkspaceList', () => {
       />,
     );
 
-    expect(html).toContain('>审核</button>');
+    expect(html).toContain('>查看处理</a>');
   });
 
   it('shows rejected incomplete fees as excluded without exposing pricing actions', () => {
@@ -117,68 +190,33 @@ describe('AdminOrderWorkspaceList', () => {
 
     expect(listHtml).toContain('金额不完整');
     expect(listHtml).toContain('未计入合计');
-    expect(listHtml).toContain('>详情</button>');
+    expect(listHtml).toContain('>详情</a>');
     expect(listHtml).not.toContain('查看待核价');
     expect(actionsHtml).not.toContain('录入人工核价');
   });
 
-  it('keeps failed confirmation visible but disabled and provides a pricing recovery path', () => {
+  it('shows actionable blockers without a second confirmation control', () => {
     const submitted = row();
     submitted.status = OrderStatus.SUBMITTED;
-    submitted.priceComparisonError = '历史人工金额缺少可重算参数';
-    submitted.confirmationPreflight = { ok: true, issues: [] };
-    submitted.capabilities = {
-      ...submitted.capabilities,
-      confirm: true,
-      hold: false,
-      release: false,
-    };
-    const html = renderToStaticMarkup(
-      <AdminOrderDecisionPanel order={submitted} />,
-    );
-
-    expect(html).toContain('确认工单');
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>确认工单<\/button>/);
-    expect(html).toContain('当前价预检失败：历史人工金额缺少可重算参数');
-    expect(html).toContain('/orders/order-1#pricing-review');
-    expect(html).toContain('处理核价');
+    submitted.confirmationPreflight = { ok: false, issues: ['请补全收货地址'] };
+    submitted.capabilities = { ...submitted.capabilities, confirm: false, hold: false, release: false };
+    const html = renderToStaticMarkup(<AdminOrderDecisionPanel order={submitted} />);
+    expect(html).toContain('请补全收货地址');
+    expect(html).not.toContain('确认并锁定');
+    expect(html).not.toContain('>确认工单</button>');
+    expect(html).not.toContain('>下发 + 打印</button>');
   });
 
-  it('只有加载到当前价凭证后才允许点击确认工单', () => {
+  it('offers release with saved pricing and never waits for a current-price token', () => {
     const submitted = row();
     submitted.status = OrderStatus.SUBMITTED;
     submitted.confirmationPreflight = { ok: true, issues: [] };
-    submitted.capabilities = {
-      ...submitted.capabilities,
-      confirm: true,
-      hold: false,
-      release: false,
-    };
-
-    const withoutPreview = renderToStaticMarkup(
-      <AdminOrderDecisionPanel order={submitted} />,
-    );
-    expect(withoutPreview).toMatch(
-      /<button[^>]*disabled=""[^>]*>确认工单<\/button>/,
-    );
-
-    submitted.priceComparison = {
-      quoted: {
-        amount: '1200.00',
-        versions: { processing: null, logistics: null },
-      },
-      current: {
-        amount: '1234.50',
-        versions: { processing: null, logistics: null },
-      },
-      quoteToken: `create-order-quote-v2:${'a'.repeat(64)}`,
-      hasVersionDiff: false,
-    };
-    const withPreview = renderToStaticMarkup(
-      <AdminOrderDecisionPanel order={submitted} />,
-    );
-    expect(withPreview).toContain('>确认工单</button>');
-    expect(withPreview).not.toMatch(/<button[^>]*\sdisabled=""/);
+    submitted.capabilities = { ...submitted.capabilities, confirm: true, hold: false, release: true };
+    submitted.priceComparison = null;
+    const html = renderToStaticMarkup(<AdminOrderDecisionPanel order={submitted} />);
+    expect(html).toContain('下发 + 打印');
+    expect(html).not.toContain('>确认工单</button>');
+    expect(html).not.toContain('锁定金额');
   });
 
   it('explains how to unblock settlement when a shipped order has no confirmed fee', () => {
@@ -257,8 +295,8 @@ describe('AdminOrderDecisionPanel change request integration', () => {
       <AdminOrderDecisionPanel order={pendingModify} />,
     );
 
-    expect(html).toContain('管理员确认的是是否接受变更');
-    expect(html).toContain('款式与费用由服务端按最新规则自动合并和重算');
+    expect(html).toContain('核对本次变更');
+    expect(html).not.toContain('服务端');
     expect(html).toContain('审核备注 / 拒绝原因');
     expect(html).not.toContain('批准修改');
   });
@@ -286,7 +324,7 @@ describe('AdminOrderDecisionPanel change request integration', () => {
   });
 });
 
-describe('AdminOrderDrawer edit entry', () => {
+describe('order edit eligibility', () => {
   it('hides the dead edit route for every non-editable terminal state', () => {
     for (const status of [
       OrderStatus.COMPLETED,
@@ -295,10 +333,10 @@ describe('AdminOrderDrawer edit entry', () => {
       OrderStatus.FINISHED,
       OrderStatus.CANCELLED,
     ]) {
-      expect(shouldShowOrderEditLink(status), status).toBe(false);
+      expect(isOrderEditable(status), status).toBe(false);
     }
-    expect(shouldShowOrderEditLink(OrderStatus.SUBMITTED)).toBe(true);
-    expect(shouldShowOrderEditLink(OrderStatus.IN_PRODUCTION)).toBe(true);
+    expect(isOrderEditable(OrderStatus.SUBMITTED)).toBe(true);
+    expect(isOrderEditable(OrderStatus.IN_PRODUCTION)).toBe(true);
   });
 });
 

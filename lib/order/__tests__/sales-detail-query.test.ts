@@ -83,6 +83,11 @@ describe('sales order detail query boundary', () => {
     dbMock.order.findFirst.mockResolvedValue(detailRecord());
 
     const result = await getSalesOrderDetailById(actor, 'order-1');
+    expect(result?.packagingGroups).toEqual([{
+      id: 'pack-1', sequence: 1, name: '礼盒混装', mode: 'MIXED_STYLE', actualBagCount: 200,
+      lines: [{ itemSequence: 1, itemName: '款式甲', unitsPerBag: 5 }],
+    }]);
+
 
     expect(result?.feeLines).toEqual([
       {
@@ -202,6 +207,11 @@ function detailRecord() {
         ],
       },
     ],
+    packagingGroups: [{
+      id: 'pack-1', sequence: 1, name: '礼盒混装', mode: 'MIXED_STYLE', actualBagCount: 200,
+      lines: [{ unitsPerBag: 5, orderItem: { sequence: 1, name: '款式甲' } }],
+      pricingSnapshot: { privateRule: 'must-not-leak' }, unitPrice: '0.2',
+    }],
     shipments: [
       {
         id: 'shipment-1',

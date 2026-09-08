@@ -8,7 +8,8 @@ import { getReporterOperationTypeOrNull } from './operation-portal';
 export type WorkerWorkOrderScanTarget = {
   orderId: string;
   workOrderVersion: number;
-  defaultTaskId: string;
+  /** Only a single unfinished task may bypass the task picker. */
+  defaultTaskId: string | null;
   requestedTaskAllowed: boolean;
 };
 
@@ -35,32 +36,34 @@ export async function resolveWorkerWorkOrderScan(
           status: { not: ProductionOperationStatus.CANCELLED },
         },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: { id: true, workOrderVersion: true },
+        select: { id: true, workOrderVersion: true, status: true },
       },
       productionProgressSteps: {
         where: { status: { not: ProductionOperationStatus.CANCELLED } },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: { id: true, workOrderVersion: true },
+        select: { id: true, workOrderVersion: true, status: true },
       },
     },
   });
   if (!order) return null;
 
-  const currentTaskIds = [
+  const currentTasks = [
     ...order.productionOperations,
     ...order.productionProgressSteps,
   ]
-    .filter((task) => task.workOrderVersion === order.workOrderVersion)
-    .map((task) => task.id);
-  const defaultTaskId = currentTaskIds[0];
-  if (!defaultTaskId) return null;
+    .filter((task) => task.workOrderVersion === order.workOrderVersion);
+  if (currentTasks.length === 0) return null;
+  const unfinishedTasks = currentTasks.filter(
+    (task) => task.status === ProductionOperationStatus.PENDING ||
+      task.status === ProductionOperationStatus.IN_PROGRESS,
+  );
 
   return {
     orderId: order.id,
     workOrderVersion: order.workOrderVersion,
-    defaultTaskId,
+    defaultTaskId: unfinishedTasks.length === 1 ? unfinishedTasks[0]!.id : null,
     requestedTaskAllowed:
       requestedTaskId === undefined ||
-      currentTaskIds.includes(requestedTaskId),
+      currentTasks.some((task) => task.id === requestedTaskId),
   };
 }

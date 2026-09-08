@@ -38,17 +38,8 @@ vi.mock('@/lib/audit-log', () => ({
 import { smartBotIdDigest } from '../../notification/smart-bot-identity';
 import { SettingValidationError, updateSettings } from '../index';
 
-function webhookChannel(id: string, isActive = true) {
-  return {
-    id,
-    transport: 'WECOM_GROUP_WEBHOOK',
-    webhookUrl: `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${id}`,
-    smartBotBotDigest: null,
-    smartBotTargetId: null,
-    smartBotChatType: null,
-    smartBotBoundAt: null,
-    isActive,
-  };
+function activeChannel(id: string, isActive = true) {
+  return smartBotChannel(id, smartBotIdDigest('current-bot-id'), isActive);
 }
 
 function smartBotChannel(id: string, botDigest: string, isActive = true) {
@@ -65,6 +56,8 @@ function smartBotChannel(id: string, botDigest: string, isActive = true) {
 }
 
 beforeEach(() => {
+  vi.stubEnv('WECOM_SMART_BOT_ID', 'current-bot-id');
+  vi.stubEnv('WECOM_SMART_BOT_SECRET', 'secret-placeholder');
   dbMock.$transaction.mockClear();
   txMock.$queryRaw.mockReset().mockResolvedValue([]);
   txMock.notificationChannel.findMany.mockReset();
@@ -76,6 +69,26 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('updateSettings management notification channel validation', () => {
+  it('旧版目标不能新增到角色路由，但存量启用路由可保留或解绑，停用后不可带旧目标重启', async () => {
+    txMock.notificationChannel.findMany.mockResolvedValue([
+      { ...activeChannel('legacy'), transport: 'WECOM_GROUP_WEBHOOK' },
+    ]);
+    const previous = {
+      factoryConfirmer: { enabled: true, channelIds: ['legacy'] },
+      owner: { enabled: false, channelIds: [] },
+    };
+    await expect(updateSettings({ management_notification_routing: previous })).rejects.toBeInstanceOf(SettingValidationError);
+    expect(txMock.setting.upsert).not.toHaveBeenCalled();
+    txMock.setting.findMany.mockResolvedValue([{ key: 'management_notification_routing', value: previous }]);
+    await expect(updateSettings({ management_notification_routing: previous })).resolves.toBeUndefined();
+    await expect(updateSettings({ management_notification_routing: {
+      ...previous, factoryConfirmer: { enabled: false, channelIds: [] },
+    } })).resolves.toBeUndefined();
+    txMock.setting.findMany.mockResolvedValue([{ key: 'management_notification_routing', value: {
+      ...previous, factoryConfirmer: { enabled: false, channelIds: ['legacy'] },
+    } }]);
+    await expect(updateSettings({ management_notification_routing: previous })).rejects.toBeInstanceOf(SettingValidationError);
+  });
   const routing = {
     factoryConfirmer: { enabled: true, channelIds: ['factory-channel'] },
     owner: { enabled: true, channelIds: ['owner-channel'] },
@@ -83,8 +96,8 @@ describe('updateSettings management notification channel validation', () => {
 
   it('事务内锁定并确认所有绑定都是 active channel', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
-      webhookChannel('factory-channel'),
-      webhookChannel('owner-channel'),
+      activeChannel('factory-channel'),
+      activeChannel('owner-channel'),
     ]);
 
     await updateSettings({ management_notification_routing: routing });
@@ -100,7 +113,6 @@ describe('updateSettings management notification channel validation', () => {
       select: {
         id: true,
         transport: true,
-        webhookUrl: true,
         smartBotBotDigest: true,
         smartBotTargetId: true,
         smartBotChatType: true,
@@ -113,7 +125,7 @@ describe('updateSettings management notification channel validation', () => {
 
   it('删除或停用的 ID 使整份设置不落库', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
-      webhookChannel('factory-channel'),
+      activeChannel('factory-channel'),
     ]);
 
     await expect(

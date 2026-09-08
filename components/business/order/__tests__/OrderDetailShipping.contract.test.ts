@@ -57,7 +57,7 @@ describe('order detail shipping availability contract', () => {
     expect(source).not.toContain('href="#finish-order"');
     expect(source).not.toContain('确认完工（价格待确认）');
     expect(source).toContain(
-      'href={`/orders#wo=${encodeURIComponent(order.orderNo)}`}',
+      'href="#detail-delivery-records"',
     );
     expect(source).toContain('结算（价格待确认）');
     expect(source).toContain('暂不能结算');

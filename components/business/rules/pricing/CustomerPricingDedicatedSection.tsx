@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { fixedCustomTierIssue } from '@/lib/price/fixed-custom-tiers';
+
 import { cloneElement, type ReactElement, type ReactNode } from 'react';
 import { AlertTriangle, Info } from 'lucide-react';
 import {
@@ -343,7 +345,7 @@ function buildFormAssembly(
       )
     ) {
       assembly.warnings.add(
-        `${source.purpose === CustomerPriceBookPurpose.LOGISTICS ? '物流' : '加工费'}草稿缺少完整的规则时间戳，本次已降级为只读。`,
+        `${source.purpose === CustomerPriceBookPurpose.LOGISTICS ? '物流' : '加工费'}草稿资料不完整，暂不可编辑。请刷新后重试。`,
       );
       continue;
     }
@@ -785,9 +787,9 @@ function WarningBlocks({
       {shippingPolicyReadOnly ? (
         <Alert variant="info" role="status">
           <Info aria-hidden="true" />
-          <AlertTitle>重量策略当前只读</AlertTitle>
+          <AlertTitle>物流重量参数</AlertTitle>
           <AlertDescription>
-            红包单重与快递数量上限按物流价目版本管理；当前页先只读展示，避免保存价格时覆盖重量规则。
+            红包单重与快递数量上限
           </AlertDescription>
         </Alert>
       ) : null}
@@ -879,7 +881,7 @@ function renderMachine(
   const high = ruleByCode(workspace.rules, 'STOCK_LOCAL_FOIL_GTE_1000_PER_PASS');
   if (!low || !high) {
     assembly.warnings.add(
-      '机烫费的低于跳变点/达到跳变点两条规则不完整，本区已降级为只读。',
+      '机烫计费档位不完整，暂不可编辑。请补齐两档规则。',
     );
   }
   const jumpTargets: FieldTarget[] = [];
@@ -938,36 +940,14 @@ function renderTiers(
     ]),
   );
   const canonical = byProduct.get('EXT-CUSTOM-MID') ?? [];
-  const structurallyAligned = CUSTOM_PRODUCT_CODES.every((code) => {
-    const rules = byProduct.get(code) ?? [];
-    return (
-      rules.length === canonical.length &&
-      rules.every((rule, index) => {
-        const selected = effectiveRule(rule);
-        const anchor = effectiveRule(canonical[index]!);
-        return (
-          selected?.minQty === anchor?.minQty &&
-          selected?.maxQty === anchor?.maxQty
-        );
-      })
-    );
-  });
-  const isNineTierPublishedShape = structurallyAligned && canonical.length === 9;
-  const isDesignTenTierShape =
-    structurallyAligned &&
-    canonical.length === 10 &&
-    effectiveRule(canonical[8]!)?.maxQty === 40_000 &&
-    effectiveRule(canonical[9]!)?.minQty === 40_001;
-  if (isNineTierPublishedShape) {
-    assembly.warnings.add(
-      '当前已发布价目只有 9 档，缺少设计稿规定的 5万档（≥ 40,001：中号 0.16 元/个、大号 0.18 元/个）。为避免改写生效中的报价，本区暂时只读。',
-    );
-  } else if (!isDesignTenTierShape) {
-    assembly.warnings.add(
-      '专版中号/方形/西封中号与大号/西封大号的档位边界未形成设计所需的同步 10 档，已禁止合并修改。',
-    );
-  }
-  const allowEdit = isDesignTenTierShape;
+  const tierIssue = fixedCustomTierIssue(CUSTOM_PRODUCT_CODES.map(code =>
+    (byProduct.get(code) ?? []).map(rule => ({
+      minQty: effectiveRule(rule)?.minQty ?? null,
+      maxQty: effectiveRule(rule)?.maxQty ?? null,
+    })),
+  ));
+  if (tierIssue) assembly.warnings.add(tierIssue);
+  const allowEdit = tierIssue === null;
   const rows: CustomerTierPricingRow[] = canonical.map((anchor, index) => {
     const sameTierRules = CUSTOM_PRODUCT_CODES.map(
       (code) => byProduct.get(code)?.[index],
@@ -1232,7 +1212,7 @@ function renderShip(
     const safeZone = provinces.length > 0 && Number.isFinite(incrementKilograms) && incrementKilograms > 0;
     if (!safeZone) {
       assembly.warnings.add(
-        '一条中通地区规则缺少可信的省份或续重单位，已降级为只读。',
+        '中通计费省份或续重单位缺失，暂不可编辑。请补齐该地区规则。',
       );
     }
     return {

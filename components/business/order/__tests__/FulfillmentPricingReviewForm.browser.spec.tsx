@@ -14,7 +14,10 @@ const { finalizeActionMock, previewActionMock, refreshMock } = vi.hoisted(() => 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: refreshMock }),
 }));
+vi.mock('next/link', () => ({ default: ({ prefetch, ...props }: React.ComponentProps<'a'> & { prefetch?: boolean }) => { void prefetch; return <a {...props} />; } }));
 
+vi.mock('@/generated/prisma/client', async () => ({ ...await import('@/generated/prisma/enums'), Prisma: { Decimal: (await import('decimal.js')).default } }));
+vi.mock('@/lib/db', () => ({ db: {} }));
 vi.mock('@/actions/order-fulfillment-pricing', () => ({
   finalizeFulfillmentPricingAction: finalizeActionMock,
   previewFulfillmentPricingAction: previewActionMock,
@@ -125,6 +128,18 @@ async function waitForPreview(host: HTMLElement) {
   await vi.waitFor(() => {
     expect(buttonWithText(host, '确认物流费用')).not.toBeUndefined();
   });
+}
+
+async function confirmPreview(host: HTMLElement, doubleClick = false) {
+  // This page already reviews per-shipment amounts and the total difference.
+  // Submit directly from that review; no second generic confirmation layer.
+  expect(host.textContent).toContain('更正前合计');
+  expect(host.textContent).toContain('更正后合计');
+  expect(host.textContent).toContain('本次差额');
+  const confirmation = buttonWithText(host, '确认物流费用')!;
+  confirmation.click();
+  if (doubleClick) confirmation.click();
+  await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
 }
 
 beforeEach(() => {
@@ -346,9 +361,7 @@ describe('FulfillmentPricingReviewForm browser contract', () => {
       buttonWithText(host, '预览费用差额')?.click();
       await waitForPreview(host);
 
-      const confirm = buttonWithText(host, '确认物流费用')!;
-      confirm.click();
-      confirm.click();
+      await confirmPreview(host, true);
       await vi.waitFor(() => expect(finalizeActionMock).toHaveBeenCalledTimes(1));
 
       expect(finalizeActionMock).toHaveBeenCalledWith(null, {
@@ -396,14 +409,14 @@ describe('FulfillmentPricingReviewForm browser contract', () => {
     try {
       buttonWithText(host, '预览费用差额')?.click();
       await waitForPreview(host);
-      buttonWithText(host, '确认物流费用')?.click();
+      await confirmPreview(host);
 
       await vi.waitFor(() => {
-        expect(host.textContent).toContain('确认结果暂时无法获取');
+        expect(host.textContent).toContain('暂未收到确认结果，请重试');
         expect(finalizeActionMock).toHaveBeenCalledTimes(1);
       });
       const firstPayload = finalizeActionMock.mock.calls[0]![1];
-      buttonWithText(host, '确认物流费用')?.click();
+      await confirmPreview(host);
 
       await vi.waitFor(() => {
         expect(finalizeActionMock).toHaveBeenCalledTimes(2);

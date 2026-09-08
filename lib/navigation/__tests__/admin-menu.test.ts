@@ -18,6 +18,16 @@ function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
 }
 
 describe('getAdminMenuItems', () => {
+  it('经营概览仅向管理员开放，并与工作台保持独立高亮', () => {
+    const adminItems = flatten(getAdminMenuItems({ role: Role.ADMIN }));
+    expect(getActiveAdminMenuHref('/owner/analytics', adminItems)).toBe('/owner/analytics');
+    expect(getActiveAdminMenuHref('/owner', adminItems)).toBe('/owner');
+    for (const role of [Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER]) {
+      expect(flatten(getAdminMenuItems({ role })).map((item) => item.href)).not.toContain('/owner/analytics');
+    }
+    expect(getAdminQuickLinks({ role: Role.ADMIN }).map((item) => item.href)).not.toContain('/owner/analytics');
+  });
+
   it('ADMIN 看到经营管理与生产管理的完整菜单', () => {
     const groups = getAdminMenuItems({ role: Role.ADMIN });
     const items = flatten(groups);
@@ -29,9 +39,10 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(34);
+    expect(items).toHaveLength(35);
     expect(items.map((i) => i.label)).toEqual([
-      'Dashboard',
+      '工作台',
+      '经营概览',
       '工单',
       '采购单',
       '工单修改申请',
@@ -68,8 +79,12 @@ describe('getAdminMenuItems', () => {
     ]);
     // P1 #1 Slice A：/owner/page.tsx 已落地，Dashboard href 不再是 `#`
     // placeholder。锁住，防止未来回退时 sidebar 又指 404 路由。
-    const dashboard = items.find((i) => i.label === 'Dashboard');
+    const dashboard = items.find((i) => i.label === '工作台');
     expect(dashboard?.href).toBe('/owner');
+    const analytics = items.find((i) => i.label === '经营概览');
+    expect(analytics?.href).toBe('/owner/analytics');
+    expect(analytics?.requiredPermission).toBe('report:all');
+    expect(analytics?.breadcrumbLabel).toBe('经营概览');
     const purchases = items.find((i) => i.label === '采购单');
     expect(purchases?.href).toBe('/owner/purchases');
     expect(purchases?.requiredPermission).toBe('purchase:manage');
@@ -230,7 +245,7 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('工艺字典');
     expect(labels).not.toContain('产品字典');
     expect(labels).not.toContain('产品分类');
-    expect(labels).toContain('Dashboard');
+    expect(labels).toContain('工作台');
     expect(labels).not.toContain('排产');
     expect(labels).toContain('外协');
     expect(labels).toContain('物料');

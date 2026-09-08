@@ -12,6 +12,7 @@ import {
   OperationReportingError,
 } from './operation-reporting';
 import { operationTypeForReporterAccount } from './reporter-operation-lane';
+import { productionOperationPassCount } from './operation-quantity';
 
 export type ReporterOperationListItem = {
   id: string;
@@ -60,6 +61,10 @@ export type ReporterOperationDetail = ReporterOperationListItem & {
       sequence: number;
       name: string | null;
       actualBagCount: number;
+      lines: Array<{
+        unitsPerBag: number;
+        orderItem: { sequence: number; name: string };
+      }>;
     };
   }>;
 };
@@ -128,12 +133,13 @@ function progressTotals(
     defectQty: { toString(): string };
     reworkQty: { toString(): string };
   }>,
+  carriedCompletedQty?: { toString(): string },
 ) {
   return {
     completedQty: reports
       .reduce(
         (total, report) => total.plus(report.completedQty.toString()),
-        new Decimal(0),
+        new Decimal(carriedCompletedQty?.toString() ?? 0),
       )
       .toString(),
     defectQty: reports
@@ -189,34 +195,13 @@ export async function getReporterOperationType(actor: {
   return operationType;
 }
 
-function passCountForSources(
-  operationType: PieceworkOperationType,
-  sources: Array<{
-    orderItem: null | {
-      frontFoilColors: string[];
-      backFoilColors: string[];
-    };
-  }>,
-): number {
-  if (operationType !== PieceworkOperationType.PARTIAL) return 1;
-  const passCounts = new Set(
-    sources
-      .map((source) =>
-        source.orderItem
-          ? source.orderItem.frontFoilColors.length +
-            source.orderItem.backFoilColors.length
-          : 0,
-      )
-      .filter((count) => count > 0),
-  );
-  return passCounts.size === 1 ? [...passCounts][0]! : 1;
-}
 
 function workOrderProgressForOperation(
   operationType: PieceworkOperationType,
   order: {
     workOrderVersion?: number;
     items?: Array<{ quantity: number }>;
+    productionOperations?: Array<{ workOrderVersion: number; operationType: PieceworkOperationType; carriedWorkOrderProgressQty: { toString(): string } }>;
     productionWorkOrderProgress?: Array<{
       workOrderVersion: number;
       stage: ProductionWorkOrderStage;
@@ -242,7 +227,8 @@ function workOrderProgressForOperation(
       (total, row) => total.plus(row.workOrderProgressQuantity.toString()),
       new Decimal(0),
     );
-  return { stage, orderTotal, completed };
+  const carried = (order.productionOperations ?? []).filter((row) => row.workOrderVersion === order.workOrderVersion && (row.operationType === PieceworkOperationType.PACKING) === (stage === ProductionWorkOrderStage.PACKING)).reduce((sum, row) => sum.plus(row.carriedWorkOrderProgressQty.toString()), new Decimal(0));
+  return { stage, orderTotal, completed: completed.plus(carried) };
 }
 
 /**
@@ -283,6 +269,7 @@ export async function listProductionOperationsForReporter(
       unit: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       createdAt: true,
       order: {
         select: {
@@ -292,6 +279,7 @@ export async function listProductionOperationsForReporter(
           promisedDate: true,
           workOrderVersion: true,
           items: { select: { quantity: true } },
+          productionOperations: { where: { carriedWorkOrderProgressQty: { gt: 0 } }, select: { workOrderVersion: true, operationType: true, carriedWorkOrderProgressQty: true } },
           productionWorkOrderProgress: {
             select: {
               workOrderVersion: true,
@@ -329,13 +317,13 @@ export async function listProductionOperationsForReporter(
         operation.workOrderVersion === operation.order.workOrderVersion,
     )
     .map((operation) => {
-    const passCount = passCountForSources(
+    const passCount = productionOperationPassCount(
       operation.operationType,
       operation.sources,
     );
     const completedQty = operation.reports.reduce(
       (total, report) => total.plus(report.reportedCompletedQty),
-      new Decimal(0),
+      new Decimal(operation.carriedCompletedQty?.toString() ?? 0),
     );
     const defectQty = operation.reports.reduce(
       (total, report) => total.plus(report.defectQty),
@@ -393,6 +381,7 @@ export async function getProductionOperationForReporter(
       unit: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       order: {
         select: {
           orderNo: true,
@@ -403,6 +392,7 @@ export async function getProductionOperationForReporter(
           packageRequirement: true,
           remark: true,
           items: { select: { quantity: true } },
+          productionOperations: { where: { carriedWorkOrderProgressQty: { gt: 0 } }, select: { workOrderVersion: true, operationType: true, carriedWorkOrderProgressQty: true } },
           productionWorkOrderProgress: {
             select: {
               workOrderVersion: true,
@@ -440,6 +430,13 @@ export async function getProductionOperationForReporter(
               sequence: true,
               name: true,
               actualBagCount: true,
+              lines: {
+                orderBy: { orderItem: { sequence: 'asc' } },
+                select: {
+                  unitsPerBag: true,
+                  orderItem: { select: { sequence: true, name: true } },
+                },
+              },
             },
           },
         },
@@ -460,13 +457,13 @@ export async function getProductionOperationForReporter(
     return null;
   }
 
-  const passCount = passCountForSources(
+  const passCount = productionOperationPassCount(
     operation.operationType,
     operation.sources,
   );
   const completedQty = operation.reports.reduce(
     (total, report) => total.plus(report.reportedCompletedQty),
-    new Decimal(0),
+    new Decimal(operation.carriedCompletedQty?.toString() ?? 0),
   );
   const defectQty = operation.reports.reduce(
     (total, report) => total.plus(report.defectQty),
@@ -545,6 +542,7 @@ export async function listProductionProgressForReporter(
       craftName: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       createdAt: true,
       order: {
         select: {
@@ -580,7 +578,7 @@ export async function listProductionProgressForReporter(
     craftName: step.craftName,
     status: step.status,
     plannedQty: step.plannedQty.toString(),
-    ...progressTotals(step.reports),
+    ...progressTotals(step.reports, step.carriedCompletedQty),
     orderItemSequence: step.orderItem.sequence,
     orderItemName: step.orderItem.name,
   }));
@@ -602,6 +600,7 @@ export async function getProductionProgressForReporter(
       craftName: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
       order: {
         select: {
           orderNo: true,
@@ -649,7 +648,7 @@ export async function getProductionProgressForReporter(
     craftName: step.craftName,
     status: step.status,
     plannedQty: step.plannedQty.toString(),
-    ...progressTotals(step.reports),
+    ...progressTotals(step.reports, step.carriedCompletedQty),
     orderItemSequence: step.orderItem.sequence,
     orderItemName: step.orderItem.name,
     packageRequirement: step.order.packageRequirement,

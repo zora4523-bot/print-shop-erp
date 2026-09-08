@@ -11,15 +11,15 @@ const STATUS_PRESENTATION: Record<
   SalesOrderStatusPresentation
 > = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'muted' },
-  [OrderStatus.PENDING_FACTORY]: { label: '待工厂确认', tone: 'outline' },
+  [OrderStatus.PENDING_FACTORY]: { label: '待处理', tone: 'outline' },
   [OrderStatus.REJECTED]: { label: '已驳回', tone: 'attention' },
-  [OrderStatus.CONFIRMED]: { label: '工厂已确认', tone: 'outline' },
+  [OrderStatus.CONFIRMED]: { label: '待下发生产', tone: 'outline' },
   [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'attention' },
   [OrderStatus.RELEASED]: { label: '已下发', tone: 'production' },
   [OrderStatus.FOILING]: { label: '烫金中', tone: 'production' },
   [OrderStatus.PACKING]: { label: '打包中', tone: 'production' },
   [OrderStatus.SETTLED]: { label: '已结算', tone: 'muted' },
-  [OrderStatus.SUBMITTED]: { label: '待工厂确认', tone: 'outline' },
+  [OrderStatus.SUBMITTED]: { label: '待处理', tone: 'outline' },
   [OrderStatus.SCHEDULING]: { label: '生产中', tone: 'production' },
   [OrderStatus.IN_PRODUCTION]: { label: '生产中', tone: 'production' },
   [OrderStatus.COMPLETED]: { label: '生产中', tone: 'production' },

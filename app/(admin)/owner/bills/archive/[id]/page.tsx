@@ -18,7 +18,7 @@ export default async function LegacyBillArchiveDetailPage({ params }: PageProps)
     <div className="space-y-6">
       <div>
         <Link href="/owner/bills/archive" className="text-sm text-muted-foreground hover:underline">
-          ← Legacy 只读归档
+          ← 历史账单
         </Link>
         <h1 className="mt-2 text-2xl font-semibold">
           {bill.period} · #{bill.sequence} · {bill.salesUser.displayName}

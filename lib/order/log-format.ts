@@ -2,17 +2,19 @@
 // page so both the UI render and tests can share the same label /
 // value-formatting rules.
 
+import { ORDER_STATUS_REGISTRY } from '../ui/status-registry';
 import { formatDateTimeShanghai } from '../format/dates';
 
 const FIELD_LABELS: Record<string, string> = {
   // Top-level Order fields the edit form can touch
   customName: '工单名称',
   customerRef: '客户名称/简称',
+  submitterId: '关联外部销售',
   receiverName: '收货人',
   receiverPhone: '收货电话',
   receiverAddress: '收货地址',
   expressCode: '快递代码',
-  packageRequirement: '包装要求',
+  packageRequirement: '包装补充说明',
   remark: '工单备注',
   promisedDate: '承诺交期',
   completedAt: '生产完成时间',
@@ -80,7 +82,9 @@ function hasKnownField(name: string): boolean {
 
 // 工单状态中文标签（cron 推送 / 日志渲染共用）。
 export function orderStatusZh(status: string): string {
-  return STATUS_LABELS[status] ?? UNKNOWN_ORDER_STATUS_LABEL;
+  if (Object.hasOwn(STATUS_LABELS, status)) return STATUS_LABELS[status]!;
+  if (Object.hasOwn(ORDER_STATUS_REGISTRY, status)) return ORDER_STATUS_REGISTRY[status as keyof typeof ORDER_STATUS_REGISTRY].label;
+  return UNKNOWN_ORDER_STATUS_LABEL;
 }
 
 export function fieldLabel(name: string): string {
@@ -97,9 +101,18 @@ export function formatLogValue(
 ): string {
   if (value === null || value === undefined || value === '') return '—';
   if (!hasKnownField(fieldName)) return UNKNOWN_VALUE_LABEL;
+  if (fieldName === 'submitterId') {
+    if (typeof value === 'object') {
+      const account = value as { displayName?: unknown; username?: unknown };
+      if (typeof account.displayName === 'string' && typeof account.username === 'string') {
+        return `${account.displayName} · ${account.username}`;
+      }
+    }
+    return '账号信息未记录';
+  }
   if (typeof value === 'boolean') return value ? '是' : '否';
   if (fieldName === 'status' && typeof value === 'string') {
-    return STATUS_LABELS[value] ?? UNKNOWN_ORDER_STATUS_LABEL;
+    return orderStatusZh(value);
   }
   if (fieldName === 'pricingStatus' && typeof value === 'string') {
     return PRICING_STATUS_LABELS[value] ?? UNKNOWN_PRICING_STATUS_LABEL;
@@ -177,6 +190,7 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_MANUAL_CHARGE_CREATED: '新增对客费用',
   ORDER_MANUAL_CHARGE_UPDATED: '修改对客费用',
   ORDER_MANUAL_CHARGE_REMOVED: '移除对客费用',
+  ORDER_READY_FOR_PRODUCTION: '自动校验通过，待下发生产',
   ORDER_PLATE_DETAIL_CREATED: '新增制版明细',
   ORDER_PLATE_DETAIL_UPDATED: '修改制版明细',
   ORDER_PLATE_DETAIL_REMOVED: '移除制版明细',

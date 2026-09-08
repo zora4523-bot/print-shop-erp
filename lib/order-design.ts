@@ -43,7 +43,7 @@ type DesignTxClient = {
   orderItem: {
     findFirst: (args: unknown) => Promise<{
       id: string;
-      order: { id: string; status: OrderStatus; submitterId: string };
+      order: { id: string; status: OrderStatus; submitterId: string; _count?: { changeRequests: number } };
     } | null>;
   };
   orderItemDesign: {
@@ -60,7 +60,7 @@ type DesignTxClient = {
       fileName: string;
       orderItem: {
         orderId: string;
-        order: { status: OrderStatus; submitterId: string };
+        order: { status: OrderStatus; submitterId: string; _count?: { changeRequests: number } };
       };
     } | null>;
     delete: (args: unknown) => Promise<unknown>;
@@ -92,9 +92,10 @@ function assertObjectKeyShape(
 }
 
 function assertDesignEditAllowed(
-  order: { status: OrderStatus; submitterId: string },
+  order: { status: OrderStatus; submitterId: string; _count?: { changeRequests: number } },
   actor: { id: string; role: Role },
 ): void {
+  if (order._count?.changeRequests) throw new OrderDesignError('工单存在待审批申请，暂不能修改设计文件');
   if (order.status !== OrderStatus.DRAFT) {
     throw new OrderDesignError('只有草稿状态的工单可以增删设计图');
   }
@@ -108,7 +109,7 @@ function assertDesignEditAllowed(
 const ORDER_ITEM_WITH_ORDER = {
   select: {
     id: true,
-    order: { select: { id: true, status: true, submitterId: true } },
+    order: { select: { id: true, status: true, submitterId: true, _count: { select: { changeRequests: { where: { status: 'PENDING' } } } } } },
   },
 } as const;
 
@@ -259,7 +260,7 @@ export async function removeOrderItemDesign(
         orderItem: {
           select: {
             orderId: true,
-            order: { select: { status: true, submitterId: true } },
+            order: { select: { status: true, submitterId: true, _count: { select: { changeRequests: { where: { status: 'PENDING' } } } } } },
           },
         },
       },

@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState, useTransition } from 'react';
+import { useActionState, useContext, useState, useTransition } from 'react';
 import {
   deleteOrderManualChargeAction,
   deleteOrderPlateDetailAction,
@@ -12,7 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import { OrderEditorAuxiliaryContext, useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type ManualChargeCode =
   | 'SAMPLE_FEE'
@@ -112,6 +113,21 @@ function ManualChargeEditor({
   const [deletePending, startDelete] = useTransition();
 
   const removed = charge?.status === 'WAIVED';
+  const dirty = !removed && (
+    categoryCode !== initialCategory || description !== (charge?.description ?? '') ||
+    amount !== (charge?.amount ?? '') || reason !== (charge?.overrideReason ?? '') ||
+    approvalReference !== (charge?.approvalReference ?? '') || removeReason !== ''
+  );
+  const auxiliary = useOrderEditorAuxiliary({ dirty, pending: savePending || deletePending });
+  const disabled = auxiliary.blocked || savePending || deletePending;
+  function resetDraft() {
+    setCategoryCode(initialCategory);
+    setDescription(charge?.description ?? '');
+    setAmount(charge?.amount ?? '');
+    setReason(charge?.overrideReason ?? '');
+    setApprovalReference(charge?.approvalReference ?? '');
+    setRemoveReason('');
+  }
   const ready =
     description.trim().length > 0 &&
     amount.trim().length > 0 &&
@@ -121,6 +137,7 @@ function ManualChargeEditor({
 
   return (
     <div className="space-y-3 rounded-lg border p-3">
+      <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">
           {charge ? charge.category.name : '新增订单级费用'}
@@ -224,7 +241,7 @@ function ManualChargeEditor({
           <Button
             type="button"
             size="sm"
-            disabled={!ready || savePending || deletePending}
+            disabled={!ready || disabled}
             onClick={() =>
               startSave(() =>
                 saveAction({
@@ -257,41 +274,39 @@ function ManualChargeEditor({
                   {resultError(deleteState)}
                 </p>
               ) : null}
-              <ConfirmActionDialog
-                level="L2"
-                disabled={!removeReason.trim() || deletePending}
-                trigger={
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={!removeReason.trim() || deletePending}
-                  >
-                    {deletePending ? '移除中…' : '移除并保留历史'}
-                  </Button>
-                }
-                title="确认移除这项对客费用？"
-                description="费用会归零，原记录、确认人和移除原因仍会保留。"
-                impactItems={[
-                  '对客应收总额将立即重算',
-                  '原金额、确认人和移除原因继续保留',
-                ]}
-                confirmLabel="确认移除"
-                onConfirm={() =>
-                  startDelete(() =>
-                    deleteAction({
-                      orderId,
-                      chargeId: charge.id,
-                      expectedPriceRevision: priceRevision,
-                      reason: removeReason,
-                    }),
-                  )
-                }
-              />
+                  <ConfirmActionController level="L2"
+                    disabled={!removeReason.trim() || disabled}
+                    trigger={
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!removeReason.trim() || disabled}
+                      >
+                        {deletePending ? '移除中…' : '移除并保留历史'}
+                      </Button>
+                    }
+                    onConfirm={() =>
+                      startDelete(() =>
+                        deleteAction({
+                          orderId,
+                          chargeId: charge.id,
+                          expectedPriceRevision: priceRevision,
+                          reason: removeReason,
+                        }),
+                      )
+                    }>
+                    <ConfirmActionDialog action="确认移除这项对客费用" changes={[]} consequences={[
+                      '对客应收总额将立即重算',
+                      '原金额、确认人和移除原因继续保留',
+                    ]} confirmText="确认移除" />
+                  </ConfirmActionController>
             </div>
           ) : null}
         </>
       )}
+      </fieldset>
+      {auxiliary.managed && dirty ? <Button type="button" variant="outline" size="sm" disabled={savePending || deletePending || auxiliary.pending} onClick={resetDraft}>还原费用输入</Button> : null}
     </div>
   );
 }
@@ -328,6 +343,22 @@ function PlateDetailEditor({
   >(deleteOrderPlateDetailAction, null);
   const [savePending, startSave] = useTransition();
   const [deletePending, startDelete] = useTransition();
+  const dirty = (!detail || detail.isActive) && (
+    name !== (detail?.name ?? '') || plateGroupId !== (detail?.plateGroupId ?? '') ||
+    specification !== (detail?.specification ?? '') || quantity !== String(detail?.quantity ?? 1) ||
+    unitPrice !== (detail?.unitPrice ?? '') || remark !== (detail?.remark ?? '') || removeReason !== ''
+  );
+  const auxiliary = useOrderEditorAuxiliary({ dirty, pending: savePending || deletePending });
+  const disabled = auxiliary.blocked || savePending || deletePending;
+  function resetDraft() {
+    setName(detail?.name ?? '');
+    setPlateGroupId(detail?.plateGroupId ?? '');
+    setSpecification(detail?.specification ?? '');
+    setQuantity(String(detail?.quantity ?? 1));
+    setUnitPrice(detail?.unitPrice ?? '');
+    setRemark(detail?.remark ?? '');
+    setRemoveReason('');
+  }
 
   if (detail && !detail.isActive) {
     return (
@@ -352,6 +383,7 @@ function PlateDetailEditor({
 
   return (
     <div className="space-y-3 rounded-md border p-3">
+      <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium">
           {detail ? `制版明细 #${detail.sequence}` : '新增制版明细'}
@@ -425,7 +457,7 @@ function PlateDetailEditor({
       <Button
         type="button"
         size="sm"
-        disabled={!ready || savePending || deletePending}
+        disabled={!ready || disabled}
         onClick={() =>
           startSave(() =>
             saveAction({
@@ -460,40 +492,38 @@ function PlateDetailEditor({
               {resultError(deleteState)}
             </p>
           ) : null}
-          <ConfirmActionDialog
-            level="L2"
-            disabled={!removeReason.trim() || deletePending}
-            trigger={
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!removeReason.trim() || deletePending}
-              >
-                {deletePending ? '移除中…' : '移除并保留历史'}
-              </Button>
-            }
-            title="确认移除这条制版明细？"
-            description="对应制版费会归零，原明细、操作人和原因仍会保留。"
-            impactItems={[
-              '对应制版费归零并重算工单总额',
-              '制版明细保留为已移除历史记录',
-            ]}
-            confirmLabel="确认移除"
-            onConfirm={() =>
-              startDelete(() =>
-                deleteAction({
-                  orderId,
-                  orderItemId,
-                  plateDetailId: detail.id,
-                  expectedPriceRevision: priceRevision,
-                  reason: removeReason,
-                }),
-              )
-            }
-          />
+            <ConfirmActionController level="L2"
+              disabled={!removeReason.trim() || disabled}
+              trigger={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!removeReason.trim() || disabled}
+                >
+                  {deletePending ? '移除中…' : '移除并保留历史'}
+                </Button>
+              }
+              onConfirm={() =>
+                startDelete(() =>
+                  deleteAction({
+                    orderId,
+                    orderItemId,
+                    plateDetailId: detail.id,
+                    expectedPriceRevision: priceRevision,
+                    reason: removeReason,
+                  }),
+                )
+              }>
+              <ConfirmActionDialog action="确认移除这条制版明细" changes={[]} consequences={[
+                '对应制版费归零并重算工单总额',
+                '制版明细保留为已移除历史记录',
+              ]} confirmText="确认移除" />
+            </ConfirmActionController>
         </div>
       ) : null}
+      </fieldset>
+      {auxiliary.managed && dirty ? <Button type="button" variant="outline" size="sm" disabled={savePending || deletePending || auxiliary.pending} onClick={resetDraft}>还原费用输入</Button> : null}
     </div>
   );
 }
@@ -509,6 +539,8 @@ export function OrderCommercialDetailsManager({
   items,
   allowPlateDetailMaintenance,
 }: Props) {
+  const scope = useContext(OrderEditorAuxiliaryContext);
+  const hasActiveEditor = scope?.mainBlocked || Object.values(scope?.entries ?? {}).some((entry) => entry.dirty || entry.pending);
   return (
     <section className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <div>
@@ -516,6 +548,7 @@ export function OrderCommercialDetailsManager({
         <p className="mt-1 text-xs text-muted-foreground">
           增改或移除后会自动重算工单总额。
         </p>
+        {hasActiveEditor ? <p className="mt-1 text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}
       </div>
 
       <div className="space-y-3">
@@ -538,6 +571,7 @@ export function OrderCommercialDetailsManager({
 
       <div className="space-y-3 border-t pt-4">
         <h3 className="text-sm font-semibold">按款式制版明细</h3>
+        <p className="text-sm text-muted-foreground">版费默认 0 元；需要收费时，由管理员添加制版明细。</p>
         {allowPlateDetailMaintenance ? (
           <ol className="space-y-4">
             {items.map((item) => (

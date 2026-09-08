@@ -13,7 +13,7 @@ describe('admin business copy contract', () => {
       'components/business/dashboard/DashboardChartsContent.tsx',
     );
 
-    expect(dashboard).toContain('label="建单产品"');
+    expect(dashboard).not.toContain('label="建单产品"');
     expect(dashboard).not.toContain('建单产品 / 规格');
     expect(dashboard).not.toContain('periodEnd ·');
     expect(charts).not.toContain('COMPLETED / SHIPPED / FINISHED');
@@ -30,7 +30,8 @@ describe('admin business copy contract', () => {
 
     expect(bills).not.toContain('销售 / 客服 id');
     expect(bills).not.toContain('ISSUED / PARTIAL_PAID / FULLY_PAID');
-    expect(billDetail).toContain('仅展示入账时快照；确认后不重算、不覆写。');
+    expect(billDetail).toContain('账单明细');
+    expect(billDetail).not.toContain('入账时快照');
     expect(billDetail).not.toContain('该金额用于解释');
     expect(salary).not.toContain('hint="每位客服一条 IN_PROGRESS"');
     expect(salary).not.toContain('hint="periodEnd 已过"');

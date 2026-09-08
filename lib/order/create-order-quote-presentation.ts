@@ -268,7 +268,7 @@ export function presentCreateOrderPlateFee(
   quote: PureCreateOrderQuoteResult,
 ): CreateOrderPlateFeePreview | null {
   const plateLine = quote.order.lines.find((line) => line.code === 'PLATE_FEE');
-  return plateLine
+  return plateLine?.status === 'PENDING_AMOUNT'
     ? {
         status: 'PENDING',
         amount: null,

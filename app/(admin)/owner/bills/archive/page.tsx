@@ -23,7 +23,7 @@ export default async function LegacyBillArchivePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Legacy 账单只读归档"
+        title="历史账单"
         subtitle="保留 finishedAt、补充账单与部分收款的原始历史语义；本页不提供任何写操作，也不与 v2 数字混算。"
       />
       <Link href="/owner/agent-bills" className={buttonVariants({ variant: 'outline' })}>

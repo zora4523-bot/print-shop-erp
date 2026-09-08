@@ -30,6 +30,18 @@ function initialValues(): Record<SettingKey, string> {
 }
 
 describe('SettingsForm management notification routing', () => {
+  it('旧版目标只在原角色保留可取消选项，其他角色没有旧版入口', () => {
+    const values = initialValues();
+    values.management_notification_routing = JSON.stringify({ factoryConfirmer: { enabled: true, channelIds: ['legacy'] }, owner: { enabled: false, channelIds: [] } });
+    const html = renderToStaticMarkup(<SettingsForm initialValues={values} notificationChannels={[
+      { id: 'legacy', channelKey: 'old', channelName: '旧群', isActive: true, selectionIssue: 'LEGACY_TRANSPORT' },
+    ]} />);
+    const inputs = html.match(/<input[^>]*value="legacy"[^>]*>/g) ?? [];
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).toContain('checked=""');
+    expect(inputs[0]).not.toContain('disabled=""');
+    expect(html).toContain('请新建通知目标并调整推送规则');
+  });
   it('两个角色只提交开关与真实 channel ID', () => {
     const values = initialValues();
     values.management_notification_routing = JSON.stringify({
@@ -94,7 +106,7 @@ describe('SettingsForm management notification routing', () => {
       />,
     );
 
-    expect(html).toContain('绑定时 Bot ID 与当前配置不一致，不可新绑');
+    expect(html).toContain('机器人账号已变更，请新建通知目标，不可新绑');
     const inputs = html.match(/<input[^>]*value="smart-old"[^>]*>/g) ?? [];
     expect(inputs).toHaveLength(2);
     expect(

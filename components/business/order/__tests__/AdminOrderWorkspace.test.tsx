@@ -9,10 +9,21 @@ vi.mock('../AdminOrderWorkspaceList', () => ({
 import {
   AdminOrderWorkspace,
   adminCustomerExactFilterParams,
+  adminRejectedFilterParams,
 } from '../AdminOrderWorkspace';
 import { parseAdminOrderWorkspaceQuery } from '@/lib/order/admin-workspace-query';
 
 describe('AdminOrderWorkspace', () => {
+  it('adds a rejected-order entry without classifying rejection as completed or retaining incompatible queue filters', () => {
+    const query = parseAdminOrderWorkspaceQuery({ queue: 'done', signal: 'pending-change', unbilled: 'yes', q: '客户甲', page: '4' }).query;
+    const params = adminRejectedFilterParams(query);
+    expect(params).toMatchObject({ queue: 'all', status: 'REJECTED', q: '客户甲' });
+    expect(params.signal).toBeUndefined();
+    expect(params.unbilled).toBeUndefined();
+    expect(params.page).toBeUndefined();
+    const activeQuery = parseAdminOrderWorkspaceQuery({ queue: 'all', status: 'REJECTED', q: '客户甲' }).query;
+    expect(adminRejectedFilterParams(activeQuery).status).toBeUndefined();
+  });
   it('builds exact customer filters from Party IDs or legacy snapshots', () => {
     expect(
       adminCustomerExactFilterParams({
@@ -78,6 +89,7 @@ describe('AdminOrderWorkspace', () => {
               'pending-confirmation': 2,
               'pending-pricing': 1,
               'pending-change': 1,
+              'pending-release': 0,
               'on-hold': 1,
               overdue: 2,
               'due-today': 3,
@@ -97,8 +109,9 @@ describe('AdminOrderWorkspace', () => {
 
     expect(html).toContain('data-slot="admin-order-workspace"');
     for (const label of [
-      '待确认',
+      '待处理',
       '待核价',
+      '待下发生产',
       '变更申请',
       '已暂停',
       '已逾期',
@@ -109,6 +122,7 @@ describe('AdminOrderWorkspace', () => {
       '已发货',
       '已结算/取消',
       '全部',
+      '已驳回 / 待补正',
     ]) {
       expect(html).toContain(label);
     }

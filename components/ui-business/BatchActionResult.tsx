@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { CircleCheck, CircleX, TriangleAlert } from 'lucide-react';
+import { CircleCheck, CircleMinus, CircleX, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type BatchActionResultStatus = 'complete' | 'partial' | 'failure';
@@ -14,7 +14,7 @@ export type BatchActionResultItem =
   | {
       id: string;
       label: React.ReactNode;
-      outcome: 'failure';
+      outcome: 'failure' | 'skipped' | 'unknown' | 'not-attempted';
       /** 失败项必须给出可行动的原因，不能只显示“操作失败”。 */
       reason: React.ReactNode;
     };
@@ -23,6 +23,8 @@ export type BatchActionResultProps = {
   status: BatchActionResultStatus;
   succeededCount: number;
   failedCount: number;
+  /** 多结果批次可明确区分跳过、结果未知和未执行；默认仍为成功/失败计数。 */
+  summary?: React.ReactNode;
   items?: readonly BatchActionResultItem[];
   title?: string;
   action?: React.ReactNode;
@@ -64,6 +66,7 @@ export function BatchActionResult({
   status,
   succeededCount,
   failedCount,
+  summary,
   items = [],
   title,
   action,
@@ -97,7 +100,7 @@ export function BatchActionResult({
             {title ?? config.title}
           </h2>
           <p data-slot="batch-action-result-summary" className="mt-1 text-sm">
-            {succeededCount} 项成功，{failedCount} 项失败
+            {summary ?? `${succeededCount} 项成功，${failedCount} 项失败`}
           </p>
         </div>
       </div>
@@ -109,7 +112,11 @@ export function BatchActionResult({
         >
           {items.map((item) => {
             const succeeded = item.outcome === 'success';
-            const ItemIcon = succeeded ? CircleCheck : CircleX;
+            const ItemIcon = succeeded
+              ? CircleCheck
+              : item.outcome === 'unknown'
+                ? TriangleAlert
+                : item.outcome === 'failure' ? CircleX : CircleMinus;
             return (
               <li
                 key={item.id}
@@ -120,10 +127,16 @@ export function BatchActionResult({
                   aria-hidden
                   className={cn(
                     'mt-0.5 size-4 shrink-0',
-                    succeeded ? 'text-success' : 'text-destructive',
+                    succeeded
+                      ? 'text-success'
+                      : item.outcome === 'failure'
+                        ? 'text-destructive'
+                        : item.outcome === 'unknown'
+                          ? 'text-warning-foreground'
+                          : 'text-muted-foreground',
                   )}
                 />
-                <div className="min-w-0">
+                <div className="admin-wrap-anywhere min-w-0">
                   <p className="font-medium text-foreground">{item.label}</p>
                   {item.reason ? (
                     <div className="mt-0.5 text-muted-foreground">

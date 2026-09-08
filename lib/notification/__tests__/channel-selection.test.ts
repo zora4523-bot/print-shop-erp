@@ -27,7 +27,7 @@ function smartBot(
 }
 
 describe('notificationChannelSelectionIssue', () => {
-  it('accepts a complete active webhook or a smart-bot target bound to the current Bot ID', () => {
+  it('rejects even a complete active legacy webhook, accepting only a correctly bound smart bot', () => {
     expect(
       notificationChannelSelectionIssue(
         {
@@ -41,7 +41,7 @@ describe('notificationChannelSelectionIssue', () => {
         },
         configured,
       ),
-    ).toBeNull();
+    ).toBe('LEGACY_TRANSPORT');
     expect(notificationChannelSelectionIssue(smartBot(), configured)).toBeNull();
   });
 
@@ -77,6 +77,6 @@ describe('notificationChannelSelectionIssue', () => {
       notificationChannelSelectionIssueMessage(
         'SMART_BOT_IDENTITY_MISMATCH',
       ),
-    ).toBe('绑定时 Bot ID 与当前配置不一致');
+    ).toBe('机器人账号已变更，请新建通知目标');
   });
 });

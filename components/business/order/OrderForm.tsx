@@ -1172,6 +1172,7 @@ export function OrderForm({
     orderId: string;
     orderNo: string;
     manualQuote: boolean;
+    readyForProduction: boolean;
   } | null>(null);
   const [expandedItem, setExpandedItem] = useState(0);
   const [localDraftDecisionComplete, setLocalDraftDecisionComplete] =
@@ -1388,6 +1389,7 @@ export function OrderForm({
     setUploading(true);
     setUploadError(null);
     let submittedManualQuote = draft.manualQuote;
+    let readyForProduction = false;
     try {
       const uploaded = await uploadPendingDesigns(draft, queues);
       if (!uploaded) return;
@@ -1421,6 +1423,7 @@ export function OrderForm({
           setUploadError(`草稿已安全保存，但提交失败：${message}`);
           return;
         }
+        readyForProduction = submitResult.readyForProduction === true;
         submittedManualQuote =
           submitResult.quotedFeeCompleteness ===
           OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS;
@@ -1431,6 +1434,7 @@ export function OrderForm({
           orderId: draft.orderId,
           orderNo: draft.orderNo,
           manualQuote: submittedManualQuote,
+          readyForProduction,
         });
         setPendingSubmission(null);
       } else {
@@ -3275,12 +3279,12 @@ export function OrderForm({
       <OrderSubmissionSuccess
         orderNumber={submittedOrder.orderNo}
         statusLabel={
-          submittedOrder.manualQuote ? '待工厂核价确认' : '待工厂确认'
+          submittedOrder.readyForProduction ? '待下发生产' : '待处理'
         }
         description={
           submittedOrder.manualQuote
             ? '这张单含系统暂时无法定价的参数，工厂核价后会通知你。核价前不会安排生产。'
-            : '工厂确认后进入生产。确认前仍可从工单详情撤回修改。'
+            : '工单已提交，资料与费用完整后进入待下发生产。可从详情查看当前进度。'
         }
         manualQuote={submittedOrder.manualQuote}
         primaryAction={{
@@ -3355,7 +3359,7 @@ export function OrderForm({
                   className="mt-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2"
                 >
                   <div>
-                    <Label htmlFor="customerPartyId">客户主数据（选填）</Label>
+                    <Label htmlFor="customerPartyId">关联客户（选填）</Label>
                     <select
                       id="customerPartyId"
                       className={`${selectClass} mt-2`}
@@ -3555,6 +3559,30 @@ export function OrderForm({
                 </section>
               ) : undefined
             }
+            packagingExtras={
+              <div className="space-y-2">
+                <Label htmlFor="packageRequirement">包装补充说明（选填）</Label>
+                <Input
+                  id="packageRequirement"
+                  maxLength={500}
+                  disabled={orderFormControlsDisabled}
+                  aria-describedby="packageRequirement-hint"
+                  aria-invalid={Boolean(errors.packageRequirement)}
+                  {...register('packageRequirement')}
+                />
+                <p
+                  id="packageRequirement-hint"
+                  className="text-xs text-muted-foreground"
+                >
+                  用于封口、贴标等补充要求；分袋数量和费用以包装明细为准。
+                </p>
+                {errors.packageRequirement?.message ? (
+                  <p role="alert" className="text-xs text-destructive">
+                    {errors.packageRequirement.message}
+                  </p>
+                ) : null}
+              </div>
+            }
             shippingExtras={
               !usesExternalSalesPricing ? (
                 <div className="mb-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
@@ -3564,14 +3592,6 @@ export function OrderForm({
                       id="expressCode"
                       className="mt-2 h-10"
                       {...register('expressCode')}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="packageRequirement">包装要求</Label>
-                    <Input
-                      id="packageRequirement"
-                      className="mt-2 h-10"
-                      {...register('packageRequirement')}
                     />
                   </div>
                 </div>

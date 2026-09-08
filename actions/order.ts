@@ -82,6 +82,7 @@ import { settlementTypeForOrderCreator } from '@/lib/order/settlement';
 import { parseExternalCreateOrderCommand } from '@/lib/order/external-create-order-command';
 import { fulfillmentPricingGuardSchema } from '@/lib/order/fulfillment-pricing-input';
 import { OrderSettlementType } from '@/generated/prisma/enums';
+import { ProductionOperationMaterializationError } from '@/lib/production/operation-materialization-service';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
 // items is a nested array and `FormData` flattens poorly. The UI layer
@@ -201,6 +202,7 @@ export async function submitOrderAction(
     revalidatePath(`/orders/${orderId}`);
     return {
       status: 'success',
+      readyForProduction: submitted.status === 'CONFIRMED',
       quotedFee: submitted.quotedFee,
       quotedFeeCompleteness: submitted.quotedFeeCompleteness,
     };
@@ -382,7 +384,7 @@ export async function updateOrderAction(
   const raw: Record<string, unknown> = {
     expectedEditVersion: formData.get('expectedEditVersion'),
   };
-  for (const key of FULL_EDITABLE_FIELDS) {
+  for (const key of [...FULL_EDITABLE_FIELDS, 'externalSalesUserId']) {
     const value = formData.get(key);
     // Reject non-string uploads at the action boundary so File / Blob
     // can't slip into fields the schema expects text for.
@@ -394,6 +396,18 @@ export async function updateOrderAction(
       };
     }
     raw[key] = value;
+  }
+
+  const shipmentPayload = formData.get('shipments');
+  if (shipmentPayload !== null) {
+    if (typeof shipmentPayload !== 'string' || shipmentPayload.length > 30_000) {
+      return { status: 'invalid', fieldErrors: { shipments: ['配送信息格式非法'] } };
+    }
+    try {
+      raw.shipments = JSON.parse(shipmentPayload);
+    } catch {
+      return { status: 'invalid', fieldErrors: { shipments: ['配送信息格式非法'] } };
+    }
   }
 
   const parsed = updateEditableOrderSchema.safeParse(raw);
@@ -560,6 +574,7 @@ export async function createOrderChangeRequestAction(
     const request = await createOrderChangeRequest(parsed.data, actor);
     revalidatePath('/orders');
     revalidatePath(`/orders/${parsed.data.orderId}`);
+    revalidatePath(`/orders/${parsed.data.orderId}/edit`);
     revalidatePath('/owner/order-changes');
     return { status: 'success', requestId: request.id };
   } catch (error) {
@@ -619,6 +634,7 @@ export async function withdrawOrderChangeRequestAction(
     const request = await withdrawOrderChangeRequest(parsed.data, actor);
     revalidatePath('/orders');
     revalidatePath(`/orders/${request.orderId}`);
+    revalidatePath(`/orders/${request.orderId}/edit`);
     revalidatePath('/owner/order-changes');
     return { status: 'success', requestStatus: request.status };
   } catch (error) {
@@ -741,6 +757,17 @@ export async function finalizeOrderPricingAction(
     if (error instanceof OrderPricingReviewError) {
       return { status: 'error', message: error.message };
     }
+    // Legacy submitted orders activate production during price confirmation.
+    // The transaction has rolled back; keep expected production blockers in
+    // the pricing form without exposing internal materialization details.
+    if (error instanceof ProductionOperationMaterializationError) {
+      return {
+        status: 'error',
+        message: error.code === 'CANONICAL_FACTS_INCOMPLETE'
+          ? '工单款式或生产信息不完整，无法完成核价。请先核对款式、数量及包装信息。'
+          : error.message,
+      };
+    }
     throw error;
   }
 }
@@ -757,6 +784,7 @@ function commercialMutationFailure(
 function revalidateOrderCommercialDetail(orderId: string): void {
   revalidatePath('/orders');
   revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/orders/${orderId}/edit`);
   revalidatePath('/owner/bills');
 }
 

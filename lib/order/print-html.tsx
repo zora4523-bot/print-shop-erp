@@ -1,5 +1,6 @@
 import { OrderPrintLayout } from './print-layout';
 import type { PrintOrder } from './print-types';
+import { printPaginationScript } from './print-pagination';
 
 const MAX_FILENAME_COMPONENT_LENGTH = 80;
 
@@ -50,6 +51,11 @@ const STANDALONE_PRINT_READY_SCRIPT = String.raw`
         node.textContent = message;
       });
     }
+    ${printPaginationScript()};
+    root.dataset.printReady = 'true';
+    window.dispatchEvent(new Event('print-ready'));
+  }).catch(() => {
+    root.dataset.printPagination = 'overflow';
     root.dataset.printReady = 'true';
     window.dispatchEvent(new Event('print-ready'));
   });

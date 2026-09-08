@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
 } from '@/components/ui-business';
 import {
   markOutsourceReceivedAction,
@@ -98,8 +98,7 @@ export function OutsourceActions({
                 className="min-h-11 rounded-md border bg-background px-3 py-2 text-sm text-foreground disabled:opacity-70"
               />
             </label>
-            <ConfirmActionDialog
-              level="L2"
+            <ConfirmActionController level="L2"
               formId={receiveFormId}
               open={receiveConfirmationOpen}
               onOpenChange={setReceiveConfirmationOpen}
@@ -114,19 +113,15 @@ export function OutsourceActions({
                   {receivePending ? '正在标记回货…' : '标记已回货'}
                 </Button>
               }
-              title="确认该外协单已回货？"
-              description={`${contextLabel}。预计回货：${expectedDateLabel}。`}
-              impactItems={[
-                `实际回货日期：${actualDate || '今天'}`,
+              onConfirm={() => {
+                confirmedReceiveRef.current = true;
+              }}>
+              <ConfirmActionDialog action="确认该外协单已回货" changes={[{ label: `${contextLabel} · 回货日期（计划 → 实际）`, old: expectedDateLabel, new: actualDate || '今天' }]} consequences={[
                 '外协单将进入已回货终态，不能直接回退。',
                 '内部任务和外协工艺全部完成后，关联工单可能自动完工并发送通知。',
                 '本操作不会自动确认外协应付金额，也不会记录付款。',
-              ]}
-              confirmLabel="确认已回货"
-              onConfirm={() => {
-                confirmedReceiveRef.current = true;
-              }}
-            />
+              ]} confirmText="确认已回货" />
+            </ConfirmActionController>
           </div>
         </form>
       ) : null}
@@ -142,8 +137,7 @@ export function OutsourceActions({
             action={() => startCancel(() => cancelAction())}
             aria-busy={cancelPending}
           />
-          <ConfirmActionDialog
-            level="L2"
+          <ConfirmActionController level="L2"
             formId={cancelFormId}
             disabled={cancelPending}
             trigger={
@@ -156,16 +150,13 @@ export function OutsourceActions({
               >
                 {cancelPending ? '正在取消…' : '取消外协单'}
               </Button>
-            }
-            title="确认取消该外协单？"
-            description={contextLabel}
-            impactItems={[
+            }>
+            <ConfirmActionDialog action="取消该外协单" changes={[]} consequences={[
               '外协单将进入已取消终态，不能再标记回货或记录付款。',
               '系统会重新核对关联工单的生产完工条件。',
               '关联工单和这张外协单的历史记录不会被删除。',
-            ]}
-            confirmLabel="确认取消外协单"
-          />
+            ]} confirmText="取消外协单" />
+          </ConfirmActionController>
         </div>
       ) : null}
 

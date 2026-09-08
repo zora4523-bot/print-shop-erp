@@ -27,6 +27,11 @@ describe('fieldLabel', () => {
 });
 
 describe('formatLogValue', () => {
+  it('shows external account snapshots without exposing internal user ids', () => {
+    expect(fieldLabel('submitterId')).toBe('关联外部销售');
+    expect(formatLogValue('submitterId', { id: 'internal-id', displayName: '渠道张先生', username: 'zhang' })).toBe('渠道张先生 · zhang');
+    expect(formatLogValue('submitterId', 'internal-id')).toBe('账号信息未记录');
+  });
   it('renders booleans as 是 / 否', () => {
     expect(formatLogValue('isUrgent', true)).toBe('是');
     expect(formatLogValue('isUrgent', false)).toBe('否');
@@ -42,6 +47,14 @@ describe('formatLogValue', () => {
     expect(formatLogValue('status', 'DRAFT')).toBe('草稿');
     expect(formatLogValue('status', 'IN_PRODUCTION')).toBe('生产中');
     expect(formatLogValue('status', 'CANCELLED')).toBe('已取消');
+  });
+
+  it.each([
+    ['PENDING_FACTORY', '待处理'], ['CONFIRMED', '待下发生产'], ['REJECTED', '已驳回'],
+    ['ON_HOLD', '已暂停'], ['RELEASED', '已下发'], ['FOILING', '烫金中'], ['PACKING', '打包中'], ['SETTLED', '已结算'],
+  ])('formats canonical workflow status %s consistently in logs', (status, label) => {
+    expect(orderStatusZh(status)).toBe(label);
+    expect(formatLogValue('status', status)).toBe(label);
   });
 
   it('does not expose unknown status values', () => {

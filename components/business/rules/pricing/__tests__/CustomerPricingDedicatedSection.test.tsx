@@ -201,6 +201,26 @@ function editablePrintFoilRule(): CustomerPriceSectionRuleDto {
 }
 
 describe('CustomerPricingDedicatedSection', () => {
+  it.each([40000, 42000])('十档完整时允许自定义上界 %i', (ninthUpper) => {
+    const upper = [750, 1500, 2500, 3500, 4500, 7500, 15000, 25000, ninthUpper, null];
+    const codes = ['EXT-CUSTOM-MID', 'EXT-CUSTOM-SQUARE', 'EXT-CUSTOM-WEST-MID', 'EXT-CUSTOM-LARGE', 'EXT-CUSTOM-WEST-LARGE'];
+    const rules = codes.flatMap(code => upper.map((maxQty, tier) => ({
+      ...editableBagRule(), id: `${code}-${tier}`, code: `${code}-${tier}`,
+      draft: { ...editableBagRule().draft, id: `${code}-${tier}`, code: `${code}-${tier}`,
+        exclusiveGroup: 'CUSTOM_BASE', product: { code },
+        minQty: tier === 0 ? 1 : upper[tier - 1]! + 1, maxQty,
+      } as NonNullable<CustomerPriceSectionRuleDto['draft']>,
+    })));
+    const html = renderToStaticMarkup(<CustomerPricingDedicatedSection
+      workspace={workspace('tiers', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')], rules)}
+      createDraftPurpose={null} />);
+    expect(html).toContain('name="tiers.8.maxQuantity"');
+    const input = html.match(/<input[^>]*name="tiers\.8\.maxQuantity"[^>]*>/u)?.[0];
+    expect(input).toBeTruthy();
+    expect(input).not.toMatch(/\sdisabled(?:=|\s|>)/u);
+    expect(input).toContain(`value="${ninthUpper}"`);
+  });
+
   it('彩印含版费原子套餐属于彩印草稿，可编辑并随表单发布', () => {
     const html = renderToStaticMarkup(
       <CustomerPricingDedicatedSection

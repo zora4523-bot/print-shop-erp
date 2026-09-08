@@ -4,7 +4,7 @@ import { useActionState, useId } from 'react';
 import { cancelPurchaseReceiptAction } from '@/actions/owner-purchases';
 import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
 import { Button } from '@/components/ui/button';
-import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 
 export type PurchaseReceiptCancelItem = {
   materialCode: string;
@@ -28,7 +28,7 @@ export function purchaseReceiptCancelImpactItems({
       (item) =>
         `反向出库：${item.materialName}（${item.materialCode}）${item.quantity} ${item.unit}。`,
     ),
-    `采购单 ${purchaseNo} 的已收货数量会同步扣回，并按剩余已收数量重新计算采购单状态。`,
+    `采购单 ${purchaseNo} 的已收货数量将扣回，采购单状态随剩余已收数量更新。`,
     '系统会写入与原收货对应的反向库存流水；若库存不足以扣回，整个操作会失败。',
     '反向出库若让库存跌破安全线，可能触发库存预警通知。',
   ];
@@ -66,8 +66,7 @@ export function CancelPurchaseReceiptButton({
   return (
     <div className="space-y-3">
       <form id={formId} action={formAction} aria-busy={pending} />
-      <ConfirmActionDialog
-        level="L3"
+      <ConfirmActionController level="L3"
         trigger={
           <Button
             type="button"
@@ -78,20 +77,17 @@ export function CancelPurchaseReceiptButton({
             {pending ? '正在取消收货过账…' : '取消收货过账'}
           </Button>
         }
-        title={`取消收货单 ${receiptNo} 的过账？`}
-        description="这不是删除备注，而是一次反向出库操作。请核对收货明细并填写可追溯的业务理由。"
-        impactItems={purchaseReceiptCancelImpactItems({
-          receiptNo,
-          purchaseNo,
-          items,
-        })}
-        confirmLabel="确认取消并反向出库"
         formId={formId}
         reasonLabel="取消理由"
         reasonName="reason"
         reasonPlaceholder="例如：供应商送错物料，已确认退回"
-        disabled={pending}
-      />
+        disabled={pending}>
+        <ConfirmActionDialog action={`取消收货单 ${receiptNo} 的过账？`} changes={[]} consequences={purchaseReceiptCancelImpactItems({
+          receiptNo,
+          purchaseNo,
+          items,
+        })} confirmText="取消并反向出库" />
+      </ConfirmActionController>
       {error ? (
         <ActionNotice
           tone="error"

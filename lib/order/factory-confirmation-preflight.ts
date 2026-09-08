@@ -1,7 +1,7 @@
 import { OrderPricingStatus, OrderStatus } from '../../generated/prisma/enums';
 
 /**
- * Both statuses mean "submitted and waiting for an explicit factory decision".
+ * Both statuses mean "submitted, awaiting readiness checks or exception handling".
  * PENDING_FACTORY is canonical; SUBMITTED remains readable/writable during the
  * expand-migrate-contract window. Keeping this list shared prevents the admin
  * queue and the backlog notifier from counting different work orders.

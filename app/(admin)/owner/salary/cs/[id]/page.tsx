@@ -11,6 +11,7 @@ import {
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { SettleCsPeriodButton } from '@/components/business/salary/SettleCsPeriodButton';
 import { CsPayrollPaymentForm } from '@/components/business/salary/CsPayrollPaymentForm';
+import { CsPeriodSummary } from '@/components/business/salary/CsPeriodSummary';
 import {
   PaymentStatusBadge,
   SalaryPeriodStatusBadge,
@@ -109,40 +110,12 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
         />
       </div>
 
-      <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-3">
-        <h2 className="text-base font-semibold">周期参数</h2>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-          <Row label="月底薪" value={`¥ ${String(period.monthlyBase)}`} tabular />
-          <Row label="期初业绩" value={String(period.initialSales)} tabular />
-          <Row label="本期累计业绩" value={String(period.totalSales)} tabular />
-          <Row
-            label="业绩合计（算档用）"
-            value={new Decimal(period.totalSales as Decimal.Value)
-              .plus(new Decimal(period.initialSales as Decimal.Value))
-              .toFixed(2)}
-            tabular
-          />
-          <Row
-            label="底薪合计"
-            value={`¥ ${baseTotal.toFixed(2)}`}
-            tabular
-          />
-          <Row label="结算时间" value={formatDateTimeShanghai(period.settledAt)} />
-          <Row
-            label="实际上班天数"
-            value={`${attendanceSummary.workUnits} 天`}
-            tabular
-          />
-          <Row
-            label="请假天数"
-            value={`${attendanceSummary.leaveUnits} 天`}
-            tabular
-          />
-        </dl>
-        <p className="text-xs text-muted-foreground">
-          上班/请假天数用于考勤核对；按当前工资制度不自动扣减客服周期底薪。
-        </p>
-      </section>
+      <CsPeriodSummary
+        period={period}
+        attendanceSummary={attendanceSummary}
+        baseTotal={baseTotal.toFixed(2)}
+        tierSalesTotal={tierSalesTotal.toFixed(2)}
+      />
 
       <section className="rounded-xl border bg-card shadow-sm">
         <h2 className="border-b px-4 py-3 text-base font-semibold sm:px-6">

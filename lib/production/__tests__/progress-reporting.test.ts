@@ -137,6 +137,13 @@ beforeEach(() => {
 });
 
 describe('reportProductionProgress', () => {
+  it('无计件工资的工艺步骤也承接已完成量并阻止超报', async () => {
+    arrangeStep(stepFixture({ carriedCompletedQty: new Decimal(60) }));
+    await expect(reportProductionProgress(input({ completedQty: 41 }), ACTOR)).rejects.toThrow(/超过/);
+    expect(dbMock.productionProgressReport.create).not.toHaveBeenCalled();
+    await expect(reportProductionProgress(input({ completedQty: 40 }), ACTOR)).resolves.toMatchObject({ completedAggregate: '100', progressStatus: ProductionOperationStatus.COMPLETED });
+  });
+
   it('已下发工单的无计件扫码也只写入真实首次认领', async () => {
     arrangeStep(
       stepFixture({

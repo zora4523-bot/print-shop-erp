@@ -223,7 +223,7 @@ function InternalOrderFormRail({
               ? plateFee
                 ? '不含待核价款与制版费；提交后由工厂确认'
                 : '不含待核价款；提交后由工厂确认'
-              : '提交时服务端会重新核价'}
+              : '预估费用'}
           </p>
         </div>
 

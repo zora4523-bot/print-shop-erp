@@ -69,6 +69,26 @@ Seed 行为由 [`prisma/seed.ts`](./prisma/seed.ts) 定义：
 
 Seed 不是通用发布后修复脚本。生产首次部署后的变更走 migration 或经过审查的运维步骤。
 
+### 工作台与响应式测试数据隔离
+
+以下行为于 2026-09-07 针对测试 helper 核对，不改变正式 seed 或数据库迁移规则。
+
+如需在已有空工单链接中演示完整编辑界面，可按
+[本地补全步骤](./DEVELOPMENT.md#补齐工作台演示工单) 单独运行测试补全脚本。
+脚本在取得工单锁后重新校验归属及全部业务关联，先保存主记录备份，再原子补入明细和报价；
+任一款计价不完整或金额/分货不守恒会整批回滚。它不修改已有价格历史、账号、已完成工单或正式 seed，
+已补齐工单也不会再次覆盖。备份用于核对原始资料；已有不可变报价不能通过删除快照回退，应保留测试审计记录。
+
+- [`seedDashboardSnapshot`](./tests/e2e/_helpers.ts) 每次运行生成独立的 `e2e-dash-<runId>` 命名空间，只追加本轮测试所需的数据。销售与客服 fixture 从角色匹配的 `e2e-*` 来源账号创建独立、停用的用户；不能借此克隆真实账号或产生可登录的新账号。
+- 工作台 fixture 的用户、工单、账单、外协、周期和可选图表数据在同一事务中写入；任一步失败则整体回滚。重试创建新的命名空间，不删除或重写既有工单、账本、工资支付、价格快照或共享账号的历史记录。
+- 测试应在完整关注列表中按本轮返回的记录 ID 查找，必要时翻页；不能为了使待办总数或第一屏顺序固定而清空历史数据。追加的数据随专用、可丢弃测试数据库的生命周期管理，不把该 helper 当作共享开发库的数据清理工具。
+- [`worker-ui-fixture.ts`](./tests/visual/worker-ui-fixture.ts) 为每个视口命名空间创建独立、停用的客服用户，避免争用同一客服只能有一个进行中周期的约束。客服展示周期使用 `2098-01-01` 至 `2098-04-30`，工单展示交期使用 `2099-12-31`，使展示 fixture 不进入当前临近结算、过期结算或交期提醒窗口。
+- 响应式 fixture 的工资日期也放在 2098 年。客服展示业绩使用期初金额，不伪造业绩事件账本；重建时只按该命名空间的明确 ID 清理自有数据，不按共享用户或全表删除。若自有记录出现新的账本引用，应检查引用与测试生命周期，不绕过外键约束。
+
+工作台追加隔离与事务失败回滚由
+[`dashboard-fixture-isolation.test.ts`](./tests/regression/dashboard-fixture-isolation.test.ts)
+守卫。以上规则只描述这两类 fixture，不授权其他测试 helper 清理共享历史数据。
+
 ## 创建迁移
 
 ```bash
@@ -153,3 +173,19 @@ pnpm db:studio
 ```
 
 错误处理见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)。
+
+
+## 2026-09-08：工单改版生产承接量
+
+迁移 `20260908003000_order_version_carryover` 为 `ProductionOperation` 增加
+`carriedCompletedQty`（合格件/袋数）、`carriedWorkOrderProgressQty`（工单独立件数），
+为 `ProductionProgressStep` 增加 `carriedCompletedQty`。历史行默认 0，历史报工、工资和结算不回填、不改写。
+
+承接量仅在生成新版工序时保存，上代承接量加上上代实际新增报工形成新基数；不生成虚构报工。
+字段受非负、计划上限与不可更新触发器保护；工单件数触发器将当前版本的承接量加入累计上限。
+业务事务仍持有工单 advisory lock，并核对来源映射和分款减量歧义。
+
+已应用迁移保持原样。此次 `migrate dev --create-only` 的 shadow replay 被历史并发索引迁移阻断，
+因此使用 HEAD schema 到当前 schema 的 `prisma migrate diff --script` 生成加列 SQL，再加入约束。
+随后在专用库、本地开发库部署，并在新建空库通过完整 `verify-fresh-migrations.mjs` 检查。
+已部署 SQL 原文含一个末尾空行，`git diff --check` 会提示 `new blank line at EOF`；为保持已应用迁移的校验和，不再改写该文件。其余任务文件通过格式检查。

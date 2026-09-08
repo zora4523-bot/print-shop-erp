@@ -18,7 +18,7 @@ import {
   ActionShortcut,
   BatchActionResult,
   ConflictResolutionPanel,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   ContentSkeleton,
   DisabledReason,
   EmptyState,
@@ -444,28 +444,20 @@ export default function ShowcasePage() {
         subtitle="L2 先核对影响范围；L3 还必须填写审计理由，关闭后焦点回到触发按钮。"
       >
         <div className="flex flex-wrap gap-3">
-          <ConfirmActionDialog
-            level="L2"
-            trigger={<Button variant="outline">停用通知群</Button>}
-            title="停用“生产通知群”？"
-            description="停用前请确认下游通知范围。"
-            impactItems={[
+          <ConfirmActionController level="L2"
+            trigger={<Button variant="outline">停用通知群</Button>}>
+            <ConfirmActionDialog action="停用“生产通知群”？" changes={[]} consequences={[
               '新通知不会再投递到该群。',
               '历史投递日志仍会保留。',
-            ]}
-            confirmLabel="确认停用"
-          />
-          <ConfirmActionDialog
-            level="L3"
-            trigger={<Button variant="destructive">作废结算结果</Button>}
-            title="作废这份结算结果？"
-            description="这是高风险操作，理由会进入审计记录。"
-            impactItems={[
+            ]} confirmText="确认停用" />
+          </ConfirmActionController>
+          <ConfirmActionController level="L3"
+            trigger={<Button variant="destructive">作废结算结果</Button>}>
+            <ConfirmActionDialog action="作废这份结算结果？" changes={[]} consequences={[
               '当前结算结果将不再作为付款依据。',
               '需要重新核算后才能继续后续流程。',
-            ]}
-            confirmLabel="填写理由并作废"
-          />
+            ]} confirmText="填写理由并作废" />
+          </ConfirmActionController>
         </div>
       </Section>
 

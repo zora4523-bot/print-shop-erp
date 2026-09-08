@@ -33,7 +33,8 @@ describe('Prisma client synchronization contract', () => {
     );
 
     expect(config).toContain('E2E_DATABASE_URL');
-    expect(config).toContain('pointsAtSameDatabase');
+    expect(config).toContain('E2E_ORIGINAL_DATABASE_TARGET');
+    expect(config).toContain('requestedE2eDatabaseTarget === defaultDatabaseTarget');
     expect(config).toContain(
       'reuseExistingServer: !hasIsolatedE2eDatabase && !process.env.CI',
     );

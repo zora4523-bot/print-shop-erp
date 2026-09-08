@@ -279,12 +279,15 @@ function summarizePendingRequest(
     return '申请取消整张工单';
   }
 
-  const items = (request.proposedChanges as { items?: unknown[] } | null)?.items;
+  const proposed = request.proposedChanges as { items?: unknown[]; promisedDate?: string | null } | null;
+  const dueDate = proposed?.promisedDate;
+  const dateSummary = dueDate === undefined ? '' : dueDate === null ? '清除承诺交期' : `交期改为 ${dueDate}`;
+  const items = proposed?.items;
   if (!Array.isArray(items) || items.length === 0) {
     const kind = request.modifyKind
       ? MODIFY_KIND_LABELS[request.modifyKind]
       : '其他';
-    return `${kind}调整`;
+    return dateSummary || `${kind}调整`;
   }
 
   return items
@@ -301,5 +304,5 @@ function summarizePendingRequest(
       if (change.operation === 'REMOVE') return `取消${name}`;
       return `修改${name}${change.quantity ? `数量 ${change.quantity}` : ''}`;
     })
-    .join('；');
+    .concat(dateSummary ? [dateSummary] : []).join('；');
 }

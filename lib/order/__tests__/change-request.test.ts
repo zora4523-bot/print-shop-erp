@@ -1,3 +1,4 @@
+vi.mock('@/lib/order/production-readiness', () => ({ prepareOrderForProductionInTx: vi.fn().mockResolvedValue({ ready: true, status: 'CONFIRMED', issues: [] }) }));
 import Decimal from 'decimal.js';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +35,7 @@ import {
   createOrderChangeApprovalToken,
   type OrderChangeApprovalResolutionEvidence,
 } from '../order-change-approval-token';
+import { createOrderChangeRequestSchema } from '../../auth/schemas';
 import { PENDING_PLATE_BUSINESS_KEY } from '../pending-plate-charge';
 
 const mocks = vi.hoisted(() => {
@@ -44,11 +46,13 @@ const mocks = vi.hoisted(() => {
     backgroundJob: { updateMany: vi.fn() },
     notificationLog: { updateMany: vi.fn() },
     order: { findUnique: vi.fn(), update: vi.fn() },
+    orderWorkflowDecision: { findFirst: vi.fn() },
     product: { findMany: vi.fn() },
     material: { findMany: vi.fn() },
     orderItem: { update: vi.fn(), create: vi.fn(), findMany: vi.fn() },
     orderItemPlateDetail: { findMany: vi.fn(), update: vi.fn() },
     orderPackagingGroup: { update: vi.fn() },
+    orderPackagingGroupLine: { updateMany: vi.fn() },
     orderShipmentLine: { upsert: vi.fn(), create: vi.fn() },
     productionOperation: { updateMany: vi.fn() },
     productionProgressStep: { updateMany: vi.fn() },
@@ -70,6 +74,8 @@ const mocks = vi.hoisted(() => {
   };
   return {
     db,
+    completion: vi.fn().mockResolvedValue({ completed: false }),
+    completionDispatch: vi.fn(),
     calculate: vi.fn(),
     finalizeCharges: vi.fn(),
     appendRevision: vi.fn(),
@@ -93,8 +99,13 @@ vi.mock('@/lib/order/print-jobs', () => ({
   createOrderPrintRequestInTx: mocks.createPrint,
   supersedeOlderOrderPrintRequestsInTx: mocks.supersedePrint,
 }));
-vi.mock('@/lib/production/operation-materialization-service', () => ({
+vi.mock('@/lib/production/operation-materialization-service', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/production/operation-materialization-service')>(),
   activateProductionOperationsInTx: mocks.activateProduction,
+}));
+vi.mock('@/lib/production-completion', () => ({
+  maybeCompleteProductionOrder: mocks.completion,
+  dispatchProductionCompletionNotification: mocks.completionDispatch,
 }));
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: mocks.dispatchNotification,
@@ -602,7 +613,7 @@ describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
     ).toBe(true);
   });
 
-  it('真实纯引擎仅剩 PLATE_FEE 待定时允许改单重算', () => {
+  it('真实纯引擎默认零版费时允许完整自动计价', () => {
     const input = createGoldenOrderInput([
       createGoldenOrderItem({ quantity: 1_200 }),
     ]);
@@ -613,10 +624,10 @@ describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
     const processing = presentCreateOrderProcessingQuote({ input, quote });
 
     expect(quote).toMatchObject({
-      status: 'PARTIAL',
-      total: null,
-      pendingLineCodes: ['PLATE_FEE'],
-      pendingReasons: [{ code: 'PLATE_AMOUNT_PENDING' }],
+      status: 'QUOTED',
+      total: quote.knownTotal,
+      pendingLineCodes: [],
+      pendingReasons: [],
     });
     expect(
       isChangeRequestQuoteAutomaticallyApplicable({ quote, processing }),
@@ -634,7 +645,7 @@ describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
     const processing = presentCreateOrderProcessingQuote({ input, quote });
 
     expect(quote.pendingLineCodes).toEqual(
-      expect.arrayContaining(['PLATE_FEE', 'SHIPPING:primary']),
+      expect.arrayContaining(['SHIPPING:primary']),
     );
     expect(
       isChangeRequestQuoteAutomaticallyApplicable({ quote, processing }),
@@ -972,6 +983,7 @@ function expectNoApprovalMutation(): void {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.completion.mockResolvedValue({ completed: false });
   mocks.getSetting.mockResolvedValue({ enabled: true });
   mocks.enqueueNotification.mockResolvedValue(false);
   mocks.dispatchNotification.mockResolvedValue(undefined);
@@ -1063,6 +1075,87 @@ beforeEach(() => {
 });
 
 describe('createOrderChangeRequest', () => {
+  it('只改交期保存真实日期提案和原值，未审批前不写原单', async () => {
+    mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'due-date-request' });
+    const oldDate = new Date('2026-09-10T00:00:00Z');
+    mocks.db.order.findUnique.mockResolvedValue(createRequestOrder({ promisedDate: oldDate }));
+    const payload = createOrderChangeRequestSchema.parse({
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      type: 'MODIFY', modifyKind: 'DUE_DATE', reason: '客户确认延期', items: [], promisedDate: '2026-09-12',
+    });
+    await createOrderChangeRequest(payload, sales);
+    expect(mocks.db.orderChangeRequest.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      proposedChanges: expect.objectContaining({ items: [], promisedDate: '2026-09-12' }),
+      beforeSnapshot: expect.objectContaining({ promisedDate: '2026-09-10' }),
+    }) }));
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(createOrderChangeRequestSchema.safeParse({ ...payload, promisedDate: '2026-02-30' }).success).toBe(false);
+  });
+  it('无实际交期变化且没有款式修改时拒绝空申请', async () => {
+    mocks.db.order.findUnique.mockResolvedValue(createRequestOrder({ promisedDate: null }));
+    await expect(createOrderChangeRequest({ orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+      type: 'MODIFY', modifyKind: 'DUE_DATE', reason: '没有变化', items: [], promisedDate: null }, sales)).rejects.toThrow(/实际/);
+    expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+  it.each([OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED, OrderStatus.DRAFT])(
+    '管理员可为 %s 工单提交修改提案但不能直接改写款式和费用',
+    async (status) => {
+      mocks.db.order.findUnique.mockResolvedValue({
+        ...createRequestOrder(),
+        status,
+      });
+      mocks.db.orderChangeRequest.create.mockResolvedValue({
+        id: 'admin-request',
+      });
+      await expect(
+        createOrderChangeRequest(
+          {
+            orderId: 'order-1',
+            expectedRevision: 2,
+            expectedWorkOrderVersion: 1,
+            type: 'MODIFY',
+            modifyKind: 'OTHER',
+            reason: '核对名称',
+            items: [
+              { operation: 'UPDATE', itemId: 'item-1', name: '修正款式名称' },
+            ],
+          },
+          admin,
+        ),
+      ).resolves.toEqual({ id: 'admin-request' });
+      expect(mocks.db.order.update).not.toHaveBeenCalled();
+      expect(mocks.db.orderItem.update).not.toHaveBeenCalled();
+      expect(mocks.db.orderChangeRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requesterId: admin.id,
+            baseRevision: 2,
+          }),
+        }),
+      );
+    },
+  );
+
+  it('管理员的修改权限不能变成取消申请权限', async () => {
+    mocks.db.order.findUnique.mockResolvedValue(createRequestOrder());
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          expectedRevision: 2,
+          expectedWorkOrderVersion: 1,
+          type: 'CANCEL',
+          reason: '取消',
+          items: [],
+        },
+        admin,
+      ),
+    ).rejects.toThrow('当前账号无权');
+    expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+
   it('只保存提案，不改写工单或历史快照', async () => {
     mocks.db.order.findUnique.mockResolvedValue(createRequestOrder());
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
@@ -1533,6 +1626,38 @@ describe('createOrderChangeRequest', () => {
 });
 
 describe('withdrawOrderChangeRequest', () => {
+  it.each([true, false])(
+    '管理员只能撤回自己提交的待审修改：本人 %s',
+    async (own) => {
+      mocks.db.orderChangeRequest.findUnique
+        .mockResolvedValueOnce({ orderId: 'order-1' })
+        .mockResolvedValueOnce({
+          id: 'request-1',
+          orderId: 'order-1',
+          requesterId: own ? admin.id : 'sales-1',
+          status: OrderChangeRequestStatus.PENDING,
+          type: OrderChangeRequestType.MODIFY,
+        });
+      mocks.db.orderChangeRequest.update.mockResolvedValueOnce({
+        id: 'request-1',
+        status: OrderChangeRequestStatus.WITHDRAWN,
+      });
+      const result = withdrawOrderChangeRequest(
+        { requestId: 'request-1' },
+        admin,
+      );
+      if (own)
+        await expect(result).resolves.toMatchObject({
+          status: OrderChangeRequestStatus.WITHDRAWN,
+        });
+      else {
+        await expect(result).rejects.toThrow('只能撤回自己');
+        expect(mocks.db.orderChangeRequest.update).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+
   it('lets only the requester withdraw a pending request and writes an audit log', async () => {
     mocks.db.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
@@ -3219,6 +3344,34 @@ describe('previewFactoryConfirmationPriceDiff', () => {
 });
 
 describe('cancellation settlement reference', () => {
+  it('取消结算的已产数量包含新版承接进度，不重复计算旧版', async () => {
+    const value = request({
+      type: OrderChangeRequestType.CANCEL,
+      proposedChanges: { items: [] },
+      order: {
+        ...request().order,
+        status: OrderStatus.FOILING,
+        workOrderVersion: 2,
+        productionOperations: [
+          { id: 'old-op', status: 'COMPLETED', workOrderVersion: 1, operationType: 'PARTIAL', carriedWorkOrderProgressQty: new Decimal(900) },
+          { id: 'current-op', status: 'IN_PROGRESS', workOrderVersion: 2, operationType: 'PARTIAL', carriedWorkOrderProgressQty: new Decimal(300) },
+        ],
+        productionWorkOrderProgress: [
+          { workOrderVersion: 1, stage: 'FOILING', workOrderProgressQuantity: new Decimal(900) },
+          { workOrderVersion: 2, stage: 'FOILING', workOrderProgressQuantity: new Decimal(200) },
+        ],
+        productionProgressSteps: [],
+        outsourceOrders: [],
+      },
+    });
+    locateCancellation(value);
+    await expect(reviewOrderChangeRequest({
+      requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      producedQty: 499, settleFee: '505.00',
+    }, admin)).rejects.toThrow('已产数量不能小于已报工 500');
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+
   it('按最大余数法稳定分摊整单已产数量', () => {
     expect(
       allocateCancellationProducedQuantity(
@@ -3444,6 +3597,91 @@ describe('cancellation settlement reference', () => {
 });
 
 describe('reviewOrderChangeRequest', () => {
+  it.each([
+    OrderSettlementType.EXTERNAL_SALES,
+    OrderSettlementType.INTERNAL_SALES,
+  ])('%s 纯交期批准保留历史金额，不从不完整明细重建费用或业绩', async (settlementType) => {
+    const value = request({
+      proposedChanges: { items: [], promisedDate: '2026-09-20' },
+      order: {
+        ...request().order,
+        settlementType,
+        promisedDate: null,
+        items: [],
+        shipments: [],
+        customerCharges: [],
+        processingAmount: new Decimal('2800.00'),
+        totalAmount: new Decimal('3000.00'),
+        quotedFee: new Decimal('2900.00'),
+        quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+        quotedPricingRevisionId: 'historical-quote',
+        confirmedFee: new Decimal('3000.00'),
+        settledFee: null,
+      },
+    });
+    locate(value);
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({
+      oldTotal: '3000.00',
+      newTotal: '3000.00',
+      delta: '0.00',
+      quoteToken: null,
+    });
+    locate(value);
+    mocks.db.orderItem.findMany.mockResolvedValue([]);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: null } });
+    mocks.db.csSalesEntry.aggregate.mockResolvedValue({ _sum: { amount: new Decimal('3000.00') } });
+
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+
+    expect(mocks.db.order.update).toHaveBeenCalledWith({
+      where: { id: value.orderId },
+      data: { revision: 3, promisedDate: new Date('2026-09-20T00:00:00Z') },
+    });
+    expect(mocks.db.orderItem.findMany).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.aggregate).not.toHaveBeenCalled();
+    expect(mocks.db.csSalesEntry.create).not.toHaveBeenCalled();
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
+    expect(mocks.db.orderLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'CHANGE_REQUEST_APPROVED',
+        changedFields: expect.objectContaining({
+          processingAmount: { before: '2800', after: '2800.00' },
+          totalAmount: { before: '3000', after: '3000.00' },
+        }),
+      }),
+    });
+  });
+  it.each(['2026-09-20', null])('交期提案 %s 的预览与审批一致，不重新计价或要求配送信息', async (promisedDate) => {
+    const value = request({ proposedChanges: { items: [], promisedDate },
+      order: { ...request().order, promisedDate: new Date('2026-09-10T00:00:00Z'), shipments: [] } });
+    locate(value);
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({
+      promisedDateChange: { before: '2026-09-10', after: promisedDate }, newTotal: '1008.00', quoteToken: null,
+    });
+    locate(value);
+    mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+    expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      promisedDate: promisedDate ? new Date(`${promisedDate}T00:00:00Z`) : null, revision: 3,
+    }) }));
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('生产中仅改交期仍升版；暂停=%s 时保持暂停，未暂停时重新检查完工', async (paused) => {
+    const value = request({ baseWorkOrderVersion: 2, proposedChanges: { items: [], promisedDate: '2026-09-20' },
+      order: { ...request().order, status: paused ? OrderStatus.ON_HOLD : OrderStatus.FOILING, workOrderVersion: 2, promisedDate: null } });
+    locate(value);
+    mocks.db.orderWorkflowDecision.findFirst.mockResolvedValue({ fromStatus: OrderStatus.FOILING });
+    mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+    expect(mocks.activateProduction).toHaveBeenCalledWith(mocks.db, 'order-1', admin, expect.any(Date), {
+      targetStatus: paused ? OrderStatus.ON_HOLD : OrderStatus.FOILING, allowVersionRematerialization: true,
+    });
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'APPROVED', workOrderVersionAfter: 3 }) }));
+    expect(mocks.completion).toHaveBeenCalledTimes(paused ? 0 : 1);
+  });
+
   it('persists DENIED with a mandatory reason and writes the rejection audit', async () => {
     const value = request();
     locate(value);
@@ -4680,7 +4918,7 @@ describe('reviewOrderChangeRequest', () => {
       .rejects.toThrow(/已有开工或完工记录.*不能再修改数量/);
   });
 
-  it('真实纯引擎仅剩制版费待定时仍可批准外部销售改单', async () => {
+  it.each([0, 88])('真实纯引擎默认零版费重算，保留人工版费 %s 元并确认完整金额', async (manualPlateFee) => {
     const value = request({
       order: {
         ...request().order,
@@ -4701,12 +4939,21 @@ describe('reviewOrderChangeRequest', () => {
         ],
       },
     });
+    if (manualPlateFee > 0) {
+      const charge = { ...EMPTY_CHARGE_BASIS, id: 'manual-plate', orderId: 'order-1', shipmentId: null,
+        businessKey: PENDING_PLATE_BUSINESS_KEY, priceBookId: null, status: OrderCustomerChargeStatus.ESTIMATED,
+        amount: new Decimal(manualPlateFee), category: { code: 'PLATE_MAKING_FEE' }, pricingSnapshot: {}, overrideReason: '实际制版费',
+      };
+      Object.assign(value.order, { customerCharges: [...value.order.customerCharges, charge] });
+      mocks.db.orderCustomerCharge.findUnique.mockResolvedValue(charge);
+    }
     locate(value);
     const state: {
       calculation: ReturnType<typeof realEngineResult> | null;
     } = { calculation: null };
     mocks.calculate.mockImplementationOnce(async (_tx, args: ServiceArgs) => {
       state.calculation = realEngineResult(args);
+      mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: new Decimal(state.calculation.quote.order.knownAmount).plus(manualPlateFee) } });
       return state.calculation;
     });
     mocks.db.orderItem.findMany.mockImplementationOnce(async () => {
@@ -4788,16 +5035,26 @@ describe('reviewOrderChangeRequest', () => {
     ).resolves.toEqual({ id: 'request-1' });
 
     expect(state.calculation?.quote.order).toMatchObject({
-      amount: null,
+      amount: state.calculation?.quote.order.knownAmount,
       lines: expect.arrayContaining([
         expect.objectContaining({
           code: 'PLATE_FEE',
-          status: 'PENDING_AMOUNT',
-          amount: null,
+          status: 'QUOTED',
+          amount: '0.00',
         }),
       ]),
     });
+    expect(mocks.db.orderItemPlateDetail.update).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.update.mock.calls.some(([arg]) => arg.where.id === 'manual-plate')).toBe(false);
+    const expectedTotal = new Decimal(state.calculation!.quote.knownTotal).plus(manualPlateFee).toFixed(2);
+    expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ totalAmount: expectedTotal }) }));
+    if (manualPlateFee) {
+      expect(mocks.appendRevision).toHaveBeenCalledWith(mocks.db, expect.objectContaining({ orderFeeSnapshot: {
+        quotedFee: value.order.quotedFee, confirmedFee: expectedTotal, settledFee: null,
+      } }));
+    }
     expect(mocks.appendRevision).toHaveBeenCalledTimes(1);
+    expect(mocks.appendRevision).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: manualPlateFee ? 'ADMIN_CONFIRMED' : 'AUTO_CONFIRMED' }));
   });
 
   it('整单一次纯计算，更新全部款式并冻结双价表证据', async () => {
@@ -5119,6 +5376,40 @@ describe('reviewOrderChangeRequest', () => {
       where: { id: 'group-1' },
       data: expect.objectContaining({
         actualBagCount: 120, unitPrice: '0.1000', subtotal: '12.00',
+        pricingSnapshot: expect.objectContaining({ source: 'CHANGE_REQUEST_PURE_REQUOTE' }),
+      }),
+    });
+  });
+
+  it('每包数量修改参与整单报价并与包装明细原子保存', async () => {
+    const value = request({ proposedChanges: { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1200, pack: 20 }] }, order: {
+      ...request().order,
+      packagingAmount: new Decimal(10), processingAmount: new Decimal(1010),
+      totalAmount: new Decimal(1018),
+      packagingGroups: [{
+        id: 'group-1', sequence: 1, name: '单款入袋',
+        mode: OrderPackagingMode.SINGLE_STYLE,
+        actualBagCount: 100, unitPrice: new Decimal('0.1'), subtotal: new Decimal(10),
+        suggestedSubtotal: new Decimal(10), pricingSnapshot: { engineVersion: 'OLD' },
+        priceOverrideReason: null,
+        lines: [{ orderItemId: 'item-1', unitsPerBag: 10 }],
+      }],
+    } });
+    locate(value);
+    await reviewOrderChangeRequest({
+      requestId: value.id,
+      decision: 'APPROVE',
+      reviewRemark: null,
+      expectedPriceRevision: 5,
+      expectedQuoteToken: quoteToken,
+    }, admin);
+    expect(mocks.calculate.mock.calls[0][1].facts.packagingGroups[0].items).toEqual([{ itemKey: 'item-1', unitsPerBag: 20 }]);
+    expect(mocks.db.orderItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pack: 20, quoteDisposition: 'PRICED', quotedAmount: '1200.00', pricingSnapshot: expect.objectContaining({ version: 1, engineVersion: 'CREATE_ORDER_PURE_V1' }) }) }));
+    expect(mocks.db.orderPackagingGroupLine.updateMany).toHaveBeenCalledWith({ where: { orderId: 'order-1', orderItemId: 'item-1' }, data: { unitsPerBag: 20 } });
+    expect(mocks.db.orderPackagingGroup.update).toHaveBeenCalledWith({
+      where: { id: 'group-1' },
+      data: expect.objectContaining({
+        actualBagCount: 60, unitPrice: '0.1000', subtotal: '6.00',
         pricingSnapshot: expect.objectContaining({ source: 'CHANGE_REQUEST_PURE_REQUOTE' }),
       }),
     });

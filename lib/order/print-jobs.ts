@@ -9,6 +9,8 @@ import {
 import { databaseClockNow } from '../background-jobs/clock';
 import { db } from '../db';
 import { orderCascadeLockKey } from './locks';
+import { resolveOrderChangeStageInTx } from './change-stage';
+import { OrderChangeRequestError } from './change-request-error';
 
 export type OrderPrintActor = { id: string; role: Role };
 
@@ -111,7 +113,16 @@ export async function createOrderPrintRequestInTx(
   if (order.workOrderVersion !== input.workOrderVersion) {
     throw new OrderPrintJobError('VERSION_STALE', `工单当前版本为 v${order.workOrderVersion}`);
   }
-  if (!PRINTABLE_STATUSES.has(order.status)) {
+  let printableStatus = order.status;
+  if (order.status === OrderStatus.ON_HOLD && input.printKind === OrderPrintKind.REPRINT) {
+    try {
+      printableStatus = await resolveOrderChangeStageInTx(tx, order);
+    } catch (error) {
+      if (!(error instanceof OrderChangeRequestError)) throw error;
+      throw new OrderPrintJobError('ORDER_NOT_PRINTABLE', error.message);
+    }
+  }
+  if (!PRINTABLE_STATUSES.has(printableStatus)) {
     throw new OrderPrintJobError('ORDER_NOT_PRINTABLE', `工单状态 ${order.status} 不允许创建打印任务`);
   }
 

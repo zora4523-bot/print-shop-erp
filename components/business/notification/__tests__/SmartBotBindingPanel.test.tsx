@@ -34,9 +34,10 @@ describe('SmartBotBindingPanel', () => {
 
     expect(html).toContain('绑定企业微信群');
     expect(html).toContain('生成一次性绑定码');
-    expect(html).toContain('@该智能机器人');
+    expect(html).toContain('@机器人');
     expect(html).toContain('尚未绑定');
-    expect(html).toContain('这里不显示 Bot ID 或 Secret');
+    expect(html).not.toContain('Bot ID');
+    expect(html).not.toContain('Secret');
     expect(html).not.toContain('chatid-raw-value');
   });
 
@@ -52,7 +53,7 @@ describe('SmartBotBindingPanel', () => {
 
     expect(html).toContain('已绑定企业微信群');
     expect(html).toContain('••••a1b2');
-    expect(html).toContain('该绑定不可更改');
+    expect(html).toContain('如需换群，请新建通知目标');
     expect(html).not.toContain('一次性绑定码');
     expect(html).not.toContain('chatid-raw-value');
   });

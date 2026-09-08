@@ -16,7 +16,7 @@ const beforeSnapshot = {
 };
 
 describe('OrderChangeFieldDiff', () => {
-  it('renders only real before-to-after field changes with both impacts', () => {
+  it('renders real before-to-after changes without repeating production instructions', () => {
     const html = renderToStaticMarkup(
       <OrderChangeFieldDiff
         beforeSnapshot={beforeSnapshot}
@@ -44,8 +44,8 @@ describe('OrderChangeFieldDiff', () => {
     expect(html).toContain('特大号');
     expect(html).toContain('哑金');
     expect(html).toContain('亮金');
-    expect(html).toContain('需要重新计价');
-    expect(html).toContain('校验已开工记录并同步任务数量');
+    expect(html).not.toContain('计价影响');
+    expect(html).not.toContain('生产影响');
   });
 
   it('makes newly added styles explicit and identifies the template', () => {
@@ -69,7 +69,7 @@ describe('OrderChangeFieldDiff', () => {
 
     expect(html).toContain('新增 · 红包 B（参考 #1 · 红包 A）');
     expect(html).toContain('—（新增）');
-    expect(html).toContain('创建对应待生产任务');
+    expect(html).toContain('500');
   });
 
   it('分开展示正反面烫金事实', () => {

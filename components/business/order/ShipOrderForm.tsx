@@ -1,11 +1,11 @@
 'use client';
 
-import { useActionState, useRef, useState, useTransition } from 'react';
+import { useActionState, useEffect, useRef, useState, useTransition } from 'react';
 import type { FormEvent } from 'react';
 import { shipOrderAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import {
   ShipOrderShipmentFields,
   ShipOrderVersionFields,
@@ -92,6 +92,7 @@ export function ShipOrderForm({
   shipments,
   isExternalSales,
   isSfCollect,
+  onSuccess,
 }: {
   orderId: string;
   expectedRevision: number;
@@ -102,6 +103,7 @@ export function ShipOrderForm({
   shipments: ShipmentInput[];
   isExternalSales: boolean;
   isSfCollect: boolean;
+  onSuccess?: () => void;
 }) {
   const [state, action] = useActionState<OrderMutationResult | null, FormData>(
     (previousState, formData) =>
@@ -120,9 +122,13 @@ export function ShipOrderForm({
     shipOrderImpactItems({ shipments, isExternalSales, isSfCollect }),
   );
   const visibleState = pending ? null : state;
+  useEffect(() => {
+    if (state?.status === 'success') onSuccess?.();
+  }, [state, onSuccess]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending || state?.status === 'success') return;
     const form = formRef.current;
     if (!form || !form.reportValidity()) return;
 
@@ -149,6 +155,7 @@ export function ShipOrderForm({
   }
 
   function confirmShipment() {
+    if (pending || state?.status === 'success') return;
     const form = formRef.current;
     if (!form) return;
     const formData = new FormData(form);
@@ -187,29 +194,22 @@ export function ShipOrderForm({
       <Button
         ref={triggerRef}
         type="submit"
-        disabled={pending || shipments.length === 0}
+        disabled={pending || state?.status === 'success' || shipments.length === 0}
         aria-busy={pending}
       >
-        {pending ? '处理中…' : `确认 ${shipments.length} 个地址已发货`}
+        {pending ? '处理中…' : state?.status === 'success' ? '已发货' : `确认 ${shipments.length} 个地址已发货`}
       </Button>
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={triggerRef}
         disabled={pending || shipments.length === 0}
-        title={`确认 ${shipments.length} 个地址已发货？`}
-        description={
-          isExternalSales
-            ? '请核对运单信息和最终收费。'
-            : '请核对运单信息。'
-        }
-        impactItems={confirmationImpactItems}
-        confirmLabel={
+        onConfirm={confirmShipment}>
+        <ConfirmActionDialog action={`确认 ${shipments.length} 个地址已发货？`} changes={[]} consequences={confirmationImpactItems} confirmText={
           isExternalSales ? '确认发货并重算应收' : '确认标记已发货'
-        }
-        onConfirm={confirmShipment}
-      />
+        } />
+      </ConfirmActionController>
+      {visibleState?.status === 'success' ? <ActionNotice tone="success" title="工单已发货" /> : null}
       {visibleState?.status === 'error' ? (
         <p role="alert" className="text-xs text-destructive">
           {visibleState.message}

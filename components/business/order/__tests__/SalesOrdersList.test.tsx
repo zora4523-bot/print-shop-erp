@@ -34,7 +34,7 @@ describe('SalesOrdersList', () => {
     expect(html).toContain('>2</b> 款');
     expect(html).toContain('2,000');
     expect(html).toContain('局部烫金 · 触感纸');
-    expect(html).toContain('待工厂确认');
+    expect(html).toContain('待处理');
     expect(html).toContain('待管理员确认价格');
     expect(html).toContain('修改申请中');
     expect(html).toContain('中通');

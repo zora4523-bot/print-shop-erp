@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   FormErrorSummary,
   FormMessage,
   formMessageA11yProps,
@@ -320,32 +320,28 @@ export function CsPayrollPaymentForm({
       </Button>
       {/* remark 是业务备注，不是服务端强制持久的审计 reason。
           不能把它偷换成 L3 理由，所以此处保持 L2 并展示完整流水影响。 */}
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         formId={formId}
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={triggerRef}
         disabled={pending || preview === null}
-        title={`确认记录 ${csUserName} 的这笔工资发放？`}
-        description="这会追加不可覆盖的财务流水。请逐项核对金额、时间、方式和流水号。"
-        impactItems={
-          preview
-            ? csPayrollPaymentImpactItems({
-                preview,
-                csUserName,
-                periodLabel,
-                remainingBase,
-                remainingCommission,
-                commissionAvailable,
-              })
-            : []
-        }
-        confirmLabel="确认追加发放流水"
         onConfirm={() => {
           confirmedRef.current = true;
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action={`确认记录 ${csUserName} 的这笔工资发放？`} changes={[]} consequences={
+          preview
+            ? csPayrollPaymentImpactItems({
+              preview,
+              csUserName,
+              periodLabel,
+              remainingBase,
+              remainingCommission,
+              commissionAvailable,
+            })
+            : []
+        } confirmText="确认追加发放流水" />
+      </ConfirmActionController>
 
       {visibleState?.status === 'error' ? (
         <ActionNotice

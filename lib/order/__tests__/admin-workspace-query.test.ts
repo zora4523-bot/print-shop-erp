@@ -97,6 +97,28 @@ describe('admin order workspace query', () => {
     );
   });
 
+  it('preserves pending-release in the todo queue and its durable-export receipt', () => {
+    const parsed = parseAdminOrderWorkspaceQuery({
+      signal: 'pending-release',
+      page: '3',
+    });
+
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.query).toMatchObject({
+      queue: 'todo',
+      signal: 'pending-release',
+      list: { page: 3 },
+    });
+    expect(serializeAdminOrderWorkspaceQuery(parsed.query)).toMatchObject({
+      signal: 'pending-release',
+      page: 3,
+    });
+    expect(adminOrderExportParamsFromQuery(parsed.query)).toEqual({
+      signal: 'pending-release',
+      adminWorkspace: 'v1',
+    });
+  });
+
   it('reports forged workspace keys without reflecting them', () => {
     const parsed = parseAdminOrderWorkspaceQuery({
       queue: 'secret',

@@ -233,7 +233,7 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
     menuGroupLabel: '员工薪酬规则',
     label: '员工薪酬规则',
     description: '维护客服提成、计时工与固定工资版本；工序计件工价属于独立规则域。',
-    impact: '后续工资快照与月度结算',
+    impact: '员工工价与月度结算',
     effect: 'effective-dated',
     href: RULE_CENTER_HREFS.employeePay,
     activeRouteBase: RULE_CENTER_HREFS.employeePay,

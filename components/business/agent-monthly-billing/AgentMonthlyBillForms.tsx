@@ -51,7 +51,7 @@ export function GenerateAgentMonthlyBillsForm({
         />
       </div>
       <Button type="submit" disabled={pending}>
-        {pending ? '同步中…' : '生成 / 同步 DRAFT'}
+        {pending ? '生成中…' : '生成或更新草稿'}
       </Button>
       <Feedback state={state} />
     </form>
@@ -77,7 +77,7 @@ export function ConfirmAgentMonthlyBillForm({
         {pending ? '确认中…' : '确认并冻结账单'}
       </Button>
       <p className="text-xs text-muted-foreground">
-        确认前会再次同步当月结算事实。0 元账单将自动结清。
+        确认后账单不可修改。
       </p>
       <Feedback state={state} />
     </form>
@@ -102,7 +102,7 @@ export function MarkAgentMonthlyBillPaidForm({
     <form action={action} aria-busy={pending} className="space-y-3">
       <input type="hidden" name="idempotencyKey" value={initialIdempotencyKey} />
       <p className="text-sm">
-        本次将按服务端锁定总额收款：
+        本次收款金额：
         <strong className="font-sans tabular-nums">¥ {lockedAmount}</strong>
       </p>
       <div className="grid gap-3 sm:grid-cols-2">

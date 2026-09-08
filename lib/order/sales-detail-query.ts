@@ -7,6 +7,7 @@ import {
   OrderCustomerChargeStatus,
   OrderItemPricingRoute,
   OrderPricingStatus,
+  OrderPackagingMode,
   OrderSettlementType,
   OrderStatus,
   Prisma,
@@ -70,6 +71,18 @@ export type SalesOrderDetail = {
       fileType: DesignFileType;
       fileUrl: string;
       fileSize: string;
+    }>;
+  }>;
+  packagingGroups: Array<{
+    id: string;
+    sequence: number;
+    name: string | null;
+    mode: OrderPackagingMode;
+    actualBagCount: number;
+    lines: Array<{
+      itemSequence: number;
+      itemName: string;
+      unitsPerBag: number;
     }>;
   }>;
   shipments: Array<{
@@ -160,6 +173,23 @@ export const salesOrderDetailSelect = {
           fileType: true,
           fileUrl: true,
           fileSize: true,
+        },
+      },
+    },
+  },
+  packagingGroups: {
+    orderBy: { sequence: 'asc' },
+    select: {
+      id: true,
+      sequence: true,
+      name: true,
+      mode: true,
+      actualBagCount: true,
+      lines: {
+        orderBy: { orderItem: { sequence: 'asc' } },
+        select: {
+          unitsPerBag: true,
+          orderItem: { select: { sequence: true, name: true } },
         },
       },
     },
@@ -323,6 +353,18 @@ function mapSalesOrderDetail(
             ? signDesignReadUrl(design.fileUrl)
             : '',
         fileSize: design.fileSize.toString(),
+      })),
+    })),
+    packagingGroups: row.packagingGroups.map((group) => ({
+      id: group.id,
+      sequence: group.sequence,
+      name: group.name,
+      mode: group.mode,
+      actualBagCount: group.actualBagCount,
+      lines: group.lines.map((line) => ({
+        itemSequence: line.orderItem.sequence,
+        itemName: line.orderItem.name,
+        unitsPerBag: line.unitsPerBag,
       })),
     })),
     shipments: row.shipments.map((shipment) => ({

@@ -1,3 +1,5 @@
+import '@/app/globals.css';
+import { page, commands } from 'vitest/browser';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import type { ReactNode } from 'react';
@@ -49,6 +51,7 @@ vi.mock('@/actions/admin-order-workflow', () => ({
   runAdminOrderBatchAction: vi.fn(),
   settleFactoryOrderAction: vi.fn(),
 }));
+vi.mock('@/components/business/order/AdminOrderInlineOperations', () => ({ AdminOrderInlineOperations: () => null }));
 
 vi.mock('@/components/ui-business', () => ({
   ConfirmActionDialog: ({
@@ -417,7 +420,38 @@ it('目录规格可用性刷新后重建草稿', async () => {
   }
 });
 
-it('逐票运费必须以完整事实重新预览，任何编辑都会重新锁定批准', async () => {
+it('仅当前交期刷新时也重建草稿，避免把旧日期作为新提案提交', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const renderForm = (promisedDate: string) => <OrderChangeRequestForm orderId="order-1"
+    expectedRevision={4} expectedWorkOrderVersion={2} promisedDate={promisedDate}
+    items={[requestItem]} catalogProducts={[]} />;
+  const chooseDueDate = async () => {
+    const category = host.querySelector<HTMLSelectElement>('select')!;
+    category.value = 'DUE_DATE';
+    category.dispatchEvent(new Event('change', { bubbles: true }));
+    await settleEffects();
+  };
+  try {
+    flushSync(() => root.render(renderForm('2026-09-10')));
+    await chooseDueDate();
+    setValue(host.querySelector<HTMLInputElement>('input[type="date"]')!, '2026-09-20');
+    setValue(host.querySelector<HTMLTextAreaElement>('textarea')!, '旧交期下的修改原因');
+    await settleEffects();
+    // Basic-info edits update editVersion but do not change the business revision.
+    flushSync(() => root.render(renderForm('2026-09-15')));
+    await chooseDueDate();
+    expect(host.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-09-15');
+    expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
+    expect(host.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+  } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+  }
+});
+
+it.each([false, true])('逐票运费重新预览与审批门禁（精简视图：%s）', async (compact) => {
   const unresolvedCharge = {
     businessKey: 'shipping:shipment-2',
     categoryCode: 'SHIPPING_FEE' as const,
@@ -454,7 +488,7 @@ it('逐票运费必须以完整事实重新预览，任何编辑都会重新锁�
 
   try {
     flushSync(() =>
-      root.render(<OrderChangeReviewForm requestId="request-1" />),
+      root.render(<OrderChangeReviewForm requestId="request-1" compact={compact} />),
     );
 
     await vi.waitFor(() => {
@@ -464,6 +498,12 @@ it('逐票运费必须以完整事实重新预览，任何编辑都会重新锁�
         ),
       ).not.toBeNull();
     });
+    if (compact) {
+      const shippingDetails = host.querySelector<HTMLInputElement>('[aria-label="第 2 票运费金额"]')?.closest('details');
+      expect(shippingDetails?.open).toBe(true);
+      expect(host.textContent).toContain('请补齐运费金额和依据，并按录入运费重新预览');
+    }
+
     const approve = host.querySelector<HTMLButtonElement>(
       '[data-testid="approve-change"]',
     )!;
@@ -552,7 +592,7 @@ it('切换或关闭裁决模式会清空上一模式的表单、预览和消息'
     setValue(figs, '非法款号');
     setValue(note, '上一个驳回理由');
     await settleEffects();
-    buttonWithText(host, '确认提交')?.click();
+    expect(buttonWithText(host, '确认驳回工单')?.disabled).toBe(true);
     await vi.waitFor(() => {
       expect(host.textContent).toContain('涉及款号只能填写正整数');
     });
@@ -592,7 +632,7 @@ it('切换或关闭裁决模式会清空上一模式的表单、预览和消息'
 
     buttonWithText(host, '取消')?.click();
     await settleEffects();
-    expect(host.textContent).not.toContain('已按服务端当前发布价计算参考结算价');
+    expect(host.textContent).not.toContain('参考价已更新，请核对最终结算金额。');
     buttonWithText(host, '批准取消')?.click();
     await settleEffects();
 
@@ -616,6 +656,54 @@ it('切换或关闭裁决模式会清空上一模式的表单、预览和消息'
       host.querySelector<HTMLInputElement>('[placeholder^="涉及款号"]')?.value,
     ).toBe('');
   } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+  }
+});
+
+
+it.each([
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+].flatMap(([width, height]) => [false, true].map((empty) => ({ width, height, empty }))))(
+  '交期申请在 $width×$height 可独立提交（无款式=$empty），并保持响应式布局与无障碍', async ({ width, height, empty }) => {
+  await page.viewport(width, height);
+  const host = document.createElement('main');
+  host.id = 'date-change-fixture';
+  document.body.append(host);
+  const root = createRoot(host);
+  createActionMock.mockResolvedValue({ status: 'success', requestId: 'date-request' });
+  try {
+    flushSync(() => root.render(<OrderChangeRequestForm orderId="order-1" expectedRevision={4}
+      expectedWorkOrderVersion={2} promisedDate="2026-09-10" items={empty ? [] : [requestItem]} catalogProducts={[]} />));
+    const category = host.querySelector<HTMLSelectElement>('select')!;
+    if (empty) {
+      expect(category.value).toBe('DUE_DATE');
+      expect([...category.options].map((option) => option.value)).toEqual(['DUE_DATE']);
+      expect(host.textContent).not.toContain('增加款式');
+    }
+    category.value = 'DUE_DATE';
+    category.dispatchEvent(new Event('change', { bubbles: true }));
+    await settleEffects();
+    setValue(host.querySelector<HTMLInputElement>('input[type="date"]')!, '2026-09-20');
+    setValue(host.querySelector<HTMLTextAreaElement>('textarea')!, '客户确认新交期');
+    await settleEffects();
+    const submit = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    expect(submit.disabled).toBe(false);
+    for (const dark of [false, true]) {
+      document.documentElement.classList.toggle('dark', dark);
+      await settleEffects();
+      await Promise.all(host.getAnimations({ subtree: true }).map((animation) => animation.finished));
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
+      if (width < 640) {
+        expect(host.querySelector('input[type="date"]')!.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      }
+      expect(await commands.checkShellAccessibility('#date-change-fixture')).toEqual([]);
+    }
+    submit.click();
+    await settleEffects();
+    expect(createActionMock).toHaveBeenCalledWith(null, expect.objectContaining({ promisedDate: '2026-09-20', items: [] }));
+  } finally {
+    document.documentElement.classList.remove('dark');
     flushSync(() => root.unmount());
     host.remove();
   }

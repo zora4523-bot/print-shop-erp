@@ -301,12 +301,31 @@ export async function getWorkerOrderDetail(
           unit: true,
           status: true,
           plannedQty: true,
+          carriedCompletedQty: true,
           sources: {
             orderBy: { createdAt: 'asc' },
             select: {
               sourceQty: true,
               orderItemId: true,
               packagingGroupId: true,
+              orderItem: {
+                select: {
+                  sequence: true, name: true,
+                  frontFoilColors: true, backFoilColors: true,
+                },
+              },
+              packagingGroup: {
+                select: {
+                  sequence: true, name: true,
+                  lines: {
+                    orderBy: { orderItem: { sequence: 'asc' } },
+                    select: {
+                      unitsPerBag: true,
+                      orderItem: { select: { sequence: true, name: true } },
+                    },
+                  },
+                },
+              },
             },
           },
           reports: {
@@ -330,6 +349,7 @@ export async function getWorkerOrderDetail(
           craftName: true,
           status: true,
           plannedQty: true,
+          carriedCompletedQty: true,
           orderItemId: true,
           orderItem: {
             select: { sequence: true, name: true },
@@ -349,10 +369,12 @@ export async function getWorkerOrderDetail(
   });
   if (!order) return null;
   const productionOperations = order.productionOperations.filter(
-    (operation) => operation.workOrderVersion === order.workOrderVersion,
+    (operation) => operation.workOrderVersion === order.workOrderVersion &&
+      operation.status !== ProductionOperationStatus.CANCELLED,
   );
   const productionProgressSteps = order.productionProgressSteps.filter(
-    (step) => step.workOrderVersion === order.workOrderVersion,
+    (step) => step.workOrderVersion === order.workOrderVersion &&
+      step.status !== ProductionOperationStatus.CANCELLED,
   );
   if (
     productionOperations.length === 0 &&

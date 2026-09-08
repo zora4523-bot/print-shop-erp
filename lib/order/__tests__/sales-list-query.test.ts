@@ -50,6 +50,13 @@ beforeEach(() => {
 });
 
 describe('sales list query boundary', () => {
+  it('已结算工单纳入销售完结队列，仍限制为本人提交', () => {
+    const query = sanitizeSalesOrderListQuery(parseOrderListQuery({ view: 'done' }).query);
+    expect(buildSalesOrderWhere(actor, query, [])).toEqual({ AND: [
+      { submitterId: actor.id }, { status: { in: [OrderStatus.SETTLED, OrderStatus.FINISHED, OrderStatus.CANCELLED] } },
+    ] });
+  });
+
   it('keeps only sales search, pagination and supported business views', () => {
     const requested = parseOrderListQuery({
       q: '福明',
@@ -82,13 +89,10 @@ describe('sales list query boundary', () => {
         { submitterId: 'sales-1' },
         {
           status: {
-            in: [
-              OrderStatus.SUBMITTED,
-              OrderStatus.SCHEDULING,
-              OrderStatus.IN_PRODUCTION,
-            ],
+            in: [OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED, OrderStatus.CONFIRMED, OrderStatus.ON_HOLD, OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SUBMITTED, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION, OrderStatus.COMPLETED],
           },
           OR: [
+            { status: { in: [OrderStatus.REJECTED, OrderStatus.ON_HOLD] } },
             {
               pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
             },
@@ -106,12 +110,7 @@ describe('sales list query boundary', () => {
         { submitterId: 'sales-1' },
         {
           status: {
-            in: [
-              OrderStatus.SUBMITTED,
-              OrderStatus.SCHEDULING,
-              OrderStatus.IN_PRODUCTION,
-              OrderStatus.COMPLETED,
-            ],
+            in: [OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED, OrderStatus.CONFIRMED, OrderStatus.ON_HOLD, OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SUBMITTED, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION, OrderStatus.COMPLETED],
           },
         },
       ],
@@ -225,7 +224,7 @@ describe('sales list query boundary', () => {
     dbMock.orderChangeRequest.findMany.mockResolvedValue([
       { orderId: 'retry-pending', status: OrderChangeRequestStatus.PENDING },
       { orderId: 'retry-pending', status: OrderChangeRequestStatus.REJECTED },
-      { orderId: 'still-rejected', status: OrderChangeRequestStatus.REJECTED },
+      { orderId: 'still-rejected', status: OrderChangeRequestStatus.DENIED },
       { orderId: 'later-approved', status: OrderChangeRequestStatus.APPROVED },
       { orderId: 'later-approved', status: OrderChangeRequestStatus.REJECTED },
     ]);
@@ -242,11 +241,7 @@ describe('sales list query boundary', () => {
                 { submitterId: 'sales-1' },
                 {
                   status: {
-                    in: [
-                      OrderStatus.SUBMITTED,
-                      OrderStatus.SCHEDULING,
-                      OrderStatus.IN_PRODUCTION,
-                    ],
+                    in: [OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED, OrderStatus.CONFIRMED, OrderStatus.ON_HOLD, OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SUBMITTED, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION, OrderStatus.COMPLETED],
                   },
                 },
               ],

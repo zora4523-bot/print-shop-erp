@@ -1,0 +1,6 @@
+interface:
+  display_name: "ERP 任务提交"
+  short_description: "任务修改完成并验证后自动提交，仅包含本任务改动并保留其他工作"
+  default_prompt: "使用 $erp-task-commit 核对当前任务的改动边界与验证结果，完成后创建本地 commit。"
+policy:
+  allow_implicit_invocation: true

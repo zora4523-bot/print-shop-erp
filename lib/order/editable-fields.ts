@@ -1,4 +1,4 @@
-import { OrderStatus } from '../../generated/prisma/enums';
+import { OrderStatus, Role } from '../../generated/prisma/enums';
 
 // Which subset of top-level Order fields is editable at each status,
 // per SPEC §3.6:
@@ -8,9 +8,7 @@ import { OrderStatus } from '../../generated/prisma/enums';
 //   COMPLETED / SHIPPED / FINISHED → 不可改 (NONE)
 //   CANCELLED                      → 不可改 (NONE) — terminal
 //
-// E-lean scope (2026-04-23 decision): editing is top-level Order fields
-// only. Item add / remove / edit is deferred to a P1 ticket; for now
-// users delete-and-recreate.
+// 款式变更走独立申请与审批，不随基本信息保存直接覆盖生产事实。
 
 export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY' | 'NONE';
 
@@ -20,6 +18,7 @@ export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY' | 'NONE';
 export const FULL_EDITABLE_FIELDS = [
   'customName',
   'customerRef',
+  'customerPartyId',
   'receiverName',
   'receiverPhone',
   'receiverAddress',
@@ -90,5 +89,18 @@ export function canEditOrderSfCollect(status: OrderStatus): boolean {
     status !== OrderStatus.SETTLED &&
     status !== OrderStatus.FINISHED &&
     status !== OrderStatus.CANCELLED
+  );
+}
+
+export const ORDER_MODIFIABLE_STATUSES: readonly OrderStatus[] = [
+  OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED, OrderStatus.SUBMITTED,
+  OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION, OrderStatus.CONFIRMED,
+  OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING,
+  OrderStatus.ON_HOLD,
+];
+
+export function canRequestOrderModification(actor: { id: string; role: Role }, order: { submitterId: string; status: OrderStatus }, hasPendingRequest = false) {
+  return !hasPendingRequest && ORDER_MODIFIABLE_STATUSES.includes(order.status) && (
+    actor.role === Role.ADMIN || ((actor.role === Role.SALES || actor.role === Role.CUSTOMER_SERVICE) && actor.id === order.submitterId)
   );
 }

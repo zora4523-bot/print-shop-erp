@@ -43,6 +43,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   adjustments: '加价规则',
   tiers: '价格阶梯',
   notifications: '推送配置',
+  attention: '关注事项',
   pigsty: 'Pigsty 运维',
   salary: '薪资',
   daily: '计件工资',
@@ -153,6 +154,7 @@ export function AdminBreadcrumb() {
           const isLast = i === segments.length - 1;
           const href = '/' + segments.slice(0, i + 1).join('/');
           const label =
+            (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
             BREADCRUMB_PATH_LABELS[href] ??
             resolveSegmentLabel(
               seg,
@@ -172,7 +174,7 @@ export function AdminBreadcrumb() {
                   isLast
                     ? 'min-w-0 flex-1'
                     : i === 0
-                      ? 'hidden shrink-0 lg:inline-flex'
+                      ? (segments[0] === 'orders' ? 'shrink-0' : 'hidden shrink-0 lg:inline-flex')
                       : 'hidden shrink-0 2xl:inline-flex'
                 }
               >
@@ -208,7 +210,7 @@ export function AdminBreadcrumb() {
                 <BreadcrumbSeparator
                   className={
                     i === 0
-                      ? 'hidden shrink-0 lg:block'
+                      ? (segments[0] === 'orders' ? 'shrink-0' : 'hidden shrink-0 lg:block')
                       : 'hidden shrink-0 2xl:block'
                   }
                 />

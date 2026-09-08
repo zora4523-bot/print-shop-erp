@@ -44,6 +44,10 @@ export async function handleOrderPdfJob(
     payload.expectedWorkOrderVersion,
   );
   const baseUrl = requiredString(payload.baseUrl);
+  // Retired task-sheet jobs must not be rendered or served as production orders.
+  if (payload.mode !== undefined && payload.mode !== 'order') {
+    throw new InvalidOrderPdfJobPayloadError();
+  }
   const actor = asRecord(payload.actor);
   const actorId = requiredString(actor.id);
   const role = requiredString(actor.role);
@@ -146,7 +150,8 @@ function matchesExpectedPdfJob(
     return (
       payload.orderId === expected.orderId &&
       actor.id === expected.actorId &&
-      payload.expectedWorkOrderVersion === expected.workOrderVersion
+      payload.expectedWorkOrderVersion === expected.workOrderVersion &&
+      (payload.mode === undefined || payload.mode === 'order')
     );
   } catch {
     return false;

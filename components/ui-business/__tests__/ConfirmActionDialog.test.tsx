@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Button } from '@/components/ui/button';
 import {
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   confirmationCanSubmit,
 } from '@/components/ui-business';
 
@@ -21,14 +21,10 @@ describe('ConfirmActionDialog', () => {
 
   it('keeps the trigger in the accessible alert-dialog contract', () => {
     const html = renderToStaticMarkup(
-      <ConfirmActionDialog
-        level="L2"
-        trigger={<Button variant="destructive">删除</Button>}
-        title="删除通知群"
-        description="请先核对影响。"
-        impactItems={['删除后不能恢复', '已发送日志仍会保留']}
-        confirmLabel="确认删除"
-      />,
+      <ConfirmActionController level="L2"
+        trigger={<Button variant="destructive">删除</Button>}>
+        <ConfirmActionDialog action="删除通知群" changes={[]} consequences={['删除后不能恢复', '已发送日志仍会保留']} confirmText="确认删除" />
+      </ConfirmActionController>,
     );
 
     expect(html).toContain('data-slot="alert-dialog-trigger"');
@@ -57,3 +53,19 @@ describe('ConfirmActionDialog', () => {
     expect(confirmDialogSource).toContain("setReason('');");
   });
 });
+
+it('rejects arbitrary controller content at runtime', () => {
+  expect(() => renderToStaticMarkup(
+    <ConfirmActionController level="L2"><p>自由段落</p></ConfirmActionController>,
+  )).toThrow('accepts one ConfirmActionDialog only');
+});
+
+// Compile-time contract: presentation cannot regain free-form prose slots.
+const facts = { action: '删除', changes: [], consequences: ['删除后不可恢复'], confirmText: '删除' };
+// @ts-expect-error description is deliberately not a presentation prop
+const rejectedDescription = <ConfirmActionDialog {...facts} description="机制说明" />;
+// @ts-expect-error notice is deliberately not a presentation prop
+const rejectedNotice = <ConfirmActionDialog {...facts} notice="重复后果" />;
+// @ts-expect-error arbitrary children are deliberately not a presentation prop
+const rejectedChildren = <ConfirmActionDialog {...facts}><p>自由段落</p></ConfirmActionDialog>;
+void [rejectedDescription, rejectedNotice, rejectedChildren];

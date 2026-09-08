@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { deleteOrderItemDesignAction } from '@/actions/design-upload';
@@ -31,6 +31,7 @@ type Props = {
   orderItemId: string;
   designs: DesignItem[];
   canEdit: boolean;
+  onBusyChange?: (busy: boolean) => void;
 };
 
 function formatSize(size: string): string {
@@ -45,66 +46,90 @@ export function DesignUploadPanel({
   orderItemId,
   designs,
   canEdit,
+  onBusyChange,
 }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const mutationInFlight = useRef(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{
     tone: 'success' | 'error';
     text: string;
   } | null>(null);
   const [deleting, startDelete] = useTransition();
+  useEffect(() => {
+    onBusyChange?.(busy || deleting);
+    return () => onBusyChange?.(false);
+  }, [busy, deleting, onBusyChange]);
+  const operationPending = busy || deleting;
   const imageDesigns = designs.filter((design) => design.fileType === 'IMAGE');
   const cdrDesigns = designs.filter((design) => design.fileType === 'CDR');
 
   async function handleFiles(files: Iterable<File>) {
+    if (!canEdit || mutationInFlight.current) return;
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
+    mutationInFlight.current = true;
     setBusy(true);
     setMessage(null);
     const failures: string[] = [];
     let uploaded = 0;
-
-    for (const file of candidates) {
-      const prepared = prepareDesignFile(file);
-      if (!prepared.ok) {
-        failures.push(`${file.name || '剪贴板图片'}：${prepared.message}`);
-        continue;
+    try {
+      for (const file of candidates) {
+        const prepared = prepareDesignFile(file);
+        if (!prepared.ok) {
+          failures.push(`${file.name || '剪贴板图片'}：${prepared.message}`);
+          continue;
+        }
+        const result = await uploadOrderItemDesignFile({
+          orderId,
+          orderItemId,
+          prepared: prepared.value,
+        });
+        if (result.ok) uploaded += 1;
+        else failures.push(`${prepared.value.file.name}：${result.message}`);
       }
-      const result = await uploadOrderItemDesignFile({
-        orderId,
-        orderItemId,
-        prepared: prepared.value,
-      });
-      if (result.ok) {
-        uploaded += 1;
-      } else {
-        failures.push(`${prepared.value.file.name}：${result.message}`);
-      }
-    }
-
-    setBusy(false);
-    if (inputRef.current) inputRef.current.value = '';
-    if (failures.length > 0) {
+      setMessage(
+        failures.length > 0
+          ? {
+              tone: 'error',
+              text: `${uploaded > 0 ? `已上传 ${uploaded} 个；` : ''}${failures.join('；')}`,
+            }
+          : { tone: 'success', text: `已上传 ${uploaded} 个设计文件` },
+      );
+    } catch {
       setMessage({
         tone: 'error',
-        text: `${uploaded > 0 ? `已上传 ${uploaded} 个；` : ''}${failures.join('；')}`,
+        text: '上传结果未确认，请刷新核对文件后再操作。',
       });
-    } else {
-      setMessage({ tone: 'success', text: `已上传 ${uploaded} 个设计文件` });
+    } finally {
+      mutationInFlight.current = false;
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = '';
+      if (uploaded > 0) router.refresh();
     }
-    if (uploaded > 0) router.refresh();
   }
 
   function handleDelete(designId: string) {
+    if (!canEdit || mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setMessage(null);
     startDelete(async () => {
-      const r = await deleteOrderItemDesignAction({ designId });
-      if (!r.ok) {
-        setMessage({ tone: 'error', text: r.message });
-        return;
+      try {
+        const result = await deleteOrderItemDesignAction({ designId });
+        if (!result.ok) {
+          setMessage({ tone: 'error', text: result.message });
+          return;
+        }
+        router.refresh();
+      } catch {
+        setMessage({
+          tone: 'error',
+          text: '删除结果未确认，请刷新核对文件后再操作。',
+        });
+      } finally {
+        mutationInFlight.current = false;
       }
-      router.refresh();
     });
   }
 
@@ -118,6 +143,8 @@ export function DesignUploadPanel({
           <div className="flex items-center gap-2">
             <input
               ref={inputRef}
+              aria-label="上传设计文件"
+              disabled={operationPending}
               type="file"
               accept=".jpg,.jpeg,.png,.webp,.cdr"
               multiple
@@ -130,7 +157,7 @@ export function DesignUploadPanel({
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy}
+              disabled={operationPending}
               onClick={() => inputRef.current?.click()}
             >
               {busy ? '上传中…' : '选择设计文件'}
@@ -140,13 +167,13 @@ export function DesignUploadPanel({
       </div>
       {canEdit ? (
         <div
-          tabIndex={busy ? -1 : 0}
+          tabIndex={operationPending ? -1 : 0}
           role="button"
-          aria-disabled={busy}
+          aria-disabled={operationPending}
           aria-label="粘贴或拖入设计图"
           className="rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-4 text-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           onPaste={(event) => {
-            if (busy) return;
+            if (operationPending) return;
             const files = Array.from(event.clipboardData.files).filter((file) =>
               file.type.startsWith('image/'),
             );
@@ -155,15 +182,18 @@ export function DesignUploadPanel({
             void handleFiles(files);
           }}
           onDragOver={(event) => {
-            if (!busy) event.preventDefault();
+            if (!operationPending) event.preventDefault();
           }}
           onDrop={(event) => {
-            if (busy) return;
+            if (operationPending) return;
             event.preventDefault();
             void handleFiles(Array.from(event.dataTransfer.files));
           }}
           onKeyDown={(event) => {
-            if (!busy && (event.key === 'Enter' || event.key === ' ')) {
+            if (
+              !operationPending &&
+              (event.key === 'Enter' || event.key === ' ')
+            ) {
               event.preventDefault();
               inputRef.current?.click();
             }
@@ -232,7 +262,7 @@ export function DesignUploadPanel({
                           variant="ghost"
                           size="sm"
                           className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          disabled={deleting}
+                          disabled={operationPending}
                           onClick={() => handleDelete(design.id)}
                         >
                           删除
@@ -276,7 +306,7 @@ export function DesignUploadPanel({
                         variant="ghost"
                         size="sm"
                         className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        disabled={deleting}
+                        disabled={operationPending}
                         onClick={() => handleDelete(design.id)}
                       >
                         删除

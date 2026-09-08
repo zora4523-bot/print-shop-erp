@@ -52,6 +52,7 @@ describe('getPendingShipments', () => {
     const r = await getPendingShipments();
     expect(r.rows).toEqual([]);
     expect(r.hasMore).toBe(false);
+    expect(r).toMatchObject({ total: 0, page: 1, pageSize: 10, pageCount: 1 });
   });
 
   it('按 completedAt 查 PACKING / legacy COMPLETED，排除未收口与暂停工单', async () => {
@@ -66,6 +67,7 @@ describe('getPendingShipments', () => {
     expect(args.orderBy).toEqual([
       { isUrgent: 'desc' },
       { completedAt: 'asc' },
+      { orderNo: 'asc' },
     ]);
   });
 
@@ -110,8 +112,37 @@ describe('getPendingShipments', () => {
       customerRef: 'CUST-A',
       isUrgent: true,
       completedAt,
+      promisedDate: null,
       submitterDisplayName: '小王',
     });
+  });
+
+  it('总数与列表共用状态条件，承诺交期保留数据库日历日', async () => {
+    const promisedDate = new Date('2026-04-28T00:00:00Z');
+    dbMock.order.findMany.mockResolvedValue([
+      { ...makePendingRow('o1', 'E2E-1', new Date(), false, '小王'), promisedDate },
+    ]);
+    dbMock.order.count.mockResolvedValue(23);
+    const result = await getPendingShipments(undefined, 5);
+    expect(result.total).toBe(23);
+    expect(result.rows[0].promisedDate).toEqual(promisedDate);
+    expect(dbMock.order.count.mock.calls[0][0].where).toBe(
+      dbMock.order.findMany.mock.calls[0][0].where,
+    );
+  });
+
+  it('完整队列服务器分页，越界页回到最后一页且保留 hasMore 探针', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    dbMock.order.count.mockResolvedValue(23);
+    const result = await getPendingShipments(undefined, 10, 99);
+    expect(result).toMatchObject({ total: 23, page: 3, pageSize: 10, pageCount: 3 });
+    expect(dbMock.order.findMany.mock.calls[0][0]).toMatchObject({ skip: 20, take: 11 });
+  });
+
+  it('总数查询失败不得降级成空队列或发起行查询', async () => {
+    dbMock.order.count.mockRejectedValue(new Error('read failed'));
+    await expect(getPendingShipments()).rejects.toThrow('read failed');
+    expect(dbMock.order.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -227,6 +258,15 @@ describe('getDueOrders', () => {
       { orderNo: 'asc' },
     ]);
   });
+
+  it('完整列表分页复用交期筛选，越界页按总数收口', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    dbMock.order.count.mockResolvedValue(41);
+    const result = await getDueOrders(NOW, 20, 99);
+    expect(result).toMatchObject({ total: 41, page: 3, pageSize: 20, pageCount: 3 });
+    expect(dbMock.order.findMany.mock.calls[0][0]).toMatchObject({ skip: 40, take: 20 });
+    expect(result.promisedThroughYmd).toBe('2026-07-10');
+  });
 });
 
 describe('getOverdueOutsourcing', () => {
@@ -245,7 +285,8 @@ describe('getOverdueOutsourcing', () => {
       '2026-04-25T16:00:00.000Z',
     );
     expect(args.where.NOT).toEqual({ expectedDate: null });
-    expect(args.orderBy).toEqual({ expectedDate: 'asc' });
+    // 完整关注页会分页，同一预计交付日用 id 固定次排序。
+    expect(args.orderBy).toEqual([{ expectedDate: 'asc' }, { id: 'asc' }]);
   });
 
   it('阈值来自 Setting：配 3 天时截止点往前挪 2 天', async () => {
@@ -360,6 +401,8 @@ describe('getEndingPeriods', () => {
     await getEndingPeriods(new Date('2026-04-26T08:00:00Z'));
     const args = dbMock.salaryPeriod.findMany.mock.calls[0][0];
     expect(args.where.status).toBe('IN_PROGRESS');
+    // 同一天到期的周期跨页不能因数据库返回顺序变化而重复或遗漏。
+    expect(args.orderBy).toEqual([{ periodEnd: 'asc' }, { id: 'asc' }]);
     // todayStart = UTC 2026-04-25T16:00
     expect((args.where.periodEnd.gte as Date).toISOString()).toBe(
       '2026-04-25T16:00:00.000Z',
@@ -512,6 +555,7 @@ function makePendingRow(
     customerRef,
     isUrgent,
     completedAt,
+    promisedDate: null,
     submitter: { displayName: submitterName },
   };
 }
@@ -531,7 +575,7 @@ describe('getRecentOverReports', () => {
     await getRecentOverReports(NOW);
     const args = dbMock.orderLog.findMany.mock.calls[0][0];
     expect(args.where.action).toBe('TASK_OVER_REPORT');
-    expect(args.orderBy).toEqual({ createdAt: 'desc' });
+    expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
     // 窗口左界 = 上海 2026-08-15 00:00 = UTC 2026-08-14T16:00Z
     expect((args.where.createdAt.gte as Date).toISOString()).toBe(
       '2026-08-14T16:00:00.000Z',
@@ -553,6 +597,7 @@ describe('getRecentOverReports', () => {
         orderId: 'order-1',
         remark: '款式 A (#1)：[超计划报工] 2026-08-21 计划 5000 / 合计 6200',
         createdAt: new Date('2026-08-21T01:00:00.000Z'),
+        changedFields: null,
         order: { orderNo: 'GD-260821-001' },
         operator: { displayName: '张师傅' },
       },
@@ -566,6 +611,7 @@ describe('getRecentOverReports', () => {
         orderId: 'order-1',
         orderNo: 'GD-260821-001',
         operatorDisplayName: '张师傅',
+        quantities: null,
         remark: '款式 A (#1)：[超计划报工] 2026-08-21 计划 5000 / 合计 6200',
         createdAt: new Date('2026-08-21T01:00:00.000Z'),
       },
@@ -580,4 +626,58 @@ describe('getRecentOverReports', () => {
     // count 不带 take
     expect(dbMock.orderLog.count.mock.calls[0][0].take).toBeUndefined();
   });
+
+  it('完整审计列表按实际总数分页，越界回到末页', async () => {
+    dbMock.orderLog.count.mockResolvedValue(27);
+    const result = await getRecentOverReports(NOW, 10, 99);
+    expect(result).toMatchObject({ total: 27, page: 3, pageSize: 10, pageCount: 3 });
+    expect(dbMock.orderLog.findMany.mock.calls[0][0]).toMatchObject({ skip: 20, take: 10 });
+  });
+
+  it('实际数量只来自完整 changedFields.after 审计快照，允许不良和返工为零', async () => {
+    dbMock.orderLog.findMany.mockResolvedValue([
+      makeOverReportLog({
+        completedQty: { before: 0, after: 6200 },
+        defectQty: { before: 0, after: 0 },
+        reworkQty: { before: 0, after: 0 },
+      }),
+    ]);
+    const result = await getRecentOverReports(NOW);
+    expect(result.rows[0].quantities).toEqual({
+      completedQty: 6200, defectQty: 0, reworkQty: 0, totalQty: 6200,
+    });
+    expect(dbMock.orderLog.findMany.mock.calls[0][0].select.changedFields).toBe(true);
+  });
+
+  it.each([
+    null,
+    '计划 5000 / 合计 6200',
+    [],
+    {},
+    { completedQty: { after: 6200 }, defectQty: { after: 0 } },
+    { completedQty: { after: '6200' }, defectQty: { after: 0 }, reworkQty: { after: 0 } },
+    { completedQty: { after: -1 }, defectQty: { after: 0 }, reworkQty: { after: 0 } },
+    { completedQty: { after: 1.5 }, defectQty: { after: 0 }, reworkQty: { after: 0 } },
+    { completedQty: { after: Number.POSITIVE_INFINITY }, defectQty: { after: 0 }, reworkQty: { after: 0 } },
+    { completedQty: { after: Number.MAX_SAFE_INTEGER + 1 }, defectQty: { after: 0 }, reworkQty: { after: 0 } },
+    { completedQty: { after: Number.MAX_SAFE_INTEGER }, defectQty: { after: 1 }, reworkQty: { after: 0 } },
+    { completedQty: [6200], defectQty: { after: 0 }, reworkQty: { after: 0 } },
+  ])('缺失或非法审计数量返回 null，不从 remark 猜测：%j', async (changedFields) => {
+    dbMock.orderLog.findMany.mockResolvedValue([makeOverReportLog(changedFields)]);
+    const result = await getRecentOverReports(NOW);
+    expect(result.rows[0].quantities).toBeNull();
+    expect(result.rows[0].remark).toContain('计划 5000 / 合计 6200');
+  });
 });
+
+function makeOverReportLog(changedFields: unknown) {
+  return {
+    id: 'log-1',
+    orderId: 'order-1',
+    remark: '款式 A (#1)：[超计划报工] 2026-08-21 计划 5000 / 合计 6200',
+    changedFields,
+    createdAt: new Date('2026-08-21T01:00:00.000Z'),
+    order: { orderNo: 'GD-260821-001' },
+    operator: { displayName: '张师傅' },
+  };
+}

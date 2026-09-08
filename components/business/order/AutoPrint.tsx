@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { paginatePrintDocument } from '@/lib/order/print-pagination';
 
 export const PRINT_READY_EVENT = 'print-ready';
 export const PRINT_READY_TIMEOUT_MS = 12_000;
@@ -26,9 +27,12 @@ export function preparePrintDocument(
   documentTarget: Document,
   windowTarget: Window,
 ): () => void {
-  if (documentTarget.documentElement.dataset.printReady === 'true') {
+  const printRoot = documentTarget.querySelector<HTMLElement>('.work-order-document');
+  if (printRoot?.dataset.printPrepared === 'true') {
     return () => undefined;
   }
+  documentTarget.documentElement.dataset.printReady = 'false';
+  delete documentTarget.documentElement.dataset.printPagination;
 
   let cancelled = false;
   const cleanups: Array<() => void> = [];
@@ -88,7 +92,13 @@ export function preparePrintDocument(
           warning.textContent = message;
         });
     }
+    paginatePrintDocument(documentTarget);
     documentTarget.documentElement.dataset.printReady = 'true';
+    documentTarget.dispatchEvent(new Event(PRINT_READY_EVENT));
+    windowTarget.dispatchEvent(new Event(PRINT_READY_EVENT));
+  }).catch(() => {
+    if (cancelled) return;
+    documentTarget.documentElement.dataset.printPagination = 'overflow';
     documentTarget.dispatchEvent(new Event(PRINT_READY_EVENT));
     windowTarget.dispatchEvent(new Event(PRINT_READY_EVENT));
   });
@@ -113,14 +123,15 @@ export function formatArtworkFailureWarning(figures: Iterable<string>): string {
 
 /**
  * Wait until the standalone print template says that fonts and images have
- * settled. The timeout is deliberately a fallback, not an error: a broken
- * readiness script must not leave the browser's print tab hanging forever.
+ * settled and A4 geometry has been verified. A timeout only prints a document
+ * whose pagination already succeeded; missing/broken scripts fail closed.
  */
 export function waitForPrintReady(
   documentTarget: PrintReadyDocument,
   windowTarget: PrintReadyWindow,
   onReady: () => void,
   timeoutMs = PRINT_READY_TIMEOUT_MS,
+  onError?: () => void,
 ): () => void {
   let settled = false;
   let readyHandle: number | null = null;
@@ -137,7 +148,8 @@ export function waitForPrintReady(
     if (settled) return;
     settled = true;
     cleanup();
-    onReady();
+    if (documentTarget.documentElement.dataset.printPagination === 'ready') onReady();
+    else onError?.();
   };
 
   // Listen on both targets so the standalone template can dispatch the
@@ -167,10 +179,10 @@ export function waitForPrintReady(
 // Gating on the flag keeps the two callers from colliding.
 export function AutoPrint({ enabled }: { enabled: boolean }) {
   const printedRef = useRef(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const stopPreparing = preparePrintDocument(document, window);
-    if (!enabled || printedRef.current) return stopPreparing;
     const onAfterPrint = () => {
       // Best-effort tab close. Browsers only honor window.close() on
       // windows that scripts opened, so fall back to leaving the tab
@@ -181,12 +193,12 @@ export function AutoPrint({ enabled }: { enabled: boolean }) {
         // no-op
       }
     };
-    window.addEventListener('afterprint', onAfterPrint);
+    if (enabled) window.addEventListener('afterprint', onAfterPrint);
     const stopWaiting = waitForPrintReady(document, window, () => {
-      if (printedRef.current) return;
+      if (!enabled || printedRef.current) return;
       printedRef.current = true;
       window.print();
-    });
+    }, PRINT_READY_TIMEOUT_MS, () => setFailed(true));
 
     return () => {
       stopPreparing();
@@ -194,5 +206,8 @@ export function AutoPrint({ enabled }: { enabled: boolean }) {
       window.removeEventListener('afterprint', onAfterPrint);
     };
   }, [enabled]);
-  return null;
+  return failed ? <p role="alert" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
+    padding: '1rem', background: '#fff', color: '#a8121a', textAlign: 'center' }}>
+    打印页面未能完成排版，已停止自动打印。请刷新页面后重试。
+  </p> : null;
 }

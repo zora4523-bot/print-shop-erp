@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   FormErrorSummary,
   FormMessage,
   formMessageA11yProps,
@@ -540,29 +540,25 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
               ? '正在提交盘点过账…'
               : `核对并提交盘点过账（${submittedItems.length} 条）`}
           </Button>
-          <ConfirmActionDialog
-            level="L3"
+          <ConfirmActionController level="L3"
             reasonLabel="盘点过账原因"
             reasonPlaceholder="例如：月末例行盘点，复核库位实物后调整"
             open={confirmationOpen}
             onOpenChange={handleConfirmationOpenChange}
             focusReturnRef={confirmationTriggerRef}
             disabled={actionPending || submittedItems.length === 0}
-            title={`确认过账 ${submittedItems.length} 个库位？`}
-            description="盘点过账会直接改变库存余额并写入不可覆盖的盘点单与库存流水。请核对差异并填写业务原因。"
-            impactItems={
+            onConfirm={submitFromConfirmation}>
+            <ConfirmActionDialog action={`确认过账 ${submittedItems.length} 个库位？`} changes={[]} consequences={
               submittedItems.length === 0
                 ? []
                 : [
-                    `提交范围：${submittedItems.length} 个库位；有差异 ${totals.changed} 个。`,
-                    `页面数值汇总：盘盈 ${totals.surplus}、盘亏 ${totals.shortage}；不同物料单位不可合并比较，以表格逐行差异为准。`,
-                    '无冲突的行会更新库位库存并写入盘点流水；实盘数为 0 表示该库位全部盘亏。',
-                    '若部分库位的账面数在盘点期间发生变化，那些行不会过账，但其他无冲突行仍可能成功。',
-                  ]
-            }
-            confirmLabel="填写原因并确认过账"
-            onConfirm={submitFromConfirmation}
-          />
+                  `提交范围：${submittedItems.length} 个库位；有差异 ${totals.changed} 个。`,
+                  `页面数值汇总：盘盈 ${totals.surplus}、盘亏 ${totals.shortage}；不同物料单位不可合并比较，以表格逐行差异为准。`,
+                  '无冲突的行会更新库位库存并写入盘点流水；实盘数为 0 表示该库位全部盘亏。',
+                  '若部分库位的账面数在盘点期间发生变化，那些行不会过账，但其他无冲突行仍可能成功。',
+                ]
+            } confirmText="确认过账" />
+          </ConfirmActionController>
           {submittedItems.length === 0 ? (
             <p className="mt-2 text-xs text-muted-foreground">
               请至少录入一个库位的实盘数。

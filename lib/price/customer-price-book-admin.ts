@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
+import { fixedCustomTierIssue } from './fixed-custom-tiers';
 import {
   Prisma,
   type CustomerPriceCalculationType,
@@ -2494,6 +2495,16 @@ async function prepareCustomerPriceSectionDraft(
   }
 
   const submittedById = new Map(input.rows.map((row) => [row.ruleId, row]));
+  if (input.section === 'tiers') {
+    const groups = new Map<string, typeof input.rows>();
+    for (const rule of [...sectionRules].sort((a, b) => (a.minQty ?? 0) - (b.minQty ?? 0))) {
+      const key = rule.productId ?? '';
+      const rows = groups.get(key) ?? [];
+      groups.set(key, [...rows, submittedById.get(rule.id)!]);
+    }
+    const issue = fixedCustomTierIssue([...groups.values()]);
+    if (issue) throw new CustomerPriceBookAdminError(issue);
+  }
   return {
     input,
     book,

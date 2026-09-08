@@ -68,6 +68,10 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     }
     opts.signal?.throwIfAborted();
     await page.emulateMediaType('print');
+    const pagination = await page.evaluate(() => document.querySelector('.work-order-document')
+      ? document.documentElement.dataset.printPagination ?? 'unprepared'
+      : null);
+    if (pagination !== null && pagination !== 'ready') throw new PrintLayoutOverflowError();
     opts.signal?.throwIfAborted();
     const pdf = await page.pdf({
       ...opts.pdf,
@@ -90,5 +94,12 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     if (!opts.browser) {
       await browser.close();
     }
+  }
+}
+
+export class PrintLayoutOverflowError extends Error {
+  constructor() {
+    super('打印内容超出 A4 页面，请检查过长的单条内容后重新生成');
+    this.name = 'PrintLayoutOverflowError';
   }
 }

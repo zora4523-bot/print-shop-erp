@@ -104,7 +104,7 @@ function ChartCard({
 }) {
   return (
     <section data-slot={slot} className="rounded-xl border bg-card shadow-sm">
-      <header className="flex items-baseline justify-between gap-2 border-b px-4 py-3">
+      <header className="flex flex-col items-start justify-between gap-1 border-b px-4 py-3 sm:flex-row sm:items-baseline sm:gap-2">
         <h2 className="text-base font-semibold">{title}</h2>
         {description ? (
           <p className="text-xs text-muted-foreground">{description}</p>

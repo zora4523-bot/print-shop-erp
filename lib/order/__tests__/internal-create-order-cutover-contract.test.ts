@@ -33,24 +33,19 @@ describe('internal create engine cutover source contract', () => {
     );
   });
 
-  it('activates confirmed chargeable submissions and returns the materialized status', () => {
+  it('prepares submissions without automatic production release', () => {
     const pricingRead = orderSource.indexOf('const currentPricing =');
     const activation = orderSource.indexOf(
-      'activateProductionOperationsInTx(',
+      'prepareOrderForProductionInTx(',
       pricingRead,
     );
     const returnStatus = orderSource.indexOf(
-      'status: activated.orderStatus',
+      'status: prepared.status',
       activation,
     );
     expect(pricingRead).toBeGreaterThan(-1);
     expect(activation).toBeGreaterThan(pricingRead);
     expect(returnStatus).toBeGreaterThan(activation);
-    expect(orderSource.slice(pricingRead, activation)).toContain(
-      'ORDER_PRICING_STATUS.AUTO_CONFIRMED',
-    );
-    expect(orderSource.slice(pricingRead, activation)).toContain(
-      'OrderBillingMode.CHARGE',
-    );
+    expect(orderSource).not.toContain('await activateProductionOperationsInTx(');
   });
 });

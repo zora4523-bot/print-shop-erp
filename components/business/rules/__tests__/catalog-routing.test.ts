@@ -137,7 +137,7 @@ describe('rule-center feature routing', () => {
     expect(bomForm).not.toContain('/owner/product-categories/new');
   });
 
-  it('旧物料字典排除纸张，首页报价规格直达规则中心', () => {
+  it('旧物料字典排除纸张，工作台移除低频规则配置入口', () => {
     const materialsPage = readFileSync(
       join(ROOT, 'app/(admin)/owner/materials/page.tsx'),
       'utf8',
@@ -165,7 +165,7 @@ describe('rule-center feature routing', () => {
     expect(materialDetailPage).toContain(
       'redirectBase: RULE_CENTER_HREFS.papers',
     );
-    expect(ownerDashboard).toContain('href={RULE_CENTER_HREFS.stockSkus}');
+    expect(ownerDashboard).not.toContain('label="建单产品"');
     expect(ownerDashboard).not.toContain('href="/owner/products"');
   });
 });

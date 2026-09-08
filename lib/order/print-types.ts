@@ -20,9 +20,6 @@ export type PrintTask = {
   completedQty: number;
   defectQty: number;
   completedAt?: Date | null;
-  // Pre-rendered absolute-URL QR. Keeping this in the DTO makes the browser
-  // print and both PDF paths consume exactly the same task destination.
-  taskQrSvg: string;
 };
 
 // Current-generation production rows are separate from legacy
@@ -34,12 +31,14 @@ export type PrintProductionStep = {
   source: 'OPERATION' | 'PROGRESS';
   itemSequence?: number | null;
   itemName?: string | null;
+  // Distinguishes operations spanning packaging groups or multiple items.
+  scopeLabel?: string | null;
+  quantityUnit?: '个' | '袋';
   craftName: string;
   plannedQty: number;
   completedQty: number;
   defectQty: number;
   completedAt?: Date | null;
-  taskQrSvg: string;
 };
 
 export type PrintFoilTechnique =

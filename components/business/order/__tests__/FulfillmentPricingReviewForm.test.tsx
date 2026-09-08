@@ -14,7 +14,7 @@ describe('fulfillment pricing review surface', () => {
     />);
     expect(html).toContain('物流费用确认');
     expect(html).toContain('预览费用差额');
-    expect(html).toContain('已审核款式价格');
+    expect(html).not.toContain('系统会拒绝此入口');
     expect(html).toContain('sfShipmentId');
     expect(html).not.toContain('name="unitPrice"');
     expect(html).not.toContain('name="processingAmount"');

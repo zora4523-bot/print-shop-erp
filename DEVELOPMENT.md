@@ -40,6 +40,25 @@ pnpm dev
 
 打开 <http://localhost:3000>。同一工作区只运行一个开发服务器；Playwright 默认会复用已经监听 `E2E_BASE_URL` 的实例。
 
+### 补齐工作台演示工单
+
+已有 `e2e-dash-<16位runId>-sub-1/sub-2/sub-3-urgent` 空工单可使用
+[`complete-dashboard-order-fixtures.ts`](./scripts/complete-dashboard-order-fixtures.ts) 原位补齐。
+它只接受本机非生产数据库和停用的工作台测试销售账号，保留编号、归属、状态和已有基本资料；
+有业务明细、金额、快照或账本引用的记录会跳过。默认运行完整计价事务后回滚：
+
+```bash
+node --conditions=react-server --import tsx scripts/complete-dashboard-order-fixtures.ts --all
+# 核对预览后写入；备份必须为仓库外尚不存在的绝对路径（0600 权限）。
+node --conditions=react-server --import tsx scripts/complete-dashboard-order-fixtures.ts --all --apply --admin=e2e-owner --backup=/tmp/dashboard-orders-before.json
+```
+
+可用 `--id=<完整测试工单ID>` 代替 `--all`。重复执行会跳过已补齐记录。
+脚本创建 1/2/4 款、分袋、单票分货和标有“不可生产”的 SVG 演示图，
+复用当前建单计价服务生成加工、包装、物流报价及不可变价格快照；版费默认 0。
+它不会伪造 CDR、实称重量或确认/结算金额，也不会执行确认、排产、发货或发送通知。
+原始工作台 E2E helper 继续保留空明细场景，不被该脚本替换。
+
 ### 管理员 seed
 
 [`prisma/seed.ts`](./prisma/seed.ts) 不再提供固定默认密码：
@@ -86,11 +105,15 @@ pnpm dev
 
 - Vitest 排除 `tests/e2e`、`tests/visual`、`.next` 和 `generated`。
 - Playwright 默认 `baseURL` 是 `http://localhost:3000`，可用 `E2E_BASE_URL` 覆盖。
+- 指定与日常库不同的 `E2E_DATABASE_URL` 时，默认端口改为 `3100`，测试服务和 worker 使用同一隔离库，且不复用日常开发服务器。配置会保存不含凭据的原数据库目标，确保 worker 重新加载配置时不会退回 `3000`；不要手工设置内部的 `E2E_ORIGINAL_DATABASE_TARGET` 标记。
 - Playwright 当前会操作开发数据库，并依靠每次运行的唯一 fixture 降低冲突；它不是生产只读测试。禁止让 `DATABASE_URL` 指向生产。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
+- 报工会产生不可删除的历史记录，必须使用隔离库及已发布的测试工价。重复运行时保留既有报工，按已有累计量断言；合格量与工单件数进度分别填写。打印基线所用提交人名称也须与固定 fixture 一致。
+- 同一工作树内，先完成全量单测，再启动 E2E 开发服务器；避免路由/配置回归测试的临时文件被 Next 文件监听器读入。发生测试期间路由缓存异常时，停止该隔离服务器并重建它的 `.next`，不要清理日常工作区或重置数据库。
+- `tests/e2e/owner-notifications.spec.ts` 仅在本地可丢弃库（库名 `notif_ui_e2e_*`，通过 `E2E_DATABASE_URL` 指定）且 `NOTIFICATION_MOCK_MODE=true` 时运行。先对该独立库应用完整迁移，使用占位 Bot ID/Secret；绑定回调由 fixture 模拟，不连接真实企业微信。测试命令为 `pnpm exec playwright test tests/e2e/owner-notifications.spec.ts --project=chromium`。已有开发服务器运行时，使用独立源码快照及端口，避免共用 `.next` 开发锁；不要为跑测试重置日常开发库。
 - `test:admin-ui` 与 `test:worker-ui` 分别覆盖六个视口、明暗主题、overflow/touch/axe 等契约。
 - 只有打印规格保存了像素截图基线。管理端和师傅端门禁不是设计稿像素 diff，不能据此声称全站逐页还原。
-- 打印二维码包含 origin；运行打印视觉测试时保持固定 `E2E_BASE_URL`，避免把 host 变化误判为版式变化。
+- 打印二维码包含 origin；隔离模式通过测试服务的 `APP_PUBLIC_URL` 保持基线 origin 为 `http://localhost:3000`，避免把测试端口变化误判为版式变化。
 
 ## 数据库开发
 
@@ -126,3 +149,7 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 ```
 
 只终止确认属于本项目的 PID，不使用宽泛的 `pkill node`。问题诊断见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)。
+
+### 多工艺工单验收数据
+
+本地场景生成命令、13 类场景及跨页面核对范围见 [工单场景数据与关联审查](docs/order-scenario-review-2026-09-08.md)。命令默认只预览，显式 `--apply` 才写入；重跑不覆盖已有流转记录。

@@ -19,7 +19,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
@@ -904,8 +904,7 @@ export function DiscardCustomerPriceBookDraftForm({
         name="expectedDraftUpdatedAt"
         value={expectedDraftUpdatedAt}
       />
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         formId={formId}
         disabled={pending}
         trigger={
@@ -918,15 +917,11 @@ export function DiscardCustomerPriceBookDraftForm({
             {pending ? '放弃中…' : '放弃草稿'}
           </Button>
         }
-        title="放弃这份价目草稿？"
-        description="请确认未发布修改已不再需要。"
-        impactItems={[
+        cancelLabel="返回检查">
+        <ConfirmActionDialog action="放弃这份价目草稿" changes={[]} consequences={[
           '草稿及其中所有未发布修改将永久删除。',
-          '当前已发布版本、历史版本与既有工单不受影响。',
-        ]}
-        confirmLabel="确认放弃草稿"
-        cancelLabel="返回检查"
-      />
+        ]} confirmText="确认放弃草稿" />
+      </ConfirmActionController>
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}
@@ -966,8 +961,7 @@ export function CancelScheduledCustomerPriceBookForm({
       <input type="hidden" name="priceBookId" value={priceBookId} />
       <input type="hidden" name="expectedUpdatedAt" value={expectedUpdatedAt} />
       <input type="hidden" name="confirmedImpact" value="true" />
-      <ConfirmActionDialog
-        level="L3"
+      <ConfirmActionController level="L3"
         formId={formId}
         disabled={pending}
         reasonLabel="取消原因"
@@ -977,20 +971,15 @@ export function CancelScheduledCustomerPriceBookForm({
             {pending ? '正在取消…' : '取消计划'}
           </Button>
         }
-        title={`取消第 ${version} 版的生效计划？`}
-        description="这不会删除已发布版本或规则，但它将不再自动生效。"
-        impactItems={[
-          '计划版本和全部规则保留作为审计证据。',
+        cancelLabel="保留计划">
+        <ConfirmActionDialog action={`取消第 ${version} 版的生效计划？`} changes={[]} consequences={[
           '前一版价格将延续覆盖原计划时段。',
-          '已建工单和历史价格快照不变。',
-        ]}
-        confirmLabel="填写原因并取消计划"
-        cancelLabel="保留计划"
-      />
+        ]} confirmText="取消计划" />
+      </ConfirmActionController>
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}
-        successMessage="计划版本已取消，版本与规则证据已保留。"
+        successMessage="生效计划已取消。"
       />
     </form>
   );
@@ -1014,6 +1003,7 @@ export function RescheduleCustomerPriceBookForm({
   );
   const formId = useId();
   const inputId = useId();
+  const [effectiveFrom, setEffectiveFrom] = useState(defaultEffectiveFrom);
   const errorId = `${inputId}-error`;
   const errors = mutationFieldErrors(state);
 
@@ -1039,15 +1029,15 @@ export function RescheduleCustomerPriceBookForm({
           name="effectiveFrom"
           type="datetime-local"
           className="min-h-11"
-          defaultValue={defaultEffectiveFrom}
+          value={effectiveFrom}
+          onChange={(event) => setEffectiveFrom(event.target.value)}
           required
           aria-invalid={Boolean(errors.effectiveFrom?.length)}
           aria-describedby={errors.effectiveFrom?.length ? errorId : undefined}
         />
         <FieldErrorMessages id={errorId} messages={errors.effectiveFrom} />
       </div>
-      <ConfirmActionDialog
-        level="L3"
+      <ConfirmActionController level="L3"
         formId={formId}
         disabled={pending}
         reasonLabel="改期原因"
@@ -1057,16 +1047,11 @@ export function RescheduleCustomerPriceBookForm({
             {pending ? '正在改期…' : '调整生效时间'}
           </Button>
         }
-        title={`调整第 ${version} 版的生效时间？`}
-        description="系统会重新衔接前后版本区间，并在提交前重新验证建单计价。"
-        impactItems={[
-          '价目版本、规则、版本号与哈希保持不变。',
+        cancelLabel="保持原时间">
+        <ConfirmActionDialog action={`调整第 ${version} 版生效时间`} changes={[{label: "生效时间", old: defaultEffectiveFrom.replace("T", " "), new: effectiveFrom.replace("T", " ")}]} consequences={[
           '新生效时间之后的新建或重新报价工单受影响。',
-          '已建工单的历史快照不会重算。',
-        ]}
-        confirmLabel="填写原因并确认改期"
-        cancelLabel="保持原时间"
-      />
+        ]} confirmText="确认改期" />
+      </ConfirmActionController>
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}

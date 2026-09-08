@@ -83,7 +83,7 @@ export async function assertWorkOrderProgressCapacityInTx(
     quantity: Decimal;
   },
 ): Promise<WorkOrderProgressCapacity> {
-  const [items, progress] = await Promise.all([
+  const [items, progress, carried] = await Promise.all([
     tx.orderItem.aggregate({
       where: { orderId: input.orderId },
       _sum: { quantity: true },
@@ -96,11 +96,17 @@ export async function assertWorkOrderProgressCapacityInTx(
       },
       _sum: { workOrderProgressQuantity: true },
     }),
+    tx.productionOperation.aggregate({
+      where: { orderId: input.orderId, workOrderVersion: input.workOrderVersion,
+        operationType: input.stage === ProductionWorkOrderStage.PACKING ? PieceworkOperationType.PACKING : { not: PieceworkOperationType.PACKING },
+      },
+      _sum: { carriedWorkOrderProgressQty: true },
+    }),
   ]);
   const orderTotal = new Decimal(items._sum.quantity ?? 0);
   const alreadyReported = new Decimal(
     progress._sum.workOrderProgressQuantity?.toString() ?? 0,
-  );
+  ).plus(carried._sum.carriedWorkOrderProgressQty?.toString() ?? 0);
   const afterReport = alreadyReported.plus(input.quantity);
   if (orderTotal.lte(0)) {
     throw new WorkOrderProgressError(

@@ -36,7 +36,6 @@ import {
   WECOM_MARKDOWN_MAX_BYTES,
   wecomMarkdownByteLength,
 } from '../notification/limits';
-import { isValidWecomGroupBotWebhookUrl } from '../notification/webhook-url';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -1944,7 +1943,7 @@ export const createOrderSchema = z
       .transform((value) => value ?? null),
     expressCode: optionalTrimmedText('快递代码', 32),
     ...shipmentChargeFields,
-    packageRequirement: optionalTrimmedText('包装要求', 500),
+    packageRequirement: optionalTrimmedText('包装补充说明', 500),
     remark: optionalTrimmedText('工单备注', 1000),
     promisedDate: optionalDateField,
     isUrgent: formBoolean,
@@ -2287,6 +2286,7 @@ const updateOrderItemChangeSchema = z
     itemId: orderChangeId,
     name: z.string().trim().min(1).max(64).optional(),
     quantity: orderItemQuantityField.optional(),
+    pack: z.number().int().min(1).max(9_999_999).optional(),
     specification: optionalTrimmedText('规格', 64).optional(),
     targetProductId: orderChangeId.optional(),
     frontFoilColors: orderItemFoilSideColorsField.optional(),
@@ -2300,6 +2300,7 @@ const updateOrderItemChangeSchema = z
     (value) =>
       value.name !== undefined ||
       value.quantity !== undefined ||
+      value.pack !== undefined ||
       value.specification !== undefined ||
       value.targetProductId !== undefined ||
       value.frontFoilColors !== undefined ||
@@ -2327,7 +2328,6 @@ export const orderChangeRequestItemsSchema = z
       addOrderItemChangeSchema,
     ]),
   )
-  .min(1, '至少填写一项修改')
   .max(50, '单次修改不超过 50 项')
   .superRefine((value, ctx) => {
     const updatedItemIds = new Set<string>();
@@ -2441,8 +2441,12 @@ const modifyOrderChangeRequestSchema = z
     modifyKind: z.enum(['QTY', 'DUE_DATE', 'ADDRESS', 'CRAFT_PAPER', 'OTHER']),
     reason: orderChangeReason,
     items: orderChangeRequestItemsSchema,
+    promisedDate: optionalDateFieldPartial,
   })
   .superRefine((value, ctx) => {
+    if (value.items.length === 0 && value.promisedDate === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['items'], message: '至少填写一项款式或交期修改' });
+    }
     value.items.forEach((item, index) => {
       const hasSpecification = typeof item.specification === 'string';
       const hasTargetProduct = item.targetProductId !== undefined;
@@ -2860,8 +2864,21 @@ const expectedOrderEditVersionField = z
   )
   .pipe(z.number().int().nonnegative());
 
+export const editOrderShipmentSchema = z.object({
+  id: z.string().trim().min(1).max(128),
+  receiverName: optionalTrimmedText('收件人', 64),
+  receiverPhone: optionalTrimmedText('收货电话', 32),
+  receiverAddress: requiredTrimmedText('收货地址', 256),
+  expressCode: optionalTrimmedText('快递代码', 32),
+  expectedDestinationProvince: optionalTrimmedText('配送省份', 32),
+  sameDestination: z.boolean(),
+}).strict();
+
 export const updateEditableOrderSchema = z.object({
   expectedEditVersion: expectedOrderEditVersionField,
+  externalSalesUserId: requiredTrimmedText('关联外部销售', 64).optional(),
+  customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
+  shipments: z.array(editOrderShipmentSchema).max(10, '单工单不超过 10 个收货地址').optional().refine((rows) => !rows || new Set(rows.map((row) => row.id)).size === rows.length, '收货地址不能重复'),
   customName: optionalTrimmedText('工单名称', 100).optional(),
   customerRef: optionalTrimmedText('客户名称/简称', 64).optional(),
   receiverName: optionalTrimmedText('收货人', 64).optional(),
@@ -2869,7 +2886,7 @@ export const updateEditableOrderSchema = z.object({
   // 普通编辑允许不传该 key（partial update），但只要传了就不能清空。
   receiverAddress: requiredTrimmedText('收货地址', 256).optional(),
   expressCode: optionalTrimmedText('快递代码', 32).optional(),
-  packageRequirement: optionalTrimmedText('包装要求', 500).optional(),
+  packageRequirement: optionalTrimmedText('包装补充说明', 500).optional(),
   remark: optionalTrimmedText('工单备注', 1000).optional(),
   promisedDate: optionalDateFieldPartial,
   isUrgent: optionalFormBoolean,
@@ -2883,7 +2900,7 @@ export const updateShippingOrderSchema = z.object({
   receiverPhone: optionalTrimmedText('收货电话', 32),
   receiverAddress: requiredTrimmedText('收货地址', 256),
   expressCode: optionalTrimmedText('快递代码', 32),
-  packageRequirement: optionalTrimmedText('包装要求', 500),
+  packageRequirement: optionalTrimmedText('包装补充说明', 500),
   remark: optionalTrimmedText('工单备注', 1000),
 });
 
@@ -3617,19 +3634,6 @@ const channelNameField = z
   .min(1, '请填写群名（如 排产群）')
   .max(64, '群名过长（最多 64 个字符）');
 
-// 企业微信 webhook URL 的官方格式：
-//   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<非空>
-// 严格限制协议、主机、路径和唯一 query，避免 SSRF、凭据泄漏与误投递。
-const channelWebhookUrlField = z
-  .string()
-  .trim()
-  .min(1, '请填写企业微信 Webhook URL')
-  .max(512, 'Webhook URL 过长')
-  .refine(
-    isValidWecomGroupBotWebhookUrl,
-    'Webhook URL 必须形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
-  );
-
 const notificationChannelIdentityFields = {
   channelKey: z
     .string()
@@ -3643,24 +3647,17 @@ const notificationChannelIdentityFields = {
   channelName: channelNameField,
 };
 
-export const createNotificationChannelSchema = z.preprocess(
-  defaultLegacyWebhookTransport,
-  z.discriminatedUnion('transport', [
-    z.object({
-      ...notificationChannelIdentityFields,
-      transport: z.literal('WECOM_GROUP_WEBHOOK'),
-      webhookUrl: channelWebhookUrlField,
-      isActive: formBoolean,
-    }),
-    z.object({
-      ...notificationChannelIdentityFields,
-      transport: z.literal('WECOM_SMART_BOT'),
-      // A smart-bot destination is deliberately born inactive and without a
-      // target. The target can only be learned from a signed WS group callback.
-      isActive: z.unknown().transform(() => false),
-    }),
-  ]),
-);
+const smartBotTransportField = z.literal('WECOM_SMART_BOT', {
+  error: '仅支持 Bot ID + Secret 智能机器人，请刷新页面后重新配置',
+});
+
+export const createNotificationChannelSchema = z.object({
+  ...notificationChannelIdentityFields,
+  transport: smartBotTransportField,
+  webhookUrl: z.never({ error: '旧版 Webhook 配置已停止维护' }).optional(),
+  // Only the authenticated group callback can establish the destination.
+  isActive: z.unknown().transform(() => false),
+});
 
 export type CreateNotificationChannelInput = z.infer<
   typeof createNotificationChannelSchema
@@ -3668,34 +3665,12 @@ export type CreateNotificationChannelInput = z.infer<
 
 // 编辑场景下不让 owner 改 channelKey（key 是稳定标识，被 audit log
 // 引用；改 key 等同于&ldquo;新建+删除&rdquo;）—— UI 把 key 渲染成只读。
-export const updateNotificationChannelSchema = z.preprocess(
-  defaultLegacyWebhookTransport,
-  z.discriminatedUnion('transport', [
-    z.object({
-      transport: z.literal('WECOM_GROUP_WEBHOOK'),
-      channelName: channelNameField,
-      webhookUrl: channelWebhookUrlField,
-      isActive: formBoolean,
-    }),
-    z.object({
-      transport: z.literal('WECOM_SMART_BOT'),
-      channelName: channelNameField,
-      isActive: formBoolean,
-    }),
-  ]),
-);
-
-function defaultLegacyWebhookTransport(value: unknown): unknown {
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    !('transport' in value)
-  ) {
-    return { ...value, transport: 'WECOM_GROUP_WEBHOOK' };
-  }
-  return value;
-}
+export const updateNotificationChannelSchema = z.object({
+  transport: smartBotTransportField,
+  webhookUrl: z.never({ error: '旧版 Webhook 配置已停止维护' }).optional(),
+  channelName: channelNameField,
+  isActive: formBoolean,
+});
 
 export type UpdateNotificationChannelInput = z.infer<
   typeof updateNotificationChannelSchema

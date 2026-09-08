@@ -39,6 +39,7 @@ function txMock() {
       create: vi.fn(),
     },
     orderLog: { create: vi.fn() },
+    orderWorkflowDecision: { findFirst: vi.fn() },
   };
 }
 
@@ -48,6 +49,39 @@ beforeEach(() => {
 });
 
 describe('versioned order print jobs', () => {
+  it.each([OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING])(
+    'queues the approved new version while paused from %s', async (fromStatus) => {
+      const tx = txMock();
+      tx.order.findUnique.mockResolvedValue({ id: 'order-1', status: OrderStatus.ON_HOLD, workOrderVersion: 2 });
+      tx.orderWorkflowDecision.findFirst.mockResolvedValue({ fromStatus });
+      tx.orderPrintJob.create.mockResolvedValue({ id: 'paused-reprint' });
+
+      await expect(createOrderPrintRequestInTx(tx as never, {
+        orderId: 'order-1', workOrderVersion: 2, printKind: OrderPrintKind.REPRINT,
+        reason: '修改批准后重打', idempotencyKey: 'paused-approved-v2',
+      }, admin)).resolves.toMatchObject({ jobId: 'paused-reprint' });
+      expect(tx.orderPrintJob.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ printKind: OrderPrintKind.REPRINT, workOrderVersion: 2 }),
+      }));
+    },
+  );
+
+  it.each([
+    { fromStatus: OrderStatus.CONFIRMED, printKind: OrderPrintKind.REPRINT },
+    { fromStatus: null, printKind: OrderPrintKind.REPRINT },
+    { fromStatus: OrderStatus.FOILING, printKind: OrderPrintKind.INITIAL },
+  ])('does not bypass release or pause evidence: %j', async ({ fromStatus, printKind }) => {
+    const tx = txMock();
+    tx.order.findUnique.mockResolvedValue({ id: 'order-1', status: OrderStatus.ON_HOLD, workOrderVersion: 2 });
+    tx.orderWorkflowDecision.findFirst.mockResolvedValue(fromStatus ? { fromStatus } : null);
+
+    await expect(createOrderPrintRequestInTx(tx as never, {
+      orderId: 'order-1', workOrderVersion: 2, printKind,
+      reason: '暂停中请求打印', idempotencyKey: 'paused-invalid-v2',
+    }, admin)).rejects.toMatchObject({ code: 'ORDER_NOT_PRINTABLE' });
+    expect(tx.orderPrintJob.create).not.toHaveBeenCalled();
+  });
+
   it('derives REPRINT from same-version printed history under the order lock', async () => {
     const tx = txMock();
     dbMock.$transaction.mockImplementationOnce(

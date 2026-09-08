@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth/config';
 import { UnauthorizedError } from '@/lib/auth/errors';
 import { requireSessionPermission } from '@/lib/auth/permissions';
 import { getAdminOrderByOrderNo } from '@/lib/order/admin-workspace';
+import { getAdminOrderInlineOperations } from '@/lib/order/admin-inline-operations';
 import { getSetting } from '@/lib/settings';
 
 export const runtime = 'nodejs';
@@ -49,7 +50,7 @@ export async function handleAdminOrderWorkspaceDetail(
   }
 
   return NextResponse.json(
-    { order },
+    { order: { ...order, inlineOperations: await getAdminOrderInlineOperations(actor, order) } },
     {
       headers: {
         'Cache-Control': 'private, no-store',

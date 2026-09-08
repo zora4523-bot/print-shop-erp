@@ -20,6 +20,7 @@ export type AdminOrderQueue = (typeof ADMIN_ORDER_QUEUES)[number];
 export const ADMIN_ORDER_SIGNALS = [
   'pending-confirmation',
   'pending-pricing',
+  'pending-release',
   'pending-change',
   'on-hold',
   'overdue',

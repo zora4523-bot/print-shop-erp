@@ -4,12 +4,14 @@ const {
   requirePermissionMock,
   revalidatePathMock,
   testChannelMock,
+  getChannelMock,
   enqueueSmartBotChannelTestMock,
 } =
   vi.hoisted(() => ({
     requirePermissionMock: vi.fn(),
     revalidatePathMock: vi.fn(),
     testChannelMock: vi.fn(),
+    getChannelMock: vi.fn(),
     enqueueSmartBotChannelTestMock: vi.fn(),
   }));
 
@@ -29,6 +31,7 @@ vi.mock('@/lib/notification/admin', () => {
     StaleChannelIdsError: DomainError,
     TooManyChannelsForPrivateEventError: DomainError,
     createChannel: vi.fn(),
+    getChannel: getChannelMock,
     deleteChannel: vi.fn(),
     updateChannel: vi.fn(),
     updateRuleWithGuard: vi.fn(),
@@ -57,6 +60,7 @@ import { testChannelAction } from '../owner-notifications';
 beforeEach(() => {
   requirePermissionMock.mockReset().mockResolvedValue({ id: 'owner-1' });
   revalidatePathMock.mockReset();
+  getChannelMock.mockReset().mockResolvedValue({ transport: 'WECOM_SMART_BOT' });
   testChannelMock.mockReset().mockResolvedValue({ ok: true, mock: true });
   enqueueSmartBotChannelTestMock.mockReset().mockResolvedValue({
     queued: true,
@@ -65,6 +69,21 @@ beforeEach(() => {
 });
 
 describe('testChannelAction', () => {
+  it('blocks stale or forged legacy test requests without sending or queueing', async () => {
+    getChannelMock.mockResolvedValue({ transport: 'WECOM_GROUP_WEBHOOK' });
+    await expect(testChannelAction('legacy')).resolves.toEqual({
+      status: 'error',
+      message: '旧版 Webhook 已停止配置和测试，请改用智能机器人目标。',
+    });
+    expect(testChannelMock).not.toHaveBeenCalled();
+    expect(enqueueSmartBotChannelTestMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a deleted target before attempting to send', async () => {
+    getChannelMock.mockResolvedValue(null);
+    await expect(testChannelAction('missing')).resolves.toEqual({ status: 'error', message: '该群不存在' });
+    expect(testChannelMock).not.toHaveBeenCalled();
+  });
   it('authorizes, delegates to lib and revalidates the owner log page', async () => {
     await expect(testChannelAction('channel-1')).resolves.toEqual({
       status: 'success',
@@ -122,7 +141,7 @@ describe('testChannelAction', () => {
     await expect(testChannelAction('smart-1')).resolves.toEqual({
       status: 'error',
       message:
-        '智能机器人连接尚未就绪，或检测到多个 LIGHT worker，请检查后台任务状态',
+        '通知机器人连接异常，请联系管理员检查运行状态后重试',
     });
     expect(enqueueSmartBotChannelTestMock).toHaveBeenCalledExactlyOnceWith(
       'smart-1',
@@ -136,12 +155,12 @@ describe('testChannelAction', () => {
     ['SMART_BOT_NOT_BOUND', '智能机器人尚未绑定企业微信群'],
     [
       'SMART_BOT_IDENTITY_MISMATCH',
-      '当前 Bot ID 与该群绑定时不一致；请使用原机器人，或新建通知目标重新绑定',
+      '机器人账号已变更，请恢复原账号或新建通知目标',
     ],
     ['CHANNEL_CONFIGURATION_INVALID', '通知目标配置不完整'],
     [
       'LOG_WRITE_FAILED',
-      '测试推送结果未能写入日志，请检查数据库后再核对群消息',
+      '投递记录保存失败，请联系管理员处理，并先核对群消息',
     ],
   ] as const)('maps %s to its owner-facing message', async (code, message) => {
     testChannelMock.mockRejectedValue(new TestChannelError(code));
@@ -166,6 +185,7 @@ describe('testChannelAction', () => {
     requirePermissionMock.mockRejectedValue(new Error('forbidden'));
 
     await expect(testChannelAction('channel-1')).rejects.toThrow('forbidden');
+    expect(getChannelMock).not.toHaveBeenCalled();
     expect(testChannelMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });

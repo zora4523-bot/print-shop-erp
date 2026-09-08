@@ -469,7 +469,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(result).toMatchObject({
       quotedFee: '335.80',
       quotedFeeCompleteness:
-        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+        OrderQuotedFeeCompleteness.COMPLETE,
       reused: false,
     });
   });
@@ -488,7 +488,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     ).rejects.toMatchObject({
       quotedFee: '346.30',
       quotedFeeCompleteness:
-        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+        OrderQuotedFeeCompleteness.COMPLETE,
     });
 
     expect(mocks.resolveLogistics).not.toHaveBeenCalled();
@@ -518,7 +518,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       priceRevision: 2,
       quotedFee: '346.30',
       quotedFeeCompleteness:
-        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+        OrderQuotedFeeCompleteness.COMPLETE,
       processingAmount: '300.00',
       packagingAmount: '25.00',
       logisticsAmount: '46.30',
@@ -601,29 +601,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         }),
       }),
     );
-    expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        where: {
-          orderId_businessKey: {
-            orderId: 'order-1',
-            businessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
-          },
-        },
-        create: expect.objectContaining({
-          categoryId: 'cat-plate',
-          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
-          amount: null,
-          suggestedAmount: null,
-          pricingSnapshot: expect.objectContaining({
-            engineVersion: 'CREATE_ORDER_PURE_V1',
-            pendingReason: expect.objectContaining({
-              code: 'PLATE_AMOUNT_PENDING',
-            }),
-          }),
-        }),
-      }),
-    );
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenCalledTimes(2);
     expect(tx.orderPriceVersionLock.createMany).toHaveBeenCalledWith({
       data: [
         expect.objectContaining({
@@ -643,7 +621,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(mocks.appendRevision).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({
-        status: 'PENDING_ADMIN_CONFIRMATION',
+        status: 'AUTO_CONFIRMED',
         orderFeeSnapshot: {
           quotedFee: '346.30',
           confirmedFee: null,
@@ -660,7 +638,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       data: {
         quotedFee: '346.30',
         quotedFeeCompleteness:
-          OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+          OrderQuotedFeeCompleteness.COMPLETE,
         quotedPricingRevisionId: 'revision-2',
         confirmedFee: null,
         settledFee: null,
@@ -1029,7 +1007,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     );
   });
 
-  it('明确保留已报价 0 元与制版费未报价 null 的区别', async () => {
+  it('顺丰到付与默认零版费仍可完整自动报价', async () => {
     const order = draftOrder({ isSfCollect: true });
     mocks.resolveLogistics.mockResolvedValue(
       resolvedLogistics([
@@ -1056,7 +1034,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(result).toMatchObject({
       quotedFee: '305.00',
       quotedFeeCompleteness:
-        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+        OrderQuotedFeeCompleteness.COMPLETE,
     });
     expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
       1,
@@ -1067,15 +1045,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         }),
       }),
     );
-    expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        create: expect.objectContaining({
-          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
-          amount: null,
-        }),
-      }),
-    );
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenCalledTimes(2);
   });
 
   it('物流持久化金额与纯引擎不一致时拒绝任何财务写入', async () => {
@@ -1130,7 +1100,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
   });
 
-  it('制版费类目缺失时失败关闭，不在提交端创建或改配置', async () => {
+  it('默认零版费无需收费类目，不在提交端创建或改配置', async () => {
     const token = await currentQuoteToken();
     const tx = txFor();
     tx.customerChargeCategory.findUnique.mockResolvedValue(null);
@@ -1143,9 +1113,9 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         NOW,
         token,
       ),
-    ).rejects.toThrow('制版费收费类目不存在或已停用');
-    expect(tx.orderItem.update).not.toHaveBeenCalled();
-    expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE });
+    expect(tx.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenCalledTimes(2);
   });
 
   it('纸张缺货时在读价目前拒绝提交', async () => {

@@ -29,7 +29,7 @@ describe('admin order asynchronous action contract', () => {
     expect(batchSource).toContain('if (inFlightRef.current) return;');
     expect(batchSource).toContain('startTransition(async () =>');
     expect(batchSource).toContain('await runAdminOrderBatchAction');
-    expect(batchSource).toContain('批量操作未完成，请刷新列表后重试');
+    expect(batchSource).toContain('请先打开工单核对实际记录，再决定是否重试');
     expect(batchSource).not.toContain('void runAdminOrderBatchAction');
   });
 

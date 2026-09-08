@@ -20,8 +20,6 @@ type DiffRow = {
   field: string;
   before: string;
   after: string;
-  pricingImpact: '不影响计价' | '需要重新计价';
-  productionImpact: string;
 };
 
 type DiffGroup = {
@@ -35,32 +33,22 @@ const FIELD_DEFINITIONS = [
   {
     key: 'name',
     label: '款式名称',
-    pricingImpact: '不影响计价',
-    productionImpact: '同步任务展示名称',
   },
   {
     key: 'quantity',
     label: '数量',
-    pricingImpact: '需要重新计价',
-    productionImpact: '校验已开工记录并同步任务数量',
   },
   {
     key: 'specification',
     label: '规格',
-    pricingImpact: '需要重新计价',
-    productionImpact: '同步生产规格',
   },
   {
     key: 'frontFoilColors',
     label: '正面烫金颜色',
-    pricingImpact: '需要重新计价',
-    productionImpact: '同步正面烫金要求',
   },
   {
     key: 'backFoilColors',
     label: '反面烫金颜色',
-    pricingImpact: '需要重新计价',
-    productionImpact: '同步反面烫金要求',
   },
 ] as const;
 
@@ -191,8 +179,6 @@ function buildDiffGroups(
                 field: '数据校验',
                 before: '申请中缺少该款式',
                 after: '无法展示',
-                pricingImpact: '不影响计价' as const,
-                productionImpact: '审核前需重新提交申请',
               },
             ],
           },
@@ -225,8 +211,6 @@ function buildDiffGroups(
             field: definition.label,
             before: displayValue(definition.key, previous),
             after: displayValue(definition.key, next),
-            pricingImpact: definition.pricingImpact,
-            productionImpact: definition.productionImpact,
           },
         ];
       });
@@ -260,11 +244,6 @@ function buildDiffGroups(
             field: definition.label,
             before: '—（新增）',
             after: displayValue(definition.key, afterRecord[definition.key]),
-            pricingImpact: '需要重新计价' as const,
-            productionImpact:
-              definition.key === 'quantity'
-                ? '创建对应待生产任务'
-                : definition.productionImpact,
           },
         ];
       });
@@ -293,6 +272,12 @@ export function OrderChangeFieldDiff({
   proposedChanges: unknown;
 }) {
   const groups = buildDiffGroups(beforeSnapshot, proposedChanges);
+  if (proposedChanges && typeof proposedChanges === 'object' && 'promisedDate' in proposedChanges &&
+      (proposedChanges.promisedDate === null || typeof proposedChanges.promisedDate === 'string')) {
+    const before = beforeSnapshot && typeof beforeSnapshot === 'object' && 'promisedDate' in beforeSnapshot && typeof beforeSnapshot.promisedDate === 'string'
+      ? beforeSnapshot.promisedDate : '未设置';
+    groups.unshift({ key: 'promised-date', title: '承诺交期', operation: '修改', rows: [{ key: 'promised-date', field: '承诺交期', before, after: proposedChanges.promisedDate ?? '未设置' }] });
+  }
 
   if (groups.length === 0) {
     return (
@@ -313,9 +298,6 @@ export function OrderChangeFieldDiff({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">逐字段差异</h3>
-        <p className="text-xs text-muted-foreground">
-          计价以审批预览为准；批准时会再次检查工单状态。
-        </p>
       </div>
       <ol className="space-y-3">
         {groups.map((group) => (
@@ -329,15 +311,13 @@ export function OrderChangeFieldDiff({
               </h4>
             </div>
             <TableScrollArea label={`${group.title}字段差异`}>
-              <table className="w-full min-w-[46rem] text-xs">
+              <table className="w-full min-w-[30rem] text-xs">
                 <thead className="bg-muted/30 text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">字段</th>
                     <th className="px-3 py-2 text-left font-medium">修改前</th>
                     <th className="px-3 py-2 text-center font-medium" aria-label="变为" />
                     <th className="px-3 py-2 text-left font-medium">修改后</th>
-                    <th className="px-3 py-2 text-left font-medium">计价影响</th>
-                    <th className="px-3 py-2 text-left font-medium">生产影响</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -354,20 +334,6 @@ export function OrderChangeFieldDiff({
                       </td>
                       <td className="admin-wrap-anywhere max-w-52 px-3 py-2 font-medium">
                         {row.after}
-                      </td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={
-                            row.pricingImpact === '需要重新计价'
-                              ? 'text-warning-foreground'
-                              : 'text-muted-foreground'
-                          }
-                        >
-                          {row.pricingImpact}
-                        </span>
-                      </td>
-                      <td className="admin-wrap-anywhere px-3 py-2 text-muted-foreground">
-                        {row.productionImpact}
                       </td>
                     </tr>
                   ))}

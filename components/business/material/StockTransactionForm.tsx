@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   FormErrorSummary,
   FormMessage,
   formMessageA11yProps,
@@ -50,7 +50,7 @@ export function stockTransactionImpactItems(
     `数量：${preview.quantity} ${preview.unit}`,
     `单位成本：${preview.unitCost || '未填写'}`,
     `原因：${preview.reasonLabel}`,
-    '系统会写入一条库存流水，并同步更新该库位与物料汇总库存；提交时会再次校验库位和库存。',
+    '该库位库存将按本次数量增减。',
   ];
 }
 
@@ -309,21 +309,17 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
       >
         {pending ? '正在更新库存…' : '核对并提交出入库'}
       </Button>
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         formId={formId}
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={triggerRef}
         disabled={pending || preview === null}
-        title={`确认${preview?.direction === 'OUT' ? '出库' : '入库'}？`}
-        description="请核对方向、当前物料、库位、数量和成本。本操作会立即形成库存流水。"
-        impactItems={preview ? stockTransactionImpactItems(preview) : []}
-        confirmLabel="确认提交出入库"
         onConfirm={() => {
           confirmedRef.current = true;
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action={`确认${preview?.direction === 'OUT' ? '出库' : '入库'}？`} changes={[]} consequences={preview ? stockTransactionImpactItems(preview) : []} confirmText="确认提交出入库" />
+      </ConfirmActionController>
     </form>
   );
 }

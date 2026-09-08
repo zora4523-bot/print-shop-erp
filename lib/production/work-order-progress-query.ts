@@ -42,7 +42,9 @@ export async function getWorkOrderProgressByOrderIds(
   const [orders, orderTotals, progressTotals, claims] = await Promise.all([
     client.order.findMany({
       where: { id: { in: uniqueIds } },
-      select: { id: true, workOrderVersion: true, scheduledAt: true },
+      select: { id: true, workOrderVersion: true, scheduledAt: true,
+        productionOperations: { where: { carriedWorkOrderProgressQty: { gt: 0 } }, select: { workOrderVersion: true, operationType: true, carriedWorkOrderProgressQty: true } },
+      },
     }),
     client.orderItem.groupBy({
       by: ['orderId'],
@@ -91,6 +93,15 @@ export async function getWorkOrderProgressByOrderIds(
     string,
     { foiling: Decimal; packing: Decimal }
   >();
+  for (const order of orders) {
+    const totals = { foiling: new Decimal(0), packing: new Decimal(0) };
+    for (const operation of order.productionOperations ?? []) {
+      if (operation.workOrderVersion !== order.workOrderVersion) continue;
+      const key = operation.operationType === 'PACKING' ? 'packing' : 'foiling';
+      totals[key] = totals[key].plus(operation.carriedWorkOrderProgressQty.toString());
+    }
+    progressByOrder.set(order.id, totals);
+  }
   for (const row of progressTotals) {
     if (
       row.workOrderVersion !==
@@ -106,9 +117,9 @@ export async function getWorkOrderProgressByOrderIds(
       row._sum.workOrderProgressQuantity?.toString() ?? 0,
     );
     if (row.stage === ProductionWorkOrderStage.FOILING) {
-      totals.foiling = value;
+      totals.foiling = totals.foiling.plus(value);
     } else {
-      totals.packing = value;
+      totals.packing = totals.packing.plus(value);
     }
     progressByOrder.set(row.orderId, totals);
   }

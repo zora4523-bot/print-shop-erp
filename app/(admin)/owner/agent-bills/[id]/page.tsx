@@ -35,7 +35,7 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
             {bill.period} · {bill.agentDisplayNameSnapshot}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            账号快照 {bill.agentUsernameSnapshot} · 成员 {bill.items.length} 单
+            账单账号 {bill.agentUsernameSnapshot} · 成员 {bill.items.length} 单
           </p>
         </div>
         <StatusBadge
@@ -55,7 +55,7 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
             ? `已于 ${formatDateTimeShanghai(bill.paidAt)} 结清`
             : bill.confirmedAt
               ? `已于 ${formatDateTimeShanghai(bill.confirmedAt)} 确认冻结`
-              : '当前为可重新同步的 DRAFT'}
+              : '草稿'}
         </p>
       </section>
 
@@ -94,17 +94,14 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
 
       <section className="space-y-3">
         <div>
-          <h2 className="font-semibold">结算成员快照</h2>
-          <p className="text-xs text-muted-foreground">
-            仅展示入账时快照；确认后不重算、不覆写。
-          </p>
+          <h2 className="font-semibold">账单明细</h2>
         </div>
         <TableScrollArea label="月度账单成员" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">工单</th>
-                <th className="px-4 py-2 text-left">客户快照</th>
+                <th className="px-4 py-2 text-left">客户</th>
                 <th className="px-4 py-2 text-left">状态 / 纸单版本</th>
                 <th className="px-4 py-2 text-left">结算时间</th>
                 <th className="px-4 py-2 text-right">结算费</th>

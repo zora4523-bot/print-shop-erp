@@ -1,10 +1,9 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useCallback, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  confirmFactoryOrderAction,
   holdFactoryOrderAction,
   rejectFactoryOrderAction,
   releaseFactoryOrderAction,
@@ -19,9 +18,14 @@ import {
 } from '@/actions/order';
 import type { CancellationSettlementReference } from '@/lib/order/change-request';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice } from '@/components/ui-business/ActionNotice';
+import { DisabledReason } from '@/components/ui-business/DisabledReason';
 import { OrderChangeReviewForm } from './OrderChangeReviewForm';
+import { cancellationReviewIssue } from './admin-order-cancellation-review';
+import { AdminOrderInlineOperations } from './AdminOrderInlineOperations';
 
 type FormMode =
   | 'reject'
@@ -42,23 +46,36 @@ const HOLD_REASONS = [
 type ReasonCode = (typeof HOLD_REASONS)[number][0];
 type ReviewResult = Awaited<ReturnType<typeof reviewOrderChangeRequestAction>>;
 type DecisionTask = () => Promise<AdminOrderWorkflowActionResult | ReviewResult>;
+type DecisionReceipt = { text: string; tone: 'success' | 'warning' };
+
+function DecisionConfirmation({
+  label, title, impactItems, changes = [], confirmLabel, disabled,
+  onConfirm, describedBy, variant = 'default',
+}: {
+  label: string;
+  title: string;
+  impactItems: string[];
+  changes?: {label: string; old: string; new: string}[];
+  confirmLabel: string;
+  disabled: boolean;
+  onConfirm: () => void;
+  describedBy?: string;
+  variant?: 'default' | 'destructive' | 'outline';
+}) {
+  return <ConfirmActionController level="L2"
+    disabled={disabled}
+    trigger={<Button type="button" size="sm" variant={variant} aria-describedby={describedBy}>{label}</Button>}
+    onConfirm={onConfirm}>
+    <ConfirmActionDialog action={title} changes={changes} consequences={impactItems} confirmText={confirmLabel} />
+  </ConfirmActionController>;
+}
 
 function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow }) {
   if (order.status !== 'PENDING_FACTORY' && order.status !== 'SUBMITTED') {
     return null;
   }
-  const issues = [
-    ...order.confirmationPreflight.issues,
-    ...(order.priceComparisonError
-      ? [`当前价预检失败：${order.priceComparisonError}`]
-      : []),
-    ...(!order.capabilities.confirm &&
-    order.confirmationPreflight.ok &&
-    !order.priceComparisonError
-      ? ['当前工单存在待处理事项，暂不能确认']
-      : []),
-  ];
-  const ok = issues.length === 0 && order.capabilities.confirm;
+  const issues = order.confirmationPreflight.issues;
+  const ok = issues.length === 0 && order.capabilities.release;
   return (
     <div
       id="admin-order-confirmation-preflight"
@@ -69,10 +86,10 @@ function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow 
       }`}
     >
       {ok ? (
-        <p className="font-medium">确认预检通过</p>
+        <p className="font-medium">可下发生产</p>
       ) : (
         <>
-          <p className="font-medium">确认预检未通过</p>
+          <p className="font-medium">待处理事项</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             {issues.map((issue) => (
               <li key={issue}>{issue}</li>
@@ -119,46 +136,8 @@ function AdminDecisionActions({
   run: (task: DecisionTask) => void;
   runOneBatch: (command: 'CREATE_PRINT' | 'MARK_PRINTED') => void;
 }) {
-  const awaitingConfirmation =
-    order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED';
-  const confirmDisabled =
-    pending ||
-    !order.capabilities.confirm ||
-    !order.confirmationPreflight.ok ||
-    !order.priceComparison ||
-    Boolean(order.priceComparisonError);
   return (
     <div className="mt-3 flex flex-wrap gap-2">
-      {order.fee.source === 'PENDING' ||
-      (awaitingConfirmation && order.priceComparisonError) ? (
-        <Link
-          href={`/orders/${order.id}#pricing-review`}
-          prefetch={false}
-          className={buttonVariants({ size: 'sm' })}
-        >
-          {order.priceComparisonError ? '处理核价' : '录入人工核价'}
-        </Link>
-      ) : null}
-      {awaitingConfirmation ? (
-        <Button
-          type="button"
-          size="sm"
-          disabled={confirmDisabled}
-          aria-describedby="admin-order-confirmation-preflight"
-          onClick={() =>
-            run(() =>
-              confirmFactoryOrderAction({
-                orderId: order.id,
-                expectedRevision: order.revision,
-                expectedWorkOrderVersion: order.workOrderVersion,
-                expectedQuoteToken: order.priceComparison?.quoteToken,
-              }),
-            )
-          }
-        >
-          确认工单
-        </Button>
-      ) : null}
       {order.capabilities.reject ? (
         <Button type="button" size="sm" variant="destructive" disabled={pending} onClick={() => openMode('reject')}>
           驳回
@@ -175,11 +154,16 @@ function AdminDecisionActions({
         </Button>
       ) : null}
       {order.capabilities.release ? (
-        <Button
-          type="button"
-          size="sm"
+        <DecisionConfirmation
+          label="下发 + 打印"
+          title="下发生产"
+          changes={[{label: order.customName ?? "未命名工单", old: "待下发", new: `${order.totalQuantity.toLocaleString("zh-CN")} 个待生产`}]}
+          impactItems={[
+            '车间可扫码报工，并生成打印任务。',
+          ]}
+          confirmLabel="下发并打印"
           disabled={pending}
-          onClick={() =>
+          onConfirm={() =>
             run(() =>
               releaseFactoryOrderAction({
                 orderId: order.id,
@@ -189,18 +173,7 @@ function AdminDecisionActions({
               }),
             )
           }
-        >
-          下发 + 打印
-        </Button>
-      ) : null}
-      {order.capabilities.ship ? (
-        <Link
-          href={`/orders/${order.id}#ship-order`}
-          prefetch={false}
-          className={buttonVariants({ size: 'sm' })}
-        >
-          录运单发货
-        </Link>
+        />
       ) : null}
       {order.capabilities.createPrint ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('CREATE_PRINT')}>
@@ -213,11 +186,16 @@ function AdminDecisionActions({
         </Button>
       ) : null}
       {order.capabilities.settle ? (
-        <Button
-          type="button"
-          size="sm"
+        <DecisionConfirmation
+          label="结算"
+          title="结算工单"
+          changes={[{label: order.customName ?? "未命名工单", old: "未结算", new: order.feeStages.confirmed === null ? "待核价" : `¥${formatMoney(order.feeStages.confirmed)}`}]}
+          impactItems={[
+            '结算后不可编辑，账单将采用本次结算金额。',
+          ]}
+          confirmLabel="结算"
           disabled={pending}
-          onClick={() =>
+          onConfirm={() =>
             run(() =>
               settleFactoryOrderAction({
                 orderId: order.id,
@@ -226,9 +204,7 @@ function AdminDecisionActions({
               }),
             )
           }
-        >
-          结算
-        </Button>
+        />
       ) : null}
       {order.capabilities.reviewChange &&
       order.pendingChangeRequest?.type === 'CANCEL' ? (
@@ -253,6 +229,7 @@ function AdminDecisionForm({
   figs,
   producedQty,
   settlementPreview,
+  settlementPreviewQuantity,
   settleFee,
   settleFeeAdjustmentReason,
   note,
@@ -274,6 +251,7 @@ function AdminDecisionForm({
   figs: string;
   producedQty: string;
   settlementPreview: CancellationSettlementReference | null;
+  settlementPreviewQuantity: number | null;
   settleFee: string;
   settleFeeAdjustmentReason: string;
   note: string;
@@ -293,6 +271,45 @@ function AdminDecisionForm({
     mode === 'reject' ||
     mode === 'hold' ||
     mode === 'resume';
+  const cancellationIssue = mode === 'change-approve' ? cancellationReviewIssue({
+    producedQuantity: parseStrictNonNegativeInteger(producedQty),
+    totalQuantity: order.totalQuantity,
+    preview: settlementPreview,
+    previewQuantity: settlementPreviewQuantity,
+    finalFee: settleFee,
+    adjustmentReason: settleFeeAdjustmentReason,
+  }) : null;
+  const formIssue = cancellationIssue ||
+    ((mode === 'reject' || mode === 'hold') && !parseStrictPositiveIntegerList(figs).ok
+      ? '涉及款号只能填写正整数，并用逗号或空格分隔'
+      : requiresNote && !note.trim()
+        ? mode === 'resume' ? '请填写已排除问题的证据。' : '请填写本次处理的理由。'
+        : null);
+  const labels = {
+    reject: '驳回工单', hold: '暂停工单', resume: '恢复生产',
+    'change-approve': '取消并结算工单', 'change-deny': '拒绝取消申请',
+  } as const;
+  const actionLabel = labels[mode];
+  const impactItems = [
+    `工单 ${order.orderNo}，版本 v${order.workOrderVersion}。`,
+    ...(mode === 'change-approve' ? [
+      `核实已产数量 ${producedQty.trim()} 个，最终结算金额 ¥${settleFee.trim()}。`,
+      ...(settleFeeAdjustmentReason.trim() ? [`金额调整原因：${settleFeeAdjustmentReason.trim()}。`] : []),
+      '批准后工单转为已取消，未完成的生产任务停止，并保存本次结算金额；已产部分照常结算。',
+    ] : mode === 'change-deny' ? [
+      '拒绝当前取消申请，工单状态和已完成的生产记录保持不变。',
+    ] : mode === 'reject' ? [
+      `驳回原因：${REJECT_REASONS.find(([code]) => code === reasonCode)?.[1] ?? reasonCode}。`,
+      '工单退回提交人处理，本次驳回理由和涉及款号会保留。',
+    ] : mode === 'hold' ? [
+      `暂停原因：${HOLD_REASONS.find(([code]) => code === reasonCode)?.[1] ?? reasonCode}。`,
+      '工单进入已暂停状态，恢复生产前需核对问题排除证据。',
+    ] : [
+      '核对已排除问题的证据后，恢复这张工单的生产流程。',
+    ]),
+    ...((mode === 'reject' || mode === 'hold') && figs.trim() ? [`涉及款号：${figs.trim()}。`] : []),
+    ...(note.trim() ? [`${mode === 'resume' ? '问题排除证据' : '处理说明'}：${note.trim()}。`] : []),
+  ];
 
   return (
     <div className="mt-3 space-y-2 border-t pt-3">
@@ -304,6 +321,7 @@ function AdminDecisionForm({
           <select
             id="decision-reason"
             value={reasonCode}
+            disabled={pending}
             onChange={(event) => setReasonCode(event.target.value as ReasonCode)}
             className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
           >
@@ -317,6 +335,7 @@ function AdminDecisionForm({
           </select>
           <Input
             value={figs}
+            disabled={pending}
             onChange={(event) => setFigs(event.target.value)}
             placeholder="涉及款号，如 1,3（可选）"
           />
@@ -332,6 +351,7 @@ function AdminDecisionForm({
               max={order.totalQuantity}
               step={1}
               value={producedQty}
+              disabled={pending}
               onChange={(event) => {
                 setProducedQty(event.target.value);
                 clearSettlementPreview();
@@ -362,25 +382,35 @@ function AdminDecisionForm({
               </p>
             </div>
           ) : null}
-          <Input
-            value={settleFee}
-            onChange={(event) => setSettleFee(event.target.value)}
-            placeholder="最终结算金额（默认参考价）"
-            inputMode="decimal"
-            aria-label="最终结算金额"
-          />
-          <Input
-            value={settleFeeAdjustmentReason}
-            onChange={(event) =>
-              setSettleFeeAdjustmentReason(event.target.value)
-            }
-            placeholder="最终金额与参考价不同时必填调整原因"
-            aria-label="结算调整原因"
-          />
+          <label className="block space-y-1 text-xs font-medium">
+            <span>最终结算金额（元）</span>
+            <Input
+              value={settleFee}
+              disabled={pending || !settlementPreview}
+              onChange={(event) => setSettleFee(event.target.value)}
+              placeholder="核对并填写最终结算金额"
+              inputMode="decimal"
+              aria-label="最终结算金额"
+            />
+          </label>
+          <label className="block space-y-1 text-xs font-medium">
+            <span>结算调整原因</span>
+            <Input
+              value={settleFeeAdjustmentReason}
+              disabled={pending || !settlementPreview}
+              onChange={(event) =>
+                setSettleFeeAdjustmentReason(event.target.value)
+              }
+              placeholder="最终金额与参考价不同时必填调整原因"
+              aria-label="结算调整原因"
+              maxLength={500}
+            />
+          </label>
         </div>
       ) : null}
       <textarea
         value={note}
+        disabled={pending}
         onChange={(event) => setNote(event.target.value)}
         maxLength={500}
         rows={3}
@@ -395,15 +425,18 @@ function AdminDecisionForm({
         required={requiresNote}
         className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          size="sm"
-          disabled={pending || (requiresNote && note.trim() === '')}
-          onClick={submitDecision}
-        >
-          {pending ? '提交中…' : '确认提交'}
-        </Button>
+      {formIssue ? <p id="admin-decision-form-help" role="status" className="text-xs text-muted-foreground">{formIssue}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <DecisionConfirmation
+          label={pending ? '提交中…' : `确认${actionLabel}`}
+          title={`${actionLabel}？`}
+          impactItems={impactItems}
+          confirmLabel={`确认${actionLabel}`}
+          disabled={pending || Boolean(formIssue)}
+          describedBy={formIssue ? 'admin-decision-form-help' : undefined}
+          variant={mode === 'reject' || mode === 'change-approve' || mode === 'change-deny' ? 'destructive' : 'default'}
+          onConfirm={submitDecision}
+        />
         <Button
           type="button"
           size="sm"
@@ -420,7 +453,7 @@ function AdminDecisionForm({
 
 function submitAdminOrderDecision({
   mode, order, reasonCode, note, figs, producedQty,
-  settleFee, settleFeeAdjustmentReason, run, setMessage,
+  settleFee, settleFeeAdjustmentReason, settlementPreview, settlementPreviewQuantity, run, setMessage,
 }: {
   mode: FormMode;
   order: AdminOrderWorkspaceRow;
@@ -430,6 +463,8 @@ function submitAdminOrderDecision({
   producedQty: string;
   settleFee: string;
   settleFeeAdjustmentReason: string;
+  settlementPreview: CancellationSettlementReference | null;
+  settlementPreviewQuantity: number | null;
   run: (task: DecisionTask) => void;
   setMessage: (value: string) => void;
 }) {
@@ -486,8 +521,16 @@ function submitAdminOrderDecision({
   }
   if (mode === 'change-approve') {
     const parsedProduced = parseStrictNonNegativeInteger(producedQty);
-    if (parsedProduced === null || parsedProduced > order.totalQuantity) {
-      setMessage(`已产数量必须是 0–${order.totalQuantity} 之间的整数`);
+    const issue = cancellationReviewIssue({
+      producedQuantity: parsedProduced,
+      totalQuantity: order.totalQuantity,
+      preview: settlementPreview,
+      previewQuantity: settlementPreviewQuantity,
+      finalFee: settleFee,
+      adjustmentReason: settleFeeAdjustmentReason,
+    });
+    if (issue || parsedProduced === null) {
+      setMessage(issue ?? '请核对已产数量。');
       return;
     }
     run(() =>
@@ -496,7 +539,7 @@ function submitAdminOrderDecision({
         decision: 'APPROVE',
         reviewRemark: note.trim() || null,
         producedQty: parsedProduced,
-        ...(settleFee.trim() ? { settleFee: settleFee.trim() } : {}),
+        settleFee: settleFee.trim(),
         ...(settleFeeAdjustmentReason.trim()
           ? {
             settleFeeAdjustmentReason:
@@ -518,8 +561,39 @@ function submitAdminOrderDecision({
 
 export function AdminOrderDecisionPanel({
   order,
+  compact = false,
 }: {
   order: AdminOrderWorkspaceRow;
+  compact?: boolean;
+}) {
+  return <AdminOrderDecisionSession key={order.id} order={order} compact={compact} />;
+}
+
+function AdminOrderDecisionSession({ order, compact }: {
+  order: AdminOrderWorkspaceRow;
+  compact: boolean;
+}) {
+  const [receipt, setReceipt] = useState<DecisionReceipt | null>(null);
+  const onCompleted = useCallback((text: string, tone: DecisionReceipt['tone'] = 'success') => {
+    setReceipt({ text, tone });
+  }, []);
+  return <>
+    <AdminOrderDecisionPanelContent
+      key={`${order.revision}:${order.workOrderVersion}:${order.pendingChangeRequest?.id ?? ''}`}
+      order={order}
+      compact={compact}
+      onCompleted={onCompleted}
+      clearReceipt={() => setReceipt(null)}
+    />
+    {receipt ? <ActionNotice tone={receipt.tone} title={receipt.text} className="mb-6 text-sm" /> : null}
+  </>;
+}
+
+function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearReceipt }: {
+  order: AdminOrderWorkspaceRow;
+  compact: boolean;
+  onCompleted: (text: string, tone?: DecisionReceipt['tone']) => void;
+  clearReceipt: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -529,12 +603,18 @@ export function AdminOrderDecisionPanel({
   const [note, setNote] = useState('');
   const [figs, setFigs] = useState('');
   const [producedQty, setProducedQty] = useState('');
+  const producedQtyRef = useRef('');
   const [settleFee, setSettleFee] = useState('');
   const [settleFeeAdjustmentReason, setSettleFeeAdjustmentReason] =
     useState('');
   const [settlementPreview, setSettlementPreview] =
     useState<CancellationSettlementReference | null>(null);
-  const [message, setMessage] = useState('');
+  const [settlementPreviewQuantity, setSettlementPreviewQuantity] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState<{ text: string; tone: 'error' | 'success' | 'warning' }>({ text: '', tone: 'error' });
+  const message = feedback.text;
+  function setMessage(text: string, tone: 'error' | 'success' | 'warning' = 'error') {
+    setFeedback({ text, tone });
+  }
 
   const awaitingConfirmation =
     order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED';
@@ -543,7 +623,7 @@ export function AdminOrderDecisionPanel({
   const hasAnyAction =
     Object.values(order.capabilities).some(Boolean) ||
     awaitingConfirmation ||
-    settlementBlockedByMissingFee;
+    settlementBlockedByMissingFee || Boolean(order.shipDisabledReason);
   if (!hasAnyAction) return null;
 
   function clearDecisionFields() {
@@ -551,7 +631,9 @@ export function AdminOrderDecisionPanel({
     setNote('');
     setFigs('');
     setProducedQty('');
+    producedQtyRef.current = '';
     setSettlementPreview(null);
+    setSettlementPreviewQuantity(null);
     setSettleFee('');
     setSettleFeeAdjustmentReason('');
   }
@@ -566,15 +648,18 @@ export function AdminOrderDecisionPanel({
     if (result.status === 'success') {
       if ('requestStatus' in result && result.requestStatus === 'STALE') {
         clearDecisionFields();
-        setMessage(
+        setMessage('');
+        onCompleted(
           '申请未执行：工单版本已变化，该申请已标记为失效，请基于最新工单重新发起。',
+          'warning',
         );
         setMode(null);
         router.refresh();
         return;
       }
       clearDecisionFields();
-      setMessage('操作成功；服务端已记录裁决与最新版本。');
+      setMessage('');
+      onCompleted('操作已完成，工单已更新。');
       setMode(null);
       router.refresh();
       return;
@@ -592,6 +677,7 @@ export function AdminOrderDecisionPanel({
   function run(task: DecisionTask) {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
+    clearReceipt();
     setMessage('');
     startTransition(async () => {
       try {
@@ -606,6 +692,7 @@ export function AdminOrderDecisionPanel({
 
   function openMode(nextMode: Exclude<FormMode, null>) {
     clearDecisionFields();
+    clearReceipt();
     setMessage('');
     setMode(nextMode);
   }
@@ -613,6 +700,7 @@ export function AdminOrderDecisionPanel({
   function runOneBatch(command: 'CREATE_PRINT' | 'MARK_PRINTED') {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
+    clearReceipt();
     setMessage('');
     startTransition(async () => {
       try {
@@ -631,8 +719,9 @@ export function AdminOrderDecisionPanel({
           ],
         });
         if (result.status === 'partial_failure') {
-          setMessage(
+          onCompleted(
             `${result.message}；成功 ${result.result.successCount} 张，结果未知 ${result.result.failedCount} 张`,
+            'warning',
           );
           router.refresh();
           return;
@@ -646,7 +735,7 @@ export function AdminOrderDecisionPanel({
           setMessage(item?.message ?? '该工单未执行');
           return;
         }
-        setMessage('操作成功；打印事实已追加记录。');
+        onCompleted(command === 'MARK_PRINTED' ? '已标记当前版本工单打印完成。' : '已创建当前版本的打印任务。');
         router.refresh();
       } catch {
         setMessage('打印操作未完成，请刷新工单后重试。');
@@ -670,7 +759,12 @@ export function AdminOrderDecisionPanel({
       return;
     }
     inFlightRef.current = true;
+    clearReceipt();
     setMessage('');
+    setSettlementPreview(null);
+    setSettlementPreviewQuantity(null);
+    setSettleFee('');
+    setSettleFeeAdjustmentReason('');
     startTransition(async () => {
       try {
         const result = await previewOrderCancellationSettlementAction(null, {
@@ -678,10 +772,12 @@ export function AdminOrderDecisionPanel({
           producedQty: parsedProduced,
         });
         if (result.status === 'success') {
+          if (parseStrictNonNegativeInteger(producedQtyRef.current) !== parsedProduced) return;
           setSettlementPreview(result.preview);
+          setSettlementPreviewQuantity(parsedProduced);
           setSettleFee(result.preview.referenceSettleFee);
           setSettleFeeAdjustmentReason('');
-          setMessage('已按服务端当前发布价计算参考结算价');
+          setMessage('参考价已更新，请核对最终结算金额。', 'success');
           return;
         }
         if (result.status === 'invalid') {
@@ -699,34 +795,61 @@ export function AdminOrderDecisionPanel({
 
   function submitDecision() {
     submitAdminOrderDecision({ mode, order, reasonCode, note, figs, producedQty,
-      settleFee, settleFeeAdjustmentReason, run, setMessage });
+      settleFee, settleFeeAdjustmentReason, settlementPreview, settlementPreviewQuantity, run, setMessage });
   }
 
   return (
     <section
+      data-slot="admin-order-decision-panel"
+      data-compact={compact || undefined}
       aria-labelledby="admin-order-decision-title"
       className="mb-6 rounded-xl border border-foreground/15 bg-muted/20 p-3"
     >
       <h3 id="admin-order-decision-title" className="text-sm font-semibold">
-        工厂裁决
+        {compact ? '待你处理' : '工厂裁决'}
       </h3>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {order.pendingChangeRequest?.type === 'MODIFY'
-          ? '管理员确认的是是否接受变更；款式与费用由服务端按最新规则自动合并和重算。'
-          : '价表版本与结算时间由服务端在锁内重读；取消结算可由管理员在引擎参考价上调整，差额必须留原因。'}
-      </p>
-
-      <ConfirmationPreflightNotice order={order} />
+      <div data-slot={compact ? 'admin-order-decision-card' : undefined}>
+      {compact ? (
+        <>
+          <h4 data-slot="admin-order-decision-heading" className="text-[12.5px] font-extrabold">
+            {order.pendingChangeRequest ? (order.pendingChangeRequest.type === 'MODIFY' ? '变更申请' : '取消申请')
+              : awaitingConfirmation ? '下发前检查'
+              : order.status === 'ON_HOLD' ? '暂停处理'
+              : order.capabilities.release ? '下发生产'
+              : order.capabilities.ship ? '录运单发货'
+              : order.capabilities.settle || settlementBlockedByMissingFee ? '结算'
+              : '工单处理'}
+          </h4>
+          {order.pendingChangeRequest ? <p className="mt-2 text-[12.5px] font-semibold">{order.pendingChangeRequest.reason}</p> : null}
+        </>
+      ) : null}
+      {!compact ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {order.pendingChangeRequest?.type === 'MODIFY'
+            ? '核对本次变更'
+            : '取消结算可调整参考金额，差额必须填写原因。'}
+        </p>
+      ) : null}
+      {!order.pendingChangeRequest && <ConfirmationPreflightNotice order={order} />}
       <MissingConfirmedFeeNotice
         orderId={order.id}
         visible={settlementBlockedByMissingFee}
       />
+      {!order.pendingChangeRequest && <AdminOrderInlineOperations order={order} disabled={pending} onCompleted={onCompleted} />}
+      {!order.capabilities.ship && order.shipDisabledReason ? <DisabledReason
+        cause="prerequisite"
+        reason={`暂不能发货：${order.shipDisabledReason}`}
+        fixHref={`/orders/${order.id}#ship-order`}
+        fixLabel="查看发货前置条件"
+        className="mt-3"
+      /> : null}
       {order.capabilities.reviewChange &&
       order.pendingChangeRequest?.type === 'MODIFY' ? (
         <div className="mt-3">
           <OrderChangeReviewForm
             key={order.pendingChangeRequest.id}
             requestId={order.pendingChangeRequest.id}
+            compact={compact}
             currentItems={order.items.map((item) => ({
               id: item.id,
               sequence: item.sequence,
@@ -736,13 +859,18 @@ export function AdminOrderDecisionPanel({
           />
         </div>
       ) : null}
-      <AdminDecisionActions
+      {!(compact && order.pendingChangeRequest?.type === 'MODIFY') && <AdminDecisionActions
         openMode={openMode}
         order={order}
         pending={pending}
         run={run}
         runOneBatch={runOneBatch}
-      />
+      />}
+      {compact && order.pendingChangeRequest?.type === 'MODIFY' && (order.capabilities.hold || order.capabilities.resume) ? (
+        <Button className="mt-3" type="button" size="sm" variant="outline" disabled={pending} onClick={() => openMode(order.capabilities.hold ? 'hold' : 'resume')}>
+          {order.capabilities.hold ? '暂停生产' : '恢复生产'}
+        </Button>
+      ) : null}
 
       {mode ? (
         <AdminDecisionForm
@@ -753,14 +881,19 @@ export function AdminOrderDecisionPanel({
           figs={figs}
           producedQty={producedQty}
           settlementPreview={settlementPreview}
+          settlementPreviewQuantity={settlementPreviewQuantity}
           settleFee={settleFee}
           settleFeeAdjustmentReason={settleFeeAdjustmentReason}
           note={note}
           setReasonCode={setReasonCode}
           setFigs={setFigs}
-          setProducedQty={setProducedQty}
+          setProducedQty={(value) => {
+            producedQtyRef.current = value;
+            setProducedQty(value);
+          }}
           clearSettlementPreview={() => {
             setSettlementPreview(null);
+            setSettlementPreviewQuantity(null);
             setSettleFee('');
             setSettleFeeAdjustmentReason('');
           }}
@@ -773,9 +906,14 @@ export function AdminOrderDecisionPanel({
         />
       ) : null}
 
-      <p role="status" aria-live="polite" className={message ? 'mt-3 text-xs font-medium' : 'sr-only'}>
-        {pending ? '正在按服务端最新事实处理…' : message}
-      </p>
+      {pending || message ? <p
+        role={!pending && message && feedback.tone === 'error' ? 'alert' : 'status'}
+        aria-live="polite"
+        className={pending || message ? `mt-3 text-xs font-medium ${pending ? 'text-muted-foreground' : feedback.tone === 'success' ? 'text-success-foreground' : feedback.tone === 'warning' ? 'text-warning-foreground' : 'text-destructive'}` : 'sr-only'}
+      >
+        {pending ? '正在处理，请稍候…' : message}
+      </p> : null}
+      </div>
     </section>
   );
 }

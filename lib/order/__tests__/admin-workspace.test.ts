@@ -1,3 +1,4 @@
+vi.mock('@/lib/order/production-readiness', () => ({ inspectOrderProductionReadinessInTx: vi.fn().mockResolvedValue(null) }));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderChangeRequestStatus,
@@ -58,14 +59,41 @@ import {
   getAdminOrderByOrderNo,
   loadAdminOrderWorkspace,
   resolveAdminOrderCapabilities,
+  resolveAdminOrderShipDisabledReason,
+  summarizeAdminOrderChange,
   resolveAdminPrintFacts,
   resolveAdminWorkspaceResultWhere,
 } from '../admin-workspace';
-import { parseAdminOrderWorkspaceQuery } from '../admin-workspace-query';
+import {
+  ADMIN_ORDER_QUEUES,
+  ADMIN_ORDER_SIGNALS,
+  parseAdminOrderWorkspaceQuery,
+} from '../admin-workspace-query';
 import { OrderChangeRequestError } from '../change-request';
 import { MISSING_ORDER_CUSTOMER_FILTER_VALUE } from '../list-query';
 
 const actor = { id: 'admin-1', role: Role.ADMIN };
+
+describe('admin change-request summary', () => {
+  const items = [{ id: 'item-1', sequence: 2, quantity: 1000, name: '原款式', specification: '中号封' }];
+
+  it('summarizes validated quantity and specification changes without leaking internal fields', () => {
+    expect(summarizeAdminOrderChange({ items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 2000, targetProductId: 'product-secret-1' }] }, items))
+      .toBe('第 2 款数量 1,000 → 2,000；第 2 款调整规格');
+  });
+
+  it('limits long requests and reports additions without depending on current quantities', () => {
+    const summary = summarizeAdminOrderChange({ items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 2000, specification: '大号封', name: '新款式' }, { operation: 'ADD', templateItemId: 'item-1', name: '新增款式', quantity: 500 }] }, items);
+    expect(summary).toBe('第 2 款数量 1,000 → 2,000；第 2 款调整规格；另 2 项变更');
+    expect(summarizeAdminOrderChange({ items: [{ operation: 'ADD', templateItemId: 'item-1', name: '新增款式', quantity: 500 }] }, items)).toBe('新增款式 500 个');
+  });
+
+  it('falls back to the request reason for malformed, unknown, or unchanged facts', () => {
+    for (const patch of [null, { items: 'unsafe' }, { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: -1 }] }, { items: [{ operation: 'UPDATE', itemId: 'missing-item', quantity: 2000 }] }, { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1000 }] }]) {
+      expect(summarizeAdminOrderChange(patch, items)).toBeNull();
+    }
+  });
+});
 
 function adminOrderRecord(overrides: Record<string, unknown> = {}) {
   const updatedAt = new Date('2026-09-02T08:00:00.000Z');
@@ -131,6 +159,7 @@ beforeEach(() => {
     async (callback: (tx: typeof dbMock) => unknown) => callback(dbMock),
   );
   dbMock.order.findMany.mockResolvedValue([]);
+  dbMock.order.count.mockReset().mockResolvedValue(0);
   dbMock.order.findFirst.mockResolvedValue(null);
   dbMock.order.findUnique.mockResolvedValue(null);
   dbMock.$queryRaw.mockResolvedValue([]);
@@ -192,9 +221,51 @@ describe('admin order workspace predicates', () => {
         { status: pendingStatuses },
         expect.any(Object),
         expect.any(Object),
+        expect.any(Object),
         { status: OrderStatus.ON_HOLD },
       ],
     });
+  });
+
+  it('limits pending release to confirmed work with no unresolved change and includes it in todo', async () => {
+    const pendingRelease = {
+      status: OrderStatus.CONFIRMED,
+      NOT: {
+        changeRequests: {
+          some: { status: OrderChangeRequestStatus.PENDING },
+        },
+      },
+    };
+    expect(adminSignalWhere('pending-release')).toEqual(pendingRelease);
+    expect(adminQueueWhere('todo')).toMatchObject({
+      OR: expect.arrayContaining([pendingRelease]),
+    });
+
+    const query = parseAdminOrderWorkspaceQuery({
+      signal: 'pending-release',
+      customerPartyId: 'party-1',
+      starred: 'yes',
+    }).query;
+    const now = new Date('2026-09-07T00:00:00.000Z');
+    const where = buildAdminWorkspaceResultWhere(actor, query, now);
+    expect(where).toMatchObject({
+      AND: [
+        {
+          AND: [
+            expect.any(Object),
+            { stars: { some: { userId: actor.id } } },
+            {},
+          ],
+        },
+        adminQueueWhere('todo'),
+        pendingRelease,
+      ],
+    });
+    expect(JSON.stringify(where)).toContain('party-1');
+    // Exports must retain the same status, change-request and user filters.
+    await expect(resolveAdminWorkspaceResultWhere(actor, query, now)).resolves.toEqual(
+      where,
+    );
   });
 
   it('keeps REJECTED out of done and resolves the print queue with a correlated snapshot', () => {
@@ -341,7 +412,10 @@ describe('admin order workspace predicates', () => {
           status: OrderStatus.COMPLETED,
         }).ship,
       ).toBe(false);
+      expect(resolveAdminOrderShipDisabledReason({ ...base, ...blocked, status: OrderStatus.COMPLETED })).toBeTruthy();
     }
+    expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.PACKING })).toBeNull();
+    expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.CONFIRMED })).toBe('当前工单状态不支持发货');
     expect(
       resolveAdminOrderCapabilities({
         ...base,
@@ -398,6 +472,42 @@ describe('admin order workspace predicates', () => {
     const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
 
     expect(detail?.capabilities.ship).toBe(false);
+    expect(detail?.shipDisabledReason).toBe('生产工序尚未完成，请先核对报工');
+  });
+
+  it.each([
+    OrderStatus.PENDING_FACTORY,
+    OrderStatus.REJECTED,
+    OrderStatus.CONFIRMED,
+    OrderStatus.FOILING,
+    OrderStatus.ON_HOLD,
+    OrderStatus.SHIPPED,
+    OrderStatus.SETTLED,
+    OrderStatus.FINISHED,
+    OrderStatus.CANCELLED,
+  ])('does not describe %s as waiting for shipment', async (status) => {
+    const row = adminOrderRecord({ status });
+    dbMock.order.findFirst.mockResolvedValue(row);
+    dbMock.order.findUnique.mockResolvedValue({
+      revision: row.revision,
+      workOrderVersion: row.workOrderVersion,
+      priceRevision: row.priceRevision,
+      updatedAt: row.updatedAt,
+    });
+
+    const detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+
+    expect(detail?.capabilities.ship).toBe(false);
+    expect(detail?.shipDisabledReason).toBeNull();
+  });
+
+  it('keeps missing-delivery guidance actionable in packing', async () => {
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({ status: OrderStatus.PACKING, _count: { shipments: 0 } }));
+
+    const detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+
+    expect(detail?.capabilities.ship).toBe(false);
+    expect(detail?.shipDisabledReason).toBe('尚未填写配送信息，请先补齐配送');
   });
 
   it('resolves print-export membership from unresolved current-version requests', async () => {
@@ -454,10 +564,6 @@ describe('admin order workspace predicates', () => {
       expect.objectContaining({ AND: expect.any(Array) }),
     );
 
-    dbMock.order.count.mockResolvedValueOnce(0);
-    for (let index = 0; index < 13; index += 1) {
-      dbMock.order.count.mockResolvedValueOnce(index);
-    }
     await loadAdminOrderWorkspace(actor, query);
     expect(dbMock.order.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -471,20 +577,27 @@ describe('admin order workspace predicates', () => {
 
   it('aggregates the whole filtered set and excludes manual pending quotes', async () => {
     const query = parseAdminOrderWorkspaceQuery({ queue: 'all' }).query;
+    const now = new Date('2026-09-07T00:00:00.000Z');
+    const queueCounts = {
+      todo: 3, print: 1, production: 2, shipped: 1, done: 2, all: 9,
+    };
+    const signalCounts = {
+      'pending-confirmation': 2,
+      'pending-pricing': 1,
+      'pending-release': 4,
+      'pending-change': 3,
+      'on-hold': 5,
+      overdue: 6,
+      'due-today': 7,
+    };
+    dbMock.order.count.mockResolvedValueOnce(5);
+    for (const queue of ADMIN_ORDER_QUEUES) {
+      dbMock.order.count.mockResolvedValueOnce(queueCounts[queue]);
+    }
+    for (const signal of ADMIN_ORDER_SIGNALS) {
+      dbMock.order.count.mockResolvedValueOnce(signalCounts[signal]);
+    }
     dbMock.order.count
-      .mockResolvedValueOnce(5)
-      .mockResolvedValueOnce(3)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(2)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(2)
-      .mockResolvedValueOnce(9)
-      .mockResolvedValueOnce(2)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(1)
       .mockResolvedValueOnce(2)
       .mockResolvedValueOnce(3)
       .mockResolvedValueOnce(4);
@@ -496,7 +609,14 @@ describe('admin order workspace predicates', () => {
       .mockResolvedValueOnce({ _sum: { confirmedFee: '20.25' } })
       .mockResolvedValueOnce({ _sum: { quotedFee: '3.75' } });
 
-    const page = await loadAdminOrderWorkspace(actor, query);
+    const page = await loadAdminOrderWorkspace(actor, query, now);
+    expect(page.counts).toEqual({ queues: queueCounts, signals: signalCounts });
+    const signalCountStart = 1 + ADMIN_ORDER_QUEUES.length;
+    for (const [index, signal] of ADMIN_ORDER_SIGNALS.entries()) {
+      expect(dbMock.order.count.mock.calls[signalCountStart + index]?.[0]).toEqual({
+        where: { AND: [expect.any(Object), adminSignalWhere(signal, now)] },
+      });
+    }
     expect(page.summary).toEqual({
       orderCount: 5,
       totalQuantity: 12345,
@@ -510,12 +630,13 @@ describe('admin order workspace predicates', () => {
       _sum: { quantity: true },
     });
     expect(dbMock.order.aggregate).toHaveBeenCalledTimes(3);
-    expect(dbMock.order.count.mock.calls[13]?.[0]).toEqual({
+    const summaryCountStart = signalCountStart + ADMIN_ORDER_SIGNALS.length;
+    expect(dbMock.order.count.mock.calls[summaryCountStart]?.[0]).toEqual({
       where: {
         AND: [expect.any(Object), adminManualPricingWhere()],
       },
     });
-    expect(dbMock.order.count.mock.calls[14]?.[0]).toEqual({
+    expect(dbMock.order.count.mock.calls[summaryCountStart + 1]?.[0]).toEqual({
       where: {
         AND: [
           expect.any(Object),
@@ -524,7 +645,7 @@ describe('admin order workspace predicates', () => {
         ],
       },
     });
-    expect(dbMock.order.count.mock.calls[15]?.[0]).toEqual({
+    expect(dbMock.order.count.mock.calls[summaryCountStart + 2]?.[0]).toEqual({
       where: {
         AND: [
           expect.any(Object),
@@ -568,11 +689,47 @@ describe('admin order workspace predicates', () => {
 
     expect(detail).toMatchObject({
       status: OrderStatus.REJECTED,
-      statusSummary: null,
+      statusSummary: '等待销售补正后重新提交',
       fee: { amount: null, source: 'INCOMPLETE' },
       feeStages: { quoted: '12.34', active: 'INCOMPLETE' },
       capabilities: { confirm: false },
     });
+  });
+
+  it('does not display a new unquoted draft as a historical zero-price order', async () => {
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({ status: OrderStatus.DRAFT, totalAmount: new Prisma.Decimal(0), priceRevision: 0 }));
+    expect((await getAdminOrderByOrderNo(actor, 'GD-260902-001'))?.fee).toMatchObject({ amount: null, source: 'PENDING' });
+  });
+
+  it('aggregates canonical craft types independently of display dictionary names', async () => {
+    const record = adminOrderRecord();
+    const crafts = ['PRINT', 'PARTIAL', 'FULL', 'PARTIAL', null];
+    dbMock.order.findFirst.mockResolvedValue({ ...record, items: crafts.map((craft, index) => ({ ...record.items[0], id: `item-${index}`, craft })) });
+    const detail = await getAdminOrderByOrderNo(actor, record.orderNo);
+    expect(detail?.craftTags).toEqual(['局部烫金', '专版烫金', '彩印']);
+    expect(detail?.craftSummary).toBe('工艺待补');
+    expect(dbMock.order.findFirst.mock.calls[0][0].select.items.select.craft).toBe(true);
+  });
+
+  it('shows the immutable rejection reason and future Shanghai calendar days', async () => {
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({
+      status: OrderStatus.REJECTED,
+      promisedDate: new Date('2026-09-10T00:00:00.000Z'),
+      workflowDecisions: [{ toStatus: OrderStatus.REJECTED, reasonCode: 'DESIGN_ERROR', reasonNote: '第二款需重传设计图' }],
+    }));
+    const detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001', new Date('2026-09-01T16:00:00.000Z'));
+    expect(detail?.statusSummary).toBe('驳回：设计图有误 · 第二款需重传设计图');
+    expect(detail?.promisedDaysLeft).toBe(8);
+  });
+
+  it('does not use an unrelated workflow reason or keep countdowns on shipped orders', async () => {
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({
+      status: OrderStatus.REJECTED,
+      workflowDecisions: [{ toStatus: OrderStatus.ON_HOLD, reasonCode: 'PAPER_OUT', reasonNote: '以前的暂停原因' }],
+    }));
+    expect((await getAdminOrderByOrderNo(actor, 'GD-260902-001'))?.statusSummary).toBe('等待销售补正后重新提交');
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({ status: OrderStatus.SHIPPED, promisedDate: new Date('2026-09-10T00:00:00.000Z') }));
+    expect((await getAdminOrderByOrderNo(actor, 'GD-260902-001'))?.promisedDaysLeft).toBeNull();
   });
 
   it('keeps an actionable incomplete quote aligned with the pending-pricing signal', async () => {
@@ -599,63 +756,24 @@ describe('admin order workspace predicates', () => {
     });
   });
 
-  it('disables confirmation when the current-price preview fails', async () => {
+  it('reads the saved price even when the current catalog cannot be quoted', async () => {
     const row = adminOrderRecord();
     dbMock.order.findFirst.mockResolvedValue(row);
-    dbMock.order.findUnique.mockResolvedValue({
-      revision: row.revision,
-      workOrderVersion: row.workOrderVersion,
-      priceRevision: row.priceRevision,
-      updatedAt: row.updatedAt,
-    });
-    previewMock.mockRejectedValueOnce(
-      new OrderChangeRequestError('当前价不可用'),
-    );
-
+    previewMock.mockRejectedValue(new OrderChangeRequestError('当前价不可用'));
     const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
-
-    expect(detail).toMatchObject({
-      orderNo: row.orderNo,
-      priceComparison: null,
-      priceComparisonError: '当前价不可用',
-      capabilities: { confirm: false, reject: true },
-    });
-    expect(dbMock.$transaction).toHaveBeenCalledWith(
-      expect.any(Function),
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-    );
+    expect(detail).toMatchObject({ orderNo: row.orderNo, priceComparison: null, priceComparisonError: null });
+    expect(previewMock).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     expect(progressMock).toHaveBeenCalledWith([row.id], dbMock);
   });
 
-  it('retries the whole detail snapshot when the price preview crosses a version change', async () => {
-    const first = adminOrderRecord();
-    const second = adminOrderRecord({
-      revision: 2,
-      priceRevision: 2,
-      updatedAt: new Date('2026-09-02T08:01:00.000Z'),
-    });
-    dbMock.order.findFirst
-      .mockResolvedValueOnce(first)
-      .mockResolvedValueOnce(second);
-    dbMock.order.findUnique
-      .mockResolvedValueOnce({
-        revision: second.revision,
-        workOrderVersion: second.workOrderVersion,
-        priceRevision: second.priceRevision,
-        updatedAt: second.updatedAt,
-      })
-      .mockResolvedValueOnce({
-        revision: second.revision,
-        workOrderVersion: second.workOrderVersion,
-        priceRevision: second.priceRevision,
-        updatedAt: second.updatedAt,
-      });
-
-    const detail = await getAdminOrderByOrderNo(actor, first.orderNo);
-
+  it('returns one coherent read snapshot without a second pricing transaction', async () => {
+    const row = adminOrderRecord({ revision: 2, priceRevision: 2 });
+    dbMock.order.findFirst.mockResolvedValue(row);
+    const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
     expect(detail?.revision).toBe(2);
-    expect(previewMock).toHaveBeenCalledTimes(2);
-    expect(dbMock.$transaction).toHaveBeenCalledTimes(2);
+    expect(previewMock).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it('does not confuse a real customer named like the empty-state label with the missing sentinel', async () => {

@@ -1,3 +1,7 @@
+import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
+import { prepareOrderForProductionInTx } from './production-readiness';
+import { OrderChangeRequestError } from './change-request-error';
+import { ORDER_MODIFIABLE_STATUSES } from './editable-fields';
 import Decimal from 'decimal.js';
 import {
   BackgroundJobStatus,
@@ -9,6 +13,7 @@ import {
   OrderChangeRequestType,
   OrderCustomerChargeStatus,
   OrderItemPricingRoute,
+  OrderItemQuoteDisposition,
   OrderPackagingMode,
   OrderPrintKind,
   OutsourceStatus,
@@ -55,11 +60,15 @@ import {
   CsSalesLedgerError,
   recordCsSalesEntryInTx,
 } from '../salary/cs-sales';
+import { maybeCompleteProductionOrder, dispatchProductionCompletionNotification, type ProductionCompletionNotification, type ProductionCompletionTx } from '../production-completion';
 import { MAX_ORDER_ITEMS_PER_ORDER } from './limits';
+import { resolveOrderChangeStageInTx } from './change-stage';
+import { proposedDueDateText, readProposedDueDate, dueDateChangePreview } from './change-due-date';
 import { orderCascadeLockKey } from './locks';
 import {
   applyPendingPlateChargeWaiverInTx,
   PENDING_PLATE_BUSINESS_KEY,
+  quoteHasDefaultZeroPlateCharge,
   PendingPlateChargeError,
   preparePendingPlateChargeWaiverInTx,
   type PendingPlateChargeWaiverPlan,
@@ -84,7 +93,7 @@ import {
   type CatalogCreateOrderQuoteCalculation,
 } from './create-order-quote-service';
 import type { CreateOrderItemQuotePreview } from './create-order-quote-presentation';
-import { activateProductionOperationsInTx } from '../production/operation-materialization-service';
+import { activateProductionOperationsInTx, ProductionOperationMaterializationError } from '../production/operation-materialization-service';
 import {
   buildTrustedAdminChargePricingSnapshot,
   buildTrustedAdminPricingSnapshot,
@@ -102,16 +111,7 @@ import {
   type OrderChangeCatalogProduct,
 } from './change-request-catalog-identity';
 
-const CHANGEABLE_ORDER_STATUSES: OrderStatus[] = [
-  OrderStatus.DRAFT,
-  OrderStatus.SUBMITTED,
-  OrderStatus.SCHEDULING,
-  OrderStatus.IN_PRODUCTION,
-  OrderStatus.CONFIRMED,
-  OrderStatus.RELEASED,
-  OrderStatus.FOILING,
-  OrderStatus.PACKING,
-];
+const CHANGEABLE_ORDER_STATUSES = ORDER_MODIFIABLE_STATUSES;
 const CANCELLABLE_BY_REQUEST_STATUSES: OrderStatus[] = [
   OrderStatus.CONFIRMED,
   OrderStatus.RELEASED,
@@ -193,7 +193,7 @@ const CANCELLATION_REQUEST_INCLUDE = {
           workOrderProgressQuantity: true,
         },
       },
-      productionOperations: { select: { id: true, status: true } },
+      productionOperations: { select: { id: true, status: true, workOrderVersion: true, operationType: true, carriedWorkOrderProgressQty: true } },
       productionProgressSteps: { select: { id: true, status: true } },
       outsourceOrders: {
         where: {
@@ -280,12 +280,7 @@ type ModificationReviewRequest = Prisma.OrderChangeRequestGetPayload<{
   include: typeof MODIFICATION_REVIEW_REQUEST_INCLUDE;
 }>;
 
-export class OrderChangeRequestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'OrderChangeRequestError';
-  }
-}
+export { OrderChangeRequestError } from './change-request-error';
 
 type ModifyChangeRequestInput = Extract<
   CreateOrderChangeRequestInput,
@@ -301,14 +296,16 @@ type CreateOrderChangeRequestCommand =
 function assertCanRequest(
   actor: { id: string; role: Role },
   order: { submitterId: string; status: OrderStatus },
+  isModification: boolean,
 ): void {
   if (
+    !(actor.role === Role.ADMIN && isModification) &&
     actor.role !== Role.SALES &&
     actor.role !== Role.CUSTOMER_SERVICE
   ) {
-    throw new OrderChangeRequestError('只有销售和客服可以提交工单修改申请');
+    throw new OrderChangeRequestError('当前账号无权提交此类工单申请');
   }
-  if (order.submitterId !== actor.id) {
+  if (actor.role !== Role.ADMIN && order.submitterId !== actor.id) {
     throw new OrderChangeRequestError('只能修改自己提交的工单');
   }
   if (!CHANGEABLE_ORDER_STATUSES.includes(order.status)) {
@@ -379,6 +376,7 @@ async function readChangeRequestOrderInTx(
       status: true,
       revision: true,
       workOrderVersion: true,
+      promisedDate: true,
       settlementType: true,
       isSfCollect: true,
       items: {
@@ -472,7 +470,23 @@ async function readChangeRequestOrderInTx(
     },
   });
   if (!order) throw new OrderChangeRequestError('工单不存在');
-  return order;
+  const actualStatus = order.status;
+  const status = await resolveOrderChangeStageInTx(tx, order);
+  return { ...order, status, actualStatus };
+}
+
+/** Internal transaction context for atomic administrator edits. Never accepted from an action payload. */
+export type OrderChangeTransactionContext = {
+  tx: Prisma.TransactionClient;
+  requestId?: string;
+  onCompletion?: (notification: ProductionCompletionNotification | undefined) => void;
+};
+
+function inOrderChangeTransaction<T>(
+  context: OrderChangeTransactionContext | undefined,
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return context ? work(context.tx) : db.$transaction(work);
 }
 
 /**
@@ -482,21 +496,22 @@ async function readChangeRequestOrderInTx(
 export async function createOrderChangeRequest(
   input: CreateOrderChangeRequestCommand,
   actor: { id: string; role: Role },
+  context?: OrderChangeTransactionContext,
 ) {
-  const notificationEnabled = (
+  const notificationEnabled = !context && (
     await getSetting('notify_order_change_enabled')
   ).enabled;
   let postCommitNotification: NotificationPayloadFor<'ORDER_CHANGE_REQUESTED'> | null =
     null;
   let createdRequest: CreatedOrderChangeRequest;
   try {
-    createdRequest = await db.$transaction(async (tx) => {
+    createdRequest = await inOrderChangeTransaction(context, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
         input.orderId,
       )}))`;
 
       const order = await readChangeRequestOrderInTx(tx, input.orderId);
-      assertCanRequest(actor, order);
+      assertCanRequest(actor, order, input.type !== 'CANCEL');
       assertExpectedOrderVersions(input, order);
       if (
         input.type === 'CANCEL' &&
@@ -528,6 +543,11 @@ export async function createOrderChangeRequest(
         itemById,
       );
       assertNoSemanticNoopUpdates(resolvedChanges, itemById);
+      const promisedDate = input.type === 'CANCEL' ? undefined : proposedDueDateText(input.promisedDate);
+      if (input.type !== 'CANCEL' && resolvedChanges.length === 0 &&
+          (promisedDate === undefined || promisedDate === proposedDueDateText(order.promisedDate))) {
+        throw new OrderChangeRequestError('请填写实际的款式或交期变更');
+      }
       for (const change of resolvedChanges) {
         const sourceId =
           change.operation === 'UPDATE'
@@ -553,6 +573,7 @@ export async function createOrderChangeRequest(
       assertPackagingChangeRequestSupported({
         changes: resolvedChanges,
         groups: order.packagingGroups ?? [],
+        status: order.status,
       });
       if (!allowsProductionGenerationUpgrade(order.status)) {
         assertNoMaterializedProductionFactChange(
@@ -590,6 +611,7 @@ export async function createOrderChangeRequest(
 
       const created = await tx.orderChangeRequest.create({
         data: {
+          ...(context?.requestId ? { id: context.requestId } : {}),
           orderId: order.id,
           requesterId: actor.id,
           baseRevision: order.revision,
@@ -605,11 +627,13 @@ export async function createOrderChangeRequest(
             orderNo: order.orderNo,
             revision: order.revision,
             workOrderVersion: order.workOrderVersion,
-            status: order.status,
+            status: order.actualStatus,
+            promisedDate: proposedDueDateText(order.promisedDate) ?? null,
             items: order.items,
           },
           proposedChanges: {
             items: resolvedChanges.map(toStoredProposedChange),
+            ...(promisedDate !== undefined ? { promisedDate } : {}),
           },
         },
         include: {
@@ -650,7 +674,7 @@ export async function createOrderChangeRequest(
           orderNo: order.orderNo,
           // Deliberately do not forward the free-text reason: it may contain a
           // customer name, price, phone number, or other sensitive detail.
-          summary: `销售已提交${requestKind}申请，待工厂确认`,
+          summary: `${actor.role === Role.ADMIN ? '管理员' : '销售'}已提交${requestKind}申请，待工厂确认`,
           deepLink: `/orders#wo=${encodeURIComponent(order.orderNo)}`,
         };
         const queued = await enqueueNotificationInTransaction(
@@ -692,7 +716,7 @@ export async function withdrawOrderChangeRequest(
   input: WithdrawOrderChangeRequestInput,
   actor: { id: string; role: Role },
 ) {
-  if (actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE) {
+  if (actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE && actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有申请人可以撤回工单变更申请');
   }
   const locator = await db.orderChangeRequest.findUnique({
@@ -1026,6 +1050,8 @@ function resolvePureChangeRequestPricing(input: {
   unitPrice: string;
   fixedFee: string;
   subtotal: string;
+  quoteDisposition: typeof OrderItemQuoteDisposition.PRICED;
+  quotedAmount: string;
   suggestedSubtotal: string | null;
   pricingSnapshot: Prisma.InputJsonObject;
   priceOverrideReason: string | null;
@@ -1067,9 +1093,13 @@ function resolvePureChangeRequestPricing(input: {
     unitPrice,
     fixedFee,
     subtotal,
+    quoteDisposition: OrderItemQuoteDisposition.PRICED,
+    quotedAmount: subtotal,
     suggestedSubtotal: quote.suggestedSubtotal,
     pricingSnapshot: {
       ...quote.snapshot,
+      // Keep the DB compatibility envelope while retaining the pure engine schema.
+      version: 1,
       source: 'CHANGE_REQUEST_PURE_REQUOTE',
       itemKey,
       requestId,
@@ -1197,7 +1227,21 @@ function assertNoCrossGroupItemMembership(
 function assertPackagingChangeRequestSupported(input: {
   changes: readonly NormalizedProposedItemChange[];
   groups: readonly PackagingMembershipGroup[];
+  status: OrderStatus;
 }): void {
+  const changesPackaging = input.changes.some(
+    (change) => change.operation === 'UPDATE' && change.pack !== undefined,
+  );
+  const packagingEditable = [
+    OrderStatus.DRAFT,
+    OrderStatus.PENDING_FACTORY,
+    OrderStatus.REJECTED,
+    OrderStatus.SUBMITTED,
+    OrderStatus.CONFIRMED,
+  ].some((status) => status === input.status);
+  if (changesPackaging && !packagingEditable) {
+    throw new OrderChangeRequestError('已进入生产的工单不能直接修改分袋组成');
+  }
   if (
     input.groups.length > 0 &&
     input.changes.some((change) => change.operation === 'ADD')
@@ -2138,7 +2182,7 @@ async function preparePendingPlateChargeReset(input: {
   customerCharges: LogisticsProjectionCharge[];
 }): Promise<PendingPlateChargeResetPlan> {
   try {
-    const staleDetails = await input.client.orderItemPlateDetail.findMany({
+    const staleDetails = quoteHasDefaultZeroPlateCharge(input.quote) ? [] : await input.client.orderItemPlateDetail.findMany({
       where: {
         isActive: true,
         orderItem: { orderId: input.orderId },
@@ -2445,6 +2489,7 @@ function changeAffectsPricing(
   change: ResolvedProposedItemChange,
   item: FoilFactSource & {
     quantity: number;
+    pack?: number | null;
     productId: string | null;
     specification: string | null;
     productStructure: PricingProjectionItem['productStructure'];
@@ -2468,6 +2513,7 @@ function changeAffectsPricing(
   );
   return (
     (change.quantity !== undefined && change.quantity !== item.quantity) ||
+    (change.pack !== undefined && change.pack !== item.pack) ||
     catalogIdentityChanged ||
     (change.foilFactsProvided &&
       (!sameStringSet(change.frontFoilColors, foil.frontFoilColors) ||
@@ -2478,6 +2524,7 @@ function changeAffectsPricing(
 type SemanticChangeItem = FoilFactSource & {
   name: string;
   quantity: number;
+  pack?: number | null;
   productId: string | null;
   specification: string | null;
   productStructure: PricingProjectionItem['productStructure'];
@@ -2850,6 +2897,33 @@ function projectedQuoteItems(input: {
   return projected;
 }
 
+function projectPackagingUnits(
+  groups: readonly PackagingProjectionGroup[],
+  changes: readonly ResolvedProposedItemChange[],
+): PackagingProjectionGroup[] {
+  const updates = new Map(
+    changes.flatMap((change) =>
+      change.operation === 'UPDATE' && change.pack !== undefined
+        ? [[change.itemId, change.pack] as const]
+        : [],
+    ),
+  );
+  for (const itemId of updates.keys()) {
+    const memberships = groups.flatMap((group) =>
+      group.lines.filter((line) => line.orderItemId === itemId),
+    );
+    if (memberships.length !== 1) {
+      throw new OrderChangeRequestError('款式缺少唯一包装明细，不能仅凭每包数量重建分袋记录');
+    }
+  }
+  return groups.map((group) => ({
+    ...group,
+    lines: group.lines.map((line) => ({
+      ...line, unitsPerBag: updates.get(line.orderItemId) ?? line.unitsPerBag,
+    })),
+  }));
+}
+
 async function calculateProjectedOrderQuote(input: {
   client: Prisma.TransactionClient;
   now: Date;
@@ -2885,7 +2959,7 @@ async function calculateProjectedOrderQuote(input: {
       now: input.now,
       facts: {
         items: projectedItems.map((item) => item.facts),
-        packagingGroups: input.packagingGroups.map((group) => ({
+        packagingGroups: projectPackagingUnits(input.packagingGroups, input.changes).map((group) => ({
           groupKey: group.id,
           mode: group.mode,
           items: group.lines.map((line) => ({
@@ -3519,6 +3593,7 @@ export type OrderChangePricingPreviewItem = {
 };
 
 export type OrderChangePricingPreview = {
+  promisedDateChange?: { before: string | null; after: string | null };
   requestId: string;
   orderId: string;
   baseRevision: number;
@@ -3600,6 +3675,7 @@ async function readReviewableChangeRequestInTx(
   if (versionMismatchReason) {
     throw new OrderChangeRequestError(versionMismatchReason);
   }
+  request.order.status = await resolveOrderChangeStageInTx(tx, request.order);
   if (!CHANGEABLE_ORDER_STATUSES.includes(request.order.status)) {
     throw new OrderChangeRequestError('工单已完工，不能预览修改计价');
   }
@@ -3676,6 +3752,7 @@ function buildUnchangedPricingPreview(
     delta: '0.00',
     items,
     pendingCharges: [],
+    promisedDateChange: dueDateChangePreview(request.proposedChanges, request.order.promisedDate),
   };
 }
 
@@ -3692,18 +3769,19 @@ export async function previewOrderChangeRequestPricing(
     expectedPriceRevision?: number;
     pendingChargeResolutions?: readonly OrderChangePendingChargeResolutionInput[];
   } = {},
+  context?: OrderChangeTransactionContext,
 ): Promise<OrderChangePricingPreview> {
   if (actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有管理员可以预览工单修改计价');
   }
 
-  const locator = await db.orderChangeRequest.findUnique({
+  const locator = await (context?.tx ?? db).orderChangeRequest.findUnique({
     where: { id: requestId },
     select: { orderId: true },
   });
   if (!locator) throw new OrderChangeRequestError('修改申请不存在');
 
-  return db.$transaction(async (tx) => {
+  return inOrderChangeTransaction(context, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       locator.orderId,
     )}))`;
@@ -3722,7 +3800,7 @@ export async function previewOrderChangeRequestPricing(
       normalizedChanges,
       itemById,
     );
-    if (!request.order.shipments.some((shipment) => shipment.sequence === 1)) {
+    if (changes.length > 0 && !request.order.shipments.some((shipment) => shipment.sequence === 1)) {
       throw new OrderChangeRequestError('工单缺少主收货地址，不能安全更新数量');
     }
     for (const change of changes) {
@@ -3758,6 +3836,7 @@ export async function previewOrderChangeRequestPricing(
     assertPackagingChangeRequestSupported({
       changes,
       groups: request.order.packagingGroups ?? [],
+      status: request.order.status,
     });
     if (!allowsProductionGenerationUpgrade(request.order.status)) {
       assertNoMaterializedProductionFactChange(
@@ -3882,7 +3961,7 @@ export async function previewOrderChangeRequestPricing(
     const recalculatedChargeCodes = new Set([
       'SHIPPING_FEE',
       'PACKING_MATERIAL',
-      ...(shouldSyncPlateCharge(
+      ...(!quoteHasDefaultZeroPlateCharge(projected.calculation.quote) && shouldSyncPlateCharge(
         request.order.status,
         request.order.settlementType,
       )
@@ -3927,6 +4006,7 @@ export async function previewOrderChangeRequestPricing(
       priceRevision: request.order.priceRevision,
       quoteToken: approvalToken,
       quotedAt: quotedAt.toISOString(),
+      promisedDateChange: dueDateChangePreview(request.proposedChanges, request.order.promisedDate),
       complete,
       requiresReviewRemark: false,
       totalExcludesPendingPlateFee:
@@ -4499,6 +4579,12 @@ function validateCancellationProducedQuantity(
       ),
     );
   }
+  for (const operation of request.order.productionOperations ?? []) {
+    if (operation.workOrderVersion !== request.order.workOrderVersion) continue;
+    const stage = operation.operationType === 'PACKING' ? 'PACKING' : 'FOILING';
+    progressByStage.set(stage, (progressByStage.get(stage) ?? new Decimal(0))
+      .plus(operation.carriedWorkOrderProgressQty ?? 0));
+  }
   const reportedMinimum = Decimal.max(
     ...[...progressByStage.values(), new Decimal(0)],
   );
@@ -4665,6 +4751,7 @@ export async function previewOrderCancellationSettlement(
     if (request.status !== OrderChangeRequestStatus.PENDING) {
       throw new OrderChangeRequestError('该申请已经处理');
     }
+    request.order.status = await resolveOrderChangeStageInTx(tx, request.order);
     const versionMismatchReason = changeRequestVersionMismatchReason(request);
     if (versionMismatchReason) {
       throw new OrderChangeRequestError(versionMismatchReason);
@@ -4781,6 +4868,8 @@ async function reviewOrderCancellationRequest(
       });
       return denied;
     }
+    const actualStatus = request.order.status;
+    request.order.status = await resolveOrderChangeStageInTx(tx, request.order);
     const versionMismatchReason = changeRequestVersionMismatchReason(request);
     if (versionMismatchReason) {
       return tx.orderChangeRequest.update({
@@ -4892,7 +4981,7 @@ async function reviewOrderCancellationRequest(
         operatorId: actor.id,
         action: 'CHANGE_REQUEST_CANCEL_APPROVED',
         changedFields: {
-          status: { before: request.order.status, after: OrderStatus.CANCELLED },
+          status: { before: actualStatus, after: OrderStatus.CANCELLED },
           producedQty: { before: null, after: producedQty },
           referenceSettleFee: { before: null, after: reference.referenceSettleFee },
           settledFee: { before: null, after: settleFeeText },
@@ -4964,21 +5053,22 @@ async function persistApprovedModificationPricingInTx(input: {
     });
   }
 
-  const refreshedItems = await tx.orderItem.findMany({
-    where: { orderId: request.order.id },
-    select: { subtotal: true },
-  });
   const nextRevision = request.order.revision + 1;
   const currentWorkOrderVersion = request.order.workOrderVersion ?? 1;
   const nextWorkOrderVersion =
     currentWorkOrderVersion + (versionedProductionChange ? 1 : 0);
   const nextPackagingAmount =
     packagingReprice?.total ?? request.order.packagingAmount;
-  const nextProcessingAmount = orderTotal(
-    refreshedItems,
-    nextPackagingAmount,
-  );
+  // Metadata-only approval must agree with buildUnchangedPricingPreview.
+  // Historical item/charge rows may not reconstruct the confirmed order price.
+  let nextProcessingAmount = new Decimal(request.order.processingAmount).toFixed(2);
+  let nextTotal = new Decimal(request.order.totalAmount).toFixed(2);
   if (projected) {
+    const refreshedItems = await tx.orderItem.findMany({
+      where: { orderId: request.order.id },
+      select: { subtotal: true },
+    });
+    nextProcessingAmount = orderTotal(refreshedItems, nextPackagingAmount);
     const pureProcessingAmount = projected.calculation.quote.items
       .reduce((sum, item) => {
         if (item.amount === null) {
@@ -4997,21 +5087,20 @@ async function persistApprovedModificationPricingInTx(input: {
     if (!pureProcessingAmount.equals(nextProcessingAmount)) {
       throw new OrderChangeRequestError('持久化加工费与纯引擎输出不一致');
     }
+    const customerChargeTotal = await tx.orderCustomerCharge.aggregate({
+      where: { orderId: request.order.id },
+      _sum: { amount: true },
+    });
+    nextTotal = checkedOrderTotal(
+      new Decimal(nextProcessingAmount).plus(customerChargeTotal._sum.amount ?? 0),
+    );
   }
-  const customerChargeTotal = await tx.orderCustomerCharge.aggregate({
-    where: { orderId: request.order.id },
-    _sum: { amount: true },
-  });
-  const nextTotal = checkedOrderTotal(
-    new Decimal(nextProcessingAmount).plus(
-      customerChargeTotal._sum.amount ?? 0,
-    ),
-  );
   const salesDelta = new Decimal(nextTotal).minus(request.order.totalAmount);
   await tx.order.update({
     where: { id: request.order.id },
     data: {
       revision: nextRevision,
+      ...(readProposedDueDate(request.proposedChanges) !== undefined ? { promisedDate: readProposedDueDate(request.proposedChanges) } : {}),
       ...(versionedProductionChange
         ? {
             workOrderVersion: nextWorkOrderVersion,
@@ -5025,8 +5114,9 @@ async function persistApprovedModificationPricingInTx(input: {
       ...(packagingReprice && packagingReprice.plans.length > 0
         ? { packagingAmount: nextPackagingAmount }
         : {}),
-      processingAmount: nextProcessingAmount,
-      totalAmount: nextTotal,
+      ...(projected
+        ? { processingAmount: nextProcessingAmount, totalAmount: nextTotal }
+        : {}),
     },
   });
   if (versionedProductionChange) {
@@ -5067,7 +5157,10 @@ async function persistApprovedModificationPricingInTx(input: {
     pureQuoteCompleteness === OrderQuotedFeeCompleteness.COMPLETE;
   const preservesProductionPlateCharges =
     PLATE_PRESERVING_PRODUCTION_STATUSES.has(request.order.status);
-  const hasAdministratorResolvedCharges = pendingChargeResolutions.size > 0;
+  const preservesManualPlateFee = projected && quoteHasDefaultZeroPlateCharge(projected.calculation.quote) &&
+    request.order.customerCharges.some((charge) => charge.category.code === 'PLATE_MAKING_FEE' &&
+      charge.status !== OrderCustomerChargeStatus.PENDING_AMOUNT && charge.amount !== null && new Decimal(charge.amount).isPositive());
+  const hasAdministratorResolvedCharges = pendingChargeResolutions.size > 0 || preservesManualPlateFee;
   const locksAdministratorConfirmedFee =
     preservesProductionPlateCharges ||
     (nonVersionedAutoConfirmed && hasAdministratorResolvedCharges);
@@ -5215,6 +5308,7 @@ type ApprovedModificationPricing = Awaited<
 >;
 
 async function finalizeApprovedModificationInTx(input: {
+  wasOnHold?: boolean;
   actor: { id: string; role: Role };
   catalogIdentityChanges: readonly CatalogIdentityAuditEntry[];
   packagingReprice: PackagingRepriceResult | null;
@@ -5258,7 +5352,7 @@ async function finalizeApprovedModificationInTx(input: {
         actor,
         reviewedAt,
         {
-          targetStatus: request.order.status,
+          targetStatus: input.wasOnHold ? OrderStatus.ON_HOLD : request.order.status,
           allowVersionRematerialization: true,
         },
       )
@@ -5305,6 +5399,7 @@ async function finalizeApprovedModificationInTx(input: {
       operatorId: actor.id,
       action: 'CHANGE_REQUEST_APPROVED',
       changedFields: {
+        ...(dueDateChangePreview(request.proposedChanges, request.order.promisedDate) ? { promisedDate: dueDateChangePreview(request.proposedChanges, request.order.promisedDate)! } : {}),
         revision: { before: request.baseRevision, after: nextRevision },
         workOrderVersion: {
           before: currentWorkOrderVersion,
@@ -5365,6 +5460,7 @@ async function finalizeApprovedModificationInTx(input: {
           ? { catalogIdentityChanges: [...catalogIdentityChanges] }
           : {}),
         requestId: request.id,
+        ...(input.wasOnHold ? { remainedOnHold: true } : {}),
         ...(rematerializedProduction
           ? {
               productionGeneration: {
@@ -5431,21 +5527,26 @@ async function finalizeApprovedModificationInTx(input: {
 export async function reviewOrderChangeRequest(
   input: ReviewOrderChangeRequestInput,
   actor: { id: string; role: Role },
+  context?: OrderChangeTransactionContext,
 ) {
   if (actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有管理员可以审核工单修改申请');
   }
 
-  const locator = await db.orderChangeRequest.findUnique({
+  const locator = await (context?.tx ?? db).orderChangeRequest.findUnique({
     where: { id: input.requestId },
     select: { orderId: true, type: true },
   });
   if (!locator) throw new OrderChangeRequestError('修改申请不存在');
+  if (context && locator.type === OrderChangeRequestType.CANCEL) {
+    throw new OrderChangeRequestError('编辑工单不能执行取消审批');
+  }
   if (locator.type === OrderChangeRequestType.CANCEL) {
     return reviewOrderCancellationRequest(input, actor, locator);
   }
 
-  return db.$transaction(async (tx) => {
+  let completionNotification: ProductionCompletionNotification | undefined;
+  const result = await inOrderChangeTransaction(context, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       locator.orderId,
     )}))`;
@@ -5492,6 +5593,8 @@ export async function reviewOrderChangeRequest(
       return denied;
     }
 
+    const wasOnHold = request.order.status === OrderStatus.ON_HOLD;
+    request.order.status = await resolveOrderChangeStageInTx(tx, request.order);
     const versionMismatchReason = changeRequestVersionMismatchReason(request);
     if (versionMismatchReason) {
       return tx.orderChangeRequest.update({
@@ -5535,7 +5638,8 @@ export async function reviewOrderChangeRequest(
       changes,
       itemById,
     );
-    if (!hasAnySemanticChange(changes, itemById)) {
+    const dateChange = dueDateChangePreview(request.proposedChanges, request.order.promisedDate);
+    if (!hasAnySemanticChange(changes, itemById) && (!dateChange || dateChange.before === dateChange.after)) {
       return tx.orderChangeRequest.update({
         where: { id: request.id },
         data: {
@@ -5560,7 +5664,7 @@ export async function reviewOrderChangeRequest(
     const primaryShipment = request.order.shipments.find(
       (shipment) => shipment.sequence === 1,
     );
-    if (!primaryShipment) {
+    if (!primaryShipment && changes.length > 0) {
       throw new OrderChangeRequestError('工单缺少主收货地址，不能安全更新数量');
     }
     for (const change of changes) {
@@ -5599,6 +5703,7 @@ export async function reviewOrderChangeRequest(
     assertPackagingChangeRequestSupported({
       changes,
       groups: request.order.packagingGroups ?? [],
+      status: request.order.status,
     });
     if (!allowsProductionGenerationUpgrade(request.order.status)) {
       assertNoMaterializedProductionFactChange(
@@ -5627,7 +5732,7 @@ export async function reviewOrderChangeRequest(
           items: request.order.items,
           logisticsItems: request.order.items,
           shipments: request.order.shipments,
-          primaryShipmentId: primaryShipment.id,
+          primaryShipmentId: primaryShipment!.id,
           packagingGroups: request.order.packagingGroups ?? [],
           changes,
         })
@@ -5799,7 +5904,7 @@ export async function reviewOrderChangeRequest(
           syncPlateCharge: shouldSyncPlateCharge(
             request.order.status,
             request.order.settlementType,
-          ),
+          ) || quoteHasDefaultZeroPlateCharge(projected.calculation.quote),
           pendingChargeResolutions:
             pendingResolutionState.resolutionsByBusinessKey,
           previousPriceRevision: request.order.priceRevision,
@@ -5822,12 +5927,12 @@ export async function reviewOrderChangeRequest(
           await tx.orderShipmentLine.upsert({
             where: {
               shipmentId_orderItemId: {
-                shipmentId: primaryShipment.id,
+                shipmentId: primaryShipment!.id,
                 orderItemId: item.id,
               },
             },
             create: {
-              shipmentId: primaryShipment.id,
+              shipmentId: primaryShipment!.id,
               orderItemId: item.id,
               quantity: change.quantity - extraShipmentQty,
             },
@@ -5842,6 +5947,7 @@ export async function reviewOrderChangeRequest(
           data: {
             name: change.name,
             quantity: change.quantity,
+            pack: change.pack,
             ...(catalogIdentity
               ? {
                   productId: catalogIdentity.productId,
@@ -5864,6 +5970,12 @@ export async function reviewOrderChangeRequest(
             ...(pricing ?? {}),
           },
         });
+        if (change.pack !== undefined) {
+          await tx.orderPackagingGroupLine.updateMany({
+            where: { orderId: request.order.id, orderItemId: item.id },
+            data: { unitsPerBag: change.pack },
+          });
+        }
         continue;
       }
 
@@ -5912,7 +6024,7 @@ export async function reviewOrderChangeRequest(
       nextSequence += 1;
       await tx.orderShipmentLine.create({
         data: {
-          shipmentId: primaryShipment.id,
+          shipmentId: primaryShipment!.id,
           orderItemId: created.id,
           quantity: change.quantity,
         },
@@ -5948,7 +6060,8 @@ export async function reviewOrderChangeRequest(
       reviewRemark,
       tx,
     });
-    return finalizeApprovedModificationInTx({
+    const reviewed = await finalizeApprovedModificationInTx({
+      wasOnHold,
       actor,
       catalogIdentityChanges,
       packagingReprice,
@@ -5960,7 +6073,25 @@ export async function reviewOrderChangeRequest(
       reviewRemark,
       tx,
     });
+    if (isAwaitingFactoryConfirmation(request.order.status)) {
+      await prepareOrderForProductionInTx(tx, request.order.id, actor, reviewedAt);
+    }
+    if (isReprintChangeStatus(request.order.status) && !wasOnHold) {
+      const completion = await maybeCompleteProductionOrder(
+        tx as unknown as ProductionCompletionTx, request.order.id, actor.id, reviewedAt,
+      );
+      completionNotification = completion.notification;
+    }
+    return reviewed;
+  }).catch((error: unknown) => {
+    if (error instanceof ProductionOperationMaterializationError) {
+      throw new OrderChangeRequestError(error.message);
+    }
+    throw error;
   });
+  if (context) context.onCompletion?.(completionNotification);
+  else await dispatchProductionCompletionNotification(completionNotification);
+  return result;
 }
 
 export async function listOrderChangeRequests(input?: {

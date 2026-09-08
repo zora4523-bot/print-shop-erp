@@ -108,7 +108,7 @@ async function OperationPieceworkSalaryContent({
 
   return (
     <section className="min-w-0 space-y-4">
-      <SalaryHeader description="新工序报工账本 · 按日锁定，点击日期查看报工和工价快照。" />
+      <SalaryHeader description="按日期查看报工明细。" />
       <SalarySummary total={total} unpaid={unpaid} />
       <SalaryRangeFilter
         inputType="date"
@@ -183,7 +183,7 @@ async function PieceworkSalaryContent({
         title={historical ? '历史日薪档案' : undefined}
         description={
           historical
-            ? '切换前已生成的 DailyWorkerSalary 只读快照，不与上方新账本合并。'
+            ? '历史日薪记录'
             : '开机师傅 · 点击日期查看工单和计件明细。'
         }
       />
@@ -275,7 +275,7 @@ async function HourlySalaryContent({
         title={historical ? '历史打包时薪档案' : undefined}
         description={
           historical
-            ? '切换前已生成的 HourlyWorkerPayroll 只读快照，不与上方新账本合并。'
+            ? '历史时薪记录'
             : `${WORKER_TYPE_LABELS[workerType]} · 点击月份查看工时和计薪明细。`
         }
       />

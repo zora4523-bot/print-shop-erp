@@ -24,7 +24,7 @@ describe('buildOrderDetailTimeline', () => {
 
     expect(steps[0]?.state).toBe('done');
     expect(steps[1]).toMatchObject({
-      label: '待工厂确认',
+      label: '已提交',
       state: 'current',
     });
     expect(steps[1]?.meta).toContain('E2E 销售');

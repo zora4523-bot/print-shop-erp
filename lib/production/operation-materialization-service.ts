@@ -1,4 +1,6 @@
 import type { Prisma } from '../../generated/prisma/client';
+import Decimal from 'decimal.js';
+import { operationCarryoverKey, planOperationCarryovers, sumCarriedQuantity } from './version-carryover';
 import {
   OrderKind,
   OrderPricingStatus,
@@ -79,6 +81,10 @@ const ORDER_FACTS_SELECT = {
       unit: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
+      carriedWorkOrderProgressQty: true,
+      reports: { select: { reportedCompletedQty: true } },
+      workOrderProgress: { select: { workOrderProgressQuantity: true } },
       sources: {
         select: {
           sourceType: true,
@@ -99,6 +105,8 @@ const ORDER_FACTS_SELECT = {
       craftName: true,
       status: true,
       plannedQty: true,
+      carriedCompletedQty: true,
+      reports: { select: { completedQty: true } },
     },
   },
 } satisfies Prisma.OrderSelect;
@@ -239,7 +247,8 @@ export async function activateProductionOperationsInTx(
       | typeof OrderStatus.SCHEDULING
       | typeof OrderStatus.RELEASED
       | typeof OrderStatus.FOILING
-      | typeof OrderStatus.PACKING;
+      | typeof OrderStatus.PACKING
+      | typeof OrderStatus.ON_HOLD;
     /** Explicitly allows a version upgrade to append a new generation. */
     allowVersionRematerialization?: boolean;
   } = {},
@@ -398,7 +407,8 @@ export async function activateProductionOperationsInTx(
         (order.status === OrderStatus.CONFIRMED ||
           order.status === OrderStatus.RELEASED ||
           order.status === OrderStatus.FOILING ||
-          order.status === OrderStatus.PACKING)
+          order.status === OrderStatus.PACKING ||
+          (order.status === OrderStatus.ON_HOLD && targetStatus === OrderStatus.ON_HOLD))
       : targetStatus === OrderStatus.RELEASED
       ? order.status === OrderStatus.CONFIRMED
       : order.status === OrderStatus.PENDING_FACTORY ||
@@ -411,16 +421,47 @@ export async function activateProductionOperationsInTx(
   }
   if (order.status !== targetStatus) transitionOrder(order.status, targetStatus);
 
+  const previousOperations = options.allowVersionRematerialization
+    ? order.productionOperations.filter((row) => row.workOrderVersion === order.workOrderVersion - 1)
+    : [];
+  const previousSteps = options.allowVersionRematerialization
+    ? order.productionProgressSteps.filter((row) => row.workOrderVersion === order.workOrderVersion - 1)
+    : [];
+  let carryovers: ReturnType<typeof planOperationCarryovers>;
+  const stepCarryovers = new Map<string, { fromStepId: string; completed: Decimal }>();
+  try {
+    carryovers = planOperationCarryovers(previousOperations, plan.specs);
+    const orderTotal = order.items.reduce((sum, item) => sum.plus(item.quantity), new Decimal(0));
+    for (const packing of [false, true]) {
+      const progress = plan.specs.filter((spec) => (spec.operationType === 'PACKING') === packing)
+        .reduce((sum, spec) => sum.plus(carryovers.get(operationCarryoverKey(spec))?.progress ?? 0), new Decimal(0));
+      if (progress.gt(orderTotal)) throw new Error('修改后的工单总量不能少于已完成的工单件数');
+    }
+    for (const step of previousSteps) {
+      const completed = sumCarriedQuantity(step.carriedCompletedQty, (step.reports ?? []).map((report) => report.completedQty));
+      if (completed.isZero()) continue;
+      const next = progressPlan.specs.find((spec) => spec.orderItemId === step.orderItemId && spec.craftId === step.craftId);
+      if (!next || completed.isNegative() || completed.gt(next.plannedQty)) throw new Error('已有工艺进度无法承接，修改数量不能少于已完成数量');
+      stepCarryovers.set(`${step.orderItemId}:${step.craftId}`, { fromStepId: step.id, completed });
+    }
+  } catch (error) {
+    throw new ProductionOperationMaterializationError('CANONICAL_FACTS_INCOMPLETE', error instanceof Error ? error.message : '无法承接历史生产进度');
+  }
+  const carryoverEvidence: Prisma.InputJsonObject[] = [];
   const operationIds: string[] = [];
   for (const spec of plan.specs) {
+    const carried = carryovers.get(operationCarryoverKey(spec));
+    const plannedPieces = spec.sources.reduce((sum, source) => sum.plus(source.completedPieceQty), new Decimal(0));
     const created = await tx.productionOperation.create({
       data: {
         orderId,
         workOrderVersion: order.workOrderVersion,
         operationType: spec.operationType,
         unit: spec.unit,
-        status: ProductionOperationStatus.PENDING,
+        status: carried?.completed.eq(plannedPieces) ? ProductionOperationStatus.COMPLETED
+          : carried?.completed.isPositive() ? ProductionOperationStatus.IN_PROGRESS : ProductionOperationStatus.PENDING,
         plannedQty: spec.plannedQty,
+        ...(carried ? { carriedCompletedQty: carried.completed.toString(), carriedWorkOrderProgressQty: carried.progress.toString() } : {}),
         sources: {
           create: spec.sources.map((source) => ({
             sourceType: source.sourceType,
@@ -433,10 +474,12 @@ export async function activateProductionOperationsInTx(
       select: { id: true },
     });
     operationIds.push(created.id);
+    if (carried) carryoverEvidence.push({ operationId: created.id, fromOperationId: carried.fromOperationId, completedQty: carried.completed.toString(), workOrderProgressQty: carried.progress.toString() });
   }
 
   const progressStepIds: string[] = [];
   for (const spec of progressPlan.specs) {
+    const carried = stepCarryovers.get(`${spec.orderItemId}:${spec.craftId}`);
     const created = await tx.productionProgressStep.create({
       data: {
         orderId,
@@ -445,12 +488,15 @@ export async function activateProductionOperationsInTx(
         craftId: spec.craftId,
         craftCode: spec.craftCode,
         craftName: spec.craftName,
-        status: ProductionOperationStatus.PENDING,
+        status: carried?.completed.eq(spec.plannedQty) ? ProductionOperationStatus.COMPLETED
+          : carried?.completed.isPositive() ? ProductionOperationStatus.IN_PROGRESS : ProductionOperationStatus.PENDING,
         plannedQty: spec.plannedQty,
+        ...(carried ? { carriedCompletedQty: carried.completed.toString() } : {}),
       },
       select: { id: true },
     });
     progressStepIds.push(created.id);
+    if (carried) carryoverEvidence.push({ progressStepId: created.id, fromStepId: carried.fromStepId, completedQty: carried.completed.toString() });
   }
 
   const activatedAt = at ?? (await databaseNow(tx));
@@ -476,6 +522,7 @@ export async function activateProductionOperationsInTx(
           ? 'OPERATIONS_REMATERIALIZED'
           : 'OPERATIONS_MATERIALIZED',
       changedFields: {
+        ...(carryoverEvidence.length > 0 ? { productionCarryover: { fromVersion: order.workOrderVersion - 1, toVersion: order.workOrderVersion, entries: carryoverEvidence, payrollEntriesCreated: 0 } } : {}),
         status: { before: order.status, after: targetStatus },
         requiresOutsource: {
           before: order.requiresOutsource,

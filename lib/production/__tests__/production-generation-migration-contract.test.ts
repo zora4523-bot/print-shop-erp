@@ -10,10 +10,10 @@ const migration = readFileSync(
 describe('production work-order generation migration contract', () => {
   it('versions every mutable production aggregate and keeps progress-step identity per generation', () => {
     expect(schema).toMatch(
-      /model ProductionOperation[\s\S]*?workOrderVersion Int\s+@default\(1\)/,
+      /model ProductionOperation[\s\S]*?workOrderVersion\s+Int\s+@default\(1\)/,
     );
     expect(schema).toMatch(
-      /model ProductionProgressStep[\s\S]*?workOrderVersion Int\s+@default\(1\)[\s\S]*?@@unique\(\[orderItemId, craftId, workOrderVersion\]\)/,
+      /model ProductionProgressStep[\s\S]*?workOrderVersion\s+Int\s+@default\(1\)[\s\S]*?@@unique\(\[orderItemId, craftId, workOrderVersion\]\)/,
     );
     expect(schema).toMatch(
       /model ProductionWorkOrderProgress[\s\S]*?workOrderVersion\s+Int\s+@default\(1\)/,

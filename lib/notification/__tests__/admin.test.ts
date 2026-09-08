@@ -53,6 +53,8 @@ import { SUPERSEDED_BEFORE_SEND_ERROR } from '../events';
 import { smartBotIdDigest } from '../smart-bot';
 import {
   ChannelInUseError,
+  ChannelTransportMismatchError,
+  createChannel,
   createSmartBotBindingCode,
   EmptyChannelIdsError,
   InactiveChannelBindError,
@@ -73,17 +75,8 @@ import {
   updateChannel,
 } from '../admin';
 
-function ruleWebhookChannel(id: string, isActive = true) {
-  return {
-    id,
-    transport: 'WECOM_GROUP_WEBHOOK' as const,
-    webhookUrl: `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${id}`,
-    smartBotBotDigest: null,
-    smartBotTargetId: null,
-    smartBotChatType: null,
-    smartBotBoundAt: null,
-    isActive,
-  };
+function ruleActiveChannel(id: string, isActive = true) {
+  return ruleSmartBotChannel(id, smartBotIdDigest('current-bot-id'), isActive);
 }
 
 function ruleSmartBotChannel(
@@ -104,6 +97,8 @@ function ruleSmartBotChannel(
 }
 
 beforeEach(() => {
+  vi.stubEnv('WECOM_SMART_BOT_ID', 'current-bot-id');
+  vi.stubEnv('WECOM_SMART_BOT_SECRET', 'secret-placeholder');
   dbMock.notificationChannel.findMany.mockReset();
   dbMock.notificationChannel.findUnique.mockReset();
   dbMock.notificationChannel.create.mockReset();
@@ -135,6 +130,31 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('smart-bot channel administration', () => {
+  it('creates only an inactive smart-bot target even when activation is requested', async () => {
+    dbMock.notificationChannel.create.mockResolvedValue({ id: 'new-smart' });
+    await createChannel({ channelKey: 'new_smart', channelName: '新群', transport: 'WECOM_SMART_BOT', isActive: true });
+    expect(dbMock.notificationChannel.create).toHaveBeenCalledWith({
+      data: { channelKey: 'new_smart', channelName: '新群', transport: 'WECOM_SMART_BOT', webhookUrl: null, isActive: false },
+      select: { id: true },
+    });
+  });
+
+  it('rejects legacy transport at the domain boundary, including untyped callers', async () => {
+    const input = { channelKey: 'legacy', channelName: '旧群', transport: 'WECOM_GROUP_WEBHOOK', isActive: true };
+    // @ts-expect-error stale caller must also be rejected at runtime
+    await expect(createChannel(input)).rejects.toBeInstanceOf(ChannelTransportMismatchError);
+    // @ts-expect-error stale caller must also be rejected at runtime
+    await expect(updateChannel('legacy', input)).rejects.toBeInstanceOf(ChannelTransportMismatchError);
+    expect(dbMock.notificationChannel.create).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('cannot overwrite a stored legacy target by claiming it is a smart bot', async () => {
+    txMock.notificationChannel.findUnique.mockResolvedValue({ transport: 'WECOM_GROUP_WEBHOOK' });
+    await expect(updateChannel('legacy', { channelName: '伪造修改', transport: 'WECOM_SMART_BOT', isActive: false }))
+      .rejects.toBeInstanceOf(ChannelTransportMismatchError);
+    expect(txMock.notificationChannel.update).not.toHaveBeenCalled();
+  });
   it('stores only a hash for a short-lived binding code', async () => {
     vi.stubEnv('WECOM_SMART_BOT_ID', 'bot-id-placeholder');
     vi.stubEnv('WECOM_SMART_BOT_SECRET', 'secret-placeholder');
@@ -369,6 +389,19 @@ describe('updateRule', () => {
     txMock.notificationChannel.findMany.mockResolvedValue([]);
   });
 
+  it('rejects new legacy bindings, retains existing active routes, and permits removing them', async () => {
+    const legacy = { ...ruleActiveChannel('legacy'), transport: 'WECOM_GROUP_WEBHOOK' };
+    txMock.notificationChannel.findMany.mockResolvedValue([legacy]);
+    const input = { messageTemplate: 'x', channelIds: ['legacy'], isActive: true };
+    await expect(updateRule('URGENT_ORDER', input)).rejects.toBeInstanceOf(IneligibleChannelBindError);
+    expect(txMock.notificationRule.update).not.toHaveBeenCalled();
+    txMock.notificationRule.findUnique.mockResolvedValue({ eventType: 'URGENT_ORDER', channelIds: ['legacy'], isActive: true });
+    await expect(updateRule('URGENT_ORDER', input)).resolves.toBeUndefined();
+    await expect(updateRule('URGENT_ORDER', { ...input, channelIds: [], isActive: false })).resolves.toBeUndefined();
+    txMock.notificationRule.findUnique.mockResolvedValue({ eventType: 'URGENT_ORDER', channelIds: ['legacy'], isActive: false });
+    await expect(updateRule('URGENT_ORDER', input)).rejects.toBeInstanceOf(IneligibleChannelBindError);
+  });
+
   it('未知事件 → RuleNotFoundError（NOTIFICATION_EVENTS 字典外）', async () => {
     await expect(
       updateRule('NOT_A_REAL_EVENT', {
@@ -392,7 +425,7 @@ describe('updateRule', () => {
 
   it('channelIds 引用不存在 channel → StaleChannelIdsError', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c1'),
+      ruleActiveChannel('c1'),
     ]);
     await expect(
       updateRule('ORDER_SUBMITTED', {
@@ -405,8 +438,8 @@ describe('updateRule', () => {
 
   it('channelIds 全部 active 命中 → update 调用', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c1'),
-      ruleWebhookChannel('c2'),
+      ruleActiveChannel('c1'),
+      ruleActiveChannel('c2'),
     ]);
     await updateRule('ORDER_SUBMITTED', {
       messageTemplate: '工单 {orderNo}',
@@ -440,7 +473,7 @@ describe('updateRule', () => {
       channelIds: [],
     });
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c2', false),
+      ruleActiveChannel('c2', false),
     ]);
     await expect(
       updateRule('ORDER_SUBMITTED', {
@@ -459,7 +492,7 @@ describe('updateRule', () => {
       channelIds: ['c2'],
     });
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c2', false),
+      ruleActiveChannel('c2', false),
     ]);
     await updateRule('ORDER_SUBMITTED', {
       messageTemplate: 'x',
@@ -530,11 +563,11 @@ describe('updateRule', () => {
     expect(txMock.notificationRule.update).toHaveBeenCalled();
   });
 
-  it('停用规则携已有不合格目标重新启用时拒绝', async () => {
+  it('非托管规则携已有不合格目标重新启用时拒绝', async () => {
     vi.stubEnv('WECOM_SMART_BOT_ID', 'current-bot-id');
     vi.stubEnv('WECOM_SMART_BOT_SECRET', 'secret-placeholder');
     txMock.notificationRule.findUnique.mockResolvedValue({
-      eventType: 'ORDER_SUBMITTED',
+      eventType: 'URGENT_ORDER',
       channelIds: ['smart-old'],
       isActive: false,
     });
@@ -543,13 +576,21 @@ describe('updateRule', () => {
     ]);
 
     await expect(
-      updateRule('ORDER_SUBMITTED', {
+      updateRule('URGENT_ORDER', {
         messageTemplate: 'x',
         channelIds: ['smart-old'],
         isActive: true,
       }),
     ).rejects.toBeInstanceOf(IneligibleChannelBindError);
     expect(txMock.notificationRule.update).not.toHaveBeenCalled();
+  });
+
+  it('托管事件可启用而不改写隐藏的历史旧群，实际角色路由由系统设置校验', async () => {
+    txMock.notificationRule.findUnique.mockResolvedValue({ eventType: 'ORDER_SUBMITTED', channelIds: ['legacy'], isActive: false });
+    txMock.notificationChannel.findMany.mockResolvedValue([{ ...ruleActiveChannel('legacy', false), transport: 'WECOM_GROUP_WEBHOOK' }]);
+    const input = { messageTemplate: 'x', channelIds: ['legacy'], isActive: true };
+    await expect(updateRule('ORDER_SUBMITTED', input)).resolves.toBeUndefined();
+    expect(txMock.notificationRule.update).toHaveBeenCalledWith({ where: { eventType: 'ORDER_SUBMITTED' }, data: input });
   });
 
   it('混合：保留旧 inactive + 新加 active → 通过；同时新加 inactive → 拒', async () => {
@@ -560,8 +601,8 @@ describe('updateRule', () => {
     });
     // c-old-inactive (kept) + c-new-active (新加) → 通过
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c-old-inactive', false),
-      ruleWebhookChannel('c-new-active'),
+      ruleActiveChannel('c-old-inactive', false),
+      ruleActiveChannel('c-new-active'),
     ]);
     await updateRule('ORDER_SUBMITTED', {
       messageTemplate: 'x',
@@ -573,7 +614,7 @@ describe('updateRule', () => {
 
   it('SELECT FOR UPDATE 锁住引用 channel 行（Codex round 106 race fix）', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c1'),
+      ruleActiveChannel('c1'),
     ]);
     await updateRule('ORDER_SUBMITTED', {
       messageTemplate: 'x',
@@ -631,7 +672,7 @@ describe('updateRuleWithGuard', () => {
 
   it('isActive=true && channelIds 非空（active 端点）→ 走 updateRule 正常路径', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c1'),
+      ruleActiveChannel('c1'),
     ]);
     await updateRuleWithGuard('ORDER_SUBMITTED', {
       messageTemplate: 'x',
@@ -680,7 +721,7 @@ describe('updateRuleWithGuard', () => {
       channelIds: [],
     });
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c1'),
+      ruleActiveChannel('c1'),
     ]);
     await updateRuleWithGuard('CS_PERIOD_ENDING', {
       messageTemplate: 'x',
@@ -692,9 +733,9 @@ describe('updateRuleWithGuard', () => {
 
   it('其他事件（ORDER_SUBMITTED 等）不受 ≤1 限制，可绑多个 channel', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c1'),
-      ruleWebhookChannel('c2'),
-      ruleWebhookChannel('c3'),
+      ruleActiveChannel('c1'),
+      ruleActiveChannel('c2'),
+      ruleActiveChannel('c3'),
     ]);
     await updateRuleWithGuard('ORDER_SUBMITTED', {
       messageTemplate: 'x',
@@ -711,8 +752,8 @@ describe('updateRuleWithGuard', () => {
     });
     // disable channel.findMany guard via mocking active for both
     txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleWebhookChannel('c1'),
-      ruleWebhookChannel('c2'),
+      ruleActiveChannel('c1'),
+      ruleActiveChannel('c2'),
     ]);
     await updateRuleWithGuard('CS_PERIOD_ENDING', {
       messageTemplate: 'x',

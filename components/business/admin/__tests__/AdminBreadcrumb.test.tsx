@@ -26,6 +26,8 @@ describe('resolveSegmentLabel', () => {
 
   it('已知段名走中文标签表', () => {
     expect(resolveSegmentLabel('orders', null)).toBe('工单');
+    expect(resolveSegmentLabel('attention', null)).toBe('关注事项');
+    expect(resolveSegmentLabel('analytics', null)).toBe('经营概览');
   });
 
   it('/orders/<id>/edit 的最后一段不再显示英文 edit', () => {
@@ -94,5 +96,23 @@ describe('AdminBreadcrumb SSR', () => {
     expect(text).toContain('规则配置中心');
     expect(text).toContain('客户计价规则');
     expect(text).not.toContain('员工工资规则');
+  });
+});
+
+
+describe('order navigation hierarchy', () => {
+  it.each(['/orders/cmtsnmyzk0000sv0rluj2fo5m', '/orders/e2e-custom-id', '/orders/e2e-custom-id/edit'])('uses a generic detail label at %s', (path) => {
+    usePathnameMock.mockReturnValue(path);
+    const html = renderToStaticMarkup(<AdminBreadcrumb />);
+    expect(html).toContain('工单详情');
+    expect(html).toContain('href="/orders"');
+    expect(visibleText(html)).not.toContain('e2e-custom-id');
+    expect(html).not.toContain('hidden shrink-0 lg:inline-flex');
+  });
+  it('keeps creation distinct from detail', () => {
+    usePathnameMock.mockReturnValue('/orders/new');
+    const html = renderToStaticMarkup(<AdminBreadcrumb />);
+    expect(html).toContain('创建工单');
+    expect(html).not.toContain('工单详情');
   });
 });

@@ -12,9 +12,9 @@ describe('sales order list presentation', () => {
     expect(salesOrderStatusPresentation(OrderStatus.DRAFT).label).toBe('草稿');
     expect(
       salesOrderStatusPresentation(OrderStatus.PENDING_FACTORY).label,
-    ).toBe('待工厂确认');
+    ).toBe('待处理');
     expect(salesOrderStatusPresentation(OrderStatus.SUBMITTED).label).toBe(
-      '待工厂确认',
+      '待处理',
     );
     for (const status of [
       OrderStatus.SCHEDULING,

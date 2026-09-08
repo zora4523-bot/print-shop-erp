@@ -13,7 +13,7 @@ import {
 } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 
 type UnsavedTierState = {
   registered: boolean;
@@ -163,25 +163,21 @@ export function PriceWorkspaceNavigationGuardProvider({
   return (
     <NavigationGuardContext.Provider value={value}>
       {children}
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         open={pendingHref !== null}
         onOpenChange={(open) => {
           if (!open) setPendingHref(null);
         }}
         focusReturnRef={pendingLinkRef}
-        title="放弃未保存修改并离开？"
-        description={unsavedTierNavigationMessage(unsaved.tierCount)}
-        impactItems={[
-          `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
-          '已保存的价目和已发布版本保持不变。',
-        ]}
-        confirmLabel="放弃修改并离开"
         cancelLabel="继续编辑"
         onConfirm={() => {
           if (pendingHref) router.push(pendingHref);
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
+          `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
+          '已保存的价目和已发布版本保持不变。',
+        ]} confirmText="放弃修改并离开" />
+      </ConfirmActionController>
     </NavigationGuardContext.Provider>
   );
 }
@@ -275,24 +271,20 @@ export function PriceWorkspaceLink({
           setConfirmationOpen(true);
         }}
       />
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={linkRef}
-        title="放弃未保存修改并离开？"
-        description={unsavedTierNavigationMessage(unsaved.tierCount)}
-        impactItems={[
-          `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
-          '已保存的价目和已发布版本保持不变。',
-        ]}
-        confirmLabel="放弃修改并离开"
         cancelLabel="继续编辑"
         onConfirm={() => {
           if (replace) router.replace(href, { scroll });
           else router.push(href, { scroll });
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
+          `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
+          '已保存的价目和已发布版本保持不变。',
+        ]} confirmText="放弃修改并离开" />
+      </ConfirmActionController>
     </>
   );
 }

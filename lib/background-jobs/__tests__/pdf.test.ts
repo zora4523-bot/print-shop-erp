@@ -33,6 +33,27 @@ beforeEach(() => {
 });
 
 describe('durable order PDF jobs', () => {
+  it.each(['tasks', 'unknown'])('does not serve retired or invalid PDF jobs (%s)', async (mode) => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      type: 'ORDER_PDF',
+      payload: { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'user-1' }, mode },
+      status: BackgroundJobStatus.SUCCEEDED,
+      result: { artifactName: 'wrong-mode.pdf' },
+      lastErrorCode: null,
+    });
+    await expect(waitForOrderPdfJob('job-pdf', {
+      expected: { orderId: 'order-1', actorId: 'user-1', workOrderVersion: 3 },
+    })).resolves.toEqual({ status: 'failed', errorCode: 'JobNotFound' });
+  });
+
+  it.each(['tasks', 'unknown'])('rejects retired or invalid jobs before loading order data (%s)', async (mode) => {
+    await expect(handleOrderPdfJob({ payload: {
+      orderId: 'order-1', expectedWorkOrderVersion: 3,
+      actor: { id: 'user-1', role: Role.ADMIN },
+      baseUrl: 'https://erp.example.com', mode,
+    } } as never)).rejects.toMatchObject({ name: 'InvalidOrderPdfJobPayloadError' });
+    expect(getOrderForPrintMock).not.toHaveBeenCalled();
+  });
   it('enqueues heavy work with actor/order binding', async () => {
     enqueueBackgroundJobMock.mockResolvedValue({
       job: { id: 'job-pdf' },
@@ -63,13 +84,14 @@ describe('durable order PDF jobs', () => {
     );
   });
 
-  it('returns a ready artifact only for the expected actor and order', async () => {
+  it.each([undefined, 'order'])('returns compatible order artifacts only for the expected actor (%s)', async (mode) => {
     dbMock.backgroundJob.findUnique.mockResolvedValue({
       type: 'ORDER_PDF',
       payload: {
         orderId: 'order-1',
         expectedWorkOrderVersion: 3,
         actor: { id: 'user-1', role: Role.ADMIN },
+        mode,
       },
       status: BackgroundJobStatus.SUCCEEDED,
       result: { artifactName: 'job-pdf.pdf' },

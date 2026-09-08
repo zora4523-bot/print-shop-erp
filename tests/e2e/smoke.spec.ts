@@ -98,7 +98,7 @@ test.describe('automation smoke', () => {
       sidebar.locator('[data-menu-group="概览"]'),
     ).toHaveCount(0);
     const dashboardLink = sidebar.getByRole('link', {
-      name: 'Dashboard',
+      name: '工作台',
       exact: true,
     });
     await expect(dashboardLink).toHaveCount(1);
@@ -286,7 +286,7 @@ test.describe('automation smoke', () => {
     ).toHaveCount(0);
     await expect(
       mobileSidebar.getByRole('link', {
-        name: 'Dashboard',
+        name: '工作台',
         exact: true,
       }),
     ).toHaveAttribute('href', '/owner');
@@ -467,34 +467,18 @@ test.describe('automation smoke', () => {
     const matchedOrder = page
       .locator(`[data-order-id="${fixture.orderId}"]:visible`)
       .first();
-    await expect(matchedOrder).toContainText(fixture.orderNo);
+    await expect(matchedOrder).not.toContainText(fixture.orderNo);
     await expect(matchedOrder).toContainText(fixture.customerRef);
     await expectNoNextErrorOverlay(page);
 
-    // Admin rows open the hash-addressable decision drawer. Full-page detail
-    // remains available from the drawer footer.
-    await matchedOrder
-      .getByRole('button', { name: fixture.orderNo, exact: true })
-      .click();
-    await expect(page).toHaveURL((url) => url.hash === `#wo=${fixture.orderNo}`);
-    const drawer = page.getByRole('dialog');
-    await expect(
-      drawer.getByText(fixture.customerRef, { exact: true }).first(),
-    ).toBeVisible();
-    await drawer.getByRole('link', { name: '完整工单', exact: true }).click();
+    // Name links go directly to full detail; Back restores the filtered list.
+    await matchedOrder.locator('h3 a').click();
     await expect(page).toHaveURL(`/orders/${fixture.orderId}`);
+    await expect(page.locator('[data-testid="admin-order-detail"]')).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL((url) => {
-      return (
-        url.pathname === '/orders' &&
-        url.searchParams.get('queue') === 'all' &&
-        url.searchParams.get('q') === fixture.orderNo &&
-        url.hash === `#wo=${fixture.orderNo}`
-      );
-    });
-    await expect(
-      page.getByRole('dialog').getByText(fixture.orderNo, { exact: true }),
-    ).toBeVisible();
+    await expect(page).toHaveURL((url) => url.pathname === '/orders' && url.searchParams.get('q') === fixture.orderNo && !url.hash);
+    await expect(matchedOrder).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`/orders/${fixture.orderId}`);

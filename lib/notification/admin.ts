@@ -45,7 +45,6 @@ export type ChannelSummary = {
   channelKey: string;
   channelName: string;
   transport: NotificationChannelTransportType;
-  webhookUrl: string | null;
   smartBotTargetId: string | null;
   smartBotChatType: NotificationSmartBotChatType | null;
   smartBotBoundAt: Date | null;
@@ -71,7 +70,6 @@ async function listChannels(): Promise<ChannelWithoutRefCount[]> {
       channelKey: true,
       channelName: true,
       transport: true,
-      webhookUrl: true,
       smartBotBotDigest: true,
       smartBotTargetId: true,
       smartBotChatType: true,
@@ -159,7 +157,6 @@ export async function getChannel(id: string): Promise<ChannelSummary | null> {
       channelKey: true,
       channelName: true,
       transport: true,
-      webhookUrl: true,
       smartBotBotDigest: true,
       smartBotTargetId: true,
       smartBotChatType: true,
@@ -191,58 +188,37 @@ export async function getChannel(id: string): Promise<ChannelSummary | null> {
   };
 }
 
-export type CreateChannelInput =
-  | {
-      channelKey: string;
-      channelName: string;
-      transport: 'WECOM_GROUP_WEBHOOK';
-      webhookUrl: string;
-      isActive: boolean;
-    }
-  | {
-      channelKey: string;
-      channelName: string;
-      transport: 'WECOM_SMART_BOT';
-      isActive: boolean;
-    };
+export type CreateChannelInput = {
+  channelKey: string;
+  channelName: string;
+  transport: 'WECOM_SMART_BOT';
+  isActive: boolean;
+};
 
 export async function createChannel(
   input: CreateChannelInput,
 ): Promise<{ id: string }> {
+  if (input.transport !== NotificationChannelTransport.WECOM_SMART_BOT) {
+    throw new ChannelTransportMismatchError();
+  }
   const created = await db.notificationChannel.create({
-    data:
-      input.transport === NotificationChannelTransport.WECOM_GROUP_WEBHOOK
-        ? {
-            channelKey: input.channelKey,
-            channelName: input.channelName,
-            transport: input.transport,
-            webhookUrl: input.webhookUrl,
-            isActive: input.isActive,
-          }
-        : {
-            channelKey: input.channelKey,
-            channelName: input.channelName,
-            transport: input.transport,
-            webhookUrl: null,
-            isActive: false,
-          },
+    data: {
+      channelKey: input.channelKey,
+      channelName: input.channelName,
+      transport: NotificationChannelTransport.WECOM_SMART_BOT,
+      webhookUrl: null,
+      isActive: false,
+    },
     select: { id: true },
   });
   return created;
 }
 
-export type UpdateChannelInput =
-  | {
-      transport: 'WECOM_GROUP_WEBHOOK';
-      channelName: string;
-      webhookUrl: string;
-      isActive: boolean;
-    }
-  | {
-      transport: 'WECOM_SMART_BOT';
-      channelName: string;
-      isActive: boolean;
-    };
+export type UpdateChannelInput = {
+  transport: 'WECOM_SMART_BOT';
+  channelName: string;
+  isActive: boolean;
+};
 
 export class ChannelTransportMismatchError extends Error {
   constructor() {
@@ -266,7 +242,7 @@ export class SmartBotIdentityMismatchError extends Error {
 }
 
 /**
- * 编辑 channel：name / webhookUrl / isActive。
+ * 仅编辑智能机器人 channel：name / isActive；旧版目标保持只读。
  *
  * **不**做"如果 isActive 翻 false 则拒绝有规则引用"的 cross-check。
  * 这是有意设计（DECISIONS Slice B）：
@@ -286,6 +262,9 @@ export async function updateChannel(
   id: string,
   input: UpdateChannelInput,
 ): Promise<void> {
+  if (input.transport !== NotificationChannelTransport.WECOM_SMART_BOT) {
+    throw new ChannelTransportMismatchError();
+  }
   await db.$transaction(async (tx) => {
     const channel = await tx.notificationChannel.findUnique({
       where: { id },
@@ -319,17 +298,10 @@ export async function updateChannel(
     }
     await tx.notificationChannel.update({
       where: { id },
-      data:
-        input.transport === NotificationChannelTransport.WECOM_GROUP_WEBHOOK
-          ? {
-              channelName: input.channelName,
-              webhookUrl: input.webhookUrl,
-              isActive: input.isActive,
-            }
-          : {
-              channelName: input.channelName,
-              isActive: input.isActive,
-            },
+      data: {
+        channelName: input.channelName,
+        isActive: input.isActive,
+      },
     });
   });
 }
@@ -665,7 +637,6 @@ export async function updateRule(
         select: {
           id: true,
           transport: true,
-          webhookUrl: true,
           smartBotBotDigest: true,
           smartBotTargetId: true,
           smartBotChatType: true,
@@ -687,7 +658,11 @@ export async function updateRule(
       const oldBound = new Set(rule.channelIds);
       // 从停用切到启用会让全部保留绑定重新成为实际发送目标，因此与
       // 新增绑定等价，不能借 oldBound 绕过可用性校验。
-      const activatesRule = input.isActive && !rule.isActive;
+      // 托管事件始终从角色设置取实际收件群（notify 无回退），规则中
+      // 保留的旧 ID 仅为历史兼容。启用事件不能被这些隐藏旧字段卡住；
+      // 真正的角色路由仍由 updateSettings 校验，新加 ID 也仍须校验。
+      const activatesRule = input.isActive && !rule.isActive &&
+        !managementNotificationRoleForEvent(eventType);
       const newlyAddedInactive = found
         .filter(
           (c) => !c.isActive && (activatesRule || !oldBound.has(c.id)),

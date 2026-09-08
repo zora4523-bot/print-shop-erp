@@ -1,5 +1,7 @@
 'use client';
 
+import { OrderReceiverContactFields } from '../OrderReceiverContactFields';
+
 import {
   useId,
   useCallback,
@@ -114,6 +116,7 @@ export type OrderFormBProps = {
   materialExtras?: ReactNode;
   pricingExtras?: ReactNode;
   shippingExtras?: ReactNode;
+  packagingExtras?: ReactNode;
   afterShipping?: ReactNode;
   allowManualWeight?: boolean;
   allowCustomSize?: boolean;
@@ -780,6 +783,7 @@ export function OrderFormB({
   materialExtras,
   pricingExtras,
   shippingExtras,
+  packagingExtras,
   afterShipping,
   allowManualWeight = false,
   allowCustomSize = true,
@@ -1346,6 +1350,8 @@ export function OrderFormB({
             </div>
           </Group>
 
+          {packagingExtras}
+
           {pricingExtras}
 
           <Group title="文件">
@@ -1427,69 +1433,19 @@ export function OrderFormB({
 
             {values.receiverAddress.trim() ? (
               <div className="mt-3 overflow-hidden rounded-xl border">
-                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center border-b px-3 py-2.5">
-                  <label
-                    htmlFor={`${uid}-receiver-name`}
-                    className="text-[0.65625rem] font-bold tracking-[0.14em] text-muted-foreground"
-                  >
-                    收件人
-                    {receiverNameRequired ? (
-                      <span aria-hidden="true" className="ml-0.5 text-destructive">
-                        *
-                      </span>
-                    ) : null}
-                  </label>
-                  <Input
-                    key={`${uid}-receiver-name-${values.receiverAddress}`}
-                    id={`${uid}-receiver-name`}
-                    defaultValue={
-                      values.receiverName || parsedReceiver.receiverName || ''
-                    }
-                    aria-invalid={Boolean(fieldErrors?.receiverName)}
-                    required={receiverNameRequired}
-                    aria-required={receiverNameRequired}
+                <div className="border-b p-3">
+                  <OrderReceiverContactFields
+                    key={`${uid}-contacts-${values.receiverAddress}`}
+                    idPrefix={uid}
+                    receiverName={values.receiverName || parsedReceiver.receiverName}
+                    receiverPhone={receiverPhoneInitialValue}
+                    nameRequired={receiverNameRequired}
+                    phoneRequired={receiverPhoneRequired}
                     disabled={disabled}
-                    className="h-7 border-0 bg-transparent px-0 font-semibold shadow-none focus-visible:ring-0"
-                    placeholder="请填写收件人"
-                    onChange={(event) => {
-                      const nextValue = event.currentTarget.value;
-                      onReceiverNameChange(nextValue);
-                    }}
+                    errors={fieldErrors}
+                    onNameChange={onReceiverNameChange}
+                    onPhoneChange={onReceiverPhoneChange}
                   />
-                  {fieldErrors?.receiverName ? (
-                    <div className="col-start-2">
-                      <FieldError>{fieldErrors.receiverName}</FieldError>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center border-b px-3 py-2.5">
-                  <label
-                    htmlFor={`${uid}-receiver-phone`}
-                    className="text-[0.65625rem] font-bold tracking-[0.14em] text-muted-foreground"
-                  >
-                    电话
-                  </label>
-                  <input
-                    key={`${uid}-receiver-phone-${values.receiverAddress}`}
-                    id={`${uid}-receiver-phone`}
-                    type="tel"
-                    defaultValue={receiverPhoneInitialValue}
-                    required={receiverPhoneRequired}
-                    aria-required={receiverPhoneRequired}
-                    aria-invalid={Boolean(fieldErrors?.receiverPhone)}
-                    disabled={disabled}
-                    className="h-7 w-full min-w-0 border-0 bg-transparent px-0 py-1 font-mono text-sm font-semibold outline-none placeholder:text-muted-foreground focus-visible:ring-0 disabled:opacity-50"
-                    placeholder="请填写收货电话"
-                    onChange={(event) => {
-                      const nextValue = event.currentTarget.value;
-                      onReceiverPhoneChange(nextValue);
-                    }}
-                  />
-                  {fieldErrors?.receiverPhone ? (
-                    <div className="col-start-2">
-                      <FieldError>{fieldErrors.receiverPhone}</FieldError>
-                    </div>
-                  ) : null}
                 </div>
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center px-3 py-2.5">
                   <span className="text-[0.65625rem] font-bold tracking-[0.14em] text-muted-foreground">

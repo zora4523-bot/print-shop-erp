@@ -12,7 +12,7 @@ import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
 
 type Props = {
@@ -46,7 +46,7 @@ export function purchaseReceiptImpactItems(
     `本次数量：${preview.quantity} ${preview.unit}`,
     `单位成本：${preview.unitCost || '未填写'}`,
     `提交前剩余：${remainingQuantity} ${preview.unit}`,
-    '系统会创建采购收货记录和库存流水，并同步更新采购明细的已收数量；提交时会再次校验剩余数量。',
+    '本次收货数量计入库存和采购单的已收数量。',
   ];
 }
 
@@ -224,23 +224,19 @@ export function PurchaseReceiptForm({
       >
         {pending ? '提交中…' : '核对并确认收货过账'}
       </Button>
-      <ConfirmActionDialog
-        level="L2"
+      <ConfirmActionController level="L2"
         formId={formId}
         open={confirmationOpen}
         onOpenChange={setConfirmationOpen}
         focusReturnRef={triggerRef}
         disabled={pending || preview === null}
-        title="确认采购收货过账？"
-        description="请核对当前采购明细、入库库位、数量与成本。过账会立即形成采购收货记录和库存流水。"
-        impactItems={
-          preview ? purchaseReceiptImpactItems(preview, remainingQuantity) : []
-        }
-        confirmLabel="确认收货过账"
         onConfirm={() => {
           confirmedRef.current = true;
-        }}
-      />
+        }}>
+        <ConfirmActionDialog action="确认采购收货过账" changes={[]} consequences={
+          preview ? purchaseReceiptImpactItems(preview, remainingQuantity) : []
+        } confirmText="收货过账" />
+      </ConfirmActionController>
     </form>
   );
 }

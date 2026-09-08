@@ -23,6 +23,7 @@ const {
   MockReworkOrderError,
   MockOrderChangeRequestError,
   MockOrderPricingReviewError,
+  MockProductionOperationMaterializationError,
 } = vi.hoisted(() => ({
   permissionsMock: { requirePermission: vi.fn() },
   orderMock: {
@@ -103,6 +104,16 @@ const {
       this.name = 'OrderPricingReviewError';
     }
   },
+  MockProductionOperationMaterializationError: class extends Error {
+    constructor(
+      public readonly code: string,
+      message: string,
+      public readonly detail: unknown = null,
+    ) {
+      super(message);
+      this.name = 'ProductionOperationMaterializationError';
+    }
+  },
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -137,6 +148,9 @@ vi.mock('@/lib/order/pricing-review', () => ({
   finalizeOrderPricing: pricingReviewMock.finalizeOrderPricing,
   OrderPricingReviewError: MockOrderPricingReviewError,
 }));
+vi.mock('@/lib/production/operation-materialization-service', () => ({
+  ProductionOperationMaterializationError: MockProductionOperationMaterializationError,
+}));
 vi.mock('@/lib/order/commercial-details', () => ({
   ...commercialDetailsMock,
   OrderCommercialDetailsError: class extends Error {},
@@ -159,6 +173,9 @@ import {
   previewOrderPricingReviewAction,
   finalizeOrderPricingAction,
   saveOrderManualChargeAction,
+  deleteOrderManualChargeAction,
+  saveOrderPlateDetailAction,
+  deleteOrderPlateDetailAction,
 } from '../order';
 
 const salesActor = {
@@ -709,6 +726,7 @@ describe('submitOrderAction', () => {
     const r = await submitOrderAction('o1', token);
     expect(r).toEqual({
       status: 'success',
+      readyForProduction: false,
       quotedFee: '566.30',
       quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
     });
@@ -720,6 +738,22 @@ describe('submitOrderAction', () => {
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
+  });
+
+  it.each([
+    [OrderStatus.CONFIRMED, true],
+    [OrderStatus.SUBMITTED, false],
+    [OrderStatus.PENDING_FACTORY, false],
+  ])('reports production readiness from the committed status %s', async (status, readyForProduction) => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.submitOrder.mockResolvedValueOnce({
+      id: 'o1', status, quotedFee: '566.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+    });
+    await expect(submitOrderAction('o1')).resolves.toEqual({
+      status: 'success', readyForProduction, quotedFee: '566.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+    });
   });
 
   it('报价变化时返回稳定 QUOTE_CHANGED 结果且不刷新路由', async () => {
@@ -975,6 +1009,26 @@ describe('finishOrderAction', () => {
 });
 
 describe('updateOrderAction', () => {
+  it('forwards the external sales account separately from customer master data', async () => {
+    permissionsMock.requirePermission.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+    await expect(updateOrderAction('o1', null, editFd({ externalSalesUserId: ' sales-2 ' }))).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(orderMock.updateOrderFields).toHaveBeenCalledWith('o1', {
+      expectedEditVersion: 7, externalSalesUserId: 'sales-2',
+    }, expect.objectContaining({ role: Role.ADMIN }));
+  });
+
+  it('rejects an empty external sales account instead of clearing ownership', async () => {
+    const result = await updateOrderAction('o1', null, editFd({ externalSalesUserId: '' }));
+    expect(result).toMatchObject({ status: 'invalid', fieldErrors: { externalSalesUserId: expect.any(Array) } });
+    expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
+  });
+
+  it('shows domain authorization failures for attempted account reassignment', async () => {
+    orderMock.updateOrderFields.mockRejectedValue(new MockOrderInvariantError('只有管理员可以更换关联外部销售'));
+    const result = await updateOrderAction('o1', null, editFd({ externalSalesUserId: 'sales-2' }));
+    expect(result).toEqual({ status: 'error', message: '只有管理员可以更换关联外部销售' });
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
   it("first-line requirePermission('order:create')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
@@ -985,6 +1039,21 @@ describe('updateOrderAction', () => {
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith('order:create');
     expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
   });
+
+  it('rejects malformed shipment JSON before invoking the domain', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    const result = await updateOrderAction(
+      'o1',
+      null,
+      editFd({ shipments: '{invalid' }),
+    );
+    expect(result).toMatchObject({
+      status: 'invalid',
+      fieldErrors: { shipments: ['配送信息格式非法'] },
+    });
+    expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
+  });
+
 
   it('forwards parsed text fields to updateOrderFields', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
@@ -1752,6 +1821,77 @@ describe('order pricing review actions', () => {
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
+  it('returns an actionable pricing error for incomplete production facts without exposing internal details', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    pricingReviewMock.finalizeOrderPricing.mockRejectedValueOnce(
+      new MockProductionOperationMaterializationError(
+        'CANONICAL_FACTS_INCOMPLETE',
+        '工单生产事实不完整，不能自动生成工序',
+        [{ code: 'NO_ITEMS', path: 'items', internalOrderId: 'private-order-id' }],
+      ),
+    );
+
+    const result = await finalizeOrderPricingAction(null, {
+      orderId: 'order-1',
+      expectedOrderRevision: 1,
+      expectedPriceRevision: 1,
+      items: [],
+      packagingGroups: [],
+      shipments: [],
+      remark: null,
+    });
+
+    expect(result).toEqual({
+      status: 'error',
+      message: '工单款式或生产信息不完整，无法完成核价。请先核对款式、数量及包装信息。',
+    });
+    expect(JSON.stringify(result)).not.toContain('NO_ITEMS');
+    expect(JSON.stringify(result)).not.toContain('private-order-id');
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('returns other expected production activation failures as local errors without revalidation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    pricingReviewMock.finalizeOrderPricing.mockRejectedValueOnce(
+      new MockProductionOperationMaterializationError(
+        'PRICING_NOT_CONFIRMED',
+        '工单价格尚未确认，不能投产',
+        { internalVersion: 'private-version' },
+      ),
+    );
+
+    await expect(finalizeOrderPricingAction(null, {
+      orderId: 'order-1',
+      expectedOrderRevision: 1,
+      expectedPriceRevision: 1,
+      items: [],
+      packagingGroups: [],
+      shipments: [],
+      remark: null,
+    })).resolves.toEqual({
+      status: 'error',
+      message: '工单价格尚未确认，不能投产',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('does not conceal unexpected pricing failures as recoverable business errors', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    const failure = new Error('unexpected database failure');
+    pricingReviewMock.finalizeOrderPricing.mockRejectedValueOnce(failure);
+
+    await expect(finalizeOrderPricingAction(null, {
+      orderId: 'order-1',
+      expectedOrderRevision: 1,
+      expectedPriceRevision: 1,
+      items: [],
+      packagingGroups: [],
+      shipments: [],
+      remark: null,
+    })).rejects.toBe(failure);
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
   it('passes structured packaging-group facts and returns the packaging total', async () => {
     permissionsMock.requirePermission.mockResolvedValue(adminActor);
     pricingReviewMock.finalizeOrderPricing.mockResolvedValue({
@@ -1858,5 +1998,43 @@ describe('structured order commercial detail actions', () => {
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/bills');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1/edit');
+  });
+
+  it.each([
+    {
+      label: 'removes a manual charge',
+      action: deleteOrderManualChargeAction,
+      mutate: commercialDetailsMock.deleteOrderManualCharge,
+      raw: { chargeId: 'charge-1', reason: '移除重复收费' },
+      saved: { chargeId: 'charge-1' },
+    },
+    {
+      label: 'saves a plate detail',
+      action: saveOrderPlateDetailAction,
+      mutate: commercialDetailsMock.saveOrderPlateDetail,
+      raw: { orderItemId: 'item-1', name: '正面版', quantity: 1, unitPrice: '25.00' },
+      saved: { plateDetailId: 'plate-1' },
+    },
+    {
+      label: 'removes a plate detail',
+      action: deleteOrderPlateDetailAction,
+      mutate: commercialDetailsMock.deleteOrderPlateDetail,
+      raw: { orderItemId: 'item-1', plateDetailId: 'plate-1', reason: '无需额外制版' },
+      saved: { plateDetailId: 'plate-1' },
+    },
+  ])('$label and refreshes the embedded editor’s amounts and version', async ({ action, mutate, raw, saved }) => {
+    const actor = { ...salesActor, role: Role.ADMIN };
+    permissionsMock.requirePermission.mockResolvedValue(actor);
+    mutate.mockResolvedValue({ ...saved, priceRevision: 5, totalAmount: '980.00' });
+
+    const result = await action(null, { orderId: 'order-1', expectedPriceRevision: 4, ...raw });
+
+    expect(result).toMatchObject({ status: 'success', priceRevision: 5 });
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('order:price:confirm');
+    expect(mutate).toHaveBeenCalledWith(expect.objectContaining(raw), actor);
+    expect(revalidatePathMock.mock.calls).toEqual([
+      ['/orders'], ['/orders/order-1'], ['/orders/order-1/edit'], ['/owner/bills'],
+    ]);
   });
 });

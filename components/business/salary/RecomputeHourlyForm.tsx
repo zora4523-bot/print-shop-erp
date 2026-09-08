@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
   BatchActionResult,
-  ConfirmActionDialog,
+  ConfirmActionController, ConfirmActionDialog,
   FormErrorSummary,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
@@ -97,8 +97,7 @@ export function RecomputeHourlyForm({ month, maxMonth, context }: Props) {
           <input type="hidden" name="month" value={month} />
         </form>
         {/* 时薪重算没有服务端 reason/审计字段，因此只做 L2 影响确认。 */}
-        <ConfirmActionDialog
-          level="L2"
+        <ConfirmActionController level="L2"
           trigger={
             <Button
               id={triggerId}
@@ -111,13 +110,10 @@ export function RecomputeHourlyForm({ month, maxMonth, context }: Props) {
               {pending ? '重算中…' : `核对并重算 ${month} 全员月结`}
             </Button>
           }
-          title={`确认重算 ${month} 全员时薪月结？`}
-          description="该批处理可能新建或覆盖未发工资记录。请先核对当前人员、金额与部分成功语义。"
-          impactItems={hourlyRecomputeImpactItems(month, context)}
-          confirmLabel={`确认重算 ${month}`}
           formId={formId}
-          disabled={pending || futureMonth}
-        />
+          disabled={pending || futureMonth}>
+          <ConfirmActionDialog action={`确认重算 ${month} 全员时薪月结？`} changes={[]} consequences={hourlyRecomputeImpactItems(month, context)} confirmText={`确认重算 ${month}`} />
+        </ConfirmActionController>
       </div>
 
       {futureMonth ? (

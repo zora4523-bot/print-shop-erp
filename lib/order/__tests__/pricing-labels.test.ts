@@ -12,7 +12,7 @@ describe('工单计价业务名称', () => {
     ['ORDER_CREATED_PROVISIONAL', '建单暂定价'],
     ['EXTERNAL_SUBMIT_QUOTE', '外部销售提交报价'],
     ['ADMIN_FULL_REPRICE', '管理员重新计价'],
-    ['ADMIN_SNAPSHOT_CONFIRMATION', '管理员确认报价快照'],
+    ['ADMIN_SNAPSHOT_CONFIRMATION', '工厂核价'],
     ['FACTORY_CONFIRM_CURRENT_PUBLISHED', '工厂按当前价表确认'],
     ['SHIPMENT_CHARGES_FINALIZED', '发货费用确认'],
     ['SF_COLLECT_CHANGED_PENDING', '顺丰到付调整'],

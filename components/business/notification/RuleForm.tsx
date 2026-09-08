@@ -52,6 +52,9 @@ export function RuleForm({
   const fieldErrors =
     state?.status === 'invalid' ? state.fieldErrors : undefined;
   const selected = new Set(initial.channelIds);
+  const visibleChannels = channels.filter(
+    (c) => c.selectionIssue !== 'LEGACY_TRANSPORT' || selected.has(c.id),
+  );
   const managementRole = managementNotificationRoleForEvent(eventType);
 
   return (
@@ -145,20 +148,20 @@ export function RuleForm({
               />
             ))}
           </div>
-        ) : channels.length === 0 ? (
+        ) : visibleChannels.length === 0 ? (
           <p className="rounded-md border border-dashed bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-            还没建任何群。请先{' '}
+            还没有智能机器人目标。请先{' '}
             <Link
               href="/owner/notifications/channels/new"
               className="font-medium underline"
             >
-              新建群
+              新建智能机器人目标
             </Link>
             。
           </p>
         ) : (
           <div className="space-y-2 rounded-md border bg-card p-3">
-            {channels.map((c) => {
+            {visibleChannels.map((c) => {
               const isSelected = selected.has(c.id);
               // 不可用渠道的 checkbox 三态语义：
               //   - 可用 → enabled，正常勾/反勾

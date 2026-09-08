@@ -114,7 +114,7 @@ export function AgentMonthlyBillExportControls({
             异步导出
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            使用当前账期、状态和代理商筛选快照生成 XLSX；文件 24 小时后过期。
+            导出当前筛选结果。下载文件保留 24 小时。
           </p>
         </div>
         <form action={action} aria-busy={pending}>

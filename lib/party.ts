@@ -309,10 +309,10 @@ export async function listSupplierPartyOptions(): Promise<SupplierPartyOption[]>
   });
 }
 
-export async function listCustomerPartyOptions(): Promise<CustomerPartyOption[]> {
+export async function listCustomerPartyOptions(currentCustomerId?: string | null): Promise<CustomerPartyOption[]> {
   const rows = await db.party.findMany({
     where: {
-      isActive: true,
+      ...(currentCustomerId ? { AND: [{ OR: [{ isActive: true }, { id: currentCustomerId }] }] } : { isActive: true }),
       OR: [{ type: PartyType.CUSTOMER }, { type: PartyType.BOTH }],
     },
     select: PARTY_SELECT,

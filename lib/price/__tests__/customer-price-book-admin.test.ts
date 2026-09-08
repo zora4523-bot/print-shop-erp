@@ -1929,6 +1929,44 @@ describe('customer price-book draft lifecycle', () => {
     expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('十档上界保存保留整板块保护，非法断层=%s', async (invalid) => {
+    const upper = [750, 1500, 2500, 3500, 4500, 7500, 15000, 25000, 40000, null];
+    const sectionRules = Array.from({ length: 5 }, (_, product) => upper.map((maxQty, tier) =>
+      editableSectionRule(`tier-${product}-${tier}`, 'processing-draft', {
+        productId: `custom-${product}`, exclusiveGroup: 'CUSTOM_BASE', kind: 'BASE',
+        calculationType: 'PER_PIECE', code: `CUSTOM_${product}_${tier}`,
+        minQty: tier === 0 ? 1 : upper[tier - 1]! + 1, maxQty, amount: '0.1800',
+      }),
+    )).flat();
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'processing-draft', purpose: 'PROCESSING', settlementType: 'EXTERNAL_SALES',
+      isActive: false, notes: draftNotes(),
+    });
+    dbMock.customerPriceRule.findMany.mockResolvedValueOnce(sectionRules)
+      .mockResolvedValueOnce([validationRule()]);
+    dbMock.customerPriceRule.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.customerPriceBook.update.mockResolvedValue({ id: 'processing-draft' });
+    const rows = sectionRules.map((rule, index) => ({
+      ruleId: rule.id as string, expectedUpdatedAt: now, amount: '0.1800',
+      minQty: index % 10 === 9 ? (invalid ? 42002 : 42001) : rule.minQty as number,
+      maxQty: index % 10 === 8 ? 42000 : rule.maxQty as number | null,
+      includedUnits: null, incrementUnits: null, incrementAmount: null,
+    }));
+    const operation = updateCustomerPriceSectionDraft({
+      priceBookId: 'processing-draft', section: 'tiers', rows,
+    }, actor, now);
+    if (invalid) {
+      await expect(operation).rejects.toThrow('阶梯上界');
+      expect(dbMock.customerPriceRule.updateMany).not.toHaveBeenCalled();
+      expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+    } else {
+      await expect(operation).resolves.toMatchObject({ priceBookId: 'processing-draft' });
+      expect(dbMock.customerPriceRule.updateMany).toHaveBeenCalledTimes(10);
+      expect(dbMock.businessAuditLog.create).toHaveBeenCalled();
+    }
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
   it('保留单本业务板块入口并仅开启一个事务', async () => {
     const sectionRule = editableSectionRule(
       'stock-base-rule',

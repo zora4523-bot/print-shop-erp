@@ -145,7 +145,6 @@ export async function updateSettings(
           select: {
             id: true,
             transport: true,
-            webhookUrl: true,
             smartBotBotDigest: true,
             smartBotTargetId: true,
             smartBotChatType: true,
@@ -187,7 +186,7 @@ export async function updateSettings(
         if (newlyAddedIneligible.length > 0) {
           throw new SettingValidationError(
             'management_notification_routing',
-            '不能新绑定已停用、与当前 Bot 身份不一致或配置不完整的接收群；请先到推送配置中修复',
+            '不能新绑定旧版 Webhook、已停用、与当前 Bot 身份不一致或配置不完整的接收群；请先到推送配置中修复',
           );
         }
       }

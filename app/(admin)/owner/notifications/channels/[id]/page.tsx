@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import { ChannelForm } from '@/components/business/notification/ChannelForm';
 import { SmartBotBindingPanel } from '@/components/business/notification/SmartBotBindingPanel';
+import { LegacyNotificationChannels } from '@/components/business/notification/LegacyNotificationChannels';
 import { updateChannelAction } from '@/actions/owner-notifications';
 import { getChannel } from '@/lib/notification/admin';
 
@@ -21,10 +22,24 @@ export default async function EditChannelPage({
   const { id } = await params;
   const channel = await getChannel(id);
   if (!channel) notFound();
+  if (channel.transport !== 'WECOM_SMART_BOT') {
+    return (
+      <div className="mx-auto max-w-xl space-y-6">
+        <h1 className="text-xl font-semibold">旧版通知目标</h1>
+        <LegacyNotificationChannels
+          open
+          channels={[{
+            id: channel.id,
+            channelName: channel.channelName,
+            isActive: channel.isActive,
+          }]}
+        />
+      </div>
+    );
+  }
 
   // bind id 进 server action（同 owner-accounts/[id] 的 .bind() 模式）
   const action = updateChannelAction.bind(null, id);
-  const smartBot = channel.transport === 'WECOM_SMART_BOT';
   const targetMasked = maskSmartBotTarget(channel.smartBotTargetId);
   const boundAt = channel.smartBotBoundAt?.toISOString() ?? null;
 
@@ -42,8 +57,6 @@ export default async function EditChannelPage({
         initial={{
           channelKey: channel.channelKey,
           channelName: channel.channelName,
-          transport: channel.transport,
-          webhookUrl: channel.webhookUrl,
           smartBotTargetMasked: targetMasked,
           smartBotChatType: channel.smartBotChatType,
           smartBotBoundAt: boundAt,
@@ -52,14 +65,12 @@ export default async function EditChannelPage({
           isActive: channel.isActive,
         }}
       />
-      {smartBot ? (
-        <SmartBotBindingPanel
-          channelId={channel.id}
-          isBound={Boolean(channel.smartBotTargetId && channel.smartBotBoundAt)}
-          targetMasked={targetMasked}
-          boundAt={boundAt}
-        />
-      ) : null}
+      <SmartBotBindingPanel
+        channelId={channel.id}
+        isBound={Boolean(channel.smartBotTargetId && channel.smartBotBoundAt)}
+        targetMasked={targetMasked}
+        boundAt={boundAt}
+      />
     </div>
   );
 }
