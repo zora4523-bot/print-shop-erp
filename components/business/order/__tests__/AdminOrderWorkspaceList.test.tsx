@@ -74,6 +74,16 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).not.toContain('v2');
   });
 
+  it('labels an unquoted draft without implying a failed pricing rule', () => {
+    const order: AdminOrderWorkspaceRow = { ...row(), status: OrderStatus.DRAFT, fee: { source: 'PENDING', amount: null, estimated: false } };
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="draft-export" />);
+    expect(html).toContain('未报价');
+    expect(html).toContain('提交后报价');
+    expect(html).toContain('href="/orders/order-1/edit"');
+    expect(html).toContain('编辑草稿');
+    expect(html).not.toContain('系统无法定价');
+  });
+
   it('shows canonical craft tags and the full distant delivery date without a countdown', () => {
     const order: AdminOrderWorkspaceRow = { ...row(), craftTags: ['局部烫金', '专版烫金', '彩印'], promisedDate: '2099-12-31', promisedDaysLeft: 26777, dueAlert: null };
     const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="signals-export" />);

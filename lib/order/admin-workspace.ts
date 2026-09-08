@@ -987,7 +987,8 @@ function mapAdminOrderRow(
     requests: row.printJobs,
   });
   const { printPending, pendingPrintJobId } = printFacts;
-  const fee = manualPricing
+  const unquotedDraft = row.status === OrderStatus.DRAFT && row.quotedFee === null && row.confirmedFee === null && row.settledFee === null;
+  const fee = manualPricing || unquotedDraft
     ? {
         amount: null,
         source: 'PENDING' as const,

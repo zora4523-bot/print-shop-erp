@@ -212,7 +212,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
             {decision ?? <p>{ORDER_STATUS_REGISTRY[model.status].label} · 暂无待办</p>}
           </section>
           <section id="order-detail-overview" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-overview' && styles.highlight)}><h2 className={styles.eyebrow}>概览</h2><p className={styles.orderName}>{model.name}</p>
-            <div className={styles.stats}><div><strong>{model.due?.slice(5) ?? '未设置'}</strong><span>{model.due ? model.dueLeft : '交货日期'}</span></div><div><strong>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')}</strong><span>工单总量（个）</span></div></div>
+            <div className={styles.stats}><div><strong>{model.due ?? '未设置'}</strong><span>{model.due ? model.dueLeft : '交货日期'}</span></div><div><strong>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')}</strong><span>工单总量（个）</span></div></div>
             {hasProgress ? <div className={styles.progressList}><Progress label="烫金" done={model.progress.foilingProgress} total={model.progress.orderTotal} /><Progress label="打包" done={model.progress.packingProgress} total={model.progress.orderTotal} /></div> : <p className={styles.emptyHint}>确认并下发生产后，报工进度在此显示</p>}
           </section>
           <section className={styles.card}><h2 className={styles.eyebrow}>版本与打印</h2>

@@ -696,6 +696,11 @@ describe('admin order workspace predicates', () => {
     });
   });
 
+  it('does not display a new unquoted draft as a historical zero-price order', async () => {
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({ status: OrderStatus.DRAFT, totalAmount: new Prisma.Decimal(0), priceRevision: 0 }));
+    expect((await getAdminOrderByOrderNo(actor, 'GD-260902-001'))?.fee).toMatchObject({ amount: null, source: 'PENDING' });
+  });
+
   it('aggregates canonical craft types independently of display dictionary names', async () => {
     const record = adminOrderRecord();
     const crafts = ['PRINT', 'PARTIAL', 'FULL', 'PARTIAL', null];

@@ -287,11 +287,11 @@ function AdminOrderRow({
           {order.fee.amount === null
             ? order.fee.source === 'INCOMPLETE'
               ? '金额不完整'
-              : '待核价'
+              : order.status === 'DRAFT' ? '未报价' : '待核价'
             : `¥${formatMoney(order.fee.amount)}`}
         </p>
         <p className="mt-0.5 text-[10px] text-muted-foreground">
-          {feeSourceLabel(order.fee.source)}
+          {order.status === 'DRAFT' && order.fee.source === 'PENDING' ? '提交后报价' : feeSourceLabel(order.fee.source)}
         </p>
         {order.fee.source === 'SETTLED' ? (
           <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">
@@ -301,15 +301,21 @@ function AdminOrderRow({
       </div>
 
       <div className="col-span-2 text-right 2xl:col-span-1">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={rowActionClassName(order)}
-          onClick={onOpen}
-        >
-          {rowActionLabel(order)}
-        </Button>
+        {order.status === 'DRAFT' ? (
+          <Link href={`/orders/${order.id}/edit`} prefetch={false} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            编辑草稿
+          </Link>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={rowActionClassName(order)}
+            onClick={onOpen}
+          >
+            {rowActionLabel(order)}
+          </Button>
+        )}
       </div>
     </li>
   );

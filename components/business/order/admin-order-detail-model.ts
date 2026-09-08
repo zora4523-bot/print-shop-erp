@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { adminOrderCraftTags, adminOrderDueHint } from '@/lib/order/admin-list-presentation';
 import type { OrderChangeRequestStatus } from '@/generated/prisma/enums';
 import type { getOrderDetail } from '@/lib/order';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
@@ -230,7 +231,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
       name: externalPriceBusinessText(item.name), qty: item.quantity,
       pack: packaging.length ? packaging.join('；') : item.pack == null ? null : `${item.pack} 个/袋（历史记录）`,
       specs: [
-        { label: '工艺', value: item.craftNames.join('、') || '未记录' },
+        { label: '工艺', value: [...new Set([...adminOrderCraftTags([item.craft]), ...item.craftNames])].join('、') || '未记录' },
         { label: '纸张', value: [item.paperType ? externalPriceBusinessText(item.paperType) : null, item.paperWeightGsm ? `${item.paperWeightGsm}g` : null].filter(Boolean).join(' · ') || '未记录' },
         { label: '规格', value: item.specification ? externalPriceBusinessText(item.specification) : '未记录' },
         { label: '实尺', value: item.actualWidthMm != null && item.actualHeightMm != null ? `${item.actualWidthMm.toString()} × ${item.actualHeightMm.toString()} mm` : '未记录' },
@@ -261,8 +262,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
     if (charge.status === 'WAIVED') continue;
     orderFees.push({ id: charge.id, label: `${charge.category.name}${charge.shipment ? ` · 第 ${charge.shipment.sequence} 票` : ''}`, amount: amount(charge.amount) });
   }
-  const day = workspace.promisedDaysLeft;
-  const dueLeft = day == null ? '' : day < 0 ? `超 ${-day} 天` : day === 0 ? '今日交付' : `剩 ${day} 天`;
+  const dueLeft = adminOrderDueHint(workspace.dueAlert) ?? '';
   const feeStages = (['quoted', 'confirmed', 'settled'] as const).map((key) => ({
     key, title: { quoted: '提交报价', confirmed: '确认金额', settled: '结算金额' }[key],
     total: amount(workspace.feeStages[key]), current: workspace.feeStages.active === key.toUpperCase(),
@@ -270,7 +270,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
   return {
     id: order.id, no: order.orderNo, name: order.customName || '未命名工单',
     version: order.workOrderVersion, status: order.status, customer: workspace.customer.name,
-    sales: workspace.submitter.name, craft: workspace.craftSummary,
+    sales: workspace.submitter.name, craft: workspace.craftTags?.join(' · ') || workspace.craftSummary,
     due: workspace.promisedDate?.slice(0, 10) ?? null, dueLeft, qty: workspace.totalQuantity, isUrgent: order.isUrgent,
     items, orderFees, total: amount(workspace.fee.amount), feeSource: workspace.fee.source, feeStages,
     vdiff: currentApproval && currentApproval.baseWorkOrderVersion != null ? {

@@ -575,7 +575,7 @@ export function AdminOrderEditor(props: Props) {
           <div className="min-w-0">
             <h1 className="text-lg font-semibold">编辑工单</h1>
             <p className="break-all font-mono text-xs text-muted-foreground">
-              {props.orderNo} · v{props.revision}
+              {props.orderNo} · v{props.workOrderVersion}
             </p>
           </div>
           <OrderStatusBadge status={props.status} />
@@ -1084,7 +1084,7 @@ export function AdminOrderEditor(props: Props) {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {review.changesRevision
-                    ? `工单版本 v${props.revision} → v${props.revision + 1}，保留修改记录与原报价快照。`
+                    ? `工单版本 v${props.workOrderVersion} → v${props.workOrderVersion + 1}，保留修改记录与原报价快照。`
                     : '本次仅修改资料，保留当前工单版本与费用。'}
                 </p>
                 {review.blockers.map((text, index) => (

@@ -247,3 +247,28 @@ describe('admin order detail projection', () => {
     expect(result).toMatchObject({ total: null, items: [], works: [], logs: [], shipments: [], changes: [], vdiff: null });
   });
 });
+
+
+describe('list/detail delivery and craft consistency', () => {
+  it('preserves canonical crafts when dictionary labels are missing and omits distant countdowns', () => {
+    const input = fixture();
+    input.workspace.craftTags = ['专版烫金', '彩印'];
+    input.workspace.promisedDate = '2099-12-31';
+    input.workspace.promisedDaysLeft = 26777;
+    input.workspace.dueAlert = null;
+    input.order.items[0]!.craft = 'PRINT';
+    input.order.items[0]!.craftNames = [];
+    const model = buildAdminOrderDetailModel(input);
+    expect(model.craft).toBe('专版烫金 · 彩印');
+    expect(model.items[0]!.specs[0]!.value).toBe('彩印');
+    expect(model.due).toBe('2099-12-31');
+    expect(model.dueLeft).toBe('');
+  });
+  it('uses the same imminent and overdue delivery labels as the list', () => {
+    const input = fixture();
+    input.workspace.dueAlert = { kind: 'due-soon', days: 1 };
+    expect(buildAdminOrderDetailModel(input).dueLeft).toBe('明天到期');
+    input.workspace.dueAlert = { kind: 'overdue', days: 2 };
+    expect(buildAdminOrderDetailModel(input).dueLeft).toBe('逾期 2 天');
+  });
+});

@@ -149,3 +149,7 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 ```
 
 只终止确认属于本项目的 PID，不使用宽泛的 `pkill node`。问题诊断见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)。
+
+### 多工艺工单验收数据
+
+本地场景生成命令、13 类场景及跨页面核对范围见 [工单场景数据与关联审查](docs/order-scenario-review-2026-09-08.md)。命令默认只预览，显式 `--apply` 才写入；重跑不覆盖已有流转记录。

@@ -2,6 +2,7 @@
 // page so both the UI render and tests can share the same label /
 // value-formatting rules.
 
+import { ORDER_STATUS_REGISTRY } from '../ui/status-registry';
 import { formatDateTimeShanghai } from '../format/dates';
 
 const FIELD_LABELS: Record<string, string> = {
@@ -81,7 +82,9 @@ function hasKnownField(name: string): boolean {
 
 // 工单状态中文标签（cron 推送 / 日志渲染共用）。
 export function orderStatusZh(status: string): string {
-  return STATUS_LABELS[status] ?? UNKNOWN_ORDER_STATUS_LABEL;
+  if (Object.hasOwn(STATUS_LABELS, status)) return STATUS_LABELS[status]!;
+  if (Object.hasOwn(ORDER_STATUS_REGISTRY, status)) return ORDER_STATUS_REGISTRY[status as keyof typeof ORDER_STATUS_REGISTRY].label;
+  return UNKNOWN_ORDER_STATUS_LABEL;
 }
 
 export function fieldLabel(name: string): string {
@@ -109,7 +112,7 @@ export function formatLogValue(
   }
   if (typeof value === 'boolean') return value ? '是' : '否';
   if (fieldName === 'status' && typeof value === 'string') {
-    return STATUS_LABELS[value] ?? UNKNOWN_ORDER_STATUS_LABEL;
+    return orderStatusZh(value);
   }
   if (fieldName === 'pricingStatus' && typeof value === 'string') {
     return PRICING_STATUS_LABELS[value] ?? UNKNOWN_PRICING_STATUS_LABEL;

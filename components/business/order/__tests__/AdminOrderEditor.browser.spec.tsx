@@ -200,6 +200,12 @@ afterEach(() => {
   window.scrollTo(0, 0);
 });
 describe('administrator edit design', () => {
+  it('shows the same work-order version as detail and print, not the concurrency revision', async () => {
+    mount({ revision: 7, workOrderVersion: 3 });
+    await expect.element(page.getByText('GD-260908-001 · v3', { exact: true })).toBeVisible();
+    expect(host.textContent).not.toContain('GD-260908-001 · v7');
+  });
+
   for (const [width, height] of [
     [375, 667],
     [393, 852],
