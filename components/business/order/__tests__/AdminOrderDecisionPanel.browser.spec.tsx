@@ -188,7 +188,7 @@ describe('admin order decisions require review before mutation', () => {
   });
 
   it.each([
-    { action: 'confirm', status: OrderStatus.PENDING_FACTORY, trigger: '确认工单', confirm: '确认并锁定金额' },
+    { action: 'release', status: OrderStatus.PENDING_FACTORY, trigger: '下发 + 打印', confirm: '确认下发并创建打印' },
     { action: 'release', status: OrderStatus.CONFIRMED, trigger: '下发 + 打印', confirm: '确认下发并创建打印' },
     { action: 'settle', status: OrderStatus.SHIPPED, trigger: '结算', confirm: '确认结算入账' },
   ] as const)('$action waits for impact confirmation before writing', async ({ action, status, trigger, confirm }) => {

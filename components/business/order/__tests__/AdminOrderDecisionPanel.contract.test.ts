@@ -28,10 +28,11 @@ describe('admin order decision reason contract', () => {
     expect(source).not.toContain('void task().then(finish)');
   });
 
-  it('把当前价预览凭证传入工厂确认动作', () => {
-    expect(source).toContain(
-      'expectedQuoteToken: order.priceComparison?.quoteToken',
-    );
-    expect(source).toContain('!order.priceComparison ||');
+  it('keeps only the explicit production release, using saved order versions', () => {
+    expect(source).not.toContain('confirmFactoryOrderAction');
+    expect(source).not.toContain('确认并锁定金额');
+    expect(source).toContain('releaseFactoryOrderAction({');
+    expect(source).toContain('expectedRevision: order.revision');
+    expect(source).toContain('expectedWorkOrderVersion: order.workOrderVersion');
   });
 });

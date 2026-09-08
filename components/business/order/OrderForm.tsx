@@ -1172,6 +1172,7 @@ export function OrderForm({
     orderId: string;
     orderNo: string;
     manualQuote: boolean;
+    readyForProduction: boolean;
   } | null>(null);
   const [expandedItem, setExpandedItem] = useState(0);
   const [localDraftDecisionComplete, setLocalDraftDecisionComplete] =
@@ -1388,6 +1389,7 @@ export function OrderForm({
     setUploading(true);
     setUploadError(null);
     let submittedManualQuote = draft.manualQuote;
+    let readyForProduction = false;
     try {
       const uploaded = await uploadPendingDesigns(draft, queues);
       if (!uploaded) return;
@@ -1421,6 +1423,7 @@ export function OrderForm({
           setUploadError(`草稿已安全保存，但提交失败：${message}`);
           return;
         }
+        readyForProduction = submitResult.readyForProduction === true;
         submittedManualQuote =
           submitResult.quotedFeeCompleteness ===
           OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS;
@@ -1431,6 +1434,7 @@ export function OrderForm({
           orderId: draft.orderId,
           orderNo: draft.orderNo,
           manualQuote: submittedManualQuote,
+          readyForProduction,
         });
         setPendingSubmission(null);
       } else {
@@ -3275,12 +3279,12 @@ export function OrderForm({
       <OrderSubmissionSuccess
         orderNumber={submittedOrder.orderNo}
         statusLabel={
-          submittedOrder.manualQuote ? '待工厂核价确认' : '待工厂确认'
+          submittedOrder.readyForProduction ? '待下发生产' : '待处理'
         }
         description={
           submittedOrder.manualQuote
             ? '这张单含系统暂时无法定价的参数，工厂核价后会通知你。核价前不会安排生产。'
-            : '工厂确认后进入生产。确认前仍可从工单详情撤回修改。'
+            : '工单已提交，资料与费用完整后进入待下发生产。可从详情查看当前进度。'
         }
         manualQuote={submittedOrder.manualQuote}
         primaryAction={{

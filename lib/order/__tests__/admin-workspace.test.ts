@@ -1,3 +1,4 @@
+vi.mock('@/lib/order/production-readiness', () => ({ inspectOrderProductionReadinessInTx: vi.fn().mockResolvedValue(null) }));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderChangeRequestStatus,
@@ -740,63 +741,24 @@ describe('admin order workspace predicates', () => {
     });
   });
 
-  it('disables confirmation when the current-price preview fails', async () => {
+  it('reads the saved price even when the current catalog cannot be quoted', async () => {
     const row = adminOrderRecord();
     dbMock.order.findFirst.mockResolvedValue(row);
-    dbMock.order.findUnique.mockResolvedValue({
-      revision: row.revision,
-      workOrderVersion: row.workOrderVersion,
-      priceRevision: row.priceRevision,
-      updatedAt: row.updatedAt,
-    });
-    previewMock.mockRejectedValueOnce(
-      new OrderChangeRequestError('当前价不可用'),
-    );
-
+    previewMock.mockRejectedValue(new OrderChangeRequestError('当前价不可用'));
     const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
-
-    expect(detail).toMatchObject({
-      orderNo: row.orderNo,
-      priceComparison: null,
-      priceComparisonError: '当前价不可用',
-      capabilities: { confirm: false, reject: true },
-    });
-    expect(dbMock.$transaction).toHaveBeenCalledWith(
-      expect.any(Function),
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-    );
+    expect(detail).toMatchObject({ orderNo: row.orderNo, priceComparison: null, priceComparisonError: null });
+    expect(previewMock).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     expect(progressMock).toHaveBeenCalledWith([row.id], dbMock);
   });
 
-  it('retries the whole detail snapshot when the price preview crosses a version change', async () => {
-    const first = adminOrderRecord();
-    const second = adminOrderRecord({
-      revision: 2,
-      priceRevision: 2,
-      updatedAt: new Date('2026-09-02T08:01:00.000Z'),
-    });
-    dbMock.order.findFirst
-      .mockResolvedValueOnce(first)
-      .mockResolvedValueOnce(second);
-    dbMock.order.findUnique
-      .mockResolvedValueOnce({
-        revision: second.revision,
-        workOrderVersion: second.workOrderVersion,
-        priceRevision: second.priceRevision,
-        updatedAt: second.updatedAt,
-      })
-      .mockResolvedValueOnce({
-        revision: second.revision,
-        workOrderVersion: second.workOrderVersion,
-        priceRevision: second.priceRevision,
-        updatedAt: second.updatedAt,
-      });
-
-    const detail = await getAdminOrderByOrderNo(actor, first.orderNo);
-
+  it('returns one coherent read snapshot without a second pricing transaction', async () => {
+    const row = adminOrderRecord({ revision: 2, priceRevision: 2 });
+    dbMock.order.findFirst.mockResolvedValue(row);
+    const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
     expect(detail?.revision).toBe(2);
-    expect(previewMock).toHaveBeenCalledTimes(2);
-    expect(dbMock.$transaction).toHaveBeenCalledTimes(2);
+    expect(previewMock).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it('does not confuse a real customer named like the empty-state label with the missing sentinel', async () => {

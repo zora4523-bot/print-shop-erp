@@ -197,8 +197,10 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
 ### 3.2 生产下发与外协（管理员）
 
 ```
-管理员查看 PENDING_FACTORY 工单
-→ 完成价格、变更申请等前置校验后确认：PENDING_FACTORY → CONFIRMED
+提交／核价／修改完成后，自动校验已保存费用、包装与工艺事实：
+    ├─ 完整且无待审批申请：PENDING_FACTORY / SUBMITTED → CONFIRMED（待下发生产）
+    └─ 不完整：保留待处理，显示具体问题
+→ 旧待确认工单可在下发事务内完成同一校验，无需逐单人工确认
 → 管理员下发生产：
     ├─ 按当前 workOrderVersion 物化 ProductionOperation 与 ProductionProgressStep
     ├─ 创建首次打印任务

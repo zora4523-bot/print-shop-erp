@@ -109,7 +109,7 @@ describe('AdminOrderWorkspace', () => {
 
     expect(html).toContain('data-slot="admin-order-workspace"');
     for (const label of [
-      '待确认',
+      '待处理',
       '待核价',
       '变更申请',
       '已暂停',

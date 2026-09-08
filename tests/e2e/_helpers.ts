@@ -2228,12 +2228,12 @@ export async function cleanupE2eProductionOperationFixture(
 // The submit button changes to "提交中…" immediately, so asserting that the
 // old accessible name disappeared can pass before the server transition has
 // committed. Wait for the detail heading's server-rendered non-draft status
-// instead. AUTO_CONFIRMED work now activates directly into SCHEDULING, while
+// instead. AUTO_CONFIRMED work is prepared for explicit production release, while
 // manual-pricing work remains SUBMITTED for factory review.
 export async function submitDraftOrderAndWait(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^提交工单$/ }).click();
   await expect(page.getByRole('heading', { level: 1 })).toContainText(
-    /待工厂确认|排产中/,
+    /待处理|待下发生产|排产中/,
     { timeout: 20_000 },
   );
 }

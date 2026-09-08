@@ -202,6 +202,7 @@ export async function submitOrderAction(
     revalidatePath(`/orders/${orderId}`);
     return {
       status: 'success',
+      readyForProduction: submitted.status === 'CONFIRMED',
       quotedFee: submitted.quotedFee,
       quotedFeeCompleteness: submitted.quotedFeeCompleteness,
     };

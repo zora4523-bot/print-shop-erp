@@ -36,8 +36,8 @@ vi.mock('@/lib/background-jobs/mode', () => ({
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: mocks.dispatch,
 }));
-vi.mock('@/lib/production/operation-materialization-service', () => ({
-  activateProductionOperationsInTx: mocks.activate,
+vi.mock('@/lib/order/production-readiness', () => ({
+  prepareOrderForProductionInTx: mocks.activate,
 }));
 
 import { submitOrder } from '../../order';
@@ -84,13 +84,13 @@ beforeEach(() => {
 });
 
 describe('submitOrder pricing-to-production handoff', () => {
-  it('materializes AUTO_CONFIRMED chargeable work in the transition transaction', async () => {
+  it('prepares AUTO_CONFIRMED work without materializing production before release', async () => {
     arrangeSubmit(OrderPricingStatus.AUTO_CONFIRMED);
     mocks.activate.mockResolvedValue({
       orderId: 'order-1',
-      orderStatus: OrderStatus.SCHEDULING,
-      operationIds: ['operation-1'],
-      operationsCreated: 1,
+      status: OrderStatus.CONFIRMED,
+      operationIds: [],
+      operationsCreated: 0,
       idempotentReplay: false,
     });
 
@@ -104,16 +104,17 @@ describe('submitOrder pricing-to-production handoff', () => {
     );
     expect(result).toMatchObject({
       id: 'order-1',
-      status: OrderStatus.SCHEDULING,
+      status: OrderStatus.CONFIRMED,
     });
   });
 
   it('leaves manual pricing at SUBMITTED until factory confirmation', async () => {
     arrangeSubmit(OrderPricingStatus.PENDING_ADMIN_CONFIRMATION);
 
+    mocks.activate.mockResolvedValue({ status: OrderStatus.SUBMITTED, ready: false, issues: ['待人工核价'] });
     const result = await submitOrder('order-1', actor, now);
 
-    expect(mocks.activate).not.toHaveBeenCalled();
+    expect(mocks.activate).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       id: 'order-1',
       status: OrderStatus.SUBMITTED,

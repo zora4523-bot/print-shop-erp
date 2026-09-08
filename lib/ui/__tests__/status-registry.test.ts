@@ -89,11 +89,11 @@ describe('status registry', () => {
 
   it('does not render queued, running, or unresolved work as danger', () => {
     expect(ORDER_STATUS_REGISTRY[OrderStatus.PENDING_FACTORY]).toMatchObject({
-      label: '待工厂确认',
+      label: '待处理',
       tone: 'info',
     });
     expect(ORDER_STATUS_REGISTRY[OrderStatus.SUBMITTED].label).toBe(
-      '待工厂确认',
+      '待处理',
     );
     expect(ORDER_STATUS_REGISTRY[OrderStatus.IN_PRODUCTION].tone).toBe('info');
     expect(BILL_STATUS_REGISTRY[BillStatus.ISSUED].tone).toBe('warning');

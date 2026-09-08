@@ -99,13 +99,13 @@ describe('administrator independently saved fee drafts', () => {
 
   it('tracks manual pricing input and restores it without submitting financial changes', async () => {
     flushSync(() => root.render(<Harness><OrderPricingReviewForm orderId="order-1" />{commercial}</Harness>));
-    await vi.waitFor(() => expect(input('整单终价备注（可选）')).toBeTruthy());
-    fill(input('整单终价备注（可选）'), '待确认费用');
+    await vi.waitFor(() => expect(input('整单费用备注（可选）')).toBeTruthy());
+    fill(input('整单费用备注（可选）'), '待确认费用');
     expect(main().disabled).toBe(true);
     expect(input('制版名称').matches(':disabled')).toBe(true);
     button('还原核价输入').click();
     await vi.waitFor(() => expect(main().disabled).toBe(false));
-    expect(input('整单终价备注（可选）').value).toBe('');
+    expect(input('整单费用备注（可选）').value).toBe('');
     expect(mocks.finalize).not.toHaveBeenCalled();
   });
 

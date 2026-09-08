@@ -454,9 +454,10 @@ function rowActionLabel(order: AdminOrderWorkspaceRow): string {
   if (order.fee.source === 'PENDING') return '查看待核价';
   if (order.printPending) return '查看待打印';
   if (order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED') {
-    return '审核';
+    return '查看处理';
   }
   if (order.status === 'ON_HOLD') return '查看暂停';
+  if (order.capabilities.release) return '查看处理';
   if (order.capabilities.ship) return '录运单发货';
   return '详情';
 }

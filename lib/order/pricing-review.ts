@@ -31,7 +31,7 @@ import {
   ORDER_PRICING_STATUS,
 } from "./pricing-status";
 import { appendOrderPricingRevisionInTx } from "./pricing-revision";
-import { activateProductionOperationsInTx } from "../production/operation-materialization-service";
+import { prepareOrderForProductionInTx } from "./production-readiness";
 import {
   assertCsOrderSalesLedgerReconciledInTx,
   CsSalesLedgerError,
@@ -1187,6 +1187,12 @@ export async function finalizeOrderPricing(
     const order = await readPricingOrder(tx, input.orderId);
     if (!order) throw new OrderPricingReviewError("工单不存在");
     assertReviewable(order);
+    const pendingRequest = await tx.orderChangeRequest.findFirst({
+      where: { orderId: order.id, status: OrderChangeRequestStatus.PENDING },
+      select: { id: true },
+    });
+    if (pendingRequest) throw new OrderPricingReviewError('存在待审批申请，请先处理申请后再核价');
+
     assertStructuredPlateChargesConsistent(order);
     if (order.priceRevision !== input.expectedPriceRevision) {
       throw new OrderPricingReviewError(
@@ -1563,18 +1569,6 @@ export async function finalizeOrderPricing(
       },
       select: { id: true },
     });
-    await tx.orderChangeRequest.updateMany({
-      where: {
-        orderId: order.id,
-        status: OrderChangeRequestStatus.PENDING,
-      },
-      data: {
-        status: OrderChangeRequestStatus.STALE,
-        reviewedById: actor.id,
-        reviewedAt: now,
-        reviewRemark: "工单终价已按报价快照确认，原修改请求基线已过期",
-      },
-    });
 
     const processingPriceBook = firstVersionEvidence(
       [
@@ -1621,7 +1615,10 @@ export async function finalizeOrderPricing(
       order.status === OrderStatus.PENDING_FACTORY ||
       order.status === OrderStatus.SUBMITTED
     ) {
-      await activateProductionOperationsInTx(tx, order.id, actor, now);
+      const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, now);
+      if (!prepared.ready) {
+        throw new OrderPricingReviewError(`核价未完成：${prepared.issues.join('；')}`);
+      }
     }
     await tx.orderLog.create({
       data: {

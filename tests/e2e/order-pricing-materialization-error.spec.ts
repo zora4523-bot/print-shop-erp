@@ -79,26 +79,25 @@ test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍�
     username: ADMIN_USERNAME,
     password: ADMIN_PASSWORD,
   });
-  const pricing = page.locator('#pricing-review');
-  await expect(pricing.getByRole('heading', { name: '工单价格状态' })).toBeVisible();
+  await page.getByRole('button', { name: '录入人工核价', exact: true }).click();
+  const pricing = page.getByRole('region', { name: '待你处理', exact: true }).locator('[data-slot="order-pricing-review"]');
+  await expect(pricing.getByRole('heading', { name: '待管理员补录' })).toBeVisible();
   const trigger = pricing.getByRole('button', { name: '确认工厂核价', exact: true });
   await expect(trigger).toBeEnabled();
   await trigger.click();
-  const dialog = page.getByRole('alertdialog', { name: '确认工厂核价并锁定终价？' });
+  const dialog = page.getByRole('alertdialog', { name: '保存本次核价？' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: '确认工厂核价', exact: true }).click();
 
-  await expect(pricing.getByRole('alert')).toHaveText(
-    '工单款式或生产信息不完整，无法完成核价。请先核对款式、数量及包装信息。',
-  );
+  await expect(pricing.getByRole('alert')).toContainText('核价未完成：');
   await expect(trigger).toBeEnabled();
   await expect(pricing).not.toContainText('CANONICAL_FACTS_INCOMPLETE');
   await expectNoNextErrorOverlay(page);
   expect(await readPricingState(orderId)).toEqual(before);
 
   await page.reload();
-  await expect(pricing.getByRole('heading', { name: '工单价格状态' })).toBeVisible();
-  await expect(pricing).toContainText('待管理员确认');
+  await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toBeVisible();
+  expect(await readPricingState(orderId)).toEqual(before);
   await expectNoNextErrorOverlay(page);
   await page.getByRole('link', { name: '工作台', exact: true }).first().click();
   await expect(page).toHaveURL(/\/owner$/);
@@ -122,9 +121,9 @@ test('管理端抽屉内核价失败保留表单与列表，且不会改写工�
   const trigger = pricing.getByRole('button', { name: '确认工厂核价', exact: true });
   await expect(trigger).toBeEnabled();
   await trigger.click();
-  const confirm = page.getByRole('alertdialog', { name: '确认工厂核价并锁定终价？' });
+  const confirm = page.getByRole('alertdialog', { name: '保存本次核价？' });
   await confirm.getByRole('button', { name: '确认工厂核价', exact: true }).click();
-  await expect(pricing.getByRole('alert')).toHaveText('工单款式或生产信息不完整，无法完成核价。请先核对款式、数量及包装信息。');
+  await expect(pricing.getByRole('alert')).toContainText('核价未完成：');
   await expect(trigger).toBeEnabled();
   await expect(page).toHaveURL(/\/orders\?queue=all#wo=/);
   expect(await readPricingState(seeded.urgentOrderId)).toEqual(before);

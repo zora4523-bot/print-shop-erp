@@ -39,7 +39,7 @@ export type OrderTimelineStep = {
 
 const FLOW: Array<{ key: string; label: string }> = [
   { key: 'created', label: '已创建' },
-  { key: 'submitted', label: '待工厂确认' },
+  { key: 'submitted', label: '已提交' },
   { key: 'scheduled', label: '工序已生成' },
   { key: 'producing', label: '生产中' },
   { key: 'complete', label: '等待完工' },

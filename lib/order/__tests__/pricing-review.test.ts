@@ -15,7 +15,7 @@ import { buildTrustedAdminChargePricingSnapshot } from "../admin-pricing-snapsho
 const {
   dbMock,
   appendPricingRevisionMock,
-  activateOperationsMock,
+  prepareProductionMock,
   assertCsOrderSalesLedgerReconciledMock,
   recordCsSalesEntryMock,
   MockCsSalesLedgerError,
@@ -27,7 +27,7 @@ const {
     orderPackagingGroup: { update: vi.fn() },
     orderCustomerCharge: { update: vi.fn(), create: vi.fn() },
     customerChargeCategory: { findUnique: vi.fn() },
-    orderChangeRequest: { updateMany: vi.fn() },
+    orderChangeRequest: { updateMany: vi.fn(), findFirst: vi.fn() },
     orderLog: { create: vi.fn() },
   };
   return {
@@ -38,7 +38,7 @@ const {
       ),
     },
     appendPricingRevisionMock: vi.fn(),
-    activateOperationsMock: vi.fn(),
+    prepareProductionMock: vi.fn(),
     assertCsOrderSalesLedgerReconciledMock: vi.fn(),
     recordCsSalesEntryMock: vi.fn(),
     MockCsSalesLedgerError: class extends Error {},
@@ -49,8 +49,8 @@ vi.mock("@/lib/db", () => ({ db: dbMock }));
 vi.mock("@/lib/order/pricing-revision", () => ({
   appendOrderPricingRevisionInTx: appendPricingRevisionMock,
 }));
-vi.mock("@/lib/production/operation-materialization-service", () => ({
-  activateProductionOperationsInTx: activateOperationsMock,
+vi.mock("@/lib/order/production-readiness", () => ({
+  prepareOrderForProductionInTx: prepareProductionMock,
 }));
 vi.mock("@/lib/salary/cs-sales", () => ({
   assertCsOrderSalesLedgerReconciledInTx:
@@ -521,7 +521,7 @@ function expectNoPricingWrites(): void {
   expect(dbMock.orderChangeRequest.updateMany).not.toHaveBeenCalled();
   expect(dbMock.order.update).not.toHaveBeenCalled();
   expect(appendPricingRevisionMock).not.toHaveBeenCalled();
-  expect(activateOperationsMock).not.toHaveBeenCalled();
+  expect(prepareProductionMock).not.toHaveBeenCalled();
   expect(dbMock.orderLog.create).not.toHaveBeenCalled();
 }
 
@@ -541,6 +541,7 @@ beforeEach(() => {
     }),
   );
   dbMock.orderChangeRequest.updateMany.mockResolvedValue({ count: 0 });
+  dbMock.orderChangeRequest.findFirst.mockResolvedValue(null);
   dbMock.orderLog.create.mockResolvedValue({ id: "log-1" });
   dbMock.$transaction.mockImplementation(
     async (callback: (client: typeof dbMock) => unknown) => callback(dbMock),
@@ -550,11 +551,11 @@ beforeEach(() => {
     orderRevision: 9,
     snapshot: {},
   });
-  activateOperationsMock.mockResolvedValue({
+  prepareProductionMock.mockResolvedValue({
     orderId: "order-1",
-    orderStatus: OrderStatus.SCHEDULING,
-    operationIds: ["operation-1"],
-    operationsCreated: 1,
+    status: OrderStatus.CONFIRMED, ready: true, issues: [],
+    operationIds: [],
+    operationsCreated: 0,
     idempotentReplay: false,
   });
   assertCsOrderSalesLedgerReconciledMock.mockResolvedValue(undefined);
@@ -562,6 +563,16 @@ beforeEach(() => {
 });
 
 describe("snapshot-only order pricing review", () => {
+  it('rejects pricing in its transaction when saved production facts cannot become ready', async () => {
+    prepareProductionMock.mockResolvedValueOnce({ ready: false, status: OrderStatus.SUBMITTED, issues: ['工单没有款式'] });
+    await expect(finalizeOrderPricing(command(), admin, now)).rejects.toThrow('核价未完成：工单没有款式');
+    expect(dbMock.$transaction).toHaveBeenCalledOnce();
+  });
+  it('does not invalidate a pending amendment while saving pricing', async () => {
+    dbMock.orderChangeRequest.findFirst.mockResolvedValueOnce({ id: 'pending-change' });
+    await expect(finalizeOrderPricing(command(), admin, now)).rejects.toThrow('存在待审批申请');
+    expectNoPricingWrites();
+  });
   it("has no quote engine or price-rule dependency", async () => {
     const source = readFileSync(
       new URL("../pricing-review.ts", import.meta.url),
@@ -867,7 +878,7 @@ describe("snapshot-only order pricing review", () => {
       expect(dbMock.orderCustomerCharge.create).not.toHaveBeenCalled();
       expect(dbMock.order.update).not.toHaveBeenCalled();
       expect(appendPricingRevisionMock).not.toHaveBeenCalled();
-      expect(activateOperationsMock).not.toHaveBeenCalled();
+      expect(prepareProductionMock).not.toHaveBeenCalled();
       expect(dbMock.orderLog.create).not.toHaveBeenCalled();
       if (failureStage === "reconcile") {
         expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
@@ -1222,7 +1233,7 @@ describe("snapshot-only order pricing review", () => {
     });
     expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledTimes(1);
     expect(result.confirmedFee).toBe("177.00");
-    expect(activateOperationsMock).toHaveBeenCalledWith(
+    expect(prepareProductionMock).toHaveBeenCalledWith(
       dbMock,
       "order-1",
       admin,
@@ -1519,7 +1530,7 @@ describe("snapshot-only order pricing review", () => {
     expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
     expect(dbMock.order.update).not.toHaveBeenCalled();
     expect(appendPricingRevisionMock).not.toHaveBeenCalled();
-    expect(activateOperationsMock).not.toHaveBeenCalled();
+    expect(prepareProductionMock).not.toHaveBeenCalled();
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
@@ -1542,7 +1553,7 @@ describe("snapshot-only order pricing review", () => {
     expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
     expect(dbMock.order.update).not.toHaveBeenCalled();
     expect(appendPricingRevisionMock).not.toHaveBeenCalled();
-    expect(activateOperationsMock).not.toHaveBeenCalled();
+    expect(prepareProductionMock).not.toHaveBeenCalled();
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 

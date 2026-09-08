@@ -1,3 +1,4 @@
+vi.mock('@/lib/order/production-readiness', () => ({ prepareOrderForProductionInTx: vi.fn().mockResolvedValue({ ready: true, status: 'CONFIRMED', issues: [] }) }));
 import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderStatus, Role } from '@/generated/prisma/enums';

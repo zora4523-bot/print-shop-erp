@@ -14,6 +14,7 @@ export type OrderMutationResult =
 export type SubmitOrderMutationResult =
   | {
       status: 'success';
+      readyForProduction?: boolean;
       quotedFee: string | null;
       quotedFeeCompleteness: OrderQuotedFeeCompleteness | null;
     }

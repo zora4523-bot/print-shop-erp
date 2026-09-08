@@ -4,7 +4,6 @@ import { useCallback, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  confirmFactoryOrderAction,
   holdFactoryOrderAction,
   rejectFactoryOrderAction,
   releaseFactoryOrderAction,
@@ -79,21 +78,8 @@ function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow 
   if (order.status !== 'PENDING_FACTORY' && order.status !== 'SUBMITTED') {
     return null;
   }
-  const issues = [
-    ...order.confirmationPreflight.issues,
-    ...(order.priceComparisonError
-      ? [`当前价预检失败：${order.priceComparisonError}`]
-      : []),
-    ...(order.capabilities.confirm && !order.priceComparison && !order.priceComparisonError
-      ? ['当前价格预览不可用，请刷新工单后重试']
-      : []),
-    ...(!order.capabilities.confirm &&
-    order.confirmationPreflight.ok &&
-    !order.priceComparisonError
-      ? ['当前工单存在待处理事项，暂不能确认']
-      : []),
-  ];
-  const ok = issues.length === 0 && order.capabilities.confirm;
+  const issues = order.confirmationPreflight.issues;
+  const ok = issues.length === 0 && order.capabilities.release;
   return (
     <div
       id="admin-order-confirmation-preflight"
@@ -104,10 +90,10 @@ function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow 
       }`}
     >
       {ok ? (
-        <p className="font-medium">确认预检通过</p>
+        <p className="font-medium">可下发生产</p>
       ) : (
         <>
-          <p className="font-medium">确认预检未通过</p>
+          <p className="font-medium">待处理事项</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             {issues.map((issue) => (
               <li key={issue}>{issue}</li>
@@ -154,41 +140,8 @@ function AdminDecisionActions({
   run: (task: DecisionTask) => void;
   runOneBatch: (command: 'CREATE_PRINT' | 'MARK_PRINTED') => void;
 }) {
-  const awaitingConfirmation =
-    order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED';
-  const confirmDisabled =
-    pending ||
-    !order.capabilities.confirm ||
-    !order.confirmationPreflight.ok ||
-    !order.priceComparison ||
-    Boolean(order.priceComparisonError);
   return (
     <div className="mt-3 flex flex-wrap gap-2">
-      {awaitingConfirmation ? (
-        <DecisionConfirmation
-          label="确认工单"
-          title="确认这张工单？"
-          description="请核对本次锁定的金额和工单版本。"
-          impactItems={[
-            `工单 ${order.orderNo}，版本 v${order.workOrderVersion}。`,
-            `确认金额：${order.priceComparison?.current.amount == null ? '待核定' : `¥${formatMoney(order.priceComparison.current.amount)}`}。`,
-            '确认后进入待下发生产，金额按本次价格预览锁定；价格或工单已变化时须重新核对。',
-          ]}
-          confirmLabel="确认并锁定金额"
-          disabled={confirmDisabled}
-          describedBy="admin-order-confirmation-preflight"
-          onConfirm={() =>
-            run(() =>
-              confirmFactoryOrderAction({
-                orderId: order.id,
-                expectedRevision: order.revision,
-                expectedWorkOrderVersion: order.workOrderVersion,
-                expectedQuoteToken: order.priceComparison?.quoteToken,
-              }),
-            )
-          }
-        />
-      ) : null}
       {order.capabilities.reject ? (
         <Button type="button" size="sm" variant="destructive" disabled={pending} onClick={() => openMode('reject')}>
           驳回
@@ -208,10 +161,10 @@ function AdminDecisionActions({
         <DecisionConfirmation
           label="下发 + 打印"
           title="下发这张工单到生产？"
-          description="下发后车间可以认领生产任务。"
+          description="下发后车间可以扫码报工，并生成当前版本的打印任务。"
           impactItems={[
-            `工单 ${order.orderNo}，版本 v${order.workOrderVersion}，共 ${order.totalQuantity.toLocaleString('zh-CN')} 个。`,
-            '工单进入已下发状态，并生成当前版本的打印任务。',
+            `${order.customName ?? '未命名工单'}，版本 v${order.workOrderVersion}，共 ${order.totalQuantity.toLocaleString('zh-CN')} 个。`,
+            '沿用已核定费用；后续费用调整另行保存，不影响原报价记录。',
           ]}
           confirmLabel="确认下发并创建打印"
           disabled={pending}
@@ -868,7 +821,7 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
         <>
           <h4 data-slot="admin-order-decision-heading" className="text-[12.5px] font-extrabold">
             {order.pendingChangeRequest ? (order.pendingChangeRequest.type === 'MODIFY' ? '变更申请' : '取消申请')
-              : awaitingConfirmation ? '工厂确认'
+              : awaitingConfirmation ? '下发前检查'
               : order.status === 'ON_HOLD' ? '暂停处理'
               : order.capabilities.release ? '下发生产'
               : order.capabilities.ship ? '录运单发货'

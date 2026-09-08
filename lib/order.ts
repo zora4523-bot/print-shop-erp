@@ -105,7 +105,7 @@ import {
   ExternalOrderQuoteFinalizeError,
   finalizeExternalOrderQuoteInTx,
 } from './order/submit-external-order';
-import { activateProductionOperationsInTx } from './production/operation-materialization-service';
+import { prepareOrderForProductionInTx } from './order/production-readiness';
 import { getSetting } from './settings';
 
 export {
@@ -1972,18 +1972,9 @@ export async function submitOrder(
           },
         });
         if (!currentPricing) throw new OrderInvariantError('工单不存在');
-        const activated =
-          currentPricing.billingMode === OrderBillingMode.CHARGE &&
-          currentPricing.pricingStatus === ORDER_PRICING_STATUS.AUTO_CONFIRMED
-            ? await activateProductionOperationsInTx(
-                tx,
-                lockedOrderId,
-                actor,
-                now,
-              )
-            : null;
+        const prepared = await prepareOrderForProductionInTx(tx, lockedOrderId, actor, now);
         if (backgroundJobsMode() !== 'durable') {
-          return activated ? { status: activated.orderStatus } : undefined;
+          return { status: prepared.status };
         }
         const payload = await tx.order.findUniqueOrThrow({
           where: { id: lockedOrderId },
@@ -2005,7 +1996,7 @@ export async function submitOrder(
               submitterName: payload.submitter.displayName,
               customerRef: payload.customerRef,
               urgentMark: payload.isUrgent ? '🚨 急单' : '',
-              summary: '新工单已提交，待工厂确认',
+              summary: prepared.ready ? '新工单已提交，待下发生产' : '新工单已提交，待处理资料或费用',
               deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
             },
             { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
@@ -2026,7 +2017,7 @@ export async function submitOrder(
         } else {
           urgentNotificationQueued = true;
         }
-        return activated ? { status: activated.orderStatus } : undefined;
+        return { status: prepared.status };
       },
     },
   );
@@ -2058,7 +2049,7 @@ export async function submitOrder(
           submitterName: payload.submitter.displayName,
           customerRef: payload.customerRef,
           urgentMark,
-          summary: '新工单已提交，待工厂确认',
+          summary: result.status === OrderStatus.CONFIRMED ? '新工单已提交，待下发生产' : '新工单已提交，待处理资料或费用',
           deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
         },
         { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },

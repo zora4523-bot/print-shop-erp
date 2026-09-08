@@ -1,5 +1,6 @@
 import 'server-only';
 import { db } from '../db';
+import { prepareOrderForProductionInTx } from './production-readiness';
 import { OrderStatus, Role } from '../../generated/prisma/enums';
 import { updateOrderFields, OrderInvariantError } from '../order';
 import { orderCascadeLockKey } from './locks';
@@ -152,6 +153,7 @@ export async function editAdminOrder(
           }
         }
         if (mode === 'preview') throw new PreviewRollback(preview);
+        await prepareOrderForProductionInTx(tx, input.orderId, actor, new Date());
         return null;
       },
       { timeout: 20_000 },

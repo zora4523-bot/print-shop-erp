@@ -1,3 +1,5 @@
+import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
+import { prepareOrderForProductionInTx } from './production-readiness';
 import { OrderChangeRequestError } from './change-request-error';
 import { ORDER_MODIFIABLE_STATUSES } from './editable-fields';
 import Decimal from 'decimal.js';
@@ -6071,6 +6073,9 @@ export async function reviewOrderChangeRequest(
       reviewRemark,
       tx,
     });
+    if (isAwaitingFactoryConfirmation(request.order.status)) {
+      await prepareOrderForProductionInTx(tx, request.order.id, actor, reviewedAt);
+    }
     if (isReprintChangeStatus(request.order.status) && !wasOnHold) {
       const completion = await maybeCompleteProductionOrder(
         tx as unknown as ProductionCompletionTx, request.order.id, actor.id, reviewedAt,

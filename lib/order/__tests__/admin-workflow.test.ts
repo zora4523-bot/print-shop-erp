@@ -17,7 +17,7 @@ const {
   databaseClockNowMock,
   activateMock,
   createPrintMock,
-  currentPriceMock,
+  prepareProductionMock,
   enqueueNotificationMock,
   dispatchNotificationMock,
   completionMock,
@@ -51,7 +51,7 @@ const {
       databaseClockNowMock: vi.fn(),
       activateMock: vi.fn(),
       createPrintMock: vi.fn(),
-      currentPriceMock: vi.fn(),
+      prepareProductionMock: vi.fn(),
       enqueueNotificationMock: vi.fn(),
       dispatchNotificationMock: vi.fn(),
       completionMock: vi.fn(),
@@ -75,10 +75,7 @@ vi.mock('@/lib/order/print-jobs', async () => {
     createOrderPrintRequestInTx: createPrintMock,
   };
 });
-vi.mock('@/lib/order/change-request', () => ({
-  OrderChangeRequestError: class OrderChangeRequestError extends Error {},
-  confirmOrderPricingAtCurrentPublishedVersionInTx: currentPriceMock,
-}));
+vi.mock('@/lib/order/production-readiness', () => ({ prepareOrderForProductionInTx: prepareProductionMock }));
 vi.mock('@/lib/notification/transactional-outbox', () => ({
   enqueueNotificationInTransaction: enqueueNotificationMock,
 }));
@@ -266,7 +263,8 @@ beforeEach(() => {
     jobId: 'print-1',
     idempotentReplay: false,
   });
-  currentPriceMock.mockResolvedValue({
+  prepareProductionMock.mockResolvedValue({
+    ready: true, status: OrderStatus.CONFIRMED, issues: [],
     confirmedFee: '128.50',
     pricingRevisionId: 'pricing-confirmed-1',
     versions: null,
@@ -313,24 +311,39 @@ describe('admin order workflow', () => {
       status: OrderStatus.CONFIRMED,
       confirmedFee: '128.50',
     });
-    expect(tx.order.update).toHaveBeenCalledWith({
-      where: { id: 'order-1' },
-      data: {
-        status: OrderStatus.CONFIRMED,
-        confirmedFee: '128.50',
-        revision: { increment: 1 },
-      },
-      select: { id: true },
-    });
-    expect(tx.order.update.mock.calls[0]?.[0].data).not.toHaveProperty(
-      'settledFee',
-    );
-    expect(currentPriceMock).toHaveBeenCalledWith(tx, {
-      orderId: 'order-1',
-      actorId: admin.id,
-      now: settledAt,
-      expectedQuoteToken: factoryQuoteToken,
-    });
+    expect(prepareProductionMock).toHaveBeenCalledWith(tx, 'order-1', admin, settledAt);
+    expect(activateMock).not.toHaveBeenCalled();
+    expect(createPrintMock).not.toHaveBeenCalled();
+  });
+
+  it('prepares an old pending order and releases it in the same transaction', async () => {
+    tx.order.findUnique.mockReset()
+      .mockResolvedValueOnce(order())
+      .mockResolvedValue(order({ status: OrderStatus.CONFIRMED, confirmedFee: new Decimal('128.50') }));
+    await expect(releaseFactoryOrder({ orderId: 'order-1', expectedRevision: 4,
+      expectedWorkOrderVersion: 2, printIdempotencyKey: 'release-pending-order-1' }, admin))
+      .resolves.toMatchObject({ status: OrderStatus.RELEASED, printJobId: 'print-1' });
+    expect(prepareProductionMock).toHaveBeenCalledWith(tx, 'order-1', admin, settledAt);
+    expect(activateMock).toHaveBeenCalledOnce();
+    expect(createPrintMock).toHaveBeenCalledOnce();
+    expect(dbMock.$transaction).toHaveBeenCalledOnce();
+  });
+
+  it('does not release or print a pending order whose saved facts fail validation', async () => {
+    prepareProductionMock.mockResolvedValueOnce({ ready: false, status: OrderStatus.PENDING_FACTORY, issues: ['费用明细不一致'] });
+    await expect(releaseFactoryOrder({ orderId: 'order-1', expectedRevision: 4,
+      expectedWorkOrderVersion: 2, printIdempotencyKey: 'release-blocked-order-1' }, admin))
+      .rejects.toMatchObject({ code: 'PREFLIGHT_FAILED', message: '费用明细不一致' });
+    expect(activateMock).not.toHaveBeenCalled();
+    expect(createPrintMock).not.toHaveBeenCalled();
+  });
+
+  it('checks the submitted revision before preparing or releasing an old pending order', async () => {
+    await expect(releaseFactoryOrder({ orderId: 'order-1', expectedRevision: 3,
+      expectedWorkOrderVersion: 2, printIdempotencyKey: 'release-stale-order-1' }, admin))
+      .rejects.toMatchObject({ code: 'STALE_VERSION' });
+    expect(prepareProductionMock).not.toHaveBeenCalled();
+    expect(activateMock).not.toHaveBeenCalled();
   });
 
   it('fails factory confirmation while a pricing or change review is pending', async () => {
@@ -383,7 +396,7 @@ describe('admin order workflow', () => {
         admin,
       ),
     ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
-    expect(currentPriceMock).not.toHaveBeenCalled();
+    expect(prepareProductionMock).not.toHaveBeenCalled();
     expect(tx.order.update).not.toHaveBeenCalled();
   });
 
@@ -437,7 +450,7 @@ describe('admin order workflow', () => {
           admin,
         ),
       ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
-      expect(currentPriceMock).not.toHaveBeenCalled();
+      expect(prepareProductionMock).not.toHaveBeenCalled();
       expect(tx.order.update).not.toHaveBeenCalled();
     }
   });
@@ -541,7 +554,7 @@ describe('admin order workflow', () => {
           admin,
         ),
       ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
-      expect(currentPriceMock).not.toHaveBeenCalled();
+      expect(prepareProductionMock).not.toHaveBeenCalled();
       expect(tx.order.update).not.toHaveBeenCalled();
     }
   });
@@ -568,7 +581,7 @@ describe('admin order workflow', () => {
         admin,
       ),
     ).resolves.toMatchObject({ status: OrderStatus.CONFIRMED });
-    expect(currentPriceMock).toHaveBeenCalledTimes(1);
+    expect(prepareProductionMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -664,7 +677,7 @@ describe('admin order workflow', () => {
         admin,
       ),
     ).rejects.toMatchObject({ code: 'PREFLIGHT_FAILED' });
-    expect(currentPriceMock).not.toHaveBeenCalled();
+    expect(prepareProductionMock).not.toHaveBeenCalled();
     expect(tx.order.update).not.toHaveBeenCalled();
     expect(tx.orderLog.create).not.toHaveBeenCalled();
   });

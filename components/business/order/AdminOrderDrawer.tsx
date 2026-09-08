@@ -63,13 +63,7 @@ export function AdminOrderDrawer({
           <DrawerSection title="金额">
             <DrawerLines lines={[
               [feeSourceLabel(order.fee.source), order.fee.amount === null ? '待核定' : `¥${formatMoney(order.fee.amount)}`],
-              ...(order.priceComparison ? [
-                ['当前确认价', order.priceComparison.current.amount === null ? '待核定' : `¥${formatMoney(order.priceComparison.current.amount)}`] as [string, string],
-              ] : []),
             ]} />
-            {order.priceComparison?.hasVersionDiff ? (
-              <p className="mt-2 text-xs text-warning-foreground">价格已更新，确认时将按当前价格锁定金额。</p>
-            ) : null}
           </DrawerSection>
         )}
 
@@ -241,9 +235,9 @@ function DrawerLines({ lines }: { lines: Array<[string, string]> }) {
 
 const STATUS_LABELS: Record<AdminOrderWorkspaceRow['status'], string> = {
   DRAFT: '草稿',
-  PENDING_FACTORY: '待确认',
+  PENDING_FACTORY: '待处理',
   REJECTED: '已驳回',
-  CONFIRMED: '已确认',
+  CONFIRMED: '待下发生产',
   ON_HOLD: '已暂停',
   RELEASED: '已下发',
   FOILING: '烫金中',
@@ -251,7 +245,7 @@ const STATUS_LABELS: Record<AdminOrderWorkspaceRow['status'], string> = {
   SHIPPED: '已发货',
   SETTLED: '已结算',
   CANCELLED: '已取消',
-  SUBMITTED: '待确认（历史）',
+  SUBMITTED: '待处理',
   SCHEDULING: '排产中（历史）',
   IN_PRODUCTION: '生产中（历史）',
   COMPLETED: '已完工（历史）',

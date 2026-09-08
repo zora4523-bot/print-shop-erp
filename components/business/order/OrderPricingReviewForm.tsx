@@ -581,7 +581,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                 variant="secondary"
               >
                 {incompleteItemCount > 0
-                  ? `${incompleteItemCount} 款需人工终价`
+                  ? `${incompleteItemCount} 款需人工核价`
                   : "全部已有报价快照"}
               </Badge>
             </div>
@@ -719,7 +719,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                   variant="secondary"
                 >
                   {incompletePackagingGroupCount > 0
-                    ? `${incompletePackagingGroupCount} 组需人工终价`
+                    ? `${incompletePackagingGroupCount} 组需人工核价`
                     : "全部已有报价快照"}
                 </Badge>
               </div>
@@ -818,7 +818,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">订单级待核价费用</h3>
                 <Badge variant="secondary">
-                  {preview.orderCharges.length} 项待人工终价
+                  {preview.orderCharges.length} 项待人工核价
                 </Badge>
               </div>
               <ol className="space-y-2">
@@ -896,7 +896,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           />
 
           <label className="block space-y-1 text-sm">
-            <span>整单终价备注（可选）</span>
+            <span>整单费用备注（可选）</span>
             <Textarea
               value={remark}
               onChange={(event) => setRemark(event.target.value)}
@@ -911,7 +911,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           ) : null}
           {finalizeState?.status === "success" ? (
             <p role="status" className="text-sm text-success-foreground">
-              终价已确认：入袋费 {finalizeState.packagingAmount}，加工费合计{" "}
+              费用已确认：入袋费 {finalizeState.packagingAmount}，加工费合计{" "}
               {finalizeState.processingAmount}，工单总额{" "}
               {finalizeState.totalAmount}。
             </p>
@@ -937,9 +937,9 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                 </ul>
               </>
             ) : pricingFinalized ? (
-              <p className="font-medium">终价已确认，正在刷新工单状态…</p>
+              <p className="font-medium">费用已确认，正在刷新工单状态…</p>
             ) : (
-              <p className="font-medium">待核价必填项已完成，可以确认终价。</p>
+              <p className="font-medium">待核价必填项已完成，可以确认费用。</p>
             )}
           </div>
 
@@ -952,13 +952,13 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                 disabled={submissionDisabled}
               >
                 {pricingFinalized
-                  ? "终价已确认"
+                  ? "费用已确认"
                   : finalizePending
                   ? "正在确认报价快照…"
                   : "确认工厂核价"}
               </Button>
             }
-            title="确认工厂核价并锁定终价？"
+            title="保存本次核价？"
             description="确认仅使用工单已有报价快照；只会补录待人工核价金额。"
             impactItems={[
               '若工单或价格已变化，本次操作会停止并提示刷新。',

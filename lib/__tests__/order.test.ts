@@ -1,3 +1,9 @@
+vi.mock('@/lib/order/production-readiness', () => ({
+  prepareOrderForProductionInTx: vi.fn(async (tx, orderId) => {
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    return { status: order?.settlementType === 'EXTERNAL_SALES' ? 'PENDING_FACTORY' : 'SUBMITTED', ready: false, issues: ['fixture needs pricing'] };
+  }),
+}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
 import {
@@ -2720,7 +2726,7 @@ describe('submitOrder', () => {
         submitterName: '张三',
         customerRef: '苹果福',
         urgentMark: '',
-        summary: '新工单已提交，待工厂确认',
+        summary: '新工单已提交，待处理资料或费用',
         deepLink: '/orders#wo=O-1',
       },
       { dedupeKey: 'notification:ORDER_SUBMITTED:o1' },

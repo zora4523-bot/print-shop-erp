@@ -726,6 +726,7 @@ describe('submitOrderAction', () => {
     const r = await submitOrderAction('o1', token);
     expect(r).toEqual({
       status: 'success',
+      readyForProduction: false,
       quotedFee: '566.30',
       quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
     });

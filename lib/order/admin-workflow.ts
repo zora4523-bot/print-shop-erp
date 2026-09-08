@@ -1,8 +1,5 @@
 import type { Prisma } from '../../generated/prisma/client';
 import {
-  OrderChangeRequestStatus,
-  OrderCustomerChargeStatus,
-  OrderItemQuoteDisposition,
   OrderPrintJobState,
   OrderPrintKind,
   OrderStatus,
@@ -30,17 +27,9 @@ import {
 import { orderCascadeLockKey } from './locks';
 import { createOrderPrintRequestInTx } from './print-jobs';
 import { transitionOrder } from './status-machine';
-import {
-  confirmOrderPricingAtCurrentPublishedVersionInTx,
-  OrderChangeRequestError,
-} from './change-request';
-import {
-  hasAdminPricingConfirmationMarker,
-  isTrustedAdminChargePricingSnapshot,
-  isTrustedAdminItemPricingSnapshot,
-  isTrustedAdminPackagingPricingSnapshot,
-  isTrustedAdminPricingSnapshot,
-} from './admin-pricing-snapshot';
+
+import { workflowOrderSelect, hasUnresolvedManualPricing, type WorkflowOrder } from './factory-confirmation-facts';
+import { prepareOrderForProductionInTx } from './production-readiness';
 import {
   evaluateFactoryConfirmationPreflight,
   isAwaitingFactoryConfirmation,
@@ -126,102 +115,6 @@ async function lockOrder(tx: WorkflowTx, orderId: string): Promise<void> {
   )}))`;
 }
 
-const workflowOrderSelect = {
-  id: true,
-  orderNo: true,
-  status: true,
-  revision: true,
-  workOrderVersion: true,
-  pricingStatus: true,
-  quotedFeeCompleteness: true,
-  quotedFee: true,
-  confirmedFee: true,
-  totalAmount: true,
-  billingMode: true,
-  items: {
-    select: {
-      id: true,
-      orderId: true,
-      fig: true,
-      productId: true,
-      pricingRoute: true,
-      craft: true,
-      productStructure: true,
-      plateGroupId: true,
-      pricingGroup: true,
-      specification: true,
-      actualWidthMm: true,
-      actualHeightMm: true,
-      paperType: true,
-      paperWeightGsm: true,
-      quantity: true,
-      pack: true,
-      crafts: true,
-      frontFoilColors: true,
-      backFoilColors: true,
-      foilColors: true,
-      foilTechnique: true,
-      hasLocalFoil: true,
-      lamination: true,
-      printColors: true,
-      printColorsKnown: true,
-      isDoubleSided: true,
-      isDoubleColor: true,
-      unitPrice: true,
-      fixedFee: true,
-      subtotal: true,
-      priceOverrideReason: true,
-      quoteDisposition: true,
-      manualQuoteReason: true,
-      pricingSnapshot: true,
-    },
-  },
-  packagingGroups: {
-    select: {
-      id: true,
-      orderId: true,
-      mode: true,
-      actualBagCount: true,
-      unitPrice: true,
-      subtotal: true,
-      priceOverrideReason: true,
-      pricingSnapshot: true,
-      lines: { select: { orderItemId: true, unitsPerBag: true } },
-    },
-  },
-  customerCharges: {
-    select: {
-      orderId: true,
-      businessKey: true,
-      shipmentId: true,
-      priceBookId: true,
-      sourceRuleId: true,
-      status: true,
-      quantity: true,
-      unit: true,
-      unitPrice: true,
-      suggestedAmount: true,
-      amount: true,
-      isAdjustment: true,
-      approvalReference: true,
-      overrideReason: true,
-      pricingSnapshot: true,
-      category: { select: { code: true } },
-    },
-  },
-  _count: {
-    select: {
-      changeRequests: {
-        where: { status: OrderChangeRequestStatus.PENDING },
-      },
-    },
-  },
-} satisfies Prisma.OrderSelect;
-
-type WorkflowOrder = Prisma.OrderGetPayload<{
-  select: typeof workflowOrderSelect;
-}>;
-
 async function readLockedOrder(
   tx: WorkflowTx,
   orderId: string,
@@ -258,84 +151,6 @@ function assertNoPendingChange(order: WorkflowOrder): void {
       '工单存在待裁决变更申请，暂不能执行该操作',
     );
   }
-}
-
-function jsonRecord(value: Prisma.JsonValue | null): Prisma.JsonObject {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function snapshotText(value: Prisma.JsonValue | undefined): string {
-  return typeof value === 'string' ? value.trim().toUpperCase() : '';
-}
-
-function pricingSnapshotStillRequiresManual(
-  value: Prisma.JsonValue | null,
-): boolean {
-  const snapshot = jsonRecord(value);
-  const actual = jsonRecord(snapshot.actual ?? null);
-  const status = snapshotText(snapshot.status);
-  const source = snapshotText(snapshot.source);
-  return (
-    status === 'MANUAL_PRICING_REQUIRED' ||
-    status === 'PENDING_AMOUNT' ||
-    status === 'EXCLUDED_MANUAL' ||
-    snapshot.complete === false ||
-    actual.provisional === true ||
-    actual.requiresAdminConfirmation === true ||
-    source.includes('MANUAL_REQUIRED')
-  );
-}
-
-function hasUnresolvedManualPricing(order: WorkflowOrder): boolean {
-  const itemPending = order.items.some((item) => {
-    if (isTrustedAdminItemPricingSnapshot(item.pricingSnapshot, item)) {
-      return false;
-    }
-    return (
-      isTrustedAdminPricingSnapshot(item.pricingSnapshot) ||
-      hasAdminPricingConfirmationMarker(item.pricingSnapshot) ||
-      item.quoteDisposition ===
-        OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED ||
-      Boolean(item.manualQuoteReason?.trim()) ||
-      pricingSnapshotStillRequiresManual(item.pricingSnapshot)
-    );
-  });
-  const packagingPending = order.packagingGroups.some((group) => {
-    if (
-      isTrustedAdminPackagingPricingSnapshot(group.pricingSnapshot, group)
-    ) {
-      return false;
-    }
-    return (
-      isTrustedAdminPricingSnapshot(group.pricingSnapshot) ||
-      hasAdminPricingConfirmationMarker(group.pricingSnapshot) ||
-      pricingSnapshotStillRequiresManual(group.pricingSnapshot)
-    );
-  });
-  const chargePending = order.customerCharges.some((charge) => {
-    if (charge.status === OrderCustomerChargeStatus.WAIVED) {
-      return charge.amount === null || !charge.amount.isZero();
-    }
-    if (charge.amount === null) return true;
-    if (
-      isTrustedAdminChargePricingSnapshot(charge.pricingSnapshot, charge)
-    ) {
-      return false;
-    }
-    if (
-      isTrustedAdminPricingSnapshot(charge.pricingSnapshot) ||
-      hasAdminPricingConfirmationMarker(charge.pricingSnapshot)
-    ) {
-      return true;
-    }
-    return (
-      charge.status === OrderCustomerChargeStatus.PENDING_AMOUNT ||
-      pricingSnapshotStillRequiresManual(charge.pricingSnapshot)
-    );
-  });
-  return itemPending || packagingPending || chargePending;
 }
 
 function assertFactoryConfirmationPreflight(order: WorkflowOrder): void {
@@ -398,6 +213,7 @@ async function findDecisionReplay(
   return existing;
 }
 
+/** Compatibility command for existing clients; accepts saved fees, never reprices from the catalog. */
 export async function confirmFactoryOrder(
   input: {
     orderId: string;
@@ -426,55 +242,11 @@ export async function confirmFactoryOrder(
     }
     assertExpectedVersion(order, input);
     assertFactoryConfirmationPreflight(order);
-    const confirmedAt = await databaseClockNow(tx);
-    let currentPricing;
-    try {
-      currentPricing = await confirmOrderPricingAtCurrentPublishedVersionInTx(
-        tx,
-        {
-          orderId: order.id,
-          actorId: actor.id,
-          now: confirmedAt,
-          expectedQuoteToken: input.expectedQuoteToken,
-        },
-      );
-    } catch (error) {
-      if (error instanceof OrderChangeRequestError) {
-        throw new AdminOrderWorkflowError(
-          'PREFLIGHT_FAILED',
-          `按当前发布价核价失败：${error.message}`,
-        );
-      }
-      throw error;
+    const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, await databaseClockNow(tx));
+    if (!prepared.ready) {
+      throw new AdminOrderWorkflowError('PREFLIGHT_FAILED', prepared.issues.join('；'));
     }
-    const confirmedFee = currentPricing.confirmedFee;
-    transitionOrder(order.status, OrderStatus.CONFIRMED);
-    await tx.order.update({
-      where: { id: order.id },
-      data: {
-        status: OrderStatus.CONFIRMED,
-        confirmedFee,
-        revision: { increment: 1 },
-      },
-      select: { id: true },
-    });
-    await tx.orderLog.create({
-      data: {
-        orderId: order.id,
-        operatorId: actor.id,
-        action: 'FACTORY_CONFIRMED',
-        changedFields: {
-          status: { before: order.status, after: OrderStatus.CONFIRMED },
-          confirmedFee: {
-            before: order.confirmedFee?.toFixed(2) ?? null,
-            after: confirmedFee,
-          },
-          revision: { before: order.revision, after: order.revision + 1 },
-        },
-        remark: '工厂预检通过并确认工单',
-      },
-    });
-    return { orderId: order.id, status: OrderStatus.CONFIRMED, confirmedFee };
+    return { orderId: order.id, status: prepared.status, confirmedFee: order.totalAmount.toFixed(2) };
   });
 }
 
@@ -775,7 +547,7 @@ export async function releaseFactoryOrder(
     postCommitNotification: NotificationPayloadFor<'ORDER_SCHEDULED'> | null;
   } = await db.$transaction(async (tx) => {
     await lockOrder(tx, input.orderId);
-    const order = await readLockedOrder(tx, input.orderId);
+    let order = await readLockedOrder(tx, input.orderId);
     const replay = await tx.orderPrintJob.findUnique({
       where: { idempotencyKey: printIdempotencyKey },
       select: {
@@ -814,6 +586,14 @@ export async function releaseFactoryOrder(
     }
     assertExpectedVersion(order, input);
     assertNoPendingChange(order);
+    if (isAwaitingFactoryConfirmation(order.status)) {
+      const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, await databaseClockNow(tx));
+      if (!prepared.ready) {
+        throw new AdminOrderWorkflowError('PREFLIGHT_FAILED', prepared.issues.join('；'));
+      }
+      order = await readLockedOrder(tx, order.id);
+    }
+
     let releaseResult = null;
     if (order.status !== OrderStatus.RELEASED) {
       if (order.status !== OrderStatus.CONFIRMED) {

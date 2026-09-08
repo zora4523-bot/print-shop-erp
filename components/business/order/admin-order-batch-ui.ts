@@ -6,7 +6,7 @@ import type { OrderListSelectionItem } from './OrderListBatchSelection';
 
 export const BATCH_COMMAND_CONFIG = {
   RELEASE_AND_CREATE_PRINT: {
-    label: '下发+打印', capability: 'release', prerequisite: '需先完成工厂确认',
+    label: '下发+打印', capability: 'release', prerequisite: '需资料与费用完整且无待审批申请',
     impact: '下发生产，并为当前工单版本创建打印任务。',
     completed: '已下发生产并创建打印任务',
   },

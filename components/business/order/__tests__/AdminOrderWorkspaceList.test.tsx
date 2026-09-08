@@ -121,7 +121,7 @@ describe('AdminOrderWorkspaceList', () => {
       />,
     );
 
-    expect(html).toContain('>审核</button>');
+    expect(html).toContain('>查看处理</button>');
   });
 
   it('shows rejected incomplete fees as excluded without exposing pricing actions', () => {
@@ -158,63 +158,28 @@ describe('AdminOrderWorkspaceList', () => {
     expect(actionsHtml).not.toContain('录入人工核价');
   });
 
-  it('keeps failed confirmation visible but disabled and provides a pricing recovery path', () => {
+  it('shows actionable blockers without a second confirmation control', () => {
     const submitted = row();
     submitted.status = OrderStatus.SUBMITTED;
-    submitted.priceComparisonError = '历史人工金额缺少可重算参数';
-    submitted.confirmationPreflight = { ok: true, issues: [] };
-    submitted.capabilities = {
-      ...submitted.capabilities,
-      confirm: true,
-      hold: false,
-      release: false,
-    };
-    const html = renderToStaticMarkup(
-      <AdminOrderDecisionPanel order={submitted} />,
-    );
-
-    expect(html).toContain('确认工单');
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>确认工单<\/button>/);
-    expect(html).toContain('当前价预检失败：历史人工金额缺少可重算参数');
-    expect(html).toContain('/orders/order-1#pricing-review');
-    expect(html).toContain('处理核价');
+    submitted.confirmationPreflight = { ok: false, issues: ['请补全收货地址'] };
+    submitted.capabilities = { ...submitted.capabilities, confirm: false, hold: false, release: false };
+    const html = renderToStaticMarkup(<AdminOrderDecisionPanel order={submitted} />);
+    expect(html).toContain('请补全收货地址');
+    expect(html).not.toContain('确认并锁定');
+    expect(html).not.toContain('>确认工单</button>');
+    expect(html).not.toContain('>下发 + 打印</button>');
   });
 
-  it('只有加载到当前价凭证后才允许点击确认工单', () => {
+  it('offers release with saved pricing and never waits for a current-price token', () => {
     const submitted = row();
     submitted.status = OrderStatus.SUBMITTED;
     submitted.confirmationPreflight = { ok: true, issues: [] };
-    submitted.capabilities = {
-      ...submitted.capabilities,
-      confirm: true,
-      hold: false,
-      release: false,
-    };
-
-    const withoutPreview = renderToStaticMarkup(
-      <AdminOrderDecisionPanel order={submitted} />,
-    );
-    expect(withoutPreview).toMatch(
-      /<button[^>]*disabled=""[^>]*>确认工单<\/button>/,
-    );
-
-    submitted.priceComparison = {
-      quoted: {
-        amount: '1200.00',
-        versions: { processing: null, logistics: null },
-      },
-      current: {
-        amount: '1234.50',
-        versions: { processing: null, logistics: null },
-      },
-      quoteToken: `create-order-quote-v2:${'a'.repeat(64)}`,
-      hasVersionDiff: false,
-    };
-    const withPreview = renderToStaticMarkup(
-      <AdminOrderDecisionPanel order={submitted} />,
-    );
-    expect(withPreview).toContain('>确认工单</button>');
-    expect(withPreview).not.toMatch(/<button[^>]*\sdisabled=""/);
+    submitted.capabilities = { ...submitted.capabilities, confirm: true, hold: false, release: true };
+    submitted.priceComparison = null;
+    const html = renderToStaticMarkup(<AdminOrderDecisionPanel order={submitted} />);
+    expect(html).toContain('下发 + 打印');
+    expect(html).not.toContain('>确认工单</button>');
+    expect(html).not.toContain('锁定金额');
   });
 
   it('explains how to unblock settlement when a shipped order has no confirmed fee', () => {

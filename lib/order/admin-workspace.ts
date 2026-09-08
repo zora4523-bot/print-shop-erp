@@ -1,3 +1,4 @@
+import { inspectOrderProductionReadinessInTx } from './production-readiness';
 import 'server-only';
 
 import Decimal from 'decimal.js';
@@ -39,8 +40,6 @@ import {
 } from './list-query';
 import { overdueCutoff, promisedDaysLeft } from './promised-date';
 import {
-  OrderChangeRequestError,
-  previewFactoryConfirmationPriceDiff,
   type FactoryConfirmationPriceDiff,
 } from './change-request';
 import {
@@ -671,7 +670,8 @@ export function resolveAdminOrderCapabilities(input: AdminOrderCapabilityFacts):
     resume:
       input.status === OrderStatus.ON_HOLD,
     release:
-      input.status === OrderStatus.CONFIRMED && !input.hasPendingChange,
+      (input.status === OrderStatus.CONFIRMED ||
+        (awaitingFactory && input.confirmationPreflightOk && !input.manualPricing && !input.pricingPending)) && !input.hasPendingChange,
     ship: resolveAdminOrderShipDisabledReason(input) === null,
     settle:
       input.status === OrderStatus.SHIPPED &&
@@ -897,90 +897,23 @@ export async function getAdminOrderByOrderNo(
           [row.id],
           tx,
         );
-        return { row, craftNames, progressByOrder };
+        const readiness = isAwaitingFactoryConfirmation(row.status)
+          ? await inspectOrderProductionReadinessInTx(tx, row.id)
+          : null;
+        return { row, craftNames, progressByOrder, readiness };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
-  // The current-price preview owns its advisory-locked transaction. Keep the
-  // row/craft/progress read in one repeatable-read snapshot, then verify the
-  // order version after preview. A concurrent mutation causes one complete
-  // retry instead of returning a cross-version drawer payload.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const snapshot = await loadSnapshot();
-    if (!snapshot) return null;
-
-    const { row, craftNames, progressByOrder } = snapshot;
-    const mapped = mapAdminOrderRow(
-      row,
-      actor.id,
-      craftNames,
-      progressByOrder.get(row.id),
-      now,
-      stagnationDays,
-    );
-    if (!isAwaitingFactoryConfirmation(row.status)) {
-      return mapped;
-    }
-
-    let priceComparison: FactoryConfirmationPriceDiff | null = null;
-    let priceComparisonError: string | null = null;
-    try {
-      priceComparison = await previewFactoryConfirmationPriceDiff(
-        row.id,
-        actor,
-        now,
-      );
-    } catch (error) {
-      if (!(error instanceof OrderChangeRequestError)) throw error;
-      priceComparisonError = error.message;
-    }
-
-    const currentVersion = await db.order.findUnique({
-      where: { id: row.id },
-      select: {
-        revision: true,
-        workOrderVersion: true,
-        priceRevision: true,
-        updatedAt: true,
-      },
-    });
-    if (!currentVersion) return null;
-    const versionStable =
-      currentVersion.revision === row.revision &&
-      currentVersion.workOrderVersion === row.workOrderVersion &&
-      currentVersion.priceRevision === row.priceRevision &&
-      currentVersion.updatedAt.getTime() === row.updatedAt.getTime();
-    if (!versionStable) {
-      if (attempt === 0) continue;
-      const latestSnapshot = await loadSnapshot();
-      if (!latestSnapshot) return null;
-      const latestMapped = mapAdminOrderRow(
-        latestSnapshot.row,
-        actor.id,
-        latestSnapshot.craftNames,
-        latestSnapshot.progressByOrder.get(latestSnapshot.row.id),
-        now,
-        stagnationDays,
-      );
-      return {
-        ...latestMapped,
-        priceComparison: null,
-        priceComparisonError: '工单数据刚刚发生变更，请刷新后重试',
-        capabilities: { ...latestMapped.capabilities, confirm: false },
-      };
-    }
-
-    return {
-      ...mapped,
-      priceComparison,
-      priceComparisonError,
-      capabilities: priceComparisonError
-        ? { ...mapped.capabilities, confirm: false }
-        : mapped.capabilities,
-    };
-  }
-
-  return null;
+  const snapshot = await loadSnapshot();
+  if (!snapshot) return null;
+  const mapped = mapAdminOrderRow(snapshot.row, actor.id, snapshot.craftNames,
+    snapshot.progressByOrder.get(snapshot.row.id), now, stagnationDays);
+  if (!snapshot.readiness) return mapped;
+  return {
+    ...mapped,
+    confirmationPreflight: { ok: snapshot.readiness.ready, issues: snapshot.readiness.issues },
+    capabilities: { ...mapped.capabilities, release: snapshot.readiness.ready, confirm: snapshot.readiness.ready },
+  };
 }
 
 function emptyFilters(): AdminOrderWorkspaceQuery['list']['filters'] {
@@ -1336,7 +1269,7 @@ function statusSummary(
   }
   if (isAwaitingFactoryConfirmation(row.status)) {
     return confirmationPreflight.ok
-      ? '✓ 预检通过，可确认'
+      ? '费用已核定，待下发检查'
       : `⚠ ${confirmationPreflight.issues.join('；')}`;
   }
   if (row.trackingNo) return `运单 ${row.trackingNo}`;

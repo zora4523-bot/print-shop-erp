@@ -400,10 +400,10 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
 
     const html = render();
 
-    expect(html).toContain('终价已确认：入袋费 20.00');
+    expect(html).toContain('费用已确认：入袋费 20.00');
     expect(html).toContain('加工费合计 150.00');
     expect(html).toContain('工单总额 185.00');
-    expect(html).toContain('终价已确认，正在刷新工单状态');
+    expect(html).toContain('费用已确认，正在刷新工单状态');
     expect(harness.confirmDisabled).toBe(true);
     expect(harness.previewAction).toHaveBeenCalledTimes(1);
     expect(harness.refresh).toHaveBeenCalledTimes(1);
