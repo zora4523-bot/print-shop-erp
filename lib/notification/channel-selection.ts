@@ -59,13 +59,13 @@ export function notificationChannelSelectionIssueMessage(
 ): string {
   switch (issue) {
     case 'LEGACY_TRANSPORT':
-      return '旧版 Webhook 已停止配置，请迁移到智能机器人';
+      return '旧版通知目标不可配置，请新建通知目标并调整推送规则';
     case 'INACTIVE':
       return '该群已停用';
     case 'CHANNEL_CONFIGURATION_INCOMPLETE':
       return '该通知目标配置不完整';
     case 'SMART_BOT_CREDENTIALS_NOT_CONFIGURED':
-      return '服务端 Bot ID 与 Secret 未完整配置';
+      return '通知机器人配置不完整，请联系管理员补齐配置';
     case 'SMART_BOT_IDENTITY_MISMATCH':
       return '绑定时 Bot ID 与当前配置不一致';
   }

@@ -306,12 +306,23 @@ primary | warning | info | success | danger | neutral
 
 | 内部词 | 用户文案 |
 |---|---|
+| PER_UNIT | 按件计费 |
 | DRAFT | 草稿 |
 | settledAt | 结算时间 |
 | DailyWorkerSalary | 历史工资记录 |
 | revision | 版本（仅有业务意义时展示） |
+| HourlyWorkerPayroll | 历史时薪记录 |
+| ProductionReport | 报工记录 |
+| ProductionTask | 生产任务 |
+| 同步 | 更新（仅有业务意义时展示） |
 | null | 待录 / 待定（按字段） |
 | 快照 | 已保存金额 / 历史记录（按业务事实） |
 | 只读 | 已归档 / 不可编辑（仅在需要解释状态时） |
 
 管理员诊断、日志、技术文档不属于普通业务流程。若用户可见位置确需技术词，须逐条登记文件、具体原文及必要原因；不得整目录放行。
+
+### 文案门禁与豁免
+
+- `pnpm lint:ui` 使用 TypeScript 语法树检查 JSX 文本、显示属性、toast / 提示、确认内容及其可静态追踪的本地和导入文案。`pnpm lint` 同时执行此检查，CI 的 lint 步骤失败即阻止通过。
+- 禁词与精确豁免在 `scripts/ui-copy/policy.json` 维护；白名单必须包含文件、完整原文和必要原因，不允许目录通配或无理由豁免。
+- 日志、注释、内部枚举比较、隐藏表单值不属于展示文案；运行时来自数据库或外部服务的内容仍需在展示边界转换业务名称并人工审查，不能将静态检查视为完整语义审计。

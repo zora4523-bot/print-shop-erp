@@ -143,7 +143,7 @@ export async function updateChannelAction(
     if (err instanceof ChannelTransportMismatchError) {
       return {
         status: 'error',
-        message: '仅支持编辑智能机器人目标；旧版目标请新建智能机器人目标后迁移路由。',
+        message: '旧版目标不可编辑，请新建通知目标并调整推送规则。',
       };
     }
     if (err instanceof UnboundSmartBotChannelError) {
@@ -197,12 +197,12 @@ export async function createSmartBotBindingCodeAction(
       case 'CREDENTIALS_NOT_CONFIGURED':
         return {
           status: 'error',
-          message: '服务端尚未配置完整的 Bot ID 与新 Secret，请先联系运维配置。',
+          message: '通知机器人配置不完整，请联系管理员补齐配置。',
         };
       case 'WORKER_UNAVAILABLE':
         return {
           status: 'error',
-          message: '智能机器人连接尚未就绪，或检测到多个 LIGHT worker；请先处理运行状态再生成绑定码。',
+          message: '通知机器人连接异常，请联系管理员检查运行状态后重试。',
         };
       case 'CONFLICT':
         return { status: 'error', message: '绑定状态已变化，请刷新页面后重试' };

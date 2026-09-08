@@ -40,7 +40,7 @@ describe('SettingsForm management notification routing', () => {
     expect(inputs).toHaveLength(1);
     expect(inputs[0]).toContain('checked=""');
     expect(inputs[0]).not.toContain('disabled=""');
-    expect(html).toContain('请迁移到智能机器人');
+    expect(html).toContain('请新建通知目标并调整推送规则');
   });
   it('两个角色只提交开关与真实 channel ID', () => {
     const values = initialValues();

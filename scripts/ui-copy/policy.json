@@ -1,0 +1,39 @@
+{
+  "banned": [
+    "settledAt",
+    "DRAFT",
+    "幂等",
+    "快照",
+    "只读",
+    "服务端",
+    "迁移",
+    "revision",
+    "Salary",
+    "Prisma",
+    "同步中",
+    "DailyWorkerSalary",
+    "null",
+    "未同步",
+    "空快照",
+    "请确认影响范围",
+    "执行后会发生以下变化",
+    "确定吗",
+    "同步",
+    "HourlyWorkerPayroll",
+    "ProductionReport",
+    "ProductionTask",
+    "PER_UNIT"
+  ],
+  "exemptions": [
+    {
+      "file": "app/(admin)/owner/pigsty/page.tsx",
+      "text": "只读检查，不会安装扩展或修改集群配置。",
+      "reason": "管理员数据库诊断操作边界，需要区分检查与修改集群；不是普通业务流程。"
+    },
+    {
+      "file": "app/dev/showcase/page.tsx",
+      "text": "终态保持中性只读；表格空态提供合法 table 行与紧凑移动形态。",
+      "reason": "仅开发环境的组件规范示例，面向开发人员说明组件契约。"
+    }
+  ]
+}

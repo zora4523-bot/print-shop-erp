@@ -8,6 +8,8 @@ Selected backlog item:
 
 ## Verification
 
+- [ ] 新增用户可见文案已对照 ui-规范 §文案
+
 - [ ] `./node_modules/.bin/prisma validate`
 - [ ] `pnpm typecheck`
 - [ ] `./node_modules/.bin/eslint .`

@@ -80,8 +80,8 @@
 - [第二批] `components/business/order/OrderChangeReviewForm.tsx:157` — 冗长审批说明 → 实际变更行、金额差额、待开工任务调整；拒绝仍保留理由必填及状态保护。
 - [第二批] `components/business/order/FulfillmentPricingReviewForm.tsx:218` — 移除第二层确认：逐票金额、总额与差额已在完整复核区呈现；按钮直接调用原确认函数，旧预览失效、版本凭据、重复点击和失败重试保护不变。
 - [第二批] `components/business/order/OrderPricingReviewForm.tsx:946` — 移除“保存本次核价”泛化弹窗：页面已逐项核价；原 submit、必填检查、金额与版本校验不变。
-- [第二批] `components/business/order/OrderChangeFieldDiff.tsx` — 删除“计价影响 / 生产影响”通用预测列，保留字段旧值、新值与数量。后果在批准复核层显示一次。
-- [第二批] `components/business/order/AdminOrderDecisionPanel.tsx` — 下发、结算改为工单名称、数量 / 金额、状态变更；不再把内部工单号和版本作为确认主文案。
+- [第二批] `components/business/order/OrderChangeFieldDiff.tsx:267` — 删除“计价影响 / 生产影响”通用预测列，保留字段旧值、新值与数量。后果在批准复核层显示一次。
+- [第二批] `components/business/order/AdminOrderDecisionPanel.tsx:51` — 下发、结算改为工单名称、数量 / 金额、状态变更；不再把内部工单号和版本作为确认主文案。
 
 - [第二批] `components/business/order/AdminOrderDecisionPanel.tsx:829` — 管理员确认的是是否接受变更；款式与费用由服务端按最新规则自动合并和重算。 → 核对本次变更。
 - [第二批] `components/business/order/AdminOrderDetailView.tsx:178` — 费用快照 → 费用记录。
@@ -162,10 +162,10 @@
 - [第三批] `components/business/notification/ChannelForm.tsx:102` — Bot ID / Secret 通道、连接配置导语 → 企业微信群、保存名称后生成绑定码的步骤；隐藏 transport 值及绑定后启用条件不变。
 - [第三批] `components/business/notification/SmartBotBindingPanel.tsx:77` — 连接部署说明与重复预告 → 生成码、在目标群发送、绑定状态；旧码失效只写在重新生成动作旁。
 - [第三批] `components/business/notification/LegacyNotificationChannels.tsx:35` — Webhook 实现与兼容说明 → 新建目标并调整推送规则的恢复步骤。
-- [第三批] `components/business/notification/UnknownNotificationActions.tsx` — 状态机制与审计介绍 → 投递状态旧值 / 新值及是否重发；原权限、重发限制、忽略理由保留。
-- [第三批] `components/business/salary/PieceworkSettlementActions.tsx` — 数据库不可变约束 / 表名 → 报工数量、金额、结算 / 发放状态；不可撤销后果保留。
-- [第三批] `components/business/price/ExternalSalesPriceBookDraftForms.tsx` — 改期时保持哈希等说明 → 原生效时间与拟定生效时间；必填理由、历史版本不可原地编辑、并发保护不变。
-- [第三批] `components/business/material/StockTransactionForm.tsx`、`components/business/purchase/PurchaseReceiptForm.tsx`、`components/business/purchase/CancelPurchaseReceiptButton.tsx` — 写流水 / 再校验机制 → 库存、已收数量的实际增减；原数量校验及事务不变。
+- [第三批] `components/business/notification/UnknownNotificationActions.tsx:79` — 状态机制与审计介绍 → 投递状态旧值 / 新值及是否重发；原权限、重发限制、忽略理由保留。
+- [第三批] `components/business/salary/PieceworkSettlementActions.tsx:62` — 数据库不可变约束 / 表名 → 报工数量、金额、结算 / 发放状态；不可撤销后果保留。
+- [第三批] `components/business/price/ExternalSalesPriceBookDraftForms.tsx:988` — 改期时保持哈希等说明 → 原生效时间与拟定生效时间；必填理由、历史版本不可原地编辑、并发保护不变。
+- [第三批] `components/business/material/StockTransactionForm.tsx:43`、`components/business/purchase/PurchaseReceiptForm.tsx:38`、`components/business/purchase/CancelPurchaseReceiptButton.tsx:16` — 写流水 / 再校验机制 → 库存、已收数量的实际增减；原数量校验及事务不变。
 - [第三批] `components/business/rules/pricing/CustomerPricingSectionViews.tsx:650` — 手填产生缝隙的讲解 → 上界正整数与相邻范围条件；删除单价单位旁的 PER_UNIT。
 - [第三批] 共享确认调用的按钮 / 标题删去多余“确认”“填写原因并”和问号；删除、付款等确认保留，理由字段仍由 Controller 执行原必填校验。
 
@@ -188,11 +188,41 @@
 
 ## Lint 与豁免
 
-检查器正在实现，尚未接入 CI，当前不宣称门禁生效。最终禁词表与逐条豁免将在校验完成后列入。
+已接入：`pnpm lint` 同时执行 ESLint 与 UI 文案检查，现有 `.github/workflows/quality.yml:83` 调用此命令。PR 模板新增「新增用户可见文案已对照 ui-规范 §文案」。本地检查通过；本任务未推送，不宣称远端 CI 已执行。
 
-## 待完成验收
+- [门禁] `scripts/ui-copy/check.mjs:1` — TypeScript AST 识别 JSX 文本、显示属性、toast / 提示、confirm props，并追踪本地 / 导入变量、函数返回值、条件分支、switch、try/catch；日志、注释、枚举比较、隐藏表单值豁免。
+- [门禁] `scripts/ui-copy/__tests__/check.test.ts:1` — 18 个断言用例覆盖禁词、可见输入值、跨文件追踪、同名局部变量、精确豁免、日志排除、规范映射表与 lint 命令连接。
+- [门禁扩展] `actions/owner-notifications.ts:146`、`:200` — 迁移路由 / Bot ID + Secret / LIGHT worker 提示 → 旧版目标不可编辑、机器人配置不完整或连接异常，并提供新建目标、联系管理员、重试的恢复动作；原错误状态与权限拒绝路径不变。
+- [门禁扩展] `lib/notification/channel-selection.ts:62` — 技术通道与连接参数提示 → 通知目标不可配置 / 配置不完整及处理动作。
 
-- 逐批完整测试与基线对比。
-- 实际业务页面的六视口与键盘验证。
-- 所有调用方实际数值和后果整理、重复复核移除。
-- 价格条件 fixtures 与断言。
+禁词表：`settledAt`、`DRAFT`、`幂等`、`快照`、`只读`、`服务端`、`迁移`、`revision`、`Salary`、`Prisma`、`同步中`、`DailyWorkerSalary`、`null`、`未同步`、`空快照`、`请确认影响范围`、`执行后会发生以下变化`、`确定吗`、`同步`、`HourlyWorkerPayroll`、`ProductionReport`、`ProductionTask`、`PER_UNIT`。
+
+逐条豁免（禁止目录级放行）：
+- `app/(admin)/owner/pigsty/page.tsx` — “只读检查，不会安装扩展或修改集群配置。”；原因：管理员数据库诊断操作边界，需要区分检查与修改集群；不是普通业务流程。
+- `app/dev/showcase/page.tsx` — “终态保持中性只读；表格空态提供合法 table 行与紧凑移动形态。”；原因：仅开发环境的组件规范示例，面向开发人员说明组件契约。
+
+最终隔离验证：555 文件，549 通过、3 失败、3 跳过；5850 测试，5791 通过、4 失败、55 跳过。相对初始基线新增 36 个通过测试，无新增失败。`pnpm typecheck` 通过；`pnpm lint` 通过，0 未豁免命中，保留原有 2 个无关未使用符号警告。
+
+
+## 验收证据
+
+| 验收项 | 证据 |
+|---|---|
+| 操作前看懂变化 | 工单审批显示数量、加工费、整单金额与差额；缺失版费不展示误导差额；价格改期显示原 / 新时间 |
+| 后果只出现一次 | 共享组件去重与实际工单页面 + 弹窗整条链的出现次数断言；物流、工厂核价移除重复弹窗 |
+| 失败后知道如何继续 | 物流失败提供重试且沿用原请求；通知未配置 / 连接异常提供处理动作；报价失效提示重新预览 |
+| 权限、金额、版本及重复提交保护 | 全量失败集合与基线一致；物流 9 个浏览器用例保留原版本、凭据、重复点击、失败重试断言；核价提交浏览器用例通过 |
+| 六视口及键盘 | 360×800、390×844、768×1024、1024×768、1440×900、1920×1080；共享确认 15、实际工单审批 6、通知绑定 6、物流 9、核价 1，共 37 个浏览器用例通过；包含 axe、溢出、Esc 与焦点恢复。复核了手机与桌面截图 |
+| 业务条件 | 十档范围 13 个纯校验用例、2 个写入边界用例、2 个 UI 用例；合法调价写 10 行，非法断层零写入 |
+
+截图：[六视口审批截图](/Users/zhixing/.codex/visualizations/2026/09/07/01a07aa7-bdfa-76c3-8bb1-73be2bb0a79c/presentation-repair/index.html)。这是实际组件浏览器测试截图，不是替代真实组件的静态设计图。未执行真实付款、批准生产或发布价目。
+
+测试迁移遵循实际行为：旧 API mock 改接新控制入口，必要文案断言改为新的业务呈现；没有删除权限、理由、数量、金额、状态、版本或防重复提交断言来掩盖回归。各批先保留失败输出，修复本次回归后在独立候选目录复跑全量。
+
+## 保留边界与待拍板残留
+
+- 无新增业务真值冲突待裁决。历史九档价目仍属于缺档，不能绕过十档条件；需另行补齐完整草稿后发布。本次没有修改历史价格、数据库数据或已应用迁移。
+- 初始基线的 4 个失败仍保留：Button 约束 1、原生 disclosure 约束 1、WORKER / SALES 详情契约 2。未修改这些既有失败断言；不能将本次结果表述为“全量全绿”。
+- 静态门禁覆盖可追踪的源码文案，不保证识别数据库内容或外部服务运行时返回的任意字符串；这些仍需在展示边界转换业务名称，并遵循规范与 PR 检查。
+- 六视口验证覆盖本次改变交互结构的确认、工单审批与通知绑定；其余仅文案修改页面用原有全量测试核对，未声称对全站每一页都做了截图对照。
+- 本次所有提交均为本地提交，未推送。任务开始前及其他任务期间产生的无关工作区改动保留。

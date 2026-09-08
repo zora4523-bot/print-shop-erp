@@ -230,7 +230,7 @@ describe('notification form checkbox contracts', () => {
     expect(existing).toHaveLength(1);
     expect(existing[0]).toContain('checked=""');
     expect(existing[0]).not.toContain('disabled=""');
-    expect(render(true)).toContain('请迁移到智能机器人');
+    expect(render(true)).toContain('请新建通知目标并调整推送规则');
   });
 
   it('启用校验失败显示服务端字段错误', () => {
