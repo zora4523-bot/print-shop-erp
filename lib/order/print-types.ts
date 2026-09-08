@@ -6,6 +6,8 @@
 //   3. The same shape can be serialized for Puppeteer's page.evaluate
 //      hand-off later if we ever render server-side.
 
+export type PrintDocumentMode = 'order' | 'tasks';
+
 export type PrintDesign = {
   id: string;
   fileType: 'IMAGE' | 'CDR';
@@ -34,6 +36,9 @@ export type PrintProductionStep = {
   source: 'OPERATION' | 'PROGRESS';
   itemSequence?: number | null;
   itemName?: string | null;
+  // Distinguishes operations spanning packaging groups or multiple items.
+  scopeLabel?: string | null;
+  quantityUnit?: '个' | '袋';
   craftName: string;
   plannedQty: number;
   completedQty: number;

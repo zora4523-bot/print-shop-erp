@@ -30,6 +30,8 @@ export default async function OrderPrintViewPage({
   const { user } = await requireSession();
   const { id } = await params;
   const sp = await searchParams;
+  if (sp.mode !== undefined && sp.mode !== 'order' && sp.mode !== 'tasks') notFound();
+  const mode = sp.mode ?? 'order';
   const baseUrl = await derivePublicBaseUrl();
   const order = await getOrderForPrint(
     id,
@@ -52,8 +54,8 @@ export default async function OrderPrintViewPage({
 
   return (
     <>
-      <OrderPrintLayout order={order} factoryName={factoryName} />
-      <AutoPrint enabled={autoprint} />
+      <OrderPrintLayout key={`${id}:${order.workOrderVersion}:${mode}`} order={order} factoryName={factoryName} mode={mode} />
+      <AutoPrint key={`prepare:${id}:${order.workOrderVersion}:${mode}`} enabled={autoprint} />
     </>
   );
 }

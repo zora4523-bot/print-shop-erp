@@ -64,9 +64,10 @@ export default async function WorkOrderQrRedirectPage({
       );
     }
     if (!target.requestedTaskAllowed) notFound();
-    redirect(
-      `/worker/tasks/${encodeURIComponent(requestedTaskId ?? target.defaultTaskId)}`,
-    );
+    const taskId = requestedTaskId ?? target.defaultTaskId;
+    redirect(taskId
+      ? `/worker/tasks/${encodeURIComponent(taskId)}`
+      : `/worker/orders/${encodeURIComponent(target.orderId)}`);
   }
 
   const order = await db.order.findFirst({

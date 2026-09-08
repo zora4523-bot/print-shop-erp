@@ -25,6 +25,7 @@ function preparationHarness(options: { imageFails?: boolean } = {}) {
   const documentTarget = {
     documentElement,
     fonts: { ready: Promise.resolve() },
+    querySelector: () => null,
     querySelectorAll(selector: string) {
       if (selector === 'img[data-print-artwork="true"]') return [image];
       if (selector === '.image-load-warning') return [warning];
@@ -61,7 +62,7 @@ function readinessHarness(initiallyReady = false) {
 
   const documentTarget = {
     documentElement: {
-      dataset: initiallyReady ? { printReady: 'true' } : {},
+      dataset: initiallyReady ? { printReady: 'true', printPagination: 'ready' } : { printPagination: 'ready' },
     },
     addEventListener: documentEvents.addEventListener.bind(documentEvents),
     removeEventListener:
@@ -93,6 +94,23 @@ function readinessHarness(initiallyReady = false) {
 }
 
 describe('waitForPrintReady', () => {
+  it.each([undefined, 'pending'])('does not print an unverified document (%s)', (state) => {
+    const harness = readinessHarness(true);
+    harness.documentTarget.documentElement.dataset.printPagination = state;
+    const onReady = vi.fn();
+    waitForPrintReady(harness.documentTarget, harness.windowTarget, onReady);
+    harness.timers.get(1)?.();
+    expect(onReady).not.toHaveBeenCalled();
+  });
+  it('does not auto-print known overflow, including the timeout fallback', () => {
+    const harness = readinessHarness(true);
+    harness.documentTarget.documentElement.dataset.printPagination = 'overflow';
+    const onReady = vi.fn();
+    waitForPrintReady(harness.documentTarget, harness.windowTarget, onReady);
+    harness.timers.get(1)?.();
+    harness.dispatchWindowReady();
+    expect(onReady).not.toHaveBeenCalled();
+  });
   it('prints once when the document is already ready', () => {
     const harness = readinessHarness(true);
     const onReady = vi.fn();

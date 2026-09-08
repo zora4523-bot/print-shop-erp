@@ -10,6 +10,7 @@ import {
 } from '../../generated/prisma/client';
 import { getOrderForPrint } from '../order/print-view';
 import { buildPrintHtml } from '../order/print-html';
+import type { PrintDocumentMode } from '../order/print-types';
 import { renderHtmlToPdf } from '../pdf/render';
 import { db } from '../db';
 import { getSetting } from '../settings';
@@ -23,6 +24,7 @@ export async function enqueueOrderPdfJob(input: {
   expectedWorkOrderVersion: number;
   actor: { id: string; role: Role };
   baseUrl: string;
+  mode?: PrintDocumentMode;
 }): Promise<string> {
   const { job } = await enqueueBackgroundJob({
     type: BACKGROUND_JOB_TYPES.ORDER_PDF,
@@ -44,6 +46,8 @@ export async function handleOrderPdfJob(
     payload.expectedWorkOrderVersion,
   );
   const baseUrl = requiredString(payload.baseUrl);
+  const mode = payload.mode ?? 'order';
+  if (mode !== 'order' && mode !== 'tasks') throw new InvalidOrderPdfJobPayloadError();
   const actor = asRecord(payload.actor);
   const actorId = requiredString(actor.id);
   const role = requiredString(actor.role);
@@ -60,7 +64,7 @@ export async function handleOrderPdfJob(
   }
 
   const { name: factoryName } = await getSetting('factory_name');
-  const html = await buildPrintHtml(order, { factoryName });
+  const html = await buildPrintHtml(order, { factoryName, mode });
   await job.assertLease?.();
   job.signal?.throwIfAborted();
   const pdf = await renderHtmlToPdf({
@@ -95,6 +99,7 @@ export async function waitForOrderPdfJob(
       orderId: string;
       actorId: string;
       workOrderVersion: number;
+      mode?: PrintDocumentMode;
     };
   } = {},
 ): Promise<OrderPdfJobWaitResult> {
@@ -137,6 +142,7 @@ function matchesExpectedPdfJob(
     orderId: string;
     actorId: string;
     workOrderVersion: number;
+    mode?: PrintDocumentMode;
   },
 ): boolean {
   if (job.type !== BACKGROUND_JOB_TYPES.ORDER_PDF) return false;
@@ -146,7 +152,8 @@ function matchesExpectedPdfJob(
     return (
       payload.orderId === expected.orderId &&
       actor.id === expected.actorId &&
-      payload.expectedWorkOrderVersion === expected.workOrderVersion
+      payload.expectedWorkOrderVersion === expected.workOrderVersion &&
+      (payload.mode ?? 'order') === (expected.mode ?? 'order')
     );
   } catch {
     return false;

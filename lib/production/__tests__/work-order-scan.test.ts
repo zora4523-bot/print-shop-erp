@@ -33,7 +33,7 @@ describe('resolveWorkerWorkOrderScan', () => {
       workOrderVersion: 3,
       productionOperations: [
         { id: 'operation-v2', workOrderVersion: 2 },
-        { id: 'operation-v3', workOrderVersion: 3 },
+        { id: 'operation-v3', workOrderVersion: 3, status: ProductionOperationStatus.PENDING },
       ],
       productionProgressSteps: [],
     });
@@ -68,7 +68,7 @@ describe('resolveWorkerWorkOrderScan', () => {
       workOrderVersion: 3,
       productionOperations: [
         { id: 'operation-v2', workOrderVersion: 2 },
-        { id: 'operation-v3', workOrderVersion: 3 },
+        { id: 'operation-v3', workOrderVersion: 3, status: ProductionOperationStatus.PENDING },
       ],
       productionProgressSteps: [],
     });
@@ -89,7 +89,7 @@ describe('resolveWorkerWorkOrderScan', () => {
       productionOperations: [],
       productionProgressSteps: [
         { id: 'progress-v4', workOrderVersion: 4 },
-        { id: 'progress-v5', workOrderVersion: 5 },
+        { id: 'progress-v5', workOrderVersion: 5, status: ProductionOperationStatus.PENDING },
       ],
     });
 
@@ -103,6 +103,49 @@ describe('resolveWorkerWorkOrderScan', () => {
       dbMock.order.findUnique.mock.calls[0][0].select.productionOperations.where
         .operationType,
     ).toEqual({ in: [] });
+  });
+
+  it('打包账号按固定岗位查询，多组打包不再默选首组', async () => {
+    operationTypeMock.mockResolvedValue(PieceworkOperationType.PACKING);
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1', workOrderVersion: 3,
+      productionOperations: [
+        { id: 'pack-1', workOrderVersion: 3, status: ProductionOperationStatus.IN_PROGRESS },
+        { id: 'pack-2', workOrderVersion: 3, status: ProductionOperationStatus.PENDING },
+      ], productionProgressSteps: [],
+    });
+    await expect(resolveWorkerWorkOrderScan('GD-001', actor)).resolves.toMatchObject({ defaultTaskId: null, requestedTaskAllowed: true });
+    expect(dbMock.order.findUnique.mock.calls[0][0].select.productionOperations.where.operationType).toBe(PieceworkOperationType.PACKING);
+    await expect(resolveWorkerWorkOrderScan('GD-001', actor, 'foil-other-lane')).resolves.toMatchObject({ requestedTaskAllowed: false });
+  });
+
+  it('已完成任务保留旧码查看能力，但不抢占唯一未完成任务直达', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1', workOrderVersion: 3,
+      productionOperations: [
+        { id: 'pack-done', workOrderVersion: 3, status: ProductionOperationStatus.COMPLETED },
+        { id: 'pack-open', workOrderVersion: 3, status: ProductionOperationStatus.PENDING },
+      ], productionProgressSteps: [],
+    });
+    await expect(resolveWorkerWorkOrderScan('GD-001', actor, 'pack-done')).resolves.toMatchObject({ defaultTaskId: 'pack-open', requestedTaskAllowed: true });
+  });
+
+  it('全部任务完成时返回选择页目标，仍可展示完成进度', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1', workOrderVersion: 3,
+      productionOperations: [{ id: 'pack-done', workOrderVersion: 3, status: ProductionOperationStatus.COMPLETED }],
+      productionProgressSteps: [],
+    });
+    await expect(resolveWorkerWorkOrderScan('GD-001', actor)).resolves.toMatchObject({ orderId: 'order-1', defaultTaskId: null });
+  });
+
+  it('付费工序和共享进度同时待报工时进入选择页', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1', workOrderVersion: 3,
+      productionOperations: [{ id: 'foil', workOrderVersion: 3, status: ProductionOperationStatus.PENDING }],
+      productionProgressSteps: [{ id: 'clean', workOrderVersion: 3, status: ProductionOperationStatus.PENDING }],
+    });
+    await expect(resolveWorkerWorkOrderScan('GD-001', actor)).resolves.toMatchObject({ defaultTaskId: null });
   });
 
   it('只有历史代次记录时拒绝访问', async () => {

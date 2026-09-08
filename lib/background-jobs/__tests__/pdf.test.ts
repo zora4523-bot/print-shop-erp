@@ -33,6 +33,30 @@ beforeEach(() => {
 });
 
 describe('durable order PDF jobs', () => {
+  it.each([
+    [undefined, 'tasks'],
+    ['tasks', 'order'],
+  ] as const)('does not return mode %s for a %s request', async (mode, expectedMode) => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      type: 'ORDER_PDF',
+      payload: { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'user-1' }, mode },
+      status: BackgroundJobStatus.SUCCEEDED,
+      result: { artifactName: 'wrong-mode.pdf' },
+      lastErrorCode: null,
+    });
+    await expect(waitForOrderPdfJob('job-pdf', {
+      expected: { orderId: 'order-1', actorId: 'user-1', workOrderVersion: 3, mode: expectedMode },
+    })).resolves.toEqual({ status: 'failed', errorCode: 'JobNotFound' });
+  });
+
+  it('rejects unknown modes before loading order data', async () => {
+    await expect(handleOrderPdfJob({ payload: {
+      orderId: 'order-1', expectedWorkOrderVersion: 3,
+      actor: { id: 'user-1', role: Role.ADMIN },
+      baseUrl: 'https://erp.example.com', mode: 'unknown',
+    } } as never)).rejects.toMatchObject({ name: 'InvalidOrderPdfJobPayloadError' });
+    expect(getOrderForPrintMock).not.toHaveBeenCalled();
+  });
   it('enqueues heavy work with actor/order binding', async () => {
     enqueueBackgroundJobMock.mockResolvedValue({
       job: { id: 'job-pdf' },

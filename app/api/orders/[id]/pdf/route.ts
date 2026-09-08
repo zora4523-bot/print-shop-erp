@@ -32,6 +32,12 @@ export async function GET(_req: Request, ctx: Params) {
     // download manager / devtools instead of a silent empty file.
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  const requestUrl = new URL(_req.url);
+  const modes = requestUrl.searchParams.getAll('mode');
+  const mode = modes[0] ?? 'order';
+  if (modes.length > 1 || (mode !== 'order' && mode !== 'tasks')) {
+    return NextResponse.json({ error: 'Invalid print mode' }, { status: 400 });
+  }
   const { id } = await ctx.params;
   const baseUrl = await derivePublicBaseUrl();
   const order = await getOrderForPrint(
@@ -56,6 +62,7 @@ export async function GET(_req: Request, ctx: Params) {
         expectedWorkOrderVersion: order.workOrderVersion,
         actor: { id: session.user.id, role: session.user.role },
         baseUrl,
+        mode,
       }));
     const result = await waitForOrderPdfJob(jobId, {
       timeoutMs: Number(process.env.PDF_JOB_WAIT_MS) || 10_000,
@@ -64,6 +71,7 @@ export async function GET(_req: Request, ctx: Params) {
         orderId: id,
         actorId: session.user.id,
         workOrderVersion: order.workOrderVersion,
+        mode,
       },
     });
     if (result.status === 'timeout') {
@@ -79,7 +87,7 @@ export async function GET(_req: Request, ctx: Params) {
         title: 'PDF 生成失败',
         message: `错误码：${result.errorCode ?? 'UnknownError'}。请点击下方按钮重新生成。`,
         status: 500,
-        retryUrl: new URL(_req.url).pathname,
+        retryUrl: pdfRetryUrl(_req.url),
       });
     }
     try {
@@ -89,13 +97,13 @@ export async function GET(_req: Request, ctx: Params) {
         title: 'PDF 产物不可用',
         message: '生成结果已过期或被清理，请点击下方按钮重新生成。',
         status: 500,
-        retryUrl: new URL(_req.url).pathname,
+        retryUrl: pdfRetryUrl(_req.url),
       });
     }
   } else {
     try {
       const { name: factoryName } = await getSetting('factory_name');
-      const html = await buildPrintHtml(order, { factoryName });
+      const html = await buildPrintHtml(order, { factoryName, mode });
       pdf = await renderHtmlToPdf({ html });
     } catch (err) {
       // Most likely cause here is Chromium not yet installed on the
@@ -143,7 +151,7 @@ export async function GET(_req: Request, ctx: Params) {
       title: '工单版本已更新',
       message: '生成期间工单已升版，旧 PDF 已丢弃。请重新生成当前版。',
       status: 409,
-      retryUrl: new URL(_req.url).pathname,
+      retryUrl: pdfRetryUrl(_req.url),
     });
   }
 
@@ -151,17 +159,19 @@ export async function GET(_req: Request, ctx: Params) {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)),
+      'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order, mode)),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',
     },
   });
 }
 
-function pdfRetryUrl(requestUrl: string, jobId: string): string {
+function pdfRetryUrl(requestUrl: string, jobId?: string): string {
   const url = new URL(requestUrl);
+  const mode = url.searchParams.get('mode');
   url.search = '';
-  url.searchParams.set('jobId', jobId);
+  if (mode === 'tasks') url.searchParams.set('mode', mode);
+  if (jobId) url.searchParams.set('jobId', jobId);
   return `${url.pathname}${url.search}`;
 }
 

@@ -1,11 +1,9 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import Decimal from 'decimal.js';
 import {
   PieceworkOperationType,
-  ProductionOperationStatus,
   Role,
 } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -14,7 +12,6 @@ import { getWorkerOrderDetail } from '@/lib/worker-portal';
 import { orderStatusZh } from '@/lib/order/log-format';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
-import { StatusBadge } from '@/components/ui-business';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
@@ -22,7 +19,8 @@ import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { formatMoney } from '@/lib/dashboard/format';
-import { PRODUCTION_OPERATION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { WorkerOrderTaskList } from '@/components/business/production/WorkerOrderTaskList';
+import { productionOperationPassCount } from '@/lib/production/operation-quantity';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -61,7 +59,9 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
     <div className="min-w-0 space-y-5">
       <header className="worker-wrap-anywhere min-w-0 space-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="font-sans text-sm tabular-nums">{order.orderNo}</span>
+          <span className="font-sans text-sm tabular-nums">
+            {order.orderNo} · v{order.workOrderVersion}
+          </span>
           <Badge variant="outline">{orderStatusZh(order.status)}</Badge>
           {order.isUrgent ? <UrgentBadge /> : null}
         </div>
@@ -86,80 +86,71 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {order.productionOperations.length > 0 ? (
-        <section className="space-y-3" aria-labelledby="operation-heading">
-          <h2 id="operation-heading" className="text-sm font-semibold">
-            本岗位计件工序
-          </h2>
-          {order.productionOperations.map((operation) => {
+      <WorkerOrderTaskList
+        reporterName={user.displayName}
+        laneLabel={order.productionOperations[0]
+          ? OPERATION_LABELS[order.productionOperations[0].operationType]
+          : '共享进度报工'}
+        operations={order.productionOperations.map((operation) => {
           const completed = operation.reports.reduce(
             (sum, report) => sum.plus(report.reportedCompletedQty),
             new Decimal(operation.carriedCompletedQty),
           );
+          const planned = new Decimal(operation.plannedQty).div(
+            productionOperationPassCount(
+              operation.operationType, operation.sources,
+            ),
+          );
           const myAmount = operation.reports
             .filter((report) => report.reporterId === user.id)
-            .reduce(
-              (sum, report) => sum.plus(report.amount),
-              new Decimal(0),
-            );
-          return (
-            <Link
-              key={operation.id}
-              href={`/worker/tasks/${operation.id}`}
-              className="block min-h-11 rounded-xl border bg-card p-4 shadow-sm hover:bg-muted/40"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <strong>{OPERATION_LABELS[operation.operationType]}</strong>
-                <OperationStatusBadge status={operation.status} />
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                已报合格 {completed.toString()} · 计划计价单位{' '}
-                {operation.plannedQty.toString()}
-              </p>
-              <p className="mt-1 font-sans text-sm tabular-nums">
-                我的已报计件 {formatMoney(myAmount)}
-              </p>
-            </Link>
+            .reduce((sum, report) => sum.plus(report.amount), new Decimal(0));
+          const groups = operation.sources.flatMap((source) =>
+            source.packagingGroup ? [source.packagingGroup] : [],
           );
-          })}
-        </section>
-      ) : null}
-
-      {order.productionProgressSteps.length > 0 ? (
-        <section className="space-y-3" aria-labelledby="progress-heading">
-          <div>
-            <h2 id="progress-heading" className="text-sm font-semibold">
-              共享生产进度
-            </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              所有师傅可报，仅推进进度，不计入工资。
-            </p>
-          </div>
-          {order.productionProgressSteps.map((step) => {
-            const completed = step.reports.reduce(
-              (sum, report) => sum.plus(report.completedQty),
-              new Decimal(step.carriedCompletedQty),
-            );
-            return (
-              <Link
-                key={step.id}
-                href={`/worker/tasks/${step.id}`}
-                className="block min-h-11 rounded-xl border bg-card p-4 shadow-sm hover:bg-muted/40"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <strong>{step.craftName}</strong>
-                  <OperationStatusBadge status={step.status} />
-                  <Badge variant="outline">不计薪</Badge>
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  #{step.orderItem.sequence} · {step.orderItem.name} · 已报合格{' '}
-                  {completed.toString()} / {step.plannedQty.toString()}
-                </p>
-              </Link>
-            );
-          })}
-        </section>
-      ) : null}
+          return {
+            id: operation.id,
+            title: groups.length > 0
+              ? groups.map((group) =>
+                `包装组 #${group.sequence}${group.name ? ` · ${group.name}` : ''}`,
+              ).join('、')
+              : OPERATION_LABELS[operation.operationType],
+            sources: operation.sources.flatMap((source) => {
+              if (source.packagingGroup) {
+                return source.packagingGroup.lines.map((line) =>
+                  `#${line.orderItem.sequence} · ${line.orderItem.name} · 每袋 ${line.unitsPerBag} 个`,
+                );
+              }
+              return source.orderItem
+                ? [`#${source.orderItem.sequence} · ${source.orderItem.name}`]
+                : [];
+            }),
+            status: operation.status,
+            planned: planned.toString(),
+            completed: completed.toString(),
+            remaining: Decimal.max(planned.minus(completed), 0).toString(),
+            unit: operation.operationType === PieceworkOperationType.PACKING ? '袋' : '个',
+            myAmount: formatMoney(myAmount),
+          };
+        })}
+        progressSteps={order.productionProgressSteps.map((step) => {
+          const completed = step.reports.reduce(
+            (sum, report) => sum.plus(report.completedQty),
+            new Decimal(step.carriedCompletedQty),
+          );
+          return {
+            id: step.id,
+            title: step.craftName,
+            sources: [`#${step.orderItem.sequence} · ${step.orderItem.name}`],
+            status: step.status,
+            planned: step.plannedQty.toString(),
+            completed: completed.toString(),
+            remaining: Decimal.max(
+              new Decimal(step.plannedQty).minus(completed), 0,
+            ).toString(),
+            unit: '个',
+          };
+        })}
+      />
 
       <div className="space-y-3">
         {order.items.map((item) => (
@@ -196,18 +187,5 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
         ))}
       </div>
     </div>
-  );
-}
-
-function OperationStatusBadge({
-  status,
-}: {
-  status: ProductionOperationStatus;
-}) {
-  const definition = PRODUCTION_OPERATION_STATUS_REGISTRY[status];
-  return (
-    <StatusBadge tone={definition.tone} dot={definition.dot}>
-      {definition.label}
-    </StatusBadge>
   );
 }

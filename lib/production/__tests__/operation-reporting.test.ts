@@ -119,8 +119,8 @@ function accountFixture(overrides: Record<string, unknown> = {}) {
 }
 
 function publishedBook(
-  operationType = PieceworkOperationType.PARTIAL,
-  unit = PieceworkRateUnit.PER_PASS,
+  operationType: PieceworkOperationType = PieceworkOperationType.PARTIAL,
+  unit: PieceworkRateUnit = PieceworkRateUnit.PER_PASS,
 ) {
   return {
     id: 'book-1',
@@ -279,6 +279,35 @@ describe('reportProductionOperation', () => {
       }),
       select: { id: true, claimedAt: true },
     });
+  });
+
+  it.each([
+    { reporterId: 'packer-2', firstReporterId: 'foil-worker', firstOperationId: 'foil-operation' },
+    { reporterId: 'packer-2', firstReporterId: 'packer-1', firstOperationId: 'operation-1' },
+  ])('首次开工归 $firstReporterId 后，$reporterId 仍可独立打包计薪', async ({ reporterId, firstReporterId, firstOperationId }) => {
+    const reporter = { id: reporterId, role: Role.WORKER };
+    dbMock.user.findUnique.mockResolvedValue(accountFixture({ id: reporterId, workerType: WorkerType.PACKER, machineType: null }));
+    arrangeOperation(operationFixture({
+      operationType: PieceworkOperationType.PACKING,
+      unit: PieceworkRateUnit.PER_BAG,
+      plannedQty: new Decimal(20),
+      status: ProductionOperationStatus.IN_PROGRESS,
+      order: { id: 'order-1', orderNo: 'GD-1', status: OrderStatus.PACKING, scheduledAt: new Date('2026-08-27T08:00:00.000Z'), workOrderVersion: 1 },
+      sources: [{ sourceType: 'PACKAGING_GROUP', sourceQty: new Decimal(20), orderItemId: null, packagingGroupId: 'group-1', orderItem: null, packagingGroup: { id: 'group-1', actualBagCount: 20 } }],
+    }));
+    dbMock.pieceworkPriceBook.findMany.mockResolvedValue([publishedBook(PieceworkOperationType.PACKING, PieceworkRateUnit.PER_BAG)]);
+    dbMock.productionReport.aggregate.mockResolvedValue({ _sum: { reportedCompletedQty: new Decimal(10), defectQty: null, reworkQty: null } });
+    dbMock.productionScanClaim.findUnique.mockImplementation(async ({ where }) => where.orderId_workOrderVersion ? {
+      id: 'first-claim', orderId: 'order-1', workOrderVersion: 1,
+      operationId: firstOperationId, progressStepId: null,
+      reporterId: firstReporterId, idempotencyKey: 'first-scan-other-key', claimedAt: NOW,
+    } : null);
+    await expect(reportProductionOperation(reportInput({ completedQty: 5, defectQty: 0, reworkQty: 0, workOrderProgressQuantity: 50 }), reporter)).resolves.toMatchObject({
+      completedAggregate: '15', amount: '0.04', operationStatus: ProductionOperationStatus.IN_PROGRESS,
+    });
+    expect(dbMock.productionReport.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reporterId, reportedCompletedQty: '5', chargeableQty: '5', amount: '0.04' }) }));
+    expect(dbMock.productionWorkOrderProgress.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reporterId, stage: 'PACKING', workOrderProgressQuantity: '50' }) }));
+    expect(dbMock.productionScanClaim.create).not.toHaveBeenCalled();
   });
 
   it('按工单总数量硬拒绝单道工序超报', async () => {

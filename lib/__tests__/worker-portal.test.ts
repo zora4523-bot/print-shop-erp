@@ -177,6 +177,14 @@ describe('worker order visibility', () => {
       fileType: 'IMAGE',
     });
     expect(detailQuery.select.productionProgressSteps.where).toBeUndefined();
+    expect(detailQuery.select.productionOperations.select.sources.select).toMatchObject({
+      orderItem: { select: { sequence: true, name: true, frontFoilColors: true, backFoilColors: true } },
+      packagingGroup: { select: {
+        sequence: true,
+        name: true,
+        lines: { select: { unitsPerBag: true, orderItem: { select: { sequence: true, name: true } } } },
+      } },
+    });
   });
 
   it('详情只返回当前工单代次，仅有历史代次时拒绝可见', async () => {
@@ -221,6 +229,22 @@ describe('worker order visibility', () => {
     expect(visibilitySql.strings.join('')).toContain(
       'FROM "ProductionProgressStep" AS progress',
     );
+  });
+
+  it('当前版已取消任务不再成为扫码选择项', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'order-1', workOrderVersion: 3,
+      productionOperations: [
+        { id: 'pack-cancelled', workOrderVersion: 3, status: ProductionOperationStatus.CANCELLED },
+        { id: 'pack-current', workOrderVersion: 3, status: ProductionOperationStatus.PENDING },
+      ],
+      productionProgressSteps: [
+        { id: 'progress-cancelled', workOrderVersion: 3, status: ProductionOperationStatus.CANCELLED },
+      ],
+    });
+    await expect(getWorkerOrderDetail('order-1', packer)).resolves.toMatchObject({
+      productionOperations: [{ id: 'pack-current' }], productionProgressSteps: [],
+    });
   });
 });
 

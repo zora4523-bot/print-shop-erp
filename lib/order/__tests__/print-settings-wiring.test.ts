@@ -21,7 +21,7 @@ describe('print factory-name wiring', () => {
     expect(html).toContain(
       "import { OrderPrintLayout } from './print-layout'",
     );
-    expect(html).toContain("import type { PrintOrder } from './print-types'");
+    expect(html).toMatch(/import type \{[^}]*\bPrintOrder\b[^}]*\} from '\.\/print-types'/);
     expect(view).toContain("from './print-types'");
     expect(layout).toContain("from './print-types'");
     expect([html, view, layout].join('\n')).not.toContain(
@@ -33,22 +33,20 @@ describe('print factory-name wiring', () => {
     const page = source('app/print/orders/[id]/page.tsx');
 
     expect(page).toContain("getSetting('factory_name')");
-    expect(page).toContain(
-      '<OrderPrintLayout order={order} factoryName={factoryName} />',
-    );
+    expect(page).toMatch(/<OrderPrintLayout\s+[^>]*order=\{order\}[^>]*factoryName=\{factoryName\}/);
   });
 
   it('同步 PDF 读取当前厂名并传入静态 HTML', () => {
     const route = source('app/api/orders/[id]/pdf/route.ts');
 
     expect(route).toContain("getSetting('factory_name')");
-    expect(route).toContain('buildPrintHtml(order, { factoryName })');
+    expect(route).toMatch(/buildPrintHtml\(order, \{[^}]*\bfactoryName\b/);
   });
 
   it('后台 PDF 任务在执行时读取当前厂名', () => {
     const job = source('lib/background-jobs/pdf.ts');
 
     expect(job).toContain("getSetting('factory_name')");
-    expect(job).toContain('buildPrintHtml(order, { factoryName })');
+    expect(job).toMatch(/buildPrintHtml\(order, \{[^}]*\bfactoryName\b/);
   });
 });

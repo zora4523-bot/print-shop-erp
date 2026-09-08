@@ -88,7 +88,7 @@ describe('high-risk status registry consumers', () => {
         'PRODUCTION_OPERATION_STATUS_REGISTRY',
       ],
       [
-        'app/(worker)/worker/orders/[id]/page.tsx',
+        'components/business/production/WorkerOrderTaskList.tsx',
         'PRODUCTION_OPERATION_STATUS_REGISTRY',
       ],
       [

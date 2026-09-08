@@ -121,6 +121,20 @@ describe('/wo/[orderNo] printed QR', () => {
     expect(redirectMock).not.toHaveBeenCalled();
   });
 
+  it('主码只有一个待报工任务时直达该任务', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'packer-1', role: Role.WORKER } });
+    resolveWorkerScanMock.mockResolvedValue({ orderId: 'order-1', workOrderVersion: 3, defaultTaskId: 'pack-2', requestedTaskAllowed: true });
+    await expect(renderPage({ version: '3' })).rejects.toBe(STOP);
+    expect(redirectMock).toHaveBeenCalledWith('/worker/tasks/pack-2');
+  });
+
+  it.each(['多个待报工任务', '全部工序已完成'])('主码%s时进入工单选择页，不默选第一条', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'packer-1', role: Role.WORKER } });
+    resolveWorkerScanMock.mockResolvedValue({ orderId: 'order-1', workOrderVersion: 3, defaultTaskId: null, requestedTaskAllowed: true });
+    await expect(renderPage({ version: '3' })).rejects.toBe(STOP);
+    expect(redirectMock).toHaveBeenCalledWith('/worker/orders/order-1');
+  });
+
   it('管理员扫当前版本头部码仍进入管理端订单', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },

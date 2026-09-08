@@ -11,6 +11,7 @@ function renderHarness() {
     setContent: vi.fn().mockResolvedValue(undefined),
     waitForFunction: vi.fn().mockResolvedValue(undefined),
     emulateMediaType: vi.fn().mockResolvedValue(undefined),
+    evaluate: vi.fn().mockResolvedValue('ready'),
     pdf: vi.fn().mockResolvedValue(Uint8Array.from([1, 2, 3])),
     close: vi.fn().mockResolvedValue(undefined),
   } as unknown as Page;
@@ -22,6 +23,14 @@ function renderHarness() {
 }
 
 describe('renderHtmlToPdf', () => {
+  it.each(['overflow', 'unprepared', 'pending'])('rejects unverified pagination (%s) instead of exporting clipped content', async (state) => {
+    const { browser, page } = renderHarness();
+    vi.mocked(page.evaluate).mockResolvedValue(state);
+    await expect(renderHtmlToPdf({ html: '<html></html>', browser }))
+      .rejects.toMatchObject({ name: 'PrintLayoutOverflowError' });
+    expect(page.pdf).not.toHaveBeenCalled();
+    expect(page.close).toHaveBeenCalled();
+  });
   it('waits for print readiness and enforces the A4 color-print contract', async () => {
     const { browser, page } = renderHarness();
 

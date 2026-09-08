@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
   PieceworkOperationType,
@@ -69,6 +70,9 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
     return (
       <div className="min-w-0 space-y-5">
         <header className="worker-wrap-anywhere min-w-0 space-y-1">
+          <Link href={`/worker/orders/${operation.orderId}`} className="inline-flex min-h-11 items-center text-sm underline underline-offset-4">
+            返回工单选择工序
+          </Link>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="font-sans text-sm tabular-nums">
               {operation.orderNo}
@@ -78,6 +82,11 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           </div>
           <h1 className="text-lg font-semibold">
             {OPERATION_LABELS[operation.operationType]}
+            {operation.operationType === PieceworkOperationType.PACKING
+              ? operation.sources.flatMap((source) => source.packagingGroup
+                ? [` · 包装组 #${source.packagingGroup.sequence}`]
+                : []).join('')
+              : ''}
           </h1>
           {operation.customName ? (
             <p className="text-sm font-semibold">{operation.customName}</p>
@@ -100,8 +109,12 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           <section className="rounded-xl border bg-card p-4 shadow-sm">
             <h2 className="mb-1 text-sm font-semibold">扫码报工</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              累计合格 {operation.completedQty} / {operation.plannedCompletedQty}
+              报工人：{user.displayName} · 累计合格 {operation.completedQty} / {operation.plannedCompletedQty}
+              {' · '}本次提交的计件工资归本人
             </p>
+            {operation.operationType === PieceworkOperationType.PACKING ? (
+              <p className="mb-3 text-sm">剩余 {remainingQty} 袋</p>
+            ) : null}
             <OperationReportForm
               operationId={operation.id}
               idempotencyKey={randomUUID()}
@@ -194,6 +207,13 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
                 <p className="mt-1 text-xs text-muted-foreground">
                   计划 {source.packagingGroup.actualBagCount} 袋
                 </p>
+                <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  {source.packagingGroup.lines.map((line) => (
+                    <li key={line.orderItem.sequence}>
+                      #{line.orderItem.sequence} · {line.orderItem.name} · 每袋 {line.unitsPerBag} 个
+                    </li>
+                  ))}
+                </ul>
               </article>
             ) : (
               <p key={index} className="text-sm text-muted-foreground">
@@ -215,6 +235,9 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
     return (
       <div className="min-w-0 space-y-5">
         <header className="worker-wrap-anywhere min-w-0 space-y-1">
+          <Link href={`/worker/orders/${progress.orderId}`} className="inline-flex min-h-11 items-center text-sm underline underline-offset-4">
+            返回工单选择工序
+          </Link>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="font-sans text-sm tabular-nums">
               {progress.orderNo}

@@ -60,6 +60,11 @@ type PrintOperationRow = {
       frontFoilColors: string[];
       backFoilColors: string[];
     };
+    packagingGroup?: null | {
+      sequence: number;
+      name: string | null;
+      lines: Array<{ orderItem: { sequence: number } }>;
+    };
   }>;
   reports: Array<{
     reportedCompletedQty: { toString(): string };
@@ -124,11 +129,34 @@ async function buildCurrentProductionSteps(input: {
         new Decimal(0),
       );
       const latestReport = operation.reports.at(-1);
+      const scopes = operation.sources.flatMap((source) => {
+        if (source.packagingGroup) {
+          const group = source.packagingGroup;
+          const items = [...new Set(group.lines.map((line) => line.orderItem.sequence))];
+          return [
+            `包装组 ${group.sequence}${group.name ? ` · ${group.name}` : ''}${items.length ? ` · 图 ${items.join('、')}` : ''}`,
+          ];
+        }
+        return [];
+      });
+      if (!singleItem) {
+        // One operation can cover all 50 styles. Repeating every full name in
+        // a single table row can exceed A4; figure references keep the scope
+        // complete while names remain on the item sheet and scan detail.
+        const itemSequences = [...new Set(operation.sources.flatMap((source) =>
+          !source.packagingGroup && source.orderItem
+            ? [source.orderItem.sequence]
+            : [],
+        ))].sort((left, right) => left - right);
+        if (itemSequences.length > 0) scopes.push(`图 ${itemSequences.join('、')}`);
+      }
       return {
         id: operation.id,
         source: 'OPERATION',
         itemSequence: singleItem?.sequence ?? null,
         itemName: singleItem?.name ?? null,
+        scopeLabel: [...new Set(scopes)].join('；') || null,
+        quantityUnit: operation.operationType === PieceworkOperationType.PACKING ? '袋' : '个',
         craftName: OPERATION_LABELS[operation.operationType],
         plannedQty: new Decimal(operation.plannedQty.toString())
           .div(passCount)
@@ -167,6 +195,7 @@ async function buildCurrentProductionSteps(input: {
           source: 'PROGRESS',
           itemSequence: step.orderItem.sequence,
           itemName: step.orderItem.name,
+          quantityUnit: '个',
           craftName: step.craftName,
           plannedQty: new Decimal(step.plannedQty.toString()).toNumber(),
           completedQty: completedQty.toNumber(),
@@ -252,6 +281,16 @@ export async function getOrderForPrint(
           sources: {
             orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             select: {
+              packagingGroup: {
+                select: {
+                  sequence: true,
+                  name: true,
+                  lines: {
+                    orderBy: { orderItem: { sequence: 'asc' } },
+                    select: { orderItem: { select: { sequence: true } } },
+                  },
+                },
+              },
               orderItem: {
                 select: {
                   sequence: true,

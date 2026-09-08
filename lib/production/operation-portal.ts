@@ -12,6 +12,7 @@ import {
   OperationReportingError,
 } from './operation-reporting';
 import { operationTypeForReporterAccount } from './reporter-operation-lane';
+import { productionOperationPassCount } from './operation-quantity';
 
 export type ReporterOperationListItem = {
   id: string;
@@ -60,6 +61,10 @@ export type ReporterOperationDetail = ReporterOperationListItem & {
       sequence: number;
       name: string | null;
       actualBagCount: number;
+      lines: Array<{
+        unitsPerBag: number;
+        orderItem: { sequence: number; name: string };
+      }>;
     };
   }>;
 };
@@ -190,28 +195,6 @@ export async function getReporterOperationType(actor: {
   return operationType;
 }
 
-function passCountForSources(
-  operationType: PieceworkOperationType,
-  sources: Array<{
-    orderItem: null | {
-      frontFoilColors: string[];
-      backFoilColors: string[];
-    };
-  }>,
-): number {
-  if (operationType !== PieceworkOperationType.PARTIAL) return 1;
-  const passCounts = new Set(
-    sources
-      .map((source) =>
-        source.orderItem
-          ? source.orderItem.frontFoilColors.length +
-            source.orderItem.backFoilColors.length
-          : 0,
-      )
-      .filter((count) => count > 0),
-  );
-  return passCounts.size === 1 ? [...passCounts][0]! : 1;
-}
 
 function workOrderProgressForOperation(
   operationType: PieceworkOperationType,
@@ -334,7 +317,7 @@ export async function listProductionOperationsForReporter(
         operation.workOrderVersion === operation.order.workOrderVersion,
     )
     .map((operation) => {
-    const passCount = passCountForSources(
+    const passCount = productionOperationPassCount(
       operation.operationType,
       operation.sources,
     );
@@ -447,6 +430,13 @@ export async function getProductionOperationForReporter(
               sequence: true,
               name: true,
               actualBagCount: true,
+              lines: {
+                orderBy: { orderItem: { sequence: 'asc' } },
+                select: {
+                  unitsPerBag: true,
+                  orderItem: { select: { sequence: true, name: true } },
+                },
+              },
             },
           },
         },
@@ -467,7 +457,7 @@ export async function getProductionOperationForReporter(
     return null;
   }
 
-  const passCount = passCountForSources(
+  const passCount = productionOperationPassCount(
     operation.operationType,
     operation.sources,
   );

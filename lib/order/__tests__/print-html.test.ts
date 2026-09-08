@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type {
+  PrintDocumentMode,
   PrintOrder,
   PrintPackagingGroup,
 } from '../print-types';
@@ -160,8 +161,8 @@ function fixtureItems(count: number): FixtureItem[] {
   });
 }
 
-function renderPrintHtml(order: PrintOrder): Promise<string> {
-  return buildPrintHtml(order, { factoryName: TEST_FACTORY_NAME });
+function renderPrintHtml(order: PrintOrder, mode: PrintDocumentMode = 'order'): Promise<string> {
+  return buildPrintHtml(order, { factoryName: TEST_FACTORY_NAME, mode });
 }
 
 function visibleText(html: string): string {
@@ -182,7 +183,99 @@ function supplementTextByLabel(html: string, label: string): string {
 }
 
 describe('buildPrintHtml', () => {
-  it('当前代次工序优先于历史任务，打印件只输出新报工码', async () => {
+  it.each([2, 4])('%i 款普通工单保留两行短备注与图稿，不生成重复备注附页', async (itemCount) => {
+    const remark = '正反面按最终设计图对版，混装按包装组执行。\n出货前核对款号、数量和收货电话。';
+    const html = await renderPrintHtml(fixtureOrder({
+      items: fixtureItems(itemCount),
+      remark,
+    }));
+
+    expect(html).toContain(`<div class="l1 note">${remark}</div>`);
+    expect(supplementTextByLabel(html, '备注')).toBe('');
+    expect(html).not.toContain('class="sec artwork-annex"');
+    expect(html.match(/class="thumb"/g)).toHaveLength(itemCount);
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
+  });
+
+  it('两款尚无实际报工任务的主单也使用紧凑布局，为备注和收货信息留足空间', async () => {
+    const html = await renderPrintHtml(fixtureOrder({
+      orderNo: 'E2E-DASH-fb9ddbe2000a64d3-SUB-2-PRINT-REGRESSION',
+      items: fixtureItems(2).map((item) => ({ ...item, tasks: [] })),
+      remark: '正反面按最终设计图对版，混装按包装组执行。\n出货前核对款号、数量和收货电话。',
+    }));
+    expect(html).toContain('<article class="sheet dense"');
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
+    expect(html.match(/<td class="step">/g)).toHaveLength(3);
+    expect(html).not.toContain('class="task-qr"');
+    expect(html).toContain('佛山市南海区某街道 1 号');
+  });
+
+  it('普通主页保留120字三行备注，超过三行时全文进入有界附页', async () => {
+    const threeLines = `${'甲'.repeat(39)}\n${'乙'.repeat(39)}\n${'丙'.repeat(40)}`;
+    expect(threeLines).toHaveLength(120);
+    const mainHtml = await renderPrintHtml(fixtureOrder({ remark: threeLines }));
+    expect(mainHtml).toContain(`<div class="l1 note">${threeLines}</div>`);
+    expect(supplementTextByLabel(mainHtml, '备注')).toBe('');
+
+    const fourLines = '第一行\n第二行\n第三行\n第四行';
+    const annexHtml = await renderPrintHtml(fixtureOrder({ remark: fourLines }));
+    expect(supplementTextByLabel(annexHtml, '备注')).toBe(fourLines);
+  });
+
+  it('默认主单用一个主码承载五条工序，并保留完整收货信息', async () => {
+    const receiverAddress = '广东省佛山市南海区桂城街道印刷产业园 8 栋 3 楼 302 室';
+    const html = await renderPrintHtml(fixtureOrder({
+      items: fixtureItems(4),
+      productionSteps: Array.from({ length: 5 }, (_, index) => ({
+        id: `operation-${index}`,
+        source: 'OPERATION',
+        craftName: index === 0 ? '局部烫金' : '打包',
+        scopeLabel: index === 0 ? '图 1、2、3、4' : `包装组 ${index} · 图 ${index}`,
+        quantityUnit: index === 0 ? '个' : '袋',
+        plannedQty: index === 0 ? 3_000 : 25,
+        completedQty: 0,
+        defectQty: 0,
+        taskQrSvg: '<svg width="109" height="109" data-task-qr="1"></svg>',
+      })),
+      shipments: [{ id: 'shipping', sequence: 1, receiverName: '张三', receiverPhone: '13800000000', receiverAddress, lines: [] }],
+    }));
+
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
+    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(1);
+    expect(html).not.toContain('data-task-qr="1"');
+    expect(html).not.toContain('class="task-qr"');
+    expect(html.match(/<td class="step">/g)).toHaveLength(5);
+    expect(html).toContain('包装组 4 · 图 4');
+    expect(html).toContain('<td class="num">25 袋</td>');
+    expect(html).toContain(receiverAddress);
+    expect(html).toContain('<span>1 / 1</span>');
+  });
+
+  it('工序流转单根据实际二维码尺寸分页，不按15mm最小值估算', async () => {
+    const order = (size: number) => fixtureOrder({
+      items: [fixtureItem({ tasks: Array.from({ length: 6 }, (_, index) => fixtureTask({
+        id: `task-${index}`,
+        taskQrSvg: `<svg width="${size}" height="${size}" data-task="${index}"></svg>`,
+      })) })],
+    });
+    const compactCodes = await renderPrintHtml(order(70), 'tasks');
+    const actualCodes = await renderPrintHtml(order(109), 'tasks');
+    expect(compactCodes.match(/<article class="sheet"/g)).toHaveLength(1);
+    expect(actualCodes.match(/<article class="sheet"/g)).toHaveLength(2);
+    expect(actualCodes.match(/class="task-qr"/g)).toHaveLength(6);
+    expect(actualCodes.match(/data-stub-qr="1"/g)).toHaveLength(2);
+    expect(actualCodes).toContain('<span>2 / 2</span>');
+    expect(actualCodes).not.toContain('class="items"');
+  });
+
+  it('没有实际任务时工序流转单给出空状态，不伪造报工码', async () => {
+    const html = await renderPrintHtml(fixtureOrder({ items: [fixtureItem({ tasks: [] })] }), 'tasks');
+    expect(html).toContain('暂无可扫码的生产工序');
+    expect(html).not.toContain('class="task-qr"');
+    expect(html).toContain('<span>1 / 1</span>');
+  });
+
+  it('当前代次工序优先于历史任务，工序流转单只输出新报工码', async () => {
     const html = await renderPrintHtml(
       fixtureOrder({
         productionSteps: [
@@ -210,6 +303,7 @@ describe('buildPrintHtml', () => {
           }),
         ],
       }),
+      'tasks',
     );
 
     expect(html).toContain('data-current-operation-qr="1"');
@@ -472,7 +566,7 @@ describe('buildPrintHtml', () => {
       '<td colSpan="3">合　计</td><td class="num">2,000</td><td></td><td class="num">200</td>',
     );
     expect(html).toContain(
-      '<td class="step">打包</td><td class="num">200 包</td>',
+      '<td class="step">打包</td><td class="num">200 袋</td>',
     );
   });
 
@@ -504,12 +598,12 @@ describe('buildPrintHtml', () => {
       '<td colSpan="3">合　计</td><td class="num">1,200</td><td></td><td class="num">120</td>',
     );
     expect(html).toContain(
-      '<td class="step">打包</td><td class="num">120 包</td>',
+      '<td class="step">打包</td><td class="num">120 袋</td>',
     );
     expect(html).not.toContain('<td class="num">240</td>');
   });
 
-  it('流程表保留每个任务的数量、师傅和独立报工二维码', async () => {
+  it('工序流转单保留每个任务的数量、师傅和独立报工二维码', async () => {
     const items = [
       fixtureItem({
         tasks: [
@@ -532,7 +626,7 @@ describe('buildPrintHtml', () => {
         ],
       }),
     ];
-    const html = await renderPrintHtml(fixtureOrder({ items }));
+    const html = await renderPrintHtml(fixtureOrder({ items }), 'tasks');
 
     expect(html).toContain('李师傅 / 王师傅');
     expect(html).toContain(
@@ -572,7 +666,7 @@ describe('buildPrintHtml', () => {
 
     expect(visibleText(html)).toContain('图 1 · 已派工款 平烫 李师傅');
     expect(visibleText(html)).toContain('图 2 · 待派工彩印款 彩印');
-    expect(html.match(/data-stub-task-qr="1"/g)).toHaveLength(1);
+    expect(html).not.toContain('data-stub-task-qr="1"');
   });
 
   it('工序与图稿附页共同计入总页数并连续编号', async () => {
@@ -588,13 +682,11 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(html.match(/<article class="sheet(?: dense)?">/g)).toHaveLength(5);
-    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(3);
-    expect(html).toContain('<span>1 / 5</span>');
-    expect(html).toContain('<span>2 / 5</span>');
-    expect(html).toContain('<span>3 / 5</span>');
-    expect(html).toContain('<span>4 / 5</span>');
-    expect(html).toContain('<span>5 / 5</span>');
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(3);
+    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(1);
+    expect(html).toContain('<span>1 / 3</span>');
+    expect(html).toContain('<span>2 / 3</span>');
+    expect(html).toContain('<span>3 / 3</span>');
   });
 
   it('20 款工单确定拆分待补充、款式、图稿与工序附页', async () => {
@@ -605,16 +697,17 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(html.match(/<article class="sheet(?: dense)?">/g)).toHaveLength(10);
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(7);
     expect(html.match(/<section class="sec warning-annex">/g)).toHaveLength(1);
     expect(html.match(/<section class="sec item-annex">/g)).toHaveLength(2);
     expect(html.match(/<section class="sec artwork-annex">/g)).toHaveLength(2);
-    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(4);
+    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(1);
     expect(html.match(/<tr><td><span class="badge">/g)).toHaveLength(20);
     expect(html.match(/class="thumb"/g)).toHaveLength(20);
-    expect(html.match(/data-stub-task-qr="1"/g)).toHaveLength(20);
-    expect(html).toContain('<span>1 / 10</span>');
-    expect(html).toContain('<span>10 / 10</span>');
+    expect(html).not.toContain('data-stub-task-qr="1"');
+    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(7);
+    expect(html).toContain('<span>1 / 7</span>');
+    expect(html).toContain('<span>7 / 7</span>');
   });
 
   it('50 款边界不依赖 CSS 自动跨页，声明页数覆盖全部内容', async () => {
@@ -625,17 +718,18 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(html.match(/<article class="sheet(?: dense)?">/g)).toHaveLength(23);
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(16);
     expect(html.match(/<section class="sec warning-annex">/g)).toHaveLength(3);
     expect(html.match(/<section class="sec item-annex">/g)).toHaveLength(4);
     expect(html.match(/<section class="sec artwork-annex">/g)).toHaveLength(5);
-    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(10);
+    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(3);
     expect(html.match(/<tr><td><span class="badge">/g)).toHaveLength(50);
     expect(html.match(/class="thumb"/g)).toHaveLength(50);
-    expect(html.match(/data-stub-task-qr="1"/g)).toHaveLength(50);
+    expect(html).not.toContain('data-stub-task-qr="1"');
+    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(16);
     expect(html.match(/<tfoot>/g)).toHaveLength(1);
-    expect(html).toContain('<span>1 / 23</span>');
-    expect(html).toContain('<span>23 / 23</span>');
+    expect(html).toContain('<span>1 / 16</span>');
+    expect(html).toContain('<span>16 / 16</span>');
   });
 
   it('显式换行备注与 50 个长姓名师傅只在有界页眉预览，全文确定性续页', async () => {
@@ -666,8 +760,9 @@ describe('buildPrintHtml', () => {
     );
 
     const sheetCount =
-      html.match(/<article class="sheet(?: dense)?">/g)?.length ?? 0;
-    expect(sheetCount).toBeGreaterThan(50);
+      html.match(/<article class="sheet(?: dense)?"/g)?.length ?? 0;
+    expect(sheetCount).toBe(39);
+    expect(html.match(/class="flow-worker"/g)).toHaveLength(50);
     expect(html.match(/<div class="cust">客{16}…<\/div>/g)).toHaveLength(
       sheetCount,
     );
@@ -706,16 +801,16 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(html.match(/<article class="sheet(?: dense)?">/g)).toHaveLength(9);
-    expect(html).toContain('<article class="sheet dense">');
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(8);
+    expect(html).toContain('<article class="sheet dense"');
     expect(html.match(/<section class="sec warning-annex">/g)).toHaveLength(1);
     expect(html.match(/<section class="sec supplement-annex">/g)).toHaveLength(2);
     expect(html.match(/<section class="sec item-annex">/g)).toHaveLength(1);
     expect(html.match(/<section class="sec artwork-annex">/g)).toHaveLength(1);
     expect(html.match(/<section class="sec shipment-annex">/g)).toHaveLength(1);
-    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(2);
-    expect(html).toContain('<span>1 / 9</span>');
-    expect(html).toContain('<span>9 / 9</span>');
+    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(1);
+    expect(html).toContain('<span>1 / 8</span>');
+    expect(html).toContain('<span>8 / 8</span>');
   });
 
   it('物流区展示承运商中文名称，不把内部代码印给车间', async () => {

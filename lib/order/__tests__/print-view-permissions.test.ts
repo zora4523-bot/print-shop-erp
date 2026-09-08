@@ -29,6 +29,49 @@ beforeEach(() => {
 });
 
 describe('getOrderForPrint permissions', () => {
+  it('50款聚合工序只引用完整图号列表，DTO款式仍保留全部64字名称', async () => {
+    const items = Array.from({ length: 50 }, (_, index) => ({
+      id: `item-${index + 1}`,
+      sequence: index + 1,
+      name: `款${String(index + 1).padStart(2, '0')}${'长'.repeat(61)}`,
+      quantity: 1,
+      crafts: [],
+      designs: [],
+      tasks: [],
+      frontFoilColors: ['金色'],
+      backFoilColors: [],
+    }));
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'fifty-styles',
+      orderNo: 'GD-FIFTY',
+      workOrderVersion: 3,
+      createdAt: new Date('2026-09-08T00:00:00Z'),
+      items,
+      packagingGroups: [],
+      shipments: [],
+      productionProgressSteps: [],
+      productionOperations: [{
+        id: 'full-operation',
+        workOrderVersion: 3,
+        operationType: PieceworkOperationType.FULL,
+        status: ProductionOperationStatus.PENDING,
+        plannedQty: '50',
+        sources: [...items].reverse().map((orderItem) => ({ orderItem })),
+        reports: [],
+      }],
+    });
+
+    const result = await getOrderForPrint(
+      'fifty-styles', { id: 'admin-1', role: Role.ADMIN }, 'https://erp.example.com',
+    );
+
+    expect(result?.productionSteps).toHaveLength(1);
+    expect(result?.productionSteps[0]?.scopeLabel).toBe(`图 ${items.map((item) => item.sequence).join('、')}`);
+    expect(result?.productionSteps[0]?.scopeLabel?.length).toBeLessThan(160);
+    expect(result?.items.map((item) => item.name)).toEqual(items.map((item) => item.name));
+    expect(result?.items.every((item) => item.name.length === 64)).toBe(true);
+  });
+
   it('does not expose production print or PDF data to SALES', async () => {
     await expect(
       getOrderForPrint(
@@ -147,6 +190,22 @@ describe('getOrderForPrint permissions', () => {
       shipments: [],
       productionOperations: [
         {
+          id: 'packing/3',
+          workOrderVersion: 3,
+          operationType: PieceworkOperationType.PACKING,
+          status: ProductionOperationStatus.PENDING,
+          plannedQty: '25',
+          sources: [{
+            orderItem: null,
+            packagingGroup: {
+              sequence: 2,
+              name: '混款装袋',
+              lines: [{ orderItem: { sequence: 1 } }, { orderItem: { sequence: 2 } }],
+            },
+          }],
+          reports: [],
+        },
+        {
           id: 'operation/old',
           workOrderVersion: 2,
           operationType: PieceworkOperationType.PARTIAL,
@@ -253,12 +312,24 @@ describe('getOrderForPrint permissions', () => {
     expect(result?.items[0]?.tasks).toEqual([]);
     expect(result?.productionSteps).toEqual([
       expect.objectContaining({
+        id: 'packing/3',
+        source: 'OPERATION',
+        craftName: '打包',
+        scopeLabel: '包装组 2 · 混款装袋 · 图 1、2',
+        quantityUnit: '袋',
+        plannedQty: 25,
+      }),
+      expect.objectContaining({
         id: 'operation/3',
         source: 'OPERATION',
         craftName: '局部烫金',
+        itemSequence: 1,
+        itemName: '彩印烫金款',
+        scopeLabel: null,
         plannedQty: 2_000,
         completedQty: 900,
         defectQty: 2,
+        quantityUnit: '个',
       }),
       expect.objectContaining({
         id: 'progress/3',
