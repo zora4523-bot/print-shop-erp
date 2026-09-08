@@ -156,7 +156,7 @@ export async function updateChannelAction(
       return {
         status: 'error',
         message:
-          '当前 Bot ID 与该群绑定时不一致；请使用原机器人，或新建通知目标重新绑定。',
+          '机器人账号已变更，请恢复原账号或新建通知目标。',
       };
     }
     const mapped = mapPrismaError(err);
@@ -570,21 +570,21 @@ function mapTestChannelError(error: unknown): ChannelTestResult | null {
     case 'SMART_BOT_IDENTITY_MISMATCH':
       return {
         status: 'error',
-        message: '当前 Bot ID 与该群绑定时不一致；请使用原机器人，或新建通知目标重新绑定',
+        message: '机器人账号已变更，请恢复原账号或新建通知目标',
       };
     case 'SMART_BOT_WORKER_REQUIRED':
-      return { status: 'error', message: '智能机器人测试必须由后台 worker 执行' };
+      return { status: 'error', message: '测试消息暂未能发送，请稍后重试' };
     case 'SMART_BOT_WORKER_UNAVAILABLE':
       return {
         status: 'error',
-        message: '智能机器人连接尚未就绪，或检测到多个 LIGHT worker，请检查后台任务状态',
+        message: '通知机器人连接异常，请联系管理员检查运行状态后重试',
       };
     case 'CHANNEL_CONFIGURATION_INVALID':
       return { status: 'error', message: '通知目标配置不完整' };
     case 'LOG_WRITE_FAILED':
       return {
         status: 'error',
-        message: '测试推送结果未能写入日志，请检查数据库后再核对群消息',
+        message: '投递记录保存失败，请联系管理员处理，并先核对群消息',
       };
   }
 }

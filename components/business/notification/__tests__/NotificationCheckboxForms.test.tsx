@@ -168,7 +168,7 @@ describe('notification form checkbox contracts', () => {
       );
 
     const newBindingHtml = render(false);
-    expect(newBindingHtml).toContain('绑定时 Bot ID 与当前配置不一致，不可新绑');
+    expect(newBindingHtml).toContain('机器人账号已变更，请新建通知目标，不可新绑');
     expect(namedInputs(newBindingHtml, 'channelIds')[0]).toContain(
       'disabled=""',
     );

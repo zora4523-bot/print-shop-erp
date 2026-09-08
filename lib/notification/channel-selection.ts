@@ -67,6 +67,6 @@ export function notificationChannelSelectionIssueMessage(
     case 'SMART_BOT_CREDENTIALS_NOT_CONFIGURED':
       return '通知机器人配置不完整，请联系管理员补齐配置';
     case 'SMART_BOT_IDENTITY_MISMATCH':
-      return '绑定时 Bot ID 与当前配置不一致';
+      return '机器人账号已变更，请新建通知目标';
   }
 }

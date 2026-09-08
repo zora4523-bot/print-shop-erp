@@ -191,18 +191,29 @@
 已接入：`pnpm lint` 同时执行 ESLint 与 UI 文案检查，现有 `.github/workflows/quality.yml:83` 调用此命令。PR 模板新增「新增用户可见文案已对照 ui-规范 §文案」。本地检查通过；本任务未推送，不宣称远端 CI 已执行。
 
 - [门禁] `scripts/ui-copy/check.mjs:1` — TypeScript AST 识别 JSX 文本、显示属性、toast / 提示、confirm props，并追踪本地 / 导入变量、函数返回值、条件分支、switch、try/catch；日志、注释、枚举比较、隐藏表单值豁免。
-- [门禁] `scripts/ui-copy/__tests__/check.test.ts:1` — 18 个断言用例覆盖禁词、可见输入值、跨文件追踪、同名局部变量、精确豁免、日志排除、规范映射表与 lint 命令连接。
+- [门禁] `scripts/ui-copy/__tests__/check.test.ts:1` — 19 个断言用例覆盖禁词、可见输入值、跨文件追踪、同名局部变量、精确豁免、日志排除、规范映射表与 lint 命令连接。
 - [门禁扩展] `actions/owner-notifications.ts:146`、`:200` — 迁移路由 / Bot ID + Secret / LIGHT worker 提示 → 旧版目标不可编辑、机器人配置不完整或连接异常，并提供新建目标、联系管理员、重试的恢复动作；原错误状态与权限拒绝路径不变。
 - [门禁扩展] `lib/notification/channel-selection.ts:62` — 技术通道与连接参数提示 → 通知目标不可配置 / 配置不完整及处理动作。
 
 禁词表：`settledAt`、`DRAFT`、`幂等`、`快照`、`只读`、`服务端`、`迁移`、`revision`、`Salary`、`Prisma`、`同步中`、`DailyWorkerSalary`、`null`、`未同步`、`空快照`、`请确认影响范围`、`执行后会发生以下变化`、`确定吗`、`同步`、`HourlyWorkerPayroll`、`ProductionReport`、`ProductionTask`、`PER_UNIT`。
 
+通知流程额外禁词：`Bot ID`、`Secret`、`worker`、`Worker`，限定 `components/business/notification/`、`actions/owner-notifications.ts`、`lib/notification/channel-selection.ts` 的可见文案；不会把管理员诊断页面一并禁用。
+
 逐条豁免（禁止目录级放行）：
 - `app/(admin)/owner/pigsty/page.tsx` — “只读检查，不会安装扩展或修改集群配置。”；原因：管理员数据库诊断操作边界，需要区分检查与修改集群；不是普通业务流程。
 - `app/dev/showcase/page.tsx` — “终态保持中性只读；表格空态提供合法 table 行与紧凑移动形态。”；原因：仅开发环境的组件规范示例，面向开发人员说明组件契约。
 
-最终隔离验证：555 文件，549 通过、3 失败、3 跳过；5850 测试，5791 通过、4 失败、55 跳过。相对初始基线新增 36 个通过测试，无新增失败。`pnpm typecheck` 通过；`pnpm lint` 通过，0 未豁免命中，保留原有 2 个无关未使用符号警告。
+最终隔离验证：555 文件，549 通过、3 失败、3 跳过；5851 测试，5792 通过、4 失败、55 跳过。相对初始基线新增 37 个通过测试，无新增失败。`pnpm typecheck` 通过；`pnpm lint` 通过，0 未豁免命中，保留原有 2 个无关未使用符号警告。
 
+
+
+### 通知入口补查
+
+- [第三批补查] `lib/notification/channel-selection.ts:70` — “绑定时 Bot ID 与当前配置不一致” → “机器人账号已变更，请新建通知目标”；新绑定 / 现有绑定的允许条件不变。
+- [第三批补查] `actions/owner-notifications.ts:159`、`:573`、`:580` — Bot ID 和 LIGHT worker 返回提示 → 机器人账号变更、恢复原账号 / 新建目标、连接异常及联系管理员重试；测试发送拒绝条件不变。
+- [第三批补查] `components/business/notification/ChannelForm.tsx:166` — 删除“启用”旁的后果预告及重复账号异常说明；保留上方原因与恢复动作，未绑定条件简写为“绑定后可启用”。
+- [第三批补查] `components/business/notification/TestChannelButton.tsx:91`、`actions/owner-notifications.ts:576` — 排队发送 / 运行进程 / 数据库说明 → 当前是否会发送、查看投递结果和故障恢复动作；结果不明时仍先核对群消息。
+- 验证：相关 28 个测试通过；增加通知范围的禁词断言后，隔离全量得到 555 文件、5851 测试，5792 通过、55 跳过、原有 4 个失败。类型检查通过，lint 零错误、零未豁免命中，原有 2 条警告保留。旧测试只更新业务提示的显示断言，匹配校验、禁用、重新验证及授权拒绝断言保留。
 
 ## 验收证据
 

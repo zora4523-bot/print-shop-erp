@@ -88,8 +88,8 @@ export function TestChannelButton({
           title={result.mock ? '测试任务已记录' : '测试消息已排队'}
           description={
             result.mock
-              ? '当前为测试模式，后台 worker 不会向企业微信实际发送。'
-              : '智能机器人将由后台 worker 发送，请稍后刷新并查看最近推送日志。'
+              ? '当前为测试模式，不会发送群消息。'
+              : '请稍后刷新并查看投递结果。'
           }
           className="max-w-sm p-2 text-left"
         />

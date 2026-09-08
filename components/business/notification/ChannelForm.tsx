@@ -164,7 +164,7 @@ export function ChannelForm(props: Props) {
           aria-describedby={fieldErrors?.isActive ? 'isActive-error' : undefined}
         />
         <span className="min-w-0 py-2">
-          启用（关闭后该目标暂停接收推送，但保留配置）
+          启用
         </span>
       </label>
 
@@ -174,12 +174,8 @@ export function ChannelForm(props: Props) {
         </p>
       ) : null}
 
-      {isCreate || !smartBotBound || !smartBotBotMatchesConfigured ? (
-        <p className="text-xs text-muted-foreground">
-          {smartBotBound && !smartBotBotMatchesConfigured
-            ? '当前 Bot ID 不匹配，该目标不能再次启用。'
-            : '请完成群聊绑定后启用。'}
-        </p>
+      {isCreate || !smartBotBound ? (
+        <p className="text-xs text-muted-foreground">绑定后可启用。</p>
       ) : null}
 
       {state?.status === 'error' ? (

@@ -35,5 +35,34 @@
       "text": "终态保持中性只读；表格空态提供合法 table 行与紧凑移动形态。",
       "reason": "仅开发环境的组件规范示例，面向开发人员说明组件契约。"
     }
+  ],
+  "scopedBanned": [
+    {
+      "prefix": "components/business/notification/",
+      "words": [
+        "Bot ID",
+        "Secret",
+        "worker",
+        "Worker"
+      ]
+    },
+    {
+      "prefix": "actions/owner-notifications.ts",
+      "words": [
+        "Bot ID",
+        "Secret",
+        "worker",
+        "Worker"
+      ]
+    },
+    {
+      "prefix": "lib/notification/channel-selection.ts",
+      "words": [
+        "Bot ID",
+        "Secret",
+        "worker",
+        "Worker"
+      ]
+    }
   ]
 }

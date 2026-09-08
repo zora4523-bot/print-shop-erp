@@ -106,7 +106,7 @@ describe('SettingsForm management notification routing', () => {
       />,
     );
 
-    expect(html).toContain('绑定时 Bot ID 与当前配置不一致，不可新绑');
+    expect(html).toContain('机器人账号已变更，请新建通知目标，不可新绑');
     const inputs = html.match(/<input[^>]*value="smart-old"[^>]*>/g) ?? [];
     expect(inputs).toHaveLength(2);
     expect(

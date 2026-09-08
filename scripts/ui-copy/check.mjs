@@ -40,10 +40,11 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
   const found = new Map();
   const visited = new Set();
   const record = (node, text) => {
-    const words = config.banned.filter(word => new RegExp(word === 'null' ? '\\bnull\\b' : word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(text));
-    if (!words.length) return;
     const origin = node.getSourceFile();
     const originFile = context.root ? path.relative(context.root, origin.fileName).split(path.sep).join('/') : file;
+    const banned = [...config.banned, ...(config.scopedBanned ?? []).filter(rule => originFile.startsWith(rule.prefix)).flatMap(rule => rule.words)];
+    const words = banned.filter(word => new RegExp(word === 'null' ? '\\bnull\\b' : word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(text));
+    if (!words.length) return;
     if (originFile.startsWith('node_modules/') || originFile.startsWith('generated/')) return;
     if (config.exemptions.some(e => e.file === originFile && e.text === text && e.reason?.trim())) return;
     const line = origin.getLineAndCharacterOfPosition(node.getStart(origin)).line + 1;

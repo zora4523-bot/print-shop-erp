@@ -77,6 +77,6 @@ describe('notificationChannelSelectionIssue', () => {
       notificationChannelSelectionIssueMessage(
         'SMART_BOT_IDENTITY_MISMATCH',
       ),
-    ).toBe('绑定时 Bot ID 与当前配置不一致');
+    ).toBe('机器人账号已变更，请新建通知目标');
   });
 });

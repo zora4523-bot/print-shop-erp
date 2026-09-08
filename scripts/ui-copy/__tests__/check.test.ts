@@ -89,3 +89,8 @@ it('keeps every documented internal mapping in the gate and wires the required l
   const pkg = JSON.parse(readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
   expect(pkg.scripts.lint).toContain('node scripts/ui-copy/check.mjs');
 });
+
+it('blocks connection implementation terms in notification flows without banning diagnostic vocabulary globally', () => {
+  expect(inspectUiCopy('<p>后台 worker 将使用 Secret</p>', 'components/business/notification/Example.tsx')).toHaveLength(1);
+  expect(inspectUiCopy('<p>worker 运行状态</p>', 'app/(admin)/owner/diagnostics/page.tsx')).toEqual([]);
+});
