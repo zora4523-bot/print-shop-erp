@@ -363,7 +363,7 @@ function AdminOrderDecisionDashboard({
   return (
     <section
       aria-label="工单决定看板"
-      className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7"
+      className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8"
     >
       {SIGNALS.map((signal) => {
         const active = query.signal === signal.key;

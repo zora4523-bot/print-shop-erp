@@ -325,7 +325,7 @@ function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow;
         size="icon-xs"
         disabled={pending}
         aria-pressed={starred}
-        aria-label={`${starred ? '取消' : '添加'}星标：${order.customName?.trim() || '未命名工单'}`}
+        aria-label={`${starred ? '取消' : '添加'}星标：${order.customName?.trim() || '未命名工单'}（${order.orderNo}）`}
         onClick={toggle}
         className={cn(starred && 'text-warning hover:text-warning-foreground')}
       >
@@ -385,7 +385,6 @@ function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
 
 function rowSummaryClassName(order: AdminOrderWorkspaceRow): string {
   if (order.status === 'REJECTED' || order.progress.foilingOverLimit || order.progress.packingOverLimit) return 'text-destructive';
-  if (order.statusSummary?.startsWith('✓')) return 'text-success-foreground';
   if (order.fee.source === 'PENDING' || order.status === 'ON_HOLD' || order.statusSummary?.startsWith('⚠')) return 'text-warning-foreground';
   return 'text-muted-foreground';
 }

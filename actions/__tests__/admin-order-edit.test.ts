@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PERMISSIONS } from '@/lib/auth/permissions-dict';
 import { Role } from '@/generated/prisma/enums';
 
 const mocks = vi.hoisted(() => ({
@@ -36,8 +37,18 @@ describe('administrator edit actions', () => {
   it('requires permission before parsing or invoking the domain command', async () => {
     mocks.permission.mockRejectedValueOnce(new Error('无权访问'));
     await expect(saveAdminOrderEditAction(payload)).rejects.toThrow('无权访问');
-    expect(mocks.permission).toHaveBeenCalledWith('order:create');
+    expect(mocks.permission).toHaveBeenCalledWith('order:update:post-schedule');
     expect(mocks.edit).not.toHaveBeenCalled();
+  });
+  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])('rejects %s at both action entrances', async (role) => {
+    mocks.permission.mockImplementation(async (permission: keyof typeof PERMISSIONS) => {
+      if (!(PERMISSIONS[permission] as readonly Role[]).includes(role)) throw new Error('无权访问');
+      return { id: 'non-admin', role };
+    });
+    await expect(previewAdminOrderEditAction(payload)).rejects.toThrow('无权访问');
+    await expect(saveAdminOrderEditAction(payload)).rejects.toThrow('无权访问');
+    expect(mocks.edit).not.toHaveBeenCalled();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
   });
   it('rejects malformed version data without writes or cache invalidation', async () => {
     expect(

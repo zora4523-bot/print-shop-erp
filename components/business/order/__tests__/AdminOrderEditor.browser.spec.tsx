@@ -240,6 +240,22 @@ describe('administrator edit design', () => {
         ).toEqual([]);
       });
   }
+  it.each(['DRAFT', 'SUBMITTED', 'PENDING_FACTORY', 'CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'] as const)(
+    '%s displays a paper version increase only when saving creates one', async (status) => {
+      mount({ status });
+      await page.getByRole('spinbutton', { name: '数量（个）', exact: true }).fill('2000');
+      await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+      const review = page.getByRole('dialog', { name: '确认保存修改', exact: true });
+      await expect.element(review).toBeVisible();
+      if (['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(status)) {
+        await expect.element(review).toHaveTextContent('工单版本 v1 → v2');
+      } else {
+        await expect.element(review).toHaveTextContent('保留当前纸质工单版本');
+        await expect.element(review).not.toHaveTextContent('v1 → v2');
+      }
+    },
+  );
+
   it('previews changed quantities and packaging together, then confirms the server quote', async () => {
     mount();
     await page

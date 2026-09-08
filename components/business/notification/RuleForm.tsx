@@ -150,12 +150,12 @@ export function RuleForm({
           </div>
         ) : visibleChannels.length === 0 ? (
           <p className="rounded-md border border-dashed bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-            还没建任何群。请先{' '}
+            还没有智能机器人目标。请先{' '}
             <Link
               href="/owner/notifications/channels/new"
               className="font-medium underline"
             >
-              新建群
+              新建智能机器人目标
             </Link>
             。
           </p>

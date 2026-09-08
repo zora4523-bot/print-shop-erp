@@ -3,7 +3,7 @@ import { SlowLoadingHint } from '@/components/ui-business';
 
 export function AdminOrdersWorkspaceSkeleton() {
   return (
-    <section data-slot="admin-orders-workspace-skeleton" aria-busy="true" aria-live="polite" className="@container mx-auto min-w-0 max-w-[1180px] space-y-3.5">
+    <section data-slot="admin-orders-workspace-skeleton" aria-busy="true" aria-live="polite" className="@container mx-auto min-w-0 max-w-none space-y-3.5">
       <span className="sr-only">正在加载管理端工单</span>
       <div aria-hidden="true" className="flex flex-wrap gap-2.5">
         {Array.from({ length: 8 }, (_, index) => (
@@ -27,9 +27,9 @@ export function AdminOrdersWorkspaceSkeleton() {
               <Skeleton className="h-4 w-40 max-w-full motion-reduce:animate-none" />
               <Skeleton className="h-3 w-60 max-w-full motion-reduce:animate-none" />
             </div>
-            <Skeleton className="hidden h-6 w-40 rounded-full motion-reduce:animate-none @min-[960px]:block" />
-            <Skeleton className="hidden h-4 w-24 motion-reduce:animate-none @min-[960px]:block" />
-            <Skeleton className="hidden h-8 w-20 rounded-lg motion-reduce:animate-none @min-[960px]:block" />
+            <Skeleton className="hidden h-6 w-40 rounded-full motion-reduce:animate-none 2xl:block" />
+            <Skeleton className="hidden h-4 w-24 motion-reduce:animate-none 2xl:block" />
+            <Skeleton className="hidden h-8 w-20 rounded-lg motion-reduce:animate-none 2xl:block" />
           </div>
         ))}
       </div>

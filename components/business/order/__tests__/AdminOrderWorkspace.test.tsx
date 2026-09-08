@@ -111,6 +111,7 @@ describe('AdminOrderWorkspace', () => {
     for (const label of [
       '待处理',
       '待核价',
+      '待下发生产',
       '变更申请',
       '已暂停',
       '已逾期',

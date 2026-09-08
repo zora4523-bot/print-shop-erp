@@ -39,7 +39,7 @@ function order(kind: 'pricing' | 'shipping'): InlineOrder {
   };
 }
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   document.documentElement.lang = 'zh-CN';
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   previewAction.mockResolvedValue({ status: 'success', preview: pricingPreview() });
@@ -93,8 +93,8 @@ it('pricing links preserve the current detail anchor; confirmation retains error
   await page.getByLabelText('确认金额（元）').fill('45.50');
   await page.getByLabelText('定价依据', { exact: true }).fill('工厂报价已核对');
   await page.getByRole('button', { name: '确认工厂核价', exact: true }).click();
-  expect(finalizeAction).not.toHaveBeenCalled();
-  await page.getByRole('alertdialog').getByRole('button', { name: '确认工厂核价', exact: true }).click();
+  await expect.poll(() => finalizeAction.mock.calls.length).toBe(1);
+  await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
   await expect.element(page.getByText('工单已更新，请重新预览', { exact: true })).toBeVisible();
   expect(finalizeAction).toHaveBeenCalledWith(null, expect.objectContaining({ expectedOrderRevision: 4, expectedPriceRevision: 7, orderCharges: [expect.objectContaining({ amount: '45.50', reason: '工厂报价已核对' })] }));
   await expect.element(page.getByLabelText('确认金额（元）')).toHaveValue('45.50');
@@ -129,7 +129,7 @@ it.each(['pricing', 'shipping'] as const)('%s completes and reports once after i
     await page.getByLabelText('运单号（选填）').fill('ZTO-987654');
   }
   await page.getByRole('button', { name: kind === 'pricing' ? '确认工厂核价' : '确认 1 个地址已发货', exact: true }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: kind === 'pricing' ? '确认工厂核价' : '确认发货并重算应收', exact: true }).click();
+  if (kind === 'shipping') await page.getByRole('alertdialog').getByRole('button', { name: '确认发货并重算应收', exact: true }).click();
   await expect.poll(() => action.mock.calls.length).toBe(1);
   await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
   const trigger = page.getByRole('button', { name: kind === 'pricing' ? '录入人工核价' : '录运单发货', exact: true });

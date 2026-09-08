@@ -136,7 +136,7 @@ export function OrderListRowSelection({
   return (
     <SelectionCheckbox
       checked={selection.selectedIds.has(orderId)}
-      label={`选择工单 ${displayName ?? orderNo}`}
+      label={`选择工单 ${displayName ? `${displayName}（${orderNo}）` : orderNo}`}
       onChange={() => selection.dispatch({ type: 'toggle', orderId })}
     />
   );
