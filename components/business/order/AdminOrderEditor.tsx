@@ -1069,9 +1069,9 @@ export function AdminOrderEditor(props: Props) {
                   <strong>保存后 {money(review.newTotal)}</strong>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {review.changesRevision
+                  {review.changesRevision && ['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(props.status)
                     ? `工单版本 v${props.workOrderVersion} → v${props.workOrderVersion + 1}。`
-                    : '本次仅修改资料，保留当前工单版本与费用。'}
+                    : review.changesRevision ? '保留当前纸质工单版本。' : '本次仅修改资料，保留当前工单版本与费用。'}
                 </p>
                 {review.blockers.map((text, index) => (
                   <p key={index} className="text-sm text-destructive">

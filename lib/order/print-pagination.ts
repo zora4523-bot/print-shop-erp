@@ -91,7 +91,9 @@ export function paginatePrintDocument(documentTarget: Document): boolean {
         // The summary belongs only after the final row, on the continuation.
         if (table?.tFoot) table.tFoot.remove();
         continuation.insertBefore(split, firstSection ?? continuationFooter);
-        while (source.children.length > 1 && sheet.getBoundingClientRect().height > pageHeight + 0.5) {
+        // Removing the summary alone may make the source fit. Keep at least
+        // one detail row with that summary instead of creating a totals-only page.
+        while (source.children.length > 1 && (destination.children.length === 0 || sheet.getBoundingClientRect().height > pageHeight + 0.5)) {
           destination.prepend(source.lastElementChild!);
         }
         if (sheet.getBoundingClientRect().height > pageHeight + 0.5) {

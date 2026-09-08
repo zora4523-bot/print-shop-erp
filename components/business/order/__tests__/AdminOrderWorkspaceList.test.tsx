@@ -67,7 +67,9 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).toContain('客户甲');
     expect(html).toContain('2026-09-05');
     expect(html).not.toContain('剩 8 天');
-    expect(html).not.toContain(order.orderNo);
+    expect(html.replace(/<[^>]*>/g, '')).not.toContain(order.orderNo);
+    expect(html).toContain(`aria-label="选择工单 端午定制（${order.orderNo}）"`);
+    expect(html).toContain(`aria-label="${order.isStarred ? '取消' : '添加'}星标：端午定制（${order.orderNo}）"`);
     expect(html).not.toContain('复制工单号');
     expect(html).not.toContain('业务员甲');
     expect(html).not.toContain('局部烫金');
@@ -97,7 +99,9 @@ describe('AdminOrderWorkspaceList', () => {
     const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={orders} customerFilterHrefs={{}} selectedExportRequestKey="duplicate-export" />);
     for (const order of orders) expect(html).toContain(`href="/orders/${order.id}"`);
     expect(html).toContain('未命名工单');
-    expect(html).not.toContain('OTHER-ID');
+    expect(html.replace(/<[^>]*>/g, '')).not.toContain('OTHER-ID');
+    expect(html).toContain('aria-label="选择工单 端午定制（OTHER-ID）"');
+    expect(html).toContain(`aria-label="选择工单 未命名工单（${orders[2].orderNo}）"`);
   });
 
   it('shows validated change facts in the row while preserving the request reason as fallback', () => {
@@ -119,7 +123,7 @@ describe('AdminOrderWorkspaceList', () => {
     );
 
     expect(html).toContain('data-slot="admin-order-workspace-list"');
-    expect(html).not.toContain('GD-260902-001');
+    expect(html.replace(/<[^>]*>/g, '')).not.toContain('GD-260902-001');
     expect(html).toContain('/orders?customerRef=%E5%AE%A2%E6%88%B7%E7%94%B2');
     expect(html).not.toContain('v2');
     expect(html).toContain('端午定制');

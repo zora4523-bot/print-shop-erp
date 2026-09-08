@@ -14,7 +14,7 @@ async function runEdit(
   payload: unknown,
   mode: 'preview' | 'save',
 ): Promise<AdminOrderEditResult> {
-  const actor = await requirePermission('order:create');
+  const actor = await requirePermission('order:update:post-schedule');
   const parsed = adminOrderEditSchema.safeParse(payload);
   if (!parsed.success)
     return {

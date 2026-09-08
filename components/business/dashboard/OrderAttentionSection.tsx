@@ -1,9 +1,7 @@
 import Link from 'next/link';
 import { SlowLoadingHint } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
-import { db } from '@/lib/db';
-import { buildAdminWorkspaceResultWhere } from '@/lib/order/admin-workspace';
-import { parseAdminOrderWorkspaceQuery } from '@/lib/order/admin-workspace-query';
+import { getOrderAttentionCounts } from '@/lib/dashboard/order-attention';
 
 const categories = [
   { signal: 'pending-confirmation', label: '待确认工单' },
@@ -14,11 +12,7 @@ const categories = [
 
 export async function OrderAttentionSection() {
   const actor = await requirePermission('report:all');
-  const counts = await Promise.all(categories.map(({ signal }) =>
-    db.order.count({ where: buildAdminWorkspaceResultWhere(
-      actor, parseAdminOrderWorkspaceQuery({ queue: 'all', signal }).query,
-    ) }),
-  ));
+  const counts = await getOrderAttentionCounts(actor, categories.map(({ signal }) => signal));
 
   return (
     <section aria-label="工单待办" className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4">

@@ -395,6 +395,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (charge) => charge.amount === null,
   );
 
+  const presentation = user.role === Role.ADMIN
+    ? await getAdminOrderDetailPresentation(user, {
+        id: order.id, orderNo: order.orderNo, revision: order.revision,
+        editVersion: order.editVersion, workOrderVersion: order.workOrderVersion,
+        priceRevision: 'priceRevision' in order && typeof order.priceRevision === 'number' ? order.priceRevision : undefined,
+      })
+    : null;
+  const inlineOperations = presentation?.workspace.inlineOperations;
+
   const detailSections = {
     pricing: (<>{isChargeableOrder && pricingStatus ? (
         <section
@@ -442,7 +451,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </dd>
             </div>
           </dl>
-          {canShowPricingReviewForm ? (
+          {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">
               <OrderPricingReviewForm
                 key={`pricing-review-${priceRevision ?? 'unknown'}`}
@@ -450,7 +459,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               />
             </div>
           ) : null}
-          {canReviewFulfillmentPricing ? (
+          {canReviewFulfillmentPricing && inlineOperations?.pricing !== 'fulfillment' ? (
             <FulfillmentPricingReviewForm
               key={`fulfillment-${order.id}-${order.revision}-${priceRevision}`}
               orderId={order.id}
@@ -1552,7 +1561,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </ul>
         )}
       </section></>),
-    shippingForm: (<>{canShip ? (
+    shippingForm: (<>{canShip && !inlineOperations?.shipping ? (
         <section
           id="ship-order"
           className="scroll-mt-28 space-y-3 rounded-xl border bg-card p-6 shadow-sm"
@@ -1674,11 +1683,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
   };
 
   if (user.role === Role.ADMIN) {
-    const presentation = await getAdminOrderDetailPresentation(user, {
-      id: order.id, orderNo: order.orderNo, revision: order.revision,
-      editVersion: order.editVersion, workOrderVersion: order.workOrderVersion,
-      priceRevision: 'priceRevision' in order && typeof order.priceRevision === 'number' ? order.priceRevision : undefined,
-    });
     if (!presentation) return <ActionNotice tone="warning" title="工单已更新，请刷新后查看最新资料"
       action={<Link href={`/orders/${order.id}`} className={buttonVariants({ variant: 'outline' })}>重新加载</Link>} />;
     const model = buildAdminOrderDetailModel({
@@ -1747,9 +1751,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 <Badge variant="outline">重做单</Badge>
               ) : null}
             </h1>
-            <details className="mt-2"><summary className="flex min-h-11 cursor-pointer items-center">工单信息</summary>
+            <Disclosure className="mt-2"><DisclosureSummary>工单信息</DisclosureSummary>
               <p className="admin-wrap-anywhere py-2">{order.orderNo} · v{order.workOrderVersion}</p>
-            </details>
+            </Disclosure>
             <p className="admin-wrap-anywhere text-sm text-muted-foreground">
               提交人 {order.submitter.displayName}（{roleLabel(order.submitter.role)}）
               {order.promisedDate

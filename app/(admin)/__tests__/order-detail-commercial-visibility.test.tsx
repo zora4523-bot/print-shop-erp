@@ -108,7 +108,7 @@ vi.mock('@/components/business/order/CancelOrderForm', () => ({
   CancelOrderForm: () => null,
 }));
 vi.mock('@/components/business/order/ShipOrderForm', () => ({
-  ShipOrderForm: () => null,
+  ShipOrderForm: () => <div>ship-order-form</div>,
 }));
 vi.mock('@/components/business/order/FinishOrderButton', () => ({
   FinishOrderButton: () => null,
@@ -221,6 +221,33 @@ beforeEach(() => {
 });
 
 describe('order detail commercial visibility', () => {
+  it.each(['factory', 'fulfillment', 'shipping'] as const)('does not mount a second %s form when the decision panel owns it', async (operation) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      status: operation === 'factory' ? OrderStatus.PENDING_FACTORY : OrderStatus.COMPLETED,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      pricingStatus: operation === 'shipping' ? 'ADMIN_CONFIRMED' : 'PENDING_ADMIN_CONFIRMATION',
+      priceRevision: 2,
+      pricingRevisions: [],
+    });
+    const original = getAdminOrderDetailPresentationMock.getMockImplementation()!;
+    getAdminOrderDetailPresentationMock.mockImplementation(async (actor, version) => {
+      const result = await original(actor, version);
+      return { ...result, workspace: { ...result.workspace, inlineOperations: {
+        pricing: operation === 'shipping' ? null : operation,
+        shipping: operation === 'shipping' ? { shipments: [] } : null,
+        fulfillment: null,
+      } } };
+    });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).not.toContain('factory-pricing-review');
+    if (operation !== 'shipping') expect(html).not.toContain('fulfillment-pricing-review');
+    expect(html).not.toContain('ship-order-form');
+    expect(html).toContain('工单价格状态');
+    expect(html).toContain('配送与发货记录');
+  });
+
   it.each([
     OrderSettlementType.EXTERNAL_SALES,
     OrderSettlementType.INTERNAL_SALES,
@@ -409,8 +436,8 @@ describe('order detail commercial visibility', () => {
     expect(html).not.toContain('日志沿用原价 76543.21');
     expect(html).toContain('历史生产记录');
     expect(html).toContain('张师傅');
-    expect(html).toContain('top:var(--admin-header-offset)');
-    expect(html).toContain('z-[9]');
+    expect(html).toContain('--order-detail-timeline-top:calc(var(--admin-header-offset, 0px) + 16px)');
+    expect(html).toContain('data-slot="order-page-heading"');
   });
 
   it.each([OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED])('exposes the permitted sales modification flow in %s', async (status) => {
@@ -450,7 +477,8 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('已知合计（不含待定）');
     expect(html).not.toContain('¥ 待定');
     expect(html).toContain('申请修改工单');
-    expect(html).toContain('返回工单列表');
+    expect(html).toContain('工单信息');
+    expect(html).toContain(salesDetailFixture().orderNo);
     expect(html.match(/>估<\/span>/g)).toHaveLength(2);
     expect(html).not.toContain('师傅');
     expect(html).not.toContain('生产安排');

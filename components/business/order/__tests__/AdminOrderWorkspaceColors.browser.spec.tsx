@@ -66,7 +66,7 @@ afterEach(() => {
 function fixtureRows(): AdminOrderWorkspaceRow[] {
   const ready = batchOrder({
     id: 'ready', orderNo: 'GD-260908-001', status: OrderStatus.PENDING_FACTORY,
-    statusSummary: '✓ 预检通过，可以确认',
+    statusSummary: '费用已核定，待下发检查',
     capabilities: { ...batchOrder().capabilities, confirm: true, release: false },
   });
   return [
@@ -155,7 +155,7 @@ function tokenColor(element: HTMLElement, token: string): string {
 
 function rowText(id: string, text: string): HTMLElement {
   const row = requiredElement(`[data-order-id="${id}"]`);
-  const element = [...row.querySelectorAll<HTMLElement>('p, span')].reverse().find((candidate) => candidate.textContent === text);
+  const element = [...row.querySelectorAll<HTMLElement>('p, span, time')].reverse().find((candidate) => candidate.textContent === text);
   expect(element, `${id}: ${text}`).toBeDefined();
   return element!;
 }
@@ -217,6 +217,9 @@ describe('admin order workspace restrained semantic colors', () => {
         for (const row of host.querySelectorAll<HTMLElement>('li[data-order-id]')) expectNeutralCard(row);
         const dashboard = requiredElement('[aria-label="工单决定看板"]');
         for (const card of dashboard.querySelectorAll<HTMLElement>('a')) expectNeutralCard(card);
+        const cards = [...dashboard.querySelectorAll<HTMLElement>('a')];
+        expect(cards).toHaveLength(8);
+        if (width >= 1280) expect(new Set(cards.map((card) => card.getBoundingClientRect().top)).size).toBe(1);
         expectControlsWithinViewport(width);
         expect(await commands.checkShellAccessibility('[data-testid="order-colors-fixture"]')).toEqual([]);
       });
@@ -230,11 +233,11 @@ describe('admin order workspace restrained semantic colors', () => {
       const row = requiredElement('[data-order-id="ready"]');
       const defaultBorder = getComputedStyle(row).borderTopColor;
       const defaultBackground = getComputedStyle(row).backgroundColor;
-      await page.getByRole('button', { name: 'GD-260908-001', exact: true }).hover();
+      await page.getByRole('link', { name: '中秋红包', exact: true }).first().hover();
       await expect.poll(() => getComputedStyle(row).borderTopColor).not.toBe(defaultBorder);
       expect(getComputedStyle(row).borderTopColor).not.toBe(tokenColor(row, '--primary'));
       expect(getComputedStyle(row).backgroundImage).toBe('none');
-      const checkbox = page.getByRole('checkbox', { name: '选择工单 GD-260908-001', exact: true });
+      const checkbox = page.getByRole('checkbox', { name: '选择工单 中秋红包（GD-260908-001）', exact: true });
       await checkbox.click();
       await parkPointer();
       await expect.element(checkbox).toBeChecked();
@@ -244,7 +247,7 @@ describe('admin order workspace restrained semantic colors', () => {
       expect(getComputedStyle(row).backgroundImage).toBe('none');
       await settleStyles();
       const selectedBackground = getComputedStyle(row).backgroundColor;
-      await page.getByRole('button', { name: 'GD-260908-001', exact: true }).hover();
+      await page.getByRole('link', { name: '中秋红包', exact: true }).first().hover();
       await expect.poll(() => getComputedStyle(row).borderTopColor).not.toBe(defaultBorder);
       await settleStyles();
       expect(getComputedStyle(row).backgroundColor).toBe(selectedBackground);
@@ -260,10 +263,7 @@ describe('admin order workspace restrained semantic colors', () => {
       await expect.element(checkbox).not.toBeChecked();
       await expect.poll(() => getComputedStyle(row).backgroundColor).toBe(defaultBackground);
       expect(location.hash).toBe('');
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ message: '暂时无法加载' }) }));
-      await page.getByRole('button', { name: 'GD-260908-001', exact: true }).click();
-      await expect.poll(() => location.hash).toContain('wo=GD-260908-001');
-      await expect.element(page.getByRole('dialog')).toBeVisible();
+      await expect.element(page.getByRole('link', { name: '中秋红包', exact: true }).first()).toHaveAttribute('href', '/orders/ready');
     });
 
     it(`${theme}: warnings and failures occupy numbers and labels instead of whole cards`, async () => {
@@ -283,19 +283,19 @@ describe('admin order workspace restrained semantic colors', () => {
         expectTextToken(label, '--muted-foreground');
         expectNeutralCard(card);
       }
-      expectTextToken(rowText('ready', '✓ 预检通过，可以确认'), '--success-foreground');
+      expectTextToken(rowText('ready', '费用已核定，待下发检查'), '--muted-foreground');
       expectTextToken(rowText('legacy', '待打印'), '--muted-foreground');
       expectTextToken(rowText('legacy', '急单'), '--warning-foreground');
-      expectTextToken(rowText('legacy', '09-10'), '--warning-foreground');
+      expectTextToken(rowText('legacy', '2026-09-10'), '--warning-foreground');
       expectTextToken(rowText('pricing', '待核价 · 缺少专版报价'), '--warning-foreground');
       expectTextToken(rowText('pricing', '待核价'), '--warning-foreground');
       expectTextToken(rowText('review', '⚠ 第 1 款缺 CDR'), '--warning-foreground');
       expectTextToken(rowText('hold', '等待补充设计文件'), '--warning-foreground');
       expectTextToken(rowText('rejected', '设计文件不符，已驳回'), '--destructive');
-      const overdue = rowText('overdue', '09-01 超7天');
+      const overdue = rowText('overdue', '逾期 7 天');
       expectTextToken(overdue, '--destructive');
-      expect(getComputedStyle(overdue).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
-      expect(getComputedStyle(overdue).backgroundColor).not.toBe(tokenColor(overdue, '--destructive'));
+      expectTextToken(rowText('overdue', '2026-09-01'), '--destructive');
+      expectTextToken(rowText('legacy', '剩 2 天'), '--warning-foreground');
       for (const row of host.querySelectorAll<HTMLElement>('li[data-order-id]')) expectNeutralCard(row);
     });
 

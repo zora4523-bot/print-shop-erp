@@ -159,7 +159,7 @@ pnpm test --run
 
 ### 管理端编辑预览与保存
 
-`actions/admin-order-edit.ts` 的 `previewAdminOrderEditAction` 与 `saveAdminOrderEditAction` 接收工单 ID、临时申请 UUID、三种工单版本、资料增量和款式变更。保存另需预览返回的价格版本及报价 token。权限为 ADMIN，所有原有工单状态、历史快照、金额和资源归属校验保留。
+`actions/admin-order-edit.ts` 的 `previewAdminOrderEditAction` 与 `saveAdminOrderEditAction` 接收工单 ID、临时申请 UUID、三种工单版本、资料增量和款式变更。保存另需预览返回的价格版本及报价 token。入口要求 `order:update:post-schedule`（仅 ADMIN），领域层再次检查 ADMIN；所有原有工单状态、历史快照、金额和资源归属校验保留。
 
 资料增量中未传或值为 `undefined` 的字段保留原值；空字符串或字段允许的 `null` 表示主动清空，`false` 仍表示关闭布尔选项。`fields.expectedEditVersion` 必填，`fields.promisedDate` / `fields.isUrgent` 可省略。顶层 `promisedDate` 必须为有效日历日期或 `null`（清除交期），并沿用交期审批规则。`ADD` 款式仅限 DRAFT，且需满足已有包装、模板及生产记录约束；已提交工单不能通过管理端编辑预览或保存新增款式，避免生成无法上传设计文件的新款。
 
