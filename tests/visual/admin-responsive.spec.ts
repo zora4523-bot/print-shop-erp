@@ -78,6 +78,13 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('order detail expanded records pass focused light and dark gates', async ({ page }, testInfo) => {
+    const routes = ownerRoutes(fixture).filter((route) => route.path === `/orders/${fixture.orderId}`);
+    expect(routes).toHaveLength(1);
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
   test('critical routes pass responsive and accessibility gates', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'light');
   });
@@ -550,7 +557,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'order-detail',
       path: `/orders/${data.orderId}`,
-      readyHeading: /^GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789/,
+      readyHeading: '自定义工单名称：七夕红包加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
       prepareGateState: (page) => prepareOrderDetailDesignPreview(page, data),
     },
     {
@@ -1267,22 +1274,71 @@ async function prepareOrderDetailDesignPreview(
   page: Page,
   data: WorkerUiFixture,
 ) {
-  const itemDetails = page
-    .locator('section details')
-    .filter({
-      has: page.getByText(/#1\s*·\s*超长款式名称红包烫金高级定制版/),
-    })
-    .first();
-  await expect(itemDetails).toBeVisible();
-  await itemDetails.locator('summary').click();
-  await expect(itemDetails).toHaveAttribute('open', '');
+  const records = page.getByRole('region', { name: '管理与业务记录', exact: true });
+  await expect(records.locator(':scope > details')).toHaveCount(7);
+  const sections = [
+    ['detail-design-files', '设计文件与完整工艺资料'],
+    ['detail-pricing-tools', '计价与收费维护'],
+    ['detail-delivery-records', '配送与发货记录'],
+    ['detail-production-records', '生产、用料与计件记录'],
+    ['detail-business-records', '基本信息、成本与重做'],
+    ['detail-audit-records', '完整变更与操作日志'],
+    ['detail-other-actions', '其他工单操作'],
+  ] as const;
+  for (const [id, title] of sections) {
+    const section = records.locator(`#${id}`);
+    await expect(section).toHaveAttribute('open', '');
+    const summary = section.locator(':scope > summary');
+    const content = section.locator(':scope > div');
+    await expect(summary).toHaveText(title);
+    await expect(content).toBeVisible();
+    await summary.click();
+    await expect(section).not.toHaveAttribute('open', '');
+    await expect(content).toBeHidden();
+    await summary.press('Enter');
+    await expect(section).toHaveAttribute('open', '');
+    await expect(content).toBeVisible();
+  }
+  await expect(records.locator('#detail-pricing-tools').getByRole('heading', { name: '工单价格状态', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-delivery-records').getByRole('heading', { name: '发货地址（1）', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-production-records').getByRole('heading', { name: '物料用量估算', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '基本信息', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-audit-records').getByRole('heading', { name: '修改日志', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-other-actions').getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);
 
-  const itemHeading = page.getByRole('heading', {
+  // The current detail contract keeps the style name, quantity, materials and
+  // saved processing amount in the main card; complete facts remain on demand.
+  const mainItem = page.locator(`#order-detail-item-${data.orderItemActiveId}`);
+  await expect(mainItem.getByRole('heading', {
     level: 3,
-    name: /#1\s+超长款式名称红包烫金高级定制版/,
-  });
-  await expect(itemHeading).toBeVisible();
-  const itemCard = itemDetails.locator('xpath=ancestor::li[1]');
+    name: '超长款式名称红包烫金高级定制版ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+    exact: true,
+  })).toBeVisible();
+  await expect(mainItem.getByText('1,234,567 个', { exact: true })).toBeVisible();
+  await expect(mainItem.getByText('特种珠光纸ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', { exact: true })).toBeVisible();
+  await expect(mainItem.getByText('https://example.invalid/specification/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/very-long-unbroken-value', { exact: true })).toBeVisible();
+  await expect(mainItem.getByText('¥ 152,345.57', { exact: true })).toBeVisible();
+  await expect(mainItem).not.toContainText(data.craftId);
+
+  const itemDetails = records.locator(`#detail-design-item-${data.orderItemActiveId}`);
+  await expect(itemDetails).not.toHaveAttribute('open', '');
+  const itemSummary = itemDetails.locator(':scope > summary');
+  await expect(itemSummary).toBeVisible();
+  await expect(itemSummary.getByText('展开', { exact: true })).toBeVisible();
+  await expect(itemSummary.getByText('收起', { exact: true })).toBeHidden();
+  await mainItem.getByRole('button', { name: '查看设计文件', exact: true }).click();
+  await expect(itemDetails).toHaveAttribute('open', '');
+  await expect(itemDetails).toBeFocused();
+  await expect(itemSummary.getByText('收起', { exact: true })).toBeVisible();
+  await expect(itemSummary.getByText('展开', { exact: true })).toBeHidden();
+  const designSummary = records.locator('#detail-design-files > summary');
+  await designSummary.click();
+  await expect(itemDetails).toBeHidden();
+  await designSummary.click();
+  await expect(itemDetails).toHaveAttribute('open', '');
+  await expect(itemSummary.getByText('收起', { exact: true })).toBeVisible();
+  await expect(itemSummary.getByText('展开', { exact: true })).toBeHidden();
+  const itemCard = itemDetails;
   const definition = (label: string) =>
     itemCard
       .locator('dt')

@@ -862,7 +862,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         <ol className="space-y-3">
           {order.items.map((item) => (
             <li key={item.id} className={user.role === Role.ADMIN ? "min-w-0 text-sm" : "min-w-0 rounded-lg border text-sm"}>
-              <Disclosure id={`detail-design-item-${item.id}`} className="min-w-0">
+              <Disclosure id={`detail-design-item-${item.id}`} className="group/design-item min-w-0">
                 <DisclosureSummary className="flex-wrap items-start justify-between gap-2 px-4 py-3">
                   <span className="admin-wrap-anywhere min-w-0 font-medium">
                     <span className="text-muted-foreground">#{item.sequence}</span>
@@ -881,8 +881,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
                       : item.tasks.length
                         ? ` · 历史完工 ${item.tasks.filter((task) => task.status === TaskStatus.COMPLETED).length}/${item.tasks.length} 任务`
                         : ' · 尚未生成生产工序'}
-                    <span className="ml-2 group-open:hidden">展开</span>
-                    <span className="ml-2 hidden group-open:inline">收起</span>
+                    <span className="ml-2 group-open/design-item:hidden">展开</span>
+                    <span className="ml-2 hidden group-open/design-item:inline">收起</span>
                   </span>
                 </DisclosureSummary>
               <div className={user.role === Role.ADMIN ? "space-y-3 px-4 pb-4" : "space-y-3 border-t px-4 py-4"}>
