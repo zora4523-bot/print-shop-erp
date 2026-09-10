@@ -1,5 +1,7 @@
 'use client';
 
+import type * as React from 'react';
+
 import {
   useActionState,
   useEffect,
@@ -994,23 +996,10 @@ export function OrderChangeReviewForm({
       className="space-y-2"
     >
       {preview ? (
-        <div className="space-y-2">
-          {compact ? (
-            <OrderChangeCompactPreview preview={preview} currentItems={currentItems} />
-          ) : (
-            <OrderChangePricingPreviewPanel preview={preview} currentItems={currentItems} />
-          )}
-          {!previewError ? (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={pending || previewPending || reviewCompleted}
-              onClick={loadPreview}
-            >
-              {previewPending ? '正在刷新…' : '刷新最新计价预览'}
-            </Button>
-          ) : null}
-        </div>
+        <ModificationPreviewSection {...{
+          compact, preview, currentItems, previewError,
+          pending, previewPending, reviewCompleted, loadPreview,
+        }} />
       ) : null}
       <OrderChangePreviewFeedback
         previewPending={previewPending}
@@ -1019,10 +1008,9 @@ export function OrderChangeReviewForm({
         loadPreview={loadPreview}
       />
       {compact && pendingCharges.length > 0 ? (
-        <Disclosure open={!pendingChargesVerified} className="rounded-lg border p-3">
-          <DisclosureSummary>补录运费 · {pendingCharges.length} 票</DisclosureSummary>
-          <div className="mt-3 space-y-2">{pendingChargeFields}</div>
-        </Disclosure>
+        <PendingFreightDisclosureSection {...{
+          pendingChargesVerified: pendingChargesVerified, pendingCharges: pendingCharges, pendingChargeFields: pendingChargeFields,
+        }} />
       ) : pendingChargeFields}
       <OrderChangeReviewDecisionFields
         requestId={requestId}
@@ -1038,5 +1026,57 @@ export function OrderChangeReviewForm({
         submit={submit}
       />
     </form>
+  );
+}
+
+type RenderModificationPreviewOptions = {
+  compact: boolean;
+  preview: OrderChangePricingPreview;
+  currentItems: CurrentOrderItem[];
+  previewError: string | null;
+  pending: boolean;
+  previewPending: boolean;
+  reviewCompleted: boolean;
+  loadPreview: () => void;
+};
+
+function ModificationPreviewSection({
+  compact,
+  preview,
+  currentItems,
+  previewError,
+  pending,
+  previewPending,
+  reviewCompleted,
+  loadPreview,
+}: RenderModificationPreviewOptions): React.ReactNode {
+  return (
+    <div className="space-y-2">
+      {compact ? (
+        <OrderChangeCompactPreview preview={preview} currentItems={currentItems} />
+      ) : (
+        <OrderChangePricingPreviewPanel preview={preview} currentItems={currentItems} />
+      )}
+      {!previewError ? (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending || previewPending || reviewCompleted}
+          onClick={loadPreview}
+        >
+          {previewPending ? '正在刷新…' : '刷新最新计价预览'}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function PendingFreightDisclosureSection({ pendingChargesVerified, pendingCharges, pendingChargeFields }: { pendingChargesVerified: boolean; pendingCharges: OrderChangePendingChargePreview[]; pendingChargeFields: React.ReactNode; }
+) {
+  return (
+    <Disclosure open={!pendingChargesVerified} className="rounded-lg border p-3">
+      <DisclosureSummary>补录运费 · {pendingCharges.length} 票</DisclosureSummary>
+      <div className="mt-3 space-y-2">{pendingChargeFields}</div>
+    </Disclosure>
   );
 }

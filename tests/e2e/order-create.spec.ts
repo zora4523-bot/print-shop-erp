@@ -90,9 +90,9 @@ test.describe('创建工单 — golden path', () => {
     });
     await page.getByLabel('承诺交期', { exact: true }).fill('2026-10-20');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('alertdialog')).toBeVisible();
     expect((await readSavedOrder(orderId)).facts).toEqual(before.facts);
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect
       .poll(async () => (await readSavedOrder(orderId)).order.promisedDate)
       .toContain('2026-10-20');
@@ -200,32 +200,25 @@ test.describe('创建工单 — golden path', () => {
     await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
       timeout: 45_000,
     });
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('heading', { name: customName, exact: true })).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
-    // 详情页显示了我们刚填的 customerRef 和款式名 —— 工单确实落库了。
-    // 等到 dd 元素带 customerRef 出现（Row 组件结构 <dt>客户名称/简称</dt><dd>...</dd>）。
-    await expect(page.locator('dd', { hasText: customerRef })).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(page.getByText('E2E 测试款式').first()).toBeVisible();
-    await expect(page.getByText(customName).first()).toBeVisible();
+    // 按当前详情页核对建单结果；款式信息直接展示，工单号按需展开。
+    await expect(page.getByText(customerRef, { exact: false }).first()).toBeVisible();
     const itemDetails = page
-      .locator('details')
-      .filter({ hasText: 'E2E 测试款式' })
-      .first();
-    await itemDetails.locator('summary').click();
-    await expect(itemDetails).toHaveAttribute('open', '');
+      .locator('article[id^="order-detail-item-"]')
+      .filter({ hasText: 'E2E 测试款式' });
+    await expect(itemDetails).toHaveCount(1);
     const itemFact = (label: string) =>
       itemDetails
         .locator('dt')
         .filter({ hasText: new RegExp(`^${label}$`) })
         .locator('..')
         .locator('dd');
-    await expect(itemFact('计价路线')).toHaveText('局部烫金（通版现货）');
+    await expect(itemFact('工艺')).toContainText('局部烫金');
     await expect(itemFact('规格')).toHaveText('大号封90×165');
-    await expect(itemFact('纸张')).toHaveText('160g珠光艳闪');
-    await expect(itemFact('纸张克重')).toHaveText('160 g/㎡');
+    await expect(itemFact('纸张')).toHaveText('160g珠光艳闪 · 160g');
+    await page.getByText('工单信息', { exact: true }).click();
     await expect(page.getByText(/^GD-\d{6}-\d{3}$/).first()).toBeVisible();
 
     // 标签页标题里是工单号，不是 id 前 8 位。这是唯一能验证
@@ -291,9 +284,9 @@ test.describe('创建工单 — golden path', () => {
     await page.getByLabel('收件人', { exact: true }).fill('修改后的收件人');
     await page.getByLabel('收货电话', { exact: true }).fill('13900139000');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('alertdialog')).toBeVisible();
     expect((await readSavedOrder(orderId)).facts).toEqual(before.facts);
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(page).toHaveURL(`/orders/${orderId}`);
     await expect(page.getByText(customName).first()).toBeVisible();
     const after = await readSavedOrder(orderId);
@@ -333,12 +326,12 @@ test.describe('创建工单 — golden path', () => {
     await page.getByLabel('数量（个）', { exact: true }).fill('1200');
     await page.getByLabel('包装（个/包）', { exact: true }).fill('20');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('alertdialog')).toBeVisible();
     expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
     await page.getByRole('button', { name: '再改改', exact: true }).click();
     expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(page).toHaveURL(`/orders/${orderId}`);
     const modified = await readSavedOrder(orderId);
     expect(modified.order.promisedDate).toBe(before.order.promisedDate);
@@ -371,7 +364,7 @@ test.describe('创建工单 — golden path', () => {
     await page.goto(`/orders/${orderId}/edit`);
     await page.getByLabel('承诺交期', { exact: true }).fill('2026-10-20');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(page).toHaveURL(`/orders/${orderId}`);
     await expect
       .poll(async () => (await readSavedOrder(orderId)).order.promisedDate)

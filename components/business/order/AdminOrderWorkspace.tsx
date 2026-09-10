@@ -100,40 +100,9 @@ export function AdminOrderWorkspace({
       <section className="min-w-0 space-y-2">
         <form key={JSON.stringify(params)} action="/orders" className="flex min-w-0 flex-wrap items-center gap-2 [&_input]:rounded-full [&_select]:rounded-full [&_button]:rounded-full [&_a]:rounded-full">
           {hiddenFilterInputs(params)}
-        <nav aria-label="工单队列" className="flex min-w-0 flex-wrap gap-2">
-          {QUEUES.map((queue) => {
-            const active = query.queue === queue.key && !query.signal;
-            const target = updateAdminOrderWorkspaceQuery(query, {
-              queue: queue.key,
-              signal: undefined,
-            });
-            return (
-              <Link
-                key={queue.key}
-                href={buildTableHref(
-                  '/orders',
-                  {},
-                  serializeAdminOrderWorkspaceQuery(target),
-                )}
-                prefetch={false}
-                aria-current={active ? 'page' : undefined}
-                className={cn(
-                  buttonVariants({
-                    variant: active ? 'default' : 'outline',
-                    size: 'sm',
-                  }),
-                  'min-h-10 shrink-0 rounded-full px-3.5 text-sm font-bold shadow-none',
-                  active && 'bg-foreground text-background hover:bg-foreground/90',
-                )}
-              >
-                {queue.label}
-                <span className="font-sans text-xs tabular-nums">
-                  {data.counts.queues[queue.key].toLocaleString('zh-CN')}
-                </span>
-              </Link>
-            );
-          })}
-        </nav>
+        <OrderQueuesSection {...{
+          query: query, data: data,
+        }} />
 
           <select
             name="submitterId"
@@ -347,6 +316,41 @@ export function AdminOrderWorkspace({
         }
       />
     </div>
+  );
+}
+
+function OrderQueuesSection({ query, data }: { query: AdminOrderWorkspaceQuery; data: AdminOrderWorkspacePage; }) {
+  return (
+    <nav aria-label="工单队列" className="flex min-w-0 flex-wrap gap-2">
+      {QUEUES.map((queue) => {
+        const active = query.queue === queue.key && !query.signal;
+        const target = updateAdminOrderWorkspaceQuery(query, {
+          queue: queue.key,
+          signal: undefined,
+        });
+        return (
+          <Link
+            key={queue.key}
+            href={buildTableHref('/orders', {}, serializeAdminOrderWorkspaceQuery(target))}
+            prefetch={false}
+            aria-current={active ? 'page' : undefined}
+            className={cn(
+              buttonVariants({
+                variant: active ? 'default' : 'outline',
+                size: 'sm',
+              }),
+              'min-h-10 shrink-0 rounded-full px-3.5 text-sm font-bold shadow-none',
+              active && 'bg-foreground text-background hover:bg-foreground/90',
+            )}
+          >
+            {queue.label}
+            <span className="font-sans text-xs tabular-nums">
+              {data.counts.queues[queue.key].toLocaleString('zh-CN')}
+            </span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 

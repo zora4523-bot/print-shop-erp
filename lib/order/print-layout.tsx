@@ -383,15 +383,9 @@ export function OrderPrintLayout({ order, factoryName }: Props) {
                 team={team}
                 factoryName={factoryName}
               />
-              <section className="sec supplement-annex">
-                <div className="annex-title">
-                  {supplement.label}
-                  {supplement.totalParts > 1
-                    ? `（${supplement.part} / ${supplement.totalParts}）`
-                    : ''}
-                </div>
-                <div className="supplement-text">{supplement.value}</div>
-              </section>
+              <SupplementAnnexSection {...{
+                supplement: supplement,
+              }} />
             </WorkOrderSheet>
           );
         })}
@@ -475,13 +469,9 @@ export function OrderPrintLayout({ order, factoryName }: Props) {
                 team={team}
                 factoryName={factoryName}
               />
-              <section className="sec shipment-annex">
-                <div className="annex-title">收货与快递（续）</div>
-                <ShippingBlock
-                  shipments={pageShipments}
-                  isSfCollect={order.isSfCollect}
-                />
-              </section>
+              <ShipmentAnnexSection {...{
+                pageShipments: pageShipments, order: order,
+              }} />
             </WorkOrderSheet>
           );
         })}
@@ -517,6 +507,27 @@ export function OrderPrintLayout({ order, factoryName }: Props) {
         })}
       </main>
     </>
+  );
+}
+
+function SupplementAnnexSection({ supplement }: { supplement: SupplementPage; }) {
+  return (
+    <section className="sec supplement-annex">
+      <div className="annex-title">
+        {supplement.label}
+        {supplement.totalParts > 1 ? `（${supplement.part} / ${supplement.totalParts}）` : ''}
+      </div>
+      <div className="supplement-text">{supplement.value}</div>
+    </section>
+  );
+}
+
+function ShipmentAnnexSection({ pageShipments, order }: { pageShipments: PrintShipment[]; order: PrintOrder; }) {
+  return (
+    <section className="sec shipment-annex">
+      <div className="annex-title">收货与快递（续）</div>
+      <ShippingBlock shipments={pageShipments} isSfCollect={order.isSfCollect} />
+    </section>
   );
 }
 
