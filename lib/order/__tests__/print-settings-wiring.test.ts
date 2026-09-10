@@ -37,7 +37,7 @@ describe('print factory-name wiring', () => {
   });
 
   it('同步 PDF 读取当前厂名并传入静态 HTML', () => {
-    const route = source('app/api/orders/[id]/pdf/route.ts');
+    const route = source('app/api/orders/[id]/pdf/handler.ts');
 
     expect(route).toContain("getSetting('factory_name')");
     expect(route).toMatch(/buildPrintHtml\(order, \{[^}]*\bfactoryName\b/);

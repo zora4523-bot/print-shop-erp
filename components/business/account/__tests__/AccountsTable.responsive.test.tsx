@@ -41,6 +41,10 @@ describe('AccountsTable responsive boundary', () => {
     // Mobile text + desktop title + desktop text all preserve the full value.
     expect(html.match(new RegExp(longDisplayName, 'g'))).toHaveLength(3);
     expect(html).toContain('编辑账号');
+    // 启停徽章归并到共享 ActiveStatusBadge 后，文案统一为「启用」
+    // （原「活跃」），与同页启停确认层保持一个词。
+    expect(html).toContain('启用');
+    expect(html).not.toContain('活跃');
   });
 
   it('保留用户名与姓名的正确列映射', () => {

@@ -9,6 +9,14 @@ const { auth } = NextAuth(authConfigEdge);
 export default auth((req) => {
   if (req.auth) return NextResponse.next();
 
+  // Keep the same gate for protected APIs, but never redirect downloads to HTML.
+  if (req.nextUrl.pathname.startsWith('/api/')) {
+    return NextResponse.json(
+      { error: '未登录或登录状态已失效，请重新登录' },
+      { status: 401, headers: { 'Cache-Control': 'private, no-store' } },
+    );
+  }
+
   // /login is excluded by the matcher. Preserve the requested pathname so a
   // successful login can send the user back to the page they intended to open.
   const url = new URL('/login', req.url);

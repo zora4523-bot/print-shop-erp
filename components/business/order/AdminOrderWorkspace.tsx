@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { formatMoney } from '@/lib/dashboard/format';
 import { Search, Star } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { OrderStatus } from '@/generated/prisma/enums';
@@ -17,7 +18,9 @@ import { cn } from '@/lib/utils';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PageHeader } from '@/components/ui-business';
 import { AdminOrderWorkspaceList } from './AdminOrderWorkspaceList';
+import styles from './AdminOrderWorkspace.module.css';
 
 const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
   { key: 'todo', label: '待办' },
@@ -83,25 +86,21 @@ export function AdminOrderWorkspace({
   const clearFiltersHref = buildTableHref('/orders', {}, {
     queue: query.queue === 'todo' ? undefined : query.queue,
   });
-  const exactCustomerFilterLabel = query.list.filters.customerPartyId
-    ? data.rows.find(
-        (order) => order.customer.id === query.list.filters.customerPartyId,
-      )?.customer.name ?? '已选客户'
-    : query.list.filters.customerRefExact ===
-        MISSING_ORDER_CUSTOMER_FILTER_VALUE
-      ? '未填客户'
-      : query.list.filters.customerRefExact;
+  const exactCustomerFilterLabel = selectedCustomerLabel(query, data);
 
   return (
-    <div data-slot="admin-order-workspace" style={{ backgroundColor: 'transparent' }} className="w-full min-w-0 max-w-none space-y-4">
+    <div data-slot="admin-order-workspace" style={{ backgroundColor: 'transparent' }} className={cn(styles.surface, "w-full min-w-0 max-w-none space-y-3.5")}>
+      <OrderWorkspaceHeader exportControls={exportControls} />
       <AdminOrderDecisionDashboard
         query={query}
         counts={data.counts.signals}
         billingStats={billingStats}
       />
 
-      <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 shadow-sm sm:p-4">
-        <nav aria-label="工单队列" className="flex min-w-0 gap-2 overflow-x-auto pb-1">
+      <section className="min-w-0 space-y-2">
+        <form key={JSON.stringify(params)} action="/orders" className="flex min-w-0 flex-wrap items-center gap-2 [&_input]:rounded-full [&_select]:rounded-full [&_button]:rounded-full [&_a]:rounded-full">
+          {hiddenFilterInputs(params)}
+        <nav aria-label="工单队列" className="flex min-w-0 flex-wrap gap-2">
           {QUEUES.map((queue) => {
             const active = query.queue === queue.key && !query.signal;
             const target = updateAdminOrderWorkspaceQuery(query, {
@@ -123,11 +122,12 @@ export function AdminOrderWorkspace({
                     variant: active ? 'default' : 'outline',
                     size: 'sm',
                   }),
-                  'min-h-10 shrink-0 rounded-full',
+                  'min-h-10 shrink-0 rounded-full px-3.5 text-sm font-bold shadow-none',
+                  active && 'bg-foreground text-background hover:bg-foreground/90',
                 )}
               >
                 {queue.label}
-                <span className="font-sans text-[10px] tabular-nums">
+                <span className="font-sans text-xs tabular-nums">
                   {data.counts.queues[queue.key].toLocaleString('zh-CN')}
                 </span>
               </Link>
@@ -135,9 +135,33 @@ export function AdminOrderWorkspace({
           })}
         </nav>
 
-        <form key={JSON.stringify(params)} action="/orders" className="flex min-w-0 flex-col gap-2 xl:flex-row">
-          {hiddenFilterInputs(params)}
-          <div className="relative min-w-0 flex-1">
+          <select
+            name="submitterId"
+            defaultValue={query.list.filters.submitterId ?? ''}
+            aria-label="按业务员筛选"
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 w-auto max-w-40 grow sm:grow-0"
+          >
+            <option value="">全部业务员</option>
+            {options.submitters.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select
+            name="craftId"
+            defaultValue={query.list.filters.craftIds[0] ?? ''}
+            aria-label="按工艺线筛选"
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 w-auto max-w-40 grow sm:grow-0"
+          >
+            <option value="">全部工艺线</option>
+            {options.crafts.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div className="relative ml-auto min-w-[200px] flex-1 sm:max-w-60">
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -150,6 +174,7 @@ export function AdminOrderWorkspace({
               className="pl-9"
             />
           </div>
+          <div className="flex w-full flex-wrap items-center gap-2 [&_a]:rounded-full">
           {exactCustomerFilterActive ? (
             <Link
               href={buildTableHref('/orders', params, {
@@ -175,35 +200,9 @@ export function AdminOrderWorkspace({
               defaultValue={query.list.filters.customerRef}
               placeholder="客户"
               aria-label="按客户筛选"
-              className="xl:w-40"
+              className="w-32 grow sm:grow-0"
             />
           )}
-          <select
-            name="submitterId"
-            defaultValue={query.list.filters.submitterId ?? ''}
-            aria-label="按业务员筛选"
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 xl:w-44"
-          >
-            <option value="">全部业务员</option>
-            {options.submitters.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <select
-            name="craftId"
-            defaultValue={query.list.filters.craftIds[0] ?? ''}
-            aria-label="按工艺线筛选"
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 xl:w-40"
-          >
-            <option value="">全部工艺线</option>
-            {options.crafts.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
           <Button type="submit">应用筛选</Button>
           <Link
             href={buildTableHref('/orders', {}, adminRejectedFilterParams(query))}
@@ -267,9 +266,9 @@ export function AdminOrderWorkspace({
               清除筛选
             </Link>
           ) : null}
+          </div>
         </form>
 
-        <div className="flex min-w-0 justify-end">{exportControls}</div>
 
         {issues.length > 0 ? (
           <p role="alert" className="text-xs font-medium text-destructive">
@@ -299,7 +298,7 @@ export function AdminOrderWorkspace({
         <span>
           金额合计{' '}
           <b className="font-sans text-foreground tabular-nums">
-            ¥{formatMoney(data.summary.effectiveFee)}
+            {formatMoney(data.summary.effectiveFee)}
           </b>
           {data.summary.manualPricingCount > 0 ? (
             <span>
@@ -363,7 +362,7 @@ function AdminOrderDecisionDashboard({
   return (
     <section
       aria-label="工单决定看板"
-      className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8"
+      className="flex flex-wrap gap-2.5"
     >
       {SIGNALS.map((signal) => {
         const active = query.signal === signal.key;
@@ -383,21 +382,21 @@ function AdminOrderDecisionDashboard({
             prefetch={false}
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'rounded-xl border bg-card px-4 py-3 shadow-sm transition-colors hover:border-foreground/50',
+              'flex !min-w-[104px] flex-col items-start rounded-xl border bg-card px-4 py-2.5 transition-colors hover:border-foreground/60 focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none',
               'border-border hover:border-muted-foreground/50',
               active && 'border-foreground bg-muted/40',
             )}
           >
             <span
               className={cn(
-                'block font-sans text-xl font-semibold tabular-nums',
+                'block font-sans text-xl font-extrabold tabular-nums',
                 count > 0 && signal.key === 'overdue' && 'text-destructive',
                 count > 0 && ['pending-pricing', 'pending-change', 'on-hold', 'due-today'].includes(signal.key) && 'text-warning-foreground',
               )}
             >
               {count.toLocaleString('zh-CN')}
             </span>
-            <span className="mt-0.5 block text-[11px] font-semibold text-muted-foreground">
+            <span className="mt-0.5 block text-xs font-semibold text-muted-foreground">
               {signal.label}
             </span>
           </Link>
@@ -407,7 +406,7 @@ function AdminOrderDecisionDashboard({
         href="/owner/agent-bills?status=CONFIRMED"
         prefetch={false}
         className={cn(
-          'rounded-xl border bg-card px-4 py-3 shadow-sm transition-colors hover:border-foreground/50',
+          'flex !min-w-[104px] flex-col items-start rounded-xl border bg-card px-4 py-2.5 transition-colors hover:border-foreground/60 focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none',
           'border-border hover:border-muted-foreground/50',
         )}
       >
@@ -416,9 +415,9 @@ function AdminOrderDecisionDashboard({
             'block font-sans text-base font-semibold tabular-nums',
           )}
         >
-          ¥{formatMoney(billingStats.receivableAmount)}
+          {formatMoney(billingStats.receivableAmount)}
         </span>
-        <span className="mt-0.5 block text-[11px] font-semibold text-muted-foreground">
+        <span className="mt-0.5 block text-xs font-semibold text-muted-foreground">
           待收款 · {billingStats.receivableBillCount.toLocaleString('zh-CN')} 张
         </span>
       </Link>
@@ -470,9 +469,30 @@ export function adminRejectedFilterParams(query: AdminOrderWorkspaceQuery) {
   });
 }
 
-function formatMoney(value: string): string {
-  return Number(value).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+function OrderWorkspaceHeader({ exportControls }: { exportControls: ReactNode }) {
+  return (
+      <PageHeader
+        title="工单管理"
+        className="[&_h1]:text-xl [&_h1]:font-extrabold"
+        actions={
+          <>
+            {exportControls}
+            <Link href="/orders/new" className={buttonVariants({ variant: 'outline' })}>
+              新建工单
+            </Link>
+          </>
+        }
+      />
+  );
+}
+
+function selectedCustomerLabel(query: AdminOrderWorkspaceQuery, data: AdminOrderWorkspacePage) {
+  return query.list.filters.customerPartyId
+    ? data.rows.find(
+        (order) => order.customer.id === query.list.filters.customerPartyId,
+      )?.customer.name ?? '已选客户'
+    : query.list.filters.customerRefExact ===
+        MISSING_ORDER_CUSTOMER_FILTER_VALUE
+      ? '未填客户'
+      : query.list.filters.customerRefExact;
 }

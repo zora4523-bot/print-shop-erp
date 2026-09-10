@@ -3,6 +3,7 @@
 import { Badge } from '@/components/ui/badge';
 import Decimal from 'decimal.js';
 import { CustomerPriceCalculationType } from '@/generated/prisma/enums';
+import { formatRate } from '@/lib/format/unit-price';
 import {
   ExternalSalesPriceTierGroupEditor,
 } from '@/components/business/price/ExternalSalesPriceTierGroupEditor';
@@ -18,18 +19,8 @@ const quantityFormatter = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 0,
 });
 
-function amountLabel(amount: string): string {
-  const [integer = '0', fraction = ''] = new Decimal(amount)
-    .toFixed(4)
-    .replace(/\.0+$/, '')
-    .replace(/(\.\d*?)0+$/, '$1')
-    .split('.');
-  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `¥${grouped}${fraction ? `.${fraction}` : ''}`;
-}
-
 function unitAmountLabel(amount: string, quantity: number): string {
-  return `${amountLabel(new Decimal(amount).div(quantity).toFixed(4))} / 个`;
+  return `${formatRate(new Decimal(amount).div(quantity))} / 个`;
 }
 
 function CurrentPriceTierPanel() {
@@ -97,7 +88,7 @@ function CurrentPriceTierPanel() {
                 当前总价
               </p>
               <p className="font-sans font-medium tabular-nums">
-                {amountLabel(tier.currentAmount ?? '0')}
+                {formatRate(tier.currentAmount ?? '0')}
               </p>
             </div>
             <div className="min-w-0">

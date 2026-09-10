@@ -12,6 +12,7 @@ import { hasPermission } from '@/lib/auth/permissions-dict';
 import { getSession } from '@/lib/auth/session';
 import { formatMoney } from '@/lib/dashboard/format';
 import {
+  formatDateInputShanghai,
   formatDateShanghai,
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
@@ -19,7 +20,8 @@ import { getPieceworkSettlementDetail } from '@/lib/salary/piecework-settlement'
 import { MarkPieceworkSettlementPaidForm } from '@/components/business/salary/PieceworkSettlementActions';
 import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { PageHeader } from '@/components/ui-business';
+import { PageHeader, TableScrollArea } from '@/components/ui-business';
+import { formatRate } from '@/lib/format/unit-price';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -52,7 +54,7 @@ export default async function PieceworkSettlementDetailPage({
   const { id } = await params;
   const settlement = await getPageData(id);
   if (!settlement) notFound();
-  const workDate = settlement.workDate.toISOString().slice(0, 10);
+  const workDate = formatDateInputShanghai(settlement.workDate);
   const returnTo = `/owner/salary/piecework/${settlement.id}`;
 
   return (
@@ -110,12 +112,7 @@ export default async function PieceworkSettlementDetailPage({
 
       <section className="space-y-3">
         <h2 className="font-semibold">报工明细</h2>
-        <div
-          role="region"
-          aria-label="计件结算报工明细"
-          tabIndex={0}
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm"
-        >
+        <TableScrollArea label="计件结算报工明细" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full min-w-[1080px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -164,7 +161,7 @@ export default async function PieceworkSettlementDetailPage({
                     {String(report.chargeableQty)} {report.unit}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {String(report.rate)}
+                    {formatRate(report.rate)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
                     {formatMoney(report.amount)}
@@ -179,7 +176,7 @@ export default async function PieceworkSettlementDetailPage({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       </section>
     </div>
   );

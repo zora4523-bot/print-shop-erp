@@ -105,7 +105,7 @@ describe('admin order decisions require review before mutation', () => {
     await submit.click();
     const dialog = page.getByRole('alertdialog');
     await expect.element(dialog).toBeVisible();
-    await expect.element(dialog.getByText('核实已产数量 100 个，最终结算金额 ¥120.00。', { exact: true })).toBeVisible();
+    await expect.element(dialog.getByText('核实已产数量 100 个，最终结算金额 ¥ 120.00。', { exact: true })).toBeVisible();
     expect(actions.review).not.toHaveBeenCalled();
     await dialog.getByRole('button', { name: '取消', exact: true }).click();
     await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();

@@ -4,6 +4,7 @@ import type { getCsPeriodDetail } from '@/lib/salary/cs';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { ContentSkeleton, ErrorBoundary } from '@/components/ui-business';
 import { CsPeriodForecast } from './CsPeriodForecast';
+import { formatMoney } from '@/lib/dashboard/format';
 
 type PeriodSummary = Pick<
   NonNullable<Awaited<ReturnType<typeof getCsPeriodDetail>>>,
@@ -33,11 +34,11 @@ export function CsPeriodSummary({
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-3">
         <h2 className="text-base font-semibold">周期参数</h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-          <SummaryRow label="月底薪" value={`¥ ${String(period.monthlyBase)}`} tabular />
+          <SummaryRow label="月底薪" value={formatMoney(period.monthlyBase)} tabular />
           <SummaryRow label="期初业绩" value={String(period.initialSales)} tabular />
           <SummaryRow label="本期累计业绩" value={String(period.totalSales)} tabular />
           <SummaryRow label="业绩合计（算档用）" value={tierSalesTotal} tabular />
-          <SummaryRow label="底薪合计" value={`¥ ${baseTotal}`} tabular />
+          <SummaryRow label="底薪合计" value={formatMoney(baseTotal)} tabular />
           <SummaryRow label="结算时间" value={formatDateTimeShanghai(period.settledAt)} />
           <SummaryRow
             label="实际上班天数"

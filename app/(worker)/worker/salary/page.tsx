@@ -22,6 +22,7 @@ import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui-business';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
+import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import { Button } from '@/components/ui/button';
 
@@ -215,12 +216,10 @@ async function PieceworkSalaryContent({
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <strong>{formatDateShanghai(salary.date)}</strong>
                       <PaymentStatusBadge isPaid={salary.isPaid} />
-                      {salaryFloorBadge(
-                        new Decimal(
-                          salary.totalPieceworkAmount as Decimal.Value,
-                        ),
-                        new Decimal(salary.baseSalary as Decimal.Value),
-                      )}
+                      <SalaryFloorBadge
+                        piecework={salary.totalPieceworkAmount as Decimal.Value}
+                        base={salary.baseSalary as Decimal.Value}
+                      />
                     </div>
                     <p className="worker-wrap-anywhere mt-2 text-xs text-muted-foreground">
                       {MACHINE_TYPE_LABELS[salary.machineType]} · {salary.taskCount}{' '}
@@ -325,8 +324,8 @@ async function HourlySalaryContent({
                     </p>
                     <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
                       {isCook
-                        ? `月薪 ¥${String(payroll.baseSalary)} · 代班费 ¥${String(payroll.spareSalary)}`
-                        : `正常工资 ¥${String(payroll.baseSalary)} · 加班工资 ¥${String(payroll.otSalary)}`}
+                        ? `月薪 ${formatMoney(payroll.baseSalary)} · 代班费 ${formatMoney(payroll.spareSalary)}`
+                        : `正常工资 ${formatMoney(payroll.baseSalary)} · 加班工资 ${formatMoney(payroll.otSalary)}`}
                     </p>
                   </div>
                   <SalaryAmount value={payroll.totalSalary} />
@@ -362,13 +361,13 @@ function SalarySummary({ total, unpaid }: { total: Decimal; unpaid: Decimal }) {
       <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
         <p className="text-xs text-muted-foreground">累计工资</p>
         <p className="worker-wrap-anywhere mt-1 font-sans tabular-nums text-lg font-semibold">
-          ¥ {total.toFixed(2)}
+          {formatMoney(total)}
         </p>
       </div>
       <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
         <p className="text-xs text-muted-foreground">尚未发放</p>
         <p className="worker-wrap-anywhere mt-1 font-sans tabular-nums text-lg font-semibold">
-          ¥ {unpaid.toFixed(2)}
+          {formatMoney(unpaid)}
         </p>
       </div>
     </section>
@@ -455,14 +454,4 @@ function salaryTotals<T extends { isPaid: boolean }>(
 
 function validMonth(value: string | undefined): value is string {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value ?? '');
-}
-
-function salaryFloorBadge(piecework: Decimal, base: Decimal) {
-  if (piecework.gt(base)) {
-    return <Badge variant="secondary">计件高于保底</Badge>;
-  }
-  if (piecework.eq(base)) {
-    return <Badge variant="outline">计件等于保底</Badge>;
-  }
-  return <Badge variant="outline">按保底补足</Badge>;
 }

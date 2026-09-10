@@ -77,7 +77,7 @@ describe('CreateBundleForm state contract', () => {
     const html = render([]);
 
     expect(html).toContain('data-kind="no-result"');
-    expect(html).toContain('没有符合条件的含 CDR 文件的工单');
+    expect(html).toContain('没有匹配的含 CDR 文件的工单');
     expect(html).toContain('调整日期范围');
     expect(html).toContain('先勾选至少一个工单');
     expect(html).not.toContain('title="先勾选');

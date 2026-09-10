@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Copy, FileDown, ImageOff, Pencil } from 'luc
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ActionNotice, StatusBadge, TableEmptyState } from '@/components/ui-business';
+import { ActionNotice, StatusBadge, TableEmptyState, useCopyToClipboard } from '@/components/ui-business';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY, ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
 import { cn } from '@/lib/utils';
@@ -50,7 +50,7 @@ function Progress({ label, done, total, unit = '个' }: {
 }
 
 export function AdminOrderDetailView({ model, canEdit, decision, prints, printHint, supplementary, packaging }: Props) {
-  const [copyNotice, setCopyNotice] = useState<{ text: string; failed: boolean } | null>(null);
+  const { feedback: copyNotice, copy } = useCopyToClipboard();
   const [preview, setPreview] = useState<number | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -118,10 +118,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           <DisclosureSummary>工单信息</DisclosureSummary>
           <div className="flex flex-wrap items-center gap-3 pb-3">
             <Button type="button" variant="ghost" aria-label="复制工单号" className={styles.number}
-              onClick={async () => {
-                try { await navigator.clipboard.writeText(model.no); setCopyNotice({ text: '工单号已复制', failed: false }); }
-                catch { setCopyNotice({ text: '复制失败，请手动复制工单号', failed: true }); }
-              }}>{model.no}<Copy aria-hidden="true" className="size-3.5 shrink-0" /></Button>
+              onClick={() => copy(model.no, '工单号')}>{model.no}<Copy aria-hidden="true" className="size-3.5 shrink-0" /></Button>
             <span className={styles.version}>版本 v{model.version}</span>
           </div>
         </Disclosure>
@@ -131,7 +128,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         {canEdit ? <Link href={`/orders/${model.id}/edit`} className={buttonVariants({ variant: 'outline' })}><Pencil aria-hidden="true" />编辑工单</Link> : null}
       </div>
     </div>}>
-      {copyNotice ? <ActionNotice tone={copyNotice.failed ? 'error' : 'success'} title={copyNotice.text} /> : null}
+      {copyNotice ? <ActionNotice tone={copyNotice.tone} title={copyNotice.message} /> : null}
       <div className={styles.columns}>
         <div className={styles.main}>
           {model.vdiff ? <section className={styles.diff} aria-label="最新变更差异">
@@ -214,7 +211,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         </div>
 
         <aside className={styles.aside} aria-label="工单概览与操作">
-          <section id="order-detail-actions" tabIndex={-1} className={cn(styles.card, styles.decision)} aria-label="当前待办"><div className={styles.eyebrow}>当前待办</div>
+          <section id="order-detail-actions" tabIndex={-1} data-emphasis="inverse" className={cn(styles.card, styles.decision)} aria-label="当前待办"><div className={styles.eyebrow}>当前待办</div>
             {decision ?? <p>{ORDER_STATUS_REGISTRY[model.status].label} · 暂无待办</p>}
           </section>
           <section id="order-detail-overview" tabIndex={-1} className={cn(styles.asideSection, highlighted === 'order-detail-overview' && styles.highlight)}><h2 className={styles.eyebrow}>概览</h2>

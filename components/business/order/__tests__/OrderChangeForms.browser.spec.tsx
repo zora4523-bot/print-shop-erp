@@ -648,7 +648,7 @@ it('切换或关闭裁决模式会清空上一模式的表单、预览和消息'
     expect(
       host.querySelector<HTMLTextAreaElement>('[aria-label="裁决说明"]')?.value,
     ).toBe('');
-    expect(host.textContent).not.toContain('引擎参考价 ¥100.00');
+    expect(host.textContent).not.toContain('引擎参考价 ¥ 100.00');
 
     buttonWithText(host, '驳回')?.click();
     await settleEffects();

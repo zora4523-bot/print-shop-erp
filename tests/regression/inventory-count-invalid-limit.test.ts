@@ -21,7 +21,7 @@ vi.mock('@/lib/inventory-count', () => ({
   listInventoryCountMaterials: inventoryMock.listInventoryCountMaterials,
 }));
 
-import { handleInventoryCountMaterialsGet } from '@/app/api/admin/inventory-count/materials/route';
+import { handleInventoryCountMaterialsGet } from '@/app/api/admin/inventory-count/materials/handler';
 
 function request(url: string): NextAuthRequest {
   return Object.assign(new NextRequest(url), { auth: null }) as NextAuthRequest;

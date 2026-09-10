@@ -1,6 +1,7 @@
 'use client';
 
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
+import { formatMoney } from '@/lib/dashboard/format';
 
 import {
   useEffect,
@@ -30,14 +31,6 @@ import {
   useOrderEditorAuxiliaryController,
 } from './use-order-editor-auxiliary';
 import { OrderFoilColorPicker } from './OrderFoilColorPicker';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
-} from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -45,11 +38,14 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ActionNotice } from '@/components/ui-business';
+import {
+  ActionNotice,
+  ConfirmActionController,
+  ConfirmActionDialog,
+} from '@/components/ui-business';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { EditOrderForm } from './EditOrderForm';
 import {
@@ -129,10 +125,6 @@ type Props = {
   fees: ReactNode;
   pendingNotice?: ReactNode;
 };
-const money = (value: string | null) =>
-  value === null
-    ? '待核定'
-    : `¥${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const colors = (text: string) => [
   ...new Set(
     text
@@ -217,6 +209,7 @@ export function AdminOrderEditor(props: Props) {
   const [leaving, setLeaving] = useState(false);
   const pendingNavigation = useRef<(() => void) | null>(null);
   const destination = useRef(`/orders/${props.orderId}`);
+  const leaveSourceRef = useRef<HTMLElement | null>(null);
   const readForm = () => {
     const element = document.getElementById(formId) as HTMLFormElement | null;
     return element ? formValues(new FormData(element)) : {};
@@ -474,6 +467,8 @@ export function AdminOrderEditor(props: Props) {
     chargeBuild.missing.length === 0 &&
     JSON.stringify(chargeBuild.resolutions) ===
       JSON.stringify(payload?.pendingChargeResolutions ?? []);
+  const confirmOpen =
+    review !== null && review.complete && chargesMatchPreview;
   function repriceCharges() {
     if (!payload || chargeBuild.missing.length) return;
     const next = {
@@ -547,12 +542,14 @@ export function AdminOrderEditor(props: Props) {
             className="size-11 shrink-0"
             aria-label="返回工单"
             disabled={pending || fileBusy || auxiliary.pending}
-            onClick={() => {
+            onClick={(event) => {
               destination.current = `/orders/${props.orderId}`;
               pendingNavigation.current = () =>
                 router.push(destination.current);
-              if (dirty || auxiliary.dirty) setLeaving(true);
-              else router.push(destination.current);
+              if (dirty || auxiliary.dirty) {
+                leaveSourceRef.current = event.currentTarget;
+                setLeaving(true);
+              } else router.push(destination.current);
             }}
           >
             <ArrowLeft className="size-4" />
@@ -579,10 +576,11 @@ export function AdminOrderEditor(props: Props) {
           <Button
             variant="outline"
             disabled={!dirty || locked}
-            onClick={() => {
+            onClick={(event) => {
               destination.current = `/orders/${props.orderId}`;
               pendingNavigation.current = () =>
                 router.push(destination.current);
+              leaveSourceRef.current = event.currentTarget;
               setLeaving(true);
             }}
           >
@@ -600,6 +598,48 @@ export function AdminOrderEditor(props: Props) {
         </div>
       </header>
       {props.pendingNotice}
+      {review && !confirmOpen ? (
+        <section
+          aria-label="核价结果"
+          className="space-y-3 rounded-xl border bg-card p-4"
+        >
+          {review.blockers.length ? (
+            <ActionNotice
+              tone="error"
+              title="本次修改暂不能保存"
+              description={review.blockers.join('；')}
+            />
+          ) : null}
+          {review.pendingCharges?.length ? (
+            <>
+              <p className="text-sm text-muted-foreground" role="status">
+                补齐以下运费并重新核价后才能保存。
+              </p>
+              <OrderChangePendingChargeEditor
+                charges={review.pendingCharges}
+                drafts={chargeDrafts}
+                disabled={pending}
+                onChange={(key, field, value) =>
+                  setChargeDrafts((drafts) => ({
+                    ...drafts,
+                    [key]: {
+                      ...(drafts[key] ?? { amount: '', reason: '' }),
+                      [field]: value,
+                    },
+                  }))
+                }
+              />
+              <Button
+                variant="outline"
+                disabled={pending || chargeBuild.missing.length > 0}
+                onClick={repriceCharges}
+              >
+                补齐运费并重新核价
+              </Button>
+            </>
+          ) : null}
+        </section>
+      ) : null}
       {auxiliary.dirty ? (
         <p role="status" className="text-sm text-muted-foreground">
           请先保存或还原下方费用输入，再修改工单资料与款式。
@@ -674,7 +714,7 @@ export function AdminOrderEditor(props: Props) {
                     className="min-w-0 flex-1 border-transparent bg-transparent px-1 font-semibold shadow-none hover:border-input focus-visible:border-input"
                   />
                   {changed ? (
-                    <span className="shrink-0 rounded border px-2 py-1 text-xs">
+                    <span className="shrink-0 rounded-md border px-2 py-1 text-xs">
                       {draft.added ? '新增' : '已改'}
                     </span>
                   ) : null}
@@ -935,7 +975,7 @@ export function AdminOrderEditor(props: Props) {
                       {changed ? '修改前加工费' : '本款加工费'}
                     </span>
                     <span className="font-medium tabular-nums">
-                      {draft.added ? '保存前自动核价' : money(source.subtotal)}
+                      {draft.added ? '保存前自动核价' : source.subtotal === null ? '待核定' : formatMoney(source.subtotal)}
                     </span>
                   </p>
                 </div>
@@ -1026,110 +1066,39 @@ export function AdminOrderEditor(props: Props) {
           </fieldset>
         </section>
       </OrderEditorAuxiliaryContext.Provider>
-      <Sheet
-        open={review !== null}
+      <ConfirmActionController
+        level="L2"
+        open={confirmOpen}
         onOpenChange={(open) => {
           if (!open && !pending) setReview(null);
         }}
+        focusReturnRef={saveButtonRef}
+        cancelLabel="再改改"
+        disabled={pending}
+        onConfirm={save}
       >
-        <SheetContent
-          side="bottom"
-          finalFocus={saveButtonRef}
-          showCloseButton={false}
-          className={`${styles.reviewSheet} [&_button]:min-h-11 [&_input]:min-h-11`}
-        >
-          <SheetHeader className="px-5 pt-5 pb-3">
-            <SheetTitle>确认保存修改</SheetTitle>
-            <SheetDescription>
-              请核对以下 {differences.length}{' '}
-              处修改。所有资料与款式变更将一起保存。
-            </SheetDescription>
-          </SheetHeader>
-          <div className={styles.reviewBody}>
-            <ul className="divide-y">
-              {differences.map((diff, index) => (
-                <li key={index} className="space-y-1 py-2">
-                  <p className="text-sm font-medium">{diff.label}</p>
-                  <div className="grid min-w-0 grid-cols-[1fr_auto_1fr] items-start gap-3 text-sm">
-                    <span className="break-words text-muted-foreground [overflow-wrap:anywhere]">
-                      {diff.before || '未填写'}
-                    </span>
-                    <span aria-label="修改为">→</span>
-                    <span className="break-words [overflow-wrap:anywhere]">
-                      {diff.after || '未填写'}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {review ? (
-              <div className="space-y-3 rounded-xl border p-4">
-                <div className="flex flex-wrap justify-between gap-3 text-sm">
-                  <span>当前金额 {money(review.oldTotal)}</span>
-                  <strong>保存后 {money(review.newTotal)}</strong>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {review.changesRevision && ['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(props.status)
-                    ? `工单版本 v${props.workOrderVersion} → v${props.workOrderVersion + 1}。`
-                    : review.changesRevision ? '保留当前纸质工单版本。' : '本次仅修改资料，保留当前工单版本与费用。'}
-                </p>
-                {review.blockers.map((text, index) => (
-                  <p key={index} className="text-sm text-destructive">
-                    {text}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-            {review?.pendingCharges?.length ? (
-              <div className="space-y-3">
-                <OrderChangePendingChargeEditor
-                  charges={review.pendingCharges}
-                  drafts={chargeDrafts}
-                  disabled={pending}
-                  onChange={(key, field, value) =>
-                    setChargeDrafts((drafts) => ({
-                      ...drafts,
-                      [key]: {
-                        ...(drafts[key] ?? { amount: '', reason: '' }),
-                        [field]: value,
-                      },
-                    }))
-                  }
-                />
-                <Button
-                  variant="outline"
-                  disabled={pending || chargeBuild.missing.length > 0}
-                  onClick={repriceCharges}
-                >
-                  补齐运费并重新核价
-                </Button>
-              </div>
-            ) : null}
-            {error ? (
-              <ActionNotice
-                tone="error"
-                title="请检查本次修改"
-                description={error}
-              />
-            ) : null}
-          </div>
-          <SheetFooter className="grid grid-cols-2 border-t px-5 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <Button
-              variant="outline"
-              disabled={pending}
-              onClick={() => setReview(null)}
-            >
-              再改改
-            </Button>
-            <Button
-              disabled={pending || !review?.complete || !chargesMatchPreview}
-              onClick={save}
-            >
-              {pending ? '保存中…' : '确认保存'}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+        <ConfirmActionDialog
+          action="保存工单修改"
+          changes={[
+            ...differences.map((diff) => ({
+              label: diff.label,
+              old: diff.before || '未填写',
+              new: diff.after || '未填写',
+            })),
+            ...(review
+              ? [{ label: '金额', old: review.oldTotal === null ? '待核定' : formatMoney(review.oldTotal), new: review.newTotal === null ? '待核定' : formatMoney(review.newTotal) }]
+              : []),
+          ]}
+          consequences={
+            review?.changesRevision
+              ? ['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(props.status)
+                ? [`工单版本 v${props.workOrderVersion} → v${props.workOrderVersion + 1}。`]
+                : ['保留当前纸质工单版本。']
+              : ['仅修改资料，保留当前工单版本与费用。']
+          }
+          confirmText="保存修改"
+        />
+      </ConfirmActionController>
       <Dialog
         open={Boolean(fileItem)}
         onOpenChange={(open) => {
@@ -1178,30 +1147,31 @@ export function AdminOrderEditor(props: Props) {
           {detailItem?.details}
         </DialogContent>
       </Dialog>
-      <Dialog open={leaving} onOpenChange={setLeaving}>
-        <DialogContent className="[&_button]:min-h-11">
-          <DialogHeader>
-            <DialogTitle>放弃未保存的修改？</DialogTitle>
-            <DialogDescription>
-              本次填写尚未保存，离开后将丢失。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setLeaving(false)}>
-              继续编辑
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                allowNavigation();
-                pendingNavigation.current?.();
-              }}
-            >
-              放弃并离开
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmActionController
+        level="L2"
+        open={leaving}
+        onOpenChange={setLeaving}
+        focusReturnRef={leaveSourceRef}
+        cancelLabel="继续编辑"
+        onConfirm={() => {
+          allowNavigation();
+          pendingNavigation.current?.();
+        }}
+      >
+        <ConfirmActionDialog
+          action="放弃未保存修改并离开"
+          changes={[]}
+          consequences={[
+            ...(differences.length
+              ? [`${differences.length} 处未保存修改将丢失。`]
+              : []),
+            ...(auxiliary.dirty ? ['未保存的费用输入将丢失。'] : []),
+            '已保存的工单资料保持不变。',
+          ]}
+          confirmText="放弃并离开"
+          danger
+        />
+      </ConfirmActionController>
     </div>
   );
 }

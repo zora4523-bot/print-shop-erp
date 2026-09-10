@@ -13,8 +13,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { TableScrollArea } from '@/components/ui-business/TableScrollArea';
+import { TableScrollArea } from '@/components/ui-business';
 import { cn } from '@/lib/utils';
+import { formatMoney } from '@/lib/dashboard/format';
+import { formatUnitPrice } from '@/lib/format/unit-price';
 
 export type PricingNumericValue = number | string | null;
 
@@ -213,7 +215,7 @@ function PricingSectionHeading({
               <Badge
                 variant="outline"
                 className={cn(
-                  'h-auto rounded-md px-2 py-0.5 font-mono text-[10px] font-bold tracking-wide',
+                  'h-auto rounded-md px-2 py-0.5 font-mono text-xs font-bold tracking-wide',
                   criticalBasis && 'border-destructive text-destructive',
                 )}
               >
@@ -221,7 +223,7 @@ function PricingSectionHeading({
               </Badge>
             ) : null}
           </div>
-          <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-muted-foreground sm:text-[13px]">
+          <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-muted-foreground sm:text-sm">
             {description}
           </p>
         </div>
@@ -271,7 +273,7 @@ function PricingNumericInput({
           aria-label={label}
           data-changed={changed || undefined}
           className={cn(
-            'h-8 min-w-0 text-right text-[13px] font-bold tabular-nums',
+            'h-8 min-w-0 text-right text-sm font-bold tabular-nums',
             changed &&
               'border-warning/50 bg-warning/10 text-warning-foreground',
             className,
@@ -287,7 +289,7 @@ function PricingNumericInput({
             data-disabled={disabled || undefined}
             data-changed={changed || undefined}
             className={cn(
-              'flex h-8 min-w-0 items-center justify-end rounded-md border border-transparent bg-transparent px-3 text-right text-[13px] font-bold tabular-nums',
+              'flex h-8 min-w-0 items-center justify-end rounded-md border border-transparent bg-transparent px-3 text-right text-sm font-bold tabular-nums',
               (value === null || value === '') && 'text-muted-foreground',
               disabled && 'text-muted-foreground',
               changed &&
@@ -311,7 +313,7 @@ function PricingNumericInput({
 
 function FormulaNote({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-lg bg-muted/70 px-3.5 py-2.5 text-xs font-semibold leading-5 sm:text-[13px]">
+    <div className="rounded-lg bg-muted/70 px-3.5 py-2.5 text-xs font-semibold leading-5 sm:text-sm">
       {children}
     </div>
   );
@@ -319,7 +321,7 @@ function FormulaNote({ children }: { children: ReactNode }) {
 
 function CardSectionLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="border-b pb-2 text-[11px] font-extrabold tracking-[0.14em] text-muted-foreground">
+    <div className="border-b pb-2 text-xs font-extrabold tracking-[0.14em] text-muted-foreground">
       {children}
     </div>
   );
@@ -352,7 +354,9 @@ function decimalLabel(value: number, maximumFractionDigits = 3): string {
 function currencyLabel(value: number | null, fractionDigits = 2): string {
   return value === null || !Number.isFinite(value)
     ? '待定'
-    : `¥${value.toFixed(fractionDigits)}`;
+    : fractionDigits === 4
+      ? formatUnitPrice(value)
+      : formatMoney(value);
 }
 
 function matrixCell(
@@ -397,18 +401,18 @@ export function CustomerBlankPricingSectionView({
       />
       {statusContent}
 
-      <Card className="min-w-0 gap-0 overflow-hidden rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
         <CardContent className="min-w-0 p-0">
           <Table label="局部烫金空白封现货单价矩阵" style={{ minWidth: minimumWidth }}>
             <TableHeader>
               <TableRow className="border-b-2 border-foreground hover:bg-transparent">
-                <TableHead className="w-44 px-4 text-[11px] font-extrabold tracking-wide text-muted-foreground">
+                <TableHead className="w-44 px-4 text-xs font-extrabold tracking-wide text-muted-foreground">
                   纸张 · 克重
                 </TableHead>
                 {columns.map((column) => (
                   <TableHead
                     key={column.key}
-                    className="min-w-28 px-2 text-right text-[11px] font-extrabold tracking-wide text-muted-foreground"
+                    className="min-w-28 px-2 text-right text-xs font-extrabold tracking-wide text-muted-foreground"
                   >
                     {column.label}
                   </TableHead>
@@ -418,9 +422,9 @@ export function CustomerBlankPricingSectionView({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.key} className="hover:bg-transparent">
-                  <TableCell className="px-4 py-2.5 text-left text-[13px] font-bold">
+                  <TableCell className="px-4 py-2.5 text-left text-sm font-bold">
                     {row.paperName}
-                    <span className="ml-1.5 font-mono text-[11px] font-semibold text-muted-foreground">
+                    <span className="ml-1.5 font-mono text-xs font-semibold text-muted-foreground">
                       {displayWeight(row.weight)}
                     </span>
                   </TableCell>
@@ -441,7 +445,7 @@ export function CustomerBlankPricingSectionView({
                           className={cn(
                             'h-9 border-transparent bg-transparent px-2 text-right shadow-none',
                             field.value === null &&
-                              'text-[11px] font-semibold placeholder:text-muted-foreground',
+                              'text-xs font-semibold placeholder:text-muted-foreground',
                             field.editable && 'hover:bg-muted/60',
                             field.changed &&
                               'border-warning/50 bg-warning/10 text-warning-foreground',
@@ -477,10 +481,10 @@ function ParameterRow({
 }) {
   return (
     <div className="flex min-w-0 items-center gap-3 py-2.5">
-      <div className="min-w-0 flex-1 text-[13px] font-bold">
+      <div className="min-w-0 flex-1 text-sm font-bold">
         <div>{label}</div>
         {description ? (
-          <div className="mt-0.5 text-[11px] font-medium leading-4 text-muted-foreground">
+          <div className="mt-0.5 text-xs font-medium leading-4 text-muted-foreground">
             {description}
           </div>
         ) : null}
@@ -492,7 +496,7 @@ function ParameterRow({
         step={step}
         className="w-[110px] shrink-0"
       />
-      <span className="w-12 shrink-0 text-[11px] font-extrabold text-muted-foreground">
+      <span className="w-12 shrink-0 text-xs font-extrabold text-muted-foreground">
         {unit}
       </span>
     </div>
@@ -544,7 +548,7 @@ export function CustomerMachinePricingSectionView({
       />
       {statusContent}
 
-      <Card className="min-w-0 gap-0 rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 rounded-xl py-0 shadow-none">
         <CardContent className="divide-y px-4 sm:px-5">
           <ParameterRow
             label="费率"
@@ -583,7 +587,7 @@ export function CustomerMachinePricingSectionView({
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 gap-0 rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 rounded-xl py-0 shadow-none">
         <CardContent className="px-4 py-3 sm:px-5">
           <div
             id={plateFee.id}
@@ -592,17 +596,17 @@ export function CustomerMachinePricingSectionView({
             className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
           >
             <div className="min-w-0">
-              <div className="text-[13px] font-bold">制烫金版费</div>
+              <div className="text-sm font-bold">制烫金版费</div>
               <p
                 id={platePolicyDescriptionId}
-                className="mt-0.5 text-[11px] font-medium leading-4 text-muted-foreground"
+                className="mt-0.5 text-xs font-medium leading-4 text-muted-foreground"
               >
                 版费默认 0 元；需要收费时，管理员可在工单中添加制版明细，录入金额和依据。
               </p>
             </div>
             <Badge
               variant="outline"
-              className="h-auto w-fit shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold text-destructive"
+              className="h-auto w-fit shrink-0 rounded-md px-2 py-0.5 text-xs font-bold text-destructive"
             >
               默认 0 元 · 可人工添加
             </Badge>
@@ -655,7 +659,7 @@ export function CustomerTiersPricingSectionView({
       />
       {statusContent}
 
-      <Card className="min-w-0 gap-0 overflow-hidden rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
         <CardContent className="min-w-0 p-0">
           <TableScrollArea label="专版烫金阶梯单价表">
             <div
@@ -666,7 +670,7 @@ export function CustomerTiersPricingSectionView({
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_130px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-[11px] font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_130px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档位</span>
                   <span role="columnheader">适用范围（推导）</span>
@@ -687,7 +691,7 @@ export function CustomerTiersPricingSectionView({
                     <div
                       role="row"
                       key={row.key}
-                      className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_130px_34px] items-center gap-2 border-b py-1.5 text-[13px] last:border-b-0"
+                      className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_130px_34px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                     >
                       <span role="cell" className="font-extrabold">
                         {row.name}
@@ -753,16 +757,16 @@ function AdjustmentRows({
       {rows.map((row) => (
         <div key={row.key} className="flex min-w-0 items-center gap-3 py-2.5">
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-[13px] font-bold">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-bold">
               <span className="admin-wrap-anywhere">{row.label}</span>
               {row.isNew ? (
-                <Badge className="h-auto rounded-md border border-warning/40 bg-warning/10 px-1.5 py-0 text-[10px] font-extrabold text-warning-foreground">
+                <Badge className="h-auto rounded-md border border-warning/40 bg-warning/10 px-1.5 py-0 text-xs font-extrabold text-warning-foreground">
                   新增 · 未发布
                 </Badge>
               ) : null}
             </div>
             {row.description ? (
-              <p className="mt-0.5 text-[11px] font-medium leading-4 text-muted-foreground">
+              <p className="mt-0.5 text-xs font-medium leading-4 text-muted-foreground">
                 {row.description}
               </p>
             ) : null}
@@ -773,7 +777,7 @@ function AdjustmentRows({
             step={row.unit === '元/个' ? '0.005' : undefined}
             className="w-[110px] shrink-0"
           />
-          <span className="w-12 shrink-0 text-[11px] font-extrabold text-muted-foreground">
+          <span className="w-12 shrink-0 text-xs font-extrabold text-muted-foreground">
             {row.unit}
           </span>
         </div>
@@ -809,14 +813,14 @@ export function CustomerAddsPricingSectionView({
       />
       {statusContent}
 
-      <Card className="min-w-0 gap-0 rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 rounded-xl py-0 shadow-none">
         <CardContent className="px-4 py-4 sm:px-5">
           <CardSectionLabel>专版烫金加价 · 纸张</CardSectionLabel>
           <AdjustmentRows rows={paperAdjustments} />
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 gap-0 rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 rounded-xl py-0 shadow-none">
         <CardContent className="px-4 py-4 sm:px-5">
           <CardSectionLabel>专版烫金加价 · 工艺</CardSectionLabel>
           <AdjustmentRows rows={craftAdjustments} />
@@ -852,18 +856,18 @@ export function CustomerPrintPricingSectionView({
       />
       {statusContent}
 
-      <Card className="min-w-0 gap-0 overflow-hidden rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
         <CardContent className="min-w-0 p-0">
           <Table label="彩印阶梯整单总价矩阵" style={{ minWidth: minimumWidth }}>
             <TableHeader>
               <TableRow className="border-b-2 border-foreground hover:bg-transparent">
-                <TableHead className="w-40 px-4 text-[11px] font-extrabold tracking-wide text-muted-foreground">
+                <TableHead className="w-40 px-4 text-xs font-extrabold tracking-wide text-muted-foreground">
                   纸张 规格
                 </TableHead>
                 {columns.map((column) => (
                   <TableHead
                     key={column.key}
-                    className="w-16 px-1 text-right text-[11px] font-extrabold tracking-wide text-muted-foreground"
+                    className="w-16 px-1 text-right text-xs font-extrabold tracking-wide text-muted-foreground"
                   >
                     {column.label}
                   </TableHead>
@@ -873,7 +877,7 @@ export function CustomerPrintPricingSectionView({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.key} className="hover:bg-transparent">
-                  <TableCell className="px-4 py-2 text-[13px] font-bold">
+                  <TableCell className="px-4 py-2 text-sm font-bold">
                     {row.label}
                   </TableCell>
                   {columns.map((column) => {
@@ -895,9 +899,9 @@ export function CustomerPrintPricingSectionView({
                 </TableRow>
               ))}
               <TableRow className="hover:bg-transparent">
-                <TableCell className="px-4 py-2 text-[13px] font-bold">
+                <TableCell className="px-4 py-2 text-sm font-bold">
                   <span className="block">单色烫金原子套餐</span>
-                  <span className="mt-0.5 block text-[10px] font-semibold text-primary">
+                  <span className="mt-0.5 block text-xs font-semibold text-primary">
                     含制版费 · 按不可拆套餐总价计价
                   </span>
                 </TableCell>
@@ -1034,7 +1038,7 @@ export function CustomerShipPricingSectionView({
       />
       {statusContent}
 
-      <Card className="min-w-0 gap-0 rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 rounded-xl py-0 shadow-none">
         <CardContent className="px-4 py-4 sm:px-5">
           <CardSectionLabel>包装 · 元/袋</CardSectionLabel>
           <div className="divide-y">
@@ -1055,7 +1059,7 @@ export function CustomerShipPricingSectionView({
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 gap-0 overflow-hidden rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
         <CardContent className="min-w-0 p-0">
           <div className="px-4 pt-4 sm:px-5">
             <CardSectionLabel>
@@ -1071,7 +1075,7 @@ export function CustomerShipPricingSectionView({
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-[11px] font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档</span>
                   <span role="columnheader">范围（推导）</span>
@@ -1089,7 +1093,7 @@ export function CustomerShipPricingSectionView({
                   <div
                     role="row"
                     key={tier.key}
-                    className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b py-1.5 text-[13px] last:border-b-0"
+                    className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                   >
                     <span role="cell" className="font-extrabold">
                       {tier.name ?? `第${index + 1}档`}
@@ -1147,7 +1151,7 @@ export function CustomerShipPricingSectionView({
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 gap-0 rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 rounded-xl py-0 shadow-none">
         <CardContent className="px-4 py-4 sm:px-5">
           <CardSectionLabel>红包单重（净重估算，不含包装）</CardSectionLabel>
           <div className="divide-y">
@@ -1170,7 +1174,7 @@ export function CustomerShipPricingSectionView({
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 gap-0 overflow-hidden rounded-[14px] py-0 shadow-none">
+      <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
         <CardContent className="min-w-0 p-0">
           <div className="px-4 pt-4 sm:px-5">
             <CardSectionLabel>
@@ -1197,7 +1201,7 @@ export function CustomerShipPricingSectionView({
                   <div
                     role="row"
                     key={zone.key}
-                    className="grid grid-cols-[34px_minmax(19rem,1fr)_100px_100px_70px] items-center gap-2 border-b py-1.5 text-[13px] last:border-b-0"
+                    className="grid grid-cols-[34px_minmax(19rem,1fr)_100px_100px_70px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                   >
                     <span role="cell" className="font-extrabold">
                       {zone.name}

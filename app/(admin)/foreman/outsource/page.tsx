@@ -32,7 +32,7 @@ export default async function OutsourceListPage() {
 
       {rows.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          暂无外协单。
+          暂无外协单
         </div>
       ) : (
         <TableScrollArea

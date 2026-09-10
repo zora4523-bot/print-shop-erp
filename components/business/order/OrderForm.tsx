@@ -10,6 +10,7 @@ import {
   useTransition,
   type ClipboardEventHandler,
 } from 'react';
+import { formatMoney } from '@/lib/dashboard/format';
 import {
   Controller,
   useForm,
@@ -622,14 +623,6 @@ function createExternalOrderItem(
     resetPaper: true,
     resetSpecification: true,
   });
-}
-
-function formatOrderCurrency(value: string | number): string {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    minimumFractionDigits: 2,
-  }).format(Number(value));
 }
 
 function compactDecimal(value: string): string {
@@ -3067,7 +3060,7 @@ export function OrderForm({
           },
           amountLabel:
             quote?.status === 'complete' && quote.amount
-              ? formatOrderCurrency(quote.amount)
+              ? formatMoney(quote.amount)
               : '待核价',
           manualQuoteReasons,
         };
@@ -3495,7 +3488,7 @@ export function OrderForm({
               !usesExternalSalesPricing ? (
                 <section
                   aria-label="内部生产信息"
-                  className="mt-[1.125rem] border-t pt-[1.125rem]"
+                  className="mt-4 border-t pt-4"
                 >
                   <div className="grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
                     <div className="@min-[560px]:col-span-2">
@@ -3529,7 +3522,7 @@ export function OrderForm({
                   </div>
                   {internalAdditionalCraftOptions.length > 0 ? (
                     <fieldset className="mt-5 border-t pt-4">
-                      <legend className="text-[0.6875rem] font-extrabold tracking-[0.18em] text-muted-foreground">
+                      <legend className="text-xs font-extrabold tracking-[0.18em] text-muted-foreground">
                         附加工艺（选填）
                       </legend>
                       <p className="mt-2 text-xs text-muted-foreground">
@@ -3601,11 +3594,11 @@ export function OrderForm({
               !usesExternalSalesPricing ? (
                 <section
                   aria-label="多地址发货"
-                  className="mt-[1.125rem] border-t pt-[1.125rem]"
+                  className="mt-4 border-t pt-4"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-[0.6875rem] font-extrabold tracking-[0.2em] text-muted-foreground">
+                      <h2 className="text-xs font-extrabold tracking-[0.2em] text-muted-foreground">
                         多地址发货
                       </h2>
                       <p className="mt-1.5 text-xs text-muted-foreground">
@@ -4067,7 +4060,7 @@ export function OrderForm({
             amountLabel:
               railLogistics?.status === 'complete' &&
               railLogistics.packagingAmount
-                ? formatOrderCurrency(railLogistics.packagingAmount)
+                ? formatMoney(railLogistics.packagingAmount)
                 : '待定',
           }}
           shippingCharge={{
@@ -4079,7 +4072,7 @@ export function OrderForm({
                 ? '—'
                 : railLogistics?.status === 'complete' &&
                     railLogistics.shippingAmount
-                  ? formatOrderCurrency(railLogistics.shippingAmount)
+                  ? formatMoney(railLogistics.shippingAmount)
                   : '待定',
             detail:
               railLogistics?.shippingLabel?.replace(/^快递费\s*/, '') ??
@@ -4088,10 +4081,10 @@ export function OrderForm({
           }}
           totalLabel={
             submitQuoteChange
-              ? formatOrderCurrency(submitQuoteChange.quotedFee)
+              ? formatMoney(submitQuoteChange.quotedFee)
               : externalTotal === null
               ? '总价由工厂确认'
-              : formatOrderCurrency(externalTotal)
+              : formatMoney(externalTotal)
           }
           totalRequiresManualQuote={
             externalReviewRequiresManualQuote

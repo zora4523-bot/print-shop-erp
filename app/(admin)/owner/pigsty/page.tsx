@@ -7,12 +7,9 @@ import {
   Timer,
   TriangleAlert,
 } from 'lucide-react';
-import {
-  PageHeader,
-  StatCard,
-  StatusBadge,
-  type Tone,
-} from '@/components/ui-business';
+import { PageHeader, StatCard, StatusBadge, TableScrollArea } from '@/components/ui-business';
+import { OpsReadinessBadge } from '@/components/business/ops/OpsReadinessBadge';
+import { SensitiveColumnMaskingBadge } from '@/components/business/ops/SensitiveColumnMaskingBadge';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getOpsExtensionReadiness,
@@ -54,25 +51,6 @@ async function read<T>(promise: Promise<T>): Promise<ReadState<T>> {
 
 function blockersLabel(blockers: readonly string[]): string {
   return blockers.length > 0 ? blockers.join(', ') : '无阻塞项';
-}
-
-function readinessTone(ready: boolean, blockers: readonly string[]): Tone {
-  if (ready) return 'success';
-  return blockers.length > 0 ? 'warning' : 'neutral';
-}
-
-function ReadinessBadge({
-  ready,
-  blockers,
-}: {
-  ready: boolean;
-  blockers: readonly string[];
-}) {
-  return (
-    <StatusBadge tone={readinessTone(ready, blockers)} dot={ready}>
-      {ready ? '就绪' : blockers.length > 0 ? '有阻塞' : '未启用'}
-    </StatusBadge>
-  );
 }
 
 function ErrorPanel({ title, error }: { title: string; error: string }) {
@@ -391,12 +369,7 @@ export default async function PigstyOpsPage() {
           title="分区维护"
           description="当前只做 pg_partman 候选表预检，不自动重写现有主键和外键。"
         >
-          <div
-            className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            role="region"
-            aria-label="分区维护预检"
-            tabIndex={0}
-          >
+          <TableScrollArea label="分区维护预检" className="rounded-lg border bg-card">
             <table className="w-full min-w-[780px] text-sm">
               <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                 <tr>
@@ -413,7 +386,7 @@ export default async function PigstyOpsPage() {
                     <td className="px-3 py-2 font-mono text-xs">{row.parentTable}</td>
                     <td className="px-3 py-2 font-mono text-xs">{row.controlColumn}</td>
                     <td className="px-3 py-2">
-                      <ReadinessBadge
+                      <OpsReadinessBadge
                         ready={row.readyForPartman}
                         blockers={row.blockers}
                       />
@@ -431,7 +404,7 @@ export default async function PigstyOpsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScrollArea>
         </Section>
       ) : null}
     </div>
@@ -457,7 +430,7 @@ function StepsPanel({
           {steps.map((step, index) => (
             <li key={`${index}-${step}`} className="flex gap-2">
               <span className="shrink-0 tabular-nums">{index + 1}.</span>
-              <code className="min-w-0 whitespace-pre-wrap break-all rounded bg-muted px-2 py-1">
+              <code className="min-w-0 whitespace-pre-wrap break-all rounded-md bg-muted px-2 py-1">
                 {step}
               </code>
             </li>
@@ -476,12 +449,7 @@ function SearchReadinessTable({ rows }: { rows: SearchIndexReadiness[] }) {
       title="搜索索引预检"
       description="工单/商品搜索上线前，确认必需扩展和索引齐全，并执行 EXPLAIN 检查真实生产计划。"
     >
-      <div
-        className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        role="region"
-        aria-label="搜索索引预检"
-        tabIndex={0}
-      >
+      <TableScrollArea label="搜索索引预检" className="rounded-lg border bg-card">
         <table className="w-full min-w-[980px] text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
@@ -505,7 +473,7 @@ function SearchReadinessTable({ rows }: { rows: SearchIndexReadiness[] }) {
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  <ReadinessBadge
+                  <OpsReadinessBadge
                     ready={row.readyForSearch}
                     blockers={row.blockers}
                   />
@@ -537,7 +505,7 @@ function SearchReadinessTable({ rows }: { rows: SearchIndexReadiness[] }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScrollArea>
     </Section>
   );
 }
@@ -550,7 +518,7 @@ function SqlBlock({
   emptyLabel: string;
 }) {
   return sql ? (
-    <code className="block max-w-[420px] whitespace-pre-wrap break-all rounded bg-muted px-2 py-1 text-xs">
+    <code className="block max-w-[420px] whitespace-pre-wrap break-all rounded-md bg-muted px-2 py-1 text-xs">
       {sql}
     </code>
   ) : (
@@ -575,7 +543,7 @@ function ExtensionLine({
           {blockersLabel(blockers)}
         </div>
       </div>
-      <ReadinessBadge ready={ready} blockers={blockers} />
+      <OpsReadinessBadge ready={ready} blockers={blockers} />
     </div>
   );
 }
@@ -586,12 +554,7 @@ function CronJobsTable({ rows }: { rows: CronHttpJobReadiness[] }) {
       title="主机 Cron 任务"
       description="数据库 HTTP 调度已停用；请在应用主机安装 deploy/run-cron.sh 与 deploy/crontab.example，密钥仅保存在 root 可读文件中。"
     >
-      <div
-        className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        role="region"
-        aria-label="HTTP Cron 任务"
-        tabIndex={0}
-      >
+      <TableScrollArea label="HTTP Cron 任务" className="rounded-lg border bg-card">
         <table className="w-full min-w-[980px] text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
@@ -615,7 +578,7 @@ function CronJobsTable({ rows }: { rows: CronHttpJobReadiness[] }) {
                 <td className="px-3 py-2 font-mono text-xs">{row.scheduleExpr}</td>
                 <td className="px-3 py-2">
                   <div className="space-y-1">
-                    <ReadinessBadge
+                    <OpsReadinessBadge
                       ready={row.readyToSchedule}
                       blockers={row.blockers}
                     />
@@ -635,7 +598,7 @@ function CronJobsTable({ rows }: { rows: CronHttpJobReadiness[] }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScrollArea>
     </Section>
   );
 }
@@ -650,12 +613,7 @@ function QueryObservabilityTable({
       title="查询观测候选"
       description="用于定位搜索、Dashboard、账单、库存和薪资路径的慢查询。"
     >
-      <div
-        className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        role="region"
-        aria-label="查询观测候选"
-        tabIndex={0}
-      >
+      <TableScrollArea label="查询观测候选" className="rounded-lg border bg-card">
         <table className="w-full min-w-[920px] text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
@@ -686,14 +644,14 @@ function QueryObservabilityTable({
                   </td>
                   <td className="px-3 py-2">
                     <div className="space-y-1">
-                      <ReadinessBadge ready={ready} blockers={row.blockers} />
+                      <OpsReadinessBadge ready={ready} blockers={row.blockers} />
                       <div className="max-w-[220px] break-words text-xs text-muted-foreground">
                         {blockersLabel(row.blockers)}
                       </div>
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <code className="block max-w-[420px] whitespace-pre-wrap break-all rounded bg-muted px-2 py-1 text-xs">
+                    <code className="block max-w-[420px] whitespace-pre-wrap break-all rounded-md bg-muted px-2 py-1 text-xs">
                       {row.diagnosticSql}
                     </code>
                   </td>
@@ -702,7 +660,7 @@ function QueryObservabilityTable({
             })}
           </tbody>
         </table>
-      </div>
+      </TableScrollArea>
     </Section>
   );
 }
@@ -713,12 +671,7 @@ function SensitiveColumnsTable({
   rows: SensitiveColumnReadiness[];
 }) {
   return (
-    <div
-      className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-      role="region"
-      aria-label="敏感列策略"
-      tabIndex={0}
-    >
+    <TableScrollArea label="敏感列策略" className="rounded-lg border bg-card">
       <table className="w-full min-w-[860px] text-sm">
         <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
           <tr>
@@ -738,20 +691,10 @@ function SensitiveColumnsTable({
               <td className="px-3 py-2">{row.dataClass}</td>
               <td className="px-3 py-2">{row.maskingStrategy}</td>
               <td className="px-3 py-2">
-                <StatusBadge
-                  tone={
-                    row.maskingStrategy !== 'anon_security_label' ||
-                    row.anonLabelApplied
-                      ? 'success'
-                      : 'warning'
-                  }
-                >
-                  {row.maskingStrategy === 'anon_security_label'
-                    ? row.anonLabelApplied
-                      ? '标签已应用'
-                      : '待应用标签'
-                    : '需导出流程处理'}
-                </StatusBadge>
+                <SensitiveColumnMaskingBadge
+                  maskingStrategy={row.maskingStrategy}
+                  anonLabelApplied={row.anonLabelApplied}
+                />
               </td>
               <td className="px-3 py-2">
                 {row.applyAnonLabelSql ? (
@@ -771,18 +714,13 @@ function SensitiveColumnsTable({
           仅显示前 12 条敏感列策略，共 {rows.length} 条。
         </div>
       ) : null}
-    </div>
+    </TableScrollArea>
   );
 }
 
 function AuditTablesTable({ rows }: { rows: SecurityAuditTableReadiness[] }) {
   return (
-    <div
-      className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-      role="region"
-      aria-label="审计表授权"
-      tabIndex={0}
-    >
+    <TableScrollArea label="审计表授权" className="rounded-lg border bg-card">
       <table className="w-full min-w-[720px] text-sm">
         <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
           <tr>
@@ -801,7 +739,7 @@ function AuditTablesTable({ rows }: { rows: SecurityAuditTableReadiness[] }) {
                 {row.auditOperations.join(', ')}
               </td>
               <td className="px-3 py-2">
-                <code className="block max-w-[420px] break-all rounded bg-muted px-2 py-1 text-xs">
+                <code className="block max-w-[420px] break-all rounded-md bg-muted px-2 py-1 text-xs">
                   {row.auditGrantSql}
                 </code>
               </td>
@@ -809,6 +747,6 @@ function AuditTablesTable({ rows }: { rows: SecurityAuditTableReadiness[] }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScrollArea>
   );
 }

@@ -1,0 +1,269 @@
+import type { ComponentProps } from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { commands, page, userEvent } from 'vitest/browser';
+import { Role } from '@/generated/prisma/enums';
+import {
+  ADMIN_ROLE_BADGE,
+  flattenAdminMenuItems,
+  getAdminMenuItems,
+} from '@/lib/navigation/admin-menu';
+import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+import '@/app/globals.css';
+
+const route = vi.hoisted(() => ({ pathname: '/orders/new', search: '' }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => route.pathname,
+  useSearchParams: () => new URLSearchParams(route.search),
+}));
+vi.mock('next/link', () => ({
+  __esModule: true,
+  default: ({
+    prefetch: _prefetch,
+    ...props
+  }: ComponentProps<'a'> & { prefetch?: boolean }) => {
+    void _prefetch;
+    return <a {...props} />;
+  },
+  useLinkStatus: () => ({ pending: false }),
+}));
+vi.mock('@/actions/account', () => ({ signOutAction: vi.fn() }));
+
+import { AdminHeader } from '../AdminHeader';
+import { AppSidebar } from '../AppSidebar';
+
+let host: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  // Only this isolated browser-test context is changed; no login or database fixture.
+  localStorage.removeItem('print-shop-erp:admin-sidebar-collapsed');
+  host = document.createElement('div');
+  host.dataset.testid = 'admin-shell-fixture';
+  document.body.append(host);
+  root = createRoot(host);
+  document.documentElement.lang = 'zh-CN';
+});
+
+afterEach(() => {
+  flushSync(() => root.unmount());
+  host.remove();
+  document.documentElement.classList.remove('dark');
+  delete document.documentElement.dataset.theme;
+  document.documentElement.style.colorScheme = '';
+  localStorage.removeItem('erp-theme');
+  localStorage.removeItem('print-shop-erp:admin-sidebar-collapsed');
+});
+
+async function renderShell(
+  role: Role,
+  theme = 'light',
+  environment = 'development',
+) {
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+  document.documentElement.dataset.theme = theme;
+  flushSync(() => root.render(
+    <SidebarProvider>
+      <AppSidebar
+        menuGroups={getAdminMenuItems({ role })}
+        roleBadge={ADMIN_ROLE_BADGE[role]}
+      />
+      <SidebarInset id="admin-main">
+        <AdminHeader
+          displayName="导航测试账号"
+          roleLabel={ADMIN_ROLE_BADGE[role]}
+          environmentLabel={environment}
+        />
+        <div className="p-6">
+          <h1>导航测试页面</h1>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>,
+  ));
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+function assertMenuLinks(role: Role) {
+  const nav = document.querySelector('[aria-label="后台主导航"]')!;
+  const expected = flattenAdminMenuItems(
+    getAdminMenuItems({ role }).flatMap((group) => group.items),
+  ).filter((item) => item.href !== '#').map((item) => item.href).sort();
+  const actual = [...nav.querySelectorAll('a')]
+    .map((link) => link.getAttribute('href')).sort();
+  expect(actual).toEqual(expected);
+  expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  for (const control of nav.querySelectorAll('a, button')) {
+    const style = getComputedStyle(control);
+    expect(style.fontSize, control.textContent ?? '').toBe('14px');
+    expect(style.lineHeight).toBe('20px');
+    expect(control.getBoundingClientRect().height).toBeCloseTo(44, 1);
+    const isEmphasized = control.getAttribute('aria-current') === 'page'
+      || Boolean(control.closest('[data-menu-level="parent"]') && control.matches('a[data-sidebar="menu-button"]'))
+      || control.hasAttribute('aria-expanded');
+    expect(style.fontWeight).toBe(isEmphasized ? '500' : '400');
+  }
+  for (const label of nav.querySelectorAll('[data-sidebar="group-label"]:not(:has(button))')) {
+    expect(getComputedStyle(label).fontSize).toBe('12px');
+  }
+  if (role !== Role.ADMIN) {
+    expect(nav.querySelector('[data-menu-level="group"]')).toBeNull();
+    expect(nav.querySelector('[data-menu-level="children"]')).toBeNull();
+  } else {
+    const rules = nav.querySelector('[data-menu-group="规则"]')!;
+    expect(rules.querySelector('[data-slot="sidebar-group-label"]')).toBeNull();
+    const link = rules.querySelector<HTMLAnchorElement>('a[href="/owner/rules"]')!;
+    const toggle = rules.querySelector<HTMLButtonElement>('button')!;
+    expect(link.textContent).toBe('规则配置中心');
+    expect(toggle.getAttribute('aria-label')).toBe('收起规则配置中心子菜单');
+    expect(toggle.closest('a')).toBeNull();
+    const linkRect = link.getBoundingClientRect();
+    const toggleRect = toggle.getBoundingClientRect();
+    expect(linkRect.top).toBe(toggleRect.top);
+    // 移动抽屉的 transform 可能引入不足 0.01px 的浮点舍入差。
+    expect(linkRect.right).toBeLessThanOrEqual(toggleRect.left + 0.01);
+    expect(toggleRect.right).toBeLessThanOrEqual(nav.getBoundingClientRect().right);
+  }
+}
+
+const viewports = [
+  [375, 667], [393, 852], [768, 1024],
+  [1024, 768], [1280, 800], [1920, 1080],
+] as const;
+
+describe.each([Role.SALES, Role.ADMIN])('%s shared navigation', (role) => {
+  for (const theme of ['light', 'dark']) {
+    for (const [width, height] of viewports) {
+      it(`${theme} ${width}×${height}: layout, accessible controls and authorized links`, async () => {
+        await page.viewport(width, height);
+        route.pathname = role === Role.ADMIN ? '/owner/rules/customer-pricing' : '/orders/new';
+        await renderShell(role, theme);
+        const header = host.querySelector('header')!;
+        expect(header.querySelector('[aria-label="快捷导航"]')).toBeNull();
+        expect(header.querySelectorAll('nav')).toHaveLength(1);
+        expect(header.querySelectorAll('button button')).toHaveLength(0);
+        const headerRect = header.getBoundingClientRect();
+        expect(headerRect.height).toBe(56);
+        expect(headerRect.right).toBeLessThanOrEqual(width + 1);
+        const radii = [...header.querySelectorAll('button')].map(
+          (button) => getComputedStyle(button).borderRadius,
+        );
+        expect(new Set(radii).size).toBe(1);
+        for (const button of header.querySelectorAll('button')) {
+          const rect = button.getBoundingClientRect();
+          expect(rect.width).toBeGreaterThanOrEqual(44);
+          expect(rect.height).toBeGreaterThanOrEqual(44);
+          expect(rect.left).toBeGreaterThanOrEqual(headerRect.left);
+          expect(rect.right).toBeLessThanOrEqual(headerRect.right);
+        }
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+        expect(await commands.checkShellAccessibility()).toEqual([]);
+
+        if (width < 768) {
+          await page.getByRole('button', { name: '打开/关闭侧边栏菜单' }).click();
+          await expect.element(page.getByRole('dialog', { name: '后台导航菜单' })).toBeVisible();
+          expect(await commands.checkShellAccessibility()).toEqual([]);
+        }
+        assertMenuLinks(role);
+        if (width < 768) {
+          const sidebar = document.querySelector('[data-mobile="true"]')!;
+          for (const control of sidebar.querySelectorAll('a, button:not([disabled])')) {
+            const rect = control.getBoundingClientRect();
+            if (!rect.width || !rect.height) continue;
+            expect(rect.width).toBeGreaterThanOrEqual(44);
+            expect(rect.height).toBeGreaterThanOrEqual(44);
+          }
+          await userEvent.keyboard('{Escape}');
+          await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+        }
+      });
+    }
+  }
+});
+
+it('客服同样平铺，生产环境不显示环境标记', async () => {
+  await page.viewport(1280, 800);
+  route.pathname = '/orders/new';
+  await renderShell(Role.CUSTOMER_SERVICE, 'light', 'production');
+  assertMenuLinks(Role.CUSTOMER_SERVICE);
+  expect(host.querySelector('[data-slot="admin-environment"]')).toBeNull();
+});
+
+it('主题和账号菜单保持键盘、焦点与退出表单契约', async () => {
+  await page.viewport(393, 852);
+  route.pathname = '/orders/new';
+  await renderShell(Role.SALES);
+  const theme = page.getByRole('button', { name: '切换界面主题' });
+  theme.element().focus();
+  await userEvent.keyboard('{Enter}');
+  await expect.element(page.getByRole('menuitemradio', { name: '暗色', exact: true })).toBeVisible();
+  await userEvent.keyboard('{Escape}');
+  await vi.waitFor(() => expect(document.activeElement).toBe(theme.element()));
+  await userEvent.keyboard('{Enter}');
+  await expect.element(page.getByRole('menuitemradio', { name: '浅色', exact: true })).toHaveFocus();
+  await userEvent.keyboard('{ArrowDown} ');
+  expect(document.documentElement.classList.contains('dark')).toBe(true);
+  expect(localStorage.getItem('erp-theme')).toBe('dark');
+  // Radio choices keep their menu open; dismiss before opening the account menu.
+  await userEvent.keyboard('{Escape}');
+  await vi.waitFor(() => expect(document.activeElement).toBe(theme.element()));
+  const account = page.getByRole('button', { name: '用户菜单：导航测试账号' });
+  account.element().focus();
+  await userEvent.keyboard('{Enter}');
+  await expect.element(page.getByRole('menuitem', { name: '修改密码' })).toBeVisible();
+  expect(document.querySelector('[data-slot="user-menu-logout"]')?.closest('form')).not.toBeNull();
+  await expect.element(page.getByText('外部销售', { exact: true })).toBeVisible();
+  await userEvent.keyboard('{Escape}');
+  await vi.waitFor(() => expect(document.activeElement).toBe(account.element()));
+});
+
+it('规则中心入口与折叠按钮合为一行，键盘折叠后仍可进入总览', async () => {
+  await page.viewport(1280, 800);
+  route.pathname = '/owner/rules/customer-pricing';
+  await renderShell(Role.ADMIN);
+  assertMenuLinks(Role.ADMIN);
+  const toggle = page.getByRole('button', { name: '收起规则配置中心子菜单' });
+  toggle.element().focus();
+  await userEvent.keyboard('{Enter}');
+  expect(document.querySelector('[aria-label="规则配置中心子菜单"]')).toBeNull();
+  await expect.element(page.getByRole('link', { name: '规则配置中心', exact: true })).toBeVisible();
+  expect(JSON.parse(localStorage.getItem('print-shop-erp:admin-sidebar-collapsed')!)).toMatchObject({ 规则: true });
+  expect(await commands.checkShellAccessibility()).toEqual([]);
+  await userEvent.keyboard(' ');
+  assertMenuLinks(Role.ADMIN);
+  expect(host.querySelector('[data-menu-group="规则"] [data-menu-level="group-children"]')?.className).not.toContain('pl-2');
+});
+
+it('原有规则折叠偏好继续生效，图标模式与总览入口保持可用', async () => {
+  await page.viewport(1280, 800);
+  localStorage.setItem('print-shop-erp:admin-sidebar-collapsed', JSON.stringify({ 规则: true }));
+  route.pathname = '/owner/rules';
+  await renderShell(Role.ADMIN);
+  const nav = page.getByRole('navigation', { name: '后台主导航' });
+  const link = nav.getByRole('link', { name: '规则配置中心', exact: true });
+  await expect.element(link).toHaveAttribute('href', '/owner/rules');
+  await expect.element(link).toHaveAttribute('aria-current', 'page');
+  const toggle = page.getByRole('button', { name: '展开规则配置中心子菜单' }).element();
+  await expect.element(toggle).toBeVisible();
+  expect(document.querySelector('[aria-label="规则配置中心子菜单"]')).toBeNull();
+  await page.getByRole('button', { name: '打开/关闭侧边栏菜单' }).click();
+  await expect.element(link).toBeVisible();
+  await expect.element(toggle).not.toBeVisible();
+  await page.getByRole('button', { name: '打开/关闭侧边栏菜单' }).click();
+  await page.getByRole('button', { name: '展开规则配置中心子菜单' }).click();
+  assertMenuLinks(Role.ADMIN);
+});
+
+it('鼠标切换主题后按 Escape 关闭菜单，焦点返回主题按钮', async () => {
+  await page.viewport(393, 852);
+  route.pathname = '/orders/new';
+  await renderShell(Role.SALES);
+  const theme = page.getByRole('button', { name: '切换界面主题' });
+  await theme.click();
+  await page.getByRole('menuitemradio', { name: '暗色', exact: true }).click();
+  expect(document.documentElement.classList.contains('dark')).toBe(true);
+  await userEvent.keyboard('{Escape}');
+  await vi.waitFor(() => expect(document.activeElement).toBe(theme.element()));
+});

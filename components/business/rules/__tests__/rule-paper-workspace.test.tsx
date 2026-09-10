@@ -66,8 +66,8 @@ describe('RulePaperWorkspace', () => {
     expect(html).toContain('160g');
     expect(html).toContain('13222 张');
     expect(html).toContain('11111 张');
-    expect(html).toContain('建单可选');
-    expect(html).toContain('停止新单选用');
+    expect(html).toContain('启用');
+    expect(html).toContain('停用');
     expect(html).toContain('未设置');
     expect(html).toContain('href="/owner/rules/papers/pearl-160"');
     expect(html).toContain('aria-label="编辑纸张：珠光艳闪"');

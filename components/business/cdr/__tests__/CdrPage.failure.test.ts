@@ -9,12 +9,13 @@ describe('CDR recent bundle failure recovery', () => {
       'utf8',
     );
     const eligibleSection = source.match(
-      /export async function CdrEligibleOrdersSection[\s\S]*?export async function CdrRecentBundlesSection/,
+      /async function CdrEligibleOrdersSection[\s\S]*?async function CdrRecentBundlesSection/,
     )?.[0];
     const historySection = source.match(
-      /export async function CdrRecentBundlesSection[\s\S]*?function CdrSectionLoading/,
+      /async function CdrRecentBundlesSection[\s\S]*$/,
     )?.[0];
 
+    expect(source).not.toMatch(/export async function Cdr/);
     expect(source).not.toContain('await Promise.all([');
     expect(source.match(/listEligibleOrders\(\{ from, to \}\)/g)).toHaveLength(1);
     expect(source.match(/listRecentBundles\(20\)/g)).toHaveLength(1);

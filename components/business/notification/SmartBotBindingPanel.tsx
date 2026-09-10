@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { createSmartBotBindingCodeAction } from '@/actions/owner-notifications';
 import { Button } from '@/components/ui/button';
-import { ActionNotice, PendingButton } from '@/components/ui-business';
+import { ActionNotice, PendingButton, useCopyToClipboard } from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 type BindingCodeReceipt = {
@@ -29,11 +29,11 @@ export function SmartBotBindingPanel({
   const [pending, startTransition] = useTransition();
   const [receipt, setReceipt] = useState<BindingCodeReceipt | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const { feedback: copyStatus, copy, reset: resetCopyStatus } = useCopyToClipboard();
 
   function generateBindingCode() {
     setError(null);
-    setCopyStatus(null);
+    resetCopyStatus();
     startTransition(async () => {
       const result = await createSmartBotBindingCodeAction(channelId);
       if (result.status === 'success') {
@@ -50,19 +50,14 @@ export function SmartBotBindingPanel({
 
   async function copyBindingCode() {
     if (!receipt) return;
-    try {
-      await navigator.clipboard.writeText(receipt.bindingCode);
-      setCopyStatus('绑定码已复制');
-    } catch {
-      setCopyStatus('复制失败，请手动选中完整绑定码');
-    }
+    await copy(receipt.bindingCode, '绑定码');
   }
 
   function refreshBindingStatus() {
     // A refresh can preserve this Client Component's local state. Drop the
     // one-time plaintext before asking the server for the newly bound state.
     setReceipt(null);
-    setCopyStatus(null);
+    resetCopyStatus();
     router.refresh();
   }
 
@@ -131,11 +126,13 @@ export function SmartBotBindingPanel({
               我已发送，刷新绑定状态
             </Button>
           </div>
-          {copyStatus ? (
-            <p role="status" className="text-xs text-muted-foreground">
-              {copyStatus}
-            </p>
-          ) : null}
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-xs text-muted-foreground"
+          >
+            {copyStatus?.message}
+          </p>
         </div>
       ) : null}
 

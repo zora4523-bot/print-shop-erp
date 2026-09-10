@@ -1,9 +1,11 @@
-import { Badge } from '@/components/ui/badge';
 import type { OrderStatus } from '../../../generated/prisma/enums';
+import { StatusBadge } from '@/components/ui-business';
 import { promisedDateAlert } from '@/lib/order/promised-date';
+import { promisedDateAlertDefinition } from '@/lib/ui/status-registry';
 
 // 承诺交期预警徽标：逾期红、3 天内到期黄；已发货/已完结/已取消或
-// 未填交期不显示。口径全部来自 lib/order/promised-date。
+// 未填交期不显示。口径来自 lib/order/promised-date，文案与色调来自
+// lib/ui/status-registry（§6：业务组件不写本地 tone 类名）。
 export function PromisedDateBadge({
   promisedDate,
   status,
@@ -13,15 +15,6 @@ export function PromisedDateBadge({
 }) {
   const alert = promisedDateAlert(promisedDate, status);
   if (!alert) return null;
-  if (alert.kind === 'overdue') {
-    return <Badge variant="destructive">逾期 {alert.days} 天</Badge>;
-  }
-  return (
-    <Badge
-      variant="outline"
-      className="border-warning/50 bg-warning/10 text-warning-foreground"
-    >
-      {alert.days === 0 ? '今天到期' : `剩 ${alert.days} 天`}
-    </Badge>
-  );
+  const definition = promisedDateAlertDefinition(alert.kind, alert.days);
+  return <StatusBadge tone={definition.tone}>{definition.label}</StatusBadge>;
 }

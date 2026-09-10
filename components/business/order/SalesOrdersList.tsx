@@ -18,12 +18,11 @@ import {
 import { OrderStatus } from '@/generated/prisma/enums';
 import type { OrderListQuery } from '@/lib/order/list-query';
 import type { SalesOrderListRow } from '@/lib/order/sales-list-query';
+import { formatMoney } from '@/lib/dashboard/format';
 import {
-  formatMoney,
   formatSalesOrderUpdatedAt,
   salesOrderAmountPresentation,
   salesOrderPrimaryAction,
-  salesOrderStatusPresentation,
 } from '@/lib/order/sales-list-presentation';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -43,7 +42,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { EmptyState } from '@/components/ui-business';
+import { EmptyState, useCopyToClipboard } from '@/components/ui-business';
+import { SalesOrderStatusBadge } from './SalesOrderStatusBadge';
+import { UrgentBadge } from './UrgentBadge';
 
 export function SalesOrdersList({
   orders,
@@ -62,7 +63,7 @@ export function SalesOrdersList({
     order?: SalesOrderListRow;
     error?: string;
   } | null>(null);
-  const [copyFeedback, setCopyFeedback] = useState('');
+  const { feedback: copyFeedback, copy } = useCopyToClipboard();
   const pageOrder = useMemo(
     () => orders.find((order) => order.orderNo === openOrderNo) ?? null,
     [openOrderNo, orders],
@@ -150,12 +151,7 @@ export function SalesOrdersList({
   }
 
   async function copyValue(value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopyFeedback(`已复制${label} ${value}`);
-    } catch {
-      setCopyFeedback(`${label}复制失败，请手动选择复制`);
-    }
+    await copy(value, label);
   }
 
   return (
@@ -205,7 +201,6 @@ export function SalesOrdersList({
         {openOrder ? (
           <SalesOrderDrawer
             order={openOrder}
-            copyFeedback={copyFeedback}
             onCopy={copyValue}
             onClose={closeOrder}
           />
@@ -219,7 +214,7 @@ export function SalesOrdersList({
         ) : null}
       </Sheet>
       <p className="sr-only" role="status" aria-live="polite">
-        {copyFeedback}
+        {copyFeedback?.message}
       </p>
     </div>
   );
@@ -236,7 +231,6 @@ function SalesOrderCard({
   onOpen: () => void;
   onCopy: (value: string, label: string) => void;
 }) {
-  const status = salesOrderStatusPresentation(order.status);
   const amount = salesOrderAmountPresentation(order);
   const hasPendingAmount = order.feeLines.some((line) => line.amount === null);
   return (
@@ -257,7 +251,7 @@ function SalesOrderCard({
             type="button"
             variant="link"
             onClick={onOpen}
-            className="admin-wrap-anywhere h-auto min-w-0 justify-start whitespace-normal p-0 text-left text-sm font-semibold sm:text-[15px]"
+            className="admin-wrap-anywhere h-auto min-w-0 justify-start whitespace-normal p-0 text-left text-sm font-semibold sm:text-base"
           >
             {order.customName ?? '未命名工单'}
           </Button>
@@ -269,10 +263,10 @@ function SalesOrderCard({
               修改申请中
             </Badge>
           ) : null}
-          {order.isUrgent ? <Badge variant="destructive">急单</Badge> : null}
+          {order.isUrgent ? <UrgentBadge /> : null}
         </div>
 
-        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] text-muted-foreground">
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
           <span className="font-sans tabular-nums">{order.orderNo}</span>
           <Button
             type="button"
@@ -337,22 +331,22 @@ function SalesOrderCard({
       </div>
 
       <div className="col-span-2 flex min-w-0 items-center justify-between gap-3 border-t pt-3 sm:col-span-1 sm:flex-col sm:items-end sm:justify-start sm:border-0 sm:pt-0">
-        <SalesStatusBadge label={status.label} tone={status.tone} />
+        <SalesOrderStatusBadge status={order.status} />
         <div className="min-w-0 text-right">
           <p
             className={cn(
               'font-sans text-sm font-semibold tabular-nums sm:text-base',
-              amount.pending && 'max-w-28 text-xs text-destructive sm:text-xs',
+              amount.pending && 'max-w-28 text-xs text-primary sm:text-xs',
             )}
           >
             {amount.label}
             {!amount.pending && hasPendingAmount ? (
-              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+              <span className="ml-1 text-xs font-normal text-muted-foreground">
                 不含待定
               </span>
             ) : null}
             {amount.estimated ? (
-              <span className="ml-1 text-[10px] text-muted-foreground">估</span>
+              <span className="ml-1 text-xs text-muted-foreground">估</span>
             ) : null}
           </p>
         </div>
@@ -451,7 +445,7 @@ function OrderThumbnail({ order }: { order: SalesOrderListRow }) {
         </span>
       )}
       {order.itemCount > 1 ? (
-        <span className="pointer-events-none absolute -right-1.5 -bottom-1.5 rounded-full border-2 border-background bg-foreground px-1.5 py-0.5 text-[9px] font-semibold text-background">
+        <span className="pointer-events-none absolute -right-1.5 -bottom-1.5 rounded-full border-2 border-background bg-foreground px-1.5 py-0.5 text-xs font-semibold text-background">
           {order.itemCount}款
         </span>
       ) : null}
@@ -467,19 +461,21 @@ function isStylePhotoFileName(fileName: string) {
   );
 }
 
+// 逾期 danger、临期 warning——与 lib/ui/status-registry.ts 的
+// PROMISED_DATE_ALERT_REGISTRY 同口径（§6：两档必须能区分开）。
 function DueDate({ order }: { order: SalesOrderListRow }) {
   if (!order.promisedDate) return <span>交货未设置</span>;
   const shortDate = order.promisedDate.slice(5);
   if (order.dueAlert?.kind === 'overdue') {
     return (
-      <span className="rounded bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
+      <span className="rounded-md bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
         交货 {shortDate} · 已超 {order.dueAlert.days} 天
       </span>
     );
   }
   if (order.dueAlert?.kind === 'due-soon') {
     return (
-      <span className="font-medium text-destructive">
+      <span className="font-medium text-warning-foreground">
         交货 {shortDate} ·{' '}
         {order.dueAlert.days === 0
           ? '今天到期'
@@ -490,44 +486,15 @@ function DueDate({ order }: { order: SalesOrderListRow }) {
   return <span>交货 {shortDate}</span>;
 }
 
-function SalesStatusBadge({
-  label,
-  tone,
-}: {
-  label: string;
-  tone: ReturnType<typeof salesOrderStatusPresentation>['tone'];
-}) {
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        tone === 'muted' && 'border-muted bg-muted text-muted-foreground',
-        tone === 'outline' && 'border-foreground/70',
-        tone === 'production' &&
-          'border-foreground bg-foreground text-background',
-        tone === 'shipped' &&
-          'border-success/40 bg-success/10 text-success-foreground',
-        tone === 'attention' &&
-          'border-destructive/40 bg-destructive/10 text-destructive',
-      )}
-    >
-      {label}
-    </Badge>
-  );
-}
-
 function SalesOrderDrawer({
   order,
-  copyFeedback,
   onCopy,
   onClose,
 }: {
   order: SalesOrderListRow;
-  copyFeedback: string;
   onCopy: (value: string, label: string) => void;
   onClose: () => void;
 }) {
-  const status = salesOrderStatusPresentation(order.status);
   const amount = salesOrderAmountPresentation(order);
   const hasPendingAmount = order.feeLines.some((line) => line.amount === null);
   const hasOperations =
@@ -540,13 +507,13 @@ function SalesOrderDrawer({
       side="right"
       className="!w-full gap-0 overflow-hidden sm:!max-w-[30rem]"
     >
-      <SheetHeader className="border-b pt-[max(1rem,env(safe-area-inset-top,0px))] pr-[max(4rem,calc(3rem+env(safe-area-inset-right,0px)))] pl-[max(1rem,env(safe-area-inset-left,0px))]">
+      <SheetHeader className="border-b pt-[max(1rem,env(safe-area-inset-top,0px))] pr-[max(4rem,calc(3rem+env(safe-area-inset-right,0px)))]">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <SheetTitle className="admin-wrap-anywhere min-w-0 text-lg font-semibold">
             <span className="sr-only">工单明细：</span>
             {order.customName ?? '未命名工单'}
           </SheetTitle>
-          <SalesStatusBadge label={status.label} tone={status.tone} />
+          <SalesOrderStatusBadge status={order.status} />
         </div>
         <SheetDescription className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span>{order.customerRef ?? '未填客户'}</span>
@@ -565,7 +532,7 @@ function SalesOrderDrawer({
         </SheetDescription>
       </SheetHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-4 pr-[max(1rem,env(safe-area-inset-right,0px))] pl-[max(1rem,env(safe-area-inset-left,0px))]">
+      <div className="min-h-0 flex-1 overflow-y-auto py-4 admin-safe-inline">
         <DrawerSection title="进度">
           <OrderProgress order={order} />
           {order.pricingAttentionReason ? (
@@ -597,10 +564,10 @@ function SalesOrderDrawer({
           <ul className="divide-y">
             {order.items.map((item) => (
               <li key={item.id} className="flex min-w-0 items-center gap-3 py-2.5">
-                <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
                   {item.sequence}
                 </span>
-                <div className="h-12 w-9 shrink-0 overflow-hidden rounded border bg-muted">
+                <div className="h-12 w-9 shrink-0 overflow-hidden rounded-md border bg-muted">
                   {item.thumbnail ? (
                     <img
                       src={item.thumbnail.url}
@@ -618,7 +585,7 @@ function SalesOrderDrawer({
                     {item.name}
                   </p>
                   <p
-                    className="mt-0.5 truncate text-[11px] text-muted-foreground"
+                    className="mt-0.5 truncate text-xs text-muted-foreground"
                     title={
                       [...item.crafts, item.paper, item.specification]
                         .filter(Boolean)
@@ -632,7 +599,7 @@ function SalesOrderDrawer({
                 </div>
                 <p className="shrink-0 text-right font-sans text-sm font-semibold tabular-nums">
                   {item.quantity.toLocaleString('zh-CN')}
-                  <span className="block text-[10px] font-normal text-muted-foreground">
+                  <span className="block text-xs font-normal text-muted-foreground">
                     个
                   </span>
                 </p>
@@ -648,9 +615,9 @@ function SalesOrderDrawer({
                 <div key={line.id} className="flex justify-between gap-3 py-2 text-sm">
                   <dt className="min-w-0 text-muted-foreground">{line.label}</dt>
                   <dd className="shrink-0 font-sans font-medium tabular-nums">
-                    {line.amount === null ? '待定' : `¥${formatMoney(line.amount)}`}
+                    {line.amount === null ? '待定' : formatMoney(line.amount)}
                     {line.estimated ? (
-                      <span className="ml-1 text-[10px] text-muted-foreground">
+                      <span className="ml-1 text-xs text-muted-foreground">
                         估
                       </span>
                     ) : null}
@@ -670,12 +637,12 @@ function SalesOrderDrawer({
             <span
               className={cn(
                 'font-sans text-xl font-semibold tabular-nums',
-                amount.pending && 'text-sm text-destructive',
+                amount.pending && 'text-sm text-primary',
               )}
             >
               {amount.label}
               {amount.estimated ? (
-                <span className="ml-1 text-[10px] text-muted-foreground">估</span>
+                <span className="ml-1 text-xs text-muted-foreground">估</span>
               ) : null}
             </span>
           </div>
@@ -712,7 +679,7 @@ function SalesOrderDrawer({
         </DrawerSection>
       </div>
 
-      <SheetFooter className="flex-row border-t bg-background pt-4 pr-[max(1rem,env(safe-area-inset-right,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] pl-[max(1rem,env(safe-area-inset-left,0px))]">
+      <SheetFooter className="flex-row border-t bg-background pt-4 admin-safe-inline admin-safe-bottom">
         {order.status === OrderStatus.DRAFT ? (
           <Link
             href={`/orders/${order.id}`}
@@ -746,9 +713,6 @@ function SalesOrderDrawer({
           </Button>
         )}
       </SheetFooter>
-      <p className="sr-only" role="status" aria-live="polite">
-        {copyFeedback}
-      </p>
     </SheetContent>
   );
 }
@@ -769,13 +733,13 @@ function SalesOrderDrawerState({
       side="right"
       className="!w-full gap-0 overflow-hidden sm:!max-w-[30rem]"
     >
-      <SheetHeader className="border-b pt-[max(1rem,env(safe-area-inset-top,0px))] pr-[max(4rem,calc(3rem+env(safe-area-inset-right,0px)))] pl-[max(1rem,env(safe-area-inset-left,0px))]">
+      <SheetHeader className="border-b pt-[max(1rem,env(safe-area-inset-top,0px))] pr-[max(4rem,calc(3rem+env(safe-area-inset-right,0px)))]">
         <SheetTitle>工单明细</SheetTitle>
         <SheetDescription className="font-sans tabular-nums">
           {orderNo}
         </SheetDescription>
       </SheetHeader>
-      <div className="flex min-h-0 flex-1 items-center justify-center py-6 pr-[max(1.5rem,env(safe-area-inset-right,0px))] pl-[max(1.5rem,env(safe-area-inset-left,0px))] text-center">
+      <div className="flex min-h-0 flex-1 items-center justify-center py-6 admin-safe-inline text-center">
         {loading || !error ? (
           <p role="status" className="text-sm text-muted-foreground">
             正在加载工单明细…
@@ -809,7 +773,7 @@ function DrawerSection({
 }) {
   return (
     <section className="mb-6 last:mb-0">
-      <h3 className="mb-2 border-b pb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      <h3 className="mb-2 border-b pb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
         {title}
       </h3>
       {children}
@@ -842,7 +806,7 @@ function OrderProgress({ order }: { order: SalesOrderListRow }) {
           key={step}
           aria-current={index === current ? 'step' : undefined}
           className={cn(
-            'relative text-center text-[10px] text-muted-foreground before:mx-auto before:mb-1.5 before:block before:size-2.5 before:rounded-full before:border before:border-muted-foreground/30 before:bg-muted after:absolute after:left-[calc(50%+0.45rem)] after:right-[calc(-50%+0.45rem)] after:top-[0.28rem] after:h-px after:bg-border last:after:hidden',
+            'relative text-center text-xs text-muted-foreground before:mx-auto before:mb-1.5 before:block before:size-2.5 before:rounded-full before:border before:border-muted-foreground/30 before:bg-muted after:absolute after:left-[calc(50%+0.45rem)] after:right-[calc(-50%+0.45rem)] after:top-[0.28rem] after:h-px after:bg-border last:after:hidden',
             index < current &&
               'text-foreground before:border-foreground before:bg-foreground after:bg-foreground',
             index === current &&

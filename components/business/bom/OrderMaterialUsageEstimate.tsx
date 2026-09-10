@@ -1,5 +1,6 @@
 import type { OrderMaterialUsageEstimate as Estimate } from '@/lib/bom';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { TableScrollArea } from '@/components/ui-business';
 
 function sourceLabel(source: Estimate['items'][number]['source']): string {
   if (source === 'PRODUCT') return '产品 BOM';
@@ -27,12 +28,7 @@ export function OrderMaterialUsageEstimate({
         </p>
       ) : (
         <div className="space-y-4">
-          <div
-            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            role="region"
-            aria-label="工单物料用量估算"
-            tabIndex={0}
-          >
+          <TableScrollArea label="工单物料用量估算">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
@@ -84,7 +80,7 @@ export function OrderMaterialUsageEstimate({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScrollArea>
 
           {estimate.totals.length > 0 ? (
             <div className="rounded-lg border p-4">

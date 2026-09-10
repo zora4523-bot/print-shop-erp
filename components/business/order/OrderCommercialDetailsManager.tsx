@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useContext, useState, useTransition } from 'react';
+import { formatMoneyPlain } from '@/lib/dashboard/format';
 import {
   deleteOrderManualChargeAction,
   deleteOrderPlateDetailAction,
@@ -390,7 +391,7 @@ function PlateDetailEditor({
         </p>
         {Number.isFinite(calculatedAmount) ? (
           <span className="font-sans text-xs tabular-nums">
-            金额 {calculatedAmount.toFixed(2)} 元
+            金额 {formatMoneyPlain(calculatedAmount)} 元
           </span>
         ) : null}
       </div>

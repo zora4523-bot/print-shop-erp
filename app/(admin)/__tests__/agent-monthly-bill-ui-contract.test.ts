@@ -71,7 +71,7 @@ describe('agent monthly bill owner cutover', () => {
       forms.indexOf('export function CreateAgentMonthlyBillCreditForm'),
     );
     expect(paidForm).not.toContain('name="amount"');
-    expect(paidForm).toContain('{lockedAmount}');
+    expect(paidForm).toContain('{formatMoney(lockedAmount)}');
     expect(paidForm).not.toContain('服务端');
   });
 

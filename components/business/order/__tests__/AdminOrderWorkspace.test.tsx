@@ -128,12 +128,12 @@ describe('AdminOrderWorkspace', () => {
     }
     expect(html).toContain('搜工单号 / 客户 / 名称 / 运单号');
     expect(html).toContain('12,345');
-    expect(html).toContain('¥4,567.80');
+    expect(html).toContain('¥ 4,567.80');
     expect(html).toContain('另 1 单待核价未计入');
     expect(html).toContain('另 3 单金额不完整未计入');
     expect(html).toContain('另 2 单历史金额未计入');
     expect(html).toContain('待收款 · 2 张');
-    expect(html).toContain('¥998.50');
+    expect(html).toContain('¥ 998.50');
     expect(html).toContain('仅未出账');
     expect(html).toContain('富行列表');
   });

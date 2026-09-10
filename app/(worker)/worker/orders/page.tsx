@@ -6,6 +6,7 @@ import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { EmptyState } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { formatMoney } from '@/lib/dashboard/format';
 import { parsePositiveInt } from '@/lib/admin/table';
 
 export const metadata = { title: '我的工单' };
@@ -87,7 +88,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
                   <div className="ml-auto shrink-0 text-right">
                     <p className="text-xs text-muted-foreground">我的已报计件</p>
                     <p className="font-sans tabular-nums font-medium">
-                      ¥ {order.pieceworkAmount}
+                      {formatMoney(order.pieceworkAmount)}
                     </p>
                   </div>
                 </div>

@@ -199,7 +199,7 @@ function FieldLabel({
   return (
     <label
       htmlFor={htmlFor}
-      className="mb-2 block text-[0.6875rem] font-bold tracking-[0.16em] text-muted-foreground"
+      className="mb-2 block text-xs font-bold tracking-[0.16em] text-muted-foreground"
     >
       {children}
       {required ? <RequiredMark /> : null}
@@ -217,7 +217,7 @@ function FieldError({ id, children }: { id?: string; children?: string }) {
     >
       <span
         aria-hidden="true"
-        className="mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full bg-destructive text-[0.5625rem] text-destructive-foreground"
+        className="mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full bg-destructive text-xs text-destructive-foreground"
       >
         !
       </span>
@@ -254,11 +254,11 @@ function PillPicker<T extends string | number>({
       aria-invalid={Boolean(error)}
       aria-describedby={error ? messageId : undefined}
     >
-      <legend className="mb-2 text-[0.6875rem] font-bold tracking-[0.16em] text-muted-foreground">
+      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
         {label}
         {required ? <RequiredMark /> : null}
         {note ? (
-          <span className="ml-2 text-[0.625rem] tracking-normal text-destructive">
+          <span className="ml-2 text-xs tracking-normal text-destructive">
             {note}
           </span>
         ) : null}
@@ -275,7 +275,7 @@ function PillPicker<T extends string | number>({
               aria-pressed={selected}
               disabled={disabled || option.disabled}
               className={cn(
-                'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-[0.84375rem] font-semibold',
+                'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-sm font-semibold',
                 option.detail && 'flex-col gap-0 py-1',
                 selected &&
                   'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
@@ -284,7 +284,7 @@ function PillPicker<T extends string | number>({
             >
               <span>{option.label}</span>
               {option.detail ? (
-                <span className="text-[0.625rem] font-medium opacity-60">
+                <span className="text-xs font-medium opacity-60">
                   {option.detail}
                 </span>
               ) : null}
@@ -310,11 +310,11 @@ function Group({
     <section
       aria-label={title}
       className={cn(
-        'border-t pt-[1.125rem]',
-        first ? 'border-0 pt-0' : 'mt-[1.125rem]',
+        'border-t pt-4',
+        first ? 'border-0 pt-0' : 'mt-4',
       )}
     >
-      <h2 className="mb-3.5 text-[0.6875rem] font-extrabold tracking-[0.2em] text-muted-foreground">
+      <h2 className="mb-3.5 text-xs font-extrabold tracking-[0.2em] text-muted-foreground">
         {title}
       </h2>
       {children}
@@ -379,7 +379,7 @@ function DesignFileBox({
       {entry ? (
         <div
           data-slot="design-file-marker"
-          className="flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-[0.625rem] font-bold text-muted-foreground"
+          className="flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-xs font-bold text-muted-foreground"
         >
           {image ? (
             <LocalDesignImagePreview
@@ -392,7 +392,7 @@ function DesignFileBox({
         </div>
       ) : null}
       <div className="min-w-0 flex-1">
-        <p className="text-[0.8125rem] font-bold leading-snug">
+        <p className="text-sm font-bold leading-snug">
           {entry
             ? image
               ? '设计图'
@@ -404,7 +404,7 @@ function DesignFileBox({
         </p>
         {entry ? (
           <p
-            className="mt-0.5 truncate text-[0.6875rem] font-medium text-muted-foreground"
+            className="mt-0.5 truncate text-xs font-medium text-muted-foreground"
             title={entry.prepared.file.name}
           >
             {entry.prepared.file.name} ·{' '}
@@ -517,7 +517,7 @@ function DesignFileBox({
           }}
         >
           {uploadContent}
-          <span className="shrink-0 rounded-md border bg-card px-2.5 py-1.5 text-[0.71875rem] font-bold">
+          <span className="shrink-0 rounded-md border bg-card px-2.5 py-1.5 text-xs font-bold">
             选择文件
           </span>
         </Button>
@@ -653,7 +653,7 @@ function FoilSideFields({
 
   return (
     <fieldset className="mt-5 min-w-0" aria-label="烫金颜色">
-      <legend className="mb-2 text-[0.6875rem] font-bold tracking-[0.16em] text-muted-foreground">
+      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
         烫金颜色
       </legend>
       <div className="rounded-xl bg-muted/30 p-3.5">
@@ -737,7 +737,7 @@ function SpecialTechnique({
   ] as const;
   return (
     <fieldset className="mt-5">
-      <legend className="mb-2 text-[0.6875rem] font-bold tracking-[0.16em] text-muted-foreground">
+      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
         特殊工艺
       </legend>
       <div className="flex flex-wrap gap-1.5">
@@ -752,7 +752,7 @@ function SpecialTechnique({
               aria-pressed={selected}
               disabled={disabled}
               className={cn(
-                'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-[0.84375rem] font-semibold',
+                'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-sm font-semibold',
                 selected &&
                   'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
               )}
@@ -974,12 +974,12 @@ export function OrderFormB({
         putFile(file, DesignFileType.IMAGE);
       }}
     >
-      <header className="mb-[1.125rem] flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[1.3125rem] font-extrabold tracking-tight">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-extrabold tracking-tight">
           {title}
         </h1>
         {settlementLabel ? (
-          <span className="rounded-full border px-3 py-1 text-[0.71875rem] font-semibold text-muted-foreground">
+          <span className="rounded-full border px-3 py-1 text-xs font-semibold text-muted-foreground">
             {settlementLabel}
           </span>
         ) : null}
@@ -987,7 +987,7 @@ export function OrderFormB({
 
       <nav
         aria-label="款式"
-        className="mb-[1.125rem] flex flex-wrap items-center gap-1.5"
+        className="mb-4 flex flex-wrap items-center gap-1.5"
       >
         {itemFields.map((entry, index) => (
           <Button
@@ -997,7 +997,7 @@ export function OrderFormB({
             aria-pressed={safeActiveIndex === index}
             disabled={disabled}
             className={cn(
-              'h-auto min-h-8 rounded-[9px] px-3.5 py-1.5 text-[0.8125rem] font-bold',
+              'h-auto min-h-8 rounded-lg px-3.5 py-1.5 text-sm font-bold',
               safeActiveIndex === index &&
                 'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
             )}
@@ -1016,7 +1016,7 @@ export function OrderFormB({
           type="button"
           variant="outline"
           disabled={disabled}
-          className="h-auto min-h-8 rounded-[9px] border-dashed px-3.5 py-1.5 text-[0.8125rem] font-extrabold text-muted-foreground"
+          className="h-auto min-h-8 rounded-lg border-dashed px-3.5 py-1.5 text-sm font-extrabold text-muted-foreground"
           onClick={onAdd}
         >
           ＋ 加款
@@ -1025,7 +1025,7 @@ export function OrderFormB({
           type="button"
           variant="outline"
           disabled={disabled}
-          className="h-auto min-h-8 rounded-[9px] border-dashed px-3.5 py-1.5 text-[0.8125rem] font-extrabold text-muted-foreground"
+          className="h-auto min-h-8 rounded-lg border-dashed px-3.5 py-1.5 text-sm font-extrabold text-muted-foreground"
           onClick={() => onDuplicate(safeActiveIndex)}
         >
           ⧉ 复制当前
@@ -1036,13 +1036,13 @@ export function OrderFormB({
             variant="outline"
             aria-label={`删除第 ${safeActiveIndex + 1} 款`}
             disabled={disabled}
-            className="h-auto min-h-8 rounded-[9px] px-3.5 py-1.5 text-[0.8125rem] font-extrabold text-destructive hover:bg-destructive/5 hover:text-destructive"
+            className="h-auto min-h-8 rounded-lg px-3.5 py-1.5 text-sm font-extrabold text-destructive hover:bg-destructive/5 hover:text-destructive"
             onClick={() => onRemove(safeActiveIndex)}
           >
             删除当前
           </Button>
         ) : null}
-        <span className="ml-auto flex items-center gap-1.5 text-[0.71875rem] font-semibold text-muted-foreground">
+        <span className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
           <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
           {savedLabel}
         </span>
@@ -1050,11 +1050,11 @@ export function OrderFormB({
 
       <div
         data-slot="order-form-layout"
-        className="grid grid-cols-1 items-start gap-[1.375rem] @min-[881px]:grid-cols-[minmax(0,1fr)_310px]"
+        className="grid grid-cols-1 items-start gap-6 @min-[881px]:grid-cols-[minmax(0,1fr)_310px]"
       >
         <div
           data-slot="order-form-editor"
-          className="@container min-w-0 rounded-[14px] border bg-card p-5"
+          className="@container min-w-0 rounded-xl border bg-card p-5"
         >
           {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
             <div
@@ -1258,7 +1258,7 @@ export function OrderFormB({
               {allowCustomSize &&
               item.pricingRoute ===
                 OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
-                <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-[0.8125rem] font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
                   <Checkbox
                     checked={customSizeSelected}
                     disabled={disabled}
@@ -1356,7 +1356,7 @@ export function OrderFormB({
 
           <Group title="文件">
             <fieldset>
-              <legend className="mb-2 text-[0.6875rem] font-bold tracking-[0.16em] text-muted-foreground">
+              <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
                 设计文件
                 {designImageRequired ? <RequiredMark /> : null}
               </legend>
@@ -1448,19 +1448,19 @@ export function OrderFormB({
                   />
                 </div>
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center px-3 py-2.5">
-                  <span className="text-[0.65625rem] font-bold tracking-[0.14em] text-muted-foreground">
+                  <span className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
                     地址
                   </span>
-                  <p className="min-w-0 break-words text-[0.8125rem] font-semibold">
+                  <p className="min-w-0 break-words text-sm font-semibold">
                     {parsedReceiver.address || '—'}
                   </p>
                 </div>
                 {parsedReceiver.platformCode ? (
                   <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center border-t px-3 py-2.5">
-                    <span className="text-[0.65625rem] font-bold tracking-[0.14em] text-muted-foreground">
+                    <span className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
                       平台码
                     </span>
-                    <p className="min-w-0 break-words font-mono text-[0.8125rem] font-semibold">
+                    <p className="min-w-0 break-words font-mono text-sm font-semibold">
                       {parsedReceiver.platformCode}
                     </p>
                   </div>
@@ -1468,7 +1468,7 @@ export function OrderFormB({
               </div>
             ) : null}
 
-            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-[0.8125rem] font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
               <Checkbox
                 checked={values.isSfCollect ?? false}
                 disabled={disabled}

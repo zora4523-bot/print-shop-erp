@@ -19,6 +19,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui-business';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { formatMoney } from '@/lib/dashboard/format';
 import { OrderKind } from '@/generated/prisma/enums';
 import { formatReceiverInfo } from '@/lib/order/receiver-info';
 import { AdminSortLink } from '@/components/business/admin/AdminDataTable';
@@ -144,14 +145,14 @@ export function OrdersTable({
                 <div className="text-right">
                   <dt className="text-muted-foreground">金额</dt>
                   <dd className="mt-0.5 font-sans font-medium tabular-nums">
-                    ¥ {String(order.totalAmount ?? '0.00')}
+                    {formatMoney(String(order.totalAmount ?? '0.00'))}
                   </dd>
                 </div>
               ) : showPieceworkCost ? (
                 <div className="text-right">
                   <dt className="text-muted-foreground">计件成本</dt>
                   <dd className="mt-0.5 font-sans font-medium tabular-nums">
-                    ¥ {order.pieceworkCost ?? '0.00'}
+                    {formatMoney(order.pieceworkCost ?? 0)}
                   </dd>
                 </div>
               ) : null}
@@ -265,7 +266,7 @@ export function OrdersTable({
                 {o.orderNo}
               </span>
               {o.sourceOrderNo ? (
-                <span className="block text-[11px] text-muted-foreground">
+                <span className="block text-xs text-muted-foreground">
                   原单 {o.sourceOrderNo}
                 </span>
               ) : null}
@@ -308,7 +309,7 @@ export function OrdersTable({
             ) : null}
             {showPieceworkCost ? (
               <TableCell className="text-right font-sans tabular-nums text-xs">
-                ¥ {o.pieceworkCost ?? '0.00'}
+                {formatMoney(o.pieceworkCost ?? 0)}
               </TableCell>
             ) : null}
             <TableCell>

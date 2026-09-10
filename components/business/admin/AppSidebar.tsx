@@ -138,6 +138,8 @@ const PINNED_HREFS = new Set([
   '/orders',
   '/orders/new',
 ]);
+// 所有可点击菜单统一 14px / 20px 与 44px 行高；层级由缩进和字重表达。
+const MENU_ROW_CLASS = 'h-11 text-sm leading-5';
 
 type AppSidebarProps = {
   menuGroups: AdminMenuGroup[];
@@ -191,11 +193,19 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
     writeSidebarCollapse(next);
   }
 
-  const pinnedItems = allItems.filter((item) => PINNED_HREFS.has(item.href));
+  // 少量、没有子菜单的角色入口直接平铺；不让唯一的账单入口再套一层财务。
+  // 管理员的多项分组与规则子菜单仍保留，权限继续由 menuGroups 决定。
+  const compactMenu =
+    allItems.length <= 4 && allItems.every((item) => !item.children?.length);
+  const pinnedItems = allItems.filter(
+    (item) => compactMenu || PINNED_HREFS.has(item.href),
+  );
   const grouped = menuGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => !PINNED_HREFS.has(item.href)),
+      items: group.items.filter(
+        (item) => !compactMenu && !PINNED_HREFS.has(item.href),
+      ),
     }))
     .filter((group) => group.items.length > 0);
 
@@ -206,7 +216,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
           <span className="text-sm font-semibold leading-tight tracking-normal">
             红包印刷 ERP
           </span>
-          <span className="w-fit rounded-md bg-sidebar-accent px-1.5 py-0.5 text-xs text-sidebar-accent-foreground">
+          <span className="text-xs text-sidebar-foreground/70">
             {roleBadge}
           </span>
         </div>
@@ -219,11 +229,11 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
       </SidebarHeader>
       {/* nav 地标：侧边栏是后台的主导航，但 SidebarContent 渲染的是
           裸 div，整个 (admin) 外壳因此没有 navigation 地标——而师傅端
-          有。aria-label 是必要的：同页还有面包屑和快捷入口两个 nav。 */}
+          有。aria-label 用于区分主导航与顶栏面包屑。 */}
       <SidebarContent aria-label="后台主导航" role="navigation">
         {pinnedItems.length > 0 ? (
           <SidebarGroup>
-            <SidebarGroupLabel>常用</SidebarGroupLabel>
+            <SidebarGroupLabel>{compactMenu ? '工作台' : '常用'}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {pinnedItems.map((item) => (
@@ -247,10 +257,17 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
         {grouped.map((group, idx) => {
           const label = group.label ?? `group-${idx}`;
           const collapsed = Boolean(group.label && collapsedGroups[group.label]);
+          // 单个父级入口直接承担分组导航与折叠，不再重复渲染分组标题。
+          const singleParent = Boolean(
+            group.label &&
+              group.items.length === 1 &&
+              group.items[0].href !== '#' &&
+              group.items[0].children?.length,
+          );
           const containsActive = group.items.some((item) =>
             menuItemContainsHref(item, activeHref),
           );
-          const hideItems = collapsed;
+          const hideItems = collapsed && !singleParent;
           const contentId = `admin-menu-group-${idx}`;
           return (
             <SidebarGroup
@@ -260,14 +277,15 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
               data-has-active-item={containsActive ? 'true' : undefined}
               className="py-1.5 group-data-[collapsible=icon]:border-t group-data-[collapsible=icon]:border-sidebar-border/70 group-data-[collapsible=icon]:py-2"
             >
-              {group.label ? (
-                <SidebarGroupLabel className="h-10 px-1 group-data-[collapsible=icon]:hidden md:h-9">
+              {group.label && !singleParent ? (
+                <SidebarGroupLabel className="h-11 px-0 group-data-[collapsible=icon]:hidden">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     className={cn(
-                      'h-10 w-full justify-between rounded-lg px-2 text-left text-xs font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground md:h-9',
+                      MENU_ROW_CLASS,
+                      'w-full justify-between rounded-md px-2 text-left font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground',
                       containsActive &&
                         'bg-sidebar-accent/60 text-sidebar-accent-foreground',
                     )}
@@ -275,21 +293,11 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
                     aria-controls={contentId}
                     onClick={() => toggleGroup(group.label!)}
                   >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          'size-2 shrink-0 rounded-full border border-sidebar-border bg-sidebar',
-                          containsActive &&
-                            'border-sidebar-primary bg-sidebar-primary',
-                        )}
-                      />
-                      <span className="truncate">{group.label}</span>
-                    </span>
+                    <span className="truncate">{group.label}</span>
                     <ChevronRight
                       aria-hidden="true"
                       className={cn(
-                        'size-3.5 shrink-0 transition-transform duration-200',
+                        'size-4 shrink-0 transition-transform duration-200',
                         !hideItems && 'rotate-90',
                       )}
                     />
@@ -303,7 +311,6 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
                 <SidebarGroupContent
                   id={contentId}
                   data-menu-level="group-children"
-                  className="pl-2 group-data-[collapsible=icon]:pl-0"
                 >
                   <SidebarMenu className="gap-0.5">
                     {group.items.map((item) => (
@@ -318,6 +325,11 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
                           cancelIntentPrefetch(href);
                           setOpenMobile(false);
                         }}
+                        disclosure={singleParent ? {
+                          collapsed,
+                          contentId: `${contentId}-submenu`,
+                          onToggle: () => toggleGroup(label),
+                        } : undefined}
                       />
                     ))}
                   </SidebarMenu>
@@ -339,6 +351,7 @@ function SidebarItem({
   onEnter,
   onLeave,
   onNavigate,
+  disclosure,
 }: {
   item: AdminMenuItem;
   activeHref: string | null;
@@ -346,6 +359,11 @@ function SidebarItem({
   onEnter: (href: string) => void;
   onLeave: (href?: string) => void;
   onNavigate: (href: string) => void;
+  disclosure?: {
+    collapsed: boolean;
+    contentId: string;
+    onToggle: () => void;
+  };
 }) {
   const Icon = ICONS[item.iconName];
   const active = item.href === activeHref;
@@ -358,13 +376,13 @@ function SidebarItem({
       <SidebarMenuItem data-menu-level={hasChildren ? 'parent' : 'item'}>
         <SidebarMenuButton
           isActive={false}
-          className="cursor-not-allowed text-muted-foreground"
+          className={cn(MENU_ROW_CLASS, 'cursor-not-allowed font-normal text-muted-foreground')}
           tooltip={`${item.label}（未上线）`}
           disabled
         >
           <Icon />
           <span>{item.label}</span>
-          <span className="ml-auto text-[10px] group-data-[collapsible=icon]:hidden">
+          <span className="ml-auto text-xs leading-4 group-data-[collapsible=icon]:hidden">
             未上线
           </span>
         </SidebarMenuButton>
@@ -376,34 +394,60 @@ function SidebarItem({
       data-menu-level={hasChildren ? 'parent' : 'item'}
       data-has-active-child={hasActiveChild ? 'true' : undefined}
     >
-      <SidebarMenuButton
-        isActive={active}
-        tooltip={item.label}
-        data-has-active-child={hasActiveChild ? 'true' : undefined}
-        render={
-          <Link
-            href={item.href}
-            aria-current={active ? 'page' : undefined}
-            prefetch={intentHref === item.href ? true : false}
-            onMouseEnter={() => onEnter(item.href)}
-            onMouseLeave={() => onLeave(item.href)}
-            onClick={() => onNavigate(item.href)}
-          />
-        }
-        className={cn(
-          hasChildren && 'h-10 font-semibold',
-          hasActiveChild &&
-            'text-sidebar-accent-foreground group-data-[collapsible=icon]:bg-sidebar-accent',
-          active &&
-            'bg-sidebar-accent font-semibold text-sidebar-accent-foreground shadow-sm ring-1 ring-sidebar-border',
-        )}
-      >
-        <Icon />
-        <span>{item.label}</span>
-        <SidebarLinkPendingIndicator />
-      </SidebarMenuButton>
-      {item.children?.length ? (
+      <div className="flex items-center">
+        <SidebarMenuButton
+          isActive={active}
+          tooltip={item.label}
+          data-has-active-child={hasActiveChild ? 'true' : undefined}
+          render={
+            <Link
+              href={item.href}
+              aria-label={item.label}
+              aria-current={active ? 'page' : undefined}
+              prefetch={intentHref === item.href ? true : false}
+              onMouseEnter={() => onEnter(item.href)}
+              onMouseLeave={() => onLeave(item.href)}
+              onClick={() => onNavigate(item.href)}
+            />
+          }
+          className={cn(
+            MENU_ROW_CLASS,
+            hasChildren ? 'font-medium' : 'font-normal',
+            disclosure && 'min-w-0 flex-1',
+            hasActiveChild &&
+              'text-sidebar-accent-foreground group-data-[collapsible=icon]:bg-sidebar-accent',
+            active &&
+              'bg-sidebar-accent font-medium text-sidebar-accent-foreground',
+          )}
+        >
+          <Icon />
+          <span>{item.label}</span>
+          <SidebarLinkPendingIndicator />
+        </SidebarMenuButton>
+        {disclosure ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-11 shrink-0 rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:hidden"
+            aria-label={`${disclosure.collapsed ? '展开' : '收起'}${item.label}子菜单`}
+            aria-expanded={!disclosure.collapsed}
+            aria-controls={disclosure.contentId}
+            onClick={disclosure.onToggle}
+          >
+            <ChevronRight
+              aria-hidden="true"
+              className={cn(
+                'size-4 transition-transform duration-200 motion-reduce:transition-none',
+                !disclosure.collapsed && 'rotate-90',
+              )}
+            />
+          </Button>
+        ) : null}
+      </div>
+      {item.children?.length && !disclosure?.collapsed ? (
         <SidebarMenuSub
+          id={disclosure?.contentId}
           aria-label={`${item.label}子菜单`}
           data-menu-level="children"
         >
@@ -469,11 +513,12 @@ function SidebarSubItem({
           />
         }
         className={cn(
-          'h-10 text-sidebar-foreground/75 md:h-8',
+          MENU_ROW_CLASS,
+          'font-normal text-sidebar-foreground/75',
           startsSubgroup &&
-            'mt-1 border-t border-sidebar-border/70 pt-2',
+            'mt-1 border-t border-sidebar-border/70',
           active &&
-            'font-semibold text-sidebar-accent-foreground shadow-sm before:absolute before:-left-[11px] before:h-4 before:w-0.5 before:rounded-full before:bg-sidebar-primary',
+            'font-medium text-sidebar-accent-foreground before:absolute before:-left-[11px] before:h-4 before:w-0.5 before:rounded-full before:bg-sidebar-primary',
         )}
       >
         <span>{item.label}</span>

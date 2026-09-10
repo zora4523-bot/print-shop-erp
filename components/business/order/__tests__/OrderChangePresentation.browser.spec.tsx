@@ -82,8 +82,8 @@ for (const [width, height] of [[360,800],[390,844],[768,1024],[1024,768],[1440,9
         </ConfirmActionController>
       </main>));
       expect(host.scrollWidth).toBeLessThanOrEqual(width);
-      expect(host.textContent).toContain('¥960.00');
-      expect(host.textContent).toContain('-¥40.00');
+      expect(host.textContent).toContain('¥ 960.00');
+      expect(host.textContent).toContain('-¥ 40.00');
       expect(host.textContent).not.toContain(approval.consequences[0]);
       await page.getByRole('button',{name:'批准变更',exact:true}).click();
       await expect.element(page.getByRole('alertdialog')).toBeVisible();

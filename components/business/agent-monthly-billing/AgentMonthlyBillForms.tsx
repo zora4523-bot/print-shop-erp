@@ -10,6 +10,7 @@ import {
 import type { AgentMonthlyBillActionResult } from '@/actions/agent-monthly-bill.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { formatMoney } from '@/lib/dashboard/format';
 
 function Feedback({ state }: { state: AgentMonthlyBillActionResult | null }) {
   if (!state) return null;
@@ -103,7 +104,7 @@ export function MarkAgentMonthlyBillPaidForm({
       <input type="hidden" name="idempotencyKey" value={initialIdempotencyKey} />
       <p className="text-sm">
         本次收款金额：
-        <strong className="font-sans tabular-nums">¥ {lockedAmount}</strong>
+        <strong className="font-sans tabular-nums">{formatMoney(lockedAmount)}</strong>
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
@@ -153,7 +154,7 @@ export function CreateAgentMonthlyBillCreditForm({
       <input type="hidden" name="sourceItemId" value={sourceItemId} />
       <div className="space-y-1">
         <label htmlFor={`credit-amount-${sourceItemId}`} className="text-xs text-muted-foreground">
-          负项金额（上限 ¥ {sourceAmount}）
+          负项金额（上限 {formatMoney(sourceAmount)}）
         </label>
         <Input
           id={`credit-amount-${sourceItemId}`}

@@ -1,16 +1,7 @@
-import { StatusBadge, type Tone } from '@/components/ui-business';
+import { StatusBadge } from '@/components/ui-business';
 import type { RuleCenterEffect } from '@/lib/navigation/rule-center';
+import { RULE_CENTER_EFFECT_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
-
-const EFFECT_PRESENTATION: Record<
-  RuleCenterEffect,
-  { label: string; tone: Tone }
-> = {
-  mixed: { label: '分域生效', tone: 'neutral' },
-  versioned: { label: '版本发布后生效', tone: 'warning' },
-  immediate: { label: '保存后即时生效', tone: 'success' },
-  'effective-dated': { label: '按生效时间启用', tone: 'info' },
-};
 
 export type RuleCenterPageHeaderProps = {
   title: string;
@@ -28,15 +19,15 @@ export function RuleCenterEffectBadge({
   effect: RuleCenterEffect;
   className?: string;
 }) {
-  const presentation = EFFECT_PRESENTATION[effect];
+  const definition = RULE_CENTER_EFFECT_REGISTRY[effect];
 
   return (
     <StatusBadge
-      tone={presentation.tone}
-      dot={effect !== 'mixed'}
+      tone={definition.tone}
+      dot={definition.dot}
       className={className}
     >
-      {presentation.label}
+      {definition.label}
     </StatusBadge>
   );
 }
@@ -63,7 +54,7 @@ export function RuleCenterPageHeader({
           {scope || effect ? (
             <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
               {scope ? (
-                <span className="inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-semibold tracking-wide text-foreground">
+                <span className="inline-flex h-6 items-center rounded-md border px-2 text-xs font-semibold tracking-wide text-foreground">
                   {scope}
                 </span>
               ) : null}

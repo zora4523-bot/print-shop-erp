@@ -152,7 +152,7 @@ describe('salary critical-action confirmations', () => {
     }).join('\n');
 
     expect(impact).toContain('发放对象：陈客服');
-    expect(impact).toContain('本次底薪 ¥ 3000.00');
+    expect(impact).toContain('本次底薪 ¥ 3,000.00');
     expect(impact).toContain('底薪和提成将全部发放完成');
     expect(impact).toContain('不可覆盖的工资流水');
     expect(impact).toContain('提交后请等待处理结果，勿重复录入');
@@ -188,7 +188,7 @@ describe('salary critical-action confirmations', () => {
     ).join('\n');
     expect(impact).toContain('目标月期：2026-07');
     expect(impact).toContain('3 条月结：2 条未发、1 条已发');
-    expect(impact).toContain('当前未发记录合计 ¥ 1800.00');
+    expect(impact).toContain('当前未发记录合计 ¥ 1,800.00');
     expect(impact).toContain('逐人处理');
     expect(impact).not.toContain('服务器');
     expect(impact).not.toContain('独立事务');
@@ -207,7 +207,7 @@ describe('salary critical-action confirmations', () => {
 
   it('shows settlement amounts, terminal state and next-period behavior', () => {
     const impact = csPeriodSettlementImpactItems(settlementContext).join('\n');
-    expect(impact).toContain('算档业绩（本期累计 + 期初）：¥ 200000.00');
+    expect(impact).toContain('算档业绩（本期累计 + 期初）：¥ 200,000.00');
     expect(impact).toContain('生成提成记录，并锁定本周期');
     expect(impact).toContain('自动开始或沿用下一周期');
     expect(impact).toContain('本次结算不会生效');

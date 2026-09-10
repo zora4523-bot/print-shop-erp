@@ -5,6 +5,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { PageHeader, StatCard } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { formatMoney } from '@/lib/dashboard/format';
 
 export const metadata = { title: '薪资总览' };
 
@@ -43,17 +44,17 @@ export default async function SalaryIndexPage() {
             value={`${s.pieceworkToday.count} 条`}
             icon={Calculator}
             tone="info"
-            hint={`合计 ¥${s.pieceworkToday.payableTotal}`}
+            hint={`合计 ${formatMoney(s.pieceworkToday.payableTotal)}`}
           />
           <StatCard
             label="今日未发"
-            value={`¥${s.pieceworkToday.unpaidTotal}`}
+            value={formatMoney(s.pieceworkToday.unpaidTotal)}
             icon={Calculator}
             tone="warning"
           />
           <StatCard
             label="累计未发（所有日期）"
-            value={`¥${s.pieceworkUnpaidAllTime.payableTotal}`}
+            value={formatMoney(s.pieceworkUnpaidAllTime.payableTotal)}
             icon={Calculator}
             tone="primary"
             hint={`${s.pieceworkUnpaidAllTime.count} 条`}
@@ -80,11 +81,11 @@ export default async function SalaryIndexPage() {
             value={`${s.dailyToday.count} 条`}
             icon={Archive}
             tone="neutral"
-            hint={`历史金额合计 ¥${s.dailyToday.actualTotal}`}
+            hint={`历史金额合计 ${formatMoney(s.dailyToday.actualTotal)}`}
           />
           <StatCard
             label="历史累计未发"
-            value={`¥${s.dailyUnpaidAllTime.actualTotal}`}
+            value={formatMoney(s.dailyUnpaidAllTime.actualTotal)}
             icon={Archive}
             tone="neutral"
             hint={`${s.dailyUnpaidAllTime.count} 条`}
@@ -117,7 +118,7 @@ export default async function SalaryIndexPage() {
           />
           <StatCard
             label="已结算周期剩余未发"
-            value={`¥${s.csUnpaid.totalIncome}`}
+            value={formatMoney(s.csUnpaid.totalIncome)}
             icon={CalendarClock}
             tone="primary"
             hint={`${s.csUnpaid.count} 个已结算但未全额发放周期（剩余底薪 + 提成）`}
@@ -143,17 +144,17 @@ export default async function SalaryIndexPage() {
             value={`${s.hourlyCurrentMonth.count} 条`}
             icon={Clock}
             tone="info"
-            hint={`合计 ¥${s.hourlyCurrentMonth.totalSalary}`}
+            hint={`合计 ${formatMoney(s.hourlyCurrentMonth.totalSalary)}`}
           />
           <StatCard
             label={`${s.currentMonth} 未发`}
-            value={`¥${s.hourlyCurrentMonth.unpaidTotal}`}
+            value={formatMoney(s.hourlyCurrentMonth.unpaidTotal)}
             icon={Clock}
             tone="warning"
           />
           <StatCard
             label="累计未发（所有月份）"
-            value={`¥${s.hourlyUnpaidAllTime.totalSalary}`}
+            value={formatMoney(s.hourlyUnpaidAllTime.totalSalary)}
             icon={Clock}
             tone="primary"
             hint={`${s.hourlyUnpaidAllTime.count} 条`}

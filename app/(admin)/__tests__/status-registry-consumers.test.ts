@@ -13,9 +13,17 @@ describe('high-risk status registry consumers', () => {
       'app/(admin)/sales/bills/[id]/page.tsx',
     ];
 
+    // 归并后两页共用 components/business/bill/BillStatusBadge；registry 的
+    // 单一引用点随之移进共享组件，列表页因筛选器仍直接读 registry。
     for (const file of legacyFiles) {
-      expect(source(file), file).toContain('BILL_STATUS_REGISTRY');
+      expect(source(file), file).toContain('BillStatusBadge');
     }
+    expect(source(legacyFiles[0]!), legacyFiles[0]).toContain(
+      'BILL_STATUS_REGISTRY',
+    );
+    expect(
+      source('components/business/bill/BillStatusBadge.tsx'),
+    ).toContain('BILL_STATUS_REGISTRY');
     const v2Files = [
       'app/(admin)/owner/agent-bills/page.tsx',
       'app/(admin)/owner/agent-bills/[id]/page.tsx',
@@ -66,12 +74,18 @@ describe('high-risk status registry consumers', () => {
 
   it('centralizes order-change, outsource, production-task, and price-version states', () => {
     const consumers: Array<[string, string]> = [
+      // 工单修改申请的状态/类型徽章已归并到共享组件，两个消费页引用它而不是
+      // 各自 import registry；registry 的单一引用点在共享组件里。
       [
         'app/(admin)/owner/order-changes/page.tsx',
-        'ORDER_CHANGE_REQUEST_STATUS_REGISTRY',
+        'ChangeRequestStatusBadge',
       ],
       [
         'app/(admin)/orders/[id]/page.tsx',
+        'ChangeRequestStatusBadge',
+      ],
+      [
+        'components/business/order/ChangeRequestStatusBadge.tsx',
         'ORDER_CHANGE_REQUEST_STATUS_REGISTRY',
       ],
       [

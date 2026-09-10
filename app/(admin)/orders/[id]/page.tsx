@@ -43,14 +43,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import {
-  ActionNotice,
-  DisabledReason,
-  StatusBadge as UiStatusBadge,
-  TableEmptyState,
-} from '@/components/ui-business';
+import { ActionNotice, DisabledReason, TableEmptyState, TableScrollArea } from '@/components/ui-business';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
+import { ChangeRequestStatusBadge } from '@/components/business/order/ChangeRequestStatusBadge';
 import { ShipmentStatusBadge } from '@/components/business/order/ShipmentStatusBadge';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
@@ -65,7 +61,11 @@ import { PromisedDateBadge } from '@/components/business/order/PromisedDateBadge
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
-import { formatDateTimeShanghai } from '@/lib/format/dates';
+import {
+  formatDateInputShanghai,
+  formatDateShanghai,
+  formatDateTimeShanghai,
+} from '@/lib/format/dates';
 import { getOrderPieceworkSummary } from '@/lib/salary/daily';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
@@ -97,7 +97,6 @@ import {
 import {
   isTrustedAdminChargePricingSnapshot,
 } from '@/lib/order/admin-pricing-snapshot';
-import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
 import { selectOrderCustomerFee } from '@/lib/order/customer-fee';
@@ -712,7 +711,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             <dt className="text-muted-foreground">承诺交期</dt>
             <dd className="mt-0.5 flex items-center gap-2">
               {order.promisedDate
-                ? order.promisedDate.toISOString().slice(0, 10)
+                ? formatDateInputShanghai(order.promisedDate)
                 : '—'}
               <PromisedDateBadge
                 promisedDate={order.promisedDate}
@@ -1270,7 +1269,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             </p>
           </div>
           <OrderChangeRequestForm
-            promisedDate={order.promisedDate?.toISOString().slice(0, 10) ?? null}
+            promisedDate={formatDateInputShanghai(order.promisedDate, '') || null}
             orderId={order.id}
             expectedRevision={order.revision}
             expectedWorkOrderVersion={order.workOrderVersion}
@@ -1402,7 +1401,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </p>
             </div>
             <strong className="admin-wrap-anywhere font-sans tabular-nums text-primary">
-              合计 ¥ {pieceworkSummary.total}
+              合计 {formatMoney(pieceworkSummary.total)}
             </strong>
           </div>
           {pieceworkSummary.items.length === 0 ? (
@@ -1444,12 +1443,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             </p>
           </div>
           {order.costEntries.length > 0 ? (
-            <div
-              className="overflow-x-auto"
-              role="region"
-              aria-label="工单成本明细"
-              tabIndex={0}
-            >
+            <TableScrollArea label="工单成本明细">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="border-b text-xs text-muted-foreground">
                   <tr>
@@ -1479,7 +1473,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                           ? `${String(entry.quantity)} ${entry.unit ?? ''}`
                           : '—'}
                         {entry.unitPrice
-                          ? ` × ¥ ${String(entry.unitPrice)}`
+                          ? ` × ${formatUnitPrice(entry.unitPrice)}`
                           : ''}
                       </td>
                       <td className="px-2 py-2 text-right font-sans tabular-nums">
@@ -1494,7 +1488,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScrollArea>
           ) : (
             <TableEmptyState
               variant="compact"
@@ -1759,7 +1753,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             <p className="admin-wrap-anywhere text-sm text-muted-foreground">
               提交人 {order.submitter.displayName}（{roleLabel(order.submitter.role)}）
               {order.promisedDate
-                ? ` · 承诺交期 ${order.promisedDate.toISOString().slice(0, 10)}`
+                ? ` · 承诺交期 ${formatDateShanghai(order.promisedDate)}`
                 : ''}
               {` · ${order.items.length} 款 ${formatQuantity(
                 order.items.reduce((sum, item) => sum + item.quantity, 0),
@@ -1851,7 +1845,7 @@ function OrderPackagingGroupsSection({ order, canViewCommercialAmounts }: {
       ) : null}
       {order.packagingGroups.length === 0 ? (
         <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
-          暂无包装组。
+          暂无包装组
         </p>
       ) : (
         <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
@@ -2071,19 +2065,6 @@ function formatNullableBoolean(value: boolean | null): string {
 
 function formatQuantity(value: number): string {
   return QUANTITY_FORMATTER.format(value);
-}
-
-function ChangeRequestStatusBadge({
-  status,
-}: {
-  status: OrderChangeRequestStatus;
-}) {
-  const definition = ORDER_CHANGE_REQUEST_STATUS_REGISTRY[status];
-  return (
-    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
-      {definition.label}
-    </UiStatusBadge>
-  );
 }
 
 const ORDER_COST_LABELS: Record<OrderCostCategory, string> = {

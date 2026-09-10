@@ -6,8 +6,8 @@ import type { TaskDisputeMutationResult } from '@/actions/task-disputes.types';
 import type { WorkerTaskDisputeView } from '@/lib/production/task-dispute';
 import { ProductionTaskDisputeStatus } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { TaskDisputeStatusBadge } from './TaskDisputeStatusBadge';
 
 export function TaskDisputePanel({
   taskId,
@@ -83,7 +83,7 @@ export function TaskDisputePanel({
       <div>
         <h3 className="font-medium">历史异议（{disputes.length}）</h3>
         {disputes.length === 0 ? (
-          <p className="mt-2 text-xs text-muted-foreground">暂无异议记录。</p>
+          <p className="mt-2 text-xs text-muted-foreground">暂无异议记录</p>
         ) : (
           <ol className="mt-2 space-y-3">
             {disputes.map((dispute) => (
@@ -115,23 +115,5 @@ export function TaskDisputePanel({
         )}
       </div>
     </section>
-  );
-}
-
-export function TaskDisputeStatusBadge({
-  status,
-}: {
-  status: ProductionTaskDisputeStatus;
-}) {
-  const label =
-    status === ProductionTaskDisputeStatus.PENDING
-      ? '待处理'
-      : status === ProductionTaskDisputeStatus.RESOLVED
-        ? '已解决'
-        : '已驳回';
-  return (
-    <Badge variant={status === ProductionTaskDisputeStatus.PENDING ? 'secondary' : 'outline'}>
-      {label}
-    </Badge>
   );
 }

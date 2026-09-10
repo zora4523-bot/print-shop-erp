@@ -84,7 +84,7 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
         <section className="rounded-xl border bg-card p-5 text-sm shadow-sm">
           <h2 className="font-semibold">不可变收款回执</h2>
           <dl className="mt-3 grid gap-3 sm:grid-cols-4">
-            <Fact label="金额" value={`¥ ${formatMoney(bill.receipt.amount)}`} />
+            <Fact label="金额" value={formatMoney(bill.receipt.amount)} />
             <Fact label="时间" value={formatDateTimeShanghai(bill.receipt.receivedAt)} />
             <Fact label="方式" value={bill.receipt.paymentMethod ?? '未记录'} />
             <Fact label="流水号" value={bill.receipt.referenceNo ?? '未记录'} />
@@ -174,7 +174,7 @@ function Amount({ label, value, strong = false }: { label: string; value: string
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={`${strong ? 'text-xl font-semibold' : 'text-lg'} font-sans tabular-nums`}>
-        ¥ {formatMoney(value)}
+        {formatMoney(value)}
       </p>
     </div>
   );

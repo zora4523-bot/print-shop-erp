@@ -6,16 +6,19 @@ import {
   DesignBundleStatus,
   NotificationStatus,
   OrderChangeRequestStatus,
+  OrderChangeRequestType,
   OrderExportStatus,
   OrderStatus,
   OutsourceStatus,
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
   ProductionOperationStatus,
+  ProductionTaskDisputeStatus,
   SalaryPeriodStatus,
   ShipmentStatus,
   TaskStatus,
 } from '@/generated/prisma/enums';
+import type { RuleCenterEffect } from '@/lib/navigation/rule-center';
 
 /**
  * Semantic tones accepted by the shared StatusBadge.
@@ -59,17 +62,67 @@ export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.PACKING]: { label: '打包中', tone: 'info', dot: true },
   [OrderStatus.SETTLED]: { label: '已结算', tone: 'success' },
   [OrderStatus.SUBMITTED]: { label: '待处理', tone: 'info' },
-  [OrderStatus.SCHEDULING]: { label: '排产中', tone: 'info', dot: true },
-  [OrderStatus.IN_PRODUCTION]: {
-    label: '生产中',
+  // SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED 只存在于迁移前的老行
+  // （见 lib/order/status-machine.ts 的转换表注释）。它们的名字与在产状态
+  // 高度相似，不加标记会让管理员误判「我到底下发过没有」，因此把「（历史）」
+  // 写进 label 本身——只在工作台加后缀会让同一状态在管理端出现两个名字。
+  // SUBMITTED 保持「待处理」不加标记：它与 PENDING_FACTORY 同名，加标记等于
+  // 把枚举差异外显给用户。
+  [OrderStatus.SCHEDULING]: {
+    label: '排产中（历史）',
     tone: 'info',
     dot: true,
   },
-  [OrderStatus.COMPLETED]: { label: '已完工', tone: 'success' },
+  [OrderStatus.IN_PRODUCTION]: {
+    label: '生产中（历史）',
+    tone: 'info',
+    dot: true,
+  },
+  [OrderStatus.COMPLETED]: { label: '已完工（历史）', tone: 'success' },
   [OrderStatus.SHIPPED]: { label: '已发货', tone: 'success' },
-  [OrderStatus.FINISHED]: { label: '已完成', tone: 'neutral' },
+  [OrderStatus.FINISHED]: { label: '已完成（历史）', tone: 'neutral' },
   [OrderStatus.CANCELLED]: { label: '已取消', tone: 'danger' },
 };
+
+/**
+ * 承诺交期预警是 `lib/order/promised-date` 的派生展示态，不写回业务状态机。
+ * key 取 'overdue' / 'due-soon'，与 `PromisedDateAlert['kind']` 逐字一致，
+ * 调用方可以直接用 alert.kind 索引，不必再维护一张映射表。
+ *
+ * 逾期用 danger：承诺交期已经过去，是一次已经发生的履约失败（与
+ * NotificationStatus.FAILED 同类），不是「还需要留意一下」；3 天内到期
+ * 是提醒，用 warning。两档必须区分开，否则升级关系在颜色上就丢了。
+ *
+ * 天数要拼进 label（「逾期 5 天」/「剩 2 天」），所以注册表只存基础文案，
+ * 由 `promisedDateAlertDefinition` 组装，页面不再自己写颜色类名。
+ */
+export const PROMISED_DATE_ALERT_STATUS = {
+  OVERDUE: 'overdue',
+  DUE_SOON: 'due-soon',
+} as const;
+
+export type PromisedDateAlertStatus =
+  (typeof PROMISED_DATE_ALERT_STATUS)[keyof typeof PROMISED_DATE_ALERT_STATUS];
+
+export const PROMISED_DATE_ALERT_REGISTRY: StatusRegistry<PromisedDateAlertStatus> = {
+  [PROMISED_DATE_ALERT_STATUS.OVERDUE]: { label: '逾期', tone: 'danger' },
+  [PROMISED_DATE_ALERT_STATUS.DUE_SOON]: { label: '今天到期', tone: 'warning' },
+};
+
+/**
+ * @param kind `promisedDateAlert()` 返回的预警种类。
+ * @param days 逾期天数或剩余天数（均为非负数）。
+ */
+export function promisedDateAlertDefinition(
+  kind: PromisedDateAlertStatus,
+  days: number,
+): StatusDefinition {
+  const base = PROMISED_DATE_ALERT_REGISTRY[kind];
+  if (kind === PROMISED_DATE_ALERT_STATUS.OVERDUE) {
+    return { ...base, label: `${base.label} ${days} 天` };
+  }
+  return days === 0 ? base : { ...base, label: `剩 ${days} 天` };
+}
 
 export const BILL_STATUS_REGISTRY: StatusRegistry<BillStatus> = {
   [BillStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
@@ -175,6 +228,30 @@ export function paymentStatusDefinition(isPaid: boolean): StatusDefinition {
   ];
 }
 
+/**
+ * 主数据的启停两态（`isActive` 布尔列，不是 Prisma 枚举）：账号、客户/供应商、
+ * 物料、产品分类共用同一张表。停用是正常的收口动作而不是失败，所以是 neutral
+ * 而不是 danger。
+ */
+export const ACTIVE_DISPLAY_STATUS = {
+  ENABLED: 'ENABLED',
+  DISABLED: 'DISABLED',
+} as const;
+
+export type ActiveDisplayStatus =
+  (typeof ACTIVE_DISPLAY_STATUS)[keyof typeof ACTIVE_DISPLAY_STATUS];
+
+export const ACTIVE_STATUS_REGISTRY: StatusRegistry<ActiveDisplayStatus> = {
+  [ACTIVE_DISPLAY_STATUS.ENABLED]: { label: '启用', tone: 'success' },
+  [ACTIVE_DISPLAY_STATUS.DISABLED]: { label: '停用', tone: 'neutral' },
+};
+
+export function activeStatusDefinition(isActive: boolean): StatusDefinition {
+  return ACTIVE_STATUS_REGISTRY[
+    isActive ? ACTIVE_DISPLAY_STATUS.ENABLED : ACTIVE_DISPLAY_STATUS.DISABLED
+  ];
+}
+
 export const SALARY_PERIOD_DISPLAY_STATUS = {
   IN_PROGRESS: SalaryPeriodStatus.IN_PROGRESS,
   READY_TO_SETTLE: 'READY_TO_SETTLE',
@@ -213,6 +290,62 @@ export function salaryPeriodStatusDefinition(
   return SALARY_PERIOD_STATUS_REGISTRY[displayStatus];
 }
 
+/**
+ * 计件保底态是「今天这份工资是怎么算出来的」的展示态：由计件合计与每日保底
+ * 比较派生，不落库、没有 Prisma 枚举。放在这里让师傅端列表、师傅端明细与
+ * 管理端历史日薪三处共用同一套 label + tone，避免各页自己发明颜色。
+ *
+ * 「按保底补足」是保护师傅的兜底机制、不是异常，因此用 info 而非 warning /
+ * danger。师傅端在徽章下方另有一段 warning 色的原因说明，徽章本身不重复加压。
+ *
+ * 三个 label 由 SPEC-v1.2.md §313-314 明文规定，不得改写。
+ */
+export const SALARY_FLOOR_DISPLAY_STATUS = {
+  ABOVE_FLOOR: 'ABOVE_FLOOR',
+  AT_FLOOR: 'AT_FLOOR',
+  TOPPED_UP_TO_FLOOR: 'TOPPED_UP_TO_FLOOR',
+} as const;
+
+export type SalaryFloorDisplayStatus =
+  (typeof SALARY_FLOOR_DISPLAY_STATUS)[keyof typeof SALARY_FLOOR_DISPLAY_STATUS];
+
+export const SALARY_FLOOR_STATUS_REGISTRY: StatusRegistry<SalaryFloorDisplayStatus> = {
+  [SALARY_FLOOR_DISPLAY_STATUS.ABOVE_FLOOR]: {
+    label: '计件高于保底',
+    tone: 'success',
+  },
+  [SALARY_FLOOR_DISPLAY_STATUS.AT_FLOOR]: {
+    label: '计件等于保底',
+    tone: 'neutral',
+  },
+  [SALARY_FLOOR_DISPLAY_STATUS.TOPPED_UP_TO_FLOOR]: {
+    label: '按保底补足',
+    tone: 'info',
+  },
+};
+
+/**
+ * @param comparison 计件合计与每日保底的比较结果，即 Decimal#cmp 的返回值：
+ *   正数 = 高于保底，0 = 等于保底，负数 = 按保底补足。
+ *   入参刻意取 number 而不是 Decimal —— 本模块保持零运行时依赖，
+ *   金额比较由调用方完成。
+ */
+export function salaryFloorStatusDefinition(
+  comparison: number,
+): StatusDefinition {
+  if (comparison > 0) {
+    return SALARY_FLOOR_STATUS_REGISTRY[
+      SALARY_FLOOR_DISPLAY_STATUS.ABOVE_FLOOR
+    ];
+  }
+  if (comparison === 0) {
+    return SALARY_FLOOR_STATUS_REGISTRY[SALARY_FLOOR_DISPLAY_STATUS.AT_FLOOR];
+  }
+  return SALARY_FLOOR_STATUS_REGISTRY[
+    SALARY_FLOOR_DISPLAY_STATUS.TOPPED_UP_TO_FLOOR
+  ];
+}
+
 export const ORDER_CHANGE_REQUEST_STATUS_REGISTRY: StatusRegistry<OrderChangeRequestStatus> = {
   [OrderChangeRequestStatus.PENDING]: {
     label: '待审核',
@@ -243,6 +376,19 @@ export const ORDER_CHANGE_REQUEST_STATUS_REGISTRY: StatusRegistry<OrderChangeReq
     label: '版本已过期',
     tone: 'neutral',
   },
+};
+
+/**
+ * 修改 / 取消申请的“类型”不是状态：它在申请的整个生命周期里不变，只回答
+ * “这张申请要做什么”，旁边那颗状态徽章才表示审批进度。类型标签由 shadcn
+ * Badge 承载，这里只集中文案，避免页面各写一份中文映射。
+ *
+ * 两档都用 neutral：CANCEL 是一次“待审的请求”，不是失败或取消终态，
+ * 给它 danger 会和同一行的「已拒绝 / 已撤销」抢红色。
+ */
+export const ORDER_CHANGE_REQUEST_TYPE_REGISTRY: StatusRegistry<OrderChangeRequestType> = {
+  [OrderChangeRequestType.MODIFY]: { label: '修改申请', tone: 'neutral' },
+  [OrderChangeRequestType.CANCEL]: { label: '取消申请', tone: 'neutral' },
 };
 
 export const OUTSOURCE_STATUS_REGISTRY: StatusRegistry<OutsourceStatus> = {
@@ -287,6 +433,27 @@ export const PRODUCTION_TASK_STATUS_REGISTRY: StatusRegistry<TaskStatus> = {
   },
   [TaskStatus.CANCELLED]: {
     label: '已取消',
+    tone: 'danger',
+  },
+};
+
+/**
+ * 师傅报工争议的处理状态。待处理是需要主管跟进的在途项 → warning + dot；
+ * 「已驳回」是这张争议的非正常终态，与 OrderChangeRequestStatus.DENIED
+ * 取同一档 danger。
+ */
+export const PRODUCTION_TASK_DISPUTE_STATUS_REGISTRY: StatusRegistry<ProductionTaskDisputeStatus> = {
+  [ProductionTaskDisputeStatus.PENDING]: {
+    label: '待处理',
+    tone: 'warning',
+    dot: true,
+  },
+  [ProductionTaskDisputeStatus.RESOLVED]: {
+    label: '已解决',
+    tone: 'success',
+  },
+  [ProductionTaskDisputeStatus.REJECTED]: {
+    label: '已驳回',
     tone: 'danger',
   },
 };
@@ -455,3 +622,117 @@ export const CUSTOMER_PRICE_BOOK_VERSION_STATUS_REGISTRY: StatusRegistry<Custome
     tone: 'neutral',
   },
 };
+
+/**
+ * 规则中心的“何时生效”标记。不是持久化枚举，而是导航配置
+ * （lib/navigation/rule-center.ts）里声明的生效方式。收在这里是为了让
+ * 规则页头徽章与规则总览列表用同一份文案，不再各写一张本地表。
+ */
+export const RULE_CENTER_EFFECT_REGISTRY: StatusRegistry<RuleCenterEffect> = {
+  mixed: { label: '分域生效', tone: 'neutral' },
+  versioned: {
+    label: '版本发布后生效',
+    tone: 'warning',
+    dot: true,
+  },
+  immediate: {
+    label: '保存后即时生效',
+    tone: 'success',
+    dot: true,
+  },
+  'effective-dated': {
+    label: '按生效时间启用',
+    tone: 'info',
+    dot: true,
+  },
+};
+
+/**
+ * Pigsty 运维页的就绪态由 (ready, blockers) 派生，不是持久化枚举。
+ * 放进 registry 让六张就绪表共用同一套文案与色档，页面不再自带 tone 函数。
+ *
+ * dot 挂在「有阻塞」而不是「就绪」：业务状态注册表里的圆点一律标「在途 /
+ * 需要跟进」，没有一个落定的 success 终态带点；把它扣在唯一不需要注意的
+ * 那一档上是反的。
+ */
+export const OPS_READINESS_DISPLAY_STATUS = {
+  READY: 'READY',
+  BLOCKED: 'BLOCKED',
+  NOT_ENABLED: 'NOT_ENABLED',
+} as const;
+
+export type OpsReadinessDisplayStatus =
+  (typeof OPS_READINESS_DISPLAY_STATUS)[keyof typeof OPS_READINESS_DISPLAY_STATUS];
+
+export const OPS_READINESS_STATUS_REGISTRY: StatusRegistry<OpsReadinessDisplayStatus> = {
+  [OPS_READINESS_DISPLAY_STATUS.READY]: { label: '就绪', tone: 'success' },
+  [OPS_READINESS_DISPLAY_STATUS.BLOCKED]: {
+    label: '有阻塞',
+    tone: 'warning',
+    dot: true,
+  },
+  [OPS_READINESS_DISPLAY_STATUS.NOT_ENABLED]: {
+    label: '未启用',
+    tone: 'neutral',
+  },
+};
+
+export function opsReadinessDefinition(
+  ready: boolean,
+  blockers: readonly string[],
+): StatusDefinition {
+  if (ready) {
+    return OPS_READINESS_STATUS_REGISTRY[OPS_READINESS_DISPLAY_STATUS.READY];
+  }
+  return OPS_READINESS_STATUS_REGISTRY[
+    blockers.length > 0
+      ? OPS_READINESS_DISPLAY_STATUS.BLOCKED
+      : OPS_READINESS_DISPLAY_STATUS.NOT_ENABLED
+  ];
+}
+
+/**
+ * 敏感列脱敏就绪态：同为 Pigsty 运维页的派生展示态。
+ * 非 anon_security_label 策略沿用 success —— 那类列由导出流程兜住，
+ * 不是缺陷，只是换了条处理路径。
+ */
+export const SENSITIVE_COLUMN_MASKING_STATUS = {
+  LABEL_APPLIED: 'LABEL_APPLIED',
+  LABEL_PENDING: 'LABEL_PENDING',
+  EXPORT_HANDLED: 'EXPORT_HANDLED',
+} as const;
+
+export type SensitiveColumnMaskingStatus =
+  (typeof SENSITIVE_COLUMN_MASKING_STATUS)[keyof typeof SENSITIVE_COLUMN_MASKING_STATUS];
+
+export const SENSITIVE_COLUMN_MASKING_STATUS_REGISTRY: StatusRegistry<SensitiveColumnMaskingStatus> = {
+  [SENSITIVE_COLUMN_MASKING_STATUS.LABEL_APPLIED]: {
+    label: '标签已应用',
+    tone: 'success',
+  },
+  [SENSITIVE_COLUMN_MASKING_STATUS.LABEL_PENDING]: {
+    label: '待应用标签',
+    tone: 'warning',
+    dot: true,
+  },
+  [SENSITIVE_COLUMN_MASKING_STATUS.EXPORT_HANDLED]: {
+    label: '需导出流程处理',
+    tone: 'success',
+  },
+};
+
+export function sensitiveColumnMaskingDefinition(
+  maskingStrategy: string,
+  anonLabelApplied: boolean,
+): StatusDefinition {
+  if (maskingStrategy !== 'anon_security_label') {
+    return SENSITIVE_COLUMN_MASKING_STATUS_REGISTRY[
+      SENSITIVE_COLUMN_MASKING_STATUS.EXPORT_HANDLED
+    ];
+  }
+  return SENSITIVE_COLUMN_MASKING_STATUS_REGISTRY[
+    anonLabelApplied
+      ? SENSITIVE_COLUMN_MASKING_STATUS.LABEL_APPLIED
+      : SENSITIVE_COLUMN_MASKING_STATUS.LABEL_PENDING
+  ];
+}

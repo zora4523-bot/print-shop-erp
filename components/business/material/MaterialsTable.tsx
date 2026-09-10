@@ -2,8 +2,8 @@ import Link from 'next/link';
 import {
   AdminRowActions,
   AdminSortLink,
-  AdminStatusBadge,
 } from '@/components/business/admin/AdminDataTable';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import {
   Table,
   TableBody,
@@ -160,7 +160,7 @@ export function MaterialsTable({
               {decimal(m.averageCost)}
             </TableCell>
             <TableCell>
-              <AdminStatusBadge active={m.isActive} />
+              <ActiveStatusBadge active={m.isActive} />
             </TableCell>
             <TableCell>
               <AdminRowActions>

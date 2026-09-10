@@ -25,6 +25,7 @@ import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { StatusBadge } from '@/components/ui-business';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { formatMoney } from '@/lib/dashboard/format';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PRODUCTION_OPERATION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
@@ -382,7 +383,7 @@ function LegacyTaskDetail({
           <Metric label="缺陷数" value={task.defectQty} />
           <Metric label="返工数" value={task.reworkQty} />
           {task.workerType === WorkerType.MACHINE ? (
-            <Metric label="历史计件金额" value={`¥ ${task.pieceworkAmount}`} />
+            <Metric label="历史计件金额" value={formatMoney(task.pieceworkAmount)} />
           ) : null}
           <Metric
             label="旧任务状态"

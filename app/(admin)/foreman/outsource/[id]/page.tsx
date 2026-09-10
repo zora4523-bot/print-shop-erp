@@ -117,7 +117,7 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
           />
           <Row
             label="确认应付金额"
-            value={payableAmount === null ? '—' : `¥ ${payableAmount.toFixed(2)}`}
+            value={payableAmount === null ? '—' : formatMoney(payableAmount)}
             tabular
           />
           <Row label="预计回货" value={formatDateShanghai(row.expectedDate)} />
@@ -161,7 +161,7 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
                 <span className="font-sans tabular-nums">
                   {change.previousAmount === null
                     ? '未录入'
-                    : `¥ ${String(change.previousAmount)}`}{' '}
+                    : formatMoney(change.previousAmount)}{' '}
                   → {formatMoney(change.newAmount)}
                 </span>
                 <span className="text-xs text-muted-foreground">
@@ -187,10 +187,10 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
           <PaymentSummary
             label="外协加工应付"
             value={
-              payableAmount === null ? '未确认' : `¥ ${payableAmount.toFixed(2)}`
+              payableAmount === null ? '未确认' : formatMoney(payableAmount)
             }
           />
-          <PaymentSummary label="已付" value={`¥ ${paidAmount.toFixed(2)}`} />
+          <PaymentSummary label="已付" value={formatMoney(paidAmount)} />
           <PaymentSummary
             label="未付"
             value={
@@ -198,7 +198,7 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
                 ? '—'
                 : paymentLedgerInvalid
                   ? '待对账'
-                  : `¥ ${remainingAmount.toFixed(2)}`
+                  : formatMoney(remainingAmount)
             }
           />
         </dl>
@@ -251,7 +251,7 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
                 className="grid min-w-0 gap-2 px-4 py-3 sm:grid-cols-[140px_180px_minmax(0,1fr)] sm:px-6"
               >
                 <span className="font-sans font-medium tabular-nums">
-                  ¥ {new Decimal(payment.amount.toString()).toFixed(2)}
+                  {formatMoney(payment.amount.toString())}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {formatDateTimeShanghai(payment.paidAt)} ·{' '}

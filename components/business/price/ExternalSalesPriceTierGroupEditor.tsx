@@ -23,6 +23,7 @@ import type {
   UpdateCustomerPriceRuleDraftGroupActionInput,
 } from '@/actions/customer-price-books.types';
 import { usePriceWorkspaceUnsavedTierChanges } from './PriceWorkspaceNavigationGuard';
+import { formatRate } from '@/lib/format/unit-price';
 
 export type ExternalSalesPriceTier = {
   ruleId: string;
@@ -143,7 +144,7 @@ function decimalInputValue(value: Decimal.Value): string {
 function amountLabel(value: string | null): string {
   if (value === null || value.trim() === '') return '待设置';
   const amount = parseAmount(value);
-  return amount ? `¥${decimalLabel(amount)}` : '待设置';
+  return amount ? formatRate(amount) : '待设置';
 }
 
 type PricingPresentation = {
@@ -369,7 +370,7 @@ export function formatDraftAmountDelta(
     : `${sign}${decimalLabel(abs.div(current).mul(100))}%`;
   return {
     kind: down ? 'down' : 'up',
-    amountLabel: `${sign}¥${decimalLabel(abs)}`,
+    amountLabel: `${sign}${formatRate(abs)}`,
     percentLabel: percent,
   };
 }
@@ -871,7 +872,7 @@ export function ExternalSalesPriceTierGroupEditor({
         </ol>
       </div>
 
-      <footer className="sticky bottom-0 z-[5] min-w-0 border-t bg-card/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-card/85 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <footer className="sticky bottom-0 z-[5] min-w-0 border-t bg-card/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-card/85 admin-safe-bottom">
         <div className="flex min-w-0 flex-col gap-3 @min-[31rem]:flex-row @min-[31rem]:items-center @min-[31rem]:justify-between">
           <div className="min-w-0">
             <TierMutationFeedback
@@ -883,7 +884,7 @@ export function ExternalSalesPriceTierGroupEditor({
               <p className="text-xs text-muted-foreground">
                 {locallyChangedTierCount > 0
                   ? `${locallyChangedTierCount} 档待保存；保存失败时不修改任何档。`
-                  : '暂无修改。'}
+                  : '暂无修改'}
               </p>
             ) : null}
           </div>

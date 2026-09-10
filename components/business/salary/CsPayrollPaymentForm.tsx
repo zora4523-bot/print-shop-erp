@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { recordCsPayrollPaymentAction } from '@/actions/owner-salary';
 import type { CsPayrollPaymentResult } from '@/actions/owner-salary.types';
+import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeLocalShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,11 +42,6 @@ export type CsPayrollPaymentPreview = {
   referenceNo: string;
 };
 
-function money(value: string): string {
-  const parsed = Number(value || '0');
-  return Number.isFinite(parsed) ? parsed.toFixed(2) : value;
-}
-
 export function csPayrollPaymentImpactItems({
   preview,
   csUserName,
@@ -72,9 +68,9 @@ export function csPayrollPaymentImpactItems({
 
   return [
     `发放对象：${csUserName}；工资周期：${periodLabel}。`,
-    `本次底薪 ¥ ${money(preview.baseAmount)}；记录后预计剩余 ¥ ${baseAfter.toFixed(2)}。`,
+    `本次底薪 ${Number.isFinite(baseAmount) ? formatMoney(baseAmount) : `¥ ${preview.baseAmount}`}；记录后预计剩余 ${formatMoney(baseAfter)}。`,
     commissionAvailable
-      ? `本次提成 ¥ ${money(preview.commissionAmount)}；记录后预计剩余 ¥ ${commissionAfter.toFixed(2)}。`
+      ? `本次提成 ${Number.isFinite(commissionAmount) ? formatMoney(commissionAmount) : `¥ ${preview.commissionAmount}`}；记录后预计剩余 ${formatMoney(commissionAfter)}。`
       : '周期尚未结算，本次不能发放提成。',
     `发放时间：${preview.paidAt.replace('T', ' ')}；方式：${preview.paymentMethod || '未填写'}；流水号：${preview.referenceNo || '未填写'}。`,
     fullyPaid
@@ -241,7 +237,7 @@ export function CsPayrollPaymentForm({
           id={inputIds.baseAmount}
           name="baseAmount"
           label="本次发放底薪（元）"
-          hint={`剩余可发 ¥ ${remainingBase}`}
+          hint={`剩余可发 ${formatMoney(remainingBase)}`}
           error={fieldErrors.baseAmount?.[0]}
         />
         <AmountField
@@ -250,7 +246,7 @@ export function CsPayrollPaymentForm({
           label="本次发放提成（元）"
           hint={
             commissionAvailable
-              ? `剩余可发 ¥ ${remainingCommission}`
+              ? `剩余可发 ${formatMoney(remainingCommission)}`
               : '周期结算后才可发放提成'
           }
           error={fieldErrors.commissionAmount?.[0]}
@@ -357,7 +353,7 @@ export function CsPayrollPaymentForm({
         <ActionNotice
           tone="success"
           title="工资发放流水已记录"
-          description={`累计底薪 ¥ ${visibleState.paidBase}，累计提成 ¥ ${visibleState.paidCommission}。${visibleState.isFullyPaid ? '本周期工资已全部发放。' : '本周期仍有未发金额。'}`}
+          description={`累计底薪 ${formatMoney(visibleState.paidBase)}，累计提成 ${formatMoney(visibleState.paidCommission)}。${visibleState.isFullyPaid ? '本周期工资已全部发放。' : '本周期仍有未发金额。'}`}
         />
       ) : null}
 

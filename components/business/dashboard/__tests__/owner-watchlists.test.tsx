@@ -161,7 +161,7 @@ describe('工作台关注列表预览', () => {
     const html = renderToStaticMarkup(await scenarios[0].render(false));
     expect(html).toContain('完工后待发 1 天');
     expect(html).toContain('今日到期');
-    expect(html).toContain('2026-09-08');
+    expect(html).toContain('2026/09/08');
     expect(html).toContain('href="/orders/shipment-1"');
     expect(html).toContain('待发客户-1');
     expect(html).toContain('待发编号-1');

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import Decimal from 'decimal.js';
-import { formatMoney } from '../format';
+import { formatMoney, formatMoneyDelta, formatMoneyPlain } from '../format';
 
 describe('formatMoney', () => {
   it('零值', () => {
@@ -64,5 +64,21 @@ describe('formatMoney', () => {
 
   it('不经过 IEEE-754 丢精度', () => {
     expect(formatMoney(new Decimal('0.1').plus('0.2'))).toBe('¥ 0.30');
+  });
+});
+
+describe('formatMoneyPlain', () => {
+  it('同口径但不带币符号', () => {
+    expect(formatMoneyPlain('1234.5')).toBe('1,234.50');
+    expect(formatMoneyPlain(new Decimal('-3'))).toBe('-3.00');
+  });
+});
+
+describe('formatMoneyDelta', () => {
+  it('正负零三态，符号在币符号前', () => {
+    expect(formatMoneyDelta('12')).toBe('+¥ 12.00');
+    expect(formatMoneyDelta('-1234.5')).toBe('-¥ 1,234.50');
+    expect(formatMoneyDelta(0)).toBe('¥ 0.00');
+    expect(formatMoneyDelta(new Decimal('0.00'))).toBe('¥ 0.00');
   });
 });

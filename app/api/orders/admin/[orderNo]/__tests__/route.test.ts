@@ -23,7 +23,7 @@ vi.mock('@/lib/order/admin-workspace', () => ({
 vi.mock('@/lib/settings', () => ({ getSetting: getSettingMock }));
 vi.mock('@/lib/order/admin-inline-operations', () => ({ getAdminOrderInlineOperations: inlineOperationsMock }));
 
-import { handleAdminOrderWorkspaceDetail } from '../route';
+import { handleAdminOrderWorkspaceDetail } from '../handler';
 
 beforeEach(() => {
   vi.clearAllMocks();

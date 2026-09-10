@@ -514,7 +514,7 @@ function renderOrderFilterForm({
         className={cn(
           'flex flex-col gap-2 sm:flex-row sm:items-center',
           mobile &&
-            'sticky bottom-0 -mx-4 border-t bg-popover px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))]',
+            'sticky bottom-0 -mx-4 border-t bg-popover px-4 pt-3 admin-safe-bottom',
         )}
       >
         <Button type="submit" className="min-h-11 sm:min-h-8">

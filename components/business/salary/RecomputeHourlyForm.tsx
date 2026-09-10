@@ -11,6 +11,7 @@ import {
   FormErrorSummary,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
+import { formatMoney } from '@/lib/dashboard/format';
 
 export type HourlyRecomputeContext = {
   existingRecordCount: number;
@@ -37,7 +38,7 @@ export function hourlyRecomputeImpactItems(
 ): string[] {
   const sampleItems = context.sampleRows.map(
     (row) =>
-      `${row.workerName}：当前 ¥ ${row.totalSalary}（${row.isPaid ? '已发，保护不改' : '未发，可能重算'}）。`,
+      `${row.workerName}：当前 ${formatMoney(row.totalSalary)}（${row.isPaid ? '已发，保护不改' : '未发，可能重算'}）。`,
   );
   const remainingSamples = Math.max(
     context.existingRecordCount - context.sampleRows.length,
@@ -47,7 +48,7 @@ export function hourlyRecomputeImpactItems(
   return [
     `目标月期：${month}（上海日历）。`,
     `当前已有 ${context.existingRecordCount} 条月结：${context.unpaidRecordCount} 条未发、${context.paidRecordCount} 条已发。`,
-    `当前未发记录合计 ¥ ${context.unpaidTotal}；重算后金额可能改变。`,
+    `当前未发记录合计 ${formatMoney(context.unpaidTotal)}；重算后金额可能改变。`,
     ...sampleItems,
     ...(remainingSamples > 0
       ? [`还有 ${remainingSamples} 条现有月结未在此预览中逐条展开。`]

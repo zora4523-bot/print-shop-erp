@@ -245,7 +245,7 @@ describe('administrator edit design', () => {
       mount({ status });
       await page.getByRole('spinbutton', { name: '数量（个）', exact: true }).fill('2000');
       await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-      const review = page.getByRole('dialog', { name: '确认保存修改', exact: true });
+      const review = page.getByRole('alertdialog', { name: '保存工单修改', exact: true });
       await expect.element(review).toBeVisible();
       if (['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(status)) {
         await expect.element(review).toHaveTextContent('工单版本 v1 → v2');
@@ -265,7 +265,7 @@ describe('administrator edit design', () => {
       .getByRole('spinbutton', { name: '包装（个/包）', exact: true })
       .fill('20');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await expect.element(page.getByRole('dialog')).toBeVisible();
+    await expect.element(page.getByRole('alertdialog')).toBeVisible();
     expect(mocks.preview.mock.calls[0][0]).toMatchObject({
       items: [
         { operation: 'UPDATE', itemId: 'item-1', quantity: 2000, pack: 20 },
@@ -273,7 +273,7 @@ describe('administrator edit design', () => {
       fields: { expectedEditVersion: '4' },
     });
     expect(mocks.preview.mock.calls[0][0].fields.isUrgent).toBeUndefined();
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect.poll(() => mocks.save.mock.calls.length).toBe(1);
     expect(mocks.save.mock.calls[0][0]).toMatchObject({
       expectedQuoteToken: 'quote-1',
@@ -333,29 +333,18 @@ describe('administrator edit design', () => {
       .fill('2000');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await page.getByRole('textbox', { name: '第 1 票运费金额' }).fill('30.00');
-    // Inspect the shared confirmation layer after its opening transition settles.
-    await expect
-      .poll(
-        () =>
-          document
-            .querySelector('[role="dialog"]')
-            ?.getAnimations()
-            .filter((animation) => animation.playState === 'running').length ??
-          0,
-      )
-      .toBe(0);
+    // Pending charges are resolved inline; the confirmation layer stays closed until the quote is complete.
+    await expect.element(page.getByRole('region', { name: '核价结果', exact: true })).toBeVisible();
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(375);
-    const dialog = document.querySelector('[role="dialog"]')!;
-    expect(dialog.scrollWidth).toBeLessThanOrEqual(dialog.clientWidth);
-    for (const control of dialog.querySelectorAll('button, input, textarea')) {
+    const section = document.querySelector('[aria-label="核价结果"]')!;
+    expect(section.scrollWidth).toBeLessThanOrEqual(section.clientWidth);
+    for (const control of section.querySelectorAll('button, input, textarea')) {
       expect(control.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
     }
     await page
       .getByRole('textbox', { name: '第 1 票运费依据' })
       .fill('物流商报价单');
-    await expect
-      .element(page.getByRole('button', { name: '确认保存', exact: true }))
-      .toBeDisabled();
+    await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
     mocks.preview.mockResolvedValueOnce({
       status: 'preview',
       preview: {
@@ -373,9 +362,9 @@ describe('administrator edit design', () => {
     });
     await page.getByRole('button', { name: '补齐运费并重新核价' }).click();
     await expect
-      .element(page.getByRole('button', { name: '确认保存', exact: true }))
+      .element(page.getByRole('button', { name: '保存修改', exact: true }))
       .toBeEnabled();
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect.poll(() => mocks.save.mock.calls.length).toBe(1);
     expect(mocks.save.mock.calls[0][0]).toMatchObject({
       expectedQuoteToken: 'resolved',
@@ -439,7 +428,7 @@ describe('administrator edit design', () => {
       .getByRole('spinbutton', { name: '数量（个）', exact: true })
       .fill('2000');
     await page.getByRole('button', { name: '放弃', exact: true }).click();
-    await expect.element(page.getByRole('dialog')).toBeVisible();
+    await expect.element(page.getByRole('alertdialog')).toBeVisible();
     expect(mocks.push).not.toHaveBeenCalled();
     await page.getByRole('button', { name: '继续编辑', exact: true }).click();
     await expect
@@ -480,7 +469,7 @@ describe('administrator edit design', () => {
     const quantity = page.getByRole('spinbutton', { name: '数量（个）', exact: true });
     await quantity.fill('2000');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await expect.element(page.getByRole('dialog', { name: '确认保存修改' })).toBeVisible();
+    await expect.element(page.getByRole('alertdialog', { name: '保存工单修改' })).toBeVisible();
     await page.getByRole('button', { name: '再改改', exact: true }).click();
     await quantity.fill('3000');
     mocks.preview.mockResolvedValueOnce({
@@ -496,7 +485,7 @@ describe('administrator edit design', () => {
       },
     });
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await expect.element(page.getByText('保存后 ¥510.00', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('¥ 510.00', { exact: true })).toBeVisible();
     expect(mocks.preview.mock.calls[0][0].items).toEqual([
       { operation: 'UPDATE', itemId: 'item-1', quantity: 2000 },
     ]);
@@ -505,7 +494,7 @@ describe('administrator edit design', () => {
     ]);
     expect(mocks.preview.mock.calls[1][0].requestId).not.toBe(mocks.preview.mock.calls[0][0].requestId);
     expect(mocks.save).not.toHaveBeenCalled();
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect.poll(() => mocks.save.mock.calls.length).toBe(1);
     expect(mocks.save.mock.calls[0][0]).toMatchObject({
       items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 3000 }],
@@ -520,16 +509,16 @@ describe('administrator edit design', () => {
     await quantity.fill('2000');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     mocks.save.mockResolvedValueOnce({ status: 'error', message: '费用规则已更新，请重新预览' });
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect.element(page.getByText('费用规则已更新，请重新预览')).toBeVisible();
-    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+    await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
     await expect.element(quantity).toHaveValue(2000);
     expect(mocks.push).not.toHaveBeenCalled();
     expect(mocks.refresh).not.toHaveBeenCalled();
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await expect.poll(() => mocks.preview.mock.calls.length).toBe(2);
     expect(mocks.save).toHaveBeenCalledTimes(1);
-    await expect.element(page.getByRole('button', { name: '确认保存', exact: true })).toBeEnabled();
+    await expect.element(page.getByRole('button', { name: '保存修改', exact: true })).toBeEnabled();
   });
 
   it('shows an incomplete server quote and prevents confirmation without losing the draft', async () => {
@@ -549,9 +538,8 @@ describe('administrator edit design', () => {
     await page.getByRole('spinbutton', { name: '数量（个）', exact: true }).fill('2000');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await expect.element(page.getByText('未匹配到有效加工价，请维护规则后重新预览')).toBeVisible();
-    await expect.element(page.getByRole('button', { name: '确认保存', exact: true })).toBeDisabled();
-    await userEvent.keyboard('{Escape}');
-    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+    await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
+    await expect.element(page.getByRole('button', { name: '保存修改…', exact: true })).toBeEnabled();
     await expect.element(page.getByRole('spinbutton', { name: '数量（个）', exact: true })).toHaveValue(2000);
     expect(mocks.save).not.toHaveBeenCalled();
   });
@@ -741,7 +729,7 @@ describe('administrator edit design', () => {
     await expect.element(page.getByRole('button', { name: '上传设计文件', exact: true })).toBeDisabled();
     await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
     await page.getByRole('button', { name: '返回工单', exact: true }).click();
-    await expect.element(page.getByRole('dialog', { name: '放弃未保存的修改？', exact: true })).toBeVisible();
+    await expect.element(page.getByRole('alertdialog', { name: '放弃未保存修改并离开', exact: true })).toBeVisible();
     expect(mocks.push).not.toHaveBeenCalled();
     await page.getByRole('button', { name: '继续编辑', exact: true }).click();
     await expect.element(page.getByRole('textbox', { name: '测试费用金额', exact: true })).toHaveValue('30.00');
@@ -816,11 +804,10 @@ describe('administrator edit design', () => {
     mount();
     await page.getByRole('spinbutton', { name: '数量（个）', exact: true }).fill('2000');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    const review = page.getByRole('dialog', { name: '确认保存修改', exact: true });
+    const review = page.getByRole('alertdialog', { name: '保存工单修改', exact: true });
     try {
-      await page.getByRole('button', { name: '确认保存', exact: true }).click();
-      await expect.element(page.getByRole('button', { name: '保存中…', exact: true })).toBeDisabled();
-      await expect.element(page.getByRole('button', { name: '再改改', exact: true })).toBeDisabled();
+      await page.getByRole('button', { name: '保存修改', exact: true }).click();
+      await expect.element(page.getByRole('button', { name: '保存修改', exact: true })).toBeDisabled();
       await userEvent.keyboard('{Escape}');
       await expect.element(review).toBeVisible();
       expect(mocks.save).toHaveBeenCalledTimes(1);
@@ -833,23 +820,23 @@ describe('administrator edit design', () => {
   });
 
   for (const [width, height] of [[393, 852], [1440, 1000]]) {
-    it(`${width}×${height}: saving opens a bottom confirmation layer and Escape retains the draft`, async () => {
+    it(`${width}×${height}: saving opens the shared confirmation layer and Escape retains the draft`, async () => {
       await page.viewport(width, height);
       mount();
       await page.getByRole('spinbutton', { name: '数量（个）', exact: true }).fill('2000');
       const save = page.getByRole('button', { name: '保存修改…', exact: true });
       await save.click();
-      const dialog = page.getByRole('dialog', { name: '确认保存修改', exact: true });
+      const dialog = page.getByRole('alertdialog', { name: '保存工单修改', exact: true });
       await expect.element(dialog).toBeVisible();
       await expect.poll(() => dialog.element().hasAttribute('data-starting-style')).toBe(false);
       await expect.poll(() => dialog.element().getAnimations().filter((animation) => animation.playState === 'running').length).toBe(0);
       const rect = dialog.element().getBoundingClientRect();
-      expect(rect.bottom).toBeCloseTo(height, 0);
-      expect(rect.width).toBeLessThanOrEqual(Math.min(620, width));
+      expect(rect.top).toBeGreaterThanOrEqual(0);
+      expect(rect.bottom).toBeLessThanOrEqual(height);
       expect(rect.left).toBeGreaterThanOrEqual(0);
       expect(rect.right).toBeLessThanOrEqual(width);
       expect(dialog.element().scrollWidth).toBeLessThanOrEqual(dialog.element().clientWidth);
-      expect(await commands.checkShellAccessibility('[role="dialog"]')).toEqual([]);
+      expect(await commands.checkShellAccessibility('[role="alertdialog"]')).toEqual([]);
       await userEvent.keyboard('{Escape}');
       await expect.element(dialog).not.toBeInTheDocument();
       await expect.element(page.getByRole('spinbutton', { name: '数量（个）', exact: true })).toHaveValue(2000);

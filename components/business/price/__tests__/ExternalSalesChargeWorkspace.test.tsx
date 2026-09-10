@@ -449,7 +449,7 @@ describe('RulePriceWorkbench', () => {
       pagination: { page: 1, pageCount: 0, total: 0 },
     });
     expect(emptyHtml).toContain('data-kind="no-data"');
-    expect(emptyHtml).toContain('还没有收费项目');
+    expect(emptyHtml).toContain('暂无收费项目');
 
     const noResultHtml = render({
       draft: null,
@@ -460,7 +460,7 @@ describe('RulePriceWorkbench', () => {
       pagination: { page: 1, pageCount: 0, total: 0 },
     });
     expect(noResultHtml).toContain('data-kind="no-result"');
-    expect(noResultHtml).toContain('没有符合条件的收费项目');
+    expect(noResultHtml).toContain('没有匹配的收费项目');
     expect(noResultHtml).toContain('清除条件');
     expect(noResultHtml).toContain(
       'href="/owner/rules/customer-pricing?purpose=processing"',

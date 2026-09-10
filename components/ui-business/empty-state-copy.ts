@@ -4,8 +4,9 @@ export const EMPTY_NO_ACCESS_DESCRIPTION =
 export const EMPTY_NO_ACCESS_ACTION = '回我的工作台';
 export const EMPTY_NO_ACCESS_HOME_HREF = '/owner';
 
+// 空态措辞（docs/ui-规范.md §5.5）：无数据「暂无X」，有筛选「没有匹配的X」。
 export function emptyNoDataTitle(noun: string): string {
-  return `还没有${noun}`;
+  return `暂无${noun}`;
 }
 
 export function emptyNoDataDescription(noun: string): string {
@@ -13,7 +14,7 @@ export function emptyNoDataDescription(noun: string): string {
 }
 
 export function emptyNoResultTitle(noun: string): string {
-  return `没有符合条件的${noun}`;
+  return `没有匹配的${noun}`;
 }
 
 export const EMPTY_NO_RESULT_DESCRIPTION = '试试放宽条件';

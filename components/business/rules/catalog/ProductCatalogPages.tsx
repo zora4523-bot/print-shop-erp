@@ -199,7 +199,7 @@ export async function ProductCatalogList({
               q
                 ? '没有匹配当前搜索与状态条件的记录。'
                 : status === 'inactive'
-                  ? '暂无已停用记录。'
+                  ? '暂无已停用记录'
                   : status === 'active'
                     ? '暂无已启用记录，可切换到“全部”查看。'
                     : undefined

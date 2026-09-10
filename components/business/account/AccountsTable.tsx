@@ -9,7 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
 import { formatDateShanghai } from '@/lib/format/dates';
 import {
   roleLabel,
@@ -17,20 +16,13 @@ import {
   machineTypeLabel,
 } from '@/lib/auth/role-labels';
 import { EmptyState } from '@/components/ui-business';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 
 function workerDetail(a: AccountSummary): string {
   if (a.role !== Role.WORKER) return '—';
   const wt = workerTypeLabel(a.workerType);
   const machine = machineTypeLabel(a.machineType);
   return machine ? `${wt} · ${machine}` : wt || '—';
-}
-
-function AccountStatusBadge({ isActive }: { isActive: boolean }) {
-  return isActive ? (
-    <Badge variant="outline">活跃</Badge>
-  ) : (
-    <Badge variant="secondary">停用</Badge>
-  );
 }
 
 export function AccountsTable({
@@ -64,7 +56,7 @@ export function AccountsTable({
                   </p>
                 </div>
                 <div className="shrink-0">
-                  <AccountStatusBadge isActive={a.isActive} />
+                  <ActiveStatusBadge active={a.isActive} />
                 </div>
               </div>
 
@@ -155,7 +147,7 @@ export function AccountsTable({
                     </span>
                   </TableCell>
                   <TableCell>
-                    <AccountStatusBadge isActive={a.isActive} />
+                    <ActiveStatusBadge active={a.isActive} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDateShanghai(a.createdAt)}

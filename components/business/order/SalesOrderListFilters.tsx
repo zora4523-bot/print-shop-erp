@@ -91,7 +91,7 @@ export function SalesOrderListFilters({
                 {tab.label}
                 <span
                   className={cn(
-                    'rounded-full bg-muted px-1.5 text-[11px] tabular-nums text-muted-foreground',
+                    'rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground',
                     active && 'bg-background/15 text-background',
                     tab.id === 'todo' &&
                       summary.todo > 0 &&

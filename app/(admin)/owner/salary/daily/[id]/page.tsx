@@ -10,13 +10,15 @@ import { getDailyWorkerSalaryDetail } from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { formatMoney } from '@/lib/dashboard/format';
 import {
+  formatDateInputShanghai,
   formatDateShanghai,
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
 import { buttonVariants } from '@/components/ui/button';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
-import { PageHeader } from '@/components/ui-business';
+import { PageHeader, TableScrollArea } from '@/components/ui-business';
 import type { LegacyMachineRuleSnapshot } from '@/lib/salary/legacy-machine-snapshot';
+import { formatRate } from '@/lib/format/unit-price';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -50,7 +52,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
   const { id } = await params;
   const salary = await getDailySalaryPageData(id);
   if (!salary) notFound();
-  const salaryDateKey = salary.date.toISOString().slice(0, 10);
+  const salaryDateKey = formatDateInputShanghai(salary.date);
 
   return (
     <div className="space-y-6">
@@ -80,10 +82,10 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
           label="保底机型"
           value={MACHINE_TYPE_LABELS[salary.machineType]}
         />
-        <Summary label="计件合计" value={`¥ ${salary.totalPieceworkAmount}`} />
-        <Summary label="每日保底" value={`¥ ${salary.baseSalary}`} />
-        <Summary label="人工调整" value={`¥ ${salary.adjustmentAmount}`} />
-        <Summary label="实发" value={`¥ ${salary.actualSalary}`} strong />
+        <Summary label="计件合计" value={formatMoney(salary.totalPieceworkAmount)} />
+        <Summary label="每日保底" value={formatMoney(salary.baseSalary)} />
+        <Summary label="人工调整" value={formatMoney(salary.adjustmentAmount)} />
+        <Summary label="实发" value={formatMoney(salary.actualSalary)} strong />
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-xs text-muted-foreground">状态</p>
           <div className="mt-2">
@@ -129,12 +131,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
             当日没有完工的计件任务，本行按保底发放。
           </p>
         ) : (
-        <div
-          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="日薪明细"
-          tabIndex={0}
-        >
+        <TableScrollArea label="日薪明细">
           <table className="w-full min-w-[1250px] text-sm">
             <thead className="border-y bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -174,7 +171,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
         )}
       </section>
     </div>
@@ -184,15 +181,15 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
 function formatRuleSnapshot(snapshot: unknown): string {
   const rule = snapshot as LegacyMachineRuleSnapshot;
   const parts = [
-    `每下 ¥${rule.pieceRate ?? '—'}`,
-    `每板 ¥${rule.boardRate ?? '—'}`,
+    `每下 ${rule.pieceRate == null ? '—' : formatRate(rule.pieceRate)}`,
+    `每板 ${rule.boardRate == null ? '—' : formatRate(rule.boardRate)}`,
   ];
   if (rule.smallOrderThreshold !== null && rule.smallOrderThreshold !== undefined) {
     parts.push(
-      `小单 ${rule.smallOrderInclusive ? '≤' : '<'} ${rule.smallOrderThreshold} = ¥${rule.smallOrderFlatPrice ?? 0}`,
+      `小单 ${rule.smallOrderInclusive ? '≤' : '<'} ${rule.smallOrderThreshold} = ${formatRate(rule.smallOrderFlatPrice ?? 0)}`,
     );
   }
-  parts.push(`大单装板 ¥${rule.largeOrderSetupFee ?? 0}`);
+  parts.push(`大单装板 ${formatRate(rule.largeOrderSetupFee ?? 0)}`);
   return parts.join(' · ');
 }
 

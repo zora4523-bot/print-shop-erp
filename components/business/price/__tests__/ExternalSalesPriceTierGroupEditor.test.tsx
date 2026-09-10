@@ -117,7 +117,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('1,000 个');
     expect(html).toContain('20,000 个');
     expect(html.match(/name="tierAmount-\d"/g)).toHaveLength(7);
-    expect(html).toContain('¥295');
+    expect(html).toContain('¥ 295.00');
     expect(html).toContain('折合单价自动计算');
     expect(html).toContain('保存（0 档）');
     expect(html).toMatch(
@@ -145,7 +145,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
       />,
     );
 
-    expect(html).toContain('+¥5.8');
+    expect(html).toContain('+¥ 5.80');
     expect(html).toContain('+5.8%');
     expect(html).not.toContain('未修改');
     expect(formatDraftAmountDelta('100', '100')).toEqual({
@@ -155,7 +155,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     });
     expect(formatDraftAmountDelta('100', '97')).toEqual({
       kind: 'down',
-      amountLabel: '−¥3',
+      amountLabel: '−¥ 3.00',
       percentLabel: '−3%',
     });
   });
@@ -170,9 +170,9 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('整批固定总价');
     expect(html).toContain('当前总价');
     expect(html).toContain('草稿总价（元）');
-    expect(html).toContain('¥295 / 批');
+    expect(html).toContain('¥ 295.00 / 批');
     expect(html).toContain('折合单价自动计算');
-    expect(html).not.toContain('¥0.31 / 个');
+    expect(html).not.toContain('¥ 0.31 / 个');
     expect(html).toContain('修改各数量档总价');
   });
 
@@ -189,10 +189,10 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('按个计价');
     expect(html).toContain('当前单价');
     expect(html).toContain('草稿单价（元/个）');
-    expect(html).toContain('¥0.295 / 个');
+    expect(html).toContain('¥ 0.295 / 个');
     expect(html).toContain('修改各数量档单价');
     expect(html).toContain('保存（0 档）');
-    expect(html).not.toContain('¥0.0003');
+    expect(html).not.toContain('¥ 0.0003');
     expect(html).not.toContain('折合单价');
     expect(html).not.toContain('当前总价');
   });
@@ -202,19 +202,19 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
       CustomerPriceCalculationType.PER_SHEET,
       '按张计价',
       '元/张',
-      '¥1.25 / 张',
+      '¥ 1.25 / 张',
     ],
     [
       CustomerPriceCalculationType.PER_10K,
       '每万个计价',
       '元/万个',
-      '¥1.25 / 万个',
+      '¥ 1.25 / 万个',
     ],
     [
       CustomerPriceCalculationType.PER_ITEM,
       '每款一次',
       '元/款',
-      '¥1.25 / 款',
+      '¥ 1.25 / 款',
     ],
   ])(
     '其他计价类型 %s 诚实显示自己的单位',
@@ -398,7 +398,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('@min-[31rem]:grid-cols-[');
     expect(html).toContain('w-full');
     expect(html).toContain('@min-[31rem]:w-auto');
-    expect(html).toContain('pb-[max(1rem,env(safe-area-inset-bottom))]');
+    expect(html).toContain('admin-safe-bottom');
     expect(html).not.toContain('overflow-x-auto');
     expect(html).not.toContain('min-w-max');
   });
@@ -411,7 +411,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
       />,
     );
 
-    expect(html).toContain('¥9,999,999,999.9999');
+    expect(html).toContain('¥ 9,999,999,999.9999');
     expect(html).toContain('折合单价自动计算');
   });
 });

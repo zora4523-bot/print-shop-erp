@@ -1938,7 +1938,7 @@ export function CustomerPriceBookDraftRuleForm({
         onRefresh={() => router.refresh()}
         successMessage="草稿已保存。"
       />
-      <div className="sticky bottom-0 z-10 -mx-4 flex min-w-0 flex-col gap-2 border-t bg-card/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_18px_-16px_var(--foreground)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="sticky bottom-0 z-10 -mx-4 flex min-w-0 flex-col gap-2 border-t bg-card/95 px-4 pt-3 admin-safe-bottom shadow-[0_-8px_18px_-16px_var(--foreground)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs leading-5 text-muted-foreground">
           发布后生效。
         </p>

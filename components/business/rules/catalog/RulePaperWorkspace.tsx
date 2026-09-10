@@ -41,7 +41,7 @@ function PaperMetric({
 }) {
   return (
     <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2">
-      <p className="text-[11px] font-medium text-muted-foreground">
+      <p className="text-xs font-medium text-muted-foreground">
         {label}
       </p>
       <p className="admin-wrap-anywhere mt-1 font-sans text-sm font-semibold tabular-nums">
@@ -82,9 +82,6 @@ export function RulePaperWorkspace({
             <h2 id="paper-master-data-heading" className="text-base font-bold">
               纸张主数据
             </h2>
-            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-              每行对应一条真实纸张物料。“建单可选”表示当前会进入新工单纸张选择器；停止新单选用不等同于临时缺货。
-            </p>
           </div>
           <span className="shrink-0 rounded-full border bg-background px-3 py-1 text-xs font-medium tabular-nums text-muted-foreground">
             {pagination.total} 种纸张
@@ -151,7 +148,7 @@ export function RulePaperWorkspace({
                     <h3 className="admin-wrap-anywhere text-sm font-bold">
                       {name}
                     </h3>
-                    <p className="admin-wrap-anywhere mt-1 font-mono text-[11px] text-muted-foreground">
+                    <p className="admin-wrap-anywhere mt-1 font-mono text-xs text-muted-foreground">
                       {paper.code}
                     </p>
                     <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-xs text-muted-foreground">
@@ -183,7 +180,7 @@ export function RulePaperWorkspace({
                       tone={paper.isActive ? 'success' : 'neutral'}
                       dot={paper.isActive}
                     >
-                      {paper.isActive ? '建单可选' : '停止新单选用'}
+                      {paper.isActive ? '启用' : '停用'}
                     </StatusBadge>
                   </div>
                   <Link

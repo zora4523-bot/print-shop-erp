@@ -10,12 +10,7 @@ import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourl
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
-import {
-  ActionNotice,
-  EmptyState,
-  PageHeader,
-  StatCard as UiStatCard,
-} from '@/components/ui-business';
+import { ActionNotice, EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea } from '@/components/ui-business';
 import {
   getAttendanceSummaries,
   parseShanghaiMonth,
@@ -88,15 +83,13 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
     .reduce(
       (acc, r) => acc.plus(new Decimal(r.totalSalary as unknown as string)),
       new Decimal(0),
-    )
-    .toFixed(2);
+    );
   const unpaidSalary = rows
     .filter((r) => !r.isPaid)
     .reduce(
       (acc, r) => acc.plus(new Decimal(r.totalSalary as unknown as string)),
       new Decimal(0),
-    )
-    .toFixed(2);
+    );
   const activeMonthRows = allMonthRows.filter(
     (row) => row.payrollWorkerType !== WorkerType.PACKER,
   );
@@ -159,13 +152,13 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
         />
         <UiStatCard
           label="实发合计"
-          value={`¥${totalSalary}`}
+          value={formatMoney(totalSalary)}
           icon={Calculator}
           tone="primary"
         />
         <UiStatCard
           label="未发合计"
-          value={`¥${unpaidSalary}`}
+          value={formatMoney(unpaidSalary)}
           icon={Calculator}
           tone="warning"
         />
@@ -185,12 +178,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
           description="暂无记录。请选择月份生成清废与厨师的月结。"
         />
       ) : (
-        <div
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="时薪月结列表"
-          tabIndex={0}
-        >
+        <TableScrollArea label="时薪月结列表" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -269,7 +257,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
               })}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </div>
   );

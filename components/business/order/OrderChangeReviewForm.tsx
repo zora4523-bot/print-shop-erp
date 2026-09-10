@@ -7,6 +7,8 @@ import {
   useState,
   useTransition,
 } from 'react';
+import { formatMoney, formatMoneyDelta } from '@/lib/dashboard/format';
+import { formatUnitPrice } from '@/lib/format/unit-price';
 import { useRouter } from 'next/navigation';
 import type { FormEvent } from 'react';
 import {
@@ -104,15 +106,6 @@ export function buildOrderChangePendingChargeResolutions(
   return { resolutions, missing };
 }
 
-function money(value: string): string {
-  return `¥${value}`;
-}
-
-function deltaMoney(value: string): string {
-  if (value.startsWith('-')) return `-¥${value.slice(1)}`;
-  if (value === '0.00') return '¥0.00';
-  return `+¥${value}`;
-}
 
 function hasSameTextSet(
   left: readonly string[],
@@ -191,7 +184,7 @@ export function orderChangeApprovalConfirmation(
       }
     }
     if (item.oldSubtotal !== item.newSubtotal) {
-      changes.push({ label: `${label} · 加工费`, old: item.oldSubtotal === null ? '新增' : money(item.oldSubtotal), new: item.newSubtotal === null ? '待核价' : money(item.newSubtotal) });
+      changes.push({ label: `${label} · 加工费`, old: item.oldSubtotal === null ? '新增' : formatMoney(item.oldSubtotal), new: item.newSubtotal === null ? '待核价' : formatMoney(item.newSubtotal) });
     }
   }
   if (preview.promisedDateChange) {
@@ -199,9 +192,9 @@ export function orderChangeApprovalConfirmation(
   }
   const consequences: string[] = [];
   if (preview.totalExcludesPendingPlateFee) {
-    consequences.push(`修改后已知费用 ${preview.newTotal === null ? '待核价' : money(preview.newTotal)}（不含版费）；版费核定后计入工单应收，整单差额待定。`);
+    consequences.push(`修改后已知费用 ${preview.newTotal === null ? '待核价' : formatMoney(preview.newTotal)}（不含版费）；版费核定后计入工单应收，整单差额待定。`);
   } else if (preview.items.length > 0) {
-    changes.push({ label: `工单金额${preview.delta === null ? '' : `（差额 ${deltaMoney(preview.delta)}）`}`, old: money(preview.oldTotal), new: preview.newTotal === null ? '待核价' : money(preview.newTotal) });
+    changes.push({ label: `工单金额${preview.delta === null ? '' : `（差额 ${formatMoneyDelta(preview.delta)}）`}`, old: formatMoney(preview.oldTotal), new: preview.newTotal === null ? '待核价' : formatMoney(preview.newTotal) });
   }
   if (preview.items.length > 0) consequences.push('待开工任务将采用本次款式和数量。');
   return { changes, consequences };
@@ -288,7 +281,7 @@ export function OrderChangePricingPreviewPanel({
         <div className="rounded-md border bg-background p-2">
           <dt className="text-xs text-muted-foreground">当前工单总额</dt>
           <dd className="mt-1 font-sans font-semibold tabular-nums">
-            {money(preview.oldTotal)}
+            {formatMoney(preview.oldTotal)}
           </dd>
         </div>
         <div className="rounded-md border bg-background p-2">
@@ -298,7 +291,7 @@ export function OrderChangePricingPreviewPanel({
               : '新总额'}
           </dt>
           <dd className="mt-1 font-sans font-semibold tabular-nums">
-            {preview.newTotal === null ? '待补全价格规则' : money(preview.newTotal)}
+            {preview.newTotal === null ? '待补全价格规则' : formatMoney(preview.newTotal)}
           </dd>
         </div>
         <div className="rounded-md border bg-background p-2">
@@ -308,7 +301,7 @@ export function OrderChangePricingPreviewPanel({
               ? '版费核定后可计算'
               : preview.delta === null
                 ? '暂无法计算'
-                : deltaMoney(preview.delta)}
+                : formatMoneyDelta(preview.delta)}
           </dd>
         </div>
       </dl>
@@ -462,14 +455,14 @@ export function OrderChangePricingPreviewPanel({
               )}
               <p className="mt-1 text-muted-foreground">
                 款式小计：
-                {item.oldSubtotal === null ? '新增' : money(item.oldSubtotal)} →{' '}
-                {item.newSubtotal === null ? '待补全规则' : money(item.newSubtotal)}
+                {item.oldSubtotal === null ? '新增' : formatMoney(item.oldSubtotal)} →{' '}
+                {item.newSubtotal === null ? '待补全规则' : formatMoney(item.newSubtotal)}
               </p>
               {item.priceImpact === 'QUOTED' ? (
                 <p className="mt-1 text-muted-foreground">
-                  自动单价 {money(item.suggestedUnitPrice as string)} ·
+                  自动单价 {formatUnitPrice(item.suggestedUnitPrice as string)} ·
                   每款一次性费用{' '}
-                  {money(item.suggestedFixedFee as string)}
+                  {formatMoney(item.suggestedFixedFee as string)}
                 </p>
               ) : null}
               {item.errors.length > 0 ? (
@@ -508,9 +501,9 @@ export function OrderChangeCompactPreview({ preview, currentItems }: {
       </ul>
       <dl data-slot="order-change-amounts" className="space-y-2 text-sm">
         {preview.promisedDateChange ? <div className="flex justify-between gap-3"><dt>承诺交期</dt><dd>{preview.promisedDateChange.before ?? '未设置'} → {preview.promisedDateChange.after ?? '未设置'}</dd></div> : null}
-        <div className="flex justify-between gap-3"><dt>原金额</dt><dd className="font-semibold">{money(preview.oldTotal)}</dd></div>
-        <div className="flex justify-between gap-3"><dt>{preview.totalExcludesPendingPlateFee ? '修改后已知费用（不含版费）' : '修改后金额'}</dt><dd className="font-semibold">{preview.newTotal === null ? '待核定' : money(preview.newTotal)}</dd></div>
-        {!preview.totalExcludesPendingPlateFee && preview.delta !== null && <div className="flex justify-between gap-3"><dt>差额</dt><dd>{deltaMoney(preview.delta)}</dd></div>}
+        <div className="flex justify-between gap-3"><dt>原金额</dt><dd className="font-semibold">{formatMoney(preview.oldTotal)}</dd></div>
+        <div className="flex justify-between gap-3"><dt>{preview.totalExcludesPendingPlateFee ? '修改后已知费用（不含版费）' : '修改后金额'}</dt><dd className="font-semibold">{preview.newTotal === null ? '待核定' : formatMoney(preview.newTotal)}</dd></div>
+        {!preview.totalExcludesPendingPlateFee && preview.delta !== null && <div className="flex justify-between gap-3"><dt>差额</dt><dd>{formatMoneyDelta(preview.delta)}</dd></div>}
       </dl>
       {preview.totalExcludesPendingPlateFee && <p className="text-xs text-warning-foreground">版费待核定，暂不计算整单差额；批准后仍需补核版费。</p>}
       {!preview.complete && <p role="status" className="text-xs text-warning-foreground">费用未完整确定，请补齐下方运费或处理计价问题后重新预览。</p>}

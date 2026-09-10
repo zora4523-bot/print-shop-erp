@@ -22,7 +22,7 @@ vi.mock('@/lib/inventory-count', () => ({
   listInventoryCountMaterials: inventoryMock.listInventoryCountMaterials,
 }));
 
-import { handleInventoryCountMaterialsGet } from '../route';
+import { handleInventoryCountMaterialsGet } from '../handler';
 
 function request(url: string): NextAuthRequest {
   return Object.assign(new NextRequest(url), { auth: null }) as NextAuthRequest;

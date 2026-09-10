@@ -21,6 +21,7 @@ import { isAgentBillPeriod } from '@/lib/agent-monthly-billing/period';
 import { GenerateAgentMonthlyBillsForm } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
 import { AgentMonthlyBillExportControls } from '@/components/business/agent-monthly-billing/AgentMonthlyBillExportControls';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import {
   EmptyState,
   PageHeader,
@@ -78,7 +79,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard
           label="待收款"
-          value={`¥ ${formatMoney(stats.receivableAmount)}`}
+          value={formatMoney(stats.receivableAmount)}
           icon={Banknote}
           tone="warning"
         />
@@ -243,45 +244,18 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         </TableScrollArea>
       )}
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>
-          第 {result.page} / {result.pageCount} 页 · 共 {result.total} 张
-        </span>
-        <div className="flex gap-2">
-          {result.page > 1 ? (
-            <Link
-              href={pageHref(raw, result.page - 1)}
-              className={buttonVariants({ size: 'sm', variant: 'outline' })}
-            >
-              上一页
-            </Link>
-          ) : null}
-          {result.page < result.pageCount ? (
-            <Link
-              href={pageHref(raw, result.page + 1)}
-              className={buttonVariants({ size: 'sm', variant: 'outline' })}
-            >
-              下一页
-            </Link>
-          ) : null}
-        </div>
-      </div>
+      <AdminPagination
+        basePath="/owner/agent-bills"
+        page={result.page}
+        pageCount={result.pageCount}
+        total={result.total}
+        pageSize={result.pageSize}
+        queryParams={{ period: raw.period, status: raw.status, agentUserId: raw.agentUserId }}
+      />
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <FileClock className="size-4" />
         legacy Bill 保留原 finishedAt / 部分收款语义，不与本页数字混算。
       </p>
     </div>
   );
-}
-
-function pageHref(
-  raw: Awaited<PageProps['searchParams']>,
-  page: number,
-): string {
-  const params = new URLSearchParams();
-  if (raw.period) params.set('period', raw.period);
-  if (raw.status) params.set('status', raw.status);
-  if (raw.agentUserId) params.set('agentUserId', raw.agentUserId);
-  params.set('page', String(page));
-  return `/owner/agent-bills?${params.toString()}`;
 }

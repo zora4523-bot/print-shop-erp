@@ -6,7 +6,8 @@ import { reviewTaskDisputeAction } from '@/actions/task-disputes';
 import type { TaskDisputeMutationResult } from '@/actions/task-disputes.types';
 import { Button } from '@/components/ui/button';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
-import { TaskDisputeStatusBadge } from './TaskDisputePanel';
+import { TaskDisputeStatusBadge } from './TaskDisputeStatusBadge';
+import { formatMoney } from '@/lib/dashboard/format';
 
 export type AdminTaskDisputeRow = {
   id: string;
@@ -45,7 +46,7 @@ export function TaskDisputeAdminPanel({
         </p>
       </div>
       {disputes.length === 0 ? (
-        <p className="text-sm text-muted-foreground">暂无师傅异议。</p>
+        <p className="text-sm text-muted-foreground">暂无师傅异议</p>
       ) : (
         <ol className="space-y-3">
           {disputes.map((dispute) => (
@@ -72,7 +73,7 @@ export function TaskDisputeAdminPanel({
                 <div>
                   <dt className="text-muted-foreground">当前计件</dt>
                   <dd className="font-sans tabular-nums">
-                    ¥ {dispute.task.pieceworkAmount}
+                    {formatMoney(dispute.task.pieceworkAmount)}
                   </dd>
                 </div>
                 <div>

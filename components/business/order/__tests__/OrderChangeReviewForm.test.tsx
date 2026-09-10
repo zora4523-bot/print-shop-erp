@@ -119,10 +119,10 @@ describe('OrderChangePricingPreviewPanel', () => {
     );
 
     expect(html).toContain('变更费用');
-    expect(html).toContain('¥1000.00');
-    expect(html).toContain('¥960.00');
-    expect(html).toContain('-¥40.00');
-    expect(html).toContain('自动单价 ¥0.8000');
+    expect(html).toContain('¥ 1,000.00');
+    expect(html).toContain('¥ 960.00');
+    expect(html).toContain('-¥ 40.00');
+    expect(html).toContain('自动单价 ¥ 0.8000');
     expect(html).toContain('核对数量与金额');
     expect(html).toContain('变更费用');
   });
@@ -168,7 +168,7 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(html).toContain('暂无法计算');
     expect(html).toContain('费用尚未核齐，请补录待核价项或修正计价规则');
     expect(html).toContain('未找到适用的价格阶梯');
-    expect(html).not.toContain('¥960.00');
+    expect(html).not.toContain('¥ 960.00');
   });
 
   it('shows the proposed quantity diff instead of presenting approval as manual pricing', () => {
@@ -219,10 +219,10 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(html).toContain('版费核定后可计算');
     expect(html).toContain('新总额（暂不含版费）');
     expect(html).toContain('版费核定后可计算');
-    expect(html).not.toContain('-¥960.30');
-    expect(confirmation.consequences).toContain('修改后已知费用 ¥39.70（不含版费）；版费核定后计入工单应收，整单差额待定。');
+    expect(html).not.toContain('-¥ 960.30');
+    expect(confirmation.consequences).toContain('修改后已知费用 ¥ 39.70（不含版费）；版费核定后计入工单应收，整单差额待定。');
     expect(confirmation.changes.some(change => change.label.startsWith('工单金额'))).toBe(false);
-    expect(impact).not.toContain('-¥960.30');
+    expect(impact).not.toContain('-¥ 960.30');
   });
 
   it('maps each validated shipping draft to the server resolution guard fields', () => {
@@ -331,10 +331,10 @@ describe('OrderChangePricingPreviewPanel', () => {
 
     expect(impact.changes).toEqual(expect.arrayContaining([
       { label: '红包 A · 数量', old: '1,000 个', new: '1,200 个' },
-      { label: '红包 A · 加工费', old: '¥1000.00', new: '¥960.00' },
+      { label: '红包 A · 加工费', old: '¥ 1,000.00', new: '¥ 960.00' },
       { label: '红包 B · 数量', old: '新增', new: '1,200 个' },
       { label: '红包 B · 正面烫金', old: '新增', new: '金色' },
-      { label: '工单金额（差额 -¥40.00）', old: '¥1000.00', new: '¥960.00' },
+      { label: '工单金额（差额 -¥ 40.00）', old: '¥ 1,000.00', new: '¥ 960.00' },
     ]));
     expect(impact.consequences).toEqual(['待开工任务将采用本次款式和数量。']);
     // Version and quote-token protection is asserted in the mutation-binding test below,

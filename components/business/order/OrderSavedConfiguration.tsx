@@ -18,8 +18,6 @@ import { DesignUploadPanel } from './DesignUploadPanel';
 type Order = NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;
 const readable = (value: string | null | undefined) =>
   value ? externalPriceBusinessText(value) : '未填写';
-const money = (value: unknown) =>
-  value === null || value === undefined ? '待核定' : formatMoney(String(value));
 const qty = (value: number) => value.toLocaleString('zh-CN');
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -57,7 +55,7 @@ export function OrderSavedConfiguration({
                     第 {item.sequence} 款 · {readable(item.name)}
                   </span>
                   <strong className="ml-auto shrink-0 tabular-nums">
-                    {'subtotal' in item ? money(item.subtotal) : '待核定'}
+                    {'subtotal' in item ? (item.subtotal == null ? '待核定' : formatMoney(String(item.subtotal))) : '待核定'}
                   </strong>
                 </DisclosureSummary>
                 <dl className="grid gap-3 pb-4 sm:grid-cols-3">
@@ -68,7 +66,7 @@ export function OrderSavedConfiguration({
                       : '待核定'}
                   </Fact>
                   <Fact label="一次性费用">
-                    {'fixedFee' in item ? money(item.fixedFee) : '待核定'}
+                    {'fixedFee' in item ? (item.fixedFee == null ? '待核定' : formatMoney(String(item.fixedFee))) : '待核定'}
                   </Fact>
                 </dl>
               </Disclosure>
@@ -77,7 +75,7 @@ export function OrderSavedConfiguration({
               <span>入袋费</span>
               <span>
                 {order.items.length && 'packagingAmount' in order
-                  ? money(order.packagingAmount)
+                  ? (order.packagingAmount == null ? '待核定' : formatMoney(String(order.packagingAmount)))
                   : '未计价'}
               </span>
             </div>
@@ -92,7 +90,7 @@ export function OrderSavedConfiguration({
                     ? ` · 第 ${charge.shipment.sequence} 票`
                     : ''}
                 </span>
-                <span className="tabular-nums">{money(charge.amount)}</span>
+                <span className="tabular-nums">{charge.amount == null ? '待核定' : formatMoney(String(charge.amount))}</span>
                 {charge.overrideReason ? (
                   <p className="basis-full text-xs text-muted-foreground">
                     {charge.overrideReason}
@@ -109,7 +107,7 @@ export function OrderSavedConfiguration({
           <div className="flex flex-wrap items-baseline justify-between gap-3 border-t pt-4">
             <span className="text-sm font-medium">当前工单金额</span>
             <strong className="text-lg tabular-nums">
-              {'totalAmount' in order ? money(order.totalAmount) : '待核定'}
+              {'totalAmount' in order ? (order.totalAmount == null ? '待核定' : formatMoney(String(order.totalAmount))) : '待核定'}
             </strong>
           </div>
           <Disclosure>
@@ -117,10 +115,10 @@ export function OrderSavedConfiguration({
               报价与结算记录
             </DisclosureSummary>
             <dl className="grid grid-cols-1 gap-3 pt-3 sm:grid-cols-3">
-              <Fact label="原始报价">{money(order.quotedFee)}</Fact>
-              <Fact label="当前确认金额">{money(order.confirmedFee)}</Fact>
+              <Fact label="原始报价">{order.quotedFee == null ? '待核定' : formatMoney(String(order.quotedFee))}</Fact>
+              <Fact label="当前确认金额">{order.confirmedFee == null ? '待核定' : formatMoney(String(order.confirmedFee))}</Fact>
               <Fact label="结算金额">
-                {order.settledFee === null ? '未结算' : money(order.settledFee)}
+                {order.settledFee === null ? '未结算' : formatMoney(String(order.settledFee))}
               </Fact>
             </dl>
           </Disclosure>
@@ -197,26 +195,25 @@ export function OrderSavedConfiguration({
             {'processingAmount' in order ? (
               <Fact label="加工费">
                 {order.items.length
-                  ? money(
+                  ? formatMoney(
                       new Decimal(String(order.processingAmount))
                         .minus(
                           'packagingAmount' in order
                             ? String(order.packagingAmount)
                             : '0',
-                        )
-                        .toFixed(2),
+                        ),
                     )
                   : '未计价'}
               </Fact>
             ) : null}
             {'packagingAmount' in order ? (
               <Fact label="入袋费">
-                {order.items.length ? money(order.packagingAmount) : '未计价'}
+                {order.items.length ? (order.packagingAmount == null ? '待核定' : formatMoney(String(order.packagingAmount))) : '未计价'}
               </Fact>
             ) : null}
-            <Fact label="报价">{money(order.quotedFee)}</Fact>
-            <Fact label="确认金额">{money(order.confirmedFee)}</Fact>
-            <Fact label="结算金额">{money(order.settledFee)}</Fact>
+            <Fact label="报价">{order.quotedFee == null ? '待核定' : formatMoney(String(order.quotedFee))}</Fact>
+            <Fact label="确认金额">{order.confirmedFee == null ? '待核定' : formatMoney(String(order.confirmedFee))}</Fact>
+            <Fact label="结算金额">{order.settledFee == null ? '待核定' : formatMoney(String(order.settledFee))}</Fact>
           </dl>
           <ul className="divide-y">
             {order.customerCharges.map((charge) => (
@@ -233,7 +230,7 @@ export function OrderSavedConfiguration({
                     ? ` · ${readable(charge.description)}`
                     : ''}
                 </span>
-                <span className="tabular-nums">{money(charge.amount)}</span>
+                <span className="tabular-nums">{charge.amount == null ? '待核定' : formatMoney(String(charge.amount))}</span>
                 {charge.overrideReason ? (
                   <p className="basis-full text-xs text-muted-foreground">
                     {charge.overrideReason}
@@ -351,10 +348,10 @@ export function OrderSavedItemDetails({
           </Fact>
         ) : null}
         {'fixedFee' in item ? (
-          <Fact label="一次性费用">{money(item.fixedFee)}</Fact>
+          <Fact label="一次性费用">{item.fixedFee == null ? '待核定' : formatMoney(String(item.fixedFee))}</Fact>
         ) : null}
         {'subtotal' in item ? (
-          <Fact label="款式小计">{money(item.subtotal)}</Fact>
+          <Fact label="款式小计">{item.subtotal == null ? '待核定' : formatMoney(String(item.subtotal))}</Fact>
         ) : null}
         {'manualQuoteReason' in item && item.manualQuoteReason ? (
           <Fact label="人工报价原因">{String(item.manualQuoteReason)}</Fact>
@@ -371,7 +368,7 @@ export function OrderSavedItemDetails({
               {plate.name}
               {plate.isActive ? '' : '（已移除）'} ·{' '}
               {readable(plate.specification)} · {plate.quantity} ×{' '}
-              {money(plate.unitPrice)} · {money(plate.amount)}
+              {plate.unitPrice == null ? '待核定' : formatMoney(String(plate.unitPrice))} · {plate.amount == null ? '待核定' : formatMoney(String(plate.amount))}
               {plate.remark ? ` · ${plate.remark}` : ''}
             </p>
           ))}
@@ -456,7 +453,7 @@ export function OrderSavedPackaging({ order }: { order: Order }) {
           {'subtotal' in group ? (
             <p className="mt-1 text-sm text-muted-foreground">
               入袋单价 {formatUnitPrice(String(group.unitPrice))} · 小计{' '}
-              {money(group.subtotal)}
+              {group.subtotal == null ? '待核定' : formatMoney(String(group.subtotal))}
               {group.priceOverrideReason
                 ? ` · ${group.priceOverrideReason}`
                 : ''}

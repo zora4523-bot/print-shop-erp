@@ -5,6 +5,7 @@ import { setHourlyPayrollPaidAction } from '@/actions/owner-salary';
 import type { SalaryMutationResult } from '@/actions/owner-salary.types';
 import { Button } from '@/components/ui/button';
 import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import { formatMoney } from '@/lib/dashboard/format';
 
 type Props = {
   id: string;
@@ -23,7 +24,7 @@ export function hourlyPaidImpactItems({
 }: Omit<Props, 'id' | 'returnTo'>) {
   if (currentPaid) {
     return [
-      `${workerName} · ${month} · 当前月结金额 ¥ ${totalSalary}。`,
+      `${workerName} · ${month} · 当前月结金额 ${formatMoney(totalSalary)}。`,
       '撤销后会清空系统内的“已发放”标记和发放时间。',
       '该月结将重新允许重算；撤销本身不会立即改变工资金额。',
       '这不会冲销外部付款，也不会生成退款流水。',
@@ -31,7 +32,7 @@ export function hourlyPaidImpactItems({
   }
 
   return [
-    `${workerName} · ${month} · 将标记已发 ¥ ${totalSalary}。`,
+    `${workerName} · ${month} · 将标记已发 ${formatMoney(totalSalary)}。`,
     '系统会记录发放时间，并锁定该月结记录。',
     '锁定后不能重算；如需更正考勤或规则结果，必须先撤销发放。',
     '这只记录系统发放状态，不会自动发起外部付款。',

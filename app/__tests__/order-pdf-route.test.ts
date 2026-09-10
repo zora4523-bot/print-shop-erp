@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import type { NextAuthRequest } from 'next-auth';
+import { UnauthorizedError } from '@/lib/auth/errors';
 import { Role } from '@/generated/prisma/enums';
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), order: vi.fn(), mode: vi.fn(), html: vi.fn(), render: vi.fn(),
   enqueue: vi.fn(), wait: vi.fn(), read: vi.fn(),
 }));
-vi.mock('@/lib/auth/session', () => ({ getSession: mocks.session }));
+vi.mock('@/lib/auth/config', () => ({ auth: (handler: unknown) => handler }));
+vi.mock('@/lib/auth/session', () => ({ requireVerifiedSession: mocks.session }));
 vi.mock('@/lib/order/print-view', () => ({ getOrderForPrint: mocks.order }));
 vi.mock('@/lib/public-base-url', () => ({ derivePublicBaseUrl: async () => 'https://erp.example.com' }));
 vi.mock('@/lib/settings', () => ({ getSetting: async () => ({ name: '测试工厂' }) }));
@@ -19,9 +23,9 @@ vi.mock('@/lib/background-jobs/pdf', () => ({
   readAndDeletePdfArtifact: mocks.read,
 }));
 
-import { GET } from '@/app/api/orders/[id]/pdf/route';
+import { handleOrderPdfGet } from '@/app/api/orders/[id]/pdf/handler';
 
-const request = (query = '') => GET(new Request(`https://erp.example.com/api/orders/order-1/pdf${query}`), {
+const request = (query = '') => handleOrderPdfGet(Object.assign(new NextRequest(`https://erp.example.com/api/orders/order-1/pdf${query}`), { auth: null }) as NextAuthRequest, {
   params: Promise.resolve({ id: 'order-1' }),
 });
 
@@ -38,7 +42,7 @@ beforeEach(() => {
 
 describe('order PDF route', () => {
   it('requires authentication before disclosing order information', async () => {
-    mocks.session.mockResolvedValue(null);
+    mocks.session.mockRejectedValue(new UnauthorizedError());
     expect((await request()).status).toBe(401);
     expect(mocks.order).not.toHaveBeenCalled();
   });
@@ -93,4 +97,30 @@ describe('order PDF route', () => {
     expect(response.status).toBe(409);
     expect(await response.text()).toContain('href="/api/orders/order-1/pdf"');
   });
+});
+
+it('does not return renderer diagnostics or durable error payloads', async () => {
+  const diagnostic = '/private/db/password=secret https://internal.example';
+  mocks.render.mockRejectedValue(new Error(diagnostic));
+  const response = await request();
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: 'PDF 生成失败', code: 'PDF_GENERATION_FAILED', message: '请重新生成；如仍失败，请联系管理员' });
+  mocks.mode.mockReturnValue('durable');
+  mocks.wait.mockResolvedValue({ status: 'failed', errorCode: diagnostic });
+  const queued = await request('?jobId=job-1');
+  expect(queued.status).toBe(500);
+  const body = await queued.text();
+  expect(body).not.toContain(diagnostic);
+  expect(body).toContain('PDF_GENERATION_FAILED');
+});
+
+it('passes request auth for verification and uses the verified actor for scope and jobs', async () => {
+  const authSession = { user: { id: 'old-token', role: Role.ADMIN }, expires: '2099-01-01' };
+  mocks.session.mockResolvedValue({ user: { id: 'worker-1', role: Role.WORKER } });
+  mocks.mode.mockReturnValue('durable');
+  const req = Object.assign(new NextRequest('https://erp.example.com/api/orders/order-1/pdf'), { auth: authSession }) as NextAuthRequest;
+  await handleOrderPdfGet(req, { params: Promise.resolve({ id: 'order-1' }) });
+  expect(mocks.session).toHaveBeenCalledWith(authSession);
+  expect(mocks.order).toHaveBeenCalledWith('order-1', { id: 'worker-1', role: Role.WORKER }, 'https://erp.example.com');
+  expect(mocks.wait).toHaveBeenCalledWith('job-1', expect.objectContaining({ expected: { orderId: 'order-1', actorId: 'worker-1', workOrderVersion: 3 } }));
 });

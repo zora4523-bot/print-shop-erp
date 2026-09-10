@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useRef, useState, useTransition } from 'react';
+import Decimal from 'decimal.js';
+import { formatMoney } from '@/lib/dashboard/format';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -20,9 +22,12 @@ import type { CancellationSettlementReference } from '@/lib/order/change-request
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
-import { ActionNotice } from '@/components/ui-business/ActionNotice';
-import { DisabledReason } from '@/components/ui-business/DisabledReason';
+import {
+  ActionNotice,
+  ConfirmActionController,
+  ConfirmActionDialog,
+  DisabledReason,
+} from '@/components/ui-business';
 import { OrderChangeReviewForm } from './OrderChangeReviewForm';
 import { cancellationReviewIssue } from './admin-order-cancellation-review';
 import { AdminOrderInlineOperations } from './AdminOrderInlineOperations';
@@ -189,7 +194,7 @@ function AdminDecisionActions({
         <DecisionConfirmation
           label="结算"
           title="结算工单"
-          changes={[{label: order.customName ?? "未命名工单", old: "未结算", new: order.feeStages.confirmed === null ? "待核价" : `¥${formatMoney(order.feeStages.confirmed)}`}]}
+          changes={[{label: order.customName ?? "未命名工单", old: "未结算", new: order.feeStages.confirmed === null ? "待核价" : formatMoney(order.feeStages.confirmed)}]}
           impactItems={[
             '结算后不可编辑，账单将采用本次结算金额。',
           ]}
@@ -293,7 +298,7 @@ function AdminDecisionForm({
   const impactItems = [
     `工单 ${order.orderNo}，版本 v${order.workOrderVersion}。`,
     ...(mode === 'change-approve' ? [
-      `核实已产数量 ${producedQty.trim()} 个，最终结算金额 ¥${settleFee.trim()}。`,
+      `核实已产数量 ${producedQty.trim()} 个，最终结算金额 ${formatSettleFeeInput(settleFee)}。`,
       ...(settleFeeAdjustmentReason.trim() ? [`金额调整原因：${settleFeeAdjustmentReason.trim()}。`] : []),
       '批准后工单转为已取消，未完成的生产任务停止，并保存本次结算金额；已产部分照常结算。',
     ] : mode === 'change-deny' ? [
@@ -372,13 +377,13 @@ function AdminDecisionForm({
           {settlementPreview ? (
             <div className="rounded-md bg-muted/50 p-2 text-xs">
               <p className="font-semibold">
-                引擎参考价 ¥{formatMoney(settlementPreview.referenceSettleFee)}
+                引擎参考价 {formatMoney(settlementPreview.referenceSettleFee)}
               </p>
               <p className="mt-1 text-muted-foreground">
-                款级 ¥{formatMoney(settlementPreview.components.itemProcessing)} ·
-                入袋 ¥{formatMoney(settlementPreview.components.bagging)} ·
-                纸箱 ¥{formatMoney(settlementPreview.components.carton)} ·
-                运费 ¥0.00
+                款级 {formatMoney(settlementPreview.components.itemProcessing)} ·
+                入袋 {formatMoney(settlementPreview.components.bagging)} ·
+                纸箱 {formatMoney(settlementPreview.components.carton)} ·
+                运费 {formatMoney(0)}
               </p>
             </div>
           ) : null}
@@ -811,7 +816,7 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
       <div data-slot={compact ? 'admin-order-decision-card' : undefined}>
       {compact ? (
         <>
-          <h4 data-slot="admin-order-decision-heading" className="text-[12.5px] font-extrabold">
+          <h4 data-slot="admin-order-decision-heading" className="text-sm font-extrabold">
             {order.pendingChangeRequest ? (order.pendingChangeRequest.type === 'MODIFY' ? '变更申请' : '取消申请')
               : awaitingConfirmation ? '下发前检查'
               : order.status === 'ON_HOLD' ? '暂停处理'
@@ -820,7 +825,7 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
               : order.capabilities.settle || settlementBlockedByMissingFee ? '结算'
               : '工单处理'}
           </h4>
-          {order.pendingChangeRequest ? <p className="mt-2 text-[12.5px] font-semibold">{order.pendingChangeRequest.reason}</p> : null}
+          {order.pendingChangeRequest ? <p className="mt-2 text-sm font-semibold">{order.pendingChangeRequest.reason}</p> : null}
         </>
       ) : null}
       {!compact ? (
@@ -943,9 +948,14 @@ export function parseStrictPositiveIntegerList(
   return { ok: true, values: [...new Set(values)] };
 }
 
-function formatMoney(value: string): string {
-  return Number(value).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+// 确认层回显用户手填的结算金额：能解析就走统一 formatter，
+// 解析不了原样回显（服务端校验会再拦）。
+function formatSettleFeeInput(value: string): string {
+  const trimmed = value.trim();
+  try {
+    const parsed = new Decimal(trimmed);
+    return parsed.isFinite() ? formatMoney(parsed) : trimmed;
+  } catch {
+    return trimmed;
+  }
 }

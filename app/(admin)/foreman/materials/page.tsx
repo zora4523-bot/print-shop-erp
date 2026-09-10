@@ -12,11 +12,9 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { getMaterialInventoryDashboard } from '@/lib/material-inventory';
 import { MATERIAL_CATEGORY_LABELS } from '@/lib/material';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
-import {
-  PageHeader,
-  StatCard,
-  StatusBadge,
-} from '@/components/ui-business';
+import { formatMoney } from '@/lib/dashboard/format';
+import { PageHeader, StatCard, StatusBadge, TableScrollArea } from '@/components/ui-business';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 
 export const metadata = { title: '物料库存' };
 
@@ -33,9 +31,9 @@ function qty(value: string, unit?: string): string {
   return unit ? `${value} ${unit}` : value;
 }
 
-function money(value: string | null): string {
+function stockValueText(value: string | null): string {
   if (value == null) return '-';
-  return `¥${value}`;
+  return formatMoney(value);
 }
 
 export default async function ForemanMaterialsPage({ searchParams }: PageProps) {
@@ -72,7 +70,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
         />
         <StatCard
           label="库存金额"
-          value={money(dashboard.totals.stockValue)}
+          value={stockValueText(dashboard.totals.stockValue)}
           icon={PackageCheck}
           tone="primary"
           hint="库存 × 参考成本；采购入库不会自动更新参考成本"
@@ -119,12 +117,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
         </div>
       </form>
 
-      <div
-        className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        role="region"
-        aria-label="物料库存列表"
-        tabIndex={0}
-      >
+      <TableScrollArea label="物料库存列表" className="rounded-xl border bg-card shadow-sm">
         <table className="w-full min-w-[1080px] text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
@@ -174,13 +167,11 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
                   <div>出 {qty(row.totalOut, row.unit)}</div>
                 </td>
                 <td className="px-4 py-3 text-right font-sans tabular-nums">
-                  {money(row.stockValue)}
+                  {stockValueText(row.stockValue)}
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-col items-start gap-1">
-                    <StatusBadge tone={row.isActive ? 'success' : 'neutral'}>
-                      {row.isActive ? '启用' : '停用'}
-                    </StatusBadge>
+                    <ActiveStatusBadge active={row.isActive} />
                     {row.isBelowSafetyStock ? (
                       <StatusBadge tone="warning">低库存</StatusBadge>
                     ) : null}
@@ -203,7 +194,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
             没有匹配的物料记录。
           </div>
         ) : null}
-      </div>
+      </TableScrollArea>
     </div>
   );
 }

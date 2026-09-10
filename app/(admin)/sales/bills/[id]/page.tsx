@@ -1,14 +1,12 @@
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
+import { BillStatusBadge } from '@/components/business/bill/BillStatusBadge';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getSalesBillDetail } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
-import {
-  StatusBadge as UiStatusBadge,
-  TableEmptyState,
-} from '@/components/ui-business';
+import { TableEmptyState, TableScrollArea } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
 import { getSession } from '@/lib/auth/session';
@@ -17,7 +15,6 @@ import { salesBillTitle } from '@/lib/page-title/titles';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
-import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import {
   parsePricingSnapshotComponents,
   PricingSnapshotBreakdown,
@@ -103,11 +100,11 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Row label="应付总额" value={`¥ ${String(bill.totalAmount)}`} tabular />
-          <Row label="已支付" value={`¥ ${String(bill.paidAmount)}`} tabular />
+          <Row label="应付总额" value={formatMoney(bill.totalAmount)} tabular />
+          <Row label="已支付" value={formatMoney(bill.paidAmount)} tabular />
           <Row
             label="待支付"
-            value={`¥ ${remaining.toFixed(2)}`}
+            value={formatMoney(remaining)}
             tabular
             highlight={remaining.gt(0)}
           />
@@ -130,7 +127,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm sm:p-6">
           <h2 className="text-base font-semibold">历史期初/手工差额</h2>
           <p className="mt-2 text-muted-foreground">
-            逐单账单启用前的历史差额：¥ {openingAmount.toFixed(2)}
+            逐单账单启用前的历史差额：{formatMoney(openingAmount)}
           </p>
         </section>
       )}
@@ -195,12 +192,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
             本账单无工单。
           </div>
         ) : (
-          <div
-            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            role="region"
-            aria-label="账单工单明细"
-            tabIndex={0}
-          >
+          <TableScrollArea label="账单工单明细">
           <table className="w-full min-w-[980px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -247,7 +239,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
               ))}
             </tbody>
           </table>
-          </div>
+          </TableScrollArea>
         )}
       </section>
 
@@ -328,9 +320,9 @@ function formatCustomerChargeSummary(summary: {
   knownAmount: Decimal;
   hasPendingAmount: boolean;
 }): string {
-  if (!summary.hasPendingAmount) return `¥ ${summary.knownAmount.toFixed(2)}`;
+  if (!summary.hasPendingAmount) return formatMoney(summary.knownAmount);
   if (summary.knownAmount.isZero()) return '待定';
-  return `¥ ${summary.knownAmount.toFixed(2)}（另有待定）`;
+  return `${formatMoney(summary.knownAmount)}（另有待定）`;
 }
 
 function Row({
@@ -355,14 +347,5 @@ function Row({
         {value}
       </dd>
     </div>
-  );
-}
-
-function BillStatusBadge({ status }: { status: BillStatus }) {
-  const definition = BILL_STATUS_REGISTRY[status];
-  return (
-    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
-      {definition.label}
-    </UiStatusBadge>
   );
 }

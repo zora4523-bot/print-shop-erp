@@ -25,7 +25,7 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/agent-monthly-billing/export', () => exportMock);
 
-import { handleAgentMonthlyBillExportDownload } from '../route';
+import { handleAgentMonthlyBillExportDownload } from '../handler';
 
 function request(): NextAuthRequest {
   return Object.assign(

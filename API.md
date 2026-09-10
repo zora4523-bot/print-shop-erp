@@ -69,7 +69,10 @@ applies_to: repository source at last_verified
 | `GET /api/cdr/bundles/:id` | Capability URL | cuid 风格 bundle id | 就绪后 `302` 到产物；生成中 `409` + `Retry-After`；失效或不存在统一 `404`；OSS 不可用 `503` |
 | `GET /api/orders/:id/pdf` | Session + order scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500` |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
+| `GET /api/salary/piecework-settlements/export` | Permission `salary:view:all`，复核数据库账号状态 | query `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 | `GET /api/salary/piecework/export` | Permission `salary:view:all` | query `date` 或 `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
+
+Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到登录 HTML；页面请求仍跳转登录。路由继续校验数据库账号状态、角色及资源所有权，不依赖 Proxy 作为最终授权。PDF 的内联渲染失败与后台任务失败只返回固定错误码 `PDF_GENERATION_FAILED` 和重试建议，不返回底层异常正文或部署路径。
 
 下载响应使用 `private, no-store`；文件名同时提供安全的 ASCII fallback 和 UTF-8 名称（适用的端点）。新增下载接口时保持内容类型、长度、缓存和 `nosniff` 语义。
 
@@ -179,3 +182,7 @@ pnpm test --run
 `GET /api/orders/admin/[orderNo]` 与管理端列表共用的工单读取模型增加可选 `craftTags` 字段，值为“局部烫金”“专版烫金”“彩印”的去重数组，来源为各款式 `craft` 类型，缺少类型返回空数组。原 `craftSummary`、工单标识及权限校验保持不变。
 
 管理端工单读取中，`DRAFT` 且报价、确认、结算快照均为空时，`fee` 返回 `{ amount: null, source: 'PENDING', estimated: false }`，表示尚未报价；已保存的真实零元报价仍按对应快照返回。
+
+### Next.js 路由模块边界
+
+`route.ts` 仅导出 HTTP 方法与 Next.js 路由配置。可测试的处理函数放在相邻 `handler.ts`，仍由 `route.ts` 中的 `auth(handler)` 包装；权限、资源范围和 HTTP 地址保持不变。

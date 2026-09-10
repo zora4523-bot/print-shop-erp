@@ -83,7 +83,7 @@ describe('order-list page selection contract', () => {
     },
     {
       tone: 'error' as const,
-      message: '复制失败，请检查浏览器的剪贴板权限后重试',
+      message: '工单号复制失败，请手动选择复制或检查浏览器剪贴板权限',
     },
   ])('keeps $tone feedback visible in the live region', (feedback) => {
     const html = renderToStaticMarkup(

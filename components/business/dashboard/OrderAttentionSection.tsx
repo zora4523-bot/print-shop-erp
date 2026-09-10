@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { SlowLoadingHint } from '@/components/ui-business';
+import { SectionLoading } from '@/components/ui-business';
+import { Skeleton } from '@/components/ui/skeleton';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getOrderAttentionCounts } from '@/lib/dashboard/order-attention';
 
@@ -32,14 +33,12 @@ export async function OrderAttentionSection() {
 
 export function OrderAttentionLoading() {
   return (
-    <div role="status" aria-busy="true" aria-live="polite">
-      <span className="sr-only">正在加载工单待办</span>
-      <div aria-hidden="true" className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4">
+    <SectionLoading label="工单待办">
+      <div className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4">
         {categories.map(({ signal }) => (
-          <div key={signal} className="h-20 animate-pulse rounded-xl border bg-card motion-reduce:animate-none sm:h-16" />
+          <Skeleton key={signal} className="h-20 rounded-xl border bg-card motion-reduce:animate-none sm:h-16" />
         ))}
       </div>
-      <SlowLoadingHint />
-    </div>
+    </SectionLoading>
   );
 }

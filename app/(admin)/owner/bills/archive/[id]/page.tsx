@@ -6,6 +6,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { buttonVariants } from '@/components/ui/button';
 import { TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { BillStatusBadge } from '@/components/business/bill/BillStatusBadge';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -23,9 +24,12 @@ export default async function LegacyBillArchiveDetailPage({ params }: PageProps)
         <h1 className="mt-2 text-2xl font-semibold">
           {bill.period} · #{bill.sequence} · {bill.salesUser.displayName}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {bill.status} · 发单 {formatDateTimeShanghai(bill.issuedAt)} · 结清{' '}
-          {formatDateTimeShanghai(bill.paidAt)}
+        <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <BillStatusBadge status={bill.status} />
+          <span>
+            发单 {formatDateTimeShanghai(bill.issuedAt)} · 结清{' '}
+            {formatDateTimeShanghai(bill.paidAt)}
+          </span>
         </p>
       </div>
       <section className="grid gap-4 rounded-xl border bg-card p-5 shadow-sm sm:grid-cols-3">
@@ -89,7 +93,7 @@ function Amount({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-sans text-lg tabular-nums">¥ {formatMoney(value)}</p>
+      <p className="font-sans text-lg tabular-nums">{formatMoney(value)}</p>
     </div>
   );
 }

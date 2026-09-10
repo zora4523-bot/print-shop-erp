@@ -10,7 +10,7 @@
     "worker:light": "node --conditions=react-server --import tsx scripts/background-worker.ts --queue=LIGHT",
     "worker:heavy": "tsx scripts/background-worker.ts --queue=HEAVY",
     "piecework:publish-v1": "tsx scripts/publish-piecework-price-book-v1.ts",
-    "lint": "eslint && node scripts/ui-copy/check.mjs",
+    "lint": "eslint && node scripts/ui-copy/check.mjs && node scripts/ui-tokens/check.mjs",
     "test": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:e2e": "playwright test",
@@ -34,7 +34,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
-    "lint:ui": "node scripts/ui-copy/check.mjs"
+    "lint:ui": "node scripts/ui-copy/check.mjs && node scripts/ui-tokens/check.mjs",
+    "lint:ui:baseline": "node scripts/ui-tokens/check.mjs --write-baseline"
   },
   "dependencies": {
     "@auth/core": "0.41.2",
