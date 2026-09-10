@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { AdminOrderBatchActionResult } from '@/actions/admin-order-workflow';
 import type { AdminOrderBatchCommand } from '@/lib/order/admin-batch';
 import { ActionNotice, BatchActionResult } from '@/components/ui-business';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BATCH_COMMAND_CONFIG, batchReceiptRows, type BatchOrderSnapshot } from './admin-order-batch-ui';
 
@@ -87,12 +87,24 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
                 id: row.order.id,
                 outcome: row.outcome,
                 label: (
-                  <>
-                    <Link href={`/orders/${encodeURIComponent(row.order.id)}`} prefetch={false} className="inline-flex min-h-11 items-center underline underline-offset-4">
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                    <Link href={`/orders/${encodeURIComponent(row.order.id)}`} prefetch={false} className="inline-flex min-h-11 min-w-0 max-w-full items-center underline underline-offset-4">
                       {row.order.orderNo}
                     </Link>
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">{row.label}</span>
-                  </>
+                    <span className="text-xs font-normal text-muted-foreground">{row.label}</span>
+                    {row.outcome === 'success' && (receipt.command === 'RELEASE_AND_CREATE_PRINT' || receipt.command === 'CREATE_PRINT') ? (
+                      <Link
+                        href={`/print/orders/${encodeURIComponent(row.order.id)}?autoprint=1`}
+                        prefetch={false}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`去打印工单 ${row.order.orderNo}`}
+                        className={buttonVariants({ variant: 'outline', className: 'min-h-11 min-w-11' })}
+                      >
+                        去打印
+                      </Link>
+                    ) : null}
+                  </span>
                 ),
                 reason: row.reason,
               }))}

@@ -162,13 +162,13 @@ function AdminDecisionActions({
       ) : null}
       {order.capabilities.release ? (
         <DecisionConfirmation
-          label="下发 + 打印"
+          label="下发生产"
           title="下发生产"
           changes={[{label: order.customName ?? "未命名工单", old: "待下发", new: `${order.totalQuantity.toLocaleString("zh-CN")} 个待生产`}]}
           impactItems={[
             '车间可扫码报工，并生成打印任务。',
           ]}
-          confirmLabel="下发并打印"
+          confirmLabel="确认下发生产"
           disabled={pending}
           onConfirm={() =>
             run(() =>
@@ -184,12 +184,12 @@ function AdminDecisionActions({
       ) : null}
       {order.capabilities.createPrint ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('CREATE_PRINT')}>
-          创建打印
+          加入待打印
         </Button>
       ) : null}
       {order.capabilities.markPrinted ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('MARK_PRINTED')}>
-          标记已打印
+          确认已打印
         </Button>
       ) : null}
       {order.capabilities.settle ? (

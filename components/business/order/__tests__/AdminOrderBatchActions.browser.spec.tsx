@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
 import type { AdminOrderBatchActionResult } from '@/actions/admin-order-workflow';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
+import { OrderStatus } from '@/generated/prisma/enums';
 import '@/app/globals.css';
 
 const { batchAction, refresh } = vi.hoisted(() => ({ batchAction: vi.fn(), refresh: vi.fn() }));
@@ -46,7 +47,7 @@ function mount(orders = [batchOrder()], selectionKey = 'initial') {
   const selectedItems = batchSelection(orders);
   flushSync(() => root.render(
     <AdminOrderBatchResultProvider>
-      <OrderListBatchBar key={selectionKey} selectedItems={selectedItems} onClear={() => {}}
+      <OrderListBatchBar key={selectionKey} selectedItems={selectedItems} onClear={() => {}} layout="inline" showCopyOrderNumbers={false}
         renderBatchActions={(selected) => <AdminOrderBatchActions orders={orders} selectedItems={selected} selectedExportRequestKey="export-test-request" />} />
     </AdminOrderBatchResultProvider>,
   ));
@@ -73,7 +74,7 @@ function mixedOrders(): AdminOrderWorkspaceRow[] {
 }
 
 async function review() {
-  await page.getByRole('button', { name: '下发+打印（4）', exact: true }).click();
+  await page.getByRole('button', { name: '下发生产（4）', exact: true }).click();
   await expect.element(page.getByRole('alertdialog')).toBeVisible();
   await settleAnimation('[data-slot="alert-dialog-content"]');
 }
@@ -85,21 +86,98 @@ async function settleAnimation(selector: string) {
 }
 
 describe('admin order batch review', () => {
+  it('shows only applicable actions as the selected orders change', async () => {
+    const order = batchOrder();
+    mount([order]);
+    const toolbar = page.getByRole('region', { name: '工单批量操作' });
+    await expect.element(toolbar.getByRole('button', { name: '下发生产（1）', exact: true })).toBeVisible();
+    expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual([
+      '下发生产（1）', '导出所选', '取消选择',
+    ]);
+
+    mount([{ ...order, status: OrderStatus.RELEASED, pendingPrintJobId: 'print-1',
+      capabilities: { ...order.capabilities, release: false, markPrinted: true } }]);
+    await expect.element(toolbar.getByRole('button', { name: '确认已打印（1）', exact: true })).toBeVisible();
+    await expect.element(toolbar.getByRole('button', { name: /下发生产|批量结算|更多操作/ })).not.toBeInTheDocument();
+
+    mount([{ ...order, status: OrderStatus.SHIPPED,
+      capabilities: { ...order.capabilities, release: false, settle: true } }]);
+    await expect.element(toolbar.getByRole('button', { name: '批量结算（1）', exact: true })).toBeVisible();
+    await expect.element(toolbar.getByRole('button', { name: /下发生产|确认已打印|更多操作/ })).not.toBeInTheDocument();
+
+    // Incomplete print identity and missing confirmed money cannot create a shortcut.
+    mount([{ ...order, capabilities: { ...order.capabilities, release: false, markPrinted: true, settle: true },
+      feeStages: { ...order.feeStages, confirmed: null } }]);
+    expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['导出所选', '取消选择']);
+    expect(batchAction).not.toHaveBeenCalled();
+  });
+
+  it('reviews print requests from More, returns focus on cancel and submits the reviewed selection', async () => {
+    const order = printRequestOrder();
+    mount([order, batchOrder({ id: 'not-printable' })]);
+    await expect.element(page.getByRole('button', { name: /加入待打印/ })).not.toBeInTheDocument();
+    await page.getByRole('button', { name: '更多操作', exact: true }).click();
+    await page.getByRole('menuitem', { name: '加入待打印（1）', exact: true }).click();
+    const dialog = page.getByRole('alertdialog', { name: '确认加入待打印', exact: true });
+    await expect.element(dialog).toBeVisible();
+    await expect.element(dialog.getByText('已选 2 张，本次可处理 1 张', { exact: true })).toBeVisible();
+    expect(batchAction).not.toHaveBeenCalled();
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await expect.poll(() => document.activeElement?.textContent).toBe('更多操作');
+
+    await userEvent.keyboard('{Enter}');
+    await expect.element(page.getByRole('menu')).toBeVisible();
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    await expect.element(dialog).toBeVisible();
+    // A refreshed row must not silently replace the version already reviewed.
+    mount([{ ...order, revision: 99, workOrderVersion: 3 }, batchOrder({ id: 'not-printable' })]);
+    batchAction.mockResolvedValue({ status: 'success', result: {
+      command: 'CREATE_PRINT', successCount: 1, skippedCount: 0, failedCount: 0, notAttemptedCount: 0,
+      items: [{ orderId: order.id, status: 'success', code: 'OK' }],
+    } });
+    await page.getByRole('button', { name: '确认加入待打印', exact: true }).click();
+    await expect.poll(() => batchAction.mock.calls.length).toBe(1);
+    expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'CREATE_PRINT', items: [
+      { orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2 },
+    ] });
+  });
+
+  it('confirms printing only for selected orders with a current pending print request', async () => {
+    const order = batchOrder();
+    const printable = { ...order, status: OrderStatus.RELEASED, pendingPrintJobId: 'print-current',
+      capabilities: { ...order.capabilities, release: false, markPrinted: true } };
+    mount([printable, { ...printable, id: 'no-print-request', pendingPrintJobId: null }]);
+    await page.getByRole('button', { name: '确认已打印（1）', exact: true }).click();
+    const dialog = page.getByRole('alertdialog', { name: '确认已打印', exact: true });
+    await expect.element(dialog).toBeVisible();
+    await expect.element(dialog.getByText(/请确认纸质工单已实际打印/)).toBeVisible();
+    expect(batchAction).not.toHaveBeenCalled();
+    batchAction.mockResolvedValue({ status: 'success', result: {
+      command: 'MARK_PRINTED', successCount: 1, skippedCount: 0, failedCount: 0, notAttemptedCount: 0,
+      items: [{ orderId: order.id, status: 'success', code: 'OK' }],
+    } });
+    await dialog.getByRole('button', { name: '确认已打印', exact: true }).click();
+    await expect.poll(() => batchAction.mock.calls.length).toBe(1);
+    expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'MARK_PRINTED', items: [
+      { orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2, requestJobId: 'print-current' },
+    ] });
+  });
+
   it('requires review, submits only eligible reviewed rows and preserves complete results after queue refresh', async () => {
     await page.viewport(1280, 800);
     let resolve!: (result: AdminOrderBatchActionResult) => void;
     batchAction.mockImplementation(() => new Promise((done) => { resolve = done; }));
     mount(mixedOrders());
-    await expect.element(page.getByRole('button', { name: '批量结算（0）', exact: true })).toBeDisabled();
+    await expect.element(page.getByRole('button', { name: /批量结算/ })).not.toBeInTheDocument();
     await review();
     expect(batchAction).not.toHaveBeenCalled();
     await expect.element(page.getByText(/已选 5 张，本次可处理 4 张/)).toBeVisible();
     await expect.element(page.getByText(/GD-260907-004：本次不处理/)).toBeVisible();
     await page.getByRole('button', { name: '取消', exact: true }).click();
     expect(batchAction).not.toHaveBeenCalled();
-    await expect.poll(() => document.activeElement?.textContent).toBe('下发+打印（4）');
+    await expect.poll(() => document.activeElement?.textContent).toBe('下发生产（4）');
     await review();
-    await page.getByRole('button', { name: '确认下发+打印', exact: true }).click();
+    await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.element(page.getByRole('dialog', { name: '批量处理结果' }).getByText('正在逐单处理…', { exact: true })).toBeVisible();
     expect(batchAction).toHaveBeenCalledOnce();
     expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'RELEASE_AND_CREATE_PRINT', items: mixedOrders().slice(0, 4).map((order) => ({ orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2 })) });
@@ -129,7 +207,7 @@ describe('admin order batch review', () => {
     });
     mount(mixedOrders());
     await review();
-    await page.getByRole('button', { name: '确认下发+打印', exact: true }).click();
+    await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.element(page.getByRole('heading', { name: '请处理未完成的工单', exact: true })).toBeVisible();
     assertConsistentSummary('成功 4 张，业务跳过 0 张，结果未知 0 张，未执行 0 张，未纳入处理 1 张');
     expect(document.querySelectorAll('[data-slot="batch-action-result-items"] > li')).toHaveLength(5);
@@ -150,6 +228,12 @@ describe('admin order batch review', () => {
     expect(document.body.textContent).not.toContain('PRIVATE_STACK');
   });
 });
+
+function printRequestOrder() {
+  const order = batchOrder();
+  return { ...order, status: OrderStatus.RELEASED,
+    capabilities: { ...order.capabilities, release: false, createPrint: true } };
+}
 
 function assertConsistentSummary(expected: string) {
   const toolbar = document.querySelector('[aria-label="工单批量操作"] p[role="status"]');
@@ -186,13 +270,27 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
       await review();
       assertGeometry('[data-slot="alert-dialog-content"]', width);
       expect(await commands.checkShellAccessibility('[data-slot="alert-dialog-content"]')).toEqual([]);
-      await page.getByRole('button', { name: '确认下发+打印', exact: true }).click();
+      await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
       await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
       await settleAnimation('[data-slot="dialog-content"]');
       assertGeometry('[data-slot="dialog-content"]', width);
       expect(await commands.checkShellAccessibility('[data-slot="dialog-content"]')).toEqual([]);
       await userEvent.keyboard('{Escape}');
       await expect.poll(() => document.activeElement?.textContent).toBe('查看批量结果');
+
+      mount([printRequestOrder()]);
+      await page.getByRole('button', { name: '更多操作', exact: true }).click();
+      await expect.element(page.getByRole('menu')).toBeVisible();
+      await settleAnimation('[data-slot="dropdown-menu-content"]');
+      assertGeometry('[data-slot="dropdown-menu-content"]', width);
+      expect(await commands.checkShellAccessibility('[data-slot="dropdown-menu-content"]')).toEqual([]);
+      await page.getByRole('menuitem', { name: '加入待打印（1）', exact: true }).click();
+      await expect.element(page.getByRole('alertdialog', { name: '确认加入待打印', exact: true })).toBeVisible();
+      await settleAnimation('[data-slot="alert-dialog-content"]');
+      assertGeometry('[data-slot="alert-dialog-content"]', width);
+      expect(await commands.checkShellAccessibility('[data-slot="alert-dialog-content"]')).toEqual([]);
+      await page.getByRole('button', { name: '取消', exact: true }).click();
+      await expect.poll(() => document.activeElement?.textContent).toBe('更多操作');
     });
   }
 }
