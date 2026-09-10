@@ -9,6 +9,7 @@ import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ActionNotice, StatusBadge, TableEmptyState, useCopyToClipboard } from '@/components/ui-business';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY, ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
+import { OrderAmount } from './OrderAmount';
 import { cn } from '@/lib/utils';
 import { OrderDetailStickyScope } from './OrderDetailStickyScope';
 import type { AdminOrderDetailModel } from './admin-order-detail-model';
@@ -31,8 +32,8 @@ type Props = {
   packaging?: ReactNode;
 };
 
-function amount(value: string | null) {
-  return value === null ? '待核定' : formatMoney(value);
+function amount(value: string | null, status: AdminOrderDetailModel['status'], estimated = false, pricingStatus?: AdminOrderDetailModel['pricingStatus'], incomplete = false) {
+  return <OrderAmount status={status} amount={value} estimated={estimated} pricingStatus={pricingStatus} incomplete={incomplete} />;
 }
 
 function Progress({ label, done, total, unit = '个' }: {
@@ -160,7 +161,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
                       <Button type="button" variant="ghost" onClick={() => locate(document.getElementById(`detail-design-item-${item.id}`) ? `detail-design-item-${item.id}` : 'detail-design-files')}>查看设计文件</Button></div>
                     {item.progress.map((progress) => <Progress key={progress.label} {...progress} />)}
                     {item.remark ? <p className={styles.remark}>{item.remark}</p> : null}
-                    <dl className={styles.feeLines}>{item.fees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount)}</dd></div>)}</dl>
+                    <dl className={styles.feeLines}>{item.fees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount, model.status, fee.estimated)}</dd></div>)}</dl>
                   </div>
                 </article>;
               })}
@@ -170,12 +171,12 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           <section id="order-detail-fees" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-fees' && styles.highlight)} aria-label="工单费用">
             <div className={styles.sectionHeading}><h2>工单费用</h2></div>
             <section className={styles.orderFees} aria-label="订单级费用">
-              <dl className={styles.feeLines}>{model.orderFees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount)}</dd></div>)}</dl>
-              <div className={styles.total}><span>{model.feeSource === 'LEGACY' ? '历史金额' : `当前${model.feeStages.find((stage) => stage.current)?.title ?? '金额'}`}</span><strong>{amount(model.total)}</strong></div>
+              <dl className={styles.feeLines}>{model.orderFees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount, model.status, fee.estimated)}</dd></div>)}</dl>
+              <div className={styles.total}><span>{model.feeSource === 'LEGACY' ? '历史金额' : `当前${model.feeStages.find((stage) => stage.current)?.title ?? '金额'}`}</span><strong>{amount(model.total, model.status, model.totalEstimated ?? model.feeSource === 'QUOTED', model.pricingStatus, model.feeSource === 'INCOMPLETE')}</strong></div>
             </section>
             <h3 className={styles.feeHistoryHeading}>费用记录</h3>
             <div className={styles.feeStages}>{model.feeStages.map((stage) => <div key={stage.key} className={cn(styles.feeStage, stage.current && styles.currentFee)}>
-              <p>{stage.title}{stage.current ? <span>当前</span> : null}</p><strong>{stage.total === null ? '—' : amount(stage.total)}</strong>
+              <p>{stage.title}{stage.current ? <span>当前</span> : null}</p><strong>{stage.total === null ? '—' : formatMoney(stage.total)}</strong>
               {stage.total === null ? <small>{stage.key === 'confirmed' ? '费用核定后显示' : stage.key === 'settled' ? '结算后显示' : '尚未形成报价'}</small> : null}
             </div>)}</div>
           </section>

@@ -220,6 +220,97 @@ beforeEach(() => {
   });
 });
 
+function basicAmount(html: string, label: string) {
+  const basics = html.match(/<h2[^>]*>基本信息<\/h2>([\s\S]*?)<\/section>/)?.[1];
+  expect(basics, '当前详情应包含基本信息').toBeDefined();
+  return basics?.split(`>${label}</dt>`)[1]?.match(/<dd[^>]*>([\s\S]*?)<\/dd>/)?.[1]?.replace(/<[^>]+>/g, '');
+}
+
+describe('order detail amount consistency', () => {
+  it.each([
+    { status: OrderStatus.PENDING_FACTORY, source: 'PENDING', expected: '待工厂核价' },
+    { status: OrderStatus.SUBMITTED, source: 'PENDING', expected: '待工厂核价' },
+    { status: OrderStatus.RELEASED, source: 'INCOMPLETE', expected: '金额不完整' },
+  ])('distinguishes factory pricing from incomplete fees after release ($status)', async ({ status, source, expected }) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const order = { ...orderFixture(), status, pricingRevisions: [], priceRevision: 1, pricingStatus: 'ADMIN_CONFIRMED',
+      quotedFeeCompleteness: 'EXCLUDES_MANUAL_ITEMS', quotedFee: '13.30', confirmedFee: null, settledFee: null };
+    getOrderDetailMock.mockResolvedValue(order);
+    const original = getAdminOrderDetailPresentationMock.getMockImplementation()!;
+    getAdminOrderDetailPresentationMock.mockImplementation(async (actor, version) => {
+      const result = await original(actor, version);
+      return { ...result, workspace: { ...result.workspace, fee: { amount: null, source, estimated: false } } };
+    });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
+    expect(basicAmount(html, '对客应收总额')).toBe(expected);
+    expect(html).toContain(`>当前金额</span><strong><span class="text-primary">${expected}`);
+  });
+
+  it.each([Role.ADMIN, Role.CUSTOMER_SERVICE])('%s does not present unpriced placeholders or shipping estimates as a complete fee', async (role) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'sales-1', role } });
+    const order = { ...orderFixture(), pricingRevisions: [], priceRevision: 1, status: OrderStatus.PENDING_FACTORY, pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      quotedFeeCompleteness: 'EXCLUDES_MANUAL_ITEMS', quotedFee: '13.30', confirmedFee: null, settledFee: null,
+      totalAmount: '13.30', processingAmount: '0.00', packagingAmount: '0.00' };
+    Object.assign(order.items[0]!, { subtotal: '0.00', quoteDisposition: 'MANUAL_PRICING_REQUIRED', pricingSnapshot: null });
+    Object.assign(order.packagingGroups[0]!, { unitPrice: '0.00', subtotal: '0.00', pricingSnapshot: {
+      status: 'EXCLUDED_MANUAL', complete: false, actual: { amount: null, provisional: true },
+    } });
+    Object.assign(order.customerCharges[0]!, { amount: '10.30', status: 'ESTIMATED' });
+    Object.assign(order.customerCharges[1]!, { amount: '3.00', status: 'ESTIMATED' });
+    getOrderDetailMock.mockResolvedValue(order);
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
+    for (const label of ['款式加工费', '入袋费', '加工费合计', '对客应收总额']) {
+      expect(basicAmount(html, label)).toBe('待工厂核价');
+    }
+    expect(html).toContain('class="text-primary">待工厂核价');
+    expect(html).not.toContain('待核定');
+  });
+
+  it.each([
+    { name: 'confirmed zero', status: OrderStatus.CONFIRMED, quotedFee: '13.30', confirmedFee: '0.00', settledFee: null, expected: '¥ 0.00' },
+    { name: 'quoted fee', status: OrderStatus.CONFIRMED, quotedFee: '120.00', confirmedFee: null, settledFee: null, expected: '¥ 120.00 估' },
+    { name: 'confirmed fee', status: OrderStatus.RELEASED, quotedFee: '120.00', confirmedFee: '130.00', settledFee: null, expected: '¥ 130.00' },
+    { name: 'settled fee', status: OrderStatus.SETTLED, quotedFee: '120.00', confirmedFee: '130.00', settledFee: '140.00', expected: '¥ 140.00' },
+    { name: 'unquoted draft', status: OrderStatus.DRAFT, quotedFee: null, confirmedFee: null, settledFee: null, expected: '未报价' },
+  ])('preserves $name without conflating valid zero and missing amounts', async (scenario) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const order = { ...orderFixture(), pricingRevisions: [], priceRevision: 1, ...scenario, pricingStatus: 'ADMIN_CONFIRMED', quotedFeeCompleteness: 'COMPLETE',
+      totalAmount: '120.00', processingAmount: '0.00', packagingAmount: '0.00' };
+    Object.assign(order.items[0]!, { subtotal: '0.00', quoteDisposition: 'PRICED' });
+    Object.assign(order.packagingGroups[0]!, { unitPrice: '0.00', subtotal: '0.00' });
+    order.customerCharges.forEach((charge) => Object.assign(charge, { status: 'FINAL' }));
+    getOrderDetailMock.mockResolvedValue(order);
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
+    expect(basicAmount(html, '对客应收总额')).toBe(scenario.expected);
+    for (const label of ['款式加工费', '入袋费', '加工费合计']) {
+      expect(basicAmount(html, label)).toBe(scenario.status === OrderStatus.DRAFT ? '未报价' : '¥ 0.00');
+    }
+    if (scenario.status === OrderStatus.DRAFT) expect(html).toContain('class="text-muted-foreground">未报价');
+  });
+
+  it('marks only estimated shipping while keeping confirmed production amounts intact', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const order = { ...orderFixture(), pricingRevisions: [], priceRevision: 1, status: OrderStatus.RELEASED, pricingStatus: 'ADMIN_CONFIRMED', quotedFeeCompleteness: 'COMPLETE',
+      quotedFee: '120.00', confirmedFee: '130.00', settledFee: null, processingAmount: '100.00', packagingAmount: '20.00' };
+    getOrderDetailMock.mockResolvedValue(order);
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
+    expect(basicAmount(html, '款式加工费')).toBe('¥ 80.00');
+    expect(basicAmount(html, '入袋费')).toBe('¥ 20.00');
+    expect(basicAmount(html, '对客应收总额')).toBe('¥ 130.00 估');
+    expect(html).toContain('¥ 4.00 估');
+  });
+
+  it('does not treat a waived null fee as a pending payable charge', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const order = { ...orderFixture(), pricingRevisions: [], priceRevision: 1, status: OrderStatus.CONFIRMED, pricingStatus: 'AUTO_CONFIRMED', quotedFeeCompleteness: 'COMPLETE',
+      quotedFee: '120.00', confirmedFee: null, settledFee: null };
+    order.customerCharges.forEach((charge) => Object.assign(charge, { status: 'WAIVED', amount: null }));
+    getOrderDetailMock.mockResolvedValue(order);
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
+    expect(basicAmount(html, '对客应收总额')).toBe('¥ 120.00 估');
+  });
+});
+
 describe('order detail commercial visibility', () => {
   it.each(['factory', 'fulfillment', 'shipping'] as const)('does not mount a second %s form when the decision panel owns it', async (operation) => {
     requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });

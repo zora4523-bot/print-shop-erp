@@ -50,7 +50,6 @@ import {
   type FactoryConfirmationPreflight,
 } from './factory-confirmation-preflight';
 import {
-  ADMIN_ORDER_SIGNALS,
   type AdminOrderQueue,
   type AdminOrderSignal,
   type AdminOrderWorkspaceQuery,
@@ -220,6 +219,16 @@ const PRINTABLE_STATUSES = [
   OrderStatus.FOILING,
   OrderStatus.PACKING,
 ] as const;
+
+const DONE_STATUSES = [
+  OrderStatus.SETTLED,
+  OrderStatus.CANCELLED,
+  OrderStatus.FINISHED,
+] as const;
+
+// This read owns a coherent list/count/fee snapshot. Bound its total duration
+// locally; changing the global transaction default would also affect writes.
+const ADMIN_WORKSPACE_READ_TIMEOUT_MS = 15_000;
 
 export function resolveAdminPrintFacts(input: {
   status: OrderStatus;
@@ -402,11 +411,7 @@ export function adminQueueWhere(
       return {
         // REJECTED 是可恢复的驳回态，不是完结。FINISHED 仅作历史兼容读。
         status: {
-          in: [
-            OrderStatus.SETTLED,
-            OrderStatus.CANCELLED,
-            OrderStatus.FINISHED,
-          ],
+          in: [...DONE_STATUSES],
         },
       };
     case 'all':
@@ -450,6 +455,62 @@ export function adminSignalWhere(
 
 function andWhere(...parts: Prisma.OrderWhereInput[]): Prisma.OrderWhereInput {
   return { AND: parts };
+}
+
+async function loadAdminWorkspaceCounts(
+  tx: Prisma.TransactionClient,
+  baseWhere: Prisma.OrderWhereInput,
+  currentPrintWhere: Prisma.OrderWhereInput,
+  now: Date,
+): Promise<AdminOrderWorkspaceCounts> {
+  // Interactive transactions share one database connection. Promise.all does
+  // not parallelize its SQL: group by the bounded status enum instead of
+  // scanning the same filtered orders once for every queue and signal.
+  const [allGroups, changeGroups, print, pendingPricing, overdue, dueToday] =
+    await Promise.all([
+      tx.order.groupBy({ by: ['status'], where: baseWhere, _count: { _all: true } }),
+      tx.order.groupBy({
+        by: ['status'],
+        where: andWhere(baseWhere, PENDING_CHANGE_WHERE),
+        _count: { _all: true },
+      }),
+      tx.order.count({ where: andWhere(baseWhere, currentPrintWhere) }),
+      tx.order.count({ where: andWhere(baseWhere, adminManualPricingWhere()) }),
+      tx.order.count({ where: andWhere(baseWhere, adminSignalWhere('overdue', now)) }),
+      tx.order.count({ where: andWhere(baseWhere, adminSignalWhere('due-today', now)) }),
+    ]);
+  const allByStatus = new Map(allGroups.map((group) => [group.status, group._count._all]));
+  const changeByStatus = new Map(changeGroups.map((group) => [group.status, group._count._all]));
+  const countStatuses = (statuses: readonly OrderStatus[], counts = allByStatus) =>
+    statuses.reduce((sum, status) => sum + (counts.get(status) ?? 0), 0);
+  const pendingChange = changeGroups.reduce((sum, group) => sum + group._count._all, 0);
+  // Manual-pricing work is already a subset of factory-pending statuses. A
+  // pending change adds other states to todo, and excludes them from production
+  // and pending-release, exactly as adminQueueWhere/adminSignalWhere specify.
+  const todoStatuses: readonly OrderStatus[] = [
+    ...FACTORY_CONFIRMATION_PENDING_STATUSES,
+    OrderStatus.CONFIRMED,
+    OrderStatus.ON_HOLD,
+  ];
+  return {
+    queues: {
+      todo: countStatuses(todoStatuses) + pendingChange - countStatuses(todoStatuses, changeByStatus),
+      print,
+      production: countStatuses(PRODUCTION_STATUSES) - countStatuses(PRODUCTION_STATUSES, changeByStatus),
+      shipped: allByStatus.get(OrderStatus.SHIPPED) ?? 0,
+      done: countStatuses(DONE_STATUSES),
+      all: allGroups.reduce((sum, group) => sum + group._count._all, 0),
+    },
+    signals: {
+      'pending-confirmation': countStatuses(FACTORY_CONFIRMATION_PENDING_STATUSES),
+      'pending-pricing': pendingPricing,
+      'pending-release': (allByStatus.get(OrderStatus.CONFIRMED) ?? 0) - (changeByStatus.get(OrderStatus.CONFIRMED) ?? 0),
+      'pending-change': pendingChange,
+      'on-hold': allByStatus.get(OrderStatus.ON_HOLD) ?? 0,
+      overdue,
+      'due-today': dueToday,
+    },
+  };
 }
 
 export function buildAdminWorkspaceBaseWhere(
@@ -555,8 +616,12 @@ const adminOrderSelect = {
     },
   },
   customerCharges: {
-    where: { status: OrderCustomerChargeStatus.PENDING_AMOUNT },
-    select: { id: true },
+    where: {
+      status: {
+        in: [OrderCustomerChargeStatus.PENDING_AMOUNT, OrderCustomerChargeStatus.ESTIMATED],
+      },
+    },
+    select: { id: true, status: true },
   },
   changeRequests: {
     where: { status: OrderChangeRequestStatus.PENDING },
@@ -714,7 +779,10 @@ export async function loadAdminOrderWorkspace(
         selectedQueueWhere,
         query.signal ? adminSignalWhere(query.signal, now) : {},
       );
-      const total = await tx.order.count({ where: resultWhere });
+      const counts = await loadAdminWorkspaceCounts(tx, baseWhere, currentPrintWhere, now);
+      const total = query.signal
+        ? await tx.order.count({ where: resultWhere })
+        : counts.queues[query.queue];
       const window = paginationWindow(
         total,
         query.list.page,
@@ -722,8 +790,6 @@ export async function loadAdminOrderWorkspace(
       );
       const [
         rows,
-        queueCounts,
-        signalCounts,
         quantity,
         manualPricingCount,
         incompleteFeeExcludedCount,
@@ -739,26 +805,6 @@ export async function loadAdminOrderWorkspace(
           skip: window.skip,
           take: window.take,
         }),
-        Promise.all(
-          (['todo', 'print', 'production', 'shipped', 'done', 'all'] as const).map(
-            (queue) =>
-              tx.order.count({
-                where: andWhere(
-                  baseWhere,
-                  queue === 'print'
-                    ? currentPrintWhere
-                    : adminQueueWhere(queue),
-                ),
-              }),
-          ),
-        ),
-        Promise.all(
-          ADMIN_ORDER_SIGNALS.map((signal) =>
-            tx.order.count({
-              where: andWhere(baseWhere, adminSignalWhere(signal, now)),
-            }),
-          ),
-        ),
         tx.orderItem.aggregate({
           where: { order: resultWhere },
           _sum: { quantity: true },
@@ -818,10 +864,9 @@ export async function loadAdminOrderWorkspace(
       ]);
       return {
         rows,
+        counts,
         total,
         window,
-        queueCounts,
-        signalCounts,
         totalQuantity: quantity._sum.quantity ?? 0,
         manualPricingCount,
         incompleteFeeExcludedCount,
@@ -834,7 +879,10 @@ export async function loadAdminOrderWorkspace(
         progressByOrder,
       };
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      timeout: ADMIN_WORKSPACE_READ_TIMEOUT_MS,
+    },
   );
 
   return {
@@ -852,16 +900,7 @@ export async function loadAdminOrderWorkspace(
     page: snapshot.window.page,
     pageSize: snapshot.window.pageSize,
     pageCount: snapshot.window.pageCount,
-    counts: {
-      queues: mapCounts(
-        ['todo', 'print', 'production', 'shipped', 'done', 'all'],
-        snapshot.queueCounts,
-      ),
-      signals: mapCounts(
-        ADMIN_ORDER_SIGNALS,
-        snapshot.signalCounts,
-      ),
-    },
+    counts: snapshot.counts,
     summary: {
       orderCount: snapshot.total,
       totalQuantity: snapshot.totalQuantity,
@@ -1001,6 +1040,15 @@ function mapAdminOrderRow(
           estimated: false,
         }
       : selectOrderCustomerFee(row);
+  // A confirmed total may still include estimated shipping or other charges.
+  // Keep its persisted amount/source and the immutable settled snapshot intact.
+  if (
+    fee.amount !== null &&
+    fee.source !== 'SETTLED' &&
+    row.customerCharges.some((charge) => charge.status === OrderCustomerChargeStatus.ESTIMATED)
+  ) {
+    fee.estimated = true;
+  }
   const daysLeft = row.promisedDate
     ? promisedDaysLeft(row.promisedDate, now)
     : null;
@@ -1232,7 +1280,7 @@ function isIncompleteCustomerFeeRecord(row: AdminOrderRecord): boolean {
         item.quoteDisposition ===
         OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
     ) ||
-    row.customerCharges.length > 0
+    row.customerCharges.some((charge) => charge.status === OrderCustomerChargeStatus.PENDING_AMOUNT)
   );
 }
 
@@ -1312,14 +1360,6 @@ function formatPaper(type: string | null, weight: number | null): string | null 
   return parts.length > 0 ? parts.join(' ') : null;
 }
 
-function mapCounts<K extends string>(
-  keys: readonly K[],
-  values: readonly number[],
-): Record<K, number> {
-  return Object.fromEntries(
-    keys.map((key, index) => [key, values[index] ?? 0]),
-  ) as Record<K, number>;
-}
 
 function assertAdmin(actor: AdminOrdersActor): void {
   if (actor.role !== Role.ADMIN) {

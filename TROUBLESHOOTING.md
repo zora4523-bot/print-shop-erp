@@ -90,6 +90,12 @@ pnpm exec prisma migrate status
 
 区分以下问题：PostgreSQL 未启动、host/port 错误、数据库不存在、账号无权限、TLS 证书不匹配。先用同一连接身份做最小连通检查，再运行 Prisma。不要为了让本地通过而放宽生产数据库权限。
 
+### 工单列表提示无法加载，日志出现 expired transaction
+
+先保留耗时与错误，点击页面“重试”。`lib/order/admin-workspace.ts` 使用同一 `RepeatableRead` 事务读取列表、计数和金额，事务内的 `Promise.all` 仍共用一个数据库连接。报错提到某个聚合查询，不代表该查询独自耗尽时限。
+
+该读取入口合并状态计数，并单独设置 15 秒事务时限。若仍超时，检查数据库锁等待、连接与查询耗时，再优化累计往返；不要把统计移出事务、用不完整合计降级，或全局提高写事务时限来掩盖问题。
+
 ### Migration 未应用或 schema 不一致
 
 开发库应用仓库已有迁移：
@@ -122,6 +128,18 @@ pnpm exec playwright install chromium
 ```
 
 生产使用系统 Chromium、PM2 环境和中文字体，按[部署指南](./docs/部署指南.md)排查。浏览器可启动不代表中文 PDF 正常，仍需实际打开 PDF 检查字形。
+
+### PDF 页面一直显示正在排队
+
+在 `BACKGROUND_JOBS_MODE=durable` 下，Next.js 开发服务器不会消费 PDF 队列。先检查 `/api/health/jobs` 的 HEAVY worker 心跳，以及后台任务的状态、重试次数和错误；排队且从未启动时，优先确认消费进程是否运行。
+
+本地缺少该进程时，在同一项目、同一开发环境启动：
+
+```bash
+pnpm worker:heavy
+```
+
+保留终端运行，任务完成后重新打开 PDF 链接。不要反复创建任务或直接修改任务状态。LIGHT worker 是独立进程，启动后可能发送已排队的通知，排查 PDF 时不需要启动它。生产进程管理使用部署 runbook。
 
 ## E2E
 
