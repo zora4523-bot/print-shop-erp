@@ -18,6 +18,15 @@ function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
 }
 
 describe('getAdminMenuItems', () => {
+  it('销售与客服有工作台入口，管理员入口独立于经营工作台，师傅不可见', () => {
+    for (const role of [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN]) {
+      const items = flatten(getAdminMenuItems({ role }));
+      const workbench = items.find((item) => item.href === '/workbench');
+      expect(workbench?.label).toBe(role === Role.ADMIN ? '销售工作台' : '工作台');
+      expect(getActiveAdminMenuHref('/workbench', items)).toBe('/workbench');
+    }
+    expect(flatten(getAdminMenuItems({ role: Role.WORKER }))).not.toContainEqual(expect.objectContaining({ href: '/workbench' }));
+  });
   it('经营概览仅向管理员开放，并与工作台保持独立高亮', () => {
     const adminItems = flatten(getAdminMenuItems({ role: Role.ADMIN }));
     expect(getActiveAdminMenuHref('/owner/analytics', adminItems)).toBe('/owner/analytics');
@@ -39,10 +48,11 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(35);
+    expect(items).toHaveLength(36);
     expect(items.map((i) => i.label)).toEqual([
       '工作台',
       '经营概览',
+      '销售工作台',
       '工单',
       '采购单',
       '工单修改申请',

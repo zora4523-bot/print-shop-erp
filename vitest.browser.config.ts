@@ -18,9 +18,9 @@ declare module 'vitest/browser' {
 }
 
 export default defineConfig({
-  // Prebundle the chart dependency before mounting React browser fixtures.
+  // Prebundle chart and select dependencies before mounting React browser fixtures.
   // Discovering it mid-test can reload the module graph with another React instance.
-  optimizeDeps: { include: ['recharts'] },
+  optimizeDeps: { include: ['recharts', '@base-ui/react/select'] },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './'),

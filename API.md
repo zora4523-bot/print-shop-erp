@@ -11,6 +11,15 @@ applies_to: repository source at last_verified
 
 端点实现以 [`app/api/`](./app/api/) 为事实源。修改方法、认证、参数、状态码或响应形状时，必须同步修改本文件和契约测试。
 
+## 销售工作台计算
+
+`actions/workbench.ts` 的 `quoteWorkbenchAction(raw)` 要求 `order:create`。
+输入为单款产品 ID、当前目录规格/纸张、计价路线、整数数量、正反面烫金颜色、烫金方式和 0–100 的整数加价百分比。
+服务端校验目录归属与颜色，复用建单 schema，并在正式计价事务中重新校验目录、读取当前价格。
+返回 `{ status: 'success', quote }` 或 `{ status: 'error', message }`；认证失败沿用授权入口抛错。
+`quote` 只含加工费、加价金额、加工费参考报价、费用明细、核价/制版待定标记及加工价版本号。金额均为十进制字符串，缺价为 `null`；不返回内部成本、规则快照或报价签名，不写订单。
+计算范围与原型差异见 [销售工作台](./docs/销售工作台.md)。
+
 ## 认证类型
 
 | 标记 | 含义 |
