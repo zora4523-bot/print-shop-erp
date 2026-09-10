@@ -20,7 +20,7 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/agent-monthly-billing/query', () => queryMock);
 
-import { handleAgentMonthlyBillDetailGet } from '../route';
+import { handleAgentMonthlyBillDetailGet } from '../handler';
 
 function request(): NextAuthRequest {
   return Object.assign(

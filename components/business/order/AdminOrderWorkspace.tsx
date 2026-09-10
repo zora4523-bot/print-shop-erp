@@ -86,29 +86,11 @@ export function AdminOrderWorkspace({
   const clearFiltersHref = buildTableHref('/orders', {}, {
     queue: query.queue === 'todo' ? undefined : query.queue,
   });
-  const exactCustomerFilterLabel = query.list.filters.customerPartyId
-    ? data.rows.find(
-        (order) => order.customer.id === query.list.filters.customerPartyId,
-      )?.customer.name ?? '已选客户'
-    : query.list.filters.customerRefExact ===
-        MISSING_ORDER_CUSTOMER_FILTER_VALUE
-      ? '未填客户'
-      : query.list.filters.customerRefExact;
+  const exactCustomerFilterLabel = selectedCustomerLabel(query, data);
 
   return (
     <div data-slot="admin-order-workspace" style={{ backgroundColor: 'transparent' }} className={cn(styles.surface, "w-full min-w-0 max-w-none space-y-3.5")}>
-      <PageHeader
-        title="工单管理"
-        className="[&_h1]:text-xl [&_h1]:font-extrabold"
-        actions={
-          <>
-            {exportControls}
-            <Link href="/orders/new" className={buttonVariants({ variant: 'outline' })}>
-              新建工单
-            </Link>
-          </>
-        }
-      />
+      <OrderWorkspaceHeader exportControls={exportControls} />
       <AdminOrderDecisionDashboard
         query={query}
         counts={data.counts.signals}
@@ -485,4 +467,32 @@ export function adminRejectedFilterParams(query: AdminOrderWorkspaceQuery) {
       filters: { ...query.list.filters, statuses: active ? [] : [OrderStatus.REJECTED] },
     },
   });
+}
+
+function OrderWorkspaceHeader({ exportControls }: { exportControls: ReactNode }) {
+  return (
+      <PageHeader
+        title="工单管理"
+        className="[&_h1]:text-xl [&_h1]:font-extrabold"
+        actions={
+          <>
+            {exportControls}
+            <Link href="/orders/new" className={buttonVariants({ variant: 'outline' })}>
+              新建工单
+            </Link>
+          </>
+        }
+      />
+  );
+}
+
+function selectedCustomerLabel(query: AdminOrderWorkspaceQuery, data: AdminOrderWorkspacePage) {
+  return query.list.filters.customerPartyId
+    ? data.rows.find(
+        (order) => order.customer.id === query.list.filters.customerPartyId,
+      )?.customer.name ?? '已选客户'
+    : query.list.filters.customerRefExact ===
+        MISSING_ORDER_CUSTOMER_FILTER_VALUE
+      ? '未填客户'
+      : query.list.filters.customerRefExact;
 }

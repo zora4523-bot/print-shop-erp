@@ -23,7 +23,7 @@ vi.mock('@/lib/background-jobs/pdf', () => ({
   readAndDeletePdfArtifact: mocks.read,
 }));
 
-import { handleOrderPdfGet } from '@/app/api/orders/[id]/pdf/route';
+import { handleOrderPdfGet } from '@/app/api/orders/[id]/pdf/handler';
 
 const request = (query = '') => handleOrderPdfGet(Object.assign(new NextRequest(`https://erp.example.com/api/orders/order-1/pdf${query}`), { auth: null }) as NextAuthRequest, {
   params: Promise.resolve({ id: 'order-1' }),

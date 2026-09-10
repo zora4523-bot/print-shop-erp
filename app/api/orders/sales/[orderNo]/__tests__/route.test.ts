@@ -17,7 +17,7 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/order/sales-list-query', () => salesOrderMock);
 
-import { handleSalesOrderDetail } from '../route';
+import { handleSalesOrderDetail } from '../handler';
 
 function request(): NextAuthRequest {
   return Object.assign(

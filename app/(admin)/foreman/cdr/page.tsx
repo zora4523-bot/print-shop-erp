@@ -105,7 +105,7 @@ export default async function ForemanCdrPage({
   );
 }
 
-export async function CdrEligibleOrdersSection({
+async function CdrEligibleOrdersSection({
   from,
   to,
   eligibleOrdersPromise,
@@ -133,7 +133,7 @@ export async function CdrEligibleOrdersSection({
   );
 }
 
-export async function CdrRecentBundlesSection({
+async function CdrRecentBundlesSection({
   recentBundlesPromise,
 }: {
   recentBundlesPromise: RecentBundlesPromise;

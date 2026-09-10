@@ -18,7 +18,7 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/agent-monthly-billing/export', () => exportMock);
 
-import { handleAgentMonthlyBillExportStatus } from '../route';
+import { handleAgentMonthlyBillExportStatus } from '../handler';
 
 const context = { params: Promise.resolve({ id: 'export-1' }) };
 const actor = { id: 'admin-1', role: 'ADMIN', displayName: '管理员' };

@@ -10,7 +10,8 @@ vi.mock('@/lib/salary/piecework-settlement-xlsx', () => ({
   buildPieceworkSettlementWorkbook: mocks.workbook,
   PieceworkSettlementExportError: class extends Error {},
 }));
-import { GET, handlePieceworkSettlementExportGet } from '../route';
+import { GET } from '../route';
+import { handlePieceworkSettlementExportGet } from '../handler';
 import { PieceworkSettlementExportError } from '@/lib/salary/piecework-settlement-xlsx';
 function request(authenticated = true) {
   return Object.assign(new NextRequest('https://erp.example/api/salary/piecework-settlements/export?from=2026-09-01&to=2026-09-08&workerId=worker-2'), {

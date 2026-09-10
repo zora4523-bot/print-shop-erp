@@ -89,7 +89,7 @@ describe('admin order list reference layout', () => {
         await page.viewport(width, height);
         document.documentElement.classList.toggle('dark', theme === 'dark');
         renderWorkspace();
-        await expect.element(page.getByRole('link', { name: '查看处理', exact: true })).toBeVisible();
+        await expect.element(page.getByRole('link', { name: '查看处理', exact: true }).first()).toBeVisible();
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
         for (const element of host.querySelectorAll<HTMLElement>('a, button, select, input:not([aria-hidden="true"]):not([type="hidden"]), [role="checkbox"]')) {
           const rect = element.getBoundingClientRect();
@@ -109,7 +109,7 @@ describe('admin order list reference layout', () => {
       document.documentElement.classList.toggle('dark', theme === 'dark');
       renderWorkspace(referenceRows());
 
-      await expect.element(page.getByRole('link', { name: '查看处理', exact: true })).toBeVisible();
+      await expect.element(page.getByRole('link', { name: '查看处理', exact: true }).first()).toBeVisible();
       expect(matchMedia('(min-width: 921px) and (hover: hover) and (pointer: fine)').matches).toBe(true);
       const rows = [...host.querySelectorAll<HTMLElement>('li[data-order-id]')];
       expect(rows).toHaveLength(6);
@@ -157,7 +157,7 @@ describe('admin order list reference layout', () => {
   it('920px keeps full touch targets in compact rows', async () => {
     await page.viewport(920, 900);
     renderWorkspace(referenceRows());
-    await expect.element(page.getByRole('link', { name: '查看处理', exact: true })).toBeVisible();
+    await expect.element(page.getByRole('link', { name: '查看处理', exact: true }).first()).toBeVisible();
     for (const element of host.querySelectorAll<HTMLElement>('li[data-order-id] a, li[data-order-id] button, li[data-order-id] [role="checkbox"]')) {
       const rect = element.getBoundingClientRect();
       if (!rect.width || !rect.height) continue;
@@ -171,7 +171,7 @@ describe('admin order list reference layout', () => {
     await page.viewport(1280, 800);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ message: '暂时无法加载' }) }));
     renderWorkspace();
-    await page.getByRole('checkbox', { name: '选择工单 GD-260902-001', exact: true }).click();
+    await page.getByRole('checkbox', { name: '选择工单 春节企业定制红包 · 多款设计（GD-260902-001）', exact: true }).click();
     expect(location.hash).toBe('');
     await expect.element(page.getByRole('link', { name: '查看处理', exact: true })).toHaveAttribute('href', '/orders/order-1');
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();

@@ -182,3 +182,7 @@ pnpm test --run
 `GET /api/orders/admin/[orderNo]` 与管理端列表共用的工单读取模型增加可选 `craftTags` 字段，值为“局部烫金”“专版烫金”“彩印”的去重数组，来源为各款式 `craft` 类型，缺少类型返回空数组。原 `craftSummary`、工单标识及权限校验保持不变。
 
 管理端工单读取中，`DRAFT` 且报价、确认、结算快照均为空时，`fee` 返回 `{ amount: null, source: 'PENDING', estimated: false }`，表示尚未报价；已保存的真实零元报价仍按对应快照返回。
+
+### Next.js 路由模块边界
+
+`route.ts` 仅导出 HTTP 方法与 Next.js 路由配置。可测试的处理函数放在相邻 `handler.ts`，仍由 `route.ts` 中的 `auth(handler)` 包装；权限、资源范围和 HTTP 地址保持不变。

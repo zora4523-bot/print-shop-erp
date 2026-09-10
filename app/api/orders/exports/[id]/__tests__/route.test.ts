@@ -30,7 +30,7 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/order/export', () => exportMock);
 
-import { handleOrderExportDownload } from '../route';
+import { handleOrderExportDownload } from '../handler';
 
 function request(): NextAuthRequest {
   return Object.assign(
