@@ -13,6 +13,7 @@ import {
   ORDER_PRICING_ROUTE_LABELS,
   productCategoryMatchesPricingRoute,
 } from '@/lib/order/pricing-route';
+import { workbenchDefaultSelection } from '@/lib/workbench/defaults';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatRate } from '@/lib/format/unit-price';
 import type {
@@ -35,6 +36,38 @@ function isColorUnavailable(selected: readonly string[], color: string) {
   );
 }
 
+function quoteInputIssue(
+  input: Omit<WorkbenchQuoteInput, 'pricingRoute' | 'quantity' | 'markup'> & {
+    quantity: string;
+    markup: string;
+  },
+): string | null {
+  if (!input.specification) return '请选择规格';
+  if (!input.paperType) return '请选择纸张';
+  if (!input.productId) return '有多个产品符合条件，请在产品中确认';
+  if (
+    input.foilTechnique !== OrderFoilTechnique.NONE &&
+    !input.frontFoilColors.length &&
+    !input.backFoilColors.length
+  )
+    return '请选择烫金颜色，单面单色请选择一种正面颜色';
+  if (
+    input.quantity === '' ||
+    !Number.isInteger(Number(input.quantity)) ||
+    Number(input.quantity) < 1 ||
+    Number(input.quantity) > 9999999
+  )
+    return '数量须为 1–9,999,999 的整数，请修改数量';
+  if (
+    input.markup === '' ||
+    !Number.isInteger(Number(input.markup)) ||
+    Number(input.markup) < 0 ||
+    Number(input.markup) > 100
+  )
+    return '加价须为 0–100 的整数，请修改加价比例';
+  return null;
+}
+
 export function WorkbenchCalculator({
   options,
 }: {
@@ -43,32 +76,37 @@ export function WorkbenchCalculator({
   const [route, setRoute] = useState<WorkbenchQuoteInput['pricingRoute']>(
     OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
   );
-  const [productId, setProductId] = useState('');
-  const [specification, setSpecification] = useState('');
-  const [paperType, setPaperType] = useState('');
+  const [initial] = useState(() =>
+    workbenchDefaultSelection(
+      OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+      options,
+    ),
+  );
+  const [productId, setProductId] = useState(initial.productId);
+  const [specification, setSpecification] = useState(initial.specification);
+  const [paperType, setPaperType] = useState(initial.paperType);
   const [quantity, setQuantity] = useState('1000');
   const [technique, setTechnique] = useState<
     WorkbenchQuoteInput['foilTechnique']
   >(OrderFoilTechnique.FLAT);
-  const [front, setFront] = useState<string[]>([]);
+  const [front, setFront] = useState<string[]>(() =>
+    options.foilColors[0] ? [options.foilColors[0].name] : [],
+  );
   const [back, setBack] = useState<string[]>([]);
   const [markup, setMarkup] = useState('35');
   const resultHeading = useRef<HTMLHeadingElement>(null);
-  const ready =
-    productId &&
-    specification &&
-    paperType &&
-    quantity !== '' &&
-    markup !== '' &&
-    Number.isInteger(Number(quantity)) &&
-    Number(quantity) >= 1 &&
-    Number(quantity) <= 9999999 &&
-    Number.isInteger(Number(markup)) &&
-    Number(markup) >= 0 &&
-    Number(markup) <= 100 &&
-    (technique === OrderFoilTechnique.NONE || front.length + back.length > 0);
+  const inputIssue = quoteInputIssue({
+    productId,
+    specification,
+    paperType,
+    quantity,
+    markup,
+    foilTechnique: technique,
+    frontFoilColors: front,
+    backFoilColors: back,
+  });
   const { result, pending, invalidate, calculate } = useWorkbenchAutoQuote(
-    ready
+    !inputIssue
       ? {
           productId,
           pricingRoute: route,
@@ -126,10 +164,19 @@ export function WorkbenchCalculator({
             onChange={(value) => {
               invalidate();
               setRoute(value as WorkbenchQuoteInput['pricingRoute']);
-              setProductId('');
-              setSpecification('');
-              setPaperType('');
-              setFront([]);
+              const next = workbenchDefaultSelection(
+                value as OrderItemPricingRoute,
+                options,
+              );
+              setProductId(next.productId);
+              setSpecification(next.specification);
+              setPaperType(next.paperType);
+              setFront(
+                value === OrderItemPricingRoute.COLOR_PRINT ||
+                  !options.foilColors[0]
+                  ? []
+                  : [options.foilColors[0].name],
+              );
               setBack([]);
               setTechnique(
                 value === OrderItemPricingRoute.COLOR_PRINT
@@ -200,6 +247,12 @@ export function WorkbenchCalculator({
               if (value === OrderFoilTechnique.NONE) {
                 setFront([]);
                 setBack([]);
+              } else if (
+                !front.length &&
+                !back.length &&
+                options.foilColors[0]
+              ) {
+                setFront([options.foilColors[0].name]);
               }
             }}
           />
@@ -211,7 +264,7 @@ export function WorkbenchCalculator({
           {technique !== OrderFoilTechnique.NONE && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                至少选择一面的烫金颜色后自动报价。
+                单面单色请选择一种正面颜色。
               </p>
               {(['front', 'back'] as const).map((side) => (
                 <fieldset key={side} className="space-y-2">
@@ -294,6 +347,7 @@ export function WorkbenchCalculator({
         result={result}
         pending={pending}
         markup={markup}
+        missingInput={inputIssue ?? '正在准备当前条件的报价'}
         resultHeading={resultHeading}
       />
     </div>
@@ -304,11 +358,13 @@ function WorkbenchQuotePanel({
   result,
   pending,
   markup,
+  missingInput,
   resultHeading,
 }: {
   result: WorkbenchQuoteResult | null;
   pending: boolean;
   markup: string;
+  missingInput: string;
   resultHeading: React.RefObject<HTMLHeadingElement | null>;
 }) {
   const quote = result?.status === 'success' ? result.quote : null;
@@ -328,7 +384,7 @@ function WorkbenchQuotePanel({
         {!result && !pending ? (
           <EmptyState
             title="填写完整后自动计算报价"
-            description="选择产品、规格和工艺，查看费用明细"
+            description={missingInput}
           />
         ) : null}
         {result?.status === 'error' && (
@@ -348,7 +404,11 @@ function WorkbenchQuotePanel({
               <ActionNotice
                 tone="warning"
                 title="部分费用待核价"
-                description="请联系管理员确认后再向客户报价"
+                description={
+                  quote.pricingReasons?.length
+                    ? quote.pricingReasons.join('；')
+                    : '请联系管理员确认后再向客户报价'
+                }
               />
             )}
             <dl className="divide-y">

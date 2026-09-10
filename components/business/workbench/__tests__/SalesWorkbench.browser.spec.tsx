@@ -115,10 +115,14 @@ function render(unavailable = false, catalog = options) {
 async function chooseProduct() {
   await page.getByRole('combobox', { name: '产品', exact: true }).click();
   await page.getByRole('option', { name: '大号专版烫金' }).click();
-  await page
+  await selectFrontGold();
+}
+async function selectFrontGold() {
+  const button = page
     .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
-    .getByRole('button', { name: '哑金' })
-    .click();
+    .getByRole('button', { name: '哑金' });
+  if (button.element().getAttribute('aria-pressed') !== 'true')
+    await button.click();
 }
 function geometry(width: number) {
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
@@ -240,6 +244,8 @@ it('selects and deselects every foil color on both sides and enforces independen
     const group = page.getByRole('group', {
       name: `${side}烫金颜色（最多 3 色）`,
     });
+    if (side === '正面')
+      await group.getByRole('button', { name: '金', exact: true }).click();
     for (const name of ['金', '银', '红', '蓝', '绿', '黑', '透明', '浅色']) {
       const button = group.getByRole('button', { name, exact: true });
       await button.click();
@@ -399,7 +405,7 @@ it('clears dependent selections on route changes and clears foil colors when swi
   await page.getByRole('option', { name: '彩印', exact: true }).click();
   await expect
     .element(page.getByRole('combobox', { name: '产品', exact: true }))
-    .toHaveTextContent('请选择');
+    .toHaveTextContent('彩印测试产品');
   await expect
     .element(page.getByRole('combobox', { name: '烫金方式', exact: true }))
     .toHaveTextContent('无烫金');
@@ -410,8 +416,7 @@ it('clears dependent selections on route changes and clears foil colors when swi
   const gold = page
     .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
     .getByRole('button', { name: '哑金' });
-  await expect.element(gold).toHaveAttribute('aria-pressed', 'false');
-  await gold.click();
+  await expect.element(gold).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('combobox', { name: '烫金方式', exact: true }).click();
   await page.getByRole('option', { name: '无烫金', exact: true }).click();
   await page.getByRole('button', { name: '计算报价', exact: true }).click();
@@ -457,10 +462,7 @@ it('starts with specification or paper, resolves matching products and resets wi
   await expect
     .element(page.getByRole('combobox', { name: '规格', exact: true }))
     .toHaveTextContent('大号封90×165');
-  await page
-    .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
-    .getByRole('button', { name: '哑金' })
-    .click();
+  await selectFrontGold();
   await page.getByRole('button', { name: '计算报价', exact: true }).click();
   await expect
     .element(page.getByText('¥ 492.75', { exact: true }))
@@ -495,6 +497,7 @@ it('keeps ambiguous paper matches unselected until a specification resolves the 
       },
     ],
   });
+  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
   await page.getByRole('combobox', { name: '纸张', exact: true }).click();
   await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
   await expect
@@ -520,6 +523,11 @@ it('automatically calculates complete input, debounces edits and keeps keyboard 
     },
   }));
   render();
+  await expect
+    .element(page.getByText('¥ 1,000.00', { exact: true }))
+    .toBeVisible();
+  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
+  mocks.quote.mockClear();
   await new Promise((resolve) => setTimeout(resolve, 650));
   expect(mocks.quote).not.toHaveBeenCalled();
   await chooseProduct();
@@ -545,6 +553,105 @@ it('automatically calculates complete input, debounces edits and keeps keyboard 
   await expect
     .element(page.getByText('¥ 4,000.00', { exact: true }))
     .toBeVisible();
+});
+
+it('recalculates a different specification without resetting the form or choosing foil again', async () => {
+  render(false, {
+    ...options,
+    products: [
+      ...options.products,
+      {
+        ...options.products[0]!,
+        id: 'medium',
+        name: '中号专版',
+        specification: '中号封80×115',
+      },
+    ],
+  });
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  await page.getByRole('combobox', { name: '规格', exact: true }).click();
+  await page.getByRole('option', { name: '中号封80×115', exact: true }).click();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  expect(mocks.quote).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      productId: 'medium',
+      specification: '中号封80×115',
+      paperType: '160g珠光艳闪',
+      frontFoilColors: ['哑金'],
+    }),
+  );
+});
+
+it('preserves an explicitly chosen product when its paper and size are shared by another product', async () => {
+  render(false, {
+    ...options,
+    products: [
+      ...options.products,
+      { ...options.products[0]!, id: 'duplicate', name: '同规格另一产品' },
+    ],
+  });
+  await page.getByRole('combobox', { name: '产品', exact: true }).click();
+  await page
+    .getByRole('option', { name: '同规格另一产品', exact: true })
+    .click();
+  for (const [field, choice] of [
+    ['规格', '大号封90×165'],
+    ['纸张', '160g珠光艳闪'],
+  ]) {
+    await page.getByRole('combobox', { name: field!, exact: true }).click();
+    await page.getByRole('option', { name: choice!, exact: true }).click();
+  }
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  expect(mocks.quote).toHaveBeenLastCalledWith(
+    expect.objectContaining({ productId: 'duplicate' }),
+  );
+});
+
+it('explains the missing color and displays manual pricing reasons without retaining an old amount', async () => {
+  render();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  await page
+    .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
+    .getByRole('button', { name: '哑金' })
+    .click();
+  await expect
+    .element(page.getByText('请选择烫金颜色，单面单色请选择一种正面颜色'))
+    .toBeVisible();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .not.toBeInTheDocument();
+  mocks.quote.mockResolvedValue({
+    ...success,
+    quote: {
+      ...success.quote,
+      suggestedAmount: null,
+      baseAmount: null,
+      markupAmount: null,
+      needsPricing: true,
+      pricingReasons: [
+        '所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价',
+      ],
+    },
+  });
+  await selectFrontGold();
+  await expect
+    .element(
+      page.getByText(
+        '所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价',
+      ),
+    )
+    .toBeVisible();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .not.toBeInTheDocument();
 });
 
 it('manual calculation cancels the scheduled automatic request and repeated presets still recalculate', async () => {

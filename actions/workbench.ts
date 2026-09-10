@@ -19,12 +19,44 @@ import {
   productCategoryMatchesPricingRoute,
   requiredPricingCraftGroups,
 } from '@/lib/order/pricing-route';
-import { calculateCreateOrderQuoteFromCatalogInTx } from '@/lib/order/create-order-quote-service';
+import {
+  calculateCreateOrderQuoteFromCatalogInTx,
+  CreateOrderQuoteError,
+} from '@/lib/order/create-order-quote-service';
 import {
   suggestWorkbenchAmount,
+  workbenchPricingReasons,
   workbenchQuoteSchema,
   type WorkbenchQuoteResult,
 } from '@/lib/workbench/quote';
+
+const QUOTE_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  烫金款必须选择正面烫金颜色: '请至少选择一种正面烫金颜色后自动计算',
+  专版烫金只能使用正面:
+    '专版反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
+  彩印叠加专版烫金只能使用正面:
+    '彩印加反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
+};
+
+function quoteFailureMessage(error: unknown): string {
+  if (error instanceof CreateOrderQuoteError) {
+    const messages = error.message.split('；').map((message) => {
+      if (
+        message === '款式 1 的规格无法唯一解析' ||
+        message.startsWith('款式 1 的规格不属于已定义计价组：')
+      ) {
+        return '所选规格无法自动报价，请选择其他规格或联系管理员补充产品资料';
+      }
+      const itemMessage = message.replace(/^款式 1：/, '');
+      return Object.hasOwn(QUOTE_ERROR_MESSAGES, itemMessage)
+        ? QUOTE_ERROR_MESSAGES[itemMessage]
+        : undefined;
+    });
+    if (messages.length && messages.every(Boolean))
+      return [...new Set(messages)].join('；');
+  }
+  return '暂无法取得当前报价，请重试；仍无法计算时请联系管理员核价';
+}
 
 export async function quoteWorkbenchAction(
   raw: unknown,
@@ -158,14 +190,17 @@ export async function quoteWorkbenchAction(
           }),
         ),
         needsPricing: !preview.complete,
+        pricingReasons: preview.complete
+          ? []
+          : workbenchPricingReasons(calculated.quote.items[0]!.manualReasons),
         plateFeePending: presentCreateOrderPlateFee(calculated.quote) !== null,
         processingVersion: calculated.quote.priceVersion.processing.version,
       },
     };
-  } catch {
+  } catch (error) {
     return {
       status: 'error',
-      message: '暂无法取得当前报价，请重试；仍无法计算时请联系管理员核价',
+      message: quoteFailureMessage(error),
     };
   }
 }

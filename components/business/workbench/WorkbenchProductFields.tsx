@@ -96,8 +96,24 @@ export function WorkbenchProductFields({
         <WorkbenchChoice
           label="规格"
           value={selection.specification}
-          options={choices(candidates.flatMap(specsFor))}
-          onChange={(specification) => choose({ ...selection, specification })}
+          options={choices(products.flatMap(specsFor))}
+          onChange={(specification) => {
+            const matching = products.filter((item) =>
+              specsFor(item).includes(specification),
+            );
+            choose({
+              productId:
+                product && specsFor(product).includes(specification)
+                  ? product.id
+                  : '',
+              specification,
+              paperType: matching.some((item) =>
+                papersFor(item).includes(selection.paperType),
+              )
+                ? selection.paperType
+                : '',
+            });
+          }}
         />
         <WorkbenchChoice
           label="纸张"

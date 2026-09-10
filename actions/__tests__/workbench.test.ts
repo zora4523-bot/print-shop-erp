@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
 import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '@/lib/price/__tests__/fixtures/create-order-golden-fixtures';
+import { CreateOrderQuoteError } from '@/lib/order/create-order-quote-service';
 
 const mocks = vi.hoisted(() => ({
   permission: vi.fn(),
@@ -85,6 +86,42 @@ beforeEach(() => {
     },
   ]);
 });
+
+function useFoilCatalog(category: 'CUSTOM_FLAT_FOIL' | 'COLOR_PRINT') {
+  const print = category === 'COLOR_PRINT';
+  const currentProduct = {
+    ...product,
+    category,
+    paperType: print ? '200g铜版纸' : product.paperType,
+    weight: print ? 200 : 160,
+  };
+  const currentCrafts = (
+    print
+      ? ['COATED_COLOR_PRINT_FOIL']
+      : ['FLAT_FOIL_SINGLE', 'FLAT_FOIL_DOUBLE', 'FLAT_FOIL_TRIPLE']
+  ).map((code) => ({ ...craft, id: code, code }));
+  const paper = {
+    id: 'paper',
+    name: currentProduct.paperType,
+    specification: null,
+    isActive: true,
+    outOfStock: false,
+  };
+  mocks.options.mockResolvedValue({
+    products: [currentProduct],
+    papers: [paper],
+    foilColors: ['哑金', '红金', '银'].map((name) => ({ name })),
+  });
+  mocks.products.mockResolvedValue([currentProduct]);
+  mocks.materials.mockResolvedValue([paper]);
+  mocks.crafts.mockResolvedValue(currentCrafts);
+  mocks.catalogCrafts.mockResolvedValue(currentCrafts);
+  return {
+    ...input,
+    paperType: currentProduct.paperType,
+    pricingRoute: print ? 'COLOR_PRINT' : 'CUSTOM_SINGLE_FLAT_FOIL',
+  };
+}
 
 describe('workbench current-price quote', () => {
   it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN])(
@@ -272,4 +309,119 @@ it('identifies missing catalog paper weight without guessing a price', async () 
     },
   );
   expect(mocks.transaction).not.toHaveBeenCalled();
+});
+
+describe('workbench automatic quote failure guidance', () => {
+  it('does not return an unrecognized engine message alongside approved guidance', async () => {
+    mocks.snapshot.mockRejectedValue(
+      new CreateOrderQuoteError(
+        '款式 1：专版烫金只能使用正面；private database details',
+      ),
+    );
+    expect(await quoteWorkbenchAction(input)).toEqual({
+      status: 'error',
+      message: '暂无法取得当前报价，请重试；仍无法计算时请联系管理员核价',
+    });
+  });
+  it('explains a back-only partial foil quote after consulting the real engine', async () => {
+    const result = await quoteWorkbenchAction({
+      ...input,
+      frontFoilColors: [],
+      backFoilColors: ['哑金'],
+    });
+    expect(mocks.snapshot).toHaveBeenCalled();
+    expect(result).toEqual({
+      status: 'error',
+      message: '请至少选择一种正面烫金颜色后自动计算',
+    });
+  });
+  it.each(['CUSTOM_FLAT_FOIL', 'COLOR_PRINT'] as const)(
+    'explains the current %s reverse-side limitation without rejecting production facts in the schema',
+    async (category) => {
+      const currentInput = useFoilCatalog(category);
+      const result = await quoteWorkbenchAction({
+        ...currentInput,
+        backFoilColors: ['哑金'],
+      });
+      expect(mocks.snapshot).toHaveBeenCalled();
+      expect(result).toEqual({
+        status: 'error',
+        message:
+          category === 'COLOR_PRINT'
+            ? '彩印加反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价'
+            : '专版反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
+      });
+    },
+  );
+  it('explains both missing front color and unsupported reverse-side full foil', async () => {
+    const result = await quoteWorkbenchAction({
+      ...useFoilCatalog('CUSTOM_FLAT_FOIL'),
+      frontFoilColors: [],
+      backFoilColors: ['哑金'],
+    });
+    expect(result).toEqual({
+      status: 'error',
+      message:
+        '请至少选择一种正面烫金颜色后自动计算；专版反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
+    });
+  });
+  it.each(['100×200、中号', '特大封120×200'])(
+    'identifies unpriceable catalog specification %s without returning internal item facts',
+    async (specification) => {
+      const configuredProduct = { ...product, specification };
+      mocks.options.mockResolvedValue({
+        products: [configuredProduct],
+        foilColors: [{ name: '哑金' }],
+      });
+      mocks.products.mockResolvedValue([configuredProduct]);
+      expect(await quoteWorkbenchAction({ ...input, specification })).toEqual({
+        status: 'error',
+        message: '所选规格无法自动报价，请选择其他规格或联系管理员补充产品资料',
+      });
+    },
+  );
+  it('shows why a three-color full foil quote requires manual pricing', async () => {
+    expect(
+      await quoteWorkbenchAction({
+        ...useFoilCatalog('CUSTOM_FLAT_FOIL'),
+        frontFoilColors: ['哑金', '红金', '银'],
+      }),
+    ).toMatchObject({
+      status: 'success',
+      quote: {
+        baseAmount: null,
+        suggestedAmount: null,
+        needsPricing: true,
+        pricingReasons: ['专版烫金三色及以上需要管理员核价'],
+      },
+    });
+  });
+  it('explains missing paper pricing while keeping the complete amount unknown', async () => {
+    const currentInput = useFoilCatalog('CUSTOM_FLAT_FOIL');
+    mocks.snapshot.mockResolvedValue({
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      full: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.full,
+        basePapers: [],
+        paperSurcharges: [],
+      },
+    });
+    expect(await quoteWorkbenchAction(currentInput)).toMatchObject({
+      status: 'success',
+      quote: {
+        suggestedAmount: null,
+        markupAmount: null,
+        needsPricing: true,
+        pricingReasons: [
+          '所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价',
+        ],
+      },
+    });
+  });
+  it('does not show stale manual pricing guidance after a complete quote', async () => {
+    expect(await quoteWorkbenchAction(input)).toMatchObject({
+      status: 'success',
+      quote: { needsPricing: false, pricingReasons: [] },
+    });
+  });
 });
