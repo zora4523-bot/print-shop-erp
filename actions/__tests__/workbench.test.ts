@@ -258,3 +258,18 @@ describe('workbench current-price quote', () => {
     }
   });
 });
+
+it('identifies missing catalog paper weight without guessing a price', async () => {
+  mocks.options.mockResolvedValue({
+    products: [{ ...product, paperType: '珠光纸', weight: null }],
+    papers: [],
+    foilColors: [{ name: '哑金' }],
+  });
+  expect(await quoteWorkbenchAction({ ...input, paperType: '珠光纸' })).toEqual(
+    {
+      status: 'error',
+      message: '所选纸张缺少克重，请联系管理员补充产品资料后再计算',
+    },
+  );
+  expect(mocks.transaction).not.toHaveBeenCalled();
+});

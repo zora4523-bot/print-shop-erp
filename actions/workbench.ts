@@ -58,6 +58,13 @@ export async function quoteWorkbenchAction(
         message: '产品选项已变更，请刷新页面后重新选择',
       };
     }
+    const paperWeightGsm =
+      parseCatalogPaperWeight(input.paperType) ?? product.weight;
+    if (paperWeightGsm == null)
+      return {
+        status: 'error',
+        message: '所选纸张缺少克重，请联系管理员补充产品资料后再计算',
+      };
     const colors = [...input.frontFoilColors, ...input.backFoilColors];
     if (
       colors.some(
@@ -88,8 +95,7 @@ export async function quoteWorkbenchAction(
           ...input,
           actualWidthMm: null,
           actualHeightMm: null,
-          paperWeightGsm:
-            parseCatalogPaperWeight(input.paperType) ?? product.weight,
+          paperWeightGsm,
           crafts: selectedCrafts.flatMap((craft) => (craft ? [craft.id] : [])),
           hasLocalFoil:
             input.pricingRoute === OrderItemPricingRoute.STOCK_BLANK,

@@ -10,6 +10,7 @@ import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-option
 import { catalogPricingFactChoices } from '@/lib/order/catalog-pricing-facts';
 import { workbenchPaperChoices } from '@/lib/workbench/catalog';
 import {
+  MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE,
   NEW_ORDER_PRICING_ROUTES,
   ORDER_PRICING_ROUTE_LABELS,
   productCategoryMatchesPricingRoute,
@@ -27,6 +28,13 @@ import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { ActionNotice, EmptyState } from '@/components/ui-business';
 import { WorkbenchChoice } from './WorkbenchChoice';
+
+function isColorUnavailable(selected: readonly string[], color: string) {
+  return (
+    selected.length >= MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE &&
+    !selected.includes(color)
+  );
+}
 
 export function WorkbenchCalculator({
   options,
@@ -100,6 +108,7 @@ export function WorkbenchCalculator({
   }
   function toggleColor(side: 'front' | 'back', color: string) {
     const values = side === 'front' ? front : back;
+    if (isColorUnavailable(values, color)) return;
     const next = values.includes(color)
       ? values.filter((value) => value !== color)
       : [...values, color];
@@ -259,6 +268,10 @@ export function WorkbenchCalculator({
                           ? front
                           : back
                         ).includes(color.name)}
+                        disabled={isColorUnavailable(
+                          side === 'front' ? front : back,
+                          color.name,
+                        )}
                         onClick={() => toggleColor(side, color.name)}
                       >
                         {color.name}

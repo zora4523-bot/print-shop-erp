@@ -25,12 +25,16 @@ export function WorkbenchChoice({
         value={value || null}
         onValueChange={(next) => onChange(next ?? '')}
         items={options}
+        disabled={options.length === 0}
       >
         <Select.Trigger
           aria-labelledby={id}
-          className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <Select.Value className="min-w-0 break-words" placeholder="请选择" />
+          <Select.Value
+            className="min-w-0 break-words"
+            placeholder={options.length ? '请选择' : '暂无可选项'}
+          />
           <Select.Icon>
             <ChevronDown aria-hidden className="size-4 shrink-0" />
           </Select.Icon>
