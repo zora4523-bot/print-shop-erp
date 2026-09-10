@@ -193,7 +193,7 @@ it('calculates, invalidates a changed input and ignores an older in-flight respo
   await page.getByRole('button', { name: '计算报价', exact: true }).click();
   await page.getByRole('spinbutton', { name: '数量（个）' }).fill('3000');
   resolve(success);
-  await expect.element(page.getByText('填写需求后计算报价')).toBeVisible();
+  await expect.element(page.getByText('填写完整后自动计算报价')).toBeVisible();
   await expect
     .element(page.getByText('¥ 492.75', { exact: true }))
     .not.toBeInTheDocument();
@@ -296,6 +296,7 @@ it('selects every quantity and markup preset, preserves form across sections and
   ] as const) {
     for (const value of values) {
       await page.getByRole('spinbutton', { name: label }).fill(value);
+      mocks.quote.mockClear();
       await page.getByRole('button', { name: '计算报价', exact: true }).click();
       expect(mocks.quote).not.toHaveBeenCalled();
     }
@@ -508,4 +509,79 @@ it('keeps ambiguous paper matches unselected until a specification resolves the 
   await expect
     .element(page.getByRole('combobox', { name: '纸张', exact: true }))
     .toHaveTextContent('160g珠光艳闪');
+});
+
+it('automatically calculates complete input, debounces edits and keeps keyboard focus', async () => {
+  mocks.quote.mockImplementation(async (input: { quantity: number }) => ({
+    ...success,
+    quote: {
+      ...(success.status === 'success' ? success.quote : {}),
+      suggestedAmount: `${input.quantity}.00`,
+    },
+  }));
+  render();
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  expect(mocks.quote).not.toHaveBeenCalled();
+  await chooseProduct();
+  await expect
+    .element(page.getByText('¥ 1,000.00', { exact: true }))
+    .toBeVisible();
+  mocks.quote.mockClear();
+  const quantity = page.getByRole('spinbutton', { name: '数量（个）' });
+  await quantity.fill('2000');
+  await quantity.fill('3000');
+  await expect
+    .element(page.getByText('¥ 3,000.00', { exact: true }))
+    .toBeVisible();
+  expect(mocks.quote).toHaveBeenCalledTimes(1);
+  await expect.element(quantity).toHaveFocus();
+  await quantity.fill('');
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  expect(mocks.quote).toHaveBeenCalledTimes(1);
+  await expect
+    .element(page.getByText('¥ 3,000.00', { exact: true }))
+    .not.toBeInTheDocument();
+  await quantity.fill('4000');
+  await expect
+    .element(page.getByText('¥ 4,000.00', { exact: true }))
+    .toBeVisible();
+});
+
+it('manual calculation cancels the scheduled automatic request and repeated presets still recalculate', async () => {
+  render();
+  await chooseProduct();
+  await page.getByRole('button', { name: '计算报价', exact: true }).click();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  expect(mocks.quote).toHaveBeenCalledTimes(1);
+  await page.getByRole('button', { name: '1,000', exact: true }).click();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  expect(mocks.quote).toHaveBeenCalledTimes(2);
+});
+
+it('ignores a late automatic response after newer input has already been priced', async () => {
+  const responses: Array<(value: WorkbenchQuoteResult) => void> = [];
+  mocks.quote.mockImplementation(
+    () =>
+      new Promise<WorkbenchQuoteResult>((resolve) => responses.push(resolve)),
+  );
+  render();
+  await chooseProduct();
+  await vi.waitFor(() => expect(responses).toHaveLength(1));
+  await page.getByRole('spinbutton', { name: '数量（个）' }).fill('2000');
+  await vi.waitFor(() => expect(responses).toHaveLength(2));
+  responses[1]!(success);
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  responses[0]!({ status: 'error', message: '旧条件错误' });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  await expect.element(page.getByText('旧条件错误')).not.toBeInTheDocument();
 });

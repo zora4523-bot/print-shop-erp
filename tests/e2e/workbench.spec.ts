@@ -221,3 +221,41 @@ test('initial specification and paper choices work without selecting a product f
   await page.getByRole('button', { name: '计算报价', exact: true }).click();
   await expect(page.getByText(/加工费价格版本/)).toBeVisible();
 });
+
+test('prices automatically after choosing requirements and changing quantity or markup', async ({
+  page,
+}) => {
+  await login(page, {
+    from: '/workbench',
+    username: E2E_USERS.sales!.username,
+    password: E2E_PASSWORD,
+  });
+  await page.getByRole('combobox', { name: '规格', exact: true }).click();
+  await page.getByRole('option', { name: '大号封90×165', exact: true }).click();
+  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
+  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
+  await page
+    .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
+    .getByRole('button')
+    .first()
+    .click();
+  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
+  const amount = page
+    .getByRole('region', { name: '报价计算', exact: true })
+    .locator('p.text-3xl');
+  const first = await amount.innerText();
+  await page.getByRole('spinbutton', { name: '数量（个）' }).fill('2000');
+  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
+  await expect(amount).not.toHaveText(first);
+  await expect(
+    page.getByRole('spinbutton', { name: '数量（个）' }),
+  ).toBeFocused();
+  await page.getByRole('button', { name: '不加价', exact: true }).click();
+  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
+  const base = await page
+    .getByText('加工费', { exact: true })
+    .locator('..')
+    .locator('dd')
+    .innerText();
+  await expect(amount).toHaveText(base);
+});

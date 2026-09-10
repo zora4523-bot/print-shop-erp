@@ -15,7 +15,6 @@ import {
 } from '@/lib/order/pricing-route';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatRate } from '@/lib/format/unit-price';
-import { quoteWorkbenchAction } from '@/actions/workbench';
 import type {
   WorkbenchQuoteInput,
   WorkbenchQuoteResult,
@@ -25,6 +24,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { ActionNotice, EmptyState } from '@/components/ui-business';
+import { useWorkbenchAutoQuote } from './useWorkbenchAutoQuote';
 import { WorkbenchChoice } from './WorkbenchChoice';
 import { WorkbenchProductFields } from './WorkbenchProductFields';
 
@@ -53,54 +53,42 @@ export function WorkbenchCalculator({
   const [front, setFront] = useState<string[]>([]);
   const [back, setBack] = useState<string[]>([]);
   const [markup, setMarkup] = useState('35');
-  const [result, setResult] = useState<WorkbenchQuoteResult | null>(null);
-  const [pending, setPending] = useState(false);
-  const generation = useRef(0);
   const resultHeading = useRef<HTMLHeadingElement>(null);
+  const ready =
+    productId &&
+    specification &&
+    paperType &&
+    quantity !== '' &&
+    markup !== '' &&
+    Number.isInteger(Number(quantity)) &&
+    Number(quantity) >= 1 &&
+    Number(quantity) <= 9999999 &&
+    Number.isInteger(Number(markup)) &&
+    Number(markup) >= 0 &&
+    Number(markup) <= 100 &&
+    (technique === OrderFoilTechnique.NONE || front.length + back.length > 0);
+  const { result, pending, invalidate, calculate } = useWorkbenchAutoQuote(
+    ready
+      ? {
+          productId,
+          pricingRoute: route,
+          specification,
+          paperType,
+          quantity: Number(quantity),
+          foilTechnique: technique,
+          frontFoilColors: front,
+          backFoilColors: back,
+          markup: Number(markup),
+        }
+      : null,
+    resultHeading,
+  );
   const products = options.products.filter((product) =>
     productCategoryMatchesPricingRoute(route, product.category),
   );
-  function invalidate() {
-    generation.current += 1;
-    setResult(null);
-    setPending(false);
-  }
   function change<T>(setter: (value: T) => void, value: T) {
     invalidate();
     setter(value);
-  }
-  async function calculate(event: React.FormEvent) {
-    event.preventDefault();
-    const request = ++generation.current;
-    setPending(true);
-    setResult(null);
-    try {
-      const response = await quoteWorkbenchAction({
-        productId,
-        pricingRoute: route,
-        specification,
-        paperType,
-        quantity: Number(quantity),
-        foilTechnique: technique,
-        frontFoilColors: front,
-        backFoilColors: back,
-        markup: Number(markup),
-      });
-      if (generation.current === request) {
-        setResult(response);
-        requestAnimationFrame(() => {
-          if (generation.current === request) resultHeading.current?.focus();
-        });
-      }
-    } catch {
-      if (generation.current === request)
-        setResult({
-          status: 'error',
-          message: '计算失败，请检查网络后重新计算',
-        });
-    } finally {
-      if (generation.current === request) setPending(false);
-    }
   }
   function toggleColor(side: 'front' | 'back', color: string) {
     const values = side === 'front' ? front : back;
@@ -121,7 +109,13 @@ export function WorkbenchCalculator({
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <Card className="min-w-0 p-4 sm:p-6">
         <h2 className="text-lg font-semibold">客户需求</h2>
-        <form onSubmit={calculate} className="space-y-5">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void calculate(true);
+          }}
+          className="space-y-5"
+        >
           <WorkbenchChoice
             label="产品类型"
             value={route}
@@ -216,6 +210,9 @@ export function WorkbenchCalculator({
           )}
           {technique !== OrderFoilTechnique.NONE && (
             <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                至少选择一面的烫金颜色后自动报价。
+              </p>
               {(['front', 'back'] as const).map((side) => (
                 <fieldset key={side} className="space-y-2">
                   <legend className="text-sm font-medium">
@@ -284,6 +281,9 @@ export function WorkbenchCalculator({
               ))}
             </div>
           </div>
+          <p className="text-sm text-muted-foreground">
+            条件填写完整后自动计算；修改选项、数量或加价比例后自动更新。
+          </p>
           <Button className="min-h-11 w-full" type="submit" disabled={pending}>
             <Calculator aria-hidden className="size-4" />
             {pending ? '正在计算…' : '计算报价'}
@@ -327,7 +327,7 @@ function WorkbenchQuotePanel({
         ) : null}
         {!result && !pending ? (
           <EmptyState
-            title="填写需求后计算报价"
+            title="填写完整后自动计算报价"
             description="选择产品、规格和工艺，查看费用明细"
           />
         ) : null}
