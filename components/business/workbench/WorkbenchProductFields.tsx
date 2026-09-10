@@ -27,6 +27,11 @@ export function WorkbenchProductFields({
     catalogPricingFactChoices(item.specification);
   const papersFor = (item: (typeof products)[number]) =>
     workbenchPaperChoices(item, papers);
+  const linkedPaper = product?.paperMaterialId
+    ? papers.find((paper) => paper.id === product.paperMaterialId)
+    : undefined;
+  const linkedPaperUnavailable =
+    product?.paperMaterialId && (!linkedPaper || linkedPaper.outOfStock);
   const candidates = product
     ? [product]
     : products.filter(
@@ -122,6 +127,11 @@ export function WorkbenchProductFields({
           onChange={(paperType) => choose({ ...selection, paperType })}
         />
       </div>
+      {linkedPaperUnavailable && (
+        <p className="text-sm text-muted-foreground">
+          所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料
+        </p>
+      )}
       {(selection.productId ||
         selection.specification ||
         selection.paperType) && (

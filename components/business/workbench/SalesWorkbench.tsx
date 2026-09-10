@@ -11,6 +11,7 @@ import {
   Search,
 } from 'lucide-react';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
+import { parseCatalogPaperWeight } from '@/lib/order/catalog-pricing-facts';
 import {
   SALES_SCENARIOS,
   PAPER_GUIDE,
@@ -175,7 +176,10 @@ export function SalesWorkbench({
                   <h3 className="font-semibold">{paper.name}</h3>
                   <p className="text-sm text-muted-foreground">
                     {paper.specification || '规格待确认'}
-                    {paper.weight !== null ? ` · ${paper.weight}g` : ''}
+                    {paper.weight !== null &&
+                    parseCatalogPaperWeight(paper.specification) !== paper.weight
+                      ? ` · ${paper.weight}g`
+                      : ''}
                   </p>
                   <p className="text-sm">
                     {paper.outOfStock ? '缺货，请确认补货时间' : '交期请确认'}

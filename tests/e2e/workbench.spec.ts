@@ -360,3 +360,25 @@ test('shows the specific missing paper price and recalculates when a priced pape
     }),
   ).toHaveCount(0);
 });
+
+test('renders the partial foil charge once for the complete front and back combination', async ({
+  page,
+}) => {
+  await login(page, {
+    from: '/workbench',
+    username: E2E_USERS.sales!.username,
+    password: E2E_PASSWORD,
+  });
+  await selectChoice(page, '产品类型', '局部烫金（通版现货）');
+  const machineCharge = page
+    .getByRole('region', { name: '报价计算', exact: true })
+    .locator('dl > div')
+    .filter({ has: page.getByText('机烫费', { exact: true }) });
+  await expect(quotedAmount(page)).toHaveText('¥ 229.50');
+  await expect(machineCharge.locator('dt')).toHaveText(/机烫费\s*¥ 40\.00 × 1$/);
+  await expect(machineCharge.locator('dd')).toHaveText('¥ 40.00');
+  await firstFoilColor(page, '反面').click();
+  await expect(quotedAmount(page)).toHaveText('¥ 283.50');
+  await expect(machineCharge.locator('dt')).toHaveText(/机烫费\s*¥ 80\.00 × 1$/);
+  await expect(machineCharge.locator('dd')).toHaveText('¥ 80.00');
+});

@@ -174,20 +174,21 @@ export async function quoteWorkbenchAction(
         baseAmount,
         ...suggestWorkbenchAmount(baseAmount, input.markup),
         lines: preview.components.map(
-          ({ name, rate, units, amount, adjustmentType }) => ({
-            name,
-            rate:
+          ({ name, rate, units, amount, adjustmentType, ruleCode }) => {
+            // Machine fees already include the quantity and every front/back
+            // pass. The presenter has no standalone rate for this combination;
+            // show its whole-item amount once instead of multiplying it again.
+            const wholeItemAmount =
+              ruleCode === 'PARTIAL_MACHINE' ||
               adjustmentType === 'PER_ORDER' ||
-              adjustmentType === 'FIXED_AMOUNT'
-                ? amount
-                : rate,
-            units:
-              adjustmentType === 'PER_ORDER' ||
-              adjustmentType === 'FIXED_AMOUNT'
-                ? '1'
-                : units,
-            amount,
-          }),
+              adjustmentType === 'FIXED_AMOUNT';
+            return {
+              name,
+              rate: wholeItemAmount ? amount : rate,
+              units: wholeItemAmount ? '1' : units,
+              amount,
+            };
+          },
         ),
         needsPricing: !preview.complete,
         pricingReasons: preview.complete

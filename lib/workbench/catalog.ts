@@ -15,6 +15,9 @@ export function workbenchPaperChoices(
   const linked = product.paperMaterialId
     ? papers.find((paper) => paper.id === product.paperMaterialId)
     : undefined;
+  // The options reader returns active materials only. A missing linked paper
+  // is unavailable even when the product still carries its saved paper label.
+  if (product.paperMaterialId && (!linked || linked.outOfStock)) return [];
   const withWeight = (name: string, weight: number | null) =>
     parseCatalogPaperWeight(name) === null && weight !== null
       ? `${weight}g${name}`

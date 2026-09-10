@@ -46,6 +46,25 @@ it('preserves the product paper constraint and follows a linked material weight'
     ),
   ).toEqual(['180g红卡']);
 });
+it.each([
+  ['out of stock', 'flash'],
+  ['absent from the active catalog', 'retired-paper'],
+])('omits explicit product papers whose linked material is %s', (_state, paperMaterialId) => {
+  expect(
+    workbenchPaperChoices(
+      { ...product, paperType: '160g珠光艳闪', weight: 160, paperMaterialId },
+      papers,
+    ),
+  ).toEqual([]);
+});
+it('preserves unlinked product paper choices independently of the material catalog', () => {
+  expect(
+    workbenchPaperChoices(
+      { ...product, paperType: '专用纸', weight: 160 },
+      [],
+    ),
+  ).toEqual(['160g专用纸']);
+});
 it('does not invent material combinations for stock products', () => {
   expect(
     workbenchPaperChoices(

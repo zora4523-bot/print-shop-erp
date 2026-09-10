@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import Decimal from 'decimal.js';
 import { Role } from '@/generated/prisma/enums';
 import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '@/lib/price/__tests__/fixtures/create-order-golden-fixtures';
 import { CreateOrderQuoteError } from '@/lib/order/create-order-quote-service';
@@ -185,6 +186,51 @@ describe('workbench current-price quote', () => {
       status: 'success',
       quote: { baseAmount: '210.00', suggestedAmount: '283.50' },
     });
+  });
+  it.each([
+    [999, [], '40.00'],
+    [999, ['哑金'], '80.00'],
+    [1000, [], '40.00'],
+    [1000, ['哑金'], '80.00'],
+    [2000, [], '80.00'],
+    [2000, ['哑金'], '160.00'],
+  ] as const)('shows the complete machine fee once for %i pieces with back colors %j', async (quantity, backFoilColors, machineAmount) => {
+    const result = await quoteWorkbenchAction({ ...input, quantity, backFoilColors });
+    expect(result.status).toBe('success');
+    if (result.status !== 'success') return;
+    expect(result.quote.lines.find((line) => line.name === '机烫费')).toEqual({
+      name: '机烫费', rate: machineAmount, units: '1', amount: machineAmount,
+    });
+    const expectedBlank = new Decimal('0.13').mul(quantity).toFixed(2);
+    expect(result.quote.lines.find((line) => line.name === '空白封')).toMatchObject({
+      rate: '0.1300', units: String(quantity), amount: expectedBlank,
+    });
+    expect(result.quote.baseAmount).toBe(new Decimal(expectedBlank).plus(machineAmount).toFixed(2));
+    for (const line of result.quote.lines) {
+      expect(new Decimal(line.rate).mul(line.units).toFixed(2), line.name).toBe(line.amount);
+    }
+  });
+  it.each([
+    ['CUSTOM_FLAT_FOIL', 'FLAT', ['哑金']],
+    ['CUSTOM_FLAT_FOIL', 'FLAT', ['哑金', '红金']],
+    ['CUSTOM_FLAT_FOIL', 'RELIEF', ['哑金']],
+    ['COLOR_PRINT', 'NONE', []],
+    ['COLOR_PRINT', 'FLAT', ['哑金']],
+  ] as const)('keeps %s / %s / %j line units consistent with the current engine amounts', async (category, foilTechnique, frontFoilColors) => {
+    const currentInput = useFoilCatalog(category);
+    const codes = category === 'COLOR_PRINT'
+      ? ['COATED_COLOR_PRINT', 'COATED_COLOR_PRINT_FOIL']
+      : ['FLAT_FOIL_SINGLE', 'FLAT_FOIL_DOUBLE', 'EMBOSS'];
+    const availableCrafts = codes.map((code) => ({ ...craft, id: code, code }));
+    mocks.crafts.mockResolvedValue(availableCrafts);
+    mocks.catalogCrafts.mockResolvedValue(availableCrafts);
+    const result = await quoteWorkbenchAction({ ...currentInput, foilTechnique, frontFoilColors, quantity: 2000 });
+    expect(result).toMatchObject({ status: 'success', quote: { needsPricing: false } });
+    if (result.status !== 'success') return;
+    for (const line of result.quote.lines) {
+      expect(new Decimal(line.rate).mul(line.units).toFixed(2), line.name).toBe(line.amount);
+    }
+    expect(result.quote.lines.reduce((sum, line) => sum.plus(line.amount), new Decimal(0)).toFixed(2)).toBe(result.quote.baseAmount);
   });
   it('revalidates catalog facts inside the engine transaction', async () => {
     mocks.products.mockResolvedValue([]);

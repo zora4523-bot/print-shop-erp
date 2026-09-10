@@ -94,6 +94,7 @@ export function WorkbenchCalculator({
   );
   const [back, setBack] = useState<string[]>([]);
   const [markup, setMarkup] = useState('35');
+  const [inputChanged, setInputChanged] = useState(false);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const inputIssue = quoteInputIssue({
     productId,
@@ -124,8 +125,12 @@ export function WorkbenchCalculator({
   const products = options.products.filter((product) =>
     productCategoryMatchesPricingRoute(route, product.category),
   );
-  function change<T>(setter: (value: T) => void, value: T) {
+  function invalidateQuote() {
+    setInputChanged(true);
     invalidate();
+  }
+  function change<T>(setter: (value: T) => void, value: T) {
+    invalidateQuote();
     setter(value);
   }
   function toggleColor(side: 'front' | 'back', color: string) {
@@ -162,7 +167,7 @@ export function WorkbenchCalculator({
               label: ORDER_PRICING_ROUTE_LABELS[value],
             }))}
             onChange={(value) => {
-              invalidate();
+              invalidateQuote();
               setRoute(value as WorkbenchQuoteInput['pricingRoute']);
               const next = workbenchDefaultSelection(
                 value as OrderItemPricingRoute,
@@ -190,7 +195,7 @@ export function WorkbenchCalculator({
             papers={options.papers}
             selection={{ productId, specification, paperType }}
             onChange={(next) => {
-              invalidate();
+              invalidateQuote();
               setProductId(next.productId);
               setSpecification(next.specification);
               setPaperType(next.paperType);
@@ -347,6 +352,7 @@ export function WorkbenchCalculator({
         result={result}
         pending={pending}
         markup={markup}
+        inputChanged={inputChanged}
         missingInput={inputIssue ?? '正在准备当前条件的报价'}
         resultHeading={resultHeading}
       />
@@ -358,19 +364,44 @@ function WorkbenchQuotePanel({
   result,
   pending,
   markup,
+  inputChanged,
   missingInput,
   resultHeading,
 }: {
   result: WorkbenchQuoteResult | null;
   pending: boolean;
   markup: string;
+  inputChanged: boolean;
   missingInput: string;
   resultHeading: React.RefObject<HTMLHeadingElement | null>;
 }) {
   const quote = result?.status === 'success' ? result.quote : null;
+  const emptyTitle = inputChanged
+    ? '条件已变更，待重新核价'
+    : '填写完整后自动计算报价';
+  const noticeVisible = result?.status === 'error' || quote?.needsPricing;
+  const noticeTone = result?.status === 'error'
+    ? 'error'
+    : quote?.needsPricing
+      ? 'warning'
+      : 'info';
+  const noticeTitle = pending
+    ? '正在按当前价格计算…'
+    : result?.status === 'error'
+      ? result.message
+      : quote?.needsPricing
+        ? '部分费用待核价'
+        : quote
+          ? `加工费参考报价 ${quote.suggestedAmount === null ? '待核价' : formatMoney(quote.suggestedAmount)}`
+          : `${emptyTitle}；${missingInput}`;
+  const pricingDescription = quote?.needsPricing
+    ? quote.pricingReasons?.length
+      ? quote.pricingReasons.join('；')
+      : '请联系管理员确认后再向客户报价'
+    : undefined;
   return (
     <div className="min-w-0 space-y-4">
-      <Card className="min-w-0 p-4 sm:p-6" aria-busy={pending}>
+      <Card className="min-w-0 p-4 sm:p-6">
         <h2
           ref={resultHeading}
           tabIndex={-1}
@@ -378,18 +409,21 @@ function WorkbenchQuotePanel({
         >
           加工费参考报价
         </h2>
+        <ActionNotice
+          tone={noticeTone}
+          title={noticeTitle}
+          description={pricingDescription}
+          className={noticeVisible ? undefined : 'sr-only'}
+        />
         {pending ? (
           <p className="text-sm text-muted-foreground">正在按当前价格计算…</p>
         ) : null}
         {!result && !pending ? (
           <EmptyState
-            title="填写完整后自动计算报价"
+            title={emptyTitle}
             description={missingInput}
           />
         ) : null}
-        {result?.status === 'error' && (
-          <ActionNotice tone="error" title={result.message} />
-        )}
         {quote && (
           <>
             <p className="text-3xl font-semibold tabular-nums text-primary">
@@ -400,17 +434,6 @@ function WorkbenchQuotePanel({
             <p className="text-sm text-muted-foreground">
               加工费价格版本 {quote.processingVersion} · 加价 {markup}%
             </p>
-            {quote.needsPricing && (
-              <ActionNotice
-                tone="warning"
-                title="部分费用待核价"
-                description={
-                  quote.pricingReasons?.length
-                    ? quote.pricingReasons.join('；')
-                    : '请联系管理员确认后再向客户报价'
-                }
-              />
-            )}
             <dl className="divide-y">
               {quote.lines.map((line, index) => (
                 <div

@@ -59,6 +59,35 @@ it('uses available catalog facts when the preferred combination is absent', () =
   });
 });
 
+it.each(['out-of-stock', 'absent'] as const)('skips an explicit product paper with an %s linked material when choosing defaults', (state) => {
+  const available = {
+    ...product,
+    id: 'available',
+    paperType: '珠光艳闪',
+    paperMaterialId: 'paper-120',
+  };
+  const unavailable = {
+    ...product,
+    id: 'unavailable',
+    paperType: '160g珠光艳闪',
+    weight: 160,
+    paperMaterialId: state === 'absent' ? 'retired-paper' : 'paper-160',
+  };
+  const catalog = {
+    ...options,
+    products: [unavailable, available],
+    papers: options.papers.map((paper) => ({ ...paper, outOfStock: paper.id === 'paper-160' })),
+  };
+  expect(workbenchDefaultSelection(route, catalog)).toEqual({
+    productId: 'available',
+    specification: available.specification,
+    paperType: '120g珠光艳闪',
+  });
+  expect(workbenchDefaultSelection(route, { ...catalog, products: [unavailable] })).toEqual({
+    productId: '', specification: '', paperType: '',
+  });
+});
+
 it('respects route and explicit product paper constraints', () => {
   const print = {
     ...product,
