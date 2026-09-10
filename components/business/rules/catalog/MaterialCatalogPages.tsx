@@ -23,11 +23,7 @@ import { MaterialsTable } from '@/components/business/material/MaterialsTable';
 import { StockTransactionForm } from '@/components/business/material/StockTransactionForm';
 import { ToggleMaterialActiveButton } from '@/components/business/material/ToggleMaterialActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import {
-  PageHeader,
-  StatusBadge,
-  TableEmptyState,
-} from '@/components/ui-business';
+import { PageHeader, StatusBadge, TableEmptyState, TableScrollArea } from '@/components/ui-business';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { RulePaperWorkspace } from '@/components/business/rules/catalog/RulePaperWorkspace';
 import { MaterialCategory } from '@/generated/prisma/enums';
@@ -144,7 +140,6 @@ export async function MaterialCatalogList({
       {paperOnly ? (
         <RuleCenterPageHeader
           title="纸张"
-          effect="immediate"
           subtitle="维护建单可选纸张与库存运营状态；历史工单引用保留。"
           actions={
             <Link href={`${routeBase}/new`} className={buttonVariants()}>
@@ -395,12 +390,7 @@ export async function EditMaterialCatalogItem({
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">库位库存</h2>
-        <div
-          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="物料库位库存"
-          tabIndex={0}
-        >
+        <TableScrollArea label="物料库位库存">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
@@ -429,7 +419,7 @@ export async function EditMaterialCatalogItem({
               )}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">

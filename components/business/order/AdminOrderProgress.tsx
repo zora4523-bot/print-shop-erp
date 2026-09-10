@@ -15,7 +15,23 @@ export function AdminOrderProgress({
   const corrupt = progress.foilingOverLimit || progress.packingOverLimit;
 
   return (
-    <div className={cn('min-w-0 space-y-1.5', compact && 'space-y-1')}>
+    <div className={cn('min-w-0 space-y-1.5', compact && 'space-y-0.5')}>
+      {compact ? (
+        <p className="text-xs leading-normal font-bold tabular-nums text-muted-foreground">
+          <span className={cn(progress.foilingOverLimit && 'text-destructive')}>
+            烫 {formatQuantity(progress.foilingProgress)}
+          </span>
+          {' · '}
+          <span
+            className={cn(
+              progress.packingOverLimit && 'text-destructive',
+              !progress.packingOverLimit && progress.packingAhead && 'text-warning-foreground',
+            )}
+          >
+            包 {formatQuantity(progress.packingProgress)}
+          </span>
+        </p>
+      ) : null}
       <ProgressLine
         label="烫金"
         value={progress.foilingProgress}
@@ -34,15 +50,15 @@ export function AdminOrderProgress({
         compact={compact}
       />
       {corrupt ? (
-        <p role="alert" className="text-[10px] font-semibold text-destructive">
+        <p role="alert" className="text-xs font-semibold text-destructive">
           进度超过工单数量 · 查数据
         </p>
       ) : progress.packingAhead ? (
-        <p role="status" className="text-[10px] font-semibold text-warning-foreground">
+        <p role="status" className="text-xs font-semibold text-warning-foreground">
           打包进度领先烫金，请核对
         </p>
       ) : progress.stagnant ? (
-        <p role="alert" className="text-[10px] font-semibold text-destructive">
+        <p role="alert" className="text-xs font-semibold text-destructive">
           下发满 {progress.stagnationDays} 天仍无有效扫码认领
         </p>
       ) : null}
@@ -69,28 +85,31 @@ function ProgressLine({
 }) {
   return (
     <div>
-      <div
-        className={cn(
-          'mb-0.5 flex items-center justify-between gap-2 text-[10px] tabular-nums',
-          invalid && 'font-semibold text-destructive',
-          !invalid && warning && 'font-semibold text-warning-foreground',
-          !invalid && !warning && 'text-muted-foreground',
-        )}
-      >
-        <span>{label}</span>
-        <span>
-          {formatQuantity(value)} / {formatQuantity(total)}
-        </span>
-      </div>
+      {!compact ? (
+        <div
+          className={cn(
+            'mb-0.5 flex items-center justify-between gap-2 text-xs tabular-nums',
+            invalid && 'font-semibold text-destructive',
+            !invalid && warning && 'font-semibold text-warning-foreground',
+            !invalid && !warning && 'text-muted-foreground',
+          )}
+        >
+          <span>{label}</span>
+          <span>
+            {formatQuantity(value)} / {formatQuantity(total)}
+          </span>
+        </div>
+      ) : null}
       <div
         role="progressbar"
         aria-label={`${label}进度`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(percent)}
+        aria-valuetext={`已完成 ${formatQuantity(value)}，工单总量 ${formatQuantity(total)}`}
         className={cn(
           'overflow-hidden rounded-full bg-muted',
-          compact ? 'h-1' : 'h-1.5',
+          compact ? 'h-[3px]' : 'h-1.5',
         )}
       >
         <span

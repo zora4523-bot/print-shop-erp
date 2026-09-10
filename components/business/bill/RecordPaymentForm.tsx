@@ -18,6 +18,7 @@ import {
 } from '@/components/ui-business';
 import { recordBillPaymentAction } from '@/actions/bill';
 import type { RecordBillPaymentResult } from '@/actions/bill.types';
+import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeLocalShanghai } from '@/lib/format/dates';
 
 type Props = {
@@ -43,10 +44,10 @@ export function paymentImpactItems(
   const settlement =
     Number.isFinite(after) && Math.abs(after) < 0.005
       ? '本次收款后账单将进入已结清终态，不能直接回退。'
-      : `本次收款后预计仍有 ¥ ${after.toFixed(2)} 未收。`;
+      : `本次收款后预计仍有 ${formatMoney(after)} 未收。`;
 
   return [
-    `本次收款：¥ ${amount.toFixed(2)}`,
+    `本次收款：${formatMoney(amount)}`,
     `收款时间：${preview.paidAt.replace('T', ' ')}`,
     `收款方式：${preview.paymentMethod || '未填写'}`,
     `流水号：${preview.referenceNo || '未填写'}`,
@@ -239,7 +240,7 @@ export function RecordPaymentForm({
         <ActionNotice
           tone="success"
           title="付款流水已录入"
-          description={`已付 ¥ ${visibleState.newPaidAmount} / ¥ ${visibleState.totalAmount} · ${visibleState.billStatus === 'FULLY_PAID' ? '账单已结清' : '账单部分结清'}`}
+          description={`已付 ${formatMoney(visibleState.newPaidAmount)} / ${formatMoney(visibleState.totalAmount)} · ${visibleState.billStatus === 'FULLY_PAID' ? '账单已结清' : '账单部分结清'}`}
         />
       ) : null}
       {visibleState?.status === 'error' ? (

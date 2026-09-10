@@ -102,7 +102,7 @@ export function OrderPaperSwatchPicker({
               aria-pressed={selected}
               disabled={disabled || option.disabled}
               className={cn(
-                'h-auto min-h-16 w-[5.375rem] flex-col items-stretch gap-1.5 whitespace-normal rounded-[10px] p-1.5 text-left transition-transform hover:-translate-y-px hover:border-foreground motion-reduce:transform-none',
+                'h-auto min-h-16 w-[5.375rem] flex-col items-stretch gap-1.5 whitespace-normal rounded-lg p-1.5 text-left transition-transform hover:-translate-y-px hover:border-foreground motion-reduce:transform-none',
                 selected &&
                   'border-foreground ring-2 ring-foreground hover:bg-background',
               )}

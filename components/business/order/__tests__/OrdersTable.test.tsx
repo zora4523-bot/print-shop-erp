@@ -142,7 +142,7 @@ describe('OrdersTable commercial visibility', () => {
     expect(emptyHtml).toContain('data-kind="no-data"');
     expect(emptyHtml).not.toContain('清除全部筛选');
     expect(filteredHtml).toContain('data-kind="no-result"');
-    expect(filteredHtml).toContain('没有符合条件的工单');
+    expect(filteredHtml).toContain('没有匹配的工单');
     expect(filteredHtml).toContain('清除全部筛选');
   });
 

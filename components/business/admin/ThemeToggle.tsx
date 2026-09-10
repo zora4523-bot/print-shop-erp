@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { Laptop, Moon, Sun, SunMoon } from 'lucide-react';
+import { buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +40,8 @@ function subscribeToTheme(listener: () => void) {
 }
 
 export function ThemeToggle() {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusOnClose = useRef(false);
   const theme = useSyncExternalStore(
     subscribeToTheme,
     currentTheme,
@@ -55,11 +58,30 @@ export function ThemeToggle() {
   }, []);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open, details) => {
+        // 关闭动画中的鼠标离开会补发 trigger-hover，不能覆盖 Escape 的焦点返回。
+        if (open || details.reason !== 'trigger-hover') {
+          restoreFocusOnClose.current = !open && details.reason === 'escape-key';
+        }
+      }}
+      onOpenChangeComplete={(open) => {
+        // Escape 关闭完成后恢复焦点；点击页面其他位置时不抢焦点。
+        if (!open && restoreFocusOnClose.current) {
+          triggerRef.current?.focus({ preventScroll: true });
+          restoreFocusOnClose.current = false;
+        }
+      }}
+    >
       <DropdownMenuTrigger
+        ref={triggerRef}
         aria-label="切换界面主题"
         title="切换界面主题"
-        className="inline-flex size-11 shrink-0 items-center justify-center rounded-full border bg-card text-foreground shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className={buttonVariants({
+          variant: 'ghost',
+          size: 'icon',
+          className: 'size-11',
+        })}
       >
         <SunMoon aria-hidden className="size-4" />
       </DropdownMenuTrigger>

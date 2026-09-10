@@ -1,5 +1,8 @@
 import { OrderStatus } from '../../../generated/prisma/enums';
-import { formatDateTimeShanghai } from '@/lib/format/dates';
+import {
+  formatDateShanghai,
+  formatDateTimeShanghai,
+} from '@/lib/format/dates';
 import { orderStatusZh } from '@/lib/order/log-format';
 
 export type OrderTimelineProductionUnit = {
@@ -172,7 +175,7 @@ export function buildOrderDetailTimeline(
     shippedLog
       ? stamp(shippedLog.createdAt, shippedLog.operatorName)
       : input.promisedDate
-        ? `承诺交期 ${input.promisedDate.toISOString().slice(0, 10)}`
+        ? `承诺交期 ${formatDateShanghai(input.promisedDate)}`
         : '—',
     finishedLog
       ? stamp(finishedLog.createdAt, finishedLog.operatorName)

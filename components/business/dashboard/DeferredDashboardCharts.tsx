@@ -8,6 +8,7 @@ import type {
   ProductionTrendChartContentProps,
   SalesRankingChartContentProps,
 } from './DashboardChartsContent';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const ProductionTrendChartContent =
   dynamic<ProductionTrendChartContentProps>(
@@ -150,11 +151,11 @@ function ChartPlaceholder({
   className: string;
 }) {
   return (
-    <div
+    <Skeleton
       role="status"
       aria-busy="true"
       aria-label={`${label}图表正在加载`}
-      className={`${className} animate-pulse rounded-xl border bg-card motion-reduce:animate-none`}
+      className={`${className} rounded-xl border bg-card motion-reduce:animate-none`}
       data-slot="dashboard-chart-placeholder"
     />
   );

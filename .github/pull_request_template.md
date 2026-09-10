@@ -8,7 +8,8 @@ Selected backlog item:
 
 ## Verification
 
-- [ ] 新增用户可见文案已对照 ui-规范 §文案
+- [ ] 新增用户可见文案已对照 `docs/ui-规范.md` §7（文案十律、业务词映射、禁词表）
+- [ ] 新增颜色 / 字号 / 圆角 / 间距已对照 `docs/ui-规范.md` §2（只用语义 token 与标准档位；例外已登记附录 A）
 
 - [ ] `./node_modules/.bin/prisma validate`
 - [ ] `pnpm typecheck`

@@ -24,10 +24,12 @@ import {
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
+import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
 import Decimal from 'decimal.js';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
 import { formatMoney } from '@/lib/dashboard/format';
+import { formatRate } from '@/lib/format/unit-price';
 type PageProps = { params: Promise<{ id: string }> };
 
 const getWorkerPieceworkSalaryPageData = cache(
@@ -171,13 +173,10 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
             {formatDateShanghai(salary.date)} 工资明细
           </h1>
           <PaymentStatusBadge isPaid={salary.isPaid} />
-          <Badge variant={pieceworkVsBase > 0 ? 'secondary' : 'outline'}>
-            {pieceworkVsBase > 0
-              ? '计件高于保底'
-              : pieceworkVsBase === 0
-                ? '计件等于保底'
-                : '按保底补足'}
-          </Badge>
+          <SalaryFloorBadge
+            piecework={salary.totalPieceworkAmount as Decimal.Value}
+            base={salary.baseSalary as Decimal.Value}
+          />
           <Badge variant="outline">上班 {attendance.workUnits} 天</Badge>
           <Badge variant="outline">请假 {attendance.leaveUnits} 天</Badge>
         </div>
@@ -339,8 +338,7 @@ function OperationSettlementDetail({
                     {String(report.defectQty)} · 返工 {String(report.reworkQty)}
                   </p>
                   <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                    计薪 {String(report.chargeableQty)} {report.unit} × ¥{' '}
-                    {String(report.rate)} · 工价 v{report.priceBookVersion}
+                    计薪 {String(report.chargeableQty)} {report.unit} × {formatRate(report.rate)} · 工价 v{report.priceBookVersion}
                   </p>
                 </div>
                 <div className="ml-auto shrink-0 text-right">
@@ -409,7 +407,7 @@ function HourlySalaryDetail({
         />
         <Metric
           label={isCook ? '代班时薪' : '正常时薪'}
-          value={`¥ ${String(payroll.hourlyRate)} / 小时`}
+          value={`${formatRate(payroll.hourlyRate)} / 小时`}
         />
         {isCook ? null : (
           <Metric

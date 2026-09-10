@@ -20,7 +20,7 @@ export function AdminOrdersWorkspaceSkeleton() {
       <Skeleton aria-hidden="true" className="h-5 w-80 max-w-full motion-reduce:animate-none" />
       <div aria-hidden="true" className="space-y-2">
         {Array.from({ length: 6 }, (_, index) => (
-          <div key={index} className="flex min-h-[84px] items-center gap-3 rounded-xl border bg-card px-3.5 py-[11px]">
+          <div key={index} className="flex min-h-[84px] items-center gap-3 rounded-xl border bg-card px-3.5 py-3">
             <Skeleton className="size-6 shrink-0 motion-reduce:animate-none" />
             <Skeleton className="h-[46px] w-[34px] shrink-0 rounded-md motion-reduce:animate-none" />
             <div className="min-w-0 flex-1 space-y-2">

@@ -13,6 +13,7 @@ import {
   RULE_CENTER_SIDEBAR_ITEMS,
   type RuleCenterEffect,
 } from '@/lib/navigation/rule-center';
+import { RULE_CENTER_EFFECT_REGISTRY } from '@/lib/ui/status-registry';
 
 export const metadata = {
   title: '规则配置中心 · 红包印刷 ERP',
@@ -46,13 +47,6 @@ const RULE_GROUPS = [
   effect: RuleCenterEffect;
   icon: LucideIcon;
 }[];
-
-const EFFECT_LABELS: Record<RuleCenterEffect, string> = {
-  mixed: '分域生效',
-  versioned: '发布后生效',
-  immediate: '保存后生效',
-  'effective-dated': '按生效时间启用',
-};
 
 export default async function RuleCenterPage() {
   await requirePermission('dict:price:manage');
@@ -106,12 +100,12 @@ export default async function RuleCenterPage() {
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block font-medium">{item.label}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
                         {item.impact}
                       </span>
                     </span>
-                    <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
-                      {EFFECT_LABELS[item.effect]}
+                    <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                      {RULE_CENTER_EFFECT_REGISTRY[item.effect].label}
                     </span>
                     <ArrowRight
                       aria-hidden="true"

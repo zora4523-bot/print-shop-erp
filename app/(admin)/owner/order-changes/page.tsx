@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { FilePenLine } from 'lucide-react';
 import {
   OrderChangeModifyKind,
-  OrderChangeRequestStatus,
   OrderChangeRequestType,
 } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -14,7 +13,6 @@ import {
 import { parsePositiveInt } from '@/lib/admin/table';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
-import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import {
@@ -28,10 +26,10 @@ import {
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import {
-  EmptyState,
-  PageHeader,
-  StatusBadge as UiStatusBadge,
-} from '@/components/ui-business';
+  ChangeRequestStatusBadge,
+  ChangeRequestTypeBadge,
+} from '@/components/business/order/ChangeRequestStatusBadge';
+import { EmptyState, PageHeader } from '@/components/ui-business';
 
 export const metadata = {
   title: '工单修改申请 · 红包印刷 ERP',
@@ -96,7 +94,7 @@ export default async function OrderChangesPage({ searchParams }: PageProps) {
               >
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <ChangeRequestStatusBadge status={request.status} />
-                  <RequestTypeBadge type={request.type} />
+                  <ChangeRequestTypeBadge type={request.type} />
                   <span className="admin-wrap-anywhere min-w-0 font-sans text-sm font-semibold tabular-nums">
                     {request.order.orderNo}
                   </span>
@@ -168,7 +166,7 @@ export default async function OrderChangesPage({ searchParams }: PageProps) {
                     <TableCell className="min-w-0 whitespace-normal px-4 py-3">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <ChangeRequestStatusBadge status={request.status} />
-                        <RequestTypeBadge type={request.type} />
+                        <ChangeRequestTypeBadge type={request.type} />
                         <span className="admin-wrap-anywhere font-sans font-medium tabular-nums">
                           {request.order.orderNo}
                         </span>
@@ -219,27 +217,6 @@ export default async function OrderChangesPage({ searchParams }: PageProps) {
         />
       ) : null}
     </div>
-  );
-}
-
-function ChangeRequestStatusBadge({
-  status,
-}: {
-  status: OrderChangeRequestStatus;
-}) {
-  const definition = ORDER_CHANGE_REQUEST_STATUS_REGISTRY[status];
-  return (
-    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
-      {definition.label}
-    </UiStatusBadge>
-  );
-}
-
-function RequestTypeBadge({ type }: { type: OrderChangeRequestType }) {
-  return (
-    <Badge variant="outline">
-      {type === OrderChangeRequestType.CANCEL ? '取消申请' : '修改申请'}
-    </Badge>
   );
 }
 

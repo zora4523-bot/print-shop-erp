@@ -29,6 +29,8 @@ export {
 } from './empty-state-copy';
 
 export { ContentSkeleton, SlowLoadingHint } from './ContentSkeleton';
+export { SectionLoading } from './SectionLoading';
+export type { SectionLoadingProps } from './SectionLoading';
 export type {
   ContentSkeletonProps,
   ContentSkeletonVariant,
@@ -57,6 +59,9 @@ export type {
   LongTaskReceiptProps,
   LongTaskReceiptStatus,
 } from './LongTaskReceipt';
+
+export { useCopyToClipboard, copyFeedbackMessage } from './useCopyToClipboard';
+export type { CopyFeedback, CopyOptions } from './useCopyToClipboard';
 
 export { TableScrollArea } from './TableScrollArea';
 export type { TableScrollAreaProps } from './TableScrollArea';

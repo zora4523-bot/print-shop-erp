@@ -10,14 +10,7 @@ import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { RegenerateBundleForm } from '@/components/business/cdr/RegenerateBundleForm';
 import { Button } from '@/components/ui/button';
-import {
-  EmptyState,
-  EnvNotice,
-  ErrorBoundary,
-  PageHeader,
-  SlowLoadingHint,
-  StatusBadge,
-} from '@/components/ui-business';
+import { EmptyState, EnvNotice, ErrorBoundary, PageHeader, SectionLoading, StatusBadge, TableScrollArea } from '@/components/ui-business';
 import {
   formatDateInputShanghai,
   formatDateShanghai,
@@ -81,7 +74,7 @@ export default async function ForemanCdrPage({
         title="CDR 候选工单暂时无法加载"
         description="日期筛选和历史下载包仍可使用；请重试候选区域。"
       >
-        <Suspense fallback={<CdrSectionLoading label="CDR 候选工单" />}>
+        <Suspense fallback={<SectionLoading label="CDR 候选工单" />}>
           <CdrEligibleOrdersSection
             from={from}
             to={to}
@@ -95,7 +88,7 @@ export default async function ForemanCdrPage({
         title="最近下载包暂时无法加载"
         description="候选工单和新建下载包仍可使用；请重试历史区域。"
       >
-        <Suspense fallback={<CdrSectionLoading label="最近下载包" />}>
+        <Suspense fallback={<SectionLoading label="最近下载包" />}>
           <CdrRecentBundlesSection
             recentBundlesPromise={recentBundlesPromise}
           />
@@ -168,12 +161,7 @@ export async function CdrRecentBundlesSection({
           }
         />
       ) : (
-        <div
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="CDR 下载包历史"
-          tabIndex={0}
-        >
+        <TableScrollArea label="CDR 下载包历史" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -260,29 +248,12 @@ export async function CdrRecentBundlesSection({
               })}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </section>
   );
 }
 
-function CdrSectionLoading({ label }: { label: string }) {
-  return (
-    <div
-      role="status"
-      aria-busy="true"
-      aria-live="polite"
-      className="space-y-2"
-    >
-      <span className="sr-only">正在加载{label}</span>
-      <div
-        aria-hidden="true"
-        className="h-48 animate-pulse rounded-xl border bg-card motion-reduce:animate-none"
-      />
-      <SlowLoadingHint />
-    </div>
-  );
-}
 
 function BundleFailureMessage({ errorCode }: { errorCode: string | null }) {
   const display = cdrBundleFailureDisplay(errorCode);

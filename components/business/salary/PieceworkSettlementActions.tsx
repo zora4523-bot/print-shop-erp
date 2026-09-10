@@ -9,6 +9,7 @@ import {
 } from '@/actions/owner-piecework-settlement';
 import { Button } from '@/components/ui/button';
 import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import { formatMoney } from '@/lib/dashboard/format';
 
 function actionError(
   state: PieceworkSettlementMutationResult | null,
@@ -59,7 +60,7 @@ export function LockPieceworkSettlementForm({
         }
         formId={formId}
         disabled={pending}>
-        <ConfirmActionDialog action={`结算 ${reporterName} ${workDate} 的计件工资`} changes={[{label: `${reportCount} 条报工`, old: "未结算", new: `¥ ${amount}`}]} consequences={[
+        <ConfirmActionDialog action={`结算 ${reporterName} ${workDate} 的计件工资`} changes={[{label: `${reportCount} 条报工`, old: "未结算", new: formatMoney(amount)}]} consequences={[
           '锁定后不能删除或重建明细；更正须通过追加冲正报工处理。',
         ]} confirmText="锁定" />
       </ConfirmActionController>
@@ -144,7 +145,7 @@ export function MarkPieceworkSettlementPaidForm({
         }
         formId={formId}
         disabled={pending}>
-        <ConfirmActionDialog action={`标记 ${reporterName} ${workDate} 的工资已发`} changes={[{label: `¥ ${amount}`, old: "未发放", new: "已发放"}]} consequences={[
+        <ConfirmActionDialog action={`标记 ${reporterName} ${workDate} 的工资已发`} changes={[{label: formatMoney(amount), old: "未发放", new: "已发放"}]} consequences={[
           '发放记录不能撤销。',
         ]} confirmText="标记已发" />
       </ConfirmActionController>

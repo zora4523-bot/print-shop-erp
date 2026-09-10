@@ -4,7 +4,7 @@ import {
   getProductionTrend,
   getSalesRanking,
 } from '@/lib/dashboard/owner-charts';
-import { ErrorBoundary, SlowLoadingHint } from '@/components/ui-business';
+import { ErrorBoundary, SectionLoading } from '@/components/ui-business';
 import {
   DeferredCategoryDistributionChart,
   DeferredProductionTrendChart,
@@ -26,7 +26,7 @@ export function OwnerAnalytics() {
         description="销售排行和产品分布仍可使用；请重试当前图表。"
       >
         <Suspense
-          fallback={<AnalyticsChartLoading label="近 30 天产量趋势" height="trend" />}
+          fallback={<SectionLoading label="近 30 天产量趋势" className="h-92" />}
         >
           <ProductionTrendChartSection />
         </Suspense>
@@ -39,7 +39,7 @@ export function OwnerAnalytics() {
           description="产量趋势和产品分布仍可使用；请重试当前图表。"
         >
           <Suspense
-            fallback={<AnalyticsChartLoading label="本月销售业绩 Top 10" height="detail" />}
+            fallback={<SectionLoading label="本月销售业绩 Top 10" className="h-100" />}
           >
             <SalesRankingChartSection />
           </Suspense>
@@ -51,7 +51,7 @@ export function OwnerAnalytics() {
           description="产量趋势和销售排行仍可使用；请重试当前图表。"
         >
           <Suspense
-            fallback={<AnalyticsChartLoading label="本月产品线分布" height="detail" />}
+            fallback={<SectionLoading label="本月产品线分布" className="h-100" />}
           >
             <CategoryDistributionChartSection />
           </Suspense>
@@ -74,25 +74,4 @@ export async function SalesRankingChartSection() {
 export async function CategoryDistributionChartSection() {
   const categoryDistribution = await getCategoryDistribution();
   return <DeferredCategoryDistributionChart data={categoryDistribution} />;
-}
-
-function AnalyticsChartLoading({
-  label,
-  height,
-}: {
-  label: string;
-  height: 'trend' | 'detail';
-}) {
-  return (
-    <div role="status" aria-busy="true" aria-live="polite" className="space-y-2">
-      <span className="sr-only">正在加载{label}</span>
-      <div
-        aria-hidden="true"
-        className={`${
-          height === 'trend' ? 'h-[23rem]' : 'h-[25rem]'
-        } animate-pulse rounded-xl border bg-card motion-reduce:animate-none`}
-      />
-      <SlowLoadingHint />
-    </div>
-  );
 }

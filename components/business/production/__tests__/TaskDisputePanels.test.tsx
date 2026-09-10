@@ -49,6 +49,9 @@ describe('TaskDisputePanel', () => {
       />,
     );
     expect(html).toContain('待处理');
+    // 异议状态徽章已从 shadcn Badge 迁到 StatusBadge + registry，
+    // 除文案外一并锁住色档：待处理 = warning。
+    expect(html).toContain('data-tone="warning"');
     expect(html).toContain('已有一条待处理异议');
     expect(html).not.toContain('name="reason"');
   });
@@ -100,6 +103,8 @@ describe('TaskDisputeAdminPanel', () => {
       />,
     );
     expect(html).toContain('已解决');
+    // 正常终态用 success，与 registry 的 RESOLVED 一致。
+    expect(html).toContain('data-tone="success"');
     expect(html).toContain('已核对，后续按工资调整流程处理');
     expect(html).not.toContain('name="resolution"');
   });

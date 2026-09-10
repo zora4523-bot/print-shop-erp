@@ -9,6 +9,7 @@ import {
   BatchActionResult,
   ConfirmActionController, ConfirmActionDialog,
 } from '@/components/ui-business';
+import { formatMoney } from '@/lib/dashboard/format';
 
 export type CsReadySettlementPreview = {
   duePeriodCount: number;
@@ -31,7 +32,7 @@ export function readyCsSettlementImpactItems(
 ): string[] {
   const sampleItems = preview.samplePeriods.map(
     (period) =>
-      `${period.csUserName} · ${period.periodLabel}：算档业绩 ¥ ${period.tierSalesTotal}，底薪合计 ¥ ${period.baseTotal}。`,
+      `${period.csUserName} · ${period.periodLabel}：算档业绩 ${formatMoney(period.tierSalesTotal)}，底薪合计 ${formatMoney(period.baseTotal)}。`,
   );
   const remaining = Math.max(
     preview.duePeriodCount - preview.samplePeriods.length,
@@ -45,7 +46,7 @@ export function readyCsSettlementImpactItems(
     ...(preview.earliestPeriodEnd && preview.latestPeriodEnd
       ? [
           `当前到期日范围：${preview.earliestPeriodEnd} ~ ${preview.latestPeriodEnd}。`,
-          `当前初始候选的算档业绩合计 ¥ ${preview.tierSalesTotal}，底薪合计 ¥ ${preview.baseTotal}。`,
+          `当前初始候选的算档业绩合计 ${formatMoney(preview.tierSalesTotal)}，底薪合计 ${formatMoney(preview.baseTotal)}。`,
         ]
       : []),
     ...sampleItems,

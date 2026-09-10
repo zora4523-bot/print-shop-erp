@@ -34,7 +34,7 @@ export function DesignImageGallery({
               href={image.fileUrl}
               target="_blank"
               rel="noreferrer"
-              className="block rounded outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="block rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               aria-label={`查看设计图：${image.fileName}`}
             >
               {/* OSS signed URLs use deployment-specific hosts. */}
@@ -42,7 +42,7 @@ export function DesignImageGallery({
               <img
                 src={image.fileUrl}
                 alt={image.fileName}
-                className="aspect-square w-full rounded object-cover"
+                className="aspect-square w-full rounded-md object-cover"
               />
             </a>
             <p

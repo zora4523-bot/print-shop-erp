@@ -6,11 +6,7 @@ import {
 import { MaterialForm } from '@/components/business/material/MaterialForm';
 import { StockTransactionForm } from '@/components/business/material/StockTransactionForm';
 import { ToggleMaterialActiveButton } from '@/components/business/material/ToggleMaterialActiveButton';
-import {
-  PageHeader,
-  StatusBadge,
-  TableEmptyState,
-} from '@/components/ui-business';
+import { PageHeader, StatusBadge, TableEmptyState, TableScrollArea } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getMaterialSummary,
@@ -101,12 +97,7 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">库位库存</h2>
-        <div
-          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="物料库位库存"
-          tabIndex={0}
-        >
+        <TableScrollArea label="物料库位库存">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
@@ -135,7 +126,7 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
               )}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">

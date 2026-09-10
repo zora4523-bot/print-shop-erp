@@ -31,3 +31,11 @@ export function formatMoneyPlain(value: Decimal.Value): string {
   const d = new Decimal(value);
   return FORMATTER.format(Number(d.toFixed(2)));
 }
+
+// 差额展示：正数带 `+`，负数带 `-`，零不带符号；符号在 `¥` 之前，
+// 例如 `+¥ 12.00` / `-¥ 12.00` / `¥ 0.00`。用于变更审批、收付款预览的前后差。
+export function formatMoneyDelta(value: Decimal.Value): string {
+  const d = new Decimal(value);
+  if (d.isZero()) return formatMoney(0);
+  return `${d.isNegative() ? '-' : '+'}${formatMoney(d.abs())}`;
+}

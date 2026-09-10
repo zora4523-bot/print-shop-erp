@@ -10,7 +10,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { StatusBadge } from '@/components/ui-business';
+import { StatusBadge, TableScrollArea } from '@/components/ui-business';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
@@ -22,7 +22,10 @@ import type {
   CustomerPriceRuleDraftAdminDto,
   CustomerPriceBookVersionAdminDto,
 } from '@/lib/price/customer-price-book-admin';
-import { formatDateTimeShanghai } from '@/lib/format/dates';
+import {
+  formatDateTimeLocalShanghai,
+  formatDateTimeShanghai,
+} from '@/lib/format/dates';
 import {
   externalPriceBusinessText,
   externalPriceRuleDisplayName,
@@ -39,6 +42,7 @@ import {
   customerPriceSectionForRule,
   type CustomerPriceSection,
 } from '@/lib/price/customer-price-section-membership';
+import { formatMoney } from '@/lib/dashboard/format';
 
 type ExternalSalesPriceBookVersionPanelProps = {
   versions: CustomerPriceBookVersionAdminDto[];
@@ -62,24 +66,8 @@ function formatShanghaiDateTime(value: string | null): string {
   return formatDateTimeShanghai(value ? new Date(value) : null, '长期');
 }
 
-const SHANGHAI_LOCAL_INPUT_FORMATTER = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
-
 function formatShanghaiDateTimeLocalInput(value: string): string {
-  const parts = Object.fromEntries(
-    SHANGHAI_LOCAL_INPUT_FORMATTER.formatToParts(new Date(value)).map((part) => [
-      part.type,
-      part.value,
-    ]),
-  );
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  return formatDateTimeLocalShanghai(new Date(value));
 }
 
 function PriceBookVersionStatusBadge({
@@ -337,7 +325,7 @@ function VersionHistory({
                 <h3 className="admin-wrap-anywhere text-sm font-semibold">
                   {lineage.name}
                 </h3>
-                <p className="admin-wrap-anywhere mt-0.5 text-[10px] text-muted-foreground">
+                <p className="admin-wrap-anywhere mt-0.5 text-xs text-muted-foreground">
                   最近变更：
                   {formatShanghaiDateTime(
                     lineage.versions[0]?.status === 'DRAFT'
@@ -401,11 +389,11 @@ function priceSummary(
     price.incrementAmount &&
     price.amount
   ) {
-    return `首重 ¥${price.amount} / ${price.includedUnits}kg · 续重 ¥${price.incrementAmount} / ${price.incrementUnits}kg${status}`;
+    return `首重 ${formatMoney(price.amount)} / ${price.includedUnits}kg · 续重 ${formatMoney(price.incrementAmount)} / ${price.incrementUnits}kg${status}`;
   }
   if (!price.amount) return `人工确认${status}`;
   const unit = calculationType ? CALCULATION_LABELS[calculationType] : '项';
-  return `¥${price.amount} / ${unit}${status}`;
+  return `${formatMoney(price.amount)} / ${unit}${status}`;
 }
 
 function deltaLabel(change: CustomerPriceBookDraftImpactChangeDto): string {
@@ -480,12 +468,7 @@ function DraftChanges({
             ))}
           </ul>
 
-          <div
-            role="region"
-            aria-label="草稿价格变更明细，可横向滚动"
-            tabIndex={0}
-            className="hidden overflow-x-auto focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 md:block"
-          >
+          <TableScrollArea label="草稿价格变更明细，可横向滚动" className="hidden md:block">
             <table className="w-full min-w-[52rem] text-sm" aria-label="草稿价格变更明细">
               <thead className="border-b bg-muted/20 text-xs text-muted-foreground">
                 <tr>
@@ -517,7 +500,7 @@ function DraftChanges({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScrollArea>
         </>
       )}
     </section>

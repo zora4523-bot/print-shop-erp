@@ -1,8 +1,6 @@
 import Link from 'next/link';
-import {
-  AdminRowActions,
-  AdminStatusBadge,
-} from '@/components/business/admin/AdminDataTable';
+import { AdminRowActions } from '@/components/business/admin/AdminDataTable';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import {
   Table,
   TableBody,
@@ -55,7 +53,7 @@ export function ProductCategoryNodesTable({
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1">
-                  <AdminStatusBadge active={node.isActive} />
+                  <ActiveStatusBadge active={node.isActive} />
                   {isRetiredProductCategory(node) ? (
                     <Badge variant="secondary">历史 / 已退役</Badge>
                   ) : null}

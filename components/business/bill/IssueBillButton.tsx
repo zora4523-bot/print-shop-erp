@@ -8,6 +8,7 @@ import {
 } from '@/components/ui-business';
 import { issueBillAction } from '@/actions/bill';
 import type { BillMutationResult } from '@/actions/bill.types';
+import { formatMoney } from '@/lib/dashboard/format';
 
 type IssueBillButtonProps = {
   billId: string;
@@ -49,7 +50,7 @@ export function IssueBillButton({
         }>
         <ConfirmActionDialog action={`确认发布 ${period} 账单？`} changes={[]} consequences={[
           `接收对象：${recipientLabel}`,
-          `当前应收：¥ ${totalAmount}，包含 ${orderCount} 张工单`,
+          `当前应收：${formatMoney(totalAmount)}，包含 ${orderCount} 张工单`,
           '发布后可以录入付款；达到应收总额时账单进入已结清终态。',
           '发布后本账单保持不变；同月迟到工单会归入新的补充账单。',
         ]} confirmText="确认发单" />

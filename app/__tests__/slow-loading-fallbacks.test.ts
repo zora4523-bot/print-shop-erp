@@ -9,18 +9,26 @@ function source(relativePath: string): string {
 }
 
 describe('custom loading fallback slow-loading contract', () => {
+  it('SectionLoading owns the polite live region and exactly one delayed hint', () => {
+    const shared = source('components/ui-business/SectionLoading.tsx');
+    expect(shared).toContain('aria-live="polite"');
+    expect(shared).toContain('正在加载{label}');
+    expect(shared.match(/<SlowLoadingHint \/>/g)).toHaveLength(1);
+  });
+
   it.each([
-    ['app/(worker)/worker/loading.tsx', '正在加载师傅工作台'],
+    ['app/(worker)/worker/loading.tsx', '师傅工作台'],
     [
       'components/business/rules/pricing/CustomerPricingLoading.tsx',
-      '正在加载客户计价规则',
+      '客户计价规则',
     ],
-  ])('%s has one delayed hint inside its polite live region', (path, label) => {
+  ])('%s delegates its live region and delayed hint to SectionLoading exactly once', (path, label) => {
     const loading = source(path);
 
-    expect(loading).toContain('aria-live="polite"');
-    expect(loading).toContain(label);
-    expect(loading.match(/<SlowLoadingHint \/>/g)).toHaveLength(1);
+    expect(loading.match(/<SectionLoading label=/g)).toHaveLength(1);
+    expect(loading).toContain(`label="${label}"`);
+    expect(loading).not.toContain('<SlowLoadingHint');
+    expect(loading).not.toContain('aria-live');
   });
 
   it('composes order skeletons without nested duplicate announcements', () => {
@@ -65,12 +73,11 @@ describe('custom loading fallback slow-loading contract', () => {
 
   it('keeps delayed loading feedback for dashboard and analytics sections', () => {
     const dashboard = source('components/business/dashboard/DashboardSectionLoading.tsx');
-    expect(dashboard).toContain('<SlowLoadingHint');
-    expect(dashboard).toContain('aria-live="polite"');
+    expect(dashboard).toContain('<SectionLoading');
     const attention = source('components/business/dashboard/OrderAttentionSection.tsx');
-    expect(attention).toContain('<SlowLoadingHint');
+    expect(attention).toContain('<SectionLoading');
     const analytics = source('components/business/dashboard/OwnerAnalytics.tsx');
-    expect(analytics).toContain('<SlowLoadingHint');
+    expect(analytics.match(/<SectionLoading label=/g)).toHaveLength(3);
   });
 
 });

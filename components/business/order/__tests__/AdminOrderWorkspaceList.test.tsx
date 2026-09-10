@@ -132,10 +132,12 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).not.toContain('局部烫金');
     expect(html).toContain('2 款 · 2,000');
     expect(html).toContain('烫金');
-    expect(html).toContain('1,200 / 2,000');
+    expect(html).toContain('烫 1,200');
+    expect(html).toContain('aria-valuetext="已完成 1,200，工单总量 2,000"');
     expect(html).toContain('打包');
-    expect(html).toContain('800 / 2,000');
-    expect(html).toContain('¥1,234.50');
+    expect(html).toContain('包 800');
+    expect(html).toContain('aria-valuetext="已完成 800，工单总量 2,000"');
+    expect(html).toContain('¥ 1,234.50');
     expect(html).toContain('确认');
     expect(html).toContain('分页');
     expect(html).toContain('选择本页');

@@ -119,13 +119,19 @@ export async function expectViewportGate(page: Page, testInfo: TestInfo) {
     const sharedCheckboxes = [
       ...document.querySelectorAll<HTMLElement>('[data-slot="checkbox"]'),
     ].filter(isVisible);
+    const compactOrderDesktop = window.matchMedia(
+      '(min-width: 921px) and (hover: hover) and (pointer: fine)',
+    ).matches;
     for (const checkbox of sharedCheckboxes) {
       const targetRect = checkbox.getBoundingClientRect();
       const indicator = checkbox.querySelector<HTMLElement>(
         '[data-slot="checkbox-indicator"]',
       );
       const indicatorRect = indicator?.getBoundingClientRect();
-      if (targetRect.width < 44 || targetRect.height < 44) {
+      const minimumTarget = compactOrderDesktop && checkbox.closest('[data-order-density="compact"]')
+        ? 24
+        : 44;
+      if (targetRect.width < minimumTarget || targetRect.height < minimumTarget) {
         issues.push(
           `checkbox-target:${describe(checkbox)}:${targetRect.width.toFixed(1)}x${targetRect.height.toFixed(1)}`,
         );

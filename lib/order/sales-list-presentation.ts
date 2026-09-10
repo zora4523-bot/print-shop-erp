@@ -1,44 +1,51 @@
-import { OrderPricingStatus, OrderStatus } from '../../generated/prisma/enums';
+import { OrderStatus } from '../../generated/prisma/enums';
 import type { SalesOrderListRow } from './sales-list-query';
+import {
+  orderAmountPresentation,
+  type OrderAmountPresentation,
+} from './amount-presentation';
+import type { StatusDefinition, StatusRegistry } from '../ui/status-registry';
 
-export type SalesOrderStatusPresentation = {
-  label: string;
-  tone: 'muted' | 'outline' | 'production' | 'shipped' | 'attention';
+/**
+ * 销售视角的工单词表：内部 11 态压成销售能对客户复述的进度词——
+ * SCHEDULING / IN_PRODUCTION / COMPLETED 一律「生产中」，所以这张表
+ * 不能与 ORDER_STATUS_REGISTRY 合并（管理端那三态是 排产中 / 生产中 /
+ * 已完工，且带「（历史）」标记）。label 与管理端有意不同；tone 用共享
+ * 六档（lib/ui/status-registry.ts 的 StatusTone），不再自带第二套色板。
+ *
+ * tone 取值原则：销售 label 与管理端 label 相同的状态，tone 跟随
+ * ORDER_STATUS_REGISTRY；唯一例外是 COMPLETED——销售看到的是「生产中」，
+ * success 会把「已完工」提前承诺给客户，故与 SCHEDULING / IN_PRODUCTION
+ * 一起留在 info。
+ */
+const SALES_ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
+  [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
+  [OrderStatus.PENDING_FACTORY]: { label: '待处理', tone: 'info' },
+  [OrderStatus.REJECTED]: { label: '已驳回', tone: 'danger' },
+  [OrderStatus.CONFIRMED]: { label: '待下发生产', tone: 'success' },
+  [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'warning', dot: true },
+  [OrderStatus.RELEASED]: { label: '已下发', tone: 'info', dot: true },
+  [OrderStatus.FOILING]: { label: '烫金中', tone: 'info', dot: true },
+  [OrderStatus.PACKING]: { label: '打包中', tone: 'info', dot: true },
+  [OrderStatus.SETTLED]: { label: '已结算', tone: 'success' },
+  [OrderStatus.SUBMITTED]: { label: '待处理', tone: 'info' },
+  [OrderStatus.SCHEDULING]: { label: '生产中', tone: 'info', dot: true },
+  [OrderStatus.IN_PRODUCTION]: { label: '生产中', tone: 'info', dot: true },
+  [OrderStatus.COMPLETED]: { label: '生产中', tone: 'info', dot: true },
+  [OrderStatus.SHIPPED]: { label: '已发货', tone: 'success' },
+  [OrderStatus.FINISHED]: { label: '已完成', tone: 'neutral' },
+  [OrderStatus.CANCELLED]: { label: '已取消', tone: 'danger' },
 };
 
-const STATUS_PRESENTATION: Record<
-  OrderStatus,
-  SalesOrderStatusPresentation
-> = {
-  [OrderStatus.DRAFT]: { label: '草稿', tone: 'muted' },
-  [OrderStatus.PENDING_FACTORY]: { label: '待处理', tone: 'outline' },
-  [OrderStatus.REJECTED]: { label: '已驳回', tone: 'attention' },
-  [OrderStatus.CONFIRMED]: { label: '待下发生产', tone: 'outline' },
-  [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'attention' },
-  [OrderStatus.RELEASED]: { label: '已下发', tone: 'production' },
-  [OrderStatus.FOILING]: { label: '烫金中', tone: 'production' },
-  [OrderStatus.PACKING]: { label: '打包中', tone: 'production' },
-  [OrderStatus.SETTLED]: { label: '已结算', tone: 'muted' },
-  [OrderStatus.SUBMITTED]: { label: '待处理', tone: 'outline' },
-  [OrderStatus.SCHEDULING]: { label: '生产中', tone: 'production' },
-  [OrderStatus.IN_PRODUCTION]: { label: '生产中', tone: 'production' },
-  [OrderStatus.COMPLETED]: { label: '生产中', tone: 'production' },
-  [OrderStatus.SHIPPED]: { label: '已发货', tone: 'shipped' },
-  [OrderStatus.FINISHED]: { label: '已完成', tone: 'muted' },
-  [OrderStatus.CANCELLED]: { label: '已取消', tone: 'muted' },
-};
+export type SalesOrderStatusPresentation = StatusDefinition;
 
 export function salesOrderStatusPresentation(
   status: OrderStatus,
 ): SalesOrderStatusPresentation {
-  return STATUS_PRESENTATION[status];
+  return SALES_ORDER_STATUS_REGISTRY[status];
 }
 
-export type SalesOrderAmountPresentation = {
-  label: string;
-  estimated: boolean;
-  pending: boolean;
-};
+export type SalesOrderAmountPresentation = OrderAmountPresentation;
 
 export function salesOrderAmountPresentation(
   order: Pick<
@@ -49,20 +56,12 @@ export function salesOrderAmountPresentation(
   if (order.status === OrderStatus.DRAFT) {
     return { label: '—', estimated: false, pending: false };
   }
-  if (
-    order.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION
-  ) {
-    return {
-      label: '待管理员确认价格',
-      estimated: false,
-      pending: true,
-    };
-  }
-  return {
-    label: `¥${formatMoney(order.totalAmount)}`,
+  return orderAmountPresentation({
+    status: order.status,
+    pricingStatus: order.pricingStatus,
+    amount: order.totalAmount,
     estimated: order.feeLines.some((line) => line.estimated),
-    pending: false,
-  };
+  });
 }
 
 export function salesOrderPrimaryAction(
@@ -93,13 +92,4 @@ export function formatSalesOrderUpdatedAt(
     month: '2-digit',
     day: '2-digit',
   }).format(new Date(updated))} 更新`;
-}
-
-export function formatMoney(value: string): string {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return value;
-  return number.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 }

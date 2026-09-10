@@ -12,6 +12,7 @@ import type {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { formatMoney } from '@/lib/dashboard/format';
 
 export function OperationReportForm({
   operationId,
@@ -41,7 +42,7 @@ export function OperationReportForm({
       explanation="工单件数进度单独用于烫金/打包进度；计件数量仍按工价单位计薪，两者不互相换算。"
       successMessage={
         state?.status === 'success'
-          ? `已记录本次报工，计件金额 ¥ ${state.amount}`
+          ? `已记录本次报工，计件金额 ${formatMoney(state.amount)}`
           : null
       }
     />

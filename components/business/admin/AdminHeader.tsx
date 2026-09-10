@@ -1,64 +1,49 @@
-import Link from 'next/link';
 import { SidebarTrigger } from '@/components/ui/sidebar';
-import { Badge } from '@/components/ui/badge';
 import { AdminBreadcrumb } from './AdminBreadcrumb';
 import { UserMenu } from './UserMenu';
 import { ThemeToggle } from './ThemeToggle';
-import type { AdminMenuItem } from '@/lib/navigation/admin-menu';
 
-// Admin shell 顶栏——sidebar 触发器 + breadcrumb（移动端隐藏、占空间）+
-// 右侧 UserMenu。Server Component，从 (admin)/layout.tsx 接收 user 数据。
-//
-// 之前 (admin)/layout.tsx 是 inline 写的 header（55-69 行）；抽出来便于：
-//   - 后续加 NotificationBell / 全局搜索 / 帮助按钮等模块化扩展
-//   - 主题/品牌色 token 化后只改这里一处
-//
-// 设计：sticky top-0，背景 card 而不是 background，与 sidebar 形成层次感。
-// 保持不透明，避免滚动后底层急单/选中色混入并降低面包屑对比度。
+// 顶栏只承载当前位置与全局操作；页面入口统一在侧边栏，避免重复导航。
+// 保持不透明与原有高度，滚动后文字对比度和页内 sticky 偏移不变。
 
 export type AdminHeaderProps = {
   displayName: string;
   roleLabel: string;
   environmentLabel: string;
-  quickLinks: AdminMenuItem[];
 };
 
 export function AdminHeader({
   displayName,
   roleLabel,
   environmentLabel,
-  quickLinks,
 }: AdminHeaderProps) {
+  const environment = environmentLabel.trim().toLowerCase();
+  const environmentText =
+    environment === 'production' || environment === 'prod'
+      ? null
+      : environment === 'development' || environment === 'dev'
+        ? '开发环境'
+        : environment === 'test'
+          ? '测试环境'
+          : '预览环境';
+
   return (
     <header
       data-slot="admin-header"
       className="admin-safe-inline admin-safe-top sticky top-0 z-10 flex min-h-14 min-w-0 items-center gap-2 border-b bg-card py-1 sm:gap-3"
     >
-      <SidebarTrigger className="size-11 shrink-0" />
+      <SidebarTrigger className="size-11 shrink-0 rounded-lg" />
       <div className="min-w-0 flex-1">
         <AdminBreadcrumb />
       </div>
-      <nav
-        aria-label="快捷导航"
-        className="hidden items-center gap-1 xl:flex"
-      >
-        {quickLinks.slice(0, 4).map((item) => (
-          <Link
-            key={`${item.label}-${item.href}`}
-            href={item.href}
-            prefetch={false}
-            className="inline-flex min-h-11 items-center rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
-      <Badge
-        variant="outline"
-        className="hidden rounded-md font-mono uppercase text-muted-foreground xl:inline-flex"
-      >
-        {environmentLabel}
-      </Badge>
+      {environmentText ? (
+        <span
+          data-slot="admin-environment"
+          className="hidden shrink-0 text-xs text-muted-foreground sm:inline"
+        >
+          {environmentText}
+        </span>
+      ) : null}
       <ThemeToggle />
       <UserMenu displayName={displayName} roleLabel={roleLabel} />
     </header>

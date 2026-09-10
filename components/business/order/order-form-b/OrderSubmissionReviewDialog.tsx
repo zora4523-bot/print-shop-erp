@@ -86,7 +86,7 @@ function ReviewWarning({ children }: { children: ReactNode }) {
     <p className="mt-2 flex items-start gap-1.5 text-xs font-semibold leading-relaxed text-destructive">
       <span
         aria-hidden="true"
-        className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full bg-destructive text-[9px] text-background"
+        className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full bg-destructive text-xs text-background"
       >
         ?
       </span>
@@ -127,7 +127,7 @@ export function OrderSubmissionReviewContent({
       )}
     >
       <header className="shrink-0 border-b px-5 pb-4 pt-5 sm:px-6">
-        <p className="text-[0.6875rem] font-semibold tracking-[0.2em] text-muted-foreground">
+        <p className="text-xs font-semibold tracking-[0.2em] text-muted-foreground">
           提交前复核
         </p>
         <h2
@@ -150,7 +150,7 @@ export function OrderSubmissionReviewContent({
             >
               <h3
                 id={`${headingId}-${item.id}`}
-                className="mb-3 border-b pb-2 text-[0.6875rem] font-semibold tracking-[0.18em] text-muted-foreground"
+                className="mb-3 border-b pb-2 text-xs font-semibold tracking-[0.18em] text-muted-foreground"
               >
                 {multiItem
                   ? `第 ${item.number} 款 / 共 ${items.length} 款`
@@ -161,7 +161,7 @@ export function OrderSubmissionReviewContent({
                 <div
                   className="rounded-xl border-2 border-foreground p-3.5"
                 >
-                  <p className="text-[0.65625rem] font-bold tracking-[0.18em] text-muted-foreground">
+                  <p className="text-xs font-bold tracking-[0.18em] text-muted-foreground">
                     数量
                   </p>
                   <p className="mt-1 text-3xl font-bold leading-none tracking-tight">
@@ -192,7 +192,7 @@ export function OrderSubmissionReviewContent({
                       'border-destructive bg-destructive/5',
                   )}
                 >
-                  <p className="text-[0.65625rem] font-bold tracking-[0.18em] text-muted-foreground">
+                  <p className="text-xs font-bold tracking-[0.18em] text-muted-foreground">
                     规格
                   </p>
                   <p className="mt-1 text-3xl font-bold leading-none tracking-tight">
@@ -238,7 +238,7 @@ export function OrderSubmissionReviewContent({
                 </span>
                 <div
                   className={cn(
-                    'flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md text-[0.5625rem] font-bold',
+                    'flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md text-xs font-bold',
                     item.artwork.missing
                       ? 'bg-muted text-destructive'
                       : 'bg-primary text-primary-foreground',
@@ -294,7 +294,7 @@ export function OrderSubmissionReviewContent({
         <section aria-labelledby={`${headingId}-shipping`} className="mt-6">
           <h3
             id={`${headingId}-shipping`}
-            className="mb-3 border-b pb-2 text-[0.6875rem] font-semibold tracking-[0.18em] text-muted-foreground"
+            className="mb-3 border-b pb-2 text-xs font-semibold tracking-[0.18em] text-muted-foreground"
           >
             收货与快递
           </h3>

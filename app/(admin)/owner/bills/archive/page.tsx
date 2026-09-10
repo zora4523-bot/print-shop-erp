@@ -1,21 +1,14 @@
 import Link from 'next/link';
 import { Archive } from 'lucide-react';
-import { BillStatus } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBills } from '@/lib/bill';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { buttonVariants } from '@/components/ui/button';
-import { EmptyState, PageHeader, StatusBadge, TableScrollArea } from '@/components/ui-business';
+import { EmptyState, PageHeader, TableScrollArea } from '@/components/ui-business';
+import { BillStatusBadge } from '@/components/business/bill/BillStatusBadge';
 
 export const metadata = { title: 'Legacy 账单只读归档' };
-
-const STATUS_LABELS: Record<BillStatus, string> = {
-  DRAFT: '草稿',
-  ISSUED: '已发单',
-  PARTIAL_PAID: '部分收款',
-  FULLY_PAID: '已结清',
-};
 
 export default async function LegacyBillArchivePage() {
   await requirePermission('bill:view:all');
@@ -55,12 +48,7 @@ export default async function LegacyBillArchivePage() {
                   <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(bill.totalAmount)}</td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(bill.paidAmount)}</td>
                   <td className="px-4 py-3 text-center">
-                    <StatusBadge
-                      tone={bill.status === BillStatus.FULLY_PAID ? 'success' : 'neutral'}
-                      dot
-                    >
-                      {STATUS_LABELS[bill.status]}
-                    </StatusBadge>
+                    <BillStatusBadge status={bill.status} />
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTimeShanghai(bill.issuedAt)}</td>
                   <td className="px-4 py-3 text-right">

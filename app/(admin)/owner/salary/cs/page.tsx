@@ -6,7 +6,7 @@ import { SalaryPeriodStatus } from '@/generated/prisma/enums';
 import { buttonVariants } from '@/components/ui/button';
 import { SettleReadyCsButton } from '@/components/business/salary/SettleReadyCsButton';
 import { SalaryPeriodStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
-import { EmptyState, PageHeader } from '@/components/ui-business';
+import { EmptyState, PageHeader, TableScrollArea } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 
@@ -108,12 +108,7 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
           description="点击右上角&ldquo;新建周期&rdquo;为客服开启首个业绩周期。"
         />
       ) : (
-        <div
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="客服提成周期列表"
-          tabIndex={0}
-        >
+        <TableScrollArea label="客服提成周期列表" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full min-w-[900px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -159,7 +154,7 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </div>
   );

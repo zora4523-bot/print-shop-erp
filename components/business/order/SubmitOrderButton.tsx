@@ -1,16 +1,10 @@
 'use client';
 
 import { useActionState } from 'react';
+import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
 import { submitOrderAction } from '@/actions/order';
 import type { SubmitOrderMutationResult } from '@/actions/order.types';
-
-function money(value: string): string {
-  return `¥${Number(value).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
 
 export function SubmitOrderButton({ orderId }: { orderId: string }) {
   const [state, formAction, pending] = useActionState<
@@ -47,7 +41,7 @@ export function SubmitOrderButton({ orderId }: { orderId: string }) {
             {state.quotedFeeCompleteness === 'EXCLUDES_MANUAL_ITEMS'
               ? '已知合计（不含待核价款）'
               : '最新合计'}
-            ：{money(state.quotedFee)}
+            ：{formatMoney(state.quotedFee)}
           </p>
         </div>
       ) : null}

@@ -73,7 +73,7 @@ describe('admin navigation prefetch policy', () => {
     expect(sidebar).toContain('<SidebarLinkPendingIndicator />');
   });
 
-  it('does not eagerly prefetch header and breadcrumb navigation', () => {
+  it('keeps header route navigation in the non-prefetching breadcrumb', () => {
     const header = readFileSync(
       path.join(ROOT, 'components/business/admin/AdminHeader.tsx'),
       'utf8',
@@ -83,7 +83,8 @@ describe('admin navigation prefetch policy', () => {
       'utf8',
     );
 
-    expect(header).toContain('prefetch={false}');
+    expect(header).not.toContain('aria-label="快捷导航"');
+    expect(header).toContain('<AdminBreadcrumb />');
     expect(breadcrumb).toContain('prefetch={false}');
     expect(breadcrumb).toContain('export const BREADCRUMB_PATH_LABELS');
     expect(breadcrumb).toContain('RULE_CENTER_SIDEBAR_ITEMS');

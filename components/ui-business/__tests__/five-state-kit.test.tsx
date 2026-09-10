@@ -36,9 +36,9 @@ describe('EmptyState kind contract', () => {
     const filtered = renderToStaticMarkup(
       <EmptyState kind="no-result" noun="工单" />,
     );
-    expect(none).toContain('还没有工单');
+    expect(none).toContain('暂无工单');
     expect(none).toContain('工单创建后会出现在这里');
-    expect(filtered).toContain('没有符合条件的工单');
+    expect(filtered).toContain('没有匹配的工单');
     expect(filtered).toContain('试试放宽条件');
   });
 });

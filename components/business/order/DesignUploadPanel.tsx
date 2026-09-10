@@ -288,7 +288,7 @@ export function DesignUploadPanel({
                     key={design.id}
                     className="flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-xs"
                   >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted font-mono text-[10px]">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted font-mono text-xs">
                       CDR
                     </span>
                     <span

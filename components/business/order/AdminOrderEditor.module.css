@@ -17,18 +17,3 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
   gap: 8px 12px;
 }
-
-.reviewSheet {
-  width: min(620px, 100%);
-  max-height: 90dvh;
-  margin-inline: auto;
-  gap: 0;
-  border-radius: 20px 20px 0 0;
-}
-
-.reviewBody {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 0 20px 16px;
-}

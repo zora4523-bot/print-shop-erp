@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import {
   OrderChangeRequestStatus,
-  OrderPricingStatus,
   OrderSettlementType,
   OrderStatus,
 } from '@/generated/prisma/enums';
@@ -12,7 +11,7 @@ import {
   editableFieldsetForStatus,
   isOrderEditable,
 } from '@/lib/order/editable-fields';
-import { salesOrderStatusPresentation } from '@/lib/order/sales-list-presentation';
+import { orderAmountPresentation } from '@/lib/order/amount-presentation';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
@@ -31,7 +30,9 @@ import { OrderCancellationRequestForm } from './OrderCancellationRequestForm';
 import { OrderChangeWithdrawButton } from './OrderChangeWithdrawButton';
 import { PromisedDateBadge } from './PromisedDateBadge';
 import { SfCollectToggleForm } from './SfCollectToggleForm';
+import { SalesOrderStatusBadge } from './SalesOrderStatusBadge';
 import { ShipmentStatusBadge } from './ShipmentStatusBadge';
+import { UrgentBadge } from './UrgentBadge';
 import { SubmitOrderButton } from './SubmitOrderButton';
 import { UrgentToggleForm } from './UrgentToggleForm';
 
@@ -98,7 +99,6 @@ export function SalesOrderDetailView({
   catalogProducts: OrderChangeCatalogProduct[];
   order: SalesOrderDetail;
 }) {
-  const status = salesOrderStatusPresentation(order.status);
   const pendingChangeRequest = order.changeRequests.find(
     (request) => request.status === OrderChangeRequestStatus.PENDING,
   );
@@ -132,9 +132,9 @@ export function SalesOrderDetailView({
               <h1 className="admin-wrap-anywhere min-w-0 font-sans text-xl font-semibold tabular-nums">
                 {order.customName?.trim() || '未命名工单'}
               </h1>
-              <SalesDetailStatusBadge label={status.label} tone={status.tone} />
+              <SalesOrderStatusBadge status={order.status} />
               {order.isUrgent ? (
-                <Badge variant="destructive">急单</Badge>
+                <UrgentBadge />
               ) : null}
               {order.isSfCollect ? (
                 <Badge variant="outline">顺丰到付</Badge>
@@ -432,20 +432,26 @@ export function SalesOrderDetailView({
 }
 
 function SalesOrderFeesSection({ order }: { order: SalesOrderDetail }) {
-  const pricingPending = order.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
-  const totalEstimated = !pricingPending && order.feeLines.some((line) => line.estimated);
+  const total = orderAmountPresentation({
+    status: order.status,
+    pricingStatus: order.pricingStatus,
+    amount: order.totalAmount,
+    estimated: order.feeLines.some((line) => line.estimated),
+  });
+  const pricingPending = total.pending;
+  const totalEstimated = total.estimated;
   const hasPendingAmount = order.feeLines.some((line) => line.amount === null);
   return (
     <section
       className={cn(
         'space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6',
-        pricingPending && 'border-destructive/40 bg-destructive/5',
+        pricingPending && 'border-primary/40 bg-primary/5',
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold">费用</h2>
         {pricingPending ? (
-          <Badge variant="destructive">待管理员确认价格</Badge>
+          <UiStatusBadge tone="primary">{total.label}</UiStatusBadge>
         ) : null}
       </div>
       {order.feeLines.length > 0 ? (
@@ -461,7 +467,7 @@ function SalesOrderFeesSection({ order }: { order: SalesOrderDetail }) {
               <dd className="shrink-0 font-sans font-medium tabular-nums">
                 {line.amount === null ? '待定' : formatMoney(line.amount)}
                 {line.estimated ? (
-                  <span className="ml-1 text-[10px] text-muted-foreground">
+                  <span className="ml-1 text-xs text-muted-foreground">
                     估
                   </span>
                 ) : null}
@@ -481,14 +487,12 @@ function SalesOrderFeesSection({ order }: { order: SalesOrderDetail }) {
         <strong
           className={cn(
             'font-sans text-xl tabular-nums',
-            pricingPending && 'text-sm text-destructive',
+            pricingPending && 'text-sm text-primary',
           )}
         >
-          {pricingPending
-            ? '待管理员确认价格'
-            : formatMoney(order.totalAmount)}
+          {total.label}
           {totalEstimated ? (
-            <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+            <span className="ml-1 text-xs font-normal text-muted-foreground">
               估
             </span>
           ) : null}
@@ -517,31 +521,5 @@ function SalesDetailRow({
         {trailing}
       </dd>
     </div>
-  );
-}
-
-function SalesDetailStatusBadge({
-  label,
-  tone,
-}: {
-  label: string;
-  tone: ReturnType<typeof salesOrderStatusPresentation>['tone'];
-}) {
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        tone === 'muted' && 'border-muted bg-muted text-muted-foreground',
-        tone === 'outline' && 'border-foreground/70',
-        tone === 'production' &&
-          'border-foreground bg-foreground text-background',
-        tone === 'shipped' &&
-          'border-success/40 bg-success/10 text-success-foreground',
-        tone === 'attention' &&
-          'border-destructive/40 bg-destructive/10 text-destructive',
-      )}
-    >
-      {label}
-    </Badge>
   );
 }

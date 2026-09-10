@@ -14,6 +14,7 @@ import { OrderStatus } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
+import { useCopyToClipboard } from '@/components/ui-business';
 
 export type OrderListSelectionItem = {
   id: string;
@@ -179,11 +180,12 @@ export function OrderListBatchBar({
   ) => ReactNode;
 }) {
   const selectionKey = selectedItems.map((item) => item.id).join(':');
-  const [feedback, setFeedback] = useState<
-    (OrderListBatchFeedbackState & { selectionKey: string }) | null
-  >(null);
+  const { feedback, copy } = useCopyToClipboard();
+  // 回执只属于复制时的那批工单：选择集一变，下面的比较自然把它隐藏，
+  // 不需要额外清理——换一批再看「已复制 2 个工单号」才是误导。
+  const [feedbackSelectionKey, setFeedbackSelectionKey] = useState<string | null>(null);
   const visibleFeedback =
-    feedback?.selectionKey === selectionKey ? feedback : null;
+    feedback && feedbackSelectionKey === selectionKey ? feedback : null;
   const batchBarRef = useRef<HTMLElement>(null);
   const [batchBarHeight, setBatchBarHeight] = useState<number | null>(null);
 
@@ -214,23 +216,12 @@ export function OrderListBatchBar({
   if (selectedItems.length === 0) return null;
 
   async function copyOrderNumbers() {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
-      await navigator.clipboard.writeText(
-        selectedItems.map((item) => item.orderNo).join('\n'),
-      );
-      setFeedback({
-        selectionKey,
-        tone: 'success',
-        message: `已复制 ${selectedItems.length} 个工单号`,
-      });
-    } catch {
-      setFeedback({
-        selectionKey,
-        tone: 'error',
-        message: '复制失败，请检查浏览器的剪贴板权限后重试',
-      });
-    }
+    setFeedbackSelectionKey(selectionKey);
+    await copy(
+      selectedItems.map((item) => item.orderNo).join('\n'),
+      '工单号',
+      { count: selectedItems.length },
+    );
   }
 
   return (
@@ -239,7 +230,7 @@ export function OrderListBatchBar({
         <div
           data-slot="order-list-batch-placeholder"
           aria-hidden="true"
-          className="pointer-events-none pb-[calc(1rem_+_env(safe-area-inset-bottom,0px))]"
+          className="pointer-events-none admin-safe-bottom"
         >
           <div
             data-slot="order-list-batch-placeholder-height"

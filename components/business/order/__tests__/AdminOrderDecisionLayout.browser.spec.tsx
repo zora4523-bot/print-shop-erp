@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 async function openDecision() {
-  flushSync(() => root.render(<section data-order-decision="" className={`${styles.decision} mx-auto max-w-lg`}><AdminOrderDecisionPanel order={orderFixture()} compact /></section>));
+  flushSync(() => root.render(<section data-order-decision="" data-emphasis="inverse" className={`${styles.decision} mx-auto max-w-lg`}><AdminOrderDecisionPanel order={orderFixture()} compact /></section>));
   await expect.element(page.getByRole('button', { name: '刷新最新计价预览', exact: true })).toBeVisible();
 }
 
@@ -130,8 +130,13 @@ describe('admin order detail decision layout', () => {
     await expect.element(approve).toBeEnabled();
     await expect.element(reject).toBeEnabled();
     expect(reject.element().getBoundingClientRect().right).toBeLessThan(approve.element().getBoundingClientRect().left);
-    expect(getComputedStyle(reject.element()).backgroundColor).toBe(getComputedStyle(reject.element()).getPropertyValue('--primary').trim());
-    expect(getComputedStyle(approve.element()).backgroundColor).toBe(getComputedStyle(approve.element()).getPropertyValue('--foreground').trim());
+    // 强调层由 Button 的 `in-data-[emphasis=inverse]` 声明，不再反转 `--primary`：
+    // 拒绝是真·品牌红，批准是深色，两者必须彼此不同。
+    const rejectBackground = getComputedStyle(reject.element()).backgroundColor;
+    const approveBackground = getComputedStyle(approve.element()).backgroundColor;
+    expect(rejectBackground).toBe(getComputedStyle(reject.element()).getPropertyValue('--primary').trim());
+    expect(approveBackground).toBe(getComputedStyle(approve.element()).getPropertyValue('--foreground').trim());
+    expect(rejectBackground).not.toBe(approveBackground);
     expect(await commands.checkShellAccessibility('[data-order-decision]')).toEqual([]);
   });
 

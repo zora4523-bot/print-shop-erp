@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { recordOutsourcePaymentAction } from '@/actions/outsource';
 import type { OutsourcePaymentMutationResult } from '@/actions/outsource.types';
+import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeLocalShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -48,10 +49,10 @@ export function outsourcePaymentImpactItems(
   const settlement =
     Number.isFinite(after) && Math.abs(after) < 0.005
       ? '本次付款后该外协单将全部结清。'
-      : `本次付款后预计仍有 ¥ ${after.toFixed(2)} 未付。`;
+      : `本次付款后预计仍有 ${formatMoney(after)} 未付。`;
 
   return [
-    `本次付款：¥ ${amount.toFixed(2)}`,
+    `本次付款：${formatMoney(amount)}`,
     `付款时间：${preview.paidAt.replace('T', ' ')}`,
     `付款方式：${preview.method || '未填写'}`,
     `付款流水号：${preview.reference || '未填写'}`,
@@ -266,7 +267,7 @@ export function OutsourcePaymentForm({
         <ActionNotice
           tone="success"
           title="外协付款流水已记入"
-          description={`已付 ¥ ${visibleState.newPaidAmount} / ¥ ${visibleState.totalAmount} · ${visibleState.isFullyPaid ? '已结清' : `未付 ¥ ${visibleState.remainingAmount}`}`}
+          description={`已付 ${formatMoney(visibleState.newPaidAmount)} / ${formatMoney(visibleState.totalAmount)} · ${visibleState.isFullyPaid ? '已结清' : `未付 ${formatMoney(visibleState.remainingAmount)}`}`}
         />
       ) : null}
       {visibleState?.status === 'error' ? (

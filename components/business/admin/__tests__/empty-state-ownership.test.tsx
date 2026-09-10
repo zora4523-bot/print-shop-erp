@@ -35,6 +35,6 @@ describe('list empty-state ownership', () => {
     const html = renderToStaticMarkup(<AccountsTable accounts={[]} />);
     expect(html.match(/data-slot="empty-state"/g)).toHaveLength(1);
     expect(html).toContain('data-kind="no-data"');
-    expect(html).toContain('还没有账号');
+    expect(html).toContain('暂无账号');
   });
 });

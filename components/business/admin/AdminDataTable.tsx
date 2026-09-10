@@ -5,7 +5,6 @@ import {
   ArrowUpDown,
   Search,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -153,6 +152,7 @@ export function AdminPagination({
   total,
   pageSize,
   queryParams,
+  pageParam = 'page',
 }: {
   basePath: string;
   page: number;
@@ -160,9 +160,11 @@ export function AdminPagination({
   total: number;
   pageSize: number;
   queryParams: TableHrefParams;
+  /** 同页多张表时用于区分的分页参数名，默认 `page`。 */
+  pageParam?: string;
 }) {
-  const prevHref = buildTableHref(basePath, queryParams, { page: page - 1 });
-  const nextHref = buildTableHref(basePath, queryParams, { page: page + 1 });
+  const prevHref = buildTableHref(basePath, queryParams, { [pageParam]: page - 1 });
+  const nextHref = buildTableHref(basePath, queryParams, { [pageParam]: page + 1 });
 
   return (
     <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
@@ -210,22 +212,6 @@ export function AdminPagination({
         )}
       </div>
     </div>
-  );
-}
-
-export function AdminStatusBadge({
-  active,
-  activeLabel = '启用',
-  inactiveLabel = '停用',
-}: {
-  active: boolean;
-  activeLabel?: string;
-  inactiveLabel?: string;
-}) {
-  return active ? (
-    <Badge variant="outline">{activeLabel}</Badge>
-  ) : (
-    <Badge variant="secondary">{inactiveLabel}</Badge>
   );
 }
 

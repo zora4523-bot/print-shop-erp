@@ -28,6 +28,7 @@ import {
   WORKER_TYPE_LABELS,
   MACHINE_TYPE_LABELS,
 } from '@/lib/auth/role-labels';
+import { formatDateInputShanghai } from '@/lib/format/dates';
 
 type EditInitial = {
   username: string;
@@ -327,8 +328,8 @@ export function AccountForm(props: Props) {
             error={errs.employmentStartDate?.[0]}
             defaultValue={
               initial?.employmentStartDate
-                ? initial.employmentStartDate.toISOString().slice(0, 10)
-                : new Date().toISOString().slice(0, 10)
+                ? formatDateInputShanghai(initial.employmentStartDate)
+                : formatDateInputShanghai(new Date())
             }
           />
           <TextField
@@ -339,7 +340,7 @@ export function AccountForm(props: Props) {
             error={errs.employmentEndDate?.[0]}
             defaultValue={
               initial?.employmentEndDate
-                ? initial.employmentEndDate.toISOString().slice(0, 10)
+                ? formatDateInputShanghai(initial.employmentEndDate)
                 : ''
             }
           />

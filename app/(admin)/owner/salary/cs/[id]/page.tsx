@@ -24,7 +24,8 @@ import { getCsPeriodTitleRef } from '@/lib/page-title/refs';
 import { csPeriodTitle } from '@/lib/page-title/titles';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
-import { formatMoney } from '@/lib/dashboard/format';
+import { formatMoney, formatMoneyDelta } from '@/lib/dashboard/format';
+import { TableScrollArea } from '@/components/ui-business';
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -152,8 +153,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
                     : ''}
                 </span>
                 <span className="font-sans font-medium tabular-nums">
-                  {new Decimal(entry.amount).isPositive() ? '+' : ''}¥{' '}
-                  {String(entry.amount)}
+                  {formatMoneyDelta(entry.amount)}
                 </span>
               </li>
             ))}
@@ -194,22 +194,22 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
           </p>
         </div>
         <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-          <Row label="已发底薪" value={`¥ ${paidBase.toFixed(2)}`} tabular />
+          <Row label="已发底薪" value={formatMoney(paidBase)} tabular />
           <Row
             label="剩余底薪"
-            value={`¥ ${remainingBase.toFixed(2)}`}
+            value={formatMoney(remainingBase)}
             tabular
           />
           <Row
             label="已发提成"
-            value={`¥ ${paidCommission.toFixed(2)}`}
+            value={formatMoney(paidCommission)}
             tabular
           />
           <Row
             label="剩余提成"
             value={
               commission
-                ? `¥ ${remainingCommission.toFixed(2)}`
+                ? formatMoney(remainingCommission)
                 : '待周期结算'
             }
             tabular
@@ -238,7 +238,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
           </h3>
           {period.payrollPayments.length === 0 ? (
             <p className="px-4 py-4 text-sm text-muted-foreground">
-              暂无工资发放流水。
+              暂无工资发放流水
             </p>
           ) : (
             <ol className="divide-y text-sm">
@@ -251,8 +251,8 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
                     {formatDateTimeShanghai(payment.paidAt)}
                   </span>
                   <span className="admin-wrap-anywhere text-muted-foreground">
-                    底薪 {formatMoney(payment.baseAmount)} · 提成 ¥{' '}
-                    {String(payment.commissionAmount)}
+                    底薪 {formatMoney(payment.baseAmount)} · 提成{' '}
+                    {formatMoney(payment.commissionAmount)}
                     {payment.paymentMethod ? ` · ${payment.paymentMethod}` : ''}
                     {payment.referenceNo ? ` · 流水号 ${payment.referenceNo}` : ''}
                     {payment.remark ? ` · ${payment.remark}` : ''}
@@ -268,12 +268,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
       </section>
 
       {period.commissions.length > 0 ? (
-        <section
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="客服提成记录"
-          tabIndex={0}
-        >
+        <TableScrollArea label="客服提成记录" className="rounded-xl border bg-card shadow-sm">
           <h2 className="border-b px-6 py-3 text-base font-semibold">
             提成记录
           </h2>
@@ -327,7 +322,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
               ))}
             </tbody>
           </table>
-        </section>
+        </TableScrollArea>
       ) : null}
 
       <Link

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { ChevronDown, KeyRound, LogOut, UserCircle } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,19 +36,21 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`用户菜单：${displayName}`}
-        className="flex min-h-11 min-w-11 items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-2 text-sm shadow-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 xl:pr-3"
+        className={buttonVariants({
+          variant: 'ghost',
+          className: 'h-11 min-w-11 gap-2 px-2',
+        })}
       >
-        <Avatar className="size-7">
-          <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+        <Avatar className="size-7 after:border-0">
+          <AvatarFallback className="bg-muted text-foreground text-xs font-semibold">
             {initial}
           </AvatarFallback>
         </Avatar>
         <span
-          className="hidden min-w-0 max-w-[140px] truncate xl:inline"
+          className="hidden min-w-0 max-w-32 truncate md:inline"
           title={displayName}
         >
-          <span className="font-medium">{displayName}</span>
-          <span className="ml-1 text-muted-foreground">· {roleLabel}</span>
+          {displayName}
         </span>
         <ChevronDown
           aria-hidden

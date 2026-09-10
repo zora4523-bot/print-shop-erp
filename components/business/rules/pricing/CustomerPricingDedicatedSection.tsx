@@ -60,6 +60,7 @@ import {
   type PricingNumericFieldState,
   type PricingNumericValue,
 } from './CustomerPricingSectionViews';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 export type CustomerPricingDedicatedSectionProps = {
   workspace: CustomerPriceSectionWorkspaceDto;
@@ -509,15 +510,7 @@ function productCode(rule: CustomerPriceSectionRuleDto): string {
 function formatShanghaiDateTime(value: string): string {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date);
+  return formatDateTimeShanghai(date);
 }
 
 function sectionHref(

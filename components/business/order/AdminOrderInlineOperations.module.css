@@ -11,4 +11,4 @@
 .form :global(.grid) > * { min-width: 0; grid-column: auto; }
 .form :is(input, select, textarea, button, a[href]) { min-height: 44px; }
 .form :is(button, a[href]) { white-space: normal; }
-.form :global([data-slot="action-notice"]) { font-size: 12px; padding: 10px; }
+.form :global([data-slot="action-notice"]) { font-size: var(--text-xs); padding: 10px; }

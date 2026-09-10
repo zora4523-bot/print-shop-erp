@@ -8,6 +8,7 @@ import {
   useTransition,
   type ReactNode,
 } from 'react';
+import { orderAmountPresentation } from '@/lib/order/amount-presentation';
 import { FileImage, Star } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -27,6 +28,7 @@ import { LegacyOrderDetailRedirect } from './LegacyOrderDetailRedirect';
 import { AdminOrderBatchActions } from './AdminOrderBatchActions';
 import { AdminOrderProgress } from './AdminOrderProgress';
 import { AdminOrderBatchResultProvider } from './AdminOrderBatchResultProvider';
+import styles from './AdminOrderWorkspace.module.css';
 
 export function AdminOrderWorkspaceList({
   orders,
@@ -100,25 +102,15 @@ function AdminOrderWorkspaceListInner({
     <section
       data-slot="admin-order-workspace-list"
       style={{ backgroundColor: 'transparent' }}
-      className="min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm"
+      className={cn(styles.surface, "@container min-w-0 space-y-2")}
     >
       {orders.length > 0 ? (
         <>
-          <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground 2xl:hidden">
+          <div className="flex min-h-8 items-center gap-2 px-3 text-xs font-medium text-muted-foreground">
             <OrderListPageSelection />
             <span>选择本页</span>
           </div>
-          <div className="hidden grid-cols-[2.75rem_3rem_minmax(15rem,1.4fr)_minmax(10rem,1fr)_7rem_8rem_8rem_auto] items-center gap-3 border-b bg-muted/30 px-3 py-2 text-[11px] font-semibold text-muted-foreground 2xl:grid">
-            <OrderListPageSelection />
-            <span aria-hidden="true" />
-            <span>工单</span>
-            <span>状态</span>
-            <span>交期</span>
-            <span>数量 / 进度</span>
-            <span className="text-right">费用</span>
-            <span className="text-right">操作</span>
-          </div>
-          <ul aria-label="管理端工单列表" className="divide-y">
+          <ul aria-label="管理端工单列表" className="space-y-2">
             {orders.map((order) => (
               <AdminOrderRow
                 key={order.id}
@@ -163,28 +155,38 @@ function AdminOrderRow({
   onOpen: () => void;
   onFeedback: (feedback: OrderRowFeedback) => void;
 }) {
+  const feeAmount = orderAmountPresentation({
+    status: order.status,
+    amount: order.fee.amount,
+    estimated: order.fee.estimated,
+    incomplete: order.fee.source === 'INCOMPLETE',
+  });
   return (
     <li
       data-order-id={order.id}
+      data-order-density="compact"
       onClick={(event) => {
         const target = event.target as HTMLElement;
         if (target.closest('button, a, input, [role="checkbox"]')) return;
         onOpen();
       }}
       className={cn(
-        'grid min-w-0 bg-card grid-cols-[2.75rem_3rem_minmax(0,1fr)_auto] gap-3 px-3 py-3 transition-colors hover:bg-muted/20 2xl:grid-cols-[2.75rem_3rem_minmax(15rem,1.4fr)_minmax(10rem,1fr)_7rem_8rem_8rem_auto] 2xl:items-center',
+        styles.row,
+        'grid min-w-0 cursor-pointer grid-cols-[2.75rem_2.125rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border bg-card px-3.5 py-3 transition-colors hover:border-foreground/60 motion-reduce:transition-none @min-[960px]:grid-cols-[1.75rem_2.125rem_minmax(160px,1.35fr)_minmax(110px,1fr)_5.5rem_7rem_6rem_7rem] @min-[960px]:items-center @min-[960px]:py-1.5',
         'border border-border hover:border-muted-foreground/50 hover:bg-card has-[[data-batch-checkbox][aria-checked=true]]:bg-muted/50',
       )}
     >
-      <div className="flex flex-col items-center gap-1">
+      <div className="flex flex-col items-center gap-1.5">
         <OrderListRowSelection orderId={order.id} orderNo={order.orderNo} displayName={order.customName?.trim() || '未命名工单'} />
         <OrderStarButton order={order} onFeedback={onFeedback} />
       </div>
       <OrderThumbnail order={order} />
 
       <div className="min-w-0">
-        <div className="flex min-w-0 flex-col items-start gap-1">
-          <h3 className="m-0 flex min-w-0 max-w-full items-start gap-2">
+        <div className={cn(styles.identity, 'flex min-w-0 flex-col items-start gap-1')}>
+          {/* 工作台页头是 h1，行标题是其下唯一层级：用 h2 才不跳级（axe heading-order）。
+              Tailwind preflight 把标题字号/字重重置为 inherit，改层级不改观感。 */}
+          <h2 className="m-0 flex min-w-0 max-w-full items-start gap-2">
             <Link
               href={`/orders/${order.id}`}
               prefetch={false}
@@ -192,10 +194,10 @@ function AdminOrderRow({
             >
               {order.customName?.trim() || '未命名工单'}
             </Link>
-            {order.isUrgent && <span className="mt-2 shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-bold text-warning-foreground">急单</span>}
-          </h3>
+            {order.isUrgent && <span className="mt-2 shrink-0 rounded-md bg-warning/10 px-1.5 py-0.5 text-xs font-bold text-warning-foreground">急单</span>}
+          </h2>
         </div>
-        <p className="mt-1 flex min-w-0 flex-wrap gap-x-1.5 text-[11px] text-muted-foreground">
+        <p className={cn(styles.meta, "mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs font-semibold text-muted-foreground")}>
           <Link
             href={customerFilterHref}
             prefetch={false}
@@ -205,27 +207,23 @@ function AdminOrderRow({
             {order.customer.name}
           </Link>
           {order.craftTags?.map((tag) => (
-            <span key={tag} className="my-0.5 inline-block whitespace-nowrap rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span key={tag} className="my-0.5 inline-block whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
               {tag}
             </span>
           ))}
         </p>
       </div>
 
-      <div className="min-w-0 text-right 2xl:text-left">
+      <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto">
         <AdminWorkspaceStatusBadge status={order.status} />
         {order.pendingChangeRequest ? (
-          <p className="mt-1 text-[11px] font-semibold">
-            <span className="mr-1 rounded border border-foreground px-1 text-[10px]">{order.pendingChangeRequest.type === 'CANCEL' ? '取消申请' : '变更申请'}</span>
+          <p className="mt-1 text-xs font-semibold">
+            <span className="mr-1 rounded-md border border-foreground px-1 text-xs">{order.pendingChangeRequest.type === 'CANCEL' ? '取消申请' : '变更申请'}</span>
             {order.pendingChangeRequest.summary ?? order.pendingChangeRequest.reason}
           </p>
         ) : order.statusSummary ? (
-          <p
-            className={cn(
-              'mt-1 max-w-64 text-[11px] font-medium text-muted-foreground 2xl:max-w-none',
-              rowSummaryClassName(order),
-            )}
-          >
+          <p className={cn('mt-1 text-xs font-semibold',
+            rowSummaryClassName(order))}>
             {order.statusSummary}
           </p>
         ) : null}
@@ -233,39 +231,38 @@ function AdminOrderRow({
 
       <DueCell order={order} />
 
-      <div className="col-span-2 pl-[3.75rem] text-xs 2xl:col-span-1 2xl:pl-0">
+      <div className="col-start-3 min-w-0 text-xs @min-[960px]:col-start-auto">
         <p className="font-semibold tabular-nums">
           {order.itemCount} 款 · {order.totalQuantity.toLocaleString('zh-CN')}
         </p>
-        <div className="mt-1.5">
+        {showOrderProgress(order) && <div data-slot="admin-order-row-progress" className="mt-1">
           <AdminOrderProgress progress={order.progress} compact />
-        </div>
+        </div>}
       </div>
 
-      <div className="col-span-2 text-right 2xl:col-span-1">
+      <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto @min-[960px]:text-right">
         <p
           className={cn(
             'font-sans text-sm font-semibold tabular-nums',
-            order.fee.amount === null && 'text-xs text-warning-foreground',
+            feeAmount.pending && 'text-xs text-primary',
           )}
         >
-          {order.fee.amount === null
-            ? order.fee.source === 'INCOMPLETE'
-              ? '金额不完整'
-              : order.status === 'DRAFT' ? '未报价' : '待核价'
-            : `¥${formatMoney(order.fee.amount)}`}
+          {feeAmount.label}
+          {feeAmount.estimated ? (
+            <span className="ml-1 text-xs font-normal text-muted-foreground">估</span>
+          ) : null}
         </p>
-        <p className="mt-0.5 text-[10px] text-muted-foreground">
+        <p className="mt-0.5 text-xs text-muted-foreground">
           {order.status === 'DRAFT' && order.fee.source === 'PENDING' ? '提交后报价' : feeSourceLabel(order.fee.source)}
         </p>
         {order.fee.source === 'SETTLED' ? (
-          <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">
+          <p className="mt-0.5 text-xs font-medium text-muted-foreground">
             {order.billing ? `${order.billing.period} 账单` : '未出账'}
           </p>
         ) : null}
       </div>
 
-      <div className="col-span-2 text-right 2xl:col-span-1">
+      <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto @min-[960px]:text-right">
         {order.status === 'DRAFT' ? (
           <Link href={`/orders/${order.id}/edit`} prefetch={false} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
             编辑草稿
@@ -274,7 +271,7 @@ function AdminOrderRow({
           <Link
             href={`/orders/${encodeURIComponent(order.id)}`}
             prefetch={false}
-            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), rowActionClassName(order))}
+            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), styles.action, rowActionClassName(order))}
           >
             {rowActionLabel(order)}
           </Link>
@@ -327,7 +324,7 @@ function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow;
         aria-pressed={starred}
         aria-label={`${starred ? '取消' : '添加'}星标：${order.customName?.trim() || '未命名工单'}（${order.orderNo}）`}
         onClick={toggle}
-        className={cn(starred && 'text-warning hover:text-warning-foreground')}
+        className={cn(styles.star, starred && 'text-warning hover:text-warning-foreground')}
       >
         <Star aria-hidden="true" className={cn(starred && 'fill-current')} />
       </Button>
@@ -337,7 +334,7 @@ function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow;
 
 function OrderThumbnail({ order }: { order: AdminOrderWorkspaceRow }) {
   return (
-    <div className="relative h-16 w-12 shrink-0 overflow-visible rounded-md border bg-muted">
+    <div className="relative h-[46px] w-[34px] shrink-0 overflow-visible rounded-md border bg-muted">
       {order.thumbnail ? (
         <img
           src={order.thumbnail.url}
@@ -351,7 +348,7 @@ function OrderThumbnail({ order }: { order: AdminOrderWorkspaceRow }) {
         </span>
       )}
       {order.itemCount > 1 ? (
-        <span className="absolute -bottom-1.5 -right-1.5 rounded-full border-2 border-background bg-foreground px-1.5 py-0.5 text-[9px] font-semibold text-background">
+        <span className="absolute -bottom-1.5 -right-1.5 rounded-full border-2 border-background bg-foreground px-1.5 py-0.5 text-xs font-semibold text-background">
           {order.itemCount}
         </span>
       ) : null}
@@ -362,7 +359,7 @@ function OrderThumbnail({ order }: { order: AdminOrderWorkspaceRow }) {
 function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
   if (!order.promisedDate) {
     return (
-      <p className="col-span-2 pl-[3.75rem] text-xs text-muted-foreground 2xl:col-span-1 2xl:pl-0">
+      <p className="col-start-3 min-w-0 text-xs text-muted-foreground @min-[960px]:col-start-auto">
         交期未设
       </p>
     );
@@ -373,14 +370,20 @@ function DueCell({ order }: { order: AdminOrderWorkspaceRow }) {
   return (
     <p
       className={cn(
-        'col-span-2 pl-[3.75rem] text-xs font-semibold 2xl:col-span-1 2xl:pl-0',
+        'col-start-3 min-w-0 text-xs font-semibold @min-[960px]:col-start-auto',
         alert?.kind === 'overdue' ? 'text-destructive' : alert && 'text-warning-foreground',
       )}
     >
       <time dateTime={date}>{date}</time>
-      {hint ? <span className="mt-0.5 block text-[10px]">{hint}</span> : null}
+      {hint ? <span className="mt-0.5 block text-xs">{hint}</span> : null}
     </p>
   );
+}
+
+export function showOrderProgress(order: AdminOrderWorkspaceRow): boolean {
+  return ['RELEASED', 'FOILING', 'PACKING', 'IN_PRODUCTION'].includes(order.status)
+    || Number(order.progress.foilingProgress) > 0 || Number(order.progress.packingProgress) > 0
+    || order.progress.foilingOverLimit || order.progress.packingOverLimit || order.progress.packingAhead || order.progress.stagnant;
 }
 
 function rowSummaryClassName(order: AdminOrderWorkspaceRow): string {
@@ -399,14 +402,15 @@ function rowActionClassName(order: AdminOrderWorkspaceRow): string {
 }
 
 function rowActionLabel(order: AdminOrderWorkspaceRow): string {
-  if (order.pendingChangeRequest) return '审查变更';
-  if (order.fee.source === 'PENDING') return '查看待核价';
-  if (order.printPending) return '查看待打印';
+  if (order.pendingChangeRequest) return '裁决变更';
+  if (order.fee.source === 'PENDING') return '录价';
+  if (order.printPending) return '处理打印';
   if (order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED') {
     return '查看处理';
   }
-  if (order.status === 'ON_HOLD') return '查看暂停';
+  if (order.status === 'ON_HOLD') return '处理';
   if (order.capabilities.release) return '查看处理';
+  if (order.capabilities.settle) return '结算';
   if (order.capabilities.ship) return '录运单发货';
   return '详情';
 }
@@ -426,11 +430,4 @@ function feeSourceLabel(source: AdminOrderWorkspaceRow['fee']['source']) {
     case 'INCOMPLETE':
       return '未计入合计';
   }
-}
-
-function formatMoney(value: string): string {
-  return Number(value).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 }

@@ -28,20 +28,22 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
     user.role === Role.ADMIN;
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={user.role === Role.ADMIN ? '工单管理' : '工单'}
-        actions={
-          canCreate ? (
-            <Link href="/orders/new" className={buttonVariants()}>
-              新建工单
-            </Link>
-          ) : null
-        }
-      />
+      {user.role !== Role.ADMIN ? (
+        <PageHeader
+          title="工单"
+          actions={
+            canCreate ? (
+              <Link href="/orders/new" className={buttonVariants()}>
+                新建工单
+              </Link>
+            ) : null
+          }
+        />
+      ) : null}
       <ErrorBoundary
         scope="section"
         title="工单页面数据暂时无法加载"
-        description="页头和新建工单入口仍可使用；请重试工单数据区域。"
+        description="请重试加载工单数据。"
       >
         <Suspense
           fallback={

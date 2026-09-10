@@ -12,7 +12,7 @@ describe('CDR recent bundle failure recovery', () => {
       /export async function CdrEligibleOrdersSection[\s\S]*?export async function CdrRecentBundlesSection/,
     )?.[0];
     const historySection = source.match(
-      /export async function CdrRecentBundlesSection[\s\S]*?function CdrSectionLoading/,
+      /export async function CdrRecentBundlesSection[\s\S]*$/,
     )?.[0];
 
     expect(source).not.toContain('await Promise.all([');

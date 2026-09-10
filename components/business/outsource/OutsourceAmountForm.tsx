@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { nextOutsourceIdempotencyKey } from './idempotency';
+import { formatMoney } from '@/lib/dashboard/format';
 
 export function OutsourceAmountForm({
   id,
@@ -106,7 +107,7 @@ export function OutsourceAmountForm({
       ) : null}
       {state?.status === 'success' ? (
         <p className="text-xs text-muted-foreground" aria-live="polite">
-          已保存外协金额 ¥ {state.amount}
+          已保存外协金额 {formatMoney(state.amount)}
         </p>
       ) : null}
     </form>

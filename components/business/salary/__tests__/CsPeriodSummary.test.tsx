@@ -27,7 +27,7 @@ describe('客服周期概览', () => {
   it('展示服务端已计算的金额和考勤值，不按请假天数改写底薪', () => {
     const sections = Children.toArray(CsPeriodSummary(props).props.children);
     const html = renderToStaticMarkup(sections[0]);
-    expect(html).toContain('20001.00');
+    expect(html).toContain('¥ 20,001.00');
     expect(html).toContain('120000.07');
     expect(html).toContain('21.5 天');
     expect(html).toContain('0.5 天');

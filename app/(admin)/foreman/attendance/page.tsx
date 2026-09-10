@@ -15,6 +15,7 @@ import { AttendanceRecordDialog } from '@/components/business/attendance/Attenda
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
+import { formatDateInputShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '员工考勤' };
 
@@ -83,7 +84,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
   const fullDayNormal = computeFullDayNormalHours(workHours);
   const attendanceByDate = new Map(
     attendance.map((a) => [
-      a.date.toISOString().slice(0, 10),
+      formatDateInputShanghai(a.date),
       a,
     ]),
   );

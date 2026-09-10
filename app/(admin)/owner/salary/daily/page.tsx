@@ -13,10 +13,10 @@ import {
   listMachineWorkersForSalary,
 } from '@/lib/salary/daily';
 import { getAttendanceSummaries } from '@/lib/attendance';
-import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
-import { EmptyState, PageHeader, StatCard } from '@/components/ui-business';
+import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
+import { EmptyState, PageHeader, StatCard, TableScrollArea } from '@/components/ui-business';
 
 export const metadata = { title: '历史日薪档案' };
 
@@ -54,15 +54,13 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     .reduce(
       (sum, row) => sum.plus(new Decimal(row.actualSalary as Decimal.Value)),
       new Decimal(0),
-    )
-    .toFixed(2);
+    );
   const unpaidActual = rows
     .filter((row) => !row.isPaid)
     .reduce(
       (sum, row) => sum.plus(new Decimal(row.actualSalary as Decimal.Value)),
       new Decimal(0),
-    )
-    .toFixed(2);
+    );
 
   return (
     <div className="space-y-6">
@@ -98,13 +96,13 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
         />
         <StatCard
           label="历史实发合计"
-          value={`¥ ${totalActual}`}
+          value={formatMoney(totalActual)}
           icon={Calculator}
           tone="neutral"
         />
         <StatCard
           label="历史未发合计"
-          value={`¥ ${unpaidActual}`}
+          value={formatMoney(unpaidActual)}
           icon={Calculator}
           tone="neutral"
         />
@@ -124,12 +122,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
           description="该页不再生成或重算日薪。"
         />
       ) : (
-        <div
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="历史日薪记录"
-          tabIndex={0}
-        >
+        <TableScrollArea label="历史日薪记录" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full min-w-[960px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -180,10 +173,10 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                   <td className="px-4 py-3 text-center">
                     <div className="flex flex-col items-center gap-1">
                       <PaymentStatusBadge isPaid={row.isPaid} />
-                      {salaryFloorBadge(
-                        new Decimal(row.totalPieceworkAmount as Decimal.Value),
-                        new Decimal(row.baseSalary as Decimal.Value),
-                      )}
+                      <SalaryFloorBadge
+                        piecework={row.totalPieceworkAmount as Decimal.Value}
+                        base={row.baseSalary as Decimal.Value}
+                      />
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -201,16 +194,10 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </div>
   );
-}
-
-function salaryFloorBadge(piecework: Decimal, base: Decimal) {
-  if (piecework.gt(base)) return <Badge variant="secondary">计件高于保底</Badge>;
-  if (piecework.eq(base)) return <Badge variant="outline">计件等于保底</Badge>;
-  return <Badge variant="outline">按保底补足</Badge>;
 }
 
 function FilterBar({

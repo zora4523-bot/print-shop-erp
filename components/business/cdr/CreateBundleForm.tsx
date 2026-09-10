@@ -7,13 +7,7 @@ import { createBundleAction } from '@/actions/foreman-cdr';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  DisabledReason,
-  EmptyState,
-  EnvNotice,
-  LongTaskReceipt,
-  PendingButton,
-} from '@/components/ui-business';
+import { DisabledReason, EmptyState, EnvNotice, LongTaskReceipt, PendingButton, TableScrollArea } from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 type EligibleOrder = {
@@ -111,12 +105,7 @@ export function CreateBundleForm({
           className="py-6"
         />
       ) : (
-        <div
-          className="overflow-x-auto rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="CDR 打包工单选择"
-          tabIndex={0}
-        >
+        <TableScrollArea label="CDR 打包工单选择" className="rounded-md border">
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -175,7 +164,7 @@ export function CreateBundleForm({
               })}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
 
       <div className="flex flex-wrap items-start justify-between gap-3">

@@ -10,7 +10,7 @@ import {
   PurchaseOrderStatusBadge,
   PurchaseReceiptStatusBadge,
 } from '@/components/business/purchase/PurchaseStatusBadge';
-import { PageHeader, TableEmptyState } from '@/components/ui-business';
+import { PageHeader, TableEmptyState, TableScrollArea } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getPurchaseOrderDetail } from '@/lib/purchase';
 import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
@@ -66,12 +66,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">采购明细</h2>
-        <div
-          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="采购明细"
-          tabIndex={0}
-        >
+        <TableScrollArea label="采购明细">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
@@ -109,7 +104,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       </section>
 
       {canReceive ? (

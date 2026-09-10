@@ -80,7 +80,7 @@ function PriceStreamStatus({
   stream: RuleCenterPriceVersionStream;
 }) {
   return (
-    <span className="inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-full border border-background/15 bg-background/5 px-2.5 text-[11px] font-semibold text-background/70 dark:border-card-foreground/15 dark:bg-card-foreground/5 dark:text-card-foreground/70">
+    <span className="inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-full border border-background/15 bg-background/5 px-2.5 text-xs font-semibold text-background/70 dark:border-card-foreground/15 dark:bg-card-foreground/5 dark:text-card-foreground/70">
       <span className="text-background/55 dark:text-card-foreground/55">
         {stream.label}
       </span>
@@ -183,7 +183,7 @@ export function RuleCenterWorkspaceBar({
             ))}
           </div>
         ) : priceVersionSummary.state === 'unavailable' ? (
-          <span className="order-3 w-full text-[11px] font-medium text-background/50 md:order-none md:w-auto dark:text-card-foreground/50">
+          <span className="order-3 w-full text-xs font-medium text-background/50 md:order-none md:w-auto dark:text-card-foreground/50">
             版本状态暂不可用
           </span>
         ) : null}

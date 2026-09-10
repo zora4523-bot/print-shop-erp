@@ -90,7 +90,7 @@ export function RuleForm({
           {payloadFields.map((f, i) => (
             <span key={f}>
               {i > 0 ? '、' : ' '}
-              <code className="rounded bg-muted px-1">{`{${f}}`}</code>
+              <code className="rounded-md bg-muted px-1">{`{${f}}`}</code>
             </span>
           ))}
         </p>
@@ -102,9 +102,9 @@ export function RuleForm({
           /^(totalAmount|totalSales|commission)$/.test(f),
         ) ? (
           <p className="text-xs text-muted-foreground">
-            金额类占位符（<code className="rounded bg-muted px-1">totalAmount</code>
-            / <code className="rounded bg-muted px-1">totalSales</code> /
-            <code className="rounded bg-muted px-1">commission</code>
+            金额类占位符（<code className="rounded-md bg-muted px-1">totalAmount</code>
+            / <code className="rounded-md bg-muted px-1">totalSales</code> /
+            <code className="rounded-md bg-muted px-1">commission</code>
             ）只是千分位数字，<strong>不含</strong>货币符号。需要 ¥ 请在模板里手写。
           </p>
         ) : null}

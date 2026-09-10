@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   countRecentFailures,
@@ -18,13 +19,7 @@ import { DeleteChannelButton } from '@/components/business/notification/DeleteCh
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
 import { LegacyNotificationChannels } from '@/components/business/notification/LegacyNotificationChannels';
 import { UnknownNotificationActions } from '@/components/business/notification/UnknownNotificationActions';
-import {
-  EnvNotice,
-  ErrorState,
-  PageHeader,
-  StatusBadge as UiStatusBadge,
-  TableEmptyState,
-} from '@/components/ui-business';
+import { EnvNotice, ErrorState, PageHeader, StatusBadge as UiStatusBadge, TableEmptyState, TableScrollArea } from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import type {
   BackgroundJobStatus,
@@ -153,12 +148,7 @@ export default async function OwnerNotificationsPage({
             description="当前没有结果不明或自动重试已耗尽的投递。"
           />
         ) : (
-          <div
-            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            role="region"
-            aria-label="待人工处理的推送"
-            tabIndex={0}
-          >
+          <TableScrollArea label="待人工处理的推送" className="rounded-xl border bg-card shadow-sm">
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -221,27 +211,18 @@ export default async function OwnerNotificationsPage({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScrollArea>
         )}
         {unresolvedCount > UNKNOWN_PAGE_SIZE ? (
-          <nav className="flex items-center justify-end gap-2" aria-label="待处理推送分页">
-            {unknownPage > 1 ? (
-              <Link
-                href={`/owner/notifications?unknownPage=${unknownPage - 1}`}
-                className={buttonVariants({ variant: 'outline', size: 'sm' })}
-              >
-                上一页
-              </Link>
-            ) : null}
-            {unknownPage < unknownPageCount ? (
-              <Link
-                href={`/owner/notifications?unknownPage=${unknownPage + 1}`}
-                className={buttonVariants({ variant: 'outline', size: 'sm' })}
-              >
-                下一页
-              </Link>
-            ) : null}
-          </nav>
+          <AdminPagination
+            basePath="/owner/notifications"
+            pageParam="unknownPage"
+            page={unknownPage}
+            pageCount={unknownPageCount}
+            total={unresolvedCount}
+            pageSize={UNKNOWN_PAGE_SIZE}
+            queryParams={{}}
+          />
         ) : null}
       </section>
 
@@ -255,12 +236,7 @@ export default async function OwnerNotificationsPage({
             description="规则触发或发送测试消息后，最近结果会显示在这里。"
           />
         ) : (
-          <div
-            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            role="region"
-            aria-label="最近推送日志"
-            tabIndex={0}
-          >
+          <TableScrollArea label="最近推送日志" className="rounded-xl border bg-card shadow-sm">
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -304,7 +280,7 @@ export default async function OwnerNotificationsPage({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScrollArea>
         )}
       </section>
     </div>
@@ -340,12 +316,7 @@ function NotificationChannelsSection({ channels }: {
           }
         />
       ) : (
-        <div
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="企业微信通知目标列表"
-          tabIndex={0}
-        >
+        <TableScrollArea label="企业微信通知目标列表" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -430,7 +401,7 @@ function NotificationChannelsSection({ channels }: {
               })}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </section>
   );
@@ -449,12 +420,7 @@ function NotificationRulesSection({ rules }: {
           description="请联系运维人员完成初始化，然后刷新本页。"
         />
       ) : (
-        <div
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="通知事件规则"
-          tabIndex={0}
-        >
+        <TableScrollArea label="通知事件规则" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -499,7 +465,7 @@ function NotificationRulesSection({ rules }: {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </section>
   );

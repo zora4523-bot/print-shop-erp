@@ -143,7 +143,7 @@ describe('admin order batch review', () => {
     mount([{ ...order, capabilities: { ...order.capabilities, settle: true } }]);
     batchAction.mockRejectedValue(new Error('PRIVATE_STACK'));
     await page.getByRole('button', { name: '批量结算（1）', exact: true }).click();
-    await expect.element(page.getByText('本次结算合计 ¥1234.50', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('本次结算合计 ¥ 1,234.50', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '确认批量结算', exact: true }).click();
     await expect.element(page.getByText('结果未知', { exact: true })).toBeVisible();
     await expect.element(page.getByText(/不要直接重复提交/)).toBeVisible();

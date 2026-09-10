@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
 
 export type OrderFormBQuoteStatus =
@@ -57,14 +58,6 @@ const STATUS_LABELS: Record<
   incomplete: '待管理员终价',
   complete: '已核价',
 };
-
-function money(value: string | number): string {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    minimumFractionDigits: 2,
-  }).format(Number(value));
-}
 
 function decimalAmount(value: string | null | undefined): Decimal | null {
   if (value === null || value === undefined || value.trim() === '') return null;
@@ -165,17 +158,17 @@ function InternalOrderFormRail({
     totalSemantics === 'EXCLUDES_MANUAL_ITEMS';
   return (
     <div className="space-y-3">
-      <section className="rounded-[14px] border bg-card p-[18px]">
+      <section className="rounded-xl border bg-card p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-[11px] font-bold tracking-[0.18em] text-muted-foreground">
+            <h2 className="text-xs font-bold tracking-[0.18em] text-muted-foreground">
               费用明细
             </h2>
-            <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
+            <p className="mt-1 text-xs font-semibold text-muted-foreground">
               {itemCount} 款
             </p>
           </div>
-          <span className="rounded-full border px-2 py-1 text-[11px] font-semibold text-muted-foreground">
+          <span className="rounded-full border px-2 py-1 text-xs font-semibold text-muted-foreground">
             {settlementLabel}
           </span>
         </div>
@@ -184,7 +177,7 @@ function InternalOrderFormRail({
           {quoteItems.map((item, index) => (
             <div
               key={item.key}
-              className="flex items-start justify-between gap-3 border-b py-2 text-[13px]"
+              className="flex items-start justify-between gap-3 border-b py-2 text-sm"
             >
               <span className="min-w-0 font-semibold text-muted-foreground">
                 {itemCount > 1 ? `${index + 1}· ` : ''}
@@ -198,7 +191,7 @@ function InternalOrderFormRail({
                 }
               >
                 {item.status === 'complete' && item.amount
-                  ? money(item.amount)
+                  ? formatMoney(item.amount)
                   : STATUS_LABELS[item.status]}
               </b>
             </div>
@@ -206,19 +199,19 @@ function InternalOrderFormRail({
         </div>
 
         <div className="mt-3 border-t-2 border-foreground pt-3">
-          <p className="text-[11px] font-semibold text-muted-foreground">
+          <p className="text-xs font-semibold text-muted-foreground">
             {requiresFactoryPricing ? '已知合计' : '当前合计'}
           </p>
           <p
             className={
               total === null
                 ? 'mt-1 text-2xl font-extrabold text-destructive'
-                : 'mt-1 text-[34px] font-extrabold leading-none tracking-tight tabular-nums'
+                : 'mt-1 text-3xl font-extrabold leading-none tracking-tight tabular-nums'
             }
           >
-            {total === null ? '——' : money(total)}
+            {total === null ? '——' : formatMoney(total)}
           </p>
-          <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
+          <p className="mt-1 text-xs font-semibold text-muted-foreground">
             {requiresFactoryPricing
               ? plateFee
                 ? '不含待核价款与制版费；提交后由工厂确认'
@@ -254,7 +247,7 @@ function InternalOrderFormRail({
         </Button>
       </section>
 
-      <section className="rounded-[14px] border bg-card p-[18px]">
+      <section className="rounded-xl border bg-card p-4">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-extrabold">待补信息</h2>
           <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs tabular-nums text-destructive">
@@ -365,23 +358,23 @@ export function OrderFormBRail({
       aria-labelledby="external-order-fee-heading"
       className={
         needsAdminPrice
-          ? 'rounded-[14px] border border-destructive bg-destructive/5 p-[18px]'
-          : 'rounded-[14px] border bg-card p-[18px]'
+          ? 'rounded-xl border border-destructive bg-destructive/5 p-4'
+          : 'rounded-xl border bg-card p-4'
       }
     >
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <h2
               id="external-order-fee-heading"
-              className="text-[11px] font-bold tracking-[0.18em] text-muted-foreground"
+              className="text-xs font-bold tracking-[0.18em] text-muted-foreground"
             >
               费用明细
             </h2>
-            <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
+            <p className="mt-1 text-xs font-semibold text-muted-foreground">
               {itemCount} 款
             </p>
           </div>
-          <span className="rounded-full border px-2 py-1 text-[11px] font-semibold text-muted-foreground">
+          <span className="rounded-full border px-2 py-1 text-xs font-semibold text-muted-foreground">
             {settlementLabel}
           </span>
         </div>
@@ -392,7 +385,7 @@ export function OrderFormBRail({
               return (
                 <div
                   key={item.key}
-                  className="flex items-start justify-between gap-3 border-b py-2 text-[13px]"
+                  className="flex items-start justify-between gap-3 border-b py-2 text-sm"
                 >
                   <span className="min-w-0 font-semibold text-muted-foreground">
                     {itemCount > 1 ? `${index + 1}· ` : ''}
@@ -412,18 +405,18 @@ export function OrderFormBRail({
             return lines.map((line, lineIndex) => (
               <div
                 key={`${item.key}-${line.label}-${lineIndex}`}
-                className="flex items-start justify-between gap-3 border-b py-2 text-[13px]"
+                className="flex items-start justify-between gap-3 border-b py-2 text-sm"
               >
                 <span className="min-w-0 font-semibold text-muted-foreground">
                   {itemCount > 1 ? `${index + 1}· ` : ''}
                   {line.label}
                 </span>
-                <b className="shrink-0 tabular-nums">{money(line.amount)}</b>
+                <b className="shrink-0 tabular-nums">{formatMoney(line.amount)}</b>
               </div>
             ));
           })}
 
-          <div className="flex justify-between gap-3 border-b py-2 text-[13px]">
+          <div className="flex justify-between gap-3 border-b py-2 text-sm">
             <span className="font-semibold text-muted-foreground">
               {packaging.label ?? '入袋'}
             </span>
@@ -435,19 +428,19 @@ export function OrderFormBRail({
               }
             >
               {packaging.status === 'complete' && packaging.amount
-                ? money(packaging.amount)
+                ? formatMoney(packaging.amount)
                 : STATUS_LABELS[packaging.status]}
             </b>
           </div>
           {plateFee ? (
-            <div className="flex justify-between gap-3 border-b py-2 text-[13px]">
+            <div className="flex justify-between gap-3 border-b py-2 text-sm">
               <span className="font-semibold text-muted-foreground">
                 {plateFee.label}
               </span>
               <b className="text-destructive">{plateFee.displayAmount}</b>
             </div>
           ) : null}
-          <div className="flex justify-between gap-3 border-b py-2 text-[13px]">
+          <div className="flex justify-between gap-3 border-b py-2 text-sm">
             <span className="font-semibold text-muted-foreground">
               {logistics?.packagingLabel ?? '纸箱耗材'}
             </span>
@@ -460,11 +453,11 @@ export function OrderFormBRail({
             >
               {numericAmount(logistics?.packagingAmount) !== null &&
               logistics?.packagingAmount
-                ? money(logistics.packagingAmount)
+                ? formatMoney(logistics.packagingAmount)
                 : STATUS_LABELS[logistics?.status ?? 'missing']}
             </b>
           </div>
-          <div className="flex justify-between gap-3 border-b py-2 text-[13px]">
+          <div className="flex justify-between gap-3 border-b py-2 text-sm">
             <span className="font-semibold text-muted-foreground">
               {logistics?.shippingLabel ?? '快递费'}
             </span>
@@ -477,26 +470,26 @@ export function OrderFormBRail({
             >
               {numericAmount(logistics?.shippingAmount) !== null &&
               logistics?.shippingAmount
-                ? money(logistics.shippingAmount)
+                ? formatMoney(logistics.shippingAmount)
                 : STATUS_LABELS[logistics?.status ?? 'missing']}
             </b>
           </div>
         </div>
 
         <div className="mt-3 border-t-2 border-foreground pt-3">
-          <p className="text-[11px] font-semibold text-muted-foreground">
+          <p className="text-xs font-semibold text-muted-foreground">
             {hasExcludedAmounts ? '已知合计' : '当前合计'}
           </p>
           <p
             className={
               total === null
                 ? 'mt-1 text-2xl font-extrabold text-destructive'
-                : 'mt-1 text-[34px] font-extrabold leading-none tracking-tight tabular-nums'
+                : 'mt-1 text-3xl font-extrabold leading-none tracking-tight tabular-nums'
             }
           >
-            {total === null ? '——' : money(total)}
+            {total === null ? '——' : formatMoney(total)}
           </p>
-          <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
+          <p className="mt-1 text-xs font-semibold text-muted-foreground">
             {totalNote}
           </p>
         </div>

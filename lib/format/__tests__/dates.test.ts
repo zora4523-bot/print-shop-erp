@@ -37,6 +37,13 @@ describe('formatDateInputShanghai', () => {
     expect(formatDateInputShanghai(CROSS_DAY)).toBe('2026-07-09');
     expect(formatDateInputShanghai(null)).toBe('');
   });
+
+  it('keeps the calendar day of a UTC-midnight @db.Date value', () => {
+    // Prisma @db.Date 与 promisedDate 都存日历日的 UTC 零点；上海为同日 08:00，
+    // 所以替换 toISOString().slice(0, 10) 后键值与显示都不变。
+    expect(formatDateInputShanghai(new Date('2026-07-09T00:00:00Z'))).toBe('2026-07-09');
+    expect(formatDateShanghai(new Date('2026-07-09T00:00:00Z'))).toBe('2026/07/09');
+  });
 });
 
 describe('formatDateTimeLocalShanghai', () => {

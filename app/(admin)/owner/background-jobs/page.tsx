@@ -2,10 +2,7 @@ import Link from 'next/link';
 import { BackgroundJobActionButton } from '@/components/business/admin/BackgroundJobActionButton';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
-import {
-  PageHeader,
-  StatusBadge as UiStatusBadge,
-} from '@/components/ui-business';
+import { PageHeader, StatusBadge as UiStatusBadge, TableScrollArea } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { getBackgroundJobHealth } from '@/lib/background-jobs/health';
@@ -69,12 +66,7 @@ export default async function BackgroundJobsPage() {
         </div>
       </div>
 
-      <div
-        className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        role="region"
-        aria-label="后台任务列表"
-        tabIndex={0}
-      >
+      <TableScrollArea label="后台任务列表" className="rounded-xl border bg-card shadow-sm">
         <table className="w-full text-sm">
           <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
             <tr>
@@ -117,7 +109,7 @@ export default async function BackgroundJobsPage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScrollArea>
     </div>
   );
 }

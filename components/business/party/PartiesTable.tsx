@@ -2,8 +2,8 @@ import Link from 'next/link';
 import {
   AdminRowActions,
   AdminSortLink,
-  AdminStatusBadge,
 } from '@/components/business/admin/AdminDataTable';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import {
   Table,
   TableBody,
@@ -123,7 +123,7 @@ export function PartiesTable({
               {formatPartyAddress(party.defaultAddress) ?? '—'}
             </TableCell>
             <TableCell>
-              <AdminStatusBadge active={party.isActive} />
+              <ActiveStatusBadge active={party.isActive} />
             </TableCell>
             <TableCell>
               <AdminRowActions>

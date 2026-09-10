@@ -69,7 +69,7 @@ export function DueDate({ date, daysLeft }: { date: Date; daysLeft: number }) {
             : `${daysLeft} 天后到期`}
       </StatusBadge>
       <p className="font-sans text-xs tabular-nums text-muted-foreground">
-        {date.toISOString().slice(0, 10)}
+        {formatDateShanghai(date)}
       </p>
     </div>
   );

@@ -22,7 +22,7 @@ describe('admin batch review and receipts', () => {
       feeStages: { ...baseline.feeStages, confirmed: amount },
     }));
     const impact = batchConfirmationImpact('SETTLE', snapshotBatchSelection('SETTLE', batchSelection(orders), orders));
-    expect(impact).toContain('本次结算合计 ¥0.30');
+    expect(impact).toContain('本次结算合计 ¥ 0.30');
     expect(impact.join(' ')).not.toContain('999.99');
     expect(impact.join(' ')).toContain('GD-2：本次不处理');
   });

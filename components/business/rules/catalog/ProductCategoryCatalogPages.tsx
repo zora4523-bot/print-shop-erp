@@ -22,6 +22,7 @@ import {
   isRetiredProductCategory,
   listProductCategoryNodes,
 } from '@/lib/product';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 
 export type ProductCategoryCatalogDetailProps = {
   params: Promise<{ id: string }>;
@@ -142,9 +143,7 @@ export async function EditProductCategoryCatalogItem({
         subtitle={`${node._count.products} 个可建单组合`}
         actions={
           <div className="flex items-center gap-2">
-            <StatusBadge tone={node.isActive ? 'success' : 'neutral'}>
-              {node.isActive ? '启用' : '停用'}
-            </StatusBadge>
+            <ActiveStatusBadge active={node.isActive} />
             {isRetired ? (
               <StatusBadge tone="warning">历史 / 已退役</StatusBadge>
             ) : null}

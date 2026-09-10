@@ -207,7 +207,7 @@ export function AutoPrint({ enabled }: { enabled: boolean }) {
     };
   }, [enabled]);
   return failed ? <p role="alert" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
-    padding: '1rem', background: '#fff', color: '#a8121a', textAlign: 'center' }}>
+    padding: '1rem', background: 'var(--card)', color: 'var(--primary)', textAlign: 'center' }}>
     打印页面未能完成排版，已停止自动打印。请刷新页面后重试。
   </p> : null;
 }

@@ -35,13 +35,17 @@ describe('SalesOrdersList', () => {
     expect(html).toContain('2,000');
     expect(html).toContain('局部烫金 · 触感纸');
     expect(html).toContain('待处理');
-    expect(html).toContain('待管理员确认价格');
+    expect(html).toContain('待工厂核价');
     expect(html).toContain('修改申请中');
     expect(html).toContain('中通');
     expect(html).toContain('75312884629891');
     expect(html).not.toContain('师傅');
     expect(html).not.toContain('计件成本');
     expect(html).not.toContain('生产任务');
+    // 状态药丸走共享 StatusBadge（SUBMITTED → 待处理 / info），
+    // 不再是销售端自带的第二套 tone 类名表。
+    expect(html).toContain('data-tone="info"');
+    expect(html).not.toContain('bg-foreground text-background');
   });
 
   it('待定费用不伪装成 0 元，已知合计明确排除待定项', () => {

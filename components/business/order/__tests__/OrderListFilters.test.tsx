@@ -363,7 +363,7 @@ describe('OrderListFilters', () => {
     expect(source).toContain('min-h-0 flex-1 overflow-y-auto');
     expect(source).toContain("idPrefix: 'mobile-'");
     expect(source).toContain('className="hidden sm:block"');
-    expect(source).toContain('safe-area-inset-bottom');
+    expect(source).toContain('admin-safe-bottom');
   });
 
   it('renders independently removable chips while retaining table preferences and other filters', () => {

@@ -10,9 +10,9 @@ import {
   EmptyState,
   PageHeader,
   StatCard,
-  StatusBadge,
   TableScrollArea,
 } from '@/components/ui-business';
+import { BillStatusBadge } from '@/components/business/bill/BillStatusBadge';
 import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
@@ -64,16 +64,14 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
       const total = new Decimal(r.totalAmount as unknown as Decimal.Value);
       const paid = new Decimal(r.paidAmount as unknown as Decimal.Value);
       return acc.plus(total.minus(paid));
-    }, new Decimal(0))
-    .toFixed(2);
+    }, new Decimal(0));
 
   const fullyPaidTotal = rows
     .filter((r) => r.status === BillStatus.FULLY_PAID)
     .reduce(
       (acc, r) => acc.plus(new Decimal(r.totalAmount as unknown as Decimal.Value)),
       new Decimal(0),
-    )
-    .toFixed(2);
+    );
 
   return (
     <div className="space-y-6">
@@ -85,14 +83,14 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <StatCard
           label="待支付"
-          value={`¥ ${unpaidTotal}`}
+          value={formatMoney(unpaidTotal)}
           icon={Wallet}
           tone="warning"
           hint="已出账与部分支付账单的待支付余额"
         />
         <StatCard
           label="已结清"
-          value={`¥ ${fullyPaidTotal}`}
+          value={formatMoney(fullyPaidTotal)}
           icon={CheckCircle2}
           tone="success"
           hint="已结清账单总额累计"
@@ -166,15 +164,6 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
         </TableScrollArea>
       )}
     </div>
-  );
-}
-
-function BillStatusBadge({ status }: { status: BillStatus }) {
-  const cfg = BILL_STATUS_REGISTRY[status];
-  return (
-    <StatusBadge tone={cfg.tone} dot={cfg.dot}>
-      {cfg.label}
-    </StatusBadge>
   );
 }
 

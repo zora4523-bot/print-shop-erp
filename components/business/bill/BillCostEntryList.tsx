@@ -6,6 +6,7 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { listOrderCostEntryDetails } from '@/lib/bill/costing';
 
 import { formatMoney } from '@/lib/dashboard/format';
+import { formatUnitPrice } from '@/lib/format/unit-price';
 type CostOrder = Parameters<typeof listOrderCostEntryDetails>[0];
 
 export function BillCostEntryList({
@@ -35,7 +36,7 @@ export function BillCostEntryList({
       </div>
       {rows.length === 0 ? (
         <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
-          暂无材料、物流、伙食、电费等补录成本。
+          暂无材料、物流、伙食、电费等补录成本
         </p>
       ) : (
         <>
@@ -64,7 +65,7 @@ export function BillCostEntryList({
                       ? ` · ${String(row.entry.quantity)} ${row.entry.unit ?? ''}`
                       : ''}
                     {row.entry.unitPrice
-                      ? ` × ¥ ${String(row.entry.unitPrice)}`
+                      ? ` × ${formatUnitPrice(row.entry.unitPrice)}`
                       : ''}
                     {row.includedInCostTotal
                       ? ''
@@ -89,7 +90,7 @@ export function BillCostEntryList({
           <p className="border-t px-4 py-3 text-right text-xs text-muted-foreground sm:px-6">
             本区已计入成本合计：
             <span className="font-sans font-medium tabular-nums text-foreground">
-              ¥ {includedTotal.toFixed(2)}
+              {formatMoney(includedTotal)}
             </span>
           </p>
         </>

@@ -40,6 +40,7 @@ import {
   OrderSettlementType,
   Role,
 } from '@/generated/prisma/enums';
+import { formatDateInputShanghai } from '@/lib/format/dates';
 
 type PageProps = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: PageProps) {
@@ -186,7 +187,7 @@ export default async function EditOrderPage({ params }: PageProps) {
               packageRequirement: order.packageRequirement,
               remark: order.remark,
               promisedDate:
-                order.promisedDate?.toISOString().slice(0, 10) ?? null,
+                formatDateInputShanghai(order.promisedDate, '') || null,
               isUrgent: order.isUrgent,
             },
           }}
@@ -361,7 +362,7 @@ export default async function EditOrderPage({ params }: PageProps) {
           packageRequirement: order.packageRequirement,
           remark: order.remark,
           promisedDate: order.promisedDate
-            ? order.promisedDate.toISOString().slice(0, 10)
+            ? formatDateInputShanghai(order.promisedDate)
             : null,
           isUrgent: order.isUrgent,
         }}
@@ -401,7 +402,7 @@ export default async function EditOrderPage({ params }: PageProps) {
           <CardContent>
             <OrderChangeRequestForm
               promisedDate={
-                order.promisedDate?.toISOString().slice(0, 10) ?? null
+                formatDateInputShanghai(order.promisedDate, '') || null
               }
               orderId={order.id}
               expectedRevision={order.revision}

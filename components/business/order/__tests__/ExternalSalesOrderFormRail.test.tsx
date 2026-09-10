@@ -41,7 +41,7 @@ describe('OrderFormBRail', () => {
       />,
     );
 
-    expect(html).toContain('¥170.00');
+    expect(html).toContain('¥ 170.00');
     expect(html).toContain('工厂直接业务');
     expect(html).toContain('保存草稿');
     expect(html).toContain('创建并提交');
@@ -69,7 +69,7 @@ describe('OrderFormBRail', () => {
       />,
     );
 
-    expect(html).toContain('¥180.00');
+    expect(html).toContain('¥ 180.00');
     expect(html).not.toContain('纸箱耗材');
     expect(html).not.toContain('快递费');
   });
@@ -93,7 +93,7 @@ describe('OrderFormBRail', () => {
     );
 
     expect(html).toContain('已知合计');
-    expect(html).toContain('¥180.00');
+    expect(html).toContain('¥ 180.00');
     expect(html).toContain('不含待核价款与制版费；提交后由工厂确认');
     expect(html).toContain('创建并提交核价');
   });
@@ -128,11 +128,11 @@ describe('OrderFormBRail', () => {
       />,
     );
 
-    expect(html).toContain('¥183.00');
+    expect(html).toContain('¥ 183.00');
     expect(html).toContain('外部销售应付工厂');
     expect(html).toContain('1 款');
     expect(html).toContain('纸箱耗材');
-    expect(html).toContain('¥3.00');
+    expect(html).toContain('¥ 3.00');
     expect(html).toContain('不含快递费');
     expect(html).not.toContain('制烫金版费');
     expect(html).toContain('创建并提交');
@@ -160,9 +160,9 @@ describe('OrderFormBRail', () => {
       />,
     );
 
-    expect(html.match(/¥170\.00/g) ?? []).toHaveLength(0);
-    expect(html).toContain('¥130.00');
-    expect(html).toContain('¥40.00');
+    expect(html.match(/¥ 170\.00/g) ?? []).toHaveLength(0);
+    expect(html).toContain('¥ 130.00');
+    expect(html).toContain('¥ 40.00');
   });
 
   it('requires factory pricing when only the plate amount is pending', () => {
@@ -243,7 +243,7 @@ describe('OrderFormBRail', () => {
     );
 
     expect(html).toContain('已知合计');
-    expect(html).toContain('¥188.00');
+    expect(html).toContain('¥ 188.00');
     expect(html).toContain('不含待核价款');
     expect(html).not.toContain('>——<');
     expect(html).toContain('入袋 10袋');

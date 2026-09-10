@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import Decimal from 'decimal.js';
+import { formatRate } from '@/lib/format/unit-price';
 import {
   RulePriceWorkbench,
   type ExternalSalesChargeWorkspaceItem,
@@ -41,16 +41,6 @@ function first(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
-function compactAmount(value: string): string {
-  const [integer = '0', fraction = ''] = new Decimal(value)
-    .toFixed(4)
-    .replace(/\.0+$/, '')
-    .replace(/(\.\d*?)0+$/, '$1')
-    .split('.');
-  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${grouped}${fraction ? `.${fraction}` : ''}`;
-}
-
 export default async function ExternalSalesPriceVisualFixturePage({
   searchParams,
 }: PageProps) {
@@ -80,11 +70,11 @@ export default async function ExternalSalesPriceVisualFixturePage({
     subjectLabel: VISUAL_TIER_PAPER,
     quantityLabel: '7 个数量档·1,000 / 2,000 / 3,000 / 4,000 / 5,000 / 10,000 / 20,000 个',
     calculationLabel: perPiece ? '按个计价' : '整批固定总价',
-    currentAmountLabel: perPiece ? '¥0.19–¥0.52 / 个' : '¥295–¥2,300 / 批',
+    currentAmountLabel: perPiece ? '¥ 0.19–¥ 0.52 / 个' : '¥ 295.00–¥ 2,300.00 / 批',
     draftAmountLabel: hasDraft
       ? perPiece
-        ? '¥0.18–¥0.54 / 个'
-        : '¥310–¥2,480 / 批'
+        ? '¥ 0.18–¥ 0.54 / 个'
+        : '¥ 310.00–¥ 2,480.00 / 批'
       : null,
     priceChangeLabel: hasDraft ? '4 个数量档已调整' : null,
     changeSummaryLabels: hasDraft
@@ -96,9 +86,9 @@ export default async function ExternalSalesPriceVisualFixturePage({
     detailHref: '#selected-charge-detail',
     priceTiers: priceTiers.map((tier) => ({
       quantityLabel: `${tier.quantity.toLocaleString('zh-CN')} 个`,
-      currentAmountLabel: `¥${compactAmount(tier.currentAmount ?? '0')}${amountSuffix}`,
+      currentAmountLabel: `${formatRate(tier.currentAmount ?? '0')}${amountSuffix}`,
       draftAmountLabel: tier.draftAmount
-        ? `¥${compactAmount(tier.draftAmount)}${amountSuffix}`
+        ? `${formatRate(tier.draftAmount)}${amountSuffix}`
         : null,
       changed: tier.changed,
     })),

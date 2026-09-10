@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { formatMoney } from '@/lib/dashboard/format';
 import type { AdminOrderBatchActionResult } from '@/actions/admin-order-workflow';
 import type { AdminOrderBatchCommand, AdminOrderBatchItemResult } from '@/lib/order/admin-batch';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
@@ -80,12 +81,12 @@ export function batchConfirmationImpact(
   const eligible = orders.filter((order) => order.eligible);
   const excluded = orders.filter((order) => !order.eligible);
   const amounts = command === 'SETTLE'
-    ? [`本次结算合计 ¥${eligible.reduce((total, order) => total.plus(order.confirmedFee!), new Decimal(0)).toFixed(2)}`]
+    ? [`本次结算合计 ${formatMoney(eligible.reduce((total, order) => total.plus(order.confirmedFee!), new Decimal(0)))}`]
     : [];
   return [
     BATCH_COMMAND_CONFIG[command].impact,
     ...amounts,
-    ...eligible.map((order) => `${order.orderNo}${order.customName ? ` · ${order.customName}` : ''}${command === 'SETTLE' ? `：¥${new Decimal(order.confirmedFee!).toFixed(2)}` : ` · v${order.workOrderVersion}`}`),
+    ...eligible.map((order) => `${order.orderNo}${order.customName ? ` · ${order.customName}` : ''}${command === 'SETTLE' ? `：${formatMoney(order.confirmedFee!)}` : ` · v${order.workOrderVersion}`}`),
     ...excluded.map((order) => `${order.orderNo}：本次不处理；${order.reason}`),
     '逐单独立处理；已成功的工单不会因其他工单失败而回退。',
   ];

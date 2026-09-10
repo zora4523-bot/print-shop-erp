@@ -9,15 +9,11 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import { yesterdayShanghai } from '@/lib/cron/schedule';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { formatMoney } from '@/lib/dashboard/format';
 import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  ActionNotice,
-  EmptyState,
-  PageHeader,
-  StatCard,
-} from '@/components/ui-business';
+import { ActionNotice, EmptyState, PageHeader, StatCard, TableScrollArea } from '@/components/ui-business';
 import {
   LockPieceworkSettlementDayForm,
   LockPieceworkSettlementForm,
@@ -118,11 +114,11 @@ export default async function PieceworkSettlementPage({
           value={`${data.settlements.length} 条`}
           icon={FileText}
           tone="info"
-          hint={`合计 ¥${lockedTotal.toFixed(2)}`}
+          hint={`合计 ${formatMoney(lockedTotal)}`}
         />
         <StatCard
           label="未发放"
-          value={`¥${unpaidTotal.toFixed(2)}`}
+          value={formatMoney(unpaidTotal)}
           icon={Calculator}
           tone="warning"
         />
@@ -158,12 +154,7 @@ export default async function PieceworkSettlementPage({
               description="无需操作，或当日报工已全部锁定。"
             />
           ) : (
-            <div
-              role="region"
-              aria-label="待锁定报工明细"
-              tabIndex={0}
-              className="overflow-x-auto rounded-xl border bg-card shadow-sm"
-            >
+            <TableScrollArea label="待锁定报工明细" className="rounded-xl border bg-card shadow-sm">
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                   <tr>
@@ -195,7 +186,7 @@ export default async function PieceworkSettlementPage({
                         {row.reportCount} / {row.orderCount}
                       </td>
                       <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                        ¥ {row.reportAmount}
+                        {formatMoney(row.reportAmount)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <LockPieceworkSettlementForm
@@ -211,7 +202,7 @@ export default async function PieceworkSettlementPage({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScrollArea>
           )}
         </section>
       ) : null}
@@ -225,12 +216,7 @@ export default async function PieceworkSettlementPage({
             description="锁定报工后，记录会显示在这里。"
           />
         ) : (
-          <div
-            role="region"
-            aria-label="已锁定计件结算"
-            tabIndex={0}
-            className="overflow-x-auto rounded-xl border bg-card shadow-sm"
-          >
+          <TableScrollArea label="已锁定计件结算" className="rounded-xl border bg-card shadow-sm">
             <table className="w-full min-w-[860px] text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -260,10 +246,10 @@ export default async function PieceworkSettlementPage({
                       {row._count.items}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums">
-                      ¥ {String(row.reportAmount)}
+                      {formatMoney(row.reportAmount)}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                      ¥ {String(row.payableAmount)}
+                      {formatMoney(row.payableAmount)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <SettlementStatus status={row.status} />
@@ -301,7 +287,7 @@ export default async function PieceworkSettlementPage({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScrollArea>
         )}
       </section>
     </div>

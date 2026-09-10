@@ -1,7 +1,7 @@
 import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
-import { PageHeader, TableEmptyState } from '@/components/ui-business';
+import { PageHeader, TableEmptyState, TableScrollArea } from '@/components/ui-business';
 import { ToggleBomActiveButton } from '@/components/business/bom/ToggleBomActiveButton';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
@@ -75,12 +75,7 @@ export default async function OwnerBomDetailPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">物料清单</h2>
-        <div
-          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="BOM 物料明细"
-          tabIndex={0}
-        >
+        <TableScrollArea label="BOM 物料明细">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
@@ -119,7 +114,7 @@ export default async function OwnerBomDetailPage({ params }: PageProps) {
               )}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">

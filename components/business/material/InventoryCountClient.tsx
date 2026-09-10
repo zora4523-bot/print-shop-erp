@@ -14,14 +14,7 @@ import { RefreshCw, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  ActionNotice,
-  ConfirmActionController, ConfirmActionDialog,
-  FormErrorSummary,
-  FormMessage,
-  formMessageA11yProps,
-  type FormErrorSummaryItem,
-} from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog, FormErrorSummary, FormMessage, TableScrollArea, formMessageA11yProps, type FormErrorSummaryItem } from '@/components/ui-business';
 import type { InventoryCountMutationResult } from '@/actions/owner-inventory.types';
 import type { InventoryCountMaterialRow } from '@/lib/inventory-count';
 import {
@@ -383,16 +376,14 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
         <input type="hidden" name="items" value={JSON.stringify(submittedItems)} />
         <input ref={remarkInputRef} type="hidden" name="remark" />
         <FormErrorSummary errors={summaryErrors} />
-        <div
+        <TableScrollArea
           id="inventory-count-items"
           {...(itemError
             ? formMessageA11yProps('inventory-count-items', 'error')
             : {})}
           aria-busy={fetchPending}
-          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          role="region"
-          aria-label="盘点物料列表"
-          tabIndex={0}
+          label="盘点物料列表"
+          className="rounded-xl border bg-card shadow-sm"
         >
           <table className="w-full text-sm">
             <thead>
@@ -517,7 +508,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
               )}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
         {itemError ? (
           <FormMessage fieldId="inventory-count-items" tone="error">
             {itemError}

@@ -8,7 +8,11 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        // `in-data-[emphasis=inverse]`：工单详情「当前待办」列把主操作压成深色、
+        // 破坏性操作提为品牌红实心。以前这层是 CSS Module 里反转 `--primary`，
+        // 同一 token 在同页有两个值；现在由 Button 自己按作用域声明。
+        default:
+          "bg-primary text-primary-foreground [a]:hover:bg-primary/80 in-data-[emphasis=inverse]:not-disabled:border-foreground in-data-[emphasis=inverse]:not-disabled:bg-foreground in-data-[emphasis=inverse]:not-disabled:text-background",
         outline:
           "border-border bg-background text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -16,7 +20,7 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive focus-visible:ring-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30",
+          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive focus-visible:ring-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 in-data-[emphasis=inverse]:not-disabled:border-primary in-data-[emphasis=inverse]:not-disabled:bg-primary in-data-[emphasis=inverse]:not-disabled:text-primary-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

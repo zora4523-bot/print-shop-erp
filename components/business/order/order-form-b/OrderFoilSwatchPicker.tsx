@@ -220,12 +220,12 @@ export function OrderFoilSwatchPicker({
                 <span
                   aria-hidden="true"
                   data-selection-order={selectedIndex + 1}
-                  className="absolute right-0 top-0 z-10 flex size-4 items-center justify-center rounded-full border border-border bg-background text-[9px] font-bold leading-none text-foreground"
+                  className="absolute right-0 top-0 z-10 flex size-4 items-center justify-center rounded-full border border-border bg-background text-xs font-bold leading-none text-foreground"
                 >
                   {selectedIndex + 1}
                 </span>
               ) : null}
-              <span className="text-[0.65625rem] font-semibold leading-tight">
+              <span className="text-xs font-semibold leading-tight">
                 {option.label}
               </span>
             </Button>
