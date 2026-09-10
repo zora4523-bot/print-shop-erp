@@ -50,49 +50,46 @@ export function SalesWorkbench({
     ...new Set(SALES_SCENARIOS.map((item) => item.category)),
   ];
   return (
-    <div className="mx-auto max-w-7xl space-y-6" data-testid="sales-workbench">
-      <PageHeader
-        title="工作台"
-        subtitle="报价计算、产品知识与销售应对"
-        actions={
-          <Link
-            href="/orders/new"
-            prefetch={false}
-            className={buttonVariants({
-              variant: 'outline',
-              className: 'min-h-11',
-            })}
-          >
-            <Plus aria-hidden className="size-4" />
-            创建工单
-          </Link>
-        }
-      />
-      <nav
-        aria-label="工作台分区"
-        className="grid grid-cols-3 gap-2 rounded-xl border bg-card p-2"
-      >
-        {[
-          { value: 'quote', label: '报价计算', icon: Calculator },
-          { value: 'materials', label: '纸张与规格', icon: BookOpen },
-          { value: 'sales', label: '话术应对', icon: MessageCircle },
-        ].map(({ value, label, icon: Icon }) => (
-          <Button
-            key={value}
-            type="button"
-            variant={section === value ? 'default' : 'ghost'}
-            className="min-h-11 whitespace-normal px-2"
-            aria-pressed={section === value}
-            onClick={() => {
-              setSection(value);
-              reset();
-            }}
-          >
-            <Icon aria-hidden className="hidden size-4 sm:block" />
-            {label}
-          </Button>
-        ))}
-      </nav>
+    <div className="mx-auto max-w-7xl space-y-4" data-testid="sales-workbench">
+      <div className="flex flex-col gap-2 rounded-xl border bg-card p-2 sm:flex-row sm:items-center">
+        <PageHeader title="工作台" className="sr-only" />
+        <nav
+          aria-label="工作台分区"
+          className="grid min-w-0 flex-1 grid-cols-3 gap-2"
+        >
+          {[
+            { value: 'quote', label: '报价计算', icon: Calculator },
+            { value: 'materials', label: '纸张与规格', icon: BookOpen },
+            { value: 'sales', label: '话术应对', icon: MessageCircle },
+          ].map(({ value, label, icon: Icon }) => (
+            <Button
+              key={value}
+              type="button"
+              variant={section === value ? 'default' : 'ghost'}
+              className="min-h-11 whitespace-normal px-2"
+              aria-pressed={section === value}
+              onClick={() => {
+                setSection(value);
+                reset();
+              }}
+            >
+              <Icon aria-hidden className="hidden size-4 sm:block" />
+              {label}
+            </Button>
+          ))}
+        </nav>
+        <Link
+          href="/orders/new"
+          prefetch={false}
+          className={buttonVariants({
+            variant: 'outline',
+            className: 'min-h-11 shrink-0 self-end sm:self-auto',
+          })}
+        >
+          <Plus aria-hidden className="size-4" />
+          创建工单
+        </Link>
+      </div>
       <section
         hidden={section !== 'quote'}
         aria-label="报价计算"
