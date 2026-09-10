@@ -1,0 +1,78 @@
+{
+  "target": "a5053860375c8e2497fc944eba151851b17e03ac",
+  "parent": "d4b558eaa8ac9237e8e6ece611e92cecfa99d205",
+  "changedFiles": [
+    ".github/pull_request_template.md",
+    "CONTRIBUTING.md",
+    "DEPLOYMENT.md",
+    "DEVELOPMENT.md",
+    "README.md",
+    "docs/AGENT-BACKLOG.md",
+    "docs/deployment-smoke-checklist.md",
+    "docs/release-remediation-2026-09-10.md",
+    "docs/上线前置操作清单.md",
+    "docs/编码规范.md"
+  ],
+  "diffSha256": "d47677ebe34a8b19098d45b6e12dd52831da725efc6504391e990cb32588a5ca",
+  "cliVersion": "1.0.25",
+  "requestedModel": "grok-4.6",
+  "note": "这是实际响应的公开答复与选定元数据摘录，不包含模型内部推理。模型意见不等于确认缺陷；最终裁定见同目录上级审查报告。提示包及原始响应仅保存在本机临时目录，哈希用于校验，不能替代重新执行审查。",
+  "reviews": [
+    {
+      "id": "full-diff",
+      "scope": "目标提交 10 文件完整 diff 与 7 份同提交关键源码",
+      "promptSha256": "fbc5045e8aa5f9ca11ebfe16499954527ff008028474c8f1b8877c322af20fd5",
+      "rawResponseSha256": "583a3ff2e99440394ab579d3c3880462dfc31409d4083589e8f4824f1bbd6c4c",
+      "sessionId": "01a08bc8-45da-75e3-b7ce-909a7482b6ae",
+      "requestId": "c397f7dd-24d4-4ad3-b59b-46e549aa1449",
+      "stopReason": "end_turn",
+      "num_turns": 1,
+      "text": "本审查只对提交 `a505386`（父 `d4b558e`）的 10 份文档做文本对照；未调用工具、未运行测试、未验证生产。历史审查摘要不重跑、不评真假。REL-02/03/04/05/08 等台账已登记待修项不记为本提交新缺陷。\n\n## 结论\n\n发现 **2** 项有源码/同提交文档反证的表述或验收冲突，无 P1。未发现把“规划/规范更新”写成“缺陷已修复”的确定证据。\n\n---\n\n### 1. P2 默认 E2E 命令/配置与“必须显式隔离”互相打架\n\n**位置**\n- `docs/编码规范.md` 分层表：`tests/e2e/` 约束改为「显式隔离测试库；…不以删除财务/报工记录清理 fixture」\n- `CONTRIBUTING.md`「缺陷修复与发布防回归」：写入型测试「使用独立可丢弃数据库」\n- `DEVELOPMENT.md`「常用命令」：`Playwright 全套（现行配置启动 next dev）` → `pnpm test:e2e`（该行只标了 `next dev`，未标数据库）\n\n**触发 / 影响**\nPR 模板要求命令以 `DEVELOPMENT.md#常用命令` 为准。按该表跑 `pnpm test:e2e` 并据此勾选「已按测试要求验证」，会与同提交的隔离硬规则冲突；报工等追加式记录一旦打进日常库，不能靠清 fixture 恢复。\n\n**反证**\n`playwright.config.ts` 写明 Ordinary E2E 仍是 shared-dev-DB；仅当 `E2E_DATABASE_URL` 与日常库目标不同才切到 `:3100` 且不 `reuseExistingServer`。未设隔离时 `DATABASE_URL` 不被替换。同提交 `DEVELOPMENT.md`「测试环境约束」也写了「未显式隔离时仍可使用日常开发库」。缺省隔离是 REL-04 待修，但本提交把目录约束/验收纪律写成已必须隔离，却未改默认命令。\n\n**最小修复**\n在 `pnpm test:e2e` 行注明：未设独立 `E2E_DATABASE_URL` 时写入日常库，不得记发布/报工验收。编码规范该行改为「默认配置仍可能指向日常库；写入/发布验收必须显式隔离，见 DEVELOPMENT」。\n\n---\n\n### 2. P3 CI 缺口入口指错章节\n\n**位置**\n`docs/deployment-smoke-checklist.md` 文首：「现行命令与 CI 缺口在 `DEVELOPMENT.md#常用命令` 统一维护」。\n\n**触发 / 影响**\n发布/smoke 读者会停在命令表，看不到本提交真正要传达的缺口：CI 只 `--list`、无浏览器/E2E/视觉/audit/smoke，绿灯不能签署发布。\n\n**反证**\n同提交 `DEVELOPMENT.md` 新增独立节 `## 当前 CI 与发布验证缺口`。`CONTRIBUTING.md` 已正确链到 `#当前-ci-与发布验证缺口`。`quality.yml` 仅为 `playwright test --list`，与该节一致，与「常用命令」表不是同一段。\n\n**最小修复**\n拆成两个链接：命令 → `#常用命令`；CI 缺口 → `#当前-ci-与发布验证缺口`。\n\n---\n\n## 明确不记为新缺陷（已登记或描述与源码一致）\n\n- `proxy.ts` 的 `if (req.auth)`、账单 `formObject` 原样收集 `$ACTION_*`、smoke 接受 cron 401/503、CI 只 `--list`、默认 `next dev`、inline jobs 与本地 smoke 可能被 jobs gate 拒绝、`agent-next-task.mjs` 仍打印 `eslint .`：台账/DEVELOPMENT/AGENT-BACKLOG 已标明待修或现行行为。\n- smoke 对 `--dry-run` 仍跑 HTTP、`--require-base-url`、production 拒 mock/inline、fresh 脚本不建库且校验 PG16/空库/确认名：与 `scripts/deploy-smoke.mjs`、`scripts/verify-fresh-migrations.mjs` 一致。\n\n## 覆盖限制（材料不足，不判定真假）\n\n- 无 `package.json` / `vitest.config.ts` / `vitest.browser.config.ts`：不能核「`pnpm lint` 含文案/令牌」「`pnpm test:browser` 存在」「单独 `vitest` 不含 `.browser.spec.tsx`」「全量 Vitest 只打专用测试库」。\n- 无 Prisma schema、金额选择器、`ui-规范.md`：不能核编码规范「`quotedFee`/`confirmedFee`/`settledFee` 当前 schema 与领域调用已使用」——这是本提交最强的事实改写，一旦与代码不符即为 P1，但现无法坐实。\n- 无价格 fixture 页、`deploy-jobs-gate.mjs`、工价 JSON：不能核 visual-fixture 在 production 的 not-found、gate 对 `smartBot.status=null` 的拒绝、`v1.json` 为待填模板。\n- `docs/audits/2026-09-10-release-readiness.md` 中的历史实测不重跑，不评价其真假；台账写「未重跑、不能把新 HEAD 标为已通过」与此一致。",
+      "reportedModel": [
+        "grok-4.6-build"
+      ]
+    },
+    {
+      "id": "operations",
+      "scope": "DEVELOPMENT.md、deployment-smoke-checklist.md 的 diff 与 4 份同提交源码",
+      "promptSha256": "269edfc8840816f0e9f12b0c8f8c6486656fd87e3a7168c1971d449988b2edd7",
+      "rawResponseSha256": "461f51d5e43227d5c83237ced1fe0deaf9cf888b3e4fd56b21068666cd716068",
+      "sessionId": "01a08bcf-cde1-7720-9010-dadd5e4ba51d",
+      "requestId": "3ec5c340-59ba-497b-af31-e7967ee766d3",
+      "stopReason": "end_turn",
+      "num_turns": 1,
+      "text": "## 审查结论\n\n对照本 commit 的 `DEVELOPMENT.md`、`docs/deployment-smoke-checklist.md` 与所给 `quality.yml`、`playwright.config.ts`、`deploy-smoke.mjs`、`verify-fresh-migrations.mjs`，**未发现本 commit 新引入或强化的、可在材料内坐实的事实错误或执行矛盾**。\n\n文档把 CI 实际步骤写成：frozen install、Prisma generate/validate、fresh 迁移、architecture/lint/typecheck、死代码证据、migrate/seed、`audit:review-data`、`vitest run --coverage`、生产构建，以及仅 `playwright test --list`、只上传死代码产物、不跑浏览器组件/E2E/打印/六视口/`pnpm audit --prod`/deploy smoke——与 `quality.yml` 一致。Playwright 默认 `pnpm run dev --port …`、`E2E_BASE_URL`/`E2E_DATABASE_URL` 隔离与 `:3100`、非隔离且非 CI 时 `reuseExistingServer`、不因 `pnpm build` 改成 `next start`，与配置一致。fresh 要求 PG16 空库、`FRESH_DATABASE_URL` + 同名 `FRESH_DATABASE_CONFIRM_DATABASE`、拒绝与 `DATABASE_URL` 同库、脚本不建不删库，与 `verify-fresh-migrations.mjs` 一致。smoke 的 `--skip-build` / `--require-base-url` / seed 默认关、production 拒 mock≠false 与显式 `inline`、无 base URL 跳过路由、cron 接受 401/503、jobs 走 gate 而非仅看 HTTP 200、`--dry-run` 仍会打 HTTP，均与 `deploy-smoke.mjs` 一致。R05/REL-04/05 按材料属已登记缺口，不记为本 commit 新 bug。\n\n**未验证（材料不足，不判错）：** `package.json` 是否存在 `pnpm lint`/`test:browser`/`test:migrations:fresh`/`audit:review-data` 及 lint 是否含文案/令牌；Node Vitest 排除规则与 `.browser.spec.tsx` 分流；`deploy-jobs-gate.mjs` 对 `smartBot.status=null` 的拒绝；`--project` 连写的 CLI 语义。",
+      "reportedModel": [
+        "grok-4.6-build"
+      ]
+    },
+    {
+      "id": "policy",
+      "scope": "其余 8 文件的 diff 与 3 份同提交源码",
+      "promptSha256": "0c90cac9f9c49937c21d6261c35ba389672e7e7a55379c0ef02089553ca639b0",
+      "rawResponseSha256": "d36a1a6a0287b984487998ddd0678daae8f1fb4a64fc2fd9acee03047dc789dd",
+      "sessionId": "01a08bcf-cde5-74e3-b538-2a39191c5a23",
+      "requestId": "e9782709-1364-4f0b-ae03-62ccb3cadb57",
+      "stopReason": "end_turn",
+      "num_turns": 1,
+      "text": "## 结论\n\n**未发现**本 commit 新引入、且能用所给同 SHA 源码坐实的事实错误或执行矛盾。本批是文档/流程入口与台账强化；对代码现状的描述与所给实现一致，且多处标明“规划≠已修”。\n\n## 已用源码核对（非新 bug）\n\n- **账单 `formObject`：** `actions/agent-monthly-bill.ts` 仍把 FormData 全部字符串键交给 `.strict()` schema，未剥离 `$ACTION_`。台账 REL-08、编码规范 §6.2 将其写为待修要求，与代码一致。\n- **代理 truthy：** `proxy.ts` 仍是 `if (req.auth) return NextResponse.next()`。REL-02 写为待开发复现，未宣称已拒绝配置错误对象。\n- **`agent:next` 旧命令：** `scripts/agent-next-task.mjs` 仍打印 `eslint` / 旧 vitest 列表。`AGENT-BACKLOG.md` 与 REL-03 已写明以 CONTRIBUTING/DEVELOPMENT 为准、生成器待 REL-03 改，无自相矛盾。\n\n## 未验证（材料不足，不记为确定错误）\n\n- REL-05 对 `scripts/deploy-smoke.mjs` 接受生产 cron 401/503 的断言（未给该脚本）。\n- 编码规范“`quotedFee`/`confirmedFee`/`settledFee` 已在 schema 与领域调用使用”（未给 Prisma/领域源码）。\n- PR 模板指向的 GitHub `main` 锚点、`DEVELOPMENT.md#常用命令`、CI 是否真未跑浏览器门禁。\n\n历史审查项（账单协议字段、代理放行、CI 缺口等）在台账中仍为待修，不按本 commit 新 bug 计。",
+      "reportedModel": [
+        "grok-4.6-build"
+      ]
+    },
+    {
+      "id": "ci-counterexample",
+      "scope": "CI 原句与 process.env.CI 源码条件的定点反证",
+      "promptSha256": "4505cd92f45ea22a33541a3f641dbd3f8219a9700608a683f001c0d891b7e910",
+      "rawResponseSha256": "4f0def5dd9806258369061a26277fe7c28ddae665975e3c2fb2fa4545d6ce304",
+      "sessionId": "01a08bc5-9bf6-7430-ac97-41d828fd87b0",
+      "requestId": "31bc047e-4513-4e39-a945-8e52289af644",
+      "stopReason": "end_turn",
+      "num_turns": 1,
+      "text": "**不成立。** 文档写「只有 `CI=true`」，源码是 `process.env.CI` 真值判断，不是等于 `\"true\"`。\n\n**影响：** 任意非空 `CI`（含 `CI=false`、`CI=1`）都会传这两个 Chromium 参数；仅未设置或空串才不传。运维可能按字面只设 `true`，或误以为 `false` 会关闭。\n\n**反例：** `CI=false` / `CI=1` 仍传递 `--no-sandbox` 与 `--disable-setuid-sandbox`。\n\n**等级：** P2 文档偏差（非运行时缺陷）。\n\n**修正：** 当前脚本在 `process.env.CI` 为真值（任意非空字符串）时向 Chromium 传递 `--no-sandbox` 与 `--disable-setuid-sandbox`；未设置或空串则不传。",
+      "reportedModel": [
+        "grok-4.6-build"
+      ]
+    }
+  ]
+}

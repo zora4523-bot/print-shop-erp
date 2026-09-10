@@ -83,6 +83,10 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 ## 常用命令
 
+运行下表中会写入数据库的 Playwright 检查前，必须设置指向独立可丢弃库的 `E2E_DATABASE_URL`，
+并确认它与日常 `DATABASE_URL` 目标不同。裸命令不会自动提供隔离，可能写入日常库；
+报工/发布验收不得使用这种缺省状态。完整迁移、工价和服务模式前置见 [测试环境约束](#测试环境约束)。
+
 | 目的 | 命令 |
 |---|---|
 | 开发服务器 | `pnpm dev` |
@@ -95,7 +99,7 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 | 全量 Vitest | `pnpm test --run` |
 | 全量单测与覆盖率 | `pnpm exec vitest run --coverage` |
 | 浏览器组件（独立 Vitest 配置） | `pnpm test:browser` |
-| Playwright 全套（现行配置启动 `next dev`） | `pnpm test:e2e` |
+| Playwright 全套（先满足隔离前置；现行配置启动 `next dev`） | `pnpm test:e2e` |
 | 业务 E2E 与无 JS 路径 | `pnpm exec playwright test tests/e2e --project=chromium --project=no-js` |
 | 打印像素与分页门禁 | `pnpm exec playwright test tests/visual/order-print.spec.ts --project=chromium` |
 | 浏览器用例清单（只发现，不执行） | `pnpm exec playwright test --list` |

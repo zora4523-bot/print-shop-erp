@@ -7,7 +7,7 @@ applies_to: deploy smoke script and repository test configuration; production st
 
 # 备份与部署 Smoke 清单
 
-本文维护 [`deploy-smoke.mjs`](../scripts/deploy-smoke.mjs) 的运行方式与能力边界；本次只核对仓库代码，未复验生产环境。发布总入口见 [DEPLOYMENT.md](../DEPLOYMENT.md)，各项所需测试以 [CONTRIBUTING.md](../CONTRIBUTING.md#测试要求) 为准，现行命令与 CI 缺口在 [DEVELOPMENT.md](../DEVELOPMENT.md#常用命令) 统一维护。
+本文维护 [`deploy-smoke.mjs`](../scripts/deploy-smoke.mjs) 的运行方式与能力边界；本次只核对仓库代码，未复验生产环境。发布总入口见 [DEPLOYMENT.md](../DEPLOYMENT.md)，各项所需测试以 [CONTRIBUTING.md](../CONTRIBUTING.md#测试要求) 为准；现行命令见 [常用命令](../DEVELOPMENT.md#常用命令)，CI 实际覆盖与待补项见 [当前 CI 与发布验证缺口](../DEVELOPMENT.md#当前-ci-与发布验证缺口)。
 
 本清单不能替代 [上线前置操作清单](上线前置操作清单.md) 中的历史迁移证据、无效索引与业务前置验收。生产写入、真实通知、cron 任务触发、迁移与恢复操作仍须按已有授权和 runbook 执行；文档示例不是执行这些操作的授权。
 
@@ -72,7 +72,7 @@ DEPLOY_SMOKE_BASE_URL="$APP_PUBLIC_URL" \
 pnpm deploy:smoke --skip-build --require-base-url
 ```
 
-当前脚本只有 `CI=true` 时向 Chromium 传递 `--no-sandbox` 与 `--disable-setuid-sandbox`；这对应现有 root 运行的生产主机。脚本不会加载 PM2 ecosystem 环境，因此 Chromium 路径及相关变量需明确注入。运行前确认 `APP_PUBLIC_URL` 为本次验收环境；示例清空 `E2E_BASE_URL` 回退值，目标空值会由 `--require-base-url` 拒绝。通过记录必须关联已验证的构建 SHA，不能只留一行 completed。
+当前脚本在 `CI` 环境变量非空时向 Chromium 传递 `--no-sandbox` 与 `--disable-setuid-sandbox`；示例设为 `true`，但 `CI=false` 或 `CI=0` 同样会关闭 sandbox。该示例适配仓库既有的 root 运行方案，不代表本次重新确认了生产主机状态。脚本不会加载 PM2 ecosystem 环境，因此 Chromium 路径及相关变量需明确注入。运行前确认 `APP_PUBLIC_URL` 为本次验收环境；示例清空 `E2E_BASE_URL` 回退值，目标空值会由 `--require-base-url` 拒绝。通过记录必须关联已验证的构建 SHA，不能只留一行 completed。
 
 无效 cron token 在配置正确的生产环境必须返回 **401**。现行脚本也接受表示缺少 `CRON_SECRET` 的 **503**，因此脚本 completed 不能证明此发布条件满足。自动门禁与文档的差异纳入 REL-05；修复前按下方 Cron Auth 负向请求记录实际 401，503 一律阻断生产放行，不能以“未执行任务”当作配置正确。
 
