@@ -345,23 +345,6 @@ export function hasAdminPricingConfirmationMarker(value: unknown): boolean {
   );
 }
 
-function decimalMatches(value: unknown, expected: MoneyLike): boolean {
-  const snapshotValue = optionalText(value);
-  if (snapshotValue === null) return false;
-
-  try {
-    const expectedDecimal = new Decimal(expected.toString());
-    const snapshotDecimal = new Decimal(snapshotValue);
-    return (
-      expectedDecimal.isFinite() &&
-      snapshotDecimal.isFinite() &&
-      expectedDecimal.equals(snapshotDecimal)
-    );
-  } catch {
-    return false;
-  }
-}
-
 function reasonMatches(
   actual: JsonRecord,
   confirmation: JsonRecord,

@@ -244,7 +244,7 @@ function AdminOrderRow({
         <p
           className={cn(
             'font-sans text-sm font-semibold tabular-nums',
-            feeAmount.pending && 'text-xs text-primary',
+            feeAmount.pending && 'text-xs text-warning-foreground',
           )}
         >
           {feeAmount.label}

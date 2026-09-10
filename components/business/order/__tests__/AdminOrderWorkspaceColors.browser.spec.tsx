@@ -288,7 +288,7 @@ describe('admin order workspace restrained semantic colors', () => {
       expectTextToken(rowText('legacy', '急单'), '--warning-foreground');
       expectTextToken(rowText('legacy', '2026-09-10'), '--warning-foreground');
       expectTextToken(rowText('pricing', '待核价 · 缺少专版报价'), '--warning-foreground');
-      expectTextToken(rowText('pricing', '待核价'), '--warning-foreground');
+      expectTextToken(rowText('pricing', '待工厂核价'), '--warning-foreground');
       expectTextToken(rowText('review', '⚠ 第 1 款缺 CDR'), '--warning-foreground');
       expectTextToken(rowText('hold', '等待补充设计文件'), '--warning-foreground');
       expectTextToken(rowText('rejected', '设计文件不符，已驳回'), '--destructive');

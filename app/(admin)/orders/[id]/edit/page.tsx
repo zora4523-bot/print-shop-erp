@@ -193,125 +193,15 @@ export default async function EditOrderPage({ params }: PageProps) {
           }}
           pendingNotice={
             pending ? (
-              <ActionNotice
-                tone="info"
-                title="修改申请待处理"
-                description={pending.reason}
-                action={
-                  <Link
-                    href={`/orders/${id}`}
-                    className={buttonVariants({ variant: 'outline' })}
-                  >
-                    查看并处理申请
-                  </Link>
-                }
-              />
+              <PendingModificationNoticeSection {...{
+                pending: pending, id: id,
+              }} />
             ) : null
           }
-          fees={
-            <>
-              <OrderSavedConfiguration
-                order={order}
-                canEditDesigns={false}
-                feesOnly
-              />
-              {external && !pending && 'priceRevision' in order ? (
-                <Disclosure className="rounded-xl border bg-card">
-                  <DisclosureSummary className="px-4 py-3">
-                    版费与其他费用
-                  </DisclosureSummary>
-                  <div className="border-t p-4">
-                    <OrderCommercialDetailsManager
-                      orderId={order.id}
-                      priceRevision={Number(order.priceRevision)}
-                      allowPlateDetailMaintenance={!pricingPending}
-                      manualCharges={order.customerCharges
-                        .filter((charge) =>
-                          [
-                            'SAMPLE_FEE',
-                            'OTHER_PACKAGING_FEE',
-                            'APPROVED_ADJUSTMENT',
-                          ].includes(String(charge.category.code)),
-                        )
-                        .map((charge) => ({
-                          id: charge.id,
-                          status: String(charge.status),
-                          description: charge.description,
-                          amount: String(charge.amount),
-                          overrideReason: charge.overrideReason,
-                          approvalReference: charge.approvalReference,
-                          category: {
-                            code: String(charge.category.code),
-                            name: charge.category.name,
-                          },
-                          finalizedBy: charge.finalizedBy,
-                          finalizedAt: charge.finalizedAt,
-                        }))}
-                      items={order.items.map((item) => ({
-                        id: item.id,
-                        sequence: item.sequence,
-                        name: item.name,
-                        independentPlateEligible:
-                          item.pricingRoute !== 'COLOR_PRINT' &&
-                          deriveLegacyOrderItemFoilFacts(item).foilColors
-                            .length > 0,
-                        plateDetails:
-                          'plateDetails' in item
-                            ? item.plateDetails.map((detail) => ({
-                                id: detail.id,
-                                sequence: detail.sequence,
-                                name: detail.name,
-                                plateGroupId: detail.plateGroupId,
-                                specification: detail.specification,
-                                quantity: detail.quantity,
-                                unitPrice: String(detail.unitPrice),
-                                amount: String(detail.amount),
-                                remark: detail.remark,
-                                isActive: detail.isActive,
-                              }))
-                            : [],
-                      }))}
-                    />
-                  </div>
-                </Disclosure>
-              ) : null}
-              {canPrice ? (
-                <Disclosure className="rounded-xl border bg-card">
-                  <DisclosureSummary className="px-4 py-3">
-                    核对自动报价与待核费用
-                  </DisclosureSummary>
-                  <div className="border-t p-4">
-                    <p className="text-xs text-muted-foreground">
-                      人工费用单独核定，完成后页面将读取最新金额。请先保存其他修改。
-                    </p>
-
-                    <OrderPricingReviewForm
-                      key={`${order.revision}:${order.editVersion}`}
-                      orderId={order.id}
-                    />
-                  </div>
-                </Disclosure>
-              ) : null}
-              {canCorrectFreight ? (
-                <Card>
-                  <CardContent className="pt-4">
-                    <FulfillmentPricingReviewForm
-                      key={`${order.revision}:${order.editVersion}`}
-                      orderId={order.id}
-                      currentValue={order.isSfCollect}
-                      isPricingPending={pricingPending}
-                      shipments={order.shipments.map((shipment) => ({
-                        id: shipment.id,
-                        sequence: shipment.sequence,
-                        destinationProvince: shipment.destinationProvince,
-                        weightKg: shipment.weightKg?.toString() ?? null,
-                      }))}
-                    />
-                  </CardContent>
-                </Card>
-              ) : null}
-            </>
-          }
+          fees=<EditorFeesSection {...{
+              order, external, pending, pricingPending,
+              canPrice, canCorrectFreight,
+            }} />
         />
       </>
     );
@@ -459,5 +349,135 @@ export default async function EditOrderPage({ params }: PageProps) {
         </Card>
       ) : null}
     </div>
+  );
+}
+
+function PendingModificationNoticeSection({ pending, id }: { pending: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>['changeRequests'][number]; id: string; }
+) {
+  return (
+    <ActionNotice
+      tone="info"
+      title="修改申请待处理"
+      description={pending.reason}
+      action={
+        <Link href={`/orders/${id}`} className={buttonVariants({ variant: 'outline' })}>
+          查看并处理申请
+        </Link>
+      }
+    />
+  );
+}
+
+type RenderEditorFeesOptions = {
+  order: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;
+  external: boolean;
+  pending:
+    | NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>['changeRequests'][number]
+    | undefined;
+  pricingPending: boolean;
+  canPrice: boolean;
+  canCorrectFreight: boolean;
+};
+
+function EditorFeesSection({
+  order,
+  external,
+  pending,
+  pricingPending,
+  canPrice,
+  canCorrectFreight,
+}: RenderEditorFeesOptions) {
+  return (
+    <>
+      <OrderSavedConfiguration order={order} canEditDesigns={false} feesOnly />
+      {external && !pending && 'priceRevision' in order ? (
+        <Disclosure className="rounded-xl border bg-card">
+          <DisclosureSummary className="px-4 py-3">版费与其他费用</DisclosureSummary>
+          <div className="border-t p-4">
+            <OrderCommercialDetailsManager
+              orderId={order.id}
+              priceRevision={Number(order.priceRevision)}
+              allowPlateDetailMaintenance={!pricingPending}
+              manualCharges={order.customerCharges
+                .filter((charge) =>
+                  ['SAMPLE_FEE', 'OTHER_PACKAGING_FEE', 'APPROVED_ADJUSTMENT'].includes(
+                    String(charge.category.code),
+                  ),
+                )
+                .map((charge) => ({
+                  id: charge.id,
+                  status: String(charge.status),
+                  description: charge.description,
+                  amount: String(charge.amount),
+                  overrideReason: charge.overrideReason,
+                  approvalReference: charge.approvalReference,
+                  category: {
+                    code: String(charge.category.code),
+                    name: charge.category.name,
+                  },
+                  finalizedBy: charge.finalizedBy,
+                  finalizedAt: charge.finalizedAt,
+                }))}
+              items={order.items.map((item) => ({
+                id: item.id,
+                sequence: item.sequence,
+                name: item.name,
+                independentPlateEligible:
+                  item.pricingRoute !== 'COLOR_PRINT' &&
+                  deriveLegacyOrderItemFoilFacts(item).foilColors.length > 0,
+                plateDetails:
+                  'plateDetails' in item
+                    ? item.plateDetails.map((detail) => ({
+                        id: detail.id,
+                        sequence: detail.sequence,
+                        name: detail.name,
+                        plateGroupId: detail.plateGroupId,
+                        specification: detail.specification,
+                        quantity: detail.quantity,
+                        unitPrice: String(detail.unitPrice),
+                        amount: String(detail.amount),
+                        remark: detail.remark,
+                        isActive: detail.isActive,
+                      }))
+                    : [],
+              }))}
+            />
+          </div>
+        </Disclosure>
+      ) : null}
+      {canPrice ? (
+        <Disclosure className="rounded-xl border bg-card">
+          <DisclosureSummary className="px-4 py-3">核对自动报价与待核费用</DisclosureSummary>
+          <div className="border-t p-4">
+            <p className="text-xs text-muted-foreground">
+              人工费用单独核定，完成后页面将读取最新金额。请先保存其他修改。
+            </p>
+
+            <OrderPricingReviewForm
+              key={`${order.revision}:${order.editVersion}`}
+              orderId={order.id}
+            />
+          </div>
+        </Disclosure>
+      ) : null}
+      {canCorrectFreight ? (
+        <Card>
+          <CardContent className="pt-4">
+            <FulfillmentPricingReviewForm
+              key={`${order.revision}:${order.editVersion}`}
+              orderId={order.id}
+              currentValue={order.isSfCollect}
+              isPricingPending={pricingPending}
+              shipments={order.shipments.map((shipment) => ({
+                id: shipment.id,
+                sequence: shipment.sequence,
+                destinationProvince: shipment.destinationProvince,
+                weightKg: shipment.weightKg?.toString() ?? null,
+              }))}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+    </>
   );
 }

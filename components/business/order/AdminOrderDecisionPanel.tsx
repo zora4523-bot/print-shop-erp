@@ -1,5 +1,7 @@
 'use client';
 
+import type * as React from 'react';
+
 import { useCallback, useRef, useState, useTransition } from 'react';
 import Decimal from 'decimal.js';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -804,6 +806,91 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
   }
 
   return (
+    <DecisionPanelSection {...{
+      compact, order, awaitingConfirmation, settlementBlockedByMissingFee,
+      pending, onCompleted, openMode, run,
+      runOneBatch, mode, reasonCode, figs,
+      producedQty, settlementPreview, settlementPreviewQuantity, settleFee,
+      settleFeeAdjustmentReason, note, setReasonCode, setFigs,
+      producedQtyRef, setProducedQty, setSettlementPreview, setSettlementPreviewQuantity,
+      setSettleFee, setSettleFeeAdjustmentReason, setNote, previewCancellation,
+      submitDecision, closeMode, message, feedback,
+    }} />
+  );
+}
+
+type RenderDecisionPanelOptions = {
+  compact: boolean;
+  order: AdminOrderWorkspaceRow;
+  awaitingConfirmation: boolean;
+  settlementBlockedByMissingFee: boolean;
+  pending: boolean;
+  onCompleted: (text: string, tone?: DecisionReceipt['tone']) => void;
+  openMode: (nextMode: Exclude<FormMode, null>) => void;
+  run: (task: DecisionTask) => void;
+  runOneBatch: (command: 'CREATE_PRINT' | 'MARK_PRINTED') => void;
+  mode: FormMode;
+  reasonCode: ReasonCode;
+  figs: string;
+  producedQty: string;
+  settlementPreview: CancellationSettlementReference | null;
+  settlementPreviewQuantity: number | null;
+  settleFee: string;
+  settleFeeAdjustmentReason: string;
+  note: string;
+  setReasonCode: React.Dispatch<React.SetStateAction<ReasonCode>>;
+  setFigs: React.Dispatch<React.SetStateAction<string>>;
+  producedQtyRef: React.RefObject<string>;
+  setProducedQty: React.Dispatch<React.SetStateAction<string>>;
+  setSettlementPreview: React.Dispatch<
+    React.SetStateAction<CancellationSettlementReference | null>
+  >;
+  setSettlementPreviewQuantity: React.Dispatch<React.SetStateAction<number | null>>;
+  setSettleFee: React.Dispatch<React.SetStateAction<string>>;
+  setSettleFeeAdjustmentReason: React.Dispatch<React.SetStateAction<string>>;
+  setNote: React.Dispatch<React.SetStateAction<string>>;
+  previewCancellation: () => void;
+  submitDecision: () => void;
+  closeMode: () => void;
+  message: string;
+  feedback: { text: string; tone: 'error' | 'success' | 'warning' };
+};
+
+function DecisionPanelSection({
+  compact,
+  order,
+  awaitingConfirmation,
+  settlementBlockedByMissingFee,
+  pending,
+  onCompleted,
+  openMode,
+  run,
+  runOneBatch,
+  mode,
+  reasonCode,
+  figs,
+  producedQty,
+  settlementPreview,
+  settlementPreviewQuantity,
+  settleFee,
+  settleFeeAdjustmentReason,
+  note,
+  setReasonCode,
+  setFigs,
+  producedQtyRef,
+  setProducedQty,
+  setSettlementPreview,
+  setSettlementPreviewQuantity,
+  setSettleFee,
+  setSettleFeeAdjustmentReason,
+  setNote,
+  previewCancellation,
+  submitDecision,
+  closeMode,
+  message,
+  feedback,
+}: RenderDecisionPanelOptions) {
+  return (
     <section
       data-slot="admin-order-decision-panel"
       data-compact={compact || undefined}
@@ -814,110 +901,137 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
         {compact ? '待你处理' : '工厂裁决'}
       </h3>
       <div data-slot={compact ? 'admin-order-decision-card' : undefined}>
-      {compact ? (
-        <>
-          <h4 data-slot="admin-order-decision-heading" className="text-sm font-extrabold">
-            {order.pendingChangeRequest ? (order.pendingChangeRequest.type === 'MODIFY' ? '变更申请' : '取消申请')
-              : awaitingConfirmation ? '下发前检查'
-              : order.status === 'ON_HOLD' ? '暂停处理'
-              : order.capabilities.release ? '下发生产'
-              : order.capabilities.ship ? '录运单发货'
-              : order.capabilities.settle || settlementBlockedByMissingFee ? '结算'
-              : '工单处理'}
-          </h4>
-          {order.pendingChangeRequest ? <p className="mt-2 text-sm font-semibold">{order.pendingChangeRequest.reason}</p> : null}
-        </>
-      ) : null}
-      {!compact ? (
-        <p className="mt-1 text-xs text-muted-foreground">
-          {order.pendingChangeRequest?.type === 'MODIFY'
-            ? '核对本次变更'
-            : '取消结算可调整参考金额，差额必须填写原因。'}
-        </p>
-      ) : null}
-      {!order.pendingChangeRequest && <ConfirmationPreflightNotice order={order} />}
-      <MissingConfirmedFeeNotice
-        orderId={order.id}
-        visible={settlementBlockedByMissingFee}
-      />
-      {!order.pendingChangeRequest && <AdminOrderInlineOperations order={order} disabled={pending} onCompleted={onCompleted} />}
-      {!order.capabilities.ship && order.shipDisabledReason ? <DisabledReason
-        cause="prerequisite"
-        reason={`暂不能发货：${order.shipDisabledReason}`}
-        fixHref={`/orders/${order.id}#ship-order`}
-        fixLabel="查看发货前置条件"
-        className="mt-3"
-      /> : null}
-      {order.capabilities.reviewChange &&
-      order.pendingChangeRequest?.type === 'MODIFY' ? (
-        <div className="mt-3">
-          <OrderChangeReviewForm
-            key={order.pendingChangeRequest.id}
-            requestId={order.pendingChangeRequest.id}
-            compact={compact}
-            currentItems={order.items.map((item) => ({
-              id: item.id,
-              sequence: item.sequence,
-              name: item.name,
-              quantity: item.quantity,
-            }))}
+        {compact ? (
+          <>
+            <h4 data-slot="admin-order-decision-heading" className="text-sm font-extrabold">
+              {order.pendingChangeRequest
+                ? order.pendingChangeRequest.type === 'MODIFY'
+                  ? '变更申请'
+                  : '取消申请'
+                : awaitingConfirmation
+                  ? '下发前检查'
+                  : order.status === 'ON_HOLD'
+                    ? '暂停处理'
+                    : order.capabilities.release
+                      ? '下发生产'
+                      : order.capabilities.ship
+                        ? '录运单发货'
+                        : order.capabilities.settle || settlementBlockedByMissingFee
+                          ? '结算'
+                          : '工单处理'}
+            </h4>
+            {order.pendingChangeRequest ? (
+              <p className="mt-2 text-sm font-semibold">{order.pendingChangeRequest.reason}</p>
+            ) : null}
+          </>
+        ) : null}
+        {!compact ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {order.pendingChangeRequest?.type === 'MODIFY'
+              ? '核对本次变更'
+              : '取消结算可调整参考金额，差额必须填写原因。'}
+          </p>
+        ) : null}
+        {!order.pendingChangeRequest && <ConfirmationPreflightNotice order={order} />}
+        <MissingConfirmedFeeNotice orderId={order.id} visible={settlementBlockedByMissingFee} />
+        {!order.pendingChangeRequest && (
+          <AdminOrderInlineOperations order={order} disabled={pending} onCompleted={onCompleted} />
+        )}
+        {!order.capabilities.ship && order.shipDisabledReason ? (
+          <DisabledReason
+            cause="prerequisite"
+            reason={`暂不能发货：${order.shipDisabledReason}`}
+            fixHref={`/orders/${order.id}#ship-order`}
+            fixLabel="查看发货前置条件"
+            className="mt-3"
           />
-        </div>
-      ) : null}
-      {!(compact && order.pendingChangeRequest?.type === 'MODIFY') && <AdminDecisionActions
-        openMode={openMode}
-        order={order}
-        pending={pending}
-        run={run}
-        runOneBatch={runOneBatch}
-      />}
-      {compact && order.pendingChangeRequest?.type === 'MODIFY' && (order.capabilities.hold || order.capabilities.resume) ? (
-        <Button className="mt-3" type="button" size="sm" variant="outline" disabled={pending} onClick={() => openMode(order.capabilities.hold ? 'hold' : 'resume')}>
-          {order.capabilities.hold ? '暂停生产' : '恢复生产'}
-        </Button>
-      ) : null}
+        ) : null}
+        {order.capabilities.reviewChange && order.pendingChangeRequest?.type === 'MODIFY' ? (
+          <div className="mt-3">
+            <OrderChangeReviewForm
+              key={order.pendingChangeRequest.id}
+              requestId={order.pendingChangeRequest.id}
+              compact={compact}
+              currentItems={order.items.map((item) => ({
+                id: item.id,
+                sequence: item.sequence,
+                name: item.name,
+                quantity: item.quantity,
+              }))}
+            />
+          </div>
+        ) : null}
+        {!(compact && order.pendingChangeRequest?.type === 'MODIFY') && (
+          <AdminDecisionActions
+            openMode={openMode}
+            order={order}
+            pending={pending}
+            run={run}
+            runOneBatch={runOneBatch}
+          />
+        )}
+        {compact &&
+        order.pendingChangeRequest?.type === 'MODIFY' &&
+        (order.capabilities.hold || order.capabilities.resume) ? (
+          <Button
+            className="mt-3"
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => openMode(order.capabilities.hold ? 'hold' : 'resume')}
+          >
+            {order.capabilities.hold ? '暂停生产' : '恢复生产'}
+          </Button>
+        ) : null}
 
-      {mode ? (
-        <AdminDecisionForm
-          mode={mode}
-          order={order}
-          pending={pending}
-          reasonCode={reasonCode}
-          figs={figs}
-          producedQty={producedQty}
-          settlementPreview={settlementPreview}
-          settlementPreviewQuantity={settlementPreviewQuantity}
-          settleFee={settleFee}
-          settleFeeAdjustmentReason={settleFeeAdjustmentReason}
-          note={note}
-          setReasonCode={setReasonCode}
-          setFigs={setFigs}
-          setProducedQty={(value) => {
-            producedQtyRef.current = value;
-            setProducedQty(value);
-          }}
-          clearSettlementPreview={() => {
-            setSettlementPreview(null);
-            setSettlementPreviewQuantity(null);
-            setSettleFee('');
-            setSettleFeeAdjustmentReason('');
-          }}
-          setSettleFee={setSettleFee}
-          setSettleFeeAdjustmentReason={setSettleFeeAdjustmentReason}
-          setNote={setNote}
-          previewCancellation={previewCancellation}
-          submitDecision={submitDecision}
-          close={closeMode}
-        />
-      ) : null}
+        {mode ? (
+          <AdminDecisionForm
+            mode={mode}
+            order={order}
+            pending={pending}
+            reasonCode={reasonCode}
+            figs={figs}
+            producedQty={producedQty}
+            settlementPreview={settlementPreview}
+            settlementPreviewQuantity={settlementPreviewQuantity}
+            settleFee={settleFee}
+            settleFeeAdjustmentReason={settleFeeAdjustmentReason}
+            note={note}
+            setReasonCode={setReasonCode}
+            setFigs={setFigs}
+            setProducedQty={(value) => {
+              producedQtyRef.current = value;
+              setProducedQty(value);
+            }}
+            clearSettlementPreview={() => {
+              setSettlementPreview(null);
+              setSettlementPreviewQuantity(null);
+              setSettleFee('');
+              setSettleFeeAdjustmentReason('');
+            }}
+            setSettleFee={setSettleFee}
+            setSettleFeeAdjustmentReason={setSettleFeeAdjustmentReason}
+            setNote={setNote}
+            previewCancellation={previewCancellation}
+            submitDecision={submitDecision}
+            close={closeMode}
+          />
+        ) : null}
 
-      {pending || message ? <p
-        role={!pending && message && feedback.tone === 'error' ? 'alert' : 'status'}
-        aria-live="polite"
-        className={pending || message ? `mt-3 text-xs font-medium ${pending ? 'text-muted-foreground' : feedback.tone === 'success' ? 'text-success-foreground' : feedback.tone === 'warning' ? 'text-warning-foreground' : 'text-destructive'}` : 'sr-only'}
-      >
-        {pending ? '正在处理，请稍候…' : message}
-      </p> : null}
+        {pending || message ? (
+          <p
+            role={!pending && message && feedback.tone === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            className={
+              pending || message
+                ? `mt-3 text-xs font-medium ${pending ? 'text-muted-foreground' : feedback.tone === 'success' ? 'text-success-foreground' : feedback.tone === 'warning' ? 'text-warning-foreground' : 'text-destructive'}`
+                : 'sr-only'
+            }
+          >
+            {pending ? '正在处理，请稍候…' : message}
+          </p>
+        ) : null}
       </div>
     </section>
   );

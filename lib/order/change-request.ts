@@ -96,7 +96,6 @@ import type { CreateOrderItemQuotePreview } from './create-order-quote-presentat
 import { activateProductionOperationsInTx, ProductionOperationMaterializationError } from '../production/operation-materialization-service';
 import {
   buildTrustedAdminChargePricingSnapshot,
-  buildTrustedAdminPricingSnapshot,
   isTrustedAdminChargePricingSnapshot,
   isTrustedAdminItemPricingSnapshot,
   isTrustedAdminPackagingPricingSnapshot,
@@ -3803,36 +3802,7 @@ export async function previewOrderChangeRequestPricing(
     if (changes.length > 0 && !request.order.shipments.some((shipment) => shipment.sequence === 1)) {
       throw new OrderChangeRequestError('工单缺少主收货地址，不能安全更新数量');
     }
-    for (const change of changes) {
-      const sourceId =
-        change.operation === 'UPDATE'
-          ? change.itemId
-          : change.templateItemId;
-      const item = itemById.get(sourceId);
-      if (!item) {
-        throw new OrderChangeRequestError(
-          change.operation === 'UPDATE'
-            ? '原款式已不存在，请重新申请'
-            : '参考款式已不存在，请重新申请',
-        );
-      }
-      assertSpecificationIdentityUnchanged(item, change);
-      assertMergedPricingFactsValid(item, change);
-      if (change.operation !== 'UPDATE') continue;
-      if (!allowsProductionGenerationUpgrade(request.order.status)) {
-        assertProductionFactsChangeAllowed(item, change);
-      }
-      if (
-        change.quantity !== undefined &&
-        change.quantity !== item.quantity
-      ) {
-        assertQuantityChangeAllowed(
-          item,
-          change.quantity,
-          allowsProductionGenerationUpgrade(request.order.status),
-        );
-      }
-    }
+    validateChangedItemFacts(changes, itemById, request);
     assertPackagingChangeRequestSupported({
       changes,
       groups: request.order.packagingGroups ?? [],
@@ -4023,6 +3993,37 @@ export async function previewOrderChangeRequestPricing(
       pendingCharges: pendingResolutionState.pendingCharges,
     };
   });
+}
+
+function validateChangedItemFacts(
+  changes: ResolvedProposedItemChange[],
+  itemById: Map<string, ModificationReviewRequest['order']['items'][number]>,
+  request: { order: { status: OrderStatus } },
+) {
+  for (const change of changes) {
+    const sourceId = change.operation === 'UPDATE' ? change.itemId : change.templateItemId;
+    const item = itemById.get(sourceId);
+    if (!item) {
+      throw new OrderChangeRequestError(
+        change.operation === 'UPDATE'
+          ? '原款式已不存在，请重新申请'
+          : '参考款式已不存在，请重新申请',
+      );
+    }
+    assertSpecificationIdentityUnchanged(item, change);
+    assertMergedPricingFactsValid(item, change);
+    if (change.operation !== 'UPDATE') continue;
+    if (!allowsProductionGenerationUpgrade(request.order.status)) {
+      assertProductionFactsChangeAllowed(item, change);
+    }
+    if (change.quantity !== undefined && change.quantity !== item.quantity) {
+      assertQuantityChangeAllowed(
+        item,
+        change.quantity,
+        allowsProductionGenerationUpgrade(request.order.status),
+      );
+    }
+  }
 }
 
 function requiredDenyReason(value: string | null | undefined): string {
@@ -5667,39 +5668,7 @@ export async function reviewOrderChangeRequest(
     if (!primaryShipment && changes.length > 0) {
       throw new OrderChangeRequestError('工单缺少主收货地址，不能安全更新数量');
     }
-    for (const change of changes) {
-      const sourceId =
-        change.operation === 'UPDATE'
-          ? change.itemId
-          : change.templateItemId;
-      const item = itemById.get(sourceId);
-      if (!item) {
-        throw new OrderChangeRequestError(
-          change.operation === 'UPDATE'
-            ? '原款式已不存在，请重新申请'
-            : '参考款式已不存在，请重新申请',
-        );
-      }
-      assertSpecificationIdentityUnchanged(item, change);
-      assertMergedPricingFactsValid(item, change);
-      if (
-        change.operation === 'UPDATE' &&
-        !allowsProductionGenerationUpgrade(request.order.status)
-      ) {
-        assertProductionFactsChangeAllowed(item, change);
-      }
-      if (
-        change.operation === 'UPDATE' &&
-        change.quantity !== undefined &&
-        change.quantity !== item.quantity
-      ) {
-        assertQuantityChangeAllowed(
-          item,
-          change.quantity,
-          allowsProductionGenerationUpgrade(request.order.status),
-        );
-      }
-    }
+    validateChangedItemFacts(changes, itemById, request);
     assertPackagingChangeRequestSupported({
       changes,
       groups: request.order.packagingGroups ?? [],
@@ -5762,86 +5731,10 @@ export async function reviewOrderChangeRequest(
         customerCharges: request.order.customerCharges,
       });
     }
-    const submittedPendingChargeResolutions =
-      input.pendingChargeResolutions ?? [];
-    const pendingResolutionState = projected
-      ? validatePendingChargeResolutions({
-          calculation: projected.calculation,
-          shipments: request.order.shipments,
-          resolutions: submittedPendingChargeResolutions,
-          requireComplete: true,
-        })
-      : {
-          pendingCharges: [] as OrderChangePendingChargePreview[],
-          resolutionsByBusinessKey: new Map<
-            string,
-            ValidatedPendingChargeResolution
-          >(),
-        };
-    if (!projected && submittedPendingChargeResolutions.length > 0) {
-      throw new OrderChangeRequestError(
-        '本次修改没有待核物流费，不能提交人工收费',
-      );
-    }
-    if (
-      pendingResolutionState.pendingCharges.length > 0 &&
-      input.expectedPriceRevision === undefined
-    ) {
-      throw new OrderChangeRequestError(
-        '批准待核物流费前必须先刷新并确认最新价格预览',
-      );
-    }
-    if (projected) {
-      const approvalToken = createOrderChangeApprovalToken({
-        requestId: request.id,
-        baseRevision: request.baseRevision,
-        priceRevision: request.order.priceRevision,
-        pureQuoteToken: projected.calculation.quoteToken,
-        pendingChargeResolutions: [
-          ...pendingResolutionState.resolutionsByBusinessKey.values(),
-        ],
-      });
-      if (
-        input.expectedQuoteToken === undefined ||
-        input.expectedQuoteToken !== approvalToken
-      ) {
-        throw new OrderChangeRequestError(
-          '价格规则、计价结果或人工物流核价内容已变化，请刷新计价预览后重试',
-        );
-      }
-    } else if (input.expectedQuoteToken !== undefined) {
-      throw new OrderChangeRequestError(
-        '本次修改无需重新计价，请刷新计价预览后重试',
-      );
-    }
-    const quoteByItemKey = new Map(
-      projected?.calculation.processing.items.map((quote, index) => [
-        projected.projectedItems[index]?.itemKey,
-        quote,
-      ]) ?? [],
+    const pendingResolutionState=validateModificationQuoteApproval(input,projected,request);
+    const { projectedByItemKey, pricingByItemKey } = buildModificationItemPricing(
+      projected, request.id, reviewedAt,
     );
-    const projectedByItemKey = new Map(
-      projected?.projectedItems.map((item) => [item.itemKey, item]) ?? [],
-    );
-    const pricingByItemKey = new Map<
-      string,
-      ReturnType<typeof resolvePureChangeRequestPricing>
-    >();
-    for (const item of projected?.projectedItems ?? []) {
-      const quote = quoteByItemKey.get(item.itemKey);
-      if (!quote) throw new OrderChangeRequestError('纯引擎的款式报价结果缺失');
-      pricingByItemKey.set(
-        item.itemKey,
-        resolvePureChangeRequestPricing({
-          quote,
-          quantity: item.quantity,
-          itemName: item.itemName,
-          itemKey: item.itemKey,
-          requestId: request.id,
-          quotedAt: reviewedAt,
-        }),
-      );
-    }
     const packagingReprice = projected
       ? packagingRepriceFromPureCalculation({
           calculation: projected.calculation,
@@ -5911,141 +5804,7 @@ export async function reviewOrderChangeRequest(
         })
       : null;
 
-    let nextSequence =
-      Math.max(0, ...request.order.items.map((item) => item.sequence)) + 1;
-    for (const [changeIndex, change] of changes.entries()) {
-      if (change.operation === 'UPDATE') {
-        const item = itemById.get(change.itemId);
-        if (!item) throw new OrderChangeRequestError('原款式已不存在，请重新申请');
-
-        if (change.quantity !== undefined && change.quantity !== item.quantity) {
-          const extraShipmentQty = assertQuantityChangeAllowed(
-            item,
-            change.quantity,
-            allowsProductionGenerationUpgrade(request.order.status),
-          );
-          await tx.orderShipmentLine.upsert({
-            where: {
-              shipmentId_orderItemId: {
-                shipmentId: primaryShipment!.id,
-                orderItemId: item.id,
-              },
-            },
-            create: {
-              shipmentId: primaryShipment!.id,
-              orderItemId: item.id,
-              quantity: change.quantity - extraShipmentQty,
-            },
-            update: { quantity: change.quantity - extraShipmentQty },
-          });
-        }
-
-        const pricing = pricingByItemKey.get(item.id);
-        const catalogIdentity = change.catalogIdentity;
-        await tx.orderItem.update({
-          where: { id: item.id },
-          data: {
-            name: change.name,
-            quantity: change.quantity,
-            pack: change.pack,
-            ...(catalogIdentity
-              ? {
-                  productId: catalogIdentity.productId,
-                  productStructure: catalogIdentity.productStructure,
-                  pricingGroup: catalogIdentity.pricingGroup,
-                  specification: catalogIdentity.specification,
-                  actualWidthMm: catalogIdentity.actualWidthMm,
-                  actualHeightMm: catalogIdentity.actualHeightMm,
-                }
-              : {}),
-            ...(change.foilFactsProvided
-              ? {
-                  frontFoilColors: change.frontFoilColors,
-                  backFoilColors: change.backFoilColors,
-                  foilColors: change.foilColors,
-                  isDoubleSided: change.isDoubleSided,
-                  isDoubleColor: change.isDoubleColor,
-                }
-              : {}),
-            ...(pricing ?? {}),
-          },
-        });
-        if (change.pack !== undefined) {
-          await tx.orderPackagingGroupLine.updateMany({
-            where: { orderId: request.order.id, orderItemId: item.id },
-            data: { unitsPerBag: change.pack },
-          });
-        }
-        continue;
-      }
-
-      const template = itemById.get(change.templateItemId);
-      if (!template) throw new OrderChangeRequestError('参考款式已不存在，请重新申请');
-      const pricing = pricingByItemKey.get(addedItemKey(changeIndex));
-      if (!pricing) {
-        throw new OrderChangeRequestError('新增款式缺少报价结果，无法批准修改');
-      }
-      const catalogIdentity = change.catalogIdentity;
-      const persistedCatalogIdentity = catalogIdentity ?? template;
-      const created = await tx.orderItem.create({
-        data: {
-          orderId: request.order.id,
-          sequence: nextSequence,
-          name: change.name,
-          productId: persistedCatalogIdentity.productId,
-          pricingRoute: template.pricingRoute,
-          productStructure: persistedCatalogIdentity.productStructure,
-          artworkVersion: template.artworkVersion,
-          plateGroupId: template.plateGroupId,
-          pricingGroup: persistedCatalogIdentity.pricingGroup,
-          manualQuoteReason: template.manualQuoteReason,
-          specification: persistedCatalogIdentity.specification,
-          actualWidthMm: persistedCatalogIdentity.actualWidthMm,
-          actualHeightMm: persistedCatalogIdentity.actualHeightMm,
-          paperType: template.paperType,
-          paperWeightGsm: template.paperWeightGsm,
-          quantity: change.quantity,
-          crafts: template.crafts,
-          frontFoilColors: change.frontFoilColors,
-          backFoilColors: change.backFoilColors,
-          foilColors: change.foilColors,
-          foilTechnique: template.foilTechnique,
-          hasLocalFoil: template.hasLocalFoil,
-          lamination: template.lamination,
-          printColors: template.printColors,
-          printColorsKnown: true,
-          isDoubleSided: change.isDoubleSided,
-          isDoubleColor: change.isDoubleColor,
-          ...pricing,
-          remark: template.remark,
-        },
-        select: { id: true },
-      });
-      nextSequence += 1;
-      await tx.orderShipmentLine.create({
-        data: {
-          shipmentId: primaryShipment!.id,
-          orderItemId: created.id,
-          quantity: change.quantity,
-        },
-      });
-      // 已发出/加工中/已回货的外协单都是不可变履约快照。新款式即使
-      // 模板款式曾外协，也不能被旧外协单自动“继承”；它保持未覆盖，
-      // 直到主管显式新建外协单。完工闸口会用逐款数量快照拦住。
-    }
-
-    if (projected) {
-      for (const itemPlan of unchangedItemPricingPlans) {
-        await tx.orderItem.update({
-          where: { id: itemPlan.itemId },
-          data: itemPlan.pricing,
-        });
-      }
-    }
-
-    if (packagingReprice) {
-      await applyPackagingRepricePlans(tx, packagingReprice);
-    }
+    await applyApprovedItemChangesInTx({ request, changes, itemById, tx, primaryShipment, pricingByItemKey, projected, unchangedItemPricingPlans, packagingReprice });
 
     const pricing = await persistApprovedModificationPricingInTx({
       actor,
@@ -6094,6 +5853,240 @@ export async function reviewOrderChangeRequest(
   return result;
 }
 
+function validateModificationQuoteApproval(
+  input: ReviewOrderChangeRequestInput,
+  projected: {
+    calculation: CatalogCreateOrderQuoteCalculation;
+    projectedItems: ProjectedQuoteItem[];
+  } | null,
+  request: ModificationReviewRequest,
+) {
+  const submittedPendingChargeResolutions = input.pendingChargeResolutions ?? [];
+  const pendingResolutionState = projected
+    ? validatePendingChargeResolutions({
+        calculation: projected.calculation,
+        shipments: request.order.shipments,
+        resolutions: submittedPendingChargeResolutions,
+        requireComplete: true,
+      })
+    : {
+        pendingCharges: [] as OrderChangePendingChargePreview[],
+        resolutionsByBusinessKey: new Map<string, ValidatedPendingChargeResolution>(),
+      };
+  if (!projected && submittedPendingChargeResolutions.length > 0) {
+    throw new OrderChangeRequestError('本次修改没有待核物流费，不能提交人工收费');
+  }
+  if (
+    pendingResolutionState.pendingCharges.length > 0 &&
+    input.expectedPriceRevision === undefined
+  ) {
+    throw new OrderChangeRequestError('批准待核物流费前必须先刷新并确认最新价格预览');
+  }
+  if (projected) {
+    const approvalToken = createOrderChangeApprovalToken({
+      requestId: request.id,
+      baseRevision: request.baseRevision,
+      priceRevision: request.order.priceRevision,
+      pureQuoteToken: projected.calculation.quoteToken,
+      pendingChargeResolutions: [...pendingResolutionState.resolutionsByBusinessKey.values()],
+    });
+    if (input.expectedQuoteToken === undefined || input.expectedQuoteToken !== approvalToken) {
+      throw new OrderChangeRequestError(
+        '价格规则、计价结果或人工物流核价内容已变化，请刷新计价预览后重试',
+      );
+    }
+  } else if (input.expectedQuoteToken !== undefined) {
+    throw new OrderChangeRequestError('本次修改无需重新计价，请刷新计价预览后重试');
+  }
+  return pendingResolutionState;
+}
+
+type ApplyApprovedItemChangesInTxOptions = {
+  request: ModificationReviewRequest;
+  changes: ResolvedProposedItemChange[];
+  itemById: Map<string, ModificationReviewRequest['order']['items'][number]>;
+  tx: Prisma.TransactionClient;
+  primaryShipment: ModificationReviewRequest['order']['shipments'][number] | undefined;
+  pricingByItemKey: Map<
+    string,
+    {
+      unitPrice: string;
+      fixedFee: string;
+      subtotal: string;
+      quoteDisposition: typeof OrderItemQuoteDisposition.PRICED;
+      quotedAmount: string;
+      suggestedSubtotal: string | null;
+      pricingSnapshot: Prisma.InputJsonObject;
+      priceOverrideReason: string | null;
+    }
+  >;
+  projected: {
+    calculation: CatalogCreateOrderQuoteCalculation;
+    projectedItems: ProjectedQuoteItem[];
+  } | null;
+  unchangedItemPricingPlans: {
+    itemId: string;
+    pricing: {
+      unitPrice: string;
+      fixedFee: string;
+      subtotal: string;
+      quoteDisposition: typeof OrderItemQuoteDisposition.PRICED;
+      quotedAmount: string;
+      suggestedSubtotal: string | null;
+      pricingSnapshot: Prisma.InputJsonObject;
+      priceOverrideReason: string | null;
+    };
+  }[];
+  packagingReprice: PackagingRepriceResult | null;
+};
+
+async function applyApprovedItemChangesInTx({
+  request,
+  changes,
+  itemById,
+  tx,
+  primaryShipment,
+  pricingByItemKey,
+  projected,
+  unchangedItemPricingPlans,
+  packagingReprice,
+}: ApplyApprovedItemChangesInTxOptions) {
+  let nextSequence = Math.max(0, ...request.order.items.map((item) => item.sequence)) + 1;
+  for (const [changeIndex, change] of changes.entries()) {
+    if (change.operation === 'UPDATE') {
+      const item = itemById.get(change.itemId);
+      if (!item) throw new OrderChangeRequestError('原款式已不存在，请重新申请');
+
+      if (change.quantity !== undefined && change.quantity !== item.quantity) {
+        const extraShipmentQty = assertQuantityChangeAllowed(
+          item,
+          change.quantity,
+          allowsProductionGenerationUpgrade(request.order.status),
+        );
+        await tx.orderShipmentLine.upsert({
+          where: {
+            shipmentId_orderItemId: {
+              shipmentId: primaryShipment!.id,
+              orderItemId: item.id,
+            },
+          },
+          create: {
+            shipmentId: primaryShipment!.id,
+            orderItemId: item.id,
+            quantity: change.quantity - extraShipmentQty,
+          },
+          update: { quantity: change.quantity - extraShipmentQty },
+        });
+      }
+
+      const pricing = pricingByItemKey.get(item.id);
+      const catalogIdentity = change.catalogIdentity;
+      await tx.orderItem.update({
+        where: { id: item.id },
+        data: {
+          name: change.name,
+          quantity: change.quantity,
+          pack: change.pack,
+          ...(catalogIdentity
+            ? {
+                productId: catalogIdentity.productId,
+                productStructure: catalogIdentity.productStructure,
+                pricingGroup: catalogIdentity.pricingGroup,
+                specification: catalogIdentity.specification,
+                actualWidthMm: catalogIdentity.actualWidthMm,
+                actualHeightMm: catalogIdentity.actualHeightMm,
+              }
+            : {}),
+          ...(change.foilFactsProvided
+            ? {
+                frontFoilColors: change.frontFoilColors,
+                backFoilColors: change.backFoilColors,
+                foilColors: change.foilColors,
+                isDoubleSided: change.isDoubleSided,
+                isDoubleColor: change.isDoubleColor,
+              }
+            : {}),
+          ...(pricing ?? {}),
+        },
+      });
+      if (change.pack !== undefined) {
+        await tx.orderPackagingGroupLine.updateMany({
+          where: { orderId: request.order.id, orderItemId: item.id },
+          data: { unitsPerBag: change.pack },
+        });
+      }
+      continue;
+    }
+
+    const template = itemById.get(change.templateItemId);
+    if (!template) throw new OrderChangeRequestError('参考款式已不存在，请重新申请');
+    const pricing = pricingByItemKey.get(addedItemKey(changeIndex));
+    if (!pricing) {
+      throw new OrderChangeRequestError('新增款式缺少报价结果，无法批准修改');
+    }
+    const catalogIdentity = change.catalogIdentity;
+    const persistedCatalogIdentity = catalogIdentity ?? template;
+    const created = await tx.orderItem.create({
+      data: {
+        orderId: request.order.id,
+        sequence: nextSequence,
+        name: change.name,
+        productId: persistedCatalogIdentity.productId,
+        pricingRoute: template.pricingRoute,
+        productStructure: persistedCatalogIdentity.productStructure,
+        artworkVersion: template.artworkVersion,
+        plateGroupId: template.plateGroupId,
+        pricingGroup: persistedCatalogIdentity.pricingGroup,
+        manualQuoteReason: template.manualQuoteReason,
+        specification: persistedCatalogIdentity.specification,
+        actualWidthMm: persistedCatalogIdentity.actualWidthMm,
+        actualHeightMm: persistedCatalogIdentity.actualHeightMm,
+        paperType: template.paperType,
+        paperWeightGsm: template.paperWeightGsm,
+        quantity: change.quantity,
+        crafts: template.crafts,
+        frontFoilColors: change.frontFoilColors,
+        backFoilColors: change.backFoilColors,
+        foilColors: change.foilColors,
+        foilTechnique: template.foilTechnique,
+        hasLocalFoil: template.hasLocalFoil,
+        lamination: template.lamination,
+        printColors: template.printColors,
+        printColorsKnown: true,
+        isDoubleSided: change.isDoubleSided,
+        isDoubleColor: change.isDoubleColor,
+        ...pricing,
+        remark: template.remark,
+      },
+      select: { id: true },
+    });
+    nextSequence += 1;
+    await tx.orderShipmentLine.create({
+      data: {
+        shipmentId: primaryShipment!.id,
+        orderItemId: created.id,
+        quantity: change.quantity,
+      },
+    });
+    // 已发出/加工中/已回货的外协单都是不可变履约快照。新款式即使
+    // 模板款式曾外协，也不能被旧外协单自动“继承”；它保持未覆盖，
+    // 直到主管显式新建外协单。完工闸口会用逐款数量快照拦住。
+  }
+
+  if (projected) {
+    for (const itemPlan of unchangedItemPricingPlans) {
+      await tx.orderItem.update({
+        where: { id: itemPlan.itemId },
+        data: itemPlan.pricing,
+      });
+    }
+  }
+
+  if (packagingReprice) {
+    await applyPackagingRepricePlans(tx, packagingReprice);
+  }
+}
+
 export async function listOrderChangeRequests(input?: {
   status?: OrderChangeRequestStatus;
   limit?: number;
@@ -6116,4 +6109,37 @@ export async function listOrderChangeRequests(input?: {
       },
     },
   });
+}
+
+function buildModificationItemPricing(
+  projected: ProjectedOrderQuote | null,
+  requestId: string,
+  reviewedAt: Date,
+) {
+  const quoteByItemKey = new Map(
+    projected?.calculation.processing.items.map((quote, index) => [
+      projected.projectedItems[index]?.itemKey,
+      quote,
+    ]) ?? [],
+  );
+  const projectedByItemKey = new Map(
+    projected?.projectedItems.map((item) => [item.itemKey, item]) ?? [],
+  );
+  const pricingByItemKey = new Map<string, ReturnType<typeof resolvePureChangeRequestPricing>>();
+  for (const item of projected?.projectedItems ?? []) {
+    const quote = quoteByItemKey.get(item.itemKey);
+    if (!quote) throw new OrderChangeRequestError('纯引擎的款式报价结果缺失');
+    pricingByItemKey.set(
+      item.itemKey,
+      resolvePureChangeRequestPricing({
+        quote,
+        quantity: item.quantity,
+        itemName: item.itemName,
+        itemKey: item.itemKey,
+        requestId: requestId,
+        quotedAt: reviewedAt,
+      }),
+    );
+  }
+  return { projectedByItemKey, pricingByItemKey };
 }

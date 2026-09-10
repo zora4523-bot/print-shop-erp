@@ -323,31 +323,7 @@ export async function activateProductionOperationsInTx(
     );
   }
 
-  const craftIds = [...new Set(order.items.flatMap((item) => item.crafts))];
-  const craftFacts =
-    craftIds.length === 0
-      ? []
-      : await tx.craft.findMany({
-          where: { id: { in: craftIds } },
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            isActive: true,
-            isOutsource: true,
-          },
-        });
-  const progressPlan = deriveProductionProgressPlan({
-    items: order.items,
-    crafts: craftFacts,
-  });
-  if (!progressPlan.ok) {
-    throw new ProductionOperationMaterializationError(
-      'CRAFT_FACTS_INCOMPLETE',
-      '工单工艺字典事实不完整，不能自动生成生产进度',
-      progressPlan.issues,
-    );
-  }
+  const { craftFacts,progressPlan }=await loadProductionProgressPlan(order,tx);
   const requiresOutsource = craftFacts.some((craft) => craft.isOutsource);
   const targetStatus = options.targetStatus ?? OrderStatus.SCHEDULING;
 
@@ -421,32 +397,9 @@ export async function activateProductionOperationsInTx(
   }
   if (order.status !== targetStatus) transitionOrder(order.status, targetStatus);
 
-  const previousOperations = options.allowVersionRematerialization
-    ? order.productionOperations.filter((row) => row.workOrderVersion === order.workOrderVersion - 1)
-    : [];
-  const previousSteps = options.allowVersionRematerialization
-    ? order.productionProgressSteps.filter((row) => row.workOrderVersion === order.workOrderVersion - 1)
-    : [];
-  let carryovers: ReturnType<typeof planOperationCarryovers>;
-  const stepCarryovers = new Map<string, { fromStepId: string; completed: Decimal }>();
-  try {
-    carryovers = planOperationCarryovers(previousOperations, plan.specs);
-    const orderTotal = order.items.reduce((sum, item) => sum.plus(item.quantity), new Decimal(0));
-    for (const packing of [false, true]) {
-      const progress = plan.specs.filter((spec) => (spec.operationType === 'PACKING') === packing)
-        .reduce((sum, spec) => sum.plus(carryovers.get(operationCarryoverKey(spec))?.progress ?? 0), new Decimal(0));
-      if (progress.gt(orderTotal)) throw new Error('修改后的工单总量不能少于已完成的工单件数');
-    }
-    for (const step of previousSteps) {
-      const completed = sumCarriedQuantity(step.carriedCompletedQty, (step.reports ?? []).map((report) => report.completedQty));
-      if (completed.isZero()) continue;
-      const next = progressPlan.specs.find((spec) => spec.orderItemId === step.orderItemId && spec.craftId === step.craftId);
-      if (!next || completed.isNegative() || completed.gt(next.plannedQty)) throw new Error('已有工艺进度无法承接，修改数量不能少于已完成数量');
-      stepCarryovers.set(`${step.orderItemId}:${step.craftId}`, { fromStepId: step.id, completed });
-    }
-  } catch (error) {
-    throw new ProductionOperationMaterializationError('CANONICAL_FACTS_INCOMPLETE', error instanceof Error ? error.message : '无法承接历史生产进度');
-  }
+  const { carryovers, stepCarryovers } = buildProductionCarryovers(
+    order, plan, progressPlan, options.allowVersionRematerialization,
+  );
   const carryoverEvidence: Prisma.InputJsonObject[] = [];
   const operationIds: string[] = [];
   for (const spec of plan.specs) {
@@ -567,4 +520,88 @@ export async function activateProductionOperationsInTx(
     progressStepsCreated: progressStepIds.length,
     idempotentReplay: false,
   };
+}
+
+async function loadProductionProgressPlan(
+  order: MaterializationOrder,
+  tx: Prisma.TransactionClient,
+) {
+  const craftIds = [...new Set(order.items.flatMap((item) => item.crafts))];
+  const craftFacts =
+    craftIds.length === 0
+      ? []
+      : await tx.craft.findMany({
+          where: { id: { in: craftIds } },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            isActive: true,
+            isOutsource: true,
+          },
+        });
+  const progressPlan = deriveProductionProgressPlan({
+    items: order.items,
+    crafts: craftFacts,
+  });
+  if (!progressPlan.ok) {
+    throw new ProductionOperationMaterializationError(
+      'CRAFT_FACTS_INCOMPLETE',
+      '工单工艺字典事实不完整，不能自动生成生产进度',
+      progressPlan.issues,
+    );
+  }
+  return { craftFacts, progressPlan };
+}
+
+function buildProductionCarryovers(
+  order: MaterializationOrder,
+  plan: ReturnType<typeof deriveProductionOperationPlan>,
+  progressPlan: ReturnType<typeof deriveProductionProgressPlan>,
+  allowVersionRematerialization: boolean | undefined,
+) {
+  const previousOperations = allowVersionRematerialization
+    ? order.productionOperations.filter(
+        (row) => row.workOrderVersion === order.workOrderVersion - 1,
+      )
+    : [];
+  const previousSteps = allowVersionRematerialization
+    ? order.productionProgressSteps.filter(
+        (row) => row.workOrderVersion === order.workOrderVersion - 1,
+      )
+    : [];
+  let carryovers: ReturnType<typeof planOperationCarryovers>;
+  const stepCarryovers = new Map<string, { fromStepId: string; completed: Decimal }>();
+  try {
+    carryovers = planOperationCarryovers(previousOperations, plan.specs);
+    const orderTotal = order.items.reduce((sum, item) => sum.plus(item.quantity), new Decimal(0));
+    for (const packing of [false, true]) {
+      const progress = plan.specs
+        .filter((spec) => (spec.operationType === 'PACKING') === packing)
+        .reduce(
+          (sum, spec) => sum.plus(carryovers.get(operationCarryoverKey(spec))?.progress ?? 0),
+          new Decimal(0),
+        );
+      if (progress.gt(orderTotal)) throw new Error('修改后的工单总量不能少于已完成的工单件数');
+    }
+    for (const step of previousSteps) {
+      const completed = sumCarriedQuantity(
+        step.carriedCompletedQty,
+        (step.reports ?? []).map((report) => report.completedQty),
+      );
+      if (completed.isZero()) continue;
+      const next = progressPlan.specs.find(
+        (spec) => spec.orderItemId === step.orderItemId && spec.craftId === step.craftId,
+      );
+      if (!next || completed.isNegative() || completed.gt(next.plannedQty))
+        throw new Error('已有工艺进度无法承接，修改数量不能少于已完成数量');
+      stepCarryovers.set(`${step.orderItemId}:${step.craftId}`, { fromStepId: step.id, completed });
+    }
+  } catch (error) {
+    throw new ProductionOperationMaterializationError(
+      'CANONICAL_FACTS_INCOMPLETE',
+      error instanceof Error ? error.message : '无法承接历史生产进度',
+    );
+  }
+  return { carryovers, stepCarryovers };
 }

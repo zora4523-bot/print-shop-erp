@@ -99,7 +99,7 @@ import {
 } from '@/lib/order/admin-pricing-snapshot';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
-import { selectOrderCustomerFee } from '@/lib/order/customer-fee';
+import { OrderCustomerFee, selectOrderCustomerFee } from '@/lib/order/customer-fee';
 import { OrderDetailTimeline } from '@/components/business/order/OrderDetailTimeline';
 import { OrderDetailStickyScope } from '@/components/business/order/OrderDetailStickyScope';
 import {
@@ -650,114 +650,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </>
             ) : null}
           </div></>),
-    basics: (<><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-        <h2 className="text-base font-semibold">基本信息</h2>
-        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Row label="工单名称" value={order.customName} full />
-          <Row
-            label="提交人"
-            value={`${order.submitter.displayName}（${roleLabel(order.submitter.role)}）`}
-          />
-          {hasProductionOperations ? (
-            <>
-              <Row
-                label="计件生产工序"
-                value={productionOperations
-                  .map(
-                    (operation) =>
-                      `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
-                  )
-                  .join('；')}
-              />
-              <Row
-                label="无计件生产进度"
-                value={
-                  productionProgressSteps.length > 0
-                    ? productionProgressSteps
-                        .map(
-                          (step) =>
-                            `#${step.orderItem.sequence} ${step.craftName}（${productionOperationStatusLabel(step.status)}）`,
-                        )
-                        .join('；')
-                    : '无'
-                }
-                full
-              />
-            </>
-          ) : assignedWorkerNames.length > 0 ? (
-            <Row label="历史派工" value={assignedWorkerNames.join('、')} />
-          ) : (
-            <Row label="生产工序" value="尚未生成" />
-          )}
-          <Row label="客户名称/简称" value={order.customerRef} />
-          {canViewCommercialAmounts && 'settlementType' in order ? (
-            <Row
-              label="结算路径"
-              value={
-                ORDER_SETTLEMENT_LABELS[
-                  order.settlementType as OrderSettlementType
-                ]
-              }
-            />
-          ) : null}
-          <Row label="快递代码" value={order.expressCode} />
-          <Row
-            label="配送方式"
-            value={order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'}
-          />
-          <Row label="收货信息" value={formatReceiverInfo(order)} full />
-          <Row label="备注" value={order.remark} full />
-          <div>
-            <dt className="text-muted-foreground">承诺交期</dt>
-            <dd className="mt-0.5 flex items-center gap-2">
-              {order.promisedDate
-                ? formatDateInputShanghai(order.promisedDate)
-                : '—'}
-              <PromisedDateBadge
-                promisedDate={order.promisedDate}
-                status={order.status}
-              />
-            </dd>
-          </div>
-          {canViewCommercialAmounts &&
-          'processingAmount' in order &&
-          'packagingAmount' in order &&
-          'totalAmount' in order ? (
-            <>
-              <Row
-                label="款式加工费"
-                value={formatMoney(
-                  new Decimal(String(order.processingAmount)).minus(
-                    String(order.packagingAmount),
-                  ),
-                )}
-                tabular
-              />
-              <Row
-                label="入袋费"
-                value={formatMoney(String(order.packagingAmount))}
-                tabular
-              />
-              <Row
-                label="加工费合计"
-                value={formatMoney(String(order.processingAmount))}
-                tabular
-              />
-              <Row
-                label={
-                  hasPendingCustomerChargeAmount
-                    ? '对客已知应收总额（不含待定费用）'
-                    : order.isSfCollect
-                    ? '对客应收总额（不含快递费，含耗材费）'
-                    : '对客应收总额'
-                }
-                value={displayedCustomerFee?.amount ?? String(order.totalAmount)}
-                tabular
-              />
-            </>
-          ) : null}
-        </dl>
-      </section></>),
+    basics: (<><OrderBasicSummarySection {...{
+      order, hasProductionOperations, productionOperations, productionProgressSteps,
+      assignedWorkerNames, canViewCommercialAmounts, hasPendingCustomerChargeAmount, displayedCustomerFee,
+    }} /></>),
     customerCharges: (<>{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
@@ -1826,6 +1722,117 @@ export default async function OrderDetailPage({ params }: PageProps) {
       </div>
       </OrderDetailStickyScope>
     </div>
+  );
+}
+
+type RenderOrderBasicSummaryOptions = {
+  order: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;
+  hasProductionOperations: boolean;
+  productionOperations: Awaited<ReturnType<typeof listOrderProductionOperations>>;
+  productionProgressSteps: Awaited<ReturnType<typeof listOrderProductionProgressSteps>>;
+  assignedWorkerNames: string[];
+  canViewCommercialAmounts: boolean;
+  hasPendingCustomerChargeAmount: boolean;
+  displayedCustomerFee: OrderCustomerFee | null;
+};
+
+function OrderBasicSummarySection({
+  order,
+  hasProductionOperations,
+  productionOperations,
+  productionProgressSteps,
+  assignedWorkerNames,
+  canViewCommercialAmounts,
+  hasPendingCustomerChargeAmount,
+  displayedCustomerFee,
+}: RenderOrderBasicSummaryOptions) {
+  return (
+    <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <h2 className="text-base font-semibold">基本信息</h2>
+      <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        <Row label="工单名称" value={order.customName} full />
+        <Row
+          label="提交人"
+          value={`${order.submitter.displayName}（${roleLabel(order.submitter.role)}）`}
+        />
+        {hasProductionOperations ? (
+          <>
+            <Row
+              label="计件生产工序"
+              value={productionOperations
+                .map(
+                  (operation) =>
+                    `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
+                )
+                .join('；')}
+            />
+            <Row
+              label="无计件生产进度"
+              value={
+                productionProgressSteps.length > 0
+                  ? productionProgressSteps
+                      .map(
+                        (step) =>
+                          `#${step.orderItem.sequence} ${step.craftName}（${productionOperationStatusLabel(step.status)}）`,
+                      )
+                      .join('；')
+                  : '无'
+              }
+              full
+            />
+          </>
+        ) : assignedWorkerNames.length > 0 ? (
+          <Row label="历史派工" value={assignedWorkerNames.join('、')} />
+        ) : (
+          <Row label="生产工序" value="尚未生成" />
+        )}
+        <Row label="客户名称/简称" value={order.customerRef} />
+        {canViewCommercialAmounts && 'settlementType' in order ? (
+          <Row
+            label="结算路径"
+            value={ORDER_SETTLEMENT_LABELS[order.settlementType as OrderSettlementType]}
+          />
+        ) : null}
+        <Row label="快递代码" value={order.expressCode} />
+        <Row label="配送方式" value={order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'} />
+        <Row label="收货信息" value={formatReceiverInfo(order)} full />
+        <Row label="备注" value={order.remark} full />
+        <div>
+          <dt className="text-muted-foreground">承诺交期</dt>
+          <dd className="mt-0.5 flex items-center gap-2">
+            {order.promisedDate ? formatDateInputShanghai(order.promisedDate) : '—'}
+            <PromisedDateBadge promisedDate={order.promisedDate} status={order.status} />
+          </dd>
+        </div>
+        {canViewCommercialAmounts &&
+        'processingAmount' in order &&
+        'packagingAmount' in order &&
+        'totalAmount' in order ? (
+          <>
+            <Row
+              label="款式加工费"
+              value={formatMoney(
+                new Decimal(String(order.processingAmount)).minus(String(order.packagingAmount)),
+              )}
+              tabular
+            />
+            <Row label="入袋费" value={formatMoney(String(order.packagingAmount))} tabular />
+            <Row label="加工费合计" value={formatMoney(String(order.processingAmount))} tabular />
+            <Row
+              label={
+                hasPendingCustomerChargeAmount
+                  ? '对客已知应收总额（不含待定费用）'
+                  : order.isSfCollect
+                    ? '对客应收总额（不含快递费，含耗材费）'
+                    : '对客应收总额'
+              }
+              value={displayedCustomerFee?.amount ?? String(order.totalAmount)}
+              tabular
+            />
+          </>
+        ) : null}
+      </dl>
+    </section>
   );
 }
 

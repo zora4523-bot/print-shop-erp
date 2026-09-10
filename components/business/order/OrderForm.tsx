@@ -105,6 +105,7 @@ import {
   type OrderFormQuoteStatus,
 } from './order-form-gaps';
 import {
+  LocalOrderFormDraft,
   localOrderFormDraftStorageKey,
   parseLocalOrderFormDraft,
   resolveNextOrderItemFig,
@@ -3300,30 +3301,9 @@ export function OrderForm({
       aria-busy={pendingState.busy}
     >
       {pendingLocalDraft && !usesExternalSalesPricing ? (
-        <section
-          role="alert"
-          aria-labelledby="local-order-draft-heading"
-          className="rounded-xl border border-warning/50 bg-warning/10 p-4"
-        >
-          <h2 id="local-order-draft-heading" className="font-semibold">
-            发现本机未提交的表单草稿
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            最近保存于 {formatLocalDraftTime(pendingLocalDraft.savedAt)}
-            ，请选择恢复或放弃。
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            图片和 CDR 文件不会保存在本地草稿中。
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button type="button" onClick={restoreLocalDraft}>
-              恢复本地草稿
-            </Button>
-            <Button type="button" variant="outline" onClick={discardLocalDraft}>
-              放弃本地草稿
-            </Button>
-          </div>
-        </section>
+        <LocalDraftPromptSection {...{
+          pendingLocalDraft: pendingLocalDraft, restoreLocalDraft: restoreLocalDraft, discardLocalDraft: discardLocalDraft,
+        }} />
       ) : null}
 
       <fieldset
@@ -4128,6 +4108,34 @@ export function OrderForm({
         />
       ) : null}
     </form>
+  );
+}
+
+function LocalDraftPromptSection({ pendingLocalDraft, restoreLocalDraft, discardLocalDraft }: { pendingLocalDraft: LocalOrderFormDraft; restoreLocalDraft: () => void; discardLocalDraft: () => void; }
+) {
+  return (
+    <section
+      role="alert"
+      aria-labelledby="local-order-draft-heading"
+      className="rounded-xl border border-warning/50 bg-warning/10 p-4"
+    >
+      <h2 id="local-order-draft-heading" className="font-semibold">
+        发现本机未提交的表单草稿
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        最近保存于 {formatLocalDraftTime(pendingLocalDraft.savedAt)}
+        ，请选择恢复或放弃。
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">图片和 CDR 文件不会保存在本地草稿中。</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" onClick={restoreLocalDraft}>
+          恢复本地草稿
+        </Button>
+        <Button type="button" variant="outline" onClick={discardLocalDraft}>
+          放弃本地草稿
+        </Button>
+      </div>
+    </section>
   );
 }
 

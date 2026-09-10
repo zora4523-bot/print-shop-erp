@@ -38,14 +38,14 @@ test.describe('自动准备与显式生产下发', () => {
     await login(page, { from: `/orders/${id}/edit`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
     await page.getByLabel('工单名称', { exact: true }).fill('团圆红包・准备就绪');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await page.getByRole('button', { name: '确认保存', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect.poll(async () => (await state(id)).status).toBe('CONFIRMED');
     const prepared = await state(id);
     expect(prepared).toMatchObject({ operations: 0, prints: 0, readiness: 1, confirmedFee: '12.30', quotedFee: null, settledFee: null });
     await page.goto(`/orders/${id}`);
     await expect(page.getByRole('button', { name: '确认工单', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '下发 + 打印', exact: true }).click();
-    await page.getByRole('button', { name: '确认下发并创建打印', exact: true }).click();
+    await page.getByRole('button', { name: '下发并打印', exact: true }).click();
     await expect.poll(async () => (await state(id)).status).toBe('RELEASED');
     const released = await state(id);
     expect(released).toMatchObject({ operations: 2, prints: 1, readiness: 1, totalAmount: '12.30', confirmedFee: '12.30', settledFee: null });
@@ -62,7 +62,7 @@ test.describe('自动准备与显式生产下发', () => {
     const valid = await fixture();
     await page.goto(`/orders/${valid}`);
     await page.getByRole('button', { name: '下发 + 打印', exact: true }).click();
-    await page.getByRole('button', { name: '确认下发并创建打印', exact: true }).click();
+    await page.getByRole('button', { name: '下发并打印', exact: true }).click();
     await expect.poll(async () => (await state(valid)).status).toBe('RELEASED');
     expect(await state(valid)).toMatchObject({ operations: 2, prints: 1, readiness: 1, confirmedFee: '12.30' });
   });
