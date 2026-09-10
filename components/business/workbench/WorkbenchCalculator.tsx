@@ -7,8 +7,6 @@ import {
   OrderItemPricingRoute,
 } from '@/generated/prisma/enums';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
-import { catalogPricingFactChoices } from '@/lib/order/catalog-pricing-facts';
-import { workbenchPaperChoices } from '@/lib/workbench/catalog';
 import {
   MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE,
   NEW_ORDER_PRICING_ROUTES,
@@ -28,6 +26,7 @@ import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { ActionNotice, EmptyState } from '@/components/ui-business';
 import { WorkbenchChoice } from './WorkbenchChoice';
+import { WorkbenchProductFields } from './WorkbenchProductFields';
 
 function isColorUnavailable(selected: readonly string[], color: string) {
   return (
@@ -61,9 +60,6 @@ export function WorkbenchCalculator({
   const products = options.products.filter((product) =>
     productCategoryMatchesPricingRoute(route, product.category),
   );
-  const product = products.find((item) => item.id === productId);
-  const choices = (values: readonly string[]) =>
-    values.map((value) => ({ value, label: value }));
   function invalidate() {
     generation.current += 1;
     setResult(null);
@@ -148,44 +144,17 @@ export function WorkbenchCalculator({
               );
             }}
           />
-          <WorkbenchChoice
-            label="产品"
-            value={productId}
-            options={products.map((item) => ({
-              value: item.id,
-              label: item.name,
-            }))}
-            onChange={(value) => {
+          <WorkbenchProductFields
+            products={products}
+            papers={options.papers}
+            selection={{ productId, specification, paperType }}
+            onChange={(next) => {
               invalidate();
-              setProductId(value);
-              const selected = products.find((item) => item.id === value);
-              const specs = catalogPricingFactChoices(selected?.specification);
-              const papers = workbenchPaperChoices(selected, options.papers);
-              setSpecification(specs.length === 1 ? specs[0]! : '');
-              setPaperType(papers.length === 1 ? papers[0]! : '');
+              setProductId(next.productId);
+              setSpecification(next.specification);
+              setPaperType(next.paperType);
             }}
           />
-          {!products.length && (
-            <p className="text-sm text-muted-foreground">
-              暂无此类型产品，请选择其他产品类型
-            </p>
-          )}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <WorkbenchChoice
-              label="规格"
-              value={specification}
-              options={choices(
-                catalogPricingFactChoices(product?.specification),
-              )}
-              onChange={(value) => change(setSpecification, value)}
-            />
-            <WorkbenchChoice
-              label="纸张"
-              value={paperType}
-              options={choices(workbenchPaperChoices(product, options.papers))}
-              onChange={(value) => change(setPaperType, value)}
-            />
-          </div>
           <div className="space-y-2">
             <Label htmlFor="workbench-quantity">数量（个）</Label>
             <Input

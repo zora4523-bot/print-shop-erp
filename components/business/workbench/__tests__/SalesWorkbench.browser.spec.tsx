@@ -353,12 +353,12 @@ it('filters every category, opens and closes all 17 scenarios and copies each ex
   }
 });
 
-it('disables empty dependent choices and recovers from server and network failures', async () => {
+it('offers initial specification and paper choices and recovers from server and network failures', async () => {
   render();
   for (const label of ['规格', '纸张'])
     await expect
       .element(page.getByRole('combobox', { name: label, exact: true }))
-      .toBeDisabled();
+      .toBeEnabled();
   await chooseProduct();
   mocks.quote.mockResolvedValueOnce({
     status: 'error',
@@ -422,4 +422,90 @@ it('clears dependent selections on route changes and clears foil colors when swi
       backFoilColors: [],
     }),
   );
+});
+
+it('starts with specification or paper, resolves matching products and resets without stale quotes', async () => {
+  render(false, {
+    ...options,
+    products: [
+      ...options.products,
+      {
+        ...options.products[0]!,
+        id: 'small',
+        name: '小号专版',
+        specification: '中号封80×115',
+        paperType: '230g红卡',
+        weight: 230,
+      },
+    ],
+  });
+  await page.getByRole('combobox', { name: '规格', exact: true }).click();
+  await page.getByRole('option', { name: '中号封80×115', exact: true }).click();
+  await expect
+    .element(page.getByRole('combobox', { name: '产品', exact: true }))
+    .toHaveTextContent('小号专版');
+  await expect
+    .element(page.getByRole('combobox', { name: '纸张', exact: true }))
+    .toHaveTextContent('230g红卡');
+  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
+  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
+  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
+  await expect
+    .element(page.getByRole('combobox', { name: '产品', exact: true }))
+    .toHaveTextContent('大号专版烫金');
+  await expect
+    .element(page.getByRole('combobox', { name: '规格', exact: true }))
+    .toHaveTextContent('大号封90×165');
+  await page
+    .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
+    .getByRole('button', { name: '哑金' })
+    .click();
+  await page.getByRole('button', { name: '计算报价', exact: true }).click();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  expect(mocks.quote).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      productId: 'custom',
+      specification: '大号封90×165',
+      paperType: '160g珠光艳闪',
+    }),
+  );
+  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .not.toBeInTheDocument();
+  for (const label of ['规格', '纸张'])
+    await expect
+      .element(page.getByRole('combobox', { name: label, exact: true }))
+      .toBeEnabled();
+});
+
+it('keeps ambiguous paper matches unselected until a specification resolves the product', async () => {
+  render(false, {
+    ...options,
+    products: [
+      ...options.products,
+      {
+        ...options.products[0]!,
+        id: 'small',
+        name: '中号专版',
+        specification: '中号封80×115',
+      },
+    ],
+  });
+  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
+  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
+  await expect
+    .element(page.getByRole('combobox', { name: '产品', exact: true }))
+    .toHaveTextContent('请选择');
+  await expect.element(page.getByText(/有 2 个产品符合选择/)).toBeVisible();
+  await page.getByRole('combobox', { name: '规格', exact: true }).click();
+  await page.getByRole('option', { name: '中号封80×115', exact: true }).click();
+  await expect
+    .element(page.getByRole('combobox', { name: '产品', exact: true }))
+    .toHaveTextContent('中号专版');
+  await expect
+    .element(page.getByRole('combobox', { name: '纸张', exact: true }))
+    .toHaveTextContent('160g珠光艳闪');
 });

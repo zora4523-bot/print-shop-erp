@@ -184,3 +184,40 @@ test('every live catalog product, specification, paper and technique can be sele
     contentType: 'application/json',
   });
 });
+
+test('initial specification and paper choices work without selecting a product first', async ({
+  page,
+}) => {
+  await login(page, {
+    from: '/workbench',
+    username: E2E_USERS.sales!.username,
+    password: E2E_PASSWORD,
+  });
+  for (const label of ['规格', '纸张'])
+    await expect(
+      page.getByRole('combobox', { name: label, exact: true }),
+    ).toBeEnabled();
+  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
+  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
+  await page.getByRole('combobox', { name: '规格', exact: true }).click();
+  await page.getByRole('option', { name: '大号封90×165', exact: true }).click();
+  await expect(
+    page.getByRole('combobox', { name: '产品', exact: true }),
+  ).toContainText('专版烫金 · 大号封');
+  await page
+    .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
+    .getByRole('button')
+    .first()
+    .click();
+  await page.getByRole('button', { name: '计算报价', exact: true }).click();
+  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
+  await expect(page.getByText('待核价', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
+  await expect(page.getByText(/加工费价格版本/)).toHaveCount(0);
+  await page.getByRole('combobox', { name: '规格', exact: true }).click();
+  await page.getByRole('option', { name: '大号封90×165', exact: true }).click();
+  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
+  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
+  await page.getByRole('button', { name: '计算报价', exact: true }).click();
+  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
+});
