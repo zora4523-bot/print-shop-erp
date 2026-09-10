@@ -60,6 +60,28 @@ verification_scope: task dependencies, current source contracts, package scripts
 
 验收人可以与执行人角色不同；尚未指派时不能虚填姓名。证据应保存在 CI artifact 或稳定的任务记录中，不能只引用将被清理的 `/tmp`。不得保存数据库凭据、通知密钥或真实客户敏感数据。完整命令见 [开发指南](../DEVELOPMENT.md#常用命令)，门禁选择见 [测试要求](../CONTRIBUTING.md#测试要求)。
 
+### Grok 文档复审记录
+
+范围为 [a505386 的 Grok 报告](audits/2026-09-10-grok-a505386-review.md) G-01/G-02/G-03，
+开始 SHA 为 `469ae29560aa80151c8f8386e7cd80a32782ec33`。执行：Codex 主代理；
+独立复核：Codex `recheck_doc_fixes` 子代理。上次修正提交为 `469ae29`，本次修正见本记录所属提交。
+原 REL-01 至 REL-12 的状态不因文档复审改变。
+
+| 项目 | 复审结果与修正 | 状态 |
+|---|---|---|
+| G-01 CI 条件与部署说明 | Smoke 清单已正确，但主部署指南 §13 仍写“只有 CI=true”；本次统一为非空字符串语义，命令显式禁用 seed、清空备用 URL，并使用已确认的 `APP_PUBLIC_URL` | 已修正文档；生产环境未复验 |
+| G-02 隔离与 fixture | 命令入口隔离要求正确；报告的“未创建 fixture”已限定为用例自身的报工/工单数据，并明确 globalSetup 会在 skip 前写入测试账号 | 已修正报告；自动隔离门禁仍归 REL-04 |
+| G-03 CI 章节入口 | 当前 smoke 文首分别指向命令表与 CI 缺口章节 | 复核通过，无需重复修改 |
+
+验证结果（2026-09-10，开始 SHA + 本次 3 份文档补丁）：
+
+- `pnpm exec vitest run tests/regression/playwright-database-isolation.test.ts scripts/__tests__/deploy-smoke.test.ts`：2 文件、6 项通过，0 失败、0 跳过。配置测试模拟环境变量，smoke 使用本机 HTTP fixture 与 dry-run，未连接数据库。
+- 从 `deploy-smoke.mjs` 实际 Chromium 参数表达式验证未设置、空字符串、`false`、`0`、`1`、`true` 共 6 种 CI 值，结果与文档一致；未启动浏览器。
+- 33 个本地链接/章节锚点按“HEAD + 仅本任务文件”检查通过；`git diff --check` 通过。上述测试及其配置/脚本依赖与开始 HEAD 一致，不依赖其他任务的未提交业务改动。
+- 原 4 份 Grok 公开答复保持原样；独立子代理完成 3 份文档 diff 复核。
+
+未运行真实浏览器、业务数据库测试或生产探针，不新增上线通过结论。
+
 ## 文档同步分工
 
 | 修改类型 | 同一任务需核对的现行文档 |
