@@ -481,6 +481,36 @@ export type SfCollectChargeCorrection = {
   customerChargeOverrideReason: string | null;
 };
 
+async function assertCreateOrderProductsInTx(
+  txClient: Prisma.TransactionClient,
+  items: readonly { productId?: string | null }[],
+): Promise<void> {
+  // Batch lookup preserves per-item first-error order, including the
+  // distinction between a missing product and a disabled product.
+  const productIds = [
+    ...new Set(
+      items.flatMap((it) => (it.productId ? [it.productId] : [])),
+    ),
+  ];
+  if (productIds.length > 0) {
+    const foundProducts = await txClient.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, isActive: true },
+    });
+    const productById = new Map(foundProducts.map((p) => [p.id, p]));
+    for (const item of items) {
+      if (!item.productId) continue;
+      const product = productById.get(item.productId);
+      if (!product) {
+        throw new OrderInvariantError(`产品不存在：${item.productId}`);
+      }
+      if (!product.isActive) {
+        throw new OrderInvariantError(`产品已停用：${item.productId}`);
+      }
+    }
+  }
+}
+
 // The transaction path:
 //   1. advisory-lock the per-day order-seq (inside nextOrderNumber)
 //   2. verify every referenced Craft exists + is active
@@ -773,28 +803,7 @@ export async function createOrder(
     // trips inside the tx). No productId → no query at all. Deliberately
     // NOT filtering isActive in the where: 不存在 and 已停用 are two
     // distinct messages, and the per-item loop keeps first-error order.
-    const productIds = [
-      ...new Set(
-        items.flatMap((it) => (it.productId ? [it.productId] : [])),
-      ),
-    ];
-    if (productIds.length > 0) {
-      const foundProducts = await txClient.product.findMany({
-        where: { id: { in: productIds } },
-        select: { id: true, isActive: true },
-      });
-      const productById = new Map(foundProducts.map((p) => [p.id, p]));
-      for (const item of items) {
-        if (!item.productId) continue;
-        const product = productById.get(item.productId);
-        if (!product) {
-          throw new OrderInvariantError(`产品不存在：${item.productId}`);
-        }
-        if (!product.isActive) {
-          throw new OrderInvariantError(`产品已停用：${item.productId}`);
-        }
-      }
-    }
+    await assertCreateOrderProductsInTx(txClient, items);
 
     // (5) processing totals and per-shipment allocation facts.
     const itemsWithSubtotals = items.map((it, index) => {
