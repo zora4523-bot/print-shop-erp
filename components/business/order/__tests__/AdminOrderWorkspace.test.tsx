@@ -8,7 +8,7 @@ vi.mock('../AdminOrderWorkspaceList', () => ({
 
 import {
   AdminOrderWorkspace,
-  adminCustomerExactFilterParams,
+  adminSubmitterFilterParams,
   adminRejectedFilterParams,
 } from '../AdminOrderWorkspace';
 import { parseAdminOrderWorkspaceQuery } from '@/lib/order/admin-workspace-query';
@@ -24,30 +24,10 @@ describe('AdminOrderWorkspace', () => {
     const activeQuery = parseAdminOrderWorkspaceQuery({ queue: 'all', status: 'REJECTED', q: '客户甲' }).query;
     expect(adminRejectedFilterParams(activeQuery).status).toBeUndefined();
   });
-  it('builds exact customer filters from Party IDs or legacy snapshots', () => {
-    expect(
-      adminCustomerExactFilterParams({
-        id: 'party-1',
-        name: '客户甲',
-        filterValue: '客户甲',
-      }),
-    ).toEqual({
-      customerRef: undefined,
-      customerPartyId: 'party-1',
-      customerRefExact: undefined,
-      page: undefined,
-    });
-    expect(
-      adminCustomerExactFilterParams({
-        id: null,
-        name: '旧客户',
-        filterValue: '旧客户',
-      }),
-    ).toEqual({
-      customerRef: undefined,
-      customerPartyId: undefined,
-      customerRefExact: '旧客户',
-      page: undefined,
+  it('filters by the owning salesperson and clears product-customer filters', () => {
+    expect(adminSubmitterFilterParams({ id: 'sales-1', name: '业务员甲' })).toEqual({
+      submitterId: 'sales-1', customerRef: undefined, customerPartyId: undefined,
+      customerRefExact: undefined, page: undefined,
     });
   });
 
@@ -126,7 +106,7 @@ describe('AdminOrderWorkspace', () => {
     ]) {
       expect(html).toContain(label);
     }
-    expect(html).toContain('搜工单号 / 客户 / 名称 / 运单号');
+    expect(html).toContain('搜工单号 / 产品客户 / 名称 / 运单号');
     expect(html).toContain('12,345');
     expect(html).toContain('¥ 4,567.80');
     expect(html).toContain('另 1 单待核价未计入');

@@ -138,7 +138,7 @@ export function AdminOrderWorkspace({
             <Input
               name="q"
               defaultValue={query.list.filters.q}
-              placeholder="搜工单号 / 客户 / 名称 / 运单号"
+              placeholder="搜工单号 / 产品客户 / 名称 / 运单号"
               aria-label="搜索工单"
               className="pl-9"
             />
@@ -152,14 +152,14 @@ export function AdminOrderWorkspace({
                 page: undefined,
               })}
               prefetch={false}
-              aria-label={`清除精确客户筛选：${exactCustomerFilterLabel}`}
+              aria-label={`清除精确产品客户筛选：${exactCustomerFilterLabel}`}
               className={cn(
                 buttonVariants({ variant: 'outline' }),
                 'min-w-0 justify-start xl:w-48',
               )}
             >
               <span className="truncate">
-                客户：{exactCustomerFilterLabel}（精确）
+                产品客户：{exactCustomerFilterLabel}（精确）
               </span>
               <span aria-hidden="true">×</span>
             </Link>
@@ -167,8 +167,8 @@ export function AdminOrderWorkspace({
             <Input
               name="customerRef"
               defaultValue={query.list.filters.customerRef}
-              placeholder="客户"
-              aria-label="按客户筛选"
+              placeholder="产品客户"
+              aria-label="按产品客户筛选"
               className="w-32 grow sm:grow-0"
             />
           )}
@@ -294,13 +294,13 @@ export function AdminOrderWorkspace({
         hasFilters={hasUserFilters}
         clearFiltersHref={clearFiltersHref}
         selectedExportRequestKey={selectedExportRequestKey}
-        customerFilterHrefs={Object.fromEntries(
+        submitterFilterHrefs={Object.fromEntries(
           data.rows.map((order) => [
             order.id,
             buildTableHref(
               '/orders',
               params,
-              adminCustomerExactFilterParams(order.customer),
+              adminSubmitterFilterParams(order.submitter),
             ),
           ]),
         )}
@@ -446,13 +446,14 @@ function hiddenFilterInputs(
   );
 }
 
-export function adminCustomerExactFilterParams(
-  customer: AdminOrderWorkspacePage['rows'][number]['customer'],
+export function adminSubmitterFilterParams(
+  submitter: AdminOrderWorkspacePage['rows'][number]['submitter'],
 ): Record<string, string | undefined> {
   return {
     customerRef: undefined,
-    customerPartyId: customer.id ?? undefined,
-    customerRefExact: customer.id ? undefined : customer.filterValue,
+    customerPartyId: undefined,
+    customerRefExact: undefined,
+    submitterId: submitter.id,
     page: undefined,
   };
 }
@@ -494,9 +495,9 @@ function selectedCustomerLabel(query: AdminOrderWorkspaceQuery, data: AdminOrder
   return query.list.filters.customerPartyId
     ? data.rows.find(
         (order) => order.customer.id === query.list.filters.customerPartyId,
-      )?.customer.name ?? '已选客户'
+      )?.customer.name ?? '已选产品客户'
     : query.list.filters.customerRefExact ===
         MISSING_ORDER_CUSTOMER_FILTER_VALUE
-      ? '未填客户'
+      ? '未填产品客户'
       : query.list.filters.customerRefExact;
 }
