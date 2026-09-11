@@ -1,6 +1,6 @@
 'use client';
 
-import { unstable_catchError as catchError, type ErrorInfo } from 'next/error';
+import { catchError, type ErrorInfo } from 'next/error';
 import { ErrorState, type ErrorStateScope } from './ErrorState';
 
 type ErrorBoundaryFallbackProps = {
@@ -18,7 +18,7 @@ export type ErrorBoundaryProps = ErrorBoundaryFallbackProps & {
 
 function ErrorBoundaryFallback(
   props: ErrorBoundaryFallbackProps,
-  { unstable_retry }: ErrorInfo,
+  { retry }: ErrorInfo,
 ) {
   return (
     <ErrorState
@@ -28,7 +28,7 @@ function ErrorBoundaryFallback(
         props.description ?? '其他内容仍可继续使用，请重试当前区域。'
       }
       retryLabel={props.retryLabel}
-      onRetry={unstable_retry}
+      onRetry={retry}
       action={props.action}
       className={props.className}
     />
@@ -37,7 +37,7 @@ function ErrorBoundaryFallback(
 
 /**
  * Next.js 16 的真实组件级错误边界。预期的表单错误仍应作为值返回；
- * 这里只捕获渲染期的非预期异常，并通过 unstable_retry 重取当前区域。
+ * 这里只捕获渲染期的非预期异常，并通过 retry 重取当前区域。
  */
 const CatchErrorBoundary = catchError<ErrorBoundaryFallbackProps>(
   ErrorBoundaryFallback,

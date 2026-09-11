@@ -5,10 +5,10 @@ import './globals.css';
 
 export default function GlobalError({
   error,
-  unstable_retry,
+  retry,
 }: {
   error: Error & { digest?: string };
-  unstable_retry: () => void;
+  retry: () => void;
 }) {
   useEffect(() => {
     console.error(error);
@@ -32,7 +32,7 @@ export default function GlobalError({
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={unstable_retry}
+                onClick={retry}
                 className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 重新加载

@@ -209,6 +209,8 @@ token 位于 [`app/globals.css`](./app/globals.css)，浅色 `:root` 与 `.dark`
 | 领域状态 | `StatusBadge` | 由 [`lib/ui/status-registry.ts`](./lib/ui/status-registry.ts) 的集中映射提供 label + tone；进行中可带 dot，仍保留文字 |
 | 横向表格 | `TableScrollArea` | 暴露滚动可能性与边缘状态，不允许 table 撑破 body |
 
+错误边界按当前安装的 Next.js 文档使用 `next/error` 的 `catchError` 和 `ErrorInfo.retry`；路由 `error.tsx` / `global-error.tsx` 接收 `retry`。不再引用已移除的 `unstable_catchError` / `unstable_retry`，以免模块加载失败或重试按钮失效。
+
 ### 五态最低要求
 
 每个需要异步数据或提交的页面，至少设计并验证：
