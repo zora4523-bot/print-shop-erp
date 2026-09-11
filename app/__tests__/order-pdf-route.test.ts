@@ -114,11 +114,23 @@ describe('order PDF route', () => {
   });
 
   it('discards a PDF if the work order changed during rendering', async () => {
-    mocks.order.mockResolvedValueOnce({ id: 'order-1', orderNo: 'GD-001', workOrderVersion: 3 })
+    mocks.order.mockResolvedValueOnce({ id: 'order-1', orderNo: 'GD-001', workOrderVersion: 3, items: [] })
       .mockResolvedValueOnce({ id: 'order-1', workOrderVersion: 4 });
     const response = await request();
     expect(response.status).toBe(409);
     expect(await response.text()).toContain('href="/api/orders/order-1/pdf?regenerate=1"');
+  });
+
+  it.each(['inline', 'durable'])('discards a PDF when access is revoked during %s rendering', async (mode) => {
+    mocks.mode.mockReturnValue(mode);
+    mocks.wait.mockResolvedValue({ status: 'ready', artifactName: 'job-1.pdf' });
+    mocks.read.mockResolvedValue(Buffer.from('pdf'));
+    mocks.order.mockResolvedValueOnce({ id: 'order-1', orderNo: 'GD-001', workOrderVersion: 3, items: [] })
+      .mockResolvedValueOnce(null);
+    const response = await request();
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Not found' });
+    expect(response.headers.get('content-type')).not.toBe('application/pdf');
   });
 });
 

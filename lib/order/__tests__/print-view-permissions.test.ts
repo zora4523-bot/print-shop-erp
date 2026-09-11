@@ -4,12 +4,14 @@ import {
   PieceworkOperationType,
   ProductionOperationStatus,
   Role,
-  TaskStatus,
+  WorkerType,
+  MachineType,
 } from '../../../generated/prisma/enums';
 
 const { dbMock, buildQrSvgMock } = vi.hoisted(() => ({
   dbMock: {
     order: { findFirst: vi.fn() },
+    user: { findUnique: vi.fn() },
     craft: { findMany: vi.fn() },
   },
   buildQrSvgMock: vi.fn(),
@@ -22,6 +24,7 @@ import { getOrderForPrint } from '../print-view';
 
 beforeEach(() => {
   dbMock.order.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.user.findUnique.mockReset().mockResolvedValue({ role: Role.ADMIN, isActive: true, workerType: null, machineType: null });
   dbMock.craft.findMany.mockReset().mockResolvedValue([]);
   buildQrSvgMock.mockReset().mockImplementation(async (value: string) => (
     `<svg data-value="${value}"></svg>`
@@ -37,7 +40,6 @@ describe('getOrderForPrint permissions', () => {
       quantity: 1,
       crafts: [],
       designs: [],
-      tasks: [],
       frontFoilColors: ['金色'],
       backFoilColors: [],
     }));
@@ -45,6 +47,8 @@ describe('getOrderForPrint permissions', () => {
       id: 'fifty-styles',
       orderNo: 'GD-FIFTY',
       workOrderVersion: 3,
+      status: OrderStatus.RELEASED,
+      changeRequests: [],
       createdAt: new Date('2026-09-08T00:00:00Z'),
       items,
       packagingGroups: [],
@@ -86,80 +90,28 @@ describe('getOrderForPrint permissions', () => {
     expect(buildQrSvgMock).not.toHaveBeenCalled();
   });
 
-  it('图稿与任务同时间戳时用 id 稳定次序，避免跨页漂移', async () => {
-    await getOrderForPrint(
-      'order-stable-sort',
-      { id: 'admin-1', role: Role.ADMIN },
-      'https://erp.example.com',
-    );
-
-    expect(dbMock.order.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        include: expect.objectContaining({
-          items: expect.objectContaining({
-            include: expect.objectContaining({
-              designs: expect.objectContaining({
-                orderBy: [{ uploadedAt: 'asc' }, { id: 'asc' }],
-              }),
-              tasks: expect.objectContaining({
-                orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-              }),
-            }),
-          }),
-        }),
-      }),
-    );
+  it('图稿与当前工序按时间和 id 稳定排序，查询不再读取旧任务', async () => {
+    await getOrderForPrint('order-stable-sort', { id: 'admin-1', role: Role.ADMIN }, 'https://erp.example.com');
+    const query = dbMock.order.findFirst.mock.calls[0]?.[0];
+    expect(query.include.items.include).toEqual({ designs: { orderBy: [{ uploadedAt: 'asc' }, { id: 'asc' }] } });
+    for (const key of ['productionOperations', 'productionProgressSteps']) {
+      expect(query.include[key]).toEqual(expect.objectContaining({
+        where: { status: { not: ProductionOperationStatus.CANCELLED } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      }));
+    }
+    expect(query.include.changeRequests).toEqual({ where: { status: 'PENDING' }, take: 1, select: { id: true } });
   });
 
-  it('打印查询排除已取消的生产任务', async () => {
-    await getOrderForPrint(
-      'order-1',
-      { id: 'admin-1', role: Role.ADMIN },
-      'https://erp.example.com',
-    );
-
-    expect(dbMock.order.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        include: expect.objectContaining({
-          items: expect.objectContaining({
-            include: expect.objectContaining({
-              designs: expect.objectContaining({
-                orderBy: [{ uploadedAt: 'asc' }, { id: 'asc' }],
-              }),
-              tasks: expect.objectContaining({
-                where: { status: { not: TaskStatus.CANCELLED } },
-                orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-              }),
-            }),
-          }),
-        }),
-      }),
-    );
-  });
-
-  it('hides a SUBMITTED scheduling draft from the assigned WORKER in print and PDF flows', async () => {
-    await expect(
-      getOrderForPrint(
-        'scheduling-draft',
-        { id: 'worker-1', role: Role.WORKER },
-        'https://erp.example.com',
-      ),
-    ).resolves.toBeNull();
-
-    expect(dbMock.order.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          id: 'scheduling-draft',
-          status: { not: OrderStatus.SUBMITTED },
-          items: {
-            some: {
-              tasks: { some: { workerId: 'worker-1' } },
-            },
-          },
-        },
-      }),
-    );
+  it('师傅不可读取尚未下发的 SUBMITTED 草稿，不再依赖旧任务分配', async () => {
+    dbMock.user.findUnique.mockResolvedValue({ role: Role.WORKER, isActive: true, workerType: WorkerType.MACHINE, machineType: MachineType.HAND_PRESS });
+    await expect(getOrderForPrint('scheduling-draft', { id: 'worker-1', role: Role.WORKER }, 'https://erp.example.com')).resolves.toBeNull();
+    expect(dbMock.order.findFirst).toHaveBeenCalledWith({
+      where: { id: 'scheduling-draft', status: { not: OrderStatus.SUBMITTED } },
+      select: { workOrderVersion: true },
+    });
     expect(dbMock.craft.findMany).not.toHaveBeenCalled();
+    expect(buildQrSvgMock).not.toHaveBeenCalled();
   });
 
   it('将当前工单版本的新工序与进度写入打印 DTO，不混入旧任务', async () => {
@@ -170,6 +122,8 @@ describe('getOrderForPrint permissions', () => {
       id: 'order-1',
       orderNo: 'GD-260827-001',
       workOrderVersion: 3,
+      status: OrderStatus.RELEASED,
+      changeRequests: [],
       customName: null,
       kind: 'NORMAL',
       sourceOrder: null,
@@ -206,8 +160,8 @@ describe('getOrderForPrint permissions', () => {
           reports: [],
         },
         {
-          id: 'operation/old',
-          workOrderVersion: 2,
+          id: 'operation/cancelled-current',
+          workOrderVersion: 3,
           operationType: PieceworkOperationType.PARTIAL,
           status: ProductionOperationStatus.CANCELLED,
           plannedQty: '4000',
@@ -241,6 +195,16 @@ describe('getOrderForPrint permissions', () => {
         },
       ],
       productionProgressSteps: [
+        {
+          id: 'progress/old', workOrderVersion: 2,
+          craftName: '旧版工序', status: ProductionOperationStatus.PENDING,
+          plannedQty: '9999', orderItem: { sequence: 1, name: '彩印烫金款' }, reports: [],
+        },
+        {
+          id: 'progress/cancelled', workOrderVersion: 3,
+          craftName: '已取消工序', status: ProductionOperationStatus.CANCELLED,
+          plannedQty: '9999', orderItem: { sequence: 1, name: '彩印烫金款' }, reports: [],
+        },
         {
           id: 'progress/3',
           workOrderVersion: 3,
@@ -309,7 +273,9 @@ describe('getOrderForPrint permissions', () => {
         craftNames: ['彩印加烫'],
       }),
     );
-    expect(result?.items[0]?.tasks).toEqual([]);
+    expect(result?.items[0]).not.toHaveProperty('tasks');
+    expect(result?.status).toBe(OrderStatus.RELEASED);
+    expect(result?.hasPendingChange).toBe(false);
     expect(result?.productionSteps).toEqual([
       expect.objectContaining({
         id: 'packing/3',
@@ -345,4 +311,23 @@ describe('getOrderForPrint permissions', () => {
     );
     expect(buildQrSvgMock).toHaveBeenCalledTimes(1);
   });
+
+  it('当前工序为空时保留空集合，真实待审申请独立于工单名称', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'order-1', orderNo: 'GD-1', workOrderVersion: 2, status: OrderStatus.RELEASED,
+      customName: '测试 · 局部烫金', changeRequests: [{ id: 'pending-1' }],
+      createdAt: new Date('2026-09-10'), packagingGroups: [], shipments: [],
+      productionOperations: [], productionProgressSteps: [],
+      items: [{
+        id: 'item-1', sequence: 1, name: '款式', quantity: 1000,
+        crafts: [], designs: [], tasks: [{ id: 'legacy', worker: { displayName: '旧师傅' } }],
+      }],
+    });
+    const result = await getOrderForPrint('order-1', { id: 'admin-1', role: Role.ADMIN }, 'https://erp.example.com');
+    expect(result?.productionSteps).toEqual([]);
+    expect(result?.items[0]).not.toHaveProperty('tasks');
+    expect(result?.status).toBe(OrderStatus.RELEASED);
+    expect(result?.hasPendingChange).toBe(true);
+  });
+
 });

@@ -1,3 +1,5 @@
+import type { OrderStatus } from '../../generated/prisma/enums';
+
 // Narrow view-model the order print renderer actually needs. We flatten the
 // DB joins into plain fields so:
 //   1. The server page can resolve craft IDs → names once (instead of
@@ -12,20 +14,8 @@ export type PrintDesign = {
   fileUrl: string;
 };
 
-export type PrintTask = {
-  id: string;
-  craftName: string;
-  workerDisplayName?: string | null;
-  plannedQty: number;
-  completedQty: number;
-  defectQty: number;
-  completedAt?: Date | null;
-};
-
-// Current-generation production rows are separate from legacy
-// ProductionTask rows. A piecework operation can span several order items (or
-// a packaging group), so forcing it into one item's legacy task collection
-// would either duplicate progress or attach it to the wrong item.
+// A current-version operation can span multiple items or a packaging group.
+// Keep it at order level so progress is never duplicated across item rows.
 export type PrintProductionStep = {
   id: string;
   source: 'OPERATION' | 'PROGRESS';
@@ -98,7 +88,6 @@ export type PrintOrderItem = {
   craftNames: string[];
   remark?: string | null;
   designs: PrintDesign[];
-  tasks: PrintTask[];
 };
 
 export type PrintPackagingGroup = {
@@ -118,6 +107,8 @@ export type PrintOrder = {
   id: string;
   orderNo: string;
   workOrderVersion: number;
+  status: OrderStatus;
+  hasPendingChange: boolean;
   customName?: string | null;
   kind: 'NORMAL' | 'REWORK';
   sourceOrderNo?: string | null;
@@ -135,9 +126,7 @@ export type PrintOrder = {
   submittedAt?: Date | null;
   createdAt: Date;
   items: PrintOrderItem[];
-  // Only rows belonging to this exact workOrderVersion are exposed here.
-  // The renderer uses legacy item.tasks only when this current-generation
-  // collection is empty, preserving old records without mixing generations.
+  // Only non-cancelled rows belonging to this exact workOrderVersion.
   productionSteps: PrintProductionStep[];
   packagingGroups: PrintPackagingGroup[];
   shipments: PrintShipment[];

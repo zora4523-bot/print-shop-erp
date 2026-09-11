@@ -15,7 +15,7 @@ const TEST_FACTORY_NAME = '佛山测试印刷厂';
 
 type FixtureItem = PrintOrder['items'][number];
 type FixtureDesign = FixtureItem['designs'][number];
-type FixtureTask = FixtureItem['tasks'][number];
+type FixtureStep = PrintOrder['productionSteps'][number];
 
 function fixtureDesign(
   overrides: Partial<FixtureDesign> = {},
@@ -28,11 +28,13 @@ function fixtureDesign(
   };
 }
 
-function fixtureTask(overrides: Partial<FixtureTask> = {}): FixtureTask {
+function fixtureStep(overrides: Partial<FixtureStep> = {}): FixtureStep {
   return {
-    id: 'task-1',
+    id: 'operation-1',
+    source: 'OPERATION',
+    itemSequence: 1,
+    itemName: '鸿运当头',
     craftName: '烫金',
-    workerDisplayName: '李师傅',
     plannedQty: 5_000,
     completedQty: 0,
     defectQty: 0,
@@ -65,7 +67,6 @@ function fixtureItem(overrides: Partial<FixtureItem> = {}): FixtureItem {
     craftNames: ['烫金'],
     remark: null,
     designs: [fixtureDesign()],
-    tasks: [fixtureTask()],
     ...overrides,
   };
 }
@@ -95,6 +96,8 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
     id: 'order-abc',
     orderNo: 'GD-260423-001',
     workOrderVersion: 2,
+    status: 'RELEASED',
+    hasPendingChange: false,
     customName: '春节礼盒',
     kind: 'NORMAL',
     sourceOrderNo: null,
@@ -112,7 +115,16 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
     submittedAt: new Date('2026-04-23T02:00:00Z'),
     createdAt: new Date('2026-04-23T01:00:00Z'),
     items: [fixtureItem()],
-    productionSteps: [],
+    productionSteps: [
+      ...(overrides.items ?? [fixtureItem()]).map((item) => fixtureStep({
+        id: `operation-${item.id}`, itemSequence: item.sequence,
+        itemName: item.name, plannedQty: item.quantity,
+      })),
+      ...(overrides.packagingGroups ?? [fixturePackagingGroup()]).map((group) => fixtureStep({
+        id: `packing-${group.id}`, itemSequence: null, itemName: null,
+        craftName: '打包', quantityUnit: '袋', plannedQty: group.actualBagCount ?? 0,
+      })),
+    ],
     packagingGroups: [fixturePackagingGroup()],
     shipments: [
       {
@@ -149,11 +161,6 @@ function fixtureItems(count: number): FixtureItem[] {
         fixtureDesign({
           id: `design-${sequence}`,
           fileUrl: `https://cdn.example.com/designs/design-${sequence}.png`,
-        }),
-      ],
-      tasks: [
-        fixtureTask({
-          id: `task-${sequence}`,
         }),
       ],
     });
@@ -196,15 +203,17 @@ describe('buildPrintHtml', () => {
     expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
   });
 
-  it('两款尚无实际报工任务的主单也使用紧凑布局，为备注和收货信息留足空间', async () => {
+  it('两款尚无当前工序的主单也使用紧凑布局，为备注和收货信息留足空间', async () => {
     const html = await renderPrintHtml(fixtureOrder({
       orderNo: 'E2E-DASH-fb9ddbe2000a64d3-SUB-2-PRINT-REGRESSION',
-      items: fixtureItems(2).map((item) => ({ ...item, tasks: [] })),
+      items: fixtureItems(2),
+      productionSteps: [],
       remark: '正反面按最终设计图对版，混装按包装组执行。\n出货前核对款号、数量和收货电话。',
     }));
     expect(html).toContain('<article class="sheet dense"');
     expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
-    expect(html.match(/<td class="step">/g)).toHaveLength(3);
+    expect(html).not.toContain('<td class="step">');
+    expect(html).toContain('暂无生产工序记录');
     expect(html).not.toContain('class="task-qr"');
     expect(html).toContain('佛山市南海区某街道 1 号');
   });
@@ -249,40 +258,35 @@ describe('buildPrintHtml', () => {
     expect(html).toContain('<span>1 / 1</span>');
   });
 
-  it('当前代次工序优先于历史任务，主单不混入旧工序', async () => {
-    const html = await renderPrintHtml(
-      fixtureOrder({
-        productionSteps: [
-          {
-            id: 'operation-v3',
-            source: 'OPERATION',
-            itemSequence: 1,
-            itemName: '鸿运当头',
-            craftName: '局部烫金',
-            plannedQty: 5_000,
-            completedQty: 1_200,
-            defectQty: 3,
-            completedAt: null,
-          },
-        ],
-        items: [
-          fixtureItem({
-            tasks: [
-              fixtureTask({
-                id: 'legacy-task-v1',
-                craftName: '旧版工序',
-              }),
-            ],
-          }),
-        ],
-      }),
-    );
-
+  it('工序表和工艺摘要只显示当前生产事实，不追加推测的打包工序', async () => {
+    const html = await renderPrintHtml(fixtureOrder({
+      productionSteps: [fixtureStep({ craftName: '局部烫金', completedQty: 1200, defectQty: 3 })],
+      items: [fixtureItem({ craftNames: ['过期工艺'] })],
+    }));
     expect(html).toContain('局部烫金');
-    const flowTables = html.match(/<table class="flow flow-compact">[\s\S]*?<\/table>/g)?.join('') ?? '';
-    expect(flowTables).not.toContain('旧版工序');
-    expect(html.match(/<td class="step">/g)).toHaveLength(2);
+    expect(html).not.toContain('过期工艺');
+    expect(html.match(/<td class="step">/g)).toHaveLength(1);
     expect(html.match(/data-stub-qr="1"/g)).toHaveLength(1);
+  });
+
+  it.each([19, 50, 73, 100])('%i 字工单名称完整换行，不单独生成附页', async (length) => {
+    const customName = '名'.repeat(length);
+    const html = await renderPrintHtml(fixtureOrder({ customName }));
+    expect(html).toContain(`<div class="order-name">工单 <b>${customName}</b></div>`);
+    expect(supplementTextByLabel(html, '工单名称')).toBe('');
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
+  });
+
+  it.each([
+    ['RELEASED', false, '已下发'],
+    ['CONFIRMED', false, '待下发生产'],
+    ['ON_HOLD', true, '已暂停'],
+  ] as const)('页眉使用真实状态 %s，审批标签只来自待处理变更', async (status, hasPendingChange, label) => {
+    const html = await renderPrintHtml(fixtureOrder({ status, hasPendingChange }));
+    expect(html).toContain(`状态 <b>${label}</b>`);
+    expect(html.includes('<span class="tag">变更待审批</span>')).toBe(hasPendingChange);
+    expect(html).not.toContain('待排产');
+    expect(html).not.toContain('生产团队');
   });
 
   it('静态 PDF shell 与浏览器打印共用完全相同的布局 DOM', async () => {
@@ -376,21 +380,19 @@ describe('buildPrintHtml', () => {
     expect(html).not.toContain('包装要求未填');
   });
 
-  it('生产工艺只来自任务或工艺事实，不把客户计价路线冒充工序', async () => {
+  it('生产工艺只来自当前工序或明确工艺事实，不把客户计价路线冒充工序', async () => {
     const items = [
       fixtureItem({
         id: 'item-local',
         sequence: 1,
         name: '局部款',
         pricingRoute: 'STOCK_BLANK',
-        tasks: [],
       }),
       fixtureItem({
         id: 'item-custom',
         sequence: 2,
         name: '专版款',
         pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
-        tasks: [],
       }),
       fixtureItem({
         id: 'item-color',
@@ -400,11 +402,10 @@ describe('buildPrintHtml', () => {
         frontFoilColors: [],
         foilColors: [],
         craftNames: ['彩印'],
-        tasks: [],
       }),
     ];
     const html = await renderPrintHtml(
-      fixtureOrder({ items, packagingGroups: [] }),
+      fixtureOrder({ items, packagingGroups: [], productionSteps: [] }),
     );
 
     expect(html).toContain('烫金 / 彩印');
@@ -417,12 +418,12 @@ describe('buildPrintHtml', () => {
   it('彩印加烫金完整打印彩色、覆膜、烫金方式与正反面事实', async () => {
     const html = await renderPrintHtml(
       fixtureOrder({
+        productionSteps: [],
         items: [
           fixtureItem({
             pricingRoute: 'COLOR_PRINT',
             craftNames: [],
-            tasks: [],
-            printColors: ['C', 'M', 'Y', 'K'],
+                printColors: ['C', 'M', 'Y', 'K'],
             printColorsKnown: true,
             lamination: 'SOFT_TOUCH',
             foilTechnique: 'RELIEF',
@@ -450,15 +451,15 @@ describe('buildPrintHtml', () => {
     expect(visibleText(html)).not.toContain('不覆膜');
   });
 
-  it('无任务且无明确工艺事实时显示待确认，不用彩印计价路线推测工序', async () => {
+  it('无当前工序且无明确工艺事实时显示待确认，不用彩印计价路线推测工序', async () => {
     const html = await renderPrintHtml(
       fixtureOrder({
+        productionSteps: [],
         items: [
           fixtureItem({
             pricingRoute: 'COLOR_PRINT',
             craftNames: [],
-            tasks: [],
-            printColors: [],
+                printColors: [],
             printColorsKnown: false,
             lamination: 'NONE',
             foilTechnique: 'UNSPECIFIED',
@@ -471,7 +472,7 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(visibleText(html)).toContain('工序待确认');
+    expect(visibleText(html)).toContain('暂无生产工序记录');
     expect(visibleText(html)).toContain('图 1 生产工艺待确认');
     expect(visibleText(html)).not.toContain('彩印颜色待确认');
   });
@@ -540,9 +541,7 @@ describe('buildPrintHtml', () => {
     expect(html).toContain(
       '<td colSpan="3">合　计</td><td class="num">2,000</td><td></td><td class="num">200</td>',
     );
-    expect(html).toContain(
-      '<td class="step">打包</td><td class="num">200 袋</td>',
-    );
+    expect(html.match(/<td class="step">打包<\/td><td class="num">100 袋<\/td>/g)).toHaveLength(2);
   });
 
   it('混装组只计一次 actualBagCount，不按款式重复累加', async () => {
@@ -578,80 +577,49 @@ describe('buildPrintHtml', () => {
     expect(html).not.toContain('<td class="num">240</td>');
   });
 
-  it('主单保留每个任务的数量与师傅，仅使用工单主码', async () => {
-    const items = [
-      fixtureItem({
-        tasks: [
-          fixtureTask({
-            id: 'task-1',
-            workerDisplayName: '李师傅',
-            plannedQty: 3_000,
-            completedQty: 3_000,
-            defectQty: 12,
-            completedAt: new Date('2026-04-23T08:00:00+08:00'),
-          }),
-          fixtureTask({
-            id: 'task-2',
-            workerDisplayName: '王师傅',
-            plannedQty: 2_000,
-            completedQty: 500,
-            defectQty: 3,
-            completedAt: new Date('2026-04-24T08:00:00+08:00'),
-          }),
-        ],
-      }),
-    ];
-    const html = await renderPrintHtml(fixtureOrder({ items }));
-
-    expect(html).toContain('李师傅 / 王师傅');
-    expect(html).toContain(
-      '<td class="step"><small class="flow-item">图 1 · 鸿运当头</small>烫金<small class="flow-worker">李师傅</small></td><td class="num">3,000</td><td class="num">3,000</td><td class="num">12</td><td>2026-04-23</td>',
-    );
-    expect(html).toContain(
-      '<td class="step"><small class="flow-item">图 1 · 鸿运当头</small>烫金<small class="flow-worker">王师傅</small></td><td class="num">2,000</td><td class="num">500</td><td class="num">3</td><td>2026-04-24</td>',
-    );
+  it('主单保留每个当前工序的数量和完成日期，仅使用工单主码', async () => {
+    const html = await renderPrintHtml(fixtureOrder({ productionSteps: [
+      fixtureStep({ id: 'operation-1', plannedQty: 3000, completedQty: 3000, defectQty: 12,
+        completedAt: new Date('2026-04-23T08:00:00+08:00') }),
+      fixtureStep({ id: 'progress-2', source: 'PROGRESS', plannedQty: 2000, completedQty: 500, defectQty: 3,
+        completedAt: new Date('2026-04-24T08:00:00+08:00') }),
+    ] }));
+    expect(html).toContain('<td class="num">3,000</td><td class="num">3,000</td><td class="num">12</td><td>2026-04-23</td>');
+    expect(html).toContain('<td class="num">2,000</td><td class="num">500</td><td class="num">3</td><td>2026-04-24</td>');
     expect(html).not.toContain('任务报工二维码');
     expect(html.match(/data-stub-qr="1"/g)).toHaveLength(1);
   });
 
-  it('逐款优先打印实际任务，未派工款式继续打印明确计划工序', async () => {
-    const html = await renderPrintHtml(
-      fixtureOrder({
-        packagingGroups: [],
-        items: [
-          fixtureItem({
-            id: 'item-1',
-            sequence: 1,
-            name: '已派工款',
-            tasks: [fixtureTask({ id: 'task-actual', craftName: '平烫' })],
-          }),
-          fixtureItem({
-            id: 'item-2',
-            sequence: 2,
-            name: '待派工彩印款',
-            craftNames: ['彩印'],
-            printColors: ['C', 'M', 'Y', 'K'],
-            tasks: [],
-          }),
-        ],
-      }),
-    );
+  it('缺少当前生产工序时不根据款式工艺或包装组制造进度', async () => {
+    const html = await renderPrintHtml(fixtureOrder({ productionSteps: [],
+      items: [fixtureItem({ craftNames: ['彩印'], printColors: ['C', 'M', 'Y', 'K'] })],
+    }));
+    expect(html).toContain('暂无生产工序记录');
+    expect(html).not.toContain('<td class="step">');
+    expect(html).toContain('<div class="l0">彩印</div>');
+    expect(html).not.toContain('待排产');
+  });
 
-    expect(visibleText(html)).toContain('图 1 · 已派工款 平烫 李师傅');
-    expect(visibleText(html)).toContain('图 2 · 待派工彩印款 彩印');
-    expect(html).not.toContain('data-stub-task-qr="1"');
+  it('首条工序过长进入附页时，主页指向明细而不是误报无记录', async () => {
+    const craftName = '长'.repeat(500);
+    const html = await renderPrintHtml(fixtureOrder({ productionSteps: [fixtureStep({ craftName })] }));
+    expect(html).toContain('工序明细见附页');
+    expect(html).not.toContain('暂无生产工序记录');
+    expect(html.match(/<td class="step">/g)).toHaveLength(1);
+    expect(html).toContain(craftName);
   });
 
   it('工序与图稿附页共同计入总页数并连续编号', async () => {
-    const tasks = Array.from({ length: 12 }, (_, index) =>
-      fixtureTask({ id: `task-${index + 1}` }),
+    const productionSteps = Array.from({ length: 12 }, (_, index) =>
+      fixtureStep({ id: `task-${index + 1}` }),
     );
     const designs = Array.from({ length: 9 }, (_, index) =>
       fixtureDesign({ id: `design-${index + 1}` }),
     );
     const html = await renderPrintHtml(
       fixtureOrder({
-        items: [fixtureItem({ tasks, designs })],
+        items: [fixtureItem({ designs })],
+        productionSteps,
       }),
     );
 
@@ -691,60 +659,30 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(16);
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(15);
     expect(html.match(/<section class="sec warning-annex">/g)).toHaveLength(3);
     expect(html.match(/<section class="sec item-annex">/g)).toHaveLength(4);
     expect(html.match(/<section class="sec artwork-annex">/g)).toHaveLength(5);
-    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(3);
+    expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(2);
     expect(html.match(/<tr><td><span class="badge">/g)).toHaveLength(50);
     expect(html.match(/class="thumb"/g)).toHaveLength(50);
     expect(html).not.toContain('data-stub-task-qr="1"');
-    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(16);
+    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(15);
     expect(html.match(/<tfoot>/g)).toHaveLength(1);
-    expect(html).toContain('<span>1 / 16</span>');
-    expect(html).toContain('<span>16 / 16</span>');
+    expect(html).toContain('<span>1 / 15</span>');
+    expect(html).toContain('<span>15 / 15</span>');
   });
 
-  it('显式换行备注与 50 个长姓名师傅只在有界页眉预览，全文确定性续页', async () => {
-    const workerNames = Array.from({ length: 50 }, (_, index) => {
-      const sequence = String(index + 1).padStart(2, '0');
-      return `师傅${sequence}${'长'.repeat(60)}`;
-    });
-    const team = workerNames.join(' / ');
+  it('显式换行备注、长客户名和超长工单名在有界页眉预览，全文确定性续页', async () => {
     const customerName = '客'.repeat(128);
-    const customName = '单'.repeat(100);
+    const customName = '单'.repeat(200);
     const remark = Array.from({ length: 500 }, () => '备').join('\n');
-    const html = await renderPrintHtml(
-      fixtureOrder({
-        customerName,
-        customName,
-        remark,
-        items: [
-          fixtureItem({
-            tasks: workerNames.map((workerDisplayName, index) =>
-              fixtureTask({
-                id: `task-${String(index + 1).padStart(2, '0')}`,
-                workerDisplayName,
-              }),
-            ),
-          }),
-        ],
-      }),
-    );
-
-    const sheetCount =
-      html.match(/<article class="sheet(?: dense)?"/g)?.length ?? 0;
-    expect(sheetCount).toBe(39);
-    expect(html.match(/class="flow-worker"/g)).toHaveLength(50);
-    expect(html.match(/<div class="cust">客{16}…<\/div>/g)).toHaveLength(
-      sheetCount,
-    );
+    const html = await renderPrintHtml(fixtureOrder({ customerName, customName, remark }));
+    const sheetCount = html.match(/<article class="sheet(?: dense)?"/g)?.length ?? 0;
+    expect(sheetCount).toBe(28);
+    expect(html.match(/<div class="cust">客{16}…<\/div>/g)).toHaveLength(sheetCount);
     expect(html).not.toContain(`<div class="cust">${customerName}</div>`);
-    expect(html.match(/<div class="l1 note">[\s\S]*?<\/div>/)?.[0]).not.toContain(
-      '\n',
-    );
     expect(supplementTextByLabel(html, '客户')).toBe(customerName);
-    expect(supplementTextByLabel(html, '生产团队')).toBe(team);
     expect(supplementTextByLabel(html, '工单名称')).toBe(customName);
     expect(supplementTextByLabel(html, '备注')).toBe(remark);
     expect(html).toContain(`<span>1 / ${sheetCount}</span>`);

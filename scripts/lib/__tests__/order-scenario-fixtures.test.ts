@@ -27,6 +27,15 @@ describe('order scenario fixture inputs', () => {
     expect(buildOrderScenarioInput(ORDER_SCENARIOS[1], catalog, now).promisedDate?.toISOString().slice(0, 10)).toBe('2026-09-09');
     expect(buildOrderScenarioInput(ORDER_SCENARIOS[8], catalog, now).promisedDate).toBeNull();
   });
+  it('keeps the quantity-change fixture name independent from its approval state', () => {
+    const scenario = ORDER_SCENARIOS.find((row) => row.key === 'change')!;
+    const input = buildOrderScenarioInput(scenario, catalog, now);
+    expect(input.customName).toBe('测试 · 局部烫金 · 加量测试');
+    expect(input.items.map((item) => item.name)).toEqual(['局部烫金 · 加量测试 · 第 1 款']);
+    expect(input.clientSubmissionId).toBe(scenarioSubmissionId('change'));
+    expect(input.items[0]!.quantity).toBe(1000);
+    expect(scenario).toMatchObject({ key: 'change', change: true });
+  });
   it('covers all canonical routes, manual pricing, mixed styles and two shipping addresses', () => {
     const inputs = ORDER_SCENARIOS.map((s) => buildOrderScenarioInput(s, catalog, now));
     expect(new Set(inputs.flatMap((input) => input.items.map((item) => item.pricingRoute)))).toEqual(new Set(['STOCK_BLANK', 'CUSTOM_SINGLE_FLAT_FOIL', 'COLOR_PRINT']));
