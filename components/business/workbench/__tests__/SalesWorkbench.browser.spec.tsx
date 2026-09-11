@@ -862,7 +862,8 @@ it('explains an unavailable linked paper and resumes quoting after choosing an a
   await product.click();
   await page.getByRole('option', { name: '关联缺货纸张产品', exact: true }).click();
   await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toBeDisabled();
-  await expect.element(page.getByText('所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料')).toBeVisible();
+  await expect.element(page.getByText('所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料').first()).toBeVisible();
+  await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toHaveAccessibleDescription('所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料');
   await expect.element(page.getByText('¥ 492.75', { exact: true })).not.toBeInTheDocument();
   await new Promise((resolve) => setTimeout(resolve, 650));
   expect(mocks.quote).not.toHaveBeenCalled();
@@ -876,6 +877,17 @@ it('explains an unavailable linked paper and resumes quoting after choosing an a
   await page.getByRole('option', { name: '关联未录克重纸张产品', exact: true }).click();
   await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toBeDisabled();
   await expect.element(page.getByText('所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料')).not.toBeInTheDocument();
+  await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toHaveAccessibleDescription('所选纸张缺少克重，请选择其他产品或联系管理员补充资料');
+  await expect.element(page.getByText('请选择纸张', { exact: true })).not.toBeInTheDocument();
+  await page.getByRole('button', { name: '计算报价', exact: true }).click();
+  await expect.element(page.getByRole('alert')).toHaveTextContent('所选纸张缺少克重，请选择其他产品或联系管理员补充资料');
+  mocks.quote.mockClear();
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  expect(mocks.quote).not.toHaveBeenCalled();
+  await product.click();
+  await page.getByRole('option', { name: '大号专版烫金', exact: true }).click();
+  await expect.element(page.getByText('¥ 492.75', { exact: true })).toBeVisible();
+  await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toHaveAccessibleDescription('');
 });
 
 it('shows a paper weight once when its specification already contains that weight', async () => {

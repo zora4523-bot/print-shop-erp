@@ -58,7 +58,9 @@ export const workbenchQuoteSchema = z
   .object({
     productId: z.string().trim().min(1).max(32),
     specification: z.string().trim().min(1).max(64),
-    paperType: z.string().trim().min(1).max(32),
+    // This is a catalog selection label: material name (64) + up to 2000g (5).
+    // The action resolves it into paper name and weight before order validation.
+    paperType: z.string().trim().min(1).max(69),
     pricingRoute: z.enum(NEW_ORDER_PRICING_ROUTES),
     quantity: z.number().int().min(1).max(9_999_999),
     frontFoilColors: z.array(z.string().trim().min(1).max(32)).max(3),

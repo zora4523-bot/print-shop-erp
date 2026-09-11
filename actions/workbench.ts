@@ -11,6 +11,7 @@ import { listActiveCraftOrderOptions } from '@/lib/craft';
 import { listExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import { presentCreateOrderPlateFee } from '@/lib/order/create-order-quote-presentation';
 import { workbenchPaperChoices } from '@/lib/workbench/catalog';
+import { canonicalizeCreateOrderPaperFact } from '@/lib/price/create-order/canonical-facts';
 import {
   catalogPricingFactChoices,
   parseCatalogPaperWeight,
@@ -97,6 +98,17 @@ export async function quoteWorkbenchAction(
         status: 'error',
         message: '所选纸张缺少克重，请联系管理员补充产品资料后再计算',
       };
+    // Keep the catalog-validated identity and weight separate. The display
+    // prefix must not consume the persisted/order paper name's 32 characters.
+    const paperFact = canonicalizeCreateOrderPaperFact(
+      input.paperType,
+      paperWeightGsm,
+    );
+    if (!paperFact || paperFact.paperType.length > 32)
+      return {
+        status: 'error',
+        message: '所选纸张名称暂不支持自动报价，请联系管理员核价',
+      };
     const colors = [...input.frontFoilColors, ...input.backFoilColors];
     if (
       colors.some(
@@ -125,6 +137,7 @@ export async function quoteWorkbenchAction(
       items: [
         {
           ...input,
+          paperType: paperFact.paperType,
           actualWidthMm: null,
           actualHeightMm: null,
           paperWeightGsm,

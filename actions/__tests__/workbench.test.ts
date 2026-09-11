@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { Role } from '@/generated/prisma/enums';
 import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '@/lib/price/__tests__/fixtures/create-order-golden-fixtures';
 import { CreateOrderQuoteError } from '@/lib/order/create-order-quote-service';
+import * as quoteService from '@/lib/order/create-order-quote-service';
 
 const mocks = vi.hoisted(() => ({
   permission: vi.fn(),
@@ -470,4 +471,27 @@ describe('workbench automatic quote failure guidance', () => {
       quote: { needsPricing: false, pricingReasons: [] },
     });
   });
+});
+
+
+it('quotes a full 32-character paper name with its catalog weight without truncating its identity', async () => {
+  const custom = useFoilCatalog('CUSTOM_FLAT_FOIL');
+  const paperType = '纸'.repeat(32);
+  const longProduct = { ...product, category: 'CUSTOM_FLAT_FOIL', paperType, paperMaterialId: 'paper', weight: null };
+  const paper = { id: 'paper', name: paperType, specification: '160g', weight: 160, isActive: true, outOfStock: false };
+  mocks.options.mockResolvedValue({ products: [longProduct], papers: [paper], foilColors: [{ name: '哑金' }] });
+  mocks.products.mockResolvedValue([longProduct]);
+  mocks.materials.mockResolvedValue([paper]);
+  const calculate = vi.spyOn(quoteService, 'calculateCreateOrderQuoteFromCatalogInTx');
+  const result = await quoteWorkbenchAction({ ...custom, paperType: `160g${paperType}` });
+  const submitted = calculate.mock.calls.at(-1)?.[1].facts.items[0];
+  calculate.mockRestore();
+  expect(submitted).toMatchObject({ paperType, paperWeightGsm: 160 });
+  // Unknown papers reach the real pricing engine and remain manual; they must
+  // not fail the input schema or silently become a different priced paper.
+  expect(result).toMatchObject({ status: 'success', quote: { needsPricing: true, baseAmount: null, suggestedAmount: null } });
+  expect(mocks.transaction).toHaveBeenCalledTimes(1);
+  mocks.transaction.mockClear();
+  expect(await quoteWorkbenchAction({ ...custom, paperType: `200g${paperType}` })).toMatchObject({ status: 'error', message: '产品选项已变更，请刷新页面后重新选择' });
+  expect(mocks.transaction).not.toHaveBeenCalled();
 });

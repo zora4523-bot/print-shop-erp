@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { ProductCategory } from '@/generated/prisma/enums';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
-import { workbenchPaperChoices } from '../catalog';
+import { workbenchPaperChoices, workbenchPaperIssue } from '../catalog';
 
 const product: ExternalCreateOrderOptions['products'][number] = {
   id: 'p',
@@ -76,4 +76,18 @@ it('does not invent material combinations for stock products', () => {
 it('handles missing product and empty material catalog', () => {
   expect(workbenchPaperChoices(undefined, papers)).toEqual([]);
   expect(workbenchPaperChoices(product, [])).toEqual([]);
+});
+
+
+it('distinguishes missing weight from stock and inactive material facts', () => {
+  const linkedProduct = { ...product, paperMaterialId: 'red' };
+  expect(workbenchPaperIssue(linkedProduct, papers)).toBeNull();
+  // A missing stock product paper constraint is not a missing material weight.
+  expect(workbenchPaperIssue({ ...linkedProduct, category: ProductCategory.BLANK_STOCK }, papers)).toBeNull();
+  expect(workbenchPaperIssue(linkedProduct, [])).toContain('缺货或停用');
+  expect(workbenchPaperIssue(linkedProduct, [{ ...papers[0]!, outOfStock: true }])).toContain('缺货或停用');
+  const weightless = [{ ...papers[0]!, weight: null, specification: null }];
+  expect(workbenchPaperIssue(linkedProduct, weightless)).toContain('缺少克重');
+  expect(workbenchPaperIssue({ ...linkedProduct, paperType: '160g红卡' }, weightless)).toBeNull();
+  expect(workbenchPaperIssue(undefined, weightless)).toBeNull();
 });

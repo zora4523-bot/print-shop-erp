@@ -2,7 +2,10 @@
 
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import { catalogPricingFactChoices } from '@/lib/order/catalog-pricing-facts';
-import { workbenchPaperChoices } from '@/lib/workbench/catalog';
+import {
+  workbenchPaperChoices,
+  workbenchPaperIssue,
+} from '@/lib/workbench/catalog';
 import { Button } from '@/components/ui/button';
 import { WorkbenchChoice } from './WorkbenchChoice';
 
@@ -27,11 +30,7 @@ export function WorkbenchProductFields({
     catalogPricingFactChoices(item.specification);
   const papersFor = (item: (typeof products)[number]) =>
     workbenchPaperChoices(item, papers);
-  const linkedPaper = product?.paperMaterialId
-    ? papers.find((paper) => paper.id === product.paperMaterialId)
-    : undefined;
-  const linkedPaperUnavailable =
-    product?.paperMaterialId && (!linkedPaper || linkedPaper.outOfStock);
+  const paperIssue = workbenchPaperIssue(product, papers);
   const candidates = product
     ? [product]
     : products.filter(
@@ -122,16 +121,12 @@ export function WorkbenchProductFields({
         />
         <WorkbenchChoice
           label="纸张"
+          description={paperIssue}
           value={selection.paperType}
           options={choices(candidates.flatMap(papersFor))}
           onChange={(paperType) => choose({ ...selection, paperType })}
         />
       </div>
-      {linkedPaperUnavailable && (
-        <p className="text-sm text-muted-foreground">
-          所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料
-        </p>
-      )}
       {(selection.productId ||
         selection.specification ||
         selection.paperType) && (

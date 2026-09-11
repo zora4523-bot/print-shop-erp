@@ -6,6 +6,28 @@ import {
 } from '@/lib/order/catalog-pricing-facts';
 import { productCategoryMatchesPricingRoute } from '@/lib/order/pricing-route';
 
+/** Explain unavailable catalog facts before asking the user to select a paper. */
+export function workbenchPaperIssue(
+  product: ExternalCreateOrderOptions['products'][number] | undefined,
+  papers: ExternalCreateOrderOptions['papers'],
+): string | null {
+  if (!product?.paperMaterialId) return null;
+  const linked = papers.find((paper) => paper.id === product.paperMaterialId);
+  if (!linked || linked.outOfStock)
+    return '所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料';
+  if (
+    product.weight === null &&
+    linked.weight === null &&
+    parseCatalogPaperWeight(linked.specification) === null &&
+    parseCatalogPaperWeight(linked.name) === null &&
+    workbenchPaperChoices(product, papers).every(
+      (choice) => parseCatalogPaperWeight(choice) === null,
+    )
+  )
+    return '所选纸张缺少克重，请选择其他产品或联系管理员补充资料';
+  return null;
+}
+
 /** Size-only custom products use the active material catalog, as in order creation. */
 export function workbenchPaperChoices(
   product: ExternalCreateOrderOptions['products'][number] | undefined,

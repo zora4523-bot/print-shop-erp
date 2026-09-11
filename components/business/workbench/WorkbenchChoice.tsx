@@ -3,19 +3,23 @@
 import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown } from 'lucide-react';
 import { useId } from 'react';
+import { DisabledReason } from '@/components/ui-business';
 
 export function WorkbenchChoice({
   label,
   value,
   options,
   onChange,
+  description,
 }: {
   label: string;
   value: string;
   options: readonly { value: string; label: string }[];
   onChange: (value: string) => void;
+  description?: string | null;
 }) {
   const id = useId();
+  const descriptionId = `${id}-description`;
   return (
     <div className="min-w-0 space-y-2">
       <span id={id} className="text-sm font-medium">
@@ -29,6 +33,7 @@ export function WorkbenchChoice({
       >
         <Select.Trigger
           aria-labelledby={id}
+          aria-describedby={description ? descriptionId : undefined}
           className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Select.Value
@@ -66,6 +71,11 @@ export function WorkbenchChoice({
           </Select.Positioner>
         </Select.Portal>
       </Select.Root>
+      {description && (
+        <div id={descriptionId}>
+          <DisabledReason cause="prerequisite" reason={description} />
+        </div>
+      )}
     </div>
   );
 }

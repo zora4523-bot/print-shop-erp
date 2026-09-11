@@ -14,6 +14,7 @@ import {
   productCategoryMatchesPricingRoute,
 } from '@/lib/order/pricing-route';
 import { workbenchDefaultSelection } from '@/lib/workbench/defaults';
+import { workbenchPaperIssue } from '@/lib/workbench/catalog';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatRate } from '@/lib/format/unit-price';
 import type {
@@ -96,16 +97,21 @@ export function WorkbenchCalculator({
   const [markup, setMarkup] = useState('35');
   const [inputChanged, setInputChanged] = useState(false);
   const resultHeading = useRef<HTMLHeadingElement>(null);
-  const inputIssue = quoteInputIssue({
-    productId,
-    specification,
-    paperType,
-    quantity,
-    markup,
-    foilTechnique: technique,
-    frontFoilColors: front,
-    backFoilColors: back,
-  });
+  const paperIssue = workbenchPaperIssue(
+    options.products.find((product) => product.id === productId),
+    options.papers,
+  );
+  const inputIssue = paperIssue ??
+    quoteInputIssue({
+      productId,
+      specification,
+      paperType,
+      quantity,
+      markup,
+      foilTechnique: technique,
+      frontFoilColors: front,
+      backFoilColors: back,
+    });
   const { result, pending, invalidate, calculate } = useWorkbenchAutoQuote(
     !inputIssue
       ? {
@@ -121,6 +127,7 @@ export function WorkbenchCalculator({
         }
       : null,
     resultHeading,
+    paperIssue,
   );
   const products = options.products.filter((product) =>
     productCategoryMatchesPricingRoute(route, product.category),

@@ -16,6 +16,7 @@ import type {
 export function useWorkbenchAutoQuote(
   input: WorkbenchQuoteInput | null,
   heading: RefObject<HTMLHeadingElement | null>,
+  invalidMessage?: string | null,
 ) {
   const key = input ? JSON.stringify(input) : null;
   const [result, setResult] = useState<WorkbenchQuoteResult | null>(null);
@@ -36,7 +37,7 @@ export function useWorkbenchAutoQuote(
       if (!key) {
         setResult({
           status: 'error',
-          message: '请选好产品、规格、纸张和工艺，并填写有效数量及加价比例',
+          message: invalidMessage ?? '请选好产品、规格、纸张和工艺，并填写有效数量及加价比例',
         });
         return;
       }
@@ -64,7 +65,7 @@ export function useWorkbenchAutoQuote(
         if (generation.current === request) setPending(false);
       }
     },
-    [key, heading],
+    [key, heading, invalidMessage],
   );
   useEffect(() => {
     if (key) timer.current = setTimeout(() => void calculate(), 500);
