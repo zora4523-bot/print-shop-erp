@@ -29,7 +29,7 @@ async function expectUnauthenticated(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: '代理商月度账单', exact: true })).toHaveCount(0);
 }
 
-test('过期和损坏的 JWT 拒绝受保护 API 和页面', async ({ page }) => {
+test('过期和损坏的 JWT 拒绝受保护 API 和页面', async ({ page, browser }) => {
   await login(page, { username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
   const cookie = (await page.context().cookies()).find((entry) => /^(?:__Secure-)?authjs\.session-token$/.test(entry.name));
   expect(cookie, '真实登录必须生成 Auth.js 会话 cookie').toBeDefined();
@@ -43,12 +43,20 @@ test('过期和损坏的 JWT 拒绝受保护 API 和页面', async ({ page }) =>
     salt: cookie!.name,
     maxAge: -3600,
   });
-  // Keep the browser cookie alive so rejection exercises JWT expiry, not
-  // merely the browser dropping an expired cookie before making the request.
-  await page.context().addCookies([{ ...cookie!, value: expiredToken, expires: Math.floor(Date.now() / 1000) + 3600 }]);
-  await expectUnauthenticated(page);
-  await page.context().addCookies([{ ...cookie!, value: 'malformed-session-token', expires: Math.floor(Date.now() / 1000) + 3600 }]);
-  await expectUnauthenticated(page);
+  // A still-loading authenticated page can renew its cookie after replacement.
+  // Fresh contexts ensure no successful login/prefetch response races the bad
+  // token. Keep the cookie alive so this exercises JWT rejection, not expiry
+  // in the browser's cookie store. Neither API nor page assertions change.
+  for (const value of [expiredToken, 'malformed-session-token']) {
+    const rejectedContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    try {
+      await rejectedContext.addCookies([{ ...cookie!, value, expires: Math.floor(Date.now() / 1000) + 3600 }]);
+      const rejectedPage = await rejectedContext.newPage();
+      await expectUnauthenticated(rejectedPage);
+    } finally {
+      await rejectedContext.close();
+    }
+  }
 });
 
 test('已签发的合法令牌不能让停用账号继续访问财务页面或 API', async ({ page }) => {

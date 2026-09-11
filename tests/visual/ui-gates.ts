@@ -18,11 +18,11 @@ export async function expectViewportGate(page: Page, testInfo: TestInfo) {
       return `${element.tagName.toLowerCase()}${id}${slot}${classes ? `.${classes}` : ''}`;
     };
     const isVisible = (element: HTMLElement) => {
-      const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
       return (
-        style.visibility !== 'hidden' &&
-        style.display !== 'none' &&
+        // Closed details can retain nonzero descendant layout boxes in
+        // Chromium. Check whether they are rendered, not just their geometry.
+        element.checkVisibility({ visibilityProperty: true }) &&
         rect.width > 0 &&
         rect.height > 0
       );
