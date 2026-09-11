@@ -221,12 +221,22 @@ jobs:
           DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
           pnpm test:e2e:prepare
 
+      - name: Match the approved print baseline locale
+        # CoreText font fallback follows macOS preferences as well as browser
+        # locale. The approved Darwin baseline was captured with zh-Hans-CN.
+        # These settings apply only to this disposable GitHub-hosted runner.
+        run: |
+          defaults write -g AppleLanguages -array zh-Hans-CN
+          defaults write -g AppleLocale -string zh_CN
+
       - name: Record print runtime versions
         run: |
           mkdir -p .review
           {
             sw_vers
             uname -m
+            defaults read -g AppleLanguages
+            defaults read -g AppleLocale
             node --version
             pnpm --version
             pnpm exec next --version

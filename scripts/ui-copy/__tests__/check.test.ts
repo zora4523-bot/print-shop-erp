@@ -58,6 +58,8 @@ describe('user-visible copy gate', () => {
 });
 
 
+// This creates a real TypeScript program and resolves imported source files.
+// Cold compiler startup on the hosted runner is not a five-second SLA.
 it('traces imported display helpers and labels to their defining file', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'ui-copy-import-'));
   try {
@@ -78,7 +80,7 @@ it('traces imported display helpers and labels to their defining file', () => {
   } finally {
     rmSync(root, {recursive: true, force: true});
   }
-});
+}, 20_000);
 
 it('keeps every documented internal mapping in the gate and wires the required lint command', () => {
   const doc = readFileSync(path.join(process.cwd(), 'docs/ui-规范.md'), 'utf8');
