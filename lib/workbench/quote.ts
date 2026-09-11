@@ -16,6 +16,8 @@ const PRICING_REASON_MESSAGES: Record<CreateOrderManualReasonCode, string> = {
   PARTIAL_BLANK_PRICE_NOT_FOUND:
     '所选规格和纸张暂无局部烫金价格，请选择其他组合或联系管理员核价',
   PARTIAL_TEN_THOUSAND_ENVELOPE: '万元封局部烫金需要管理员单独核价',
+  FULL_ICE_WHITE_ADMIN_PRICING:
+    '冰白纸专版烫金由管理员手动核价，请提交工单后等待核价',
   FULL_PRICE_NOT_FOUND: '所选数量暂无专版烫金价格，请联系管理员核价',
   FULL_PAPER_SURCHARGE_NOT_FOUND:
     '所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价',

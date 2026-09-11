@@ -80,3 +80,15 @@
 | `git diff --check` | 通过。 |
 
 日志位于同一仓库外证据目录：`target.log`、`unit-final.log`、`e2e.log`、`lint.log`、`lint-final.log`、`typecheck-final.log`。本次没有schema迁移、发布、push或价格规则修改；验证范围是上述问题修复，不能据此宣称整个生产环境已完成发布验收。冰白纸专版价格需要业务管理员按现行流程配置和发布，仍不代填价格。
+
+## 冰白纸核价方式定案（2026-09-11）
+
+业主随后明确指定冰白纸专版烫金采用管理员手动核价，取代上节“补充并发布自动价格”的待办。此后该路线由共用计价引擎主动转人工核价，工作台显示明确原因，金额保持待核价；即使后续价格表出现匹配价格也不会自动报价。彩印、其他纸张和既有历史报价不变。决策见 [DECISIONS](../../DECISIONS.md#2026-09-11冰白纸专版烫金由管理员手动核价)。
+
+实施起点 `385adbc1cba044040cc862a16e79858d8e82f291`，独立候选 `/tmp/erp-ice-manual-20260911/snapshot` 为 Git archive 加仅本次8个文件改动。新增4项断言在原实现下全部失败（`red.log`），修改后全量 `pnpm exec vitest run` 为582文件、6,202项通过，43项仍为既有legacy bill跳过（`unit.log`）。`pnpm lint` 零错误、2个既有location.assign警告；`pnpm typecheck` 通过（`lint.log`、`typecheck.log`）。
+
+调用链复核：`submit-external-order` 按 MANUAL_PRICING_REQUIRED 保存款式待核价状态和空报价，并将整单转 PENDING_ADMIN_CONFIRMATION；`pricing-review` 保留 ADMIN 权限校验。此轮未提交、改价或流转用户实际工单。真实开发页面选择冰白纸后已显示本次管理员核价文案，加工费及加价金额均为待核价。
+
+E2E 使用独立可丢弃数据库、端口3115。为使测试目录与已修复的开发目录一致，先在该测试库执行上一提交的受保护纸张清理脚本；8类外键、33个快照字段检查通过，演练证据与正式操作分属独立测试库。本次没有改已发布价格表或迁移。
+
+`pnpm exec playwright test tests/e2e/workbench.spec.ts tests/e2e/workbench-paper-boundaries.spec.ts --project=chromium` 最终11项通过、零跳过（development模式，1.9分钟，`e2e.log`），包含新增的冰白纸人工核价、改数量仍待核价以及切回红卡恢复自动报价。`git diff --check`通过。仅本地提交，不包含发布或生产环境全面验收。

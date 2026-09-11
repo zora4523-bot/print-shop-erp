@@ -306,6 +306,20 @@ function quoteFullProcessing(
   manualReasons: CreateOrderManualReason[];
   errors: string[];
 } {
+  // Business policy (2026-09-11): ice-white full foil is priced by an administrator,
+  // even if a future price book happens to contain a matching automatic rate.
+  if (item.paperType.trim() === '冰白纸') {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [manualReason(
+        'FULL_ICE_WHITE_ADMIN_PRICING',
+        '冰白纸专版烫金由管理员手动核价，请提交工单后等待核价',
+      )],
+      errors: [],
+    };
+  }
   const manualReasons: CreateOrderManualReason[] = [];
   if (item.frontColors.length >= 3) {
     manualReasons.push(

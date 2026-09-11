@@ -382,3 +382,19 @@ test('renders the partial foil charge once for the complete front and back combi
   await expect(machineCharge.locator('dt')).toHaveText(/机烫费\s*¥ 80\.00 × 1$/);
   await expect(machineCharge.locator('dd')).toHaveText('¥ 80.00');
 });
+
+test('ice-white full foil explicitly requires administrator pricing and recovers on paper change', async ({ page }) => {
+  await login(page, { from: '/workbench', username: E2E_USERS.sales!.username, password: E2E_PASSWORD });
+  await expect(quotedAmount(page)).toHaveText('¥ 438.75');
+  await selectChoice(page, '纸张', '160g冰白纸');
+  await expect(quotedAmount(page)).toHaveText('待核价');
+  const guidance = page.getByText('冰白纸专版烫金由管理员手动核价，请提交工单后等待核价', { exact: true });
+  await expect(guidance).toBeVisible();
+  await expect(page.getByText('所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '2,000', exact: true }).click();
+  await expect(quotedAmount(page)).toHaveText('待核价');
+  await expect(guidance).toBeVisible();
+  await selectChoice(page, '纸张', '160g红卡');
+  await expect(quotedAmount(page)).toHaveText('¥ 769.50');
+  await expect(guidance).toHaveCount(0);
+});
