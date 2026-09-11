@@ -42,14 +42,14 @@ describe('order detail shipping availability contract', () => {
     });
   });
 
-  it('passes every current version token and a server-generated request key', () => {
-    expect(source).toContain('expectedRevision={order.revision}');
-    expect(source).toContain('expectedEditVersion={order.editVersion}');
-    expect(source).toContain(
-      'expectedWorkOrderVersion={order.workOrderVersion}',
-    );
-    expect(source).toContain('expectedPriceRevision={priceRevision ?? 0}');
-    expect(source).toContain('initialIdempotencyKey={randomUUID()}');
+  it('passes every version token to per-address registration', () => {
+    expect(source).toContain('revision={order.revision}');
+    expect(source).toContain('editVersion={order.editVersion}');
+    expect(source).toContain('workOrderVersion={order.workOrderVersion}');
+    expect(source).toContain('priceRevision={priceRevision ?? 0}');
+    expect(source).toContain('version={shipment.registrationVersion}');
+    expect(source).toContain('shipmentId={shipment.id}');
+    expect(source).not.toContain('<ShipOrderForm');
   });
 
   it('routes shipped orders to settlement instead of the retired finish writer', () => {

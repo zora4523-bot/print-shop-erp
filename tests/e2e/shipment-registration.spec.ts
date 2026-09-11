@@ -1,0 +1,50 @@
+import { test, expect } from '@playwright/test';
+import sharp from 'sharp';
+import { Client } from 'pg';
+import { randomUUID } from 'node:crypto';
+import { login } from './_helpers';
+
+test('逐地址登记、面单历史与最后一票应收确认', async ({ page }) => {
+  test.skip(process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1', 'Requires an isolated database');
+  test.setTimeout(120_000);
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  const id = `ship-e2e-${randomUUID()}`;
+  try {
+    const users = await db.query('SELECT id FROM "User" WHERE username=$1', ['e2e-owner']);
+    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"pricingStatus","pricingConfirmedAt","pricingConfirmedById","confirmedFee","totalAmount","receiverAddress","receiverPhone","revision","editVersion","workOrderVersion","priceRevision","updatedAt") VALUES ($1,$1,$2,'ADMIN',$2,'FACTORY_DIRECT','PACKING','ADMIN_CONFIRMED',NOW(),$2,25,25,'测试地址','13800138000',1,1,1,1,NOW())`, [id, users.rows[0].id]);
+    for (const number of [1, 2]) await db.query(`INSERT INTO "OrderShipment" (id,"orderId",sequence,"receiverName","receiverPhone","receiverAddress","updatedAt") VALUES ($1,$2,$3,'测试收件人','13800138000','测试地址',NOW())`, [`${id}-${number}`, id, number]);
+    await login(page, { username: 'e2e-owner', password: 'e2e-test-password-1234' });
+    await page.goto(`/orders/${id}`);
+    const delivery = page.locator('#detail-delivery-records');
+    await delivery.locator('summary').first().click();
+    const first = delivery.locator('li').filter({ has: page.getByRole('textbox', { name: '运单号', exact: true }) }).nth(0);
+    await first.getByRole('textbox', { name: '运单号', exact: true }).fill('ZTO-TEST-1');
+    await first.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('ZTO');
+    await first.getByLabel('面单照片', { exact: false }).setInputFiles({ name: 'label.png', mimeType: 'image/png', buffer: await sharp({ create: { width: 32, height: 32, channels: 3, background: 'white' } }).png().toBuffer() });
+    await expect(first.getByRole('link', { name: '查看面单照片' })).toBeVisible();
+    await first.getByRole('button', { name: '保存物流资料', exact: true }).click();
+    await expect.poll(async () => (await db.query('SELECT "registrationVersion" FROM "OrderShipment" WHERE id=$1', [`${id}-1`])).rows[0].registrationVersion).toBe(1);
+    await expect(first.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeEnabled();
+    await first.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '确认发货', exact: true }).click();
+    await expect.poll(async () => (await db.query('SELECT status FROM "OrderShipment" WHERE id=$1', [`${id}-1`])).rows[0].status).toBe('SHIPPED');
+    expect((await db.query('SELECT status,"settledFee" FROM "Order" WHERE id=$1', [id])).rows[0]).toEqual({ status: 'PACKING', settledFee: null });
+    await expect(first.getByRole('button', { name: '确认该地址已发货', exact: true })).toHaveCount(0);
+    const second = delivery.locator('li').filter({ has: page.getByRole('textbox', { name: '运单号', exact: true }) }).nth(1);
+    await second.getByRole('textbox', { name: '运单号', exact: true }).fill('SF-TEST-2');
+    await second.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('SF');
+    await second.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '确认发货', exact: true }).click();
+    await expect.poll(async () => (await db.query('SELECT status FROM "Order" WHERE id=$1', [id])).rows[0].status).toBe('SETTLED');
+    const order = (await db.query('SELECT "settledFee","settledAt" FROM "Order" WHERE id=$1', [id])).rows[0];
+    expect(order.settledFee).toBe('25.00'); expect(order.settledAt).not.toBeNull();
+    const labels = await db.query('SELECT id FROM "OrderShipmentLabel" WHERE "shipmentId"=$1', [`${id}-1`]);
+    expect(labels.rowCount).toBe(1);
+    const url = `/api/orders/${id}/shipments/${id}-1/labels/${labels.rows[0].id}`;
+    expect((await page.request.get(url)).status()).toBe(200);
+    await page.context().clearCookies();
+    await login(page, { username: 'e2e-sales', password: 'e2e-test-password-1234' });
+    expect((await page.request.get(url)).status()).toBe(404);
+  } finally { await db.end(); }
+});

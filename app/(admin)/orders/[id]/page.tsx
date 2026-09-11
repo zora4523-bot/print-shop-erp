@@ -1,3 +1,4 @@
+import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
 import { getAdminOrderDetailPresentation } from '@/lib/order/admin-detail-query';
 import { buildAdminOrderDetailModel } from '@/components/business/order/admin-order-detail-model';
 import { AdminOrderDetailView } from '@/components/business/order/AdminOrderDetailView';
@@ -51,7 +52,6 @@ import { ShipmentStatusBadge } from '@/components/business/order/ShipmentStatusB
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
-import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
 import { SfCollectToggleForm } from '@/components/business/order/SfCollectToggleForm';
 import { FulfillmentPricingReviewForm } from '@/components/business/order/FulfillmentPricingReviewForm';
@@ -81,7 +81,7 @@ import { OrderCommercialDetailsManager } from '@/components/business/order/Order
 import { OrderChangeFieldDiff } from '@/components/business/order/OrderChangeFieldDiff';
 import { OrderCostEntryForm } from '@/components/business/bill/OrderCostEntryForm';
 import { formatReceiverInfo } from '@/lib/order/receiver-info';
-import { formatMoney } from '@/lib/dashboard/format';
+import { formatMoney, formatMoneyPlain } from '@/lib/dashboard/format';
 import { formatUnitPrice } from '@/lib/format/unit-price';
 import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import {
@@ -115,7 +115,6 @@ import {
 import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
 import {
-  buildShipOrderShipmentInputs,
   orderShippingAvailability,
 } from '@/lib/order/shipping-availability';
 
@@ -378,13 +377,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const orderChangeCatalogProducts = canRequestChange
     ? await listActiveOrderChangeCatalogProducts()
     : [];
-  const customerChargeByShipmentAndCategory = new Map(
-    order.customerCharges.flatMap((charge) =>
-      charge.shipment
-        ? [[`${charge.shipment.id}:${String(charge.category.code)}`, charge] as const]
-        : [],
-    ),
-  );
   const manualCustomerCharges = order.customerCharges.filter((charge) =>
     ['SAMPLE_FEE', 'OTHER_PACKAGING_FEE', 'APPROVED_ADJUSTMENT'].includes(
       String(charge.category.code),
@@ -607,7 +599,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             ) : null}
             {canShip ? (
               <Link
-                href="#ship-order"
+                href="#shipment-registration"
                 className={buttonVariants({ size: 'sm' })}
               >
                 发货
@@ -764,7 +756,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </ol>
         </section>
       ) : null}</>),
-    shipments: (<><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+    shipments: (<><section id="shipment-registration" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold">
             发货地址（{order.shipments.length}）
@@ -805,6 +797,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 <p className="font-sans tabular-nums">
                   运单号：{shipment.trackingNo}
                 </p>
+              ) : null}
+              {user.role === Role.ADMIN && order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.FINISHED ? (
+                <ShipmentRegistrationForm key={`${shipment.id}:${shipment.registrationVersion}`}
+                  orderId={order.id} shipmentId={shipment.id} version={shipment.registrationVersion}
+                  revision={order.revision} editVersion={order.editVersion} workOrderVersion={order.workOrderVersion} priceRevision={priceRevision ?? 0}
+                  trackingNo={shipment.trackingNo} carrierCode={shipment.carrierCode} carrierName={shipment.carrierName}
+                  shipped={shipment.status === 'SHIPPED'} canConfirm={canShip} disabledReason={shipDisabledReason}
+                  lastPending={order.shipments.filter((row) => row.status !== 'SHIPPED').length === 1}
+                  amount={order.confirmedFee !== null ? formatMoneyPlain(order.confirmedFee) : '待核价'}
+                  labels={shipment.labels.map((label) => ({ id: label.id, createdAt: label.createdAt.toISOString() }))}
+                />
               ) : null}
               <p className="mt-2 text-xs text-muted-foreground">
                 {shipment.lines
@@ -1453,34 +1456,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </ul>
         )}
       </section></>),
-    shippingForm: (<>{canShip && !inlineOperations?.shipping ? (
-        <section
-          id="ship-order"
-          className="scroll-mt-28 space-y-3 rounded-xl border bg-card p-6 shadow-sm"
-        >
-          <h2 className="text-base font-semibold">标记发货</h2>
-          <p className="text-xs text-muted-foreground">
-            打包工序与其他生产工序已完工；录入运单后转为已发货。
-          </p>
-          <ShipOrderForm
-            orderId={order.id}
-            expectedRevision={order.revision}
-            expectedEditVersion={order.editVersion}
-            expectedWorkOrderVersion={order.workOrderVersion}
-            expectedPriceRevision={priceRevision ?? 0}
-            initialIdempotencyKey={randomUUID()}
-            shipments={buildShipOrderShipmentInputs(
-              order.shipments,
-              customerChargeByShipmentAndCategory,
-            )}
-            isExternalSales={
-              'settlementType' in order &&
-              order.settlementType === OrderSettlementType.EXTERNAL_SALES
-            }
-            isSfCollect={order.isSfCollect}
-          />
-        </section>
-      ) : null}</>),
+    shippingForm: null,
     completionBlock: (<>{user.role === Role.ADMIN &&
       (order.status === OrderStatus.SCHEDULING ||
         order.status === OrderStatus.IN_PRODUCTION) &&

@@ -764,22 +764,25 @@ enum ShipmentStatus {
 }
 
 model OrderShipment {
-  id                  String         @id @default(cuid())
+  id                  String               @id @default(cuid())
   orderId             String
   sequence            Int
   receiverName        String?
   receiverPhone       String?
   receiverAddress     String?
   expressCode         String?
-  carrierCode         String?        @db.VarChar(16) // ZTO / SF / OTHER；不可复用快递代码
-  destinationProvince String?        @db.VarChar(32) // 对客物流计费省份，不从自由地址猜测
-  quotedWeightKg      Decimal?       @db.Decimal(10, 3) // 创建时承运商计费重量估算
+  carrierName         String?              @db.VarChar(80)
+  registrationVersion Int                  @default(0)
+  labels              OrderShipmentLabel[]
+  carrierCode         String?              @db.VarChar(16) // ZTO / SF / OTHER；不可复用快递代码
+  destinationProvince String?              @db.VarChar(32) // 对客物流计费省份，不从自由地址猜测
+  quotedWeightKg      Decimal?             @db.Decimal(10, 3) // 创建时承运商计费重量估算
   trackingNo          String?
-  weightKg            Decimal?       @db.Decimal(10, 3)
-  status              ShipmentStatus @default(PLANNED)
+  weightKg            Decimal?             @db.Decimal(10, 3)
+  status              ShipmentStatus       @default(PLANNED)
   shippedAt           DateTime?
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   order           Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
   lines           OrderShipmentLine[]
@@ -787,6 +790,18 @@ model OrderShipment {
 
   @@unique([orderId, sequence])
   @@index([orderId, status])
+}
+
+// Small private waybill images; replacement appends history instead of overwriting.
+model OrderShipmentLabel {
+  id          String        @id @default(cuid())
+  shipmentId  String
+  image       Bytes
+  createdById String
+  createdAt   DateTime      @default(now())
+  shipment    OrderShipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+
+  @@index([shipmentId, createdAt])
 }
 
 model OrderShipmentLine {

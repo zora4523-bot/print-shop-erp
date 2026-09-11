@@ -1665,9 +1665,10 @@ async function transitionWithLog(
   target: TransitionTarget,
   actor: { id: string; role: Role },
   opts: TransitionOptions,
+  transaction?: Prisma.TransactionClient,
 ): Promise<{ id: string; status: OrderStatus; idempotentReplay?: boolean }> {
   const now = opts.now ?? new Date();
-  return db.$transaction(async (tx) => {
+  const work = async (tx: Prisma.TransactionClient) => {
     const txClient = tx as unknown as StatusTxClient;
     // Per-order advisory lock: serialize ALL transitions on this
     // order. Without this, two concurrent ship calls each read
@@ -1836,7 +1837,8 @@ async function transitionWithLog(
     return afterTransitionResult
       ? { ...updated, status: afterTransitionResult.status }
       : updated;
-  });
+  };
+  return transaction ? work(transaction) : db.$transaction(work);
 }
 
 export async function submitOrder(
@@ -2378,12 +2380,13 @@ type RequestedShipOrderShipment = ReturnType<
 type StoredShipOrderShipment = {
   id: string;
   sequence: number;
+  shippedAt?: Date | null;
   destinationProvince: string | null;
   weightKg: Prisma.Decimal | null;
   lines: Array<{ quantity: number }>;
 };
 
-async function assertShipOrderReadinessInTx(
+export async function assertShipOrderReadinessInTx(
   tx: Prisma.TransactionClient,
   input: {
     orderId: string;
@@ -2398,6 +2401,7 @@ async function assertShipOrderReadinessInTx(
     select: {
       id: true,
       sequence: true,
+      shippedAt: true,
       destinationProvince: true,
       weightKg: true,
       lines: { select: { quantity: true } },
@@ -2746,7 +2750,7 @@ async function applyShipOrderShipmentFactsInTx(
             }
           : {}),
         status: ShipmentStatus.SHIPPED,
-        shippedAt: input.now,
+        shippedAt: shipment.shippedAt ?? input.now,
       },
       select: { id: true },
     });
@@ -2762,6 +2766,7 @@ export async function shipOrder(
   actor: { id: string; role: Role },
   trackingInput: string | null | ShipOrderCommand,
   now: Date = new Date(),
+  transaction?: Prisma.TransactionClient,
 ): Promise<{ id: string; status: OrderStatus; idempotentReplay: boolean }> {
   const { requestedShipments, primaryTracking, command } =
     normalizeShipOrderInput(trackingInput);
@@ -2829,7 +2834,7 @@ export async function shipOrder(
             remark: '发货时按实际物流事实终审对客收费',
           });
         }
-        if (backgroundJobsMode() !== 'durable') return;
+        if (backgroundJobsMode() !== 'durable' && !transaction) return;
         const order = await tx.order.findUniqueOrThrow({
           where: { id },
           select: { id: true, orderNo: true },
@@ -2846,7 +2851,10 @@ export async function shipOrder(
         );
       },
     },
+    transaction,
   );
+
+  if (transaction) return { ...result, idempotentReplay: Boolean(result.idempotentReplay) };
 
   if (result.idempotentReplay) {
     return { ...result, idempotentReplay: true };
@@ -4059,6 +4067,7 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
       shipments: {
         orderBy: { sequence: 'asc' },
         include: {
+          labels: { select: { id: true, createdAt: true }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] },
           lines: {
             orderBy: { orderItem: { sequence: 'asc' } },
             include: {

@@ -683,6 +683,7 @@ export async function settleFactoryOrder(
     expectedWorkOrderVersion: number;
   },
   actor: AdminWorkflowActor,
+  transaction?: Prisma.TransactionClient,
 ): Promise<{
   orderId: string;
   status: OrderStatus;
@@ -691,7 +692,7 @@ export async function settleFactoryOrder(
   idempotentReplay: boolean;
 }> {
   assertAdmin(actor);
-  return db.$transaction(async (tx) => {
+  const work = async (tx: Prisma.TransactionClient) => {
     // This must remain the first database statement in the settlement writer.
     await lockSettlementCutoffShared(tx);
     await lockOrder(tx, input.orderId);
@@ -763,5 +764,6 @@ export async function settleFactoryOrder(
       settledAt,
       idempotentReplay: false,
     };
-  });
+  };
+  return transaction ? work(transaction) : db.$transaction(work);
 }

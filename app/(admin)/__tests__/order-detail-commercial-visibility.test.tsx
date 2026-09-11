@@ -1,3 +1,5 @@
+vi.mock('@/components/business/order/ShipmentRegistrationForm', () => ({ ShipmentRegistrationForm: () => null }));
+vi.mock('@/actions/shipment-registration', () => ({ registerShipmentAction: vi.fn() }));
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { batchOrder } from '@/components/business/order/__tests__/admin-order-batch-fixture';
@@ -90,6 +92,7 @@ vi.mock('@/lib/bom', () => ({
   estimateMaterialUsageForOrderItems: estimateMaterialUsageMock,
 }));
 vi.mock('@/lib/dashboard/format', () => ({
+  formatMoneyPlain: (value: unknown) => Number(value).toFixed(2),
   formatMoney: (value: string | number) => `¥ ${Number(value).toFixed(2)}`,
 }));
 vi.mock('@/components/business/bom/OrderMaterialUsageEstimate', () => ({
@@ -827,6 +830,9 @@ function salesDetailFixture() {
         expressCode: null,
         destinationProvince: '广东',
         trackingNo: null,
+        labels: [],
+        registrationVersion: 0,
+        carrierName: null,
         lines: [
           {
             id: 'shipment-line-1',
@@ -887,6 +893,9 @@ function orderFixture() {
         weightKg: null,
         expressCode: null,
         trackingNo: null,
+        labels: [],
+        registrationVersion: 0,
+        carrierName: null,
         carrierCode: null,
         lines: [],
       },

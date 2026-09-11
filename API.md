@@ -186,3 +186,11 @@ pnpm test --run
 ### Next.js 路由模块边界
 
 `route.ts` 仅导出 HTTP 方法与 Next.js 路由配置。可测试的处理函数放在相邻 `handler.ts`，仍由 `route.ts` 中的 `auth(handler)` 包装；权限、资源范围和 HTTP 地址保持不变。
+
+### 逐地址发货登记
+
+`registerShipmentAction(FormData)` 仅允许具有 `order:ship` 权限的管理员，领域层再次检查管理员身份及地址所属工单。参数：`orderId`、`shipmentId`、`expectedVersion`（地址登记版本）、工单的 `expectedRevision/expectedEditVersion/expectedWorkOrderVersion/expectedPriceRevision`、UUID `idempotencyKey`、`trackingNo`、`carrierCode`（空/ZTO/SF/OTHER）、`carrierName`、`confirm`（true/false），可选 `photo` 文件。返回 `{ok,message}`，不返回内部错误。
+
+保存资料不改变发货状态；确认要求完整运单及承运商、完工、已确认费用、无待审变更和未完成外协。最后一票复用整单发货及 v2 结算服务，二者和地址、图片、审计记录在同一事务提交；若发货核算改变已确认金额，整个确认回滚，须先完成物流费用复核。重复 UUID 同内容直接返回已保存，不重复结算；不同内容拒绝。
+
+`GET /api/orders/[id]/shipments/[shipmentId]/labels/[labelId]`：校验当前有效登录状态及工单可见范围，三个 ID 必须属于同一资源链。200 返回 JPEG（private/no-store、nosniff）；未登录 401；不存在或越权 404。图片不使用公开 URL，替换后旧图仍能从历史面单查看。
