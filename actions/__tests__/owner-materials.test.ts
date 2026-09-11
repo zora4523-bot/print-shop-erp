@@ -392,6 +392,7 @@ describe('setMaterialActiveAction', () => {
 
 describe('createMaterialTransactionAction', () => {
   const validTx = {
+    idempotencyKey: 'bd0e055a-ed96-4aeb-93c3-b92b8e0cffed',
     direction: 'OUT',
     quantity: '3.50',
     reasonType: 'PRODUCTION_USE',
@@ -410,6 +411,7 @@ describe('createMaterialTransactionAction', () => {
     expect(result.status).toBe('success');
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith('material:manage');
     expect(materialMock.createMaterialTransaction).toHaveBeenCalledWith({
+      idempotencyKey: validTx.idempotencyKey,
       materialId: 'mat1',
       locationId: null,
       direction: TxDirection.OUT,
@@ -428,6 +430,13 @@ describe('createMaterialTransactionAction', () => {
       null,
       fd({ ...validTx, quantity: '0' }),
     );
+    expect(result.status).toBe('invalid');
+    expect(materialMock.createMaterialTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each(['', 'not-a-request-key'])('rejects a missing or malformed request key before any stock write: %s', async (idempotencyKey) => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const result = await createMaterialTransactionAction('mat1', null, fd({ ...validTx, idempotencyKey }));
     expect(result.status).toBe('invalid');
     expect(materialMock.createMaterialTransaction).not.toHaveBeenCalled();
   });

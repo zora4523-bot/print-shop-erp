@@ -188,8 +188,8 @@ describe('admin order decisions require review before mutation', () => {
   });
 
   it.each([
-    { action: 'release', status: OrderStatus.PENDING_FACTORY, trigger: '下发 + 打印', confirm: '下发并打印' },
-    { action: 'release', status: OrderStatus.CONFIRMED, trigger: '下发 + 打印', confirm: '下发并打印' },
+    { action: 'release', status: OrderStatus.PENDING_FACTORY, trigger: '下发生产', confirm: '确认下发生产' },
+    { action: 'release', status: OrderStatus.CONFIRMED, trigger: '下发生产', confirm: '确认下发生产' },
     { action: 'settle', status: OrderStatus.SHIPPED, trigger: '结算', confirm: '结算' },
   ] as const)('$action waits for impact confirmation before writing', async ({ action, status, trigger, confirm }) => {
     const order = baseOrder();
@@ -243,8 +243,8 @@ describe('admin order decisions require review before mutation', () => {
     const order = baseOrder();
     order.capabilities.release = true;
     renderOrder(order);
-    await page.getByRole('button', { name: '下发 + 打印', exact: true }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: '下发并打印', exact: true }).click();
+    await page.getByRole('button', { name: '下发生产', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.element(page.getByText('正在处理，请稍候…', { exact: true })).toBeVisible();
     finish({ status: 'error', message: '工单版本已变化，请刷新后重试。' });
     await expect.element(page.getByRole('alert')).toHaveTextContent('工单版本已变化');

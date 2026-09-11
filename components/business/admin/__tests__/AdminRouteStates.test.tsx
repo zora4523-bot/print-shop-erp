@@ -6,7 +6,7 @@ import { AdminRouteLoading } from '../AdminRouteLoading';
 describe('admin route states', () => {
   it('uses the shared page error fallback inside real error.tsx boundaries', () => {
     const html = renderToStaticMarkup(
-      <AdminRouteError error={new Error('boom')} unstable_retry={vi.fn()} />,
+      <AdminRouteError error={new Error('boom')} retry={vi.fn()} />,
     );
 
     expect(html).toContain('data-slot="admin-route-error"');

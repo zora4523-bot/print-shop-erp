@@ -14,7 +14,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
     },
     material: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     materialLocationStock: { update: vi.fn() },
-    materialTransaction: { create: vi.fn() },
+    materialTransaction: { create: vi.fn(), findUnique: vi.fn() },
   };
   return {
     txMock: tx,
@@ -80,6 +80,7 @@ beforeEach(() => {
   txMock.material.update.mockReset();
   txMock.materialLocationStock.update.mockReset().mockResolvedValue({ id: 'stock1' });
   txMock.materialTransaction.create.mockReset();
+  txMock.materialTransaction.findUnique.mockReset().mockResolvedValue(null);
   notifyMock.mockReset();
 });
 
@@ -462,6 +463,7 @@ describe('createMaterialTransaction', () => {
     });
 
     const result = await createMaterialTransaction({
+      idempotencyKey: 'eac25702-5e61-45b3-908c-f177a27ba835',
       materialId: 'mat1',
       direction: TxDirection.IN,
       quantity: '3.5',
@@ -496,6 +498,7 @@ describe('createMaterialTransaction', () => {
       .mockResolvedValueOnce([{ id: 'stock1', currentStock: '1.00' }]);
     await expect(
       createMaterialTransaction({
+      idempotencyKey: 'eac25702-5e61-45b3-908c-f177a27ba835',
         materialId: 'mat1',
         direction: TxDirection.OUT,
         quantity: '2',
@@ -533,6 +536,7 @@ describe('createMaterialTransaction', () => {
     txMock.material.update.mockResolvedValue(makeMaterial(materialOver));
     txMock.materialTransaction.create.mockResolvedValue(mockTransactionRow({ quantity }));
     return createMaterialTransaction({
+      idempotencyKey: 'eac25702-5e61-45b3-908c-f177a27ba835',
       materialId: 'mat1',
       direction: TxDirection.OUT,
       quantity,
@@ -606,6 +610,7 @@ describe('createMaterialTransaction', () => {
       mockTransactionRow({ direction: TxDirection.IN, quantity: '3.00', reasonType: 'PURCHASE' }),
     );
     const result = await createMaterialTransaction({
+      idempotencyKey: 'eac25702-5e61-45b3-908c-f177a27ba835',
       materialId: 'mat1',
       direction: TxDirection.IN,
       quantity: '3',
@@ -622,6 +627,7 @@ describe('createMaterialTransaction', () => {
     txMock.$queryRaw.mockResolvedValueOnce([]);
     await expect(
       createMaterialTransaction({
+      idempotencyKey: 'eac25702-5e61-45b3-908c-f177a27ba835',
         materialId: 'missing',
         direction: TxDirection.IN,
         quantity: '1',
@@ -632,4 +638,44 @@ describe('createMaterialTransaction', () => {
       }),
     ).rejects.toBeInstanceOf(MaterialInvariantError);
   });
+});
+
+// A lost HTTP response can replay the exact mutation while the first one has
+// already committed. Only one movement and notification may be recorded.
+describe('manual material movement request replay', () => {
+  const request = {
+    idempotencyKey: 'ba9c9ef6-261c-4dbb-b03c-a485d8888d1d',
+    materialId: 'mat1', direction: TxDirection.OUT, quantity: '2.00',
+    reasonType: 'PRODUCTION_USE', unitCost: null, remark: '领料', operatorId: 'owner1',
+  };
+
+  beforeEach(() => {
+    let stored: Record<string, unknown> | null = null;
+    txMock.$queryRaw.mockResolvedValue([{ id: 'stock1', currentStock: '3.00' }]);
+    txMock.material.update.mockResolvedValue(makeMaterial({ currentStock: '1.00' }));
+    txMock.materialTransaction.findUnique.mockImplementation(async () => stored);
+    txMock.materialTransaction.create.mockImplementation(async ({ data }) => {
+      stored = { ...data, id: 'tx-replay', material: makeMaterial({ currentStock: '1.00' }) };
+      return stored;
+    });
+  });
+
+  it('returns the original movement without changing balances or repeating an alert', async () => {
+    const first = await createMaterialTransaction(request);
+    const replay = await createMaterialTransaction({ ...request, quantity: '2' });
+    expect(replay.transaction.id).toBe(first.transaction.id);
+    expect(txMock.materialTransaction.create).toHaveBeenCalledTimes(1);
+    expect(txMock.material.update).toHaveBeenCalledTimes(1);
+    expect(txMock.materialLocationStock.update).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{ quantity: '1.00' }, { operatorId: 'other-actor' }, { remark: '不同业务内容' }])(
+    'rejects a reused key with changed business facts or operator: %j', async (overrides) => {
+      await createMaterialTransaction(request);
+      await expect(createMaterialTransaction({ ...request, ...overrides }))
+        .rejects.toThrow('出入库请求与原记录不一致');
+      expect(txMock.materialTransaction.create).toHaveBeenCalledTimes(1);
+    },
+  );
 });

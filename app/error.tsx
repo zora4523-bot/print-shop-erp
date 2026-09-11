@@ -7,10 +7,10 @@ import { ErrorState } from '@/components/ui-business';
 
 export default function RootRouteError({
   error,
-  unstable_retry,
+  retry,
 }: {
   error: Error & { digest?: string };
-  unstable_retry: () => void;
+  retry: () => void;
 }) {
   useEffect(() => {
     // Next.js 会在生产环境隐藏服务端错误详情；这里只把原始错误交给
@@ -25,7 +25,7 @@ export default function RootRouteError({
         title="页面暂时无法加载"
         description="可能是网络或服务短暂波动。请重试当前页面；如果问题持续，可以先返回系统首页。"
         retryLabel="重试当前页面"
-        onRetry={unstable_retry}
+        onRetry={retry}
         action={
           <Button
             render={<Link href="/" prefetch={false} />}

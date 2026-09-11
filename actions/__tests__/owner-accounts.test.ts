@@ -93,6 +93,34 @@ beforeEach(() => {
 });
 
 describe('createUserAction', () => {
+  it.each(['username', '"username"'])(
+    'maps Prisma 7 adapter username uniqueness (%s) without requiring query-engine metadata', async (field) => {
+      const error = {
+        code: 'P2002',
+        meta: { modelName: 'User', driverAdapterError: { cause: { constraint: { fields: [field] } } } },
+      };
+      accountMock.createUser.mockRejectedValueOnce(error);
+      const result = await createUserAction(null, fd({
+        username: 'existing-user', displayName: 'Duplicate', role: Role.SALES, password: 'plain-pass-1',
+      }));
+      expect(result).toEqual({ status: 'invalid', fieldErrors: { username: ['该用户名已被占用'] } });
+      expect(redirectMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([['username', 'unexpected'], ['username_other'], ['User_unrelated_key']])(
+    'rethrows unknown unique constraints instead of matching a username substring or subset: %s', async (...fields) => {
+      const error = new Prisma.PrismaClientKnownRequestError('unknown constraint', {
+        code: 'P2002', clientVersion: 'test', meta: { target: fields },
+      });
+      accountMock.createUser.mockRejectedValueOnce(error);
+      await expect(createUserAction(null, fd({
+        username: 'existing-user', displayName: 'Duplicate', role: Role.SALES, password: 'plain-pass-1',
+      }))).rejects.toBe(error);
+    },
+  );
+
   it('calls requirePermission("account:manage") first — auth failure bubbles', async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');

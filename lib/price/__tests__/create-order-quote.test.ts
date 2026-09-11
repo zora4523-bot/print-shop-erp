@@ -506,9 +506,32 @@ describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () =
     },
   );
 
+  it.each([160, 180])('冰白纸 %ig 专版始终交由管理员核价，即使价格表配置了自动价', (paperWeightGsm) => {
+    const result = calculateCreateOrderQuote(
+      createGoldenOrderInput([fullItem({ paperType: '冰白纸', paperWeightGsm })]),
+      {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+        full: {
+          ...CREATE_ORDER_GOLDEN_SNAPSHOT.full,
+          basePapers: [...CREATE_ORDER_GOLDEN_SNAPSHOT.full.basePapers, { paperType: '冰白纸', paperWeightGsm }],
+        },
+      },
+    );
+    expect(result.items[0]).toMatchObject({
+      status: 'MANUAL_PRICING_REQUIRED', unitPrice: null, processingAmount: null,
+      amount: null, knownAmount: '0.00',
+      manualReasons: [{ code: 'FULL_ICE_WHITE_ADMIN_PRICING', message: '冰白纸专版烫金由管理员手动核价，请提交工单后等待核价' }],
+    });
+  });
+
+  it('冰白纸专版没有自动价时显示明确的管理员核价原因', () => {
+    const result = quoteSingle(fullItem({ paperType: '冰白纸', paperWeightGsm: 160 }), { unitsPerBag: 6 });
+    expect(result.manualReasons.map((reason) => reason.code)).toEqual(['FULL_ICE_WHITE_ADMIN_PRICING']);
+  });
+
   it('非基准纸缺加价行转人工，不默认为 0', () => {
     const result = quoteSingle(
-      fullItem({ paperType: '冰白纸', paperWeightGsm: 160 }),
+      fullItem({ paperType: '云纹纸', paperWeightGsm: 160 }),
       { unitsPerBag: 6 },
     );
     expect(result.items[0]?.status).toBe('MANUAL_PRICING_REQUIRED');

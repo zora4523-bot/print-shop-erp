@@ -9,6 +9,7 @@ import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ActionNotice, StatusBadge, TableEmptyState, useCopyToClipboard } from '@/components/ui-business';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY, ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
+import { OrderAmount } from './OrderAmount';
 import { cn } from '@/lib/utils';
 import { OrderDetailStickyScope } from './OrderDetailStickyScope';
 import type { AdminOrderDetailModel } from './admin-order-detail-model';
@@ -31,8 +32,8 @@ type Props = {
   packaging?: ReactNode;
 };
 
-function amount(value: string | null) {
-  return value === null ? '待核定' : formatMoney(value);
+function amount(value: string | null, status: AdminOrderDetailModel['status'], estimated = false, pricingStatus?: AdminOrderDetailModel['pricingStatus'], incomplete = false) {
+  return <OrderAmount status={status} amount={value} estimated={estimated} pricingStatus={pricingStatus} incomplete={incomplete} />;
 }
 
 function Progress({ label, done, total, unit = '个' }: {
@@ -124,7 +125,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         </Disclosure>
       </div>
       <div className={styles.headerActions}>
-        <Link href={`/api/orders/${model.id}/pdf`} className={buttonVariants({ variant: 'outline' })}><FileDown aria-hidden="true" />工单 PDF</Link>
+        <a href={`/api/orders/${model.id}/pdf`} className={buttonVariants({ variant: 'outline' })}><FileDown aria-hidden="true" />工单 PDF</a>
         {canEdit ? <Link href={`/orders/${model.id}/edit`} className={buttonVariants({ variant: 'outline' })}><Pencil aria-hidden="true" />编辑工单</Link> : null}
       </div>
     </div>}>
@@ -160,7 +161,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
                       <Button type="button" variant="ghost" onClick={() => locate(document.getElementById(`detail-design-item-${item.id}`) ? `detail-design-item-${item.id}` : 'detail-design-files')}>查看设计文件</Button></div>
                     {item.progress.map((progress) => <Progress key={progress.label} {...progress} />)}
                     {item.remark ? <p className={styles.remark}>{item.remark}</p> : null}
-                    <dl className={styles.feeLines}>{item.fees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount)}</dd></div>)}</dl>
+                    <dl className={styles.feeLines}>{item.fees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount, model.status, fee.estimated)}</dd></div>)}</dl>
                   </div>
                 </article>;
               })}
@@ -170,12 +171,12 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           <section id="order-detail-fees" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-fees' && styles.highlight)} aria-label="工单费用">
             <div className={styles.sectionHeading}><h2>工单费用</h2></div>
             <section className={styles.orderFees} aria-label="订单级费用">
-              <dl className={styles.feeLines}>{model.orderFees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount)}</dd></div>)}</dl>
-              <div className={styles.total}><span>{model.feeSource === 'LEGACY' ? '历史金额' : `当前${model.feeStages.find((stage) => stage.current)?.title ?? '金额'}`}</span><strong>{amount(model.total)}</strong></div>
+              <dl className={styles.feeLines}>{model.orderFees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount, model.status, fee.estimated)}</dd></div>)}</dl>
+              <div className={styles.total}><span>{model.feeSource === 'LEGACY' ? '历史金额' : `当前${model.feeStages.find((stage) => stage.current)?.title ?? '金额'}`}</span><strong>{amount(model.total, model.status, model.totalEstimated ?? model.feeSource === 'QUOTED', model.pricingStatus, model.feeSource === 'INCOMPLETE')}</strong></div>
             </section>
             <h3 className={styles.feeHistoryHeading}>费用记录</h3>
             <div className={styles.feeStages}>{model.feeStages.map((stage) => <div key={stage.key} className={cn(styles.feeStage, stage.current && styles.currentFee)}>
-              <p>{stage.title}{stage.current ? <span>当前</span> : null}</p><strong>{stage.total === null ? '—' : amount(stage.total)}</strong>
+              <p>{stage.title}{stage.current ? <span>当前</span> : null}</p><strong>{stage.total === null ? '—' : formatMoney(stage.total)}</strong>
               {stage.total === null ? <small>{stage.key === 'confirmed' ? '费用核定后显示' : stage.key === 'settled' ? '结算后显示' : '尚未形成报价'}</small> : null}
             </div>)}</div>
           </section>
@@ -205,7 +206,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           </section>
 
           {packaging ? <Disclosure className={styles.extra}><DisclosureSummary>分货与包装明细</DisclosureSummary><div>{packaging}</div></Disclosure> : null}
-          {supplementary.length ? <section className={styles.supplementary} aria-label="管理与业务记录"><h2>管理与业务记录</h2>{supplementary.map((section) => <Disclosure key={section.id} id={section.id} tabIndex={-1} className={cn(styles.extra, highlighted === section.id && styles.highlight)}>
+          {supplementary.length ? <section className={styles.supplementary} aria-label="管理与业务记录"><h2>管理与业务记录</h2>{supplementary.map((section) => <Disclosure key={section.id} id={section.id} open tabIndex={-1} className={cn(styles.extra, highlighted === section.id && styles.highlight)}>
             <DisclosureSummary>{section.title}</DisclosureSummary><div>{section.content}</div>
           </Disclosure>)}</section> : null}
         </div>
@@ -223,7 +224,8 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
               {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : <p className={styles.emptyHint}>未生成打印任务 · 下发生产后生成</p>}
             {versionChanged ? <p className={styles.emptyHint}>旧版纸质工单已失效，请使用 v{model.version}。</p> : null}
             {printHint ? <p className={styles.emptyHint}>{printHint}</p> : null}
-            <Link href={`/print/orders/${model.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</Link>
+            <a href={`/api/orders/${model.id}/pdf?view=inline`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</a>
+            <Link href={`/print/orders/${model.id}`} prefetch={false} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>网页预览</Link>
           </section>
           <section className={styles.asideSection}><h2 className={styles.eyebrow}>收货</h2>{model.shipments.length ? <ol className={styles.shipments}>{model.shipments.map((shipment) => <li key={shipment.id}>
             <p>{model.shipments.length > 1 ? `第 ${shipment.sequence} 票 · ` : ''}{shipment.name} {shipment.phone}</p><strong>{shipment.address || '未填写收货地址'}</strong>

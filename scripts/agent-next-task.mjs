@@ -69,16 +69,18 @@ Implement the next automation backlog task:
 ${selected.body}
 
 Execution rules:
-1. Read AGENTS.md, README.md, DECISIONS.md, PIGSTY-EXTENSIONS.md, and docs/AGENT-ROUTINES.md first.
+1. Read AGENTS.md, CONTRIBUTING.md, DEVELOPMENT.md, docs/编码规范.md, README.md, DECISIONS.md, PIGSTY-EXTENSIONS.md, and docs/AGENT-ROUTINES.md first.
 2. Create or use branch ${selected.branch || 'codex/<task>'}.
 3. Implement only ${selected.id}. Do not work on other backlog items.
 4. Do not execute production database operations or destructive git commands.
-5. Run verification:
-   - ./node_modules/.bin/prisma validate
-   - pnpm typecheck
-   - ./node_modules/.bin/eslint .
-   - ./node_modules/.bin/vitest run --reporter=dot --testTimeout=10000
-   - ./node_modules/.bin/next build when App Router, Prisma schema, migrations, or page components change
+5. Select verification by CONTRIBUTING.md#测试要求 and use current commands and environment prerequisites from DEVELOPMENT.md#常用命令 and DEVELOPMENT.md#测试环境约束:
+   - Use pnpm lint for the complete ESLint, UI copy, and token gates; plain eslint is insufficient.
+   - Run pnpm typecheck and pnpm test --run when required for the change's risk; use pnpm build for the required production build.
+   - Run pnpm test:browser and the relevant E2E/visual checks for UI or framework-boundary changes. Playwright --list only collects tests and is not execution.
+   - Before any browser test that writes data, explicitly configure an isolated disposable E2E_DATABASE_URL distinct from the daily DATABASE_URL and prepare required fixtures. A missing prerequisite or skipped case is not a pass.
+   - For migrations, run pnpm exec prisma validate and pnpm test:migrations:fresh against a confirmed disposable empty database, following DEVELOPMENT.md.
+   - Follow the full release-candidate row for release work, including coverage, production dependency audit, production-build browser tests, and target-environment smoke. Never lower gates or update visual baselines merely to pass.
+   - Record the tested SHA, working-tree changes, runtime mode, commands, actual pass/fail/skip counts, evidence, and remaining coverage. Synchronize the affected canonical docs and release-remediation task status.
 6. Commit the scoped changes and open a draft PR.
 7. In the PR body, include summary, tests, risks, and manual follow-up.
 `;

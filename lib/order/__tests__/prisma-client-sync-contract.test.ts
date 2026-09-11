@@ -13,36 +13,8 @@ describe('Prisma client synchronization contract', () => {
     expect(packageJson.scripts?.predev).toMatch(/(?:^|\s)prisma generate(?:\s|$)/);
   });
 
-  it('starts the Playwright server through the development lifecycle', () => {
-    const source = readFileSync(join(workspace, 'playwright.config.ts'), 'utf8');
-
-    expect(source).toMatch(/command:\s*`pnpm (?:run )?dev\b/);
-    expect(source).not.toContain(
-      'command: `node ./node_modules/next/dist/bin/next dev',
-    );
-  });
-
-  it('isolates append-only production E2E facts from the normal database', () => {
-    const config = readFileSync(
-      join(workspace, 'playwright.config.ts'),
-      'utf8',
-    );
-    const helpers = readFileSync(
-      join(workspace, 'tests/e2e/_helpers.ts'),
-      'utf8',
-    );
-
-    expect(config).toContain('E2E_DATABASE_URL');
-    expect(config).toContain('E2E_ORIGINAL_DATABASE_TARGET');
-    expect(config).toContain('requestedE2eDatabaseTarget === defaultDatabaseTarget');
-    expect(config).toContain(
-      'reuseExistingServer: !hasIsolatedE2eDatabase && !process.env.CI',
-    );
-    expect(helpers).toContain('productionOperationE2eIsolationFailure()');
-    expect(helpers.indexOf('productionOperationE2eIsolationFailure()')).toBeLessThan(
-      helpers.indexOf('return withDb(async (db) => {', helpers.indexOf('seedE2eProductionOperationFixture')),
-    );
-  });
+  // Playwright lifecycle and isolation behavior are verified by
+  // tests/regression/playwright-database-isolation.test.ts and e2e-global-setup.test.ts.
 
   it('keeps the generated client schema byte-for-byte current', () => {
     const schema = readFileSync(join(workspace, 'prisma/schema.prisma'), 'utf8');

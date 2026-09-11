@@ -18,7 +18,55 @@ function smartBot(
   };
 }
 
+function inlineHealth() {
+  return {
+    status: 'ok', mode: 'inline', time: '2026-09-10T00:00:00.000Z',
+    jobs: { pending: { LIGHT: 0, HEAVY: 0 }, running: 0,
+      staleRunning: 0, deadLast24h: 0, deadNotificationLast24h: 0 },
+    smartBot: { status: null, required: false, configurationValid: true,
+      identityMatch: null, operational: true, recoveryWaitMs: 0 },
+    alerts: [], warnings: [],
+  };
+}
+
 describe('deploy jobs health gate', () => {
+  it.each([
+    { mode: 'durable' }, { mode: undefined }, { status: 'error' },
+    { time: undefined }, { time: 'invalid' }, { jobs: undefined },
+    { jobs: { ...inlineHealth().jobs, pending: { LIGHT: 0 } } },
+    { jobs: { ...inlineHealth().jobs, running: -1 } },
+    { alerts: undefined }, { warnings: {} }, { alerts: ['smart-bot-auth-failed'] },
+    { warnings: ['unreviewed-warning'] },
+    ...Object.keys(inlineHealth().smartBot).map((field) => ({
+      smartBot: { ...inlineHealth().smartBot, [field]: undefined },
+    })),
+    { smartBot: { ...inlineHealth().smartBot, required: true } },
+    { smartBot: { ...inlineHealth().smartBot, configurationValid: false } },
+    { smartBot: { ...inlineHealth().smartBot, identityMatch: false } },
+    { smartBot: { ...inlineHealth().smartBot, operational: false } },
+    { smartBot: { ...inlineHealth().smartBot, recoveryWaitMs: 100 } },
+  ])('rejects incomplete or inconsistent optional inline null health %#', (overrides) => {
+    expect(assessDeployJobsGate({ ...inlineHealth(), ...overrides }, {
+      runtimeEnvironment: 'development',
+    })).toMatchObject({ ok: false, ready: false });
+  });
+
+  it.each(['development', 'test'])('CLI accepts explicit %s inline health as NOT_REQUIRED', async (environment) => {
+    const result = await runGateCli(JSON.stringify(inlineHealth()), ['--status-only'], {
+      NODE_ENV: environment,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe('NOT_REQUIRED');
+  });
+
+  it('CLI rejects inline null health under production even when the body says ok', async () => {
+    const result = await runGateCli(JSON.stringify(inlineHealth()), ['--status-only'], {
+      NODE_ENV: 'production',
+    });
+    expect(result.code).toBe(2);
+    expect(result.stdout).not.toContain('NOT_REQUIRED');
+  });
+
   it.each(['AUTH_FAILED', 'CONNECTION_CONFLICT'])(
     'blocks the non-self-healing smart-bot state %s',
     (status) => {

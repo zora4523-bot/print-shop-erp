@@ -17,6 +17,7 @@ const { dbMock, previewMock, progressMock } = vi.hoisted(() => {
   const database = {
     order: {
       count: vi.fn(),
+      groupBy: vi.fn(),
       findMany: vi.fn(),
       findFirst: vi.fn(),
       findUnique: vi.fn(),
@@ -55,6 +56,7 @@ import {
   adminManualPricingWhere,
   adminQueueWhere,
   adminSignalWhere,
+  buildAdminWorkspaceBaseWhere,
   buildAdminWorkspaceResultWhere,
   getAdminOrderByOrderNo,
   loadAdminOrderWorkspace,
@@ -65,8 +67,6 @@ import {
   resolveAdminWorkspaceResultWhere,
 } from '../admin-workspace';
 import {
-  ADMIN_ORDER_QUEUES,
-  ADMIN_ORDER_SIGNALS,
   parseAdminOrderWorkspaceQuery,
 } from '../admin-workspace-query';
 import { OrderChangeRequestError } from '../change-request';
@@ -160,6 +160,7 @@ beforeEach(() => {
   );
   dbMock.order.findMany.mockResolvedValue([]);
   dbMock.order.count.mockReset().mockResolvedValue(0);
+  dbMock.order.groupBy.mockReset().mockResolvedValue([]);
   dbMock.order.findFirst.mockResolvedValue(null);
   dbMock.order.findUnique.mockResolvedValue(null);
   dbMock.$queryRaw.mockResolvedValue([]);
@@ -578,29 +579,20 @@ describe('admin order workspace predicates', () => {
   it('aggregates the whole filtered set and excludes manual pending quotes', async () => {
     const query = parseAdminOrderWorkspaceQuery({ queue: 'all' }).query;
     const now = new Date('2026-09-07T00:00:00.000Z');
-    const queueCounts = {
-      todo: 3, print: 1, production: 2, shipped: 1, done: 2, all: 9,
-    };
+    const groups = (counts: Partial<Record<OrderStatus, number>>) =>
+      Object.entries(counts).map(([status, count]) => ({ status, _count: { _all: count } }));
+    dbMock.order.groupBy
+      .mockResolvedValueOnce(groups({ PENDING_FACTORY: 2, SUBMITTED: 1, CONFIRMED: 4, ON_HOLD: 2, RELEASED: 3, FOILING: 2, PACKING: 1, SHIPPED: 2, SETTLED: 2, CANCELLED: 1, FINISHED: 1, REJECTED: 1, DRAFT: 1 }))
+      .mockResolvedValueOnce(groups({ PENDING_FACTORY: 1, CONFIRMED: 1, RELEASED: 1, SHIPPED: 1, SETTLED: 1, REJECTED: 1 }));
+    const queueCounts = { todo: 13, print: 1, production: 8, shipped: 2, done: 4, all: 23 };
     const signalCounts = {
-      'pending-confirmation': 2,
-      'pending-pricing': 1,
-      'pending-release': 4,
-      'pending-change': 3,
-      'on-hold': 5,
-      overdue: 6,
-      'due-today': 7,
+      'pending-confirmation': 3, 'pending-pricing': 1, 'pending-release': 3,
+      'pending-change': 6, 'on-hold': 2, overdue: 6, 'due-today': 7,
     };
-    dbMock.order.count.mockResolvedValueOnce(5);
-    for (const queue of ADMIN_ORDER_QUEUES) {
-      dbMock.order.count.mockResolvedValueOnce(queueCounts[queue]);
-    }
-    for (const signal of ADMIN_ORDER_SIGNALS) {
-      dbMock.order.count.mockResolvedValueOnce(signalCounts[signal]);
-    }
     dbMock.order.count
-      .mockResolvedValueOnce(2)
-      .mockResolvedValueOnce(3)
-      .mockResolvedValueOnce(4);
+      .mockResolvedValueOnce(1).mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(6).mockResolvedValueOnce(7)
+      .mockResolvedValueOnce(2).mockResolvedValueOnce(3).mockResolvedValueOnce(4);
     dbMock.orderItem.aggregate.mockResolvedValue({
       _sum: { quantity: 12345 },
     });
@@ -611,14 +603,23 @@ describe('admin order workspace predicates', () => {
 
     const page = await loadAdminOrderWorkspace(actor, query, now);
     expect(page.counts).toEqual({ queues: queueCounts, signals: signalCounts });
-    const signalCountStart = 1 + ADMIN_ORDER_QUEUES.length;
-    for (const [index, signal] of ADMIN_ORDER_SIGNALS.entries()) {
-      expect(dbMock.order.count.mock.calls[signalCountStart + index]?.[0]).toEqual({
-        where: { AND: [expect.any(Object), adminSignalWhere(signal, now)] },
+    expect(dbMock.order.groupBy).toHaveBeenNthCalledWith(1, {
+      by: ['status'], where: buildAdminWorkspaceBaseWhere(actor, query), _count: { _all: true },
+    });
+    expect(dbMock.order.groupBy).toHaveBeenNthCalledWith(2, {
+      by: ['status'], where: { AND: [buildAdminWorkspaceBaseWhere(actor, query), adminSignalWhere('pending-change', now)] }, _count: { _all: true },
+    });
+    for (const [index, signal] of (['pending-pricing', 'overdue', 'due-today'] as const).entries()) {
+      expect(dbMock.order.count.mock.calls[index + 1]?.[0]).toEqual({
+        where: { AND: [buildAdminWorkspaceBaseWhere(actor, query), adminSignalWhere(signal, now)] },
       });
     }
+    expect(dbMock.order.count).toHaveBeenCalledTimes(7);
+    expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 15_000,
+    });
     expect(page.summary).toEqual({
-      orderCount: 5,
+      orderCount: 23,
       totalQuantity: 12345,
       effectiveFee: '34.00',
       manualPricingCount: 2,
@@ -630,7 +631,7 @@ describe('admin order workspace predicates', () => {
       _sum: { quantity: true },
     });
     expect(dbMock.order.aggregate).toHaveBeenCalledTimes(3);
-    const summaryCountStart = signalCountStart + ADMIN_ORDER_SIGNALS.length;
+    const summaryCountStart = 4;
     expect(dbMock.order.count.mock.calls[summaryCountStart]?.[0]).toEqual({
       where: {
         AND: [expect.any(Object), adminManualPricingWhere()],
@@ -675,6 +676,77 @@ describe('admin order workspace predicates', () => {
     });
   });
 
+  it.each([
+    // status, todo, production, shipped, done, pending confirmation, release, hold
+    [OrderStatus.DRAFT, 0, 0, 0, 0, 0, 0, 0],
+    [OrderStatus.PENDING_FACTORY, 1, 0, 0, 0, 1, 0, 0],
+    [OrderStatus.SUBMITTED, 1, 0, 0, 0, 1, 0, 0],
+    [OrderStatus.REJECTED, 0, 0, 0, 0, 0, 0, 0],
+    [OrderStatus.CONFIRMED, 1, 1, 0, 0, 0, 1, 0],
+    [OrderStatus.ON_HOLD, 1, 0, 0, 0, 0, 0, 1],
+    [OrderStatus.RELEASED, 0, 1, 0, 0, 0, 0, 0],
+    [OrderStatus.FOILING, 0, 1, 0, 0, 0, 0, 0],
+    [OrderStatus.PACKING, 0, 1, 0, 0, 0, 0, 0],
+    [OrderStatus.SCHEDULING, 0, 1, 0, 0, 0, 0, 0],
+    [OrderStatus.IN_PRODUCTION, 0, 1, 0, 0, 0, 0, 0],
+    [OrderStatus.COMPLETED, 0, 1, 0, 0, 0, 0, 0],
+    [OrderStatus.SHIPPED, 0, 0, 1, 0, 0, 0, 0],
+    [OrderStatus.SETTLED, 0, 0, 0, 1, 0, 0, 0],
+    [OrderStatus.FINISHED, 0, 0, 0, 1, 0, 0, 0],
+    [OrderStatus.CANCELLED, 0, 0, 0, 1, 0, 0, 0],
+  ] as const)('keeps %s queue memberships with and without a pending change', async (status, todo, production, shipped, done, pendingConfirmation, pendingRelease, onHold) => {
+    for (const hasPendingChange of [false, true]) {
+      dbMock.order.groupBy.mockReset()
+        .mockResolvedValueOnce([{ status, _count: { _all: 1 } }])
+        .mockResolvedValueOnce(hasPendingChange ? [{ status, _count: { _all: 1 } }] : []);
+      const page = await loadAdminOrderWorkspace(actor, parseAdminOrderWorkspaceQuery({ queue: 'all' }).query);
+      expect(page.total).toBe(1);
+      expect(page.counts).toEqual({
+        queues: { todo: hasPendingChange ? 1 : todo, print: 0, production: hasPendingChange ? 0 : production, shipped, done, all: 1 },
+        signals: {
+          'pending-confirmation': pendingConfirmation, 'pending-pricing': 0,
+          'pending-release': hasPendingChange ? 0 : pendingRelease,
+          'pending-change': hasPendingChange ? 1 : 0,
+          'on-hold': onHold, overdue: 0, 'due-today': 0,
+        },
+      });
+    }
+  });
+
+  it('preserves all base filters and counts an added signal within its selected queue', async () => {
+    const now = new Date('2026-09-10T00:00:00Z');
+    const query = parseAdminOrderWorkspaceQuery({ queue: 'production', signal: 'overdue', q: '客户搜索', starred: 'yes', page: '3' }).query;
+    dbMock.order.groupBy.mockResolvedValueOnce([{ status: OrderStatus.RELEASED, _count: { _all: 3 } }]).mockResolvedValueOnce([]);
+    dbMock.order.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(2).mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    const page = await loadAdminOrderWorkspace(actor, query, now);
+    expect(page.counts.queues.production).toBe(3);
+    expect(page.counts.signals.overdue).toBe(2);
+    expect(page.total).toBe(1);
+    expect(page.page).toBe(1);
+    expect(dbMock.order.groupBy).toHaveBeenNthCalledWith(1, { by: ['status'], where: buildAdminWorkspaceBaseWhere(actor, query), _count: { _all: true } });
+    expect(dbMock.order.count).toHaveBeenNthCalledWith(5, { where: buildAdminWorkspaceResultWhere(actor, query, now) });
+    expect(dbMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: buildAdminWorkspaceResultWhere(actor, query, now), skip: 0 }));
+  });
+
+  it('uses exact current print membership for both queue count and the selected page', async () => {
+    const query = parseAdminOrderWorkspaceQuery({ queue: 'print' }).query;
+    dbMock.$queryRaw.mockResolvedValueOnce([{ id: 'current-print-1' }]);
+    dbMock.order.groupBy.mockResolvedValueOnce([{ status: OrderStatus.RELEASED, _count: { _all: 3 } }]).mockResolvedValueOnce([]);
+    dbMock.order.count.mockResolvedValueOnce(1);
+    const page = await loadAdminOrderWorkspace(actor, query);
+    expect(page.total).toBe(1);
+    expect(page.counts.queues.print).toBe(1);
+    expect(dbMock.order.count).toHaveBeenNthCalledWith(1, { where: { AND: [buildAdminWorkspaceBaseWhere(actor, query), { id: { in: ['current-print-1'] } }] } });
+    expect(dbMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { AND: [buildAdminWorkspaceBaseWhere(actor, query), { id: { in: ['current-print-1'] } }, {}] } }));
+  });
+
+  it('fails the coherent read instead of returning misleading zero statistics', async () => {
+    const failure = new Error('database unavailable');
+    dbMock.order.groupBy.mockRejectedValueOnce(failure);
+    await expect(loadAdminOrderWorkspace(actor, parseAdminOrderWorkspaceQuery({}).query)).rejects.toBe(failure);
+    expect(dbMock.order.findMany).not.toHaveBeenCalled();
+  });
+
   it('does not present a rejected incomplete quote as actionable manual pricing', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       adminOrderRecord({
@@ -699,6 +771,53 @@ describe('admin order workspace predicates', () => {
   it('does not display a new unquoted draft as a historical zero-price order', async () => {
     dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({ status: OrderStatus.DRAFT, totalAmount: new Prisma.Decimal(0), priceRevision: 0 }));
     expect((await getAdminOrderByOrderNo(actor, 'GD-260902-001'))?.fee).toMatchObject({ amount: null, source: 'PENDING' });
+  });
+
+  it.each([
+    { name: 'confirmed fee with estimated shipping', confirmedFee: '130.00', settledFee: null, hasEstimate: true, source: 'CONFIRMED', amount: '130.00', estimated: true },
+    { name: 'confirmed zero with an estimated charge', confirmedFee: '0.00', settledFee: null, hasEstimate: true, source: 'CONFIRMED', amount: '0.00', estimated: true },
+    { name: 'confirmed fee without estimates', confirmedFee: '130.00', settledFee: null, hasEstimate: false, source: 'CONFIRMED', amount: '130.00', estimated: false },
+    { name: 'settled fee despite a retained estimated charge', confirmedFee: '130.00', settledFee: '140.00', hasEstimate: true, source: 'SETTLED', amount: '140.00', estimated: false },
+    { name: 'quoted fee without estimated charge rows', confirmedFee: null, settledFee: null, hasEstimate: false, source: 'QUOTED', amount: '120.00', estimated: true },
+  ])('projects $name without changing its persisted snapshot', async (scenario) => {
+    const row = adminOrderRecord({
+      status: scenario.settledFee === null ? OrderStatus.RELEASED : OrderStatus.SETTLED,
+      pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED,
+      quotedFee: new Prisma.Decimal('120.00'),
+      confirmedFee: scenario.confirmedFee === null ? null : new Prisma.Decimal(scenario.confirmedFee),
+      settledFee: scenario.settledFee === null ? null : new Prisma.Decimal(scenario.settledFee),
+      customerCharges: scenario.hasEstimate ? [{ id: 'shipping-estimate', status: OrderCustomerChargeStatus.ESTIMATED }] : [],
+    });
+    dbMock.order.findFirst.mockResolvedValue(row);
+    const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
+    expect(detail?.fee).toEqual({ amount: scenario.amount, source: scenario.source, estimated: scenario.estimated });
+    expect(detail?.feeStages).toEqual({ quoted: '120.00', confirmed: scenario.confirmedFee, settled: scenario.settledFee, active: scenario.source });
+    expect(dbMock.order.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({ customerCharges: {
+        where: { status: { in: [OrderCustomerChargeStatus.PENDING_AMOUNT, OrderCustomerChargeStatus.ESTIMATED] } },
+        select: { id: true, status: true },
+      } }),
+    }));
+  });
+
+  it.each([OrderStatus.SUBMITTED, OrderStatus.REJECTED])('distinguishes estimated charges from genuinely missing charges on %s orders', async (status) => {
+    const row = adminOrderRecord({
+      status,
+      quotedFee: new Prisma.Decimal('120.00'),
+      customerCharges: [{ id: 'shipping-estimate', status: OrderCustomerChargeStatus.ESTIMATED }],
+    });
+    dbMock.order.findFirst.mockResolvedValue(row);
+    const estimated = await getAdminOrderByOrderNo(actor, row.orderNo);
+    expect(estimated?.fee).toEqual({ amount: '120.00', source: 'QUOTED', estimated: true });
+    expect(estimated?.statusSummary).not.toBe('系统无法完整定价，待人工核价');
+
+    dbMock.order.findFirst.mockResolvedValue({
+      ...row,
+      customerCharges: [...row.customerCharges, { id: 'missing-charge', status: OrderCustomerChargeStatus.PENDING_AMOUNT }],
+    });
+    const pending = await getAdminOrderByOrderNo(actor, row.orderNo);
+    expect(pending?.fee).toEqual({ amount: null, source: status === OrderStatus.SUBMITTED ? 'PENDING' : 'INCOMPLETE', estimated: false });
+    expect(pending?.capabilities.confirm).toBe(false);
   });
 
   it('aggregates canonical craft types independently of display dictionary names', async () => {

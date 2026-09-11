@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { paginatePrintDocument } from '@/lib/order/print-pagination';
+import { requirePrintFonts } from '@/lib/order/print-fonts';
 
 export const PRINT_READY_EVENT = 'print-ready';
 export const PRINT_READY_TIMEOUT_MS = 12_000;
@@ -80,7 +81,7 @@ export function preparePrintDocument(
       });
     });
 
-  const fontsReady = documentTarget.fonts?.ready.catch(() => undefined);
+  const fontsReady = requirePrintFonts(documentTarget);
   void Promise.all([fontsReady, ...images.map(waitForImage)]).then(() => {
     if (cancelled) return;
     if (failedFigures.size > 0) {
@@ -98,7 +99,7 @@ export function preparePrintDocument(
     windowTarget.dispatchEvent(new Event(PRINT_READY_EVENT));
   }).catch(() => {
     if (cancelled) return;
-    documentTarget.documentElement.dataset.printPagination = 'overflow';
+    documentTarget.documentElement.dataset.printPagination = documentTarget.documentElement.dataset.printFonts === 'failed' ? 'font-error' : 'overflow';
     documentTarget.dispatchEvent(new Event(PRINT_READY_EVENT));
     windowTarget.dispatchEvent(new Event(PRINT_READY_EVENT));
   });
@@ -208,6 +209,6 @@ export function AutoPrint({ enabled }: { enabled: boolean }) {
   }, [enabled]);
   return failed ? <p role="alert" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
     padding: '1rem', background: 'var(--card)', color: 'var(--primary)', textAlign: 'center' }}>
-    打印页面未能完成排版，已停止自动打印。请刷新页面后重试。
+    打印字体或排版未能加载完成，已停止自动打印。请刷新重试，或返回工单下载 PDF。
   </p> : null;
 }

@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { Prisma } from '../generated/prisma/client';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   createUserSchema,
@@ -17,7 +16,7 @@ import {
   AccountInvariantError,
 } from '@/lib/account';
 import type { AccountMutationResult } from './owner-accounts.types';
-import { collectFieldErrors } from '@/lib/admin/action-helpers';
+import { collectFieldErrors, extractPrismaUniqueTargets } from '@/lib/admin/action-helpers';
 
 // NB: Next.js strips every non-async-function export from a 'use server'
 // module, so a `export type { AccountMutationResult }` re-export here would
@@ -25,31 +24,17 @@ import { collectFieldErrors } from '@/lib/admin/action-helpers';
 // components, and tests — must import the type from './owner-accounts.types'
 // directly.
 
-// P2002 on the User table's unique username column. `meta.target` comes in
-// several shapes depending on the driver — `string[]` of columns, a single
-// column `string`, or a single constraint/index `string` like
-// `User_username_key` (Prisma's default `<Model>_<column>_key` format,
-// confirmed in prisma/migrations/.../migration.sql). Accept all three via
-// exact-element match against a synonym allowlist.
-// Background: rounds 16 (substring match false-positives) → 17 (exact
-// match too strict, drops constraint-name variants).
+// Accept both query-engine targets and Prisma 7 adapter constraint fields.
+// Username is a single-column constraint; extra fields or a partial name must
+// not disguise an unrelated database error as a user-correctable duplicate.
 const USERNAME_UNIQUE_SYNONYMS = ['username', 'User_username_key'] as const;
 
-function matchesUnique(targets: string[], synonyms: readonly string[]): boolean {
-  return targets.some((t) => synonyms.includes(t));
-}
-
 function mapPrismaError(err: unknown): AccountMutationResult | null {
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-    const raw = err.meta?.target;
-    const targets: string[] = Array.isArray(raw)
-      ? (raw as string[])
-      : typeof raw === 'string'
-        ? [raw]
-        : [];
-    if (matchesUnique(targets, USERNAME_UNIQUE_SYNONYMS)) {
-      return { status: 'invalid', fieldErrors: { username: ['该用户名已被占用'] } };
-    }
+  if (typeof err !== 'object' || err === null ||
+      !('code' in err) || err.code !== 'P2002') return null;
+  const targets = extractPrismaUniqueTargets('meta' in err ? err.meta : undefined);
+  if (targets.length === 1 && USERNAME_UNIQUE_SYNONYMS.some((target) => target === targets[0])) {
+    return { status: 'invalid', fieldErrors: { username: ['该用户名已被占用'] } };
   }
   return null;
 }

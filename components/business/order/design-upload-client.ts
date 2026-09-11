@@ -151,11 +151,21 @@ export async function uploadOrderItemDesignFile({
       };
     }
 
-    const response = await fetch(signed.putUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': prepared.mimeType },
-      body: prepared.file,
-    });
+    let response: Response;
+    try {
+      response = await fetch(signed.putUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': prepared.mimeType },
+        body: prepared.file,
+      });
+    } catch {
+      // Browsers conceal the HTTP response for failed CORS preflights. A
+      // rejected fetch cannot distinguish that case from a network outage.
+      return {
+        ok: false,
+        message: '文件未上传，请检查网络；仍失败请联系管理员核对上传设置后重试',
+      };
+    }
     if (!response.ok) {
       return {
         ok: false,

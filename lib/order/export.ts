@@ -296,7 +296,7 @@ export async function processQueuedOrderExport(
         throw new InvalidOrderExportStoredFilterError();
       }
       const { resolveAdminWorkspaceResultWhere } = await import(
-        './admin-workspace'
+        './admin-workspace-filters'
       );
       resultWhere = await resolveAdminWorkspaceResultWhere(
         actor,

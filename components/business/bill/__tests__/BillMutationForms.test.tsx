@@ -107,7 +107,7 @@ describe('bill mutation confirmations', () => {
       path.join(
         process.cwd(),
         'app',
-        '(admin)',
+        '(billing)',
         'owner',
         'bills',
         '[id]',

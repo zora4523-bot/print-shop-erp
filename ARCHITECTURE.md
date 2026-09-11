@@ -13,6 +13,10 @@ applies_to: repository source at last_verified
 
 ## 系统边界
 
+销售资料与单款快速计价入口为 `/workbench`，页面和 action 均以 `order:create` 授权。
+目录读取复用建单目录；计算复用 `calculateCreateOrderQuoteFromCatalogInTx`，只向浏览器投影对客加工费明细和 Decimal 加价结果。
+销售知识独立于目录加载，不创建订单或新的价格账本，详见 [销售工作台](./docs/销售工作台.md)。
+
 红包印刷 ERP 是一个 Next.js App Router 应用，覆盖工单、生产、外协、库存、采购、定价、账单、薪资、通知和运维页面。当前运行时由以下部分组成：
 
 ```text
@@ -157,3 +161,15 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 - 修改数据一致性、回退或快照策略。
 
 只记录已经从代码、配置或已批准决策中验证的事实。带日期的生产快照属于部署 runbook，不应被提升为永久架构事实。
+
+### 发布验证进程隔离（2026-09-11）
+
+仓库 Playwright 配置在启动服务及 globalSetup 首次连接前预检独立 E2E 数据库和显式库名确认。开发测试、生产构建测试与 durable worker 测试使用独立服务端口和构建产物；禁止复用日常开发服务。测试工价经正式发布服务建立并标明非生产，不能作为正式业务定价。命令与环境规则只在 [开发指南](./DEVELOPMENT.md#测试环境约束) 维护，远端 CI/生产验收证据在 [整改台账](./docs/release-remediation-2026-09-10.md) 跟踪。
+
+六个账单页面位于 `app/(billing)/owner/`，复用原 AdminShellLayout、OwnerLayout 和错误/404 边界；URL 保持不变，独立分组提供原生表单初始 HTML。页面与 HEAVY 导出共享 `lib/order/admin-workspace-filters.ts` 的权限及筛选谓词，worker 不导入带 `server-only` 的页面聚合模块。
+
+Next 16.3 默认会在 Proxy 前规范化并剥离 Flight 标头；`skipProxyUrlNormalize: true` 保留预取标识供认证代理判断。matcher 不跳过预取认证，代理仅阻止预取响应的 Cookie 写回，正常导航的滚动会话不受影响；原始路径下的公共资源、认证及受保护路由都有回归。
+
+### 跨设备打印输出（2026-09-11）
+
+正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。

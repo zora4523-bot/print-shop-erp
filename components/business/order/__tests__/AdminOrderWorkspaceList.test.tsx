@@ -206,7 +206,7 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).toContain('请补全收货地址');
     expect(html).not.toContain('确认并锁定');
     expect(html).not.toContain('>确认工单</button>');
-    expect(html).not.toContain('>下发 + 打印</button>');
+    expect(html).not.toContain('>下发生产</button>');
   });
 
   it('offers release with saved pricing and never waits for a current-price token', () => {
@@ -216,7 +216,7 @@ describe('AdminOrderWorkspaceList', () => {
     submitted.capabilities = { ...submitted.capabilities, confirm: true, hold: false, release: true };
     submitted.priceComparison = null;
     const html = renderToStaticMarkup(<AdminOrderDecisionPanel order={submitted} />);
-    expect(html).toContain('下发 + 打印');
+    expect(html).toContain('下发生产');
     expect(html).not.toContain('>确认工单</button>');
     expect(html).not.toContain('锁定金额');
   });

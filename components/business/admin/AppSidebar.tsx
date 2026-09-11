@@ -135,6 +135,7 @@ function getSidebarCollapseServerSnapshot(): Record<string, boolean> {
 }
 const PINNED_HREFS = new Set([
   '/owner',
+  '/workbench',
   '/orders',
   '/orders/new',
 ]);
@@ -196,7 +197,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   // 少量、没有子菜单的角色入口直接平铺；不让唯一的账单入口再套一层财务。
   // 管理员的多项分组与规则子菜单仍保留，权限继续由 menuGroups 决定。
   const compactMenu =
-    allItems.length <= 4 && allItems.every((item) => !item.children?.length);
+    allItems.length <= 5 && allItems.every((item) => !item.children?.length);
   const pinnedItems = allItems.filter(
     (item) => compactMenu || PINNED_HREFS.has(item.href),
   );

@@ -71,6 +71,25 @@ function packagingFixture(snapshot: unknown, subtotal = '0.00'): AdminOrderDetai
 }
 
 describe('admin order detail projection', () => {
+  it.each([
+    ['160g珠光艳闪', 160, '160g珠光艳闪'],
+    ['珠光艳闪 160 G', 160, '珠光艳闪 160 G'],
+    ['珠光艳闪（160克）', 160, '珠光艳闪（160克）'],
+    ['珠光艳闪 160gsm', 160, '珠光艳闪 160gsm'],
+    ['珠光艳闪', 160, '珠光艳闪 · 160g'],
+    ['120g珠光艳闪', 160, '120g珠光艳闪 · 160g'],
+    ['160g珠光艳闪', 60, '160g珠光艳闪 · 60g'],
+    ['1600g红卡', 160, '1600g红卡 · 160g'],
+    ['160.5g珠光艳闪', 160, '160.5g珠光艳闪 · 160g'],
+    ['珠光艳闪', null, '珠光艳闪'],
+    [null, 160, '160g'],
+    [null, null, '未记录'],
+  ])('preserves paper facts without repeating the same weight: %s / %s', (paperType, paperWeightGsm, expected) => {
+    const input = fixture();
+    Object.assign(input.order.items[0]!, { paperType, paperWeightGsm });
+    expect(buildAdminOrderDetailModel(input).items[0]!.specs.find((spec) => spec.label === '纸张')?.value).toBe(expected);
+  });
+
   it('retains exact persisted amounts, zero plate fees and nullable fee stages', () => {
     const input = fixture();
     input.workspace.feeStages = { quoted: '9007199254.01', confirmed: '0.00', settled: null, active: 'CONFIRMED' };

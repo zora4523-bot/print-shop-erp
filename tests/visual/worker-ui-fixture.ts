@@ -27,6 +27,7 @@ export type WorkerUiFixture = {
   salaryItemId: string;
   adjustmentId: string;
   salaryDate: string;
+  hourlyWorkerId: string;
   csUserId: string;
   csPeriodId: string;
 };
@@ -71,6 +72,7 @@ function fixtureFor(namespace: string): WorkerUiFixture {
     salaryItemId: `${prefix}-salary-item`,
     adjustmentId: `${prefix}-adjustment`,
     salaryDate,
+    hourlyWorkerId: `${prefix}-long-cleaner`,
     csUserId: `${prefix}-cs-user`,
     csPeriodId: `${prefix}-cs-period`,
   };
@@ -86,6 +88,35 @@ async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   }
 }
 
+async function deleteUnusedHourlyWorker(db: Client, id: string): Promise<void> {
+  if (!/^e2e-worker-ui-[a-z0-9-]+-long-cleaner$/.test(id)) {
+    throw new Error('Only the dedicated visual hourly worker may be cleaned up.');
+  }
+  const user = await db.query('SELECT id FROM "User" WHERE id = $1 FOR UPDATE', [id]);
+  if (user.rowCount === 0) return;
+  // Include every actual User foreign key, including future relations. Refuse
+  // cleanup once this read-only identity acquires history; never cascade it away.
+  const references = await db.query<{ relation: string; column: string }>(`
+    SELECT format('%I.%I', ns.nspname, rel.relname) AS relation,
+           quote_ident(col.attname) AS column
+    FROM pg_constraint fk
+    JOIN pg_class rel ON rel.oid = fk.conrelid
+    JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+    JOIN LATERAL unnest(fk.conkey, fk.confkey) keys(local_num, remote_num) ON TRUE
+    JOIN pg_attribute col ON col.attrelid = fk.conrelid AND col.attnum = keys.local_num
+    JOIN pg_attribute remote_col ON remote_col.attrelid = fk.confrelid AND remote_col.attnum = keys.remote_num
+    WHERE fk.contype = 'f' AND fk.confrelid = '"User"'::regclass AND remote_col.attname = 'id'
+  `);
+  for (const reference of references.rows) {
+    // Both identifiers are quoted by PostgreSQL from its own relation catalog.
+    const linked = await db.query(
+      `SELECT 1 FROM ${reference.relation} WHERE ${reference.column} = $1 LIMIT 1`, [id],
+    );
+    if (linked.rowCount !== 0) throw new Error(`Visual hourly worker has history in ${reference.relation}; retain it.`);
+  }
+  await db.query('DELETE FROM "User" WHERE id = $1', [id]);
+}
+
 export async function seedWorkerUiFixture(
   namespace = 'default',
 ): Promise<WorkerUiFixture> {
@@ -93,6 +124,7 @@ export async function seedWorkerUiFixture(
   await withDb(async (db) => {
     await db.query('BEGIN');
     try {
+      await deleteUnusedHourlyWorker(db, fixture.hourlyWorkerId);
       const users = await db.query<{ id: string; username: string }>(
         `SELECT id, username FROM "User" WHERE username = ANY($1::text[])`,
         [[
@@ -159,6 +191,14 @@ export async function seedWorkerUiFixture(
       await db.query(`DELETE FROM "Order" WHERE id = $1`, [
         fixture.overrideSchedulingOrderId,
       ]);
+
+      await db.query(
+        `INSERT INTO "User" (id, username, password, role, "workerType", "displayName", "isActive", "createdAt", "updatedAt")
+         SELECT $1::text, $1::text::citext, password, 'WORKER'::"Role", 'CLEANER'::"WorkerType",
+                '长姓名清废师傅ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证筛选不会撑开小屏', FALSE, NOW(), NOW()
+         FROM "User" WHERE id = $2`,
+        [fixture.hourlyWorkerId, adminId],
+      );
 
       // Each viewport owns a separate CS identity: the database permits only
       // one IN_PROGRESS period per user. Never remove shared e2e-cs periods.
@@ -575,6 +615,7 @@ export async function cleanupWorkerUiFixture(
   await withDb(async (db) => {
     await db.query('BEGIN');
     try {
+      await deleteUnusedHourlyWorker(db, fixture.hourlyWorkerId);
       await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [fixture.salaryId]);
       await db.query(
         `DELETE FROM "ProductionOperationSource" WHERE "operationId" = ANY($1::text[])`,

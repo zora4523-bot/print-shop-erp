@@ -8,6 +8,7 @@ import {
   useTransition,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import { ChevronDown } from 'lucide-react';
 import {
   runAdminOrderBatchAction,
   type AdminOrderBatchActionResult,
@@ -20,7 +21,8 @@ import type { AdminOrderBatchCommand } from '@/lib/order/admin-batch';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import type { OrderListSelectionItem } from './OrderListBatchSelection';
 import { Button } from '@/components/ui/button';
-import { ConfirmActionController, ConfirmActionDialog, DisabledReason } from '@/components/ui-business';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { useAdminOrderBatchResult } from './AdminOrderBatchResultProvider';
 import {
   BATCH_COMMAND_CONFIG,
@@ -49,6 +51,7 @@ export function AdminOrderBatchActions({
     orders: BatchOrderSnapshot[];
   } | null>(null);
   const focusReturnRef = useRef<HTMLButtonElement | null>(null);
+  const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [exportState, exportAction, exportPending] = useActionState<
     OrderExportActionResult | null,
     FormData
@@ -112,20 +115,19 @@ export function AdminOrderBatchActions({
         reviewedOrders,
         count: reviewedOrders.filter((order) => order.eligible).length,
       };
-    });
-  const unavailableReason = commandOptions
-    .filter(({ count }) => count === 0)
-    .map(({ config }) => `${config.label}：${config.prerequisite}`)
-    .join('；');
+    })
+    .filter(({ count }) => count > 0);
+  const primaryOptions = commandOptions.filter(({ command }) => command !== 'CREATE_PRINT');
+  const printOption = commandOptions.find(({ command }) => command === 'CREATE_PRINT');
   const controls = (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      {commandOptions.map(({ command, config, reviewedOrders, count }) => (
+      {primaryOptions.map(({ command, config, reviewedOrders, count }) => (
         <Button
           key={command}
           type="button"
           variant="secondary"
           className="min-h-11"
-          disabled={busy || count === 0}
+          disabled={busy}
           onClick={(event) => {
             focusReturnRef.current = event.currentTarget;
             setConfirmation({ command, orders: reviewedOrders });
@@ -134,6 +136,28 @@ export function AdminOrderBatchActions({
           {config.label}（{count}）
         </Button>
       ))}
+      {printOption ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            ref={moreTriggerRef}
+            render={<Button type="button" variant="secondary" className="min-h-11" disabled={busy} />}
+          >
+            更多操作
+            <ChevronDown aria-hidden="true" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48" finalFocus={confirmation ? false : moreTriggerRef}>
+            <DropdownMenuItem
+              disabled={busy}
+              onClick={() => {
+                focusReturnRef.current = moreTriggerRef.current;
+                setConfirmation({ command: printOption.command, orders: printOption.reviewedOrders });
+              }}
+            >
+              {printOption.config.label}（{printOption.count}）
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
       <form action={exportAction} aria-busy={exportPending}>
         <input type="hidden" name="scope" value="selected" />
         <input
@@ -159,17 +183,7 @@ export function AdminOrderBatchActions({
 
   return (
     <>
-      {unavailableReason ? (
-        <DisabledReason
-          cause="prerequisite"
-          reason={unavailableReason}
-          className="basis-full sm:min-w-0 sm:flex-1 sm:basis-auto [&_[data-slot=disabled-reason-copy]]:text-xs [&_[data-slot=disabled-reason-copy]]:leading-relaxed [&_[data-slot=disabled-reason-copy]]:text-background/80"
-        >
-          {controls}
-        </DisabledReason>
-      ) : (
-        <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">{controls}</div>
-      )}
+      <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">{controls}</div>
       <ConfirmActionController level="L2"
         open={confirmation !== null}
         onOpenChange={(open) => { if (!open) setConfirmation(null); }}
@@ -180,7 +194,7 @@ export function AdminOrderBatchActions({
           if (confirmation) run(confirmation.command, confirmation.orders);
           setConfirmation(null);
         }}>
-        <ConfirmActionDialog action={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认批量操作'} changes={[]} consequences={confirmation ? batchConfirmationImpact(confirmation.command, confirmation.orders) : []} confirmText={confirmation ? `确认${BATCH_COMMAND_CONFIG[confirmation.command].label}` : '确认操作'} />
+        <ConfirmActionDialog action={confirmation ? BATCH_COMMAND_CONFIG[confirmation.command].confirmLabel : '确认批量操作'} changes={[]} consequences={confirmation ? batchConfirmationImpact(confirmation.command, confirmation.orders) : []} confirmText={confirmation ? BATCH_COMMAND_CONFIG[confirmation.command].confirmLabel : '确认操作'} />
       </ConfirmActionController>
       <p
         role="status"

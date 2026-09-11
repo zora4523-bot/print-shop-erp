@@ -2,7 +2,7 @@
 
 import type * as React from 'react';
 
-import { useActionState, useState, type ReactNode } from 'react';
+import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { CustomerPartyOption } from '@/lib/party';
 import type { OrderExternalSalesAssociation } from '@/lib/order/external-sales-association';
 import { OrderExternalSalesField } from './OrderExternalSalesField';
@@ -84,6 +84,16 @@ export function EditOrderForm({
   designLayout = false,
   designFields,
 }: Props) {
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const form = formRef.current;
+    // React resets resolved actions during commit even when their result is a
+    // validation/conflict error. Native listeners run during that reset; React
+    // event handlers may be paused. Persisted edit versions remount this form.
+    const preserveDraft = (event: Event) => event.preventDefault();
+    form?.addEventListener('reset', preserveDraft);
+    return () => form?.removeEventListener('reset', preserveDraft);
+  }, []);
   const boundAction = updateOrderAction.bind(null, orderId);
   const [state, formAction, actionPending] = useActionState<
     OrderMutationResult | null,
@@ -129,6 +139,7 @@ export function EditOrderForm({
 
   return (
     <form
+      ref={formRef}
       id={formId}
       noValidate={Boolean(onReview)}
       action={onReview ? undefined : formAction}

@@ -282,6 +282,7 @@ async function createMaterialTransactionWithScope(
   }
 
   const parsed = materialStockTransactionSchema.safeParse({
+    idempotencyKey: getFormString(formData, 'idempotencyKey'),
     materialId,
     locationId: getFormStringOr(formData, 'locationId', ''),
     direction: getFormString(formData, 'direction'),

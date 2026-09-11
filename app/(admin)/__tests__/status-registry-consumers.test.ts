@@ -25,8 +25,8 @@ describe('high-risk status registry consumers', () => {
       source('components/business/bill/BillStatusBadge.tsx'),
     ).toContain('BILL_STATUS_REGISTRY');
     const v2Files = [
-      'app/(admin)/owner/agent-bills/page.tsx',
-      'app/(admin)/owner/agent-bills/[id]/page.tsx',
+      'app/(billing)/owner/agent-bills/page.tsx',
+      'app/(billing)/owner/agent-bills/[id]/page.tsx',
     ];
     for (const file of v2Files) {
       expect(source(file), file).toContain(

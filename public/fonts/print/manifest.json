@@ -1,0 +1,14 @@
+[
+  {
+    "file": "NotoSansSC-VF.woff2",
+    "sha256": "19b68c72a4d5fadef0c8ee01710b6b689fbeebd655166b47366caacc44d9bbb6",
+    "sourceSha256": "d68bafcb48a2707749396aa12bbbd833cb70401f3a9a689fd2902c7e0d295964",
+    "codepoints": 30890
+  },
+  {
+    "file": "NotoSansMono-VF.woff2",
+    "sha256": "75beaba32ad45198a685ce57e6f9c8c0280b4266a03451820f44b9da786e0951",
+    "sourceSha256": "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
+    "codepoints": 3490
+  }
+]

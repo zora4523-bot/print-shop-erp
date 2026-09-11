@@ -28,6 +28,34 @@ const FATAL_SMART_BOT_STATUSES = new Set([
   'CONNECTION_CONFLICT',
 ]);
 
+const WORKER_UNAVAILABLE_ALERTS = new Set([
+  'light-worker-missing',
+  'heavy-worker-missing',
+  'light-worker-version-mismatch',
+  'heavy-worker-version-mismatch',
+]);
+
+function isCompleteInlineHealth(body, runtimeEnvironment) {
+  const jobs = body?.jobs;
+  const smartBot = body?.smartBot;
+  return ['development', 'test'].includes(runtimeEnvironment) &&
+    body?.mode === 'inline' &&
+    ['ok', 'degraded', 'alert'].includes(body.status) &&
+    typeof body.time === 'string' && Number.isFinite(Date.parse(body.time)) &&
+    [jobs?.pending?.LIGHT, jobs?.pending?.HEAVY, jobs?.running,
+      jobs?.staleRunning, jobs?.deadLast24h, jobs?.deadNotificationLast24h]
+      .every((count) => Number.isSafeInteger(count) && count >= 0) &&
+    [body.alerts, body.warnings].every((codes) =>
+      Array.isArray(codes) && codes.every((code) => typeof code === 'string')) &&
+    body.alerts.every((code) => ['dead-jobs-last-24h', 'stale-running-jobs'].includes(code)) &&
+    body.warnings.every((code) => ['light-backlog-old', 'heavy-backlog-old',
+      'dead-notification-jobs-last-24h'].includes(code)) &&
+    smartBot?.status === null &&
+    smartBot.required === false && smartBot.configurationValid === true &&
+    smartBot.identityMatch === null && smartBot.operational === true &&
+    smartBot.recoveryWaitMs === 0;
+}
+
 /**
  * The jobs endpoint can legitimately be 503 because of an old non-notification
  * dead letter or a stale job. Those conditions stay visible to operators, but
@@ -36,13 +64,18 @@ const FATAL_SMART_BOT_STATUSES = new Set([
  * transport cannot work until an operator intervenes, so they fail the gate.
  * A required connector that is still reconnecting is observable but not ready;
  * update.sh may wait for it only within its bounded observation window.
+ * Null is accepted only for the complete optional-bot response from an
+ * explicitly non-production inline caller. An unknown status never implies
+ * that a production worker or required connector is healthy.
+ * @param {unknown} body
+ * @param {{ runtimeEnvironment?: string }} options
  */
-export function assessDeployJobsGate(body) {
+export function assessDeployJobsGate(body, options = {}) {
   const smartBot = body?.smartBot;
   const status = smartBot?.status;
+  const optionalInline = isCompleteInlineHealth(body, options.runtimeEnvironment);
   if (
-    typeof status !== 'string' ||
-    !KNOWN_SMART_BOT_STATUSES.has(status) ||
+    (!optionalInline && !KNOWN_SMART_BOT_STATUSES.has(status)) ||
     typeof smartBot?.required !== 'boolean' ||
     typeof smartBot?.configurationValid !== 'boolean' ||
     (smartBot.identityMatch !== null &&
@@ -93,6 +126,16 @@ export function assessDeployJobsGate(body) {
       required: true,
     };
   }
+  if ([body.alerts, body.warnings].some((codes) =>
+    Array.isArray(codes) && codes.some((code) => WORKER_UNAVAILABLE_ALERTS.has(code)))) {
+    return {
+      ok: false,
+      ready: false,
+      reason: 'worker-unavailable',
+      status,
+      required: smartBot.required,
+    };
+  }
   const ready =
     !smartBot.required ||
     (status === 'CONNECTED' && smartBot.operational === true);
@@ -106,6 +149,9 @@ export function assessDeployJobsGate(body) {
 }
 
 export function deployJobsGateFailureMessage(assessment) {
+  if (assessment.reason === 'worker-unavailable') {
+    return 'a required background worker is missing or running a different release';
+  }
   if (assessment.reason === 'smart-bot-fatal') {
     return `enterprise WeChat smart-bot is not operational: ${assessment.status}`;
   }
@@ -163,7 +209,8 @@ function resolveWaitBudgets(options) {
  *   recoveryBudgetMs?: number,
  *   hardLimitMs?: number,
  *   intervalMs?: number,
- *   settleMs?: number
+ *   settleMs?: number,
+ *   runtimeEnvironment?: string
  * }} options
  */
 export async function waitForDeployJobsGate(options) {
@@ -197,9 +244,11 @@ export async function waitForDeployJobsGate(options) {
     }
     const observedAt = now();
     if (observedAt >= Math.min(deadline, hardDeadline)) return timeout();
-    const assessment = assessDeployJobsGate(body);
+    const assessment = assessDeployJobsGate(body, {
+      runtimeEnvironment: options.runtimeEnvironment,
+    });
     lastAssessment = assessment;
-    if (!assessment.ok && assessment.reason !== 'smart-bot-status-unavailable') {
+    if (!assessment.ok && !['smart-bot-status-unavailable', 'worker-unavailable'].includes(assessment.reason)) {
       return finish(false, assessment.reason);
     }
     if (assessment.ok && assessment.ready) {
@@ -254,6 +303,7 @@ async function runWaitCli(target, checkOnly = false) {
       return;
     }
     const result = await waitForDeployJobsGate({
+      runtimeEnvironment: process.env.NODE_ENV,
       readHealth: async ({ timeoutMs }) => {
         // Read JSON even on 503: unrelated historical queue alerts do not
         // invalidate a healthy connector. Bound headers AND response-body I/O.
@@ -298,7 +348,9 @@ async function runCli() {
     return;
   }
 
-  const assessment = assessDeployJobsGate(body);
+  const assessment = assessDeployJobsGate(body, {
+    runtimeEnvironment: process.env.NODE_ENV,
+  });
   if (!assessment.ok) {
     console.error(
       `[deploy-jobs-gate] ${deployJobsGateFailureMessage(assessment)}`,

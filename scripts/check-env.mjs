@@ -85,11 +85,26 @@ if (wecomSmartBotSet.length === 1) {
   );
 }
 
+if (isProd && !/^\d+\.\d+\.\d+\.\d+$/.test(env.PDF_CHROMIUM_VERSION || '')) {
+  errors.push('生产 PDF_CHROMIUM_VERSION 必须固定为已验收 Chromium 的完整版本。');
+}
+const pdfStorage = env.PDF_ARTIFACT_STORAGE || 'filesystem';
+if (!['filesystem', 'oss'].includes(pdfStorage)) errors.push('PDF_ARTIFACT_STORAGE 必须为 filesystem 或 oss。');
+if (isProd && pdfStorage === 'filesystem' && !env.PDF_ARTIFACT_DIR?.trim()) {
+  errors.push('生产 PDF_ARTIFACT_DIR 必须显式配置持久化共享目录。');
+}
+if (pdfStorage === 'oss') {
+  for (const key of ['OSS_ACCESS_KEY_ID', 'OSS_ACCESS_KEY_SECRET', 'OSS_STS_ROLE_ARN', 'OSS_BUCKET', 'OSS_REGION']) {
+    if (!env[key]?.trim()) errors.push(`PDF OSS 存储缺少 ${key}。`);
+  }
+}
+
 for (const key of [
   'PDF_ARTIFACT_DIR',
   'ORDER_EXPORT_ARTIFACT_DIR',
   'AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR',
 ]) {
+  if (key === 'PDF_ARTIFACT_DIR' && pdfStorage === 'oss') continue;
   const value = env[key]?.trim();
   if (value && !isAbsolute(value)) {
     errors.push(`${key} 必须是绝对路径 —— Web 与 HEAVY worker 需要访问同一个产物目录。`);

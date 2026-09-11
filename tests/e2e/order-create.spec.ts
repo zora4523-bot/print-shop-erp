@@ -204,7 +204,10 @@ test.describe('创建工单 — golden path', () => {
     await expectNoNextErrorOverlay(page);
 
     // 按当前详情页核对建单结果；款式信息直接展示，工单号按需展开。
-    await expect(page.getByText(customerRef, { exact: false }).first()).toBeVisible();
+    // The compact mobile header intentionally hides its duplicate metadata.
+    const customerFact = page.locator('dt').filter({ hasText: /^客户名称\/简称$/ }).locator('..').locator('dd');
+    await expect(customerFact).toBeVisible();
+    await expect(customerFact).toHaveText(customerRef);
     const itemDetails = page
       .locator('article[id^="order-detail-item-"]')
       .filter({ hasText: 'E2E 测试款式' });
@@ -217,7 +220,7 @@ test.describe('创建工单 — golden path', () => {
         .locator('dd');
     await expect(itemFact('工艺')).toContainText('局部烫金');
     await expect(itemFact('规格')).toHaveText('大号封90×165');
-    await expect(itemFact('纸张')).toHaveText('160g珠光艳闪 · 160g');
+    await expect(itemFact('纸张')).toHaveText('160g珠光艳闪');
     await page.getByText('工单信息', { exact: true }).click();
     await expect(page.getByText(/^GD-\d{6}-\d{3}$/).first()).toBeVisible();
 
@@ -258,7 +261,7 @@ test.describe('创建工单 — golden path', () => {
     await expect(page.getByLabel('收货电话', { exact: true })).toHaveValue(
       before.order.receiverPhone ?? '',
     );
-    await page.getByText('更多生产信息', { exact: true }).click();
+    await page.getByRole('button', { name: '更多生产信息', exact: true }).click();
     const productionDetails = page.getByRole('dialog', {
       name: '第 1 款生产信息',
       exact: true,
@@ -317,7 +320,7 @@ test.describe('创建工单 — golden path', () => {
       '13900139000',
     );
     await expectNoNextErrorOverlay(page);
-    await expect(page.locator('#edit-items')).toBeVisible();
+    await expect(page.locator('#edit-items:visible')).toBeVisible();
     await page.screenshot({
       path: test.info().outputPath('edit-order.png'),
       fullPage: true,

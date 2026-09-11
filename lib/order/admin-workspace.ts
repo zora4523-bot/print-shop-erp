@@ -5,7 +5,6 @@ import { adminOrderCraftTags, type AdminOrderCraftTag } from './admin-list-prese
 import Decimal from 'decimal.js';
 import {
   AgentMonthlyBillStatus,
-  OrderBillingMode,
   DesignFileType,
   OrderChangeRequestStatus,
   OrderCustomerChargeStatus,
@@ -14,21 +13,14 @@ import {
   OrderPrintJobState,
   OrderQuotedFeeCompleteness,
   OrderStatus,
-  OrderSettlementType,
   OutsourceStatus,
   Prisma,
   ProductionOperationStatus,
-  Role,
   TaskStatus,
 } from '../../generated/prisma/client';
 import { paginationWindow } from '../admin/table';
-import { UnauthorizedError } from '../auth/errors';
 import { orderChangeRequestItemsSchema } from '../auth/schemas';
 import { db } from '../db';
-import {
-  shanghaiDayBoundary,
-  todayShanghai,
-} from '../dashboard/shanghai-clock';
 import { signDesignReadUrl } from '../oss/read-url';
 import {
   getWorkOrderProgressByOrderIds,
@@ -39,7 +31,7 @@ import {
   buildOrderWhere,
   MISSING_ORDER_CUSTOMER_FILTER_VALUE,
 } from './list-query';
-import { overdueCutoff, promisedDaysLeft } from './promised-date';
+import { promisedDaysLeft } from './promised-date';
 import {
   type FactoryConfirmationPriceDiff,
 } from './change-request';
@@ -50,13 +42,22 @@ import {
   type FactoryConfirmationPreflight,
 } from './factory-confirmation-preflight';
 import {
-  ADMIN_ORDER_SIGNALS,
   type AdminOrderQueue,
   type AdminOrderSignal,
   type AdminOrderWorkspaceQuery,
 } from './admin-workspace-query';
 
-export type AdminOrdersActor = { id: string; role: Role };
+import {
+  ACTIVE_PROMISE_STATUSES, PRODUCTION_STATUSES, PRINTABLE_STATUSES, DONE_STATUSES,
+  PENDING_CHANGE_WHERE, loadCurrentPrintOrderIds, adminIncompleteCustomerFeeWhere, adminManualPricingWhere,
+  adminQueueWhere, adminSignalWhere, andWhere, buildAdminWorkspaceBaseWhere, assertAdmin,
+  type AdminOrdersActor,
+} from './admin-workspace-filters';
+export {
+  adminIncompleteCustomerFeeWhere, adminManualPricingWhere, adminQueueWhere,
+  adminSignalWhere, buildAdminWorkspaceBaseWhere, buildAdminWorkspaceResultWhere,
+  resolveAdminWorkspaceResultWhere, type AdminOrdersActor,
+} from './admin-workspace-filters';
 
 export type AdminOrderWorkspaceSummary = {
   orderCount: number;
@@ -191,35 +192,9 @@ export type AdminOrderWorkspacePage = {
   summary: AdminOrderWorkspaceSummary;
 };
 
-const ACTIVE_PROMISE_STATUSES = [
-  OrderStatus.PENDING_FACTORY,
-  OrderStatus.CONFIRMED,
-  OrderStatus.ON_HOLD,
-  OrderStatus.RELEASED,
-  OrderStatus.FOILING,
-  OrderStatus.PACKING,
-  // Expand-migrate-contract 期间的历史行仍可读。
-  OrderStatus.SUBMITTED,
-  OrderStatus.SCHEDULING,
-  OrderStatus.IN_PRODUCTION,
-  OrderStatus.COMPLETED,
-] as const;
-
-const PRODUCTION_STATUSES = [
-  OrderStatus.CONFIRMED,
-  OrderStatus.RELEASED,
-  OrderStatus.FOILING,
-  OrderStatus.PACKING,
-  OrderStatus.SCHEDULING,
-  OrderStatus.IN_PRODUCTION,
-  OrderStatus.COMPLETED,
-] as const;
-
-const PRINTABLE_STATUSES = [
-  OrderStatus.RELEASED,
-  OrderStatus.FOILING,
-  OrderStatus.PACKING,
-] as const;
+// This read owns a coherent list/count/fee snapshot. Bound its total duration
+// locally; changing the global transaction default would also affect writes.
+const ADMIN_WORKSPACE_READ_TIMEOUT_MS = 15_000;
 
 export function resolveAdminPrintFacts(input: {
   status: OrderStatus;
@@ -258,250 +233,60 @@ export function resolveAdminPrintFacts(input: {
   };
 }
 
-const PENDING_CHANGE_WHERE = {
-  changeRequests: {
-    some: { status: OrderChangeRequestStatus.PENDING },
-  },
-} as const satisfies Prisma.OrderWhereInput;
-
-async function loadCurrentPrintOrderIds(
-  client: Pick<Prisma.TransactionClient, '$queryRaw'>,
-): Promise<string[]> {
-  const rows = await client.$queryRaw<Array<{ id: string }>>`
-    SELECT orders."id"
-    FROM "Order" orders
-    WHERE orders."status" IN (
-      'RELEASED'::"OrderStatus",
-      'FOILING'::"OrderStatus",
-      'PACKING'::"OrderStatus"
-    )
-      AND (
-        EXISTS (
-          SELECT 1
-          FROM "OrderPrintJob" request
-          WHERE request."orderId" = orders."id"
-            AND request."workOrderVersion" = orders."workOrderVersion"
-            AND request."state" = 'PENDING'::"OrderPrintJobState"
-            AND request."requestJobId" IS NULL
-            AND NOT EXISTS (
-              SELECT 1
-              FROM "OrderPrintJob" resolution
-              WHERE resolution."requestJobId" = request."id"
-            )
-        )
-        OR NOT EXISTS (
-          SELECT 1
-          FROM "OrderPrintJob" request
-          INNER JOIN "OrderPrintJob" resolution
-            ON resolution."requestJobId" = request."id"
-          WHERE request."orderId" = orders."id"
-            AND request."workOrderVersion" = orders."workOrderVersion"
-            AND request."state" = 'PENDING'::"OrderPrintJobState"
-            AND request."requestJobId" IS NULL
-            AND resolution."state" = 'PRINTED'::"OrderPrintJobState"
-        )
-      )
-  `;
-  return rows.map((row) => row.id);
-}
-
-/**
- * An incomplete customer fee is a persisted business fact, never inferred
- * from a zero amount or from the broad PENDING_ADMIN_CONFIRMATION state. This
- * predicate intentionally has no workflow-status restriction: partial quotes
- * remain excluded from totals after an order is rejected or cancelled.
- */
-export function adminIncompleteCustomerFeeWhere(): Prisma.OrderWhereInput {
-  return {
-    confirmedFee: null,
-    settledFee: null,
-    OR: [
-      {
-        quotedFeeCompleteness:
-          OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
-      },
-      {
-        items: {
-          some: {
-            quoteDisposition:
-              OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
-          },
-        },
-      },
-      {
-        customerCharges: {
-          some: { status: OrderCustomerChargeStatus.PENDING_AMOUNT },
-        },
-      },
-    ],
-  };
-}
-
-/**
- * Actionable manual-pricing work is the intersection of an incomplete fee
- * fact and a status in which an administrator can resolve it. Keep this
- * predicate aligned with the row's pending-pricing presentation.
- */
-export function adminManualPricingWhere(): Prisma.OrderWhereInput {
-  return {
-    status: { in: [...FACTORY_CONFIRMATION_PENDING_STATUSES] },
-    ...adminIncompleteCustomerFeeWhere(),
-  };
-}
-
-/**
- * Confirmed work awaits the canonical production-release command. Legacy
- * SCHEDULING orders have already entered production, while SUBMITTED orders
- * still require factory confirmation. Pending changes must be decided first.
- * Membership is a workflow queue, not a replacement for release preflight.
- */
-function pendingReleaseWhere(): Prisma.OrderWhereInput {
-  return {
-    status: OrderStatus.CONFIRMED,
-    NOT: PENDING_CHANGE_WHERE,
-  };
-}
-
-function printableWhere(): Prisma.OrderWhereInput {
-  return {
-    status: { in: [...PRINTABLE_STATUSES] },
-  };
-}
-
-export function adminQueueWhere(
-  queue: AdminOrderQueue,
-): Prisma.OrderWhereInput {
-  switch (queue) {
-    case 'todo':
-      return {
-        OR: [
-          {
-            status: {
-              in: [...FACTORY_CONFIRMATION_PENDING_STATUSES],
-            },
-          },
-          adminManualPricingWhere(),
-          pendingReleaseWhere(),
-          PENDING_CHANGE_WHERE,
-          { status: OrderStatus.ON_HOLD },
-        ],
-      };
-    case 'print':
-      // Prisma cannot express request.workOrderVersion = order.workOrderVersion.
-      // Snapshot/export callers replace this superset with the correlated raw
-      // predicate from loadCurrentPrintOrderIds.
-      return printableWhere();
-    case 'production':
-      return {
-        status: { in: [...PRODUCTION_STATUSES] },
-        NOT: PENDING_CHANGE_WHERE,
-      };
-    case 'shipped':
-      return { status: OrderStatus.SHIPPED };
-    case 'done':
-      return {
-        // REJECTED 是可恢复的驳回态，不是完结。FINISHED 仅作历史兼容读。
-        status: {
-          in: [
-            OrderStatus.SETTLED,
-            OrderStatus.CANCELLED,
-            OrderStatus.FINISHED,
-          ],
-        },
-      };
-    case 'all':
-      return {};
-  }
-}
-
-export function adminSignalWhere(
-  signal: AdminOrderSignal,
-  now: Date = new Date(),
-): Prisma.OrderWhereInput {
-  switch (signal) {
-    case 'pending-confirmation':
-      return {
-        status: {
-          in: [...FACTORY_CONFIRMATION_PENDING_STATUSES],
-        },
-      };
-    case 'pending-pricing':
-      return adminManualPricingWhere();
-    case 'pending-release':
-      return pendingReleaseWhere();
-    case 'pending-change':
-      return PENDING_CHANGE_WHERE;
-    case 'on-hold':
-      return { status: OrderStatus.ON_HOLD };
-    case 'overdue':
-      return {
-        status: { in: [...ACTIVE_PROMISE_STATUSES] },
-        promisedDate: { lt: overdueCutoff(now) },
-      };
-    case 'due-today': {
-      const { start, end } = shanghaiDayBoundary(todayShanghai(now));
-      return {
-        status: { in: [...ACTIVE_PROMISE_STATUSES] },
-        promisedDate: { gte: start, lt: end },
-      };
-    }
-  }
-}
-
-function andWhere(...parts: Prisma.OrderWhereInput[]): Prisma.OrderWhereInput {
-  return { AND: parts };
-}
-
-export function buildAdminWorkspaceBaseWhere(
-  actor: AdminOrdersActor,
-  query: AdminOrderWorkspaceQuery,
-): Prisma.OrderWhereInput {
-  assertAdmin(actor);
-  return andWhere(
-    buildOrderWhere(actor, query.list.filters),
-    query.starred ? { stars: { some: { userId: actor.id } } } : {},
-    query.unbilled
-      ? {
-          settlementType: OrderSettlementType.EXTERNAL_SALES,
-          billingMode: OrderBillingMode.CHARGE,
-          status: { in: [OrderStatus.SETTLED, OrderStatus.CANCELLED] },
-          settledFee: { not: null },
-          settledAt: { not: null },
-          agentMonthlyBillItem: { is: null },
-        }
-      : {},
-  );
-}
-
-export function buildAdminWorkspaceResultWhere(
-  actor: AdminOrdersActor,
-  query: AdminOrderWorkspaceQuery,
-  now: Date = new Date(),
-): Prisma.OrderWhereInput {
-  return andWhere(
-    buildAdminWorkspaceBaseWhere(actor, query),
-    adminQueueWhere(query.queue),
-    query.signal ? adminSignalWhere(query.signal, now) : {},
-  );
-}
-
-/** Resolve the durable-export predicate against the same current-version
- * print membership rule used by the interactive workspace snapshot. */
-export async function resolveAdminWorkspaceResultWhere(
-  actor: AdminOrdersActor,
-  query: AdminOrderWorkspaceQuery,
+async function loadAdminWorkspaceCounts(
+  tx: Prisma.TransactionClient,
+  baseWhere: Prisma.OrderWhereInput,
+  currentPrintWhere: Prisma.OrderWhereInput,
   now: Date,
-): Promise<Prisma.OrderWhereInput> {
-  assertAdmin(actor);
-  const queueWhere =
-    query.queue === 'print'
-      ? { id: { in: await loadCurrentPrintOrderIds(db) } }
-      : adminQueueWhere(query.queue);
-  return andWhere(
-    buildAdminWorkspaceBaseWhere(actor, query),
-    queueWhere,
-    query.signal ? adminSignalWhere(query.signal, now) : {},
-  );
+): Promise<AdminOrderWorkspaceCounts> {
+  // Interactive transactions share one database connection. Promise.all does
+  // not parallelize its SQL: group by the bounded status enum instead of
+  // scanning the same filtered orders once for every queue and signal.
+  const [allGroups, changeGroups, print, pendingPricing, overdue, dueToday] =
+    await Promise.all([
+      tx.order.groupBy({ by: ['status'], where: baseWhere, _count: { _all: true } }),
+      tx.order.groupBy({
+        by: ['status'],
+        where: andWhere(baseWhere, PENDING_CHANGE_WHERE),
+        _count: { _all: true },
+      }),
+      tx.order.count({ where: andWhere(baseWhere, currentPrintWhere) }),
+      tx.order.count({ where: andWhere(baseWhere, adminManualPricingWhere()) }),
+      tx.order.count({ where: andWhere(baseWhere, adminSignalWhere('overdue', now)) }),
+      tx.order.count({ where: andWhere(baseWhere, adminSignalWhere('due-today', now)) }),
+    ]);
+  const allByStatus = new Map(allGroups.map((group) => [group.status, group._count._all]));
+  const changeByStatus = new Map(changeGroups.map((group) => [group.status, group._count._all]));
+  const countStatuses = (statuses: readonly OrderStatus[], counts = allByStatus) =>
+    statuses.reduce((sum, status) => sum + (counts.get(status) ?? 0), 0);
+  const pendingChange = changeGroups.reduce((sum, group) => sum + group._count._all, 0);
+  // Manual-pricing work is already a subset of factory-pending statuses. A
+  // pending change adds other states to todo, and excludes them from production
+  // and pending-release, exactly as adminQueueWhere/adminSignalWhere specify.
+  const todoStatuses: readonly OrderStatus[] = [
+    ...FACTORY_CONFIRMATION_PENDING_STATUSES,
+    OrderStatus.CONFIRMED,
+    OrderStatus.ON_HOLD,
+  ];
+  return {
+    queues: {
+      todo: countStatuses(todoStatuses) + pendingChange - countStatuses(todoStatuses, changeByStatus),
+      print,
+      production: countStatuses(PRODUCTION_STATUSES) - countStatuses(PRODUCTION_STATUSES, changeByStatus),
+      shipped: allByStatus.get(OrderStatus.SHIPPED) ?? 0,
+      done: countStatuses(DONE_STATUSES),
+      all: allGroups.reduce((sum, group) => sum + group._count._all, 0),
+    },
+    signals: {
+      'pending-confirmation': countStatuses(FACTORY_CONFIRMATION_PENDING_STATUSES),
+      'pending-pricing': pendingPricing,
+      'pending-release': (allByStatus.get(OrderStatus.CONFIRMED) ?? 0) - (changeByStatus.get(OrderStatus.CONFIRMED) ?? 0),
+      'pending-change': pendingChange,
+      'on-hold': allByStatus.get(OrderStatus.ON_HOLD) ?? 0,
+      overdue,
+      'due-today': dueToday,
+    },
+  };
 }
 
 const adminOrderSelect = {
@@ -555,8 +340,12 @@ const adminOrderSelect = {
     },
   },
   customerCharges: {
-    where: { status: OrderCustomerChargeStatus.PENDING_AMOUNT },
-    select: { id: true },
+    where: {
+      status: {
+        in: [OrderCustomerChargeStatus.PENDING_AMOUNT, OrderCustomerChargeStatus.ESTIMATED],
+      },
+    },
+    select: { id: true, status: true },
   },
   changeRequests: {
     where: { status: OrderChangeRequestStatus.PENDING },
@@ -714,7 +503,10 @@ export async function loadAdminOrderWorkspace(
         selectedQueueWhere,
         query.signal ? adminSignalWhere(query.signal, now) : {},
       );
-      const total = await tx.order.count({ where: resultWhere });
+      const counts = await loadAdminWorkspaceCounts(tx, baseWhere, currentPrintWhere, now);
+      const total = query.signal
+        ? await tx.order.count({ where: resultWhere })
+        : counts.queues[query.queue];
       const window = paginationWindow(
         total,
         query.list.page,
@@ -722,8 +514,6 @@ export async function loadAdminOrderWorkspace(
       );
       const [
         rows,
-        queueCounts,
-        signalCounts,
         quantity,
         manualPricingCount,
         incompleteFeeExcludedCount,
@@ -739,26 +529,6 @@ export async function loadAdminOrderWorkspace(
           skip: window.skip,
           take: window.take,
         }),
-        Promise.all(
-          (['todo', 'print', 'production', 'shipped', 'done', 'all'] as const).map(
-            (queue) =>
-              tx.order.count({
-                where: andWhere(
-                  baseWhere,
-                  queue === 'print'
-                    ? currentPrintWhere
-                    : adminQueueWhere(queue),
-                ),
-              }),
-          ),
-        ),
-        Promise.all(
-          ADMIN_ORDER_SIGNALS.map((signal) =>
-            tx.order.count({
-              where: andWhere(baseWhere, adminSignalWhere(signal, now)),
-            }),
-          ),
-        ),
         tx.orderItem.aggregate({
           where: { order: resultWhere },
           _sum: { quantity: true },
@@ -818,10 +588,9 @@ export async function loadAdminOrderWorkspace(
       ]);
       return {
         rows,
+        counts,
         total,
         window,
-        queueCounts,
-        signalCounts,
         totalQuantity: quantity._sum.quantity ?? 0,
         manualPricingCount,
         incompleteFeeExcludedCount,
@@ -834,7 +603,10 @@ export async function loadAdminOrderWorkspace(
         progressByOrder,
       };
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      timeout: ADMIN_WORKSPACE_READ_TIMEOUT_MS,
+    },
   );
 
   return {
@@ -852,16 +624,7 @@ export async function loadAdminOrderWorkspace(
     page: snapshot.window.page,
     pageSize: snapshot.window.pageSize,
     pageCount: snapshot.window.pageCount,
-    counts: {
-      queues: mapCounts(
-        ['todo', 'print', 'production', 'shipped', 'done', 'all'],
-        snapshot.queueCounts,
-      ),
-      signals: mapCounts(
-        ADMIN_ORDER_SIGNALS,
-        snapshot.signalCounts,
-      ),
-    },
+    counts: snapshot.counts,
     summary: {
       orderCount: snapshot.total,
       totalQuantity: snapshot.totalQuantity,
@@ -1001,6 +764,15 @@ function mapAdminOrderRow(
           estimated: false,
         }
       : selectOrderCustomerFee(row);
+  // A confirmed total may still include estimated shipping or other charges.
+  // Keep its persisted amount/source and the immutable settled snapshot intact.
+  if (
+    fee.amount !== null &&
+    fee.source !== 'SETTLED' &&
+    row.customerCharges.some((charge) => charge.status === OrderCustomerChargeStatus.ESTIMATED)
+  ) {
+    fee.estimated = true;
+  }
   const daysLeft = row.promisedDate
     ? promisedDaysLeft(row.promisedDate, now)
     : null;
@@ -1232,7 +1004,7 @@ function isIncompleteCustomerFeeRecord(row: AdminOrderRecord): boolean {
         item.quoteDisposition ===
         OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
     ) ||
-    row.customerCharges.length > 0
+    row.customerCharges.some((charge) => charge.status === OrderCustomerChargeStatus.PENDING_AMOUNT)
   );
 }
 
@@ -1310,19 +1082,4 @@ function formatProgressQuantity(value: string): string {
 function formatPaper(type: string | null, weight: number | null): string | null {
   const parts = [type, weight ? `${weight}g` : null].filter(Boolean);
   return parts.length > 0 ? parts.join(' ') : null;
-}
-
-function mapCounts<K extends string>(
-  keys: readonly K[],
-  values: readonly number[],
-): Record<K, number> {
-  return Object.fromEntries(
-    keys.map((key, index) => [key, values[index] ?? 0]),
-  ) as Record<K, number>;
-}
-
-function assertAdmin(actor: AdminOrdersActor): void {
-  if (actor.role !== Role.ADMIN) {
-    throw new UnauthorizedError('管理端工单工作台仅对管理员开放');
-  }
 }

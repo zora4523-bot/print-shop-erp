@@ -3,6 +3,56 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import { describe, expect, it } from 'vitest';
 
 describe('production deploy smoke jobs gate', () => {
+  it.each([401, 503])('accepts local inline optional null health with cron %s', async (cronStatus) => {
+    const result = await runSmokeWithJobs({
+      statusCode: 200, body: inlineHealth(), cronStatus,
+      environment: 'development', mode: 'inline',
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('[deploy-smoke] completed');
+  });
+
+  it('rejects production optional null health even when the remote body says inline', async () => {
+    const result = await runSmokeWithJobs({ statusCode: 200, body: inlineHealth() });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('recognized smart-bot status');
+  });
+
+  it.each(['heavy-worker-missing', 'light-worker-version-mismatch'])(
+    'rejects production %s even when ready is healthy and the bot is connected', async (alert) => {
+      const result = await runSmokeWithJobs({
+        statusCode: 503, body: { mode: 'durable', alerts: [alert],
+          smartBot: { status: 'CONNECTED', required: true,
+            configurationValid: true, identityMatch: true, operational: true } },
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('required background worker');
+    },
+  );
+
+  it.each([200, 403, 500])('rejects unexpected production cron status %s', async (cronStatus) => {
+    const result = await runSmokeWithJobs({
+      statusCode: 200,
+      body: { smartBot: { status: 'CONNECTED', required: true,
+        configurationValid: true, identityMatch: true, operational: true } },
+      cronStatus,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`invalid auth expected 401, got ${cronStatus}`);
+  });
+
+  it('rejects missing production cron configuration instead of accepting a 503', async () => {
+    const result = await runSmokeWithJobs({
+      statusCode: 200,
+      body: { smartBot: { status: 'CONNECTED', required: true,
+        configurationValid: true, identityMatch: true, operational: true } },
+      cronStatus: 503,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('invalid auth expected 401, got 503');
+    expect(result.stdout).not.toContain('[deploy-smoke] completed');
+  });
+
   it.each([
     { smartBotStatus: 'AUTH_FAILED', statusCode: 200 },
     { smartBotStatus: 'CONNECTION_CONFLICT', statusCode: 200 },
@@ -76,9 +126,23 @@ describe('production deploy smoke jobs gate', () => {
   });
 });
 
+function inlineHealth() {
+  return {
+    status: 'ok', mode: 'inline', time: '2026-09-10T00:00:00.000Z',
+    jobs: { pending: { LIGHT: 0, HEAVY: 0 }, running: 0, staleRunning: 0,
+      deadLast24h: 0, deadNotificationLast24h: 0 },
+    smartBot: { status: null, required: false, configurationValid: true,
+      identityMatch: null, operational: true, recoveryWaitMs: 0 },
+    alerts: [], warnings: [],
+  };
+}
+
 async function runSmokeWithJobs(input: {
   statusCode: number;
   body: Record<string, unknown>;
+  cronStatus?: number;
+  environment?: 'production' | 'development';
+  mode?: 'inline' | 'durable';
 }): Promise<{ code: number | null; stdout: string; stderr: string }> {
   const server = createServer((request, response) => {
     switch (request.url) {
@@ -99,7 +163,7 @@ async function runSmokeWithJobs(input: {
         response.end();
         return;
       case '/api/cron/daily-salary':
-        response.statusCode = 401;
+        response.statusCode = input.cronStatus ?? 401;
         response.end('unauthorized');
         return;
       default:
@@ -115,7 +179,7 @@ async function runSmokeWithJobs(input: {
   }
 
   try {
-    return await runSmoke(`http://127.0.0.1:${address.port}`);
+    return await runSmoke(`http://127.0.0.1:${address.port}`, input);
   } finally {
     await close(server);
   }
@@ -123,6 +187,7 @@ async function runSmokeWithJobs(input: {
 
 function runSmoke(
   baseUrl: string,
+  options: { environment?: 'production' | 'development'; mode?: 'inline' | 'durable' },
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(
@@ -138,9 +203,9 @@ function runSmoke(
         cwd: process.cwd(),
         env: {
           ...process.env,
-          NODE_ENV: 'production',
-          NOTIFICATION_MOCK_MODE: 'false',
-          BACKGROUND_JOBS_MODE: 'durable',
+          NODE_ENV: options.environment ?? 'production',
+          NOTIFICATION_MOCK_MODE: options.environment === 'development' ? 'true' : 'false',
+          BACKGROUND_JOBS_MODE: options.mode ?? 'durable',
           DEPLOY_SMOKE_BASE_URL: baseUrl,
           DEPLOY_SMOKE_RUN_SEED: 'false',
         },

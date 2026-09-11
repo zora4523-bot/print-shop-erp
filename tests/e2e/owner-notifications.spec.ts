@@ -1,3 +1,5 @@
+import { assertActivatedE2eDatabase } from '../../scripts/lib/e2e-environment';
+import { requireReleasePrerequisite } from './release-prerequisite';
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { test, expect, type Locator } from '@playwright/test';
@@ -10,16 +12,13 @@ import { smartBotIdDigest } from '../../lib/notification/smart-bot-identity';
 // Configuration writes and simulated binding are restricted to a disposable DB.
 // Never run these fixtures against the user's live notification routes.
 function hasDisposableDatabase(): boolean {
-  // Playwright reloads config in workers after DATABASE_URL is already switched;
-  // do not rely on a marker recomputed against that switched URL.
-  const requested = process.env.E2E_DATABASE_URL;
-  if (!requested || requested !== process.env.DATABASE_URL) return false;
-  const url = new URL(requested);
-  return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) &&
-    /^\/notif_ui_e2e_[a-z0-9_]+$/.test(url.pathname);
+  try { assertActivatedE2eDatabase(); return true; } catch { return false; }
 }
 test.beforeEach(() => {
-  test.skip(!hasDisposableDatabase(), 'Requires a local disposable E2E_DATABASE_URL named notif_ui_e2e_*');
+  const isolationFailure = hasDisposableDatabase() ? null : 'Requires the validated disposable E2E database';
+  requireReleasePrerequisite(isolationFailure);
+  requireReleasePrerequisite(process.env.NOTIFICATION_MOCK_MODE === 'true' ? null : 'Requires explicit notification mock mode');
+  test.skip(Boolean(isolationFailure), isolationFailure ?? '');
   test.skip(process.env.NOTIFICATION_MOCK_MODE !== 'true', 'Requires explicit mock mode; no real group messages');
 });
 
@@ -85,7 +84,7 @@ test('ADMIN smart-only configuration, legacy read-only history, routes and mock 
 
   await page.locator('#channelKey').fill(channelKey);
   await page.locator('#channelName').fill(channelName);
-  await expect(page.getByRole('textbox', { name: '传输方式' })).toHaveValue('Bot ID + Secret 智能机器人');
+  await expect(page.getByRole('textbox', { name: '通知方式' })).toHaveValue('企业微信群');
   await expect(page.locator('select[name="transport"], input[name="webhookUrl"]')).toHaveCount(0);
   await expect(page.getByRole('checkbox', { name: /^启用/ })).toBeDisabled();
   await page.getByRole('button', { name: '创建通知目标', exact: true }).click();
@@ -154,7 +153,7 @@ test('ADMIN smart-only configuration, legacy read-only history, routes and mock 
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
   await row().getByRole('button', { name: '删除', exact: true }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: '确认删除', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '删除', exact: true }).click();
   await expect(row().getByRole('alert', { name: '删除失败', exact: true })).toContainText('历史推送记录');
   await expectNoNextErrorOverlay(page);
 });

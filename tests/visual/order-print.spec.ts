@@ -8,7 +8,6 @@ import type { PrintOrder } from '../../lib/order/print-types';
 import {
   cleanupPrintableOrderStressFixture,
   login,
-  ADMIN_USERNAME,
   E2E_PASSWORD,
   E2E_USERS,
   getUserIdByUsername,
@@ -49,6 +48,7 @@ test.afterEach(async ({ page }) => {
 });
 
 async function waitForPrintReady(page: Page, sheetCount?: number) {
+  await expect(page.locator('html[data-print-fonts="ready"]')).toHaveCount(1);
   await expect(page.locator('html[data-print-ready="true"]')).toHaveCount(1);
   await expect(page.locator('html[data-print-pagination="ready"]')).toHaveCount(1);
   await expect(page.locator('.work-order-document')).toBeVisible();
@@ -238,6 +238,7 @@ async function standaloneOrderFixture(): Promise<PrintOrder> {
 function buildStandaloneHtml(order: PrintOrder): string {
   // Playwright replaces JSX with component placeholders. Plain Node/tsx keeps
   // this regression on real React SSR and the actual serialized paginator.
+  // The standalone document embeds ~8 MiB of WOFF2 fonts as base64.
   return execFileSync(process.execPath, ['--import', 'tsx', '-e', `
     const { readFileSync } = require('node:fs');
     const { buildPrintHtml } = require('./lib/order/print-html.tsx');
@@ -245,7 +246,7 @@ function buildStandaloneHtml(order: PrintOrder): string {
     order.createdAt = new Date(order.createdAt);
     order.promisedDate = new Date(order.promisedDate);
     buildPrintHtml(order, { factoryName: '佛山印刷厂' }).then((html) => process.stdout.write(html));
-  `], { input: JSON.stringify({ order }), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  `], { input: JSON.stringify({ order }), encoding: 'utf8', maxBuffer: 24 * 1024 * 1024 });
 }
 
 async function expectEverySheetFitsOneA4Page(page: Page) {
@@ -353,7 +354,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
   });
   for (const count of ARTWORK_COUNTS) {
     test(`${count} 张图稿的主页与附页稳定`, async ({ page }) => {
-      const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+      const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
       const { orderId } = await seedPrintableOrder({
         submitterId: adminId,
         designCount: count,
@@ -390,7 +391,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
   }
 
   test('完整工单上下文稳定', async ({ page }) => {
-    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const { orderId, customName, itemRemark, foilColors } =
       await seedPrintableOrder({
         submitterId: adminId,
@@ -425,16 +426,16 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(page.locator('.remark')).toHaveCount(0);
     await expect(page.getByText(itemRemark!, { exact: true })).toHaveCount(0);
 
+    await expectEverySheetFitsOneA4Page(page);
+    expect(await renderPdfPageCount(page)).toBe(2);
     await expect(page.locator('.work-order-document')).toHaveScreenshot(
       'order-print-rich-context.png',
     );
-    await expectEverySheetFitsOneA4Page(page);
-    expect(await renderPdfPageCount(page)).toBe(2);
   });
 
   for (const itemCount of [2, 4]) {
     test(`${itemCount} 款完整工单仅一页且主二维码可完整编码`, async ({ page }) => {
-      const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+      const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
       const { orderId } = await seedPrintableOrder({ submitterId: adminId, designCount: 1, variant: 'large-items', itemCount });
       const { orderNo, address, remark } = await addRealisticSmallOrderContext(orderId, itemCount);
       await login(page, { from: `/print/orders/${orderId}`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
@@ -454,7 +455,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
 
   for (const taskCount of [1, 6, 12]) {
     test(`${taskCount} 条工序保留主单明细且仅有工单主码`, async ({ page }) => {
-      const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+      const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
       const { orderId } = await seedPrintableOrder({ submitterId: adminId, designCount: 1, variant: 'task-qr', taskCount });
       await login(page, { from: `/print/orders/${orderId}`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
       await waitForPrintReady(page);
@@ -476,7 +477,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
   }
 
   test('三款工单的款式、多地址与打印分页稳定', async ({ page }) => {
-    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const { orderId } = await seedPrintableOrder({
       submitterId: adminId,
       designCount: 1,
@@ -500,10 +501,6 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(page.locator('.ship-list')).toContainText('VR 分地址收件人');
     await expect(page.locator('.ship-list')).toContainText('广州市测试分地址 99 号');
 
-    await expect(page.locator('.work-order-document')).toHaveScreenshot(
-      'order-print-three-items.png',
-    );
-
     const footerPositions = await page
       .locator('.sheet > .ft')
       .evaluateAll((footers) =>
@@ -517,10 +514,13 @@ test.describe('OrderPrintLayout 截图回归', () => {
       'exact',
     );
     await expectDeclaredPagination(page);
+    await expect(page.locator('.work-order-document')).toHaveScreenshot(
+      'order-print-three-items.png',
+    );
   });
 
   test('20 款工单的款式、图稿与工序按物理 A4 页拆分', async ({ page }) => {
-    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const { orderId } = await seedPrintableOrder({
       submitterId: adminId,
       designCount: 1,
@@ -556,7 +556,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
   });
 
   test('50 款边界的声明页数与实际 PDF 页数一致', async ({ page }) => {
-    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const { orderId } = await seedPrintableOrder({
       submitterId: adminId,
       designCount: 1,
@@ -601,7 +601,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
     page,
   }) => {
     test.setTimeout(120_000);
-    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const { orderId } = await seedPrintableOrder({
       submitterId: adminId,
       designCount: 1,
@@ -663,7 +663,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
   test('8 款、8 图、临界文本与双长地址不挤破密集主页', async ({
     page,
   }) => {
-    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const { orderId } = await seedPrintableOrder({
       submitterId: adminId,
       designCount: 1,
@@ -699,7 +699,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
   test('1 款 1 图因千字多行备注移入附页时仍严格对齐物理 A4', async ({
     page,
   }) => {
-    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const { orderId } = await seedPrintableOrder({
       submitterId: adminId,
       designCount: 1,
