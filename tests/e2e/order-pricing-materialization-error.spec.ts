@@ -98,7 +98,11 @@ test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍�
   await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toBeVisible();
   expect(await readPricingState(orderId)).toEqual(before);
   await expectNoNextErrorOverlay(page);
-  await page.getByRole('link', { name: '工作台', exact: true }).first().click();
+  const workbenchLink = page.getByRole('link', { name: '工作台', exact: true }).first();
+  if (!(await workbenchLink.isVisible())) {
+    await page.getByRole('button', { name: '打开/关闭侧边栏菜单', exact: true }).click();
+  }
+  await workbenchLink.click();
   await expect(page).toHaveURL(/\/owner$/);
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
 });

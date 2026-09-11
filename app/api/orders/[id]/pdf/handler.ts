@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { NextAuthRequest } from 'next-auth';
 import { requireVerifiedSession } from '@/lib/auth/session';
@@ -9,18 +10,18 @@ import {
   buildPrintHtml,
 } from '@/lib/order/print-html';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
+import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { getSetting } from '@/lib/settings';
 import {
   enqueueOrderPdfJob,
-  readAndDeletePdfArtifact,
+  readPdfArtifact,
   waitForOrderPdfJob,
 } from '@/lib/background-jobs/pdf';
 
 // Node runtime: Puppeteer needs it (spawns Chromium).
-// PDFs are per-order, generated on demand. No caching yet — once we
-// know what staleness window is acceptable we can turn on
-// `export const revalidate = N;` or an ETag.
+// HTTP responses remain private/no-store. Durable jobs reuse an authorized
+// content snapshot for a bounded window; every download checks access again.
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -38,6 +39,10 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     throw error;
   }
   const requestUrl = new URL(_req.url);
+  const view = requestUrl.searchParams.get('view');
+  if ((view !== null && view !== 'inline') || requestUrl.searchParams.getAll('view').length > 1) {
+    return NextResponse.json({ error: 'Invalid PDF view' }, { status: 400 });
+  }
   const modes = requestUrl.searchParams.getAll('mode');
   const mode = modes[0] ?? 'order';
   if (modes.length > 1 || mode !== 'order') {
@@ -54,6 +59,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
+  const { name: factoryName } = await getSetting('factory_name');
   let pdf: Buffer;
   if (backgroundJobsMode() === 'durable') {
     const requestedJobId = new URL(_req.url).searchParams.get('jobId');
@@ -67,6 +73,8 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
         expectedWorkOrderVersion: order.workOrderVersion,
         actor: { id: session.user.id, role: session.user.role },
         baseUrl,
+        ...(requestUrl.searchParams.get('regenerate') === '1' ? { regenerationKey: randomUUID() } : {}),
+        snapshotKey: orderPdfSnapshotKey(order, factoryName),
       }));
     const result = await waitForOrderPdfJob(jobId, {
       timeoutMs: Number(process.env.PDF_JOB_WAIT_MS) || 10_000,
@@ -74,6 +82,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
       expected: {
         orderId: id,
         actorId: session.user.id,
+        actorRole: session.user.role,
         workOrderVersion: order.workOrderVersion,
       },
     });
@@ -94,7 +103,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
       });
     }
     try {
-      pdf = await readAndDeletePdfArtifact(result.artifactName);
+      pdf = await readPdfArtifact(result.artifactName);
     } catch {
       return pdfStatusPage({
         title: 'PDF 产物不可用',
@@ -105,9 +114,8 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     }
   } else {
     try {
-      const { name: factoryName } = await getSetting('factory_name');
       const html = await buildPrintHtml(order, { factoryName });
-      pdf = await renderHtmlToPdf({ html });
+      pdf = await renderHtmlToPdf({ html, signal: _req.signal });
     } catch {
       // Log a fixed event only: renderer exceptions can contain paths, URLs and secrets.
       console.error('[order-pdf] PDF_GENERATION_FAILED');
@@ -122,15 +130,26 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     }
   }
 
+  try {
+    const currentSession = await requireVerifiedSession(_req.auth);
+    if (currentSession.user.id !== session.user.id || currentSession.user.role !== session.user.role) {
+      throw new UnauthorizedError();
+    }
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError)) throw error;
+    return NextResponse.json({ error: '未登录或登录状态已失效，请重新登录' }, {
+      status: 401, headers: { 'Cache-Control': 'private, no-store' },
+    });
+  }
   const currentOrder = await getOrderForPrint(
     id,
     { id: session.user.id, role: session.user.role },
     baseUrl,
   );
-  if (
-    !currentOrder ||
-    currentOrder.workOrderVersion !== order.workOrderVersion
-  ) {
+  if (!currentOrder) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  if (currentOrder.workOrderVersion !== order.workOrderVersion) {
     return pdfStatusPage({
       title: '工单版本已更新',
       message: '生成期间工单已升版，旧 PDF 已丢弃。请重新生成当前版。',
@@ -143,7 +162,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)),
+      'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)).replace(/^attachment/, view === 'inline' ? 'inline' : 'attachment'),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',
     },
@@ -153,8 +172,11 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
 
 function pdfRetryUrl(requestUrl: string, jobId?: string): string {
   const url = new URL(requestUrl);
+  const inline = url.searchParams.get('view') === 'inline';
   url.search = '';
+  if (inline) url.searchParams.set('view', 'inline');
   if (jobId) url.searchParams.set('jobId', jobId);
+  else url.searchParams.set('regenerate', '1');
   return `${url.pathname}${url.search}`;
 }
 
@@ -170,7 +192,7 @@ function pdfStatusPage(input: {
     ? `<meta http-equiv="refresh" content="5;url=${retryUrl}">`
     : '';
   return new Response(
-    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">${refreshMeta}<meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36rem;margin:12vh auto;padding:0 1.5rem;line-height:1.6"><h1>${escapeHtml(input.title)}</h1><p>${escapeHtml(input.message)}</p><p><a href="${retryUrl}">立即重试</a></p></body></html>`,
+    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">${refreshMeta}<meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36rem;margin:12vh auto;padding:0 1.5rem;line-height:1.6"><h1>${escapeHtml(input.title)}</h1><p>${escapeHtml(input.message)}</p><p><a href="${retryUrl}" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:0 12px">立即重试</a></p></body></html>`,
     {
       status: input.status,
       headers: {

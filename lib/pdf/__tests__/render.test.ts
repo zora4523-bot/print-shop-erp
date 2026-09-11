@@ -1,6 +1,6 @@
 import type { Browser, Page } from 'puppeteer';
 import { TimeoutError } from 'puppeteer';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PDF_PRINT_READY_TIMEOUT_MS,
   renderHtmlToPdf,
@@ -23,10 +23,26 @@ function renderHarness() {
   return { browser, page };
 }
 
+afterEach(() => vi.unstubAllEnvs());
 describe('renderHtmlToPdf', () => {
-  it.each(['overflow', 'unprepared', 'pending'])('rejects unverified pagination (%s) instead of exporting clipped content', async (state) => {
+  it('rejects browser version drift before creating a render page', async () => {
+    const { browser } = renderHarness();
+    browser.version = vi.fn().mockResolvedValue('Chrome/147.0.0.1');
+    vi.stubEnv('PDF_CHROMIUM_VERSION', '147.0.0.2');
+    await expect(renderHtmlToPdf({ html: '<html></html>', browser })).rejects.toThrow('PDF_BROWSER_VERSION_MISMATCH');
+    expect(browser.newPage).not.toHaveBeenCalled();
+  });
+
+  it.each(['failed', 'loading', 'unprepared'])('rejects unavailable print fonts (%s)', async (state) => {
     const { browser, page } = renderHarness();
     vi.mocked(page.evaluate).mockResolvedValue(state);
+    await expect(renderHtmlToPdf({ html: '<html></html>', browser })).rejects.toMatchObject({ name: 'PrintFontUnavailableError' });
+    expect(page.pdf).not.toHaveBeenCalled();
+    expect(page.close).toHaveBeenCalledOnce();
+  });
+  it.each(['overflow', 'unprepared', 'pending'])('rejects unverified pagination (%s) instead of exporting clipped content', async (state) => {
+    const { browser, page } = renderHarness();
+    vi.mocked(page.evaluate).mockResolvedValueOnce('ready').mockResolvedValue(state);
     await expect(renderHtmlToPdf({ html: '<html></html>', browser }))
       .rejects.toMatchObject({ name: 'PrintLayoutOverflowError' });
     expect(page.pdf).not.toHaveBeenCalled();

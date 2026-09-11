@@ -30,7 +30,7 @@ export function orderRowSecondaryActions(input: {
     {
       id: 'print',
       label: '打印工单',
-      href: `/print/orders/${input.orderId}?autoprint=1`,
+      href: `/api/orders/${input.orderId}/pdf?view=inline`,
       newTab: true,
     },
     {

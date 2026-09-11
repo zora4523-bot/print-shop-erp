@@ -72,7 +72,7 @@ jobs:
 
       - name: Install browser and PDF runtime dependencies
         run: |
-          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright install --with-deps chromium webkit
           pnpm exec puppeteer browsers install chrome
 
       - name: Generate and validate Prisma client
@@ -131,6 +131,9 @@ jobs:
           E2E_CANDIDATE_SHA: ${{ github.sha }}
           NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm test:release:durable
+
+      - name: Cross-browser print compatibility
+        run: pnpm test:compat
 
       - name: Development-only visual fixtures
         run: pnpm test:release:dev-fixtures

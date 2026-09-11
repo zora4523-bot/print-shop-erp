@@ -519,14 +519,14 @@ export default async function OrderDetailPage({ params }: PageProps) {
         />
       ) : null}</>),
     otherActions: (<><div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
-            <Link
-              href={`/print/orders/${order.id}?autoprint=1`}
+            <a
+              href={`/api/orders/${order.id}/pdf?view=inline`}
               target="_blank"
               rel="noopener noreferrer"
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               打印
-            </Link>
+            </a>
             <a
               href={`/api/orders/${order.id}/pdf`}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}

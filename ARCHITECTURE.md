@@ -169,3 +169,7 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 六个账单页面位于 `app/(billing)/owner/`，复用原 AdminShellLayout、OwnerLayout 和错误/404 边界；URL 保持不变，独立分组提供原生表单初始 HTML。页面与 HEAVY 导出共享 `lib/order/admin-workspace-filters.ts` 的权限及筛选谓词，worker 不导入带 `server-only` 的页面聚合模块。
 
 Next 16.3 默认会在 Proxy 前规范化并剥离 Flight 标头；`skipProxyUrlNormalize: true` 保留预取标识供认证代理判断。matcher 不跳过预取认证，代理仅阻止预取响应的 Cookie 写回，正常导航的滚动会话不受影响；原始路径下的公共资源、认证及受保护路由都有回归。
+
+### 跨设备打印输出（2026-09-11）
+
+正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。

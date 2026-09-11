@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
+import { embeddedPrintFontCss } from '../print-fonts-server';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type {
@@ -290,6 +291,7 @@ describe('buildPrintHtml', () => {
       createElement(OrderPrintLayout, {
         order,
         factoryName: TEST_FACTORY_NAME,
+        fontCss: await embeddedPrintFontCss(),
       }),
     );
 
@@ -790,7 +792,7 @@ describe('buildPrintHtml', () => {
     expect(html).toContain(
       '<div class="who"><b>张三</b> · 13800000000 · 中通 · [6014]</div>',
     );
-    expect(html).not.toContain('ZTO');
+    expect(html.replace(/data:font\/woff2;base64,[A-Za-z0-9+/=]+/g, '')).not.toContain('ZTO');
   });
 
   it('加急与重做使用红色描边标签，不恢复旧版实底横幅', async () => {

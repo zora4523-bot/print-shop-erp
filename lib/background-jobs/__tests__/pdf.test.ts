@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { dbMock, enqueueBackgroundJobMock, getOrderForPrintMock } = vi.hoisted(() => ({
   dbMock: {
     backgroundJob: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn() },
   },
   enqueueBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   getOrderForPrintMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('../clock', () => ({ databaseNow: async () => new Date('2026-09-11T00:00:00Z') }));
 vi.mock('../repository', () => ({
   enqueueBackgroundJob: enqueueBackgroundJobMock,
 }));
@@ -30,9 +32,23 @@ beforeEach(() => {
   dbMock.backgroundJob.findUnique.mockReset();
   enqueueBackgroundJobMock.mockReset();
   getOrderForPrintMock.mockReset();
+  dbMock.user.findUnique.mockResolvedValue({ role: Role.ADMIN, isActive: true });
 });
 
 describe('durable order PDF jobs', () => {
+  it('coalesces one authorized snapshot and separates actors, versions and explicit regeneration', async () => {
+    enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job-1' } });
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    await enqueueOrderPdfJob(input);
+    await enqueueOrderPdfJob(input);
+    await enqueueOrderPdfJob({ ...input, actor: { id: 'b', role: Role.ADMIN } });
+    await enqueueOrderPdfJob({ ...input, expectedWorkOrderVersion: 4 });
+    await enqueueOrderPdfJob({ ...input, regenerationKey: 'retry' });
+    const keys = enqueueBackgroundJobMock.mock.calls.map(([call]) => (call as { dedupeKey: string }).dedupeKey);
+    expect(keys[0]).toBe(keys[1]);
+    expect(new Set(keys)).toHaveProperty('size', 4);
+  });
+
   it.each(['tasks', 'unknown'])('does not serve retired or invalid PDF jobs (%s)', async (mode) => {
     dbMock.backgroundJob.findUnique.mockResolvedValue({
       type: 'ORDER_PDF',
@@ -42,7 +58,7 @@ describe('durable order PDF jobs', () => {
       lastErrorCode: null,
     });
     await expect(waitForOrderPdfJob('job-pdf', {
-      expected: { orderId: 'order-1', actorId: 'user-1', workOrderVersion: 3 },
+      expected: { orderId: 'order-1', actorId: 'user-1', actorRole: Role.ADMIN, workOrderVersion: 3 },
     })).resolves.toEqual({ status: 'failed', errorCode: 'JobNotFound' });
   });
 
@@ -102,11 +118,16 @@ describe('durable order PDF jobs', () => {
       waitForOrderPdfJob('job-pdf', {
         expected: {
           orderId: 'order-1',
-          actorId: 'user-1',
+          actorId: 'user-1', actorRole: Role.ADMIN,
           workOrderVersion: 3,
         },
       }),
     ).resolves.toEqual({ status: 'ready', artifactName: 'job-pdf.pdf' });
+  });
+
+  it('does not reuse an artifact generated under a different role', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({ type: 'ORDER_PDF', payload: { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'user-1', role: Role.ADMIN } }, status: BackgroundJobStatus.SUCCEEDED, result: { artifactName: 'old-role.pdf' } });
+    await expect(waitForOrderPdfJob('job-1', { expected: { orderId: 'order-1', actorId: 'user-1', actorRole: Role.WORKER, workOrderVersion: 3 } })).resolves.toEqual({ status: 'failed', errorCode: 'JobNotFound' });
   });
 
   it('hides a job id bound to another actor', async () => {
@@ -126,7 +147,7 @@ describe('durable order PDF jobs', () => {
       waitForOrderPdfJob('job-pdf', {
         expected: {
           orderId: 'order-1',
-          actorId: 'user-1',
+          actorId: 'user-1', actorRole: Role.ADMIN,
           workOrderVersion: 3,
         },
       }),
@@ -150,7 +171,7 @@ describe('durable order PDF jobs', () => {
       waitForOrderPdfJob('job-pdf', {
         expected: {
           orderId: 'order-1',
-          actorId: 'user-1',
+          actorId: 'user-1', actorRole: Role.ADMIN,
           workOrderVersion: 3,
         },
       }),

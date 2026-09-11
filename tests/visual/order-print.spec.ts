@@ -48,6 +48,7 @@ test.afterEach(async ({ page }) => {
 });
 
 async function waitForPrintReady(page: Page, sheetCount?: number) {
+  await expect(page.locator('html[data-print-fonts="ready"]')).toHaveCount(1);
   await expect(page.locator('html[data-print-ready="true"]')).toHaveCount(1);
   await expect(page.locator('html[data-print-pagination="ready"]')).toHaveCount(1);
   await expect(page.locator('.work-order-document')).toBeVisible();
@@ -237,6 +238,7 @@ async function standaloneOrderFixture(): Promise<PrintOrder> {
 function buildStandaloneHtml(order: PrintOrder): string {
   // Playwright replaces JSX with component placeholders. Plain Node/tsx keeps
   // this regression on real React SSR and the actual serialized paginator.
+  // The standalone document embeds ~8 MiB of WOFF2 fonts as base64.
   return execFileSync(process.execPath, ['--import', 'tsx', '-e', `
     const { readFileSync } = require('node:fs');
     const { buildPrintHtml } = require('./lib/order/print-html.tsx');
@@ -244,7 +246,7 @@ function buildStandaloneHtml(order: PrintOrder): string {
     order.createdAt = new Date(order.createdAt);
     order.promisedDate = new Date(order.promisedDate);
     buildPrintHtml(order, { factoryName: '佛山印刷厂' }).then((html) => process.stdout.write(html));
-  `], { input: JSON.stringify({ order }), encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  `], { input: JSON.stringify({ order }), encoding: 'utf8', maxBuffer: 24 * 1024 * 1024 });
 }
 
 async function expectEverySheetFitsOneA4Page(page: Page) {
@@ -424,11 +426,11 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(page.locator('.remark')).toHaveCount(0);
     await expect(page.getByText(itemRemark!, { exact: true })).toHaveCount(0);
 
+    await expectEverySheetFitsOneA4Page(page);
+    expect(await renderPdfPageCount(page)).toBe(2);
     await expect(page.locator('.work-order-document')).toHaveScreenshot(
       'order-print-rich-context.png',
     );
-    await expectEverySheetFitsOneA4Page(page);
-    expect(await renderPdfPageCount(page)).toBe(2);
   });
 
   for (const itemCount of [2, 4]) {
@@ -499,10 +501,6 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(page.locator('.ship-list')).toContainText('VR 分地址收件人');
     await expect(page.locator('.ship-list')).toContainText('广州市测试分地址 99 号');
 
-    await expect(page.locator('.work-order-document')).toHaveScreenshot(
-      'order-print-three-items.png',
-    );
-
     const footerPositions = await page
       .locator('.sheet > .ft')
       .evaluateAll((footers) =>
@@ -516,6 +514,9 @@ test.describe('OrderPrintLayout 截图回归', () => {
       'exact',
     );
     await expectDeclaredPagination(page);
+    await expect(page.locator('.work-order-document')).toHaveScreenshot(
+      'order-print-three-items.png',
+    );
   });
 
   test('20 款工单的款式、图稿与工序按物理 A4 页拆分', async ({ page }) => {

@@ -93,16 +93,15 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
                     </Link>
                     <span className="text-xs font-normal text-muted-foreground">{row.label}</span>
                     {row.outcome === 'success' && (receipt.command === 'RELEASE_AND_CREATE_PRINT' || receipt.command === 'CREATE_PRINT') ? (
-                      <Link
-                        href={`/print/orders/${encodeURIComponent(row.order.id)}?autoprint=1`}
-                        prefetch={false}
+                      <a
+                        href={`/api/orders/${encodeURIComponent(row.order.id)}/pdf?view=inline`}
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={`去打印工单 ${row.order.orderNo}`}
                         className={buttonVariants({ variant: 'outline', className: 'min-h-11 min-w-11' })}
                       >
                         去打印
-                      </Link>
+                      </a>
                     ) : null}
                   </span>
                 ),

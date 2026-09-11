@@ -184,6 +184,9 @@ test('CDR排队到mock完成的下载状态、过期后重新生成与真实PDF�
     const pdfJobs = await withSupplyChainDb((db) => db.query<{ id: string }>(`SELECT id FROM "BackgroundJob" WHERE type='ORDER_PDF' AND payload->>'orderId'=$1 ORDER BY "createdAt"`, [fixture.orderId]));
     expect(pdfJobs.rows).toHaveLength(1);
     expect(pdfRequests).toEqual(['GET']);
+    const repeated = await page.request.get(`${pdfPath}?jobId=${pdfJobs.rows[0]!.id}`);
+    expect(repeated.status()).toBe(200);
+    expect(await repeated.body()).toEqual(await readFile(file));
     expect((await expectJobSucceeded(pdfJobs.rows[0]!.id)).job).toMatchObject({ type: 'ORDER_PDF', queue: 'HEAVY', attempts: 1 });
     expect((await request.get(`/api/orders/${fixture.orderId}/pdf`)).status()).toBe(401);
   } finally { await worker.stop(); }

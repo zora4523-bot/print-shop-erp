@@ -22,7 +22,11 @@ describe('PDF download navigation', () => {
     'components/business/order/AdminOrderDetailView.tsx',
     'app/(admin)/orders/[id]/page.tsx',
   ])('%s must not route or prefetch a download through next/link', (file) => {
-    expect(hrefTags(file, (href) => href.includes('/api/orders/') && href.includes('/pdf'))).toEqual(['a']);
+    expect(hrefTags(file, (href) => href.includes('/api/orders/') && href.includes('/pdf'))).toEqual(['a', 'a']);
+  });
+
+  it('uses a native PDF link in batch results', () => {
+    expect(hrefTags('components/business/order/AdminOrderBatchResultProvider.tsx', (href) => href.includes('/pdf'))).toEqual(['a']);
   });
 
   it('renders row menu download destinations as native anchors', () => {

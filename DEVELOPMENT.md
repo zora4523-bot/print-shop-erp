@@ -200,3 +200,7 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 ## 旧导入纸张资料修复
 
 `pnpm exec tsx scripts/retire-unused-paper-imports.ts` 默认演练并回滚，仅针对已确认的三条旧导入资料。适用条件、写入方式、审计与恢复步骤统一见 [部署指南](./docs/部署指南.md#旧导入纸张身份冲突的一次性修复)。它不参与开发服务器启动，也不替代数据库迁移。
+
+### 跨设备打印测试
+
+安装 `pnpm exec playwright install chromium webkit` 后运行 `pnpm test:compat`，使用已有隔离数据库 preflight 和真实 production build/start，覆盖桌面 Chromium/WebKit、iPhone WebKit 与 Android Chromium 模拟。此命令不代表真机验收。`pnpm test:release tests/visual/order-print.spec.ts --project=chromium --update-snapshots=none` 继续执行已有像素门禁；新字体需审查实际差异后批准基线。新增字体/存储/快照测试与标准全量 Vitest 一起运行；部署与实测范围见 [跨设备打印](./docs/跨设备打印与可用性.md)。

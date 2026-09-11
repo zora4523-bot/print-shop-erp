@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
+import { printFontCss } from './print-fonts';
 
 import { formatDateInputShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
@@ -15,6 +16,7 @@ import type {
 interface Props {
   order: PrintOrder;
   factoryName: string;
+  fontCss?: string;
 }
 
 type Artwork = {
@@ -102,7 +104,7 @@ const CARRIER_LABEL: Record<string, string> = {
   DEPPON: '德邦',
 };
 
-export function OrderPrintLayout({ order, factoryName }: Props) {
+export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() }: Props) {
   const totalQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const itemPackaging = buildItemPackaging(order.packagingGroups);
   const packagingComplete = hasCompleteBagFacts(order, itemPackaging);
@@ -260,8 +262,8 @@ export function OrderPrintLayout({ order, factoryName }: Props) {
 
   return (
     <>
-      <style>{PRINT_CSS}</style>
-      <main className="work-order-document order-document" data-print-mode="order">
+      <style>{fontCss + PRINT_CSS}</style>
+      <main className="work-order-document order-document" data-print-fonts="required" data-print-mode="order">
         <WorkOrderSheet
           order={order}
           page={1}
@@ -1517,7 +1519,8 @@ const PRINT_CSS = String.raw`
 *{ box-sizing:border-box; margin:0; padding:0; }
 html,body{ min-height:100%; }
 body{
-  font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC","Source Han Sans SC",sans-serif;
+  font-family:"ERP Print Sans",sans-serif;
+  font-synthesis:none;
   color:var(--ink); background:#93969a; font-variant-numeric:tabular-nums;
   -webkit-font-smoothing:antialiased; padding:8mm 0;
 }
@@ -1544,7 +1547,7 @@ body{
 .scan{ text-align:right; flex:0 0 auto; }
 .scan .qr{ min-width:25mm; min-height:25mm; margin-left:auto; display:flex; justify-content:flex-end; }
 .scan svg{ min-width:25mm; min-height:25mm; display:block; }
-.scan .no{ font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:8pt; font-weight:700; margin-top:1.4mm; white-space:nowrap; }
+.scan .no{ font-family:"ERP Print Mono",monospace; font-size:8pt; font-weight:700; margin-top:1.4mm; white-space:nowrap; }
 .sec{ padding:4.5mm 0; border-top:.25mm solid var(--hair); }
 .sheet.dense > .sec{ padding-top:3mm; padding-bottom:3mm; }
 .order-document .sheet.dense > .sec{ padding-top:2.2mm; padding-bottom:2.2mm; }

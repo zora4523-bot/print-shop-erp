@@ -11,13 +11,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/auth/session', () => ({ requireVerifiedSession: mocks.session }));
 vi.mock('@/lib/order/print-view', () => ({ getOrderForPrint: mocks.order }));
 vi.mock('@/lib/public-base-url', () => ({ derivePublicBaseUrl: async () => 'https://erp.example.test' }));
-vi.mock('@/lib/settings', () => ({ getSetting: vi.fn() }));
+vi.mock('@/lib/settings', () => ({ getSetting: async () => ({ name: '测试工厂' }) }));
 vi.mock('@/lib/background-jobs/mode', () => ({ backgroundJobsMode: () => 'durable' }));
 vi.mock('@/lib/order/print-html', () => ({ buildPrintHtml: mocks.html, buildOrderPdfFilename: vi.fn() }));
 vi.mock('@/lib/pdf/render', () => ({ renderHtmlToPdf: mocks.render }));
 vi.mock('@/lib/background-jobs/pdf', () => ({
   enqueueOrderPdfJob: mocks.enqueue, waitForOrderPdfJob: mocks.wait,
-  readAndDeletePdfArtifact: mocks.read,
+  readPdfArtifact: mocks.read,
 }));
 
 import { handleOrderPdfGet } from '@/app/api/orders/[id]/pdf/handler';
@@ -56,7 +56,7 @@ it('recovers a ready job whose PDF file was removed without exposing its diagnos
   expect(body).toContain('PDF 产物不可用');
   expect(body).toContain('生成结果已过期或被清理，请点击下方按钮重新生成。');
   const retryLinks = [...body.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
-  expect(retryLinks).toEqual(['/api/orders/order-recovery/pdf']);
+  expect(retryLinks).toEqual(['/api/orders/order-recovery/pdf?regenerate=1']);
   const publicPayload = JSON.stringify({ headers: Object.fromEntries(response.headers), body });
   for (const diagnostic of [artifactName, artifactPath, 'ENOENT', 'private-stack-frame', '%PDF', 'job-consumed', 'jobId']) {
     expect(publicPayload).not.toContain(diagnostic);
