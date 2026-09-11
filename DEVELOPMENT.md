@@ -131,7 +131,7 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 现有打印像素基线仅有 Darwin 版，独立 `print-darwin` 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。两个任务均在失败后上传明确的审计、JSON、覆盖率、截图和 trace 路径，启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。
 
-2026-09-11 首次 PR #16 远端执行暴露了编译器扫描测试的 5 秒超时和 macOS 字体回退差异。扫描集成测试使用独立的 20 秒执行上限，保留全部语义断言；打印 runner 在启动浏览器前设置与基线一致的 `AppleLanguages=zh-Hans-CN`、`AppleLocale=zh_CN`，并记录实际语言和运行时版本。截图基线与比较阈值不变，修正结果以 PR checks 为准。
+2026-09-11 PR #16 前两轮远端执行分别暴露了导入文案扫描、全仓按钮 AST 扫描的 5 秒超时。这两项集成扫描使用独立的 20 秒执行上限，扫描范围及全部语义断言保持。Darwin 仍有 13 项字体截图差异：CI PDF 出现额外 Helvetica 回退，对齐系统语言偏好未消除差异，该尝试已撤回。截图基线与比较阈值未改，CI 专用基线须先取得业务确认，修正结果以最新 PR checks 为准。
 
 下述为此前本地整改时的仓库配置与保护查询记录：当时尚未推送或运行远端 CI。2026-09-11 只读查询显示 main 的 `protected=false`；保护与规则集接口返回 403，提示当前私有仓库套餐限制，因此 required checks 尚未强制执行。工作流语法通过不能替代远端通过与分支保护验收。真实通知、生产 worker、生产存量与部署 smoke 仍须按 REL-07 独立留证。认证配置的 `skipProxyUrlNormalize` 用于保留 Next 16.3 预取标头；修改时必须重跑登出晚响应竞态与公共/受保护路径回归。当前本地实测与未通过项见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
 
