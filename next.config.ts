@@ -2,6 +2,8 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Keep the Node.js OSS SDK's optional proxy dependencies out of Turbopack.
+  serverExternalPackages: ['ali-oss'],
   // Codex and local browser previews open the dev server through 127.0.0.1.
   // Next 16 otherwise blocks the dev-only client bootstrap/HMR endpoints.
   allowedDevOrigins: ['127.0.0.1'],

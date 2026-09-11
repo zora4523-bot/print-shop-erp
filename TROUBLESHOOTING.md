@@ -47,6 +47,16 @@ curl -I http://localhost:3000/login
 
 ## 开发服务器无法启动
 
+### 后台页面报 `Can't resolve 'proxy-agent'`
+
+若导入链为 `ali-oss → urllib → detect_proxy_agent.js`，Turbopack 正在解析 OSS SDK 的可选代理模块。当前应用未启用 OSS 代理，Node.js 原生加载 SDK 不需要执行该分支。
+
+保留 `next.config.ts` 中的 `serverExternalPackages: ['ali-oss']`，让服务端通过 Node.js 原生加载 OSS SDK。此配置依据当前安装版 Next.js 的 `node_modules/next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/serverExternalPackages.md`。若以后启用 `URLLIB_ENABLE_PROXY` 或显式代理，需另外安装并验证 SDK 兼容的代理依赖。
+
+等待配置变更触发开发服务器重启，再刷新实际报错的已登录后台页面；只检查 `/login` 无法覆盖这条服务端导入链。运行 `pnpm exec vitest run lib/oss/__tests__` 验证 OSS 配置、签名与读取逻辑。
+
+2026-09-11 验证：Next.js 16.3.4 下 `/owner` 已正常显示待办和经营数据，OSS 相关 38 个测试通过；本条验证不代表完成全量生产构建或真实 OSS 上传测试。
+
 ### `EADDRINUSE` / 端口占用
 
 ```bash
