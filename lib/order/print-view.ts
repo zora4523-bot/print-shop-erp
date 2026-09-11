@@ -3,11 +3,12 @@ import { buildQrSvg } from './qr';
 import { db } from '../db';
 import {
   PieceworkOperationType,
+  OrderChangeRequestStatus,
   ProductionOperationStatus,
   Role,
-  TaskStatus,
 } from '../../generated/prisma/enums';
-import { getOrderScopeFilter } from '../auth/order-scope';
+import { getOrderPrintScope } from './print-access';
+import { productionOperationPassCount } from '../production/operation-quantity';
 import { signDesignReadUrl } from '../oss/read-url';
 import type {
   PrintDesign,
@@ -16,7 +17,6 @@ import type {
   PrintPackagingGroup,
   PrintProductionStep,
   PrintShipment,
-  PrintTask,
 } from './print-types';
 
 const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
@@ -24,27 +24,6 @@ const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
   [PieceworkOperationType.FULL]: '专版烫金',
   [PieceworkOperationType.PACKING]: '打包',
 };
-
-function partialPassCount(
-  sources: Array<{
-    orderItem: null | {
-      frontFoilColors: string[];
-      backFoilColors: string[];
-    };
-  }>,
-): number {
-  const counts = new Set(
-    sources
-      .map((source) =>
-        source.orderItem
-          ? source.orderItem.frontFoilColors.length +
-            source.orderItem.backFoilColors.length
-          : 0,
-      )
-      .filter((count) => count > 0),
-  );
-  return counts.size === 1 ? [...counts][0]! : 1;
-}
 
 type PrintOperationRow = {
   id: string;
@@ -94,10 +73,12 @@ function buildCurrentProductionSteps(input: {
   progressSteps: PrintProgressStepRow[];
 }): PrintProductionStep[] {
   const currentOperations = input.operations.filter(
-    (operation) => operation.workOrderVersion === input.workOrderVersion,
+    (operation) => operation.workOrderVersion === input.workOrderVersion &&
+      operation.status !== ProductionOperationStatus.CANCELLED,
   );
   const currentProgressSteps = input.progressSteps.filter(
-    (step) => step.workOrderVersion === input.workOrderVersion,
+    (step) => step.workOrderVersion === input.workOrderVersion &&
+      step.status !== ProductionOperationStatus.CANCELLED,
   );
   return [
     ...currentOperations.map((operation): PrintProductionStep => {
@@ -105,10 +86,10 @@ function buildCurrentProductionSteps(input: {
         operation.sources.length === 1
           ? operation.sources[0]?.orderItem ?? null
           : null;
-      const passCount =
-        operation.operationType === PieceworkOperationType.PARTIAL
-          ? partialPassCount(operation.sources)
-          : 1;
+      const passCount = productionOperationPassCount(
+        operation.operationType,
+        operation.sources,
+      );
       const completedQty = operation.reports.reduce(
         (total, report) => total.plus(report.reportedCompletedQty.toString()),
         new Decimal(operation.carriedCompletedQty?.toString() ?? 0),
@@ -191,9 +172,9 @@ function buildCurrentProductionSteps(input: {
 
 // Loads the narrow shape the production print layout needs. SALES uses the
 // customer-facing list drawer and must not receive a production sheet (it
-// contains task, worker and internal process details). CUSTOMER_SERVICE can
+// contains internal production details). CUSTOMER_SERVICE can
 // print its own submissions, ADMIN sees everything, and WORKER sees only
-// assigned orders that have left the SUBMITTED scheduling-draft state.
+// current-version orders in its reporting lane or with public progress.
 // Returns null when the actor can't see the order — the page
 // maps that to notFound() so there's no "this order exists but you
 // can't print it" disclosure.
@@ -205,16 +186,19 @@ export async function getOrderForPrint(
   // （未登录先登录再回跳），不需要专用扫码器。
   baseUrl: string,
 ): Promise<PrintOrder | null> {
-  if (user.role === Role.SALES) return null;
+  const where = await getOrderPrintScope(id, user);
+  if (!where) return null;
 
   const order = await db.order.findFirst({
-    where: {
-      id,
-      ...getOrderScopeFilter(user),
-    },
+    where,
     include: {
       customerParty: { select: { name: true } },
       sourceOrder: { select: { orderNo: true } },
+      changeRequests: {
+        where: { status: OrderChangeRequestStatus.PENDING },
+        take: 1,
+        select: { id: true },
+      },
       packagingGroups: {
         orderBy: { sequence: 'asc' },
         include: {
@@ -307,14 +291,6 @@ export async function getOrderForPrint(
           designs: {
             orderBy: [{ uploadedAt: 'asc' }, { id: 'asc' }],
           },
-          tasks: {
-            where: { status: { not: TaskStatus.CANCELLED } },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-            include: {
-              craft: { select: { name: true } },
-              worker: { select: { displayName: true } },
-            },
-          },
         },
       },
     },
@@ -388,18 +364,6 @@ export async function getOrderForPrint(
           d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
       }),
     ),
-    tasks:
-      productionSteps.length > 0
-        ? []
-        : item.tasks.map((task): PrintTask => ({
-            id: task.id,
-            craftName: task.craft.name,
-            workerDisplayName: task.worker?.displayName ?? null,
-            plannedQty: task.plannedQty,
-            completedQty: task.completedQty,
-            defectQty: task.defectQty,
-            completedAt: task.completedAt,
-          })),
   }));
 
   const printPackagingGroups: PrintPackagingGroup[] =
@@ -435,6 +399,8 @@ export async function getOrderForPrint(
     id: order.id,
     orderNo: order.orderNo,
     workOrderVersion: order.workOrderVersion,
+    status: order.status,
+    hasPendingChange: order.changeRequests.length > 0,
     customName: order.customName,
     kind: order.kind,
     sourceOrderNo: order.sourceOrder?.orderNo ?? null,

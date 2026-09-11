@@ -199,10 +199,9 @@ async function standaloneOrderFixture(): Promise<PrintOrder> {
       fileType: 'IMAGE',
       fileUrl: `data:image/svg+xml;base64,${Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="90" height="165"><rect width="90" height="165" fill="#ad1022"/><text x="45" y="80" text-anchor="middle" fill="#e3bd6f" font-size="18">${index + 1}</text></svg>`).toString('base64')}`,
     }],
-    tasks: [],
   }));
   const productionSteps: PrintOrder['productionSteps'] = Array.from({ length: 5 }, (_, index) => ({
-      id: `operation-${index + 1}-${'long-task-identifier-'.repeat(4)}`,
+      id: `operation-${index + 1}-${'long-operation-identifier-'.repeat(4)}`,
       source: 'OPERATION' as const,
       itemSequence: index < 4 ? index + 1 : null,
       itemName: index < 4 ? items[index]!.name : null,
@@ -215,7 +214,7 @@ async function standaloneOrderFixture(): Promise<PrintOrder> {
     }));
   return {
     id: 'standalone-order', orderNo, workOrderVersion: 3, customName: '新春平安封四款',
-    kind: 'NORMAL', isUrgent: true, isSfCollect: false,
+    kind: 'NORMAL', status: 'RELEASED', hasPendingChange: false, isUrgent: true, isSfCollect: false,
     promisedDate: new Date('2026-09-10T00:00:00+08:00'),
     customerName: '视觉回归客户', customerRef: '视觉回归',
     packageRequirement: '混装每款 2 个，袋口封牢',
@@ -300,6 +299,54 @@ function textPreview(value: string, maxCharacters: number): string {
 }
 
 test.describe('OrderPrintLayout 截图回归', () => {
+  for (const nameLength of [19, 50, 73, 100]) {
+    test(`${nameLength} 字工单名称在页眉完整换行且只生成一页 PDF`, async ({ page }) => {
+      const order = await standaloneOrderFixture();
+      order.customName = '新春红包' + '客户定制款'.repeat(20).slice(0, nameLength - 4);
+      await page.setContent(buildStandaloneHtml(order));
+      await waitForPrintReady(page, 1);
+      await expect(page.locator('.order-name')).toContainText(order.customName);
+      await expect(page.locator('.hd .line')).toContainText('已下发');
+      await expect(page.locator('.hd .line')).not.toContainText('待审批');
+      await expect(page.locator('.work-order-document')).not.toContainText('生产团队待排产');
+      expect(await readSupplementText(page, '工单名称')).toBe('');
+      await expectDeclaredPagination(page);
+    });
+  }
+
+  test('待审批只依据真实变更标记，已下发工单无师傅仍可正常打印', async ({ page }) => {
+    const order = await standaloneOrderFixture();
+    order.hasPendingChange = true;
+    await page.setContent(buildStandaloneHtml(order));
+    await waitForPrintReady(page, 1);
+    await expect(page.locator('.hd .line')).toContainText('已下发');
+    await expect(page.locator('.hd .line')).toContainText('变更待审批');
+    await expect(page.locator('.work-order-document')).not.toContainText('待排产');
+    await expectDeclaredPagination(page);
+  });
+
+  test('自动打印等待图稿和分页完成后只触发一次', async ({ page }) => {
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
+    const { orderId } = await seedPrintableOrder({ submitterId: adminId, designCount: 1 });
+    await page.addInitScript(() => {
+      window.print = () => {
+        const html = document.documentElement;
+        html.dataset.printInvocationCount = String(Number(html.dataset.printInvocationCount ?? 0) + 1);
+        html.dataset.printInvocationReady = `${html.dataset.printReady}:${html.dataset.printPagination}`;
+      };
+    });
+    await login(page, {
+      from: `/print/orders/${orderId}?autoprint=1`,
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+    await waitForPrintReady(page, 1);
+    await expect(page.locator('html')).toHaveAttribute('data-print-invocation-count', '1');
+    await expect(page.locator('html')).toHaveAttribute('data-print-invocation-ready', 'true:ready');
+    await expectDeclaredPagination(page);
+    await expect(page.locator('html')).toHaveAttribute('data-print-invocation-count', '1');
+  });
+
   test('standalone HTML 真实执行分页脚本并保留一个主码和完整工序', async ({ page }) => {
     const order = await standaloneOrderFixture();
     const base = `https://print-regression.example.com/wo/${order.orderNo}?v=3`;
@@ -405,16 +452,13 @@ test.describe('OrderPrintLayout 截图回归', () => {
       password: E2E_PASSWORD,
     });
     await expect(page).toHaveURL(`/print/orders/${orderId}`);
-    await waitForPrintReady(page, 2);
+    await waitForPrintReady(page, 1);
 
-    await expect(page.locator('.cust')).toHaveText([
-      'VR-CUSTOMER',
-      'VR-CUSTOMER',
-    ]);
-    await expect(page.locator('.hd .line').first()).toContainText(
-      `工单 ${textPreview(customName!, 18)}`,
-    );
-    expect(await readSupplementText(page, '工单名称')).toBe(customName);
+    await expect(page.locator('.cust')).toHaveText('VR-CUSTOMER');
+    await expect(page.locator('.order-name')).toContainText(customName!);
+    expect(await readSupplementText(page, '工单名称')).toBe('');
+    await expect(page.locator('.hd')).toContainText('已下发');
+    await expect(page.locator('.work-order-document')).not.toContainText('生产团队待排产');
 
     const foilFact = page.locator('.fact').filter({
       has: page.getByText('烫金工艺', { exact: true }),
@@ -427,7 +471,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(page.getByText(itemRemark!, { exact: true })).toHaveCount(0);
 
     await expectEverySheetFitsOneA4Page(page);
-    expect(await renderPdfPageCount(page)).toBe(2);
+    expect(await renderPdfPageCount(page)).toBe(1);
     await expect(page.locator('.work-order-document')).toHaveScreenshot(
       'order-print-rich-context.png',
     );
@@ -461,11 +505,11 @@ test.describe('OrderPrintLayout 截图回归', () => {
       await waitForPrintReady(page);
       await expectSingleOrderQrPerSheet(page);
       await expect(page.locator('.flow tbody > tr')).toHaveCount(taskCount);
+      await expect(page.locator('.flow tbody > tr').first()).toContainText('5,000 个');
       await expect(page.locator('.item-process')).toContainText('彩印 C、M、Y、K · 触感膜');
       await expect(page.locator('.item-process')).toContainText('局部浮雕 · 正面 哑金 / 反面 红金');
       await expectDeclaredPagination(page);
 
-      await expect(page.locator('.work-order-document')).toHaveScreenshot(`order-print-main-flow-${taskCount}.png`);
       if (taskCount === 1) {
         const retiredPdf = await page.request.get(`/api/orders/${orderId}/pdf?mode=tasks`);
         expect(retiredPdf.status()).toBe(400);
@@ -473,6 +517,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
         expect(retiredPrint.status()).toBe(404);
         expect(await retiredPrint.text()).not.toContain('<main class="work-order-document');
       }
+      await expect(page.locator('.work-order-document')).toHaveScreenshot(`order-print-main-flow-${taskCount}.png`);
     });
   }
 
@@ -597,7 +642,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expectDeclaredPagination(page);
   });
 
-  test('最长合法文本与 10 个地址也通过显式续页保持 PDF 页数一致', async ({
+  test('历史超长名称、最长备注与 10 个地址通过显式续页保持 PDF 页数一致', async ({
     page,
   }) => {
     test.setTimeout(120_000);
@@ -634,23 +679,21 @@ test.describe('OrderPrintLayout 截图回归', () => {
     );
 
     const remark = Array.from({ length: 500 }, () => '备').join('\n');
-    const workerNames = Array.from({ length: 50 }, (_, index) => {
-      const sequence = String(index + 1).padStart(2, '0');
-      return `师傅${sequence}${'长'.repeat(60)}`;
-    });
-    const team = workerNames.join(' / ');
     const customer = '客'.repeat(128);
-    const customName = '单'.repeat(100);
+    const customName = '单'.repeat(200);
 
     await expect(page.locator('.cust')).toHaveText(
       Array.from({ length: sheetCount }, () => textPreview(customer, 16)),
     );
-    await expect(page.locator('.hd .line b:first-of-type')).toHaveText(
-      Array.from({ length: sheetCount }, () => textPreview(team, 18)),
-    );
+    await expect(page.locator('.hd').first()).toContainText('已下发');
     expect(await readSupplementText(page, '客户')).toBe(customer);
-    expect(await readSupplementText(page, '生产团队')).toBe(team);
+    expect(await readSupplementText(page, '生产团队')).toBe('');
+    await expect(page.locator('.order-name').first()).toContainText(textPreview(customName, 100));
     expect(await readSupplementText(page, '工单名称')).toBe(customName);
+    for (let index = 0; index < 50; index++) {
+      const sequence = String(index + 1).padStart(2, '0');
+      await expect(page.locator('.flow tbody > tr').filter({ hasText: `工序${sequence}${'长'.repeat(60)}` })).toHaveCount(1);
+    }
     expect(await readSupplementText(page, '备注')).toBe(remark);
     expect(
       await page.locator('.sheet').first().locator('.note').textContent(),

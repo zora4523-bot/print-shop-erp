@@ -3,6 +3,7 @@ import { printFontCss } from './print-fonts';
 
 import { formatDateInputShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import type {
   PrintFoilTechnique,
@@ -39,7 +40,6 @@ type FlowRow = {
   itemName: string | null;
   scopeLabel?: string | null;
   name: string;
-  worker: string | null;
   planned: string;
   completed: string;
   defect: string;
@@ -74,8 +74,8 @@ const MAX_SUPPLEMENT_LINES_PER_PAGE = 22;
 const SUPPLEMENT_CHARACTERS_PER_LINE = 36;
 const MAX_HEADER_FACTORY_CHARACTERS = 24;
 const MAX_HEADER_CUSTOMER_CHARACTERS = 16;
-const MAX_HEADER_TEAM_CHARACTERS = 18;
-const MAX_HEADER_ORDER_NAME_CHARACTERS = 18;
+const MAX_HEADER_ORDER_NAME_CHARACTERS = 100;
+const MAX_HEADER_ORDER_NAME_LINES = 3;
 
 const FOIL_TECHNIQUE_LABEL: Record<PrintFoilTechnique, string> = {
   UNSPECIFIED: '烫金',
@@ -114,7 +114,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
   const hasOversizedItem = order.items.some(
     (item) => estimateItemRowUnits(item) >= 4,
   );
-  const team = getTeam(order);
   const fullCraft = formatProductionCrafts(order);
   const fullPaper = joinDistinct(order.items.map(formatPaper));
   const fullFoil = joinDistinct(order.items.map(formatFoil));
@@ -168,16 +167,11 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
       mainLimit: MAX_HEADER_CUSTOMER_CHARACTERS,
     },
     {
-      key: 'team',
-      label: '生产团队',
-      value: team,
-      mainLimit: MAX_HEADER_TEAM_CHARACTERS,
-    },
-    {
       key: 'order-name',
       label: '工单名称',
       value: clean(order.customName),
       mainLimit: MAX_HEADER_ORDER_NAME_CHARACTERS,
+      mainLines: MAX_HEADER_ORDER_NAME_LINES,
     },
     {
       key: 'craft',
@@ -221,13 +215,13 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
   const artworkAnnexPages = hasArtworkOnMainPage
     ? []
     : chunk(artworks, MAX_ARTWORKS_PER_ANNEX_PAGE);
-  const warnings = auditOrder(order, itemPackaging, team);
+  const warnings = auditOrder(order, itemPackaging);
   const mainWarnings = warnings.slice(0, MAX_WARNINGS_ON_MAIN_PAGE);
   const warningAnnexPages = chunk(
     warnings.slice(MAX_WARNINGS_ON_MAIN_PAGE),
     MAX_WARNINGS_PER_ANNEX_PAGE,
   );
-  const flowRows = buildFlowRows(order, totalQuantity, totalBags);
+  const flowRows = buildFlowRows(order);
   const { mainFlowRows, flowAnnexPages } = paginateFlowRows(flowRows);
   const shipments =
     order.shipments.length > 0 ? order.shipments : [fallbackShipment(order)];
@@ -257,8 +251,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
     order.items.length >= 2 ||
     artworks.length >= 5 ||
     order.shipments.length > 1 ||
-    order.productionSteps.length > 0 ||
-    order.items.some((item) => item.tasks.length > 0);
+    order.productionSteps.length > 0;
 
   return (
     <>
@@ -271,7 +264,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
           orderDate={orderDate}
           dense={denseMainSheet}
         >
-          <WorkOrderHeader order={order} team={team} factoryName={factoryName} />
+          <WorkOrderHeader order={order} factoryName={factoryName} />
           <AuditWarnings
             warnings={mainWarnings}
             remainingCount={warnings.length - mainWarnings.length}
@@ -326,7 +319,11 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
           ) : null}
 
           <section className="sec">
-            <FlowTable rows={mainFlowRows} />
+            {mainFlowRows.length === 0 && flowRows.length > 0 ? (
+              <p className="flow-empty">工序明细见附页</p>
+            ) : (
+              <FlowTable rows={mainFlowRows} />
+            )}
           </section>
 
           <section className="sec">
@@ -355,7 +352,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
             >
               <WorkOrderHeader
                 order={order}
-                team={team}
                 factoryName={factoryName}
               />
               <section className="sec warning-annex">
@@ -382,7 +378,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
             >
               <WorkOrderHeader
                 order={order}
-                team={team}
                 factoryName={factoryName}
               />
               <SupplementAnnexSection {...{
@@ -406,7 +401,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
             >
               <WorkOrderHeader
                 order={order}
-                team={team}
                 factoryName={factoryName}
               />
               <section className="sec item-annex">
@@ -440,7 +434,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
             >
               <WorkOrderHeader
                 order={order}
-                team={team}
                 factoryName={factoryName}
               />
               <section className="sec artwork-annex">
@@ -468,7 +461,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
             >
               <WorkOrderHeader
                 order={order}
-                team={team}
                 factoryName={factoryName}
               />
               <ShipmentAnnexSection {...{
@@ -497,7 +489,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
             >
               <WorkOrderHeader
                 order={order}
-                team={team}
                 factoryName={factoryName}
               />
               <section className="sec flow-annex">
@@ -564,11 +555,9 @@ function WorkOrderSheet({
 
 function WorkOrderHeader({
   order,
-  team,
   factoryName,
 }: {
   order: PrintOrder;
-  team: string | null;
   factoryName: string;
 }) {
   const displayFactoryName = previewForHeader(
@@ -579,11 +568,12 @@ function WorkOrderHeader({
     clean(order.customerName),
     MAX_HEADER_CUSTOMER_CHARACTERS,
   );
-  const displayTeam = previewForHeader(team, MAX_HEADER_TEAM_CHARACTERS);
-  const displayOrderName = previewForHeader(
-    clean(order.customName),
-    MAX_HEADER_ORDER_NAME_CHARACTERS,
-  );
+  const fullOrderName = clean(order.customName);
+  const displayOrderName =
+    Array.from(fullOrderName ?? '').length <= MAX_HEADER_ORDER_NAME_CHARACTERS &&
+    explicitLineCount(fullOrderName) <= MAX_HEADER_ORDER_NAME_LINES
+      ? fullOrderName
+      : previewForMain(fullOrderName, MAX_HEADER_ORDER_NAME_CHARACTERS);
   return (
     <header className="hd">
       <div className="hd-main">
@@ -591,13 +581,12 @@ function WorkOrderHeader({
         <div className={classNames('cust', !displayCustomerName && 'miss')}>
           {displayCustomerName ?? '客户未填'}
         </div>
+        {displayOrderName ? (
+          <div className="order-name">工单 <b>{displayOrderName}</b></div>
+        ) : null}
         <div className="line">
-          团队 <b className={!displayTeam ? 'miss' : undefined}>{displayTeam ?? '待排产'}</b>
-          {displayOrderName ? (
-            <>
-              <span className="sep">·</span>工单 <b>{displayOrderName}</b>
-            </>
-          ) : null}
+          状态 <b>{ORDER_STATUS_REGISTRY[order.status].label}</b>
+          {order.hasPendingChange ? <span className="tag">变更待审批</span> : null}
           {order.isUrgent ? <span className="tag">加急</span> : null}
           {order.kind === 'REWORK' ? (
             <span className="tag">
@@ -784,6 +773,7 @@ function ArtworkGrid({ artworks, onAnnex }: { artworks: Artwork[]; onAnnex: bool
 }
 
 function FlowTable({ rows }: { rows: FlowRow[] }) {
+  if (rows.length === 0) return <p className="flow-empty">暂无生产工序记录</p>;
   return (
     <table className="flow flow-compact">
       <thead>
@@ -805,9 +795,6 @@ function FlowTable({ rows }: { rows: FlowRow[] }) {
                   <small className="flow-item">{itemLabel}</small>
                 ) : null}
                 {row.name}
-                {row.worker ? (
-                  <small className="flow-worker">{row.worker}</small>
-                ) : null}
               </td>
               <td className="num">{row.planned}</td>
               <td className="num">{row.completed}</td>
@@ -939,97 +926,18 @@ function calculateTotalBags(order: PrintOrder, packaging: Map<string, ItemPackag
   return order.packagingGroups.reduce((sum, group) => sum + group.actualBagCount, 0);
 }
 
-function buildFlowRows(
-  order: PrintOrder,
-  totalQuantity: number,
-  totalBags: number | null,
-): FlowRow[] {
-  // A current work-order generation is authoritative. Legacy ProductionTask
-  // rows remain a fallback for historical orders only; mixing both would
-  // duplicate outdated quantities beside the current production facts.
-  const rows =
-    order.productionSteps.length > 0
-      ? order.productionSteps.map((step) => ({
-          key: `production-${step.source.toLowerCase()}-${step.id}`,
-          itemSequence: step.itemSequence ?? null,
-          itemName: step.itemName ?? null,
-          scopeLabel: step.scopeLabel,
-          name: clean(step.craftName) ?? '工序未填',
-          worker: null,
-          planned: `${formatNumber(step.plannedQty)}${step.quantityUnit ? ` ${step.quantityUnit}` : ''}`,
-          completed: formatProgress(step.completedQty),
-          defect: formatProgress(step.defectQty),
-          completedAt: step.completedAt
-            ? formatDateInputShanghai(step.completedAt)
-            : '',
-        }))
-      : order.items.flatMap((item) =>
-          item.tasks.length > 0
-            ? buildTaskRows(item)
-            : derivePlannedSteps(item),
-        );
-  if (rows.length === 0) {
-    rows.push({
-      key: 'production-pending',
-      itemSequence: null,
-      itemName: null,
-      name: '工序待确认',
-      worker: null,
-      planned: formatNumber(totalQuantity),
-      completed: '',
-      defect: '',
-      completedAt: '',
-    });
-  }
-  if (
-    order.packagingGroups.length > 0 &&
-    !rows.some((row) => row.name === '打包')
-  ) {
-    rows.push({
-      key: 'packaging',
-      itemSequence: null,
-      itemName: null,
-      name: '打包',
-      worker: null,
-      planned: totalBags === null ? '—' : `${formatNumber(totalBags)} 袋`,
-      completed: '',
-      defect: '',
-      completedAt: '',
-    });
-  }
-  return rows;
-}
-
-function buildTaskRows(item: PrintOrderItem): FlowRow[] {
-  return item.tasks.map((task) => ({
-    key: `task-${task.id}`,
-    itemSequence: item.sequence,
-    itemName: item.name,
-    name: clean(task.craftName) ?? '工序未填',
-    worker: clean(task.workerDisplayName) ?? '待分配',
-    planned: formatNumber(task.plannedQty),
-    completed: formatProgress(task.completedQty),
-    defect: formatProgress(task.defectQty),
-    completedAt: task.completedAt
-      ? formatDateInputShanghai(task.completedAt)
-      : '',
+function buildFlowRows(order: PrintOrder): FlowRow[] {
+  return order.productionSteps.map((step) => ({
+    key: `production-${step.source.toLowerCase()}-${step.id}`,
+    itemSequence: step.itemSequence ?? null,
+    itemName: step.itemName ?? null,
+    scopeLabel: step.scopeLabel,
+    name: clean(step.craftName) ?? '工序未填',
+    planned: `${formatNumber(step.plannedQty)}${step.quantityUnit ? ` ${step.quantityUnit}` : ''}`,
+    completed: formatProgress(step.completedQty),
+    defect: formatProgress(step.defectQty),
+    completedAt: step.completedAt ? formatDateInputShanghai(step.completedAt) : '',
   }));
-}
-
-function derivePlannedSteps(item: PrintOrderItem): FlowRow[] {
-  return productionStepNames(item)
-    .filter((name) => name !== '打包')
-    .map((name, index) => ({
-      key: `planned-${item.id}-${index}-${name}`,
-      itemSequence: item.sequence,
-      itemName: item.name,
-      name,
-      worker: null,
-      planned: formatNumber(item.quantity),
-      completed: '',
-      defect: '',
-      completedAt: '',
-    }));
 }
 
 function hasCompleteBagFacts(
@@ -1041,11 +949,10 @@ function hasCompleteBagFacts(
   );
 }
 
-function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>, team: string | null): string[] {
+function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>): string[] {
   const warnings: string[] = [];
   if (!clean(order.customerName)) warnings.push('客户未填');
   if (!order.promisedDate) warnings.push('交货日期未填');
-  if (!team) warnings.push('生产团队待排产');
   // Keep the legacy paper warning only when both the note and bag facts are
   // missing. Complete structured packaging needs no additional free-text note.
   if (!clean(order.packageRequirement) && !hasCompleteBagFacts(order, packaging)) {
@@ -1056,7 +963,10 @@ function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>, te
     const prefix = `图 ${item.sequence}`;
     if (!clean(item.specification)) warnings.push(`${prefix} 规格未填`);
     if (!clean(formatPaper(item))) warnings.push(`${prefix} 纸张未填`);
-    if (item.tasks.length === 0 && productionStepNames(item).length === 0) {
+    if (
+      declaredCraftNames(item).length === 0 &&
+      !order.productionSteps.some((step) => step.itemSequence === item.sequence)
+    ) {
       warnings.push(`${prefix} 生产工艺待确认`);
     }
     if (
@@ -1074,10 +984,6 @@ function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>, te
   if (!clean(shipment.receiverPhone)) warnings.push('收件电话未填');
   if (!clean(shipment.receiverAddress)) warnings.push('收货地址未填');
   return unique(warnings);
-}
-
-function getTeam(order: PrintOrder): string | null {
-  return joinDistinct(order.items.flatMap((item) => item.tasks.map((task) => task.workerDisplayName)));
 }
 
 function formatPaper(item: PrintOrderItem): string | null {
@@ -1160,15 +1066,13 @@ function foilColorsBySide(item: PrintOrderItem): {
 
 function formatProductionCrafts(order: PrintOrder): string | null {
   return joinDistinct(
-    order.items.flatMap((item) =>
-      item.tasks.length > 0
-        ? item.tasks.map((task) => task.craftName)
-        : productionStepNames(item),
-    ),
+    order.productionSteps.length > 0
+      ? order.productionSteps.map((step) => step.craftName)
+      : order.items.flatMap(declaredCraftNames),
   );
 }
 
-function productionStepNames(item: PrintOrderItem): string[] {
+function declaredCraftNames(item: PrintOrderItem): string[] {
   const persistedCrafts = unique(
     item.craftNames.map(clean).filter((name): name is string => Boolean(name)),
   );
@@ -1352,8 +1256,7 @@ function paginateFlowRows(rows: FlowRow[]): {
 function estimateCompactFlowRowHeightMm(row: FlowRow): number {
   return 2.4 +
     estimateTextLines(formatFlowItemLabel(row), 30) * 2.8 +
-    estimateTextLines(row.name, 20) * 3.5 +
-    estimateTextLines(row.worker, 30) * 2.8;
+    estimateTextLines(row.name, 20) * 3.5;
 }
 
 function paginateByWeight<T>(
@@ -1540,7 +1443,10 @@ body{
 .factory{ font-size:8pt; font-weight:700; color:var(--mute); letter-spacing:.08em; margin-bottom:1.8mm; }
 .factory,.cust{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .cust{ max-width:130mm; font-size:26pt; font-weight:800; line-height:1; letter-spacing:-.02em; }
-.line{ display:flex; align-items:center; flex-wrap:wrap; gap:1.5mm; max-height:2.7em; overflow:hidden; font-size:9.5pt; font-weight:600; color:var(--mute); margin-top:2.6mm; }
+.order-name{ margin-top:2mm; font-size:10pt; line-height:1.4; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--mute); }
+.order-name b{ color:var(--ink); }
+.flow-empty{ font-size:9pt; color:var(--mute); margin:2mm 0; }
+.line{ display:flex; align-items:center; flex-wrap:wrap; gap:1.5mm; font-size:9.5pt; font-weight:600; color:var(--mute); margin-top:2.6mm; }
 .line b{ max-width:60mm; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); }
 .line b.miss{ color:var(--flag); }
 .sep{ color:var(--hair); margin:0 .5mm; }
@@ -1589,14 +1495,12 @@ tfoot td{ border-top:.4mm solid var(--rule); border-bottom:none; font-size:11.5p
 .flow tbody td{ min-height:11mm; }.flow .step{ font-size:11.5pt; font-weight:800; }
 .flow .step small{ display:block; color:var(--mute); font-size:7pt; font-weight:600; }
 .flow .step .flow-item{ margin-bottom:.8mm; }
-.flow .step .flow-worker{ margin-top:.8mm; }
 .flow-compact .flow-step-col{ width:auto; }
 .flow-compact .flow-number-col{ width:25mm; }.flow-compact .flow-defect-col{ width:20mm; }.flow-compact .flow-date-col{ width:27mm; }
 .flow-compact tbody td{ font-size:9pt; line-height:1.2; padding-top:1.1mm; padding-bottom:1.1mm; }
 .flow-compact .step{ font-size:9pt; overflow-wrap:anywhere; }
 .flow-compact .step small{ font-size:6.8pt; line-height:1.2; }
 .flow-compact .step .flow-item{ display:inline; margin-bottom:0; margin-right:2mm; }
-.flow-compact .step .flow-worker{ display:inline; margin-top:0; margin-left:2mm; }
 .flow-step-col{ width:30mm; }.flow-number-col{ width:24mm; }.flow-defect-col{ width:20mm; }.flow-date-col{ width:26mm; }
 .flow-annex{ flex:1; }
 .annex-title{ font-size:15pt; font-weight:800; margin-bottom:4mm; }

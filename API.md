@@ -79,7 +79,7 @@ applies_to: repository source at last_verified
 | `GET /api/admin/inventory-count/materials` | Permission `material:manage` | query `q`、`limit` | `200 {materials}`；未授权 `401` |
 | `GET /api/orders/admin/:orderNo` | Permission `order:view:all` + ADMIN | path `orderNo` | `200 {order}`；未授权 `401`，非管理员 `403`，不可见或不存在 `404`；响应 `private, no-store` |
 | `GET /api/cdr/bundles/:id` | Capability URL | cuid 风格 bundle id | 就绪后 `302` 到产物；生成中 `409` + `Retry-After`；失效或不存在统一 `404`；OSS 不可用 `503` |
-| `GET /api/orders/:id/pdf` | Session + order scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500` |
+| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500` |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
 | `GET /api/salary/piecework-settlements/export` | Permission `salary:view:all`，复核数据库账号状态 | query `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 | `GET /api/salary/piecework/export` | Permission `salary:view:all` | query `date` 或 `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
@@ -89,6 +89,10 @@ Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到�
 下载响应使用 `private, no-store`；文件名同时提供安全的 ASCII fallback 和 UTF-8 名称（适用的端点）。新增下载接口时保持内容类型、长度、缓存和 `nosniff` 语义。
 
 工单 PDF 仅输出每页一个主码的生产主单。工序流转单已移除：`mode=tasks` 下载请求返回 `400`，浏览器打印页返回 `404`。后台任务继续绑定用户、工单和生产版本；兼容缺省或 `mode=order` 的历史任务，拒绝生成或下载旧流转单任务。浏览器打印页 `/print/orders/:id` 使用相同模板与分页规则。
+
+生产打印范围统一由 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 提供，适用于网页正文、页面标题、同步 PDF 及后台 PDF。每次读取复核账号仍启用且角色未变化：ADMIN 可查看全部，CUSTOMER_SERVICE 仅查看自己提交的工单，SALES 不可查看生产打印件。WORKER 按当前账号的固定报工岗位匹配当前版本未取消的计件工序，或读取包含当前版本公共进度工序的工单；`SUBMITTED` 不向师傅开放。旧 `ProductionTask.workerId` 派工关系不授予打印权限，无权访问的页面标题不含工单号。
+
+打印工序只读取当前 `workOrderVersion` 的 `ProductionOperation` / `ProductionProgressStep`，排除已取消工序；缺记录时显示空态，不生成旧任务或推测进度。状态来自当前工单，待审批标记只来自真实的 PENDING 修改申请。后台渲染后、下载响应前继续复核账号、范围及生产版本；撤权不返回产物，响应前发现升版返回 `409` 并要求重新生成。
 
 工单主码 `/wo/:orderNo?v=:version` 只读取并分流，不写报工或工资。师傅/打包账号仅进入当前岗位的当前版工序；唯一未完成工序直接进入，多个或全部完成时显示选择页。旧 `task` 参数仍精确校验工单、版本和岗位，禁止越权跳转。
 

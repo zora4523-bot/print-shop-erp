@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { dbMock, enqueueBackgroundJobMock, getOrderForPrintMock } = vi.hoisted(() => ({
+const { dbMock, enqueueBackgroundJobMock, getOrderForPrintMock, renderMock, writeFileMock } = vi.hoisted(() => ({
   dbMock: {
     backgroundJob: { findUnique: vi.fn() },
     user: { findUnique: vi.fn() },
   },
   enqueueBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   getOrderForPrintMock: vi.fn(),
+  renderMock: vi.fn(),
+  writeFileMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
@@ -17,8 +19,13 @@ vi.mock('../repository', () => ({
 vi.mock('@/lib/order/print-view', () => ({
   getOrderForPrint: getOrderForPrintMock,
 }));
-vi.mock('@/lib/order/print-html', () => ({ buildPrintHtml: vi.fn() }));
-vi.mock('@/lib/pdf/render', () => ({ renderHtmlToPdf: vi.fn() }));
+vi.mock('@/lib/order/print-html', () => ({ buildPrintHtml: async () => '<html>sheet</html>' }));
+vi.mock('@/lib/pdf/render', () => ({ renderHtmlToPdf: renderMock }));
+vi.mock('@/lib/settings', () => ({ getSetting: async () => ({ name: '测试工厂' }) }));
+vi.mock('node:fs/promises', () => ({
+  mkdir: vi.fn(), readdir: async () => [], readFile: vi.fn(), rename: vi.fn(),
+  stat: vi.fn(), unlink: vi.fn(), writeFile: writeFileMock,
+}));
 
 import { BackgroundJobStatus, Role } from '../../../generated/prisma/enums';
 import {
@@ -32,6 +39,8 @@ beforeEach(() => {
   dbMock.backgroundJob.findUnique.mockReset();
   enqueueBackgroundJobMock.mockReset();
   getOrderForPrintMock.mockReset();
+  renderMock.mockReset().mockResolvedValue(Buffer.from('pdf'));
+  writeFileMock.mockReset();
   dbMock.user.findUnique.mockResolvedValue({ role: Role.ADMIN, isActive: true });
 });
 
@@ -195,5 +204,32 @@ describe('durable order PDF jobs', () => {
         },
       } as never),
     ).rejects.toBeInstanceOf(OrderPdfVersionStaleError);
+  });
+
+  it.each([
+    [null, 'OrderPdfNotFoundError'],
+    [{ workOrderVersion: 4 }, 'OrderPdfVersionStaleError'],
+  ])('生成期间撤权或升版时不写入 PDF 产物 (%j)', async (current, errorName) => {
+    getOrderForPrintMock.mockResolvedValueOnce({ id: 'order-1', orderNo: 'GD-1', workOrderVersion: 3 })
+      .mockResolvedValueOnce(current);
+    await expect(handleOrderPdfJob({
+      id: 'job-1', attempts: 1,
+      payload: { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'user-1', role: Role.ADMIN }, baseUrl: 'https://erp.example.com' },
+    } as never)).rejects.toMatchObject({ name: errorName });
+    expect(renderMock).toHaveBeenCalledOnce();
+    expect(getOrderForPrintMock).toHaveBeenCalledTimes(2);
+    expect(writeFileMock).not.toHaveBeenCalled();
+  });
+
+  it('当前权限与版本复核通过后才写入并返回 PDF', async () => {
+    dbMock.user.findUnique.mockResolvedValue({ role: Role.WORKER, isActive: true });
+    getOrderForPrintMock.mockResolvedValue({ id: 'order-1', orderNo: 'GD-1', workOrderVersion: 3 });
+    await expect(handleOrderPdfJob({
+      id: 'job-1', attempts: 1,
+      payload: { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'user-1', role: Role.WORKER }, baseUrl: 'https://erp.example.com' },
+    } as never)).resolves.toEqual({ artifactName: 'job-1-1.pdf', byteLength: 3, orderNo: 'GD-1', workOrderVersion: 3 });
+    expect(getOrderForPrintMock).toHaveBeenCalledTimes(2);
+    expect(getOrderForPrintMock).toHaveBeenLastCalledWith('order-1', { id: 'user-1', role: Role.WORKER }, 'https://erp.example.com');
+    expect(writeFileMock).toHaveBeenCalledOnce();
   });
 });

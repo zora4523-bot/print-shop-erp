@@ -14,7 +14,6 @@ export { E2E_PASSWORD, E2E_USERS };
 // Prisma client cleanly.
 
 import { randomBytes } from 'node:crypto';
-import bcrypt from 'bcryptjs';
 import { Client } from 'pg';
 import { isolateE2eLoginClient } from './_login-client';
 
@@ -44,31 +43,55 @@ async function withFixtureTransaction<T>(fn: (db: Client) => Promise<T>): Promis
   });
 }
 
+// Deterministic print fixtures never record production. Refuse to reuse one
+// after it acquired real history; report/claim/revision rows are never deleted.
+async function deletePrintableOrderFixture(db: Client, orderId: string): Promise<void> {
+  if (
+    process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1' ||
+    !/^e2e-vr-(?:[0-9]+|rich-[0-9]+|three-items-[0-9]+|task-qr-[0-9]+-[0-9]+|large-items-[0-9]+-[0-9]+(?:-stress|-dense|-art-annex)?)-v2$/.test(orderId)
+  ) {
+    throw new Error('只允许重建独立数据库中的打印夹具');
+  }
+  const history = await db.query<{ hasHistory: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM "ProductionReport" report
+       JOIN "ProductionOperation" operation ON operation.id = report."operationId"
+       WHERE operation."orderId" = $1
+       UNION ALL
+       SELECT 1 FROM "ProductionProgressReport" report
+       JOIN "ProductionProgressStep" step ON step.id = report."progressStepId"
+       WHERE step."orderId" = $1
+       UNION ALL
+       SELECT 1 FROM "ProductionScanClaim" WHERE "orderId" = $1
+       UNION ALL
+       SELECT 1 FROM "OrderPricingRevision" WHERE "orderId" = $1
+     ) AS "hasHistory"`,
+    [orderId],
+  );
+  if (history.rows[0]!.hasHistory) {
+    throw new Error('打印夹具已产生业务历史，请使用新的独立测试数据库');
+  }
+  await db.query(
+    `DELETE FROM "ProductionOperationSource" WHERE "operationId" IN (
+       SELECT id FROM "ProductionOperation" WHERE "orderId" = $1
+     )`,
+    [orderId],
+  );
+  await db.query('DELETE FROM "ProductionOperation" WHERE "orderId" = $1', [orderId]);
+  await db.query('DELETE FROM "ProductionProgressStep" WHERE "orderId" = $1', [orderId]);
+  await db.query('DELETE FROM "Order" WHERE id = $1', [orderId]);
+}
+
 export async function cleanupPrintableOrderStressFixture(): Promise<void> {
-  await withDb(async (db) => {
-    await db.query('BEGIN');
-    try {
-      // The stress order owns the ProductionTask rows. Delete it first so the
-      // task cascade releases the dedicated worker and craft foreign keys.
-      await db.query(
-        `DELETE FROM "Order"
-          WHERE id ~ '^e2e-vr-large-items-[0-9]+-[0-9]+-stress-v2$'`,
-      );
-      await db.query(
-        `DELETE FROM "User"
-          WHERE id ~ '^e2e-vr-print-long-worker-[0-9]{2}$'
-            AND username = id`,
-      );
-      await db.query(
-        `DELETE FROM "Craft"
-          WHERE id = 'e2e-vr-print-long-team-craft'
-            AND code = 'E2E_PRINT_LONG_TEAM'`,
-      );
-      await db.query('COMMIT');
-    } catch (error) {
-      await db.query('ROLLBACK');
-      throw error;
-    }
+  if (process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1') {
+    throw new Error('打印夹具清理须使用独立测试数据库');
+  }
+  await withFixtureTransaction(async (db) => {
+    const orders = await db.query<{ id: string }>(
+      `SELECT id FROM "Order"
+       WHERE id ~ '^e2e-vr-large-items-[0-9]+-[0-9]+-stress-v2$'`,
+    );
+    for (const order of orders.rows) await deletePrintableOrderFixture(db, order.id);
   });
 }
 
@@ -488,6 +511,9 @@ export async function seedPrintableOrder(opts: {
   itemRemark: string | null;
   foilColors: string[];
 }> {
+  if (process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1') {
+    throw new Error('打印夹具须使用独立测试数据库');
+  }
   const variant = opts.variant ?? 'default';
   const richContext =
     variant === 'rich-context' || variant === 'three-items';
@@ -521,8 +547,9 @@ export async function seedPrintableOrder(opts: {
     );
   }
   const taskCount = variant === 'task-qr' ? opts.taskCount ?? 1 : 0;
+  // Simulate a historical over-limit name; current input is capped at 100.
   const customName = stressText
-    ? '单'.repeat(100)
+    ? '单'.repeat(200)
     : richContext
       ? '视觉回归自定义工单名称：春节红包VIP客户加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789第二版终稿'
       : null;
@@ -534,10 +561,10 @@ export async function seedPrintableOrder(opts: {
     : ['金色'];
 
   // Deterministic per (variant, designCount). Existing default IDs stay
-  // unchanged so the original six bucket baselines do not churn. The
-  // same ID across runs also keeps the QR SVG and screenshot bytes stable.
-  // CASCADE FKs on Order → OrderItem and OrderItem → OrderItemDesign
-  // clean up children automatically.
+  // unchanged so fixture identifiers do not create unrelated QR differences.
+  // The same ID across runs keeps QR SVG and screenshot bytes stable.
+  // Only no-history print fixtures can be replaced. Production facts use
+  // restrictive foreign keys and are removed explicitly in the transaction.
   const largeFixtureSuffix = stressText
     ? '-stress'
     : denseBoundary
@@ -570,8 +597,8 @@ export async function seedPrintableOrder(opts: {
             : `E2E-VR2-${opts.designCount}`;
   const orderItemId = `${orderId}-item`;
 
-  await withDb(async (db) => {
-    await db.query(`DELETE FROM "Order" WHERE id = $1`, [orderId]);
+  await withFixtureTransaction(async (db) => {
+    await deletePrintableOrderFixture(db, orderId);
 
     await db.query(
       `
@@ -583,7 +610,7 @@ export async function seedPrintableOrder(opts: {
         "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
         $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType", $3,
-        'DRAFT'::"OrderStatus", FALSE,
+        'RELEASED'::"OrderStatus", FALSE,
         $10,
         $4,
         'VR 收件人',
@@ -730,94 +757,6 @@ export async function seedPrintableOrder(opts: {
       }
     }
 
-    if (variant === 'large-items' && stressText) {
-      const craftId = 'e2e-vr-print-long-team-craft';
-      const firstOrderItemId =
-        itemCount === 1 ? orderItemId : `${orderItemId}-1`;
-      const workerPasswordHash = await bcrypt.hash(E2E_PASSWORD, 10);
-      const workers = Array.from({ length: 50 }, (_, index) => {
-        const sequence = String(index + 1).padStart(2, '0');
-        return {
-          id: `e2e-vr-print-long-worker-${sequence}`,
-          username: `e2e-vr-print-long-worker-${sequence}`,
-          displayName: `师傅${sequence}${'长'.repeat(60)}`,
-        };
-      });
-
-      await db.query(
-        `
-        INSERT INTO "Craft" (
-          id, name, code, "isOutsource", "sortOrder", "isActive",
-          "createdAt", "updatedAt"
-        ) VALUES (
-          $1, 'E2E 专版烫金', 'E2E_PRINT_LONG_TEAM', FALSE, 9998, TRUE,
-          TIMESTAMP '2026-01-01 00:00:00',
-          TIMESTAMP '2026-01-01 00:00:00'
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          code = EXCLUDED.code,
-          "isActive" = TRUE,
-          "updatedAt" = EXCLUDED."updatedAt"
-        `,
-        [craftId],
-      );
-
-      for (const worker of workers) {
-        await db.query(
-          `
-          INSERT INTO "User" (
-            id, username, password, role, "workerType", "employmentType", "displayName",
-            "isActive", "createdAt", "updatedAt"
-          ) VALUES (
-            $1, $2, $4, 'WORKER'::"Role",
-            'PACKER'::"WorkerType", 'TEMPORARY'::"EmploymentType", $3, TRUE,
-            TIMESTAMP '2026-01-01 00:00:00',
-            TIMESTAMP '2026-01-01 00:00:00'
-          )
-          ON CONFLICT (id) DO UPDATE SET
-            username = EXCLUDED.username,
-            password = EXCLUDED.password,
-            role = EXCLUDED.role,
-            "workerType" = EXCLUDED."workerType",
-            "employmentType" = EXCLUDED."employmentType",
-            "displayName" = EXCLUDED."displayName",
-            "isActive" = TRUE,
-            "updatedAt" = EXCLUDED."updatedAt"
-          `,
-          [
-            worker.id,
-            worker.username,
-            worker.displayName,
-            workerPasswordHash,
-          ],
-        );
-      }
-
-      for (const [index, worker] of workers.entries()) {
-        const sequence = String(index + 1).padStart(2, '0');
-        await db.query(
-          `
-          INSERT INTO "ProductionTask" (
-            id, "orderItemId", "craftId", "workerId", "workerType", status,
-            "plannedQty", "createdAt", "updatedAt"
-          ) VALUES (
-            $1, $2, $3, $4, 'PACKER'::"WorkerType",
-            'PENDING'::"TaskStatus", 100,
-            TIMESTAMP '2026-01-01 00:00:00',
-            TIMESTAMP '2026-01-01 00:00:00'
-          )
-          `,
-          [
-            `${orderId}-task-${sequence}`,
-            firstOrderItemId,
-            craftId,
-            worker.id,
-          ],
-        );
-      }
-    }
-
     if (variant === 'three-items') {
       const primaryShipmentId = `${orderId}-shipment-1`;
       const secondaryShipmentId = `${orderId}-shipment-2`;
@@ -858,7 +797,6 @@ export async function seedPrintableOrder(opts: {
     }
 
     if (variant === 'task-qr') {
-      const craftId = 'e2e-vr-print-task-craft';
       await db.query(
         `
         UPDATE "OrderItem"
@@ -877,40 +815,50 @@ export async function seedPrintableOrder(opts: {
         `,
         [orderItemId],
       );
-      await db.query(
-        `
-        INSERT INTO "Craft" (
-          id, name, code, "isOutsource", "sortOrder", "isActive",
-          "createdAt", "updatedAt"
-        ) VALUES (
-          $1, 'E2E 局部烫金', 'E2E_PRINT_TASK_QR', FALSE, 9999, TRUE,
-          NOW(), NOW()
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          code = EXCLUDED.code,
-          "isActive" = TRUE,
-          "updatedAt" = NOW()
-        `,
-        [craftId],
-      );
-      for (let taskIndex = 0; taskIndex < taskCount; taskIndex++) {
+    }
+
+    for (let itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+      const currentOrderItemId =
+        itemCount === 1 ? orderItemId : `${orderItemId}-${itemIndex + 1}`;
+      const quantity = 5000 + itemIndex * 1000;
+      const isStressFirstItem = stressText && itemIndex === 0;
+      if (!isStressFirstItem) {
+        const operationId = `${orderId}-operation-${itemIndex + 1}`;
+        const isPartial = variant === 'task-qr';
+        // PARTIAL counts passes: the task-qr item has two foil colors but
+        // the printed work-order quantity must remain 5,000 individual items.
         await db.query(
-          `
-          INSERT INTO "ProductionTask" (
-            id, "orderItemId", "craftId", "workerId", status,
-            "plannedQty", "createdAt", "updatedAt"
-          ) VALUES (
-            $1, $2, $3, $4, 'PENDING'::"TaskStatus", 5000,
-            TIMESTAMP '2026-01-01 00:00:00',
-            TIMESTAMP '2026-01-01 00:00:00'
-          )
-          `,
+          `INSERT INTO "ProductionOperation" (
+             id, "orderId", "workOrderVersion", "operationType", unit,
+             status, "plannedQty", "createdAt", "updatedAt"
+           ) VALUES (
+             $1, $2, 1, $3::"PieceworkOperationType", $4::"PieceworkRateUnit",
+             'PENDING', $5, TIMESTAMP '2026-01-01 00:00:00', TIMESTAMP '2026-01-01 00:00:00'
+           )`,
+          [operationId, orderId, isPartial ? 'PARTIAL' : 'FULL', isPartial ? 'PER_PASS' : 'PER_PIECE', quantity * (isPartial ? 2 : 1)],
+        );
+        await db.query(
+          `INSERT INTO "ProductionOperationSource" (
+             id, "operationId", "sourceType", "orderItemId", "sourceQty", "createdAt"
+           ) VALUES ($1, $2, 'ORDER_ITEM', $3, $4, TIMESTAMP '2026-01-01 00:00:00')`,
+          [`${operationId}-source`, operationId, currentOrderItemId, quantity * (isPartial ? 2 : 1)],
+        );
+      }
+      const progressCount = isStressFirstItem ? 50 : variant === 'task-qr' ? taskCount - 1 : 0;
+      for (let progressIndex = 0; progressIndex < progressCount; progressIndex++) {
+        const sequence = String(progressIndex + 1).padStart(2, '0');
+        await db.query(
+          `INSERT INTO "ProductionProgressStep" (
+             id, "orderId", "workOrderVersion", "orderItemId", "craftId",
+             "craftCode", "craftName", status, "plannedQty", "createdAt", "updatedAt"
+           ) VALUES (
+             $1, $2, 1, $3, $4, $5, $6, 'PENDING', $7,
+             TIMESTAMP '2026-01-01 00:00:00', TIMESTAMP '2026-01-01 00:00:00'
+           )`,
           [
-            `${orderId}-task-${taskIndex + 1}`,
-            orderItemId,
-            craftId,
-            opts.submitterId,
+            `${currentOrderItemId}-progress-${sequence}`, orderId, currentOrderItemId,
+            `e2e-vr-print-progress-${sequence}`, `E2E_PRINT_PROGRESS_${sequence}`,
+            isStressFirstItem ? `工序${sequence}${'长'.repeat(60)}` : `印后工序 ${sequence}`, quantity,
           ],
         );
       }
