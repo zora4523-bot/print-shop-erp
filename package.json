@@ -37,7 +37,7 @@
     "lint:ui": "node scripts/ui-copy/check.mjs && node scripts/ui-tokens/check.mjs",
     "lint:ui:baseline": "node scripts/ui-tokens/check.mjs --write-baseline",
     "test:e2e:preflight": "tsx scripts/e2e-preflight.ts",
-    "test:e2e:prepare": "tsx scripts/prepare-e2e-piecework.ts",
+    "test:e2e:prepare": "tsx scripts/prepare-e2e-catalog.ts && tsx scripts/prepare-e2e-piecework.ts",
     "test:compat": "playwright test --config=playwright.compat.config.ts",
     "test:release": "playwright test --config=playwright.release.config.ts",
     "test:release:dev-fixtures": "playwright test --config=playwright.dev-fixtures.config.ts",

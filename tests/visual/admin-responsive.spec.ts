@@ -90,6 +90,15 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'light');
   });
 
+  test('attendance filters and settings fit all viewports in both themes', async ({ page }, testInfo) => {
+    const routes = ownerRoutes(fixture).filter((route) =>
+      route.name === 'attendance' || route.name === 'settings',
+    );
+    expect(routes).toHaveLength(2);
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
   test('critical routes pass the same gates with dark tokens', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'dark');
   });
