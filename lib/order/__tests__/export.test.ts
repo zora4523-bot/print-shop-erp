@@ -90,7 +90,7 @@ vi.mock('@/lib/order/export-artifact', () => ({
   openOrderExportArtifact: openArtifactMock,
   orderExportArtifactPath: vi.fn((name: string) => `/tmp/${name}`),
 }));
-vi.mock('@/lib/order/admin-workspace', () => ({
+vi.mock('@/lib/order/admin-workspace-filters', () => ({
   resolveAdminWorkspaceResultWhere: resolveAdminWorkspaceResultWhereMock,
 }));
 

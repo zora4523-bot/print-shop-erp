@@ -110,6 +110,7 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
           />
           <Tooltip
             isAnimationActive={false}
+            itemStyle={{ color: 'var(--popover-foreground)' }}
             contentStyle={{
               fontSize: 12,
               backgroundColor: 'var(--popover)',

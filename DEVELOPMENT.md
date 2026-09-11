@@ -2,7 +2,7 @@
 status: maintained
 owner: project-maintainers
 last_verified: 2026-08-24
-sections_verified: 2026-09-10
+sections_verified: 2026-09-11
 applies_to: repository development workflow
 verification_scope: scripts, CI and test configuration sections at sections_verified
 ---
@@ -43,7 +43,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-打开 <http://localhost:3000>。同一工作区只运行一个开发服务器；Playwright 默认会复用已经监听 `E2E_BASE_URL` 的实例。
+打开 <http://localhost:3000>。同一工作区只运行一个开发服务器；Playwright 使用独立端口且不复用已有实例。
 
 ### 补齐工作台演示工单
 
@@ -84,8 +84,8 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 ## 常用命令
 
 运行下表中会写入数据库的 Playwright 检查前，必须设置指向独立可丢弃库的 `E2E_DATABASE_URL`，
-并确认它与日常 `DATABASE_URL` 目标不同。裸命令不会自动提供隔离，可能写入日常库；
-报工/发布验收不得使用这种缺省状态。完整迁移、工价和服务模式前置见 [测试环境约束](#测试环境约束)。
+并设置匹配库名的 `E2E_DATABASE_CONFIRM_DATABASE`。预检拒绝缺失确认、生产式库名、
+与日常 `DATABASE_URL` 相同的目标及不受控服务地址；在启动服务或首次连接前失败。完整迁移、工价和服务模式前置见 [测试环境约束](#测试环境约束)。
 
 | 目的 | 命令 |
 |---|---|
@@ -98,6 +98,11 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 | 目标 Vitest | `pnpm test --run <path>` |
 | 全量 Vitest | `pnpm test --run` |
 | 全量单测与覆盖率 | `pnpm exec vitest run --coverage` |
+| E2E 隔离预检（只读） | `pnpm test:e2e:preflight` |
+| 发布非生产测试工价（仅隔离库） | `pnpm test:e2e:prepare` |
+| 发布构建、业务与视觉门禁 | `pnpm test:release` |
+| 持久任务排队/重试/下载门禁 | `pnpm test:release:durable` |
+| 开发专用价格视觉 fixture | `pnpm test:release:dev-fixtures` |
 | 浏览器组件（独立 Vitest 配置） | `pnpm test:browser` |
 | Playwright 全套（先满足隔离前置；现行配置启动 `next dev`） | `pnpm test:e2e` |
 | 业务 E2E 与无 JS 路径 | `pnpm exec playwright test tests/e2e --project=chromium --project=no-js` |
@@ -122,23 +127,27 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 ## 当前 CI 与发布验证缺口
 
-截至本次核对，[Quality 工作流](./.github/workflows/quality.yml) 实际执行：冻结锁文件安装、Prisma generate/validate、完整 fresh 迁移链、架构检查、完整 lint、typecheck、死代码证据、隔离库 migrate/seed、业务数据审计、全量 Vitest 覆盖率和生产构建。
+[Quality 工作流](./.github/workflows/quality.yml) 的 Linux `verify` 配置执行冻结安装、依赖安全审计、Prisma generate/validate、完整 fresh 迁移链、架构/完整 lint/typecheck、死代码证据、业务数据审计、全量单测与覆盖率、浏览器组件、生产构建业务及六视口，以及真实 durable worker 排队/重试/授权下载。开发专用价格 fixture 单独运行。
 
-CI 当前仅用 `playwright test --list` 编译用例清单，**没有执行**浏览器组件、业务 E2E、打印和六视口检查，也没有依赖安全审计或部署 smoke。当前上传的仅是死代码证据。CI 绿灯不能据此签署发布验收；补齐执行、环境与报告的任务为 [REL-04](./docs/release-remediation-2026-09-10.md#rel-04-把发布浏览器与安全门禁接入-ci)。任务已规划不等于门禁已上线。
+现有打印像素基线仅有 Darwin 版，独立 `print-darwin` 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。两个任务均在失败后上传明确的审计、JSON、覆盖率、截图和 trace 路径，启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。
+
+这描述的是仓库配置，本次尚未推送或运行远端 CI。2026-09-11 只读查询显示 main 的 `protected=false`；保护与规则集接口返回 403，提示当前私有仓库套餐限制，因此 required checks 尚未强制执行。工作流语法通过不能替代远端通过与分支保护验收。真实通知、生产 worker、生产存量与部署 smoke 仍须按 REL-07 独立留证。认证配置的 `skipProxyUrlNormalize` 用于保留 Next 16.3 预取标头；修改时必须重跑登出晚响应竞态与公共/受保护路径回归。当前本地实测与未通过项见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
 
 发布验证必须记录冻结候选 SHA、命令、运行模式、数据库隔离方式、通过/失败/跳过数量、跳过原因与证据。所需验证层级及放行标准只在 [贡献指南](./CONTRIBUTING.md#测试要求) 维护；本次历史实测在 [2026-09-10 审查](./docs/audits/2026-09-10-release-readiness.md)，不能沿用为后续候选的通过记录。
 
 ## 测试环境约束
 
 - Vitest 的 Node 配置排除 `tests/e2e`、`tests/visual`、`.next` 和 `generated`；浏览器组件由 `vitest.browser.config.ts` 单独执行。
-- Playwright 默认 `baseURL` 是 `http://localhost:3000`，可用 `E2E_BASE_URL` 覆盖。
-- 指定与日常库不同的 `E2E_DATABASE_URL` 时，默认端口改为 `3100`，测试服务和 worker 使用同一隔离库，且不复用日常开发服务器。配置会保存不含凭据的原数据库目标，确保 worker 重新加载配置时不会退回 `3000`；不要手工设置内部的 `E2E_ORIGINAL_DATABASE_TARGET` 标记。
-- Playwright 当前会写入所配置的数据库，未显式隔离时仍可使用日常开发库。发布验证必须显式使用可丢弃隔离库；全量 Vitest 的 PostgreSQL 测试也只对专用测试库运行。禁止把这些测试指向生产，不能以 fixture 名称唯一代替数据库隔离。
+- 开发 Playwright 固定默认 `http://127.0.0.1:3100`，发布配置默认 `http://127.0.0.1:3200`。`E2E_BASE_URL` 只接受本机独立端口，拒绝 3000、远程地址和带路径/query 的地址；所有模式 `reuseExistingServer=false`。
+- `E2E_DATABASE_URL` 与匹配库名的 `E2E_DATABASE_CONFIRM_DATABASE` 必填。库名须含独立 `test` / `e2e` / `ci` 分段且不含 `prod` / `production` / `live`；数据库名称必须与日常 `DATABASE_URL` 不同，即使主机不同也拒绝同名，避免 DNS 别名绕过隔离。主机百分号解码、大小写与末尾点规范化后比较，localhost、127.0.0.1、::1 视为同一主机。原目标标记只在已激活的 Playwright 子进程重载中保留；普通启动重新读取当前 URL。不要设置内部标记或 URL query 来替换主机/库名。`--list` 只收集，不连接；实际执行在 webServer/globalSetup 双重预检。
+- 全量 Vitest 的 PostgreSQL 测试也只对专用测试库运行，不能用 fixture 名称唯一代替隔离。
+- 先 migrate/seed 隔离库，再执行 `test:e2e:prepare`。测试进程同时提供 `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`（或明确 E2E_ADMIN 覆盖）；只设置数据库不能完成登录前置。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
-- 报工会产生不可删除的历史记录，必须使用隔离库及已发布、已经生效且覆盖所需操作类型的测试工价。仓库 `config/piecework-price-books/v1.json` 是待填写模板，seed 不代表已经发布工价；测试工价须明确标注非生产并通过正式发布服务建立。缺隔离库或有效工价导致的报工 skip 属于发布前置未满足，不能记作报工已验收。重复运行时保留既有报工，按已有累计量断言；合格量与工单件数进度分别填写。打印基线所用提交人名称也须与固定 fixture 一致。
+- 报工会产生不可删除的历史记录，必须使用隔离库及已发布、已经生效且覆盖所需操作类型的测试工价。仓库 `config/piecework-price-books/v1.json` 是待填写模板，seed 不代表已经发布工价；测试工价须明确标注非生产并通过正式发布服务建立。执行 `pnpm test:e2e:prepare` 通过正式服务发布并等待生效，工价清楚标记 E2E ONLY，重复准备幂等。发布配置缺少这些前置直接失败，不能以 skip 验收。重复运行时保留既有报工，按已有累计量断言；合格量与工单件数进度分别填写。打印基线所用提交人名称也须与固定 fixture 一致。
 - 同一工作树内，先完成全量单测，再启动 E2E 开发服务器；避免路由/配置回归测试的临时文件被 Next 文件监听器读入。发生测试期间路由缓存异常时，停止该隔离服务器并重建它的 `.next`，不要清理日常工作区或重置数据库。
-- `tests/e2e/owner-notifications.spec.ts` 仅在本地可丢弃库（库名 `notif_ui_e2e_*`，通过 `E2E_DATABASE_URL` 指定）且 `NOTIFICATION_MOCK_MODE=true` 时运行。先对该独立库应用完整迁移，使用占位 Bot ID/Secret；绑定回调由 fixture 模拟，不连接真实企业微信。测试命令为 `pnpm exec playwright test tests/e2e/owner-notifications.spec.ts --project=chromium`。已有开发服务器运行时，使用独立源码快照及端口，避免共用 `.next` 开发锁；不要为跑测试重置日常开发库。
-- 默认 `playwright.config.ts` 的 webServer 是 `pnpm run dev --port …`；执行 `pnpm build` 不会把该配置自动切换为 `next start`，非隔离模式还可能复用已有实例。生产构建 E2E 必须用明确启动同一候选构建产物的配置，固定 `next start`、端口、数据库和 mock 环境并保存配置证据。仓库尚未提供统一的发布 Playwright 配置，该配置及 CI 接入属于 REL-04，不能引用临时审查配置为仓库现成功能。
+- `tests/e2e/owner-notifications.spec.ts` 复用上述隔离预检且要求 `NOTIFICATION_MOCK_MODE=true`；绑定回调由 fixture 模拟，不连接真实企业微信。标准开发及发布 Playwright 配置为隔离服务设置测试 AUTH/CRON secret、mock 通知/CDR、inline jobs，不代表生产基础设施通过。
+- 默认 `playwright.config.ts` 仍用于 `next dev`。`playwright.release.config.ts` 明确执行 `prisma generate → next build → next start`，产物为 `.next-release`、使用 `tsconfig.release.json`，不复用开发服务。`playwright.dev-fixtures.config.ts` 仅执行开发专用价格 fixture，生产组明确排除该组。
+- `playwright.durable.config.ts` 使用 `BACKGROUND_JOBS_MODE=durable`、独立 `.next-durable` 产物和 `tsconfig.durable.json`；默认端口 3300，可用 `E2E_DURABLE_BASE_URL` 指定受同一预检约束的地址。该组由用例启动真实 HEAVY worker，验证持久队列、失败重试和下载；通知及 CDR 仍为 mock，不代表真实外部服务通过。
 - 同一工作目录不要同时运行 `next dev` 与 `next build`，也不要让生产测试复用未知开发实例。先停止开发服务再构建、启动，或使用独立工作目录及产物目录；切换模式后重新确认进程、端口和候选 SHA。
 - `test:admin-ui` 与 `test:worker-ui` 分别覆盖六个视口、明暗主题、overflow/touch/axe 等契约。
 - 只有打印规格保存了像素截图基线。管理端和师傅端门禁不是设计稿像素 diff，不能据此声称全站逐页还原。

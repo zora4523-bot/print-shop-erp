@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
   MaterialCategory,
@@ -436,6 +437,8 @@ export async function setMaterialActive(
 }
 
 export type CreateMaterialTransactionData = {
+  idempotencyKey?: string;
+  requestFingerprint?: string;
   materialId: string;
   locationId?: string | null;
   direction: TxDirection;
@@ -620,6 +623,8 @@ export async function applyMaterialStockMovement(
     }),
     txClient.materialTransaction.create({
       data: {
+        idempotencyKey: data.idempotencyKey,
+        requestFingerprint: data.requestFingerprint,
         materialId: data.materialId,
         warehouseId: location.warehouseId,
         locationId: location.locationId,
@@ -661,12 +666,46 @@ export async function applyMaterialStockMovement(
   return { material, transaction, stockAlert };
 }
 
+function manualMaterialRequestFingerprint(data: CreateMaterialTransactionData): string {
+  return createHash('sha256').update(JSON.stringify({
+    materialId: data.materialId,
+    locationId: data.locationId ?? null,
+    direction: data.direction,
+    quantity: new Decimal(data.quantity).toFixed(2),
+    reasonType: data.reasonType,
+    unitCost: data.unitCost == null ? null : new Decimal(data.unitCost).toFixed(4),
+    remark: data.remark,
+    operatorId: data.operatorId,
+    purchaseReceiptItemId: data.purchaseReceiptItemId ?? null,
+    stockTransferId: data.stockTransferId ?? null,
+    inventoryCountItemId: data.inventoryCountItemId ?? null,
+  })).digest('hex');
+}
+
 export async function createMaterialTransaction(
-  data: CreateMaterialTransactionData,
+  data: CreateMaterialTransactionData & { idempotencyKey: string },
 ): Promise<MaterialStockMovementResult> {
+  const idempotencyKey = data.idempotencyKey?.trim();
+  if (!idempotencyKey || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+    throw new MaterialInvariantError('出入库请求无效，请刷新页面后重试');
+  }
+  const requestFingerprint = manualMaterialRequestFingerprint(data);
   let notificationQueued = false;
   const result = await db.$transaction(async (tx) => {
-    const movement = await applyMaterialStockMovement(tx, data);
+    // Lock the request before the material, so concurrent delivery of one
+    // command can only observe and return the first committed ledger entry.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:manual-stock:${idempotencyKey}`}))`;
+    const existing = await tx.materialTransaction.findUnique({
+      where: { idempotencyKey },
+      include: { material: { select: MATERIAL_SELECT } },
+    });
+    if (existing) {
+      if (existing.requestFingerprint !== requestFingerprint) {
+        throw new MaterialInvariantError('出入库请求与原记录不一致，请刷新页面后重新核对');
+      }
+      return { material: existing.material, transaction: existing, stockAlert: null };
+    }
+    const movement = await applyMaterialStockMovement(tx, { ...data, idempotencyKey, requestFingerprint });
     if (movement.stockAlert) {
       notificationQueued = await enqueueNotificationInTransaction(
         tx as unknown as EnqueueClient,

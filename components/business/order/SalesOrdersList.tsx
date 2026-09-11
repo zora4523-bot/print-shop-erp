@@ -251,7 +251,7 @@ function SalesOrderCard({
             type="button"
             variant="link"
             onClick={onOpen}
-            className="admin-wrap-anywhere h-auto min-w-0 justify-start whitespace-normal p-0 text-left text-sm font-semibold sm:text-base"
+            className="admin-wrap-anywhere h-auto min-w-0 max-w-full justify-start whitespace-normal p-0 text-left text-sm font-semibold sm:text-base"
           >
             {order.customName ?? '未命名工单'}
           </Button>
@@ -532,7 +532,12 @@ function SalesOrderDrawer({
         </SheetDescription>
       </SheetHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-4 admin-safe-inline">
+      <div
+        role="region"
+        aria-label="工单明细内容"
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-y-auto py-4 admin-safe-inline outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
         <DrawerSection title="进度">
           <OrderProgress order={order} />
           {order.pricingAttentionReason ? (

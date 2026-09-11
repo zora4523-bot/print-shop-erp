@@ -1,6 +1,6 @@
 'use client';
 
-import { unstable_catchError as catchError, type ErrorInfo } from 'next/error';
+import { catchError, type ErrorInfo } from 'next/error';
 import { ErrorState } from '@/components/ui-business';
 
 type PriceDataBoundaryFallbackProps = {
@@ -15,7 +15,7 @@ export type PriceDataBoundaryProps = PriceDataBoundaryFallbackProps & {
 
 function PriceDataBoundaryFallback(
   props: PriceDataBoundaryFallbackProps,
-  { unstable_retry }: ErrorInfo,
+  { retry }: ErrorInfo,
 ) {
   return (
     <div className="min-w-0 space-y-4">
@@ -23,7 +23,7 @@ function PriceDataBoundaryFallback(
         scope="section"
         title={props.title}
         description={props.description}
-        onRetry={unstable_retry}
+        onRetry={retry}
       />
       {props.preservedContent}
     </div>

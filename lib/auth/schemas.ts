@@ -724,6 +724,7 @@ export type UpdateMaterialInput = z.infer<typeof updateMaterialSchema>;
 
 export const materialStockTransactionSchema = z
   .object({
+    idempotencyKey: z.string().trim().uuid('出入库请求无效，请刷新页面后重试'),
     materialId: z.string().trim().min(1, '物料 id 不能为空'),
     locationId: z
       .string()

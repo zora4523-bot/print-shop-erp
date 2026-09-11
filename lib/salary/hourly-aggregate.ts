@@ -788,6 +788,7 @@ export async function markHourlyPayrollPaid(
       select: {
         workerId: true,
         month: true,
+        isPaid: true,
         salaryRuleSnapshot: true,
         worker: { select: { displayName: true } },
       },
@@ -814,6 +815,11 @@ export async function markHourlyPayrollPaid(
       throw new HourlyAggregateError(
         `不能将当前或未来月份的月结标记为已发（${row.month}，上海日历）；请等该月结束后再发放`,
       );
+    }
+    // A lost response or a lock waiter may repeat the same transition. Keep
+    // the first payment timestamp and derivative snapshot untouched on replay.
+    if (row.isPaid === isPaid) {
+      return { id, isPaid: row.isPaid, workerName: row.worker.displayName };
     }
     const updated = await tx.hourlyWorkerPayroll.update({
       where: { id },

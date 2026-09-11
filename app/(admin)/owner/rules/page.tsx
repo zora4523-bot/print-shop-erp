@@ -100,7 +100,7 @@ export default async function RuleCenterPage() {
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block font-medium">{item.label}</span>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
                         {item.impact}
                       </span>
                     </span>

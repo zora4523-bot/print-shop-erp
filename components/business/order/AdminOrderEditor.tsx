@@ -204,6 +204,7 @@ export function AdminOrderEditor(props: Props) {
     serverReady,
   );
   const [pending, startTransition] = useTransition();
+  const saveInFlightRef = useRef(false);
   const [review, setReview] = useState<AdminOrderEditPreview | null>(null);
   const [payload, setPayload] = useState<AdminOrderEditInput | null>(null);
   const [error, setError] = useState('');
@@ -280,7 +281,9 @@ export function AdminOrderEditor(props: Props) {
     });
   }
   function save() {
-    if (!payload || !review || !chargesMatchPreview) return;
+    if (saveInFlightRef.current || !payload || !review || !chargesMatchPreview) return;
+    // The confirmation's close event can run before pending has rendered.
+    saveInFlightRef.current = true;
     startTransition(async () => {
       try {
         const result = await saveAdminOrderEditAction({
@@ -301,6 +304,8 @@ export function AdminOrderEditor(props: Props) {
       } catch {
         setError('保存结果未确认，请刷新核对工单后再操作。');
         setReview(null);
+      } finally {
+        saveInFlightRef.current = false;
       }
     });
   }
@@ -316,7 +321,7 @@ export function AdminOrderEditor(props: Props) {
   }, [locked]);
   return (
     <div
-      className={`mx-auto min-w-0 max-w-[880px] space-y-3 pb-8 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:shadow-none [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11`}
+      className={`admin-wrap-anywhere mx-auto min-w-0 max-w-[880px] space-y-3 pb-8 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:shadow-none [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11`}
     >
       <EditorActionsSection {...{
         pending, fileBusy, auxiliary, destinationRef,
@@ -423,7 +428,7 @@ export function AdminOrderEditor(props: Props) {
         </section>
       </OrderEditorAuxiliaryContext.Provider>
       <EditorConfirmationSection {...{
-        confirmOpen, pending, setReview, saveButtonRef,
+        confirmOpen, pending, saveInFlightRef, setReview, saveButtonRef,
         save, differences, review, props,
       }} />
       <EditorFilesSection {...{
@@ -476,6 +481,7 @@ export function AdminOrderEditor(props: Props) {
 type RenderEditorConfirmationOptions = {
   confirmOpen: boolean;
   pending: boolean;
+  saveInFlightRef: React.RefObject<boolean>;
   setReview: React.Dispatch<React.SetStateAction<AdminOrderEditPreview | null>>;
   saveButtonRef: React.RefObject<HTMLButtonElement | null>;
   save: () => void;
@@ -487,6 +493,7 @@ type RenderEditorConfirmationOptions = {
 function EditorConfirmationSection({
   confirmOpen,
   pending,
+  saveInFlightRef,
   setReview,
   saveButtonRef,
   save,
@@ -499,7 +506,7 @@ function EditorConfirmationSection({
       level="L2"
       open={confirmOpen}
       onOpenChange={(open) => {
-        if (!open && !pending) setReview(null);
+        if (!open && !pending && !saveInFlightRef.current) setReview(null);
       }}
       focusReturnRef={saveButtonRef}
       cancelLabel="再改改"

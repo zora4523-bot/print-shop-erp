@@ -184,7 +184,7 @@ describe('admin order batch review', () => {
     expect(batchAction.mock.calls[0][0]).not.toHaveProperty('reason');
     resolve(partialResult());
     await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
-    assertConsistentSummary('成功 1 张，业务跳过 1 张，结果未知 1 张，未执行 1 张，未纳入处理 1 张');
+    await assertConsistentSummary('成功 1 张，业务跳过 1 张，结果未知 1 张，未执行 1 张，未纳入处理 1 张');
     expect(document.querySelectorAll('[data-slot="batch-action-result-items"] > li')).toHaveLength(5);
     expect(document.querySelector('[data-slot="batch-action-result"]')?.textContent).not.toMatch(/INTERNAL_MESSAGE|INVALID_STATUS|PENDING_FACTORY|DB_DETAIL|ABORTED/);
     expect(refresh).toHaveBeenCalledOnce();
@@ -209,7 +209,7 @@ describe('admin order batch review', () => {
     await review();
     await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.element(page.getByRole('heading', { name: '请处理未完成的工单', exact: true })).toBeVisible();
-    assertConsistentSummary('成功 4 张，业务跳过 0 张，结果未知 0 张，未执行 0 张，未纳入处理 1 张');
+    await assertConsistentSummary('成功 4 张，业务跳过 0 张，结果未知 0 张，未执行 0 张，未纳入处理 1 张');
     expect(document.querySelectorAll('[data-slot="batch-action-result-items"] > li')).toHaveLength(5);
     await page.getByRole('button', { name: '关闭结果', exact: true }).click();
     await expect.element(page.getByRole('region', { name: '工单批量操作' }).getByText(/成功 4 张，业务跳过 0 张.*未纳入处理 1 张/)).toBeVisible();
@@ -235,13 +235,13 @@ function printRequestOrder() {
     capabilities: { ...order.capabilities, release: false, createPrint: true } };
 }
 
-function assertConsistentSummary(expected: string) {
-  const toolbar = document.querySelector('[aria-label="工单批量操作"] p[role="status"]');
-  const receipt = document.querySelector('[data-slot="batch-action-result-summary"]');
-  const persistent = document.querySelector('[data-slot="admin-order-batch-receipt-link"] p');
-  expect(toolbar?.textContent).toBe(expected);
-  expect(receipt?.textContent).toBe(expected);
-  expect(persistent?.textContent).toBe(expected);
+async function assertConsistentSummary(expected: string) {
+  // The receipt can render before the action transition releases the toolbar's pending state.
+  await expect.poll(() => ({
+    toolbar: document.querySelector('[aria-label="工单批量操作"] p[role="status"]')?.textContent,
+    receipt: document.querySelector('[data-slot="batch-action-result-summary"]')?.textContent,
+    persistent: document.querySelector('[data-slot="admin-order-batch-receipt-link"] p')?.textContent,
+  })).toEqual({ toolbar: expected, receipt: expected, persistent: expected });
 }
 
 function assertGeometry(selector: string, width: number) {

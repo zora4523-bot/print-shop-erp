@@ -19,6 +19,7 @@ import {
   customerPricingHref,
 } from '../../lib/navigation/rule-center';
 
+const longOrderName = '自定义工单名称：七夕红包加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 let fixture: WorkerUiFixture;
 
 test.beforeAll(async ({}, testInfo) => {
@@ -71,7 +72,7 @@ test.describe('administrator workspace', () => {
       {
         name: 'order-edit',
         path: `/orders/${fixture.orderId}/edit`,
-        readyHeading: /^编辑工单 /,
+        readyHeading: '编辑工单',
       },
     ];
     await checkRoutes(page, testInfo, routes, 'light');
@@ -411,6 +412,34 @@ test.describe('sales workspace', () => {
     await checkRoutes(page, testInfo, listRoute, 'dark');
   });
 
+  for (const reducedMotion of ['reduce', 'no-preference'] as const) {
+    test(`long sales order drawer closes and restores history with motion ${reducedMotion}`, async ({ page }, testInfo) => {
+      const pageErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      await page.emulateMedia({ reducedMotion });
+      await page.goto(`/orders?q=${encodeURIComponent(fixture.orderNo)}`);
+      await prepareSalesOrderListState(page, fixture);
+      await expectSalesDrawerCloseReachable(page);
+      await expectViewportGate(page, testInfo);
+      await expectA11yGate(page);
+      const content = page.getByRole('region', { name: '工单明细内容', exact: true });
+      await content.focus();
+      await expect(content).toBeFocused();
+      if (await content.evaluate((element) => element.scrollHeight > element.clientHeight)) {
+        await page.keyboard.press('End');
+        await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+        await page.keyboard.press('Home');
+        await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBe(0);
+      }
+      // A directly loaded hash closes in place; Escape uses the same close contract.
+      const drawer = page.getByRole('dialog', { name: `工单明细： ${longOrderName}`, exact: true });
+      await page.keyboard.press('Escape');
+      await expect(drawer).toBeHidden();
+      await expect(page).toHaveURL((url) => url.pathname === '/orders' && url.searchParams.get('view') === 'draft' && !url.hash);
+      expect(pageErrors).toEqual([]);
+    });
+  }
+
   test('sales order detail passes its focused safe-surface gates', async ({
     page,
   }, testInfo) => {
@@ -467,18 +496,18 @@ async function checkRoutes(
       // Server-rendered routes can create reduced-motion color transitions on
       // the next paint. Wait across consecutive paints so axe never samples a
       // half-switched palette (light foreground tokens on dark surfaces).
-      await page.evaluate(async () => {
-        for (let paint = 0; paint < 3; paint += 1) {
-          await new Promise<void>((resolve) =>
-            requestAnimationFrame(() => resolve()),
-          );
-          await Promise.all(
-            document
-              .getAnimations()
-              .map((animation) => animation.finished.catch(() => undefined)),
-          );
-        }
-      });
+      for (let paint = 0; paint < 3; paint += 1) {
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+        // Observe current animations instead of retaining a finished promise
+        // from an animation that the streaming/hydration commit may replace.
+        await expect.poll(() => page.evaluate(() => document.getAnimations()
+          .filter((animation) => animation.playState === 'running' || animation.pending)
+          .map((animation) => ({
+            state: animation.playState,
+            target: animation.effect instanceof KeyframeEffect && animation.effect.target instanceof Element
+              ? animation.effect.target.outerHTML.slice(0, 180) : null,
+          }))), { message: `${route.name}: animations must settle before visual gates` }).toEqual([]);
+      }
       await expectViewportGate(page, testInfo);
       await expectA11yGate(page);
       await attachCandidateScreenshot(
@@ -540,7 +569,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       name: 'orders',
       path: '/orders',
       readyHeading: '工单管理',
-      prepareGateState: prepareAdminOrderWorkspaceState,
+      prepareGateState: (page) => prepareAdminOrderWorkspaceState(page, data),
     },
     {
       name: 'orders-filtered',
@@ -552,7 +581,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
         '&foilColor=' +
         encodeURIComponent('哑金,透明金,客户特殊调色长名称'),
       readyHeading: '工单管理',
-      prepareGateState: prepareAdminOrderWorkspaceState,
+      prepareGateState: (page) => prepareAdminOrderWorkspaceState(page, data),
     },
     {
       name: 'order-detail',
@@ -577,7 +606,15 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     // 以下四条此前从未被任何门禁访问过。UI 审查在它们上面实测到 axe
     // label / select-name 违规（筛选栏 <label> 没有 htmlFor），修完补进
     // 路由表，避免再次退化。
-    { name: 'salary-hourly', path: '/owner/salary/hourly', readyHeading: '时薪工月结' },
+    {
+      name: 'salary-hourly', path: '/owner/salary/hourly', readyHeading: '时薪工月结',
+      prepareGateState: async (page) => {
+        const worker = page.getByRole('combobox', { name: '师傅', exact: true });
+        await expect(worker.locator(`option[value="${data.hourlyWorkerId}"]`)).toHaveText(
+          `长姓名清废师傅ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证筛选不会撑开小屏（${data.hourlyWorkerId} · 已停用）`,
+        );
+      },
+    },
     {
       name: 'salary-daily',
       path: '/owner/salary/daily',
@@ -647,6 +684,10 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       name: 'rule-center-employee-pay',
       path: RULE_CENTER_HREFS.employeePay,
       readyHeading: '员工工资规则',
+      prepareGateState: async (page) => {
+        await expect(page.getByRole('combobox', { name: '工资规则', exact: true })).toBeVisible();
+        await expect(page.getByRole('textbox', { name: '每月固定工资（元）', exact: true })).toBeVisible();
+      },
     },
     {
       name: 'agent-monthly-bills-alias',
@@ -656,7 +697,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'legacy-bills-archive',
       path: '/owner/bills/archive',
-      readyHeading: 'Legacy 账单只读归档',
+      readyHeading: '历史账单',
     },
     {
       name: 'order-changes',
@@ -701,7 +742,7 @@ function priceTierFixtureRoutes(): readonly AdminRoute[] {
   ];
 }
 
-async function prepareAdminOrderWorkspaceState(page: Page) {
+async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture) {
   const workspace = page
     .locator('[data-slot="admin-order-workspace"]:visible')
     .first();
@@ -731,28 +772,29 @@ async function prepareAdminOrderWorkspaceState(page: Page) {
       .getByRole('link', { name: /^全部/ })
       .click();
     await expect(page).toHaveURL(/(?:[?&])queue=all(?:&|$)/);
-    const firstOrder = page
-      .getByRole('list', { name: '管理端工单列表', exact: true })
-      .getByRole('button', { name: /^GD-/ })
-      .first();
-    await expect(firstOrder).toBeVisible();
-    await firstOrder.click();
-    const orderDrawer = page.getByRole('dialog').filter({
-      has: page.getByRole('heading', { name: '费用三段', exact: true }),
-    });
-    await expect(orderDrawer).toBeVisible();
-    await expect(orderDrawer.getByText('quotedFee', { exact: true })).toBeVisible();
-    await expect(orderDrawer.getByText('confirmedFee', { exact: true })).toBeVisible();
-    await expect(orderDrawer.getByText('settledFee', { exact: true })).toBeVisible();
-    const currentFeeStageCount = await orderDrawer
-      .locator('[aria-current="step"]')
-      .count();
-    expect(currentFeeStageCount).toBeLessThanOrEqual(1);
-    if (currentFeeStageCount === 0) {
-      await expect(orderDrawer).toContainText('不伪造三段快照');
+    const search = workspace.getByLabel('搜索工单', { exact: true });
+    await search.fill(data.orderNo);
+    await search.press('Enter');
+    await expect(page).toHaveURL((url) => url.searchParams.get('q') === data.orderNo);
+    const order = page.getByRole('list', { name: '管理端工单列表', exact: true })
+      .locator(`[data-order-id="${data.orderId}"]`);
+    await order.getByRole('heading', { level: 2 }).getByRole('link', { name: longOrderName, exact: true }).click();
+    await expect(page).toHaveURL((url) => url.pathname === `/orders/${data.orderId}`);
+    const fees = page.getByRole('region', { name: '工单费用', exact: true });
+    await expect(fees.getByRole('heading', { name: '费用记录', exact: true })).toBeVisible();
+    for (const title of ['提交报价', '确认金额', '结算金额']) {
+      await expect(fees.getByText(title, { exact: true })).toBeVisible();
     }
-    await page.keyboard.press('Escape');
-    await expect(orderDrawer).toBeHidden();
+    // This legacy fixture has only a historical total, no fabricated stage snapshots.
+    await expect(fees.getByText('历史金额', { exact: true })).toBeVisible();
+    await expect(fees.getByText('¥ 646,172.57', { exact: true })).toBeVisible();
+    await expect(fees.getByText('当前', { exact: true })).toHaveCount(0);
+    await expect(fees.getByText('—', { exact: true })).toHaveCount(3);
+    for (const hint of ['尚未形成报价', '费用核定后显示', '结算后显示']) {
+      await expect(fees.getByText(hint, { exact: true })).toBeVisible();
+    }
+    await page.goBack();
+    await expect(workspace).toBeVisible();
   }
 
   const exportTrigger = workspace.getByRole('button', {
@@ -791,14 +833,14 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
   return [
     {
       name: 'sales-orders',
-      path: '/orders',
+      path: `/orders?q=${encodeURIComponent(data.orderNo)}`,
       readyHeading: '工单',
-      prepareGateState: prepareSalesOrderListState,
+      prepareGateState: (page) => prepareSalesOrderListState(page, data),
     },
     {
       name: 'sales-order-detail',
       path: `/orders/${data.orderId}`,
-      readyHeading: /^GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789/,
+      readyHeading: new RegExp(`^${longOrderName}`),
       prepareGateState: prepareSalesOrderDetailState,
     },
     {
@@ -1102,7 +1144,10 @@ async function prepareDeterministicPriceWorkspaceState(
     await expect(
       tierPanel.getByLabel('1,000 个价格档启用', { exact: true }),
     ).toBeChecked();
-    await expect(tierPanel.locator('ol > li').first()).toContainText('+¥15');
+    const firstTierDelta = tierPanel.locator('ol > li').first()
+      .locator('div').filter({ has: page.getByText('变化', { exact: true }) })
+      .locator('p.tabular-nums');
+    await expect(firstTierDelta).toHaveText('+¥ 15.00+5.0847%');
     await expect(
       tierPanel.getByRole('button', {
         name: '保存（0 档）',
@@ -1124,7 +1169,11 @@ async function prepareDeterministicPriceWorkspaceState(
         .last()
         .getByLabel('草稿单价（元/个）', { exact: true }),
     ).toHaveValue('0.18');
-    await expect(tierPanel.getByText('¥0.52 / 个', { exact: true })).toBeVisible();
+    const firstTierCurrentRate = tierPanel.locator('ol > li').first()
+      .locator('div').filter({ has: page.getByText('当前单价', { exact: true }) })
+      .locator('p.tabular-nums');
+    await expect(firstTierCurrentRate).toHaveText('¥ 0.52 / 个');
+    await expect(firstTierCurrentRate).toBeVisible();
     await expect(tierPanel.getByText('按个计价', { exact: true })).toBeVisible();
     await expect(tierPanel.getByText('折合单价', { exact: true })).toHaveCount(0);
     await expect(
@@ -1150,7 +1199,7 @@ async function prepareDeterministicPriceWorkspaceState(
   await preparePriceBookBusinessState(page);
 }
 
-async function prepareSalesOrderListState(page: Page) {
+async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   await expect(
     page.getByRole('button', { name: /导出工单/ }),
   ).toHaveCount(0);
@@ -1170,28 +1219,21 @@ async function prepareSalesOrderListState(page: Page) {
 
   const list = page.getByRole('list', { name: '销售工单列表' });
   await expect(list).toBeVisible();
-  const cards = list.locator('[data-sales-order-card]');
-  expect(await cards.count()).toBeGreaterThan(0);
-  const actionableButton = page.getByRole('button', {
-    name: /查看详情|查看原因/,
-  });
-  const firstCard = cards.filter({ has: actionableButton }).first();
-  const action = firstCard.getByRole('button', {
-    name: /查看详情|查看原因/,
-  });
+  const card = list.locator(`[data-sales-order-card][data-order-id="${data.orderId}"]`);
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText(longOrderName);
+  const action = card.getByRole('button', { name: /查看详情|查看原因/ });
   await expect(action).toBeVisible();
-  await expect(firstCard).not.toContainText('计件成本');
-  await expect(firstCard).not.toContainText('师傅');
-  const copyLabel = await firstCard
-    .getByRole('button', { name: /^复制工单号 / })
-    .getAttribute('aria-label');
-  const orderNo = copyLabel?.replace(/^复制工单号 /, '');
-  expect(orderNo).toBeTruthy();
-
+  await expect(card).not.toContainText('计件成本');
+  await expect(card).not.toContainText('师傅');
+  await expect(card.getByRole('button', { name: `复制工单号 ${data.orderNo}`, exact: true })).toBeVisible();
+  const orderNo = data.orderNo;
+  await expectViewportGate(page, test.info());
   await action.click();
-  await expect(page).toHaveURL(/#wo=/);
+  await expect(page).toHaveURL((url) => new URLSearchParams(url.hash.slice(1)).get('wo') === orderNo);
   const drawer = page.getByRole('dialog', { name: /工单明细/ });
   await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole('heading', { name: `工单明细： ${longOrderName}`, exact: true })).toBeVisible();
   await expect(drawer).not.toContainText('计件成本');
   await expect(drawer).not.toContainText('生产任务');
   await expect(drawer.getByRole('link', { name: '完整详情' })).toHaveCount(0);
@@ -1204,18 +1246,45 @@ async function prepareSalesOrderListState(page: Page) {
     );
   }
 
+  await expectSalesDrawerCloseReachable(page);
   await drawer.getByRole('button', { name: '关闭', exact: true }).click();
   await expect(drawer).toBeHidden();
   await expect(page).toHaveURL((url) => !url.hash);
   await page.goForward();
   await expect(drawer).toBeVisible();
 
-  await page.goto(`/orders?view=draft#wo=${encodeURIComponent(orderNo!)}`);
+  await page.goto(`/orders?view=draft#wo=${encodeURIComponent(orderNo)}`);
   await expect(drawer).toBeVisible();
-  await expect(drawer).toContainText(orderNo!);
+  await expect(drawer).toContainText(orderNo);
   await expect(
     drawer.getByRole('heading', { name: '进度', exact: true }),
   ).toBeVisible();
+}
+
+async function expectSalesDrawerCloseReachable(page: Page) {
+  const drawer = page.getByRole('dialog', { name: `工单明细： ${longOrderName}`, exact: true });
+  const close = drawer.getByRole('button', { name: '关闭', exact: true });
+  await expect(close).toBeVisible();
+  // Wait for the real entrance transition. Do not force clicks through title text.
+  await expect(drawer).not.toHaveAttribute('data-starting-style');
+  await drawer.evaluate(async (root) => {
+    await Promise.all(root.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
+  });
+  const hit = await close.evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    const target = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    const heading = button.closest('[role="dialog"]')?.querySelector('h2');
+    return {
+      reachable: target === button || (target !== null && button.contains(target)),
+      button: box.toJSON(),
+      heading: heading?.getBoundingClientRect().toJSON(),
+      target: target?.outerHTML.slice(0, 400),
+      hash: location.hash,
+      reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    };
+  });
+  await test.info().attach('sales-drawer-close-hit-target', { body: JSON.stringify(hit, null, 2), contentType: 'application/json' });
+  expect(hit.reachable, JSON.stringify(hit)).toBe(true);
 }
 
 async function prepareSalesOrderDetailState(page: Page) {
@@ -1239,8 +1308,8 @@ async function prepareSalesOrderDetailState(page: Page) {
     detail.getByRole('link', { name: '下载 PDF', exact: true }),
   ).toHaveCount(0);
   await expect(
-    detail.getByRole('link', { name: '返回工单列表', exact: true }),
-  ).toBeVisible();
+    page.getByRole('navigation', { name: '面包屑导航', exact: true }).getByRole('link', { name: '工单', exact: true }),
+  ).toHaveAttribute('href', '/orders');
 
   const formSection = page
     .locator('section')

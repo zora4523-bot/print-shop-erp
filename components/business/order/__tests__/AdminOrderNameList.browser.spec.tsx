@@ -75,7 +75,7 @@ describe('admin name-first order list', () => {
         document.documentElement.classList.toggle('dark', theme === 'dark');
         renderList([row(), { ...row(), id: 'order-2', orderNo: 'INTERNAL-SECOND', customName: '春节客户定制礼品红包'.repeat(8) }]);
         await expect.element(page.getByRole('link', { name: '端午定制', exact: true })).toBeVisible();
-        expect(host.querySelector('h3 a')?.getAttribute('href')).toBe('/orders/order-1');
+        expect(host.querySelector('h2 a')?.getAttribute('href')).toBe('/orders/order-1');
         expect(host.textContent).not.toContain('GD-260902-001');
         expect(host.textContent).not.toContain('INTERNAL-SECOND');
         expect(host.textContent).not.toContain('业务员甲');
@@ -107,7 +107,7 @@ describe('admin name-first order list', () => {
     vi.mocked(setOrderStarredAction).mockResolvedValue({ status: 'success', orderId: 'order-2', starred: false });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ message: '暂时无法加载' }) }));
     renderList([row(), { ...row(), id: 'order-2', orderNo: 'OTHER-ID' }]);
-    expect([...host.querySelectorAll('h3 a')].map(link => link.getAttribute('href'))).toEqual(['/orders/order-1', '/orders/order-2']);
+    expect([...host.querySelectorAll('h2 a')].map(link => link.getAttribute('href'))).toEqual(['/orders/order-1', '/orders/order-2']);
     const second = host.querySelector<HTMLElement>('[data-order-id="order-2"]')!;
     second.querySelector<HTMLElement>('[role="checkbox"]')!.click();
     expect(location.hash).toBe('');

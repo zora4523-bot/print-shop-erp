@@ -8,14 +8,14 @@ const { boundaryCapture } = vi.hoisted(() => ({
       info: {
         error: Error;
         reset: () => void;
-        unstable_retry: () => void;
+        retry: () => void;
       },
     ) => React.ReactNode),
   },
 }));
 
 vi.mock('next/error', () => ({
-  unstable_catchError:
+  catchError:
     (fallback: typeof boundaryCapture.fallback) =>
     ({ children }: { children?: React.ReactNode }) => {
       boundaryCapture.fallback = fallback;
@@ -55,7 +55,7 @@ describe('PriceDataBoundary', () => {
         {
           error: new Error('database password leaked'),
           reset: vi.fn(),
-          unstable_retry: retry,
+          retry: retry,
         },
       ),
     );

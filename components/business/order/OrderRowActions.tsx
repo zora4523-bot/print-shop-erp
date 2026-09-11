@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { Download, MoreHorizontal, Printer } from 'lucide-react';
 import { OrderStatus } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
@@ -75,9 +74,8 @@ export function OrderRowMoreActions({
           <DropdownMenuItem
             key={action.id}
             render={
-              <Link
+              <a
                 href={action.href}
-                prefetch={false}
                 target={action.newTab ? '_blank' : undefined}
                 rel={action.newTab ? 'noopener noreferrer' : undefined}
               />

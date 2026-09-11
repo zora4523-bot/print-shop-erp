@@ -2,6 +2,7 @@
 status: maintained
 owner: project-maintainers
 last_verified: 2026-09-10
+sections_verified: 2026-09-11 local inline gate and production cron acceptance
 applies_to: deploy smoke script and repository test configuration; production state not reverified
 ---
 
@@ -32,9 +33,9 @@ DEPLOY_SMOKE_BASE_URL=http://localhost:3003 \
 pnpm deploy:smoke --skip-build --require-base-url
 ```
 
-这里刻意使用 `--skip-build`，避免运行中的 `next dev` 与 `next build` 共用同一工作目录的产物。此命令是开发环境诊断，不能证明生产构建可用。若需要验证本地构建产物，先停止开发服务，执行 `pnpm build`，再用 `pnpm start --port 3003` 启动，确保服务和检查进程采用相同测试库、mock 及后台模式；也可使用独立工作目录。默认 Playwright 仍会启动开发服务器，生产构建 E2E 的现行缺口见 [开发指南](../DEVELOPMENT.md#测试环境约束)。
+这里刻意使用 `--skip-build`，避免运行中的 `next dev` 与 `next build` 共用同一工作目录的产物。此命令是开发环境诊断，不能证明生产构建可用。若需要验证本地构建产物，先停止开发服务，执行 `pnpm build`，再用 `pnpm start --port 3003` 启动，确保服务和检查进程采用相同测试库、mock 及后台模式；也可使用独立工作目录。默认 Playwright 启动开发服务器；生产构建使用 `pnpm test:release`，隔离前置见 [开发指南](../DEVELOPMENT.md#测试环境约束)。
 
-**已知未修复：** 无 worker/机器人心跳的 inline 环境会返回 `smartBot.status=null`，现行 gate 拒绝该响应。因此上述本地序列目前可能按 [R05](audits/2026-09-10-release-readiness.md) 失败；不能宣称这是已验证通过的一键门禁，不能跳过 jobs 检查来记绿。契约及 local/durable 两种模式的闭环验证归 [REL-05](release-remediation-2026-09-10.md#rel-05-统一健康端点与部署-smoke-契约)。
+本地 `development` / `test` 的 inline 响应只有在完整健康字段合法、无机器人要求、配置有效、运行正常且无恢复等待时，才接受 `smartBot.status=null`。生产 null、缺 worker、身份不符和缺必需配置仍阻断。契约回归见 [整改执行记录](audits/2026-09-11-remediation-validation.md)；通过脚本测试不等于目标环境已验收。
 
 ## 脚本实际检查与限制
 
@@ -46,7 +47,7 @@ pnpm deploy:smoke --skip-build --require-base-url
 | 构建 | 未带 `--skip-build` 时运行 `next build`；必须确保没有共享产物的开发服务 |
 | HTTP | 有 base URL 才检查 login、live/ready/jobs、受保护页面跳转和无效 cron token；发布使用 `--require-base-url`，禁止以跳过路由检查代替通过 |
 | jobs | 调用真实部署 gate 校验机器人状态、必需配置和身份；HTTP 200 本身不足以通过。旧非通知死信等可能使健康响应为 503，脚本按既有 gate 规则记录警告，不等于所有队列任务已处理 |
-| cron | 当前脚本在所有模式都接受 401 或 503；生产验收必须另外确认 401，见下文已知契约差异 |
+| cron | production 仅接受无效 token 返回 401；503 立即失败。development/test 允许 401 或 503 |
 
 `--skip-build` 仅在同一候选已完成构建时作为发布复查选项；`--skip-pdf-browser` 仅用于故障定位，不能据此记 PDF 通过。`--dry-run` 仅预览子命令和浏览器启动，配置 base URL 后仍会执行 HTTP 检查，不能当作完整验证结果。
 
@@ -74,7 +75,7 @@ pnpm deploy:smoke --skip-build --require-base-url
 
 当前脚本在 `CI` 环境变量非空时向 Chromium 传递 `--no-sandbox` 与 `--disable-setuid-sandbox`；示例设为 `true`，但 `CI=false` 或 `CI=0` 同样会关闭 sandbox。该示例适配仓库既有的 root 运行方案，不代表本次重新确认了生产主机状态。脚本不会加载 PM2 ecosystem 环境，因此 Chromium 路径及相关变量需明确注入。运行前确认 `APP_PUBLIC_URL` 为本次验收环境；示例清空 `E2E_BASE_URL` 回退值，目标空值会由 `--require-base-url` 拒绝。通过记录必须关联已验证的构建 SHA，不能只留一行 completed。
 
-无效 cron token 在配置正确的生产环境必须返回 **401**。现行脚本也接受表示缺少 `CRON_SECRET` 的 **503**，因此脚本 completed 不能证明此发布条件满足。自动门禁与文档的差异纳入 REL-05；修复前按下方 Cron Auth 负向请求记录实际 401，503 一律阻断生产放行，不能以“未执行任务”当作配置正确。
+无效 cron token 在配置正确的生产环境必须返回 **401**。脚本现已按 `NODE_ENV=production` 拒绝表示缺少 `CRON_SECRET` 的 **503**；非生产保留 401/503 诊断。仍需对本次目标环境保存真实状态码与 release SHA，不能用本机回归替代生产证据。
 
 ## PDF Browser
 

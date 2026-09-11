@@ -21,9 +21,9 @@ describe('admin business copy contract', () => {
   });
 
   it('账单和工资页使用业务名称而非原始枚举或人员 ID', () => {
-    const bills = source('app/(admin)/owner/agent-bills/page.tsx');
+    const bills = source('app/(billing)/owner/agent-bills/page.tsx');
     const billDetail = source(
-      'app/(admin)/owner/agent-bills/[id]/page.tsx',
+      'app/(billing)/owner/agent-bills/[id]/page.tsx',
     );
     const salary = source('app/(admin)/owner/salary/page.tsx');
     const hourly = source('app/(admin)/owner/salary/hourly/page.tsx');

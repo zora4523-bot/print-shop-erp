@@ -1753,7 +1753,7 @@ export function midPreviousShanghaiMonth(now: Date = new Date()): Date {
 // "admin@2026" here would silently fail on every clean machine / CI
 // env (Codex round 73 / P1). Username defaults to "admin" because
 // that's the seed's fixed default in `.env.example`.
-export const ADMIN_USERNAME = process.env.E2E_ADMIN_USERNAME ?? 'admin';
+export const ADMIN_USERNAME = process.env.E2E_ADMIN_USERNAME ?? process.env.SEED_ADMIN_USERNAME ?? 'admin';
 export const ADMIN_PASSWORD = (() => {
   const v = process.env.E2E_ADMIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD;
   if (!v || v.trim() === '') {
@@ -2225,17 +2225,20 @@ export async function cleanupE2eProductionOperationFixture(
   });
 }
 
-// The submit button changes to "提交中…" immediately, so asserting that the
-// old accessible name disappeared can pass before the server transition has
-// committed. Wait for the detail heading's server-rendered non-draft status
-// instead. AUTO_CONFIRMED work is prepared for explicit production release, while
-// manual-pricing work remains SUBMITTED for factory review.
+// A disappearing label can precede the server commit. Read the persisted
+// status so both the sales detail and the admin detail with a separate badge
+// must complete the real transition; an arbitrary order title cannot pass it.
 export async function submitDraftOrderAndWait(page: Page): Promise<void> {
+  const orderId = new URL(page.url()).pathname.split('/')[2];
+  if (!orderId || orderId === 'new') throw new Error('提交测试必须位于工单详情');
   await page.getByRole('button', { name: /^提交工单$/ }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toContainText(
-    /待处理|待下发生产|排产中/,
-    { timeout: 20_000 },
-  );
+  await expect.poll(async () => withDb(async (db) => {
+    const result = await db.query<{ status: string }>(
+      'SELECT status::text FROM "Order" WHERE id = $1', [orderId],
+    );
+    return result.rows[0]?.status;
+  }), { timeout: 20_000 }).toMatch(/^(SUBMITTED|CONFIRMED)$/);
+  await expectNoNextErrorOverlay(page);
 }
 
 // Stamps a cuid-shaped suffix onto identifiers so reruns against the

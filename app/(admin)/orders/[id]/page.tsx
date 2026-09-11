@@ -527,12 +527,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
             >
               打印
             </Link>
-            <Link
+            <a
               href={`/api/orders/${order.id}/pdf`}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               下载 PDF
-            </Link>
+            </a>
             {canEdit ? (
               <Link
                 href={`/orders/${order.id}/edit`}

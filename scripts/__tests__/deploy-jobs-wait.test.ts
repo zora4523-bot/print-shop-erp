@@ -26,6 +26,30 @@ async function simulate(observe: (elapsedMs: number) => unknown) {
 }
 
 describe('bounded deploy recovery observation', () => {
+  it('waits within the startup budget for a missing worker and then requires stable connection', async () => {
+    const { result, elapsedMs } = await simulate((at) => at < 10_000
+      ? { ...health(), alerts: ['heavy-worker-missing'] }
+      : health());
+    expect(result.ok).toBe(true);
+    expect(elapsedMs).toBe(16_000);
+  });
+
+  it('never accepts a persistently missing worker even while the bot is connected', async () => {
+    const { result, elapsedMs } = await simulate(() => ({
+      ...health(), alerts: ['heavy-worker-missing'],
+    }));
+    expect(result).toMatchObject({ ok: false, reason: 'startup-timeout' });
+    expect(elapsedMs).toBe(120_000);
+  });
+
+  it('does not let a missing worker delay an actionable bot failure', async () => {
+    const { result, elapsedMs } = await simulate(() => ({
+      ...health('AUTH_FAILED'), alerts: ['heavy-worker-missing', 'smart-bot-auth-failed'],
+    }));
+    expect(result).toMatchObject({ ok: false, reason: 'smart-bot-fatal' });
+    expect(elapsedMs).toBe(0);
+  });
+
   it('accepts an ordinary release only after six continuous connected seconds', async () => {
     const { result, elapsedMs } = await simulate(() => health());
     expect(result.ok).toBe(true);

@@ -2,15 +2,17 @@
 
 import { useActionState } from 'react';
 import {
-  confirmAgentMonthlyBillAction,
-  createAgentMonthlyBillCreditAction,
   generateAgentMonthlyBillsAction,
-  markAgentMonthlyBillPaidAction,
 } from '@/actions/agent-monthly-bill';
 import type { AgentMonthlyBillActionResult } from '@/actions/agent-monthly-bill.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatMoney } from '@/lib/dashboard/format';
+
+type BillFormAction = (
+  previous: AgentMonthlyBillActionResult | null,
+  formData: FormData,
+) => Promise<AgentMonthlyBillActionResult>;
 
 function Feedback({ state }: { state: AgentMonthlyBillActionResult | null }) {
   if (!state) return null;
@@ -60,17 +62,19 @@ export function GenerateAgentMonthlyBillsForm({
 }
 
 export function ConfirmAgentMonthlyBillForm({
-  billId,
+  submitAction,
   initialIdempotencyKey,
 }: {
-  billId: string;
+  submitAction: BillFormAction;
   initialIdempotencyKey: string;
 }) {
-  const bound = confirmAgentMonthlyBillAction.bind(null, billId);
+  // Receive the bound reference from the Server Component. Binding during
+  // client-component SSR recreates its pending argument promise on every
+  // useActionState postback retry, so native validation never finishes.
   const [state, action, pending] = useActionState<
     AgentMonthlyBillActionResult | null,
     FormData
-  >(bound, null);
+  >(submitAction, null);
   return (
     <form action={action} aria-busy={pending} className="space-y-2">
       <input type="hidden" name="idempotencyKey" value={initialIdempotencyKey} />
@@ -86,19 +90,18 @@ export function ConfirmAgentMonthlyBillForm({
 }
 
 export function MarkAgentMonthlyBillPaidForm({
-  billId,
+  submitAction,
   lockedAmount,
   initialIdempotencyKey,
 }: {
-  billId: string;
+  submitAction: BillFormAction;
   lockedAmount: string;
   initialIdempotencyKey: string;
 }) {
-  const bound = markAgentMonthlyBillPaidAction.bind(null, billId);
   const [state, action, pending] = useActionState<
     AgentMonthlyBillActionResult | null,
     FormData
-  >(bound, null);
+  >(submitAction, null);
   return (
     <form action={action} aria-busy={pending} className="space-y-3">
       <input type="hidden" name="idempotencyKey" value={initialIdempotencyKey} />
@@ -129,21 +132,20 @@ export function MarkAgentMonthlyBillPaidForm({
 }
 
 export function CreateAgentMonthlyBillCreditForm({
-  billId,
+  submitAction,
   sourceItemId,
   sourceAmount,
   initialIdempotencyKey,
 }: {
-  billId: string;
+  submitAction: BillFormAction;
   sourceItemId: string;
   sourceAmount: string;
   initialIdempotencyKey: string;
 }) {
-  const bound = createAgentMonthlyBillCreditAction.bind(null, billId);
   const [state, action, pending] = useActionState<
     AgentMonthlyBillActionResult | null,
     FormData
-  >(bound, null);
+  >(submitAction, null);
   return (
     <form
       action={action}

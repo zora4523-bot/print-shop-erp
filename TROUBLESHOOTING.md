@@ -2,6 +2,7 @@
 status: maintained
 owner: project-maintainers
 last_verified: 2026-08-24
+sections_verified: 2026-09-11 E2E isolation and release failure diagnosis
 applies_to: local development and repository validation
 ---
 
@@ -145,12 +146,12 @@ pnpm worker:heavy
 
 ### Playwright 等待 Web server 超时
 
-- 确认 `E2E_BASE_URL` 是有效 URL，默认 `http://localhost:3000`。
+- 确认 `E2E_BASE_URL` 是受控本机独立端口，开发默认 `http://127.0.0.1:3100`，发布默认 `http://127.0.0.1:3200`；3000 和远程地址会被拒绝。
 - 查看该端口是否已经运行别的项目。
 - 手工运行的服务与 Playwright 不要争用同一个 `.next`。
-- CI 会启动自己的服务，本地默认复用已存在服务。
+- CI 和本地测试都会启动受控服务，不复用已有实例；端口被占用时先确认占用进程，不能直接连接未知服务。
 
-可以为隔离运行选择明确端口：
+先按 [测试环境约束](./DEVELOPMENT.md#测试环境约束) 配置独立 `E2E_DATABASE_URL`、匹配库名确认和测试账号，并完成迁移及测试工价前置。之后可以为开发模式选择明确端口：
 
 ```bash
 E2E_BASE_URL=http://127.0.0.1:3100 pnpm exec playwright test --project=chromium --workers=1
@@ -158,7 +159,7 @@ E2E_BASE_URL=http://127.0.0.1:3100 pnpm exec playwright test --project=chromium 
 
 ### E2E 数据冲突或偶发失败
 
-Playwright 会写开发数据库且默认串行。确认没有另一套测试并发操作同一数据库；不要指向生产。保留失败 trace、截图和 fixture id，先重现根因，不通过增加任意等待或删除断言“修复”。
+Playwright 只允许写入已确认的独立可丢弃 E2E 数据库，默认串行；缺少隔离前置会在启动服务或首次连接前失败。确认没有另一套测试并发操作同一测试库；不要指向日常开发库或生产。保留失败 trace、截图和 fixture id，以及已有追加式历史，先重现根因，不通过增加任意等待或删除断言“修复”。
 
 ### 登录 fixture 失败
 
@@ -229,3 +230,14 @@ OSS 上传、企业微信通知、PDF、PM2 worker、cron、备份和 Nginx 都�
 - 已执行的只读诊断和结果。
 
 不要提交 `.env`、数据库 dump、Webhook URL、Bearer token、真实客户资料或共享密码。
+
+## 发布复验发现的故障模式（2026-09-11 局部核对）
+
+- **无 JavaScript 账单停在加载或原生提交不结束**：分别检查初始 HTML 是否被祖先 loading/Suspense 隐藏，以及提交后 `useActionState` 的绑定参数是否反复生成 pending Promise。本项目账单独立路由分组保留原授权布局，详情 action 在 Server Page 绑定后传给表单。应验证非法输入反馈与成功写入，不能以 action 已返回日志代替 HTTP 已完成。
+- **访问详情就创建 PDF 后台任务**：下载动作使用原生链接；不能让 Next 导航预取触发生成接口。检查无点击时请求和任务数量均为零，点击一次只创建一次任务。
+- **HEAVY 工单导出报 `server-only` 导入错误**：独立 worker 不能加载页面聚合模块。共享筛选条件维护在 `lib/order/admin-workspace-filters.ts`，页面与导出共同消费，避免复制权限/队列规则后产生分歧。
+- **重复账号或启用 BOM 跳到整页错误**：检查 Prisma P2002 元数据中的带引号字段。只对已识别的字段集合转成业务反馈，未知约束继续抛出；不要笼统吞掉所有唯一冲突。
+
+修复与真实复验边界见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。测试环境与 CI 的现行运行方式见 [开发指南](./DEVELOPMENT.md#测试环境约束)。
+
+- **登出后又变回已登录**：保留登出前后请求的顺序和 Set-Cookie 属性（不记录令牌内容），检查在途页面预取是否晚于登出响应回写会话。项目代理对预取仍鉴权，但不续写 Cookie；Next 16.3 需要保留 Proxy 的预取标头才能识别。不得只用新浏览器上下文掩盖原页面会话复活。

@@ -337,7 +337,7 @@
     },
     {
       "rule": "money",
-      "file": "app/(admin)/owner/agent-bills/[id]/page.tsx",
+      "file": "app/(billing)/owner/agent-bills/[id]/page.tsx",
       "text": "lockedAmount={new Decimal(bill.totalAmount).toFixed(2)}",
       "clause": "§4.1",
       "migration": "P0-1",
@@ -346,7 +346,7 @@
     },
     {
       "rule": "money",
-      "file": "app/(admin)/owner/agent-bills/[id]/page.tsx",
+      "file": "app/(billing)/owner/agent-bills/[id]/page.tsx",
       "text": "sourceAmount={new Decimal(item.settledFeeSnapshot).toFixed(2)}",
       "clause": "§4.1",
       "migration": "P0-1",

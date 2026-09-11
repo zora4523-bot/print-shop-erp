@@ -1,42 +1,44 @@
 ---
 status: maintained-plan
 owner: project-maintainers
-last_verified: 2026-09-10
-verification_scope: task dependencies, current source contracts, package scripts and CI configuration; no repair implementation or production acceptance
+last_verified: 2026-09-11
+verification_scope: local remediation acceptance and final candidate validation; remote CI and production prerequisites remain pending
 ---
 
 # 发布整改开发任务（2026-09-10）
 
-依据：[发布审查](audits/2026-09-10-release-readiness.md)。本清单是当前修复计划与状态台账，不代表问题已修复或发布已获批准。历史审查结果保持不变，后续修复在本台账关联新证据。
+依据：[发布审查](audits/2026-09-10-release-readiness.md)。本清单维护整改任务的现行状态；历史审查结果保持不变，修复和验收关联[本轮执行记录](audits/2026-09-11-remediation-validation.md)。**九项任务已通过本地验收，但远端 CI、生产前置和独立打印改版尚未验收，当前仍不放行上线。**
 
 ## 执行规则
 
 1. 先完成安全依赖与稳定的业务缺陷，再修复测试契约并补齐生产流程验证，最后冻结发布候选。
 2. 每个任务记录负责人、开始 SHA、涉及文件、业务不变量、复现、验收、验证命令与实际输出。实现和必要测试为一个可审查提交；无关重构单独提交。
-3. 状态统一：`待开发 → 开发中 → 待验证 → 已验收`；依赖缺失用 `待前置条件`，不得写已完成。只有通过对应验收才能进入已验收。
+3. 状态统一：`待开发 → 开发中 → 待验证 → 已验收`；验收必须注明本地或目标环境范围。依赖缺失用 `待前置条件`，不得写已完成。本地验收不代替远端 CI、生产前置或业务批准。
 4. 遵守 [CONTRIBUTING.md](../CONTRIBUTING.md) 的权限、所有权、金额精度、历史快照、幂等与迁移规则，以及 [UI 文案规范](ui-规范.md)。测试应追随已确认的规则，不反向修改规则来消除失败。
 5. 修改完成按项目技能仅提交当前任务，不夹带打印等其他工作；不得降低覆盖率、删除断言、无依据更新截图基线或编辑已应用迁移。
 
 ## 当前基线与任务状态
 
-规划核对基线为 `d4b558eaa8ac9237e8e6ece611e92cecfa99d205`。它比审查提交增加了工单展示/列表修复；打印/PDF 仍有其他任务的未提交修改。本次未重跑全套产品测试，不能沿用旧报告将新 HEAD 标为已通过。已核对：Next/Auth 版本、账单 `formObject`、代理 truthy 判断和 CI 浏览器缺口仍在。R06/R08/R09 须在开始实现时按原场景重新复现。
+历史规划快照（2026-09-10）：规划核对基线为 `d4b558eaa8ac9237e8e6ece611e92cecfa99d205`。它比审查提交增加了工单展示/列表修复；打印/PDF 仍有其他任务的未提交修改。本次未重跑全套产品测试，不能沿用旧报告将新 HEAD 标为已通过。已核对：Next/Auth 版本、账单 `formObject`、代理 truthy 判断和 CI 浏览器缺口仍在。R06/R08/R09 须在开始实现时按原场景重新复现。
 
-下表是任务状态的唯一记录位置；责任角色不是已指派的具体人员。领取时填执行人，复核人验收后才改为“已验收”。“待前置条件”不表示所有开发都被阻断。
+2026-09-11 现行候选：整改从 `ecc14a4` 开始，共享 HEAD 期间先后推进至 `dbbe06a`、`50c8214`；本轮最终候选以 `50c8214` 为父基线，加上本记录所属提交的精确任务增量。隔离环境使用 Node 24.15.0、pnpm 10.33.1、Next 16.3.4、Prisma 7.7.0 与 PostgreSQL 16。全量单测、覆盖率及 83 项生产业务/已提交打印布局/无 JS 流程已通过；库存表单最终单文件修正后的完整 lint、typecheck、226 项目标单测和 1 项真实库存整链也已通过。组件最终全量报告为 444 通过、0 失败、0 跳过；durable 最后独立复验 3/3 通过，精确范围见[执行记录](audits/2026-09-11-remediation-validation.md)。上段仅保留规划时事实，不代表当前缺陷状态。
 
-| 任务 | 责任角色（执行人待指派） | 当前状态 | 依赖 / 边界 | 关闭证据 |
+下表是任务状态的唯一记录位置；已领取项填实际执行代理，仍待业务/运维项保留责任角色。复核验收后才改为“已验收”。“待前置条件”不表示所有开发都被阻断。
+
+| 任务 | 执行人 / 责任角色 | 当前状态 | 依赖 / 边界 | 验收证据 |
 |---|---|---|---|---|
-| REL-01 依赖安全 | 应用开发 | 待开发 | 固定升级范围；与 REL-02 协调认证依赖 | 待填写 |
-| REL-02 代理认证 | 应用开发 | 待开发 | 最终在 REL-01 依赖版本上验收 | 待填写 |
-| REL-03 测试契约 | 测试/领域开发 | 待开发 | 可先修 mock/定位器；账单与 REL-08 协调 | 待填写 |
-| REL-04 CI 与发布测试配置 | 测试/基础设施 | 待开发 | 先建配置；所有适用失败解决后才能验收 | 待填写 |
-| REL-05 smoke 契约 | 运维/应用开发 | 待开发 | 独立于 UI；保留生产拒绝分支 | 待填写 |
-| REL-06 价格入口 | 前端 | 待开发 | REL-01 后复现；若消失也需保留回归 | 待填写 |
-| REL-07 生产前置 | 运维/业务负责人 | 待前置条件 | 可先备齐环境证据；最终验收依赖全部适用门禁 | 待填写 |
-| REL-08 月账单提交 | 应用开发 | 待开发 | 可与安全修复并行；完整 E2E 依赖 REL-03/04 配置 | 待填写 |
-| REL-09 打印验收 | 打印开发/业务验收 | 待验证 | 等打印改版形成明确提交；不夹带其工作区内容 | 待填写 |
-| REL-10 业务整链 | 测试/各领域开发 | 待开发 | 分批在隔离库实现；依赖 REL-04 配置 | 待填写 |
-| REL-11 移动抽屉定位 | 前端/测试 | 待开发 | 先固定失败 fixture，不能假定通用 Sheet 有错 | 待填写 |
-| REL-12 图表深色主题 | 前端 | 待开发 | 显式触发 tooltip 后验证 | 待填写 |
+| REL-01 依赖安全 | Codex 主代理 | 已验收（本地） | 新锁文件生产依赖审计为 0；冻结安装、构建与回归通过 | [执行记录](audits/2026-09-11-remediation-validation.md) |
+| REL-02 代理认证 | Codex auth_billing_repairs | 已验收（本地） | 非法会话、过期/停用账号及登出后迟到预取响应均有回归 | [执行记录](audits/2026-09-11-remediation-validation.md) |
+| REL-03 测试契约 | Codex browser_contract_repairs / 主代理 | 已验收（本地） | 真实确认、草稿保留与业务断言已执行；组件最终报告 444/444 通过 | [执行记录](audits/2026-09-11-remediation-validation.md) |
+| REL-04 CI 与发布测试配置 | Codex smoke_contract_repair / 主代理；仓库管理员 | 待验证（远端） | 隔离与 CI 代码已落实；远端未跑，main 保护为 false，保护/规则集 API 为 403 | [执行记录](audits/2026-09-11-remediation-validation.md)；required checks 尚无生效证据 |
+| REL-05 smoke 契约 | Codex smoke_contract_repair | 已验收（本地） | 158 项回归及实际 health/CLI 通过；生产 inline 拒绝、无效 cron 为 401 | [执行记录](audits/2026-09-11-remediation-validation.md)；真实生产探针归 REL-07 |
+| REL-06 价格入口 | Codex browser_contract_repairs | 已验收（本地） | 新版生产构建入口、非法参数及浏览器导航连续三轮通过 | [执行记录](audits/2026-09-11-remediation-validation.md) |
+| REL-07 生产前置 | 运维/业务负责人 | 待前置条件 | 正式工价、生产 worker、OSS/CDR/消息、存量迁移、备份恢复须按目标环境留证 | [上线前置清单](上线前置操作清单.md) |
+| REL-08 月账单提交 | Codex auth_billing_repairs | 已验收（本地） | hydration、无 JS 与脚本未加载的生成→冻结→收款均通过 | [执行记录](audits/2026-09-11-remediation-validation.md) |
+| REL-09 打印验收 | 打印开发/业务验收 | 待验证（独立改版） | 13 项像素差异未获批准，不更新基线；改版不夹带进本轮候选 | [执行记录](audits/2026-09-11-remediation-validation.md)；旧版打印通过不关闭新版验收 |
+| REL-10 业务整链 | Codex 主代理 / auth_billing_repairs / smoke_contract_repair | 已验收（本地） | A–F 已有 UI、领域与真实库证据；最终库存修正补验 1/1 通过 | [执行记录](audits/2026-09-11-remediation-validation.md)；真实外部服务归 REL-07 |
+| REL-11 移动抽屉定位 | Codex browser_contract_repairs | 已验收（本地） | 六视口、明暗、键盘和正常关闭已覆盖；动画几何测试修正后目标 29/29、全量组件报告 444/444 通过 | [执行记录](audits/2026-09-11-remediation-validation.md) |
+| REL-12 图表深色主题 | Codex browser_contract_repairs | 已验收（本地） | 主题前景修复，tooltip 金额、明暗对比度及相关视觉断言通过 | [执行记录](audits/2026-09-11-remediation-validation.md) |
 
 ## 阶段、顺序与退出条件
 
@@ -54,13 +56,22 @@ verification_scope: task dependencies, current source contracts, package scripts
 
 每次领取任务追加一行执行记录，保留原始失败和复测结果；不在历史审查报告里改写结果。
 
-| 任务/子项 | 执行人 / 复核人 | 开始 SHA / 修复 commit | 原问题复现与测试命令 | 通过/失败/跳过及证据位置 | 同步文档 / 遗留项 |
-|---|---|---|---|---|---|
-| 待领取 | — | — | — | — | — |
+本轮开发开始 SHA 为 `ecc14a4`，最终隔离候选父基线为 `50c8214`；修复 commit 均指**本记录所属提交**。下表汇总交付，命令、原始红灯与最后复验范围以[执行记录](audits/2026-09-11-remediation-validation.md)为准；不把修正前全量结果写成修正后全量重跑。
+
+| 任务/子项 | 执行 / 复核 | 原问题与验证 | 通过/失败/跳过及证据 | 同步文档 / 遗留项 |
+|---|---|---|---|---|
+| REL-01/02 | 主代理 / auth_billing_repairs | 依赖公告、异常 auth、登出迟到 Cookie；冻结安装、审计、认证单测及真实浏览器 | 生产依赖审计各级为 0；认证反例与真实登录/登出通过 | 编码规范、API、架构；生产身份与部署验收仍归 REL-07 |
+| 全量单测与静态门禁 | smoke_contract_repair / 主代理 | `check:architecture`、`lint`、`typecheck`、全量 `vitest --coverage --maxWorkers=2` | 581 文件、6183 通过、43 legacy 跳过、0 失败；覆盖率语句 85.27%、分支 79.38%、函数 91.69%、行 87.07%。库存表单后续修正复验：完整 lint 0 error/2 旧 warning、typecheck、226 项目标单测通过 | 43 项均为已由 v2 替代的旧账单写入归档；未降低覆盖率或关闭 lint 规则 |
+| REL-03/06/08/10 真实业务 | 三执行代理 / 主代理 | 生产 `build → start`、正式路由、明确 E2E 前置、UI 写入与读库核验 | 最终生产业务、已提交打印布局及无 JS 83/83 通过；库存最终修正后 1/1 通过，包含并发重放、盘点冲突和失败草稿/请求键/账本保持 | DEVELOPMENT、API、DATABASE；durable 最后独立复验 3/3 通过，详见执行记录 |
+| REL-03/11/12 组件与六视口 | browser_contract_repairs / 主代理 | 实际确认组件、抽屉关闭/键盘/动画、长内容、深色 tooltip 与 axe | 最终组件首轮 442/444，2 项为动画期间几何取值失败；最小测试修正后目标 29/29 通过，最终全量报告 444 通过、0 失败、0 跳过。开发价格 fixture 六视口 13 通过/5 预期跳过；5 项仅限 393 宽度的移动筛选，全部六视口均执行价格与主题断言 | UI-SYSTEM、排错指南；不强制点击、不调低像素阈值 |
+| REL-04/05 隔离、CI 与 smoke | smoke_contract_repair / 主代理 | 写库前隔离校验；实际 worker 及浏览器命令；health→gate 与本机 CLI | 隔离回归、工作流语法与 158 项 smoke 契约通过；本机非生产 inline 成功、production inline 拒绝、无效 cron 返回 401 | DEVELOPMENT、部署/smoke 文档；远端 CI 未执行、分支保护未启用 |
+| REL-07/09 外部前置 | 运维/业务负责人、打印开发 | 正式工价与目标环境；独立打印改版旧/新/差异对照 | 生产前置未验收；独立打印 33 项中 20 通过、13 像素差异未批准，失败后的后续断言不计通过 | 本清单及上线前置清单；不更新基线、不自动部署 |
 
 验收人可以与执行人角色不同；尚未指派时不能虚填姓名。证据应保存在 CI artifact 或稳定的任务记录中，不能只引用将被清理的 `/tmp`。不得保存数据库凭据、通知密钥或真实客户敏感数据。完整命令见 [开发指南](../DEVELOPMENT.md#常用命令)，门禁选择见 [测试要求](../CONTRIBUTING.md#测试要求)。
 
 ### Grok 文档复审记录
+
+以下保留 2026-09-10 的历史文档复审记录。Grok 实际只审查 `a505386`，共四份答复；G-01/G-02/G-03 此前已修正。本轮新代码由本地代理审查和测试，未声称已获 Grok 复审。
 
 范围为 [a505386 的 Grok 报告](audits/2026-09-10-grok-a505386-review.md) G-01/G-02/G-03，
 开始 SHA 为 `469ae29560aa80151c8f8386e7cd80a32782ec33`。执行：Codex 主代理；
@@ -125,8 +136,8 @@ verification_scope: task dependencies, current source contracts, package scripts
 
 - 优先级：P1；角色：测试/基础设施；依赖：按阶段表区分 REL-04-A 与 REL-04-B。
 - 范围：`.github/workflows/quality.yml`、Playwright 发布配置、隔离测试库和工价 fixture、报告上传。
-- REL-04-A：先新增受版本控制的生产构建测试配置/命令，明确 `build → start`、不复用开发服务器及独立 `.next`/端口；保留 dev-only 价格 fixture 的单独用例组并增加正式路由等价验收。目前仓库默认仍是 `next dev`，审查使用的 `/tmp` 配置不算交付。
-- REL-04-B：实际运行组件、业务、视觉及安全检查并上传结果；分支保护/required checks 是否生效单独留证，不能仅添加 YAML 就声明已强制执行。
+- REL-04-A：先新增受版本控制的生产构建测试配置/命令，明确 `build → start`、不复用开发服务器及独立 `.next`/端口；保留 dev-only 价格 fixture 的单独用例组并增加正式路由等价验收。已提供 `test:release` 与独立产物；默认开发命令仍为 `next dev`，详见开发指南。
+- REL-04-B：工作流已接入实际组件、业务、视觉和 durable worker，并保留隐藏 artifact；Linux 业务与 macOS Darwin 打印分开执行，均不以 `--list` 代替测试。远端 CI 尚未执行，main `protected=false`，保护与规则集接口返回 403；required checks 必须取得实际生效证据，不能仅添加 YAML 就声明已强制执行。
 - 不变量：不访问生产数据库或真实通知，fixture 只写独立可丢弃库，追加式生产/财务记录不靠删除绕过约束。
 - 验收：CI 实际执行浏览器组件、生产构建 E2E、打印门禁及六视口明暗/axe；不能只 `--list`。新库发布测试工价后报工场景不得因缺前置条件静默跳过；CI 保存失败截图、trace、JSON 和依赖审计。
 - 验证：用已知失败用例证明 CI 会红，再修复至绿；从空库完整迁移开始，候选 SHA 与构建产物一致。
@@ -136,7 +147,7 @@ verification_scope: task dependencies, current source contracts, package scripts
 - 优先级：P2；角色：运维/应用开发；关联：R05 及本次复核的 cron 503 漏判。
 - 范围：jobs 健康摘要、部署 gate、测试与部署 smoke 文档。
 - 复现：inline、无 worker/机器人时 health 返回 `smartBot.status=null`，其余字段表示无机器人要求且正常，smoke 拒绝。
-- 本次文档核对另发现：`scripts/deploy-smoke.mjs` 对所有模式接受 cron 401/503，但 smoke 清单要求生产 503 拒绝发布。需补 production 分支的失败断言，当前不能声称脚本已经拦截。
+- 本次文档核对另发现：`scripts/deploy-smoke.mjs` 对所有模式接受 cron 401/503，但 smoke 清单要求生产 503 拒绝发布。已补 production 分支的失败断言和实现；实际目标环境探针仍待留证。
 - 验收：明确定义该状态是合法的本地模式还是要求工具指定模式；文档里的本地 smoke 可执行。生产缺 worker、必需机器人未配置、身份不符、生产 cron 缺配置返回 503 仍失败；无效 token 的预期 401 应通过，不能放宽为“HTTP 200 就通过”。
 - 验证：真实路由响应交给真实 gate 的集成测试；本地 inline 与 durable worker 两套 smoke；生产失败分支回归。
 
@@ -181,11 +192,11 @@ verification_scope: task dependencies, current source contracts, package scripts
 
 ### REL-10 子项与验收范围
 
-子项初始均待开发，由 REL-10 执行记录逐项维护；不能把其中一项通过计作 REL-10 完成。
+A–F 已按下表边界完成本地验收，逐项证据由[执行记录](audits/2026-09-11-remediation-validation.md)维护；真实外部服务验收仍归 REL-07。不能只凭其中一项通过关闭整链任务。
 
 | 子项 | 业务链与最小验收 | 关键边界 |
 |---|---|---|
-| 10-A 主数据 | 账号/客户/供应商/产品类别/工艺/纸张/SKU/BOM 创建→修改→停用及下游选择 | 角色/资源范围、停用后不能新选、历史仍可查看 |
+| 10-A 主数据 | 账号/客户/供应商/产品类别/工艺/纸张/SKU 的合法创建→修改→停用及下游选择；BOM 按正式规则创建新版本与停用 | 角色/资源范围、停用后不能新选、历史仍可查看；不把不可变 BOM 强行改成可编辑 |
 | 10-B 库存 | 领料→退料、调拨、盘点提交及冲突 | 库存与流水一致、并发不丢量、重复请求不重复入账 |
 | 10-C 采购 | 采购→部分收货→重复重试→撤销 | 收货累计与库存、采购状态一致；非法撤销保持原数据 |
 | 10-D 外协 | 创建→逐款回货→付款→工单完工判定 | 款式覆盖、数量快照、金额精度与付款幂等 |

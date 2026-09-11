@@ -9,6 +9,7 @@ import {
 function renderHarness() {
   const page = {
     setContent: vi.fn().mockResolvedValue(undefined),
+    waitForNetworkIdle: vi.fn().mockResolvedValue(undefined),
     waitForFunction: vi.fn().mockResolvedValue(undefined),
     emulateMediaType: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn().mockResolvedValue('ready'),
@@ -48,8 +49,10 @@ describe('renderHtmlToPdf', () => {
 
     expect(page.setContent).toHaveBeenCalledWith(
       '<html><body>print</body></html>',
-      { waitUntil: 'networkidle0' },
+      { waitUntil: 'load' },
     );
+    expect(page.waitForNetworkIdle).toHaveBeenCalledWith({ concurrency: 0, signal: undefined });
+    expect(page.waitForNetworkIdle).toHaveBeenCalledBefore(vi.mocked(page.pdf));
     expect(page.waitForFunction).toHaveBeenCalledWith(
       expect.any(Function),
       {

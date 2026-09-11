@@ -6,13 +6,13 @@ const { boundaryCapture } = vi.hoisted(() => ({
     fallback: null as null | ((props: Record<string, unknown>, info: {
       error: Error;
       reset: () => void;
-      unstable_retry: () => void;
+      retry: () => void;
     }) => React.ReactNode),
   },
 }));
 
 vi.mock('next/error', () => ({
-  unstable_catchError:
+  catchError:
     (fallback: typeof boundaryCapture.fallback) =>
     ({ children }: { children?: React.ReactNode }) => {
       boundaryCapture.fallback = fallback;
@@ -40,7 +40,7 @@ describe('ErrorBoundary', () => {
     const html = renderToStaticMarkup(
       fallback(
         { scope: 'section', title: '这块数据没加载出来' },
-        { error: new Error('boom'), reset: vi.fn(), unstable_retry: retry },
+        { error: new Error('boom'), reset: vi.fn(), retry: retry },
       ),
     );
 

@@ -46,10 +46,10 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
   opts.signal?.addEventListener('abort', abortRender, { once: true });
   try {
     opts.signal?.throwIfAborted();
-    // `networkidle0` is required so OSS-hosted design thumbnails have
-    // finished loading before we snapshot. Inline SVG (QR codes)
-    // doesn't trigger network activity, but image tags do.
-    await page.setContent(opts.html, { waitUntil: 'networkidle0' });
+    // Puppeteer 25 separates DOM lifecycle from network-idle waiting.
+    // Preserve zero active requests before rendering remote artwork thumbnails.
+    await page.setContent(opts.html, { waitUntil: 'load' });
+    await page.waitForNetworkIdle({ concurrency: 0, signal: opts.signal });
     opts.signal?.throwIfAborted();
     try {
       await page.waitForFunction(

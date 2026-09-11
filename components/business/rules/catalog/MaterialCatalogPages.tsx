@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import {
@@ -383,6 +384,7 @@ export async function EditMaterialCatalogItem({
         <h2 className="mb-4 text-base font-semibold">库存出入库</h2>
         <StockTransactionForm
           action={boundTransaction}
+          initialIdempotencyKey={randomUUID()}
           unit={material.unit}
           locationOptions={locationOptions}
         />

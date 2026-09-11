@@ -491,6 +491,7 @@ describe('ADMIN_MODULES registry', () => {
       const relativeRoute = routePathname.replace(/^\//, '');
       const candidates = [
         join(root, 'app', '(admin)', relativeRoute, 'page.tsx'),
+        join(root, 'app', '(billing)', relativeRoute, 'page.tsx'),
         join(root, 'app', relativeRoute, 'page.tsx'),
       ];
       expect(

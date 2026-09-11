@@ -198,3 +198,17 @@ pnpm test --run
 ### Next.js 路由模块边界
 
 `route.ts` 仅导出 HTTP 方法与 Next.js 路由配置。可测试的处理函数放在相邻 `handler.ts`，仍由 `route.ts` 中的 `auth(handler)` 包装；权限、资源范围和 HTTP 地址保持不变。
+
+### 发布整改后的认证与表单契约（2026-09-11）
+
+Proxy 仅将包含非空 `user.id`、合法且未过期 `expires` 的 session 视为已登录；错误对象、数组、缺字段和过期 session 均拒绝。页面跳转登录，受保护 API 返回 401；数据库账号状态、权限和资源所有权仍在服务端检查。
+
+月账单生成、确认、收款与抵扣 action 在 strict schema 前仅过滤字段名以 `$ACTION_` 开头的 React 表单协议元数据；未知业务字段仍拒绝。该兼容处理不改变账单冻结、Decimal 金额、幂等键或历史快照。
+
+部署 jobs gate 仅在明确的 development/test inline 模式与完整健康摘要一致时接受 optional/null 机器人状态；production 仍拒绝 null、必需 worker 缺失或版本不符。production smoke 对无效 cron token 只接受 401，缺配置的 503 失败。
+
+PDF 生成接口仍执行认证、角色和资源所有权校验；页面下载入口使用原生链接，导航预取不得创建后台任务。P2002 仅按已识别的约束字段映射为表单业务错误，未知冲突继续抛出。
+
+手工出入库 action 必须携带有效的 `idempotencyKey`；同键重放仅返回原流水，同键不同操作者或业务内容拒绝，成功后表单换新键。时薪重复标记为已发保留首次发放时间。数据库前向迁移与历史兼容边界见 [数据库说明](./DATABASE.md#手工出入库请求幂等2026-09-11-局部核对)。
+
+认证预取仍完整验证会话，但 GET/HEAD 预取响应不回写代理层滚动会话 Cookie，防止晚响应复活已经登出的会话；普通导航续期策略保持。

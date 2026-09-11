@@ -217,7 +217,7 @@ test.describe('创建工单 — golden path', () => {
         .locator('dd');
     await expect(itemFact('工艺')).toContainText('局部烫金');
     await expect(itemFact('规格')).toHaveText('大号封90×165');
-    await expect(itemFact('纸张')).toHaveText('160g珠光艳闪 · 160g');
+    await expect(itemFact('纸张')).toHaveText('160g珠光艳闪');
     await page.getByText('工单信息', { exact: true }).click();
     await expect(page.getByText(/^GD-\d{6}-\d{3}$/).first()).toBeVisible();
 

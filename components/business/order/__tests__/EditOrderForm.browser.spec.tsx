@@ -63,6 +63,7 @@ function mount(props: Partial<ComponentProps<typeof EditOrderForm>> = {}) {
   flushSync(() =>
     root.render(
       <EditOrderForm
+        key={`order-1:${props.expectedEditVersion ?? 4}`}
         orderId="order-1"
         expectedEditVersion={4}
         fieldset="FULL"
@@ -215,6 +216,40 @@ describe('complete order editing', () => {
     expect(JSON.parse(String(data.get('shipments'))).map((row: { receiverAddress: string }) => row.receiverAddress)).toEqual(shipments.map((row) => row.receiverAddress));
     await expect.element(page.getByRole('combobox', { name: '关联外部销售' })).toHaveValue('sales-2');
   });
+  it('preserves the chosen account through pending, field errors and a retry', async () => {
+    let finish!: (result: { status: 'invalid'; fieldErrors: Record<string, string[]> }) => void;
+    save.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    mount({ externalSalesAssociation });
+    const account = page.getByRole('combobox', { name: '关联外部销售' });
+    const submit = page.getByRole('button', { name: '保存', exact: true });
+    await account.selectOptions('sales-2');
+    await submit.click();
+    await expect.element(account).toBeDisabled();
+    expect((account.element() as HTMLSelectElement).value, 'pending value').toBe('sales-2');
+    await expect.element(page.getByRole('button', { name: '保存中…', exact: true })).toBeDisabled();
+    expect(save).toHaveBeenCalledOnce();
+    finish({ status: 'invalid', fieldErrors: { externalSalesUserId: ['账号不可用，请重新选择。'] } });
+    await expect.element(account).toBeEnabled();
+    expect((account.element() as HTMLSelectElement).value, 'resolved value').toBe('sales-2');
+    await expect.element(page.getByText('账号不可用，请重新选择。', { exact: true })).toBeVisible();
+    await submit.click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1][2].get('externalSalesUserId')).toBe('sales-2');
+    expect((account.element() as HTMLSelectElement).value, 'resolved value').toBe('sales-2');
+  });
+
+  it('adopts the persisted account when the server supplies a new edit version', async () => {
+    mount({ externalSalesAssociation });
+    await page.getByRole('combobox', { name: '关联外部销售' }).selectOptions('sales-2');
+    // The real edit page keys this form by order.id and editVersion after refresh.
+    mount({ expectedEditVersion: 5, externalSalesAssociation: {
+      ...externalSalesAssociation, current: externalSalesAssociation.options[1],
+    } });
+    await expect.element(page.getByRole('combobox', { name: '关联外部销售' })).toHaveValue('sales-2');
+    expect(host.querySelector<HTMLInputElement>('[name="expectedEditVersion"]')?.value).toBe('5');
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('retains a historical unavailable account and explains a frozen association', async () => {
     mount({ externalSalesAssociation: { ...externalSalesAssociation, options: [], blockedReason: '工单已确认，不能更换关联外部销售。' } });
     const field = page.getByRole('combobox', { name: '关联外部销售' });

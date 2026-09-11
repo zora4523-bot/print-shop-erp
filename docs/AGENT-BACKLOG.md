@@ -29,9 +29,9 @@ Never auto-merge. Never apply production database operations from this backlog.
    `pnpm lint` includes copy/token gates; plain `eslint` does not. Record actual
    results, skipped coverage and the tested SHA in the PR template.
 4. Run the required build, browser and migration checks for the affected scope;
-   browser inventory collection is not test execution. The current
-   `agent:next` prompt generator still prints older commands. Until REL-03
-   updates it, use the canonical requirements above rather than that command list.
+   browser inventory collection is not test execution. The `agent:next` prompt
+   generator now links the canonical requirements above and includes copy/token,
+   isolation and release evidence requirements.
 5. The PR must be draft unless the user explicitly asks for a ready PR.
 
 ## A01 - E2E Smoke Suite For Critical Flow

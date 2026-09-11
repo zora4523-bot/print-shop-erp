@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { requireReleasePrerequisite } from './release-prerequisite';
 import {
   cleanupE2eProductionOperationFixture,
   E2E_PASSWORD,
@@ -19,6 +20,7 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
     test.setTimeout(120_000);
 
     const isolationFailure = productionOperationE2eIsolationFailure();
+    requireReleasePrerequisite(isolationFailure);
     if (isolationFailure) {
       test.skip(true, isolationFailure);
       return;
@@ -26,6 +28,7 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
 
     const seeded = await seedE2eProductionOperationFixture();
     if (!seeded.ready) {
+      requireReleasePrerequisite(seeded.reason);
       test.skip(true, seeded.reason);
       return;
     }

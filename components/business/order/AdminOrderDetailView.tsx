@@ -125,7 +125,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         </Disclosure>
       </div>
       <div className={styles.headerActions}>
-        <Link href={`/api/orders/${model.id}/pdf`} className={buttonVariants({ variant: 'outline' })}><FileDown aria-hidden="true" />工单 PDF</Link>
+        <a href={`/api/orders/${model.id}/pdf`} className={buttonVariants({ variant: 'outline' })}><FileDown aria-hidden="true" />工单 PDF</a>
         {canEdit ? <Link href={`/orders/${model.id}/edit`} className={buttonVariants({ variant: 'outline' })}><Pencil aria-hidden="true" />编辑工单</Link> : null}
       </div>
     </div>}>

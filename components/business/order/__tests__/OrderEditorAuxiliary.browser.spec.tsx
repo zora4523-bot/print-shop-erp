@@ -1,15 +1,20 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type ComponentProps, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderPricingReviewPreview } from '@/lib/order/pricing-review';
-import { Button } from '@/components/ui/button';
 
 const mocks = vi.hoisted(() => ({ save: vi.fn(), remove: vi.fn(), plate: vi.fn(), removePlate: vi.fn(), preview: vi.fn(), finalize: vi.fn(), freightPreview: vi.fn(), freightFinalize: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock('next/link', () => ({
+  default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => {
+    void prefetch;
+    return <a {...props} />;
+  },
+  useLinkStatus: () => ({ pending: false }),
+}));
 vi.mock('@/actions/order', () => ({ saveOrderManualChargeAction: mocks.save, deleteOrderManualChargeAction: mocks.remove, saveOrderPlateDetailAction: mocks.plate, deleteOrderPlateDetailAction: mocks.removePlate, previewOrderPricingReviewAction: mocks.preview, finalizeOrderPricingAction: mocks.finalize }));
 vi.mock('@/actions/order-fulfillment-pricing', () => ({ previewFulfillmentPricingAction: mocks.freightPreview, finalizeFulfillmentPricingAction: mocks.freightFinalize }));
-vi.mock('@/components/ui-business', () => ({ ConfirmActionDialog: ({ disabled, onConfirm, confirmLabel }: { disabled?: boolean; onConfirm: () => void; confirmLabel: string }) => <Button type="button" disabled={disabled} onClick={onConfirm}>{confirmLabel}</Button> }));
 
 import { OrderCommercialDetailsManager } from '../OrderCommercialDetailsManager';
 import { OrderPricingReviewForm } from '../OrderPricingReviewForm';

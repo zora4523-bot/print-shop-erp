@@ -1,6 +1,16 @@
+import type { ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
+// Link is a framework boundary; Vite does not inject Next's process definitions.
+vi.mock('next/link', () => ({
+  default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => {
+    void prefetch;
+    return <a {...props} />;
+  },
+  useLinkStatus: () => ({ pending: false }),
+}));
+
 import { CustomerBlankPricingSectionView } from '../CustomerPricingSectionViews';
 
 function pricingView(value: number) {

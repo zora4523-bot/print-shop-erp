@@ -1,6 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
+import { assertActivatedE2eDatabase } from '../../scripts/lib/e2e-environment';
+import { assertReleasePieceworkPrerequisite } from '../../scripts/lib/e2e-piecework';
 
 // Idempotent E2E user fixture. Runs once before the test suite.
 // Inserts (or updates) one user per role needed by the E2E suite. Passwords
@@ -99,9 +101,17 @@ export const E2E_USERS: Record<string, E2EUser> = {
 };
 
 export default async function globalSetup(): Promise<void> {
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const database = assertActivatedE2eDatabase();
+  const client = new Client({ connectionString: database.url });
   await client.connect();
   try {
+    const identity = await client.query<{ database: string }>('SELECT current_database() AS database');
+    if (identity.rows[0]?.database !== database.databaseName) {
+      throw new Error('Connected database does not match E2E_DATABASE_CONFIRM_DATABASE; fixture writes refused.');
+    }
+    if (process.env.E2E_RELEASE_MODE === '1') {
+      await assertReleasePieceworkPrerequisite(client);
+    }
     const passwordHash = await bcrypt.hash(E2E_PASSWORD, 10);
     for (const u of Object.values(E2E_USERS)) {
       // ON CONFLICT mirrors the upsert semantics: if the row exists

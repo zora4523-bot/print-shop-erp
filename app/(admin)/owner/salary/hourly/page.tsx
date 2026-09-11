@@ -304,13 +304,13 @@ function FilterBar({
           <option value="paid">仅已发</option>
         </select>
       </div>
-      <div className="flex flex-col">
+      <div className="flex min-w-0 max-w-full flex-col">
         <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅</label>
         <select
           id="hourly-workerId"
           name="workerId"
           defaultValue={workerId ?? ''}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-full min-w-0 rounded-md border bg-background px-3 py-1 text-sm"
         >
           <option value="">全部师傅</option>
           {workers.map((worker) => (
