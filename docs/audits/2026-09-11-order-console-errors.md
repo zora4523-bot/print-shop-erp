@@ -45,3 +45,38 @@
 再次探测改为先验证对全新随机测试路径的删除权限，并在每阶段记录结果；该预检仍返回 AccessDenied/403，因此在任何新 PUT 前停止，没有新增测试文件。证据 `oss-transfer-probe.json` 的 phase 为 `cleanup-permission`，status 为 0。尚需核对应用账号的对象权限后才能验收完整上传链路，不能据此断言真实上传 PUT 或 HEAD 一定失败。用户现有草稿未提交，其设计文件未上传或更改；不能把跨域预检通过写成完整上传、读取和登记验收通过。
 
 控制台错误原文含临时签名与 token，本报告不收录这些参数；临时探测脚本和证据在仓库外。没有数据库迁移、价格修改、历史订单变更或部署。
+
+## 后续复核与资料修复（2026-09-11）
+
+本节追加此前待办的后续状态，保留上文当时的失败证据。代码起点 `2cd0423dddb3211d57c01e7ae2303e82ddf7e0d6`；候选为该 HEAD 加本节对应的维护脚本、14 项测试及文档，未包含工作区其他打印改动。
+
+### OSS：已恢复，纠正验收前置
+
+用户确认已处理测试文件后，重新核查真实工单 `cmtwgmdlv0000f70rrp8a1l8v`：图片与 CDR 均已登记，工单为 CONFIRMED。使用应用账号对这两个已存在对象进行 HEAD 和 GET，全部返回 200，实际大小分别为 28,076 和 72,887 字节，与数据库登记一致。此轮只读，不再创建测试对象，也未代替用户提交或修改工单。
+
+此前把 DeleteObject 权限作为传输验收前置不正确：`recordOrderItemDesign` 使用 HEAD 检查文件后登记；`removeOrderItemDesign` 只删除关联记录并写工单日志，没有调用 OSS 物理删除。因此缺少 DeleteObject 不能证明上传或业务删除不可用，也不需要为测试增加对象删除权限。已纠正部署指南。跨域预检、真实文件登记和读取证据已闭环；旧诊断对象清理仍以用户确认作为依据，不宣称工具列举成功。
+
+### 纸张：三条未使用旧导入记录已清理
+
+溯源到 `20260826184000_external_sales_processing_rule_v2` 已建立标准纸张，但旧名称的语义重复未被数据库的精确名称约束消除。核对三条旧记录均为零库存、空成本/安全库存、无产品/采购/库存/BOM 等引用。事务内动态核查 8 个外键消费字段、33 个 JSON 快照字段，均无相关引用。
+
+维护脚本先演练回滚，再在当前开发服务器所连数据库执行。三条旧导入记录已删除，完整 before 留在 BusinessAuditLog；标准材料不改名、不改价，计价引擎的唯一匹配约束保持不变。执行前后 Order、OrderItem、Product、CustomerPriceBook、CustomerPriceRule、OrderPricingRevision 全表内容哈希一致。再次演练返回空变更，确认幂等。
+
+真实浏览器复核：修复前选择 160g冰白纸出现通用无法核价错误；修复后进入正式计价判断，明确显示“所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价”。这属于当前已发布价格未覆盖，不能写成冰白纸已可自动出价。160g红卡在专版大号封、单面单色、1,000 个、加价35%条件下自动显示加工费325.00、参考报价438.75。数量改为2,000后自动更新为加工费570.00、参考报价769.50，未点击计算按钮。刷新后旧冰白纸名称及混合导入的艳闪选项已移除。
+
+### 本轮验证
+
+独立候选目录 `/tmp/erp-outstanding-20260911/snapshot`，由 Git archive 加本任务文件构成。依赖与生成物单独复制；只移除了副本中指回原工作区的 `node_modules/node_modules` 链接并清除副本失败缓存，没有改动用户原目录。E2E 使用显式确认的独立可丢弃数据库及端口3115，框架现有隔离门禁保持启用。初次 E2E 因临时包装器错误地把普通连接设为测试连接而被门禁拒绝；随后因复制的外链导致编译失败。纠正测试环境后重跑，均非应用回归。
+
+数据库集成演练在独立测试库新建本次专用 schema，完成后仅清理该 schema：验证默认回滚、SET NULL 外键拒绝、历史快照拒绝、中途删除失败时审计和删除一起回滚、成功写入完整 before 及重复执行幂等，5 组实测通过。证据为仓库外 `integration.log`；现场演练与执行证据为 `dry-run.json`、`applied.json`；文件读取为 `oss-head.json`、`oss-get.json`，均不收录签名或凭证。
+
+| 最终验证命令 | 结果 |
+|---|---|
+| `pnpm exec vitest run scripts/maintenance/__tests__/retire-unused-paper-imports.test.ts` | 14项通过，零跳过。 |
+| `pnpm exec vitest run` | 582文件通过，6,198项通过；43项为起点已跳过的legacy bill测试，不计入通过。 |
+| `pnpm exec playwright test tests/e2e/workbench.spec.ts tests/e2e/workbench-paper-boundaries.spec.ts --project=chromium` | development模式10项通过，零跳过，1.8分钟；包括目录逐项选择、自动计算、缺价恢复、权限及资料查询。 |
+| `pnpm lint`，最后增补后重跑维护脚本eslint | 零错误，最终任务文件零警告；全库仍为global-error和OrderForm两处既有警告。 |
+| `pnpm typecheck` | 最终候选通过。 |
+| `git diff --check` | 通过。 |
+
+日志位于同一仓库外证据目录：`target.log`、`unit-final.log`、`e2e.log`、`lint.log`、`lint-final.log`、`typecheck-final.log`。本次没有schema迁移、发布、push或价格规则修改；验证范围是上述问题修复，不能据此宣称整个生产环境已完成发布验收。冰白纸专版价格需要业务管理员按现行流程配置和发布，仍不代填价格。
