@@ -90,8 +90,8 @@ function renderDetail(model = detailModel(), canEdit = true) {
     printHint={printHint}
     decision={<div><p>当前待办：核对本版打印</p><Button type="button">核对打印任务</Button><a href="#pricing-review" className="inline-flex min-h-11 min-w-11 items-center p-3">前往核价</a></div>}
     prints={[{ id: 'print-1', version: 1, state: 'SUPERSEDED', at: '2026-09-07T02:00:00Z' }, { id: 'print-2', version: 2, state: 'PENDING', at: '2026-09-08T02:00:00Z' }]}
-    supplementary={[{ id: 'extra-audit', title: '完整审核记录', content: <p>该记录来自已保存的审核结果。</p> }, { id: 'detail-design-files', title: '设计文件管理', content: <p>设计原稿与生产文件记录。</p> }, { id: 'detail-pricing', title: '计价与核价', content: <Disclosure data-testid="nested-pricing"><DisclosureSummary>核价明细</DisclosureSummary><section id="pricing-review"><h3>待核价费用明细</h3></section></Disclosure> }]}
-    packaging={<p>分袋明细：300 袋，每袋 10 个。</p>}
+    supplementary={[{ id: 'extra-audit', title: '完整审核记录', content: <section data-testid="embedded-audit" className="rounded-xl border bg-card p-6 shadow-sm"><p>该记录来自已保存的审核结果。</p><section data-testid="nested-card" className="rounded-xl border bg-card p-4"><label htmlFor="audit-note">记录备注</label><input id="audit-note" className="block min-h-11 w-full rounded-md border bg-background" /></section></section> }, { id: 'detail-design-files', title: '设计文件管理', content: <p>设计原稿与生产文件记录。</p> }, { id: 'detail-pricing', title: '计价与核价', content: <Disclosure data-testid="nested-pricing"><DisclosureSummary>核价明细</DisclosureSummary><section id="pricing-review"><h3>待核价费用明细</h3></section></Disclosure> }]}
+    packaging={<section data-testid="embedded-packaging" className="rounded-xl border bg-card p-6 shadow-sm"><p>分袋明细：300 袋，每袋 10 个。</p></section>}
   />));
 }
 
@@ -149,6 +149,21 @@ describe('admin order detail design and interaction gates', () => {
         document.documentElement.classList.toggle('dark', theme === 'dark');
         renderDetail();
         await settleLayout();
+        for (const id of ['embedded-audit', 'embedded-packaging']) {
+          const style = getComputedStyle(host.querySelector(`[data-testid="${id}"]`)!);
+          expect(style.backgroundColor, `${id} 应共用页面底色`).toBe('rgba(0, 0, 0, 0)');
+        }
+        const card = host.querySelector('[data-testid="nested-card"]')!;
+        const input = host.querySelector('#audit-note')!;
+        const reference = document.createElement('div');
+        reference.className = 'bg-card';
+        host.append(reference);
+        expect(getComputedStyle(card).backgroundColor).toBe(getComputedStyle(reference).backgroundColor);
+        expect(getComputedStyle(card).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+        reference.className = 'bg-background';
+        expect(getComputedStyle(input).backgroundColor).toBe(getComputedStyle(reference).backgroundColor);
+        expect(getComputedStyle(input).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+        reference.remove();
         expect(geometryFailures(host, width)).toEqual([]);
         const surface = host.querySelector<HTMLElement>('[data-testid="admin-order-detail"]')!;
         const actions = document.getElementById('order-detail-actions')!;
