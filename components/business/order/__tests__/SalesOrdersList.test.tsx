@@ -34,7 +34,7 @@ describe('SalesOrdersList', () => {
     expect(html).toContain('>2</b> 款');
     expect(html).toContain('2,000');
     expect(html).toContain('局部烫金 · 触感纸');
-    expect(html).toContain('待处理');
+    expect(html).toContain('待工厂处理');
     expect(html).toContain('待工厂核价');
     expect(html).toContain('修改申请中');
     expect(html).toContain('中通');
@@ -42,10 +42,27 @@ describe('SalesOrdersList', () => {
     expect(html).not.toContain('师傅');
     expect(html).not.toContain('计件成本');
     expect(html).not.toContain('生产任务');
-    // 状态药丸走共享 StatusBadge（SUBMITTED → 待处理 / info），
+    // 状态药丸走共享 StatusBadge（SUBMITTED → 待工厂处理 / info），
     // 不再是销售端自带的第二套 tone 类名表。
     expect(html).toContain('data-tone="info"');
     expect(html).not.toContain('bg-foreground text-background');
+  });
+
+  it.each(Object.values(OrderStatus))('%s 卡片直接链接完整详情，不受操作权限白名单影响', (status) => {
+    const html = renderToStaticMarkup(
+      <SalesOrdersList orders={[{ ...row(), status }]} query={query()} nowIso="2026-09-12T08:00:00Z" />,
+    );
+    expect(html).toContain('href="/orders/order-1"');
+    expect(html).not.toContain('href="/orders/order-1#change-request"');
+    expect(html).toContain('title="快速预览工单"');
+  });
+
+  it('取消申请显示真实类型，不混用修改申请文案', () => {
+    const html = renderToStaticMarkup(
+      <SalesOrdersList orders={[{ ...row(), pendingChangeRequest: { ...row().pendingChangeRequest!, type: 'CANCEL' } }]} query={query()} nowIso="2026-09-12T08:00:00Z" />,
+    );
+    expect(html).toContain('取消申请中');
+    expect(html).not.toContain('修改申请中');
   });
 
   it('待定费用不伪装成 0 元，已知合计明确排除待定项', () => {
@@ -199,6 +216,7 @@ function row(): SalesOrderListRow {
     pricingAttentionReason: '价格待管理员确认',
     pendingChangeRequest: {
       id: 'change-1',
+      type: 'MODIFY',
       reason: '客户改数量',
       createdAt: '2026-08-27T07:30:00.000Z',
     },

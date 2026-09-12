@@ -53,8 +53,40 @@ describe('sales list query boundary', () => {
   it('已结算工单纳入销售完结队列，仍限制为本人提交', () => {
     const query = sanitizeSalesOrderListQuery(parseOrderListQuery({ view: 'done' }).query);
     expect(buildSalesOrderWhere(actor, query, [])).toEqual({ AND: [
-      { submitterId: actor.id }, { status: { in: [OrderStatus.SETTLED, OrderStatus.FINISHED, OrderStatus.CANCELLED] } },
+      { submitterId: actor.id }, { status: { in: [OrderStatus.SETTLED, OrderStatus.FINISHED] } },
     ] });
+  });
+
+  it('所有新旧状态恰好归入一个生命周期分类，汇总和筛选口径相同', async () => {
+    const statuses = Object.values(OrderStatus);
+    dbMock.order.groupBy.mockResolvedValue(statuses.map((status) => ({ status, _count: { _all: 1 } })));
+    const summary = await getSalesOrderListSummary(actor);
+    expect(summary.all).toBe(statuses.length);
+    const classified: OrderStatus[] = [];
+    for (const view of ['doing', 'shipped', 'done', 'cancelled', 'draft'] as const) {
+      const query = sanitizeSalesOrderListQuery(parseOrderListQuery({ view }).query);
+      expect(query.view).toBe(view);
+      const where = buildSalesOrderWhere(actor, query) as { AND: [{ submitterId: string }, { status: OrderStatus | { in: OrderStatus[] } }] };
+      expect(where.AND[0]).toEqual({ submitterId: actor.id });
+      const predicate = where.AND[1].status;
+      const matched = typeof predicate === 'string' ? [predicate] : predicate.in;
+      classified.push(...matched);
+      expect(summary[view]).toBe(matched.length);
+      if (view === 'done') expect(matched).toEqual([OrderStatus.SETTLED, OrderStatus.FINISHED]);
+      if (view === 'cancelled') expect(matched).toEqual([OrderStatus.CANCELLED]);
+    }
+    expect(classified.sort()).toEqual(statuses.sort());
+  });
+
+  it.each(['MODIFY', 'CANCEL'] as const)('保留待审核 %s 申请类型，单纯等待审核不算需关注', async (type) => {
+    dbMock.order.findFirst.mockResolvedValue(orderRecord({
+      pricingStatus: OrderPricingStatus.AUTO_CONFIRMED,
+      changeRequests: [{ id: 'pending', type, status: OrderChangeRequestStatus.PENDING, reason: '测试申请', createdAt: new Date('2026-09-12T00:00:00Z') }],
+    }));
+    const order = await getSalesOrderByOrderNo(actor, 'GD-260827-001');
+    expect(order?.pendingChangeRequest?.type).toBe(type);
+    expect(order?.needsAction).toBe(false);
+    expect(dbMock.order.findFirst.mock.calls[0][0].select.changeRequests.select.type).toBe(true);
   });
 
   it('keeps only sales search, pagination and supported business views', () => {
@@ -128,6 +160,7 @@ describe('sales list query boundary', () => {
           changeRequests: [
             {
               id: 'change-1',
+              type: 'MODIFY',
               status: OrderChangeRequestStatus.REJECTED,
               reason: '客户改数量',
               reviewRemark: '已进入生产，不能删款',
@@ -300,7 +333,8 @@ describe('sales list query boundary', () => {
       todo: 2,
       doing: 7,
       shipped: 5,
-      done: 7,
+      done: 6,
+      cancelled: 1,
       draft: 2,
       shippedThisMonth: 7,
     });

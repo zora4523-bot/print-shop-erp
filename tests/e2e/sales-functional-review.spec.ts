@@ -8,8 +8,8 @@ test.use({ hasTouch: true });
 
 // Each case owns a fresh, append-only historical fixture. Never mutate a real
 // salesperson's order or weaken the database's immediate quote constraints.
-async function seed(status = 'SUBMITTED', username = E2E_USERS.sales.username) {
-  const id = `e2e-sales-review-${randomUUID()}`;
+async function seed(status = 'SUBMITTED', username = E2E_USERS.sales.username, prefix = 'e2e-sales-review') {
+  const id = `${prefix}-${randomUUID()}`;
   const salesId = await getUserIdByUsername(username);
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
@@ -17,7 +17,7 @@ async function seed(status = 'SUBMITTED', username = E2E_USERS.sales.username) {
     await db.query('BEGIN');
     const { rows: books } = await db.query(`SELECT id FROM "CustomerPriceBook" WHERE purpose='LOGISTICS' AND "settlementType"='EXTERNAL_SALES' AND "isActive" ORDER BY "effectiveFrom" DESC LIMIT 1`);
     expect(books).not.toHaveLength(0);
-    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"customName","receiverName","receiverPhone","receiverAddress","processingAmount","totalAmount","confirmedFee","pricingStatus","pricingConfirmedAt","updatedAt") VALUES ($1,$1,$2,'SALES',$2,'EXTERNAL_SALES',$3::"OrderStatus",$1,'测试收件人','13800138000','广东省佛山市测试路1号',100,130,130,'LEGACY_CONFIRMED',NOW(),NOW())`, [id, salesId, status]);
+    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"customName","receiverName","receiverPhone","receiverAddress","processingAmount","totalAmount","confirmedFee","pricingStatus","pricingConfirmedAt","updatedAt","settlementContractVersion","settledFee","settledAt") VALUES ($1,$1,$2,'SALES',$2,'EXTERNAL_SALES',$3::"OrderStatus",$1,'测试收件人','13800138000','广东省佛山市测试路1号',100,130,130,'LEGACY_CONFIRMED',NOW(),NOW(),CASE WHEN $3::text='SETTLED' THEN 2 END,CASE WHEN $3::text='SETTLED' THEN 130 END,CASE WHEN $3::text='SETTLED' THEN NOW() END)`, [id, salesId, status]);
     await db.query(`INSERT INTO "OrderItem" (id,"orderId",sequence,name,"pricingRoute","productStructure","paperType","paperWeightGsm",quantity,crafts,"foilTechnique",subtotal,"updatedAt") VALUES ($1,$2,1,'销售回归测试款','STOCK_BLANK','STANDARD_ENVELOPE','珠光艳闪',160,1000,ARRAY[]::text[],'FLAT',100,NOW())`, [`${id}-item`, id]);
     await db.query(`INSERT INTO "OrderShipment" (id,"orderId",sequence,"receiverName","receiverPhone","receiverAddress","destinationProvince","carrierCode","updatedAt") VALUES ($1,$2,1,'测试收件人','13800138000','广东省佛山市测试路1号','广东','ZTO',NOW())`, [`${id}-shipment`, id]);
     await db.query(`INSERT INTO "OrderShipmentLine" (id,"shipmentId","orderItemId",quantity) VALUES ($1,$2,$3,1000)`, [`${id}-line`, `${id}-shipment`, `${id}-item`]);
@@ -100,6 +100,9 @@ test('待下发生产的销售工单抽屉定位工厂处理，不提前显示�
   await expect(progress.locator('[aria-current="step"]')).toHaveText('工厂处理');
   await expect(progress.getByText('完成', { exact: true })).not.toHaveAttribute('aria-current', 'step');
   expect((await readOrder(id)).status).toBe('CONFIRMED');
+  await drawer.getByRole('link', { name: '查看完整详情', exact: true }).click();
+  await expect(page).toHaveURL(`/orders/${id}`);
+  await expect(page.locator('#change-request')).toBeVisible();
   await healthy(page);
   expect(errors).toEqual([]);
 });
@@ -118,7 +121,9 @@ test('销售搜索、分类、抽屉、详情和草稿编辑回显', async ({ pa
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.goto(`/orders/${id}`);
+  await expect(page).not.toHaveURL(/#wo=/);
+  await card.getByRole('link', { name: '查看草稿', exact: true }).click();
+  await expect(page).toHaveURL(`/orders/${id}`);
   await page.getByRole('link', { name: '编辑工单', exact: true }).click();
   const note = '销售回归备注\n请核对包装';
   await page.getByRole('textbox', { name: /工单备注/ }).fill(note);
@@ -177,10 +182,75 @@ test('销售交期修改与取消申请可提交撤回，原工单不提前变�
   await section.getByRole('button', { name: '提交取消申请', exact: true }).click();
   await expect(page.getByRole('button', { name: '撤回申请', exact: true })).toBeVisible();
   expect((await readOrder(id)).status).toBe('CONFIRMED');
+  await page.goto(`/orders?q=${id}`);
+  const card = page.locator(`[data-order-id="${id}"]`);
+  await expect(card.getByText('取消申请中', { exact: true })).toBeVisible();
+  await expect(card.getByText('修改申请中', { exact: true })).toHaveCount(0);
+  await card.getByRole('link', { name: '查看详情', exact: true }).click();
+  await expect(page).toHaveURL(`/orders/${id}`);
+  await expect(page.locator('#change-request').getByRole('heading', { name: '最近申请' })).toBeVisible();
   await page.getByRole('button', { name: '撤回申请', exact: true }).click();
   await expect.poll(async () => (await readOrder(id)).requests).toEqual([
     { type: 'MODIFY', status: 'WITHDRAWN' }, { type: 'CANCEL', status: 'WITHDRAWN' },
   ]);
+  await healthy(page);
+  expect(errors).toEqual([]);
+});
+
+test('销售全部状态均能打开详情，分类结果和汇总计数一致', async ({ page }) => {
+  test.setTimeout(90_000);
+  const batch = `e2e-sales-status-${randomUUID()}`;
+  const groups = {
+    doing: ['PENDING_FACTORY', 'REJECTED', 'CONFIRMED', 'ON_HOLD', 'RELEASED', 'FOILING', 'PACKING', 'SUBMITTED', 'SCHEDULING', 'IN_PRODUCTION', 'COMPLETED'],
+    shipped: ['SHIPPED'], done: ['SETTLED', 'FINISHED'], cancelled: ['CANCELLED'], draft: ['DRAFT'],
+  };
+  const ids = new Map<string, string>();
+  for (const status of Object.values(groups).flat()) ids.set(status, await seed(status, E2E_USERS.sales.username, batch));
+  const errors = trackErrors(page);
+  await salesLogin(page, `/orders?q=${batch}`);
+  const cards = page.locator('[data-sales-order-card]');
+  await expect(cards).toHaveCount(16);
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  const counts = new Map<string, number>();
+  try {
+    const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
+    const { rows } = await db.query('SELECT status, COUNT(*)::int AS count FROM "Order" WHERE "submitterId"=$1 GROUP BY status', [salesId]);
+    for (const row of rows) counts.set(row.status, row.count);
+  } finally { await db.end(); }
+  const labels = { doing: '进行中', shipped: '已发货', done: '已完成', cancelled: '已取消', draft: '草稿' };
+  for (const [view, statuses] of Object.entries(groups)) {
+    const tab = page.getByRole('navigation', { name: '销售工单视图' }).getByRole('link', { name: new RegExp(`^${labels[view as keyof typeof labels]}`) });
+    await expect(tab).toHaveText(`${labels[view as keyof typeof labels]}${statuses.reduce((sum, status) => sum + (counts.get(status) ?? 0), 0)}`);
+    await tab.click();
+    await expect(page).toHaveURL(new RegExp(`view=${view}(?:&|$)`));
+    await expect(cards).toHaveCount(statuses.length);
+    await expect.poll(async () => (await cards.evaluateAll((elements) => elements.map((element) => element.getAttribute('data-order-id')))).sort()).toEqual(statuses.map((status) => ids.get(status)).sort());
+    for (const status of statuses) {
+      const id = ids.get(status)!;
+      const card = page.locator(`[data-order-id="${id}"]`);
+      await expect(card.getByRole('link', { name: /查看详情|查看草稿|查看原因/ })).toHaveAttribute('href', `/orders/${id}`);
+      await card.getByRole('button', { name: id, exact: true }).click();
+      const drawer = page.getByRole('dialog');
+      await expect(drawer.getByRole('link', { name: '查看完整详情' })).toHaveAttribute('href', `/orders/${id}`);
+      await drawer.getByRole('button', { name: '关闭预览', exact: true }).click();
+      await expect(drawer).toHaveCount(0);
+      await expect(page).not.toHaveURL(/#wo=/);
+      await card.getByRole('link', { name: /查看详情|查看草稿|查看原因/ }).click();
+      await expect(page).toHaveURL(`/orders/${id}`);
+      await expect(page.locator('[data-slot="sales-order-detail"]')).toBeVisible();
+      await healthy(page);
+      await page.goBack();
+      await expect(page).toHaveURL(new RegExp(`view=${view}(?:&|$)`));
+      await expect(card).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+    }
+  }
+  await page.goto(`/orders/${ids.get('CANCELLED')}`);
+  await expect(page.locator('[data-slot="sales-order-detail"]')).toBeVisible();
+  await expect(page.getByText('已取消', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: '编辑工单', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '提交修改申请', exact: true })).toHaveCount(0);
   await healthy(page);
   expect(errors).toEqual([]);
 });
@@ -229,7 +299,15 @@ test('销售列表、详情和编辑页在六视口及明暗主题下可用', as
       }, dark);
       await healthy(page);
       await expect(page.locator('h1:visible')).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth), `${path}: ${width} dark=${dark}`).toBeLessThanOrEqual(width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), `${path}: initial ${width} dark=${dark}`).toBeLessThanOrEqual(width);
+      if (path.startsWith('/orders?')) {
+        await expect(page.locator(`[data-order-id="${id}"]:visible`)).toBeVisible();
+      } else if (path.endsWith('/edit')) {
+        await expect(page.getByRole('textbox', { name: /工单备注/ })).toBeVisible();
+      } else {
+        await expect(page.locator('[data-slot="sales-order-detail"]:visible')).toBeVisible();
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), `${path}: loaded ${width} dark=${dark}`).toBeLessThanOrEqual(width);
       const result = await new AxeBuilder({ page }).include('#admin-main').analyze();
       expect(result.violations.map(({ id: rule, nodes }) => ({ rule, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) })), `${path}: ${width} dark=${dark}`).toEqual([]);
       if (width <= 393 && path.startsWith('/orders?')) {

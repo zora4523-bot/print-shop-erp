@@ -186,6 +186,7 @@ beforeEach(() => {
     doing: 0,
     shipped: 0,
     done: 0,
+    cancelled: 0,
     draft: 0,
     shippedThisMonth: 0,
   });

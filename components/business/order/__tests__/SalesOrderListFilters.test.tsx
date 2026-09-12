@@ -4,7 +4,7 @@ import type { OrderListQuery } from '@/lib/order/list-query';
 import { SalesOrderListFilters } from '../SalesOrderListFilters';
 
 describe('SalesOrderListFilters', () => {
-  it('renders the six sales views, scoped search and business summary', () => {
+  it('renders the seven sales views, scoped search and business summary', () => {
     const query = salesQuery({ q: '福明', view: 'todo' });
     const html = renderToStaticMarkup(
       <SalesOrderListFilters
@@ -15,6 +15,7 @@ describe('SalesOrderListFilters', () => {
           doing: 8,
           shipped: 2,
           done: 4,
+          cancelled: 0,
           draft: 1,
           shippedThisMonth: 6,
         }}
@@ -25,15 +26,16 @@ describe('SalesOrderListFilters', () => {
     expect(html).toContain('data-slot="sales-order-list-filters"');
     for (const label of [
       '全部',
-      '需处理',
+      '需关注',
       '进行中',
       '已发货',
       '已完成',
+      '已取消',
       '草稿',
     ]) {
       expect(html).toContain(label);
     }
-    expect(html).toContain('3 单需处理 · 本月已发 6 单');
+    expect(html).toContain('3 单需关注 · 本月已发 6 单');
     expect(html).toContain('aria-current="page"');
     expect(html).toContain('name="q"');
     expect(html).toContain('value="福明"');
@@ -52,6 +54,7 @@ describe('SalesOrderListFilters', () => {
           doing: 0,
           shipped: 0,
           done: 0,
+          cancelled: 0,
           draft: 0,
           shippedThisMonth: 0,
         }}

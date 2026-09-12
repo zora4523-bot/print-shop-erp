@@ -374,7 +374,7 @@ export function SalesOrderDetailView({
           </section>
 
           {order.changeRequests.length > 0 ? (
-            <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+            <section id={pendingChangeRequest ? 'change-request' : undefined} className="scroll-mt-4 space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
               <h2 className="text-base font-semibold">最近申请</h2>
               <ol className="space-y-3">
                 {order.changeRequests.map((request) => {

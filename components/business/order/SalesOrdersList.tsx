@@ -7,7 +7,6 @@ import {
   Copy,
   FileImage,
   PackageCheck,
-  Pencil,
 } from 'lucide-react';
 import {
   useEffect,
@@ -15,7 +14,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { OrderStatus } from '@/generated/prisma/enums';
 import type { OrderListQuery } from '@/lib/order/list-query';
 import type { SalesOrderListRow } from '@/lib/order/sales-list-query';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -252,6 +250,8 @@ function SalesOrderCard({
             type="button"
             variant="link"
             onClick={onOpen}
+            title="快速预览工单"
+            aria-haspopup="dialog"
             className="admin-wrap-anywhere h-auto min-w-0 max-w-full shrink justify-start whitespace-normal p-0 text-left text-sm font-semibold sm:text-base"
           >
             {order.customName ?? '未命名工单'}
@@ -261,7 +261,7 @@ function SalesOrderCard({
           </span>
           {order.pendingChangeRequest ? (
             <Badge variant="outline" className="border-foreground/60">
-              修改申请中
+              {order.pendingChangeRequest.type === 'CANCEL' ? '取消申请中' : '修改申请中'}
             </Badge>
           ) : null}
           {order.isUrgent ? <UrgentBadge /> : null}
@@ -303,7 +303,7 @@ function SalesOrderCard({
         ) : null}
         {order.rejectedChangeRequest ? (
           <p className="mt-2 border-l-2 border-destructive pl-2 text-xs font-medium text-destructive">
-            修改申请被拒 ·{' '}
+            {order.rejectedChangeRequest.type === 'CANCEL' ? '取消申请被拒' : '修改申请被拒'} ·{' '}
             {order.rejectedChangeRequest.reviewRemark ?? '请查看申请详情'}
           </p>
         ) : null}
@@ -351,15 +351,16 @@ function SalesOrderCard({
             ) : null}
           </p>
         </div>
-        <Button
-          type="button"
-          variant={order.needsAction ? 'destructive' : 'outline'}
-          size="sm"
-          onClick={onOpen}
-          className="min-h-9 px-3"
+        <Link
+          href={`/orders/${order.id}`}
+          prefetch={false}
+          className={cn(
+            buttonVariants({ variant: order.needsAction ? 'destructive' : 'outline', size: 'sm' }),
+            'min-h-9 px-3',
+          )}
         >
           {salesOrderPrimaryAction(order)}
-        </Button>
+        </Link>
       </div>
     </li>
   );
@@ -498,11 +499,6 @@ function SalesOrderDrawer({
 }) {
   const amount = salesOrderAmountPresentation(order);
   const hasPendingAmount = order.feeLines.some((line) => line.amount === null);
-  const hasOperations =
-    order.status === OrderStatus.SUBMITTED ||
-    order.status === OrderStatus.SCHEDULING ||
-    order.status === OrderStatus.IN_PRODUCTION ||
-    order.status === OrderStatus.COMPLETED;
   return (
     <SheetContent
       side="right"
@@ -543,7 +539,7 @@ function SalesOrderDrawer({
           ) : null}
           {order.pendingChangeRequest ? (
             <div className="mt-3 rounded-lg border border-foreground/30 p-3 text-xs">
-              <p className="font-semibold">修改申请 · 等待管理员处理</p>
+              <p className="font-semibold">{order.pendingChangeRequest.type === 'CANCEL' ? '取消申请' : '修改申请'} · 等待管理员处理</p>
               <p className="mt-1 text-muted-foreground">
                 {order.pendingChangeRequest.reason}
               </p>
@@ -551,7 +547,7 @@ function SalesOrderDrawer({
           ) : null}
           {order.rejectedChangeRequest ? (
             <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs">
-              <p className="font-semibold text-destructive">修改申请被拒</p>
+              <p className="font-semibold text-destructive">{order.rejectedChangeRequest.type === 'CANCEL' ? '取消申请被拒' : '修改申请被拒'}</p>
               <p className="mt-1">{order.rejectedChangeRequest.reason}</p>
               <p className="mt-1 text-muted-foreground">
                 管理员：
@@ -681,38 +677,16 @@ function SalesOrderDrawer({
       </div>
 
       <SheetFooter className="flex-row border-t bg-background pt-4 admin-safe-inline admin-safe-bottom">
-        {order.status === OrderStatus.DRAFT ? (
-          <Link
-            href={`/orders/${order.id}`}
-            prefetch={false}
-            className={cn(buttonVariants(), 'flex-1')}
-          >
-            <Pencil aria-hidden="true" />
-            继续填写
-          </Link>
-        ) : hasOperations ? (
-          <Link
-            href={`/orders/${order.id}#change-request`}
-            prefetch={false}
-            className={cn(
-              buttonVariants({
-                variant: order.needsAction ? 'destructive' : 'default',
-              }),
-              'flex-1',
-            )}
-          >
-            {order.needsAction ? '处理此工单' : '工单操作'}
-          </Link>
-        ) : (
-          <Button
-            type="button"
-            variant="outline"
-            className="flex-1"
-            onClick={onClose}
-          >
-            关闭详情
-          </Button>
-        )}
+        <Button type="button" variant="outline" onClick={onClose}>
+          关闭预览
+        </Button>
+        <Link
+          href={`/orders/${order.id}`}
+          prefetch={false}
+          className={cn(buttonVariants(), 'min-w-0 flex-1')}
+        >
+          查看完整详情
+        </Link>
       </SheetFooter>
     </SheetContent>
   );
