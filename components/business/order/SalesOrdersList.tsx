@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/sheet';
 import { EmptyState, useCopyToClipboard } from '@/components/ui-business';
 import { SalesOrderStatusBadge } from './SalesOrderStatusBadge';
+import { SalesOrderProgress } from './SalesOrderProgress';
 import { UrgentBadge } from './UrgentBadge';
 
 export function SalesOrdersList({
@@ -534,7 +535,7 @@ function SalesOrderDrawer({
 
       <div className="min-h-0 flex-1 overflow-y-auto py-4 admin-safe-inline">
         <DrawerSection title="进度">
-          <OrderProgress order={order} />
+          <SalesOrderProgress status={order.status} />
           {order.pricingAttentionReason ? (
             <p className="mt-3 border-l-2 border-destructive pl-3 text-xs font-medium text-destructive">
               {order.pricingAttentionReason}
@@ -778,45 +779,6 @@ function DrawerSection({
       </h3>
       {children}
     </section>
-  );
-}
-
-function OrderProgress({ order }: { order: SalesOrderListRow }) {
-  if (order.status === OrderStatus.CANCELLED) {
-    return <p className="text-sm text-muted-foreground">工单已取消</p>;
-  }
-  const steps = ['已提交', '工厂处理', '生产', '发货', '完成'];
-  const current =
-    order.status === OrderStatus.DRAFT
-      ? -1
-      : order.status === OrderStatus.SUBMITTED
-        ? 0
-        : order.status === OrderStatus.SCHEDULING
-          ? 1
-          : order.status === OrderStatus.IN_PRODUCTION ||
-              order.status === OrderStatus.COMPLETED
-            ? 2
-            : order.status === OrderStatus.SHIPPED
-              ? 3
-              : 4;
-  return (
-    <ol aria-label="工单进度" className="grid grid-cols-5">
-      {steps.map((step, index) => (
-        <li
-          key={step}
-          aria-current={index === current ? 'step' : undefined}
-          className={cn(
-            'relative text-center text-xs text-muted-foreground before:mx-auto before:mb-1.5 before:block before:size-2.5 before:rounded-full before:border before:border-muted-foreground/30 before:bg-muted after:absolute after:left-[calc(50%+0.45rem)] after:right-[calc(-50%+0.45rem)] after:top-[0.28rem] after:h-px after:bg-border last:after:hidden',
-            index < current &&
-              'text-foreground before:border-foreground before:bg-foreground after:bg-foreground',
-            index === current &&
-              'font-medium text-foreground before:border-destructive before:bg-destructive',
-          )}
-        >
-          {step}
-        </li>
-      ))}
-    </ol>
   );
 }
 
