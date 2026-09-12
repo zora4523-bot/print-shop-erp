@@ -527,12 +527,13 @@ export async function releaseFactoryOrder(
     expectedRevision: number;
     expectedWorkOrderVersion: number;
     printIdempotencyKey: string;
+    createPrint?: boolean;
   },
   actor: AdminWorkflowActor,
 ): Promise<{
   orderId: string;
   status: OrderStatus;
-  printJobId: string;
+  printJobId: string | null;
   idempotentReplay: boolean;
 }> {
   assertAdmin(actor);
@@ -541,14 +542,14 @@ export async function releaseFactoryOrder(
     result: {
       orderId: string;
       status: OrderStatus;
-      printJobId: string;
+      printJobId: string | null;
       idempotentReplay: boolean;
     };
     postCommitNotification: NotificationPayloadFor<'ORDER_SCHEDULED'> | null;
   } = await db.$transaction(async (tx) => {
     await lockOrder(tx, input.orderId);
     let order = await readLockedOrder(tx, input.orderId);
-    const replay = await tx.orderPrintJob.findUnique({
+    const replay = input.createPrint === false ? null : await tx.orderPrintJob.findUnique({
       where: { idempotencyKey: printIdempotencyKey },
       select: {
         id: true,
@@ -610,7 +611,7 @@ export async function releaseFactoryOrder(
         { targetStatus: OrderStatus.RELEASED },
       );
     }
-    const print = await createOrderPrintRequestInTx(
+    const print = input.createPrint === false ? null : await createOrderPrintRequestInTx(
       tx,
       {
         orderId: order.id,
@@ -647,8 +648,8 @@ export async function releaseFactoryOrder(
         result: {
           orderId: order.id,
           status: OrderStatus.RELEASED,
-          printJobId: print.jobId,
-          idempotentReplay: print.idempotentReplay,
+          printJobId: print?.jobId ?? null,
+          idempotentReplay: print?.idempotentReplay ?? false,
         },
         postCommitNotification: queued ? null : notificationPayload,
       };
@@ -657,8 +658,8 @@ export async function releaseFactoryOrder(
       result: {
         orderId: order.id,
         status: OrderStatus.RELEASED,
-        printJobId: print.jobId,
-        idempotentReplay: print.idempotentReplay,
+        printJobId: print?.jobId ?? null,
+        idempotentReplay: print?.idempotentReplay ?? false,
       },
       postCommitNotification: null,
     };

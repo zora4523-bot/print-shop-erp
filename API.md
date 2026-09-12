@@ -173,7 +173,7 @@ pnpm test --run
 
 - 创建动作成功响应的可选 `readyForProduction` 表示是否已进入待下发，用于成功页提示；未提供时不得视为可生产。
 - `submitOrder`、人工核价及管理员保存/修改审批完成后，在原事务自动检查保存价与生产事实；完整订单返回或进入 `CONFIRMED`（待下发），不提前创建生产/打印任务。异常订单保留待处理。
-- `releaseFactoryOrderAction` 与批量 `RELEASE_AND_CREATE_PRINT` 接受满足准备校验的 `PENDING_FACTORY / SUBMITTED` 存量单，在单一事务完成准备、下发和首次打印；仍限 ADMIN，保留 revision、workOrderVersion、幂等键检查。
+- `releaseFactoryOrderAction` 与批量 `RELEASE_AND_CREATE_PRINT` 接受满足准备校验的 `PENDING_FACTORY / SUBMITTED` 存量单。单张工单界面传 `createPrint: false`，事务仅完成准备和下发，不读取或创建打印任务；省略该可选布尔值时保留组合下发与首次打印行为，供现有批量调用使用。仍限 ADMIN，保留 revision、workOrderVersion、请求键校验；独立下发不使用打印任务作为重放凭证，过期版本按原规则拒绝，需刷新核对后再操作。领域结果 `printJobId` 在不创建打印时为 null。
 - `confirmFactoryOrderAction` 保留兼容：使用已保存费用进入待下发；`expectedQuoteToken` 仅为旧请求兼容字段，不触发最新目录报价，工单版本仍须匹配。新 UI 不再展示独立确认步骤。
 - 下发不形成财务结算；后续费用沿用既有更正接口，已结算记录不能覆盖。
 

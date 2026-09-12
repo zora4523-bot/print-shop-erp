@@ -228,6 +228,21 @@ beforeEach(() => {
 });
 
 describe('order detail commercial visibility', () => {
+  it('places secondary operations inside the right-hand action panel and omits retired display fields', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue(orderFixture());
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    const aside = html.slice(html.indexOf('<aside'), html.indexOf('</aside>'));
+    expect(aside).toContain('id="detail-other-actions"');
+    expect(aside).toContain('下载 PDF');
+    expect(aside).toContain('>打印<');
+    expect(html.match(/id="detail-other-actions"/g)).toHaveLength(1);
+    expect(html).not.toContain('其他工单操作');
+    expect(html).not.toContain('版组 / 模具组 ID');
+    expect(html).not.toContain('专版计价组');
+    expect(html).not.toContain('未填版组');
+    expect(html).not.toContain('未填规格');
+  });
   it('renders one audit feed while retaining full change-request history', async () => {
     requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
     getOrderDetailMock.mockResolvedValue(orderFixture());
@@ -532,8 +547,8 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('229.00 × 162.00 mm');
     expect(html).toContain('200 g/㎡');
     expect(html).toContain('客户确认版 V3');
-    expect(html).toContain('PLATE-GROUP-7');
-    expect(html).toContain('万元封-大号');
+    expect(html).not.toContain('PLATE-GROUP-7');
+    expect(html).not.toContain('专版计价组');
     expect(html).toContain('浮雕');
     expect(html).toContain('哑金（1 色）');
     expect(html).toContain('青、品红（2 色）');

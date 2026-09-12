@@ -983,8 +983,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 />
                 </> : null}
                 <Row label="稿件版本" value={item.artworkVersion} />
-                <Row label="版组 / 模具组 ID" value={item.plateGroupId} />
-                <Row label="专版计价组" value={item.pricingGroup} />
                 <Row
                   label="加工面"
                   value={item.isDoubleSided ? '双面加工' : '单面加工'}
@@ -1097,17 +1095,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     {item.plateDetails.map((detail) => (
                       <li
                         key={detail.id}
-                        className="grid gap-1 py-2 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1.5fr)_1fr_100px_120px]"
+                        className="grid gap-1 py-2 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_100px_120px]"
                       >
                         <span className="admin-wrap-anywhere">
                           #{detail.sequence} · {detail.name}
                           {!detail.isActive ? '（已移除）' : ''}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {detail.plateGroupId ?? '未填版组'} ·{' '}
-                          {detail.specification
-                            ? externalPriceBusinessText(detail.specification)
-                            : '未填规格'}
                         </span>
                         <span className="font-sans tabular-nums">
                           {formatQuantity(detail.quantity)} ×{' '}

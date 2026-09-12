@@ -168,3 +168,10 @@
 @media (min-width: 1200px) {
   .itemBody > .feeLines { width: min(100%, 320px); margin-left: auto; padding-left: 16px; border-left: 1px solid var(--border); }
 }
+
+.otherActions { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.otherActions > h2 { font-size: var(--text-sm); margin-bottom: 8px; }
+.otherActions > div { justify-content: flex-start; }
+.otherActions a, .otherActions button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.aside { max-height: calc(100dvh - var(--order-detail-timeline-top) - 16px); overflow-y: auto; }
+@media (max-width: 960px) { .aside { max-height: none; overflow: visible; } }

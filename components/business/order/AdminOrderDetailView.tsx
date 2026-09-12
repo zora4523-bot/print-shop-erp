@@ -51,6 +51,7 @@ function Progress({ label, done, total, unit = '个' }: {
 
 export function AdminOrderDetailView({ model, canEdit, decision, prints, printHint, supplementary, packaging }: Props) {
   const { feedback: copyNotice, copy } = useCopyToClipboard();
+  const otherActions = supplementary.find(section => section.id === 'detail-other-actions');
   const [preview, setPreview] = useState<number | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -139,10 +140,10 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           </div>
         </Disclosure>
       </div>
-      <div className={styles.headerActions}>
+      {!otherActions ? <div className={styles.headerActions}>
         <Link href={`/api/orders/${model.id}/pdf`} className={buttonVariants({ variant: 'outline' })}><FileDown aria-hidden="true" />工单 PDF</Link>
         {canEdit ? <Link href={`/orders/${model.id}/edit`} className={buttonVariants({ variant: 'outline' })}><Pencil aria-hidden="true" />编辑工单</Link> : null}
-      </div>
+      </div> : null}
     </div>}>
       {copyNotice ? <ActionNotice tone={copyNotice.tone} title={copyNotice.message} /> : null}
       <nav className={styles.navigation} aria-label="工单区块导航">{navigation.map((entry) => <a key={entry.id} href={`#${entry.id}`}>{entry.title}</a>)}</nav>
@@ -150,14 +151,15 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         <aside className={styles.aside} aria-label="工单概览与操作">
           <section id="order-detail-actions" tabIndex={-1} data-emphasis="inverse" className={cn(styles.card, styles.decision)} aria-label="当前待办"><div className={styles.eyebrow}>当前待办</div>
             {decision ?? <p>{ORDER_STATUS_REGISTRY[model.status].label} · 暂无待办</p>}
+            {otherActions ? <div id="detail-other-actions" tabIndex={-1} className={styles.otherActions}><h2>工单操作</h2>{otherActions.content}</div> : null}
           </section>
           {hasProgress ? <section className={styles.asideSection} aria-label="生产进度"><h2 className={styles.eyebrow}>生产进度</h2><Progress label="烫金" done={model.progress.foilingProgress} total={model.progress.orderTotal} /><Progress label="打包" done={model.progress.packingProgress} total={model.progress.orderTotal} /></section> : null}
           <section className={styles.asideSection}><h2 className={styles.eyebrow}>版本与打印</h2>
             {prints.length ? <ol className={styles.prints}>{prints.map((print) => <li key={print.id}><span>工单 v{print.version}<small>{print.at}</small></span><StatusBadge tone={print.version !== model.version || print.state === 'SUPERSEDED' ? 'danger' : print.state === 'PRINTED' ? 'success' : 'warning'}>
-              {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : <p className={styles.emptyHint}>未生成打印任务 · 下发生产后生成</p>}
+              {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : <p className={styles.emptyHint}>尚未创建打印任务</p>}
             {versionChanged ? <p className={styles.emptyHint}>旧版纸质工单已失效，请使用 v{model.version}。</p> : null}
             {printHint ? <p className={styles.emptyHint}>{printHint}</p> : null}
-            <Link href={`/print/orders/${model.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</Link>
+            {!otherActions ? <Link href={`/print/orders/${model.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</Link> : null}
           </section>
 
         </aside>
@@ -251,7 +253,6 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           </> : null}
           {renderSections(['detail-audit-records'])}
           </div>
-          {renderSections(['detail-other-actions'])}
           {renderSections(supplementary.filter((section) => !placedSections.has(section.id)).map((section) => section.id))}
 
         </div>
