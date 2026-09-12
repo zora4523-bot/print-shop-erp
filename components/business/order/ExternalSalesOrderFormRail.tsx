@@ -330,16 +330,16 @@ export function OrderFormBRail({
   const manualMessages = [
     ...quoteItems.flatMap((item, index) =>
       item.status === 'incomplete' || item.status === 'error'
-        ? [`第 ${index + 1} 款：${item.message || STATUS_LABELS[item.status]}`]
+        ? [{ key: `item:${item.key}`, message: `第 ${index + 1} 款：${item.message || STATUS_LABELS[item.status]}` }]
         : [],
     ),
     ...(packaging.status === 'incomplete' || packaging.status === 'error'
-      ? [packaging.message || STATUS_LABELS[packaging.status]]
+      ? [{ key: 'packaging', message: packaging.message || STATUS_LABELS[packaging.status] }]
       : []),
     ...(logistics?.status === 'incomplete' || logistics?.status === 'error'
-      ? [logistics.message || STATUS_LABELS[logistics.status]]
+      ? [{ key: 'logistics', message: logistics.message || STATUS_LABELS[logistics.status] }]
       : []),
-    ...(plateFee ? [`${plateFee.label}金额待工厂确认`] : []),
+    ...(plateFee ? [{ key: 'plate-fee', message: `${plateFee.label}金额待工厂确认` }] : []),
   ];
   const needsAdminPrice = manualMessages.length > 0;
   const excludedLabels = [
@@ -498,8 +498,8 @@ export function OrderFormBRail({
           <div className="mt-3 border-l-[3px] border-destructive pl-3 text-destructive">
             <p className="text-sm font-extrabold">这张单需要管理员终价</p>
             <ul className="mt-1 list-disc space-y-1 pl-4 text-xs">
-              {manualMessages.map((message) => (
-                <li key={message}>{message}</li>
+              {manualMessages.map(({ key, message }) => (
+                <li key={key}>{message}</li>
               ))}
             </ul>
           </div>
