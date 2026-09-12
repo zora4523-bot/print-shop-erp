@@ -291,3 +291,14 @@ function detailRecord() {
     ],
   };
 }
+
+it('projects the current factory reason and affected figures, dropping actor and internal recovery evidence', async () => {
+  dbMock.order.findFirst.mockResolvedValue({ ...detailRecord(), status: OrderStatus.REJECTED,
+    workflowDecisions: [{ toStatus: OrderStatus.REJECTED, reasonCode: 'DESIGN_ERROR', reasonNote: '请修正文字', affectedFigs: [1], createdAt: new Date('2026-09-12T00:00:00Z'), actorId: 'private-actor', recoveryEvidence: 'private-evidence' }] });
+  const result = await getSalesOrderDetailById(actor, 'order-1');
+  expect(result?.workflowDecision).toEqual({ reason: '设计图有误', note: '请修正文字', affectedFigs: [1], createdAt: '2026-09-12T00:00:00.000Z' });
+  expect(JSON.stringify(result)).not.toContain('private-');
+  dbMock.order.findFirst.mockResolvedValue({ ...detailRecord(), status: OrderStatus.CONFIRMED,
+    workflowDecisions: [{ toStatus: OrderStatus.REJECTED, reasonCode: 'DESIGN_ERROR' }] });
+  expect((await getSalesOrderDetailById(actor, 'order-1'))?.workflowDecision).toBeNull();
+});

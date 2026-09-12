@@ -1152,6 +1152,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             </p>
           </div>
           <OrderChangeRequestForm
+              hasPackagingGroups={order.packagingGroups.length > 0}
             promisedDate={formatDateInputShanghai(order.promisedDate, '') || null}
             orderId={order.id}
             expectedRevision={order.revision}

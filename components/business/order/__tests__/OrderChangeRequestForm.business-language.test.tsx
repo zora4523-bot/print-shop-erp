@@ -220,3 +220,12 @@ describe('OrderChangeRequestForm 业务语言投影', () => {
     });
   });
 });
+
+it('packaging membership controls the add-item capability and resets an obsolete draft', () => {
+  const props = { orderId: 'order-1', expectedRevision: 4, expectedWorkOrderVersion: 2, items: [sourceItem], catalogProducts };
+  const allowed = renderToStaticMarkup(<OrderChangeRequestForm {...props} hasPackagingGroups={false} />);
+  const blocked = renderToStaticMarkup(<OrderChangeRequestForm {...props} hasPackagingGroups />);
+  expect(allowed).toContain('本次申请需要新增一款');
+  expect(blocked).not.toContain('本次申请需要新增一款');
+  expect(orderChangeRequestDraftIdentity({ ...props, hasPackagingGroups: true })).not.toBe(orderChangeRequestDraftIdentity({ ...props, hasPackagingGroups: false }));
+});

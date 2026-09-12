@@ -252,3 +252,13 @@ pnpm test --run
 `view=todo` 查询条件不变，界面名称为“需关注”，属于进行中工单的交叉筛选。
 列表及 `GET /api/orders/sales/[orderNo]` 的待审核/被拒申请投影增加 `type`（MODIFY / CANCEL），
 用于区分修改申请和取消申请；不增加写入权限或内部字段。
+
+### 外部销售补正与账单（2026-09-12）
+
+- 建单客户选项使用 `listSalesCustomerOptions`：以 session 销售 ID 限制 `Party.customerOrders.some.submitterId`，仅返回 ID、编码、名称、简称。客户联系人、电话和地址不进入该投影。建单和编辑写入同时校验客户范围，管理员原权限不变。
+- 销售工单详情及编辑共同使用 `getSalesOrderDetailById` 的显式查询与序列化；通用 `getOrderDetail` 不再用于销售编辑。工单自身收件信息继续可见，内部改价说明、成本及生产记录不进入销售 DTO。
+- `cancelOrderAction` 允许 ADMIN / SALES。SALES 必须提交 `expectedEditVersion` 和取消原因；领域事务再次校验所有权、版本、无待审申请及 DRAFT / PENDING_FACTORY / REJECTED 状态。已确认订单仍走审批取消；ON_HOLD 通过已保存暂停决定还原原生产阶段后校验取消申请和结算。
+- `submitOrderAction` 支持 REJECTED 补正重提：禁止待审申请、缺图或失效报价；重新计算并确认报价，回到 PENDING_FACTORY 由工厂复核。补正通知使用独立去重键。
+- 图稿登记与删除只开放 DRAFT / REJECTED；驳回补正在工单锁内增加业务/编辑版本，操作记录保存文件前后标识、类型、URL 和大小，旧 OSS 对象不删除。确认/生产/暂停期间不能直接换稿。
+- `/sales/bills`、详情与标题均读取 `AgentMonthlyBill`，以当前销售 ID 限定归属；金额和明细来自月账单自身保存值，草稿不计入待支付。销售入口不再读取旧 `Bill`；管理端历史归档不变。
+- 销售详情返回当前驳回/暂停原因、说明、受影响款号和时间；不暴露执行人及恢复内部证据。有包装组时不提供新增款式入口，服务端原拒绝校验保留。

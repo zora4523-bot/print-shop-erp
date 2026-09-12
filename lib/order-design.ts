@@ -12,8 +12,8 @@ import { orderCascadeLockKey } from './order/locks';
 // DB 行——策略没有 DeleteObject 权限，OSS 对象留待孤儿清理（P1 待办，
 // PROGRESS 已记录）。
 //
-// 状态窗口：**仅 DRAFT**。提交后的设计图增删属于 A05（款式级编辑，
-// needs-owner-input），业主拍板前不开口子（DECISIONS 2026-07-05）。
+// 状态窗口：DRAFT / REJECTED。驳回补正保留文件前后信息到不可变操作记录，
+// 增加业务版本与编辑版本；确认、生产和暂停期间仍禁止直接换稿。
 //
 // 并发正确性：登记/删除的写事务持有与所有 Order.status 写入路径同一把
 // advisory lock（print-shop-erp:order-cascade:<id>），并在锁内 fresh-read
@@ -58,6 +58,10 @@ type DesignTxClient = {
     findUnique: (args: unknown) => Promise<{
       id: string;
       fileName: string;
+      fileUrl: string;
+      fileType: DesignFileType;
+      fileSize: bigint;
+      orderItemId: string;
       orderItem: {
         orderId: string;
         order: { status: OrderStatus; submitterId: string; _count?: { changeRequests: number } };
@@ -65,6 +69,7 @@ type DesignTxClient = {
     } | null>;
     delete: (args: unknown) => Promise<unknown>;
   };
+  order: { update: (args: unknown) => Promise<unknown> };
   orderLog: { create: (args: unknown) => Promise<unknown> };
 };
 
@@ -96,8 +101,8 @@ function assertDesignEditAllowed(
   actor: { id: string; role: Role },
 ): void {
   if (order._count?.changeRequests) throw new OrderDesignError('工单存在待审批申请，暂不能修改设计文件');
-  if (order.status !== OrderStatus.DRAFT) {
-    throw new OrderDesignError('只有草稿状态的工单可以增删设计图');
+  if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
+    throw new OrderDesignError('只有草稿或驳回状态的工单可以增删设计图');
   }
   const globalOverride =
     actor.role === Role.ADMIN;
@@ -223,9 +228,13 @@ export async function recordOrderItemDesign(
         uploadedAt: true,
       },
     });
+    if (fresh.order.status === OrderStatus.REJECTED) {
+      await txClient.order.update({ where: { id: input.orderId }, data: { revision: { increment: 1 }, editVersion: { increment: 1 } } });
+    }
     await txClient.orderLog.create({
       data: {
         orderId: input.orderId,
+        changedFields: { design: { before: null, after: { id: design.id, orderItemId: input.orderItemId, fileName, fileType: input.fileType, fileUrl: design.fileUrl, fileSize: String(actualSize) } } },
         operatorId: actor.id,
         action: 'UPDATE',
         remark: `上传设计图：${fileName}`,
@@ -257,6 +266,10 @@ export async function removeOrderItemDesign(
       select: {
         id: true,
         fileName: true,
+        fileUrl: true,
+        fileType: true,
+        fileSize: true,
+        orderItemId: true,
         orderItem: {
           select: {
             orderId: true,
@@ -268,6 +281,9 @@ export async function removeOrderItemDesign(
     if (!fresh) throw new OrderDesignError('设计图不存在');
     assertDesignEditAllowed(fresh.orderItem.order, actor);
 
+    if (fresh.orderItem.order.status === OrderStatus.REJECTED) {
+      await txClient.order.update({ where: { id: orderId }, data: { revision: { increment: 1 }, editVersion: { increment: 1 } } });
+    }
     await txClient.orderItemDesign.delete({ where: { id: designId } });
     await txClient.orderLog.create({
       data: {
@@ -275,6 +291,7 @@ export async function removeOrderItemDesign(
         operatorId: actor.id,
         action: 'UPDATE',
         remark: `删除设计图：${fresh.fileName}`,
+        changedFields: { design: { before: { id: fresh.id, orderItemId: fresh.orderItemId, fileName: fresh.fileName, fileType: fresh.fileType, fileUrl: fresh.fileUrl, fileSize: String(fresh.fileSize) }, after: null } },
       },
     });
   });

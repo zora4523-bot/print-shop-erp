@@ -13,7 +13,7 @@ import {
 //   1. signDesignUploadAction → 预签 PUT URL（服务端校验类型/大小/路径）
 //   2. 浏览器 fetch PUT 直传 OSS（文件不经过我们的服务器）
 //   3. recordDesignUploadAction → 服务端 HEAD 确认后写 OrderItemDesign
-// 仅 DRAFT 状态渲染上传/删除控件（服务端 lib 层同样强校验）。
+// 仅草稿或驳回状态渲染上传/删除控件（服务端 lib 层同样强校验）。
 
 export type DesignItem = {
   id: string;

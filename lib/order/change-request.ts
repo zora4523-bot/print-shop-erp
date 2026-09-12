@@ -112,6 +112,7 @@ import {
 
 const CHANGEABLE_ORDER_STATUSES = ORDER_MODIFIABLE_STATUSES;
 const CANCELLABLE_BY_REQUEST_STATUSES: OrderStatus[] = [
+  OrderStatus.ON_HOLD,
   OrderStatus.CONFIRMED,
   OrderStatus.RELEASED,
   OrderStatus.FOILING,

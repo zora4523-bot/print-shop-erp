@@ -79,6 +79,7 @@ type Props = {
   items: ItemOption[];
   catalogProducts: OrderChangeCatalogProduct[];
   promisedDate?: string | null;
+  hasPackagingGroups?: boolean;
 };
 
 export function orderChangeRequestDraftIdentity({
@@ -88,6 +89,7 @@ export function orderChangeRequestDraftIdentity({
   items,
   catalogProducts,
   promisedDate = null,
+  hasPackagingGroups = false,
 }: Pick<
   Props,
   | 'orderId'
@@ -96,6 +98,7 @@ export function orderChangeRequestDraftIdentity({
   | 'items'
   | 'catalogProducts'
   | 'promisedDate'
+  | 'hasPackagingGroups'
 >): string {
   const catalogFacts = catalogProducts
     .map((product) => ({
@@ -124,6 +127,7 @@ export function orderChangeRequestDraftIdentity({
     expectedRevision,
     expectedWorkOrderVersion,
     promisedDate,
+    hasPackagingGroups,
     items: items.map((item) => ({
       id: item.id,
       sequence: item.sequence,
@@ -553,6 +557,7 @@ function OrderChangeRequestDraftForm({
   items,
   catalogProducts,
   promisedDate = null,
+  hasPackagingGroups = false,
 }: Props) {
   const [state, action] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
@@ -711,7 +716,7 @@ function OrderChangeRequestDraftForm({
         </p>
       ) : null}
 
-      {hasItems ? <fieldset className="min-w-0 rounded-lg border p-3">
+      {hasItems && !hasPackagingGroups ? <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
         <label className="flex min-h-11 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
           <Checkbox

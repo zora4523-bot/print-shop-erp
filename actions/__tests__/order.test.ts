@@ -810,11 +810,11 @@ describe('cancelOrderAction', () => {
   it('forwards a trimmed reason', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
-    await cancelOrderAction('o1', null, fd({ reason: '  客户临时取消  ' }));
+    await cancelOrderAction('o1', null, fd({ reason: '  客户临时取消  ', expectedEditVersion: '4' }));
     expect(orderMock.cancelOrder).toHaveBeenCalledWith(
       'o1',
       expect.anything(),
-      '客户临时取消',
+      '客户临时取消', expect.any(Date), 4,
     );
   });
 
@@ -835,7 +835,7 @@ describe('cancelOrderAction', () => {
     const r = await cancelOrderAction(
       'o1',
       null,
-      fd({ reason: '客户取消' }),
+      fd({ reason: '客户取消', expectedEditVersion: '4' }),
     );
     expect(r.status).toBe('error');
   });
@@ -843,7 +843,7 @@ describe('cancelOrderAction', () => {
   it('revalidates both routes on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
-    await cancelOrderAction('o1', null, fd({ reason: '客户取消' }));
+    await cancelOrderAction('o1', null, fd({ reason: '客户取消', expectedEditVersion: '4' }));
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
   });

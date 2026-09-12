@@ -1,3 +1,4 @@
+import { SalesOrderEditor } from '@/components/business/order/SalesOrderEditor';
 import { AddOrderShipmentForm } from '@/components/business/order/AddOrderShipmentForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
@@ -61,6 +62,7 @@ export default async function EditOrderPage({ params }: PageProps) {
   )
     notFound();
   const { id } = await params;
+  if (user.role === Role.SALES) return <SalesOrderEditor id={id} user={user} />;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   if (!order || (user.role !== Role.ADMIN && order.submitterId !== user.id))
     notFound();
@@ -319,6 +321,7 @@ export default async function EditOrderPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             <OrderChangeRequestForm
+              hasPackagingGroups={order.packagingGroups.length > 0}
               promisedDate={
                 formatDateInputShanghai(order.promisedDate, '') || null
               }

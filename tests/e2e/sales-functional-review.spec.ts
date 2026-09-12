@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
-import { E2E_PASSWORD, E2E_USERS, getUserIdByUsername, login } from './_helpers';
+import { E2E_PASSWORD, E2E_USERS, getUserIdByUsername, login, seedSettledExternalSalesOrder } from './_helpers';
 
 test.use({ hasTouch: true });
 
@@ -129,6 +129,8 @@ test('销售搜索、分类、抽屉、详情和草稿编辑回显', async ({ pa
   await page.getByRole('textbox', { name: /工单备注/ }).fill(note);
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await expect.poll(async () => (await readOrder(id)).remark?.replace(/\r\n/g, '\n')).toBe(note);
+  await expect(page).toHaveURL(`/orders/${id}`);
+  await expect(page.locator('[data-slot="sales-order-detail"]')).toBeVisible();
   await page.goto(`/orders/${id}/edit`);
   await expect(page.getByRole('textbox', { name: /工单备注/ })).toHaveValue(note);
   await healthy(page);
@@ -320,4 +322,143 @@ test('销售列表、详情和编辑页在六视口及明暗主题下可用', as
     }
   }
   expect(errors).toEqual([]);
+});
+
+async function fixtureSql(run: (db: Client) => Promise<void>) {
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  try { await db.query('BEGIN'); await run(db); await db.query('COMMIT'); }
+  catch (error) { await db.query('ROLLBACK'); throw error; }
+  finally { await db.end(); }
+}
+
+test('销售客户响应按身份隔离，详情与编辑均不暴露内部改价说明', async ({ page }) => {
+  const id = await seed('DRAFT');
+  const foreignId = await seed('DRAFT', E2E_USERS.billingSales.username);
+  const own = `e2e-own-customer-${randomUUID()}`;
+  const other = `e2e-other-customer-${randomUUID()}`;
+  const privatePhone = '13900009991';
+  await fixtureSql(async (db) => {
+    for (const partyId of [own, other]) {
+      await db.query(`INSERT INTO "Party" (id,type,code,name,"updatedAt") VALUES ($1::text,'CUSTOMER',$1::text,$1::text,NOW())`, [partyId]);
+      await db.query(`INSERT INTO "PartyContact" (id,"partyId",name,phone,"isPrimary","updatedAt") VALUES ($1,$2,'隐私联系人',$3,true,NOW())`, [`${partyId}-contact`, partyId, privatePhone]);
+    }
+    await db.query(`UPDATE "Order" SET "customerPartyId"=$2 WHERE id=$1`, [id, own]);
+    await db.query(`UPDATE "Order" SET "customerPartyId"=$2 WHERE id=$1`, [foreignId, other]);
+    // Exercise the previously untested non-null Decimal shipment boundary.
+    await db.query(`UPDATE "OrderShipment" SET "quotedWeightKg"=1.234 WHERE "orderId"=$1`, [id]);
+  });
+  await salesLogin(page, '/orders/new');
+  const created = await page.goto('/orders/new');
+  const response = await created!.text();
+  expect(response).toContain(own);
+  expect(response).not.toContain(other);
+  expect(response).not.toContain(privatePhone);
+  const errors = trackErrors(page);
+  for (const suffix of ['', '/edit']) {
+    const result = await page.goto(`/orders/${id}${suffix}`);
+    const body = await result!.text();
+    expect(body).not.toContain('测试历史约定收费');
+    expect(body).not.toContain(other);
+    expect(body).not.toContain(privatePhone);
+    await healthy(page);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('销售可取消草稿、待工厂处理和驳回单，理由持久化', async ({ page }) => {
+  await salesLogin(page, '/orders');
+  for (const status of ['DRAFT', 'PENDING_FACTORY', 'REJECTED']) {
+    const id = await seed(status);
+    await page.goto(`/orders/${id}`);
+    await page.getByRole('button', { name: '取消工单', exact: true }).click();
+    const dialog = page.getByRole('alertdialog');
+    await dialog.getByLabel('取消原因', { exact: false }).fill('销售测试取消');
+    await dialog.getByRole('button', { name: '取消工单', exact: true }).click();
+    await expect.poll(async () => (await readOrder(id)).status).toBe('CANCELLED');
+    await healthy(page);
+  }
+});
+
+test('驳回展示补正原因和图稿入口，暂停可申请取消，包装组限制新增款式', async ({ page }) => {
+  const rejected = await seed('REJECTED');
+  const held = await seed('ON_HOLD');
+  const admin = await getUserIdByUsername(E2E_USERS.owner.username);
+  await fixtureSql(async (db) => {
+    for (const [id, action, fromStatus, toStatus] of [[rejected, 'REJECT', 'PENDING_FACTORY', 'REJECTED'], [held, 'HOLD', 'CONFIRMED', 'ON_HOLD']]) {
+      await db.query(`INSERT INTO "OrderWorkflowDecision" (id,"orderId","fromStatus","toStatus",action,"reasonCode","reasonNote","affectedFigs","actorId","idempotencyKey") VALUES ($1::text,$2,$3::"OrderStatus",$4::"OrderStatus",$5::"OrderWorkflowAction",'DESIGN_ERROR','请修正第1款文字','[1]'::jsonb,$6,$1::text)`, [`${id}-decision`, id, fromStatus, toStatus, action, admin]);
+    }
+    await db.query(`INSERT INTO "OrderPackagingGroup" (id,"orderId",sequence,mode,"actualBagCount","updatedAt") VALUES ($1,$2,1,'SINGLE_STYLE',100,NOW())`, [`${held}-group`, held]);
+    await db.query(`INSERT INTO "OrderPackagingGroupLine" (id,"orderId","packagingGroupId","orderItemId","unitsPerBag") VALUES ($1,$4,$2,$3,10)`, [`${held}-packline`, `${held}-group`, `${held}-item`, held]);
+  });
+  await salesLogin(page, `/orders/${rejected}`);
+  await expect(page.getByText('请修正第1款文字', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '提交工单', exact: true })).toBeVisible();
+  await expect(page.locator('input[type=file]').first()).toBeAttached();
+  await page.goto(`/orders/${held}#change-request`);
+  await expect(page.getByText('请修正第1款文字', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('本次申请需要新增一款')).toHaveCount(0);
+  await page.locator('#change-request').getByLabel('取消原因').fill('客户申请暂停后取消');
+  await page.getByRole('button', { name: '提交取消申请', exact: true }).click();
+  await expect(page.getByRole('button', { name: '撤回申请', exact: true })).toBeVisible();
+  expect((await readOrder(held)).status).toBe('ON_HOLD');
+  await page.getByRole('button', { name: '撤回申请', exact: true }).click();
+  await healthy(page);
+});
+
+test('管理员确认月账单后销售查看同一金额和冻结明细，其他销售不可访问', async ({ page }) => {
+  const fixture = await seedSettledExternalSalesOrder({ customerRef: '销售账单隔离验收', settledFee: '123.45', settledAt: new Date('2026-08-15T00:00:00Z') });
+  const billId = `e2e-sales-bill-${randomUUID()}`;
+  await fixtureSql(async (db) => {
+    await db.query(`INSERT INTO "AgentMonthlyBill" (id,"agentUserId",period,"agentUsernameSnapshot","agentDisplayNameSnapshot","updatedAt") VALUES ($1,$2,$3,$4,$5,NOW())`, [billId, fixture.agentUserId, fixture.period, fixture.agentUsername, fixture.agentDisplayName]);
+  });
+  // Confirmation invokes the administrator's real scoped synchronization and freezing command.
+  await login(page, { from: `/owner/agent-bills/${billId}`, username: E2E_USERS.owner.username, password: E2E_PASSWORD });
+  await page.getByRole('button', { name: /确认.*账单/ }).click();
+  await expect(page.getByRole('button', { name: '标记已收' })).toBeVisible();
+  await page.context().clearCookies();
+  await login(page, { from: '/sales/bills', username: fixture.agentUsername, password: E2E_PASSWORD });
+  await page.getByRole('link', { name: '查看详情', exact: true }).click();
+  await expect(page).toHaveURL(`/sales/bills/${billId}`, { timeout: 20_000 });
+  await expect(page.getByText(fixture.orderNo, { exact: true })).toBeVisible();
+  await expect(page.getByText(/¥\s*123\.45/).first()).toBeVisible();
+  await healthy(page);
+  await page.context().clearCookies();
+  await salesLogin(page, `/sales/bills/${billId}`);
+  await expect(page.getByText(fixture.orderNo, { exact: true })).toHaveCount(0);
+});
+
+test('驳回补正重新计价确认后提交，缺图阻止提交，旧图删除有审计', async ({ page }) => {
+  const id = await seed('REJECTED');
+  const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
+  await fixtureSql(async (db) => {
+    const product = (await db.query(`SELECT p.id,p.specification,p."paperType" FROM "Product" p WHERE p."isActive" AND p.category='BLANK_STOCK' AND p.specification LIKE '%90%' AND p."paperType" LIKE '%160%' ORDER BY p.code LIMIT 1`)).rows[0];
+    expect(product).toBeTruthy();
+    const craft = (await db.query(`SELECT id FROM "Craft" WHERE code='FLAT_FOIL_PARTIAL' AND "isActive" LIMIT 1`)).rows[0];
+    expect(craft).toBeTruthy();
+    await db.query(`UPDATE "OrderItem" SET fig=1,"productId"=$2,specification=$3,"paperType"=$4,"pricingGroup"='LARGE',"actualWidthMm"=90,"actualHeightMm"=165,crafts=ARRAY[$5]::text[],"foilColors"=ARRAY['哑金'],"frontFoilColors"=ARRAY['哑金'],"hasLocalFoil"=true WHERE "orderId"=$1`, [id, product.id, product.specification, product.paperType, craft.id]);
+    await db.query(`INSERT INTO "OrderPackagingGroup" (id,"orderId",sequence,mode,"actualBagCount","updatedAt") VALUES ($1,$2,1,'SINGLE_STYLE',100,NOW())`, [`${id}-group`, id]);
+    await db.query(`INSERT INTO "OrderPackagingGroupLine" (id,"orderId","packagingGroupId","orderItemId","unitsPerBag") VALUES ($1,$2,$3,$4,10)`, [`${id}-packline`, id, `${id}-group`, `${id}-item`]);
+    await db.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileName","fileUrl","fileType","fileSize","uploadedBy") VALUES ($1,$2,'旧图稿.png','/favicon.ico','IMAGE',100,$3)`, [`${id}-old-art`, `${id}-item`, salesId]);
+  });
+  await salesLogin(page, `/orders/${id}`);
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await page.getByRole('button', { name: '提交工单', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: '缺少设计图片' })).toBeVisible();
+  expect((await readOrder(id)).status).toBe('REJECTED');
+  // OSS transport is separately tested with HEAD/ownership/TOCTOU boundaries;
+  // this fixture supplies the newly registered image for the real submit flow.
+  await fixtureSql(async (db) => {
+    const log = await db.query(`SELECT "changedFields" FROM "OrderLog" WHERE "orderId"=$1 AND "changedFields"->'design'->'before'->>'id'=$2`, [id, `${id}-old-art`]);
+    expect(log.rows).toHaveLength(1);
+    await db.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileName","fileUrl","fileType","fileSize","uploadedBy") VALUES ($1,$2,'补正图稿.png','/favicon.ico','IMAGE',100,$3)`, [`${id}-new-art`, `${id}-item`, salesId]);
+  });
+  await page.reload();
+  await page.getByRole('button', { name: '提交工单', exact: true }).click();
+  await expect(page.getByRole('button', { name: '确认最新报价并提交', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '确认最新报价并提交', exact: true }).click();
+  await expect.poll(async () => (await readOrder(id)).status).toBe('PENDING_FACTORY');
+  const after = await readOrder(id);
+  expect(Number(after.snapshotFee)).toBe(Number(after.quotedFee));
+  await healthy(page);
 });

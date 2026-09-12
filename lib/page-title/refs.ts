@@ -54,9 +54,9 @@ export const getAdminBillTitleRef = cache(async (id: string) =>
 
 export const getSalesBillTitleRef = cache(
   async (id: string, salesUserId: string) =>
-    // 所有权写进 where，与 getSalesBillDetail 一致：不先读进来再判断。
-    db.bill.findUnique({
-      where: { id, salesUserId },
+    // 所有权写进 where，与销售月账单查询一致：不先读进来再判断。
+    db.agentMonthlyBill.findUnique({
+      where: { id, agentUserId: salesUserId },
       select: { period: true },
     }),
 );

@@ -1,3 +1,4 @@
+import { salesCustomerScope } from './order/sales-customer-policy';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
@@ -704,6 +705,9 @@ export async function createOrder(
         where: { id: customerPartyId },
         select: { id: true, type: true, isActive: true },
       });
+      if (actor.role === Role.SALES && !await txClient.party.findFirst({ where: { id: customerPartyId, ...salesCustomerScope(actor.id) }, select: { id: true } })) {
+        throw new OrderInvariantError('只能选择自己关联的客户');
+      }
       if (!customer || !customer.isActive) {
         throw new OrderInvariantError('所选客户不存在或已停用');
       }
@@ -1611,6 +1615,8 @@ type TransitionOptions = {
   // can see submitterId / status) but BEFORE the status-machine check.
   // Throw OrderInvariantError to reject.
   authz?: (order: {
+    revision: number;
+    editVersion: number;
     submitterId: string;
     status: OrderStatus;
     receiverAddress: string | null;
@@ -1649,6 +1655,7 @@ type TransitionOptions = {
     tx: Prisma.TransactionClient,
     orderId: string,
     order: {
+      status: OrderStatus;
       settlementType: OrderSettlementType;
       pricingStatus: string;
       priceRevision: number;
@@ -1859,6 +1866,7 @@ export async function submitOrder(
   )
     .then((setting) => setting.enabled)
     .catch(() => true);
+  let submissionNotificationKey = orderId;
   let submittedNotificationQueued = !submittedNotificationEnabled;
   let urgentNotificationQueued = false;
   const finalizedExternalQuote: {
@@ -1877,6 +1885,7 @@ export async function submitOrder(
       remark: '提交工单',
       now,
       authz: (order) => {
+        if (order.status === OrderStatus.REJECTED) submissionNotificationKey = `${orderId}:correction:${order.revision}`;
         // 'order:create' permission lets SALES / CS create AND submit — but
         // only for their own rows. ADMIN keeps the global override.
         const globalOverride = actor.role === Role.ADMIN;
@@ -1898,6 +1907,7 @@ export async function submitOrder(
       },
       cascade: async (tx, lockedOrderId, lockedOrder) => {
         const prismaTx = tx as unknown as Prisma.TransactionClient;
+        if (await prismaTx.orderChangeRequest.findFirst({ where: { orderId: lockedOrderId, status: 'PENDING' }, select: { id: true } })) throw new OrderInvariantError('请先撤回或处理当前申请，再提交工单');
         if (
           lockedOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
         ) {
@@ -1974,7 +1984,7 @@ export async function submitOrder(
           }
         }
       },
-      afterTransition: async (tx, lockedOrderId) => {
+      afterTransition: async (tx, lockedOrderId, previousOrder) => {
         const currentPricing = await tx.order.findUnique({
           where: { id: lockedOrderId },
           select: {
@@ -1983,7 +1993,9 @@ export async function submitOrder(
           },
         });
         if (!currentPricing) throw new OrderInvariantError('工单不存在');
-        const prepared = await prepareOrderForProductionInTx(tx, lockedOrderId, actor, now);
+        const prepared = previousOrder.status === OrderStatus.REJECTED
+          ? { status: OrderStatus.PENDING_FACTORY, ready: false }
+          : await prepareOrderForProductionInTx(tx, lockedOrderId, actor, now);
         if (backgroundJobsMode() !== 'durable') {
           return { status: prepared.status };
         }
@@ -2010,7 +2022,7 @@ export async function submitOrder(
               summary: prepared.ready ? '新工单已提交，待下发生产' : '新工单已提交，待处理资料或费用',
               deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
             },
-            { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
+            { dedupeKey: `notification:ORDER_SUBMITTED:${submissionNotificationKey}` },
           );
         }
         if (payload.isUrgent) {
@@ -2063,7 +2075,7 @@ export async function submitOrder(
           summary: result.status === OrderStatus.CONFIRMED ? '新工单已提交，待下发生产' : '新工单已提交，待处理资料或费用',
           deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
         },
-        { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
+        { dedupeKey: `notification:ORDER_SUBMITTED:${submissionNotificationKey}` },
       );
     }
     // SPEC §8.1：急单提交 → 排产群+管理员群（独立 rule，独立事件）。
@@ -2096,6 +2108,7 @@ export async function cancelOrder(
   actor: { id: string; role: Role },
   reason: string,
   now: Date = new Date(),
+  expectedEditVersion?: number,
 ): Promise<{ id: string; status: OrderStatus }> {
   const normalizedReason = reason.trim();
   if (!normalizedReason) {
@@ -2104,8 +2117,7 @@ export async function cancelOrder(
   if (normalizedReason.length > 500) {
     throw new OrderInvariantError('取消原因过长（最多 500 个字符）');
   }
-  // The action-layer `requirePermission('order:cancel')` is ADMIN-only, so
-  // there's no additional ownership guard to run here.
+  // Ownership and version are checked under the order lock, independently of UI permissions.
   return transitionWithLog(orderId, OrderStatus.CANCELLED, actor, {
     remark: `取消：${normalizedReason}`,
     now,
@@ -2114,6 +2126,8 @@ export async function cancelOrder(
     // cancellation must be an OrderChangeRequest so producedQty, settlement
     // and the administrator decision are written atomically and auditable.
     authz: (order) => {
+      if (actor.role !== Role.ADMIN && (actor.role !== Role.SALES || order.submitterId !== actor.id)) throw new OrderInvariantError('只能取消自己创建的工单');
+      if (actor.role === Role.SALES && (!Number.isSafeInteger(expectedEditVersion) || expectedEditVersion !== order.editVersion)) throw new OrderInvariantError('工单已更新，请刷新后重新取消');
       if (
         order.status !== OrderStatus.DRAFT &&
         order.status !== OrderStatus.PENDING_FACTORY &&
@@ -2128,6 +2142,8 @@ export async function cancelOrder(
     // Once any report exists we refuse to erase payroll facts; an operator
     // must handle those records explicitly before cancelling the order.
     cascade: async (tx, id) => {
+      const pending = await (tx as unknown as Prisma.TransactionClient).orderChangeRequest.findFirst({ where: { orderId: id, status: 'PENDING' }, select: { id: true } });
+      if (pending) throw new OrderInvariantError('请先撤回或处理当前申请，再取消工单');
       const operations = await tx.productionOperation.findMany({
         where: { orderId: id },
         select: {
@@ -3228,6 +3244,9 @@ async function updateOrderEditableFields(
           where: { id: customerId },
           select: { id: true, isActive: true, type: true },
         });
+        if (actor.role === Role.SALES && !await tx.party.findFirst({ where: { id: customerId, ...salesCustomerScope(actor.id) }, select: { id: true } })) {
+          throw new OrderInvariantError('只能选择自己关联的客户');
+        }
         if (!customer || !customer.isActive ||
           (customer.type !== PartyType.CUSTOMER && customer.type !== PartyType.BOTH)) {
           throw new OrderInvariantError('所选客户不存在、已停用或不是客户，请重新选择');

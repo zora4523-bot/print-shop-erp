@@ -28,6 +28,7 @@ export type SalesOrderDetail = {
   orderNo: string;
   customName: string | null;
   customerRef: string | null;
+  customerPartyId?: string | null;
   status: OrderStatus;
   settlementType: OrderSettlementType;
   isUrgent: boolean;
@@ -47,6 +48,7 @@ export type SalesOrderDetail = {
     phone: string | null;
     address: string | null;
   };
+  workflowDecision?: { reason: string; note: string | null; affectedFigs: number[]; createdAt: string } | null;
   feeLines: Array<{
     id: string;
     label: string;
@@ -131,6 +133,7 @@ export const salesOrderDetailSelect = {
   orderNo: true,
   customName: true,
   customerRef: true,
+  customerPartyId: true,
   status: true,
   settlementType: true,
   isUrgent: true,
@@ -153,6 +156,10 @@ export const salesOrderDetailSelect = {
   receiverName: true,
   receiverPhone: true,
   receiverAddress: true,
+  workflowDecisions: {
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
+    select: { toStatus: true, reasonCode: true, reasonNote: true, affectedFigs: true, createdAt: true },
+  },
   items: {
     orderBy: { sequence: 'asc' },
     select: {
@@ -328,6 +335,7 @@ function mapSalesOrderDetail(
     orderNo: row.orderNo,
     customName: row.customName,
     customerRef: row.customerRef,
+    customerPartyId: row.customerPartyId,
     status: row.status,
     settlementType: row.settlementType,
     isUrgent: row.isUrgent,
@@ -347,6 +355,14 @@ function mapSalesOrderDetail(
       phone: row.receiverPhone,
       address: row.receiverAddress,
     },
+    workflowDecision: (() => {
+      const decision = row.workflowDecisions?.[0];
+      if (!decision || decision.toStatus !== row.status || ![OrderStatus.REJECTED, OrderStatus.ON_HOLD].some((status) => status === row.status)) return null;
+      return { reason: decision.reasonCode === 'PAPER_OUT' ? '纸张库存不足' : decision.reasonCode === 'DESIGN_ERROR' ? '设计图有误' : '待工厂核价',
+        note: decision.reasonNote,
+        affectedFigs: Array.isArray(decision.affectedFigs) ? decision.affectedFigs.filter((value): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0) : [],
+        createdAt: decision.createdAt.toISOString() };
+    })(),
     feeLines,
     items: row.items.map((item) => ({
       id: item.id,

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import {
   OrderChangeRequestStatus,
   OrderSettlementType,
@@ -32,6 +33,7 @@ import { SfCollectToggleForm } from './SfCollectToggleForm';
 import { SalesOrderStatusBadge } from './SalesOrderStatusBadge';
 import { ShipmentStatusBadge } from './ShipmentStatusBadge';
 import { UrgentBadge } from './UrgentBadge';
+import { CancelOrderForm } from './CancelOrderForm';
 import { SubmitOrderButton } from './SubmitOrderButton';
 import { UrgentToggleForm } from './UrgentToggleForm';
 import { OrderRemark } from './OrderRemark';
@@ -58,6 +60,7 @@ function SalesOrderChangeRequestSection({
         </p>
       </div>
       <OrderChangeRequestForm
+              hasPackagingGroups={order.packagingGroups.length > 0}
         promisedDate={order.promisedDate?.slice(0, 10) ?? null}
         orderId={order.id}
         expectedRevision={order.revision}
@@ -96,9 +99,11 @@ function SalesOrderChangeRequestSection({
 export function SalesOrderDetailView({
   catalogProducts,
   order,
+  editForm,
 }: {
   catalogProducts: OrderChangeCatalogProduct[];
   order: SalesOrderDetail;
+  editForm?: ReactNode;
 }) {
   const pendingChangeRequest = order.changeRequests.find(
     (request) => request.status === OrderChangeRequestStatus.PENDING,
@@ -112,11 +117,11 @@ export function SalesOrderDetailView({
   const canToggleSfCollect =
     !pendingChangeRequest && canEditOrderSfCollect(order.status) && !isFinalizedExternalShipment;
   const canEditDesigns =
-    !pendingChangeRequest && order.status === OrderStatus.DRAFT;
+    !pendingChangeRequest && (order.status === OrderStatus.DRAFT || order.status === OrderStatus.REJECTED);
   const canRequestModify =
     ORDER_MODIFIABLE_STATUSES.includes(order.status) && !pendingChangeRequest;
   const canRequestCancellation =
-    (order.status === OrderStatus.CONFIRMED ||
+    (order.status === OrderStatus.ON_HOLD || order.status === OrderStatus.CONFIRMED ||
       order.status === OrderStatus.RELEASED ||
       order.status === OrderStatus.FOILING ||
       order.status === OrderStatus.PACKING) &&
@@ -154,7 +159,7 @@ export function SalesOrderDetailView({
 
           <div className="flex min-w-0 flex-wrap items-start gap-2 lg:justify-end">
             <SalesOrderRefreshButton />
-            {canEdit ? (
+            {canEdit && !editForm ? (
               <Link
                 href={`/orders/${order.id}/edit`}
                 className={buttonVariants({ variant: 'outline', size: 'sm' })}
@@ -195,12 +200,24 @@ export function SalesOrderDetailView({
                 }))}
               />
             ) : null}
-            {order.status === OrderStatus.DRAFT ? (
+            {!pendingChangeRequest && (order.status === OrderStatus.DRAFT || order.status === OrderStatus.REJECTED) ? (
               <SubmitOrderButton orderId={order.id} />
             ) : null}
           </div>
         </div>
       </section>
+
+      {!pendingChangeRequest && [OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED].some((status) => status === order.status) ? (
+        <CancelOrderForm orderId={order.id} orderNo={order.orderNo} expectedEditVersion={order.editVersion}
+          impact={[{ label: '工单', value: `${order.orderNo} 将取消，停止后续处理` }]} compact />
+      ) : null}
+      {order.workflowDecision ? <section className="space-y-2 rounded-xl border border-warning/50 bg-warning/10 p-4">
+        <h2 className="font-semibold">{order.status === OrderStatus.REJECTED ? '驳回原因' : '暂停原因'}：{order.workflowDecision.reason}</h2>
+        {order.workflowDecision.note ? <p className="whitespace-pre-wrap break-words">{order.workflowDecision.note}</p> : null}
+        <p>受影响款式：{order.workflowDecision.affectedFigs.map((sequence) => `第 ${sequence} 款`).join('、')}</p>
+        <p className="text-xs text-muted-foreground">{formatDateTimeShanghai(new Date(order.workflowDecision.createdAt))}</p>
+      </section> : null}
+      {editForm}
 
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
         <div className="min-w-0 space-y-4">

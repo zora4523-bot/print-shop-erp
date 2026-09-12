@@ -1346,3 +1346,12 @@ it.each(['receiverName', 'receiverPhone'])('旧草稿提交前重新验证额外
   expect(mocks.appendRevision).not.toHaveBeenCalled();
   expect(tx.order.update).not.toHaveBeenCalled();
 });
+
+it('rejected orders with a previous quote reprice instead of reusing it', async () => {
+  const order = draftOrder({ status: OrderStatus.REJECTED, quotedPricingRevisionId: 'old-revision' });
+  const token = await currentQuoteToken(order);
+  expect(token).toBeTruthy();
+  const tx = txFor(order);
+  const result = await finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient, order.id, 'sales-1', NOW, token);
+  expect(result.reused).toBe(false);
+});

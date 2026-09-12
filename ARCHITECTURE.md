@@ -157,3 +157,11 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 - 修改数据一致性、回退或快照策略。
 
 只记录已经从代码、配置或已批准决策中验证的事实。带日期的生产快照属于部署 runbook，不应被提升为永久架构事实。
+
+## 外部销售读取边界（2026-09-12）
+
+销售详情及编辑复用 `lib/order/sales-detail-query.ts` 的同一查询/序列化契约；
+`SalesOrderEditor` 不接触通用工单 DTO。客户选项在服务端按当前销售关联工单限定，
+客户表尚无独立销售分配字段，不能把无关联客户默认为销售可见。
+`lib/agent-monthly-billing/sales-query.ts` 只读取本人的 `AgentMonthlyBill` 及冻结明细，
+不复用包含管理员内部关系的月账单详情。旧 Bill 仅保留管理历史归档用途。

@@ -32,7 +32,7 @@ const { dbMock } = vi.hoisted(() => {
     };
     orderItem: { findFirst: ReturnType<typeof vi.fn> };
     craft: { findMany: ReturnType<typeof vi.fn> };
-    party: { findUnique: ReturnType<typeof vi.fn> };
+    party: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
     user: { findUnique: ReturnType<typeof vi.fn> };
     product: { findMany: ReturnType<typeof vi.fn> };
     material: { findMany: ReturnType<typeof vi.fn> };
@@ -91,7 +91,7 @@ const { dbMock } = vi.hoisted(() => {
     },
     orderItem: { findFirst: vi.fn() },
     craft: { findMany: vi.fn() },
-    party: { findUnique: vi.fn() },
+    party: { findUnique: vi.fn(), findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
     product: { findMany: vi.fn() },
     material: { findMany: vi.fn() },
@@ -528,6 +528,7 @@ beforeEach(() => {
   dbMock.orderItem.findFirst.mockReset().mockResolvedValue(null);
   dbMock.craft.findMany.mockReset();
   dbMock.party.findUnique.mockReset();
+  dbMock.party.findFirst.mockReset().mockResolvedValue({ id: 'customer-1' });
   dbMock.user.findUnique.mockReset();
   dbMock.product.findMany.mockReset();
   dbMock.material.findMany.mockReset().mockImplementation(
@@ -6174,4 +6175,28 @@ describe('setOrderSfCollect — 后期履约标识', () => {
       setOrderSfCollect('order-1', true, salesActor),
     ).rejects.toThrow(/只能修改自己创建的工单/);
   });
+});
+
+describe('sales early cancellation boundaries', () => {
+  it.each([OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED])('allows the owner to cancel %s with the current edit version', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue({ id: 'o1', status, submitterId: salesActor.id, editVersion: 4 });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
+    await expect(cancelOrder('o1', salesActor, '客户取消', new Date(), 4)).resolves.toMatchObject({ status: OrderStatus.CANCELLED });
+  });
+  it('rejects foreign ownership, stale versions and active requests before writing', async () => {
+    dbMock.order.findUnique.mockResolvedValue({ id: 'o1', status: OrderStatus.REJECTED, submitterId: 'other', editVersion: 4 });
+    await expect(cancelOrder('o1', salesActor, '客户取消', new Date(), 4)).rejects.toThrow('只能取消自己');
+    dbMock.order.findUnique.mockResolvedValue({ id: 'o1', status: OrderStatus.REJECTED, submitterId: salesActor.id, editVersion: 4 });
+    await expect(cancelOrder('o1', salesActor, '客户取消', new Date(), 3)).rejects.toThrow('已更新');
+    dbMock.orderChangeRequest.findFirst.mockResolvedValue({ id: 'pending' });
+    await expect(cancelOrder('o1', salesActor, '客户取消', new Date(), 4)).rejects.toThrow('当前申请');
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+});
+
+it('sales cannot bind an active customer belonging to another salesperson', async () => {
+  dbMock.party.findUnique.mockResolvedValue({ id: 'foreign-customer', type: PartyType.CUSTOMER, isActive: true });
+  dbMock.party.findFirst.mockResolvedValue(null);
+  await expect(createOrder({ customerPartyId: 'foreign-customer', customerRef: '客户', receiverName: '收件人', receiverPhone: '13800000000', receiverAddress: '广东佛山测试收货地址', expressCode: null, packageRequirement: null, remark: null, promisedDate: null, isUrgent: false, isSfCollect: false, items: [baseItem()] }, salesActor)).rejects.toThrow('只能选择自己关联的客户');
+  expect(dbMock.order.create).not.toHaveBeenCalled();
 });

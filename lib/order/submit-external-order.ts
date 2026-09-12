@@ -690,14 +690,14 @@ async function prepareExternalOrderQuote(
   if (!order) throw new ExternalOrderQuoteFinalizeError('工单不存在');
   // A DRAFT may carry a quote produced by an approved change request. It is
   // still mutable and must revalidate live paper/catalog facts at submission.
-  if (order.quotedPricingRevisionId && order.status !== OrderStatus.DRAFT) {
+  if (order.quotedPricingRevisionId && order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
     return { kind: 'REUSE', result: resultFromExisting(order) };
   }
   if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
     throw new ExternalOrderQuoteFinalizeError('仅外部销售工单需要生成提交报价');
   }
-  if (order.status !== OrderStatus.DRAFT) {
-    throw new ExternalOrderQuoteFinalizeError('只能为草稿工单生成提交报价');
+  if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
+    throw new ExternalOrderQuoteFinalizeError('只能为草稿或驳回工单生成提交报价');
   }
   if (order.items.length === 0) {
     throw new ExternalOrderQuoteFinalizeError('工单至少需要一个款式');

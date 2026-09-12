@@ -6,12 +6,14 @@ const { dbMock } = vi.hoisted(() => {
     order: { findFirst: ReturnType<typeof vi.fn> };
     productionTask: { findFirst: ReturnType<typeof vi.fn> };
     bill: { findUnique: ReturnType<typeof vi.fn> };
+    agentMonthlyBill: { findUnique: ReturnType<typeof vi.fn> };
     salaryPeriod: { findUnique: ReturnType<typeof vi.fn> };
     outsourceOrder: { findUnique: ReturnType<typeof vi.fn> };
   } = {
     order: { findFirst: vi.fn() },
     productionTask: { findFirst: vi.fn() },
     bill: { findUnique: vi.fn() },
+    agentMonthlyBill: { findUnique: vi.fn() },
     salaryPeriod: { findUnique: vi.fn() },
     outsourceOrder: { findUnique: vi.fn() },
   };
@@ -115,16 +117,16 @@ describe('getSalesBillTitleRef', () => {
   it('所有权写进 where，别人的账期查不出来', () => {
     getSalesBillTitleRef('bill-1', 'sales-1');
 
-    expect(whereOf(dbMock.bill.findUnique)).toEqual({
+    expect(whereOf(dbMock.agentMonthlyBill.findUnique)).toEqual({
       id: 'bill-1',
-      salesUserId: 'sales-1',
+      agentUserId: 'sales-1',
     });
   });
 
   it('只取账期，不带任何金额', () => {
     getSalesBillTitleRef('bill-1', 'sales-1');
 
-    expect(selectOf(dbMock.bill.findUnique)).toEqual({ period: true });
+    expect(selectOf(dbMock.agentMonthlyBill.findUnique)).toEqual({ period: true });
   });
 });
 
