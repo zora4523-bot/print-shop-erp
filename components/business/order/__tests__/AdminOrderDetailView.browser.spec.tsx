@@ -139,7 +139,7 @@ async function expectHashTargetUnobscured(target: HTMLElement) {
   expect(target.contains(hit), '标题位置应命中目标内容而非吸顶遮挡层').toBe(true);
 }
 
-const viewports = [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]] as const;
+const viewports = [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080], [2205, 1203]] as const;
 
 describe('admin order detail design and interaction gates', () => {
   for (const theme of ['light', 'dark']) {
@@ -150,6 +150,14 @@ describe('admin order detail design and interaction gates', () => {
         renderDetail();
         await settleLayout();
         expect(geometryFailures(host, width)).toEqual([]);
+        const surface = host.querySelector<HTMLElement>('[data-testid="admin-order-detail"]')!;
+        const actions = document.getElementById('order-detail-actions')!;
+        const itemsHeading = document.getElementById('order-detail-items-title')!;
+        if (width === 2205) expect(surface.getBoundingClientRect().width).toBeGreaterThanOrEqual(1700);
+        if (width <= 960) expect(actions.getBoundingClientRect().top).toBeLessThan(itemsHeading.getBoundingClientRect().top);
+        for (const link of host.querySelectorAll<HTMLAnchorElement>('nav[aria-label="工单区块导航"] a')) expect(document.getElementById(link.hash.slice(1))).not.toBeNull();
+        expect(document.getElementById('order-detail-overview')?.textContent).toContain('业务员：');
+        expect(document.getElementById('order-detail-fees')!.compareDocumentPosition(document.getElementById('order-history-records')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(host.textContent).not.toMatch(/¥\s*¥/);
         await expect.element(page.getByText('¥ 570.00', { exact: true }).first()).toBeVisible();
         expect(await commands.checkShellAccessibility('[data-testid="order-detail-fixture"]')).toEqual([]);
