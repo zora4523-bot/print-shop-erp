@@ -218,6 +218,8 @@ describe('admin order detail design and interaction gates', () => {
     expect(target!.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
     const details = [...host.querySelectorAll('details')].find((element) => element.querySelector('summary')?.textContent?.includes('完整审核记录'));
     expect(details).toBeDefined();
+    expect(details!.open).toBe(true);
+    await page.getByText('完整审核记录', { exact: true }).click();
     expect(details!.open).toBe(false);
     await page.getByText('完整审核记录', { exact: true }).click();
     expect(details!.open).toBe(true);
@@ -272,7 +274,8 @@ describe('admin order detail design and interaction gates', () => {
     await page.viewport(1280, 900);
     renderDetail();
     const files = document.getElementById('detail-design-files') as HTMLDetailsElement;
-    expect(files.open).toBe(false);
+    expect(files.open).toBe(true);
+    files.open = false;
     await page.getByRole('button', { name: '查看设计文件', exact: true }).first().click();
     expect(files.open).toBe(true);
     await expect.element(page.getByText('设计原稿与生产文件记录。', { exact: true })).toBeVisible();
@@ -301,7 +304,8 @@ describe('admin order detail design and interaction gates', () => {
     expect(document.getElementById('pricing-review')!.hasAttribute('tabindex')).toBe(false);
     await settleLayout();
     const outer = document.getElementById('detail-pricing') as HTMLDetailsElement;
-    expect(outer.open).toBe(false);
+    expect(outer.open).toBe(true);
+    outer.open = false;
     location.hash = '#pricing-review';
     await expect.poll(() => outer.open).toBe(true);
     await expectHashTargetUnobscured(document.getElementById('pricing-review')!);

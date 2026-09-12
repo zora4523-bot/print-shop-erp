@@ -205,7 +205,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
           </section>
 
           {packaging ? <Disclosure className={styles.extra}><DisclosureSummary>分货与包装明细</DisclosureSummary><div>{packaging}</div></Disclosure> : null}
-          {supplementary.length ? <section className={styles.supplementary} aria-label="管理与业务记录"><h2>管理与业务记录</h2>{supplementary.map((section) => <Disclosure key={section.id} id={section.id} tabIndex={-1} className={cn(styles.extra, highlighted === section.id && styles.highlight)}>
+          {supplementary.length ? <section className={styles.supplementary} aria-label="管理与业务记录"><h2>管理与业务记录</h2>{supplementary.map((section) => <Disclosure open key={section.id} id={section.id} tabIndex={-1} className={cn(styles.extra, highlighted === section.id && styles.highlight)}>
             <DisclosureSummary>{section.title}</DisclosureSummary><div>{section.content}</div>
           </Disclosure>)}</section> : null}
         </div>

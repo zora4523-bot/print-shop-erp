@@ -17,7 +17,7 @@ test('逐地址登记、面单历史与最后一票应收确认', async ({ page 
     await login(page, { username: 'e2e-owner', password: 'e2e-test-password-1234' });
     await page.goto(`/orders/${id}`);
     const delivery = page.locator('#detail-delivery-records');
-    await delivery.locator('summary').first().click();
+    await expect(delivery).toHaveAttribute('open', '');
     const first = delivery.locator('li').filter({ has: page.getByRole('textbox', { name: '运单号', exact: true }) }).nth(0);
     await first.getByRole('textbox', { name: '运单号', exact: true }).fill('ZTO-TEST-1');
     await first.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('ZTO');
