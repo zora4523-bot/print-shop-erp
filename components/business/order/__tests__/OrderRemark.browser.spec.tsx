@@ -31,6 +31,8 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [[375,667],
     const primary = document.createElement('span'); primary.className = 'text-primary'; host.append(primary);
     expect(getComputedStyle(full).color).toBe(getComputedStyle(primary).color);
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    const summary = host.querySelector('details summary span[aria-describedby]')!;
+    expect(document.getElementById(summary.getAttribute('aria-describedby')!)?.textContent).toBe(note);
     await page.getByText('工单备注 · 展开/收起', { exact: true }).click();
     expect(host.querySelector('details')?.open).toBe(true);
     expect(host.querySelector('details > p')?.textContent).toBe(note);
