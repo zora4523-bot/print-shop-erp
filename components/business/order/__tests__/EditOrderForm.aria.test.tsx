@@ -128,3 +128,20 @@ describe('EditOrderForm 字段错误的 aria 连线', () => {
     expect(falseFallbackIndex).toBeGreaterThan(enabledValueIndex);
   });
 });
+
+ describe('销售编辑客户字段', () => {
+  it.each(['FULL', 'SHIPPING_ONLY'] as const)('在 %s 中不渲染或提交客户字段，保留其他编辑入口', (fieldset) => {
+    const html = renderToStaticMarkup(<EditOrderForm orderId="sales-order" expectedEditVersion={7}
+      fieldset={fieldset} hideCustomerFields initial={{ ...initial, customerRef: '已有简称', customerPartyId: 'existing-customer' }} />);
+    expect(html).not.toContain('name="customerRef"');
+    expect(html).not.toContain('name="customerPartyId"');
+    expect(html).not.toContain('关联客户');
+    expect(html).not.toContain('客户名称/简称');
+    expect(html).toContain('name="remark"');
+    expect(html).toContain('name="customName"');
+  });
+  it('管理端默认保留客户字段', () => {
+    expect(render()).toContain('name="customerRef"');
+    expect(render()).toContain('name="customerPartyId"');
+  });
+});

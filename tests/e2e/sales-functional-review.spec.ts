@@ -324,10 +324,10 @@ test('销售列表、详情和编辑页在六视口及明暗主题下可用', as
   expect(errors).toEqual([]);
 });
 
-async function fixtureSql(run: (db: Client) => Promise<void>) {
+async function fixtureSql<T>(run: (db: Client) => Promise<T>): Promise<T> {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
-  try { await db.query('BEGIN'); await run(db); await db.query('COMMIT'); }
+  try { await db.query('BEGIN'); const result = await run(db); await db.query('COMMIT'); return result; }
   catch (error) { await db.query('ROLLBACK'); throw error; }
   finally { await db.end(); }
 }
@@ -363,6 +363,14 @@ test('销售客户响应按身份隔离，详情与编辑均不暴露内部改�
     expect(body).not.toContain(privatePhone);
     await healthy(page);
   }
+  await expect(page.getByLabel('客户名称/简称（选填）')).toHaveCount(0);
+  await expect(page.getByLabel('关联客户', { exact: true })).toHaveCount(0);
+  const savedCustomer = await fixtureSql(async (db) => (await db.query('SELECT "customerRef", "customerPartyId" FROM "Order" WHERE id=$1', [id])).rows[0]);
+  await page.getByRole('textbox', { name: /工单备注/ }).fill('移除客户入口后保存备注');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(page).toHaveURL(`/orders/${id}`);
+  const afterCustomer = await fixtureSql(async (db) => (await db.query('SELECT "customerRef", "customerPartyId" FROM "Order" WHERE id=$1', [id])).rows[0]);
+  expect(afterCustomer).toEqual(savedCustomer);
   expect(errors).toEqual([]);
 });
 
