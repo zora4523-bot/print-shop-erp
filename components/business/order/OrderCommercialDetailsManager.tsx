@@ -516,9 +516,6 @@ export function OrderCommercialDetailsManager({
     <section className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <div>
         <h2 className="text-base font-semibold">制版明细与其他费用</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          增改或移除后会自动重算工单总额。
-        </p>
         {hasActiveEditor ? <p className="mt-1 text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}
       </div>
 
@@ -542,7 +539,6 @@ export function OrderCommercialDetailsManager({
 
       <div className="space-y-3 border-t pt-4">
         <h3 className="text-sm font-semibold">按款式制版明细</h3>
-        <p className="text-sm text-muted-foreground">版费默认 0 元；需要收费时，由管理员添加制版明细。</p>
         {allowPlateDetailMaintenance ? (
           <ol className="space-y-4">
             {items.map((item) => (

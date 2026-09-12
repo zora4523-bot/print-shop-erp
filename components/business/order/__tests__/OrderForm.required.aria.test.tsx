@@ -127,7 +127,7 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(html).toContain('id="customerRef"');
     expect(html).toContain('id="expressCode"');
     expect(html).toContain('id="items.0.manualQuoteReason"');
-    expect(html).toContain('配置外项目说明（转人工核价）');
+    expect(html).toContain('需人工核价的要求（选填）');
     expect(html).toContain('id="items.0.artworkVersion"');
     expect(html).toContain('id="items.0.plateGroupId"');
     expect(html).toContain('id="items.0.remark"');

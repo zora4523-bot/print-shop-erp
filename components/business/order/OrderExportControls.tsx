@@ -136,8 +136,7 @@ export function OrderExportControls({
             导出工单
           </SheetTitle>
           <SheetDescription>
-            由独立重任务生成多工作表 XLSX，不会占用当前页面的 SSR
-            进程。文件 24 小时后过期。
+            导出 Excel，文件保留 24 小时。
           </SheetDescription>
         </SheetHeader>
         <SheetClose

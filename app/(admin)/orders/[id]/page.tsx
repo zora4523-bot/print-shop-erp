@@ -1294,10 +1294,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
-              <h2 className="text-base font-semibold">计件工资关联</h2>
-              <p className="text-xs text-muted-foreground">
-                金额按已生成的日薪明细统计。
-              </p>
+              <h2 className="text-base font-semibold">已生成计件工资</h2>
             </div>
             <strong className="admin-wrap-anywhere font-sans tabular-nums text-primary">
               合计 {formatMoney(pieceworkSummary.total)}
@@ -1306,8 +1303,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           {pieceworkSummary.items.length === 0 ? (
             <TableEmptyState
               variant="compact"
-              title="尚无计件明细"
-              description="计件工资生成后，关联明细会显示在这里。"
+              title="暂无计件工资明细"
             />
           ) : (
             <ul className="divide-y text-sm">
@@ -1338,7 +1334,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <div>
             <h2 className="text-base font-semibold">成本补录与调整</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              计件工资和外协金额自动汇总；这里只需补录其他成本。
+              无需重复录入计件工资和外协费用。
             </p>
           </div>
           {order.costEntries.length > 0 ? (
@@ -1520,10 +1516,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
           <h2 className="text-base font-semibold">发起重做工单</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              适用于质量问题或物流损毁。系统会创建关联的新工单并生成对应工序；
-              原工单状态、应收账单和历史工资保持不变。
-            </p>
           </div>
           <ReworkOrderForm
             sourceOrderId={order.id}

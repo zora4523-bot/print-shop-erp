@@ -3473,20 +3473,17 @@ export function OrderForm({
                   <div className="grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
                     <div className="@min-[560px]:col-span-2">
                       <Label htmlFor={`items.${expandedItem}.manualQuoteReason`}>
-                        配置外项目说明（转人工核价）
+                        需人工核价的要求（选填）
                       </Label>
                       <Textarea
                         id={`items.${expandedItem}.manualQuoteReason`}
                         className="mt-2 min-h-20"
-                        placeholder="仅当规则配置里没有所需纸张、规格或工艺时填写；请记录完整客需，金额由工厂确认时录入"
+                        placeholder="选项中没有所需纸张、规格或工艺时，请在此填写具体要求"
                         aria-invalid={Boolean(
                           errors.items?.[expandedItem]?.manualQuoteReason,
                         )}
                         {...register(`items.${expandedItem}.manualQuoteReason`)}
                       />
-                      <p className="mt-1.5 text-xs text-muted-foreground">
-                        不会在创建页录入人工单价；填写后该款式进入工厂人工核价。
-                      </p>
                     </div>
                     <div className="@min-[560px]:col-span-2">
                       <Label htmlFor={`items.${expandedItem}.remark`}>
@@ -3506,7 +3503,7 @@ export function OrderForm({
                         附加工艺（选填）
                       </legend>
                       <p className="mt-2 text-xs text-muted-foreground">
-                        主工艺已由上方工艺类型、烫金和包装选择自动生成；这里只选择额外工序。
+                        选择额外工序。
                       </p>
                       <InternalAdditionalCraftChoices
                         options={internalAdditionalCraftOptions}

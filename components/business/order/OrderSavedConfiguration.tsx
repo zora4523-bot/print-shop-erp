@@ -122,13 +122,6 @@ export function OrderSavedConfiguration({
               </Fact>
             </dl>
           </Disclosure>
-          <p className="text-xs text-muted-foreground">
-            修改后的费用在保存确认中核对。
-            {'settlementType' in order &&
-            order.settlementType === 'EXTERNAL_SALES'
-              ? '版费默认 0，管理员可在下方补充制版明细。'
-              : ''}
-          </p>
         </CardContent>
       </Card>
     );
