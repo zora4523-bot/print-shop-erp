@@ -228,6 +228,22 @@ beforeEach(() => {
 });
 
 describe('order detail commercial visibility', () => {
+  it.each([true, false])('design headers omit production hints and optional history follows actual records: %s', async (withHistory) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const order = orderFixture();
+    if (!withHistory) order.items = order.items.map(item => ({ ...item, tasks: [] }));
+    getOrderDetailMock.mockResolvedValue(order);
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    const design = html.slice(html.indexOf('id="detail-design-item-'));
+    const summary = design.slice(design.indexOf('<summary'), design.indexOf('</summary>'));
+    expect(summary).not.toMatch(/已完工|历史完工|生产工序|任务/);
+    expect(summary).toContain('项工艺');
+    expect(html).not.toContain('尚未生成生产工序');
+    expect(html).not.toContain('该款式无独立生产工序');
+    expect(html).not.toContain('该款式无无计件进度步骤');
+    if (withHistory) expect(html).toContain('历史生产记录');
+    else expect(html).not.toContain('历史生产记录');
+  });
   it('places secondary operations inside the right-hand action panel and omits retired display fields', async () => {
     requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
     getOrderDetailMock.mockResolvedValue(orderFixture());

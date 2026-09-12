@@ -25,7 +25,6 @@ import {
   PieceworkOperationType,
   ProductionOperationStatus,
   Role,
-  TaskStatus,
 } from '../../../../generated/prisma/enums';
 import { getSession, requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
@@ -880,13 +879,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     {item.craftNames.length
                       ? ` · ${item.craftNames.length} 项工艺`
                       : ''}
-                    {hasProductionOperations
-                      ? (operationsByOrderItemId.get(item.id)?.length ?? 0) > 0
-                        ? ` · 已完工 ${operationsByOrderItemId.get(item.id)!.filter((operation) => operation.status === ProductionOperationStatus.COMPLETED).length}/${operationsByOrderItemId.get(item.id)!.length} 工序`
-                        : ' · 无独立生产工序'
-                      : item.tasks.length
-                        ? ` · 历史完工 ${item.tasks.filter((task) => task.status === TaskStatus.COMPLETED).length}/${item.tasks.length} 任务`
-                        : ' · 尚未生成生产工序'}
                     <span className="ml-2 group-open:hidden">展开</span>
                     <span className="ml-2 hidden group-open:inline">收起</span>
                   </span>
@@ -1047,6 +1039,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     />
                   </>
                 ) : null}
+                {(hasProductionOperations ? (operationsByOrderItemId.get(item.id)?.length ?? 0) > 0 : item.tasks.length > 0) ? (
                 <Row
                   label={hasProductionOperations ? '生产工序' : '历史生产记录'}
                   value={
@@ -1056,19 +1049,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
                             (operation) =>
                               `${PRODUCTION_OPERATION_LABELS[operation.operationType]}：${productionOperationStatusLabel(operation.status)}`,
                           )
-                          .join('；') || '该款式无独立生产工序'
-                      : item.tasks.length
-                        ? item.tasks
-                            .map(
-                              (task) =>
-                                `${task.craft.name}：${task.worker?.displayName ?? '历史未分派记录'}`,
-                            )
-                            .join('；')
-                        : '尚未生成生产工序'
+                          .join('；')
+                      : item.tasks
+                          .map((task) => `${task.craft.name}：${task.worker?.displayName ?? '历史未分派记录'}`)
+                          .join('；')
                   }
                   full
                 />
-                {hasProductionOperations ? (
+                ) : null}
+                {hasProductionOperations && (progressByOrderItemId.get(item.id)?.length ?? 0) > 0 ? (
                   <Row
                     label="无计件进度（不计薪）"
                     value={
@@ -1080,7 +1069,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                           );
                           return `${step.craftName}：${productionOperationStatusLabel(step.status)}（${completed.toString()}/${step.plannedQty.toString()}）`;
                         })
-                        .join('；') || '该款式无无计件进度步骤'
+                        .join('；')
                     }
                     full
                   />
@@ -1746,9 +1735,7 @@ function OrderBasicSummarySection({
           </>
         ) : assignedWorkerNames.length > 0 ? (
           <Row label="历史派工" value={assignedWorkerNames.join('、')} />
-        ) : (
-          <Row label="生产工序" value="尚未生成" />
-        )}
+        ) : null}
         <Row label="客户名称/简称" value={order.customerRef} />
         {canViewCommercialAmounts && 'settlementType' in order ? (
           <Row
