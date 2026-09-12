@@ -310,6 +310,7 @@ export function SalesOrderDetailView({
                       {group.name ? ` · ${group.name}` : ''} ·{' '}
                       {group.mode === 'MIXED_STYLE' ? '混装' : '单款装'}
                     </h3>
+                    {editForm && canEdit ? <SalesTextEditForm key={`group-${group.id}-${order.editVersion}`} orderId={order.id} targetId={group.id} field="packagingName" version={order.editVersion} value={group.name ?? ''} label="包装组名称" /> : null}
                     <p className="mt-1">
                       共 {group.actualBagCount.toLocaleString('zh-CN')} 袋
                     </p>

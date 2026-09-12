@@ -2,7 +2,7 @@
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/auth/permissions';
 import { editSalesOrderText, SalesTextEditError, salesTextEditSchema } from '@/lib/order/edit-sales-text';
-export async function editSalesTextAction(orderId: string, targetId: string, field: 'itemName' | 'itemRemark', _previous: { error?: string; saved?: boolean } | null, form: FormData) {
+export async function editSalesTextAction(orderId: string, targetId: string, field: 'itemName' | 'itemRemark' | 'packagingName', _previous: { error?: string; saved?: boolean } | null, form: FormData) {
   const actor = await requirePermission('order:create');
   const version = form.get('expectedEditVersion');
   if (typeof version !== 'string' || !/^(0|[1-9]\d*)$/.test(version)) return { error: '请刷新工单后重试' };

@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
 vi.mock('server-only', () => ({}));
-const m = vi.hoisted(() => ({ tx: { $executeRaw: vi.fn(), order: { findUnique: vi.fn(), update: vi.fn() }, orderItem: { findFirst: vi.fn(), update: vi.fn() }, orderLog: { create: vi.fn() } } }));
+const m = vi.hoisted(() => ({ tx: { $executeRaw: vi.fn(), order: { findUnique: vi.fn(), update: vi.fn() }, orderItem: { findFirst: vi.fn(), update: vi.fn() }, orderPackagingGroup: { findFirst: vi.fn(), update: vi.fn() }, orderLog: { create: vi.fn() } } }));
 vi.mock('@/lib/db', () => ({ db: { $transaction: (fn: (tx: unknown) => unknown) => fn(m.tx) } }));
 import { editSalesOrderText } from '../edit-sales-text';
 const actor = { id: 'sales', role: Role.SALES };
@@ -17,4 +17,15 @@ it('saves and clears item remark without renaming or repricing', async () => {
   m.tx.orderItem.findFirst.mockResolvedValue({ name: '旧名称', remark: '旧备注' });
   await editSalesOrderText({ ...input, field: 'itemRemark', value: '' }, actor);
   expect(m.tx.orderItem.update).toHaveBeenCalledWith({ where: { id: 'item' }, data: { remark: null } });
+});
+
+it('renames a packaging group without changing bag counts or members', async () => {
+  m.tx.orderPackagingGroup.findFirst.mockResolvedValue({ name: '旧组' });
+  await editSalesOrderText({ ...input, field: 'packagingName', value: '新组' }, actor);
+  expect(m.tx.orderPackagingGroup.update).toHaveBeenCalledWith({ where: { id: 'item' }, data: { name: '新组' } });
+  expect(m.tx.orderItem.update).not.toHaveBeenCalled();
+});
+it('rejects foreign packaging group', async () => {
+  m.tx.orderPackagingGroup.findFirst.mockResolvedValue(null);
+  await expect(editSalesOrderText({ ...input, field: 'packagingName' }, actor)).rejects.toThrow('不属于');
 });
