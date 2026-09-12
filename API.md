@@ -194,3 +194,11 @@ pnpm test --run
 保存资料不改变发货状态；确认要求完整运单及承运商、完工、已确认费用、无待审变更和未完成外协。最后一票复用整单发货及 v2 结算服务，二者和地址、图片、审计记录在同一事务提交；若发货核算改变已确认金额，整个确认回滚，须先完成物流费用复核。重复 UUID 同内容直接返回已保存，不重复结算；不同内容拒绝。
 
 `GET /api/orders/[id]/shipments/[shipmentId]/labels/[labelId]`：校验当前有效登录状态及工单可见范围，三个 ID 必须属于同一资源链。200 返回 JPEG（private/no-store、nosniff）；未登录 401；不存在或越权 404。图片不使用公开 URL，替换后旧图仍能从历史面单查看。
+
+### 管理员工单动态分页
+
+`actions/order-activity.ts` 的 `loadOrderActivity(input)` 为只读 Server Action。每次请求先要求 `order:view:all`，再校验 `orderId`（1–128 字符）和 `cursor: { at: ISO UTC 时间, id: 1–128 字符 }`；领域查询再次限制管理员与工单可见范围。
+
+按 `createdAt DESC, id DESC` 查询游标之前的记录，每页最多 20 条，额外读取 1 条判定是否存在下一页。成功返回 `{ ok: true, page: { events, nextCursor } }`，无下一页时 `nextCursor` 为 `null`；无效参数、工单不存在/不可访问返回 `{ ok: false, message }`。权限失败由授权入口拒绝。界面对网络或服务异常仅显示重试提示，不展示异常堆栈。
+
+`events` 仅包含展示所需的操作标题、时间、人员、备注和已格式化变更；不返回原始 `changedFields` 或内部报价修订标识。首屏使用同一领域查询；非管理员详情继续使用原有授权裁剪结果，不使用该分页入口。查询不修改审计记录或财务数据。

@@ -1,3 +1,5 @@
+import { OrderActivity } from '@/components/business/order/OrderActivity';
+import { readOrderActivity } from '@/lib/order/activity';
 import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
 import { getAdminOrderDetailPresentation } from '@/lib/order/admin-detail-query';
 import { buildAdminOrderDetailModel } from '@/components/business/order/admin-order-detail-model';
@@ -169,6 +171,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
     ...(order?.items ?? []).map((item) => item.designs.length),
   );
   if (!order) notFound();
+  const adminActivity = user.role === Role.ADMIN ? await readOrderActivity(order.id, user) : null;
   const canViewCommercialAmounts = user.role !== Role.WORKER;
   const displayedCustomerFee =
     canViewCommercialAmounts && 'totalAmount' in order
@@ -1563,7 +1566,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
           { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
           { id: 'detail-business-records', title: '基本信息、成本与重做', content: <>{detailSections.basics}{detailSections.costs}{detailSections.rework}{detailSections.reworkForm}</> },
-          { id: 'detail-audit-records', title: '完整变更与操作日志', content: <>{detailSections.changeHistory}{detailSections.logs}</> },
+          { id: 'detail-audit-records', title: '工单动态', content: <>{adminActivity ? <OrderActivity key={`${order.id}:${adminActivity.events[0]?.id ?? "empty"}`} orderId={order.id} initialPage={adminActivity} /> : null}{detailSections.changeHistory}</> },
           { id: 'detail-other-actions', title: '其他工单操作', content: detailSections.otherActions },
         ]}
       />

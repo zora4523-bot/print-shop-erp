@@ -1,3 +1,5 @@
+vi.mock('@/lib/order/activity', () => ({ readOrderActivity: vi.fn().mockResolvedValue({ events: [], nextCursor: null }) }));
+vi.mock('@/actions/order-activity', () => ({ loadOrderActivity: vi.fn() }));
 vi.mock('@/components/business/order/ShipmentRegistrationForm', () => ({ ShipmentRegistrationForm: () => null }));
 vi.mock('@/actions/shipment-registration', () => ({ registerShipmentAction: vi.fn() }));
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -190,8 +192,10 @@ vi.mock('next/navigation', () => ({
 }));
 
 import OrderDetailPage from '@/app/(admin)/orders/[id]/page';
+import { readOrderActivity } from '@/lib/order/activity';
 
 beforeEach(() => {
+  vi.mocked(readOrderActivity).mockReset().mockResolvedValue({ events: [], nextCursor: null });
   getOrderDetailMock.mockReset();
   getSalesOrderDetailByIdMock.mockReset();
   requireSessionMock.mockReset();
@@ -224,6 +228,21 @@ beforeEach(() => {
 });
 
 describe('order detail commercial visibility', () => {
+  it('renders one audit feed while retaining full change-request history', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue(orderFixture());
+    vi.mocked(readOrderActivity).mockResolvedValue({ events: [{
+      id: 'audit-1', at: '2026-09-11T10:33:00.000Z', date: '2026/09/11', time: '18:33', actor: '管理员',
+      title: '审计事件唯一标题', remark: null, changes: { primary: [], details: [], unavailable: false },
+    }], nextCursor: null });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html.match(/审计事件唯一标题/g)).toHaveLength(1);
+    expect(html).not.toContain('日志沿用原价 76543.21');
+    expect(html).not.toContain('修改日志');
+    expect(html).toContain('工单修改申请');
+    expect(html).toContain('沿用原价 87654.32');
+    expect(html).toContain('id="order-history-records"');
+  });
   it.each(['factory', 'fulfillment', 'shipping'] as const)('does not mount a second %s form when the decision panel owns it', async (operation) => {
     requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
     getOrderDetailMock.mockResolvedValue({

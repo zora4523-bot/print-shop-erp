@@ -230,6 +230,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
 
           {renderSections(['detail-business-records'])}
           <div id="order-history-records" tabIndex={-1} className={styles.historyGroup}>
+          {!supplementary.some(section => section.id === 'detail-audit-records') ? <>
           <section className={styles.ledger} aria-label="变更历史">
             <div className={styles.sectionHeading}><h2>变更历史</h2><span>{model.changes.length} 次申请</span></div>
             {model.changes.length === 0 ? <p className={styles.emptyHint}>暂无变更</p> : <ol className={styles.history}>{model.changes.map((change) => <li key={change.id}>
@@ -247,8 +248,9 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
             </li>)}</ol>}
           </section>
 
-          </div>
+          </> : null}
           {renderSections(['detail-audit-records'])}
+          </div>
           {renderSections(['detail-other-actions'])}
           {renderSections(supplementary.filter((section) => !placedSections.has(section.id)).map((section) => section.id))}
 
