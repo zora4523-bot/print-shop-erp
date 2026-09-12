@@ -136,7 +136,7 @@ describe('order row secondary action contract', () => {
       {
         id: 'print',
         label: '打印工单',
-        href: '/print/orders/order-1?autoprint=1',
+        href: '/api/orders/order-1/pdf?view=inline',
         newTab: true,
       },
       {

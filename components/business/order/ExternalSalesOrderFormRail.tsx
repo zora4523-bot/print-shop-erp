@@ -327,7 +327,9 @@ export function OrderFormBRail({
     packaging.status === 'incomplete' ||
     packaging.status === 'error' ||
     (excludesManualItems && !plateFee);
-  const manualMessages = [
+  // Shared quote failures can reach both packaging and logistics. Show each
+  // message once while retaining the distinct per-item labels above it.
+  const manualMessageCandidates = [
     ...quoteItems.flatMap((item, index) =>
       item.status === 'incomplete' || item.status === 'error'
         ? [{ key: `item:${item.key}`, message: `第 ${index + 1} 款：${item.message || STATUS_LABELS[item.status]}` }]
@@ -341,6 +343,9 @@ export function OrderFormBRail({
       : []),
     ...(plateFee ? [{ key: 'plate-fee', message: `${plateFee.label}金额待工厂确认` }] : []),
   ];
+  const manualMessages = manualMessageCandidates.filter((entry, index, all) =>
+    all.findIndex((candidate) => candidate.message === entry.message) === index,
+  ).map((entry) => ({ ...entry, key: entry.key.startsWith('item:') ? entry.key : `shared:${entry.message}` }));
   const needsAdminPrice = manualMessages.length > 0;
   const excludedLabels = [
     ...(hasNonPlateManualPricing ? ['待核价款'] : []),

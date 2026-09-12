@@ -11,6 +11,18 @@ applies_to: repository source at last_verified
 
 端点实现以 [`app/api/`](./app/api/) 为事实源。修改方法、认证、参数、状态码或响应形状时，必须同步修改本文件和契约测试。
 
+## 销售工作台计算
+
+`actions/workbench.ts` 的 `quoteWorkbenchAction(raw)` 要求 `order:create`。
+输入为单款产品 ID、当前目录规格/纸张、计价路线、整数数量、正反面烫金颜色、烫金方式和 0–100 的整数加价百分比。
+服务端校验目录归属与颜色，复用建单 schema，并在正式计价事务中重新校验目录、读取当前价格。
+目录纸张缺少克重时返回明确的补资料错误，不猜测克重或金额。
+纸张输入是目录选项显示值，最多 69 字符（物料名称与克重前缀）；必须精确匹配当前目录选项。服务端使用建单同一规范化函数拆分名称和克重，再执行订单原有 32 字名称校验。合法 32 字名称不因显示克重前缀而被拒绝；规范化后仍超限时返回人工核价提示，不截断名称。
+返回 `{ status: 'success', quote }` 或 `{ status: 'error', message }`；认证失败沿用授权入口抛错。
+`quote` 只含加工费、加价金额、加工费参考报价、费用明细、核价/制版待定标记及加工价版本号。金额均为十进制字符串，缺价为 `null`；不返回内部成本、规则快照或报价签名，不写订单。
+`quote.pricingReasons` 为受控中文核价原因数组，完整报价为空数组；前端兼容省略该字段的响应。原因由正式引擎的业务代码映射，不透传内部诊断。已知规格/烫金组合错误返回具体的修改条件或人工核价提示，其他异常保持通用错误。
+计算范围与原型差异见 [销售工作台](./docs/销售工作台.md)。
+
 ## 认证类型
 
 | 标记 | 含义 |
@@ -67,7 +79,7 @@ applies_to: repository source at last_verified
 | `GET /api/admin/inventory-count/materials` | Permission `material:manage` | query `q`、`limit` | `200 {materials}`；未授权 `401` |
 | `GET /api/orders/admin/:orderNo` | Permission `order:view:all` + ADMIN | path `orderNo` | `200 {order}`；未授权 `401`，非管理员 `403`，不可见或不存在 `404`；响应 `private, no-store` |
 | `GET /api/cdr/bundles/:id` | Capability URL | cuid 风格 bundle id | 就绪后 `302` 到产物；生成中 `409` + `Retry-After`；失效或不存在统一 `404`；OSS 不可用 `503` |
-| `GET /api/orders/:id/pdf` | Session + order scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500` |
+| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500` |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
 | `GET /api/salary/piecework-settlements/export` | Permission `salary:view:all`，复核数据库账号状态 | query `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 | `GET /api/salary/piecework/export` | Permission `salary:view:all` | query `date` 或 `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
@@ -77,6 +89,10 @@ Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到�
 下载响应使用 `private, no-store`；文件名同时提供安全的 ASCII fallback 和 UTF-8 名称（适用的端点）。新增下载接口时保持内容类型、长度、缓存和 `nosniff` 语义。
 
 工单 PDF 仅输出每页一个主码的生产主单。工序流转单已移除：`mode=tasks` 下载请求返回 `400`，浏览器打印页返回 `404`。后台任务继续绑定用户、工单和生产版本；兼容缺省或 `mode=order` 的历史任务，拒绝生成或下载旧流转单任务。浏览器打印页 `/print/orders/:id` 使用相同模板与分页规则。
+
+生产打印范围统一由 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 提供，适用于网页正文、页面标题、同步 PDF 及后台 PDF。每次读取复核账号仍启用且角色未变化：ADMIN 可查看全部，CUSTOMER_SERVICE 仅查看自己提交的工单，SALES 不可查看生产打印件。WORKER 按当前账号的固定报工岗位匹配当前版本未取消的计件工序，或读取包含当前版本公共进度工序的工单；`SUBMITTED` 不向师傅开放。旧 `ProductionTask.workerId` 派工关系不授予打印权限，无权访问的页面标题不含工单号。
+
+打印工序只读取当前 `workOrderVersion` 的 `ProductionOperation` / `ProductionProgressStep`，排除已取消工序；缺记录时显示空态，不生成旧任务或推测进度。状态来自当前工单，待审批标记只来自真实的 PENDING 修改申请。后台渲染后、下载响应前继续复核账号、范围及生产版本；撤权不返回产物，响应前发现升版返回 `409` 并要求重新生成。
 
 工单主码 `/wo/:orderNo?v=:version` 只读取并分流，不写报工或工资。师傅/打包账号仅进入当前岗位的当前版工序；唯一未完成工序直接进入，多个或全部完成时显示选择页。旧 `task` 参数仍精确校验工单、版本和岗位，禁止越权跳转。
 
@@ -282,3 +298,21 @@ F48：同一入口增加 `packagingName`，仅更新该工单所属包装组名�
 - `editItemRemarkAction(orderId, itemId, previous, formData)`：要求 `order:create`；领域层仅允许管理员及该工单的客服创建者。接收 `expectedEditVersion` 与最长 1000 字的 `remark`，统一换行符为 LF，空白清空为 null；待审批和不可编辑状态拒绝。校验款式归属，事务内保存备注、推进编辑/业务版本并记审计；不改变金额、价格版本、纸质工单版本或生产数据。返回 `success`、带 `fieldErrors` 的 `invalid` 或业务 `error`。
 - `addOrderShipmentAction` 沿用既有预览凭证与四版本校验，新增允许客服对本人创建的工单调用；客服和销售均不可传人工物流费用。其他分货、物流登记、已结算和收费历史限制保持不变。
 - 共享修改申请表单支持既有款式 `pack`（每袋数量），只在领域允许的未生产阶段、且款式有唯一包装明细时提供输入。它仍经过修改申请、计价预检与管理员审批，不通过基础资料保存直接改包装或金额。
+
+### 发布整改后的认证与表单契约（2026-09-11）
+
+Proxy 仅将包含非空 `user.id`、合法且未过期 `expires` 的 session 视为已登录；错误对象、数组、缺字段和过期 session 均拒绝。页面跳转登录，受保护 API 返回 401；数据库账号状态、权限和资源所有权仍在服务端检查。
+
+月账单生成、确认、收款与抵扣 action 在 strict schema 前仅过滤字段名以 `$ACTION_` 开头的 React 表单协议元数据；未知业务字段仍拒绝。该兼容处理不改变账单冻结、Decimal 金额、幂等键或历史快照。
+
+部署 jobs gate 仅在明确的 development/test inline 模式与完整健康摘要一致时接受 optional/null 机器人状态；production 仍拒绝 null、必需 worker 缺失或版本不符。production smoke 对无效 cron token 只接受 401，缺配置的 503 失败。
+
+PDF 生成接口仍执行认证、角色和资源所有权校验；页面下载入口使用原生链接，导航预取不得创建后台任务。P2002 仅按已识别的约束字段映射为表单业务错误，未知冲突继续抛出。
+
+手工出入库 action 必须携带有效的 `idempotencyKey`；同键重放仅返回原流水，同键不同操作者或业务内容拒绝，成功后表单换新键。时薪重复标记为已发保留首次发放时间。数据库前向迁移与历史兼容边界见 [数据库说明](./DATABASE.md#手工出入库请求幂等2026-09-11-局部核对)。
+
+认证预取仍完整验证会话，但 GET/HEAD 预取响应不回写代理层滚动会话 Cookie，防止晚响应复活已经登出的会话；普通导航续期策略保持。
+
+### 跨设备 PDF（2026-09-11）
+
+`GET /api/orders/:id/pdf` 默认 attachment；`view=inline` 使用 inline 供系统 PDF 阅读器打开，其他/重复 view 返回 400。202 轮询保留 view 与 jobId；失败恢复链接携带 `regenerate=1` 新建生成请求。同一授权内容在 15 分钟数据库时间窗口内复用任务；产物保留 1 小时，可重复下载，每次仍检查账号、所有权及当前工单版本。产物存储可选持久共享卷或私有 OSS，不提供公开下载地址。详见 [跨设备打印](./docs/跨设备打印与可用性.md)。

@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import Decimal from 'decimal.js';
+import {
+  confirmAgentMonthlyBillAction,
+  createAgentMonthlyBillCreditAction,
+  markAgentMonthlyBillPaidAction,
+} from '@/actions/agent-monthly-bill';
 import { AgentMonthlyBillStatus } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getAgentMonthlyBillDetail } from '@/lib/agent-monthly-billing/query';
@@ -63,7 +68,7 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
         <section className="space-y-3 rounded-xl border bg-card p-5 shadow-sm">
           <h2 className="font-semibold">对账确认</h2>
           <ConfirmAgentMonthlyBillForm
-            billId={bill.id}
+            submitAction={confirmAgentMonthlyBillAction.bind(null, bill.id)}
             initialIdempotencyKey={randomUUID()}
           />
         </section>
@@ -73,7 +78,7 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
         <section className="space-y-3 rounded-xl border bg-card p-5 shadow-sm">
           <h2 className="font-semibold">整单收款</h2>
           <MarkAgentMonthlyBillPaidForm
-            billId={bill.id}
+            submitAction={markAgentMonthlyBillPaidAction.bind(null, bill.id)}
             lockedAmount={new Decimal(bill.totalAmount).toFixed(2)}
             initialIdempotencyKey={randomUUID()}
           />
@@ -119,7 +124,7 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
                     </Link>
                     {bill.status !== AgentMonthlyBillStatus.DRAFT ? (
                       <CreateAgentMonthlyBillCreditForm
-                        billId={bill.id}
+                        submitAction={createAgentMonthlyBillCreditAction.bind(null, bill.id)}
                         sourceItemId={item.id}
                         sourceAmount={new Decimal(item.settledFeeSnapshot).toFixed(2)}
                         initialIdempotencyKey={randomUUID()}

@@ -529,7 +529,12 @@ function SalesOrderDrawer({
         </SheetDescription>
       </SheetHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-4 admin-safe-inline">
+      <div
+        role="region"
+        aria-label="工单明细内容"
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-y-auto py-4 admin-safe-inline outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
         <DrawerSection title="进度">
           <SalesOrderProgress status={order.status} />
           {order.pricingAttentionReason ? (

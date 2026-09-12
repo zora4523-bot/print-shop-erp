@@ -132,6 +132,35 @@ describe('createBomAction', () => {
       expect(result.fieldErrors.productId).toContain('该产品已有启用 BOM');
     }
   });
+
+  it.each([
+    { fields: ['"productId"'], field: 'productId', message: '该产品已有启用 BOM' },
+    { fields: ['"categoryNodeId"'], field: 'categoryNodeId', message: '该产品分类已有启用 BOM' },
+    { fields: ['"productId"', 'version'], field: 'version', message: '该产品已有相同版本号 BOM' },
+    { fields: ['version', '"categoryNodeId"'], field: 'version', message: '该产品分类已有相同版本号 BOM' },
+    { fields: ['"bomId"', '"materialId"'], field: 'items', message: '同一个 BOM 中物料不能重复' },
+  ])('maps the complete adapter field set $fields to $field', async ({ fields, field, message }) => {
+    const error = new Prisma.PrismaClientKnownRequestError('duplicate', {
+      code: 'P2002', clientVersion: '7.7.0',
+      meta: { modelName: 'BillOfMaterial', driverAdapterError: { cause: { constraint: { fields } } } },
+    });
+    bomMock.createBom.mockRejectedValueOnce(error);
+    expect(await createBomAction(null, fd(validBom))).toEqual({
+      status: 'invalid', fieldErrors: { [field]: [message] },
+    });
+    expect(redirectMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it.each([['productId', 'unexpected'], ['version'], ['BillOfMaterial_unknown_key'], ['prefix_productId']])(
+    'rethrows an unknown constraint rather than guessing from a partial field match: %s', async (...fields) => {
+      const error = new Prisma.PrismaClientKnownRequestError('unknown constraint', {
+        code: 'P2002', clientVersion: 'test', meta: { target: fields },
+      });
+      bomMock.createBom.mockRejectedValueOnce(error);
+      await expect(createBomAction(null, fd(validBom))).rejects.toBe(error);
+    },
+  );
 });
 
 describe('setBomActiveAction', () => {

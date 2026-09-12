@@ -1981,6 +1981,8 @@ model MaterialLocationStock {
 
 model MaterialTransaction {
   id                    String      @id @default(cuid())
+  idempotencyKey        String?     @unique @db.VarChar(128)
+  requestFingerprint    String?     @db.VarChar(64)
   materialId            String
   warehouseId           String?
   locationId            String?

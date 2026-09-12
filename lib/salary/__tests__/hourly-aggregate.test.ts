@@ -750,6 +750,54 @@ describe('markHourlyPayrollPaid', () => {
     expect(data.paidAt).toBe(now);
   });
 
+  it.each([true, false])('replaying isPaid=%s preserves the first transition and history', async (isPaid) => {
+    const firstTime = new Date('2026-06-01T09:00:00Z');
+    const replayTime = new Date('2026-06-02T10:00:00Z');
+    let stored = {
+      workerId: 'worker-1', month: '2026-05',
+      salaryRuleSnapshot: { workerType: WorkerType.CLEANER },
+      worker: { displayName: '李师傅' },
+      totalSalary: '110.00', isPaid: !isPaid,
+      paidAt: isPaid ? null : new Date('2026-06-01T08:00:00Z'),
+    };
+    dbMock.hourlyWorkerPayroll.findUnique.mockImplementation(async () => stored);
+    dbMock.hourlyWorkerPayroll.update.mockImplementation(async ({ data }: {
+      data: { isPaid: boolean; paidAt: Date | null };
+    }) => {
+      stored = { ...stored, ...data };
+      return { id: 'p-1', isPaid: stored.isPaid };
+    });
+
+    const first = await markHourlyPayrollPaid('p-1', isPaid, firstTime);
+    const history = structuredClone(stored);
+    const replay = await markHourlyPayrollPaid('p-1', isPaid, replayTime);
+
+    expect(stored).toEqual(history);
+    expect(stored.paidAt).toEqual(isPaid ? firstTime : null);
+    expect(replay).toEqual(first);
+    expect(replay).toEqual({ id: 'p-1', isPaid, workerName: '李师傅' });
+    expect(dbMock.hourlyWorkerPayroll.update).toHaveBeenCalledTimes(1);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('a concurrent payment that wins the lock is returned without overwriting its paidAt', async () => {
+    dbMock.hourlyWorkerPayroll.findUnique
+      .mockResolvedValueOnce({ workerId: 'worker-1', month: '2026-05', isPaid: false })
+      .mockResolvedValueOnce({
+        workerId: 'worker-1', month: '2026-05', isPaid: true,
+        paidAt: new Date('2026-06-01T09:00:00Z'),
+        salaryRuleSnapshot: { workerType: WorkerType.CLEANER },
+        worker: { displayName: '李师傅' },
+      });
+
+    await expect(markHourlyPayrollPaid('p-1', true, new Date('2026-06-02T10:00:00Z')))
+      .resolves.toEqual({ id: 'p-1', isPaid: true, workerName: '李师傅' });
+    expect(dbMock.hourlyWorkerPayroll.update).not.toHaveBeenCalled();
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.hourlyWorkerPayroll.findUnique.mock.invocationCallOrder[1]!,
+    );
+  });
+
   it('拒绝将上海当月的临时月结冻结为已发', async () => {
     await expect(
       markHourlyPayrollPaid(

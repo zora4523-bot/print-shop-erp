@@ -69,16 +69,19 @@ async function checkWorkerRoutes(
       // The route is server-rendered, but its reduced-motion color transitions
       // can still be created during the next paint. Let consecutive paints and
       // any newly-created transitions settle before axe samples the palette.
-      await page.evaluate(async () => {
-        for (let paint = 0; paint < 3; paint += 1) {
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          await Promise.all(
-            document
-              .getAnimations()
-              .map((animation) => animation.finished.catch(() => undefined)),
-          );
-        }
-      });
+      for (let paint = 0; paint < 3; paint += 1) {
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+        // Streaming can replace an animation whose finished promise was
+        // captured earlier. Observe the current document, as the admin gate
+        // does, and report still-running targets within the assertion budget.
+        await expect.poll(() => page.evaluate(() => document.getAnimations()
+          .filter((animation) => animation.playState === 'running' || animation.pending)
+          .map((animation) => ({
+            state: animation.playState,
+            target: animation.effect instanceof KeyframeEffect && animation.effect.target instanceof Element
+              ? animation.effect.target.outerHTML.slice(0, 180) : null,
+          }))), { message: `${route.name}: animations must settle before visual gates` }).toEqual([]);
+      }
       await expectViewportGate(page, testInfo);
       await expectA11yGate(page);
       await attachCandidateScreenshot(

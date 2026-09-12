@@ -44,7 +44,7 @@ export function SettingsForm({
 
   return (
     <form action={formAction} aria-busy={pending}>
-      <fieldset disabled={pending} className="space-y-6 border-0 p-0">
+      <fieldset disabled={pending} className="min-w-0 space-y-6 border-0 p-0">
         <div className="space-y-5 rounded-xl border bg-card p-6 shadow-sm">
           {SETTING_KEYS.map((key) => (
             <SettingField
@@ -322,7 +322,7 @@ function ManagementNotificationRoutingField({
                           disabled={disabled}
                           aria-label={`${role.label}：${channel.channelName}`}
                         />
-                        <span className="min-w-0 py-2">
+                        <span className="admin-wrap-anywhere min-w-0 py-2">
                           {channel.channelName}
                           <span className="ml-1 font-mono text-xs text-muted-foreground">
                             {channel.channelKey}

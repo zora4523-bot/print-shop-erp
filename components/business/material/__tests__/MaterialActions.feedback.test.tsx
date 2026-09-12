@@ -31,7 +31,7 @@ import { ToggleMaterialActiveButton } from '../ToggleMaterialActiveButton';
 
 function renderTransaction() {
   return renderToStaticMarkup(
-    <StockTransactionForm action={vi.fn()} unit="张" locationOptions={[]} />,
+    <StockTransactionForm action={vi.fn()} unit="张" locationOptions={[]} initialIdempotencyKey="6c181687-83f4-49d6-97f8-206eb2fc8e28" />,
   );
 }
 

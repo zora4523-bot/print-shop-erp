@@ -37,12 +37,13 @@ const creditSchema = z
   })
   .strict();
 
-function formObject(formData: FormData): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, value] of formData.entries()) {
-    if (typeof value === 'string') result[key] = value;
-  }
-  return result;
+function formObject(formData: FormData): Record<string, FormDataEntryValue> {
+  // React adds action references and state metadata on native submissions.
+  // Preserve every business entry, including files, so strict schemas can
+  // reject unknown keys and invalid types instead of silently dropping them.
+  return Object.fromEntries(
+    [...formData.entries()].filter(([key]) => !key.startsWith('$ACTION_')),
+  );
 }
 
 function mappedError(error: unknown): AgentMonthlyBillActionResult | null {
@@ -53,9 +54,23 @@ function mappedError(error: unknown): AgentMonthlyBillActionResult | null {
 }
 
 function invalid(error: z.ZodError): AgentMonthlyBillActionResult {
+  const messages: Readonly<Record<string, string>> = {
+    period: '账期无效，请选择有效月份',
+    idempotencyKey: '表单已失效，请刷新页面后重试',
+    paymentMethod: '收款方式无效，请填写 100 字以内的文字',
+    referenceNo: '流水号无效，请填写 100 字以内的文字',
+    sourceItemId: '账单明细无效，请刷新页面后重试',
+    amount: '负项金额无效，请填写最多两位小数的正数',
+    reason: '负项原因无效，请填写 1 至 500 字',
+  };
   return {
     status: 'invalid',
-    fieldErrors: collectFieldErrorsDeep(error.issues),
+    fieldErrors: collectFieldErrorsDeep(error.issues.map((issue) => ({
+      path: issue.path,
+      message: issue.code === 'unrecognized_keys'
+        ? '提交内容包含页面不支持的字段，请刷新后重试'
+        : messages[String(issue.path[0])] ?? '提交内容无效，请检查后重试',
+    }))),
   };
 }
 
@@ -79,7 +94,7 @@ export async function generateAgentMonthlyBillsAction(
     refreshBillPages();
     return {
       status: 'success',
-      message: `已同步 ${result.generated.length} 张 ${result.period} 账单`,
+      message: `已生成或更新 ${result.generated.length} 张 ${result.period} 账单`,
     };
   } catch (error) {
     const mapped = mappedError(error);
@@ -124,7 +139,7 @@ export async function markAgentMonthlyBillPaidAction(
   formData: FormData,
 ): Promise<AgentMonthlyBillActionResult> {
   const actor = await requirePermission('bill:mark-paid');
-  // Parse every submitted key with a strict schema. In particular, a client
+  // Parse every business key with a strict schema. In particular, a client
   // that attempts to submit `amount` is rejected; the service reads only the
   // locked bill total.
   const parsed = paidSchema.safeParse(formObject(formData));
@@ -143,7 +158,7 @@ export async function markAgentMonthlyBillPaidAction(
     return {
       status: 'success',
       billStatus: result.status,
-      message: `已按锁定总额 ¥ ${result.amount} 标记已收`,
+      message: `已收款 ¥ ${result.amount}`,
     };
   } catch (error) {
     const mapped = mappedError(error);
@@ -173,8 +188,8 @@ export async function createAgentMonthlyBillCreditAction(
       status: 'success',
       message:
         result.allocatedBillIds.length > 0
-          ? '负项事实已记录，并已抵扣后续开放月份'
-          : '负项事实已记录；尚无后续 DRAFT，余额会保留等待未来月份',
+          ? '已记录负项，并已抵扣后续账单'
+          : '已记录负项，余额将在后续草稿账单中抵扣',
     };
   } catch (error) {
     const mapped = mappedError(error);

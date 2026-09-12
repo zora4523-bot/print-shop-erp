@@ -858,32 +858,8 @@ export function OrderFormB({
   const [customNameOverride, setCustomNameOverride] = useState<string | null>(
     null,
   );
-  const rootRef = useRef<HTMLDivElement>(null);
-  const handledErrorFocusRequest = useRef(0);
-  const issueFocusTimer = useRef<number | null>(null);
-  const removeButtonRef = useRef<HTMLButtonElement>(null);
-  const styleNavRef = useRef<HTMLElement>(null);
-  const restoreDeleteFocus = useRef(false);
-
-  const cancelIssueFocus = useCallback(() => {
-    if (issueFocusTimer.current !== null) {
-      window.clearTimeout(issueFocusTimer.current);
-      issueFocusTimer.current = null;
-    }
-  }, []);
-
-  useEffect(() => cancelIssueFocus, [cancelIssueFocus]);
-
-  useLayoutEffect(() => {
-    if (!restoreDeleteFocus.current) return;
-    restoreDeleteFocus.current = false;
-    const target =
-      removeButtonRef.current ??
-      styleNavRef.current?.querySelector<HTMLButtonElement>(
-        '[aria-pressed="true"]',
-      );
-    target?.focus({ preventScroll: true });
-  }, [itemFields.length]);
+  const { rootRef, handledErrorFocusRequestRef, issueFocusTimerRef, removeButtonRef,
+    styleNavRef, restoreDeleteFocusRef, cancelIssueFocus } = useOrderFormFocus(itemFields.length);
 
   const printFoilMode = useMemo(
     () => (item ? currentPrintFoilMode(item) : 'NONE'),
@@ -903,8 +879,8 @@ export function OrderFormB({
       );
       if (index >= 0) onActiveIndexChange(index);
     }
-    issueFocusTimer.current = window.setTimeout(() => {
-      issueFocusTimer.current = null;
+    issueFocusTimerRef.current = window.setTimeout(() => {
+      issueFocusTimerRef.current = null;
       const root = rootRef.current;
       if (!root) return;
       const addressNumber = Number(message.match(/地址\s*(\d+)/)?.[1]);
@@ -942,18 +918,18 @@ export function OrderFormB({
           : 'smooth',
       });
     }, 0);
-  }, [cancelIssueFocus, items, onActiveIndexChange]);
+  }, [cancelIssueFocus, items, onActiveIndexChange, issueFocusTimerRef, rootRef]);
 
   useEffect(() => {
     if (
       !errorFocusRequest ||
-      handledErrorFocusRequest.current === errorFocusRequest
+      handledErrorFocusRequestRef.current === errorFocusRequest
     ) {
       return;
     }
-    handledErrorFocusRequest.current = errorFocusRequest;
+    handledErrorFocusRequestRef.current = errorFocusRequest;
     if (fieldErrors?.summary?.length) focusIssue(fieldErrors.summary[0]);
-  }, [errorFocusRequest, fieldErrors?.summary, focusIssue]);
+  }, [errorFocusRequest, fieldErrors?.summary, focusIssue, handledErrorFocusRequestRef]);
 
   if (!item || !field) return null;
 
@@ -1073,7 +1049,7 @@ export function OrderFormB({
             className="min-h-11 rounded-lg px-3 py-1.5 text-sm font-semibold text-destructive hover:bg-destructive/5 hover:text-destructive"
             onClick={() => {
               cancelIssueFocus();
-              restoreDeleteFocus.current = true;
+              restoreDeleteFocusRef.current = true;
               onRemove(safeActiveIndex);
             }}
           >
@@ -1560,4 +1536,36 @@ export function OrderFormB({
       </div>
     </div>
   );
+}
+
+function useOrderFormFocus(itemCount: number) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const handledErrorFocusRequestRef = useRef(0);
+  const issueFocusTimerRef = useRef<number | null>(null);
+  const removeButtonRef = useRef<HTMLButtonElement>(null);
+  const styleNavRef = useRef<HTMLElement>(null);
+  const restoreDeleteFocusRef = useRef(false);
+
+  const cancelIssueFocus = useCallback(() => {
+    if (issueFocusTimerRef.current !== null) {
+      window.clearTimeout(issueFocusTimerRef.current);
+      issueFocusTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelIssueFocus, [cancelIssueFocus]);
+
+  useLayoutEffect(() => {
+    if (!restoreDeleteFocusRef.current) return;
+    restoreDeleteFocusRef.current = false;
+    const target =
+      removeButtonRef.current ??
+      styleNavRef.current?.querySelector<HTMLButtonElement>(
+        '[aria-pressed="true"]',
+      );
+    target?.focus({ preventScroll: true });
+  }, [itemCount]);
+
+  return { rootRef, handledErrorFocusRequestRef, issueFocusTimerRef, removeButtonRef,
+    styleNavRef, restoreDeleteFocusRef, cancelIssueFocus };
 }

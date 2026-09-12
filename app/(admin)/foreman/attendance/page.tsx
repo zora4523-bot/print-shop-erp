@@ -275,7 +275,7 @@ function FilterBar({
 }) {
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
-      <div className="flex flex-col">
+      <div className="flex min-w-0 max-w-full flex-col">
         <label
           htmlFor="attendance-month"
           className="text-xs text-muted-foreground"
@@ -287,10 +287,10 @@ function FilterBar({
           type="month"
           name="month"
           defaultValue={selectedMonth}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
         />
       </div>
-      <div className="flex flex-col">
+      <div className="flex min-w-0 max-w-full flex-col">
         <label
           htmlFor="attendance-worker"
           className="text-xs text-muted-foreground"
@@ -301,7 +301,7 @@ function FilterBar({
           id="attendance-worker"
           name="workerId"
           defaultValue={selectedWorkerId ?? ''}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
         >
           {workers.map((w) => (
             <option key={w.id} value={w.id}>

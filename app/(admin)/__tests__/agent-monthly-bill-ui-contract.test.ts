@@ -20,7 +20,7 @@ describe('agent monthly bill owner cutover', () => {
   it('keeps the explicit legacy archive pages read-only', () => {
     const list = source(
       'app',
-      '(admin)',
+      '(billing)',
       'owner',
       'bills',
       'archive',
@@ -28,7 +28,7 @@ describe('agent monthly bill owner cutover', () => {
     );
     const detail = source(
       'app',
-      '(admin)',
+      '(billing)',
       'owner',
       'bills',
       'archive',
@@ -44,10 +44,10 @@ describe('agent monthly bill owner cutover', () => {
   });
 
   it('turns the former legacy writer routes into compatibility redirects', () => {
-    const list = source('app', '(admin)', 'owner', 'bills', 'page.tsx');
+    const list = source('app', '(billing)', 'owner', 'bills', 'page.tsx');
     const detail = source(
       'app',
-      '(admin)',
+      '(billing)',
       'owner',
       'bills',
       '[id]',
@@ -78,7 +78,7 @@ describe('agent monthly bill owner cutover', () => {
   it('uses the independent durable export action, status API, and download route', () => {
     const page = source(
       'app',
-      '(admin)',
+      '(billing)',
       'owner',
       'agent-bills',
       'page.tsx',

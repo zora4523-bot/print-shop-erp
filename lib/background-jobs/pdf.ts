@@ -1,7 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { basename, isAbsolute, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { writePdfArtifact, cleanupOldPdfArtifacts } from '../pdf/artifacts';
 import {
   BackgroundJobQueue,
   BackgroundJobStatus,
@@ -11,11 +9,16 @@ import {
 import { getOrderForPrint } from '../order/print-view';
 import { buildPrintHtml } from '../order/print-html';
 import { renderHtmlToPdf } from '../pdf/render';
+import { orderPdfSnapshotKey } from '../pdf/order-snapshot';
 import { db } from '../db';
 import { getSetting } from '../settings';
+import { databaseNow } from './clock';
 import { enqueueBackgroundJob } from './repository';
 import { BACKGROUND_JOB_TYPES, type ClaimedBackgroundJob } from './types';
 
+export { readPdfArtifact, writePdfArtifact } from '../pdf/artifacts';
+
+const PDF_JOB_REUSE_WINDOW_MS = 15 * 60_000;
 const ROLE_SET: ReadonlySet<string> = new Set(Object.values(Role));
 
 export async function enqueueOrderPdfJob(input: {
@@ -23,11 +26,19 @@ export async function enqueueOrderPdfJob(input: {
   expectedWorkOrderVersion: number;
   actor: { id: string; role: Role };
   baseUrl: string;
+  snapshotKey?: string;
+  regenerationKey?: string;
 }): Promise<string> {
+  const enqueuedAt = await databaseNow();
+  const snapshotDigest = createHash('sha256').update(JSON.stringify(input)).digest('hex');
+  const reuseWindow = Math.floor(enqueuedAt.getTime() / PDF_JOB_REUSE_WINDOW_MS);
   const { job } = await enqueueBackgroundJob({
     type: BACKGROUND_JOB_TYPES.ORDER_PDF,
     queue: BackgroundJobQueue.HEAVY,
-    dedupeKey: `order-pdf:${input.orderId}:${randomUUID()}`,
+    // Unique DB key coalesces concurrent requests for the same authorized
+    // snapshot within a 15-minute window. A new window allows recovery when a
+    // completed artifact expired; all downloads still recheck current access.
+    dedupeKey: `order-pdf:v2:${snapshotDigest}:${reuseWindow}`,
     payload: JSON.parse(JSON.stringify(input)) as Prisma.InputJsonValue,
     priority: 120,
     maxAttempts: 2,
@@ -53,6 +64,7 @@ export async function handleOrderPdfJob(
   const role = requiredString(actor.role);
   if (!ROLE_SET.has(role)) throw new InvalidOrderPdfJobPayloadError();
 
+  await requireCurrentPdfActor(actorId, role);
   const order = await getOrderForPrint(
     orderId,
     { id: actorId, role: role as Role },
@@ -64,6 +76,9 @@ export async function handleOrderPdfJob(
   }
 
   const { name: factoryName } = await getSetting('factory_name');
+  if (payload.snapshotKey && payload.snapshotKey !== orderPdfSnapshotKey(order, factoryName)) {
+    throw new OrderPdfVersionStaleError();
+  }
   const html = await buildPrintHtml(order, { factoryName });
   await job.assertLease?.();
   job.signal?.throwIfAborted();
@@ -73,6 +88,20 @@ export async function handleOrderPdfJob(
   });
   await job.assertLease?.();
   job.signal?.throwIfAborted();
+  await requireCurrentPdfActor(actorId, role);
+  const currentOrder = await getOrderForPrint(
+    orderId,
+    { id: actorId, role: role as Role },
+    baseUrl,
+  );
+  if (!currentOrder) throw new OrderPdfNotFoundError();
+  if (currentOrder.workOrderVersion !== expectedWorkOrderVersion) {
+    throw new OrderPdfVersionStaleError();
+  }
+  const { name: currentFactoryName } = await getSetting('factory_name');
+  if (payload.snapshotKey && payload.snapshotKey !== orderPdfSnapshotKey(currentOrder, currentFactoryName)) {
+    throw new OrderPdfVersionStaleError();
+  }
   const artifactName = `${job.id}-${job.attempts}.pdf`;
   await writePdfArtifact(artifactName, pdf);
   await job.assertLease?.();
@@ -98,6 +127,7 @@ export async function waitForOrderPdfJob(
     expected?: {
       orderId: string;
       actorId: string;
+      actorRole: Role;
       workOrderVersion: number;
     };
   } = {},
@@ -140,6 +170,7 @@ function matchesExpectedPdfJob(
   expected: {
     orderId: string;
     actorId: string;
+    actorRole: Role;
     workOrderVersion: number;
   },
 ): boolean {
@@ -150,70 +181,13 @@ function matchesExpectedPdfJob(
     return (
       payload.orderId === expected.orderId &&
       actor.id === expected.actorId &&
+      actor.role === expected.actorRole &&
       payload.expectedWorkOrderVersion === expected.workOrderVersion &&
       (payload.mode === undefined || payload.mode === 'order')
     );
   } catch {
     return false;
   }
-}
-
-export async function readAndDeletePdfArtifact(name: string): Promise<Buffer> {
-  const path = safeArtifactPath(name);
-  const pdf = await readFile(path);
-  await unlink(path).catch(() => undefined);
-  return pdf;
-}
-
-export async function writePdfArtifact(
-  name: string,
-  pdf: Buffer,
-): Promise<void> {
-  const dir = artifactDir();
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  const target = safeArtifactPath(name);
-  const temporary = `${target}.${process.pid}.tmp`;
-  try {
-    await writeFile(temporary, pdf, { mode: 0o600 });
-    await rename(temporary, target);
-  } catch (error) {
-    // Preserve the primary write/rename failure. Cleanup is best-effort because
-    // a partial file may not exist, or the same filesystem failure may also
-    // prevent unlinking it. The hourly orphan sweep remains the final fallback.
-    await unlink(temporary).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function cleanupOldPdfArtifacts(): Promise<void> {
-  const dir = artifactDir();
-  const entries = await readdir(dir).catch(() => [] as string[]);
-  const cutoff = Date.now() - 60 * 60_000;
-  await Promise.all(
-    entries
-      .filter((entry) => entry.endsWith('.pdf'))
-      .map(async (entry) => {
-        const path = safeArtifactPath(entry);
-        const info = await stat(path).catch(() => null);
-        if (info && info.mtimeMs < cutoff) await unlink(path).catch(() => undefined);
-      }),
-  );
-}
-
-function artifactDir(): string {
-  const configured = process.env.PDF_ARTIFACT_DIR;
-  if (configured) {
-    if (!isAbsolute(configured)) throw new InvalidOrderPdfJobPayloadError();
-    return configured;
-  }
-  return join(tmpdir(), 'print-shop-erp-pdf-artifacts');
-}
-
-function safeArtifactPath(name: string): string {
-  if (basename(name) !== name || !/^[A-Za-z0-9_-]+\.pdf$/.test(name)) {
-    throw new InvalidOrderPdfJobPayloadError();
-  }
-  return join(artifactDir(), name);
 }
 
 function asRecord(
@@ -241,16 +215,15 @@ function requiredPositiveInteger(value: Prisma.JsonValue | undefined): number {
 
 async function delay(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolveDelay) => {
-    const timer = setTimeout(resolveDelay, ms);
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolveDelay();
+    };
+    const timer = setTimeout(finish, ms);
     timer.unref();
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolveDelay();
-      },
-      { once: true },
-    );
+    signal?.addEventListener('abort', finish, { once: true });
+    if (signal?.aborted) finish();
   });
 }
 
@@ -273,4 +246,9 @@ export class OrderPdfVersionStaleError extends Error {
     super('order PDF work-order version changed');
     this.name = 'OrderPdfVersionStaleError';
   }
+}
+
+async function requireCurrentPdfActor(id: string, role: string): Promise<void> {
+  const current = await db.user.findUnique({ where: { id }, select: { role: true, isActive: true } });
+  if (!current?.isActive || current.role !== role) throw new OrderPdfNotFoundError();
 }

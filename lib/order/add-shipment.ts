@@ -298,6 +298,26 @@ export async function addOrderShipment(
     if (mode === 'preview') return preview;
     if (input.previewToken !== preview.token)
       throw new AddOrderShipmentError('费用或分货信息已变化，请重新预览后保存');
+    return persistAddedShipment(tx, { order, source, remaining, input, quote, preview, sequence, actor, now, affected });
+  });
+}
+
+type ShipmentOrder = Prisma.OrderGetPayload<{ include: {
+  items: true; shipments: { include: { lines: true } };
+  customerCharges: { include: { category: true } };
+} }>;
+
+/** Persist the validated preview under the caller's transaction and locks. */
+async function persistAddedShipment(tx: Prisma.TransactionClient,
+  { order, source, remaining, input, quote, preview, sequence, actor, now, affected }: {
+    order: ShipmentOrder; source: ShipmentOrder['shipments'][number];
+    remaining: { orderItemId: string; quantity: number }[];
+    input: AddOrderShipmentInput;
+    quote: Awaited<ReturnType<typeof resolveExternalOrderChargesForFinalization>> | null;
+    preview: AddOrderShipmentPreview; sequence: number;
+    actor: { id: string; role: Role }; now: Date;
+    affected: ShipmentOrder['customerCharges'];
+  }) {
     const created = await tx.orderShipment.create({
       data: {
         orderId: order.id,
@@ -434,5 +454,4 @@ export async function addOrderShipment(
       },
     });
     return null;
-  });
 }

@@ -11,6 +11,9 @@
 | **[ARCHITECTURE.md](./ARCHITECTURE.md)** | 当前系统边界、分层、进程与数据流 | 开发 / 评审 |
 | **[DEVELOPMENT.md](./DEVELOPMENT.md)** | 本地安装、命令、测试与开发循环 | 开发 |
 | **[CONTRIBUTING.md](./CONTRIBUTING.md)** | 编码、迁移、测试、评审与发布记录规则 | 贡献者 |
+| **[docs/编码规范.md](./docs/编码规范.md)** | 分层、表单/授权边界、金额真值与防回归编码要求 | 开发 / 评审 |
+| **[发布整改任务台账](./docs/release-remediation-2026-09-10.md)** | 发布审查项的阶段、依赖、责任角色、验收与现行状态 | 开发 / 测试 / 发布负责人 |
+| **[发布审查快照](./docs/audits/2026-09-10-release-readiness.md)** | 2026-09-10 测试结果及逐功能矩阵；后续状态看任务台账 | 开发 / 验收 |
 | **[API.md](./API.md)** | Route Handlers 与 Server Actions 契约 | 开发 / 集成 |
 | **[DATABASE.md](./DATABASE.md)** | Prisma、迁移、seed、扩展与数据安全 | 开发 / DBA |
 | **[DEPLOYMENT.md](./DEPLOYMENT.md)** | 稳定部署入口；详细步骤指向唯一 runbook | 运维 / Owner |

@@ -3,7 +3,7 @@
 .header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .identity { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 380px; }
 .identity h1 { min-width: 0; max-width: 100%; }
-.number { height: auto; min-height: 44px; white-space: normal; overflow-wrap: anywhere; text-align: left; font-family: var(--font-mono), monospace; font-size: var(--text-base); font-weight: 600; padding: 4px 0; }
+.number { min-width: 0; max-width: 100%; height: auto; min-height: 44px; white-space: normal; overflow-wrap: anywhere; text-align: left; font-family: var(--font-mono), monospace; font-size: var(--text-base); font-weight: 600; padding: 4px 0; }
 .version { border-radius: var(--radius-sm); padding: 2px 7px; background: var(--foreground); color: var(--background); font-size: var(--text-xs); font-weight: 700; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 24px; flex-basis: 100%; color: var(--muted-foreground); overflow-wrap: anywhere; font-size: var(--text-xs); }
 .headerActions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
@@ -101,7 +101,7 @@
 .supplementary { display: grid; gap: 10px; }
 .extra { min-width: 0; border-top: 1px solid var(--border); }
 .extra > summary { min-height: 44px; padding: 12px 0; font-size: var(--text-lg); font-weight: 600; }
-.extra > div { padding: 0 0 12px; min-width: 0; display: grid; gap: 12px; }
+.extra > div { padding: 0 0 12px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 /* Flatten only embedded module surfaces; nested cards and controls retain theirs. */
 .extra > div > section { box-shadow: none; border: 0; border-radius: 0; padding: 0; background: transparent; }
 .lightbox { max-width: 920px !important; padding: 0 !important; gap: 0 !important; grid-template-columns: minmax(0, 1fr) 260px; }

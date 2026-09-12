@@ -44,8 +44,8 @@ test.describe('自动准备与显式生产下发', () => {
     expect(prepared).toMatchObject({ operations: 0, prints: 0, readiness: 1, confirmedFee: '12.30', quotedFee: null, settledFee: null });
     await page.goto(`/orders/${id}`);
     await expect(page.getByRole('button', { name: '确认工单', exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: '下发 + 打印', exact: true }).click();
-    await page.getByRole('button', { name: '下发并打印', exact: true }).click();
+    await page.getByRole('button', { name: '下发生产', exact: true }).click();
+    await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.poll(async () => (await state(id)).status).toBe('RELEASED');
     const released = await state(id);
     expect(released).toMatchObject({ operations: 2, prints: 1, readiness: 1, totalAmount: '12.30', confirmedFee: '12.30', settledFee: null });
@@ -57,12 +57,12 @@ test.describe('自动准备与显式生产下发', () => {
     const invalid = await fixture(true);
     await login(page, { from: `/orders/${invalid}`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
     await expect(page.getByText('费用明细与工单合计不一致，请先核对费用', { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '下发 + 打印', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '下发生产', exact: true })).toHaveCount(0);
     expect(await state(invalid)).toMatchObject({ status: 'SUBMITTED', operations: 0, prints: 0, readiness: 0, confirmedFee: null });
     const valid = await fixture();
     await page.goto(`/orders/${valid}`);
-    await page.getByRole('button', { name: '下发 + 打印', exact: true }).click();
-    await page.getByRole('button', { name: '下发并打印', exact: true }).click();
+    await page.getByRole('button', { name: '下发生产', exact: true }).click();
+    await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.poll(async () => (await state(valid)).status).toBe('RELEASED');
     expect(await state(valid)).toMatchObject({ operations: 2, prints: 1, readiness: 1, confirmedFee: '12.30' });
   });

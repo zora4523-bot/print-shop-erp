@@ -92,6 +92,7 @@ function runCheckEnv(
         WECOM_SMART_BOT_SECRET: '',
         APP_PUBLIC_URL: 'https://erp.example.com',
         APP_VERSION: 'test',
+        PDF_CHROMIUM_VERSION: '152.0.7977.75',
         PDF_ARTIFACT_DIR: '/tmp/print-shop-erp-pdf-test',
         ORDER_EXPORT_ARTIFACT_DIR: '/tmp/print-shop-erp-export-test',
         ...overrides,
@@ -107,3 +108,15 @@ function runCheckEnv(
     child.once('close', (code) => resolveRun({ code, stdout }));
   });
 }
+
+describe('portable PDF deployment configuration', () => {
+  it('rejects an unpinned production browser', async () => {
+    expect((await runCheckEnv({ PDF_CHROMIUM_VERSION: '' })).code).toBe(1);
+  });
+  it('rejects implicit temporary PDF storage in production', async () => {
+    expect((await runCheckEnv({ PDF_ARTIFACT_DIR: '' })).code).toBe(1);
+  });
+  it('rejects unknown storage backends', async () => {
+    expect((await runCheckEnv({ PDF_ARTIFACT_STORAGE: 'unknown' })).code).toBe(1);
+  });
+});

@@ -7,22 +7,26 @@ import type { OrderListSelectionItem } from './OrderListBatchSelection';
 
 export const BATCH_COMMAND_CONFIG = {
   RELEASE_AND_CREATE_PRINT: {
-    label: '下发+打印', capability: 'release', prerequisite: '需资料与费用完整且无待审批申请',
-    impact: '下发生产，并为当前工单版本创建打印任务。',
-    completed: '已下发生产并创建打印任务',
+    label: '下发生产', capability: 'release', prerequisite: '需资料与费用完整且无待审批申请',
+    confirmLabel: '确认下发生产',
+    impact: '工单下发至车间，并加入待打印。',
+    completed: '已下发生产，待打印',
   },
   CREATE_PRINT: {
-    label: '创建打印', capability: 'createPrint', prerequisite: '需可打印且无待打印任务',
-    impact: '为当前工单版本创建打印任务；不会自动完成打印。',
-    completed: '已创建打印任务',
+    label: '加入待打印', capability: 'createPrint', prerequisite: '需可打印且无待打印任务',
+    confirmLabel: '确认加入待打印',
+    impact: '将当前版本的工单加入待打印。',
+    completed: '已加入待打印',
   },
   MARK_PRINTED: {
-    label: '标记已打印', capability: 'markPrinted', prerequisite: '需有当前版待打印任务',
+    label: '确认已打印', capability: 'markPrinted', prerequisite: '需有当前版待打印任务',
+    confirmLabel: '确认已打印',
     impact: '将当前版本的待打印任务标记为已打印；请确认纸质工单已实际打印。',
     completed: '已标记为打印完成',
   },
   SETTLE: {
     label: '批量结算', capability: 'settle', prerequisite: '需已发货且费用已确认',
+    confirmLabel: '确认批量结算',
     impact: '按每张工单的已确认金额完成结算，并记录结算时间。',
     completed: '已完成结算',
   },
@@ -84,6 +88,7 @@ export function batchConfirmationImpact(
     ? [`本次结算合计 ${formatMoney(eligible.reduce((total, order) => total.plus(order.confirmedFee!), new Decimal(0)))}`]
     : [];
   return [
+    `已选 ${orders.length} 张，本次可处理 ${eligible.length} 张`,
     BATCH_COMMAND_CONFIG[command].impact,
     ...amounts,
     ...eligible.map((order) => `${order.orderNo}${order.customName ? ` · ${order.customName}` : ''}${command === 'SETTLE' ? `：${formatMoney(order.confirmedFee!)}` : ` · v${order.workOrderVersion}`}`),

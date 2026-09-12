@@ -1,0 +1,2921 @@
+{
+  "record_date": "2026-09-11",
+  "release_decision": "NOT_APPROVED_FOR_PRODUCTION",
+  "scope": "Latest Grok findings first, then REL-01 through REL-12; local implementation and verification complete, external release prerequisites still pending.",
+  "base_commit": "50c8214584e9fe2c6ca47c5941b0d55ff29168ff",
+  "candidate_commit": "The commit containing this evidence record; no claim that the base alone was tested.",
+  "grok_scope": {
+    "reviewed_commit": "a505386",
+    "successful_responses": 4,
+    "raw": "2026-09-10-grok-a505386.json",
+    "current_code_reviewed_by_grok": false,
+    "note": "G-01/G-02/G-03 were already addressed by 469ae29 and ecc14a4; current code received local independent review."
+  },
+  "runtime": {
+    "node": "24.15.0",
+    "pnpm": "10.33.1",
+    "next": "16.3.4",
+    "react": "19.2.4",
+    "prisma": "7.7.0",
+    "postgresql": "16.13",
+    "vitest": "4.1.5",
+    "playwright_chromium": "147.0.7727.15",
+    "puppeteer_chrome": "152.0.7977.75"
+  },
+  "isolation": {
+    "snapshot": "HEAD + exact task delta, excluding existing uncommitted printing changes",
+    "ports": [
+      3200,
+      3300,
+      3400,
+      3500,
+      3600
+    ],
+    "database_kind": "Explicitly named disposable local test databases; normal DATABASE_URL differs from E2E database",
+    "notifications": "mock",
+    "cdr": "mock",
+    "durable_worker": "real Node HEAVY process",
+    "pdf_xlsx": "real output",
+    "production_access": false,
+    "push_or_deploy": false
+  },
+  "candidate_code_and_config_sha256": {
+    ".env.example": "1bdd7560e6cd8d9bf4f24049dec9d93194ca0d385373a724499c0d27d8e798a7",
+    ".github/workflows/quality.yml": "aba8e9c43ceb0c8833d2a69d66a871280ba4f2ad92fac036245c7b9a36f8e0c8",
+    ".gitignore": "3fd7ed10a7b5dda72e2e66106793bd098954cdc4b1cf8710da72b5bc4bfb788f",
+    "actions/__tests__/agent-monthly-bill.test.ts": "6fdf02cee6c4f6175a44153a4f3808459f65d8f42943d45a8c6f33059144ddc7",
+    "actions/__tests__/owner-accounts.test.ts": "b9507d071dbfacc393eca5ca1e28c4a9dec8f128f0965a6ee54fe4ccf153d413",
+    "actions/__tests__/owner-boms.test.ts": "c8636883778d35c34f8d34d256f2329bb36c7b62ec7785b97cb74bbacb606468",
+    "actions/__tests__/owner-materials.test.ts": "7aad7d92fd6c889648715eaf75df1b81f38a9a7cf27639887f61bf404fb793c2",
+    "actions/agent-monthly-bill.ts": "443cccc14377495fdf242659549d031cdc743cf1ac5f9afeff8071391d9482ec",
+    "actions/owner-accounts.ts": "f01410497c0a4e5360554ab0a2e5f574f736c6d323320db1f896d7182fc68f2a",
+    "actions/owner-boms.ts": "c11610c6436e5a95b73c2b53e9aa5d61c54e256fd639f952140ad189c7b09163",
+    "actions/owner-materials.ts": "847720b46b912ac4a6135629c7bc6d5545aef7d5a288a02c5b55c8c76c9f5ef0",
+    "app/(admin)/__tests__/admin-business-copy-contract.test.ts": "1473c8daba7b18251d206f0070fbc0f857b2c35ab65e06db9145869b7987bc55",
+    "app/(admin)/__tests__/agent-monthly-bill-ui-contract.test.ts": "3bf493321973f888a20ebda049ddafb6ba44856f6d1d2b12d8a45d0ef06f65e0",
+    "app/(admin)/__tests__/bill-detail-visibility.test.tsx": "256462613e141fce43b6f40f016a265bc17823af8b3b6e068747e457c05451f7",
+    "app/(admin)/__tests__/detail-empty-state-ownership.test.ts": "ce1b86818fb389992f161568e0744e8dc5c5e8b0a5fbf20699fd915d33964ff0",
+    "app/(admin)/__tests__/status-registry-consumers.test.ts": "ea8226c37917746400886aba26bfb6ee8be90ff5b98e615bd9c4f72d3c39a064",
+    "app/(admin)/foreman/materials/[id]/page.tsx": "1236470743177f642dbee98951c6b2249b46ee303180e3f908d33e18ad8cbbf1",
+    "app/(admin)/orders/[id]/page.tsx": "1b8c8335487cfca5e94bcb630e2560bcc4f3a5888abae6a7fc50c1567779ecf3",
+    "app/(admin)/owner/rules/page.tsx": "2465efd8a8b575db09e221117a266c69d1db606000f972fdd766b6bfc59e0fb0",
+    "app/(admin)/owner/salary/hourly/page.tsx": "8109da869a299662e80594a8f0ca00f68d93a254714eb8fe6d878d6473e2abbe",
+    "app/(billing)/error.tsx": "574e55cce60ad89880b9fc98049688ac09d9033903c9e051bcaf080e9f6700bb",
+    "app/(billing)/layout.tsx": "abba82da2d79a4030dde3fb125be4ba87cf1cff1c7ff9c64c745c35809e75703",
+    "app/(billing)/not-found.tsx": "a9b099ab3c34c05e0b2525bb5ae877da0cc2932dbfb18dfa1fe34f3ef1554958",
+    "app/(billing)/owner/agent-bills/[id]/page.tsx": "cd77da15fb57a0ce49c33790e1d4192acc20f91d9349ca97fada485067646485",
+    "app/(billing)/owner/agent-bills/page.tsx": "d7285125a6ed45301f05d5fa0fdbb105077cf8de97d69c8d7b0f10d2ab66c9a4",
+    "app/(billing)/owner/bills/[id]/page.tsx": "36a860e1bdfc7a8a95553390003e41c40c0bc0e7eb53252c223dc4d1542685ba",
+    "app/(billing)/owner/bills/archive/[id]/page.tsx": "4dcd134c93f2fde84d7b221ddd4cb52a670d4a6fc523e49dafed12cfe0269cef",
+    "app/(billing)/owner/bills/archive/page.tsx": "c18060cccdf6f835cafe85cb30378173711b65a938eb8b37f421a04abf9b1a25",
+    "app/(billing)/owner/bills/page.tsx": "e59373f872a537152171860b3329c13bc8492900790e450309a9f5c94cf426d4",
+    "app/(worker)/worker/error.tsx": "1783f9cfd662cec19c994ca55f85b322c38602734e8893a63936f5504ae51b7e",
+    "app/__tests__/order-pdf-recovery.test.ts": "b3699b0ec061a453898bbafe1220409e661bd873e87e2ea1887113d5d9b80fb1",
+    "app/__tests__/proxy-auth-response.test.ts": "2dac851170a04722bfcc00e6c3aa138d3b97f71deb6ff671bf085601d3b58560",
+    "app/__tests__/root-error-contract.test.ts": "e8ce720195f341d7c0723c22ac261fa8317156ff87d310b063f94586912f3cad",
+    "app/error.tsx": "901055277cbc0af2e6a1bfee1c54050596619c34e7793eb384c8394c1d2d4e44",
+    "app/global-error.tsx": "626be233df9372951004bee4c891243a352915a836acf66c7f33c05971788a2e",
+    "components/business/admin/AdminRouteError.tsx": "3e052b79711c5d256a8f30ce12a9319d45b684e1eff7deefc3c0431d4758ee30",
+    "components/business/admin/__tests__/AdminRouteStates.test.tsx": "3aa64af8a1f5d80d5102b4ea1ee8e88672adfc9541e49aa59e571333caf2c170",
+    "components/business/agent-monthly-billing/AgentMonthlyBillForms.tsx": "aacfc399415878b8730cfd7ea715b39ca500236f9816184896e734332b8b0653",
+    "components/business/bill/__tests__/BillMutationForms.test.tsx": "d9e08745601c87c22a71c1ccddedc0ca2ddcb2ed6ce3be6923708680ad77eeb2",
+    "components/business/dashboard/SalesRankingChart.tsx": "15a316ee99cacbd61237349bf4f2a6610f7d80a7a4f1bf9f5a1673bed9e57a63",
+    "components/business/dashboard/__tests__/SalesRankingChart.browser.spec.tsx": "4e61dc4f8a66027605fddcd0258a6535ab652d4d5602e7bd7823241edb1771bd",
+    "components/business/material/StockTransactionForm.tsx": "1d08af6c7419c1e08a9aafa4afb484520a2672b5aae5397871baeef907353c6e",
+    "components/business/material/__tests__/MaterialActions.feedback.test.tsx": "65313e8033f99f8d5854ceeac4182b76842e326c1650d515fce78553f257abbf",
+    "components/business/notification/__tests__/NotificationConfiguration.browser.spec.tsx": "18521cdceb7438be9401f5cec0e60d0b8dabf80c7e50907c96a48951876a79e1",
+    "components/business/order/AdminOrderDetailView.tsx": "6ab834e891f8e7f164d404a078aacdcde8ee2574496311270acdb63b3cf275ac",
+    "components/business/order/AdminOrderEditor.tsx": "e7b180d234242a477af35cc449d95aa0d4de20ade194f5f3a859ae4ba6f7d90c",
+    "components/business/order/EditOrderForm.tsx": "9dfb52c2849aa693018168fce0aad83d0316ef0c75ff8b3cf474a5cab0a485c3",
+    "components/business/order/OrderRowActions.tsx": "319cd331283266773af8d1f73e92abebdc339ae29e33472d7a35e5ff7153194c",
+    "components/business/order/SalesOrdersList.tsx": "eec2be4e33ad6d5ae8b1a623eebcf9805a2440d42ad0077487dc1aea2bc9c120",
+    "components/business/order/__tests__/AdminOrderBatchActions.browser.spec.tsx": "0e2b41465b8fba13ab314b77ffdd60895699f3dd79e6293e6c56d71e472f5ed5",
+    "components/business/order/__tests__/AdminOrderNameList.browser.spec.tsx": "e1f4e9659831a203956356fe656e2f938d07df1cff5312991cff33b95d73fd8f",
+    "components/business/order/__tests__/AdminOrderWorkspaceSizing.browser.spec.tsx": "9b8e17fc95115730f90e4ca382852214807beecb5751c2557584ff5f82f38e86",
+    "components/business/order/__tests__/EditOrderForm.browser.spec.tsx": "d6ba33b2032b0be0ded7e549b2aae38511478b5f02eb95735d65fdbafa234437",
+    "components/business/order/__tests__/OrderChangeForms.browser.spec.tsx": "0f6a265bb4ea1c4ae93a2a8612c5c773a63cfbe76596d443e393288adf87e125",
+    "components/business/order/__tests__/OrderEditorAuxiliary.browser.spec.tsx": "4742fd54e2b0c5984ae891d26fe4bca3cbf9d0e16a48be4873980dcd24a8a011",
+    "components/business/rules/catalog/MaterialCatalogPages.tsx": "a377d1ba6b085675f45dd707d764965fc4a72da2511756560d384dd48f64fdd8",
+    "components/business/rules/pricing/PriceDataBoundary.tsx": "24864bac7b0dad91fae5ef7b5c863a5accb1cbf86fc34c39eab6a58a426c2c4e",
+    "components/business/rules/pricing/__tests__/CustomerPricingSectionViews.browser.spec.tsx": "74492ac736c73e5ed72cc0ccddcd61079c785529a7e14e0fb2043693a1c94c08",
+    "components/business/rules/pricing/__tests__/PriceDataBoundary.test.tsx": "70378e187250b4c36718f58997c09910321e4fd015258bb8d10713aba1accf63",
+    "components/ui-business/ErrorBoundary.tsx": "f747684216f9f85cdda6789bc0e5acb5f25ee2093aff3e27f7a4808d90b50598",
+    "components/ui-business/__tests__/ErrorBoundary.test.tsx": "c998d2f15a982e8ec3928c25c3401fa6a6b59170e9d3cfae89942f918362571d",
+    "eslint.config.mjs": "b96b42bb7a9a0e46a21d93c25fd27ac2cc1a0abcaf96cfb7125921a0ec8e97ad",
+    "lib/__tests__/bom.test.ts": "790141bfdc23289e42ef9f2aa27aafa931e5d5735a16911589612390f6687e67",
+    "lib/__tests__/material-stock-concurrency.postgres.test.ts": "0bd61097f19b4756073f5d56899ac09090969efbef74bc86e86f862b35380116",
+    "lib/__tests__/material.test.ts": "ed99985f35b4f29223d87d75a89c09446481c0d668fd5a849460510699ce7228",
+    "lib/admin/__tests__/action-helpers.test.ts": "c3b1f1705a2743913b02a317ebdcc0d3e472a9cbb02574c659cb0a1922796834",
+    "lib/admin/action-helpers.ts": "22f5fa861cd806969508f83f4ae3afa4a4aa440ecd57738a4cbfbe38b0dccf0d",
+    "lib/auth/__tests__/schemas.test.ts": "50bac32dcf4d4774a802b5ec696ec61b6cf993c140eef15614b7cf123dc99b45",
+    "lib/auth/schemas.ts": "111551f9b0af477930d50800850c35c16d0fafc06a385e4cae869df687d0cb1e",
+    "lib/material.ts": "87c522310bd860db25c83a59564ccacca48caa6e5fbc40b5ec25223be73ab904",
+    "lib/navigation/__tests__/admin-menu.test.ts": "6e3534cb9dcf0486e5ee40515267de49c86e2992d97032cc4a051b48063de961",
+    "lib/order/__tests__/export.test.ts": "a94aafa27768417c1a86bd24217852b92cec2d38345dce32f4f3bb0e1f9dd2a6",
+    "lib/order/__tests__/prisma-client-sync-contract.test.ts": "e96666a5b59834c2a1cb2341e3f3082009335202cd831467810e6a4c69b007eb",
+    "lib/order/admin-workspace-filters.ts": "a4958ee96c124f0b5e695bbf6d452020e094a822a09a58c0d65afac6832c9e31",
+    "lib/order/admin-workspace.ts": "b2847442ff5b85090351715374694508cc284381e5d7ea8bdb3a4070d031be67",
+    "lib/order/export.ts": "99f6d1fa52dd4ad75d5ec0659bad7950d485571a86d2b59dadcb960d6069ca9b",
+    "lib/pdf/__tests__/render.test.ts": "3420aee0a673f98c63fcd743977dac454c2c591f9904b6bf6dd351de9b1cc707",
+    "lib/pdf/render.ts": "0cefbcb1625ad978c9f3acca96107c73aa2d03c0a25242817ab9d3c72d00e8a0",
+    "lib/salary/__tests__/hourly-aggregate.test.ts": "d5bd77e46ba7b486d1eb666d9f104ba2f6edaf30c50b333f9e2fb71befa04d87",
+    "lib/salary/hourly-aggregate.ts": "2d5f8090588b86717de1b461d6c802733d7825862bbc6b364056d19a61576bad",
+    "next.config.ts": "1085e62f539c7639cb381a86aa9b17ac12e2e8c092653abce73bdfce661843e2",
+    "package.json": "af1fc787f96f5170a7e466e114ac5202471a2e5544011a17588139e2fe8fe36f",
+    "playwright.config.ts": "11e2eec493c8f01fd7f5cfd2159b619eb1d8118e8813802fa064d18736eaa221",
+    "playwright.dev-fixtures.config.ts": "3b99266124a882b23a0e97218ee34221526e2683af240f0c7e88023889db26a0",
+    "playwright.durable.config.ts": "61320e6d83d36d75b34d5d29618fb4bf34757cce75bb6f80f5a30a37c9f19f4a",
+    "playwright.release.config.ts": "b352818c4c4699346f251f795fedc46cd55802c2ebeed5bab439da2916005ea5",
+    "pnpm-lock.yaml": "07fed0604250b381cd94a1d16a7eab1f0175dbec0140c647835b7a0ccd758d45",
+    "prisma/migrations/20260911040000_manual_material_request_idempotency/migration.sql": "7720bc570153145496f8e694543410b4153c81a20534efe575d95357433bb718",
+    "prisma/schema.prisma": "e8405fdd007f8c61c3941ab5f213bc7ab41a9cca3679f65d5ebb37da9293de51",
+    "proxy.ts": "ec76d6daecbcf5acd373b8bedaeb33fdc933646cb01f369abf2ef1f7bdae655c",
+    "scripts/__tests__/agent-next-task.test.ts": "65dccd4f9215e86033451fee7e90127a0a104617180a999ea5c09a0b40532ed6",
+    "scripts/__tests__/deploy-health-contract.test.ts": "22cda25fadfd29141d8df8181df377253f882042f5813a817c4b596d6a48520f",
+    "scripts/__tests__/deploy-jobs-gate.test.ts": "bf634663bea20223c548fbda2af84ac60d002d1d82331ea070cace8a6d850e07",
+    "scripts/__tests__/deploy-jobs-wait.test.ts": "10c173fb6131f1d9c011dff419b1ad97d67108996a1dc2e96221661772e46221",
+    "scripts/__tests__/deploy-smoke.test.ts": "22d808cacbac30876a588f091a0ca3ce62314e3ed142389ae589ece44660613a",
+    "scripts/__tests__/e2e-preflight.test.ts": "6fa1cb3de20f874fa5c214bc92efcf45155fd7d4d50c8c0a98c74440ab02eb0c",
+    "scripts/__tests__/prepare-e2e-piecework.test.ts": "7ba3189aaeb7f3d6df696fa1a8021fda2843ea03e91b62c4f0ad9cf3e356608b",
+    "scripts/agent-next-task.mjs": "b862d40ef98fd6b414c169a6faefe2fa34c1560d348cf82a02755601cd74b5be",
+    "scripts/deploy-jobs-gate.mjs": "376f9334cfe44fb0b189a40a58d1ae746ab305f734c5a106d462bb99046e04ac",
+    "scripts/deploy-smoke.mjs": "aea44000cc3f6ea9ec09717548e9dfee6f1e1ef8016d91d896263f2c7958abec",
+    "scripts/e2e-preflight.ts": "afecf3ecd67905cf7d7fc4a71feada5d58046dcd9f583c42fe027cc9f466ed2e",
+    "scripts/lib/__tests__/e2e-environment.test.ts": "787a66dac2c07c198792d639181ac6a354a31221ef62a03347b17347e9eda3d1",
+    "scripts/lib/e2e-environment.ts": "7d20fbf6bfe5e12ecd7c61644ab14d30e29f2448577625a6bd970f2e56bc9ea9",
+    "scripts/lib/e2e-piecework.ts": "8b6a17d761dbd2153c30306f11579068acddc7eabebd88fae7f8a599bb2df01f",
+    "scripts/lib/playwright-config.ts": "9fd85315c53f14d2da8fb1124e4143b9b531fb1cc2bc79626bbd5ff6c0ac58dc",
+    "scripts/prepare-e2e-piecework.ts": "14e39c5222c3f9034577cfa971be3ece23003fffb17bc4766924beec451d871f",
+    "scripts/ui-tokens/baseline.json": "34424e065d62a2b009118911e2520876fa52741aa9cd60026c4b3c846b3e56d2",
+    "tests/durable/_helpers.ts": "1a529759a08bb50ac3d84de9e11295d05f545c545635296c4ece3efafb0ada92",
+    "tests/durable/_xlsx.ts": "aba5c8534170e139ff310194d7e3ffb86d878a27b99bc98a76b6ab287ab70140",
+    "tests/durable/files.spec.ts": "1a11628c8f47f577ef9a0ef0257dff179f853d0eee6aa5ada83ff1c10c425a21",
+    "tests/e2e/_cs-notification-fixtures.ts": "6a28de2182fe8b9a093daf7ad63e37acc9b8da785ab878421c7f2b9b859ae560",
+    "tests/e2e/_helpers.ts": "067c1c2ef4229f4922d04a881c0e14d8bcc0681a725bf418e4980b4118b601d9",
+    "tests/e2e/_supply-chain-fixtures.ts": "7b6681cd13d5aa6a46522e1c8e0df2f50fea9029b06ae2362c48e06234d11ab5",
+    "tests/e2e/auth-logout-race.spec.ts": "57cf54733b2c593d2ead87c1390fd935d5db5e281ae237681c68978f562e7d8a",
+    "tests/e2e/auth-session-rejection.spec.ts": "38400362a5293abdc05fdc7156b2e6ed7f784892e416e767e57050fe727e1243",
+    "tests/e2e/bill-flow.spec.ts": "facebdf73905d5915309ce54532c2b4f0f5efe1707c6daa8fe75e8563f03adb4",
+    "tests/e2e/cs-accumulate.spec.ts": "0520d3ec53950eb9d8a44036d6d0352560d5afa99283230923c8bf6c07d3e7b9",
+    "tests/e2e/global-setup.ts": "d9e03d19fe63afbc645905812ec23e5b8e5f21d4e32c42c17ca6d40f687700dd",
+    "tests/e2e/inventory-flow.spec.ts": "8b2bdb2fb316727312fb2fefe195d4a315bf5efa566ddaac108a03919e0361d9",
+    "tests/e2e/master-data-fixtures.ts": "22a2612d1539ea6bd8ae9dfe7d80579fe7e99b3568c9acadab0f0a4227e16f6f",
+    "tests/e2e/master-data-flow.spec.ts": "55cd22fee83105aa4100c0d060b769a6c03803b82e95f810dad950ff9b6fbf3b",
+    "tests/e2e/notification-cron.spec.ts": "6abf0ba173499612598fc9607fc8f5ffd35c04b8be596de0ac19ded6b3a46162",
+    "tests/e2e/order-create.spec.ts": "f916a4f82c7fde1f1c47b5e7666052120b7abd8e4d293243b3994627c39310fa",
+    "tests/e2e/order-pricing-materialization-error.spec.ts": "dbfe0fc60dfe8233601f2329f8210d9372135a5d30894cd20a29c2a9c7629184",
+    "tests/e2e/outsource-flow.spec.ts": "a0e147e8a33880fc3f5af8edd4d794d37f2660ced6411c1bc187cd1fcb1b810a",
+    "tests/e2e/owner-notifications.spec.ts": "eef6bfbaf0a9a821580667feea7934d3c119c92e0f343c5340b703aedd6c64e4",
+    "tests/e2e/owner-settings.spec.ts": "b3b3ecc4fc8304b2d18740e069b6ac753fca943735aaf178ff147bfb12833dac",
+    "tests/e2e/price-entry.spec.ts": "cf797b68fa756bb9846f6cc9fe3ae1095987f59f0b9af070b13a14dac68e3522",
+    "tests/e2e/production-operation.spec.ts": "2211a6c98273e4a55687b3df4285f870edc0cef8b40fedbec860d3d8403c0c6c",
+    "tests/e2e/purchase-flow.spec.ts": "33d534db75e8c7626575e81a528cd3e6ee751b71c50d681d864c2163b6884a7b",
+    "tests/e2e/release-ledger-fixtures.ts": "fa5d3b28d47d8a30378e4d7b7c2301e98e2b5f54df57db19029b236c2e62f245",
+    "tests/e2e/release-prerequisite.ts": "52ea4a418ea21d499fb30d6f4c14fb1dbf04dd40170055f999fe59b0f2291d9a",
+    "tests/e2e/salary-flow.spec.ts": "4eed3425350ad774add1b2920018e9b12663ba889946e5e1e24448e8437123d8",
+    "tests/e2e/smoke.spec.ts": "d53a7e003716383882faca721af7e3e7aeb0f06de40fa9370abe4c05fd68cd82",
+    "tests/e2e/work-order-single-qr.spec.ts": "bce240bdae40492491d8efa08edd9048f05969f822934a9c4bb9ba7a75776556",
+    "tests/regression/e2e-global-setup.test.ts": "4221936bca8dd596f33b4346ea24fd7b64cc91ee36451ec8386f57418368631c",
+    "tests/regression/pdf-download-links.test.ts": "04b77c24f4baaceb2b8cfed74d0c83cfbf34c90dcb0b45aa566d08d355fc7df2",
+    "tests/regression/playwright-database-isolation.test.ts": "190e176ed73217f9b681d497a0d12508f30c93d383dda61aef3b29b862ff5eab",
+    "tests/visual/admin-responsive.spec.ts": "cf795c5938dee841f8a82654b3be1fe03b2f37d374c8494bf0f4cabd73d1c499",
+    "tests/visual/order-print.spec.ts": "9f4c3c8fe5f8a1f86d39227d1b84474f325a68b5240ab68448a6de2c2eff26df",
+    "tests/visual/worker-ui-fixture.ts": "a5b15f79b1409dc52f1708f1abee1fc82dccd16abf11f5cd1dabcc338207c229",
+    "tsconfig.durable.json": "f36819cf9bb47a302ea0657fefbb199104f1db6bf32e1c6a3045b782ae3ab378",
+    "tsconfig.json": "9f5753bd770ac49cc0ad6600c1f464df961c39d5b6c80ae57a742fe482315028",
+    "tsconfig.release.json": "ede903ec0f9943c1c8466e4dbf5d4374f17aeec4a62f4fcc4015ba9fd5964b0c",
+    "components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx": "c80f763a1404730bd0d68c05b42b187b6d5a0c83fbc0ee15ce5ee390c0a04e48"
+  },
+  "verification_sequence": {
+    "initial_full_run_fingerprints": {
+      "count": 144,
+      "raw": "final-source-fingerprints.json",
+      "sha256": "b085f7019279f0ceef931399a743b372b7d81cfb5398d5a5ba8d3d6f99ed1add"
+    },
+    "after_full_run_amendments": [
+      {
+        "path": "components/business/material/StockTransactionForm.tsx",
+        "before": "50fd08c9676759aa8b1c7a0ca184884978d8b2a52725ddf7d2e753aecf54c5db",
+        "after": "1d08af6c7419c1e08a9aafa4afb484520a2672b5aae5397871baeef907353c6e",
+        "reason": "Move nonce rotation into successful action completion; avoid set-state-in-effect without disabling lint.",
+        "requiredRevalidation": [
+          "full lint",
+          "typecheck",
+          "material target units",
+          "real inventory replay and error-draft E2E"
+        ]
+      },
+      {
+        "base": "50c8214584e9fe2c6ca47c5941b0d55ff29168ff",
+        "path": "components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx",
+        "before_sha256": "39403cbb30c75cccf6399eef3482985f9bfda6735aec5606f4e9915b81eb342e",
+        "after_sha256": "c80f763a1404730bd0d68c05b42b187b6d5a0c83fbc0ee15ce5ee390c0a04e48"
+      }
+    ],
+    "stock_revalidation": [
+      "complete lint",
+      "complete typecheck",
+      "226 material target tests",
+      "real complete inventory browser workflow"
+    ],
+    "navigation_revalidation": [
+      "ESLint",
+      "29 navigation targets",
+      "complete 444 browser components"
+    ],
+    "note": "The complete 6183-unit and 83-business runs precede only the stock action-callback amendment and navigation-test amendment. The directly affected scopes were rerun; counts are not represented as one run of identical final files."
+  },
+  "commands": {
+    "unit": "pnpm exec vitest run --coverage --maxWorkers=2 --reporter=default --reporter=json --outputFile=<unit-report>",
+    "components": "pnpm test:browser --no-file-parallelism --reporter=default --reporter=json --outputFile=<component-report>",
+    "business": "pnpm test:release tests/e2e tests/visual/order-print.spec.ts --project=chromium --project=no-js --update-snapshots=none",
+    "inventory_amendment": "pnpm test:release tests/e2e/inventory-flow.spec.ts --project=chromium --update-snapshots=none",
+    "durable": "pnpm test:release:durable --update-snapshots=none",
+    "dependency_audit": "pnpm audit --prod --json",
+    "required_environment": "See DEVELOPMENT.md; test-only database/confirmation/account/price preparation is mandatory."
+  },
+  "results": {
+    "unit": {
+      "files": 581,
+      "total": 6226,
+      "passed": 6183,
+      "failed": 0,
+      "skipped": 43,
+      "success": true,
+      "raw": "release-final-unit.json",
+      "sha256": "5d3473225ff293d1a32d9c6b98c30d5348b8c35d1abaa67b456e1ceaa7e254ea"
+    },
+    "coverage_percent": {
+      "statements": 85.27,
+      "branches": 79.38,
+      "functions": 91.69,
+      "lines": 87.07
+    },
+    "legacy_skip_groups": {
+      "file": "lib/__tests__/bill.test.ts",
+      "generateBills": 18,
+      "issueBill": 8,
+      "recordPayment": 17,
+      "new_skips": 0
+    },
+    "unit_stock_amendment": {
+      "files": 4,
+      "total": 226,
+      "passed": 226,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "raw": "release-final-unit-amended.json",
+      "sha256": "7699bb9a79376bcf39182ccf6adf5e60ce17bb246469101bf88bfe80a023d2d7"
+    },
+    "browser_components": {
+      "files": 32,
+      "total": 444,
+      "passed": 444,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "raw": "release-final-components-after.json",
+      "sha256": "a878a86eb7f4b3debd1fc6cdff56db734d5d5c46f5657dd373bffc9fc12b4453"
+    },
+    "business_and_committed_printing": {
+      "run_stats": {
+        "startTime": "2026-09-11T03:53:46.295Z",
+        "duration": 317343.66500000004,
+        "expected": 83,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "raw": "release-final-business.json",
+      "sha256": "03236ae17ba55387f4578ba146c9c7fd0060c9a252625521d636229b0befd9d2",
+      "selected_files": null,
+      "tests": [
+        {
+          "file": "e2e/admin-workspace-filter.spec.ts",
+          "title": "列表队列、信号与搜索连续切换保持真实数据库统计一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/admin-workspace-filter.spec.ts",
+          "title": "待核价详情不把部分报价当应收，完整报价在上下两处标为估价",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/auth-logout-race.spec.ts",
+          "title": "退出登录后才到达的预取响应不能重新写入会话",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/auth-logout-race.spec.ts",
+          "title": "保留 Flight 头后公共资源、普通续期和预取认证边界不变",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/auth-session-rejection.spec.ts",
+          "title": "过期和损坏的 JWT 拒绝受保护 API 和页面",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/auth-session-rejection.spec.ts",
+          "title": "已签发的合法令牌不能让停用账号继续访问财务页面或 API",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/auth.spec.ts",
+          "title": "未登录访问受保护页面 → 重定向到 /login",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/auth.spec.ts",
+          "title": "seeded admin 能登录并落到首页",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/auth.spec.ts",
+          "title": "错误密码留在 /login 并显示错误",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/bill-flow.spec.ts",
+          "title": "账单脚本仍在加载时原生提交能结束并显示生成结果",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/bill-flow.spec.ts",
+          "title": "生成 → 冻结 → 收款与重试 → 负项，保持金额和历史成员",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/bill-flow.spec.ts",
+          "title": "生成 → 冻结 → 收款与重试 → 负项，保持金额和历史成员",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/cdr-bundle.spec.ts",
+          "title": "foreman 选 1 条 CDR 工单 → 生成 mock 下载包 → /api/cdr/bundles/[id] 返 503",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/cs-accumulate.spec.ts",
+          "title": "客服默认零版费工单提交计入业绩，代理商整单收款不改写客服业绩",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/inventory-flow.spec.ts",
+          "title": "库存领退料、调拨重试、盘点冲突与重新盘点保持数量和流水一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/master-data-flow.spec.ts",
+          "title": "账号创建、修改、重置密码与停用生效，既有会话不能继续登录",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/master-data-flow.spec.ts",
+          "title": "客户及供应商维护、停用过滤和已创建采购快照保持一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/master-data-flow.spec.ts",
+          "title": "工艺创建和修改保留编号，停用后新工单不可选择，启用后恢复",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/master-data-flow.spec.ts",
+          "title": "类别、纸张、SKU 与 BOM 按不可变边界维护，停用保留明细并阻止下游新选择",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/notification-cron.spec.ts",
+          "title": "/api/cron/outsource-overdue → OUTSOURCE_OVERDUE NotificationLog",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/notification-cron.spec.ts",
+          "title": "/api/cron/cs-period-ending → CS_PERIOD_ENDING NotificationLog",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/notification-cron.spec.ts",
+          "title": "/api/cron/order-overdue → ORDER_OVERDUE NotificationLog",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/notification-urgent.spec.ts",
+          "title": "ADMIN 创建急单 → 提交 → ORDER_SUBMITTED + URGENT_ORDER 两条 log",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-create.spec.ts",
+          "title": "历史工单缺少计价明细时，纯交期申请审批保留全部原价",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-create.spec.ts",
+          "title": "ADMIN 创建 → 编辑 → 保存，保留款式、分货、包装及计价事实",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-external-sales-association.spec.ts",
+          "title": "管理员更换关联外部销售：保存归属、审计与访问范围同步，原价保持",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-pricing-materialization-error.spec.ts",
+          "title": "生产事实缺失时核价局部反馈并完整回滚，详情页面仍可使用",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-pricing-materialization-error.spec.ts",
+          "title": "管理端旧链接进入详情后核价失败保留表单，且不会改写工单",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-production-readiness.spec.ts",
+          "title": "保存自动进入待下发；一次下发生成工序与打印；刷新不会重计价",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-production-readiness.spec.ts",
+          "title": "旧待确认单可直接下发，错误合计展示原因且没有写入",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/outsource-flow.spec.ts",
+          "title": "逐款外协回货守住完成闸口；人工应付、部分付款和重试保留精确账本",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/outsource-flow.spec.ts",
+          "title": "销售角色不能通过已知工单进入外协创建页面",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/owner-dashboard.spec.ts",
+          "title": "工作台重点记录、完整关注列表和经营概览可连续使用",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/owner-notifications.spec.ts",
+          "title": "ADMIN smart-only configuration, legacy read-only history, routes and mock test",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/owner-notifications.spec.ts",
+          "title": "SALES cannot open owner notification configuration",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/owner-settings.spec.ts",
+          "title": "厂名改动会落到打印视图上",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/owner-settings.spec.ts",
+          "title": "非法输入被挡下：数字项靠原生约束，文本项靠服务端",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/price-entry.spec.ts",
+          "title": "production entry and navigation sequence 1",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/price-entry.spec.ts",
+          "title": "production entry and navigation sequence 2",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/price-entry.spec.ts",
+          "title": "production entry and navigation sequence 3",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/production-operation.spec.ts",
+          "title": "固定局部烫金账号看到本人工序 → 上报 → 累计数量更新",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/purchase-flow.spec.ts",
+          "title": "采购创建 → 部分收货 → 幂等重试 → 拒绝非法取消 → 撤销收货 → 取消采购",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/purchase-flow.spec.ts",
+          "title": "销售角色不能进入采购写入页面",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/salary-flow.spec.ts",
+          "title": "清废考勤录入、月结、发放与已付历史锁定走真实管理页面",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/smoke.spec.ts",
+          "title": "protected routes redirect unauthenticated users to /login",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/smoke.spec.ts",
+          "title": "ADMIN uses direct rule-center sidebar entries and canonical rule pages",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/smoke.spec.ts",
+          "title": "ADMIN can open Pigsty readiness and search core ERP surfaces",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/work-order-single-qr.spec.ts",
+          "title": "单工序直达、多包装组选择、旧版拦截和跨岗任务拒绝",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/work-order-single-qr.spec.ts",
+          "title": "师傅开工后打包人仍可报工，首开工不变且工资各归本人",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench-paper-boundaries.spec.ts",
+          "title": "paper boundaries explain unavailable facts, preserve the long name and recover through real automatic quoting",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "every live catalog product, specification, paper and technique can be selected",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "initial specification and paper choices work without selecting a product first",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "prices immediately on entry and recalculates quantity, specification and markup without a calculate click",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "explains reverse-side pricing limitations and recovers automatically after correcting the combination",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "shows the specific missing paper price and recalculates when a priced paper is restored",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "renders the partial foil charge once for the complete front and back combination",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "sales opens the workbench, calculates with the current catalog and searches replies",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "customer service can read the same knowledge page",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/workbench.spec.ts",
+          "title": "workers cannot open sales workbench",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "standalone HTML 真实执行分页脚本并保留一个主码和完整工序",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "50 款长名称聚合工序保留明细且 PDF 物理页数与页脚一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "单票合法多行长地址完整续页且没有额外空白 PDF 页",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "1 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "2 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "3 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "5 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "8 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "10 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "完整工单上下文稳定",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "2 款完整工单仅一页且主二维码可完整编码",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "4 款完整工单仅一页且主二维码可完整编码",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "1 条工序保留主单明细且仅有工单主码",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "6 条工序保留主单明细且仅有工单主码",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "12 条工序保留主单明细且仅有工单主码",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "三款工单的款式、多地址与打印分页稳定",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "20 款工单的款式、图稿与工序按物理 A4 页拆分",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "50 款边界的声明页数与实际 PDF 页数一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "最长合法文本与 10 个地址也通过显式续页保持 PDF 页数一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "8 款、8 图、临界文本与双长地址不挤破密集主页",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "1 款 1 图因千字多行备注移入附页时仍严格对齐物理 A4",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/no-js.spec.ts",
+          "title": "登录表单在 JS 不可用时仍能提交并建立 session",
+          "project": "no-js",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/no-js.spec.ts",
+          "title": "退出登录在 JS 不可用时仍能清除 session",
+          "project": "no-js",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/no-js.spec.ts",
+          "title": "改密码表单在 JS 不可用时仍能往返服务端校验",
+          "project": "no-js",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        }
+      ]
+    },
+    "inventory_amendment": {
+      "run_stats": {
+        "startTime": "2026-09-11T04:01:48.407Z",
+        "duration": 38134.805,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "raw": "release-final-inventory-amended.json",
+      "sha256": "86f2c5b31c956335399bc60f5649de3b44c2c32c17fb0f71f96ce23a2db40f5d",
+      "selected_files": null,
+      "tests": [
+        {
+          "file": "e2e/inventory-flow.spec.ts",
+          "title": "库存领退料、调拨重试、盘点冲突与重新盘点保持数量和流水一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        }
+      ]
+    },
+    "durable": {
+      "run_stats": {
+        "startTime": "2026-09-11T04:02:57.695Z",
+        "duration": 144114.916,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "raw": "release-final-durable.json",
+      "sha256": "cde2e5fbb3e3f34eb97cf965233792bf947e67841edd2f10fee49d499276030c",
+      "selected_files": null,
+      "tests": [
+        {
+          "file": "files.spec.ts",
+          "title": "工单导出真实排队、IO失败和worker重试后生成可读XLSX，下载按创建人和有效期授权",
+          "project": "durable-chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "files.spec.ts",
+          "title": "月账单导出由真实worker读取请求时数据并生成可下载XLSX",
+          "project": "durable-chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "files.spec.ts",
+          "title": "CDR排队到mock完成的下载状态、过期后重新生成与真实PDF任务",
+          "project": "durable-chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        }
+      ]
+    },
+    "production_dependency_audit": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0
+      },
+      "dependencies": 692,
+      "devDependencies": 0,
+      "optionalDependencies": 0,
+      "totalDependencies": 692
+    },
+    "static_checks": {
+      "architecture": "pass",
+      "lint": "pass, 0 errors, 2 existing window.location warnings",
+      "typecheck": "pass; repeated after stock amendment"
+    },
+    "migration": {
+      "fresh_total": 141,
+      "fresh_result": "pass on a new empty local test database",
+      "incremental_result": "pass on existing candidate, unit and durable test databases",
+      "new_file": "prisma/migrations/20260911040000_manual_material_request_idempotency/migration.sql",
+      "sha256": "7720bc570153145496f8e694543410b4153c81a20534efe575d95357433bb718",
+      "applied_migrations_modified": false
+    },
+    "postgres_stock_concurrency": {
+      "passed": 2,
+      "mock_locks": false,
+      "real_blocking_observed": true,
+      "public_summary_fingerprints_unchanged": true,
+      "remaining_test_schemas": 0,
+      "pg_ivm_covered": false
+    },
+    "admin_six_viewports_before_rule_fix": {
+      "run_stats": {
+        "startTime": "2026-09-11T03:25:37.598Z",
+        "duration": 825651.2869999999,
+        "expected": 77,
+        "skipped": 5,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "raw": "additional-02-erp-rel06-11-fourth.json",
+      "sha256": "c0c49171b1e7ee7a236339ff3f62fa3144e422df330ce27f48625950dd5cb747",
+      "selected_files": null,
+      "tests": [
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner dashboard focused light and dark gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner pending release link opens the matching order filter",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation, detail and editing pass focused light and dark gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order detail expanded records pass focused light and dark gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner dashboard focused light and dark gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner pending release link opens the matching order filter",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation, detail and editing pass focused light and dark gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order detail expanded records pass focused light and dark gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner dashboard focused light and dark gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner pending release link opens the matching order filter",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation, detail and editing pass focused light and dark gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order detail expanded records pass focused light and dark gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner dashboard focused light and dark gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner pending release link opens the matching order filter",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation, detail and editing pass focused light and dark gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order detail expanded records pass focused light and dark gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner dashboard focused light and dark gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner pending release link opens the matching order filter",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation, detail and editing pass focused light and dark gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order detail expanded records pass focused light and dark gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner dashboard focused light and dark gates",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "owner pending release link opens the matching order filter",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation, detail and editing pass focused light and dark gates",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order detail expanded records pass focused light and dark gates",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-1920x1080",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-1920x1080",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation responds to its available container instead of the viewport",
+          "project": "admin-375x667",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation responds to its available container instead of the viewport",
+          "project": "admin-393x852",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation responds to its available container instead of the viewport",
+          "project": "admin-768x1024",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation responds to its available container instead of the viewport",
+          "project": "admin-1024x768",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation responds to its available container instead of the viewport",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "order creation responds to its available container instead of the viewport",
+          "project": "admin-1920x1080",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "六个业务编辑器不再回落通用价格矩阵",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "六个业务编辑器不再回落通用价格矩阵",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "六个业务编辑器不再回落通用价格矩阵",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "六个业务编辑器不再回落通用价格矩阵",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "六个业务编辑器不再回落通用价格矩阵",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "六个业务编辑器不再回落通用价格矩阵",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass responsive and accessibility gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass the same gates with dark tokens",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order list passes its focused light and dark gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion reduce",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion no-preference",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order detail passes its focused safe-surface gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass responsive and accessibility gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass the same gates with dark tokens",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order list passes its focused light and dark gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion reduce",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion no-preference",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order detail passes its focused safe-surface gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass responsive and accessibility gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass the same gates with dark tokens",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order list passes its focused light and dark gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion reduce",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion no-preference",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order detail passes its focused safe-surface gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass responsive and accessibility gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass the same gates with dark tokens",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order list passes its focused light and dark gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion reduce",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion no-preference",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order detail passes its focused safe-surface gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass responsive and accessibility gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass the same gates with dark tokens",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order list passes its focused light and dark gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion reduce",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion no-preference",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order detail passes its focused safe-surface gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass responsive and accessibility gates",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales routes pass the same gates with dark tokens",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order list passes its focused light and dark gates",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion reduce",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "long sales order drawer closes and restores history with motion no-preference",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "sales order detail passes its focused safe-surface gates",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        }
+      ]
+    },
+    "admin_affected_six_viewports_after_rule_fix": {
+      "run_stats": {
+        "startTime": "2026-09-11T03:39:47.030Z",
+        "duration": 464902.232,
+        "expected": 12,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "raw": "additional-03-erp-rel11-critical-wrap-final.json",
+      "sha256": "bf330223efbe408062b34e34e478ae3f48d99e354218380e8bd6fe3b2d55296d",
+      "selected_files": null,
+      "tests": [
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass responsive and accessibility gates",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "critical routes pass the same gates with dark tokens",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        }
+      ]
+    },
+    "worker_and_price_selected_from_mixed_run": {
+      "run_stats": {
+        "startTime": "2026-09-11T03:13:07.153Z",
+        "duration": 494452.77400000003,
+        "expected": 26,
+        "skipped": 58,
+        "unexpected": 15,
+        "flaky": 0
+      },
+      "raw": "additional-04-erp-rel06-11-second.json",
+      "sha256": "cb9fcc262cf4d55943cafb7a5e7c4d3bdd9657a20e5d2a2f973f6690b8a0f5e7",
+      "selected_files": [
+        "visual/worker-responsive.spec.ts",
+        "e2e/price-entry.spec.ts"
+      ],
+      "tests": [
+        {
+          "file": "e2e/price-entry.spec.ts",
+          "title": "production entry and navigation sequence 1",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/price-entry.spec.ts",
+          "title": "production entry and navigation sequence 2",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/price-entry.spec.ts",
+          "title": "production entry and navigation sequence 3",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass overflow, clipping, touch-target and axe gates",
+          "project": "worker-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass the same layout gate with dark tokens",
+          "project": "worker-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass overflow, clipping, touch-target and axe gates",
+          "project": "worker-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass the same layout gate with dark tokens",
+          "project": "worker-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass overflow, clipping, touch-target and axe gates",
+          "project": "worker-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass the same layout gate with dark tokens",
+          "project": "worker-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass overflow, clipping, touch-target and axe gates",
+          "project": "worker-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass the same layout gate with dark tokens",
+          "project": "worker-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass overflow, clipping, touch-target and axe gates",
+          "project": "worker-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass the same layout gate with dark tokens",
+          "project": "worker-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass overflow, clipping, touch-target and axe gates",
+          "project": "worker-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/worker-responsive.spec.ts",
+          "title": "worker routes pass the same layout gate with dark tokens",
+          "project": "worker-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        }
+      ]
+    },
+    "development_price_fixtures": {
+      "run_stats": {
+        "startTime": "2026-09-11T03:39:01.894Z",
+        "duration": 98839.231,
+        "expected": 13,
+        "skipped": 5,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "raw": "additional-08-report.json",
+      "sha256": "3c4985c1304a66ced5ef86fb4785b1b0d86aeb51ed15ed9ae491820e4dce749e",
+      "selected_files": null,
+      "tests": [
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass responsive and accessibility gates",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass the same gates with dark tokens",
+          "project": "admin-375x667",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "mobile pricing filters stay inline, scroll locally, and remove one chip",
+          "project": "admin-375x667",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass responsive and accessibility gates",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass the same gates with dark tokens",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "mobile pricing filters stay inline, scroll locally, and remove one chip",
+          "project": "admin-393x852",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass responsive and accessibility gates",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass the same gates with dark tokens",
+          "project": "admin-768x1024",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "mobile pricing filters stay inline, scroll locally, and remove one chip",
+          "project": "admin-768x1024",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass responsive and accessibility gates",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass the same gates with dark tokens",
+          "project": "admin-1024x768",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "mobile pricing filters stay inline, scroll locally, and remove one chip",
+          "project": "admin-1024x768",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass responsive and accessibility gates",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass the same gates with dark tokens",
+          "project": "admin-1280x800",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "mobile pricing filters stay inline, scroll locally, and remove one chip",
+          "project": "admin-1280x800",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass responsive and accessibility gates",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "seven-tier current and draft states pass the same gates with dark tokens",
+          "project": "admin-1920x1080",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/admin-responsive.spec.ts",
+          "title": "mobile pricing filters stay inline, scroll locally, and remove one chip",
+          "project": "admin-1920x1080",
+          "status": "skipped",
+          "attempts": [
+            "skipped"
+          ]
+        }
+      ]
+    },
+    "independent_print_redesign": {
+      "run_stats": {
+        "startTime": "2026-09-11T03:13:51.782Z",
+        "duration": 116274.279,
+        "expected": 20,
+        "skipped": 0,
+        "unexpected": 13,
+        "flaky": 0
+      },
+      "raw": "additional-09-playwright-release.json",
+      "sha256": "c9bd401978de1b470959cdb74ee2c413881754e0283676065829b8e330451e38",
+      "selected_files": null,
+      "tests": [
+        {
+          "file": "e2e/order-print-access.spec.ts",
+          "title": "未登录不能读取打印页或 PDF",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-print-access.spec.ts",
+          "title": "师傅仅可打印当前有效岗位工序；旧版、已取消、其它岗位和草稿均拒绝",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-print-access.spec.ts",
+          "title": "其它固定岗位可读取公共进度，但不会因此获得仅含局部烫金工单的权限",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-print-access.spec.ts",
+          "title": "销售即使是录单人也不可读取生产工单标题、正文或 PDF",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-print-access.spec.ts",
+          "title": "客服可打印本人提交工单，其他人的标题、正文和 PDF 保持不可见",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "e2e/order-print-access.spec.ts",
+          "title": "已有登录令牌的账号停用后不能继续下载 PDF",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "19 字工单名称在页眉完整换行且只生成一页 PDF",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "50 字工单名称在页眉完整换行且只生成一页 PDF",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "73 字工单名称在页眉完整换行且只生成一页 PDF",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "100 字工单名称在页眉完整换行且只生成一页 PDF",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "待审批只依据真实变更标记，已下发工单无师傅仍可正常打印",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "自动打印等待图稿和分页完成后只触发一次",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "standalone HTML 真实执行分页脚本并保留一个主码和完整工序",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "50 款长名称聚合工序保留明细且 PDF 物理页数与页脚一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "单票合法多行长地址完整续页且没有额外空白 PDF 页",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "1 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "2 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "3 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "5 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "8 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "10 张图稿的主页与附页稳定",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "完整工单上下文稳定",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "2 款完整工单仅一页且主二维码可完整编码",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "4 款完整工单仅一页且主二维码可完整编码",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "1 条工序保留主单明细且仅有工单主码",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "6 条工序保留主单明细且仅有工单主码",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "12 条工序保留主单明细且仅有工单主码",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "三款工单的款式、多地址与打印分页稳定",
+          "project": "chromium",
+          "status": "unexpected",
+          "attempts": [
+            "failed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "20 款工单的款式、图稿与工序按物理 A4 页拆分",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "50 款边界的声明页数与实际 PDF 页数一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "历史超长名称、最长备注与 10 个地址通过显式续页保持 PDF 页数一致",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "8 款、8 图、临界文本与双长地址不挤破密集主页",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        },
+        {
+          "file": "visual/order-print.spec.ts",
+          "title": "1 款 1 图因千字多行备注移入附页时仍严格对齐物理 A4",
+          "project": "chromium",
+          "status": "expected",
+          "attempts": [
+            "passed"
+          ]
+        }
+      ]
+    }
+  },
+  "external_pending": [
+    {
+      "id": "REL-04",
+      "reason": "Remote CI has not run; main protected=false; branch protection/ruleset queries returned 403 plan restriction. Local YAML/shell validation is not enforcement evidence."
+    },
+    {
+      "id": "REL-07",
+      "reason": "Formal three prices/effective date/approver, production data and migration, matching LIGHT/HEAVY, OSS/CDR/notification, two backup repositories/WAL and restore drill remain unverified."
+    },
+    {
+      "id": "REL-09",
+      "reason": "Separate existing print redesign has 13 pixel differences; no user approval received; baselines unchanged and redesign excluded from this commit. 20 pass/13 fail is not full print acceptance."
+    }
+  ],
+  "evidence_archive": {
+    "local_directory": "/Users/zhixing/.codex/visualizations/2026/09/10/01a08b91-8eed-7200-a421-690bf535d918/erp-release-evidence-20260911",
+    "manifest_sha256": "1915622653381ac4cdc0ad2567b2f292317a826eb35daccd8a4270721f9cc077",
+    "files": [
+      {
+        "name": "release-final-unit.json",
+        "bytes": 7847813,
+        "sha256": "5d3473225ff293d1a32d9c6b98c30d5348b8c35d1abaa67b456e1ceaa7e254ea"
+      },
+      {
+        "name": "release-final-unit.log",
+        "bytes": 71644,
+        "sha256": "7d7a788a385f016cd9672e6e3244ca52c5239ae5fd1768dd43d3bc0769334d85"
+      },
+      {
+        "name": "release-final-unit-amended.json",
+        "bytes": 67886,
+        "sha256": "7699bb9a79376bcf39182ccf6adf5e60ce17bb246469101bf88bfe80a023d2d7"
+      },
+      {
+        "name": "release-final-unit-amended.log",
+        "bytes": 595,
+        "sha256": "789ab9a137ad87ea5fd94afd99e83c52f8b199c3b13629248fb55cac83baed1f"
+      },
+      {
+        "name": "release-final-lint-amended.log",
+        "bytes": 1151,
+        "sha256": "344d49899fb8782cf9620a049c6cf729be99b2858c26b5f6e6d06132ea10a990"
+      },
+      {
+        "name": "release-final-typecheck-amended.log",
+        "bytes": 177,
+        "sha256": "20cf494517b1ecaad3d626c35c21d13ea4fb66f72352c623406e96927b7a6e4e"
+      },
+      {
+        "name": "release-final-business.json",
+        "bytes": 137610,
+        "sha256": "03236ae17ba55387f4578ba146c9c7fd0060c9a252625521d636229b0befd9d2"
+      },
+      {
+        "name": "release-final-business.log",
+        "bytes": 46175,
+        "sha256": "568d6c53961a554e321af5fd41b840b05a26a923e6e1e615b8d0d46095ec7bf3"
+      },
+      {
+        "name": "release-final-inventory-amended.json",
+        "bytes": 11000,
+        "sha256": "86f2c5b31c956335399bc60f5649de3b44c2c32c17fb0f71f96ce23a2db40f5d"
+      },
+      {
+        "name": "release-final-inventory-amended.log",
+        "bytes": 20004,
+        "sha256": "691d63e11566db4d559464c9c456de4213f33bafe5dff8cc7a01bed9718b8c0b"
+      },
+      {
+        "name": "release-final-components.json",
+        "bytes": 148551,
+        "sha256": "9d2cc5fa2a635cddf75cd1521e25e04b16aa7ec8274f137d2c3cf16e93c77d59"
+      },
+      {
+        "name": "release-final-components.log",
+        "bytes": 21402,
+        "sha256": "589b0e9e358bb6b90f8708020c74a3c0838e83f3db3c539c2566bc8324fa50b6"
+      },
+      {
+        "name": "release-final-components-after.json",
+        "bytes": 147698,
+        "sha256": "a878a86eb7f4b3debd1fc6cdff56db734d5d5c46f5657dd373bffc9fc12b4453"
+      },
+      {
+        "name": "release-final-components-after.log",
+        "bytes": 18296,
+        "sha256": "99c4e70376a258e42102f18a38247805f25f248a580b7d18d10f6db7a1e36de5"
+      },
+      {
+        "name": "release-final-components-summary.json",
+        "bytes": 794,
+        "sha256": "f42e4ba364fdb96771f6bc3005b3f1e8191b14cc88e63650eb5fa6ef0610f6ce"
+      },
+      {
+        "name": "release-final-component-test-correction.json",
+        "bytes": 317,
+        "sha256": "4c205f4e85bdf05f4415c891d7a422028b480370a5c27bcf373585810bbd3582"
+      },
+      {
+        "name": "stock-form-lint-amendment.json",
+        "bytes": 493,
+        "sha256": "9b61acacde1a8c3d8245634f259c868321bd1fe280e3649a82d651f0fb250fae"
+      },
+      {
+        "name": "final-source-fingerprints.json",
+        "bytes": 16520,
+        "sha256": "b085f7019279f0ceef931399a743b372b7d81cfb5398d5a5ba8d3d6f99ed1add"
+      },
+      {
+        "name": "final-candidate-code-fingerprints.json",
+        "bytes": 16669,
+        "sha256": "d4467870061c230f3f3ce0df01cf40c067c844f79f297b3aeee2130da1341ce6"
+      },
+      {
+        "name": "verified-dependency-audit.json",
+        "bytes": 310,
+        "sha256": "c7f561e7625fc73c1e58a5bf675cb2461a8a918494c1d939a7a7e209f4f4dc70"
+      },
+      {
+        "name": "final-141-fresh.log",
+        "bytes": 21575,
+        "sha256": "c16f4f79744bfea2c7d61deeaf944e5e092d60654db8bc747c4e6d9d610dedbe"
+      },
+      {
+        "name": "release-final-durable-migrate.log",
+        "bytes": 504,
+        "sha256": "a5a9f65d47c50f41de5cec9c094460ba4cc5d28d54e2ad04bd7c79284d9ddcdf"
+      },
+      {
+        "name": "master-bom-pdf-boundaries.json",
+        "bytes": 2956,
+        "sha256": "6dd3d47c635922cdc32257996cdc47b2404a67556c8c4d7d3e2c665c8849e8dc"
+      },
+      {
+        "name": "master-bom-pdf-boundaries.log",
+        "bytes": 1168,
+        "sha256": "1cfe6fd0af6dc4e6c88454a7876c16561f96b31421969f272df4ea55a8e58b18"
+      },
+      {
+        "name": "master-health-gates.json",
+        "bytes": 1068,
+        "sha256": "96f602015363031359f7b6e0ee4a141d311cd8041363b9ad9665c4e6caa15ba8"
+      },
+      {
+        "name": "master-invalid-cron.json",
+        "bytes": 144,
+        "sha256": "634fc15395b916804c50f1386a01047cfcfc1ff3a8293fedae97f705b0aa46b8"
+      },
+      {
+        "name": "master-owner-settings-report.json",
+        "bytes": 12030,
+        "sha256": "e0be766511da86edd0956664344c5198599ff6270160f6cc11d876b3c9545974"
+      },
+      {
+        "name": "verified-architecture.log",
+        "bytes": 227,
+        "sha256": "49a1c0e3eb57f22d8db32bb76ed1bfdafe4ab275b98b354447b5f0a47c9cab39"
+      },
+      {
+        "name": "runtime-chinese.pdf",
+        "bytes": 27453,
+        "sha256": "ca10111a714f0e395b39b253a1a96b18ef3c44287e999808be441c7e6b7bb3a2"
+      },
+      {
+        "name": "additional-00-final.json",
+        "bytes": 24898,
+        "sha256": "9a319e39204d20963332b5ca0b1113e5cc51df7aa9da3da4373e74737e887a22",
+        "source": "/tmp/erp-rel02-rel08/cs-cron-replay/final.json"
+      },
+      {
+        "name": "additional-01-manifest.json",
+        "bytes": 2190,
+        "sha256": "34894f180da942db0ce669ea3c1412c96d0595a49a14bfec7b636fb82bb73b12",
+        "source": "/tmp/erp-rel02-rel08/cs-cron-replay/manifest.json"
+      },
+      {
+        "name": "additional-02-erp-rel06-11-fourth.json",
+        "bytes": 584111,
+        "sha256": "c0c49171b1e7ee7a236339ff3f62fa3144e422df330ce27f48625950dd5cb747",
+        "source": "/tmp/erp-rel06-11-fourth.json"
+      },
+      {
+        "name": "additional-03-erp-rel11-critical-wrap-final.json",
+        "bytes": 294613,
+        "sha256": "bf330223efbe408062b34e34e478ae3f48d99e354218380e8bd6fe3b2d55296d",
+        "source": "/tmp/erp-rel11-critical-wrap-final.json"
+      },
+      {
+        "name": "additional-04-erp-rel06-11-second.json",
+        "bytes": 421267,
+        "sha256": "cb9fcc262cf4d55943cafb7a5e7c4d3bdd9657a20e5d2a2f973f6690b8a0f5e7",
+        "source": "/tmp/erp-rel06-11-second.json"
+      },
+      {
+        "name": "additional-05-erp-rel-stock-concurrency-isolated.log",
+        "bytes": 231,
+        "sha256": "7801d619721384593c64bc4eb90306ea212725536a256880302c2e1149d3ab8b",
+        "source": "/tmp/erp-rel-stock-concurrency-isolated.log"
+      },
+      {
+        "name": "additional-06-erp-stock-public-before.json",
+        "bytes": 230,
+        "sha256": "ba6f6d33ff14d8035a53cf86a242a893322ada9ebbaa71304de96c6b05de856a",
+        "source": "/tmp/erp-stock-public-before.json"
+      },
+      {
+        "name": "additional-07-erp-stock-public-after.json",
+        "bytes": 230,
+        "sha256": "ba6f6d33ff14d8035a53cf86a242a893322ada9ebbaa71304de96c6b05de856a",
+        "source": "/tmp/erp-stock-public-after.json"
+      },
+      {
+        "name": "additional-08-report.json",
+        "bytes": 57047,
+        "sha256": "3c4985c1304a66ced5ef86fb4785b1b0d86aeb51ed15ed9ae491820e4dce749e",
+        "source": "/tmp/erp-all-remediation-ecc14a4/dev-fixtures-green/report.json"
+      },
+      {
+        "name": "additional-09-playwright-release.json",
+        "bytes": 198313,
+        "sha256": "c9bd401978de1b470959cdb74ee2c413881754e0283676065829b8e330451e38",
+        "source": "/tmp/erp-all-remediation-ecc14a4/print-review/.review/playwright-release.json"
+      },
+      {
+        "name": "release-final-durable.json",
+        "bytes": 11728,
+        "sha256": "cde2e5fbb3e3f34eb97cf965233792bf947e67841edd2f10fee49d499276030c"
+      },
+      {
+        "name": "release-final-durable.log",
+        "bytes": 20486,
+        "sha256": "7eb5bae419029c8cc0c63fc2cedd8aa64878f58c815b1ce863a51d8efdb109a8"
+      }
+    ]
+  },
+  "limitations": [
+    "Local mocked integrations do not prove live external service readiness.",
+    "Browser viewport emulation does not replace actual-device approval.",
+    "Some completed navigation server logs reported destination stream closed early; no claim of universally clean server logs.",
+    "Historical failed runs are retained. No coverage/axe/44px threshold was lowered, no force-click bypass, and no pixel baseline was automatically updated."
+  ]
+}

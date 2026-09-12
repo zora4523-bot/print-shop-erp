@@ -16,7 +16,7 @@ export const ORDER_SCENARIOS = [
   { key: 'draft', name: '彩印 · 草稿无交期', crafts: ['PRINT'], days: null, state: 'DRAFT' },
   { key: 'hold', name: '彩印 · 暂停待补稿', crafts: ['PRINT'], days: 6, state: 'ON_HOLD' },
   { key: 'rejected', name: '专版三色 · 驳回待补正', crafts: ['FULL'], days: 4, manual: true, state: 'REJECTED' },
-  { key: 'change', name: '局部烫金 · 加量申请待审批', crafts: ['PARTIAL'], days: 8, change: true },
+  { key: 'change', name: '局部烫金 · 加量测试', crafts: ['PARTIAL'], days: 8, change: true },
   { key: 'cancelled', name: '局部烫金 · 已取消', crafts: ['PARTIAL'], days: -3, state: 'CANCELLED' },
 ] as const satisfies readonly { key: string; name: string; crafts: readonly Craft[]; days: number | null; urgent?: boolean; split?: boolean; manual?: boolean; change?: boolean; state?: string }[];
 export type OrderScenario = (typeof ORDER_SCENARIOS)[number];

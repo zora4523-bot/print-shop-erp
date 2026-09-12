@@ -185,12 +185,12 @@ function AdminDecisionActions({
       ) : null}
       {order.capabilities.createPrint ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('CREATE_PRINT')}>
-          创建打印
+          加入待打印
         </Button>
       ) : null}
       {order.capabilities.markPrinted ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('MARK_PRINTED')}>
-          标记已打印
+          确认已打印
         </Button>
       ) : null}
       {order.capabilities.settle ? (

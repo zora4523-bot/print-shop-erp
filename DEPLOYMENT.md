@@ -19,6 +19,8 @@ applies_to: repository deployment workflow at last_verified
 |---|---|
 | 从零部署、更新、故障恢复 | [`docs/部署指南.md`](./docs/部署指南.md) |
 | 当前发布批次的单向门和人工核对 | [`docs/上线前置操作清单.md`](./docs/上线前置操作清单.md) |
+| 发布阻塞、修复顺序与验收状态 | [发布整改任务台账](./docs/release-remediation-2026-09-10.md) |
+| 2026-09-10 审查证据与功能覆盖 | [发布审查快照](./docs/audits/2026-09-10-release-readiness.md) |
 | 自动化 smoke 与备份检查 | [`docs/deployment-smoke-checklist.md`](./docs/deployment-smoke-checklist.md) |
 | 环境变量模板 | [`.env.example`](./.env.example) |
 | 环境预检实现 | [`scripts/check-env.mjs`](./scripts/check-env.mjs) |
@@ -45,9 +47,13 @@ applies_to: repository deployment workflow at last_verified
 ## 使用方式
 
 1. 打开 canonical [部署指南](./docs/部署指南.md)。
-2. 对照[当前批次前置清单](./docs/上线前置操作清单.md)，确认是否存在新的不可逆步骤。
+2. 核对[发布整改台账](./docs/release-remediation-2026-09-10.md)的候选验证与未关闭项，
+   再按[前置清单](./docs/上线前置操作清单.md)确认适用的存量约束和不可逆步骤。
 3. 只执行 runbook 中与目标环境和 release SHA 匹配的流程。
 4. 使用[部署 smoke 清单](./docs/deployment-smoke-checklist.md)保存验证证据。
 5. 遇到本地开发问题先查 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)；生产问题以部署 runbook 为准。
 
 如果部署命令或拓扑发生变化，请修改 `docs/部署指南.md`，只在入口或资料地图变化时修改本文件。
+
+2026-09-10 本次仅复核发布资料入口与审查状态：整改规划不等于修复完成，仓库 CI 目前也未执行浏览器发布门禁。
+本文其余部署拓扑的历史核对日期保持不变；实际放行须依据同一候选的新证据。

@@ -1,3 +1,4 @@
+import { requireReleasePrerequisite } from './release-prerequisite';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { Client } from 'pg';
@@ -61,7 +62,9 @@ async function hasCurrentRates() {
 
 test.describe('工单单码跨岗位入口', () => {
   test.beforeEach(() => {
-    test.skip(Boolean(productionOperationE2eIsolationFailure()), '需要明确隔离的 E2E 数据库；不向开发工单写测试事实');
+    const isolationFailure = productionOperationE2eIsolationFailure();
+    requireReleasePrerequisite(isolationFailure);
+    test.skip(Boolean(isolationFailure), '需要明确隔离的 E2E 数据库；不向开发工单写测试事实');
     test.setTimeout(120_000);
   });
 
@@ -89,7 +92,7 @@ test.describe('工单单码跨岗位入口', () => {
       await expect(packerPage).toHaveURL(`/worker/tasks/${fixture.packId}`);
       await expect(packerPage.getByText('#1 · 花好月圆 · 每袋 10 个')).toBeVisible();
       await workerPage.goto(`/wo/${fixture.id}?v=1&task=${fixture.foilId}`);
-      await expect(workerPage.getByRole('alert')).toContainText('此工单已作废，当前版本 v2');
+      await expect(workerPage.getByRole('main').getByRole('alert').filter({ hasText: '此工单已作废' })).toContainText('此工单已作废，当前版本 v2');
       await packerPage.goto(`/wo/${fixture.id}?v=2&task=${fixture.foilId}`);
       await expect(packerPage.getByRole('heading', { name: '找不到这个页面，或你没有访问权限' })).toBeVisible();
       const facts = await withDb((db) => db.query('SELECT id FROM "ProductionScanClaim" WHERE "orderId"=$1', [fixture.id]));
@@ -112,7 +115,10 @@ test.describe('工单单码跨岗位入口', () => {
   });
 
   test('师傅开工后打包人仍可报工，首开工不变且工资各归本人', async ({ browser }) => {
-    test.skip(!await hasCurrentRates(), '隔离库缺少已发布的烫金/打包工价；用例不修改受保护价表');
+    const hasRates = await hasCurrentRates();
+    const priceFailure = hasRates ? null : '隔离库缺少已发布的烫金/打包工价；用例不修改受保护价表';
+    requireReleasePrerequisite(priceFailure);
+    test.skip(!hasRates, priceFailure ?? '');
     const fixture = await createFixture();
     const workerContext = await browser.newContext();
     const packerContext = await browser.newContext();

@@ -224,6 +224,17 @@ describe('estimateMaterialUsageForOrderItems', () => {
       },
     ]);
 
+    expect(dbMock.billOfMaterial.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          isActive: true,
+          OR: [
+            { productId: { in: ['prod1'] } },
+            { categoryNodeId: { in: ['cat1'] } },
+          ],
+        },
+      }),
+    );
     expect(estimate.items[0]).toMatchObject({
       source: 'PRODUCT',
       materials: [{ materialId: 'mat1', quantity: '1000.0000' }],
@@ -237,5 +248,42 @@ describe('estimateMaterialUsageForOrderItems', () => {
         quantity: '1000.0000',
       },
     ]);
+  });
+
+  it('returns NONE and no materials when no active product or category BOM remains', async () => {
+    dbMock.billOfMaterial.findMany.mockResolvedValue([]);
+
+    const estimate = await estimateMaterialUsageForOrderItems([
+      {
+        id: 'item-without-active-bom',
+        sequence: 1,
+        name: '停用 BOM 后的款式',
+        quantity: 2000,
+        productId: 'prod1',
+        product: {
+          id: 'prod1',
+          name: '标准红包',
+          categoryNodeId: 'cat1',
+          categoryNode: { id: 'cat1', name: '红包' },
+        },
+      },
+    ]);
+
+    expect(dbMock.billOfMaterial.findMany).toHaveBeenCalledOnce();
+    expect(dbMock.billOfMaterial.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isActive: true }) }),
+    );
+    expect(estimate).toEqual({
+      items: [{
+        orderItemId: 'item-without-active-bom',
+        sequence: 1,
+        itemName: '停用 BOM 后的款式',
+        quantity: 2000,
+        source: 'NONE',
+        bom: null,
+        materials: [],
+      }],
+      totals: [],
+    });
   });
 });

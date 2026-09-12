@@ -53,27 +53,6 @@ vi.mock('@/actions/admin-order-workflow', () => ({
 }));
 vi.mock('@/components/business/order/AdminOrderInlineOperations', () => ({ AdminOrderInlineOperations: () => null }));
 
-vi.mock('@/components/ui-business', () => ({
-  ConfirmActionDialog: ({
-    confirmLabel,
-    disabled,
-    onConfirm,
-  }: {
-    confirmLabel: string;
-    disabled?: boolean;
-    onConfirm: () => void;
-  }) => (
-    <button
-      type="button"
-      data-native-button-reason="browser test confirmation harness"
-      data-testid={confirmLabel.includes('批准') ? 'approve-change' : 'deny-change'}
-      disabled={disabled}
-      onClick={onConfirm}
-    >
-      {confirmLabel}
-    </button>
-  ),
-}));
 
 import { OrderChangeRequestForm } from '../OrderChangeRequestForm';
 import { OrderChangeReviewForm } from '../OrderChangeReviewForm';
@@ -245,7 +224,7 @@ function buttonWithText(host: HTMLElement, text: string) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 it('冲突后刷新成功会移除旧审批错误并恢复批准', async () => {
@@ -275,13 +254,13 @@ it('冲突后刷新成功会移除旧审批错误并恢复批准', async () => {
 
     await vi.waitFor(() => {
       expect(
-        host.querySelector<HTMLButtonElement>('[data-testid="approve-change"]')
+        buttonWithText(host, '批准变更')
           ?.disabled,
       ).toBe(false);
     });
-    host
-      .querySelector<HTMLButtonElement>('[data-testid="approve-change"]')
-      ?.click();
+    await page.getByRole('button', { name: '批准变更', exact: true }).click();
+    expect(reviewActionMock).not.toHaveBeenCalled();
+    await page.getByRole('button', { name: '批准', exact: true }).click();
     await vi.waitFor(() => {
       expect(host.textContent).toContain('价格版本已变化');
     });
@@ -296,10 +275,46 @@ it('冲突后刷新成功会移除旧审批错误并恢复批准', async () => {
       expect(previewActionMock).toHaveBeenCalledTimes(2);
       expect(host.textContent).not.toContain('价格版本已变化');
       expect(
-        host.querySelector<HTMLButtonElement>('[data-testid="approve-change"]')
+        buttonWithText(host, '批准变更')
           ?.disabled,
       ).toBe(false);
     });
+  } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+  }
+});
+
+it('审批确认可取消，提交期间阻止重复调用且失败后恢复操作', async () => {
+  previewActionMock.mockResolvedValue({ status: 'success', preview: pricingPreview() });
+  let finish!: (value: { status: 'error'; message: string }) => void;
+  reviewActionMock.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() => root.render(<OrderChangeReviewForm requestId="request-1" />));
+    const approve = page.getByRole('button', { name: '批准变更', exact: true });
+    await expect.element(approve).toBeEnabled();
+    await approve.click();
+    await expect.element(page.getByRole('alertdialog')).toBeVisible();
+    expect(reviewActionMock).not.toHaveBeenCalled();
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    expect(reviewActionMock).not.toHaveBeenCalled();
+    await approve.click();
+    await page.getByRole('button', { name: '批准', exact: true }).click();
+    await vi.waitFor(() => expect(reviewActionMock).toHaveBeenCalledOnce());
+    await expect.element(approve).toBeDisabled();
+    await expect.element(page.getByRole('button', { name: '拒绝申请', exact: true })).toBeDisabled();
+    expect(reviewActionMock).toHaveBeenCalledExactlyOnceWith(null, expect.objectContaining({
+      requestId: 'request-1', decision: 'APPROVE', expectedPriceRevision: 5,
+      expectedQuoteToken: pricingPreview().quoteToken,
+    }));
+    finish({ status: 'error', message: '价格版本已变化，请刷新后重试。' });
+    await expect.element(page.getByText('价格版本已变化，请刷新后重试。', { exact: true })).toBeVisible();
+    expect(reviewActionMock).toHaveBeenCalledOnce();
+    await expect.element(approve).toBeEnabled();
+    expect(refreshMock).not.toHaveBeenCalled();
   } finally {
     flushSync(() => root.unmount());
     host.remove();
@@ -504,9 +519,7 @@ it.each([false, true])('逐票运费重新预览与审批门禁（精简视图�
       expect(host.textContent).toContain('请补齐运费金额和依据，并按录入运费重新预览');
     }
 
-    const approve = host.querySelector<HTMLButtonElement>(
-      '[data-testid="approve-change"]',
-    )!;
+    const approve = buttonWithText(host, '批准变更')!;
     expect(approve.disabled).toBe(true);
 
     const amount = host.querySelector<HTMLInputElement>(
@@ -541,7 +554,7 @@ it.each([false, true])('逐票运费重新预览与审批门禁（精简视图�
       });
       expect(approve.disabled).toBe(false);
       expect(host.textContent).toContain(
-        '该组逐票运费已通过服务端重新预览',
+        '运费已核对。',
       );
     });
 

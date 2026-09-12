@@ -139,3 +139,28 @@ describe('uploadOrderItemDesignFile', () => {
     expect(recordDesignUploadAction).not.toHaveBeenCalled();
   });
 });
+
+it('does not record a blocked PUT and reacquires a signature on retry', async () => {
+  const prepared = prepareDesignFile(new File(['png'], 'design.png', { type: 'image/png' }));
+  if (!prepared.ok) throw new Error('Invalid test fixture');
+  signDesignUploadAction
+    .mockResolvedValueOnce({ status: 'ok', putUrl: 'https://oss.example.test/first', objectKey: 'first' })
+    .mockResolvedValueOnce({ status: 'ok', putUrl: 'https://oss.example.test/retry', objectKey: 'retry' });
+  const fetchMock = vi.fn()
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce({ ok: true, status: 200 });
+  vi.stubGlobal('fetch', fetchMock);
+  recordDesignUploadAction.mockResolvedValue({ ok: true });
+  const input = { orderId: 'order-1', orderItemId: 'item-1', prepared: prepared.value };
+  expect(await uploadOrderItemDesignFile(input)).toEqual({
+    ok: false,
+    message: '文件未上传，请检查网络；仍失败请联系管理员核对上传设置后重试',
+  });
+  expect(recordDesignUploadAction).not.toHaveBeenCalled();
+  expect(await uploadOrderItemDesignFile(input)).toEqual({ ok: true });
+  expect(signDesignUploadAction).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1]?.[0]).toBe('https://oss.example.test/retry');
+  expect(recordDesignUploadAction).toHaveBeenCalledExactlyOnceWith({
+    orderId: 'order-1', orderItemId: 'item-1', objectKey: 'retry', fileType: DesignFileType.IMAGE, fileName: 'design.png',
+  });
+});

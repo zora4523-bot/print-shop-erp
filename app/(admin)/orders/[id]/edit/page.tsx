@@ -103,150 +103,10 @@ export default async function EditOrderPage({ params }: PageProps) {
     isFulfillmentPricingStatus(order.status) &&
     order.settledAt === null;
   if (user.role === Role.ADMIN) {
-    const productionLocked = [
-      OrderStatus.RELEASED,
-      OrderStatus.FOILING,
-      OrderStatus.PACKING,
-      OrderStatus.IN_PRODUCTION,
-      OrderStatus.SCHEDULING,
-      OrderStatus.ON_HOLD,
-    ].some((status) => status === order.status);
-    return (
-      <>
-        <BreadcrumbEntity label={order.orderNo} />
-        <AdminOrderEditor
-          key={`${order.id}:${order.editVersion}`}
-          orderId={order.id}
-          orderNo={order.orderNo}
-          status={order.status}
-          revision={order.revision}
-          workOrderVersion={order.workOrderVersion}
-          canModify={canModify}
-          canAdd={canModify && order.status === OrderStatus.DRAFT && order.packagingGroups.length === 0}
-          canEditDesigns={order.status === OrderStatus.DRAFT && !pending}
-          productionLocked={productionLocked}
-          products={products}
-          foilColors={foilColors.map((color) => color.name)}
-          items={order.items.map((item) => ({
-            id: item.id,
-            sequence: item.sequence,
-            name: item.name,
-            quantity: item.quantity,
-            pack: item.pack,
-            productId: item.productId,
-            pricingRoute: item.pricingRoute,
-            specification: item.specification,
-            paperType: item.paperType,
-            paperWeightGsm: item.paperWeightGsm,
-            ...deriveLegacyOrderItemFoilFacts(item),
-            subtotal: 'subtotal' in item ? String(item.subtotal) : null,
-            details: (
-              <OrderSavedItemDetails
-                order={order}
-                item={item}
-                includeDesigns={false}
-              />
-            ),
-            packagingEditable:
-              order.packagingGroups
-                .flatMap((group) => group.lines)
-                .filter((line) => line.orderItem.id === item.id).length === 1,
-            designs: item.designs.map((design) => ({
-              id: design.id,
-              fileName: design.fileName,
-              fileType: design.fileType,
-              fileSize: String(design.fileSize),
-              fileUrl:
-                design.fileType === 'IMAGE'
-                  ? signDesignReadUrl(design.fileUrl)
-                  : '',
-            })),
-          }))}
-          form={{
-            orderId: order.id,
-            expectedEditVersion: order.editVersion,
-            fieldset,
-            customers,
-            externalSalesAssociation,
-            shipments: order.shipments.map((row) => ({
-              id: row.id,
-              sequence: row.sequence,
-              status: row.status,
-              receiverName: row.receiverName,
-              receiverPhone: row.receiverPhone,
-              receiverAddress: row.receiverAddress,
-              expressCode: row.expressCode,
-              destinationProvince: row.destinationProvince,
-            })),
-            packagingDetails: <OrderSavedPackaging order={order} />,
-            isExternalSales: external,
-            isSfCollect: order.isSfCollect,
-            blocked: Boolean(pending),
-            initial: {
-              customName: order.customName,
-              customerRef: order.customerRef,
-              customerPartyId: order.customerPartyId,
-              receiverName: order.receiverName,
-              receiverPhone: order.receiverPhone,
-              receiverAddress: order.receiverAddress,
-              expressCode: order.expressCode,
-              packageRequirement: order.packageRequirement,
-              remark: order.remark,
-              promisedDate:
-                formatDateInputShanghai(order.promisedDate, '') || null,
-              isUrgent: order.isUrgent,
-            },
-          }}
-          pendingNotice={
-            pending ? (
-              <PendingModificationNoticeSection {...{
-                pending: pending, id: id,
-              }} />
-            ) : null
-          }
-          itemRemarks={!pending ? (
-            <section aria-label="款式备注" className="space-y-4">
-              {order.items.map((item) => (
-                <OrderItemRemarkForm key={`${item.id}:${order.editVersion}`} orderId={order.id}
-                  itemId={item.id} sequence={item.sequence} version={order.editVersion} initial={item.remark} />
-              ))}
-            </section>
-          ) : null}
-          deliveries={
-            !pending && order.shipments.length < 10 &&
-            !order.shipments.some((row) => row.status === 'SHIPPED') &&
-            'priceRevision' in order ? (
-              <AddOrderShipmentForm
-                orderId={order.id}
-                expectedRevision={order.revision}
-                expectedEditVersion={order.editVersion}
-                expectedWorkOrderVersion={order.workOrderVersion}
-                expectedPriceRevision={Number(order.priceRevision)}
-                allowManualPricing={external && order.billingMode !== 'NO_CHARGE' && order.status !== OrderStatus.DRAFT}
-                nextSequence={Math.max(0, ...order.shipments.map((row) => row.sequence)) + 1}
-                sources={order.shipments
-                  .filter((row) => !row.trackingNo && row.weightKg === null && row.registrationVersion === 0)
-                  .map((row) => ({
-                    id: row.id,
-                    sequence: row.sequence,
-                    receiverAddress: row.receiverAddress,
-                    lines: row.lines.filter((line) => line.quantity > 0).map((line) => ({
-                      orderItemId: line.orderItem.id,
-                      name: line.orderItem.name,
-                      quantity: line.quantity,
-                    })),
-                  }))}
-              />
-            ) : null
-          }
-          fees=<EditorFeesSection {...{
-              order, external, pending, pricingPending,
-              canPrice, canCorrectFreight,
-            }} />
-        />
-      </>
-    );
+    return <AdministratorOrderEdit {...{order, external, pending, pricingPending, canPrice,
+      canCorrectFreight, id, canModify, products, foilColors, fieldset, customers, externalSalesAssociation}} />;
   }
+
   return (
     <div className="mx-auto min-w-0 max-w-6xl space-y-5 [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11">
       <BreadcrumbEntity label={order.orderNo} />
@@ -549,4 +409,160 @@ function EditorFeesSection({
       ) : null}
     </>
   );
+}
+
+function AdministratorOrderEdit({order, external, pending, pricingPending, canPrice,
+  canCorrectFreight, id, canModify, products, foilColors, fieldset, customers, externalSalesAssociation}:
+  RenderEditorFeesOptions & {
+    id: string; canModify: boolean;
+    products: Awaited<ReturnType<typeof listActiveOrderChangeCatalogProducts>>;
+    foilColors: Awaited<ReturnType<typeof listExternalCreateOrderFoilOptions>>;
+    fieldset: Exclude<ReturnType<typeof editableFieldsetForStatus>, 'NONE'>;
+    customers: Awaited<ReturnType<typeof listCustomerPartyOptions>>;
+    externalSalesAssociation: Awaited<ReturnType<typeof getOrderExternalSalesAssociation>>;
+  }) {
+    const productionLocked = [
+      OrderStatus.RELEASED,
+      OrderStatus.FOILING,
+      OrderStatus.PACKING,
+      OrderStatus.IN_PRODUCTION,
+      OrderStatus.SCHEDULING,
+      OrderStatus.ON_HOLD,
+    ].some((status) => status === order.status);
+    return (
+      <>
+        <BreadcrumbEntity label={order.orderNo} />
+        <AdminOrderEditor
+          key={`${order.id}:${order.editVersion}`}
+          orderId={order.id}
+          orderNo={order.orderNo}
+          status={order.status}
+          revision={order.revision}
+          workOrderVersion={order.workOrderVersion}
+          canModify={canModify}
+          canAdd={canModify && order.status === OrderStatus.DRAFT && order.packagingGroups.length === 0}
+          canEditDesigns={order.status === OrderStatus.DRAFT && !pending}
+          productionLocked={productionLocked}
+          products={products}
+          foilColors={foilColors.map((color) => color.name)}
+          items={order.items.map((item) => ({
+            id: item.id,
+            sequence: item.sequence,
+            name: item.name,
+            quantity: item.quantity,
+            pack: item.pack,
+            productId: item.productId,
+            pricingRoute: item.pricingRoute,
+            specification: item.specification,
+            paperType: item.paperType,
+            paperWeightGsm: item.paperWeightGsm,
+            ...deriveLegacyOrderItemFoilFacts(item),
+            subtotal: 'subtotal' in item ? String(item.subtotal) : null,
+            details: (
+              <OrderSavedItemDetails
+                order={order}
+                item={item}
+                includeDesigns={false}
+              />
+            ),
+            packagingEditable:
+              order.packagingGroups
+                .flatMap((group) => group.lines)
+                .filter((line) => line.orderItem.id === item.id).length === 1,
+            designs: item.designs.map((design) => ({
+              id: design.id,
+              fileName: design.fileName,
+              fileType: design.fileType,
+              fileSize: String(design.fileSize),
+              fileUrl:
+                design.fileType === 'IMAGE'
+                  ? signDesignReadUrl(design.fileUrl)
+                  : '',
+            })),
+          }))}
+          form={{
+            orderId: order.id,
+            expectedEditVersion: order.editVersion,
+            fieldset,
+            customers,
+            externalSalesAssociation,
+            shipments: order.shipments.map((row) => ({
+              id: row.id,
+              sequence: row.sequence,
+              status: row.status,
+              receiverName: row.receiverName,
+              receiverPhone: row.receiverPhone,
+              receiverAddress: row.receiverAddress,
+              expressCode: row.expressCode,
+              destinationProvince: row.destinationProvince,
+            })),
+            packagingDetails: <OrderSavedPackaging order={order} />,
+            isExternalSales: external,
+            isSfCollect: order.isSfCollect,
+            blocked: Boolean(pending),
+            initial: {
+              customName: order.customName,
+              customerRef: order.customerRef,
+              customerPartyId: order.customerPartyId,
+              receiverName: order.receiverName,
+              receiverPhone: order.receiverPhone,
+              receiverAddress: order.receiverAddress,
+              expressCode: order.expressCode,
+              packageRequirement: order.packageRequirement,
+              remark: order.remark,
+              promisedDate:
+                formatDateInputShanghai(order.promisedDate, '') || null,
+              isUrgent: order.isUrgent,
+            },
+          }}
+          pendingNotice={
+            pending ? (
+              <PendingModificationNoticeSection {...{
+                pending: pending, id: id,
+              }} />
+            ) : null
+          }
+          itemRemarks={!pending ? (
+            <section aria-label="款式备注" className="space-y-4">
+              {order.items.map((item) => (
+                <OrderItemRemarkForm key={`${item.id}:${order.editVersion}`} orderId={order.id}
+                  itemId={item.id} sequence={item.sequence} version={order.editVersion} initial={item.remark} />
+              ))}
+            </section>
+          ) : null}
+          deliveries={
+            !pending && order.shipments.length < 10 &&
+            !order.shipments.some((row) => row.status === 'SHIPPED') &&
+            'priceRevision' in order ? (
+              <AddOrderShipmentForm
+                orderId={order.id}
+                expectedRevision={order.revision}
+                expectedEditVersion={order.editVersion}
+                expectedWorkOrderVersion={order.workOrderVersion}
+                expectedPriceRevision={Number(order.priceRevision)}
+                allowManualPricing={external && order.billingMode !== 'NO_CHARGE' && order.status !== OrderStatus.DRAFT}
+                nextSequence={Math.max(0, ...order.shipments.map((row) => row.sequence)) + 1}
+                sources={order.shipments
+                  .filter((row) => !row.trackingNo && row.weightKg === null && row.registrationVersion === 0)
+                  .map((row) => ({
+                    id: row.id,
+                    sequence: row.sequence,
+                    receiverAddress: row.receiverAddress,
+                    lines: row.lines.filter((line) => line.quantity > 0).map((line) => ({
+                      orderItemId: line.orderItem.id,
+                      name: line.orderItem.name,
+                      quantity: line.quantity,
+                    })),
+                  }))}
+              />
+            ) : null
+          }
+          fees=<EditorFeesSection {...{
+              order, external, pending, pricingPending,
+              canPrice, canCorrectFreight,
+            }} />
+        />
+      </>
+    );
+
 }

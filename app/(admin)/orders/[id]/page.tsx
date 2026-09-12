@@ -8,6 +8,7 @@ import { AdminOrderDetailView } from '@/components/business/order/AdminOrderDeta
 import { AdminOrderDetailDecision } from '@/components/business/order/AdminOrderDetailDecision';
 import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import Decimal from 'decimal.js';
 import { DESIGN_GRID_WARN_THRESHOLD } from '@/components/business/order/design-grid';
 import { randomUUID } from 'node:crypto';
@@ -101,7 +102,8 @@ import {
 } from '@/lib/order/admin-pricing-snapshot';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
-import { OrderCustomerFee, selectOrderCustomerFee } from '@/lib/order/customer-fee';
+import { orderDetailAmounts } from '@/lib/order/detail-amounts';
+import { OrderAmount } from '@/components/business/order/OrderAmount';
 import { OrderDetailTimeline } from '@/components/business/order/OrderDetailTimeline';
 import { OrderDetailStickyScope } from '@/components/business/order/OrderDetailStickyScope';
 import {
@@ -173,10 +175,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
   if (!order) notFound();
   const adminActivity = user.role === Role.ADMIN ? await readOrderActivity(order.id, user) : null;
   const canViewCommercialAmounts = user.role !== Role.WORKER;
-  const displayedCustomerFee =
-    canViewCommercialAmounts && 'totalAmount' in order
-      ? selectOrderCustomerFee(order)
-      : null;
   const canCreateRework =
     user.role === Role.ADMIN &&
     order.kind !== OrderKind.REWORK &&
@@ -385,10 +383,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
       String(charge.category.code),
     ),
   );
-  const hasPendingCustomerChargeAmount = order.customerCharges.some(
-    (charge) => charge.amount === null,
-  );
-
   const presentation = user.role === Role.ADMIN
     ? await getAdminOrderDetailPresentation(user, {
         id: order.id, orderNo: order.orderNo, revision: order.revision,
@@ -520,19 +514,22 @@ export default async function OrderDetailPage({ params }: PageProps) {
         />
       ) : null}</>),
     otherActions: (<><div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
-            <Link
-              href={`/print/orders/${order.id}?autoprint=1`}
+            <a
+              href={`/api/orders/${order.id}/pdf?view=inline`}
               target="_blank"
               rel="noopener noreferrer"
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               打印
-            </Link>
-            <Link
+            </a>
+            <a
               href={`/api/orders/${order.id}/pdf`}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               下载 PDF
+            </a>
+            <Link href={`/print/orders/${order.id}`} prefetch={false} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              网页预览
             </Link>
             {canEdit ? (
               <Link
@@ -647,7 +644,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </div></>),
     basics: (<><OrderBasicSummarySection hideRemark={user.role === Role.ADMIN} {...{
       order, hasProductionOperations, productionOperations, productionProgressSteps,
-      assignedWorkerNames, canViewCommercialAmounts, hasPendingCustomerChargeAmount, displayedCustomerFee,
+      assignedWorkerNames, canViewCommercialAmounts,
     }} /></>),
     customerCharges: (<>{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -868,7 +865,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         <ol className="space-y-3">
           {order.items.map((item) => (
             <li key={item.id} className={user.role === Role.ADMIN ? "min-w-0 text-sm" : "min-w-0 rounded-lg border text-sm"}>
-              <Disclosure id={`detail-design-item-${item.id}`} className="min-w-0">
+              <Disclosure id={`detail-design-item-${item.id}`} className="group/design-item min-w-0">
                 <DisclosureSummary className="flex-wrap items-start justify-between gap-2 px-4 py-3">
                   <span className="admin-wrap-anywhere min-w-0 font-medium">
                     <span className="text-muted-foreground">#{item.sequence}</span>
@@ -880,8 +877,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     {item.craftNames.length
                       ? ` · ${item.craftNames.length} 项工艺`
                       : ''}
-                    <span className="ml-2 group-open:hidden">展开</span>
-                    <span className="ml-2 hidden group-open:inline">收起</span>
+                    <span className="ml-2 group-open/design-item:hidden">展开</span>
+                    <span className="ml-2 hidden group-open/design-item:inline">收起</span>
                   </span>
                 </DisclosureSummary>
               <div className={user.role === Role.ADMIN ? "space-y-3 px-4 pb-4" : "space-y-3 border-t px-4 py-4"}>
@@ -1692,8 +1689,6 @@ type RenderOrderBasicSummaryOptions = {
   productionProgressSteps: Awaited<ReturnType<typeof listOrderProductionProgressSteps>>;
   assignedWorkerNames: string[];
   canViewCommercialAmounts: boolean;
-  hasPendingCustomerChargeAmount: boolean;
-  displayedCustomerFee: OrderCustomerFee | null;
 };
 
 function OrderBasicSummarySection({
@@ -1704,9 +1699,13 @@ function OrderBasicSummarySection({
   productionProgressSteps,
   assignedWorkerNames,
   canViewCommercialAmounts,
-  hasPendingCustomerChargeAmount,
-  displayedCustomerFee,
 }: RenderOrderBasicSummaryOptions) {
+  const amounts = canViewCommercialAmounts ? orderDetailAmounts(order) : null;
+  const displayAmount = (amount: string | null, estimated: boolean, total = false) => {
+    return <OrderAmount status={order.status} amount={amount} estimated={estimated}
+      pricingStatus={total ? amounts?.pricingStatus : undefined}
+      incomplete={total && amounts?.feeSource === 'INCOMPLETE'} />;
+  };
   return (
     <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <h2 className="text-base font-semibold">基本信息</h2>
@@ -1763,29 +1762,22 @@ function OrderBasicSummarySection({
             <PromisedDateBadge promisedDate={order.promisedDate} status={order.status} />
           </dd>
         </div>
-        {canViewCommercialAmounts &&
-        'processingAmount' in order &&
-        'packagingAmount' in order &&
-        'totalAmount' in order ? (
+        {amounts ? (
           <>
             <Row
               label="款式加工费"
-              value={formatMoney(
-                new Decimal(String(order.processingAmount)).minus(String(order.packagingAmount)),
-              )}
+              value={displayAmount(amounts.itemProcessingAmount, amounts.processingEstimated)}
               tabular
             />
-            <Row label="入袋费" value={formatMoney(String(order.packagingAmount))} tabular />
-            <Row label="加工费合计" value={formatMoney(String(order.processingAmount))} tabular />
+            <Row label="入袋费" value={displayAmount(amounts.packagingAmount, amounts.packagingEstimated)} tabular />
+            <Row label="加工费合计" value={displayAmount(amounts.processingAmount, amounts.processingEstimated || amounts.packagingEstimated)} tabular />
             <Row
               label={
-                hasPendingCustomerChargeAmount
-                  ? '对客已知应收总额（不含待定费用）'
-                  : order.isSfCollect
+                order.isSfCollect
                     ? '对客应收总额（不含快递费，含耗材费）'
                     : '对客应收总额'
               }
-              value={displayedCustomerFee?.amount ?? String(order.totalAmount)}
+              value={displayAmount(amounts.totalAmount, amounts.estimated, true)}
               tabular
             />
           </>
@@ -1933,7 +1925,7 @@ function Row({
   full,
 }: {
   label: string;
-  value: string | null | undefined;
+  value: ReactNode;
   tabular?: boolean;
   full?: boolean;
 }) {

@@ -1059,30 +1059,7 @@ export function OrderForm({
     mode: 'onBlur',
     // The external editor owns one explicit error-navigation request per submit.
     shouldFocusError: !usesExternalSalesPricing,
-    defaultValues: {
-      clientSubmissionId,
-      nextItemFig: 2,
-      customName: null,
-      customerPartyId: null,
-      customerRef: null,
-      receiverName: null,
-      receiverPhone: null,
-      receiverAddress: null,
-      expressCode: null,
-      destinationProvince: null,
-      quotedWeightKg: null,
-      shippingFee: null,
-      packingMaterialFee: null,
-      customerChargeOverrideReason: null,
-      packageRequirement: null,
-      remark: null,
-      promisedDate: null,
-      isUrgent: false,
-      isSfCollect: false,
-      additionalShipments: [],
-      packagingGroups: defaultPackagingGroups(1),
-      items: [initialItem],
-    },
+    defaultValues: initialOrderFormValues(clientSubmissionId, initialItem),
   });
   const {
     control,
@@ -4192,3 +4169,30 @@ export function orderServerFieldErrorMessages(
 
 const selectClass =
   'flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
+
+function initialOrderFormValues(clientSubmissionId: string, initialItem: ReturnType<typeof createExternalOrderItem>): CreateOrderInput {
+  return {
+      clientSubmissionId,
+      nextItemFig: 2,
+      customName: null,
+      customerPartyId: null,
+      customerRef: null,
+      receiverName: null,
+      receiverPhone: null,
+      receiverAddress: null,
+      expressCode: null,
+      destinationProvince: null,
+      quotedWeightKg: null,
+      shippingFee: null,
+      packingMaterialFee: null,
+      customerChargeOverrideReason: null,
+      packageRequirement: null,
+      remark: null,
+      promisedDate: null,
+      isUrgent: false,
+      isSfCollect: false,
+      additionalShipments: [],
+      packagingGroups: defaultPackagingGroups(1),
+      items: [initialItem],
+    };
+}

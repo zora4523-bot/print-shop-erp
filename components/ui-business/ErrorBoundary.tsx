@@ -36,7 +36,7 @@ function ErrorBoundaryFallback(
 }
 
 /**
- * Next.js 16 的真实组件级错误边界。预期的表单错误仍应作为值返回；
+ * Next.js 16.3 的稳定组件级错误边界。预期的表单错误仍应作为值返回；
  * 这里只捕获渲染期的非预期异常，并通过 retry 重取当前区域。
  */
 const CatchErrorBoundary = catchError<ErrorBoundaryFallbackProps>(

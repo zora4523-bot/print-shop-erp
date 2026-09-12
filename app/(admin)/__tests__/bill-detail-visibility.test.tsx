@@ -43,7 +43,7 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-import OwnerBillDetailPage from '@/app/(admin)/owner/bills/[id]/page';
+import OwnerBillDetailPage from '@/app/(billing)/owner/bills/[id]/page';
 import SalesBillDetailPage from '@/app/(admin)/sales/bills/[id]/page';
 
 const finishedAt = new Date('2026-08-01T02:00:00.000Z');
