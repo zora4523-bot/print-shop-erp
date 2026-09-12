@@ -549,7 +549,11 @@ export async function setOrderSfCollectAction(
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
     }
-    throw err;
+    console.error('[order:sf-collect] unexpected failure', {
+      orderId,
+      name: err instanceof Error ? err.name : typeof err,
+    });
+    return { status: 'error', message: '配送方式更新失败，请刷新后重试' };
   }
 
   revalidatePath('/orders');

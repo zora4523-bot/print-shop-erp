@@ -13,7 +13,9 @@ describe('admin route states', () => {
     expect(html).toContain('data-scope="page"');
     expect(html).toContain('role="alert"');
     expect(html).toContain('重试当前页面');
-    expect(html).toContain('返回管理首页');
+    expect(html).toContain('返回首页');
+    expect(html).toContain('href="/"');
+    expect(html).not.toContain('href="/owner"');
   });
 
   it('uses the shared skeleton contract without replacing persistent chrome', () => {

@@ -5556,6 +5556,16 @@ describe('setOrderUrgent — quick toggle', () => {
 });
 
 describe('setOrderSfCollect — 后期履约标识', () => {
+  it('rejects a delivery change while a modification is pending without writing fees', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      ...sfSnapshot(OrderStatus.SUBMITTED, false, salesActor.id, OrderSettlementType.EXTERNAL_SALES),
+      changeRequests: [{ id: 'pending-change' }],
+    });
+    await expect(setOrderSfCollect('order-1', true, salesActor)).rejects.toThrow('待审批申请');
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
+    expect(appendPricingRevisionMock).not.toHaveBeenCalled();
+  });
   it('rejects an unversioned external fulfilment correction before changing financial facts', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       sfSnapshot(OrderStatus.COMPLETED, false, 'sales-1', OrderSettlementType.EXTERNAL_SALES),
@@ -5759,9 +5769,12 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         shippingAmount: '4.30',
       }),
     );
-    dbMock.order.update.mockResolvedValue({
-      id: 'order-1',
-      status: OrderStatus.SHIPPED,
+    const quote: Record<string, unknown> = { quotedFee: null, quotedFeeCompleteness: null, quotedPricingRevisionId: null };
+    dbMock.order.update.mockImplementation(async ({ data }) => {
+      Object.assign(quote, data);
+      const present = ['quotedFee', 'quotedFeeCompleteness', 'quotedPricingRevisionId'].map((key) => quote[key] !== null);
+      expect(present.every(Boolean) || present.every((value) => !value), '每次 SQL 更新都必须满足报价三字段约束').toBe(true);
+      return { id: 'order-1', status: OrderStatus.SUBMITTED };
     });
 
     await setOrderSfCollect('order-1', true, ownerActor);
@@ -5793,8 +5806,6 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         data: expect.objectContaining({
           isSfCollect: true,
           totalAmount: '5007.00',
-          quotedFee: '5007.00',
-          quotedFeeCompleteness: 'COMPLETE',
           confirmedFee: null,
           settledFee: null,
         }),
@@ -5808,6 +5819,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         source: 'SF_COLLECT_CHANGED_PENDING',
         expectedPriceRevision: 4,
         incrementOrderRevision: true,
+        orderFeeSnapshot: { quotedFee: '5007.00', confirmedFee: null, settledFee: null },
       }),
     );
     const quoteLinkIndex = dbMock.order.update.mock.calls.findIndex(
@@ -5818,7 +5830,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     expect(dbMock.order.update.mock.calls[quoteLinkIndex]).toEqual([
       expect.objectContaining({
         where: { id: 'order-1' },
-        data: { quotedPricingRevisionId: 'pricing-revision-2' },
+        data: { quotedFee: '5007.00', quotedFeeCompleteness: 'COMPLETE', quotedPricingRevisionId: 'pricing-revision-2' },
       }),
     ]);
     expect(
@@ -5899,8 +5911,6 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         data: expect.objectContaining({
           isSfCollect: false,
           totalAmount: '5011.30',
-          quotedFee: '5011.30',
-          quotedFeeCompleteness: 'COMPLETE',
           confirmedFee: null,
           settledFee: null,
         }),

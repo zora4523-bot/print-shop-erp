@@ -205,6 +205,15 @@ pnpm build
 - build 成功但 dev 报错：停止并重启单一 dev server，必要时移动 `.next` 备份。
 - dev 成功但 build 失败：检查 Server/Client 边界、动态 API、环境变量读取和静态生成路径；以 Next 16 本地文档为准。
 
+## 销售详情切换顺丰到付后整页无法加载
+
+若日志出现 `Order_quoted_fee_snapshot_shape_check`，检查外部销售历史工单的报价更新顺序。
+`quotedFee`、`quotedFeeCompleteness`、`quotedPricingRevisionId` 必须在每条 SQL 后满足
+全空或全非空，不能先写金额再补引用。事务包裹本身不会延迟这个 CHECK。
+正确顺序是更新共同费用事实、以新金额追加不可变价格修订，再一次写入完整报价三字段；
+生产前与履约阶段的配送切换都必须遵守。保留已有约束及历史迁移，不用删约束或清空数据恢复。
+事务失败会回滚；修复后刷新页面，再在没有待审批申请且版本有效时重试。非预期错误应在配送表单反馈。
+
 ## 外部服务
 
 OSS 上传、企业微信通知、PDF、PM2 worker、cron、备份和 Nginx 都有环境差异。生产排查不要照搬本地 mock 结果，使用 [DEPLOYMENT.md](./DEPLOYMENT.md) 的资料地图和目标环境日志。

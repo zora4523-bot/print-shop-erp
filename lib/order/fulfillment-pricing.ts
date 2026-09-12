@@ -538,7 +538,6 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
   const amount = confirmed ? plan.preview.newTotal! : plan.provisionalTotal;
   await tx.order.update({ where: { id: order.id }, data: {
     isSfCollect: input.isSfCollect, totalAmount: amount, confirmedFee: confirmed ? amount : null,
-    ...(!confirmed ? { quotedFee: amount, quotedFeeCompleteness: plan.preview.canConfirm ? OrderQuotedFeeCompleteness.COMPLETE : OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS } : {}),
   }, select: { id: true } });
   const pricing = await appendOrderPricingRevisionInTx(tx, {
     orderId: order.id, status: confirmed ? OrderPricingStatus.ADMIN_CONFIRMED : OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
@@ -549,7 +548,13 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
     metadata: { fulfillment: { baselinePricingRevisionId: plan.baseline.id, preservedFinancialFingerprint: plan.baseline.frozen, isSfCollect: input.isSfCollect, recovered: plan.baseline.recovered, previousQuotedPricingRevisionId: order.quotedPricingRevisionId, previousQuotedFee: order.quotedFee?.toFixed(2) ?? null } },
   });
   if (!confirmed) {
-    await tx.order.update({ where: { id: order.id }, data: { quotedPricingRevisionId: pricing.pricingRevisionId }, select: { id: true } });
+    // Keep the quote tuple valid at every SQL statement, including on legacy
+    // orders without a previous quote reference.
+    await tx.order.update({ where: { id: order.id }, data: {
+      quotedFee: amount,
+      quotedFeeCompleteness: plan.preview.canConfirm ? OrderQuotedFeeCompleteness.COMPLETE : OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+      quotedPricingRevisionId: pricing.pricingRevisionId,
+    }, select: { id: true } });
   }
   const result = { orderId: order.id, status: order.status, confirmedFee: confirmed ? amount : null, revision: pricing.orderRevision, priceRevision: pricing.priceRevision };
   await tx.orderLog.create({ data: {

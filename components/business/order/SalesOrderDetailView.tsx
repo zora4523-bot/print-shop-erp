@@ -109,7 +109,7 @@ export function SalesOrderDetailView({
     order.status === OrderStatus.SHIPPED &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
   const canToggleSfCollect =
-    canEditOrderSfCollect(order.status) && !isFinalizedExternalShipment;
+    !pendingChangeRequest && canEditOrderSfCollect(order.status) && !isFinalizedExternalShipment;
   const canEditDesigns =
     !pendingChangeRequest && order.status === OrderStatus.DRAFT;
   const canRequestModify =

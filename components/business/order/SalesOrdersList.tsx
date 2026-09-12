@@ -251,7 +251,7 @@ function SalesOrderCard({
             type="button"
             variant="link"
             onClick={onOpen}
-            className="admin-wrap-anywhere h-auto min-w-0 justify-start whitespace-normal p-0 text-left text-sm font-semibold sm:text-base"
+            className="admin-wrap-anywhere h-auto min-w-0 max-w-full shrink justify-start whitespace-normal p-0 text-left text-sm font-semibold sm:text-base"
           >
             {order.customName ?? '未命名工单'}
           </Button>

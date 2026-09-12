@@ -3606,9 +3606,13 @@ export async function setOrderSfCollect(
         promisedDate: true,
         isUrgent: true,
         isSfCollect: true,
+        changeRequests: { where: { status: OrderChangeRequestStatus.PENDING }, select: { id: true } },
       },
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
+    if (order.changeRequests?.length) {
+      throw new OrderInvariantError('工单有待审批申请，请先处理申请再修改配送方式');
+    }
 
     const globalOverride = actor.role === Role.ADMIN;
     if (!globalOverride && order.submitterId !== actor.id) {
@@ -3865,15 +3869,6 @@ export async function setOrderSfCollect(
         totalAmount: nextTotalAmount,
         ...(order.settlementType === OrderSettlementType.EXTERNAL_SALES
           ? {
-              // Changing the fulfilment charging mode invalidates every
-              // previously confirmed/settled customer-fee snapshot. Persist
-              // the newly calculated amount as the current provisional quote
-              // so the shared selector cannot fall through to stale money
-              // while the pricing revision awaits administrator confirmation.
-              quotedFee: nextTotalAmount,
-              quotedFeeCompleteness:
-                nextQuotedFeeCompleteness ??
-                OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
               confirmedFee: null,
               settledFee: null,
             }
@@ -3893,6 +3888,11 @@ export async function setOrderSfCollect(
               now: changedAt,
               expectedPriceRevision: order.priceRevision,
               incrementOrderRevision: true,
+              orderFeeSnapshot: {
+                quotedFee: nextTotalAmount,
+                confirmedFee: null,
+                settledFee: null,
+              },
               remark: isSfCollect
                 ? '顺丰到付变更后待管理员重新确认终价'
                 : '取消顺丰到付后待管理员重新确认终价',
@@ -3901,12 +3901,16 @@ export async function setOrderSfCollect(
           )
         : null;
     if (pricingRevision) {
-      // quotedFee above is the value represented by this newly appended
-      // immutable revision. Link it only after the revision row exists so the
-      // same-order FK/trigger can validate the reference in this transaction.
+      // The quote's amount, completeness and revision reference form one
+      // database invariant. Legacy orders may have all three fields null;
+      // write the whole tuple only after its immutable revision exists.
       await txClient.order.update({
         where: { id: orderId },
         data: {
+          quotedFee: nextTotalAmount,
+          quotedFeeCompleteness:
+            nextQuotedFeeCompleteness ??
+            OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
           quotedPricingRevisionId: pricingRevision.pricingRevisionId,
         },
         select: { id: true, status: true },
