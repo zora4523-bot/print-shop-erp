@@ -119,6 +119,7 @@ export type OrderFormBProps = {
   shippingExtras?: ReactNode;
   packagingExtras?: ReactNode;
   afterShipping?: ReactNode;
+  footerExtras?: ReactNode;
   allowManualWeight?: boolean;
   allowCustomSize?: boolean;
   items: CreateOrderInput['items'];
@@ -788,6 +789,7 @@ export function OrderFormB({
   shippingExtras,
   packagingExtras,
   afterShipping,
+  footerExtras,
   allowManualWeight = false,
   allowCustomSize = true,
   items,
@@ -905,7 +907,13 @@ export function OrderFormB({
       issueFocusTimer.current = null;
       const root = rootRef.current;
       if (!root) return;
-      const directSelector = message.includes('工单名称')
+      const addressNumber = Number(message.match(/地址\s*(\d+)/)?.[1]);
+      const extraContact = addressNumber >= 2 && (message.includes('收件人') || message.includes('电话'))
+        ? `[name="additionalShipments.${addressNumber - 2}.${message.includes('收件人') ? 'receiverName' : 'receiverPhone'}"]`
+        : null;
+      const directSelector = extraContact ?? (message.includes('工单备注')
+        ? '#remark'
+        : message.includes('工单名称')
         ? '[id$="-custom-name"]'
         : message.includes('收件人')
           ? '[id$="-receiver-name"]'
@@ -913,7 +921,7 @@ export function OrderFormB({
           ? '[id$="-receiver-phone"]'
           : message.includes('收货地址') || message.includes('地址')
             ? '[id$="-receiver-address-paste"]'
-            : null;
+            : null);
       const invalidOwner = root.querySelector<HTMLElement>(
         '[aria-invalid="true"]:not([tabindex="-1"]), [data-invalid="true"]',
       );
@@ -1545,6 +1553,7 @@ export function OrderFormB({
               顺丰到付（本单不计快递费）
             </label>
           </Group>
+          {footerExtras}
         </div>
 
         <StickyOrderFormRail rail={rail} />

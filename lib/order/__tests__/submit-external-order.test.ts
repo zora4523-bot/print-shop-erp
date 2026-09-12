@@ -137,6 +137,8 @@ function draftOrder(overrides: Record<string, unknown> = {}) {
       {
         id: 'shipment-1',
         sequence: 1,
+        receiverName: '收件人',
+        receiverPhone: '13800138000',
         destinationProvince: '上海',
         weightKg: '12.000',
         lines: [
@@ -358,6 +360,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         {
           id: 'shipment-1',
           sequence: 1,
+          receiverName: '收件人',
+          receiverPhone: '13800138000',
           destinationProvince: '上海',
           // A newly-created draft has no trusted fulfilment weight. Browser
           // quotedWeightKg is not persisted into this field.
@@ -681,6 +685,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         {
           id: 'shipment-1',
           sequence: 1,
+          receiverName: '收件人',
+          receiverPhone: '13800138000',
           destinationProvince: '上海',
           weightKg: '12.000',
           lines: [{ orderItemId: 'item-print', quantity: 2_000 }],
@@ -796,6 +802,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         {
           id: 'shipment-1',
           sequence: 1,
+          receiverName: '收件人',
+          receiverPhone: '13800138000',
           destinationProvince: '上海',
           weightKg: '12.000',
           lines: [{ orderItemId: 'item-print-foil', quantity: 2_000 }],
@@ -1140,6 +1148,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         {
           id: 'shipment-1',
           sequence: 1,
+          receiverName: '收件人',
+          receiverPhone: '13800138000',
           destinationProvince: '上海',
           weightKg: null,
           lines: [{ orderItemId: 'item-1', quantity: 1_000 }],
@@ -1326,4 +1336,13 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.order.update).not.toHaveBeenCalled();
     expect(tx.orderPriceVersionLock.createMany).not.toHaveBeenCalled();
   });
+});
+
+it.each(['receiverName', 'receiverPhone'])('旧草稿提交前重新验证额外地址 %s', async (field) => {
+  const source = draftOrder();
+  const order = draftOrder({ shipments: [source.shipments[0], { ...source.shipments[0], id: 'shipment-2', sequence: 2, [field]: null }] });
+  const tx = txFor(order);
+  await expect(finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient, order.id, 'admin', NOW, null)).rejects.toThrow('地址 2：请填写');
+  expect(mocks.appendRevision).not.toHaveBeenCalled();
+  expect(tx.order.update).not.toHaveBeenCalled();
 });

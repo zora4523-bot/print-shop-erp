@@ -1,5 +1,7 @@
 'use client';
 
+import { OrderRemark } from '../OrderRemark';
+
 import { useId, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -58,6 +60,7 @@ export type OrderSubmissionReviewCharge = {
 
 export type OrderSubmissionReviewContentProps = {
   orderName: string;
+  remark?: string | null;
   items: readonly OrderSubmissionReviewItem[];
   receiver: OrderSubmissionReviewReceiver;
   additionalReceivers?: readonly OrderSubmissionReviewReceiver[];
@@ -99,6 +102,7 @@ function ReviewWarning({ children }: { children: ReactNode }) {
 
 export function OrderSubmissionReviewContent({
   orderName,
+  remark,
   items,
   receiver,
   additionalReceivers = [],
@@ -143,6 +147,7 @@ export function OrderSubmissionReviewContent({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+        {remark?.trim() ? <div className="mb-6"><OrderRemark remark={remark} /></div> : null}
         {items.map((item) => {
           const manualQuote = Boolean(item.manualQuoteReasons?.length);
           return (

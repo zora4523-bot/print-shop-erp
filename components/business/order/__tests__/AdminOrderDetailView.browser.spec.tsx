@@ -50,6 +50,7 @@ function designImage(label: string, color: string): string {
 function detailModel(overrides: Partial<AdminOrderDetailModel> = {}): AdminOrderDetailModel {
   const diffs = [{ id: 'change-qty', label: '第 2 款 · 数量', before: '1,000', after: '2,000', targetItemId: 'item-2' }];
   return {
+    remark: '先核对样稿\n再安排生产',
     id: 'detail-order-1', no: 'GD-260908-DETAIL-001', name: '中秋礼品红包', version: 2,
     status: OrderStatus.FOILING, customer: '华南礼品包装有限公司', sales: '外部销售 · 林女士',
     craft: '局部烫金 · 专版烫金', due: '2026-09-18', dueLeft: '剩 10 天', qty: 3000, isUrgent: false,

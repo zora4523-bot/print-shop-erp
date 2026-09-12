@@ -238,3 +238,19 @@ describe('parseExternalCreateOrderCommand', () => {
     expect(result.issues.some((issue) => issue.path[0] === field)).toBe(true);
   });
 });
+
+
+describe('external extra delivery contacts', () => {
+  const shipment = { receiverName: '李女士', receiverPhone: '13900139000', receiverAddress: '广东省广州市测试路2号', expressCode: null, destinationProvince: '广东', itemQuantities: [400] };
+  it.each(['receiverName', 'receiverPhone'])('rejects a missing %s at the server boundary', (field) => {
+    const result = parseExternalCreateOrderCommand(externalOrder({ additionalShipments: [{ ...shipment, [field]: '  ' }] }));
+    expect(result).toMatchObject({ success: false, issues: [{ path: ['additionalShipments', 0, field] }] });
+  });
+  it('preserves complete extra contacts and the order note', () => {
+    const result = parseExternalCreateOrderCommand(externalOrder({ remark: '先核对样稿\n再安排生产', additionalShipments: [shipment] }));
+    expect(result).toMatchObject({ success: true, data: { remark: '先核对样稿\n再安排生产', additionalShipments: [shipment] } });
+  });
+  it('rejects an order note longer than 1000 characters', () => {
+    expect(parseExternalCreateOrderCommand(externalOrder({ remark: '字'.repeat(1001) })).success).toBe(false);
+  });
+});

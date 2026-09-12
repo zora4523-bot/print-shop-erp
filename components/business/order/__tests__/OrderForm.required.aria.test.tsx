@@ -256,3 +256,12 @@ describe('OrderForm 必填字段的 required 语义', () => {
     ).toBe(false);
   });
 });
+
+
+it.each([true, false])('shows one optional order note after shipping for external=%s', (external) => {
+  const html = render(external);
+  expect(html.match(/id="remark"/g)).toHaveLength(1);
+  expect(html).toContain('工单备注（选填）');
+  expect(html).toMatch(/<textarea[^>]*id="remark"[^>]*maxLength="1000"/i);
+  expect(html.indexOf('id="remark"')).toBeGreaterThan(html.indexOf('多地址发货'));
+});

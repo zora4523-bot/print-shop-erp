@@ -238,3 +238,10 @@ describe('order form local draft', () => {
     ).toBe(4);
   });
 });
+
+
+it('preserves multiline order remarks in local drafts', () => {
+  const remark = '先核对样稿\n再安排生产';
+  const saved = serializeLocalOrderFormDraft({ ...formValues(), remark }, 'external-sales');
+  expect(parseLocalOrderFormDraft(saved!, 'external-sales')?.values.remark).toBe(remark);
+});

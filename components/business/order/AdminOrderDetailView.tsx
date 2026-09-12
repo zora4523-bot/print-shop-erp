@@ -1,5 +1,7 @@
 'use client';
 
+import { OrderRemark } from './OrderRemark';
+
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight, Copy, FileDown, ImageOff, Pencil } from 'lucide-react';
@@ -164,6 +166,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
 
         </aside>
         <div className={styles.main}>
+          <OrderRemark remark={model.remark} />
           {model.vdiff ? <section className={styles.diff} aria-label="最新变更差异">
             <div className={styles.sectionHeading}><h2>变更已生效 · v{model.vdiff.from} → v{model.vdiff.to}</h2><span>批准于 {model.vdiff.at}</span></div>
             <div className={styles.diffItems}>{model.vdiff.items.map((entry) => <Button key={entry.id} type="button" variant="ghost"

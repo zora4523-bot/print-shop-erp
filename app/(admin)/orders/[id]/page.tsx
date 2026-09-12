@@ -644,7 +644,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </>
             ) : null}
           </div></>),
-    basics: (<><OrderBasicSummarySection {...{
+    basics: (<><OrderBasicSummarySection hideRemark={user.role === Role.ADMIN} {...{
       order, hasProductionOperations, productionOperations, productionProgressSteps,
       assignedWorkerNames, canViewCommercialAmounts, hasPendingCustomerChargeAmount, displayedCustomerFee,
     }} /></>),
@@ -1678,6 +1678,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
 }
 
 type RenderOrderBasicSummaryOptions = {
+  hideRemark?: boolean;
   order: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;
   hasProductionOperations: boolean;
   productionOperations: Awaited<ReturnType<typeof listOrderProductionOperations>>;
@@ -1689,6 +1690,7 @@ type RenderOrderBasicSummaryOptions = {
 };
 
 function OrderBasicSummarySection({
+  hideRemark = false,
   order,
   hasProductionOperations,
   productionOperations,
@@ -1746,7 +1748,7 @@ function OrderBasicSummarySection({
         <Row label="快递代码" value={order.expressCode} />
         <Row label="配送方式" value={order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'} />
         <Row label="收货信息" value={formatReceiverInfo(order)} full />
-        <Row label="备注" value={order.remark} full />
+        {!hideRemark ? <Row label="备注" value={order.remark} full /> : null}
         <div>
           <dt className="text-muted-foreground">承诺交期</dt>
           <dd className="mt-0.5 flex items-center gap-2">

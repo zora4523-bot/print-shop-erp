@@ -1,5 +1,7 @@
 'use client';
 
+import { OrderRemark } from './OrderRemark';
+
 /* eslint-disable @next/next/no-img-element */
 
 import {
@@ -212,6 +214,7 @@ function AdminOrderRow({
             </span>
           ))}
         </p>
+        <OrderRemark remark={order.remark} compact />
       </div>
 
       <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto">

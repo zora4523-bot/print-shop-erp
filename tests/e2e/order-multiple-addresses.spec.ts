@@ -62,6 +62,7 @@ test('管理员添加分货地址，预览不落库，保存后详情与费用�
         ],
       );
     }
+    await client.query('UPDATE "Order" SET remark=$2 WHERE id=$1', [id, '先核对样稿\n再安排生产']);
     await client.query('COMMIT');
     const read = async () =>
       (
@@ -136,6 +137,9 @@ test('管理员添加分货地址，预览不落库，保存后详情与费用�
     await expect(page.locator('#detail-delivery-records')).toContainText(
       '第二地址收件人',
     );
+    await expect(page.locator('[data-slot="order-remark"]')).toContainText('先核对样稿\n再安排生产');
+    await page.goto(`/orders/${id}/edit`);
+    await expect(page.getByRole('textbox', { name: /工单备注/ })).toHaveValue('先核对样稿\n再安排生产');
     await stale.close();
   } catch (error) {
     await client.query('ROLLBACK');
@@ -156,6 +160,12 @@ test('外部销售建单页添加地址并纳入报价和提交复核', async ({
     .getByRole('textbox', { name: '工单名称', exact: true })
     .fill(`E2E 多地址建单 ${randomUUID()}`);
   const form = page.locator('[data-slot="order-form-b"]');
+  const note = '先核对样稿\n再安排生产';
+  await form.getByRole('textbox', { name: '工单备注（选填）', exact: true }).fill(note);
+  await expect.poll(() => page.evaluate(() => Object.values(localStorage).some((value) => typeof value === 'string' && value.includes('先核对样稿')))).toBe(true);
+  await page.reload();
+  await expect(form.getByRole('textbox', { name: '工单备注（选填）', exact: true })).toHaveValue(note);
+
   await form
     .getByRole('group', { name: '工艺类型' })
     .getByRole('button', { name: '局部烫金', exact: true })
@@ -192,9 +202,16 @@ test('外部销售建单页添加地址并纳入报价和提交复核', async ({
     page.getByText('快递费 中通 · 2 个地址', { exact: false }),
   ).toBeVisible();
   await form.locator('input[type="file"]').first().setInputFiles({ name: 'design.png', mimeType: 'image/png', buffer: await sharp({ create: { width: 64, height: 64, channels: 3, background: 'white' } }).png().toBuffer() });
+  await extra.getByLabel('联系电话').fill('');
+  await page.getByRole('button', { name: /^(创建并提交|提交并申请管理员终价)$/ }).click();
+  await expect(extra.getByLabel('联系电话')).toHaveAttribute('aria-invalid', 'true');
+  await expect(extra.getByText('请填写联系电话', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await extra.getByLabel('联系电话').fill('13900139000');
   await page.getByRole('button', { name: /^(创建并提交|提交并申请管理员终价)$/ }).click();
   const review = page.getByRole('dialog');
   await expect(review).toContainText('江西省南昌市测试路2号');
+  await expect(review.getByRole('region', { name: '工单备注', exact: true })).toContainText(note);
   await expect(review).toContainText('地址 1 · 600 件');
   await expect(review).toContainText('地址 2 · 400 件');
   await review.getByRole('button', { name: '返回修改', exact: true }).click();

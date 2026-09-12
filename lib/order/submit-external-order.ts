@@ -1,3 +1,4 @@
+import { externalShipmentContactIssues } from './external-shipment-contact';
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
@@ -125,6 +126,8 @@ type FinalizeOrderRow = {
   shipments: Array<{
     id: string;
     sequence: number;
+    receiverName: string | null;
+    receiverPhone: string | null;
     destinationProvince: string | null;
     weightKg: MoneyLike | null;
     lines: Array<{ orderItemId: string; quantity: number }>;
@@ -261,6 +264,8 @@ const finalizeOrderSelect = {
     select: {
       id: true,
       sequence: true,
+      receiverName: true,
+      receiverPhone: true,
       destinationProvince: true,
       weightKg: true,
       lines: { select: { orderItemId: true, quantity: true } },
@@ -700,6 +705,8 @@ async function prepareExternalOrderQuote(
   if (order.shipments.length === 0) {
     throw new ExternalOrderQuoteFinalizeError('工单至少需要一个发货地址');
   }
+  const contactIssues = externalShipmentContactIssues(order.shipments.filter((shipment) => shipment.sequence > 1));
+  if (contactIssues.length) throw new ExternalOrderQuoteFinalizeError(contactIssues.map((issue) => issue.message).join('；'));
   // Canonical lock order for every quote/catalog transaction:
   // price snapshot -> PAPER rows. Material writers already use the same order.
   await acquirePriceRuleSnapshotReadLock(tx);

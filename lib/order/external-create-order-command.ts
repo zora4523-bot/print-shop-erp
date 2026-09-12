@@ -1,3 +1,4 @@
+import { externalShipmentContactIssues } from './external-shipment-contact';
 import type { z } from 'zod';
 import {
   createOrderSchema,
@@ -287,6 +288,12 @@ export function parseExternalCreateOrderCommand(
       issues: compatibilityIssues(compatible.error, raw),
     };
   }
+
+  const contactIssues = externalShipmentContactIssues(compatible.data.additionalShipments);
+  if (contactIssues.length) return {
+    success: false,
+    issues: contactIssues.map((issue) => ({ ...issue, fig: null })),
+  };
 
   const canonicalInput = toCanonicalFacts(compatible.data);
   const canonical = externalCreateOrderSubmitSchema.safeParse(canonicalInput);

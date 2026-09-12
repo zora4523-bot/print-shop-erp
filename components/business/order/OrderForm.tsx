@@ -1,5 +1,7 @@
 'use client';
 
+import { externalShipmentContactIssues } from '@/lib/order/external-shipment-contact';
+
 import {
   useCallback,
   useEffect,
@@ -1591,6 +1593,7 @@ export function OrderForm({
     if (!data.receiverName?.trim()) issues.push('收件人必填');
     if (!data.receiverAddress?.trim()) issues.push('收货地址必填');
     if (!data.receiverPhone?.trim()) issues.push('收货电话必填');
+    issues.push(...externalShipmentContactIssues(data.additionalShipments).map((issue) => issue.message));
     if (!currentExternalOrderQuote?.quoteToken) {
       issues.push('请等待最新费用报价完成');
     }
@@ -3213,6 +3216,7 @@ export function OrderForm({
     : [];
   const externalRHFOrderIssues = externalValidationVisible
     ? [
+        errors.remark?.message ? `工单备注：${errors.remark.message}` : null,
         errors.customName?.message
           ? `工单名称：${errors.customName.message}`
           : null,
@@ -3418,14 +3422,6 @@ export function OrderForm({
                     control={control}
                     disabled={orderFormControlsDisabled}
                   />
-                  <div className="@min-[560px]:col-span-2">
-                    <Label htmlFor="remark">工单备注</Label>
-                    <Textarea
-                      id="remark"
-                      className="mt-2 min-h-20"
-                      {...register('remark')}
-                    />
-                  </div>
                 </div>
               ) : undefined
             }
@@ -3577,6 +3573,16 @@ export function OrderForm({
                 </div>
               ) : undefined
             }
+            footerExtras={
+              <section className="mt-4 border-t pt-4">
+                <Label htmlFor="remark">工单备注（选填）</Label>
+                <Textarea id="remark" maxLength={1000} className="mt-2 min-h-24"
+                  disabled={orderFormControlsDisabled} aria-invalid={Boolean(errors.remark)}
+                  aria-describedby={errors.remark ? 'order-remark-error' : undefined}
+                  {...register('remark')} />
+                {errors.remark?.message ? <p id="order-remark-error" role="alert" className="mt-2 text-sm text-destructive">{errors.remark.message}</p> : null}
+              </section>
+            }
             afterShipping={
                 <fieldset
                   disabled={orderFormControlsDisabled}
@@ -3646,11 +3652,17 @@ export function OrderForm({
                               </Label>
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverName`}
+                                required={usesExternalSalesPricing}
+                                aria-invalid={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim()}
+                                aria-describedby={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? `extra-${shipmentIndex}-receiverName-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverName`,
                                 )}
                               />
+                              {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? (
+                                <p id={`extra-${shipmentIndex}-receiverName-error`} role="alert" className="mt-2 text-sm text-destructive">请填写收件人</p>
+                              ) : null}
                             </div>
                             <div>
                               <Label
@@ -3660,11 +3672,17 @@ export function OrderForm({
                               </Label>
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverPhone`}
+                                required={usesExternalSalesPricing}
+                                aria-invalid={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim()}
+                                aria-describedby={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? `extra-${shipmentIndex}-receiverPhone-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverPhone`,
                                 )}
                               />
+                              {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? (
+                                <p id={`extra-${shipmentIndex}-receiverPhone-error`} role="alert" className="mt-2 text-sm text-destructive">请填写联系电话</p>
+                              ) : null}
                             </div>
                             <div>
                               <Label
@@ -4036,6 +4054,7 @@ export function OrderForm({
             }
           }}
           orderName={pendingSubmission.data.customName?.trim() || '未命名工单'}
+          remark={pendingSubmission.data.remark}
           items={externalReviewItems}
           receiver={{
             name: pendingSubmission.data.receiverName?.trim() || '未识别收件人',
