@@ -130,6 +130,35 @@ test('销售搜索、分类、抽屉、详情和草稿编辑回显', async ({ pa
   expect(errors).toEqual([]);
 });
 
+test('管理员保存后，已打开的销售详情可刷新看到名称、备注、包装及收件人', async ({ page, browser }) => {
+  test.setTimeout(60_000);
+  const id = await seed('DRAFT');
+  await salesLogin(page, `/orders/${id}`);
+  const errors = trackErrors(page);
+  const adminContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  try {
+    const adminPage = await adminContext.newPage();
+    await login(adminPage, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: `/orders/${id}/edit` });
+    await adminPage.getByRole('textbox', { name: '工单名称', exact: true }).fill('管理员更新可见工单');
+    await adminPage.getByRole('textbox', { name: /工单备注/ }).fill('管理员修改备注\n请核对后发货');
+    await adminPage.getByLabel('包装补充说明（选填）').fill('贴客户标签后封口');
+    await adminPage.getByRole('textbox', { name: '收件人', exact: true }).fill('更新收件人');
+    await adminPage.getByRole('button', { name: '保存修改…', exact: true }).click();
+    const confirm = adminPage.getByRole('button', { name: '保存修改', exact: true });
+    await expect(confirm).toBeVisible();
+    await confirm.click();
+    await expect(adminPage).toHaveURL(`/orders/${id}`);
+    await page.getByRole('button', { name: '刷新工单详情', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '管理员更新可见工单', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: '工单备注', exact: true })).toContainText('管理员修改备注');
+    await expect(page.getByRole('region', { name: '包装明细', exact: true })).toContainText('贴客户标签后封口');
+    await expect(page.getByText('更新收件人', { exact: false })).toHaveCount(1);
+    await expect(page.getByText('设计图可在草稿状态上传或删除')).toHaveCount(0);
+    await healthy(page);
+    expect(errors).toEqual([]);
+  } finally { await adminContext.close(); }
+});
+
 test('销售交期修改与取消申请可提交撤回，原工单不提前变更', async ({ page }) => {
   const id = await seed('CONFIRMED');
   const errors = trackErrors(page);

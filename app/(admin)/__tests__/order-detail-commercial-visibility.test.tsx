@@ -2,6 +2,7 @@ vi.mock('@/lib/order/activity', () => ({ readOrderActivity: vi.fn().mockResolved
 vi.mock('@/actions/order-activity', () => ({ loadOrderActivity: vi.fn() }));
 vi.mock('@/components/business/order/ShipmentRegistrationForm', () => ({ ShipmentRegistrationForm: () => null }));
 vi.mock('@/actions/shipment-registration', () => ({ registerShipmentAction: vi.fn() }));
+vi.mock('@/components/business/order/SalesOrderRefreshButton', () => ({ SalesOrderRefreshButton: () => <span>刷新</span> }));
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { batchOrder } from '@/components/business/order/__tests__/admin-order-batch-fixture';
@@ -522,6 +523,12 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('入袋加工费');
     expect(html).toContain('礼盒包装');
     expect(html).toContain('每袋 10 个');
+    expect(html).toContain('90 × 165 mm');
+    expect(html).toContain('正面烫金');
+    expect(html).toContain('反面烫金');
+    expect(html).toContain('触感膜');
+    expect(html).toContain('data-slot="order-remark"');
+    expect(html.match(/佛山市/g)).toHaveLength(1);
     expect(html).toContain('包装补充说明');
     expect(html).toContain('外部销售快递费');
     expect(html).toContain('外部销售打包耗材费');
@@ -530,7 +537,9 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('已知合计（不含待定）');
     expect(html).not.toContain('¥ 待定');
     expect(html).toContain('申请修改工单');
-    expect(html).toContain('工单信息');
+    expect(html).not.toContain('设计图可在草稿状态上传或删除');
+    expect(html).not.toContain('基于生产版本');
+    expect(html).not.toContain('批准后生产版本');
     expect(html).toContain(salesDetailFixture().orderNo);
     expect(html.match(/>估<\/span>/g)).toHaveLength(2);
     expect(html).not.toContain('师傅');
@@ -542,6 +551,26 @@ describe('order detail commercial visibility', () => {
     expect(html).not.toContain('协议改价机密说明');
     expect(html).not.toContain('日志沿用原价 76543.21');
     expect(html).not.toContain('内部材料成本秘密');
+  });
+
+  it('shows customer-facing review results and retains legacy receipt information once', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'sales-1', role: Role.SALES } });
+    getSalesOrderDetailByIdMock.mockResolvedValue({
+      ...salesDetailFixture(), shipments: [],
+      changeRequests: [{ id: 'request-1', type: 'MODIFY', status: OrderChangeRequestStatus.APPROVED,
+        baseRevision: 1, baseWorkOrderVersion: 999, workOrderVersionAfter: 1000,
+        reason: '客户调整数量', reviewRemark: '已按新数量调整',
+        createdAt: '2026-09-11T01:00:00Z', reviewedAt: '2026-09-12T02:00:00Z', canWithdraw: false,
+      }],
+    });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).toContain('已按新数量调整');
+    expect(html).toContain('审核时间');
+    expect(html).toContain('最近申请');
+    expect(html).not.toContain('基于生产版本');
+    expect(html).not.toContain('批准后生产版本');
+    expect(html).not.toContain('v999');
+    expect(html.match(/佛山市/g)).toHaveLength(1);
   });
 
   it('清晰展示结构化款式事实与包装组组成', async () => {
@@ -857,6 +886,13 @@ function salesDetailFixture() {
         quantity: 1000,
         specification: '大号',
         paper: '艳红珠光纸 200g',
+        details: [
+          { label: '纸张', value: '艳红珠光纸 200g' },
+          { label: '正面烫金', value: '哑金' },
+          { label: '反面烫金', value: '红金' },
+          { label: '实际尺寸', value: '90 × 165 mm' },
+          { label: '覆膜', value: '触感膜' },
+        ],
         frontFoilColors: ['哑金'],
         backFoilColors: [],
         foilColors: ['哑金'],

@@ -13,6 +13,7 @@ import {
 test('管理员添加分货地址，预览不落库，保存后详情与费用一致，旧页面不能重复保存', async ({
   page,
   context,
+  browser,
 }) => {
   test.setTimeout(120_000);
   const client = new Client({ connectionString: process.env.DATABASE_URL });
@@ -140,6 +141,17 @@ test('管理员添加分货地址，预览不落库，保存后详情与费用�
     await expect(page.locator('[data-slot="order-remark"]')).toContainText('先核对样稿\n再安排生产');
     await page.goto(`/orders/${id}/edit`);
     await expect(page.getByRole('textbox', { name: /工单备注/ })).toHaveValue('先核对样稿\n再安排生产');
+    const salesContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    try {
+      const salesPage = await salesContext.newPage();
+      await login(salesPage, { username: E2E_USERS.sales.username, password: E2E_PASSWORD, from: `/orders/${id}` });
+      await expect(salesPage.getByRole('heading', { name: '发货与收货（2）' })).toBeVisible();
+      await expect(salesPage.getByText('江西省南昌市测试路2号', { exact: true })).toBeVisible();
+      await expect(salesPage.getByText('第二地址收件人', { exact: false })).toHaveCount(1);
+      await expect(salesPage.getByText(/地址 2 ·/).first()).toBeVisible();
+      await expect(salesPage.locator('[data-slot="order-remark"]')).toContainText('先核对样稿');
+      await expect(salesPage.locator('[data-slot="admin-route-error"]')).toHaveCount(0);
+    } finally { await salesContext.close(); }
     await stale.close();
   } catch (error) {
     await client.query('ROLLBACK');

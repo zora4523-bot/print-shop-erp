@@ -18,7 +18,6 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
-import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { StatusBadge as UiStatusBadge } from '@/components/ui-business';
@@ -35,6 +34,8 @@ import { ShipmentStatusBadge } from './ShipmentStatusBadge';
 import { UrgentBadge } from './UrgentBadge';
 import { SubmitOrderButton } from './SubmitOrderButton';
 import { UrgentToggleForm } from './UrgentToggleForm';
+import { OrderRemark } from './OrderRemark';
+import { SalesOrderRefreshButton } from './SalesOrderRefreshButton';
 
 function SalesOrderChangeRequestSection({
   catalogProducts,
@@ -140,9 +141,7 @@ export function SalesOrderDetailView({
                 <Badge variant="outline">顺丰到付</Badge>
               ) : null}
             </div>
-            <Disclosure className="mt-2"><DisclosureSummary>工单信息</DisclosureSummary>
-              <p className="admin-wrap-anywhere pb-3">{order.orderNo}</p>
-            </Disclosure>
+            <p className="admin-wrap-anywhere mt-2 text-sm text-muted-foreground">{order.orderNo}</p>
             <p className="admin-wrap-anywhere mt-1 text-sm text-muted-foreground">
               {order.customerRef ?? '未填客户'} · 第 {order.revision} 版 ·{' '}
               {order.items.length} 款{' '}
@@ -154,6 +153,7 @@ export function SalesOrderDetailView({
           </div>
 
           <div className="flex min-w-0 flex-wrap items-start gap-2 lg:justify-end">
+            <SalesOrderRefreshButton />
             {canEdit ? (
               <Link
                 href={`/orders/${order.id}/edit`}
@@ -219,16 +219,10 @@ export function SalesOrderDetailView({
                   />
                 }
               />
-              <SalesDetailRow label="快递代码" value={order.expressCode} />
-              <SalesDetailRow
-                label="收货人"
-                value={[order.receiver.name, order.receiver.phone]
-                  .filter(Boolean)
-                  .join(' · ')}
-              />
-              <SalesDetailRow label="收货地址" value={order.receiver.address} />
-              <SalesDetailRow label="备注" value={order.remark} full />
+              <SalesDetailRow label="配送方式" value={order.isSfCollect ? '顺丰到付' : '寄付'} />
+              {order.expressCode ? <SalesDetailRow label="快递代码" value={order.expressCode} /> : null}
             </dl>
+            <OrderRemark remark={order.remark} />
           </section>
 
           <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -236,9 +230,6 @@ export function SalesOrderDetailView({
               <h2 className="text-base font-semibold">
                 款式（{order.items.length}）
               </h2>
-              <span className="text-xs text-muted-foreground">
-                设计图可在草稿状态上传或删除
-              </span>
             </div>
             <ol className="space-y-3">
               {order.items.map((item) => (
@@ -254,21 +245,16 @@ export function SalesOrderDetailView({
                         </span>{' '}
                         · {externalPriceBusinessText(item.name)}
                       </h3>
-                      <p className="admin-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                        {[item.specification, item.paper]
-                          .filter(Boolean)
-                          .map((value) =>
-                            externalPriceBusinessText(String(value)),
-                          )
-                          .join(' · ') || '规格信息待补充'}
-                      </p>
                     </div>
                     <strong className="shrink-0 font-sans tabular-nums">
                       {item.quantity.toLocaleString('zh-CN')} 个
                     </strong>
                   </div>
+                  <dl className="mt-3 grid min-w-0 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                    {item.details.map((fact) => <SalesDetailRow key={fact.label} label={fact.label} value={fact.value} />)}
+                  </dl>
                   {item.remark ? (
-                    <HighlightedRemark className="admin-wrap-anywhere mt-3">
+                    <HighlightedRemark className="admin-wrap-anywhere mt-3 whitespace-pre-wrap">
                       {item.remark}
                     </HighlightedRemark>
                   ) : null}
@@ -305,7 +291,7 @@ export function SalesOrderDetailView({
                       {group.mode === 'MIXED_STYLE' ? '混装' : '单款装'}
                     </h3>
                     <p className="mt-1">
-                      实际 {group.actualBagCount.toLocaleString('zh-CN')} 袋
+                      共 {group.actualBagCount.toLocaleString('zh-CN')} 袋
                     </p>
                     <p className="mt-1 text-muted-foreground">
                       {group.lines
@@ -345,7 +331,7 @@ export function SalesOrderDetailView({
             {order.shipments.length > 0 ? (
               <ol className="space-y-3">
                 {order.shipments.map((shipment) => (
-                  <li key={shipment.id} className="rounded-lg border p-3 text-sm">
+                  <li key={shipment.id} className="min-w-0 rounded-lg border p-3 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <strong>地址 {shipment.sequence}</strong>
                       <ShipmentStatusBadge status={shipment.status} />
@@ -359,10 +345,13 @@ export function SalesOrderDetailView({
                       {shipment.receiverAddress ?? '收货地址未填写'}
                     </p>
                     {shipment.trackingNo ? (
-                      <p className="mt-2 font-sans tabular-nums">
+                      <p className="admin-wrap-anywhere mt-2 font-sans tabular-nums">
                         运单号：{shipment.trackingNo}
                       </p>
                     ) : null}
+                    {shipment.carrier ? <p className="admin-wrap-anywhere mt-2">快递：{shipment.carrier}</p> : null}
+                    {shipment.expressCode && shipment.expressCode !== order.expressCode ? <p className="admin-wrap-anywhere mt-2">快递代码：{shipment.expressCode}</p> : null}
+                    {shipment.shippedAt ? <p className="mt-2">发货时间：{formatDateTimeShanghai(new Date(shipment.shippedAt))}</p> : null}
                     {shipment.lines.length > 0 ? (
                       <p className="admin-wrap-anywhere mt-2 text-xs text-muted-foreground">
                         {shipment.lines
@@ -377,13 +366,16 @@ export function SalesOrderDetailView({
                 ))}
               </ol>
             ) : (
-              <p className="text-sm text-muted-foreground">暂无发货地址</p>
+              <div className="admin-wrap-anywhere space-y-1 text-sm">
+                <p>{[order.receiver.name, order.receiver.phone].filter(Boolean).join(' · ') || '收货人未填写'}</p>
+                <p>{order.receiver.address || '收货地址未填写'}</p>
+              </div>
             )}
           </section>
 
           {order.changeRequests.length > 0 ? (
             <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-              <h2 className="text-base font-semibold">变更 / 取消申请</h2>
+              <h2 className="text-base font-semibold">最近申请</h2>
               <ol className="space-y-3">
                 {order.changeRequests.map((request) => {
                   const definition =
@@ -396,26 +388,19 @@ export function SalesOrderDetailView({
                         </UiStatusBadge>
                         <span className="text-xs text-muted-foreground">
                           {request.type === 'CANCEL' ? '取消' : '修改'} ·{' '}
-                          基于业务第 {request.baseRevision} 版 · 基于生产版本{' '}
-                          {request.baseWorkOrderVersion == null
-                            ? '历史未记录'
-                            : `v${request.baseWorkOrderVersion}`}{' '}
-                          · 批准后生产版本{' '}
-                          {request.workOrderVersionAfter == null
-                            ? '未生成'
-                            : `v${request.workOrderVersionAfter}`}{' '}
-                          ·{' '}
+                          基于第 {request.baseRevision} 版 ·{' '}
                           {formatDateTimeShanghai(new Date(request.createdAt))}
                         </span>
                       </div>
-                      <p className="admin-wrap-anywhere mt-2">
+                      <p className="admin-wrap-anywhere mt-2 whitespace-pre-wrap">
                         原因：{request.reason}
                       </p>
                       {request.reviewRemark ? (
-                        <p className="admin-wrap-anywhere mt-2 text-xs text-muted-foreground">
+                        <p className="admin-wrap-anywhere mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
                           审核说明：{request.reviewRemark}
                         </p>
                       ) : null}
+                      {request.reviewedAt ? <p className="mt-2 text-xs text-muted-foreground">审核时间：{formatDateTimeShanghai(new Date(request.reviewedAt))}</p> : null}
                       {request.canWithdraw ? (
                         <OrderChangeWithdrawButton requestId={request.id} />
                       ) : null}
