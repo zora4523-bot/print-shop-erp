@@ -134,7 +134,7 @@ export function DesignUploadPanel({
   }
 
   return (
-    <div className="mt-3 space-y-2 border-t pt-3">
+    <div aria-busy={busy || deleting} className="mt-3 space-y-2 border-t pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">
           设计文件（{designs.length}）

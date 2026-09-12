@@ -1,3 +1,4 @@
+vi.mock('@/actions/order-sales-text', () => ({ editSalesTextAction: vi.fn() }));
 vi.mock('@/lib/order/activity', () => ({ readOrderActivity: vi.fn().mockResolvedValue({ events: [], nextCursor: null }) }));
 vi.mock('@/actions/order-activity', () => ({ loadOrderActivity: vi.fn() }));
 vi.mock('@/components/business/order/ShipmentRegistrationForm', () => ({ ShipmentRegistrationForm: () => null }));

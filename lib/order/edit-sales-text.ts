@@ -18,7 +18,7 @@ export class SalesTextEditError extends Error {}
 export async function editSalesOrderText(raw: unknown, actor: { id: string; role: Role }) {
   if (actor.role !== Role.SALES) throw new SalesTextEditError('当前账号不能使用销售编辑入口');
   const input = salesTextEditSchema.parse(raw);
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(input.orderId)}))`;
     const order = await tx.order.findUnique({ where: { id: input.orderId }, select: {
       submitterId: true, status: true, editVersion: true,
@@ -33,14 +33,14 @@ export async function editSalesOrderText(raw: unknown, actor: { id: string; role
       const group = await tx.orderPackagingGroup.findFirst({ where: { id: input.targetId, orderId: input.orderId }, select: { name: true } });
       if (!group) throw new SalesTextEditError('包装组不属于该工单');
       before = group.name;
-      if (before === after) return;
+      if (before === after) return false;
       await tx.orderPackagingGroup.update({ where: { id: input.targetId }, data: { name: after } });
     } else {
       const item = await tx.orderItem.findFirst({ where: { id: input.targetId, orderId: input.orderId }, select: { name: true, remark: true } });
       if (!item) throw new SalesTextEditError('款式不属于该工单');
       const key = input.field === 'itemName' ? 'name' : 'remark';
       before = item[key];
-      if (before === after) return;
+      if (before === after) return false;
       await tx.orderItem.update({ where: { id: input.targetId }, data: input.field === 'itemName' ? { name: input.value } : { remark: after } });
     }
     await tx.order.update({ where: { id: input.orderId }, data: { revision: { increment: 1 }, editVersion: { increment: 1 } } });
@@ -48,5 +48,6 @@ export async function editSalesOrderText(raw: unknown, actor: { id: string; role
       remark: `修改${input.field === 'itemName' ? '款式名称' : input.field === 'packagingName' ? '包装组名称' : '款式备注'}：${before ?? '未填写'} → ${after ?? '未填写'}`,
       changedFields: { salesText: { targetId: input.targetId, field: input.field, before, after } },
     } });
+    return true;
   });
 }

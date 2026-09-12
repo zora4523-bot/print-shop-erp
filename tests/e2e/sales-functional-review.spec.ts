@@ -478,12 +478,14 @@ test('销售编辑新增地址先分货复核费用，保存后地址与总价�
   await expect(page.getByRole('heading', { name: '已保存的基本信息', exact: true })).toBeVisible();
   const add = page.getByRole('region', { name: '添加收货地址', exact: true });
   await page.getByRole('textbox', { name: '工单备注', exact: true }).fill('先保存备注');
-  await expect(add.getByRole('button', { name: '添加地址 2' })).toBeDisabled();
+  await add.getByRole('button', { name: '添加地址 2' }).click();
+  await expect(page.getByRole('alertdialog')).toContainText('请先保存当前修改');
+  await page.getByRole('button', { name: '继续编辑', exact: true }).click();
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await expect(page).toHaveURL(`/orders/${id}`);
   await page.goto(`/orders/${id}/edit`);
   await add.getByRole('button', { name: '添加地址 2' }).click();
-  await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
+
   await add.getByLabel('收件人', { exact: true }).fill('地址二收件人');
   await add.getByLabel('收货电话', { exact: true }).fill('13800138001');
   await add.getByLabel('收货地址', { exact: true }).fill('江西省南昌市测试路2号');
@@ -503,4 +505,48 @@ test('销售编辑新增地址先分货复核费用，保存后地址与总价�
   await expect(page.getByText('地址二收件人', { exact: false })).toBeVisible();
   await healthy(page);
   expect(errors).toEqual([]);
+});
+
+test('销售文字字段直接保存且统一保护拦截开关刷新路由和弹窗', async ({ page }) => {
+  const id = await seed('DRAFT');
+  await fixtureSql(async (db) => {
+    await db.query(`INSERT INTO "OrderPackagingGroup" (id,"orderId",sequence,name,mode,"actualBagCount","updatedAt") VALUES ($1,$2,1,'原包装组','SINGLE_STYLE',100,NOW())`, [`${id}-group`,id]);
+    await db.query(`INSERT INTO "OrderPackagingGroupLine" (id,"orderId","packagingGroupId","orderItemId","unitsPerBag") VALUES ($1,$2,$3,$4,10)`, [`${id}-group-line`,id,`${id}-group`,`${id}-item`]);
+  });
+  await salesLogin(page, `/orders/${id}/edit`);
+  const before = await readOrder(id);
+  await page.getByRole('form', { name: '款式名称', exact: true }).getByRole('textbox').fill('直接编辑新款式名称');
+  for (const name of ['标记为急单', '标记顺丰到付', '刷新工单详情']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('请先保存当前修改');
+    await page.getByRole('button', { name: '继续编辑', exact: true }).click();
+  }
+  await page.getByRole('link', { name: '返回工单', exact: true }).click();
+  await expect(page.getByRole('alertdialog')).toContainText('未保存的修改将丢失');
+  await page.getByRole('button', { name: '继续编辑', exact: true }).click();
+  await expect(page.getByRole('form', { name: '款式名称', exact: true }).getByRole('textbox')).toHaveValue('直接编辑新款式名称');
+  const cancelReload = page.waitForEvent('dialog').then(async (dialog) => { expect(dialog.type()).toBe('beforeunload'); await dialog.dismiss(); });
+  await page.reload({ timeout: 2000 }).catch(() => undefined);
+  await cancelReload;
+  await page.getByRole('button', { name: '保存款式名称', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /直接编辑新款式名称/ })).toBeVisible();
+  await page.getByRole('form', { name: '款式备注', exact: true }).getByRole('textbox').fill('新增款式说明');
+  await page.getByRole('button', { name: '保存款式备注', exact: true }).click();
+  await expect(page.getByText('新增款式说明', { exact: true })).toBeVisible();
+  await expect(page.getByRole('form', { name: '包装组名称', exact: true }).locator('input[name=expectedEditVersion]')).toHaveValue('2');
+  await page.getByRole('form', { name: '包装组名称', exact: true }).getByRole('textbox').fill('包装组新名称');
+  await page.getByRole('button', { name: '保存包装组名称', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /包装组新名称/ })).toBeVisible();
+  await page.getByRole('button', { name: '取消工单', exact: true }).click();
+  await page.getByRole('textbox', { name: /取消原因/ }).fill('未保存的取消原因');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-sales-edit-notice]')).toContainText('请先保存当前修改');
+  await page.getByRole('button', { name: '继续编辑', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: /取消原因/ })).toHaveValue('未保存的取消原因');
+  const after = await readOrder(id);
+  expect(after.totalAmount).toBe(before.totalAmount);
+  expect(after.priceRevision).toBe(before.priceRevision);
+  expect(after.status).toBe(before.status);
+  expect(after.requests).toBeNull();
+  await healthy(page);
 });
