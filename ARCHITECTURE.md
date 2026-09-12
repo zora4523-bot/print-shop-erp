@@ -165,3 +165,5 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 客户表尚无独立销售分配字段，不能把无关联客户默认为销售可见。
 `lib/agent-monthly-billing/sales-query.ts` 只读取本人的 `AgentMonthlyBill` 及冻结明细，
 不复用包含管理员内部关系的月账单详情。旧 Bill 仅保留管理历史归档用途。
+
+销售编辑页的新增地址复用 `add-shipment` 领域事务，与管理员共用分货守恒、自动物流报价、预览令牌及版本校验；销售权限在锁内按工单创建人限制，禁止手工指定费用。`SalesOrderEditWorkspace` 协调编辑保存与独立新增地址表单，防止刷新覆盖未保存的输入。

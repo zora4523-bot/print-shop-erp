@@ -92,6 +92,7 @@ export type SalesOrderDetail = {
       unitsPerBag: number;
     }>;
   }>;
+  canAddShipment?: boolean;
   shipments: Array<{
     id: string;
     sequence: number;
@@ -101,6 +102,7 @@ export type SalesOrderDetail = {
     receiverAddress: string | null;
     expressCode: string | null;
     destinationProvince: string | null;
+    canSplit?: boolean;
     trackingNo: string | null;
     carrier: string | null;
     shippedAt: string | null;
@@ -149,6 +151,7 @@ export const salesOrderDetailSelect = {
   quotedFee: true,
   confirmedFee: true,
   settledFee: true,
+  settledAt: true,
   promisedDate: true,
   expressCode: true,
   packageRequirement: true,
@@ -229,6 +232,8 @@ export const salesOrderDetailSelect = {
       expressCode: true,
       destinationProvince: true,
       trackingNo: true,
+      weightKg: true,
+      registrationVersion: true,
       carrierName: true,
       carrierCode: true,
       shippedAt: true,
@@ -404,6 +409,7 @@ function mapSalesOrderDetail(
         unitsPerBag: line.unitsPerBag,
       })),
     })),
+    canAddShipment: !row.settledAt && row.settledFee === null && row.shipments.length < 10 && !row.shipments.some((shipment) => shipment.status === 'SHIPPED') && !row.changeRequests.some((request) => request.status === 'PENDING'),
     shipments: row.shipments.map((shipment) => ({
       id: shipment.id,
       sequence: shipment.sequence,
@@ -413,6 +419,7 @@ function mapSalesOrderDetail(
       receiverAddress: shipment.receiverAddress,
       expressCode: shipment.expressCode,
       destinationProvince: shipment.destinationProvince,
+      canSplit: !shipment.trackingNo && shipment.weightKg === null && shipment.registrationVersion === 0,
       trackingNo: shipment.trackingNo,
       carrier: shipment.carrierName || CARRIER_LABELS[shipment.carrierCode ?? ''] || null,
       shippedAt: shipment.shippedAt?.toISOString() ?? null,

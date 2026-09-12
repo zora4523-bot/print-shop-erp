@@ -5,6 +5,8 @@ import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { editableFieldsetForStatus } from '@/lib/order/editable-fields';
 import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
 import { buttonVariants } from '@/components/ui/button';
+import { AddOrderShipmentForm } from './AddOrderShipmentForm';
+import { SalesOrderEditWorkspace } from './SalesOrderEditWorkspace';
 import { EditOrderForm } from './EditOrderForm';
 import { SalesOrderDetailView } from './SalesOrderDetailView';
 
@@ -18,6 +20,17 @@ export async function SalesOrderEditor({ id, user }: { id: string; user: { id: s
   return <SalesOrderDetailView order={order} catalogProducts={catalogProducts} editForm={
     <section className="space-y-4">
       <Link href={`/orders/${id}`} className={buttonVariants({ variant: 'outline' })}>返回工单</Link>
+      <SalesOrderEditWorkspace key={`${id}:${order.editVersion}`} addAddress={order.canAddShipment ?
+        <AddOrderShipmentForm orderId={id} expectedRevision={order.revision} expectedEditVersion={order.editVersion}
+          expectedWorkOrderVersion={order.workOrderVersion} expectedPriceRevision={order.priceRevision} allowManualPricing={false}
+          nextSequence={Math.max(0, ...order.shipments.map((shipment) => shipment.sequence)) + 1}
+          sources={order.shipments.filter((shipment) => shipment.canSplit).map((shipment) => ({
+            id: shipment.id, sequence: shipment.sequence, receiverAddress: shipment.receiverAddress,
+            lines: shipment.lines.flatMap((line) => {
+              const item = order.items.find((candidate) => candidate.sequence === line.itemSequence);
+              return item ? [{ orderItemId: item.id, name: line.itemName, quantity: line.quantity }] : [];
+            }),
+          }))} /> : null}>
       <EditOrderForm key={`${id}:${order.editVersion}`} orderId={id}
         expectedEditVersion={order.editVersion} fieldset={fieldset} hideCustomerFields
         shipments={order.shipments} isExternalSales={order.settlementType === OrderSettlementType.EXTERNAL_SALES}
@@ -27,6 +40,7 @@ export async function SalesOrderEditor({ id, user }: { id: string; user: { id: s
           receiverPhone: order.receiver.phone, receiverAddress: order.receiver.address,
           expressCode: order.expressCode, packageRequirement: order.packageRequirement,
           remark: order.remark, promisedDate: order.promisedDate, isUrgent: order.isUrgent }} />
+      </SalesOrderEditWorkspace>
     </section>
   } />;
 }

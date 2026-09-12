@@ -40,6 +40,7 @@ const actor = { id: 'admin', role: Role.ADMIN };
 function fixture() {
   return {
     id: 'order',
+    submitterId: 'sales',
     settlementType: 'EXTERNAL_SALES',
     status: 'SUBMITTED',
     revision: 1,
@@ -194,12 +195,12 @@ describe('administrator adds a delivery with conserved allocations and frozen lo
     );
     expect(mocks.log).toHaveBeenCalledOnce();
   });
-  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])(
+  it.each([Role.CUSTOMER_SERVICE, Role.WORKER])(
     'rejects non-administrator %s before database access',
     async (role) => {
       await expect(
         addOrderShipment(input(), { id: 'other', role }, 'save'),
-      ).rejects.toThrow('只有管理员');
+      ).rejects.toThrow('当前账号不能');
       expect(mocks.transaction).not.toHaveBeenCalled();
     },
   );
@@ -415,4 +416,19 @@ it('replaces a pending null amount even when it has a note', async () => {
   expect(
     mocks.charge.mock.calls.some(([args]) => args.where?.id === 'shipping'),
   ).toBe(true);
+});
+
+it('sales can preview and save own split with automatic pricing', async () => {
+  const sales = { id: 'sales', role: Role.SALES };
+  const preview = await addOrderShipment(input(), sales, 'preview');
+  await addOrderShipment({ ...input(), previewToken: preview!.token }, sales, 'save');
+  expect(mocks.create).toHaveBeenCalledOnce();
+});
+it('sales cannot split another owner order', async () => {
+  await expect(addOrderShipment(input(), { id: 'foreign', role: Role.SALES }, 'preview')).rejects.toThrow('自己创建');
+  expect(mocks.create).not.toHaveBeenCalled();
+});
+it('sales cannot forge manual charges', async () => {
+  await expect(addOrderShipment({ ...input(), shippingFee: '1', overrideReason: '低价' }, { id: 'sales', role: Role.SALES }, 'preview')).rejects.toThrow('人工物流费用');
+  expect(mocks.transaction).not.toHaveBeenCalled();
 });

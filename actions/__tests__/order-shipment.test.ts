@@ -36,7 +36,7 @@ beforeEach(() => {
 it('checks authorization before parsing or accessing an order', async () => {
   mocks.permission.mockRejectedValue(new Error('无权访问'));
   await expect(addOrderShipmentAction({}, 'save')).rejects.toThrow('无权访问');
-  expect(mocks.permission).toHaveBeenCalledWith('order:update:post-schedule');
+  expect(mocks.permission).toHaveBeenCalledWith('order:create');
   expect(mocks.add).not.toHaveBeenCalled();
 });
 it('rejects invalid allocation input without writes', async () => {

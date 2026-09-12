@@ -16,7 +16,7 @@ export async function addOrderShipmentAction(
   payload: unknown,
   mode: 'preview' | 'save',
 ): Promise<AddOrderShipmentResult> {
-  const actor = await requirePermission('order:update:post-schedule');
+  const actor = await requirePermission('order:create');
   const parsed = addOrderShipmentSchema.safeParse(payload);
   if (!parsed.success)
     return {

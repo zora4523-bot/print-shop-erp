@@ -222,7 +222,7 @@ export function SalesOrderDetailView({
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
         <div className="min-w-0 space-y-4">
           <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-            <h2 className="text-base font-semibold">基本信息</h2>
+            <h2 className="text-base font-semibold">{editForm ? '已保存的基本信息' : '基本信息'}</h2>
             <dl className="grid min-w-0 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <SalesDetailRow
                 label="承诺交期"

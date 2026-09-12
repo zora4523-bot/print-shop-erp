@@ -470,3 +470,37 @@ test('驳回补正重新计价确认后提交，缺图阻止提交，旧图删�
   expect(Number(after.snapshotFee)).toBe(Number(after.quotedFee));
   await healthy(page);
 });
+
+test('销售编辑新增地址先分货复核费用，保存后地址与总价同步', async ({ page }) => {
+  const id = await seed('CONFIRMED');
+  const errors = trackErrors(page);
+  await salesLogin(page, `/orders/${id}/edit`);
+  await expect(page.getByRole('heading', { name: '已保存的基本信息', exact: true })).toBeVisible();
+  const add = page.getByRole('region', { name: '添加收货地址', exact: true });
+  await page.getByRole('textbox', { name: '工单备注', exact: true }).fill('先保存备注');
+  await expect(add.getByRole('button', { name: '添加地址 2' })).toBeDisabled();
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(page).toHaveURL(`/orders/${id}`);
+  await page.goto(`/orders/${id}/edit`);
+  await add.getByRole('button', { name: '添加地址 2' }).click();
+  await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
+  await add.getByLabel('收件人', { exact: true }).fill('地址二收件人');
+  await add.getByLabel('收货电话', { exact: true }).fill('13800138001');
+  await add.getByLabel('收货地址', { exact: true }).fill('江西省南昌市测试路2号');
+  await add.getByLabel('计费省份', { exact: true }).fill('江西');
+  await add.getByLabel(/分配数量/).fill('400');
+  await expect(add.getByLabel(/人工/)).toHaveCount(0);
+  await add.getByRole('button', { name: '预览费用' }).click();
+  await expect(add.getByRole('button', { name: '保存地址' })).toBeVisible();
+  await add.getByRole('button', { name: '保存地址' }).click();
+  await expect(page.getByRole('heading', { name: '配送信息 · 2 票' })).toBeVisible();
+  const rows = await fixtureSql(async (db) => (await db.query('SELECT s.sequence, sum(l.quantity)::int AS quantity FROM "OrderShipment" s JOIN "OrderShipmentLine" l ON l."shipmentId"=s.id WHERE s."orderId"=$1 GROUP BY s.sequence ORDER BY s.sequence', [id])).rows);
+  expect(rows).toEqual([{ sequence: 1, quantity: 600 }, { sequence: 2, quantity: 400 }]);
+  const saved = await readOrder(id);
+  expect(Number(saved.totalAmount)).toBe(Number(saved.quotedFee));
+  expect(Number(saved.quotedFee)).toBe(Number(saved.snapshotFee));
+  await page.goto(`/orders/${id}`);
+  await expect(page.getByText('地址二收件人', { exact: false })).toBeVisible();
+  await healthy(page);
+  expect(errors).toEqual([]);
+});
