@@ -291,3 +291,10 @@ describe('list/detail delivery and craft consistency', () => {
     expect(buildAdminOrderDetailModel(input).dueLeft).toBe('逾期 2 天');
   });
 });
+
+
+it('keeps the order-level note separate from style notes', () => {
+  const input = fixture();
+  input.order.remark = '先核对样稿\n再安排生产';
+  expect(buildAdminOrderDetailModel(input).remark).toBe(input.order.remark);
+});

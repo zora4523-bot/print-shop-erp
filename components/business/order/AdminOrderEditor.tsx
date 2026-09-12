@@ -126,6 +126,8 @@ type Props = {
   canEditDesigns: boolean;
   productionLocked: boolean;
   fees: ReactNode;
+  deliveries?: ReactNode;
+  itemRemarks?: ReactNode;
   pendingNotice?: ReactNode;
 };
 const colors = (text: string) => [
@@ -411,6 +413,8 @@ export function AdminOrderEditor(props: Props) {
         }
       />
       <OrderEditorAuxiliaryContext.Provider value={auxiliary.context}>
+        {props.itemRemarks}
+        {props.deliveries}
         <section aria-label="费用核对" className="space-y-3">
           {dirty ? (
             <p className="text-xs text-muted-foreground">

@@ -37,7 +37,7 @@ export async function signDesignUploadAction(raw: unknown): Promise<SignUploadRe
     return invalidFromIssues(parsed.error.issues);
   }
 
-  // 铸凭证前先过授权闸：目标款式必须真实存在、工单 DRAFT、actor 有权
+  // 铸凭证前先过授权闸：目标款式必须真实存在、工单为草稿或驳回、actor 有权
   // 编辑。否则任何有 design:upload 权限的人都能对任意 id 铸 STS 凭证
   // 往 bucket 写孤儿对象。
   try {

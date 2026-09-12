@@ -464,7 +464,8 @@ test.describe('automation smoke', () => {
       .locator(`[data-order-id="${fixture.orderId}"]:visible`)
       .first();
     await expect(matchedOrder).not.toContainText(fixture.orderNo);
-    await expect(matchedOrder).toContainText(fixture.customerRef);
+    // 工厂列表按业务员识别对接人；产品客户仍用于服务端搜索。
+    await expect(matchedOrder).toContainText(`业务员：${E2E_USERS.owner.displayName}`);
     await expectNoNextErrorOverlay(page);
 
     // Name links go directly to full detail; Back restores the filtered list.

@@ -122,6 +122,7 @@ export const ORDER_LIST_SALES_VIEW_KEYS = [
   'doing',
   'shipped',
   'done',
+  'cancelled',
   'draft',
 ] as const;
 export const ORDER_LIST_VIEW_KEYS = [

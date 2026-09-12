@@ -3,8 +3,8 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { TableScrollArea } from '@/components/ui-business';
 
 function sourceLabel(source: Estimate['items'][number]['source']): string {
-  if (source === 'PRODUCT') return '产品 BOM';
-  if (source === 'CATEGORY') return '分类 BOM';
+  if (source === 'PRODUCT') return '产品物料清单';
+  if (source === 'CATEGORY') return '分类物料清单';
   return '未匹配';
 }
 
@@ -17,14 +17,11 @@ export function OrderMaterialUsageEstimate({
     <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
       <div>
         <h2 className="text-base font-semibold">物料用量估算</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          仅按当前启用 BOM 估算，不自动扣减库存；生产发料流程另行确认。
-        </p>
       </div>
 
       {estimate.items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          款式未关联产品，无法匹配 BOM。
+          暂无款式用量记录。
         </p>
       ) : (
         <div className="space-y-4">
@@ -34,7 +31,7 @@ export function OrderMaterialUsageEstimate({
                 <tr className="border-b text-left text-muted-foreground">
                   <th className="py-2 pr-3">款式</th>
                   <th className="py-2 pr-3">来源</th>
-                  <th className="py-2 pr-3">BOM</th>
+                  <th className="py-2 pr-3">物料清单</th>
                   <th className="py-2 pr-3">物料</th>
                 </tr>
               </thead>
@@ -57,12 +54,12 @@ export function OrderMaterialUsageEstimate({
                           </div>
                         </>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground">尚未配置物料清单</span>
                       )}
                     </td>
                     <td className="py-3 pr-3 align-top">
                       {item.materials.length === 0 ? (
-                        <span className="text-muted-foreground">无匹配物料</span>
+                        <span className="text-muted-foreground">暂无物料</span>
                       ) : (
                         <ul className="space-y-1">
                           {item.materials.map((material) => (

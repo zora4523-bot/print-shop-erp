@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { Role } from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { listActiveCraftOrderOptions } from '@/lib/craft';
+import { listSalesCustomerOptions } from '@/lib/order/sales-customer-scope';
 import { listCustomerPartyOptions } from '@/lib/party';
 import { OrderForm } from '@/components/business/order/OrderForm';
 import {
@@ -25,7 +26,7 @@ export default async function NewOrderPage() {
   const settlementType = settlementTypeForOrderCreator(user.role);
   const [crafts, customers, createOrderBootstrap] = await Promise.all([
     listActiveCraftOrderOptions(),
-    listCustomerPartyOptions(),
+    user.role === Role.SALES ? listSalesCustomerOptions(user) : listCustomerPartyOptions(),
     // Every chargeable create path uses the same published catalog snapshot.
     // Role changes who may request manual pricing, not which paper/spec/craft
     // dictionary the form renders.

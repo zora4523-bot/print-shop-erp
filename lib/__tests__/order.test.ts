@@ -32,7 +32,7 @@ const { dbMock } = vi.hoisted(() => {
     };
     orderItem: { findFirst: ReturnType<typeof vi.fn> };
     craft: { findMany: ReturnType<typeof vi.fn> };
-    party: { findUnique: ReturnType<typeof vi.fn> };
+    party: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
     user: { findUnique: ReturnType<typeof vi.fn> };
     product: { findMany: ReturnType<typeof vi.fn> };
     material: { findMany: ReturnType<typeof vi.fn> };
@@ -91,7 +91,7 @@ const { dbMock } = vi.hoisted(() => {
     },
     orderItem: { findFirst: vi.fn() },
     craft: { findMany: vi.fn() },
-    party: { findUnique: vi.fn() },
+    party: { findUnique: vi.fn(), findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
     product: { findMany: vi.fn() },
     material: { findMany: vi.fn() },
@@ -528,6 +528,7 @@ beforeEach(() => {
   dbMock.orderItem.findFirst.mockReset().mockResolvedValue(null);
   dbMock.craft.findMany.mockReset();
   dbMock.party.findUnique.mockReset();
+  dbMock.party.findFirst.mockReset().mockResolvedValue({ id: 'customer-1' });
   dbMock.user.findUnique.mockReset();
   dbMock.product.findMany.mockReset();
   dbMock.material.findMany.mockReset().mockImplementation(
@@ -5556,6 +5557,16 @@ describe('setOrderUrgent — quick toggle', () => {
 });
 
 describe('setOrderSfCollect — 后期履约标识', () => {
+  it('rejects a delivery change while a modification is pending without writing fees', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      ...sfSnapshot(OrderStatus.SUBMITTED, false, salesActor.id, OrderSettlementType.EXTERNAL_SALES),
+      changeRequests: [{ id: 'pending-change' }],
+    });
+    await expect(setOrderSfCollect('order-1', true, salesActor)).rejects.toThrow('待审批申请');
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
+    expect(appendPricingRevisionMock).not.toHaveBeenCalled();
+  });
   it('rejects an unversioned external fulfilment correction before changing financial facts', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       sfSnapshot(OrderStatus.COMPLETED, false, 'sales-1', OrderSettlementType.EXTERNAL_SALES),
@@ -5759,9 +5770,12 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         shippingAmount: '4.30',
       }),
     );
-    dbMock.order.update.mockResolvedValue({
-      id: 'order-1',
-      status: OrderStatus.SHIPPED,
+    const quote: Record<string, unknown> = { quotedFee: null, quotedFeeCompleteness: null, quotedPricingRevisionId: null };
+    dbMock.order.update.mockImplementation(async ({ data }) => {
+      Object.assign(quote, data);
+      const present = ['quotedFee', 'quotedFeeCompleteness', 'quotedPricingRevisionId'].map((key) => quote[key] !== null);
+      expect(present.every(Boolean) || present.every((value) => !value), '每次 SQL 更新都必须满足报价三字段约束').toBe(true);
+      return { id: 'order-1', status: OrderStatus.SUBMITTED };
     });
 
     await setOrderSfCollect('order-1', true, ownerActor);
@@ -5793,8 +5807,6 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         data: expect.objectContaining({
           isSfCollect: true,
           totalAmount: '5007.00',
-          quotedFee: '5007.00',
-          quotedFeeCompleteness: 'COMPLETE',
           confirmedFee: null,
           settledFee: null,
         }),
@@ -5808,6 +5820,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         source: 'SF_COLLECT_CHANGED_PENDING',
         expectedPriceRevision: 4,
         incrementOrderRevision: true,
+        orderFeeSnapshot: { quotedFee: '5007.00', confirmedFee: null, settledFee: null },
       }),
     );
     const quoteLinkIndex = dbMock.order.update.mock.calls.findIndex(
@@ -5818,7 +5831,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     expect(dbMock.order.update.mock.calls[quoteLinkIndex]).toEqual([
       expect.objectContaining({
         where: { id: 'order-1' },
-        data: { quotedPricingRevisionId: 'pricing-revision-2' },
+        data: { quotedFee: '5007.00', quotedFeeCompleteness: 'COMPLETE', quotedPricingRevisionId: 'pricing-revision-2' },
       }),
     ]);
     expect(
@@ -5899,8 +5912,6 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         data: expect.objectContaining({
           isSfCollect: false,
           totalAmount: '5011.30',
-          quotedFee: '5011.30',
-          quotedFeeCompleteness: 'COMPLETE',
           confirmedFee: null,
           settledFee: null,
         }),
@@ -6164,4 +6175,28 @@ describe('setOrderSfCollect — 后期履约标识', () => {
       setOrderSfCollect('order-1', true, salesActor),
     ).rejects.toThrow(/只能修改自己创建的工单/);
   });
+});
+
+describe('sales early cancellation boundaries', () => {
+  it.each([OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED])('allows the owner to cancel %s with the current edit version', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue({ id: 'o1', status, submitterId: salesActor.id, editVersion: 4 });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
+    await expect(cancelOrder('o1', salesActor, '客户取消', new Date(), 4)).resolves.toMatchObject({ status: OrderStatus.CANCELLED });
+  });
+  it('rejects foreign ownership, stale versions and active requests before writing', async () => {
+    dbMock.order.findUnique.mockResolvedValue({ id: 'o1', status: OrderStatus.REJECTED, submitterId: 'other', editVersion: 4 });
+    await expect(cancelOrder('o1', salesActor, '客户取消', new Date(), 4)).rejects.toThrow('只能取消自己');
+    dbMock.order.findUnique.mockResolvedValue({ id: 'o1', status: OrderStatus.REJECTED, submitterId: salesActor.id, editVersion: 4 });
+    await expect(cancelOrder('o1', salesActor, '客户取消', new Date(), 3)).rejects.toThrow('已更新');
+    dbMock.orderChangeRequest.findFirst.mockResolvedValue({ id: 'pending' });
+    await expect(cancelOrder('o1', salesActor, '客户取消', new Date(), 4)).rejects.toThrow('当前申请');
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+});
+
+it('sales cannot bind an active customer belonging to another salesperson', async () => {
+  dbMock.party.findUnique.mockResolvedValue({ id: 'foreign-customer', type: PartyType.CUSTOMER, isActive: true });
+  dbMock.party.findFirst.mockResolvedValue(null);
+  await expect(createOrder({ customerPartyId: 'foreign-customer', customerRef: '客户', receiverName: '收件人', receiverPhone: '13800000000', receiverAddress: '广东佛山测试收货地址', expressCode: null, packageRequirement: null, remark: null, promisedDate: null, isUrgent: false, isSfCollect: false, items: [baseItem()] }, salesActor)).rejects.toThrow('只能选择自己关联的客户');
+  expect(dbMock.order.create).not.toHaveBeenCalled();
 });

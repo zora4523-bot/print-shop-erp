@@ -30,11 +30,13 @@ export function CancelOrderForm({
   orderNo,
   impact = [],
   compact = false,
+  expectedEditVersion,
 }: {
   orderId: string;
   orderNo?: string;
   impact?: CancelOrderImpact[];
   compact?: boolean;
+  expectedEditVersion?: number;
 }) {
   const bound = cancelOrderAction.bind(null, orderId);
   const [state, formAction, pending] = useActionState<
@@ -68,7 +70,7 @@ export function CancelOrderForm({
         action={formAction}
         aria-busy={pending}
         noValidate
-      />
+      >{expectedEditVersion !== undefined ? <input type="hidden" name="expectedEditVersion" value={expectedEditVersion} /> : null}</form>
 
       <ConfirmActionController level="L3"
         formId={formId}

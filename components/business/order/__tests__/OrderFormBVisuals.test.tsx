@@ -169,6 +169,21 @@ describe('OrderFoilSwatchPicker', () => {
 });
 
 describe('OrderSubmissionReviewContent', () => {
+  it('shows every delivery and allocation before submitting a multi-address order', () => {
+    const html = renderToStaticMarkup(<OrderSubmissionReviewContent
+      orderName="多地址工单" items={[]}
+      receiver={{ name: '主收件人', phone: '13800138000', address: '广东主地址', quantityLabel: '600 件' }}
+      additionalReceivers={[{ name: '第二收件人', phone: '13900139000', address: '江西第二地址', quantityLabel: '400 件' }]}
+      shippingCharge={{ label: '快递费', amountLabel: '¥18.70' }} totalLabel="¥118.70"
+      onBack={noop} onConfirm={noop}
+    />);
+    expect(html).toContain('地址 1 · 600 件');
+    expect(html).toContain('地址 2 · 400 件');
+    expect(html).toContain('广东主地址');
+    expect(html).toContain('江西第二地址');
+    expect(html).toContain('13900139000');
+  });
+
   it('places quantity and specification first and exposes every consequence before confirmation', () => {
     const html = renderToStaticMarkup(
       <OrderSubmissionReviewContent

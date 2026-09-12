@@ -19,3 +19,13 @@
 ## 用户可见文案
 
 所有 UI 任务遵循 [文案与确认](./docs/ui-规范.md#文案与确认)。出现与旧页面、原型或组件默认文案不一致时，以该章节为准；不得因此跳过权限、金额、版本与审计校验。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

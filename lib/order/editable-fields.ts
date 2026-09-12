@@ -104,3 +104,9 @@ export function canRequestOrderModification(actor: { id: string; role: Role }, o
     actor.role === Role.ADMIN || ((actor.role === Role.SALES || actor.role === Role.CUSTOMER_SERVICE) && actor.id === order.submitterId)
   );
 }
+
+/** Packaging changes share the domain's pre-production boundary. */
+export function canChangeOrderPackaging(status: OrderStatus): boolean {
+  return [OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED,
+    OrderStatus.SUBMITTED, OrderStatus.CONFIRMED].some((candidate) => candidate === status);
+}

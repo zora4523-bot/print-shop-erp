@@ -15,14 +15,15 @@ const SALES_TABS: Array<{
   label: string;
   count: keyof Pick<
     SalesOrderListSummary,
-    'all' | 'todo' | 'doing' | 'shipped' | 'done' | 'draft'
+    'all' | 'todo' | 'doing' | 'shipped' | 'done' | 'cancelled' | 'draft'
   >;
 }> = [
   { id: 'all', label: '全部', count: 'all' },
-  { id: 'todo', label: '需处理', count: 'todo' },
+  { id: 'todo', label: '需关注', count: 'todo' },
   { id: 'doing', label: '进行中', count: 'doing' },
   { id: 'shipped', label: '已发货', count: 'shipped' },
   { id: 'done', label: '已完成', count: 'done' },
+  { id: 'cancelled', label: '已取消', count: 'cancelled' },
   { id: 'draft', label: '草稿', count: 'draft' },
 ];
 
@@ -54,16 +55,16 @@ export function SalesOrderListFilters({
             我的工单
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {summary.todo} 单需处理 · 本月已发 {summary.shippedThisMonth} 单
+            {summary.todo} 单需关注 · 本月已发 {summary.shippedThisMonth} 单
           </p>
         </div>
         <p className="text-xs text-muted-foreground">共 {summary.all} 单</p>
       </div>
 
-      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center">
+      <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
         <nav
           aria-label="销售工单视图"
-          className="flex min-w-0 gap-2 overflow-x-auto pb-1"
+          className="flex min-w-0 gap-2 overflow-x-auto pb-1 xl:flex-1"
         >
           {SALES_TABS.map((tab) => {
             const active = activeView === tab.id;
@@ -109,7 +110,7 @@ export function SalesOrderListFilters({
         <form
           action="/orders"
           role="search"
-          className="flex min-w-0 flex-1 items-center gap-2 lg:ml-auto lg:max-w-sm"
+          className="flex w-full min-w-0 items-center gap-2 xl:ml-auto xl:w-72 xl:shrink-0"
         >
           {query.view ? (
             <input type="hidden" name="view" value={query.view} />

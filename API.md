@@ -189,7 +189,7 @@ pnpm test --run
 
 - 创建动作成功响应的可选 `readyForProduction` 表示是否已进入待下发，用于成功页提示；未提供时不得视为可生产。
 - `submitOrder`、人工核价及管理员保存/修改审批完成后，在原事务自动检查保存价与生产事实；完整订单返回或进入 `CONFIRMED`（待下发），不提前创建生产/打印任务。异常订单保留待处理。
-- `releaseFactoryOrderAction` 与批量 `RELEASE_AND_CREATE_PRINT` 接受满足准备校验的 `PENDING_FACTORY / SUBMITTED` 存量单，在单一事务完成准备、下发和首次打印；仍限 ADMIN，保留 revision、workOrderVersion、幂等键检查。
+- `releaseFactoryOrderAction` 与批量 `RELEASE_AND_CREATE_PRINT` 接受满足准备校验的 `PENDING_FACTORY / SUBMITTED` 存量单。单张工单界面传 `createPrint: false`，事务仅完成准备和下发，不读取或创建打印任务；省略该可选布尔值时保留组合下发与首次打印行为，供现有批量调用使用。仍限 ADMIN，保留 revision、workOrderVersion、请求键校验；独立下发不使用打印任务作为重放凭证，过期版本按原规则拒绝，需刷新核对后再操作。领域结果 `printJobId` 在不创建打印时为 null。
 - `confirmFactoryOrderAction` 保留兼容：使用已保存费用进入待下发；`expectedQuoteToken` 仅为旧请求兼容字段，不触发最新目录报价，工单版本仍须匹配。新 UI 不再展示独立确认步骤。
 - 下发不形成财务结算；后续费用沿用既有更正接口，已结算记录不能覆盖。
 
@@ -202,6 +202,102 @@ pnpm test --run
 ### Next.js 路由模块边界
 
 `route.ts` 仅导出 HTTP 方法与 Next.js 路由配置。可测试的处理函数放在相邻 `handler.ts`，仍由 `route.ts` 中的 `auth(handler)` 包装；权限、资源范围和 HTTP 地址保持不变。
+
+### 逐地址发货登记
+
+`registerShipmentAction(FormData)` 仅允许具有 `order:ship` 权限的管理员，领域层再次检查管理员身份及地址所属工单。参数：`orderId`、`shipmentId`、`expectedVersion`（地址登记版本）、工单的 `expectedRevision/expectedEditVersion/expectedWorkOrderVersion/expectedPriceRevision`、UUID `idempotencyKey`、`trackingNo`、`carrierCode`（空/ZTO/SF/OTHER）、`carrierName`、`confirm`（true/false），可选 `photo` 文件。返回 `{ok,message}`，不返回内部错误。
+
+保存资料不改变发货状态；确认要求完整运单及承运商、完工、已确认费用、无待审变更和未完成外协。最后一票复用整单发货及 v2 结算服务，二者和地址、图片、审计记录在同一事务提交；若发货核算改变已确认金额，整个确认回滚，须先完成物流费用复核。重复 UUID 同内容直接返回已保存，不重复结算；不同内容拒绝。
+
+`GET /api/orders/[id]/shipments/[shipmentId]/labels/[labelId]`：校验当前有效登录状态及工单可见范围，三个 ID 必须属于同一资源链。200 返回 JPEG（private/no-store、nosniff）；未登录 401；不存在或越权 404。图片不使用公开 URL，替换后旧图仍能从历史面单查看。
+
+### 管理员工单动态分页
+
+`actions/order-activity.ts` 的 `loadOrderActivity(input)` 为只读 Server Action。每次请求先要求 `order:view:all`，再校验 `orderId`（1–128 字符）和 `cursor: { at: ISO UTC 时间, id: 1–128 字符 }`；领域查询再次限制管理员与工单可见范围。
+
+按 `createdAt DESC, id DESC` 查询游标之前的记录，每页最多 20 条，额外读取 1 条判定是否存在下一页。成功返回 `{ ok: true, page: { events, nextCursor } }`，无下一页时 `nextCursor` 为 `null`；无效参数、工单不存在/不可访问返回 `{ ok: false, message }`。权限失败由授权入口拒绝。界面对网络或服务异常仅显示重试提示，不展示异常堆栈。
+
+`events` 仅包含展示所需的操作标题、时间、人员、备注和已格式化变更；不返回原始 `changedFields` 或内部报价修订标识。首屏使用同一领域查询；非管理员详情继续使用原有授权裁剪结果，不使用该分页入口。查询不修改审计记录或财务数据。
+
+### 管理员添加发货地址
+
+`actions/order-shipment.ts:addOrderShipmentAction(payload, mode)`：权限
+`order:update:post-schedule`，领域层再次限定 ADMIN。`mode` 为 `preview` 或
+`save`；预览只读，保存必须提交预览返回的 `previewToken`。
+
+输入包含 `orderId`、`sourceShipmentId`、`expectedRevision`、
+`expectedEditVersion`、`expectedWorkOrderVersion`、`expectedPriceRevision`，
+新地址的 `receiverName / receiverPhone / receiverAddress / destinationProvince`，
+以及 `lines: { orderItemId, quantity }[]`。新地址的 `shippingFee`、
+`packingMaterialFee` 可选，填写时必须有 `overrideReason`，仅适用于已提交的
+外部销售工单。返回 `preview`（原总额、新总额、差额、各地址费用）、`saved`
+或 `error`。
+
+保存使用工单级锁及数据库行锁，在同一事务内分货、增加地址、更新物流应收、
+追加价格修订与操作日志。最多 10 个地址，原地址至少保留一件；拒绝跨工单
+款式/地址、超分配、待审批、已发货、已结算及来源地址已有物流登记的请求。
+外部销售沿用原物流价目，保留原地址人工确认金额及历史证据；新金额进入待核价。
+外部销售草稿按原流程在提交时物化费用，内部结算保持原有不产生物流应收的规则。
+
+
+### 外部销售建单备注与额外地址（2026-09-12）
+
+`createOrderAction` 的外部销售输入继续使用订单级 `remark`，选填、去除首尾空白后最多 1000 字，保留换行。
+每个 `additionalShipments` 的 `receiverName` 与 `receiverPhone` 均为必填，缺失时返回对应地址及字段错误；
+不得只验证主地址。金额、报价令牌及分货数量约束不变。
+
+### 顺丰到付切换失败与待审批保护（2026-09-12）
+
+`setOrderSfCollectAction` 保留权限、所有权、状态及履约版本校验。存在待审批申请时，
+领域层拒绝切换配送方式，避免改变申请所依据的报价；销售详情同步隐藏入口。
+业务校验失败返回 `{ status: 'error', message }`；非预期持久化异常返回
+`配送方式更新失败，请刷新后重试`，由当前表单展示，不能导致整页错误边界。
+日志只记录操作、工单 ID 和异常类型，不返回数据库细节。失败不失效页面缓存。
+
+### 销售详情只读投影（2026-09-12）
+
+`getSalesOrderDetailById` 继续限定 SALES 和本人工单；新增持久化款式事实的展示投影、
+快递名称及发货时间，多地址费用标注地址编号。设计文件签名及源文件下载权限不变。
+申请记录不再输出无展示用途的生产前后版本；现有操作所需的顶层版本字段继续用于并发校验。
+管理员保存已失效详情路径，销售“刷新”重新请求当前角色的详情，不修改工单或核价记录。
+
+### 销售列表视图与申请类型（2026-09-12）
+
+销售 `/orders` 新增 `view=cancelled`（仅已取消）；`view=done` 只包含 SETTLED / FINISHED。
+汇总新增 `cancelled`，与筛选使用相同状态范围；所有查询仍在本人工单范围内执行。
+`view=todo` 查询条件不变，界面名称为“需关注”，属于进行中工单的交叉筛选。
+列表及 `GET /api/orders/sales/[orderNo]` 的待审核/被拒申请投影增加 `type`（MODIFY / CANCEL），
+用于区分修改申请和取消申请；不增加写入权限或内部字段。
+
+### 外部销售补正与账单（2026-09-12）
+
+- 建单客户选项使用 `listSalesCustomerOptions`：以 session 销售 ID 限制 `Party.customerOrders.some.submitterId`，仅返回 ID、编码、名称、简称。客户联系人、电话和地址不进入该投影。建单和编辑写入同时校验客户范围，管理员原权限不变。
+- 销售工单详情及编辑共同使用 `getSalesOrderDetailById` 的显式查询与序列化；通用 `getOrderDetail` 不再用于销售编辑。工单自身收件信息继续可见，内部改价说明、成本及生产记录不进入销售 DTO。
+- `cancelOrderAction` 允许 ADMIN / SALES。SALES 必须提交 `expectedEditVersion` 和取消原因；领域事务再次校验所有权、版本、无待审申请及 DRAFT / PENDING_FACTORY / REJECTED 状态。已确认订单仍走审批取消；ON_HOLD 通过已保存暂停决定还原原生产阶段后校验取消申请和结算。
+- `submitOrderAction` 支持 REJECTED 补正重提：禁止待审申请、缺图或失效报价；重新计算并确认报价，回到 PENDING_FACTORY 由工厂复核。补正通知使用独立去重键。
+- 图稿登记与删除只开放 DRAFT / REJECTED；驳回补正在工单锁内增加业务/编辑版本，操作记录保存文件前后标识、类型、URL 和大小，旧 OSS 对象不删除。确认/生产/暂停期间不能直接换稿。
+- `/sales/bills`、详情与标题均读取 `AgentMonthlyBill`，以当前销售 ID 限定归属；金额和明细来自月账单自身保存值，草稿不计入待支付。销售入口不再读取旧 `Bill`；管理端历史归档不变。
+- 销售详情返回当前驳回/暂停原因、说明、受影响款号和时间；不暴露执行人及恢复内部证据。有包装组时不提供新增款式入口，服务端原拒绝校验保留。
+
+### 销售编辑页新增收货地址（2026-09-12）
+
+`addOrderShipmentAction` 使用 `order:create` 入口权限；领域层仅允许管理员或工单本人销售，销售传入人工运费、纸箱费或改价说明一律拒绝。销售复用预览→确认保存协议：从未登记物流的已有票分货，数量守恒，自动核算物流费用，校验业务/编辑/生产/价格版本及预览令牌，原子更新地址、分货、报价与审计。已发货、已结算、有待审申请及超过10票仍拒绝。
+
+销售编辑使用同一销售详情白名单，额外投影可新增/可分货布尔能力，不向客户端传递原始重量或物流登记内部字段；独立新增地址表单与未保存的编辑表单互斥。编辑页“已保存的基本信息”展示当前数据库工单的承诺交期及配送方式，不代表尚未保存的表单草稿。
+
+### 销售非计价文字编辑（字段对照 F18）
+
+`editSalesTextAction` 只接收目标工单、目标款式、`itemName`、文字值及编辑版本。仅本人销售可用，在工单锁内检查所有权、目标归属、可编辑状态、待审批申请与版本；只更新名称、业务/编辑版本和审计，不写价格、生产版本或审批状态。普通空名称被拒绝，管理员通过原管理编辑入口处理。
+
+F47：同一文字编辑入口增加 `itemRemark`，最多1000字符，空字符串明确清空为 null；不修改款式名称和费用，其他锁与审计相同。
+
+F48：同一入口增加 `packagingName`，仅更新该工单所属包装组名称，允许清空；不改变 mode、actualBagCount、成员组成、入袋费或报价。款式文字及包装组文字可在非终态、无待审申请时直接保存；工单名称的确认后锁定保持不变。
+
+### 内部款式备注与客服配送补齐（2026-09-12）
+
+- `editItemRemarkAction(orderId, itemId, previous, formData)`：要求 `order:create`；领域层仅允许管理员及该工单的客服创建者。接收 `expectedEditVersion` 与最长 1000 字的 `remark`，统一换行符为 LF，空白清空为 null；待审批和不可编辑状态拒绝。校验款式归属，事务内保存备注、推进编辑/业务版本并记审计；不改变金额、价格版本、纸质工单版本或生产数据。返回 `success`、带 `fieldErrors` 的 `invalid` 或业务 `error`。
+- `addOrderShipmentAction` 沿用既有预览凭证与四版本校验，新增允许客服对本人创建的工单调用；客服和销售均不可传人工物流费用。其他分货、物流登记、已结算和收费历史限制保持不变。
+- 共享修改申请表单支持既有款式 `pack`（每袋数量），只在领域允许的未生产阶段、且款式有唯一包装明细时提供输入。它仍经过修改申请、计价预检与管理员审批，不通过基础资料保存直接改包装或金额。
 
 ### 发布整改后的认证与表单契约（2026-09-11）
 

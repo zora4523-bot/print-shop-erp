@@ -81,6 +81,7 @@ export type AdminOrderWorkspaceRow = {
   editVersion?: number;
   workOrderVersion: number;
   customName: string | null;
+  remark?: string | null;
   customer: { id: string | null; name: string; filterValue: string };
   submitter: { id: string; name: string };
   status: OrderStatus;
@@ -298,6 +299,7 @@ const adminOrderSelect = {
   priceRevision: true,
   updatedAt: true,
   customName: true,
+  remark: true,
   customerRef: true,
   status: true,
   isUrgent: true,
@@ -860,6 +862,7 @@ function mapAdminOrderRow(
     editVersion: row.editVersion,
     workOrderVersion: row.workOrderVersion,
     customName: row.customName,
+    remark: row.remark,
     customer: {
       id: row.customerParty?.id ?? null,
       name: customerName,

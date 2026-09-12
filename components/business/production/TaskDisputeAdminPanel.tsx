@@ -41,9 +41,7 @@ export function TaskDisputeAdminPanel({
     <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <div>
         <h2 className="text-base font-semibold">师傅任务 / 计件异议</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          待处理 {pendingCount} 条。回复异议不会修改报工或工资；如需调整，请到对应页面处理。
-        </p>
+        {pendingCount > 0 ? <p className="mt-1 text-xs text-muted-foreground">待处理 {pendingCount} 条</p> : null}
       </div>
       {disputes.length === 0 ? (
         <p className="text-sm text-muted-foreground">暂无师傅异议</p>
@@ -139,6 +137,7 @@ function TaskDisputeReviewForm({ disputeId }: { disputeId: string }) {
           {state.message}
         </p>
       ) : null}
+      <p className="text-xs text-muted-foreground">本次只保存处理回复，不调整报工和工资。</p>
       <div className="flex flex-wrap gap-2">
         <Button
           type="submit"

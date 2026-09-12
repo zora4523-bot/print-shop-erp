@@ -78,9 +78,9 @@ export type CustomerPartyOption = {
   code: string;
   name: string;
   shortName: string | null;
-  receiverName: string | null;
-  receiverPhone: string | null;
-  receiverAddress: string | null;
+  receiverName?: string | null;
+  receiverPhone?: string | null;
+  receiverAddress?: string | null;
 };
 
 export const PARTY_LIST_SORT_KEYS = [

@@ -270,7 +270,7 @@ describe('fulfilment charge confirmation', () => {
       await expect(finalizeFulfillmentPricing({ ...input, ...guard, previewToken: preview.previewToken }, admin)).rejects.toThrow(/待确认/);
       expect(mocks.tx.order.update).not.toHaveBeenCalled();
       await recordFulfillmentSfCollectChangeInTx(mocks.tx as never, { ...input, ...guard }, sales);
-      expect(mocks.tx.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ quotedFee: '147.00', quotedFeeCompleteness: 'EXCLUDES_MANUAL_ITEMS', confirmedFee: null }) }));
+      expect(mocks.tx.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ quotedFee: '147.00', quotedFeeCompleteness: 'EXCLUDES_MANUAL_ITEMS', quotedPricingRevisionId: 'revision-6' }) }));
     } else {
       await expect(finalizeFulfillmentPricing({ ...input, ...guard, previewToken: preview.previewToken }, admin)).resolves.toMatchObject({ confirmedFee: '155.00' });
       expect(mocks.tx.orderCustomerCharge.update).toHaveBeenCalledTimes(1);
@@ -285,10 +285,24 @@ describe('fulfilment charge confirmation', () => {
     expect(result.changed).toBe(true);
     expect(mocks.tx.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ confirmedFee: null }) }));
     expect(mocks.appendRevision).toHaveBeenCalledWith(mocks.tx, expect.objectContaining({ status: 'PENDING_ADMIN_CONFIRMATION' }));
-    const update = mocks.tx.order.update.mock.calls[0]![0].data;
+    const update = Object.assign({}, ...mocks.tx.order.update.mock.calls.map(([call]) => call.data));
     expect(selectOrderCustomerFee({ ...value, ...update })).toEqual({ amount: '147.00', source: 'QUOTED', estimated: true });
-    expect(mocks.tx.order.update).toHaveBeenLastCalledWith(expect.objectContaining({ data: { quotedPricingRevisionId: 'revision-6' } }));
+    expect(mocks.tx.order.update).toHaveBeenLastCalledWith(expect.objectContaining({ data: { quotedFee: '147.00', quotedFeeCompleteness: 'COMPLETE', quotedPricingRevisionId: 'revision-6' } }));
     expect(mocks.appendRevision).toHaveBeenCalledWith(mocks.tx, expect.objectContaining({ orderFeeSnapshot: { quotedFee: '147.00', confirmedFee: null, settledFee: null } }));
+  });
+
+  it('keeps every update valid when a legacy fulfilled order has no quote tuple', async () => {
+    const value = setup(order(OrderStatus.COMPLETED));
+    mocks.tx.order.findUnique.mockResolvedValue({ ...value, quotedFee: null, quotedPricingRevisionId: null });
+    const quote: Record<string, unknown> = { quotedFee: null, quotedFeeCompleteness: null, quotedPricingRevisionId: null };
+    mocks.tx.order.update.mockImplementation(async ({ data }) => {
+      Object.assign(quote, data);
+      const present = ['quotedFee', 'quotedFeeCompleteness', 'quotedPricingRevisionId'].map((key) => quote[key] !== null);
+      expect(present.every(Boolean) || present.every((value) => !value)).toBe(true);
+      return { id: value.id };
+    });
+    await recordFulfillmentSfCollectChangeInTx(mocks.tx as never, { orderId: value.id, isSfCollect: true, ...guard }, sales);
+    expect(quote).toMatchObject({ quotedFee: '147.00', quotedPricingRevisionId: 'revision-6' });
   });
 
   it('replays the same confirmed operation without applying another correction, but rejects different content', async () => {

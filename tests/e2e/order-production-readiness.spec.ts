@@ -32,7 +32,7 @@ async function state(id: string) {
 }
 test.describe('自动准备与显式生产下发', () => {
   test.beforeEach(() => { test.skip(Boolean(productionOperationE2eIsolationFailure()), '只在隔离数据库写入新测试工单'); });
-  test('保存自动进入待下发；一次下发生成工序与打印；刷新不会重计价', async ({ page }) => {
+  test('保存自动进入待下发；下发与打印独立；刷新不会重计价', async ({ page }) => {
     test.setTimeout(120_000);
     const id = await fixture();
     await login(page, { from: `/orders/${id}/edit`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
@@ -48,9 +48,13 @@ test.describe('自动准备与显式生产下发', () => {
     await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.poll(async () => (await state(id)).status).toBe('RELEASED');
     const released = await state(id);
-    expect(released).toMatchObject({ operations: 2, prints: 1, readiness: 1, totalAmount: '12.30', confirmedFee: '12.30', settledFee: null });
+    expect(released).toMatchObject({ operations: 2, prints: 0, readiness: 1, totalAmount: '12.30', confirmedFee: '12.30', settledFee: null });
     await page.reload();
     expect(await state(id)).toEqual(released);
+    // 单张下发不自动打印；独立打印仍须创建当前版本任务。
+    await page.getByRole('button', { name: '加入待打印', exact: true }).click();
+    await expect.poll(async () => (await state(id)).prints).toBe(1);
+    expect(await state(id)).toEqual({ ...released, prints: 1 });
   });
   test('旧待确认单可直接下发，错误合计展示原因且没有写入', async ({ page }) => {
     test.setTimeout(120_000);
@@ -64,6 +68,6 @@ test.describe('自动准备与显式生产下发', () => {
     await page.getByRole('button', { name: '下发生产', exact: true }).click();
     await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.poll(async () => (await state(valid)).status).toBe('RELEASED');
-    expect(await state(valid)).toMatchObject({ operations: 2, prints: 1, readiness: 1, confirmedFee: '12.30' });
+    expect(await state(valid)).toMatchObject({ operations: 2, prints: 0, readiness: 1, confirmedFee: '12.30' });
   });
 });

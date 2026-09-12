@@ -142,11 +142,39 @@ describe('sales order detail query boundary', () => {
       expect.objectContaining({
         id: 'change-1',
         type: 'MODIFY',
-        baseWorkOrderVersion: 2,
-        workOrderVersionAfter: null,
         canWithdraw: true,
       }),
     ]);
+    expect(result?.changeRequests[0]).not.toHaveProperty('baseWorkOrderVersion');
+    expect(result?.changeRequests[0]).not.toHaveProperty('workOrderVersionAfter');
+  });
+
+  it('returns persisted customer configuration, carrier details and address-linked charges', async () => {
+    const record = detailRecord();
+    dbMock.order.findFirst.mockResolvedValue({
+      ...record,
+      items: [{ ...record.items[0], craft: 'PRINT', pricingRoute: 'COLOR_PRINT',
+        productStructure: 'WESTERN_ENVELOPE', actualWidthMm: '91.25', actualHeightMm: '166.50',
+        paperType: '触感纸 160g', paperWeightGsm: 160, artworkVersion: '客户确认V2',
+        foilTechnique: 'RELIEF', frontFoilColors: ['红金', '哑金'], backFoilColors: ['黑金'],
+        lamination: 'SOFT_TOUCH', printColors: ['青', '品红'], printColorsKnown: true, hasLocalFoil: true,
+        plateGroupId: 'private-plate', pricingSnapshot: { private: 'private-rule' },
+      }],
+      shipments: [record.shipments[0], { ...record.shipments[0], id: 'shipment-2', sequence: 2,
+        carrierCode: 'SF', carrierName: '顺丰速运', trackingNo: 'SF123', shippedAt: new Date('2026-09-12T03:00:00Z'),
+      }],
+      customerCharges: [{ ...record.customerCharges[0], shipment: { sequence: 2 } }],
+    });
+    const result = await getSalesOrderDetailById(actor, 'order-1');
+    expect(result?.items[0]?.details).toEqual(expect.arrayContaining([
+      { label: '实际尺寸', value: '91.25 × 166.50 mm' },
+      { label: '正面烫金', value: '红金、哑金' }, { label: '反面烫金', value: '黑金' },
+      { label: '纸张', value: '触感纸 160g' }, { label: '覆膜', value: '触感膜' },
+      { label: '彩印颜色', value: '青、品红' }, { label: '稿件版本', value: '客户确认V2' },
+    ]));
+    expect(result?.shipments[1]).toMatchObject({ carrier: '顺丰速运', trackingNo: 'SF123', shippedAt: '2026-09-12T03:00:00.000Z' });
+    expect(result?.feeLines.at(-1)?.label).toBe('地址 2 · 快递费');
+    expect(JSON.stringify(result)).not.toContain('private-');
   });
 });
 
@@ -263,3 +291,14 @@ function detailRecord() {
     ],
   };
 }
+
+it('projects the current factory reason and affected figures, dropping actor and internal recovery evidence', async () => {
+  dbMock.order.findFirst.mockResolvedValue({ ...detailRecord(), status: OrderStatus.REJECTED,
+    workflowDecisions: [{ toStatus: OrderStatus.REJECTED, reasonCode: 'DESIGN_ERROR', reasonNote: '请修正文字', affectedFigs: [1], createdAt: new Date('2026-09-12T00:00:00Z'), actorId: 'private-actor', recoveryEvidence: 'private-evidence' }] });
+  const result = await getSalesOrderDetailById(actor, 'order-1');
+  expect(result?.workflowDecision).toEqual({ reason: '设计图有误', note: '请修正文字', affectedFigs: [1], createdAt: '2026-09-12T00:00:00.000Z' });
+  expect(JSON.stringify(result)).not.toContain('private-');
+  dbMock.order.findFirst.mockResolvedValue({ ...detailRecord(), status: OrderStatus.CONFIRMED,
+    workflowDecisions: [{ toStatus: OrderStatus.REJECTED, reasonCode: 'DESIGN_ERROR' }] });
+  expect((await getSalesOrderDetailById(actor, 'order-1'))?.workflowDecision).toBeNull();
+});

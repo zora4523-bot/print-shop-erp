@@ -96,3 +96,15 @@ it('blocks connection implementation terms in notification flows without banning
   expect(inspectUiCopy('<p>后台 worker 将使用 Secret</p>', 'components/business/notification/Example.tsx')).toHaveLength(1);
   expect(inspectUiCopy('<p>worker 运行状态</p>', 'app/(admin)/owner/diagnostics/page.tsx')).toEqual([]);
 });
+
+
+it.each([
+  ['components/business/order/OrderExportControls.tsx', '由独立重任务生成，不占用 SSR 进程'],
+  ['components/business/bom/OrderMaterialUsageEstimate.tsx', '仅按当前启用 BOM 估算'],
+  ['app/(admin)/orders/[id]/page.tsx', '计件工资生成后，关联明细会显示在这里'],
+])('rejects retired order introductions in %s', (file, copy) => {
+  expect(inspectUiCopy(`<p>${copy}</p>`, file, policy).length).toBeGreaterThan(0);
+});
+it('allows required order blockers and attachment warnings', () => {
+  expect(inspectUiCopy('<p>完工后才可发货。图片和 CDR 文件不会保存在本地草稿中。</p>', 'components/business/order/OrderForm.tsx', policy)).toEqual([]);
+});

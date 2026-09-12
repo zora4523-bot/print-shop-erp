@@ -1,3 +1,4 @@
+import { externalShipmentContactIssues } from './external-shipment-contact';
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
@@ -125,6 +126,8 @@ type FinalizeOrderRow = {
   shipments: Array<{
     id: string;
     sequence: number;
+    receiverName: string | null;
+    receiverPhone: string | null;
     destinationProvince: string | null;
     weightKg: MoneyLike | null;
     lines: Array<{ orderItemId: string; quantity: number }>;
@@ -261,6 +264,8 @@ const finalizeOrderSelect = {
     select: {
       id: true,
       sequence: true,
+      receiverName: true,
+      receiverPhone: true,
       destinationProvince: true,
       weightKg: true,
       lines: { select: { orderItemId: true, quantity: true } },
@@ -685,14 +690,14 @@ async function prepareExternalOrderQuote(
   if (!order) throw new ExternalOrderQuoteFinalizeError('工单不存在');
   // A DRAFT may carry a quote produced by an approved change request. It is
   // still mutable and must revalidate live paper/catalog facts at submission.
-  if (order.quotedPricingRevisionId && order.status !== OrderStatus.DRAFT) {
+  if (order.quotedPricingRevisionId && order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
     return { kind: 'REUSE', result: resultFromExisting(order) };
   }
   if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
     throw new ExternalOrderQuoteFinalizeError('仅外部销售工单需要生成提交报价');
   }
-  if (order.status !== OrderStatus.DRAFT) {
-    throw new ExternalOrderQuoteFinalizeError('只能为草稿工单生成提交报价');
+  if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
+    throw new ExternalOrderQuoteFinalizeError('只能为草稿或驳回工单生成提交报价');
   }
   if (order.items.length === 0) {
     throw new ExternalOrderQuoteFinalizeError('工单至少需要一个款式');
@@ -700,6 +705,8 @@ async function prepareExternalOrderQuote(
   if (order.shipments.length === 0) {
     throw new ExternalOrderQuoteFinalizeError('工单至少需要一个发货地址');
   }
+  const contactIssues = externalShipmentContactIssues(order.shipments.filter((shipment) => shipment.sequence > 1));
+  if (contactIssues.length) throw new ExternalOrderQuoteFinalizeError(contactIssues.map((issue) => issue.message).join('；'));
   // Canonical lock order for every quote/catalog transaction:
   // price snapshot -> PAPER rows. Material writers already use the same order.
   await acquirePriceRuleSnapshotReadLock(tx);

@@ -65,7 +65,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 function renderList(orders = [row()]) {
-  flushSync(() => root.render(<AdminOrderWorkspaceList orders={orders} customerFilterHrefs={{ 'order-1': '/orders?customerRef=customer-a' }} selectedExportRequestKey="name-list-export" />));
+  flushSync(() => root.render(<AdminOrderWorkspaceList orders={orders} submitterFilterHrefs={{ 'order-1': '/orders?submitterId=sales-1' }} selectedExportRequestKey="name-list-export" />));
 }
 describe('admin name-first order list', () => {
   for (const [width, height] of [[375,667],[393,852],[768,1024],[1024,768],[1280,800],[1920,1080]]) {
@@ -73,12 +73,12 @@ describe('admin name-first order list', () => {
       it(`${width}x${height} ${theme}: title, selection, overflow, targets and axe`, async () => {
         await page.viewport(width, height);
         document.documentElement.classList.toggle('dark', theme === 'dark');
-        renderList([row(), { ...row(), id: 'order-2', orderNo: 'INTERNAL-SECOND', customName: '春节客户定制礼品红包'.repeat(8) }]);
+        renderList([row(), { ...row(), id: 'order-2', orderNo: 'INTERNAL-SECOND', customName: '春节客户定制礼品红包'.repeat(8), submitter: { id: 'sales-2', name: '长名称业务员'.repeat(10) } }]);
         await expect.element(page.getByRole('link', { name: '端午定制', exact: true })).toBeVisible();
         expect(host.querySelector('h2 a')?.getAttribute('href')).toBe('/orders/order-1');
         expect(host.textContent).not.toContain('GD-260902-001');
         expect(host.textContent).not.toContain('INTERNAL-SECOND');
-        expect(host.textContent).not.toContain('业务员甲');
+        expect(host.textContent).toContain('业务员甲');
         for (const label of ['局部烫金', '专版烫金', '彩印', '2099-12-31']) expect(host.textContent).toContain(label);
         expect(host.textContent).not.toContain('26777');
         await page.getByRole('checkbox', { name: '选择本页 2 项工单', exact: true }).click();

@@ -245,6 +245,7 @@ describe('admin order decisions require review before mutation', () => {
     renderOrder(order);
     await page.getByRole('button', { name: '下发生产', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: '确认下发生产', exact: true }).click();
+    expect(actions.release).toHaveBeenCalledWith(expect.objectContaining({ createPrint: false }));
     await expect.element(page.getByText('正在处理，请稍候…', { exact: true })).toBeVisible();
     finish({ status: 'error', message: '工单版本已变化，请刷新后重试。' });
     await expect.element(page.getByRole('alert')).toHaveTextContent('工单版本已变化');

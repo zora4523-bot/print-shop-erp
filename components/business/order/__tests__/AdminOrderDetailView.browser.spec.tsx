@@ -50,6 +50,7 @@ function designImage(label: string, color: string): string {
 function detailModel(overrides: Partial<AdminOrderDetailModel> = {}): AdminOrderDetailModel {
   const diffs = [{ id: 'change-qty', label: '第 2 款 · 数量', before: '1,000', after: '2,000', targetItemId: 'item-2' }];
   return {
+    remark: '先核对样稿\n再安排生产',
     id: 'detail-order-1', no: 'GD-260908-DETAIL-001', name: '中秋礼品红包', version: 2,
     status: OrderStatus.FOILING, customer: '华南礼品包装有限公司', sales: '外部销售 · 林女士',
     craft: '局部烫金 · 专版烫金', due: '2026-09-18', dueLeft: '剩 10 天', qty: 3000, isUrgent: false,
@@ -90,16 +91,8 @@ function renderDetail(model = detailModel(), canEdit = true) {
     printHint={printHint}
     decision={<div><p>当前待办：核对本版打印</p><Button type="button">核对打印任务</Button><a href="#pricing-review" className="inline-flex min-h-11 min-w-11 items-center p-3">前往核价</a></div>}
     prints={[{ id: 'print-1', version: 1, state: 'SUPERSEDED', at: '2026-09-07T02:00:00Z' }, { id: 'print-2', version: 2, state: 'PENDING', at: '2026-09-08T02:00:00Z' }]}
-    supplementary={[
-      { id: 'detail-design-files', title: '设计文件与完整工艺资料', content: <p>设计原稿与生产文件记录。</p> },
-      { id: 'detail-pricing-tools', title: '计价与收费维护', content: <Disclosure data-testid="nested-pricing"><DisclosureSummary>核价明细</DisclosureSummary><section id="pricing-review"><h3>待核价费用明细</h3></section></Disclosure> },
-      { id: 'detail-delivery-records', title: '配送与发货记录', content: <p>已保存的配送与发货记录。</p> },
-      { id: 'detail-production-records', title: '生产、用料与计件记录', content: <p>已保存的生产、用料与计件记录。</p> },
-      { id: 'detail-business-records', title: '基本信息、成本与重做', content: <p>已保存的基本信息、成本与重做记录。</p> },
-      { id: 'detail-audit-records', title: '完整变更与操作日志', content: <p>该记录来自已保存的审核结果。</p> },
-      { id: 'detail-other-actions', title: '其他工单操作', content: <Button type="button">查看操作记录</Button> },
-    ]}
-    packaging={<p>分袋明细：300 袋，每袋 10 个。</p>}
+    supplementary={[{ id: 'detail-other-actions', title: '其他工单操作', content: <div className="flex flex-wrap gap-2"><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf?view=inline`}>打印</a><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf`}>下载 PDF</a>{canEdit ? <a className="inline-flex min-h-11 items-center p-2" href={`/orders/${model.id}/edit`}>编辑工单</a> : null}<Button variant="outline" disabled>发货</Button></div> }, { id: 'detail-audit-records', title: '完整审核记录', content: <section data-testid="embedded-audit" className="rounded-xl border bg-card p-6 shadow-sm"><p>该记录来自已保存的审核结果。</p><section data-testid="nested-card" className="rounded-xl border bg-card p-4"><label htmlFor="audit-note">记录备注</label><input id="audit-note" className="block min-h-11 w-full rounded-md border bg-background" /></section></section> }, { id: 'detail-design-files', title: '设计文件管理', content: <p>设计原稿与生产文件记录。</p> }, { id: 'detail-pricing-tools', title: '计价与核价', content: <Disclosure data-testid="nested-pricing"><DisclosureSummary>核价明细</DisclosureSummary><section id="pricing-review"><h3>待核价费用明细</h3></section></Disclosure> }]}
+    packaging={<section data-testid="embedded-packaging" className="rounded-xl border bg-card p-6 shadow-sm"><p>分袋明细：300 袋，每袋 10 个。</p></section>}
   />));
 }
 
@@ -147,7 +140,7 @@ async function expectHashTargetUnobscured(target: HTMLElement) {
   expect(target.contains(hit), '标题位置应命中目标内容而非吸顶遮挡层').toBe(true);
 }
 
-const viewports = [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]] as const;
+const viewports = [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080], [2205, 1203]] as const;
 
 describe('admin order detail design and interaction gates', () => {
   for (const theme of ['light', 'dark']) {
@@ -157,13 +150,33 @@ describe('admin order detail design and interaction gates', () => {
         document.documentElement.classList.toggle('dark', theme === 'dark');
         renderDetail();
         await settleLayout();
-        const records = host.querySelectorAll<HTMLDetailsElement>('[aria-label="管理与业务记录"] > details');
-        expect(records).toHaveLength(7);
-        expect([...records].every((record) => record.open)).toBe(true);
-        expect(host.querySelector<HTMLDetailsElement>('[data-testid="nested-pricing"]')!.open).toBe(false);
-        await expect.element(page.getByText('设计原稿与生产文件记录。', { exact: true })).toBeVisible();
-        await expect.element(page.getByRole('button', { name: '查看操作记录', exact: true })).toBeVisible();
+        for (const id of ['embedded-audit', 'embedded-packaging']) {
+          const style = getComputedStyle(host.querySelector(`[data-testid="${id}"]`)!);
+          expect(style.backgroundColor, `${id} 应共用页面底色`).toBe('rgba(0, 0, 0, 0)');
+        }
+        const card = host.querySelector('[data-testid="nested-card"]')!;
+        const input = host.querySelector('#audit-note')!;
+        const reference = document.createElement('div');
+        reference.className = 'bg-card';
+        host.append(reference);
+        expect(getComputedStyle(card).backgroundColor).toBe(getComputedStyle(reference).backgroundColor);
+        expect(getComputedStyle(card).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+        reference.className = 'bg-background';
+        expect(getComputedStyle(input).backgroundColor).toBe(getComputedStyle(reference).backgroundColor);
+        expect(getComputedStyle(input).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+        reference.remove();
         expect(geometryFailures(host, width)).toEqual([]);
+        const surface = host.querySelector<HTMLElement>('[data-testid="admin-order-detail"]')!;
+        const actions = document.getElementById('order-detail-actions')!;
+        expect(actions.querySelector('#detail-other-actions')).not.toBeNull();
+        expect(host.querySelectorAll('#detail-other-actions')).toHaveLength(1);
+        expect(host.textContent).not.toContain('其他工单操作');
+        const itemsHeading = document.getElementById('order-detail-items-title')!;
+        if (width === 2205) expect(surface.getBoundingClientRect().width).toBeGreaterThanOrEqual(1700);
+        if (width <= 960) expect(actions.getBoundingClientRect().top).toBeLessThan(itemsHeading.getBoundingClientRect().top);
+        for (const link of host.querySelectorAll<HTMLAnchorElement>('nav[aria-label="工单区块导航"] a')) expect(document.getElementById(link.hash.slice(1))).not.toBeNull();
+        expect(document.getElementById('order-detail-overview')?.textContent).toContain('业务员：');
+        expect(document.getElementById('order-detail-fees')!.compareDocumentPosition(document.getElementById('order-history-records')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(host.textContent).not.toMatch(/¥\s*¥/);
         await expect.element(page.getByText('¥ 570.00', { exact: true }).first()).toBeVisible();
         expect(await commands.checkShellAccessibility('[data-testid="order-detail-fixture"]')).toEqual([]);
@@ -178,7 +191,7 @@ describe('admin order detail design and interaction gates', () => {
     await page.viewport(1280, 900);
     renderDetail();
     const records = document.getElementById('detail-audit-records') as HTMLDetailsElement;
-    await page.getByText('完整变更与操作日志', { exact: true }).click();
+    await page.getByText('完整审核记录', { exact: true }).click();
     expect(records.open).toBe(false);
     const thumbnail = page.getByRole('button', { name: '查看第 1 款设计图', exact: true });
     await thumbnail.click();
@@ -221,7 +234,7 @@ describe('admin order detail design and interaction gates', () => {
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     renderDetail();
     const records = document.getElementById('detail-audit-records') as HTMLDetailsElement;
-    await page.getByText('完整变更与操作日志', { exact: true }).click();
+    await page.getByText('完整审核记录', { exact: true }).click();
     expect(records.open).toBe(false);
     await expect.element(page.getByRole('heading', { name: '中秋礼品红包', exact: true })).toBeVisible();
     expect(host.querySelector<HTMLElement>('[aria-label="复制工单号"]')!.checkVisibility()).toBe(false);
@@ -239,22 +252,18 @@ describe('admin order detail design and interaction gates', () => {
     expect(target).not.toBeNull();
     await expect.poll(() => target!.getBoundingClientRect().top).toBeLessThan(852);
     expect(target!.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
-    const records = host.querySelectorAll<HTMLDetailsElement>('[aria-label="管理与业务记录"] > details');
-    expect(records).toHaveLength(7);
-    for (const record of records) {
-      const summary = page.getByText(record.querySelector('summary')!.textContent!, { exact: true });
-      expect(record.open).toBe(true);
-      await summary.click();
-      expect(record.open).toBe(false);
-      await expect.element(summary).toHaveFocus();
-      await userEvent.keyboard('{Enter}');
-      expect(record.open).toBe(true);
-      await userEvent.keyboard(' ');
-      expect(record.open).toBe(false);
-      await summary.click();
-      expect(record.open).toBe(true);
-    }
-    expect(host.querySelector<HTMLDetailsElement>('[data-testid="nested-pricing"]')!.open).toBe(false);
+    const details = [...host.querySelectorAll('details')].find((element) => element.querySelector('summary')?.textContent?.includes('完整审核记录'));
+    expect(details).toBeDefined();
+    expect(details!.open).toBe(true);
+    await page.getByText('完整审核记录', { exact: true }).click();
+    expect(details!.open).toBe(false);
+    await expect.element(page.getByText('完整审核记录', { exact: true })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(details!.open).toBe(true);
+    await userEvent.keyboard(' ');
+    expect(details!.open).toBe(false);
+    await page.getByText('完整审核记录', { exact: true }).click();
+    expect(details!.open).toBe(true);
     await expect.element(page.getByText('该记录来自已保存的审核结果。', { exact: true })).toBeVisible();
     expect(geometryFailures(host, 393)).toEqual([]);
   });
@@ -269,7 +278,9 @@ describe('admin order detail design and interaction gates', () => {
     }), false);
     await settleLayout();
     expect(host.textContent).toMatch(/未记录款式|暂无款式/);
-    expect(host.textContent).toMatch(/暂无变更/);
+    // The supplied audit section owns history; do not duplicate an empty feed.
+    expect(host.textContent).not.toMatch(/暂无变更/);
+    expect(host.textContent).toContain('该记录来自已保存的审核结果。');
     expect(host.textContent).toMatch(/暂无报工|生产开始后|尚无报工/);
     expect(host.textContent).toMatch(/未填写收货|暂无配送|未记录配送/);
     expect(host.textContent).toMatch(/¥\s*0\.00/);
@@ -309,7 +320,7 @@ describe('admin order detail design and interaction gates', () => {
     renderDetail();
     const files = document.getElementById('detail-design-files') as HTMLDetailsElement;
     expect(files.open).toBe(true);
-    await page.getByText('设计文件与完整工艺资料', { exact: true }).click();
+    await page.getByText('设计文件管理', { exact: true }).click();
     expect(files.open).toBe(false);
     await page.getByRole('button', { name: '查看设计文件', exact: true }).first().click();
     expect(files.open).toBe(true);
@@ -342,7 +353,7 @@ describe('admin order detail design and interaction gates', () => {
     await settleLayout();
     const outer = document.getElementById('detail-pricing-tools') as HTMLDetailsElement;
     expect(outer.open).toBe(true);
-    await page.getByText('计价与收费维护', { exact: true }).click();
+    await page.getByText('计价与核价', { exact: true }).click();
     expect(outer.open).toBe(false);
     location.hash = '#pricing-review';
     await expect.poll(() => outer.open).toBe(true);
@@ -362,7 +373,7 @@ describe('admin order detail design and interaction gates', () => {
     expect(outer.open && inner.open).toBe(true);
     expect(location.hash).toBe('#pricing-review');
     await page.getByText('核价明细', { exact: true }).click();
-    await page.getByText('计价与收费维护', { exact: true }).click();
+    await page.getByText('计价与核价', { exact: true }).click();
     expect(outer.open || inner.open).toBe(false);
     await page.getByRole('link', { name: '前往核价', exact: true }).click();
     expect(outer.open).toBe(true);

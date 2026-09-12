@@ -772,7 +772,7 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
     ).toBeVisible();
   }
   await expect(workspace.getByLabel('搜索工单')).toBeVisible();
-  await expect(workspace.getByLabel('按客户筛选')).toBeVisible();
+  await expect(workspace.getByLabel('按产品客户筛选')).toBeVisible();
   await expect(workspace.getByLabel('按业务员筛选')).toBeVisible();
   await expect(workspace.getByLabel('按工艺线筛选')).toBeVisible();
 
@@ -1217,7 +1217,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   );
   await expect(filters).toBeVisible();
   const views = filters.getByRole('navigation', { name: '销售工单视图' });
-  for (const label of ['全部', '需处理', '进行中', '已发货', '已完成', '草稿']) {
+  for (const label of ['全部', '需关注', '进行中', '已发货', '已完成', '已取消', '草稿']) {
     await expect(views.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
   }
   await expect(
@@ -1231,7 +1231,8 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   const card = list.locator(`[data-sales-order-card][data-order-id="${data.orderId}"]`);
   await expect(card).toHaveCount(1);
   await expect(card).toContainText(longOrderName);
-  const action = card.getByRole('button', { name: /查看详情|查看原因/ });
+  await expect(card.getByRole('link', { name: /查看详情|查看草稿|查看原因/ })).toHaveAttribute('href', `/orders/${data.orderId}`);
+  const action = card.getByRole('button', { name: longOrderName, exact: true });
   await expect(action).toBeVisible();
   await expect(card).not.toContainText('计件成本');
   await expect(card).not.toContainText('师傅');
@@ -1245,7 +1246,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   await expect(drawer.getByRole('heading', { name: `工单明细： ${longOrderName}`, exact: true })).toBeVisible();
   await expect(drawer).not.toContainText('计件成本');
   await expect(drawer).not.toContainText('生产任务');
-  await expect(drawer.getByRole('link', { name: '完整详情' })).toHaveCount(0);
+  await expect(drawer.getByRole('link', { name: '查看完整详情', exact: true })).toHaveAttribute('href', `/orders/${data.orderId}`);
   await expect(drawer.getByRole('link', { name: '下载 PDF' })).toHaveCount(0);
   if ((page.viewportSize()?.width ?? 0) < 640) {
     const drawerBox = await drawer.boundingBox();
@@ -1352,16 +1353,17 @@ async function prepareOrderDetailDesignPreview(
   page: Page,
   data: WorkerUiFixture,
 ) {
-  const records = page.getByRole('region', { name: '管理与业务记录', exact: true });
-  await expect(records.locator(':scope > details')).toHaveCount(7);
+  // 管理区块按业务顺序嵌入主栏，操作集中在待办栏（docs/ui-规范.md）。
+  const records = page.getByTestId('admin-order-detail');
+  await expect(records).toBeVisible();
+  await expect(records.locator('details[id^="detail-"]:not([id^="detail-design-item-"])')).toHaveCount(6);
   const sections = [
     ['detail-design-files', '设计文件与完整工艺资料'],
     ['detail-pricing-tools', '计价与收费维护'],
     ['detail-delivery-records', '配送与发货记录'],
     ['detail-production-records', '生产、用料与计件记录'],
     ['detail-business-records', '基本信息、成本与重做'],
-    ['detail-audit-records', '完整变更与操作日志'],
-    ['detail-other-actions', '其他工单操作'],
+    ['detail-audit-records', '工单动态'],
   ] as const;
   for (const [id, title] of sections) {
     const section = records.locator(`#${id}`);
@@ -1381,7 +1383,8 @@ async function prepareOrderDetailDesignPreview(
   await expect(records.locator('#detail-delivery-records').getByRole('heading', { name: '发货地址（1）', exact: true })).toBeVisible();
   await expect(records.locator('#detail-production-records').getByRole('heading', { name: '物料用量估算', exact: true })).toBeVisible();
   await expect(records.locator('#detail-business-records').getByRole('heading', { name: '基本信息', exact: true })).toBeVisible();
-  await expect(records.locator('#detail-audit-records').getByRole('heading', { name: '修改日志', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-audit-records').getByRole('region', { name: '操作事件', exact: true })).toBeVisible();
+  await expect(records.getByRole('complementary', { name: '工单概览与操作' }).locator('#detail-other-actions')).toBeVisible();
   await expect(records.locator('#detail-other-actions').getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);
 
   // The current detail contract keeps the style name, quantity, materials and
@@ -1545,13 +1548,13 @@ async function prepareAdminOrderCreationState(page: Page) {
     .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
   await form
     .getByRole('textbox', {
-      name: '配置外项目说明（转人工核价）',
+      name: '需人工核价的要求（选填）',
       exact: true,
     })
     .fill('客户要求追加配置外特殊工艺，请工厂确认环节人工核价并保留完整客需说明。');
 
   await form
-    .getByRole('button', { name: '增加收货地址', exact: true })
+    .getByRole('button', { name: '添加地址 2', exact: true })
     .click();
   await form
     .locator('textarea[name="additionalShipments.0.receiverAddress"]')
@@ -1560,7 +1563,7 @@ async function prepareAdminOrderCreationState(page: Page) {
     .locator('input[name="additionalShipments.0.itemQuantities.0"]')
     .fill('100');
   await expect(
-    form.getByRole('heading', { name: '额外地址 1', exact: true }),
+    form.getByRole('heading', { name: '地址 2', exact: true }),
   ).toBeVisible();
 }
 

@@ -324,13 +324,10 @@ function PlateDetailEditor({
   detail: PlateDetail | null;
 }) {
   const [name, setName] = useState(detail?.name ?? '');
-  const [plateGroupId, setPlateGroupId] = useState(
-    detail?.plateGroupId ?? '',
-  );
-  const [specification, setSpecification] = useState(
-    detail?.specification ?? '',
-  );
-  const [quantity, setQuantity] = useState(String(detail?.quantity ?? 1));
+  // Existing rows retain their billing quantity and production metadata.
+  const plateGroupId = detail?.plateGroupId ?? '';
+  const specification = detail?.specification ?? '';
+  const quantity = String(detail?.quantity ?? 1);
   const [unitPrice, setUnitPrice] = useState(detail?.unitPrice ?? '');
   const [remark, setRemark] = useState(detail?.remark ?? '');
   const [removeReason, setRemoveReason] = useState('');
@@ -345,17 +342,13 @@ function PlateDetailEditor({
   const [savePending, startSave] = useTransition();
   const [deletePending, startDelete] = useTransition();
   const dirty = (!detail || detail.isActive) && (
-    name !== (detail?.name ?? '') || plateGroupId !== (detail?.plateGroupId ?? '') ||
-    specification !== (detail?.specification ?? '') || quantity !== String(detail?.quantity ?? 1) ||
+    name !== (detail?.name ?? '') ||
     unitPrice !== (detail?.unitPrice ?? '') || remark !== (detail?.remark ?? '') || removeReason !== ''
   );
   const auxiliary = useOrderEditorAuxiliary({ dirty, pending: savePending || deletePending });
   const disabled = auxiliary.blocked || savePending || deletePending;
   function resetDraft() {
     setName(detail?.name ?? '');
-    setPlateGroupId(detail?.plateGroupId ?? '');
-    setSpecification(detail?.specification ?? '');
-    setQuantity(String(detail?.quantity ?? 1));
     setUnitPrice(detail?.unitPrice ?? '');
     setRemark(detail?.remark ?? '');
     setRemoveReason('');
@@ -391,41 +384,18 @@ function PlateDetailEditor({
         </p>
         {Number.isFinite(calculatedAmount) ? (
           <span className="font-sans text-xs tabular-nums">
+            {Number(quantity) > 1 ? `数量 ${quantity} · ` : null}
             金额 {formatMoneyPlain(calculatedAmount)} 元
           </span>
         ) : null}
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-xs">
           <span>制版名称</span>
           <Input
             value={name}
             maxLength={120}
             onChange={(event) => setName(event.target.value)}
-          />
-        </label>
-        <label className="space-y-1 text-xs">
-          <span>版组 ID</span>
-          <Input
-            value={plateGroupId}
-            maxLength={64}
-            onChange={(event) => setPlateGroupId(event.target.value)}
-          />
-        </label>
-        <label className="space-y-1 text-xs">
-          <span>规格</span>
-          <Input
-            value={specification}
-            maxLength={120}
-            onChange={(event) => setSpecification(event.target.value)}
-          />
-        </label>
-        <label className="space-y-1 text-xs">
-          <span>数量</span>
-          <Input
-            inputMode="numeric"
-            value={quantity}
-            onChange={(event) => setQuantity(event.target.value)}
           />
         </label>
         <label className="space-y-1 text-xs">
@@ -436,7 +406,7 @@ function PlateDetailEditor({
             onChange={(event) => setUnitPrice(event.target.value)}
           />
         </label>
-        <label className="space-y-1 text-xs lg:col-span-3">
+        <label className="space-y-1 text-xs sm:col-span-2">
           <span>备注</span>
           <Textarea
             value={remark}
@@ -546,9 +516,6 @@ export function OrderCommercialDetailsManager({
     <section className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <div>
         <h2 className="text-base font-semibold">制版明细与其他费用</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          增改或移除后会自动重算工单总额。
-        </p>
         {hasActiveEditor ? <p className="mt-1 text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}
       </div>
 
@@ -572,7 +539,6 @@ export function OrderCommercialDetailsManager({
 
       <div className="space-y-3 border-t pt-4">
         <h3 className="text-sm font-semibold">按款式制版明细</h3>
-        <p className="text-sm text-muted-foreground">版费默认 0 元；需要收费时，由管理员添加制版明细。</p>
         {allowPlateDetailMaintenance ? (
           <ol className="space-y-4">
             {items.map((item) => (

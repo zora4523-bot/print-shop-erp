@@ -45,6 +45,7 @@ type Props = {
   externalSalesAssociation?: OrderExternalSalesAssociation;
   shipments?: readonly EditableShipment[];
   isExternalSales?: boolean;
+  hideCustomerFields?: boolean;
   isSfCollect?: boolean;
   blocked?: boolean;
   busy?: boolean;
@@ -74,6 +75,7 @@ export function EditOrderForm({
   externalSalesAssociation,
   shipments,
   isExternalSales = false,
+  hideCustomerFields = false,
   isSfCollect = false,
   blocked = false,
   busy = false,
@@ -203,7 +205,7 @@ export function EditOrderForm({
       )}
 
       <OrderBasicFieldsSection {...{
-        designLayout, isExternalSales, isShippingOnly, pendingLocked,
+        designLayout, isExternalSales, hideCustomerFields, isShippingOnly, pendingLocked,
         initial, state, customerRef, setCustomerRef,
         externalSalesAssociation, customerId, setCustomerId, unknownCustomer,
         customers, selectedCustomer, delivery, designFields,
@@ -455,6 +457,7 @@ function OrderDeliveryFieldsSection({
 type RenderOrderBasicFieldsOptions = {
   designLayout: boolean;
   isExternalSales: boolean;
+  hideCustomerFields: boolean;
   isShippingOnly: boolean;
   pendingLocked: boolean;
   initial: EditOrderInitialValues;
@@ -476,6 +479,7 @@ type RenderOrderBasicFieldsOptions = {
 function OrderBasicFieldsSection({
   designLayout,
   isExternalSales,
+  hideCustomerFields,
   isShippingOnly,
   pendingLocked,
   initial,
@@ -509,7 +513,7 @@ function OrderBasicFieldsSection({
           initial={initial.customName}
           errors={fieldErrors(state, 'customName')}
         />
-        <Field
+        {!hideCustomerFields && <Field
           name="customerRef"
           label="客户名称/简称（选填）"
           disabled={pendingLocked || (FULL_ONLY_FIELDS.has('customerRef') && isShippingOnly)}
@@ -518,8 +522,8 @@ function OrderBasicFieldsSection({
           onValueChange={setCustomerRef}
           maxLength={64}
           errors={fieldErrors(state, 'customerRef')}
-        />
-        {externalSalesAssociation ? (
+        />}
+        {hideCustomerFields ? null : externalSalesAssociation ? (
           <OrderExternalSalesField
             association={externalSalesAssociation}
             disabled={pendingLocked || isShippingOnly}

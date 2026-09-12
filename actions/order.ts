@@ -245,7 +245,13 @@ export async function cancelOrderAction(
   }
 
   try {
-    await cancelOrder(orderId, actor, parsed.data.reason);
+    const version = formData.get('expectedEditVersion');
+    if (actor.role === 'SALES') {
+      if (typeof version !== 'string' || !/^\d+$/.test(version)) return { status: 'error', message: '请刷新工单后重新取消' };
+      await cancelOrder(orderId, actor, parsed.data.reason, new Date(), Number(version));
+    } else {
+      await cancelOrder(orderId, actor, parsed.data.reason);
+    }
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
@@ -549,7 +555,11 @@ export async function setOrderSfCollectAction(
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
     }
-    throw err;
+    console.error('[order:sf-collect] unexpected failure', {
+      orderId,
+      name: err instanceof Error ? err.name : typeof err,
+    });
+    return { status: 'error', message: '配送方式更新失败，请刷新后重试' };
   }
 
   revalidatePath('/orders');

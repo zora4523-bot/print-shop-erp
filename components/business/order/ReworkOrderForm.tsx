@@ -4,6 +4,7 @@ import {
   useActionState,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from 'react';
@@ -15,6 +16,7 @@ import { ReworkCause } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 
 type CraftOption = {
   id: string;
@@ -56,11 +58,13 @@ function parsedUnitsPerBag(value: string | undefined): number | undefined {
 
 export function ReworkOrderForm({ sourceOrderId, items }: Props) {
   const router = useRouter();
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
   const [state, action] = useActionState<
     CreateReworkOrderMutationResult | null,
     unknown
   >(createReworkOrderAction, null);
   const [pending, startTransition] = useTransition();
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [cause, setCause] = useState<ReworkCause>(ReworkCause.QUALITY);
   const [reason, setReason] = useState('');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(
@@ -127,6 +131,11 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending || !canSubmit) return;
+    setConfirmOpen(true);
+  }
+
+  function submitRework() {
     if (pending || !canSubmit) return;
     const payload = {
       sourceOrderId,
@@ -297,12 +306,15 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={pending || !canSubmit}>
+        <Button ref={submitButtonRef} type="submit" disabled={pending || !canSubmit}>
           {pending ? '创建中…' : `创建重做单（${selectedCount} 款）`}
         </Button>
-        <span className="text-xs text-muted-foreground">
-          重做单不计客户应收，但生产任务仍正常记录师傅工资。
-        </span>
+        <ConfirmActionController level="L2" focusReturnRef={submitButtonRef} open={confirmOpen} onOpenChange={setConfirmOpen} disabled={pending || !canSubmit} onConfirm={submitRework}>
+          <ConfirmActionDialog action="创建重做单"
+            changes={items.filter((item) => selectedItems.has(item.id)).map((item) => ({ label: `第 ${item.sequence} 款重做数量`, old: '未创建', new: `${quantities[item.id]} 个` }))}
+            consequences={['创建关联重做工单，不新增客户应收，生产任务正常记录师傅工资。', '原工单状态、应收账单和历史工资保持不变。']}
+            confirmText="确认创建" />
+        </ConfirmActionController>
       </div>
     </form>
   );

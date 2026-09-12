@@ -7,6 +7,7 @@ const { dbMock, txMock, headMock, ossCtorMock } = vi.hoisted(() => {
     orderItem: { findFirst: vi.fn() },
     orderItemDesign: { create: vi.fn(), delete: vi.fn(), findUnique: vi.fn() },
     orderLog: { create: vi.fn() },
+    order: { update: vi.fn() },
   };
   return {
     txMock: tx,
@@ -111,7 +112,7 @@ describe('assertCanUploadDesign', () => {
       draftItem({ status: OrderStatus.SUBMITTED }),
     );
     await expect(assertCanUploadDesign('o1', 'i1', salesActor)).rejects.toThrow(
-      /草稿状态/,
+      /草稿或驳回状态/,
     );
 
     dbMock.orderItem.findFirst.mockResolvedValue(
@@ -159,7 +160,7 @@ describe('recordOrderItemDesign', () => {
     );
     await expect(
       recordOrderItemDesign(baseInput, salesActor, configuredEnv),
-    ).rejects.toThrow(/草稿状态/);
+    ).rejects.toThrow(/草稿或驳回状态/);
     expect(txMock.orderItemDesign.create).not.toHaveBeenCalled();
   });
 
@@ -272,7 +273,7 @@ describe('removeOrderItemDesign', () => {
       designRow({ status: OrderStatus.SUBMITTED }),
     );
     await expect(removeOrderItemDesign('d1', salesActor)).rejects.toThrow(
-      /草稿状态/,
+      /草稿或驳回状态/,
     );
 
     txMock.orderItemDesign.findUnique.mockResolvedValue(
@@ -282,5 +283,26 @@ describe('removeOrderItemDesign', () => {
       /自己创建/,
     );
     expect(txMock.orderItemDesign.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe('rejected artwork correction', () => {
+  it('allows the owner to upload while rejected, increments versions and archives added file facts', async () => {
+    txMock.orderItem.findFirst.mockResolvedValue(draftItem({ status: OrderStatus.REJECTED }));
+    dbMock.orderItem.findFirst.mockResolvedValue(draftItem({ status: OrderStatus.REJECTED }));
+    txMock.orderItemDesign.create.mockResolvedValue({ id: 'new-design', fileUrl: 'https://example.test/new.jpg' });
+    await recordOrderItemDesign(baseInput, salesActor, configuredEnv);
+    expect(txMock.order.update).toHaveBeenCalledWith({ where: { id: 'o1' }, data: { revision: { increment: 1 }, editVersion: { increment: 1 } } });
+    expect(txMock.orderLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ changedFields: { design: { before: null, after: expect.objectContaining({ id: 'new-design', fileSize: '2048' }) } } }) }));
+  });
+  it('archives removed rejected artwork instead of losing its identity and object URL', async () => {
+    dbMock.orderItemDesign.findUnique.mockResolvedValue({ id: 'old', orderItem: { orderId: 'o1' } });
+    txMock.orderItemDesign.findUnique.mockResolvedValue({ id: 'old', orderItemId: 'i1', fileName: 'old.jpg', fileUrl: 'https://example.test/old.jpg', fileType: DesignFileType.IMAGE, fileSize: BigInt(123), orderItem: { orderId: 'o1', order: { status: OrderStatus.REJECTED, submitterId: salesActor.id } } });
+    await removeOrderItemDesign('old', salesActor);
+    expect(txMock.orderLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ changedFields: { design: { before: expect.objectContaining({ id: 'old', fileUrl: 'https://example.test/old.jpg', fileSize: '123' }), after: null } } }) }));
+  });
+  it('does not let another salesperson correct rejected artwork', async () => {
+    dbMock.orderItem.findFirst.mockResolvedValue(draftItem({ status: OrderStatus.REJECTED, submitterId: 'other' }));
+    await expect(assertCanUploadDesign('o1', 'i1', salesActor)).rejects.toThrow('只能修改自己');
   });
 });

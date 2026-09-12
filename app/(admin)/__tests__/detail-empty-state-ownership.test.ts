@@ -26,14 +26,12 @@ function expectSingleSharedEmptyState(source: string): void {
 }
 
 describe('detail no-data empty-state ownership', () => {
+  it('monthly bill detail omits obsolete legacy payment history and empty optional deductions', () => {
+    const source = readAdminPage('sales', 'bills', '[id]');
+    expect(source).not.toContain('payments.map');
+    expect(source).toContain('bill.adjustments.length ?');
+  });
   it.each([
-    {
-      group: '(admin)',
-      file: ['sales', 'bills', '[id]'],
-      start: '支付明细（',
-      end: '工单明细（',
-      title: '暂无支付流水',
-    },
     {
       group: '(billing)',
       file: ['owner', 'bills', 'archive', '[id]'],

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
       update: vi.fn(),
     },
     orderLog: { create: vi.fn() },
+    orderChangeRequest: { findFirst: vi.fn().mockResolvedValue(null) },
   };
   return {
     tx,

@@ -1,0 +1,31 @@
+import { beforeEach, expect, it, vi } from 'vitest';
+import { Role } from '@/generated/prisma/enums';
+vi.mock('server-only', () => ({}));
+const m = vi.hoisted(() => ({ tx: { $executeRaw: vi.fn(), order: { findUnique: vi.fn(), update: vi.fn() }, orderItem: { findFirst: vi.fn(), update: vi.fn() }, orderPackagingGroup: { findFirst: vi.fn(), update: vi.fn() }, orderLog: { create: vi.fn() } } }));
+vi.mock('@/lib/db', () => ({ db: { $transaction: (fn: (tx: unknown) => unknown) => fn(m.tx) } }));
+import { editSalesOrderText } from '../edit-sales-text';
+const actor = { id: 'sales', role: Role.SALES };
+const input = { orderId: 'order', targetId: 'item', field: 'itemName', expectedEditVersion: 3, value: '新名称' };
+beforeEach(() => { vi.resetAllMocks(); m.tx.order.findUnique.mockResolvedValue({ submitterId: 'sales', status: 'DRAFT', editVersion: 3, _count: { changeRequests: 0 } }); m.tx.orderItem.findFirst.mockResolvedValue({ name: '旧名称' }); });
+it('saves text and audits without changing price or status', async () => { await editSalesOrderText(input, actor); expect(m.tx.orderItem.update).toHaveBeenCalledWith({ where: { id: 'item' }, data: { name: '新名称' } }); expect(m.tx.order.update).toHaveBeenCalledWith({ where: { id: 'order' }, data: { revision: { increment: 1 }, editVersion: { increment: 1 } } }); expect(m.tx.orderLog.create).toHaveBeenCalledOnce(); });
+it.each([{ submitterId: 'foreign' }, { status: 'SETTLED' }, { editVersion: 4 }, { _count: { changeRequests: 1 } }])('rejects ownership/status/version/pending mismatch %j', async (override) => { m.tx.order.findUnique.mockResolvedValue({ submitterId: 'sales', status: 'DRAFT', editVersion: 3, _count: { changeRequests: 0 }, ...override }); await expect(editSalesOrderText(input, actor)).rejects.toThrow(); expect(m.tx.orderItem.update).not.toHaveBeenCalled(); });
+it('rejects foreign item', async () => { m.tx.orderItem.findFirst.mockResolvedValue(null); await expect(editSalesOrderText(input, actor)).rejects.toThrow('不属于'); });
+it('rejects non-sales', async () => { await expect(editSalesOrderText(input, { ...actor, role: Role.WORKER })).rejects.toThrow(); });
+it('rejects injected pricing fields', async () => { await expect(editSalesOrderText({ ...input, unitPrice: 1 }, actor)).rejects.toThrow(); });
+
+it('saves and clears item remark without renaming or repricing', async () => {
+  m.tx.orderItem.findFirst.mockResolvedValue({ name: '旧名称', remark: '旧备注' });
+  await editSalesOrderText({ ...input, field: 'itemRemark', value: '' }, actor);
+  expect(m.tx.orderItem.update).toHaveBeenCalledWith({ where: { id: 'item' }, data: { remark: null } });
+});
+
+it('renames a packaging group without changing bag counts or members', async () => {
+  m.tx.orderPackagingGroup.findFirst.mockResolvedValue({ name: '旧组' });
+  await editSalesOrderText({ ...input, field: 'packagingName', value: '新组' }, actor);
+  expect(m.tx.orderPackagingGroup.update).toHaveBeenCalledWith({ where: { id: 'item' }, data: { name: '新组' } });
+  expect(m.tx.orderItem.update).not.toHaveBeenCalled();
+});
+it('rejects foreign packaging group', async () => {
+  m.tx.orderPackagingGroup.findFirst.mockResolvedValue(null);
+  await expect(editSalesOrderText({ ...input, field: 'packagingName' }, actor)).rejects.toThrow('不属于');
+});

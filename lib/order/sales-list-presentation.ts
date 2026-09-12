@@ -20,7 +20,7 @@ import type { StatusDefinition, StatusRegistry } from '../ui/status-registry';
  */
 const SALES_ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
-  [OrderStatus.PENDING_FACTORY]: { label: '待处理', tone: 'info' },
+  [OrderStatus.PENDING_FACTORY]: { label: '待工厂处理', tone: 'info' },
   [OrderStatus.REJECTED]: { label: '已驳回', tone: 'danger' },
   [OrderStatus.CONFIRMED]: { label: '待下发生产', tone: 'success' },
   [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'warning', dot: true },
@@ -28,7 +28,7 @@ const SALES_ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.FOILING]: { label: '烫金中', tone: 'info', dot: true },
   [OrderStatus.PACKING]: { label: '打包中', tone: 'info', dot: true },
   [OrderStatus.SETTLED]: { label: '已结算', tone: 'success' },
-  [OrderStatus.SUBMITTED]: { label: '待处理', tone: 'info' },
+  [OrderStatus.SUBMITTED]: { label: '待工厂处理', tone: 'info' },
   [OrderStatus.SCHEDULING]: { label: '生产中', tone: 'info', dot: true },
   [OrderStatus.IN_PRODUCTION]: { label: '生产中', tone: 'info', dot: true },
   [OrderStatus.COMPLETED]: { label: '生产中', tone: 'info', dot: true },
@@ -38,6 +38,35 @@ const SALES_ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
 };
 
 export type SalesOrderStatusPresentation = StatusDefinition;
+
+type SalesOrderProgressPresentation =
+  | { currentStep: 0 | 1 | 2 | 3 | 4; message?: never }
+  | { currentStep: null; message: string };
+
+// Enumerate both lifecycles: adding a status must never silently imply completion.
+// A paused order does not identify its previous stage, so do not infer one.
+const SALES_ORDER_PROGRESS: Record<OrderStatus, SalesOrderProgressPresentation> = {
+  [OrderStatus.DRAFT]: { currentStep: null, message: '草稿尚未提交' },
+  [OrderStatus.PENDING_FACTORY]: { currentStep: 0 },
+  [OrderStatus.SUBMITTED]: { currentStep: 0 },
+  [OrderStatus.CONFIRMED]: { currentStep: 1 },
+  [OrderStatus.SCHEDULING]: { currentStep: 1 },
+  [OrderStatus.RELEASED]: { currentStep: 2 },
+  [OrderStatus.FOILING]: { currentStep: 2 },
+  [OrderStatus.PACKING]: { currentStep: 2 },
+  [OrderStatus.IN_PRODUCTION]: { currentStep: 2 },
+  [OrderStatus.COMPLETED]: { currentStep: 2 },
+  [OrderStatus.SHIPPED]: { currentStep: 3 },
+  [OrderStatus.SETTLED]: { currentStep: 4 },
+  [OrderStatus.FINISHED]: { currentStep: 4 },
+  [OrderStatus.REJECTED]: { currentStep: null, message: '工单已驳回，待修改后重新提交' },
+  [OrderStatus.ON_HOLD]: { currentStep: null, message: '工单已暂停' },
+  [OrderStatus.CANCELLED]: { currentStep: null, message: '工单已取消' },
+};
+
+export function salesOrderProgressPresentation(status: OrderStatus): SalesOrderProgressPresentation {
+  return SALES_ORDER_PROGRESS[status] ?? { currentStep: null, message: '工单进度暂不可用' };
+}
 
 export function salesOrderStatusPresentation(
   status: OrderStatus,

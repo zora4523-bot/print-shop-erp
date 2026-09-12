@@ -1,3 +1,4 @@
+vi.mock('@/lib/order/sales-customer-scope', () => ({ listSalesCustomerOptions: vi.fn().mockResolvedValue([]) }));
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductCategory, Role } from '@/generated/prisma/enums';
