@@ -272,6 +272,7 @@ export function SalesOrderDetailView({
                   <dl className="mt-3 grid min-w-0 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
                     {item.details.map((fact) => <SalesDetailRow key={fact.label} label={fact.label} value={fact.value} />)}
                   </dl>
+                  {editForm && canEdit ? <SalesTextEditForm key={`remark-${item.id}-${order.editVersion}`} orderId={order.id} targetId={item.id} field="itemRemark" version={order.editVersion} value={item.remark ?? ''} label="款式备注" /> : null}
                   {item.remark ? (
                     <HighlightedRemark className="admin-wrap-anywhere mt-3 whitespace-pre-wrap">
                       {item.remark}

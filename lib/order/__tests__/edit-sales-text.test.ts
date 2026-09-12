@@ -12,3 +12,9 @@ it.each([{ submitterId: 'foreign' }, { status: 'SETTLED' }, { editVersion: 4 }, 
 it('rejects foreign item', async () => { m.tx.orderItem.findFirst.mockResolvedValue(null); await expect(editSalesOrderText(input, actor)).rejects.toThrow('不属于'); });
 it('rejects non-sales', async () => { await expect(editSalesOrderText(input, { ...actor, role: Role.WORKER })).rejects.toThrow(); });
 it('rejects injected pricing fields', async () => { await expect(editSalesOrderText({ ...input, unitPrice: 1 }, actor)).rejects.toThrow(); });
+
+it('saves and clears item remark without renaming or repricing', async () => {
+  m.tx.orderItem.findFirst.mockResolvedValue({ name: '旧名称', remark: '旧备注' });
+  await editSalesOrderText({ ...input, field: 'itemRemark', value: '' }, actor);
+  expect(m.tx.orderItem.update).toHaveBeenCalledWith({ where: { id: 'item' }, data: { remark: null } });
+});
