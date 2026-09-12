@@ -6,6 +6,7 @@ import {
   useId,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -145,6 +146,8 @@ export type OrderFormBProps = {
   disabled?: boolean;
   savedLabel: string;
   fieldErrors?: OrderFormBErrors;
+  /** Increment only after an explicit submit attempt fails. */
+  errorFocusRequest?: number;
   rail: ReactNode;
   onActiveIndexChange: (index: number) => void;
   onAdd: () => void;
@@ -800,6 +803,7 @@ export function OrderFormB({
   disabled = false,
   savedLabel,
   fieldErrors,
+  errorFocusRequest = 0,
   rail,
   onActiveIndexChange,
   onAdd,
@@ -853,7 +857,31 @@ export function OrderFormB({
     null,
   );
   const rootRef = useRef<HTMLDivElement>(null);
-  const autoFocusedErrorSignature = useRef<string | null>(null);
+  const handledErrorFocusRequest = useRef(0);
+  const issueFocusTimer = useRef<number | null>(null);
+  const removeButtonRef = useRef<HTMLButtonElement>(null);
+  const styleNavRef = useRef<HTMLElement>(null);
+  const restoreDeleteFocus = useRef(false);
+
+  const cancelIssueFocus = useCallback(() => {
+    if (issueFocusTimer.current !== null) {
+      window.clearTimeout(issueFocusTimer.current);
+      issueFocusTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelIssueFocus, [cancelIssueFocus]);
+
+  useLayoutEffect(() => {
+    if (!restoreDeleteFocus.current) return;
+    restoreDeleteFocus.current = false;
+    const target =
+      removeButtonRef.current ??
+      styleNavRef.current?.querySelector<HTMLButtonElement>(
+        '[aria-pressed="true"]',
+      );
+    target?.focus({ preventScroll: true });
+  }, [itemFields.length]);
 
   const printFoilMode = useMemo(
     () => (item ? currentPrintFoilMode(item) : 'NONE'),
@@ -865,11 +893,16 @@ export function OrderFormB({
     values.receiverPhone || parsedReceiver.receiverPhone || '';
 
   const focusIssue = useCallback((message: string) => {
+    cancelIssueFocus();
     const itemNumber = Number(message.match(/第\s*(\d+)\s*款/)?.[1]);
     if (Number.isSafeInteger(itemNumber) && itemNumber > 0) {
-      onActiveIndexChange(itemNumber - 1);
+      const index = items.findIndex(
+        (entry, index) => (entry.fig ?? index + 1) === itemNumber,
+      );
+      if (index >= 0) onActiveIndexChange(index);
     }
-    window.setTimeout(() => {
+    issueFocusTimer.current = window.setTimeout(() => {
+      issueFocusTimer.current = null;
       const root = rootRef.current;
       if (!root) return;
       const directSelector = message.includes('工单名称')
@@ -882,29 +915,37 @@ export function OrderFormB({
             ? '[id$="-receiver-address-paste"]'
             : null;
       const invalidOwner = root.querySelector<HTMLElement>(
-        '[aria-invalid="true"], [data-invalid="true"]',
+        '[aria-invalid="true"]:not([tabindex="-1"]), [data-invalid="true"]',
       );
       const target =
         (directSelector
           ? root.querySelector<HTMLElement>(directSelector)
           : null) ??
         invalidOwner?.querySelector<HTMLElement>(
-          'input, textarea, button, [role="button"]',
+          'input:not([tabindex="-1"]), textarea, button, [role="button"]',
         ) ??
-        invalidOwner;
-      target?.focus();
-      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        invalidOwner ??
+        root.querySelector<HTMLElement>('[data-slot="order-form-errors"]');
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({
+        block: 'center',
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'instant'
+          : 'smooth',
+      });
     }, 0);
-  }, [onActiveIndexChange]);
+  }, [cancelIssueFocus, items, onActiveIndexChange]);
 
-  const errorSignature = fieldErrors?.summary?.join('|') ?? '';
   useEffect(() => {
-    if (!errorSignature || autoFocusedErrorSignature.current === errorSignature) {
+    if (
+      !errorFocusRequest ||
+      handledErrorFocusRequest.current === errorFocusRequest
+    ) {
       return;
     }
-    autoFocusedErrorSignature.current = errorSignature;
-    focusIssue(fieldErrors?.summary?.[0] ?? '');
-  }, [errorSignature, fieldErrors?.summary, focusIssue]);
+    handledErrorFocusRequest.current = errorFocusRequest;
+    if (fieldErrors?.summary?.length) focusIssue(fieldErrors.summary[0]);
+  }, [errorFocusRequest, fieldErrors?.summary, focusIssue]);
 
   if (!item || !field) return null;
 
@@ -956,7 +997,7 @@ export function OrderFormB({
     <div
       ref={rootRef}
       data-slot="order-form-b"
-      className="@container mx-auto w-full max-w-[1180px] px-0 pb-10 font-sans tabular-nums"
+      className="@container mx-auto w-full max-w-[1180px] px-0 pb-10 font-sans tabular-nums [overflow-anchor:none]"
       onPaste={(event) => {
         const target = event.target as HTMLElement;
         if (
@@ -985,7 +1026,60 @@ export function OrderFormB({
         ) : null}
       </header>
 
+      <div
+        role="group"
+        aria-label="款式操作"
+        className="mb-3 flex flex-wrap items-center gap-1.5"
+      >
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          className="min-h-11 rounded-lg border-dashed px-3 py-1.5 text-sm font-semibold text-muted-foreground"
+          onClick={() => {
+            cancelIssueFocus();
+            onAdd();
+          }}
+        >
+          ＋ 加款
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          className="min-h-11 rounded-lg border-dashed px-3 py-1.5 text-sm font-semibold text-muted-foreground"
+          onClick={() => {
+            cancelIssueFocus();
+            onDuplicate(safeActiveIndex);
+          }}
+        >
+          ⧉ 复制当前
+        </Button>
+        {itemFields.length > 1 ? (
+          <Button
+            ref={removeButtonRef}
+            type="button"
+            variant="outline"
+            aria-label={`删除第 ${safeActiveIndex + 1} 款`}
+            disabled={disabled}
+            className="min-h-11 rounded-lg px-3 py-1.5 text-sm font-semibold text-destructive hover:bg-destructive/5 hover:text-destructive"
+            onClick={() => {
+              cancelIssueFocus();
+              restoreDeleteFocus.current = true;
+              onRemove(safeActiveIndex);
+            }}
+          >
+            删除当前
+          </Button>
+        ) : null}
+        <span className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
+          {savedLabel}
+        </span>
+      </div>
+
       <nav
+        ref={styleNavRef}
         aria-label="款式"
         className="mb-4 flex flex-wrap items-center gap-1.5"
       >
@@ -997,11 +1091,14 @@ export function OrderFormB({
             aria-pressed={safeActiveIndex === index}
             disabled={disabled}
             className={cn(
-              'h-auto min-h-8 rounded-lg px-3.5 py-1.5 text-sm font-bold',
+              'h-auto min-h-11 rounded-lg px-3.5 py-1.5 text-sm font-bold',
               safeActiveIndex === index &&
                 'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
             )}
-            onClick={() => onActiveIndexChange(index)}
+            onClick={() => {
+              cancelIssueFocus();
+              onActiveIndexChange(index);
+            }}
           >
             {index + 1}. {ROUTE_OPTIONS.find((route) => route.value === items[index]?.pricingRoute)?.label ?? '款式'}
             {fieldErrors?.items?.[index] ? (
@@ -1012,40 +1109,6 @@ export function OrderFormB({
             ) : null}
           </Button>
         ))}
-        <Button
-          type="button"
-          variant="outline"
-          disabled={disabled}
-          className="h-auto min-h-8 rounded-lg border-dashed px-3.5 py-1.5 text-sm font-extrabold text-muted-foreground"
-          onClick={onAdd}
-        >
-          ＋ 加款
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={disabled}
-          className="h-auto min-h-8 rounded-lg border-dashed px-3.5 py-1.5 text-sm font-extrabold text-muted-foreground"
-          onClick={() => onDuplicate(safeActiveIndex)}
-        >
-          ⧉ 复制当前
-        </Button>
-        {itemFields.length > 1 ? (
-          <Button
-            type="button"
-            variant="outline"
-            aria-label={`删除第 ${safeActiveIndex + 1} 款`}
-            disabled={disabled}
-            className="h-auto min-h-8 rounded-lg px-3.5 py-1.5 text-sm font-extrabold text-destructive hover:bg-destructive/5 hover:text-destructive"
-            onClick={() => onRemove(safeActiveIndex)}
-          >
-            删除当前
-          </Button>
-        ) : null}
-        <span className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
-          {savedLabel}
-        </span>
       </nav>
 
       <div
@@ -1059,6 +1122,8 @@ export function OrderFormB({
           {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
             <div
               role="alert"
+              data-slot="order-form-errors"
+              tabIndex={-1}
               className="mb-4 rounded-xl border border-destructive bg-destructive/5 px-4 py-3.5 text-destructive"
             >
               <h2 className="text-sm font-extrabold">

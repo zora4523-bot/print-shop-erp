@@ -1055,6 +1055,8 @@ export function OrderForm({
     // widen the compile-time seam.
     resolver: zodResolver(createOrderSchema) as never,
     mode: 'onBlur',
+    // The external editor owns one explicit error-navigation request per submit.
+    shouldFocusError: !usesExternalSalesPricing,
     defaultValues: {
       clientSubmissionId,
       nextItemFig: 2,
@@ -1150,6 +1152,7 @@ export function OrderForm({
     useState<InternalCreateOrderQuoteViewState | null>(null);
   const [externalValidationVisible, setExternalValidationVisible] =
     useState(false);
+  const [errorFocusRequest, setErrorFocusRequest] = useState(0);
   const [externalInputRevision, setExternalInputRevision] = useState(0);
   const [pendingSubmission, setPendingSubmission] = useState<{
     data: CreateOrderInput;
@@ -1552,7 +1555,10 @@ export function OrderForm({
         ),
       );
       setState(result);
-      if (result.status !== 'success') return;
+      if (result.status !== 'success') {
+        setErrorFocusRequest((current) => current + 1);
+        return;
+      }
 
       clearLocalDraftAfterServerCreate();
 
@@ -1632,6 +1638,7 @@ export function OrderForm({
     if (usesExternalSalesPricing && intent === 'submit') {
       setExternalValidationVisible(true);
       if (externalSubmissionIssues(data, fieldIds, queueSnapshot).length > 0) {
+        setErrorFocusRequest((current) => current + 1);
         return;
       }
       const quoteToken = currentExternalOrderQuote?.quoteToken;
@@ -1656,6 +1663,7 @@ export function OrderForm({
   const onInvalid = () => {
     if (!usesExternalSalesPricing) return;
     setExternalValidationVisible(true);
+    setErrorFocusRequest((current) => current + 1);
     setPendingSubmission(null);
   };
 
@@ -3810,6 +3818,7 @@ export function OrderForm({
                   : '草稿未保存'
             }
             fieldErrors={externalFieldErrors}
+            errorFocusRequest={errorFocusRequest}
             rail={
               <OrderFormBRail
                 itemCount={itemsArray.fields.length}
