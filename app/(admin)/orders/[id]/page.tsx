@@ -1,3 +1,4 @@
+import { canChangeOrderPackaging } from '@/lib/order/editable-fields';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
 import { readOrderActivity } from '@/lib/order/activity';
 import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
@@ -1163,6 +1164,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
               sequence: item.sequence,
               name: item.name,
               quantity: item.quantity,
+              pack: order.packagingGroups.flatMap((group) => group.lines)
+                .find((line) => line.orderItem.id === item.id)?.unitsPerBag ?? item.pack,
+              packagingEditable: canChangeOrderPackaging(order.status) &&
+                order.packagingGroups.flatMap((group) => group.lines)
+                  .filter((line) => line.orderItem.id === item.id).length === 1,
               productId: item.productId,
               pricingRoute: item.pricingRoute,
               specification: item.specification,

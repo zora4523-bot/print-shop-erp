@@ -195,8 +195,8 @@ describe('administrator adds a delivery with conserved allocations and frozen lo
     );
     expect(mocks.log).toHaveBeenCalledOnce();
   });
-  it.each([Role.CUSTOMER_SERVICE, Role.WORKER])(
-    'rejects non-administrator %s before database access',
+  it.each([Role.WORKER])(
+    'rejects unauthorized role %s before database access',
     async (role) => {
       await expect(
         addOrderShipment(input(), { id: 'other', role }, 'save'),
@@ -430,5 +430,24 @@ it('sales cannot split another owner order', async () => {
 });
 it('sales cannot forge manual charges', async () => {
   await expect(addOrderShipment({ ...input(), shippingFee: '1', overrideReason: '低价' }, { id: 'sales', role: Role.SALES }, 'preview')).rejects.toThrow('人工物流费用');
+  expect(mocks.transaction).not.toHaveBeenCalled();
+});
+
+it('allows customer service to split its own order through the existing quote protocol', async () => {
+  const order = fixture();
+  order.submitterId = 'cs';
+  mocks.find.mockResolvedValue(order);
+  const cs = { id: 'cs', role: Role.CUSTOMER_SERVICE };
+  const preview = await addOrderShipment(input(), cs, 'preview');
+  expect(mocks.create).not.toHaveBeenCalled();
+  await addOrderShipment({ ...input(), previewToken: preview!.token }, cs, 'save');
+  expect(mocks.create).toHaveBeenCalledOnce();
+});
+it('rejects customer service editing another submitter order', async () => {
+  await expect(addOrderShipment(input(), { id: 'cs', role: Role.CUSTOMER_SERVICE }, 'preview')).rejects.toThrow('自己创建');
+  expect(mocks.create).not.toHaveBeenCalled();
+});
+it('rejects customer service manual pricing before the transaction', async () => {
+  await expect(addOrderShipment({ ...input(), packingMaterialFee: '1', overrideReason: '测试' }, { id: 'cs', role: Role.CUSTOMER_SERVICE }, 'preview')).rejects.toThrow('人工物流费用');
   expect(mocks.transaction).not.toHaveBeenCalled();
 });

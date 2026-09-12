@@ -1,3 +1,6 @@
+import { InternalOrderEditWorkspace } from '@/components/business/order/InternalOrderEditWorkspace';
+import { OrderItemRemarkForm } from '@/components/business/order/OrderItemRemarkForm';
+import { canChangeOrderPackaging } from '@/lib/order/editable-fields';
 import { SalesOrderEditor } from '@/components/business/order/SalesOrderEditor';
 import { AddOrderShipmentForm } from '@/components/business/order/AddOrderShipmentForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
@@ -201,6 +204,14 @@ export default async function EditOrderPage({ params }: PageProps) {
               }} />
             ) : null
           }
+          itemRemarks={!pending ? (
+            <section aria-label="款式备注" className="space-y-4">
+              {order.items.map((item) => (
+                <OrderItemRemarkForm key={`${item.id}:${order.editVersion}`} orderId={order.id}
+                  itemId={item.id} sequence={item.sequence} version={order.editVersion} initial={item.remark} />
+              ))}
+            </section>
+          ) : null}
           deliveries={
             !pending && order.shipments.length < 10 &&
             !order.shipments.some((row) => row.status === 'SHIPPED') &&
@@ -259,6 +270,27 @@ export default async function EditOrderPage({ params }: PageProps) {
       <p className="text-sm text-muted-foreground">
         基本信息与配送保存后生效；款式和费用通过下方审批、核价处理。
       </p>
+      <InternalOrderEditWorkspace key={`${order.id}:${order.editVersion}`} auxiliary={
+        <>
+          {!pending ? order.items.map((item) => (
+            <OrderItemRemarkForm key={item.id} orderId={order.id} itemId={item.id}
+              sequence={item.sequence} version={order.editVersion} initial={item.remark} />
+          )) : null}
+          {!pending && order.shipments.length < 10 &&
+            !order.shipments.some((row) => row.status === 'SHIPPED') && 'priceRevision' in order ? (
+              <AddOrderShipmentForm orderId={order.id} expectedRevision={order.revision}
+                expectedEditVersion={order.editVersion} expectedWorkOrderVersion={order.workOrderVersion}
+                expectedPriceRevision={Number(order.priceRevision)} allowManualPricing={false}
+                nextSequence={Math.max(0, ...order.shipments.map((row) => row.sequence)) + 1}
+                sources={order.shipments.filter((row) => !row.trackingNo && row.weightKg === null && row.registrationVersion === 0)
+                  .map((row) => ({ id: row.id, sequence: row.sequence, receiverAddress: row.receiverAddress,
+                    lines: row.lines.filter((line) => line.quantity > 0).map((line) => ({
+                      orderItemId: line.orderItem.id, name: line.orderItem.name, quantity: line.quantity,
+                    })),
+                  }))} />
+          ) : null}
+        </>
+      }>
       <EditOrderForm
         key={`${order.id}:${order.editVersion}`}
         orderId={order.id}
@@ -287,6 +319,7 @@ export default async function EditOrderPage({ params }: PageProps) {
           isUrgent: order.isUrgent,
         }}
       />
+      </InternalOrderEditWorkspace>
       <OrderSavedConfiguration
         order={order}
         canEditDesigns={order.status === OrderStatus.DRAFT && !pending}
@@ -334,6 +367,11 @@ export default async function EditOrderPage({ params }: PageProps) {
                 sequence: item.sequence,
                 name: item.name,
                 quantity: item.quantity,
+                pack: order.packagingGroups.flatMap((group) => group.lines)
+                  .find((line) => line.orderItem.id === item.id)?.unitsPerBag ?? item.pack,
+                packagingEditable: canChangeOrderPackaging(order.status) &&
+                  order.packagingGroups.flatMap((group) => group.lines)
+                    .filter((line) => line.orderItem.id === item.id).length === 1,
                 productId: item.productId,
                 pricingRoute: item.pricingRoute,
                 specification: item.specification,

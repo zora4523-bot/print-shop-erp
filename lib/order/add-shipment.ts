@@ -21,11 +21,11 @@ export async function addOrderShipment(
   actor: { id: string; role: Role },
   mode: 'preview' | 'save',
 ) {
-  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES)
+  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE)
     throw new AddOrderShipmentError('当前账号不能添加发货地址');
   const input = addOrderShipmentSchema.parse(raw);
-  if (actor.role === Role.SALES && (input.shippingFee !== undefined || input.packingMaterialFee !== undefined || input.overrideReason !== undefined))
-    throw new AddOrderShipmentError('销售不能录入人工物流费用');
+  if (actor.role !== Role.ADMIN && (input.shippingFee !== undefined || input.packingMaterialFee !== undefined || input.overrideReason !== undefined))
+    throw new AddOrderShipmentError('当前账号不能录入人工物流费用');
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(input.orderId)}))`;
     await tx.$executeRaw`SELECT id FROM "Order" WHERE id = ${input.orderId} FOR UPDATE`;
@@ -41,7 +41,7 @@ export async function addOrderShipment(
       },
     });
     if (!order) throw new AddOrderShipmentError('工单不存在，请刷新页面');
-    if (actor.role === Role.SALES && order.submitterId !== actor.id)
+    if (actor.role !== Role.ADMIN && order.submitterId !== actor.id)
       throw new AddOrderShipmentError('只能为自己创建的工单添加地址');
     if (
       order.revision !== input.expectedRevision ||

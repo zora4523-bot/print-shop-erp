@@ -72,6 +72,8 @@ function SalesOrderChangeRequestSection({
           sequence: item.sequence,
           name: item.name,
           quantity: item.quantity,
+          pack: item.pack,
+          packagingEditable: item.packagingEditable,
           productId: item.productId,
           pricingRoute: item.pricingRoute,
           specification: item.specification,

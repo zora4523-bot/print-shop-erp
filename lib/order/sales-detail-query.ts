@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { canChangeOrderPackaging } from './editable-fields';
+
 import Decimal from 'decimal.js';
 import {
   DesignFileType,
@@ -60,6 +62,8 @@ export type SalesOrderDetail = {
     sequence: number;
     name: string;
     quantity: number;
+    pack?: number | null;
+    packagingEditable?: boolean;
     productId: string | null;
     pricingRoute: OrderItemPricingRoute;
     specification: string | null;
@@ -374,6 +378,10 @@ function mapSalesOrderDetail(
       sequence: item.sequence,
       name: item.name,
       quantity: item.quantity,
+      pack: row.packagingGroups.flatMap((group) => group.lines)
+        .find((line) => line.orderItem.sequence === item.sequence)?.unitsPerBag ?? item.pack,
+      packagingEditable: canChangeOrderPackaging(row.status) && row.packagingGroups
+        .flatMap((group) => group.lines).filter((line) => line.orderItem.sequence === item.sequence).length === 1,
       productId: item.productId,
       pricingRoute: item.pricingRoute,
       specification: item.specification,
