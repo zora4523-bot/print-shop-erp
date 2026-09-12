@@ -76,6 +76,9 @@ function tagWithIdSuffix(html: string, suffix: string): string {
 }
 
 describe('OrderForm 必填字段的 required 语义', () => {
+  it.each([true, false])('两种建单身份均可添加第 2 个收货地址：%s', (external) => {
+    expect(render(external)).toContain('添加地址 2');
+  });
   it('服务端错误只展示去重后的业务文案，不显示内部字段路径', () => {
     const messages = orderServerFieldErrorMessages({
       'items.0.paperType': ['第 1 款的纸张已停用'],

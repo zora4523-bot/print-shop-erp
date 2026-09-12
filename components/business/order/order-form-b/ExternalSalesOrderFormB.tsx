@@ -1468,6 +1468,8 @@ export function OrderFormB({
               </div>
             ) : null}
 
+            {afterShipping}
+
             <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
               <Checkbox
                 checked={values.isSfCollect ?? false}
@@ -1478,7 +1480,6 @@ export function OrderFormB({
               顺丰到付（本单不计快递费）
             </label>
           </Group>
-          {afterShipping}
         </div>
 
         <StickyOrderFormRail rail={rail} />

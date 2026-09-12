@@ -1,0 +1,418 @@
+import Decimal from 'decimal.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Role } from '@/generated/prisma/enums';
+import { addOrderShipmentSchema } from '../add-shipment-schema';
+vi.mock('server-only', () => ({}));
+const mocks = vi.hoisted(() => ({
+  transaction: vi.fn(),
+  find: vi.fn(),
+  quote: vi.fn(),
+  revision: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  line: vi.fn(),
+  charge: vi.fn(),
+  log: vi.fn(),
+  remove: vi.fn(),
+}));
+vi.mock('@/lib/db', () => ({ db: { $transaction: mocks.transaction } }));
+vi.mock('@/lib/price/order-charge-service', () => ({
+  resolveExternalOrderChargesForFinalization: mocks.quote,
+}));
+vi.mock('../pricing-revision', () => ({
+  appendOrderPricingRevisionInTx: mocks.revision,
+}));
+import { addOrderShipment } from '../add-shipment';
+const input = () => ({
+  orderId: 'order',
+  sourceShipmentId: 'source',
+  expectedRevision: 1,
+  expectedEditVersion: 2,
+  expectedWorkOrderVersion: 1,
+  expectedPriceRevision: 1,
+  receiverName: '李女士',
+  receiverPhone: '13800138000',
+  receiverAddress: '江西省南昌市测试路 1 号',
+  destinationProvince: '江西',
+  lines: [{ orderItemId: 'item', quantity: 40 }],
+});
+const actor = { id: 'admin', role: Role.ADMIN };
+function fixture() {
+  return {
+    id: 'order',
+    settlementType: 'EXTERNAL_SALES',
+    status: 'SUBMITTED',
+    revision: 1,
+    editVersion: 2,
+    workOrderVersion: 1,
+    priceRevision: 1,
+    totalAmount: new Decimal('130.10'),
+    settledAt: null,
+    settledFee: null,
+    isSfCollect: false,
+    items: [
+      {
+        id: 'item',
+        quantity: 100,
+        paperWeightGsm: 150,
+        paperType: '珠光纸',
+        productStructure: 'ENVELOPE',
+      },
+    ],
+    shipments: [
+      {
+        id: 'source',
+        sequence: 1,
+        status: 'PLANNED',
+        trackingNo: null,
+        weightKg: null,
+        registrationVersion: 0,
+        destinationProvince: '广东',
+        lines: [{ orderItemId: 'item', quantity: 100 }],
+      },
+    ],
+    customerCharges: [
+      {
+        id: 'shipping',
+        shipmentId: 'source',
+        businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+        category: { code: 'SHIPPING_FEE' },
+        priceBookId: 'frozen-book',
+        amount: new Decimal('20'),
+        status: 'ESTIMATED',
+        overrideReason: null,
+      },
+      {
+        id: 'packing',
+        shipmentId: 'source',
+        businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
+        category: { code: 'PACKING_MATERIAL' },
+        priceBookId: 'frozen-book',
+        amount: new Decimal('10'),
+        status: 'ESTIMATED',
+        overrideReason: null,
+      },
+    ],
+    _count: { changeRequests: 0 },
+  };
+}
+const tx = {
+  $executeRaw: vi.fn(),
+  order: { findUnique: mocks.find, update: mocks.update },
+  orderShipment: { create: mocks.create, update: mocks.update },
+  orderShipmentLine: { update: mocks.line, delete: mocks.remove },
+  orderCustomerCharge: { update: mocks.charge, create: mocks.charge },
+  orderLog: { create: mocks.log },
+};
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.transaction.mockImplementation((work) => work(tx));
+  mocks.find.mockResolvedValue(fixture());
+  mocks.create.mockResolvedValue({ id: 'new-shipment' });
+  mocks.revision.mockResolvedValue({ pricingRevisionId: 'new-revision' });
+  mocks.quote.mockResolvedValue({
+    totalAmount: '35.25',
+    priceBook: { id: 'frozen-book' },
+    charges: [1, 2].flatMap((sequence) =>
+      ['SHIPPING_FEE', 'PACKING_MATERIAL'].map((code) => ({
+        shipmentKey: String(sequence),
+        categoryCode: code,
+        categoryId: code,
+        priceBookId: 'frozen-book',
+        businessKey: `SHIPMENT:${sequence}:${code}`,
+        amount:
+          sequence === 1 ? '5.00' : code === 'SHIPPING_FEE' ? '20.00' : '5.25',
+        status: 'ESTIMATED',
+        pricingSnapshot: { quotedAt: new Date().toISOString() },
+      })),
+    ),
+  });
+});
+describe('administrator adds a delivery with conserved allocations and frozen logistics prices', () => {
+  it('previews without writes, uses independent shipment quantities and Decimal delta', async () => {
+    const result = await addOrderShipment(input(), actor, 'preview');
+    expect(result).toMatchObject({
+      sequence: 2,
+      oldTotal: '130.10',
+      newTotal: '135.35',
+      delta: '5.25',
+    });
+    expect(mocks.quote).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        shipments: [
+          expect.objectContaining({ shipmentKey: '1', itemQuantity: 60 }),
+          expect.objectContaining({
+            shipmentKey: '2',
+            itemQuantity: 40,
+            province: '江西',
+          }),
+        ],
+      }),
+      'frozen-book',
+      expect.any(Date),
+    );
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.revision).not.toHaveBeenCalled();
+  });
+  it('saves address, allocations, charges, fee lifecycle and audit atomically', async () => {
+    const preview = await addOrderShipment(input(), actor, 'preview');
+    await addOrderShipment(
+      { ...input(), previewToken: preview!.token },
+      actor,
+      'save',
+    );
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          orderId: 'order',
+          sequence: 2,
+          lines: { create: input().lines },
+        }),
+      }),
+    );
+    expect(mocks.line).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { quantity: 60 } }),
+    );
+    expect(mocks.charge).toHaveBeenCalledTimes(4);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          totalAmount: '135.35',
+          confirmedFee: null,
+          settledFee: null,
+        }),
+      }),
+    );
+    expect(mocks.revision).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        expectedPriceRevision: 1,
+        incrementOrderRevision: true,
+      }),
+    );
+    expect(mocks.log).toHaveBeenCalledOnce();
+  });
+  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])(
+    'rejects non-administrator %s before database access',
+    async (role) => {
+      await expect(
+        addOrderShipment(input(), { id: 'other', role }, 'save'),
+      ).rejects.toThrow('只有管理员');
+      expect(mocks.transaction).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    ['stale version', { expectedEditVersion: 1 }, '已变化'],
+    ['foreign shipment', { sourceShipmentId: 'foreign' }, '不属于'],
+    [
+      'foreign item',
+      { lines: [{ orderItemId: 'foreign', quantity: 1 }] },
+      '超出',
+    ],
+    [
+      'over-allocation',
+      { lines: [{ orderItemId: 'item', quantity: 101 }] },
+      '超出',
+    ],
+    [
+      'empty original',
+      { lines: [{ orderItemId: 'item', quantity: 100 }] },
+      '至少保留',
+    ],
+    ['missing quote', { previewToken: '' }, '重新预览'],
+  ])('rejects %s without writes', async (_name, overrides, message) => {
+    await expect(
+      addOrderShipment({ ...input(), ...overrides }, actor, 'save'),
+    ).rejects.toThrow(message);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it.each(['SHIPPED', 'SETTLED', 'CANCELLED'])(
+    'rejects terminal %s',
+    async (status) => {
+      mocks.find.mockResolvedValue({ ...fixture(), status });
+      await expect(addOrderShipment(input(), actor, 'preview')).rejects.toThrow(
+        '不能添加',
+      );
+    },
+  );
+  it('rejects partial shipment, pending approval, registered weight and corrupt allocations', async () => {
+    for (const order of [
+      { ...fixture(), _count: { changeRequests: 1 } },
+      {
+        ...fixture(),
+        shipments: [{ ...fixture().shipments[0], status: 'SHIPPED' }],
+      },
+      {
+        ...fixture(),
+        shipments: [{ ...fixture().shipments[0], weightKg: new Decimal(2) }],
+      },
+      { ...fixture(), items: [{ ...fixture().items[0], quantity: 110 }] },
+    ]) {
+      mocks.find.mockResolvedValue(order);
+      await expect(
+        addOrderShipment(input(), actor, 'preview'),
+      ).rejects.toThrow();
+    }
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it('preserves confirmed source amounts and evidence', async () => {
+    const order = fixture();
+    order.customerCharges[0].status = 'FINAL';
+    mocks.find.mockResolvedValue(order);
+    const preview = await addOrderShipment(input(), actor, 'preview');
+    expect(mocks.quote.mock.calls[0][1].shipments[0]).toMatchObject({
+      shippingFee: '20',
+      overrideReason: '新增地址分货，保留原地址已确认费用',
+    });
+    await addOrderShipment(
+      { ...input(), previewToken: preview!.token },
+      actor,
+      'save',
+    );
+    expect(
+      mocks.charge.mock.calls.some(([args]) => args.where?.id === 'shipping'),
+    ).toBe(false);
+  });
+  it('uses SF waiver for every quote and rejects changed preview', async () => {
+    mocks.find.mockResolvedValue({ ...fixture(), isSfCollect: true });
+    const preview = await addOrderShipment(input(), actor, 'preview');
+    expect(mocks.quote.mock.calls[0][1].isSfCollect).toBe(true);
+    await expect(
+      addOrderShipment(
+        {
+          ...input(),
+          receiverAddress: '更改后的地址',
+          previewToken: preview!.token,
+        },
+        actor,
+        'save',
+      ),
+    ).rejects.toThrow('重新预览');
+  });
+  it('validates duplicate, fractional, empty and negative splits', () => {
+    for (const lines of [
+      [...input().lines, ...input().lines],
+      [{ orderItemId: 'item', quantity: -1 }],
+      [{ orderItemId: 'item', quantity: 0.5 }],
+      [{ orderItemId: 'item', quantity: 0 }],
+    ])
+      expect(
+        addOrderShipmentSchema.safeParse({ ...input(), lines }).success,
+      ).toBe(false);
+  });
+});
+
+it.each([
+  ['FACTORY_DIRECT', 'SUBMITTED', 'UNCHANGED'],
+  ['EXTERNAL_SALES', 'DRAFT', 'ON_SUBMIT'],
+])(
+  'preserves the existing charge lifecycle for %s %s',
+  async (settlementType, status, pricingMode) => {
+    mocks.find.mockResolvedValue({
+      ...fixture(),
+      settlementType,
+      status,
+      customerCharges: [],
+    });
+    const preview = await addOrderShipment(input(), actor, 'preview');
+    expect(preview).toMatchObject({
+      pricingMode,
+      oldTotal: '130.10',
+      newTotal: '130.10',
+      charges: [],
+    });
+    await addOrderShipment(
+      { ...input(), previewToken: preview!.token },
+      actor,
+      'save',
+    );
+    expect(mocks.quote).not.toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalledOnce();
+    expect(mocks.revision).not.toHaveBeenCalled();
+  },
+);
+it('requires a manual fee reason and refuses nonzero SF freight', async () => {
+  expect(
+    addOrderShipmentSchema.safeParse({ ...input(), shippingFee: '12.34' })
+      .success,
+  ).toBe(false);
+  mocks.find.mockResolvedValue({ ...fixture(), isSfCollect: true });
+  await expect(
+    addOrderShipment(
+      { ...input(), shippingFee: '12.34', overrideReason: '实报运费' },
+      actor,
+      'preview',
+    ),
+  ).rejects.toThrow('顺丰到付');
+});
+it('quotes explicit manual new-address fees without replacing source confirmed facts', async () => {
+  await addOrderShipment(
+    {
+      ...input(),
+      shippingFee: '12.34',
+      packingMaterialFee: '5',
+      overrideReason: '偏远地区实报',
+    },
+    actor,
+    'preview',
+  );
+  expect(mocks.quote.mock.calls[0][1].shipments[1]).toMatchObject({
+    shippingFee: '12.34',
+    packingMaterialFee: '5',
+    overrideReason: '偏远地区实报',
+  });
+});
+
+it('rejects an eleventh address and inconsistent charge ownership', async () => {
+  const order = fixture();
+  mocks.find.mockResolvedValue({
+    ...order,
+    shipments: Array.from({ length: 10 }, (_, i) => ({
+      ...order.shipments[0],
+      id: `shipment-${i}`,
+      sequence: i + 1,
+    })),
+  });
+  await expect(addOrderShipment(input(), actor, 'preview')).rejects.toThrow(
+    '最多 10',
+  );
+  order.customerCharges[0].shipmentId = 'foreign';
+  mocks.find.mockResolvedValue(order);
+  await expect(addOrderShipment(input(), actor, 'preview')).rejects.toThrow(
+    '物流收费与地址不一致',
+  );
+  expect(mocks.create).not.toHaveBeenCalled();
+});
+it('does not create a receivable for a no-charge rework order', async () => {
+  mocks.find.mockResolvedValue({
+    ...fixture(),
+    billingMode: 'NO_CHARGE',
+    customerCharges: [],
+  });
+  const preview = await addOrderShipment(input(), actor, 'preview');
+  expect(preview).toMatchObject({ pricingMode: 'UNCHANGED', delta: '0.00' });
+  expect(mocks.quote).not.toHaveBeenCalled();
+});
+
+it('replaces a pending null amount even when it has a note', async () => {
+  const order = fixture();
+  mocks.find.mockResolvedValue({
+    ...order,
+    customerCharges: order.customerCharges.map((charge) =>
+      charge.id === 'shipping'
+        ? { ...charge, amount: null, overrideReason: '待核价' }
+        : charge,
+    ),
+  });
+  const preview = await addOrderShipment(input(), actor, 'preview');
+  await addOrderShipment(
+    { ...input(), previewToken: preview!.token },
+    actor,
+    'save',
+  );
+  expect(
+    mocks.charge.mock.calls.some(([args]) => args.where?.id === 'shipping'),
+  ).toBe(true);
+});

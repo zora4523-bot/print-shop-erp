@@ -202,3 +202,23 @@ pnpm test --run
 按 `createdAt DESC, id DESC` 查询游标之前的记录，每页最多 20 条，额外读取 1 条判定是否存在下一页。成功返回 `{ ok: true, page: { events, nextCursor } }`，无下一页时 `nextCursor` 为 `null`；无效参数、工单不存在/不可访问返回 `{ ok: false, message }`。权限失败由授权入口拒绝。界面对网络或服务异常仅显示重试提示，不展示异常堆栈。
 
 `events` 仅包含展示所需的操作标题、时间、人员、备注和已格式化变更；不返回原始 `changedFields` 或内部报价修订标识。首屏使用同一领域查询；非管理员详情继续使用原有授权裁剪结果，不使用该分页入口。查询不修改审计记录或财务数据。
+
+### 管理员添加发货地址
+
+`actions/order-shipment.ts:addOrderShipmentAction(payload, mode)`：权限
+`order:update:post-schedule`，领域层再次限定 ADMIN。`mode` 为 `preview` 或
+`save`；预览只读，保存必须提交预览返回的 `previewToken`。
+
+输入包含 `orderId`、`sourceShipmentId`、`expectedRevision`、
+`expectedEditVersion`、`expectedWorkOrderVersion`、`expectedPriceRevision`，
+新地址的 `receiverName / receiverPhone / receiverAddress / destinationProvince`，
+以及 `lines: { orderItemId, quantity }[]`。新地址的 `shippingFee`、
+`packingMaterialFee` 可选，填写时必须有 `overrideReason`，仅适用于已提交的
+外部销售工单。返回 `preview`（原总额、新总额、差额、各地址费用）、`saved`
+或 `error`。
+
+保存使用工单级锁及数据库行锁，在同一事务内分货、增加地址、更新物流应收、
+追加价格修订与操作日志。最多 10 个地址，原地址至少保留一件；拒绝跨工单
+款式/地址、超分配、待审批、已发货、已结算及来源地址已有物流登记的请求。
+外部销售沿用原物流价目，保留原地址人工确认金额及历史证据；新金额进入待核价。
+外部销售草稿按原流程在提交时物化费用，内部结算保持原有不产生物流应收的规则。

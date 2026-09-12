@@ -46,6 +46,7 @@ export type OrderSubmissionReviewReceiver = {
   name: string;
   phone: string;
   address: string;
+  quantityLabel?: string;
 };
 
 export type OrderSubmissionReviewCharge = {
@@ -59,6 +60,7 @@ export type OrderSubmissionReviewContentProps = {
   orderName: string;
   items: readonly OrderSubmissionReviewItem[];
   receiver: OrderSubmissionReviewReceiver;
+  additionalReceivers?: readonly OrderSubmissionReviewReceiver[];
   cartonCharge?: OrderSubmissionReviewCharge;
   shippingCharge: OrderSubmissionReviewCharge;
   totalLabel: string;
@@ -99,6 +101,7 @@ export function OrderSubmissionReviewContent({
   orderName,
   items,
   receiver,
+  additionalReceivers = [],
   cartonCharge,
   shippingCharge,
   totalLabel,
@@ -298,14 +301,17 @@ export function OrderSubmissionReviewContent({
           >
             收货与快递
           </h3>
-          <address className="not-italic">
-            <p className="text-xs font-medium text-muted-foreground">
-              {receiver.name} · {receiver.phone}
-            </p>
-            <p className="mt-1 text-sm font-semibold leading-relaxed">
-              {receiver.address}
-            </p>
-          </address>
+          {[receiver, ...additionalReceivers].map((entry, index) => (
+            <address key={index} className="mb-3 break-words not-italic">
+              {additionalReceivers.length > 0 ? <p className="text-sm font-semibold">地址 {index + 1}{entry.quantityLabel ? ` · ${entry.quantityLabel}` : ''}</p> : null}
+              <p className="text-xs font-medium text-muted-foreground">
+                {entry.name} · {entry.phone}
+              </p>
+              <p className="mt-1 text-sm font-semibold leading-relaxed">
+                {entry.address}
+              </p>
+            </address>
+          ))}
           <dl className="mt-3 divide-y border-y text-sm">
             {cartonCharge ? (
               <div className="flex items-start justify-between gap-4 py-2.5">

@@ -1,3 +1,4 @@
+import { AddOrderShipmentForm } from '@/components/business/order/AddOrderShipmentForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { AdminOrderEditor } from '@/components/business/order/AdminOrderEditor';
@@ -196,6 +197,33 @@ export default async function EditOrderPage({ params }: PageProps) {
               <PendingModificationNoticeSection {...{
                 pending: pending, id: id,
               }} />
+            ) : null
+          }
+          deliveries={
+            !pending && order.shipments.length < 10 &&
+            !order.shipments.some((row) => row.status === 'SHIPPED') &&
+            'priceRevision' in order ? (
+              <AddOrderShipmentForm
+                orderId={order.id}
+                expectedRevision={order.revision}
+                expectedEditVersion={order.editVersion}
+                expectedWorkOrderVersion={order.workOrderVersion}
+                expectedPriceRevision={Number(order.priceRevision)}
+                allowManualPricing={external && order.billingMode !== 'NO_CHARGE' && order.status !== OrderStatus.DRAFT}
+                nextSequence={Math.max(0, ...order.shipments.map((row) => row.sequence)) + 1}
+                sources={order.shipments
+                  .filter((row) => !row.trackingNo && row.weightKg === null && row.registrationVersion === 0)
+                  .map((row) => ({
+                    id: row.id,
+                    sequence: row.sequence,
+                    receiverAddress: row.receiverAddress,
+                    lines: row.lines.filter((line) => line.quantity > 0).map((line) => ({
+                      orderItemId: line.orderItem.id,
+                      name: line.orderItem.name,
+                      quantity: line.quantity,
+                    })),
+                  }))}
+              />
             ) : null
           }
           fees=<EditorFeesSection {...{

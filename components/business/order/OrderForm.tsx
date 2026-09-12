@@ -2885,6 +2885,8 @@ export function OrderForm({
         totalAmount: currentLogisticsResult?.suggestedTotal ?? null,
         shippingLabel: watchedIsSfCollect
           ? '快递费 · 顺丰到付'
+          : watchedShipments.length > 0
+            ? `快递费 中通 · ${watchedShipments.length + 1} 个地址`
           : `快递费 中通${watchedDestinationProvince ? ` · ${watchedDestinationProvince}` : ' · 未填地址'}${typeof billableWeight === 'string' || typeof billableWeight === 'number' ? ` · ${billableWeight}kg` : ''}`,
         packagingLabel: `纸箱耗材 ${totalQuantity.toLocaleString('zh-CN')}个`,
         message:
@@ -3568,8 +3570,8 @@ export function OrderForm({
               ) : undefined
             }
             afterShipping={
-              !usesExternalSalesPricing ? (
-                <section
+                <fieldset
+                  disabled={orderFormControlsDisabled}
                   aria-label="多地址发货"
                   className="mt-4 border-t pt-4"
                 >
@@ -3606,7 +3608,7 @@ export function OrderForm({
                         })
                       }
                     >
-                      增加收货地址
+                      {shipmentsArray.fields.length >= 9 ? '已达 10 个地址' : `添加地址 ${shipmentsArray.fields.length + 2}`}
                     </Button>
                   </div>
                   {shipmentsArray.fields.length > 0 ? (
@@ -3615,12 +3617,13 @@ export function OrderForm({
                         <li key={shipment.id} className="rounded-xl border p-4">
                           <div className="flex items-center justify-between gap-3">
                             <h3 className="text-sm font-extrabold">
-                              额外地址 {shipmentIndex + 1}
+                              地址 {shipmentIndex + 2}
                             </h3>
                             <Button
                               type="button"
                               variant="outline"
                               className="text-destructive"
+                              disabled={orderFormControlsDisabled}
                               onClick={() => shipmentsArray.remove(shipmentIndex)}
                             >
                               删除地址
@@ -3763,8 +3766,7 @@ export function OrderForm({
                       ))}
                     </ol>
                   ) : null}
-                </section>
-              ) : undefined
+                </fieldset>
             }
             items={watchedItems}
             itemFields={itemsArray.fields}
@@ -4030,7 +4032,14 @@ export function OrderForm({
             name: pendingSubmission.data.receiverName?.trim() || '未识别收件人',
             phone: pendingSubmission.data.receiverPhone?.trim() || '无电话',
             address: pendingSubmission.data.receiverAddress?.trim() || '—',
+            quantityLabel: `${pendingSubmission.data.items.reduce((sum, item) => sum + item.quantity, 0) - pendingSubmission.data.additionalShipments.reduce((sum, shipment) => sum + shipment.itemQuantities.reduce((subtotal, quantity) => subtotal + quantity, 0), 0)} 件`,
           }}
+          additionalReceivers={pendingSubmission.data.additionalShipments.map((shipment) => ({
+            name: shipment.receiverName?.trim() || '未填写收件人',
+            phone: shipment.receiverPhone?.trim() || '未填写电话',
+            address: shipment.receiverAddress.trim(),
+            quantityLabel: `${shipment.itemQuantities.reduce((sum, quantity) => sum + quantity, 0)} 件`,
+          }))}
           cartonCharge={{
             label: '纸箱耗材',
             detail: `${totalQuantity.toLocaleString('zh-CN')} 个`,
