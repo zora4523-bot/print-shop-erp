@@ -176,7 +176,8 @@ describe('CustomerPricingSectionViews', () => {
     );
 
     expect(html).toContain('aria-label="局部烫金空白封现货单价矩阵"');
-    expect(visibleText(html)).toContain('空格是“— 转人工”显式状态');
+    expect(visibleText(html)).not.toContain('显式状态');
+    expect(html.match(/<header\b[\s\S]*?<\/header>/)?.[0]).not.toContain('<p');
     expect(inputMarkup(html, '珠光艳闪160g中号封单价')).toContain(
       'placeholder="— 转人工"',
     );
@@ -260,18 +261,19 @@ describe('CustomerPricingSectionViews', () => {
 
     expect(html).toContain('aria-label="彩印阶梯整单总价矩阵"');
     expect(text).toContain('彩印阶梯总价');
-    expect(text).toContain('元 / 单 · PER_ORDER · 整单总价不乘数量');
-    expect(text).toContain('查到的直接就是整单总价');
-    expect(text).toContain('该档无报价转人工，不是 0 元');
-    expect(text).toContain('单色烫金原子套餐');
-    expect(text).toContain('含制版费 · 按不可拆套餐总价计价');
-    expect(text).toContain('不再另收订单级制版费');
-    expect(text).toContain('冰白中号 2千起为空就是现状');
+    expect(text).toContain('元 / 单');
+    expect(text).not.toContain('PER_ORDER');
+    expect(text).not.toContain('查到的直接就是整单总价');
+    expect(text).not.toContain('该档无报价转人工，不是 0 元');
+    expect(text).toContain('单色烫金套餐');
+    expect(text).toContain('含制版费');
+    expect(text).not.toContain('不再另收订单级制版费');
+    expect(text).not.toContain('冰白中号 2千起为空就是现状');
     expect(inputMarkup(html, '冰白160g 中号2千档整单总价')).toContain(
       'placeholder="—"',
     );
     expect(
-      inputMarkup(html, '单色烫金1千档含版费原子套餐价'),
+      inputMarkup(html, '单色烫金1千档含版费套餐价'),
     ).toContain('value="200"');
   });
 });

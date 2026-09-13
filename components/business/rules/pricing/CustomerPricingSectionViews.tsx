@@ -177,7 +177,6 @@ type PricingNumericInputProps = PricingNumericFieldState & {
 type PricingSectionHeadingProps = {
   headingId: string;
   title: string;
-  description?: ReactNode;
   basis?: string;
   criticalBasis?: boolean;
   actions?: ReactNode;
@@ -194,7 +193,6 @@ const EMPTY_FIELD: PricingNumericFieldState = {
 function PricingSectionHeading({
   headingId,
   title,
-  description,
   basis,
   criticalBasis = false,
   actions,
@@ -222,11 +220,6 @@ function PricingSectionHeading({
               </Badge>
             ) : null}
           </div>
-          {description ? (
-            <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-muted-foreground sm:text-sm">
-              {description}
-            </p>
-          ) : null}
         </div>
         {actions ? (
           <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
@@ -392,12 +385,6 @@ export function CustomerBlankPricingSectionView({
         headingId={headingId}
         title="局部烫金 · 空白封现货单价"
         basis="元 / 个"
-        description={
-          <>
-            空白封 = 局部烫金的材料价。空格是“— 转人工”显式状态；
-            <strong className="text-foreground">0 元和无报价是两回事</strong>。
-          </>
-        }
         actions={headingActions}
       />
       {statusContent}
@@ -539,12 +526,6 @@ export function CustomerMachinePricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="局部烫金 · 机烫费与制版费"
-        description={
-          <>
-            机烫费按<strong className="text-foreground">印刷次数</strong>
-            计，不按面数。印刷次数 = 数量 × 过版次数。
-          </>
-        }
         actions={headingActions}
       />
       {statusContent}
@@ -791,12 +772,6 @@ export function CustomerAddsPricingSectionView({
         headingId={headingId}
         title="专版烫金 · 加价"
         basis="元 / 个"
-        description={
-          <>
-            全部仅作用于专版烫金，叠加到阶梯单价上；基准 160g 艳闪 / 红卡 = 0，
-            基准纸不需要加价行。
-          </>
-        }
         actions={headingActions}
       />
       {statusContent}
@@ -837,9 +812,8 @@ export function CustomerPrintPricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="彩印阶梯总价"
-        basis="元 / 单 · PER_ORDER · 整单总价不乘数量"
+        basis="元 / 单"
         criticalBasis
-        description="查到的直接就是整单总价。空格 = 该档无报价，转人工。数量取整：5千–7千按5千 · 8千–1万按1万 · 1.5万–2万按2万。"
         actions={headingActions}
       />
       {statusContent}
@@ -888,9 +862,9 @@ export function CustomerPrintPricingSectionView({
               ))}
               <TableRow className="hover:bg-transparent">
                 <TableCell className="px-4 py-2 text-sm font-bold">
-                  <span className="block">单色烫金原子套餐</span>
+                  <span className="block">单色烫金套餐</span>
                   <span className="mt-0.5 block text-xs font-semibold text-primary">
-                    含制版费 · 按不可拆套餐总价计价
+                    含制版费
                   </span>
                 </TableCell>
                 {columns.map((column) => {
@@ -903,7 +877,7 @@ export function CustomerPrintPricingSectionView({
                     <TableCell key={column.key} className="p-1">
                       <PricingNumericInput
                         {...field}
-                        ariaLabel={`单色烫金${column.label}档含版费原子套餐价`}
+                        ariaLabel={`单色烫金${column.label}档含版费套餐价`}
                         className="h-8 w-14 px-1.5 text-xs"
                       />
                     </TableCell>
@@ -912,12 +886,6 @@ export function CustomerPrintPricingSectionView({
               </TableRow>
             </TableBody>
           </Table>
-          <div className="px-4 pb-4 pt-3 sm:px-5">
-            <FormulaNote>
-              彩印基础价清空一个格子 = 该档无报价转人工，
-              <strong className="text-destructive">不是 0 元</strong>。单色烫金套餐价已包含制版费，有唯一明确档位时作为不可拆原子总价计入款式，不再另收订单级制版费；缺档时整款转人工核价。冰白中号 2千起为空就是现状，不会按 0 元处理。
-            </FormulaNote>
-          </div>
         </CardContent>
       </Card>
     </section>
@@ -1021,7 +989,6 @@ export function CustomerShipPricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="包装 · 纸箱耗材 · 中通快递"
-        description="入袋混装按袋（款级）；纸箱与快递按整单。纸箱任何情况都收；快递仅总数量 ≤ 上限时自动计，超出走物流待定，顺丰到付归零。"
         actions={headingActions}
       />
       {statusContent}

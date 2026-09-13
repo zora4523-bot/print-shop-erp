@@ -239,7 +239,7 @@ describe('CustomerPricingDedicatedSection', () => {
 
     expect(html).toContain('data-section-draft-form="true"');
     expect(html).toMatch(
-      /<input\b[^>]*aria-label="单色烫金1千档含版费原子套餐价"[^>]*value="200"/u,
+      /<input\b[^>]*aria-label="单色烫金1千档含版费套餐价"[^>]*value="200"/u,
     );
     expect(html).toContain('name="print.foil.Q1000"');
   });

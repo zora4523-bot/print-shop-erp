@@ -335,6 +335,8 @@ gates:
 - `components/business/order/AdminOrderDecisionPanel.tsx:837`：“款式与费用由服务端按最新规则自动合并和重算。”
 - `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:963`：“缺少设计稿规定的 5万档…本区暂时只读”。该处还涉及编辑条件，须另行核对业务规则。
 
+计价分区页头只保留名称、计价单位和操作入口。空白封的“0 元与无报价”解释、彩印的取档机制及固定缺价示例不作为常驻说明；单元格保留实际价格和转人工状态，真实校验失败仍显示原因和恢复入口。单色烫金套餐以“含制版费”标识收费内容，不展示内部计价术语。
+
 ### 业务词映射
 
 | 内部词 | 用户文案 |
