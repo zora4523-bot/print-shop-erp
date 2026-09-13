@@ -13,7 +13,7 @@ import {
 //   1. signDesignUploadAction → 预签 PUT URL（服务端校验类型/大小/路径）
 //   2. 浏览器 fetch PUT 直传 OSS（文件不经过我们的服务器）
 //   3. recordDesignUploadAction → 服务端 HEAD 确认后写 OrderItemDesign
-// 仅 DRAFT 状态渲染上传/删除控件（服务端 lib 层同样强校验）。
+// 仅草稿或驳回状态渲染上传/删除控件（服务端 lib 层同样强校验）。
 
 export type DesignItem = {
   id: string;
@@ -134,7 +134,7 @@ export function DesignUploadPanel({
   }
 
   return (
-    <div className="mt-3 space-y-2 border-t pt-3">
+    <div aria-busy={busy || deleting} className="mt-3 space-y-2 border-t pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">
           设计文件（{designs.length}）

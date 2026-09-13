@@ -76,6 +76,9 @@ function tagWithIdSuffix(html: string, suffix: string): string {
 }
 
 describe('OrderForm 必填字段的 required 语义', () => {
+  it.each([true, false])('两种建单身份均可添加第 2 个收货地址：%s', (external) => {
+    expect(render(external)).toContain('添加地址 2');
+  });
   it('服务端错误只展示去重后的业务文案，不显示内部字段路径', () => {
     const messages = orderServerFieldErrorMessages({
       'items.0.paperType': ['第 1 款的纸张已停用'],
@@ -127,7 +130,7 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(html).toContain('id="customerRef"');
     expect(html).toContain('id="expressCode"');
     expect(html).toContain('id="items.0.manualQuoteReason"');
-    expect(html).toContain('配置外项目说明（转人工核价）');
+    expect(html).toContain('需人工核价的要求（选填）');
     expect(html).toContain('id="items.0.artworkVersion"');
     expect(html).toContain('id="items.0.plateGroupId"');
     expect(html).toContain('id="items.0.remark"');
@@ -252,4 +255,13 @@ describe('OrderForm 必填字段的 required 语义', () => {
         .lockNavigation,
     ).toBe(false);
   });
+});
+
+
+it.each([true, false])('shows one optional order note after shipping for external=%s', (external) => {
+  const html = render(external);
+  expect(html.match(/id="remark"/g)).toHaveLength(1);
+  expect(html).toContain('工单备注（选填）');
+  expect(html).toMatch(/<textarea[^>]*id="remark"[^>]*maxLength="1000"/i);
+  expect(html.indexOf('id="remark"')).toBeGreaterThan(html.indexOf('多地址发货'));
 });

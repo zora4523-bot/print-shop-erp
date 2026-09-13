@@ -8,7 +8,6 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { ActionNotice } from '@/components/ui-business';
 import { OrderPricingReviewForm } from './OrderPricingReviewForm';
 import { FulfillmentPricingReviewForm } from './FulfillmentPricingReviewForm';
-import { ShipOrderForm } from './ShipOrderForm';
 import styles from './AdminOrderInlineOperations.module.css';
 
 export function AdminOrderInlineOperations({ order, disabled = false, onCompleted }: {
@@ -21,7 +20,6 @@ export function AdminOrderInlineOperations({ order, disabled = false, onComplete
   const [mode, setMode] = useState<'pricing' | 'shipping' | null>(null);
   const [openedModes, setOpenedModes] = useState({ pricing: false, shipping: false });
   const [receipt, setReceipt] = useState('');
-  const [requestKey] = useState(() => globalThis.crypto.randomUUID());
   const data = order.inlineOperations;
   const finish = useCallback((message: string) => {
     if (onCompleted) onCompleted(message);
@@ -31,7 +29,6 @@ export function AdminOrderInlineOperations({ order, disabled = false, onComplete
     router.refresh();
   }, [onCompleted, router]);
   const pricingFinished = useCallback(() => finish('核价已确认'), [finish]);
-  const shippingFinished = useCallback(() => finish('工单已发货'), [finish]);
   if (order.pendingChangeRequest) return null;
   const pricingFallback = !data?.pricing && (order.fee.source === 'PENDING' || Boolean(order.priceComparisonError));
   if (!data?.pricing && !data?.shipping && !pricingFallback && !receipt) return null;
@@ -55,7 +52,7 @@ export function AdminOrderInlineOperations({ order, disabled = false, onComplete
         {data?.pricing === 'fulfillment' && data.fulfillment ? <FulfillmentPricingReviewForm orderId={order.id} {...data.fulfillment} variant="drawer" onSuccess={pricingFinished} /> : null}
       </div> : null}
       {openedModes.shipping && data?.shipping ? <div id={`${panelId}-shipping`} hidden={mode !== 'shipping'} className={styles.form}>
-        <ShipOrderForm orderId={order.id} {...data.shipping} initialIdempotencyKey={requestKey} onSuccess={shippingFinished} />
+        <Link href={`/orders/${order.id}#shipment-registration`} prefetch={false} className={buttonVariants({ variant: 'outline' })}>前往登记物流</Link>
       </div> : null}
     </div>
   );

@@ -10,7 +10,7 @@ const { previewAction, finalizeAction, shipAction, refresh, completed } = vi.hoi
   previewAction: vi.fn(), finalizeAction: vi.fn(), shipAction: vi.fn(), refresh: vi.fn(), completed: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
-vi.mock('next/link', () => ({ default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => { void prefetch; return <a {...props} />; } }));
+vi.mock('next/link', () => ({ __esModule: true, default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => { void prefetch; return <a {...props} />; } }));
 vi.mock('@/actions/order', () => ({ previewOrderPricingReviewAction: previewAction, finalizeOrderPricingAction: finalizeAction, shipOrderAction: shipAction }));
 vi.mock('@/actions/order-fulfillment-pricing', () => ({ previewFulfillmentPricingAction: vi.fn(), finalizeFulfillmentPricingAction: vi.fn() }));
 import { AdminOrderInlineOperations } from '../AdminOrderInlineOperations';
@@ -58,7 +58,8 @@ async function open(kind: 'pricing' | 'shipping', onCompleted?: (message: string
   const trigger = page.getByRole('button', { name: kind === 'pricing' ? '录入人工核价' : '录运单发货', exact: true });
   await trigger.click();
   await expect.element(trigger).toHaveAttribute('aria-expanded', 'true');
-  await expect.element(page.getByLabelText(kind === 'pricing' ? '确认金额（元）' : '运单号（选填）')).toBeVisible();
+  if (kind === 'pricing') await expect.element(page.getByLabelText('确认金额（元）')).toBeVisible();
+  else await expect.element(page.getByRole('link', { name: '前往登记物流' })).toBeVisible();
 }
 
 for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
@@ -100,23 +101,13 @@ it('pricing links preserve the current detail anchor; confirmation retains error
   await expect.element(page.getByLabelText('确认金额（元）')).toHaveValue('45.50');
 });
 
-it('shipping waits for confirmation and refreshes the list without leaving the detail', async () => {
-  await page.viewport(393, 852); await open('shipping');
-  await page.getByLabelText('运单号（选填）').fill('ZTO-123456');
-  await page.getByRole('button', { name: '确认 1 个地址已发货', exact: true }).click();
+it('shipping directs users to the per-address registration without calling the old writer', async () => {
+  await open('shipping');
+  await expect.element(page.getByRole('link', { name: '前往登记物流' })).toHaveAttribute('href', '/orders/inline-order#shipment-registration');
   expect(shipAction).not.toHaveBeenCalled();
-  await page.getByRole('alertdialog').getByRole('button', { name: '取消', exact: true }).click();
-  expect(shipAction).not.toHaveBeenCalled();
-  await page.getByRole('button', { name: '确认 1 个地址已发货', exact: true }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: '确认发货并重算应收', exact: true }).click();
-  await expect.element(page.getByText('工单已发货', { exact: true })).toBeVisible();
-  await expect.poll(() => refresh.mock.calls.length).toBeGreaterThan(0);
-  const formData = shipAction.mock.calls[0][2] as FormData;
-  expect(formData.get('expectedRevision')).toBe('4'); expect(formData.get('expectedPriceRevision')).toBe('7');
-  expect(formData.get('shipmentTrackingNo')).toBe('ZTO-123456');
 });
 
-it.each(['pricing', 'shipping'] as const)('%s completes and reports once after its pending form is collapsed', async (kind) => {
+it.each(['pricing'] as const)('%s completes and reports once after its pending form is collapsed', async (kind) => {
   let finish!: (result: { status: 'success' }) => void;
   const action = kind === 'pricing' ? finalizeAction : shipAction;
   action.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
@@ -129,7 +120,6 @@ it.each(['pricing', 'shipping'] as const)('%s completes and reports once after i
     await page.getByLabelText('运单号（选填）').fill('ZTO-987654');
   }
   await page.getByRole('button', { name: kind === 'pricing' ? '确认工厂核价' : '确认 1 个地址已发货', exact: true }).click();
-  if (kind === 'shipping') await page.getByRole('alertdialog').getByRole('button', { name: '确认发货并重算应收', exact: true }).click();
   await expect.poll(() => action.mock.calls.length).toBe(1);
   await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
   const trigger = page.getByRole('button', { name: kind === 'pricing' ? '录入人工核价' : '录运单发货', exact: true });

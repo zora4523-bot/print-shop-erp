@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import {
   createMaterialTransactionAction,
@@ -90,6 +91,7 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
             丢掉。表单字段的重置改由组件内部在 success 后 reset()。 */}
         <StockTransactionForm
           action={boundTransaction}
+          initialIdempotencyKey={randomUUID()}
           unit={material.unit}
           locationOptions={locationOptions}
         />

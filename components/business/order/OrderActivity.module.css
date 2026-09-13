@@ -1,0 +1,28 @@
+.activity { min-width: 0; }
+.count { color: var(--muted-foreground); font-size: var(--text-xs); margin-bottom: 8px; }
+.date { font-size: var(--text-sm); font-weight: 600; padding: 20px 0 8px; }
+.event { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.event header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 24px; }
+.event h4 { font-size: var(--text-base); font-weight: 600; overflow-wrap: anywhere; }
+.event header p { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted-foreground); font-size: var(--text-xs); }
+.event time { font-variant-numeric: tabular-nums; }
+.changes { display: grid; gap: 8px; margin-top: 10px; font-size: var(--text-sm); }
+.changes:empty { display: none; }
+.changes > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 16px; }
+.changes dt { color: var(--muted-foreground); }
+.changes dd { display: flex; flex-wrap: wrap; gap: 8px; overflow-wrap: anywhere; min-width: 0; }
+.changes dd span:first-child { color: var(--muted-foreground); }
+.changes dd > * { min-width: 0; max-width: 100%; }
+.changes strong { font-weight: 600; }
+.remark { margin-top: 8px; font-size: var(--text-sm); color: var(--muted-foreground); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 80ch; }
+.details { margin-top: 4px; }
+.details > summary { width: fit-content; gap: 8px; padding: 0 4px; color: var(--muted-foreground); }
+.indicator { transition: transform 150ms; }
+.details[open] .indicator { transform: rotate(180deg); }
+.activity > button { margin-top: 16px; min-height: 44px; }
+@media (max-width: 640px) {
+  .event header { display: block; }
+  .event header p { margin-top: 4px; }
+  .changes > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) { .indicator { transition: none; } }

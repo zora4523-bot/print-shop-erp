@@ -43,7 +43,7 @@ describe('工单变更申请 UI 集成契约', () => {
     const requestPolicy = sourceBlock(
       detailSource,
       'const canRequestChange =',
-      'const customerChargeByShipmentAndCategory =',
+      'const manualCustomerCharges =',
     );
     expect(requestPolicy).toContain('canRequestOrderModification(user, order, Boolean(pendingChangeRequest))');
     expect(requestPolicy).toContain('user.role === Role.CUSTOMER_SERVICE');

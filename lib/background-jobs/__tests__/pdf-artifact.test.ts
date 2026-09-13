@@ -46,7 +46,8 @@ describe('writePdfArtifact', () => {
     await writePdfArtifact('job-1.pdf', Buffer.from('pdf'));
 
     const target = '/var/tmp/pdf-artifact-test/job-1.pdf';
-    const temporary = `${target}.${process.pid}.tmp`;
+    const temporary = fsMock.writeFile.mock.calls[0]?.[0];
+    expect(temporary).toMatch(/^\/var\/tmp\/pdf-artifact-test\/job-1\.pdf\.[a-f0-9-]{36}\.tmp$/);
     expect(fsMock.writeFile).toHaveBeenCalledWith(
       temporary,
       Buffer.from('pdf'),
@@ -67,7 +68,7 @@ describe('writePdfArtifact', () => {
     ).rejects.toBe(renameFailure);
 
     expect(fsMock.unlink).toHaveBeenCalledWith(
-      `/var/tmp/pdf-artifact-test/job-2.pdf.${process.pid}.tmp`,
+      fsMock.writeFile.mock.calls[0]?.[0],
     );
   });
 

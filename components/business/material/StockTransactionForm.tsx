@@ -2,6 +2,7 @@
 
 import {
   useActionState,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -28,6 +29,7 @@ type Props = {
     fd: FormData,
   ) => Promise<MaterialMutationResult>;
   unit: string;
+  initialIdempotencyKey: string;
   locationOptions: WarehouseLocationOption[];
 };
 
@@ -61,6 +63,7 @@ const STOCK_TRANSACTION_FIELDS: Record<
   string,
   { fieldId: string; label: string }
 > = {
+  idempotencyKey: { fieldId: 'stock-transaction-form', label: '出入库请求' },
   materialId: { fieldId: 'stock-transaction-form', label: '物料' },
   direction: { fieldId: 'direction', label: '方向' },
   quantity: { fieldId: 'quantity', label: '数量' },
@@ -70,11 +73,17 @@ const STOCK_TRANSACTION_FIELDS: Record<
   remark: { fieldId: 'remark', label: '备注' },
 };
 
-export function StockTransactionForm({ action, unit, locationOptions }: Props) {
+export function StockTransactionForm({ action, unit, locationOptions, initialIdempotencyKey }: Props) {
+  const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
+  const submitMovement = useCallback(async (prev: MaterialMutationResult | null, formData: FormData) => {
+    const result = await action(prev, formData);
+    if (result.status === 'success') setIdempotencyKey(window.crypto.randomUUID());
+    return result;
+  }, [action]);
   const [state, formAction, pending] = useActionState<
     MaterialMutationResult | null,
     FormData
-  >(action, null);
+  >(submitMovement, null);
   const visibleState = pending ? null : state;
   const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
   const generalError =
@@ -87,13 +96,17 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
   // 外层不再用 key 强制重挂载（那会连成功提示一起清掉），改成成功后
   // 只 reset 原生表单字段，useActionState 的 state 得以保留并渲染。
   const formRef = useRef<HTMLFormElement>(null);
+  const allowResetRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const confirmedRef = useRef(false);
   const formId = 'stock-transaction-form';
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [preview, setPreview] = useState<StockTransactionPreview | null>(null);
   useEffect(() => {
-    if (state?.status === 'success') formRef.current?.reset();
+    if (state?.status === 'success') {
+      allowResetRef.current = true;
+      try { formRef.current?.reset(); } finally { allowResetRef.current = false; }
+    }
   }, [state]);
   const [direction, setDirection] = useState<'IN' | 'OUT'>('IN');
   const [reasonType, setReasonType] = useState<'PRODUCTION_USE' | 'RETURN' | 'OTHER'>('RETURN');
@@ -155,6 +168,11 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
       ref={formRef}
       action={formAction}
       onSubmit={handleSubmit}
+      onReset={(event) => {
+        // React also resets uncontrolled fields after a resolved error result.
+        // Keep the draft and request key until the stock mutation succeeds.
+        if (!allowResetRef.current) event.preventDefault();
+      }}
       onInvalidCapture={() => {
         // 若确认后浏览器原生校验阻止 submit，立即销毁一次性放行令牌。
         confirmedRef.current = false;
@@ -163,6 +181,7 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
       data-risk-level="L2"
       className="space-y-4"
     >
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <FormErrorSummary errors={summaryErrors} />
 
       <div className="grid gap-4 md:grid-cols-2">

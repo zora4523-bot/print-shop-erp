@@ -67,7 +67,7 @@ const resumeSchema = z.object({
   idempotencyKey,
 });
 
-const releaseSchema = versionedSchema.extend({ printIdempotencyKey: idempotencyKey });
+const releaseSchema = versionedSchema.extend({ printIdempotencyKey: idempotencyKey, createPrint: z.boolean().optional() });
 
 const batchSchema = z.object({
   requestId: idempotencyKey,

@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { adminOrderCraftTags, adminOrderDueHint } from '@/lib/order/admin-list-presentation';
-import type { OrderChangeRequestStatus } from '@/generated/prisma/enums';
+import type { OrderChangeRequestStatus, OrderPricingStatus } from '@/generated/prisma/enums';
 import type { getOrderDetail } from '@/lib/order';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import type { listOrderProductionOperations, listOrderProductionProgressSteps } from '@/lib/production/operation-order-view';
@@ -8,9 +8,9 @@ import { actionLabel, formatOrderLogChanges } from '@/lib/order/log-format';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
-import { hasAdminPricingConfirmationMarker, isTrustedAdminItemPricingSnapshot, isTrustedAdminPackagingPricingSnapshot, isTrustedAdminPricingSnapshot } from '@/lib/order/admin-pricing-snapshot';
+import { orderDetailAmounts } from '@/lib/order/detail-amounts';
 
-export type DetailFee = { id: string; label: string; amount: string | null };
+export type DetailFee = { id: string; label: string; amount: string | null; estimated?: boolean };
 export type DetailDiff = { id: string; label: string; before: string; after: string; targetItemId: string | null; targetSection?: 'items' | 'fees' | 'overview' };
 export type DetailItem = {
   id: string; fig: number; sequence: number; name: string; qty: number; pack: string | null;
@@ -37,10 +37,12 @@ export type DetailShipment = {
   address: string | null; trackingNo: string | null; carrier: string | null; items: string[];
 };
 export type AdminOrderDetailModel = {
+  remark?: string | null;
   id: string; no: string; name: string; version: number; status: AdminOrderWorkspaceRow['status'];
   customer: string; sales: string; craft: string; due: string | null; dueLeft: string;
   qty: number; isUrgent: boolean; items: DetailItem[]; orderFees: DetailFee[];
   total: string | null; feeSource: AdminOrderWorkspaceRow['fee']['source'];
+  pricingStatus?: OrderPricingStatus; totalEstimated?: boolean;
   feeStages: { key: 'quoted' | 'confirmed' | 'settled'; title: string; total: string | null; current: boolean }[];
   vdiff: { from: number; to: number; at: string; items: DetailDiff[] } | null;
   changes: DetailChange[]; works: DetailWork[]; logs: DetailLog[]; shipments: DetailShipment[];
@@ -101,52 +103,20 @@ function personName(value: unknown): string | null {
   return typeof name === 'string' ? name : null;
 }
 
-function hasTrustedManualItemPrice(item: Order['items'][number]): boolean {
-  // The shared detail query omits money for worker views, so narrow the
-  // commercial fields explicitly before using the row-bound validator.
-  const facts = record(item);
-  const unitPrice = decimal(facts.unitPrice);
-  const fixedFee = decimal(facts.fixedFee);
-  const subtotal = decimal(facts.subtotal);
-  if (!unitPrice || !fixedFee || !subtotal) return false;
-  return isTrustedAdminItemPricingSnapshot(facts.pricingSnapshot, {
-    ...item,
-    unitPrice: unitPrice.toString(), fixedFee: fixedFee.toString(), subtotal: subtotal.toString(),
-    manualQuoteReason: typeof facts.manualQuoteReason === 'string' ? facts.manualQuoteReason : null,
-    priceOverrideReason: typeof facts.priceOverrideReason === 'string' ? facts.priceOverrideReason : null,
-  });
-}
-
-function packagingHasUnknownAmount(order: Order, group: Order['packagingGroups'][number]): boolean {
-  const fields = record(group);
-  const unitPrice = decimal(fields.unitPrice);
-  const subtotal = decimal(fields.subtotal);
-  const snapshot = fields.pricingSnapshot;
-  if (unitPrice && subtotal && isTrustedAdminPackagingPricingSnapshot(snapshot, {
-    ...group, orderId: order.id, unitPrice: unitPrice.toString(), subtotal: subtotal.toString(),
-    priceOverrideReason: typeof fields.priceOverrideReason === 'string' ? fields.priceOverrideReason : null,
-    lines: group.lines.map((line) => ({ orderItemId: line.orderItem.id, unitsPerBag: line.unitsPerBag })),
-  })) return false;
-  // An administrator marker whose row binding is stale is not a usable quote.
-  if (isTrustedAdminPricingSnapshot(snapshot) || hasAdminPricingConfirmationMarker(snapshot)) return true;
-  const data = record(snapshot);
-  const actual = record(data.actual);
-  const status = typeof data.status === 'string' ? data.status.toUpperCase() : '';
-  const source = typeof data.source === 'string' ? data.source.toUpperCase() : '';
-  // Mirrors pricing-review's snapshotHasUnknownManualAmount. Only an explicit
-  // unknown-amount envelope replaces persisted zero with null; unrelated
-  // pending order fees and older reviewable amounts do not erase this fee.
-  const requiresManual = ['MANUAL_PRICING_REQUIRED', 'PENDING_AMOUNT', 'EXCLUDED_MANUAL'].includes(status) ||
-    data.complete === false || actual.provisional === true || actual.requiresAdminConfirmation === true || source.includes('MANUAL_REQUIRED');
-  return requiresManual && (actual.amount === null || actual.provisional === true || actual.requiresAdminConfirmation === true);
-}
-
 function display(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   if (Array.isArray(value)) return value.filter((entry) => typeof entry === 'string').join('、') || '无';
   if (typeof value === 'number') return value.toLocaleString('zh-CN');
   if (typeof value === 'boolean') return value ? '是' : '否';
   return typeof value === 'string' ? externalPriceBusinessText(value) : '未记录';
+}
+
+function paperDescription(type: string | null, weight: number | null): string {
+  const paper = type ? externalPriceBusinessText(type).trim() : '';
+  // Keep the saved material name intact. Only omit the additional weight when
+  // that exact value is already present; 160g must not match 60g or 1600g.
+  const includesWeight = weight && new RegExp(`(?:^|[^\\d.])${weight}\\s*(?:gsm|g|克)(?![a-z])`, 'i').test(paper);
+  return [paper, weight && !includesWeight ? `${weight}g` : null].filter(Boolean).join(' · ') || '未记录';
 }
 
 const DIFF_FIELDS = [
@@ -196,6 +166,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
   if (order.id !== workspace.id || order.workOrderVersion !== workspace.workOrderVersion || order.revision !== workspace.revision || (workspace.editVersion !== undefined && order.editVersion !== workspace.editVersion)) {
     throw new Error('工单资料版本已变化，请刷新后重试');
   }
+  const monetaryFacts = orderDetailAmounts(order);
   const currentItemIds = new Set(order.items.map((item) => item.id));
   const changes = order.changeRequests.map((request): DetailChange => ({
     id: request.id, status: request.status, reason: request.reason, at: dateTime(request.createdAt),
@@ -214,12 +185,10 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
     const packaging = order.packagingGroups.flatMap((group) =>
       group.lines.filter((line) => line.orderItem.id === item.id).map((line) =>
         `${group.name || `包装 ${group.sequence}`}：${line.unitsPerBag} 个/袋，${group.actualBagCount} 袋`));
-    const itemRecord = record(item);
-    const unresolvedManualQuote = item.quoteDisposition === 'MANUAL_PRICING_REQUIRED' &&
-      !hasTrustedManualItemPrice(item);
     const fees: DetailFee[] = [{
       id: `${item.id}-subtotal`, label: '款式加工费',
-      amount: unresolvedManualQuote ? null : amount(itemRecord.subtotal),
+      amount: monetaryFacts.itemAmounts.get(item.id) ?? null,
+      ...(monetaryFacts.itemEstimated.get(item.id) ? { estimated: true } : {}),
     }];
     if ('plateDetails' in item) {
       for (const plate of item.plateDetails.filter((row) => row.isActive)) {
@@ -232,7 +201,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
       pack: packaging.length ? packaging.join('；') : item.pack == null ? null : `${item.pack} 个/袋（历史记录）`,
       specs: [
         { label: '工艺', value: [...new Set([...adminOrderCraftTags([item.craft]), ...item.craftNames])].join('、') || '未记录' },
-        { label: '纸张', value: [item.paperType ? externalPriceBusinessText(item.paperType) : null, item.paperWeightGsm ? `${item.paperWeightGsm}g` : null].filter(Boolean).join(' · ') || '未记录' },
+        { label: '纸张', value: paperDescription(item.paperType, item.paperWeightGsm) },
         { label: '规格', value: item.specification ? externalPriceBusinessText(item.specification) : '未记录' },
         { label: '实尺', value: item.actualWidthMm != null && item.actualHeightMm != null ? `${item.actualWidthMm.toString()} × ${item.actualHeightMm.toString()} mm` : '未记录' },
         { label: '正面烫金', value: foil.frontFoilColors.join('、') || '无' },
@@ -250,9 +219,8 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
       })),
     };
   });
-  const orderRecord = record(order);
-  const orderFees: DetailFee[] = [{ id: 'packaging', label: '入袋费', amount:
-    order.packagingGroups.some((group) => packagingHasUnknownAmount(order, group)) ? null : amount(orderRecord.packagingAmount) }];
+  const orderFees: DetailFee[] = [{ id: 'packaging', label: '入袋费', amount: monetaryFacts.packagingAmount,
+    ...(monetaryFacts.packagingEstimated ? { estimated: true } : {}) }];
   const displayedPlateIds = new Set(order.items.flatMap((item) =>
     'plateDetails' in item ? item.plateDetails.filter((plate) => plate.isActive).map((plate) => plate.id) : []));
   for (const charge of order.customerCharges) {
@@ -260,7 +228,8 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
     // Keep the item-level breakdown and do not display it a second time here.
     if (charge.businessKey.startsWith('PLATE_DETAIL:') && displayedPlateIds.has(charge.businessKey.slice('PLATE_DETAIL:'.length))) continue;
     if (charge.status === 'WAIVED') continue;
-    orderFees.push({ id: charge.id, label: `${charge.category.name}${charge.shipment ? ` · 第 ${charge.shipment.sequence} 票` : ''}`, amount: amount(charge.amount) });
+    orderFees.push({ id: charge.id, label: `${charge.category.name}${charge.shipment ? ` · 第 ${charge.shipment.sequence} 票` : ''}`, amount: amount(charge.amount),
+      ...(charge.status === 'ESTIMATED' ? { estimated: true } : {}) });
   }
   const dueLeft = adminOrderDueHint(workspace.dueAlert) ?? '';
   const feeStages = (['quoted', 'confirmed', 'settled'] as const).map((key) => ({
@@ -268,11 +237,13 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
     total: amount(workspace.feeStages[key]), current: workspace.feeStages.active === key.toUpperCase(),
   }));
   return {
+    remark: order.remark,
     id: order.id, no: order.orderNo, name: order.customName || '未命名工单',
     version: order.workOrderVersion, status: order.status, customer: workspace.customer.name,
     sales: workspace.submitter.name, craft: workspace.craftTags?.join(' · ') || workspace.craftSummary,
     due: workspace.promisedDate?.slice(0, 10) ?? null, dueLeft, qty: workspace.totalQuantity, isUrgent: order.isUrgent,
     items, orderFees, total: amount(workspace.fee.amount), feeSource: workspace.fee.source, feeStages,
+    pricingStatus: monetaryFacts.pricingStatus, totalEstimated: workspace.fee.estimated,
     vdiff: currentApproval && currentApproval.baseWorkOrderVersion != null ? {
       from: currentApproval.baseWorkOrderVersion, to: order.workOrderVersion,
       at: dateTime(currentApproval.reviewedAt ?? currentApproval.createdAt),

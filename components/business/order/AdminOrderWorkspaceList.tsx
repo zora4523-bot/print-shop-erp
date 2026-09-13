@@ -1,5 +1,7 @@
 'use client';
 
+import { OrderRemark } from './OrderRemark';
+
 /* eslint-disable @next/next/no-img-element */
 
 import {
@@ -32,14 +34,14 @@ import styles from './AdminOrderWorkspace.module.css';
 
 export function AdminOrderWorkspaceList({
   orders,
-  customerFilterHrefs,
+  submitterFilterHrefs,
   selectedExportRequestKey,
   hasFilters = false,
   clearFiltersHref = '/orders',
   footer,
 }: {
   orders: AdminOrderWorkspaceRow[];
-  customerFilterHrefs: Record<string, string>;
+  submitterFilterHrefs: Record<string, string>;
   selectedExportRequestKey: string;
   hasFilters?: boolean;
   clearFiltersHref?: string;
@@ -70,7 +72,7 @@ export function AdminOrderWorkspaceList({
       >
         <AdminOrderWorkspaceListInner
           orders={orders}
-          customerFilterHrefs={customerFilterHrefs}
+          submitterFilterHrefs={submitterFilterHrefs}
           hasFilters={hasFilters}
           clearFiltersHref={clearFiltersHref}
           onFeedback={setFeedback}
@@ -83,14 +85,14 @@ export function AdminOrderWorkspaceList({
 
 function AdminOrderWorkspaceListInner({
   orders,
-  customerFilterHrefs,
+  submitterFilterHrefs,
   hasFilters,
   clearFiltersHref,
   onFeedback,
   footer,
 }: {
   orders: AdminOrderWorkspaceRow[];
-  customerFilterHrefs: Record<string, string>;
+  submitterFilterHrefs: Record<string, string>;
   hasFilters: boolean;
   clearFiltersHref: string;
   onFeedback: (feedback: OrderRowFeedback) => void;
@@ -115,8 +117,8 @@ function AdminOrderWorkspaceListInner({
               <AdminOrderRow
                 key={order.id}
                 order={order}
-                customerFilterHref={
-                  customerFilterHrefs[order.id] ?? '/orders'
+                submitterFilterHref={
+                  submitterFilterHrefs[order.id] ?? '/orders'
                 }
                 onOpen={() => router.push(`/orders/${encodeURIComponent(order.id)}`)}
                 onFeedback={onFeedback}
@@ -146,12 +148,12 @@ type OrderRowFeedback = { tone: 'success' | 'error'; message: string };
 
 function AdminOrderRow({
   order,
-  customerFilterHref,
+  submitterFilterHref,
   onOpen,
   onFeedback,
 }: {
   order: AdminOrderWorkspaceRow;
-  customerFilterHref: string;
+  submitterFilterHref: string;
   onOpen: () => void;
   onFeedback: (feedback: OrderRowFeedback) => void;
 }) {
@@ -199,12 +201,12 @@ function AdminOrderRow({
         </div>
         <p className={cn(styles.meta, "mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs font-semibold text-muted-foreground")}>
           <Link
-            href={customerFilterHref}
+            href={submitterFilterHref}
             prefetch={false}
             className="admin-wrap-anywhere underline decoration-dotted underline-offset-2 hover:text-foreground"
             onClick={(event) => event.stopPropagation()}
           >
-            {order.customer.name}
+            业务员：{order.submitter.name.trim() || '未命名账号'}
           </Link>
           {order.craftTags?.map((tag) => (
             <span key={tag} className="my-0.5 inline-block whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
@@ -212,6 +214,7 @@ function AdminOrderRow({
             </span>
           ))}
         </p>
+        <OrderRemark remark={order.remark} compact />
       </div>
 
       <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto">

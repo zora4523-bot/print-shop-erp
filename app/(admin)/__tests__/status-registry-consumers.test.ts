@@ -7,7 +7,7 @@ function source(relativePath: string): string {
 }
 
 describe('high-risk status registry consumers', () => {
-  it('uses centralized registries across v2 owner and legacy sales bills', () => {
+  it('uses centralized registries across owner and sales monthly bills', () => {
     const legacyFiles = [
       'app/(admin)/sales/bills/page.tsx',
       'app/(admin)/sales/bills/[id]/page.tsx',
@@ -16,7 +16,7 @@ describe('high-risk status registry consumers', () => {
     // 归并后两页共用 components/business/bill/BillStatusBadge；registry 的
     // 单一引用点随之移进共享组件，列表页因筛选器仍直接读 registry。
     for (const file of legacyFiles) {
-      expect(source(file), file).toContain('BillStatusBadge');
+      expect(source(file), file).toContain('AGENT_MONTHLY_BILL_STATUS_REGISTRY');
     }
     expect(source(legacyFiles[0]!), legacyFiles[0]).toContain(
       'BILL_STATUS_REGISTRY',
@@ -25,8 +25,8 @@ describe('high-risk status registry consumers', () => {
       source('components/business/bill/BillStatusBadge.tsx'),
     ).toContain('BILL_STATUS_REGISTRY');
     const v2Files = [
-      'app/(admin)/owner/agent-bills/page.tsx',
-      'app/(admin)/owner/agent-bills/[id]/page.tsx',
+      'app/(billing)/owner/agent-bills/page.tsx',
+      'app/(billing)/owner/agent-bills/[id]/page.tsx',
     ];
     for (const file of v2Files) {
       expect(source(file), file).toContain(

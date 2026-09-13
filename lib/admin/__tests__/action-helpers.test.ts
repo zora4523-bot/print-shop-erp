@@ -117,6 +117,14 @@ describe('admin action helpers', () => {
     ).toEqual(['code', 'version']);
   });
 
+  it('unquotes PostgreSQL identifiers from real adapter constraint details without substring matching', () => {
+    expect(extractPrismaUniqueTargets({
+      driverAdapterError: { cause: { constraint: { fields: ['"productId"', 'version'] } } },
+    })).toEqual(['productId', 'version']);
+    expect(normalizePrismaUniqueTargets(['"a""b"', 'some_productId_index', 'prefix"productId"']))
+      .toEqual(['a"b', 'some_productId_index', 'prefix"productId"']);
+  });
+
   it('maps P2002 unique violations into field errors', () => {
     const err = new Prisma.PrismaClientKnownRequestError('dup', {
       code: 'P2002',

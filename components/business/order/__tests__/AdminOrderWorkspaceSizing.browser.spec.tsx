@@ -69,6 +69,7 @@ afterEach(() => {
 
 function mount() {
   const orders: AdminOrderWorkspaceRow[] = Array.from({ length: 20 }, (_, index) => batchOrder({
+    remark: index === 0 ? '先核对样稿\n再安排生产。'.repeat(40) : null,
     id: `order-${index}`, orderNo: `GD-260907-${String(index).padStart(3, '0')}`,
   }));
   flushSync(() => root.render(
@@ -134,7 +135,16 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
       await page.getByRole('checkbox', { name: '选择本页 20 项工单', exact: true }).click();
       await expect.element(page.getByRole('region', { name: '工单批量操作' })).toBeVisible();
       assertAligned(width);
-      expect(element('[aria-label="工单批量操作"]').querySelectorAll('[data-slot="disabled-reason-copy"]')).toHaveLength(1);
+      await page.getByText('工单备注 · 展开/收起', { exact: true }).click();
+      expect(element('li[data-order-id="order-0"] details').hasAttribute('open')).toBe(true);
+      expect(element('li[data-order-id="order-0"] details p').textContent).toContain('先核对样稿\n再安排生产。');
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+      // Current controls list eligible commands only; assert the capability
+      // boundary rather than an obsolete disabled-reason wrapper.
+      await expect.element(page.getByRole('button', { name: '下发生产（20）', exact: true })).toBeEnabled();
+      for (const unavailable of ['加入待打印', '确认已打印', '批量结算']) {
+        await expect.element(page.getByRole('button', { name: new RegExp(unavailable) })).not.toBeInTheDocument();
+      }
       expect(await commands.checkShellAccessibility('[data-testid="order-sizing-fixture"]')).toEqual([]);
       element('li[data-order-id="order-19"]').scrollIntoView();
       const lastRow = element('li[data-order-id="order-19"]').getBoundingClientRect();

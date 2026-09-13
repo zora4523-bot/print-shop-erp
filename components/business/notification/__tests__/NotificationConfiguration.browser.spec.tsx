@@ -53,7 +53,7 @@ for (const theme of ['light', 'dark']) {
       await page.viewport(width!, height!);
       document.documentElement.classList.toggle('dark', theme === 'dark');
       renderConfiguration();
-      await expect.element(page.getByRole('textbox', { name: '传输方式' })).toHaveValue('Bot ID + Secret 智能机器人');
+      await expect.element(page.getByRole('textbox', { name: '通知方式' })).toHaveValue('企业微信群');
       expect(host.querySelector('select, [name="webhookUrl"], [name="secret"], [name="botId"]')).toBeNull();
       await expect.element(page.getByRole('checkbox', { name: /^启用/ })).toBeDisabled();
       const history = host.querySelector('[data-slot="legacy-notification-channels"]')!;
@@ -77,8 +77,8 @@ it('submits only smart-bot metadata and lets the keyboard expand read-only histo
   summary.focus();
   await userEvent.keyboard('{Enter}');
   expect(host.querySelector('details')?.open).toBe(true);
-  await page.getByRole('textbox', { name: '通知目标标识（创建后不可修改）' }).fill('new_smart');
-  await page.getByRole('textbox', { name: '通知目标名称（用于后台展示）' }).fill('测试群');
+  await page.getByRole('textbox', { name: '通知目标标识', exact: true }).fill('new_smart');
+  await page.getByRole('textbox', { name: '通知目标名称', exact: true }).fill('测试群');
   await page.getByRole('button', { name: '创建通知目标', exact: true }).click();
   await vi.waitFor(() => expect(action).toHaveBeenCalledOnce());
   // React invokes the action with previous state and browser-created FormData.

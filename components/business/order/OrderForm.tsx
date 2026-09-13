@@ -1,5 +1,7 @@
 'use client';
 
+import { externalShipmentContactIssues } from '@/lib/order/external-shipment-contact';
+
 import {
   useCallback,
   useEffect,
@@ -1055,30 +1057,9 @@ export function OrderForm({
     // widen the compile-time seam.
     resolver: zodResolver(createOrderSchema) as never,
     mode: 'onBlur',
-    defaultValues: {
-      clientSubmissionId,
-      nextItemFig: 2,
-      customName: null,
-      customerPartyId: null,
-      customerRef: null,
-      receiverName: null,
-      receiverPhone: null,
-      receiverAddress: null,
-      expressCode: null,
-      destinationProvince: null,
-      quotedWeightKg: null,
-      shippingFee: null,
-      packingMaterialFee: null,
-      customerChargeOverrideReason: null,
-      packageRequirement: null,
-      remark: null,
-      promisedDate: null,
-      isUrgent: false,
-      isSfCollect: false,
-      additionalShipments: [],
-      packagingGroups: defaultPackagingGroups(1),
-      items: [initialItem],
-    },
+    // The external editor owns one explicit error-navigation request per submit.
+    shouldFocusError: !usesExternalSalesPricing,
+    defaultValues: initialOrderFormValues(clientSubmissionId, initialItem),
   });
   const {
     control,
@@ -1150,6 +1131,7 @@ export function OrderForm({
     useState<InternalCreateOrderQuoteViewState | null>(null);
   const [externalValidationVisible, setExternalValidationVisible] =
     useState(false);
+  const [errorFocusRequest, setErrorFocusRequest] = useState(0);
   const [externalInputRevision, setExternalInputRevision] = useState(0);
   const [pendingSubmission, setPendingSubmission] = useState<{
     data: CreateOrderInput;
@@ -1552,7 +1534,10 @@ export function OrderForm({
         ),
       );
       setState(result);
-      if (result.status !== 'success') return;
+      if (result.status !== 'success') {
+        setErrorFocusRequest((current) => current + 1);
+        return;
+      }
 
       clearLocalDraftAfterServerCreate();
 
@@ -1585,6 +1570,7 @@ export function OrderForm({
     if (!data.receiverName?.trim()) issues.push('收件人必填');
     if (!data.receiverAddress?.trim()) issues.push('收货地址必填');
     if (!data.receiverPhone?.trim()) issues.push('收货电话必填');
+    issues.push(...externalShipmentContactIssues(data.additionalShipments).map((issue) => issue.message));
     if (!currentExternalOrderQuote?.quoteToken) {
       issues.push('请等待最新费用报价完成');
     }
@@ -1632,6 +1618,7 @@ export function OrderForm({
     if (usesExternalSalesPricing && intent === 'submit') {
       setExternalValidationVisible(true);
       if (externalSubmissionIssues(data, fieldIds, queueSnapshot).length > 0) {
+        setErrorFocusRequest((current) => current + 1);
         return;
       }
       const quoteToken = currentExternalOrderQuote?.quoteToken;
@@ -1656,6 +1643,7 @@ export function OrderForm({
   const onInvalid = () => {
     if (!usesExternalSalesPricing) return;
     setExternalValidationVisible(true);
+    setErrorFocusRequest((current) => current + 1);
     setPendingSubmission(null);
   };
 
@@ -2885,6 +2873,8 @@ export function OrderForm({
         totalAmount: currentLogisticsResult?.suggestedTotal ?? null,
         shippingLabel: watchedIsSfCollect
           ? '快递费 · 顺丰到付'
+          : watchedShipments.length > 0
+            ? `快递费 中通 · ${watchedShipments.length + 1} 个地址`
           : `快递费 中通${watchedDestinationProvince ? ` · ${watchedDestinationProvince}` : ' · 未填地址'}${typeof billableWeight === 'string' || typeof billableWeight === 'number' ? ` · ${billableWeight}kg` : ''}`,
         packagingLabel: `纸箱耗材 ${totalQuantity.toLocaleString('zh-CN')}个`,
         message:
@@ -3203,6 +3193,7 @@ export function OrderForm({
     : [];
   const externalRHFOrderIssues = externalValidationVisible
     ? [
+        errors.remark?.message ? `工单备注：${errors.remark.message}` : null,
         errors.customName?.message
           ? `工单名称：${errors.customName.message}`
           : null,
@@ -3408,14 +3399,6 @@ export function OrderForm({
                     control={control}
                     disabled={orderFormControlsDisabled}
                   />
-                  <div className="@min-[560px]:col-span-2">
-                    <Label htmlFor="remark">工单备注</Label>
-                    <Textarea
-                      id="remark"
-                      className="mt-2 min-h-20"
-                      {...register('remark')}
-                    />
-                  </div>
                 </div>
               ) : undefined
             }
@@ -3473,20 +3456,17 @@ export function OrderForm({
                   <div className="grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
                     <div className="@min-[560px]:col-span-2">
                       <Label htmlFor={`items.${expandedItem}.manualQuoteReason`}>
-                        配置外项目说明（转人工核价）
+                        需人工核价的要求（选填）
                       </Label>
                       <Textarea
                         id={`items.${expandedItem}.manualQuoteReason`}
                         className="mt-2 min-h-20"
-                        placeholder="仅当规则配置里没有所需纸张、规格或工艺时填写；请记录完整客需，金额由工厂确认时录入"
+                        placeholder="选项中没有所需纸张、规格或工艺时，请在此填写具体要求"
                         aria-invalid={Boolean(
                           errors.items?.[expandedItem]?.manualQuoteReason,
                         )}
                         {...register(`items.${expandedItem}.manualQuoteReason`)}
                       />
-                      <p className="mt-1.5 text-xs text-muted-foreground">
-                        不会在创建页录入人工单价；填写后该款式进入工厂人工核价。
-                      </p>
                     </div>
                     <div className="@min-[560px]:col-span-2">
                       <Label htmlFor={`items.${expandedItem}.remark`}>
@@ -3506,7 +3486,7 @@ export function OrderForm({
                         附加工艺（选填）
                       </legend>
                       <p className="mt-2 text-xs text-muted-foreground">
-                        主工艺已由上方工艺类型、烫金和包装选择自动生成；这里只选择额外工序。
+                        选择额外工序。
                       </p>
                       <InternalAdditionalCraftChoices
                         options={internalAdditionalCraftOptions}
@@ -3570,9 +3550,19 @@ export function OrderForm({
                 </div>
               ) : undefined
             }
+            footerExtras={
+              <section className="mt-4 border-t pt-4">
+                <Label htmlFor="remark">工单备注（选填）</Label>
+                <Textarea id="remark" maxLength={1000} className="mt-2 min-h-24"
+                  disabled={orderFormControlsDisabled} aria-invalid={Boolean(errors.remark)}
+                  aria-describedby={errors.remark ? 'order-remark-error' : undefined}
+                  {...register('remark')} />
+                {errors.remark?.message ? <p id="order-remark-error" role="alert" className="mt-2 text-sm text-destructive">{errors.remark.message}</p> : null}
+              </section>
+            }
             afterShipping={
-              !usesExternalSalesPricing ? (
-                <section
+                <fieldset
+                  disabled={orderFormControlsDisabled}
                   aria-label="多地址发货"
                   className="mt-4 border-t pt-4"
                 >
@@ -3609,7 +3599,7 @@ export function OrderForm({
                         })
                       }
                     >
-                      增加收货地址
+                      {shipmentsArray.fields.length >= 9 ? '已达 10 个地址' : `添加地址 ${shipmentsArray.fields.length + 2}`}
                     </Button>
                   </div>
                   {shipmentsArray.fields.length > 0 ? (
@@ -3618,12 +3608,13 @@ export function OrderForm({
                         <li key={shipment.id} className="rounded-xl border p-4">
                           <div className="flex items-center justify-between gap-3">
                             <h3 className="text-sm font-extrabold">
-                              额外地址 {shipmentIndex + 1}
+                              地址 {shipmentIndex + 2}
                             </h3>
                             <Button
                               type="button"
                               variant="outline"
                               className="text-destructive"
+                              disabled={orderFormControlsDisabled}
                               onClick={() => shipmentsArray.remove(shipmentIndex)}
                             >
                               删除地址
@@ -3638,11 +3629,17 @@ export function OrderForm({
                               </Label>
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverName`}
+                                required={usesExternalSalesPricing}
+                                aria-invalid={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim()}
+                                aria-describedby={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? `extra-${shipmentIndex}-receiverName-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverName`,
                                 )}
                               />
+                              {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? (
+                                <p id={`extra-${shipmentIndex}-receiverName-error`} role="alert" className="mt-2 text-sm text-destructive">请填写收件人</p>
+                              ) : null}
                             </div>
                             <div>
                               <Label
@@ -3652,11 +3649,17 @@ export function OrderForm({
                               </Label>
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverPhone`}
+                                required={usesExternalSalesPricing}
+                                aria-invalid={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim()}
+                                aria-describedby={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? `extra-${shipmentIndex}-receiverPhone-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverPhone`,
                                 )}
                               />
+                              {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? (
+                                <p id={`extra-${shipmentIndex}-receiverPhone-error`} role="alert" className="mt-2 text-sm text-destructive">请填写联系电话</p>
+                              ) : null}
                             </div>
                             <div>
                               <Label
@@ -3766,8 +3769,7 @@ export function OrderForm({
                       ))}
                     </ol>
                   ) : null}
-                </section>
-              ) : undefined
+                </fieldset>
             }
             items={watchedItems}
             itemFields={itemsArray.fields}
@@ -3811,6 +3813,7 @@ export function OrderForm({
                   : '草稿未保存'
             }
             fieldErrors={externalFieldErrors}
+            errorFocusRequest={errorFocusRequest}
             rail={
               <OrderFormBRail
                 itemCount={itemsArray.fields.length}
@@ -4028,12 +4031,20 @@ export function OrderForm({
             }
           }}
           orderName={pendingSubmission.data.customName?.trim() || '未命名工单'}
+          remark={pendingSubmission.data.remark}
           items={externalReviewItems}
           receiver={{
             name: pendingSubmission.data.receiverName?.trim() || '未识别收件人',
             phone: pendingSubmission.data.receiverPhone?.trim() || '无电话',
             address: pendingSubmission.data.receiverAddress?.trim() || '—',
+            quantityLabel: `${pendingSubmission.data.items.reduce((sum, item) => sum + item.quantity, 0) - pendingSubmission.data.additionalShipments.reduce((sum, shipment) => sum + shipment.itemQuantities.reduce((subtotal, quantity) => subtotal + quantity, 0), 0)} 件`,
           }}
+          additionalReceivers={pendingSubmission.data.additionalShipments.map((shipment) => ({
+            name: shipment.receiverName?.trim() || '未填写收件人',
+            phone: shipment.receiverPhone?.trim() || '未填写电话',
+            address: shipment.receiverAddress.trim(),
+            quantityLabel: `${shipment.itemQuantities.reduce((sum, quantity) => sum + quantity, 0)} 件`,
+          }))}
           cartonCharge={{
             label: '纸箱耗材',
             detail: `${totalQuantity.toLocaleString('zh-CN')} 个`,
@@ -4158,3 +4169,30 @@ export function orderServerFieldErrorMessages(
 
 const selectClass =
   'flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
+
+function initialOrderFormValues(clientSubmissionId: string, initialItem: ReturnType<typeof createExternalOrderItem>): CreateOrderInput {
+  return {
+      clientSubmissionId,
+      nextItemFig: 2,
+      customName: null,
+      customerPartyId: null,
+      customerRef: null,
+      receiverName: null,
+      receiverPhone: null,
+      receiverAddress: null,
+      expressCode: null,
+      destinationProvince: null,
+      quotedWeightKg: null,
+      shippingFee: null,
+      packingMaterialFee: null,
+      customerChargeOverrideReason: null,
+      packageRequirement: null,
+      remark: null,
+      promisedDate: null,
+      isUrgent: false,
+      isSfCollect: false,
+      additionalShipments: [],
+      packagingGroups: defaultPackagingGroups(1),
+      items: [initialItem],
+    };
+}

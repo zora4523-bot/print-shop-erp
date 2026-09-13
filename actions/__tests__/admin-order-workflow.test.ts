@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   confirm: vi.fn(),
   settle: vi.fn(),
+  release: vi.fn(),
   batch: vi.fn(),
 }));
 
@@ -20,7 +21,7 @@ vi.mock('@/lib/order/admin-workflow', () => ({
   confirmFactoryOrder: mocks.confirm,
   holdFactoryOrder: vi.fn(),
   rejectFactoryOrder: vi.fn(),
-  releaseFactoryOrder: vi.fn(),
+  releaseFactoryOrder: mocks.release,
   resumeFactoryOrder: vi.fn(),
   settleFactoryOrder: mocks.settle,
 }));
@@ -50,6 +51,7 @@ vi.mock('@/lib/production/operation-materialization-service', () => ({
 
 import {
   confirmFactoryOrderAction,
+  releaseFactoryOrderAction,
   runAdminOrderBatchAction,
   settleFactoryOrderAction,
 } from '../admin-order-workflow';
@@ -60,6 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.requirePermission.mockResolvedValue(actor);
   mocks.confirm.mockResolvedValue({ orderId: 'order-1' });
+  mocks.release.mockResolvedValue({ orderId: 'order-1' });
   mocks.settle.mockResolvedValue({ orderId: 'order-1' });
   mocks.batch.mockResolvedValue({
     command: 'SETTLE',
@@ -212,4 +215,13 @@ describe('admin order workflow cache invalidation', () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/owner/agent-bills');
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/owner/bills');
   });
+});
+
+it('validates and forwards independent release without enabling print creation', async () => {
+  const input = { orderId: 'order-1', expectedRevision: 4, expectedWorkOrderVersion: 2,
+    printIdempotencyKey: 'release-only-order-1-v2', createPrint: false };
+  await expect(releaseFactoryOrderAction(input)).resolves.toMatchObject({ status: 'success' });
+  expect(mocks.release).toHaveBeenCalledWith(input, actor);
+  await expect(releaseFactoryOrderAction({ ...input, createPrint: 'false' })).resolves.toMatchObject({ status: 'invalid' });
+  expect(mocks.release).toHaveBeenCalledTimes(1);
 });

@@ -1,6 +1,8 @@
 import { OrderPrintLayout } from './print-layout';
 import type { PrintOrder } from './print-types';
 import { printPaginationScript } from './print-pagination';
+import { requirePrintFonts } from './print-fonts';
+import { embeddedPrintFontCss } from './print-fonts-server';
 
 const MAX_FILENAME_COMPONENT_LENGTH = 80;
 
@@ -37,10 +39,8 @@ const STANDALONE_PRINT_READY_SCRIPT = String.raw`
     image.addEventListener('load', () => finish(false), { once: true });
     image.addEventListener('error', () => finish(true), { once: true });
   });
-  const fontsReady = document.fonts && document.fonts.ready
-    ? document.fonts.ready.catch(() => undefined)
-    : Promise.resolve();
-  Promise.all([fontsReady, ...images.map(waitForImage)]).finally(() => {
+  const fontsReady = (${requirePrintFonts.toString()})(document);
+  Promise.all([fontsReady, ...images.map(waitForImage)]).then(() => {
     if (failedFigures.size > 0) {
       const figures = Array.from(failedFigures);
       const preview = figures.slice(0, 6).join('、');
@@ -55,7 +55,7 @@ const STANDALONE_PRINT_READY_SCRIPT = String.raw`
     root.dataset.printReady = 'true';
     window.dispatchEvent(new Event('print-ready'));
   }).catch(() => {
-    root.dataset.printPagination = 'overflow';
+    root.dataset.printPagination = root.dataset.printFonts === 'failed' ? 'font-error' : 'overflow';
     root.dataset.printReady = 'true';
     window.dispatchEvent(new Event('print-ready'));
   });
@@ -81,7 +81,7 @@ export async function buildPrintHtml(
 ): Promise<string> {
   const { renderToStaticMarkup } = await import('react-dom/server');
   const body = renderToStaticMarkup(
-    <OrderPrintLayout order={order} factoryName={options.factoryName} />,
+    <OrderPrintLayout order={order} factoryName={options.factoryName} fontCss={await embeddedPrintFontCss()} />,
   );
 
   // Minimal doc shell — the layout injects its own <style>, and all

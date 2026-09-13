@@ -903,6 +903,16 @@ describe('admin order workflow', () => {
     });
   });
 
+  it('releases independently without creating or replaying a print job', async () => {
+    tx.order.findUnique.mockResolvedValueOnce(order({ status: OrderStatus.CONFIRMED, confirmedFee: new Decimal('128.50') }));
+    const result = await releaseFactoryOrder({ orderId: 'order-1', expectedRevision: 4,
+      expectedWorkOrderVersion: 2, printIdempotencyKey: 'release-only-order-1-v2', createPrint: false }, admin);
+    expect(activateMock).toHaveBeenCalledWith(tx, 'order-1', admin, undefined, { targetStatus: OrderStatus.RELEASED });
+    expect(createPrintMock).not.toHaveBeenCalled();
+    expect(tx.orderPrintJob.findUnique).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: OrderStatus.RELEASED, printJobId: null });
+  });
+
   it('releases production before creating the initial versioned print request', async () => {
     tx.order.findUnique.mockResolvedValueOnce(
       order({

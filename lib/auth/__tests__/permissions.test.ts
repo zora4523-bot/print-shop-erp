@@ -94,7 +94,6 @@ describe('PERMISSIONS map', () => {
 
   it('administrator-only permissions are exactly [ADMIN]', () => {
     const adminOnly: Permission[] = [
-      'order:cancel',
       'order:change:review',
       'order:price:confirm',
       'order:export:all',

@@ -1,7 +1,7 @@
 import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
 import { prepareOrderForProductionInTx } from './production-readiness';
 import { OrderChangeRequestError } from './change-request-error';
-import { ORDER_MODIFIABLE_STATUSES } from './editable-fields';
+import { ORDER_MODIFIABLE_STATUSES, canChangeOrderPackaging } from './editable-fields';
 import Decimal from 'decimal.js';
 import {
   BackgroundJobStatus,
@@ -112,6 +112,7 @@ import {
 
 const CHANGEABLE_ORDER_STATUSES = ORDER_MODIFIABLE_STATUSES;
 const CANCELLABLE_BY_REQUEST_STATUSES: OrderStatus[] = [
+  OrderStatus.ON_HOLD,
   OrderStatus.CONFIRMED,
   OrderStatus.RELEASED,
   OrderStatus.FOILING,
@@ -1231,13 +1232,7 @@ function assertPackagingChangeRequestSupported(input: {
   const changesPackaging = input.changes.some(
     (change) => change.operation === 'UPDATE' && change.pack !== undefined,
   );
-  const packagingEditable = [
-    OrderStatus.DRAFT,
-    OrderStatus.PENDING_FACTORY,
-    OrderStatus.REJECTED,
-    OrderStatus.SUBMITTED,
-    OrderStatus.CONFIRMED,
-  ].some((status) => status === input.status);
+  const packagingEditable = canChangeOrderPackaging(input.status);
   if (changesPackaging && !packagingEditable) {
     throw new OrderChangeRequestError('已进入生产的工单不能直接修改分袋组成');
   }

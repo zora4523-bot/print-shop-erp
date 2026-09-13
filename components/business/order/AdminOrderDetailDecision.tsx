@@ -45,7 +45,7 @@ export function AdminOrderDetailDecision({ order, requiresPaperRecall }: {
         if (result.status === 'success') {
           const item = result.result.items[0];
           if (item?.status === 'success') {
-            setNotice({ tone: 'success', text: `已标记 v${order.workOrderVersion} 打印完成` });
+            setNotice({ tone: 'success', text: `已确认 v${order.workOrderVersion} 打印完成` });
             setOpen(false);
           } else setNotice({ tone: 'warning', text: item?.message ?? '本次未执行，请刷新工单核对。' });
           router.refresh();
@@ -70,9 +70,9 @@ export function AdminOrderDetailDecision({ order, requiresPaperRecall }: {
     </div> : null}
     {hasAction ? <AdminOrderDecisionPanel order={panelOrder} compact /> : <p className="text-sm">{ORDER_STATUS_REGISTRY[order.status].label} · 暂无待办</p>}
     {requiresRecall ? <Dialog open={open} onOpenChange={(value) => { if (pending) return; setOpen(value); if (value) { setRecalled(false); setNotice(null); } }}>
-      <DialogTrigger render={<Button type="button" variant="outline" disabled={pending || resultUnknown || !order.pendingPrintJobId}>标记已打印</Button>} />
+      <DialogTrigger render={<Button type="button" variant="outline" disabled={pending || resultUnknown || !order.pendingPrintJobId}>确认已打印</Button>} />
       <DialogContent>
-        <DialogTitle>标记 v{order.workOrderVersion} 已打印</DialogTitle>
+        <DialogTitle>确认 v{order.workOrderVersion} 已打印</DialogTitle>
         <DialogDescription>请先核对本次打印件，并收回此前纸质工单，避免车间继续使用旧单。</DialogDescription>
         <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border p-2 text-sm">
           <Checkbox checked={recalled} onCheckedChange={(value) => setRecalled(value === true)} disabled={pending} />
@@ -80,7 +80,7 @@ export function AdminOrderDetailDecision({ order, requiresPaperRecall }: {
         </label>
         {notice ? <ActionNotice tone={notice.tone} title={notice.text} /> : null}
         <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" className="min-h-11" disabled={pending} onClick={() => setOpen(false)}>取消</Button>
-          <Button type="button" className="min-h-11" disabled={!recalled || pending || resultUnknown} onClick={markPrinted}>{pending ? '正在保存…' : '确认打印完成'}</Button></div>
+          <Button type="button" className="min-h-11" disabled={!recalled || pending || resultUnknown} onClick={markPrinted}>{pending ? '正在保存…' : '确认已打印'}</Button></div>
       </DialogContent>
     </Dialog> : null}
     {notice && !open ? <ActionNotice tone={notice.tone} title={notice.text} /> : null}

@@ -135,7 +135,9 @@ async function checkRoutes() {
   } catch {
     fail('/api/health/jobs returned invalid JSON');
   }
-  const jobsGate = assessDeployJobsGate(jobsBody);
+  const jobsGate = assessDeployJobsGate(jobsBody, {
+    runtimeEnvironment: process.env.NODE_ENV,
+  });
   if (!jobsGate.ok || !jobsGate.ready) {
     fail(`/api/health/jobs ${deployJobsGateFailureMessage(jobsGate)}`);
   }
@@ -166,8 +168,9 @@ async function checkRoutes() {
     },
     body: '{}',
   });
-  if (![401, 503].includes(cron.status)) {
-    fail(`/api/cron/daily-salary invalid auth expected 401 or 503, got ${cron.status}`);
+  const expectedCronStatuses = process.env.NODE_ENV === 'production' ? [401] : [401, 503];
+  if (!expectedCronStatuses.includes(cron.status)) {
+    fail(`/api/cron/daily-salary invalid auth expected ${expectedCronStatuses.join(' or ')}, got ${cron.status}`);
   }
 }
 

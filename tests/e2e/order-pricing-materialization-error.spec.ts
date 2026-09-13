@@ -85,9 +85,8 @@ test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍�
   const trigger = pricing.getByRole('button', { name: '确认工厂核价', exact: true });
   await expect(trigger).toBeEnabled();
   await trigger.click();
-  const dialog = page.getByRole('alertdialog', { name: '保存本次核价？' });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: '确认工厂核价', exact: true }).click();
+  // 文案与确认第 10 条：核价已有完整复核层，直接提交，不再嵌套确认。
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
 
   await expect(pricing.getByRole('alert')).toContainText('核价未完成：');
   await expect(trigger).toBeEnabled();
@@ -99,7 +98,11 @@ test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍�
   await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toBeVisible();
   expect(await readPricingState(orderId)).toEqual(before);
   await expectNoNextErrorOverlay(page);
-  await page.getByRole('link', { name: '工作台', exact: true }).first().click();
+  const workbenchLink = page.getByRole('link', { name: '工作台', exact: true }).first();
+  if (!(await workbenchLink.isVisible())) {
+    await page.getByRole('button', { name: '打开/关闭侧边栏菜单', exact: true }).click();
+  }
+  await workbenchLink.click();
   await expect(page).toHaveURL(/\/owner$/);
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
 });
@@ -122,8 +125,7 @@ test('管理端旧链接进入详情后核价失败保留表单，且不会改�
   const trigger = pricing.getByRole('button', { name: '确认工厂核价', exact: true });
   await expect(trigger).toBeEnabled();
   await trigger.click();
-  const confirm = page.getByRole('alertdialog', { name: '保存本次核价？' });
-  await confirm.getByRole('button', { name: '确认工厂核价', exact: true }).click();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
   await expect(pricing.getByRole('alert')).toContainText('核价未完成：');
   await expect(trigger).toBeEnabled();
   await expect(page).toHaveURL(`/orders/${seeded.urgentOrderId}`);

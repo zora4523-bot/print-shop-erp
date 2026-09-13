@@ -25,6 +25,8 @@ type ItemOption = {
   sequence: number;
   name: string;
   quantity: number;
+  pack?: number | null;
+  packagingEditable?: boolean;
   productId: string | null;
   pricingRoute: OrderItemPricingRoute;
   specification: string | null;
@@ -42,6 +44,7 @@ type EditableItem = {
   name: string;
   displayName: string;
   quantity: number;
+  pack: string;
   targetProductId: string | null;
   specification: string;
   specificationSelectionKey: string;
@@ -54,6 +57,7 @@ type OrderItemChangePayload =
   | {
       operation: 'UPDATE';
       itemId: string;
+      pack?: number;
       name: string;
       quantity: number;
       targetProductId?: string;
@@ -79,6 +83,7 @@ type Props = {
   items: ItemOption[];
   catalogProducts: OrderChangeCatalogProduct[];
   promisedDate?: string | null;
+  hasPackagingGroups?: boolean;
 };
 
 export function orderChangeRequestDraftIdentity({
@@ -88,6 +93,7 @@ export function orderChangeRequestDraftIdentity({
   items,
   catalogProducts,
   promisedDate = null,
+  hasPackagingGroups = false,
 }: Pick<
   Props,
   | 'orderId'
@@ -96,6 +102,7 @@ export function orderChangeRequestDraftIdentity({
   | 'items'
   | 'catalogProducts'
   | 'promisedDate'
+  | 'hasPackagingGroups'
 >): string {
   const catalogFacts = catalogProducts
     .map((product) => ({
@@ -124,11 +131,14 @@ export function orderChangeRequestDraftIdentity({
     expectedRevision,
     expectedWorkOrderVersion,
     promisedDate,
+    hasPackagingGroups,
     items: items.map((item) => ({
       id: item.id,
       sequence: item.sequence,
       name: item.name,
       quantity: item.quantity,
+      pack: item.pack ?? null,
+      packagingEditable: item.packagingEditable ?? false,
       productId: item.productId,
       pricingRoute: item.pricingRoute,
       specification: item.specification,
@@ -224,6 +234,7 @@ export function createOrderChangeEditableItem(
     name: item.name,
     displayName: externalPriceBusinessText(item.name),
     quantity: item.quantity,
+    pack: item.pack == null ? '' : String(item.pack),
     targetProductId: item.productId,
     specification,
     specificationSelectionKey: currentOption?.selectionKey ?? '',
@@ -243,6 +254,7 @@ export function hasOrderItemSemanticChange(
   return (
     editableItem.name.trim() !== item.name.trim() ||
     editableItem.quantity !== item.quantity ||
+    (Boolean(item.packagingEditable) && editableItem.pack !== (item.pack == null ? '' : String(item.pack))) ||
     editableItem.targetProductId !== item.productId ||
     editableItem.specification !== (item.specification ?? '') ||
     !hasSameColorSet(
@@ -284,6 +296,8 @@ export function buildSelectedOrderItemChanges(
         itemId: item.id,
         name: current.name,
         quantity: current.quantity,
+        ...(item.packagingEditable && current.pack !== (item.pack == null ? '' : String(item.pack))
+          ? { pack: Number(current.pack) } : {}),
         ...(specificationChanged && targetProductId
           ? {
               targetProductId,
@@ -389,6 +403,14 @@ function ExistingOrderItemChanges({
                     }
                   />
                 </label>
+                {item.packagingEditable ? (
+                  <label className="min-w-0 space-y-1 text-sm">
+                    <span>每袋数量</span>
+                    <Input type="number" min={1} max={9999999} step={1}
+                      required value={current.pack} disabled={pending}
+                      onChange={(event) => updateItem(item.id, { pack: event.target.value })} />
+                  </label>
+                ) : null}
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>规格</span>
                   <select
@@ -553,6 +575,7 @@ function OrderChangeRequestDraftForm({
   items,
   catalogProducts,
   promisedDate = null,
+  hasPackagingGroups = false,
 }: Props) {
   const [state, action] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
@@ -681,6 +704,7 @@ function OrderChangeRequestDraftForm({
       <p className="text-xs text-muted-foreground">
         {hasItems ? <>
           勾选要修改的款式；可改款式名、数量、目录规格和正反面烫金颜色。
+          {items.some((item) => item.packagingEditable) ? '未进入生产且包装明细明确的款式，可申请调整每袋数量。' : null}
           规格只显示与当前计价路线、纸张和克重一致的活动目录选项。
           已产数量将在改版后承接，历史报工和工资保留。
         </> : '未记录款式，本次可申请调整交期。'}
@@ -711,7 +735,7 @@ function OrderChangeRequestDraftForm({
         </p>
       ) : null}
 
-      {hasItems ? <fieldset className="min-w-0 rounded-lg border p-3">
+      {hasItems && !hasPackagingGroups ? <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
         <label className="flex min-h-11 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
           <Checkbox

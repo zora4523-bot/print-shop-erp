@@ -98,8 +98,8 @@ function partialResult(): AdminOrderBatchActionResult {
 }
 
 async function openRecall() {
-  await page.getByRole('button', { name: '标记已打印', exact: true }).click();
-  await expect.element(page.getByRole('dialog', { name: '标记 v3 已打印', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '确认已打印', exact: true }).click();
+  await expect.element(page.getByRole('dialog', { name: '确认 v3 已打印', exact: true })).toBeVisible();
 }
 
 async function acknowledgeRecall() {
@@ -108,7 +108,7 @@ async function acknowledgeRecall() {
 
 async function submitRecall() {
   await acknowledgeRecall();
-  await page.getByRole('button', { name: '确认打印完成', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '确认已打印', exact: true }).click();
 }
 
 async function settleDialog() {
@@ -124,10 +124,10 @@ describe('admin detail print recall workflow', () => {
     mount();
     expect(sharedPanel.mock.lastCall?.[0].order.capabilities.markPrinted).toBe(false);
     await openRecall();
-    await expect.element(page.getByRole('button', { name: '确认打印完成', exact: true })).toBeDisabled();
+    await expect.element(page.getByRole('dialog').getByRole('button', { name: '确认已打印', exact: true })).toBeDisabled();
     expect(batchAction).not.toHaveBeenCalled();
     await acknowledgeRecall();
-    const submit = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '确认打印完成')!;
+    const submit = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent === '确认已打印')!;
     submit.click();
     submit.click();
     await expect.element(page.getByRole('button', { name: '正在保存…', exact: true })).toBeDisabled();
@@ -140,7 +140,7 @@ describe('admin detail print recall workflow', () => {
       items: [{ orderId: 'detail-print-order', expectedRevision: 7, expectedWorkOrderVersion: 3, requestJobId: 'current-print-v3' }],
     });
     resolve(completeResult());
-    await expect.element(page.getByText('已标记 v3 打印完成', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('已确认 v3 打印完成', { exact: true })).toBeVisible();
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
     expect(refresh).toHaveBeenCalledOnce();
     expect(batchAction).toHaveBeenCalledOnce();
@@ -154,7 +154,7 @@ describe('admin detail print recall workflow', () => {
     await submitRecall();
     await expect.element(page.getByText('工单版本已变化，请刷新核对。', { exact: true })).toBeVisible();
     await expect.element(page.getByRole('dialog')).toBeVisible();
-    expect(document.body.textContent).not.toContain('已标记 v3 打印完成');
+    expect(document.body.textContent).not.toContain('已确认 v3 打印完成');
     expect(refresh).toHaveBeenCalledOnce();
     expect(batchAction).toHaveBeenCalledOnce();
   });
@@ -171,7 +171,7 @@ describe('admin detail print recall workflow', () => {
       await submitRecall();
       await expect.element(page.getByText(response.message, { exact: true })).toBeVisible();
       await expect.element(page.getByRole('dialog')).toBeVisible();
-      expect(document.body.textContent).not.toMatch(/已标记 v3 打印完成|INVALID_REVISION/);
+      expect(document.body.textContent).not.toMatch(/已确认 v3 打印完成|INVALID_REVISION/);
       expect(batchAction).toHaveBeenCalledOnce();
       expect(refresh).not.toHaveBeenCalled();
     });
@@ -186,13 +186,13 @@ describe('admin detail print recall workflow', () => {
       await openRecall();
       await submitRecall();
       await expect.element(page.getByText('打印结果尚未确认，请刷新工单核对后再处理。', { exact: true })).toBeVisible();
-      await expect.element(page.getByRole('button', { name: '确认打印完成', exact: true })).toBeDisabled();
-      expect(document.body.textContent).not.toMatch(/PRIVATE_|已标记 v3 打印完成/);
+      await expect.element(page.getByRole('dialog').getByRole('button', { name: '确认已打印', exact: true })).toBeDisabled();
+      expect(document.body.textContent).not.toMatch(/PRIVATE_|已确认 v3 打印完成/);
       await page.getByRole('button', { name: '取消', exact: true }).click();
       await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
-      await expect.element(page.getByRole('button', { name: '标记已打印', exact: true })).toBeDisabled();
+      await expect.element(page.getByRole('button', { name: '确认已打印', exact: true })).toBeDisabled();
       await expect.element(page.getByRole('button', { name: '刷新核对打印结果', exact: true })).toBeVisible();
-      const trigger = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '标记已打印')!;
+      const trigger = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '确认已打印')!;
       trigger.click();
       expect(batchAction).toHaveBeenCalledOnce();
       expect(refresh).toHaveBeenCalledTimes(mode === 'partial failure' ? 1 : 0);
@@ -204,7 +204,7 @@ describe('admin detail print recall workflow', () => {
     mount(printableOrder({ workOrderVersion: 1, pendingPrintJobId: 'first-print-v1' }), false);
     expect(sharedPanel.mock.lastCall?.[0].order.capabilities.markPrinted).toBe(true);
     expect(sharedPanel.mock.lastCall?.[0].order.pendingPrintJobId).toBe('first-print-v1');
-    await expect.element(page.getByRole('button', { name: '标记已打印', exact: true })).not.toBeInTheDocument();
+    await expect.element(page.getByRole('button', { name: '确认已打印', exact: true })).not.toBeInTheDocument();
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
     expect(batchAction).not.toHaveBeenCalled();
   });
@@ -213,9 +213,9 @@ describe('admin detail print recall workflow', () => {
     await page.viewport(1280, 900);
     const original = printableOrder();
     mount({ ...original, capabilities: { ...original.capabilities, markPrinted: false } });
-    await expect.element(page.getByRole('button', { name: '标记已打印', exact: true })).not.toBeInTheDocument();
+    await expect.element(page.getByRole('button', { name: '确认已打印', exact: true })).not.toBeInTheDocument();
     mount(printableOrder({ pendingPrintJobId: null }));
-    await expect.element(page.getByRole('button', { name: '标记已打印', exact: true })).toBeDisabled();
+    await expect.element(page.getByRole('button', { name: '确认已打印', exact: true })).toBeDisabled();
     expect(batchAction).not.toHaveBeenCalled();
   });
 
@@ -242,7 +242,7 @@ describe('admin detail print recall workflow', () => {
       expect(await commands.checkShellAccessibility('[role="dialog"]')).toEqual([]);
       await userEvent.keyboard('{Escape}');
       await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
-      await expect.element(page.getByRole('button', { name: '标记已打印', exact: true })).toHaveFocus();
+      await expect.element(page.getByRole('button', { name: '确认已打印', exact: true })).toHaveFocus();
     });
   }
 });

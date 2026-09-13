@@ -6,6 +6,10 @@ task, run the listed verification commands, and open a draft PR.
 
 Never auto-merge. Never apply production database operations from this backlog.
 
+2026-09-10：本文件保留既有自动任务队列与交付历史。发布整改统一在
+[发布任务台账](release-remediation-2026-09-10.md) 领取和关闭，不在这里复制第二套状态。
+下方已完成条目的旧账号、旧命令和旧断言是交付时记录，不能代替现行规范与候选复验。
+
 ## Status Values
 
 - `agent-ready`: safe for an agent to implement without more business input.
@@ -20,13 +24,14 @@ Never auto-merge. Never apply production database operations from this backlog.
 1. Pick the highest-priority `agent-ready` item. For ties, keep file order.
 2. Skip tasks that touch payroll/finance facts unless the task explicitly limits
    itself to tests, docs, or read-only UI.
-3. For every code task, run:
-   - `./node_modules/.bin/prisma validate`
-   - `pnpm typecheck`
-   - `./node_modules/.bin/eslint .`
-   - `./node_modules/.bin/vitest run --reporter=dot --testTimeout=10000`
-4. Run `./node_modules/.bin/next build` when touching App Router pages,
-   components used by pages, Prisma schema, or migrations.
+3. Select verification by [CONTRIBUTING.md](../CONTRIBUTING.md#测试要求) and use
+   the current commands in [DEVELOPMENT.md](../DEVELOPMENT.md#常用命令).
+   `pnpm lint` includes copy/token gates; plain `eslint` does not. Record actual
+   results, skipped coverage and the tested SHA in the PR template.
+4. Run the required build, browser and migration checks for the affected scope;
+   browser inventory collection is not test execution. The `agent:next` prompt
+   generator now links the canonical requirements above and includes copy/token,
+   isolation and release evidence requirements.
 5. The PR must be draft unless the user explicitly asks for a ready PR.
 
 ## A01 - E2E Smoke Suite For Critical Flow

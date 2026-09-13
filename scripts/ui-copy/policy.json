@@ -63,6 +63,43 @@
         "worker",
         "Worker"
       ]
+    },
+    {
+      "prefix": "components/business/order/",
+      "words": [
+        "SSR",
+        "独立重任务",
+        "版费默认 0",
+        "增改或移除后会自动重算",
+        "不会在创建页录入人工单价",
+        "主工艺已由上方",
+        "修改后的费用在保存确认中核对"
+      ]
+    },
+    {
+      "prefix": "components/business/bom/OrderMaterialUsageEstimate.tsx",
+      "words": [
+        "BOM",
+        "不自动扣减库存",
+        "生产发料流程另行确认"
+      ]
+    },
+    {
+      "prefix": "app/(admin)/orders/",
+      "words": [
+        "金额按已生成的日薪明细统计",
+        "计件工资生成后，关联明细会显示在这里",
+        "适用于质量问题或物流损毁。系统会创建",
+        "尚未生成生产工序",
+        "该款式无独立生产工序",
+        "该款式无无计件进度步骤"
+      ]
+    },
+    {
+      "prefix": "components/business/production/TaskDisputeAdminPanel.tsx",
+      "words": [
+        "如需调整，请到对应页面处理"
+      ]
     }
   ]
 }

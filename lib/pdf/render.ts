@@ -1,4 +1,4 @@
-import type { Browser, LaunchOptions, PDFOptions } from 'puppeteer';
+import type { Browser, LaunchOptions, Page, PDFOptions } from 'puppeteer';
 
 export const PDF_PRINT_READY_TIMEOUT_MS = 12_000;
 
@@ -38,7 +38,17 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
       ...opts.launch,
     }));
 
-  const page = await browser.newPage();
+  let page: Page;
+  try {
+    const expectedVersion = process.env.PDF_CHROMIUM_VERSION;
+    if (expectedVersion && (await browser.version()).split('/').pop() !== expectedVersion) {
+      throw new PdfBrowserVersionMismatchError();
+    }
+    page = await browser.newPage();
+  } catch (error) {
+    if (!opts.browser) await browser.close();
+    throw error;
+  }
   const abortRender = () => {
     void page.close().catch(() => undefined);
     if (!opts.browser) void browser.close().catch(() => undefined);
@@ -46,10 +56,10 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
   opts.signal?.addEventListener('abort', abortRender, { once: true });
   try {
     opts.signal?.throwIfAborted();
-    // `networkidle0` is required so OSS-hosted design thumbnails have
-    // finished loading before we snapshot. Inline SVG (QR codes)
-    // doesn't trigger network activity, but image tags do.
-    await page.setContent(opts.html, { waitUntil: 'networkidle0' });
+    // Puppeteer 25 separates DOM lifecycle from network-idle waiting.
+    // Preserve zero active requests before rendering remote artwork thumbnails.
+    await page.setContent(opts.html, { waitUntil: 'load' });
+    await page.waitForNetworkIdle({ concurrency: 0, signal: opts.signal });
     opts.signal?.throwIfAborted();
     try {
       await page.waitForFunction(
@@ -68,6 +78,9 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     }
     opts.signal?.throwIfAborted();
     await page.emulateMediaType('print');
+    const fontStatus = await page.evaluate(() => document.querySelector('[data-print-fonts="required"]')
+      ? document.documentElement.dataset.printFonts ?? 'unprepared' : null);
+    if (fontStatus !== null && fontStatus !== 'ready') throw new PrintFontUnavailableError();
     const pagination = await page.evaluate(() => document.querySelector('.work-order-document')
       ? document.documentElement.dataset.printPagination ?? 'unprepared'
       : null);
@@ -101,5 +114,19 @@ export class PrintLayoutOverflowError extends Error {
   constructor() {
     super('打印内容超出 A4 页面，请检查过长的单条内容后重新生成');
     this.name = 'PrintLayoutOverflowError';
+  }
+}
+
+export class PrintFontUnavailableError extends Error {
+  constructor() {
+    super('打印字体未就绪，已停止生成 PDF');
+    this.name = 'PrintFontUnavailableError';
+  }
+}
+
+class PdfBrowserVersionMismatchError extends Error {
+  constructor() {
+    super('PDF_BROWSER_VERSION_MISMATCH');
+    this.name = 'PDF_BROWSER_VERSION_MISMATCH';
   }
 }

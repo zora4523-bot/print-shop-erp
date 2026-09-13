@@ -25,6 +25,9 @@ const FIELD_LABELS: Record<string, string> = {
   status: '状态',
   // Created-by / submitted-by meta
   trackingNo: '快递单号',
+  carrierCode: '物流公司',
+  carrierName: '物流公司名称',
+  shipmentStatus: '发货状态',
   // 超计划报工（action='TASK_OVER_REPORT'）落在同一张表里
   completedQty: '合格数',
   defectQty: '不良数',
@@ -74,7 +77,7 @@ const UNKNOWN_ACTION_LABEL = '其他操作';
 // Command replay metadata belongs in the immutable audit payload, but it is
 // not a user-facing field change. In particular, request identifiers and
 // fingerprints must not appear as a confusing “其他变更” row in the detail UI.
-const INTERNAL_AUDIT_FIELDS = new Set(['shipRequest', 'fulfillmentRequest']);
+const INTERNAL_AUDIT_FIELDS = new Set(['shipRequest', 'fulfillmentRequest', 'requestId', 'fingerprint', 'labelAdded']);
 
 function hasKnownField(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(FIELD_LABELS, name);
@@ -111,6 +114,8 @@ export function formatLogValue(
     return '账号信息未记录';
   }
   if (typeof value === 'boolean') return value ? '是' : '否';
+  if (fieldName === 'carrierCode' && typeof value === 'string') return ({ ZTO: '中通', SF: '顺丰', OTHER: '其他' } as Record<string, string>)[value] ?? '其他';
+  if (fieldName === 'shipmentStatus' && typeof value === 'string') return value === 'SHIPPED' ? '已发货' : '待发货';
   if (fieldName === 'status' && typeof value === 'string') {
     return orderStatusZh(value);
   }
@@ -191,6 +196,7 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_MANUAL_CHARGE_UPDATED: '修改对客费用',
   ORDER_MANUAL_CHARGE_REMOVED: '移除对客费用',
   ORDER_READY_FOR_PRODUCTION: '自动校验通过，待下发生产',
+  SHIPMENT_REGISTERED: '登记发货资料',
   ORDER_PLATE_DETAIL_CREATED: '新增制版明细',
   ORDER_PLATE_DETAIL_UPDATED: '修改制版明细',
   ORDER_PLATE_DETAIL_REMOVED: '移除制版明细',

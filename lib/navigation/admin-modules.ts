@@ -77,6 +77,30 @@ const RULE_CENTER_ADMIN_MODULES: readonly AdminModuleMetadata[] =
 
 export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   {
+    id: 'sales.workbench',
+    label: '工作台',
+    routeBase: '/workbench',
+    iconName: 'BookOpen',
+    breadcrumbLabel: '工作台',
+    menuSection: 'workflow',
+    status: 'implemented',
+    menuOrder: 10,
+    menuRoles: [Role.SALES, Role.CUSTOMER_SERVICE],
+    requiredPermission: 'order:create',
+  },
+  {
+    id: 'owner.salesWorkbench',
+    label: '销售工作台',
+    routeBase: '/workbench',
+    iconName: 'BookOpen',
+    breadcrumbLabel: '销售工作台',
+    menuSection: 'workflow',
+    status: 'implemented',
+    menuOrder: 16,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'order:create',
+  },
+  {
     id: 'owner.dashboard',
     label: '工作台',
     routeBase: '/owner',

@@ -4,11 +4,10 @@ import { redirect } from 'next/navigation';
 import {
   getFormString,
   getFormStringOr,
+  extractPrismaUniqueTargets,
   invalidFromIssues,
   mapInvariantError,
-  mapPrismaUniqueViolation,
   revalidatePaths,
-  type UniqueViolationMapping,
 } from '@/lib/admin/action-helpers';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createBomSchema } from '@/lib/auth/schemas';
@@ -16,37 +15,45 @@ import { BomInvariantError, createBom, setBomActive } from '@/lib/bom';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import type { BomMutationResult } from './owner-boms.types';
 
-const BOM_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
+const BOM_UNIQUE_VIOLATIONS = [
   {
     field: 'version',
-    targets: ['productId', 'version', 'BillOfMaterial_productId_version_key'],
+    targets: [['productId', 'version'], ['BillOfMaterial_productId_version_key']],
     message: '该产品已有相同版本号 BOM',
   },
   {
     field: 'version',
-    targets: [
-      'categoryNodeId',
-      'version',
-      'BillOfMaterial_categoryNodeId_version_key',
-    ],
+    targets: [['categoryNodeId', 'version'], ['BillOfMaterial_categoryNodeId_version_key']],
     message: '该产品分类已有相同版本号 BOM',
   },
   {
     field: 'productId',
-    targets: ['BillOfMaterial_active_product_key'],
+    targets: [['productId'], ['BillOfMaterial_active_product_key']],
     message: '该产品已有启用 BOM',
   },
   {
     field: 'categoryNodeId',
-    targets: ['BillOfMaterial_active_category_key'],
+    targets: [['categoryNodeId'], ['BillOfMaterial_active_category_key']],
     message: '该产品分类已有启用 BOM',
   },
   {
     field: 'items',
-    targets: ['bomId', 'materialId', 'BillOfMaterialItem_bomId_materialId_key'],
+    targets: [['bomId', 'materialId'], ['BillOfMaterialItem_bomId_materialId_key']],
     message: '同一个 BOM 中物料不能重复',
   },
-];
+] as const;
+
+function mapBomUniqueViolation(error: unknown): BomMutationResult | null {
+  if (typeof error !== 'object' || error === null ||
+      !('code' in error) || error.code !== 'P2002') return null;
+  const targets = extractPrismaUniqueTargets('meta' in error ? error.meta : undefined);
+  // One active BOM is enforced by a partial unique index on the target alone;
+  // version uniqueness uses two fields. Matching any one field confuses them.
+  const mapping = BOM_UNIQUE_VIOLATIONS.find((candidate) => candidate.targets.some(
+    (fields) => fields.length === targets.length && fields.every((field) => targets.includes(field)),
+  ));
+  return mapping ? { status: 'invalid', fieldErrors: { [mapping.field]: [mapping.message] } } : null;
+}
 
 function normalizeBomFormInput(formData: FormData) {
   const itemCount = Number.parseInt(getFormStringOr(formData, 'itemCount', '0'), 10);
@@ -83,7 +90,7 @@ export async function createBomAction(
     const created = await createBom(parsed.data);
     createdId = created.id;
   } catch (err) {
-    const unique = mapPrismaUniqueViolation(err, BOM_UNIQUE_VIOLATIONS);
+    const unique = mapBomUniqueViolation(err);
     if (unique) return unique;
     const invariant = mapInvariantError(err, BomInvariantError);
     if (invariant) return invariant;
@@ -103,7 +110,7 @@ export async function setBomActiveAction(
   try {
     await setBomActive(id, isActive);
   } catch (err) {
-    const unique = mapPrismaUniqueViolation(err, BOM_UNIQUE_VIOLATIONS);
+    const unique = mapBomUniqueViolation(err);
     if (unique) return unique;
     const invariant = mapInvariantError(err, BomInvariantError);
     if (invariant) return invariant;

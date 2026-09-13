@@ -177,21 +177,17 @@ test.describe('automation smoke', () => {
       ).toHaveAttribute('href', child.href);
     }
 
-    const rulesGroup = sidebar.locator('[data-menu-group="规则"]');
-    await expect(
-      rulesGroup.getByRole('button', { name: '规则 收起', exact: true }),
-    ).toHaveAttribute('aria-expanded', 'true');
-    await rulesGroup
-      .getByRole('button', { name: '规则 收起', exact: true })
-      .click();
-    await expect(
-      rulesGroup.getByRole('button', { name: '规则 展开', exact: true }),
-    ).toHaveAttribute('aria-expanded', 'false');
-    await expect(ruleParentLink).toHaveCount(0);
-    await rulesGroup
-      .getByRole('button', { name: '规则 展开', exact: true })
-      .click();
-    await expect(ruleParentLink).toHaveCount(1);
+    // 规则分组只显示父入口，子菜单使用专属开关。
+    await expect(sidebar.getByRole('button', { name: /^规则 (收起|展开)$/, exact: true })).toHaveCount(0);
+    const ruleToggle = () => ruleParent.getByRole('button', { name: /规则配置中心子菜单/ });
+    await expect(ruleToggle()).toHaveAttribute('aria-expanded', 'true');
+    await ruleToggle().click();
+    await expect(ruleToggle()).toHaveAttribute('aria-expanded', 'false');
+    await expect(ruleSubmenu).not.toBeVisible();
+    await expect(ruleParentLink).toBeVisible();
+    await ruleToggle().click();
+    await expect(ruleToggle()).toHaveAttribute('aria-expanded', 'true');
+    await expect(ruleSubmenu).toBeVisible();
     await expect(
       sidebar.locator(
         [
@@ -357,7 +353,7 @@ test.describe('automation smoke', () => {
     await page.goto('/owner/boms/new');
     await expect(page.getByRole('heading', { name: '新建 BOM' })).toBeVisible();
     await expect(page.getByLabel('BOM 名称')).toBeVisible();
-    await expect(page.getByLabel('物料').first()).toBeVisible();
+    await expect(page.getByRole('combobox', { name: '物料', exact: true }).first()).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`/owner/parties?q=${fixture.partyCode}`);
@@ -431,7 +427,7 @@ test.describe('automation smoke', () => {
     await expect(supplierSelect).toContainText(fixture.supplierPartyCode);
     await supplierSelect.selectOption(fixture.supplierPartyId);
     await expect(supplierSelect).toHaveValue(fixture.supplierPartyId);
-    await expect(page.getByLabel('物料')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: '物料', exact: true })).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/warehouses');
@@ -443,7 +439,7 @@ test.describe('automation smoke', () => {
 
     await page.goto('/orders/new');
     await expect(page.getByRole('heading', { name: '新建工单' })).toBeVisible();
-    await expect(page.getByLabel('客户主数据（选填）')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: '关联客户（选填）', exact: true })).toBeVisible();
     await expect(page.locator('input[name="customerRef"]')).toBeVisible();
     await expect(page.locator('input[name="receiverName"]')).toHaveCount(0);
     await expect(page.locator('input[name="receiverPhone"]')).toHaveCount(0);
@@ -468,11 +464,12 @@ test.describe('automation smoke', () => {
       .locator(`[data-order-id="${fixture.orderId}"]:visible`)
       .first();
     await expect(matchedOrder).not.toContainText(fixture.orderNo);
-    await expect(matchedOrder).toContainText(fixture.customerRef);
+    // 工厂列表按业务员识别对接人；产品客户仍用于服务端搜索。
+    await expect(matchedOrder).toContainText(`业务员：${E2E_USERS.owner.displayName}`);
     await expectNoNextErrorOverlay(page);
 
     // Name links go directly to full detail; Back restores the filtered list.
-    await matchedOrder.locator('h3 a').click();
+    await matchedOrder.getByRole('heading').getByRole('link').click();
     await expect(page).toHaveURL(`/orders/${fixture.orderId}`);
     await expect(page.locator('[data-testid="admin-order-detail"]')).toBeVisible();
     await page.goBack();

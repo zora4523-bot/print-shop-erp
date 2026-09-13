@@ -1531,6 +1531,7 @@ describe('warehouse operation schemas', () => {
 
 describe('materialStockTransactionSchema', () => {
   const base = {
+    idempotencyKey: 'afe9e043-d6ed-4fe5-8c0e-138254b8c5d6',
     materialId: 'mat_1',
     locationId: '',
     direction: 'IN',

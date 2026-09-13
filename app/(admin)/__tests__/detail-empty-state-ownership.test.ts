@@ -26,20 +26,21 @@ function expectSingleSharedEmptyState(source: string): void {
 }
 
 describe('detail no-data empty-state ownership', () => {
+  it('monthly bill detail omits obsolete legacy payment history and empty optional deductions', () => {
+    const source = readAdminPage('sales', 'bills', '[id]');
+    expect(source).not.toContain('payments.map');
+    expect(source).toContain('bill.adjustments.length ?');
+  });
   it.each([
     {
-      file: ['sales', 'bills', '[id]'],
-      start: '支付明细（',
-      end: '工单明细（',
-      title: '暂无支付流水',
-    },
-    {
+      group: '(billing)',
       file: ['owner', 'bills', 'archive', '[id]'],
       start: '历史收款记录</h2>',
       end: '<Link href="/owner/bills/archive"',
       title: '暂无收款流水',
     },
     {
+      group: '(admin)',
       file: ['foreman', 'outsource', '[id]'],
       start: '付款明细（',
       // 状态操作区在终态也保留，以便 Server Action 成功
@@ -47,8 +48,8 @@ describe('detail no-data empty-state ownership', () => {
       end: '<OutsourceActions',
       title: '暂无外协付款记录',
     },
-  ])('uses one compact shared empty state for $title', ({ file, start, end, title }) => {
-    const region = between(readAdminPage(...file), start, end);
+  ])('uses one compact shared empty state for $title', ({ group, file, start, end, title }) => {
+    const region = between(readProjectFile('app', group, ...file, 'page.tsx'), start, end);
 
     expectSingleSharedEmptyState(region);
     expect(region).toContain('variant="compact"');

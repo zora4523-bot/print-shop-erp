@@ -13,6 +13,10 @@ applies_to: repository source at last_verified
 
 ## 系统边界
 
+销售资料与单款快速计价入口为 `/workbench`，页面和 action 均以 `order:create` 授权。
+目录读取复用建单目录；计算复用 `calculateCreateOrderQuoteFromCatalogInTx`，只向浏览器投影对客加工费明细和 Decimal 加价结果。
+销售知识独立于目录加载，不创建订单或新的价格账本，详见 [销售工作台](./docs/销售工作台.md)。
+
 红包印刷 ERP 是一个 Next.js App Router 应用，覆盖工单、生产、外协、库存、采购、定价、账单、薪资、通知和运维页面。当前运行时由以下部分组成：
 
 ```text
@@ -112,6 +116,7 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
   [`lib/auth/permissions-dict.ts`](./lib/auth/permissions-dict.ts)。
 - Server Actions 使用 `requirePermission`；被 `auth(handler)` 包装的 Route Handler 使用 `requireSessionPermission`。
 - 所有者范围、工单范围和师傅任务范围在领域查询中继续收窄，不能因角色通过粗粒度权限就跳过资源级检查。
+- 生产打印使用 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 的独立范围，网页正文、标题与同步/后台 PDF 共用。ADMIN 查看全部，CUSTOMER_SERVICE 限本人提交，SALES 拒绝；WORKER 按当前账号固定报工岗位匹配当前版本未取消工序，或访问当前版本公共进度工序，排除 `SUBMITTED`。查询复核账号启用状态与角色，不以旧派工关系授权；后台生成后及下载前再次复核范围与生产版本。
 - cron 使用 `CRON_SECRET`；CDR 外协下载使用不可猜测且限时的 bundle id，不依赖登录 session。
 
 ## 数据与一致性
@@ -122,6 +127,7 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 - 工单计价、生产计件和薪资规则保存快照；规则更新不能改变历史记录。
 - 工单主二维码是只读入口，依据当前账号岗位及生产版本定位可报工工序。工序选择不建立整单人员归属；提交报工仍由服务端以会话账号记账，烫金与打包分别计件。订单版本首次扫码记录仅表示首次开工事实，不替代每笔报工的 `reporterId`。
 - 浏览器打印和后台 PDF 共用打印 DTO、模板及字体/图片就绪后的 A4 几何分页函数。主单每页保留一个带版本主码，工序数量与进度以文字表格呈现；无法安全分割的超高内容停止自动打印与 PDF 导出。
+- 打印 DTO 的工序事实只来自当前 `workOrderVersion` 的 `ProductionOperation` 与 `ProductionProgressStep`，过滤已取消项，移除 `ProductionTask` 读取和渲染回退。缺少当前工序时明确显示空态，不按工艺名称合成生产任务。页眉状态使用工单状态注册表，审批提示读取 PENDING 修改申请；名称或未指定师傅都不参与状态推导。
 - 状态变化由领域状态机或事务守护，不能由页面直接拼接状态更新。
 - 关键写路径保存审计、幂等或唯一性证据；迁移中的 fail-fast 检查不能为“通过部署”而删除。
 - 迁移只向前修复。数据库迁移已开始后，不能只回退代码并继续写入新结构。
@@ -157,3 +163,25 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 - 修改数据一致性、回退或快照策略。
 
 只记录已经从代码、配置或已批准决策中验证的事实。带日期的生产快照属于部署 runbook，不应被提升为永久架构事实。
+
+## 外部销售读取边界（2026-09-12）
+
+销售详情及编辑复用 `lib/order/sales-detail-query.ts` 的同一查询/序列化契约；
+`SalesOrderEditor` 不接触通用工单 DTO。客户选项在服务端按当前销售关联工单限定，
+客户表尚无独立销售分配字段，不能把无关联客户默认为销售可见。
+`lib/agent-monthly-billing/sales-query.ts` 只读取本人的 `AgentMonthlyBill` 及冻结明细，
+不复用包含管理员内部关系的月账单详情。旧 Bill 仅保留管理历史归档用途。
+
+销售编辑页的新增地址复用 `add-shipment` 领域事务，与管理员共用分货守恒、自动物流报价、预览令牌及版本校验；销售权限在锁内按工单创建人限制，禁止手工指定费用。`SalesOrderEditGuard` 统一协调编辑页全部表单、页头操作、路由离开与弹窗的未保存内容；通过表单快照和提交状态阻止其他操作刷新覆盖输入。
+
+### 发布验证进程隔离（2026-09-11）
+
+仓库 Playwright 配置在启动服务及 globalSetup 首次连接前预检独立 E2E 数据库和显式库名确认。开发测试、生产构建测试与 durable worker 测试使用独立服务端口和构建产物；禁止复用日常开发服务。测试工价经正式发布服务建立并标明非生产，不能作为正式业务定价。命令与环境规则只在 [开发指南](./DEVELOPMENT.md#测试环境约束) 维护，远端 CI/生产验收证据在 [整改台账](./docs/release-remediation-2026-09-10.md) 跟踪。
+
+六个账单页面位于 `app/(billing)/owner/`，复用原 AdminShellLayout、OwnerLayout 和错误/404 边界；URL 保持不变，独立分组提供原生表单初始 HTML。页面与 HEAVY 导出共享 `lib/order/admin-workspace-filters.ts` 的权限及筛选谓词，worker 不导入带 `server-only` 的页面聚合模块。
+
+Next 16.3 默认会在 Proxy 前规范化并剥离 Flight 标头；`skipProxyUrlNormalize: true` 保留预取标识供认证代理判断。matcher 不跳过预取认证，代理仅阻止预取响应的 Cookie 写回，正常导航的滚动会话不受影响；原始路径下的公共资源、认证及受保护路由都有回归。
+
+### 跨设备打印输出（2026-09-11）
+
+正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。

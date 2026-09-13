@@ -86,6 +86,18 @@ async function renderShell(
   });
 }
 
+async function settleMobileSidebar() {
+  const sidebar = document.querySelector<HTMLElement>('[data-mobile="true"]')!;
+  await expect.poll(() => sidebar.hasAttribute('data-starting-style')).toBe(false);
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+  // A translating 44px control can have a fractional bounding-box width even
+  // though its layout width is 44px. Measure after the real transition finishes.
+  await expect.poll(() => sidebar.getAnimations({ subtree: true })
+    .some((animation) => animation.pending || animation.playState === 'running')).toBe(false);
+}
+
 function assertMenuLinks(role: Role) {
   const nav = document.querySelector('[aria-label="后台主导航"]')!;
   const expected = flattenAdminMenuItems(
@@ -164,16 +176,26 @@ describe.each([Role.SALES, Role.ADMIN])('%s shared navigation', (role) => {
         if (width < 768) {
           await page.getByRole('button', { name: '打开/关闭侧边栏菜单' }).click();
           await expect.element(page.getByRole('dialog', { name: '后台导航菜单' })).toBeVisible();
+          await settleMobileSidebar();
           expect(await commands.checkShellAccessibility()).toEqual([]);
         }
         assertMenuLinks(role);
         if (width < 768) {
-          const sidebar = document.querySelector('[data-mobile="true"]')!;
-          for (const control of sidebar.querySelectorAll('a, button:not([disabled])')) {
+          const sidebar = document.querySelector<HTMLElement>('[data-mobile="true"]')!;
+          for (const control of sidebar.querySelectorAll<HTMLElement>('a, button:not([disabled])')) {
             const rect = control.getBoundingClientRect();
             if (!rect.width || !rect.height) continue;
+            expect(control.offsetWidth).toBeGreaterThanOrEqual(44);
+            expect(control.offsetHeight).toBeGreaterThanOrEqual(44);
             expect(rect.width).toBeGreaterThanOrEqual(44);
             expect(rect.height).toBeGreaterThanOrEqual(44);
+            const clip = (control.closest('[data-slot="sidebar-content"]') ?? sidebar).getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            if (centerX > Math.max(0, clip.left) && centerX < Math.min(width, clip.right)
+              && centerY > Math.max(0, clip.top) && centerY < Math.min(height, clip.bottom)) {
+              expect(control.contains(document.elementFromPoint(centerX, centerY)), control.outerHTML).toBe(true);
+            }
           }
           await userEvent.keyboard('{Escape}');
           await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();

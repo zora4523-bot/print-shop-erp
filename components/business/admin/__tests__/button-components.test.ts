@@ -10,6 +10,8 @@ const BUTTON_ROOTS = [
 ];
 
 describe('admin and business buttons', () => {
+  // Parse every admin/business TSX file; keep the full repository scan and
+  // assertions, with a separate budget for slower hosted CI CPUs.
   it('uses the shared Button component instead of one-off native buttons', () => {
     const failures: string[] = [];
 
@@ -41,7 +43,7 @@ describe('admin and business buttons', () => {
       failures,
       `Native buttons must use @/components/ui/button (or document a necessary primitive with data-native-button-reason):\n${failures.join('\n')}`,
     ).toEqual([]);
-  });
+  }, 20_000);
 });
 
 function findTsxFiles(root: string): string[] {

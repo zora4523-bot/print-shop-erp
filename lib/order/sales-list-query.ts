@@ -4,6 +4,7 @@ import Decimal from 'decimal.js';
 import {
   DesignFileType,
   OrderChangeRequestStatus,
+  OrderChangeRequestType,
   OrderPricingStatus,
   OrderStatus,
   Prisma,
@@ -32,6 +33,7 @@ export const SALES_ORDER_LIST_VIEWS = [
   'doing',
   'shipped',
   'done',
+  'cancelled',
   'draft',
 ] as const satisfies readonly OrderListViewKey[];
 
@@ -43,6 +45,7 @@ export type SalesOrderListSummary = {
   doing: number;
   shipped: number;
   done: number;
+  cancelled: number;
   draft: number;
   shippedThisMonth: number;
 };
@@ -88,11 +91,13 @@ export type SalesOrderListRow = {
   pricingAttentionReason: string | null;
   pendingChangeRequest: {
     id: string;
+    type: OrderChangeRequestType;
     reason: string;
     createdAt: string;
   } | null;
   rejectedChangeRequest: {
     id: string;
+    type: OrderChangeRequestType;
     reason: string;
     reviewRemark: string | null;
     reviewedAt: string;
@@ -121,7 +126,7 @@ const ACTIVE_SALES_STATUSES = [
   OrderStatus.COMPLETED,
 ] as const;
 
-const FINISHED_SALES_STATUSES = [OrderStatus.SETTLED, OrderStatus.FINISHED, OrderStatus.CANCELLED] as const;
+const FINISHED_SALES_STATUSES = [OrderStatus.SETTLED, OrderStatus.FINISHED] as const;
 const isRejectedChange = (status: OrderChangeRequestStatus) =>
   status === OrderChangeRequestStatus.DENIED || status === OrderChangeRequestStatus.REJECTED;
 
@@ -211,6 +216,7 @@ const salesOrderSelect = {
     select: {
       id: true,
       status: true,
+      type: true,
       reason: true,
       reviewRemark: true,
       reviewedAt: true,
@@ -224,8 +230,8 @@ type SalesOrderRecord = Prisma.OrderGetPayload<{
 }>;
 
 /**
- * The sales workspace deliberately exposes only its search and six business
- * views. Old administrator filter parameters are discarded so a bookmarked
+ * The sales workspace deliberately exposes only its search and business views.
+ * Old administrator filter parameters are discarded so a bookmarked
  * advanced filter cannot remain invisibly active after the role-specific UI
  * switches to the compact sales surface.
  */
@@ -260,6 +266,7 @@ function salesViewWhere(
       status: { in: [...FINISHED_SALES_STATUSES] },
     };
   }
+  if (view === 'cancelled') return { status: OrderStatus.CANCELLED };
   if (view === 'draft') return { status: OrderStatus.DRAFT };
   return null;
 }
@@ -526,6 +533,7 @@ export async function getSalesOrderListSummary(
     doing: count(...ACTIVE_SALES_STATUSES),
     shipped: count(OrderStatus.SHIPPED),
     done: count(...FINISHED_SALES_STATUSES),
+    cancelled: count(OrderStatus.CANCELLED),
     draft: count(OrderStatus.DRAFT),
     shippedThisMonth,
   };
@@ -600,6 +608,7 @@ function mapSalesOrderRow(
     pendingChangeRequest: pendingChange
       ? {
           id: pendingChange.id,
+          type: pendingChange.type,
           reason: pendingChange.reason,
           createdAt: pendingChange.createdAt.toISOString(),
         }
@@ -607,6 +616,7 @@ function mapSalesOrderRow(
     rejectedChangeRequest: rejectedChange
       ? {
           id: rejectedChange.id,
+          type: rejectedChange.type,
           reason: rejectedChange.reason,
           reviewRemark: rejectedChange.reviewRemark,
           reviewedAt: (

@@ -79,10 +79,15 @@ export function getFormStringOr(
 }
 
 export function normalizePrismaUniqueTargets(target: unknown): string[] {
-  if (Array.isArray(target)) {
-    return target.filter((v): v is string => typeof v === 'string');
-  }
-  return typeof target === 'string' ? [target] : [];
+  const targets = Array.isArray(target)
+    ? target.filter((value): value is string => typeof value === 'string')
+    : typeof target === 'string' ? [target] : [];
+  // adapter-pg reads PostgreSQL's `Key ("productId", version)=...` detail.
+  // Unquote whole SQL identifiers only; never guess by substring/index prefix.
+  return targets.map((value) => {
+    const quoted = /^"((?:[^"]|"")*)"$/.exec(value);
+    return quoted ? quoted[1]!.replace(/""/g, '"') : value;
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

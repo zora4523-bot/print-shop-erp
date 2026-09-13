@@ -1,0 +1,11 @@
+import { beforeEach, expect, it, vi } from 'vitest';
+const mocks = vi.hoisted(() => ({ session: vi.fn(), find: vi.fn() }));
+vi.mock('@/lib/auth/config', () => ({ auth: (handler: unknown) => handler }));
+vi.mock('@/lib/auth/session', () => ({ getVerifiedSession: mocks.session }));
+vi.mock('@/lib/db', () => ({ db: { orderShipmentLabel: { findFirst: mocks.find } } }));
+import { GET } from '../route';
+const call = () => (GET as unknown as (request: object, context: object) => Promise<Response>)({ auth: null }, { params: Promise.resolve({ id: 'order', shipmentId: 'shipment', labelId: 'label' }) });
+beforeEach(() => { vi.resetAllMocks(); });
+it('requires a currently valid session', async () => { mocks.session.mockResolvedValue(null); expect((await call()).status).toBe(401); expect(mocks.find).not.toHaveBeenCalled(); });
+it('scopes both order and shipment ownership for a sales user', async () => { mocks.session.mockResolvedValue({ user: { id: 'sales', role: 'SALES' } }); mocks.find.mockResolvedValue(null); expect((await call()).status).toBe(404); expect(mocks.find.mock.calls[0][0].where).toEqual({ id: 'label', shipmentId: 'shipment', shipment: { orderId: 'order', order: { submitterId: 'sales' } } }); });
+it('serves a private non-cacheable JPEG for an authorized reader', async () => { mocks.session.mockResolvedValue({ user: { id: 'admin', role: 'ADMIN' } }); mocks.find.mockResolvedValue({ image: new Uint8Array([255,216,255,217]) }); const response = await call(); expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('private, no-store'); expect(response.headers.get('content-type')).toBe('image/jpeg'); expect(response.headers.get('x-content-type-options')).toBe('nosniff'); });

@@ -189,3 +189,17 @@ pnpm db:studio
 因此使用 HEAD schema 到当前 schema 的 `prisma migrate diff --script` 生成加列 SQL，再加入约束。
 随后在专用库、本地开发库部署，并在新建空库通过完整 `verify-fresh-migrations.mjs` 检查。
 已部署 SQL 原文含一个末尾空行，`git diff --check` 会提示 `new blank line at EOF`；为保持已应用迁移的校验和，不再改写该文件。其余任务文件通过格式检查。
+
+### 发货登记与面单（2026-09-11）
+
+前向迁移 `20260911110000_shipment_registration` 为 `OrderShipment` 新增 `carrierName` 和 `registrationVersion`；新增 `OrderShipmentLabel` 保存归一化 JPEG 字节、地址关联、登记人及时间。单图上限 512 KiB（应用与数据库 CHECK 双重限制），替换追加新记录，不覆盖旧图片。选择数据库私有存储是为了让小型面单凭证和业务提交原子落库，避免上传成功但登记失败的孤儿文件；备份容量需包含图片历史，长期大批量使用时可迁移到受控对象存储。
+
+该迁移仅新增列和表，无历史状态或金额回填。已在本地开发库应用；独立 `erp_shipping_verify_20260911` 空库完整验证 141 个迁移及后置条件。`migrate dev --create-only` 遇到既有并发索引不能在 shadow 事务运行，因此使用 Prisma schema diff 生成新增 SQL、审查后 migrate deploy；没有修改既有迁移。
+
+## 手工出入库请求幂等（2026-09-11 局部核对）
+
+前向迁移 `20260911040000_manual_material_request_idempotency` 为 `MaterialTransaction` 添加可空的唯一 `idempotencyKey` 和 `requestFingerprint`。旧流水不回填、不改写；没有这对字段的采购、调拨、盘点流水继续由各自单据的幂等规则管理。数据库要求新请求键与 64 位摘要成对存在，唯一索引作为最终去重约束。
+
+手工表单携带服务端生成的请求键，仅在成功响应后换新键；网络失败重试沿用原键。服务在事务内先锁请求、核对操作者与规范化业务内容的摘要，再锁定物料和库位更新库存、写流水及通知 outbox。同键同内容返回首次流水，不再更新余额或发送预警；同键不同内容拒绝。上线前必须先应用前向迁移，不能只部署新的 Prisma Client。
+
+已发时薪再次提交同一“已发”状态时保留原 `paidAt` 和 `updatedAt`，不能把重试时间写成首次发放时间。验证与候选状态见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。

@@ -19,7 +19,7 @@ export const PERMISSIONS = {
   'order:export:all':           [Role.ADMIN],
   'order:ship':                 [Role.ADMIN],
   'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
-  'order:cancel':               [Role.ADMIN],
+  'order:cancel':               [Role.ADMIN, Role.SALES],
   'order:change:request':       [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
   'order:change:review':        [Role.ADMIN],
   'order:price:confirm':        [Role.ADMIN],

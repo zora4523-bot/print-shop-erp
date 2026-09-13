@@ -48,7 +48,7 @@ import { resultMessage } from '../AdminOrderBatchActions';
 
 describe('AdminOrderWorkspaceList', () => {
   it('distinguishes a filtered empty result from an empty queue with working recovery links', () => {
-    const props = { orders: [], customerFilterHrefs: {}, selectedExportRequestKey: 'empty-export' };
+    const props = { orders: [], submitterFilterHrefs: {}, selectedExportRequestKey: 'empty-export' };
     const filtered = renderToStaticMarkup(<AdminOrderWorkspaceList {...props} hasFilters clearFiltersHref="/orders?queue=all" />);
     expect(filtered).toContain('没有符合筛选条件的工单');
     expect(filtered).toContain('href="/orders?queue=all"');
@@ -61,24 +61,24 @@ describe('AdminOrderWorkspaceList', () => {
 
   it('uses the name as a detail link and hides identifiers and redundant metadata', () => {
     const order = { ...row(), promisedDaysLeft: 8, dueAlert: null };
-    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="name-export" />);
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} submitterFilterHrefs={{}} selectedExportRequestKey="name-export" />);
     expect(html).toContain('href="/orders/order-1"');
     expect(html).toContain('端午定制');
-    expect(html).toContain('客户甲');
+    expect(html).not.toContain('客户甲');
     expect(html).toContain('2026-09-05');
     expect(html).not.toContain('剩 8 天');
     expect(html.replace(/<[^>]*>/g, '')).not.toContain(order.orderNo);
     expect(html).toContain(`aria-label="选择工单 端午定制（${order.orderNo}）"`);
     expect(html).toContain(`aria-label="${order.isStarred ? '取消' : '添加'}星标：端午定制（${order.orderNo}）"`);
     expect(html).not.toContain('复制工单号');
-    expect(html).not.toContain('业务员甲');
+    expect(html).toContain('业务员甲');
     expect(html).not.toContain('局部烫金');
     expect(html).not.toContain('v2');
   });
 
   it('labels an unquoted draft without implying a failed pricing rule', () => {
     const order: AdminOrderWorkspaceRow = { ...row(), status: OrderStatus.DRAFT, fee: { source: 'PENDING', amount: null, estimated: false } };
-    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="draft-export" />);
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} submitterFilterHrefs={{}} selectedExportRequestKey="draft-export" />);
     expect(html).toContain('未报价');
     expect(html).toContain('提交后报价');
     expect(html).toContain('href="/orders/order-1/edit"');
@@ -88,7 +88,7 @@ describe('AdminOrderWorkspaceList', () => {
 
   it('shows canonical craft tags and the full distant delivery date without a countdown', () => {
     const order: AdminOrderWorkspaceRow = { ...row(), craftTags: ['局部烫金', '专版烫金', '彩印'], promisedDate: '2099-12-31', promisedDaysLeft: 26777, dueAlert: null };
-    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="signals-export" />);
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} submitterFilterHrefs={{}} selectedExportRequestKey="signals-export" />);
     for (const tag of order.craftTags!) expect(html).toContain(tag);
     expect(html).toContain('2099-12-31');
     expect(html).not.toContain('26777');
@@ -96,7 +96,7 @@ describe('AdminOrderWorkspaceList', () => {
 
   it('keeps duplicate names linked to separate records and uses a readable empty-name fallback', () => {
     const orders = [row(), { ...row(), id: 'order-2', orderNo: 'OTHER-ID' }, { ...row(), id: 'order-3', customName: '  ' }];
-    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={orders} customerFilterHrefs={{}} selectedExportRequestKey="duplicate-export" />);
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={orders} submitterFilterHrefs={{}} selectedExportRequestKey="duplicate-export" />);
     for (const order of orders) expect(html).toContain(`href="/orders/${order.id}"`);
     expect(html).toContain('未命名工单');
     expect(html.replace(/<[^>]*>/g, '')).not.toContain('OTHER-ID');
@@ -106,7 +106,7 @@ describe('AdminOrderWorkspaceList', () => {
 
   it('shows validated change facts in the row while preserving the request reason as fallback', () => {
     const order = { ...row(), pendingChangeRequest: { id: 'request-1', type: 'MODIFY' as const, reason: '修改数量', summary: '第 2 款数量 1,000 → 2,000', createdAt: '2026-09-07T01:00:00.000Z' } };
-    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} customerFilterHrefs={{}} selectedExportRequestKey="change-export" />);
+    const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} submitterFilterHrefs={{}} selectedExportRequestKey="change-export" />);
     expect(html).toContain('第 2 款数量 1,000 → 2,000');
   });
 
@@ -115,8 +115,8 @@ describe('AdminOrderWorkspaceList', () => {
       <AdminOrderWorkspaceList
         orders={[row()]}
         selectedExportRequestKey="selected-export-request-1"
-        customerFilterHrefs={{
-          'order-1': '/orders?customerRef=%E5%AE%A2%E6%88%B7%E7%94%B2',
+        submitterFilterHrefs={{
+          'order-1': '/orders?submitterId=sales-1',
         }}
         footer={<p>分页</p>}
       />,
@@ -124,11 +124,11 @@ describe('AdminOrderWorkspaceList', () => {
 
     expect(html).toContain('data-slot="admin-order-workspace-list"');
     expect(html.replace(/<[^>]*>/g, '')).not.toContain('GD-260902-001');
-    expect(html).toContain('/orders?customerRef=%E5%AE%A2%E6%88%B7%E7%94%B2');
+    expect(html).toContain('/orders?submitterId=sales-1');
     expect(html).not.toContain('v2');
     expect(html).toContain('端午定制');
-    expect(html).toContain('客户甲');
-    expect(html).not.toContain('业务员甲');
+    expect(html).not.toContain('客户甲');
+    expect(html).toContain('业务员甲');
     expect(html).not.toContain('局部烫金');
     expect(html).toContain('2 款 · 2,000');
     expect(html).toContain('烫金');
@@ -156,7 +156,7 @@ describe('AdminOrderWorkspaceList', () => {
       <AdminOrderWorkspaceList
         orders={[submitted]}
         selectedExportRequestKey="selected-export-request-review"
-        customerFilterHrefs={{ 'order-1': '/orders?customerRef=customer' }}
+        submitterFilterHrefs={{ 'order-1': '/orders?submitterId=sales-1' }}
       />,
     );
 
@@ -183,7 +183,7 @@ describe('AdminOrderWorkspaceList', () => {
       <AdminOrderWorkspaceList
         orders={[rejected]}
         selectedExportRequestKey="selected-export-request-incomplete"
-        customerFilterHrefs={{ 'order-1': '/orders?customerPartyId=party-1' }}
+        submitterFilterHrefs={{ 'order-1': '/orders?submitterId=sales-1' }}
       />,
     );
     const actionsHtml = renderToStaticMarkup(
@@ -206,7 +206,7 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).toContain('请补全收货地址');
     expect(html).not.toContain('确认并锁定');
     expect(html).not.toContain('>确认工单</button>');
-    expect(html).not.toContain('>下发 + 打印</button>');
+    expect(html).not.toContain('>下发生产</button>');
   });
 
   it('offers release with saved pricing and never waits for a current-price token', () => {
@@ -216,7 +216,7 @@ describe('AdminOrderWorkspaceList', () => {
     submitted.capabilities = { ...submitted.capabilities, confirm: true, hold: false, release: true };
     submitted.priceComparison = null;
     const html = renderToStaticMarkup(<AdminOrderDecisionPanel order={submitted} />);
-    expect(html).toContain('下发 + 打印');
+    expect(html).toContain('下发生产');
     expect(html).not.toContain('>确认工单</button>');
     expect(html).not.toContain('锁定金额');
   });
@@ -250,7 +250,7 @@ describe('AdminOrderWorkspaceList', () => {
       <AdminOrderWorkspaceList
         orders={[stagnant]}
         selectedExportRequestKey="selected-export-request-2"
-        customerFilterHrefs={{ 'order-1': '/orders?customerRef=customer' }}
+        submitterFilterHrefs={{ 'order-1': '/orders?submitterId=sales-1' }}
       />,
     );
 

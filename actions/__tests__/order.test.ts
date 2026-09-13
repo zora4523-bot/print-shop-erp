@@ -810,11 +810,11 @@ describe('cancelOrderAction', () => {
   it('forwards a trimmed reason', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
-    await cancelOrderAction('o1', null, fd({ reason: '  客户临时取消  ' }));
+    await cancelOrderAction('o1', null, fd({ reason: '  客户临时取消  ', expectedEditVersion: '4' }));
     expect(orderMock.cancelOrder).toHaveBeenCalledWith(
       'o1',
       expect.anything(),
-      '客户临时取消',
+      '客户临时取消', expect.any(Date), 4,
     );
   });
 
@@ -835,7 +835,7 @@ describe('cancelOrderAction', () => {
     const r = await cancelOrderAction(
       'o1',
       null,
-      fd({ reason: '客户取消' }),
+      fd({ reason: '客户取消', expectedEditVersion: '4' }),
     );
     expect(r.status).toBe('error');
   });
@@ -843,7 +843,7 @@ describe('cancelOrderAction', () => {
   it('revalidates both routes on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
-    await cancelOrderAction('o1', null, fd({ reason: '客户取消' }));
+    await cancelOrderAction('o1', null, fd({ reason: '客户取消', expectedEditVersion: '4' }));
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
   });
@@ -1290,6 +1290,17 @@ describe('setOrderUrgentAction', () => {
 });
 
 describe('setOrderSfCollectAction', () => {
+  it('returns unexpected persistence failures to the form without leaking database details', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.setOrderSfCollect.mockRejectedValueOnce(new Error('private database constraint detail'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const result = await setOrderSfCollectAction('o1', null, fd({ isSfCollect: 'true' }));
+      expect(result).toEqual({ status: 'error', message: '配送方式更新失败，请刷新后重试' });
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private database constraint detail');
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    } finally { log.mockRestore(); }
+  });
   const fulfillmentGuardFormFields = {
     expectedOrderRevision: '4',
     expectedEditVersion: '2',

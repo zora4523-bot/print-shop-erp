@@ -58,6 +58,8 @@ describe('user-visible copy gate', () => {
 });
 
 
+// This creates a real TypeScript program and resolves imported source files.
+// Cold compiler startup on the hosted runner is not a five-second SLA.
 it('traces imported display helpers and labels to their defining file', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'ui-copy-import-'));
   try {
@@ -78,7 +80,7 @@ it('traces imported display helpers and labels to their defining file', () => {
   } finally {
     rmSync(root, {recursive: true, force: true});
   }
-});
+}, 20_000);
 
 it('keeps every documented internal mapping in the gate and wires the required lint command', () => {
   const doc = readFileSync(path.join(process.cwd(), 'docs/ui-规范.md'), 'utf8');
@@ -93,4 +95,16 @@ it('keeps every documented internal mapping in the gate and wires the required l
 it('blocks connection implementation terms in notification flows without banning diagnostic vocabulary globally', () => {
   expect(inspectUiCopy('<p>后台 worker 将使用 Secret</p>', 'components/business/notification/Example.tsx')).toHaveLength(1);
   expect(inspectUiCopy('<p>worker 运行状态</p>', 'app/(admin)/owner/diagnostics/page.tsx')).toEqual([]);
+});
+
+
+it.each([
+  ['components/business/order/OrderExportControls.tsx', '由独立重任务生成，不占用 SSR 进程'],
+  ['components/business/bom/OrderMaterialUsageEstimate.tsx', '仅按当前启用 BOM 估算'],
+  ['app/(admin)/orders/[id]/page.tsx', '计件工资生成后，关联明细会显示在这里'],
+])('rejects retired order introductions in %s', (file, copy) => {
+  expect(inspectUiCopy(`<p>${copy}</p>`, file, policy).length).toBeGreaterThan(0);
+});
+it('allows required order blockers and attachment warnings', () => {
+  expect(inspectUiCopy('<p>完工后才可发货。图片和 CDR 文件不会保存在本地草稿中。</p>', 'components/business/order/OrderForm.tsx', policy)).toEqual([]);
 });

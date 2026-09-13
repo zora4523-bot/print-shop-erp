@@ -13,7 +13,7 @@ describe('root error recovery contracts', () => {
     const routeError = source('app/error.tsx');
 
     expect(routeError).toMatch(/^'use client';/);
-    expect(routeError).toContain('unstable_retry');
+    expect(routeError).toContain('retry');
     expect(routeError).toContain('scope="page"');
     expect(routeError).toContain('返回系统首页');
     expect(routeError).not.toContain('{error.message}');
@@ -26,7 +26,7 @@ describe('root error recovery contracts', () => {
     expect(globalError).toContain("import './globals.css'");
     expect(globalError).toContain('<html lang="zh-CN">');
     expect(globalError).toContain('<body');
-    expect(globalError).toContain('unstable_retry');
+    expect(globalError).toContain('retry');
     expect(globalError).not.toContain('{error.message}');
   });
 });
