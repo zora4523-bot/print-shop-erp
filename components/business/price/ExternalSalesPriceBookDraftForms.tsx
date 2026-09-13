@@ -654,13 +654,39 @@ export function PublishCustomerPriceBookDraftForm({
     router.refresh();
   }, [router, state]);
 
+  if (impact && !hasChanges) {
+    // Only the exact no-change diagnostic is redundant; never suppress real validation failures.
+    const issues = (impact.validationIssues ?? []).filter(
+      issue => issue.message !== '草稿与当前版本没有价格或规则变化，无需发布',
+    );
+    const unexplainedFailure = !validationPassed && !impact.validationIssues?.length;
+    return (
+      <section aria-label="草稿检查结果" className="space-y-3 rounded-xl border bg-card p-5">
+        <p role="status" className="text-sm">草稿与当前版本一致，无需发布。</p>
+        {issues.length > 0 || unexplainedFailure ? (
+          <div role="alert" className="space-y-2 text-sm text-destructive">
+            <p>发布检查未通过，请修正问题后重试。</p>
+            <ul className="space-y-2">
+              {issues.map((issue, index) => (
+                <li key={index} className="admin-wrap-anywhere">
+                  {issue.message}
+                  {issue.href ? <a href={issue.href} className="ml-2 underline">打开对应价格</a> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <form
       ref={formRef}
       action={formAction}
       aria-busy={pending}
       aria-label="发布价目草稿"
-      className="min-w-0 space-y-3 rounded-lg border p-3"
+      className="min-w-0 space-y-4 rounded-xl border bg-card p-5"
     >
       <input type="hidden" name="priceBookId" value={priceBookId} />
       <input
@@ -672,18 +698,15 @@ export function PublishCustomerPriceBookDraftForm({
 
       <section
         aria-labelledby={`publish-summary-${priceBookId}`}
-        className="space-y-3 rounded-lg border border-destructive/35 bg-destructive/5 p-3"
+        className="space-y-4"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground">
-            发布确认
-          </span>
           <h3 id={`publish-summary-${priceBookId}`} className="font-medium">
             确认本次价格变更
           </h3>
         </div>
 
-        <dl className="grid gap-2 text-xs sm:grid-cols-2">
+        <dl className="grid gap-3 text-sm [&_dt]:shrink-0 [&_dd]:min-w-0 [&_dd]:text-right [&_dd]:break-words">
           <div className="flex justify-between gap-3">
             <dt className="text-muted-foreground">变更范围</dt>
             <dd className="font-sans tabular-nums">
@@ -710,7 +733,7 @@ export function PublishCustomerPriceBookDraftForm({
               {impact?.decreasedRuleCount ?? '—'} 条
             </dd>
           </div>
-          <div className="flex justify-between gap-3 sm:col-span-2">
+          <div className="flex justify-between gap-3">
             <dt className="text-muted-foreground">生效方式</dt>
             <dd className="font-medium">
               {effectiveFrom
@@ -751,15 +774,14 @@ export function PublishCustomerPriceBookDraftForm({
         </p>
 
         {requiresHighRiskConfirmation ? (
-          <div className="space-y-2 rounded-md border border-destructive/40 bg-background p-3">
-            <p className="text-sm font-medium text-destructive">
+          <div className="space-y-3 rounded-lg border border-warning/40 bg-warning/10 p-3">
+            <p className="text-sm font-medium text-warning-foreground">
               检测到 {impact?.highRiskRuleCount} 条高风险报价变更
             </p>
             <p className="text-xs leading-5 text-muted-foreground">
               任一价格相对当前版涨跌达到 {impact?.highRiskDeltaPercentThreshold}% ，
               或价格在 0 元与非零之间、无报价与有报价之间切换，
               以及有效规则新增、移除或启停时，需要单独确认。
-              系统不会限制价格，只防止误触发布。
             </p>
             <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
               <Checkbox
@@ -790,9 +812,6 @@ export function PublishCustomerPriceBookDraftForm({
       <Disclosure className="rounded-lg border bg-card p-3">
         <DisclosureSummary className="justify-between gap-3">
           <span>预约生效或补充发布说明（可选）</span>
-          <span className="text-xs font-normal text-muted-foreground">
-            普通调价无需填写
-          </span>
         </DisclosureSummary>
         <div className="mt-3 space-y-3 border-t pt-3">
           <div className="space-y-2">
@@ -847,7 +866,7 @@ export function PublishCustomerPriceBookDraftForm({
 
       <Button
         type="submit"
-        variant="destructive"
+        variant="default"
         className="min-h-11 w-full"
         disabled={
           pending ||

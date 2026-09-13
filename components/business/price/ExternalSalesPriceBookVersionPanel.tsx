@@ -42,7 +42,7 @@ import {
   customerPriceSectionForRule,
   type CustomerPriceSection,
 } from '@/lib/price/customer-price-section-membership';
-import { formatMoney } from '@/lib/dashboard/format';
+import { formatRate } from '@/lib/format/unit-price';
 
 type ExternalSalesPriceBookVersionPanelProps = {
   versions: CustomerPriceBookVersionAdminDto[];
@@ -50,6 +50,7 @@ type ExternalSalesPriceBookVersionPanelProps = {
   preview: CustomerPriceBookDraftPublishPreviewDto | null;
   invalidDraftSelection: boolean;
   defaultPublishAt: string;
+  selectedPurpose?: CustomerPriceBookPurpose;
 };
 
 const PURPOSE_LABELS: Record<CustomerPriceBookPurpose, string> = {
@@ -163,10 +164,22 @@ function DraftChangeName({
       {impactChangeDisplayName(change)}
     </Link>
   ) : (
-    <p className="admin-wrap-anywhere font-medium">
+    <span className="admin-wrap-anywhere font-medium">
       {impactChangeDisplayName(change)}
-    </p>
+    </span>
   );
+}
+
+function DraftChangeQuantity({ change, draft }: {
+  change: CustomerPriceBookDraftImpactChangeDto;
+  draft: CustomerPriceBookDraftAdminDto;
+}) {
+  const href = change.draftRuleId ? ruleEditHref(draft, change.draftRuleId) : null;
+  return href ? (
+    <Link href={href} prefetch={false} className="underline-offset-4 hover:underline">
+      {change.quantityLabel}
+    </Link>
+  ) : <span>{change.quantityLabel}</span>;
 }
 
 function historyTimestamp(version: CustomerPriceBookVersionAdminDto): number {
@@ -182,11 +195,11 @@ function VersionHistoryEntry({
   version: CustomerPriceBookVersionAdminDto;
 }) {
   return (
-    <li className="min-w-0 rounded-lg border bg-background p-3">
+    <li className="min-w-0 border-b py-4 last:border-b-0">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-medium">第 {version.version} 版</p>
-          <p className="mt-1 font-sans text-xs tabular-nums text-muted-foreground">
+          <p className="mt-1 font-sans text-sm tabular-nums text-muted-foreground">
             {version.status === 'DRAFT'
               ? `基于第 ${version.basedOnVersion ?? '—'} 版 · 最后更新 ${formatShanghaiDateTime(
                   version.updatedAt,
@@ -312,7 +325,7 @@ function VersionHistory({
         <h2 id={`price-book-history-${purpose}`} className="font-semibold">
           {PURPOSE_LABELS[purpose]}
         </h2>
-        <span className="font-sans text-xs tabular-nums text-muted-foreground">
+        <span className="font-sans text-sm tabular-nums text-muted-foreground">
           {lineages.length} 个价目序列 · {versions.length} 个版本
         </span>
       </div>
@@ -334,7 +347,7 @@ function VersionHistory({
                   )}
                 </p>
               </div>
-              <ol className="space-y-3">
+              <ol className="divide-y">
                 {lineage.versions.map((version) => (
                   <VersionHistoryEntry key={version.id} version={version} />
                 ))}
@@ -389,11 +402,11 @@ function priceSummary(
     price.incrementAmount &&
     price.amount
   ) {
-    return `首重 ${formatMoney(price.amount)} / ${price.includedUnits}kg · 续重 ${formatMoney(price.incrementAmount)} / ${price.incrementUnits}kg${status}`;
+    return `首重 ${formatRate(price.amount)} / ${price.includedUnits}kg · 续重 ${formatRate(price.incrementAmount)} / ${price.incrementUnits}kg${status}`;
   }
   if (!price.amount) return `人工确认${status}`;
   const unit = calculationType ? CALCULATION_LABELS[calculationType] : '项';
-  return `${formatMoney(price.amount)} / ${unit}${status}`;
+  return `${formatRate(price.amount)} / ${unit}${status}`;
 }
 
 function deltaLabel(change: CustomerPriceBookDraftImpactChangeDto): string {
@@ -415,94 +428,71 @@ function deltaTone(change: CustomerPriceBookDraftImpactChangeDto): string {
   return 'text-muted-foreground';
 }
 
-function DraftChanges({
-  preview,
-  draft,
-}: {
+function DraftChanges({ preview, draft }: {
   preview: CustomerPriceBookDraftPublishPreviewDto;
   draft: CustomerPriceBookDraftAdminDto;
 }) {
+  const grouped = new Map<string, CustomerPriceBookDraftImpactChangeDto[]>();
+  for (const change of preview.changes) {
+    const key = impactChangeDisplayName(change);
+    const group = grouped.get(key) ?? [];
+    group.push(change);
+    grouped.set(key, group);
+  }
   return (
-    <section
-      aria-labelledby="draft-change-list-heading"
-      className="min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm"
-    >
-      <header className="flex min-w-0 flex-wrap items-center gap-2 border-b bg-muted/30 px-4 py-3">
-        <h3 id="draft-change-list-heading" className="font-semibold">
-          第 {preview.version} 版草稿 · 本次修改
-        </h3>
-        <Badge variant="secondary">
-          {preview.changedItemCount} 项 · {preview.changedRuleCount} 档
-        </Badge>
-        <span className="ml-auto text-xs text-muted-foreground">
-          按涨幅从大到小
-        </span>
+    <section aria-labelledby="draft-change-list-heading" className="min-w-0 overflow-hidden rounded-xl border bg-card">
+      <header className="flex min-w-0 flex-wrap items-center gap-2 border-b px-4 py-3">
+        <h3 id="draft-change-list-heading" className="font-semibold">本次修改</h3>
+        <Badge variant="secondary">{preview.changedItemCount} 项 · {preview.changedRuleCount} 档</Badge>
       </header>
-
-      {preview.changes.length === 0 ? (
-        <div className="p-6 text-sm text-muted-foreground">
-          草稿和当前生效版没有可发布的差异。请先返回收费项目工作台调整。
-        </div>
-      ) : (
-        <>
-          <ul className="divide-y md:hidden">
-            {preview.changes.map((change, index) => (
-              <li key={`${change.draftRuleId ?? change.name}-${index}`} className="space-y-2 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <DraftChangeName change={change} draft={draft} />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {change.quantityLabel}
-                    </p>
-                  </div>
-                  <span className={cn('shrink-0 font-sans text-sm font-medium tabular-nums', deltaTone(change))}>
-                    {deltaLabel(change)}
-                  </span>
-                </div>
-                <dl className="grid grid-cols-2 gap-2 text-xs">
-                  <div><dt className="text-muted-foreground">当前价</dt><dd className="mt-1 font-sans tabular-nums">{priceSummary(change.current, change.calculationType)}</dd></div>
-                  <div><dt className="text-muted-foreground">新价</dt><dd className="mt-1 font-sans font-medium tabular-nums">{priceSummary(change.draft, change.calculationType)}</dd></div>
-                </dl>
-                <p className="text-xs text-muted-foreground">变更：{change.changedFields.join('、')}</p>
-              </li>
-            ))}
-          </ul>
-
-          <TableScrollArea label="草稿价格变更明细，可横向滚动" className="hidden md:block">
-            <table className="w-full min-w-[52rem] text-sm" aria-label="草稿价格变更明细">
-              <thead className="border-b bg-muted/20 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium">收费项目 / 数量档</th>
-                  <th className="px-4 py-2 text-right font-medium">当前价</th>
-                  <th className="px-4 py-2 text-right font-medium">新价</th>
-                  <th className="px-4 py-2 text-right font-medium">变化</th>
+      <div className="divide-y md:hidden">
+        {[...grouped].map(([name, changes]) => (
+          <section key={name} className="p-4">
+            <h4><DraftChangeName change={changes[0]!} draft={draft} /></h4>
+            <ul className="divide-y">
+              {changes.map((change, index) => (
+                <li key={change.draftRuleId ?? index} className="space-y-2 py-3">
+                  <p className="text-sm"><DraftChangeQuantity change={change} draft={draft} /></p>
+                  <dl className="grid grid-cols-2 gap-3 text-sm">
+                    <div><dt className="text-xs text-muted-foreground">当前价</dt><dd className="mt-1 tabular-nums">{priceSummary(change.current, change.calculationType)}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">新价</dt><dd className="mt-1 font-medium tabular-nums">{priceSummary(change.draft, change.calculationType)}</dd></div>
+                  </dl>
+                  <p className={cn('text-sm tabular-nums', deltaTone(change))}>{deltaLabel(change)}</p>
+                  <p className="text-xs text-muted-foreground">变更：{change.changedFields.join('、')}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+      <TableScrollArea label="草稿价格变更明细，可横向滚动" className="hidden md:block">
+        <table className="w-full min-w-[36rem] text-sm" aria-label="草稿价格变更明细">
+          <thead className="border-b text-xs text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3 text-left font-medium">收费项目 / 数量档</th>
+              <th className="px-4 py-3 text-right font-medium">当前价</th>
+              <th className="px-4 py-3 text-right font-medium">新价</th>
+              <th className="px-4 py-3 text-right font-medium">变化</th>
+            </tr>
+          </thead>
+          {[...grouped].map(([name, changes]) => (
+            <tbody key={name} className="divide-y border-b last:border-b-0">
+              <tr><th colSpan={4} scope="rowgroup" className="bg-muted/30 px-4 py-2 text-left"><DraftChangeName change={changes[0]!} draft={draft} /></th></tr>
+              {changes.map((change, index) => (
+                <tr key={change.draftRuleId ?? index}>
+                  <td className="px-4 py-3">
+                    <p><DraftChangeQuantity change={change} draft={draft} /></p>
+                    <p className="mt-1 text-xs text-muted-foreground">{change.changedFields.join('、')}</p>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{priceSummary(change.current, change.calculationType)}</td>
+                  <td className="px-4 py-3 text-right font-medium tabular-nums">{priceSummary(change.draft, change.calculationType)}</td>
+                  <td className={cn('px-4 py-3 text-right tabular-nums', deltaTone(change))}>{deltaLabel(change)}</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y">
-                {preview.changes.map((change, index) => (
-                  <tr key={`${change.draftRuleId ?? change.name}-${index}`}>
-                    <td className="min-w-0 px-4 py-3">
-                      <DraftChangeName change={change} draft={draft} />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {change.quantityLabel} · {change.changedFields.join('、')}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 text-right font-sans text-xs tabular-nums text-muted-foreground">
-                      {priceSummary(change.current, change.calculationType)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-sans text-xs font-medium tabular-nums">
-                      {priceSummary(change.draft, change.calculationType)}
-                    </td>
-                    <td className={cn('px-4 py-3 text-right font-sans text-xs font-medium tabular-nums', deltaTone(change))}>
-                      {deltaLabel(change)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableScrollArea>
-        </>
-      )}
+              ))}
+            </tbody>
+          ))}
+        </table>
+      </TableScrollArea>
     </section>
   );
 }
@@ -531,13 +521,13 @@ function DraftPublishPanel({
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 rounded-xl border bg-muted/20 p-4">
         <div className="min-w-0">
           <h2 id="selected-price-book-draft-heading" className="font-semibold">
-            发布{PURPOSE_LABELS[draft.purpose]}草稿 · 第 {draft.version} 版
+            {PURPOSE_LABELS[draft.purpose]} v{preview.basedOnVersion} → v{draft.version}
           </h2>
           <p className="admin-wrap-anywhere mt-1 text-sm text-muted-foreground">
             调价原因：{draft.changeReason}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            基于第 {preview.basedOnVersion} 版 · 全表 {preview.totalRuleCount} 条规则
+            更新于 {formatShanghaiDateTime(draft.updatedAt)}
           </p>
         </div>
         <Link
@@ -545,13 +535,13 @@ function DraftPublishPanel({
           prefetch={false}
           className={cn(buttonVariants({ variant: 'outline' }), 'min-h-11')}
         >
-          返回编辑收费项目
+          返回编辑
         </Link>
       </div>
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_26rem] xl:items-start">
-        <DraftChanges preview={preview} draft={draft} />
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-[4.75rem]">
+      <div className={cn('grid min-w-0 gap-5', preview.changes.length > 0 && 'min-[1440px]:grid-cols-[minmax(0,1fr)_360px] min-[1440px]:items-start')}>
+        {preview.changes.length > 0 ? <DraftChanges preview={preview} draft={draft} /> : null}
+        <aside className="min-w-0">
           <PublishCustomerPriceBookDraftForm
             priceBookId={draft.id}
             expectedDraftUpdatedAt={draft.updatedAt}
@@ -608,10 +598,13 @@ export function ExternalSalesPriceBookVersionPanel({
   preview,
   invalidDraftSelection,
   defaultPublishAt,
+  selectedPurpose,
 }: ExternalSalesPriceBookVersionPanelProps) {
+  const activePurpose = draft?.purpose ?? selectedPurpose;
+  const purposes = activePurpose ? [activePurpose] : Object.values(CustomerPriceBookPurpose);
   const history = (
-    <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-      {Object.values(CustomerPriceBookPurpose).map((purpose) => (
+    <div className={cn('grid min-w-0 gap-4', !activePurpose && 'lg:grid-cols-2')}>
+      {purposes.map((purpose) => (
         <VersionHistory
           key={purpose}
           purpose={purpose}
@@ -626,6 +619,24 @@ export function ExternalSalesPriceBookVersionPanel({
       id="external-sales-price-book-version-manager"
       className="min-w-0 space-y-6"
     >
+      {activePurpose ? (
+        <nav aria-label="价格用途" className="flex flex-wrap gap-2 border-b pb-3">
+          {Object.values(CustomerPriceBookPurpose).map(purpose => {
+            const current = versions.find(version => version.purpose === purpose && version.status === 'CURRENT');
+            const pendingDraft = versions.find(version => version.purpose === purpose && version.status === 'DRAFT');
+            const href = pendingDraft ? versionsHref(pendingDraft.id) : `${priceVersionsHref()}?purpose=${purpose.toLowerCase()}`;
+            return (
+              <Link key={purpose} href={href} prefetch={false} aria-current={activePurpose === purpose ? 'page' : undefined}
+                className={cn(buttonVariants({ variant: activePurpose === purpose ? 'secondary' : 'ghost' }), 'min-h-11 h-auto flex-wrap gap-2')}>
+                <span className="font-semibold">{PURPOSE_LABELS[purpose]}</span>
+                <span className="text-xs text-muted-foreground">{current ? `当前 v${current.version}` : '无生效版本'}</span>
+                {pendingDraft ? <span className="text-xs text-warning-foreground">草稿 v{pendingDraft.version}</span> : null}
+              </Link>
+            );
+          })}
+        </nav>
+      ) : null}
+
       {invalidDraftSelection ? (
         <div role="alert" className="rounded-xl border bg-card p-4 text-sm">
           草稿不存在或不可编辑。
@@ -647,7 +658,7 @@ export function ExternalSalesPriceBookVersionPanel({
       {draft && preview ? (
         <Disclosure className="min-w-0 rounded-lg border bg-card p-3">
           <DisclosureSummary className="justify-between gap-3">
-            <span>查看完整版本历史（{versions.length} 个版本）</span>
+            <span>版本历史（{versions.filter(version => !activePurpose || version.purpose === activePurpose).length} 个版本）</span>
             <ChevronDown
               aria-hidden="true"
               className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"

@@ -27,13 +27,14 @@ import { cn } from '@/lib/utils';
 import { PriceDataBoundary } from './PriceDataBoundary';
 
 export const metadata = {
-  title: '价格版本与发布',
+  title: '价格版本',
 };
 
 type PageProps = {
   searchParams: Promise<{
     draft?: string | string[];
     section?: string | string[];
+    purpose?: string | string[];
   }>;
 };
 
@@ -89,27 +90,28 @@ export default async function PriceVersionsPage({
   const rawDraftId = firstSearchParam(sp.draft).trim();
   const draftId = safeOpaqueId(rawDraftId);
   const isGapWorkspace = firstSearchParam(sp.section).trim() === 'gaps';
+  const selectedPurpose = firstSearchParam(sp.purpose) === 'logistics'
+    ? CustomerPriceBookPurpose.LOGISTICS : CustomerPriceBookPurpose.PROCESSING;
   const versionsPromise = listCustomerPriceBookVersionsAndDrafts();
 
   return (
     <div className="min-w-0 space-y-6">
       <RuleCenterPageHeader
-        title={isGapWorkspace ? '缺口清单与版本历史' : '价格版本与发布'}
-        effect="versioned"
+        title={isGapWorkspace ? '缺口清单与版本历史' : '价格版本'}
         subtitle={
           isGapWorkspace
             ? '把会阻断自动报价或发布的真实问题先处理；加工费与物流费保持独立版本流。'
-            : '审阅草稿差异和报价影响，发布后仅影响之后的新单。'
+            : undefined
         }
-        actions={
+        actions={rawDraftId ? undefined : (
           <Link
-            href={customerPricingHref('processing')}
+            href={customerPricingHref(selectedPurpose === CustomerPriceBookPurpose.LOGISTICS ? 'logistics' : 'processing')}
             prefetch={false}
             className={buttonVariants({ variant: 'outline' })}
           >
             返回客户计价
           </Link>
-        }
+        )}
       />
       <ErrorBoundary
         scope="section"
@@ -122,6 +124,7 @@ export default async function PriceVersionsPage({
             draftId={draftId}
             isGapWorkspace={isGapWorkspace}
             versionsPromise={versionsPromise}
+            selectedPurpose={isGapWorkspace ? undefined : selectedPurpose}
           />
         </Suspense>
       </ErrorBoundary>
@@ -134,7 +137,9 @@ async function ExternalSalesPriceBookVersionsContent({
   draftId,
   isGapWorkspace,
   versionsPromise,
+  selectedPurpose,
 }: {
+  selectedPurpose?: CustomerPriceBookPurpose;
   rawDraftId: string;
   draftId: string | null;
   isGapWorkspace: boolean;
@@ -150,6 +155,7 @@ async function ExternalSalesPriceBookVersionsContent({
     <ExternalSalesPriceBookVersionPanel
       versions={versions}
       draft={null}
+      selectedPurpose={requestedDraft?.purpose ?? selectedPurpose}
       preview={null}
       invalidDraftSelection={Boolean(rawDraftId) && !requestedDraft}
       defaultPublishAt=""

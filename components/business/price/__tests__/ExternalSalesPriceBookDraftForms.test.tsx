@@ -543,8 +543,10 @@ describe('PublishCustomerPriceBookDraftForm', () => {
       />,
     );
 
-    expect(html).toContain('没有可发布的差异');
-    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+    expect(html).toContain('草稿与当前版本一致，无需发布');
+    expect(html).not.toContain('type="submit"');
+    expect(html).not.toContain('含启停或非金额修改');
+    expect(html).not.toContain('name="effectiveFrom"');
   });
 
   it('异常涨跌要求额外显式确认，未勾选时不能提交', () => {
