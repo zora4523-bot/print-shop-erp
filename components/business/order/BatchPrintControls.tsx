@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { requestBatchPrintAction } from '@/actions/order-batch-print';
 import { BATCH_PRINT_MAX, type BatchPrintIssue, type BatchPrintStatus } from '@/lib/order/batch-print-contract';
@@ -8,9 +8,10 @@ import type { OrderListSelectionItem } from './OrderListBatchSelection';
 
 type Task = { id: string; labels: string[]; orderIds: string[] };
 
-export function BatchPrintControls({ selectedItems, disabled }: {
+export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   selectedItems: readonly OrderListSelectionItem[];
   disabled?: boolean;
+  renderLayout?: (action: ReactNode, result: ReactNode) => ReactNode;
 }) {
   const [task, setTask] = useState<Task | null>(null);
   const [status, setStatus] = useState<BatchPrintStatus | null>(null);
@@ -73,11 +74,13 @@ export function BatchPrintControls({ selectedItems, disabled }: {
 
   const tooMany = selectedItems.length > BATCH_PRINT_MAX;
   const generating = task !== null && (status?.status === 'pending' || status?.status === 'unavailable');
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <Button type="button" variant="secondary" className="min-h-11" disabled={disabled || pending || generating || tooMany || !selectedItems.length} onClick={() => void start()}>
-        {pending ? '正在提交…' : generating ? '正在准备打印…' : `打印所选（${selectedItems.length}）`}
-      </Button>
+  const action = (
+    <Button type="button" variant="secondary" className="min-h-11" disabled={disabled || pending || generating || tooMany || !selectedItems.length} onClick={() => void start()}>
+      {pending ? '正在提交…' : generating ? '正在准备打印…' : `打印所选（${selectedItems.length}）`}
+    </Button>
+  );
+  const result = tooMany || task || message || issues.length ? (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-current/20 pt-2 [overflow-wrap:anywhere]">
       {tooMany ? <span className="text-sm">每批最多打印 {BATCH_PRINT_MAX} 张，请减少所选工单。</span> : null}
       {task ? <>
         <span role="status" className="text-sm">已生成 {status?.completed ?? 0} / {status?.total ?? task.labels.length} 单</span>
@@ -89,6 +92,12 @@ export function BatchPrintControls({ selectedItems, disabled }: {
       {task && task.orderIds?.join(',') !== selectedItems.map((item) => item.id).join(',') ? <p className="basis-full text-sm">所选工单已变化，下方生成结果仍对应此前提交的 {task.labels.length} 单。</p> : null}
       {message ? <p role="status" className="basis-full text-sm">{message}</p> : null}
       {issues.length ? <ul className="basis-full space-y-1 text-sm">{issues.map((issue) => <li key={issue.position} className="break-all">{labels[issue.position - 1] ?? `第 ${issue.position} 单`}：{issue.message}</li>)}</ul> : null}
+    </div>
+  ) : null;
+  return renderLayout ? renderLayout(action, result) : (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div>{action}</div>
+      {result}
     </div>
   );
 }

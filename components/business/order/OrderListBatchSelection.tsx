@@ -246,14 +246,14 @@ export function OrderListBatchBar({
         className={cn(
           'flex flex-col rounded-xl bg-foreground py-3 text-background sm:flex-row sm:items-center',
           layout === 'inline'
-            ? 'w-full min-w-0 gap-3 px-3.5'
+            ? 'w-full min-w-0 gap-3 px-3.5 sm:items-start'
             : 'fixed bottom-[calc(1rem_+_env(safe-area-inset-bottom,0px))] left-1/2 z-40 w-[calc(100%_-_1rem)] max-w-3xl -translate-x-1/2 gap-2 px-3 shadow-xl sm:w-auto sm:min-w-[28rem]',
         )}
       >
-        <p className="shrink-0 text-sm font-semibold tabular-nums">
+        <p className={cn('shrink-0 text-sm font-semibold tabular-nums', layout === 'inline' && 'sm:flex sm:min-h-11 sm:items-center')}>
           已选 {selectedItems.length} 项
         </p>
-        <div className="hidden h-5 w-px bg-background/20 sm:block" aria-hidden="true" />
+        <div className={cn('hidden h-5 w-px bg-background/20 sm:block', layout === 'inline' && 'sm:mt-3')} aria-hidden="true" />
         <div className={cn('flex min-w-0 flex-1 flex-wrap gap-2', layout === 'inline' ? 'items-start' : 'items-center')}>
           {showCopyOrderNumbers ? <Button
             type="button"

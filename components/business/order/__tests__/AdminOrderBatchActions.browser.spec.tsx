@@ -8,7 +8,7 @@ import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { OrderStatus } from '@/generated/prisma/enums';
 import '@/app/globals.css';
 
-const { batchAction, refresh } = vi.hoisted(() => ({ batchAction: vi.fn(), refresh: vi.fn() }));
+const { batchAction, refresh, printAction, printFetch } = vi.hoisted(() => ({ batchAction: vi.fn(), refresh: vi.fn(), printAction: vi.fn(), printFetch: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
 vi.mock('next/link', () => ({
   __esModule: true,
@@ -18,7 +18,7 @@ vi.mock('next/link', () => ({
   },
 }));
 vi.mock('@/actions/admin-order-workflow', () => ({ runAdminOrderBatchAction: batchAction }));
-vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: vi.fn() }));
+vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: printAction }));
 vi.mock('@/actions/order-export', () => ({ requestOrderExportAction: vi.fn() }));
 
 import { AdminOrderBatchActions } from '../AdminOrderBatchActions';
@@ -42,6 +42,7 @@ afterEach(() => {
   host.remove();
   document.documentElement.classList.remove('dark');
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function mount(orders = [batchOrder()], selectionKey = 'initial') {
@@ -295,3 +296,50 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
     });
   }
 }
+
+
+it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]])(
+  'keeps the complete batch toolbar aligned at %i × %i through print states', async (width, height) => {
+    await page.viewport(width, height);
+    const originalFetch = globalThis.fetch.bind(globalThis);
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).startsWith('/api/orders/batch-print/') ? printFetch(input, init) : originalFetch(input, init));
+    printAction.mockResolvedValue({ status: 'queued', jobId: 'layout-job' });
+    for (const dark of [false, true]) {
+      document.documentElement.classList.toggle('dark', dark);
+      for (const state of ['idle', 'pending', 'ready', 'failed'] as const) {
+        printFetch.mockResolvedValue({ ok: true, json: async () => ({
+          status: state, completed: state === 'ready' ? 1 : 0, total: 1,
+          issues: state === 'failed' ? [{ position: 1, message: '工单内容已变化' }] : [],
+        }) });
+        mount([batchOrder()], `${dark}-${state}`);
+        if (state !== 'idle') {
+          await page.getByRole('button', { name: '打印所选（1）' }).click();
+          if (state === 'ready') await expect.element(page.getByRole('link', { name: '打开 PDF' })).toBeVisible();
+          else await expect.element(page.getByText(state === 'failed'
+            ? '未生成打印文件，请检查以下工单或减少所选数量后重试。'
+            : '正在准备打印文件，完成后可打开打印或下载。')).toBeVisible();
+        }
+        const buttons = [...host.querySelectorAll<HTMLButtonElement>('button')];
+        const primary = buttons.filter((button) => /下发生产|打印所选|正在准备打印|导出所选/.test(button.textContent ?? ''));
+        const boxes = primary.map((button) => button.getBoundingClientRect());
+        if (width >= 768) {
+          expect(Math.max(...boxes.map((box) => box.top)) - Math.min(...boxes.map((box) => box.top))).toBeLessThanOrEqual(1);
+          const clear = buttons.find((button) => button.textContent?.includes('取消选择'))!.getBoundingClientRect();
+          expect(Math.abs(clear.top - boxes[0].top)).toBeLessThanOrEqual(1);
+        }
+        for (const element of host.querySelectorAll('button, a')) {
+          const box = element.getBoundingClientRect();
+          expect(box.height).toBeGreaterThanOrEqual(44);
+          expect(box.width).toBeGreaterThanOrEqual(44);
+        }
+        if (state === 'ready') {
+          const link = host.querySelector('a[href*="batch-print"]')!.getBoundingClientRect();
+          expect(link.top).toBeGreaterThanOrEqual(Math.max(...boxes.map((box) => box.bottom)));
+        }
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+        expect(await commands.checkShellAccessibility('[aria-label="工单批量操作"]')).toEqual([]);
+      }
+    }
+  }, 30000,
+);
