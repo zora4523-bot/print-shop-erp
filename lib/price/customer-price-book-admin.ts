@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createHash } from 'node:crypto';
 import { fixedCustomTierIssue } from './fixed-custom-tiers';
+import customTierRelease from '../../config/customer-price-books/custom-tiers-20260913.json';
 import {
   Prisma,
   type CustomerPriceCalculationType,
@@ -1578,6 +1579,118 @@ export async function getCustomerPriceBookDraftRuleEditor(
   });
 }
 
+/** Controlled one-time data release. Runtime quotation still reads published rules. */
+export async function prepareConfirmedCustomTierDraft(
+  input: { priceBookId: string; expectedDraftUpdatedAt: Date },
+  actor: AuditActor,
+): Promise<{ id: string; updatedAt: Date }> {
+  if (actor.role !== 'ADMIN') throw new CustomerPriceBookAdminError('仅管理员可调整专版阶梯');
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const now = new Date();
+    const draft = await tx.customerPriceBook.findUnique({ where: { id: input.priceBookId } });
+    const workflow = draft ? draftWorkflow(draft.notes) : null;
+    if (!draft || draft.isActive || !workflow ||
+        draft.purpose !== CustomerPriceBookPurpose.PROCESSING ||
+        draft.settlementType !== EXTERNAL_SETTLEMENT ||
+        draft.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
+      throw new CustomerPriceBookAdminError('草稿已变化或不可编辑，请刷新后重试');
+    }
+    const source = await tx.customerPriceBook.findUnique({ where: { id: workflow.basedOn.id } });
+    if (!source || !source.isActive || source.effectiveFrom > now || source.effectiveTo !== null ||
+        source.code !== 'EXTERNAL_SALES_PROCESSING_RULES' ||
+        notesRecord(source.notes).ruleVersion !== '2026-08-30-print-null-sentinel') {
+      throw new CustomerPriceBookAdminError('当前价目版本不适用本次专版阶梯调整');
+    }
+    const outsideTiers = (rules: DraftPriceRuleForValidation[]) =>
+      rules.filter(rule => rule.exclusiveGroup !== 'CUSTOM_BASE');
+    const before = await validationRules(tx, draft.id);
+    const original = await validationRules(tx, source.id);
+    if (calculateCustomerPriceRuleSetSha256(outsideTiers(before)) !==
+        calculateCustomerPriceRuleSetSha256(outsideTiers(original)) ||
+        JSON.stringify(canonicalJson(notesRecord(draft.notes).constants)) !==
+        JSON.stringify(canonicalJson(notesRecord(source.notes).constants))) {
+      throw new CustomerPriceBookAdminError('草稿含其他调价，请先单独处理，避免一并发布');
+    }
+    const productCodes = [
+      'EXT-CUSTOM-MID', 'EXT-CUSTOM-SQUARE', 'EXT-CUSTOM-WEST-MID',
+      'EXT-CUSTOM-LARGE', 'EXT-CUSTOM-WEST-LARGE',
+    ];
+    const rows = await tx.customerPriceRule.findMany({
+      where: { priceBookId: draft.id, exclusiveGroup: 'CUSTOM_BASE' },
+      include: { product: { select: { code: true, name: true } } },
+      orderBy: { minQty: 'asc' },
+    });
+    const groups = productCodes.map(code => rows.filter(rule => rule.product?.code === code));
+    const issue = fixedCustomTierIssue(groups);
+    if (issue || groups.flat().length !== rows.length || rows.some(rule =>
+      !rule.isActive || rule.kind !== 'BASE' || rule.calculationType !== 'PER_PIECE')) {
+      throw new CustomerPriceBookAdminError(issue ?? '专版基础规则不完整，不能自动调整');
+    }
+    // The exclusion constraint is immediate: stage only this unpublished group
+    // inactive, then restore each row with its final non-overlapping range. The
+    // transaction and snapshot write lock hide all intermediate states.
+    const staged = await tx.customerPriceRule.updateMany({
+      where: { priceBookId: draft.id, id: { in: rows.map(rule => rule.id) }, isActive: true },
+      data: { isActive: false },
+    });
+    if (staged.count !== rows.length) throw new CustomerPriceBookAdminError('草稿已变化，请刷新后重试');
+    const sourceSha256 = createHash('sha256').update(JSON.stringify(customTierRelease)).digest('hex');
+    for (const [groupIndex, group] of groups.entries()) {
+      const isLarge = groupIndex >= 3;
+      for (const [index, tier] of customTierRelease.tiers.entries()) {
+        const minQty = index === 0 ? 1 : tier.quantity;
+        const maxQty = (customTierRelease.tiers[index + 1]?.quantity ?? 10_000_000) - 1;
+        const amount = new Prisma.Decimal(isLarge ? tier.large : tier.middle);
+        const data = {
+          minQty, maxQty, amount, isActive: true,
+          name: `${group[0]!.product!.name} · ${tier.name}`,
+          sourceName: customTierRelease.source, sourceSha256,
+          sourceSheet: '专版单色平烫', sourceRange: `数量 ${tier.quantity}`,
+          note: '按达到档位取价；200个档含不足200个，保持无最低起订量。',
+        };
+        const existing = group.length === 11 ? group[index] : group[index - 1];
+        if (existing) {
+          await tx.customerPriceRule.update({ where: { id: existing.id }, data });
+        } else {
+          const anchor = group[0]!;
+          await tx.customerPriceRule.create({ data: {
+            ...data, priceBookId: draft.id, categoryId: anchor.categoryId,
+            productId: anchor.productId, code: `BASE_${productCodes[groupIndex]}_Q200`,
+            kind: anchor.kind, calculationType: anchor.calculationType,
+            includedUnits: anchor.includedUnits, incrementUnits: anchor.incrementUnits,
+            incrementAmount: anchor.incrementAmount,
+            triggerCondition: anchor.triggerCondition === null
+              ? Prisma.DbNull : anchor.triggerCondition as Prisma.InputJsonValue,
+            exclusiveGroup: anchor.exclusiveGroup, priority: anchor.priority,
+            blocksAutomaticQuote: anchor.blocksAutomaticQuote, isActive: true,
+          } });
+        }
+      }
+    }
+    const after = await assertValidRuleSet(tx, draft.id, draft.purpose);
+    await readCandidatePublishedCreateOrderPriceProjection(tx, {
+      candidatePriceBookId: draft.id, effectiveFrom: now, snapshotLockHeld: true,
+    });
+    const updated = await tx.customerPriceBook.update({
+      where: { id: draft.id },
+      data: { notes: notesInput({
+        ...notesRecord(draft.notes), ruleVersion: customTierRelease.version,
+        workflow: { ...workflow, changeReason: '按确认报价表补齐200个档，数量达到下一档时换价',
+          lastEditedBy: actor.id, lastEditedAt: now.toISOString() },
+      }) },
+      select: { id: true, updatedAt: true },
+    });
+    await writeAuditLogInTx(tx, {
+      actor, action: 'UPDATE_DRAFT_RULE_GROUP', entityType: 'CustomerPriceBook', entityId: draft.id,
+      before: before.filter(rule => rule.exclusiveGroup === 'CUSTOM_BASE'),
+      after: after.filter(rule => rule.exclusiveGroup === 'CUSTOM_BASE'),
+      requestMetadata: { source: 'prepareConfirmedCustomTierDraft', release: customTierRelease.version },
+    });
+    return updated;
+  }, { timeout: 30_000 });
+}
+
 export async function createCustomerPriceBookDraft(
   input: CreateCustomerPriceBookDraftInput,
   actor: AuditActor,
@@ -2523,6 +2636,19 @@ async function writePreparedCustomerPriceSectionDraft(
   prepared: PreparedCustomerPriceSectionDraft,
   now: Date,
 ): Promise<void> {
+  // Stage changed BASE ranges together before restoring them. Updating one
+  // adjacent range at a time can violate the immediate exclusion constraint,
+  // even though the complete, already validated ladder has no overlap.
+  for (const existing of prepared.changedRules) {
+    const submitted = prepared.submittedById.get(existing.id)!;
+    if (existing.kind !== 'BASE' || !existing.isActive ||
+        (existing.minQty === submitted.minQty && existing.maxQty === submitted.maxQty)) continue;
+    const staged = await tx.customerPriceRule.updateMany({
+      where: { id: existing.id, priceBookId: prepared.input.priceBookId, updatedAt: submitted.expectedUpdatedAt },
+      data: { isActive: false, updatedAt: existing.updatedAt },
+    });
+    if (staged.count !== 1) throw new CustomerPriceBookAdminError('价格已被其他管理员修改，请刷新后重试');
+  }
   for (const existing of prepared.changedRules) {
     const submitted = prepared.submittedById.get(existing.id)!;
     const outcome = await tx.customerPriceRule.updateMany({
@@ -2532,6 +2658,7 @@ async function writePreparedCustomerPriceSectionDraft(
         updatedAt: submitted.expectedUpdatedAt,
       },
       data: {
+        isActive: existing.isActive,
         amount:
           submitted.amount === null
             ? null

@@ -211,3 +211,5 @@ Next、`@next/env`、`eslint-config-next` 锁定到本地已验证的 16.3.4，�
 ### 跨设备打印测试
 
 安装 `pnpm exec playwright install chromium webkit` 后运行 `pnpm test:compat`，使用已有隔离数据库 preflight 和真实 production build/start，覆盖桌面 Chromium/WebKit、iPhone WebKit 与 Android Chromium 模拟。此命令不代表真机验收。`pnpm test:release tests/visual/order-print.spec.ts --project=chromium --update-snapshots=none` 继续执行已有像素门禁；新字体需审查实际差异后批准基线。新增字体/存储/快照测试与标准全量 Vitest 一起运行；部署与实测范围见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+
+专版单色平烫数量档位的 2026-09-13 更新，按[专版阶梯更新说明](./docs/专版阶梯更新-20260913.md)执行版本化发布；新装数据库迁移后同样需要应用该价格配置。

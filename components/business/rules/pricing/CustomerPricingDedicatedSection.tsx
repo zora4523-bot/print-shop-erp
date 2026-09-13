@@ -969,7 +969,7 @@ function renderTiers(
     const sentinelOpen = isLast && (anchorRule?.maxQty ?? 0) >= 9_999_999;
     return {
       key: `tier-${index}`,
-      name: TIER_NAMES[index] ?? `第${index + 1}档`,
+      name: (canonical.length === 11 ? ['200个档', ...TIER_NAMES] : TIER_NAMES)[index] ?? `第${index + 1}档`,
       maxQuantity: boundField(
         assembly,
         `tiers.${index}.maxQuantity`,

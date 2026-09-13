@@ -201,8 +201,11 @@ function editablePrintFoilRule(): CustomerPriceSectionRuleDto {
 }
 
 describe('CustomerPricingDedicatedSection', () => {
-  it.each([40000, 42000])('十档完整时允许自定义上界 %i', (ninthUpper) => {
-    const upper = [750, 1500, 2500, 3500, 4500, 7500, 15000, 25000, ninthUpper, null];
+  it.each([
+    [750, 1500, 2500, 3500, 4500, 7500, 15000, 25000, 42000, null],
+    [499, 999, 1999, 2999, 3999, 4999, 9999, 19999, 29999, 49999, null],
+  ])('历史十档和当前十一档均可编辑：%j', (...upper) => {
+    const ninthUpper = upper[8];
     const codes = ['EXT-CUSTOM-MID', 'EXT-CUSTOM-SQUARE', 'EXT-CUSTOM-WEST-MID', 'EXT-CUSTOM-LARGE', 'EXT-CUSTOM-WEST-LARGE'];
     const rules = codes.flatMap(code => upper.map((maxQty, tier) => ({
       ...editableBagRule(), id: `${code}-${tier}`, code: `${code}-${tier}`,
@@ -219,6 +222,7 @@ describe('CustomerPricingDedicatedSection', () => {
     expect(input).toBeTruthy();
     expect(input).not.toMatch(/\sdisabled(?:=|\s|>)/u);
     expect(input).toContain(`value="${ninthUpper}"`);
+    expect(html.includes('aria-label="200个档中号组单价"')).toBe(upper.length === 11);
   });
 
   it('彩印含版费原子套餐属于彩印草稿，可编辑并随表单发布', () => {

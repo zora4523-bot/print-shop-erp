@@ -1,3 +1,5 @@
+// Frozen pre-2026-09-13 price snapshot: protects historical quotation behavior.
+// Current attained-tier boundaries are covered by confirmed-custom-tiers.test.ts.
 import type {
   CreateOrderPackagingGroupInput,
   CreateOrderPriceSnapshot,

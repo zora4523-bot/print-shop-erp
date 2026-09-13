@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fixedCustomTierIssue, type CustomTierRange } from '../fixed-custom-tiers';
 
-// 加工费计费规则 §2.1: ten identities, configurable bounds, five product sizes.
+// Historical ten-tier snapshots remain supported. Current §2.1 has eleven tiers.
 export function tierFixture(ninthUpper = 40_000): CustomTierRange[][] {
   const upper = [750, 1500, 2500, 3500, 4500, 7500, 15000, 25000, ninthUpper, null];
   return Array.from({ length: 5 }, () => upper.map((maxQty, index) => ({
@@ -10,6 +10,15 @@ export function tierFixture(ninthUpper = 40_000): CustomTierRange[][] {
 }
 
 describe('fixed custom tiers', () => {
+  it('accepts all eleven attained tiers and rejects mixed legacy/current groups', () => {
+    const upper = [499, 999, 1999, 2999, 3999, 4999, 9999, 19999, 29999, 49999, null];
+    const groups = Array.from({ length: 5 }, () => upper.map((maxQty, index) => ({
+      minQty: index === 0 ? 1 : upper[index - 1]! + 1, maxQty,
+    })));
+    expect(fixedCustomTierIssue(groups)).toBeNull();
+    groups[0].shift();
+    expect(fixedCustomTierIssue(groups)).toBeTruthy();
+  });
   it.each([40_000, 42_000, 30_000])('accepts complete continuous tiers with editable upper %i', upper => {
     expect(fixedCustomTierIssue(tierFixture(upper))).toBeNull();
   });

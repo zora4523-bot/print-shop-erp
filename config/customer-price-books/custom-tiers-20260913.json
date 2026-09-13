@@ -1,0 +1,17 @@
+{
+  "version": "2026-09-13-attained-custom-tiers",
+  "source": "用户确认的专版单色平烫报价表，2026-09-13",
+  "tiers": [
+    { "quantity": 200, "name": "200个档", "middle": "0.96", "large": "1.00" },
+    { "quantity": 500, "name": "500个档", "middle": "0.48", "large": "0.52" },
+    { "quantity": 1000, "name": "1千档", "middle": "0.31", "large": "0.325" },
+    { "quantity": 2000, "name": "2千档", "middle": "0.27", "large": "0.285" },
+    { "quantity": 3000, "name": "3千档", "middle": "0.25", "large": "0.27" },
+    { "quantity": 4000, "name": "4千档", "middle": "0.23", "large": "0.245" },
+    { "quantity": 5000, "name": "5千档", "middle": "0.20", "large": "0.22" },
+    { "quantity": 10000, "name": "1万档", "middle": "0.18", "large": "0.20" },
+    { "quantity": 20000, "name": "2万档", "middle": "0.17", "large": "0.19" },
+    { "quantity": 30000, "name": "3万档", "middle": "0.17", "large": "0.19" },
+    { "quantity": 50000, "name": "5万档", "middle": "0.16", "large": "0.18" }
+  ]
+}

@@ -93,15 +93,16 @@ describe('CustomerPricingSectionViews', () => {
 
   it('renders tiers as the single design-spec ladder with derived ranges and paired prices', () => {
     const rows = [
-      tier('q500', '500个档', 750, 0.48, 0.52),
-      tier('q1000', '1千档', 1_500, 0.31, 0.325),
-      tier('q2000', '2千档', 2_500, 0.27, 0.285),
-      tier('q3000', '3千档', 3_500, 0.25, 0.27),
-      tier('q4000', '4千档', 4_500, 0.23, 0.245),
-      tier('q5000', '5千档', 7_500, 0.2, 0.22),
-      tier('q10000', '1万档', 15_000, 0.18, 0.2),
-      tier('q20000', '2万档', 25_000, 0.17, 0.19),
-      tier('q30000', '3万档', 40_000, 0.17, 0.19),
+      tier('q200', '200个档', 499, 0.96, 1),
+      tier('q500', '500个档', 999, 0.48, 0.52),
+      tier('q1000', '1千档', 1_999, 0.31, 0.325),
+      tier('q2000', '2千档', 2_999, 0.27, 0.285),
+      tier('q3000', '3千档', 3_999, 0.25, 0.27),
+      tier('q4000', '4千档', 4_999, 0.23, 0.245),
+      tier('q5000', '5千档', 9_999, 0.2, 0.22),
+      tier('q10000', '1万档', 19_999, 0.18, 0.2),
+      tier('q20000', '2万档', 29_999, 0.17, 0.19),
+      tier('q30000', '3万档', 49_999, 0.17, 0.19),
       tier('q50000', '5万档', null, 0.16, 0.18),
     ];
 
@@ -114,15 +115,15 @@ describe('CustomerPricingSectionViews', () => {
     expect(html).toContain('aria-label="专版烫金阶梯单价"');
     expect(text).toContain('专版烫金 · 阶梯单价');
     expect(text).toContain('适用范围（推导）');
-    expect(text).toContain('中号组 上界');
+    expect(text).toContain('数量上界（含）');
     expect(text).toContain('单价 中/大');
-    expect(text).toContain('1 ~ 750 个');
-    expect(text).toContain('4,501 ~ 7,500 个');
-    expect(text).toContain('≥ 40,001 个');
-    expect(text).toContain('4,600 个落 5千档，不是 4千档');
+    expect(text).toContain('≥ 1 且 &lt; 500 个');
+    expect(text).toContain('≥ 5,000 且 &lt; 10,000 个');
+    expect(text).toContain('≥ 50,000 个');
+    expect(text).toContain('4,600 个落 4千档');
 
-    expect(html.match(/aria-label="[^"]+中号组单价"/g)).toHaveLength(10);
-    expect(html.match(/aria-label="[^"]+大号组单价"/g)).toHaveLength(10);
+    expect(html.match(/aria-label="[^"]+中号组单价"/g)).toHaveLength(11);
+    expect(html.match(/aria-label="[^"]+大号组单价"/g)).toHaveLength(11);
     expect(inputMarkup(html, '500个档中号组单价')).toContain(
       'value="0.48"',
     );

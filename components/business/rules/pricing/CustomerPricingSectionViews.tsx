@@ -625,7 +625,7 @@ function tierRanges(rows: readonly CustomerTierPricingRow[]) {
     const label =
       upper === null
         ? `≥ ${integerLabel(lower)} 个`
-        : `${integerLabel(lower)} ~ ${integerLabel(upper)} 个`;
+        : `≥ ${integerLabel(lower)} 且 < ${integerLabel(upper + 1)} 个`;
     if (upper !== null) previousMax = upper;
     return { lower, upper, label };
   });
@@ -654,7 +654,7 @@ export function CustomerTiersPricingSectionView({
         headingId={headingId}
         title="专版烫金 · 阶梯单价"
         basis="元 / 个"
-        description="上界为正整数，须大于上一档且小于下一档；末档不限。"
+        description="按数量区间取价，达到下一档数量时采用下一档单价；末档不限。"
         actions={headingActions}
       />
       {statusContent}
@@ -665,17 +665,17 @@ export function CustomerTiersPricingSectionView({
             <div
               role="table"
               aria-label="专版烫金阶梯单价"
-              className="min-w-[780px] px-4 py-3 sm:px-5"
+              className="min-w-[820px] px-4 py-3 sm:px-5"
             >
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_130px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_180px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档位</span>
                   <span role="columnheader">适用范围（推导）</span>
                   <span role="columnheader" className="text-right">
-                    中号组 上界
+                    数量上界（含）
                   </span>
                   <span role="columnheader" className="text-right">
                     单价 中/大
@@ -691,7 +691,7 @@ export function CustomerTiersPricingSectionView({
                     <div
                       role="row"
                       key={row.key}
-                      className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_130px_34px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
+                      className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_180px_34px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                     >
                       <span role="cell" className="font-extrabold">
                         {row.name}
@@ -738,7 +738,7 @@ export function CustomerTiersPricingSectionView({
               <strong className="text-destructive">
                 {exampleTier ?? '未命中'}
               </strong>
-              {exampleQuantity === 4_600 ? '，不是 4千档' : ''}。范围推导保证任何数量恰好命中一档。
+              。每个数量仅对应一档，未设最低起订量。
             </FormulaNote>
           </div>
         </CardContent>
