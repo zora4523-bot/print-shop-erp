@@ -12,6 +12,9 @@ import {
 } from './_helpers';
 
 const owner = E2E_USERS.owner!;
+// Next development cold compilation can exceed the default 5-second assertion
+// timeout. Wait for the actual destination and content without fixed sleeps.
+const routeTransitionOptions = { timeout: 20_000 };
 
 async function readSavedOrder(id: string) {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
@@ -120,11 +123,11 @@ test.describe('创建工单 — golden path', () => {
     await expect(page).toHaveURL('/orders/new');
 
     const suffix = uniqueSuffix();
-    const customerRef = `e2e-${suffix}`;
     const customName = `E2E 中秋礼盒 ${suffix}`;
 
     await page.getByRole('textbox', { name: '工单名称' }).fill(customName);
-    await page.locator('input[name="customerRef"]').fill(customerRef);
+    await expect(page.getByLabel('关联外部销售（选填）')).toHaveValue('');
+    await expect(page.locator('input[name="customerRef"]')).toHaveCount(0);
 
     // 当前单页表单默认打开第一个款式。建单事实由三条
     // 计价路线 + 纸张 + 规格组成，不再把“报价产品”或人工金额
@@ -200,14 +203,13 @@ test.describe('创建工单 — golden path', () => {
     await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
       timeout: 45_000,
     });
-    await expect(page.getByRole('heading', { name: customName, exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: customName, exact: true })).toBeVisible(routeTransitionOptions);
     await expectNoNextErrorOverlay(page);
 
     // 按当前详情页核对建单结果；款式信息直接展示，工单号按需展开。
     // The compact mobile header intentionally hides its duplicate metadata.
     const customerFact = page.locator('dt').filter({ hasText: /^客户名称\/简称$/ }).locator('..').locator('dd');
-    await expect(customerFact).toBeVisible();
-    await expect(customerFact).toHaveText(customerRef);
+    await expect(customerFact).toHaveText('—');
     const itemDetails = page
       .locator('article[id^="order-detail-item-"]')
       .filter({ hasText: 'E2E 测试款式' });
@@ -227,7 +229,7 @@ test.describe('创建工单 — golden path', () => {
     // 标签页标题里是工单号，不是 id 前 8 位。这是唯一能验证
     // generateMetadata 在真实 Next 运行时里真的查到了 orderNo 的地方 ——
     // 单测跑不到 metadata 那条路径。
-    await expect(page).toHaveTitle(/^GD-\d{6}-\d{3} · 工单$/);
+    await expect(page).toHaveTitle(/^GD-\d{6}-\d{3} · 工单 · 长昆纸品有限公司$/);
 
     const orderId = new URL(page.url()).pathname.split('/')[2];
     // Give only this freshly created fixture existing optional facts. Editing
@@ -252,9 +254,7 @@ test.describe('创建工单 — golden path', () => {
     await expect(page.getByLabel('工单名称', { exact: true })).toHaveValue(
       customName,
     );
-    await expect(page.getByLabel('客户名称/简称（选填）')).toHaveValue(
-      customerRef,
-    );
+    await expect(page.getByLabel('客户名称/简称（选填）')).toHaveValue('');
     await expect(page.getByLabel('收件人', { exact: true })).toHaveValue(
       before.order.receiverName ?? '',
     );
@@ -290,7 +290,7 @@ test.describe('创建工单 — golden path', () => {
     await expect(page.getByRole('alertdialog')).toBeVisible();
     expect((await readSavedOrder(orderId)).facts).toEqual(before.facts);
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
-    await expect(page).toHaveURL(`/orders/${orderId}`);
+    await expect(page).toHaveURL(`/orders/${orderId}`, routeTransitionOptions);
     await expect(page.getByText(customName).first()).toBeVisible();
     const after = await readSavedOrder(orderId);
     expect(after.order.receiverName).toBe('修改后的收件人');
@@ -335,7 +335,7 @@ test.describe('创建工单 — golden path', () => {
     expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
-    await expect(page).toHaveURL(`/orders/${orderId}`);
+    await expect(page).toHaveURL(`/orders/${orderId}`, routeTransitionOptions);
     const modified = await readSavedOrder(orderId);
     expect(modified.order.promisedDate).toBe(before.order.promisedDate);
     expect(modified.order.isUrgent).toBe(true);
@@ -368,7 +368,7 @@ test.describe('创建工单 — golden path', () => {
     await page.getByLabel('承诺交期', { exact: true }).fill('2026-10-20');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
-    await expect(page).toHaveURL(`/orders/${orderId}`);
+    await expect(page).toHaveURL(`/orders/${orderId}`, routeTransitionOptions);
     await expect
       .poll(async () => (await readSavedOrder(orderId)).order.promisedDate)
       .toContain('2026-10-20');

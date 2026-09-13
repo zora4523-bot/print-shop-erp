@@ -94,7 +94,7 @@ export function buildCompletionInput(order: Pick<CompletionOrder, 'id' | 'custom
     productId: 'prd_v2_39953dbc7b8d18bb4d5b0cd7',
     pricingRoute: 'STOCK_BLANK', productStructure: 'STANDARD_ENVELOPE',
     specification: '大号封90×165', paperType: '160g珠光艳闪', paperWeightGsm: 160,
-    actualWidthMm: 90, actualHeightMm: 165, quantity, pack: i % 2 === 0 ? 10 : 20,
+    actualWidthMm: 90, actualHeightMm: 165, quantity, pack: i % 2 === 0 ? 10 : 12,
     crafts: ['craft_flat_foil_partial'], frontFoilColors: ['亚金'], backFoilColors: [],
     foilColors: ['亚金'], foilTechnique: 'FLAT', hasLocalFoil: true,
     lamination: 'NONE', printColors: [], isDoubleSided: false, isDoubleColor: false,

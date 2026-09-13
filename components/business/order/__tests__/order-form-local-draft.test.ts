@@ -221,8 +221,6 @@ describe('order form local draft', () => {
         pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
         productStructure: 'WESTERN_ENVELOPE',
         artworkVersion: '第 3 版',
-        plateGroupId: 'plate-a',
-        pricingGroup: 'pricing-a',
         specification: '220 × 110 mm',
         actualWidthMm: 220,
         actualHeightMm: 110,
@@ -361,9 +359,30 @@ describe('order form local draft', () => {
   });
 });
 
-
 it('preserves multiline order remarks in local drafts', () => {
   const remark = '先核对样稿\n再安排生产';
-  const saved = serializeLocalOrderFormDraft({ ...formValues(), remark }, 'external-sales');
-  expect(parseLocalOrderFormDraft(saved!, 'external-sales')?.values.remark).toBe(remark);
+  const saved = serializeLocalOrderFormDraft(
+    { ...formValues(), remark },
+    'external-sales',
+  );
+  expect(
+    parseLocalOrderFormDraft(saved!, 'external-sales')?.values.remark,
+  ).toBe(remark);
+});
+
+it('preserves the admin recipient and drops retired group inputs from old drafts', () => {
+  const values = { ...formValues(), externalSalesUserId: 'sales-2' };
+  const draft = parseLocalOrderFormDraft(
+    serializeLocalOrderFormDraft(values, 'internal')!,
+    'internal',
+  )!;
+  expect(draft.values.externalSalesUserId).toBe('sales-2');
+  expect(JSON.stringify(draft.values.items)).not.toMatch(
+    /plateGroupId|pricingGroup/,
+  );
+  const external = parseLocalOrderFormDraft(
+    serializeLocalOrderFormDraft(values, 'external-sales')!,
+    'external-sales',
+  )!;
+  expect(external.values).not.toHaveProperty('externalSalesUserId');
 });

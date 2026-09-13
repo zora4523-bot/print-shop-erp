@@ -26,6 +26,26 @@ const pendingPlateFee = {
 };
 
 describe('OrderFormBRail', () => {
+  it('keeps draft creation available for admin entry with external pricing', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'complete', amount: '10.00' }}
+        logistics={null}
+        usesExternalSalesPricing
+        allowSaveDraft
+        settlementLabel="外部销售应付工厂"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+    expect(html).toContain('保存草稿');
+    expect(html).toContain('创建并提交');
+    expect(html).toContain('纸箱耗材');
+  });
+
   it('uses the internal settlement rail without external packaging or logistics fees', () => {
     const html = renderToStaticMarkup(
       <OrderFormBRail

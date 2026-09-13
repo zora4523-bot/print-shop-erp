@@ -31,7 +31,11 @@ import {
   isNewOrderPricingRoute,
   resolveOrderItemFoilSides,
 } from '../order/pricing-route';
-import { calculatePackagingBagCount } from '../order/packaging-bag-count';
+import {
+  calculateCreateOrderBagCount,
+  MAX_CREATE_ORDER_UNITS_PER_BAG,
+  CREATE_ORDER_PACKAGING_LIMIT_MESSAGE,
+} from '../order/create-order-packaging';
 import {
   WECOM_MARKDOWN_MAX_BYTES,
   wecomMarkdownByteLength,
@@ -1841,6 +1845,16 @@ export const quoteCreateOrderPackagingGroupsSchema = z
         });
       }
       seen.add(group.groupKey);
+      if (
+        group.itemUnitsPerBag.reduce((total, units) => total + units, 0) >
+        MAX_CREATE_ORDER_UNITS_PER_BAG
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['groups', index, 'itemUnitsPerBag'],
+          message: CREATE_ORDER_PACKAGING_LIMIT_MESSAGE,
+        });
+      }
     });
   });
 
@@ -1932,6 +1946,7 @@ export const createOrderSchema = z
       .min(1, '下一款式编号必须大于 0')
       .optional(),
     customName: optionalTrimmedText('工单名称', 100).optional(),
+    externalSalesUserId: optionalTrimmedText('关联外部销售', 64).optional(),
     customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
     customerRef: optionalTrimmedText('客户名称/简称', 64),
     receiverName: optionalTrimmedText('收货人', 64),
@@ -1969,6 +1984,13 @@ export const createOrderSchema = z
     const seenFigs = new Set<number>();
     let maximumFig = 0;
     input.items.forEach((item, itemIndex) => {
+      if (item.pack != null && item.pack > MAX_CREATE_ORDER_UNITS_PER_BAG) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', itemIndex, 'pack'],
+          message: CREATE_ORDER_PACKAGING_LIMIT_MESSAGE,
+        });
+      }
       const fig = item.fig ?? itemIndex + 1;
       maximumFig = Math.max(maximumFig, fig);
       if (seenFigs.has(fig)) {
@@ -2131,7 +2153,7 @@ export const createOrderSchema = z
           message: '混装包装组至少要包含 2 个款式',
         });
       }
-      const derived = calculatePackagingBagCount({
+      const derived = calculateCreateOrderBagCount({
         mode: group.mode,
         itemQuantities: input.items.map((item) => item.quantity),
         itemUnitsPerBag: group.itemUnitsPerBag,

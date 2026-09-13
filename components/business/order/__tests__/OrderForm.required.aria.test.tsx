@@ -38,6 +38,7 @@ function render(usesExternalSalesPricing = true) {
       draftScope="test-user"
       crafts={crafts}
       products={[]}
+      externalSalesAccounts={usesExternalSalesPricing ? undefined : []}
       settlementLabel="内部结算"
       settlementType={
         usesExternalSalesPricing
@@ -127,12 +128,14 @@ describe('OrderForm 必填字段的 required 语义', () => {
 
     expect(html).toContain('data-slot="order-form-b"');
     expect(html).toContain('内部结算');
-    expect(html).toContain('id="customerRef"');
+    expect(html).not.toContain('id="customerRef"');
+    expect(html).toContain('id="externalSalesUserId"');
     expect(html).toContain('id="expressCode"');
     expect(html).toContain('id="items.0.manualQuoteReason"');
     expect(html).toContain('需人工核价的要求（选填）');
     expect(html).toContain('id="items.0.artworkVersion"');
-    expect(html).toContain('id="items.0.plateGroupId"');
+    expect(html).not.toContain('id="items.0.plateGroupId"');
+    expect(html).not.toContain('id="items.0.pricingGroup"');
     expect(html).toContain('id="items.0.remark"');
     expect(tagWithIdSuffix(html, '-custom-name')).not.toContain('required=""');
   });

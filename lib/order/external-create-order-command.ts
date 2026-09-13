@@ -36,6 +36,7 @@ export type ExternalCreateOrderCommandResult =
  */
 export const EXTERNAL_CREATE_ORDER_SERVER_OWNED_FIELDS = {
   root: [
+    'externalSalesUserId',
     'quotedFee',
     'confirmedFee',
     'settledFee',

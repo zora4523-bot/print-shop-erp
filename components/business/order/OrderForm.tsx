@@ -120,7 +120,9 @@ import {
   isLegacyStockFoilCraft,
   productCategoryMatchesPricingRoute,
 } from '@/lib/order/pricing-route';
-import { calculatePackagingBagCount } from '@/lib/order/packaging-bag-count';
+import { calculateCreateOrderBagCount } from '@/lib/order/create-order-packaging';
+import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
+import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
 import {
   catalogPricingFactChoices,
@@ -187,6 +189,7 @@ type Props = {
   crafts: readonly CraftOption[];
   products: readonly ProductOption[];
   customers?: readonly CustomerPartyOption[];
+  externalSalesAccounts?: readonly ExternalSalesAccountOption[];
   settlementLabel: string;
   settlementType: OrderSettlementType;
   externalCreateOrderOptions?: ExternalCreateOrderOptions;
@@ -541,8 +544,8 @@ function orderItemQuoteFacts(
     pricingRoute: item.pricingRoute,
     productStructure: item.productStructure,
     artworkVersion: item.artworkVersion,
-    plateGroupId: item.plateGroupId,
-    pricingGroup: item.pricingGroup,
+    plateGroupId: null,
+    pricingGroup: null,
     specification: item.specification,
     actualWidthMm: item.actualWidthMm,
     actualHeightMm: item.actualHeightMm,
@@ -721,21 +724,23 @@ export function OrderForm({
   crafts,
   products,
   customers = [],
-  settlementLabel,
+  externalSalesAccounts,
+  settlementLabel: defaultSettlementLabel,
   settlementType,
   externalCreateOrderOptions,
   initialExternalPriceSnapshot,
   draftScope,
   workbenchTransferId,
 }: Props) {
-  const usesExternalSalesPricing = settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const isExternalSalesActor = settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const canAssignExternalSales = externalSalesAccounts !== undefined;
   const router = useRouter();
   const initialItem = useMemo(() => {
     const firstFoil = externalCreateOrderOptions?.foilColors[0]?.name;
     const item = createExternalOrderItem(
       crafts, products, externalCreateOrderOptions?.papers ?? [], firstFoil,
     );
-    if (!usesExternalSalesPricing) return item;
+    if (!isExternalSalesActor) return item;
     return {
       ...item,
       frontFoilColors: firstFoil ? [firstFoil] : [],
@@ -749,7 +754,7 @@ export function OrderForm({
     externalCreateOrderOptions?.foilColors,
     externalCreateOrderOptions?.papers,
     products,
-    usesExternalSalesPricing,
+    isExternalSalesActor,
   ]);
   const [clientSubmissionId] = useState(() => globalThis.crypto.randomUUID());
   const form = useForm<CreateOrderInput>({
@@ -760,8 +765,11 @@ export function OrderForm({
     resolver: zodResolver(createOrderSchema) as never,
     mode: 'onBlur',
     // The external editor owns one explicit error-navigation request per submit.
-    shouldFocusError: !usesExternalSalesPricing,
-    defaultValues: initialOrderFormValues(clientSubmissionId, initialItem),
+    shouldFocusError: !isExternalSalesActor,
+    defaultValues: {
+      ...initialOrderFormValues(clientSubmissionId, initialItem),
+      externalSalesUserId: null,
+    },
   });
   const {
     control,
@@ -786,6 +794,16 @@ export function OrderForm({
   });
   const watchedCustomName = useWatch({ control, name: 'customName' });
   const watchedCustomerRef = useWatch({ control, name: 'customerRef' });
+  const watchedExternalSalesUserId = useWatch({
+    control,
+    name: 'externalSalesUserId',
+  });
+  const usesExternalSalesPricing =
+    isExternalSalesActor ||
+    (canAssignExternalSales && Boolean(watchedExternalSalesUserId));
+  const settlementLabel = usesExternalSalesPricing
+    ? ORDER_SETTLEMENT_LABELS.EXTERNAL_SALES
+    : defaultSettlementLabel;
   const watchedPromisedDate = useWatch({ control, name: 'promisedDate' });
   const watchedReceiverAddress = useWatch({
     control,
@@ -866,12 +884,12 @@ export function OrderForm({
   const [transferReady, setTransferReady] = useState(!workbenchTransferId);
   const existingLocalDraftKey = localOrderFormDraftStorageKey(
     draftScope,
-    usesExternalSalesPricing,
+    isExternalSalesActor,
   );
   const localDraftStorageKey = workbenchTransferId
     ? `${existingLocalDraftKey}:workbench:${workbenchTransferId}`
     : existingLocalDraftKey;
-  const localDraftPricingScope = usesExternalSalesPricing
+  const localDraftPricingScope = isExternalSalesActor
     ? 'external-sales'
     : 'internal';
   const getLocalDraftSnapshot = useCallback(() => {
@@ -1236,8 +1254,13 @@ export function OrderForm({
     startSubmit(async () => {
       const submittedData: CreateOrderInput = {
         ...data,
+        ...(canAssignExternalSales
+          ? { customerPartyId: null, customerRef: null }
+          : {}),
         items: data.items.map((item) => ({
           ...item,
+          plateGroupId: null,
+          pricingGroup: null,
           crafts: usesExternalSalesPricing
             ? item.crafts
             : resolveInternalOrderCraftIds(item, crafts),
@@ -1275,7 +1298,12 @@ export function OrderForm({
         createOrderAction(
           null,
           usesExternalSalesPricing
-            ? buildExternalCreateOrderPayload(submittedData)
+            ? {
+                ...buildExternalCreateOrderPayload(submittedData),
+                ...(canAssignExternalSales
+                  ? { externalSalesUserId: submittedData.externalSalesUserId }
+                  : {}),
+              }
             : submittedData,
         ),
       );
@@ -1711,8 +1739,8 @@ export function OrderForm({
           crafts,
         ),
         artworkVersion: current.artworkVersion,
-        plateGroupId: current.plateGroupId,
-        pricingGroup: current.pricingGroup,
+        plateGroupId: null,
+        pricingGroup: null,
         manualQuoteReason: current.manualQuoteReason,
         unitPrice: null,
         fixedFee: null,
@@ -1957,7 +1985,7 @@ export function OrderForm({
   });
   useEffect(() => {
     watchedPackagingGroups.forEach((group, groupIndex) => {
-      const result = calculatePackagingBagCount({
+      const result = calculateCreateOrderBagCount({
         mode: group.mode,
         itemQuantities: watchedItems.map((item) => item.quantity),
         itemUnitsPerBag: group.itemUnitsPerBag,
@@ -2423,6 +2451,7 @@ export function OrderForm({
   ];
   const formGaps = collectOrderFormGaps({
     customerRef: watchedCustomerRef,
+    requiresCustomerRef: !canAssignExternalSales,
     promisedDate: watchedPromisedDate,
     items: itemGapInputs,
     shipping: {
@@ -2716,7 +2745,7 @@ export function OrderForm({
     ) ??
     watchedPackagingGroups[expandedItem];
   const activePackagingBagCount = activePackagingGroup
-    ? calculatePackagingBagCount({
+    ? calculateCreateOrderBagCount({
         mode: activePackagingGroup.mode,
         itemQuantities: watchedItems.map((item) => item.quantity),
         itemUnitsPerBag: activePackagingGroup.itemUnitsPerBag,
@@ -2915,7 +2944,7 @@ export function OrderForm({
           }
         />
       ) : null}
-      {pendingLocalDraft && !usesExternalSalesPricing ? (
+      {pendingLocalDraft && !isExternalSalesActor ? (
         <LocalDraftPromptSection {...{
           pendingLocalDraft: pendingLocalDraft, restoreLocalDraft: restoreLocalDraft, discardLocalDraft: discardLocalDraft,
         }} />
@@ -2941,69 +2970,107 @@ export function OrderForm({
               isSfCollect: watchedIsSfCollect,
             }}
             orderExtras={
-              !usesExternalSalesPricing ? (
+              !isExternalSalesActor ? (
                 <div
                   data-slot="order-form-order-extras"
                   className="mt-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2"
                 >
-                  <div>
-                    <Label htmlFor="customerPartyId">关联客户（选填）</Label>
-                    <select
-                      id="customerPartyId"
-                      className={`${selectClass} mt-2`}
-                      {...register('customerPartyId', {
-                        setValueAs: (value) => (value === '' ? null : value),
-                        onChange: (event) => {
-                          const customer = customers.find(
-                            (candidate) => candidate.id === event.target.value,
-                          );
-                          if (!customer) return;
+                  {canAssignExternalSales ? (
+                    <div className="@min-[560px]:col-span-2">
+                      <Label htmlFor="externalSalesUserId">
+                        关联外部销售（选填）
+                      </Label>
+                      <select
+                        id="externalSalesUserId"
+                        className={`${selectClass} mt-2`}
+                        aria-invalid={Boolean(errors.externalSalesUserId)}
+                        {...register('externalSalesUserId', {
+                          setValueAs: (value) => (value === '' ? null : value),
+                        })}
+                        onChange={(event) => {
                           setValue(
-                            'customerRef',
-                            customer.shortName ?? customer.name,
+                            'externalSalesUserId',
+                            event.target.value || null,
                             { shouldDirty: true, shouldValidate: true },
                           );
-                          if (!getValues('receiverName') && customer.receiverName) {
-                            setValue('receiverName', customer.receiverName, {
-                              shouldDirty: true,
-                            });
-                          }
-                          if (!getValues('receiverPhone') && customer.receiverPhone) {
-                            setValue('receiverPhone', customer.receiverPhone, {
-                              shouldDirty: true,
-                            });
-                          }
-                          if (!getValues('receiverAddress') && customer.receiverAddress) {
-                            setValue('receiverAddress', customer.receiverAddress, {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            });
-                          }
-                        },
-                      })}
-                    >
-                      <option value="">— 临时客户 / 仅填写简称 —</option>
-                      {customers.map((customer) => (
-                        <option key={customer.id} value={customer.id}>
-                          {customer.code} · {customer.shortName ?? customer.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <Label htmlFor="customerRef">客户名称/简称</Label>
-                    <Input
-                      id="customerRef"
-                      className="mt-2 h-10"
-                      aria-invalid={Boolean(errors.customerRef)}
-                      {...register('customerRef')}
-                    />
-                    {errors.customerRef?.message ? (
-                      <p role="alert" className="mt-1.5 text-xs font-semibold text-destructive">
-                        {errors.customerRef.message}
-                      </p>
-                    ) : null}
-                  </div>
+                          invalidateStructuralQuotes();
+                        }}
+                      >
+                        <option value="">工厂直接业务</option>
+                        {externalSalesAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.displayName} · {account.username}
+                          </option>
+                        ))}
+                      </select>
+                      {errors.externalSalesUserId?.message ? (
+                        <p role="alert" className="mt-1.5 text-xs text-destructive">
+                          {errors.externalSalesUserId.message}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <Label htmlFor="customerPartyId">关联客户（选填）</Label>
+                        <select
+                          id="customerPartyId"
+                          className={`${selectClass} mt-2`}
+                          {...register('customerPartyId', {
+                            setValueAs: (value) => (value === '' ? null : value),
+                            onChange: (event) => {
+                              const customer = customers.find(
+                                (candidate) => candidate.id === event.target.value,
+                              );
+                              if (!customer) return;
+                              setValue(
+                                'customerRef',
+                                customer.shortName ?? customer.name,
+                                { shouldDirty: true, shouldValidate: true },
+                              );
+                              if (!getValues('receiverName') && customer.receiverName) {
+                                setValue('receiverName', customer.receiverName, {
+                                  shouldDirty: true,
+                                });
+                              }
+                              if (!getValues('receiverPhone') && customer.receiverPhone) {
+                                setValue('receiverPhone', customer.receiverPhone, {
+                                  shouldDirty: true,
+                                });
+                              }
+                              if (!getValues('receiverAddress') && customer.receiverAddress) {
+                                setValue('receiverAddress', customer.receiverAddress, {
+                                  shouldDirty: true,
+                                  shouldValidate: true,
+                                });
+                              }
+                            },
+                          })}
+                        >
+                          <option value="">— 临时客户 / 仅填写简称 —</option>
+                          {customers.map((customer) => (
+                            <option key={customer.id} value={customer.id}>
+                              {customer.code} · {customer.shortName ?? customer.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <Label htmlFor="customerRef">客户名称/简称</Label>
+                        <Input
+                          id="customerRef"
+                          className="mt-2 h-10"
+                          aria-invalid={Boolean(errors.customerRef)}
+                          {...register('customerRef')}
+                        />
+                        {errors.customerRef?.message ? (
+                          <p role="alert" className="mt-1.5 text-xs font-semibold text-destructive">
+                            {errors.customerRef.message}
+                          </p>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
                   <div>
                     <Label htmlFor="promisedDate">承诺交期</Label>
                     <Input
@@ -3047,26 +3114,6 @@ export function OrderForm({
                         id={`items.${expandedItem}.artworkVersion`}
                         className="mt-2 h-10"
                         {...register(`items.${expandedItem}.artworkVersion`)}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor={`items.${expandedItem}.plateGroupId`}>
-                        版组 / 模具组 ID
-                      </Label>
-                      <Input
-                        id={`items.${expandedItem}.plateGroupId`}
-                        className="mt-2 h-10"
-                        {...register(`items.${expandedItem}.plateGroupId`)}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor={`items.${expandedItem}.pricingGroup`}>
-                        专版计价组
-                      </Label>
-                      <Input
-                        id={`items.${expandedItem}.pricingGroup`}
-                        className="mt-2 h-10"
-                        {...register(`items.${expandedItem}.pricingGroup`)}
                       />
                     </div>
                   </div>
@@ -3463,6 +3510,7 @@ export function OrderForm({
                 packaging={railPackaging}
                 logistics={railLogistics}
                 usesExternalSalesPricing={usesExternalSalesPricing}
+                allowSaveDraft={!isExternalSalesActor}
                 settlementLabel={settlementLabel}
                 knownTotal={currentCreateOrderQuote?.knownTotal}
                 totalSemantics={currentCreateOrderQuote?.totalSemantics}
@@ -3627,7 +3675,7 @@ export function OrderForm({
           />
         )}
       </fieldset>
-      {!usesExternalSalesPricing && createdDraft ? (
+      {createdDraft && (!usesExternalSalesPricing || createdDraft.intent === 'draft') ? (
         <section
           className={
             uploadError

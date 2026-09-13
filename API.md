@@ -145,6 +145,10 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 [`actions/admin-order-workflow.ts`](./actions/admin-order-workflow.ts) 和
 [`lib/order/change-request.ts`](./lib/order/change-request.ts)。
 
+- `quoteExternalCreateOrderAction` 同时允许 SALES 自助报价与 ADMIN 代建预览；仍使用同一已发布价目、参数校验和报价 token，不允许客服伪造外部结算。关联账号的有效性在实际创建事务中重验。
+- `createOrderAction` 新增选填 `externalSalesUserId`：仅 ADMIN 可指定启用的 SALES 账号。事务内锁定并验证账号，写入 `submitterId` 与 `EXTERNAL_SALES` 结算方向，`submitterRole=SALES` 满足结算一致性约束，实际管理员保留在 `createdById` 和创建日志；未指定仍为 `FACTORY_DIRECT`。外部销售原始输入出现该字段（包括 null）直接拒绝；客服/师傅不能代指定。重复创建按实际创建人和原归属校验。
+- 管理员新建页移除 `customerPartyId/customerRef` 输入；管理员新建时这两个值统一为空，忽略旧浏览器草稿中的残留。其他角色和既有工单的客户关联保持原契约。
+- 新建的 `items[].pack` 上限为 12；`packagingGroups[].itemUnitsPerBag` 的一包合计最多 12，混装按各款相加。预报价、创建 schema、创建领域及页面同步校验，不改变旧工单包装及历史报价。数量为正整数；超限须调整，不能自动截断或按零费用放行。
 - `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；`customerPartyId` 只能选择活动客户（不变的历史关联可保留）。ADMIN 可修改范围内工单，SALES / CUSTOMER_SERVICE 仅可修改自己创建的工单；存在待审批申请时拒绝保存。
 - 管理员编辑页的“关联外部销售”使用 `externalSalesUserId`，只列出启用的 SALES 账号。它更新工单 `submitterId`，同步销售访问范围及后续对账归属，不写入客户主数据 `customerPartyId`。仅 ADMIN 可更换 DRAFT / PENDING_FACTORY / REJECTED / SUBMITTED 的 EXTERNAL_SALES 工单；已有结算、发货、账单（含草稿）、客服业绩或重做关联时拒绝转移。非外部销售工单不得借此转换结算方向。空账号和无效账号拒绝；未更换的历史账号可保留。事务内锁定工单与目标账号并验证递增编辑版本，保留创建人、创建时角色、客户简称、配送及全部金额快照；日志记录前后账号名称与账号 ID。
 - 完整编辑页用 `shipments` JSON 提交全部现有配送记录的 `id`、收件人、电话、地址、快递代码、`expectedDestinationProvince` 和 `sameDestination`。服务端校验记录集合与工单归属，拒绝新增、遗漏、重复和已发货记录的修改；外部销售需完整联系人。寄付地址变更必须明确确认原计费省份与条件未变；跨省、未核定或计费条件变化不能用普通编辑跳过物流核价。未带配送 JSON 的旧入口不能修改外部寄付地址。

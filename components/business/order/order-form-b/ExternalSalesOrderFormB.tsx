@@ -1,4 +1,6 @@
 'use client';
+import { MAX_CREATE_ORDER_UNITS_PER_BAG } from '@/lib/order/create-order-packaging';
+
 import { Group, FieldLabel, FieldError, RequiredMark, PillPicker } from './OrderFieldPrimitives';
 import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
 
@@ -842,6 +844,7 @@ export function OrderFormB({
                   id={`${uid}-units-per-bag`}
                   type="number"
                   min={1}
+                  max={MAX_CREATE_ORDER_UNITS_PER_BAG}
                   step={1}
                   required
                   aria-required="true"
@@ -853,7 +856,7 @@ export function OrderFormB({
                   className="h-10"
                   onChange={(event) =>
                     onUnitsPerBagChange(
-                      Number.parseInt(event.target.value, 10) || 0,
+                      Number(event.target.value) || 0,
                     )
                   }
                 />
@@ -884,13 +887,15 @@ export function OrderFormB({
                   },
                 ]}
                 disabled={disabled}
-                note={itemFields.length < 2 ? '混装需两款以上' : undefined}
                 onChange={onPackagingModeChange}
               />
+              {itemFields.length < 2 ? (
+                <p className="mt-2 text-xs text-muted-foreground">混装需至少 2 款</p>
+              ) : null}
             </div>
           </Group>
 
-          {packagingExtras}
+          {packagingExtras ? <div className="mt-5">{packagingExtras}</div> : null}
 
           {pricingExtras}
 

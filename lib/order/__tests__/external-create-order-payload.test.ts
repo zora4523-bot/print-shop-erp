@@ -49,7 +49,7 @@ function formInput(): CreateOrderInput {
         name: '第 7 款单款装',
         mode: 'SINGLE_STYLE',
         actualBagCount: 1,
-        itemUnitsPerBag: [1000],
+        itemUnitsPerBag: [10],
       },
     ],
     items: [
@@ -65,7 +65,7 @@ function formInput(): CreateOrderInput {
         paperType: '艳红珠光纸',
         paperWeightGsm: 160,
         quantity: 1000,
-        pack: 1000,
+        pack: 10,
         crafts: ['craft-1'],
         frontFoilColors: ['亚金'],
         backFoilColors: [],
@@ -182,7 +182,7 @@ describe('buildExternalCreateOrderPayload', () => {
       items: [
         {
           fig: 7,
-          pack: 1000,
+          pack: 10,
           craft: 'PARTIAL',
           pricingRoute: 'STOCK_BLANK',
           crafts: ['craft-1'],
@@ -202,7 +202,7 @@ describe('buildExternalCreateOrderPayload', () => {
         {
           mode: 'SINGLE_STYLE',
           actualBagCount: 1,
-          itemUnitsPerBag: [1000],
+          itemUnitsPerBag: [10],
         },
       ],
     });

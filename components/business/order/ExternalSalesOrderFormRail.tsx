@@ -276,6 +276,7 @@ export function OrderFormBRail({
   packaging,
   logistics,
   usesExternalSalesPricing,
+  allowSaveDraft = false,
   settlementLabel,
   knownTotal,
   totalSemantics,
@@ -289,6 +290,7 @@ export function OrderFormBRail({
   packaging: ExternalSalesPackagingQuote;
   logistics: OrderFormBRailLogistics | null;
   usesExternalSalesPricing: boolean;
+  allowSaveDraft?: boolean;
   settlementLabel: string;
   knownTotal?: string | null;
   totalSemantics?: OrderFormBRailTotalSemantics;
@@ -510,6 +512,19 @@ export function OrderFormBRail({
           </div>
         ) : null}
 
+        {allowSaveDraft ? (
+          <Button
+            type="submit"
+            name="creationIntent"
+            value="draft"
+            variant="outline"
+            className="mt-4 min-h-11 w-full text-sm font-extrabold"
+            disabled={busy}
+            onClick={() => onAttemptSubmit('draft')}
+          >
+            {busy ? '处理中…' : '保存草稿'}
+          </Button>
+        ) : null}
         <Button
           type="submit"
           name="creationIntent"

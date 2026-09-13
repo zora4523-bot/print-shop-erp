@@ -38,6 +38,7 @@ export type OrderFormGapShipment = {
 
 export type OrderFormGapInput = {
   customerRef?: string | null;
+  requiresCustomerRef?: boolean;
   promisedDate?: Date | string | null;
   items: readonly OrderFormGapItem[];
   shipping: {
@@ -87,7 +88,11 @@ export function collectOrderFormGaps(
   const gaps: OrderFormGap[] = [];
   const usesExternalSalesPricing = input.shipping.usesExternalSalesPricing;
 
-  if (!usesExternalSalesPricing && !hasText(input.customerRef)) {
+  if (
+    !usesExternalSalesPricing &&
+    input.requiresCustomerRef !== false &&
+    !hasText(input.customerRef)
+  ) {
     gaps.push({
       id: 'customer-ref',
       step: 'customer',

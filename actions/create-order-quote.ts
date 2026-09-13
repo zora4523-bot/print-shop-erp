@@ -1,7 +1,7 @@
 'use server';
 
 import { z } from 'zod';
-import { OrderSettlementType } from '@/generated/prisma/enums';
+import { OrderSettlementType, Role } from '@/generated/prisma/enums';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import type {
   CreateOrderQuoteActionInput,
@@ -53,6 +53,7 @@ export async function quoteExternalCreateOrderAction(
   const actor = await requirePermission('order:create');
 
   if (
+    actor.role !== Role.ADMIN &&
     settlementTypeForOrderCreator(actor.role) !==
     OrderSettlementType.EXTERNAL_SALES
   ) {

@@ -1,3 +1,4 @@
+import { MAX_CREATE_ORDER_UNITS_PER_BAG } from '@/lib/order/create-order-packaging';
 import { z } from 'zod';
 
 export const externalOrderCraftValues = [
@@ -62,7 +63,7 @@ export const externalCreateOrderStyleSchema = z
     lamination: z
       .enum(['NONE', 'MATTE', 'SOFT_TOUCH', 'NEW_GLOSS', 'LASER'])
       .default('NONE'),
-    pack: positiveNullableInteger('每包数量', 9_999_999),
+    pack: positiveNullableInteger('每包数量', MAX_CREATE_ORDER_UNITS_PER_BAG),
     remark: optionalTrimmed(1_000),
   })
   .strict()

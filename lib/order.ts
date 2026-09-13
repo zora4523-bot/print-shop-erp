@@ -100,7 +100,11 @@ import {
   deriveLegacyOrderItemFoilFacts,
   isNewOrderPricingRoute,
 } from './order/pricing-route';
-import { calculatePackagingBagCount } from './order/packaging-bag-count';
+import {
+  calculateCreateOrderBagCount,
+  MAX_CREATE_ORDER_UNITS_PER_BAG,
+  CREATE_ORDER_PACKAGING_LIMIT_MESSAGE,
+} from './order/create-order-packaging';
 import {
   ExternalOrderQuoteChangedError,
   ExternalOrderQuoteFinalizeError,
@@ -589,7 +593,24 @@ export async function createOrder(
 ): Promise<CreatedOrderSummary> {
   const additionalShipments = input.additionalShipments ?? [];
   const packagingGroupInputs = input.packagingGroups ?? [];
-  const settlementType = settlementTypeForOrderCreator(actor.role);
+  const externalSalesUserId = input.externalSalesUserId?.trim() || null;
+  if (externalSalesUserId && actor.role !== Role.ADMIN) {
+    throw new OrderInvariantError('只有管理员可以关联外部销售');
+  }
+  const submitterId = externalSalesUserId ?? actor.id;
+  const settlementType = externalSalesUserId
+    ? OrderSettlementType.EXTERNAL_SALES
+    : settlementTypeForOrderCreator(actor.role);
+  for (const item of input.items) {
+    if (
+      item.pack != null &&
+      (!Number.isSafeInteger(item.pack) ||
+        item.pack < 1 ||
+        item.pack > MAX_CREATE_ORDER_UNITS_PER_BAG)
+    ) {
+      throw new OrderInvariantError(CREATE_ORDER_PACKAGING_LIMIT_MESSAGE);
+    }
+  }
   const isExternalSalesDraft =
     settlementType === OrderSettlementType.EXTERNAL_SALES;
   if (!input.receiverAddress?.trim()) {
@@ -637,6 +658,7 @@ export async function createOrder(
           id: true,
           orderNo: true,
           submitterId: true,
+          createdById: true,
           pricingStatus: true,
           items: {
             select: { id: true },
@@ -645,7 +667,10 @@ export async function createOrder(
         },
       });
       if (existing) {
-        if (existing.submitterId !== actor.id) {
+        if (
+          existing.createdById !== actor.id ||
+          existing.submitterId !== submitterId
+        ) {
           throw new OrderInvariantError('提交标识已被其他账号使用');
         }
         return {
@@ -654,6 +679,17 @@ export async function createOrder(
           itemIds: existing.items.map((item) => item.id),
           pricingStatus: existing.pricingStatus,
         };
+      }
+    }
+
+    if (externalSalesUserId) {
+      await txClient.$executeRaw`SELECT id FROM "User" WHERE id = ${externalSalesUserId} FOR SHARE`;
+      const target = await txClient.user.findUnique({
+        where: { id: externalSalesUserId },
+        select: { role: true, isActive: true },
+      });
+      if (!target || !target.isActive || target.role !== Role.SALES) {
+        throw new OrderInvariantError('所选账号不存在、已停用或不是外部销售，请重新选择');
       }
     }
 
@@ -679,7 +715,7 @@ export async function createOrder(
       };
     });
     const packagingGroups = packagingGroupInputs.map((group, index) => {
-      const count = calculatePackagingBagCount({
+      const count = calculateCreateOrderBagCount({
         mode: group.mode,
         itemQuantities: items.map((item) => item.quantity),
         itemUnitsPerBag: group.itemUnitsPerBag,
@@ -699,7 +735,8 @@ export async function createOrder(
     for (const item of items) {
       assertOrderQuantity(item.quantity, item.name);
     }
-    const customerPartyId = input.customerPartyId ?? null;
+    const customerPartyId =
+      actor.role === Role.ADMIN ? null : input.customerPartyId ?? null;
     if (customerPartyId) {
       const customer = await txClient.party.findUnique({
         where: { id: customerPartyId },
@@ -1151,8 +1188,8 @@ export async function createOrder(
     const created = await txClient.order.create({
       data: {
         orderNo,
-        submitterId: actor.id,
-        submitterRole: actor.role,
+        submitterId,
+        submitterRole: externalSalesUserId ? Role.SALES : actor.role,
         createdById: actor.id,
         customerPartyId,
         status: OrderStatus.DRAFT,
@@ -1164,7 +1201,7 @@ export async function createOrder(
         isUrgent: input.isUrgent,
         isSfCollect: input.isSfCollect,
         customName: input.customName ?? null,
-        customerRef: input.customerRef,
+        customerRef: actor.role === Role.ADMIN ? null : input.customerRef,
         receiverName: input.receiverName,
         receiverPhone: input.receiverPhone,
         receiverAddress: input.receiverAddress,
@@ -1468,6 +1505,7 @@ export async function createOrder(
           id: true,
           orderNo: true,
           submitterId: true,
+          createdById: true,
           pricingStatus: true,
           items: {
             select: { id: true },
@@ -1475,7 +1513,7 @@ export async function createOrder(
           },
         },
       });
-      if (existing?.submitterId === actor.id) {
+      if (existing?.createdById === actor.id && existing.submitterId === submitterId) {
         return {
           id: existing.id,
           orderNo: existing.orderNo,

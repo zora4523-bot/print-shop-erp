@@ -209,7 +209,7 @@ function baseOrderInput(over: Record<string, unknown> = {}) {
         name: '单款装',
         mode: 'SINGLE_STYLE',
         actualBagCount: 1,
-        itemUnitsPerBag: [1000],
+        itemUnitsPerBag: [10],
       },
     ],
     items: [
@@ -250,7 +250,7 @@ function externalOrderInput(over: Record<string, unknown> = {}) {
     receiverAddress: '上海市浦东新区测试路 1 号',
     destinationProvince: '上海',
     expressCode: null,
-    packageRequirement: '客户原话：每包 1000 个',
+    packageRequirement: '客户原话：每包 10 个',
     remark: null,
     promisedDate: null,
     isUrgent: false,
@@ -261,7 +261,7 @@ function externalOrderInput(over: Record<string, unknown> = {}) {
         name: '第 7 款单款装',
         mode: 'SINGLE_STYLE',
         actualBagCount: 1,
-        itemUnitsPerBag: [1000],
+        itemUnitsPerBag: [10],
       },
     ],
     items: [
@@ -277,7 +277,7 @@ function externalOrderInput(over: Record<string, unknown> = {}) {
         paperType: '艳红珠光纸',
         paperWeightGsm: 160,
         quantity: 1000,
-        pack: 1000,
+        pack: 10,
         crafts: ['craft-1'],
         frontFoilColors: ['亚金'],
         backFoilColors: [],
@@ -2048,4 +2048,34 @@ describe('structured order commercial detail actions', () => {
       ['/orders'], ['/orders/order-1'], ['/orders/order-1/edit'], ['/owner/bills'],
     ]);
   });
+});
+
+it('accepts an admin recipient and rejects external-sales attempts to assign one', async () => {
+  permissionsMock.requirePermission.mockResolvedValue({
+    ...salesActor,
+    role: Role.ADMIN,
+  });
+  orderMock.createOrder.mockResolvedValue({
+    id: 'order',
+    orderNo: 'GD-test',
+    itemIds: ['item'],
+    pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+  });
+  expect(
+    await createOrderAction(null, {
+      ...baseOrderInput(),
+      externalSalesUserId: 'sales-2',
+    }),
+  ).toMatchObject({ status: 'success' });
+  expect(orderMock.createOrder.mock.calls[0]![0].externalSalesUserId).toBe(
+    'sales-2',
+  );
+  orderMock.createOrder.mockClear();
+  permissionsMock.requirePermission.mockResolvedValue(salesActor);
+  const result = await createOrderAction(null, {
+    ...externalOrderInput(),
+    externalSalesUserId: 'sales-2',
+  });
+  expect(result).toMatchObject({ status: 'invalid' });
+  expect(orderMock.createOrder).not.toHaveBeenCalled();
 });

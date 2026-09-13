@@ -46,8 +46,6 @@ const ITEM_FACT_KEYS = [
   'pricingRoute',
   'productStructure',
   'artworkVersion',
-  'plateGroupId',
-  'pricingGroup',
   'specification',
   'actualWidthMm',
   'actualHeightMm',
@@ -163,6 +161,9 @@ export function sanitizeOrderFormDraftValues(
   const includeInternalFacts = pricingScope === 'internal';
   const root = pickValues(value, ROOT_FACT_KEYS);
   if (!root) return null;
+  if (includeInternalFacts && typeof value.externalSalesUserId === 'string') {
+    root.externalSalesUserId = value.externalSalesUserId;
+  }
   const items = value.items.map((item, itemIndex) => {
     const picked = pickValues(item, [
       ...ITEM_FACT_KEYS,

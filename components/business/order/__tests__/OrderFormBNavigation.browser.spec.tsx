@@ -149,3 +149,33 @@ it('keyboard deletion retains a usable focus target', async () => {
   await userEvent.keyboard(' ');
   expect(document.activeElement).toBe(selectedStyle());
 });
+
+for (const theme of ['light', 'dark']) for (const width of [393, 768, 1280]) {
+  it(`packaging layout is readable and constrained at ${width}px in ${theme}`, async () => {
+    await page.viewport(width, 900);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<OrderFormB {...baseProps}
+      items={[baseItem]} itemFields={[{ id: 'item-1' }]} activeIndex={0}
+      onActiveIndexChange={noop} onRemove={noop}
+      packagingExtras={<div><label htmlFor="test-pack-note">包装补充说明（选填）</label><input id="test-pack-note" /></div>}
+    />));
+    await layoutReady();
+    const pack = host.querySelector<HTMLInputElement>('input[id$="-units-per-bag"]')!;
+    expect(pack.max).toBe('12');
+    pack.value = '13';
+    expect(pack.validity.rangeOverflow).toBe(true);
+    pack.value = '12';
+    expect(pack.validity.valid).toBe(true);
+    const mixed = page.getByRole('button', { name: '混装', exact: true });
+    await expect.element(mixed).toBeDisabled();
+    const mode = host.querySelector('button[id$="-packaging-mode-MIXED_STYLE"]')!.closest('fieldset')!;
+    expect(mode.querySelector('legend')!.textContent).toBe('包装方式');
+    const note = mode.parentElement!.querySelector('p')!;
+    expect(note.className).toContain('text-muted-foreground');
+    expect(note.getBoundingClientRect().top).toBeGreaterThanOrEqual(mode.getBoundingClientRect().bottom + 7);
+    const nextLabel = host.querySelector('label[for="test-pack-note"]')!;
+    expect(nextLabel.getBoundingClientRect().top).toBeGreaterThanOrEqual(note.getBoundingClientRect().bottom + 19);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('section[aria-label="数量与包装"]')).toEqual([]);
+  });
+}

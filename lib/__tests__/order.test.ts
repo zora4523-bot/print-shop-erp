@@ -333,7 +333,7 @@ async function createOrder(
           mode: OrderPackagingMode.SINGLE_STYLE,
           actualBagCount: 1,
           itemUnitsPerBag: input.items.map((_, candidateIndex) =>
-            candidateIndex === itemIndex ? item.quantity : 0,
+            candidateIndex === itemIndex ? 10 : 0,
           ),
         }))
       : input.packagingGroups;
@@ -2085,13 +2085,13 @@ describe('createOrder', () => {
               name: '烫金款 A 包装组',
               mode: OrderPackagingMode.SINGLE_STYLE,
               actualBagCount: 1,
-              itemUnitsPerBag: [6_000, 0],
+              itemUnitsPerBag: [10, 0],
             },
             {
               name: '烫金款 B 包装组',
               mode: OrderPackagingMode.SINGLE_STYLE,
               actualBagCount: 1,
-              itemUnitsPerBag: [0, 6_000],
+              itemUnitsPerBag: [0, 10],
             },
           ],
         },
@@ -6199,4 +6199,113 @@ it('sales cannot bind an active customer belonging to another salesperson', asyn
   dbMock.party.findFirst.mockResolvedValue(null);
   await expect(createOrder({ customerPartyId: 'foreign-customer', customerRef: '客户', receiverName: '收件人', receiverPhone: '13800000000', receiverAddress: '广东佛山测试收货地址', expressCode: null, packageRequirement: null, remark: null, promisedDate: null, isUrgent: false, isSfCollect: false, items: [baseItem()] }, salesActor)).rejects.toThrow('只能选择自己关联的客户');
   expect(dbMock.order.create).not.toHaveBeenCalled();
+});
+
+describe('admin creates for an external salesperson', () => {
+  function delegatedInput(): Parameters<typeof createOrderDomain>[0] {
+    return {
+      expressCode: null,
+      packageRequirement: null,
+      remark: null,
+      promisedDate: null,
+      isUrgent: false,
+      isSfCollect: false,
+      clientSubmissionId: 'ab75a0a0-eace-4a54-9ce9-367b95efc701',
+      externalSalesUserId: 'sales-2',
+      customName: '外部销售代录测试',
+      customerPartyId: 'old-customer',
+      customerRef: '旧简称',
+      receiverName: '张先生',
+      receiverPhone: '13800138000',
+      receiverAddress: '上海市测试地址',
+      items: [baseItem()],
+      packagingGroups: [
+        {
+          name: null,
+          mode: 'SINGLE_STYLE',
+          actualBagCount: 100,
+          itemUnitsPerBag: [10],
+        },
+      ],
+    };
+  }
+  it('records the selected owner and external settlement while retaining the creating admin', async () => {
+    dbMock.user.findUnique.mockResolvedValue({
+      role: Role.SALES,
+      isActive: true,
+    });
+    await createOrderDomain(delegatedInput(), ownerActor);
+    expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
+      submitterId: 'sales-2',
+      createdById: ownerActor.id,
+      submitterRole: Role.SALES,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      customerPartyId: null,
+      customerRef: null,
+      status: OrderStatus.DRAFT,
+      priceRevision: 0,
+    });
+    expect(dbMock.party.findUnique).not.toHaveBeenCalled();
+    expect(
+      dbMock.$executeRaw.mock.calls.some(([sql]) =>
+        sql.join('').includes('FOR SHARE'),
+      ),
+    ).toBe(true);
+  });
+  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])(
+    'rejects assignment by %s before writing',
+    async (role) => {
+      await expect(
+        createOrderDomain(delegatedInput(), { id: 'actor', role }),
+      ).rejects.toThrow('只有管理员');
+      expect(dbMock.$transaction).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    null,
+    { role: Role.SALES, isActive: false },
+    { role: Role.ADMIN, isActive: true },
+  ])('rejects missing, disabled or non-sales accounts: %j', async (target) => {
+    dbMock.user.findUnique.mockResolvedValue(target);
+    await expect(
+      createOrderDomain(delegatedInput(), ownerActor),
+    ).rejects.toThrow('所选账号');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it('replays for the creator, and rejects changing the owner under the same submission id', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'created',
+      orderNo: 'GD-test',
+      createdById: ownerActor.id,
+      submitterId: 'sales-2',
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      items: [{ id: 'item' }],
+    });
+    await expect(
+      createOrderDomain(delegatedInput(), ownerActor),
+    ).resolves.toMatchObject({ id: 'created' });
+    await expect(
+      createOrderDomain(
+        { ...delegatedInput(), externalSalesUserId: 'sales-3' },
+        ownerActor,
+      ),
+    ).rejects.toThrow('提交标识');
+    await expect(
+      createOrderDomain(delegatedInput(), {
+        id: 'another-admin',
+        role: Role.ADMIN,
+      }),
+    ).rejects.toThrow('提交标识');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it('rejects oversized bags even when a domain caller bypasses the schema', async () => {
+    const input = delegatedInput();
+    await expect(
+      createOrderDomain(
+        { ...input, items: [{ ...input.items[0]!, pack: 13 }] },
+        ownerActor,
+      ),
+    ).rejects.toThrow('12');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
 });
