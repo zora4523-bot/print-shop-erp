@@ -139,9 +139,6 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
                   <div className="font-medium">
                     {externalPriceBusinessText(row.name)}
                   </div>
-                  <div className="mt-1 font-sans tabular-nums text-xs text-muted-foreground">
-                    {row.code}
-                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <div>{MATERIAL_CATEGORY_LABELS[row.category]}</div>
