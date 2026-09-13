@@ -30,6 +30,26 @@ async function choose(page: Page, group: string, value: string) {
     .click();
 }
 
+async function transferCoatedOrder(
+  page: Page,
+  role: 'sales' | 'owner' = 'sales',
+) {
+  await openWorkbench(page, role);
+  await choose(page, '工艺类型', '彩印');
+  await choose(page, '纸张材质', '铜版纸');
+  await choose(page, '覆膜', '触感膜');
+  await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+  await expect(page).toHaveURL(/\/orders\/new\?fromWorkbench=/);
+  await expect(
+    page.getByRole('spinbutton', { name: '数量', exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page
+      .getByRole('group', { name: '覆膜' })
+      .getByRole('button', { name: '触感膜', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+}
+
 test.describe('shared workbench calculator', () => {
   test.describe.configure({ timeout: 90000 });
   test('sales changes markup locally, transfers identical item facts, and sees the same processing lines in order entry', async ({
@@ -145,6 +165,267 @@ test.describe('shared workbench calculator', () => {
     await expect(
       page.getByRole('spinbutton', { name: '数量', exact: true }),
     ).toBeEnabled();
+    const transferUrl = page.url();
+    await page
+      .getByRole('textbox', { name: /工单名称/ })
+      .fill('报价转单继续填写');
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Object.keys(localStorage).some(
+            (key) =>
+              key.includes(':workbench:') &&
+              localStorage.getItem(key)?.includes('报价转单继续填写'),
+          ),
+        ),
+      )
+      .toBe(true);
+    await page.goto('/orders');
+    await page.goto('/orders/new');
+    await expect(page.getByRole('textbox', { name: /工单名称/ })).toHaveValue(
+      '原工单不要覆盖',
+    );
+    await page.getByText('报价工单草稿（1）', { exact: true }).click();
+    await page.getByRole('link', { name: '恢复草稿' }).click();
+    await expect(page).toHaveURL(transferUrl);
+    await expect(page.getByRole('textbox', { name: /工单名称/ })).toHaveValue(
+      '报价转单继续填写',
+    );
+    for (const [key, value] of Object.entries(original))
+      expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBe(
+        value,
+      );
+  });
+  test('preserves finishing after reload and recovery without a session payload', async ({
+    page,
+  }) => {
+    page.on('dialog', (dialog) => dialog.accept());
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await transferCoatedOrder(page);
+    await page.reload();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await page.evaluate(() => sessionStorage.clear());
+    await page.goto('/orders/new');
+    await page.getByText('报价工单草稿（1）', { exact: true }).click();
+    await page.getByRole('link', { name: '恢复草稿' }).click();
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeEnabled();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    expect(
+      await page.evaluate(
+        () =>
+          JSON.parse(
+            localStorage.getItem(
+              Object.keys(localStorage).find((key) =>
+                key.includes(':workbench:'),
+              )!,
+            )!,
+          ).values.items[0].lamination,
+      ),
+    ).toBe('SOFT_TOUCH');
+    expect(errors).toEqual([]);
+  });
+  test('restores internal-sales finishing and requires a selection for incomplete legacy drafts', async ({
+    page,
+  }) => {
+    await transferCoatedOrder(page, 'owner');
+    const url = page.url();
+    await page.reload();
+    await page
+      .getByRole('button', { name: '恢复本地草稿', exact: true })
+      .click();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await page.goto('/owner');
+    await page.evaluate(() => {
+      const key = Object.keys(localStorage).find((entry) =>
+        entry.includes(':internal:workbench:'),
+      )!;
+      const draft = JSON.parse(localStorage.getItem(key)!);
+      delete draft.values.items[0].lamination;
+      localStorage.setItem(key, JSON.stringify(draft));
+    });
+    const posts: string[] = [];
+    page.on('request', (request) => {
+      if (
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname === '/orders/new'
+      )
+        posts.push(request.postData() ?? '');
+    });
+    await page.goto(url);
+    await page
+      .getByRole('button', { name: '恢复本地草稿', exact: true })
+      .click();
+    await expect(
+      page.getByText('第 1 款覆膜资料缺失，请重新选择覆膜', { exact: true }),
+    ).toBeVisible();
+    expect(
+      await page
+        .waitForRequest(
+          (request) =>
+            request.method() === 'POST' &&
+            new URL(request.url()).pathname === '/orders/new',
+          { timeout: 1500 },
+        )
+        .catch(() => null),
+    ).toBeNull();
+    expect(posts).toEqual([]);
+    await choose(page, '覆膜', '触感膜');
+    await expect
+      .poll(() => posts.some((body) => body.includes('SOFT_TOUCH')))
+      .toBe(true);
+  });
+  test('keeps order creation blocked when the transferred draft cannot be saved', async ({
+    page,
+  }) => {
+    await openWorkbench(page);
+    await ready(page);
+    await page.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key.startsWith('print-shop-erp:order-form-draft:'))
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        return original.call(this, key, value);
+      };
+    });
+    await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+    await expect(page).toHaveURL(/\/orders\/new\?fromWorkbench=/);
+    await expect(
+      page.getByRole('region', { name: '带入报价条件' }).getByRole('alert'),
+    ).toContainText('报价条件保存失败');
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeDisabled();
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).filter((key) => key.includes(':workbench:')),
+      ),
+    ).toEqual([]);
+  });
+  test('recovers corrupt local storage from valid session facts, then blocks when both are unreadable', async ({
+    page,
+  }) => {
+    await transferCoatedOrder(page);
+    const key = await page.evaluate(() =>
+      Object.keys(localStorage).find((entry) => entry.includes(':workbench:'))!,
+    );
+    await page.evaluate(
+      (key) => localStorage.setItem(key, 'invalid json'),
+      key,
+    );
+    await page.reload();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeEnabled();
+    await page.evaluate((key) => {
+      localStorage.setItem(key, 'invalid json');
+      for (const entry of Object.keys(sessionStorage)) {
+        if (!entry.startsWith('workbench-order:')) continue;
+        const payload = JSON.parse(sessionStorage.getItem(entry)!);
+        payload.expiresAt = Date.now() - 1;
+        sessionStorage.setItem(entry, JSON.stringify(payload));
+      }
+    }, key);
+    await page.reload();
+    await expect(
+      page.getByRole('region', { name: '带入报价条件' }).getByRole('alert'),
+    ).toContainText('报价条件已过期或无法读取');
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeDisabled();
+    await page.getByRole('button', { name: '返回工作台', exact: true }).click();
+    await expect(page).toHaveURL(/\/workbench$/);
+  });
+  test('requires missing legacy finishing to be selected before automatic quoting resumes', async ({
+    page,
+  }) => {
+    page.on('dialog', (dialog) => dialog.accept());
+    await transferCoatedOrder(page);
+    await page
+      .getByRole('textbox', { name: /工单名称/ })
+      .fill('保留缺失覆膜草稿');
+    await page
+      .getByRole('textbox', { name: '收货地址', exact: true })
+      .fill('报价草稿 13800138000 上海市浦东新区测试路1号');
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Object.keys(localStorage).some(
+            (key) =>
+              key.includes(':workbench:') &&
+              localStorage.getItem(key)?.includes('保留缺失覆膜草稿'),
+          ),
+        ),
+      )
+      .toBe(true);
+    const url = page.url();
+    await page.goto('/orders');
+    await page.evaluate(() => {
+      const key = Object.keys(localStorage).find((entry) =>
+        entry.includes(':workbench:'),
+      )!;
+      const draft = JSON.parse(localStorage.getItem(key)!);
+      delete draft.values.items[0].lamination;
+      localStorage.setItem(key, JSON.stringify(draft));
+    });
+    const posts: string[] = [];
+    page.on('request', (request) => {
+      if (
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname === '/orders/new'
+      )
+        posts.push(request.postData() ?? '');
+    });
+    await page.goto(url);
+    await expect(
+      page.getByText('第 1 款覆膜资料缺失，请重新选择覆膜', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /工单名称/ })).toHaveValue(
+      '保留缺失覆膜草稿',
+    );
+    expect(
+      await page
+        .waitForRequest(
+          (request) =>
+            request.method() === 'POST' &&
+            new URL(request.url()).pathname === '/orders/new',
+          { timeout: 1500 },
+        )
+        .catch(() => null),
+    ).toBeNull();
+    expect(posts).toEqual([]);
+    await page.getByRole('button', { name: '选择覆膜', exact: true }).click();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '亚膜', exact: true }),
+    ).toBeFocused();
+    await choose(page, '覆膜', '触感膜');
+    await expect(
+      page.getByText('第 1 款覆膜资料缺失，请重新选择覆膜', { exact: true }),
+    ).toHaveCount(0);
+    await expect
+      .poll(() => posts.some((body) => body.includes('SOFT_TOUCH')))
+      .toBe(true);
   });
   test('uses printed lamination and partial/full foil with live prices and recovers from invalid quantity', async ({
     page,

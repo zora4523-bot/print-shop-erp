@@ -1,5 +1,7 @@
 'use client';
 import { WorkbenchOrderTransfer } from './WorkbenchOrderTransfer';
+import { LocalOrderDrafts } from './LocalOrderDrafts';
+import { ActionNotice } from '@/components/ui-business';
 import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
 import { orderItemSelectionUpdate, type OrderItemSelectionChange } from '@/lib/order/order-item-selection';
 import { OrderItemProductField } from './order-form-b/OrderItemFields';
@@ -108,6 +110,7 @@ import {
 import {
   LocalOrderFormDraft,
   localOrderFormDraftStorageKey,
+  needsOrderItemLaminationSelection,
   parseLocalOrderFormDraft,
   resolveNextOrderItemFig,
   serializeLocalOrderFormDraft,
@@ -900,6 +903,9 @@ export function OrderForm({
     ? null
     : storedLocalDraft;
   const localDraftReady = hydrated && pendingLocalDraft === null && transferReady;
+  const missingLaminationIndex = watchedItems.findIndex(
+    needsOrderItemLaminationSelection,
+  );
   const detectedLocalDraftError = !hydrated
     ? null
     : localDraftSnapshot === LOCAL_DRAFT_STORAGE_UNAVAILABLE
@@ -939,15 +945,17 @@ export function OrderForm({
       );
       if (!serialized) {
         setLocalDraftError('当前表单无法安全序列化，本地草稿未更新。');
-        return;
+        return false;
       }
       try {
         window.localStorage.setItem(localDraftStorageKey, serialized);
         setLocalDraftDecisionComplete(true);
         setLastLocalDraftSavedAt(savedAt.toISOString());
         setLocalDraftError(null);
+        return true;
       } catch {
         setLocalDraftError('本地草稿保存失败，请不要在创建工单前关闭页面。');
+        return false;
       }
     },
     [localDraftPricingScope, localDraftStorageKey],
@@ -1154,8 +1162,9 @@ export function OrderForm({
     if (facts(normalized) !== facts(requested))
       return '产品资料已变更，请返回工作台重新选择';
     const values = initialOrderFormValues(clientSubmissionId, normalized);
+    if (!persistLocalDraftValues(values))
+      return '报价条件保存失败，请释放浏览器存储空间后返回工作台重试';
     reset(values);
-    persistLocalDraftValues(values);
     setLocalDraftDecisionComplete(true);
     setTransferReady(true);
     return null;
@@ -1333,6 +1342,8 @@ export function OrderForm({
   }
 
   const onValid: SubmitHandler<CreateOrderInput> = (data, event) => {
+    if (!localDraftReady || data.items.some(needsOrderItemLaminationSelection))
+      return;
     // The disabled submit button covers clicks; this guard also blocks Enter
     // key or programmatic submits while an authoritative quote is in flight.
     if (
@@ -2008,6 +2019,7 @@ export function OrderForm({
     };
   }, [currentPackagingQuoteInput, getValues, settlementType]);
   const currentInternalQuoteRequestReady =
+    missingLaminationIndex < 0 &&
     watchedItems.length > 0 &&
     watchedItems.every(
       (item) =>
@@ -2217,6 +2229,7 @@ export function OrderForm({
     initialExternalPriceSnapshot,
   ]);
   const currentExternalQuoteRequestReady =
+    missingLaminationIndex < 0 &&
     watchedItems.length > 0 &&
     watchedItems.every(
       (item) =>
@@ -2862,8 +2875,44 @@ export function OrderForm({
           scope={draftScope}
           existingDraftKey={existingLocalDraftKey}
           transferDraftKey={localDraftStorageKey}
+          pricingScope={localDraftPricingScope}
           onApply={applyWorkbenchTransfer}
           onContinue={() => setTransferReady(true)}
+        />
+      ) : null}
+      {!createdDraft ? (
+        <LocalOrderDrafts
+          baseKey={existingLocalDraftKey}
+          pricingScope={localDraftPricingScope}
+          currentId={workbenchTransferId}
+          onNavigate={() =>
+            !submitting && !uploading &&
+            (!isDirty || !localDraftReady || persistLocalDraftValues(getValues()))
+          }
+        />
+      ) : null}
+      {localDraftReady && missingLaminationIndex >= 0 ? (
+        <ActionNotice
+          tone="warning"
+          title={`第 ${missingLaminationIndex + 1} 款覆膜资料缺失，请重新选择覆膜`}
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              onClick={(event) => {
+                const formElement = event.currentTarget.closest('form');
+                setExpandedItem(missingLaminationIndex);
+                window.requestAnimationFrame(() => {
+                  formElement
+                    ?.querySelector<HTMLElement>('button[id$="-lamination-MATTE"]')
+                    ?.focus();
+                });
+              }}
+            >
+              选择覆膜
+            </Button>
+          }
         />
       ) : null}
       {pendingLocalDraft && !usesExternalSalesPricing ? (

@@ -1,6 +1,7 @@
 'use client';
 import type { ReactNode } from 'react';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
+import { isCoatedOrderPaper } from '@/lib/order/order-item-material';
 import {
   OrderItemPricingRoute,
   OrderFoilTechnique,
@@ -89,10 +90,7 @@ function isCopperPaper(
   options: readonly OrderPaperSwatchOption[],
 ): boolean {
   const option = options.find((entry) => entry.value === paperKey);
-  const text = `${paperKey ?? ''} ${option?.label ?? ''}`.toLowerCase();
-  return (
-    text.includes('铜版') || text.includes('coated') || text.includes('tbz')
-  );
+  return isCoatedOrderPaper(paperKey) || isCoatedOrderPaper(option?.label);
 }
 
 function currentPrintFoilMode(

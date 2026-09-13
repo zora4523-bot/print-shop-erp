@@ -5,6 +5,10 @@ import { readWorkbenchTransfer } from '@/lib/workbench/order-transfer';
 import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
 import { Button } from '@/components/ui/button';
 import { ActionNotice } from '@/components/ui-business';
+import {
+  parseLocalOrderFormDraft,
+  type LocalOrderFormDraftPricingScope,
+} from './order-form-local-draft';
 
 /** Separate local-draft namespace keeps an existing unfinished order intact. */
 export function WorkbenchOrderTransfer({
@@ -12,6 +16,7 @@ export function WorkbenchOrderTransfer({
   scope,
   existingDraftKey,
   transferDraftKey,
+  pricingScope,
   onApply,
   onContinue,
 }: {
@@ -19,6 +24,7 @@ export function WorkbenchOrderTransfer({
   scope: string;
   existingDraftKey: string;
   transferDraftKey: string;
+  pricingScope: LocalOrderFormDraftPricingScope;
   onApply: (input: WorkbenchItemQuoteInput) => string | null;
   onContinue: () => void;
 }) {
@@ -41,7 +47,11 @@ export function WorkbenchOrderTransfer({
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
-        if (window.localStorage.getItem(transferDraftKey)) {
+        const transferDraft = window.localStorage.getItem(transferDraftKey);
+        if (
+          transferDraft &&
+          parseLocalOrderFormDraft(transferDraft, pricingScope)
+        ) {
           handlers.current.onContinue();
           setDone(true);
           return;
@@ -51,7 +61,12 @@ export function WorkbenchOrderTransfer({
           setError('报价条件已过期或无法读取，请返回工作台重新选择');
           return;
         }
-        if (window.localStorage.getItem(existingDraftKey)) setChoice(input);
+        const existingDraft = window.localStorage.getItem(existingDraftKey);
+        if (
+          existingDraft &&
+          parseLocalOrderFormDraft(existingDraft, pricingScope)
+        )
+          setChoice(input);
         else {
           const message = handlers.current.onApply(input);
           if (message) setError(message);
@@ -62,7 +77,7 @@ export function WorkbenchOrderTransfer({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [id, scope, existingDraftKey, transferDraftKey]);
+  }, [id, scope, existingDraftKey, transferDraftKey, pricingScope]);
   if (done) return null;
   return (
     <section

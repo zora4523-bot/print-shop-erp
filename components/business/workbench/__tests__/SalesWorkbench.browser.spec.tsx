@@ -287,6 +287,67 @@ it('uses shared lamination and printed-foil selectors without losing the selecte
     .poll(() => mocks.quote.mock.calls.at(-1)?.[0]?.item.hasLocalFoil)
     .toBe(false);
 });
+it('keeps administrator foil names selected and supports deselection without aliases or duplicates', async () => {
+  render(false, {
+    ...options,
+    foilColors: [{ ...options.foilColors[0]!, name: '哑金' }],
+  });
+  const swatch = page.getByRole('button', { name: /^哑金(?:，第 \d 色)?$/ });
+  await expect.element(swatch).toHaveAttribute('aria-pressed', 'true');
+  await expect
+    .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.frontFoilColors)
+    .toEqual(['哑金']);
+  await swatch.click();
+  await expect.element(swatch).toHaveAttribute('aria-pressed', 'false');
+  await swatch.click();
+  await expect.element(swatch).toHaveAttribute('aria-pressed', 'true');
+  await expect
+    .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.frontFoilColors)
+    .toEqual(['哑金']);
+  await page.getByRole('button', { name: '按此款式创建工单' }).click();
+  const id = new URL(
+    mocks.push.mock.calls[0]![0],
+    'http://localhost',
+  ).searchParams.get('fromWorkbench');
+  expect(
+    JSON.parse(sessionStorage.getItem(`workbench-order:sales:${id}`)!).item
+      .frontFoilColors,
+  ).toEqual(['哑金']);
+});
+it('quotes and transfers the selected finishing for a COATED catalog paper', async () => {
+  render(false, {
+    ...options,
+    products: options.products.map((product) =>
+      product.id === 'color'
+        ? { ...product, paperType: '200gCOATED' }
+        : product,
+    ),
+    papers: options.papers.map((paper) =>
+      paper.id === 'coated' ? { ...paper, name: 'COATED' } : paper,
+    ),
+  });
+  await page
+    .getByRole('group', { name: '工艺类型' })
+    .getByRole('button', { name: '彩印', exact: true })
+    .click();
+  const finishing = page
+    .getByRole('group', { name: '覆膜' })
+    .getByRole('button', { name: '触感膜', exact: true });
+  await finishing.click();
+  await expect.element(finishing).toHaveAttribute('aria-pressed', 'true');
+  await expect
+    .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.lamination)
+    .toBe(OrderLamination.SOFT_TOUCH);
+  await page.getByRole('button', { name: '按此款式创建工单' }).click();
+  const id = new URL(
+    mocks.push.mock.calls[0]![0],
+    'http://localhost',
+  ).searchParams.get('fromWorkbench');
+  expect(
+    JSON.parse(sessionStorage.getItem(`workbench-order:sales:${id}`)!).item
+      .lamination,
+  ).toBe(OrderLamination.SOFT_TOUCH);
+});
 it('rejects invalid quantities and stale asynchronous results, preserves focus, and retries failures', async () => {
   render();
   await expect.poll(() => mocks.quote.mock.calls.length).toBe(1);

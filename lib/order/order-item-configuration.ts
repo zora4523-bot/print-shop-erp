@@ -1,4 +1,5 @@
 import type { CreateOrderInput } from '@/lib/auth/schemas';
+import { isCoatedOrderPaper } from './order-item-material';
 import {
   OrderItemPricingRoute,
   OrderProductStructure,
@@ -101,15 +102,6 @@ export function normalizeExternalOrderItem(args: {
   resetSpecification?: boolean;
   preserveCustomSize?: boolean;
 }): CreateOrderInput['items'][number] {
-  const normalizeExternalFoilColor = (color: string) =>
-    ({
-      哑金: '亚金',
-      浅金: '浅色',
-      红金: '红色',
-      黑金: '黑色',
-      蓝金: '蓝色',
-      透明金: '透明色',
-    })[color] ?? color;
   const route = args.item.pricingRoute;
   const routePapers = externalOrderPapersForRoute(
     args.products,
@@ -175,10 +167,9 @@ export function normalizeExternalOrderItem(args: {
   const paperType = externalOrderPaperType(paper, route, specification, weight);
   if (!paperType) return args.item;
 
-  let frontFoilColors = args.item.frontFoilColors.map(
-    normalizeExternalFoilColor,
-  );
-  let backFoilColors = args.item.backFoilColors.map(normalizeExternalFoilColor);
+  // Catalog names are the selectable identities, not display aliases.
+  let frontFoilColors = [...new Set(args.item.frontFoilColors)];
+  let backFoilColors = [...new Set(args.item.backFoilColors)];
   let foilTechnique = args.item.foilTechnique;
   let hasLocalFoil = args.item.hasLocalFoil;
   let printColors = [...args.item.printColors];
@@ -215,7 +206,7 @@ export function normalizeExternalOrderItem(args: {
       foilTechnique = OrderFoilTechnique.FLAT;
     }
     lamination =
-      paper.appearance === 'coated'
+      isCoatedOrderPaper(paper.label)
         ? lamination === OrderLamination.NONE
           ? OrderLamination.MATTE
           : lamination

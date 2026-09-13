@@ -36,6 +36,67 @@ function store() {
   };
 }
 describe('shared order configuration', () => {
+  it.each(['哑金', '浅金', '红金', '蓝金', '哑黑', '银色'])(
+    'preserves the configured foil identity %s through normalization and quoting',
+    (name) => {
+      const item = createExternalOrderItem(
+        crafts,
+        catalog.products,
+        catalog.papers,
+        name,
+      );
+      const normalized = normalizeExternalOrderItem({
+        item,
+        crafts,
+        products: catalog.products,
+        paperMaterials: catalog.papers,
+      });
+      expect(normalized.frontFoilColors).toEqual([name]);
+      expect(
+        workbenchItemQuoteSchema.parse({ item: normalized }).item.foilColors,
+      ).toEqual([name]);
+    },
+  );
+
+  it.each(['COATED', 'TBZ', '铜版纸'])(
+    'retains selected finishing for the %s catalog label',
+    (name) => {
+      const options = {
+        ...catalog,
+        papers: catalog.papers.map((paper) =>
+          paper.id === 'coated' ? { ...paper, name } : paper,
+        ),
+        products: catalog.products.map((product) =>
+          product.id === 'color'
+            ? { ...product, paperType: `200g${name}` }
+            : product,
+        ),
+      };
+      const selected = orderItemSelectionUpdate(
+        initial(),
+        { type: 'route', value: OrderItemPricingRoute.COLOR_PRINT },
+        options.products,
+        options,
+      )!;
+      const item = normalizeExternalOrderItem({
+        ...selected.options,
+        item: selected.item,
+        crafts,
+        products: options.products,
+        paperMaterials: options.papers,
+      });
+      expect(item.lamination).toBe(OrderLamination.MATTE);
+      const finished = normalizeExternalOrderItem({
+        item: { ...item, lamination: OrderLamination.SOFT_TOUCH },
+        crafts,
+        products: options.products,
+        paperMaterials: options.papers,
+      });
+      expect(
+        workbenchItemQuoteSchema.parse({ item: finished }).item.lamination,
+      ).toBe(OrderLamination.SOFT_TOUCH);
+    },
+  );
   it('uses the same paper, weight and product identity and never prices an unavailable linked paper', () => {
     expect(initial()).toMatchObject({
       productId: 'stock',

@@ -1,5 +1,9 @@
-import { OrderItemPricingRoute } from '@/generated/prisma/enums';
+import {
+  OrderItemPricingRoute,
+  OrderLamination,
+} from '@/generated/prisma/enums';
 import { isNewOrderPricingRoute } from '@/lib/order/pricing-route';
+import { isCoatedOrderPaper } from '@/lib/order/order-item-material';
 
 const LOCAL_ORDER_DRAFT_VERSION = 5 as const;
 const LEGACY_LOCAL_ORDER_DRAFT_VERSION = 4 as const;
@@ -58,6 +62,7 @@ const ITEM_FACT_KEYS = [
   'foilTechnique',
   'hasLocalFoil',
   'printColors',
+  'lamination',
   'isDoubleSided',
   'isDoubleColor',
   'remark',
@@ -169,8 +174,40 @@ export function sanitizeOrderFormDraftValues(
       !isNewOrderPricingRoute(picked.pricingRoute as OrderItemPricingRoute)
     )
       return null;
+    // Incomplete scalar inputs can be restored for editing. These lists are
+    // always present in a form draft and are consumed as arrays by the editor.
+    if (
+      [
+        'crafts',
+        'frontFoilColors',
+        'backFoilColors',
+        'foilColors',
+        'printColors',
+      ].some(
+        (key) =>
+          !Array.isArray(picked[key]) ||
+          !(picked[key] as JsonValue[]).every(
+            (entry) => typeof entry === 'string',
+          ),
+      )
+    )
+      return null;
     if (!Number.isSafeInteger(picked.fig) || Number(picked.fig) < 1) {
       picked.fig = itemIndex + 1;
+    }
+    if (
+      !Object.values(OrderLamination).some(
+        (value) => value === picked.lamination,
+      )
+    ) {
+      // Old drafts omitted this fact. Preserve the other entered fields, but
+      // never turn an unknown coated-paper finishing into a default price.
+      picked.lamination =
+        picked.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
+        typeof picked.paperType === 'string' &&
+        isCoatedOrderPaper(picked.paperType)
+          ? null
+          : OrderLamination.NONE;
     }
     if (!Number.isSafeInteger(picked.pack) || Number(picked.pack) < 1) {
       const legacyPack = packagingGroupValues
@@ -260,4 +297,54 @@ export function localOrderFormDraftStorageKey(
 ): string {
   const pricingScope = usesExternalSalesPricing ? 'external-sales' : 'internal';
   return `print-shop-erp:order-form-draft:v4:${encodeURIComponent(userScope)}:${pricingScope}`;
+}
+
+export function needsOrderItemLaminationSelection(item: {
+  pricingRoute?: string;
+  paperType?: string | null;
+  lamination?: unknown;
+}): boolean {
+  return (
+    item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
+    isCoatedOrderPaper(item.paperType) &&
+    !Object.values(OrderLamination).some((value) => value === item.lamination)
+  );
+}
+
+export type LocalWorkbenchDraft = {
+  id: string;
+  name: string | null;
+  savedAt: string;
+};
+
+/** Discover existing transfer drafts without a second, fallible storage index. */
+export function listLocalWorkbenchDrafts(
+  storage: Pick<Storage, 'length' | 'key' | 'getItem'>,
+  baseKey: string,
+  pricingScope: LocalOrderFormDraftPricingScope,
+): LocalWorkbenchDraft[] {
+  const prefix = `${baseKey}:workbench:`;
+  const drafts: LocalWorkbenchDraft[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (!key?.startsWith(prefix)) continue;
+    const id = key.slice(prefix.length);
+    if (!/^[\da-f-]{36}$/i.test(id)) continue;
+    const raw = storage.getItem(key);
+    const draft = raw ? parseLocalOrderFormDraft(raw, pricingScope) : null;
+    if (!draft) continue;
+    drafts.push({
+      id,
+      name:
+        typeof draft.values.customName === 'string'
+          ? draft.values.customName.trim() || null
+          : null,
+      savedAt: draft.savedAt,
+    });
+  }
+  return drafts.sort(
+    (left, right) =>
+      Date.parse(right.savedAt) - Date.parse(left.savedAt) ||
+      left.id.localeCompare(right.id),
+  );
 }

@@ -4,6 +4,7 @@ import {
   OrderLamination,
 } from '@/generated/prisma/enums';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
+import { isCoatedOrderPaper } from './order-item-material';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import {
   externalOrderPapersForRoute,
@@ -85,7 +86,7 @@ export function orderItemSelectionUpdate(
           paperWeightGsm: weight,
           lamination:
             current.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
-            paper.appearance === 'coated'
+            isCoatedOrderPaper(paper.label)
               ? OrderLamination.MATTE
               : OrderLamination.NONE,
         },
