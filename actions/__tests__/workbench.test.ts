@@ -31,7 +31,7 @@ vi.mock(
   }),
 );
 
-import { quoteWorkbenchAction } from '../workbench';
+import { quoteWorkbenchAction, quoteWorkbenchItemAction } from '../workbench';
 const product = {
   id: 'product-stock',
   code: null,
@@ -493,5 +493,45 @@ it('quotes a full 32-character paper name with its catalog weight without trunca
   expect(mocks.transaction).toHaveBeenCalledTimes(1);
   mocks.transaction.mockClear();
   expect(await quoteWorkbenchAction({ ...custom, paperType: `200g${paperType}` })).toMatchObject({ status: 'error', message: '产品选项已变更，请刷新页面后重新选择' });
+  expect(mocks.transaction).not.toHaveBeenCalled();
+});
+
+
+const canonicalItem = {
+  ...input,
+  paperWeightGsm: 160,
+  actualWidthMm: 90,
+  actualHeightMm: 165,
+  crafts: [craft.id],
+  foilColors: input.frontFoilColors,
+  hasLocalFoil: true,
+  lamination: 'NONE',
+  printColors: [],
+  isDoubleSided: false,
+  isDoubleColor: false,
+};
+it('accepts canonical order facts, not only the old calculator fields', async () => {
+  const result = await quoteWorkbenchItemAction({ item: canonicalItem });
+  expect(result).toMatchObject({
+    status: 'success',
+    quote: { needsPricing: false, baseAmount: '170.00' },
+  });
+});
+it('authorizes the canonical action before input parsing or reads', async () => {
+  mocks.permission.mockRejectedValue(new Error('unauthorized'));
+  await expect(quoteWorkbenchItemAction({})).rejects.toThrow('unauthorized');
+  expect(mocks.transaction).not.toHaveBeenCalled();
+});
+it('rejects unsupported routes, malformed quantities and attempted manual overrides', async () => {
+  for (const patch of [
+    { quantity: 0 },
+    { quantity: 1.2 },
+    { pricingRoute: 'MANUAL_QUOTE' },
+    { manualQuoteReason: '绕过目录' },
+  ]) {
+    expect(await quoteWorkbenchItemAction({
+      item: { ...canonicalItem, ...patch },
+    })).toMatchObject({ status: 'error' });
+  }
   expect(mocks.transaction).not.toHaveBeenCalled();
 });

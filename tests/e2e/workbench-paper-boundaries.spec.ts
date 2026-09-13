@@ -11,16 +11,39 @@ import {
 const prefix = `e2e-wb-${randomBytes(4).toString('hex')}`;
 const longPaper = prefix + '纸'.repeat(32 - prefix.length);
 const fixtures = [
-  { key: 'stock', name: `${prefix}-缺货`, paper: `${prefix}-缺货纸`, specification: '160g', productPaper: `160g${prefix}-缺货纸`, outOfStock: true },
-  { key: 'weight', name: `${prefix}-缺克重`, paper: `${prefix}-无克重`, specification: null, productPaper: null, outOfStock: false },
-  { key: 'long', name: `${prefix}-长纸名`, paper: longPaper, specification: '160g', productPaper: longPaper, outOfStock: false },
+  {
+    key: 'stock',
+    name: `${prefix}-缺货`,
+    paper: `${prefix}-缺货纸`,
+    specification: '160g',
+    productPaper: `160g${prefix}-缺货纸`,
+    outOfStock: true,
+  },
+  {
+    key: 'weight',
+    name: `${prefix}-缺克重`,
+    paper: `${prefix}-无克重`,
+    specification: null,
+    productPaper: null,
+    outOfStock: false,
+  },
+  {
+    key: 'long',
+    name: `${prefix}-长纸名`,
+    paper: longPaper,
+    specification: '160g',
+    productPaper: longPaper,
+    outOfStock: false,
+  },
 ];
 const productIds = fixtures.map(({ key }) => `${prefix}-p-${key}`);
 const materialIds = fixtures.map(({ key }) => `${prefix}-m-${key}`);
 let seeded = false;
+let craftWasActive: boolean | undefined;
 
 // Use the existing isolation guard before opening any database connection.
-// These are disposable catalog facts only; no orders, prices or ledgers change.
+// Prepare disposable catalog facts and restore the single foil craft activation afterward.
+// No orders, prices or ledgers change.
 async function connect() {
   const failure = e2eIsolationFailure();
   if (failure) throw new Error(failure);
@@ -39,17 +62,50 @@ test.beforeAll(async () => {
       ORDER BY p.id LIMIT 1
     `);
     const node = result.rows[0]?.categoryNodeId;
-    if (!node) throw new Error('Workbench E2E requires an active custom product category');
+    if (!node)
+      throw new Error(
+        'Workbench E2E requires an active custom product category',
+      );
     await client.query('BEGIN');
+    const craft = await client.query<{ isActive: boolean }>(
+      `SELECT "isActive" FROM "Craft" WHERE code = 'FLAT_FOIL_SINGLE'`,
+    );
+    craftWasActive = craft.rows[0]?.isActive;
+    if (craftWasActive === undefined) {
+      await client.query(
+        `INSERT INTO "Craft" (id, code, name, "isActive", "updatedAt") VALUES ($1, 'FLAT_FOIL_SINGLE', '专版单色平烫', true, NOW())`,
+        [`${prefix}-craft`],
+      );
+    }
+    await client.query(
+      `UPDATE "Craft" SET "isActive" = true WHERE code = 'FLAT_FOIL_SINGLE'`,
+    );
     for (const [index, fixture] of fixtures.entries()) {
-      await client.query(`
+      await client.query(
+        `
         INSERT INTO "Material" (id, code, name, category, specification, unit, "outOfStock", "updatedAt")
         VALUES ($1::text, $1::text, $2, 'PAPER', $3, '张', $4, NOW())
-      `, [materialIds[index], fixture.paper, fixture.specification, fixture.outOfStock]);
-      await client.query(`
+      `,
+        [
+          materialIds[index],
+          fixture.paper,
+          fixture.specification,
+          fixture.outOfStock,
+        ],
+      );
+      await client.query(
+        `
         INSERT INTO "Product" (id, name, category, "categoryNodeId", specification, "paperType", "paperMaterialId", "updatedAt")
         VALUES ($1, $2, 'CUSTOM_FLAT_FOIL', $3, '大号封90×165', $4, $5, NOW())
-      `, [productIds[index], fixture.name, node, fixture.productPaper, materialIds[index]]);
+      `,
+        [
+          productIds[index],
+          fixture.name,
+          node,
+          fixture.productPaper,
+          materialIds[index],
+        ],
+      );
     }
     await client.query('COMMIT');
     seeded = true;
@@ -67,8 +123,18 @@ test.afterAll(async () => {
   try {
     // Only retire this run's catalog fixtures; preserve any historical references.
     await client.query('BEGIN');
-    await client.query('UPDATE "Product" SET "isActive" = false WHERE id = ANY($1::text[])', [productIds]);
-    await client.query('UPDATE "Material" SET "isActive" = false WHERE id = ANY($1::text[])', [materialIds]);
+    await client.query(
+      'UPDATE "Product" SET "isActive" = false WHERE id = ANY($1::text[])',
+      [productIds],
+    );
+    await client.query(
+      'UPDATE "Material" SET "isActive" = false WHERE id = ANY($1::text[])',
+      [materialIds],
+    );
+    await client.query(
+      `UPDATE "Craft" SET "isActive" = $1 WHERE code = 'FLAT_FOIL_SINGLE'`,
+      [craftWasActive ?? false],
+    );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -78,39 +144,49 @@ test.afterAll(async () => {
   }
 });
 
-test('paper boundaries explain unavailable facts, preserve the long name and recover through real automatic quoting', async ({ page }) => {
+test('shared paper choices exclude unavailable facts, preserve a long name and recover through actual quotes', async ({
+  page,
+}) => {
   test.setTimeout(90_000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await login(page, { from: '/workbench', username: E2E_USERS.sales!.username, password: E2E_PASSWORD });
-  const product = page.getByRole('combobox', { name: '产品', exact: true });
-  const paper = page.getByRole('combobox', { name: '纸张', exact: true });
-  for (const [index, reason] of [
-    '所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料',
-    '所选纸张缺少克重，请选择其他产品或联系管理员补充资料',
-  ].entries()) {
-    await product.click();
-    await page.getByRole('option', { name: fixtures[index]!.name, exact: true }).click();
-    await expect(paper).toBeDisabled();
-    await expect(paper).toHaveAccessibleDescription(reason);
-    await expect(page.getByText('请选择纸张', { exact: true })).toHaveCount(0);
-    await expect(page.locator('p.text-3xl')).toHaveCount(0);
-    await page.getByRole('button', { name: '计算报价', exact: true }).click();
-    await expect(page.getByRole('region', { name: '报价计算', exact: true }).getByRole('alert')).toHaveText(reason);
+  await login(page, {
+    from: '/workbench',
+    username: E2E_USERS.sales!.username,
+    password: E2E_PASSWORD,
+  });
+  await page
+    .getByRole('group', { name: '工艺类型' })
+    .getByRole('button', { name: '专版烫金', exact: true })
+    .click();
+  const papers = page.getByRole('group', { name: '纸张材质', exact: true });
+  const unavailable = papers.getByRole('button', {
+    name: fixtures[0]!.paper,
+    exact: true,
+  });
+  if (await unavailable.count()) await expect(unavailable).toBeDisabled();
+  await expect(
+    papers.getByRole('button', { name: fixtures[1]!.paper, exact: true }),
+  ).toHaveCount(0);
+  await papers.getByRole('button', { name: longPaper, exact: true }).click();
+  const quote = page.getByRole('region', { name: '报价计算', exact: true });
+  await expect(quote.locator('p.text-3xl')).toHaveText('待核价');
+  await expect(quote.locator('summary')).toContainText('费用明细');
+  await papers.getByRole('button', { name: '珠光艳闪', exact: true }).click();
+  await page
+    .getByRole('group', { name: '克重', exact: true })
+    .getByRole('button', { name: '160g', exact: true })
+    .click();
+  const product = quote.getByRole('combobox', { name: '匹配产品' });
+  if (await product.count()) {
+    // Explicitly choose a real catalog option when the isolated fixtures overlap.
+    const id = await product
+      .locator('option[value]:not([value=""])')
+      .first()
+      .getAttribute('value');
+    expect(id).toBeTruthy();
+    await product.selectOption(id!);
   }
-  await product.click();
-  await page.getByRole('option', { name: fixtures[2]!.name, exact: true }).click();
-  await expect(paper).toHaveText(`160g${longPaper}`);
-  // The real engine reports unknown paper pricing; a schema rejection would
-  // have neither a price version nor this manual-pricing result.
-  await expect(page.locator('p.text-3xl')).toHaveText('待核价');
-  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
-  await expect(page.getByRole('region', { name: '报价计算', exact: true }).getByRole('alert')).toHaveCount(0);
-  await product.click();
-  await page.getByRole('option', { name: '专版烫金 · 大号封', exact: true }).click();
-  await paper.click();
-  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
-  await expect(page.locator('p.text-3xl')).toContainText('¥');
-  await expect(paper).toHaveAccessibleDescription('');
+  await expect(quote.locator('p.text-3xl')).toContainText('¥');
   expect(errors).toEqual([]);
 });

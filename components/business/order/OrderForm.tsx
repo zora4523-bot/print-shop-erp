@@ -1,4 +1,16 @@
 'use client';
+import { WorkbenchOrderTransfer } from './WorkbenchOrderTransfer';
+import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
+import { orderItemSelectionUpdate, type OrderItemSelectionChange } from '@/lib/order/order-item-selection';
+import { OrderItemProductField } from './order-form-b/OrderItemFields';
+import { externalOrderCatalogCandidates } from '@/lib/order/order-item-catalog';
+import { orderItemFieldOptions } from './order-item-field-options';
+import {
+  createBlankItem,
+  createExternalOrderItem,
+  normalizeExternalOrderItem,
+  resolveExternalOrderCraftIds,
+} from '@/lib/order/order-item-configuration';
 
 import { externalShipmentContactIssues } from '@/lib/order/external-shipment-contact';
 
@@ -73,8 +85,6 @@ import {
   OrderSubmissionReviewDialog,
   OrderSubmissionSuccess,
   type OrderFormBErrors,
-  type OrderFoilSwatchOption,
-  type OrderPaperSwatchOption,
   type OrderSubmissionReviewItem,
 } from './order-form-b';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
@@ -87,20 +97,9 @@ import {
   isCurrentOrderQuoteResponse,
 } from './create-order-quote-request';
 import {
-  externalOrderDefaultSpecification,
-  externalOrderDimensions,
   externalOrderPaperFromType,
-  externalOrderPapersForRoute,
-  externalOrderPaperType,
-  externalOrderProductStructure,
-  externalOrderSpecificationsForRoute,
   externalOrderSpecificationLabel,
-  externalOrderStyleName,
-  externalOrderWeightOptionsForSelection,
-  findExternalOrderCatalogProduct,
-  type ExternalOrderPaper,
   type ExternalOrderPaperKey,
-  type ExternalOrderPaperMaterial,
 } from './external-order-b-catalog';
 import {
   collectOrderFormGaps,
@@ -116,9 +115,7 @@ import {
 import {
   ORDER_PRICING_ROUTE_LABELS,
   isLegacyStockFoilCraft,
-  normalizeCraftIdsForPricingRoute,
   productCategoryMatchesPricingRoute,
-  requiredPricingCraftGroups,
 } from '@/lib/order/pricing-route';
 import { calculatePackagingBagCount } from '@/lib/order/packaging-bag-count';
 import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
@@ -183,6 +180,7 @@ export type ProductOption = {
 };
 
 type Props = {
+  workbenchTransferId?: string;
   crafts: readonly CraftOption[];
   products: readonly ProductOption[];
   customers?: readonly CustomerPartyOption[];
@@ -261,48 +259,6 @@ export function resolveOrderFormPendingState({
   };
 }
 
-function createBlankItem(
-  crafts: readonly CraftOption[],
-): CreateOrderInput['items'][number] {
-  return {
-    fig: 1,
-    name: '',
-    productId: null,
-    pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
-    productStructure: OrderProductStructure.UNSPECIFIED,
-    artworkVersion: null,
-    plateGroupId: null,
-    pricingGroup: null,
-    manualQuoteReason: null,
-    specification: null,
-    actualWidthMm: null,
-    actualHeightMm: null,
-    paperType: null,
-    paperWeightGsm: null,
-    quantity: 1000,
-    pack: 10,
-    crafts: normalizeCraftIdsForPricingRoute(
-      OrderItemPricingRoute.STOCK_BLANK,
-      [],
-      crafts,
-    ),
-    frontFoilColors: ['哑金'],
-    backFoilColors: [],
-    foilColors: ['哑金'],
-    foilTechnique: OrderFoilTechnique.FLAT,
-    hasLocalFoil: true,
-    printColors: [],
-    lamination: OrderLamination.NONE,
-    isDoubleSided: false,
-    isDoubleColor: false,
-    unitPrice: null,
-    fixedFee: null,
-    suggestedSubtotal: null,
-    priceOverrideReason: null,
-    remark: null,
-  };
-}
-
 function defaultPackagingGroups(itemCount: number): CreateOrderInput['packagingGroups'] {
   return Array.from({ length: itemCount }, (_, itemIndex) => ({
     name: null,
@@ -372,32 +328,6 @@ export function removeOrderItemRelations({
   };
 }
 
-function resolveExternalOrderCraftIds(
-  item: CreateOrderInput['items'][number],
-  crafts: readonly CraftOption[],
-): string[] {
-  const groups = requiredPricingCraftGroups({
-    route: item.pricingRoute,
-    foilColors: item.foilColors,
-    frontFoilColors: item.frontFoilColors,
-    backFoilColors: item.backFoilColors,
-    isDoubleSided: item.isDoubleSided,
-    foilTechnique: item.foilTechnique,
-  });
-  const resolved = groups.flatMap((group) => {
-    const craft = crafts.find(
-      (candidate) =>
-        candidate.code && group.anyOfCodes.includes(candidate.code),
-    );
-    return craft ? [craft.id] : [];
-  });
-  return normalizeCraftIdsForPricingRoute(
-    item.pricingRoute,
-    resolved,
-    crafts,
-  );
-}
-
 /**
  * Keep only genuinely additional production steps from the previous value and
  * replace every route-owned craft with the facts derived from the current
@@ -419,213 +349,6 @@ export function resolveInternalOrderCraftIds(
       ...additionalIds,
     ]),
   ];
-}
-
-function normalizeExternalOrderItem(args: {
-  item: CreateOrderInput['items'][number];
-  crafts: readonly CraftOption[];
-  products: readonly ProductOption[];
-  paperMaterials?: readonly ExternalOrderPaperMaterial[];
-  paperKey?: ExternalOrderPaperKey;
-  resetPaper?: boolean;
-  resetSpecification?: boolean;
-  preserveCustomSize?: boolean;
-}): CreateOrderInput['items'][number] {
-  const normalizeExternalFoilColor = (color: string) =>
-    ({
-      哑金: '亚金',
-      浅金: '浅色',
-      红金: '红色',
-      黑金: '黑色',
-      蓝金: '蓝色',
-      透明金: '透明色',
-    })[color] ?? color;
-  const route = args.item.pricingRoute;
-  const routePapers = externalOrderPapersForRoute(
-    args.products,
-    route,
-    args.paperMaterials,
-  );
-  const specifications = externalOrderSpecificationsForRoute(
-    args.products,
-    route,
-  );
-  const requestedSpecification = args.item.specification ?? '';
-  const specification =
-    !args.resetSpecification && specifications.includes(requestedSpecification)
-      ? requestedSpecification
-      : externalOrderDefaultSpecification(args.products, route) ||
-        specifications[0] ||
-        '';
-  const availableRoutePapers = routePapers.filter((candidate) =>
-    externalOrderWeightOptionsForSelection(
-      candidate,
-      route,
-      specification,
-    ).some((option) => !option.disabled),
-  );
-  const inferredPaper = externalOrderPaperFromType(
-    args.products,
-    args.item.paperType,
-    args.paperMaterials,
-  );
-  const requestedPaper = args.paperKey
-    ? availableRoutePapers.find((paper) => paper.key === args.paperKey)
-    : undefined;
-  const paper =
-    requestedPaper ??
-    (!args.resetPaper &&
-    inferredPaper &&
-    availableRoutePapers.some(
-      (candidate) => candidate.key === inferredPaper.key,
-    )
-      ? inferredPaper
-      : availableRoutePapers[0]);
-  if (!paper) return args.item;
-
-  const weightOptions = externalOrderWeightOptionsForSelection(
-    paper,
-    route,
-    specification,
-  );
-  const enabledWeights = weightOptions
-    .filter((option) => !option.disabled)
-    .map((option) => option.value);
-  const currentWeight = args.item.paperWeightGsm ?? enabledWeights[0] ?? null;
-  const configuredCurrentWeight = weightOptions.find(
-    (option) => option.value === currentWeight,
-  );
-  const weight =
-    currentWeight !== null &&
-    configuredCurrentWeight && !configuredCurrentWeight.disabled
-      ? currentWeight
-      : (enabledWeights[0] ?? currentWeight);
-  if (weight === null) return args.item;
-  const paperType = externalOrderPaperType(
-    paper,
-    route,
-    specification,
-    weight,
-  );
-  if (!paperType) return args.item;
-
-  let frontFoilColors = args.item.frontFoilColors.map(
-    normalizeExternalFoilColor,
-  );
-  let backFoilColors = args.item.backFoilColors.map(
-    normalizeExternalFoilColor,
-  );
-  let foilTechnique = args.item.foilTechnique;
-  let hasLocalFoil = args.item.hasLocalFoil;
-  let printColors = [...args.item.printColors];
-  let lamination = args.item.lamination;
-  if (route === OrderItemPricingRoute.STOCK_BLANK) {
-    frontFoilColors = frontFoilColors.slice(0, 3);
-    backFoilColors = backFoilColors.slice(0, 3);
-    foilTechnique = OrderFoilTechnique.FLAT;
-    hasLocalFoil = true;
-    printColors = [];
-    lamination = OrderLamination.NONE;
-  } else if (route === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL) {
-    frontFoilColors = frontFoilColors.slice(0, 3);
-    backFoilColors = [];
-    foilTechnique =
-      foilTechnique === OrderFoilTechnique.RELIEF ||
-      foilTechnique === OrderFoilTechnique.RAISED
-        ? foilTechnique
-        : OrderFoilTechnique.FLAT;
-    hasLocalFoil = false;
-    printColors = [];
-    lamination = OrderLamination.NONE;
-  } else if (route === OrderItemPricingRoute.COLOR_PRINT) {
-    frontFoilColors = frontFoilColors.slice(0, 1);
-    backFoilColors = [];
-    printColors = ['彩印'];
-    if (frontFoilColors.length === 0) {
-      foilTechnique = OrderFoilTechnique.NONE;
-      hasLocalFoil = false;
-    } else if (
-      foilTechnique === OrderFoilTechnique.NONE ||
-      foilTechnique === OrderFoilTechnique.UNSPECIFIED
-    ) {
-      foilTechnique = OrderFoilTechnique.FLAT;
-    }
-    lamination =
-      paper.key === 'COATED'
-        ? lamination === OrderLamination.NONE
-          ? OrderLamination.MATTE
-          : lamination
-        : OrderLamination.NONE;
-  }
-
-  const foilColors = [...new Set([...frontFoilColors, ...backFoilColors])];
-  const dimensions = externalOrderDimensions(specification);
-  const catalogProduct = findExternalOrderCatalogProduct(
-    args.products,
-    route,
-    paperType,
-    specification,
-  );
-  const routeLabel = ORDER_PRICING_ROUTE_LABELS[route];
-  const next: CreateOrderInput['items'][number] = {
-    ...args.item,
-    name: externalOrderStyleName({
-      routeLabel,
-      paperLabel: paper.label,
-      weight,
-      specification,
-    }),
-    productId: catalogProduct?.id ?? null,
-    pricingRoute: route,
-    productStructure: externalOrderProductStructure(specification),
-    specification,
-    actualWidthMm:
-      args.preserveCustomSize && args.item.actualWidthMm === null
-        ? null
-        : (dimensions?.widthMm ?? null),
-    actualHeightMm:
-      args.preserveCustomSize && args.item.actualHeightMm === null
-        ? null
-        : (dimensions?.heightMm ?? null),
-    paperType,
-    paperWeightGsm: weight,
-    frontFoilColors,
-    backFoilColors,
-    foilColors,
-    foilTechnique,
-    hasLocalFoil,
-    lamination,
-    printColors,
-    isDoubleSided: backFoilColors.length > 0,
-    isDoubleColor: frontFoilColors.length + backFoilColors.length > 1,
-    manualQuoteReason: null,
-    unitPrice: null,
-    fixedFee: null,
-    suggestedSubtotal: null,
-    priceOverrideReason: null,
-  };
-  return { ...next, crafts: resolveExternalOrderCraftIds(next, args.crafts) };
-}
-
-function createExternalOrderItem(
-  crafts: readonly CraftOption[],
-  products: readonly ProductOption[],
-  paperMaterials: readonly ExternalOrderPaperMaterial[],
-  defaultFoilColor?: string | null,
-): CreateOrderInput['items'][number] {
-  const blank = {
-    ...createBlankItem(crafts),
-    frontFoilColors: defaultFoilColor ? [defaultFoilColor] : [],
-    foilColors: defaultFoilColor ? [defaultFoilColor] : [],
-  };
-  return normalizeExternalOrderItem({
-    item: blank,
-    crafts,
-    products,
-    paperMaterials,
-    resetPaper: true,
-    resetSpecification: true,
-  });
 }
 
 function compactDecimal(value: string): string {
@@ -663,31 +386,6 @@ function externalQuoteComponentLabel(
     return `机烫金 ${foilSummary} · ${calculation}`;
   }
   return displayName;
-}
-
-function externalPaperSwatchTexture(
-  appearance: ExternalOrderPaper['appearance'],
-): OrderPaperSwatchOption['texture'] {
-  switch (appearance) {
-    case 'pearl':
-      return 'pearl';
-    case 'pearl-red':
-      return 'pearl-red';
-    case 'solid-red':
-      return 'solid-red';
-    case 'matte-red':
-      return 'matte-red';
-    case 'variegated':
-      return 'variegated-pearl';
-    case 'glitter':
-      return 'glitter-red';
-    case 'linen':
-      return 'linen-red';
-    case 'ice-white':
-      return 'ice-white';
-    case 'coated':
-      return 'coated-white';
-  }
 }
 
 const CHINESE_DIGITS = '零一二三四五六七八九';
@@ -1025,6 +723,7 @@ export function OrderForm({
   externalCreateOrderOptions,
   initialExternalPriceSnapshot,
   draftScope,
+  workbenchTransferId,
 }: Props) {
   const usesExternalSalesPricing = settlementType === OrderSettlementType.EXTERNAL_SALES;
   const router = useRouter();
@@ -1161,10 +860,14 @@ export function OrderForm({
   const internalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
   const itemFieldIdsRef = useRef<string[]>([]);
   const nextItemFigRef = useRef(2);
-  const localDraftStorageKey = localOrderFormDraftStorageKey(
+  const [transferReady, setTransferReady] = useState(!workbenchTransferId);
+  const existingLocalDraftKey = localOrderFormDraftStorageKey(
     draftScope,
     usesExternalSalesPricing,
   );
+  const localDraftStorageKey = workbenchTransferId
+    ? `${existingLocalDraftKey}:workbench:${workbenchTransferId}`
+    : existingLocalDraftKey;
   const localDraftPricingScope = usesExternalSalesPricing
     ? 'external-sales'
     : 'internal';
@@ -1196,7 +899,7 @@ export function OrderForm({
   const pendingLocalDraft = localDraftDecisionComplete
     ? null
     : storedLocalDraft;
-  const localDraftReady = hydrated && pendingLocalDraft === null;
+  const localDraftReady = hydrated && pendingLocalDraft === null && transferReady;
   const detectedLocalDraftError = !hydrated
     ? null
     : localDraftSnapshot === LOCAL_DRAFT_STORAGE_UNAVAILABLE
@@ -1255,7 +958,7 @@ export function OrderForm({
   }, [itemsArray.fields]);
 
   useEffect(() => {
-    if (!usesExternalSalesPricing || !pendingLocalDraft) return;
+    if (!usesExternalSalesPricing || !pendingLocalDraft || !transferReady) return;
     const timer = window.setTimeout(() => {
       nextItemFigRef.current = resolveNextOrderItemFig(
         pendingLocalDraft.values,
@@ -1272,7 +975,7 @@ export function OrderForm({
       setLocalDraftError(null);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [pendingLocalDraft, reset, usesExternalSalesPricing]);
+  }, [pendingLocalDraft, reset, usesExternalSalesPricing, transferReady]);
 
   useEffect(() => {
     if (!localDraftReady || pendingLocalDraft || createdDraft || !isDirty) {
@@ -1422,6 +1125,40 @@ export function OrderForm({
     } finally {
       setUploading(false);
     }
+  }
+
+  function applyWorkbenchTransfer(input: WorkbenchItemQuoteInput): string | null {
+    const requested = { ...createBlankItem(crafts), ...input.item };
+    const normalized = normalizeExternalOrderItem({
+      item: requested,
+      crafts,
+      products,
+      paperMaterials: externalCreateOrderOptions?.papers,
+      preserveCustomSize: true,
+    });
+    const facts = (item: CreateOrderInput['items'][number]) =>
+      JSON.stringify([
+        item.productId,
+        item.pricingRoute,
+        item.specification,
+        item.paperType,
+        item.paperWeightGsm,
+        item.frontFoilColors,
+        item.backFoilColors,
+        item.foilTechnique,
+        item.hasLocalFoil,
+        item.lamination,
+        item.actualWidthMm,
+        item.actualHeightMm,
+      ]);
+    if (facts(normalized) !== facts(requested))
+      return '产品资料已变更，请返回工作台重新选择';
+    const values = initialOrderFormValues(clientSubmissionId, normalized);
+    reset(values);
+    persistLocalDraftValues(values);
+    setLocalDraftDecisionComplete(true);
+    setTransferReady(true);
+    return null;
   }
 
   function restoreLocalDraft() {
@@ -1976,161 +1713,46 @@ export function OrderForm({
     );
   }
 
-  function changeExternalRoute(index: number, route: OrderItemPricingRoute) {
-    const current = getValues(`items.${index}`);
-    const defaultFoilColor =
-      externalCreateOrderOptions?.foilColors[0]?.name ?? null;
-    commitOrderFormBItem(
-      index,
-      {
-        ...current,
-        pricingRoute: route,
-        frontFoilColors:
-          route === OrderItemPricingRoute.COLOR_PRINT || !defaultFoilColor
-            ? []
-            : [defaultFoilColor],
-        backFoilColors: [],
-        foilColors:
-          route === OrderItemPricingRoute.COLOR_PRINT || !defaultFoilColor
-            ? []
-            : [defaultFoilColor],
-        foilTechnique:
-          route === OrderItemPricingRoute.COLOR_PRINT
-            ? OrderFoilTechnique.NONE
-            : OrderFoilTechnique.FLAT,
-        hasLocalFoil: route === OrderItemPricingRoute.STOCK_BLANK,
-        lamination: OrderLamination.NONE,
-      },
-      {
-        resetPaper: true,
-        resetSpecification: true,
-        preserveCustomSize: false,
-        internalMaterialChange: 'route',
-      },
-    );
-  }
-
-  function changeExternalPaper(index: number, paperKey: ExternalOrderPaperKey) {
-    const current = getValues(`items.${index}`);
-    const paper = externalOrderPapersForRoute(
+  function changeItemSelection(index: number, change: OrderItemSelectionChange) {
+    const selected = orderItemSelectionUpdate(
+      getValues(`items.${index}`),
+      change,
       products,
-      current.pricingRoute,
-      externalCreateOrderOptions?.papers,
-    ).find(
-      (candidate) => candidate.key === paperKey,
+      externalCreateOrderOptions,
     );
-    if (!paper) return;
-    const nextWeight =
-      externalOrderWeightOptionsForSelection(
-        paper,
-        current.pricingRoute,
-        current.specification ??
-          externalOrderDefaultSpecification(
-            products,
-            current.pricingRoute,
-          ),
-      ).find((option) => !option.disabled)?.value ?? current.paperWeightGsm;
-    commitOrderFormBItem(
-      index,
-      {
-        ...current,
-        paperWeightGsm: nextWeight,
-        lamination:
-          current.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
-          paper.key === 'COATED'
-            ? OrderLamination.MATTE
-            : OrderLamination.NONE,
-      },
-      {
-        paperKey,
-        preserveCustomSize: false,
-        internalMaterialChange: 'paper',
-      },
-    );
+    if (!selected) return;
+    if (change.type === 'customSize') {
+      setValue(`items.${index}`, selected.item, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    } else {
+      commitOrderFormBItem(index, selected.item, selected.options);
+    }
   }
-
-  function changeExternalWeight(index: number, weight: number) {
-    const current = getValues(`items.${index}`);
-    commitOrderFormBItem(
-      index,
-      { ...current, paperWeightGsm: weight },
-      { internalMaterialChange: 'weight' },
-    );
-  }
-
-  function changeExternalSpecification(index: number, specification: string) {
-    const current = getValues(`items.${index}`);
-    commitOrderFormBItem(
-      index,
-      { ...current, specification },
-      { internalMaterialChange: 'specification' },
-    );
-  }
-
-  function changeExternalFoilSides(
+  const changeExternalRoute = (index: number, value: OrderItemPricingRoute) =>
+    changeItemSelection(index, { type: 'route', value });
+  const changeExternalPaper = (index: number, value: string) =>
+    changeItemSelection(index, { type: 'paper', value });
+  const changeExternalWeight = (index: number, value: number) =>
+    changeItemSelection(index, { type: 'weight', value });
+  const changeExternalSpecification = (index: number, value: string) =>
+    changeItemSelection(index, { type: 'specification', value });
+  const changeExternalFoilSides = (
     index: number,
-    frontFoilColors: string[],
-    backFoilColors: string[],
-  ) {
-    const current = getValues(`items.${index}`);
-    commitOrderFormBItem(index, {
-      ...current,
-      frontFoilColors,
-      backFoilColors,
-      foilColors: [...new Set([...frontFoilColors, ...backFoilColors])],
-      isDoubleSided: backFoilColors.length > 0,
-      isDoubleColor: frontFoilColors.length + backFoilColors.length > 1,
-    });
-  }
-
-  function changeExternalFoilTechnique(
+    front: string[],
+    back: string[],
+  ) => changeItemSelection(index, { type: 'foil', front, back });
+  const changeExternalFoilTechnique = (
     index: number,
-    technique: OrderFoilTechnique,
-  ) {
-    const current = getValues(`items.${index}`);
-    commitOrderFormBItem(index, {
-      ...current,
-      foilTechnique:
-        current.foilTechnique === technique
-          ? OrderFoilTechnique.FLAT
-          : technique,
-    });
-  }
-
-  function changeExternalCustomSize(index: number, custom: boolean) {
-    const current = getValues(`items.${index}`);
-    const dimensions = externalOrderDimensions(current.specification ?? '');
-    const next = {
-      ...current,
-      actualWidthMm: custom ? null : (dimensions?.widthMm ?? null),
-      actualHeightMm: custom ? null : (dimensions?.heightMm ?? null),
-    };
-    setValue(`items.${index}`, next, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-  }
-
-  function changeExternalPrintFoilMode(
+    value: OrderFoilTechnique,
+  ) => changeItemSelection(index, { type: 'technique', value });
+  const changeExternalCustomSize = (index: number, value: boolean) =>
+    changeItemSelection(index, { type: 'customSize', value });
+  const changeExternalPrintFoilMode = (
     index: number,
-    mode: 'NONE' | 'PARTIAL' | 'FULL',
-  ) {
-    const current = getValues(`items.${index}`);
-    const hasFoil = mode !== 'NONE';
-    const configuredDefaultFoil =
-      externalCreateOrderOptions?.foilColors[0]?.name ?? '';
-    const selectedFoil = current.frontFoilColors[0] ?? configuredDefaultFoil;
-    commitOrderFormBItem(index, {
-      ...current,
-      frontFoilColors: hasFoil && selectedFoil ? [selectedFoil] : [],
-      backFoilColors: [],
-      foilColors: hasFoil && selectedFoil ? [selectedFoil] : [],
-      foilTechnique: hasFoil
-        ? OrderFoilTechnique.FLAT
-        : OrderFoilTechnique.NONE,
-      hasLocalFoil: mode === 'PARTIAL',
-    });
-  }
+    value: 'NONE' | 'PARTIAL' | 'FULL',
+  ) => changeItemSelection(index, { type: 'printFoil', value });
 
   function changeExternalPackagingMode(mode: OrderPackagingMode) {
     const items = getValues('items');
@@ -3032,7 +2654,7 @@ export function OrderForm({
               ? [{ label: '不加烫金', critical: true }]
               : []),
             ...(item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
-            paper?.key === 'COATED' &&
+            paper?.appearance === 'coated' &&
             item.lamination === OrderLamination.MATTE
               ? [{ label: '覆亚膜' }]
               : []),
@@ -3060,73 +2682,16 @@ export function OrderForm({
   const activeExternalItem =
     watchedItems[expandedItem] ?? watchedItems[0] ?? initialItem;
   const internalAdditionalCraftOptions = additionalOrderCraftOptions(crafts);
-  const activeExternalPaper = externalOrderPaperFromType(
-    products, activeExternalItem.paperType, externalCreateOrderOptions?.papers,
-  );
-  const externalPaperOptions: OrderPaperSwatchOption[] =
-    externalOrderPapersForRoute(
-      products,
-      activeExternalItem.pricingRoute,
-      externalCreateOrderOptions?.papers,
-    ).map(
-      (paper) => ({
-        value: paper.key,
-        label: paper.label,
-        texture: externalPaperSwatchTexture(paper.appearance),
-        disabled: (() => {
-          const weightOptions = externalOrderWeightOptionsForSelection(
-            paper,
-            activeExternalItem.pricingRoute,
-            activeExternalItem.specification ?? '',
-          );
-          return (
-            weightOptions.length === 0 ||
-            weightOptions.every((option) => option.disabled)
-          );
-        })(),
-      }),
-    );
-  const externalFoilOptions: OrderFoilSwatchOption[] =
-    externalCreateOrderOptions?.foilColors.map((foil) => ({
-      value: foil.name,
-      label: foil.name,
-      color: foil.displayColor,
-      imageSrc: foil.displayImage,
-    })) ?? [];
-  const externalWeightOptions = activeExternalPaper
-    ? externalOrderWeightOptionsForSelection(
-        activeExternalPaper,
-        activeExternalItem.pricingRoute,
-        activeExternalItem.specification ?? '',
-      )
-    : [];
-  const configuredExternalSpecifications = externalCreateOrderOptions
-    ? externalCreateOrderOptions.specifications
-        .filter((specification) =>
-          specification.productCategories.some((category) =>
-            productCategoryMatchesPricingRoute(
-              activeExternalItem.pricingRoute,
-              category,
-            ),
-          ),
-        )
-        .map((specification) => specification.label)
-    : externalOrderSpecificationsForRoute(
-        products,
-        activeExternalItem.pricingRoute,
-      );
-  const externalSpecificationOptions = configuredExternalSpecifications.map(
-    (specification) => ({
-    value: specification,
-    label: externalOrderSpecificationLabel(
-      specification,
-      activeExternalItem.pricingRoute,
-    ),
-    disabled:
-      activeExternalItem.pricingRoute === OrderItemPricingRoute.STOCK_BLANK &&
-      specification.includes('迷你') &&
-      activeExternalPaper?.key !== 'PEARL_FLASH',
-    }),
+  const {
+    activeExternalPaper,
+    externalPaperOptions,
+    externalFoilOptions,
+    externalWeightOptions,
+    externalSpecificationOptions,
+  } = orderItemFieldOptions(
+    activeExternalItem,
+    products,
+    externalCreateOrderOptions,
   );
   const activeMixedPackagingGroup = watchedPackagingGroups.find(
     (group) => group.mode === OrderPackagingMode.MIXED_STYLE,
@@ -3291,6 +2856,16 @@ export function OrderForm({
       noValidate
       aria-busy={pendingState.busy}
     >
+      {workbenchTransferId ? (
+        <WorkbenchOrderTransfer
+          id={workbenchTransferId}
+          scope={draftScope}
+          existingDraftKey={existingLocalDraftKey}
+          transferDraftKey={localDraftStorageKey}
+          onApply={applyWorkbenchTransfer}
+          onContinue={() => setTransferReady(true)}
+        />
+      ) : null}
       {pendingLocalDraft && !usesExternalSalesPricing ? (
         <LocalDraftPromptSection {...{
           pendingLocalDraft: pendingLocalDraft, restoreLocalDraft: restoreLocalDraft, discardLocalDraft: discardLocalDraft,
@@ -3403,49 +2978,67 @@ export function OrderForm({
               ) : undefined
             }
             materialExtras={
-              !usesExternalSalesPricing ? (
-                <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.name`}>款式名</Label>
-                    <Input
-                      id={`items.${expandedItem}.name`}
-                      className="mt-2 h-10"
-                      aria-invalid={Boolean(errors.items?.[expandedItem]?.name)}
-                      {...register(`items.${expandedItem}.name`)}
-                    />
+              <>
+                {!usesExternalSalesPricing ? (
+                  <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
+                    <div>
+                      <Label htmlFor={`items.${expandedItem}.name`}>款式名</Label>
+                      <Input
+                        id={`items.${expandedItem}.name`}
+                        className="mt-2 h-10"
+                        aria-invalid={Boolean(errors.items?.[expandedItem]?.name)}
+                        {...register(`items.${expandedItem}.name`)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor={`items.${expandedItem}.artworkVersion`}>
+                        稿件版本
+                      </Label>
+                      <Input
+                        id={`items.${expandedItem}.artworkVersion`}
+                        className="mt-2 h-10"
+                        {...register(`items.${expandedItem}.artworkVersion`)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor={`items.${expandedItem}.plateGroupId`}>
+                        版组 / 模具组 ID
+                      </Label>
+                      <Input
+                        id={`items.${expandedItem}.plateGroupId`}
+                        className="mt-2 h-10"
+                        {...register(`items.${expandedItem}.plateGroupId`)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor={`items.${expandedItem}.pricingGroup`}>
+                        专版计价组
+                      </Label>
+                      <Input
+                        id={`items.${expandedItem}.pricingGroup`}
+                        className="mt-2 h-10"
+                        {...register(`items.${expandedItem}.pricingGroup`)}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.artworkVersion`}>
-                      稿件版本
-                    </Label>
-                    <Input
-                      id={`items.${expandedItem}.artworkVersion`}
-                      className="mt-2 h-10"
-                      {...register(`items.${expandedItem}.artworkVersion`)}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.plateGroupId`}>
-                      版组 / 模具组 ID
-                    </Label>
-                    <Input
-                      id={`items.${expandedItem}.plateGroupId`}
-                      className="mt-2 h-10"
-                      {...register(`items.${expandedItem}.plateGroupId`)}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.pricingGroup`}>
-                      专版计价组
-                    </Label>
-                    <Input
-                      id={`items.${expandedItem}.pricingGroup`}
-                      className="mt-2 h-10"
-                      {...register(`items.${expandedItem}.pricingGroup`)}
-                    />
-                  </div>
-                </div>
-              ) : undefined
+                ) : null}
+                <OrderItemProductField
+                  value={activeExternalItem.productId}
+                  products={externalOrderCatalogCandidates(
+                    products,
+                    activeExternalItem.pricingRoute,
+                    activeExternalItem.paperType ?? '',
+                    activeExternalItem.specification ?? '',
+                  )}
+                  disabled={orderFormControlsDisabled}
+                  onChange={(productId) =>
+                    setValue(`items.${expandedItem}.productId`, productId, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                />
+              </>
             }
             pricingExtras={
               !usesExternalSalesPricing ? (

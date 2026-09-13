@@ -186,7 +186,10 @@ describe('OrderForm processing quote concurrency', () => {
   });
 
   it('offers only B business routes and reserves configuration-outside notes for internal create', () => {
-    expect(formBSource).toContain('options={ROUTE_OPTIONS}');
+    expect(formBSource).toContain('<OrderItemCraftFields');
+    const sharedSource = readFileSync(path.join(process.cwd(), 'components/business/order/order-form-b/OrderItemFields.tsx'), 'utf8');
+    expect(sharedSource).toContain('options={ROUTE_OPTIONS}');
+    expect(sharedSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
     expect(formBSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
     expect(source).toContain(
       'manualQuoteReason: usesExternalSalesPricing',

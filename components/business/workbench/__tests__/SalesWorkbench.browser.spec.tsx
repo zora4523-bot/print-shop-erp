@@ -4,15 +4,26 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
 import {
-  OrderProductStructure,
-  ProductCategory,
+  WORKBENCH_CATALOG,
+  WORKBENCH_CRAFTS,
+} from '@/lib/workbench/__tests__/item-fixtures';
+import {
+  OrderItemPricingRoute,
+  OrderLamination,
 } from '@/generated/prisma/enums';
-import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import type { WorkbenchQuoteResult } from '@/lib/workbench/quote';
 import '@/app/globals.css';
 
-const mocks = vi.hoisted(() => ({ quote: vi.fn() }));
-vi.mock('@/actions/workbench', () => ({ quoteWorkbenchAction: mocks.quote }));
+const mocks = vi.hoisted(() => ({ quote: vi.fn(), push: vi.fn() }));
+vi.mock('@/actions/workbench', () => ({
+  quoteWorkbenchItemAction: mocks.quote,
+}));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mocks.push, replace: mocks.push }),
+}));
+vi.mock('next/image', () => ({
+  default: ({ alt }: { alt: string }) => <span>{alt}</span>,
+}));
 vi.mock('next/link', () => ({
   __esModule: true,
   default: ({
@@ -26,53 +37,7 @@ vi.mock('next/link', () => ({
 import { SalesWorkbench } from '../SalesWorkbench';
 import { SALES_SCENARIOS } from '@/lib/workbench/knowledge';
 
-const options: ExternalCreateOrderOptions = {
-  products: [
-    {
-      id: 'custom',
-      code: null,
-      name: '大号专版烫金',
-      category: ProductCategory.CUSTOM_FLAT_FOIL,
-      specification: '大号封90×165',
-      paperType: '160g珠光艳闪',
-      paperMaterialId: null,
-      weight: 160,
-    },
-  ],
-  papers: [
-    {
-      id: 'paper',
-      code: 'paper',
-      name: '珠光艳闪',
-      specification: '160g',
-      unit: '张',
-      outOfStock: false,
-      sortOrder: 0,
-      weight: 160,
-    },
-  ],
-  specifications: [
-    {
-      specCode: 'large',
-      label: '大号封',
-      widthMm: 90,
-      heightMm: 165,
-      productStructure: OrderProductStructure.STANDARD_ENVELOPE,
-      productIds: ['custom'],
-      productCategories: [ProductCategory.CUSTOM_FLAT_FOIL],
-    },
-  ],
-  foilColors: [
-    {
-      id: 'gold',
-      code: 'gold',
-      name: '哑金',
-      displayColor: null,
-      displayImage: null,
-      sortOrder: 0,
-    },
-  ],
-};
+const options = WORKBENCH_CATALOG;
 const success: WorkbenchQuoteResult = {
   status: 'success',
   quote: {
@@ -108,21 +73,14 @@ afterEach(() => {
 function render(unavailable = false, catalog = options) {
   flushSync(() =>
     root.render(
-      <SalesWorkbench options={catalog} catalogUnavailable={unavailable} />,
+      <SalesWorkbench
+        options={catalog}
+        crafts={WORKBENCH_CRAFTS}
+        draftScope="sales"
+        catalogUnavailable={unavailable}
+      />,
     ),
   );
-}
-async function chooseProduct() {
-  await page.getByRole('combobox', { name: '产品', exact: true }).click();
-  await page.getByRole('option', { name: '大号专版烫金' }).click();
-  await selectFrontGold();
-}
-async function selectFrontGold() {
-  const button = page
-    .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
-    .getByRole('button', { name: '哑金' });
-  if (button.element().getAttribute('aria-pressed') !== 'true')
-    await button.click();
 }
 function geometry(width: number) {
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
@@ -175,33 +133,6 @@ describe('sales workbench responsive gates', () => {
       });
   }
 });
-it('calculates, invalidates a changed input and ignores an older in-flight response', async () => {
-  await page.viewport(1280, 800);
-  render();
-  await chooseProduct();
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  await page.getByRole('spinbutton', { name: '数量（个）' }).fill('2000');
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .not.toBeInTheDocument();
-  let resolve!: (result: WorkbenchQuoteResult) => void;
-  mocks.quote.mockImplementationOnce(
-    () =>
-      new Promise<WorkbenchQuoteResult>((done) => {
-        resolve = done;
-      }),
-  );
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await page.getByRole('spinbutton', { name: '数量（个）' }).fill('3000');
-  resolve(success);
-  await expect.element(page.getByText('条件已变更，待重新核价', { exact: true })).toBeVisible();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .not.toBeInTheDocument();
-});
 it('searches, clears empty results, copies a reply and displays failures', async () => {
   await page.viewport(393, 852);
   render();
@@ -231,87 +162,6 @@ it('keeps sales knowledge usable without the catalog', async () => {
   await expect.element(page.getByText('产品资料暂无法加载')).toBeVisible();
   await page.getByRole('button', { name: '话术应对', exact: true }).click();
   await expect.element(page.getByText('17 个应对场景')).toBeVisible();
-});
-
-it('selects and deselects every foil color on both sides and enforces independent three-color limits', async () => {
-  render(false, {
-    ...options,
-    foilColors: ['金', '银', '红', '蓝', '绿', '黑', '透明', '浅色'].map(
-      (name, index) => ({ ...options.foilColors[0]!, id: String(index), name }),
-    ),
-  });
-  for (const side of ['正面', '反面']) {
-    const group = page.getByRole('group', {
-      name: `${side}烫金颜色（最多 3 色）`,
-    });
-    if (side === '正面')
-      await group.getByRole('button', { name: '金', exact: true }).click();
-    for (const name of ['金', '银', '红', '蓝', '绿', '黑', '透明', '浅色']) {
-      const button = group.getByRole('button', { name, exact: true });
-      await button.click();
-      await expect.element(button).toHaveAttribute('aria-pressed', 'true');
-      await button.click();
-      await expect.element(button).toHaveAttribute('aria-pressed', 'false');
-    }
-    for (const name of ['金', '银', '红'])
-      await group.getByRole('button', { name, exact: true }).click();
-    await expect
-      .element(group.getByRole('button', { name: '蓝', exact: true }))
-      .toBeDisabled();
-    await group.getByRole('button', { name: '金', exact: true }).click();
-    await expect
-      .element(group.getByRole('button', { name: '蓝', exact: true }))
-      .toBeEnabled();
-    await group.getByRole('button', { name: '蓝', exact: true }).click();
-  }
-});
-
-it('selects every quantity and markup preset, preserves form across sections and rejects invalid numbers', async () => {
-  render();
-  await chooseProduct();
-  for (const quantity of [500, 1000, 2000, 5000, 10000, 50000]) {
-    await page
-      .getByRole('button', {
-        name: quantity.toLocaleString('zh-CN'),
-        exact: true,
-      })
-      .click();
-    await expect
-      .element(page.getByRole('spinbutton', { name: '数量（个）' }))
-      .toHaveValue(quantity);
-  }
-  for (const markup of [0, 20, 35, 50, 80]) {
-    await page
-      .getByRole('button', {
-        name: markup === 0 ? '不加价' : `+${markup}%`,
-        exact: true,
-      })
-      .click();
-    await expect
-      .element(page.getByRole('spinbutton', { name: '加工费加价比例（%）' }))
-      .toHaveValue(markup);
-  }
-  await page.getByRole('button', { name: '纸张与规格', exact: true }).click();
-  await page.getByRole('button', { name: '报价计算', exact: true }).click();
-  await expect
-    .element(page.getByRole('spinbutton', { name: '数量（个）' }))
-    .toHaveValue(50000);
-  for (const [label, values, valid] of [
-    ['数量（个）', ['', '0', '-1', '1.5', '10000000'], '1000'],
-    ['加工费加价比例（%）', ['', '-1', '101', '1.5'], '35'],
-  ] as const) {
-    for (const value of values) {
-      await page.getByRole('spinbutton', { name: label }).fill(value);
-      mocks.quote.mockClear();
-      await page.getByRole('button', { name: '计算报价', exact: true }).click();
-      expect(mocks.quote).not.toHaveBeenCalled();
-    }
-    await page.getByRole('spinbutton', { name: label }).fill(valid);
-  }
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  expect(mocks.quote).toHaveBeenCalledWith(
-    expect.objectContaining({ quantity: 1000, markup: 35 }),
-  );
 });
 
 it('filters every category, opens and closes all 17 scenarios and copies each exact reply', async () => {
@@ -360,540 +210,165 @@ it('filters every category, opens and closes all 17 scenarios and copies each ex
   }
 });
 
-it('offers initial specification and paper choices and recovers from server and network failures', async () => {
-  render();
-  for (const label of ['规格', '纸张'])
-    await expect
-      .element(page.getByRole('combobox', { name: label, exact: true }))
-      .toBeEnabled();
-  await chooseProduct();
-  mocks.quote.mockResolvedValueOnce({
-    status: 'error',
-    message: '请重新选择产品',
-  });
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect.element(page.getByText('请重新选择产品')).toBeVisible();
-  mocks.quote.mockRejectedValueOnce(new Error('offline'));
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect
-    .element(page.getByText('计算失败，请检查网络后重新计算'))
-    .toBeVisible();
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  await expect
-    .element(page.getByRole('link', { name: '创建工单' }))
-    .toHaveAttribute('href', '/orders/new');
-});
-
-it('clears dependent selections on route changes and clears foil colors when switching to no foil', async () => {
-  render(false, {
-    ...options,
-    products: [
-      ...options.products,
-      {
-        ...options.products[0]!,
-        id: 'print',
-        name: '彩印测试产品',
-        category: ProductCategory.COLOR_PRINT,
-      },
-    ],
-  });
-  await chooseProduct();
-  await page.getByRole('combobox', { name: '产品类型', exact: true }).click();
-  await page.getByRole('option', { name: '彩印', exact: true }).click();
-  await expect
-    .element(page.getByRole('combobox', { name: '产品', exact: true }))
-    .toHaveTextContent('彩印测试产品');
-  await expect
-    .element(page.getByRole('combobox', { name: '烫金方式', exact: true }))
-    .toHaveTextContent('无烫金');
-  await page.getByRole('combobox', { name: '产品', exact: true }).click();
-  await page.getByRole('option', { name: '彩印测试产品', exact: true }).click();
-  await page.getByRole('combobox', { name: '烫金方式', exact: true }).click();
-  await page.getByRole('option', { name: '平烫', exact: true }).click();
-  const gold = page
-    .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
-    .getByRole('button', { name: '哑金' });
-  await expect.element(gold).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('combobox', { name: '烫金方式', exact: true }).click();
-  await page.getByRole('option', { name: '无烫金', exact: true }).click();
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  expect(mocks.quote).toHaveBeenLastCalledWith(
-    expect.objectContaining({
-      productId: 'print',
-      foilTechnique: 'NONE',
-      frontFoilColors: [],
-      backFoilColors: [],
-    }),
-  );
-});
-
-it('starts with specification or paper, resolves matching products and resets without stale quotes', async () => {
-  render(false, {
-    ...options,
-    products: [
-      ...options.products,
-      {
-        ...options.products[0]!,
-        id: 'small',
-        name: '小号专版',
-        specification: '中号封80×115',
-        paperType: '230g红卡',
-        weight: 230,
-      },
-    ],
-  });
-  await page.getByRole('combobox', { name: '规格', exact: true }).click();
-  await page.getByRole('option', { name: '中号封80×115', exact: true }).click();
-  await expect
-    .element(page.getByRole('combobox', { name: '产品', exact: true }))
-    .toHaveTextContent('小号专版');
-  await expect
-    .element(page.getByRole('combobox', { name: '纸张', exact: true }))
-    .toHaveTextContent('230g红卡');
-  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
-  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
-  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
-  await expect
-    .element(page.getByRole('combobox', { name: '产品', exact: true }))
-    .toHaveTextContent('大号专版烫金');
-  await expect
-    .element(page.getByRole('combobox', { name: '规格', exact: true }))
-    .toHaveTextContent('大号封90×165');
-  await selectFrontGold();
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  expect(mocks.quote).toHaveBeenLastCalledWith(
-    expect.objectContaining({
-      productId: 'custom',
-      specification: '大号封90×165',
-      paperType: '160g珠光艳闪',
-    }),
-  );
-  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .not.toBeInTheDocument();
-  for (const label of ['规格', '纸张'])
-    await expect
-      .element(page.getByRole('combobox', { name: label, exact: true }))
-      .toBeEnabled();
-});
-
-it('keeps ambiguous paper matches unselected until a specification resolves the product', async () => {
-  render(false, {
-    ...options,
-    products: [
-      ...options.products,
-      {
-        ...options.products[0]!,
-        id: 'small',
-        name: '中号专版',
-        specification: '中号封80×115',
-      },
-    ],
-  });
-  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
-  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
-  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
-  await expect
-    .element(page.getByRole('combobox', { name: '产品', exact: true }))
-    .toHaveTextContent('请选择');
-  await expect.element(page.getByText(/有 2 个产品符合选择/)).toBeVisible();
-  await page.getByRole('combobox', { name: '规格', exact: true }).click();
-  await page.getByRole('option', { name: '中号封80×115', exact: true }).click();
-  await expect
-    .element(page.getByRole('combobox', { name: '产品', exact: true }))
-    .toHaveTextContent('中号专版');
-  await expect
-    .element(page.getByRole('combobox', { name: '纸张', exact: true }))
-    .toHaveTextContent('160g珠光艳闪');
-});
-
-it('automatically calculates complete input, debounces edits and keeps keyboard focus', async () => {
-  mocks.quote.mockImplementation(async (input: { quantity: number }) => ({
-    ...success,
-    quote: {
-      ...(success.status === 'success' ? success.quote : {}),
-      suggestedAmount: `${input.quantity}.00`,
-    },
-  }));
-  render();
-  await expect
-    .element(page.getByText('¥ 1,000.00', { exact: true }))
-    .toBeVisible();
-  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
-  mocks.quote.mockClear();
-  await new Promise((resolve) => setTimeout(resolve, 650));
-  expect(mocks.quote).not.toHaveBeenCalled();
-  await chooseProduct();
-  await expect
-    .element(page.getByText('¥ 1,000.00', { exact: true }))
-    .toBeVisible();
-  mocks.quote.mockClear();
-  const quantity = page.getByRole('spinbutton', { name: '数量（个）' });
-  await quantity.fill('2000');
-  await quantity.fill('3000');
-  await expect
-    .element(page.getByText('¥ 3,000.00', { exact: true }))
-    .toBeVisible();
-  expect(mocks.quote).toHaveBeenCalledTimes(1);
-  await expect.element(quantity).toHaveFocus();
-  await quantity.fill('');
-  await new Promise((resolve) => setTimeout(resolve, 650));
-  expect(mocks.quote).toHaveBeenCalledTimes(1);
-  await expect
-    .element(page.getByText('¥ 3,000.00', { exact: true }))
-    .not.toBeInTheDocument();
-  await quantity.fill('4000');
-  await expect
-    .element(page.getByText('¥ 4,000.00', { exact: true }))
-    .toBeVisible();
-});
-
-it('recalculates a different specification without resetting the form or choosing foil again', async () => {
-  render(false, {
-    ...options,
-    products: [
-      ...options.products,
-      {
-        ...options.products[0]!,
-        id: 'medium',
-        name: '中号专版',
-        specification: '中号封80×115',
-      },
-    ],
-  });
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  await page.getByRole('combobox', { name: '规格', exact: true }).click();
-  await page.getByRole('option', { name: '中号封80×115', exact: true }).click();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  expect(mocks.quote).toHaveBeenLastCalledWith(
-    expect.objectContaining({
-      productId: 'medium',
-      specification: '中号封80×115',
-      paperType: '160g珠光艳闪',
-      frontFoilColors: ['哑金'],
-    }),
-  );
-});
-
-it('preserves an explicitly chosen product when its paper and size are shared by another product', async () => {
-  render(false, {
-    ...options,
-    products: [
-      ...options.products,
-      { ...options.products[0]!, id: 'duplicate', name: '同规格另一产品' },
-    ],
-  });
-  await page.getByRole('combobox', { name: '产品', exact: true }).click();
-  await page
-    .getByRole('option', { name: '同规格另一产品', exact: true })
-    .click();
-  for (const [field, choice] of [
-    ['规格', '大号封90×165'],
-    ['纸张', '160g珠光艳闪'],
-  ]) {
-    await page.getByRole('combobox', { name: field!, exact: true }).click();
-    await page.getByRole('option', { name: choice!, exact: true }).click();
-  }
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  expect(mocks.quote).toHaveBeenLastCalledWith(
-    expect.objectContaining({ productId: 'duplicate' }),
-  );
-});
-
-it('explains the missing color and displays manual pricing reasons without retaining an old amount', async () => {
-  render();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  await page
-    .getByRole('group', { name: '正面烫金颜色（最多 3 色）' })
-    .getByRole('button', { name: '哑金' })
-    .click();
-  await expect
-    .element(page.getByText('请选择烫金颜色，单面单色请选择一种正面颜色', { exact: true }))
-    .toBeVisible();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .not.toBeInTheDocument();
-  mocks.quote.mockResolvedValue({
-    ...success,
-    quote: {
-      ...success.quote,
-      suggestedAmount: null,
-      baseAmount: null,
-      markupAmount: null,
-      needsPricing: true,
-      pricingReasons: [
-        '所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价',
-      ],
-    },
-  });
-  await selectFrontGold();
-  await expect
-    .element(
-      page.getByText(
-        '所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价',
-      ),
-    )
-    .toBeVisible();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .not.toBeInTheDocument();
-});
-
-it('manual calculation cancels the scheduled automatic request and repeated presets still recalculate', async () => {
-  render();
-  await chooseProduct();
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  await new Promise((resolve) => setTimeout(resolve, 650));
-  expect(mocks.quote).toHaveBeenCalledTimes(1);
-  await page.getByRole('button', { name: '1,000', exact: true }).click();
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  expect(mocks.quote).toHaveBeenCalledTimes(2);
-});
-
-it('ignores a late automatic response after newer input has already been priced', async () => {
-  const responses: Array<(value: WorkbenchQuoteResult) => void> = [];
-  mocks.quote.mockImplementation(
-    () =>
-      new Promise<WorkbenchQuoteResult>((resolve) => responses.push(resolve)),
-  );
-  render();
-  await chooseProduct();
-  await vi.waitFor(() => expect(responses).toHaveLength(1));
-  await page.getByRole('spinbutton', { name: '数量（个）' }).fill('2000');
-  await vi.waitFor(() => expect(responses).toHaveLength(2));
-  responses[1]!(success);
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  responses[0]!({ status: 'error', message: '旧条件错误' });
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  await expect
-    .element(page.getByText('¥ 492.75', { exact: true }))
-    .toBeVisible();
-  await expect.element(page.getByText('旧条件错误')).not.toBeInTheDocument();
-});
-
-it('announces automatic quote progress, invalidation and the latest amount without moving focus', async () => {
-  const responses: Array<(value: WorkbenchQuoteResult) => void> = [];
-  mocks.quote.mockImplementation(
-    () => new Promise<WorkbenchQuoteResult>((resolve) => responses.push(resolve)),
-  );
-  render();
-  const quote = page.getByRole('region', { name: '报价计算', exact: true });
-  const status = quote.getByRole('status');
-  await vi.waitFor(() => expect(responses).toHaveLength(1));
-  await expect.element(status).toHaveAttribute('aria-live', 'polite');
-  await expect.element(status).toHaveTextContent('正在按当前价格计算');
-  expect(status.element().closest('[aria-busy="true"]')).toBeNull();
-  responses[0]!(success);
-  await expect.element(status).toHaveTextContent('加工费参考报价 ¥ 492.75');
-
-  const quantity = page.getByRole('spinbutton', { name: '数量（个）' });
-  await quantity.fill('2000');
-  await expect.element(status).toHaveTextContent('条件已变更，待重新核价');
-  await expect.element(page.getByText('¥ 492.75', { exact: true })).not.toBeInTheDocument();
-  await expect.element(quantity).toHaveFocus();
-  await vi.waitFor(() => expect(responses).toHaveLength(2));
-  await expect.element(status).toHaveTextContent('正在按当前价格计算');
-  responses[1]!({
-    ...success,
-    quote: { ...success.quote, suggestedAmount: '985.50' },
-  });
-  await expect.element(status).toHaveTextContent('加工费参考报价 ¥ 985.50');
-  await expect.element(quantity).toHaveFocus();
-
-  await quantity.fill('');
-  await expect.element(status).toHaveTextContent('条件已变更，待重新核价');
-  await expect.element(status).toHaveTextContent('数量须为 1–9,999,999 的整数');
-  await expect.element(page.getByText('¥ 985.50', { exact: true })).not.toBeInTheDocument();
-  await new Promise((resolve) => setTimeout(resolve, 650));
-  expect(responses).toHaveLength(2);
-  await expect.element(quantity).toHaveFocus();
-});
-
-it('announces pricing failures and manual pricing once in the quote region', async () => {
-  render();
-  await expect.element(page.getByText('¥ 492.75', { exact: true })).toBeVisible();
-  const quote = page.getByRole('region', { name: '报价计算', exact: true });
-  mocks.quote.mockRejectedValueOnce(new Error('offline'));
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect.element(quote.getByRole('alert')).toHaveTextContent('计算失败，请检查网络后重新计算');
-  expect(quote.element().querySelectorAll('[aria-live]')).toHaveLength(1);
-
-  mocks.quote.mockResolvedValueOnce({
-    ...success,
-    quote: {
-      ...success.quote,
-      suggestedAmount: null,
-      baseAmount: null,
-      markupAmount: null,
-      needsPricing: true,
-      pricingReasons: ['专版烫金三色及以上需要管理员核价'],
-    },
-  });
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect.element(quote.getByRole('status')).toHaveTextContent('部分费用待核价');
-  await expect.element(quote.getByRole('status')).toHaveTextContent('专版烫金三色及以上需要管理员核价');
-  expect(quote.element().querySelectorAll('[aria-live]')).toHaveLength(1);
-});
-
-it('supports keyboard selection, escape focus return and sales disclosure copy', async () => {
-  render(false, {
-    ...options,
-    products: [
-      ...options.products,
-      {
-        ...options.products[0]!,
-        id: 'medium',
-        name: '中号专版',
-        specification: '中号封80×115',
-      },
-    ],
-  });
-  const product = page.getByRole('combobox', { name: '产品', exact: true });
-  (product.element() as HTMLElement).focus();
-  await userEvent.keyboard('{Enter}');
-  await expect.element(page.getByRole('option', { name: '中号专版', exact: true })).toBeVisible();
-  await userEvent.keyboard('{ArrowDown}{Enter}');
-  await expect.element(product).toHaveTextContent('中号专版');
-  await expect.element(product).toHaveFocus();
-  await expect
-    .element(page.getByRole('combobox', { name: '规格', exact: true }))
-    .toHaveTextContent('中号封80×115');
-  await userEvent.keyboard('{Enter}');
-  await expect.element(page.getByRole('option', { name: '中号专版', exact: true })).toBeVisible();
-  await userEvent.keyboard('{Escape}');
-  await expect.element(product).toHaveFocus();
-  await expect.element(product).toHaveAttribute('aria-expanded', 'false');
-
-  const sales = page.getByRole('button', { name: '话术应对', exact: true });
-  (sales.element() as HTMLElement).focus();
-  await userEvent.keyboard('{Enter}');
-  const scenario = SALES_SCENARIOS[0];
-  const summary = page.getByText(scenario.title, { exact: true }).element().closest('summary')!;
-  summary.focus();
-  await userEvent.keyboard('{Enter}');
-  await expect.element(page.getByText(scenario.reply, { exact: true })).toBeVisible();
-  const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
-  try {
-    const copy = page.getByRole('button', { name: `复制话术：${scenario.title}` });
-    (copy.element() as HTMLElement).focus();
-    await userEvent.keyboard('{Enter}');
-    expect(write).toHaveBeenCalledWith(scenario.reply);
-    summary.focus();
-    await userEvent.keyboard(' ');
-    await expect.element(page.getByText(scenario.reply, { exact: true })).not.toBeVisible();
-    expect(document.activeElement).toBe(summary);
-  } finally {
-    write.mockRestore();
-  }
-});
-
-it('accepts both quantity endpoints and a 100 percent markup', async () => {
-  render();
-  const quantity = page.getByRole('spinbutton', { name: '数量（个）' });
-  const markup = page.getByRole('spinbutton', { name: '加工费加价比例（%）' });
-  await markup.fill('100');
-  for (const value of [1, 9_999_999]) {
-    await quantity.fill(String(value));
-    await page.getByRole('button', { name: '计算报价', exact: true }).click();
-    await expect.element(page.getByText('¥ 492.75', { exact: true })).toBeVisible();
-    expect(mocks.quote).toHaveBeenLastCalledWith(
-      expect.objectContaining({ quantity: value, markup: 100 }),
-    );
-  }
-});
-
-it('explains an unavailable linked paper and resumes quoting after choosing an available product', async () => {
-  render(false, {
-    ...options,
-    products: [
-      ...options.products,
-      {
-        ...options.products[0]!,
-        id: 'unavailable',
-        name: '关联缺货纸张产品',
-        paperMaterialId: 'unavailable-paper',
-      },
-      {
-        ...options.products[0]!,
-        id: 'weightless',
-        name: '关联未录克重纸张产品',
-        paperType: null,
-        weight: null,
-        paperMaterialId: 'weightless-paper',
-      },
-    ],
-    papers: [
-      ...options.papers,
-      { ...options.papers[0]!, id: 'unavailable-paper', outOfStock: true },
-      {
-        ...options.papers[0]!,
-        id: 'weightless-paper',
-        name: '未录克重纸张',
-        weight: null,
-        specification: null,
-      },
-    ],
-  });
-  await expect.element(page.getByText('¥ 492.75', { exact: true })).toBeVisible();
-  const product = page.getByRole('combobox', { name: '产品', exact: true });
-  mocks.quote.mockClear();
-  await product.click();
-  await page.getByRole('option', { name: '关联缺货纸张产品', exact: true }).click();
-  await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toBeDisabled();
-  await expect.element(page.getByText('所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料').first()).toBeVisible();
-  await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toHaveAccessibleDescription('所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料');
-  await expect.element(page.getByText('¥ 492.75', { exact: true })).not.toBeInTheDocument();
-  await new Promise((resolve) => setTimeout(resolve, 650));
-  expect(mocks.quote).not.toHaveBeenCalled();
-  await product.click();
-  await page.getByRole('option', { name: '大号专版烫金', exact: true }).click();
-  await expect.element(page.getByText('¥ 492.75', { exact: true })).toBeVisible();
-  expect(mocks.quote).toHaveBeenLastCalledWith(
-    expect.objectContaining({ productId: 'custom', paperType: '160g珠光艳闪' }),
-  );
-  await product.click();
-  await page.getByRole('option', { name: '关联未录克重纸张产品', exact: true }).click();
-  await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toBeDisabled();
-  await expect.element(page.getByText('所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料')).not.toBeInTheDocument();
-  await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toHaveAccessibleDescription('所选纸张缺少克重，请选择其他产品或联系管理员补充资料');
-  await expect.element(page.getByText('请选择纸张', { exact: true })).not.toBeInTheDocument();
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect.element(page.getByRole('alert')).toHaveTextContent('所选纸张缺少克重，请选择其他产品或联系管理员补充资料');
-  mocks.quote.mockClear();
-  await new Promise((resolve) => setTimeout(resolve, 650));
-  expect(mocks.quote).not.toHaveBeenCalled();
-  await product.click();
-  await page.getByRole('option', { name: '大号专版烫金', exact: true }).click();
-  await expect.element(page.getByText('¥ 492.75', { exact: true })).toBeVisible();
-  await expect.element(page.getByRole('combobox', { name: '纸张', exact: true })).toHaveAccessibleDescription('');
-});
-
 it('shows a paper weight once when its specification already contains that weight', async () => {
   render();
   await page.getByRole('button', { name: '纸张与规格', exact: true }).click();
-  const materials = page.getByRole('region', { name: '纸张与规格', exact: true });
-  await expect.element(materials.getByText('160g', { exact: true })).toBeVisible();
-  await expect.element(materials.getByText('160g · 160g', { exact: true })).not.toBeInTheDocument();
+  const materials = page.getByRole('region', {
+    name: '纸张与规格',
+    exact: true,
+  });
+  await expect
+    .element(materials.getByText('160g', { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(materials.getByText('160g · 160g', { exact: true }))
+    .not.toBeInTheDocument();
+});
+
+it('uses order conditions, calculates automatically and changes markup without requesting a new base', async () => {
+  render();
+  await expect.poll(() => mocks.quote.mock.calls.length).toBe(1);
+  expect(mocks.quote.mock.calls[0]![0].item).toMatchObject({
+    pricingRoute: 'STOCK_BLANK',
+    quantity: 1000,
+    productId: 'stock',
+    paperWeightGsm: 160,
+  });
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  await page.getByRole('spinbutton', { name: '加工费加价比例（%）' }).fill('0');
+  await expect
+    .element(page.getByRole('status').getByText('¥ 365.00', { exact: true }))
+    .toBeVisible();
+  expect(mocks.quote).toHaveBeenCalledTimes(1);
+  await page
+    .getByRole('spinbutton', { name: '加工费加价比例（%）' })
+    .fill('100');
+  await expect
+    .element(page.getByText('¥ 730.00', { exact: true }))
+    .toBeVisible();
+  expect(mocks.quote).toHaveBeenCalledTimes(1);
+  await page
+    .getByRole('spinbutton', { name: '加工费加价比例（%）' })
+    .fill('-1');
+  await expect.element(page.getByText('请输入 0–100 的整数')).toBeVisible();
+  await expect
+    .element(page.getByText('¥ 730.00', { exact: true }))
+    .not.toBeInTheDocument();
+});
+it('uses shared lamination and printed-foil selectors without losing the selected material', async () => {
+  render();
+  await page
+    .getByRole('group', { name: '工艺类型' })
+    .getByRole('button', { name: '彩印', exact: true })
+    .click();
+  await page
+    .getByRole('group', { name: '覆膜' })
+    .getByRole('button', { name: '触感膜', exact: true })
+    .click();
+  await page
+    .getByRole('group', { name: '叠加烫金' })
+    .getByRole('button', { name: '局部烫金', exact: true })
+    .click();
+  await expect
+    .poll(() => mocks.quote.mock.calls.at(-1)?.[0]?.item)
+    .toMatchObject({
+      pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+      lamination: OrderLamination.SOFT_TOUCH,
+      hasLocalFoil: true,
+      paperWeightGsm: 200,
+    });
+  await page
+    .getByRole('group', { name: '叠加烫金' })
+    .getByRole('button', { name: '专版烫金', exact: true })
+    .click();
+  await expect
+    .poll(() => mocks.quote.mock.calls.at(-1)?.[0]?.item.hasLocalFoil)
+    .toBe(false);
+});
+it('rejects invalid quantities and stale asynchronous results, preserves focus, and retries failures', async () => {
+  render();
+  await expect.poll(() => mocks.quote.mock.calls.length).toBe(1);
+  let resolve!: (result: WorkbenchQuoteResult) => void;
+  mocks.quote.mockImplementationOnce(
+    () =>
+      new Promise<WorkbenchQuoteResult>((done) => {
+        resolve = done;
+      }),
+  );
+  const quantity = page.getByRole('spinbutton', { name: '数量', exact: true });
+  await quantity.fill('2000');
+  await expect.poll(() => mocks.quote.mock.calls.length).toBe(2);
+  await quantity.fill('0');
+  resolve(success);
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .not.toBeInTheDocument();
+  await expect.element(quantity).toHaveFocus();
+  mocks.quote.mockRejectedValueOnce(new Error('offline'));
+  await quantity.fill('9999999');
+  await expect
+    .element(page.getByText('计算失败，请检查网络后重新计算'))
+    .toBeVisible();
+  await page.getByRole('button', { name: '重试报价' }).click();
+  await expect
+    .element(page.getByText('¥ 492.75', { exact: true }))
+    .toBeVisible();
+  expect(mocks.quote.mock.calls.at(-1)?.[0].item.quantity).toBe(9999999);
+});
+it('keeps missing prices unknown and passes only item conditions to order creation', async () => {
+  mocks.quote.mockResolvedValue({
+    status: 'success',
+    quote: {
+      ...success.quote,
+      baseAmount: null,
+      needsPricing: true,
+      pricingReasons: ['该组合待管理员核价'],
+    },
+  });
+  render();
+  await expect.element(page.getByText('该组合待管理员核价')).toBeVisible();
+  await expect
+    .element(page.getByRole('status').getByText('待核价', { exact: true }))
+    .toBeVisible();
+  await page.getByRole('button', { name: '按此款式创建工单' }).click();
+  expect(mocks.push).toHaveBeenCalledWith(
+    expect.stringMatching(/^\/orders\/new\?fromWorkbench=/),
+  );
+  const id = new URL(
+    mocks.push.mock.calls[0]![0],
+    'http://localhost',
+  ).searchParams.get('fromWorkbench');
+  const transferred = JSON.parse(
+    window.sessionStorage.getItem(`workbench-order:sales:${id}`)!,
+  );
+  expect(transferred.item).toMatchObject({
+    productId: 'stock',
+    quantity: 1000,
+  });
+  expect(transferred.item).not.toHaveProperty('suggestedSubtotal');
+  expect(transferred).not.toHaveProperty('markup');
+});
+it('resolves duplicated products only after explicit selection and never silently switches them', async () => {
+  const catalog = {
+    ...options,
+    products: [
+      ...options.products,
+      { ...options.products[0]!, id: 'stock2', name: '局部烫金二' },
+    ],
+  };
+  render(false, catalog);
+  const select = page.getByRole('combobox', { name: '匹配产品' });
+  await expect.element(select).toHaveValue('');
+  expect(mocks.quote).not.toHaveBeenCalled();
+  await userEvent.selectOptions(select, 'stock2');
+  await expect
+    .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.productId)
+    .toBe('stock2');
+  await page.getByRole('spinbutton', { name: '数量', exact: true }).fill('500');
+  await expect
+    .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.quantity)
+    .toBe(500);
+  expect(mocks.quote.mock.calls.at(-1)?.[0].item.productId).toBe('stock2');
 });

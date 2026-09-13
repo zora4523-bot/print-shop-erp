@@ -1,4 +1,6 @@
 'use client';
+import { Group, FieldLabel, FieldError, RequiredMark, PillPicker } from './OrderFieldPrimitives';
+import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
 
 import { OrderReceiverContactFields } from '../OrderReceiverContactFields';
 
@@ -7,7 +9,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type ClipboardEventHandler,
@@ -32,11 +33,9 @@ import { formatDesignFileSize } from '../design-file-display';
 import { LocalDesignImagePreview } from '../LocalDesignImagePreview';
 import { prepareDesignFile } from '../design-upload-client';
 import {
-  OrderFoilSwatchPicker,
   type OrderFoilSwatchOption,
 } from './OrderFoilSwatchPicker';
 import {
-  OrderPaperSwatchPicker,
   type OrderPaperSwatchOption,
 } from './OrderPaperSwatchPicker';
 
@@ -50,22 +49,6 @@ const FOIL_OPTIONS: readonly OrderFoilSwatchOption[] = [
   { value: '透明色', label: '透明色', tone: 'clear' },
   { value: '绿色', label: '绿色', tone: 'green' },
 ];
-
-const ROUTE_OPTIONS = [
-  { value: OrderItemPricingRoute.STOCK_BLANK, label: '局部烫金' },
-  {
-    value: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
-    label: '专版烫金',
-  },
-  { value: OrderItemPricingRoute.COLOR_PRINT, label: '彩印' },
-] as const;
-
-const LAMINATION_OPTIONS = [
-  { value: OrderLamination.MATTE, label: '亚膜' },
-  { value: OrderLamination.SOFT_TOUCH, label: '触感膜' },
-  { value: OrderLamination.NEW_GLOSS, label: '新光膜' },
-  { value: OrderLamination.LASER, label: '雷射' },
-] as const;
 
 function StickyOrderFormRail({ rail }: { rail: ReactNode }) {
   return (
@@ -175,156 +158,6 @@ export type OrderFormBProps = {
   onReceiverPhoneChange: (value: string) => void;
   onSfCollectChange: (value: boolean) => void;
 };
-
-type PillOption<T extends string | number> = {
-  value: T;
-  label: string;
-  detail?: string;
-  disabled?: boolean;
-};
-
-function RequiredMark() {
-  return (
-    <span aria-hidden="true" className="ml-0.5 font-bold text-destructive">
-      *
-    </span>
-  );
-}
-
-function FieldLabel({
-  htmlFor,
-  children,
-  required = false,
-}: {
-  htmlFor?: string;
-  children: ReactNode;
-  required?: boolean;
-}) {
-  return (
-    <label
-      htmlFor={htmlFor}
-      className="mb-2 block text-xs font-bold tracking-[0.16em] text-muted-foreground"
-    >
-      {children}
-      {required ? <RequiredMark /> : null}
-    </label>
-  );
-}
-
-function FieldError({ id, children }: { id?: string; children?: string }) {
-  if (!children) return null;
-  return (
-    <p
-      id={id}
-      role="alert"
-      className="mt-1.5 flex items-start gap-1.5 text-xs font-semibold text-destructive"
-    >
-      <span
-        aria-hidden="true"
-        className="mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full bg-destructive text-xs text-destructive-foreground"
-      >
-        !
-      </span>
-      <span>{children}</span>
-    </p>
-  );
-}
-
-function PillPicker<T extends string | number>({
-  id,
-  label,
-  value,
-  options,
-  disabled,
-  required,
-  note,
-  error,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: T;
-  options: readonly PillOption<T>[];
-  disabled?: boolean;
-  required?: boolean;
-  note?: string;
-  error?: string;
-  onChange: (value: T) => void;
-}) {
-  const messageId = `${id}-message`;
-  return (
-    <fieldset
-      className="min-w-0"
-      aria-invalid={Boolean(error)}
-      aria-describedby={error ? messageId : undefined}
-    >
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
-        {label}
-        {required ? <RequiredMark /> : null}
-        {note ? (
-          <span className="ml-2 text-xs tracking-normal text-destructive">
-            {note}
-          </span>
-        ) : null}
-      </legend>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <Button
-              key={String(option.value)}
-              id={`${id}-${String(option.value)}`}
-              type="button"
-              variant="outline"
-              aria-pressed={selected}
-              disabled={disabled || option.disabled}
-              className={cn(
-                'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-sm font-semibold',
-                option.detail && 'flex-col gap-0 py-1',
-                selected &&
-                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
-              )}
-              onClick={() => onChange(option.value)}
-            >
-              <span>{option.label}</span>
-              {option.detail ? (
-                <span className="text-xs font-medium opacity-60">
-                  {option.detail}
-                </span>
-              ) : null}
-            </Button>
-          );
-        })}
-      </div>
-      <FieldError id={messageId}>{error}</FieldError>
-    </fieldset>
-  );
-}
-
-function Group({
-  title,
-  children,
-  first = false,
-}: {
-  title: string;
-  children: ReactNode;
-  first?: boolean;
-}) {
-  return (
-    <section
-      aria-label={title}
-      className={cn(
-        'border-t pt-4',
-        first ? 'border-0 pt-0' : 'mt-4',
-      )}
-    >
-      <h2 className="mb-3.5 text-xs font-extrabold tracking-[0.2em] text-muted-foreground">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
 
 function nextPendingId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -531,15 +364,6 @@ function DesignFileBox({
   );
 }
 
-function isCopperPaper(
-  paperKey: string | null,
-  options: readonly OrderPaperSwatchOption[],
-): boolean {
-  const option = options.find((entry) => entry.value === paperKey);
-  const text = `${paperKey ?? ''} ${option?.label ?? ''}`.toLowerCase();
-  return text.includes('铜版') || text.includes('coated') || text.includes('tbz');
-}
-
 export function parseExternalReceiverDisplay(raw: string): {
   address: string;
   platformCode: string | null;
@@ -593,186 +417,6 @@ export function parseExternalReceiverDisplay(raw: string): {
     receiverName: inferredName || null,
     receiverPhone: phone || null,
   };
-}
-
-function currentPrintFoilMode(
-  item: CreateOrderInput['items'][number],
-): 'NONE' | 'PARTIAL' | 'FULL' {
-  if (
-    item.frontFoilColors.length === 0 &&
-    item.backFoilColors.length === 0
-  ) {
-    return 'NONE';
-  }
-  return item.hasLocalFoil === false ? 'FULL' : 'PARTIAL';
-}
-
-function FoilSideFields({
-  item,
-  direct,
-  maxSelections,
-  disabled,
-  error,
-  idStem,
-  foilOptions,
-  onFoilSidesChange,
-  onBackFoilToggle,
-}: {
-  item: CreateOrderInput['items'][number];
-  direct: boolean;
-  maxSelections: number;
-  disabled?: boolean;
-  error?: string;
-  idStem: string;
-  foilOptions: readonly OrderFoilSwatchOption[];
-  onFoilSidesChange: (front: string[], back: string[]) => void;
-  onBackFoilToggle: (enabled: boolean) => void;
-}) {
-  const front = item.frontFoilColors;
-  const back = item.backFoilColors;
-  const backEnabled = back.length > 0 || item.isDoubleSided;
-
-  if (direct) {
-    return (
-      <div className="mt-5">
-        <OrderFoilSwatchPicker
-          id={`${idStem}-foil-front`}
-          label="烫金颜色"
-          value={front}
-          options={foilOptions}
-          maxSelections={maxSelections}
-          minimumSelections={0}
-          disabled={disabled}
-          error={error}
-          onChange={(nextFront) => onFoilSidesChange(nextFront, [])}
-        />
-      </div>
-    );
-  }
-
-  const sameAsFront =
-    backEnabled &&
-    front.length === back.length &&
-    front.every((color, index) => color === back[index]);
-
-  return (
-    <fieldset className="mt-5 min-w-0" aria-label="烫金颜色">
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
-        烫金颜色
-      </legend>
-      <div className="rounded-xl bg-muted/30 p-3.5">
-        <div className="mb-2.5 flex items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">
-            正面
-          </span>
-        </div>
-        <OrderFoilSwatchPicker
-          id={`${idStem}-foil-front`}
-          label=""
-          value={front}
-          options={foilOptions}
-          maxSelections={maxSelections}
-          minimumSelections={0}
-          disabled={disabled}
-          onChange={(nextFront) => onFoilSidesChange(nextFront, back)}
-        />
-      </div>
-      <div
-        className={cn(
-          'mt-2 rounded-xl bg-muted/30 p-3.5',
-          !backEnabled && 'bg-muted/15',
-        )}
-      >
-        <div className={cn('flex items-center gap-2', backEnabled && 'mb-2.5')}>
-          <span className="text-sm font-semibold text-foreground">
-            反面
-          </span>
-          <span className="text-xs font-semibold text-muted-foreground">
-            {backEnabled
-              ? sameAsFront
-                ? '与正面同色'
-                : back.join(' + ') || '未选'
-              : '不烫'}
-          </span>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            aria-pressed={backEnabled}
-            disabled={disabled}
-            className="ml-auto text-xs font-semibold"
-            onClick={() => onBackFoilToggle(!backEnabled)}
-          >
-            {backEnabled ? '取消反面' : '＋ 加烫反面'}
-          </Button>
-        </div>
-        {backEnabled ? (
-          <OrderFoilSwatchPicker
-            id={`${idStem}-foil-back`}
-            label=""
-            value={back}
-            options={foilOptions}
-            maxSelections={maxSelections}
-            minimumSelections={0}
-            disabled={disabled}
-            onChange={(nextBack) => onFoilSidesChange(front, nextBack)}
-          />
-        ) : null}
-      </div>
-      <FieldError>{error}</FieldError>
-    </fieldset>
-  );
-}
-
-function SpecialTechnique({
-  id,
-  value,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  value: OrderFoilTechnique;
-  disabled?: boolean;
-  onChange: (value: OrderFoilTechnique) => void;
-}) {
-  const options = [
-    { value: OrderFoilTechnique.RELIEF, label: '浮雕' },
-    { value: OrderFoilTechnique.RAISED, label: '激凸' },
-  ] as const;
-  return (
-    <fieldset className="mt-5">
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
-        特殊工艺
-      </legend>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <Button
-              key={option.value}
-              id={`${id}-${option.value}`}
-              type="button"
-              variant="outline"
-              aria-pressed={selected}
-              disabled={disabled}
-              className={cn(
-                'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-sm font-semibold',
-                selected &&
-                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
-              )}
-              onClick={() =>
-                onChange(
-                  selected ? OrderFoilTechnique.FLAT : option.value,
-                )
-              }
-            >
-              {option.label}
-            </Button>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
 }
 
 export function OrderFormB({
@@ -861,11 +505,6 @@ export function OrderFormB({
   const { rootRef, handledErrorFocusRequestRef, issueFocusTimerRef, removeButtonRef,
     styleNavRef, restoreDeleteFocusRef, cancelIssueFocus } = useOrderFormFocus(itemFields.length);
 
-  const printFoilMode = useMemo(
-    () => (item ? currentPrintFoilMode(item) : 'NONE'),
-    [item],
-  );
-  const copperPaper = isCopperPaper(paperKey, paperOptions);
   const parsedReceiver = parseExternalReceiverDisplay(values.receiverAddress);
   const receiverPhoneInitialValue =
     values.receiverPhone || parsedReceiver.receiverPhone || '';
@@ -932,19 +571,6 @@ export function OrderFormB({
   }, [errorFocusRequest, fieldErrors?.summary, focusIssue, handledErrorFocusRequestRef]);
 
   if (!item || !field) return null;
-
-  const directFoil =
-    item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ||
-    item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT;
-  const showsFoil =
-    item.pricingRoute !== OrderItemPricingRoute.COLOR_PRINT ||
-    printFoilMode !== 'NONE';
-  const showsSpecialTechnique =
-    item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ||
-    (item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
-      printFoilMode === 'FULL');
-  const customSizeSelected =
-    item.actualWidthMm === null && item.actualHeightMm === null;
 
   const putFile = (file: File, expectedType: DesignFileType) => {
     const prepared = prepareDesignFile(file, {
@@ -1165,184 +791,49 @@ export function OrderFormB({
             {orderExtras}
           </Group>
 
-          <Group title={`工艺 · 第 ${safeActiveIndex + 1} 款`}>
-            <PillPicker
-              id={`${uid}-route`}
-              label="工艺类型"
-              value={item.pricingRoute}
-              options={ROUTE_OPTIONS}
-              disabled={disabled}
-              error={itemErrors?.route}
-              onChange={onRouteChange}
-            />
-
-            {item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT ? (
-              <div className="mt-5 space-y-5">
-                {copperPaper ? (
-                  <PillPicker
-                    id={`${uid}-lamination`}
-                    label="覆膜"
-                    value={item.lamination}
-                    options={LAMINATION_OPTIONS}
-                    disabled={disabled}
-                    onChange={onLaminationChange}
-                  />
-                ) : null}
-                <PillPicker
-                  id={`${uid}-print-foil`}
-                  label="叠加烫金"
-                  value={printFoilMode}
-                  options={[
-                    { value: 'NONE', label: '无' },
-                    { value: 'PARTIAL', label: '局部烫金' },
-                    { value: 'FULL', label: '专版烫金' },
-                  ]}
-                  disabled={disabled}
-                  onChange={onPrintFoilModeChange}
-                />
-              </div>
-            ) : null}
-
-            {showsFoil ? (
-              <FoilSideFields
-                item={item}
-                direct={directFoil}
-                maxSelections={
-                  item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT ? 1 : 3
-                }
-                disabled={disabled}
-                error={itemErrors?.foilColors}
-                idStem={`${uid}-style-${safeActiveIndex}`}
-                foilOptions={foilOptions}
-                onFoilSidesChange={onFoilSidesChange}
-                onBackFoilToggle={onBackFoilToggle}
-              />
-            ) : null}
-
-            {showsSpecialTechnique ? (
-              <SpecialTechnique
-                id={`${uid}-special-technique`}
-                value={item.foilTechnique}
-                disabled={disabled}
-                onChange={onFoilTechniqueChange}
-              />
-            ) : null}
-          </Group>
-
-          <Group title="材料">
-            {materialExtras}
-            <OrderPaperSwatchPicker
-              id={`${uid}-paper`}
-              value={paperKey}
-              options={paperOptions}
-              disabled={disabled}
-              error={itemErrors?.paper}
-              onChange={onPaperChange}
-            />
-
-            <div className="mt-5">
-              <PillPicker
-                id={`${uid}-weight`}
-                label="克重"
-                value={item.paperWeightGsm ?? 0}
-                options={weightOptions.map((option) => ({
-                  ...option,
-                  label: `${option.value}g`,
-                }))}
-                disabled={disabled}
-                error={itemErrors?.weight}
-                onChange={onWeightChange}
-              />
-              {allowManualWeight &&
-              item.pricingRoute ===
-                OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
-                <div className="mt-2">
-                  <div className="flex max-w-[11rem] items-center gap-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={2000}
-                      step={1}
-                      aria-label="手动输入克重"
-                      placeholder="手动输入"
-                      disabled={disabled}
-                      value={
-                        item.paperWeightGsm !== null &&
-                        !weightOptions.some((option) => option.value === item.paperWeightGsm)
-                          ? item.paperWeightGsm
-                          : ''
-                      }
-                      onChange={(event) => {
-                        const next = Number(event.target.value);
-                        if (Number.isInteger(next) && next > 0) {
-                          onWeightChange(next);
-                        }
-                      }}
-                    />
-                    <span className="text-xs font-bold text-muted-foreground">g</span>
-                  </div>
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    手动输入克重转管理员终价
-                  </p>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="mt-5">
-              <PillPicker
-                id={`${uid}-specification`}
-                label="规格"
-                value={item.specification ?? ''}
-                options={specificationOptions}
-                disabled={disabled}
-                error={itemErrors?.specification}
-                onChange={onSpecificationChange}
-              />
-              {item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK &&
-              paperKey !== 'PEARL_FLASH' ? (
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  迷你封仅珠光纸艳闪可做
-                </p>
-              ) : null}
-              {allowCustomSize &&
-              item.pricingRoute ===
-                OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
-                <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-                  <Checkbox
-                    checked={customSizeSelected}
-                    disabled={disabled}
-                    aria-label="改尺寸（转管理员终价）"
-                    onCheckedChange={onCustomSizeChange}
-                  />
-                  改尺寸（转管理员终价）
-                </label>
-              ) : null}
-            </div>
-          </Group>
+          <OrderItemCraftFields
+            uid={uid}
+            item={item}
+            title={`工艺 · 第 ${safeActiveIndex + 1} 款`}
+            paperKey={paperKey}
+            paperOptions={paperOptions}
+            foilOptions={foilOptions}
+            disabled={disabled}
+            itemErrors={itemErrors}
+            onRouteChange={onRouteChange}
+            onLaminationChange={onLaminationChange}
+            onPrintFoilModeChange={onPrintFoilModeChange}
+            onFoilSidesChange={onFoilSidesChange}
+            onBackFoilToggle={onBackFoilToggle}
+            onFoilTechniqueChange={onFoilTechniqueChange}
+          />
+          <OrderItemMaterialFields
+            uid={uid}
+            item={item}
+            disabled={disabled}
+            itemErrors={itemErrors}
+            materialExtras={materialExtras}
+            paperKey={paperKey}
+            paperOptions={paperOptions}
+            weightOptions={weightOptions}
+            specificationOptions={specificationOptions}
+            allowManualWeight={allowManualWeight}
+            allowCustomSize={allowCustomSize}
+            onPaperChange={onPaperChange}
+            onWeightChange={onWeightChange}
+            onSpecificationChange={onSpecificationChange}
+            onCustomSizeChange={onCustomSizeChange}
+          />
 
           <Group title="数量与包装">
             <div className="grid grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-              <div>
-                <FieldLabel htmlFor={`${uid}-quantity`} required>
-                  数量
-                </FieldLabel>
-                <Input
-                  id={`${uid}-quantity`}
-                  type="number"
-                  min={1}
-                  step={1}
-                  required
-                  aria-required="true"
-                  aria-invalid={Boolean(itemErrors?.quantity)}
-                  disabled={disabled}
-                  value={item.quantity || ''}
-                  className="h-10"
-                  onChange={(event) =>
-                    onQuantityChange(Number.parseInt(event.target.value, 10) || 0)
-                  }
-                />
-                <FieldError>{itemErrors?.quantity}</FieldError>
-              </div>
+              <OrderItemQuantityField
+                uid={uid}
+                item={item}
+                disabled={disabled}
+                itemErrors={itemErrors}
+                onQuantityChange={onQuantityChange}
+              />
               <div>
                 <FieldLabel htmlFor={`${uid}-units-per-bag`} required>
                   每包数量

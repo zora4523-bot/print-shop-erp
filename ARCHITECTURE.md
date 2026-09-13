@@ -14,7 +14,7 @@ applies_to: repository source at last_verified
 ## 系统边界
 
 销售资料与单款快速计价入口为 `/workbench`，页面和 action 均以 `order:create` 授权。
-目录读取复用建单目录；计算复用 `calculateCreateOrderQuoteFromCatalogInTx`，只向浏览器投影对客加工费明细和 Decimal 加价结果。
+目录、款式字段和选择联动复用建单模块；当前报价 action 接收建单同形单款事实，通过 `calculateCreateOrderQuoteFromCatalogInTx` 投影加工费。加价在浏览器用纯 Decimal 函数计算，不进入订单金额。临时款式带入使用账号隔离的 sessionStorage，建单页重新校验目录并按原流程报价、提交；独立本地草稿键保护已有工单。
 销售知识独立于目录加载，不创建订单或新的价格账本，详见 [销售工作台](./docs/销售工作台.md)。
 
 红包印刷 ERP 是一个 Next.js App Router 应用，覆盖工单、生产、外协、库存、采购、定价、账单、薪资、通知和运维页面。当前运行时由以下部分组成：

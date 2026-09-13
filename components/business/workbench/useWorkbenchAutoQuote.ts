@@ -7,14 +7,12 @@ import {
   useState,
   type RefObject,
 } from 'react';
-import { quoteWorkbenchAction } from '@/actions/workbench';
-import type {
-  WorkbenchQuoteInput,
-  WorkbenchQuoteResult,
-} from '@/lib/workbench/quote';
+import { quoteWorkbenchItemAction } from '@/actions/workbench';
+import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
+import type { WorkbenchQuoteResult } from '@/lib/workbench/quote';
 
 export function useWorkbenchAutoQuote(
-  input: WorkbenchQuoteInput | null,
+  input: WorkbenchItemQuoteInput | null,
   heading: RefObject<HTMLHeadingElement | null>,
   invalidMessage?: string | null,
 ) {
@@ -37,7 +35,8 @@ export function useWorkbenchAutoQuote(
       if (!key) {
         setResult({
           status: 'error',
-          message: invalidMessage ?? '请选好产品、规格、纸张和工艺，并填写有效数量及加价比例',
+          message:
+            invalidMessage ?? '请选好产品、规格、纸张和工艺，并填写有效数量',
         });
         return;
       }
@@ -45,8 +44,8 @@ export function useWorkbenchAutoQuote(
       setPending(true);
       setResult(null);
       try {
-        const response = await quoteWorkbenchAction(
-          JSON.parse(key) as WorkbenchQuoteInput,
+        const response = await quoteWorkbenchItemAction(
+          JSON.parse(key) as WorkbenchItemQuoteInput,
         );
         if (generation.current === request) {
           setResult(response);

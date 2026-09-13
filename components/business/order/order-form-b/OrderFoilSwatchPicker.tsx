@@ -269,7 +269,7 @@ export function OrderFoilSwatchPicker({
                         aria-label={`将第 ${index + 1} 色 ${color} 上移`}
                         data-order-action="up"
                         disabled={disabled || index === 0}
-                        className="size-5 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"
+                        className="size-11 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"
                         onBlur={onBlur}
                         onClick={() =>
                           onChange(
@@ -290,7 +290,7 @@ export function OrderFoilSwatchPicker({
                         aria-label={`将第 ${index + 1} 色 ${color} 下移`}
                         data-order-action="down"
                         disabled={disabled || index === selected.length - 1}
-                        className="size-5 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"
+                        className="size-11 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"
                         onBlur={onBlur}
                         onClick={() =>
                           onChange(
@@ -313,7 +313,7 @@ export function OrderFoilSwatchPicker({
                     aria-label={`移除第 ${index + 1} 色 ${color}`}
                     data-order-action="remove"
                     disabled={disabled || selected.length <= minimumSelections}
-                    className="size-5 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"
+                    className="size-11 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"
                     onBlur={onBlur}
                     onClick={() =>
                       onChange(

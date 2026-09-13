@@ -15,7 +15,14 @@ export const metadata = {
   title: '新建工单',
 };
 
-export default async function NewOrderPage() {
+export default async function NewOrderPage({
+  searchParams,
+}: { searchParams?: Promise<{ fromWorkbench?: string }> } = {}) {
+  const transfer = (await searchParams)?.fromWorkbench;
+  const workbenchTransferId =
+    typeof transfer === 'string' && /^[\da-f-]{36}$/i.test(transfer)
+      ? transfer
+      : undefined;
   const { user } = await requireSession();
   const canCreate =
     user.role === Role.SALES ||
@@ -26,7 +33,9 @@ export default async function NewOrderPage() {
   const settlementType = settlementTypeForOrderCreator(user.role);
   const [crafts, customers, createOrderBootstrap] = await Promise.all([
     listActiveCraftOrderOptions(),
-    user.role === Role.SALES ? listSalesCustomerOptions(user) : listCustomerPartyOptions(),
+    user.role === Role.SALES
+      ? listSalesCustomerOptions(user)
+      : listCustomerPartyOptions(),
     // Every chargeable create path uses the same published catalog snapshot.
     // Role changes who may request manual pricing, not which paper/spec/craft
     // dictionary the form renders.
@@ -36,6 +45,8 @@ export default async function NewOrderPage() {
   return (
     <div className="space-y-4">
       <OrderForm
+        key={workbenchTransferId ?? 'new'}
+        workbenchTransferId={workbenchTransferId}
         draftScope={user.id}
         crafts={crafts}
         products={createOrderBootstrap.options.products}

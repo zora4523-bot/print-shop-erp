@@ -1,0 +1,100 @@
+import {
+  ProductCategory,
+  OrderProductStructure,
+} from '@/generated/prisma/enums';
+import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
+export const WORKBENCH_CRAFTS = [
+  'FLAT_FOIL_PARTIAL',
+  'FLAT_FOIL_SINGLE',
+  'FLAT_FOIL_DOUBLE',
+  'FLAT_FOIL_TRIPLE',
+  'COATED_COLOR_PRINT',
+  'COATED_COLOR_PRINT_FOIL',
+  'EMBOSS',
+  'BUMP',
+].map((code) => ({
+  id: code,
+  code,
+  name: code,
+  isOutsource: false,
+  isLowFrequency: false,
+}));
+export const WORKBENCH_CATALOG: ExternalCreateOrderOptions = {
+  products: [
+    {
+      id: 'stock',
+      code: null,
+      name: '局部烫金',
+      category: ProductCategory.BLANK_STOCK,
+      specification: '大号封90×165',
+      paperType: '160g珠光艳闪',
+      paperMaterialId: 'paper',
+      weight: 160,
+    },
+    {
+      id: 'custom',
+      code: null,
+      name: '专版烫金',
+      category: ProductCategory.CUSTOM_FLAT_FOIL,
+      specification: '大号封90×165',
+      paperType: null,
+      paperMaterialId: null,
+      weight: null,
+    },
+    {
+      id: 'color',
+      code: null,
+      name: '彩印',
+      category: ProductCategory.COLOR_PRINT,
+      specification: '大号封90×165',
+      paperType: '200g铜版纸',
+      paperMaterialId: 'coated',
+      weight: 200,
+    },
+  ],
+  papers: [
+    {
+      id: 'paper',
+      code: 'PAPER',
+      name: '珠光艳闪',
+      specification: '160g',
+      unit: '张',
+      outOfStock: false,
+      sortOrder: 0,
+      weight: 160,
+    },
+    {
+      id: 'coated',
+      code: 'COATED',
+      name: '铜版纸',
+      specification: '200g',
+      unit: '张',
+      outOfStock: false,
+      sortOrder: 1,
+      weight: 200,
+    },
+  ],
+  specifications: [
+    {
+      specCode: 'large',
+      label: '大号封90×165',
+      widthMm: 90,
+      heightMm: 165,
+      productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+      productIds: ['stock', 'custom', 'color'],
+      productCategories: [
+        ProductCategory.BLANK_STOCK,
+        ProductCategory.CUSTOM_FLAT_FOIL,
+        ProductCategory.COLOR_PRINT,
+      ],
+    },
+  ],
+  foilColors: ['亚金', '红色', '蓝色', '黑色'].map((name, index) => ({
+    id: `foil-${index}`,
+    code: `FOIL-${index}`,
+    name,
+    displayColor: null,
+    displayImage: null,
+    sortOrder: index,
+  })),
+};
