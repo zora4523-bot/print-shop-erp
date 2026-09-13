@@ -16,8 +16,9 @@ applies_to: local development and repository validation
 
 当日志出现 `unstable_catchError is not a function`，先比较
 `package.json` 的 Next.js 版本和 `node -p "require('next/package.json').version"`。
-本项目锁定 16.2.4，错误边界使用该版本的 `unstable_catchError`；
-16.3 的对应 API 已改名，不能只替换本地安装版本。
+当前主线锁定 16.3.4，错误边界使用 `catchError` 和 `retry`。
+旧版 16.2.4 分支使用 `unstable_catchError` 和 `unstable_retry`；
+切换分支后应按目标分支锁文件安装依赖，不能只替换 API 或本地安装版本。
 
 停止当前项目的开发服务器，将 `node_modules` 和 `.next` 移到仓库外备份，
 执行 `pnpm install --frozen-lockfile`，再核对安装版本并启动服务。
