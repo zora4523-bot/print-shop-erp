@@ -333,3 +333,11 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 下载返回 200；未登录 401；无权限或任务不存在 404；未就绪或工单内容变化 409；
 文件过期或读取失败 503；非法 view/id 400。所有响应 `Cache-Control: private, no-store`。
 下载前后重新检查所有工单内容标识及创建者权限，任意变化阻止整份文件下载。
+
+### 空白封纸张与规格价格（2026-09-13）
+
+`actions/blank-paper.ts` 的 `addBlankPaperAction` 同时要求 `dict:price:manage`、`material:manage`、`dict:product:manage`。输入包括 `priceBookId`、ISO `expectedUpdatedAt`、`paper`（`mode: new` 的名称与整数克重，或 `mode: existing` 的纸张 ID）及 1–6 个唯一 `specifications`。规格 key 为 `mini / square / mid / large / west-mid / west-large`；`amount` 为非负、最多四位小数的十进制字符串或 `null`。
+
+事务内锁定价格写入，验证外部销售加工费草稿、更新时间、纸张身份与启用/缺货状态、产品分类和规格唯一性，创建或复用纸张/产品并保存草稿价格与审计。`null` 仅保留可建单组合，不生成价格规则；零元生成真实零价规则。重复价格格拒绝覆盖，价格修改沿用既有草稿矩阵 Action。返回 `{status:'success',paperId,priceBookId}` 或可预期业务错误 `{status:'error',message}`；权限与未知系统异常不吞掉。
+
+销售目录在保存后刷新，自动计价仍只消费已发布价目；历史工单不重算。`updateMaterial` 拒绝直接修改已关联建单产品的纸张名称、规格克重或分类，防止破坏产品与纸张身份。流程与验证范围见 [空白封纸张规格管理](./docs/空白封纸张规格管理-20260913.md)。

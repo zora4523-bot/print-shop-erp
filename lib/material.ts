@@ -397,6 +397,18 @@ export async function updateMaterial(
       throw new MaterialUnitChangeError(MATERIAL_UNIT_IMMUTABLE_MESSAGE);
     }
 
+    if (
+      target.category === MaterialCategory.PAPER &&
+      (target.name !== data.name ||
+        target.specification !== data.specification ||
+        target.category !== data.category) &&
+      (await tx.product.count({ where: { paperMaterialId: id } })) > 0
+    ) {
+      throw new MaterialInvariantError(
+        '纸张已用于建单产品，名称、克重或分类不可直接修改；请新增纸张并配置价格',
+      );
+    }
+
     return tx.material.update({
       where: { id },
       data: {

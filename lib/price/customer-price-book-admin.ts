@@ -1,6 +1,14 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
+import {
+  addBlankPaperSchema,
+  blankPaperFact,
+  blankSpecificationKey,
+  BLANK_SPECIFICATIONS,
+  type AddBlankPaperInput,
+} from './blank-paper';
+import { canonicalizeCreateOrderPaperFact } from './create-order/canonical-facts';
 import { fixedCustomTierIssue } from './fixed-custom-tiers';
 import customTierRelease from '../../config/customer-price-books/custom-tiers-20260913.json';
 import {
@@ -3466,4 +3474,268 @@ export async function publishCustomerPriceBookDraft(
     if (error instanceof CustomerPriceBookAdminError) throw error;
     throw mapConstraintError(error) ?? error;
   }
+}
+
+/** Add catalog combinations and their draft prices under the same pricing write lock. */
+export async function addBlankPaperDraft(
+  raw: AddBlankPaperInput,
+  actor: AuditActor,
+  now: Date = new Date(),
+): Promise<{ paperId: string; priceBookId: string }> {
+  const input = addBlankPaperSchema.parse(raw);
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const book = await tx.customerPriceBook.findUnique({
+      where: { id: input.priceBookId },
+    });
+    const workflow = book ? draftWorkflow(book.notes) : null;
+    if (
+      !book ||
+      !workflow ||
+      book.isActive ||
+      book.purpose !== 'PROCESSING' ||
+      book.settlementType !== EXTERNAL_SETTLEMENT
+    ) {
+      throw new CustomerPriceBookAdminError(
+        '加工费草稿不可编辑，请返回价格表重新发起调价',
+      );
+    }
+    if (book.updatedAt.toISOString() !== input.expectedUpdatedAt) {
+      throw new CustomerPriceBookAdminError('草稿已变化，请刷新后重新提交');
+    }
+    const rules = await tx.customerPriceRule.findMany({
+      where: { priceBookId: book.id, exclusiveGroup: 'STOCK_BASE' },
+      include: { product: { include: { categoryNode: true } } },
+    });
+    const anchor = rules.find(
+      (rule) =>
+        rule.product?.isActive &&
+        rule.product.categoryNode.isActive &&
+        rule.product.category === 'BLANK_STOCK',
+    );
+    if (!anchor?.product)
+      throw new CustomerPriceBookAdminError(
+        '空白封产品分类未配置，请先配置可建单产品组合',
+      );
+    const papers = await tx.material.findMany({ where: { category: 'PAPER' } });
+    const existingPaperId =
+      input.paper.mode === 'existing' ? input.paper.id : null;
+    const selected = papers.find((paper) => paper.id === existingPaperId);
+    const fact =
+      input.paper.mode === 'new'
+        ? canonicalizeCreateOrderPaperFact(input.paper.name, input.paper.weight)
+        : selected
+          ? blankPaperFact(selected)
+          : null;
+    if (!fact || fact.paperWeightGsm > 2000)
+      throw new CustomerPriceBookAdminError(
+        '纸张名称或克重不完整，请先完善纸张资料',
+      );
+    const label = `${fact.paperWeightGsm}g${fact.paperType}`;
+    const matches = papers.filter((paper) => {
+      const candidate = blankPaperFact(paper);
+      return (
+        candidate?.paperType === fact.paperType &&
+        candidate.paperWeightGsm === fact.paperWeightGsm
+      );
+    });
+    if (matches.length > 1)
+      throw new CustomerPriceBookAdminError(
+        '同名同克重纸张存在重复记录，请先在纸张管理中处理',
+      );
+    let paper = selected ?? matches[0];
+    if (paper && (!paper.isActive || paper.outOfStock))
+      throw new CustomerPriceBookAdminError(
+        '纸张已停用或缺货，请先在纸张管理中处理',
+      );
+    if (
+      input.paper.mode === 'existing' &&
+      (!selected || matches[0]?.id !== selected.id)
+    ) {
+      throw new CustomerPriceBookAdminError('纸张资料已变化，请刷新后重新选择');
+    }
+    const hash = createHash('sha256').update(label).digest('hex').slice(0, 20);
+    if (!paper) {
+      paper = await tx.material.create({
+        data: {
+          code: `PAPER-${hash}`,
+          name: label,
+          specification: `${fact.paperWeightGsm}g`,
+          category: 'PAPER',
+          unit: '张',
+        },
+      });
+      await writeAuditLogInTx(tx, {
+        actor,
+        action: 'CREATE',
+        entityType: 'Material',
+        entityId: paper.id,
+        before: null,
+        after: paper,
+      });
+    }
+    const products = await tx.product.findMany({
+      where: { category: 'BLANK_STOCK' },
+      include: { categoryNode: true },
+    });
+    const createdRuleIds: string[] = [];
+    for (const entry of input.specifications) {
+      const spec = BLANK_SPECIFICATIONS.find((spec) => spec.key === entry.key)!;
+      const duplicate = rules.some((rule) => {
+        const condition = parseCustomerRuleCondition(
+          rule.triggerCondition,
+        ).condition;
+        return (
+          condition?.paperTypes?.some((name) => {
+            const candidate = canonicalizeCreateOrderPaperFact(name);
+            return (
+              candidate?.paperType === fact.paperType &&
+              candidate.paperWeightGsm === fact.paperWeightGsm
+            );
+          }) &&
+          condition.specifications?.some(
+            (name) => blankSpecificationKey(name) === entry.key,
+          )
+        );
+      });
+      if (duplicate)
+        throw new CustomerPriceBookAdminError(
+          `${spec.label}已有价格记录，请返回价格表修改`,
+        );
+      const matchingProducts = products.filter((product) => {
+        const candidate = product.paperType
+          ? canonicalizeCreateOrderPaperFact(product.paperType, product.weight)
+          : null;
+        return (
+          (product.paperMaterialId === paper.id ||
+            (candidate?.paperType === fact.paperType &&
+              candidate.paperWeightGsm === fact.paperWeightGsm)) &&
+          blankSpecificationKey(product.specification) === entry.key
+        );
+      });
+      if (matchingProducts.length > 1)
+        throw new CustomerPriceBookAdminError(
+          `${spec.label}有重复产品组合，请先在产品组合中处理`,
+        );
+      let product = matchingProducts[0];
+      const productFact = product?.paperType
+        ? canonicalizeCreateOrderPaperFact(product.paperType, product.weight)
+        : null;
+      if (
+        product &&
+        (!product.isActive ||
+          !product.categoryNode.isActive ||
+          productFact?.paperType !== fact.paperType ||
+          productFact.paperWeightGsm !== fact.paperWeightGsm ||
+          (product.paperMaterialId && product.paperMaterialId !== paper.id))
+      ) {
+        throw new CustomerPriceBookAdminError(
+          `${spec.label}产品组合已停用或纸张关联不一致，请先检查产品组合`,
+        );
+      }
+      if (!product) {
+        product = await tx.product.create({
+          data: {
+            code: `BLANK-${hash}-${spec.key}`,
+            name: `${label} ${spec.label}`,
+            category: 'BLANK_STOCK',
+            categoryNodeId: anchor.product.categoryNodeId,
+            paperMaterialId: paper.id,
+            paperType: label,
+            weight: fact.paperWeightGsm,
+            specification: spec.specification,
+          },
+          include: { categoryNode: true },
+        });
+        await writeAuditLogInTx(tx, {
+          actor,
+          action: 'CREATE',
+          entityType: 'Product',
+          entityId: product.id,
+          before: null,
+          after: product,
+        });
+      }
+      if (!product.paperMaterialId) {
+        const before = product;
+        product = await tx.product.update({
+          where: { id: product.id },
+          data: { paperMaterialId: paper.id },
+          include: { categoryNode: true },
+        });
+        await writeAuditLogInTx(tx, {
+          actor,
+          action: 'LINK_PAPER',
+          entityType: 'Product',
+          entityId: product.id,
+          before,
+          after: product,
+        });
+      }
+      // An enabled catalog combination without a rule uses the existing manual-pricing path.
+      if (entry.amount === null) continue;
+      const rule = await tx.customerPriceRule.create({
+        data: {
+          priceBookId: book.id,
+          categoryId: anchor.categoryId,
+          productId: product.id,
+          code: `STOCK-BASE-${hash}-${spec.key}`,
+          name: `${label} ${spec.label}空白封单价`,
+          kind: 'BASE',
+          calculationType: 'PER_PIECE',
+          amount: new Prisma.Decimal(entry.amount),
+          minQty: 1,
+          maxQty: null,
+          exclusiveGroup: 'STOCK_BASE',
+          triggerCondition: {
+            schemaVersion: 1,
+            target: 'ITEM',
+            pricingRoutes: ['STOCK_BLANK'],
+            paperTypes: [label],
+            specifications: [spec.label],
+          },
+        },
+      });
+      createdRuleIds.push(rule.id);
+      await writeAuditLogInTx(tx, {
+        actor,
+        action: 'CREATE_DRAFT_RULE',
+        entityType: 'CustomerPriceRule',
+        entityId: rule.id,
+        before: null,
+        after: rule,
+      });
+    }
+    await assertValidRuleSet(tx, book.id, book.purpose);
+    const editedAt = new Date(
+      Math.max(now.getTime(), book.updatedAt.getTime() + 1),
+    );
+    await tx.customerPriceBook.update({
+      where: { id: book.id },
+      data: {
+        updatedAt: editedAt,
+        notes: notesInput({
+          ...notesRecord(book.notes),
+          workflow: {
+            ...workflow,
+            lastEditedBy: actor.id,
+            lastEditedAt: editedAt.toISOString(),
+          },
+        }),
+      },
+    });
+    await writeAuditLogInTx(tx, {
+      actor,
+      action: 'ADD_BLANK_PAPER',
+      entityType: 'CustomerPriceBook',
+      entityId: book.id,
+      before: { updatedAt: book.updatedAt },
+      after: {
+        paperId: paper.id,
+        ruleIds: createdRuleIds,
+        updatedAt: editedAt,
+      },
+    });
+    return { paperId: paper.id, priceBookId: book.id };
+  });
 }

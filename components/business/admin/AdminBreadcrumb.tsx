@@ -62,12 +62,13 @@ const SEGMENT_LABELS: Record<string, string> = {
 // 规则中心的子页使用完整路径标签，避免同名 segment 在不同
 // 业务层级中回落到模糊的通用文案。
 export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
-  Object.fromEntries(
-    RULE_CENTER_SIDEBAR_ITEMS.map((item) => [
-      item.href,
-      item.breadcrumbLabel,
-    ]),
-  );
+  {
+    ...Object.fromEntries(
+      RULE_CENTER_SIDEBAR_ITEMS.map((item) => [item.href, item.breadcrumbLabel]),
+    ),
+    '/owner/rules/customer-pricing/blank': '空白封单价',
+    '/owner/rules/customer-pricing/blank/new': '新增纸张与规格价格',
+  };
 
 // Routes that are layout-only (no page.tsx) — linking them produces
 // 404s. Render those segments as text instead。
@@ -76,6 +77,7 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
 const LAYOUT_ONLY_PATHS = new Set<string>([
   '/foreman',
   '/sales',
+  '/owner/rules/customer-pricing/blank',
 ]);
 
 // cuid（Prisma @default(cuid())）/ uuid 形态的路径段。这类段没有可读

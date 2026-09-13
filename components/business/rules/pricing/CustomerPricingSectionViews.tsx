@@ -38,6 +38,7 @@ export type PricingMatrixColumn = {
 
 export type PricingMatrixCell = PricingNumericFieldState & {
   columnKey: string;
+  emptyLabel?: string;
 };
 
 export type CustomerBlankPricingRow = {
@@ -427,8 +428,8 @@ export function CustomerBlankPricingSectionView({
                         <PricingNumericInput
                           {...field}
                           ariaLabel={`${row.paperName}${displayWeight(row.weight)}${column.label}单价`}
-                          placeholder="— 转人工"
-                          step="0.005"
+                          placeholder={row.cells.find(cell => cell.columnKey === column.key)?.emptyLabel ?? '— 转人工'}
+                          step="0.0001"
                           changedDot
                           className={cn(
                             'h-9 border-transparent bg-transparent px-2 text-right shadow-none',

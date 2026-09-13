@@ -201,6 +201,31 @@ function editablePrintFoilRule(): CustomerPriceSectionRuleDto {
 }
 
 describe('CustomerPricingDedicatedSection', () => {
+  it('无价格的已启用规格显示转人工，未配置规格显示不适用', () => {
+    const data = workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')]);
+    data.blankProducts = [{ id: 'new-product', paperType: '160g新纸张', specification: '中号封80×115' }];
+    const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
+    expect(html).toContain('新纸张');
+    expect(html).toContain('新增纸张 / 规格');
+    expect(html).toContain('— 转人工');
+    expect(html).toContain('不适用');
+  });
+
+  it('新编码按规格进入正确列，同克重中文纸张的输入框不重名', () => {
+    const rules = ['甲纸', '乙纸'].map((name, index) => ({
+      ...editableBagRule(),
+      id: `blank-${index}`, code: `NEW-CODE-${index}`,
+      draft: { ...editableBagRule().draft, id: `blank-${index}`, code: `NEW-CODE-${index}`,
+        exclusiveGroup: 'STOCK_BASE', product: { id: `product-${index}`, code: `NEW-CODE-${index}`, paperType: `160g${name}`, specification: '中号封80×115' } },
+    } as CustomerPriceSectionRuleDto));
+    const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')], rules)} createDraftPurpose={null} />);
+    expect(html).toContain('甲纸160g中号封单价');
+    expect(html).toContain('乙纸160g中号封单价');
+    const ids = [...html.matchAll(/<input[^>]*id="([^"]+)"/gu)].map(match => match[1]);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it.each([
     [750, 1500, 2500, 3500, 4500, 7500, 15000, 25000, 42000, null],
     [499, 999, 1999, 2999, 3999, 4999, 9999, 19999, 29999, 49999, null],
