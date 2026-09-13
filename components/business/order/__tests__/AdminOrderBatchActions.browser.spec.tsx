@@ -307,7 +307,7 @@ it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1
     printAction.mockResolvedValue({ status: 'queued', jobId: 'layout-job' });
     for (const dark of [false, true]) {
       document.documentElement.classList.toggle('dark', dark);
-      for (const state of ['idle', 'pending', 'ready', 'failed'] as const) {
+      for (const state of ['idle', 'pending', 'ready', 'failed', 'unavailable'] as const) {
         printFetch.mockResolvedValue({ ok: true, json: async () => ({
           status: state, completed: state === 'ready' ? 1 : 0, total: 1,
           issues: state === 'failed' ? [{ position: 1, message: '工单内容已变化' }] : [],
@@ -318,10 +318,11 @@ it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1
           if (state === 'ready') await expect.element(page.getByRole('link', { name: '打开 PDF' })).toBeVisible();
           else await expect.element(page.getByText(state === 'failed'
             ? '未生成打印文件，请检查以下工单或减少所选数量后重试。'
+            : state === 'unavailable' ? '等待打印服务恢复，将自动更新进度；如长时间未恢复，请联系管理员。'
             : '正在准备打印文件，完成后可打开打印或下载。')).toBeVisible();
         }
         const buttons = [...host.querySelectorAll<HTMLButtonElement>('button')];
-        const primary = buttons.filter((button) => /下发生产|打印所选|正在准备打印|导出所选/.test(button.textContent ?? ''));
+        const primary = buttons.filter((button) => /下发生产|打印所选|正在准备打印|等待打印服务恢复|导出所选/.test(button.textContent ?? ''));
         const boxes = primary.map((button) => button.getBoundingClientRect());
         if (width >= 768) {
           expect(Math.max(...boxes.map((box) => box.top)) - Math.min(...boxes.map((box) => box.top))).toBeLessThanOrEqual(1);

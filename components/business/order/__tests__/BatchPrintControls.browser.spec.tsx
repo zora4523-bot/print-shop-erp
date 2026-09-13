@@ -34,8 +34,8 @@ it('disables submissions larger than 50 orders', async () => {
 it('keeps the same task when the worker is offline', async () => {
   m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'unavailable', completed: 0, total: 2, issues: [] }) });
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
-  await expect.element(page.getByText('打印服务暂不可用，请稍后查看进度；如仍不可用，请联系管理员。')).toBeVisible();
-  await page.getByRole('button', { name: '查看进度' }).click();
+  await expect.element(page.getByText('等待打印服务恢复，将自动更新进度；如长时间未恢复，请联系管理员。')).toBeVisible();
+  await page.getByRole('button', { name: '刷新进度' }).click();
   expect(m.start).toHaveBeenCalledTimes(1);
 });
 it('identifies the failed order and allows another submission', async () => {
@@ -86,4 +86,67 @@ it('continues checking after two minutes and exposes the finished PDF', async ()
     await expect.element(page.getByRole('link', { name: '下载 PDF' })).toBeVisible();
     expect(timer.mock.calls.some(([, delay]) => delay === 10_000)).toBe(true);
   } finally { timer.mockRestore(); clock.mockRestore(); }
+});
+
+it('shows manual refresh loading and completion even when progress has not changed', async () => {
+  const unavailable = { ok: true, json: async () => ({ status: 'unavailable', completed: 0, total: 2, issues: [] }) };
+  m.fetch.mockResolvedValue(unavailable);
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await expect.element(page.getByRole('button', { name: '等待打印服务恢复' })).toBeDisabled();
+  const response = Promise.withResolvers<typeof unavailable>();
+  m.fetch.mockReturnValueOnce(response.promise);
+  await page.getByRole('button', { name: '刷新进度' }).click();
+  await expect.element(page.getByRole('button', { name: '正在刷新…' })).toBeDisabled();
+  expect(m.fetch).toHaveBeenCalledTimes(2);
+  response.resolve(unavailable);
+  await expect.element(page.getByText('进度已刷新。')).toBeVisible();
+  await expect.element(page.getByRole('button', { name: '刷新进度' })).toBeEnabled();
+  expect(m.start).toHaveBeenCalledTimes(1);
+});
+
+it('automatically resumes the same task after the print service recovers', async () => {
+  const originalTimeout = globalThis.setTimeout;
+  const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation((handler, delay, ...args) =>
+    originalTimeout(handler, delay === 10_000 ? 0 : delay, ...args));
+  try {
+    m.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'unavailable', completed: 0, total: 2, issues: [] }) });
+    mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+    await expect.element(page.getByRole('link', { name: '打开 PDF' })).toBeVisible();
+    expect(m.start).toHaveBeenCalledTimes(1);
+    expect(m.fetch).toHaveBeenCalledTimes(2);
+    expect(timer.mock.calls.some(([, delay]) => delay === 10_000)).toBe(true);
+  } finally { timer.mockRestore(); }
+});
+
+it('reports a failed manual refresh and permits another attempt', async () => {
+  m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'unavailable', completed: 0, total: 2, issues: [] }) });
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await expect.element(page.getByRole('button', { name: '等待打印服务恢复' })).toBeVisible();
+  m.fetch.mockRejectedValueOnce(new Error('offline'));
+  await page.getByRole('button', { name: '刷新进度' }).click();
+  await expect.element(page.getByText('刷新未成功，请稍后重试。')).toBeVisible();
+  await expect.element(page.getByRole('button', { name: '刷新进度' })).toBeEnabled();
+  m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'ready', completed: 2, total: 2, issues: [] }) });
+  await page.getByRole('button', { name: '刷新进度' }).click();
+  await expect.element(page.getByRole('link', { name: '打开 PDF' })).toBeVisible();
+  expect(m.start).toHaveBeenCalledTimes(1);
+});
+
+it('ends manual refresh loading when the status request times out', async () => {
+  m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'unavailable', completed: 0, total: 2, issues: [] }) });
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await expect.element(page.getByRole('button', { name: '等待打印服务恢复' })).toBeVisible();
+  const timeoutController = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
+  try {
+    m.fetch.mockImplementationOnce((_input: RequestInfo | URL, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal!.addEventListener('abort', () => reject(new Error('request timed out')), { once: true });
+    }));
+    await page.getByRole('button', { name: '刷新进度' }).click();
+    await expect.element(page.getByRole('button', { name: '正在刷新…' })).toBeDisabled();
+    expect(timeout).toHaveBeenCalledWith(15_000);
+    timeoutController.abort();
+    await expect.element(page.getByText('刷新未成功，请稍后重试。')).toBeVisible();
+    await expect.element(page.getByRole('button', { name: '刷新进度' })).toBeEnabled();
+  } finally { timeout.mockRestore(); }
 });

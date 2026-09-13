@@ -20,6 +20,9 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   const [issues, setIssues] = useState<BatchPrintIssue[]>([]);
   const [labels, setLabels] = useState<string[]>([]);
   const [pollKey, setPollKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFeedback, setRefreshFeedback] = useState('');
+  const refreshInFlight = useRef(false);
   const inFlight = useRef(false);
 
   useEffect(() => {
@@ -28,24 +31,37 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const startedAt = Date.now();
+    let manualRefresh = pollKey > 0;
     async function poll() {
       try {
-        const response = await fetch(`/api/orders/batch-print/${jobId}`, { cache: 'no-store', signal: controller.signal });
+        const response = await fetch(`/api/orders/batch-print/${jobId}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
         if (!response.ok) throw new Error('Status unavailable');
         const next: BatchPrintStatus = await response.json();
         if (controller.signal.aborted) return;
         setStatus(next);
         setIssues(next.issues);
+        setRefreshFeedback(manualRefresh ? '进度已刷新。' : '');
         if (next.status === 'pending') {
           setMessage(next.phase === 'queued' ? '正在排队，请勿重复提交。' : next.phase === 'merging' ? '正在合并打印文件，请稍候。' : '正在准备打印文件，完成后可打开打印或下载。');
           timer = setTimeout(poll, Date.now() - startedAt < 120_000 ? 2000 : 10_000);
         } else if (next.status === 'unavailable') {
-          setMessage('打印服务暂不可用，请稍后查看进度；如仍不可用，请联系管理员。');
+          setMessage('等待打印服务恢复，将自动更新进度；如长时间未恢复，请联系管理员。');
+          timer = setTimeout(poll, 10_000);
         } else if (next.status === 'failed') {
           setMessage('未生成打印文件，请检查以下工单或减少所选数量后重试。');
         } else setMessage('打印文件已生成。打开 PDF 后可使用阅读器的打印功能，也可下载后打印。');
       } catch {
-        if (!controller.signal.aborted) setMessage('暂时无法查看生成进度，请稍后重试。');
+        if (!controller.signal.aborted) {
+          setMessage('暂时无法获取进度，将自动重试，也可点击刷新进度。');
+          if (manualRefresh) setRefreshFeedback('刷新未成功，请稍后重试。');
+          timer = setTimeout(poll, 10_000);
+        }
+      } finally {
+        if (!controller.signal.aborted && manualRefresh) {
+          setRefreshing(false);
+          refreshInFlight.current = false;
+          manualRefresh = false;
+        }
       }
     }
     void poll();
@@ -57,6 +73,10 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
     inFlight.current = true;
     setPending(true);
     setMessage('');
+    setRefreshFeedback('');
+    setRefreshing(false);
+    refreshInFlight.current = false;
+    setPollKey(0);
     setTask(null);
     setStatus(null);
     setIssues([]);
@@ -76,7 +96,7 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   const generating = task !== null && (status?.status === 'pending' || status?.status === 'unavailable');
   const action = (
     <Button type="button" variant="secondary" className="min-h-11" disabled={disabled || pending || generating || tooMany || !selectedItems.length} onClick={() => void start()}>
-      {pending ? '正在提交…' : generating ? '正在准备打印…' : `打印所选（${selectedItems.length}）`}
+      {pending ? '正在提交…' : status?.status === 'unavailable' ? '等待打印服务恢复' : generating ? '正在准备打印…' : `打印所选（${selectedItems.length}）`}
     </Button>
   );
   const result = tooMany || task || message || issues.length ? (
@@ -87,9 +107,20 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
         {status?.status === 'ready' ? <>
           <Button role="link" render={<a href={`/api/orders/batch-print/${task.id}?view=download`} />} nativeButton={false} variant="secondary" className="min-h-11">下载 PDF</Button>
           <Button role="link" render={<a href={`/api/orders/batch-print/${task.id}?view=inline`} target="_blank" rel="noopener noreferrer" />} nativeButton={false} variant="secondary" className="min-h-11">打开 PDF</Button>
-        </> : <Button variant="secondary" className="min-h-11" onClick={() => { setMessage(''); setPollKey((value) => value + 1); }}>查看进度</Button>}
+        </> : status?.status !== 'failed' ? (
+          <Button type="button" variant="secondary" className="min-h-11" disabled={refreshing} aria-busy={refreshing} onClick={() => {
+            if (refreshInFlight.current) return;
+            refreshInFlight.current = true;
+            setRefreshing(true);
+            setRefreshFeedback('');
+            setPollKey((value) => value + 1);
+          }}>
+            {refreshing ? '正在刷新…' : '刷新进度'}
+          </Button>
+        ) : null}
       </> : null}
       {task && task.orderIds?.join(',') !== selectedItems.map((item) => item.id).join(',') ? <p className="basis-full text-sm">所选工单已变化，下方生成结果仍对应此前提交的 {task.labels.length} 单。</p> : null}
+      {refreshFeedback ? <p role="status" className="basis-full text-sm">{refreshFeedback}</p> : null}
       {message ? <p role="status" className="basis-full text-sm">{message}</p> : null}
       {issues.length ? <ul className="basis-full space-y-1 text-sm">{issues.map((issue) => <li key={issue.position} className="break-all">{labels[issue.position - 1] ?? `第 ${issue.position} 单`}：{issue.message}</li>)}</ul> : null}
     </div>
