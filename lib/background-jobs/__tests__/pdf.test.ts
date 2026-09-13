@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { dbMock, enqueueBackgroundJobMock, getOrderForPrintMock, renderMock, writeFileMock } = vi.hoisted(() => ({
   dbMock: {
     backgroundJob: { findUnique: vi.fn() },
+    backgroundWorkerHeartbeat: { findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
   },
   enqueueBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -37,6 +38,7 @@ import {
 
 beforeEach(() => {
   dbMock.backgroundJob.findUnique.mockReset();
+  dbMock.backgroundWorkerHeartbeat.findFirst.mockReset();
   enqueueBackgroundJobMock.mockReset();
   getOrderForPrintMock.mockReset();
   renderMock.mockReset().mockResolvedValue(Buffer.from('pdf'));
@@ -231,5 +233,38 @@ describe('durable order PDF jobs', () => {
     expect(getOrderForPrintMock).toHaveBeenCalledTimes(2);
     expect(getOrderForPrintMock).toHaveBeenLastCalledWith('order-1', { id: 'user-1', role: Role.WORKER }, 'https://erp.example.com');
     expect(writeFileMock).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe('PDF queue availability', () => {
+  const expected = { orderId: 'o', actorId: 'a', actorRole: Role.ADMIN, workOrderVersion: 1 };
+  const pending = {
+    type: 'ORDER_PDF', status: BackgroundJobStatus.PENDING,
+    payload: { orderId: 'o', expectedWorkOrderVersion: 1, actor: { id: 'a', role: Role.ADMIN } },
+    createdAt: new Date('2026-09-10T23:59:00Z'),
+  };
+  it('stops waiting when no active heavy worker exists', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue(pending);
+    dbMock.backgroundWorkerHeartbeat.findFirst.mockResolvedValue(null);
+    await expect(waitForOrderPdfJob('j', { expected })).resolves.toEqual({ status: 'unavailable' });
+    expect(dbMock.backgroundWorkerHeartbeat.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ queue: 'HEAVY', lastSeenAt: { gte: expect.any(Date) } }),
+    }));
+  });
+  it('caps waiting by persisted job age across requests without cancelling work', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, createdAt: new Date('2026-09-10T23:58:00Z') });
+    dbMock.backgroundWorkerHeartbeat.findFirst.mockResolvedValue({ workerId: 'w' });
+    await expect(waitForOrderPdfJob('j', { expected })).resolves.toEqual({ status: 'delayed' });
+  });
+  it('serves completed artifacts even if the worker has stopped', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, status: BackgroundJobStatus.SUCCEEDED, result: { artifactName: 'j.pdf' } });
+    await expect(waitForOrderPdfJob('j', { expected })).resolves.toEqual({ status: 'ready', artifactName: 'j.pdf' });
+    expect(dbMock.backgroundWorkerHeartbeat.findFirst).not.toHaveBeenCalled();
+  });
+  it('checks ownership before exposing queue availability', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue(pending);
+    await expect(waitForOrderPdfJob('j', { expected: { ...expected, actorId: 'other' } })).resolves.toEqual({ status: 'failed', errorCode: 'JobNotFound' });
+    expect(dbMock.backgroundWorkerHeartbeat.findFirst).not.toHaveBeenCalled();
   });
 });

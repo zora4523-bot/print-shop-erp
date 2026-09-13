@@ -13,6 +13,7 @@ import { orderPdfSnapshotKey } from '../pdf/order-snapshot';
 import { db } from '../db';
 import { getSetting } from '../settings';
 import { databaseNow } from './clock';
+import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS } from './heartbeat-policy';
 import { enqueueBackgroundJob } from './repository';
 import { BACKGROUND_JOB_TYPES, type ClaimedBackgroundJob } from './types';
 
@@ -117,7 +118,9 @@ export async function handleOrderPdfJob(
 export type OrderPdfJobWaitResult =
   | { status: 'ready'; artifactName: string }
   | { status: 'failed'; errorCode: string | null }
-  | { status: 'timeout' };
+  | { status: 'timeout' }
+  | { status: 'unavailable' }
+  | { status: 'delayed' };
 
 export async function waitForOrderPdfJob(
   jobId: string,
@@ -142,6 +145,7 @@ export async function waitForOrderPdfJob(
         status: true,
         result: true,
         lastErrorCode: true,
+        createdAt: true,
       },
     });
     if (!job) return { status: 'failed', errorCode: 'JobNotFound' };
@@ -159,6 +163,20 @@ export async function waitForOrderPdfJob(
       job.status === BackgroundJobStatus.CANCELLED
     ) {
       return { status: 'failed', errorCode: job.lastErrorCode };
+    }
+    // Check only after the actor/order binding and completed-state checks.
+    // Database time keeps queue age and remote worker heartbeats comparable.
+    const at = await databaseNow();
+    const worker = await db.backgroundWorkerHeartbeat.findFirst({
+      where: {
+        queue: BackgroundJobQueue.HEAVY,
+        lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) },
+      },
+      select: { workerId: true },
+    });
+    if (!worker) return { status: 'unavailable' };
+    if (at.getTime() - job.createdAt.getTime() >= 120_000) {
+      return { status: 'delayed' };
     }
     await delay(300, options.signal);
   }

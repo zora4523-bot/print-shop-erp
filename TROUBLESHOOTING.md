@@ -287,3 +287,16 @@ OSS 上传、企业微信通知、PDF、PM2 worker、cron、备份和 Nginx 都�
 - 队列持续 202：检查 HEAVY 心跳、重任务并发、失败次数、存储可写性；恢复既有 worker，不反复启动新 worker。
 
 检查流程和未验收范围见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+
+
+## PDF 一直显示正在生成
+
+启用 `BACKGROUND_JOBS_MODE=durable` 时，`pnpm dev` 只启动 Web 服务，
+还需要独立运行 `pnpm worker:heavy`。检查 HEAVY worker 进程、日志和
+`BackgroundWorkerHeartbeat.lastSeenAt`，并核对任务是否一直 PENDING、attempts 为 0。
+本地可把 worker 日志单独保存到 `/tmp/erp-worker-heavy.log`；更新代码或依赖后也需重启 worker。
+
+PDF 接口在账号和工单绑定校验通过后检查 HEAVY 心跳，使用与健康检查一致的有效窗口
+和数据库时钟。无有效心跳返回 503；未完成任务自创建起等待达到两分钟也返回 503，
+停止自动刷新。重试链接保留原 jobId，不取消任务、不重复入队；worker 恢复并完成后，
+再次重试可正常取得 PDF。已成功的任务不受 worker 是否在线影响。
