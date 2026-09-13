@@ -116,7 +116,9 @@ describe('CustomerPricingSectionViews', () => {
     expect(text).toContain('专版烫金 · 阶梯单价');
     expect(text).toContain('适用范围（推导）');
     expect(text).toContain('数量上界（含）');
-    expect(text).toContain('单价 中/大');
+    expect(text).toContain('中号组单价');
+    expect(text).toContain('大号组单价');
+    expect(html.match(/role="columnheader"/g)).toHaveLength(5);
     expect(text).toContain('≥ 1 且 &lt; 500 个');
     expect(text).toContain('≥ 5,000 且 &lt; 10,000 个');
     expect(text).toContain('≥ 50,000 个');

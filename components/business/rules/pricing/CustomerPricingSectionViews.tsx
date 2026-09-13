@@ -670,17 +670,19 @@ export function CustomerTiersPricingSectionView({
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_180px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档位</span>
                   <span role="columnheader">适用范围（推导）</span>
                   <span role="columnheader" className="text-right">
                     数量上界（含）
                   </span>
-                  <span role="columnheader" className="text-right">
-                    单价 中/大
+                  <span role="columnheader" className="px-1.5 text-right">
+                    中号组单价
                   </span>
-                  <span role="columnheader" aria-label="预留操作列" />
+                  <span role="columnheader" className="px-1.5 text-right">
+                    大号组单价
+                  </span>
                 </div>
               </div>
               <div role="rowgroup">
@@ -691,7 +693,7 @@ export function CustomerTiersPricingSectionView({
                     <div
                       role="row"
                       key={row.key}
-                      className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_180px_34px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
+                      className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                     >
                       <span role="cell" className="font-extrabold">
                         {row.name}
@@ -710,21 +712,22 @@ export function CustomerTiersPricingSectionView({
                           placeholder={lastOpenTier ? '∞' : '—'}
                         />
                       </div>
-                      <div role="cell" className="flex min-w-0 gap-1.5">
+                      <div role="cell" className="min-w-0">
                         <PricingNumericInput
                           {...row.middlePrice}
                           ariaLabel={`${row.name}中号组单价`}
                           step="0.005"
-                          className="min-w-0 flex-1 px-1.5 text-xs"
+                          className="w-full min-w-0 px-1.5 text-xs"
                         />
+                      </div>
+                      <div role="cell" className="min-w-0">
                         <PricingNumericInput
                           {...row.largePrice}
                           ariaLabel={`${row.name}大号组单价`}
                           step="0.005"
-                          className="min-w-0 flex-1 px-1.5 text-xs"
+                          className="w-full min-w-0 px-1.5 text-xs"
                         />
                       </div>
-                      <span role="cell" />
                     </div>
                   );
                 })}
