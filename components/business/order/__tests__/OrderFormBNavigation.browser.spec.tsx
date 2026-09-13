@@ -63,6 +63,23 @@ function Fixture({ count = 15 }: { count?: number }) {
     }}
   />;
 }
+function QuoteRefreshFixture() {
+  const [quantity, setQuantity] = useState(998);
+  const [unitsPerBag, setUnitsPerBag] = useState(10);
+  const [quoteFailed, setQuoteFailed] = useState(true);
+  useEffect(() => {
+    refreshQuote = () => setQuoteFailed(true);
+  }, []);
+  return <OrderFormB {...baseProps}
+    items={[{ ...baseItem, quantity }]}
+    itemFields={[{ id: 'item-1' }]} activeIndex={0}
+    onActiveIndexChange={noop} onRemove={noop}
+    fieldErrors={{ summary: quoteFailed ? ['报价失败：请调整包装数量并重新核价'] : [] }}
+    packaging={{ mode: 'SINGLE_STYLE', unitsPerBag, bagCount: Math.ceil(quantity / unitsPerBag) }}
+    onQuantityChange={(value) => { setQuantity(value); setQuoteFailed(false); }}
+    onUnitsPerBagChange={(value) => { setUnitsPerBag(value); setQuoteFailed(false); }}
+  />;
+}
 beforeEach(() => {
   document.documentElement.lang = 'zh-CN';
   host = document.createElement('div');
@@ -81,6 +98,41 @@ afterEach(() => {
 const layoutReady = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 const deleteButton = () => host.querySelector<HTMLButtonElement>('button[aria-label^="删除第"]')!;
 const selectedStyle = () => host.querySelector<HTMLButtonElement>('nav[aria-label="款式"] [aria-pressed="true"]')!;
+
+for (const theme of ['light', 'dark']) for (const [width, height] of [
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+]) {
+  it(`${width}x${height} ${theme}: quote refresh keeps quantity and pack inputs stationary`, async () => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<QuoteRefreshFixture />));
+    await layoutReady();
+    for (const [label, suffix, value] of [
+      ['数量', '-quantity', '999'], ['每包数量', '-units-per-bag', '12'],
+    ]) {
+      const input = host.querySelector<HTMLInputElement>(`input[id$="${suffix}"]`)!;
+      input.scrollIntoView({ block: 'center', behavior: 'instant' });
+      await page.getByRole('spinbutton', { name: label, exact: true }).click();
+      await layoutReady();
+      const top = input.getBoundingClientRect().top;
+      const scrollY = window.scrollY;
+      await page.getByRole('spinbutton', { name: label, exact: true }).fill(value);
+      await layoutReady();
+      expect(host.querySelector('[data-slot="order-form-errors"]')).toBeNull();
+      expect(document.activeElement).toBe(input);
+      expect(input.getBoundingClientRect().top).toBe(top);
+      expect(window.scrollY).toBe(scrollY);
+      flushSync(() => refreshQuote());
+      await layoutReady();
+      expect(host.querySelector('[data-slot="order-form-errors"]')).not.toBeNull();
+      expect(document.activeElement).toBe(input);
+      expect(input.getBoundingClientRect().top).toBe(top);
+      expect(window.scrollY).toBe(scrollY);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('[data-slot="order-form-editor"]')).toEqual([]);
+  });
+}
 
 for (const theme of ['light', 'dark']) for (const [width, height] of [
   [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],

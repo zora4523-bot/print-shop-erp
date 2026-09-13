@@ -731,33 +731,6 @@ export function OrderFormB({
           data-slot="order-form-editor"
           className="@container min-w-0 rounded-xl border bg-card p-5"
         >
-          {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
-            <div
-              role="alert"
-              data-slot="order-form-errors"
-              tabIndex={-1}
-              className="mb-4 rounded-xl border border-destructive bg-destructive/5 px-4 py-3.5 text-destructive"
-            >
-              <h2 className="text-sm font-extrabold">
-                还有 {fieldErrors.summary.length} 处需要处理
-              </h2>
-              <ul className="mt-2 space-y-0.5 text-xs font-semibold">
-                {fieldErrors.summary.map((message, index) => (
-                  <li key={`${message}-${index}`}>
-                    <Button
-                      type="button"
-                      variant="link"
-                      className="h-auto! min-h-0! min-w-0! justify-start px-0! py-1 text-left whitespace-normal text-destructive underline underline-offset-2 hover:text-destructive hover:opacity-70"
-                      onClick={() => focusIssue(message)}
-                    >
-                      {message}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
           <Group title="工单" first>
             <div>
               <FieldLabel
@@ -1026,6 +999,34 @@ export function OrderFormB({
             </label>
           </Group>
           {footerExtras}
+
+          {/* Async error summaries must not shift fields while they are being edited. */}
+          {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
+            <div
+              role="alert"
+              data-slot="order-form-errors"
+              tabIndex={-1}
+              className="mt-5 rounded-xl border border-destructive bg-destructive/5 px-4 py-3.5 text-destructive"
+            >
+              <h2 className="text-sm font-extrabold">
+                还有 {fieldErrors.summary.length} 处需要处理
+              </h2>
+              <ul className="mt-2 space-y-0.5 text-xs font-semibold">
+                {fieldErrors.summary.map((message, index) => (
+                  <li key={`${message}-${index}`}>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto! min-h-0! min-w-0! justify-start px-0! py-1 text-left whitespace-normal text-destructive underline underline-offset-2 hover:text-destructive hover:opacity-70"
+                      onClick={() => focusIssue(message)}
+                    >
+                      {message}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
 
         <StickyOrderFormRail rail={rail} />
