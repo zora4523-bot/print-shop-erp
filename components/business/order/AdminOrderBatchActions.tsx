@@ -8,6 +8,7 @@ import {
   useTransition,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import { BatchPrintControls } from './BatchPrintControls';
 import { ChevronDown } from 'lucide-react';
 import {
   runAdminOrderBatchAction,
@@ -158,6 +159,7 @@ export function AdminOrderBatchActions({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
+      <BatchPrintControls selectedItems={selectedItems} disabled={busy} />
       <form action={exportAction} aria-busy={exportPending}>
         <input type="hidden" name="scope" value="selected" />
         <input

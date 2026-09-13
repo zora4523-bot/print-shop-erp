@@ -1,3 +1,4 @@
+import { handleBatchPrintJob } from '@/lib/order/batch-print';
 import { handleAgentMonthlyBillExportJob } from './agent-monthly-bill-export';
 import { handleCdrBundleJob } from './cdr';
 import { handleOrderExportJob } from './order-export';
@@ -8,6 +9,7 @@ import type { BackgroundJobHandlers } from './worker';
 // HEAVY handlers need the normal Node/React server-rendering exports for PDF
 // generation, so they are loaded separately from LIGHT notification modules.
 export const heavyBackgroundJobHandlers: BackgroundJobHandlers = {
+  [BACKGROUND_JOB_TYPES.ORDER_BATCH_PDF]: handleBatchPrintJob,
   [BACKGROUND_JOB_TYPES.AGENT_MONTHLY_BILL_EXPORT]: handleAgentMonthlyBillExportJob,
   [BACKGROUND_JOB_TYPES.CDR_BUNDLE]: handleCdrBundleJob,
   [BACKGROUND_JOB_TYPES.ORDER_PDF]: handleOrderPdfJob,

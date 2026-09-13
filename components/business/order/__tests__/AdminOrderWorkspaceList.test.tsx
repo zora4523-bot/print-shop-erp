@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { OrderStatus } from '@/generated/prisma/enums';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 
+vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));

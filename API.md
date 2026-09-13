@@ -316,3 +316,18 @@ PDF 生成接口仍执行认证、角色和资源所有权校验；页面下载�
 ### 跨设备 PDF（2026-09-11）
 
 `GET /api/orders/:id/pdf` 默认 attachment；`view=inline` 使用 inline 供系统 PDF 阅读器打开，其他/重复 view 返回 400。202 轮询保留 view 与 jobId；失败恢复链接携带 `regenerate=1` 新建生成请求。同一授权内容在 15 分钟数据库时间窗口内复用任务；产物保留 1 小时，可重复下载，每次仍检查账号、所有权及当前工单版本。产物存储可选持久共享卷或私有 OSS，不提供公开下载地址。详见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+
+
+### 批量打印工单
+
+`requestBatchPrintAction` 要求 `order:view:all`，领域层复核账号启用且为 ADMIN。
+输入为 UUID `requestId` 和按列表顺序排列的 1–50 个不重复 `orderIds`。
+成功返回 `{status: 'queued', jobId}`；选择无效返回按所选顺序编号的问题项，不创建部分任务。
+使用 HEAVY 队列 `ORDER_BATCH_PDF`，不改变工单状态或创建生产下发记录。
+
+`GET /api/orders/batch-print/:jobId` 返回私有、不缓存的进度 JSON：
+`status`（pending/ready/failed/unavailable）、`completed`、`total`、`issues`。
+仅创建者可读；账号权限每次复核。`view=download` 下载合并 PDF，`view=inline` 内联打开。
+下载返回 200；未登录 401；无权限或任务不存在 404；未就绪或工单内容变化 409；
+文件过期或读取失败 503；非法 view/id 400。所有响应 `Cache-Control: private, no-store`。
+下载前后重新检查所有工单内容标识及创建者权限，任意变化阻止整份文件下载。

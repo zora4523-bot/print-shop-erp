@@ -185,3 +185,12 @@ Next 16.3 默认会在 Proxy 前规范化并剥离 Flight 标头；`skipProxyUrl
 ### 跨设备打印输出（2026-09-11）
 
 正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+
+
+### 工单批量 PDF
+
+管理员列表通过 `actions/order-batch-print.ts` 提交有序选择，
+`lib/order/batch-print.ts` 校验并创建 `ORDER_BATCH_PDF` HEAVY 任务。
+worker 逐单复用生产打印模板，以 pdf-lib 合并页，进度更新遵守任务租约 fencing。
+单批最多 50 单、累计输入 PDF 最多 100 MiB；失败不发布部分产物。
+产物复用现有私有 PDF 存储及保留期限，下载由任务创建者访问并复核所有工单。

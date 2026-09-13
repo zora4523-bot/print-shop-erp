@@ -18,6 +18,7 @@ vi.mock('next/link', () => ({
   },
 }));
 vi.mock('@/actions/admin-order-workflow', () => ({ runAdminOrderBatchAction: batchAction }));
+vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: vi.fn() }));
 vi.mock('@/actions/order-export', () => ({ requestOrderExportAction: vi.fn() }));
 
 import { AdminOrderBatchActions } from '../AdminOrderBatchActions';
@@ -92,7 +93,7 @@ describe('admin order batch review', () => {
     const toolbar = page.getByRole('region', { name: '工单批量操作' });
     await expect.element(toolbar.getByRole('button', { name: '下发生产（1）', exact: true })).toBeVisible();
     expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual([
-      '下发生产（1）', '导出所选', '取消选择',
+      '下发生产（1）', '打印所选（1）', '导出所选', '取消选择',
     ]);
 
     mount([{ ...order, status: OrderStatus.RELEASED, pendingPrintJobId: 'print-1',
@@ -108,7 +109,7 @@ describe('admin order batch review', () => {
     // Incomplete print identity and missing confirmed money cannot create a shortcut.
     mount([{ ...order, capabilities: { ...order.capabilities, release: false, markPrinted: true, settle: true },
       feeStages: { ...order.feeStages, confirmed: null } }]);
-    expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['导出所选', '取消选择']);
+    expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['打印所选（1）', '导出所选', '取消选择']);
     expect(batchAction).not.toHaveBeenCalled();
   });
 
