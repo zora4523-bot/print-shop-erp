@@ -1,3 +1,4 @@
+import { packagingUnit } from './packaging-mode';
 import Decimal from "decimal.js";
 import type { Prisma } from "../../generated/prisma/client";
 import {
@@ -1037,7 +1038,7 @@ function validateFinalPricingSubmissions(
     submittedGroups.size !== order.packagingGroups.length ||
     order.packagingGroups.some((group) => !submittedGroups.has(group.id))
   ) {
-    throw new OrderPricingReviewError("请完整确认每一个包装组的入袋费");
+    throw new OrderPricingReviewError("请完整确认每一个包装组的包装费");
   }
   for (const group of order.packagingGroups) {
     const submitted = submittedGroups.get(group.id)!;
@@ -1046,7 +1047,7 @@ function validateFinalPricingSubmissions(
       submitted.expectedActualBagCount !== group.actualBagCount
     ) {
       throw new OrderPricingReviewError(
-        `包装组 ${group.sequence} 的模式或实际袋数已变更，请刷新后按当前快照重新核价`,
+        `包装组 ${group.sequence} 的模式或包装数量已变更，请刷新后按当前快照重新核价`,
       );
     }
   }
@@ -1214,10 +1215,13 @@ export async function finalizeOrderPricing(
       const submitted = submittedGroups.get(group.id)!;
       const unitPrice = parseManualMoney(
         submitted.unitPrice,
-        `包装组 ${group.sequence} 的每袋入袋费`,
+        `包装组 ${group.sequence} 的每${packagingUnit(group.mode)}包装费`,
         DECIMAL_10_4_MAX,
         4,
       );
+      if (group.mode === OrderPackagingMode.UNPACKED && !unitPrice.isZero()) {
+        throw new OrderPricingReviewError('不包装的包装费必须为 0');
+      }
       const reason = requiredReason(
         submitted.reason,
         `包装组 ${group.sequence} 需人工核价`,
@@ -1227,7 +1231,7 @@ export async function finalizeOrderPricing(
         .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       if (subtotal.gt(DECIMAL_12_2_MAX)) {
         throw new OrderPricingReviewError(
-          `包装组 ${group.sequence} 的入袋费小计超出系统允许范围`,
+          `包装组 ${group.sequence} 的包装费小计超出系统允许范围`,
         );
       }
       return [{

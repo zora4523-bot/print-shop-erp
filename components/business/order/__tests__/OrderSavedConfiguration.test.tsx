@@ -196,7 +196,7 @@ describe('saved order facts in editor', () => {
       </>,
     );
     expect(html).toContain('未记录款式');
-    expect(html).toContain('未记录分袋明细');
+    expect(html).toContain('未记录包装明细');
     expect(html).toContain('待核定');
   });
 });

@@ -178,9 +178,12 @@ databaseDescribe.sequential(
 
       expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
       expect(passed).toHaveLength(RULE8_GOLDEN_CASE_COUNT);
-      expect(snapshot.priceVersion.processing.id).toBe(
-        'cpb_external_processing_print_sentinel_v1',
-      );
+      // Publishing an additive rule version changes the book ID. Keep every
+      // golden amount above, and verify that its evidence identifies an active
+      // published processing book rather than pinning a retired version ID.
+      const book = await db.customerPriceBook.findUniqueOrThrow({where: {id: snapshot.priceVersion.processing.id}});
+      expect(book).toMatchObject({isActive: true, purpose: 'PROCESSING', version: snapshot.priceVersion.processing.version});
+      expect(book.effectiveTo).toBeNull();
     });
   },
 );

@@ -283,3 +283,39 @@ for (const theme of ['light', 'dark']) for (const width of [393, 768, 1280]) {
     expect(await commands.checkShellAccessibility('section[aria-label="数量与包装"]')).toEqual([]);
   });
 }
+
+function PackagingTypesFixture() {
+  const [mode, setMode] = useState<OrderFormBProps['packaging']['mode']>('SINGLE_STYLE');
+  return <OrderFormB {...baseProps} items={[baseItem]} itemFields={[{id: 'item-1'}]} activeIndex={0}
+    onActiveIndexChange={noop} onRemove={noop} onPackagingModeChange={setMode}
+    packaging={{mode, unitsPerBag: mode === 'BOX_TACTILE' ? 8 : 10, bagCount: mode === 'UNPACKED' ? 0 : 100}} />;
+}
+for (const theme of ['light', 'dark']) for (const [width, height] of [
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+]) {
+  it(`packaging types ${width}x${height} ${theme}: switch, capacity, touch and accessibility`, async () => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<PackagingTypesFixture />));
+    await layoutReady();
+    await expect.element(page.getByRole('button', {name: '入袋', exact: true})).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', {name: '不包装', exact: true}).click();
+    expect(host.querySelector('input[id$="-units-per-bag"]')).toBeNull();
+    await expect.element(page.getByText('包装费 ¥0.00', {exact: true})).toBeVisible();
+    await page.getByRole('button', {name: '装盒', exact: true}).click();
+    await page.getByRole('button', {name: /触感盒子 250g/}).click();
+    const field = host.querySelector<HTMLInputElement>('input[id$="-units-per-bag"]')!;
+    expect(field.max).toBe('8');
+    field.value = '9'; expect(field.validity.rangeOverflow).toBe(true);
+    field.value = '8'; expect(field.validity.valid).toBe(true);
+    const section = host.querySelector('section[aria-label="数量与包装"]')!;
+    for (const button of section.querySelectorAll('button')) {
+      const rect = button.getBoundingClientRect();
+      expect(rect.height).toBeGreaterThanOrEqual(44);
+      expect(rect.left).toBeGreaterThanOrEqual(0);
+      expect(rect.right).toBeLessThanOrEqual(width);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('section[aria-label="数量与包装"]')).toEqual([]);
+  });
+}

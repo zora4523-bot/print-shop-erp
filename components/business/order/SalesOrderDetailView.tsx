@@ -1,3 +1,4 @@
+import { packagingModeLabel, packagingUnit } from '@/lib/order/packaging-mode';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import {
@@ -310,19 +311,19 @@ export function SalesOrderDetailView({
                     <h3 className="font-medium">
                       包装组 #{group.sequence}
                       {group.name ? ` · ${group.name}` : ''} ·{' '}
-                      {group.mode === 'MIXED_STYLE' ? '混装' : '单款装'}
+                      {packagingModeLabel(group.mode)}
                     </h3>
                     {editForm && canEdit ? <SalesTextEditForm key={`group-${group.id}-${order.editVersion}`} orderId={order.id} targetId={group.id} field="packagingName" version={order.editVersion} value={group.name ?? ''} label="包装组名称" /> : null}
                     <p className="mt-1">
-                      共 {group.actualBagCount.toLocaleString('zh-CN')} 袋
+                      {group.mode === 'UNPACKED' ? '不收取包装费' : `共 ${group.actualBagCount.toLocaleString('zh-CN')} ${packagingUnit(group.mode)}`}
                     </p>
                     <p className="mt-1 text-muted-foreground">
                       {group.lines
                         .map(
                           (line) =>
-                            `#${line.itemSequence} ${line.itemName} · 每袋 ${line.unitsPerBag} 个`,
+                            `#${line.itemSequence} ${line.itemName}${group.mode === 'UNPACKED' ? '' : ` · 每${packagingUnit(group.mode)} ${line.unitsPerBag} 个`}`,
                         )
-                        .join('；') || '未记录每袋组成'}
+                        .join('；') || '未记录包装组成'}
                     </p>
                   </li>
                 ))}

@@ -1,4 +1,5 @@
 "use client";
+import { packagingUnit, PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 
 import {
   type Dispatch,
@@ -23,7 +24,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { OrderPackagingMode } from "@/generated/prisma/enums";
 import { externalPriceBusinessText } from "@/lib/price/external-price-display";
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
@@ -50,12 +50,6 @@ type OrderChargeDraft = {
   amount: string;
   reason: string;
 };
-
-const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
-  [OrderPackagingMode.SINGLE_STYLE]: "单款装",
-  [OrderPackagingMode.MIXED_STYLE]: "混装",
-};
-
 function resultError(
   result:
     FinalizeOrderPricingMutationResult | PreviewOrderPricingReviewResult | null,
@@ -370,7 +364,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           .filter((group) => !group.complete)
           .map((group) => ({
             href: `#pricing-review-packaging-${group.packagingGroupId}`,
-            label: `包装组 #${group.sequence} 入袋费`,
+            label: `包装组 #${group.sequence} 包装费`,
           })),
         ...preview.orderCharges.map((charge) => ({
           href: `#pricing-review-charge-${charge.chargeId}`,
@@ -414,7 +408,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           const label = `包装组 #${group.sequence}`;
           return [
             ...(!hasValue(draft?.unitPrice ?? group.currentUnitPrice)
-              ? [`${label} 每袋入袋费`]
+              ? [`${label} 每${packagingUnit(group.mode)}包装费`]
               : []),
             ...(!hasValue(draft?.reason ?? group.currentReason)
               ? [`${label} 定价依据`]
@@ -713,7 +707,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           {preview.packagingGroups.some((group) => showReadOnly || !group.complete) ? (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">包装组入袋费</h3>
+                <h3 className="text-sm font-semibold">包装组费用</h3>
                 <Badge
                   variant="secondary"
                 >
@@ -739,8 +733,10 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <p className="font-medium">
                           包装组 #{group.sequence} · {group.name ?? "未命名"} ·{" "}
-                          {PACKAGING_MODE_LABELS[group.mode]} ·{" "}
-                          {group.actualBagCount.toLocaleString("zh-CN")} 袋
+                          {PACKAGING_MODE_LABELS[group.mode]}
+                          {group.mode !== "UNPACKED"
+                            ? ` · ${group.actualBagCount.toLocaleString("zh-CN")} ${packagingUnit(group.mode)}`
+                            : null}
                         </p>
                         <Badge
                           variant="secondary"
@@ -755,7 +751,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                       ) : null}
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="space-y-1 text-xs">
-                          <span>每袋入袋费（元）</span>
+                          <span>{group.mode === "UNPACKED" ? "包装费（元）" : `每${packagingUnit(group.mode)}包装费（元）`}</span>
                           <Input
                             required={!group.complete}
                             inputMode="decimal"
@@ -779,7 +775,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                           />
                         </label>
                         <div className="space-y-1 text-xs">
-                          <span>入袋费小计</span>
+                          <span>包装费小计</span>
                           <p className="min-h-10 rounded-md border bg-muted/40 px-3 py-2 font-sans tabular-nums">
                             {group.currentSubtotal}
                           </p>
@@ -910,7 +906,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           ) : null}
           {finalizeState?.status === "success" ? (
             <p role="status" className="text-sm text-success-foreground">
-              费用已确认：入袋费 {finalizeState.packagingAmount}，加工费合计{" "}
+              费用已确认：包装费 {finalizeState.packagingAmount}，加工费合计{" "}
               {finalizeState.processingAmount}，工单总额{" "}
               {finalizeState.totalAmount}。
             </p>

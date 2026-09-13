@@ -197,7 +197,9 @@ export async function quoteInternalCreateOrderAction(
   const packaging = quoteCreateOrderPackagingGroupsSchema.safeParse({
     groups: raw.packagingGroups,
   });
+  const shipmentQuantities = z.array(z.array(z.number().int().min(0).max(9_999_999)).max(MAX_ORDER_ITEMS_PER_ORDER)).min(1).max(10).optional().safeParse(raw.shipmentQuantities);
   const issues = [
+    ...(shipmentQuantities.success ? [] : prefixedIssues('shipmentQuantities', shipmentQuantities.error.issues)),
     ...(factsKey.success
       ? []
       : prefixedIssues('factsKey', factsKey.error.issues)),
@@ -223,7 +225,8 @@ export async function quoteInternalCreateOrderAction(
     !settlementType.success ||
     !orderItemCount.success ||
     !items.success ||
-    !packaging.success
+    !packaging.success ||
+    !shipmentQuantities.success
   ) {
     return { status: 'invalid', fieldErrors: { _: ['报价数据格式非法'] } };
   }
@@ -235,6 +238,7 @@ export async function quoteInternalCreateOrderAction(
       items: items.data.items,
       orderItemCount: orderItemCount.data,
       packagingGroups: packaging.data.groups,
+      shipmentQuantities: shipmentQuantities.data,
     };
     const quote = await quoteInternalCreateOrder(input);
     return { status: 'success', quote };

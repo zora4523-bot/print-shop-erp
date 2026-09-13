@@ -56,6 +56,7 @@ export const workflowOrderSelect = {
       pricingSnapshot: true,
     },
   },
+  shipments: {select: {lines: {select: {orderItemId: true, quantity: true}}}},
   packagingGroups: {
     select: {
       id: true,

@@ -1,3 +1,4 @@
+import { packagingModeLabel, packagingUnit } from '@/lib/order/packaging-mode';
 import Decimal from 'decimal.js';
 import { adminOrderCraftTags, adminOrderDueHint } from '@/lib/order/admin-list-presentation';
 import type { OrderChangeRequestStatus, OrderPricingStatus } from '@/generated/prisma/enums';
@@ -184,7 +185,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
     const foil = resolveOrderItemFoilSides(item);
     const packaging = order.packagingGroups.flatMap((group) =>
       group.lines.filter((line) => line.orderItem.id === item.id).map((line) =>
-        `${group.name || `包装 ${group.sequence}`}：${line.unitsPerBag} 个/袋，${group.actualBagCount} 袋`));
+        `${group.name || `包装 ${group.sequence}`}：${packagingModeLabel(group.mode)}${group.mode === 'UNPACKED' ? '' : `，${line.unitsPerBag} 个/${packagingUnit(group.mode)}，${group.actualBagCount} ${packagingUnit(group.mode)}`}`));
     const fees: DetailFee[] = [{
       id: `${item.id}-subtotal`, label: '款式加工费',
       amount: monetaryFacts.itemAmounts.get(item.id) ?? null,
@@ -219,7 +220,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
       })),
     };
   });
-  const orderFees: DetailFee[] = [{ id: 'packaging', label: '入袋费', amount: monetaryFacts.packagingAmount,
+  const orderFees: DetailFee[] = [{ id: 'packaging', label: '包装费', amount: monetaryFacts.packagingAmount,
     ...(monetaryFacts.packagingEstimated ? { estimated: true } : {}) }];
   const displayedPlateIds = new Set(order.items.flatMap((item) =>
     'plateDetails' in item ? item.plateDetails.filter((plate) => plate.isActive).map((plate) => plate.id) : []));

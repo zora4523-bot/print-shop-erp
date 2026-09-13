@@ -36,6 +36,7 @@ import {
   MAX_CREATE_ORDER_UNITS_PER_BAG,
   CREATE_ORDER_PACKAGING_LIMIT_MESSAGE,
 } from '../order/create-order-packaging';
+import { isMixedPackaging, packagingCapacity, packagingCapacityError } from '../order/packaging-mode';
 import {
   WECOM_MARKDOWN_MAX_BYTES,
   wecomMarkdownByteLength,
@@ -1810,7 +1811,7 @@ const orderPackagingQuoteGroupSchema = z.object({
     .number({ error: '袋数必须是数字' })
     .finite('袋数必须是有限数')
     .int('袋数必须是整数')
-    .min(1, '袋数必须大于 0')
+    .min(0, '包装数量不能为负数')
     .max(9_999_999, '袋数过大'),
 });
 
@@ -1847,13 +1848,16 @@ export const quoteCreateOrderPackagingGroupsSchema = z
       seen.add(group.groupKey);
       if (
         group.itemUnitsPerBag.reduce((total, units) => total + units, 0) >
-        MAX_CREATE_ORDER_UNITS_PER_BAG
+        (packagingCapacity(group.mode) ?? Number.POSITIVE_INFINITY)
       ) {
         ctx.addIssue({
           code: 'custom',
           path: ['groups', index, 'itemUnitsPerBag'],
-          message: CREATE_ORDER_PACKAGING_LIMIT_MESSAGE,
+          message: packagingCapacityError(group.mode),
         });
+      }
+      if (group.actualBagCount === 0 && group.mode !== OrderPackagingMode.UNPACKED) {
+        ctx.addIssue({ code: 'custom', path: ['groups', index, 'actualBagCount'], message: '包装数量必须大于 0' });
       }
     });
   });
@@ -1901,7 +1905,7 @@ const packagingGroupSchema = z.object({
     z
       .number({ message: '实际袋数必须是数字' })
       .int('实际袋数必须是整数')
-      .min(1, '实际袋数必须大于 0')
+      .min(0, '包装数量不能为负数')
       .max(9_999_999, '实际袋数过大'),
   ),
   itemUnitsPerBag: z
@@ -2134,7 +2138,7 @@ export const createOrderSchema = z
         (quantity) => quantity > 0,
       ).length;
       if (
-        group.mode === OrderPackagingMode.SINGLE_STYLE &&
+        group.mode !== OrderPackagingMode.UNPACKED && !isMixedPackaging(group.mode) &&
         selectedItemCount !== 1
       ) {
         ctx.addIssue({
@@ -2144,7 +2148,7 @@ export const createOrderSchema = z
         });
       }
       if (
-        group.mode === OrderPackagingMode.MIXED_STYLE &&
+        isMixedPackaging(group.mode) &&
         selectedItemCount < 2
       ) {
         ctx.addIssue({
@@ -2157,6 +2161,10 @@ export const createOrderSchema = z
         mode: group.mode,
         itemQuantities: input.items.map((item) => item.quantity),
         itemUnitsPerBag: group.itemUnitsPerBag,
+        shipmentQuantities: [
+          input.items.map((item, index) => item.quantity - input.additionalShipments.reduce((sum, shipment) => sum + (shipment.itemQuantities[index] ?? 0), 0)),
+          ...input.additionalShipments.map((shipment) => shipment.itemQuantities),
+        ],
       });
       if (!derived.complete) {
         ctx.addIssue({
@@ -2662,7 +2670,7 @@ export const finalizeOrderPricingSchema = z
             z
               .number({ message: '实际袋数必须是数字' })
               .int('实际袋数必须是整数')
-              .min(1, '实际袋数必须大于 0')
+              .min(0, '包装数量不能为负数')
               .max(9_999_999, '实际袋数过大'),
           ),
           unitPrice: moneyOptionalField,

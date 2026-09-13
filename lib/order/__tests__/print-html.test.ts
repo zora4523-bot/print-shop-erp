@@ -189,6 +189,26 @@ function supplementTextByLabel(html: string, label: string): string {
 }
 
 describe('buildPrintHtml', () => {
+  it.each([
+    ['UNPACKED', 0, '不包装'],
+    ['BOX_RED_CARD', 500, '红卡盒子 230g'],
+    ['BOX_TACTILE', 625, '触感盒子 250g'],
+  ] as const)('%s prints explicit packaging without a missing-data annex', async (mode, count, label) => {
+    const html = await renderPrintHtml(fixtureOrder({
+      packageRequirement: null,
+      packagingGroups: [fixturePackagingGroup({
+        mode,
+        actualBagCount: count,
+        lines: [{orderItemId: 'item-1', orderItemSequence: 1, unitsPerBag: mode === 'BOX_TACTILE' ? 8 : 10}],
+      })],
+    }));
+    expect(html).toContain(label);
+    expect(html).toContain('见包装明细');
+    expect(html).not.toContain('包装数量未填');
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
+    if (mode !== 'UNPACKED') expect(html).toContain(`${count}盒`);
+  });
+
   it.each([2, 4])('%i 款普通工单保留两行短备注与图稿，不生成重复备注附页', async (itemCount) => {
     const remark = '正反面按最终设计图对版，混装按包装组执行。\n出货前核对款号、数量和收货电话。';
     const html = await renderPrintHtml(fixtureOrder({

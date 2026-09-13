@@ -67,6 +67,7 @@ export type ExternalOrderChargeShipmentInput = {
   billableWeightKg: Decimal.Value | null;
   /** Server-validated item facts allocated to this shipment for weight estimation. */
   weightItems?: readonly ExternalOrderChargeWeightItem[];
+  requiresActualWeight?: boolean;
   /** Sum of all style quantities allocated to this shipment. */
   itemQuantity: number;
 };
@@ -300,6 +301,10 @@ export function resolveExternalOrderShipmentWeight(
       weightItemCount: shipment.weightItems?.length ?? 0,
       error: '实际计费重量无效，请核对履约重量',
     };
+  }
+
+  if (shipment.requiresActualWeight) {
+    return {status: 'INCOMPLETE', source: 'SERVER_ESTIMATE', billableWeightKg: null, netWeightGrams: null, weightItemCount: shipment.weightItems?.length ?? 0, error: '装盒运费需确认实际包装重量'};
   }
 
   if (policy.billableWeightInput === 'CARRIER_CONFIRMED') {
@@ -956,6 +961,7 @@ function logisticsPolicySnapshot(policy: ExternalOrderLogisticsPolicy) {
 function chargeSnapshotInput(input: ExternalOrderChargeInput) {
   return input.shipments.map((shipment) => ({
     shipmentKey: shipment.shipmentKey,
+    ...(shipment.requiresActualWeight ? {requiresActualWeight: true} : {}),
     province: shipment.province?.trim() || null,
     billableWeightKg:
       parseFiniteDecimal(shipment.billableWeightKg)?.toString() ?? null,

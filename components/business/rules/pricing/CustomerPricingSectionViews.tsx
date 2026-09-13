@@ -158,6 +158,7 @@ export type CustomerShippingPricingFields = {
 };
 
 export type CustomerShipPricingSectionViewProps = {
+  box?: readonly {label: string; field: PricingNumericFieldState}[];
   bag: CustomerBagPricingFields;
   carton: CustomerCartonPricingFields;
   shipping: CustomerShippingPricingFields;
@@ -968,6 +969,7 @@ function calculateShippingExample(
 }
 
 export function CustomerShipPricingSectionView({
+  box,
   bag,
   carton,
   shipping,
@@ -1014,6 +1016,13 @@ export function CustomerShipPricingSectionView({
           </div>
         </CardContent>
       </Card>
+
+      {box ? <Card className="min-w-0 gap-0 rounded-xl py-0 shadow-none">
+        <CardContent className="px-4 py-4 sm:px-5">
+          <CardSectionLabel>装盒 · 元/盒</CardSectionLabel>
+          <div className="divide-y">{box.map((row) => <ParameterRow key={row.label} label={row.label} field={row.field} unit="元/盒" step="0.01" />)}</div>
+        </CardContent>
+      </Card> : null}
 
       <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
         <CardContent className="min-w-0 p-0">

@@ -1,3 +1,4 @@
+import { BOX_PRICE_RULES, boxPriceRuleDefinition } from '@/lib/price/box-packaging-rules';
 import 'server-only';
 import { blankSpecificationKey } from '@/lib/price/blank-paper';
 
@@ -320,7 +321,7 @@ function ownsSectionRule(
   return (
     rule.purpose === CustomerPriceBookPurpose.PROCESSING &&
     (code === 'PACKAGING_SINGLE_STYLE_PER_BAG' ||
-      code === 'PACKAGING_MIXED_STYLE_PER_BAG')
+      code === 'PACKAGING_MIXED_STYLE_PER_BAG' || Boolean(boxPriceRuleDefinition(code)))
   );
 }
 
@@ -583,8 +584,8 @@ function createDraftActionLabel(
       ? '收起物流费调价'
       : '调整物流费'
     : selected
-      ? '收起入袋费调价'
-      : '调整入袋费';
+      ? '收起包装费调价'
+      : '调整包装费';
 }
 
 function createDraftHref(
@@ -1287,6 +1288,10 @@ function renderShip(
 
   return (
     <CustomerShipPricingSectionView
+      box={BOX_PRICE_RULES.map((definition) => {
+        const rule = ruleByCode(workspace.rules, definition.code);
+        return {label: definition.name, field: rule ? ruleField(assembly, `ship.box.${definition.code}`, [rule], 'amount') : missingField(`ship.box.${definition.code}`)};
+      })}
       bag={{
         normalFee: normalBag
           ? ruleField(assembly, 'ship.bag.normalFee', [normalBag], 'amount')

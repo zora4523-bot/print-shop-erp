@@ -1,3 +1,4 @@
+import { packagingBoxType } from './packaging-mode';
 import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
 import { prepareOrderForProductionInTx } from './production-readiness';
 import { OrderChangeRequestError } from './change-request-error';
@@ -1921,6 +1922,7 @@ async function prepareExternalLogisticsChargeRefresh(input: {
             );
           return {
             shipmentKey: shipment.shipmentKey,
+            requiresActualWeight: input.calculation.input.packagingGroups.some((group) => packagingBoxType(group.mode) && group.items.some((item) => (shipment.itemQuantities[item.itemKey] ?? 0) > 0)),
             province: shipment.province,
             billableWeightKg: shipment.trustedBillableWeightKg ?? null,
             itemQuantity: allocations.reduce(
@@ -3236,6 +3238,7 @@ function factoryConfirmationCurrentAmount(input: {
         );
         return {
           shipmentKey: shipment.shipmentKey,
+          requiresActualWeight: input.calculation.input.packagingGroups.some((group) => packagingBoxType(group.mode) && group.items.some((item) => (shipment.itemQuantities[item.itemKey] ?? 0) > 0)),
           province: shipment.province,
           billableWeightKg: shipment.trustedBillableWeightKg ?? null,
           itemQuantity: allocations.reduce(

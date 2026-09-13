@@ -11,6 +11,16 @@ applies_to: repository source at last_verified
 [`prisma/schema.prisma`](./prisma/schema.prisma)，迁移历史的唯一事实源是
 [`prisma/migrations/`](./prisma/migrations/)。任何文档里的数字都不能替代目标数据库上的 `prisma migrate status`。
 
+## 包装类型增量（2026-09-13 局部核对）
+
+新增迁移 `20260913140000_order_packaging_types`、`20260913140100_packaging_constraints`、`20260913140200_box_piecework_unit`，不回写历史记录。包装模式扩展为入袋、不包装及两种盒型的常规/混装；`CustomerPriceCalculationType` 和 `PieceworkRateUnit` 增加 `PER_BOX`。
+
+不包装约束：`actualBagCount=0`、`unitPrice=0`、`subtotal=0`，建议小计为 0 或空；其余模式实际包装数量必须为正。常规装盒只含一款，混装至少两款。已有数据库列名 `actualBagCount` / `unitsPerBag` 保留兼容，新类型按袋/盒语义解释。
+
+打包生产工序支持 `PER_BAG` / `PER_BOX`；不包装不物化打包工序。工资规则唯一键变为 `(priceBookId, operationType, unit)`；已发布工资本保留原三条必需规则，可额外包含一条装盒规则。没有装盒工价时不套用入袋工价。客户报价与工资本仍独立。
+
+空盒及装盒费写入新加工费价目版本，不修改已发布规则或旧工单快照。安装步骤见 [包装类型实施记录](./docs/包装类型实施-20260913.md)。
+
 ## 技术基线
 
 - PostgreSQL；开发与生产拓扑见 [DEVELOPMENT.md](./DEVELOPMENT.md) 和 [DEPLOYMENT.md](./DEPLOYMENT.md)。

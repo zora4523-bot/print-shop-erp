@@ -241,6 +241,7 @@ function toCanonicalFacts(data: CreateOrderInput): unknown {
       printFoilMode: canonicalPrintFoilMode(item),
       foilTechnique: item.foilTechnique,
       lamination: item.lamination,
+      packagingMode: data.packagingGroups.find((group) => (group.itemUnitsPerBag[index] ?? 0) > 0)?.mode,
       pack: item.pack ?? null,
       remark: item.remark,
     })),

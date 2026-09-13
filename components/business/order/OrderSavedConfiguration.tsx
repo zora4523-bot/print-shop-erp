@@ -1,3 +1,4 @@
+import { packagingModeLabel, packagingUnit } from '@/lib/order/packaging-mode';
 import Decimal from 'decimal.js';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import type { ReactNode } from 'react';
@@ -72,7 +73,7 @@ export function OrderSavedConfiguration({
               </Disclosure>
             ))}
             <div className="flex justify-between gap-3 py-3 text-sm">
-              <span>入袋费</span>
+              <span>包装费</span>
               <span>
                 {order.items.length && 'packagingAmount' in order
                   ? (order.packagingAmount == null ? '待核定' : formatMoney(String(order.packagingAmount)))
@@ -200,7 +201,7 @@ export function OrderSavedConfiguration({
               </Fact>
             ) : null}
             {'packagingAmount' in order ? (
-              <Fact label="入袋费">
+              <Fact label="包装费">
                 {order.items.length ? (order.packagingAmount == null ? '待核定' : formatMoney(String(order.packagingAmount))) : '未计价'}
               </Fact>
             ) : null}
@@ -425,27 +426,27 @@ export function OrderSavedPackaging({ order }: { order: Order }) {
         ))}
       </div>
       {order.packagingGroups.length === 0 ? (
-        <p className="text-sm text-muted-foreground">未记录分袋明细。</p>
+        <p className="text-sm text-muted-foreground">未记录包装明细。</p>
       ) : null}
       {order.packagingGroups.map((group) => (
         <div key={group.id} className="min-w-0 rounded-lg border p-3">
           <h3 className="text-sm font-medium">
             包装组 #{group.sequence}
             {group.name ? ` · ${group.name}` : ''} ·{' '}
-            {group.mode === 'MIXED_STYLE' ? '混装' : '单款装'}
+            {packagingModeLabel(group.mode)}
           </h3>
           <p className="mt-1 text-sm">
-            实际 {qty(group.actualBagCount)} 袋 ·{' '}
+            {group.mode === 'UNPACKED' ? '不收取包装费' : `实际 ${qty(group.actualBagCount)} ${packagingUnit(group.mode)}`} ·{' '}
             {group.lines
               .map(
                 (line) =>
-                  `#${line.orderItem.sequence} 每袋 ${qty(line.unitsPerBag)} 个`,
+                  group.mode === 'UNPACKED' ? `#${line.orderItem.sequence}` : `#${line.orderItem.sequence} 每${packagingUnit(group.mode)} ${qty(line.unitsPerBag)} 个`,
               )
-              .join('；') || '未记录每袋组成'}
+              .join('；') || '未记录包装组成'}
           </p>
           {'subtotal' in group ? (
             <p className="mt-1 text-sm text-muted-foreground">
-              入袋单价 {formatUnitPrice(String(group.unitPrice))} · 小计{' '}
+              包装单价 {formatUnitPrice(String(group.unitPrice))} · 小计{' '}
               {group.subtotal == null ? '待核定' : formatMoney(String(group.subtotal))}
               {group.priceOverrideReason
                 ? ` · ${group.priceOverrideReason}`

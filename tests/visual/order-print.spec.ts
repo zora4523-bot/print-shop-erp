@@ -364,6 +364,33 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(page.locator('html')).toHaveAttribute('data-print-invocation-count', '1');
   });
 
+  for (const mode of ['UNPACKED', 'BOX_RED_CARD', 'BOX_TACTILE'] as const) {
+    test(`${mode} 单款工单打印一页，包装类型与数量正确`, async ({ page }) => {
+      const order = await standaloneOrderFixture();
+      order.items = [{...order.items[0]!, quantity: 101}];
+      order.customName = '春节红包';
+      order.packageRequirement = null;
+      const units = mode === 'BOX_TACTILE' ? 8 : 10;
+      const count = mode === 'UNPACKED' ? 0 : Math.ceil(101 / units);
+      order.packagingGroups = [{
+        id: 'packaging', sequence: 1, name: null, mode, actualBagCount: count,
+        lines: [{orderItemId: order.items[0]!.id, orderItemSequence: 1, unitsPerBag: units}],
+      }];
+      order.shipments[0]!.lines = [{orderItemSequence: 1, orderItemName: order.items[0]!.name, quantity: 101}];
+      order.productionSteps = [{...order.productionSteps[0]!, plannedQty: 101}];
+      if (mode !== 'UNPACKED') order.productionSteps.push({
+        ...order.productionSteps[0]!, id: 'packing', itemSequence: null, itemName: null,
+        scopeLabel: '包装组 1 · 图 1', craftName: '打包', plannedQty: count, quantityUnit: '盒',
+      });
+      await page.setContent(buildStandaloneHtml(order));
+      await waitForPrintReady(page, 1);
+      await expect(page.locator('.items')).toContainText(mode === 'UNPACKED' ? '不包装' : `${count}盒`);
+      await expect(page.locator('.work-order-document')).not.toContainText('包装数量未填');
+      await expectDeclaredPagination(page);
+      await page.locator('.work-order-document').screenshot({path: test.info().outputPath(`${mode}.png`)});
+    });
+  }
+
   test('standalone HTML 真实执行分页脚本并保留一个主码和完整工序', async ({ page }) => {
     const order = await standaloneOrderFixture();
     const base = `https://print-regression.example.com/wo/${order.orderNo}?v=3`;

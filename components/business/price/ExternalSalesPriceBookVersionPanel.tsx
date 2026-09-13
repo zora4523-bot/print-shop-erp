@@ -383,6 +383,7 @@ const CALCULATION_LABELS: Record<CustomerPriceCalculationType, string> = {
   [CustomerPriceCalculationType.PER_SHEET]: '张',
   [CustomerPriceCalculationType.PER_10K]: '万个',
   [CustomerPriceCalculationType.PER_ITEM]: '款',
+  [CustomerPriceCalculationType.PER_BOX]: '按盒计价',
   [CustomerPriceCalculationType.PER_BAG]: '袋',
 };
 

@@ -1,5 +1,14 @@
 'use client';
-import { MAX_CREATE_ORDER_UNITS_PER_BAG } from '@/lib/order/create-order-packaging';
+import {
+  isMixedPackaging,
+  packagingType,
+  packagingBoxType,
+  packagingModeFor,
+  packagingCapacity,
+  PACKAGING_BOXES,
+  type PackagingType,
+  type PackagingBoxType,
+} from '@/lib/order/packaging-mode';
 
 import { Group, FieldLabel, FieldError, RequiredMark, PillPicker } from './OrderFieldPrimitives';
 import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
@@ -801,6 +810,51 @@ export function OrderFormB({
           />
 
           <Group title="数量与包装">
+            <div className="mb-5">
+              <PillPicker
+                id={`${uid}-packaging-type`}
+                label="包装类型"
+                value={packagingType(packaging.mode)}
+                options={[
+                  { value: 'BAG', label: '入袋' },
+                  { value: 'UNPACKED', label: '不包装' },
+                  { value: 'BOX', label: '装盒' },
+                ]}
+                disabled={disabled}
+                onChange={(type) =>
+                  onPackagingModeChange(
+                    packagingModeFor(
+                      type as PackagingType,
+                      isMixedPackaging(packaging.mode),
+                      packagingBoxType(packaging.mode) ?? 'RED_CARD',
+                    ),
+                  )
+                }
+              />
+              {packagingType(packaging.mode) === 'BOX' ? (
+                <div className="mt-4">
+                  <PillPicker
+                    id={`${uid}-box-type`}
+                    label="盒子"
+                    value={packagingBoxType(packaging.mode) ?? 'RED_CARD'}
+                    options={Object.entries(PACKAGING_BOXES).map(([value, box]) => ({
+                      value,
+                      label: `${box.label} · 最多 ${box.capacity} 个/盒`,
+                    }))}
+                    disabled={disabled}
+                    onChange={(box) =>
+                      onPackagingModeChange(
+                        packagingModeFor(
+                          'BOX',
+                          isMixedPackaging(packaging.mode),
+                          box as PackagingBoxType,
+                        ),
+                      )
+                    }
+                  />
+                </div>
+              ) : null}
+            </div>
             <div className="grid grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
               <OrderItemQuantityField
                 uid={uid}
@@ -809,67 +863,77 @@ export function OrderFormB({
                 itemErrors={itemErrors}
                 onQuantityChange={onQuantityChange}
               />
-              <div>
-                <FieldLabel htmlFor={`${uid}-units-per-bag`} required>
-                  每包数量
-                </FieldLabel>
-                <Input
-                  id={`${uid}-units-per-bag`}
-                  type="number"
-                  min={1}
-                  max={MAX_CREATE_ORDER_UNITS_PER_BAG}
-                  step={1}
-                  required
-                  aria-required="true"
-                  aria-invalid={Boolean(
-                    packaging.error || fieldErrors?.packaging,
-                  )}
-                  aria-describedby={`${uid}-packaging-message`}
+              {packagingType(packaging.mode) !== 'UNPACKED' ? (
+                <div>
+                  <FieldLabel htmlFor={`${uid}-units-per-bag`} required>
+                    {packagingType(packaging.mode) === 'BOX' ? '每盒数量' : '每包数量'}
+                  </FieldLabel>
+                  <Input
+                    id={`${uid}-units-per-bag`}
+                    type="number"
+                    min={1}
+                    max={packagingCapacity(packaging.mode) ?? undefined}
+                    step={1}
+                    required
+                    aria-required="true"
+                    aria-invalid={Boolean(packaging.error || fieldErrors?.packaging)}
+                    aria-describedby={`${uid}-packaging-message`}
+                    disabled={disabled}
+                    value={packaging.unitsPerBag || ''}
+                    className="h-10"
+                    onChange={(event) => onUnitsPerBagChange(Number(event.target.value) || 0)}
+                  />
+                  <FieldError
+                    id={`${uid}-packaging-message`}
+                    reservedLines={2}
+                    hint={
+                      packaging.bagCount !== null
+                        ? `共 ${packaging.bagCount.toLocaleString('zh-CN')} ${packagingType(packaging.mode) === 'BOX' ? '盒' : '包'}`
+                        : undefined
+                    }
+                  >
+                    {packaging.error ?? fieldErrors?.packaging}
+                  </FieldError>
+                </div>
+              ) : (
+                <div className="flex items-center text-sm text-muted-foreground">
+                  包装费 ¥0.00
+                </div>
+              )}
+            </div>
+            {packagingType(packaging.mode) !== 'UNPACKED' ? (
+              <div className="mt-5">
+                <PillPicker
+                  id={`${uid}-packaging-mode`}
+                  label="包装方式"
+                  value={isMixedPackaging(packaging.mode) ? 'MIXED_STYLE' : 'SINGLE_STYLE'}
+                  options={[
+                    {
+                      value: OrderPackagingMode.SINGLE_STYLE,
+                      label: '常规装',
+                    },
+                    {
+                      value: OrderPackagingMode.MIXED_STYLE,
+                      label: '混装',
+                      disabled: itemFields.length < 2,
+                    },
+                  ]}
                   disabled={disabled}
-                  value={packaging.unitsPerBag || ''}
-                  className="h-10"
-                  onChange={(event) =>
-                    onUnitsPerBagChange(
-                      Number(event.target.value) || 0,
+                  onChange={(mode) =>
+                    onPackagingModeChange(
+                      packagingModeFor(
+                        packagingType(packaging.mode),
+                        mode === 'MIXED_STYLE',
+                        packagingBoxType(packaging.mode) ?? 'RED_CARD',
+                      ),
                     )
                   }
                 />
-                <FieldError
-                  id={`${uid}-packaging-message`}
-                  reservedLines={2}
-                  hint={
-                    packaging.bagCount !== null
-                      ? `共 ${packaging.bagCount.toLocaleString('zh-CN')} 包`
-                      : undefined
-                  }
-                >
-                  {packaging.error ?? fieldErrors?.packaging}
-                </FieldError>
+                {itemFields.length < 2 ? (
+                  <p className="mt-2 text-xs text-muted-foreground">混装需至少 2 款</p>
+                ) : null}
               </div>
-            </div>
-            <div className="mt-5">
-              <PillPicker
-                id={`${uid}-packaging-mode`}
-                label="包装方式"
-                value={packaging.mode}
-                options={[
-                  {
-                    value: OrderPackagingMode.SINGLE_STYLE,
-                    label: '常规装',
-                  },
-                  {
-                    value: OrderPackagingMode.MIXED_STYLE,
-                    label: '混装',
-                    disabled: itemFields.length < 2,
-                  },
-                ]}
-                disabled={disabled}
-                onChange={onPackagingModeChange}
-              />
-              {itemFields.length < 2 ? (
-                <p className="mt-2 text-xs text-muted-foreground">混装需至少 2 款</p>
-              ) : null}
-            </div>
+            ) : null}
           </Group>
 
           {packagingExtras ? <div className="mt-5">{packagingExtras}</div> : null}

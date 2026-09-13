@@ -1,3 +1,4 @@
+import { packagingType, packagingModeLabel } from './packaging-mode';
 import type { CSSProperties, ReactNode } from 'react';
 import { printFontCss } from './print-fonts';
 
@@ -29,6 +30,7 @@ type Artwork = {
 };
 
 type ItemPackaging = {
+  mode?: import('@/generated/prisma/enums').OrderPackagingMode;
   unitsPerBag: number | null;
   bagCount: number | null;
   mixed: boolean;
@@ -279,7 +281,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
               <Fact
                 label="包装要求"
                 value={
-                  packageRequirement ?? (packagingComplete ? '见分袋明细' : null)
+                  packageRequirement ?? (packagingComplete ? (order.packagingGroups.some((group) => packagingType(group.mode) !== 'BAG') ? '见包装明细' : '见分袋明细') : null)
                 }
                 emphasis="l1"
               />
@@ -650,18 +652,19 @@ function ItemTable({
                 <td>
                   <div>{clean(item.name) ?? `款式 ${item.sequence}`}</div>
                   {processFacts ? <div className="item-process">{processFacts}</div> : null}
+                  {itemPack?.mode && packagingType(itemPack.mode) === 'BOX' ? <div className="item-process">{packagingModeLabel(itemPack.mode)}</div> : null}
                 </td>
                 <td className="num">{formatNumber(item.quantity)}</td>
                 <td className={classNames('num', !hasPack && 'miss')}>
-                  {hasPack ? formatNumber(itemPack!.unitsPerBag!) : '未填'}
+                  {itemPack?.mode === 'UNPACKED' ? '不包装' : hasPack ? `${formatNumber(itemPack!.unitsPerBag!)}${itemPack?.mode && packagingType(itemPack.mode) === 'BOX' ? '个/盒' : ''}` : '未填'}
                 </td>
                 <td className={classNames('num', !itemPack && 'miss')}>
                   {!itemPack
                     ? '—'
-                    : itemPack.mixed
+                    : itemPack.mode === 'UNPACKED' ? '—' : itemPack.mixed
                       ? '混装'
                       : itemPack.bagCount && itemPack.bagCount > 0
-                        ? formatNumber(itemPack.bagCount)
+                        ? `${formatNumber(itemPack.bagCount)}${itemPack.mode && packagingType(itemPack.mode) === 'BOX' ? '盒' : ''}`
                         : '—'}
                 </td>
               </tr>
@@ -854,11 +857,12 @@ function buildArtworks(order: PrintOrder): Artwork[] {
 }
 
 function buildItemPackaging(groups: PrintPackagingGroup[]): Map<string, ItemPackaging> {
-  const entries = new Map<string, Array<{ unitsPerBag: number; bagCount: number; mixed: boolean }>>();
+  const entries = new Map<string, Array<{ unitsPerBag: number; bagCount: number; mixed: boolean; mode: PrintPackagingGroup['mode'] }>>();
   for (const group of groups) {
     for (const line of group.lines) {
       const current = entries.get(line.orderItemId) ?? [];
       current.push({
+        mode: group.mode,
         unitsPerBag: line.unitsPerBag,
         bagCount: group.actualBagCount,
         mixed: group.mode === 'MIXED_STYLE' || group.lines.length > 1,
@@ -870,6 +874,7 @@ function buildItemPackaging(groups: PrintPackagingGroup[]): Map<string, ItemPack
     const units = unique(rows.map((row) => row.unitsPerBag).filter((value) => value > 0));
     const mixed = rows.length > 1 || rows.some((row) => row.mixed);
     return [itemId, {
+      mode: rows[0]?.mode,
       unitsPerBag: units.length === 1 ? units[0]! : null,
       bagCount: mixed ? null : rows[0]?.bagCount ?? null,
       mixed,
@@ -880,7 +885,7 @@ function buildItemPackaging(groups: PrintPackagingGroup[]): Map<string, ItemPack
 function calculateTotalBags(order: PrintOrder, packaging: Map<string, ItemPackaging>): number | null {
   if (order.items.length === 0 || order.packagingGroups.length === 0 ||
     order.items.some((item) => !packaging.get(item.id)?.unitsPerBag) ||
-    order.packagingGroups.some((group) => group.actualBagCount <= 0)) return null;
+    order.packagingGroups.some((group) => group.mode !== 'UNPACKED' && group.actualBagCount <= 0)) return null;
   return order.packagingGroups.reduce((sum, group) => sum + group.actualBagCount, 0);
 }
 

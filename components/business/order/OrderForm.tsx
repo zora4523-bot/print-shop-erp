@@ -1,4 +1,13 @@
 'use client';
+import {
+  isMixedPackaging,
+  packagingModeWithStyleCount,
+  packagingType,
+  packagingBoxType,
+  packagingCapacity,
+  packagingUnit,
+  packagingShipmentQuantities,
+} from '@/lib/order/packaging-mode';
 import { WorkbenchOrderTransfer } from './WorkbenchOrderTransfer';
 import { LocalOrderDrafts } from './LocalOrderDrafts';
 import { ActionNotice } from '@/components/ui-business';
@@ -318,10 +327,7 @@ export function removeOrderItemRelations({
     return [
       {
         ...group,
-        mode:
-          selectedItemCount === 1
-            ? OrderPackagingMode.SINGLE_STYLE
-            : OrderPackagingMode.MIXED_STYLE,
+        mode: packagingModeWithStyleCount(group.mode, selectedItemCount),
         itemUnitsPerBag,
       },
     ];
@@ -990,7 +996,10 @@ export function OrderForm({
       nextItemFigRef.current = resolveNextOrderItemFig(
         pendingLocalDraft.values,
       );
-      reset(pendingLocalDraft.values as unknown as CreateOrderInput);
+      reset({
+        ...(pendingLocalDraft.values as unknown as CreateOrderInput),
+        clientSubmissionId,
+      });
       setQuoteViews({});
       setLogisticsQuote(null);
       setPackagingQuote(null);
@@ -1002,7 +1011,7 @@ export function OrderForm({
       setLocalDraftError(null);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [pendingLocalDraft, reset, usesExternalSalesPricing, transferReady]);
+  }, [clientSubmissionId, pendingLocalDraft, reset, usesExternalSalesPricing, transferReady]);
 
   useEffect(() => {
     if (!localDraftReady || pendingLocalDraft || createdDraft || !isDirty) {
@@ -1194,8 +1203,10 @@ export function OrderForm({
     nextItemFigRef.current = resolveNextOrderItemFig(
       pendingLocalDraft.values,
     );
-    const restoredValues =
-      pendingLocalDraft.values as unknown as CreateOrderInput;
+    const restoredValues = {
+      ...(pendingLocalDraft.values as unknown as CreateOrderInput),
+      clientSubmissionId,
+    };
     reset(
       usesExternalSalesPricing
         ? restoredValues
@@ -1504,7 +1515,7 @@ export function OrderForm({
     const groups = getValues('packagingGroups');
     const nextItemIndex = itemsArray.fields.length;
     const mixed = groups.some(
-      (group) => group.mode === OrderPackagingMode.MIXED_STYLE,
+      (group) => isMixedPackaging(group.mode),
     );
     const extendedGroups = groups.map((group) => ({
       ...group,
@@ -1566,7 +1577,7 @@ export function OrderForm({
     const groups = getValues('packagingGroups');
     const nextItemIndex = itemsArray.fields.length;
     const mixed = groups.some(
-      (group) => group.mode === OrderPackagingMode.MIXED_STYLE,
+      (group) => isMixedPackaging(group.mode),
     );
     const sourceUnits =
       groups.find((group) => (group.itemUnitsPerBag[index] ?? 0) > 0)
@@ -1581,7 +1592,7 @@ export function OrderForm({
     if (!mixed) {
       nextGroups.push({
         name: null,
-        mode: OrderPackagingMode.SINGLE_STYLE,
+        mode: groups.find((group) => (group.itemUnitsPerBag[index] ?? 0) > 0)?.mode ?? OrderPackagingMode.SINGLE_STYLE,
         actualBagCount: 100,
         itemUnitsPerBag: Array.from(
           { length: nextItemIndex + 1 },
@@ -1797,44 +1808,31 @@ export function OrderForm({
   function changeExternalPackagingMode(mode: OrderPackagingMode) {
     const items = getValues('items');
     const groups = getValues('packagingGroups');
-    if (mode === OrderPackagingMode.MIXED_STYLE) {
-      if (items.length < 2) return;
-      const itemUnitsPerBag = items.map(
-        (_, itemIndex) =>
-          groups.find((group) => (group.itemUnitsPerBag[itemIndex] ?? 0) > 0)
-            ?.itemUnitsPerBag[itemIndex] ?? 10,
-      );
-      setValue(
-        'packagingGroups',
-        [
-          {
-            name: null,
-            mode,
-            actualBagCount: 1,
-            itemUnitsPerBag,
-          },
-        ],
-        { shouldDirty: true, shouldValidate: true },
-      );
-      return;
-    }
-    const mixedGroup = groups.find(
-      (group) => group.mode === OrderPackagingMode.MIXED_STYLE,
+    const previousMode = groups[0]?.mode ?? OrderPackagingMode.SINGLE_STYLE;
+    const switchingType =
+      packagingType(mode) !== packagingType(previousMode) ||
+      packagingBoxType(mode) !== packagingBoxType(previousMode);
+    const capacity = packagingCapacity(mode) ?? 10;
+    const units = items.map((_, index) => {
+      const previous =
+        groups.find((group) => (group.itemUnitsPerBag[index] ?? 0) > 0)?.itemUnitsPerBag[index] ?? 10;
+      return switchingType ? Math.min(previous, capacity) : previous;
+    });
+    if (isMixedPackaging(mode) && items.length < 2) return;
+    const next = isMixedPackaging(mode)
+      ? [{ name: null, mode, actualBagCount: 1, itemUnitsPerBag: units }]
+      : items.map((_, index) => ({
+          name: null,
+          mode,
+          actualBagCount: mode === OrderPackagingMode.UNPACKED ? 0 : 1,
+          itemUnitsPerBag: items.map((__, candidate) => (candidate === index ? units[index] : 0)),
+        }));
+    items.forEach((_, index) =>
+      setValue(`items.${index}.pack`, mode === OrderPackagingMode.UNPACKED ? null : units[index], {
+        shouldDirty: true,
+      }),
     );
-    setValue(
-      'packagingGroups',
-      items.map((_, itemIndex) => ({
-        name: null,
-        mode,
-        actualBagCount: 1,
-        itemUnitsPerBag: items.map((__, candidateIndex) =>
-          candidateIndex === itemIndex
-            ? (mixedGroup?.itemUnitsPerBag[itemIndex] ?? 10)
-            : 0,
-        ),
-      })),
-      { shouldDirty: true, shouldValidate: true },
-    );
+    setValue('packagingGroups', next, { shouldDirty: true, shouldValidate: true });
   }
 
   function changeExternalUnitsPerBag(index: number, unitsPerBag: number) {
@@ -1852,7 +1850,7 @@ export function OrderForm({
     const groupIndex =
       matchedGroupIndex >= 0
         ? matchedGroupIndex
-        : groups[0]?.mode === OrderPackagingMode.MIXED_STYLE
+        : groups[0] && isMixedPackaging(groups[0].mode)
           ? 0
           : index;
     if (groupIndex < 0) return;
@@ -1977,7 +1975,9 @@ export function OrderForm({
     watchedItems,
     watchedPackagingGroups.length,
   ]);
+  const packagingShipments = useMemo(() => packagingShipmentQuantities(watchedItems, watchedShipments), [watchedItems, watchedShipments]);
   const packagingBagFactsKey = JSON.stringify({
+    shipmentQuantities: packagingShipments,
     itemQuantities: watchedItems.map((item) => item.quantity),
     groups: watchedPackagingGroups.map((group) => ({
       mode: group.mode,
@@ -1990,6 +1990,7 @@ export function OrderForm({
         mode: group.mode,
         itemQuantities: watchedItems.map((item) => item.quantity),
         itemUnitsPerBag: group.itemUnitsPerBag,
+        shipmentQuantities: packagingShipments,
       });
       if (result.complete && result.bagCount !== group.actualBagCount) {
         setValue(
@@ -1999,7 +2000,7 @@ export function OrderForm({
         );
       }
     });
-  }, [packagingBagFactsKey, setValue, watchedItems, watchedPackagingGroups]);
+  }, [packagingBagFactsKey, packagingShipments, setValue, watchedItems, watchedPackagingGroups]);
 
   const currentPackagingQuoteInput = useCallback(
     () => ({
@@ -2026,7 +2027,7 @@ export function OrderForm({
       quoteFactsKey(item, watchedItems.length),
     ),
     packaging: currentPackagingInputKey,
-    logistics: 'INTERNAL_NO_ORDER_CHARGES',
+    logistics: JSON.stringify(packagingShipments),
     openedPriceVersion: null,
   });
   const currentInternalQuoteInput = useCallback(() => {
@@ -2038,10 +2039,11 @@ export function OrderForm({
           quoteFactsKey(item, values.items.length),
         ),
         packaging: JSON.stringify(packaging),
-        logistics: 'INTERNAL_NO_ORDER_CHARGES',
+        logistics: JSON.stringify(packagingShipmentQuantities(values.items, values.additionalShipments)),
         openedPriceVersion: null,
       }),
       settlementType,
+      shipmentQuantities: packagingShipmentQuantities(values.items, values.additionalShipments),
       items: values.items.map(internalOrderItemQuoteFacts),
       orderItemCount: values.items.length,
       packagingGroups: packaging.groups,
@@ -2061,7 +2063,7 @@ export function OrderForm({
     watchedPackagingGroups.every(
       (group) =>
         Number.isSafeInteger(group.actualBagCount) &&
-        group.actualBagCount >= 1,
+        (group.mode === OrderPackagingMode.UNPACKED ? group.actualBagCount === 0 : group.actualBagCount >= 1),
     );
 
   useEffect(() => {
@@ -2271,7 +2273,7 @@ export function OrderForm({
     watchedPackagingGroups.every(
       (group) =>
         Number.isSafeInteger(group.actualBagCount) &&
-        group.actualBagCount >= 1,
+        (group.mode === OrderPackagingMode.UNPACKED ? group.actualBagCount === 0 : group.actualBagCount >= 1),
     ) &&
     currentPrimaryQuantitiesValid &&
     currentLogisticsQuoteReady;
@@ -2568,7 +2570,7 @@ export function OrderForm({
               ? 'complete'
               : 'incomplete',
     amount: currentPackagingResult?.suggestedTotal ?? null,
-    label: `${watchedPackagingGroups.some((group) => group.mode === OrderPackagingMode.MIXED_STYLE) ? '混装' : '入袋'} ${watchedPackagingGroups.reduce((sum, group) => sum + (Number.isSafeInteger(group.actualBagCount) ? group.actualBagCount : 0), 0).toLocaleString('zh-CN')}袋`,
+    label: watchedPackagingGroups.every((group) => group.mode === OrderPackagingMode.UNPACKED) ? '不包装' : watchedPackagingGroups.map((group) => group.mode === OrderPackagingMode.UNPACKED ? '不包装' : `${packagingBoxType(group.mode) ? '装盒' : '入袋'} ${group.actualBagCount}${packagingUnit(group.mode)}`).join('、'),
     message:
       packagingQuote?.error ??
       currentPackagingResult?.errors.join('；') ??
@@ -2646,8 +2648,8 @@ export function OrderForm({
           quantityLabel: item.quantity.toLocaleString('zh-CN'),
           quantityInWords: `${formatChineseInteger(item.quantity)}个`,
           quantityDetail:
-            unitsPerBag > 0 && packagingGroup
-              ? `${unitsPerBag}个一包，共 ${packagingGroup.actualBagCount.toLocaleString('zh-CN')} 包`
+            packagingGroup?.mode === OrderPackagingMode.UNPACKED ? '不包装' : unitsPerBag > 0 && packagingGroup
+              ? `${unitsPerBag}个/${packagingUnit(packagingGroup.mode)}，共 ${packagingGroup.actualBagCount.toLocaleString('zh-CN')} ${packagingUnit(packagingGroup.mode)}`
               : undefined,
           specification,
           dimensions,
@@ -2701,7 +2703,7 @@ export function OrderForm({
             item.lamination === OrderLamination.MATTE
               ? [{ label: '覆亚膜' }]
               : []),
-            ...(packagingGroup?.mode === OrderPackagingMode.MIXED_STYLE
+            ...(packagingGroup && isMixedPackaging(packagingGroup.mode)
               ? [{ label: '混装' }]
               : []),
             ...(!cdr ? [{ label: '未上传 CDR', critical: true }] : []),
@@ -2737,7 +2739,7 @@ export function OrderForm({
     externalCreateOrderOptions,
   );
   const activeMixedPackagingGroup = watchedPackagingGroups.find(
-    (group) => group.mode === OrderPackagingMode.MIXED_STYLE,
+    (group) => isMixedPackaging(group.mode),
   );
   const activePackagingGroup =
     activeMixedPackagingGroup ??
@@ -2750,6 +2752,7 @@ export function OrderForm({
         mode: activePackagingGroup.mode,
         itemQuantities: watchedItems.map((item) => item.quantity),
         itemUnitsPerBag: activePackagingGroup.itemUnitsPerBag,
+        shipmentQuantities: packagingShipments,
       })
     : null;
   const externalLocalIssues = externalValidationVisible
@@ -3210,7 +3213,7 @@ export function OrderForm({
                 <FieldError
                   id="packageRequirement-hint"
                   reservedLines={2}
-                  hint="用于封口、贴标等补充要求；分袋数量和费用以包装明细为准。"
+                  hint="用于封口、贴标等补充要求；包装数量和费用以包装明细为准。"
                 >
                   {errors.packageRequirement?.message}
                 </FieldError>

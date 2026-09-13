@@ -23,7 +23,7 @@ export type PrintProductionStep = {
   itemName?: string | null;
   // Distinguishes operations spanning packaging groups or multiple items.
   scopeLabel?: string | null;
-  quantityUnit?: '个' | '袋';
+  quantityUnit?: '个' | '袋' | '盒';
   craftName: string;
   plannedQty: number;
   completedQty: number;
@@ -94,7 +94,7 @@ export type PrintPackagingGroup = {
   id: string;
   sequence: number;
   name?: string | null;
-  mode: 'SINGLE_STYLE' | 'MIXED_STYLE';
+  mode: import('@/generated/prisma/enums').OrderPackagingMode;
   actualBagCount: number;
   lines: Array<{
     orderItemId: string;

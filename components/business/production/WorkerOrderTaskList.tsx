@@ -13,7 +13,7 @@ export type WorkerOrderTaskCard = {
   planned: string;
   completed: string;
   remaining: string;
-  unit: '个' | '袋';
+  unit: '个' | '袋' | '盒';
   myAmount?: string;
 };
 

@@ -62,7 +62,7 @@ export async function inspectOrderProductionReadinessInTx(
     !packaging.equals(order.packagingAmount) || !processing.equals(order.processingAmount) || !total.equals(order.totalAmount) || total.isNegative() || !total.isFinite()) {
     issues.push('费用明细与工单合计不一致，请先核对费用');
   }
-  const production = deriveProductionOperationPlan({ orderId, items: order.items, packagingGroups: order.packagingGroups });
+  const production = deriveProductionOperationPlan({ orderId, items: order.items, packagingGroups: order.packagingGroups, shipments: order.shipments });
   if (!production.ok) issues.push(...production.issues.map((issue) => issue.message));
   const craftIds = [...new Set(order.items.flatMap((item) => item.crafts))];
   const crafts = craftIds.length === 0 ? [] : await tx.craft.findMany({

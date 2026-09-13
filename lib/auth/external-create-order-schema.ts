@@ -1,3 +1,4 @@
+import { OrderPackagingMode } from '@/generated/prisma/enums';
 import { MAX_CREATE_ORDER_UNITS_PER_BAG } from '@/lib/order/create-order-packaging';
 import { z } from 'zod';
 
@@ -63,6 +64,7 @@ export const externalCreateOrderStyleSchema = z
     lamination: z
       .enum(['NONE', 'MATTE', 'SOFT_TOUCH', 'NEW_GLOSS', 'LASER'])
       .default('NONE'),
+    packagingMode: z.enum(OrderPackagingMode).optional(),
     pack: positiveNullableInteger('每包数量', MAX_CREATE_ORDER_UNITS_PER_BAG),
     remark: optionalTrimmed(1_000),
   })
@@ -140,7 +142,7 @@ function addOrderFactsIssues(
       });
     }
     seen.add(style.fig);
-    if (requirePack && style.pack === null) {
+    if (requirePack && style.packagingMode !== OrderPackagingMode.UNPACKED && style.pack === null) {
       ctx.addIssue({
         code: 'custom',
         path: ['styles', index, 'pack'],

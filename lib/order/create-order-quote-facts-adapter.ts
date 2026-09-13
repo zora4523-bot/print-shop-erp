@@ -6,6 +6,7 @@ import {
   OrderItemPricingRoute,
   OrderLamination,
   OrderProductStructure,
+  type OrderPackagingMode,
 } from '../../generated/prisma/enums';
 import {
   canonicalizeCreateOrderPaperFact,
@@ -70,7 +71,7 @@ export type LegacyCreateOrderQuoteItemFacts = {
 
 export type LegacyCreateOrderPackagingGroupFacts = {
   groupKey: string;
-  mode: 'SINGLE_STYLE' | 'MIXED_STYLE';
+  mode: OrderPackagingMode;
   /**
    * Persisted membership and per-bag composition. Any old actualBagCount is
    * deliberately ignored; the pure engine derives the chargeable bag count.

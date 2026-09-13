@@ -24,6 +24,7 @@ export type CreateOrderQuoteMutationResult =
   | { status: 'error'; message: string };
 
 export type InternalCreateOrderQuoteActionInput = {
+  shipmentQuantities?: number[][];
   factsKey: string;
   settlementType:
     | typeof OrderSettlementType.INTERNAL_SALES

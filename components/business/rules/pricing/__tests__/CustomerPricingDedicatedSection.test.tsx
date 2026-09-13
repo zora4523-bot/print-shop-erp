@@ -354,11 +354,11 @@ describe('CustomerPricingDedicatedSection', () => {
     );
 
     expect(closedHtml).toContain('>调整物流费</a>');
-    expect(closedHtml).toContain('>调整入袋费</a>');
+    expect(closedHtml).toContain('>调整包装费</a>');
     expect(closedHtml).toContain('start=1&amp;purpose=logistics');
     expect(closedHtml).toContain('start=1&amp;purpose=processing');
     expect(html).toContain('>收起物流费调价</a>');
-    expect(html).toContain('>调整入袋费</a>');
+    expect(html).toContain('>调整包装费</a>');
     expect(html).toContain('href="/owner/rules/customer-pricing?section=ship"');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-haspopup="dialog"');

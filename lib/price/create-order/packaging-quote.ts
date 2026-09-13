@@ -1,5 +1,7 @@
 import { OrderPackagingMode } from '../../../generated/prisma/enums';
 import { calculatePackagingBagCount } from '../../order/packaging-bag-count';
+import { packagingBoxType, packagingModeLabel } from '@/lib/order/packaging-mode';
+import type { CreateOrderShipmentInput } from './types';
 import { decimalValue, safeMoney, safeUnitPrice } from './money';
 import type {
   CreateOrderPackagingGroupInput,
@@ -22,7 +24,12 @@ function packagingLine(args: {
     layer: 'PACKAGING_GROUP',
     itemKey: null,
     groupKey: args.groupKey,
-    code: 'BAGGING',
+    code:
+      args.basis.mode === 'UNPACKED'
+        ? 'NO_PACKAGING'
+        : String(args.basis.mode).startsWith('BOX_')
+          ? 'BOX_PACKAGING'
+          : 'BAGGING',
     label: args.label,
     status: args.status,
     amount: args.amount,
@@ -47,7 +54,7 @@ function pendingGroup(
     knownAmount: '0.00',
     line: packagingLine({
       groupKey,
-      label: mode === 'MIXED_STYLE' ? '混装入袋' : '常规入袋',
+      label: packagingModeLabel(mode),
       status: 'PENDING_AMOUNT',
       amount: null,
       includedInKnownTotal: false,
@@ -68,6 +75,7 @@ function quoteGroup(args: {
   itemsByKey: ReadonlyMap<string, CreateOrderQuoteItemInput>;
   manualItemKeys: ReadonlySet<string>;
   snapshot: CreateOrderPriceSnapshot;
+  shipments?: readonly CreateOrderShipmentInput[];
 }): CreateOrderPackagingGroupQuote {
   const { group, itemsByKey, manualItemKeys, snapshot } = args;
   const itemKeys = group.items.map((item) => item.itemKey);
@@ -79,9 +87,7 @@ function quoteGroup(args: {
     (itemKey, index) => itemKeys.indexOf(itemKey) !== index,
   );
   if (duplicateItemKeys.length > 0) {
-    errors.push(
-      `包装组款式重复：${[...new Set(duplicateItemKeys)].join('、')}`,
-    );
+    errors.push(`包装组款式重复：${[...new Set(duplicateItemKeys)].join('、')}`);
   }
   const unknownItemKeys = itemKeys.filter((itemKey) => !itemsByKey.has(itemKey));
   if (unknownItemKeys.length > 0) {
@@ -96,48 +102,58 @@ function quoteGroup(args: {
   }
 
   const bagCountResult = calculatePackagingBagCount({
-    mode:
-      group.mode === 'MIXED_STYLE'
-        ? OrderPackagingMode.MIXED_STYLE
-        : OrderPackagingMode.SINGLE_STYLE,
-    itemQuantities: group.items.map(
-      (item) => itemsByKey.get(item.itemKey)!.quantity,
-    ),
+    mode: group.mode,
+    itemQuantities: group.items.map((item) => itemsByKey.get(item.itemKey)!.quantity),
     itemUnitsPerBag: group.items.map((item) => item.unitsPerBag!),
+    shipmentQuantities: args.shipments?.map((shipment) =>
+      group.items.map((item) => shipment.itemQuantities[item.itemKey] ?? 0),
+    ),
   });
   if (!bagCountResult.complete) {
-    return pendingGroup(
-      group.groupKey,
-      itemKeys,
-      group.mode,
-      bagCountResult.errors,
-    );
+    return pendingGroup(group.groupKey, itemKeys, group.mode, bagCountResult.errors);
   }
 
-  const rawRate =
-    group.mode === 'MIXED_STYLE'
-      ? snapshot.bagging.mixedPerBag
-      : snapshot.bagging.standardPerBag;
+  const box = packagingBoxType(group.mode);
+  const noPackaging = group.mode === OrderPackagingMode.UNPACKED;
+  const boxMaterialRate = box
+    ? decimalValue(
+        box === 'RED_CARD'
+          ? (snapshot.boxing?.redCardEmptyBox ?? '')
+          : (snapshot.boxing?.tactileEmptyBox ?? ''),
+      )
+    : null;
+  const boxPackingRate = box ? decimalValue(snapshot.boxing?.packingPerBox ?? '') : null;
+  if (box && (!boxMaterialRate || !boxPackingRate)) {
+    return pendingGroup(group.groupKey, itemKeys, group.mode, [
+      '当前价格版本缺少盒子单价或装盒费，请配置并发布包装价格',
+    ]);
+  }
+  const rawRate = noPackaging
+    ? '0'
+    : box
+      ? boxMaterialRate!.plus(boxPackingRate!).toString()
+      : group.mode === 'MIXED_STYLE'
+        ? snapshot.bagging.mixedPerBag
+        : snapshot.bagging.standardPerBag;
   const rate = decimalValue(rawRate);
   if (!rate) {
-    return pendingGroup(group.groupKey, itemKeys, group.mode, [
-      '入袋费率配置无效',
-    ]);
+    return pendingGroup(group.groupKey, itemKeys, group.mode, ['入袋费率配置无效']);
   }
   const quotedAmount = safeMoney(rate.times(bagCountResult.bagCount));
   if (quotedAmount === null) {
-    return pendingGroup(group.groupKey, itemKeys, group.mode, [
-      '入袋费超过可保存上限',
-    ]);
+    return pendingGroup(group.groupKey, itemKeys, group.mode, ['入袋费超过可保存上限']);
   }
   const storedRate = safeUnitPrice(rate);
   if (storedRate === null) {
-    return pendingGroup(group.groupKey, itemKeys, group.mode, [
-      '入袋费率超过可保存上限',
-    ]);
+    return pendingGroup(group.groupKey, itemKeys, group.mode, ['入袋费率超过可保存上限']);
   }
 
-  const excludedManual = itemKeys.some((itemKey) => manualItemKeys.has(itemKey));
+  const emptyBoxAmount = box
+    ? safeMoney(boxMaterialRate!.times(bagCountResult.bagCount))!
+    : null;
+
+  const excludedManual =
+    !noPackaging && !box && itemKeys.some((itemKey) => manualItemKeys.has(itemKey));
   const status = excludedManual ? 'EXCLUDED_MANUAL' : 'QUOTED';
   return {
     groupKey: group.groupKey,
@@ -148,7 +164,7 @@ function quoteGroup(args: {
     knownAmount: excludedManual ? '0.00' : quotedAmount,
     line: packagingLine({
       groupKey: group.groupKey,
-      label: group.mode === 'MIXED_STYLE' ? '混装入袋' : '常规入袋',
+      label: packagingModeLabel(group.mode),
       status,
       amount: quotedAmount,
       includedInKnownTotal: !excludedManual,
@@ -157,6 +173,16 @@ function quoteGroup(args: {
         itemKeys: itemKeys.join(','),
         bagCount: bagCountResult.bagCount,
         rate: storedRate,
+        ...(box
+          ? {
+              boxType: box,
+              emptyBoxRate: safeUnitPrice(boxMaterialRate!)!,
+              packingRate: safeUnitPrice(boxPackingRate!)!,
+              emptyBoxAmount,
+              // Allocate the rounding remainder so the evidence adds up to the charged total.
+              packingAmount: safeMoney(decimalValue(quotedAmount)!.minus(emptyBoxAmount!))!,
+            }
+          : {}),
       },
     }),
     errors: [],
@@ -169,6 +195,7 @@ export function quoteCreateOrderPackagingGroups(args: {
   groups: readonly CreateOrderPackagingGroupInput[];
   manualItemKeys: ReadonlySet<string>;
   snapshot: CreateOrderPriceSnapshot;
+  shipments?: readonly CreateOrderShipmentInput[];
 }): CreateOrderPackagingGroupQuote[] {
   const itemsByKey = new Map(args.items.map((item) => [item.itemKey, item]));
   const quotes = args.groups.map((group) =>
@@ -177,6 +204,7 @@ export function quoteCreateOrderPackagingGroups(args: {
       itemsByKey,
       manualItemKeys: args.manualItemKeys,
       snapshot: args.snapshot,
+      shipments: args.shipments,
     }),
   );
   const groupedItemKeys = new Set(
@@ -185,13 +213,7 @@ export function quoteCreateOrderPackagingGroups(args: {
 
   for (const item of args.items) {
     if (groupedItemKeys.has(item.itemKey)) continue;
-    quotes.push(
-      pendingGroup(
-        `UNASSIGNED:${item.itemKey}`,
-        [item.itemKey],
-        'SINGLE_STYLE',
-      ),
-    );
+    quotes.push(pendingGroup(`UNASSIGNED:${item.itemKey}`, [item.itemKey], 'SINGLE_STYLE'));
   }
   return quotes;
 }

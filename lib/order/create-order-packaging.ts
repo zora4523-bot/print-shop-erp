@@ -3,6 +3,7 @@ import {
   type PackagingBagCountInput,
   type PackagingBagCountResult,
 } from "./packaging-bag-count";
+import { packagingCapacity, packagingCapacityError } from './packaging-mode';
 
 export const MAX_CREATE_ORDER_UNITS_PER_BAG = 12;
 export const CREATE_ORDER_PACKAGING_LIMIT_MESSAGE =
@@ -16,12 +17,12 @@ export function calculateCreateOrderBagCount(
   if (!count.complete) return count;
   if (
     input.itemUnitsPerBag.reduce((total, units) => total + units, 0) >
-    MAX_CREATE_ORDER_UNITS_PER_BAG
+    (packagingCapacity(input.mode) ?? Number.POSITIVE_INFINITY)
   ) {
     return {
       complete: false,
       bagCount: null,
-      errors: [CREATE_ORDER_PACKAGING_LIMIT_MESSAGE],
+      errors: [packagingCapacityError(input.mode)],
     };
   }
   return count;

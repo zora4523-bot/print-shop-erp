@@ -1,3 +1,4 @@
+import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 import { canChangeOrderPackaging } from '@/lib/order/editable-fields';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
 import { readOrderActivity } from '@/lib/order/activity';
@@ -19,7 +20,6 @@ import {
   OrderFoilTechnique,
   OrderItemPricingRoute,
   OrderKind,
-  OrderPackagingMode,
   OrderProductStructure,
   OrderSettlementType,
   OrderStatus,
@@ -1965,10 +1965,7 @@ const FOIL_TECHNIQUE_LABELS: Record<OrderFoilTechnique, string> = {
   [OrderFoilTechnique.RAISED]: '激凸',
 };
 
-const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
-  [OrderPackagingMode.SINGLE_STYLE]: '单款装',
-  [OrderPackagingMode.MIXED_STYLE]: '混装',
-};
+
 
 const PRODUCTION_OPERATION_LABELS: Record<PieceworkOperationType, string> = {
   [PieceworkOperationType.PARTIAL]: '局部烫金',

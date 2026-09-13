@@ -1,4 +1,6 @@
+"use client";
 'use client';
+import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 
 import { useActionState, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -71,6 +73,7 @@ const CALCULATION_TYPE_LABELS: Record<CustomerPriceCalculationType, string> = {
   [CustomerPriceCalculationType.PER_SHEET]: '按张',
   [CustomerPriceCalculationType.PER_10K]: '每万个',
   [CustomerPriceCalculationType.PER_ITEM]: '每款一次',
+  [CustomerPriceCalculationType.PER_BOX]: '按盒计价',
   [CustomerPriceCalculationType.PER_BAG]: '按实际袋数',
 };
 
@@ -97,10 +100,7 @@ const LAMINATION_LABELS: Record<OrderLamination, string> = {
   [OrderLamination.LASER]: '激光膜',
 };
 
-const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
-  [OrderPackagingMode.SINGLE_STYLE]: '单款装',
-  [OrderPackagingMode.MIXED_STYLE]: '混装',
-};
+
 
 function textValue(formData: FormData, name: string): string {
   const value = formData.get(name);

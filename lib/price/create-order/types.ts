@@ -3,10 +3,11 @@ import type {
   ExternalOrderLogisticsPolicy,
   ExternalOrderProductStructure,
 } from '../external-order-charges';
+import type { OrderPackagingMode } from '@/generated/prisma/enums';
 
 export type CreateOrderCraft = 'PARTIAL' | 'FULL' | 'PRINT';
 
-export type CreateOrderPackagingMode = 'SINGLE_STYLE' | 'MIXED_STYLE';
+export type CreateOrderPackagingMode = OrderPackagingMode;
 
 export type CreateOrderSpecialEffect = 'NONE' | 'RELIEF' | 'RAISED';
 
@@ -217,6 +218,12 @@ export type CreateOrderPriceSnapshot = {
   bagging: {
     standardPerBag: string;
     mixedPerBag: string;
+  };
+  /** Absent on older published books; never substitute zero for missing box prices. */
+  boxing?: {
+    redCardEmptyBox: string;
+    tactileEmptyBox: string;
+    packingPerBox: string;
   };
   plate: {
     label: string;

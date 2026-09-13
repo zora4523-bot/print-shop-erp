@@ -1,3 +1,4 @@
+import { BOX_PRICE_RULES, CONFIRMED_BOX_RATES } from './box-packaging-rules';
 import 'server-only';
 
 import { createHash } from 'node:crypto';
@@ -1584,6 +1585,116 @@ export async function getCustomerPriceBookDraftRuleEditor(
         updatedAt: rule.updatedAt.toISOString(),
       },
     };
+  });
+}
+
+/** Add only the approved box rules to an unchanged draft, preserving all published history. */
+export async function prepareConfirmedBoxPackagingDraft(
+  input: { priceBookId: string; expectedDraftUpdatedAt: Date },
+  actor: AuditActor,
+): Promise<{ id: string; updatedAt: Date }> {
+  if (actor.role !== 'ADMIN') throw new CustomerPriceBookAdminError('仅管理员可设置装盒价格');
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const draft = await tx.customerPriceBook.findUnique({ where: { id: input.priceBookId } });
+    const workflow = draft ? draftWorkflow(draft.notes) : null;
+    if (
+      !draft ||
+      draft.isActive ||
+      !workflow ||
+      draft.purpose !== CustomerPriceBookPurpose.PROCESSING ||
+      draft.settlementType !== EXTERNAL_SETTLEMENT ||
+      draft.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()
+    )
+      throw new CustomerPriceBookAdminError('草稿已变化或不可编辑，请刷新后重试');
+    const source = await tx.customerPriceBook.findUnique({ where: { id: workflow.basedOn.id } });
+    const now = new Date();
+    if (!source || !source.isActive || source.effectiveFrom > now || source.effectiveTo !== null)
+      throw new CustomerPriceBookAdminError('草稿基准版本已变化');
+    const before = await validationRules(tx, draft.id);
+    const original = await validationRules(tx, source.id);
+    const outsideBoxes = (rules: DraftPriceRuleForValidation[]) =>
+      rules.filter((rule) => !BOX_PRICE_RULES.some((box) => box.code === rule.code));
+    if (
+      calculateCustomerPriceRuleSetSha256(outsideBoxes(before)) !==
+        calculateCustomerPriceRuleSetSha256(outsideBoxes(original)) ||
+      JSON.stringify(canonicalJson(notesRecord(draft.notes).constants)) !==
+        JSON.stringify(canonicalJson(notesRecord(source.notes).constants))
+    )
+      throw new CustomerPriceBookAdminError('草稿含其他调价，不能一并发布装盒规则');
+    const category = await tx.customerChargeCategory.findFirst({
+      where: { code: 'PACKING', isActive: true },
+      select: { id: true },
+    });
+    if (!category) throw new CustomerPriceBookAdminError('缺少包装收费类目');
+    for (const [index, rule] of BOX_PRICE_RULES.entries()) {
+      const existing = before.find((candidate) => candidate.code === rule.code);
+      if (existing) {
+        if (!new Prisma.Decimal(String(existing.amount)).eq(CONFIRMED_BOX_RATES[index]))
+          throw new CustomerPriceBookAdminError('装盒草稿已有不同价格，请在包装计价页面审阅');
+        continue;
+      }
+      await tx.customerPriceRule.create({
+        data: {
+          priceBookId: draft.id,
+          categoryId: category.id,
+          code: rule.code,
+          name: rule.name,
+          kind: 'ADD_ON',
+          calculationType: 'PER_BOX',
+          amount: CONFIRMED_BOX_RATES[index],
+          exclusiveGroup: rule.group,
+          priority: 100,
+          minQty: null,
+          maxQty: null,
+          triggerCondition: {
+            schemaVersion: 1,
+            target: 'PACKAGING_GROUP',
+            packagingModes: [...rule.modes],
+          },
+          sourceName: '2026-09-13 用户确认装盒报价',
+          sourceSha256: createHash('sha256')
+            .update(JSON.stringify({ rules: BOX_PRICE_RULES, rates: CONFIRMED_BOX_RATES }))
+            .digest('hex'),
+          note: '空盒与装盒加工费分别按实际盒数计价。',
+          isActive: true,
+        },
+      });
+    }
+    await assertValidRuleSet(tx, draft.id, draft.purpose);
+    await readCandidatePublishedCreateOrderPriceProjection(tx, {
+      candidatePriceBookId: draft.id,
+      effectiveFrom: now,
+      snapshotLockHeld: true,
+    });
+    const updated = await tx.customerPriceBook.update({
+      where: { id: draft.id },
+      data: {
+        notes: notesInput({
+          ...notesRecord(draft.notes),
+          workflow: {
+            ...workflow,
+            changeReason: '新增红卡、触感空盒与装盒加工费',
+            lastEditedBy: actor.id,
+            lastEditedAt: now.toISOString(),
+          },
+        }),
+      },
+      select: { id: true, updatedAt: true },
+    });
+    await writeAuditLogInTx(tx, {
+      actor,
+      action: 'UPDATE_DRAFT_RULE_GROUP',
+      entityType: 'CustomerPriceBook',
+      entityId: draft.id,
+      before: [],
+      after: BOX_PRICE_RULES.map((rule, index) => ({
+        code: rule.code,
+        amount: CONFIRMED_BOX_RATES[index],
+      })),
+      requestMetadata: { source: 'customer-price-book-admin.prepareConfirmedBoxPackagingDraft' },
+    });
+    return updated;
   });
 }
 

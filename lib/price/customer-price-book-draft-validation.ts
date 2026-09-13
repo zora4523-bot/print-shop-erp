@@ -1,3 +1,4 @@
+import { BOX_PRICE_RULES, boxPriceRuleDefinition } from './box-packaging-rules';
 import Decimal from 'decimal.js';
 import { MAX_ORDER_ITEM_FOIL_COLORS } from '../order/foil-colors';
 import {
@@ -803,7 +804,7 @@ function processingIssues(
           message: '款式规则必须明确至少一条适用计价路线',
         });
       }
-      if (rule.calculationType === 'PER_BAG') {
+      if (rule.calculationType === 'PER_BAG' || rule.calculationType === 'PER_BOX') {
         issues.push({
           path: `rules.${rule.id}.calculationType`,
           ruleId: rule.id,
@@ -827,6 +828,20 @@ function processingIssues(
         });
       }
     } else {
+      const boxRule = boxPriceRuleDefinition(rule.code);
+      if (boxRule) {
+        const condition = parsedCondition.condition;
+        const amount = parsedDecimal(rule.amount);
+        if (rule.kind !== 'ADD_ON' || rule.calculationType !== 'PER_BOX' ||
+          rule.productId !== null || rule.category.code !== 'PACKING' || rule.blocksAutomaticQuote ||
+          rule.minQty !== null || rule.maxQty !== null || rule.exclusiveGroup !== boxRule.group ||
+          !condition.packagingModes || condition.packagingModes.length !== boxRule.modes.length ||
+          condition.packagingModes.some((mode) => !(boxRule.modes as readonly string[]).includes(mode)) ||
+          !amount || !amount.isFinite() || amount.isNegative() || amount.decimalPlaces() > 4 || amount.gt('999999.9999')) {
+          issues.push({ path: `rules.${rule.id}`, ruleId: rule.id, message: `${boxRule.name}配置不完整，请检查按盒单价和适用盒型` });
+        }
+        continue;
+      }
       packagingGroupRules.push({
         rule,
         modes: parsedCondition.condition.packagingModes ?? [],
@@ -921,6 +936,14 @@ function processingIssues(
         ruleId: rule.id,
         message: `收费项目在数量上限处的金额超过款式可保存上限 ${EXTERNAL_SALES_PRICE_LIMITS.subtotal} 元`,
       });
+    }
+  }
+  const configuredBoxes = active.filter((rule) => boxPriceRuleDefinition(rule.code));
+  if (configuredBoxes.length > 0) {
+    for (const definition of BOX_PRICE_RULES) {
+      if (configuredBoxes.filter((rule) => rule.code === definition.code).length !== 1) {
+        issues.push({ path: 'rules', message: `${definition.name}必须且只能配置一条启用规则` });
+      }
     }
   }
   const engineErrors = validateExternalSalesPriceRules(

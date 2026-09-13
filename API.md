@@ -11,6 +11,16 @@ applies_to: repository source at last_verified
 
 端点实现以 [`app/api/`](./app/api/) 为事实源。修改方法、认证、参数、状态码或响应形状时，必须同步修改本文件和契约测试。
 
+## 建单包装类型（2026-09-13）
+
+`createOrderAction` 和内外部报价仍复用同一包装计算链。`packagingGroups[].mode` 支持原有 `SINGLE_STYLE` / `MIXED_STYLE`（入袋），新增 `UNPACKED`、`BOX_RED_CARD` / `BOX_RED_CARD_MIXED`、`BOX_TACTILE` / `BOX_TACTILE_MIXED`。默认仍为入袋。
+
+兼容字段 `actualBagCount` 在装盒时表示盒数，在不包装时必须为 0；数量由服务端按款式、包装组成和发货地址重新计算。`itemUnitsPerBag` 的正值用于保留不包装款式的组归属，不作为收费依据。不包装允许款式 `pack=null`；包装模式由通过归属校验的包装组推导。外部销售仍不得提交单价、覆盖金额或价格快照。
+
+管理员建单报价 `shipmentQuantities` 为按地址排列的逐款数量数组，装盒必须与各款总数一致；省略时按同一地址计算。最终创建与提交总是按持久化发货事实重新计算。装盒缺失已发布规则时返回待核价，不能自动使用 0 元或前端常量。详见 [包装规则](./docs/加工费计费规则.md#4-包装包装组级)。
+
+本地草稿仅保存可编辑事实；恢复时补回本次会话的 `clientSubmissionId`，不复用历史提交标识。
+
 ## 销售工作台计算
 
 `actions/workbench.ts` 的当前入口 `quoteWorkbenchItemAction({ item })` 要求 `order:create`，先授权再解析。`item` 复用建单报价 schema，包含产品、路线、纸张名称和克重、规格/尺寸、整数数量、正反面颜色、覆膜及局部/专版加烫事实；不接受人工改价。金额、加价比例及报价签名不属于该输入，解析后不传给领域服务。

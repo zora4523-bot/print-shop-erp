@@ -719,6 +719,7 @@ export async function createOrder(
         mode: group.mode,
         itemQuantities: items.map((item) => item.quantity),
         itemUnitsPerBag: group.itemUnitsPerBag,
+        shipmentQuantities: [items.map((item, itemIndex) => item.quantity - additionalShipments.reduce((sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0), 0)), ...additionalShipments.map((shipment) => shipment.itemQuantities)],
       });
       if (!count.complete) {
         throw new OrderInvariantError(

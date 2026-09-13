@@ -333,6 +333,11 @@ enum OrderLamination {
 enum OrderPackagingMode {
   SINGLE_STYLE
   MIXED_STYLE
+  UNPACKED
+  BOX_RED_CARD
+  BOX_RED_CARD_MIXED
+  BOX_TACTILE
+  BOX_TACTILE_MIXED
 }
 
 enum OrderChangeRequestStatus {
@@ -621,7 +626,8 @@ model OrderItemPlateDetail {
 }
 
 // 包装是订单级组合事实，不得塞进单个款式的备注。一个组明确表达
-// 单款/混装、实际袋数以及每袋的款式组成，为版本化 0.1/0.2 入袋规则提供证据。
+// 入袋/装盒/不包装及单款/混装。兼容字段 actualBagCount / unitsPerBag
+// 对装盒表示盒数/每盒组成；不包装以 0 数量保存，正数组成只保留款式归属。
 model OrderPackagingGroup {
   id                  String             @id @default(cuid())
   orderId             String
@@ -983,6 +989,7 @@ enum PieceworkRateUnit {
   PER_PASS
   PER_PIECE
   PER_BAG
+  PER_BOX
 }
 
 enum PieceworkPriceBookStatus {
@@ -1063,7 +1070,7 @@ model PieceworkPriceRule {
 
   priceBook PieceworkPriceBook @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
 
-  @@unique([priceBookId, operationType])
+  @@unique([priceBookId, operationType, unit])
   @@index([operationType])
 }
 
@@ -1667,6 +1674,7 @@ enum CustomerPriceCalculationType {
   PER_10K
   PER_ITEM
   PER_BAG
+  PER_BOX
 }
 
 enum CustomerPriceBookPurpose {

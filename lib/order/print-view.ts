@@ -26,6 +26,7 @@ const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
 };
 
 type PrintOperationRow = {
+  unit?: import('@/generated/prisma/enums').PieceworkRateUnit;
   id: string;
   workOrderVersion: number;
   operationType: PieceworkOperationType;
@@ -126,7 +127,7 @@ function buildCurrentProductionSteps(input: {
         itemSequence: singleItem?.sequence ?? null,
         itemName: singleItem?.name ?? null,
         scopeLabel: [...new Set(scopes)].join('；') || null,
-        quantityUnit: operation.operationType === PieceworkOperationType.PACKING ? '袋' : '个',
+        quantityUnit: operation.unit === 'PER_BOX' ? '盒' : operation.operationType === PieceworkOperationType.PACKING ? '袋' : '个',
         craftName: OPERATION_LABELS[operation.operationType],
         plannedQty: new Decimal(operation.plannedQty.toString())
           .div(passCount)
@@ -228,6 +229,7 @@ export async function getOrderForPrint(
           id: true,
           workOrderVersion: true,
           operationType: true,
+          unit: true,
           status: true,
           plannedQty: true,
           carriedCompletedQty: true,

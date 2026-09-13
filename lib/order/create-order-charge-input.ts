@@ -1,3 +1,4 @@
+import { packagingBoxType } from './packaging-mode';
 import type {
   ExternalOrderChargeInput,
   ExternalOrderChargeWeightItem,
@@ -23,6 +24,7 @@ export function buildCreateOrderExternalChargeInput(
       );
       return {
         shipmentKey: shipment.shipmentKey,
+        ...(input.packagingGroups.some((group) => packagingBoxType(group.mode) && group.items.some((line) => (shipment.itemQuantities[line.itemKey] ?? 0) > 0)) ? {requiresActualWeight: true} : {}),
         province: shipment.province,
         billableWeightKg: shipment.trustedBillableWeightKg ?? null,
         itemQuantity: allocations.reduce(

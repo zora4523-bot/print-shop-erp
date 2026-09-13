@@ -64,6 +64,7 @@ export type InternalCreateOrderQuoteInput = {
   items: CreateOrderQuoteItemInput[];
   orderItemCount: number;
   packagingGroups: QuoteCreateOrderPackagingGroupsInput['groups'];
+  shipmentQuantities?: number[][];
 };
 
 export type InternalCreateOrderQuoteResult =
@@ -310,18 +311,11 @@ export async function quoteInternalCreateOrder(
           }),
           packagingGroups: packagingFacts(input.packagingGroups, itemKeys),
           isSfCollect: false,
-          shipments: [
-            {
-              shipmentKey: 'internal-create',
-              province: null,
-              itemQuantities: Object.fromEntries(
-                input.items.map((item, index) => [
-                  itemKeys[index]!,
-                  item.quantity,
-                ]),
-              ),
-            },
-          ],
+          shipments: (input.shipmentQuantities ?? [input.items.map((item) => item.quantity)]).map((quantities, index) => ({
+            shipmentKey: String(index + 1),
+            province: null,
+            itemQuantities: Object.fromEntries(itemKeys.map((itemKey, itemIndex) => [itemKey, quantities[itemIndex] ?? 0])),
+          })),
         },
         includeOrderCharges: false,
       });
