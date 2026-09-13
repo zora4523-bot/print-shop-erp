@@ -40,24 +40,36 @@ export function FieldLabel({
 export function FieldError({
   id,
   children,
+  hint,
+  reservedLines,
 }: {
   id?: string;
   children?: string;
+  hint?: ReactNode;
+  reservedLines?: 1 | 2;
 }) {
-  if (!children) return null;
+  if (!children && !hint && !reservedLines) return null;
   return (
     <p
       id={id}
-      role="alert"
-      className="mt-1.5 flex items-start gap-1.5 text-xs font-semibold text-destructive"
+      role={children ? 'alert' : undefined}
+      aria-hidden={!children && !hint ? true : undefined}
+      className={cn(
+        'mt-1.5 flex items-start gap-1.5 text-xs',
+        children ? 'font-semibold text-destructive' : 'text-muted-foreground',
+        reservedLines === 1 && 'min-h-4',
+        reservedLines === 2 && 'min-h-8',
+      )}
     >
-      <span
-        aria-hidden="true"
-        className="mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full bg-destructive text-xs text-destructive-foreground"
-      >
-        !
-      </span>
-      <span>{children}</span>
+      {children ? (
+        <span
+          aria-hidden="true"
+          className="mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full bg-destructive text-xs text-destructive-foreground"
+        >
+          !
+        </span>
+      ) : null}
+      <span>{children || hint}</span>
     </p>
   );
 }

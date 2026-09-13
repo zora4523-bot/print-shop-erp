@@ -15,6 +15,7 @@ type Props = {
   required?: boolean;
   nameRequired?: boolean;
   phoneRequired?: boolean;
+  reserveErrorSpace?: boolean;
   errors?: { receiverName?: string; receiverPhone?: string };
   onNameChange?: (value: string) => void;
   onPhoneChange?: (value: string) => void;
@@ -32,6 +33,7 @@ export function OrderReceiverContactFields({
   required = false,
   nameRequired = required,
   phoneRequired = required,
+  reserveErrorSpace = false,
   errors,
   onNameChange,
   onPhoneChange,
@@ -96,8 +98,12 @@ export function OrderReceiverContactFields({
               field.change?.(event.target.value);
             }}
           />
-          {field.error ? (
-            <p id={`${field.id}-error`} className="text-xs text-destructive">
+          {field.error || reserveErrorSpace ? (
+            <p
+              id={`${field.id}-error`}
+              aria-hidden={!field.error ? true : undefined}
+              className={`text-xs text-destructive${reserveErrorSpace ? ' min-h-4' : ''}`}
+            >
               {field.error}
             </p>
           ) : null}

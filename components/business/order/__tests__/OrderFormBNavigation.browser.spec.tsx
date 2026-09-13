@@ -16,6 +16,7 @@ let host: HTMLDivElement;
 let root: Root;
 let refreshQuote: () => void;
 let requestErrorFocus: () => void;
+let showFieldErrors: (visible: boolean) => void;
 const noop = () => {};
 // Parse the real defaults rather than inventing a second item schema.
 const baseItem = createOrderSchema.shape.items.element.parse({
@@ -80,6 +81,27 @@ function QuoteRefreshFixture() {
     onUnitsPerBagChange={(value) => { setUnitsPerBag(value); setQuoteFailed(false); }}
   />;
 }
+function FieldFeedbackFixture() {
+  const [invalid, setInvalid] = useState(false);
+  const [values, setValues] = useState({
+    customName: '测试工单', receiverName: '张先生', receiverPhone: '13800138000',
+    receiverAddress: '广东省佛山市南海区测试路1号', isSfCollect: false,
+  });
+  useEffect(() => { showFieldErrors = setInvalid; }, []);
+  return <OrderFormB {...baseProps}
+    values={values} items={[baseItem]} itemFields={[{ id: 'item-1' }]}
+    activeIndex={0} onActiveIndexChange={noop} onRemove={noop}
+    packaging={{ ...baseProps.packaging, error: invalid ? '每包数量不能超过 12 个，请调整包装数量' : null }}
+    fieldErrors={invalid ? {
+      customName: '工单名称必填', receiverName: '请填写收件人', receiverPhone: '请填写收货电话',
+      receiverAddress: '请填写收货地址', items: [{ quantity: '数量必须大于 0', designImage: '请上传设计图' }],
+    } : {}}
+    onCustomNameChange={(customName) => setValues((v) => ({ ...v, customName }))}
+    onReceiverAddressChange={(receiverAddress) => setValues((v) => ({ ...v, receiverAddress }))}
+    onReceiverNameChange={(receiverName) => setValues((v) => ({ ...v, receiverName }))}
+    onReceiverPhoneChange={(receiverPhone) => setValues((v) => ({ ...v, receiverPhone }))}
+  />;
+}
 beforeEach(() => {
   document.documentElement.lang = 'zh-CN';
   host = document.createElement('div');
@@ -98,6 +120,36 @@ afterEach(() => {
 const layoutReady = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 const deleteButton = () => host.querySelector<HTMLButtonElement>('button[aria-label^="删除第"]')!;
 const selectedStyle = () => host.querySelector<HTMLButtonElement>('nav[aria-label="款式"] [aria-pressed="true"]')!;
+
+for (const theme of ['light', 'dark']) for (const [width, height] of [
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+]) {
+  it(`${width}x${height} ${theme}: field feedback keeps downstream input positions and focus stable`, async () => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<FieldFeedbackFixture />));
+    await layoutReady();
+    const selectors = ['-custom-name', '-quantity', '-units-per-bag', '-receiver-address-paste', '-receiver-name', '-receiver-phone'];
+    const fields = selectors.map((suffix) => host.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[id$="${suffix}"]`)!);
+    const phone = fields.at(-1)!;
+    phone.scrollIntoView({ block: 'center', behavior: 'instant' });
+    await page.getByRole('textbox', { name: '收货电话', exact: true }).click();
+    const positions = fields.map((field) => field.getBoundingClientRect().top);
+    const scrollY = window.scrollY;
+    for (const invalid of [true, false, true, false]) {
+      flushSync(() => showFieldErrors(invalid));
+      await layoutReady();
+      expect(fields.map((field) => field.getBoundingClientRect().top)).toEqual(positions);
+      expect(window.scrollY).toBe(scrollY);
+      expect(document.activeElement).toBe(phone);
+      expect(host.querySelectorAll('[role="alert"]').length > 0).toBe(invalid);
+      expect(host.querySelector('[id$="-packaging-message"]')!.textContent).toBe(invalid
+        ? '!每包数量不能超过 12 个，请调整包装数量' : '共 100 包');
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('[data-slot="order-form-editor"]')).toEqual([]);
+  });
+}
 
 for (const theme of ['light', 'dark']) for (const [width, height] of [
   [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],

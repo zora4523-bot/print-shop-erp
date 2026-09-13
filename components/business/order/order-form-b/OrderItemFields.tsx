@@ -485,6 +485,7 @@ export function OrderItemQuantityField({
         required
         aria-required="true"
         aria-invalid={Boolean(itemErrors?.quantity)}
+        aria-describedby={itemErrors?.quantity ? `${uid}-quantity-message` : undefined}
         disabled={disabled}
         value={item.quantity || ''}
         className="h-10 min-h-11"
@@ -494,7 +495,7 @@ export function OrderItemQuantityField({
           )
         }
       />
-      <FieldError>{itemErrors?.quantity}</FieldError>
+      <FieldError id={`${uid}-quantity-message`} reservedLines={1}>{itemErrors?.quantity}</FieldError>
     </div>
   );
 }

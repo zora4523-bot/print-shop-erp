@@ -5,6 +5,7 @@ import { ActionNotice } from '@/components/ui-business';
 import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
 import { orderItemSelectionUpdate, type OrderItemSelectionChange } from '@/lib/order/order-item-selection';
 import { OrderItemProductField } from './order-form-b/OrderItemFields';
+import { FieldError } from './order-form-b/OrderFieldPrimitives';
 import { externalOrderCatalogCandidates } from '@/lib/order/order-item-catalog';
 import { orderItemFieldOptions } from './order-item-field-options';
 import {
@@ -3003,11 +3004,9 @@ export function OrderForm({
                           </option>
                         ))}
                       </select>
-                      {errors.externalSalesUserId?.message ? (
-                        <p role="alert" className="mt-1.5 text-xs text-destructive">
-                          {errors.externalSalesUserId.message}
-                        </p>
-                      ) : null}
+                      <FieldError reservedLines={1}>
+                        {errors.externalSalesUserId?.message}
+                      </FieldError>
                     </div>
                   ) : (
                     <>
@@ -3063,11 +3062,9 @@ export function OrderForm({
                           aria-invalid={Boolean(errors.customerRef)}
                           {...register('customerRef')}
                         />
-                        {errors.customerRef?.message ? (
-                          <p role="alert" className="mt-1.5 text-xs font-semibold text-destructive">
-                            {errors.customerRef.message}
-                          </p>
-                        ) : null}
+                        <FieldError reservedLines={1}>
+                          {errors.customerRef?.message}
+                        </FieldError>
                       </div>
                     </>
                   )}
@@ -3080,11 +3077,9 @@ export function OrderForm({
                       aria-invalid={Boolean(errors.promisedDate)}
                       {...register('promisedDate')}
                     />
-                    {errors.promisedDate?.message ? (
-                      <p role="alert" className="mt-1.5 text-xs font-semibold text-destructive">
-                        {errors.promisedDate.message as string}
-                      </p>
-                    ) : null}
+                    <FieldError reservedLines={1}>
+                      {errors.promisedDate?.message as string | undefined}
+                    </FieldError>
                   </div>
                   <UrgentOrderField
                     control={control}
@@ -3212,17 +3207,13 @@ export function OrderForm({
                   aria-invalid={Boolean(errors.packageRequirement)}
                   {...register('packageRequirement')}
                 />
-                <p
+                <FieldError
                   id="packageRequirement-hint"
-                  className="text-xs text-muted-foreground"
+                  reservedLines={2}
+                  hint="用于封口、贴标等补充要求；分袋数量和费用以包装明细为准。"
                 >
-                  用于封口、贴标等补充要求；分袋数量和费用以包装明细为准。
-                </p>
-                {errors.packageRequirement?.message ? (
-                  <p role="alert" className="text-xs text-destructive">
-                    {errors.packageRequirement.message}
-                  </p>
-                ) : null}
+                  {errors.packageRequirement?.message}
+                </FieldError>
               </div>
             }
             shippingExtras={
@@ -3246,7 +3237,9 @@ export function OrderForm({
                   disabled={orderFormControlsDisabled} aria-invalid={Boolean(errors.remark)}
                   aria-describedby={errors.remark ? 'order-remark-error' : undefined}
                   {...register('remark')} />
-                {errors.remark?.message ? <p id="order-remark-error" role="alert" className="mt-2 text-sm text-destructive">{errors.remark.message}</p> : null}
+                <FieldError id="order-remark-error" reservedLines={1}>
+                  {errors.remark?.message}
+                </FieldError>
               </section>
             }
             afterShipping={
@@ -3326,9 +3319,9 @@ export function OrderForm({
                                   `additionalShipments.${shipmentIndex}.receiverName`,
                                 )}
                               />
-                              {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? (
-                                <p id={`extra-${shipmentIndex}-receiverName-error`} role="alert" className="mt-2 text-sm text-destructive">请填写收件人</p>
-                              ) : null}
+                              <FieldError id={`extra-${shipmentIndex}-receiverName-error`} reservedLines={1}>
+                                {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? '请填写收件人' : undefined}
+                              </FieldError>
                             </div>
                             <div>
                               <Label
@@ -3346,9 +3339,9 @@ export function OrderForm({
                                   `additionalShipments.${shipmentIndex}.receiverPhone`,
                                 )}
                               />
-                              {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? (
-                                <p id={`extra-${shipmentIndex}-receiverPhone-error`} role="alert" className="mt-2 text-sm text-destructive">请填写联系电话</p>
-                              ) : null}
+                              <FieldError id={`extra-${shipmentIndex}-receiverPhone-error`} reservedLines={1}>
+                                {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? '请填写联系电话' : undefined}
+                              </FieldError>
                             </div>
                             <div>
                               <Label
@@ -3406,15 +3399,9 @@ export function OrderForm({
                                   },
                                 )}
                               />
-                              {errors.additionalShipments?.[shipmentIndex]
-                                ?.receiverAddress?.message ? (
-                                <p role="alert" className="mt-1.5 text-xs font-semibold text-destructive">
-                                  {
-                                    errors.additionalShipments[shipmentIndex]
-                                      ?.receiverAddress?.message
-                                  }
-                                </p>
-                              ) : null}
+                              <FieldError reservedLines={1}>
+                                {errors.additionalShipments?.[shipmentIndex]?.receiverAddress?.message}
+                              </FieldError>
                             </div>
                           </div>
                           <fieldset className="mt-4">
@@ -3444,15 +3431,9 @@ export function OrderForm({
                                 </div>
                               ))}
                             </div>
-                            {errors.additionalShipments?.[shipmentIndex]
-                              ?.itemQuantities?.message ? (
-                              <p role="alert" className="mt-2 text-xs font-semibold text-destructive">
-                                {
-                                  errors.additionalShipments[shipmentIndex]
-                                    ?.itemQuantities?.message
-                                }
-                              </p>
-                            ) : null}
+                            <FieldError reservedLines={2}>
+                              {errors.additionalShipments?.[shipmentIndex]?.itemQuantities?.message}
+                            </FieldError>
                           </fieldset>
                         </li>
                       ))}

@@ -361,7 +361,7 @@ function DesignFileBox({
           </span>
         </Button>
       )}
-      <FieldError id={errorId}>{error}</FieldError>
+      <FieldError id={errorId} reservedLines={2}>{error}</FieldError>
     </div>
   );
 }
@@ -759,7 +759,7 @@ export function OrderFormB({
               onCustomNameChange(nextValue);
             }}
               />
-              <FieldError id={`${uid}-custom-name-message`}>
+              <FieldError id={`${uid}-custom-name-message`} reservedLines={1}>
                 {fieldErrors?.customName}
               </FieldError>
             </div>
@@ -824,6 +824,7 @@ export function OrderFormB({
                   aria-invalid={Boolean(
                     packaging.error || fieldErrors?.packaging,
                   )}
+                  aria-describedby={`${uid}-packaging-message`}
                   disabled={disabled}
                   value={packaging.unitsPerBag || ''}
                   className="h-10"
@@ -833,12 +834,15 @@ export function OrderFormB({
                     )
                   }
                 />
-                {packaging.bagCount !== null && !packaging.error ? (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    共 {packaging.bagCount.toLocaleString('zh-CN')} 包
-                  </p>
-                ) : null}
-                <FieldError>
+                <FieldError
+                  id={`${uid}-packaging-message`}
+                  reservedLines={2}
+                  hint={
+                    packaging.bagCount !== null
+                      ? `共 ${packaging.bagCount.toLocaleString('zh-CN')} 包`
+                      : undefined
+                  }
+                >
                   {packaging.error ?? fieldErrors?.packaging}
                 </FieldError>
               </div>
@@ -938,6 +942,11 @@ export function OrderFormB({
                 required
                 aria-required="true"
                 aria-invalid={Boolean(fieldErrors?.receiverAddress)}
+                aria-describedby={
+                  fieldErrors?.receiverAddress
+                    ? `${uid}-receiver-address-message`
+                    : undefined
+                }
                 disabled={disabled}
                 placeholder="粘贴电商后台地址串，自动拆分"
                 className="min-h-16"
@@ -946,7 +955,9 @@ export function OrderFormB({
                   onReceiverAddressChange(event.target.value)
                 }
               />
-              <FieldError>{fieldErrors?.receiverAddress}</FieldError>
+              <FieldError id={`${uid}-receiver-address-message`} reservedLines={1}>
+                {fieldErrors?.receiverAddress}
+              </FieldError>
             </div>
 
             {values.receiverAddress.trim() ? (
@@ -959,6 +970,7 @@ export function OrderFormB({
                     receiverPhone={receiverPhoneInitialValue}
                     nameRequired={receiverNameRequired}
                     phoneRequired={receiverPhoneRequired}
+                    reserveErrorSpace
                     disabled={disabled}
                     errors={fieldErrors}
                     onNameChange={onReceiverNameChange}
