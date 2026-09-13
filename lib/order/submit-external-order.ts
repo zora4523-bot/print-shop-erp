@@ -1,5 +1,6 @@
 import { externalShipmentContactIssues } from './external-shipment-contact';
 import Decimal from 'decimal.js';
+import { isTrustedAdminItemPricingSnapshot, isTrustedAdminPackagingPricingSnapshot, type AdminPackagingPricingSnapshotFacts, type AdminItemPricingSnapshotFacts } from './admin-pricing-snapshot';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   CustomerPriceBookPurpose,
@@ -56,6 +57,15 @@ type MoneyLike = { toString(): string } | string | number;
 const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
 
 type FinalizeOrderItem = {
+  orderId?: string;
+  craft?: string | null;
+  pack?: number | null;
+  printColorsKnown?: boolean;
+  unitPrice?: MoneyLike;
+  fixedFee?: MoneyLike;
+  subtotal?: MoneyLike;
+  priceOverrideReason?: string | null;
+  pricingSnapshot?: unknown;
   id: string;
   sequence: number;
   fig: number | null;
@@ -116,6 +126,7 @@ type FinalizeOrderRow = {
   } | null;
   items: FinalizeOrderItem[];
   packagingGroups: Array<{
+    orderId?: string; unitPrice?: MoneyLike; subtotal?: MoneyLike; priceOverrideReason?: string | null; pricingSnapshot?: unknown;
     id: string;
     sequence: number;
     name: string | null;
@@ -211,6 +222,15 @@ const finalizeOrderSelect = {
     orderBy: { sequence: 'asc' },
     select: {
       id: true,
+      orderId: true,
+      craft: true,
+      pack: true,
+      printColorsKnown: true,
+      unitPrice: true,
+      fixedFee: true,
+      subtotal: true,
+      priceOverrideReason: true,
+      pricingSnapshot: true,
       sequence: true,
       fig: true,
       name: true,
@@ -249,6 +269,11 @@ const finalizeOrderSelect = {
     orderBy: { sequence: 'asc' },
     select: {
       id: true,
+      orderId: true,
+      unitPrice: true,
+      subtotal: true,
+      priceOverrideReason: true,
+      pricingSnapshot: true,
       sequence: true,
       name: true,
       mode: true,
@@ -378,6 +403,17 @@ function persistedItemKey(item: FinalizeOrderItem): string {
   return String(item.sequence);
 }
 
+function hasAdminCreatePrice(order: FinalizeOrderRow, item: FinalizeOrderItem): boolean {
+  return item.orderId === order.id && item.craft !== undefined && item.pack !== undefined &&
+    item.printColorsKnown !== undefined && item.unitPrice !== undefined && item.fixedFee !== undefined &&
+    item.subtotal !== undefined && item.priceOverrideReason !== undefined &&
+    isTrustedAdminItemPricingSnapshot(item.pricingSnapshot, item as AdminItemPricingSnapshotFacts);
+}
+
+function hasAdminPackagingPrice(order: FinalizeOrderRow, group: FinalizeOrderRow['packagingGroups'][number]): boolean {
+  return group.orderId === order.id && group.unitPrice !== undefined && group.subtotal !== undefined && group.priceOverrideReason !== undefined && isTrustedAdminPackagingPricingSnapshot(group.pricingSnapshot, group as AdminPackagingPricingSnapshotFacts);
+}
+
 function persistedQuoteFacts(
   order: FinalizeOrderRow,
 ): CreateOrderQuoteFactsAdapterInput {
@@ -396,7 +432,7 @@ function persistedQuoteFacts(
           `款式 ${item.sequence} 的计价路线不支持自动报价`,
         );
       }
-      if (item.manualQuoteReason?.trim()) {
+      if (item.manualQuoteReason?.trim() && !hasAdminCreatePrice(order, item)) {
         throw new ExternalOrderQuoteFinalizeError(
           `款式 ${item.sequence} 携带配置外备注，外部销售不能直接提交`,
         );
@@ -414,6 +450,7 @@ function persistedQuoteFacts(
         paperType: item.paperType,
         paperWeightGsm: item.paperWeightGsm,
         quantity: item.quantity,
+        ...(hasAdminCreatePrice(order, item) ? { manualQuoteReason: item.manualQuoteReason } : {}),
         crafts: item.crafts,
         foilColors: item.foilColors,
         frontFoilColors: item.frontFoilColors,
@@ -788,38 +825,7 @@ export async function finalizeExternalOrderQuoteInTx(
       quote.errors.join('；') || '提交报价事实无效',
     );
   }
-  const logisticsPreview = pureLogisticsQuote(pureInput, priceSnapshot);
-
-  const currentQuoteToken = createExternalOrderQuoteToken({
-    items: pureInput.items,
-    packagingGroups: pureInput.packagingGroups,
-    logistics: {
-      isSfCollect: pureInput.isSfCollect,
-      shipments: pureInput.shipments,
-    },
-    priceVersion: quote.priceVersion,
-    result: {
-      items: quote.items,
-      packaging: quote.packagingGroups,
-      logistics: quote.order,
-    },
-  });
-  const presentation = presentCreateOrderQuote({
-    factsKey: order.id,
-    input: pureInput,
-    quote,
-    logistics: logisticsPreview,
-    quoteToken: currentQuoteToken,
-  });
-  if (expectedQuoteToken !== currentQuoteToken) {
-    throw new ExternalOrderQuoteChangedError(
-      currentQuoteToken,
-      presentation.knownTotal,
-      presentation.totalSemantics === 'COMPLETE'
-        ? OrderQuotedFeeCompleteness.COMPLETE
-        : OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
-    );
-  }
+  const { presentation, logisticsPreview } = assertFinalizedQuoteAcknowledged(order, pureInput, priceSnapshot, quote, expectedQuoteToken);
 
   let logistics: Awaited<
     ReturnType<typeof resolveExternalOrderChargesForProvisionalCreation>
@@ -863,6 +869,8 @@ export async function finalizeExternalOrderQuoteInTx(
   }
   const manualItemIds: string[] = [];
   let knownItemAmount = new Decimal(0);
+  let adminPriceDelta = new Decimal(0);
+  let adminPriceCount = 0;
   for (const [index, item] of order.items.entries()) {
     const pureItem = quote.items[index];
     const itemPresentation = presentation.items[index];
@@ -874,6 +882,12 @@ export async function finalizeExternalOrderQuoteInTx(
       throw new ExternalOrderQuoteFinalizeError(
         '纯引擎款式结果与工单不一致',
       );
+    }
+    if (hasAdminCreatePrice(order, item)) {
+      knownItemAmount = knownItemAmount.plus(item.subtotal!.toString());
+      adminPriceDelta = adminPriceDelta.plus(item.subtotal!.toString()).minus(pureItem.knownAmount);
+      adminPriceCount += 1;
+      continue;
     }
     knownItemAmount = knownItemAmount.plus(pureItem.knownAmount);
     const complete =
@@ -969,6 +983,12 @@ export async function finalizeExternalOrderQuoteInTx(
       throw new ExternalOrderQuoteFinalizeError(
         `包装组 ${group.sequence} 报价与工单不一致`,
       );
+    }
+    if (hasAdminPackagingPrice(order, group)) {
+      knownPackagingAmount = knownPackagingAmount.plus(group.subtotal!.toString());
+      adminPriceDelta = adminPriceDelta.plus(group.subtotal!.toString()).minus(pureGroup.knownAmount);
+      adminPriceCount += 1;
+      continue;
     }
     knownPackagingAmount = knownPackagingAmount.plus(pureGroup.knownAmount);
     const complete =
@@ -1138,7 +1158,7 @@ export async function finalizeExternalOrderQuoteInTx(
   assertStorableTotal(knownProcessingAmount, '加工费合计');
   assertStorableTotal(knownLogisticsAmount, '物流费合计');
   assertStorableTotal(knownTotalAmount, '工单已知费用合计');
-  if (!new Decimal(quote.knownTotal).equals(knownTotalAmount)) {
+  if (!new Decimal(quote.knownTotal).plus(adminPriceDelta).equals(knownTotalAmount)) {
     throw new ExternalOrderQuoteFinalizeError(
       '持久化明细合计与纯引擎已知合计不一致',
     );
@@ -1147,25 +1167,22 @@ export async function finalizeExternalOrderQuoteInTx(
   const processingAmount = knownProcessingAmount.toFixed(2);
   const logisticsAmount = knownLogisticsAmount.toFixed(2);
   const totalAmount = knownTotalAmount.toFixed(2);
-  const hasManual = presentation.hasManualPricing;
+  const hasManual = manualItemIds.length > 0 || hasManualPackaging || hasManualLogistics || hasPendingPlate;
   if (
-    hasManual !==
-    (manualItemIds.length > 0 ||
-      hasManualPackaging ||
-      hasManualLogistics ||
-      hasPendingPlate)
+    adminPriceCount === 0 &&
+    presentation.hasManualPricing !== hasManual
   ) {
     throw new ExternalOrderQuoteFinalizeError(
       '纯引擎的人工核价语义与持久化明细不一致',
     );
   }
   const quotedFeeCompleteness =
-    presentation.totalSemantics === 'COMPLETE'
+    !hasManual
       ? OrderQuotedFeeCompleteness.COMPLETE
       : OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS;
   const pricingStatus = hasManual
     ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
-    : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
+    : adminPriceCount > 0 ? ORDER_PRICING_STATUS.ADMIN_CONFIRMED : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
 
   // The quoted-fee shape check requires quotedPricingRevisionId at the same
   // time as quotedFee. Persist the legacy visible totals first so the immutable
@@ -1257,4 +1274,106 @@ export async function finalizeExternalOrderQuoteInTx(
     },
     reused: false,
   };
+}
+
+function assertFinalizedQuoteAcknowledged(
+  order: FinalizeOrderRow,
+  pureInput: CreateOrderQuoteInput,
+  priceSnapshot: CreateOrderPriceSnapshot,
+  quote: CreateOrderQuoteResult,
+  expectedQuoteToken: string | null | undefined,
+) {
+  const logisticsPreview = pureLogisticsQuote(pureInput, priceSnapshot);
+  const confirmedItems = order.items.filter((item) =>
+    hasAdminCreatePrice(order, item),
+  );
+  const confirmedGroups = order.packagingGroups.filter((group) =>
+    hasAdminPackagingPrice(order, group),
+  );
+  const confirmedDelta = confirmedItems
+    .reduce(
+      (sum, item) =>
+        sum
+          .plus(item.subtotal!.toString())
+          .minus(
+            quote.items.find((line) => line.itemKey === persistedItemKey(item))!
+              .knownAmount,
+          ),
+      new Decimal(0),
+    )
+    .plus(
+      confirmedGroups.reduce(
+        (sum, group) =>
+          sum
+            .plus(group.subtotal!.toString())
+            .minus(
+              quote.packagingGroups.find(
+                (line) => line.groupKey === String(group.sequence),
+              )!.knownAmount,
+            ),
+        new Decimal(0),
+      ),
+    );
+
+  const currentQuoteToken = createExternalOrderQuoteToken({
+    items: pureInput.items,
+    packagingGroups: pureInput.packagingGroups,
+    logistics: {
+      isSfCollect: pureInput.isSfCollect,
+      shipments: pureInput.shipments,
+    },
+    priceVersion: quote.priceVersion,
+    result: {
+      items: quote.items,
+      packaging: quote.packagingGroups,
+      logistics: quote.order,
+      ...(confirmedItems.length || confirmedGroups.length
+        ? {
+            adminPrices: [
+              ...confirmedItems.map((item) => ({
+                id: item.id,
+                snapshot: item.pricingSnapshot,
+              })),
+              ...confirmedGroups.map((group) => ({
+                id: group.id,
+                snapshot: group.pricingSnapshot,
+              })),
+            ],
+          }
+        : {}),
+    },
+  });
+  const presentation = presentCreateOrderQuote({
+    factsKey: order.id,
+    input: pureInput,
+    quote,
+    logistics: logisticsPreview,
+    quoteToken: currentQuoteToken,
+  });
+  if (expectedQuoteToken !== currentQuoteToken) {
+    throw new ExternalOrderQuoteChangedError(
+      currentQuoteToken,
+      new Decimal(presentation.knownTotal).plus(confirmedDelta).toFixed(2),
+      quote.items.every(
+        (line) =>
+          line.status === 'QUOTED' ||
+          confirmedItems.some(
+            (item) => persistedItemKey(item) === line.itemKey,
+          ),
+      ) &&
+        quote.packagingGroups.every(
+          (line) =>
+            line.status === 'QUOTED' ||
+            confirmedGroups.some(
+              (group) => String(group.sequence) === line.groupKey,
+            ),
+        ) &&
+        logisticsPreview.complete &&
+        !presentation.plateFee
+        ? OrderQuotedFeeCompleteness.COMPLETE
+        : OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+    );
+  }
+
+  return { presentation, logisticsPreview };
 }

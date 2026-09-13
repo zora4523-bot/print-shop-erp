@@ -9,6 +9,7 @@
     "start": "next start",
     "worker:light": "node --conditions=react-server --import tsx scripts/background-worker.ts --queue=LIGHT",
     "worker:heavy": "tsx scripts/background-worker.ts --queue=HEAVY",
+    "piecework:publish": "tsx scripts/publish-piecework-price-book-v1.ts",
     "piecework:publish-v1": "tsx scripts/publish-piecework-price-book-v1.ts",
     "lint": "eslint && node scripts/ui-copy/check.mjs && node scripts/ui-tokens/check.mjs",
     "test": "vitest",

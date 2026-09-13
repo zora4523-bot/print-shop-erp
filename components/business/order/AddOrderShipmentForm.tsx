@@ -270,22 +270,7 @@ export function AddOrderShipmentForm({
                     件
                   </p>
                 ))}
-              {preview.charges.map((row) => (
-                <p key={row.sequence}>
-                  地址 {row.sequence} · 快递费 {formatMoney(row.shippingFee)} ·
-                  纸箱费 {formatMoney(row.packingMaterialFee)}
-                </p>
-              ))}
-              <p>
-                工单金额 {formatMoney(preview.oldTotal)} →{' '}
-                {formatMoney(preview.newTotal)}（差额{' '}
-                {formatMoney(preview.delta)}）
-              </p>
-              {preview.pricingMode === 'REQUOTE' ? (
-                <p>保存后需重新核价。</p>
-              ) : preview.pricingMode === 'ON_SUBMIT' ? (
-                <p>提交工单时核算各地址费用。</p>
-              ) : null}
+              <ShipmentPricingPreview preview={preview} />
             </div>
           ) : null}
           <div className="mt-4 flex flex-wrap gap-3">
@@ -330,5 +315,42 @@ export function AddOrderShipmentForm({
         </form>
       )}
     </section>
+  );
+}
+
+function ShipmentPricingPreview({
+  preview,
+}: {
+  preview: AddOrderShipmentPreview;
+}) {
+  return (
+    <>
+      {preview.charges.map((row) => (
+        <p key={row.sequence}>
+          地址 {row.sequence} · 快递费{' '}
+          {row.shippingFee === null ? '待核价' : formatMoney(row.shippingFee)} ·
+          纸箱费{' '}
+          {row.packingMaterialFee === null
+            ? '待核价'
+            : formatMoney(row.packingMaterialFee)}
+        </p>
+      ))}
+      {preview.packaging.map((group) => (
+        <p key={group.groupId}>
+          包装组 {group.sequence}：{group.oldBoxCount} → {group.boxCount} 盒，
+          装盒费用 {formatMoney(group.oldSubtotal)} →{' '}
+          {formatMoney(group.subtotal)}
+        </p>
+      ))}
+      <p>
+        工单金额 {formatMoney(preview.oldTotal)} →{' '}
+        {formatMoney(preview.newTotal)}（差额 {formatMoney(preview.delta)}）
+      </p>
+      {preview.requiresPriceReview ? (
+        <p>保存后需重新核价。</p>
+      ) : preview.pricingMode === 'ON_SUBMIT' ? (
+        <p>提交工单时核算各地址费用。</p>
+      ) : null}
+    </>
   );
 }

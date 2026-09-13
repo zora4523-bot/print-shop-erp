@@ -386,3 +386,12 @@ it('preserves the admin recipient and drops retired group inputs from old drafts
   )!;
   expect(external.values).not.toHaveProperty('externalSalesUserId');
 });
+
+it.each(['internal', 'external-sales'] as const)('manual prices survive only administrator local drafts: %s', (scope) => {
+  const values = formValues();
+  const adminPrice = { amount: '123.45', reason: '协议价格', factsKey: 'saved-facts' };
+  const serialized = serializeLocalOrderFormDraft({ ...values, items: [{ ...values.items[0], adminPrice }], packagingGroups: [{ ...values.packagingGroups[0], adminPrice }] }, scope);
+  const restored = parseLocalOrderFormDraft(serialized!, scope)!;
+  expect((restored.values.items as Array<Record<string, unknown>>)[0].adminPrice).toEqual(scope === 'internal' ? adminPrice : undefined);
+  expect((restored.values.packagingGroups as Array<Record<string, unknown>>)[0].adminPrice).toEqual(scope === 'internal' ? adminPrice : undefined);
+});

@@ -254,3 +254,9 @@ describe('external extra delivery contacts', () => {
     expect(parseExternalCreateOrderCommand(externalOrder({ remark: '字'.repeat(1001) })).success).toBe(false);
   });
 });
+
+it.each([null, { amount: '0', reason: '伪造免单', factsKey: 'forged' }])('rejects SALES style and packaging admin price fields even when %j', (adminPrice) => {
+  const input = externalOrder();
+  expect(parseExternalCreateOrderCommand(onlyItem(input, { adminPrice })).success).toBe(false);
+  expect(parseExternalCreateOrderCommand({ ...input, packagingGroups: [{ ...input.packagingGroups[0], adminPrice }] }).success).toBe(false);
+});

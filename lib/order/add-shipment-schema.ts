@@ -68,14 +68,25 @@ export type AddOrderShipmentInput = z.infer<typeof addOrderShipmentSchema>;
 export type AddOrderShipmentPreview = {
   token: string;
   pricingMode: 'REQUOTE' | 'ON_SUBMIT' | 'UNCHANGED';
+  requiresPriceReview: boolean;
   sequence: number;
   oldTotal: string;
   newTotal: string;
   delta: string;
+  packaging: {
+    groupId: string;
+    sequence: number;
+    oldBoxCount: number;
+    boxCount: number;
+    unitPrice: string;
+    oldSubtotal: string;
+    subtotal: string;
+    delta: string;
+  }[];
   charges: {
     sequence: number;
-    shippingFee: string;
-    packingMaterialFee: string;
+    shippingFee: string | null;
+    packingMaterialFee: string | null;
   }[];
 };
 export type AddOrderShipmentResult =

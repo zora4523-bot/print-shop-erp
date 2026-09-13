@@ -8,6 +8,8 @@ import {
   packagingUnit,
   packagingShipmentQuantities,
 } from '@/lib/order/packaging-mode';
+import { AdminCreatePriceFields } from './AdminCreatePriceFields';
+import { adminCreatePriceFactsKey, calculateAdminCreatePrice, sumCreateKnownAmounts, adminPackagingPriceFactsKey, calculateAdminPackagingPrice } from '@/lib/order/admin-create-price';
 import { WorkbenchOrderTransfer } from './WorkbenchOrderTransfer';
 import { LocalOrderDrafts } from './LocalOrderDrafts';
 import { ActionNotice } from '@/components/ui-business';
@@ -1269,6 +1271,7 @@ export function OrderForm({
         ...(canAssignExternalSales
           ? { customerPartyId: null, customerRef: null }
           : {}),
+        packagingGroups: data.packagingGroups.map((group) => group.mode === OrderPackagingMode.UNPACKED ? { ...group, adminPrice: undefined } : group),
         items: data.items.map((item) => ({
           ...item,
           plateGroupId: null,
@@ -1276,9 +1279,7 @@ export function OrderForm({
           crafts: usesExternalSalesPricing
             ? item.crafts
             : resolveInternalOrderCraftIds(item, crafts),
-          // Prices are always server-owned on the create screen. Internal
-          // operators may only describe an out-of-catalog item; the factory
-          // confirmation step records the confirmed amount later.
+          // Automatic amounts remain server-owned; explicit adminPrice is separately authorized.
           manualQuoteReason: usesExternalSalesPricing
             ? null
             : item.manualQuoteReason,
@@ -1309,7 +1310,7 @@ export function OrderForm({
       const result = await runCreateOrderAction(() =>
         createOrderAction(
           null,
-          usesExternalSalesPricing
+          usesExternalSalesPricing && !canAssignExternalSales
             ? {
                 ...buildExternalCreateOrderPayload(submittedData),
                 ...(canAssignExternalSales
@@ -1403,6 +1404,7 @@ export function OrderForm({
     const intent: OrderCreationIntent =
       submitter?.value === 'submit' ? 'submit' : 'draft';
 
+    if (adminPrices.some((value) => value?.error) || adminPackagingPrices.some((value) => value?.error)) return;
     if (usesExternalSalesPricing && intent === 'submit') {
       setExternalValidationVisible(true);
       if (externalSubmissionIssues(data, fieldIds, queueSnapshot).length > 0) {
@@ -2404,6 +2406,8 @@ export function OrderForm({
   const serverFieldErrors =
     state?.status === 'invalid' ? state.fieldErrors : undefined;
   const serverGeneralError = state?.status === 'error' ? state.message : null;
+  const { adminPriceFacts, adminPackagingFacts, adminPrices, adminPackagingPrices, hasAdminPrices } = adminCreatePricingState(watchedItems, watchedPackagingGroups, watchedShipments, canAssignExternalSales, usesExternalSalesPricing, crafts);
+
   const itemGapInputs = watchedItems.map((item, index) => {
     const fieldId = itemsArray.fields[index]?.id;
     const view = fieldId ? quoteViews[fieldId] : undefined;
@@ -2428,7 +2432,8 @@ export function OrderForm({
 
     return {
       ...item,
-      quoteStatus,
+      quoteStatus: adminPrices[index]?.error ? 'error' as const : adminPrices[index]?.price ? 'complete' as const : quoteStatus,
+      quoteError: adminPrices[index]?.error ?? view?.error,
     };
   });
 
@@ -2463,9 +2468,10 @@ export function OrderForm({
       shipments: shipmentGapInputs,
     },
   });
-  const orderFormBGaps = usesExternalSalesPricing
-    ? []
-    : formGaps.map((gap) => gap.label);
+  const orderFormBGaps = [...(usesExternalSalesPricing ? [] : formGaps.map((gap) => gap.label)),
+    ...adminPrices.flatMap((value, index) => value?.error ? [`款式 #${index + 1}：${value.error}`] : []),
+    ...adminPackagingPrices.flatMap((value, index) => value?.error ? [`包装组 ${index + 1}：${value.error}`] : []),
+  ];
   const totalQuantity = watchedItems.reduce(
     (sum, item) => sum + (Number.isFinite(item.quantity) ? item.quantity : 0),
     0,
@@ -2476,8 +2482,9 @@ export function OrderForm({
     const current =
       view?.inputKey === quoteFactsKey(watchedItems[index], watchedItems.length);
     const result = current ? view?.result : undefined;
+    const manualPrice = adminPrices[index]?.price;
     const manualPricingRequested =
-      !usesExternalSalesPricing && Boolean(item.manualQuoteReason?.trim());
+      !manualPrice && !usesExternalSalesPricing && Boolean(item.manualQuoteReason?.trim());
     return {
       key: fieldId,
       label:
@@ -2486,12 +2493,12 @@ export function OrderForm({
           watchedItems[index]?.pricingRoute ?? OrderItemPricingRoute.STOCK_BLANK
         ],
       status: manualPricingRequested ? 'incomplete' : item.quoteStatus,
-      amount:
+      amount: manualPrice?.subtotal ?? (
         !manualPricingRequested && item.quoteStatus === 'complete'
           ? (result?.suggestedSubtotal ?? null)
-          : null,
+          : null),
       components:
-        !manualPricingRequested && item.quoteStatus === 'complete'
+        !manualPrice && !manualPricingRequested && item.quoteStatus === 'complete'
             ? (result?.components ?? []).map((component) => ({
                 label: externalQuoteComponentLabel(
                   watchedItems[index] ?? item,
@@ -2500,7 +2507,7 @@ export function OrderForm({
                 amount: component.amount,
               }))
             : [],
-      message:
+      message: manualPrice ? '人工定价' :
         manualPricingRequested
           ? `配置外项目：${item.manualQuoteReason?.trim()}`
           : item.quoteStatus === 'error'
@@ -2576,6 +2583,12 @@ export function OrderForm({
       currentPackagingResult?.errors.join('；') ??
       null,
   };
+  if (adminPackagingPrices.some(Boolean)) {
+    const groups = watchedPackagingGroups.map((_, index) => adminPackagingPrices[index]?.price?.subtotal ?? currentPackagingResult?.groups[index]?.suggestedSubtotal ?? null);
+    railPackaging.amount = sumCreateKnownAmounts(groups);
+    railPackaging.status = groups.every((amount) => amount !== null) && !adminPackagingPrices.some((price) => price?.error) ? 'complete' : 'incomplete';
+    railPackaging.message = railPackaging.status === 'complete' ? null : '请核对包装价格';
+  }
   const currentExternalOrderQuote =
     externalOrderQuote?.inputKey === currentExternalQuoteFactsKey
       ? externalOrderQuote.result
@@ -2587,11 +2600,20 @@ export function OrderForm({
   const currentCreateOrderQuote = usesExternalSalesPricing
     ? currentExternalOrderQuote
     : currentInternalOrderQuote;
+  const displayedKnownTotal = hasAdminPrices ? sumCreateKnownAmounts([
+    ...railQuoteItems.map((item) => item.status === 'complete' ? item.amount : null),
+    ...watchedPackagingGroups.map((_, index) => adminPackagingPrices[index]
+      ? adminPackagingPrices[index]?.price?.subtotal
+      : currentPackagingResult?.groups[index]?.suggestedSubtotal),
+    railLogistics?.shippingAmount, railLogistics?.packagingAmount,
+  ]) : currentCreateOrderQuote?.knownTotal;
+  const displayedTotalSemantics = resolveCreatePriceTotalSemantics(hasAdminPrices, railQuoteItems, railPackaging.status, usesExternalSalesPricing ? railLogistics?.status : 'complete', currentCreateOrderQuote);
+
   const externalRequiresManualQuote =
     railQuoteItems.some((item) => item.status !== 'complete') ||
     railPackaging.status !== 'complete' ||
     railLogistics?.status !== 'complete' ||
-    currentExternalOrderQuote?.hasManualPricing === true;
+    displayedTotalSemantics === 'EXCLUDES_MANUAL_ITEMS';
   const externalReviewRequiresManualQuote = submitQuoteChange
     ? submitQuoteChange.quotedFeeCompleteness ===
       OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS
@@ -2600,7 +2622,7 @@ export function OrderForm({
     quoteItems: railQuoteItems,
     packaging: railPackaging,
     logistics: railLogistics,
-    knownTotal: currentCreateOrderQuote?.knownTotal,
+    knownTotal: displayedKnownTotal,
   });
   const externalReviewItems: OrderSubmissionReviewItem[] = pendingSubmission
     ? pendingSubmission.data.items.map((item, index) => {
@@ -3134,8 +3156,17 @@ export function OrderForm({
                 />
               </>
             }
-            pricingExtras={
-              !usesExternalSalesPricing ? (
+            pricingExtras={<>
+              {canAssignExternalSales ? <AdminCreatePriceFields
+                value={watchedItems[expandedItem]?.adminPrice}
+                factsKey={adminPriceFacts(watchedItems[expandedItem])}
+                disabled={orderFormControlsDisabled}
+                suggestedAmount={quoteViews[itemsArray.fields[expandedItem]?.id]?.result?.suggestedSubtotal}
+                error={adminPrices[expandedItem]?.error}
+                onChange={(price) => setValue(`items.${expandedItem}.adminPrice`, price, { shouldDirty: true, shouldValidate: true })}
+              /> : null}
+              {quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <div className="mt-3"><Button type="button" variant="outline" disabled={orderFormControlsDisabled || quoting || externalQuoteQuoting} onClick={() => { setInternalOrderQuote(null); setExternalOrderQuote(null); }}>重新报价</Button></div> : null}
+              {!usesExternalSalesPricing ? (
                 <section
                   aria-label="内部生产信息"
                   className="mt-4 border-t pt-4"
@@ -3197,10 +3228,19 @@ export function OrderForm({
                     </fieldset>
                   ) : null}
                 </section>
-              ) : undefined
-            }
+              ) : null}
+            </>}
             packagingExtras={
-              <div className="space-y-2">
+              <div className="space-y-3">
+                {canAssignExternalSales ? watchedPackagingGroups.map((group, index) => group.mode !== OrderPackagingMode.UNPACKED ? (
+                  <AdminCreatePriceFields key={index} value={group.adminPrice} factsKey={adminPackagingFacts(group)} disabled={orderFormControlsDisabled}
+                    title={`包装组 ${index + 1} 单价`} priceLabel={`包装单价（元 / ${packagingUnit(group.mode)}）`}
+                    note={packagingBoxType(group.mode) ? '包含盒子和装盒费用。' : ''}
+                    suggestedAmount={currentPackagingResult?.groups[index]?.suggestedUnitPrice}
+                    error={adminPackagingPrices[index]?.error}
+                    onChange={(price) => setValue(`packagingGroups.${index}.adminPrice`, price, { shouldDirty: true, shouldValidate: true })}
+                  />
+                ) : null) : null}
                 <Label htmlFor="packageRequirement">包装补充说明（选填）</Label>
                 <Input
                   id="packageRequirement"
@@ -3468,8 +3508,8 @@ export function OrderForm({
             weightOptions={externalWeightOptions}
             specificationOptions={externalSpecificationOptions}
             foilOptions={externalCreateOrderOptions ? externalFoilOptions : undefined}
-            allowManualWeight={false}
-            allowCustomSize={usesExternalSalesPricing}
+            allowManualWeight={canAssignExternalSales}
+            allowCustomSize={usesExternalSalesPricing || canAssignExternalSales}
             disabled={
               !localDraftReady ||
               submitting ||
@@ -3496,8 +3536,8 @@ export function OrderForm({
                 usesExternalSalesPricing={usesExternalSalesPricing}
                 allowSaveDraft={!isExternalSalesActor}
                 settlementLabel={settlementLabel}
-                knownTotal={currentCreateOrderQuote?.knownTotal}
-                totalSemantics={currentCreateOrderQuote?.totalSemantics}
+                knownTotal={displayedKnownTotal}
+                totalSemantics={displayedTotalSemantics}
                 plateFee={currentCreateOrderQuote?.plateFee ?? null}
                 gaps={orderFormBGaps}
                 busy={
@@ -3869,4 +3909,97 @@ function initialOrderFormValues(clientSubmissionId: string, initialItem: ReturnT
       packagingGroups: defaultPackagingGroups(1),
       items: [initialItem],
     };
+}
+
+function adminCreatePricingState(
+  watchedItems: CreateOrderInput['items'],
+  watchedPackagingGroups: CreateOrderInput['packagingGroups'],
+  watchedShipments: CreateOrderInput['additionalShipments'],
+  canAssignExternalSales: boolean,
+  usesExternalSalesPricing: boolean,
+  crafts: readonly CraftOption[],
+) {
+  function adminPriceFacts(item: CreateOrderInput['items'][number]) {
+    return adminCreatePriceFactsKey({
+      ...item,
+      manualQuoteReason: usesExternalSalesPricing ? null : item.manualQuoteReason,
+      crafts: usesExternalSalesPricing
+        ? item.crafts
+        : resolveInternalOrderCraftIds(item, crafts),
+    });
+  }
+  const adminPrices = watchedItems.map((item) => {
+    if (!canAssignExternalSales || !item.adminPrice) return null;
+    if (item.adminPrice.factsKey !== adminPriceFacts(item))
+      return { error: '款式条件已变化，请重新确认人工价格' };
+    try {
+      return { price: calculateAdminCreatePrice(item.adminPrice) };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : '请核对人工价格',
+      };
+    }
+  });
+  function adminPackagingFacts(
+    group: CreateOrderInput['packagingGroups'][number],
+  ) {
+    return adminPackagingPriceFactsKey(
+      group,
+      watchedItems.map((item) => item.quantity),
+      watchedShipments.map((shipment) => shipment.itemQuantities),
+    );
+  }
+  const adminPackagingPrices = watchedPackagingGroups.map((group) => {
+    if (
+      !canAssignExternalSales ||
+      !group.adminPrice ||
+      group.mode === OrderPackagingMode.UNPACKED
+    )
+      return null;
+    if (group.adminPrice.factsKey !== adminPackagingFacts(group))
+      return { error: '包装条件已变化，请重新确认包装价格' };
+    try {
+      return {
+        price: calculateAdminPackagingPrice(
+          group.adminPrice,
+          group.actualBagCount,
+        ),
+      };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : '请核对包装价格',
+      };
+    }
+  });
+  const hasAdminPrices =
+    adminPrices.some(Boolean) || adminPackagingPrices.some(Boolean);
+
+  return {
+    adminPriceFacts,
+    adminPackagingFacts,
+    adminPrices,
+    adminPackagingPrices,
+    hasAdminPrices,
+  };
+}
+
+function resolveCreatePriceTotalSemantics(
+  manual: boolean,
+  items: readonly { status: string }[],
+  packagingStatus: string,
+  logisticsStatus: string | undefined,
+  automatic:
+    | {
+        plateFee?: unknown;
+        totalSemantics: 'COMPLETE' | 'EXCLUDES_MANUAL_ITEMS';
+      }
+    | undefined,
+): 'COMPLETE' | 'EXCLUDES_MANUAL_ITEMS' | undefined {
+  if (!manual) return automatic?.totalSemantics;
+  return items.every((item) => item.status === 'complete') &&
+    packagingStatus === 'complete' &&
+    logisticsStatus === 'complete' &&
+    !automatic?.plateFee
+    ? 'COMPLETE'
+    : 'EXCLUDES_MANUAL_ITEMS';
 }

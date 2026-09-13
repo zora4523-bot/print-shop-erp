@@ -1172,7 +1172,14 @@ const orderItemFoilSideColorsField = z
     }
   });
 
+export const adminCreatePriceSchema = z.object({
+  factsKey: z.string().max(10000),
+  amount: z.string().trim().regex(/^\d{1,10}(\.\d{1,2})?$/, '请填写有效价格（最多两位小数）'),
+  reason: z.string().trim().min(2, '请填写定价原因').max(200, '定价原因最多 200 字'),
+});
+
 const orderItemBaseSchema = z.object({
+  adminPrice: adminCreatePriceSchema.optional(),
   fig: z
     .number({ message: '款式编号必须是正整数' })
     .int('款式编号必须是整数')
@@ -1893,6 +1900,9 @@ const packagingUnitsPerBagField = z.preprocess(
 );
 
 const packagingGroupSchema = z.object({
+  adminPrice: adminCreatePriceSchema.extend({
+    amount: z.string().trim().regex(/^\d{1,6}(\.\d{1,4})?$/, '包装单价最多四位小数'),
+  }).optional(),
   name: optionalTrimmedText('包装组名称', 64),
   mode: z.enum(OrderPackagingMode),
   actualBagCount: z.preprocess(

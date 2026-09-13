@@ -7,6 +7,10 @@ applies_to: repository source at last_verified
 
 # 数据库指南
 
+## 2026-09-13 工价后继版本迁移
+
+`20260914000000_piecework_successor_publication` 允许以同一事务发布的连续后继工价关闭旧开放有效期；约束禁止改费率、发布证据、已关闭有效期及既有报工归属时间。延迟约束触发器要求下一版本已经发布且有效期精确衔接。人工建单价和拆址重价复用既有金额、快照及价格修订列，不增加订单字段。迁移与验证见 [修复记录](./docs/管理员建单定价与装盒修复-20260913.md)。
+
 本文描述仓库中的 PostgreSQL / Prisma 契约。Schema 的唯一事实源是
 [`prisma/schema.prisma`](./prisma/schema.prisma)，迁移历史的唯一事实源是
 [`prisma/migrations/`](./prisma/migrations/)。任何文档里的数字都不能替代目标数据库上的 `prisma migrate status`。

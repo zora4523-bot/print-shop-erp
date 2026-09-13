@@ -219,14 +219,23 @@ export function sanitizeOrderFormDraftValues(
         .find((units) => Number.isSafeInteger(units) && Number(units) > 0);
       picked.pack = legacyPack === undefined ? null : Number(legacyPack);
     }
+    if (includeInternalFacts && isRecord(item)) {
+      const price = pickValues(item.adminPrice, ['amount', 'reason', 'factsKey']);
+      if (price) picked.adminPrice = price;
+    }
     return picked;
   });
   const shipments = value.additionalShipments.map((shipment) =>
     pickValues(shipment, SHIPMENT_FACT_KEYS),
   );
-  const packagingGroups = packagingGroupValues.map((group) =>
-    pickValues(group, PACKAGING_GROUP_VALUE_KEYS),
-  );
+  const packagingGroups = packagingGroupValues.map((group) => {
+    const picked = pickValues(group, PACKAGING_GROUP_VALUE_KEYS);
+    if (picked && includeInternalFacts && isRecord(group)) {
+      const price = pickValues(group.adminPrice, ['amount', 'reason', 'factsKey']);
+      if (price) picked.adminPrice = price;
+    }
+    return picked;
+  });
   if (items.some((item) => item === null)) return null;
   if (shipments.some((shipment) => shipment === null)) return null;
   if (packagingGroups.some((group) => group === null)) return null;

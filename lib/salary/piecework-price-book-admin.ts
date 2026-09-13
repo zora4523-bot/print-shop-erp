@@ -27,9 +27,9 @@ export type PieceworkPriceBookManifestRule = {
   amount: string | null;
 };
 
-export type PieceworkPriceBookV1Manifest = {
+export type PieceworkPriceBookManifest = {
   schemaVersion: 1;
-  priceBookVersion: 1;
+  priceBookVersion: number;
   effectiveFrom: string | null;
   sourceName: string;
   publishNote: string;
@@ -58,7 +58,7 @@ export type PieceworkPublicationPreview = {
 export type PieceworkPublicationReceipt = {
   outcome: 'PUBLISHED' | 'ALREADY_PUBLISHED';
   bookId: string;
-  version: 1;
+  version: number;
   effectiveFrom: string;
   rules: Array<{
     operationType: PieceworkOperationTypeValue;
@@ -71,8 +71,8 @@ export type PieceworkPublicationReceipt = {
   auditLogId: string;
 };
 
-export type PublishPieceworkPriceBookV1Input = {
-  manifest: PieceworkPriceBookV1Manifest;
+export type PublishPieceworkPriceBookInput = {
+  manifest: PieceworkPriceBookManifest;
   expectedDraftUpdatedAt: Date;
   /** 版本化 manifest 文件的原始字节 SHA-256。 */
   sourceSha256: string;
@@ -122,9 +122,9 @@ function normalizeRate(value: string): string | null {
   return parsed.toFixed(4);
 }
 
-export function parsePieceworkPriceBookV1Manifest(
+export function parsePieceworkPriceBookManifest(
   value: unknown,
-): PieceworkPriceBookV1Manifest {
+): PieceworkPriceBookManifest {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -136,14 +136,14 @@ export function parsePieceworkPriceBookV1Manifest(
       'rules',
     ]) ||
     value.schemaVersion !== 1 ||
-    value.priceBookVersion !== 1 ||
+    (!Number.isSafeInteger(value.priceBookVersion) || Number(value.priceBookVersion) < 1) ||
     (value.effectiveFrom !== null &&
       typeof value.effectiveFrom !== 'string') ||
     typeof value.sourceName !== 'string' ||
     typeof value.publishNote !== 'string' ||
     !Array.isArray(value.rules)
   ) {
-    throw new PieceworkPriceBookAdminError('计件工价 v1 manifest 结构非法');
+    throw new PieceworkPriceBookAdminError('计件工价 manifest 结构非法');
   }
 
   const rules = value.rules.map((candidate) => {
@@ -157,7 +157,7 @@ export function parsePieceworkPriceBookV1Manifest(
       (candidate.amount !== null && typeof candidate.amount !== 'string')
     ) {
       throw new PieceworkPriceBookAdminError(
-        '计件工价 v1 manifest 规则结构非法',
+        '计件工价 manifest 规则结构非法',
       );
     }
     return {
@@ -169,7 +169,7 @@ export function parsePieceworkPriceBookV1Manifest(
 
   return {
     schemaVersion: 1,
-    priceBookVersion: 1,
+    priceBookVersion: Number(value.priceBookVersion),
     effectiveFrom: value.effectiveFrom,
     sourceName: value.sourceName,
     publishNote: value.publishNote,
@@ -189,7 +189,8 @@ function canonicalRules(
   return [...rules]
     .sort(
       (left, right) =>
-        order.get(left.operationType)! - order.get(right.operationType)!,
+        order.get(left.operationType)! - order.get(right.operationType)! ||
+        left.unit.localeCompare(right.unit),
     )
     .map((rule) => ({
       operationType: rule.operationType,
@@ -199,7 +200,7 @@ function canonicalRules(
     }));
 }
 
-function canonicalManifest(manifest: PieceworkPriceBookV1Manifest): string {
+function canonicalManifest(manifest: PieceworkPriceBookManifest): string {
   return JSON.stringify({
     schemaVersion: manifest.schemaVersion,
     priceBookVersion: manifest.priceBookVersion,
@@ -211,7 +212,7 @@ function canonicalManifest(manifest: PieceworkPriceBookV1Manifest): string {
 }
 
 export function calculatePieceworkManifestSha256(
-  manifest: PieceworkPriceBookV1Manifest,
+  manifest: PieceworkPriceBookManifest,
 ): string {
   return createHash('sha256').update(canonicalManifest(manifest)).digest('hex');
 }
@@ -225,9 +226,10 @@ export function calculatePieceworkRuleSetSha256(
 }
 
 export function validatePieceworkManifestForPublication(
-  manifest: PieceworkPriceBookV1Manifest,
+  manifest: PieceworkPriceBookManifest,
 ): string[] {
   const issues: string[] = [];
+  if (manifest.schemaVersion !== 1 || !Number.isSafeInteger(manifest.priceBookVersion) || manifest.priceBookVersion < 1) issues.push('工价版本号必须为正整数');
   if (!manifest.effectiveFrom) {
     issues.push('effectiveFrom 尚未填写');
   } else if (!Number.isFinite(new Date(manifest.effectiveFrom).getTime())) {
@@ -245,17 +247,17 @@ export function validatePieceworkManifestForPublication(
   ) {
     issues.push('publishNote 长度必须为 2–500');
   }
-  if (manifest.rules.length !== PIECEWORK_OPERATION_TYPES.length) {
-    issues.push('必须且只能提供 PARTIAL/FULL/PACKING 三条规则');
+  if (manifest.rules.length < 3 || manifest.rules.length > 4) {
+    issues.push('必须提供三条基础工价，可增加一条按盒装盒工价');
   }
 
-  const seen = new Set<PieceworkOperationTypeValue>();
+  const seen = new Set<string>();
   for (const rule of manifest.rules) {
-    if (seen.has(rule.operationType)) {
+    if (seen.has(`${rule.operationType}:${rule.unit}`)) {
       issues.push(`${rule.operationType} 存在重复规则`);
     }
-    seen.add(rule.operationType);
-    if (PIECEWORK_UNIT_BY_OPERATION[rule.operationType] !== rule.unit) {
+    seen.add(`${rule.operationType}:${rule.unit}`);
+    if (PIECEWORK_UNIT_BY_OPERATION[rule.operationType] !== rule.unit && !(rule.operationType === 'PACKING' && rule.unit === 'PER_BOX')) {
       issues.push(`${rule.operationType} 必须使用 ${PIECEWORK_UNIT_BY_OPERATION[rule.operationType]}`);
     }
     if (rule.amount === null) {
@@ -265,13 +267,13 @@ export function validatePieceworkManifestForPublication(
     }
   }
   for (const operationType of PIECEWORK_OPERATION_TYPES) {
-    if (!seen.has(operationType)) issues.push(`缺少 ${operationType} 规则`);
+    if (!seen.has(`${operationType}:${PIECEWORK_UNIT_BY_OPERATION[operationType]}`)) issues.push(`缺少 ${operationType} 规则`);
   }
   return [...new Set(issues)];
 }
 
 function manifestRulesWithNormalizedAmounts(
-  manifest: PieceworkPriceBookV1Manifest,
+  manifest: PieceworkPriceBookManifest,
 ): Array<PieceworkPriceBookManifestRule & { amount: string }> {
   return canonicalRules(manifest.rules).map((rule) => ({
     ...rule,
@@ -281,12 +283,12 @@ function manifestRulesWithNormalizedAmounts(
 
 function storedRulesMatch(
   stored: StoredPieceworkRule[],
-  manifest: PieceworkPriceBookV1Manifest,
+  manifest: PieceworkPriceBookManifest,
 ): boolean {
-  if (stored.length !== PIECEWORK_OPERATION_TYPES.length) return false;
-  const storedByType = new Map(stored.map((rule) => [rule.operationType, rule]));
+  if (stored.length !== manifest.rules.length) return false;
+  const storedByType = new Map(stored.map((rule) => [`${rule.operationType}:${rule.unit}`, rule]));
   return manifestRulesWithNormalizedAmounts(manifest).every((expected) => {
-    const actual = storedByType.get(expected.operationType);
+    const actual = storedByType.get(`${expected.operationType}:${expected.unit}`);
     return (
       actual?.unit === expected.unit &&
       actual.amount !== null &&
@@ -295,32 +297,31 @@ function storedRulesMatch(
   });
 }
 
-export async function previewPieceworkPriceBookV1Publication(
-  manifest: PieceworkPriceBookV1Manifest,
+export async function previewPieceworkPriceBookPublication(
+  manifest: PieceworkPriceBookManifest,
   sourceSha256: string,
 ): Promise<PieceworkPublicationPreview> {
   const issues = validatePieceworkManifestForPublication(manifest);
   if (!SHA256.test(sourceSha256)) issues.push('manifest 原始文件 SHA-256 非法');
   const book = await db.pieceworkPriceBook.findUnique({
-    where: { version: 1 },
+    where: { version: manifest.priceBookVersion },
     include: {
       rules: {
         select: { id: true, operationType: true, unit: true, amount: true },
       },
     },
   });
-  if (!book) issues.push('找不到 seed 创建的计件工价簿 v1');
+  const latest = !book ? await db.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } }) : null;
+  if (!book && (!latest || manifest.priceBookVersion !== latest.version + 1 || latest.status !== 'PUBLISHED')) issues.push('新版本必须紧接当前已发布版本');
   if (book?.status === PieceworkPriceBookStatus.PUBLISHED) {
-    issues.push('计件工价簿 v1 已发布；apply 只能做同 manifest 幂等复放');
+    issues.push('计件工价簿已发布；apply 只能做同 manifest 幂等复放');
   }
-  if (book && book.rules.length !== PIECEWORK_OPERATION_TYPES.length) {
-    issues.push('草稿中不是正好三条工序规则');
-  }
+  if (book && ![3, 4].includes(book.rules.length)) issues.push('草稿工价规则数量不正确');
 
   return {
     bookId: book?.id ?? null,
     bookStatus: book?.status ?? null,
-    draftUpdatedAt: book?.updatedAt.toISOString() ?? null,
+    draftUpdatedAt: book?.updatedAt.toISOString() ?? latest?.updatedAt.toISOString() ?? null,
     sourceSha256,
     manifestSha256: calculatePieceworkManifestSha256(manifest),
     ruleSetSha256:
@@ -333,7 +334,7 @@ export async function previewPieceworkPriceBookV1Publication(
   };
 }
 
-function receiptRules(manifest: PieceworkPriceBookV1Manifest) {
+function receiptRules(manifest: PieceworkPriceBookManifest) {
   return manifestRulesWithNormalizedAmounts(manifest).map((rule) => ({
     operationType: rule.operationType,
     unit: rule.unit,
@@ -372,8 +373,8 @@ async function assertActiveAdmin(
   };
 }
 
-export async function publishPieceworkPriceBookV1(
-  input: PublishPieceworkPriceBookV1Input,
+export async function publishPieceworkPriceBook(
+  input: PublishPieceworkPriceBookInput,
   now: Date = new Date(),
 ): Promise<PieceworkPublicationReceipt> {
   const issues = validatePieceworkManifestForPublication(input.manifest);
@@ -394,11 +395,12 @@ export async function publishPieceworkPriceBookV1(
 
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('print-shop-erp:piecework-price-book:publish'))`;
-    await tx.$queryRaw`SELECT "id" FROM "PieceworkPriceBook" WHERE "version" = 1 FOR UPDATE`;
-    await tx.$queryRaw`SELECT rule."id" FROM "PieceworkPriceRule" rule INNER JOIN "PieceworkPriceBook" book ON book."id" = rule."priceBookId" WHERE book."version" = 1 FOR UPDATE OF rule`;
+    await tx.$queryRaw`SELECT "id" FROM "PieceworkPriceBook" WHERE "version" = ${input.manifest.priceBookVersion} FOR UPDATE`;
+    await tx.$queryRaw`SELECT rule."id" FROM "PieceworkPriceRule" rule INNER JOIN "PieceworkPriceBook" book ON book."id" = rule."priceBookId" WHERE book."version" = ${input.manifest.priceBookVersion} FOR UPDATE OF rule`;
 
-    const book = await tx.pieceworkPriceBook.findUnique({
-      where: { version: 1 },
+    const actor = await assertActiveAdmin(tx, input.actor);
+    let book = await tx.pieceworkPriceBook.findUnique({
+      where: { version: input.manifest.priceBookVersion },
       include: {
         rules: {
           select: { id: true, operationType: true, unit: true, amount: true },
@@ -406,7 +408,15 @@ export async function publishPieceworkPriceBookV1(
       },
     });
     if (!book) {
-      throw new PieceworkPriceBookAdminError('找不到 seed 创建的计件工价簿 v1');
+      const latest = await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } });
+      if (!latest || latest.status !== 'PUBLISHED' || latest.version + 1 !== input.manifest.priceBookVersion || latest.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
+        throw new PieceworkPriceBookAdminError('当前工价版本已变化，请重新预览');
+      }
+      book = await tx.pieceworkPriceBook.create({
+        data: { version: input.manifest.priceBookVersion, updatedAt: input.expectedDraftUpdatedAt,
+          rules: { create: normalizedRules.map((rule) => ({ operationType: rule.operationType, unit: rule.unit, amount: null })) } },
+        include: { rules: { select: { id: true, operationType: true, unit: true, amount: true } } },
+      });
     }
 
     if (book.status === PieceworkPriceBookStatus.PUBLISHED) {
@@ -420,7 +430,7 @@ export async function publishPieceworkPriceBookV1(
         storedRulesMatch(book.rules as StoredPieceworkRule[], input.manifest);
       if (!exactReplay) {
         throw new PieceworkPriceBookAdminError(
-          '计件工价簿 v1 已以不同 manifest 发布，禁止覆盖',
+          '计件工价簿已以不同 manifest 发布，禁止覆盖',
         );
       }
       const audit = await tx.businessAuditLog.findFirst({
@@ -433,12 +443,12 @@ export async function publishPieceworkPriceBookV1(
         select: { id: true },
       });
       if (!audit) {
-        throw new PieceworkPriceBookAdminError('已发布 v1 缺少审计记录');
+        throw new PieceworkPriceBookAdminError('已发布版本缺少审计记录');
       }
       return {
         outcome: 'ALREADY_PUBLISHED',
         bookId: book.id,
-        version: 1,
+        version: input.manifest.priceBookVersion,
         effectiveFrom: effectiveFrom.toISOString(),
         rules: receiptRules(input.manifest),
         sourceSha256: input.sourceSha256,
@@ -454,18 +464,21 @@ export async function publishPieceworkPriceBookV1(
     if (book.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
       throw new PieceworkPriceBookAdminError('计件工价草稿已变更，请重新 dry-run');
     }
-    if (book.rules.length !== PIECEWORK_OPERATION_TYPES.length) {
-      throw new PieceworkPriceBookAdminError('草稿必须且只能包含三条工序规则');
+    if (book.rules.length === 3 && normalizedRules.some((rule) => rule.unit === 'PER_BOX')) {
+      const added = await tx.pieceworkPriceRule.create({ data: {
+        priceBookId: book.id, operationType: 'PACKING', unit: 'PER_BOX', amount: null,
+      } });
+      book.rules.push(added);
     }
-    const actor = await assertActiveAdmin(tx, input.actor);
+    if (book.rules.length !== normalizedRules.length) throw new PieceworkPriceBookAdminError('草稿工价与发布规则不一致');
     const existingByType = new Map(
       (book.rules as StoredPieceworkRule[]).map((rule) => [
-        rule.operationType,
+        `${rule.operationType}:${rule.unit}`,
         rule,
       ]),
     );
     for (const expected of normalizedRules) {
-      const current = existingByType.get(expected.operationType);
+      const current = existingByType.get(`${expected.operationType}:${expected.unit}`);
       if (!current || current.unit !== expected.unit) {
         throw new PieceworkPriceBookAdminError(
           `草稿 ${expected.operationType} 单位缺失或不一致`,
@@ -490,6 +503,15 @@ export async function publishPieceworkPriceBookV1(
       }
     }
 
+    const previous = await tx.pieceworkPriceBook.findFirst({
+      where: { status: 'PUBLISHED', effectiveTo: null }, orderBy: { version: 'desc' },
+    });
+    if (previous) {
+      if (!previous.effectiveFrom || previous.effectiveFrom >= effectiveFrom || previous.version + 1 !== book.version) {
+        throw new PieceworkPriceBookAdminError('生效时间必须晚于当前工价版本');
+      }
+      await tx.pieceworkPriceBook.update({ where: { id: previous.id }, data: { effectiveTo: effectiveFrom } });
+    }
     const published = await tx.pieceworkPriceBook.updateMany({
       where: {
         id: book.id,
@@ -519,12 +541,12 @@ export async function publishPieceworkPriceBookV1(
       entityType: 'PieceworkPriceBook',
       entityId: book.id,
       before: {
-        version: 1,
+        version: input.manifest.priceBookVersion,
         status: PieceworkPriceBookStatus.DRAFT,
         updatedAt: book.updatedAt,
       },
       after: {
-        version: 1,
+        version: input.manifest.priceBookVersion,
         status: PieceworkPriceBookStatus.PUBLISHED,
         effectiveFrom,
         rules: receiptRules(input.manifest),
@@ -533,16 +555,18 @@ export async function publishPieceworkPriceBookV1(
         ruleSetSha256,
       },
       requestMetadata: {
-        source: 'piecework-price-book-admin.publishPieceworkPriceBookV1',
+        source: 'piecework-price-book-admin.publishPieceworkPriceBook',
         sourceName: input.manifest.sourceName.trim(),
         publishNote: input.manifest.publishNote.trim(),
+        previousBookId: previous?.id ?? null,
+        previousEffectiveTo: effectiveFrom.toISOString(),
       },
     });
 
     return {
       outcome: 'PUBLISHED',
       bookId: book.id,
-      version: 1,
+      version: input.manifest.priceBookVersion,
       effectiveFrom: effectiveFrom.toISOString(),
       rules: receiptRules(input.manifest),
       sourceSha256: input.sourceSha256,
@@ -556,3 +580,10 @@ export async function publishPieceworkPriceBookV1(
 export function isSha256(value: string): boolean {
   return SHA256.test(value);
 }
+
+// Compatibility for existing deployment scripts; both entries use the same versioned publisher.
+export type PieceworkPriceBookV1Manifest = PieceworkPriceBookManifest;
+export type PublishPieceworkPriceBookV1Input = PublishPieceworkPriceBookInput;
+export const parsePieceworkPriceBookV1Manifest = parsePieceworkPriceBookManifest;
+export const previewPieceworkPriceBookV1Publication = previewPieceworkPriceBookPublication;
+export const publishPieceworkPriceBookV1 = publishPieceworkPriceBook;

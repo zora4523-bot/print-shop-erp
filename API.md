@@ -7,6 +7,12 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 2026-09-13 管理员建单人工定价与拆址修复
+
+`createOrderAction` 的管理员载荷支持 `items[].adminPrice={amount,reason,factsKey}`（整款加工费总额，两位小数）及 `packagingGroups[].adminPrice`（每袋/盒单价，四位小数）。服务端检查活跃管理员、金额、原因及当前条件，落库为既有管理员确认快照，提交时保留可信人工价。销售端禁止该字段（包含显式 null）。`factsKey` 是防止误用旧价的条件对照，不作为授权凭证。
+
+新增地址预览增加 `requiresPriceReview`（保存后是否需重新核价）和 `packaging`（组号、旧/新盒数、小计、差额），`charges[].shippingFee`、`packingMaterialFee` 可为 null 表示待核；保存同步包装费用和价格修订。拆址改变已物化工序的盒数时，返回业务错误并要求工单修改申请。详见 [行为、权限及发布步骤](./docs/管理员建单定价与装盒修复-20260913.md)。
+
 本项目不是面向第三方开放的 REST API。页面读取主要由 Server Components 完成，页面写入主要通过 Server Actions；HTTP Route Handlers 只承担认证、健康检查、调度、下载、导出和少量查询。
 
 端点实现以 [`app/api/`](./app/api/) 为事实源。修改方法、认证、参数、状态码或响应形状时，必须同步修改本文件和契约测试。

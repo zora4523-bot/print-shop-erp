@@ -166,7 +166,7 @@ const isDirectExecution =
 if (isDirectExecution) {
   main().catch((error: unknown) => {
     console.error(
-      '计件工价簿 v1 发布失败：',
+      '计件工价簿发布失败：',
       error instanceof Error ? error.message : String(error),
     );
     process.exitCode = 1;

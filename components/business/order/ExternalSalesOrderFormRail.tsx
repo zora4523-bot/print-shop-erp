@@ -144,10 +144,10 @@ export function externalSalesOrderFormTotal(args: {
 }
 
 function InternalOrderFormRail({
-  itemCount, quoteItems, knownTotal, totalSemantics, plateFee,
+  itemCount, quoteItems, packaging, knownTotal, totalSemantics, plateFee,
   settlementLabel, gaps, busy, onAttemptSubmit,
 }: Pick<Parameters<typeof OrderFormBRail>[0],
-  'itemCount' | 'quoteItems' | 'knownTotal' | 'totalSemantics' | 'plateFee' |
+  'itemCount' | 'quoteItems' | 'packaging' | 'knownTotal' | 'totalSemantics' | 'plateFee' |
   'settlementLabel' | 'gaps' | 'busy' | 'onAttemptSubmit'
 >) {
   const serverKnownTotal = decimalAmount(knownTotal);
@@ -196,6 +196,11 @@ function InternalOrderFormRail({
               </b>
             </div>
           ))}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-b py-2 text-sm">
+          <span className="text-muted-foreground">{packaging.label ?? '包装费'}</span>
+          <b className="tabular-nums">{packaging.status === 'complete' && packaging.amount !== null ? formatMoney(packaging.amount) : STATUS_LABELS[packaging.status]}</b>
         </div>
 
         <div className="mt-3 border-t-2 border-foreground pt-3">
@@ -304,6 +309,7 @@ export function OrderFormBRail({
       <InternalOrderFormRail
         itemCount={itemCount}
         quoteItems={quoteItems}
+        packaging={packaging}
         knownTotal={knownTotal}
         totalSemantics={totalSemantics}
         plateFee={plateFee}
