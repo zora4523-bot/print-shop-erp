@@ -584,7 +584,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(
       page.locator('.sheet').first().locator('.items tbody > tr'),
     ).toHaveCount(4);
-    await expect(page.locator('.warning-annex')).toHaveCount(1);
+    await expect(page.locator('.warning-annex')).toHaveCount(0);
     await expect(page.locator('.item-annex')).toHaveCount(2);
     await expect(
       page.locator('.item-annex').nth(0).locator('tbody > tr'),
@@ -620,7 +620,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(
       page.locator('.sheet').first().locator('.items tbody > tr'),
     ).toHaveCount(4);
-    await expect(page.locator('.warning-annex')).toHaveCount(3);
+    await expect(page.locator('.warning-annex')).toHaveCount(0);
     await expect(page.locator('.item-annex')).toHaveCount(4);
     await expect(
       page.locator('.item-annex').nth(0).locator('tbody > tr'),

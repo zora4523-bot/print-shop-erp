@@ -60,8 +60,6 @@ const MAX_ARTWORKS_ON_MAIN_PAGE = 8;
 const MAX_ARTWORKS_PER_ANNEX_PAGE = 10;
 const MAIN_FLOW_HEIGHT_MM = 60;
 const ANNEX_FLOW_HEIGHT_MM = 195;
-const MAX_WARNINGS_ON_MAIN_PAGE = 6;
-const MAX_WARNINGS_PER_ANNEX_PAGE = 15;
 const MAX_SHIPMENTS_ON_MAIN_PAGE = 2;
 const MAX_SHIPMENTS_PER_ANNEX_PAGE = 4;
 const MAX_MAIN_FACT_CHARACTERS = 36;
@@ -216,11 +214,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
     ? []
     : chunk(artworks, MAX_ARTWORKS_PER_ANNEX_PAGE);
   const warnings = auditOrder(order, itemPackaging);
-  const mainWarnings = warnings.slice(0, MAX_WARNINGS_ON_MAIN_PAGE);
-  const warningAnnexPages = chunk(
-    warnings.slice(MAX_WARNINGS_ON_MAIN_PAGE),
-    MAX_WARNINGS_PER_ANNEX_PAGE,
-  );
   const flowRows = buildFlowRows(order);
   const { mainFlowRows, flowAnnexPages } = paginateFlowRows(flowRows);
   const shipments =
@@ -238,7 +231,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
     : [];
   const pageCount =
     1 +
-    warningAnnexPages.length +
     supplementPages.length +
     itemAnnexPages.length +
     artworkAnnexPages.length +
@@ -265,10 +257,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
           dense={denseMainSheet}
         >
           <WorkOrderHeader order={order} factoryName={factoryName} />
-          <AuditWarnings
-            warnings={mainWarnings}
-            remainingCount={warnings.length - mainWarnings.length}
-          />
+          <AuditWarnings warnings={warnings} />
 
           <section className="sec">
             <div className="grid">
@@ -340,34 +329,8 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
           </section>
         </WorkOrderSheet>
 
-        {warningAnnexPages.map((pageWarnings, index) => {
-          const page = 2 + index;
-          return (
-            <WorkOrderSheet
-              key={`warning-page-${page}`}
-              order={order}
-              page={page}
-              pageCount={pageCount}
-              orderDate={orderDate}
-            >
-              <WorkOrderHeader
-                order={order}
-                factoryName={factoryName}
-              />
-              <section className="sec warning-annex">
-                <div className="annex-title">数据待补充（续）</div>
-                <ol className="warning-list">
-                  {pageWarnings.map((warning, warningIndex) => (
-                    <li key={`${warningIndex}-${warning}`}>{warning}</li>
-                  ))}
-                </ol>
-              </section>
-            </WorkOrderSheet>
-          );
-        })}
-
         {supplementPages.map((supplement, index) => {
-          const page = 2 + warningAnnexPages.length + index;
+          const page = 2 + index;
           return (
             <WorkOrderSheet
               key={`supplement-page-${supplement.key}-${supplement.part}`}
@@ -389,7 +352,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
 
         {itemAnnexPages.map((items, index) => {
           const page =
-            2 + warningAnnexPages.length + supplementPages.length + index;
+            2 + supplementPages.length + index;
           const isLastItemPage = index === itemAnnexPages.length - 1;
           return (
             <WorkOrderSheet
@@ -420,7 +383,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
         {artworkAnnexPages.map((pageArtworks, index) => {
           const page =
             2 +
-            warningAnnexPages.length +
             supplementPages.length +
             itemAnnexPages.length +
             index;
@@ -446,7 +408,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
         {shipmentAnnexPages.map((pageShipments, index) => {
           const page =
             2 +
-            warningAnnexPages.length +
             supplementPages.length +
             itemAnnexPages.length +
             artworkAnnexPages.length +
@@ -473,7 +434,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
         {flowAnnexPages.map((rows, index) => {
           const page =
             2 +
-            warningAnnexPages.length +
             supplementPages.length +
             itemAnnexPages.length +
             artworkAnnexPages.length +
@@ -609,17 +569,14 @@ function WorkOrderHeader({
 
 function AuditWarnings({
   warnings,
-  remainingCount = 0,
 }: {
   warnings: string[];
-  remainingCount?: number;
 }) {
   return (
     <>
       {warnings.length > 0 ? (
         <div className="warn">
           数据不完整：{warnings.join('；')}
-          {remainingCount > 0 ? `；另有 ${remainingCount} 项见附页` : ''}
         </div>
       ) : null}
       <div className="warn image-load-warning" hidden />
@@ -983,7 +940,8 @@ function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>): s
   if (!clean(shipment.receiverName)) warnings.push('收件人姓名未填');
   if (!clean(shipment.receiverPhone)) warnings.push('收件电话未填');
   if (!clean(shipment.receiverAddress)) warnings.push('收货地址未填');
-  return unique(warnings);
+  // Summarize repeated missing fields without creating paper-only audit pages.
+  return unique(warnings.map((warning) => order.items.length > 1 ? warning.replace(/^图 \d+ /, '款式') : warning));
 }
 
 function formatPaper(item: PrintOrderItem): string | null {
@@ -1504,9 +1462,7 @@ tfoot td{ border-top:.4mm solid var(--rule); border-bottom:none; font-size:11.5p
 .flow-step-col{ width:30mm; }.flow-number-col{ width:24mm; }.flow-defect-col{ width:20mm; }.flow-date-col{ width:26mm; }
 .flow-annex{ flex:1; }
 .annex-title{ font-size:15pt; font-weight:800; margin-bottom:4mm; }
-.item-annex,.warning-annex,.supplement-annex,.shipment-annex{ flex:1; }
-.warning-list{ padding-left:6mm; color:var(--flag); font-size:10pt; font-weight:700; line-height:1.45; }
-.warning-list li{ padding:1.4mm 0; border-bottom:.15mm solid var(--hair); }
+.item-annex,.supplement-annex,.shipment-annex{ flex:1; }
 .supplement-text{ white-space:pre-wrap; overflow-wrap:anywhere; font-size:11pt; font-weight:600; line-height:1.65; }
 .shipment-annex-notice{ font-size:11pt; font-weight:700; color:var(--mute); }
 .badge{ display:inline-flex; align-items:center; justify-content:center; min-width:5.2mm; height:5.2mm; padding:0 1.3mm; background:var(--ink); color:#fff; border-radius:99mm; font-size:8.5pt; font-weight:800; }

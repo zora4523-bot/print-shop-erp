@@ -630,7 +630,21 @@ describe('buildPrintHtml', () => {
     expect(html).toContain('<span>3 / 3</span>');
   });
 
-  it('20 款工单确定拆分待补充、款式、图稿与工序附页', async () => {
+  it('单款缺失超过六项时仍只打印一页，保留缺失提示', async () => {
+    const html = await renderPrintHtml(fixtureOrder({
+      customerName: '', promisedDate: null, packageRequirement: '',
+      packagingGroups: [], productionSteps: [],
+      items: [{ ...fixtureItems(1)[0], specification: '', designs: [], foilTechnique: 'FLAT', frontFoilColors: [], backFoilColors: [] }],
+    }));
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
+    expect(html).not.toContain('warning-annex');
+    expect(html).not.toContain('项见附页');
+    expect(html).toContain('客户未填');
+    expect(html).toContain('缺设计图');
+    expect(html).toContain('<span>1 / 1</span>');
+  });
+
+  it('20 款工单确定拆分款式、图稿与工序附页', async () => {
     const html = await renderPrintHtml(
       fixtureOrder({
         items: fixtureItems(20),
@@ -638,17 +652,17 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(7);
-    expect(html.match(/<section class="sec warning-annex">/g)).toHaveLength(1);
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(6);
+    expect(html).not.toContain('warning-annex');
     expect(html.match(/<section class="sec item-annex">/g)).toHaveLength(2);
     expect(html.match(/<section class="sec artwork-annex">/g)).toHaveLength(2);
     expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(1);
     expect(html.match(/<tr><td><span class="badge">/g)).toHaveLength(20);
     expect(html.match(/class="thumb"/g)).toHaveLength(20);
     expect(html).not.toContain('data-stub-task-qr="1"');
-    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(7);
-    expect(html).toContain('<span>1 / 7</span>');
-    expect(html).toContain('<span>7 / 7</span>');
+    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(6);
+    expect(html).toContain('<span>1 / 6</span>');
+    expect(html).toContain('<span>6 / 6</span>');
   });
 
   it('50 款边界不依赖 CSS 自动跨页，声明页数覆盖全部内容', async () => {
@@ -659,18 +673,18 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(15);
-    expect(html.match(/<section class="sec warning-annex">/g)).toHaveLength(3);
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(12);
+    expect(html).not.toContain('warning-annex');
     expect(html.match(/<section class="sec item-annex">/g)).toHaveLength(4);
     expect(html.match(/<section class="sec artwork-annex">/g)).toHaveLength(5);
     expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(2);
     expect(html.match(/<tr><td><span class="badge">/g)).toHaveLength(50);
     expect(html.match(/class="thumb"/g)).toHaveLength(50);
     expect(html).not.toContain('data-stub-task-qr="1"');
-    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(15);
+    expect(html.match(/data-stub-qr="1"/g)).toHaveLength(12);
     expect(html.match(/<tfoot>/g)).toHaveLength(1);
-    expect(html).toContain('<span>1 / 15</span>');
-    expect(html).toContain('<span>15 / 15</span>');
+    expect(html).toContain('<span>1 / 12</span>');
+    expect(html).toContain('<span>12 / 12</span>');
   });
 
   it('显式换行备注、长客户名和超长工单名在有界页眉预览，全文确定性续页', async () => {
@@ -712,16 +726,16 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(8);
+    expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(7);
     expect(html).toContain('<article class="sheet dense"');
-    expect(html.match(/<section class="sec warning-annex">/g)).toHaveLength(1);
+    expect(html).not.toContain('warning-annex');
     expect(html.match(/<section class="sec supplement-annex">/g)).toHaveLength(2);
     expect(html.match(/<section class="sec item-annex">/g)).toHaveLength(1);
     expect(html.match(/<section class="sec artwork-annex">/g)).toHaveLength(1);
     expect(html.match(/<section class="sec shipment-annex">/g)).toHaveLength(1);
     expect(html.match(/<section class="sec flow-annex">/g)).toHaveLength(1);
-    expect(html).toContain('<span>1 / 8</span>');
-    expect(html).toContain('<span>8 / 8</span>');
+    expect(html).toContain('<span>1 / 7</span>');
+    expect(html).toContain('<span>7 / 7</span>');
   });
 
   it('物流区展示承运商中文名称，不把内部代码印给车间', async () => {
