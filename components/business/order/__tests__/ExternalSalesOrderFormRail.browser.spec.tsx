@@ -1,9 +1,12 @@
+import type { ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { commands, page } from 'vitest/browser';
+import { commands, page, userEvent } from 'vitest/browser';
 import '@/app/globals.css';
 import { OrderFormBRail, type OrderFormBRailQuoteItem } from '../ExternalSalesOrderFormRail';
+
+vi.mock('next/link', () => ({ default: (props: ComponentProps<'a'>) => <a {...props} /> }));
 
 let host: HTMLDivElement;
 let root: Root;
@@ -65,5 +68,42 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [
     expect(errors).not.toHaveBeenCalled();
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     expect(await commands.checkShellAccessibility('[data-testid="rail-fixture"]')).toEqual([]);
+  });
+}
+
+for (const theme of ['light', 'dark']) for (const [width, height] of [
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+]) {
+  it(`${width} ${theme}: both settlements expose breakdown, pending fees and actionable gaps`, async () => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    const onGapClick = vi.fn();
+    const onAttemptSubmit = vi.fn();
+    for (const external of [false, true]) {
+      flushSync(() => root.render(<OrderFormBRail
+        itemCount={1} quoteItems={[{ key: 'one', label: '局部烫金 · 大号封', status: 'complete', amount: '170',
+          components: [{ label: '空白封', amount: '130' }, { label: '局部烫金', amount: '40' }] }]}
+        packaging={{ status: 'complete', amount: '0', label: '不包装', pricingSource: 'ADMIN' }}
+        plateFee={{ status: 'PENDING', amount: null, displayAmount: '待定', label: '制烫金版费' }}
+        logistics={{ status: 'incomplete', shippingAmount: null, packagingAmount: '3', totalAmount: null }}
+        usesExternalSalesPricing={external} settlementLabel={external ? '外部销售应付工厂' : '工厂直接业务'}
+        knownTotal={external ? '173' : '170'} gaps={['未填写承诺交期']} busy={false}
+        onGapClick={onGapClick} onAttemptSubmit={onAttemptSubmit}
+      />));
+      expect(host.textContent).toContain('¥ 130.00');
+      expect(host.textContent).toContain('¥ 40.00');
+      expect(host.textContent).toContain('¥ 0.00人工价');
+      expect(host.textContent).toContain('制烫金版费');
+      expect(host.textContent?.includes('纸箱耗材')).toBe(external);
+      for (const control of host.querySelectorAll('button')) expect(control.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      await page.getByRole('button', { name: '未填写承诺交期', exact: true }).click();
+      expect(onGapClick).toHaveBeenLastCalledWith(0);
+      const submit = host.querySelector<HTMLButtonElement>('button[value="submit"]')!;
+      submit.focus();
+      await userEvent.keyboard('{Enter}');
+      expect(onAttemptSubmit).toHaveBeenLastCalledWith('submit');
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+      expect(await commands.checkShellAccessibility('[data-testid="rail-fixture"]')).toEqual([]);
+    }
   });
 }

@@ -22,6 +22,9 @@ const railSource = readFileSync(
   ),
   'utf8',
 );
+const feeDetailsSource = readFileSync(
+  path.join(process.cwd(), 'components/business/order/OrderCreateFeeDetails.tsx'), 'utf8',
+);
 const formBSource = readFileSync(
   path.join(
     process.cwd(),
@@ -69,9 +72,10 @@ describe('OrderForm logistics quote authority', () => {
       'setValue(packingPath, shipment.packaging.amount, {',
     );
     expect(source).toContain('const railLogistics = usesExternalSalesPricing');
-    expect(railSource).toContain("{packaging.label ?? '入袋'}");
-    expect(railSource).toContain("{logistics?.packagingLabel ?? '纸箱耗材'}");
-    expect(railSource).toContain("{logistics?.shippingLabel ?? '快递费'}");
+    expect(railSource).toContain('<OrderCreateFeeDetails {...props} />');
+    expect(feeDetailsSource).toContain("packaging.label ?? '包装费'");
+    expect(feeDetailsSource).toContain("logistics?.packagingLabel ?? '纸箱耗材'");
+    expect(feeDetailsSource).toContain("logistics?.shippingLabel ?? '快递费'");
     expect(railSource).toContain('当前合计');
     expect(source).not.toContain('对客快递费（元，销售暂定）');
     expect(source).not.toContain('收费调整说明');

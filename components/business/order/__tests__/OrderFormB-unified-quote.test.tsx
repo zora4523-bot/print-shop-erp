@@ -331,7 +331,7 @@ describe('OrderForm B unified external-sales quote', () => {
     expect(html).toContain('款式加工费');
     expect(html).toContain('入袋 300袋');
     expect(html).toContain('制烫金版费');
-    expect(html).toContain('待定');
+    expect(html).toContain('待工厂核价');
     expect(html).toContain('纸箱耗材');
     expect(html).toContain('快递费 · 上海 12kg');
     expect(html).toContain('已知合计');

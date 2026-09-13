@@ -346,6 +346,16 @@ PageHeader
 - 创建与编辑共用 `OrderReceiverContactFields`。编辑展示全部配送联系人；修改基本信息与配送后直接保存，款式变更及费用通过已有申请、审批和核价组件处理。生产后锁定基本生产事实，待审批时锁定普通保存；终态返回详情页。
 - 款式、包装与费用以共享 Card / Disclosure 分区；逐款详情折叠，保存冲突保留用户输入。`EditOrderForm.browser.spec.tsx` 覆盖六视口、明暗主题、overflow、44px 控件、axe 及多地址/失败/状态交互；创建到编辑的真实数据往返由 `tests/e2e/order-create.spec.ts` 验证。
 
+## 建单费用与跨角色交互
+
+管理员直单、管理员代外部销售和外部销售建单共用 `OrderFormBRail` 与 `OrderCreateFeeDetails`。费用按款式小计及加工分项、包装、待核制版费排列；只有外部销售结算展示纸箱和快递费。人工价标记来源并隐藏已被替代的自动分项；混合来源的包装费标记“含人工价”。明确的 0 元正常显示，待核费用独立列示并从已知合计说明中排除。
+
+两端复用同一提交复核弹窗和费用组件。缺项不再仅靠禁用按钮表达：提交校验或点击缺项后定位对应款式/字段，报价刷新和输入本身不请求滚动。复核内容区可通过键盘滚动，确认按钮保持可达。离页保护覆盖未保存输入及待上传文件，已提交后的反馈流程沿用原角色约定。
+
+管理员的人工定价、款式名称和稿件版本入口由操作者身份控制；纸张/工艺可选范围、必填资料及是否计入物流费用继续由原业务规则控制。外部销售不能使用管理员定价，工作台报价保留加工费加价比例，不混入建单包装/物流收费。
+
+验证入口：`ExternalSalesOrderFormRail.browser.spec.tsx`、`OrderCreateReview.browser.spec.tsx`、`OrderFormBNavigation.browser.spec.tsx`（六视口×明暗主题、overflow、44px、axe、键盘与输入稳定性）；真实框架和持久化回归为 `tests/e2e/order-create-ui-parity.spec.ts`、`tests/e2e/admin-create-pricing.spec.ts`。2026-09-14 的范围与证据见 [跨端建单修复记录](./docs/audits/2026-09-14-order-create-ui-parity.md)。
+
 ## 当前采用状态
 
 共享 token、基础组件、结构化反馈和跨视口门禁已经建立。工单列表批量选择/行菜单、变更审批逐字段差异、CDR 同条件重新生成、通知 transport/job 状态拆分与 UNKNOWN 人工决策已经落地。业务 UI 生产代码由 ESLint 和结构测试禁止新增原生 `alert/confirm`。

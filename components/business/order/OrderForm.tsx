@@ -1,4 +1,6 @@
 'use client';
+import { OrderCreateFeeDetails } from './OrderCreateFeeDetails';
+import { orderCreateFeeSummary } from './order-create-fee-summary';
 import {
   isMixedPackaging,
   packagingModeWithStyleCount,
@@ -773,8 +775,8 @@ export function OrderForm({
     // widen the compile-time seam.
     resolver: zodResolver(createOrderSchema) as never,
     mode: 'onBlur',
-    // The external editor owns one explicit error-navigation request per submit.
-    shouldFocusError: !isExternalSalesActor,
+    // The shared editor owns one explicit error-navigation request per submit.
+    shouldFocusError: false,
     defaultValues: {
       ...initialOrderFormValues(clientSubmissionId, initialItem),
       externalSalesUserId: null,
@@ -858,9 +860,10 @@ export function OrderForm({
     useState<ExternalCreateOrderQuoteViewState | null>(null);
   const [internalOrderQuote, setInternalOrderQuote] =
     useState<InternalCreateOrderQuoteViewState | null>(null);
-  const [externalValidationVisible, setExternalValidationVisible] =
+  const [submissionValidationVisible, setSubmissionValidationVisible] =
     useState(false);
   const [errorFocusRequest, setErrorFocusRequest] = useState(0);
+  const [errorFocusMessage, setErrorFocusMessage] = useState<string>();
   const [externalInputRevision, setExternalInputRevision] = useState(0);
   const [pendingSubmission, setPendingSubmission] = useState<{
     data: CreateOrderInput;
@@ -956,7 +959,7 @@ export function OrderForm({
   );
   useOrderFormLeaveGuard(
     shouldProtectOrderFormLeave({
-      enabled: usesExternalSalesPricing,
+      enabled: true,
       dirty: isDirty,
       pendingFileCount: pendingDesignFileCount,
       submitted: Boolean(submittedOrder),
@@ -1404,26 +1407,26 @@ export function OrderForm({
     const intent: OrderCreationIntent =
       submitter?.value === 'submit' ? 'submit' : 'draft';
 
-    if (adminPrices.some((value) => value?.error) || adminPackagingPrices.some((value) => value?.error)) return;
-    if (usesExternalSalesPricing && intent === 'submit') {
-      setExternalValidationVisible(true);
-      if (externalSubmissionIssues(data, fieldIds, queueSnapshot).length > 0) {
+    if (adminPriceGaps.length) {
+      setSubmissionValidationVisible(true);
+      setErrorFocusMessage(adminPriceGaps[0].label);
+      setErrorFocusRequest((current) => current + 1);
+      return;
+    }
+    if (intent === 'submit') {
+      setSubmissionValidationVisible(true);
+      setErrorFocusMessage(undefined);
+      const issues = usesExternalSalesPricing
+        ? externalSubmissionIssues(data, fieldIds, queueSnapshot)
+        : formGaps.map((gap) => gap.label);
+      if (issues.length > 0) {
         setErrorFocusRequest((current) => current + 1);
         return;
       }
-      const quoteToken = currentExternalOrderQuote?.quoteToken;
-      if (!quoteToken) return;
+      const quoteToken = currentExternalOrderQuote?.quoteToken ?? '';
+      if (usesExternalSalesPricing && !quoteToken) return;
       setSubmitQuoteChange(null);
-      setPendingSubmission({
-        data,
-        fieldIds,
-        queues: queueSnapshot,
-        quoteToken,
-      });
-      return;
-    }
-
-    if (!usesExternalSalesPricing && intent === 'submit' && formGaps.length > 0) {
+      setPendingSubmission({ data, fieldIds, queues: queueSnapshot, quoteToken });
       return;
     }
 
@@ -1431,8 +1434,8 @@ export function OrderForm({
   };
 
   const onInvalid = () => {
-    if (!usesExternalSalesPricing) return;
-    setExternalValidationVisible(true);
+    setErrorFocusMessage(undefined);
+    setSubmissionValidationVisible(true);
     setErrorFocusRequest((current) => current + 1);
     setPendingSubmission(null);
   };
@@ -2468,10 +2471,11 @@ export function OrderForm({
       shipments: shipmentGapInputs,
     },
   });
-  const orderFormBGaps = [...(usesExternalSalesPricing ? [] : formGaps.map((gap) => gap.label)),
-    ...adminPrices.flatMap((value, index) => value?.error ? [`款式 #${index + 1}：${value.error}`] : []),
-    ...adminPackagingPrices.flatMap((value, index) => value?.error ? [`包装组 ${index + 1}：${value.error}`] : []),
+  const adminPriceGaps: Array<{ label: string; fieldId: string; itemIndex?: number }> = [
+    ...adminPrices.flatMap((value, index) => value?.error ? [{ label: `款式 #${index + 1}：${value.error}`, fieldId: `items.${index}.adminPrice.amount`, itemIndex: index }] : []),
+    ...adminPackagingPrices.flatMap((value, index) => value?.error ? [{ label: `包装组 ${index + 1}：${value.error}`, fieldId: `packagingGroups.${index}.adminPrice.amount` }] : []),
   ];
+  const orderFormBGaps = [...(usesExternalSalesPricing ? [] : formGaps), ...adminPriceGaps].map((gap) => gap.label);
   const totalQuantity = watchedItems.reduce(
     (sum, item) => sum + (Number.isFinite(item.quantity) ? item.quantity : 0),
     0,
@@ -2507,6 +2511,7 @@ export function OrderForm({
                 amount: component.amount,
               }))
             : [],
+      pricingSource: manualPrice ? 'ADMIN' as const : 'AUTO' as const,
       message: manualPrice ? '人工定价' :
         manualPricingRequested
           ? `配置外项目：${item.manualQuoteReason?.trim()}`
@@ -2587,6 +2592,7 @@ export function OrderForm({
     const groups = watchedPackagingGroups.map((_, index) => adminPackagingPrices[index]?.price?.subtotal ?? currentPackagingResult?.groups[index]?.suggestedSubtotal ?? null);
     railPackaging.amount = sumCreateKnownAmounts(groups);
     railPackaging.status = groups.every((amount) => amount !== null) && !adminPackagingPrices.some((price) => price?.error) ? 'complete' : 'incomplete';
+    railPackaging.pricingSource = watchedPackagingGroups.every((_, index) => adminPackagingPrices[index]?.price) ? 'ADMIN' : 'MIXED';
     railPackaging.message = railPackaging.status === 'complete' ? null : '请核对包装价格';
   }
   const currentExternalOrderQuote =
@@ -2612,7 +2618,7 @@ export function OrderForm({
   const externalRequiresManualQuote =
     railQuoteItems.some((item) => item.status !== 'complete') ||
     railPackaging.status !== 'complete' ||
-    railLogistics?.status !== 'complete' ||
+    (usesExternalSalesPricing && railLogistics?.status !== 'complete') ||
     displayedTotalSemantics === 'EXCLUDES_MANUAL_ITEMS';
   const externalReviewRequiresManualQuote = submitQuoteChange
     ? submitQuoteChange.quotedFeeCompleteness ===
@@ -2777,12 +2783,10 @@ export function OrderForm({
         shipmentQuantities: packagingShipments,
       })
     : null;
-  const externalLocalIssues = externalValidationVisible
-    ? externalSubmissionIssues(
-        getValues(),
-        itemsArray.fields.map((field) => field.id),
-        pendingDesigns,
-      )
+  const externalLocalIssues = submissionValidationVisible
+    ? usesExternalSalesPricing
+      ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), pendingDesigns)
+      : orderFormBGaps
     : [];
   const externalItemErrors: OrderFormBErrors['items'] =
     watchedItems.map((item, index) => {
@@ -2805,13 +2809,13 @@ export function OrderForm({
         quantity:
           quantityMessage,
         designImage:
-          usesExternalSalesPricing && externalValidationVisible && !hasImage
+          usesExternalSalesPricing && submissionValidationVisible && !hasImage
             ? '请上传设计图'
             : undefined,
       };
       return Object.values(itemError).some(Boolean) ? itemError : undefined;
     });
-  const externalRHFItemIssues = externalValidationVisible
+  const externalRHFItemIssues = submissionValidationVisible
     ? externalItemErrors.flatMap((itemError, index) => {
         if (!itemError) return [];
         const fig = watchedItems[index]?.fig ?? index + 1;
@@ -2824,8 +2828,10 @@ export function OrderForm({
         ];
       })
     : [];
-  const externalRHFOrderIssues = externalValidationVisible
+  const externalRHFOrderIssues = submissionValidationVisible
     ? [
+        errors.promisedDate?.message ? `承诺交期：${errors.promisedDate.message}` : null,
+        errors.customerRef?.message ? `产品客户：${errors.customerRef.message}` : null,
         errors.remark?.message ? `工单备注：${errors.remark.message}` : null,
         errors.customName?.message
           ? `工单名称：${errors.customName.message}`
@@ -2842,6 +2848,7 @@ export function OrderForm({
       ].filter((message): message is string => Boolean(message))
     : [];
   const externalFieldErrors: OrderFormBErrors = {
+    targets: Object.fromEntries([...formGaps, ...adminPriceGaps].map((gap) => [gap.label, { fieldId: gap.fieldId, itemIndex: gap.itemIndex }])),
     summary: [
       ...new Set([
         ...externalLocalIssues,
@@ -2861,28 +2868,28 @@ export function OrderForm({
     customName:
       errors.customName?.message ??
       (usesExternalSalesPricing &&
-      externalValidationVisible &&
+      submissionValidationVisible &&
       !getValues('customName')?.trim()
         ? '工单名称必填'
         : undefined),
     receiverName:
       errors.receiverName?.message ??
       (usesExternalSalesPricing &&
-      externalValidationVisible &&
+      submissionValidationVisible &&
       !getValues('receiverName')?.trim()
         ? '收件人必填'
         : undefined),
     receiverPhone:
       errors.receiverPhone?.message ??
       (usesExternalSalesPricing &&
-      externalValidationVisible &&
+      submissionValidationVisible &&
       !getValues('receiverPhone')?.trim()
         ? '收货电话必填'
         : undefined),
     receiverAddress:
       errors.receiverAddress?.message ??
       (usesExternalSalesPricing &&
-      externalValidationVisible &&
+      submissionValidationVisible &&
       !getValues('receiverAddress')?.trim()
         ? '收货地址必填'
         : undefined),
@@ -3115,7 +3122,7 @@ export function OrderForm({
             }
             materialExtras={
               <>
-                {!usesExternalSalesPricing ? (
+                {!isExternalSalesActor ? (
                   <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
                     <div>
                       <Label htmlFor={`items.${expandedItem}.name`}>款式名</Label>
@@ -3158,6 +3165,7 @@ export function OrderForm({
             }
             pricingExtras={<>
               {canAssignExternalSales ? <AdminCreatePriceFields
+                amountId={`items.${expandedItem}.adminPrice.amount`}
                 value={watchedItems[expandedItem]?.adminPrice}
                 factsKey={adminPriceFacts(watchedItems[expandedItem])}
                 disabled={orderFormControlsDisabled}
@@ -3233,7 +3241,7 @@ export function OrderForm({
             packagingExtras={
               <div className="space-y-3">
                 {canAssignExternalSales ? watchedPackagingGroups.map((group, index) => group.mode !== OrderPackagingMode.UNPACKED ? (
-                  <AdminCreatePriceFields key={index} value={group.adminPrice} factsKey={adminPackagingFacts(group)} disabled={orderFormControlsDisabled}
+                  <AdminCreatePriceFields key={index} amountId={`packagingGroups.${index}.adminPrice.amount`} value={group.adminPrice} factsKey={adminPackagingFacts(group)} disabled={orderFormControlsDisabled}
                     title={`包装组 ${index + 1} 单价`} priceLabel={`包装单价（元 / ${packagingUnit(group.mode)}）`}
                     note={packagingBoxType(group.mode) ? '包含盒子和装盒费用。' : ''}
                     suggestedAmount={currentPackagingResult?.groups[index]?.suggestedUnitPrice}
@@ -3355,15 +3363,15 @@ export function OrderForm({
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverName`}
                                 required={usesExternalSalesPricing}
-                                aria-invalid={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim()}
-                                aria-describedby={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? `extra-${shipmentIndex}-receiverName-error` : undefined}
+                                aria-invalid={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim()}
+                                aria-describedby={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? `extra-${shipmentIndex}-receiverName-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverName`,
                                 )}
                               />
                               <FieldError id={`extra-${shipmentIndex}-receiverName-error`} reservedLines={1}>
-                                {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? '请填写收件人' : undefined}
+                                {usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? '请填写收件人' : undefined}
                               </FieldError>
                             </div>
                             <div>
@@ -3375,15 +3383,15 @@ export function OrderForm({
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverPhone`}
                                 required={usesExternalSalesPricing}
-                                aria-invalid={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim()}
-                                aria-describedby={usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? `extra-${shipmentIndex}-receiverPhone-error` : undefined}
+                                aria-invalid={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim()}
+                                aria-describedby={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? `extra-${shipmentIndex}-receiverPhone-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverPhone`,
                                 )}
                               />
                               <FieldError id={`extra-${shipmentIndex}-receiverPhone-error`} reservedLines={1}>
-                                {usesExternalSalesPricing && externalValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? '请填写联系电话' : undefined}
+                                {usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? '请填写联系电话' : undefined}
                               </FieldError>
                             </div>
                             <div>
@@ -3527,6 +3535,7 @@ export function OrderForm({
             }
             fieldErrors={externalFieldErrors}
             errorFocusRequest={errorFocusRequest}
+            errorFocusMessage={errorFocusMessage}
             rail={
               <OrderFormBRail
                 itemCount={itemsArray.fields.length}
@@ -3547,9 +3556,13 @@ export function OrderForm({
                   Boolean(createdDraft)
                 }
                 onAttemptSubmit={(intent) => {
-                  if (usesExternalSalesPricing && intent === 'submit') {
-                    setExternalValidationVisible(true);
-                  }
+                  setErrorFocusMessage(undefined);
+                  if (intent === 'submit') setSubmissionValidationVisible(true);
+                }}
+                onGapClick={(index) => {
+                  setSubmissionValidationVisible(true);
+                  setErrorFocusMessage(orderFormBGaps[index]);
+                  setErrorFocusRequest((current) => current + 1);
                 }}
               />
             }
@@ -3736,7 +3749,7 @@ export function OrderForm({
           ) : null}
         </section>
       ) : null}
-      {usesExternalSalesPricing && pendingSubmission ? (
+      {pendingSubmission ? (
         <OrderSubmissionReviewDialog
           open
           onOpenChange={(open) => {
@@ -3744,7 +3757,7 @@ export function OrderForm({
               setPendingSubmission(null);
             }
           }}
-          orderName={pendingSubmission.data.customName?.trim() || '未命名工单'}
+          orderName={pendingSubmission.data.customName?.trim() || pendingSubmission.data.items[0]?.name || '新建工单'}
           remark={pendingSubmission.data.remark}
           items={externalReviewItems}
           receiver={{
@@ -3759,31 +3772,10 @@ export function OrderForm({
             address: shipment.receiverAddress.trim(),
             quantityLabel: `${shipment.itemQuantities.reduce((sum, quantity) => sum + quantity, 0)} 件`,
           }))}
-          cartonCharge={{
-            label: '纸箱耗材',
-            detail: `${totalQuantity.toLocaleString('zh-CN')} 个`,
-            amountLabel:
-              railLogistics?.status === 'complete' &&
-              railLogistics.packagingAmount
-                ? formatMoney(railLogistics.packagingAmount)
-                : '待定',
-          }}
-          shippingCharge={{
-            label: pendingSubmission.data.isSfCollect
-              ? '快递费 · 顺丰到付'
-              : '快递费 · 中通',
-            amountLabel:
-              pendingSubmission.data.isSfCollect
-                ? '—'
-                : railLogistics?.status === 'complete' &&
-                    railLogistics.shippingAmount
-                  ? formatMoney(railLogistics.shippingAmount)
-                  : '待定',
-            detail:
-              railLogistics?.shippingLabel?.replace(/^快递费\s*/, '') ??
-              railLogistics?.message ??
-              undefined,
-          }}
+          feeDetails={<OrderCreateFeeDetails
+            quoteItems={railQuoteItems} packaging={railPackaging} logistics={railLogistics}
+            usesExternalSalesPricing={usesExternalSalesPricing} plateFee={currentCreateOrderQuote?.plateFee}
+          />}
           totalLabel={
             submitQuoteChange
               ? formatMoney(submitQuoteChange.quotedFee)
@@ -3794,17 +3786,11 @@ export function OrderForm({
           totalRequiresManualQuote={
             externalReviewRequiresManualQuote
           }
-          totalNote={
-            uploadError ??
-            serverGeneralError ??
-            (railLogistics?.status === 'complete'
-              ? currentCreateOrderQuote?.plateFee
-                ? '不含制版费。'
-                : '当前已知费用已完整。'
-              : currentCreateOrderQuote?.plateFee
-                ? '不含制版费与快递费。'
-                : '不含快递费。')
-          }
+          totalNote={uploadError ?? serverGeneralError ?? orderCreateFeeSummary({
+            quoteItems: railQuoteItems, packaging: railPackaging, logistics: railLogistics,
+            usesExternalSalesPricing, totalSemantics: displayedTotalSemantics,
+            plateFee: currentCreateOrderQuote?.plateFee,
+          }).totalNote ?? undefined}
           confirmLabel={
             createdDraft && uploadError
               ? '继续完成'

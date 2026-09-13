@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
 import '@/app/globals.css';
+import { Button } from '@/components/ui/button';
 import { createOrderSchema } from '@/lib/auth/schemas';
 import { OrderFormB, type OrderFormBProps } from '../order-form-b/ExternalSalesOrderFormB';
 
@@ -319,3 +320,28 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [
     expect(await commands.checkShellAccessibility('section[aria-label="数量与包装"]')).toEqual([]);
   });
 }
+
+it('administrator gap targets select the affected style and focus its quantity field only on request', async () => {
+  await page.viewport(1280, 800);
+  function AdminGapFixture() {
+    const [active, setActive] = useState(0);
+    const [request, setRequest] = useState(0);
+    const label = '款式 #2 数量必须大于 0';
+    return <OrderFormB {...baseProps}
+      items={[baseItem, { ...baseItem, fig: 2, quantity: 0 }]}
+      itemFields={[{ id: 'first' }, { id: 'second' }]} activeIndex={active}
+      onActiveIndexChange={setActive} onRemove={noop}
+      fieldErrors={{ summary: [label], targets: { [label]: { fieldId: 'items.1.quantity', itemIndex: 1 } } }}
+      errorFocusRequest={request} errorFocusMessage={label}
+      rail={<Button onClick={() => setRequest((value) => value + 1)}>定位数量</Button>}
+    />;
+  }
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+  flushSync(() => root.render(<AdminGapFixture />));
+  await layoutReady();
+  expect(scroll).not.toHaveBeenCalled();
+  await page.getByRole('button', { name: '定位数量', exact: true }).click();
+  await expect.poll(() => document.activeElement?.id.endsWith('-quantity')).toBe(true);
+  expect(selectedStyle().textContent).toContain('2.');
+  expect(scroll).toHaveBeenCalledTimes(1);
+});

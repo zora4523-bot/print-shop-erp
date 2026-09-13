@@ -74,6 +74,7 @@ function StickyOrderFormRail({ rail }: { rail: ReactNode }) {
 
 export type OrderFormBErrors = {
   summary?: readonly string[];
+  targets?: Readonly<Record<string, { fieldId: string; itemIndex?: number }>>;
   customName?: string;
   receiverName?: string;
   receiverPhone?: string;
@@ -143,6 +144,7 @@ export type OrderFormBProps = {
   fieldErrors?: OrderFormBErrors;
   /** Increment only after an explicit submit attempt fails. */
   errorFocusRequest?: number;
+  errorFocusMessage?: string;
   rail: ReactNode;
   onActiveIndexChange: (index: number) => void;
   onAdd: () => void;
@@ -461,6 +463,7 @@ export function OrderFormB({
   savedLabel,
   fieldErrors,
   errorFocusRequest = 0,
+  errorFocusMessage,
   rail,
   onActiveIndexChange,
   onAdd,
@@ -522,8 +525,10 @@ export function OrderFormB({
 
   const focusIssue = useCallback((message: string) => {
     cancelIssueFocus();
+    const explicitTarget = fieldErrors?.targets?.[message];
+    if (explicitTarget?.itemIndex !== undefined) onActiveIndexChange(explicitTarget.itemIndex);
     const itemNumber = Number(message.match(/第\s*(\d+)\s*款/)?.[1]);
-    if (Number.isSafeInteger(itemNumber) && itemNumber > 0) {
+    if (explicitTarget?.itemIndex === undefined && Number.isSafeInteger(itemNumber) && itemNumber > 0) {
       const index = items.findIndex(
         (entry, index) => (entry.fig ?? index + 1) === itemNumber,
       );
@@ -537,7 +542,11 @@ export function OrderFormB({
       const extraContact = addressNumber >= 2 && (message.includes('收件人') || message.includes('电话'))
         ? `[name="additionalShipments.${addressNumber - 2}.${message.includes('收件人') ? 'receiverName' : 'receiverPhone'}"]`
         : null;
-      const directSelector = extraContact ?? (message.includes('工单备注')
+      const directSelector = (explicitTarget ? `[id="${CSS.escape(explicitTarget.fieldId)}"]` : null) ?? extraContact ?? (message.includes('承诺交期')
+        ? '#promisedDate'
+        : message.includes('产品客户')
+        ? '#customerRef'
+        : message.includes('工单备注')
         ? '#remark'
         : message.includes('工单名称')
         ? '[id$="-custom-name"]'
@@ -552,6 +561,8 @@ export function OrderFormB({
         '[aria-invalid="true"]:not([tabindex="-1"]), [data-invalid="true"]',
       );
       const target =
+        (explicitTarget?.fieldId.endsWith('.quantity') ? root.querySelector<HTMLElement>('[id$="-quantity"]') : null) ??
+        (explicitTarget?.fieldId === 'receiverAddress' ? root.querySelector<HTMLElement>('[id$="-receiver-address-paste"]') : null) ??
         (directSelector
           ? root.querySelector<HTMLElement>(directSelector)
           : null) ??
@@ -568,7 +579,7 @@ export function OrderFormB({
           : 'smooth',
       });
     }, 0);
-  }, [cancelIssueFocus, items, onActiveIndexChange, issueFocusTimerRef, rootRef]);
+  }, [cancelIssueFocus, fieldErrors?.targets, items, onActiveIndexChange, issueFocusTimerRef, rootRef]);
 
   useEffect(() => {
     if (
@@ -578,8 +589,9 @@ export function OrderFormB({
       return;
     }
     handledErrorFocusRequestRef.current = errorFocusRequest;
-    if (fieldErrors?.summary?.length) focusIssue(fieldErrors.summary[0]);
-  }, [errorFocusRequest, fieldErrors?.summary, focusIssue, handledErrorFocusRequestRef]);
+    if (errorFocusMessage) focusIssue(errorFocusMessage);
+    else if (fieldErrors?.summary?.length) focusIssue(fieldErrors.summary[0]);
+  }, [errorFocusRequest, errorFocusMessage, fieldErrors?.summary, focusIssue, handledErrorFocusRequestRef]);
 
   if (!item || !field) return null;
 

@@ -11,6 +11,7 @@ type Price = NonNullable<CreateOrderInput['items'][number]['adminPrice']>;
 
 export function AdminCreatePriceFields({
   value,
+  amountId,
   factsKey,
   onChange,
   disabled,
@@ -21,6 +22,7 @@ export function AdminCreatePriceFields({
   note = '包装费、版费和运费另列。',
 }: {
   value: Price | undefined;
+  amountId?: string;
   factsKey: string;
   onChange: (value: Price | undefined) => void;
   disabled: boolean;
@@ -67,10 +69,10 @@ export function AdminCreatePriceFields({
       {value ? (
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor={`${id}-amount`}>{priceLabel}</Label>
+            <Label htmlFor={amountId ?? `${id}-amount`}>{priceLabel}</Label>
             <Input
               className="min-h-11"
-              id={`${id}-amount`}
+              id={amountId ?? `${id}-amount`}
               inputMode="decimal"
               maxLength={13}
               value={value.amount}
