@@ -4,7 +4,7 @@ import { AccountForm } from '@/components/business/account/AccountForm';
 import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
-  title: '新建账号 · 红包印刷 ERP',
+  title: '新建账号',
 };
 
 export default async function NewAccountPage() {

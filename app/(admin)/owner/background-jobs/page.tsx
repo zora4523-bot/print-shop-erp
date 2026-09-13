@@ -20,7 +20,7 @@ import {
   backgroundJobTypeLabel,
 } from '@/lib/background-jobs/labels';
 
-export const metadata = { title: '后台任务 · 红包印刷 ERP' };
+export const metadata = { title: '后台任务' };
 export const dynamic = 'force-dynamic';
 
 export default async function BackgroundJobsPage() {

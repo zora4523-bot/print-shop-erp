@@ -9,7 +9,7 @@ import { listMaterials } from '@/lib/material';
 import { listSupplierPartyOptions } from '@/lib/party';
 
 export const metadata = {
-  title: '新建采购单 · 红包印刷 ERP',
+  title: '新建采购单',
 };
 
 type PageProps = {

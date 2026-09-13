@@ -36,7 +36,7 @@ import {
   summarizeSmartBotConnection,
 } from '@/lib/background-jobs/health';
 
-export const metadata = { title: '推送配置 · 红包印刷 ERP' };
+export const metadata = { title: '推送配置' };
 
 const UNKNOWN_PAGE_SIZE = 25;
 

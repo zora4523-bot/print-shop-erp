@@ -12,7 +12,7 @@ import {
 import { loadExternalCreateOrderBootstrap } from '@/lib/order/create-order-bootstrap';
 
 export const metadata = {
-  title: '新建工单 · 红包印刷 ERP',
+  title: '新建工单',
 };
 
 export default async function NewOrderPage() {

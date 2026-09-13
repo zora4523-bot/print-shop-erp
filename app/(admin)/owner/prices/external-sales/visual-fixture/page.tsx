@@ -34,7 +34,7 @@ type PageProps = {
 const FIXTURE_PATH = '/owner/prices/external-sales/visual-fixture';
 
 export const metadata = {
-  title: '收费工作台视觉验收 · 红包印刷 ERP',
+  title: '收费工作台视觉验收',
 };
 
 function first(value: string | string[] | undefined): string {

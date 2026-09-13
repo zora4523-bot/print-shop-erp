@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils';
 import { PriceDataBoundary } from './PriceDataBoundary';
 
 export const metadata = {
-  title: '价格版本与发布 · 红包印刷 ERP',
+  title: '价格版本与发布',
 };
 
 type PageProps = {

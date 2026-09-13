@@ -2,7 +2,7 @@ import { NewMaterialCatalogItem } from '@/components/business/rules/catalog/Mate
 import { MaterialCategory } from '@/generated/prisma/enums';
 
 export const metadata = {
-  title: '新建物料 · 红包印刷 ERP',
+  title: '新建物料',
 };
 
 export default function NewOwnerMaterialPage() {

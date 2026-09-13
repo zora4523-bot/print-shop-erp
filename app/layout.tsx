@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono } from "next/font/google";
 import Script from "next/script";
+import { COMPANY_NAME } from "@/lib/app-brand";
 import "./globals.css";
 
 // 正文走跨平台系统 UI 无衬线字体栈（globals.css --font-sans）；
@@ -12,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "红包印刷 ERP",
-  description: "红包印刷厂内部管理系统",
+  title: { default: COMPANY_NAME, template: `%s · ${COMPANY_NAME}` },
+  description: `${COMPANY_NAME}内部管理系统`,
 };
 
 export const viewport: Viewport = {

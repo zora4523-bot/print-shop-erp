@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { COMPANY_NAME } from '@/lib/app-brand';
 import './globals.css';
 
 export default function GlobalError({
@@ -17,7 +18,7 @@ export default function GlobalError({
   return (
     <html lang="zh-CN">
       <body className="bg-background text-foreground">
-        <title>系统暂时无法加载 · 红包印刷 ERP</title>
+        <title>{`系统暂时无法加载 · ${COMPANY_NAME}`}</title>
         <main className="touch-viewport mx-auto flex min-h-dvh w-full max-w-3xl items-center px-4 py-10 sm:px-6">
           <section
             role="alert"

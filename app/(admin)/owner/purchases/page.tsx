@@ -21,7 +21,7 @@ import {
 } from '@/lib/purchase';
 
 export const metadata = {
-  title: '采购单 · 红包印刷 ERP',
+  title: '采购单',
 };
 
 type PageProps = {

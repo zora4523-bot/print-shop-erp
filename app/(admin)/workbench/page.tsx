@@ -2,7 +2,7 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { listExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import { SalesWorkbench } from '@/components/business/workbench/SalesWorkbench';
 
-export const metadata = { title: '工作台 · 红包印刷 ERP' };
+export const metadata = { title: '工作台' };
 
 export default async function WorkbenchPage() {
   await requirePermission('order:create');

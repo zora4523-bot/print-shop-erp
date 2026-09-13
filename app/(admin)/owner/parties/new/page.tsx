@@ -8,7 +8,7 @@ import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
-  title: '新建客户/供应商 · 红包印刷 ERP',
+  title: '新建客户/供应商',
 };
 
 type PageProps = {

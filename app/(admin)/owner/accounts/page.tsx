@@ -16,7 +16,7 @@ import {
 import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
-  title: '账号管理 · 红包印刷 ERP',
+  title: '账号管理',
 };
 
 type PageProps = {

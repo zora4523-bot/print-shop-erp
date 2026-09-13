@@ -3,7 +3,7 @@ import { requireSession } from '@/lib/auth/session';
 import { ChangePasswordForm } from '@/components/business/auth/ChangePasswordForm';
 
 export const metadata = {
-  title: '修改密码 · 红包印刷 ERP',
+  title: '修改密码',
 };
 
 export default async function ChangePasswordPage() {

@@ -8,6 +8,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import Link, { useLinkStatus } from 'next/link';
+import { COMPANY_NAME } from '@/lib/app-brand';
 import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Bell,
@@ -215,7 +216,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
       <SidebarHeader>
         <div className="flex flex-col gap-1 px-2 py-2 group-data-[collapsible=icon]:hidden">
           <span className="text-sm font-semibold leading-tight tracking-normal">
-            红包印刷 ERP
+            {COMPANY_NAME}
           </span>
           <span className="text-xs text-sidebar-foreground/70">
             {roleBadge}

@@ -24,7 +24,7 @@ import {
 } from '@/lib/party';
 
 export const metadata = {
-  title: '客户/供应商 · 红包印刷 ERP',
+  title: '客户/供应商',
 };
 
 type PageProps = {

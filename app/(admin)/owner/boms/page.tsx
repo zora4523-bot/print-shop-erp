@@ -18,7 +18,7 @@ import {
 } from '@/lib/product';
 
 export const metadata = {
-  title: 'BOM/用料 · 红包印刷 ERP',
+  title: 'BOM/用料',
 };
 
 type PageProps = {

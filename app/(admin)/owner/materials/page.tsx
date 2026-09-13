@@ -5,7 +5,7 @@ import {
 import { MaterialCategory } from '@/generated/prisma/enums';
 
 export const metadata = {
-  title: '物料字典 · 红包印刷 ERP',
+  title: '物料字典',
 };
 
 type PageProps = Pick<MaterialCatalogListProps, 'searchParams'>;
