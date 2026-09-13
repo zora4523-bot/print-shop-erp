@@ -289,3 +289,15 @@ it('鼠标切换主题后按 Escape 关闭菜单，焦点返回主题按钮', as
   await userEvent.keyboard('{Escape}');
   await vi.waitFor(() => expect(document.activeElement).toBe(theme.element()));
 });
+
+it('账号始终展开，不受旧折叠偏好影响', async () => {
+  await page.viewport(1280, 800);
+  localStorage.setItem('print-shop-erp:admin-sidebar-collapsed', JSON.stringify({ 账号: true, 财务: true }));
+  route.pathname = '/owner/accounts';
+  await renderShell(Role.ADMIN);
+  const group = host.querySelector('[data-menu-group="账号"]')!;
+  expect(group.querySelector('button[aria-expanded]')).toBeNull();
+  await expect.element(page.getByRole('navigation', { name: '后台主导航' }).getByRole('link', { name: '用户管理', exact: true })).toBeVisible();
+  expect(group.querySelector('a')?.getAttribute('aria-current')).toBe('page');
+  await expect.element(page.getByRole('button', { name: '财务 展开' })).toBeVisible();
+});
