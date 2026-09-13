@@ -331,3 +331,16 @@ describe('getOrderForPrint permissions', () => {
   });
 
 });
+
+it('resolves relative artwork URLs for standalone PDF rendering', async () => {
+  dbMock.order.findFirst.mockResolvedValue({
+    id: 'relative-art', orderNo: 'GD-RELATIVE', workOrderVersion: 1,
+    status: OrderStatus.RELEASED, changeRequests: [], createdAt: new Date('2026-09-13'),
+    items: [{ id: 'item', sequence: 1, name: '图稿', quantity: 1, crafts: [],
+      frontFoilColors: [], backFoilColors: [],
+      designs: [{ id: 'art', fileType: 'IMAGE', fileUrl: '/favicon.ico' }] }],
+    packagingGroups: [], shipments: [], productionProgressSteps: [], productionOperations: [],
+  });
+  const order = await getOrderForPrint('relative-art', { id: 'admin', role: Role.ADMIN }, 'https://erp.example.com');
+  expect(order?.items[0].designs[0].fileUrl).toBe('https://erp.example.com/favicon.ico');
+});

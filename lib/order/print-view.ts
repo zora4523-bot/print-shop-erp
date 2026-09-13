@@ -361,7 +361,10 @@ export async function getOrderForPrint(
         // Puppeteer PDF 都在窗口内完成）。CDR 不签——打印视图按 SPEC
         // §E.2.1 过滤掉 CDR，不该在 HTML 里留可用下载 URL。
         fileUrl:
-          d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
+          d.fileType === 'IMAGE'
+            ? signDesignReadUrl(d.fileUrl.startsWith('/') && !d.fileUrl.startsWith('//')
+              ? new URL(d.fileUrl, `${base}/`).href : d.fileUrl)
+            : d.fileUrl,
       }),
     ),
   }));

@@ -9,6 +9,7 @@ export const batchPrintRequestSchema = z.object({
 export type BatchPrintIssue = { position: number; message: string };
 export type BatchPrintStatus = {
   status: 'pending' | 'ready' | 'failed' | 'unavailable';
+  phase?: 'queued' | 'rendering' | 'merging';
   completed: number;
   total: number;
   issues: BatchPrintIssue[];

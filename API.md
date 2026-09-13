@@ -326,7 +326,9 @@ PDF 生成接口仍执行认证、角色和资源所有权校验；页面下载�
 使用 HEAVY 队列 `ORDER_BATCH_PDF`，不改变工单状态或创建生产下发记录。
 
 `GET /api/orders/batch-print/:jobId` 返回私有、不缓存的进度 JSON：
-`status`（pending/ready/failed/unavailable）、`completed`、`total`、`issues`。
+`status`（pending/ready/failed/unavailable）、`completed`、`total`、`issues`；
+pending/unavailable 另有 `phase`（queued/rendering/merging）。
+同账号同有序内容的进行中任务复用；同一十五分钟时间窗内完整有效结果复用，不依赖客户端 requestId 相同。
 仅创建者可读；账号权限每次复核。`view=download` 下载合并 PDF，`view=inline` 内联打开。
 下载返回 200；未登录 401；无权限或任务不存在 404；未就绪或工单内容变化 409；
 文件过期或读取失败 503；非法 view/id 400。所有响应 `Cache-Control: private, no-store`。

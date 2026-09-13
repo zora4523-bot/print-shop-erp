@@ -299,6 +299,23 @@ function textPreview(value: string, maxCharacters: number): string {
 }
 
 test.describe('OrderPrintLayout 截图回归', () => {
+  test('长测试编号不会挤压页眉或增加单款页数', async ({ page }) => {
+    const order = await standaloneOrderFixture();
+    order.orderNo = 'e2e-sales-status-3a45a04f-1ee6-4340-bd40-6de653334496-42828677-155d-405a-a2fc-d57dd57db6ef';
+    order.customName = order.orderNo;
+    order.items = order.items.slice(0, 1);
+    order.productionSteps = [];
+    order.packagingGroups = [];
+    order.remark = null;
+    order.shipments = [];
+    await page.setContent(buildStandaloneHtml(order));
+    await waitForPrintReady(page, 1);
+    await expect(page.locator('.scan .no')).toContainText(order.orderNo);
+    const headerWidth = await page.locator('.hd-main').evaluate((node) => node.getBoundingClientRect().width);
+    expect(headerWidth).toBeGreaterThan(300);
+    await expectDeclaredPagination(page);
+  });
+
   for (const nameLength of [19, 50, 73, 100]) {
     test(`${nameLength} 字工单名称在页眉完整换行且只生成一页 PDF`, async ({ page }) => {
       const order = await standaloneOrderFixture();

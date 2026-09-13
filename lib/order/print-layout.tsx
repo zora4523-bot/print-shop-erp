@@ -74,6 +74,7 @@ const MAX_HEADER_FACTORY_CHARACTERS = 24;
 const MAX_HEADER_CUSTOMER_CHARACTERS = 16;
 const MAX_HEADER_ORDER_NAME_CHARACTERS = 100;
 const MAX_HEADER_ORDER_NAME_LINES = 3;
+const MAX_INLINE_ORDER_NUMBER_CHARACTERS = 64;
 
 const FOIL_TECHNIQUE_LABEL: Record<PrintFoilTechnique, string> = {
   UNSPECIFIED: '烫金',
@@ -555,7 +556,7 @@ function WorkOrderHeader({
           ) : null}
         </div>
       </div>
-      <div className="scan">
+      <div className={classNames('scan', Array.from(order.orderNo).length > MAX_INLINE_ORDER_NUMBER_CHARACTERS && 'long-identifier')}>
         <div
           className="qr"
           aria-label={`工单 ${order.orderNo} 二维码`}
@@ -1409,6 +1410,8 @@ body{
 .line b.miss{ color:var(--flag); }
 .sep{ color:var(--hair); margin:0 .5mm; }
 .scan{ text-align:right; flex:0 0 auto; }
+.scan.long-identifier{ min-width:25mm; max-width:65mm; }
+.scan.long-identifier .no{ white-space:normal; overflow-wrap:anywhere; }
 .scan .qr{ min-width:25mm; min-height:25mm; margin-left:auto; display:flex; justify-content:flex-end; }
 .scan svg{ min-width:25mm; min-height:25mm; display:block; }
 .scan .no{ font-family:"ERP Print Mono",monospace; font-size:8pt; font-weight:700; margin-top:1.4mm; white-space:nowrap; }

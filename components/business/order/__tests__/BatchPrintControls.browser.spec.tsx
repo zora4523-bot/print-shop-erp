@@ -63,3 +63,27 @@ it('identifies results from the previous selection', async () => {
   await expect.element(page.getByText('所选工单已变化，下方生成结果仍对应此前提交的 2 单。')).toBeVisible();
   expect(host.querySelector('a')?.getAttribute('href')).toContain('job-1');
 });
+
+it('explains queueing and disables repeated submissions', async () => {
+  m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'pending', phase: 'queued', completed: 0, total: 2, issues: [] }) });
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await expect.element(page.getByText('正在排队，请勿重复提交。')).toBeVisible();
+  await expect.element(page.getByRole('button', { name: '正在准备打印…' })).toBeDisabled();
+});
+
+it('continues checking after two minutes and exposes the finished PDF', async () => {
+  const now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  const originalTimeout = globalThis.setTimeout;
+  const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation((handler, delay, ...args) =>
+    originalTimeout(handler, delay === 10_000 ? 0 : delay, ...args));
+  try {
+    m.fetch.mockResolvedValueOnce({ ok: true, json: async () => {
+      clock.mockReturnValue(now + 130_000);
+      return { status: 'pending', phase: 'merging', completed: 2, total: 2, issues: [] };
+    } });
+    mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+    await expect.element(page.getByRole('link', { name: '下载 PDF' })).toBeVisible();
+    expect(timer.mock.calls.some(([, delay]) => delay === 10_000)).toBe(true);
+  } finally { timer.mockRestore(); clock.mockRestore(); }
+});

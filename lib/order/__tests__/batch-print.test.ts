@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import type { ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 const m = vi.hoisted(() => ({
-  user: vi.fn(), find: vi.fn(), update: vi.fn(), worker: vi.fn(), order: vi.fn(),
+  active: vi.fn(), user: vi.fn(), find: vi.fn(), update: vi.fn(), worker: vi.fn(), order: vi.fn(),
   enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(),
 }));
-vi.mock('@/lib/db', () => ({ db: { user: { findUnique: m.user }, backgroundJob: { findUnique: m.find, updateMany: m.update }, backgroundWorkerHeartbeat: { findFirst: m.worker } } }));
+vi.mock('@/lib/db', () => ({ db: { user: { findUnique: m.user }, backgroundJob: { findFirst: m.active, findUnique: m.find, updateMany: m.update }, backgroundWorkerHeartbeat: { findFirst: m.worker } } }));
 vi.mock('@/lib/background-jobs/repository', () => ({ enqueueBackgroundJob: m.enqueue, BackgroundJobLeaseLostError: class extends Error {} }));
 vi.mock('@/lib/background-jobs/clock', () => ({ databaseNow: async () => new Date('2026-09-13') }));
 vi.mock('@/lib/order/print-view', () => ({ getOrderForPrint: m.order }));
@@ -19,7 +19,8 @@ const payload = { actorId: 'admin', baseUrl: 'https://example.test', orders: [{ 
 const job = { id: 'j', type: 'ORDER_BATCH_PDF', payload, workerId: 'worker', attempts: 1, assertLease: vi.fn() } as unknown as ClaimedBackgroundJob;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  m.active.mockResolvedValue(null);
   m.user.mockResolvedValue({ isActive: true, role: 'ADMIN' });
   m.order.mockImplementation(async (id: string) => ({ id, version: 1 }));
   m.enqueue.mockResolvedValue({ job: { id: 'j' } });
@@ -31,7 +32,7 @@ beforeEach(() => {
     return Buffer.from(await doc.save());
   });
   m.find.mockResolvedValue({ ...job, status: 'PENDING', result: null });
-  m.read.mockResolvedValue(Buffer.from('pdf'));
+  m.read.mockImplementation(async (name: string) => { if (name.startsWith('order-cache-')) throw new Error('missing'); return Buffer.from('pdf'); });
 });
 
 describe('batch PDF invariants', () => {
@@ -62,7 +63,7 @@ describe('batch PDF invariants', () => {
   it('merges real PDFs in selection order with fenced progress', async () => {
     const result = await handleBatchPrintJob(job);
     expect(result).toMatchObject({ completed: 2, artifactName: 'j-1.pdf', issues: [] });
-    const merged = await PDFDocument.load(m.write.mock.calls[0][1]);
+    const merged = await PDFDocument.load(m.write.mock.calls.find(([name]) => name === 'j-1.pdf')![1]);
     expect(merged.getPages().map((page) => page.getSize())).toEqual([{ width: 100, height: 200 }, { width: 300, height: 400 }]);
     expect(m.update.mock.calls.map(([call]) => call.data.result.completed)).toEqual([0, 1, 2]);
     expect(m.update.mock.calls[0][0].where).toMatchObject({ lockedBy: 'worker', attempts: 1, status: 'RUNNING' });
@@ -73,7 +74,7 @@ describe('batch PDF invariants', () => {
     expect(m.write).not.toHaveBeenCalled();
   });
   it('rejects content changes during rendering', async () => {
-    m.order.mockResolvedValueOnce({ id: 'a', version: 1 }).mockResolvedValueOnce({ id: 'b', version: 1 }).mockResolvedValue({ id: 'a', version: 2 });
+    m.order.mockResolvedValueOnce({ id: 'a', version: 1 }).mockResolvedValue({ id: 'a', version: 2 });
     expect(await handleBatchPrintJob(job)).toMatchObject({ issues: expect.arrayContaining([{ position: 1, message: expect.any(String) }]) });
     expect(m.write).not.toHaveBeenCalled();
   });
@@ -103,4 +104,39 @@ describe('batch PDF invariants', () => {
     expect(await downloadBatchPrint('admin', 'j')).toBeNull();
     expect(m.read).not.toHaveBeenCalled();
   });
+});
+
+it('coalesces different request IDs while the same content is running', async () => {
+  m.active.mockResolvedValue({ id: 'running' });
+  expect(await requestBatchPrint('admin', { requestId: crypto.randomUUID(), orderIds: ['a'] }, payload.baseUrl)).toBe('running');
+  expect(m.enqueue).not.toHaveBeenCalled();
+});
+it('reuses cached single-order PDFs without rendering', async () => {
+  const pdf = await PDFDocument.create(); pdf.addPage([100, 200]);
+  m.read.mockResolvedValue(Buffer.from(await pdf.save()));
+  expect(await handleBatchPrintJob(job)).toMatchObject({ completed: 2, issues: [] });
+  expect(m.render).not.toHaveBeenCalled();
+});
+it('distinguishes queueing from merging', async () => {
+  expect(await batchPrintStatus('admin', 'j')).toMatchObject({ phase: 'queued' });
+  m.find.mockResolvedValue({ ...job, status: 'RUNNING', result: { completed: 2, issues: [] } });
+  expect(await batchPrintStatus('admin', 'j')).toMatchObject({ phase: 'merging' });
+});
+
+it('reuses a completed valid batch without another job', async () => {
+  m.find.mockResolvedValue({ id: 'done', status: 'SUCCEEDED', result: { completed: 1, issues: [], artifactName: 'done.pdf' } });
+  expect(await requestBatchPrint('admin', { requestId: crypto.randomUUID(), orderIds: ['a'] }, payload.baseUrl)).toBe('done');
+  expect(m.enqueue).not.toHaveBeenCalled();
+});
+it('regenerates an expired completed batch', async () => {
+  m.find.mockResolvedValue({ id: 'done', status: 'SUCCEEDED', result: { completed: 1, issues: [], artifactName: 'done.pdf' } });
+  m.read.mockRejectedValue(new Error('expired'));
+  expect(await requestBatchPrint('admin', { requestId: crypto.randomUUID(), orderIds: ['a'] }, payload.baseUrl)).toBe('j');
+  expect(m.enqueue).toHaveBeenCalledOnce();
+});
+
+it('does not cache or publish a PDF whose uploaded artwork failed', async () => {
+  m.render.mockRejectedValue(Object.assign(new Error('private URL'), { name: 'PrintArtworkUnavailableError' }));
+  expect(await handleBatchPrintJob(job)).toMatchObject({ issues: [{ position: 1, message: '图稿加载失败，请检查图稿后重试' }] });
+  expect(m.write).not.toHaveBeenCalled();
 });

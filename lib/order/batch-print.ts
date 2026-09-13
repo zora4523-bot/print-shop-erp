@@ -76,9 +76,27 @@ export async function requestBatchPrint(actorId: string, input: unknown, baseUrl
   if (issues.length) throw new BatchPrintSelectionError(issues);
   const payload: Payload = { actorId, baseUrl, orders };
   const digest = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  const scope = `batch-pdf:v2:${digest}:`;
+  const existing = await db.backgroundJob.findFirst({
+    where: { type: BACKGROUND_JOB_TYPES.ORDER_BATCH_PDF, dedupeKey: { startsWith: scope },
+      status: { in: [BackgroundJobStatus.PENDING, BackgroundJobStatus.RUNNING] } },
+    orderBy: { createdAt: 'desc' }, select: { id: true },
+  });
+  if (existing) return existing.id;
+  const window = Math.floor((await databaseNow()).getTime() / (15 * 60_000));
+  const dedupeKey = `${scope}${window}`;
+  const previous = await db.backgroundJob.findUnique({ where: { dedupeKey } });
+  if (previous?.status === BackgroundJobStatus.SUCCEEDED) {
+    const result = resultSchema.safeParse(previous.result);
+    if (result.success && !result.data.issues.length && result.data.artifactName) {
+      try { await readPdfArtifact(result.data.artifactName); return previous.id; }
+      catch { /* Expired/missing files must be regenerated. */ }
+    }
+  }
+  const terminal = previous && ['SUCCEEDED', 'CANCELLED'].includes(previous.status);
   const { job } = await enqueueBackgroundJob({
     type: BACKGROUND_JOB_TYPES.ORDER_BATCH_PDF, queue: BackgroundJobQueue.HEAVY,
-    dedupeKey: `batch-pdf:${actorId}:${request.requestId}:${digest}`,
+    dedupeKey: terminal ? `${scope}${request.requestId}` : dedupeKey,
     payload, maxAttempts: 2,
   });
   return job.id;
@@ -103,7 +121,18 @@ export async function handleBatchPrintJob(job: ClaimedBackgroundJob) {
   for (let index = 0; index < payload.orders.length; index++) {
     try {
       const { order, factoryName } = await loadCurrent(payload, index);
-      const pdf = await renderHtmlToPdf({ html: await buildPrintHtml(order, { factoryName }), signal: job.signal });
+      // Private, actor-scoped content cache. Authorization and snapshot checks
+      // above and before publication still apply on every cache hit.
+      const cacheName = `order-cache-${createHash('sha256').update(`${payload.actorId}:${payload.orders[index].key}`).digest('hex')}.pdf`;
+      let pdf: Buffer;
+      try { pdf = await readPdfArtifact(cacheName); }
+      catch {
+        pdf = await renderHtmlToPdf({ html: await buildPrintHtml(order, { factoryName }), signal: job.signal, requireArtwork: true });
+        await loadCurrent(payload, index);
+        job.signal?.throwIfAborted();
+        await job.assertLease?.();
+        await writePdfArtifact(cacheName, pdf);
+      }
       bytes += pdf.length;
       if (bytes > BATCH_PRINT_MAX_BYTES) {
         return { completed: index, issues: [{ position: index + 1, message: '文件过大，请减少所选工单后分批打印' }] };
@@ -115,7 +144,8 @@ export async function handleBatchPrintJob(job: ClaimedBackgroundJob) {
       await job.assertLease?.();
       if (error instanceof BatchPrintSelectionError) return { completed: index, issues: error.issues };
       if (error instanceof BatchPrintAccessError || error instanceof BackgroundJobLeaseLostError) throw error;
-      return { completed: index, issues: [{ position: index + 1, message: '工单生成失败，请检查打印内容后重试' }] };
+      return { completed: index, issues: [{ position: index + 1, message: error instanceof Error && error.name === 'PrintArtworkUnavailableError'
+        ? '图稿加载失败，请检查图稿后重试' : '工单生成失败，请检查打印内容后重试' }] };
     }
     await progress(job, index + 1);
   }
@@ -155,7 +185,8 @@ export async function batchPrintStatus(actorId: string, jobId: string): Promise<
     where: { queue: BackgroundJobQueue.HEAVY, lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
     select: { workerId: true },
   });
-  return { ...base, status: worker ? 'pending' : 'unavailable' };
+  return { ...base, status: worker ? 'pending' : 'unavailable',
+    phase: job.status === 'PENDING' ? 'queued' : result.completed >= payload.orders.length ? 'merging' : 'rendering' };
 }
 
 export async function downloadBatchPrint(actorId: string, jobId: string) {
