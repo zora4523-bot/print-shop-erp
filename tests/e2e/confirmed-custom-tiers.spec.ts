@@ -60,7 +60,7 @@ test('confirmed custom prices publish once, preserve history and render eleven t
   await login(page, { from: route, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
   await expect(page.getByRole('table', { name: '专版烫金阶梯单价', exact: true })).toBeVisible();
   await expect(page.getByText('≥ 500 且 < 1,000 个', { exact: true })).toBeVisible();
-  await expect(page.getByText('4千档', { exact: true })).toHaveCount(2);
+  await expect(page.getByText('4千档', { exact: true })).toHaveCount(1);
   const boundary = page.getByRole('spinbutton', { name: /^500个档上界/ });
   const large = page.getByRole('spinbutton', { name: /^1千档大号组单价/ });
   await expect(large).toHaveValue('0.325');
@@ -72,6 +72,15 @@ test('confirmed custom prices publish once, preserve history and render eleven t
     await expect(boundary).toHaveValue(upper);
     await expect(large).toHaveValue('0.325');
   }
+  // Verify four-decimal prices survive native form submission and reload.
+  for (const price of ['0.3251', '0.325']) {
+    await large.fill(price);
+    await page.getByRole('button', { name: '保存调价草稿', exact: true }).click();
+    await expect(page.getByText('调价草稿已保存。', { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(large).toHaveValue(price);
+  }
+  await expect(page.getByText('档位取档', { exact: false })).toHaveCount(0);
   for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
     const context = await browser.newContext({
       storageState: await page.context().storageState(), viewport: { width, height },

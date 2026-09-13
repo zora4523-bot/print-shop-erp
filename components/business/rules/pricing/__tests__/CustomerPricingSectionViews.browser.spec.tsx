@@ -102,7 +102,7 @@ for (const editable of [false, true]) {
           await settleEffects();
           const headers = [...host.querySelectorAll<HTMLElement>('[role="columnheader"]')];
           expect(headers.map(header => header.textContent)).toEqual([
-            '档位', '适用范围（推导）', '数量上界（含）', '中号组单价', '大号组单价',
+            '档位', '数量范围', '数量上界（含）', '中号组单价', '大号组单价',
           ]);
           const cells = [...host.querySelectorAll<HTMLElement>('[role="cell"]')];
           expect(cells).toHaveLength(headers.length);
@@ -125,3 +125,29 @@ for (const editable of [false, true]) {
     }
   }
 }
+
+it('专版单价允许服务端支持的四位小数且拒绝额外精度', async () => {
+  const host = document.createElement('form');
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() => root.render(<CustomerTiersPricingSectionView rows={[
+      { key: 'q1000', name: '1千档', maxQuantity: { id: 'limit', value: 1999 },
+        middlePrice: { id: 'mid-precision', value: '0.31', editable: true },
+        largePrice: { id: 'large-precision', value: '0.325', editable: true } },
+    ]} />));
+    await settleEffects();
+    for (const input of host.querySelectorAll<HTMLInputElement>('input[type="number"]')) {
+      for (const value of ['0.326', '0.3251']) {
+        input.value = value;
+        expect(input.validity.stepMismatch, value).toBe(false);
+        expect(input.checkValidity(), value).toBe(true);
+      }
+      input.value = '0.32511';
+      expect(input.validity.stepMismatch).toBe(true);
+    }
+  } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+  }
+});

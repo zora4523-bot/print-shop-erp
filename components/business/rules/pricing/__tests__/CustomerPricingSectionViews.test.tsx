@@ -114,7 +114,7 @@ describe('CustomerPricingSectionViews', () => {
     expect(html.match(/role="table"/g)).toHaveLength(1);
     expect(html).toContain('aria-label="专版烫金阶梯单价"');
     expect(text).toContain('专版烫金 · 阶梯单价');
-    expect(text).toContain('适用范围（推导）');
+    expect(text).toContain('数量范围');
     expect(text).toContain('数量上界（含）');
     expect(text).toContain('中号组单价');
     expect(text).toContain('大号组单价');
@@ -122,7 +122,10 @@ describe('CustomerPricingSectionViews', () => {
     expect(text).toContain('≥ 1 且 &lt; 500 个');
     expect(text).toContain('≥ 5,000 且 &lt; 10,000 个');
     expect(text).toContain('≥ 50,000 个');
-    expect(text).toContain('4,600 个落 4千档');
+    expect(text).not.toContain('4,600');
+    expect(text).not.toContain('档位取档');
+    expect(text).not.toContain('达到下一档');
+    expect(text).not.toContain('未设最低起订量');
 
     expect(html.match(/aria-label="[^"]+中号组单价"/g)).toHaveLength(11);
     expect(html.match(/aria-label="[^"]+大号组单价"/g)).toHaveLength(11);

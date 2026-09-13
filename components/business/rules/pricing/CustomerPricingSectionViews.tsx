@@ -77,7 +77,6 @@ export type CustomerTierPricingRow = {
 
 export type CustomerTiersPricingSectionViewProps = {
   rows: readonly CustomerTierPricingRow[];
-  exampleQuantity?: number;
   headingActions?: ReactNode;
   statusContent?: ReactNode;
   className?: string;
@@ -178,7 +177,7 @@ type PricingNumericInputProps = PricingNumericFieldState & {
 type PricingSectionHeadingProps = {
   headingId: string;
   title: string;
-  description: ReactNode;
+  description?: ReactNode;
   basis?: string;
   criticalBasis?: boolean;
   actions?: ReactNode;
@@ -223,9 +222,11 @@ function PricingSectionHeading({
               </Badge>
             ) : null}
           </div>
-          <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-muted-foreground sm:text-sm">
-            {description}
-          </p>
+          {description ? (
+            <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-muted-foreground sm:text-sm">
+              {description}
+            </p>
+          ) : null}
         </div>
         {actions ? (
           <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
@@ -633,17 +634,12 @@ function tierRanges(rows: readonly CustomerTierPricingRow[]) {
 
 export function CustomerTiersPricingSectionView({
   rows,
-  exampleQuantity = 4_600,
   headingActions,
   statusContent,
   className,
   headingId = 'customer-tiers-pricing-heading',
 }: CustomerTiersPricingSectionViewProps) {
   const ranges = tierRanges(rows);
-  const exampleIndex = ranges.findIndex(
-    (range) => range.upper === null || exampleQuantity <= range.upper,
-  );
-  const exampleTier = exampleIndex >= 0 ? rows[exampleIndex]?.name : null;
 
   return (
     <section
@@ -654,7 +650,6 @@ export function CustomerTiersPricingSectionView({
         headingId={headingId}
         title="专版烫金 · 阶梯单价"
         basis="元 / 个"
-        description="按数量区间取价，达到下一档数量时采用下一档单价；末档不限。"
         actions={headingActions}
       />
       {statusContent}
@@ -673,7 +668,7 @@ export function CustomerTiersPricingSectionView({
                   className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档位</span>
-                  <span role="columnheader">适用范围（推导）</span>
+                  <span role="columnheader">数量范围</span>
                   <span role="columnheader" className="text-right">
                     数量上界（含）
                   </span>
@@ -716,7 +711,7 @@ export function CustomerTiersPricingSectionView({
                         <PricingNumericInput
                           {...row.middlePrice}
                           ariaLabel={`${row.name}中号组单价`}
-                          step="0.005"
+                          step="0.0001"
                           className="w-full min-w-0 px-1.5 text-xs"
                         />
                       </div>
@@ -724,7 +719,7 @@ export function CustomerTiersPricingSectionView({
                         <PricingNumericInput
                           {...row.largePrice}
                           ariaLabel={`${row.name}大号组单价`}
-                          step="0.005"
+                          step="0.0001"
                           className="w-full min-w-0 px-1.5 text-xs"
                         />
                       </div>
@@ -734,16 +729,6 @@ export function CustomerTiersPricingSectionView({
               </div>
             </div>
           </TableScrollArea>
-          <div className="px-4 pb-4 sm:px-5">
-            <FormulaNote>
-              档位取档按“实际数量适用范围”：
-              {integerLabel(exampleQuantity)} 个落{' '}
-              <strong className="text-destructive">
-                {exampleTier ?? '未命中'}
-              </strong>
-              。每个数量仅对应一档，未设最低起订量。
-            </FormulaNote>
-          </div>
         </CardContent>
       </Card>
     </section>
