@@ -10,7 +10,7 @@
 
 **2026-09-14：PR #19（`codex/gongdanceshi` → `main`，<https://github.com/zora4523-bot/print-shop-erp/pull/19>）已开，
 本地继续在 `codex/tijian-2` 上修 CI 暴露的问题，每修一处就 `git push origin codex/tijian-2:codex/gongdanceshi` 快进 PR 分支。
-两分支当前同头（`997e512b`），共 50 个提交领先 `origin/main`。未合并、未部署。**
+两分支当前同头（`41569c81`），共 53 个提交领先 `origin/main`。未合并、未部署。**
 
 **PR 开出后 CI 与本地门禁复核发现并已修的 4 件事（都是 09-13 批次改了行为但没同步测试 / 基线）：**
 
@@ -122,7 +122,17 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 下一步具体指令（给下次 AI）
 
-**先做：盯 PR #19 的 CI 跑完（run 34833590442，head `997e512b`）**
+**先做：盯 PR #19 的 CI 跑完（run 34838580706，head `41569c81`）**
+
+第五轮（34833590442）结果：202 通过，6 失败 + 3 重试通过，全在 E2E / 六视口步骤。已修：
+- `53c983c4` workbench-paper-boundaries：诊断信息显示报价区是错误态「暂无法取得当前报价」——CI 全套共库时
+  「匹配产品」第一项是本 spec 自己造的「缺克重」夹具产品，`.first()` 选中它报价必失败；改为按 prefix 排除。
+- `53c983c4` admin-responsive 375 / 393：`getByTestId('admin-order-detail')` 短暂解析到 2 个元素（第二份在
+  `#admin-main` 之外，来源未定位），改为只取主栏可见的一份。**若再见到「resolved to 2 elements」类错误，先怀疑
+  同一现象，用 `#admin-main` + `:visible` 限定；根因要拿 CI trace 才能定。**
+- `41569c81` 多地址装盒：150 秒仍等不到跳转，本地秒过；已改成失败时带出页面提示（role=alert / aria-invalid /
+  费用栏文字）。第六轮若仍失败，错误信息里就有原因。
+未修（CI 上重试通过或本地无法复现）：order-entry-stability:88 等报价响应、admin-responsive 抽屉 Home 键复位。
 
 1. verify job 顺序：迁移链 → 静态门禁 → 单测覆盖率 → Browser Mode → 生产构建 + business E2E + 六视口 →
    **durable → 跨浏览器打印 → dev-fixtures**。前五步的 20 个失败已全部修掉（本地 release 配置逐条复现并
@@ -297,3 +307,4 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 - 2026-09-14（下午）：推 `codex/gongdanceshi` 开 PR #19。CI 先因 Actions 账单未启动；恢复后依次修：打印基线（`4a6d5fd9`，业主确认）、Browser Mode 5 个 spec 缺 mock（`010b154f`）、管理端六视口门禁两处过时断言（`77aebdd7`）、CLAUDE.md §14 E2E 流程（`13813008`）。均在 `codex/tijian-2` 修后快进 PR 分支。
 - 2026-09-14（晚）：第三轮 CI 的 20 个 E2E / 六视口失败全部修完：真回归 `3578db20`（复制款式崩页）、装盒价目进 E2E 准备 `64f78382`、排行图省略 `aec6e722`、过时断言 `8622a5dc` / `65c2e1de`。均在隔离库 release 配置下逐条验证后快进 PR 分支。
 - 2026-09-14（夜）：第四轮 CI 剩余 2 个时序失败改超时 / 加诊断（`8ec5bc74`、`997e512b`）；本地 durable、compat 绿；PROGRESS 补上 09-13 / 09-14。第五轮 CI（34833590442）复核中。
+- 2026-09-14（深夜）：第五轮 CI 6 失败按诊断信息修 3 处（`53c983c4`、`41569c81`），第六轮 34838580706 复核中。顺着业主截图查出「存量工单过不了生产就绪校验」的结构性问题，已写进「待业主拍板」。
