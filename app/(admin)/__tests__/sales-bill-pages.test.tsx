@@ -118,10 +118,18 @@ it('uses the same sales-facing status names in the filter, the rows and the deta
   const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
   expect(rows.find((row) => row.includes('/sales/bills/confirmed'))).toContain('待支付');
   expect(rows.find((row) => row.includes('/sales/bills/paid'))).toContain('已结清');
-  detail.mockResolvedValue({ ...bill, status: 'DRAFT', paidAt: null });
-  const detailHtml = await renderDetail();
-  expect(detailHtml).toContain('整理中');
-  expect(detailHtml).not.toContain('草稿');
+});
+it.each([
+  ['DRAFT', '整理中'],
+  ['CONFIRMED', '待支付'],
+  ['PAID', '已结清'],
+])('renders the %s detail badge with the sales-facing label %s', async (status, label) => {
+  detail.mockResolvedValue({ ...bill, status, paidAt: status === 'PAID' ? bill.paidAt : null });
+  const html = await renderDetail();
+  // 只看徽标本身：DRAFT 的未定稿提示条也含「整理中」，不能靠全文包含来断言。
+  const badges = (html.match(/<[a-z]+[^>]*data-slot="badge"[^>]*>[\s\S]*?<\/[a-z]+>/g) ?? []).map((tag) => tag.replace(/<[^>]+>/g, '').trim());
+  expect(badges).toEqual([label]);
+  for (const adminOnly of ['草稿', '已确认·待收', '已收']) expect(html).not.toContain(adminOnly);
 });
 it('shows zero totals and an empty state for an empty filtered list', async () => {
   const html = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({ status: 'DRAFT' }) }));
