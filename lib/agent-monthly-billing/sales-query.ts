@@ -26,8 +26,9 @@ export async function getSalesMonthlyBill(actor: Actor, id: string) {
   return db.agentMonthlyBill.findFirst({
     where: { ...scope(actor), id },
     select: { ...select,
+      receipt: { select: { amount: true, receivedAt: true, paymentMethod: true, referenceNo: true } },
       items: { orderBy: [{ settledAtSnapshot: 'asc' }, { id: 'asc' }], select: {
-        id: true, orderNoSnapshot: true, workOrderVersionSnapshot: true,
+        id: true, orderId: true, orderNoSnapshot: true, workOrderVersionSnapshot: true, orderStatusSnapshot: true,
         customerRefSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true,
       } },
       adjustments: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {

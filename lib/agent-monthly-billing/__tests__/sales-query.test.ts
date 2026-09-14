@@ -24,3 +24,16 @@ it('fails closed for non-sales actors', async () => {
   await expect(getSalesMonthlyBill({ id: 'admin', role: Role.ADMIN }, 'id')).rejects.toThrow();
   expect(findFirst).not.toHaveBeenCalled();
 });
+it('selects only customer-facing receipt facts and frozen item identity/status', async () => {
+  await getSalesMonthlyBill(actor, 'bill-a');
+  const query = findFirst.mock.calls[0][0];
+  expect(query.where).toEqual({ agentUserId: actor.id, id: 'bill-a' });
+  expect(query.select.receipt).toEqual({ select: {
+    amount: true, receivedAt: true, paymentMethod: true, referenceNo: true,
+  } });
+  expect(query.select.items.select).toEqual({
+    id: true, orderId: true, orderNoSnapshot: true, workOrderVersionSnapshot: true,
+    orderStatusSnapshot: true, customerRefSnapshot: true, settledFeeSnapshot: true,
+    settledAtSnapshot: true,
+  });
+});
