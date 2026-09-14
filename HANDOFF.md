@@ -10,7 +10,7 @@
 
 **2026-09-14：分支 `codex/gongdanceshi` 已完成结构体检并收口体检报告的全部 6 项缺陷，全部已 commit、未推送、未部署。**
 
-本分支自 2026-09-13 起共 34 个提交领先 `origin/main`，内容分三块：
+本分支自 2026-09-13 起共 37 个提交领先 `origin/main`，内容分三块：
 
 1. **建单 / 定价 / 装盒批次（09-13，业务代码）**：管理员建单定价与关联外部销售、默认入袋 / 不包装 /
    版本化装盒计价、专版十一档「达到档位取价」（`e5bac3cb`，价目簿由 `scripts/publish-confirmed-custom-tiers.ts`
@@ -22,7 +22,10 @@
    - `e357efcc` 抽出 `buildFinalizePayload`，`OrderPricingReviewForm` 回到 723 行上限内，`check:architecture` 回绿
    - `666e8d89` `.gitignore` 忽略 `**/__tests__/__screenshots__/`（Browser Mode 运行产物，非基线）
    - `fb433c39` golden-gate 测试改按 print-sentinel 谱系（`notes.ruleVersion` + `sourceSha256`）时间点回读快照，
-     本机开发库已发布 v9 / v10 十一档也能过；黄金用例一字未动
+     本机开发库已发布 v9 / v10 十一档也能过；黄金用例一字未动。**Codex 复审指出这丢了「当前生效版发错价」
+     的防线**，`1f6556ef` 补回第二条用例：读此刻快照，按当前版 `ruleVersion` 在 `LINEAGE_EXPECTATIONS`
+     取期望集（print-sentinel = 原 42 例；`2026-09-13-attained-custom-tiers` = 11 个专版大号边界例覆盖），
+     未登记谱系直接失败。**以后发布新的加工费谱系，必须同时在这张表登记它对 §8 黄金值的影响。**
    - `068a7803` CLAUDE.md 1.3 同步现状 + HANDOFF 重写
    - `3a70278e` `lib/auth/schemas.ts`（3756 行）按域拆到 `lib/auth/schemas/` 12 个文件，入口纯 re-export，
      60 个调用方零改动；`6f8faa83` 把按路径读源码的 `edit-field-inventory.test.ts` 改成遍历该目录
@@ -31,7 +34,11 @@
 
 **验证事实（09-14，最后一次全量）**：`pnpm test run` 614 文件通过 / 4 跳过、6701 项通过；
 `pnpm check:architecture` 914 模块 / 0 环 / 25 项债务无增长；typecheck、eslint 通过；
-`OrderPricingReviewForm` Browser Mode 1/1。没有跑 Codex 复审，没有更新任何截图基线。
+`OrderPricingReviewForm` Browser Mode 1/1；golden-gate 两条用例在本机（当前 v10）2/2。
+**Codex 复审已跑两轮**（`codex exec --sandbox read-only -m gpt-5.6-sol`）：第一轮覆盖 048c5dd1..e553bed2 八个提交，
+唯一中等问题即上述 golden-gate 防线，其余（载荷搬运等价、schemas 拆分无丢失 / 无环 / 无 Prisma runtime 泄漏、
+测试遍历不重复计数、归档无代码消费方、CLAUDE.md 与现状一致）核对无误；第二轮只看 `1f6556ef`，结论可合入，
+仅一条注释精度（`fde821fc` 已改）。没有更新任何截图基线。
 
 **体检里刻意没做、需要业主定夺的项**：
 - 三个超大文件**没有拆**：`lib/order/change-request.ts`（6143 行，143 个顶层语句里 125 个是私有函数，
@@ -61,8 +68,8 @@
 
 1. 推送 `codex/gongdanceshi` 前再跑一遍 `pnpm check:architecture && pnpm lint && pnpm typecheck && pnpm test run`
    （CI 的 Static quality gates 会按这个顺序跑，架构门禁排最前）。
-2. 若按惯例走 Codex 复审，把 `e357efcc`、`fb433c39` 两个 commit 一起给它看：前者是纯搬运，后者改了测试语义
-   （「当前生效版」→「print-sentinel 谱系版」），复审重点是这个语义变化是否可接受。
+2. Codex 复审已完成（见验证事实），本批可以直接推送开 PR；CI 的 vitest 步骤会在全新库上跑 golden-gate 的
+   「当前生效版」用例（当前版 = print-sentinel，走空覆盖集，与旧测试等价）。
 3. 更新 `PROGRESS.md`：把 09-13 批次（建单定价 / 装盒 / 十一档 / 批量打印）与 09-14 体检收口写进「已完成」。
 4. 新建任务过程文件直接放 `docs/archive/`（规则见其 README），不要再往仓库根目录放 PLAN- / REPORT-。
 5. 新增 Zod schema 放进 `lib/auth/schemas/<域>.ts`，不要往入口文件 `lib/auth/schemas.ts` 里加。
@@ -200,3 +207,4 @@
 - 2026-09-08：UI 规范三段式完成（只写 docs / lint / PR 模板，零 UI 代码改动，未 commit）。盘点 `docs/UI现状盘点.md`（原始扫描 `docs/audits/2026-09-08-ui-scan-*.md`）；对照裁决 `docs/audits/2026-09-08-UI对照裁决表.md`（业主确认，待拍板项按默认生效）；定稿 `docs/ui-规范.md`（§2 令牌、§7 文案，附录 A 豁免）；`docs/UI迁移清单.md` P0/P1/P2；新门禁 `scripts/ui-tokens/check.mjs` + `baseline.json`（裸色 / 内联金额 / deep import，存量 warn、新增 error、stale 报错）已挂进 `pnpm lint`，实测 0 error / 132 warn。随附的「七组原型 ui-规范.md」未送达，基准由四份原型 `:root` + 仓库条款拼合。同日完成 P0-3：`AdminOrderEditor` 的 Sheet「确认保存修改」与 Dialog 离开确认改走 `ConfirmActionController`，待补运费/阻断改为页内「核价结果」区，`AdminOrderEditor.browser.spec.tsx` 43/43。同日完成 P0-2：`app/`+`components/` 14 处 UTC 日期切片改 Shanghai formatter（真缺陷仅 `AccountForm` 默认入职日）。2026-09-09 完成 P0-1：金额全部走 `formatMoney` / `formatMoneyPlain` / `formatMoneyDelta` / `formatUnitPrice`，门禁新增拦 `¥ ${…}` 直拼，`baseline.json` money 待迁移清零；遗留阶梯价 4 位小数与费率格式两项待拍板（见迁移清单）。同日完成 P1-4（deep import 清零）与 P1-3（删 10 行无用 token）。P1-8 / P1-7 / P1-10 / P1-2 同日完成。P1-5 圆角间距归并同日完成。P1-6 与 P1-1 同日实施完毕（`baseline.json` 存量豁免清零；`--muted-foreground` 因 AA 压到 L 0.53），admin 门禁 axe 对比度归零、剩余失败为另一任务的工单号标题定位器；业主已目视确认；`.decision` 深色按钮方案另立 P2-12。P1 仅剩 P1-9 金额三态（待拍板）。P2 已完成 P2-9（关闭，无死导出）、P2-5（2/3，RulePriceWorkbench 因导航拦截豁免）、P2-8（空态工厂改「暂无X」/「没有匹配的X」）、P2-7（新增 `SectionLoading`，业务代码 `animate-pulse` 归零）、P2-11（手写横滚包裹归零，`TableScrollArea` 透传 div 属性）。三项待拍板已按业主授权定案（DECISIONS 2026-09-09：`formatRate`、保持 L2、三态收编 `pricingStatus`+`estimated`），P1-9 转 P2-13。P2-4（复制 hook）与 P2-12（决策列 emphasis，顺带修好批准/拒绝同色的潜在缺陷）已完成。P2-13（三态 helper，顺带把待核价的 destructive/warning 统一成 primary、销售端文案统一为「待工厂核价」）已完成。P2-1（状态药丸归并，6 组并行 + 对抗校验；顺带修掉归档账单外显原始枚举、销售端急单 danger 误用、临期/逾期同色，以及并行任务引入的 heading-order 回归）已完成，残余登记为 P2-14 / P2-15。P2 剩余：、P2-2 NativeSelect、P2-6 字段错误、P2-3 PendingButton、P2-10 disabled 审计。注意 `AdminOrderListLayout.browser.spec.tsx`（未跟踪，另一任务 WIP）等待尚不存在的「下发生产」按钮，整套超时，不是回归。
 - 2026-09-14：结构体检（`docs/archive/项目结构体检-2026-09-14.md`）+ 四项收口 commit：架构门禁回绿（`e357efcc`）、忽略 Browser Mode 截图产物（`666e8d89`）、golden-gate 按 print-sentinel 谱系回读（`fb433c39`）、CLAUDE.md 1.3 同步现状。未推送、未部署、未跑 Codex 复审。
 - 2026-09-14（续）：体检剩余项收口：`lib/auth/schemas.ts` 按域拆分（`3a70278e` + 测试改遍历 `6f8faa83`）、`docs/archive/` 归档 25 份过程文件并立规则（`d3254723`）、CLAUDE.md §3 / §15.3 同步。change-request / lib/order.ts / OrderForm 量过耦合度后**没有拆**，理由写在「当前任务」。
+- 2026-09-14（Codex 复审）：两轮只读复审。一处中等问题（golden-gate 丢了当前生效版防线）由 `1f6556ef` 补回「按谱系登记期望」的第二条用例，`fde821fc` 修注释；其余提交核对无误。
