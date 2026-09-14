@@ -2754,6 +2754,10 @@ export function OrderForm({
     : [];
   const activeExternalItem =
     watchedItems[expandedItem] ?? watchedItems[0] ?? initialItem;
+  // 复制 / 新增款式后 setExpandedItem(nextIndex) 先于 watch('items') 更新一帧，
+  // 这一帧 watchedItems[expandedItem] 为 undefined；凡按下标取当前款的渲染都要经此别名守卫，
+  // 否则管理员人工定价区会抛 TypeError 把整页送进错误边界（PR #19 CI 首次暴露）。
+  const expandedWatchedItem = watchedItems[expandedItem];
   const internalAdditionalCraftOptions = additionalOrderCraftOptions(crafts);
   const {
     activeExternalPaper,
@@ -3164,10 +3168,10 @@ export function OrderForm({
               </>
             }
             pricingExtras={<>
-              {canAssignExternalSales ? <AdminCreatePriceFields
+              {canAssignExternalSales && expandedWatchedItem ? <AdminCreatePriceFields
                 amountId={`items.${expandedItem}.adminPrice.amount`}
-                value={watchedItems[expandedItem]?.adminPrice}
-                factsKey={adminPriceFacts(watchedItems[expandedItem])}
+                value={expandedWatchedItem.adminPrice}
+                factsKey={adminPriceFacts(expandedWatchedItem)}
                 disabled={orderFormControlsDisabled}
                 suggestedAmount={quoteViews[itemsArray.fields[expandedItem]?.id]?.result?.suggestedSubtotal}
                 error={adminPrices[expandedItem]?.error}
