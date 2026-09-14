@@ -82,3 +82,40 @@ for (const theme of ['light', 'dark']) {
     });
   }
 }
+
+// 经营分析页在 375 / 393 视口的门禁曾在 CI 上失败：e2e 留下的长显示名让 Y 轴分类
+// 标签向左溢出视口 1.8px（Linux 无中文字体时回退字形更宽）。这里锁定「按实际字体
+// 度量单行省略」的契约：任何刻度文字都不能越过图表容器左边界，且长名被截断。
+it('393: long display names are ellipsized inside the axis instead of overflowing left', async () => {
+  await page.viewport(393, 852);
+  const longName = 'E2E 客户及供应商验收账号 1789217384232';
+  flushSync(() =>
+    root.render(
+      <main>
+        <h1>销售业绩</h1>
+        <SalesRankingChart data={[{ ...data[0]!, displayName: longName }, data[1]!]} />
+      </main>,
+    ),
+  );
+  await expect.poll(() => host.querySelectorAll('.recharts-bar-rectangle').length).toBe(2);
+  // 自定义 tick 渲染器不带 recharts 的刻度类名，按分类文字内容从 SVG 里找两条 Y 轴标签。
+  const findLabels = () =>
+    [...host.querySelectorAll<SVGTextElement>('svg text')].filter((node) =>
+      /客服乙|E2E/.test(node.textContent ?? ''),
+    );
+  await expect.poll(() => findLabels().length).toBe(2);
+  const labels = findLabels();
+  const hostLeft = host.getBoundingClientRect().left;
+  for (const label of labels) {
+    expect(label.getBoundingClientRect().left, label.textContent ?? '').toBeGreaterThanOrEqual(hostLeft);
+    expect(label.getBoundingClientRect().left).toBeGreaterThanOrEqual(0);
+  }
+  const rendered = labels.map((label) => ({
+    text: label.textContent,
+    lines: label.querySelectorAll('tspan').length,
+    width: Math.round(label.getBoundingClientRect().width),
+  }));
+  const truncated = labels.find((label) => label.textContent?.includes('…'));
+  expect(truncated?.textContent ?? '', JSON.stringify(rendered)).not.toBe(longName);
+  expect(truncated?.textContent ?? '', JSON.stringify(rendered)).toMatch(/…$/);
+});
