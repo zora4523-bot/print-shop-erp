@@ -10,7 +10,7 @@
 
 **2026-09-14：PR #19（`codex/gongdanceshi` → `main`，<https://github.com/zora4523-bot/print-shop-erp/pull/19>）已开，
 本地继续在 `codex/tijian-2` 上修 CI 暴露的问题，每修一处就 `git push origin codex/tijian-2:codex/gongdanceshi` 快进 PR 分支。
-两分支当前同头（`65c2e1de`），共 46 个提交领先 `origin/main`。未合并、未部署。**
+两分支当前同头（`997e512b`），共 50 个提交领先 `origin/main`。未合并、未部署。**
 
 **PR 开出后 CI 与本地门禁复核发现并已修的 4 件事（都是 09-13 批次改了行为但没同步测试 / 基线）：**
 
@@ -45,6 +45,17 @@
    `<Text maxLines breakAll>` 按字体度量省略；Browser Mode 加 393 长名用例。
 8. **`8622a5dc` / `65c2e1de` 过时断言**：管理员建单已无关联客户 / 简称控件（notification-urgent、
    master-data-flow、smoke）；价格版本页标题改「价格版本」、库存列表隐藏物料编码（smoke）。
+
+**第四轮 CI（run 34824602280）只剩 2 个失败 + 2 个重试通过，都是 CI 慢机器的时序：** `8ec5bc74` 多地址装盒用例
+对齐同文件的 150 秒超时；`997e512b` 工作台纸张边界用例等报价最多 30 秒并把报价区文字带进错误信息（组件在
+「正在计算…」和错误态都不渲染 `p.text-3xl`）。本地 durable 3/3、compat 16/16 已绿；dev-fixtures 要同目录起
+`next dev`，会和 :3000 的开发服务器争 `.next`，没在本地跑。
+
+**本机全量 e2e（全新库、字母序）观察到 4 个 CI 上会过的失败，都是高负载下的时序，未改：**
+blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模式撞到 2 个元素（导航过程中新旧
+`#admin-main` 同时存在）；sales-functional-review:316 在 375 深色下 axe 报对比度 1.01（`#17181c` 文字落在
+`#171717` 上，颜色过渡未完成就跑了 axe）；order-entry-stability:88 等 `/orders/new` 报价响应超时。若要收口，
+方向是给这些等待加显式条件而不是加时长。
 
 **规律（写给下一个改建单页的人）**：09-13 那批把行为改了但没跑 `test:release`，本地 `.next` 和开发库
 的历史数据把问题全盖住了。改建单 / 定价 / 包装后，至少在隔离库上跑
@@ -111,7 +122,7 @@
 
 ## 下一步具体指令（给下次 AI）
 
-**先做：盯 PR #19 的 CI 跑完（run 34824602280，head `65c2e1de`）**
+**先做：盯 PR #19 的 CI 跑完（run 34833590442，head `997e512b`）**
 
 1. verify job 顺序：迁移链 → 静态门禁 → 单测覆盖率 → Browser Mode → 生产构建 + business E2E + 六视口 →
    **durable → 跨浏览器打印 → dev-fixtures**。前五步的 20 个失败已全部修掉（本地 release 配置逐条复现并
@@ -257,3 +268,4 @@
 - 2026-09-14（Codex 复审）：两轮只读复审。一处中等问题（golden-gate 丢了当前生效版防线）由 `1f6556ef` 补回「按谱系登记期望」的第二条用例，`fde821fc` 修注释；其余提交核对无误。
 - 2026-09-14（下午）：推 `codex/gongdanceshi` 开 PR #19。CI 先因 Actions 账单未启动；恢复后依次修：打印基线（`4a6d5fd9`，业主确认）、Browser Mode 5 个 spec 缺 mock（`010b154f`）、管理端六视口门禁两处过时断言（`77aebdd7`）、CLAUDE.md §14 E2E 流程（`13813008`）。均在 `codex/tijian-2` 修后快进 PR 分支。
 - 2026-09-14（晚）：第三轮 CI 的 20 个 E2E / 六视口失败全部修完：真回归 `3578db20`（复制款式崩页）、装盒价目进 E2E 准备 `64f78382`、排行图省略 `aec6e722`、过时断言 `8622a5dc` / `65c2e1de`。均在隔离库 release 配置下逐条验证后快进 PR 分支。
+- 2026-09-14（夜）：第四轮 CI 剩余 2 个时序失败改超时 / 加诊断（`8ec5bc74`、`997e512b`）；本地 durable、compat 绿；PROGRESS 补上 09-13 / 09-14。第五轮 CI（34833590442）复核中。
