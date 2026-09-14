@@ -179,6 +179,11 @@ test('管理员多地址装盒分别进位，保存两盒而非一盒', async ({
   test.setTimeout(150_000);
   await login(page, {from: '/orders/new', username: E2E_USERS.owner.username, password: E2E_PASSWORD});
   await page.getByRole('textbox', {name: '工单名称', exact: true}).fill('分址装盒验证');
+  // 显式选纸：全套 spec 共库时表单默认纸张会变成别的 spec 造的夹具纸（CI 第六轮选中了
+  // blank-paper-pricing 的「验证纸…」，其 4 位小数单价让金额守卫拒绝保存）。
+  await page.getByRole('group', {name: '纸张材质'}).getByRole('button', {name: '珠光艳闪', exact: true}).click();
+  await page.getByRole('group', {name: '克重'}).getByRole('button', {name: '160g', exact: true}).click();
+  await page.getByRole('group', {name: '规格'}).getByRole('button', {name: '大号封', exact: true}).click();
   await page.getByRole('spinbutton', {name: '数量', exact: true}).fill('10');
   await page.getByRole('group', {name: '包装类型', exact: true}).getByRole('button', {name: '装盒', exact: true}).click();
   await page.getByRole('textbox', {name: '收货地址', exact: true}).fill('张先生 13800138000 广东省佛山市南海区测试路1号');
