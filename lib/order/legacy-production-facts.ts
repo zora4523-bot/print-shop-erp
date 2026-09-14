@@ -51,6 +51,11 @@ export async function repairLegacyProductionFacts(input: RepairLegacyProductionF
     const mode = input.packagingMode ?? legacyPackagingMode(order.packageRequirement);
     if (needsPackaging) {
       if (!mode) throw new LegacyProductionFactsError('原单未记录明确包装方式，请选择包装方式');
+      // 数据库约束 OrderPackagingGroup_count_by_mode_check 要求不包装组金额为 0；
+      // 历史包装费非零时不能选不包装，在写入前给出业务错误而不是让约束报错回滚。
+      if (mode === OrderPackagingMode.UNPACKED && !new Decimal(order.packagingAmount).isZero()) {
+        throw new LegacyProductionFactsError('原单记录了包装费，不能补录为不包装，请先核对费用或选择实际包装方式');
+      }
       if (order.items.length === 0) throw new LegacyProductionFactsError('工单没有款式，请先补录款式');
       const totalQuantity = order.items.reduce((sum, item) => sum.plus(item.quantity), new Decimal(0));
       let remaining = new Decimal(order.packagingAmount);

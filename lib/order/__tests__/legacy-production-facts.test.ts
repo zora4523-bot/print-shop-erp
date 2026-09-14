@@ -112,6 +112,10 @@ describe('repairLegacyProductionFacts', () => {
     await expect(repairLegacyProductionFacts({ ...input(), packagingMode: OrderPackagingMode.UNPACKED }, actor)).resolves.toMatchObject({ ready: true });
     expect(order.packagingGroups[0].actualBagCount).toBe(0);
   });
+  it('不包装 + 历史包装费非零在写入前被拒（数据库约束要求不包装组金额为 0）', async () => {
+    order.packagingAmount = new Decimal('0.01'); order.processingAmount = new Decimal('20.01'); order.totalAmount = order.processingAmount; order.confirmedFee = order.totalAmount;
+    await expect(repairLegacyProductionFacts({ ...input(), packagingMode: OrderPackagingMode.UNPACKED }, actor)).rejects.toThrow('不能补录为不包装'); expectNoWrites();
+  });
   it('装盒按地址分别进位且通过真实 readiness', async () => {
     Object.assign(order, { shipments: [{ lines: [{ orderItemId: 'item-1', quantity: 1 }] }, { lines: [{ orderItemId: 'item-1', quantity: 100 }] }] });
     await expect(repairLegacyProductionFacts({ ...input(), packagingMode: OrderPackagingMode.BOX_RED_CARD }, actor)).resolves.toMatchObject({ ready: true });
