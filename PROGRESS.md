@@ -8,7 +8,7 @@
 
 ## 最后更新
 
-2026-09-03（企业微信通知、人工制版费、改单并发与管理端列表收口；已拆分 commit、未部署，真实群验收与按人路由仍待完成）
+2026-09-14（PR #19 `codex/gongdanceshi` → `main` 开出：09-13 建单 / 定价 / 装盒 / 打印批次 + 09-14 结构体检收口 + CI 复核修复；未合并、未部署）
 
 ## 已完成
 
@@ -35,6 +35,22 @@
 - [x] **企业微信单条字节守卫**：按[官方消息推送文档](https://developer.work.weixin.qq.com/document/path/99110)在模板保存和真实/mock 发送前均限制 `markdown.content ≤ 4096 UTF-8 字节`。
 - [x] **共享 Webhook 全局节流**：真实 `sendWebhook` 以规范化 endpoint/key 的 SHA-256 摘要为键，由 PostgreSQL 原子预留 3500ms permit，同 URL 跨事件、跨 worker 进程串行；等待可被 durable lease signal 中止，mock/注入 sender 不触库。未部署 migration `20260902121100_notification_webhook_global_throttle` 前不得开启生产真发。
 - [ ] **企业微信仍未完成的项**：尚未做 per-CS / 对应师傅的按人路由；真实企微群与 durable LIGHT worker 仍需在应用新 migration 后做生产人工验收。
+
+### 2026-09-13 建单 / 定价 / 装盒 / 打印批次（26 个提交，详见 DECISIONS 2026-09-11 ~ 09-13）
+
+- [x] 管理员建单定价与关联外部销售（仅 ADMIN 可选活动 SALES，冻结 `EXTERNAL_SALES`）；管理员创建不再录入工单客户及简称。
+- [x] 包装：默认入袋、不包装、红卡盒 / 触感盒版本化装盒计价；每包上限 12；多地址装盒分别进位。
+- [x] 专版十一档「达到档位取价」（`e5bac3cb`），价目簿由 `scripts/publish-confirmed-custom-tiers.ts` 发布，**不是 migration**。
+- [x] 空白封纸张规格价格、批量打印 PDF、报价转单草稿修复、品牌名统一为「长昆纸品有限公司」、库存列表隐藏物料编码。
+
+### 2026-09-14 结构体检与 PR #19 CI 复核（`codex/tijian-2` 修后快进）
+
+- [x] 体检报告 `docs/archive/项目结构体检-2026-09-14.md`；6 项缺陷收口：架构门禁回绿、Browser Mode 截图产物 gitignore、golden-gate 按谱系登记期望（`1f6556ef`）、`lib/auth/schemas.ts` 按域拆分（`3a70278e`）、`docs/archive/` 归档规则、CLAUDE.md 1.3 同步。两轮 Codex 只读复审通过。
+- [x] CI 复核（Actions 账单恢复后）：打印基线更新（`4a6d5fd9`，业主确认）、Browser Mode 5 个 spec 补 mock（`010b154f`）、管理端六视口门禁与 e2e 过时断言同步（`77aebdd7` / `8622a5dc` / `65c2e1de`）。
+- [x] **真回归修复 `3578db20`**：管理员建单「复制当前」整页崩进错误边界（人工定价区按下标取款缺守卫）。
+- [x] **`64f78382`**：装盒价目是部署后数据步骤，新增 `prepare-e2e-box-packaging.ts` 进 `test:e2e:prepare`；生产启用装盒仍需手动执行 `install-box-packaging-rules.ts --apply`。
+- [x] `aec6e722`：经营分析业绩排行 Y 轴长显示名按字体度量省略，不再在 375 / 393 溢出。
+- [ ] CI 后三步（durable / 跨浏览器打印 / dev-fixtures）尚未在 CI 上跑绿过；PR 合并后删 `codex/tijian-2`。
 
 ### 2026-09-03 提交记录
 
