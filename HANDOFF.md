@@ -8,58 +8,58 @@
 
 ## 当前任务
 
-**2026-08-24：UI/UX 对齐与状态契约整改批次已完成当前可安全落地范围，未 commit、未部署。** 问题已按 S0–S3 严重度、C1–C4 成本拆成 23 个独立任务。已闭合根错误恢复、基础 UI 原子件、七个共享状态组件、L2/L3 确认层、核心状态注册表、CDR 过期重生、工单字段差异/批量安全子集、通知 UNKNOWN 人工决策、产品引用影响闭环和首批表单/空态迁移。
+**2026-09-14：分支 `codex/gongdanceshi` 已完成结构体检并收口 4 项缺陷，全部已 commit、未推送、未部署。**
 
-**验证事实：** 272 个 Vitest 文件 / 3184 项、typecheck、lint、Prisma validate、diff-check 和 Next.js 16.2.4 生产构建全绿；管理端 36/36、师傅端 12/12、打印像素基线 8/8 通过。应用内浏览器对 `/dev/showcase` 的 393×852 / 1280×800 与 L2/L3 交互检查也通过，开发服务器仍运行于 `http://localhost:3000`。
+本分支自 2026-09-13 起（含本次文档提交）共 30 个提交领先 `origin/main`，内容分三块：
 
-**下一轮不要把开放项写成已完成。** 主数据只有产品域已做真实引用闭环；工艺和账号需先拍板停用策略。剩余旧写表单、长任务回执和复杂页分区错误隔离应按页面族独立迁移。管理/师傅门禁是响应式、axe 与候选截图，不是 85 页设计稿像素 diff；真像素基线仍需业主确认。
+1. **建单 / 定价 / 装盒批次（09-13，业务代码）**：管理员建单定价与关联外部销售、默认入袋 / 不包装 /
+   版本化装盒计价、专版十一档「达到档位取价」（`e5bac3cb`，价目簿由 `scripts/publish-confirmed-custom-tiers.ts`
+   按 `config/customer-price-books/custom-tiers-20260913.json` 发布，**不是 migration**）、空白封纸张规格价格、
+   批量打印 PDF、报价转单草稿修复、品牌名统一为「长昆纸品有限公司」。对应决策见 DECISIONS 2026-09-11 ~ 09-13。
+2. **结构体检（09-14，只读）**：报告在 `docs/项目结构体检-2026-09-14.md`。门禁实测：typecheck / lint /
+   prisma validate / dead-code 全绿；分层、权限闸口、Prisma 直连边界与 CLAUDE.md 一致。
+3. **体检收口（09-14，4 个独立 commit）**：
+   - `e357efcc` 抽出 `buildFinalizePayload`，`OrderPricingReviewForm` 回到 723 行上限内，`check:architecture` 回绿
+   - `666e8d89` `.gitignore` 忽略 `**/__tests__/__screenshots__/`（Browser Mode 运行产物，非基线）
+   - `fb433c39` golden-gate 测试改按 print-sentinel 谱系（`notes.ruleVersion` + `sourceSha256`）时间点回读快照，
+     本机开发库已发布 v9 / v10 十一档也能过；黄金用例一字未动
+   - 本次 CLAUDE.md 1.3 + HANDOFF 同步（见下）
 
-**此前已完成（不要重做）：**
+**验证事实（09-14）**：`pnpm test run` 614 文件通过 / 4 跳过（修复前 1 失败即 golden-gate）；
+`pnpm check:architecture` 902 模块 / 25 项债务无增长；相关组件单测 8/8、Browser Mode 1/1。
+没有跑 Codex 复审，没有更新任何截图基线。
 
-**2026-08-23：根路由失效会话 500 已修复并提交。**
-
-`/` 原先直接调用 `requireSession()`：签名 JWT 仍有效、但数据库账号已删除或停用时，Edge proxy 的乐观检查会放行，页面层却把 `UnauthorizedError` 演变为 500，进而触发 React 错误恢复阶段的二次 Script 警告。根页现改用 `getSession()`，验证结果为 `null` 时跳转 `/login`；数据库等真实异常仍原样抛出。四角色分流、失效会话和异常透传已有回归测试；修复提交为 `cbc88ca`。Prisma validate、typecheck、lint、236 个测试文件 / 2988 项单测、Next 生产 build 及带失效会话的浏览器复验均通过；未改 `RootLayout` 主题脚本。
-
-**同日已完成的结构复审：** Codex 已完成未提交上线前加固批次的独立结构复审，并只修复当前代码下仍成立的部分。
-
-复审结论已填入 `docs/代码质量审查-2026-08-23.md`：B1 / B2 / B4 / B5 与 S1 / S3 / S5 / S6 / S7 成立，B3 / B6 / S2 / S4 部分成立，没有整项直接证伪。成立部分已按规定修法落地：通知 `RETRYING + DEAD` 业主契约、共用发送 / finalize 循环、queue-local lease reaper、daily / notification admin / outsource 职责拆分、死 API 删除、未 apply 的查询索引 migration 压缩及 S1–S7 收口。
-
-部分证伪的旧修法没有实施：不把 RETRYING 改成 FAILED，不改 5xx / 超时 / 网络的 UNKNOWN，不改外协 `max` 覆盖、`orderItemIds` 兼容缓存、日薪已发 / 冻结 roster、独立取号可留空隙、Server Component `<details>` 与登录成功也消耗 GCRA 令牌的契约。代码收口按小块提交为 `f608e39 → 9dd1cc5`；任务外的原有脏改动仍留在工作树，未 stash / reset / revert。
-
-| 文档 | 用途 |
-|---|---|
-| `docs/定价表单优化-2026-08-24.md` | 定价现状对照 + 首批范围 |
-| `docs/codex-prompt-定价表单优化-2026-08-24.md` | **下一轮 Codex 执行稿** |
-| `docs/ux-redesign/` | 交互稿（浏览器打开 `.dc.html`） |
-| `docs/UI-DESIGN-COVERAGE.md` | 85 页设计证据等级、实现覆盖与不可过度声称的边界 |
-| `docs/UI-REMEDIATION-BACKLOG.md` | 严重度×成本排序、23 个独立任务、状态与本批门禁证据 |
-| `UI-SYSTEM.md` | UI token、组件、状态、确认级别与测试契约 |
-| `TROUBLESHOOTING.md` | 含 `fetchServerAction: Failed to fetch` 的根因分类与恢复步骤 |
-| `docs/代码质量审查-2026-08-23.md` | 结构审查正文 + 已完成的复审表（留档） |
-| `docs/codex-prompt-代码质量审查修复-2026-08-23.md` | 结构收口原始约束（留档，不要再跑） |
+**体检里尚未处理的项（业主定夺）**：
+- 超大文件：`lib/order/change-request.ts` 6143 行、`lib/order.ts` 4410 行、`OrderForm.tsx` 3991 行、
+  `lib/auth/schemas.ts` 3756 行。建议只在触碰时顺手拆；`schemas.ts` 可按域拆目录并保留 re-export。
+- 根目录 8 份 AUDIT- / PLAN- / REPORT- 过程文件与 `docs/` 里带日期的一次性报告没有归档规则，建议 `git mv` 进
+  `docs/archive/`。移动时要同步本文件与 PROGRESS 的链接。
+- `PROGRESS.md` 仍停在 09-03，09-13 这批建单 / 定价 / 打印工作还没写进去。
+- knip 134 个未用导出 / 229 个未用类型，集中在 barrel 文件；CI 只当证据，不是门禁。
 
 ### 仍成立的 Git / 生产事实
 
-- 发布候选与 `357a084` 均在 `main` 祖先链；本次结构收口代码提交为 `f608e39 → 9dd1cc5`。
-- remote：`https://github.com/zora4523-bot/print-shop-erp.git`（**私有，HTTPS**）。开发机 SSH 不通（`git@github.com` 解析到 `198.18.1.8`），**不要把 remote 改回 SSH**。
-- **生产未动。** <https://bag.sshapi.cn> 仍运行 `aa42ba0`（2026-08-02）/ **45 / 45 migrations**。工作区这批加固也**没有部署**。
-- 当前 `HEAD` 已跟踪 82 项 migration，尾项是 `20260822112100_create_notification_log_query_index`；工作树还有未提交的 `20260822102000_retire_database_http_scheduler`，所以本地目录共 83 项。这些都**不是生产已 apply 事实**。
+- remote：`https://github.com/zora4523-bot/print-shop-erp.git`（**私有，HTTPS**）。开发机 SSH 不通，**不要把 remote 改回 SSH**。
+- 远端只有 `main` 与 `codex/*`（`codex/fabuceshi`、`codex/gongdan`），**没有 `dev`**；本分支 `codex/gongdanceshi` 尚未推送。
+- **生产未动。** <https://bag.sshapi.cn> 上次记录仍是 `aa42ba0`（2026-08-02）/ 45 项 migration；本地迁移链已有 146 项。
+  这些都**不是生产已 apply 事实**，部署前必须重新核对。
+- 本机开发库加工费价目簿已到 v10（`2026-09-13-attained-custom-tiers`），v8 是 print-sentinel 迁移版。
+  golden-gate 测试现在按谱系读 v8，**不要**为了让它过去回滚开发库版本。
 
 ---
 
 ## 下一步具体指令（给下次 AI）
 
-**立刻做：收口本轮展示层，不要开新功能**
+**先做：把这批改动送去 review，不要开新功能**
 
-1. 本轮改动还没 commit。小步提交，`type(scope): subject`，不要把结构审查文件混进来，不要 stash/reset 丢掉工作区其它脏文件。
-2. 建议至少再跑：`pnpm lint`、`pnpm typecheck`、`pnpm test run`；动过的页面再评估 `pnpm test:admin-ui`。打印基线不要更新。
-3. 若继续 UI：只补有交互稿、且现有数据够画的页面（批次七八主数据/设置若要对着稿，先打开 `docs/ux-redesign/批次七八 主数据设置仓库与打印 交互稿.dc.html` 对照现状）。不要做执行清单 B 区。
-4. 不要从 `ERP 全站线框 批次1-3.dc.html` 开工。
+1. 推送 `codex/gongdanceshi` 前再跑一遍 `pnpm check:architecture && pnpm lint && pnpm typecheck && pnpm test run`
+   （CI 的 Static quality gates 会按这个顺序跑，架构门禁排最前）。
+2. 若按惯例走 Codex 复审，把 `e357efcc`、`fb433c39` 两个 commit 一起给它看：前者是纯搬运，后者改了测试语义
+   （「当前生效版」→「print-sentinel 谱系版」），复审重点是这个语义变化是否可接受。
+3. 更新 `PROGRESS.md`：把 09-13 批次（建单定价 / 装盒 / 十一档 / 批量打印）与 09-14 体检收口写进「已完成」。
+4. 文档归档（`docs/archive/`）只在业主点头后做；动根目录文件会牵连本文件与 PROGRESS 的链接。
+5. 不要把 `docs/项目结构体检-2026-09-14.md` 里的「建议」当成已拍板；超大文件拆分没有立项。
 
-**根路由修复和结构复审都已收口：不要为消除该警告改 `RootLayout` 的 `beforeInteractive` Script，也不要重做 B1–B6 / S1–S7。**
-
-5. 与结构审查无关的原有脏文件仍在；后续处理它们时继续禁止 stash / reset / 猜测性 revert。若要把整个上线前加固批次定为发布候选，仍应跑 `test:admin-ui` / `test:worker-ui` 与人工验收。
-6. B4 压缩的前提已在本地开发库确认；若未来发现外部库曾 apply 旧的 `20260822111000` / `20260822112000`，必须停止部署并恢复不改写历史的方案。
 
 **部署前仍必须先做（顺序不能反）**
 
@@ -189,3 +189,4 @@
 - 2026-08-24：入库 UI 重设计交付包（源：Downloads「定价表单优化分析」）。交互稿在 `docs/ux-redesign/`；定价对照 `docs/定价表单优化-2026-08-24.md`；Codex 展示层执行稿 `docs/codex-prompt-定价表单优化-2026-08-24.md`。首批只做外部销售工作台/阶梯表/发布中心，不做全站 12 项。未实现、未部署。
 - 2026-08-24：按交互稿改已有页面（展示层，未 commit）：工单详情常驻动作条 + 时间线 + 款式折叠 + 取消收回页头；收费工作台阶梯 Δ / 粘性草稿条 / 两套只读文案 / 发布 L3 影响；排产「本次可派 / 阻断」列 + 师傅候选卡；Dashboard 处理队列优先（无毛利、无上次查看）；工单修改申请列表前移决策列；计件工资重算移到筛选行末。未碰 lib/actions/prisma。未部署。
 - 2026-09-08：UI 规范三段式完成（只写 docs / lint / PR 模板，零 UI 代码改动，未 commit）。盘点 `docs/UI现状盘点.md`（原始扫描 `docs/audits/2026-09-08-ui-scan-*.md`）；对照裁决 `docs/audits/2026-09-08-UI对照裁决表.md`（业主确认，待拍板项按默认生效）；定稿 `docs/ui-规范.md`（§2 令牌、§7 文案，附录 A 豁免）；`docs/UI迁移清单.md` P0/P1/P2；新门禁 `scripts/ui-tokens/check.mjs` + `baseline.json`（裸色 / 内联金额 / deep import，存量 warn、新增 error、stale 报错）已挂进 `pnpm lint`，实测 0 error / 132 warn。随附的「七组原型 ui-规范.md」未送达，基准由四份原型 `:root` + 仓库条款拼合。同日完成 P0-3：`AdminOrderEditor` 的 Sheet「确认保存修改」与 Dialog 离开确认改走 `ConfirmActionController`，待补运费/阻断改为页内「核价结果」区，`AdminOrderEditor.browser.spec.tsx` 43/43。同日完成 P0-2：`app/`+`components/` 14 处 UTC 日期切片改 Shanghai formatter（真缺陷仅 `AccountForm` 默认入职日）。2026-09-09 完成 P0-1：金额全部走 `formatMoney` / `formatMoneyPlain` / `formatMoneyDelta` / `formatUnitPrice`，门禁新增拦 `¥ ${…}` 直拼，`baseline.json` money 待迁移清零；遗留阶梯价 4 位小数与费率格式两项待拍板（见迁移清单）。同日完成 P1-4（deep import 清零）与 P1-3（删 10 行无用 token）。P1-8 / P1-7 / P1-10 / P1-2 同日完成。P1-5 圆角间距归并同日完成。P1-6 与 P1-1 同日实施完毕（`baseline.json` 存量豁免清零；`--muted-foreground` 因 AA 压到 L 0.53），admin 门禁 axe 对比度归零、剩余失败为另一任务的工单号标题定位器；业主已目视确认；`.decision` 深色按钮方案另立 P2-12。P1 仅剩 P1-9 金额三态（待拍板）。P2 已完成 P2-9（关闭，无死导出）、P2-5（2/3，RulePriceWorkbench 因导航拦截豁免）、P2-8（空态工厂改「暂无X」/「没有匹配的X」）、P2-7（新增 `SectionLoading`，业务代码 `animate-pulse` 归零）、P2-11（手写横滚包裹归零，`TableScrollArea` 透传 div 属性）。三项待拍板已按业主授权定案（DECISIONS 2026-09-09：`formatRate`、保持 L2、三态收编 `pricingStatus`+`estimated`），P1-9 转 P2-13。P2-4（复制 hook）与 P2-12（决策列 emphasis，顺带修好批准/拒绝同色的潜在缺陷）已完成。P2-13（三态 helper，顺带把待核价的 destructive/warning 统一成 primary、销售端文案统一为「待工厂核价」）已完成。P2-1（状态药丸归并，6 组并行 + 对抗校验；顺带修掉归档账单外显原始枚举、销售端急单 danger 误用、临期/逾期同色，以及并行任务引入的 heading-order 回归）已完成，残余登记为 P2-14 / P2-15。P2 剩余：、P2-2 NativeSelect、P2-6 字段错误、P2-3 PendingButton、P2-10 disabled 审计。注意 `AdminOrderListLayout.browser.spec.tsx`（未跟踪，另一任务 WIP）等待尚不存在的「下发生产」按钮，整套超时，不是回归。
+- 2026-09-14：结构体检（`docs/项目结构体检-2026-09-14.md`）+ 四项收口 commit：架构门禁回绿（`e357efcc`）、忽略 Browser Mode 截图产物（`666e8d89`）、golden-gate 按 print-sentinel 谱系回读（`fb433c39`）、CLAUDE.md 1.3 同步现状。未推送、未部署、未跑 Codex 复审。
