@@ -1903,6 +1903,12 @@ describe('order pricing review actions', () => {
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
+  it('终价未就绪仍返回 success 与 issues', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    pricingReviewMock.finalizeOrderPricing.mockResolvedValue({ orderId: 'order-1', priceRevision: 4, packagingAmount: '0.00', processingAmount: '10.00', totalAmount: '10.00', confirmedFee: '10.00', productionReadiness: { ready: false, issues: ['工单没有包装组'] } });
+    expect(await finalizeOrderPricingAction(null, { orderId: 'order-1', expectedOrderRevision: 2, expectedPriceRevision: 3, items: [], packagingGroups: [], orderCharges: [], shipments: [], remark: null })).toMatchObject({ status: 'success', productionReadiness: { ready: false, issues: ['工单没有包装组'] } });
+  });
+
   it('passes structured packaging-group facts and returns the packaging total', async () => {
     permissionsMock.requirePermission.mockResolvedValue(adminActor);
     pricingReviewMock.finalizeOrderPricing.mockResolvedValue({

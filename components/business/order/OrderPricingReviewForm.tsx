@@ -1,4 +1,5 @@
 "use client";
+import { ProductionReadinessWarning } from './ProductionReadinessWarning';
 import { packagingUnit, PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 
 import {
@@ -356,7 +357,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
     previewState?.status === "success" ? previewState.preview : null;
 
   useEffect(() => {
-    if (finalizeState?.status !== "success") return;
+    if (finalizeState?.status !== "success" || finalizeState.productionReadiness?.ready === false) return;
     // 确认成功后工单已不再是“待管理员确认”。刷新服务端页面
     // 以移除表单，不再重复请求已被服务端禁止的核价预览。
     if (onSuccess) onSuccess();
@@ -380,6 +381,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
     );
   }
 
+  const productionReadiness = finalizeState?.status === "success" ? finalizeState.productionReadiness : preview?.productionReadiness;
   const previewError = resultError(previewState);
   const finalizeError = resultError(finalizeState);
   const incompleteItemCount =
@@ -518,6 +520,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           正在加载费用…
         </p>
       ) : null}
+      <ProductionReadinessWarning readiness={productionReadiness} saved={finalizeState?.status === "success"} />
       {previewError ? (
         <div className="space-y-2 rounded-md border border-destructive/40 p-3">
           <p role="alert" className="text-sm text-destructive">
@@ -966,7 +969,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                 </ul>
               </>
             ) : pricingFinalized ? (
-              <p className="font-medium">费用已确认，正在刷新工单状态…</p>
+              <p className="font-medium">{productionReadiness?.ready === false ? "费用已确认，请补录生产资料" : "费用已确认，正在刷新工单状态"}…</p>
             ) : (
               <p className="font-medium">待核价必填项已完成，可以确认费用。</p>
             )}

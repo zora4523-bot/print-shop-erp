@@ -202,6 +202,24 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     );
   });
 
+  it('生产资料不就绪只提示，不禁用已经填齐费用的确认按钮', () => {
+    const value = preview();
+    value.items = []; value.packagingGroups = []; value.orderCharges = []; value.shipments = [];
+    value.productionReadiness = { ready: false, issues: ['工单没有包装组'] };
+    harness.previewState = { status: 'success', preview: value };
+    const html = renderToStaticMarkup(<OrderPricingReviewForm orderId="order-1" />);
+    expect(html).toContain('确认费用后，工单仍需补录以下资料');
+    expect(harness.confirmDisabled).toBe(false);
+  });
+
+  it('终价保存成功但不 ready 时保留提示，不刷新或触发成功跳转', () => {
+    harness.finalizeState = { status: 'success', orderId: 'order-1', priceRevision: 4, packagingAmount: '20.00', processingAmount: '130.00', totalAmount: '165.00', confirmedFee: '165.00', productionReadiness: { ready: false, issues: ['工单没有包装组'] } };
+    const onSuccess = vi.fn();
+    const html = renderToStaticMarkup(<OrderPricingReviewForm orderId="order-1" onSuccess={onSuccess} />);
+    expect(html).toContain('费用已确认，工单仍需补录以下资料');
+    expect(harness.refresh).not.toHaveBeenCalled(); expect(onSuccess).not.toHaveBeenCalled();
+  });
+
   it('describes snapshot confirmation without promising a latest-rule reprice', () => {
     const html = render();
 

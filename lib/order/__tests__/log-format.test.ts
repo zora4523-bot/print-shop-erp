@@ -1,3 +1,4 @@
+import { orderPricingSourceLabel } from '../pricing-source';
 import { describe, it, expect } from 'vitest';
 import {
   actionLabel,
@@ -207,6 +208,9 @@ describe('actionLabel', () => {
     expect(actionLabel('DELETE')).toBe('删除');
     expect(actionLabel('TASK_RELEASE_TO_POOL')).toBe('释放到抢单池');
     expect(actionLabel('TASK_SELF_CLAIM')).toBe('师傅抢单');
+    expect(actionLabel('PRICING_CONFIRMED_NOT_READY')).toBe('终价已确认，生产资料待补齐');
+    expect(actionLabel('LEGACY_PRODUCTION_FACTS_REPAIRED')).toBe('补录生产资料');
+    expect(orderPricingSourceLabel('LEGACY_PRODUCTION_FACTS_REPAIR')).toBe('补录工艺并保留终价');
     expect(actionLabel('PRICING_ADMIN_CONFIRMED')).toBe('管理员终价确认');
     expect(actionLabel('ORDER_MANUAL_CHARGE_CREATED')).toBe('新增对客费用');
     expect(actionLabel('ORDER_PLATE_DETAIL_REMOVED')).toBe('移除制版明细');

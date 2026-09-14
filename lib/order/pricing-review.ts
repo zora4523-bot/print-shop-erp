@@ -32,7 +32,7 @@ import {
   ORDER_PRICING_STATUS,
 } from "./pricing-status";
 import { appendOrderPricingRevisionInTx } from "./pricing-revision";
-import { prepareOrderForProductionInTx } from "./production-readiness";
+import { inspectOrderProductionReadinessInTx, prepareOrderForProductionInTx } from "./production-readiness";
 import {
   assertCsOrderSalesLedgerReconciledInTx,
   CsSalesLedgerError,
@@ -106,6 +106,7 @@ type ChargePreview = {
 };
 
 export type OrderPricingReviewPreview = {
+  productionReadiness?: { ready: boolean; issues: string[] };
   orderId: string;
   orderNo: string;
   orderRevision: number;
@@ -834,6 +835,9 @@ export async function previewOrderPricingReview(
     return {
       orderId: order.id,
       orderNo: order.orderNo,
+      productionReadiness: order.status === OrderStatus.SUBMITTED || order.status === OrderStatus.PENDING_FACTORY
+        ? await inspectOrderProductionReadinessInTx(tx, order.id).then(({ ready, issues }) => ({ ready, issues }))
+        : undefined,
       orderRevision: order.revision,
       priceRevision: order.priceRevision,
       currentProcessingAmount: money(order.processingAmount)!,
@@ -1177,6 +1181,7 @@ export async function finalizeOrderPricing(
   processingAmount: string;
   totalAmount: string;
   confirmedFee: string;
+  productionReadiness?: { ready: boolean; issues: string[] };
   processingPriceBookVersion: number | null;
   logisticsPriceBookVersion: number | null;
 }> {
@@ -1615,13 +1620,18 @@ export async function finalizeOrderPricing(
         customerChargeAmount: customerChargeTotal.toFixed(2),
       },
     });
+    let productionReadiness: { ready: boolean; issues: string[] } | undefined;
     if (
       order.status === OrderStatus.PENDING_FACTORY ||
       order.status === OrderStatus.SUBMITTED
     ) {
       const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, now);
+      productionReadiness = { ready: prepared.ready, issues: prepared.issues };
       if (!prepared.ready) {
-        throw new OrderPricingReviewError(`核价未完成：${prepared.issues.join('；')}`);
+        await tx.orderLog.create({ data: {
+          orderId: order.id, operatorId: actor.id, action: 'PRICING_CONFIRMED_NOT_READY',
+          remark: `终价已保存，生产资料待补齐：${prepared.issues.join('；')}`,
+        } });
       }
     }
     await tx.orderLog.create({
@@ -1675,6 +1685,7 @@ export async function finalizeOrderPricing(
       processingAmount,
       totalAmount,
       confirmedFee: totalAmount,
+      productionReadiness,
       processingPriceBookVersion: processingPriceBook?.version ?? null,
       logisticsPriceBookVersion: logisticsPriceBook?.version ?? null,
     };
