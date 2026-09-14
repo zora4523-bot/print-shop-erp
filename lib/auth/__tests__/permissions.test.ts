@@ -48,6 +48,7 @@ describe('PERMISSIONS map', () => {
       'order:cancel',
       'order:change:request',
       'order:change:review',
+      'order:production-facts:repair',
       'order:price:confirm',
       'task:report',
       'task:dispute:create',
@@ -96,6 +97,7 @@ describe('PERMISSIONS map', () => {
   it('administrator-only permissions are exactly [ADMIN]', () => {
     const adminOnly: Permission[] = [
       'order:change:review',
+      'order:production-facts:repair',
       'order:price:confirm',
       'order:export:all',
       'task:dispute:review',

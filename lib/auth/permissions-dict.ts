@@ -22,6 +22,7 @@ export const PERMISSIONS = {
   'order:cancel':               [Role.ADMIN, Role.SALES],
   'order:change:request':       [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
   'order:change:review':        [Role.ADMIN],
+  'order:production-facts:repair': [Role.ADMIN],
   'order:price:confirm':        [Role.ADMIN],
 
   // 新生产工序与历史任务异议

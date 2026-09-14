@@ -1,3 +1,4 @@
+import { isValidPackagingUnitsPerBag, MAX_PACKAGING_UNITS_PER_BAG } from './packaging-units';
 import { isMixedPackaging, packagingModeWithStyleCount, packagingBoxType } from './packaging-mode';
 import {
   OrderBillingMode,
@@ -50,20 +51,6 @@ export const REWORK_PACKAGING_FACT_SOURCES = {
 
 export type ReworkPackagingFactSource =
   (typeof REWORK_PACKAGING_FACT_SOURCES)[keyof typeof REWORK_PACKAGING_FACT_SOURCES];
-
-const MAX_PACKAGING_UNITS_PER_BAG = 9_999_999;
-
-function isValidPackagingUnitsPerBag(
-  value: number | null | undefined,
-): value is number {
-  return (
-    value !== null &&
-    value !== undefined &&
-    Number.isSafeInteger(value) &&
-    value > 0 &&
-    value <= MAX_PACKAGING_UNITS_PER_BAG
-  );
-}
 
 /**
  * The admin form only asks for missing per-style legacy evidence. One

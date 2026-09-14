@@ -17,6 +17,7 @@ const ORDER_PRICING_SOURCE_LABELS = {
   ADMIN_MANUAL_CHARGE_REMOVED: '管理员删除附加费用',
   ORDER_ITEM_PLATE_DETAIL: '管理员调整制版费用',
   ORDER_ITEM_PLATE_DETAIL_REMOVED: '管理员删除制版费用',
+  LEGACY_PRODUCTION_FACTS_REPAIR: '补录工艺并保留终价',
   LEGACY_BACKFILL: '历史价格回填',
 } as const;
 

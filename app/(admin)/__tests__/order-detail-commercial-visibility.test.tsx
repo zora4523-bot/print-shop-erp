@@ -1,3 +1,6 @@
+vi.mock('@/actions/order-production-facts', () => ({ repairLegacyProductionFactsAction: vi.fn() }));
+const readinessQuery = vi.hoisted(() => vi.fn().mockResolvedValue({ ready: true, issues: [] }));
+vi.mock('@/lib/order/production-readiness-query', () => ({ getOrderProductionReadiness: readinessQuery }));
 vi.mock('@/actions/order-sales-text', () => ({ editSalesTextAction: vi.fn() }));
 vi.mock('@/lib/order/activity', () => ({ readOrderActivity: vi.fn().mockResolvedValue({ events: [], nextCursor: null }) }));
 vi.mock('@/actions/order-activity', () => ({ loadOrderActivity: vi.fn() }));
@@ -295,6 +298,17 @@ describe('order detail amount consistency', () => {
       expect(basicAmount(html, label)).toBe(scenario.status === OrderStatus.DRAFT ? '未报价' : '¥ 0.00');
     }
     if (scenario.status === OrderStatus.DRAFT) expect(html).toContain('class="text-muted-foreground">未报价');
+  });
+
+  it('终价已保存后即使核价表单消失，详情仍显示未就绪原因和补录入口', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const order = { ...orderFixture(), pricingRevisions: [], priceRevision: 1, status: OrderStatus.SUBMITTED, pricingStatus: 'ADMIN_CONFIRMED', packagingGroups: [] };
+    getOrderDetailMock.mockResolvedValue(order);
+    readinessQuery.mockResolvedValueOnce({ ready: false, issues: ['工单没有包装组'] });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
+    expect(html).toContain('费用已确认，工单仍需补录以下资料');
+    expect(html).toContain('工单没有包装组'); expect(html).toContain('补录生产资料');
+    expect(html).not.toContain('factory-pricing-review');
   });
 
   it('marks only estimated shipping while keeping confirmed production amounts intact', async () => {

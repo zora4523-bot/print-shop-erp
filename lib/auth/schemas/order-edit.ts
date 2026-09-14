@@ -1,7 +1,7 @@
 // 工单后续操作：取消、发货、返工、改单申请与审核、工厂终价、手工费用、版费、编辑、急单、顺丰到付
 // 由 lib/auth/schemas.ts 按域拆出（2026-09-14）；对外仍通过 lib/auth/schemas.ts 统一导出。
 import { z } from 'zod';
-import { ReworkCause, OrderPackagingMode } from '../../../generated/prisma/enums';
+import { ReworkCause, OrderPackagingMode, OrderCraft } from '../../../generated/prisma/enums';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '../../order/limits';
 import { craftIdSchema, formBoolean, moneyOptionalField, optionalDateFieldPartial, optionalFormBoolean, optionalShipmentText, optionalTrimmedText, orderItemFoilColorsField, orderItemFoilSideColorsField, orderItemMoneyOptionalField, orderItemQuantityField, requiredFormBoolean, requiredTrimmedText, shipmentBillableWeightField, shipmentChargeMoneyField } from './shared';
 
@@ -793,3 +793,22 @@ export const setOrderSfCollectSchema = z
   });
 
 export type SetOrderSfCollectInput = z.infer<typeof setOrderSfCollectSchema>;
+
+export const repairLegacyProductionFactsSchema = z.object({
+  orderId: reworkEntityId,
+  expectedOrderRevision: shipOrderVersionField('工单版本', 0),
+  items: z.array(z.object({
+    itemId: reworkEntityId,
+    craft: z.enum(OrderCraft).optional(),
+    unitsPerBag: optionalReworkUnitsPerBagField,
+  })).max(MAX_ORDER_ITEMS_PER_ORDER),
+  packagingMode: z.enum(OrderPackagingMode).optional(),
+}).superRefine((value, ctx) => {
+  const ids = new Set<string>();
+  value.items.forEach((item, index) => {
+    if (ids.has(item.itemId)) ctx.addIssue({ code: 'custom', path: ['items', index, 'itemId'], message: '款式不能重复' });
+    ids.add(item.itemId);
+  });
+});
+
+export type RepairLegacyProductionFactsInput = z.infer<typeof repairLegacyProductionFactsSchema>;
