@@ -146,10 +146,11 @@ test('客户及供应商维护、停用过滤和已创建采购快照保持一�
     addresses: [{ detail: '隔离测试地址 2 号', isDefault: true }],
   });
   const customer = await readPartyState(customerId);
+  // DECISIONS 2026-09-13：管理员创建不再录入工单客户及简称，建单页不再提供关联客户下拉与简称回填；
+  // 客户主数据的创建 / 停用 / 快照一致性仍由下方断言覆盖。
   await page.goto('/orders/new');
-  await expect(page.locator(`#customerPartyId option[value="${customerId}"]`)).toHaveCount(1);
-  await page.getByLabel('关联客户（选填）', { exact: true }).selectOption(customerId);
-  await expect(page.getByLabel('客户名称/简称', { exact: true })).toHaveValue(`客户简称${actor.suffix}`);
+  await expect(page.locator('#customerPartyId')).toHaveCount(0);
+  await expect(page.getByLabel('客户名称/简称', { exact: true })).toHaveCount(0);
   await page.goto(`/owner/parties/${customerId}`);
   await confirmState(page, '停用客户/供应商');
   await expect.poll(() => readPartyState(customerId)).toMatchObject({ party: { isActive: false } });

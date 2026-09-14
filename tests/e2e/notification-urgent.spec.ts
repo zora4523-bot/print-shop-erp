@@ -45,9 +45,10 @@ test.describe('notification urgent wire — golden path', () => {
     await form
       .getByRole('textbox', { name: '工单名称', exact: true })
       .fill(customName);
-    await form
-      .getByRole('textbox', { name: '客户名称/简称', exact: true })
-      .fill(orderRef);
+    // DECISIONS 2026-09-13：管理员建单页已无「客户名称/简称」输入框。
+    await expect(
+      form.getByRole('textbox', { name: '客户名称/简称', exact: true }),
+    ).toHaveCount(0);
     const urgentCheckbox = form.getByRole('checkbox', {
       name: '急单（提交后会推送至排产群）',
       exact: true,
