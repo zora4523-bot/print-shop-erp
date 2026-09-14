@@ -19,6 +19,8 @@
 /output/
 /.review/
 /.vitest-attachments/
+# Vitest Browser Mode 运行时截图产物（无基线比对，勿提交）
+**/__tests__/__screenshots__/
 
 # next.js
 /.next/
