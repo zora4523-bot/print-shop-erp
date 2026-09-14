@@ -21,13 +21,41 @@ import { readPublishedCreateOrderPriceSnapshot } from '../create-order-published
 
 const databaseDescribe = process.env.DATABASE_URL ? describe : describe.skip;
 
+/**
+ * 黄金用例锁定的是迁移 20260830170000_external_processing_print_null_sentinel
+ * 发布的那一版加工费价目簿。迁移链之后还可能有 CLI / 规则中心发布的新版本
+ * （如 2026-09-13 的「达到档位取价」十一档），它们会改变「当前生效」的快照，
+ * 但不改写这一版。所以这里按谱系标识定位该版本，并以它的生效时刻回读快照，
+ * 让断言在任何已跑完迁移链的库上都成立，而不依赖库里之后发布过什么。
+ */
+const PRINT_SENTINEL_LINEAGE = {
+  ruleVersion: '2026-08-30-print-null-sentinel',
+  sourceSha256:
+    '8a5e1149a2e62920c7ebf9d14a6cedf4e6dac5e0769d556b5a52dbeb99dbd852',
+} as const;
+
 databaseDescribe.sequential(
-  'current published create-order price snapshot · 42-case golden gate',
+  'print-sentinel lineage create-order price snapshot · 42-case golden gate',
   () => {
     it('matches every authoritative §8 case after the print-sentinel release', async () => {
+      const lineageBook = await db.customerPriceBook.findFirst({
+        where: {
+          settlementType: 'EXTERNAL_SALES',
+          purpose: 'PROCESSING',
+          sourceSha256: PRINT_SENTINEL_LINEAGE.sourceSha256,
+          notes: { path: ['ruleVersion'], equals: PRINT_SENTINEL_LINEAGE.ruleVersion },
+        },
+        orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+        select: { id: true, version: true, effectiveFrom: true },
+      });
+      expect(
+        lineageBook,
+        '未找到 print-sentinel 谱系的加工费价目簿，请确认迁移链已完整应用',
+      ).not.toBeNull();
       const snapshot = await db.$transaction((tx) =>
-        readPublishedCreateOrderPriceSnapshot(tx, { now: new Date() }),
+        readPublishedCreateOrderPriceSnapshot(tx, { now: lineageBook!.effectiveFrom }),
       );
+      expect(snapshot.priceVersion.processing.id).toBe(lineageBook!.id);
       const passed: string[] = [];
       const failed: Array<{ caseId: string; actual: unknown }> = [];
       const record = (caseId: string, ok: boolean, actual: unknown) => {
@@ -178,12 +206,15 @@ databaseDescribe.sequential(
 
       expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
       expect(passed).toHaveLength(RULE8_GOLDEN_CASE_COUNT);
-      // Publishing an additive rule version changes the book ID. Keep every
-      // golden amount above, and verify that its evidence identifies an active
-      // published processing book rather than pinning a retired version ID.
+      // 快照证据必须指向谱系里那一版已发布的加工费价目簿；后续发布会给它
+      // 写上 effectiveTo，但不会撤销它（isActive 仍为 true），也不改其规则。
       const book = await db.customerPriceBook.findUniqueOrThrow({where: {id: snapshot.priceVersion.processing.id}});
-      expect(book).toMatchObject({isActive: true, purpose: 'PROCESSING', version: snapshot.priceVersion.processing.version});
-      expect(book.effectiveTo).toBeNull();
+      expect(book).toMatchObject({
+        id: lineageBook!.id,
+        isActive: true,
+        purpose: 'PROCESSING',
+        version: snapshot.priceVersion.processing.version,
+      });
     });
   },
 );
