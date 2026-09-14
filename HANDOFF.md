@@ -14,6 +14,8 @@ Codex（`gpt-6-astra` 写模式）实现、Claude 对抗复审后提交；Codex 
 所以补录工艺后对**原本可信**的终价依据做续接是必要的，且不会把失配的旧依据洗白（有测试）；下发 / 接单闸口未放宽；
 `ProductionReadinessWarning` 把「canonical 工艺」这类内部术语在展示层替换，因为 `operation-materializer.ts` 本轮不动。
 历史账单 cmsbmplo40008850rahu58pb4 业主决定忽略。
+Codex 只读对抗审查一轮：0 P1、1 P2（补录为不包装且历史包装费非零会撞 `OrderPackagingGroup_count_by_mode_check` 整批回滚）→ e8afe8b4 领域层先拒。
+全量 vitest 6783 通过；与 lint / typecheck 并发时 6 个 postgres / 扫描用例超时，单跑 4 秒全过。
 
 
 **2026-09-14：PR #19（`codex/gongdanceshi` → `main`，<https://github.com/zora4523-bot/print-shop-erp/pull/19>）已开，
