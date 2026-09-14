@@ -5,7 +5,7 @@ import { getSalesBillTitleRef } from '@/lib/page-title/refs';
 import { getSession } from '@/lib/auth/session';
 import { Role } from '@/generated/prisma/enums';
 import { getSalesMonthlyBill } from '@/lib/agent-monthly-billing/sales-query';
-import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { StatusBadge, TableScrollArea } from '@/components/ui-business';
@@ -23,7 +23,7 @@ export default async function SalesBillDetailPage({ params }: Props) {
   const bill = await getSalesMonthlyBill(actor, (await params).id);
   if (!bill) notFound();
   return <div className="space-y-6">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">{bill.period} 月账单</h1><StatusBadge tone={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}>{AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}</StatusBadge><Link href="/sales/bills" className={buttonVariants({ variant: 'outline' })}>返回账单</Link></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">{bill.period} 月账单</h1><StatusBadge tone={SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}>{SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}</StatusBadge><Link href="/sales/bills" className={buttonVariants({ variant: 'outline' })}>返回账单</Link></div>
     {bill.status === 'DRAFT' ? <p className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">本月账单仍在整理中，金额未定稿；以管理员确认后的金额为准。</p> : null}
     <dl className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
       <div><dt>工单合计</dt><dd>{formatMoney(bill.memberSubtotal)}</dd></div><div><dt>抵扣金额</dt><dd>{formatMoney(bill.adjustmentAmount)}</dd></div><div><dt>应付合计</dt><dd className="font-semibold">{formatMoney(bill.totalAmount)}</dd></div>

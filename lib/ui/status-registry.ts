@@ -145,6 +145,17 @@ export const AGENT_MONTHLY_BILL_STATUS_REGISTRY: StatusRegistry<AgentMonthlyBill
   [AgentMonthlyBillStatus.PAID]: { label: '已收', tone: 'success' },
 };
 
+/**
+ * 销售端（外部代理商）看到的同一组状态：管理端是收款视角（待收 / 已收），
+ * 销售端是付款视角（待支付 / 已结清），DRAFT 对销售意味着"管理员还在整理、金额未定稿"。
+ * tone 与管理端一致，只换文案；两端页面都必须从这里取，不得各写字面量。
+ */
+export const SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY: StatusRegistry<AgentMonthlyBillStatus> = {
+  [AgentMonthlyBillStatus.DRAFT]: { label: '整理中', tone: 'neutral' },
+  [AgentMonthlyBillStatus.CONFIRMED]: { label: '待支付', tone: 'warning', dot: true },
+  [AgentMonthlyBillStatus.PAID]: { label: '已结清', tone: 'success' },
+};
+
 export const AGENT_MONTHLY_BILL_EXPORT_STATUS_REGISTRY: StatusRegistry<AgentMonthlyBillExportStatus> = {
   [AgentMonthlyBillExportStatus.PENDING]: {
     label: '生成中',

@@ -105,6 +105,24 @@ it('keeps DRAFT rows visibly provisional and totals DRAFT, CONFIRMED and PAID se
   expect(html).toContain('href="/sales/bills/draft-1"');
   expect(list).toHaveBeenCalledWith(actor, { period: '2026-08' });
 });
+it('uses the same sales-facing status names in the filter, the rows and the detail badge', async () => {
+  list.mockResolvedValue([
+    { ...bill, id: 'draft', status: 'DRAFT' },
+    { ...bill, id: 'confirmed', status: 'CONFIRMED' },
+    { ...bill, id: 'paid', status: 'PAID' },
+  ]);
+  const html = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({}) }));
+  const options = html.match(/<option[^>]*>[^<]*<\/option>/g) ?? [];
+  expect(options.map((option) => option.replace(/<[^>]+>/g, ''))).toEqual(['全部', '整理中', '待支付', '已结清']);
+  for (const adminOnly of ['草稿', '已确认·待收', '已收']) expect(html).not.toContain(adminOnly);
+  const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
+  expect(rows.find((row) => row.includes('/sales/bills/confirmed'))).toContain('待支付');
+  expect(rows.find((row) => row.includes('/sales/bills/paid'))).toContain('已结清');
+  detail.mockResolvedValue({ ...bill, status: 'DRAFT', paidAt: null });
+  const detailHtml = await renderDetail();
+  expect(detailHtml).toContain('整理中');
+  expect(detailHtml).not.toContain('草稿');
+});
 it('shows zero totals and an empty state for an empty filtered list', async () => {
   const html = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({ status: 'DRAFT' }) }));
   expect(html).toContain('当前筛选条件下暂无账单');
