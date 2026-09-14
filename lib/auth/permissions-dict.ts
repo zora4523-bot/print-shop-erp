@@ -50,6 +50,7 @@ export const PERMISSIONS = {
   'warehouse:manage':           [Role.ADMIN],
 
   // 账单
+  'bill:manage':                [Role.ADMIN],
   'bill:view:all':              [Role.ADMIN],
   'bill:view:self':             [Role.SALES],
   'bill:mark-paid':             [Role.ADMIN],

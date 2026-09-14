@@ -37,14 +37,14 @@ function mapBillError(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Owner actions — bill:view:all / bill:mark-paid
+// Owner actions — bill:manage / bill:mark-paid
 // ─────────────────────────────────────────────────────────────────────
 
 export async function generateBillsAction(
   _prev: GenerateBillsResult | null,
   raw: unknown,
 ): Promise<GenerateBillsResult> {
-  const actor = await requirePermission('bill:view:all');
+  const actor = await requirePermission('bill:manage');
 
   const parsed = generateBillsSchema.safeParse(raw);
   if (!parsed.success) {
@@ -81,7 +81,7 @@ export async function generateBillsAction(
 export async function issueBillAction(
   billId: string,
 ): Promise<BillMutationResult> {
-  const actor = await requirePermission('bill:view:all');
+  const actor = await requirePermission('bill:manage');
 
   try {
     await issueBill(billId, actor);
@@ -154,7 +154,7 @@ export async function createOrderCostEntryAction(
   _prev: OrderCostMutationResult | null,
   formData: FormData,
 ): Promise<OrderCostMutationResult> {
-  const actor = await requirePermission('bill:view:all');
+  const actor = await requirePermission('bill:manage');
   const parsed = createOrderCostEntrySchema.safeParse({
     idempotencyKey: formData.get('idempotencyKey'),
     orderId: formData.get('orderId'),

@@ -21,7 +21,7 @@ export async function requestAgentMonthlyBillExportAction(
   _previous: AgentMonthlyBillExportActionResult | null,
   formData: FormData,
 ): Promise<AgentMonthlyBillExportActionResult> {
-  const actor = await requirePermission('bill:view:all');
+  const actor = await requirePermission('bill:manage');
   const requestKey = stringEntry(formData.get('requestKey'));
   const period = stringEntry(formData.get('period')) || undefined;
   const statusRaw = stringEntry(formData.get('status')) || undefined;
