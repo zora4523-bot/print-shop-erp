@@ -187,6 +187,15 @@ test('shared paper choices exclude unavailable facts, preserve a long name and r
     expect(id).toBeTruthy();
     await product.selectOption(id!);
   }
-  await expect(quote.locator('p.text-3xl')).toContainText('¥');
+  // 报价区在「正在计算…」与错误态都不渲染 p.text-3xl；CI 的 2 核 runner 在长跑
+  // 后一次报价可超过默认 5 秒。最多等 30 秒，失败时把当时的报价区文字带进错误信息。
+  const price = quote.locator('p.text-3xl');
+  await expect
+    .poll(
+      async () =>
+        (await price.count()) ? await price.innerText() : `<no price>\n${await quote.innerText()}`,
+      { timeout: 30_000, message: '报价区应给出 ¥ 金额' },
+    )
+    .toContain('¥');
   expect(errors).toEqual([]);
 });
