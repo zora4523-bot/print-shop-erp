@@ -196,6 +196,23 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 卡住的问题
 
+### 待业主拍板（2026-09-14 深夜新增：代理商月度账单 review 结论）
+
+范围：`lib/agent-monthly-billing/*`、`actions/agent-monthly-bill*.ts`、`app/(billing)/owner/agent-bills`、`app/(admin)/sales/bills`。
+流转：工单 SETTLED / CANCELLED 且 `settledFee` 非空 → 按 `submitterId` + 上海月份归集为 (agentUserId, period) 一张 DRAFT →
+管理员确认冻结（总额 0 自动 PAID）→ 管理员整单登记收款（金额固定 = 总额，一张不可变回执）→ PAID；跨月负项以不可变
+Credit 记录、只能分配到同一销售之后的 DRAFT，且封顶不超过成员小计。cron `generate-bills` 每月按上一上海月走同一 v2 写入。
+隔离：销售端全部经 `sales-query.ts` 的 `agentUserId = actor.id`，有测试锁定；管理端动作全部 ADMIN。触发器保证冻结后
+子表不可变、成员快照必须与工单结算事实一致。并发有 6 组 postgres 测试。**没有发现串账或越权。**
+缺口（功能层面，非 bug）：
+1. 销售端看不到收款回执（金额 / 时间 / 方式 / 流水号只在管理端），只有一个 `paidAt`；也没有凭证附件字段，回执只是登记不是凭证。
+2. 账单明细只到「每张工单一个结算总额」，逐项费用（加工 / 包装 / 物流）要回工单详情看，账单里的工单号还不是链接；
+   取消单的取消费与正常单在销售端无法区分（`orderStatusSnapshot` 没给销售端）。
+3. 收款只能整单全额一次，没有部分收款 / 多笔；确认后不能撤销，只能靠下月负项。
+4. 销售端列表会显示管理员还在处理的 DRAFT（口径未定的数字），「待支付」卡只算 CONFIRMED。
+5. 生成 / 确认 / 负项动作都挂在 `bill:view:all` 这个"查看"权限上（角色映射仍是 ADMIN，语义不准）。
+6. 管理端统计只有全局应收卡；按销售汇总要靠列表筛 `agentUserId`，没有按销售的汇总表 / 导出分组。
+
 ### 待业主拍板（2026-09-14 晚新增：存量工单过不了生产就绪校验）
 
 - **现象**：开发库工单 `e2e-multi-address-…` 核价页报「款式 #1 缺少可唯一映射的 canonical 工艺；工单没有包装组；款式 #1 未加入任一包装组」，
