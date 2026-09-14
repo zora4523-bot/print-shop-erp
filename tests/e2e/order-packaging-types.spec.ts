@@ -175,6 +175,8 @@ for (const actor of ['owner', 'sales'] as const) {
 }
 
 test('管理员多地址装盒分别进位，保存两盒而非一盒', async ({page}) => {
+  // 与同文件其它装盒用例一致：CI 的 2 核 runner 上登录 + 报价 + 保存跳转超过默认 30 秒。
+  test.setTimeout(150_000);
   await login(page, {from: '/orders/new', username: E2E_USERS.owner.username, password: E2E_PASSWORD});
   await page.getByRole('textbox', {name: '工单名称', exact: true}).fill('分址装盒验证');
   await page.getByRole('spinbutton', {name: '数量', exact: true}).fill('10');
