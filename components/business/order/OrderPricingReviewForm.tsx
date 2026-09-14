@@ -69,6 +69,90 @@ function priceBookLabel(
     : "历史金额";
 }
 
+/**
+ * 把预览数据与管理员草稿合并成 finalizeOrderPricingAction 的输入。
+ * 纯函数：草稿缺省时回退到当前值或建议值，已完成的行原样带回。
+ */
+function buildFinalizePayload({
+  orderId,
+  preview,
+  itemDrafts,
+  packagingGroupDrafts,
+  orderChargeDrafts,
+  shipmentDrafts,
+  remark,
+}: {
+  orderId: string;
+  preview: OrderPricingReviewPreview;
+  itemDrafts: Record<string, ItemDraft>;
+  packagingGroupDrafts: Record<string, PackagingGroupDraft>;
+  orderChargeDrafts: Record<string, OrderChargeDraft>;
+  shipmentDrafts: Record<string, ShipmentDraft>;
+  remark: string;
+}) {
+  return {
+    orderId,
+    expectedOrderRevision: preview.orderRevision,
+    expectedPriceRevision: preview.priceRevision,
+    items: preview.items
+      .filter((item) => !item.complete)
+      .map((item) => ({
+        itemId: item.itemId,
+        unitPrice:
+          itemDrafts[item.itemId]?.unitPrice ?? item.currentUnitPrice,
+        fixedFee: itemDrafts[item.itemId]?.fixedFee ?? item.currentFixedFee,
+        reason: itemDrafts[item.itemId]?.reason ?? item.currentReason ?? "",
+      })),
+    packagingGroups: preview.packagingGroups.map((group) => ({
+      packagingGroupId: group.packagingGroupId,
+      expectedMode: group.mode,
+      expectedActualBagCount: group.actualBagCount,
+      unitPrice:
+        group.complete
+          ? group.currentUnitPrice
+          : (packagingGroupDrafts[group.packagingGroupId]?.unitPrice ??
+            group.currentUnitPrice),
+      reason:
+        packagingGroupDrafts[group.packagingGroupId]?.reason ??
+        group.currentReason ??
+        "",
+    })),
+    orderCharges: preview.orderCharges.map((charge) => ({
+      chargeId: charge.chargeId,
+      expectedBusinessKey: charge.businessKey,
+      amount:
+        orderChargeDrafts[charge.chargeId]?.amount ??
+        charge.currentAmount ??
+        charge.suggestedAmount ??
+        "",
+      reason:
+        orderChargeDrafts[charge.chargeId]?.reason ??
+        charge.currentReason ??
+        "",
+    })),
+    shipments: preview.shipments.map((shipment) => ({
+      shipmentId: shipment.shipmentId,
+      expectedDestinationProvince: shipment.destinationProvince,
+      expectedBillableWeightKg: shipment.billableWeightKg,
+      shippingFee:
+        shipmentDrafts[shipment.shipmentId]?.shippingFee ??
+        shipment.shipping.currentAmount ??
+        shipment.shipping.suggestedAmount ??
+        "",
+      packingMaterialFee:
+        shipmentDrafts[shipment.shipmentId]?.packingMaterialFee ??
+        shipment.packaging.currentAmount ??
+        shipment.packaging.suggestedAmount ??
+        "",
+      reason:
+        shipmentDrafts[shipment.shipmentId]?.reason ??
+        shipment.currentReason ??
+        "",
+    })),
+    remark,
+  };
+}
+
 function hasValue(value: string | null | undefined): boolean {
   return Boolean(value?.trim());
 }
@@ -282,67 +366,17 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
   function submit() {
     if (!preview || finalizeState?.status === "success" || auxiliary.blocked || finalizePending || previewPending) return;
     startFinalizeTransition(() =>
-      finalizeAction({
-        orderId,
-        expectedOrderRevision: preview.orderRevision,
-        expectedPriceRevision: preview.priceRevision,
-        items: preview.items
-          .filter((item) => !item.complete)
-          .map((item) => ({
-            itemId: item.itemId,
-            unitPrice:
-              itemDrafts[item.itemId]?.unitPrice ?? item.currentUnitPrice,
-            fixedFee: itemDrafts[item.itemId]?.fixedFee ?? item.currentFixedFee,
-            reason: itemDrafts[item.itemId]?.reason ?? item.currentReason ?? "",
-          })),
-        packagingGroups: preview.packagingGroups.map((group) => ({
-          packagingGroupId: group.packagingGroupId,
-          expectedMode: group.mode,
-          expectedActualBagCount: group.actualBagCount,
-          unitPrice:
-            group.complete
-              ? group.currentUnitPrice
-              : (packagingGroupDrafts[group.packagingGroupId]?.unitPrice ??
-                group.currentUnitPrice),
-          reason:
-            packagingGroupDrafts[group.packagingGroupId]?.reason ??
-            group.currentReason ??
-            "",
-        })),
-        orderCharges: preview.orderCharges.map((charge) => ({
-          chargeId: charge.chargeId,
-          expectedBusinessKey: charge.businessKey,
-          amount:
-            orderChargeDrafts[charge.chargeId]?.amount ??
-            charge.currentAmount ??
-            charge.suggestedAmount ??
-            "",
-          reason:
-            orderChargeDrafts[charge.chargeId]?.reason ??
-            charge.currentReason ??
-            "",
-        })),
-        shipments: preview.shipments.map((shipment) => ({
-          shipmentId: shipment.shipmentId,
-          expectedDestinationProvince: shipment.destinationProvince,
-          expectedBillableWeightKg: shipment.billableWeightKg,
-          shippingFee:
-            shipmentDrafts[shipment.shipmentId]?.shippingFee ??
-            shipment.shipping.currentAmount ??
-            shipment.shipping.suggestedAmount ??
-            "",
-          packingMaterialFee:
-            shipmentDrafts[shipment.shipmentId]?.packingMaterialFee ??
-            shipment.packaging.currentAmount ??
-            shipment.packaging.suggestedAmount ??
-            "",
-          reason:
-            shipmentDrafts[shipment.shipmentId]?.reason ??
-            shipment.currentReason ??
-            "",
-        })),
-        remark,
-      }),
+      finalizeAction(
+        buildFinalizePayload({
+          orderId,
+          preview,
+          itemDrafts,
+          packagingGroupDrafts,
+          orderChargeDrafts,
+          shipmentDrafts,
+          remark,
+        }),
+      ),
     );
   }
 
