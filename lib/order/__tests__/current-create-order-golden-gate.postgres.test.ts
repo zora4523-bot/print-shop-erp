@@ -55,8 +55,9 @@ type LineageExpectations = {
 /**
  * 2026-09-13「按达到档位取价，补齐 200 个档」（config/customer-price-books/
  * custom-tiers-20260913.json，由 scripts/publish-confirmed-custom-tiers.ts 发布）。
- * 档位变成 [200,499] [500,999] [1000,1999] … [50000,∞)，单价表本身没变；
- * 大号封 200 个档单价 ¥1.00 是业主确认的报价表值。
+ * 档位变成 [1,499] [500,999] [1000,1999] … [50000,∞)（无最低起订量，不足
+ * 200 个仍按 200 个档取价），单价表本身没变；大号封 200 个档单价 ¥1.00 是
+ * 业主确认的报价表值。
  */
 const ATTAINED_CUSTOM_TIERS_FULL_BOUNDARY: ReadonlyMap<string, FullBoundaryOverride> =
   new Map<string, FullBoundaryOverride>([
