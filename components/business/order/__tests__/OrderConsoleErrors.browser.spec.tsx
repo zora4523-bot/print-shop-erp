@@ -6,6 +6,15 @@ import '@/app/globals.css';
 
 const mocks = vi.hoisted(() => ({ sign: vi.fn(), record: vi.fn(), remove: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+// ExternalSalesOrderFormRail 经 ui-business 桶文件带入 NavCard / PendingLink 等
+// 真实 next/link 使用者；Browser Mode 里真实 next/link 会因 process 未定义而崩溃。
+vi.mock('next/link', () => ({
+  __esModule: true,
+  default: ({ prefetch, ...props }: import('react').ComponentProps<'a'> & { prefetch?: boolean }) => {
+    void prefetch;
+    return <a {...props} />;
+  },
+}));
 vi.mock('@/actions/design-upload', () => ({
   signDesignUploadAction: mocks.sign,
   recordDesignUploadAction: mocks.record,

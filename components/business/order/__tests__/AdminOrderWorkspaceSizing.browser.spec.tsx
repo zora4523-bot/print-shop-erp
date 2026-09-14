@@ -16,6 +16,9 @@ vi.mock('@/actions/order-export', () => ({
   requestOrderExportAction: vi.fn(),
 }));
 vi.mock('@/actions/order-fulfillment-pricing', () => ({ previewFulfillmentPricingAction: vi.fn(), finalizeFulfillmentPricingAction: vi.fn() }));
+// BatchPrintControls 引入的 server action；不 mock 会把 next-auth 拖进浏览器，
+// 其预打包 chunk 再去向已被 mock 的 next/navigation 要内部导出而报错。
+vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: vi.fn() }));
 vi.mock('@/actions/admin-order-workflow', () => ({
   runAdminOrderBatchAction: vi.fn(),
   confirmFactoryOrderAction: vi.fn(),
