@@ -745,7 +745,10 @@ export async function createProductAction(
 - 复用 `lib/admin/action-helpers.ts`：`collectFieldErrors`（扁平表单）/ `collectFieldErrorsDeep`
   （含数组、嵌套，路径展平成 `items.0.quantity`）、`mapPrismaUniqueViolation`、`revalidatePaths`。
   两个 collect 家族**不可互换**：给嵌套表单用 shallow 会丢掉行级定位。
-- Zod schema 集中在 `lib/auth/schemas.ts`。
+- Zod schema 统一从 `lib/auth/schemas.ts` import；实现按域拆在 `lib/auth/schemas/`
+  （account / catalog / party / inventory / order-create / order-edit / production / outsource /
+  salary / finance / notification，跨域字段 helper 在 `shared.ts`）。新增 schema 放进对应域文件，
+  入口文件只做 re-export；`lib/order/__tests__/edit-field-inventory.test.ts` 会遍历整个目录。
 - 列表页分页/排序/筛选用 `lib/admin/table.ts` 的解析器，不要各页自己 parse searchParams。
 
 ### 15.4 后台任务与 cron

@@ -8,9 +8,9 @@
 
 ## 当前任务
 
-**2026-09-14：分支 `codex/gongdanceshi` 已完成结构体检并收口 4 项缺陷，全部已 commit、未推送、未部署。**
+**2026-09-14：分支 `codex/gongdanceshi` 已完成结构体检并收口体检报告的全部 6 项缺陷，全部已 commit、未推送、未部署。**
 
-本分支自 2026-09-13 起（含本次文档提交）共 30 个提交领先 `origin/main`，内容分三块：
+本分支自 2026-09-13 起共 34 个提交领先 `origin/main`，内容分三块：
 
 1. **建单 / 定价 / 装盒批次（09-13，业务代码）**：管理员建单定价与关联外部销售、默认入袋 / 不包装 /
    版本化装盒计价、专版十一档「达到档位取价」（`e5bac3cb`，价目簿由 `scripts/publish-confirmed-custom-tiers.ts`
@@ -23,17 +23,24 @@
    - `666e8d89` `.gitignore` 忽略 `**/__tests__/__screenshots__/`（Browser Mode 运行产物，非基线）
    - `fb433c39` golden-gate 测试改按 print-sentinel 谱系（`notes.ruleVersion` + `sourceSha256`）时间点回读快照，
      本机开发库已发布 v9 / v10 十一档也能过；黄金用例一字未动
-   - 本次 CLAUDE.md 1.3 + HANDOFF 同步（见下）
+   - `068a7803` CLAUDE.md 1.3 同步现状 + HANDOFF 重写
+   - `3a70278e` `lib/auth/schemas.ts`（3756 行）按域拆到 `lib/auth/schemas/` 12 个文件，入口纯 re-export，
+     60 个调用方零改动；`6f8faa83` 把按路径读源码的 `edit-field-inventory.test.ts` 改成遍历该目录
+   - `d3254723` 新建 `docs/archive/` 并立归档规则，`git mv` 25 份过程文件（根目录 8 + docs/ 17），
+     全部 .md 引用同步改路径，相对链接检查前后无新增断链
 
-**验证事实（09-14）**：`pnpm test run` 614 文件通过 / 4 跳过（修复前 1 失败即 golden-gate）；
-`pnpm check:architecture` 902 模块 / 25 项债务无增长；相关组件单测 8/8、Browser Mode 1/1。
-没有跑 Codex 复审，没有更新任何截图基线。
+**验证事实（09-14，最后一次全量）**：`pnpm test run` 614 文件通过 / 4 跳过、6701 项通过；
+`pnpm check:architecture` 914 模块 / 0 环 / 25 项债务无增长；typecheck、eslint 通过；
+`OrderPricingReviewForm` Browser Mode 1/1。没有跑 Codex 复审，没有更新任何截图基线。
 
-**体检里尚未处理的项（业主定夺）**：
-- 超大文件：`lib/order/change-request.ts` 6143 行、`lib/order.ts` 4410 行、`OrderForm.tsx` 3991 行、
-  `lib/auth/schemas.ts` 3756 行。建议只在触碰时顺手拆；`schemas.ts` 可按域拆目录并保留 re-export。
-- 根目录 8 份 AUDIT- / PLAN- / REPORT- 过程文件与 `docs/` 里带日期的一次性报告没有归档规则，建议 `git mv` 进
-  `docs/archive/`。移动时要同步本文件与 PROGRESS 的链接。
+**体检里刻意没做、需要业主定夺的项**：
+- 三个超大文件**没有拆**：`lib/order/change-request.ts`（6143 行，143 个顶层语句里 125 个是私有函数，
+  其中 45 个被 ≥3 处引用）、`lib/order.ts`（4410 行，`createOrder` 单函数 965 行）、
+  `components/business/order/OrderForm.tsx`（3991 行客户端组件）。用拆 schemas 的同一套依赖分析量过：
+  机械搬运要么导出几十个内部 helper、要么产生模块环，做不到「零行为变化」，需要按业务边界重新设计
+  （改单：申请 / 审核 / 应用 / 时间线；建单：款式行 / rail / 费用明细）。建议只在触碰时顺手拆，不单独立项。
+- `docs/release-remediation-2026-09-10.md`、`LOAD-TEST-RESULTS`、`UI-UX-ADVERSARIAL-REVIEW`、`codex-ui-brief`、
+  `*-20260913.md` 刻意留在原地，原因见 `docs/archive/README.md`。
 - `PROGRESS.md` 仍停在 09-03，09-13 这批建单 / 定价 / 打印工作还没写进去。
 - knip 134 个未用导出 / 229 个未用类型，集中在 barrel 文件；CI 只当证据，不是门禁。
 
@@ -57,8 +64,10 @@
 2. 若按惯例走 Codex 复审，把 `e357efcc`、`fb433c39` 两个 commit 一起给它看：前者是纯搬运，后者改了测试语义
    （「当前生效版」→「print-sentinel 谱系版」），复审重点是这个语义变化是否可接受。
 3. 更新 `PROGRESS.md`：把 09-13 批次（建单定价 / 装盒 / 十一档 / 批量打印）与 09-14 体检收口写进「已完成」。
-4. 文档归档（`docs/archive/`）只在业主点头后做；动根目录文件会牵连本文件与 PROGRESS 的链接。
-5. 不要把 `docs/archive/项目结构体检-2026-09-14.md` 里的「建议」当成已拍板；超大文件拆分没有立项。
+4. 新建任务过程文件直接放 `docs/archive/`（规则见其 README），不要再往仓库根目录放 PLAN- / REPORT-。
+5. 新增 Zod schema 放进 `lib/auth/schemas/<域>.ts`，不要往入口文件 `lib/auth/schemas.ts` 里加。
+6. 不要把 `docs/archive/项目结构体检-2026-09-14.md` 里对 change-request / OrderForm / lib/order.ts 的拆分建议
+   当成已拍板；那三个文件的拆分没有立项。
 
 
 **部署前仍必须先做（顺序不能反）**
@@ -190,3 +199,4 @@
 - 2026-08-24：按交互稿改已有页面（展示层，未 commit）：工单详情常驻动作条 + 时间线 + 款式折叠 + 取消收回页头；收费工作台阶梯 Δ / 粘性草稿条 / 两套只读文案 / 发布 L3 影响；排产「本次可派 / 阻断」列 + 师傅候选卡；Dashboard 处理队列优先（无毛利、无上次查看）；工单修改申请列表前移决策列；计件工资重算移到筛选行末。未碰 lib/actions/prisma。未部署。
 - 2026-09-08：UI 规范三段式完成（只写 docs / lint / PR 模板，零 UI 代码改动，未 commit）。盘点 `docs/UI现状盘点.md`（原始扫描 `docs/audits/2026-09-08-ui-scan-*.md`）；对照裁决 `docs/audits/2026-09-08-UI对照裁决表.md`（业主确认，待拍板项按默认生效）；定稿 `docs/ui-规范.md`（§2 令牌、§7 文案，附录 A 豁免）；`docs/UI迁移清单.md` P0/P1/P2；新门禁 `scripts/ui-tokens/check.mjs` + `baseline.json`（裸色 / 内联金额 / deep import，存量 warn、新增 error、stale 报错）已挂进 `pnpm lint`，实测 0 error / 132 warn。随附的「七组原型 ui-规范.md」未送达，基准由四份原型 `:root` + 仓库条款拼合。同日完成 P0-3：`AdminOrderEditor` 的 Sheet「确认保存修改」与 Dialog 离开确认改走 `ConfirmActionController`，待补运费/阻断改为页内「核价结果」区，`AdminOrderEditor.browser.spec.tsx` 43/43。同日完成 P0-2：`app/`+`components/` 14 处 UTC 日期切片改 Shanghai formatter（真缺陷仅 `AccountForm` 默认入职日）。2026-09-09 完成 P0-1：金额全部走 `formatMoney` / `formatMoneyPlain` / `formatMoneyDelta` / `formatUnitPrice`，门禁新增拦 `¥ ${…}` 直拼，`baseline.json` money 待迁移清零；遗留阶梯价 4 位小数与费率格式两项待拍板（见迁移清单）。同日完成 P1-4（deep import 清零）与 P1-3（删 10 行无用 token）。P1-8 / P1-7 / P1-10 / P1-2 同日完成。P1-5 圆角间距归并同日完成。P1-6 与 P1-1 同日实施完毕（`baseline.json` 存量豁免清零；`--muted-foreground` 因 AA 压到 L 0.53），admin 门禁 axe 对比度归零、剩余失败为另一任务的工单号标题定位器；业主已目视确认；`.decision` 深色按钮方案另立 P2-12。P1 仅剩 P1-9 金额三态（待拍板）。P2 已完成 P2-9（关闭，无死导出）、P2-5（2/3，RulePriceWorkbench 因导航拦截豁免）、P2-8（空态工厂改「暂无X」/「没有匹配的X」）、P2-7（新增 `SectionLoading`，业务代码 `animate-pulse` 归零）、P2-11（手写横滚包裹归零，`TableScrollArea` 透传 div 属性）。三项待拍板已按业主授权定案（DECISIONS 2026-09-09：`formatRate`、保持 L2、三态收编 `pricingStatus`+`estimated`），P1-9 转 P2-13。P2-4（复制 hook）与 P2-12（决策列 emphasis，顺带修好批准/拒绝同色的潜在缺陷）已完成。P2-13（三态 helper，顺带把待核价的 destructive/warning 统一成 primary、销售端文案统一为「待工厂核价」）已完成。P2-1（状态药丸归并，6 组并行 + 对抗校验；顺带修掉归档账单外显原始枚举、销售端急单 danger 误用、临期/逾期同色，以及并行任务引入的 heading-order 回归）已完成，残余登记为 P2-14 / P2-15。P2 剩余：、P2-2 NativeSelect、P2-6 字段错误、P2-3 PendingButton、P2-10 disabled 审计。注意 `AdminOrderListLayout.browser.spec.tsx`（未跟踪，另一任务 WIP）等待尚不存在的「下发生产」按钮，整套超时，不是回归。
 - 2026-09-14：结构体检（`docs/archive/项目结构体检-2026-09-14.md`）+ 四项收口 commit：架构门禁回绿（`e357efcc`）、忽略 Browser Mode 截图产物（`666e8d89`）、golden-gate 按 print-sentinel 谱系回读（`fb433c39`）、CLAUDE.md 1.3 同步现状。未推送、未部署、未跑 Codex 复审。
+- 2026-09-14（续）：体检剩余项收口：`lib/auth/schemas.ts` 按域拆分（`3a70278e` + 测试改遍历 `6f8faa83`）、`docs/archive/` 归档 25 份过程文件并立规则（`d3254723`）、CLAUDE.md §3 / §15.3 同步。change-request / lib/order.ts / OrderForm 量过耦合度后**没有拆**，理由写在「当前任务」。
