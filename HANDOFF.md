@@ -8,9 +8,34 @@
 
 ## 当前任务
 
-**2026-09-14：分支 `codex/gongdanceshi` 已完成结构体检并收口体检报告的全部 6 项缺陷，全部已 commit、未推送、未部署。**
+**2026-09-14：PR #19（`codex/gongdanceshi` → `main`，<https://github.com/zora4523-bot/print-shop-erp/pull/19>）已开，
+本地继续在 `codex/tijian-2` 上修 CI 暴露的问题，每修一处就 `git push origin codex/tijian-2:codex/gongdanceshi` 快进 PR 分支。
+两分支当前同头（`77aebdd7`），共 41 个提交领先 `origin/main`。未合并、未部署。**
 
-本分支自 2026-09-13 起共 37 个提交领先 `origin/main`，内容分三块：
+**PR 开出后 CI 与本地门禁复核发现并已修的 4 件事（都是 09-13 批次改了行为但没同步测试 / 基线）：**
+
+1. **GitHub Actions 账单**：09-12 15:01 起所有 run 因「payments failed / spending limit」根本没启动。业主已处理，
+   `gh run rerun` 后正常。
+2. **`4a6d5fd9` 打印像素基线**：`order-print-three-items` 差 1082 像素，整页只有「数据不完整」一行——`749c3d87`
+   把多款式的「图 1/2/3 包装数量未填」合并成「款式包装数量未填」。业主目视确认后按新文案更新基线。
+3. **`010b154f` Browser Mode 5 个 spec 导入即挂**（CI 与本地冷缓存一致，与 vite 缓存无关）：`BatchPrintControls`
+   直接 import `@/actions/order-batch-print`，4 个 AdminOrder spec 没 mock 它 → `next-auth` 进浏览器预打包 →
+   其 chunk 向已被 mock 的 `next/navigation` 要内部导出 `t` 报错；`ExternalSalesOrderFormRail` 经 `ui-business`
+   桶文件带入真实 `next/link` → `process is not defined`。都在 spec 里补 mock，不改组件与配置。
+   **规律：组件新 import 任何 server action 或经桶文件带入 `next/link`，对应 browser spec 必须同步 mock。**
+4. **`77aebdd7` 管理端六视口门禁**：仍在给管理员建单填已移除的「客户名称/简称」（DECISIONS 09-13），价格版本页
+   `readyHeading` 仍是旧标题「价格版本与发布」。修正后 admin 84/85（375×667 一次偶发，单独重跑两遍都过）、
+   worker 12/12。CI 此前从未跑到这一步。
+
+另 `13813008` 把 CLAUDE.md §14「Playwright 复用 :3000 并共用开发库」改成现行的隔离库 + 独立端口流程。
+
+**本机环境观察（未动，业主定夺）：**
+- 本地 Postgres 堆了 28 个历史 e2e / 测试库；本次又建了 `erp_e2e_tijian_20260914`（可 `DROP DATABASE`）。
+- `.env` 的 `BACKGROUND_JOBS_MODE=durable` 且本机没起 light worker，`BackgroundJob` 里 42 条 NOTIFICATION 自 09-07
+  起一直 PENDING，`/api/health/ready` 因此 503（`light-worker-missing` / `light-backlog-old`）。
+- `:3000` 上一直有一个此工作树的 `next dev`（不是本会话启动的）；Playwright 不会复用它。
+
+**09-14 上午的结构体检收口（已在 PR 内）**：
 
 1. **建单 / 定价 / 装盒批次（09-13，业务代码）**：管理员建单定价与关联外部销售、默认入袋 / 不包装 /
    版本化装盒计价、专版十一档「达到档位取价」（`e5bac3cb`，价目簿由 `scripts/publish-confirmed-custom-tiers.ts`
@@ -64,12 +89,12 @@
 
 ## 下一步具体指令（给下次 AI）
 
-**先做：把这批改动送去 review，不要开新功能**
+**先做：盯 PR #19 的 CI 跑完（run 34813161057，head `77aebdd7`）**
 
-1. 推送 `codex/gongdanceshi` 前再跑一遍 `pnpm check:architecture && pnpm lint && pnpm typecheck && pnpm test run`
-   （CI 的 Static quality gates 会按这个顺序跑，架构门禁排最前）。
-2. Codex 复审已完成（见验证事实），本批可以直接推送开 PR；CI 的 vitest 步骤会在全新库上跑 golden-gate 的
-   「当前生效版」用例（当前版 = print-sentinel，走空覆盖集，与旧测试等价）。
+1. verify job 顺序：迁移链 → 静态门禁 → 单测覆盖率 → Browser Mode → **生产构建 + business E2E + 六视口** →
+   durable → 跨浏览器打印 → dev-fixtures。前四步已在上一轮绿过，六视口及之后是首次真正跑到，可能还有 09-13
+   批次没同步的 e2e 断言；本地复现方式见 CLAUDE.md §14（隔离库 + `--config=playwright.release.config.ts`）。
+2. 绿了就合并 PR；合并后删 `codex/tijian-2`。不要再往 `codex/gongdanceshi` 直接推。
 3. 更新 `PROGRESS.md`：把 09-13 批次（建单定价 / 装盒 / 十一档 / 批量打印）与 09-14 体检收口写进「已完成」。
 4. 新建任务过程文件直接放 `docs/archive/`（规则见其 README），不要再往仓库根目录放 PLAN- / REPORT-。
 5. 新增 Zod schema 放进 `lib/auth/schemas/<域>.ts`，不要往入口文件 `lib/auth/schemas.ts` 里加。
@@ -208,3 +233,4 @@
 - 2026-09-14：结构体检（`docs/archive/项目结构体检-2026-09-14.md`）+ 四项收口 commit：架构门禁回绿（`e357efcc`）、忽略 Browser Mode 截图产物（`666e8d89`）、golden-gate 按 print-sentinel 谱系回读（`fb433c39`）、CLAUDE.md 1.3 同步现状。未推送、未部署、未跑 Codex 复审。
 - 2026-09-14（续）：体检剩余项收口：`lib/auth/schemas.ts` 按域拆分（`3a70278e` + 测试改遍历 `6f8faa83`）、`docs/archive/` 归档 25 份过程文件并立规则（`d3254723`）、CLAUDE.md §3 / §15.3 同步。change-request / lib/order.ts / OrderForm 量过耦合度后**没有拆**，理由写在「当前任务」。
 - 2026-09-14（Codex 复审）：两轮只读复审。一处中等问题（golden-gate 丢了当前生效版防线）由 `1f6556ef` 补回「按谱系登记期望」的第二条用例，`fde821fc` 修注释；其余提交核对无误。
+- 2026-09-14（下午）：推 `codex/gongdanceshi` 开 PR #19。CI 先因 Actions 账单未启动；恢复后依次修：打印基线（`4a6d5fd9`，业主确认）、Browser Mode 5 个 spec 缺 mock（`010b154f`）、管理端六视口门禁两处过时断言（`77aebdd7`）、CLAUDE.md §14 E2E 流程（`13813008`）。均在 `codex/tijian-2` 修后快进 PR 分支。
