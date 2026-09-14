@@ -688,8 +688,26 @@ pnpm worker:light            # 本地手动跑 LIGHT 队列 worker
 pnpm worker:heavy            # 本地手动跑 HEAVY 队列 worker（CDR/PDF/XLSX）
 ```
 
-**E2E 前置**：Playwright 复用已在 `:3000` 跑的 dev server（没有就自己拉起），并共用开发库；
-`tests/e2e/global-setup.ts` 会幂等 upsert 各角色测试账号（密码见该文件的 `E2E_PASSWORD`）。
+**E2E 前置（2026-09-14 更新，旧说法「复用 :3000 并共用开发库」已作废）**：Playwright **绝不**复用
+`:3000` 的开发服务器，也**绝不**碰 `DATABASE_URL` 指向的开发库。它自己在 `127.0.0.1:3100`（开发配置）
+或 `:3200`（release 配置，`next build` + `next start`，`.next-release`）拉起服务，并要求一个一次性的
+隔离库：`E2E_DATABASE_URL`（库名须含 `e2e` / `test` / `ci` 分段）+ 同名的 `E2E_DATABASE_CONFIRM_DATABASE`，
+缺任一项 webServer 直接拒启。本地跑法与 CI 一致：
+
+```bash
+psql "$DATABASE_URL" -c 'CREATE DATABASE erp_e2e_<日期>'
+export E2E_DATABASE_URL=postgresql://…/erp_e2e_<日期>  E2E_DATABASE_CONFIRM_DATABASE=erp_e2e_<日期>
+pnpm test:e2e:preflight
+DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+pnpm test:e2e:prepare            # 修复测试纸张目录 + 发布 E2E ONLY 工价
+pnpm test:admin-ui               # 或 test:worker-ui / test:e2e / test:release
+```
+
+`tests/e2e/global-setup.ts` 会在隔离库里幂等 upsert 各角色测试账号（密码见该文件的 `E2E_PASSWORD`）。
+打印像素基线是 darwin-chromium 的，只在 macOS 上用 `--config=playwright.release.config.ts` 复现 / 更新；
+`pnpm test:release -- <spec> -g <名字>` 的 `-g` 不会被 pnpm 透传，要用 `pnpm exec playwright test …`。
+用完的隔离库记得 `DROP DATABASE`，本机已经堆过 28 个。
 
 ---
 
