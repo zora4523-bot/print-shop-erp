@@ -2,7 +2,7 @@
 
 把下面 `---` 之间整段交给 Codex。设计稿在仓库 `docs/ux-redesign/`，用浏览器打开即可。
 
-这是**展示层**任务，与 `docs/codex-prompt-代码质量审查修复-2026-08-23.md`（结构收口）并行、文件几乎不重叠。不要在本任务里改 jobs / notification / salary / prisma。
+这是**展示层**任务，与 `docs/archive/codex-prompt-代码质量审查修复-2026-08-23.md`（结构收口）并行、文件几乎不重叠。不要在本任务里改 jobs / notification / salary / prisma。
 
 ---
 
@@ -11,7 +11,7 @@
 
 ## 读取顺序（不要跳）
 
-1. `docs/定价表单优化-2026-08-24.md` —— 现状对照表，哪一条还在、哪一条不要动
+1. `docs/archive/定价表单优化-2026-08-24.md` —— 现状对照表，哪一条还在、哪一条不要动
 2. `docs/ux-redesign/批次五 价格与报价 交互稿.dc.html` —— P1 工作台、发布中心、阶梯表、契约 09
 3. `docs/ux-redesign/收费项目工作台 重设计.dc.html` —— 只当早期演示；**冲突以批次五为准**
 4. `docs/ux-redesign/交互与状态设计规范.dc.html` —— L3、五态；清单没写的情况按契约推

@@ -113,7 +113,10 @@ print-shop-erp/
 ├── scripts/                      # background-worker、check-*、deploy-smoke、ui-tokens/、价目簿发布
 ├── deploy/                       # PM2 ecosystem、nginx、crontab 样例、update.sh
 ├── tests/{e2e,visual,regression,durable,compat}/   # 对应 5 份 playwright.*.config.ts
-├── docs/                         # 运维 runbook、UI 规范、审查报告、ux-redesign 交互稿
+├── docs/                         # 运维 runbook、UI 规范、手册（仍在维护的才放 docs/ 根）
+│   ├── audits/                   # YYYY-MM-DD-<主题>.md 审查记录 + evidence/
+│   ├── archive/                  # 任务过程文件归档（PLAN/REPORT/codex 执行稿/带日期的一次性报告），规则见其 README
+│   └── ux-redesign/              # 交互稿 .dc.html
 ├── SPEC-v1.2.md  CLAUDE.md  AGENTS.md  HANDOFF.md  PROGRESS.md  DECISIONS.md
 └── package.json
 ```

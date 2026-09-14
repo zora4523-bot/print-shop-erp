@@ -260,7 +260,7 @@
 
 - [x] **根路由失效会话 500 已修复**：签名 JWT 通过 Edge proxy、但数据库账号已删除或停用时，`/` 现由 `getSession()` 验证后跳转 `/login`，不再抛 `UnauthorizedError` 500 或连带触发 React Script 警告。四角色分流、失效会话和真实异常透传测试已补；提交 `cbc88ca`，Prisma validate、typecheck、lint、236 文件 / 2988 单测、Next build 与浏览器复验全绿。
 
-0a. [x] **Codex 结构复审已收口**：复审表已填完，B1–B6 和 S1–S7 中当前仍成立的部分已按规定修法落地并拆成小提交。未采用的旧修法 / 过度推论见 `docs/代码质量审查-2026-08-23.md`；`RETRYING` 仍不会在 job DEAD 时被改成 `FAILED`。本次 Prisma validate、typecheck、lint、235 文件 / 2982 单测、覆盖率门禁和 Next 生产 build 均通过；仅有当前 Node 22 低于仓库声明 Node 24 的 engine 警告。
+0a. [x] **Codex 结构复审已收口**：复审表已填完，B1–B6 和 S1–S7 中当前仍成立的部分已按规定修法落地并拆成小提交。未采用的旧修法 / 过度推论见 `docs/archive/代码质量审查-2026-08-23.md`；`RETRYING` 仍不会在 job DEAD 时被改成 `FAILED`。本次 Prisma validate、typecheck、lint、235 文件 / 2982 单测、覆盖率门禁和 Next 生产 build 均通过；仅有当前 Node 22 低于仓库声明 Node 24 的 engine 警告。
 
 **然后（2026-08-21 对抗审查批次收尾，仍不需要拍板）**：
 

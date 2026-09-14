@@ -88,7 +88,7 @@ App Router 页面
 - 管理员编辑页的外部销售关联查询与冻结条件集中在 `lib/order/external-sales-association.ts`。保存由原编辑事务校验管理员身份、工单及账号锁、财务关联和编辑版本后更新 `submitterId`，使访问范围与后续对账使用同一归属；不修改 `createdById`、`submitterRole`、`settlementType` 或价格快照。内部业务、已确认或已入账工单不能通过此入口转为外部销售业务。
 - 发货可用性与配送 DTO 分别放在 `lib/order/shipping-availability.ts`、`lib/order/shipping-fields.ts`。详情、抽屉及服务端操作查询消费这些纯契约；UI 目录保留兼容导出，不再由领域代码引用组件。
 - 销售详情使用 `sales-detail-query.ts` 的显式 select 和映射；包装只传模式、实际袋数、每袋组成等客户可见事实，不附带内部规则、生产工资或成本快照。
-- 本次跨页审查范围与证据见 [工单页面审查记录](./docs/order-pages-audit-2026-09-07.md)。
+- 本次跨页审查范围与证据见 [工单页面审查记录](./docs/archive/order-pages-audit-2026-09-07.md)。
 
 ### HTTP Route Handler
 

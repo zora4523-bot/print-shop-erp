@@ -1,4 +1,4 @@
-文档版本（SHA-256）：`docs/工单列表-管理端.html`=`ad6d637ae9a2398dc81810d66ac7fd9b879b04b5647d0dcca7828ccb3b622b95`；`docs/codex-管理端列表与月度账单任务.md`=`6845998e2a41abb14cb94b48fbfc8b5a1fc22afd8b4e01d5a5944a1e0c4ccb0a`；`docs/工单变更与版本规则.md`=`10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9`；`docs/加工费计费规则.md`=`8a5e1149a2e62920c7ebf9d14a6cedf4e6dac5e0769d556b5a52dbeb99dbd852`
+文档版本（SHA-256）：`docs/工单列表-管理端.html`=`ad6d637ae9a2398dc81810d66ac7fd9b879b04b5647d0dcca7828ccb3b622b95`；`docs/archive/codex-管理端列表与月度账单任务.md`=`6845998e2a41abb14cb94b48fbfc8b5a1fc22afd8b4e01d5a5944a1e0c4ccb0a`；`docs/工单变更与版本规则.md`=`10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9`；`docs/加工费计费规则.md`=`8a5e1149a2e62920c7ebf9d14a6cedf4e6dac5e0769d556b5a52dbeb99dbd852`
 
 # PLAN-管理端列表与账单
 
@@ -29,7 +29,7 @@
 
 1. 两份附件已逐字同步到 repo：
    - `/Users/zhixing/Downloads/工单列表-管理端.html` → `docs/工单列表-管理端.html`
-   - `/Users/zhixing/Downloads/codex-管理端列表与月度账单任务 (2).md` → `docs/codex-管理端列表与月度账单任务.md`
+   - `/Users/zhixing/Downloads/codex-管理端列表与月度账单任务 (2).md` → `docs/archive/codex-管理端列表与月度账单任务.md`
 2. 两组源/目标文件均通过 `cmp`；四份真值文档的 SHA-256 固定在本 PLAN 第一行。
 3. 已创建干净基线 commit：`f04a5c0 docs: pin admin work-order planning sources`。
 4. 已完成完整基线验证；唯一红项及全部通过项已存入基线审计，不在本任务顺手修复。

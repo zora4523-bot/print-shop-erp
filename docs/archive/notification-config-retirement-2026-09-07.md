@@ -37,4 +37,4 @@
 
 检查时页面显示“状态未知”：没有读到当前版本 LIGHT worker 的有效连接心跳。该状态不能证明凭据错误，也不能证明真实推送在线。本次不启动 worker、不恢复待发送任务；恢复真实发送须先检查 worker、版本、凭据及待处理队列，再在授权范围内验证送达。
 
-相关契约已同步到 [API](../API.md)、[规格 §8](../SPEC-v1.2.md#8-通知推送)、[架构](../ARCHITECTURE.md)、[开发说明](../DEVELOPMENT.md)、[UI 规范](../UI-SYSTEM.md) 及 `.env.example`。未修改已应用迁移，未提交或推送此次工作区改动。
+相关契约已同步到 [API](../../API.md)、[规格 §8](../../SPEC-v1.2.md#8-通知推送)、[架构](../../ARCHITECTURE.md)、[开发说明](../../DEVELOPMENT.md)、[UI 规范](../../UI-SYSTEM.md) 及 `.env.example`。未修改已应用迁移，未提交或推送此次工作区改动。
