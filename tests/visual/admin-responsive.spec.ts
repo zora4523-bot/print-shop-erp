@@ -686,7 +686,8 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'rule-center-price-versions',
       path: RULE_CENTER_HREFS.priceVersions,
-      readyHeading: '价格版本与发布',
+      // 2026-09-13 价格版本页重排后标题统一为「价格版本」（docs/价格版本页面-20260913.md）。
+      readyHeading: '价格版本',
       prepareGateState: preparePriceBookBusinessState,
     },
     {
@@ -1540,9 +1541,10 @@ async function prepareAdminOrderCreationState(page: Page) {
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })
     .fill('管理员内部建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
-  await form
-    .getByRole('textbox', { name: '客户名称/简称', exact: true })
-    .fill('超长客户名称用于验证小屏换行与表单容器不溢出');
+  // DECISIONS 2026-09-13：管理员创建不再录入工单客户及简称，该输入框已从建单页移除。
+  await expect(
+    form.getByRole('textbox', { name: '客户名称/简称', exact: true }),
+  ).toHaveCount(0);
   await form
     .getByRole('textbox', { name: '款式名', exact: true })
     .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
