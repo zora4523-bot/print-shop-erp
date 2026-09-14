@@ -168,6 +168,34 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 卡住的问题
 
+### 待业主拍板（2026-09-14 晚新增：存量工单过不了生产就绪校验）
+
+- **现象**：开发库工单 `e2e-multi-address-…` 核价页报「款式 #1 缺少可唯一映射的 canonical 工艺；工单没有包装组；款式 #1 未加入任一包装组」，
+  同一表单下方却写「待核价必填项已完成，可以确认费用」，详情页「包装组（0）」。
+- **直接原因**：这张单是 e2e 用裸 SQL 插进开发库的（`tests/e2e/order-multiple-addresses.spec.ts`），没有 `OrderPackagingGroup`，
+  `OrderItem.craft` 为 NULL。开发库 560 张工单里 443 张是 e2e 残留、457 张没有包装组；非 e2e 的只有 2 张（`GD-260807-001` 草稿、
+  `multi-address-…回归工单`）。
+- **结构性原因（不只是脏数据）**：
+  1. `lib/production/operation-materializer.ts` 只认 canonical 事实（`OrderItem.craft` + 包装组）。迁移 `20260828101000` 只把三条计价路线
+     回填成 craft，`MANUAL_QUOTE` 刻意留 NULL；包装组表 `20260826140000` 从未回填。DECISIONS 2026-09-08 明确「本次不批量回填旧工单」。
+  2. 该校验（`prepareOrderForProductionInTx`）挂在 5 个动作上：`submitOrder`、`confirmFactoryOrder`、`releaseFactoryOrder`、`editAdminOrder`、
+     `reviewOrderChangeRequest` + 核价终价。**没有任何 UI 能给存量单补包装组或 craft**：包装组只在 `createOrder` / `rework` 创建，
+     管理员编辑的 `packagingGroups` 必须带已有 `packagingGroupId`，改单也不创建组。存量单一旦进这些状态就卡死。
+  3. 核价预览（`previewOrderPricingReview`）不做就绪预检，`missingRequirements` 只算价格字段，所以表单一边说可以确认、一边终价被服务端拒绝。
+     工单列表倒是有 `confirmationPreflight`（`admin-workspace.ts:668`）会禁用「确认/下发」，两处口径不一致。
+  4. `lib/production/operation-migration-preflight.ts` 有只读的 `preflightLegacyOperationConversion`（注释写明「部署前有一张单被阻断就要停，
+     另跑经审的转换事务」），但没有任何脚本 / runbook 调用它。
+  5. 14 个 e2e 文件用裸 SQL 插 `"Order"`，只有 5 个同时插包装组——夹具绕过领域层，会持续制造这类不满足不变量的数据；
+     它们曾在共用开发库的年代跑过，所以开发库才长这样。
+- **生产影响**：生产仍在 `aa42ba0`（无包装组表、无 craft 列）。部署本 PR 后，所有老工单都没有包装组、`MANUAL_QUOTE` 款式 craft 为 NULL；
+  凡还停在 SUBMITTED / PENDING_FACTORY / CONFIRMED（待下发）或之后需要编辑 / 改单的老单，都会撞上同样的阻断且无法自救。
+  已在生产的 IN_PRODUCTION 及之后状态不受影响（校验只在 awaiting-factory-confirmation 与下发路径跑）。
+- **建议（需拍板）**：(a) 部署前跑 `preflightLegacyOperationConversion` 类的只读清单，把生产库里将被阻断的老单数出来；
+  (b) 给存量单一条补录路径：要么迁移 / 脚本按老 `OrderItem.pack` 与 `crafts` 生成包装组和 craft，要么在管理员编辑里允许新增包装组并设定 craft；
+  (c) 核价预览接入 `inspectOrderProductionReadinessInTx`，把阻断项显示在表单里、禁用确认按钮，和列表口径一致；
+  (d) e2e 夹具改走领域层创建（或至少补齐包装组 / craft），并在隔离库上运行，别再往开发库塞裸 SQL 工单。
+- 开发库里那 443 张 e2e 残留可整体清理，但要业主点头（含关联的收费 / 发货 / 日志行）。
+
 ### 待业主拍板（本批新增，代码已按默认口径落地）
 
 - **盘点「部分过账」语义需业主点头**：一次提交现在可能只过账一部分行，`InventoryCount` 单据上只有被接受的那些，冲突行原样退回要求重数。原设计是一行冲突整单驳回（99 行合格数据陪葬且无 override）。风险评估为低（盘点行本来就是逐 (物料, 库位) 独立的），但要确认。
