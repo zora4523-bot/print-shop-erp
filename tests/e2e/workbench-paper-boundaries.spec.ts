@@ -180,8 +180,11 @@ test('shared paper choices exclude unavailable facts, preserve a long name and r
   const product = quote.getByRole('combobox', { name: '匹配产品' });
   if (await product.count()) {
     // Explicitly choose a real catalog option when the isolated fixtures overlap.
+    // 全套 spec 共库时选项排序会变，`.first()` 可能选中本 spec 自己造的「缺克重」
+    // 夹具产品，报价随即失败（CI 第五轮现场）；按前缀排除本 spec 的夹具。
     const id = await product
       .locator('option[value]:not([value=""])')
+      .filter({ hasNotText: prefix })
       .first()
       .getAttribute('value');
     expect(id).toBeTruthy();

@@ -1355,7 +1355,9 @@ async function prepareOrderDetailDesignPreview(
   data: WorkerUiFixture,
 ) {
   // 管理区块按业务顺序嵌入主栏，操作集中在待办栏（docs/ui-规范.md）。
-  const records = page.getByTestId('admin-order-detail');
+  // 只取主栏里可见的那一份：CI 在 375 / 393 视口整页跳转后曾短暂出现第二份
+  // 同 testid 的节点（位于 #admin-main 之外），未限定范围会撞严格模式冲突。
+  const records = page.locator('#admin-main [data-testid="admin-order-detail"]:visible');
   await expect(records).toBeVisible();
   await expect(records.locator('details[id^="detail-"]:not([id^="detail-design-item-"])')).toHaveCount(6);
   const sections = [
