@@ -10,7 +10,7 @@
 
 **2026-09-14：PR #19（`codex/gongdanceshi` → `main`，<https://github.com/zora4523-bot/print-shop-erp/pull/19>）已开，
 本地继续在 `codex/tijian-2` 上修 CI 暴露的问题，每修一处就 `git push origin codex/tijian-2:codex/gongdanceshi` 快进 PR 分支。
-两分支当前同头（`77aebdd7`），共 41 个提交领先 `origin/main`。未合并、未部署。**
+两分支当前同头（`65c2e1de`），共 46 个提交领先 `origin/main`。未合并、未部署。**
 
 **PR 开出后 CI 与本地门禁复核发现并已修的 4 件事（都是 09-13 批次改了行为但没同步测试 / 基线）：**
 
@@ -28,6 +28,28 @@
    worker 12/12。CI 此前从未跑到这一步。
 
 另 `13813008` 把 CLAUDE.md §14「Playwright 复用 :3000 并共用开发库」改成现行的隔离库 + 独立端口流程。
+
+**第三轮 CI 首次跑到「生产构建 + E2E + 六视口」，20 个失败，已按根因分四类全部修完（run 34824602280 复核中）：**
+
+5. **`3578db20` 真回归（最重要）**：管理员建单页点「复制当前」整页掉进错误边界，探针抓到
+   `TypeError: Cannot read properties of undefined (reading 'manualQuoteReason')`——58c6910b 的
+   `factsKey={adminPriceFacts(watchedItems[expandedItem])}` 没有 `?.`，复制后 `setExpandedItem` 先于
+   `watch('items')` 一帧。加 `expandedWatchedItem` 守卫。它一个拖挂了 admin-order-entry /
+   order-entry-stability ×4 / notification-urgent / 多地址装盒等所有管理员建单 e2e。
+6. **`64f78382` 装盒价目不在迁移链**：红卡空盒 / 触感空盒 / 装盒加工费是部署后数据步骤
+   （`install-box-packaging-rules.ts`），开发库有、隔离库和 CI 没有，装盒工单永远提交不了。抽出
+   `scripts/lib/box-packaging-install.ts`，新增 `prepare-e2e-box-packaging.ts` 挂进 `test:e2e:prepare` 第三步
+   （须 `node --conditions=react-server --import tsx`，价目簿模块带 server-only）。
+7. **`aec6e722` 经营分析业绩排行图**：CI 先跑完 e2e 再跑视口门禁，e2e 留下的长显示名让 Y 轴标签在
+   375 / 393 溢出 1.8px（Linux 无中文字体、回退字形更宽，macOS 单跑看不到）。改函数形式 tick 用
+   `<Text maxLines breakAll>` 按字体度量省略；Browser Mode 加 393 长名用例。
+8. **`8622a5dc` / `65c2e1de` 过时断言**：管理员建单已无关联客户 / 简称控件（notification-urgent、
+   master-data-flow、smoke）；价格版本页标题改「价格版本」、库存列表隐藏物料编码（smoke）。
+
+**规律（写给下一个改建单页的人）**：09-13 那批把行为改了但没跑 `test:release`，本地 `.next` 和开发库
+的历史数据把问题全盖住了。改建单 / 定价 / 包装后，至少在隔离库上跑
+`tests/e2e/{admin-order-entry,order-entry-stability,order-packaging-types,smoke}.spec.ts` 与
+`tests/visual/admin-responsive.spec.ts`。
 
 **本机环境观察（未动，业主定夺）：**
 - 本地 Postgres 堆了 28 个历史 e2e / 测试库；本次又建了 `erp_e2e_tijian_20260914`（可 `DROP DATABASE`）。
@@ -89,11 +111,11 @@
 
 ## 下一步具体指令（给下次 AI）
 
-**先做：盯 PR #19 的 CI 跑完（run 34813161057，head `77aebdd7`）**
+**先做：盯 PR #19 的 CI 跑完（run 34824602280，head `65c2e1de`）**
 
-1. verify job 顺序：迁移链 → 静态门禁 → 单测覆盖率 → Browser Mode → **生产构建 + business E2E + 六视口** →
-   durable → 跨浏览器打印 → dev-fixtures。前四步已在上一轮绿过，六视口及之后是首次真正跑到，可能还有 09-13
-   批次没同步的 e2e 断言；本地复现方式见 CLAUDE.md §14（隔离库 + `--config=playwright.release.config.ts`）。
+1. verify job 顺序：迁移链 → 静态门禁 → 单测覆盖率 → Browser Mode → 生产构建 + business E2E + 六视口 →
+   **durable → 跨浏览器打印 → dev-fixtures**。前五步的 20 个失败已全部修掉（本地 release 配置逐条复现并
+   验证），后三步仍是首次跑到；本地复现方式见 CLAUDE.md §14（隔离库 + `--config=playwright.release.config.ts`）。
 2. 绿了就合并 PR；合并后删 `codex/tijian-2`。不要再往 `codex/gongdanceshi` 直接推。
 3. 更新 `PROGRESS.md`：把 09-13 批次（建单定价 / 装盒 / 十一档 / 批量打印）与 09-14 体检收口写进「已完成」。
 4. 新建任务过程文件直接放 `docs/archive/`（规则见其 README），不要再往仓库根目录放 PLAN- / REPORT-。
@@ -234,3 +256,4 @@
 - 2026-09-14（续）：体检剩余项收口：`lib/auth/schemas.ts` 按域拆分（`3a70278e` + 测试改遍历 `6f8faa83`）、`docs/archive/` 归档 25 份过程文件并立规则（`d3254723`）、CLAUDE.md §3 / §15.3 同步。change-request / lib/order.ts / OrderForm 量过耦合度后**没有拆**，理由写在「当前任务」。
 - 2026-09-14（Codex 复审）：两轮只读复审。一处中等问题（golden-gate 丢了当前生效版防线）由 `1f6556ef` 补回「按谱系登记期望」的第二条用例，`fde821fc` 修注释；其余提交核对无误。
 - 2026-09-14（下午）：推 `codex/gongdanceshi` 开 PR #19。CI 先因 Actions 账单未启动；恢复后依次修：打印基线（`4a6d5fd9`，业主确认）、Browser Mode 5 个 spec 缺 mock（`010b154f`）、管理端六视口门禁两处过时断言（`77aebdd7`）、CLAUDE.md §14 E2E 流程（`13813008`）。均在 `codex/tijian-2` 修后快进 PR 分支。
+- 2026-09-14（晚）：第三轮 CI 的 20 个 E2E / 六视口失败全部修完：真回归 `3578db20`（复制款式崩页）、装盒价目进 E2E 准备 `64f78382`、排行图省略 `aec6e722`、过时断言 `8622a5dc` / `65c2e1de`。均在隔离库 release 配置下逐条验证后快进 PR 分支。
