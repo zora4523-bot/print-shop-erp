@@ -1,3 +1,4 @@
+import { subtotalReconciles } from './subtotal-reconciliation';
 import { packagingBoxType } from './packaging-mode';
 import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
 import { prepareOrderForProductionInTx } from './production-readiness';
@@ -1085,7 +1086,7 @@ function resolvePureChangeRequestPricing(input: {
     quantity,
     itemName,
   );
-  if (!new Decimal(subtotal).equals(quote.suggestedSubtotal)) {
+  if (!subtotalReconciles(subtotal, quote.suggestedSubtotal)) {
     throw new OrderChangeRequestError(
       `款式“${itemName}”的纯引擎分项与小计无法对平`,
     );

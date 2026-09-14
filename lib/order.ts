@@ -1,3 +1,4 @@
+import { subtotalReconciles } from './order/subtotal-reconciliation';
 import { salesCustomerScope } from './order/sales-customer-policy';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
@@ -946,7 +947,7 @@ export async function createOrder(
         2,
       );
       if (
-        !new Decimal(computeSubtotal(it.quantity, unitPrice, fixedFee)).equals(
+        !subtotalReconciles(computeSubtotal(it.quantity, unitPrice, fixedFee),
           subtotal,
         )
       ) {

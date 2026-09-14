@@ -1,3 +1,4 @@
+import * as quoteService from '../order/create-order-quote-service';
 vi.mock('@/lib/order/production-readiness', () => ({
   prepareOrderForProductionInTx: vi.fn(async (tx, orderId) => {
     const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -1251,6 +1252,27 @@ describe('createOrder', () => {
       where: { id: { in: ['product-1'] } },
       select: { id: true, isActive: true },
     });
+  });
+
+  it.each([['0.00', true], ['0.02', false]] as const)('建单半分复算允许舍入、固定费偏差 %s 的结果为 %s', async (fixedFee, allowed) => {
+    dbMock.product.findMany.mockResolvedValue([{ id: 'product-1', code: 'EXT-STOCK-PEARL-FLASH-160-LARGE', category: 'BLANK_STOCK', specification: '大号封90×165', paperType: '160g珠光艳闪', paperMaterialId: null, weight: 160, isActive: true }]);
+    const actual = quoteService.calculateCreateOrderQuoteFromCatalogInTx;
+    const spy = vi.spyOn(quoteService, 'calculateCreateOrderQuoteFromCatalogInTx').mockImplementation(async (...args) => {
+      const result = await actual(...args);
+      result.quote = { ...result.quote, knownTotal: new Decimal(result.quote.knownTotal).minus(result.quote.items[0]!.amount!).plus('244.08').toFixed(2), items: [{ ...result.quote.items[0]!, status: 'QUOTED', amount: '244.08' }] };
+      result.processing.items[0] = { ...result.processing.items[0]!, complete: true, suggestedUnitPrice: '0.3250', suggestedFixedFee: fixedFee, suggestedSubtotal: '244.08' };
+      return result;
+    });
+    try {
+      const call = createOrder({ shippingFee: null, packingMaterialFee: null, customerChargeOverrideReason: null, customerRef: null, receiverName: null, receiverPhone: null, receiverAddress: '广东测试地址', expressCode: null, packageRequirement: null, remark: null, promisedDate: null, isUrgent: false, isSfCollect: false,
+        items: [baseItem({ quantity: 751, productId: 'product-1', specification: '大号封90×165', actualWidthMm: 90, actualHeightMm: 165, pricingGroup: 'LARGE', unitPrice: null, fixedFee: null, priceOverrideReason: null })],
+        packagingGroups: [{ name: '包装', mode: OrderPackagingMode.SINGLE_STYLE, actualBagCount: 76, itemUnitsPerBag: [10] }],
+      }, ownerActor);
+      if (allowed) {
+        await expect(call).resolves.toBeDefined();
+        expect(dbMock.order.create.mock.calls.at(-1)![0].data.items.create[0]).toMatchObject({ unitPrice: '0.3250', fixedFee, subtotal: '244.08' });
+      } else await expect(call).rejects.toThrow('纯引擎分项与小计不一致');
+    } finally { spy.mockRestore(); }
   });
 
   it('assigns GD-YYMMDD-001 when the day has no existing orders', async () => {
