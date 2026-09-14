@@ -10,7 +10,7 @@
 
 **2026-09-14：PR #19（`codex/gongdanceshi` → `main`，<https://github.com/zora4523-bot/print-shop-erp/pull/19>）已开，
 本地继续在 `codex/tijian-2` 上修 CI 暴露的问题，每修一处就 `git push origin codex/tijian-2:codex/gongdanceshi` 快进 PR 分支。
-两分支当前同头（`41569c81`），共 53 个提交领先 `origin/main`。未合并、未部署。**
+两分支当前同头（`1d23b144`），共 56 个提交领先 `origin/main`。未合并、未部署。**
 
 **PR 开出后 CI 与本地门禁复核发现并已修的 4 件事（都是 09-13 批次改了行为但没同步测试 / 基线）：**
 
@@ -62,11 +62,17 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 `tests/e2e/{admin-order-entry,order-entry-stability,order-packaging-types,smoke}.spec.ts` 与
 `tests/visual/admin-responsive.spec.ts`。
 
-**本机环境观察（未动，业主定夺）：**
-- 本地 Postgres 堆了 28 个历史 e2e / 测试库；本次又建了 `erp_e2e_tijian_20260914`（可 `DROP DATABASE`）。
-- `.env` 的 `BACKGROUND_JOBS_MODE=durable` 且本机没起 light worker，`BackgroundJob` 里 42 条 NOTIFICATION 自 09-07
-  起一直 PENDING，`/api/health/ready` 因此 503（`light-worker-missing` / `light-backlog-old`）。
-- `:3000` 上一直有一个此工作树的 `next dev`（不是本会话启动的）；Playwright 不会复用它。
+**开发库已于 2026-09-14 20:42 按业主选择重建（残留数据清零）：**
+- 备份：`~/print-shop-erp-backups/print_shop_erp-20260914-204227.dump`（pg_dump -Fc，全库）与
+  `config-tables-20260914.sql`。恢复旧库用 `pg_restore -d`。
+- 步骤：终止连接 → drop/create → `prisma migrate deploy` → `db:seed` → 回灌 Setting / NotificationChannel /
+  NotificationRule / SalaryRule（`_ChannelRules` 原本就是空）→ 删掉迁移用 NOW() 生成、与原 4 月 22 日那套值完全相同的
+  12 条 SalaryRule → `install-box-packaging-rules.ts --apply`（v7）→ `publish-confirmed-custom-tiers.ts --apply`（v8）。
+- 结果：0 张工单、1 个账号（seed admin）、物料 32 / 产品 57（均来自迁移）、装盒 3 条规则在当前版；golden-gate
+  单测在新库 2/2。丢掉的只有 2 张非测试工单（`GD-260807-001` 草稿等）与 10 个旧价目簿版本历史，都在备份里。
+- `/api/health/ready` 仍 503：`.env` `BACKGROUND_JOBS_MODE=durable` 但本机没起 light / heavy worker，与数据无关。
+- 本地 Postgres 仍有 28 个历史 e2e / 测试库 + 本次的 `erp_e2e_tijian_20260914`，未删。
+- `:3000` 的 `next dev` 不是本会话启动的，重建期间被断连一次，已自动重连。
 
 **09-14 上午的结构体检收口（已在 PR 内）**：
 
@@ -122,7 +128,19 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 下一步具体指令（给下次 AI）
 
-**先做：盯 PR #19 的 CI 跑完（run 34838580706，head `41569c81`）**
+**先做：盯 PR #19 的 CI 跑完（run 34845568496，head `1d23b144`）**
+
+第六轮（34838580706）只剩 1 失败 + 1 重试通过：多地址装盒用例的诊断信息显示保存被
+「纯引擎分项与小计不一致」拦下——CI 全套共库时表单默认纸张是 blank-paper-pricing 留下的「验证纸…」
+（大号封单价 0.5555）。`1d23b144` 改为显式选珠光艳闪 / 160g / 大号封。
+
+**顺带坐实的真实缺陷（待业主拍板，本批未改引擎）——半分金额下不了单**：
+`lib/order/create-order-quote-presentation.ts` 的 `splitItemAmount` 把 2 位小数的金额减去 4 位单价×数量后
+四舍五入成固定费；`lib/order.ts:954` 再要求「单价×数量+固定费 == 小计」严格相等。用黄金价目（5 档，单价
+`0.3250`）实测：751 → 金额 244.08、固定费 0.01、复算 244.085 ≠ 244.08；1001 同理。也就是说 3 位小数档位
+（0.325 / 0.245 / 0.285，五档和十一档都有）遇到奇数数量就被 createOrder 拒绝，客户端只看到一句内部错误。
+改单路径 `change-request.ts:1090` 有同款守卫。修法二选一：守卫按 2 位小数比较；或拆分时把余数并进固定费后
+用同一精度校验。需要业主决定金额口径（DECISIONS 2026-08-02 金额一致性）。
 
 第五轮（34833590442）结果：202 通过，6 失败 + 3 重试通过，全在 E2E / 六视口步骤。已修：
 - `53c983c4` workbench-paper-boundaries：诊断信息显示报价区是错误态「暂无法取得当前报价」——CI 全套共库时
@@ -308,3 +326,4 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 - 2026-09-14（晚）：第三轮 CI 的 20 个 E2E / 六视口失败全部修完：真回归 `3578db20`（复制款式崩页）、装盒价目进 E2E 准备 `64f78382`、排行图省略 `aec6e722`、过时断言 `8622a5dc` / `65c2e1de`。均在隔离库 release 配置下逐条验证后快进 PR 分支。
 - 2026-09-14（夜）：第四轮 CI 剩余 2 个时序失败改超时 / 加诊断（`8ec5bc74`、`997e512b`）；本地 durable、compat 绿；PROGRESS 补上 09-13 / 09-14。第五轮 CI（34833590442）复核中。
 - 2026-09-14（深夜）：第五轮 CI 6 失败按诊断信息修 3 处（`53c983c4`、`41569c81`），第六轮 34838580706 复核中。顺着业主截图查出「存量工单过不了生产就绪校验」的结构性问题，已写进「待业主拍板」。
+- 2026-09-14（夜）：第六轮 CI 诊断出装盒用例是默认纸张漂移（`1d23b144` 显式选纸）；探针坐实「半分金额下不了单」引擎缺陷（待拍板）。业主选择重建开发库：备份后 drop/create + 迁移 + seed + 回灌配置 + 装盒 / 十一档发布，残留清零。第七轮 CI 34845568496 复核中。
