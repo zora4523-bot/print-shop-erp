@@ -214,6 +214,11 @@ Credit 记录、只能分配到同一销售之后的 DRAFT，且封顶不超过�
 复审时我改掉的 Codex 取舍：未知结算状态原显示「未识别配置」→ 改为原样显示快照值；DRAFT 详情页补了与列表一致的未定稿提示；
 页面 SSR 测试从 `lib/agent-monthly-billing/__tests__` 移到 `app/(admin)/__tests__/sales-bill-pages.test.tsx`。
 门禁：lint 0 错、typecheck 通过、全量 vitest 6720 通过（`raw-sql-settlement-contract` 在与 lint 并发时超时，单跑 1.5s 通过）。
+Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3（销售端状态文案三处不一致）→ 2ad3a12f 新增
+`SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY`（整理中 / 待支付 / 已结清）两页统一取用；第二轮 0 P1/P2、1 P3（详情徽标
+断言可被未定稿提示条满足、注册表契约分不清两端）→ fa406ba0 徽标按三状态参数化只取 `data-slot=badge`、契约改前缀否定匹配。
+复审后全量 vitest 6725 通过（616 文件）。教训：fa406ba0 曾在 vitest 启动挂起被杀后经 `| tail` 管道把退出码抹成 0 而提交推送，
+事后单跑 / 合跑均通过，内容无误，但门禁被绕过了一次；此后链式门禁一律 `set -o pipefail`。
 
 ### 待业主拍板（2026-09-14 晚新增：存量工单过不了生产就绪校验）
 
