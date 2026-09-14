@@ -187,8 +187,23 @@ test('管理员多地址装盒分别进位，保存两盒而非一盒', async ({
   await extra.getByLabel('详细地址').fill('李先生 13900139000 江西省南昌市测试路2号');
   await extra.getByRole('spinbutton').fill('5');
   await expect(page.getByText('共 2 盒', {exact: true})).toBeVisible();
-  await page.getByRole('button', {name: '保存草稿', exact: true}).click();
-  await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+$/);
+  const save = page.getByRole('button', {name: '保存草稿', exact: true});
+  await expect(save).toBeEnabled({timeout: 30_000});
+  await save.click();
+  // CI 上两轮都在此处等跳转直到超时而本地秒过；失败时把页面上的错误提示与
+  // 字段级校验信息带进错误信息，而不是只留一句 waitForURL 超时。
+  await expect
+    .poll(
+      async () => {
+        if (/\/orders\/(?!new\b)[a-z0-9]+$/.test(page.url())) return 'navigated';
+        const notices = await page
+          .locator('[role="alert"], [aria-invalid="true"], [data-slot="order-form-rail"] p')
+          .allInnerTexts();
+        return `still on ${page.url()}\n${notices.filter(Boolean).join('\n')}`;
+      },
+      {timeout: 60_000, message: '保存草稿后应跳转到工单详情'},
+    )
+    .toBe('navigated');
   const db = new Client({connectionString: process.env.DATABASE_URL});
   await db.connect();
   try {
