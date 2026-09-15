@@ -83,6 +83,7 @@ function render(
     OrderItemPricingRoute.STOCK_BLANK,
   ),
   options: {
+    fieldErrors?: import('../order-form-b/ExternalSalesOrderFormB').OrderFormBErrors;
     paperKey?: string;
     itemCount?: number;
     activeIndex?: number;
@@ -99,6 +100,7 @@ function render(
   const items = Array.from({ length: itemCount }, () => ({ ...activeItem }));
   return renderToStaticMarkup(
     <OrderFormB
+      fieldErrors={options.fieldErrors}
       values={{
         customName: '',
         receiverName: '',
@@ -483,4 +485,10 @@ describe('OrderFormB', () => {
     expect(color).toContain('雷射');
     expect(color).toContain('叠加烫金');
   });
+});
+
+it('retains the form-level submission error alert', () => {
+  const html = render(undefined, { fieldErrors: { summary: ['提交失败，请重试'] } });
+  expect(html).toMatch(/role="alert"[^>]*data-slot="order-form-errors"/);
+  expect(html).toContain('提交失败，请重试');
 });

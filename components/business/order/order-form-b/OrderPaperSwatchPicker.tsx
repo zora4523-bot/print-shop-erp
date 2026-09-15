@@ -122,7 +122,7 @@ export function OrderPaperSwatchPicker({
         })}
       </div>
       {error ? (
-        <p id={messageId} role="alert" className="text-xs text-destructive">
+        <p id={messageId} className="text-xs text-destructive">
           {error}
         </p>
       ) : hint ? (

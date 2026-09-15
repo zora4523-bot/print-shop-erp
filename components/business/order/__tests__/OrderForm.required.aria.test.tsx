@@ -2,6 +2,15 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { OrderSettlementType } from '@/generated/prisma/enums';
 
+const { fieldState } = vi.hoisted(() => ({ fieldState: { errors: {} as Record<string, { type: string; message: string }> } }));
+vi.mock('react-hook-form', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-hook-form')>();
+  return { ...actual, useForm: (...args: Parameters<typeof actual.useForm>) => {
+    const form = actual.useForm(...args);
+    return { ...form, formState: { ...form.formState, errors: fieldState.errors } };
+  } };
+});
+
 // TextField 曾经把 required 解构出来「只拿去画红星」，没有透传给 <Input>。
 // 读屏器于是把「款式名」「数量」念成普通选填输入框。tests/visual 的 axe 门禁
 // 结构上覆盖不到这条路径：axe 无从知道哪些字段在业务上是必填的，星号和
@@ -267,4 +276,30 @@ it.each([true, false])('shows one optional order note after shipping for externa
   expect(html).toContain('工单备注（选填）');
   expect(html).toMatch(/<textarea[^>]*id="remark"[^>]*maxLength="1000"/i);
   expect(html.indexOf('id="remark"')).toBeGreaterThan(html.indexOf('多地址发货'));
+});
+
+it('field validation keeps aria links without interrupting screen readers', () => {
+  fieldState.errors = { remark: { type: 'maxLength', message: '工单备注过长' } };
+  try {
+    const html = render(false);
+    expect(html).toMatch(/<textarea[^>]*id="remark"[^>]*aria-invalid="true"[^>]*aria-describedby="order-remark-error"/);
+    const tag = html.match(/<p[^>]*id="order-remark-error"[^>]*>/)?.[0];
+    expect(tag).toBeDefined();
+    expect(tag).not.toContain('role="alert"');
+    expect(html).toContain('工单备注过长');
+  } finally { fieldState.errors = {}; }
+});
+
+it('paper and foil field errors keep their accessible description without alerts', async () => {
+  const { OrderPaperSwatchPicker } = await import('../order-form-b/OrderPaperSwatchPicker');
+  const { OrderFoilSwatchPicker } = await import('../order-form-b/OrderFoilSwatchPicker');
+  for (const element of [
+    <OrderPaperSwatchPicker key="paper" id="paper" value={null} options={[]} onChange={() => {}} error="请选择纸张" />,
+    <OrderFoilSwatchPicker key="foil" id="foil" value={[]} options={[]} onChange={() => {}} error="请选择烫金色" />,
+  ]) {
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby=');
+    expect(html).not.toContain('role="alert"');
+  }
 });

@@ -52,7 +52,6 @@ export function FieldError({
   return (
     <p
       id={id}
-      role={children ? 'alert' : undefined}
       aria-hidden={!children && !hint ? true : undefined}
       className={cn(
         'mt-1.5 flex items-start gap-1.5 text-xs',
