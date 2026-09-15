@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { requireSession } from '@/lib/auth/session';
+import { redirect } from 'next/navigation';
+import { getSession } from '@/lib/auth/session';
 import { ChangePasswordForm } from '@/components/business/auth/ChangePasswordForm';
 
 export const metadata = {
@@ -7,7 +8,8 @@ export const metadata = {
 };
 
 export default async function ChangePasswordPage() {
-  await requireSession();
+  const session = await getSession();
+  if (!session) redirect('/login?from=/account/password');
 
   return (
     // main + touch-viewport：这条路由同样在 (admin)/(worker) 壳之外，
