@@ -1,3 +1,4 @@
+import { LogoutButton } from '@/components/business/auth/LogoutButton';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { AdminBreadcrumb } from './AdminBreadcrumb';
 import { UserMenu } from './UserMenu';
@@ -46,6 +47,7 @@ export function AdminHeader({
       ) : null}
       <ThemeToggle />
       <UserMenu displayName={displayName} roleLabel={roleLabel} />
+      <noscript><LogoutButton /></noscript>
     </header>
   );
 }
