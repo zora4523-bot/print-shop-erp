@@ -77,18 +77,21 @@ for (const actor of ['owner', 'sales'] as const) {
       await expect(extraAddress).toBeFocused();
       await expect(extraAddress).toHaveValue('广东省广州市越秀区测试路2号三楼');
 
-      const response = page.waitForResponse((response) =>
-        new URL(response.url()).pathname === '/orders/new' &&
-        response.request().method() === 'POST' &&
-        Boolean(response.request().postData()?.includes('"quantity":1260')),
-      );
+      // 不再用 waitForResponse 按 postData 匹配报价请求：Server Action 的请求体
+      // 可能以流式发送，Playwright 的 postData() 为 null，谓词永远不成立，
+      // 四个变体会随机超时（CI 第八轮与本地各挂两个）。改为等费用栏按新数量
+      // 更新并脱离「核价中 / 待重新核价」状态。
+      const rail = page.locator('[data-slot="order-form-rail"]');
+      const railBefore = await rail.innerText();
       await quantity.fill('1260');
       await extraAddress.click();
       const addressTop = await top(extraAddress);
-      await (await response).finished();
-      await expect(
-        page.locator('[data-slot="order-form-rail"]').getByText(/^(核价中…|待重新核价)$/),
-      ).toHaveCount(0);
+      await expect
+        .poll(async () => {
+          const text = await rail.innerText();
+          return text !== railBefore && !/核价中…|待重新核价/.test(text);
+        }, { timeout: 30_000, message: '费用栏应按数量 1260 重新报价完成' })
+        .toBe(true);
       expect(quoteResponses.every((status) => status === 200)).toBe(true);
       await expect(extraAddress).toBeFocused();
       expect(await top(extraAddress)).toBe(addressTop);
