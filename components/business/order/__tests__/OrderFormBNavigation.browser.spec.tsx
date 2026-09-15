@@ -143,7 +143,10 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [
       expect(fields.map((field) => field.getBoundingClientRect().top)).toEqual(positions);
       expect(window.scrollY).toBe(scrollY);
       expect(document.activeElement).toBe(phone);
-      expect(host.querySelectorAll('[role="alert"]').length > 0).toBe(invalid);
+      // 逐字段错误不再挂 role="alert"（与 EditOrderForm 口径一致，避免 onBlur 抢播报）：
+      // 以 aria-invalid 连线判断错误是否呈现。
+      expect(host.querySelectorAll('[role="alert"]').length).toBe(0);
+      expect(host.querySelectorAll('[aria-invalid="true"]').length > 0).toBe(invalid);
       expect(host.querySelector('[id$="-packaging-message"]')!.textContent).toBe(invalid
         ? '!每包数量不能超过 12 个，请调整包装数量' : '共 100 包');
     }
