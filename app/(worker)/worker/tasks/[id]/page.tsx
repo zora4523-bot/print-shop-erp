@@ -337,10 +337,17 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
     );
   }
 
+  return renderLegacyTaskDetail(id, actor);
+}
+
+// 旧任务分支单独成函数：WorkerTaskDetailPage 已贴着 300 行的架构门禁阈值。
+async function renderLegacyTaskDetail(
+  id: string,
+  actor: Parameters<typeof getLegacyProductionTaskDetail>[1],
+) {
   const legacyTask = await getLegacyProductionTaskDetail(id, actor);
   if (!legacyTask) notFound();
-  const disputes = await listWorkerTaskDisputes(id, actor);
-  return <LegacyTaskDetail task={legacyTask} disputes={disputes} />;
+  return <LegacyTaskDetail task={legacyTask} disputes={await listWorkerTaskDisputes(id, actor)} />;
 }
 
 function OperationStatusBadge({
