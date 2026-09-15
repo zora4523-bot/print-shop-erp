@@ -28,6 +28,7 @@ export type AdminMenuItem = {
 
 export type AdminMenuGroup = {
   label?: string;
+  collapsible?: boolean;
   items: AdminMenuItem[];
 };
 
@@ -126,7 +127,7 @@ export function getAdminMenuItems(user: { role: Role }): AdminMenuGroup[] {
     if (group) {
       group.items.push(item);
     } else {
-      groups.push({ label, items: [item] });
+      groups.push({ label, items: [item], collapsible: adminModule.menuSection !== 'account' });
     }
   }
   return groups;

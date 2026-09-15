@@ -1,3 +1,4 @@
+import { boxPriceRuleDefinition } from './box-packaging-rules';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
@@ -79,9 +80,9 @@ export function customerPriceSectionOwnsRule(
   return (
     purpose === CustomerPriceBookPurpose.PROCESSING &&
     rule.kind === CustomerPriceRuleKind.ADD_ON &&
-    rule.calculationType === CustomerPriceCalculationType.PER_BAG &&
-    (code === 'PACKAGING_SINGLE_STYLE_PER_BAG' ||
-      code === 'PACKAGING_MIXED_STYLE_PER_BAG')
+    ((rule.calculationType === CustomerPriceCalculationType.PER_BAG &&
+      (code === 'PACKAGING_SINGLE_STYLE_PER_BAG' || code === 'PACKAGING_MIXED_STYLE_PER_BAG')) ||
+      (rule.calculationType === CustomerPriceCalculationType.PER_BOX && Boolean(boxPriceRuleDefinition(code))))
   );
 }
 

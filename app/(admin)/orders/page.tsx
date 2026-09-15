@@ -13,7 +13,7 @@ import {
 } from './_components/OrdersListContentSkeleton';
 
 export const metadata = {
-  title: '工单列表 · 红包印刷 ERP',
+  title: '工单列表',
 };
 
 type PageProps = {

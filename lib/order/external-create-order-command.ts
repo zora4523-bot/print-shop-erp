@@ -36,6 +36,7 @@ export type ExternalCreateOrderCommandResult =
  */
 export const EXTERNAL_CREATE_ORDER_SERVER_OWNED_FIELDS = {
   root: [
+    'externalSalesUserId',
     'quotedFee',
     'confirmedFee',
     'settledFee',
@@ -48,6 +49,7 @@ export const EXTERNAL_CREATE_ORDER_SERVER_OWNED_FIELDS = {
     'customerChargeOverrideReason',
   ],
   item: [
+    'adminPrice',
     'unitPrice',
     'fixedFee',
     'subtotal',
@@ -120,6 +122,10 @@ function collectForbiddenFieldIssues(
       }
     });
   }
+
+  if (Array.isArray(raw.packagingGroups)) raw.packagingGroups.forEach((group, index) => {
+    if (isRecord(group) && hasOwn(group, 'adminPrice')) issues.push(forbiddenFieldIssue(['packagingGroups', index, 'adminPrice'], 'adminPrice', null));
+  });
 
   const shipmentCollections: Array<{
     key: string;
@@ -240,6 +246,7 @@ function toCanonicalFacts(data: CreateOrderInput): unknown {
       printFoilMode: canonicalPrintFoilMode(item),
       foilTechnique: item.foilTechnique,
       lamination: item.lamination,
+      packagingMode: data.packagingGroups.find((group) => (group.itemUnitsPerBag[index] ?? 0) > 0)?.mode,
       pack: item.pack ?? null,
       remark: item.remark,
     })),

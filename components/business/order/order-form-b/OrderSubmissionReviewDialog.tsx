@@ -65,7 +65,8 @@ export type OrderSubmissionReviewContentProps = {
   receiver: OrderSubmissionReviewReceiver;
   additionalReceivers?: readonly OrderSubmissionReviewReceiver[];
   cartonCharge?: OrderSubmissionReviewCharge;
-  shippingCharge: OrderSubmissionReviewCharge;
+  shippingCharge?: OrderSubmissionReviewCharge;
+  feeDetails?: ReactNode;
   totalLabel: string;
   totalRequiresManualQuote?: boolean;
   totalNote?: string;
@@ -108,6 +109,7 @@ export function OrderSubmissionReviewContent({
   additionalReceivers = [],
   cartonCharge,
   shippingCharge,
+  feeDetails,
   totalLabel,
   totalRequiresManualQuote = false,
   totalNote,
@@ -146,7 +148,7 @@ export function OrderSubmissionReviewContent({
         <p className="mt-1.5 text-sm text-muted-foreground">{headingHint}</p>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+      <div role="region" aria-label="工单复核内容" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto px-5 py-5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6">
         {remark?.trim() ? <div className="mb-6"><OrderRemark remark={remark} /></div> : null}
         {items.map((item) => {
           const manualQuote = Boolean(item.manualQuoteReasons?.length);
@@ -299,6 +301,10 @@ export function OrderSubmissionReviewContent({
           );
         })}
 
+        {feeDetails ? <section aria-label="费用复核" className="mt-6">
+          <h3 className="mb-3 text-sm font-semibold">费用明细</h3>
+          {feeDetails}
+        </section> : null}
         <section aria-labelledby={`${headingId}-shipping`} className="mt-6">
           <h3
             id={`${headingId}-shipping`}
@@ -317,7 +323,7 @@ export function OrderSubmissionReviewContent({
               </p>
             </address>
           ))}
-          <dl className="mt-3 divide-y border-y text-sm">
+          {cartonCharge || shippingCharge ? <dl className="mt-3 divide-y border-y text-sm">
             {cartonCharge ? (
               <div className="flex items-start justify-between gap-4 py-2.5">
                 <dt className="text-muted-foreground">
@@ -329,7 +335,7 @@ export function OrderSubmissionReviewContent({
                 </dd>
               </div>
             ) : null}
-            <div className="flex items-start justify-between gap-4 py-2.5">
+            {shippingCharge ? <div className="flex items-start justify-between gap-4 py-2.5">
               <dt className="text-muted-foreground">
                 {shippingCharge.label}
                 {shippingCharge.detail ? ` · ${shippingCharge.detail}` : ''}
@@ -342,8 +348,8 @@ export function OrderSubmissionReviewContent({
               <dd className="shrink-0 font-semibold tabular-nums">
                 {shippingCharge.amountLabel}
               </dd>
-            </div>
-          </dl>
+            </div> : null}
+          </dl> : null}
         </section>
 
         <div className="mt-4 flex items-baseline justify-between gap-4 border-t-2 border-foreground pt-4">

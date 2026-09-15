@@ -1,0 +1,11 @@
+import { beforeEach, expect, it, vi } from 'vitest';
+const m = vi.hoisted(() => ({ permission: vi.fn(), request: vi.fn() }));
+vi.mock('@/lib/auth/permissions', () => ({ requirePermission: m.permission }));
+vi.mock('@/lib/public-base-url', () => ({ derivePublicBaseUrl: async () => 'https://example.test' }));
+vi.mock('@/lib/order/batch-print', () => ({ requestBatchPrint: m.request, BatchPrintSelectionError: class extends Error {} }));
+import { requestBatchPrintAction } from '../order-batch-print';
+beforeEach(() => { vi.resetAllMocks(); m.permission.mockResolvedValue({ id: 'admin' }); m.request.mockResolvedValue('job'); });
+it('checks permission before interpreting untrusted input', async () => { m.permission.mockRejectedValue(new Error('Denied')); await expect(requestBatchPrintAction(null)).rejects.toThrow('Denied'); expect(m.request).not.toHaveBeenCalled(); });
+it('rejects more than 50 orders at the action boundary', async () => { expect(await requestBatchPrintAction({ requestId: crypto.randomUUID(), orderIds: Array(51).fill('a') })).toMatchObject({ status: 'error' }); expect(m.request).not.toHaveBeenCalled(); });
+it('uses only the authenticated actor', async () => { const input = { requestId: crypto.randomUUID(), orderIds: ['a'], actorId: 'victim' }; expect(await requestBatchPrintAction(input)).toEqual({ status: 'queued', jobId: 'job' }); expect(m.request).toHaveBeenCalledWith('admin', { requestId: input.requestId, orderIds: ['a'] }, 'https://example.test'); });
+it('does not expose internal submission errors', async () => { m.request.mockRejectedValue(new Error('postgres://private')); expect(JSON.stringify(await requestBatchPrintAction({ requestId: crypto.randomUUID(), orderIds: ['a'] }))).not.toContain('postgres'); });

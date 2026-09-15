@@ -1,3 +1,4 @@
+import { buildCreateOrderExternalChargeInput } from '../../order/create-order-charge-input';
 import { calculateExternalOrderCharges } from '../external-order-charges';
 import { quoteCreateOrderItem } from './item-quote';
 import { sumMoney, sumMoneySafely } from './money';
@@ -147,39 +148,8 @@ function quoteOrderLayer(
       errors: [],
     };
   }
-  const itemsByKey = new Map(input.items.map((item) => [item.itemKey, item]));
   const chargeQuote = calculateExternalOrderCharges(
-    {
-      isSfCollect: input.isSfCollect,
-      shipments: input.shipments.map((shipment) => {
-        const allocations = Object.entries(shipment.itemQuantities).filter(
-          ([, quantity]) => quantity > 0,
-        );
-        return {
-          shipmentKey: shipment.shipmentKey,
-          province: shipment.province,
-          billableWeightKg: shipment.trustedBillableWeightKg ?? null,
-          itemQuantity: allocations.reduce(
-            (total, [, quantity]) => total + quantity,
-            0,
-          ),
-          weightItems: allocations.flatMap(([itemKey, quantity]) => {
-            const item = itemsByKey.get(itemKey);
-            return item
-              ? [
-                  {
-                    itemKey,
-                    quantity,
-                    paperWeightGsm: item.paperWeightGsm,
-                    paperType: item.paperType,
-                    productStructure: item.productStructure,
-                  },
-                ]
-              : [];
-          }),
-        };
-      }),
-    },
+    buildCreateOrderExternalChargeInput(input),
     snapshot.orderCharges.rules,
     snapshot.orderCharges.logisticsPolicy,
   );
@@ -258,6 +228,7 @@ export function calculateCreateOrderQuote(
     items: input.items,
     groups: input.packagingGroups,
     manualItemKeys: manualItemKeySet,
+    shipments: input.shipments,
     snapshot,
   });
   const invalidItemErrors = items.flatMap((item) =>

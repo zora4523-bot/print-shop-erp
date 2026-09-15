@@ -762,6 +762,7 @@ export async function finalizeOrderPricingAction(
       processingAmount: finalized.processingAmount,
       totalAmount: finalized.totalAmount,
       confirmedFee: finalized.confirmedFee,
+      productionReadiness: finalized.productionReadiness,
     };
   } catch (error) {
     if (error instanceof OrderPricingReviewError) {

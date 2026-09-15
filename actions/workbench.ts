@@ -6,10 +6,10 @@ import {
 } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createOrderQuoteItemsSchema } from '@/lib/auth/schemas';
-import { db } from '@/lib/db';
 import { listActiveCraftOrderOptions } from '@/lib/craft';
 import { listExternalCreateOrderOptions } from '@/lib/order/create-order-options';
-import { presentCreateOrderPlateFee } from '@/lib/order/create-order-quote-presentation';
+import { calculateWorkbenchItem } from '@/lib/workbench/service';
+import { workbenchItemQuoteSchema } from '@/lib/workbench/item-quote';
 import { workbenchPaperChoices } from '@/lib/workbench/catalog';
 import { canonicalizeCreateOrderPaperFact } from '@/lib/price/create-order/canonical-facts';
 import {
@@ -20,13 +20,8 @@ import {
   productCategoryMatchesPricingRoute,
   requiredPricingCraftGroups,
 } from '@/lib/order/pricing-route';
+import { CreateOrderQuoteError } from '@/lib/order/create-order-quote-service';
 import {
-  calculateCreateOrderQuoteFromCatalogInTx,
-  CreateOrderQuoteError,
-} from '@/lib/order/create-order-quote-service';
-import {
-  suggestWorkbenchAmount,
-  workbenchPricingReasons,
   workbenchQuoteSchema,
   type WorkbenchQuoteResult,
 } from '@/lib/workbench/quote';
@@ -159,62 +154,29 @@ export async function quoteWorkbenchAction(
         message: '工艺组合不完整，请检查正反面烫金颜色与工艺后重新计算',
       };
     const item = validated.data.items[0]!;
-    const calculated = await db.$transaction((tx) =>
-      calculateCreateOrderQuoteFromCatalogInTx(tx, {
-        now: new Date(),
-        includeOrderCharges: false,
-        facts: {
-          items: [
-            { ...item, pricingRoute: input.pricingRoute, itemKey: '1', fig: 1 },
-          ],
-          packagingGroups: [],
-          isSfCollect: false,
-          shipments: [
-            {
-              shipmentKey: 'workbench',
-              province: null,
-              itemQuantities: { '1': input.quantity },
-            },
-          ],
-        },
-      }),
+    return await calculateWorkbenchItem(
+      { ...item, pricingRoute: input.pricingRoute },
+      input.markup,
     );
-    const preview = calculated.processing.items[0]!;
-    const baseAmount = preview.complete ? preview.suggestedSubtotal : null;
-    return {
-      status: 'success',
-      quote: {
-        baseAmount,
-        ...suggestWorkbenchAmount(baseAmount, input.markup),
-        lines: preview.components.map(
-          ({ name, rate, units, amount, adjustmentType, ruleCode }) => {
-            // Machine fees already include the quantity and every front/back
-            // pass. The presenter has no standalone rate for this combination;
-            // show its whole-item amount once instead of multiplying it again.
-            const wholeItemAmount =
-              ruleCode === 'PARTIAL_MACHINE' ||
-              adjustmentType === 'PER_ORDER' ||
-              adjustmentType === 'FIXED_AMOUNT';
-            return {
-              name,
-              rate: wholeItemAmount ? amount : rate,
-              units: wholeItemAmount ? '1' : units,
-              amount,
-            };
-          },
-        ),
-        needsPricing: !preview.complete,
-        pricingReasons: preview.complete
-          ? []
-          : workbenchPricingReasons(calculated.quote.items[0]!.manualReasons),
-        plateFeePending: presentCreateOrderPlateFee(calculated.quote) !== null,
-        processingVersion: calculated.quote.priceVersion.processing.version,
-      },
-    };
   } catch (error) {
     return {
       status: 'error',
       message: quoteFailureMessage(error),
     };
+  }
+}
+
+/** Current calculator submits the same structured item facts as order entry. */
+export async function quoteWorkbenchItemAction(
+  raw: unknown,
+): Promise<WorkbenchQuoteResult> {
+  await requirePermission('order:create');
+  const parsed = workbenchItemQuoteSchema.safeParse(raw);
+  if (!parsed.success)
+    return { status: 'error', message: '请检查规格、纸张、数量和工艺后重试' };
+  try {
+    return await calculateWorkbenchItem(parsed.data.item, 0);
+  } catch (error) {
+    return { status: 'error', message: quoteFailureMessage(error) };
   }
 }

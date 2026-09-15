@@ -159,3 +159,18 @@ it('passes request auth for verification and uses the verified actor for scope a
   expect(mocks.order).toHaveBeenCalledWith('order-1', { id: 'worker-1', role: Role.WORKER }, 'https://erp.example.com');
   expect(mocks.wait).toHaveBeenCalledWith('job-1', expect.objectContaining({ expected: { orderId: 'order-1', actorId: 'worker-1', actorRole: Role.WORKER, workOrderVersion: 3 } }));
 });
+
+
+it.each(['unavailable', 'delayed'])('stops automatic refresh for %s but preserves the authorized job', async (status) => {
+  mocks.mode.mockReturnValue('durable');
+  mocks.wait.mockResolvedValue({ status });
+  const response = await request('?view=inline&jobId=job-old');
+  expect(response.status).toBe(503);
+  expect(response.headers.get('refresh')).toBeNull();
+  const body = await response.text();
+  expect(body).not.toContain('http-equiv="refresh"');
+  expect(body).toContain('jobId=job-old');
+  expect(body).toContain('view=inline');
+  expect(body).not.toContain('regenerate=1');
+  expect(mocks.enqueue).not.toHaveBeenCalled();
+});

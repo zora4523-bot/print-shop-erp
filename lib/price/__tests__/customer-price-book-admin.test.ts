@@ -74,6 +74,7 @@ import {
   getCustomerPriceBookDraftRuleEditor,
   listCustomerPriceBookVersionsAndDrafts,
   publishCustomerPriceBookDraft,
+  prepareConfirmedCustomTierDraft,
   rescheduleCustomerPriceBook,
   updateCustomerPriceRuleDraft,
   updateCustomerPriceRuleDraftGroup,
@@ -1961,7 +1962,9 @@ describe('customer price-book draft lifecycle', () => {
       expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
     } else {
       await expect(operation).resolves.toMatchObject({ priceBookId: 'processing-draft' });
-      expect(dbMock.customerPriceRule.updateMany).toHaveBeenCalledTimes(10);
+      expect(dbMock.customerPriceRule.updateMany).toHaveBeenCalledTimes(20);
+      expect(dbMock.customerPriceRule.updateMany.mock.calls.slice(0, 10).every(([call]) => call.data.isActive === false)).toBe(true);
+      expect(dbMock.customerPriceRule.updateMany.mock.calls.slice(10).every(([call]) => call.data.isActive === true)).toBe(true);
       expect(dbMock.businessAuditLog.create).toHaveBeenCalled();
     }
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
@@ -3173,5 +3176,45 @@ describe('price-book admin DTO and normalized hash', () => {
         now,
       ),
     ).rejects.toBeInstanceOf(CustomerPriceBookAdminError);
+  });
+});
+
+
+describe('confirmed custom-tier draft release guards', () => {
+  const input = { priceBookId: 'draft', expectedDraftUpdatedAt: now };
+  function mockDraft() {
+    dbMock.customerPriceBook.findUnique.mockResolvedValueOnce({
+      id: 'draft', isActive: false, purpose: 'PROCESSING', settlementType: 'EXTERNAL_SALES',
+      updatedAt: now, notes: draftNotes(),
+    });
+  }
+  it('rejects non-admin actors before opening a write transaction', async () => {
+    await expect(prepareConfirmedCustomTierDraft(input, { ...actor, role: Role.SALES })).rejects.toThrow('仅管理员');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+  it('rejects stale draft timestamps without changing any rules', async () => {
+    mockDraft();
+    await expect(prepareConfirmedCustomTierDraft({ ...input, expectedDraftUpdatedAt: new Date(0) }, actor)).rejects.toThrow('草稿已变化');
+    expect(dbMock.customerPriceRule.update).not.toHaveBeenCalled();
+  });
+  it('does not overwrite an independently published successor', async () => {
+    mockDraft();
+    dbMock.customerPriceBook.findUnique.mockResolvedValueOnce({
+      id: 'book-v1', isActive: true, effectiveFrom: now, effectiveTo: null,
+      code: 'EXTERNAL_SALES_PROCESSING_RULES', notes: { ruleVersion: 'other-release' },
+    });
+    await expect(prepareConfirmedCustomTierDraft(input, actor)).rejects.toThrow('不适用');
+    expect(dbMock.customerPriceRule.update).not.toHaveBeenCalled();
+  });
+  it('refuses unrelated draft changes rather than publishing them with the tier update', async () => {
+    mockDraft();
+    dbMock.customerPriceBook.findUnique.mockResolvedValueOnce({
+      id: 'book-v1', isActive: true, effectiveFrom: now, effectiveTo: null,
+      code: 'EXTERNAL_SALES_PROCESSING_RULES', notes: { ruleVersion: '2026-08-30-print-null-sentinel' },
+    });
+    dbMock.customerPriceRule.findMany.mockResolvedValueOnce([validationRule({ amount: '9' })])
+      .mockResolvedValueOnce([validationRule({ amount: '1' })]);
+    await expect(prepareConfirmedCustomTierDraft(input, actor)).rejects.toThrow('草稿含其他调价');
+    expect(dbMock.customerPriceRule.update).not.toHaveBeenCalled();
   });
 });

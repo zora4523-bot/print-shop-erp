@@ -6,6 +6,8 @@ import { E2E_PASSWORD, E2E_USERS, getUserIdByUsername, login, seedSettledExterna
 
 test.use({ hasTouch: true });
 
+const testArtwork = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#fff"/><rect x="20" y="20" width="260" height="360" fill="#a20a1c"/><text x="150" y="210" fill="#fff" text-anchor="middle" font-size="30">TEST</text></svg>')}`;
+
 // Each case owns a fresh, append-only historical fixture. Never mutate a real
 // salesperson's order or weaken the database's immediate quote constraints.
 async function seed(status = 'SUBMITTED', username = E2E_USERS.sales.username, prefix = 'e2e-sales-review') {
@@ -17,7 +19,7 @@ async function seed(status = 'SUBMITTED', username = E2E_USERS.sales.username, p
     await db.query('BEGIN');
     const { rows: books } = await db.query(`SELECT id FROM "CustomerPriceBook" WHERE purpose='LOGISTICS' AND "settlementType"='EXTERNAL_SALES' AND "isActive" ORDER BY "effectiveFrom" DESC LIMIT 1`);
     expect(books).not.toHaveLength(0);
-    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"customName","receiverName","receiverPhone","receiverAddress","processingAmount","totalAmount","confirmedFee","pricingStatus","pricingConfirmedAt","updatedAt","settlementContractVersion","settledFee","settledAt") VALUES ($1,$1,$2,'SALES',$2,'EXTERNAL_SALES',$3::"OrderStatus",$1,'测试收件人','13800138000','广东省佛山市测试路1号',100,130,130,'LEGACY_CONFIRMED',NOW(),NOW(),CASE WHEN $3::text='SETTLED' THEN 2 END,CASE WHEN $3::text='SETTLED' THEN 130 END,CASE WHEN $3::text='SETTLED' THEN NOW() END)`, [id, salesId, status]);
+    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"customName","receiverName","receiverPhone","receiverAddress","processingAmount","totalAmount","confirmedFee","pricingStatus","pricingConfirmedAt","updatedAt","settlementContractVersion","settledFee","settledAt") VALUES ($1,$1,$2,'SALES',$2,'EXTERNAL_SALES',$3::"OrderStatus",$4,'测试收件人','13800138000','广东省佛山市测试路1号',100,130,130,'LEGACY_CONFIRMED',NOW(),NOW(),CASE WHEN $3::text='SETTLED' THEN 2 END,CASE WHEN $3::text='SETTLED' THEN 130 END,CASE WHEN $3::text='SETTLED' THEN NOW() END)`, [id, salesId, status, `销售回归工单 · ${status}`]);
     await db.query(`INSERT INTO "OrderItem" (id,"orderId",sequence,name,"pricingRoute","productStructure","paperType","paperWeightGsm",quantity,crafts,"foilTechnique",subtotal,"updatedAt") VALUES ($1,$2,1,'销售回归测试款','STOCK_BLANK','STANDARD_ENVELOPE','珠光艳闪',160,1000,ARRAY[]::text[],'FLAT',100,NOW())`, [`${id}-item`, id]);
     await db.query(`INSERT INTO "OrderShipment" (id,"orderId",sequence,"receiverName","receiverPhone","receiverAddress","destinationProvince","carrierCode","updatedAt") VALUES ($1,$2,1,'测试收件人','13800138000','广东省佛山市测试路1号','广东','ZTO',NOW())`, [`${id}-shipment`, id]);
     await db.query(`INSERT INTO "OrderShipmentLine" (id,"shipmentId","orderItemId",quantity) VALUES ($1,$2,$3,1000)`, [`${id}-line`, `${id}-shipment`, `${id}-item`]);
@@ -117,7 +119,7 @@ test('销售搜索、分类、抽屉、详情和草稿编辑回显', async ({ pa
   await expect(card).toBeVisible();
   await page.getByRole('navigation', { name: '销售工单视图' }).getByRole('link', { name: /^草稿/ }).click();
   await expect(card).toBeVisible();
-  await card.getByRole('button', { name: id, exact: true }).click();
+  await card.getByRole('button', { name: /销售回归工单/, exact: false }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -232,7 +234,7 @@ test('销售全部状态均能打开详情，分类结果和汇总计数一致',
       const id = ids.get(status)!;
       const card = page.locator(`[data-order-id="${id}"]`);
       await expect(card.getByRole('link', { name: /查看详情|查看草稿|查看原因/ })).toHaveAttribute('href', `/orders/${id}`);
-      await card.getByRole('button', { name: id, exact: true }).click();
+      await card.getByRole('button', { name: /销售回归工单/, exact: false }).click();
       const drawer = page.getByRole('dialog');
       await expect(drawer.getByRole('link', { name: '查看完整详情' })).toHaveAttribute('href', `/orders/${id}`);
       await drawer.getByRole('button', { name: '关闭预览', exact: true }).click();
@@ -313,7 +315,7 @@ test('销售列表、详情和编辑页在六视口及明暗主题下可用', as
       const result = await new AxeBuilder({ page }).include('#admin-main').analyze();
       expect(result.violations.map(({ id: rule, nodes }) => ({ rule, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) })), `${path}: ${width} dark=${dark}`).toEqual([]);
       if (width <= 393 && path.startsWith('/orders?')) {
-        await page.locator(`[data-order-id="${id}"]`).getByRole('button', { name: id, exact: true }).tap();
+        await page.locator(`[data-order-id="${id}"]`).getByRole('button', { name: /销售回归工单/, exact: false }).tap();
         await expect(page.getByRole('dialog'), `touch: ${width} dark=${dark}, url=${page.url()}`).toBeVisible();
         await page.getByRole('button', { name: '关闭', exact: true }).tap();
         await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -447,7 +449,7 @@ test('驳回补正重新计价确认后提交，缺图阻止提交，旧图删�
     await db.query(`UPDATE "OrderItem" SET fig=1,"productId"=$2,specification=$3,"paperType"=$4,"pricingGroup"='LARGE',"actualWidthMm"=90,"actualHeightMm"=165,crafts=ARRAY[$5]::text[],"foilColors"=ARRAY['哑金'],"frontFoilColors"=ARRAY['哑金'],"hasLocalFoil"=true WHERE "orderId"=$1`, [id, product.id, product.specification, product.paperType, craft.id]);
     await db.query(`INSERT INTO "OrderPackagingGroup" (id,"orderId",sequence,mode,"actualBagCount","updatedAt") VALUES ($1,$2,1,'SINGLE_STYLE',100,NOW())`, [`${id}-group`, id]);
     await db.query(`INSERT INTO "OrderPackagingGroupLine" (id,"orderId","packagingGroupId","orderItemId","unitsPerBag") VALUES ($1,$2,$3,$4,10)`, [`${id}-packline`, id, `${id}-group`, `${id}-item`]);
-    await db.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileName","fileUrl","fileType","fileSize","uploadedBy") VALUES ($1,$2,'旧图稿.png','/favicon.ico','IMAGE',100,$3)`, [`${id}-old-art`, `${id}-item`, salesId]);
+    await db.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileName","fileUrl","fileType","fileSize","uploadedBy") VALUES ($1,$2,'旧图稿.png',$4,'IMAGE',100,$3)`, [`${id}-old-art`, `${id}-item`, salesId, testArtwork]);
   });
   await salesLogin(page, `/orders/${id}`);
   await page.getByRole('button', { name: '删除', exact: true }).click();
@@ -459,7 +461,7 @@ test('驳回补正重新计价确认后提交，缺图阻止提交，旧图删�
   await fixtureSql(async (db) => {
     const log = await db.query(`SELECT "changedFields" FROM "OrderLog" WHERE "orderId"=$1 AND "changedFields"->'design'->'before'->>'id'=$2`, [id, `${id}-old-art`]);
     expect(log.rows).toHaveLength(1);
-    await db.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileName","fileUrl","fileType","fileSize","uploadedBy") VALUES ($1,$2,'补正图稿.png','/favicon.ico','IMAGE',100,$3)`, [`${id}-new-art`, `${id}-item`, salesId]);
+    await db.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileName","fileUrl","fileType","fileSize","uploadedBy") VALUES ($1,$2,'补正图稿.png',$4,'IMAGE',100,$3)`, [`${id}-new-art`, `${id}-item`, salesId, testArtwork]);
   });
   await page.reload();
   await page.getByRole('button', { name: '提交工单', exact: true }).click();

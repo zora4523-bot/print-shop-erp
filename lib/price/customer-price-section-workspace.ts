@@ -1,4 +1,5 @@
 import 'server-only';
+import { listExternalCreateOrderProductOptions } from '../product';
 
 import Decimal from 'decimal.js';
 import {
@@ -93,6 +94,9 @@ export type CustomerPriceSectionWorkspaceDto = {
   sources: CustomerPriceSectionWorkspaceStateDto[];
   rules: CustomerPriceSectionRuleDto[];
   shippingWeightPolicy: CustomerPriceShippingWeightPolicyDto | null;
+  blankProducts?: Array<{
+    id: string; paperType: string | null; specification: string | null;
+  }>;
 };
 
 export type CustomerPriceSectionProjectionSource = {
@@ -411,6 +415,11 @@ export async function getCustomerPriceSectionWorkspace(
         { purpose: processing.purpose, groups: processing.groups },
       ]),
       shippingWeightPolicy: null,
+      ...(section === 'blank' ? {
+        blankProducts: (await listExternalCreateOrderProductOptions())
+          .filter(product => product.category === 'BLANK_STOCK')
+          .map(({ id, paperType, specification }) => ({ id, paperType, specification })),
+      } : {}),
     };
   }
 

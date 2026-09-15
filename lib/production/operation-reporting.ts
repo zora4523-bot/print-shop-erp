@@ -690,7 +690,7 @@ async function appendPricedProductionReport(
       version: true,
       ruleSetSha256: true,
       rules: {
-        where: { operationType: operation.operationType },
+        where: { operationType: operation.operationType, unit: operation.unit },
         select: { operationType: true, unit: true, amount: true },
       },
     },
@@ -709,13 +709,14 @@ async function appendPricedProductionReport(
   ) {
     throw new OperationReportingError(
       'PIECEWORK_RATE_UNAVAILABLE',
-      '当前时点没有唯一、完整且已发布的工序工价',
+      operation.unit === 'PER_BOX' ? '装盒工价尚未发布，请管理员配置按盒工价后报工' : '当前时点没有唯一、完整且已发布的工序工价',
     );
   }
 
   const priced = calculatePieceworkAmount(
     {
       operationType: operation.operationType,
+      unit: operation.unit,
       completedQty: parsed.completed.toString(),
       defectQty: parsed.defect.toString(),
       reworkQty: parsed.rework.toString(),

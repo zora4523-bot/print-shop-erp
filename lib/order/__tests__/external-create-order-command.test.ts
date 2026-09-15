@@ -16,7 +16,7 @@ function externalOrder(overrides: Record<string, unknown> = {}) {
     receiverAddress: '上海市浦东新区测试路 1 号',
     destinationProvince: '上海',
     expressCode: null,
-    packageRequirement: '按客户原话：每包一千个',
+    packageRequirement: '按客户原话：每包十个',
     remark: null,
     promisedDate: null,
     isUrgent: false,
@@ -27,7 +27,7 @@ function externalOrder(overrides: Record<string, unknown> = {}) {
         name: '第 7 款单款装',
         mode: 'SINGLE_STYLE',
         actualBagCount: 1,
-        itemUnitsPerBag: [1000],
+        itemUnitsPerBag: [10],
       },
     ],
     items: [
@@ -43,7 +43,7 @@ function externalOrder(overrides: Record<string, unknown> = {}) {
         paperType: '艳红珠光纸',
         paperWeightGsm: 160,
         quantity: 1000,
-        pack: 1000,
+        pack: 10,
         crafts: ['craft-1'],
         frontFoilColors: ['亚金'],
         backFoilColors: [],
@@ -79,7 +79,7 @@ describe('parseExternalCreateOrderCommand', () => {
     if (!result.success) return;
     expect(result.facts).toMatchObject({
       customName: '王总中秋信封',
-      packRaw: '按客户原话：每包一千个',
+      packRaw: '按客户原话：每包十个',
       receiverName: '王先生',
       styles: [
         {
@@ -92,13 +92,13 @@ describe('parseExternalCreateOrderCommand', () => {
           heightMm: 220,
           frontColors: ['亚金'],
           backColors: [],
-          pack: 1000,
+          pack: 10,
         },
       ],
     });
     expect(result.data.items[0]).toMatchObject({
       fig: 7,
-      pack: 1000,
+      pack: 10,
       unitPrice: null,
       suggestedSubtotal: null,
     });
@@ -253,4 +253,10 @@ describe('external extra delivery contacts', () => {
   it('rejects an order note longer than 1000 characters', () => {
     expect(parseExternalCreateOrderCommand(externalOrder({ remark: '字'.repeat(1001) })).success).toBe(false);
   });
+});
+
+it.each([null, { amount: '0', reason: '伪造免单', factsKey: 'forged' }])('rejects SALES style and packaging admin price fields even when %j', (adminPrice) => {
+  const input = externalOrder();
+  expect(parseExternalCreateOrderCommand(onlyItem(input, { adminPrice })).success).toBe(false);
+  expect(parseExternalCreateOrderCommand({ ...input, packagingGroups: [{ ...input.packagingGroups[0], adminPrice }] }).success).toBe(false);
 });

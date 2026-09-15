@@ -1,7 +1,17 @@
+import { BOX_PRICE_RULES, CONFIRMED_BOX_RATES } from './box-packaging-rules';
 import 'server-only';
 
 import { createHash } from 'node:crypto';
+import {
+  addBlankPaperSchema,
+  blankPaperFact,
+  blankSpecificationKey,
+  BLANK_SPECIFICATIONS,
+  type AddBlankPaperInput,
+} from './blank-paper';
+import { canonicalizeCreateOrderPaperFact } from './create-order/canonical-facts';
 import { fixedCustomTierIssue } from './fixed-custom-tiers';
+import customTierRelease from '../../config/customer-price-books/custom-tiers-20260913.json';
 import {
   Prisma,
   type CustomerPriceCalculationType,
@@ -1578,6 +1588,228 @@ export async function getCustomerPriceBookDraftRuleEditor(
   });
 }
 
+/** Add only the approved box rules to an unchanged draft, preserving all published history. */
+export async function prepareConfirmedBoxPackagingDraft(
+  input: { priceBookId: string; expectedDraftUpdatedAt: Date },
+  actor: AuditActor,
+): Promise<{ id: string; updatedAt: Date }> {
+  if (actor.role !== 'ADMIN') throw new CustomerPriceBookAdminError('仅管理员可设置装盒价格');
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const draft = await tx.customerPriceBook.findUnique({ where: { id: input.priceBookId } });
+    const workflow = draft ? draftWorkflow(draft.notes) : null;
+    if (
+      !draft ||
+      draft.isActive ||
+      !workflow ||
+      draft.purpose !== CustomerPriceBookPurpose.PROCESSING ||
+      draft.settlementType !== EXTERNAL_SETTLEMENT ||
+      draft.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()
+    )
+      throw new CustomerPriceBookAdminError('草稿已变化或不可编辑，请刷新后重试');
+    const source = await tx.customerPriceBook.findUnique({ where: { id: workflow.basedOn.id } });
+    const now = new Date();
+    if (!source || !source.isActive || source.effectiveFrom > now || source.effectiveTo !== null)
+      throw new CustomerPriceBookAdminError('草稿基准版本已变化');
+    const before = await validationRules(tx, draft.id);
+    const original = await validationRules(tx, source.id);
+    const outsideBoxes = (rules: DraftPriceRuleForValidation[]) =>
+      rules.filter((rule) => !BOX_PRICE_RULES.some((box) => box.code === rule.code));
+    if (
+      calculateCustomerPriceRuleSetSha256(outsideBoxes(before)) !==
+        calculateCustomerPriceRuleSetSha256(outsideBoxes(original)) ||
+      JSON.stringify(canonicalJson(notesRecord(draft.notes).constants)) !==
+        JSON.stringify(canonicalJson(notesRecord(source.notes).constants))
+    )
+      throw new CustomerPriceBookAdminError('草稿含其他调价，不能一并发布装盒规则');
+    const category = await tx.customerChargeCategory.findFirst({
+      where: { code: 'PACKING', isActive: true },
+      select: { id: true },
+    });
+    if (!category) throw new CustomerPriceBookAdminError('缺少包装收费类目');
+    for (const [index, rule] of BOX_PRICE_RULES.entries()) {
+      const existing = before.find((candidate) => candidate.code === rule.code);
+      if (existing) {
+        if (!new Prisma.Decimal(String(existing.amount)).eq(CONFIRMED_BOX_RATES[index]))
+          throw new CustomerPriceBookAdminError('装盒草稿已有不同价格，请在包装计价页面审阅');
+        continue;
+      }
+      await tx.customerPriceRule.create({
+        data: {
+          priceBookId: draft.id,
+          categoryId: category.id,
+          code: rule.code,
+          name: rule.name,
+          kind: 'ADD_ON',
+          calculationType: 'PER_BOX',
+          amount: CONFIRMED_BOX_RATES[index],
+          exclusiveGroup: rule.group,
+          priority: 100,
+          minQty: null,
+          maxQty: null,
+          triggerCondition: {
+            schemaVersion: 1,
+            target: 'PACKAGING_GROUP',
+            packagingModes: [...rule.modes],
+          },
+          sourceName: '2026-09-13 用户确认装盒报价',
+          sourceSha256: createHash('sha256')
+            .update(JSON.stringify({ rules: BOX_PRICE_RULES, rates: CONFIRMED_BOX_RATES }))
+            .digest('hex'),
+          note: '空盒与装盒加工费分别按实际盒数计价。',
+          isActive: true,
+        },
+      });
+    }
+    await assertValidRuleSet(tx, draft.id, draft.purpose);
+    await readCandidatePublishedCreateOrderPriceProjection(tx, {
+      candidatePriceBookId: draft.id,
+      effectiveFrom: now,
+      snapshotLockHeld: true,
+    });
+    const updated = await tx.customerPriceBook.update({
+      where: { id: draft.id },
+      data: {
+        notes: notesInput({
+          ...notesRecord(draft.notes),
+          workflow: {
+            ...workflow,
+            changeReason: '新增红卡、触感空盒与装盒加工费',
+            lastEditedBy: actor.id,
+            lastEditedAt: now.toISOString(),
+          },
+        }),
+      },
+      select: { id: true, updatedAt: true },
+    });
+    await writeAuditLogInTx(tx, {
+      actor,
+      action: 'UPDATE_DRAFT_RULE_GROUP',
+      entityType: 'CustomerPriceBook',
+      entityId: draft.id,
+      before: [],
+      after: BOX_PRICE_RULES.map((rule, index) => ({
+        code: rule.code,
+        amount: CONFIRMED_BOX_RATES[index],
+      })),
+      requestMetadata: { source: 'customer-price-book-admin.prepareConfirmedBoxPackagingDraft' },
+    });
+    return updated;
+  });
+}
+
+/** Controlled one-time data release. Runtime quotation still reads published rules. */
+export async function prepareConfirmedCustomTierDraft(
+  input: { priceBookId: string; expectedDraftUpdatedAt: Date },
+  actor: AuditActor,
+): Promise<{ id: string; updatedAt: Date }> {
+  if (actor.role !== 'ADMIN') throw new CustomerPriceBookAdminError('仅管理员可调整专版阶梯');
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const now = new Date();
+    const draft = await tx.customerPriceBook.findUnique({ where: { id: input.priceBookId } });
+    const workflow = draft ? draftWorkflow(draft.notes) : null;
+    if (!draft || draft.isActive || !workflow ||
+        draft.purpose !== CustomerPriceBookPurpose.PROCESSING ||
+        draft.settlementType !== EXTERNAL_SETTLEMENT ||
+        draft.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
+      throw new CustomerPriceBookAdminError('草稿已变化或不可编辑，请刷新后重试');
+    }
+    const source = await tx.customerPriceBook.findUnique({ where: { id: workflow.basedOn.id } });
+    if (!source || !source.isActive || source.effectiveFrom > now || source.effectiveTo !== null ||
+        source.code !== 'EXTERNAL_SALES_PROCESSING_RULES' ||
+        notesRecord(source.notes).ruleVersion !== '2026-08-30-print-null-sentinel') {
+      throw new CustomerPriceBookAdminError('当前价目版本不适用本次专版阶梯调整');
+    }
+    const outsideTiers = (rules: DraftPriceRuleForValidation[]) =>
+      rules.filter(rule => rule.exclusiveGroup !== 'CUSTOM_BASE');
+    const before = await validationRules(tx, draft.id);
+    const original = await validationRules(tx, source.id);
+    if (calculateCustomerPriceRuleSetSha256(outsideTiers(before)) !==
+        calculateCustomerPriceRuleSetSha256(outsideTiers(original)) ||
+        JSON.stringify(canonicalJson(notesRecord(draft.notes).constants)) !==
+        JSON.stringify(canonicalJson(notesRecord(source.notes).constants))) {
+      throw new CustomerPriceBookAdminError('草稿含其他调价，请先单独处理，避免一并发布');
+    }
+    const productCodes = [
+      'EXT-CUSTOM-MID', 'EXT-CUSTOM-SQUARE', 'EXT-CUSTOM-WEST-MID',
+      'EXT-CUSTOM-LARGE', 'EXT-CUSTOM-WEST-LARGE',
+    ];
+    const rows = await tx.customerPriceRule.findMany({
+      where: { priceBookId: draft.id, exclusiveGroup: 'CUSTOM_BASE' },
+      include: { product: { select: { code: true, name: true } } },
+      orderBy: { minQty: 'asc' },
+    });
+    const groups = productCodes.map(code => rows.filter(rule => rule.product?.code === code));
+    const issue = fixedCustomTierIssue(groups);
+    if (issue || groups.flat().length !== rows.length || rows.some(rule =>
+      !rule.isActive || rule.kind !== 'BASE' || rule.calculationType !== 'PER_PIECE')) {
+      throw new CustomerPriceBookAdminError(issue ?? '专版基础规则不完整，不能自动调整');
+    }
+    // The exclusion constraint is immediate: stage only this unpublished group
+    // inactive, then restore each row with its final non-overlapping range. The
+    // transaction and snapshot write lock hide all intermediate states.
+    const staged = await tx.customerPriceRule.updateMany({
+      where: { priceBookId: draft.id, id: { in: rows.map(rule => rule.id) }, isActive: true },
+      data: { isActive: false },
+    });
+    if (staged.count !== rows.length) throw new CustomerPriceBookAdminError('草稿已变化，请刷新后重试');
+    const sourceSha256 = createHash('sha256').update(JSON.stringify(customTierRelease)).digest('hex');
+    for (const [groupIndex, group] of groups.entries()) {
+      const isLarge = groupIndex >= 3;
+      for (const [index, tier] of customTierRelease.tiers.entries()) {
+        const minQty = index === 0 ? 1 : tier.quantity;
+        const maxQty = (customTierRelease.tiers[index + 1]?.quantity ?? 10_000_000) - 1;
+        const amount = new Prisma.Decimal(isLarge ? tier.large : tier.middle);
+        const data = {
+          minQty, maxQty, amount, isActive: true,
+          name: `${group[0]!.product!.name} · ${tier.name}`,
+          sourceName: customTierRelease.source, sourceSha256,
+          sourceSheet: '专版单色平烫', sourceRange: `数量 ${tier.quantity}`,
+          note: '按达到档位取价；200个档含不足200个，保持无最低起订量。',
+        };
+        const existing = group.length === 11 ? group[index] : group[index - 1];
+        if (existing) {
+          await tx.customerPriceRule.update({ where: { id: existing.id }, data });
+        } else {
+          const anchor = group[0]!;
+          await tx.customerPriceRule.create({ data: {
+            ...data, priceBookId: draft.id, categoryId: anchor.categoryId,
+            productId: anchor.productId, code: `BASE_${productCodes[groupIndex]}_Q200`,
+            kind: anchor.kind, calculationType: anchor.calculationType,
+            includedUnits: anchor.includedUnits, incrementUnits: anchor.incrementUnits,
+            incrementAmount: anchor.incrementAmount,
+            triggerCondition: anchor.triggerCondition === null
+              ? Prisma.DbNull : anchor.triggerCondition as Prisma.InputJsonValue,
+            exclusiveGroup: anchor.exclusiveGroup, priority: anchor.priority,
+            blocksAutomaticQuote: anchor.blocksAutomaticQuote, isActive: true,
+          } });
+        }
+      }
+    }
+    const after = await assertValidRuleSet(tx, draft.id, draft.purpose);
+    await readCandidatePublishedCreateOrderPriceProjection(tx, {
+      candidatePriceBookId: draft.id, effectiveFrom: now, snapshotLockHeld: true,
+    });
+    const updated = await tx.customerPriceBook.update({
+      where: { id: draft.id },
+      data: { notes: notesInput({
+        ...notesRecord(draft.notes), ruleVersion: customTierRelease.version,
+        workflow: { ...workflow, changeReason: '按确认报价表补齐200个档，数量达到下一档时换价',
+          lastEditedBy: actor.id, lastEditedAt: now.toISOString() },
+      }) },
+      select: { id: true, updatedAt: true },
+    });
+    await writeAuditLogInTx(tx, {
+      actor, action: 'UPDATE_DRAFT_RULE_GROUP', entityType: 'CustomerPriceBook', entityId: draft.id,
+      before: before.filter(rule => rule.exclusiveGroup === 'CUSTOM_BASE'),
+      after: after.filter(rule => rule.exclusiveGroup === 'CUSTOM_BASE'),
+      requestMetadata: { source: 'prepareConfirmedCustomTierDraft', release: customTierRelease.version },
+    });
+    return updated;
+  }, { timeout: 30_000 });
+}
+
 export async function createCustomerPriceBookDraft(
   input: CreateCustomerPriceBookDraftInput,
   actor: AuditActor,
@@ -2523,6 +2755,19 @@ async function writePreparedCustomerPriceSectionDraft(
   prepared: PreparedCustomerPriceSectionDraft,
   now: Date,
 ): Promise<void> {
+  // Stage changed BASE ranges together before restoring them. Updating one
+  // adjacent range at a time can violate the immediate exclusion constraint,
+  // even though the complete, already validated ladder has no overlap.
+  for (const existing of prepared.changedRules) {
+    const submitted = prepared.submittedById.get(existing.id)!;
+    if (existing.kind !== 'BASE' || !existing.isActive ||
+        (existing.minQty === submitted.minQty && existing.maxQty === submitted.maxQty)) continue;
+    const staged = await tx.customerPriceRule.updateMany({
+      where: { id: existing.id, priceBookId: prepared.input.priceBookId, updatedAt: submitted.expectedUpdatedAt },
+      data: { isActive: false, updatedAt: existing.updatedAt },
+    });
+    if (staged.count !== 1) throw new CustomerPriceBookAdminError('价格已被其他管理员修改，请刷新后重试');
+  }
   for (const existing of prepared.changedRules) {
     const submitted = prepared.submittedById.get(existing.id)!;
     const outcome = await tx.customerPriceRule.updateMany({
@@ -2532,6 +2777,7 @@ async function writePreparedCustomerPriceSectionDraft(
         updatedAt: submitted.expectedUpdatedAt,
       },
       data: {
+        isActive: existing.isActive,
         amount:
           submitted.amount === null
             ? null
@@ -3339,4 +3585,268 @@ export async function publishCustomerPriceBookDraft(
     if (error instanceof CustomerPriceBookAdminError) throw error;
     throw mapConstraintError(error) ?? error;
   }
+}
+
+/** Add catalog combinations and their draft prices under the same pricing write lock. */
+export async function addBlankPaperDraft(
+  raw: AddBlankPaperInput,
+  actor: AuditActor,
+  now: Date = new Date(),
+): Promise<{ paperId: string; priceBookId: string }> {
+  const input = addBlankPaperSchema.parse(raw);
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const book = await tx.customerPriceBook.findUnique({
+      where: { id: input.priceBookId },
+    });
+    const workflow = book ? draftWorkflow(book.notes) : null;
+    if (
+      !book ||
+      !workflow ||
+      book.isActive ||
+      book.purpose !== 'PROCESSING' ||
+      book.settlementType !== EXTERNAL_SETTLEMENT
+    ) {
+      throw new CustomerPriceBookAdminError(
+        '加工费草稿不可编辑，请返回价格表重新发起调价',
+      );
+    }
+    if (book.updatedAt.toISOString() !== input.expectedUpdatedAt) {
+      throw new CustomerPriceBookAdminError('草稿已变化，请刷新后重新提交');
+    }
+    const rules = await tx.customerPriceRule.findMany({
+      where: { priceBookId: book.id, exclusiveGroup: 'STOCK_BASE' },
+      include: { product: { include: { categoryNode: true } } },
+    });
+    const anchor = rules.find(
+      (rule) =>
+        rule.product?.isActive &&
+        rule.product.categoryNode.isActive &&
+        rule.product.category === 'BLANK_STOCK',
+    );
+    if (!anchor?.product)
+      throw new CustomerPriceBookAdminError(
+        '空白封产品分类未配置，请先配置可建单产品组合',
+      );
+    const papers = await tx.material.findMany({ where: { category: 'PAPER' } });
+    const existingPaperId =
+      input.paper.mode === 'existing' ? input.paper.id : null;
+    const selected = papers.find((paper) => paper.id === existingPaperId);
+    const fact =
+      input.paper.mode === 'new'
+        ? canonicalizeCreateOrderPaperFact(input.paper.name, input.paper.weight)
+        : selected
+          ? blankPaperFact(selected)
+          : null;
+    if (!fact || fact.paperWeightGsm > 2000)
+      throw new CustomerPriceBookAdminError(
+        '纸张名称或克重不完整，请先完善纸张资料',
+      );
+    const label = `${fact.paperWeightGsm}g${fact.paperType}`;
+    const matches = papers.filter((paper) => {
+      const candidate = blankPaperFact(paper);
+      return (
+        candidate?.paperType === fact.paperType &&
+        candidate.paperWeightGsm === fact.paperWeightGsm
+      );
+    });
+    if (matches.length > 1)
+      throw new CustomerPriceBookAdminError(
+        '同名同克重纸张存在重复记录，请先在纸张管理中处理',
+      );
+    let paper = selected ?? matches[0];
+    if (paper && (!paper.isActive || paper.outOfStock))
+      throw new CustomerPriceBookAdminError(
+        '纸张已停用或缺货，请先在纸张管理中处理',
+      );
+    if (
+      input.paper.mode === 'existing' &&
+      (!selected || matches[0]?.id !== selected.id)
+    ) {
+      throw new CustomerPriceBookAdminError('纸张资料已变化，请刷新后重新选择');
+    }
+    const hash = createHash('sha256').update(label).digest('hex').slice(0, 20);
+    if (!paper) {
+      paper = await tx.material.create({
+        data: {
+          code: `PAPER-${hash}`,
+          name: label,
+          specification: `${fact.paperWeightGsm}g`,
+          category: 'PAPER',
+          unit: '张',
+        },
+      });
+      await writeAuditLogInTx(tx, {
+        actor,
+        action: 'CREATE',
+        entityType: 'Material',
+        entityId: paper.id,
+        before: null,
+        after: paper,
+      });
+    }
+    const products = await tx.product.findMany({
+      where: { category: 'BLANK_STOCK' },
+      include: { categoryNode: true },
+    });
+    const createdRuleIds: string[] = [];
+    for (const entry of input.specifications) {
+      const spec = BLANK_SPECIFICATIONS.find((spec) => spec.key === entry.key)!;
+      const duplicate = rules.some((rule) => {
+        const condition = parseCustomerRuleCondition(
+          rule.triggerCondition,
+        ).condition;
+        return (
+          condition?.paperTypes?.some((name) => {
+            const candidate = canonicalizeCreateOrderPaperFact(name);
+            return (
+              candidate?.paperType === fact.paperType &&
+              candidate.paperWeightGsm === fact.paperWeightGsm
+            );
+          }) &&
+          condition.specifications?.some(
+            (name) => blankSpecificationKey(name) === entry.key,
+          )
+        );
+      });
+      if (duplicate)
+        throw new CustomerPriceBookAdminError(
+          `${spec.label}已有价格记录，请返回价格表修改`,
+        );
+      const matchingProducts = products.filter((product) => {
+        const candidate = product.paperType
+          ? canonicalizeCreateOrderPaperFact(product.paperType, product.weight)
+          : null;
+        return (
+          (product.paperMaterialId === paper.id ||
+            (candidate?.paperType === fact.paperType &&
+              candidate.paperWeightGsm === fact.paperWeightGsm)) &&
+          blankSpecificationKey(product.specification) === entry.key
+        );
+      });
+      if (matchingProducts.length > 1)
+        throw new CustomerPriceBookAdminError(
+          `${spec.label}有重复产品组合，请先在产品组合中处理`,
+        );
+      let product = matchingProducts[0];
+      const productFact = product?.paperType
+        ? canonicalizeCreateOrderPaperFact(product.paperType, product.weight)
+        : null;
+      if (
+        product &&
+        (!product.isActive ||
+          !product.categoryNode.isActive ||
+          productFact?.paperType !== fact.paperType ||
+          productFact.paperWeightGsm !== fact.paperWeightGsm ||
+          (product.paperMaterialId && product.paperMaterialId !== paper.id))
+      ) {
+        throw new CustomerPriceBookAdminError(
+          `${spec.label}产品组合已停用或纸张关联不一致，请先检查产品组合`,
+        );
+      }
+      if (!product) {
+        product = await tx.product.create({
+          data: {
+            code: `BLANK-${hash}-${spec.key}`,
+            name: `${label} ${spec.label}`,
+            category: 'BLANK_STOCK',
+            categoryNodeId: anchor.product.categoryNodeId,
+            paperMaterialId: paper.id,
+            paperType: label,
+            weight: fact.paperWeightGsm,
+            specification: spec.specification,
+          },
+          include: { categoryNode: true },
+        });
+        await writeAuditLogInTx(tx, {
+          actor,
+          action: 'CREATE',
+          entityType: 'Product',
+          entityId: product.id,
+          before: null,
+          after: product,
+        });
+      }
+      if (!product.paperMaterialId) {
+        const before = product;
+        product = await tx.product.update({
+          where: { id: product.id },
+          data: { paperMaterialId: paper.id },
+          include: { categoryNode: true },
+        });
+        await writeAuditLogInTx(tx, {
+          actor,
+          action: 'LINK_PAPER',
+          entityType: 'Product',
+          entityId: product.id,
+          before,
+          after: product,
+        });
+      }
+      // An enabled catalog combination without a rule uses the existing manual-pricing path.
+      if (entry.amount === null) continue;
+      const rule = await tx.customerPriceRule.create({
+        data: {
+          priceBookId: book.id,
+          categoryId: anchor.categoryId,
+          productId: product.id,
+          code: `STOCK-BASE-${hash}-${spec.key}`,
+          name: `${label} ${spec.label}空白封单价`,
+          kind: 'BASE',
+          calculationType: 'PER_PIECE',
+          amount: new Prisma.Decimal(entry.amount),
+          minQty: 1,
+          maxQty: null,
+          exclusiveGroup: 'STOCK_BASE',
+          triggerCondition: {
+            schemaVersion: 1,
+            target: 'ITEM',
+            pricingRoutes: ['STOCK_BLANK'],
+            paperTypes: [label],
+            specifications: [spec.label],
+          },
+        },
+      });
+      createdRuleIds.push(rule.id);
+      await writeAuditLogInTx(tx, {
+        actor,
+        action: 'CREATE_DRAFT_RULE',
+        entityType: 'CustomerPriceRule',
+        entityId: rule.id,
+        before: null,
+        after: rule,
+      });
+    }
+    await assertValidRuleSet(tx, book.id, book.purpose);
+    const editedAt = new Date(
+      Math.max(now.getTime(), book.updatedAt.getTime() + 1),
+    );
+    await tx.customerPriceBook.update({
+      where: { id: book.id },
+      data: {
+        updatedAt: editedAt,
+        notes: notesInput({
+          ...notesRecord(book.notes),
+          workflow: {
+            ...workflow,
+            lastEditedBy: actor.id,
+            lastEditedAt: editedAt.toISOString(),
+          },
+        }),
+      },
+    });
+    await writeAuditLogInTx(tx, {
+      actor,
+      action: 'ADD_BLANK_PAPER',
+      entityType: 'CustomerPriceBook',
+      entityId: book.id,
+      before: { updatedAt: book.updatedAt },
+      after: {
+        paperId: paper.id,
+        ruleIds: createdRuleIds,
+        updatedAt: editedAt,
+      },
+    });
+    return { paperId: paper.id, priceBookId: book.id };
+  });
 }

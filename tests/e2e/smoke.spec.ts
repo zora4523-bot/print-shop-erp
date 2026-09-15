@@ -210,7 +210,8 @@ test.describe('automation smoke', () => {
         label: '价格版本',
         path: RULE_CENTER_HREFS.priceVersions,
         navPath: RULE_CENTER_HREFS.priceVersions,
-        heading: '价格版本与发布',
+        // 2026-09-13 价格版本页重排后标题统一为「价格版本」（docs/价格版本页面-20260913.md）。
+        heading: '价格版本',
       },
       {
         label: '员工薪酬规则',
@@ -439,8 +440,9 @@ test.describe('automation smoke', () => {
 
     await page.goto('/orders/new');
     await expect(page.getByRole('heading', { name: '新建工单' })).toBeVisible();
-    await expect(page.getByRole('combobox', { name: '关联客户（选填）', exact: true })).toBeVisible();
-    await expect(page.locator('input[name="customerRef"]')).toBeVisible();
+    // DECISIONS 2026-09-13：管理员创建不再录入工单客户及简称，关联客户与简称控件已从建单页移除。
+    await expect(page.getByRole('combobox', { name: '关联客户（选填）', exact: true })).toHaveCount(0);
+    await expect(page.locator('input[name="customerRef"]')).toHaveCount(0);
     await expect(page.locator('input[name="receiverName"]')).toHaveCount(0);
     await expect(page.locator('input[name="receiverPhone"]')).toHaveCount(0);
     const receiverAddress = page.getByRole('textbox', {
@@ -489,8 +491,9 @@ test.describe('automation smoke', () => {
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`/foreman/materials?q=${fixture.materialCode}`);
-    await expect(page.getByText(fixture.materialCode)).toBeVisible();
+    // 73e1b5d9（2026-09-13）：库存列表不再展示物料编码，但按编码搜索仍命中目标物料。
     await expect(page.getByText(fixture.materialName)).toBeVisible();
+    await expect(page.getByText(fixture.materialCode)).toHaveCount(0);
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`${RULE_CENTER_HREFS.papers}?q=${fixture.materialCode}`);

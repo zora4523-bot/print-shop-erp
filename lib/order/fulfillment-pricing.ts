@@ -1,3 +1,4 @@
+import { packagingBoxType } from './packaging-mode';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
@@ -103,7 +104,7 @@ const CONFIRMED_ACTION = 'FULFILLMENT_PRICING_CONFIRMED';
 const PENDING_ACTION = 'SF_COLLECT_FULFILLMENT_CHANGED';
 const include = {
   items: { orderBy: { sequence: 'asc' as const } },
-  packagingGroups: { orderBy: { sequence: 'asc' as const } },
+  packagingGroups: { include: {lines: true}, orderBy: { sequence: 'asc' as const } },
   customerCharges: { include: { category: { select: { code: true } } } },
   shipments: {
     orderBy: { sequence: 'asc' as const },
@@ -426,6 +427,7 @@ async function buildPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder, 
           shipments: [{
             shipmentKey: String(shipment.sequence), province: plan.destinationProvince,
             billableWeightKg: plan.weightKg,
+            requiresActualWeight: order.packagingGroups.some((group) => packagingBoxType(group.mode) && group.lines.some((line) => shipment.lines.some((allocation) => allocation.orderItemId === line.orderItemId && allocation.quantity > 0))),
             itemQuantity: shipment.lines.reduce((sum, line) => sum + line.quantity, 0),
             weightItems: shipment.lines.flatMap((line) => {
               const item = itemById.get(line.orderItemId);

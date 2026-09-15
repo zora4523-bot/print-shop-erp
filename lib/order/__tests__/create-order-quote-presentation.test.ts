@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 import { calculateCreateOrderQuote } from '../../price/create-order';
 import { calculateExternalOrderCharges } from '../../price/external-order-charges';
@@ -47,6 +48,19 @@ function quoteLogistics(
 }
 
 describe('create-order pure quote presentation', () => {
+  it.each([
+    [751, '244.08', '0.00'],
+    [1001, '325.33', '0.00'],
+    [751, '254.08', '10.00'],
+  ])('半分金额 %s × 0.325，小计 %s，固定费 %s', (quantity, amount, fixedFee) => {
+    const input = createGoldenOrderInput([createGoldenOrderItem({ quantity })]);
+    const original = calculateCreateOrderQuote(input, CREATE_ORDER_GOLDEN_SNAPSHOT);
+    const quote = { ...original, items: [{ ...original.items[0]!, status: 'QUOTED' as const, unitPrice: '0.3250', amount }] };
+    const presentation = presentCreateOrderQuote({ factsKey: 'half-cent', input, quote, logistics: quoteLogistics(input), quoteToken: 'token' });
+    expect(presentation.items[0]).toMatchObject({ complete: true, suggestedUnitPrice: '0.3250', suggestedFixedFee: fixedFee, suggestedSubtotal: amount });
+    expect(new Decimal(presentation.items[0]!.suggestedUnitPrice!).times(quantity).plus(presentation.items[0]!.suggestedFixedFee!).toFixed(2)).toBe(amount);
+  });
+
   it('keeps the existing form DTO while storing a versioned pure snapshot', () => {
     const input = createGoldenOrderInput([
       createGoldenOrderItem({ quantity: 1_000 }),

@@ -15,7 +15,6 @@ import { parseCatalogPaperWeight } from '@/lib/order/catalog-pricing-facts';
 import {
   SALES_SCENARIOS,
   PAPER_GUIDE,
-  QUOTE_GUIDE,
 } from '@/lib/workbench/knowledge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -28,13 +27,18 @@ import {
   useCopyToClipboard,
 } from '@/components/ui-business';
 import { WorkbenchCalculator } from './WorkbenchCalculator';
+import type { PricingCraftIdentity } from '@/lib/order/pricing-route';
 
 export function SalesWorkbench({
   options,
+  crafts = [],
+  draftScope = '',
   catalogUnavailable = false,
 }: {
   options: ExternalCreateOrderOptions;
   catalogUnavailable?: boolean;
+  crafts?: readonly PricingCraftIdentity[];
+  draftScope?: string;
 }) {
   const [section, setSection] = useState('quote');
   const [search, setSearch] = useState('');
@@ -112,21 +116,12 @@ export function SalesWorkbench({
             }
           />
         ) : (
-          <WorkbenchCalculator options={options} />
+          <WorkbenchCalculator
+            options={options}
+            crafts={crafts}
+            draftScope={draftScope}
+          />
         )}
-        <Card className="p-4 sm:p-6">
-          <h2 className="text-lg font-semibold">计算方式</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {QUOTE_GUIDE.map(([title, content]) => (
-              <div key={title}>
-                <h3 className="mb-2 text-sm font-semibold">{title}</h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  {content}
-                </p>
-              </div>
-            ))}
-          </div>
-        </Card>
       </section>
       <section
         hidden={section !== 'materials'}

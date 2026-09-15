@@ -280,7 +280,7 @@ Hook：`useActionState` 92 / `useTransition` 34 / `useFormState` 0 / `useFormSta
 
 ## 4. 文案现状
 
-由《呈现规范修复任务》审计，引用其结论（`REPORT-呈现修复.md`，基线 `d742fd0`）：
+由《呈现规范修复任务》审计，引用其结论（`docs/archive/REPORT-呈现修复.md`，基线 `d742fd0`）：
 
 - 第 0 批已把文案十律、业务词映射与反例写入 `docs/ui-规范.md`「文案与确认」章（提交 `3acbf7b`）。
 - 第一批已把 44 个 `ConfirmActionDialog` 调用点从 `title/description/impactItems/confirmLabel` 迁到 `action/changes/consequences/confirmText`（提交 `293c1c8`）。

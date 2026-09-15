@@ -23,6 +23,7 @@ export type OrderFormGapItem = {
   quantity?: number | null;
   crafts?: string[] | null;
   quoteStatus?: OrderFormQuoteStatus;
+  quoteError?: string | null;
   manualQuoteReason?: string | null;
 };
 
@@ -38,6 +39,7 @@ export type OrderFormGapShipment = {
 
 export type OrderFormGapInput = {
   customerRef?: string | null;
+  requiresCustomerRef?: boolean;
   promisedDate?: Date | string | null;
   items: readonly OrderFormGapItem[];
   shipping: {
@@ -87,7 +89,11 @@ export function collectOrderFormGaps(
   const gaps: OrderFormGap[] = [];
   const usesExternalSalesPricing = input.shipping.usesExternalSalesPricing;
 
-  if (!usesExternalSalesPricing && !hasText(input.customerRef)) {
+  if (
+    !usesExternalSalesPricing &&
+    input.requiresCustomerRef !== false &&
+    !hasText(input.customerRef)
+  ) {
     gaps.push({
       id: 'customer-ref',
       step: 'customer',
@@ -159,7 +165,7 @@ export function collectOrderFormGaps(
     // readiness: the resulting order still requires factory price confirmation.
     if (!usesExternalSalesPricing && !manualPricingRequested) {
       if (item.quoteStatus !== 'complete') {
-        const stateLabel = quoteGapLabel(item.quoteStatus);
+        const stateLabel = item.quoteError || quoteGapLabel(item.quoteStatus);
         gaps.push({
           id: `item-${index}-quote`,
           step: 'items',

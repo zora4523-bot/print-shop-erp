@@ -905,10 +905,10 @@ async function* packagingGroupRows(
     '包装组序号',
     '包装组名称',
     '组模式',
-    '实际袋数',
-    '每袋单价',
+    '实际包装数量',
+    '每袋/盒单价',
     '小计',
-    '每袋各款组成',
+    '每袋/盒各款组成',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
     const rows = await db.orderPackagingGroup.findMany({
@@ -2105,6 +2105,7 @@ const BILLING_MODE_LABELS: Record<OrderBillingMode, string> = {
   NO_CHARGE: '不计费',
 };
 const PACKAGING_MODE_LABELS: Record<string, string> = {
+  UNPACKED: '不包装', BOX_RED_CARD: '红卡盒装', BOX_RED_CARD_MIXED: '红卡盒混装', BOX_TACTILE: '触感盒装', BOX_TACTILE_MIXED: '触感盒混装',
   SINGLE_STYLE: '单款装',
   MIXED_STYLE: '混装',
 };

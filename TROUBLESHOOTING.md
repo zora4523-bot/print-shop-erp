@@ -12,6 +12,24 @@ applies_to: local development and repository validation
 
 生产故障使用 [DEPLOYMENT.md](./DEPLOYMENT.md) 指向的 canonical runbook；本文主要处理本地开发和验证。
 
+## Next.js 安装版本漂移导致首页 500
+
+当日志出现 `unstable_catchError is not a function`，先比较
+`package.json` 的 Next.js 版本和 `node -p "require('next/package.json').version"`。
+当前主线锁定 16.3.4，错误边界使用 `catchError` 和 `retry`。
+旧版 16.2.4 分支使用 `unstable_catchError` 和 `unstable_retry`；
+切换分支后应按目标分支锁文件安装依赖，不能只替换 API 或本地安装版本。
+
+停止当前项目的开发服务器，将 `node_modules` 和 `.next` 移到仓库外备份，
+执行 `pnpm install --frozen-lockfile`，再核对安装版本并启动服务。
+仓库使用 `pnpm-lock.yaml` 和 pnpm 的 Prisma 适配器补丁配置，
+不要混用没有对应锁文件的 `npm ci` 来恢复依赖。
+
+验证时，未登录请求 `/` 应返回 307，跟随跳转到登录页后为 200。
+故意抛错的页面可以返回 500，但浏览器必须显示“页面暂时无法加载”和重试按钮；
+此时故障注入本身的异常日志是预期结果，不应再出现错误边界 API 加载失败。
+临时故障路由验证完应移除，再检查正常访问日志。
+
 ## `fetchServerAction: Failed to fetch`
 
 ### 含义
@@ -269,3 +287,16 @@ OSS 上传、企业微信通知、PDF、PM2 worker、cron、备份和 Nginx 都�
 - 队列持续 202：检查 HEAVY 心跳、重任务并发、失败次数、存储可写性；恢复既有 worker，不反复启动新 worker。
 
 检查流程和未验收范围见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+
+
+## PDF 一直显示正在生成
+
+启用 `BACKGROUND_JOBS_MODE=durable` 时，`pnpm dev` 只启动 Web 服务，
+还需要独立运行 `pnpm worker:heavy`。检查 HEAVY worker 进程、日志和
+`BackgroundWorkerHeartbeat.lastSeenAt`，并核对任务是否一直 PENDING、attempts 为 0。
+本地可把 worker 日志单独保存到 `/tmp/erp-worker-heavy.log`；更新代码或依赖后也需重启 worker。
+
+PDF 接口在账号和工单绑定校验通过后检查 HEAVY 心跳，使用与健康检查一致的有效窗口
+和数据库时钟。无有效心跳返回 503；未完成任务自创建起等待达到两分钟也返回 503，
+停止自动刷新。重试链接保留原 jobId，不取消任务、不重复入队；worker 恢复并完成后，
+再次重试可正常取得 PDF。已成功的任务不受 worker 是否在线影响。

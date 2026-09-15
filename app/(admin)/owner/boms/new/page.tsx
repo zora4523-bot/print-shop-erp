@@ -10,7 +10,7 @@ import {
 } from '@/lib/product';
 
 export const metadata = {
-  title: '新建 BOM · 红包印刷 ERP',
+  title: '新建 BOM',
 };
 
 export default async function NewBomPage() {

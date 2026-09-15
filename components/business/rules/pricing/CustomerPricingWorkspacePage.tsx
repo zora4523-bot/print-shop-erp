@@ -14,7 +14,7 @@ import {
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 export const metadata = {
-  title: '客户计价规则 · 红包印刷 ERP',
+  title: '客户计价规则',
 };
 
 type SearchParams = {

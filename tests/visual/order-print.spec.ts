@@ -299,6 +299,23 @@ function textPreview(value: string, maxCharacters: number): string {
 }
 
 test.describe('OrderPrintLayout 截图回归', () => {
+  test('长测试编号不会挤压页眉或增加单款页数', async ({ page }) => {
+    const order = await standaloneOrderFixture();
+    order.orderNo = 'e2e-sales-status-3a45a04f-1ee6-4340-bd40-6de653334496-42828677-155d-405a-a2fc-d57dd57db6ef';
+    order.customName = order.orderNo;
+    order.items = order.items.slice(0, 1);
+    order.productionSteps = [];
+    order.packagingGroups = [];
+    order.remark = null;
+    order.shipments = [];
+    await page.setContent(buildStandaloneHtml(order));
+    await waitForPrintReady(page, 1);
+    await expect(page.locator('.scan .no')).toContainText(order.orderNo);
+    const headerWidth = await page.locator('.hd-main').evaluate((node) => node.getBoundingClientRect().width);
+    expect(headerWidth).toBeGreaterThan(300);
+    await expectDeclaredPagination(page);
+  });
+
   for (const nameLength of [19, 50, 73, 100]) {
     test(`${nameLength} 字工单名称在页眉完整换行且只生成一页 PDF`, async ({ page }) => {
       const order = await standaloneOrderFixture();
@@ -346,6 +363,33 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expectDeclaredPagination(page);
     await expect(page.locator('html')).toHaveAttribute('data-print-invocation-count', '1');
   });
+
+  for (const mode of ['UNPACKED', 'BOX_RED_CARD', 'BOX_TACTILE'] as const) {
+    test(`${mode} 单款工单打印一页，包装类型与数量正确`, async ({ page }) => {
+      const order = await standaloneOrderFixture();
+      order.items = [{...order.items[0]!, quantity: 101}];
+      order.customName = '春节红包';
+      order.packageRequirement = null;
+      const units = mode === 'BOX_TACTILE' ? 8 : 10;
+      const count = mode === 'UNPACKED' ? 0 : Math.ceil(101 / units);
+      order.packagingGroups = [{
+        id: 'packaging', sequence: 1, name: null, mode, actualBagCount: count,
+        lines: [{orderItemId: order.items[0]!.id, orderItemSequence: 1, unitsPerBag: units}],
+      }];
+      order.shipments[0]!.lines = [{orderItemSequence: 1, orderItemName: order.items[0]!.name, quantity: 101}];
+      order.productionSteps = [{...order.productionSteps[0]!, plannedQty: 101}];
+      if (mode !== 'UNPACKED') order.productionSteps.push({
+        ...order.productionSteps[0]!, id: 'packing', itemSequence: null, itemName: null,
+        scopeLabel: '包装组 1 · 图 1', craftName: '打包', plannedQty: count, quantityUnit: '盒',
+      });
+      await page.setContent(buildStandaloneHtml(order));
+      await waitForPrintReady(page, 1);
+      await expect(page.locator('.items')).toContainText(mode === 'UNPACKED' ? '不包装' : `${count}盒`);
+      await expect(page.locator('.work-order-document')).not.toContainText('包装数量未填');
+      await expectDeclaredPagination(page);
+      await page.locator('.work-order-document').screenshot({path: test.info().outputPath(`${mode}.png`)});
+    });
+  }
 
   test('standalone HTML 真实执行分页脚本并保留一个主码和完整工序', async ({ page }) => {
     const order = await standaloneOrderFixture();
@@ -584,7 +628,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(
       page.locator('.sheet').first().locator('.items tbody > tr'),
     ).toHaveCount(4);
-    await expect(page.locator('.warning-annex')).toHaveCount(1);
+    await expect(page.locator('.warning-annex')).toHaveCount(0);
     await expect(page.locator('.item-annex')).toHaveCount(2);
     await expect(
       page.locator('.item-annex').nth(0).locator('tbody > tr'),
@@ -620,7 +664,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expect(
       page.locator('.sheet').first().locator('.items tbody > tr'),
     ).toHaveCount(4);
-    await expect(page.locator('.warning-annex')).toHaveCount(3);
+    await expect(page.locator('.warning-annex')).toHaveCount(0);
     await expect(page.locator('.item-annex')).toHaveCount(4);
     await expect(
       page.locator('.item-annex').nth(0).locator('tbody > tr'),

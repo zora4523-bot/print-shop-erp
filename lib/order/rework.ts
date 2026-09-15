@@ -1,3 +1,5 @@
+import { isValidPackagingUnitsPerBag, MAX_PACKAGING_UNITS_PER_BAG } from './packaging-units';
+import { isMixedPackaging, packagingModeWithStyleCount, packagingBoxType } from './packaging-mode';
 import {
   OrderBillingMode,
   OrderCraft,
@@ -49,20 +51,6 @@ export const REWORK_PACKAGING_FACT_SOURCES = {
 
 export type ReworkPackagingFactSource =
   (typeof REWORK_PACKAGING_FACT_SOURCES)[keyof typeof REWORK_PACKAGING_FACT_SOURCES];
-
-const MAX_PACKAGING_UNITS_PER_BAG = 9_999_999;
-
-function isValidPackagingUnitsPerBag(
-  value: number | null | undefined,
-): value is number {
-  return (
-    value !== null &&
-    value !== undefined &&
-    Number.isSafeInteger(value) &&
-    value > 0 &&
-    value <= MAX_PACKAGING_UNITS_PER_BAG
-  );
-}
 
 /**
  * The admin form only asks for missing per-style legacy evidence. One
@@ -407,7 +395,7 @@ export async function createReworkOrder(
       }
       if (
         !Number.isSafeInteger(group.actualBagCount) ||
-        group.actualBagCount <= 0
+        (group.mode === OrderPackagingMode.UNPACKED ? group.actualBagCount !== 0 : group.actualBagCount <= 0)
       ) {
         throw new ReworkOrderError(
           `原包装组 #${group.sequence} 的实际袋数非法，请先修复原单包装事实`,
@@ -419,9 +407,9 @@ export async function createReworkOrder(
         );
       }
       if (
-        (group.mode === OrderPackagingMode.SINGLE_STYLE &&
+        (group.mode !== OrderPackagingMode.UNPACKED && !isMixedPackaging(group.mode) &&
           group.lines.length !== 1) ||
-        (group.mode === OrderPackagingMode.MIXED_STYLE &&
+        (isMixedPackaging(group.mode) &&
           group.lines.length < 2)
       ) {
         throw new ReworkOrderError(
@@ -444,8 +432,7 @@ export async function createReworkOrder(
         itemIdsInGroup.add(sourceItem.id);
         if (
           !isValidPackagingUnitsPerBag(line.unitsPerBag) ||
-          Math.ceil(sourceItem.quantity / line.unitsPerBag) !==
-            group.actualBagCount
+          (group.mode !== OrderPackagingMode.UNPACKED && !packagingBoxType(group.mode) && Math.ceil(sourceItem.quantity / line.unitsPerBag) !== group.actualBagCount)
         ) {
           throw new ReworkOrderError(
             `款式“${sourceItem.name}”的原单每袋数与实际袋数不一致，请先修复原单包装事实`,
@@ -543,7 +530,7 @@ export async function createReworkOrder(
         const bagCounts = [
           ...new Set(plan.members.map((member) => member.bagCount)),
         ];
-        if (bagCounts.length !== 1) {
+        if (sourcePackagingGroupById.get(sourcePackagingGroupId)!.mode !== OrderPackagingMode.UNPACKED && bagCounts.length !== 1) {
           throw new ReworkOrderError(
             `原包装组 #${plan.sourceSequence} 的重做数量无法沿用同一混装袋数，请调整重做数量或先拆分原单包装事实`,
           );
@@ -551,11 +538,8 @@ export async function createReworkOrder(
         return {
           sequence: 0,
           name: plan.sourceName,
-          mode:
-            plan.members.length === 1
-              ? OrderPackagingMode.SINGLE_STYLE
-              : OrderPackagingMode.MIXED_STYLE,
-          actualBagCount: bagCounts[0]!,
+          mode: packagingModeWithStyleCount(sourcePackagingGroupById.get(sourcePackagingGroupId)!.mode, plan.members.length),
+          actualBagCount: sourcePackagingGroupById.get(sourcePackagingGroupId)!.mode === OrderPackagingMode.UNPACKED ? 0 : bagCounts[0]!,
           factSource: REWORK_PACKAGING_FACT_SOURCES.SOURCE_GROUP,
           sourcePackagingGroupId,
           firstRequestedIndex: plan.firstRequestedIndex,

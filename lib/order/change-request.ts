@@ -1,3 +1,5 @@
+import { subtotalReconciles } from './subtotal-reconciliation';
+import { packagingBoxType } from './packaging-mode';
 import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
 import { prepareOrderForProductionInTx } from './production-readiness';
 import { OrderChangeRequestError } from './change-request-error';
@@ -1084,7 +1086,7 @@ function resolvePureChangeRequestPricing(input: {
     quantity,
     itemName,
   );
-  if (!new Decimal(subtotal).equals(quote.suggestedSubtotal)) {
+  if (!subtotalReconciles(subtotal, quote.suggestedSubtotal)) {
     throw new OrderChangeRequestError(
       `款式“${itemName}”的纯引擎分项与小计无法对平`,
     );
@@ -1921,6 +1923,7 @@ async function prepareExternalLogisticsChargeRefresh(input: {
             );
           return {
             shipmentKey: shipment.shipmentKey,
+            requiresActualWeight: input.calculation.input.packagingGroups.some((group) => packagingBoxType(group.mode) && group.items.some((item) => (shipment.itemQuantities[item.itemKey] ?? 0) > 0)),
             province: shipment.province,
             billableWeightKg: shipment.trustedBillableWeightKg ?? null,
             itemQuantity: allocations.reduce(
@@ -3236,6 +3239,7 @@ function factoryConfirmationCurrentAmount(input: {
         );
         return {
           shipmentKey: shipment.shipmentKey,
+          requiresActualWeight: input.calculation.input.packagingGroups.some((group) => packagingBoxType(group.mode) && group.items.some((item) => (shipment.itemQuantities[item.itemKey] ?? 0) > 0)),
           province: shipment.province,
           billableWeightKg: shipment.trustedBillableWeightKg ?? null,
           itemQuantity: allocations.reduce(

@@ -83,6 +83,7 @@ function render(
     OrderItemPricingRoute.STOCK_BLANK,
   ),
   options: {
+    fieldErrors?: import('../order-form-b/ExternalSalesOrderFormB').OrderFormBErrors;
     paperKey?: string;
     itemCount?: number;
     activeIndex?: number;
@@ -99,6 +100,7 @@ function render(
   const items = Array.from({ length: itemCount }, () => ({ ...activeItem }));
   return renderToStaticMarkup(
     <OrderFormB
+      fieldErrors={options.fieldErrors}
       values={{
         customName: '',
         receiverName: '',
@@ -382,7 +384,7 @@ describe('OrderFormB', () => {
     expect(html).toContain('＋ 加烫反面');
     expect(html).toContain('常规装');
     expect(html).not.toMatch(/0\.[12]\s*元\/袋/);
-    expect(html).toContain('混装需两款以上');
+    expect(html).toContain('混装需至少 2 款');
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>[\s\S]*?混装/);
     expect(html).toContain('共 200 包');
   });
@@ -483,4 +485,10 @@ describe('OrderFormB', () => {
     expect(color).toContain('雷射');
     expect(color).toContain('叠加烫金');
   });
+});
+
+it('retains the form-level submission error alert', () => {
+  const html = render(undefined, { fieldErrors: { summary: ['提交失败，请重试'] } });
+  expect(html).toMatch(/role="alert"[^>]*data-slot="order-form-errors"/);
+  expect(html).toContain('提交失败，请重试');
 });

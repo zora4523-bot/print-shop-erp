@@ -5350,6 +5350,21 @@ describe('reviewOrderChangeRequest', () => {
     expectNoApprovalMutation();
   });
 
+  it.each([['0.00', true], ['0.02', false]] as const)('改单半分复算允许舍入、固定费偏差 %s 的结果为 %s', async (fixedFee, allowed) => {
+    const value = request({ proposedChanges: { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 751 }] } });
+    locate(value);
+    mocks.calculate.mockImplementation(async (_tx: unknown, args: ServiceArgs) => {
+      const result = pureResult(args, { plateApplies: false });
+      result.quote.items[0].amount = '244.08';
+      result.processing.items[0] = { ...result.processing.items[0], suggestedUnitPrice: '0.3250', suggestedFixedFee: fixedFee, suggestedSubtotal: '244.08' };
+      return result;
+    });
+    mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal('244.08') }]);
+    const call = reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null, expectedPriceRevision: 5, expectedQuoteToken: quoteToken }, admin);
+    if (allowed) await expect(call).resolves.toBeDefined();
+    else await expect(call).rejects.toThrow('纯引擎分项与小计无法对平');
+  });
+
   it('包装组袋数与金额来自同一次纯引擎结果', async () => {
     const value = request({ order: {
       ...request().order,

@@ -99,7 +99,7 @@ describe('agent monthly bill owner cutover', () => {
     expect(controls).toContain(
       'href={`/api/owner/agent-bills/exports/${item.id}`}',
     );
-    expect(action).toContain("requirePermission('bill:view:all')");
+    expect(action).toContain("requirePermission('bill:manage')");
     expect(action).toContain("backgroundJobsMode() === 'durable'");
     expect(action).not.toContain("from '@/lib/order/export'");
   });

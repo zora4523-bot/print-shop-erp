@@ -10,6 +10,7 @@ vi.mock('../notification-channel-test', () => ({
   handleNotificationChannelTestJob: vi.fn(),
 }));
 vi.mock('../order-export', () => ({ handleOrderExportJob: vi.fn() }));
+vi.mock('@/lib/order/batch-print', () => ({ handleBatchPrintJob: vi.fn() }));
 vi.mock('../pdf', () => ({ handleOrderPdfJob: vi.fn() }));
 
 import { backgroundJobHandlers } from '../handlers';

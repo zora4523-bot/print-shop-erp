@@ -28,10 +28,10 @@ const worker = E2E_USERS.workerHandPress!;
 
 // 本地登录助手：不复用 _helpers.ts 的 login()，因为那个模块在导入时就会
 // 求值 ADMIN_PASSWORD 并在缺环境变量时抛错，而这里只需要 e2e-* 固定账号。
-async function loginWithoutJs(page: Page): Promise<void> {
+async function loginWithoutJs(page: Page, username = worker.username): Promise<void> {
   await isolateE2eLoginClient(page);
   await page.goto('/login');
-  await page.locator('#username').fill(worker.username);
+  await page.locator('#username').fill(username);
   await page.locator('#password').fill(E2E_PASSWORD);
   await page.getByRole('button', { name: /登录|登 录/ }).click();
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), {
@@ -40,6 +40,14 @@ async function loginWithoutJs(page: Page): Promise<void> {
 }
 
 test.describe('零 JS 降级', () => {
+  test('后台退出登录在 JS 不可用时仍能清除 session', async ({ page }) => {
+    await loginWithoutJs(page, E2E_USERS.owner!.username);
+    await page.goto('/orders');
+    await page.getByRole('button', { name: '退出登录', exact: true }).click();
+    await page.waitForURL((url) => url.pathname === '/login');
+    await page.goto('/orders');
+    expect(new URL(page.url()).pathname).toBe('/login');
+  });
   test('登录表单在 JS 不可用时仍能提交并建立 session', async ({ page }) => {
     await loginWithoutJs(page);
 
@@ -54,8 +62,7 @@ test.describe('零 JS 降级', () => {
   test('退出登录在 JS 不可用时仍能清除 session', async ({ page }) => {
     await loginWithoutJs(page);
 
-    // 师傅端外壳的 LogoutButton 是常驻可见的原生 form；后台的登出入口
-    // 藏在 DropdownMenu 里，开菜单本身就需要 JS，因此这条路径用师傅端。
+    // 师傅端常驻原生退出表单。
     await page.getByRole('button', { name: '退出登录' }).click();
     await page.waitForURL((url) => url.pathname.startsWith('/login'), {
       timeout: 15_000,

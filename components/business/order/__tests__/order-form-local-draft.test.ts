@@ -4,6 +4,8 @@ import {
   parseLocalOrderFormDraft,
   resolveNextOrderItemFig,
   serializeLocalOrderFormDraft,
+  listLocalWorkbenchDrafts,
+  needsOrderItemLaminationSelection,
 } from '../order-form-local-draft';
 
 function formValues() {
@@ -75,6 +77,126 @@ function formValues() {
 }
 
 describe('order form local draft', () => {
+  it.each([undefined, null, 'foil', [5]])(
+    'rejects structurally corrupt craft lists: %j',
+    (crafts) => {
+      const values = formValues();
+      const serialized = JSON.stringify({
+        version: 5,
+        pricingScope: 'internal',
+        savedAt: '2026-09-13T01:00:00Z',
+        values: { ...values, items: [{ ...values.items[0], crafts }] },
+      });
+      expect(parseLocalOrderFormDraft(serialized, 'internal')).toBeNull();
+    },
+  );
+  it.each(['internal', 'external-sales'] as const)(
+    'retains every finishing fact after repeated %s draft saves',
+    (scope) => {
+      for (const lamination of [
+        'NONE',
+        'MATTE',
+        'SOFT_TOUCH',
+        'NEW_GLOSS',
+        'LASER',
+      ]) {
+        const values = formValues();
+        const item = {
+          ...values.items[0],
+          pricingRoute: 'COLOR_PRINT',
+          paperType: '200g铜版纸',
+          lamination,
+        };
+        const first = serializeLocalOrderFormDraft(
+          { ...values, items: [item] },
+          scope,
+        )!;
+        const restored = parseLocalOrderFormDraft(first, scope)!;
+        const second = parseLocalOrderFormDraft(
+          serializeLocalOrderFormDraft(restored.values, scope)!,
+          scope,
+        )!;
+        expect(second.values.items).toEqual([
+          expect.objectContaining({ lamination, printColors: ['C', 'M'] }),
+        ]);
+        expect(second.values.items).not.toEqual([
+          expect.objectContaining({ unitPrice: '0.2500' }),
+        ]);
+      }
+    },
+  );
+
+  it.each([4, 5])(
+    'restores version %s missing finishing as an explicit selection gap without discarding other work',
+    (version) => {
+      const values = formValues();
+      values.items[0]!.pricingRoute = 'COLOR_PRINT';
+      values.items[0]!.paperType = '200gCOATED';
+      const raw = JSON.stringify({
+        version,
+        pricingScope: 'external-sales',
+        savedAt: '2026-09-13T01:00:00Z',
+        values,
+      });
+      const restored = parseLocalOrderFormDraft(raw, 'external-sales')!;
+      const item = (
+        restored.values.items as Array<Record<string, unknown>>
+      )[0]!;
+      expect(item).toMatchObject({
+        name: '外盒',
+        quantity: 8000,
+        lamination: null,
+      });
+      expect(needsOrderItemLaminationSelection(item)).toBe(true);
+      expect(
+        needsOrderItemLaminationSelection({
+          ...item,
+          lamination: 'SOFT_TOUCH',
+        }),
+      ).toBe(false);
+      expect(restored.values.customerRef).toBe(values.customerRef);
+      expect(restored.values.packagingGroups).toEqual([
+        expect.objectContaining({ actualBagCount: 100 }),
+      ]);
+    },
+  );
+
+  it('discovers only valid transfer drafts in the current account and pricing scope, newest first', () => {
+    const base = localOrderFormDraftStorageKey('sales-1', true);
+    const ids = ['a', 'b', 'c'].map(
+      (letter) => `${letter.repeat(8)}-1111-1111-1111-111111111111`,
+    );
+    const raw = (
+      date: string,
+      scope: 'internal' | 'external-sales' = 'external-sales',
+    ) =>
+      serializeLocalOrderFormDraft(
+        { ...formValues(), customName: '待继续工单' },
+        scope,
+        new Date(date),
+      )!;
+    const entries = new Map([
+      [base, raw('2026-09-13')],
+      [`${base}:workbench:${ids[0]}`, raw('2026-09-12')],
+      [`${base}:workbench:${ids[1]}`, raw('2026-09-13')],
+      [`${base}:workbench:${ids[2]}`, raw('2026-09-14', 'internal')],
+      [`${base}:workbench:../invalid`, raw('2026-09-14')],
+      [`${base}:workbench:${'d'.repeat(36)}`, 'invalid json'],
+      [
+        `${localOrderFormDraftStorageKey('sales-2', true)}:workbench:${ids[0]}`,
+        raw('2026-09-15'),
+      ],
+    ]);
+    const storage = {
+      length: entries.size,
+      key: (index: number) => [...entries.keys()][index] ?? null,
+      getItem: (key: string) => entries.get(key) ?? null,
+    };
+    expect(listLocalWorkbenchDrafts(storage, base, 'external-sales')).toEqual([
+      { id: ids[1], name: '待继续工单', savedAt: '2026-09-13T00:00:00.000Z' },
+      { id: ids[0], name: '待继续工单', savedAt: '2026-09-12T00:00:00.000Z' },
+    ]);
+  });
   it('keeps only serializable RHF fields and never persists design files', () => {
     const serialized = serializeLocalOrderFormDraft(
       formValues(),
@@ -99,8 +221,6 @@ describe('order form local draft', () => {
         pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
         productStructure: 'WESTERN_ENVELOPE',
         artworkVersion: '第 3 版',
-        plateGroupId: 'plate-a',
-        pricingGroup: 'pricing-a',
         specification: '220 × 110 mm',
         actualWidthMm: 220,
         actualHeightMm: 110,
@@ -239,9 +359,39 @@ describe('order form local draft', () => {
   });
 });
 
-
 it('preserves multiline order remarks in local drafts', () => {
   const remark = '先核对样稿\n再安排生产';
-  const saved = serializeLocalOrderFormDraft({ ...formValues(), remark }, 'external-sales');
-  expect(parseLocalOrderFormDraft(saved!, 'external-sales')?.values.remark).toBe(remark);
+  const saved = serializeLocalOrderFormDraft(
+    { ...formValues(), remark },
+    'external-sales',
+  );
+  expect(
+    parseLocalOrderFormDraft(saved!, 'external-sales')?.values.remark,
+  ).toBe(remark);
+});
+
+it('preserves the admin recipient and drops retired group inputs from old drafts', () => {
+  const values = { ...formValues(), externalSalesUserId: 'sales-2' };
+  const draft = parseLocalOrderFormDraft(
+    serializeLocalOrderFormDraft(values, 'internal')!,
+    'internal',
+  )!;
+  expect(draft.values.externalSalesUserId).toBe('sales-2');
+  expect(JSON.stringify(draft.values.items)).not.toMatch(
+    /plateGroupId|pricingGroup/,
+  );
+  const external = parseLocalOrderFormDraft(
+    serializeLocalOrderFormDraft(values, 'external-sales')!,
+    'external-sales',
+  )!;
+  expect(external.values).not.toHaveProperty('externalSalesUserId');
+});
+
+it.each(['internal', 'external-sales'] as const)('manual prices survive only administrator local drafts: %s', (scope) => {
+  const values = formValues();
+  const adminPrice = { amount: '123.45', reason: '协议价格', factsKey: 'saved-facts' };
+  const serialized = serializeLocalOrderFormDraft({ ...values, items: [{ ...values.items[0], adminPrice }], packagingGroups: [{ ...values.packagingGroups[0], adminPrice }] }, scope);
+  const restored = parseLocalOrderFormDraft(serialized!, scope)!;
+  expect((restored.values.items as Array<Record<string, unknown>>)[0].adminPrice).toEqual(scope === 'internal' ? adminPrice : undefined);
+  expect((restored.values.packagingGroups as Array<Record<string, unknown>>)[0].adminPrice).toEqual(scope === 'internal' ? adminPrice : undefined);
 });

@@ -37,7 +37,7 @@ import { listRecentStockTransfers } from '@/lib/stock-transfer';
 import { getWarehouseDashboard } from '@/lib/warehouse';
 
 export const metadata = {
-  title: '仓库作业台 · 红包印刷 ERP',
+  title: '仓库作业台',
 };
 
 type WarehouseDashboardPromise = ReturnType<typeof getWarehouseDashboard>;

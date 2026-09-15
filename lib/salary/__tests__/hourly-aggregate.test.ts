@@ -11,6 +11,8 @@ const { dbMock } = vi.hoisted(() => {
     salaryRule: { findFirst: vi.fn() },
     attendance: { findMany: vi.fn() },
     hourlyWorkerPayroll: {
+      count: vi.fn().mockResolvedValue(0),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { totalSalary: null } }),
       findUnique: vi.fn(),
       upsert: vi.fn(),
       findMany: vi.fn(),
@@ -32,6 +34,7 @@ import {
   HourlyAggregateError,
   HourlyBatchUnexpectedError,
   listHourlyPayrolls,
+  getHourlyPayrollMonthContext,
   markHourlyPayrollPaid,
 } from '../hourly-aggregate';
 
@@ -76,6 +79,8 @@ function setupAllRules(byKey: Record<string, unknown> = ACTIVE_RULES): void {
 }
 
 beforeEach(() => {
+  dbMock.hourlyWorkerPayroll.count.mockReset().mockResolvedValue(0);
+  dbMock.hourlyWorkerPayroll.aggregate.mockReset().mockResolvedValue({ _sum: { totalSalary: null } });
   dbMock.user.findUnique.mockReset();
   dbMock.user.findMany.mockReset();
   dbMock.salaryRule.findFirst.mockReset();
@@ -722,7 +727,7 @@ describe('listHourlyPayrolls', () => {
 
     const rows = await listHourlyPayrolls({});
 
-    expect(rows[0].payrollWorkerType).toBe(WorkerType.PACKER);
+    expect(rows.rows[0].payrollWorkerType).toBe(WorkerType.PACKER);
     expect(dbMock.hourlyWorkerPayroll.findMany.mock.calls[0][0].select.worker)
       .toEqual({ select: { displayName: true } });
   });
@@ -1026,4 +1031,50 @@ describe('computeHourlyPayroll — advisory lock + now pinning (Codex round 48)'
       expect(call[0].where.effectiveFrom.lte).toEqual(now);
     }
   });
+});
+
+describe('salary list pagination', () => {
+  it.each([
+    [undefined, undefined, 1, 50, 0],
+    [['2', '9'], '20', 2, 20, 20],
+    ['oops', '-2', 1, 1, 0],
+    ['999', '999', 3, 100, 200],
+  ])('parses page=%s pageSize=%s and bounds take/skip', async (page, pageSize, expectedPage, take, skip) => {
+    dbMock.hourlyWorkerPayroll.count.mockResolvedValue(205);
+    dbMock.hourlyWorkerPayroll.findMany.mockResolvedValue([]);
+    const result = await listHourlyPayrolls({ page, pageSize });
+    expect(result).toMatchObject({ page: expectedPage, pageSize: take, total: 205 });
+    expect(dbMock.hourlyWorkerPayroll.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take, skip }));
+  });
+});
+
+it('keeps whole-month recompute counts and sums across bounded batches and excludes historical packers', async () => {
+  const batch = Array.from({ length: 100 }, (_, index) => ({
+    id: `p-${index}`, workerId: `w-${index}`, totalSalary: '0.10', isPaid: false,
+    salaryRuleSnapshot: { workerType: index === 0 ? WorkerType.PACKER : WorkerType.CLEANER },
+    worker: { displayName: `师傅${index}` },
+  }));
+  dbMock.hourlyWorkerPayroll.findMany.mockResolvedValueOnce(batch).mockResolvedValueOnce([
+    { ...batch[1], id: 'last', workerId: 'last-worker', totalSalary: '100.00', isPaid: true },
+    { ...batch[1], id: 'unknown', workerId: 'unknown-worker', totalSalary: '0.20', salaryRuleSnapshot: {} },
+  ]);
+  const result = await getHourlyPayrollMonthContext('2026-05');
+  expect(result.workerIds).toHaveLength(102);
+  expect(result.context).toMatchObject({ existingRecordCount: 101, unpaidRecordCount: 100, paidRecordCount: 1, unpaidTotal: '10.10' });
+  expect(result.context.sampleRows).toHaveLength(5);
+  expect(dbMock.hourlyWorkerPayroll.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    where: { month: '2026-05' }, take: 100, skip: 1, cursor: { id: 'p-99' },
+  }));
+});
+
+it('keeps filtered owner totals independent of the visible page', async () => {
+  dbMock.hourlyWorkerPayroll.count.mockResolvedValue(120);
+  dbMock.hourlyWorkerPayroll.findMany.mockResolvedValue([]);
+  dbMock.hourlyWorkerPayroll.aggregate
+    .mockResolvedValueOnce({ _sum: { totalSalary: '1000.01' } })
+    .mockResolvedValueOnce({ _sum: { totalSalary: null } });
+  const result = await listHourlyPayrolls({ workerId: 'w1', isPaid: true, page: '2' });
+  expect(result).toMatchObject({ total: 120, totalSalary: '1000.01', unpaidSalary: '0' });
+  expect(dbMock.hourlyWorkerPayroll.aggregate).toHaveBeenNthCalledWith(1, { where: { workerId: 'w1', isPaid: true }, _sum: { totalSalary: true } });
+  expect(dbMock.hourlyWorkerPayroll.aggregate).toHaveBeenNthCalledWith(2, { where: { AND: [{ workerId: 'w1', isPaid: true }, { isPaid: false }] }, _sum: { totalSalary: true } });
 });

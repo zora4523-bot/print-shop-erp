@@ -1,3 +1,4 @@
+vi.mock('@/lib/order/external-sales-association', () => ({ listExternalSalesAccountOptions: vi.fn().mockResolvedValue([{ id: 'sales-2', displayName: '外部销售', username: 'sales-2' }]) }));
 vi.mock('@/lib/order/sales-customer-scope', () => ({ listSalesCustomerOptions: vi.fn().mockResolvedValue([]) }));
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -103,6 +104,8 @@ describe('new-order price catalog binding', () => {
       expect.objectContaining({
         products: currentPriceBookProducts,
         settlementType: 'FACTORY_DIRECT',
+        customers: [],
+        externalSalesAccounts: [{ id: 'sales-2', displayName: '外部销售', username: 'sales-2' }],
         externalCreateOrderOptions: expect.objectContaining({
           products: currentPriceBookProducts,
         }),

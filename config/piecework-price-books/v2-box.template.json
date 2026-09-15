@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "priceBookVersion": 2,
+  "effectiveFrom": null,
+  "sourceName": "",
+  "publishNote": "",
+  "rules": [
+    { "operationType": "PARTIAL", "unit": "PER_PASS", "amount": null },
+    { "operationType": "FULL", "unit": "PER_PIECE", "amount": null },
+    { "operationType": "PACKING", "unit": "PER_BAG", "amount": null },
+    { "operationType": "PACKING", "unit": "PER_BOX", "amount": null }
+  ]
+}

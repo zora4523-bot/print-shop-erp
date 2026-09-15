@@ -1,11 +1,16 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ permission: vi.fn(), options: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  permission: vi.fn(),
+  options: vi.fn(),
+  crafts: vi.fn(),
+}));
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: mocks.permission,
 }));
 vi.mock('@/lib/order/create-order-options', () => ({
   listExternalCreateOrderOptions: mocks.options,
 }));
+vi.mock('@/lib/craft', () => ({ listActiveCraftOrderOptions: mocks.crafts }));
 vi.mock('@/components/business/workbench/SalesWorkbench', () => ({
   SalesWorkbench: () => null,
 }));
@@ -13,6 +18,7 @@ import WorkbenchPage from '../workbench/page';
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.permission.mockResolvedValue({ id: 's', role: 'SALES' });
+  mocks.crafts.mockResolvedValue([]);
 });
 it('checks permission before catalog access', async () => {
   mocks.permission.mockRejectedValue(new Error('unauthorized'));

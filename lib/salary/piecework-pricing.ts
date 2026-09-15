@@ -13,6 +13,7 @@ export const PIECEWORK_RATE_UNITS = [
   'PER_PASS',
   'PER_PIECE',
   'PER_BAG',
+  'PER_BOX',
 ] as const;
 
 export type PieceworkRateUnitValue = (typeof PIECEWORK_RATE_UNITS)[number];
@@ -33,6 +34,7 @@ export type PieceworkRate = {
 };
 
 export type PieceworkPricingInput = {
+  unit?: PieceworkRateUnitValue;
   operationType: PieceworkOperationTypeValue;
   completedQty: Decimal.Value;
   defectQty?: Decimal.Value;
@@ -143,8 +145,8 @@ export function calculatePieceworkAmount(
       '工价工序与报工工序不一致',
     );
   }
-  const expectedUnit = PIECEWORK_UNIT_BY_OPERATION[input.operationType];
-  if (rate.unit !== expectedUnit) {
+  const expectedUnit = input.unit ?? PIECEWORK_UNIT_BY_OPERATION[input.operationType];
+  if (rate.unit !== expectedUnit || (expectedUnit !== PIECEWORK_UNIT_BY_OPERATION[input.operationType] && !(input.operationType === 'PACKING' && expectedUnit === 'PER_BOX'))) {
     throw new PieceworkPricingError(
       'INVALID_PIECEWORK_INPUT',
       '工序与工价单位不一致',

@@ -775,23 +775,26 @@ describe('external sales price book pages', () => {
       }),
     );
 
-    expect(versionsHtml).toContain('价格版本与发布');
+    expect(versionsHtml).toContain('价格版本');
     expect(versionsHtml).toContain('external-sales-price-book-version-manager');
     expect(versionsHtml).toContain('加工费');
     expect(versionsHtml).toContain('物流费');
     expect(versionsHtml).toContain('当前生效');
     expect(versionsHtml).toContain('草稿');
-    expect(versionsHtml).toContain('计划生效');
+    expect(versionsHtml).toContain('purpose=logistics');
     expect(versionsHtml).toContain('历史');
     expect(versionsHtml).toContain('编辑收费项目');
     expect(versionsHtml).toContain('准备发布');
     expect(versionsHtml).not.toContain('版本发布说明');
-    expect(versionsHtml).toContain(
-      '已有计划生效版本，待该版本生效后再创建下一份调价草稿',
+    const logisticsHtml = await renderToResolvedMarkup(
+      await OwnerExternalSalesPriceBookVersionsPage({ searchParams: Promise.resolve({ purpose: 'logistics' }) }),
     );
+    expect(logisticsHtml).toContain('计划生效');
+    expect(logisticsHtml).toContain('已有计划生效版本，待该版本生效后再创建下一份调价草稿');
+    expect(logisticsHtml).not.toContain('price-book-history-PROCESSING');
     expect(versionsHtml).not.toContain('SHA-256');
     expect(versionsHtml).not.toContain('processing-rule-set-hash');
-    expect(listVersionsMock).toHaveBeenCalledTimes(1);
+    expect(listVersionsMock).toHaveBeenCalledTimes(2);
     expect(getDraftMock).not.toHaveBeenCalled();
     expect(getPublishPreviewMock).not.toHaveBeenCalled();
   });
@@ -872,7 +875,7 @@ describe('external sales price book pages', () => {
     );
 
     expect(html).toContain('待处理工作队列');
-    expect(html).toContain('发布加工费草稿 · 第 4 版');
+    expect(html).toContain('加工费 v3 → v4');
     expect(html).toContain('本次修改');
     expect(html).toContain('确认本次价格变更');
     expect(getDraftMock).toHaveBeenCalledTimes(1);
@@ -889,7 +892,7 @@ describe('external sales price book pages', () => {
       }),
     );
 
-    expect(html).toContain('价格版本与发布');
+    expect(html).toContain('价格版本');
     expect(html).toContain(
       'href="/owner/rules/customer-pricing?section=blank"',
     );
@@ -913,7 +916,7 @@ describe('external sales price book pages', () => {
     expect(listVersionsMock).toHaveBeenCalledTimes(1);
     expect(getDraftMock).toHaveBeenCalledTimes(1);
     expect(getPublishPreviewMock).toHaveBeenCalledTimes(1);
-    expect(html).toContain('发布加工费草稿 · 第 4 版');
+    expect(html).toContain('加工费 v3 → v4');
     expect(html).toContain('本次修改');
     expect(html).toContain('确认本次价格变更');
     expect(html).toContain('2 个收费项目 · 2 条规则');
@@ -929,7 +932,7 @@ describe('external sales price book pages', () => {
       'name="expectedDraftUpdatedAt" value="2026-08-09T00:30:00.000Z"',
     );
     expect(html).toContain('更多草稿操作');
-    expect(html).toContain('查看完整版本历史');
+    expect(html).toContain('版本历史');
     expect(html).toContain('aria-label="放弃价目草稿"');
     expect(html).not.toContain('COLOR-100');
     expect(html).not.toContain('source-hash');

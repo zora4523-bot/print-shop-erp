@@ -51,6 +51,7 @@ function fixture() {
     settledAt: null,
     settledFee: null,
     isSfCollect: false,
+    packagingGroups: [],
     items: [
       {
         id: 'item',
@@ -99,6 +100,8 @@ function fixture() {
 }
 const tx = {
   $executeRaw: vi.fn(),
+  productionOperation: { count: vi.fn().mockResolvedValue(0) },
+  orderPackagingGroup: { update: vi.fn() },
   order: { findUnique: mocks.find, update: mocks.update },
   orderShipment: { create: mocks.create, update: mocks.update },
   orderShipmentLine: { update: mocks.line, delete: mocks.remove },
@@ -152,6 +155,7 @@ describe('administrator adds a delivery with conserved allocations and frozen lo
       }),
       'frozen-book',
       expect.any(Date),
+      { allowPending: true },
     );
     expect(mocks.create).not.toHaveBeenCalled();
     expect(mocks.update).not.toHaveBeenCalled();
@@ -450,4 +454,61 @@ it('rejects customer service editing another submitter order', async () => {
 it('rejects customer service manual pricing before the transaction', async () => {
   await expect(addOrderShipment({ ...input(), packingMaterialFee: '1', overrideReason: '测试' }, { id: 'cs', role: Role.CUSTOMER_SERVICE }, 'preview')).rejects.toThrow('人工物流费用');
   expect(mocks.transaction).not.toHaveBeenCalled();
+});
+
+describe('split boxed deliveries', () => {
+  function boxes() {
+    const order = fixture();
+    return { ...order, settlementType: 'FACTORY_DIRECT', processingAmount: new Decimal('83.03'),
+      packagingAmount: new Decimal('29.90'), totalAmount: new Decimal('83.03'),
+      customerCharges: [], items: [{ ...order.items[0], quantity: 101 }],
+      shipments: [{ ...order.shipments[0], lines: [{ orderItemId: 'item', quantity: 101 }] }],
+      packagingGroups: [{ id: 'box', sequence: 1, mode: 'BOX_TACTILE', actualBagCount: 13,
+        unitPrice: new Decimal('2.3'), subtotal: new Decimal('29.9'), pricingSnapshot: { source: 'INTERNAL_CREATE_AUTO' },
+        lines: [{ orderItemId: 'item', unitsPerBag: 8 }],
+      }],
+    };
+  }
+  it('updates box count, processing and receivable amounts with a pricing revision', async () => {
+    const order = boxes(); mocks.find.mockResolvedValue(order);
+    tx.productionOperation.count.mockResolvedValue(0);
+    const split = { ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] };
+    const preview = await addOrderShipment(split, actor, 'preview');
+    expect(preview).toMatchObject({ oldTotal: '83.03', newTotal: '85.33', packaging: [{ boxCount: 14, subtotal: '32.20' }] });
+    await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
+    expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actualBagCount: 14, subtotal: '32.20' }) }));
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ packagingAmount: '32.20', processingAmount: '85.33', totalAmount: '85.33' }) }));
+    expect(mocks.revision).toHaveBeenCalled();
+  });
+  it('updates free rework box quantities without reopening price confirmation or erasing free snapshots', async () => {
+    const order = boxes();
+    Object.assign(order, { billingMode: 'NO_CHARGE', settlementType: 'NO_CHARGE', packagingAmount: new Decimal(0), processingAmount: new Decimal(0), totalAmount: new Decimal(0) });
+    Object.assign(order.packagingGroups[0], { unitPrice: new Decimal(0), subtotal: new Decimal(0), pricingSnapshot: { source: 'FREE_REWORK' } });
+    mocks.find.mockResolvedValue(order); tx.productionOperation.count.mockResolvedValue(0);
+    const split = { ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] };
+    const preview = await addOrderShipment(split, actor, 'preview');
+    expect(preview).toMatchObject({ requiresPriceReview: false, newTotal: '0.00' });
+    await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
+    expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith({ where: { id: 'box' }, data: { actualBagCount: 14 } });
+    expect(mocks.revision).not.toHaveBeenCalled();
+  });
+  it('requires a versioned change after production is released when counts change', async () => {
+    mocks.find.mockResolvedValue(boxes()); tx.productionOperation.count.mockResolvedValue(1);
+    await expect(addOrderShipment({ ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] }, actor, 'preview')).rejects.toThrow('工单修改申请');
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it('keeps both boxed destinations pending until actual freight is known', async () => {
+    const order = boxes(); order.settlementType = 'EXTERNAL_SALES';
+    mocks.find.mockResolvedValue({ ...order, customerCharges: fixture().customerCharges });
+    tx.productionOperation.count.mockResolvedValue(0);
+    const quote = await mocks.quote();
+    quote.charges = quote.charges.map((charge: Record<string, unknown>) => ({ ...charge, suggestedAmount: null, amount: '0.00', overrideReason: null, pricingSnapshot: { actual: { requiresAdminConfirmation: true } } }));
+    mocks.quote.mockResolvedValue(quote);
+    const split = { ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] };
+    const preview = await addOrderShipment(split, actor, 'preview');
+    expect(mocks.quote.mock.calls.at(-1)?.[1].shipments.every((shipment: { requiresActualWeight: boolean }) => shipment.requiresActualWeight)).toBe(true);
+    expect(preview!.charges.every((charge) => charge.shippingFee === null)).toBe(true);
+    await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
+    expect(mocks.charge).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ amount: null, status: 'PENDING_AMOUNT' }) }));
+  });
 });

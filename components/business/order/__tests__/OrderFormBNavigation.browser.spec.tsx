@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
 import '@/app/globals.css';
+import { Button } from '@/components/ui/button';
 import { createOrderSchema } from '@/lib/auth/schemas';
 import { OrderFormB, type OrderFormBProps } from '../order-form-b/ExternalSalesOrderFormB';
 
@@ -16,6 +17,7 @@ let host: HTMLDivElement;
 let root: Root;
 let refreshQuote: () => void;
 let requestErrorFocus: () => void;
+let showFieldErrors: (visible: boolean) => void;
 const noop = () => {};
 // Parse the real defaults rather than inventing a second item schema.
 const baseItem = createOrderSchema.shape.items.element.parse({
@@ -63,6 +65,44 @@ function Fixture({ count = 15 }: { count?: number }) {
     }}
   />;
 }
+function QuoteRefreshFixture() {
+  const [quantity, setQuantity] = useState(998);
+  const [unitsPerBag, setUnitsPerBag] = useState(10);
+  const [quoteFailed, setQuoteFailed] = useState(true);
+  useEffect(() => {
+    refreshQuote = () => setQuoteFailed(true);
+  }, []);
+  return <OrderFormB {...baseProps}
+    items={[{ ...baseItem, quantity }]}
+    itemFields={[{ id: 'item-1' }]} activeIndex={0}
+    onActiveIndexChange={noop} onRemove={noop}
+    fieldErrors={{ summary: quoteFailed ? ['报价失败：请调整包装数量并重新核价'] : [] }}
+    packaging={{ mode: 'SINGLE_STYLE', unitsPerBag, bagCount: Math.ceil(quantity / unitsPerBag) }}
+    onQuantityChange={(value) => { setQuantity(value); setQuoteFailed(false); }}
+    onUnitsPerBagChange={(value) => { setUnitsPerBag(value); setQuoteFailed(false); }}
+  />;
+}
+function FieldFeedbackFixture() {
+  const [invalid, setInvalid] = useState(false);
+  const [values, setValues] = useState({
+    customName: '测试工单', receiverName: '张先生', receiverPhone: '13800138000',
+    receiverAddress: '广东省佛山市南海区测试路1号', isSfCollect: false,
+  });
+  useEffect(() => { showFieldErrors = setInvalid; }, []);
+  return <OrderFormB {...baseProps}
+    values={values} items={[baseItem]} itemFields={[{ id: 'item-1' }]}
+    activeIndex={0} onActiveIndexChange={noop} onRemove={noop}
+    packaging={{ ...baseProps.packaging, error: invalid ? '每包数量不能超过 12 个，请调整包装数量' : null }}
+    fieldErrors={invalid ? {
+      customName: '工单名称必填', receiverName: '请填写收件人', receiverPhone: '请填写收货电话',
+      receiverAddress: '请填写收货地址', items: [{ quantity: '数量必须大于 0', designImage: '请上传设计图' }],
+    } : {}}
+    onCustomNameChange={(customName) => setValues((v) => ({ ...v, customName }))}
+    onReceiverAddressChange={(receiverAddress) => setValues((v) => ({ ...v, receiverAddress }))}
+    onReceiverNameChange={(receiverName) => setValues((v) => ({ ...v, receiverName }))}
+    onReceiverPhoneChange={(receiverPhone) => setValues((v) => ({ ...v, receiverPhone }))}
+  />;
+}
 beforeEach(() => {
   document.documentElement.lang = 'zh-CN';
   host = document.createElement('div');
@@ -81,6 +121,74 @@ afterEach(() => {
 const layoutReady = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 const deleteButton = () => host.querySelector<HTMLButtonElement>('button[aria-label^="删除第"]')!;
 const selectedStyle = () => host.querySelector<HTMLButtonElement>('nav[aria-label="款式"] [aria-pressed="true"]')!;
+
+for (const theme of ['light', 'dark']) for (const [width, height] of [
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+]) {
+  it(`${width}x${height} ${theme}: field feedback keeps downstream input positions and focus stable`, async () => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<FieldFeedbackFixture />));
+    await layoutReady();
+    const selectors = ['-custom-name', '-quantity', '-units-per-bag', '-receiver-address-paste', '-receiver-name', '-receiver-phone'];
+    const fields = selectors.map((suffix) => host.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[id$="${suffix}"]`)!);
+    const phone = fields.at(-1)!;
+    phone.scrollIntoView({ block: 'center', behavior: 'instant' });
+    await page.getByRole('textbox', { name: '收货电话', exact: true }).click();
+    const positions = fields.map((field) => field.getBoundingClientRect().top);
+    const scrollY = window.scrollY;
+    for (const invalid of [true, false, true, false]) {
+      flushSync(() => showFieldErrors(invalid));
+      await layoutReady();
+      expect(fields.map((field) => field.getBoundingClientRect().top)).toEqual(positions);
+      expect(window.scrollY).toBe(scrollY);
+      expect(document.activeElement).toBe(phone);
+      // 逐字段错误不再挂 role="alert"（与 EditOrderForm 口径一致，避免 onBlur 抢播报）：
+      // 以 aria-invalid 连线判断错误是否呈现。
+      expect(host.querySelectorAll('[role="alert"]').length).toBe(0);
+      expect(host.querySelectorAll('[aria-invalid="true"]').length > 0).toBe(invalid);
+      expect(host.querySelector('[id$="-packaging-message"]')!.textContent).toBe(invalid
+        ? '!每包数量不能超过 12 个，请调整包装数量' : '共 100 包');
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('[data-slot="order-form-editor"]')).toEqual([]);
+  });
+}
+
+for (const theme of ['light', 'dark']) for (const [width, height] of [
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+]) {
+  it(`${width}x${height} ${theme}: quote refresh keeps quantity and pack inputs stationary`, async () => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<QuoteRefreshFixture />));
+    await layoutReady();
+    for (const [label, suffix, value] of [
+      ['数量', '-quantity', '999'], ['每包数量', '-units-per-bag', '12'],
+    ]) {
+      const input = host.querySelector<HTMLInputElement>(`input[id$="${suffix}"]`)!;
+      input.scrollIntoView({ block: 'center', behavior: 'instant' });
+      await page.getByRole('spinbutton', { name: label, exact: true }).click();
+      await layoutReady();
+      const top = input.getBoundingClientRect().top;
+      const scrollY = window.scrollY;
+      await page.getByRole('spinbutton', { name: label, exact: true }).fill(value);
+      await layoutReady();
+      expect(host.querySelector('[data-slot="order-form-errors"]')).toBeNull();
+      expect(document.activeElement).toBe(input);
+      expect(input.getBoundingClientRect().top).toBe(top);
+      expect(window.scrollY).toBe(scrollY);
+      flushSync(() => refreshQuote());
+      await layoutReady();
+      expect(host.querySelector('[data-slot="order-form-errors"]')).not.toBeNull();
+      expect(document.activeElement).toBe(input);
+      expect(input.getBoundingClientRect().top).toBe(top);
+      expect(window.scrollY).toBe(scrollY);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('[data-slot="order-form-editor"]')).toEqual([]);
+  });
+}
 
 for (const theme of ['light', 'dark']) for (const [width, height] of [
   [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
@@ -148,4 +256,95 @@ it('keyboard deletion retains a usable focus target', async () => {
   expect(document.activeElement).toBe(deleteButton());
   await userEvent.keyboard(' ');
   expect(document.activeElement).toBe(selectedStyle());
+});
+
+for (const theme of ['light', 'dark']) for (const width of [393, 768, 1280]) {
+  it(`packaging layout is readable and constrained at ${width}px in ${theme}`, async () => {
+    await page.viewport(width, 900);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<OrderFormB {...baseProps}
+      items={[baseItem]} itemFields={[{ id: 'item-1' }]} activeIndex={0}
+      onActiveIndexChange={noop} onRemove={noop}
+      packagingExtras={<div><label htmlFor="test-pack-note">包装补充说明（选填）</label><input id="test-pack-note" /></div>}
+    />));
+    await layoutReady();
+    const pack = host.querySelector<HTMLInputElement>('input[id$="-units-per-bag"]')!;
+    expect(pack.max).toBe('12');
+    pack.value = '13';
+    expect(pack.validity.rangeOverflow).toBe(true);
+    pack.value = '12';
+    expect(pack.validity.valid).toBe(true);
+    const mixed = page.getByRole('button', { name: '混装', exact: true });
+    await expect.element(mixed).toBeDisabled();
+    const mode = host.querySelector('button[id$="-packaging-mode-MIXED_STYLE"]')!.closest('fieldset')!;
+    expect(mode.querySelector('legend')!.textContent).toBe('包装方式');
+    const note = mode.parentElement!.querySelector('p')!;
+    expect(note.className).toContain('text-muted-foreground');
+    expect(note.getBoundingClientRect().top).toBeGreaterThanOrEqual(mode.getBoundingClientRect().bottom + 7);
+    const nextLabel = host.querySelector('label[for="test-pack-note"]')!;
+    expect(nextLabel.getBoundingClientRect().top).toBeGreaterThanOrEqual(note.getBoundingClientRect().bottom + 19);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('section[aria-label="数量与包装"]')).toEqual([]);
+  });
+}
+
+function PackagingTypesFixture() {
+  const [mode, setMode] = useState<OrderFormBProps['packaging']['mode']>('SINGLE_STYLE');
+  return <OrderFormB {...baseProps} items={[baseItem]} itemFields={[{id: 'item-1'}]} activeIndex={0}
+    onActiveIndexChange={noop} onRemove={noop} onPackagingModeChange={setMode}
+    packaging={{mode, unitsPerBag: mode === 'BOX_TACTILE' ? 8 : 10, bagCount: mode === 'UNPACKED' ? 0 : 100}} />;
+}
+for (const theme of ['light', 'dark']) for (const [width, height] of [
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+]) {
+  it(`packaging types ${width}x${height} ${theme}: switch, capacity, touch and accessibility`, async () => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<PackagingTypesFixture />));
+    await layoutReady();
+    await expect.element(page.getByRole('button', {name: '入袋', exact: true})).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', {name: '不包装', exact: true}).click();
+    expect(host.querySelector('input[id$="-units-per-bag"]')).toBeNull();
+    await expect.element(page.getByText('包装费 ¥0.00', {exact: true})).toBeVisible();
+    await page.getByRole('button', {name: '装盒', exact: true}).click();
+    await page.getByRole('button', {name: /触感盒子 250g/}).click();
+    const field = host.querySelector<HTMLInputElement>('input[id$="-units-per-bag"]')!;
+    expect(field.max).toBe('8');
+    field.value = '9'; expect(field.validity.rangeOverflow).toBe(true);
+    field.value = '8'; expect(field.validity.valid).toBe(true);
+    const section = host.querySelector('section[aria-label="数量与包装"]')!;
+    for (const button of section.querySelectorAll('button')) {
+      const rect = button.getBoundingClientRect();
+      expect(rect.height).toBeGreaterThanOrEqual(44);
+      expect(rect.left).toBeGreaterThanOrEqual(0);
+      expect(rect.right).toBeLessThanOrEqual(width);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('section[aria-label="数量与包装"]')).toEqual([]);
+  });
+}
+
+it('administrator gap targets select the affected style and focus its quantity field only on request', async () => {
+  await page.viewport(1280, 800);
+  function AdminGapFixture() {
+    const [active, setActive] = useState(0);
+    const [request, setRequest] = useState(0);
+    const label = '款式 #2 数量必须大于 0';
+    return <OrderFormB {...baseProps}
+      items={[baseItem, { ...baseItem, fig: 2, quantity: 0 }]}
+      itemFields={[{ id: 'first' }, { id: 'second' }]} activeIndex={active}
+      onActiveIndexChange={setActive} onRemove={noop}
+      fieldErrors={{ summary: [label], targets: { [label]: { fieldId: 'items.1.quantity', itemIndex: 1 } } }}
+      errorFocusRequest={request} errorFocusMessage={label}
+      rail={<Button onClick={() => setRequest((value) => value + 1)}>定位数量</Button>}
+    />;
+  }
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+  flushSync(() => root.render(<AdminGapFixture />));
+  await layoutReady();
+  expect(scroll).not.toHaveBeenCalled();
+  await page.getByRole('button', { name: '定位数量', exact: true }).click();
+  await expect.poll(() => document.activeElement?.id.endsWith('-quantity')).toBe(true);
+  expect(selectedStyle().textContent).toContain('2.');
+  expect(scroll).toHaveBeenCalledTimes(1);
 });

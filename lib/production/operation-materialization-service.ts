@@ -61,10 +61,12 @@ const ORDER_FACTS_SELECT = {
     },
     orderBy: { sequence: 'asc' as const },
   },
+  shipments: {select: {lines: {select: {orderItemId: true, quantity: true}}}},
   packagingGroups: {
     select: {
       id: true,
       sequence: true,
+      mode: true,
       actualBagCount: true,
       lines: {
         select: { orderItemId: true, unitsPerBag: true },
@@ -314,6 +316,7 @@ export async function activateProductionOperationsInTx(
     orderId: order.id,
     items: order.items,
     packagingGroups: order.packagingGroups,
+    shipments: order.shipments,
   });
   if (!plan.ok) {
     throw new ProductionOperationMaterializationError(

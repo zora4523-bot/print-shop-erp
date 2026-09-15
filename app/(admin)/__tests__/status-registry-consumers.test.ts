@@ -15,8 +15,11 @@ describe('high-risk status registry consumers', () => {
 
     // 归并后两页共用 components/business/bill/BillStatusBadge；registry 的
     // 单一引用点随之移进共享组件，列表页因筛选器仍直接读 registry。
+    // 销售端只能用付款视角的 SALES_ 注册表，不能直接读管理端（收款视角）的那份；
+    // 子串包含分不清两者，所以用前缀否定断言。
     for (const file of legacyFiles) {
-      expect(source(file), file).toContain('AGENT_MONTHLY_BILL_STATUS_REGISTRY');
+      expect(source(file), file).toContain('SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY');
+      expect(source(file), file).not.toMatch(/(?<!SALES_)AGENT_MONTHLY_BILL_STATUS_REGISTRY/);
     }
     expect(source(legacyFiles[0]!), legacyFiles[0]).toContain(
       'BILL_STATUS_REGISTRY',
@@ -29,9 +32,8 @@ describe('high-risk status registry consumers', () => {
       'app/(billing)/owner/agent-bills/[id]/page.tsx',
     ];
     for (const file of v2Files) {
-      expect(source(file), file).toContain(
-        'AGENT_MONTHLY_BILL_STATUS_REGISTRY',
-      );
+      expect(source(file), file).toMatch(/(?<!SALES_)AGENT_MONTHLY_BILL_STATUS_REGISTRY/);
+      expect(source(file), file).not.toContain('SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY');
     }
     expect(source(legacyFiles[1]!)).not.toContain(
       '<Badge variant="destructive">{label}</Badge>',

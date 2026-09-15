@@ -32,7 +32,7 @@ import {
 import { EmptyState, PageHeader } from '@/components/ui-business';
 
 export const metadata = {
-  title: '工单修改申请 · 红包印刷 ERP',
+  title: '工单修改申请',
 };
 
 type PageProps = {

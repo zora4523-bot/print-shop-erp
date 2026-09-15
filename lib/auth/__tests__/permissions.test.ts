@@ -48,6 +48,7 @@ describe('PERMISSIONS map', () => {
       'order:cancel',
       'order:change:request',
       'order:change:review',
+      'order:production-facts:repair',
       'order:price:confirm',
       'task:report',
       'task:dispute:create',
@@ -60,6 +61,7 @@ describe('PERMISSIONS map', () => {
       'material:issue',
       'purchase:manage',
       'warehouse:manage',
+      'bill:manage',
       'bill:view:all',
       'bill:view:self',
       'bill:mark-paid',
@@ -95,10 +97,12 @@ describe('PERMISSIONS map', () => {
   it('administrator-only permissions are exactly [ADMIN]', () => {
     const adminOnly: Permission[] = [
       'order:change:review',
+      'order:production-facts:repair',
       'order:price:confirm',
       'order:export:all',
       'task:dispute:review',
       'attendance:manage',
+      'bill:manage',
       'bill:view:all',
       'bill:mark-paid',
       'salary:view:all',
@@ -147,6 +151,7 @@ describe('requirePermission', () => {
     [Role.CUSTOMER_SERVICE, 'order:create'],
     [Role.ADMIN, 'order:create'],
     [Role.ADMIN, 'account:manage'],
+    [Role.ADMIN, 'bill:manage'],
     [Role.ADMIN, 'order:export:all'],
     [Role.SALES, 'bill:view:self'],
     [Role.WORKER, 'task:report'],
@@ -162,6 +167,9 @@ describe('requirePermission', () => {
 
   it.each([
     [Role.WORKER, 'order:create'],
+    [Role.SALES, 'bill:manage'],
+    [Role.CUSTOMER_SERVICE, 'bill:manage'],
+    [Role.WORKER, 'bill:manage'],
     [Role.SALES, 'account:manage'],
     [Role.CUSTOMER_SERVICE, 'salary:rule:manage'],
     [Role.WORKER, 'order:view:all'],

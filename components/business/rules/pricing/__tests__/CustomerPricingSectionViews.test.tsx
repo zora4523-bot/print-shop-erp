@@ -93,15 +93,16 @@ describe('CustomerPricingSectionViews', () => {
 
   it('renders tiers as the single design-spec ladder with derived ranges and paired prices', () => {
     const rows = [
-      tier('q500', '500个档', 750, 0.48, 0.52),
-      tier('q1000', '1千档', 1_500, 0.31, 0.325),
-      tier('q2000', '2千档', 2_500, 0.27, 0.285),
-      tier('q3000', '3千档', 3_500, 0.25, 0.27),
-      tier('q4000', '4千档', 4_500, 0.23, 0.245),
-      tier('q5000', '5千档', 7_500, 0.2, 0.22),
-      tier('q10000', '1万档', 15_000, 0.18, 0.2),
-      tier('q20000', '2万档', 25_000, 0.17, 0.19),
-      tier('q30000', '3万档', 40_000, 0.17, 0.19),
+      tier('q200', '200个档', 499, 0.96, 1),
+      tier('q500', '500个档', 999, 0.48, 0.52),
+      tier('q1000', '1千档', 1_999, 0.31, 0.325),
+      tier('q2000', '2千档', 2_999, 0.27, 0.285),
+      tier('q3000', '3千档', 3_999, 0.25, 0.27),
+      tier('q4000', '4千档', 4_999, 0.23, 0.245),
+      tier('q5000', '5千档', 9_999, 0.2, 0.22),
+      tier('q10000', '1万档', 19_999, 0.18, 0.2),
+      tier('q20000', '2万档', 29_999, 0.17, 0.19),
+      tier('q30000', '3万档', 49_999, 0.17, 0.19),
       tier('q50000', '5万档', null, 0.16, 0.18),
     ];
 
@@ -113,16 +114,21 @@ describe('CustomerPricingSectionViews', () => {
     expect(html.match(/role="table"/g)).toHaveLength(1);
     expect(html).toContain('aria-label="专版烫金阶梯单价"');
     expect(text).toContain('专版烫金 · 阶梯单价');
-    expect(text).toContain('适用范围（推导）');
-    expect(text).toContain('中号组 上界');
-    expect(text).toContain('单价 中/大');
-    expect(text).toContain('1 ~ 750 个');
-    expect(text).toContain('4,501 ~ 7,500 个');
-    expect(text).toContain('≥ 40,001 个');
-    expect(text).toContain('4,600 个落 5千档，不是 4千档');
+    expect(text).toContain('数量范围');
+    expect(text).toContain('数量上界（含）');
+    expect(text).toContain('中号组单价');
+    expect(text).toContain('大号组单价');
+    expect(html.match(/role="columnheader"/g)).toHaveLength(5);
+    expect(text).toContain('≥ 1 且 &lt; 500 个');
+    expect(text).toContain('≥ 5,000 且 &lt; 10,000 个');
+    expect(text).toContain('≥ 50,000 个');
+    expect(text).not.toContain('4,600');
+    expect(text).not.toContain('档位取档');
+    expect(text).not.toContain('达到下一档');
+    expect(text).not.toContain('未设最低起订量');
 
-    expect(html.match(/aria-label="[^"]+中号组单价"/g)).toHaveLength(10);
-    expect(html.match(/aria-label="[^"]+大号组单价"/g)).toHaveLength(10);
+    expect(html.match(/aria-label="[^"]+中号组单价"/g)).toHaveLength(11);
+    expect(html.match(/aria-label="[^"]+大号组单价"/g)).toHaveLength(11);
     expect(inputMarkup(html, '500个档中号组单价')).toContain(
       'value="0.48"',
     );
@@ -170,7 +176,8 @@ describe('CustomerPricingSectionViews', () => {
     );
 
     expect(html).toContain('aria-label="局部烫金空白封现货单价矩阵"');
-    expect(visibleText(html)).toContain('空格是“— 转人工”显式状态');
+    expect(visibleText(html)).not.toContain('显式状态');
+    expect(html.match(/<header\b[\s\S]*?<\/header>/)?.[0]).not.toContain('<p');
     expect(inputMarkup(html, '珠光艳闪160g中号封单价')).toContain(
       'placeholder="— 转人工"',
     );
@@ -254,18 +261,19 @@ describe('CustomerPricingSectionViews', () => {
 
     expect(html).toContain('aria-label="彩印阶梯整单总价矩阵"');
     expect(text).toContain('彩印阶梯总价');
-    expect(text).toContain('元 / 单 · PER_ORDER · 整单总价不乘数量');
-    expect(text).toContain('查到的直接就是整单总价');
-    expect(text).toContain('该档无报价转人工，不是 0 元');
-    expect(text).toContain('单色烫金原子套餐');
-    expect(text).toContain('含制版费 · 按不可拆套餐总价计价');
-    expect(text).toContain('不再另收订单级制版费');
-    expect(text).toContain('冰白中号 2千起为空就是现状');
+    expect(text).toContain('元 / 单');
+    expect(text).not.toContain('PER_ORDER');
+    expect(text).not.toContain('查到的直接就是整单总价');
+    expect(text).not.toContain('该档无报价转人工，不是 0 元');
+    expect(text).toContain('单色烫金套餐');
+    expect(text).toContain('含制版费');
+    expect(text).not.toContain('不再另收订单级制版费');
+    expect(text).not.toContain('冰白中号 2千起为空就是现状');
     expect(inputMarkup(html, '冰白160g 中号2千档整单总价')).toContain(
       'placeholder="—"',
     );
     expect(
-      inputMarkup(html, '单色烫金1千档含版费原子套餐价'),
+      inputMarkup(html, '单色烫金1千档含版费套餐价'),
     ).toContain('value="200"');
   });
 });

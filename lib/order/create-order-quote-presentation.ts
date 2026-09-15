@@ -152,7 +152,7 @@ function splitItemAmount(item: CreateOrderItemQuote, quantity: number): {
     return { unitPrice: '0.0000', fixedFee: item.amount };
   }
   const fixedFee = new Decimal(item.amount)
-    .minus(new Decimal(item.unitPrice).times(quantity))
+    .minus(new Decimal(item.unitPrice).times(quantity).toDecimalPlaces(2, Decimal.ROUND_HALF_UP))
     .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
   if (!fixedFee.isFinite() || fixedFee.isNegative()) {
     return { unitPrice: null, fixedFee: null };

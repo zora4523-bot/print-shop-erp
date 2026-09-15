@@ -14,7 +14,7 @@ applies_to: repository source at last_verified
 ## 系统边界
 
 销售资料与单款快速计价入口为 `/workbench`，页面和 action 均以 `order:create` 授权。
-目录读取复用建单目录；计算复用 `calculateCreateOrderQuoteFromCatalogInTx`，只向浏览器投影对客加工费明细和 Decimal 加价结果。
+目录、款式字段和选择联动复用建单模块；当前报价 action 接收建单同形单款事实，通过 `calculateCreateOrderQuoteFromCatalogInTx` 投影加工费。加价在浏览器用纯 Decimal 函数计算，不进入订单金额。临时款式带入使用账号隔离的 sessionStorage，建单页重新校验目录并按原流程报价、提交；独立本地草稿键保护已有工单。
 销售知识独立于目录加载，不创建订单或新的价格账本，详见 [销售工作台](./docs/销售工作台.md)。
 
 红包印刷 ERP 是一个 Next.js App Router 应用，覆盖工单、生产、外协、库存、采购、定价、账单、薪资、通知和运维页面。当前运行时由以下部分组成：
@@ -88,7 +88,7 @@ App Router 页面
 - 管理员编辑页的外部销售关联查询与冻结条件集中在 `lib/order/external-sales-association.ts`。保存由原编辑事务校验管理员身份、工单及账号锁、财务关联和编辑版本后更新 `submitterId`，使访问范围与后续对账使用同一归属；不修改 `createdById`、`submitterRole`、`settlementType` 或价格快照。内部业务、已确认或已入账工单不能通过此入口转为外部销售业务。
 - 发货可用性与配送 DTO 分别放在 `lib/order/shipping-availability.ts`、`lib/order/shipping-fields.ts`。详情、抽屉及服务端操作查询消费这些纯契约；UI 目录保留兼容导出，不再由领域代码引用组件。
 - 销售详情使用 `sales-detail-query.ts` 的显式 select 和映射；包装只传模式、实际袋数、每袋组成等客户可见事实，不附带内部规则、生产工资或成本快照。
-- 本次跨页审查范围与证据见 [工单页面审查记录](./docs/order-pages-audit-2026-09-07.md)。
+- 本次跨页审查范围与证据见 [工单页面审查记录](./docs/archive/order-pages-audit-2026-09-07.md)。
 
 ### HTTP Route Handler
 
@@ -185,3 +185,14 @@ Next 16.3 默认会在 Proxy 前规范化并剥离 Flight 标头；`skipProxyUrl
 ### 跨设备打印输出（2026-09-11）
 
 正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+
+
+### 工单批量 PDF
+
+管理员列表通过 `actions/order-batch-print.ts` 提交有序选择，
+`lib/order/batch-print.ts` 校验并创建 `ORDER_BATCH_PDF` HEAVY 任务。
+worker 逐单复用生产打印模板，以 pdf-lib 合并页，进度更新遵守任务租约 fencing。
+单批最多 50 单、累计输入 PDF 最多 100 MiB；失败不发布部分产物。
+产物复用现有私有 PDF 存储及保留期限，下载由任务创建者访问并复核所有工单。
+
+批量打印按账号和内容快照缓存单张 PDF（私有存储、一小时有效），使用前仍读取当前工单并复核权限，合并后及下载前后继续校验。缓存键包含打印模板版本；相对图稿地址转为公开站点绝对地址。

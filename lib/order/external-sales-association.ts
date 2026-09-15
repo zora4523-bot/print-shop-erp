@@ -54,6 +54,17 @@ export type ExternalSalesAccountOption = {
   username: string;
 };
 
+export async function listExternalSalesAccountOptions(
+  actor: { role: Role },
+): Promise<ExternalSalesAccountOption[]> {
+  if (actor.role !== Role.ADMIN) return [];
+  return db.user.findMany({
+    where: { role: Role.SALES, isActive: true },
+    select: { id: true, displayName: true, username: true },
+    orderBy: [{ displayName: 'asc' }, { id: 'asc' }],
+  });
+}
+
 export type OrderExternalSalesAssociation = {
   current: ExternalSalesAccountOption | null;
   options: ExternalSalesAccountOption[];
@@ -75,10 +86,6 @@ export async function getOrderExternalSalesAssociation(
   return {
     current: order.settlementType === OrderSettlementType.EXTERNAL_SALES ? order.submitter : null,
     blockedReason,
-    options: blockedReason ? [] : await db.user.findMany({
-      where: { role: Role.SALES, isActive: true },
-      select: { id: true, displayName: true, username: true },
-      orderBy: [{ displayName: 'asc' }, { id: 'asc' }],
-    }),
+    options: blockedReason ? [] : await listExternalSalesAccountOptions(actor),
   };
 }

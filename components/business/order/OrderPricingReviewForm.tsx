@@ -1,4 +1,6 @@
 "use client";
+import { ProductionReadinessWarning } from './ProductionReadinessWarning';
+import { packagingUnit, PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 
 import {
   type Dispatch,
@@ -23,7 +25,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { OrderPackagingMode } from "@/generated/prisma/enums";
 import { externalPriceBusinessText } from "@/lib/price/external-price-display";
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
@@ -50,12 +51,6 @@ type OrderChargeDraft = {
   amount: string;
   reason: string;
 };
-
-const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
-  [OrderPackagingMode.SINGLE_STYLE]: "单款装",
-  [OrderPackagingMode.MIXED_STYLE]: "混装",
-};
-
 function resultError(
   result:
     FinalizeOrderPricingMutationResult | PreviewOrderPricingReviewResult | null,
@@ -73,6 +68,90 @@ function priceBookLabel(
   return book
     ? `${book.name} · 第 ${book.version} 版`
     : "历史金额";
+}
+
+/**
+ * 把预览数据与管理员草稿合并成 finalizeOrderPricingAction 的输入。
+ * 纯函数：草稿缺省时回退到当前值或建议值，已完成的行原样带回。
+ */
+function buildFinalizePayload({
+  orderId,
+  preview,
+  itemDrafts,
+  packagingGroupDrafts,
+  orderChargeDrafts,
+  shipmentDrafts,
+  remark,
+}: {
+  orderId: string;
+  preview: OrderPricingReviewPreview;
+  itemDrafts: Record<string, ItemDraft>;
+  packagingGroupDrafts: Record<string, PackagingGroupDraft>;
+  orderChargeDrafts: Record<string, OrderChargeDraft>;
+  shipmentDrafts: Record<string, ShipmentDraft>;
+  remark: string;
+}) {
+  return {
+    orderId,
+    expectedOrderRevision: preview.orderRevision,
+    expectedPriceRevision: preview.priceRevision,
+    items: preview.items
+      .filter((item) => !item.complete)
+      .map((item) => ({
+        itemId: item.itemId,
+        unitPrice:
+          itemDrafts[item.itemId]?.unitPrice ?? item.currentUnitPrice,
+        fixedFee: itemDrafts[item.itemId]?.fixedFee ?? item.currentFixedFee,
+        reason: itemDrafts[item.itemId]?.reason ?? item.currentReason ?? "",
+      })),
+    packagingGroups: preview.packagingGroups.map((group) => ({
+      packagingGroupId: group.packagingGroupId,
+      expectedMode: group.mode,
+      expectedActualBagCount: group.actualBagCount,
+      unitPrice:
+        group.complete
+          ? group.currentUnitPrice
+          : (packagingGroupDrafts[group.packagingGroupId]?.unitPrice ??
+            group.currentUnitPrice),
+      reason:
+        packagingGroupDrafts[group.packagingGroupId]?.reason ??
+        group.currentReason ??
+        "",
+    })),
+    orderCharges: preview.orderCharges.map((charge) => ({
+      chargeId: charge.chargeId,
+      expectedBusinessKey: charge.businessKey,
+      amount:
+        orderChargeDrafts[charge.chargeId]?.amount ??
+        charge.currentAmount ??
+        charge.suggestedAmount ??
+        "",
+      reason:
+        orderChargeDrafts[charge.chargeId]?.reason ??
+        charge.currentReason ??
+        "",
+    })),
+    shipments: preview.shipments.map((shipment) => ({
+      shipmentId: shipment.shipmentId,
+      expectedDestinationProvince: shipment.destinationProvince,
+      expectedBillableWeightKg: shipment.billableWeightKg,
+      shippingFee:
+        shipmentDrafts[shipment.shipmentId]?.shippingFee ??
+        shipment.shipping.currentAmount ??
+        shipment.shipping.suggestedAmount ??
+        "",
+      packingMaterialFee:
+        shipmentDrafts[shipment.shipmentId]?.packingMaterialFee ??
+        shipment.packaging.currentAmount ??
+        shipment.packaging.suggestedAmount ??
+        "",
+      reason:
+        shipmentDrafts[shipment.shipmentId]?.reason ??
+        shipment.currentReason ??
+        "",
+    })),
+    remark,
+  };
 }
 
 function hasValue(value: string | null | undefined): boolean {
@@ -278,7 +357,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
     previewState?.status === "success" ? previewState.preview : null;
 
   useEffect(() => {
-    if (finalizeState?.status !== "success") return;
+    if (finalizeState?.status !== "success" || finalizeState.productionReadiness?.ready === false) return;
     // 确认成功后工单已不再是“待管理员确认”。刷新服务端页面
     // 以移除表单，不再重复请求已被服务端禁止的核价预览。
     if (onSuccess) onSuccess();
@@ -288,70 +367,21 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
   function submit() {
     if (!preview || finalizeState?.status === "success" || auxiliary.blocked || finalizePending || previewPending) return;
     startFinalizeTransition(() =>
-      finalizeAction({
-        orderId,
-        expectedOrderRevision: preview.orderRevision,
-        expectedPriceRevision: preview.priceRevision,
-        items: preview.items
-          .filter((item) => !item.complete)
-          .map((item) => ({
-            itemId: item.itemId,
-            unitPrice:
-              itemDrafts[item.itemId]?.unitPrice ?? item.currentUnitPrice,
-            fixedFee: itemDrafts[item.itemId]?.fixedFee ?? item.currentFixedFee,
-            reason: itemDrafts[item.itemId]?.reason ?? item.currentReason ?? "",
-          })),
-        packagingGroups: preview.packagingGroups.map((group) => ({
-          packagingGroupId: group.packagingGroupId,
-          expectedMode: group.mode,
-          expectedActualBagCount: group.actualBagCount,
-          unitPrice:
-            group.complete
-              ? group.currentUnitPrice
-              : (packagingGroupDrafts[group.packagingGroupId]?.unitPrice ??
-                group.currentUnitPrice),
-          reason:
-            packagingGroupDrafts[group.packagingGroupId]?.reason ??
-            group.currentReason ??
-            "",
-        })),
-        orderCharges: preview.orderCharges.map((charge) => ({
-          chargeId: charge.chargeId,
-          expectedBusinessKey: charge.businessKey,
-          amount:
-            orderChargeDrafts[charge.chargeId]?.amount ??
-            charge.currentAmount ??
-            charge.suggestedAmount ??
-            "",
-          reason:
-            orderChargeDrafts[charge.chargeId]?.reason ??
-            charge.currentReason ??
-            "",
-        })),
-        shipments: preview.shipments.map((shipment) => ({
-          shipmentId: shipment.shipmentId,
-          expectedDestinationProvince: shipment.destinationProvince,
-          expectedBillableWeightKg: shipment.billableWeightKg,
-          shippingFee:
-            shipmentDrafts[shipment.shipmentId]?.shippingFee ??
-            shipment.shipping.currentAmount ??
-            shipment.shipping.suggestedAmount ??
-            "",
-          packingMaterialFee:
-            shipmentDrafts[shipment.shipmentId]?.packingMaterialFee ??
-            shipment.packaging.currentAmount ??
-            shipment.packaging.suggestedAmount ??
-            "",
-          reason:
-            shipmentDrafts[shipment.shipmentId]?.reason ??
-            shipment.currentReason ??
-            "",
-        })),
-        remark,
-      }),
+      finalizeAction(
+        buildFinalizePayload({
+          orderId,
+          preview,
+          itemDrafts,
+          packagingGroupDrafts,
+          orderChargeDrafts,
+          shipmentDrafts,
+          remark,
+        }),
+      ),
     );
   }
 
+  const productionReadiness = finalizeState?.status === "success" ? finalizeState.productionReadiness : preview?.productionReadiness;
   const previewError = resultError(previewState);
   const finalizeError = resultError(finalizeState);
   const incompleteItemCount =
@@ -370,7 +400,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           .filter((group) => !group.complete)
           .map((group) => ({
             href: `#pricing-review-packaging-${group.packagingGroupId}`,
-            label: `包装组 #${group.sequence} 入袋费`,
+            label: `包装组 #${group.sequence} 包装费`,
           })),
         ...preview.orderCharges.map((charge) => ({
           href: `#pricing-review-charge-${charge.chargeId}`,
@@ -414,7 +444,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           const label = `包装组 #${group.sequence}`;
           return [
             ...(!hasValue(draft?.unitPrice ?? group.currentUnitPrice)
-              ? [`${label} 每袋入袋费`]
+              ? [`${label} 每${packagingUnit(group.mode)}包装费`]
               : []),
             ...(!hasValue(draft?.reason ?? group.currentReason)
               ? [`${label} 定价依据`]
@@ -490,6 +520,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           正在加载费用…
         </p>
       ) : null}
+      <ProductionReadinessWarning readiness={productionReadiness} saved={finalizeState?.status === "success"} />
       {previewError ? (
         <div className="space-y-2 rounded-md border border-destructive/40 p-3">
           <p role="alert" className="text-sm text-destructive">
@@ -713,7 +744,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           {preview.packagingGroups.some((group) => showReadOnly || !group.complete) ? (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">包装组入袋费</h3>
+                <h3 className="text-sm font-semibold">包装组费用</h3>
                 <Badge
                   variant="secondary"
                 >
@@ -739,8 +770,10 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <p className="font-medium">
                           包装组 #{group.sequence} · {group.name ?? "未命名"} ·{" "}
-                          {PACKAGING_MODE_LABELS[group.mode]} ·{" "}
-                          {group.actualBagCount.toLocaleString("zh-CN")} 袋
+                          {PACKAGING_MODE_LABELS[group.mode]}
+                          {group.mode !== "UNPACKED"
+                            ? ` · ${group.actualBagCount.toLocaleString("zh-CN")} ${packagingUnit(group.mode)}`
+                            : null}
                         </p>
                         <Badge
                           variant="secondary"
@@ -755,7 +788,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                       ) : null}
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="space-y-1 text-xs">
-                          <span>每袋入袋费（元）</span>
+                          <span>{group.mode === "UNPACKED" ? "包装费（元）" : `每${packagingUnit(group.mode)}包装费（元）`}</span>
                           <Input
                             required={!group.complete}
                             inputMode="decimal"
@@ -779,7 +812,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                           />
                         </label>
                         <div className="space-y-1 text-xs">
-                          <span>入袋费小计</span>
+                          <span>包装费小计</span>
                           <p className="min-h-10 rounded-md border bg-muted/40 px-3 py-2 font-sans tabular-nums">
                             {group.currentSubtotal}
                           </p>
@@ -910,7 +943,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           ) : null}
           {finalizeState?.status === "success" ? (
             <p role="status" className="text-sm text-success-foreground">
-              费用已确认：入袋费 {finalizeState.packagingAmount}，加工费合计{" "}
+              费用已确认：包装费 {finalizeState.packagingAmount}，加工费合计{" "}
               {finalizeState.processingAmount}，工单总额{" "}
               {finalizeState.totalAmount}。
             </p>
@@ -936,7 +969,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                 </ul>
               </>
             ) : pricingFinalized ? (
-              <p className="font-medium">费用已确认，正在刷新工单状态…</p>
+              <p className="font-medium">{productionReadiness?.ready === false ? "费用已确认，请补录生产资料" : "费用已确认，正在刷新工单状态"}…</p>
             ) : (
               <p className="font-medium">待核价必填项已完成，可以确认费用。</p>
             )}

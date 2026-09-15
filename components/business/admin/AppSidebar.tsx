@@ -8,6 +8,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import Link, { useLinkStatus } from 'next/link';
+import { COMPANY_NAME } from '@/lib/app-brand';
 import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Bell,
@@ -215,7 +216,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
       <SidebarHeader>
         <div className="flex flex-col gap-1 px-2 py-2 group-data-[collapsible=icon]:hidden">
           <span className="text-sm font-semibold leading-tight tracking-normal">
-            红包印刷 ERP
+            {COMPANY_NAME}
           </span>
           <span className="text-xs text-sidebar-foreground/70">
             {roleBadge}
@@ -257,10 +258,11 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
         ) : null}
         {grouped.map((group, idx) => {
           const label = group.label ?? `group-${idx}`;
-          const collapsed = Boolean(group.label && collapsedGroups[group.label]);
+          const collapsible = group.collapsible !== false;
+          const collapsed = collapsible && Boolean(group.label && collapsedGroups[group.label]);
           // 单个父级入口直接承担分组导航与折叠，不再重复渲染分组标题。
           const singleParent = Boolean(
-            group.label &&
+            collapsible && group.label &&
               group.items.length === 1 &&
               group.items[0].href !== '#' &&
               group.items[0].children?.length,
@@ -278,7 +280,11 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
               data-has-active-item={containsActive ? 'true' : undefined}
               className="py-1.5 group-data-[collapsible=icon]:border-t group-data-[collapsible=icon]:border-sidebar-border/70 group-data-[collapsible=icon]:py-2"
             >
-              {group.label && !singleParent ? (
+              {group.label && !singleParent && !collapsible ? (
+                <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
+                  {group.label}
+                </SidebarGroupLabel>
+              ) : group.label && !singleParent ? (
                 <SidebarGroupLabel className="h-11 px-0 group-data-[collapsible=icon]:hidden">
                   <Button
                     type="button"

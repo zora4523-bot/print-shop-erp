@@ -59,8 +59,8 @@ const validRaw = {
     {
       groupKey: 'bag-1',
       mode: OrderPackagingMode.SINGLE_STYLE,
-      actualBagCount: 20,
-      itemUnitsPerBag: [100],
+      actualBagCount: 200,
+      itemUnitsPerBag: [10],
     },
   ],
   logistics: {
@@ -97,10 +97,10 @@ describe('quoteExternalCreateOrderAction', () => {
     expect(mocks.quoteExternalCreateOrder).not.toHaveBeenCalled();
   });
 
-  it('仅允许外部销售账号调用', async () => {
+  it('不允许客服切换为外部销售口径', async () => {
     mocks.requirePermission.mockResolvedValueOnce({
-      id: 'admin-1',
-      role: Role.ADMIN,
+      id: 'cs-1',
+      role: Role.CUSTOMER_SERVICE,
     });
 
     const result = await quoteExternalCreateOrderAction(validRaw);
@@ -197,4 +197,19 @@ describe('quoteExternalCreateOrderAction', () => {
       message: '报价失败，请检查价目配置后重试',
     });
   });
+});
+
+it('lets an admin preview the same external quote when creating for a salesperson', async () => {
+  mocks.requirePermission.mockResolvedValue({
+    id: 'admin-1',
+    role: Role.ADMIN,
+  });
+  mocks.quoteExternalCreateOrder.mockResolvedValue({ quoteToken: 'quote' });
+  const result = await quoteExternalCreateOrderAction(validRaw);
+  expect(result.status).toBe('success');
+  expect(mocks.quoteExternalCreateOrder).toHaveBeenCalledWith(
+    expect.objectContaining({
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+    }),
+  );
 });

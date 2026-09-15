@@ -86,6 +86,16 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
         workOrderVersion: order.workOrderVersion,
       },
     });
+    if (result.status === 'unavailable' || result.status === 'delayed') {
+      return pdfStatusPage({
+        title: result.status === 'unavailable' ? 'PDF 生成服务暂不可用' : 'PDF 等待时间较长',
+        message: result.status === 'unavailable'
+          ? '暂时无法生成 PDF，请稍后重试；如仍不可用，请联系管理员。'
+          : '已暂停自动刷新，请稍后重试以查看生成结果。',
+        status: 503,
+        retryUrl: pdfRetryUrl(_req.url, jobId),
+      });
+    }
     if (result.status === 'timeout') {
       return pdfStatusPage({
         title: 'PDF 正在生成',

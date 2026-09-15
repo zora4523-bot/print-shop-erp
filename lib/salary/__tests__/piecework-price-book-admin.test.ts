@@ -8,9 +8,12 @@ const { dbMock } = vi.hoisted(() => ({
     $transaction: vi.fn(),
     pieceworkPriceBook: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
       updateMany: vi.fn(),
     },
-    pieceworkPriceRule: { updateMany: vi.fn() },
+    pieceworkPriceRule: { updateMany: vi.fn(), create: vi.fn() },
     user: { findUnique: vi.fn() },
     businessAuditLog: { create: vi.fn(), findFirst: vi.fn() },
   },
@@ -316,5 +319,50 @@ describe('publishPieceworkPriceBookV1', () => {
         now,
       ),
     ).rejects.toThrow('禁止覆盖');
+  });
+});
+
+describe('box wage publication and successor versions', () => {
+  const boxed = () => manifest({ priceBookVersion: 2, rules: [
+    ...manifest().rules,
+    { operationType: 'PACKING', unit: 'PER_BOX', amount: '0.2000' },
+  ] });
+  it('canonicalizes two PACKING units independently and accepts a successor manifest', () => {
+    const parsed = parsePieceworkPriceBookV1Manifest(boxed());
+    expect(parsed.priceBookVersion).toBe(2);
+    expect(calculatePieceworkRuleSetSha256(parsed.rules)).toBe(calculatePieceworkRuleSetSha256([...parsed.rules].reverse()));
+  });
+  it('previews a new version without writing and binds the current published revision', async () => {
+    dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
+    dbMock.pieceworkPriceBook.findFirst.mockResolvedValue({ ...draftBook(), status: 'PUBLISHED' });
+    const preview = await previewPieceworkPriceBookV1Publication(boxed(), sourceSha256);
+    expect(preview).toMatchObject({ readyToPublish: true, bookId: null, draftUpdatedAt: draftUpdatedAt.toISOString() });
+    expect(dbMock.pieceworkPriceBook.create).not.toHaveBeenCalled();
+  });
+  it('closes the previous interval and publishes a separate four-rate version atomically', async () => {
+    const previous = { ...draftBook(), status: 'PUBLISHED', effectiveFrom: now };
+    const next = { ...draftBook(), id: 'piecework-v2', version: 2, rules: boxed().rules.map((rule, index) => ({ ...rule, id: `rule-${index}`, amount: null })) };
+    dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
+    dbMock.pieceworkPriceBook.findFirst.mockResolvedValue(previous);
+    dbMock.pieceworkPriceBook.create.mockResolvedValue(next);
+    const receipt = await publishPieceworkPriceBookV1({ manifest: boxed(), actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now);
+    expect(receipt).toMatchObject({ version: 2, outcome: 'PUBLISHED' });
+    expect(receipt.rules).toContainEqual({ operationType: 'PACKING', unit: 'PER_BOX', rate: '0.2000' });
+    expect(dbMock.pieceworkPriceBook.update).toHaveBeenCalledWith({ where: { id: previous.id }, data: { effectiveTo: new Date(boxed().effectiveFrom!) } });
+    expect(dbMock.pieceworkPriceRule.updateMany).toHaveBeenCalledTimes(4);
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalled();
+  });
+  it('adds the optional box rate to an unpublished three-rate seed only', async () => {
+    dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(draftBook());
+    dbMock.pieceworkPriceRule.create.mockResolvedValue({ id: 'box', operationType: 'PACKING', unit: 'PER_BOX', amount: null });
+    const receipt = await publishPieceworkPriceBookV1({ manifest: { ...boxed(), priceBookVersion: 1 }, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now);
+    expect(receipt.rules).toHaveLength(4);
+  });
+  it('rejects stale successors, duplicate box rules and a missing bag rule', async () => {
+    dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
+    dbMock.pieceworkPriceBook.findFirst.mockResolvedValue({ ...draftBook(), version: 2, status: 'PUBLISHED' });
+    await expect(publishPieceworkPriceBookV1({ manifest: boxed(), actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('版本已变化');
+    const duplicate = boxed(); duplicate.rules[2] = duplicate.rules[3];
+    await expect(publishPieceworkPriceBookV1({ manifest: duplicate, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('重复规则');
   });
 });

@@ -68,14 +68,14 @@ describe('agent monthly bill actions', () => {
       submit: generateAgentMonthlyBillsAction,
       values: { period: '2026-08' },
       command: generateMock,
-      permission: 'bill:view:all',
+      permission: 'bill:manage',
     },
     {
       name: 'confirm',
       submit: confirmAgentMonthlyBillAction.bind(null, 'bill-1'),
       values: { idempotencyKey: 'confirm-1' },
       command: confirmMock,
-      permission: 'bill:view:all',
+      permission: 'bill:manage',
     },
     {
       name: 'receive payment',
@@ -89,7 +89,7 @@ describe('agent monthly bill actions', () => {
       submit: createAgentMonthlyBillCreditAction.bind(null, 'bill-1'),
       values: { idempotencyKey: 'credit-1', sourceItemId: 'item-1', amount: '10.00', reason: '质量调整' },
       command: createCreditMock,
-      permission: 'bill:view:all',
+      permission: 'bill:manage',
     },
   ];
 

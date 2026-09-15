@@ -48,6 +48,7 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
+  createOrderCostEntryAction,
   generateBillsAction,
   issueBillAction,
   recordBillPaymentAction,
@@ -79,7 +80,7 @@ beforeEach(() => {
 });
 
 describe('generateBillsAction', () => {
-  it("first-line requirePermission('bill:view:all')", async () => {
+  it("first-line requirePermission('bill:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
@@ -87,7 +88,7 @@ describe('generateBillsAction', () => {
       generateBillsAction(null, { period: '2026-05' }),
     ).rejects.toBeInstanceOf(UnauthorizedError);
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
-      'bill:view:all',
+      'bill:manage',
     );
   });
 
@@ -135,13 +136,14 @@ describe('generateBillsAction', () => {
 });
 
 describe('issueBillAction', () => {
-  it("requirePermission('bill:view:all')", async () => {
+  it("requirePermission('bill:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
     await expect(issueBillAction('b1')).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('bill:manage');
   });
 
   it('maps InvalidBillTransitionError to error', async () => {
@@ -258,4 +260,11 @@ describe('recordBillPaymentAction', () => {
     expect(r.status).toBe('error');
     if (r.status === 'error') expect(r.message).toMatch(/超出/);
   });
+});
+
+it('requires bill:manage before parsing or writing an order cost entry', async () => {
+  permissionsMock.requirePermission.mockRejectedValue(new UnauthorizedError('未登录'));
+  await expect(createOrderCostEntryAction(null, new FormData())).rejects.toBeInstanceOf(UnauthorizedError);
+  expect(permissionsMock.requirePermission).toHaveBeenCalledWith('bill:manage');
+  expect(revalidatePathMock).not.toHaveBeenCalled();
 });

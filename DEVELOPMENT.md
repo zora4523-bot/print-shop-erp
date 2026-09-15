@@ -9,6 +9,8 @@ verification_scope: scripts, CI and test configuration sections at sections_veri
 
 # 本地开发指南
 
+计件工价发布入口 `pnpm piecework:publish` 支持版本递增及按盒费率；默认只读，旧 `piecework:publish-v1` 兼容保留。正式配置填写和发布参数见 [工价发布步骤](./docs/管理员建单定价与装盒修复-20260913.md#员工按盒工价发布)。专项数据库回归需显式设置 `ERP_PRICING_REPAIR_DB_TEST=1`，仅连接准备过包装 E2E fixture 的独立测试库。
+
 本次核对范围为 `package.json`、CI、Vitest、Playwright 和 smoke 配置；不代表生产环境已验证。
 改动需要哪些检查以 [CONTRIBUTING.md](./CONTRIBUTING.md#测试要求) 为准，本文维护可执行命令与环境前置。
 
@@ -196,7 +198,7 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 ### 多工艺工单验收数据
 
-本地场景生成命令、13 类场景及跨页面核对范围见 [工单场景数据与关联审查](docs/order-scenario-review-2026-09-08.md)。命令默认只预览，显式 `--apply` 才写入；重跑不覆盖已有流转记录。
+本地场景生成命令、13 类场景及跨页面核对范围见 [工单场景数据与关联审查](docs/archive/order-scenario-review-2026-09-08.md)。命令默认只预览，显式 `--apply` 才写入；重跑不覆盖已有流转记录。
 
 ### 发货登记验证
 
@@ -211,3 +213,9 @@ Next、`@next/env`、`eslint-config-next` 锁定到本地已验证的 16.3.4，�
 ### 跨设备打印测试
 
 安装 `pnpm exec playwright install chromium webkit` 后运行 `pnpm test:compat`，使用已有隔离数据库 preflight 和真实 production build/start，覆盖桌面 Chromium/WebKit、iPhone WebKit 与 Android Chromium 模拟。此命令不代表真机验收。`pnpm test:release tests/visual/order-print.spec.ts --project=chromium --update-snapshots=none` 继续执行已有像素门禁；新字体需审查实际差异后批准基线。新增字体/存储/快照测试与标准全量 Vitest 一起运行；部署与实测范围见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+
+专版单色平烫数量档位的 2026-09-13 更新，按[专版阶梯更新说明](./docs/专版阶梯更新-20260913.md)执行版本化发布；新装数据库迁移后同样需要应用该价格配置。
+
+### 包装类型开发验收（2026-09-13）
+
+新增迁移及价格初始化步骤见 [包装类型实施记录](./docs/包装类型实施-20260913.md)。写入型测试必须使用独立数据库；包装 E2E 在 `tests/e2e/order-packaging-types.spec.ts`，纯计价边界在 `lib/price/__tests__/create-order-box-packaging.test.ts`，打印门禁在 `tests/visual/order-print.spec.ts`。不得用日常数据库运行写入夹具。

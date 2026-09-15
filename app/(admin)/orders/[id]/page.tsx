@@ -1,3 +1,8 @@
+import { getOrderProductionReadiness } from '@/lib/order/production-readiness-query';
+import { ProductionReadinessWarning } from '@/components/business/order/ProductionReadinessWarning';
+import { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-facts-presentation';
+import { LegacyProductionFactsRepairForm } from '@/components/business/order/LegacyProductionFactsRepairForm';
+import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 import { canChangeOrderPackaging } from '@/lib/order/editable-fields';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
 import { readOrderActivity } from '@/lib/order/activity';
@@ -19,7 +24,6 @@ import {
   OrderFoilTechnique,
   OrderItemPricingRoute,
   OrderKind,
-  OrderPackagingMode,
   OrderProductStructure,
   OrderSettlementType,
   OrderStatus,
@@ -209,6 +213,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // 发货与结算权限：order:ship = ADMIN（见 permissions.ts）。
   // action 层仍会重新校验，这里只控制界面入口。
   const canShipOrSettle = user.role === Role.ADMIN;
+  const canRepairProductionFacts = user.role === Role.ADMIN;
+  const repairFacts = canRepairProductionFacts ? getLegacyProductionFactsRepair(order) : null;
   const isExternalSalesOrder =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
@@ -225,6 +231,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
     typeof order.priceRevision === 'number'
       ? order.priceRevision
       : null;
+  const showSavedPricingReadiness = canRepairProductionFacts && pricingStatus === ORDER_PRICING_STATUS.ADMIN_CONFIRMED && (order.status === OrderStatus.SUBMITTED || order.status === OrderStatus.PENDING_FACTORY);
+  const savedPricingReadiness = showSavedPricingReadiness ? await getOrderProductionReadiness(order.id) : undefined;
   const isPricingPending =
     pricingStatus === ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
   const hasLiveOutsource = order.outsourceOrders.some(
@@ -393,7 +401,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const inlineOperations = presentation?.workspace.inlineOperations;
 
   const detailSections = {
-    pricing: (<>{isChargeableOrder && pricingStatus ? (
+    pricing: (<><ProductionReadinessWarning readiness={savedPricingReadiness} saved />{repairFacts ? <LegacyProductionFactsRepairForm canRepair={canRepairProductionFacts} key={`repair-${order.revision}`} facts={repairFacts} /> : null}{isChargeableOrder && pricingStatus ? (
         <section
           id="pricing-review"
           className={
@@ -442,7 +450,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">
               <OrderPricingReviewForm
-                key={`pricing-review-${priceRevision ?? 'unknown'}`}
+                key={`pricing-review-${priceRevision ?? 'unknown'}-${order.revision}`}
                 orderId={order.id}
               />
             </div>
@@ -1965,10 +1973,7 @@ const FOIL_TECHNIQUE_LABELS: Record<OrderFoilTechnique, string> = {
   [OrderFoilTechnique.RAISED]: '激凸',
 };
 
-const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
-  [OrderPackagingMode.SINGLE_STYLE]: '单款装',
-  [OrderPackagingMode.MIXED_STYLE]: '混装',
-};
+
 
 const PRODUCTION_OPERATION_LABELS: Record<PieceworkOperationType, string> = {
   [PieceworkOperationType.PARTIAL]: '局部烫金',

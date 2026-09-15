@@ -1,7 +1,10 @@
+import { subtotalReconciles } from './order/subtotal-reconciliation';
 import { salesCustomerScope } from './order/sales-customer-policy';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
+import { calculateAdminCreatePrice, adminCreatePriceFactsKey, calculateAdminPackagingPrice, adminPackagingPriceFactsKey } from './order/admin-create-price';
+import { buildTrustedAdminItemPricingSnapshot, buildTrustedAdminPackagingPricingSnapshot } from './order/admin-pricing-snapshot';
 import {
   CsSalesEntryType,
   CustomerPriceBookPurpose,
@@ -100,7 +103,11 @@ import {
   deriveLegacyOrderItemFoilFacts,
   isNewOrderPricingRoute,
 } from './order/pricing-route';
-import { calculatePackagingBagCount } from './order/packaging-bag-count';
+import {
+  calculateCreateOrderBagCount,
+  MAX_CREATE_ORDER_UNITS_PER_BAG,
+  CREATE_ORDER_PACKAGING_LIMIT_MESSAGE,
+} from './order/create-order-packaging';
 import {
   ExternalOrderQuoteChangedError,
   ExternalOrderQuoteFinalizeError,
@@ -588,8 +595,27 @@ export async function createOrder(
   now: Date = new Date(),
 ): Promise<CreatedOrderSummary> {
   const additionalShipments = input.additionalShipments ?? [];
+  const hasAdminPrices = validateAdminCreatePrices(input, actor.role, additionalShipments);
+
   const packagingGroupInputs = input.packagingGroups ?? [];
-  const settlementType = settlementTypeForOrderCreator(actor.role);
+  const externalSalesUserId = input.externalSalesUserId?.trim() || null;
+  if (externalSalesUserId && actor.role !== Role.ADMIN) {
+    throw new OrderInvariantError('只有管理员可以关联外部销售');
+  }
+  const submitterId = externalSalesUserId ?? actor.id;
+  const settlementType = externalSalesUserId
+    ? OrderSettlementType.EXTERNAL_SALES
+    : settlementTypeForOrderCreator(actor.role);
+  for (const item of input.items) {
+    if (
+      item.pack != null &&
+      (!Number.isSafeInteger(item.pack) ||
+        item.pack < 1 ||
+        item.pack > MAX_CREATE_ORDER_UNITS_PER_BAG)
+    ) {
+      throw new OrderInvariantError(CREATE_ORDER_PACKAGING_LIMIT_MESSAGE);
+    }
+  }
   const isExternalSalesDraft =
     settlementType === OrderSettlementType.EXTERNAL_SALES;
   if (!input.receiverAddress?.trim()) {
@@ -629,6 +655,10 @@ export async function createOrder(
     // TypeScript and allowed an obsolete Prisma runtime to reach production
     // code before failing on the first nested write.
     const txClient = tx;
+    if (hasAdminPrices) {
+      const administrator = await txClient.user.findUnique({ where: { id: actor.id }, select: { role: true, isActive: true } });
+      if (!administrator?.isActive || administrator.role !== Role.ADMIN) throw new OrderInvariantError('当前账号不能修改工单价格');
+    }
 
     if (input.clientSubmissionId) {
       const existing = await txClient.order.findUnique({
@@ -637,6 +667,7 @@ export async function createOrder(
           id: true,
           orderNo: true,
           submitterId: true,
+          createdById: true,
           pricingStatus: true,
           items: {
             select: { id: true },
@@ -645,7 +676,10 @@ export async function createOrder(
         },
       });
       if (existing) {
-        if (existing.submitterId !== actor.id) {
+        if (
+          existing.createdById !== actor.id ||
+          existing.submitterId !== submitterId
+        ) {
           throw new OrderInvariantError('提交标识已被其他账号使用');
         }
         return {
@@ -654,6 +688,17 @@ export async function createOrder(
           itemIds: existing.items.map((item) => item.id),
           pricingStatus: existing.pricingStatus,
         };
+      }
+    }
+
+    if (externalSalesUserId) {
+      await txClient.$executeRaw`SELECT id FROM "User" WHERE id = ${externalSalesUserId} FOR SHARE`;
+      const target = await txClient.user.findUnique({
+        where: { id: externalSalesUserId },
+        select: { role: true, isActive: true },
+      });
+      if (!target || !target.isActive || target.role !== Role.SALES) {
+        throw new OrderInvariantError('所选账号不存在、已停用或不是外部销售，请重新选择');
       }
     }
 
@@ -679,10 +724,11 @@ export async function createOrder(
       };
     });
     const packagingGroups = packagingGroupInputs.map((group, index) => {
-      const count = calculatePackagingBagCount({
+      const count = calculateCreateOrderBagCount({
         mode: group.mode,
         itemQuantities: items.map((item) => item.quantity),
         itemUnitsPerBag: group.itemUnitsPerBag,
+        shipmentQuantities: [items.map((item, itemIndex) => item.quantity - additionalShipments.reduce((sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0), 0)), ...additionalShipments.map((shipment) => shipment.itemQuantities)],
       });
       if (!count.complete) {
         throw new OrderInvariantError(
@@ -699,7 +745,8 @@ export async function createOrder(
     for (const item of items) {
       assertOrderQuantity(item.quantity, item.name);
     }
-    const customerPartyId = input.customerPartyId ?? null;
+    const customerPartyId =
+      actor.role === Role.ADMIN ? null : input.customerPartyId ?? null;
     if (customerPartyId) {
       const customer = await txClient.party.findUnique({
         where: { id: customerPartyId },
@@ -810,7 +857,7 @@ export async function createOrder(
     await assertCreateOrderProductsInTx(txClient, items);
 
     // (5) processing totals and per-shipment allocation facts.
-    const itemsWithSubtotals = items.map((it, index) => {
+    const automaticItems = items.map((it, index) => {
       if (isExternalSalesDraft) {
         return {
           ...it,
@@ -833,7 +880,7 @@ export async function createOrder(
           `款式“${it.name}”的纯引擎结果与建单事实不一致`,
         );
       }
-      if (quote.status === 'MANUAL_PRICING_REQUIRED') {
+      if (quote.status === 'MANUAL_PRICING_REQUIRED' || (it.adminPrice && quote.status !== 'QUOTED')) {
         return {
           ...it,
           manualQuoteReason: it.manualQuoteReason?.trim() || null,
@@ -900,7 +947,7 @@ export async function createOrder(
         2,
       );
       if (
-        !new Decimal(computeSubtotal(it.quantity, unitPrice, fixedFee)).equals(
+        !subtotalReconciles(computeSubtotal(it.quantity, unitPrice, fixedFee),
           subtotal,
         )
       ) {
@@ -933,6 +980,9 @@ export async function createOrder(
         } satisfies Prisma.InputJsonObject,
       };
     });
+    const itemsWithSubtotals = automaticItems.map(applyAdminCreateItemPrice);
+    const adminPriceDelta = itemsWithSubtotals.reduce((sum, item, index) =>
+      sum.plus(item.subtotal).minus(automaticItems[index].subtotal), new Decimal(0));
     const itemProcessingAmount = sumTotals(
       itemsWithSubtotals.map((i) => i.subtotal),
     );
@@ -944,7 +994,7 @@ export async function createOrder(
     ) {
       throw new OrderInvariantError('纯引擎包装组结果与建单事实不一致');
     }
-    const packagingGroupsWithPrices = packagingGroups.map((group, index) => {
+    const automaticPackagingGroups = packagingGroups.map((group, index) => {
       if (isExternalSalesDraft) return {
         ...group,
         unitPrice: '0.0000',
@@ -985,7 +1035,7 @@ export async function createOrder(
           } satisfies Prisma.InputJsonObject,
         };
       }
-      if (quote.status === 'EXCLUDED_MANUAL') {
+      if (quote.status === 'EXCLUDED_MANUAL' || group.adminPrice) {
         return {
           ...group,
           unitPrice: '0.0000',
@@ -1008,6 +1058,12 @@ export async function createOrder(
         `包装组 ${index + 1} 无法生成可保存的入袋报价${presentation.errors.length > 0 ? `：${presentation.errors.join('；')}` : ''}`,
       );
     });
+    const packagingGroupsWithPrices = automaticPackagingGroups.map((group): Omit<typeof group, 'pricingSnapshot'> & { pricingSnapshot: Prisma.InputJsonObject | null; priceOverrideReason: string | null } => {
+      if (!group.adminPrice) return { ...group, priceOverrideReason: null };
+      try { return { ...group, ...calculateAdminPackagingPrice(group.adminPrice, group.actualBagCount), complete: true }; }
+      catch (error) { throw new OrderInvariantError(error instanceof Error ? error.message : '包装价格无效'); }
+    });
+    const adminPackagingDelta = packagingGroupsWithPrices.reduce((sum, group, index) => sum.plus(group.subtotal).minus(automaticPackagingGroups[index].subtotal), new Decimal(0));
     const packagingAmount = sumTotals(
       packagingGroupsWithPrices.map((group) => group.subtotal),
     );
@@ -1017,7 +1073,7 @@ export async function createOrder(
     assertStorableOrderTotal(processingAmount);
     if (
       !isExternalSalesDraft &&
-      !new Decimal(processingAmount).equals(internalQuote!.quote.knownTotal)
+      !new Decimal(processingAmount).minus(adminPriceDelta).minus(adminPackagingDelta).equals(internalQuote!.quote.knownTotal)
     ) {
       throw new OrderInvariantError('建单持久化合计与纯引擎已知合计不一致');
     }
@@ -1128,10 +1184,12 @@ export async function createOrder(
     assertStorableOrderTotal(totalAmount);
     const requiresAdminPricing =
       isExternalSalesDraft ||
-      internalQuote?.quote.status !== 'QUOTED';
+      itemsWithSubtotals.some((item) => item.requiresAdminConfirmation) ||
+      packagingGroupsWithPrices.some((group) => !group.complete) ||
+      Boolean(internalQuote && quoteHasPendingPlateCharge(internalQuote.quote));
     const pricingStatus = requiresAdminPricing
       ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
-      : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
+      : hasAdminPrices ? ORDER_PRICING_STATUS.ADMIN_CONFIRMED : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
     let internalPlateCategoryId: string | null = null;
     const internalHasPendingPlate =
       !isExternalSalesDraft &&
@@ -1151,8 +1209,8 @@ export async function createOrder(
     const created = await txClient.order.create({
       data: {
         orderNo,
-        submitterId: actor.id,
-        submitterRole: actor.role,
+        submitterId,
+        submitterRole: externalSalesUserId ? Role.SALES : actor.role,
         createdById: actor.id,
         customerPartyId,
         status: OrderStatus.DRAFT,
@@ -1164,7 +1222,7 @@ export async function createOrder(
         isUrgent: input.isUrgent,
         isSfCollect: input.isSfCollect,
         customName: input.customName ?? null,
-        customerRef: input.customerRef,
+        customerRef: actor.role === Role.ADMIN ? null : input.customerRef,
         receiverName: input.receiverName,
         receiverPhone: input.receiverPhone,
         receiverAddress: input.receiverAddress,
@@ -1178,7 +1236,7 @@ export async function createOrder(
         pricingStatus,
         priceRevision: isExternalSalesDraft ? 0 : 1,
         pricingConfirmedAt: requiresAdminPricing ? null : now,
-        pricingConfirmedById: null,
+        pricingConfirmedById: hasAdminPrices && !requiresAdminPricing ? actor.id : null,
         items: {
           create: itemsWithSubtotals.map((it, idx) => ({
             sequence: idx + 1,
@@ -1224,10 +1282,7 @@ export async function createOrder(
             ...(it.pricingSnapshot === null
               ? {}
               : { pricingSnapshot: it.pricingSnapshot }),
-            priceOverrideReason:
-              settlementType === OrderSettlementType.EXTERNAL_SALES
-                ? null
-                : it.priceOverrideReason ?? null,
+            priceOverrideReason: it.priceOverrideReason ?? null,
             remark: it.remark ?? null,
           })),
         },
@@ -1254,6 +1309,8 @@ export async function createOrder(
         },
       },
     });
+
+    await confirmCreatedAdminItemPricesInTx(txClient, created.id, itemsWithSubtotals, actor.id, now);
 
     if (internalHasPendingPlate) {
       try {
@@ -1290,7 +1347,7 @@ export async function createOrder(
           ...(group.pricingSnapshot === null
             ? {}
             : { pricingSnapshot: group.pricingSnapshot }),
-          priceOverrideReason: null,
+          priceOverrideReason: group.priceOverrideReason,
         },
         select: { id: true },
       });
@@ -1311,6 +1368,12 @@ export async function createOrder(
       });
       if (lines.length > 0) {
         await txClient.orderPackagingGroupLine.createMany({ data: lines });
+      }
+      if (group.adminPrice) {
+        const stored = await txClient.orderPackagingGroup.findUniqueOrThrow({ where: { id: createdGroup.id }, include: { lines: true } });
+        const pricingSnapshot = buildTrustedAdminPackagingPricingSnapshot({ previous: group.pricingSnapshot, now, actorId: actor.id, previousPriceRevision: 0, group: stored });
+        await txClient.orderPackagingGroup.update({ where: { id: stored.id }, data: { pricingSnapshot } });
+        group.pricingSnapshot = pricingSnapshot;
       }
     }
 
@@ -1351,7 +1414,7 @@ export async function createOrder(
           orderId: created.id,
           revision: 1,
           status: pricingStatus,
-          source: requiresAdminPricing
+          source: hasAdminPrices ? 'ORDER_CREATED_ADMIN' : requiresAdminPricing
             ? 'ORDER_CREATED_PROVISIONAL'
             : 'ORDER_CREATED_AUTO',
           createdById: actor.id,
@@ -1383,10 +1446,11 @@ export async function createOrder(
             engineVersion: 'CREATE_ORDER_PURE_V1',
             priceVersion: internalQuote!.quote.priceVersion,
             engineStatus: internalQuote!.quote.status,
-            knownTotal: internalQuote!.quote.knownTotal,
+            knownTotal: processingAmount,
+            automaticKnownTotal: internalQuote!.quote.knownTotal,
             manualReasons: internalQuote!.quote.manualReasons,
             pendingReasons: internalQuote!.quote.pendingReasons,
-            source: requiresAdminPricing
+            source: hasAdminPrices ? 'ORDER_CREATED_ADMIN' : requiresAdminPricing
               ? 'ORDER_CREATED_PROVISIONAL'
               : 'ORDER_CREATED_AUTO',
             pricedAt: now.toISOString(),
@@ -1433,7 +1497,7 @@ export async function createOrder(
               unitPrice: group.unitPrice,
               subtotal: group.subtotal,
               suggestedSubtotal: group.suggestedSubtotal,
-              priceOverrideReason: null,
+              priceOverrideReason: group.priceOverrideReason,
               requiresAdminConfirmation: !group.complete,
               pricingSnapshot: group.pricingSnapshot,
             })),
@@ -1468,6 +1532,7 @@ export async function createOrder(
           id: true,
           orderNo: true,
           submitterId: true,
+          createdById: true,
           pricingStatus: true,
           items: {
             select: { id: true },
@@ -1475,7 +1540,7 @@ export async function createOrder(
           },
         },
       });
-      if (existing?.submitterId === actor.id) {
+      if (existing?.createdById === actor.id && existing.submitterId === submitterId) {
         return {
           id: existing.id,
           orderNo: existing.orderNo,
@@ -4238,3 +4303,109 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
 
 // Re-export for action-layer error mapping.
 export { InvalidOrderTransitionError };
+
+async function confirmCreatedAdminItemPricesInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  submittedItems: Array<{
+    adminPrice?: unknown;
+    pricingSnapshot: Prisma.InputJsonObject | null;
+  }>,
+  actorId: string,
+  now: Date,
+) {
+  if (!submittedItems.some((item) => item.adminPrice)) return;
+
+  const stored = await tx.orderItem.findMany({
+    where: { orderId: orderId },
+    orderBy: { sequence: 'asc' },
+  });
+  for (const item of stored) {
+    const submitted = submittedItems[item.sequence - 1];
+    if (!submitted.adminPrice) continue;
+    const pricingSnapshot = buildTrustedAdminItemPricingSnapshot({
+      previous: submitted.pricingSnapshot,
+      now,
+      actorId: actorId,
+      previousPriceRevision: 0,
+      item,
+    });
+    await tx.orderItem.update({
+      where: { id: item.id },
+      data: { pricingSnapshot },
+    });
+    submitted.pricingSnapshot = pricingSnapshot;
+  }
+}
+
+function validateAdminCreatePrices(
+  input: CreateOrderCommand,
+  role: Role,
+  additionalShipments: AdditionalShipmentCommand[],
+): boolean {
+  const hasAdminPrices =
+    input.items.some((item) => item.adminPrice !== undefined) ||
+    (input.packagingGroups ?? []).some(
+      (group) => group.adminPrice !== undefined,
+    );
+  if (hasAdminPrices && role !== Role.ADMIN) {
+    throw new OrderInvariantError('只有管理员可以在建单时定价');
+  }
+  for (const item of input.items) {
+    if (
+      item.adminPrice &&
+      item.adminPrice.factsKey !== adminCreatePriceFactsKey(item)
+    ) {
+      throw new OrderInvariantError('款式条件已变化，请重新确认人工价格');
+    }
+  }
+  for (const group of input.packagingGroups ?? []) {
+    if (
+      group.adminPrice &&
+      group.adminPrice.factsKey !==
+        adminPackagingPriceFactsKey(
+          group,
+          input.items.map((item) => item.quantity),
+          additionalShipments.map((shipment) => shipment.itemQuantities),
+        )
+    )
+      throw new OrderInvariantError('包装条件已变化，请重新确认包装价格');
+    if (group.mode === 'UNPACKED' && group.adminPrice)
+      throw new OrderInvariantError('不包装的费用固定为 0，无需人工定价');
+  }
+  return hasAdminPrices;
+}
+
+function applyAdminCreateItemPrice<
+  T extends {
+    adminPrice?: CreateOrderInput['items'][number]['adminPrice'];
+    pricingSnapshot: Prisma.InputJsonObject | null;
+  },
+>(
+  item: T,
+): Omit<T, 'pricingSnapshot' | 'priceOverrideReason'> & {
+  pricingSnapshot: Prisma.InputJsonObject | null;
+  priceOverrideReason: string | null;
+} {
+  if (!item.adminPrice) return { ...item, priceOverrideReason: null };
+  let price: ReturnType<typeof calculateAdminCreatePrice>;
+  try {
+    price = calculateAdminCreatePrice(item.adminPrice);
+  } catch (error) {
+    throw new OrderInvariantError(
+      error instanceof Error ? error.message : '人工价格无效',
+    );
+  }
+  return {
+    ...item,
+    ...price,
+    quotedAmount: price.subtotal,
+    pricingSnapshot: item.pricingSnapshot ?? {
+      version: 1,
+      complete: false,
+      suggestedSubtotal: null,
+    },
+    quoteDisposition: OrderItemQuoteDisposition.PRICED,
+    requiresAdminConfirmation: false,
+  };
+}

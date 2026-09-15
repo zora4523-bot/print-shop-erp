@@ -6,10 +6,35 @@ import {
   CartesianGrid,
   Cell,
   ResponsiveContainer,
+  Text,
   Tooltip,
   XAxis,
   YAxis,
+  type YAxisTickContentProps,
 } from 'recharts';
+
+// Y 轴分类刻度用 <Text> 按实际字体度量做单行省略：长显示名（或 CI 机器缺中文
+// 字体时更宽的回退字形）不再把刻度文字顶出视口左边界；完整名字仍在 tooltip。
+// 必须用函数形式：对象形式的 tick 会被 recharts 按 SVG 属性过滤，maxLines /
+// breakAll 传不进 <Text>。
+const RANKING_LABEL_WIDTH = 60;
+function renderRankingTick({ x, y, payload }: YAxisTickContentProps) {
+  return (
+    <Text
+      x={x}
+      y={y}
+      textAnchor="end"
+      verticalAnchor="middle"
+      fontSize={11}
+      fill="var(--muted-foreground)"
+      width={RANKING_LABEL_WIDTH}
+      maxLines={1}
+      breakAll
+    >
+      {String(payload.value ?? '')}
+    </Text>
+  );
+}
 
 // 本月销售业绩 Top 10 横向柱状图。layout="vertical" 把 X 轴当数值
 // 轴、Y 轴当类目（recharts 的 vertical 命名跟人的直觉相反，但这是
@@ -107,6 +132,7 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
             stroke="var(--muted-foreground)"
             fontSize={11}
             width={72}
+            tick={renderRankingTick}
           />
           <Tooltip
             isAnimationActive={false}

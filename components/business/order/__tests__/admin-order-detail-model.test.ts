@@ -103,7 +103,7 @@ describe('admin order detail projection', () => {
       { id: 'item-1-subtotal', label: '款式加工费', amount: '100.10' },
       { id: 'plate-1', label: '版费 · 正面', amount: '0.00' },
     ]);
-    expect(result.orderFees).toEqual([{ id: 'packaging', label: '入袋费', amount: '0.00' }]);
+    expect(result.orderFees).toEqual([{ id: 'packaging', label: '包装费', amount: '0.00' }]);
     expect(result.feeStages[0]).not.toHaveProperty('processingAmount');
   });
 
@@ -253,7 +253,7 @@ describe('admin order detail projection', () => {
       { id: 'shipping', businessKey: 'SHIPPING:1', status: 'FINAL', amount: new Decimal('20.05'), category: { name: '运费' }, shipment: { sequence: 1 } },
     ] as unknown as AdminOrderDetailInput['order']['customerCharges'];
     expect(buildAdminOrderDetailModel(input).orderFees).toEqual([
-      { id: 'packaging', label: '入袋费', amount: '0.00' },
+      { id: 'packaging', label: '包装费', amount: '0.00' },
       { id: 'shipping', label: '运费 · 第 1 票', amount: '20.05' },
     ]);
   });

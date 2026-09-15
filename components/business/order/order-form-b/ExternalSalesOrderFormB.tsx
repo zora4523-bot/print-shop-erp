@@ -1,4 +1,17 @@
 'use client';
+import {
+  isMixedPackaging,
+  packagingType,
+  packagingBoxType,
+  packagingModeFor,
+  packagingCapacity,
+  PACKAGING_BOXES,
+  type PackagingType,
+  type PackagingBoxType,
+} from '@/lib/order/packaging-mode';
+
+import { Group, FieldLabel, FieldError, RequiredMark, PillPicker } from './OrderFieldPrimitives';
+import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
 
 import { OrderReceiverContactFields } from '../OrderReceiverContactFields';
 
@@ -7,7 +20,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type ClipboardEventHandler,
@@ -32,11 +44,9 @@ import { formatDesignFileSize } from '../design-file-display';
 import { LocalDesignImagePreview } from '../LocalDesignImagePreview';
 import { prepareDesignFile } from '../design-upload-client';
 import {
-  OrderFoilSwatchPicker,
   type OrderFoilSwatchOption,
 } from './OrderFoilSwatchPicker';
 import {
-  OrderPaperSwatchPicker,
   type OrderPaperSwatchOption,
 } from './OrderPaperSwatchPicker';
 
@@ -51,22 +61,6 @@ const FOIL_OPTIONS: readonly OrderFoilSwatchOption[] = [
   { value: '绿色', label: '绿色', tone: 'green' },
 ];
 
-const ROUTE_OPTIONS = [
-  { value: OrderItemPricingRoute.STOCK_BLANK, label: '局部烫金' },
-  {
-    value: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
-    label: '专版烫金',
-  },
-  { value: OrderItemPricingRoute.COLOR_PRINT, label: '彩印' },
-] as const;
-
-const LAMINATION_OPTIONS = [
-  { value: OrderLamination.MATTE, label: '亚膜' },
-  { value: OrderLamination.SOFT_TOUCH, label: '触感膜' },
-  { value: OrderLamination.NEW_GLOSS, label: '新光膜' },
-  { value: OrderLamination.LASER, label: '雷射' },
-] as const;
-
 function StickyOrderFormRail({ rail }: { rail: ReactNode }) {
   return (
     <aside
@@ -80,6 +74,7 @@ function StickyOrderFormRail({ rail }: { rail: ReactNode }) {
 
 export type OrderFormBErrors = {
   summary?: readonly string[];
+  targets?: Readonly<Record<string, { fieldId: string; itemIndex?: number }>>;
   customName?: string;
   receiverName?: string;
   receiverPhone?: string;
@@ -149,6 +144,7 @@ export type OrderFormBProps = {
   fieldErrors?: OrderFormBErrors;
   /** Increment only after an explicit submit attempt fails. */
   errorFocusRequest?: number;
+  errorFocusMessage?: string;
   rail: ReactNode;
   onActiveIndexChange: (index: number) => void;
   onAdd: () => void;
@@ -175,156 +171,6 @@ export type OrderFormBProps = {
   onReceiverPhoneChange: (value: string) => void;
   onSfCollectChange: (value: boolean) => void;
 };
-
-type PillOption<T extends string | number> = {
-  value: T;
-  label: string;
-  detail?: string;
-  disabled?: boolean;
-};
-
-function RequiredMark() {
-  return (
-    <span aria-hidden="true" className="ml-0.5 font-bold text-destructive">
-      *
-    </span>
-  );
-}
-
-function FieldLabel({
-  htmlFor,
-  children,
-  required = false,
-}: {
-  htmlFor?: string;
-  children: ReactNode;
-  required?: boolean;
-}) {
-  return (
-    <label
-      htmlFor={htmlFor}
-      className="mb-2 block text-xs font-bold tracking-[0.16em] text-muted-foreground"
-    >
-      {children}
-      {required ? <RequiredMark /> : null}
-    </label>
-  );
-}
-
-function FieldError({ id, children }: { id?: string; children?: string }) {
-  if (!children) return null;
-  return (
-    <p
-      id={id}
-      role="alert"
-      className="mt-1.5 flex items-start gap-1.5 text-xs font-semibold text-destructive"
-    >
-      <span
-        aria-hidden="true"
-        className="mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full bg-destructive text-xs text-destructive-foreground"
-      >
-        !
-      </span>
-      <span>{children}</span>
-    </p>
-  );
-}
-
-function PillPicker<T extends string | number>({
-  id,
-  label,
-  value,
-  options,
-  disabled,
-  required,
-  note,
-  error,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: T;
-  options: readonly PillOption<T>[];
-  disabled?: boolean;
-  required?: boolean;
-  note?: string;
-  error?: string;
-  onChange: (value: T) => void;
-}) {
-  const messageId = `${id}-message`;
-  return (
-    <fieldset
-      className="min-w-0"
-      aria-invalid={Boolean(error)}
-      aria-describedby={error ? messageId : undefined}
-    >
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
-        {label}
-        {required ? <RequiredMark /> : null}
-        {note ? (
-          <span className="ml-2 text-xs tracking-normal text-destructive">
-            {note}
-          </span>
-        ) : null}
-      </legend>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <Button
-              key={String(option.value)}
-              id={`${id}-${String(option.value)}`}
-              type="button"
-              variant="outline"
-              aria-pressed={selected}
-              disabled={disabled || option.disabled}
-              className={cn(
-                'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-sm font-semibold',
-                option.detail && 'flex-col gap-0 py-1',
-                selected &&
-                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
-              )}
-              onClick={() => onChange(option.value)}
-            >
-              <span>{option.label}</span>
-              {option.detail ? (
-                <span className="text-xs font-medium opacity-60">
-                  {option.detail}
-                </span>
-              ) : null}
-            </Button>
-          );
-        })}
-      </div>
-      <FieldError id={messageId}>{error}</FieldError>
-    </fieldset>
-  );
-}
-
-function Group({
-  title,
-  children,
-  first = false,
-}: {
-  title: string;
-  children: ReactNode;
-  first?: boolean;
-}) {
-  return (
-    <section
-      aria-label={title}
-      className={cn(
-        'border-t pt-4',
-        first ? 'border-0 pt-0' : 'mt-4',
-      )}
-    >
-      <h2 className="mb-3.5 text-xs font-extrabold tracking-[0.2em] text-muted-foreground">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
 
 function nextPendingId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -526,18 +372,9 @@ function DesignFileBox({
           </span>
         </Button>
       )}
-      <FieldError id={errorId}>{error}</FieldError>
+      <FieldError id={errorId} reservedLines={2}>{error}</FieldError>
     </div>
   );
-}
-
-function isCopperPaper(
-  paperKey: string | null,
-  options: readonly OrderPaperSwatchOption[],
-): boolean {
-  const option = options.find((entry) => entry.value === paperKey);
-  const text = `${paperKey ?? ''} ${option?.label ?? ''}`.toLowerCase();
-  return text.includes('铜版') || text.includes('coated') || text.includes('tbz');
 }
 
 export function parseExternalReceiverDisplay(raw: string): {
@@ -595,186 +432,6 @@ export function parseExternalReceiverDisplay(raw: string): {
   };
 }
 
-function currentPrintFoilMode(
-  item: CreateOrderInput['items'][number],
-): 'NONE' | 'PARTIAL' | 'FULL' {
-  if (
-    item.frontFoilColors.length === 0 &&
-    item.backFoilColors.length === 0
-  ) {
-    return 'NONE';
-  }
-  return item.hasLocalFoil === false ? 'FULL' : 'PARTIAL';
-}
-
-function FoilSideFields({
-  item,
-  direct,
-  maxSelections,
-  disabled,
-  error,
-  idStem,
-  foilOptions,
-  onFoilSidesChange,
-  onBackFoilToggle,
-}: {
-  item: CreateOrderInput['items'][number];
-  direct: boolean;
-  maxSelections: number;
-  disabled?: boolean;
-  error?: string;
-  idStem: string;
-  foilOptions: readonly OrderFoilSwatchOption[];
-  onFoilSidesChange: (front: string[], back: string[]) => void;
-  onBackFoilToggle: (enabled: boolean) => void;
-}) {
-  const front = item.frontFoilColors;
-  const back = item.backFoilColors;
-  const backEnabled = back.length > 0 || item.isDoubleSided;
-
-  if (direct) {
-    return (
-      <div className="mt-5">
-        <OrderFoilSwatchPicker
-          id={`${idStem}-foil-front`}
-          label="烫金颜色"
-          value={front}
-          options={foilOptions}
-          maxSelections={maxSelections}
-          minimumSelections={0}
-          disabled={disabled}
-          error={error}
-          onChange={(nextFront) => onFoilSidesChange(nextFront, [])}
-        />
-      </div>
-    );
-  }
-
-  const sameAsFront =
-    backEnabled &&
-    front.length === back.length &&
-    front.every((color, index) => color === back[index]);
-
-  return (
-    <fieldset className="mt-5 min-w-0" aria-label="烫金颜色">
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
-        烫金颜色
-      </legend>
-      <div className="rounded-xl bg-muted/30 p-3.5">
-        <div className="mb-2.5 flex items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">
-            正面
-          </span>
-        </div>
-        <OrderFoilSwatchPicker
-          id={`${idStem}-foil-front`}
-          label=""
-          value={front}
-          options={foilOptions}
-          maxSelections={maxSelections}
-          minimumSelections={0}
-          disabled={disabled}
-          onChange={(nextFront) => onFoilSidesChange(nextFront, back)}
-        />
-      </div>
-      <div
-        className={cn(
-          'mt-2 rounded-xl bg-muted/30 p-3.5',
-          !backEnabled && 'bg-muted/15',
-        )}
-      >
-        <div className={cn('flex items-center gap-2', backEnabled && 'mb-2.5')}>
-          <span className="text-sm font-semibold text-foreground">
-            反面
-          </span>
-          <span className="text-xs font-semibold text-muted-foreground">
-            {backEnabled
-              ? sameAsFront
-                ? '与正面同色'
-                : back.join(' + ') || '未选'
-              : '不烫'}
-          </span>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            aria-pressed={backEnabled}
-            disabled={disabled}
-            className="ml-auto text-xs font-semibold"
-            onClick={() => onBackFoilToggle(!backEnabled)}
-          >
-            {backEnabled ? '取消反面' : '＋ 加烫反面'}
-          </Button>
-        </div>
-        {backEnabled ? (
-          <OrderFoilSwatchPicker
-            id={`${idStem}-foil-back`}
-            label=""
-            value={back}
-            options={foilOptions}
-            maxSelections={maxSelections}
-            minimumSelections={0}
-            disabled={disabled}
-            onChange={(nextBack) => onFoilSidesChange(front, nextBack)}
-          />
-        ) : null}
-      </div>
-      <FieldError>{error}</FieldError>
-    </fieldset>
-  );
-}
-
-function SpecialTechnique({
-  id,
-  value,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  value: OrderFoilTechnique;
-  disabled?: boolean;
-  onChange: (value: OrderFoilTechnique) => void;
-}) {
-  const options = [
-    { value: OrderFoilTechnique.RELIEF, label: '浮雕' },
-    { value: OrderFoilTechnique.RAISED, label: '激凸' },
-  ] as const;
-  return (
-    <fieldset className="mt-5">
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
-        特殊工艺
-      </legend>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <Button
-              key={option.value}
-              id={`${id}-${option.value}`}
-              type="button"
-              variant="outline"
-              aria-pressed={selected}
-              disabled={disabled}
-              className={cn(
-                'h-auto min-h-8 rounded-full px-3.5 py-1.5 text-sm font-semibold',
-                selected &&
-                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
-              )}
-              onClick={() =>
-                onChange(
-                  selected ? OrderFoilTechnique.FLAT : option.value,
-                )
-              }
-            >
-              {option.label}
-            </Button>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
-}
-
 export function OrderFormB({
   values,
   title = '新建工单',
@@ -806,6 +463,7 @@ export function OrderFormB({
   savedLabel,
   fieldErrors,
   errorFocusRequest = 0,
+  errorFocusMessage,
   rail,
   onActiveIndexChange,
   onAdd,
@@ -861,19 +519,16 @@ export function OrderFormB({
   const { rootRef, handledErrorFocusRequestRef, issueFocusTimerRef, removeButtonRef,
     styleNavRef, restoreDeleteFocusRef, cancelIssueFocus } = useOrderFormFocus(itemFields.length);
 
-  const printFoilMode = useMemo(
-    () => (item ? currentPrintFoilMode(item) : 'NONE'),
-    [item],
-  );
-  const copperPaper = isCopperPaper(paperKey, paperOptions);
   const parsedReceiver = parseExternalReceiverDisplay(values.receiverAddress);
   const receiverPhoneInitialValue =
     values.receiverPhone || parsedReceiver.receiverPhone || '';
 
   const focusIssue = useCallback((message: string) => {
     cancelIssueFocus();
+    const explicitTarget = fieldErrors?.targets?.[message];
+    if (explicitTarget?.itemIndex !== undefined) onActiveIndexChange(explicitTarget.itemIndex);
     const itemNumber = Number(message.match(/第\s*(\d+)\s*款/)?.[1]);
-    if (Number.isSafeInteger(itemNumber) && itemNumber > 0) {
+    if (explicitTarget?.itemIndex === undefined && Number.isSafeInteger(itemNumber) && itemNumber > 0) {
       const index = items.findIndex(
         (entry, index) => (entry.fig ?? index + 1) === itemNumber,
       );
@@ -887,7 +542,11 @@ export function OrderFormB({
       const extraContact = addressNumber >= 2 && (message.includes('收件人') || message.includes('电话'))
         ? `[name="additionalShipments.${addressNumber - 2}.${message.includes('收件人') ? 'receiverName' : 'receiverPhone'}"]`
         : null;
-      const directSelector = extraContact ?? (message.includes('工单备注')
+      const directSelector = (explicitTarget ? `[id="${CSS.escape(explicitTarget.fieldId)}"]` : null) ?? extraContact ?? (message.includes('承诺交期')
+        ? '#promisedDate'
+        : message.includes('产品客户')
+        ? '#customerRef'
+        : message.includes('工单备注')
         ? '#remark'
         : message.includes('工单名称')
         ? '[id$="-custom-name"]'
@@ -902,6 +561,8 @@ export function OrderFormB({
         '[aria-invalid="true"]:not([tabindex="-1"]), [data-invalid="true"]',
       );
       const target =
+        (explicitTarget?.fieldId.endsWith('.quantity') ? root.querySelector<HTMLElement>('[id$="-quantity"]') : null) ??
+        (explicitTarget?.fieldId === 'receiverAddress' ? root.querySelector<HTMLElement>('[id$="-receiver-address-paste"]') : null) ??
         (directSelector
           ? root.querySelector<HTMLElement>(directSelector)
           : null) ??
@@ -918,7 +579,7 @@ export function OrderFormB({
           : 'smooth',
       });
     }, 0);
-  }, [cancelIssueFocus, items, onActiveIndexChange, issueFocusTimerRef, rootRef]);
+  }, [cancelIssueFocus, fieldErrors?.targets, items, onActiveIndexChange, issueFocusTimerRef, rootRef]);
 
   useEffect(() => {
     if (
@@ -928,23 +589,11 @@ export function OrderFormB({
       return;
     }
     handledErrorFocusRequestRef.current = errorFocusRequest;
-    if (fieldErrors?.summary?.length) focusIssue(fieldErrors.summary[0]);
-  }, [errorFocusRequest, fieldErrors?.summary, focusIssue, handledErrorFocusRequestRef]);
+    if (errorFocusMessage) focusIssue(errorFocusMessage);
+    else if (fieldErrors?.summary?.length) focusIssue(fieldErrors.summary[0]);
+  }, [errorFocusRequest, errorFocusMessage, fieldErrors?.summary, focusIssue, handledErrorFocusRequestRef]);
 
   if (!item || !field) return null;
-
-  const directFoil =
-    item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ||
-    item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT;
-  const showsFoil =
-    item.pricingRoute !== OrderItemPricingRoute.COLOR_PRINT ||
-    printFoilMode !== 'NONE';
-  const showsSpecialTechnique =
-    item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ||
-    (item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
-      printFoilMode === 'FULL');
-  const customSizeSelected =
-    item.actualWidthMm === null && item.actualHeightMm === null;
 
   const putFile = (file: File, expectedType: DesignFileType) => {
     const prepared = prepareDesignFile(file, {
@@ -1103,33 +752,6 @@ export function OrderFormB({
           data-slot="order-form-editor"
           className="@container min-w-0 rounded-xl border bg-card p-5"
         >
-          {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
-            <div
-              role="alert"
-              data-slot="order-form-errors"
-              tabIndex={-1}
-              className="mb-4 rounded-xl border border-destructive bg-destructive/5 px-4 py-3.5 text-destructive"
-            >
-              <h2 className="text-sm font-extrabold">
-                还有 {fieldErrors.summary.length} 处需要处理
-              </h2>
-              <ul className="mt-2 space-y-0.5 text-xs font-semibold">
-                {fieldErrors.summary.map((message, index) => (
-                  <li key={`${message}-${index}`}>
-                    <Button
-                      type="button"
-                      variant="link"
-                      className="h-auto! min-h-0! min-w-0! justify-start px-0! py-1 text-left whitespace-normal text-destructive underline underline-offset-2 hover:text-destructive hover:opacity-70"
-                      onClick={() => focusIssue(message)}
-                    >
-                      {message}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
           <Group title="工单" first>
             <div>
               <FieldLabel
@@ -1158,248 +780,175 @@ export function OrderFormB({
               onCustomNameChange(nextValue);
             }}
               />
-              <FieldError id={`${uid}-custom-name-message`}>
+              <FieldError id={`${uid}-custom-name-message`} reservedLines={1}>
                 {fieldErrors?.customName}
               </FieldError>
             </div>
             {orderExtras}
           </Group>
 
-          <Group title={`工艺 · 第 ${safeActiveIndex + 1} 款`}>
-            <PillPicker
-              id={`${uid}-route`}
-              label="工艺类型"
-              value={item.pricingRoute}
-              options={ROUTE_OPTIONS}
-              disabled={disabled}
-              error={itemErrors?.route}
-              onChange={onRouteChange}
-            />
+          <OrderItemCraftFields
+            uid={uid}
+            item={item}
+            title={`工艺 · 第 ${safeActiveIndex + 1} 款`}
+            paperKey={paperKey}
+            paperOptions={paperOptions}
+            foilOptions={foilOptions}
+            disabled={disabled}
+            itemErrors={itemErrors}
+            onRouteChange={onRouteChange}
+            onLaminationChange={onLaminationChange}
+            onPrintFoilModeChange={onPrintFoilModeChange}
+            onFoilSidesChange={onFoilSidesChange}
+            onBackFoilToggle={onBackFoilToggle}
+            onFoilTechniqueChange={onFoilTechniqueChange}
+          />
+          <OrderItemMaterialFields
+            uid={uid}
+            item={item}
+            disabled={disabled}
+            itemErrors={itemErrors}
+            materialExtras={materialExtras}
+            paperKey={paperKey}
+            paperOptions={paperOptions}
+            weightOptions={weightOptions}
+            specificationOptions={specificationOptions}
+            allowManualWeight={allowManualWeight}
+            allowCustomSize={allowCustomSize}
+            onPaperChange={onPaperChange}
+            onWeightChange={onWeightChange}
+            onSpecificationChange={onSpecificationChange}
+            onCustomSizeChange={onCustomSizeChange}
+          />
 
-            {item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT ? (
-              <div className="mt-5 space-y-5">
-                {copperPaper ? (
-                  <PillPicker
-                    id={`${uid}-lamination`}
-                    label="覆膜"
-                    value={item.lamination}
-                    options={LAMINATION_OPTIONS}
-                    disabled={disabled}
-                    onChange={onLaminationChange}
-                  />
-                ) : null}
-                <PillPicker
-                  id={`${uid}-print-foil`}
-                  label="叠加烫金"
-                  value={printFoilMode}
-                  options={[
-                    { value: 'NONE', label: '无' },
-                    { value: 'PARTIAL', label: '局部烫金' },
-                    { value: 'FULL', label: '专版烫金' },
-                  ]}
-                  disabled={disabled}
-                  onChange={onPrintFoilModeChange}
-                />
-              </div>
-            ) : null}
-
-            {showsFoil ? (
-              <FoilSideFields
-                item={item}
-                direct={directFoil}
-                maxSelections={
-                  item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT ? 1 : 3
-                }
-                disabled={disabled}
-                error={itemErrors?.foilColors}
-                idStem={`${uid}-style-${safeActiveIndex}`}
-                foilOptions={foilOptions}
-                onFoilSidesChange={onFoilSidesChange}
-                onBackFoilToggle={onBackFoilToggle}
-              />
-            ) : null}
-
-            {showsSpecialTechnique ? (
-              <SpecialTechnique
-                id={`${uid}-special-technique`}
-                value={item.foilTechnique}
-                disabled={disabled}
-                onChange={onFoilTechniqueChange}
-              />
-            ) : null}
-          </Group>
-
-          <Group title="材料">
-            {materialExtras}
-            <OrderPaperSwatchPicker
-              id={`${uid}-paper`}
-              value={paperKey}
-              options={paperOptions}
-              disabled={disabled}
-              error={itemErrors?.paper}
-              onChange={onPaperChange}
-            />
-
-            <div className="mt-5">
+          <Group title="数量与包装">
+            <div className="mb-5">
               <PillPicker
-                id={`${uid}-weight`}
-                label="克重"
-                value={item.paperWeightGsm ?? 0}
-                options={weightOptions.map((option) => ({
-                  ...option,
-                  label: `${option.value}g`,
-                }))}
+                id={`${uid}-packaging-type`}
+                label="包装类型"
+                value={packagingType(packaging.mode)}
+                options={[
+                  { value: 'BAG', label: '入袋' },
+                  { value: 'UNPACKED', label: '不包装' },
+                  { value: 'BOX', label: '装盒' },
+                ]}
                 disabled={disabled}
-                error={itemErrors?.weight}
-                onChange={onWeightChange}
+                onChange={(type) =>
+                  onPackagingModeChange(
+                    packagingModeFor(
+                      type as PackagingType,
+                      isMixedPackaging(packaging.mode),
+                      packagingBoxType(packaging.mode) ?? 'RED_CARD',
+                    ),
+                  )
+                }
               />
-              {allowManualWeight &&
-              item.pricingRoute ===
-                OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
-                <div className="mt-2">
-                  <div className="flex max-w-[11rem] items-center gap-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={2000}
-                      step={1}
-                      aria-label="手动输入克重"
-                      placeholder="手动输入"
-                      disabled={disabled}
-                      value={
-                        item.paperWeightGsm !== null &&
-                        !weightOptions.some((option) => option.value === item.paperWeightGsm)
-                          ? item.paperWeightGsm
-                          : ''
-                      }
-                      onChange={(event) => {
-                        const next = Number(event.target.value);
-                        if (Number.isInteger(next) && next > 0) {
-                          onWeightChange(next);
-                        }
-                      }}
-                    />
-                    <span className="text-xs font-bold text-muted-foreground">g</span>
-                  </div>
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    手动输入克重转管理员终价
-                  </p>
+              {packagingType(packaging.mode) === 'BOX' ? (
+                <div className="mt-4">
+                  <PillPicker
+                    id={`${uid}-box-type`}
+                    label="盒子"
+                    value={packagingBoxType(packaging.mode) ?? 'RED_CARD'}
+                    options={Object.entries(PACKAGING_BOXES).map(([value, box]) => ({
+                      value,
+                      label: `${box.label} · 最多 ${box.capacity} 个/盒`,
+                    }))}
+                    disabled={disabled}
+                    onChange={(box) =>
+                      onPackagingModeChange(
+                        packagingModeFor(
+                          'BOX',
+                          isMixedPackaging(packaging.mode),
+                          box as PackagingBoxType,
+                        ),
+                      )
+                    }
+                  />
                 </div>
               ) : null}
             </div>
-
-            <div className="mt-5">
-              <PillPicker
-                id={`${uid}-specification`}
-                label="规格"
-                value={item.specification ?? ''}
-                options={specificationOptions}
-                disabled={disabled}
-                error={itemErrors?.specification}
-                onChange={onSpecificationChange}
-              />
-              {item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK &&
-              paperKey !== 'PEARL_FLASH' ? (
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  迷你封仅珠光纸艳闪可做
-                </p>
-              ) : null}
-              {allowCustomSize &&
-              item.pricingRoute ===
-                OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
-                <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-                  <Checkbox
-                    checked={customSizeSelected}
-                    disabled={disabled}
-                    aria-label="改尺寸（转管理员终价）"
-                    onCheckedChange={onCustomSizeChange}
-                  />
-                  改尺寸（转管理员终价）
-                </label>
-              ) : null}
-            </div>
-          </Group>
-
-          <Group title="数量与包装">
             <div className="grid grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-              <div>
-                <FieldLabel htmlFor={`${uid}-quantity`} required>
-                  数量
-                </FieldLabel>
-                <Input
-                  id={`${uid}-quantity`}
-                  type="number"
-                  min={1}
-                  step={1}
-                  required
-                  aria-required="true"
-                  aria-invalid={Boolean(itemErrors?.quantity)}
+              <OrderItemQuantityField
+                uid={uid}
+                item={item}
+                disabled={disabled}
+                itemErrors={itemErrors}
+                onQuantityChange={onQuantityChange}
+              />
+              {packagingType(packaging.mode) !== 'UNPACKED' ? (
+                <div>
+                  <FieldLabel htmlFor={`${uid}-units-per-bag`} required>
+                    {packagingType(packaging.mode) === 'BOX' ? '每盒数量' : '每包数量'}
+                  </FieldLabel>
+                  <Input
+                    id={`${uid}-units-per-bag`}
+                    type="number"
+                    min={1}
+                    max={packagingCapacity(packaging.mode) ?? undefined}
+                    step={1}
+                    required
+                    aria-required="true"
+                    aria-invalid={Boolean(packaging.error || fieldErrors?.packaging)}
+                    aria-describedby={`${uid}-packaging-message`}
+                    disabled={disabled}
+                    value={packaging.unitsPerBag || ''}
+                    className="h-10"
+                    onChange={(event) => onUnitsPerBagChange(Number(event.target.value) || 0)}
+                  />
+                  <FieldError
+                    id={`${uid}-packaging-message`}
+                    reservedLines={2}
+                    hint={
+                      packaging.bagCount !== null
+                        ? `共 ${packaging.bagCount.toLocaleString('zh-CN')} ${packagingType(packaging.mode) === 'BOX' ? '盒' : '包'}`
+                        : undefined
+                    }
+                  >
+                    {packaging.error ?? fieldErrors?.packaging}
+                  </FieldError>
+                </div>
+              ) : (
+                <div className="flex items-center text-sm text-muted-foreground">
+                  包装费 ¥0.00
+                </div>
+              )}
+            </div>
+            {packagingType(packaging.mode) !== 'UNPACKED' ? (
+              <div className="mt-5">
+                <PillPicker
+                  id={`${uid}-packaging-mode`}
+                  label="包装方式"
+                  value={isMixedPackaging(packaging.mode) ? 'MIXED_STYLE' : 'SINGLE_STYLE'}
+                  options={[
+                    {
+                      value: OrderPackagingMode.SINGLE_STYLE,
+                      label: '常规装',
+                    },
+                    {
+                      value: OrderPackagingMode.MIXED_STYLE,
+                      label: '混装',
+                      disabled: itemFields.length < 2,
+                    },
+                  ]}
                   disabled={disabled}
-                  value={item.quantity || ''}
-                  className="h-10"
-                  onChange={(event) =>
-                    onQuantityChange(Number.parseInt(event.target.value, 10) || 0)
-                  }
-                />
-                <FieldError>{itemErrors?.quantity}</FieldError>
-              </div>
-              <div>
-                <FieldLabel htmlFor={`${uid}-units-per-bag`} required>
-                  每包数量
-                </FieldLabel>
-                <Input
-                  id={`${uid}-units-per-bag`}
-                  type="number"
-                  min={1}
-                  step={1}
-                  required
-                  aria-required="true"
-                  aria-invalid={Boolean(
-                    packaging.error || fieldErrors?.packaging,
-                  )}
-                  disabled={disabled}
-                  value={packaging.unitsPerBag || ''}
-                  className="h-10"
-                  onChange={(event) =>
-                    onUnitsPerBagChange(
-                      Number.parseInt(event.target.value, 10) || 0,
+                  onChange={(mode) =>
+                    onPackagingModeChange(
+                      packagingModeFor(
+                        packagingType(packaging.mode),
+                        mode === 'MIXED_STYLE',
+                        packagingBoxType(packaging.mode) ?? 'RED_CARD',
+                      ),
                     )
                   }
                 />
-                {packaging.bagCount !== null && !packaging.error ? (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    共 {packaging.bagCount.toLocaleString('zh-CN')} 包
-                  </p>
+                {itemFields.length < 2 ? (
+                  <p className="mt-2 text-xs text-muted-foreground">混装需至少 2 款</p>
                 ) : null}
-                <FieldError>
-                  {packaging.error ?? fieldErrors?.packaging}
-                </FieldError>
               </div>
-            </div>
-            <div className="mt-5">
-              <PillPicker
-                id={`${uid}-packaging-mode`}
-                label="包装方式"
-                value={packaging.mode}
-                options={[
-                  {
-                    value: OrderPackagingMode.SINGLE_STYLE,
-                    label: '常规装',
-                  },
-                  {
-                    value: OrderPackagingMode.MIXED_STYLE,
-                    label: '混装',
-                    disabled: itemFields.length < 2,
-                  },
-                ]}
-                disabled={disabled}
-                note={itemFields.length < 2 ? '混装需两款以上' : undefined}
-                onChange={onPackagingModeChange}
-              />
-            </div>
+            ) : null}
           </Group>
 
-          {packagingExtras}
+          {packagingExtras ? <div className="mt-5">{packagingExtras}</div> : null}
 
           {pricingExtras}
 
@@ -1469,6 +1018,11 @@ export function OrderFormB({
                 required
                 aria-required="true"
                 aria-invalid={Boolean(fieldErrors?.receiverAddress)}
+                aria-describedby={
+                  fieldErrors?.receiverAddress
+                    ? `${uid}-receiver-address-message`
+                    : undefined
+                }
                 disabled={disabled}
                 placeholder="粘贴电商后台地址串，自动拆分"
                 className="min-h-16"
@@ -1477,7 +1031,9 @@ export function OrderFormB({
                   onReceiverAddressChange(event.target.value)
                 }
               />
-              <FieldError>{fieldErrors?.receiverAddress}</FieldError>
+              <FieldError id={`${uid}-receiver-address-message`} reservedLines={1}>
+                {fieldErrors?.receiverAddress}
+              </FieldError>
             </div>
 
             {values.receiverAddress.trim() ? (
@@ -1490,6 +1046,7 @@ export function OrderFormB({
                     receiverPhone={receiverPhoneInitialValue}
                     nameRequired={receiverNameRequired}
                     phoneRequired={receiverPhoneRequired}
+                    reserveErrorSpace
                     disabled={disabled}
                     errors={fieldErrors}
                     onNameChange={onReceiverNameChange}
@@ -1530,6 +1087,34 @@ export function OrderFormB({
             </label>
           </Group>
           {footerExtras}
+
+          {/* Async error summaries must not shift fields while they are being edited. */}
+          {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
+            <div
+              role="alert"
+              data-slot="order-form-errors"
+              tabIndex={-1}
+              className="mt-5 rounded-xl border border-destructive bg-destructive/5 px-4 py-3.5 text-destructive"
+            >
+              <h2 className="text-sm font-extrabold">
+                还有 {fieldErrors.summary.length} 处需要处理
+              </h2>
+              <ul className="mt-2 space-y-0.5 text-xs font-semibold">
+                {fieldErrors.summary.map((message, index) => (
+                  <li key={`${message}-${index}`}>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto! min-h-0! min-w-0! justify-start px-0! py-1 text-left whitespace-normal text-destructive underline underline-offset-2 hover:text-destructive hover:opacity-70"
+                      onClick={() => focusIssue(message)}
+                    >
+                      {message}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
 
         <StickyOrderFormRail rail={rail} />

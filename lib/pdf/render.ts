@@ -14,6 +14,7 @@ export const PDF_PRINT_READY_TIMEOUT_MS = 12_000;
 
 export type RenderPdfOptions = {
   html: string;
+  requireArtwork?: boolean;
   // Extra `page.pdf()` flags. The work-order paper invariants below (A4,
   // background graphics, CSS page size, and zero Puppeteer margins) always
   // win so preview and downloaded PDF cannot drift apart.
@@ -86,6 +87,9 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
       : null);
     if (pagination !== null && pagination !== 'ready') throw new PrintLayoutOverflowError();
     opts.signal?.throwIfAborted();
+    if (opts.requireArtwork && await page.evaluate(() => document.querySelector('.thumb.image-failed') !== null)) {
+      throw new PrintArtworkUnavailableError();
+    }
     const pdf = await page.pdf({
       ...opts.pdf,
       format: 'A4',
@@ -129,4 +133,8 @@ class PdfBrowserVersionMismatchError extends Error {
     super('PDF_BROWSER_VERSION_MISMATCH');
     this.name = 'PDF_BROWSER_VERSION_MISMATCH';
   }
+}
+
+export class PrintArtworkUnavailableError extends Error {
+  constructor() { super('PRINT_ARTWORK_UNAVAILABLE'); this.name = 'PrintArtworkUnavailableError'; }
 }

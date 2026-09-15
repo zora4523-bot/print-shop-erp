@@ -17,6 +17,7 @@ import type {
   CreateOrderPricingGroup,
 } from '../price/create-order/types';
 import { CREATE_ORDER_PRINT_FOIL_PRICING_POLICY } from '../price/create-order/types';
+import { BOX_PRICE_RULES } from '@/lib/price/box-packaging-rules';
 import { parseCustomerRuleCondition } from '../price/customer-rule-condition';
 import type {
   ExternalOrderChargeRule,
@@ -995,6 +996,42 @@ function projectBagging(
   };
 }
 
+function projectBoxing(
+  rules: readonly PublishedCreateOrderRuleRow[],
+  consumed: Set<string>,
+): CreateOrderPriceSnapshot['boxing'] {
+  const boxRules = rules.filter(
+    (rule) => rule.exclusiveGroup === 'BOX_CONTAINER' || rule.exclusiveGroup === 'BOX_LABOR',
+  );
+  if (boxRules.length === 0) return undefined;
+  const rates = BOX_PRICE_RULES.map((definition) => {
+    const rule = requireOneRule(
+      boxRules.filter((candidate) => candidate.code === definition.code),
+      definition.name,
+    );
+    requireRuleShape(rule, {
+      kind: CustomerPriceRuleKind.ADD_ON,
+      calculationType: CustomerPriceCalculationType.PER_BOX,
+    });
+    const condition = processingCondition(rule);
+    if (
+      condition.target !== 'PACKAGING_GROUP' ||
+      rule.exclusiveGroup !== definition.group ||
+      !condition.packagingModes ||
+      condition.packagingModes.length !== definition.modes.length ||
+      condition.packagingModes.some(
+        (mode) => !(definition.modes as readonly string[]).includes(mode),
+      ) ||
+      rule.minQty !== null ||
+      rule.maxQty !== null
+    )
+      invalidRule(rule, '盒子收费须按盒型及实际盒数计价');
+    consumed.add(rule.id);
+    return normalizedDecimal(rule.amount, { rule, label: definition.name })!;
+  });
+  return { redCardEmptyBox: rates[0], tactileEmptyBox: rates[1], packingPerBox: rates[2] };
+}
+
 function positivePolicyDecimal(value: unknown): string | null {
   if (typeof value !== 'number' && typeof value !== 'string') return null;
   try {
@@ -1332,6 +1369,7 @@ export function projectPublishedCreateOrderPriceSnapshot(
   );
   const print = projectPrint(automaticProcessingRules, consumed);
   const bagging = projectBagging(automaticProcessingRules, consumed);
+  const boxing = projectBoxing(automaticProcessingRules, consumed);
   for (const rule of automaticProcessingRules) {
     if (consumed.has(rule.id)) continue;
     const code = textCode(rule.code);
@@ -1367,6 +1405,7 @@ export function projectPublishedCreateOrderPriceSnapshot(
       full: full.snapshot,
       print: print.snapshot,
       bagging: bagging.snapshot,
+      ...(boxing ? { boxing } : {}),
       plate: {
         label: '\u5236\u70eb\u91d1\u7248\u8d39',
         pricingPolicy: 'ADMIN_MANUAL_ONLY',

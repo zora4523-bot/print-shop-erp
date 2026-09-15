@@ -7,21 +7,41 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 2026-09-13 管理员建单人工定价与拆址修复
+
+`createOrderAction` 的管理员载荷支持 `items[].adminPrice={amount,reason,factsKey}`（整款加工费总额，两位小数）及 `packagingGroups[].adminPrice`（每袋/盒单价，四位小数）。服务端检查活跃管理员、金额、原因及当前条件，落库为既有管理员确认快照，提交时保留可信人工价。销售端禁止该字段（包含显式 null）。`factsKey` 是防止误用旧价的条件对照，不作为授权凭证。
+
+新增地址预览增加 `requiresPriceReview`（保存后是否需重新核价）和 `packaging`（组号、旧/新盒数、小计、差额），`charges[].shippingFee`、`packingMaterialFee` 可为 null 表示待核；保存同步包装费用和价格修订。拆址改变已物化工序的盒数时，返回业务错误并要求工单修改申请。详见 [行为、权限及发布步骤](./docs/管理员建单定价与装盒修复-20260913.md)。
+
 本项目不是面向第三方开放的 REST API。页面读取主要由 Server Components 完成，页面写入主要通过 Server Actions；HTTP Route Handlers 只承担认证、健康检查、调度、下载、导出和少量查询。
 
 端点实现以 [`app/api/`](./app/api/) 为事实源。修改方法、认证、参数、状态码或响应形状时，必须同步修改本文件和契约测试。
 
+## 建单包装类型（2026-09-13）
+
+`createOrderAction` 和内外部报价仍复用同一包装计算链。`packagingGroups[].mode` 支持原有 `SINGLE_STYLE` / `MIXED_STYLE`（入袋），新增 `UNPACKED`、`BOX_RED_CARD` / `BOX_RED_CARD_MIXED`、`BOX_TACTILE` / `BOX_TACTILE_MIXED`。默认仍为入袋。
+
+兼容字段 `actualBagCount` 在装盒时表示盒数，在不包装时必须为 0；数量由服务端按款式、包装组成和发货地址重新计算。`itemUnitsPerBag` 的正值用于保留不包装款式的组归属，不作为收费依据。不包装允许款式 `pack=null`；包装模式由通过归属校验的包装组推导。外部销售仍不得提交单价、覆盖金额或价格快照。
+
+管理员建单报价 `shipmentQuantities` 为按地址排列的逐款数量数组，装盒必须与各款总数一致；省略时按同一地址计算。最终创建与提交总是按持久化发货事实重新计算。装盒缺失已发布规则时返回待核价，不能自动使用 0 元或前端常量。详见 [包装规则](./docs/加工费计费规则.md#4-包装包装组级)。
+
+本地草稿仅保存可编辑事实；恢复时补回本次会话的 `clientSubmissionId`，不复用历史提交标识。
+
 ## 销售工作台计算
 
-`actions/workbench.ts` 的 `quoteWorkbenchAction(raw)` 要求 `order:create`。
-输入为单款产品 ID、当前目录规格/纸张、计价路线、整数数量、正反面烫金颜色、烫金方式和 0–100 的整数加价百分比。
-服务端校验目录归属与颜色，复用建单 schema，并在正式计价事务中重新校验目录、读取当前价格。
-目录纸张缺少克重时返回明确的补资料错误，不猜测克重或金额。
-纸张输入是目录选项显示值，最多 69 字符（物料名称与克重前缀）；必须精确匹配当前目录选项。服务端使用建单同一规范化函数拆分名称和克重，再执行订单原有 32 字名称校验。合法 32 字名称不因显示克重前缀而被拒绝；规范化后仍超限时返回人工核价提示，不截断名称。
-返回 `{ status: 'success', quote }` 或 `{ status: 'error', message }`；认证失败沿用授权入口抛错。
-`quote` 只含加工费、加价金额、加工费参考报价、费用明细、核价/制版待定标记及加工价版本号。金额均为十进制字符串，缺价为 `null`；不返回内部成本、规则快照或报价签名，不写订单。
-`quote.pricingReasons` 为受控中文核价原因数组，完整报价为空数组；前端兼容省略该字段的响应。原因由正式引擎的业务代码映射，不透传内部诊断。已知规格/烫金组合错误返回具体的修改条件或人工核价提示，其他异常保持通用错误。
-计算范围与原型差异见 [销售工作台](./docs/销售工作台.md)。
+`actions/workbench.ts` 的当前入口 `quoteWorkbenchItemAction({ item })` 要求 `order:create`，先授权再解析。`item` 复用建单报价 schema，包含产品、路线、纸张名称和克重、规格/尺寸、整数数量、正反面颜色、覆膜及局部/专版加烫事实；不接受人工改价。金额、加价比例及报价签名不属于该输入，解析后不传给领域服务。
+
+服务端经 `calculateWorkbenchItem` 调用 `calculateCreateOrderQuoteFromCatalogInTx`，重新校验目录、工艺及当前发布版本；只计算当前单款加工费，不纳入包装和运费。不新增价格算法、价格账本或订单。
+
+返回 `{ status: 'success', quote }` 或 `{ status: 'error', message }`，认证失败沿用授权入口抛错。`quote` 仅含加工费及明细、核价/制版待定标记和加工价版本号。金额为十进制字符串，缺价为 `null`；不返回内部成本、规则快照或签名。为兼容现有响应形状，新入口返回的 `markupAmount` 为零、`suggestedAmount` 等于完整基础加工费（未知仍为 `null`）。工作台使用同一纯 Decimal 函数在客户端计算 0–100 的整数加价比例；加价变化不再发起报价请求。
+
+`quote.pricingReasons` 是受控中文核价原因数组，完整报价为空数组；前端兼容省略该字段。不得把未知费用当成零或把加工费参考价当成整单总价。纸张缺货、规格失效和不支持的组合继续由建单领域校验决定结果。
+
+旧 `quoteWorkbenchAction(raw)` 保留原签名及目录显示值解析作为兼容入口，也委托同一服务计算。旧纸张输入最多 69 字符，须精确匹配当前目录，再拆分为订单允许的名称（最多 32 字）和克重；不截断名称。当前工作台不再调用旧入口。
+
+“按此款式创建工单”仅把经 schema 校验的款式事实保存到当前账号的 sessionStorage，30 分钟有效，以随机标识进入 `/orders/new?fromWorkbench=...`；不携带加价或金额。建单页重新核对目录，使用独立本地草稿键保留原未完成工单，并通过原建单报价/提交动作重新核价和授权。顶部普通“创建工单”链接仍进入常规新建页。
+
+计算器使用和变更记录见 [销售工作台](./docs/销售工作台.md)。
 
 ## 认证类型
 
@@ -79,7 +99,7 @@ applies_to: repository source at last_verified
 | `GET /api/admin/inventory-count/materials` | Permission `material:manage` | query `q`、`limit` | `200 {materials}`；未授权 `401` |
 | `GET /api/orders/admin/:orderNo` | Permission `order:view:all` + ADMIN | path `orderNo` | `200 {order}`；未授权 `401`，非管理员 `403`，不可见或不存在 `404`；响应 `private, no-store` |
 | `GET /api/cdr/bundles/:id` | Capability URL | cuid 风格 bundle id | 就绪后 `302` 到产物；生成中 `409` + `Retry-After`；失效或不存在统一 `404`；OSS 不可用 `503` |
-| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500` |
+| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500`；生成服务不可用或任务等待达到两分钟 `503`（手动查询原任务，不自动刷新） |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
 | `GET /api/salary/piecework-settlements/export` | Permission `salary:view:all`，复核数据库账号状态 | query `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 | `GET /api/salary/piecework/export` | Permission `salary:view:all` | query `date` 或 `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
@@ -141,6 +161,10 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 [`actions/admin-order-workflow.ts`](./actions/admin-order-workflow.ts) 和
 [`lib/order/change-request.ts`](./lib/order/change-request.ts)。
 
+- `quoteExternalCreateOrderAction` 同时允许 SALES 自助报价与 ADMIN 代建预览；仍使用同一已发布价目、参数校验和报价 token，不允许客服伪造外部结算。关联账号的有效性在实际创建事务中重验。
+- `createOrderAction` 新增选填 `externalSalesUserId`：仅 ADMIN 可指定启用的 SALES 账号。事务内锁定并验证账号，写入 `submitterId` 与 `EXTERNAL_SALES` 结算方向，`submitterRole=SALES` 满足结算一致性约束，实际管理员保留在 `createdById` 和创建日志；未指定仍为 `FACTORY_DIRECT`。外部销售原始输入出现该字段（包括 null）直接拒绝；客服/师傅不能代指定。重复创建按实际创建人和原归属校验。
+- 管理员新建页移除 `customerPartyId/customerRef` 输入；管理员新建时这两个值统一为空，忽略旧浏览器草稿中的残留。其他角色和既有工单的客户关联保持原契约。
+- 新建的 `items[].pack` 上限为 12；`packagingGroups[].itemUnitsPerBag` 的一包合计最多 12，混装按各款相加。预报价、创建 schema、创建领域及页面同步校验，不改变旧工单包装及历史报价。数量为正整数；超限须调整，不能自动截断或按零费用放行。
 - `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；`customerPartyId` 只能选择活动客户（不变的历史关联可保留）。ADMIN 可修改范围内工单，SALES / CUSTOMER_SERVICE 仅可修改自己创建的工单；存在待审批申请时拒绝保存。
 - 管理员编辑页的“关联外部销售”使用 `externalSalesUserId`，只列出启用的 SALES 账号。它更新工单 `submitterId`，同步销售访问范围及后续对账归属，不写入客户主数据 `customerPartyId`。仅 ADMIN 可更换 DRAFT / PENDING_FACTORY / REJECTED / SUBMITTED 的 EXTERNAL_SALES 工单；已有结算、发货、账单（含草稿）、客服业绩或重做关联时拒绝转移。非外部销售工单不得借此转换结算方向。空账号和无效账号拒绝；未更换的历史账号可保留。事务内锁定工单与目标账号并验证递增编辑版本，保留创建人、创建时角色、客户简称、配送及全部金额快照；日志记录前后账号名称与账号 ID。
 - 完整编辑页用 `shipments` JSON 提交全部现有配送记录的 `id`、收件人、电话、地址、快递代码、`expectedDestinationProvince` 和 `sameDestination`。服务端校验记录集合与工单归属，拒绝新增、遗漏、重复和已发货记录的修改；外部销售需完整联系人。寄付地址变更必须明确确认原计费省份与条件未变；跨省、未核定或计费条件变化不能用普通编辑跳过物流核价。未带配送 JSON 的旧入口不能修改外部寄付地址。
@@ -316,3 +340,28 @@ PDF 生成接口仍执行认证、角色和资源所有权校验；页面下载�
 ### 跨设备 PDF（2026-09-11）
 
 `GET /api/orders/:id/pdf` 默认 attachment；`view=inline` 使用 inline 供系统 PDF 阅读器打开，其他/重复 view 返回 400。202 轮询保留 view 与 jobId；失败恢复链接携带 `regenerate=1` 新建生成请求。同一授权内容在 15 分钟数据库时间窗口内复用任务；产物保留 1 小时，可重复下载，每次仍检查账号、所有权及当前工单版本。产物存储可选持久共享卷或私有 OSS，不提供公开下载地址。详见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+
+
+### 批量打印工单
+
+`requestBatchPrintAction` 要求 `order:view:all`，领域层复核账号启用且为 ADMIN。
+输入为 UUID `requestId` 和按列表顺序排列的 1–50 个不重复 `orderIds`。
+成功返回 `{status: 'queued', jobId}`；选择无效返回按所选顺序编号的问题项，不创建部分任务。
+使用 HEAVY 队列 `ORDER_BATCH_PDF`，不改变工单状态或创建生产下发记录。
+
+`GET /api/orders/batch-print/:jobId` 返回私有、不缓存的进度 JSON：
+`status`（pending/ready/failed/unavailable）、`completed`、`total`、`issues`；
+pending/unavailable 另有 `phase`（queued/rendering/merging）。
+同账号同有序内容的进行中任务复用；同一十五分钟时间窗内完整有效结果复用，不依赖客户端 requestId 相同。
+仅创建者可读；账号权限每次复核。`view=download` 下载合并 PDF，`view=inline` 内联打开。
+下载返回 200；未登录 401；无权限或任务不存在 404；未就绪或工单内容变化 409；
+文件过期或读取失败 503；非法 view/id 400。所有响应 `Cache-Control: private, no-store`。
+下载前后重新检查所有工单内容标识及创建者权限，任意变化阻止整份文件下载。
+
+### 空白封纸张与规格价格（2026-09-13）
+
+`actions/blank-paper.ts` 的 `addBlankPaperAction` 同时要求 `dict:price:manage`、`material:manage`、`dict:product:manage`。输入包括 `priceBookId`、ISO `expectedUpdatedAt`、`paper`（`mode: new` 的名称与整数克重，或 `mode: existing` 的纸张 ID）及 1–6 个唯一 `specifications`。规格 key 为 `mini / square / mid / large / west-mid / west-large`；`amount` 为非负、最多四位小数的十进制字符串或 `null`。
+
+事务内锁定价格写入，验证外部销售加工费草稿、更新时间、纸张身份与启用/缺货状态、产品分类和规格唯一性，创建或复用纸张/产品并保存草稿价格与审计。`null` 仅保留可建单组合，不生成价格规则；零元生成真实零价规则。重复价格格拒绝覆盖，价格修改沿用既有草稿矩阵 Action。返回 `{status:'success',paperId,priceBookId}` 或可预期业务错误 `{status:'error',message}`；权限与未知系统异常不吞掉。
+
+销售目录在保存后刷新，自动计价仍只消费已发布价目；历史工单不重算。`updateMaterial` 拒绝直接修改已关联建单产品的纸张名称、规格克重或分类，防止破坏产品与纸张身份。流程与验证范围见 [空白封纸张规格管理](./docs/空白封纸张规格管理-20260913.md)。

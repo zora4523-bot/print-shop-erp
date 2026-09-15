@@ -30,12 +30,16 @@ const authenticatedProxy: NextMiddleware = auth((req, _event: NextFetchEvent) =>
     );
   }
 
-  // /login is excluded by the matcher. Preserve the requested pathname so a
+  // /login is excluded by the matcher. Preserve the requested path and query so a
   // successful login can send the user back to the page they intended to open.
   const url = new URL('/login', req.url);
   const { pathname } = req.nextUrl;
   if (pathname !== '/') {
-    url.searchParams.set('from', pathname);
+    // `_rsc` 是 Next 的 RSC 缓存参数，不属于用户请求的页面地址，不能带进回跳。
+    const query = new URLSearchParams(req.nextUrl.search);
+    query.delete('_rsc');
+    const search = query.size ? `?${query.toString()}` : '';
+    url.searchParams.set('from', pathname + search);
   }
   return NextResponse.redirect(url);
 });

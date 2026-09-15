@@ -8,9 +8,16 @@
 
 ## 最后更新
 
-2026-09-03（企业微信通知、人工制版费、改单并发与管理端列表收口；已拆分 commit、未部署，真实群验收与按人路由仍待完成）
+2026-09-14（PR #19 `codex/gongdanceshi` → `main` 开出：09-13 建单 / 定价 / 装盒 / 打印批次 + 09-14 结构体检收口 + CI 复核修复；未合并、未部署）
 
 ## 已完成
+
+### 2026-09-15 半分金额容差与存量生产资料补录
+
+- [x] 单价乘数量先舍入再拆固定费；建单与改单统一 0.01 元容差。
+- [x] 管理员终价保存与生产就绪分离，未就绪日志/预览/详情页提示。
+- [x] 管理员补录空工艺及缺失包装组，保留历史金额、版本锁和审计；已确认价格只对可信依据续接。
+- Codex 逐文件说明见 `docs/archive/2026-09-14-金额与存量生产资料修复报告.md`；在 `codex/tijian-2`，未合并、未部署。
 
 ### P0（MVP 核心，2026-05-06 收官，详细过程见 HANDOFF.md 历史）
 
@@ -35,6 +42,22 @@
 - [x] **企业微信单条字节守卫**：按[官方消息推送文档](https://developer.work.weixin.qq.com/document/path/99110)在模板保存和真实/mock 发送前均限制 `markdown.content ≤ 4096 UTF-8 字节`。
 - [x] **共享 Webhook 全局节流**：真实 `sendWebhook` 以规范化 endpoint/key 的 SHA-256 摘要为键，由 PostgreSQL 原子预留 3500ms permit，同 URL 跨事件、跨 worker 进程串行；等待可被 durable lease signal 中止，mock/注入 sender 不触库。未部署 migration `20260902121100_notification_webhook_global_throttle` 前不得开启生产真发。
 - [ ] **企业微信仍未完成的项**：尚未做 per-CS / 对应师傅的按人路由；真实企微群与 durable LIGHT worker 仍需在应用新 migration 后做生产人工验收。
+
+### 2026-09-13 建单 / 定价 / 装盒 / 打印批次（26 个提交，详见 DECISIONS 2026-09-11 ~ 09-13）
+
+- [x] 管理员建单定价与关联外部销售（仅 ADMIN 可选活动 SALES，冻结 `EXTERNAL_SALES`）；管理员创建不再录入工单客户及简称。
+- [x] 包装：默认入袋、不包装、红卡盒 / 触感盒版本化装盒计价；每包上限 12；多地址装盒分别进位。
+- [x] 专版十一档「达到档位取价」（`e5bac3cb`），价目簿由 `scripts/publish-confirmed-custom-tiers.ts` 发布，**不是 migration**。
+- [x] 空白封纸张规格价格、批量打印 PDF、报价转单草稿修复、品牌名统一为「长昆纸品有限公司」、库存列表隐藏物料编码。
+
+### 2026-09-14 结构体检与 PR #19 CI 复核（`codex/tijian-2` 修后快进）
+
+- [x] 体检报告 `docs/archive/项目结构体检-2026-09-14.md`；6 项缺陷收口：架构门禁回绿、Browser Mode 截图产物 gitignore、golden-gate 按谱系登记期望（`1f6556ef`）、`lib/auth/schemas.ts` 按域拆分（`3a70278e`）、`docs/archive/` 归档规则、CLAUDE.md 1.3 同步。两轮 Codex 只读复审通过。
+- [x] CI 复核（Actions 账单恢复后）：打印基线更新（`4a6d5fd9`，业主确认）、Browser Mode 5 个 spec 补 mock（`010b154f`）、管理端六视口门禁与 e2e 过时断言同步（`77aebdd7` / `8622a5dc` / `65c2e1de`）。
+- [x] **真回归修复 `3578db20`**：管理员建单「复制当前」整页崩进错误边界（人工定价区按下标取款缺守卫）。
+- [x] **`64f78382`**：装盒价目是部署后数据步骤，新增 `prepare-e2e-box-packaging.ts` 进 `test:e2e:prepare`；生产启用装盒仍需手动执行 `install-box-packaging-rules.ts --apply`。
+- [x] `aec6e722`：经营分析业绩排行 Y 轴长显示名按字体度量省略，不再在 375 / 393 溢出。
+- [ ] CI 后三步（durable / 跨浏览器打印 / dev-fixtures）尚未在 CI 上跑绿过；PR 合并后删 `codex/tijian-2`。
 
 ### 2026-09-03 提交记录
 
@@ -260,7 +283,7 @@
 
 - [x] **根路由失效会话 500 已修复**：签名 JWT 通过 Edge proxy、但数据库账号已删除或停用时，`/` 现由 `getSession()` 验证后跳转 `/login`，不再抛 `UnauthorizedError` 500 或连带触发 React Script 警告。四角色分流、失效会话和真实异常透传测试已补；提交 `cbc88ca`，Prisma validate、typecheck、lint、236 文件 / 2988 单测、Next build 与浏览器复验全绿。
 
-0a. [x] **Codex 结构复审已收口**：复审表已填完，B1–B6 和 S1–S7 中当前仍成立的部分已按规定修法落地并拆成小提交。未采用的旧修法 / 过度推论见 `docs/代码质量审查-2026-08-23.md`；`RETRYING` 仍不会在 job DEAD 时被改成 `FAILED`。本次 Prisma validate、typecheck、lint、235 文件 / 2982 单测、覆盖率门禁和 Next 生产 build 均通过；仅有当前 Node 22 低于仓库声明 Node 24 的 engine 警告。
+0a. [x] **Codex 结构复审已收口**：复审表已填完，B1–B6 和 S1–S7 中当前仍成立的部分已按规定修法落地并拆成小提交。未采用的旧修法 / 过度推论见 `docs/archive/代码质量审查-2026-08-23.md`；`RETRYING` 仍不会在 job DEAD 时被改成 `FAILED`。本次 Prisma validate、typecheck、lint、235 文件 / 2982 单测、覆盖率门禁和 Next 生产 build 均通过；仅有当前 Node 22 低于仓库声明 Node 24 的 engine 警告。
 
 **然后（2026-08-21 对抗审查批次收尾，仍不需要拍板）**：
 

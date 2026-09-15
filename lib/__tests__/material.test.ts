@@ -13,6 +13,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
       findFirst: vi.fn(),
     },
     material: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    product: { count: vi.fn() },
     materialLocationStock: { update: vi.fn() },
     materialTransaction: { create: vi.fn(), findUnique: vi.fn() },
   };
@@ -62,6 +63,7 @@ import {
 } from '../material';
 
 beforeEach(() => {
+  txMock.product.count.mockReset().mockResolvedValue(0);
   dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.material)) fn.mockReset();
   dbMock.materialTransaction.create.mockReset();
@@ -327,6 +329,16 @@ describe('createMaterial', () => {
 });
 
 describe('updateMaterial', () => {
+  it('已关联建单产品的纸张不能改写身份，避免销售选择和历史规则失联', async () => {
+    const material = makeMaterial({ unit: '张' });
+    txMock.material.findUnique.mockResolvedValue(material);
+    txMock.product.count.mockResolvedValue(1);
+    await expect(updateMaterial('mat1', { code: material.code, name: '改名', category: MaterialCategory.PAPER,
+      specification: material.specification, unit: '张', safetyStock: null, averageCost: null,
+    })).rejects.toThrow('纸张已用于建单产品');
+    expect(txMock.material.update).not.toHaveBeenCalled();
+  });
+
   it('throws when target missing', async () => {
     txMock.material.findUnique.mockResolvedValue(null);
     await expect(

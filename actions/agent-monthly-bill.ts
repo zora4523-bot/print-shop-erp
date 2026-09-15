@@ -83,7 +83,7 @@ export async function generateAgentMonthlyBillsAction(
   _previous: AgentMonthlyBillActionResult | null,
   formData: FormData,
 ): Promise<AgentMonthlyBillActionResult> {
-  const actor = await requirePermission('bill:view:all');
+  const actor = await requirePermission('bill:manage');
   const parsed = generateSchema.safeParse(formObject(formData));
   if (!parsed.success) return invalid(parsed.error);
   try {
@@ -108,7 +108,7 @@ export async function confirmAgentMonthlyBillAction(
   _previous: AgentMonthlyBillActionResult | null,
   formData: FormData,
 ): Promise<AgentMonthlyBillActionResult> {
-  const actor = await requirePermission('bill:view:all');
+  const actor = await requirePermission('bill:manage');
   const parsed = confirmSchema.safeParse(formObject(formData));
   if (!parsed.success) return invalid(parsed.error);
   try {
@@ -172,7 +172,7 @@ export async function createAgentMonthlyBillCreditAction(
   _previous: AgentMonthlyBillActionResult | null,
   formData: FormData,
 ): Promise<AgentMonthlyBillActionResult> {
-  const actor = await requirePermission('bill:view:all');
+  const actor = await requirePermission('bill:manage');
   const parsed = creditSchema.safeParse(formObject(formData));
   if (!parsed.success) return invalid(parsed.error);
   try {

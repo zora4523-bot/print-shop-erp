@@ -123,3 +123,11 @@ describe('renderHtmlToPdf', () => {
     expect(browser.close).not.toHaveBeenCalled();
   });
 });
+
+it('rejects failed uploaded artwork before producing a cacheable PDF', async () => {
+  const { browser, page } = renderHarness();
+  vi.mocked(page.evaluate).mockResolvedValueOnce('ready').mockResolvedValueOnce('ready').mockResolvedValueOnce(true);
+  await expect(renderHtmlToPdf({ html: '<html></html>', browser, requireArtwork: true })).rejects.toMatchObject({ name: 'PrintArtworkUnavailableError' });
+  expect(page.pdf).not.toHaveBeenCalled();
+  expect(page.close).toHaveBeenCalledOnce();
+});

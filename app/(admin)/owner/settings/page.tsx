@@ -10,7 +10,7 @@ import {
 import { listManagementNotificationChannels } from '@/lib/notification/management-routing';
 
 export const metadata = {
-  title: '系统设置 · 红包印刷 ERP',
+  title: '系统设置',
 };
 
 export default async function OwnerSettingsPage() {

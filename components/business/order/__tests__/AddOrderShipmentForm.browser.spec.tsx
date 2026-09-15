@@ -71,8 +71,10 @@ describe('add delivery', () => {
     vi.mocked(addOrderShipmentAction).mockResolvedValue({
       status: 'preview',
       preview: {
+        packaging: [],
         token: 'token',
         pricingMode: 'REQUOTE',
+        requiresPriceReview: true,
         sequence: 2,
         oldTotal: '100',
         newTotal: '108.25',

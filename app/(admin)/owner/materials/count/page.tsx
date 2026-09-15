@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
-  title: '库存盘点 · 红包印刷 ERP',
+  title: '库存盘点',
 };
 
 export default async function OwnerMaterialInventoryCountPage() {

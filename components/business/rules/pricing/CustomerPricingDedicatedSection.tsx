@@ -1,4 +1,6 @@
+import { BOX_PRICE_RULES, boxPriceRuleDefinition } from '@/lib/price/box-packaging-rules';
 import 'server-only';
+import { blankSpecificationKey } from '@/lib/price/blank-paper';
 
 import { fixedCustomTierIssue } from '@/lib/price/fixed-custom-tiers';
 
@@ -90,12 +92,12 @@ type FormAssembly = {
 };
 
 const BLANK_COLUMNS = [
-  { key: 'mini', label: '迷你封', suffix: '-MINI' },
-  { key: 'square', label: '方形', suffix: '-SQUARE' },
-  { key: 'mid', label: '中号封', suffix: '-MID' },
-  { key: 'large', label: '大号封', suffix: '-LARGE' },
-  { key: 'west-mid', label: '西封中号', suffix: '-WEST-MID' },
-  { key: 'west-large', label: '西封大号', suffix: '-WEST-LARGE' },
+  { key: 'mini', label: '迷你封' },
+  { key: 'square', label: '方形' },
+  { key: 'mid', label: '中号封' },
+  { key: 'large', label: '大号封' },
+  { key: 'west-mid', label: '西封中号' },
+  { key: 'west-large', label: '西封大号' },
 ] as const;
 
 const BLANK_PAPER_ORDER = [
@@ -319,7 +321,7 @@ function ownsSectionRule(
   return (
     rule.purpose === CustomerPriceBookPurpose.PROCESSING &&
     (code === 'PACKAGING_SINGLE_STYLE_PER_BAG' ||
-      code === 'PACKAGING_MIXED_STYLE_PER_BAG')
+      code === 'PACKAGING_MIXED_STYLE_PER_BAG' || Boolean(boxPriceRuleDefinition(code)))
   );
 }
 
@@ -582,8 +584,8 @@ function createDraftActionLabel(
       ? '收起物流费调价'
       : '调整物流费'
     : selected
-      ? '收起入袋费调价'
-      : '调整入袋费';
+      ? '收起包装费调价'
+      : '调整包装费';
 }
 
 function createDraftHref(
@@ -608,10 +610,21 @@ function VersionHeadingActions({
   createDraftPurpose,
 }: CustomerPricingDedicatedSectionProps) {
   const sources = workspace.sources.filter(canCreateDraft);
-  if (sources.length === 0) return null;
+  const canAddBlank = workspace.section === 'blank' && workspace.sources.some(
+    (source) => source.purpose === CustomerPriceBookPurpose.PROCESSING && source.draft,
+  );
+  if (sources.length === 0 && !canAddBlank) return null;
 
   return (
     <>
+      {canAddBlank ? (
+        <PriceWorkspaceLink
+          href="/owner/rules/customer-pricing/blank/new"
+          className={cn(buttonVariants({ variant: 'outline' }), 'min-h-11')}
+        >
+          新增纸张 / 规格
+        </PriceWorkspaceLink>
+      ) : null}
       {sources.map((source) => {
         const selected = createDraftPurpose === source.purpose;
         return (
@@ -790,18 +803,6 @@ function WarningBlocks({
   );
 }
 
-function blankColumnKey(code: string): string | null {
-  const ordered = [
-    BLANK_COLUMNS[4],
-    BLANK_COLUMNS[5],
-    BLANK_COLUMNS[0],
-    BLANK_COLUMNS[1],
-    BLANK_COLUMNS[2],
-    BLANK_COLUMNS[3],
-  ];
-  return ordered.find((column) => code.endsWith(column.suffix))?.key ?? null;
-}
-
 function paperParts(paperType: string | null | undefined): {
   paperName: string;
   weight: string;
@@ -824,6 +825,11 @@ function renderBlank(
     rows.push(rule);
     byPaper.set(paper, rows);
   }
+  for (const product of workspace.blankProducts ?? []) {
+    if (product.paperType && !byPaper.has(product.paperType)) {
+      byPaper.set(product.paperType, []);
+    }
+  }
   const paperPriority = new Map<string, number>(
     BLANK_PAPER_ORDER.map((paper, index) => [paper, index]),
   );
@@ -838,18 +844,25 @@ function renderBlank(
       const parts = paperParts(paper);
       const cells: PricingMatrixCell[] = BLANK_COLUMNS.map((column) => {
         const matched = rules.find(
-          (rule) => blankColumnKey(productCode(rule)) === column.key,
+          (rule) =>
+            blankSpecificationKey(effectiveRule(rule)?.product?.specification) === column.key,
+        );
+        const catalogProduct = workspace.blankProducts?.find(
+          (product) => product.paperType === paper &&
+            blankSpecificationKey(product.specification) === column.key,
         );
         return {
           ...(matched
             ? ruleField(
                 assembly,
-                `blank.${paper}.${column.key}`,
+                `blank.${effectiveRule(matched)!.id}.${column.key}`,
                 [matched],
                 'amount',
               )
             : missingField(`blank.${paper}.${column.key}`)),
           columnKey: column.key,
+          emptyLabel: workspace.blankProducts && !matched && !catalogProduct
+            ? '不适用' : '— 转人工',
         };
       });
       return {
@@ -969,7 +982,7 @@ function renderTiers(
     const sentinelOpen = isLast && (anchorRule?.maxQty ?? 0) >= 9_999_999;
     return {
       key: `tier-${index}`,
-      name: TIER_NAMES[index] ?? `第${index + 1}档`,
+      name: (canonical.length === 11 ? ['200个档', ...TIER_NAMES] : TIER_NAMES)[index] ?? `第${index + 1}档`,
       maxQuantity: boundField(
         assembly,
         `tiers.${index}.maxQuantity`,
@@ -1275,6 +1288,10 @@ function renderShip(
 
   return (
     <CustomerShipPricingSectionView
+      box={BOX_PRICE_RULES.map((definition) => {
+        const rule = ruleByCode(workspace.rules, definition.code);
+        return {label: definition.name, field: rule ? ruleField(assembly, `ship.box.${definition.code}`, [rule], 'amount') : missingField(`ship.box.${definition.code}`)};
+      })}
       bag={{
         normalFee: normalBag
           ? ruleField(assembly, 'ship.bag.normalFee', [normalBag], 'amount')

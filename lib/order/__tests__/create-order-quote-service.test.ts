@@ -30,6 +30,8 @@ vi.mock('@/lib/order/create-order-published-rule-adapter', async () => {
   };
 });
 
+import { calculateWorkbenchItem } from '@/lib/workbench/service';
+import { workbenchItemQuoteSchema } from '@/lib/workbench/item-quote';
 import {
   quoteExternalCreateOrder,
   type CreateOrderQuoteInput,
@@ -291,6 +293,11 @@ describe('quoteExternalCreateOrder', () => {
       totalSemantics: 'COMPLETE',
     });
     expect(result.total).toBe(result.knownTotal);
+    const preview = await calculateWorkbenchItem(
+      workbenchItemQuoteSchema.parse({item:plainPrint}).item,
+      0,
+    );
+    expect(preview).toMatchObject({status:'success',quote:{baseAmount:result.items[0]!.suggestedSubtotal}});
   });
 
   it('彩印单色烫金命中含版费原子套餐时报价完整，不携带独立制版费', async () => {
@@ -348,6 +355,11 @@ describe('quoteExternalCreateOrder', () => {
       suggestedFixedFee: '700.00',
       suggestedSubtotal: '700.00',
     });
+    const preview = await calculateWorkbenchItem(
+      workbenchItemQuoteSchema.parse({item:bundledPrint}).item,
+      0,
+    );
+    expect(preview).toMatchObject({status:'success',quote:{baseAmount:result.items[0]!.suggestedSubtotal}});
     expect(result.items[0]?.components.map((line) => line.ruleCode)).toEqual([
       'PRINT_PER_ORDER',
       'PRINT_FOIL_PER_ORDER',
@@ -357,5 +369,64 @@ describe('quoteExternalCreateOrder', () => {
       hasManualPricing: false,
       totalSemantics: 'COMPLETE',
     });
+  });
+});
+
+
+describe('workbench and order-entry price parity', () => {
+  it.each([
+    1, 499, 500, 999, 1000, 1999, 2000, 2999, 3000, 3999, 4000, 4999, 5000,
+    9999, 10000, 19999, 20000, 29999, 30000, 49999, 50000,
+  ])('matches the dedicated-foil item at quantity %s', async (quantity) => {
+    mocks.productFindMany.mockResolvedValue([
+      {
+        id: 'product-custom',
+        code: 'CUSTOM-LARGE',
+        category: 'CUSTOM_FLAT_FOIL',
+        specification: '大号封90×165',
+        paperType: null,
+        paperMaterialId: null,
+        weight: null,
+        isActive: true,
+      },
+    ]);
+    mocks.craftFindMany.mockResolvedValue([
+      { id: 'craft-single', code: 'FLAT_FOIL_SINGLE', isActive: true },
+    ]);
+    const facts = {
+      ...item,
+      productId: 'product-custom',
+      pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+      quantity,
+      crafts: ['craft-single'],
+      hasLocalFoil: false,
+    };
+    const order = await quoteExternalCreateOrder(
+      input({
+        items: [facts],
+        packagingGroups: [],
+        logistics: {
+          ...input().logistics,
+          shipments: [
+            { ...input().logistics.shipments[0]!, itemQuantities: [quantity] },
+          ],
+        },
+      }),
+      now,
+    );
+    const workbench = await calculateWorkbenchItem(
+      workbenchItemQuoteSchema.parse({ item: facts }).item,
+      0,
+    );
+    expect(workbench.status).toBe('success');
+    if (workbench.status === 'success') {
+      expect(workbench.quote.baseAmount).toBe(
+        order.items[0]!.suggestedSubtotal,
+      );
+      expect(workbench.quote.needsPricing).toBe(!order.items[0]!.complete);
+      expect(workbench.quote.processingVersion).toBe(
+        order.priceVersion.processing.version,
+      );
+    }
   });
 });

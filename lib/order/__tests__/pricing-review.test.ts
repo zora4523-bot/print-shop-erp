@@ -15,6 +15,7 @@ import { buildTrustedAdminChargePricingSnapshot } from "../admin-pricing-snapsho
 const {
   dbMock,
   appendPricingRevisionMock,
+  inspectProductionMock,
   prepareProductionMock,
   assertCsOrderSalesLedgerReconciledMock,
   recordCsSalesEntryMock,
@@ -38,6 +39,7 @@ const {
       ),
     },
     appendPricingRevisionMock: vi.fn(),
+    inspectProductionMock: vi.fn(),
     prepareProductionMock: vi.fn(),
     assertCsOrderSalesLedgerReconciledMock: vi.fn(),
     recordCsSalesEntryMock: vi.fn(),
@@ -50,6 +52,7 @@ vi.mock("@/lib/order/pricing-revision", () => ({
   appendOrderPricingRevisionInTx: appendPricingRevisionMock,
 }));
 vi.mock("@/lib/order/production-readiness", () => ({
+  inspectOrderProductionReadinessInTx: inspectProductionMock,
   prepareOrderForProductionInTx: prepareProductionMock,
 }));
 vi.mock("@/lib/salary/cs-sales", () => ({
@@ -551,6 +554,7 @@ beforeEach(() => {
     orderRevision: 9,
     snapshot: {},
   });
+  inspectProductionMock.mockResolvedValue({ ready: false, issues: ["工单没有包装组"] });
   prepareProductionMock.mockResolvedValue({
     orderId: "order-1",
     status: OrderStatus.CONFIRMED, ready: true, issues: [],
@@ -563,10 +567,20 @@ beforeEach(() => {
 });
 
 describe("snapshot-only order pricing review", () => {
-  it('rejects pricing in its transaction when saved production facts cannot become ready', async () => {
+  it.each([OrderStatus.SUBMITTED, OrderStatus.PENDING_FACTORY])('不 ready 时价格仍落库且返回 issues（%s）', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue(pricingOrder({ status }));
     prepareProductionMock.mockResolvedValueOnce({ ready: false, status: OrderStatus.SUBMITTED, issues: ['工单没有款式'] });
-    await expect(finalizeOrderPricing(command(), admin, now)).rejects.toThrow('核价未完成：工单没有款式');
+    await expect(finalizeOrderPricing(command(), admin, now)).resolves.toMatchObject({ productionReadiness: { ready: false, issues: ['工单没有款式'] } });
+    expect(dbMock.order.update).toHaveBeenCalled();
+    expect(appendPricingRevisionMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: 'ADMIN_CONFIRMED', incrementOrderRevision: true }));
+    expect(dbMock.orderLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'PRICING_CONFIRMED_NOT_READY', remark: expect.stringContaining('工单没有款式') }) });
     expect(dbMock.$transaction).toHaveBeenCalledOnce();
+  });
+  it('预览只读检查生产就绪并返回阻断资料', async () => {
+    expect(await previewOrderPricingReview('order-1', admin, now)).toMatchObject({ productionReadiness: { ready: false, issues: ['工单没有包装组'] } });
+    expect(inspectProductionMock).toHaveBeenCalledOnce();
+    expect(prepareProductionMock).not.toHaveBeenCalled();
+    expectNoPricingWrites();
   });
   it('does not invalidate a pending amendment while saving pricing', async () => {
     dbMock.orderChangeRequest.findFirst.mockResolvedValueOnce({ id: 'pending-change' });

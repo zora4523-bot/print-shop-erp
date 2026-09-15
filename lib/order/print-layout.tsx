@@ -1,3 +1,4 @@
+import { packagingType, packagingModeLabel } from './packaging-mode';
 import type { CSSProperties, ReactNode } from 'react';
 import { printFontCss } from './print-fonts';
 
@@ -29,6 +30,7 @@ type Artwork = {
 };
 
 type ItemPackaging = {
+  mode?: import('@/generated/prisma/enums').OrderPackagingMode;
   unitsPerBag: number | null;
   bagCount: number | null;
   mixed: boolean;
@@ -60,8 +62,6 @@ const MAX_ARTWORKS_ON_MAIN_PAGE = 8;
 const MAX_ARTWORKS_PER_ANNEX_PAGE = 10;
 const MAIN_FLOW_HEIGHT_MM = 60;
 const ANNEX_FLOW_HEIGHT_MM = 195;
-const MAX_WARNINGS_ON_MAIN_PAGE = 6;
-const MAX_WARNINGS_PER_ANNEX_PAGE = 15;
 const MAX_SHIPMENTS_ON_MAIN_PAGE = 2;
 const MAX_SHIPMENTS_PER_ANNEX_PAGE = 4;
 const MAX_MAIN_FACT_CHARACTERS = 36;
@@ -76,6 +76,7 @@ const MAX_HEADER_FACTORY_CHARACTERS = 24;
 const MAX_HEADER_CUSTOMER_CHARACTERS = 16;
 const MAX_HEADER_ORDER_NAME_CHARACTERS = 100;
 const MAX_HEADER_ORDER_NAME_LINES = 3;
+const MAX_INLINE_ORDER_NUMBER_CHARACTERS = 64;
 
 const FOIL_TECHNIQUE_LABEL: Record<PrintFoilTechnique, string> = {
   UNSPECIFIED: '烫金',
@@ -216,11 +217,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
     ? []
     : chunk(artworks, MAX_ARTWORKS_PER_ANNEX_PAGE);
   const warnings = auditOrder(order, itemPackaging);
-  const mainWarnings = warnings.slice(0, MAX_WARNINGS_ON_MAIN_PAGE);
-  const warningAnnexPages = chunk(
-    warnings.slice(MAX_WARNINGS_ON_MAIN_PAGE),
-    MAX_WARNINGS_PER_ANNEX_PAGE,
-  );
   const flowRows = buildFlowRows(order);
   const { mainFlowRows, flowAnnexPages } = paginateFlowRows(flowRows);
   const shipments =
@@ -238,7 +234,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
     : [];
   const pageCount =
     1 +
-    warningAnnexPages.length +
     supplementPages.length +
     itemAnnexPages.length +
     artworkAnnexPages.length +
@@ -265,10 +260,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
           dense={denseMainSheet}
         >
           <WorkOrderHeader order={order} factoryName={factoryName} />
-          <AuditWarnings
-            warnings={mainWarnings}
-            remainingCount={warnings.length - mainWarnings.length}
-          />
+          <AuditWarnings warnings={warnings} />
 
           <section className="sec">
             <div className="grid">
@@ -289,7 +281,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
               <Fact
                 label="包装要求"
                 value={
-                  packageRequirement ?? (packagingComplete ? '见分袋明细' : null)
+                  packageRequirement ?? (packagingComplete ? (order.packagingGroups.some((group) => packagingType(group.mode) !== 'BAG') ? '见包装明细' : '见分袋明细') : null)
                 }
                 emphasis="l1"
               />
@@ -340,34 +332,8 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
           </section>
         </WorkOrderSheet>
 
-        {warningAnnexPages.map((pageWarnings, index) => {
-          const page = 2 + index;
-          return (
-            <WorkOrderSheet
-              key={`warning-page-${page}`}
-              order={order}
-              page={page}
-              pageCount={pageCount}
-              orderDate={orderDate}
-            >
-              <WorkOrderHeader
-                order={order}
-                factoryName={factoryName}
-              />
-              <section className="sec warning-annex">
-                <div className="annex-title">数据待补充（续）</div>
-                <ol className="warning-list">
-                  {pageWarnings.map((warning, warningIndex) => (
-                    <li key={`${warningIndex}-${warning}`}>{warning}</li>
-                  ))}
-                </ol>
-              </section>
-            </WorkOrderSheet>
-          );
-        })}
-
         {supplementPages.map((supplement, index) => {
-          const page = 2 + warningAnnexPages.length + index;
+          const page = 2 + index;
           return (
             <WorkOrderSheet
               key={`supplement-page-${supplement.key}-${supplement.part}`}
@@ -389,7 +355,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
 
         {itemAnnexPages.map((items, index) => {
           const page =
-            2 + warningAnnexPages.length + supplementPages.length + index;
+            2 + supplementPages.length + index;
           const isLastItemPage = index === itemAnnexPages.length - 1;
           return (
             <WorkOrderSheet
@@ -420,7 +386,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
         {artworkAnnexPages.map((pageArtworks, index) => {
           const page =
             2 +
-            warningAnnexPages.length +
             supplementPages.length +
             itemAnnexPages.length +
             index;
@@ -446,7 +411,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
         {shipmentAnnexPages.map((pageShipments, index) => {
           const page =
             2 +
-            warningAnnexPages.length +
             supplementPages.length +
             itemAnnexPages.length +
             artworkAnnexPages.length +
@@ -473,7 +437,6 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
         {flowAnnexPages.map((rows, index) => {
           const page =
             2 +
-            warningAnnexPages.length +
             supplementPages.length +
             itemAnnexPages.length +
             artworkAnnexPages.length +
@@ -595,7 +558,7 @@ function WorkOrderHeader({
           ) : null}
         </div>
       </div>
-      <div className="scan">
+      <div className={classNames('scan', Array.from(order.orderNo).length > MAX_INLINE_ORDER_NUMBER_CHARACTERS && 'long-identifier')}>
         <div
           className="qr"
           aria-label={`工单 ${order.orderNo} 二维码`}
@@ -609,17 +572,14 @@ function WorkOrderHeader({
 
 function AuditWarnings({
   warnings,
-  remainingCount = 0,
 }: {
   warnings: string[];
-  remainingCount?: number;
 }) {
   return (
     <>
       {warnings.length > 0 ? (
         <div className="warn">
           数据不完整：{warnings.join('；')}
-          {remainingCount > 0 ? `；另有 ${remainingCount} 项见附页` : ''}
         </div>
       ) : null}
       <div className="warn image-load-warning" hidden />
@@ -692,18 +652,19 @@ function ItemTable({
                 <td>
                   <div>{clean(item.name) ?? `款式 ${item.sequence}`}</div>
                   {processFacts ? <div className="item-process">{processFacts}</div> : null}
+                  {itemPack?.mode && packagingType(itemPack.mode) === 'BOX' ? <div className="item-process">{packagingModeLabel(itemPack.mode)}</div> : null}
                 </td>
                 <td className="num">{formatNumber(item.quantity)}</td>
                 <td className={classNames('num', !hasPack && 'miss')}>
-                  {hasPack ? formatNumber(itemPack!.unitsPerBag!) : '未填'}
+                  {itemPack?.mode === 'UNPACKED' ? '不包装' : hasPack ? `${formatNumber(itemPack!.unitsPerBag!)}${itemPack?.mode && packagingType(itemPack.mode) === 'BOX' ? '个/盒' : ''}` : '未填'}
                 </td>
                 <td className={classNames('num', !itemPack && 'miss')}>
                   {!itemPack
                     ? '—'
-                    : itemPack.mixed
+                    : itemPack.mode === 'UNPACKED' ? '—' : itemPack.mixed
                       ? '混装'
                       : itemPack.bagCount && itemPack.bagCount > 0
-                        ? formatNumber(itemPack.bagCount)
+                        ? `${formatNumber(itemPack.bagCount)}${itemPack.mode && packagingType(itemPack.mode) === 'BOX' ? '盒' : ''}`
                         : '—'}
                 </td>
               </tr>
@@ -896,11 +857,12 @@ function buildArtworks(order: PrintOrder): Artwork[] {
 }
 
 function buildItemPackaging(groups: PrintPackagingGroup[]): Map<string, ItemPackaging> {
-  const entries = new Map<string, Array<{ unitsPerBag: number; bagCount: number; mixed: boolean }>>();
+  const entries = new Map<string, Array<{ unitsPerBag: number; bagCount: number; mixed: boolean; mode: PrintPackagingGroup['mode'] }>>();
   for (const group of groups) {
     for (const line of group.lines) {
       const current = entries.get(line.orderItemId) ?? [];
       current.push({
+        mode: group.mode,
         unitsPerBag: line.unitsPerBag,
         bagCount: group.actualBagCount,
         mixed: group.mode === 'MIXED_STYLE' || group.lines.length > 1,
@@ -912,6 +874,7 @@ function buildItemPackaging(groups: PrintPackagingGroup[]): Map<string, ItemPack
     const units = unique(rows.map((row) => row.unitsPerBag).filter((value) => value > 0));
     const mixed = rows.length > 1 || rows.some((row) => row.mixed);
     return [itemId, {
+      mode: rows[0]?.mode,
       unitsPerBag: units.length === 1 ? units[0]! : null,
       bagCount: mixed ? null : rows[0]?.bagCount ?? null,
       mixed,
@@ -922,7 +885,7 @@ function buildItemPackaging(groups: PrintPackagingGroup[]): Map<string, ItemPack
 function calculateTotalBags(order: PrintOrder, packaging: Map<string, ItemPackaging>): number | null {
   if (order.items.length === 0 || order.packagingGroups.length === 0 ||
     order.items.some((item) => !packaging.get(item.id)?.unitsPerBag) ||
-    order.packagingGroups.some((group) => group.actualBagCount <= 0)) return null;
+    order.packagingGroups.some((group) => group.mode !== 'UNPACKED' && group.actualBagCount <= 0)) return null;
   return order.packagingGroups.reduce((sum, group) => sum + group.actualBagCount, 0);
 }
 
@@ -983,7 +946,8 @@ function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>): s
   if (!clean(shipment.receiverName)) warnings.push('收件人姓名未填');
   if (!clean(shipment.receiverPhone)) warnings.push('收件电话未填');
   if (!clean(shipment.receiverAddress)) warnings.push('收货地址未填');
-  return unique(warnings);
+  // Summarize repeated missing fields without creating paper-only audit pages.
+  return unique(warnings.map((warning) => order.items.length > 1 ? warning.replace(/^图 \d+ /, '款式') : warning));
 }
 
 function formatPaper(item: PrintOrderItem): string | null {
@@ -1451,6 +1415,8 @@ body{
 .line b.miss{ color:var(--flag); }
 .sep{ color:var(--hair); margin:0 .5mm; }
 .scan{ text-align:right; flex:0 0 auto; }
+.scan.long-identifier{ min-width:25mm; max-width:65mm; }
+.scan.long-identifier .no{ white-space:normal; overflow-wrap:anywhere; }
 .scan .qr{ min-width:25mm; min-height:25mm; margin-left:auto; display:flex; justify-content:flex-end; }
 .scan svg{ min-width:25mm; min-height:25mm; display:block; }
 .scan .no{ font-family:"ERP Print Mono",monospace; font-size:8pt; font-weight:700; margin-top:1.4mm; white-space:nowrap; }
@@ -1504,9 +1470,7 @@ tfoot td{ border-top:.4mm solid var(--rule); border-bottom:none; font-size:11.5p
 .flow-step-col{ width:30mm; }.flow-number-col{ width:24mm; }.flow-defect-col{ width:20mm; }.flow-date-col{ width:26mm; }
 .flow-annex{ flex:1; }
 .annex-title{ font-size:15pt; font-weight:800; margin-bottom:4mm; }
-.item-annex,.warning-annex,.supplement-annex,.shipment-annex{ flex:1; }
-.warning-list{ padding-left:6mm; color:var(--flag); font-size:10pt; font-weight:700; line-height:1.45; }
-.warning-list li{ padding:1.4mm 0; border-bottom:.15mm solid var(--hair); }
+.item-annex,.supplement-annex,.shipment-annex{ flex:1; }
 .supplement-text{ white-space:pre-wrap; overflow-wrap:anywhere; font-size:11pt; font-weight:600; line-height:1.65; }
 .shipment-annex-notice{ font-size:11pt; font-weight:700; color:var(--mute); }
 .badge{ display:inline-flex; align-items:center; justify-content:center; min-width:5.2mm; height:5.2mm; padding:0 1.3mm; background:var(--ink); color:#fff; border-radius:99mm; font-size:8.5pt; font-weight:800; }

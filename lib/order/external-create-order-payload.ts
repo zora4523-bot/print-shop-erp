@@ -7,6 +7,7 @@ import type { CreateOrderInput } from '@/lib/auth/schemas';
  */
 export const EXTERNAL_CREATE_PAYLOAD_SERVER_OWNED_FIELDS = {
   root: [
+    'externalSalesUserId',
     'quotedFee',
     'confirmedFee',
     'settledFee',
@@ -19,6 +20,7 @@ export const EXTERNAL_CREATE_PAYLOAD_SERVER_OWNED_FIELDS = {
     'customerChargeOverrideReason',
   ],
   item: [
+    'adminPrice',
     'unitPrice',
     'fixedFee',
     'subtotal',
@@ -47,8 +49,9 @@ type ShipmentServerOwnedField =
 
 export type ExternalCreateOrderPayload = Omit<
   CreateOrderInput,
-  RootServerOwnedField | 'items' | 'additionalShipments'
+  RootServerOwnedField | 'items' | 'additionalShipments' | 'packagingGroups'
 > & {
+  packagingGroups: Array<Omit<CreateOrderInput['packagingGroups'][number], 'adminPrice'>>;
   items: Array<
     Omit<CreateOrderInput['items'][number], ItemServerOwnedField>
   >;
@@ -109,6 +112,7 @@ export function buildExternalCreateOrderPayload(
   payload.additionalShipments = input.additionalShipments.map((shipment) =>
     sanitizeShipment(shipment),
   );
+  payload.packagingGroups = input.packagingGroups.map((group) => withoutFields(group as unknown as Record<string, unknown>, ['adminPrice']));
 
   // The B form currently models the primary shipment at the root and extra
   // destinations as `additionalShipments`. Clean the canonical aliases too so

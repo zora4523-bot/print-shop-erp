@@ -31,7 +31,7 @@
 | **docs/deployment-smoke-checklist.md** | 部署前 smoke 与备份检查清单 | 开发 / 运维 |
 | **docs/上线前置操作清单.md** | 当前发布批次的部署前排查、单向门与人工验证 | 运维 / Owner |
 | **docs/AGENT-BACKLOG.md** | Agent 自动化开发任务队列 | 开发 / Codex routines |
-| **docs/规范合规审查-2026-08-19.md** | CLAUDE.md 规范合规审查快照（含 19 条待处理） | 开发 |
+| **docs/archive/规范合规审查-2026-08-19.md** | CLAUDE.md 规范合规审查快照（含 19 条待处理） | 开发 |
 | **docs/AGENT-ROUTINES.md** | Agent 自动 prompt / draft PR 执行协议 | 开发 / Codex routines |
 | **CHANGELOG.md** | SPEC 历史；不是产品发布日志 | 所有人 |
 | **SPEC-v1.0.md / v1.1.md** | 历史版本（仅归档） | 参考 |

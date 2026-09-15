@@ -128,7 +128,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
             planned: planned.toString(),
             completed: completed.toString(),
             remaining: Decimal.max(planned.minus(completed), 0).toString(),
-            unit: operation.operationType === PieceworkOperationType.PACKING ? '袋' : '个',
+            unit: operation.unit === 'PER_BOX' ? '盒' : operation.operationType === PieceworkOperationType.PACKING ? '袋' : '个',
             myAmount: formatMoney(myAmount),
           };
         })}

@@ -26,7 +26,10 @@ UI：Tailwind CSS + shadcn/ui
 表单：React Hook Form + Zod
 状态：Server Components 优先，必要时用 useState
 测试：
-  - 单元测试：Vitest（node 环境，`vitest.config.ts`；184 个测试文件 / 2440 项）
+  - 单元测试：Vitest（node 环境，`vitest.config.ts`；2026-09-14 实测 618 个测试文件 / 6757 项，
+    其中 27 个 `*.postgres.test.ts` 需要 `DATABASE_URL`，缺失时整文件跳过）
+  - 组件交互契约：Vitest Browser Mode（`vitest.browser.config.ts`，`*.browser.spec.tsx`，47 个文件，
+    `pnpm test:browser`；CI 有独立步骤，**尚未**纳入 §6.3 的 commit 前门禁，是否纳入待业主拍板）
   - 渲染/交互断言：Playwright（`tests/e2e`）+ 截图与响应式门禁（`tests/visual`）
 后台任务：PostgreSQL 任务账本（`BackgroundJob`）+ PM2 light/heavy worker
 可观测性：OpenTelemetry（instrumentation.ts） + Sentry（错误监控）
@@ -38,7 +41,8 @@ PDF生成：Puppeteer（headless Chrome 渲染打印视图；生产用系统 Chr
 ```
 
 **版本锁定策略**：
-- Node、Next、Prisma、Auth.js 全部锁精确版本（如 `"next": "16.2.4"` 而非 `"next": "^16.2.4"`）
+- Node、Next、Prisma、Auth.js 全部锁精确版本（如 `"next": "16.3.4"` 而非 `"next": "^16.3.4"`；
+  当前安装版以 `package.json` 为准，本文件里的版本号只是示例）
 - 其他依赖用 caret（`^`）允许 patch 和 minor 更新
 - 升级通过 PR 走，不让 Renovate 或 Dependabot 自动合并主要版本
 
@@ -68,39 +72,51 @@ PDF生成：Puppeteer（headless Chrome 渲染打印视图；生产用系统 Chr
 
 ```
 print-shop-erp/
-├── app/                          # Next.js App Router（页面层）
+├── app/                          # Next.js App Router（页面层，118 个 page/route）
 │   ├── (auth)/login/             # 登录
 │   ├── (admin)/                  # 后台工作台外壳（侧边栏/面包屑/header）
-│   │   ├── owner/                # ADMIN only（字典、价格、薪资、账单、运维…）
+│   │   ├── owner/                # ADMIN only（字典、价格、薪资、运维…）
 │   │   ├── foreman/              # ADMIN only（排产、外协、考勤、CDR、领料）
 │   │   ├── orders/               # ADMIN + SALES + CUSTOMER_SERVICE
 │   │   └── sales/                # 外部 SALES only（应收、报价）
+│   ├── (billing)/owner/          # 账单 / 代理商账单页：复用 (admin) 鉴权与外壳，但不走它的
+│   │                             #   streaming loading 边界，保证原生财务表单零 JS 可提交；URL 不变
 │   ├── (worker)/worker/          # 师傅端 H5（WORKER only，独立外壳）
-│   ├── api/                      # cron / health / cdr / 客户端数据层路由
+│   ├── account/password/         # 自助改密（§4.6 例外 2）
+│   ├── wo/[orderNo]/             # 工单二维码落地页
+│   ├── api/                      # cron(10) / orders / owner / health / salary / admin / cdr / auth
 │   ├── print/orders/[id]/        # 打印视图（Puppeteer 渲染源）
 │   └── dev/showcase/             # 设计系统演示页（非业务）
-├── actions/                      # Server Actions（业务编排层）
+├── actions/                      # Server Actions（业务编排层，69 个文件 / 138 个 action）
 │   ├── order.ts                  # 'use server'，只能导出 async 函数
 │   └── order.types.ts            # 配套返回类型（'use server' 不能导出类型）
 ├── components/
 │   ├── ui/                       # shadcn 原子件（唯一允许 Tailwind 调色板字面量的目录）
 │   ├── ui-business/              # 跨领域业务原子件（PageHeader/StatCard/StatusBadge…）
-│   └── business/<领域>/          # 业务组件（order、salary、price、admin…）
+│   └── business/<领域>/          # 业务组件（order 最重，112 个文件；其余 ≤ 21）
+├── hooks/                        # 客户端通用 hook（目前只有 use-mobile）
 ├── lib/                          # 核心业务逻辑层（Prisma 调用集中于此）
 │   ├── db.ts                     # Prisma client 单例（唯一的 Prisma 入口）
 │   ├── auth/                     # config / session / permissions / permissions-dict / schemas
 │   ├── admin/                    # action-helpers（MutationResult 契约）、table（分页排序）
-│   ├── salary/  order/  price/  bill/  production/  outsource/
+│   ├── order/  price/  salary/  production/  bill/  outsource/  agent-monthly-billing/  workbench/
 │   ├── background-jobs/          # 持久化任务账本 + worker + handler registry
-│   ├── cron/  notification/  oss/  pdf/  cdr/  export/  dashboard/  navigation/
+│   ├── cron/  notification/  oss/  pdf/  cdr/  export/  dashboard/  navigation/  settings/
+│   ├── format/  page-title/  ui/ # 展示层纯函数（金额/日期格式、页标题、状态注册表）
+│   ├── <域>.ts                   # 38 个尚未归目录的域根模块（bill/bom/craft/material*/purchase*/…）
 │   └── __tests__/                # 领域根模块（lib/order.ts 等）的测试
-├── generated/prisma/             # Prisma 7 生成产物（gitignore 外的生成目录，勿手改）
+├── config/                       # architecture-debt.json（架构门禁债务表）、价目簿发布清单
+├── generated/prisma/             # Prisma 7 生成产物（已 gitignore，勿手改）
 ├── instrumentation.ts            # OTel + Sentry 初始化入口
+├── proxy.ts                      # Next 16 的 Edge 层入口（原 middleware），乐观会话检查
 ├── prisma/{schema.prisma,migrations/,seed.ts}
-├── scripts/                      # background-worker、check-env、deploy-smoke、agent-next-task
+├── scripts/                      # background-worker、check-*、deploy-smoke、ui-tokens/、价目簿发布
 ├── deploy/                       # PM2 ecosystem、nginx、crontab 样例、update.sh
-├── tests/{e2e,visual,integration}/
-├── docs/                         # 运维 runbook、admin 框架计划、agent backlog
+├── tests/{e2e,visual,regression,durable,compat}/   # 对应 5 份 playwright.*.config.ts
+├── docs/                         # 运维 runbook、UI 规范、手册（仍在维护的才放 docs/ 根）
+│   ├── audits/                   # YYYY-MM-DD-<主题>.md 审查记录 + evidence/
+│   ├── archive/                  # 任务过程文件归档（PLAN/REPORT/codex 执行稿/带日期的一次性报告），规则见其 README
+│   └── ux-redesign/              # 交互稿 .dc.html
 ├── SPEC-v1.2.md  CLAUDE.md  AGENTS.md  HANDOFF.md  PROGRESS.md  DECISIONS.md
 └── package.json
 ```
@@ -119,7 +135,9 @@ print-shop-erp/
 - Prisma import 不得出现在 `app/` 和 `actions/` 以外的页面/组件文件中
 - `actions/` 中可以 import Prisma，但应委托给 `lib/` 的函数处理复杂业务
 - `components/` 中不得有任何数据库调用
-- 现状：`db` 的直接使用集中在 `lib/`（约 60 个文件）；`actions/` 与 `app/api/health/*` 只有极少数遗留直连，新代码不要扩大这个口子
+- 现状（2026-09-14 实测）：`db` 的直接使用集中在 `lib/`（111 个文件）；`lib/` 之外只有 6 处遗留直连
+  —— `actions/account.ts`、`actions/order-workspace.ts`（收藏工单）、`app/api/health/*` 两个探针、
+  `app/wo/[orderNo]/page.tsx`、`app/api/orders/.../labels/[labelId]/route.ts` —— 新代码不要扩大这个口子
 
 **Prisma 生成物的 import 约定**（易踩坑）：
 
@@ -259,7 +277,7 @@ export async function createOrder(data: OrderInput) {
 
 **禁止**：在 `components/` 或 `app/` 的 JSX 中做权限判断来显示/隐藏按钮。正确做法是在 Server Component 里预先判断权限、传给 Client Component 一个 boolean 属性。
 
-**三类例外**（实测 99 个 Server Action 中恰好 3 个，全部合理，不要"修复"它们）：
+**三类例外**（2026-09-14 复核 138 个 Server Action，仍只有这 3 个，全部合理，不要"修复"它们）：
 
 1. **鉴权入口本身**：`actions/auth.ts` 的 `signInWithCredentials` —— 登录前定义上没有 session。
 2. **自助操作**：`actions/account.ts` 的 `changeMyPassword` / `signOutAction` —— 只作用于调用者
@@ -332,8 +350,9 @@ amount: 12.34     // JS float 精度问题
 ### 6.1 分支
 
 - `main`：受保护，只接受PR合入
-- `dev`：日常开发主干
-- `feature/xxx`：功能分支
+- `codex/<任务>`：日常开发分支（现状：远端只有 `main` 与 `codex/*`，**没有 `dev` 分支**，
+  每个任务批次在自己的 `codex/*` 分支上小步提交，经 PR 回 `main`）
+- `feature/xxx`：早期约定的功能分支命名，仍可用
 
 ### 6.2 Commit Message
 
@@ -413,12 +432,13 @@ await dispatchNotification('ORDER_SUBMITTED', { orderId, orderNo, submitterName 
 
 ### 8.2 组件/渲染测试
 
-**现状（与早期计划不同，以此为准）**：`vitest.config.ts` 只有 node 环境，**没有启用 Browser
-Mode**。组件层的验证分两处落地：
+**现状（2026-09-14 更新，以此为准）**：`vitest.config.ts` 是 node 环境；组件交互契约走独立的
+`vitest.browser.config.ts`（Vitest Browser Mode，Playwright chromium，`*.browser.spec.tsx`，47 个文件，
+`pnpm test:browser`），CI 单独跑一步。组件层的验证分四处落地：
 
 - **纯逻辑部分用 Vitest**：Zod schema 校验、报工数量约束、打印布局的网格计算、导航菜单与权限
   相关的可见性推导 —— 抽成纯函数放 `lib/`，在 node 环境测。
-- **SSR markup 断言也用 Vitest**（第三种形态，20 个测试文件在用）：`renderToStaticMarkup` +
+- **SSR markup 断言也用 Vitest**（110 个测试文件在用）：`renderToStaticMarkup` +
   `vi.mock('react')` 注入 `useActionState` 状态，断言渲染出的 HTML。用于**Playwright 结构上够
   不到**的场景 —— 典型是逐字段错误的 aria 连线：错误 DOM 只在提交失败后存在，而 `tests/visual`
   的 axe 门禁断言的是页面加载态，那条路径它一次都走不到。
@@ -426,7 +446,12 @@ Mode**。组件层的验证分两处落地：
 - **真实渲染用 Playwright**：`tests/visual/` 在真实 Chromium 下跑截图、响应式裁切/溢出/触控目标
   与 axe 无障碍门禁（6 视口 × 明暗模式）。
 
-新增 UI 时**不要**自己去开 Vitest Browser Mode；要么把逻辑抽纯函数，要么加 Playwright 断言。
+- **组件交互契约用 Vitest Browser Mode**：需要真实事件循环、焦点、键盘与 axe 的组件级断言
+  （Sheet/Dialog 确认流、Checkbox 键盘 wrapper、六视口 overflow）写成 `*.browser.spec.tsx`，
+  放在组件旁的 `__tests__/`。运行产物 `__tests__/__screenshots__/` 已 gitignore，不是基线。
+
+新增 UI 时先把逻辑抽纯函数；交互契约进 Browser Mode，真实页面级门禁进 Playwright。
+不要再新开第二套浏览器测试配置。
 
 ### 8.3 E2E测试（Playwright）
 
@@ -663,8 +688,26 @@ pnpm worker:light            # 本地手动跑 LIGHT 队列 worker
 pnpm worker:heavy            # 本地手动跑 HEAVY 队列 worker（CDR/PDF/XLSX）
 ```
 
-**E2E 前置**：Playwright 复用已在 `:3000` 跑的 dev server（没有就自己拉起），并共用开发库；
-`tests/e2e/global-setup.ts` 会幂等 upsert 各角色测试账号（密码见该文件的 `E2E_PASSWORD`）。
+**E2E 前置（2026-09-14 更新，旧说法「复用 :3000 并共用开发库」已作废）**：Playwright **绝不**复用
+`:3000` 的开发服务器，也**绝不**碰 `DATABASE_URL` 指向的开发库。它自己在 `127.0.0.1:3100`（开发配置）
+或 `:3200`（release 配置，`next build` + `next start`，`.next-release`）拉起服务，并要求一个一次性的
+隔离库：`E2E_DATABASE_URL`（库名须含 `e2e` / `test` / `ci` 分段）+ 同名的 `E2E_DATABASE_CONFIRM_DATABASE`，
+缺任一项 webServer 直接拒启。本地跑法与 CI 一致：
+
+```bash
+psql "$DATABASE_URL" -c 'CREATE DATABASE erp_e2e_<日期>'
+export E2E_DATABASE_URL=postgresql://…/erp_e2e_<日期>  E2E_DATABASE_CONFIRM_DATABASE=erp_e2e_<日期>
+pnpm test:e2e:preflight
+DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+pnpm test:e2e:prepare            # 修复测试纸张目录 + 发布 E2E ONLY 工价
+pnpm test:admin-ui               # 或 test:worker-ui / test:e2e / test:release
+```
+
+`tests/e2e/global-setup.ts` 会在隔离库里幂等 upsert 各角色测试账号（密码见该文件的 `E2E_PASSWORD`）。
+打印像素基线是 darwin-chromium 的，只在 macOS 上用 `--config=playwright.release.config.ts` 复现 / 更新；
+`pnpm test:release -- <spec> -g <名字>` 的 `-g` 不会被 pnpm 透传，要用 `pnpm exec playwright test …`。
+用完的隔离库记得 `DROP DATABASE`，本机已经堆过 28 个。
 
 ---
 
@@ -720,7 +763,10 @@ export async function createProductAction(
 - 复用 `lib/admin/action-helpers.ts`：`collectFieldErrors`（扁平表单）/ `collectFieldErrorsDeep`
   （含数组、嵌套，路径展平成 `items.0.quantity`）、`mapPrismaUniqueViolation`、`revalidatePaths`。
   两个 collect 家族**不可互换**：给嵌套表单用 shallow 会丢掉行级定位。
-- Zod schema 集中在 `lib/auth/schemas.ts`。
+- Zod schema 统一从 `lib/auth/schemas.ts` import；实现按域拆在 `lib/auth/schemas/`
+  （account / catalog / party / inventory / order-create / order-edit / production / outsource /
+  salary / finance / notification，跨域字段 helper 在 `shared.ts`）。新增 schema 放进对应域文件，
+  入口文件只做 re-export；`lib/order/__tests__/edit-field-inventory.test.ts` 会遍历整个目录。
 - 列表页分页/排序/筛选用 `lib/admin/table.ts` 的解析器，不要各页自己 parse searchParams。
 
 ### 15.4 后台任务与 cron
@@ -729,7 +775,7 @@ export async function createProductAction(
   durable 模式下通知、cron、CDR 打包、PDF、XLSX 导出先落 `BackgroundJob` 账本，由 PM2 的
   light/heavy worker 领取执行；heavy 队列（CDR/PDF/导出）并发固定 1。
 - 入队必须带 `dedupeKey`；任务类型用 `BACKGROUND_JOB_TYPES` 常量，不写字符串字面量。
-- 8 个 `/api/cron/*` 端点用 `requireCronAuth(req)` 校验 `Authorization: Bearer $CRON_SECRET`；
+- 10 个 `/api/cron/*` 端点全部用 `requireCronAuth(req)` 校验 `Authorization: Bearer $CRON_SECRET`；
   未配置 secret → 503（部署漏配时快速失败）。响应形状对外部调度器是契约，不要改。
 - handler 抛未知异常时必须**携带部分进度重抛**，让 durable job 重试，绝不把漏算的批次标成成功。
 
@@ -787,13 +833,16 @@ const [state, formAction, pending] = useActionState(action.bind(null, id), null)
 <form action={formAction}>
 ```
 
-- **现状**：92 个 `<form>` 里仍有约 15 处后台表单是被箭头函数包裹的，**这是已知且被接受的**，
+- **现状**：111 个 `<form>`（2026-09-14）里仍有一部分后台表单是被箭头函数包裹的（2026-08-17 盘点约
+  15 处，此后未重新清点），**这是已知且被接受的**，
   不要顺手"修复"——真要动先看 DECISIONS 2026-08-17 的影响一节。
 - **SPEC 有三处强制要求 JS**（§H.1 OSS 直传、§E.1 打印弹窗、浏览器端算建议价），所以
   建单路径在架构上不可能零 JS。
 
 ---
 
-**本文档版本**：1.2
-**最后更新**：2026-08-19
+**本文档版本**：1.3（2026-09-14 按结构体检同步现状：§2 测试体系、§3 目录树、§3 直连清单、
+§4.6 例外基数、§6.1 分支现状、§8.2 Browser Mode、§15.4 cron 数量、§15.8 表单基数；
+未动 §4.5 / §15.7 等待业主落笔的条款，见 HANDOFF「CLAUDE.md 待业主落笔」）
+**最后更新**：2026-09-14
 **维护者**：业主 + Claude Code / Codex

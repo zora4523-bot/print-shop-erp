@@ -40,7 +40,7 @@ export function buildOrderScenarioInput(scenario: OrderScenario, catalog: Scenar
       pricingRoute: print ? 'COLOR_PRINT' : craft === 'PARTIAL' ? 'STOCK_BLANK' : 'CUSTOM_SINGLE_FLAT_FOIL',
       paperType: print ? '200g铜版纸' : '160g珠光艳闪', paperWeightGsm: print ? 200 : 160,
       specification: print ? '大号88×165' : '大号封90×165', actualWidthMm: print ? 88 : 90,
-      quantity, pack: 10, crafts: [catalog.crafts[manual ? 'MANUAL' : craft]],
+      quantity, pack: split ? 5 : 10, crafts: [catalog.crafts[manual ? 'MANUAL' : craft]],
       frontFoilColors: colors, backFoilColors: [], foilColors: colors,
       foilTechnique: craft === 'PRINT' ? 'NONE' : 'FLAT', hasLocalFoil: craft === 'PARTIAL' || craft === 'PRINT_FOIL',
       printColors: print ? ['四色'] : [], lamination: 'NONE',
@@ -53,7 +53,7 @@ export function buildOrderScenarioInput(scenario: OrderScenario, catalog: Scenar
     customName: `测试 · ${scenario.name}`, isUrgent: 'urgent' in scenario && scenario.urgent,
     promisedDate: date, items, nextItemFig: items.length + 1,
     remark: 'ORDER_SCENARIO_V1：开发验收数据，不可生产或发货；演示图不是 CDR。',
-    packagingGroups: split ? [{ name: '两款混装', mode: 'MIXED_STYLE', actualBagCount: quantity / 10, itemUnitsPerBag: [10, 10] }]
+    packagingGroups: split ? [{ name: '两款混装', mode: 'MIXED_STYLE', actualBagCount: quantity / 5, itemUnitsPerBag: [5, 5] }]
       : items.map((_, index) => ({ name: `第 ${index + 1} 款单款装`, mode: 'SINGLE_STYLE', actualBagCount: quantity / 10, itemUnitsPerBag: items.map((_, i) => i === index ? 10 : 0) })),
     additionalShipments: split ? [{ receiverName: '第二测试收货人', receiverPhone: '00000000000', receiverAddress: '广东省广州市测试地址2号（请勿发货）', destinationProvince: '广东省', expressCode: null, itemQuantities: [500, 500] }] : [],
   });

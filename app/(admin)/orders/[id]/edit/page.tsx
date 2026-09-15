@@ -1,3 +1,7 @@
+import { getOrderProductionReadiness } from '@/lib/order/production-readiness-query';
+import { ProductionReadinessWarning } from '@/components/business/order/ProductionReadinessWarning';
+import { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-facts-presentation';
+import { LegacyProductionFactsRepairForm } from '@/components/business/order/LegacyProductionFactsRepairForm';
 import { InternalOrderEditWorkspace } from '@/components/business/order/InternalOrderEditWorkspace';
 import { OrderItemRemarkForm } from '@/components/business/order/OrderItemRemarkForm';
 import { canChangeOrderPackaging } from '@/lib/order/editable-fields';
@@ -103,8 +107,10 @@ export default async function EditOrderPage({ params }: PageProps) {
     isFulfillmentPricingStatus(order.status) &&
     order.settledAt === null;
   if (user.role === Role.ADMIN) {
-    return <AdministratorOrderEdit {...{order, external, pending, pricingPending, canPrice,
-      canCorrectFreight, id, canModify, products, foilColors, fieldset, customers, externalSalesAssociation}} />;
+    const showSavedPricingReadiness = 'pricingStatus' in order && order.pricingStatus === OrderPricingStatus.ADMIN_CONFIRMED && (order.status === OrderStatus.SUBMITTED || order.status === OrderStatus.PENDING_FACTORY);
+    const readiness = showSavedPricingReadiness ? await getOrderProductionReadiness(order.id) : undefined;
+    return <><ProductionReadinessWarning readiness={readiness} saved /><AdministratorOrderEdit {...{order, external, pending, pricingPending, canPrice,
+      canCorrectFreight, id, canModify, products, foilColors, fieldset, customers, externalSalesAssociation}} /></>;
   }
 
   return (
@@ -421,6 +427,8 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
     customers: Awaited<ReturnType<typeof listCustomerPartyOptions>>;
     externalSalesAssociation: Awaited<ReturnType<typeof getOrderExternalSalesAssociation>>;
   }) {
+    const repairFacts = getLegacyProductionFactsRepair(order);
+    const canRepairProductionFacts = repairFacts !== null;
     const productionLocked = [
       OrderStatus.RELEASED,
       OrderStatus.FOILING,
@@ -432,6 +440,7 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
     return (
       <>
         <BreadcrumbEntity label={order.orderNo} />
+        {canRepairProductionFacts && repairFacts ? <LegacyProductionFactsRepairForm canRepair={canRepairProductionFacts} key={`repair-${order.revision}`} facts={repairFacts} /> : null}
         <AdminOrderEditor
           key={`${order.id}:${order.editVersion}`}
           orderId={order.id}

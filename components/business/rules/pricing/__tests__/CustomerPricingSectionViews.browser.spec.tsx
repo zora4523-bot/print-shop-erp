@@ -2,6 +2,8 @@ import type { ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
+import { commands, page } from 'vitest/browser';
+import '@/app/globals.css';
 // Link is a framework boundary; Vite does not inject Next's process definitions.
 vi.mock('next/link', () => ({
   default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => {
@@ -11,7 +13,7 @@ vi.mock('next/link', () => ({
   useLinkStatus: () => ({ pending: false }),
 }));
 
-import { CustomerBlankPricingSectionView } from '../CustomerPricingSectionViews';
+import { CustomerBlankPricingSectionView, CustomerTiersPricingSectionView } from '../CustomerPricingSectionViews';
 
 function pricingView(value: number) {
   return (
@@ -74,5 +76,78 @@ it('价格快照更新后显示新值且不触发 Base UI 非受控告警', asyn
     flushSync(() => root.unmount());
     host.remove();
     errorSpy.mockRestore();
+  }
+});
+
+
+for (const editable of [false, true]) {
+  for (const dark of [false, true]) {
+    for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
+      it(`tier columns ${editable ? 'editing' : 'readonly'} ${dark ? 'dark' : 'light'} ${width}`, async () => {
+        await page.viewport(width!, height!);
+        document.documentElement.lang = 'zh-CN';
+        document.documentElement.classList.toggle('dark', dark);
+        const host = document.createElement('div');
+        host.dataset.testid = 'tier-columns';
+        host.className = 'p-4';
+        host.style.width = `${width! >= 1024 ? width! - 256 : width!}px`;
+        document.body.append(host);
+        const root = createRoot(host);
+        try {
+          flushSync(() => root.render(<CustomerTiersPricingSectionView rows={[
+            { key: 'q1000', name: '1千档', maxQuantity: { id: 'quantity', value: 1999, editable },
+              middlePrice: { id: 'middle', value: '0.31', editable },
+              largePrice: { id: 'large', value: '0.325', editable } },
+          ]} />));
+          await settleEffects();
+          const headers = [...host.querySelectorAll<HTMLElement>('[role="columnheader"]')];
+          expect(headers.map(header => header.textContent)).toEqual([
+            '档位', '数量范围', '数量上界（含）', '中号组单价', '大号组单价',
+          ]);
+          const cells = [...host.querySelectorAll<HTMLElement>('[role="cell"]')];
+          expect(cells).toHaveLength(headers.length);
+          for (const index of [3, 4]) {
+            const header = headers[index]!.getBoundingClientRect();
+            const cell = cells[index]!.getBoundingClientRect();
+            const price = cells[index]!.querySelector<HTMLElement>('[data-price-label], input')!;
+            expect(cell.left).toBeCloseTo(header.left, 1);
+            expect(cell.width).toBeCloseTo(header.width, 1);
+            expect(price.getBoundingClientRect().width).toBeCloseTo(cell.width, 1);
+          }
+          expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width!);
+          expect(await commands.checkShellAccessibility('[data-testid="tier-columns"]')).toEqual([]);
+        } finally {
+          flushSync(() => root.unmount());
+          host.remove();
+          document.documentElement.classList.remove('dark');
+        }
+      });
+    }
+  }
+}
+
+it('专版单价允许服务端支持的四位小数且拒绝额外精度', async () => {
+  const host = document.createElement('form');
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() => root.render(<CustomerTiersPricingSectionView rows={[
+      { key: 'q1000', name: '1千档', maxQuantity: { id: 'limit', value: 1999 },
+        middlePrice: { id: 'mid-precision', value: '0.31', editable: true },
+        largePrice: { id: 'large-precision', value: '0.325', editable: true } },
+    ]} />));
+    await settleEffects();
+    for (const input of host.querySelectorAll<HTMLInputElement>('input[type="number"]')) {
+      for (const value of ['0.326', '0.3251']) {
+        input.value = value;
+        expect(input.validity.stepMismatch, value).toBe(false);
+        expect(input.checkValidity(), value).toBe(true);
+      }
+      input.value = '0.32511';
+      expect(input.validity.stepMismatch).toBe(true);
+    }
+  } finally {
+    flushSync(() => root.unmount());
+    host.remove();
   }
 });

@@ -35,6 +35,8 @@ export default defineConfig({
       //      倒退，不逼着为 UI 查询函数补测试。水位来自 2026-08-19 实测
       //      84.43 / 76.79 / 89.71 / 86.65，各留 1 个百分点余量。
       thresholds: {
+        'lib/order/admin-create-price.ts': { statements: 100, branches: 100, functions: 100, lines: 100 },
+        'lib/order/shipment-box-pricing.ts': { statements: 100, branches: 100, functions: 100, lines: 100 },
         'lib/salary/piecework-pricing.ts': {
           statements: 100, branches: 100, functions: 100, lines: 100,
         },

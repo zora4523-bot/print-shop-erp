@@ -22,6 +22,7 @@ export const PERMISSIONS = {
   'order:cancel':               [Role.ADMIN, Role.SALES],
   'order:change:request':       [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
   'order:change:review':        [Role.ADMIN],
+  'order:production-facts:repair': [Role.ADMIN],
   'order:price:confirm':        [Role.ADMIN],
 
   // 新生产工序与历史任务异议
@@ -50,6 +51,7 @@ export const PERMISSIONS = {
   'warehouse:manage':           [Role.ADMIN],
 
   // 账单
+  'bill:manage':                [Role.ADMIN],
   'bill:view:all':              [Role.ADMIN],
   'bill:view:self':             [Role.SALES],
   'bill:mark-paid':             [Role.ADMIN],

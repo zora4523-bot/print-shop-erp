@@ -16,7 +16,7 @@ import {
 import { RULE_CENTER_EFFECT_REGISTRY } from '@/lib/ui/status-registry';
 
 export const metadata = {
-  title: '规则配置中心 · 红包印刷 ERP',
+  title: '规则配置中心',
 };
 
 const RULE_GROUPS = [

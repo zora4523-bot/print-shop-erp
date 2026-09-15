@@ -1,63 +1,19 @@
+export type * from './order-create-fee-types';
+import type {
+  OrderFormBRailProps,
+  OrderFormBRailQuoteItem,
+  OrderFormBRailLogistics,
+  ExternalSalesPackagingQuote,
+  OrderFormBQuoteStatus,
+} from './order-create-fee-types';
+import { useId } from 'react';
 import Decimal from 'decimal.js';
+import { Badge } from '@/components/ui/badge';
+import { ActionNotice } from '@/components/ui-business';
+import { OrderCreateFeeDetails } from './OrderCreateFeeDetails';
+import { orderCreateFeeSummary } from './order-create-fee-summary';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
-
-export type OrderFormBQuoteStatus =
-  | 'missing'
-  | 'loading'
-  | 'stale'
-  | 'error'
-  | 'incomplete'
-  | 'complete';
-
-export type OrderFormBRailQuoteItem = {
-  key: string;
-  label: string;
-  status: OrderFormBQuoteStatus;
-  amount: string | null;
-  components: Array<{ label: string; amount: string }>;
-  message?: string | null;
-};
-
-export type OrderFormBRailLogistics = {
-  status: OrderFormBQuoteStatus;
-  shippingAmount: string | null;
-  packagingAmount: string | null;
-  totalAmount: string | null;
-  shippingLabel?: string;
-  packagingLabel?: string;
-  message?: string | null;
-};
-
-export type ExternalSalesPackagingQuote = {
-  status: OrderFormBQuoteStatus;
-  amount: string | null;
-  label?: string;
-  message?: string | null;
-};
-
-export type OrderFormBRailPlateFee = {
-  status: 'PENDING';
-  amount: null;
-  displayAmount: '待定';
-  label: string;
-};
-
-export type OrderFormBRailTotalSemantics =
-  | 'COMPLETE'
-  | 'EXCLUDES_MANUAL_ITEMS';
-
-const STATUS_LABELS: Record<
-  ExternalSalesPackagingQuote['status'],
-  string
-> = {
-  missing: '待核价',
-  loading: '核价中…',
-  stale: '待重新核价',
-  error: '核价失败',
-  incomplete: '待管理员终价',
-  complete: '已核价',
-};
 
 function decimalAmount(value: string | null | undefined): Decimal | null {
   if (value === null || value === undefined || value.trim() === '') return null;
@@ -86,7 +42,8 @@ function internalOrderFormTotal(
 ): number | null {
   if (
     quoteItems.some(
-      (item) => item.status !== 'complete' || decimalAmount(item.amount) === null,
+      (item) =>
+        item.status !== 'complete' || decimalAmount(item.amount) === null,
     )
   ) {
     return null;
@@ -143,391 +100,125 @@ export function externalSalesOrderFormTotal(args: {
   );
 }
 
-function InternalOrderFormRail({
-  itemCount, quoteItems, knownTotal, totalSemantics, plateFee,
-  settlementLabel, gaps, busy, onAttemptSubmit,
-}: Pick<Parameters<typeof OrderFormBRail>[0],
-  'itemCount' | 'quoteItems' | 'knownTotal' | 'totalSemantics' | 'plateFee' |
-  'settlementLabel' | 'gaps' | 'busy' | 'onAttemptSubmit'
->) {
-  const serverKnownTotal = decimalAmount(knownTotal);
-  const total = serverKnownTotal
-    ? roundedCurrencyNumber(serverKnownTotal)
-    : internalOrderFormTotal(quoteItems);
-  const requiresFactoryPricing =
-    totalSemantics === 'EXCLUDES_MANUAL_ITEMS';
-  return (
-    <div className="space-y-3">
-      <section className="rounded-xl border bg-card p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-xs font-bold tracking-[0.18em] text-muted-foreground">
-              费用明细
-            </h2>
-            <p className="mt-1 text-xs font-semibold text-muted-foreground">
-              {itemCount} 款
-            </p>
-          </div>
-          <span className="rounded-full border px-2 py-1 text-xs font-semibold text-muted-foreground">
-            {settlementLabel}
-          </span>
-        </div>
-
-        <div className="mt-3" aria-live="polite">
-          {quoteItems.map((item, index) => (
-            <div
-              key={item.key}
-              className="flex items-start justify-between gap-3 border-b py-2 text-sm"
-            >
-              <span className="min-w-0 font-semibold text-muted-foreground">
-                {itemCount > 1 ? `${index + 1}· ` : ''}
-                {item.label}
-              </span>
-              <b
-                className={
-                  item.status === 'complete' && item.amount
-                    ? 'shrink-0 tabular-nums'
-                    : 'shrink-0 text-destructive'
-                }
-              >
-                {item.status === 'complete' && item.amount
-                  ? formatMoney(item.amount)
-                  : STATUS_LABELS[item.status]}
-              </b>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-3 border-t-2 border-foreground pt-3">
-          <p className="text-xs font-semibold text-muted-foreground">
-            {requiresFactoryPricing ? '已知合计' : '当前合计'}
-          </p>
-          <p
-            className={
-              total === null
-                ? 'mt-1 text-2xl font-extrabold text-destructive'
-                : 'mt-1 text-3xl font-extrabold leading-none tracking-tight tabular-nums'
-            }
-          >
-            {total === null ? '——' : formatMoney(total)}
-          </p>
-          <p className="mt-1 text-xs font-semibold text-muted-foreground">
-            {requiresFactoryPricing
-              ? plateFee
-                ? '不含待核价款与制版费；提交后由工厂确认'
-                : '不含待核价款；提交后由工厂确认'
-              : '预估费用'}
-          </p>
-        </div>
-
-        <Button
-          type="submit"
-          name="creationIntent"
-          value="draft"
-          variant="outline"
-          className="mt-4 min-h-11 w-full text-sm font-extrabold"
-          disabled={busy}
-          onClick={() => onAttemptSubmit('draft')}
-        >
-          {busy ? '处理中…' : '保存草稿'}
-        </Button>
-        <Button
-          type="submit"
-          name="creationIntent"
-          value="submit"
-          className="mt-2 min-h-12 w-full bg-foreground text-sm font-extrabold text-background hover:bg-foreground/90"
-          disabled={busy || gaps.length > 0}
-          onClick={() => onAttemptSubmit('submit')}
-        >
-          {busy
-            ? '处理中…'
-            : requiresFactoryPricing
-              ? '创建并提交核价'
-              : '创建并提交'}
-        </Button>
-      </section>
-
-      <section className="rounded-xl border bg-card p-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-extrabold">待补信息</h2>
-          <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs tabular-nums text-destructive">
-            {gaps.length}
-          </span>
-        </div>
-        {gaps.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            必填信息已完整。
-          </p>
-        ) : (
-          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-destructive">
-            {gaps.map((gap, index) => (
-              <li key={`${gap}-${index}`}>{gap}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
-  );
-}
-
-export function OrderFormBRail({
-  itemCount,
-  quoteItems,
-  packaging,
-  logistics,
-  usesExternalSalesPricing,
-  settlementLabel,
-  knownTotal,
-  totalSemantics,
-  plateFee,
-  gaps,
-  busy,
-  onAttemptSubmit,
-}: {
-  itemCount: number;
-  quoteItems: readonly OrderFormBRailQuoteItem[];
-  packaging: ExternalSalesPackagingQuote;
-  logistics: OrderFormBRailLogistics | null;
-  usesExternalSalesPricing: boolean;
-  settlementLabel: string;
-  knownTotal?: string | null;
-  totalSemantics?: OrderFormBRailTotalSemantics;
-  plateFee?: OrderFormBRailPlateFee | null;
-  gaps: readonly string[];
-  busy: boolean;
-  onAttemptSubmit: (intent: 'draft' | 'submit') => void;
-}) {
-  if (!usesExternalSalesPricing) {
-    return (
-      <InternalOrderFormRail
-        itemCount={itemCount}
-        quoteItems={quoteItems}
-        knownTotal={knownTotal}
-        totalSemantics={totalSemantics}
-        plateFee={plateFee}
-        settlementLabel={settlementLabel}
-        gaps={gaps}
-        busy={busy}
-        onAttemptSubmit={onAttemptSubmit}
-      />
-    );
-  }
-
-  const total = externalSalesOrderFormTotal({
+export function OrderFormBRail(props: OrderFormBRailProps) {
+  const {
+    itemCount,
     quoteItems,
     packaging,
     logistics,
+    usesExternalSalesPricing,
+    settlementLabel,
     knownTotal,
-  });
-  const excludesManualItems = totalSemantics === 'EXCLUDES_MANUAL_ITEMS';
-  const hasNonPlateManualPricing =
-    quoteItems.some(
-      (item) => item.status === 'incomplete' || item.status === 'error',
-    ) ||
-    packaging.status === 'incomplete' ||
-    packaging.status === 'error' ||
-    (excludesManualItems && !plateFee);
-  // Shared quote failures can reach both packaging and logistics. Show each
-  // message once while retaining the distinct per-item labels above it.
-  const manualMessageCandidates = [
-    ...quoteItems.flatMap((item, index) =>
-      item.status === 'incomplete' || item.status === 'error'
-        ? [{ key: `item:${item.key}`, message: `第 ${index + 1} 款：${item.message || STATUS_LABELS[item.status]}` }]
-        : [],
-    ),
-    ...(packaging.status === 'incomplete' || packaging.status === 'error'
-      ? [{ key: 'packaging', message: packaging.message || STATUS_LABELS[packaging.status] }]
-      : []),
-    ...(logistics?.status === 'incomplete' || logistics?.status === 'error'
-      ? [{ key: 'logistics', message: logistics.message || STATUS_LABELS[logistics.status] }]
-      : []),
-    ...(plateFee ? [{ key: 'plate-fee', message: `${plateFee.label}金额待工厂确认` }] : []),
-  ];
-  const manualMessages = manualMessageCandidates.filter((entry, index, all) =>
-    all.findIndex((candidate) => candidate.message === entry.message) === index,
-  ).map((entry) => ({ ...entry, key: entry.key.startsWith('item:') ? entry.key : `shared:${entry.message}` }));
-  const needsAdminPrice = manualMessages.length > 0;
-  const excludedLabels = [
-    ...(hasNonPlateManualPricing ? ['待核价款'] : []),
-    ...(plateFee ? ['制版费'] : []),
-    ...(logistics?.status === 'complete' ? [] : ['快递费']),
-  ];
-  const hasExcludedAmounts = excludedLabels.length > 0;
-  const totalNote =
-    hasExcludedAmounts
-      ? `不含${excludedLabels.join('、')}`
-      : '当前已知费用已完整';
-
+    gaps,
+    busy,
+    onAttemptSubmit,
+    onGapClick,
+  } = props;
+  const headingId = useId();
+  const summary = orderCreateFeeSummary(props);
+  const total = usesExternalSalesPricing
+    ? externalSalesOrderFormTotal({
+        quoteItems,
+        packaging,
+        logistics,
+        knownTotal,
+      })
+    : (numericAmount(knownTotal) ?? internalOrderFormTotal(quoteItems));
   return (
-    <section
-      aria-labelledby="external-order-fee-heading"
-      className={
-        needsAdminPrice
-          ? 'rounded-xl border border-destructive bg-destructive/5 p-4'
-          : 'rounded-xl border bg-card p-4'
-      }
-    >
+    <div className="space-y-3">
+      <section
+        aria-labelledby={headingId}
+        className="rounded-xl border bg-card p-4"
+      >
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <h2
-              id="external-order-fee-heading"
-              className="text-xs font-bold tracking-[0.18em] text-muted-foreground"
-            >
+            <h2 id={headingId} className="text-sm font-semibold">
               费用明细
             </h2>
-            <p className="mt-1 text-xs font-semibold text-muted-foreground">
-              {itemCount} 款
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{itemCount} 款</p>
           </div>
-          <span className="rounded-full border px-2 py-1 text-xs font-semibold text-muted-foreground">
-            {settlementLabel}
-          </span>
+          <Badge variant="outline">{settlementLabel}</Badge>
         </div>
-
-        <div aria-live="polite">
-          {quoteItems.map((item, index) => {
-            if (item.status !== 'complete' || !item.amount) {
-              return (
-                <div
-                  key={item.key}
-                  className="flex items-start justify-between gap-3 border-b py-2 text-sm"
-                >
-                  <span className="min-w-0 font-semibold text-muted-foreground">
-                    {itemCount > 1 ? `${index + 1}· ` : ''}
-                    {item.label}
-                  </span>
-                  <b className="shrink-0 text-destructive">
-                    {STATUS_LABELS[item.status]}
-                  </b>
-                </div>
-              );
-            }
-
-            const lines =
-              item.components.length > 0
-                ? item.components
-                : [{ label: item.label, amount: item.amount }];
-            return lines.map((line, lineIndex) => (
-              <div
-                key={`${item.key}-${line.label}-${lineIndex}`}
-                className="flex items-start justify-between gap-3 border-b py-2 text-sm"
-              >
-                <span className="min-w-0 font-semibold text-muted-foreground">
-                  {itemCount > 1 ? `${index + 1}· ` : ''}
-                  {line.label}
-                </span>
-                <b className="shrink-0 tabular-nums">{formatMoney(line.amount)}</b>
-              </div>
-            ));
-          })}
-
-          <div className="flex justify-between gap-3 border-b py-2 text-sm">
-            <span className="font-semibold text-muted-foreground">
-              {packaging.label ?? '入袋'}
-            </span>
-            <b
-              className={
-                packaging.status === 'complete'
-                  ? 'tabular-nums'
-                  : 'text-destructive'
-              }
-            >
-              {packaging.status === 'complete' && packaging.amount
-                ? formatMoney(packaging.amount)
-                : STATUS_LABELS[packaging.status]}
-            </b>
-          </div>
-          {plateFee ? (
-            <div className="flex justify-between gap-3 border-b py-2 text-sm">
-              <span className="font-semibold text-muted-foreground">
-                {plateFee.label}
-              </span>
-              <b className="text-destructive">{plateFee.displayAmount}</b>
-            </div>
-          ) : null}
-          <div className="flex justify-between gap-3 border-b py-2 text-sm">
-            <span className="font-semibold text-muted-foreground">
-              {logistics?.packagingLabel ?? '纸箱耗材'}
-            </span>
-            <b
-              className={
-                numericAmount(logistics?.packagingAmount) !== null
-                  ? 'tabular-nums'
-                  : 'text-destructive'
-              }
-            >
-              {numericAmount(logistics?.packagingAmount) !== null &&
-              logistics?.packagingAmount
-                ? formatMoney(logistics.packagingAmount)
-                : STATUS_LABELS[logistics?.status ?? 'missing']}
-            </b>
-          </div>
-          <div className="flex justify-between gap-3 border-b py-2 text-sm">
-            <span className="font-semibold text-muted-foreground">
-              {logistics?.shippingLabel ?? '快递费'}
-            </span>
-            <b
-              className={
-                numericAmount(logistics?.shippingAmount) !== null
-                  ? 'tabular-nums'
-                  : 'text-destructive'
-              }
-            >
-              {numericAmount(logistics?.shippingAmount) !== null &&
-              logistics?.shippingAmount
-                ? formatMoney(logistics.shippingAmount)
-                : STATUS_LABELS[logistics?.status ?? 'missing']}
-            </b>
-          </div>
-        </div>
-
+        <OrderCreateFeeDetails {...props} />
         <div className="mt-3 border-t-2 border-foreground pt-3">
           <p className="text-xs font-semibold text-muted-foreground">
-            {hasExcludedAmounts ? '已知合计' : '当前合计'}
+            {summary.excludedLabels.length ? '已知合计' : '当前合计'}
           </p>
-          <p
-            className={
-              total === null
-                ? 'mt-1 text-2xl font-extrabold text-destructive'
-                : 'mt-1 text-3xl font-extrabold leading-none tracking-tight tabular-nums'
-            }
-          >
+          <p className="mt-1 text-3xl font-bold tracking-tight tabular-nums">
             {total === null ? '——' : formatMoney(total)}
           </p>
-          <p className="mt-1 text-xs font-semibold text-muted-foreground">
-            {totalNote}
-          </p>
+          {summary.totalNote ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {summary.totalNote}
+            </p>
+          ) : null}
         </div>
-
-        {needsAdminPrice ? (
-          <div className="mt-3 border-l-[3px] border-destructive pl-3 text-destructive">
-            <p className="text-sm font-extrabold">这张单需要管理员终价</p>
-            <ul className="mt-1 list-disc space-y-1 pl-4 text-xs">
-              {manualMessages.map(({ key, message }) => (
-                <li key={key}>{message}</li>
-              ))}
-            </ul>
-          </div>
+        {summary.messages.length ? (
+          <ActionNotice
+            className="mt-4"
+            tone={summary.hasError ? 'error' : 'warning'}
+            title={summary.hasError ? '请核对费用后重试' : '待工厂核价'}
+            description={
+              <ul className="list-disc space-y-1 pl-4 text-xs">
+                {summary.messages.map(({ key, message }) => (
+                  <li key={key}>{message}</li>
+                ))}
+              </ul>
+            }
+          />
         ) : null}
-
+        {(props.allowSaveDraft ?? !usesExternalSalesPricing) ? (
+          <Button
+            type="submit"
+            name="creationIntent"
+            value="draft"
+            variant="outline"
+            className="mt-4 min-h-11 w-full"
+            disabled={busy}
+            onClick={() => onAttemptSubmit('draft')}
+          >
+            {busy ? '处理中…' : '保存草稿'}
+          </Button>
+        ) : null}
         <Button
           type="submit"
           name="creationIntent"
           value="submit"
-          className={
-            needsAdminPrice
-              ? 'mt-4 min-h-12 w-full bg-destructive text-sm font-extrabold hover:bg-destructive/90'
-              : 'mt-4 min-h-12 w-full bg-foreground text-sm font-extrabold text-background hover:bg-foreground/90'
-          }
+          className="mt-3 min-h-12 w-full"
           disabled={busy}
           onClick={() => onAttemptSubmit('submit')}
         >
-          {busy
-            ? '处理中…'
-            : needsAdminPrice
-              ? '提交并申请管理员终价'
-              : '创建并提交'}
+          {busy ? '处理中…' : '创建并提交'}
         </Button>
-    </section>
+      </section>
+      {gaps.length ? (
+        <section
+          aria-label="待补信息"
+          className="rounded-xl border bg-card p-4"
+        >
+          <h2 className="text-sm font-semibold">
+            待补信息 <Badge variant="secondary">{gaps.length}</Badge>
+          </h2>
+          <ul className="mt-2 space-y-1 text-sm">
+            {gaps.map((gap, index) => (
+              <li key={`${gap}-${index}`}>
+                {onGapClick ? (
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto min-h-11 w-full justify-start whitespace-normal px-0 text-left"
+                    onClick={() => onGapClick(index)}
+                  >
+                    {gap}
+                  </Button>
+                ) : (
+                  gap
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
   );
 }

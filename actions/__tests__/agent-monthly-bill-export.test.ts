@@ -74,7 +74,7 @@ describe('requestAgentMonthlyBillExportAction', () => {
       requestAgentMonthlyBillExportAction(null, new FormData()),
     ).rejects.toBeInstanceOf(UnauthorizedError);
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
-      'bill:view:all',
+      'bill:manage',
     );
     expect(exportMock.requestAgentMonthlyBillExport).not.toHaveBeenCalled();
   });

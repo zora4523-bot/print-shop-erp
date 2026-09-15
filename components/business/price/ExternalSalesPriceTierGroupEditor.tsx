@@ -200,6 +200,10 @@ const PRICING_PRESENTATIONS: Record<
     valueNoun: '每款价',
     instruction: '修改各数量档每款价。',
   },
+  [CustomerPriceCalculationType.PER_BOX]: {
+    calculationLabel: '按实际盒数', currentColumnLabel: '当前每盒价',
+    draftColumnLabel: '草稿每盒价（元/盒）', amountSuffix: ' / 盒', valueNoun: '每盒价', instruction: '修改每盒价格。',
+  },
   [CustomerPriceCalculationType.PER_BAG]: {
     calculationLabel: '按实际袋数',
     currentColumnLabel: '当前每袋价',

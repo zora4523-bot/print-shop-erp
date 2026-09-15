@@ -76,6 +76,7 @@ export type PreviewOrderPricingReviewResult =
 
 export type FinalizeOrderPricingMutationResult =
   | {
+      productionReadiness?: { ready: boolean; issues: string[] };
       status: 'success';
       orderId: string;
       priceRevision: number;

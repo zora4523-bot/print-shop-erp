@@ -1,400 +1,493 @@
 import { expect, test, type Page } from '@playwright/test';
-import { writeFile } from 'node:fs/promises';
 import { login, E2E_USERS, E2E_PASSWORD } from './_helpers';
 
-async function selectChoice(page: Page, label: string, name: string) {
-  const control = page.getByRole('combobox', { name: label, exact: true });
-  await control.click();
-  await page.getByRole('option', { name, exact: true }).click();
-  await expect(control).toContainText(name);
+async function openWorkbench(
+  page: Page,
+  role: 'sales' | 'owner' | 'customerService' = 'sales',
+) {
+  await login(page, {
+    from: '/workbench',
+    username: E2E_USERS[role]!.username,
+    password: E2E_PASSWORD,
+  });
+  await expect(
+    page.getByRole('heading', { name: '款式条件', exact: true }),
+  ).toBeVisible();
+}
+function quote(page: Page) {
+  return page.getByRole('region', { name: '报价计算', exact: true });
+}
+async function ready(page: Page) {
+  await expect(quote(page).locator('summary')).toContainText('费用明细');
+  await expect(
+    quote(page).getByRole('button', { name: '刷新报价', exact: true }),
+  ).toBeEnabled();
+}
+async function choose(page: Page, group: string, value: string) {
+  await page
+    .getByRole('group', { name: group, exact: true })
+    .getByRole('button', { name: value, exact: true })
+    .click();
 }
 
-async function choiceNames(page: Page, label: string) {
-  const control = page.getByRole('combobox', { name: label, exact: true });
-  if (await control.isDisabled()) return [];
-  await control.click();
-  await expect(page.getByRole('option').first()).toBeVisible();
-  const values = await page.getByRole('option').allTextContents();
-  await page.keyboard.press('Escape');
-  return values;
+async function transferCoatedOrder(
+  page: Page,
+  role: 'sales' | 'owner' = 'sales',
+) {
+  await openWorkbench(page, role);
+  await choose(page, '工艺类型', '彩印');
+  await choose(page, '纸张材质', '铜版纸');
+  await choose(page, '覆膜', '触感膜');
+  await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+  await expect(page).toHaveURL(/\/orders\/new\?fromWorkbench=/);
+  await expect(
+    page.getByRole('spinbutton', { name: '数量', exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page
+      .getByRole('group', { name: '覆膜' })
+      .getByRole('button', { name: '触感膜', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
 }
 
-function firstFoilColor(page: Page, side: '正面' | '反面') {
-  return page
-    .getByRole('group', { name: `${side}烫金颜色（最多 3 色）` })
-    .getByRole('button')
-    .first();
-}
-
-async function selectFirstFrontColor(page: Page) {
-  const color = firstFoilColor(page, '正面');
-  if ((await color.getAttribute('aria-pressed')) !== 'true')
-    await color.click();
-  await expect(color).toHaveAttribute('aria-pressed', 'true');
-}
-
-function quotedAmount(page: Page) {
-  return page
-    .getByRole('region', { name: '报价计算', exact: true })
-    .locator('p.text-3xl');
-}
-
-test.describe('sales workbench', () => {
-  // The first visit compiles a new authenticated route in the shared dev server.
-  test.describe.configure({ timeout: 90_000 });
-  test('sales opens the workbench, calculates with the current catalog and searches replies', async ({
+test.describe('shared workbench calculator', () => {
+  test.describe.configure({ timeout: 90000 });
+  test('sales changes markup locally, transfers identical item facts, and sees the same processing lines in order entry', async ({
     page,
   }) => {
-    await login(page, {
-      from: '/workbench',
-      username: E2E_USERS.sales!.username,
-      password: E2E_PASSWORD,
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await openWorkbench(page);
+    await ready(page);
+    await quote(page)
+      .getByRole('spinbutton', { name: '数量', exact: true })
+      .fill('1000');
+    await ready(page);
+    const count = { posts: 0 };
+    page.on('request', (request) => {
+      if (
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname === '/workbench'
+      )
+        count.posts++;
     });
+    await quote(page)
+      .getByRole('spinbutton', { name: '加工费加价比例（%）' })
+      .fill('0');
+    const base = await quote(page)
+      .locator('dl > div')
+      .filter({ has: page.locator('dt', { hasText: '基础加工费' }) })
+      .locator('dd')
+      .innerText();
+    expect(base).toMatch(/¥/);
+    await expect(quote(page).locator('p.text-3xl')).toHaveText(base);
+    expect(count.posts).toBe(0);
+    await quote(page).locator('summary').click();
+    const lines = await quote(page).locator('details dd').allTextContents();
+    const preservedDraftKey = 'workbench-preserve-sentinel';
+    await page.evaluate(
+      (key) => localStorage.setItem(key, 'unrelated'),
+      preservedDraftKey,
+    );
+    await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+    await expect(page).toHaveURL(/\/orders\/new\?fromWorkbench=/);
     await expect(
-      page.getByRole('heading', { name: '工作台', exact: true }),
-    ).toBeVisible();
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toHaveValue('1000');
     await expect(
       page
-        .getByRole('navigation', { name: '后台主导航' })
-        .getByRole('link', { name: '工作台', exact: true }),
-    ).toHaveAttribute('aria-current', 'page');
-    await page.getByRole('combobox', { name: '产品类型', exact: true }).click();
+        .getByRole('group', { name: '工艺类型' })
+        .getByRole('button', { name: '局部烫金', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
     await page
-      .getByRole('option', { name: '局部烫金（通版现货）', exact: true })
-      .click();
-    await page.getByRole('combobox', { name: '产品', exact: true }).click();
-    await page.getByRole('option').first().click();
-    await expect(
-      page.getByRole('combobox', { name: '规格', exact: true }),
-    ).not.toContainText('请选择');
-    await page.getByRole('combobox', { name: '纸张', exact: true }).click();
-    await page.getByRole('option').first().click();
-    await selectFirstFrontColor(page);
-    await page.getByRole('button', { name: '计算报价', exact: true }).click();
-    const quote = page.getByRole('region', { name: '报价计算', exact: true });
-    await expect(quote.getByText(/加工费价格版本/)).toBeVisible();
-    await expect(quote.getByText('加工费', { exact: true })).toBeVisible();
-    await expect(quote.getByText(/暂无法取得当前报价/)).toHaveCount(0);
-    await page.getByRole('spinbutton', { name: '数量（个）' }).fill('2000');
-    await expect(quote.getByText(/加工费价格版本/)).toHaveCount(0);
-    // Custom catalog products own a size and intentionally leave paperType
-    // empty. Their paper selector must use current materials.
-    await page.getByRole('combobox', { name: '产品类型', exact: true }).click();
-    await page.getByRole('option', { name: '专版烫金', exact: true }).click();
-    await page.getByRole('combobox', { name: '产品', exact: true }).click();
-    await page
-      .getByRole('option', { name: '专版烫金 · 大号封', exact: true })
-      .click();
-    await page.getByRole('combobox', { name: '纸张', exact: true }).click();
-    await page
-      .getByRole('option', { name: '160g珠光艳闪', exact: true })
-      .click();
-    await selectFirstFrontColor(page);
-    await page.getByRole('button', { name: '计算报价', exact: true }).click();
-    await expect(quote.getByText(/加工费价格版本/)).toBeVisible();
-    await expect(quote.getByText('待核价', { exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: '话术应对', exact: true }).click();
-    await page.getByRole('textbox', { name: '搜索销售话术' }).fill('免费打样');
-    await page.getByText('可以免费打样吗', { exact: true }).click();
-    await expect(
-      page.getByRole('button', { name: '复制话术：可以免费打样吗' }),
-    ).toBeVisible();
+      .getByRole('textbox', { name: '收货地址', exact: true })
+      .fill('报价带入测试 13800138000 上海市浦东新区测试路1号');
+    const rail = page.locator('[data-slot="order-form-rail"]');
+    for (const amount of lines)
+      await expect(
+        rail.getByText(amount, { exact: true }).first(),
+      ).toBeVisible();
+    expect(
+      await page.evaluate(
+        (key) => localStorage.getItem(key),
+        preservedDraftKey,
+      ),
+    ).toBe('unrelated');
+    expect(errors).toEqual([]);
+    await page.screenshot({
+      path: '/tmp/workbench-transfer-order.png',
+      fullPage: true,
+    });
   });
-
-  test('customer service can read the same knowledge page', async ({
+  test('preserves an existing draft when creating a separate order from a quote', async ({
     page,
   }) => {
-    await login(page, {
-      from: '/workbench',
-      username: E2E_USERS.customerService!.username,
-      password: E2E_PASSWORD,
-    });
+    await openWorkbench(page);
+    await page.goto('/orders/new');
+    await page
+      .getByRole('textbox', { name: /工单名称/ })
+      .fill('原工单不要覆盖');
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Object.keys(localStorage).find(
+            (key) =>
+              key.includes('order-form') &&
+              localStorage.getItem(key)?.includes('原工单不要覆盖'),
+          ),
+        ),
+      )
+      .toBeTruthy();
+    const original = await page.evaluate(() =>
+      Object.fromEntries(
+        Object.keys(localStorage)
+          .filter((key) => key.includes('order-form'))
+          .map((key) => [key, localStorage.getItem(key)]),
+      ),
+    );
+    // Leave through browser navigation after accepting the existing unsaved-change guard.
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.goto('/workbench');
+    await ready(page);
+    await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
     await expect(
-      page.getByRole('heading', { name: '工作台', exact: true }),
+      page.getByRole('button', { name: '使用本次报价创建工单' }),
     ).toBeVisible();
-    await page.getByRole('button', { name: '纸张与规格', exact: true }).click();
+    await page.getByRole('button', { name: '使用本次报价创建工单' }).click();
     await expect(
-      page.getByRole('heading', { name: '当前可选规格' }),
-    ).toBeVisible();
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeEnabled();
+    for (const [key, value] of Object.entries(original))
+      expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBe(
+        value,
+      );
+    await page.reload();
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeEnabled();
+    const transferUrl = page.url();
+    await page
+      .getByRole('textbox', { name: /工单名称/ })
+      .fill('报价转单继续填写');
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Object.keys(localStorage).some(
+            (key) =>
+              key.includes(':workbench:') &&
+              localStorage.getItem(key)?.includes('报价转单继续填写'),
+          ),
+        ),
+      )
+      .toBe(true);
+    await page.goto('/orders');
+    await page.goto('/orders/new');
+    await expect(page.getByRole('textbox', { name: /工单名称/ })).toHaveValue(
+      '原工单不要覆盖',
+    );
+    await page.getByText('报价工单草稿（1）', { exact: true }).click();
+    await page.getByRole('link', { name: '恢复草稿' }).click();
+    await expect(page).toHaveURL(transferUrl);
+    await expect(page.getByRole('textbox', { name: /工单名称/ })).toHaveValue(
+      '报价转单继续填写',
+    );
+    for (const [key, value] of Object.entries(original))
+      expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBe(
+        value,
+      );
   });
-
-  test('workers cannot open sales workbench', async ({ page }) => {
-    await login(page, {
+  test('preserves finishing after reload and recovery without a session payload', async ({
+    page,
+  }) => {
+    page.on('dialog', (dialog) => dialog.accept());
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await transferCoatedOrder(page);
+    await page.reload();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await page.evaluate(() => sessionStorage.clear());
+    await page.goto('/orders/new');
+    await page.getByText('报价工单草稿（1）', { exact: true }).click();
+    await page.getByRole('link', { name: '恢复草稿' }).click();
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeEnabled();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    expect(
+      await page.evaluate(
+        () =>
+          JSON.parse(
+            localStorage.getItem(
+              Object.keys(localStorage).find((key) =>
+                key.includes(':workbench:'),
+              )!,
+            )!,
+          ).values.items[0].lamination,
+      ),
+    ).toBe('SOFT_TOUCH');
+    expect(errors).toEqual([]);
+  });
+  test('restores internal-sales finishing and requires a selection for incomplete legacy drafts', async ({
+    page,
+  }) => {
+    await transferCoatedOrder(page, 'owner');
+    const url = page.url();
+    await page.reload();
+    await page
+      .getByRole('button', { name: '恢复本地草稿', exact: true })
+      .click();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await page.goto('/owner');
+    await page.evaluate(() => {
+      const key = Object.keys(localStorage).find((entry) =>
+        entry.includes(':internal:workbench:'),
+      )!;
+      const draft = JSON.parse(localStorage.getItem(key)!);
+      delete draft.values.items[0].lamination;
+      localStorage.setItem(key, JSON.stringify(draft));
+    });
+    const posts: string[] = [];
+    page.on('request', (request) => {
+      if (
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname === '/orders/new'
+      )
+        posts.push(request.postData() ?? '');
+    });
+    await page.goto(url);
+    await page
+      .getByRole('button', { name: '恢复本地草稿', exact: true })
+      .click();
+    await expect(
+      page.getByText('第 1 款覆膜资料缺失，请重新选择覆膜', { exact: true }),
+    ).toBeVisible();
+    expect(
+      await page
+        .waitForRequest(
+          (request) =>
+            request.method() === 'POST' &&
+            new URL(request.url()).pathname === '/orders/new',
+          { timeout: 1500 },
+        )
+        .catch(() => null),
+    ).toBeNull();
+    expect(posts).toEqual([]);
+    await choose(page, '覆膜', '触感膜');
+    await expect
+      .poll(() => posts.some((body) => body.includes('SOFT_TOUCH')))
+      .toBe(true);
+  });
+  test('keeps order creation blocked when the transferred draft cannot be saved', async ({
+    page,
+  }) => {
+    await openWorkbench(page);
+    await ready(page);
+    await page.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key.startsWith('print-shop-erp:order-form-draft:'))
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        return original.call(this, key, value);
+      };
+    });
+    await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+    await expect(page).toHaveURL(/\/orders\/new\?fromWorkbench=/);
+    await expect(
+      page.getByRole('region', { name: '带入报价条件' }).getByRole('alert'),
+    ).toContainText('报价条件保存失败');
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeDisabled();
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).filter((key) => key.includes(':workbench:')),
+      ),
+    ).toEqual([]);
+  });
+  test('recovers corrupt local storage from valid session facts, then blocks when both are unreadable', async ({
+    page,
+  }) => {
+    await transferCoatedOrder(page);
+    const key = await page.evaluate(() =>
+      Object.keys(localStorage).find((entry) => entry.includes(':workbench:'))!,
+    );
+    await page.evaluate(
+      (key) => localStorage.setItem(key, 'invalid json'),
+      key,
+    );
+    await page.reload();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeEnabled();
+    await page.evaluate((key) => {
+      localStorage.setItem(key, 'invalid json');
+      for (const entry of Object.keys(sessionStorage)) {
+        if (!entry.startsWith('workbench-order:')) continue;
+        const payload = JSON.parse(sessionStorage.getItem(entry)!);
+        payload.expiresAt = Date.now() - 1;
+        sessionStorage.setItem(entry, JSON.stringify(payload));
+      }
+    }, key);
+    await page.reload();
+    await expect(
+      page.getByRole('region', { name: '带入报价条件' }).getByRole('alert'),
+    ).toContainText('报价条件已过期或无法读取');
+    await expect(
+      page.getByRole('spinbutton', { name: '数量', exact: true }),
+    ).toBeDisabled();
+    await page.getByRole('button', { name: '返回工作台', exact: true }).click();
+    await expect(page).toHaveURL(/\/workbench$/);
+  });
+  test('requires missing legacy finishing to be selected before automatic quoting resumes', async ({
+    page,
+  }) => {
+    page.on('dialog', (dialog) => dialog.accept());
+    await transferCoatedOrder(page);
+    await page
+      .getByRole('textbox', { name: /工单名称/ })
+      .fill('保留缺失覆膜草稿');
+    await page
+      .getByRole('textbox', { name: '收货地址', exact: true })
+      .fill('报价草稿 13800138000 上海市浦东新区测试路1号');
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Object.keys(localStorage).some(
+            (key) =>
+              key.includes(':workbench:') &&
+              localStorage.getItem(key)?.includes('保留缺失覆膜草稿'),
+          ),
+        ),
+      )
+      .toBe(true);
+    const url = page.url();
+    await page.goto('/orders');
+    await page.evaluate(() => {
+      const key = Object.keys(localStorage).find((entry) =>
+        entry.includes(':workbench:'),
+      )!;
+      const draft = JSON.parse(localStorage.getItem(key)!);
+      delete draft.values.items[0].lamination;
+      localStorage.setItem(key, JSON.stringify(draft));
+    });
+    const posts: string[] = [];
+    page.on('request', (request) => {
+      if (
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname === '/orders/new'
+      )
+        posts.push(request.postData() ?? '');
+    });
+    await page.goto(url);
+    await expect(
+      page.getByText('第 1 款覆膜资料缺失，请重新选择覆膜', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /工单名称/ })).toHaveValue(
+      '保留缺失覆膜草稿',
+    );
+    expect(
+      await page
+        .waitForRequest(
+          (request) =>
+            request.method() === 'POST' &&
+            new URL(request.url()).pathname === '/orders/new',
+          { timeout: 1500 },
+        )
+        .catch(() => null),
+    ).toBeNull();
+    expect(posts).toEqual([]);
+    await page.getByRole('button', { name: '选择覆膜', exact: true }).click();
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '亚膜', exact: true }),
+    ).toBeFocused();
+    await choose(page, '覆膜', '触感膜');
+    await expect(
+      page.getByText('第 1 款覆膜资料缺失，请重新选择覆膜', { exact: true }),
+    ).toHaveCount(0);
+    await expect
+      .poll(() => posts.some((body) => body.includes('SOFT_TOUCH')))
+      .toBe(true);
+  });
+  test('uses printed lamination and partial/full foil with live prices and recovers from invalid quantity', async ({
+    page,
+  }) => {
+    await openWorkbench(page);
+    await ready(page);
+    await choose(page, '工艺类型', '彩印');
+    await choose(page, '纸张材质', '铜版纸');
+    await choose(page, '覆膜', '触感膜');
+    await choose(page, '叠加烫金', '局部烫金');
+    await ready(page);
+    await expect(
+      page
+        .getByRole('group', { name: '覆膜' })
+        .getByRole('button', { name: '触感膜' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await choose(page, '叠加烫金', '专版烫金');
+    await ready(page);
+    await quote(page)
+      .getByRole('spinbutton', { name: '数量', exact: true })
+      .fill('0');
+    await expect(quote(page).locator('p.text-3xl')).toHaveCount(0);
+    await quote(page)
+      .getByRole('spinbutton', { name: '数量', exact: true })
+      .fill('2000');
+    await ready(page);
+    await expect(
+      quote(page).getByRole('button', { name: '按此款式创建工单' }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: '/tmp/workbench-printed.png',
+      fullPage: true,
+    });
+  });
+  for (const role of ['owner', 'customerService'] as const)
+    test(`${role} can calculate without impersonating an external sales account`, async ({
+      page,
+    }) => {
+      await openWorkbench(page, role);
+      await ready(page);
+      await expect(quote(page).locator('p.text-3xl')).toContainText(/¥|待核价/);
+    });
+  test('rejects a worker and retains sales knowledge search', async ({
+    page,
+    browser,
+  }) => {
+    await openWorkbench(page);
+    await page.getByRole('button', { name: '话术应对', exact: true }).click();
+    await page.getByRole('textbox', { name: '搜索销售话术' }).fill('太贵');
+    await expect(
+      page.getByText('太贵了，能不能优惠点', { exact: true }),
+    ).toBeVisible();
+    const context = await browser.newContext();
+    const worker = await context.newPage();
+    await login(worker, {
+      from: '/workbench',
       username: E2E_USERS.workerHandPress!.username,
       password: E2E_PASSWORD,
     });
-    await page.goto('/workbench');
-    await expect(page.getByTestId('sales-workbench')).toHaveCount(0);
-    await expect(
-      page.getByRole('button', { name: '计算报价', exact: true }),
-    ).toHaveCount(0);
+    await expect(worker.getByRole('heading', { name: '款式条件' })).toHaveCount(
+      0,
+    );
+    await context.close();
   });
-});
-
-test('every live catalog product, specification, paper and technique can be selected', async ({
-  page,
-}, testInfo) => {
-  test.setTimeout(240_000);
-  await login(page, {
-    from: '/workbench',
-    username: E2E_USERS.sales!.username,
-    password: E2E_PASSWORD,
-  });
-  const report: object[] = [];
-  for (const route of await choiceNames(page, '产品类型')) {
-    await selectChoice(page, '产品类型', route);
-    // Specification choices now cover the whole route and may switch product.
-    // Audit that selector once per route, then retain each product's own size.
-    const routeSpecifications = await choiceNames(page, '规格');
-    expect(routeSpecifications.length, `${route} 规格`).toBeGreaterThan(0);
-    for (const specification of routeSpecifications)
-      await selectChoice(page, '规格', specification);
-    report.push({ route, routeSpecifications });
-    await page
-      .getByRole('button', { name: '重新选择产品、规格和纸张' })
-      .click();
-    const products = await choiceNames(page, '产品');
-    expect(products.length, route).toBeGreaterThan(0);
-    for (const product of products) {
-      await selectChoice(page, '产品', product);
-      const specification = (
-        await page
-          .getByRole('combobox', { name: '规格', exact: true })
-          .innerText()
-      ).trim();
-      expect(specification, `${product} 规格`).not.toBe('请选择');
-      expect(routeSpecifications, `${product} 规格`).toContain(specification);
-      const papers = await choiceNames(page, '纸张');
-      expect(papers.length, `${product} 纸张`).toBeGreaterThan(0);
-      for (const paper of papers) await selectChoice(page, '纸张', paper);
-      await expect(
-        page.getByRole('combobox', { name: '产品', exact: true }),
-      ).toContainText(product);
-      await selectChoice(page, '纸张', papers[0]!);
-      for (const technique of await choiceNames(page, '烫金方式')) {
-        await selectChoice(page, '烫金方式', technique);
-        if (technique !== '无烫金') await selectFirstFrontColor(page);
-        await page
-          .getByRole('button', { name: '计算报价', exact: true })
-          .click();
-        if (product === '紫色珠光纸') {
-          await expect(
-            page.getByText(
-              '所选纸张缺少克重，请联系管理员补充产品资料后再计算',
-            ),
-          ).toBeVisible();
-        } else {
-          await expect(page.getByText(/加工费价格版本/)).toBeVisible();
-        }
-        report.push({
-          route,
-          product,
-          specification,
-          papers,
-          technique,
-          missingPaperWeight: product === '紫色珠光纸',
-          needsPricing:
-            (await page.getByText('待核价', { exact: true }).count()) > 0,
-        });
-      }
-    }
-  }
-  const reportPath = testInfo.outputPath('catalog-selection-audit.json');
-  await writeFile(reportPath, JSON.stringify(report, null, 2));
-  await testInfo.attach('catalog-selection-audit', {
-    path: reportPath,
-    contentType: 'application/json',
-  });
-});
-
-test('initial specification and paper choices work without selecting a product first', async ({
-  page,
-}) => {
-  await login(page, {
-    from: '/workbench',
-    username: E2E_USERS.sales!.username,
-    password: E2E_PASSWORD,
-  });
-  for (const label of ['规格', '纸张'])
-    await expect(
-      page.getByRole('combobox', { name: label, exact: true }),
-    ).toBeEnabled();
-  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
-  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
-  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
-  await page.getByRole('combobox', { name: '规格', exact: true }).click();
-  await page.getByRole('option', { name: '大号封90×165', exact: true }).click();
-  await expect(
-    page.getByRole('combobox', { name: '产品', exact: true }),
-  ).toContainText('专版烫金 · 大号封');
-  await selectFirstFrontColor(page);
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
-  await expect(page.getByText('待核价', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: '重新选择产品、规格和纸张' }).click();
-  await expect(page.getByText(/加工费价格版本/)).toHaveCount(0);
-  await page.getByRole('combobox', { name: '规格', exact: true }).click();
-  await page.getByRole('option', { name: '大号封90×165', exact: true }).click();
-  await page.getByRole('combobox', { name: '纸张', exact: true }).click();
-  await page.getByRole('option', { name: '160g珠光艳闪', exact: true }).click();
-  await page.getByRole('button', { name: '计算报价', exact: true }).click();
-  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
-});
-
-test('prices immediately on entry and recalculates quantity, specification and markup without a calculate click', async ({
-  page,
-}) => {
-  await login(page, {
-    from: '/workbench',
-    username: E2E_USERS.sales!.username,
-    password: E2E_PASSWORD,
-  });
-  const amount = quotedAmount(page);
-  // No form interaction is permitted before this assertion: the prototype's
-  // complete initial example must already produce a live system quote.
-  await expect(amount).toHaveText('¥ 438.75');
-  await expect(firstFoilColor(page, '正面')).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
-  await expect(
-    page.getByRole('combobox', { name: '规格', exact: true }),
-  ).toContainText('大号封90×165');
-  await expect(
-    page.getByRole('combobox', { name: '纸张', exact: true }),
-  ).toContainText('160g珠光艳闪');
-  await page.getByRole('spinbutton', { name: '数量（个）' }).fill('2000');
-  await expect(amount).toHaveText('¥ 769.50');
-  await expect(
-    page.getByRole('spinbutton', { name: '数量（个）' }),
-  ).toBeFocused();
-  const midSpecification = (await choiceNames(page, '规格')).find((name) =>
-    name.startsWith('中号封'),
-  );
-  expect(midSpecification).toBeTruthy();
-  await selectChoice(page, '规格', midSpecification!);
-  await expect(
-    page.getByRole('combobox', { name: '产品', exact: true }),
-  ).toContainText('专版烫金 · 中号封');
-  await expect(firstFoilColor(page, '正面')).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
-  await expect(amount).toHaveText('¥ 729.00');
-  await page.getByRole('button', { name: '不加价', exact: true }).click();
-  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
-  const base = await page
-    .getByText('加工费', { exact: true })
-    .locator('..')
-    .locator('dd')
-    .innerText();
-  await expect(amount).toHaveText(base);
-});
-
-test('explains reverse-side pricing limitations and recovers automatically after correcting the combination', async ({
-  page,
-}) => {
-  await login(page, {
-    from: '/workbench',
-    username: E2E_USERS.sales!.username,
-    password: E2E_PASSWORD,
-  });
-  await expect(quotedAmount(page)).toHaveText('¥ 438.75');
-  await firstFoilColor(page, '反面').click();
-  await expect(
-    page.getByText(
-      '专版反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await expect(quotedAmount(page)).toHaveCount(0);
-  await firstFoilColor(page, '反面').click();
-  await expect(quotedAmount(page)).toHaveText('¥ 438.75');
-
-  await selectChoice(page, '产品类型', '彩印');
-  await selectChoice(page, '烫金方式', '平烫');
-  await selectFirstFrontColor(page);
-  await firstFoilColor(page, '反面').click();
-  await expect(
-    page.getByText(
-      '彩印加反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
-      { exact: true },
-    ),
-  ).toBeVisible();
-
-  await selectChoice(page, '产品类型', '局部烫金（通版现货）');
-  await firstFoilColor(page, '正面').click();
-  await firstFoilColor(page, '反面').click();
-  await expect(
-    page.getByText('请至少选择一种正面烫金颜色后自动计算', { exact: true }),
-  ).toBeVisible();
-  await selectFirstFrontColor(page);
-  await expect(page.getByText(/加工费价格版本/)).toBeVisible();
-  await expect(quotedAmount(page)).not.toHaveText('待核价');
-  await expect(
-    page.getByText('请至少选择一种正面烫金颜色后自动计算', { exact: true }),
-  ).toHaveCount(0);
-});
-
-test('shows the specific missing paper price and recalculates when a priced paper is restored', async ({
-  page,
-}) => {
-  await login(page, {
-    from: '/workbench',
-    username: E2E_USERS.sales!.username,
-    password: E2E_PASSWORD,
-  });
-  await expect(quotedAmount(page)).toHaveText('¥ 438.75');
-  await selectChoice(page, '纸张', '120g珠光艳闪');
-  await expect(quotedAmount(page)).toHaveText('待核价');
-  await expect(
-    page.getByText('所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价', {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await selectChoice(page, '纸张', '160g珠光艳闪');
-  await expect(quotedAmount(page)).toHaveText('¥ 438.75');
-  await expect(
-    page.getByText('所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价', {
-      exact: true,
-    }),
-  ).toHaveCount(0);
-});
-
-test('renders the partial foil charge once for the complete front and back combination', async ({
-  page,
-}) => {
-  await login(page, {
-    from: '/workbench',
-    username: E2E_USERS.sales!.username,
-    password: E2E_PASSWORD,
-  });
-  await selectChoice(page, '产品类型', '局部烫金（通版现货）');
-  const machineCharge = page
-    .getByRole('region', { name: '报价计算', exact: true })
-    .locator('dl > div')
-    .filter({ has: page.getByText('机烫费', { exact: true }) });
-  await expect(quotedAmount(page)).toHaveText('¥ 229.50');
-  await expect(machineCharge.locator('dt')).toHaveText(/机烫费\s*¥ 40\.00 × 1$/);
-  await expect(machineCharge.locator('dd')).toHaveText('¥ 40.00');
-  await firstFoilColor(page, '反面').click();
-  await expect(quotedAmount(page)).toHaveText('¥ 283.50');
-  await expect(machineCharge.locator('dt')).toHaveText(/机烫费\s*¥ 80\.00 × 1$/);
-  await expect(machineCharge.locator('dd')).toHaveText('¥ 80.00');
-});
-
-test('ice-white full foil explicitly requires administrator pricing and recovers on paper change', async ({ page }) => {
-  await login(page, { from: '/workbench', username: E2E_USERS.sales!.username, password: E2E_PASSWORD });
-  await expect(quotedAmount(page)).toHaveText('¥ 438.75');
-  await selectChoice(page, '纸张', '160g冰白纸');
-  await expect(quotedAmount(page)).toHaveText('待核价');
-  const guidance = page.getByText('冰白纸专版烫金由管理员手动核价，请提交工单后等待核价', { exact: true });
-  await expect(guidance).toBeVisible();
-  await expect(page.getByText('所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: '2,000', exact: true }).click();
-  await expect(quotedAmount(page)).toHaveText('待核价');
-  await expect(guidance).toBeVisible();
-  await selectChoice(page, '纸张', '160g红卡');
-  await expect(quotedAmount(page)).toHaveText('¥ 769.50');
-  await expect(guidance).toHaveCount(0);
 });

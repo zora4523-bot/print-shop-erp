@@ -116,3 +116,11 @@ describe('order navigation hierarchy', () => {
     expect(html).not.toContain('工单详情');
   });
 });
+
+it('新增空白封纸张使用业务标题且不链接无页面的中间路径', () => {
+  usePathnameMock.mockReturnValue('/owner/rules/customer-pricing/blank/new');
+  const html = renderToStaticMarkup(<AdminBreadcrumb />);
+  expect(visibleText(html)).toContain('新增纸张与规格价格');
+  expect(visibleText(html)).not.toContain('创建工单');
+  expect(html).not.toContain('href="/owner/rules/customer-pricing/blank"');
+});

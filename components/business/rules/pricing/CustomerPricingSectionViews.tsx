@@ -38,6 +38,7 @@ export type PricingMatrixColumn = {
 
 export type PricingMatrixCell = PricingNumericFieldState & {
   columnKey: string;
+  emptyLabel?: string;
 };
 
 export type CustomerBlankPricingRow = {
@@ -77,7 +78,6 @@ export type CustomerTierPricingRow = {
 
 export type CustomerTiersPricingSectionViewProps = {
   rows: readonly CustomerTierPricingRow[];
-  exampleQuantity?: number;
   headingActions?: ReactNode;
   statusContent?: ReactNode;
   className?: string;
@@ -158,6 +158,7 @@ export type CustomerShippingPricingFields = {
 };
 
 export type CustomerShipPricingSectionViewProps = {
+  box?: readonly {label: string; field: PricingNumericFieldState}[];
   bag: CustomerBagPricingFields;
   carton: CustomerCartonPricingFields;
   shipping: CustomerShippingPricingFields;
@@ -178,7 +179,6 @@ type PricingNumericInputProps = PricingNumericFieldState & {
 type PricingSectionHeadingProps = {
   headingId: string;
   title: string;
-  description: ReactNode;
   basis?: string;
   criticalBasis?: boolean;
   actions?: ReactNode;
@@ -195,7 +195,6 @@ const EMPTY_FIELD: PricingNumericFieldState = {
 function PricingSectionHeading({
   headingId,
   title,
-  description,
   basis,
   criticalBasis = false,
   actions,
@@ -223,9 +222,6 @@ function PricingSectionHeading({
               </Badge>
             ) : null}
           </div>
-          <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-muted-foreground sm:text-sm">
-            {description}
-          </p>
         </div>
         {actions ? (
           <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
@@ -391,12 +387,6 @@ export function CustomerBlankPricingSectionView({
         headingId={headingId}
         title="局部烫金 · 空白封现货单价"
         basis="元 / 个"
-        description={
-          <>
-            空白封 = 局部烫金的材料价。空格是“— 转人工”显式状态；
-            <strong className="text-foreground">0 元和无报价是两回事</strong>。
-          </>
-        }
         actions={headingActions}
       />
       {statusContent}
@@ -439,8 +429,8 @@ export function CustomerBlankPricingSectionView({
                         <PricingNumericInput
                           {...field}
                           ariaLabel={`${row.paperName}${displayWeight(row.weight)}${column.label}单价`}
-                          placeholder="— 转人工"
-                          step="0.005"
+                          placeholder={row.cells.find(cell => cell.columnKey === column.key)?.emptyLabel ?? '— 转人工'}
+                          step="0.0001"
                           changedDot
                           className={cn(
                             'h-9 border-transparent bg-transparent px-2 text-right shadow-none',
@@ -538,12 +528,6 @@ export function CustomerMachinePricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="局部烫金 · 机烫费与制版费"
-        description={
-          <>
-            机烫费按<strong className="text-foreground">印刷次数</strong>
-            计，不按面数。印刷次数 = 数量 × 过版次数。
-          </>
-        }
         actions={headingActions}
       />
       {statusContent}
@@ -625,7 +609,7 @@ function tierRanges(rows: readonly CustomerTierPricingRow[]) {
     const label =
       upper === null
         ? `≥ ${integerLabel(lower)} 个`
-        : `${integerLabel(lower)} ~ ${integerLabel(upper)} 个`;
+        : `≥ ${integerLabel(lower)} 且 < ${integerLabel(upper + 1)} 个`;
     if (upper !== null) previousMax = upper;
     return { lower, upper, label };
   });
@@ -633,17 +617,12 @@ function tierRanges(rows: readonly CustomerTierPricingRow[]) {
 
 export function CustomerTiersPricingSectionView({
   rows,
-  exampleQuantity = 4_600,
   headingActions,
   statusContent,
   className,
   headingId = 'customer-tiers-pricing-heading',
 }: CustomerTiersPricingSectionViewProps) {
   const ranges = tierRanges(rows);
-  const exampleIndex = ranges.findIndex(
-    (range) => range.upper === null || exampleQuantity <= range.upper,
-  );
-  const exampleTier = exampleIndex >= 0 ? rows[exampleIndex]?.name : null;
 
   return (
     <section
@@ -654,7 +633,6 @@ export function CustomerTiersPricingSectionView({
         headingId={headingId}
         title="专版烫金 · 阶梯单价"
         basis="元 / 个"
-        description="上界为正整数，须大于上一档且小于下一档；末档不限。"
         actions={headingActions}
       />
       {statusContent}
@@ -665,22 +643,24 @@ export function CustomerTiersPricingSectionView({
             <div
               role="table"
               aria-label="专版烫金阶梯单价"
-              className="min-w-[780px] px-4 py-3 sm:px-5"
+              className="min-w-[820px] px-4 py-3 sm:px-5"
             >
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_130px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档位</span>
-                  <span role="columnheader">适用范围（推导）</span>
+                  <span role="columnheader">数量范围</span>
                   <span role="columnheader" className="text-right">
-                    中号组 上界
+                    数量上界（含）
                   </span>
-                  <span role="columnheader" className="text-right">
-                    单价 中/大
+                  <span role="columnheader" className="px-1.5 text-right">
+                    中号组单价
                   </span>
-                  <span role="columnheader" aria-label="预留操作列" />
+                  <span role="columnheader" className="px-1.5 text-right">
+                    大号组单价
+                  </span>
                 </div>
               </div>
               <div role="rowgroup">
@@ -691,7 +671,7 @@ export function CustomerTiersPricingSectionView({
                     <div
                       role="row"
                       key={row.key}
-                      className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_130px_34px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
+                      className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                     >
                       <span role="cell" className="font-extrabold">
                         {row.name}
@@ -710,37 +690,28 @@ export function CustomerTiersPricingSectionView({
                           placeholder={lastOpenTier ? '∞' : '—'}
                         />
                       </div>
-                      <div role="cell" className="flex min-w-0 gap-1.5">
+                      <div role="cell" className="min-w-0">
                         <PricingNumericInput
                           {...row.middlePrice}
                           ariaLabel={`${row.name}中号组单价`}
-                          step="0.005"
-                          className="min-w-0 flex-1 px-1.5 text-xs"
+                          step="0.0001"
+                          className="w-full min-w-0 px-1.5 text-xs"
                         />
+                      </div>
+                      <div role="cell" className="min-w-0">
                         <PricingNumericInput
                           {...row.largePrice}
                           ariaLabel={`${row.name}大号组单价`}
-                          step="0.005"
-                          className="min-w-0 flex-1 px-1.5 text-xs"
+                          step="0.0001"
+                          className="w-full min-w-0 px-1.5 text-xs"
                         />
                       </div>
-                      <span role="cell" />
                     </div>
                   );
                 })}
               </div>
             </div>
           </TableScrollArea>
-          <div className="px-4 pb-4 sm:px-5">
-            <FormulaNote>
-              档位取档按“实际数量适用范围”：
-              {integerLabel(exampleQuantity)} 个落{' '}
-              <strong className="text-destructive">
-                {exampleTier ?? '未命中'}
-              </strong>
-              {exampleQuantity === 4_600 ? '，不是 4千档' : ''}。范围推导保证任何数量恰好命中一档。
-            </FormulaNote>
-          </div>
         </CardContent>
       </Card>
     </section>
@@ -803,12 +774,6 @@ export function CustomerAddsPricingSectionView({
         headingId={headingId}
         title="专版烫金 · 加价"
         basis="元 / 个"
-        description={
-          <>
-            全部仅作用于专版烫金，叠加到阶梯单价上；基准 160g 艳闪 / 红卡 = 0，
-            基准纸不需要加价行。
-          </>
-        }
         actions={headingActions}
       />
       {statusContent}
@@ -849,9 +814,8 @@ export function CustomerPrintPricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="彩印阶梯总价"
-        basis="元 / 单 · PER_ORDER · 整单总价不乘数量"
+        basis="元 / 单"
         criticalBasis
-        description="查到的直接就是整单总价。空格 = 该档无报价，转人工。数量取整：5千–7千按5千 · 8千–1万按1万 · 1.5万–2万按2万。"
         actions={headingActions}
       />
       {statusContent}
@@ -900,9 +864,9 @@ export function CustomerPrintPricingSectionView({
               ))}
               <TableRow className="hover:bg-transparent">
                 <TableCell className="px-4 py-2 text-sm font-bold">
-                  <span className="block">单色烫金原子套餐</span>
+                  <span className="block">单色烫金套餐</span>
                   <span className="mt-0.5 block text-xs font-semibold text-primary">
-                    含制版费 · 按不可拆套餐总价计价
+                    含制版费
                   </span>
                 </TableCell>
                 {columns.map((column) => {
@@ -915,7 +879,7 @@ export function CustomerPrintPricingSectionView({
                     <TableCell key={column.key} className="p-1">
                       <PricingNumericInput
                         {...field}
-                        ariaLabel={`单色烫金${column.label}档含版费原子套餐价`}
+                        ariaLabel={`单色烫金${column.label}档含版费套餐价`}
                         className="h-8 w-14 px-1.5 text-xs"
                       />
                     </TableCell>
@@ -924,12 +888,6 @@ export function CustomerPrintPricingSectionView({
               </TableRow>
             </TableBody>
           </Table>
-          <div className="px-4 pb-4 pt-3 sm:px-5">
-            <FormulaNote>
-              彩印基础价清空一个格子 = 该档无报价转人工，
-              <strong className="text-destructive">不是 0 元</strong>。单色烫金套餐价已包含制版费，有唯一明确档位时作为不可拆原子总价计入款式，不再另收订单级制版费；缺档时整款转人工核价。冰白中号 2千起为空就是现状，不会按 0 元处理。
-            </FormulaNote>
-          </div>
         </CardContent>
       </Card>
     </section>
@@ -1011,6 +969,7 @@ function calculateShippingExample(
 }
 
 export function CustomerShipPricingSectionView({
+  box,
   bag,
   carton,
   shipping,
@@ -1033,7 +992,6 @@ export function CustomerShipPricingSectionView({
       <PricingSectionHeading
         headingId={headingId}
         title="包装 · 纸箱耗材 · 中通快递"
-        description="入袋混装按袋（款级）；纸箱与快递按整单。纸箱任何情况都收；快递仅总数量 ≤ 上限时自动计，超出走物流待定，顺丰到付归零。"
         actions={headingActions}
       />
       {statusContent}
@@ -1058,6 +1016,13 @@ export function CustomerShipPricingSectionView({
           </div>
         </CardContent>
       </Card>
+
+      {box ? <Card className="min-w-0 gap-0 rounded-xl py-0 shadow-none">
+        <CardContent className="px-4 py-4 sm:px-5">
+          <CardSectionLabel>装盒 · 元/盒</CardSectionLabel>
+          <div className="divide-y">{box.map((row) => <ParameterRow key={row.label} label={row.label} field={row.field} unit="元/盒" step="0.01" />)}</div>
+        </CardContent>
+      </Card> : null}
 
       <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
         <CardContent className="min-w-0 p-0">

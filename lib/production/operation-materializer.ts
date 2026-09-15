@@ -1,5 +1,8 @@
+import { packagingBoxType } from '../order/packaging-mode';
+import { calculatePackagingBagCount } from '../order/packaging-bag-count';
 import {
   OrderCraft,
+  OrderPackagingMode,
   PieceworkOperationType,
   PieceworkRateUnit,
   ProductionOperationSourceType,
@@ -16,6 +19,7 @@ export type CanonicalProductionItemFact = {
 };
 
 export type CanonicalPackagingGroupFact = {
+  mode?: OrderPackagingMode;
   id: string;
   sequence: number;
   actualBagCount: number;
@@ -27,6 +31,7 @@ export type CanonicalPackagingGroupFact = {
 
 export type CanonicalProductionOrderFacts = {
   orderId: string;
+  shipments?: readonly {lines: readonly {orderItemId: string; quantity: number}[]}[];
   items: readonly CanonicalProductionItemFact[];
   packagingGroups: readonly CanonicalPackagingGroupFact[];
 };
@@ -99,6 +104,49 @@ function issue(
 
 function normalizedQty(value: number): string {
   return String(value);
+}
+
+function packingOperationSpec(
+  group: CanonicalPackagingGroupFact,
+  mode: OrderPackagingMode,
+): ProductionOperationSpec {
+  return {
+    key: `PACKING:group=${group.id}`,
+    operationType: PieceworkOperationType.PACKING,
+    unit: packagingBoxType(mode) ? PieceworkRateUnit.PER_BOX : PieceworkRateUnit.PER_BAG,
+    plannedQty: normalizedQty(group.actualBagCount),
+    passCount: 1,
+    sources: [
+      {
+        sourceType: ProductionOperationSourceType.PACKAGING_GROUP,
+        orderItemId: null,
+        packagingGroupId: group.id,
+        sourceQty: normalizedQty(group.actualBagCount),
+        completedPieceQty: normalizedQty(group.actualBagCount),
+        passCount: 1,
+      },
+    ],
+  };
+}
+
+function hasMatchingBoxCount(
+  facts: CanonicalProductionOrderFacts,
+  group: CanonicalPackagingGroupFact,
+  mode: OrderPackagingMode,
+): boolean {
+  const result = calculatePackagingBagCount({
+    mode,
+    itemQuantities: facts.items.map((item) => item.quantity),
+    itemUnitsPerBag: facts.items.map(
+      (item) => group.lines.find((line) => line.orderItemId === item.id)?.unitsPerBag ?? 0,
+    ),
+    shipmentQuantities: facts.shipments?.map((shipment) =>
+      facts.items.map(
+        (item) => shipment.lines.find((line) => line.orderItemId === item.id)?.quantity ?? 0,
+      ),
+    ),
+  });
+  return result.complete && result.bagCount === group.actualBagCount;
 }
 
 /**
@@ -247,7 +295,8 @@ export function deriveProductionOperationPlan(
       continue;
     }
     packagingIds.add(group.id);
-    if (!isPositiveWhole(group.actualBagCount)) {
+    const mode = group.mode ?? (group.lines.length > 1 ? OrderPackagingMode.MIXED_STYLE : OrderPackagingMode.SINGLE_STYLE);
+    if (mode === OrderPackagingMode.UNPACKED ? group.actualBagCount !== 0 : !isPositiveWhole(group.actualBagCount)) {
       issue(
         issues,
         'INVALID_PACKAGING_QUANTITY',
@@ -303,6 +352,7 @@ export function deriveProductionOperationPlan(
       );
       const itemQuantity = itemQuantityById.get(line.orderItemId);
       if (
+        mode !== OrderPackagingMode.UNPACKED && !packagingBoxType(mode) &&
         itemQuantity !== undefined &&
         Math.ceil(itemQuantity / line.unitsPerBag) !== group.actualBagCount
       ) {
@@ -315,23 +365,11 @@ export function deriveProductionOperationPlan(
       }
     }
 
-    packingSpecs.push({
-      key: `PACKING:group=${group.id}`,
-      operationType: PieceworkOperationType.PACKING,
-      unit: PieceworkRateUnit.PER_BAG,
-      plannedQty: normalizedQty(group.actualBagCount),
-      passCount: 1,
-      sources: [
-        {
-          sourceType: ProductionOperationSourceType.PACKAGING_GROUP,
-          orderItemId: null,
-          packagingGroupId: group.id,
-          sourceQty: normalizedQty(group.actualBagCount),
-          completedPieceQty: normalizedQty(group.actualBagCount),
-          passCount: 1,
-        },
-      ],
-    });
+    if (mode === OrderPackagingMode.UNPACKED) continue;
+    if (packagingBoxType(mode) && !hasMatchingBoxCount(facts, group, mode)) {
+      issue(issues, 'PACKAGING_QUANTITY_MISMATCH', path, '实际盒数与包装、发货组成不一致');
+    }
+    packingSpecs.push(packingOperationSpec(group, mode));
   }
 
   for (const item of facts.items) {

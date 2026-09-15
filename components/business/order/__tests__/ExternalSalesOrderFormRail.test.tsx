@@ -26,6 +26,26 @@ const pendingPlateFee = {
 };
 
 describe('OrderFormBRail', () => {
+  it('keeps draft creation available for admin entry with external pricing', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'complete', amount: '10.00' }}
+        logistics={null}
+        usesExternalSalesPricing
+        allowSaveDraft
+        settlementLabel="外部销售应付工厂"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+    expect(html).toContain('保存草稿');
+    expect(html).toContain('创建并提交');
+    expect(html).toContain('纸箱耗材');
+  });
+
   it('uses the internal settlement rail without external packaging or logistics fees', () => {
     const html = renderToStaticMarkup(
       <OrderFormBRail
@@ -94,8 +114,8 @@ describe('OrderFormBRail', () => {
 
     expect(html).toContain('已知合计');
     expect(html).toContain('¥ 180.00');
-    expect(html).toContain('不含待核价款与制版费；提交后由工厂确认');
-    expect(html).toContain('创建并提交核价');
+    expect(html).toContain('不含制版费');
+    expect(html).toContain('创建并提交');
   });
 
   it('shows the known subtotal while shipping is still pending', () => {
@@ -140,7 +160,7 @@ describe('OrderFormBRail', () => {
     expect(html).not.toContain('这张单需要管理员终价');
   });
 
-  it('does not repeat a completed style total above its fee lines', () => {
+  it('groups a completed style subtotal with its fee components', () => {
     const html = renderToStaticMarkup(
       <OrderFormBRail
         itemCount={1}
@@ -160,7 +180,7 @@ describe('OrderFormBRail', () => {
       />,
     );
 
-    expect(html.match(/¥ 170\.00/g) ?? []).toHaveLength(0);
+    expect(html.match(/¥ 170\.00/g) ?? []).toHaveLength(1);
     expect(html).toContain('¥ 130.00');
     expect(html).toContain('¥ 40.00');
   });
@@ -189,8 +209,8 @@ describe('OrderFormBRail', () => {
     );
 
     expect(html).toContain('制烫金版费金额待工厂确认');
-    expect(html).toContain('这张单需要管理员终价');
-    expect(html).toContain('提交并申请管理员终价');
+    expect(html).toContain('待工厂核价');
+    expect(html).toContain('创建并提交');
   });
 
   it('keeps the known total and full fee semantics when one style needs manual pricing', () => {
@@ -248,10 +268,43 @@ describe('OrderFormBRail', () => {
     expect(html).not.toContain('>——<');
     expect(html).toContain('入袋 10袋');
     expect(html).toContain('制烫金版费');
-    expect(html).toContain('待定');
+    expect(html).toContain('待工厂核价');
     expect(html).toContain('纸箱耗材');
     expect(html).toContain('快递费');
-    expect(html).toContain('这张单需要管理员终价');
+    expect(html).toContain('待工厂核价');
+  });
+
+  for (const external of [false, true]) {
+    it(`shares fee components and preserves manual zero prices for ${external ? 'external' : 'internal'} settlement`, () => {
+      const render = (manual: boolean) => renderToStaticMarkup(<OrderFormBRail
+        itemCount={1} quoteItems={manual ? [{ ...quoteItems[0], amount: '0', pricingSource: 'ADMIN' }] : quoteItems}
+        packaging={{ status: 'complete', amount: '0', label: '不包装', pricingSource: manual ? 'ADMIN' : 'AUTO' }}
+        logistics={{ status: 'error', shippingAmount: null, packagingAmount: '3.00', totalAmount: null, message: '运费待核' }}
+        usesExternalSalesPricing={external} settlementLabel={external ? '外部销售应付工厂' : '工厂直接业务'}
+        knownTotal={manual ? '0' : '170'} gaps={[]} busy={false} onAttemptSubmit={vi.fn()}
+      />);
+      const automatic = render(false);
+      expect(automatic).toContain('空白封');
+      expect(automatic).toContain('¥ 130.00');
+      expect(automatic).toContain('¥ 40.00');
+      const manual = render(true);
+      expect(manual).toContain('人工价');
+      expect(manual).toContain('¥ 0.00');
+      expect(manual).not.toContain('¥ 130.00');
+      expect(manual).not.toContain('预估费用');
+      for (const text of ['纸箱耗材', '运费待核', '不含快递费']) {
+        expect(manual.includes(text)).toBe(external);
+      }
+    });
+  }
+
+  it('distinguishes a mixture of manual and automatic packaging prices', () => {
+    const html = renderToStaticMarkup(<OrderFormBRail itemCount={1} quoteItems={quoteItems}
+      packaging={{ status: 'complete', amount: '10', pricingSource: 'MIXED' }}
+      logistics={null} usesExternalSalesPricing={false} settlementLabel="工厂直接业务"
+      knownTotal="180" gaps={[]} busy={false} onAttemptSubmit={vi.fn()} />);
+    expect(html).toContain('含人工价');
+    expect(html).not.toContain('>人工价<');
   });
 
   it('adds decimal amounts without floating-point drift', () => {

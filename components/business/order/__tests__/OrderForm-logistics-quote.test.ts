@@ -22,6 +22,9 @@ const railSource = readFileSync(
   ),
   'utf8',
 );
+const feeDetailsSource = readFileSync(
+  path.join(process.cwd(), 'components/business/order/OrderCreateFeeDetails.tsx'), 'utf8',
+);
 const formBSource = readFileSync(
   path.join(
     process.cwd(),
@@ -69,9 +72,10 @@ describe('OrderForm logistics quote authority', () => {
       'setValue(packingPath, shipment.packaging.amount, {',
     );
     expect(source).toContain('const railLogistics = usesExternalSalesPricing');
-    expect(railSource).toContain("{packaging.label ?? '入袋'}");
-    expect(railSource).toContain("{logistics?.packagingLabel ?? '纸箱耗材'}");
-    expect(railSource).toContain("{logistics?.shippingLabel ?? '快递费'}");
+    expect(railSource).toContain('<OrderCreateFeeDetails {...props} />');
+    expect(feeDetailsSource).toContain("packaging.label ?? '包装费'");
+    expect(feeDetailsSource).toContain("logistics?.packagingLabel ?? '纸箱耗材'");
+    expect(feeDetailsSource).toContain("logistics?.shippingLabel ?? '快递费'");
     expect(railSource).toContain('当前合计');
     expect(source).not.toContain('对客快递费（元，销售暂定）');
     expect(source).not.toContain('收费调整说明');
@@ -186,7 +190,10 @@ describe('OrderForm processing quote concurrency', () => {
   });
 
   it('offers only B business routes and reserves configuration-outside notes for internal create', () => {
-    expect(formBSource).toContain('options={ROUTE_OPTIONS}');
+    expect(formBSource).toContain('<OrderItemCraftFields');
+    const sharedSource = readFileSync(path.join(process.cwd(), 'components/business/order/order-form-b/OrderItemFields.tsx'), 'utf8');
+    expect(sharedSource).toContain('options={ROUTE_OPTIONS}');
+    expect(sharedSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
     expect(formBSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
     expect(source).toContain(
       'manualQuoteReason: usesExternalSalesPricing',
@@ -199,7 +206,8 @@ describe('OrderForm local draft recovery', () => {
   it('requires an explicit restore/discard decision before enabling the form', () => {
     expect(source).toContain('恢复本地草稿');
     expect(source).toContain('放弃本地草稿');
-    expect(source).toContain('reset(pendingLocalDraft.values');
+    expect(source).toContain('...(pendingLocalDraft.values as unknown as CreateOrderInput)');
+    expect(source).toContain('clientSubmissionId,');
     expect(source).toMatch(
       /<fieldset[\s\S]{0,120}disabled=\{orderFormControlsDisabled\}/,
     );

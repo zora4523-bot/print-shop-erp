@@ -31,6 +31,7 @@ export type SubmittedShipmentCustomerCharges = {
   province: string | null;
   billableWeightKg: string | null;
   weightItems?: readonly ExternalOrderChargeWeightItem[];
+  requiresActualWeight?: boolean;
   itemQuantity: number;
   shippingFee: string | null;
   packingMaterialFee: string | null;
@@ -652,6 +653,7 @@ async function resolveExternalOrderCharges(
       province: shipment.province,
       billableWeightKg: shipment.billableWeightKg,
       weightItems: shipment.weightItems,
+      requiresActualWeight: shipment.requiresActualWeight,
       itemQuantity: shipment.itemQuantity,
     })),
   };

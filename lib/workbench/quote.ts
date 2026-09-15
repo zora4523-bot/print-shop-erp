@@ -104,7 +104,7 @@ export type WorkbenchQuoteResult =
   | { status: 'success'; quote: WorkbenchQuote }
   | { status: 'error'; message: string };
 
-/** Called on the server only after the current published engine has priced the item. */
+/** Applies a sales markup to an authoritative base amount; never an order settlement amount. */
 export function suggestWorkbenchAmount(base: string | null, markup: number) {
   if (base === null) return { suggestedAmount: null, markupAmount: null };
   const amount = new Decimal(base);

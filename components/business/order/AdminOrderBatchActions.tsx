@@ -8,6 +8,7 @@ import {
   useTransition,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import { BatchPrintControls } from './BatchPrintControls';
 import { ChevronDown } from 'lucide-react';
 import {
   runAdminOrderBatchAction,
@@ -120,70 +121,76 @@ export function AdminOrderBatchActions({
   const primaryOptions = commandOptions.filter(({ command }) => command !== 'CREATE_PRINT');
   const printOption = commandOptions.find(({ command }) => command === 'CREATE_PRINT');
   const controls = (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      {primaryOptions.map(({ command, config, reviewedOrders, count }) => (
-        <Button
-          key={command}
-          type="button"
-          variant="secondary"
-          className="min-h-11"
-          disabled={busy}
-          onClick={(event) => {
-            focusReturnRef.current = event.currentTarget;
-            setConfirmation({ command, orders: reviewedOrders });
-          }}
-        >
-          {config.label}（{count}）
-        </Button>
-      ))}
-      {printOption ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            ref={moreTriggerRef}
-            render={<Button type="button" variant="secondary" className="min-h-11" disabled={busy} />}
-          >
-            更多操作
-            <ChevronDown aria-hidden="true" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-48" finalFocus={confirmation ? false : moreTriggerRef}>
-            <DropdownMenuItem
+    <BatchPrintControls selectedItems={selectedItems} disabled={busy} renderLayout={(printAction, printResult) => (
+      <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {primaryOptions.map(({ command, config, reviewedOrders, count }) => (
+            <Button
+              key={command}
+              type="button"
+              variant="secondary"
+              className="min-h-11"
               disabled={busy}
-              onClick={() => {
-                focusReturnRef.current = moreTriggerRef.current;
-                setConfirmation({ command: printOption.command, orders: printOption.reviewedOrders });
+              onClick={(event) => {
+                focusReturnRef.current = event.currentTarget;
+                setConfirmation({ command, orders: reviewedOrders });
               }}
             >
-              {printOption.config.label}（{printOption.count}）
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
-      <form action={exportAction} aria-busy={exportPending}>
-        <input type="hidden" name="scope" value="selected" />
-        <input
-          type="hidden"
-          name="requestKey"
-          value={selectedExportRequestKey}
-        />
-        <input type="hidden" name="params" value="{}" />
-        {selectedItems.map((item) => (
-          <input
-            key={item.id}
-            type="hidden"
-            name="selectedOrderId"
-            value={item.id}
-          />
-        ))}
-        <Button type="submit" variant="secondary" className="min-h-11" disabled={busy}>
-          {exportPending ? '正在提交…' : '导出所选'}
-        </Button>
-      </form>
-    </div>
+              {config.label}（{count}）
+            </Button>
+          ))}
+          {printOption ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                ref={moreTriggerRef}
+                render={<Button type="button" variant="secondary" className="min-h-11" disabled={busy} />}
+              >
+                更多操作
+                <ChevronDown aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48" finalFocus={confirmation ? false : moreTriggerRef}>
+                <DropdownMenuItem
+                  disabled={busy}
+                  onClick={() => {
+                    focusReturnRef.current = moreTriggerRef.current;
+                    setConfirmation({ command: printOption.command, orders: printOption.reviewedOrders });
+                  }}
+                >
+                  {printOption.config.label}（{printOption.count}）
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {printAction}
+          <form action={exportAction} aria-busy={exportPending}>
+            <input type="hidden" name="scope" value="selected" />
+            <input
+              type="hidden"
+              name="requestKey"
+              value={selectedExportRequestKey}
+            />
+            <input type="hidden" name="params" value="{}" />
+            {selectedItems.map((item) => (
+              <input
+                key={item.id}
+                type="hidden"
+                name="selectedOrderId"
+                value={item.id}
+              />
+            ))}
+            <Button type="submit" variant="secondary" className="min-h-11" disabled={busy}>
+              {exportPending ? '正在提交…' : '导出所选'}
+            </Button>
+          </form>
+        </div>
+        {printResult}
+      </div>
+    )} />
   );
 
   return (
     <>
-      <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">{controls}</div>
+      <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">{controls}</div>
       <ConfirmActionController level="L2"
         open={confirmation !== null}
         onOpenChange={(open) => { if (!open) setConfirmation(null); }}
