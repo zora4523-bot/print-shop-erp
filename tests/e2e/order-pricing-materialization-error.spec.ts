@@ -55,7 +55,9 @@ async function readPricingState(orderId: string): Promise<PricingState> {
   }
 }
 
-test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍可使用', async ({ page }) => {
+// 2026-09-14 业主拍板：生产事实缺失不再回滚终价——价格照存（ADMIN_CONFIRMED），
+// 就绪缺项以提示块列出，工单停在 SUBMITTED 等管理员补录，不生成任何生产事实。
+test('生产事实缺失时终价照存、缺项提示且不生成生产事实，详情页面仍可使用', async ({ page }) => {
   test.setTimeout(90_000);
   const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
   // The dashboard's minimal legacy submission deliberately lacks production
@@ -88,15 +90,30 @@ test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍�
   // 文案与确认第 10 条：核价已有完整复核层，直接提交，不再嵌套确认。
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
 
-  await expect(pricing.getByRole('alert')).toContainText('核价未完成：');
-  await expect(trigger).toBeEnabled();
-  await expect(pricing).not.toContainText('CANONICAL_FACTS_INCOMPLETE');
+  // 终价落库后页面按 revalidate 重渲染：人工核价表单随 ADMIN_CONFIRMED 消失，
+  // 「下发前检查」面板列出待补录事项，页面不报错。
+  await expect(pricing).toHaveCount(0);
+  await expect(page.getByText('待处理事项', { exact: true })).toBeVisible();
+  await expect(page.getByText('CANONICAL_FACTS_INCOMPLETE')).toHaveCount(0);
   await expectNoNextErrorOverlay(page);
-  expect(await readPricingState(orderId)).toEqual(before);
+  const after = await readPricingState(orderId);
+  expect(after).toMatchObject({
+    status: 'SUBMITTED',
+    pricingStatus: 'ADMIN_CONFIRMED',
+    pricingRevisions: 1,
+    operations: 0,
+    progressSteps: 0,
+    confirmationLogs: 1,
+  });
+  expect(after.priceRevision).toBeGreaterThan(before.priceRevision);
+  // 终价确认把确认金额冻结为当前合计；就绪与否只影响是否进入 CONFIRMED。
+  expect(after.confirmedFee).toBe(after.totalAmount);
 
   await page.reload();
-  await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toBeVisible();
-  expect(await readPricingState(orderId)).toEqual(before);
+  // 终价已保存，不再提供人工核价入口；刷新后状态不变。
+  await expect(page.getByText('待处理事项', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toHaveCount(0);
+  expect(await readPricingState(orderId)).toEqual(after);
   await expectNoNextErrorOverlay(page);
   const workbenchLink = page.getByRole('link', { name: '工作台', exact: true }).first();
   if (!(await workbenchLink.isVisible())) {
@@ -107,7 +124,7 @@ test('生产事实缺失时核价局部反馈并完整回滚，详情页面仍�
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
 });
 
-test('管理端旧链接进入详情后核价失败保留表单，且不会改写工单', async ({ page }) => {
+test('管理端旧链接进入详情后终价照存、缺项提示，且不生成生产事实', async ({ page }) => {
   test.setTimeout(90_000);
   const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
   const seeded = await seedDashboardSnapshot({ salesUserId });
@@ -126,9 +143,14 @@ test('管理端旧链接进入详情后核价失败保留表单，且不会改�
   await expect(trigger).toBeEnabled();
   await trigger.click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
-  await expect(pricing.getByRole('alert')).toContainText('核价未完成：');
-  await expect(trigger).toBeEnabled();
+  await expect(pricing).toHaveCount(0);
+  await expect(drawer.getByText('待处理事项', { exact: true })).toBeVisible();
   await expect(page).toHaveURL(`/orders/${seeded.urgentOrderId}`);
-  expect(await readPricingState(seeded.urgentOrderId)).toEqual(before);
+  const after = await readPricingState(seeded.urgentOrderId);
+  expect(after).toMatchObject({
+    status: 'SUBMITTED', pricingStatus: 'ADMIN_CONFIRMED',
+    pricingRevisions: 1, operations: 0, progressSteps: 0, confirmationLogs: 1,
+  });
+  expect(after.confirmedFee).toBe(after.totalAmount);
   await expectNoNextErrorOverlay(page);
 });
