@@ -8,6 +8,14 @@
 
 ## 当前任务
 
+**2026-09-15（傍晚）：PR #19 已合并进 `main`（merge commit `d283b5a5`，19:34），`codex/tijian-2` / `codex/gongdanceshi` 远端与本地均已删除。**
+合并前最后一轮 CI（run 34927184124 第 5 次尝试，head `5bdb907e`）verify 67 分钟 / print-darwin 3 分钟全绿，是 `1d23b144` 之后
+第一次全绿。当天上午追 CI 修了三轮：`3caba196`（旧任务详情抽 `renderLegacyTaskDetail` 回到 300 行架构阈值）、`ac61743c`
+（建单 browser spec 改按 aria-invalid 判断）、`5bdb907e`（登录回跳 `?from=` 剔除 Next 内部 `_rsc` 参数，auth-logout-race 用例）。
+前 4 次尝试全部因 GitHub Actions 账单「payments failed / spending limit」根本没启动，业主处理后重跑才通过——
+**这已是 09-12 之后第二次撞账单，以后 job 在 10 秒内 0 步骤失败先看注解，不要当代码问题查。**
+**合并 ≠ 部署**：生产仍是 `aa42ba0` / 45 项 migration，`main` 现在 146 项；部署前置步骤见下文「部署前仍必须先做」。
+
 **2026-09-15（上午）：前端缺陷批次已落地（`codex/tijian-2`）**。Codex 只读审计出 4 条（我逐条核实）+ PROGRESS 技术债 2 项，
 Codex `gpt-6-astra` 写模式修、我复审提交：2afdb77e 登录跳转保留查询串（扫码 v/task 不再丢）；ace6f360 旧任务详情挂异议面板；
 7ef99774 改密页无会话跳登录；23d0e29c 日薪 / 时薪 / 师傅端工资三处分页（合计走 aggregate，师傅端合计**跟随日期筛选**——
@@ -136,7 +144,8 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 ### 仍成立的 Git / 生产事实
 
 - remote：`https://github.com/zora4523-bot/print-shop-erp.git`（**私有，HTTPS**）。开发机 SSH 不通，**不要把 remote 改回 SSH**。
-- 远端只有 `main` 与 `codex/*`（`codex/fabuceshi`、`codex/gongdan`），**没有 `dev`**；本分支 `codex/gongdanceshi` 尚未推送。
+- 远端只有 `main` 与 `codex/*`（`codex/fabuceshi`、`codex/gongdan`），**没有 `dev`**。PR #19 的两个分支已于 09-15 删除；
+  `main` 头为 `d283b5a5`。本文档的更新走 `codex/memory-after-pr19` 分支的 PR。
 - **生产未动。** <https://bag.sshapi.cn> 上次记录仍是 `aa42ba0`（2026-08-02）/ 45 项 migration；本地迁移链已有 146 项。
   这些都**不是生产已 apply 事实**，部署前必须重新核对。
 - 本机开发库加工费价目簿已到 v10（`2026-09-13-attained-custom-tiers`），v8 是 print-sentinel 迁移版。
@@ -146,7 +155,17 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 下一步具体指令（给下次 AI）
 
-**先做：盯 PR #19 的 CI 跑完（run 34845568496，head `1d23b144`）**
+**PR #19 已合并（09-15）。下一步从这里起：**
+
+- 部署仍未做，先走「部署前仍必须先做」的 1-5 步与人工验收 6-9；部署本身需要业主明确授权（CLAUDE.md §12）。
+- 「卡住的问题」里 09-14 深夜新增的代理商账单 3 项、e2e 夹具是否改走领域层、6 处冗余 `router.refresh()`、
+  `pnpm test:browser` 是否进门禁，都还等业主拍板，拍板前不要动。
+- 本机 git 在 09-15 曾被 Xcode 许可协议挡住（`sudo xcodebuild -license accept` 后恢复）；再遇到 `gh` 报
+  「failed to determine base repo」先查这个，`gh api` 与 `-R zora4523-bot/print-shop-erp` 不受影响。
+
+**以下为合并前的 CI 追踪记录，仅供回溯：**
+
+先做：盯 PR #19 的 CI 跑完（run 34845568496，head `1d23b144`）
 
 第六轮（34838580706）只剩 1 失败 + 1 重试通过：多地址装盒用例的诊断信息显示保存被
 「纯引擎分项与小计不一致」拦下——CI 全套共库时表单默认纸张是 blank-paper-pricing 留下的「验证纸…」
@@ -175,8 +194,8 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 1. verify job 顺序：迁移链 → 静态门禁 → 单测覆盖率 → Browser Mode → 生产构建 + business E2E + 六视口 →
    **durable → 跨浏览器打印 → dev-fixtures**。前五步的 20 个失败已全部修掉（本地 release 配置逐条复现并
    验证），后三步仍是首次跑到；本地复现方式见 CLAUDE.md §14（隔离库 + `--config=playwright.release.config.ts`）。
-2. 绿了就合并 PR；合并后删 `codex/tijian-2`。不要再往 `codex/gongdanceshi` 直接推。
-3. 更新 `PROGRESS.md`：把 09-13 批次（建单定价 / 装盒 / 十一档 / 批量打印）与 09-14 体检收口写进「已完成」。
+2. ~~绿了就合并 PR；合并后删 `codex/tijian-2`~~（09-15 已做）。
+3. ~~更新 `PROGRESS.md`~~（09-14 / 09-15 已补）。
 4. 新建任务过程文件直接放 `docs/archive/`（规则见其 README），不要再往仓库根目录放 PLAN- / REPORT-。
 5. 新增 Zod schema 放进 `lib/auth/schemas/<域>.ts`，不要往入口文件 `lib/auth/schemas.ts` 里加。
 6. 不要把 `docs/archive/项目结构体检-2026-09-14.md` 里对 change-request / OrderForm / lib/order.ts 的拆分建议
@@ -376,3 +395,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 
 - 2026-09-15（上午）：前端缺陷批次 6 个提交（登录跳转查询串、异议面板、改密页、工资分页、逐字段 alert、零 JS 退出）；Codex 审计 + 实现，Claude 复审。
 - 2026-09-15：按业主决定修复半分金额（0.01 容差 + 拆分先舍入）、终价不再被就绪校验回滚、新增管理员补录生产资料路径（`order:production-facts:repair`）；Codex 实现、Claude 复审提交。
+- 2026-09-15（傍晚）：追 CI 三轮（`3caba196` / `ac61743c` / `5bdb907e`），账单恢复后 run 34927184124 全绿；PR #19 以 merge commit `d283b5a5` 合入 `main`，删 `codex/tijian-2` 与 `codex/gongdanceshi`。生产未部署。
