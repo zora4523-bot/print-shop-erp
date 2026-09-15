@@ -14,7 +14,7 @@ Codex `gpt-6-astra` 写模式修、我复审提交：2afdb77e 登录跳转保留
 Codex 原改成忽略筛选的全量，我改回原口径）；21e92124 建单逐字段错误去 role=alert；本提交 后台 `<noscript>` 原生退出 +
 no-js 用例（release 配置隔离库 4/4）。未修且说明原因：OSS 重放窗口（业主 08-21 接受）、盘点净额往返（需设计评审）、
 6 处冗余 router.refresh（等拍板）、运维项。本地跑 e2e 注意：`:3000` 有 dev server 时开发配置起不了 `:3100`（Next 16 单实例检查），
-用 `--config=playwright.release.config.ts`。
+用 `--config=playwright.release.config.ts`。Codex 只读对抗审查这六个提交：no discrete actionable issues。
 
 **2026-09-15：半分金额容差 + 管理员补录生产资料已落地（`codex/tijian-2`，未合并、未部署）**。业主 2026-09-14 拍板见 DECISIONS 同日条目。
 Codex（`gpt-6-astra` 写模式）实现、Claude 对抗复审后提交；Codex 的逐文件说明与门禁记录在
