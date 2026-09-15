@@ -30,12 +30,12 @@ const authenticatedProxy: NextMiddleware = auth((req, _event: NextFetchEvent) =>
     );
   }
 
-  // /login is excluded by the matcher. Preserve the requested pathname so a
+  // /login is excluded by the matcher. Preserve the requested path and query so a
   // successful login can send the user back to the page they intended to open.
   const url = new URL('/login', req.url);
-  const { pathname } = req.nextUrl;
+  const { pathname, search } = req.nextUrl;
   if (pathname !== '/') {
-    url.searchParams.set('from', pathname);
+    url.searchParams.set('from', pathname + search);
   }
   return NextResponse.redirect(url);
 });

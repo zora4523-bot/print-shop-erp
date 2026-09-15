@@ -89,3 +89,10 @@ it.each([['HEAD', false], ['POST', true]])('keeps the prefetch cookie rule scope
   const response = await invoke(req);
   expect(response.headers.has('set-cookie')).toBe(renews);
 });
+
+it('preserves the query string of a protected scan URL in from', async () => {
+  const response = await invoke(request('/wo/GD-260915-001?v=2&task=task-1'));
+  expect(response.status).toBe(307);
+  expect(new URL(response.headers.get('location')!).searchParams.get('from'))
+    .toBe('/wo/GD-260915-001?v=2&task=task-1');
+});
