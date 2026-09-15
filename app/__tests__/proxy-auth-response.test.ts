@@ -96,3 +96,11 @@ it('preserves the query string of a protected scan URL in from', async () => {
   expect(new URL(response.headers.get('location')!).searchParams.get('from'))
     .toBe('/wo/GD-260915-001?v=2&task=task-1');
 });
+
+it('drops the Next-internal _rsc parameter from from while keeping user parameters', async () => {
+  const prefetch = await invoke(request('/account/password?_rsc=gate'));
+  expect(new URL(prefetch.headers.get('location')!).searchParams.get('from')).toBe('/account/password');
+  const mixed = await invoke(request('/wo/GD-260915-001?v=2&_rsc=abc&task=task-1'));
+  expect(new URL(mixed.headers.get('location')!).searchParams.get('from'))
+    .toBe('/wo/GD-260915-001?v=2&task=task-1');
+});
