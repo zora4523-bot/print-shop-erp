@@ -374,6 +374,7 @@ async function readChangeRequestOrderInTx(
     select: {
       id: true,
       orderNo: true,
+      purpose: true,
       submitterId: true,
       status: true,
       revision: true,
@@ -515,6 +516,7 @@ export async function createOrderChangeRequest(
       const order = await readChangeRequestOrderInTx(tx, input.orderId);
       assertCanRequest(actor, order, input.type !== 'CANCEL');
       assertExpectedOrderVersions(input, order);
+      if (order.purpose && order.purpose !== 'STANDARD' && input.items.length) throw new OrderChangeRequestError('样品工单的款式需重新建单，请保留原单记录后创建新工单');
       if (
         input.type === 'CANCEL' &&
         !CANCELLABLE_BY_REQUEST_STATUSES.includes(order.status)

@@ -213,7 +213,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // 发货与结算权限：order:ship = ADMIN（见 permissions.ts）。
   // action 层仍会重新校验，这里只控制界面入口。
   const canShipOrSettle = user.role === Role.ADMIN;
-  const canRepairProductionFacts = user.role === Role.ADMIN;
+  const canRepairProductionFacts = user.role === Role.ADMIN && order.purpose !== 'SAMPLE_SHIPMENT';
   const repairFacts = canRepairProductionFacts ? getLegacyProductionFactsRepair(order) : null;
   const isExternalSalesOrder =
     'settlementType' in order &&
@@ -253,6 +253,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
   const canAdminManageCommercialDetails =
+    (order.purpose ?? 'STANDARD') === 'STANDARD' &&
     user.role === Role.ADMIN &&
     isChargeableOrder &&
     order.status !== OrderStatus.SETTLED &&
@@ -261,16 +262,18 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const canShowPricingReviewForm =
     user.role === Role.ADMIN &&
     isChargeableOrder &&
-    isPricingPending &&
-    isOrderPricingReviewAllowedStatus(order.status);
+    (isPricingPending || order.purpose === 'PROOF') &&
+    isOrderPricingReviewAllowedStatus(order.status, order.purpose);
   const canReviewFulfillmentPricing =
+    order.purpose !== 'PROOF' &&
     user.role === Role.ADMIN &&
-    isExternalSalesOrder &&
+    (isExternalSalesOrder || order.purpose === 'SAMPLE_SHIPMENT') &&
     isFulfillmentPricingStatus(order.status);
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
     isExternalSalesOrder;
   const canToggleSfCollect =
+    order.purpose !== 'PROOF' &&
     canEditOrderSfCollect(order.status) &&
     (order.submitterId === user.id || user.role === Role.ADMIN) &&
     (!isFinalizedExternalShipment || user.role === Role.ADMIN);
@@ -585,7 +588,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 外协
               </Link>
             ) : null}
-            {canSubmit ? <SubmitOrderButton orderId={order.id} /> : null}
+            {canSubmit ? <SubmitOrderButton orderId={order.id} purpose={order.purpose} /> : null}
             {canShipOrSettle && order.status === OrderStatus.SHIPPED ? (
               isPricingPending ? (
                 <DisabledReason

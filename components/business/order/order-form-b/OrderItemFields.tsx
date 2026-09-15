@@ -57,6 +57,7 @@ type Common = {
   };
 };
 export type OrderItemCraftFieldsProps = Common & {
+  hideRoute?: boolean;
   title?: string;
   paperKey: string | null;
   paperOptions: readonly OrderPaperSwatchOption[];
@@ -265,6 +266,7 @@ function SpecialTechnique({
 }
 
 export function OrderItemCraftFields({
+  hideRoute = false,
   uid,
   item,
   title = '工艺',
@@ -293,7 +295,7 @@ export function OrderItemCraftFields({
       printFoilMode === 'FULL');
   return (
     <Group title={title} first={first}>
-      <PillPicker
+      {!hideRoute ? <PillPicker
         id={`${uid}-route`}
         label="工艺类型"
         value={item.pricingRoute}
@@ -301,7 +303,7 @@ export function OrderItemCraftFields({
         disabled={disabled}
         error={itemErrors?.route}
         onChange={onRouteChange}
-      />
+      /> : null}
 
       {item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT ? (
         <div className="mt-5 space-y-5">

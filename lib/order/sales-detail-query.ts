@@ -27,6 +27,7 @@ const CARRIER_LABELS: Readonly<Record<string, string>> = { ZTO: '中通', SF: '�
 
 export type SalesOrderDetail = {
   id: string;
+  purpose?: import('./purpose').OrderPurposeValue;
   orderNo: string;
   customName: string | null;
   customerRef: string | null;
@@ -136,6 +137,7 @@ export type SalesOrderDetail = {
 // cross the sales-facing RSC boundary.
 export const salesOrderDetailSelect = {
   id: true,
+  purpose: true,
   orderNo: true,
   customName: true,
   customerRef: true,
@@ -341,6 +343,7 @@ function mapSalesOrderDetail(
 
   return {
     id: row.id,
+    purpose: row.purpose,
     orderNo: row.orderNo,
     customName: row.customName,
     customerRef: row.customerRef,

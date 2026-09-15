@@ -8,6 +8,9 @@ import type { CreateOrderInput } from '@/lib/auth/schemas';
 export const EXTERNAL_CREATE_PAYLOAD_SERVER_OWNED_FIELDS = {
   root: [
     'externalSalesUserId',
+    'pricingMode',
+    'purposeAmount',
+    'manualTotal',
     'quotedFee',
     'confirmedFee',
     'settledFee',

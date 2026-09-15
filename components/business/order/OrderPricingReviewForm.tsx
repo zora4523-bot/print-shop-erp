@@ -879,7 +879,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
                       ) : null}
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="space-y-1 text-xs">
-                          <span>确认金额（元）</span>
+                          <span>{preview.purpose === 'PROOF' ? '整单总价（元）' : '确认金额（元）'}</span>
                           <Input
                             required
                             inputMode="decimal"

@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({ quote: vi.fn(), push: vi.fn() }));
 vi.mock('@/actions/workbench', () => ({
   quoteWorkbenchItemAction: mocks.quote,
 }));
+vi.mock('@/actions/create-order-quote', () => ({ quoteSampleOrderAction: vi.fn() }));
+vi.mock('@/actions/order', () => ({ createOrderAction: vi.fn(), submitOrderAction: vi.fn() }));
+vi.mock('@/actions/design-upload', () => ({ signDesignUploadAction: vi.fn(), recordDesignUploadAction: vi.fn(), deleteOrderItemDesignAction: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.push }),
 }));
@@ -260,7 +263,7 @@ it('uses order conditions, calculates automatically and changes markup without r
 it('uses shared lamination and printed-foil selectors without losing the selected material', async () => {
   render();
   await page
-    .getByRole('group', { name: '工艺类型' })
+    .getByRole('group', { name: '工单类型' })
     .getByRole('button', { name: '彩印', exact: true })
     .click();
   await page
@@ -327,7 +330,7 @@ it('quotes and transfers the selected finishing for a COATED catalog paper', asy
     ),
   });
   await page
-    .getByRole('group', { name: '工艺类型' })
+    .getByRole('group', { name: '工单类型' })
     .getByRole('button', { name: '彩印', exact: true })
     .click();
   const finishing = page

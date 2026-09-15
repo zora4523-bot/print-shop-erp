@@ -37,7 +37,9 @@ export function orderPricingStatusLabel(
  */
 export function isOrderPricingReviewAllowedStatus(
   status: string | null | undefined,
+  purpose?: string,
 ): boolean {
+  if (purpose === 'PROOF' && [OrderStatus.CONFIRMED, OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.COMPLETED].some((value) => value === status)) return true;
   return (
     status === OrderStatus.PENDING_FACTORY || status === OrderStatus.SUBMITTED
   );

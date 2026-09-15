@@ -18,7 +18,7 @@ export class LegacyProductionFactsError extends Error {
 }
 
 const repairSelect = {
-  id: true, revision: true, priceRevision: true, pricingStatus: true, status: true, packageRequirement: true, packagingAmount: true,
+  id: true, purpose: true, revision: true, priceRevision: true, pricingStatus: true, status: true, packageRequirement: true, packagingAmount: true,
   items: { orderBy: { sequence: 'asc' }, select: { ...workflowOrderSelect.items.select, sequence: true, name: true } },
   packagingGroups: { select: { id: true } },
   shipments: { select: { lines: { select: { orderItemId: true, quantity: true } } } },
@@ -30,6 +30,7 @@ export async function repairLegacyProductionFacts(input: RepairLegacyProductionF
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(input.orderId)}))`;
     const order = await tx.order.findUnique({ where: { id: input.orderId }, select: repairSelect });
     if (!order) throw new LegacyProductionFactsError('工单不存在');
+    if (order.purpose === 'SAMPLE_SHIPMENT') throw new LegacyProductionFactsError('寄样品无需补录生产资料');
     if (!isLegacyProductionFactsRepairAllowedStatus(order.status)) throw new LegacyProductionFactsError('工单已下发或当前状态不允许补录，请刷新工单');
     if (order.revision !== input.expectedOrderRevision) throw new LegacyProductionFactsError('工单已变化，请刷新后重新补录');
     const requested = new Map(input.items.map((item) => [item.itemId, item]));

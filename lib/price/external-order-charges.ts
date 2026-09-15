@@ -73,6 +73,8 @@ export type ExternalOrderChargeShipmentInput = {
 };
 
 export type ExternalOrderChargeInput = {
+  /** Server chooses this policy only for sample shipments. */
+  samplePackaging?: { ruleCode: string | null };
   isSfCollect: boolean;
   shipments: ExternalOrderChargeShipmentInput[];
 };
@@ -785,6 +787,7 @@ function quotePackaging(
   orderTotalQuantity: number,
   isPrimaryShipment: boolean,
   rules: readonly ExternalOrderChargeRule[],
+  samplePackaging?: { ruleCode: string | null },
 ): ExternalOrderChargeLine {
   if (!Number.isSafeInteger(shipment.itemQuantity) || shipment.itemQuantity < 1) {
     const orderTotalInvalid =
@@ -855,6 +858,19 @@ function quotePackaging(
       null,
       false,
     );
+  }
+
+  if (samplePackaging) {
+    const tier = samplePackaging.ruleCode ? tiers.find((row) => row.code === samplePackaging.ruleCode) : tiers[0];
+    if (!tier) return incompleteLine(shipment.shipmentKey, 'PACKAGING', '打包耗材费', '纸箱费', ['所选包装已停用，请重新选择包装'], { orderTotalQuantity }, null, false);
+    return {
+      code: `PACKAGING_${shipment.shipmentKey}`, ruleCode: isPrimaryShipment ? tier.code : null,
+      categoryCode: 'PACKAGING', categoryName: '打包耗材费', shipmentKey: shipment.shipmentKey,
+      name: isPrimaryShipment ? '纸箱费' : '纸箱费已计入主地址',
+      amount: isPrimaryShipment ? money(new Decimal(tier.amount)) : '0.00', complete: true,
+      advisory: false, waived: false, errors: [], source: isPrimaryShipment ? tier.source : null,
+      basis: { orderTotalQuantity, granularity: 'PER_ORDER', samplePackaging: true, selectedTierMaximumQuantity: tier.maxQty, allocatedToPrimaryShipment: isPrimaryShipment },
+    };
   }
 
   const fullSegmentCount =
@@ -1052,6 +1068,7 @@ export function calculateExternalOrderCharges(
       orderTotalQuantity,
       index === 0,
       rules,
+      input.samplePackaging,
     ),
   }));
   const shippingLines = shipments.map((shipment) => shipment.shipping);

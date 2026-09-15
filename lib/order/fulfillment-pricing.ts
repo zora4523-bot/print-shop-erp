@@ -208,7 +208,7 @@ function normalizedInput(input: PreviewFulfillmentPricingCommand): Required<Prev
 async function readOrder(tx: Prisma.TransactionClient, orderId: string): Promise<FulfillmentOrder> {
   const order = await tx.order.findUnique({ where: { id: orderId }, include });
   if (!order) throw new FulfillmentPricingError('工单不存在');
-  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES || !isFulfillmentPricingStatus(order.status) || order.settledAt !== null || order.settledFee !== null) {
+  if ((order.settlementType !== OrderSettlementType.EXTERNAL_SALES && order.purpose !== 'SAMPLE_SHIPMENT') || !isFulfillmentPricingStatus(order.status) || order.settledAt !== null || order.settledFee !== null) {
     throw new FulfillmentPricingError('当前工单不允许履约费用更正；已结算或终态工单请走财务处理');
   }
   if (order._count.changeRequests > 0) throw new FulfillmentPricingError('工单仍有待裁决变更申请，不能同时确认履约费用');
@@ -337,6 +337,7 @@ type PlannedShipping = {
 };
 
 async function buildPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder, input: Required<PreviewFulfillmentPricingCommand>, now: Date) {
+  if (order.purpose === 'PROOF') throw new FulfillmentPricingError('打样按整单总价收费，请在整单核价中修改费用');
   const baseline = await verifiedBaseline(tx, order);
   const byShipment = shippingCharges(order);
   const corrections = new Map(input.shipments.map((row) => [row.shipmentId, row]));
@@ -529,7 +530,8 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
       data: { status, amount, suggestedAmount: row.suggestedAmount, sourceRuleId: row.sourceRuleId,
         quantity: row.weightKg, unit: 'kg', overrideReason: reason,
         pricingSnapshot: snapshot as Prisma.InputJsonObject,
-        finalizedById: confirmed ? actor.id : null, finalizedAt: confirmed ? now : null },
+        finalizedById: status === OrderCustomerChargeStatus.FINAL || status === OrderCustomerChargeStatus.WAIVED ? actor.id : null,
+        finalizedAt: status === OrderCustomerChargeStatus.FINAL || status === OrderCustomerChargeStatus.WAIVED ? now : null },
     });
     await tx.orderShipment.update({ where: { id: row.shipmentId }, data: {
       carrierCode: input.isSfCollect ? 'SF' : 'ZTO',

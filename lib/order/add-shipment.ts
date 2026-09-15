@@ -137,8 +137,8 @@ export async function addOrderShipment(
       ),
     );
     const pricingMode =
-      order.billingMode === 'NO_CHARGE' ||
-      order.settlementType !== 'EXTERNAL_SALES'
+      order.purpose === 'PROOF' || order.billingMode === 'NO_CHARGE' ||
+      (order.settlementType !== 'EXTERNAL_SALES' && order.purpose !== 'SAMPLE_SHIPMENT')
         ? 'UNCHANGED'
         : order.status === 'DRAFT' && standard.length === 0
           ? 'ON_SUBMIT'
@@ -191,6 +191,7 @@ export async function addOrderShipment(
             tx,
             {
               isSfCollect: order.isSfCollect,
+              samplePackaging: order.purpose === 'SAMPLE_SHIPMENT' ? { ruleCode: order.samplePackagingRuleCode } : undefined,
               shipments: [
                 {
                   sequence: source.sequence,

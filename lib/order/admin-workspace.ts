@@ -74,6 +74,7 @@ export type AdminOrderWorkspaceCounts = {
 };
 
 export type AdminOrderWorkspaceRow = {
+  purpose?: import("./purpose").OrderPurposeValue;
   inlineOperations?: import('./admin-inline-types').AdminOrderInlineOperationsData | null;
   id: string;
   orderNo: string;
@@ -291,6 +292,7 @@ async function loadAdminWorkspaceCounts(
 }
 
 const adminOrderSelect = {
+  purpose: true,
   id: true,
   orderNo: true,
   revision: true,
@@ -858,6 +860,7 @@ function mapAdminOrderRow(
   return {
     id: row.id,
     orderNo: row.orderNo,
+    purpose: row.purpose,
     revision: row.revision,
     editVersion: row.editVersion,
     workOrderVersion: row.workOrderVersion,

@@ -88,6 +88,9 @@ function shell(
       productionWorkOrderProgress: 0, productionScanClaims: 0, stars: 0,
       printJobs: 0, workflowDecisions: 0, exportSelections: 0,
     },
+    purpose: 'STANDARD',
+    pricingMode: 'ITEMIZED',
+    samplePackagingRuleCode: null,
     ...overrides,
   };
 }
