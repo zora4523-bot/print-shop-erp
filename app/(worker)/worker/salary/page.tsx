@@ -1,3 +1,4 @@
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -30,7 +31,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '我的工资' };
 
 type PageProps = {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; page?: string | string[] }>;
 };
 
 const HOURLY_WORKER_TYPES = new Set<WorkerType>([
@@ -88,7 +89,7 @@ async function OperationPieceworkSalaryContent({
   searchParams: sp,
 }: {
   actor: WorkerSalaryActor;
-  searchParams: { from?: string; to?: string };
+  searchParams: { from?: string; to?: string; page?: string | string[] };
 }) {
   const from = sp.from ? parseStrictYmd(sp.from) : null;
   const to = sp.to ? parseStrictYmd(sp.to) : null;
@@ -167,16 +168,19 @@ async function PieceworkSalaryContent({
   historical = false,
 }: {
   actor: WorkerSalaryActor;
-  searchParams: { from?: string; to?: string };
+  searchParams: { from?: string; to?: string; page?: string | string[] };
   historical?: boolean;
 }) {
   const from = sp.from ? parseStrictYmd(sp.from) : null;
   const to = sp.to ? parseStrictYmd(sp.to) : null;
-  const salaries = await listWorkerSalaries(actor, {
+  const salaryPage = await listWorkerSalaries(actor, {
+    page: sp.page,
     from: from ?? undefined,
     to: to ?? undefined,
   });
-  const { total, unpaid } = salaryTotals(salaries, 'actualSalary');
+  const salaries = salaryPage.rows;
+  const total = new Decimal(salaryPage.totalSalary);
+  const unpaid = new Decimal(salaryPage.unpaidSalary);
 
   return (
     <div className="min-w-0 space-y-4">
@@ -245,6 +249,8 @@ async function PieceworkSalaryContent({
           ))}
         </ul>
       )}
+      <AdminPagination basePath="/worker/salary" {...salaryPage}
+        queryParams={{ from: sp.from, to: sp.to }} />
     </div>
   );
 }
@@ -257,7 +263,7 @@ async function HourlySalaryContent({
 }: {
   actor: WorkerSalaryActor;
   workerType: WorkerType;
-  searchParams: { from?: string; to?: string };
+  searchParams: { from?: string; to?: string; page?: string | string[] };
   historical?: boolean;
 }) {
   const fromMonth = validMonth(sp.from) ? sp.from : undefined;

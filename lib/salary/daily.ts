@@ -1,3 +1,4 @@
+import { paginatedResult, paginationWindow, parsePositiveInt } from '../admin/table';
 import Decimal from 'decimal.js';
 import { Role, WorkerType } from '../../generated/prisma/enums';
 import { parseStrictYmd } from '../auth/schemas';
@@ -13,6 +14,8 @@ export async function listDailyWorkerSalaries(filter: {
   date?: string;
   workerId?: string;
   isPaid?: boolean;
+  page?: string | string[];
+  pageSize?: string | string[];
 }) {
   const where: {
     date?: Date;
@@ -31,7 +34,17 @@ export async function listDailyWorkerSalaries(filter: {
   if (filter.workerId) where.workerId = filter.workerId;
   if (filter.isPaid !== undefined) where.isPaid = filter.isPaid;
 
-  return db.dailyWorkerSalary.findMany({
+  const [total, sums, unpaidSums] = await Promise.all([
+    db.dailyWorkerSalary.count({ where }),
+    db.dailyWorkerSalary.aggregate({ where, _sum: { actualSalary: true } }),
+    db.dailyWorkerSalary.aggregate({ where: { AND: [where, { isPaid: false }] }, _sum: { actualSalary: true } }),
+  ]);
+  const window = paginationWindow(total,
+    parsePositiveInt(filter.page, { defaultValue: 1 }),
+    parsePositiveInt(filter.pageSize, { defaultValue: 50, max: 100 }));
+  const rows = await db.dailyWorkerSalary.findMany({
+    take: window.take,
+    skip: window.skip,
     where,
     orderBy: [{ date: 'desc' }, { workerId: 'asc' }],
     select: {
@@ -50,6 +63,10 @@ export async function listDailyWorkerSalaries(filter: {
       worker: { select: { displayName: true } },
     },
   });
+  return { ...paginatedResult(rows, total, window),
+    totalSalary: String(sums._sum.actualSalary ?? 0),
+    unpaidSalary: String(unpaidSums._sum.actualSalary ?? 0),
+  };
 }
 
 /** Users shown in the legacy archive filter; no eligibility or pricing use. */

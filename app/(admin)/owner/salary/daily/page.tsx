@@ -1,3 +1,4 @@
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { Archive, Calculator, Download, FileText } from 'lucide-react';
@@ -25,6 +26,8 @@ type PageProps = {
     date?: string;
     paid?: string;
     workerId?: string;
+    page?: string | string[];
+    pageSize?: string | string[];
   }>;
 };
 
@@ -35,14 +38,17 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     sp.date && parseStrictYmd(sp.date) ? sp.date : todayShanghai();
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
-  const [rows, workers] = await Promise.all([
+  const [salaryPage, workers] = await Promise.all([
     listDailyWorkerSalaries({
       date: selectedDate,
       isPaid,
+      page: sp.page,
+      pageSize: sp.pageSize,
       workerId: sp.workerId,
     }),
     listMachineWorkersForSalary(),
   ]);
+  const { rows } = salaryPage;
   const attendanceStart = parseStrictYmd(selectedDate)!;
   const attendanceEnd = new Date(attendanceStart);
   attendanceEnd.setUTCDate(attendanceEnd.getUTCDate() + 1);
@@ -50,17 +56,8 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     rows.map((row) => row.workerId),
     { start: attendanceStart, end: attendanceEnd },
   );
-  const totalActual = rows
-    .reduce(
-      (sum, row) => sum.plus(new Decimal(row.actualSalary as Decimal.Value)),
-      new Decimal(0),
-    );
-  const unpaidActual = rows
-    .filter((row) => !row.isPaid)
-    .reduce(
-      (sum, row) => sum.plus(new Decimal(row.actualSalary as Decimal.Value)),
-      new Decimal(0),
-    );
+  const totalActual = salaryPage.totalSalary;
+  const unpaidActual = salaryPage.unpaidSalary;
 
   return (
     <div className="space-y-6">
@@ -90,7 +87,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label="历史记录"
-          value={`${rows.length} 条`}
+          value={`${salaryPage.total} 条`}
           icon={FileText}
           tone="neutral"
         />
@@ -196,6 +193,11 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
           </table>
         </TableScrollArea>
       )}
+      <AdminPagination
+        basePath="/owner/salary/daily"
+        {...salaryPage}
+        queryParams={{ date: selectedDate, paid: sp.paid, workerId: sp.workerId, pageSize: salaryPage.pageSize }}
+      />
     </div>
   );
 }

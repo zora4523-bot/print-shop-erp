@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     dailyWorkerSalary: {
+      count: vi.fn().mockResolvedValue(0),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { actualSalary: null } }),
       findMany: vi.fn(),
       findUnique: vi.fn(),
     },
@@ -20,6 +22,8 @@ import {
 } from '../daily';
 
 beforeEach(() => {
+  dbMock.dailyWorkerSalary.count.mockReset().mockResolvedValue(0);
+  dbMock.dailyWorkerSalary.aggregate.mockReset().mockResolvedValue({ _sum: { actualSalary: null } });
   dbMock.dailyWorkerSalary.findMany.mockReset().mockResolvedValue([]);
   dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
   dbMock.dailyWorkerSalaryItem.findMany.mockReset().mockResolvedValue([]);
@@ -94,4 +98,31 @@ describe('legacy DailyWorkerSalary read adapter', () => {
       expect.objectContaining({ where: { orderId: 'order-1' } }),
     );
   });
+});
+
+describe('salary list pagination', () => {
+  it.each([
+    [undefined, undefined, 1, 50, 0],
+    [['2', '9'], '20', 2, 20, 20],
+    ['oops', '-2', 1, 1, 0],
+    ['999', '999', 3, 100, 200],
+  ])('parses page=%s pageSize=%s and bounds take/skip', async (page, pageSize, expectedPage, take, skip) => {
+    dbMock.dailyWorkerSalary.count.mockResolvedValue(205);
+    dbMock.dailyWorkerSalary.findMany.mockResolvedValue([]);
+    const result = await listDailyWorkerSalaries({ page, pageSize });
+    expect(result).toMatchObject({ page: expectedPage, pageSize: take, total: 205 });
+    expect(dbMock.dailyWorkerSalary.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take, skip }));
+  });
+});
+
+it('keeps filtered owner totals independent of the visible page', async () => {
+  dbMock.dailyWorkerSalary.count.mockResolvedValue(120);
+  dbMock.dailyWorkerSalary.findMany.mockResolvedValue([]);
+  dbMock.dailyWorkerSalary.aggregate
+    .mockResolvedValueOnce({ _sum: { actualSalary: '1000.01' } })
+    .mockResolvedValueOnce({ _sum: { actualSalary: null } });
+  const result = await listDailyWorkerSalaries({ workerId: 'w1', isPaid: true, page: '2' });
+  expect(result).toMatchObject({ total: 120, totalSalary: '1000.01', unpaidSalary: '0' });
+  expect(dbMock.dailyWorkerSalary.aggregate).toHaveBeenNthCalledWith(1, { where: { workerId: 'w1', isPaid: true }, _sum: { actualSalary: true } });
+  expect(dbMock.dailyWorkerSalary.aggregate).toHaveBeenNthCalledWith(2, { where: { AND: [{ workerId: 'w1', isPaid: true }, { isPaid: false }] }, _sum: { actualSalary: true } });
 });

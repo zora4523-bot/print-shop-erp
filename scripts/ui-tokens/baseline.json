@@ -463,15 +463,6 @@
     },
     {
       "rule": "money",
-      "file": "app/(admin)/owner/salary/hourly/page.tsx",
-      "text": ".toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
       "file": "components/business/order/admin-order-detail-model.ts",
       "text": "return decimal(value)?.toFixed(2) ?? null;",
       "clause": "§4.1",

@@ -8,7 +8,7 @@ import {
   Role,
   WorkerType,
 } from '../generated/prisma/enums';
-import { paginatedResult, paginationWindow } from './admin/table';
+import { paginatedResult, paginationWindow, parsePositiveInt } from './admin/table';
 import { db } from './db';
 import { getReporterOperationTypeOrNull } from './production/operation-portal';
 import { getHourlyPayrollWorkerType } from './salary/hourly-aggregate';
@@ -20,6 +20,7 @@ import {
 // 师傅端 H5 一屏能承受的卡片数。取值与 lib/order/list-query.ts 的
 // ORDER_LIST_DEFAULT_PAGE_SIZE 一致，两端口径对齐。
 export const WORKER_ORDER_PAGE_SIZE = 20;
+export const WORKER_SALARY_PAGE_SIZE = 20;
 
 export type WorkerActor = { id: string; role: Role };
 
@@ -387,11 +388,10 @@ export async function getWorkerOrderDetail(
 
 export async function listWorkerSalaries(
   actor: WorkerSalaryActor,
-  filters?: { from?: Date; to?: Date },
+  filters?: { from?: Date; to?: Date; page?: string | string[] },
 ) {
   requireMachineSalaryActor(actor);
-  return db.dailyWorkerSalary.findMany({
-    where: {
+  const where = {
       workerId: actor.id,
       date:
         filters?.from || filters?.to
@@ -400,7 +400,20 @@ export async function listWorkerSalaries(
               lte: filters.to,
             }
           : undefined,
-    },
+  };
+  const [total, sums, unpaidSums] = await Promise.all([
+    db.dailyWorkerSalary.count({ where }),
+    // 合计跟随日期筛选（与分页前 salaryTotals(salaries) 的口径一致），但用
+    // aggregate 走全量，绝不能变成「本页合计」——给师傅看错工资总额比慢更糟。
+    db.dailyWorkerSalary.aggregate({ where, _sum: { actualSalary: true } }),
+    db.dailyWorkerSalary.aggregate({ where: { AND: [where, { isPaid: false }] }, _sum: { actualSalary: true } }),
+  ]);
+  const window = paginationWindow(total,
+    parsePositiveInt(filters?.page, { defaultValue: 1 }), WORKER_SALARY_PAGE_SIZE);
+  const rows = await db.dailyWorkerSalary.findMany({
+    where,
+    take: window.take,
+    skip: window.skip,
     orderBy: { date: 'desc' },
     select: {
       id: true,
@@ -416,6 +429,10 @@ export async function listWorkerSalaries(
       paidAt: true,
     },
   });
+  return { ...paginatedResult(rows, total, window),
+    totalSalary: String(sums._sum.actualSalary ?? 0),
+    unpaidSalary: String(unpaidSums._sum.actualSalary ?? 0),
+  };
 }
 
 export async function listWorkerPieceworkSettlementsForPortal(

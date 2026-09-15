@@ -1,7 +1,7 @@
-import Decimal from 'decimal.js';
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Link from 'next/link';
 import { Calculator, FileText } from 'lucide-react';
-import { listHourlyPayrolls } from '@/lib/salary/hourly-aggregate';
+import { listHourlyPayrolls, getHourlyPayrollMonthContext } from '@/lib/salary/hourly-aggregate';
 import { listUsers } from '@/lib/account';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Role, WorkerType } from '@/generated/prisma/enums';
@@ -25,6 +25,8 @@ type PageProps = {
     month?: string;
     paid?: string;
     workerId?: string;
+    page?: string | string[];
+    pageSize?: string | string[];
     marked?: string;
     markedPaid?: string;
   }>;
@@ -46,6 +48,8 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
   if (sp.month) filterQuery.set('month', sp.month);
   if (sp.paid) filterQuery.set('paid', sp.paid);
   if (sp.workerId) filterQuery.set('workerId', sp.workerId);
+  if (sp.page) filterQuery.set('page', Array.isArray(sp.page) ? sp.page[0] : sp.page);
+  if (sp.pageSize) filterQuery.set('pageSize', Array.isArray(sp.pageSize) ? sp.pageSize[0] : sp.pageSize);
   const returnTo = filterQuery.size
     ? `/owner/salary/hourly?${filterQuery.toString()}`
     : '/owner/salary/hourly';
@@ -55,16 +59,19 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
   // 重算影响不能被页面的「已发 / 师傅」筛选误导：操作会
   // 扫描整个月份，因此额外读取该月全部现有月结，只将真实快照
   // 传给客户端确认层。
-  const [rows, allMonthRows, accounts] = await Promise.all([
+  const [salaryPage, monthContext, accounts] = await Promise.all([
     listHourlyPayrolls({
       month: selectedMonth,
       workerId: sp.workerId,
       isPaid,
+      page: sp.page,
+      pageSize: sp.pageSize,
     }),
-    listHourlyPayrolls({ month: selectedMonth }),
+    getHourlyPayrollMonthContext(selectedMonth),
     listUsers(),
   ]);
-  const payrollWorkerIds = new Set(allMonthRows.map((row) => row.workerId));
+  const { rows } = salaryPage;
+  const payrollWorkerIds = new Set(monthContext.workerIds);
   const workers = accounts.filter(
     (account) =>
       account.id === sp.workerId ||
@@ -79,38 +86,9 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
     monthRange,
   );
 
-  const totalSalary = rows
-    .reduce(
-      (acc, r) => acc.plus(new Decimal(r.totalSalary as unknown as string)),
-      new Decimal(0),
-    );
-  const unpaidSalary = rows
-    .filter((r) => !r.isPaid)
-    .reduce(
-      (acc, r) => acc.plus(new Decimal(r.totalSalary as unknown as string)),
-      new Decimal(0),
-    );
-  const activeMonthRows = allMonthRows.filter(
-    (row) => row.payrollWorkerType !== WorkerType.PACKER,
-  );
-  const allMonthUnpaidRows = activeMonthRows.filter((row) => !row.isPaid);
-  const recomputeContext = {
-    existingRecordCount: activeMonthRows.length,
-    unpaidRecordCount: allMonthUnpaidRows.length,
-    paidRecordCount: activeMonthRows.length - allMonthUnpaidRows.length,
-    unpaidTotal: allMonthUnpaidRows
-      .reduce(
-        (sum, row) =>
-          sum.plus(new Decimal(row.totalSalary as unknown as string)),
-        new Decimal(0),
-      )
-      .toFixed(2),
-    sampleRows: activeMonthRows.slice(0, 5).map((row) => ({
-      workerName: row.worker.displayName,
-      totalSalary: String(row.totalSalary),
-      isPaid: row.isPaid,
-    })),
-  };
+  const totalSalary = salaryPage.totalSalary;
+  const unpaidSalary = salaryPage.unpaidSalary;
+  const recomputeContext = monthContext.context;
 
   return (
     <div className="space-y-6">
@@ -146,7 +124,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <UiStatCard
           label="记录数"
-          value={`${rows.length} 条`}
+          value={`${salaryPage.total} 条`}
           icon={FileText}
           tone="info"
         />
@@ -259,6 +237,11 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
           </table>
         </TableScrollArea>
       )}
+      <AdminPagination
+        basePath="/owner/salary/hourly"
+        {...salaryPage}
+        queryParams={{ month: selectedMonth, paid: sp.paid, workerId: sp.workerId, pageSize: salaryPage.pageSize }}
+      />
     </div>
   );
 }

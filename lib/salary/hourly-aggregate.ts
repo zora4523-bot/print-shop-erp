@@ -1,3 +1,4 @@
+import { paginatedResult, paginationWindow, parsePositiveInt } from '../admin/table';
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import { Role, WorkerType } from '../../generated/prisma/enums';
@@ -715,18 +716,31 @@ export async function listHourlyPayrolls(filter: {
   month?: string;
   workerId?: string;
   isPaid?: boolean;
+  page?: string | string[];
+  pageSize?: string | string[];
 }) {
   if (filter.month !== undefined) {
     // Validate month format early — same reason listDailyWorkerSalaries
     // validates date early .
     parseShanghaiMonth(filter.month);
   }
-  const rows = await db.hourlyWorkerPayroll.findMany({
-    where: {
+  const where = {
       ...(filter.month ? { month: filter.month } : {}),
       ...(filter.workerId ? { workerId: filter.workerId } : {}),
       ...(filter.isPaid !== undefined ? { isPaid: filter.isPaid } : {}),
-    },
+  };
+  const [total, sums, unpaidSums] = await Promise.all([
+    db.hourlyWorkerPayroll.count({ where }),
+    db.hourlyWorkerPayroll.aggregate({ where, _sum: { totalSalary: true } }),
+    db.hourlyWorkerPayroll.aggregate({ where: { AND: [where, { isPaid: false }] }, _sum: { totalSalary: true } }),
+  ]);
+  const window = paginationWindow(total,
+    parsePositiveInt(filter.page, { defaultValue: 1 }),
+    parsePositiveInt(filter.pageSize, { defaultValue: 50, max: 100 }));
+  const rows = await db.hourlyWorkerPayroll.findMany({
+    take: window.take,
+    skip: window.skip,
+    where,
     orderBy: [{ month: 'desc' }, { workerId: 'asc' }],
     select: {
       id: true,
@@ -747,10 +761,58 @@ export async function listHourlyPayrolls(filter: {
       worker: { select: { displayName: true } },
     },
   });
-  return rows.map((row) => ({
+  const mapped = rows.map((row) => ({
     ...row,
     payrollWorkerType: getHourlyPayrollWorkerType(row.salaryRuleSnapshot),
   }));
+  return { ...paginatedResult(mapped, total, window),
+    totalSalary: String(sums._sum.totalSalary ?? 0),
+    unpaidSalary: String(unpaidSums._sum.totalSalary ?? 0),
+  };
+}
+
+/** Whole-month confirmation must not inherit the visible page/filter.
+ * Read narrow batches so neither full payroll rows nor snapshots accumulate.
+ */
+export async function getHourlyPayrollMonthContext(month: string) {
+  parseShanghaiMonth(month);
+  const workerIds: string[] = [];
+  const sampleRows: Array<{ workerName: string; totalSalary: string; isPaid: boolean }> = [];
+  let existingRecordCount = 0;
+  let unpaidRecordCount = 0;
+  let unpaidTotal = new Decimal(0);
+  let cursor: string | undefined;
+  while (true) {
+    const rows = await db.hourlyWorkerPayroll.findMany({
+      where: { month },
+      orderBy: { workerId: 'asc' },
+      take: 100,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true, workerId: true, totalSalary: true, isPaid: true,
+        salaryRuleSnapshot: true, worker: { select: { displayName: true } },
+      },
+    });
+    for (const row of rows) {
+      workerIds.push(row.workerId);
+      if (getHourlyPayrollWorkerType(row.salaryRuleSnapshot) === WorkerType.PACKER) continue;
+      existingRecordCount += 1;
+      if (!row.isPaid) {
+        unpaidRecordCount += 1;
+        unpaidTotal = unpaidTotal.plus(String(row.totalSalary));
+      }
+      if (sampleRows.length < 5) sampleRows.push({
+        workerName: row.worker.displayName, totalSalary: String(row.totalSalary), isPaid: row.isPaid,
+      });
+    }
+    if (rows.length < 100) break;
+    cursor = rows[rows.length - 1].id;
+  }
+  return { workerIds, context: {
+    existingRecordCount, unpaidRecordCount,
+    paidRecordCount: existingRecordCount - unpaidRecordCount,
+    unpaidTotal: unpaidTotal.toFixed(2), sampleRows,
+  } };
 }
 
 export async function markHourlyPayrollPaid(

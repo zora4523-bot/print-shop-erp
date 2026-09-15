@@ -17,7 +17,7 @@ const {
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
     order: { findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
-    dailyWorkerSalary: { findMany: vi.fn(), findFirst: vi.fn() },
+    dailyWorkerSalary: { count: vi.fn(), aggregate: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
     hourlyWorkerPayroll: { findMany: vi.fn(), findFirst: vi.fn() },
   },
   operationTypeMock: vi.fn(),
@@ -70,6 +70,8 @@ beforeEach(() => {
   dbMock.order.findMany.mockReset().mockResolvedValue([]);
   dbMock.order.findFirst.mockReset().mockResolvedValue(null);
   dbMock.order.count.mockReset().mockResolvedValue(0);
+  dbMock.dailyWorkerSalary.count.mockReset().mockResolvedValue(0);
+  dbMock.dailyWorkerSalary.aggregate.mockReset().mockResolvedValue({ _sum: { actualSalary: null } });
   dbMock.dailyWorkerSalary.findMany.mockReset().mockResolvedValue([]);
   dbMock.dailyWorkerSalary.findFirst.mockReset().mockResolvedValue(null);
   dbMock.hourlyWorkerPayroll.findMany.mockReset().mockResolvedValue([]);
@@ -470,4 +472,24 @@ describe('worker salary visibility', () => {
     expect(dbMock.dailyWorkerSalary.findMany).not.toHaveBeenCalled();
     expect(dbMock.hourlyWorkerPayroll.findMany).not.toHaveBeenCalled();
   });
+});
+
+it('keeps total/unpaid as filtered full aggregates after salary pagination, never the visible page', async () => {
+  dbMock.dailyWorkerSalary.count.mockResolvedValue(45);
+  dbMock.dailyWorkerSalary.findMany.mockResolvedValue([{ id: 'one-page-row', actualSalary: '1.23' }]);
+  dbMock.dailyWorkerSalary.aggregate
+    .mockResolvedValueOnce({ _sum: { actualSalary: '9876.54' } })
+    .mockResolvedValueOnce({ _sum: { actualSalary: '1234.56' } });
+  const from = new Date('2026-01-01');
+  const result = await listWorkerSalaries(worker, { page: '2', from });
+  expect(result).toMatchObject({ total: 45, page: 2, pageSize: 20, totalSalary: '9876.54', unpaidSalary: '1234.56' });
+  expect(result.rows).toHaveLength(1);
+  expect(dbMock.dailyWorkerSalary.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    take: 20, skip: 20, where: { workerId: worker.id, date: { gte: from, lte: undefined } },
+  }));
+  const where = { workerId: worker.id, date: { gte: from, lte: undefined } };
+  expect(dbMock.dailyWorkerSalary.aggregate.mock.calls.map(([args]) => args)).toEqual([
+    { where, _sum: { actualSalary: true } },
+    { where: { AND: [where, { isPaid: false }] }, _sum: { actualSalary: true } },
+  ]);
 });
