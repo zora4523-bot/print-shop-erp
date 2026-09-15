@@ -252,6 +252,17 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum OrderPurpose {
+  STANDARD
+  SAMPLE_SHIPMENT
+  PROOF
+}
+
+enum OrderPricingMode {
+  ITEMIZED
+  MANUAL_TOTAL
+}
+
 enum OrderKind {
   NORMAL
   REWORK
@@ -401,6 +412,9 @@ model Order {
   createdById               String // 代下单场景
   customerPartyId           String?
   status                    OrderStatus                 @default(DRAFT)
+  samplePackagingRuleCode   String?
+  purpose                   OrderPurpose                @default(STANDARD)
+  pricingMode               OrderPricingMode            @default(ITEMIZED)
   kind                      OrderKind                   @default(NORMAL)
   billingMode               OrderBillingMode            @default(CHARGE)
   settlementType            OrderSettlementType
@@ -505,6 +519,7 @@ model Order {
   @@index([submittedAt])
   @@index([completedAt])
   @@index([shippedAt])
+  @@index([purpose, createdAt])
 }
 
 // 每次形成暂定价、自动确认价或管理员终审价都追加一行。应用层没有更新/

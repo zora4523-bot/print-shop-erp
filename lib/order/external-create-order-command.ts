@@ -22,7 +22,7 @@ export type ExternalCreateOrderCommandResult =
   | {
       success: true;
       data: CreateOrderInput;
-      facts: ExternalCreateOrderSubmitInput;
+      facts: ExternalCreateOrderSubmitInput | null;
     }
   | {
       success: false;
@@ -37,6 +37,9 @@ export type ExternalCreateOrderCommandResult =
 export const EXTERNAL_CREATE_ORDER_SERVER_OWNED_FIELDS = {
   root: [
     'externalSalesUserId',
+    'pricingMode',
+    'purposeAmount',
+    'manualTotal',
     'quotedFee',
     'confirmedFee',
     'settledFee',
@@ -302,6 +305,10 @@ export function parseExternalCreateOrderCommand(
     issues: contactIssues.map((issue) => ({ ...issue, fig: null })),
   };
 
+  if (compatible.data.purpose === 'SAMPLE_SHIPMENT') {
+    if (!compatible.data.receiverName?.trim() || !compatible.data.receiverPhone?.trim()) return { success: false, issues: [{ path: ['receiverPhone'], fig: null, message: '请填写收货人和手机号' }] };
+    return { success: true, data: compatible.data, facts: null };
+  }
   const canonicalInput = toCanonicalFacts(compatible.data);
   const canonical = externalCreateOrderSubmitSchema.safeParse(canonicalInput);
   if (!canonical.success) {

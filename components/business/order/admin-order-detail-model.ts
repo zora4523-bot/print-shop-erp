@@ -38,6 +38,7 @@ export type DetailShipment = {
   address: string | null; trackingNo: string | null; carrier: string | null; items: string[];
 };
 export type AdminOrderDetailModel = {
+  purpose?: import('@/lib/order/purpose').OrderPurposeValue;
   remark?: string | null;
   id: string; no: string; name: string; version: number; status: AdminOrderWorkspaceRow['status'];
   customer: string; sales: string; craft: string; due: string | null; dueLeft: string;
@@ -235,10 +236,11 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
   const dueLeft = adminOrderDueHint(workspace.dueAlert) ?? '';
   const feeStages = (['quoted', 'confirmed', 'settled'] as const).map((key) => ({
     key, title: { quoted: '提交报价', confirmed: '确认金额', settled: '结算金额' }[key],
-    total: amount(workspace.feeStages[key]), current: workspace.feeStages.active === key.toUpperCase(),
+    total: key === 'quoted' && order.purpose === 'PROOF' ? null : amount(workspace.feeStages[key]), current: workspace.feeStages.active === key.toUpperCase(),
   }));
   return {
     remark: order.remark,
+    purpose: order.purpose,
     id: order.id, no: order.orderNo, name: order.customName || '未命名工单',
     version: order.workOrderVersion, status: order.status, customer: workspace.customer.name,
     sales: workspace.submitter.name, craft: workspace.craftTags?.join(' · ') || workspace.craftSummary,

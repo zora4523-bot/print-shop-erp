@@ -102,6 +102,7 @@ async function lockAndReadOrder(
       orderNo: true,
       status: true,
       settlementType: true,
+      purpose: true,
       pricingStatus: true,
       priceRevision: true,
       revision: true,
@@ -114,6 +115,8 @@ async function lockAndReadOrder(
     },
   });
   if (!order) throw new OrderCommercialDetailsError('工单不存在');
+  if (order.purpose === 'PROOF') throw new OrderCommercialDetailsError('打样请通过整单核价修改总价');
+  if (order.purpose === 'SAMPLE_SHIPMENT') throw new OrderCommercialDetailsError('寄样品仅收取快递费和包装费');
   if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
     throw new OrderCommercialDetailsError('只有外部销售工单可以维护对客附加费用');
   }

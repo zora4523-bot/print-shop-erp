@@ -1,6 +1,7 @@
 // 建单：款式事实、报价输入、物流 / 包装预报价与 createOrderSchema（SPEC §3.1 / §4.1）
 // 由 lib/auth/schemas.ts 按域拆出（2026-09-14）；对外仍通过 lib/auth/schemas.ts 统一导出。
 import { z } from 'zod';
+import { ORDER_PURPOSES } from '../../order/purpose';
 import { OrderFoilTechnique, OrderItemPricingRoute, OrderLamination, OrderPackagingMode, OrderProductStructure } from '../../../generated/prisma/enums';
 import { MAX_ORDER_ITEM_FOIL_COLORS } from '../../order/foil-colors';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '../../order/limits';
@@ -341,9 +342,11 @@ export const orderItemPricingFactsSchema = orderItemBaseSchema
   })
   .superRefine(validateOrderItemPricingFacts);
 
-const orderItemSchema = orderItemBaseSchema.superRefine(
-  validateOrderItemPricingFacts,
-);
+const orderItemSchema = orderItemBaseSchema.superRefine((item, ctx) => {
+  // The parent command accepts the legacy unclassified route only for a
+  // non-production sample shipment; it never authorizes a manual price.
+  if (item.pricingRoute !== 'MANUAL_QUOTE') validateOrderItemPricingFacts(item, ctx);
+});
 
 export type OrderItemInput = z.infer<typeof orderItemSchema>;
 
@@ -717,6 +720,8 @@ const packagingGroupSchema = z.object({
 
 export const createOrderSchema = z
   .object({
+    purpose: z.enum(ORDER_PURPOSES).optional(),
+    samplePackagingRuleCode: z.string().trim().min(1).max(100).nullable().optional(),
     clientSubmissionId: z.string().uuid('提交标识无效').optional(),
     nextItemFig: z
       .number()
@@ -759,6 +764,15 @@ export const createOrderSchema = z
       ),
   })
   .superRefine((input, ctx) => {
+    const sample = input.purpose === 'SAMPLE_SHIPMENT';
+    if (!sample && input.samplePackagingRuleCode) ctx.addIssue({ code: 'custom', path: ['samplePackagingRuleCode'], message: '只有寄样品工单可以选择寄样包装' });
+    input.items.forEach((item, index) => {
+      if (!sample && item.pricingRoute === 'MANUAL_QUOTE') ctx.addIssue({ code: 'custom', path: ['items', index, 'pricingRoute'], message: '新建工单必须从三条计价路线中选择一条' });
+      if (sample && (item.pricingRoute !== 'MANUAL_QUOTE' || item.crafts.length || item.productId || item.frontFoilColors.length || item.backFoilColors.length || item.foilColors.length || item.paperType || item.manualQuoteReason || item.lamination !== 'NONE' || item.printColors.length || item.paperWeightGsm || item.actualWidthMm || item.actualHeightMm || item.plateGroupId || item.productStructure !== 'UNSPECIFIED' || item.foilTechnique !== 'NONE' || item.hasLocalFoil !== null || item.pack !== null || item.isDoubleSided || item.isDoubleColor)) ctx.addIssue({ code: 'custom', path: ['items', index], message: '寄样品只需填写样品名称和数量' });
+      if (input.purpose && input.purpose !== 'STANDARD' && (item.adminPrice || Number(item.unitPrice) || Number(item.fixedFee))) ctx.addIssue({ code: 'custom', path: ['items', index], message: '请在工单核价时填写费用' });
+    });
+    if (input.purpose && input.purpose !== 'STANDARD' && input.packagingGroups.some((group) => group.adminPrice)) ctx.addIssue({ code: 'custom', path: ['packagingGroups'], message: '样品工单不单独收取包装加工费' });
+    if (sample && input.packagingGroups.length) ctx.addIssue({ code: 'custom', path: ['packagingGroups'], message: '寄样品不收取入袋加工费' });
     const seenFigs = new Set<number>();
     let maximumFig = 0;
     input.items.forEach((item, itemIndex) => {

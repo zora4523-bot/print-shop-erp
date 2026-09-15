@@ -1,3 +1,6 @@
+import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
+import { createOrderSchema } from './auth/schemas';
+import { isSampleOrder } from './order/purpose';
 import { subtotalReconciles } from './order/subtotal-reconciliation';
 import { salesCustomerScope } from './order/sales-customer-policy';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
@@ -594,6 +597,12 @@ export async function createOrder(
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<CreatedOrderSummary> {
+  const special = isSampleOrder(input.purpose);
+  const sampleShipment = input.purpose === 'SAMPLE_SHIPMENT';
+  if (special) {
+    const parsed = createOrderSchema.safeParse(input);
+    if (!parsed.success) throw new OrderInvariantError(parsed.error.issues.map((issue) => issue.message).join('；'));
+  }
   const additionalShipments = input.additionalShipments ?? [];
   const hasAdminPrices = validateAdminCreatePrices(input, actor.role, additionalShipments);
 
@@ -617,7 +626,7 @@ export async function createOrder(
     }
   }
   const isExternalSalesDraft =
-    settlementType === OrderSettlementType.EXTERNAL_SALES;
+    settlementType === OrderSettlementType.EXTERNAL_SALES || special;
   if (!input.receiverAddress?.trim()) {
     throw new OrderInvariantError('请填写收货地址');
   }
@@ -629,7 +638,7 @@ export async function createOrder(
       `请填写额外地址 ${missingAdditionalAddress + 1} 的收货地址`,
     );
   }
-  assertExternalSalesPackagingCoverage(
+  if (!sampleShipment) assertExternalSalesPackagingCoverage(
     settlementType,
     input.items.length,
     packagingGroupInputs,
@@ -1214,6 +1223,9 @@ export async function createOrder(
         createdById: actor.id,
         customerPartyId,
         status: OrderStatus.DRAFT,
+        purpose: input.purpose ?? 'STANDARD',
+        pricingMode: input.purpose === 'PROOF' ? 'MANUAL_TOTAL' : 'ITEMIZED',
+        samplePackagingRuleCode: sampleShipment ? input.samplePackagingRuleCode ?? null : null,
         kind: OrderKind.NORMAL,
         billingMode: OrderBillingMode.CHARGE,
         settlementType,
@@ -1572,6 +1584,7 @@ type StatusTxClient = {
       | {
           id: string;
           status: OrderStatus;
+          purpose?: string;
           submitterId: string;
           receiverAddress: string | null;
           receiverPhone: string | null;
@@ -1707,6 +1720,7 @@ type TransitionOptions = {
     tx: CascadeTxClient,
     orderId: string,
     order: {
+      purpose?: string;
       settlementType: OrderSettlementType;
       pricingStatus: string;
       workOrderVersion: number;
@@ -1763,6 +1777,7 @@ async function transitionWithLog(
         receiverPhone: true,
         settlementType: true,
         pricingStatus: true,
+        purpose: true,
         revision: true,
         editVersion: true,
         workOrderVersion: true,
@@ -1931,6 +1946,7 @@ export async function submitOrder(
   )
     .then((setting) => setting.enabled)
     .catch(() => true);
+  const sampleFinalized: { current: { quotedFee: string; quotedFeeCompleteness: OrderQuotedFeeCompleteness } | null } = { current: null };
   let submissionNotificationKey = orderId;
   let submittedNotificationQueued = !submittedNotificationEnabled;
   let urgentNotificationQueued = false;
@@ -1973,7 +1989,14 @@ export async function submitOrder(
       cascade: async (tx, lockedOrderId, lockedOrder) => {
         const prismaTx = tx as unknown as Prisma.TransactionClient;
         if (await prismaTx.orderChangeRequest.findFirst({ where: { orderId: lockedOrderId, status: 'PENDING' }, select: { id: true } })) throw new OrderInvariantError('请先撤回或处理当前申请，再提交工单');
-        if (
+        if (isSampleOrder(lockedOrder.purpose)) {
+          try { sampleFinalized.current = await finalizeSampleOrderInTx(prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken); }
+          catch (error) {
+            if (error instanceof SampleQuoteChangedError) throw new OrderQuoteChangedError(error.quote.quoteToken, error.quote.knownTotal, error.quote.total === null ? OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS : OrderQuotedFeeCompleteness.COMPLETE, error.message);
+            if (error instanceof SampleOrderError) throw new OrderInvariantError(error.message);
+            throw error;
+          }
+        } else if (
           lockedOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
         ) {
           const itemWithoutImage = await prismaTx.orderItem.findFirst({
@@ -2162,9 +2185,9 @@ export async function submitOrder(
 
   return {
     ...result,
-    quotedFee: finalizedExternalQuote.current?.quotedFee ?? null,
+    quotedFee: finalizedExternalQuote.current?.quotedFee ?? sampleFinalized.current?.quotedFee ?? null,
     quotedFeeCompleteness:
-      finalizedExternalQuote.current?.quotedFeeCompleteness ?? null,
+      finalizedExternalQuote.current?.quotedFeeCompleteness ?? sampleFinalized.current?.quotedFeeCompleteness ?? null,
   };
 }
 
@@ -2592,6 +2615,8 @@ async function finalizeExternalShipmentChargesInTx(
     where: { id: input.orderId },
     select: {
       settlementType: true,
+      purpose: true,
+      samplePackagingRuleCode: true,
       isSfCollect: true,
       processingAmount: true,
       customerCharges: {
@@ -2607,7 +2632,8 @@ async function finalizeExternalShipmentChargesInTx(
     },
   });
   if (!chargeOrder) throw new OrderInvariantError('工单不存在');
-  if (chargeOrder.settlementType !== OrderSettlementType.EXTERNAL_SALES) return;
+  if (chargeOrder.purpose === 'PROOF') return;
+  if (chargeOrder.settlementType !== OrderSettlementType.EXTERNAL_SALES && chargeOrder.purpose !== 'SAMPLE_SHIPMENT') return;
 
   const standardCustomerCharges = chargeOrder.customerCharges.filter((charge) =>
     ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(String(charge.category.code)),
@@ -2672,6 +2698,7 @@ async function finalizeExternalShipmentChargesInTx(
       tx,
       {
         isSfCollect: chargeOrder.isSfCollect,
+        samplePackaging: chargeOrder.purpose === 'SAMPLE_SHIPMENT' ? { ruleCode: chargeOrder.samplePackagingRuleCode } : undefined,
         shipments: input.storedShipments.map((shipment) => {
           const requested = input.requestByShipmentId.get(shipment.id);
           if (!requested) {
@@ -2996,6 +3023,8 @@ type EditTxClient = {
     }) => Promise<
       | {
           id: string;
+          purpose?: string;
+          samplePackagingRuleCode?: string | null;
           status: OrderStatus;
           submitterId: string;
           settlementType: OrderSettlementType;
@@ -3671,6 +3700,8 @@ export async function setOrderSfCollect(
       where: { id: orderId, ...getOrderScopeFilter(actor) },
       select: {
         id: true,
+        purpose: true,
+        samplePackagingRuleCode: true,
         status: true,
         submitterId: true,
         settlementType: true,
@@ -3694,6 +3725,7 @@ export async function setOrderSfCollect(
       },
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
+    if (order.purpose === 'PROOF') throw new OrderInvariantError('打样配送费用已包含在整单总价中');
     if (order.changeRequests?.length) {
       throw new OrderInvariantError('工单有待审批申请，请先处理申请再修改配送方式');
     }
@@ -3706,7 +3738,7 @@ export async function setOrderSfCollect(
       throw new OrderInvariantError('已完成或已取消的工单不能修改顺丰到付标识');
     }
     if (
-      order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+      (order.settlementType === OrderSettlementType.EXTERNAL_SALES || order.purpose === 'SAMPLE_SHIPMENT') &&
       order.status === OrderStatus.SHIPPED &&
       actor.role !== Role.ADMIN
     ) {
@@ -3715,7 +3747,7 @@ export async function setOrderSfCollect(
       );
     }
     if (
-      order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+      (order.settlementType === OrderSettlementType.EXTERNAL_SALES || order.purpose === 'SAMPLE_SHIPMENT') &&
       isFulfillmentPricingStatus(order.status)
     ) {
       if (!fulfillmentGuard) {
@@ -3814,6 +3846,7 @@ export async function setOrderSfCollect(
           prismaTx,
           {
             isSfCollect,
+            samplePackaging: order.purpose === 'SAMPLE_SHIPMENT' ? { ruleCode: order.samplePackagingRuleCode ?? null } : undefined,
             shipments: shipmentChargeFacts.map((fact) => {
               const shipment = shipmentBySequence.get(fact.shipmentKey);
               if (!shipment) {

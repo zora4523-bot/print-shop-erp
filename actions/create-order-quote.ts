@@ -252,3 +252,19 @@ export async function quoteInternalCreateOrderAction(
     };
   }
 }
+
+/** Sample purposes share the create permission and the published price reader. */
+export async function quoteSampleOrderAction(raw: unknown): Promise<
+  | { status: 'success'; quote: import('@/lib/order/sample-order').SampleOrderQuote }
+  | { status: 'error'; message: string }
+> {
+  await requirePermission('order:create');
+  try {
+    const { quoteSampleOrder } = await import('@/lib/order/sample-order');
+    return { status: 'success', quote: await quoteSampleOrder(raw) };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { status: 'error', message: error.issues.map((issue) => issue.message).join('；') };
+    if (error instanceof Error && ['SampleOrderError', 'PublishedCreateOrderPriceAdapterError'].includes(error.name)) return { status: 'error', message: error.message };
+    throw error;
+  }
+}

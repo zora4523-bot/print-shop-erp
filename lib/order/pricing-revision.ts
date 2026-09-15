@@ -10,6 +10,9 @@ type FreshPricingOrder = {
   id: string;
   orderNo: string;
   settlementType: string;
+  purpose?: string;
+  pricingMode?: string;
+  samplePackagingRuleCode?: string | null;
   revision: number;
   priceRevision: number;
   pricingStatus: string;
@@ -134,6 +137,9 @@ export async function appendOrderPricingRevisionInTx(
       id: true,
       orderNo: true,
       settlementType: true,
+      purpose: true,
+      pricingMode: true,
+      samplePackagingRuleCode: true,
       revision: true,
       priceRevision: true,
       pricingStatus: true,
@@ -241,6 +247,7 @@ export async function appendOrderPricingRevisionInTx(
       id: order.id,
       orderNo: order.orderNo,
       settlementType: order.settlementType,
+      ...(order.purpose ? { purpose: order.purpose, pricingMode: order.pricingMode, samplePackagingRuleCode: order.samplePackagingRuleCode ?? null } : {}),
       orderRevision: nextOrderRevision,
       pricingStatus: input.status,
       priceRevision: nextPriceRevision,

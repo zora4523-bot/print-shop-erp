@@ -1,5 +1,6 @@
 'use client';
 
+import { OrderPurposeBadge } from './OrderPurposeBadge';
 import { OrderRemark } from './OrderRemark';
 
 /* eslint-disable @next/next/no-img-element */
@@ -196,6 +197,7 @@ function AdminOrderRow({
             >
               {order.customName?.trim() || '未命名工单'}
             </Link>
+            <OrderPurposeBadge purpose={order.purpose} />
             {order.isUrgent && <span className="mt-2 shrink-0 rounded-md bg-warning/10 px-1.5 py-0.5 text-xs font-bold text-warning-foreground">急单</span>}
           </h2>
         </div>

@@ -576,6 +576,7 @@ export async function resolveExternalOrderChargesForProvisionalCreation(
   client: Prisma.TransactionClient,
   input: {
     isSfCollect: boolean;
+    samplePackaging?: { ruleCode: string | null };
     shipments: SubmittedShipmentCustomerCharges[];
   },
   now: Date,
@@ -600,6 +601,7 @@ export async function resolveExternalOrderChargesForFinalization(
   client: Prisma.TransactionClient,
   input: {
     isSfCollect: boolean;
+    samplePackaging?: { ruleCode: string | null };
     shipments: SubmittedShipmentCustomerCharges[];
   },
   priceBookId: string,
@@ -628,6 +630,7 @@ async function resolveExternalOrderCharges(
   client: Prisma.TransactionClient,
   input: {
     isSfCollect: boolean;
+    samplePackaging?: { ruleCode: string | null };
     shipments: SubmittedShipmentCustomerCharges[];
   },
   now: Date,
@@ -647,6 +650,7 @@ async function resolveExternalOrderCharges(
     snapshotLockHeld,
   );
   const quoteInput: ExternalOrderChargeInput = {
+    samplePackaging: input.samplePackaging,
     isSfCollect: input.isSfCollect,
     shipments: input.shipments.map((shipment) => ({
       shipmentKey: shipment.shipmentKey,

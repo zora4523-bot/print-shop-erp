@@ -26,7 +26,7 @@ export async function getAdminOrderInlineOperations(
       changeRequests: { none: { status: OrderChangeRequestStatus.PENDING } },
     },
     select: {
-      revision: true, editVersion: true, workOrderVersion: true, priceRevision: true,
+      purpose: true, revision: true, editVersion: true, workOrderVersion: true, priceRevision: true,
       status: true, settlementType: true, pricingStatus: true, isSfCollect: true,
       settledAt: true, settledFee: true,
       shipments: {
@@ -45,10 +45,10 @@ export async function getAdminOrderInlineOperations(
   if (!row) return null;
   const isPricingPending = row.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
   const isExternalSales = row.settlementType === OrderSettlementType.EXTERNAL_SALES;
-  const canPrice = row.settlementType !== OrderSettlementType.NO_CHARGE && isPricingPending;
-  const pricing = canPrice && isOrderPricingReviewAllowedStatus(row.status)
+  const canPrice = row.settlementType !== OrderSettlementType.NO_CHARGE && (isPricingPending || row.purpose === 'PROOF');
+  const pricing = canPrice && isOrderPricingReviewAllowedStatus(row.status, row.purpose)
     ? 'factory'
-    : canPrice && isExternalSales && isFulfillmentPricingStatus(row.status) && row.settledAt === null && row.settledFee === null
+    : canPrice && row.purpose !== 'PROOF' && (isExternalSales || row.purpose === 'SAMPLE_SHIPMENT') && isFulfillmentPricingStatus(row.status) && row.settledAt === null && row.settledFee === null
       ? 'fulfillment' : null;
   const charges = new Map(row.customerCharges.flatMap((charge) =>
     charge.shipmentId ? [[`${charge.shipmentId}:${charge.category.code}`, charge] as const] : [],

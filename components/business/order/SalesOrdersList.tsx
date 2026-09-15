@@ -23,6 +23,7 @@ import {
   salesOrderPrimaryAction,
 } from '@/lib/order/sales-list-presentation';
 import { cn } from '@/lib/utils';
+import { OrderPurposeBadge } from './OrderPurposeBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
@@ -264,7 +265,7 @@ function SalesOrderCard({
               {order.pendingChangeRequest.type === 'CANCEL' ? '取消申请中' : '修改申请中'}
             </Badge>
           ) : null}
-          {order.isUrgent ? <UrgentBadge /> : null}
+          <OrderPurposeBadge purpose={order.purpose} />{order.isUrgent ? <UrgentBadge /> : null}
         </div>
 
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground">

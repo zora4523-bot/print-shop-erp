@@ -9,6 +9,7 @@ import {
 export const workflowOrderSelect = {
   id: true,
   orderNo: true,
+  purpose: true,
   status: true,
   revision: true,
   workOrderVersion: true,

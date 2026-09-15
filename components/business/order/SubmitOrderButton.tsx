@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { submitOrderAction } from '@/actions/order';
 import type { SubmitOrderMutationResult } from '@/actions/order.types';
 
-export function SubmitOrderButton({ orderId }: { orderId: string }) {
+export function SubmitOrderButton({ orderId, purpose }: { orderId: string; purpose?: string }) {
   const [state, formAction, pending] = useActionState<
     SubmitOrderMutationResult | null,
     FormData
@@ -38,10 +38,10 @@ export function SubmitOrderButton({ orderId }: { orderId: string }) {
         >
           <p className="font-medium">{state.message}</p>
           <p className="mt-1 tabular-nums">
-            {state.quotedFeeCompleteness === 'EXCLUDES_MANUAL_ITEMS'
+            {purpose === 'PROOF' ? '整单总价待管理员核定' : <>{state.quotedFeeCompleteness === 'EXCLUDES_MANUAL_ITEMS'
               ? '已知合计（不含待核价款）'
               : '最新合计'}
-            ：{formatMoney(state.quotedFee)}
+            ：{formatMoney(state.quotedFee)}</>}
           </p>
         </div>
       ) : null}

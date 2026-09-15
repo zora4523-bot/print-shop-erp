@@ -365,3 +365,14 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 事务内锁定价格写入，验证外部销售加工费草稿、更新时间、纸张身份与启用/缺货状态、产品分类和规格唯一性，创建或复用纸张/产品并保存草稿价格与审计。`null` 仅保留可建单组合，不生成价格规则；零元生成真实零价规则。重复价格格拒绝覆盖，价格修改沿用既有草稿矩阵 Action。返回 `{status:'success',paperId,priceBookId}` 或可预期业务错误 `{status:'error',message}`；权限与未知系统异常不吞掉。
 
 销售目录在保存后刷新，自动计价仍只消费已发布价目；历史工单不重算。`updateMaterial` 拒绝直接修改已关联建单产品的纸张名称、规格克重或分类，防止破坏产品与纸张身份。流程与验证范围见 [空白封纸张规格管理](./docs/空白封纸张规格管理-20260913.md)。
+
+## 2026-09-15 寄样品与打样
+
+- 工作台以 `quoteSampleOrderAction` 使用既有 `order:create` 权限和已发布价表读取器；返回整单 `total`（未知为 null）、`knownTotal`、快递/包装明细、可选包装规则及 `quoteToken`。独立 Server Action 位于现有建单报价模块，不增加 REST 路由。
+- `createOrderAction` 接受 `purpose=STANDARD|SAMPLE_SHIPMENT|PROOF` 和仅寄样可用的 `samplePackagingRuleCode`。不传用途兼容普通单。`pricingMode` 由服务端推导；外部销售仍不能提交金额、状态、价目版本或管理员定价字段。用途在建单后不可切换。
+- 特殊用途先存无价格草稿，再复用 `submitOrderAction(orderId,quoteToken)` 事务、所有权校验及报价变化响应。寄样保留真实数量，不要求生产工艺或设计图；打样须真实工艺与设计图片。寄样包装取当前已发布的最小数量档或指定有效规则，未录实际重量的寄付运费待核价。
+- 打样复用 `previewOrderPricingReviewAction` / `finalizeOrderPricingAction`，仅管理员填写单一「整单总价」。账本唯一收费键 `ORDER:PROOF:TOTAL`（SAMPLE_FEE）；款式、入袋加工均含在整单价内，保持零分项。空值、负数、超限、额外加工费及过期版本拒绝；明确 0 元须有定价依据。确认后的打样在下发/生产/打包阶段可沿此入口调整整单价，已结算禁止调整。普通工单核价状态范围保持原样。
+- 寄样下发进入 PACKING，不生成加工工序或计件工资；打样沿正常生产流程。打样发货不重算物流应收，附加收费/顺丰到付金额更正入口不适用。寄样沿原价目版本补录实际重量与运费，包装规格保持选中档位。
+- 首版样品用途的生产款式修改申请暂不开放；收件信息、备注、交期和取消沿原权限路径。变更生产款式应新建工单，保留原单历史。
+
+实现、测试及本地操作见 [寄样与打样开发任务](./docs/寄样与打样开发任务.md)。

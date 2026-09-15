@@ -217,3 +217,16 @@ pnpm db:studio
 手工表单携带服务端生成的请求键，仅在成功响应后换新键；网络失败重试沿用原键。服务在事务内先锁请求、核对操作者与规范化业务内容的摘要，再锁定物料和库位更新库存、写流水及通知 outbox。同键同内容返回首次流水，不再更新余额或发送预警；同键不同内容拒绝。上线前必须先应用前向迁移，不能只部署新的 Prisma Client。
 
 已发时薪再次提交同一“已发”状态时保留原 `paidAt` 和 `updatedAt`，不能把重试时间写成首次发放时间。验证与候选状态见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
+
+## 2026-09-15 样品用途与整单价
+
+新增前向迁移：
+
+1. `20260915120000_sample_order_purpose`：增加 Order.purpose（STANDARD / SAMPLE_SHIPMENT / PROOF）、pricingMode（ITEMIZED / MANUAL_TOTAL）、samplePackagingRuleCode，以及 purpose/createdAt 索引。旧行默认 STANDARD + ITEMIZED；CHECK 强制 PROOF 对应 MANUAL_TOTAL，其余用途对应 ITEMIZED。
+2. `20260915121000_sample_draft_revision`：扩展 Order_priceRevision_check，允许各创建角色的样品草稿在未报价时 priceRevision=0；仍要求 DRAFT 且没有报价修订引用。保留已应用迁移原文。
+
+寄样加工行零金额；运费与包装复用 OrderCustomerCharge 的逐地址键及物流价目锁。打样只用 `ORDER:PROOF:TOTAL` 的 SAMPLE_FEE 行作为总应收，未核价 amount=null；管理员确认后由原价格修订/审计/台账事务同步 totalAmount、confirmedFee，settledFee 仍在结算时写入。没有平行的人工总价列。
+
+报价冻结在既有 OrderPricingRevision 与 OrderPriceVersionLock。已报价/确认工单不会因发布规则而自动变价。样品用途不可通过现有编辑命令改写，历史普通单不重新计算。
+
+本轮已验证原本地开发库升级及独立空库 148 项完整迁移链。生产发布仍须执行既有迁移发布步骤，本次未部署。
