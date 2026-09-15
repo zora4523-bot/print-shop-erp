@@ -1,3 +1,5 @@
+import { listWorkerTaskDisputes } from '@/lib/production/task-dispute';
+import { TaskDisputePanel } from '@/components/business/production/TaskDisputePanel';
 import { randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
@@ -337,7 +339,8 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
 
   const legacyTask = await getLegacyProductionTaskDetail(id, actor);
   if (!legacyTask) notFound();
-  return <LegacyTaskDetail task={legacyTask} />;
+  const disputes = await listWorkerTaskDisputes(id, actor);
+  return <LegacyTaskDetail task={legacyTask} disputes={disputes} />;
 }
 
 function OperationStatusBadge({
@@ -355,8 +358,10 @@ function OperationStatusBadge({
 
 function LegacyTaskDetail({
   task,
+  disputes,
 }: {
   task: NonNullable<Awaited<ReturnType<typeof getLegacyProductionTaskDetail>>>;
+  disputes: Awaited<ReturnType<typeof listWorkerTaskDisputes>>;
 }) {
   return (
     <div className="min-w-0 space-y-5">
@@ -397,6 +402,7 @@ function LegacyTaskDetail({
           />
         </dl>
       </section>
+      <TaskDisputePanel taskId={task.id} disputes={disputes} />
       {task.orderItem.remark ? (
         <HighlightedRemark>{task.orderItem.remark}</HighlightedRemark>
       ) : null}
