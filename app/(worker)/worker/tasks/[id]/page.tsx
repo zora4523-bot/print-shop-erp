@@ -131,8 +131,9 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             {operation.operationType === PieceworkOperationType.PACKING ? (
               <p className="mb-3 text-sm">剩余 {remainingQty} 袋</p>
             ) : null}
-            {operation.operationType === PieceworkOperationType.PARTIAL && <p className="mb-3 text-sm">计薪过版次数：{operation.payrollPassCount} 次 · 工资 = 合格完成数 × {operation.payrollPassCount} × 每下工价</p>}
+            {operation.operationType === PieceworkOperationType.PARTIAL && <p className="mb-3 text-sm">计薪过版次数：{operation.payrollPassCount} 次</p>}
             {currentRate ? <><p className="mb-3 text-sm">本人适用工价：{formatUnitPrice(currentRate.rule.amount.toString())}/{operation.unit === 'PER_PASS' ? '下' : operation.unit === 'PER_PIECE' ? '个' : operation.unit === 'PER_BOX' ? '盒' : '袋'} · {currentRate.source === 'PERSONAL' ? '个人工价' : '统一工价'} · 第 {currentRate.book.version} 版</p>
+            {currentRate.rule.smallOrderAmount != null && currentRate.rule.setupAmount != null && <p className="mb-3 text-sm">小单（≤1000 个，含装版）：{formatUnitPrice(currentRate.rule.smallOrderAmount.toString())}/{operation.operationType === 'FULL' ? '色' : '次'}；大单装版费：{formatUnitPrice(currentRate.rule.setupAmount.toString())}/{operation.operationType === 'FULL' ? '色' : '次'}</p>}
             <OperationReportForm
               operationId={operation.id}
               payrollRevision={operation.payrollRevision}

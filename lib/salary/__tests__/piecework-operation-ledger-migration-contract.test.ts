@@ -33,7 +33,7 @@ describe('piecework operation-ledger migration contract', () => {
     expect(migration).toContain(
       `CREATE TYPE "PieceworkRateUnit" AS ENUM ('PER_PASS', 'PER_PIECE', 'PER_BAG')`,
     );
-    expect(schema).toContain('amount        Decimal?');
+    expect(schema).toMatch(/amount\s+Decimal\?/);
     expect(migration).toContain(
       'A published piecework price book cannot contain null rates',
     );

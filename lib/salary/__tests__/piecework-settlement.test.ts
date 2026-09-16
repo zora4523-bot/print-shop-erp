@@ -367,3 +367,10 @@ describe('markPieceworkSettlementPaid', () => {
     );
   });
 });
+
+it('待人工核定的多人提成不能进入结算', async () => {
+  const row = report('partial', '24.00', 'PARTIAL');
+  dbMock.productionReport.findMany.mockResolvedValue([{ ...row, operation: { ...row.operation, payrollReviewRequired: true } }]);
+  await expect(lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-08-27', actor: ACTOR })).rejects.toThrow('待人工核定');
+  expect(dbMock.pieceworkSettlement.create).not.toHaveBeenCalled();
+});

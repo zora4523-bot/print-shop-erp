@@ -26,6 +26,8 @@ export type PieceworkPriceBookManifestRule = {
   operationType: PieceworkOperationTypeValue;
   unit: PieceworkRateUnitValue;
   amount: string | null;
+  smallOrderAmount?: string;
+  setupAmount?: string;
 };
 
 export type PieceworkPriceBookManifest = {
@@ -42,6 +44,8 @@ type StoredPieceworkRule = {
   operationType: PieceworkOperationTypeValue;
   unit: PieceworkRateUnitValue;
   amount: Decimal | string | null;
+  smallOrderAmount?: Decimal | string | null;
+  setupAmount?: Decimal | string | null;
 };
 
 export type PieceworkPublicationPreview = {
@@ -65,6 +69,8 @@ export type PieceworkPublicationReceipt = {
     operationType: PieceworkOperationTypeValue;
     unit: PieceworkRateUnitValue;
     rate: string;
+    smallOrderAmount?: string;
+    setupAmount?: string;
   }>;
   sourceSha256: string;
   manifestSha256: string;
@@ -152,12 +158,13 @@ export function parsePieceworkPriceBookManifest(
   const rules = value.rules.map((candidate) => {
     if (
       !isRecord(candidate) ||
-      !hasExactKeys(candidate, ['operationType', 'unit', 'amount']) ||
+      (!hasExactKeys(candidate, ['operationType', 'unit', 'amount']) && !hasExactKeys(candidate, ['operationType', 'unit', 'amount', 'smallOrderAmount', 'setupAmount'])) ||
       !PIECEWORK_OPERATION_TYPES.includes(
         candidate.operationType as PieceworkOperationTypeValue,
       ) ||
       !PIECEWORK_RATE_UNITS.includes(candidate.unit as PieceworkRateUnitValue) ||
-      (candidate.amount !== null && typeof candidate.amount !== 'string')
+      (candidate.amount !== null && typeof candidate.amount !== 'string') ||
+      ('smallOrderAmount' in candidate && (typeof candidate.smallOrderAmount !== 'string' || typeof candidate.setupAmount !== 'string'))
     ) {
       throw new PieceworkPriceBookAdminError(
         '计件工价 manifest 规则结构非法',
@@ -167,6 +174,7 @@ export function parsePieceworkPriceBookManifest(
       operationType: candidate.operationType as PieceworkOperationTypeValue,
       unit: candidate.unit as PieceworkRateUnitValue,
       amount: candidate.amount as string | null,
+      ...(typeof candidate.smallOrderAmount === 'string' && typeof candidate.setupAmount === 'string' ? { smallOrderAmount: candidate.smallOrderAmount, setupAmount: candidate.setupAmount } : {}),
     };
   });
 
@@ -198,6 +206,7 @@ function canonicalRules(
     .map((rule) => ({
       operationType: rule.operationType,
       unit: rule.unit,
+      ...(rule.smallOrderAmount !== undefined && rule.setupAmount !== undefined ? { smallOrderAmount: normalizeRate(rule.smallOrderAmount) ?? rule.smallOrderAmount, setupAmount: normalizeRate(rule.setupAmount) ?? rule.setupAmount } : {}),
       amount:
         rule.amount === null ? null : (normalizeRate(rule.amount) ?? rule.amount),
     }));
@@ -260,6 +269,9 @@ export function validatePieceworkManifestForPublication(
       issues.push(`${rule.operationType} 存在重复规则`);
     }
     seen.add(`${rule.operationType}:${rule.unit}`);
+    if (rule.smallOrderAmount !== undefined || rule.setupAmount !== undefined) {
+      if (rule.operationType === 'PACKING' || rule.smallOrderAmount === undefined || rule.setupAmount === undefined || normalizeRate(rule.smallOrderAmount) === null || normalizeRate(rule.setupAmount) === null) issues.push('烫金小单工资与装版费须同时填写有效金额');
+    }
     if (PIECEWORK_UNIT_BY_OPERATION[rule.operationType] !== rule.unit && !(rule.operationType === 'PACKING' && rule.unit === 'PER_BOX')) {
       issues.push(`${rule.operationType} 必须使用 ${PIECEWORK_UNIT_BY_OPERATION[rule.operationType]}`);
     }
@@ -295,7 +307,9 @@ function storedRulesMatch(
     return (
       actual?.unit === expected.unit &&
       actual.amount !== null &&
-      new Decimal(actual.amount).toFixed(4) === expected.amount
+      new Decimal(actual.amount).toFixed(4) === expected.amount &&
+      (actual.smallOrderAmount == null ? undefined : new Decimal(actual.smallOrderAmount).toFixed(4)) === expected.smallOrderAmount &&
+      (actual.setupAmount == null ? undefined : new Decimal(actual.setupAmount).toFixed(4)) === expected.setupAmount
     );
   });
 }
@@ -310,7 +324,7 @@ export async function previewPieceworkPriceBookPublication(
     where: { version: manifest.priceBookVersion },
     include: {
       rules: {
-        select: { id: true, operationType: true, unit: true, amount: true },
+        select: { id: true, operationType: true, unit: true, amount: true, smallOrderAmount: true, setupAmount: true },
       },
     },
   });
@@ -344,6 +358,7 @@ function receiptRules(manifest: PieceworkPriceBookManifest) {
     operationType: rule.operationType,
     unit: rule.unit,
     rate: rule.amount,
+    ...(rule.smallOrderAmount !== undefined ? { smallOrderAmount: rule.smallOrderAmount, setupAmount: rule.setupAmount } : {}),
   }));
 }
 
@@ -408,7 +423,7 @@ export async function publishPieceworkPriceBook(
       where: { version: input.manifest.priceBookVersion },
       include: {
         rules: {
-          select: { id: true, operationType: true, unit: true, amount: true },
+          select: { id: true, operationType: true, unit: true, amount: true, smallOrderAmount: true, setupAmount: true },
         },
       },
     });
@@ -422,7 +437,7 @@ export async function publishPieceworkPriceBook(
       book = await tx.pieceworkPriceBook.create({
         data: { version: input.manifest.priceBookVersion, updatedAt: input.expectedDraftUpdatedAt,
           rules: { create: normalizedRules.map((rule) => ({ operationType: rule.operationType, unit: rule.unit, amount: null })) } },
-        include: { rules: { select: { id: true, operationType: true, unit: true, amount: true } } },
+        include: { rules: { select: { id: true, operationType: true, unit: true, amount: true, smallOrderAmount: true, setupAmount: true } } },
       });
     }
 
@@ -508,6 +523,16 @@ export async function publishPieceworkPriceBook(
         throw new PieceworkPriceBookAdminError(
           `草稿 ${expected.operationType} 已有不同金额，禁止覆盖`,
         );
+      }
+      for (const column of ['smallOrderAmount', 'setupAmount'] as const) {
+        const stored = current[column];
+        if (stored != null && new Decimal(stored).toFixed(4) !== expected[column]) throw new PieceworkPriceBookAdminError('草稿小单工资或装版费不同，请重新核对');
+      }
+      if (current.smallOrderAmount == null && expected.smallOrderAmount !== undefined && expected.setupAmount !== undefined) {
+        await tx.pieceworkPriceRule.updateMany({
+          where: { id: current.id, smallOrderAmount: null, setupAmount: null },
+          data: { smallOrderAmount: new Prisma.Decimal(expected.smallOrderAmount), setupAmount: new Prisma.Decimal(expected.setupAmount) },
+        });
       }
       if (current.amount === null) {
         const updated = await tx.pieceworkPriceRule.updateMany({

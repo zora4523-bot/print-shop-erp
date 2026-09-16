@@ -471,7 +471,7 @@ export async function lockPieceworkSettlement(input: {
         entryType: true,
         reportedAt: true,
         operation: {
-          select: { id: true, orderId: true, operationType: true },
+          select: { id: true, orderId: true, operationType: true, payrollReviewRequired: true },
         },
       },
     });
@@ -481,6 +481,7 @@ export async function lockPieceworkSettlement(input: {
         '该报工人在所选日期没有待结算的新工序报工',
       );
     }
+    if (reports.some((report) => report.operation.payrollReviewRequired)) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在待人工核定的工单提成，请先在工单详情核定');
     const aggregate = aggregatePieceworkSettlementReports(reports);
     const lockedAt = await databaseNow(tx);
     const snapshot = {

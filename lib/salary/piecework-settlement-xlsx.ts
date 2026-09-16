@@ -201,7 +201,7 @@ export async function buildPieceworkSettlementWorkbook(
         report.operation.order.orderNo,
         report.operation.order.customName ?? '',
         report.operation.operationType,
-        report.entryType === 'REVERSAL' ? '冲正' : '报工',
+        report.entryType === 'ADJUSTMENT' ? '人工调整' : report.entryType === 'REVERSAL' ? '冲正' : '报工',
         Number(report.reportedCompletedQty),
         Number(report.defectQty),
         Number(report.reworkQty),

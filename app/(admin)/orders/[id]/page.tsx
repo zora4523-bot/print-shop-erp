@@ -1,3 +1,4 @@
+import { OrderWagePanel } from '@/components/business/salary/OrderWagePanel';
 import { PayrollPassForm } from '@/components/business/production/PayrollPassForm';
 import { productionOperationPassCount } from '@/lib/production/operation-quantity';
 import { canEditAllOrderFees } from '@/lib/order/admin-fee-policy';
@@ -1300,7 +1301,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         />
       ) : null}</>),
     material: (<><OrderMaterialUsageEstimate estimate={materialEstimate} /></>),
-    piecework: (<>{pieceworkSummary ? (
+    piecework: (<>{user.role === Role.ADMIN && <OrderWagePanel orderId={order.id} actor={user} />}{pieceworkSummary ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
