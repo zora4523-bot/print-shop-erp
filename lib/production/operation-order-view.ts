@@ -18,10 +18,13 @@ export async function listOrderProductionOperations(orderId: string) {
       operationType: true,
       unit: true,
       status: true,
+      payrollPassCount: true,
+      payrollRevision: true,
       plannedQty: true,
       carriedCompletedQty: true,
       sources: {
         select: {
+          orderItem: { select: { sequence: true, frontFoilColors: true, backFoilColors: true } },
           orderItemId: true,
           packagingGroupId: true,
           sourceQty: true,

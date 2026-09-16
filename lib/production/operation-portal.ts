@@ -29,6 +29,8 @@ export type ReporterOperationListItem = {
   defectQty: string;
   reworkQty: string;
   passCount: number;
+  payrollPassCount: number;
+  payrollRevision: number;
   sourceCount: number;
   workOrderStage: ProductionWorkOrderStage;
   workOrderTotalQty: string;
@@ -268,6 +270,8 @@ export async function listProductionOperationsForReporter(
       operationType: true,
       unit: true,
       status: true,
+      payrollPassCount: true,
+      payrollRevision: true,
       plannedQty: true,
       carriedCompletedQty: true,
       createdAt: true,
@@ -354,6 +358,8 @@ export async function listProductionOperationsForReporter(
       defectQty: defectQty.toString(),
       reworkQty: reworkQty.toString(),
       passCount,
+      payrollPassCount: operation.payrollPassCount ?? passCount,
+      payrollRevision: operation.payrollRevision ?? 0,
       sourceCount: operation.sources.length,
       workOrderStage: workOrderProgress.stage,
       workOrderTotalQty: workOrderProgress.orderTotal.toString(),
@@ -380,6 +386,8 @@ export async function getProductionOperationForReporter(
       operationType: true,
       unit: true,
       status: true,
+      payrollPassCount: true,
+      payrollRevision: true,
       plannedQty: true,
       carriedCompletedQty: true,
       order: {
@@ -495,6 +503,8 @@ export async function getProductionOperationForReporter(
     defectQty: defectQty.toString(),
     reworkQty: reworkQty.toString(),
     passCount,
+    payrollPassCount: operation.payrollPassCount ?? passCount,
+    payrollRevision: operation.payrollRevision ?? 0,
     sourceCount: operation.sources.length,
     workOrderStage: workOrderProgress.stage,
     workOrderTotalQty: workOrderProgress.orderTotal.toString(),

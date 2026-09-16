@@ -91,8 +91,8 @@ export default async function WorkerTasksPage() {
                   <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
                     已完成 {operation.completedQty} /{' '}
                     {operation.plannedCompletedQty}
-                    {operation.passCount > 1
-                      ? ` · 每个 ${operation.passCount} 次烫印`
+                    {operation.operationType === PieceworkOperationType.PARTIAL
+                      ? ` · 每个计薪 ${operation.payrollPassCount} 次`
                       : ''}
                     {operation.promisedDate
                       ? ` · 交期 ${formatDateShanghai(operation.promisedDate)}`

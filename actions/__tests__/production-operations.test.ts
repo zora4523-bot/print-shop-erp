@@ -50,6 +50,7 @@ import { ProgressReportingError } from '@/lib/production/progress-reporting';
 
 function formData() {
   const data = new FormData();
+  data.set('expectedPayrollRevision', '0');
   data.set('completedQty', '100');
   data.set('defectQty', '2');
   data.set('reworkQty', '1');
@@ -197,6 +198,7 @@ describe('reportProductionOperationAction', () => {
     expect(reportMock).toHaveBeenCalledWith(
       {
         operationId: 'operation-1',
+        expectedPayrollRevision: 0,
         completedQty: 100,
         defectQty: 2,
         reworkQty: 1,

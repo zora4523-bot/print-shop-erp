@@ -54,6 +54,7 @@ export type OperationReportInput = {
    */
   workOrderProgressQuantity?: number;
   idempotencyKey: string;
+  expectedPayrollRevision?: number;
 };
 
 export type OperationReportActor = {
@@ -104,6 +105,8 @@ const OPERATION_REPORT_SELECT = {
   operationType: true,
   unit: true,
   status: true,
+  payrollPassCount: true,
+  payrollRevision: true,
   plannedQty: true,
   carriedCompletedQty: true,
   order: {
@@ -248,7 +251,7 @@ function validateInput(input: OperationReportInput) {
   };
 }
 
-function operationLockKey(operationId: string): string {
+export function operationLockKey(operationId: string): string {
   return `print-shop-erp:production-operation:${operationId}`;
 }
 
@@ -723,7 +726,7 @@ async function appendPricedProductionReport(
       defectQty: parsed.defect.toString(),
       reworkQty: parsed.rework.toString(),
       ...(operation.operationType === PieceworkOperationType.PARTIAL
-        ? { passCount: plan.passCount }
+        ? { passCount: operation.payrollPassCount ?? plan.passCount }
         : {}),
     },
     {
@@ -768,6 +771,8 @@ async function appendPricedProductionReport(
             parsed.workOrderProgress?.toString() ?? null,
         },
         payroll: {
+          passCount: operation.payrollPassCount ?? plan.passCount,
+          payrollRevision: operation.payrollRevision ?? 0,
           defectAndReworkExcluded: true,
           chargeableQty: priced.chargeableQty,
           rate: priced.rate,
@@ -899,6 +904,9 @@ async function reportProductionOperationInTx(
   }
 
   assertOperationIsReportable(operation);
+  if (input.expectedPayrollRevision !== undefined && input.expectedPayrollRevision !== (operation.payrollRevision ?? 0)) {
+    throw new OperationReportingError('INVALID_INPUT', '计薪次数已调整，请刷新页面核对后重新报工');
+  }
   const plan = plannedCompletedPieces(operation);
   const workOrderProgress = await prepareWorkOrderProgress(
     tx,
