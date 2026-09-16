@@ -241,3 +241,10 @@ pnpm db:studio
 草稿规则保存与发布使用同一个 advisory lock；保存同时推进父版本 `updatedAt`，
 并追加审计。空拟生效时间在发布锁内使用数据库时钟确定，不预设为零价。
 新 seed 不再生成机型计价与包装时薪旧规则，但保留历史记录及历史查询依赖。
+
+### 2026-09-16：局部工序计薪次数
+
+前向迁移 `20260916153000_operation_payroll_pass_count` 增加
+`ProductionOperation.payrollPassCount`（可空正整数，限局部工序）与 `payrollRevision`。
+空值保留按颜色数的原行为；不回填、不更新历史报工，不改变来源数量与生产计划。
+报工 `snapshot.payroll` 保存实际次数和修订号；改版新工序重新使用默认次数。

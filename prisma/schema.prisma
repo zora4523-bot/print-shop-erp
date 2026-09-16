@@ -1098,6 +1098,9 @@ model ProductionOperation {
   operationType               PieceworkOperationType
   unit                        PieceworkRateUnit
   status                      ProductionOperationStatus @default(PENDING)
+  // 工资次数可调整；生产计划、来源数与历史报工不随之变更。
+  payrollPassCount            Int?
+  payrollRevision             Int                       @default(0)
   plannedQty                  Decimal                   @db.Decimal(14, 3)
   // 改版承接的合格量与工单件数，只参与进度，不生成计件工资。
   carriedCompletedQty         Decimal                   @default(0) @db.Decimal(14, 3)

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState, useState } from 'react';
 import Decimal from 'decimal.js';
 import { formatUnitPrice } from '@/lib/format/unit-price';
@@ -29,6 +30,11 @@ export function PieceworkPriceBookForm({ books, now }: { books: PieceworkAdminBo
   const [state, action, pending] = useActionState<PieceworkActionResult | null, FormData>(mutatePieceworkRulesAction, null);
   return <section className="space-y-5 rounded-xl border bg-card p-5 shadow-sm" aria-labelledby="piecework-heading">
     <h2 id="piecework-heading" className="font-semibold">计件工价</h2>
+    <div className="space-y-1 text-sm text-muted-foreground">
+      <p>局部烫金工资 = 合格完成数 × 计薪过版次数 × 每下工价</p>
+      <p>专版烫金工资 = 合格完成数 × 每个工价</p>
+      <Link href="/orders" className="inline-flex min-h-11 items-center underline underline-offset-4">到工单详情调整计薪过版次数</Link>
+    </div>
     {state && <div role={state.status === 'error' ? 'alert' : undefined}><FormMessage fieldId="piecework-result" tone={state.status}>{state.message}</FormMessage></div>}
     {!draft && <form aria-busy={pending} action={action}><Button type="submit" name="intent" value="create" disabled={pending}>{pending ? '创建中…' : '新建调价草稿'}</Button></form>}
     {draft && <DraftEditor key={`${draft.version}:${draft.updatedAt}`} draft={draft} previous={books.find((b) => b.version === draft.version - 1)} action={action} pending={pending} fieldErrors={state?.fieldErrors} />}

@@ -1,3 +1,5 @@
+import { PayrollPassForm } from '@/components/business/production/PayrollPassForm';
+import { productionOperationPassCount } from '@/lib/production/operation-quantity';
 import { canEditAllOrderFees } from '@/lib/order/admin-fee-policy';
 import { AdminOrderFeeEditor } from '@/components/business/order/AdminOrderFeeEditor';
 import { getOrderProductionReadiness } from '@/lib/order/production-readiness-query';
@@ -660,6 +662,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
       order, hasProductionOperations, productionOperations, productionProgressSteps,
       assignedWorkerNames, canViewCommercialAmounts,
     }} /></>),
+    payrollPass: (<>
+      {user.role === Role.ADMIN && ['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'].includes(order.status) && productionOperations.some((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)) && <section className="space-y-3 rounded-xl border bg-card p-4 sm:p-6">
+        <h2 className="text-base font-semibold">师傅计薪次数</h2>
+        <div className="grid gap-3 sm:grid-cols-2">{productionOperations.filter((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)).map((op) => <PayrollPassForm key={`${op.id}:${op.payrollRevision}`} operationId={op.id} revision={op.payrollRevision} passCount={op.payrollPassCount ?? productionOperationPassCount(op.operationType, op.sources)} sequences={op.sources.flatMap((s) => s.orderItem ? [s.orderItem.sequence] : [])} />)}</div>
+      </section>}
+    </>),
     customerCharges: (<>{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
@@ -1563,7 +1571,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           { id: 'detail-design-files', title: '设计文件与完整工艺资料', content: detailSections.designFiles },
           { id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> },
           { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
-          { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
+          { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
           { id: 'detail-business-records', title: '基本信息、成本与重做', content: <>{detailSections.basics}{detailSections.costs}{detailSections.rework}{detailSections.reworkForm}</> },
           { id: 'detail-audit-records', title: '工单动态', content: <>{adminActivity ? <OrderActivity key={`${order.id}:${adminActivity.events[0]?.id ?? "empty"}`} orderId={order.id} initialPage={adminActivity} /> : null}{detailSections.changeHistory}</> },
           { id: 'detail-other-actions', title: '其他工单操作', content: detailSections.otherActions },

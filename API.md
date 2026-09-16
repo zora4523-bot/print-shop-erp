@@ -400,3 +400,10 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 发布与草稿编辑共用事务锁；扫码报工在取价及写入期间取得共享锁。报工锁顺序为既有
 工单/工序/身份锁 → 工价共享锁 → 报工日/人员日锁；发布不取得报工日或工序锁。
 已发布版本只能创建后续版本调整，重复发布不重复记审计或改变生效时间。
+
+### 2026-09-16：管理员调整局部工序计薪次数
+
+`updatePayrollPassAction`（`salary:rule:manage` + 活跃管理员复核）接收
+`operationId / expectedRevision / passCount / reason`；次数为 1–999 整数、原因 2–500 字。
+只调整当前版本未完工局部工序，使用订单→工序锁、版本检查及工单审计。
+师傅报工 Action 新增必填 `expectedPayrollRevision`；旧页面须刷新，已成功请求重试仍返回原记录。

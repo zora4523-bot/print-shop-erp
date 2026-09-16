@@ -96,11 +96,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           ) : null}
           <p className="text-xs text-muted-foreground">
             计划 {operation.plannedCompletedQty}
-            {operation.passCount > 1
-              ? ` 个 · 每个 ${operation.passCount} 次烫印`
-              : operation.operationType === PieceworkOperationType.PACKING
-                ? ' 袋'
-                : ' 个'}
+            {operation.operationType === PieceworkOperationType.PACKING ? ' 袋' : ' 个'}
             {operation.promisedDate
               ? ` · 交期 ${formatDateShanghai(operation.promisedDate)}`
               : ''}
@@ -118,8 +114,10 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             {operation.operationType === PieceworkOperationType.PACKING ? (
               <p className="mb-3 text-sm">剩余 {remainingQty} 袋</p>
             ) : null}
+            {operation.operationType === PieceworkOperationType.PARTIAL && <p className="mb-3 text-sm">计薪过版次数：{operation.payrollPassCount} 次 · 工资 = 合格完成数 × {operation.payrollPassCount} × 每下工价</p>}
             <OperationReportForm
               operationId={operation.id}
+              payrollRevision={operation.payrollRevision}
               idempotencyKey={randomUUID()}
               remainingQty={remainingQty}
               workOrderProgressRemainingQty={workOrderProgressRemainingQty}
