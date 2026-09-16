@@ -116,6 +116,7 @@ model User {
   createdPricingRevisions     OrderPricingRevision[]        @relation("OrderPricingRevisionCreator")
   personalPieceworkBooks      PieceworkPriceBook[]          @relation("PersonalPieceworkOwner")
   publishedPieceworkBooks     PieceworkPriceBook[]          @relation("PieceworkPriceBookPublisher")
+  adjustedProductionReports   ProductionReport[]            @relation("ProductionReportAdjuster")
   productionReports           ProductionReport[]            @relation("ProductionReportReporter")
   productionProgressReports   ProductionProgressReport[]    @relation("ProductionProgressReportReporter")
   productionWorkOrderProgress ProductionWorkOrderProgress[] @relation("ProductionWorkOrderProgressReporter")
@@ -1031,6 +1032,7 @@ enum ProductionReportSource {
 }
 
 enum ProductionReportEntryType {
+  ADJUSTMENT
   REPORT
   REVERSAL
 }
@@ -1080,13 +1082,15 @@ model PieceworkPriceBook {
 }
 
 model PieceworkPriceRule {
-  id            String                 @id @default(cuid())
-  priceBookId   String
-  operationType PieceworkOperationType
-  unit          PieceworkRateUnit
-  amount        Decimal?               @db.Decimal(14, 4)
-  createdAt     DateTime               @default(now()) @db.Timestamptz(3)
-  updatedAt     DateTime               @updatedAt @db.Timestamptz(3)
+  id               String                 @id @default(cuid())
+  priceBookId      String
+  operationType    PieceworkOperationType
+  unit             PieceworkRateUnit
+  amount           Decimal?               @db.Decimal(14, 4)
+  smallOrderAmount Decimal?               @db.Decimal(14, 4)
+  setupAmount      Decimal?               @db.Decimal(14, 4)
+  createdAt        DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime               @updatedAt @db.Timestamptz(3)
 
   priceBook PieceworkPriceBook @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
 
@@ -1105,6 +1109,7 @@ model ProductionOperation {
   status                      ProductionOperationStatus @default(PENDING)
   // 工资次数可调整；生产计划、来源数与历史报工不随之变更。
   payrollPassCount            Int?
+  payrollReviewRequired       Boolean                   @default(false)
   payrollRevision             Int                       @default(0)
   plannedQty                  Decimal                   @db.Decimal(14, 3)
   // 改版承接的合格量与工单件数，只参与进度，不生成计件工资。
@@ -1158,6 +1163,9 @@ model ProductionReport {
   chargeableQty        Decimal                   @db.Decimal(14, 3)
   unit                 PieceworkRateUnit
   rate                 Decimal                   @db.Decimal(14, 4)
+  wageSupplement       Decimal                   @default(0) @db.Decimal(14, 2)
+  adjustedById         String?
+  adjustedBy           User?                     @relation("ProductionReportAdjuster", fields: [adjustedById], references: [id], onDelete: Restrict)
   amount               Decimal                   @db.Decimal(14, 2)
   priceBookId          String
   priceBookVersion     Int

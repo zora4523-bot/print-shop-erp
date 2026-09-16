@@ -1,4 +1,5 @@
 'use client';
+import { DEFAULT_FOIL_WAGES } from '@/lib/salary/foil-wage';
 
 import Link from 'next/link';
 import { useActionState, useState } from 'react';
@@ -8,7 +9,7 @@ import { mutatePersonalPieceworkAction } from '@/actions/owner-personal-piecewor
 import { mutatePieceworkRulesAction } from '@/actions/owner-piecework-rules';
 import type { PieceworkActionResult } from '@/actions/owner-piecework-rules.types';
 import type { PieceworkAdminBook } from '@/lib/salary/piecework-admin';
-import { PIECEWORK_RATE_FIELDS } from '@/lib/salary/piecework-admin-input';
+import { PIECEWORK_RATE_FIELDS, FOIL_WAGE_FIELDS } from '@/lib/salary/piecework-admin-input';
 import { formatDateTimeLocalShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -17,8 +18,9 @@ import { FormMessage } from '@/components/ui-business';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Badge } from '@/components/ui/badge';
 
-function rateFor(book: PieceworkAdminBook | undefined, field: typeof PIECEWORK_RATE_FIELDS[number]) {
-  return book?.rules.find((r) => r.operationType === field.operationType && r.unit === field.unit)?.amount ?? '';
+function rateFor(book: PieceworkAdminBook | undefined, field: RateField) {
+  const rule = book?.rules.find((r) => r.operationType === field.operationType && r.unit === field.unit);
+  return rule?.['column' in field ? field.column : 'amount'] ?? '';
 }
 function stateLabel(book: PieceworkAdminBook, now: string) {
   if (book.status === 'DRAFT') return '草稿';
@@ -26,9 +28,10 @@ function stateLabel(book: PieceworkAdminBook, now: string) {
   if (book.effectiveTo && book.effectiveTo <= now) return '历史版本';
   return '当前生效';
 }
-type RateField = typeof PIECEWORK_RATE_FIELDS[number];
+type RateField = typeof PIECEWORK_RATE_FIELDS[number] | typeof FOIL_WAGE_FIELDS[number];
+const allFields: RateField[] = PIECEWORK_RATE_FIELDS.flatMap((field) => [field, ...FOIL_WAGE_FIELDS.filter((fee) => fee.operationType === field.operationType)] as RateField[]);
 export function PieceworkPriceBookForm({ books, now, personal }: { books: PieceworkAdminBook[]; now: string; personal?: { workerId: string; lane: string | null; canEdit: boolean; unifiedBooks: PieceworkAdminBook[] } }) {
-  const fields = PIECEWORK_RATE_FIELDS.filter((f) => !personal || f.operationType === personal.lane);
+  const fields = allFields.filter((f) => !personal || f.operationType === personal.lane);
   const canEdit = !personal || personal.canEdit;
   const mutate = personal ? mutatePersonalPieceworkAction.bind(null, personal.workerId) : mutatePieceworkRulesAction;
   const current = books.find((b) => stateLabel(b, now) === '当前生效');
@@ -40,9 +43,8 @@ export function PieceworkPriceBookForm({ books, now, personal }: { books: Piecew
     <h2 id="piecework-heading" className="font-semibold">计件工价</h2>
     <div className="space-y-1 text-sm text-muted-foreground">
       {personal ? <p>当前模式：{current && !current.useUnifiedRates ? '个人工价' : '统一工价'}</p> : <Link href="/owner/accounts" className="inline-flex min-h-11 items-center underline underline-offset-4">到师傅账号设置个人工价</Link>}
-      <p>局部烫金工资 = 合格完成数 × 计薪过版次数 × 每下工价</p>
-      <p>专版烫金工资 = 合格完成数 × 每个工价</p>
-      <Link href="/orders" className="inline-flex min-h-11 items-center underline underline-offset-4">到工单详情调整计薪过版次数</Link>
+      <p>小单 ≤1000 个：小单工资 × 次数，含装版。大单 ≥1001 个：数量 × 计件单价 × 次数 ＋ 装版费 × 次数。</p>
+      <p>局部按过版次数；专版按颜色数，不按正反面翻倍。</p>
     </div>
     {state && <div role={state.status === 'error' ? 'alert' : undefined}><FormMessage fieldId="piecework-result" tone={state.status}>{state.message}</FormMessage></div>}
     {!draft && canEdit && <form aria-busy={pending} action={action}><Button type="submit" name="intent" value="create" disabled={pending}>{pending ? '创建中…' : '新建调价草稿'}</Button></form>}
@@ -52,7 +54,7 @@ export function PieceworkPriceBookForm({ books, now, personal }: { books: Piecew
         <DisclosureSummary className="flex-wrap gap-2">第 {book.version} 版 <Badge variant="outline">{stateLabel(book, now)}</Badge> · {formatDateTimeShanghai(new Date(book.effectiveFrom))}</DisclosureSummary>
         {personal && <p className="mt-3 text-sm">{book.useUnifiedRates ? '使用统一工价' : '使用个人工价'}</p>}
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-          {(book.useUnifiedRates ? [] : PIECEWORK_RATE_FIELDS.filter((f) => !personal || book.rules.some((r) => r.unit === f.unit))).map((field) => <div key={field.key}><dt className="text-sm text-muted-foreground">{field.label}</dt><dd>{rateFor(book, field) || '未配置'} {rateFor(book, field) && field.unitLabel}</dd></div>)}
+          {(book.useUnifiedRates ? [] : allFields.filter((f) => (!personal || book.rules.some((r) => r.unit === f.unit)) && (!('column' in f) || rateFor(book, f) !== ''))).map((field) => <div key={field.key}><dt className="text-sm text-muted-foreground">{field.label}</dt><dd>{rateFor(book, field) || '未配置'} {rateFor(book, field) && field.unitLabel}</dd></div>)}
         </dl>
         <p className="mt-3 break-words text-sm">调价依据：{book.sourceName}</p>
         <p className="break-words text-sm">调整说明：{book.publishNote}</p>
@@ -83,7 +85,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
       <fieldset disabled={pending} className="grid min-w-0 gap-4 sm:grid-cols-2">
         {(personal && unified ? [] : fields).map((field) => <label key={field.key} className="space-y-1 text-sm" htmlFor={`piecework-${field.key}`}>
           <span>{field.label}（{field.unitLabel}）{field.key === 'box' ? ' · 选填' : ''}</span>
-          <Input id={`piecework-${field.key}`} name={field.key} aria-invalid={Boolean(fieldErrors?.[field.key])} aria-describedby={fieldErrors?.[field.key] ? `piecework-${field.key}-message` : undefined} inputMode="decimal" defaultValue={rateFor(draft, field)} placeholder="待录" maxLength={15} pattern="[0-9]{1,10}(\.[0-9]{1,4})?" />
+          <Input id={`piecework-${field.key}`} name={field.key} aria-invalid={Boolean(fieldErrors?.[field.key])} aria-describedby={fieldErrors?.[field.key] ? `piecework-${field.key}-message` : undefined} inputMode="decimal" defaultValue={rateFor(draft, field) || ('defaultValue' in field ? field.defaultValue : field.key === 'partial' ? DEFAULT_FOIL_WAGES.PARTIAL.pieceRate : field.key === 'full' ? DEFAULT_FOIL_WAGES.FULL.pieceRate : '')} placeholder="待录" maxLength={15} pattern="[0-9]{1,10}(\.[0-9]{1,4})?" />
           {fieldErrors?.[field.key]?.map((message) => <FormMessage key={message} fieldId={`piecework-${field.key}`} tone="error">{message}</FormMessage>)}
         </label>)}
         <label className="space-y-1 text-sm" htmlFor="piecework-source"><span>调价依据</span><Input id="piecework-source" name="sourceName" maxLength={500} defaultValue={draft.sourceName} /></label>

@@ -413,3 +413,10 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 `mutatePersonalPieceworkAction(workerId, previous, form)` 仅 `salary:rule:manage` 管理员可调用，领域事务再次验证管理员与目标账号状态。账号取绑定参数，表单账号不能覆盖它。
 `intent=create/save/publish` 复用工价草稿流程；save 包含 `version/updatedAt/useUnifiedRates/partial/full/bag/box/sourceName/publishNote/effectiveFrom`。只保存当前岗位字段，空金额与零金额分开。publish 只接收已保存的版本和修订时间，不能直接带价发布。
 扫码报工表单新增必填 `expectedRateKey`，为当前价格簿与个人模式版本的组合键。成功重试仍返回原记录；新报工工价已变化则拒绝并要求刷新。客户端不能指定结算价格或他人账号。
+
+### 2026-09-17 师傅分档工价与工单提成核定
+
+- 统一／个人工价草稿增加 `partialSmall`、`partialSetup`、`fullSmall`、`fullSetup`；同一工序的包干和装版金额必须一起填写，发布后随版本冻结。省略两项的旧调用仍表示历史线性规则。
+- `reviewOrderWagesAction`：仅 `salary:rule:manage`，领域层再次检查在职管理员。输入工序 ID、报工明细修订摘要、每位师傅／工作日的锚点报工 ID 和目标总额、至少两字原因。
+- 核定按工单→工序→工作日→人员锁序串行化；拒绝陈旧明细、漏项、重复对象、负目标金额及已结算日改价。原报工不变，仅追加 `ADJUSTMENT` 差额，产量全为零。重复请求不重复记账，改变已提交请求则要求刷新。
+- 多人接手或计薪条件变化标记 `payrollReviewRequired`；工单详情“工单提成明细”核定后方可锁定结算。核定不改变师傅账号工价规则。

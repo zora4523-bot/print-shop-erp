@@ -1,3 +1,4 @@
+import { priceFoilReport } from '../salary/foil-report-wage';
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
@@ -715,6 +716,10 @@ async function appendPricedProductionReport(
       amount: rule.amount.toString(),
     },
   );
+  const foil = await priceFoilReport(tx, { operation, reporterId: account.id, priceBookId: book.id,
+    completedQty: priced.completedQty, baseAmount: priced.amount, passCount: operation.payrollPassCount ?? plan.passCount, rule });
+  if (foil) priced.amount = foil.amount;
+  if (foil?.reviewRequired) await tx.productionOperation.update({ where: { id: operation.id }, data: { payrollReviewRequired: true } });
   const report = await tx.productionReport.create({
     data: {
       operationId: operation.id,
@@ -728,6 +733,7 @@ async function appendPricedProductionReport(
       unit: priced.unit,
       rate: priced.rate,
       amount: priced.amount,
+      wageSupplement: foil?.wageSupplement ?? '0.00',
       priceBookId: book.id,
       priceBookVersion: book.version,
       ruleSetSha256: book.ruleSetSha256,
@@ -751,6 +757,7 @@ async function appendPricedProductionReport(
             parsed.workOrderProgress?.toString() ?? null,
         },
         payroll: {
+          foilWage: foil?.detail ?? null,
           rateSource: selected.source,
           policyBookId: policy?.id ?? null,
           policyBookVersion: policy?.version ?? null,

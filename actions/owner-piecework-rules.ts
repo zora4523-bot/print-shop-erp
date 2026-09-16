@@ -18,6 +18,8 @@ export async function mutatePieceworkRulesAction(_previous: PieceworkActionResul
       const parsed = pieceworkDraftSchema.safeParse({
         version: Number(formData.get('version')), updatedAt: formData.get('updatedAt'),
         partial: formData.get('partial'), full: formData.get('full'), bag: formData.get('bag'), box: formData.get('box'),
+        partialSmall: formData.get('partialSmall') ?? undefined, partialSetup: formData.get('partialSetup') ?? undefined,
+        fullSmall: formData.get('fullSmall') ?? undefined, fullSetup: formData.get('fullSetup') ?? undefined,
         sourceName: formData.get('sourceName'), publishNote: formData.get('publishNote'),
         effectiveFrom: formData.get('effectiveFrom'),
       });

@@ -254,3 +254,12 @@ pnpm db:studio
 迁移 `20260916200000_personal_piecework_rates` 给 `PieceworkPriceBook` 增加可空 `workerId` 外键及 `useUnifiedRates`。空账号表示统一工价；账号版本可为个人价格或无明细的统一模式。全局版本号保持唯一，各作用域生效区间互斥；关闭区间要求同作用域后继版本。发布触发器核验账号有效、岗位与单位完整。报工触发器独立检查实际报工人的有效个人模式与所用价格簿。原已发布不可变、冲正和历史保护继续生效。
 迁移 `20260917001000_personal_piecework_draft_scope` 将原全局单草稿索引改为每作用域单草稿。两条均为前向迁移，旧记录保留统一作用域，不回写工资、不自动发布任何正式价格。
 `ProductionReport.snapshot.payroll` 新增 `rateSource/policyBookId/policyBookVersion/rateWorkerId`，旧快照缺这些字段时解释为统一工价。
+
+### 2026-09-17 分档工资与人工核定账本
+
+增量迁移 `20260917010000_foil_wage_rule_components`、`20260917011000_foil_wage_ledger`、`20260917012000_foil_wage_fixed_rounding`：
+
+- `PieceworkPriceRule.smallOrderAmount/setupAmount` 为成对可空的金额；历史规则保持 NULL，不重新解释历史工资。PACKING 不使用烫金包干字段。
+- `ProductionReport.wageSupplement` 是保持原 rate／chargeableQty 快照的计价差额，总额约束为 `round(chargeableQty × rate, 2) + wageSupplement`。数据库重新验证分档、倍率与首次固定费，不能任意填差额绕过自动计价。
+- `ADJUSTMENT` 仅以有效原报工为锚点，由有效管理员追加，零产量、同一未结算工作日，保留原工价身份和调整原因。原记录不可修改，已结算工资不能更改。
+- `ProductionOperation.payrollReviewRequired` 标识多人接手、合并款式颜色数不一致、继承进度或计价条件变化；人工核定后解除结算阻挡。分档报工冲正也需要复核。

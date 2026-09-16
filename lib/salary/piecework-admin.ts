@@ -1,3 +1,4 @@
+import { foilFeeData } from './foil-wage-admin';
 import { createHash } from 'node:crypto';
 import { Prisma } from '../../generated/prisma/client';
 import { db } from '../db';
@@ -23,7 +24,7 @@ export function projectPieceworkBook(book: Book) {
     effectiveFrom: book.effectiveFrom?.toISOString() ?? '',
     effectiveTo: book.effectiveTo?.toISOString() ?? '',
     sourceName: book.sourceName ?? '', publishNote: book.publishNote ?? '',
-    rules: book.rules.map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount?.toFixed(4) ?? '' })),
+    rules: book.rules.map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount?.toFixed(4) ?? '', smallOrderAmount: r.smallOrderAmount?.toFixed(4) ?? '', setupAmount: r.setupAmount?.toFixed(4) ?? '' })),
   };
 }
 export type PieceworkAdminBook = ReturnType<typeof projectPieceworkBook>;
@@ -44,7 +45,7 @@ export async function createPieceworkDraft(actor: AuditActor) {
     } else {
       await tx.pieceworkPriceBook.create({ data: {
         version: (await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } }))!.version + 1,
-        rules: { create: latest.rules.map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount })) },
+        rules: { create: latest.rules.map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount, smallOrderAmount: r.smallOrderAmount, setupAmount: r.setupAmount })) },
       } });
     }
     const created = await tx.pieceworkPriceBook.findFirstOrThrow({ where: { workerId: null }, orderBy: { version: 'desc' }, include: includeRules });
@@ -57,7 +58,7 @@ function manifestFrom(book: Book): PieceworkPriceBookManifest {
     schemaVersion: 1, priceBookVersion: book.version,
     effectiveFrom: book.effectiveFrom?.toISOString() ?? null,
     sourceName: book.sourceName ?? '', publishNote: book.publishNote ?? '',
-    rules: book.rules.map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount?.toFixed(4) ?? null })),
+    rules: book.rules.map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount?.toFixed(4) ?? null, ...(r.smallOrderAmount != null && r.setupAmount != null ? { smallOrderAmount: r.smallOrderAmount.toFixed(4), setupAmount: r.setupAmount.toFixed(4) } : {}) })),
   };
 }
 export async function savePieceworkDraft(raw: PieceworkDraftInput, actor: AuditActor) {
@@ -78,8 +79,8 @@ export async function savePieceworkDraft(raw: PieceworkDraftInput, actor: AuditA
       } else {
         await tx.pieceworkPriceRule.upsert({
           where: { priceBookId_operationType_unit: { priceBookId: book.id, operationType: field.operationType, unit: field.unit } },
-          create: { priceBookId: book.id, operationType: field.operationType, unit: field.unit, amount: value === '' ? null : new Prisma.Decimal(value) },
-          update: { amount: value === '' ? null : new Prisma.Decimal(value) },
+          create: { priceBookId: book.id, operationType: field.operationType, unit: field.unit, amount: value === '' ? null : new Prisma.Decimal(value), ...foilFeeData(input, field.operationType) },
+          update: { amount: value === '' ? null : new Prisma.Decimal(value), ...foilFeeData(input, field.operationType) },
         });
       }
     }

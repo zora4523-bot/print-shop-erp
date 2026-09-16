@@ -148,7 +148,7 @@ export default async function PieceworkSettlementDetailPage({
                   </td>
                   <td className="px-4 py-3 text-center">
                     <Badge variant="outline">
-                      {report.entryType === ProductionReportEntryType.REVERSAL
+                      {report.entryType === ProductionReportEntryType.ADJUSTMENT ? '人工调整' : report.entryType === ProductionReportEntryType.REVERSAL
                         ? '冲正'
                         : '报工'}
                     </Badge>

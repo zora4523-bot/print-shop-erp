@@ -9,7 +9,7 @@ export async function resolveReporterPieceworkRate(tx: Prisma.TransactionClient,
       { OR: [{ workerId: null }, { workerId }] },
     ] },
     select: { id: true, workerId: true, useUnifiedRates: true, version: true, ruleSetSha256: true,
-      rules: { where: { operationType, unit }, select: { operationType: true, unit: true, amount: true } },
+      rules: { where: { operationType, unit }, select: { operationType: true, unit: true, amount: true, smallOrderAmount: true, setupAmount: true } },
     },
   });
   const personal = books.filter((b) => b.workerId === workerId);

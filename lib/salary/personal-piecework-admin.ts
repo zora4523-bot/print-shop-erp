@@ -1,3 +1,4 @@
+import { foilFeeData } from './foil-wage-admin';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { Prisma } from '../../generated/prisma/client';
@@ -35,7 +36,7 @@ export async function createPersonalPieceworkDraft(workerId: string, actor: Audi
     if (!latest) throw new PieceworkPriceBookAdminError('请先初始化统一工价');
     const book = await tx.pieceworkPriceBook.create({ data: {
       workerId, useUnifiedRates: previous?.useUnifiedRates ?? true, version: latest.version + 1,
-      rules: { create: previous?.rules.filter((r) => r.operationType === lane).map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount })) ?? [] },
+      rules: { create: previous?.rules.filter((r) => r.operationType === lane).map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount, smallOrderAmount: r.smallOrderAmount, setupAmount: r.setupAmount })) ?? [] },
     }, include });
     await writeAuditLogInTx(tx, { actor: admin, action: 'CREATE_DRAFT', entityType: 'PieceworkPriceBook', entityId: book.id, after: projectPieceworkBook(book) });
     return projectPieceworkBook(book);
@@ -52,7 +53,7 @@ export async function savePersonalPieceworkDraft(raw: z.infer<typeof personalPie
       for (const field of PIECEWORK_RATE_FIELDS.filter((f) => f.operationType === lane)) {
         const value = input[field.key];
         if (field.key === 'box' && !value) continue;
-        await tx.pieceworkPriceRule.create({ data: { priceBookId: book.id, operationType: field.operationType, unit: field.unit, amount: value === '' ? null : new Prisma.Decimal(value) } });
+        await tx.pieceworkPriceRule.create({ data: { priceBookId: book.id, operationType: field.operationType, unit: field.unit, amount: value === '' ? null : new Prisma.Decimal(value), ...foilFeeData(input, field.operationType) } });
       }
     }
     const now = await databaseClockNow(tx);

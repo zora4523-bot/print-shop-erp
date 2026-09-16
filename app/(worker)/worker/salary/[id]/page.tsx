@@ -329,7 +329,7 @@ function OperationSettlementDetail({
                   </Link>
                   <p className="worker-wrap-anywhere mt-1">
                     {OPERATION_LABELS[report.operation.operationType]}
-                    {report.entryType === ProductionReportEntryType.REVERSAL
+                    {report.entryType === ProductionReportEntryType.ADJUSTMENT ? ' · 人工调整' : report.entryType === ProductionReportEntryType.REVERSAL
                       ? ' · 冲正'
                       : ''}
                   </p>
