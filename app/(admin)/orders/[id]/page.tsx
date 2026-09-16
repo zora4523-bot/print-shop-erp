@@ -1,3 +1,5 @@
+import { canEditAllOrderFees } from '@/lib/order/admin-fee-policy';
+import { AdminOrderFeeEditor } from '@/components/business/order/AdminOrderFeeEditor';
 import { getOrderProductionReadiness } from '@/lib/order/production-readiness-query';
 import { ProductionReadinessWarning } from '@/components/business/order/ProductionReadinessWarning';
 import { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-facts-presentation';
@@ -450,6 +452,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </dd>
             </div>
           </dl>
+          {user.role === Role.ADMIN && !pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails && (isExternalSalesOrder || order.settlementType === OrderSettlementType.FACTORY_DIRECT)} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
           {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">
               <OrderPricingReviewForm
@@ -475,7 +478,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}</>),
     commercial: (<>{canAdminManageCommercialDetails &&
-      isExternalSalesOrder &&
+      (isExternalSalesOrder || order.settlementType === OrderSettlementType.FACTORY_DIRECT) &&
       priceRevision !== null ? (
         <OrderCommercialDetailsManager
           orderId={order.id}

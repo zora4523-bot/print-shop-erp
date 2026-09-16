@@ -24,7 +24,11 @@ vi.mock('@/actions/order', () => ({
 }));
 vi.mock('@/actions/create-order-quote', () => ({
   quoteExternalCreateOrderAction: vi.fn(),
+  quoteInternalCreateOrderAction: vi.fn(),
+  quoteSampleOrderAction: vi.fn(),
 }));
+vi.mock('@/actions/workbench', () => ({ quoteWorkbenchItemAction: vi.fn() }));
+vi.mock('@/actions/design-upload', () => ({ deleteOrderItemDesignAction: vi.fn() }));
 vi.mock('../design-upload-client', () => ({
   uploadOrderItemDesignFile: vi.fn(),
 }));

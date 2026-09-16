@@ -50,6 +50,7 @@ export type OrderFormBRailProps = {
   logistics: OrderFormBRailLogistics | null;
   usesExternalSalesPricing: boolean;
   allowSaveDraft?: boolean;
+  allowEditFees?: boolean;
   settlementLabel: string;
   knownTotal?: string | null;
   totalSemantics?: OrderFormBRailTotalSemantics;

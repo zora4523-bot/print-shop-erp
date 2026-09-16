@@ -244,7 +244,7 @@ type InternalCreateOrderQuoteViewState = {
 
 type QuoteFacts = Parameters<typeof quoteFactsKey>[0];
 
-type OrderCreationIntent = 'draft' | 'submit';
+type OrderCreationIntent = 'draft' | 'submit' | 'fees';
 
 const LAMINATION_LABELS: Record<OrderLamination, string> = {
   [OrderLamination.NONE]: '不覆膜',
@@ -732,6 +732,28 @@ function InternalAdditionalCraftChoices({
   );
 }
 
+function internalQuoteRequestReady(
+  items: CreateOrderInput['items'],
+  groups: CreateOrderInput['packagingGroups'],
+  missingLaminationIndex: number,
+): boolean {
+  return missingLaminationIndex < 0 &&
+    items.length > 0 &&
+    items.every(
+      (item) =>
+        (Boolean(item.manualQuoteReason?.trim()) ||
+          (Boolean(item.productId) && item.crafts.length > 0)) &&
+        Number.isSafeInteger(item.quantity) &&
+        item.quantity >= 1,
+    ) &&
+    groups.length > 0 &&
+    groups.every(
+      (group) =>
+        Number.isSafeInteger(group.actualBagCount) &&
+        (group.mode === OrderPackagingMode.UNPACKED ? group.actualBagCount === 0 : group.actualBagCount >= 1),
+    );
+}
+
 export function OrderForm({
   crafts,
   products,
@@ -868,6 +890,7 @@ export function OrderForm({
   const [errorFocusMessage, setErrorFocusMessage] = useState<string>();
   const [externalInputRevision, setExternalInputRevision] = useState(0);
   const [pendingSubmission, setPendingSubmission] = useState<{
+    intent: OrderCreationIntent;
     data: CreateOrderInput;
     fieldIds: string[];
     queues: Record<string, PendingDesignImage[]>;
@@ -1117,7 +1140,7 @@ export function OrderForm({
       if (!uploaded) return;
 
       setUploadProgress(null);
-      if (draft.intent === 'submit') {
+      if (draft.intent !== 'draft') {
         const submitResult = await runSubmitOrderAction(() =>
           submitOrderAction(draft.orderId, draft.quoteToken),
         );
@@ -1160,7 +1183,7 @@ export function OrderForm({
         });
         setPendingSubmission(null);
       } else {
-        router.push(`/orders/${draft.orderId}`);
+        router.push(`/orders/${draft.orderId}${draft.intent === 'fees' ? '#admin-fee-editor' : ''}`);
       }
     } catch {
       setUploadProgress(null);
@@ -1343,7 +1366,7 @@ export function OrderForm({
           result.pricingStatus ===
           ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
         quoteToken:
-          usesExternalSalesPricing && intent === 'submit'
+          usesExternalSalesPricing && intent !== 'draft'
             ? expectedQuoteToken
             : null,
       };
@@ -1396,7 +1419,8 @@ export function OrderForm({
       createdDraft ||
       quoting ||
       externalQuoteQuoting ||
-      externalQuoteNeedsRefresh
+      externalQuoteNeedsRefresh ||
+      internalQuoteNeedsRefresh
     ) {
       return;
     }
@@ -1407,7 +1431,7 @@ export function OrderForm({
     const submitter = (event?.nativeEvent as SubmitEvent | undefined)
       ?.submitter as HTMLButtonElement | null | undefined;
     const intent: OrderCreationIntent =
-      submitter?.value === 'submit' ? 'submit' : 'draft';
+      submitter?.value === 'fees' && canAssignExternalSales ? 'fees' : submitter?.value === 'submit' ? 'submit' : 'draft';
 
     if (adminPriceGaps.length) {
       setSubmissionValidationVisible(true);
@@ -1415,7 +1439,7 @@ export function OrderForm({
       setErrorFocusRequest((current) => current + 1);
       return;
     }
-    if (intent === 'submit') {
+    if (intent !== 'draft') {
       setSubmissionValidationVisible(true);
       setErrorFocusMessage(undefined);
       const issues = usesExternalSalesPricing
@@ -1428,7 +1452,7 @@ export function OrderForm({
       const quoteToken = currentExternalOrderQuote?.quoteToken ?? '';
       if (usesExternalSalesPricing && !quoteToken) return;
       setSubmitQuoteChange(null);
-      setPendingSubmission({ data, fieldIds, queues: queueSnapshot, quoteToken });
+      setPendingSubmission({ intent, data, fieldIds, queues: queueSnapshot, quoteToken });
       return;
     }
 
@@ -2056,22 +2080,15 @@ export function OrderForm({
       packagingGroups: packaging.groups,
     };
   }, [currentPackagingQuoteInput, getValues, settlementType]);
-  const currentInternalQuoteRequestReady =
-    missingLaminationIndex < 0 &&
-    watchedItems.length > 0 &&
-    watchedItems.every(
-      (item) =>
-        (Boolean(item.manualQuoteReason?.trim()) ||
-          (Boolean(item.productId) && item.crafts.length > 0)) &&
-        Number.isSafeInteger(item.quantity) &&
-        item.quantity >= 1,
-    ) &&
-    watchedPackagingGroups.length > 0 &&
-    watchedPackagingGroups.every(
-      (group) =>
-        Number.isSafeInteger(group.actualBagCount) &&
-        (group.mode === OrderPackagingMode.UNPACKED ? group.actualBagCount === 0 : group.actualBagCount >= 1),
-    );
+  const currentInternalQuoteRequestReady = internalQuoteRequestReady(
+    watchedItems, watchedPackagingGroups, missingLaminationIndex,
+  );
+
+  const internalQuoteNeedsRefresh =
+    !usesExternalSalesPricing &&
+    currentInternalQuoteRequestReady &&
+    !(internalOrderQuote?.inputKey === currentInternalQuoteFactsKey &&
+      (internalOrderQuote.result || internalOrderQuote.error));
 
   useEffect(() => {
     if (
@@ -2906,7 +2923,7 @@ export function OrderForm({
     items: externalItemErrors,
   };
   if (samplePurpose && externalCreateOrderOptions) {
-    return <OrderSampleEntry form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
+    return <OrderSampleEntry canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
       crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
       initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute} />;
   }
@@ -3548,7 +3565,7 @@ export function OrderForm({
             errorFocusRequest={errorFocusRequest}
             errorFocusMessage={errorFocusMessage}
             rail={
-              <OrderFormBRail
+              <OrderFormBRail allowEditFees={canAssignExternalSales}
                 itemCount={itemsArray.fields.length}
                 quoteItems={railQuoteItems}
                 packaging={railPackaging}
@@ -3562,13 +3579,15 @@ export function OrderForm({
                 gaps={orderFormBGaps}
                 busy={
                   pendingState.busy ||
+                  quoting ||
+                  internalQuoteNeedsRefresh ||
                   externalQuoteQuoting ||
                   externalQuoteNeedsRefresh ||
                   Boolean(createdDraft)
                 }
                 onAttemptSubmit={(intent) => {
                   setErrorFocusMessage(undefined);
-                  if (intent === 'submit') setSubmissionValidationVisible(true);
+                  if (intent !== 'draft') setSubmissionValidationVisible(true);
                 }}
                 onGapClick={(index) => {
                   setSubmissionValidationVisible(true);
@@ -3827,7 +3846,7 @@ export function OrderForm({
               pendingSubmission.data,
               pendingSubmission.fieldIds,
               pendingSubmission.queues,
-              'submit',
+              pendingSubmission.intent,
               pendingSubmission.quoteToken,
             );
           }}

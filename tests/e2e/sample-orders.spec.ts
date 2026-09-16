@@ -168,7 +168,15 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
               ).rows[0].fee,
           )
           .toBe('88.00');
+        await expect(adminPage.locator('#pricing-review').getByText('管理员已确认', { exact: true })).toBeVisible();
       }
+      await adminPage.getByRole('button', { name: '编辑全部收费', exact: true }).click();
+      const fees = adminPage.locator('#admin-fee-editor');
+      await expect(fees.getByLabel('收费金额（元）').first()).toBeVisible();
+      await fees.getByLabel('收费金额（元）').last().fill(purpose === '打样' ? '99.00' : '3.00');
+      await fees.getByLabel('定价依据（必填）').fill('管理员调整样品收费');
+      await fees.getByRole('button', { name: '保存收费', exact: true }).click();
+      await expect.poll(async () => (await db.query('SELECT "confirmedFee"::text AS fee FROM "Order" WHERE id=$1', [orderId])).rows[0].fee).toBe(purpose === '打样' ? '99.00' : '3.00');
       await adminPage.goto('/orders');
       await expect(
         adminPage
