@@ -69,7 +69,7 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
           .fill(submittedCustomerRef);
 
         await form
-          .getByRole('group', { name: '工艺类型' })
+          .getByRole('group', { name: '工单类型' })
           .getByRole('button', { name: '局部烫金', exact: true })
           .click();
         await form

@@ -136,7 +136,7 @@ test.describe('创建工单 — golden path', () => {
     await openFirstOrderItemEditor(page);
     await page.getByLabel('包装补充说明（选填）').fill('创建时贴客户标签');
     const form = page.locator('[data-slot="order-form-b"]');
-    const routes = form.getByRole('group', { name: '工艺类型' });
+    const routes = form.getByRole('group', { name: '工单类型' });
     for (const route of ['局部烫金', '专版烫金', '彩印']) {
       await expect(
         routes.getByRole('button', { name: route, exact: true }),

@@ -4,9 +4,12 @@ import { Client } from 'pg';
 import bcrypt from 'bcryptjs';
 import { assertActivatedE2eDatabase, postgresDatabaseIdentity, isDisposableE2eDatabaseName } from '../../scripts/lib/e2e-environment';
 async function database() {
-  const target = process.env.SAMPLE_TEST_DATABASE_URL ?? assertActivatedE2eDatabase().url;
+  // The standard runner already replaces DATABASE_URL with the validated
+  // isolated target. Only the standalone override still needs this comparison.
+  const explicit = process.env.SAMPLE_TEST_DATABASE_URL;
+  const target = explicit ?? assertActivatedE2eDatabase().url;
   const identity = postgresDatabaseIdentity(target);
-  if (!identity || !isDisposableE2eDatabaseName(identity.databaseName) || identity.target === postgresDatabaseIdentity(process.env.DATABASE_URL ?? '')?.target) throw new Error('请使用独立收费验收数据库');
+  if (!identity || !isDisposableE2eDatabaseName(identity.databaseName) || (explicit && identity.target === postgresDatabaseIdentity(process.env.DATABASE_URL ?? '')?.target)) throw new Error('请使用独立收费验收数据库');
   const db = new Client({ connectionString: target }); await db.connect(); return db;
 }
 async function login(page: Page, username: string, path: string) {
