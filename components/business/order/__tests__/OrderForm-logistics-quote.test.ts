@@ -103,7 +103,7 @@ describe('OrderForm logistics quote authority', () => {
     expect(source).toContain('busy={');
     expect(source).toContain('pendingState.busy ||');
     expect(source).toMatch(
-      /if\s*\(\s*createdDraft\s*\|\|\s*quoting\s*\|\|\s*externalQuoteQuoting\s*\|\|\s*externalQuoteNeedsRefresh\s*\)\s*\{\s*return;\s*\}/,
+      /if\s*\(\s*createdDraft\s*\|\|\s*quoting\s*\|\|\s*externalQuoteQuoting\s*\|\|\s*externalQuoteNeedsRefresh\s*\|\|\s*internalQuoteNeedsRefresh\s*\)\s*\{\s*return;\s*\}/,
     );
   });
 
