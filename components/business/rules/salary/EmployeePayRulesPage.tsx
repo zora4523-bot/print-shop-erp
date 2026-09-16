@@ -4,11 +4,14 @@ import { SalaryRuleSettingsForm } from '@/components/business/salary/SalaryRuleS
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { formatDateTimeLocalShanghai } from '@/lib/format/dates';
 
+import { listPieceworkAdminBooks } from '@/lib/salary/piecework-admin';
+import { PieceworkPriceBookForm } from '@/components/business/salary/PieceworkPriceBookForm';
+
 export const metadata = { title: '员工工资规则' };
 
 export default async function EmployeePayRulesPage() {
   await requirePermission('salary:rule:manage');
-  const rules = await listSalaryRuleSettings();
+  const [rules, books] = await Promise.all([listSalaryRuleSettings(), listPieceworkAdminBooks()]);
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
@@ -16,8 +19,9 @@ export default async function EmployeePayRulesPage() {
         effect="effective-dated"
         subtitle="员工工价与生效日期"
       />
+      <PieceworkPriceBookForm books={books} now={new Date().toISOString()} />
       <section className="rounded-xl border bg-card p-5 shadow-sm">
-        <h2 className="font-semibold">新增规则版本</h2>
+        <h2 className="font-semibold">其他薪酬规则</h2>
         <p className="mt-1 text-sm text-muted-foreground">新版本不影响已结算工资。</p>
         <div className="mt-5"><SalaryRuleSettingsForm rules={rules} defaultEffectiveFrom={formatDateTimeLocalShanghai(new Date())} /></div>
       </section>

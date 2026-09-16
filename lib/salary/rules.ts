@@ -100,7 +100,7 @@ export async function getActiveCsTiers(
 //
 // Rule keys under WORKER_HOURLY:
 //   - CLEANER_HOURLY:   { hourlyRate }
-//   - COOK_SPARE_HOURLY:{ hourlyRate }  // = PACKER rate per SPEC §5.4
+//   - COOK_SPARE_HOURLY:{ hourlyRate }  // 独立兼职工价
 //   - OT_MULTIPLIER:    { multiplier }
 //   - WORK_HOURS:       { morning, afternoon, otStart } — 不硬编码
 //
@@ -132,9 +132,7 @@ export async function getActiveCleanerHourlyRate(
   return v?.hourlyRate ?? null;
 }
 
-// COOK 空闲时间打包按 PACKER 时薪的独立规则（SPEC §5.4 "spare_pay =
-// attendance.spareHours * packer_rule.hourlyRate"）。单独一条规则
-// key 让管理员可以把"厨师打包兼职时薪"和主 PACKER_HOURLY 解耦调整。
+// COOK 空闲时间打包使用独立时薪，不读取已退役的包装工时薪规则。
 export async function getActiveCookSpareHourlyRate(
   now: Date = new Date(),
   client: SalaryRuleClient = db as unknown as SalaryRuleClient,
