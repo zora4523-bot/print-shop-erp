@@ -1,3 +1,7 @@
+import { PieceworkPriceBookForm } from '@/components/business/salary/PieceworkPriceBookForm';
+import { listPieceworkAdminBooks } from '@/lib/salary/piecework-admin';
+import { listPersonalPieceworkBooks } from '@/lib/salary/personal-piecework-admin';
+import { operationTypeForReporterAccount } from '@/lib/production/reporter-operation-lane';
 import { notFound } from 'next/navigation';
 import { getUserSummary } from '@/lib/account';
 import { updateUserAction } from '@/actions/owner-accounts';
@@ -31,6 +35,10 @@ export default async function EditAccountPage({ params }: PageProps) {
   const { id } = await params;
   const account = await getUserSummary(id);
   if (!account) notFound();
+
+  const personalBooks = account.role === 'WORKER' ? await listPersonalPieceworkBooks(id) : [];
+  const lane = operationTypeForReporterAccount(account);
+  const unifiedBooks = account.role === 'WORKER' ? await listPieceworkAdminBooks() : [];
 
   // Bind the id once so the form only has to pass (prev, fd).
   const boundUpdate = updateUserAction.bind(null, id);
@@ -66,6 +74,8 @@ export default async function EditAccountPage({ params }: PageProps) {
           initial={account}
         />
       </section>
+
+      {account.role === 'WORKER' && <PieceworkPriceBookForm books={personalBooks} now={new Date().toISOString()} personal={{ workerId: id, lane, canEdit: Boolean(lane), unifiedBooks }} />}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-2 text-base font-semibold">重置密码</h2>

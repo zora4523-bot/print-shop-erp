@@ -3,7 +3,6 @@ import type { Prisma } from '../../generated/prisma/client';
 import {
   OrderStatus,
   PieceworkOperationType,
-  PieceworkPriceBookStatus,
   ProductionOperationStatus,
   ProductionReportEntryType,
   ProductionReportSource,
@@ -22,7 +21,8 @@ import {
   type ProductionCompletionNotification,
   type ProductionCompletionTx,
 } from '../production-completion';
-import { calculatePieceworkAmount } from '../salary/piecework-pricing';
+import { resolveReporterPieceworkRate } from '../salary/piecework-rate-selection';
+import { PieceworkPricingError, calculatePieceworkAmount } from '../salary/piecework-pricing';
 import {
   pieceworkReportingDayGateLockKey,
   pieceworkSettlementLockKey,
@@ -55,6 +55,7 @@ export type OperationReportInput = {
   workOrderProgressQuantity?: number;
   idempotencyKey: string;
   expectedPayrollRevision?: number;
+  expectedRateKey?: string;
 };
 
 export type OperationReportActor = {
@@ -248,6 +249,7 @@ function validateInput(input: OperationReportInput) {
     defect,
     rework,
     workOrderProgress,
+    expectedRateKey: input.expectedRateKey,
   };
 }
 
@@ -684,38 +686,16 @@ async function appendPricedProductionReport(
     );
   }
 
-  const books = await tx.pieceworkPriceBook.findMany({
-    where: {
-      status: PieceworkPriceBookStatus.PUBLISHED,
-      effectiveFrom: { lte: reportedAt },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: reportedAt } }],
-    },
-    select: {
-      id: true,
-      version: true,
-      ruleSetSha256: true,
-      rules: {
-        where: { operationType: operation.operationType, unit: operation.unit },
-        select: { operationType: true, unit: true, amount: true },
-      },
-    },
-    take: 2,
-  });
-  const book = books[0];
-  const rule = book?.rules[0];
-  if (
-    books.length !== 1 ||
-    !book ||
-    !book.ruleSetSha256 ||
-    book.rules.length !== 1 ||
-    !rule ||
-    rule.amount === null ||
-    rule.unit !== operation.unit
-  ) {
-    throw new OperationReportingError(
-      'PIECEWORK_RATE_UNAVAILABLE',
-      operation.unit === 'PER_BOX' ? '装盒工价尚未发布，请管理员配置按盒工价后报工' : '当前时点没有唯一、完整且已发布的工序工价',
-    );
+  let selected;
+  try {
+    selected = await resolveReporterPieceworkRate(tx, account.id, operation.operationType, operation.unit, reportedAt);
+  } catch (error) {
+    if (error instanceof PieceworkPricingError) throw new OperationReportingError('PIECEWORK_RATE_UNAVAILABLE', error.message);
+    throw error;
+  }
+  const { book, rule, policy } = selected;
+  if (parsed.expectedRateKey !== undefined && parsed.expectedRateKey !== selected.key) {
+    throw new OperationReportingError('PIECEWORK_RATE_UNAVAILABLE', '适用工价已调整，请刷新核对后重新报工');
   }
 
   const priced = calculatePieceworkAmount(
@@ -771,6 +751,10 @@ async function appendPricedProductionReport(
             parsed.workOrderProgress?.toString() ?? null,
         },
         payroll: {
+          rateSource: selected.source,
+          policyBookId: policy?.id ?? null,
+          policyBookVersion: policy?.version ?? null,
+          rateWorkerId: book.workerId ?? null,
           passCount: operation.payrollPassCount ?? plan.passCount,
           payrollRevision: operation.payrollRevision ?? 0,
           defectAndReworkExcluded: true,

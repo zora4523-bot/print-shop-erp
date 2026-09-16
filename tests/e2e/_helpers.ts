@@ -1964,6 +1964,7 @@ export async function seedE2eProductionOperationFixture(): Promise<E2eProduction
            ON rule."priceBookId" = book.id
           AND rule."operationType" = 'PARTIAL'::"PieceworkOperationType"
         WHERE book.status = 'PUBLISHED'::"PieceworkPriceBookStatus"
+          AND book."workerId" IS NULL
           AND book."effectiveFrom" <= CURRENT_TIMESTAMP
           AND (book."effectiveTo" IS NULL OR book."effectiveTo" > CURRENT_TIMESTAMP)
         ORDER BY book.version DESC

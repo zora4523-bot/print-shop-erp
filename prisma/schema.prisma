@@ -114,6 +114,7 @@ model User {
   resolvedTaskDisputes        ProductionTaskDispute[]       @relation("ProductionTaskDisputeResolver")
   confirmedOrderPricing       Order[]                       @relation("OrderPricingConfirmer")
   createdPricingRevisions     OrderPricingRevision[]        @relation("OrderPricingRevisionCreator")
+  personalPieceworkBooks      PieceworkPriceBook[]          @relation("PersonalPieceworkOwner")
   publishedPieceworkBooks     PieceworkPriceBook[]          @relation("PieceworkPriceBookPublisher")
   productionReports           ProductionReport[]            @relation("ProductionReportReporter")
   productionProgressReports   ProductionProgressReport[]    @relation("ProductionProgressReportReporter")
@@ -1050,20 +1051,23 @@ enum PieceworkSettlementStatus {
 // 对内工价簿独立版本化。DRAFT 可编辑金额、拟生效时间和说明，PUBLISHED 一旦发布后
 // 由数据库触发器禁止更改/删除；绝不复用 CustomerPriceBook。
 model PieceworkPriceBook {
-  id             String                   @id @default(cuid())
-  version        Int                      @unique
-  status         PieceworkPriceBookStatus @default(DRAFT)
-  effectiveFrom  DateTime?                @db.Timestamptz(3)
-  effectiveTo    DateTime?                @db.Timestamptz(3)
-  sourceName     String?                  @db.Text
-  sourceSha256   String?                  @db.VarChar(64)
-  manifestSha256 String?                  @db.VarChar(64)
-  ruleSetSha256  String?                  @db.VarChar(64)
-  publishNote    String?                  @db.Text
-  publishedById  String?
-  publishedAt    DateTime?                @db.Timestamptz(3)
-  createdAt      DateTime                 @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime                 @updatedAt @db.Timestamptz(3)
+  workerId        String?
+  useUnifiedRates Boolean                  @default(false)
+  worker          User?                    @relation("PersonalPieceworkOwner", fields: [workerId], references: [id], onDelete: Restrict)
+  id              String                   @id @default(cuid())
+  version         Int                      @unique
+  status          PieceworkPriceBookStatus @default(DRAFT)
+  effectiveFrom   DateTime?                @db.Timestamptz(3)
+  effectiveTo     DateTime?                @db.Timestamptz(3)
+  sourceName      String?                  @db.Text
+  sourceSha256    String?                  @db.VarChar(64)
+  manifestSha256  String?                  @db.VarChar(64)
+  ruleSetSha256   String?                  @db.VarChar(64)
+  publishNote     String?                  @db.Text
+  publishedById   String?
+  publishedAt     DateTime?                @db.Timestamptz(3)
+  createdAt       DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime                 @updatedAt @db.Timestamptz(3)
 
   publishedBy User?                @relation("PieceworkPriceBookPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
   rules       PieceworkPriceRule[]
@@ -1072,6 +1076,7 @@ model PieceworkPriceBook {
   @@index([status, effectiveFrom])
   @@index([publishedById])
   @@index([sourceSha256])
+  @@index([workerId, status, effectiveFrom])
 }
 
 model PieceworkPriceRule {
