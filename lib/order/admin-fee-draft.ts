@@ -35,7 +35,11 @@ export function feeRowAmount(row: FeeRow, values: Record<string, string>): Decim
 }
 export function feeEditorTotal(preview: OrderPricingReviewPreview, rows: FeeRow[], values: Record<string, string>): string | null {
   try {
-    const total = rows.reduce((sum, row) => sum.minus(row.amount || '0').plus(feeRowAmount(row, values)), new Decimal(preview.currentTotalAmount));
+    const total = rows.reduce((sum, row) => {
+      const changed = row.pending || row.fields.some((field) => values[field.key] !== undefined && !new Decimal(values[field.key]).eq(field.value));
+      // Preserve stored rounding for complete rows that the server will not rewrite.
+      return !row.pending && !changed ? sum : sum.minus(row.amount || '0').plus(feeRowAmount(row, values));
+    }, new Decimal(preview.currentTotalAmount));
     return total.isFinite() ? total.toFixed(2) : null;
   } catch { return null; }
 }
@@ -49,7 +53,7 @@ export function feeEditorCommand(preview: OrderPricingReviewPreview, values: Rec
     items: ['PROOF', 'SAMPLE_SHIPMENT'].includes(preview.purpose ?? '') ? [] : preview.items.filter((item) => !item.complete || changed(`${item.itemId}:unit`, item.currentUnitPrice) || changed(`${item.itemId}:fixed`, item.currentFixedFee)).map((item) => ({
       itemId: item.itemId, unitPrice: values[`${item.itemId}:unit`] ?? item.currentUnitPrice, fixedFee: values[`${item.itemId}:fixed`] ?? item.currentFixedFee, reason,
     })),
-    packagingGroups: preview.packagingGroups.map((group) => ({ packagingGroupId: group.packagingGroupId, expectedMode: group.mode, expectedActualBagCount: group.actualBagCount, unitPrice: values[`${group.packagingGroupId}:unit`] ?? group.currentUnitPrice, reason })),
+    packagingGroups: preview.packagingGroups.map((group) => ({ packagingGroupId: group.packagingGroupId, expectedMode: group.mode, expectedActualBagCount: group.actualBagCount, unitPrice: group.mode === 'UNPACKED' || ['PROOF', 'SAMPLE_SHIPMENT'].includes(preview.purpose ?? '') ? '0' : values[`${group.packagingGroupId}:unit`] ?? group.currentUnitPrice, reason })),
     orderCharges: preview.orderCharges.map((charge) => ({ chargeId: charge.chargeId, expectedBusinessKey: charge.businessKey, amount: values[charge.chargeId] ?? charge.currentAmount ?? '', reason })),
     shipments: preview.shipments.map((shipment) => ({ shipmentId: shipment.shipmentId, expectedDestinationProvince: shipment.destinationProvince, expectedBillableWeightKg: shipment.billableWeightKg, shippingFee: values[`${shipment.shipmentId}:shipping`] ?? shipment.shipping.currentAmount ?? '', packingMaterialFee: values[`${shipment.shipmentId}:packaging`] ?? shipment.packaging.currentAmount ?? '', reason })),
   };

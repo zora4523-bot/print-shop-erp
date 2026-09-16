@@ -24,3 +24,18 @@ describe('administrator fee draft', () => {
     expect(feeEditorTotal(data, adminFeeRows(data), { proof: 'abc' })).toBeNull();
   });
 });
+
+it('preserves an unchanged stored subtotal instead of recomputing historical rounding', () => {
+  const data = preview(); data.purpose = 'STANDARD'; data.orderCharges = []; data.currentTotalAmount = '0.01';
+  data.items = [{ itemId: 'item', sequence: 1, name: '历史款', quantity: 3, complete: true, errors: [], manualQuoteReason: null, currentUnitPrice: '0.0050', currentFixedFee: '0', currentSubtotal: '0.01', suggestedUnitPrice: null, suggestedFixedFee: null, suggestedSubtotal: null, currentReason: null }];
+  expect(feeEditorTotal(data, adminFeeRows(data), {})).toBe('0.01');
+  expect(feeEditorTotal(data, adminFeeRows(data), { 'item:unit': '0.005' })).toBe('0.01');
+  expect(feeEditorTotal(data, adminFeeRows(data), { 'item:unit': '0.01' })).toBe('0.03');
+});
+
+it.each(['STANDARD', 'PROOF', 'SAMPLE_SHIPMENT'])('supplies zero for hidden pending UNPACKED groups on %s', (purpose) => {
+  const data = preview(); data.purpose = purpose;
+  data.packagingGroups = [{ packagingGroupId: 'unpacked', sequence: 1, name: '不包装', mode: 'UNPACKED', actualBagCount: 0, complete: false, errors: ['待核价'], currentUnitPrice: '', currentSubtotal: '', suggestedUnitPrice: null, suggestedSubtotal: null, currentReason: null }];
+  expect(adminFeeRows(data).some((row) => row.key === 'unpacked')).toBe(false);
+  expect(feeEditorCommand(data, {}, '确认不包装').packagingGroups[0].unitPrice).toBe('0');
+});
