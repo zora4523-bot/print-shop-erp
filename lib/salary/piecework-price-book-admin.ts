@@ -10,6 +10,7 @@ import {
 } from '../../generated/prisma/enums';
 import { writeAuditLogInTx, type AuditActor } from '../audit-log';
 import { db } from '../db';
+import { databaseClockNow } from '../background-jobs/clock';
 import {
   PIECEWORK_OPERATION_TYPES,
   PIECEWORK_RATE_UNITS,
@@ -77,6 +78,8 @@ export type PublishPieceworkPriceBookInput = {
   /** 版本化 manifest 文件的原始字节 SHA-256。 */
   sourceSha256: string;
   actor: AuditActor;
+  /** Resolve the effective instant under the publication lock; retries reuse it. */
+  effectiveImmediately?: boolean;
 };
 
 export class PieceworkPriceBookAdminError extends Error {
@@ -342,7 +345,7 @@ function receiptRules(manifest: PieceworkPriceBookManifest) {
   }));
 }
 
-async function assertActiveAdmin(
+export async function assertActivePieceworkAdmin(
   tx: Prisma.TransactionClient,
   submitted: AuditActor,
 ): Promise<AuditActor> {
@@ -375,9 +378,11 @@ async function assertActiveAdmin(
 
 export async function publishPieceworkPriceBook(
   input: PublishPieceworkPriceBookInput,
-  now: Date = new Date(),
+  now?: Date,
 ): Promise<PieceworkPublicationReceipt> {
-  const issues = validatePieceworkManifestForPublication(input.manifest);
+  const issues = validatePieceworkManifestForPublication(input.effectiveImmediately
+    ? { ...input.manifest, effectiveFrom: (now ?? new Date()).toISOString() }
+    : input.manifest);
   if (issues.length > 0) {
     throw new PieceworkPriceBookAdminError(issues.join('；'));
   }
@@ -388,8 +393,6 @@ export async function publishPieceworkPriceBook(
     throw new PieceworkPriceBookAdminError('manifest 原始文件 SHA-256 非法');
   }
 
-  const effectiveFrom = new Date(input.manifest.effectiveFrom!);
-  const manifestSha256 = calculatePieceworkManifestSha256(input.manifest);
   const normalizedRules = manifestRulesWithNormalizedAmounts(input.manifest);
   const ruleSetSha256 = calculatePieceworkRuleSetSha256(normalizedRules);
 
@@ -398,7 +401,7 @@ export async function publishPieceworkPriceBook(
     await tx.$queryRaw`SELECT "id" FROM "PieceworkPriceBook" WHERE "version" = ${input.manifest.priceBookVersion} FOR UPDATE`;
     await tx.$queryRaw`SELECT rule."id" FROM "PieceworkPriceRule" rule INNER JOIN "PieceworkPriceBook" book ON book."id" = rule."priceBookId" WHERE book."version" = ${input.manifest.priceBookVersion} FOR UPDATE OF rule`;
 
-    const actor = await assertActiveAdmin(tx, input.actor);
+    const actor = await assertActivePieceworkAdmin(tx, input.actor);
     let book = await tx.pieceworkPriceBook.findUnique({
       where: { version: input.manifest.priceBookVersion },
       include: {
@@ -418,6 +421,16 @@ export async function publishPieceworkPriceBook(
         include: { rules: { select: { id: true, operationType: true, unit: true, amount: true } } },
       });
     }
+
+    const publicationNow = now ?? await databaseClockNow(tx);
+    const effectiveFrom = input.effectiveImmediately
+      ? (book.status === PieceworkPriceBookStatus.PUBLISHED ? book.effectiveFrom! : publicationNow)
+      : new Date(input.manifest.effectiveFrom!);
+    // Keep scheduled CLI manifests byte-semantically compatible with existing
+    // publication hashes; only immediate publication needs a resolved time.
+    const manifestSha256 = calculatePieceworkManifestSha256(input.effectiveImmediately
+      ? { ...input.manifest, effectiveFrom: effectiveFrom.toISOString() }
+      : input.manifest);
 
     if (book.status === PieceworkPriceBookStatus.PUBLISHED) {
       const exactReplay =
@@ -458,11 +471,11 @@ export async function publishPieceworkPriceBook(
       };
     }
 
-    if (effectiveFrom < now) {
+    if (effectiveFrom < publicationNow) {
       throw new PieceworkPriceBookAdminError('计件工价簿不能追溯发布');
     }
     if (book.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
-      throw new PieceworkPriceBookAdminError('计件工价草稿已变更，请重新 dry-run');
+      throw new PieceworkPriceBookAdminError('计件工价草稿已变更，请重新加载后核对');
     }
     if (book.rules.length === 3 && normalizedRules.some((rule) => rule.unit === 'PER_BOX')) {
       const added = await tx.pieceworkPriceRule.create({ data: {
@@ -528,7 +541,7 @@ export async function publishPieceworkPriceBook(
         ruleSetSha256,
         publishNote: input.manifest.publishNote.trim(),
         publishedById: actor.id,
-        publishedAt: now,
+        publishedAt: publicationNow,
       },
     });
     if (published.count !== 1) {

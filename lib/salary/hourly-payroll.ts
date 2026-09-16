@@ -5,18 +5,17 @@ import { WorkerType } from '../../generated/prisma/enums';
 // takes already-aggregated hour totals + decoded SalaryRule values
 // and returns the pay breakdown.
 //
-// Three flavors in one function (deliberately — the COOK branch
-// shares PACKER's hourly rate for spare hours, so split files would
-// spread one business rule across two modules).
+// CLEANER uses hourly rates; COOK uses a monthly base plus a separate
+// spare-work hourly rate. PACKER now belongs to the operation ledger.
 //
 // Rule shape the caller decodes from SalaryRule.ruleValue:
-//   - PACKER_HOURLY   / CLEANER_HOURLY : { hourlyRate: number }
+//   - CLEANER_HOURLY                   : { hourlyRate: number }
 //   - COOK_MONTHLY                     : { monthlyBase: number }
-//   - COOK_SPARE_HOURLY                : { hourlyRate: number }   (= PACKER rate)
+//   - COOK_SPARE_HOURLY                : { hourlyRate: number }
 //   - OT_MULTIPLIER                    : { multiplier: number }   (default 1.0)
 
 export type HourlyPayrollRules = {
-  // Normal hourly rate for PACKER / CLEANER. For COOK this is
+  // Normal hourly rate for CLEANER. For COOK this is
   // ignored in favor of monthlyBase + spare-hour rate.
   hourlyRate?: string | number;
   // Overtime multiplier (e.g. 1.5 for 1.5x). Defaults to 1.0 per
@@ -24,8 +23,7 @@ export type HourlyPayrollRules = {
   otMultiplier?: string | number;
   // COOK only — monthly flat.
   monthlyBase?: string | number;
-  // COOK only — rate for spare-hour packing work (usually same as
-  // PACKER_HOURLY).
+  // COOK only — independently configured spare-hour packing rate.
   spareHourlyRate?: string | number;
 };
 
@@ -78,7 +76,7 @@ export function calcHourlyPayroll(
 
   if (input.workerType === WorkerType.COOK) {
     // SPEC §5.4: COOK has a flat monthlyBase + spare hours paid at
-    // PACKER rate. normal / ot hours are NOT paid separately — the
+    // spare-work rate. normal / ot hours are NOT paid separately — the
     // monthlyBase covers kitchen duty.
     if (rules.monthlyBase === undefined) {
       throw new HourlyPayrollError('厨师缺少 COOK_MONTHLY 规则');
@@ -96,7 +94,7 @@ export function calcHourlyPayroll(
     };
   }
 
-  // PACKER / CLEANER (and any future hourly type). OT is separate so
+  // CLEANER (and any future hourly type). OT is separate so
   // the multiplier can be adjusted without touching normal pay.
   if (rules.hourlyRate === undefined) {
     throw new HourlyPayrollError('时薪工缺少 hourlyRate 规则');

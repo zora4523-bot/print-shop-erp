@@ -1047,7 +1047,7 @@ enum PieceworkSettlementStatus {
   PAID
 }
 
-// 对内工价簿独立版本化。DRAFT 可补金额，PUBLISHED 一旦发布后
+// 对内工价簿独立版本化。DRAFT 可编辑金额、拟生效时间和说明，PUBLISHED 一旦发布后
 // 由数据库触发器禁止更改/删除；绝不复用 CustomerPriceBook。
 model PieceworkPriceBook {
   id             String                   @id @default(cuid())

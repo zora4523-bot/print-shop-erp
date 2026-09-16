@@ -655,6 +655,8 @@ async function appendPricedProductionReport(
   plan: OperationCompletionPlan,
   parsed: ValidatedOperationReportInput,
 ): Promise<{ reportId: string; reportedAt: Date; amount: string }> {
+  // Keep effective-time selection and report insertion atomic against publication.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext('print-shop-erp:piecework-price-book:publish'))`;
   // The locks above are followed by reporting-day gate -> reporter/day.
   const { reportedAt, workDate, workDateCol } =
     await lockCurrentPieceworkReportingDay(tx, account.id);
