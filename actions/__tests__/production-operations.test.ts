@@ -50,6 +50,7 @@ import { ProgressReportingError } from '@/lib/production/progress-reporting';
 
 function formData() {
   const data = new FormData();
+  data.set('expectedRateKey', 'book:unified');
   data.set('expectedPayrollRevision', '0');
   data.set('completedQty', '100');
   data.set('defectQty', '2');
@@ -199,6 +200,7 @@ describe('reportProductionOperationAction', () => {
       {
         operationId: 'operation-1',
         expectedPayrollRevision: 0,
+        expectedRateKey: 'book:unified',
         completedQty: 100,
         defectQty: 2,
         reworkQty: 1,

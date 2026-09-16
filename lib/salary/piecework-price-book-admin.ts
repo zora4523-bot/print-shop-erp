@@ -314,8 +314,10 @@ export async function previewPieceworkPriceBookPublication(
       },
     },
   });
-  const latest = !book ? await db.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } }) : null;
-  if (!book && (!latest || manifest.priceBookVersion !== latest.version + 1 || latest.status !== 'PUBLISHED')) issues.push('新版本必须紧接当前已发布版本');
+  const latest = !book ? await db.pieceworkPriceBook.findFirst({ where: { workerId: null }, orderBy: { version: 'desc' } }) : null;
+  const highest = !book ? await db.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } }) : null;
+  if (!book && (!latest || manifest.priceBookVersion !== (highest?.version ?? 0) + 1 || latest.status !== 'PUBLISHED')) issues.push('新版本必须紧接当前已发布版本');
+  if (book?.workerId) throw new PieceworkPriceBookAdminError('个人工价请在师傅账号中维护');
   if (book?.status === PieceworkPriceBookStatus.PUBLISHED) {
     issues.push('计件工价簿已发布；apply 只能做同 manifest 幂等复放');
   }
@@ -410,9 +412,11 @@ export async function publishPieceworkPriceBook(
         },
       },
     });
+    if (book?.workerId) throw new PieceworkPriceBookAdminError('个人工价请在师傅账号中维护');
     if (!book) {
-      const latest = await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } });
-      if (!latest || latest.status !== 'PUBLISHED' || latest.version + 1 !== input.manifest.priceBookVersion || latest.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
+      const latest = await tx.pieceworkPriceBook.findFirst({ where: { workerId: null }, orderBy: { version: 'desc' } });
+      const highest = await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } });
+      if (!latest || latest.status !== 'PUBLISHED' || (highest?.version ?? 0) + 1 !== input.manifest.priceBookVersion || latest.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
         throw new PieceworkPriceBookAdminError('当前工价版本已变化，请重新预览');
       }
       book = await tx.pieceworkPriceBook.create({
@@ -517,10 +521,10 @@ export async function publishPieceworkPriceBook(
     }
 
     const previous = await tx.pieceworkPriceBook.findFirst({
-      where: { status: 'PUBLISHED', effectiveTo: null }, orderBy: { version: 'desc' },
+      where: { workerId: null, status: 'PUBLISHED', effectiveTo: null }, orderBy: { version: 'desc' },
     });
     if (previous) {
-      if (!previous.effectiveFrom || previous.effectiveFrom >= effectiveFrom || previous.version + 1 !== book.version) {
+      if (!previous.effectiveFrom || previous.effectiveFrom >= effectiveFrom || previous.version >= book.version) {
         throw new PieceworkPriceBookAdminError('生效时间必须晚于当前工价版本');
       }
       await tx.pieceworkPriceBook.update({ where: { id: previous.id }, data: { effectiveTo: effectiveFrom } });

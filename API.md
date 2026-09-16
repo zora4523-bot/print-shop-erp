@@ -407,3 +407,9 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 `operationId / expectedRevision / passCount / reason`；次数为 1–999 整数、原因 2–500 字。
 只调整当前版本未完工局部工序，使用订单→工序锁、版本检查及工单审计。
 师傅报工 Action 新增必填 `expectedPayrollRevision`；旧页面须刷新，已成功请求重试仍返回原记录。
+
+### 师傅个人工价（2026-09-17）
+
+`mutatePersonalPieceworkAction(workerId, previous, form)` 仅 `salary:rule:manage` 管理员可调用，领域事务再次验证管理员与目标账号状态。账号取绑定参数，表单账号不能覆盖它。
+`intent=create/save/publish` 复用工价草稿流程；save 包含 `version/updatedAt/useUnifiedRates/partial/full/bag/box/sourceName/publishNote/effectiveFrom`。只保存当前岗位字段，空金额与零金额分开。publish 只接收已保存的版本和修订时间，不能直接带价发布。
+扫码报工表单新增必填 `expectedRateKey`，为当前价格簿与个人模式版本的组合键。成功重试仍返回原记录；新报工工价已变化则拒绝并要求刷新。客户端不能指定结算价格或他人账号。

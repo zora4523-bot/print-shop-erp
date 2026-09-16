@@ -15,8 +15,9 @@ import {
 
 const includeRules = { rules: { orderBy: [{ operationType: 'asc' }, { unit: 'asc' }] } } satisfies Prisma.PieceworkPriceBookInclude;
 type Book = Prisma.PieceworkPriceBookGetPayload<{ include: typeof includeRules }>;
-function project(book: Book) {
+export function projectPieceworkBook(book: Book) {
   return {
+    workerId: book.workerId ?? null, useUnifiedRates: book.useUnifiedRates ?? false,
     version: book.version, status: book.status,
     updatedAt: book.updatedAt.toISOString(),
     effectiveFrom: book.effectiveFrom?.toISOString() ?? '',
@@ -25,9 +26,9 @@ function project(book: Book) {
     rules: book.rules.map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount?.toFixed(4) ?? '' })),
   };
 }
-export type PieceworkAdminBook = ReturnType<typeof project>;
+export type PieceworkAdminBook = ReturnType<typeof projectPieceworkBook>;
 export async function listPieceworkAdminBooks(): Promise<PieceworkAdminBook[]> {
-  return (await db.pieceworkPriceBook.findMany({ include: includeRules, orderBy: { version: 'desc' } })).map(project);
+  return (await db.pieceworkPriceBook.findMany({ where: { workerId: null }, include: includeRules, orderBy: { version: 'desc' } })).map(projectPieceworkBook);
 }
 async function lock(tx: Prisma.TransactionClient, actor: AuditActor) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('print-shop-erp:piecework-price-book:publish'))`;
@@ -36,19 +37,19 @@ async function lock(tx: Prisma.TransactionClient, actor: AuditActor) {
 export async function createPieceworkDraft(actor: AuditActor) {
   return db.$transaction(async (tx) => {
     const activeActor = await lock(tx, actor);
-    const latest = await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' }, include: includeRules });
-    if (latest?.status === 'DRAFT') return project(latest);
+    const latest = await tx.pieceworkPriceBook.findFirst({ where: { workerId: null }, orderBy: { version: 'desc' }, include: includeRules });
+    if (latest?.status === 'DRAFT') return projectPieceworkBook(latest);
     if (!latest) {
       await ensurePieceworkPriceBookV1PlaceholderInTx(tx);
     } else {
       await tx.pieceworkPriceBook.create({ data: {
-        version: latest.version + 1,
+        version: (await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } }))!.version + 1,
         rules: { create: latest.rules.map((r) => ({ operationType: r.operationType, unit: r.unit, amount: r.amount })) },
       } });
     }
-    const created = await tx.pieceworkPriceBook.findFirstOrThrow({ orderBy: { version: 'desc' }, include: includeRules });
-    await writeAuditLogInTx(tx, { actor: activeActor, action: 'CREATE_DRAFT', entityType: 'PieceworkPriceBook', entityId: created.id, after: project(created) });
-    return project(created);
+    const created = await tx.pieceworkPriceBook.findFirstOrThrow({ where: { workerId: null }, orderBy: { version: 'desc' }, include: includeRules });
+    await writeAuditLogInTx(tx, { actor: activeActor, action: 'CREATE_DRAFT', entityType: 'PieceworkPriceBook', entityId: created.id, after: projectPieceworkBook(created) });
+    return projectPieceworkBook(created);
   });
 }
 function manifestFrom(book: Book): PieceworkPriceBookManifest {
@@ -67,7 +68,7 @@ export async function savePieceworkDraft(raw: PieceworkDraftInput, actor: AuditA
     const activeActor = await lock(tx, actor);
     await tx.$queryRaw`SELECT "id" FROM "PieceworkPriceBook" WHERE "version" = ${input.version} FOR UPDATE`;
     const book = await tx.pieceworkPriceBook.findUnique({ where: { version: input.version }, include: includeRules });
-    if (!book || book.status !== 'DRAFT' || book.updatedAt.toISOString() !== input.updatedAt) {
+    if (!book || book.workerId || book.status !== 'DRAFT' || book.updatedAt.toISOString() !== input.updatedAt) {
       throw new PieceworkPriceBookAdminError('工价已被修改，请重新加载后核对');
     }
     for (const field of PIECEWORK_RATE_FIELDS) {
@@ -90,14 +91,14 @@ export async function savePieceworkDraft(raw: PieceworkDraftInput, actor: AuditA
       sourceName: input.sourceName, publishNote: input.publishNote, updatedAt,
       sourceSha256: null, manifestSha256: null, ruleSetSha256: null,
     }, include: includeRules });
-    await writeAuditLogInTx(tx, { actor: activeActor, action: 'UPDATE_DRAFT', entityType: 'PieceworkPriceBook', entityId: book.id, before: project(book), after: project(updated) });
-    return project(updated);
+    await writeAuditLogInTx(tx, { actor: activeActor, action: 'UPDATE_DRAFT', entityType: 'PieceworkPriceBook', entityId: book.id, before: projectPieceworkBook(book), after: projectPieceworkBook(updated) });
+    return projectPieceworkBook(updated);
   });
 }
 export async function publishSavedPieceworkDraft(raw: PieceworkRevision, actor: AuditActor) {
   const input = pieceworkRevisionSchema.parse(raw);
   const book = await db.pieceworkPriceBook.findUnique({ where: { version: input.version }, include: includeRules });
-  if (!book) throw new PieceworkPriceBookAdminError('工价不存在，请重新加载');
+  if (!book || book.workerId) throw new PieceworkPriceBookAdminError('工价不存在，请重新加载');
   if (book.status === 'DRAFT' && book.updatedAt.toISOString() !== input.updatedAt) throw new PieceworkPriceBookAdminError('工价已被修改，请重新加载后核对');
   if (book.status === 'PUBLISHED') {
     const audit = await db.businessAuditLog.findFirst({

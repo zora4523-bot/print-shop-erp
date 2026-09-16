@@ -26,7 +26,7 @@ export async function assertReleasePieceworkPrerequisite(client: Pick<Client, 'q
       rule."operationType"::text AS "operationType", rule.unit::text AS unit, rule.amount::text AS amount
     FROM "PieceworkPriceBook" book
     LEFT JOIN "PieceworkPriceRule" rule ON rule."priceBookId" = book.id
-    WHERE book.status = 'PUBLISHED'::"PieceworkPriceBookStatus"
+    WHERE book.status = 'PUBLISHED'::"PieceworkPriceBookStatus" AND book."workerId" IS NULL
       AND book."effectiveFrom" <= CURRENT_TIMESTAMP
       AND (book."effectiveTo" IS NULL OR book."effectiveTo" > CURRENT_TIMESTAMP)`);
   const rows = result.rows;

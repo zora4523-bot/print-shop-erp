@@ -63,6 +63,7 @@ export async function reportProductionOperationAction(
   formData: FormData,
 ): Promise<ReportProductionOperationActionResult> {
   const actor = await requirePermission('task:report');
+  const expectedRateKey = formData.get('expectedRateKey');
   const expectedPayrollRevision = formInteger(formData, 'expectedPayrollRevision');
   const completedQty = formInteger(formData, 'completedQty');
   const defectQty = formInteger(formData, 'defectQty');
@@ -73,6 +74,7 @@ export async function reportProductionOperationAction(
   );
   const idempotencyKey = formData.get('idempotencyKey');
   if (
+    typeof expectedRateKey !== 'string' || !expectedRateKey ||
     expectedPayrollRevision === null ||
     completedQty === null ||
     defectQty === null ||
@@ -88,6 +90,7 @@ export async function reportProductionOperationAction(
       {
         operationId,
         expectedPayrollRevision,
+        expectedRateKey,
         completedQty,
         defectQty,
         reworkQty,

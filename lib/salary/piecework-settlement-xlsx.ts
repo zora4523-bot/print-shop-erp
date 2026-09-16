@@ -61,6 +61,7 @@ export async function loadPieceworkSettlementExportData(
           amount: true,
           report: {
             select: {
+              snapshot: true,
               id: true,
               entryType: true,
               reportedCompletedQty: true,
@@ -131,6 +132,12 @@ function shanghaiDateTime(date: Date | null): string {
   }).format(date);
 }
 
+function payrollSource(snapshot: Prisma.JsonValue) {
+  const payroll = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot.payroll : null;
+  if (!payroll || typeof payroll !== 'object' || Array.isArray(payroll)) return { source: '统一工价', version: '' };
+  return { source: payroll.rateSource === 'PERSONAL' ? '个人工价' : '统一工价', version: typeof payroll.policyBookVersion === 'number' ? payroll.policyBookVersion : '' };
+}
+
 export async function buildPieceworkSettlementWorkbook(
   settlements: Awaited<ReturnType<typeof loadPieceworkSettlementExportData>>,
 ): Promise<Buffer> {
@@ -167,6 +174,8 @@ export async function buildPieceworkSettlementWorkbook(
     '规则集Hash',
     '报工时间',
     '报工ID',
+    '工价来源',
+    '账号工价版本',
   ]];
 
   for (const settlement of settlements) {
@@ -204,6 +213,8 @@ export async function buildPieceworkSettlementWorkbook(
         report.ruleSetSha256,
         shanghaiDateTime(report.reportedAt),
         report.id,
+        payrollSource(report.snapshot).source,
+        payrollSource(report.snapshot).version,
       ]);
     }
   }

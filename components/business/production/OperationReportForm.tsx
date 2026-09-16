@@ -17,12 +17,14 @@ import { formatMoney } from '@/lib/dashboard/format';
 export function OperationReportForm({
   operationId,
   payrollRevision,
+  rateKey,
   idempotencyKey,
   remainingQty,
   workOrderProgressRemainingQty,
 }: {
   operationId: string;
   payrollRevision: number;
+  rateKey: string;
   idempotencyKey: string;
   remainingQty: string;
   workOrderProgressRemainingQty: string;
@@ -35,6 +37,7 @@ export function OperationReportForm({
 
   return (
     <ReportFields
+      rateKey={rateKey}
       payrollRevision={payrollRevision}
       state={state}
       formAction={formAction}
@@ -91,6 +94,7 @@ type ReportFormState =
   | null;
 
 function ReportFields({
+  rateKey,
   payrollRevision,
   state,
   formAction,
@@ -101,6 +105,7 @@ function ReportFields({
   explanation,
   successMessage,
 }: {
+  rateKey?: string;
   payrollRevision?: number;
   state: ReportFormState;
   formAction: (payload: FormData) => void;
@@ -119,6 +124,7 @@ function ReportFields({
       noValidate
     >
       <fieldset disabled={pending} className="space-y-4 border-0 p-0">
+        {rateKey && <input type="hidden" name="expectedRateKey" value={rateKey} />}
         {payrollRevision !== undefined && <input type="hidden" name="expectedPayrollRevision" value={payrollRevision} />}
         <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
         <QuantityField

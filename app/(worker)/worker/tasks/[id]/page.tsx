@@ -1,3 +1,8 @@
+import { resolveReporterPieceworkRate } from '@/lib/salary/piecework-rate-selection';
+import { PieceworkPricingError } from '@/lib/salary/piecework-pricing';
+import { db } from '@/lib/db';
+import { databaseClockNow } from '@/lib/background-jobs/clock';
+import { PieceworkRateUnit } from '@/generated/prisma/enums';
 import { listWorkerTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputePanel } from '@/components/business/production/TaskDisputePanel';
 import { randomUUID } from 'node:crypto';
@@ -28,6 +33,7 @@ import { StatusBadge } from '@/components/ui-business';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { formatMoney } from '@/lib/dashboard/format';
+import { formatUnitPrice } from '@/lib/format/unit-price';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PRODUCTION_OPERATION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
@@ -40,6 +46,16 @@ const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
   [PieceworkOperationType.FULL]: '专版烫金',
   [PieceworkOperationType.PACKING]: '打包入袋',
 };
+
+async function readWorkerRate(workerId: string, operation: NonNullable<Awaited<ReturnType<typeof getProductionOperationForReporter>>>) {
+  try {
+    const currentRate = await resolveReporterPieceworkRate(db, workerId, operation.operationType, operation.unit as PieceworkRateUnit, await databaseClockNow(db));
+    return { currentRate, rateError: '' };
+  } catch (error) {
+    if (!(error instanceof PieceworkPricingError)) throw error;
+    return { currentRate: null, rateError: error.message };
+  }
+}
 
 export default async function WorkerTaskDetailPage({ params }: PageProps) {
   const { user } = await requireSession();
@@ -60,6 +76,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
     }
   }
   if (operation) {
+    const { currentRate, rateError } = await readWorkerRate(user.id, operation);
     const remainingQty = Decimal.max(
       new Decimal(operation.plannedCompletedQty).minus(operation.completedQty),
       0,
@@ -115,13 +132,15 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
               <p className="mb-3 text-sm">剩余 {remainingQty} 袋</p>
             ) : null}
             {operation.operationType === PieceworkOperationType.PARTIAL && <p className="mb-3 text-sm">计薪过版次数：{operation.payrollPassCount} 次 · 工资 = 合格完成数 × {operation.payrollPassCount} × 每下工价</p>}
+            {currentRate ? <><p className="mb-3 text-sm">本人适用工价：{formatUnitPrice(currentRate.rule.amount.toString())}/{operation.unit === 'PER_PASS' ? '下' : operation.unit === 'PER_PIECE' ? '个' : operation.unit === 'PER_BOX' ? '盒' : '袋'} · {currentRate.source === 'PERSONAL' ? '个人工价' : '统一工价'} · 第 {currentRate.book.version} 版</p>
             <OperationReportForm
               operationId={operation.id}
               payrollRevision={operation.payrollRevision}
+              rateKey={currentRate.key}
               idempotencyKey={randomUUID()}
               remainingQty={remainingQty}
               workOrderProgressRemainingQty={workOrderProgressRemainingQty}
-            />
+            /></> : <p role="alert" className="text-sm text-destructive">{rateError}</p>}
           </section>
         ) : null}
 
