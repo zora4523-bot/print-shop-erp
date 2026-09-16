@@ -1,4 +1,5 @@
 'use client';
+import { OrderSampleEntry, prepareSampleOrderEntry, useSampleOrderEntry } from './OrderSampleEntry';
 import { OrderCreateFeeDetails } from './OrderCreateFeeDetails';
 import { orderCreateFeeSummary } from './order-create-fee-summary';
 import {
@@ -743,6 +744,7 @@ export function OrderForm({
   draftScope,
   workbenchTransferId,
 }: Props) {
+  const { samplePurpose, chooseSamplePurpose } = useSampleOrderEntry(draftScope, workbenchTransferId);
   const isExternalSalesActor = settlementType === OrderSettlementType.EXTERNAL_SALES;
   const canAssignExternalSales = externalSalesAccounts !== undefined;
   const router = useRouter();
@@ -2903,6 +2905,11 @@ export function OrderForm({
         : undefined,
     items: externalItemErrors,
   };
+  if (samplePurpose && externalCreateOrderOptions) {
+    return <OrderSampleEntry form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
+      crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
+      initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute} />;
+  }
   if (usesExternalSalesPricing && submittedOrder) {
     return (
       <OrderSubmissionSuccess
@@ -3591,6 +3598,10 @@ export function OrderForm({
               });
               setExternalInputRevision((current) => current + 1);
             }}
+            onPurposeChange={externalCreateOrderOptions && !createdDraft ? (purpose) => {
+              prepareSampleOrderEntry(getValues(), expandedItem, draftScope, purpose);
+              chooseSamplePurpose(purpose);
+            } : undefined}
             onRouteChange={(route) =>
               changeExternalRoute(expandedItem, route)
             }

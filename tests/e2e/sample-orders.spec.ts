@@ -59,15 +59,15 @@ async function contact(page: Page) {
     .fill('浙江省杭州市测试地址');
 }
 
-for (const purpose of ['寄样品', '打样'] as const) {
-  test(`外部销售创建${purpose}，管理员核价与用途标签`, async ({
+for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄样品', '打样'] as const) {
+  test(`${entry} 外部销售创建${purpose}，管理员核价与用途标签`, async ({
     page,
     browser,
   }) => {
     test.setTimeout(120_000);
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    await login(page, 'e2e-sample-sales');
+    await login(page, 'e2e-sample-sales', entry);
     await page.getByRole('button', { name: purpose, exact: true }).click();
     if (purpose === '寄样品') {
       await page.getByLabel('样品名称').fill(`浏览器寄样 ${Date.now()}`);
@@ -100,7 +100,7 @@ for (const purpose of ['寄样品', '打样'] as const) {
     await page
       .getByRole('button', { name: '查看已保存工单', exact: true })
       .click();
-    await page.waitForURL(/\/orders\/[a-z0-9]+$/);
+    await page.waitForURL(/\/orders\/(?!new$)[a-z0-9]+$/);
     const orderId = page.url().split('/').pop()!;
     const db = await database();
     try {
@@ -132,7 +132,7 @@ for (const purpose of ['寄样品', '打样'] as const) {
         )
         .not.toBe('DRAFT');
       await expect(page.getByLabel('整单总价（元）')).toHaveCount(0);
-      await page.goto('/workbench');
+      await page.goto(entry);
       await expect(page.getByRole('button', { name: '寄样品', exact: true })).toBeEnabled();
       await expect(page.getByRole('button', { name: '查看已保存工单', exact: true })).toHaveCount(0);
       const context = await browser.newContext();
@@ -184,9 +184,9 @@ for (const purpose of ['寄样品', '打样'] as const) {
   });
 }
 
-test('样品入口六视口、明暗主题、触控和无障碍', async ({ page }) => {
+test('新建工单样品入口六视口、明暗主题、触控和无障碍', async ({ page }) => {
   test.setTimeout(180_000);
-  await login(page, 'e2e-sample-admin');
+  await login(page, 'e2e-sample-admin', '/orders/new');
   for (const [width, height] of [
     [375, 667],
     [393, 852],
@@ -226,4 +226,90 @@ test('样品入口六视口、明暗主题、触控和无障碍', async ({ page 
       }
     }
   }
+});
+
+for (const purpose of ['寄样品', '打样'] as const) {
+  test(`管理员新建页保存并提交${purpose}，类型与费用正确`, async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page, 'e2e-sample-admin', '/orders/new');
+    await page.getByLabel('工单名称', { exact: false }).fill('管理员样品工单名称');
+    await page.getByRole('button', { name: purpose, exact: true }).click();
+    await contact(page);
+    if (purpose === '寄样品') {
+      await page.getByLabel('样品名称').fill('管理员寄样验收');
+      await page.getByLabel('样品数量').fill('2');
+      await page.getByRole('checkbox', { name: '顺丰到付', exact: true }).check();
+    } else {
+      await page.getByRole('spinbutton', { name: '数量', exact: true }).fill('3');
+    }
+    await page.getByRole('button', { name: '核对费用', exact: true }).click();
+    await expect(page.getByRole('button', { name: '保存工单', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: '保存工单', exact: true }).click();
+    await expect(page.getByRole('button', { name: '查看已保存工单', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '寄样品', exact: true })).toBeDisabled();
+    await page.reload();
+    await expect(page.getByRole('button', { name: '查看已保存工单', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '查看已保存工单', exact: true }).click();
+    await page.waitForURL(/\/orders\/(?!new$)[a-z0-9]+$/);
+    const id = page.url().split('/').pop()!;
+    const db = await database();
+    try {
+      const { rows: [order] } = await db.query('SELECT purpose, "pricingMode", "confirmedFee", "createdById", "submitterRole", "customName" FROM "Order" WHERE id=$1', [id]);
+      expect(order.purpose).toBe(purpose === '寄样品' ? 'SAMPLE_SHIPMENT' : 'PROOF');
+      expect(order.submitterRole).toBe('ADMIN');
+      if (purpose === '打样') {
+        expect(order.customName).toBe('管理员样品工单名称');
+        expect(order.pricingMode).toBe('MANUAL_TOTAL');
+        expect(order.confirmedFee).toBeNull();
+        await db.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileType","fileUrl","fileName","fileSize","uploadedBy") SELECT $1,i.id,'IMAGE',$2,'fixture.png',68,o."createdById" FROM "OrderItem" i JOIN "Order" o ON o.id=i."orderId" WHERE o.id=$3`, [crypto.randomUUID(), 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=', id]);
+        await page.reload();
+      }
+      await page.getByRole('button', { name: '提交工单', exact: true }).click();
+      await page.getByRole('button', { name: '确认最新报价并提交', exact: true }).click();
+      await expect.poll(async () => (await db.query('SELECT status FROM "Order" WHERE id=$1', [id])).rows[0].status).not.toBe('DRAFT');
+    } finally { await db.end(); }
+  });
+}
+
+test('新建页五入口切换保留普通单与收件信息', async ({ page }) => {
+  await login(page, 'e2e-sample-sales', '/orders/new');
+  for (const label of ['局部烫金', '专版烫金', '彩印', '寄样品', '打样']) {
+    await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  await page.getByLabel('工单名称', { exact: false }).fill('切换保留验收');
+  await page.getByRole('button', { name: '寄样品', exact: true }).click();
+  await contact(page);
+  await page.getByRole('button', { name: '局部烫金', exact: true }).click();
+  await expect(page.getByLabel('工单名称', { exact: false })).toHaveValue('切换保留验收');
+  await page.getByRole('button', { name: '打样', exact: true }).click();
+  await expect(page.getByLabel('收货人', { exact: true })).toHaveValue('浏览器验收');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: '打样工单', exact: true })).toBeVisible();
+  await expect(page.getByLabel('收货人', { exact: true })).toHaveValue('浏览器验收');
+});
+
+test('管理员关联销售后切换寄样、刷新仍保留工单归属', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'e2e-sample-admin', '/orders/new');
+  const db = await database();
+  try {
+    const sales = (await db.query('SELECT id FROM "User" WHERE username=$1', ['e2e-sample-sales'])).rows[0].id;
+    await page.getByLabel('关联外部销售（选填）', { exact: true }).selectOption(sales);
+    await page.getByRole('button', { name: '寄样品', exact: true }).click();
+    await page.getByLabel('样品名称').fill('归属保留验收');
+    await contact(page);
+    await page.getByRole('checkbox', { name: '顺丰到付', exact: true }).check();
+    await page.reload();
+    await expect(page.getByLabel('样品名称')).toHaveValue('归属保留验收');
+    await page.getByRole('button', { name: '核对费用', exact: true }).click();
+    await expect(page.getByRole('button', { name: '保存工单', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: '保存工单', exact: true }).click();
+    await page.getByRole('button', { name: '查看已保存工单', exact: true }).click();
+    await page.waitForURL(/\/orders\/(?!new$)[a-z0-9]+$/);
+    const id = page.url().split('/').pop()!;
+    const order = (await db.query('SELECT "submitterId", "createdById", "settlementType" FROM "Order" WHERE id=$1', [id])).rows[0];
+    expect(order.submitterId).toBe(sales);
+    expect(order.createdById).not.toBe(sales);
+    expect(order.settlementType).toBe('EXTERNAL_SALES');
+  } finally { await db.end(); }
 });

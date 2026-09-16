@@ -1,4 +1,5 @@
 'use client';
+import { OrderPurposePicker } from '../OrderPurposePicker';
 import {
   isMixedPackaging,
   packagingType,
@@ -151,6 +152,7 @@ export type OrderFormBProps = {
   onDuplicate: (index: number) => void;
   onRemove: (index: number) => void;
   onCustomNameChange: (value: string) => void;
+  onPurposeChange?: (value: 'SAMPLE_SHIPMENT' | 'PROOF') => void;
   onRouteChange: (value: OrderItemPricingRoute) => void;
   onPaperChange: (value: string) => void;
   onWeightChange: (value: number) => void;
@@ -481,6 +483,7 @@ export function OrderFormB({
   onRemove,
   onCustomNameChange,
   onRouteChange,
+  onPurposeChange,
   onPaperChange,
   onWeightChange,
   onSpecificationChange,
@@ -813,7 +816,15 @@ export function OrderFormB({
             {orderExtras}
           </Group>
 
+          {onPurposeChange ? <OrderPurposePicker
+            value={item.pricingRoute} disabled={Boolean(disabled)}
+            onChange={(value) => {
+              if (value === 'PROOF' || value === 'SAMPLE_SHIPMENT') onPurposeChange(value);
+              else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') onRouteChange(value);
+            }}
+          /> : null}
           <OrderItemCraftFields
+            hideRoute={Boolean(onPurposeChange)}
             uid={uid}
             item={item}
             title={`工艺 · 第 ${safeActiveIndex + 1} 款`}

@@ -42,6 +42,8 @@ export const EMPTY_SAMPLE_FORM: SampleOrderFormState = {
   collect: false,
   remark: '',
 };
+export type SampleOrderContext = Pick<CreateOrderInput, 'externalSalesUserId' | 'customerRef' | 'promisedDate' | 'isUrgent' | 'expressCode' | 'customName' | 'packageRequirement'>;
+
 export type SavedSampleDraft = { orderId: string; itemIds: string[] };
 
 export function SampleOrderForm({
@@ -53,7 +55,9 @@ export function SampleOrderForm({
   onDraftChange,
   onComplete,
   onBusyChange,
+  context,
 }: {
+  context?: SampleOrderContext;
   purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
   item?: CreateOrderInput['items'][number];
   value: SampleOrderFormState;
@@ -97,18 +101,20 @@ export function SampleOrderForm({
   };
   const facts = {
     purpose,
-    customName: purpose === 'PROOF' ? item?.name : name,
+    customName: purpose === 'PROOF' ? context?.customName || item?.name : name,
     samplePackagingRuleCode:
       purpose === 'SAMPLE_SHIPMENT' ? packing || null : null,
-    customerRef: null,
+    customerRef: context?.customerRef ?? null,
+    externalSalesUserId: context?.externalSalesUserId ?? null,
+    promisedDate: context?.promisedDate ?? null,
     receiverName,
     receiverPhone,
     receiverAddress,
     destinationProvince: province || null,
-    expressCode: null,
-    packageRequirement: null,
+    expressCode: context?.expressCode ?? null,
+    packageRequirement: context?.packageRequirement ?? null,
     remark,
-    isUrgent: false,
+    isUrgent: context?.isUrgent ?? false,
     isSfCollect: collect,
     items: [purpose === 'PROOF' ? item : sampleItem],
     additionalShipments: [],
@@ -166,10 +172,10 @@ export function SampleOrderForm({
         requestId.current = { key: factsKey, id: crypto.randomUUID() };
       const result = await createOrderAction(
         null,
-        buildExternalCreateOrderPayload({
-          ...data,
-          clientSubmissionId: requestId.current.id,
-        }),
+        {
+          ...buildExternalCreateOrderPayload({ ...data, clientSubmissionId: requestId.current.id }),
+          ...(context?.externalSalesUserId ? { externalSalesUserId: context.externalSalesUserId } : {}),
+        },
       );
       if (result.status !== 'success') {
         setError(

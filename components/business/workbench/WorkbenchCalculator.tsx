@@ -1,7 +1,7 @@
 'use client';
 
-import { SampleOrderForm } from '@/components/business/order/SampleOrderForm';
-import { PillPicker } from '@/components/business/order/order-form-b/OrderFieldPrimitives';
+import { type SampleOrderFormState, type SampleOrderContext, SampleOrderForm } from '@/components/business/order/SampleOrderForm';
+import { OrderPurposePicker } from '@/components/business/order/OrderPurposePicker';
 import { useSampleWorkbenchDraft } from './useSampleWorkbenchDraft';
 import { useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -45,25 +45,36 @@ function workbenchInputIssue(item: { productId: string | null; crafts: string[] 
         : null;
 }
 
-function WorkbenchPurposePicker({ value, disabled, onChange }: {
-  value: string; disabled: boolean; onChange: (value: string) => void;
-}) {
-  const uid = useId();
-  return <PillPicker<string> id={`${uid}-purpose`} label="工单类型" value={value} disabled={disabled}
-    options={[
-      { value: 'STOCK_BLANK', label: '局部烫金' },
-      { value: 'CUSTOM_SINGLE_FLAT_FOIL', label: '专版烫金' },
-      { value: 'COLOR_PRINT', label: '彩印' },
-      { value: 'SAMPLE_SHIPMENT', label: '寄样品' },
-      { value: 'PROOF', label: '打样' },
-    ]} onChange={onChange} />;
+function selectWorkbenchItem(
+  item: import('@/lib/auth/schemas').CreateOrderInput['items'][number],
+  change: OrderItemSelectionChange,
+  options: ExternalCreateOrderOptions,
+  crafts: readonly PricingCraftIdentity[],
+) {
+  const next = orderItemSelectionUpdate(item, change, options.products, options);
+  if (!next) return null;
+  return change.type === 'customSize' ? next.item : normalizeExternalOrderItem({
+    ...next.options, item: next.item, crafts, products: options.products,
+    paperMaterials: options.papers,
+    preserveCustomSize: next.options.preserveCustomSize ?? true,
+  });
 }
 
 export function WorkbenchCalculator({
   options,
   crafts = [],
   draftScope = '',
+  createEntry,
 }: {
+  createEntry?: {
+    purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
+    form: SampleOrderFormState;
+    context: SampleOrderContext;
+    item: import('@/lib/auth/schemas').CreateOrderInput['items'][number];
+    onStandard: (route: import('@/generated/prisma/enums').OrderItemPricingRoute, form: SampleOrderFormState) => void;
+    onPurposeChange: (purpose: 'SAMPLE_SHIPMENT' | 'PROOF') => void;
+    onComplete: () => void;
+  };
   options: ExternalCreateOrderOptions;
   crafts?: readonly PricingCraftIdentity[];
   draftScope?: string;
@@ -71,14 +82,14 @@ export function WorkbenchCalculator({
   const uid = useId().replaceAll(':', '');
   const router = useRouter();
   const [item, setItem] = useState(() =>
-    createExternalOrderItem(
+    createEntry?.item ?? createExternalOrderItem(
       crafts,
       options.products,
       options.papers,
       options.foilColors[0]?.name,
     ),
   );
-  const { purpose, setPurpose, specialLocked, sampleFormProps } = useSampleWorkbenchDraft(item, setItem, draftScope);
+  const { purpose, setPurpose, specialLocked, sampleFormProps } = useSampleWorkbenchDraft(item, setItem, draftScope, createEntry);
   const [markup, setMarkup] = useState('35');
   const [transferError, setTransferError] = useState<string | null>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
@@ -96,25 +107,8 @@ export function WorkbenchCalculator({
     setItem(next);
   }
   function select(change: OrderItemSelectionChange) {
-    const next = orderItemSelectionUpdate(
-      item,
-      change,
-      options.products,
-      options,
-    );
-    if (next)
-      update(
-        change.type === 'customSize'
-          ? next.item
-          : normalizeExternalOrderItem({
-              ...next.options,
-              item: next.item,
-              crafts,
-              products: options.products,
-              paperMaterials: options.papers,
-              preserveCustomSize: next.options.preserveCustomSize ?? true,
-            }),
-      );
+    const next = selectWorkbenchItem(item, change, options, crafts);
+    if (next) update(next);
   }
   const quote = result?.status === 'success' ? result.quote : null;
   const markupValid =
@@ -144,13 +138,13 @@ export function WorkbenchCalculator({
       <div className={purpose === 'SAMPLE_SHIPMENT' ? 'grid min-w-0 gap-4' : 'grid min-w-0 gap-4 @min-[881px]:grid-cols-[minmax(0,1fr)_19rem]'}>
         <Card className="min-w-0 p-4 sm:p-6">
           <h2 className="mb-4 text-lg font-semibold">{purpose === 'SAMPLE_SHIPMENT' ? '工单条件' : '款式条件'}</h2>
-          <WorkbenchPurposePicker value={purpose === 'STANDARD' ? item.pricingRoute : purpose} disabled={specialLocked}
+          <OrderPurposePicker value={purpose === 'STANDARD' ? item.pricingRoute : purpose} disabled={specialLocked}
             onChange={(value) => {
               invalidate();
-              if (value === 'SAMPLE_SHIPMENT' || value === 'PROOF') setPurpose(value);
-              else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') { setPurpose('STANDARD'); select({ type: 'route', value }); }
+              if (value === 'SAMPLE_SHIPMENT' || value === 'PROOF') { setPurpose(value); createEntry?.onPurposeChange(value); }
+              else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') { if (createEntry) createEntry.onStandard(value, sampleFormProps.value); else { setPurpose('STANDARD'); select({ type: 'route', value }); } }
             }} />
-          {purpose === 'SAMPLE_SHIPMENT' ? <div className="mt-4"><SampleOrderForm purpose="SAMPLE_SHIPMENT" {...sampleFormProps} /></div> : !options.products.length ? <EmptyState title="暂无可报价产品" description="请联系管理员配置产品后重试" /> : <fieldset disabled={specialLocked} className="min-w-0">
+          {purpose === 'SAMPLE_SHIPMENT' ? <div className="mt-4"><SampleOrderForm purpose="SAMPLE_SHIPMENT" {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /></div> : !options.products.length ? <EmptyState title="暂无可报价产品" description="请联系管理员配置产品后重试" /> : <fieldset disabled={specialLocked} className="min-w-0">
           <OrderItemCraftFields
             hideRoute={purpose === 'STANDARD'}
             uid={uid}
@@ -225,7 +219,7 @@ export function WorkbenchCalculator({
           </fieldset>}
         </Card>
         {purpose !== 'SAMPLE_SHIPMENT' && options.products.length > 0 ? <aside className="min-w-0 @min-[881px]:sticky @min-[881px]:top-20 @min-[881px]:self-start">
-          {purpose === 'PROOF' ? <SampleOrderForm purpose="PROOF" item={item} {...sampleFormProps} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
+          {purpose === 'PROOF' ? <SampleOrderForm purpose="PROOF" item={item} {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
             <h2
               ref={resultHeading}
               tabIndex={-1}
