@@ -297,6 +297,7 @@ describe('OrderFormB', () => {
 
     expect(html).toContain('粘贴或上传设计图');
     expect(html).toContain('上传 CDR 文件');
+    expect(html).toContain('可多选或拖放多个文件');
     expect(html).not.toContain('data-slot="design-file-marker"');
     expect(html).not.toMatch(/>图</);
     expect(html).toContain('粘贴、拖放或选择第 1 款 设计图');

@@ -255,6 +255,11 @@ function DesignFileBox({
               : '上传 CDR 文件'}
           {required && !entry ? <RequiredMark /> : null}
         </p>
+        {!image && !entry ? (
+          <p className="mt-0.5 text-xs font-medium text-muted-foreground">
+            可多选或拖放多个文件
+          </p>
+        ) : null}
         {entry ? (
           <p
             className="mt-0.5 truncate text-xs font-medium text-muted-foreground"
