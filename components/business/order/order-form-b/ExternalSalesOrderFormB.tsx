@@ -198,6 +198,7 @@ function DesignFileBox({
   required = false,
   error,
   onFile,
+  onFiles,
   onRemove,
 }: {
   itemNumber: number;
@@ -206,6 +207,7 @@ function DesignFileBox({
   disabled?: boolean;
   required?: boolean;
   error?: string;
+  onFiles?: (files: File[]) => void;
   onFile: (file: File) => void;
   onRemove: () => void;
 }) {
@@ -220,8 +222,9 @@ function DesignFileBox({
   const handleDrop: DragEventHandler<HTMLElement> = (event) => {
     if (disabled) return;
     event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (file) onFile(file);
+    const files = Array.from(event.dataTransfer.files);
+    if (onFiles) onFiles(files);
+    else if (files[0]) onFile(files[0]);
   };
 
   const uploadContent = (
@@ -270,6 +273,7 @@ function DesignFileBox({
       <input
         ref={inputRef}
         type="file"
+        multiple={Boolean(onFiles)}
         className="sr-only"
         tabIndex={-1}
         disabled={disabled}
@@ -283,8 +287,9 @@ function DesignFileBox({
             : '.cdr,application/x-cdr,application/octet-stream'
         }
         onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) onFile(file);
+          const files = Array.from(event.target.files ?? []);
+          if (onFiles) onFiles(files);
+          else if (files[0]) onFile(files[0]);
           event.target.value = '';
         }}
       />
@@ -502,7 +507,7 @@ export function OrderFormB({
   const imageEntry = queue.find(
     (entry) => entry.prepared.fileType === DesignFileType.IMAGE,
   );
-  const cdrEntry = queue.find(
+  const cdrEntries = queue.filter(
     (entry) => entry.prepared.fileType === DesignFileType.CDR,
   );
   const [imageFileError, setImageFileError] = useState<{
@@ -624,6 +629,22 @@ export function OrderFormB({
         prepared: prepared.value,
       }),
     );
+  };
+
+  const appendCdrFiles = (files: File[]) => {
+    const additions: PendingDesignImage[] = [];
+    const errors: string[] = [];
+    for (const file of files) {
+      const prepared = prepareDesignFile(file);
+      if (!prepared.ok) errors.push(`${file.name}：${prepared.message}`);
+      else if (prepared.value.fileType !== DesignFileType.CDR) {
+        errors.push(`${file.name}：请选择 CDR 文件`);
+      } else {
+        additions.push({ id: nextPendingId(), prepared: prepared.value });
+      }
+    }
+    setCdrFileError(errors.length ? { fieldId: field.id, message: errors.join('；') } : null);
+    if (additions.length) onPendingDesignsChange([...queue, ...additions]);
   };
 
   return (
@@ -981,27 +1002,31 @@ export function OrderFormB({
                     )
                   }
                 />
-                <DesignFileBox
-                  itemNumber={safeActiveIndex + 1}
-                  fileType={DesignFileType.CDR}
-                  entry={cdrEntry}
-                  disabled={disabled}
-                  error={
-                    cdrFileError?.fieldId === field.id
-                      ? cdrFileError.message
-                      : undefined
-                  }
-                  onFile={(file) => putFile(file, DesignFileType.CDR)}
-                  onRemove={() =>
-                    onPendingDesignsChange(
-                      replacePendingDesignKind(
-                        queue,
-                        DesignFileType.CDR,
-                        null,
-                      ),
-                    )
-                  }
-                />
+                <div className="min-w-0 space-y-2">
+                  <DesignFileBox
+                    itemNumber={safeActiveIndex + 1}
+                    fileType={DesignFileType.CDR}
+                    disabled={disabled}
+                    error={cdrFileError?.fieldId === field.id ? cdrFileError.message : undefined}
+                    onFiles={appendCdrFiles}
+                    onFile={(file) => appendCdrFiles([file])}
+                    onRemove={() => {}}
+                  />
+                  {cdrEntries.map((entry) => (
+                    <div key={entry.id} className="flex min-w-0 items-center gap-2 rounded-xl border bg-card p-3">
+                      <span data-slot="design-file-marker" className="shrink-0 text-xs font-bold text-muted-foreground"><span>CDR</span></span>
+                      <p className="min-w-0 flex-1 truncate text-sm" title={entry.prepared.file.name}>
+                        {entry.prepared.file.name} · {formatDesignFileSize(entry.prepared.file.size)}
+                      </p>
+                      <Button
+                        type="button" variant="outline" disabled={disabled}
+                        className="min-h-11 min-w-11 shrink-0"
+                        aria-label={`移除第 ${safeActiveIndex + 1} 款 CDR 文件 ${entry.prepared.file.name}`}
+                        onClick={() => onPendingDesignsChange(queue.filter((file) => file.id !== entry.id))}
+                      >移除</Button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </fieldset>
           </Group>
