@@ -725,7 +725,9 @@ export async function previewOrderPricingReviewAction(
   }
 
   try {
-    const preview = await previewOrderPricingReview(parsed.data.orderId, actor);
+    const preview = parsed.data.editAll
+      ? await previewOrderPricingReview(parsed.data.orderId, actor, undefined, true)
+      : await previewOrderPricingReview(parsed.data.orderId, actor);
     return { status: 'success', preview };
   } catch (error) {
     if (error instanceof OrderPricingReviewError) {

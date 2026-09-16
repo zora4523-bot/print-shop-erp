@@ -112,13 +112,15 @@ async function lockAndReadOrder(
       quotedPricingRevisionId: true,
       confirmedFee: true,
       settledFee: true,
+      settledAt: true,
     },
   });
   if (!order) throw new OrderCommercialDetailsError('工单不存在');
+  if (order.settledFee != null || order.settledAt != null) throw new OrderCommercialDetailsError('已结算工单不能修改价格明细');
   if (order.purpose === 'PROOF') throw new OrderCommercialDetailsError('打样请通过整单核价修改总价');
   if (order.purpose === 'SAMPLE_SHIPMENT') throw new OrderCommercialDetailsError('寄样品仅收取快递费和包装费');
-  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
-    throw new OrderCommercialDetailsError('只有外部销售工单可以维护对客附加费用');
+  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES && order.settlementType !== OrderSettlementType.FACTORY_DIRECT) {
+    throw new OrderCommercialDetailsError('只有外部销售或工厂直接业务工单可以维护附加费用');
   }
   if (
     order.status === OrderStatus.CANCELLED ||

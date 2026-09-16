@@ -1919,3 +1919,115 @@ describe("snapshot-only order pricing review", () => {
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 });
+
+describe('administrator edits all applicable fees', () => {
+  function editableCommand(overrides: Partial<FinalizeOrderPricingCommand> = {}) {
+    const input = command({ editAll: true, ...overrides });
+    input.orderCharges = [{ chargeId: 'other-charge', expectedBusinessKey: 'ORDER:OTHER', amount: '7.00', reason: '保留费用' }];
+    return input;
+  }
+  beforeEach(() => {
+    dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settledFee: null, settledAt: null, status: OrderStatus.CONFIRMED }));
+  });
+  it('previews already-confirmed amounts without changing the pending-only contract', async () => {
+    dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settledFee: null, status: OrderStatus.CONFIRMED, pricingStatus: 'AUTO_CONFIRMED' }));
+    const preview = await previewOrderPricingReview('order-1', admin, now, true);
+    expect(preview.editAll).toBe(true);
+    expect(preview.orderCharges.map((row) => row.chargeId)).toContain('other-charge');
+    expect(preview.items[0].complete).toBe(true);
+    await expect(previewOrderPricingReview('order-1', admin, now)).rejects.toThrow('不能确认终价');
+  });
+  it('edits automatic item, packaging and shipping prices together and keeps the order in production', async () => {
+    const input = editableCommand();
+    input.items.push({ itemId: 'item-auto', unitPrice: '0.15', fixedFee: '12', reason: '管理员优惠价' });
+    const result = await finalizeOrderPricing(input, admin, now);
+    expect(dbMock.orderItem.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'item-auto' }, data: expect.objectContaining({ subtotal: '162.00' }) }));
+    expect(dbMock.orderPackagingGroup.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'group-auto' }, data: expect.objectContaining({ unitPrice: '99.0000' }) }));
+    expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'shipping-auto' }, data: expect.objectContaining({ amount: '99.00' }) }));
+    expect(result.totalAmount).toBe('2284.00');
+    expect(prepareProductionMock).not.toHaveBeenCalled();
+    expect(appendPricingRevisionMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ incrementOrderRevision: true }));
+  });
+  it('leaves unchanged automatic snapshots intact', async () => {
+    const order = pricingOrder({ settledFee: null, status: OrderStatus.CONFIRMED });
+    dbMock.order.findUnique.mockResolvedValue(order);
+    const input = editableCommand();
+    input.packagingGroups[0].unitPrice = String(order.packagingGroups[0].unitPrice);
+    input.shipments[0].shippingFee = '0.00';
+    await finalizeOrderPricing(input, admin, now);
+    expect(dbMock.orderItem.update.mock.calls.map(([args]) => args.where.id)).not.toContain('item-auto');
+    expect(dbMock.orderPackagingGroup.update.mock.calls.map(([args]) => args.where.id)).not.toContain('group-auto');
+    expect(dbMock.orderCustomerCharge.update.mock.calls.map(([args]) => args.where.id)).not.toContain('other-charge');
+  });
+  it.each(['DRAFT', 'REJECTED', 'SETTLED', 'FINISHED', 'CANCELLED'])('refuses %s orders', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settledFee: null, status }));
+    await expect(finalizeOrderPricing(editableCommand(), admin, now)).rejects.toThrow('不能编辑收费');
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+  it.each([{ settledFee: '0' }, { settledAt: now }])('rejects settlement facts regardless of lifecycle status', async (facts) => {
+    dbMock.order.findUnique.mockResolvedValue(pricingOrder({ status: OrderStatus.CONFIRMED, settledFee: null, ...facts }));
+    await expect(finalizeOrderPricing(editableCommand(), admin, now)).rejects.toThrow('不能编辑收费');
+  });
+  it('rejects SALES even when the editAll flag is forged', async () => {
+    await expect(previewOrderPricingReview('order-1', sales, now, true)).rejects.toThrow('管理员');
+    await expect(finalizeOrderPricing(editableCommand(), sales, now)).rejects.toThrow('管理员');
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+  it('refuses stale prices and pending changes', async () => {
+    await expect(finalizeOrderPricing(editableCommand({ expectedPriceRevision: 2 }), admin, now)).rejects.toThrow('价格已被其他人更新');
+    dbMock.orderChangeRequest.findFirst.mockResolvedValue({ id: 'pending' });
+    await expect(finalizeOrderPricing(editableCommand(), admin, now)).rejects.toThrow('待审批');
+  });
+  it('requires a reason for changed automatic prices', async () => {
+    const input = editableCommand(); input.packagingGroups[0].reason = '';
+    await expect(finalizeOrderPricing(input, admin, now)).rejects.toThrow('定价依据');
+  });
+  it('does not charge freight for freight-collect shipments', async () => {
+    dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settledFee: null, isSfCollect: true }));
+    await expect(finalizeOrderPricing(editableCommand(), admin, now)).rejects.toThrow('顺丰到付');
+  });
+  it('rejects negative ordinary charge amounts', async () => {
+    const input = editableCommand(); input.orderCharges[0].amount = '-2';
+    await expect(finalizeOrderPricing(input, admin, now)).rejects.toThrow('超出系统允许范围');
+  });
+});
+
+describe('factory-direct missing logistics charges', () => {
+  it('allows administrators to create both shipment fee rows with trusted snapshots', async () => {
+    const order = pricingOrder({ settledFee: null, settlementType: OrderSettlementType.FACTORY_DIRECT, status: OrderStatus.CONFIRMED });
+    dbMock.order.findUnique.mockResolvedValue({ ...order, customerCharges: order.customerCharges.filter((charge) => charge.shipmentId === null) });
+    const preview = await previewOrderPricingReview('order-1', admin, now, true);
+    expect(preview.shipments[0].shipping.currentAmount).toBeNull();
+    const input = command({ editAll: true, orderCharges: [{ chargeId: 'other-charge', expectedBusinessKey: 'ORDER:OTHER', amount: '7.00', reason: '保留' }] });
+    await finalizeOrderPricing(input, admin, now);
+    expect(dbMock.orderCustomerCharge.create).toHaveBeenCalledTimes(2);
+    expect(dbMock.orderCustomerCharge.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ businessKey: 'SHIPMENT:1:SHIPPING_FEE', amount: '99.00' }) }));
+  });
+});
+
+it('accepts a signed approved adjustment in the full editor without allowing precision loss', async () => {
+  const order = pricingOrder({ settledFee: null, status: OrderStatus.CONFIRMED });
+  dbMock.order.findUnique.mockResolvedValue({ ...order, customerCharges: order.customerCharges.map((charge) => charge.id === 'other-charge' ? { ...charge, category: { code: 'APPROVED_ADJUSTMENT', name: '调整' }, isAdjustment: true, approvalReference: '管理员审批' } : charge) });
+  const input = command({ editAll: true, orderCharges: [{ chargeId: 'other-charge', expectedBusinessKey: 'ORDER:OTHER', amount: '-5.123', reason: '优惠调整' }] });
+  await expect(finalizeOrderPricing(input, admin, now)).rejects.toThrow('超出系统允许范围');
+  expect(dbMock.order.update).not.toHaveBeenCalled();
+  input.orderCharges[0].amount = '-5.12';
+  await finalizeOrderPricing(input, admin, now);
+  expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'other-charge' }, data: expect.objectContaining({ amount: '-5.12' }) }));
+});
+
+it('does not turn an unchanged automatic amount into a manual override', async () => {
+  dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settledFee: null, status: OrderStatus.CONFIRMED }));
+  const input = command({ editAll: true, orderCharges: [{ chargeId: 'other-charge', expectedBusinessKey: 'ORDER:OTHER', amount: '7', reason: '保留' }] });
+  input.items.push({ itemId: 'item-auto', unitPrice: '0.1', fixedFee: '10', reason: '' });
+  await finalizeOrderPricing(input, admin, now);
+  expect(dbMock.orderItem.update.mock.calls.map(([args]) => args.where.id)).not.toContain('item-auto');
+});
+
+it('rejects an overflowing processing aggregate even if a discount keeps the total within range', async () => {
+  const order = pricingOrder({ settledFee: null, status: OrderStatus.CONFIRMED });
+  dbMock.order.findUnique.mockResolvedValue({ ...order, items: order.items.map((item) => ({ ...item, quantity: 6000 })), customerCharges: order.customerCharges.map((charge) => charge.id === 'other-charge' ? { ...charge, category: { code: 'APPROVED_ADJUSTMENT', name: '调整' }, isAdjustment: true, approvalReference: '管理员审批' } : charge) });
+  const input = command({ editAll: true, items: order.items.map((item) => ({ itemId: item.id, unitPrice: '999999.9999', fixedFee: '0', reason: '金额边界' })), orderCharges: [{ chargeId: 'other-charge', expectedBusinessKey: 'ORDER:OTHER', amount: '-3000000000', reason: '整单折让' }] });
+  await expect(finalizeOrderPricing(input, admin, now)).rejects.toThrow('加工费或包装费合计超出系统允许范围');
+  expect(dbMock.order.update).not.toHaveBeenCalled();
+});

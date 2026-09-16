@@ -1748,6 +1748,13 @@ describe('reviewOrderChangeRequestAction', () => {
 describe('order pricing review actions', () => {
   const adminActor = { ...salesActor, role: Role.ADMIN };
 
+  it('passes the explicit all-fee mode through the authorized preview boundary', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    pricingReviewMock.previewOrderPricingReview.mockResolvedValue({ orderId: 'order-1' });
+    expect(await previewOrderPricingReviewAction(null, { orderId: 'order-1', editAll: true })).toMatchObject({ status: 'success' });
+    expect(pricingReviewMock.previewOrderPricingReview).toHaveBeenCalledWith('order-1', adminActor, undefined, true);
+  });
+
   it('checks order:price:confirm before parsing a preview request', async () => {
     permissionsMock.requirePermission.mockRejectedValue(
       new UnauthorizedError('未登录'),

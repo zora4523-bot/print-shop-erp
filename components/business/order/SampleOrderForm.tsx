@@ -46,6 +46,19 @@ export type SampleOrderContext = Pick<CreateOrderInput, 'externalSalesUserId' | 
 
 export type SavedSampleDraft = { orderId: string; itemIds: string[] };
 
+type SampleOrderFormProps = {
+  canEditFees?: boolean;
+  context?: SampleOrderContext;
+  purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
+  item?: CreateOrderInput['items'][number];
+  value: SampleOrderFormState;
+  onChange: (value: SampleOrderFormState) => void;
+  draft: SavedSampleDraft | null;
+  onDraftChange: (value: SavedSampleDraft) => void;
+  onComplete: () => void;
+  onBusyChange?: (busy: boolean) => void;
+};
+
 export function SampleOrderForm({
   purpose,
   item,
@@ -56,17 +69,8 @@ export function SampleOrderForm({
   onComplete,
   onBusyChange,
   context,
-}: {
-  context?: SampleOrderContext;
-  purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
-  item?: CreateOrderInput['items'][number];
-  value: SampleOrderFormState;
-  onChange: (value: SampleOrderFormState) => void;
-  draft: SavedSampleDraft | null;
-  onDraftChange: (value: SavedSampleDraft) => void;
-  onComplete: () => void;
-  onBusyChange?: (busy: boolean) => void;
-}) {
+  canEditFees = false,
+}: SampleOrderFormProps) {
   const uid = useId();
   const router = useRouter();
   const requestId = useRef<{ key: string; id: string } | null>(null);
@@ -193,7 +197,7 @@ export function SampleOrderForm({
       onBusyChange?.(false);
     }
   }
-  async function submit() {
+  async function submit(editFees = false) {
     if (!draft) return;
     setBusy(true);
     setError(null);
@@ -205,7 +209,7 @@ export function SampleOrderForm({
       if (result.status === 'success') {
         requestId.current = null;
         onComplete();
-        router.push(`/orders/${draft.orderId}`);
+        router.push(`/orders/${draft.orderId}${editFees ? '#admin-fee-editor' : ''}`);
         router.refresh();
         return;
       }
@@ -325,6 +329,7 @@ export function SampleOrderForm({
               ? '费用待核价'
               : `合计 ${formatMoney(quote?.total ?? '0')}`}
           </p>
+          {canEditFees ? <Button type="button" variant="outline" disabled={busy || uploading} onClick={() => void submit(true)}>提交并编辑收费</Button> : null}
           <Button
             type="button"
             disabled={busy || uploading}

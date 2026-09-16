@@ -156,6 +156,7 @@ vi.mock('@/components/business/order/OrderChangeWithdrawButton', () => ({
 vi.mock('@/components/business/order/OrderChangeReviewForm', () => ({
   OrderChangeReviewForm: () => null,
 }));
+vi.mock('@/components/business/order/AdminOrderFeeEditor', () => ({ AdminOrderFeeEditor: () => <div>all-fee-editor</div> }));
 vi.mock('@/components/business/order/OrderPricingReviewForm', () => ({
   OrderPricingReviewForm: () => <div>factory-pricing-review</div>,
 }));

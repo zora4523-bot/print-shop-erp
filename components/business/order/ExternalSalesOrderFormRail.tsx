@@ -180,6 +180,7 @@ export function OrderFormBRail(props: OrderFormBRailProps) {
             {busy ? '处理中…' : '保存草稿'}
           </Button>
         ) : null}
+        {props.allowEditFees ? <Button type="submit" name="creationIntent" value="fees" variant="outline" className="mt-3 min-h-11 w-full" disabled={busy} onClick={() => onAttemptSubmit('submit')}>创建并编辑收费</Button> : null}
         <Button
           type="submit"
           name="creationIntent"

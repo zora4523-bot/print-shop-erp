@@ -31,7 +31,8 @@ export function useSampleOrderEntry(draftScope: string, workbenchTransferId?: st
   return { samplePurpose, chooseSamplePurpose };
 }
 
-export function OrderSampleEntry({ form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange }: {
+export function OrderSampleEntry({ form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees }: {
+  canEditFees?: boolean;
   form: UseFormReturn<CreateOrderInput>;
   purpose: SamplePurpose;
   options: ExternalCreateOrderOptions;
@@ -54,7 +55,7 @@ export function OrderSampleEntry({ form, purpose, options, crafts, draftScope, i
     <h1 className="text-xl font-semibold">新建工单</h1>
     <WorkbenchCalculator options={options} crafts={crafts}
       draftScope={`order-create:${draftScope}`}
-      createEntry={{ purpose, form: sampleForm,
+      createEntry={{ canEditFees, purpose, form: sampleForm,
         item: values.items[itemIndex] ?? initialItem,
         context: { customName: values.customName, packageRequirement: values.packageRequirement, externalSalesUserId: values.externalSalesUserId,
           customerRef: values.customerRef, promisedDate: values.promisedDate,
