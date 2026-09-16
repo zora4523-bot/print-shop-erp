@@ -365,6 +365,7 @@ for (const theme of ['light', 'dark']) for (const width of [375, 393, 768, 1024,
     flushSync(() => root.render(<CdrFixture />));
     const input = host.querySelector<HTMLInputElement>('input[aria-label="第 1 款 CDR 文件"]')!;
     expect(input.multiple).toBe(true);
+    await expect.element(page.getByText('可多选或拖放多个文件', { exact: true })).toBeVisible();
     const select = (names: string[]) => {
       const transfer = new DataTransfer();
       names.forEach((name) => transfer.items.add(new File(['content'], name, { type: 'application/octet-stream' })));
