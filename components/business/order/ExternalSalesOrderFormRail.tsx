@@ -135,7 +135,7 @@ export function OrderFormBRail(props: OrderFormBRailProps) {
             <h2 id={headingId} className="text-sm font-semibold">
               费用明细
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">{itemCount} 款</p>
+            <p className="mt-1 text-xs text-muted-foreground">{itemCount} 条规格明细</p>
           </div>
           <Badge variant="outline">{settlementLabel}</Badge>
         </div>

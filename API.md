@@ -429,3 +429,9 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 扫码报工前端先核对本批数量，再调用原 `reportProductionOperationAction` 或共享进度 Action；完成数和工单件数进度默认空白。服务端数量、岗位、版本、工价及幂等校验保持不变，计件报工成功同时刷新 `/worker/salary`。
 
 `lib/salary/worker-pending-reports.ts` 供工资 Server Component 读取本人尚未关联结算项的流水。服务端重新核对账号启用状态及计件岗位，以会话 `actor.id` 限定 `reporterId`，不接受客户端指定其他师傅。按上海日期筛选，以 `pendingPage` 独立分页，每页 20 条；原报工、人工调整、冲正按原金额及符号展示，不重算工资、不改历史快照。
+
+### 建单设计分组与批量工作区（2026-09-18）
+
+`createOrderAction` 的 `items[].designGroupKey` 为可选 nullable UUID。同一工单内相同标识的材料、工艺和稿件版本必须一致，规格与数量可不同；缺失标识的明细独立处理。该字段只保存分组，不参与金额计算或赋予资源访问权限。外部销售仍经过禁止收费字段的命令边界。
+
+批量工作区复用单工单 create/quote/upload/submit，不新增绕过鉴权的批量 API。每张工单使用独立、稳定的 `clientSubmissionId`，创建结果立即记录；上传或提交失败继续已有草稿，不对已成功工单重放创建。

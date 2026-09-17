@@ -1,4 +1,5 @@
 'use client';
+import type { OrderCreationLifecycle } from './order-creation-editor';
 import { useEffect, useState } from 'react';
 import type { UseFormReturn } from 'react-hook-form';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
@@ -31,7 +32,8 @@ export function useSampleOrderEntry(draftScope: string, workbenchTransferId?: st
   return { samplePurpose, chooseSamplePurpose };
 }
 
-export function OrderSampleEntry({ form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees }: {
+export function OrderSampleEntry({ lifecycle, form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees }: {
+  lifecycle?: OrderCreationLifecycle;
   canEditFees?: boolean;
   form: UseFormReturn<CreateOrderInput>;
   purpose: SamplePurpose;
@@ -55,7 +57,7 @@ export function OrderSampleEntry({ form, purpose, options, crafts, draftScope, i
     <h1 className="text-xl font-semibold">新建工单</h1>
     <WorkbenchCalculator options={options} crafts={crafts}
       draftScope={`order-create:${draftScope}`}
-      createEntry={{ canEditFees, purpose, form: sampleForm,
+      createEntry={{ lifecycle, canEditFees, purpose, form: sampleForm,
         item: values.items[itemIndex] ?? initialItem,
         context: { customName: values.customName, packageRequirement: values.packageRequirement, externalSalesUserId: values.externalSalesUserId,
           customerRef: values.customerRef, promisedDate: values.promisedDate,

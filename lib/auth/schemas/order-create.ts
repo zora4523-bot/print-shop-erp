@@ -27,6 +27,7 @@ export const adminCreatePriceSchema = z.object({
 });
 
 const orderItemBaseSchema = z.object({
+  designGroupKey: z.string().uuid().nullish(),
   adminPrice: adminCreatePriceSchema.optional(),
   fig: z
     .number({ message: '款式编号必须是正整数' })
@@ -764,6 +765,17 @@ export const createOrderSchema = z
       ),
   })
   .superRefine((input, ctx) => {
+    const designFacts = new Map<string, string>();
+    input.items.forEach((item, index) => {
+      if (!item.designGroupKey) return;
+      const facts = JSON.stringify([item.pricingRoute, item.paperType, item.paperWeightGsm,
+        item.artworkVersion, [...item.crafts].sort(), item.frontFoilColors, item.backFoilColors,
+        item.foilTechnique, item.hasLocalFoil, item.printColors, item.lamination]);
+      const previous = designFacts.get(item.designGroupKey);
+      if (previous !== undefined && previous !== facts) ctx.addIssue({ code: 'custom',
+        path: ['items', index, 'designGroupKey'], message: '同一设计款的材料和工艺必须一致，不同设计请增加设计款' });
+      designFacts.set(item.designGroupKey, facts);
+    });
     const sample = input.purpose === 'SAMPLE_SHIPMENT';
     if (!sample && input.samplePackagingRuleCode) ctx.addIssue({ code: 'custom', path: ['samplePackagingRuleCode'], message: '只有寄样品工单可以选择寄样包装' });
     input.items.forEach((item, index) => {

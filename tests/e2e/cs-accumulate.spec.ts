@@ -85,7 +85,7 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
           .getByRole('button', { name: '160g', exact: true })
           .click();
         await form
-          .getByRole('textbox', { name: '款式名', exact: true })
+          .getByRole('textbox', { name: '设计款名称', exact: true })
           .fill('E2E 客服业绩款');
         await form
           .getByRole('spinbutton', { name: '数量', exact: true })

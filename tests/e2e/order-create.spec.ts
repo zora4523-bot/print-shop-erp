@@ -168,7 +168,7 @@ test.describe('创建工单 — golden path', () => {
     ).toHaveAttribute('aria-pressed', 'true');
 
     await form
-      .getByRole('textbox', { name: '款式名', exact: true })
+      .getByRole('textbox', { name: '设计款名称', exact: true })
       .fill('E2E 测试款式');
     // B 版数量输入是受控组件，用可访问名称绑定用户行为，
     // 不再依赖旧面板的 input name 实现细节。

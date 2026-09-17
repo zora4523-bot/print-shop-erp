@@ -30,8 +30,8 @@ vi.mock('@/lib/order/create-order-bootstrap', () => ({
 vi.mock('@/lib/party', () => ({
   listCustomerPartyOptions: listCustomersMock,
 }));
-vi.mock('@/components/business/order/OrderForm', () => ({
-  OrderForm: (props: unknown) => {
+vi.mock('@/components/business/order/OrderCreationWorkspace', () => ({
+  OrderCreationWorkspace: (props: unknown) => {
     orderFormPropsMock(props);
     return <div data-order-form />;
   },

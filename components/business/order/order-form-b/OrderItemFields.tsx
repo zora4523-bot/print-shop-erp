@@ -71,6 +71,7 @@ export type OrderItemCraftFieldsProps = Common & {
 };
 export type OrderItemMaterialFieldsProps = Common & {
   materialExtras?: ReactNode;
+  specificationTabs?: ReactNode;
   paperKey: string | null;
   paperOptions: readonly OrderPaperSwatchOption[];
   weightOptions: readonly { value: number; disabled?: boolean }[];
@@ -366,6 +367,7 @@ export function OrderItemMaterialFields({
   disabled,
   itemErrors,
   materialExtras,
+  specificationTabs,
   paperKey,
   paperOptions,
   weightOptions,
@@ -441,6 +443,7 @@ export function OrderItemMaterialFields({
       </div>
 
       <div className="mt-5">
+        {specificationTabs}
         <PillPicker
           id={`${uid}-specification`}
           label="规格"

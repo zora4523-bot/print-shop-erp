@@ -1,6 +1,9 @@
 'use client';
 
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle } from './order-creation-editor';
+import { designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
+import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import { OrderSampleEntry, prepareSampleOrderEntry, useSampleOrderEntry } from './OrderSampleEntry';
 import { OrderCreateFeeDetails } from './OrderCreateFeeDetails';
 import { orderCreateFeeSummary } from './order-create-fee-summary';
@@ -135,15 +138,11 @@ import {
 import {
   ORDER_PRICING_ROUTE_LABELS,
   isLegacyStockFoilCraft,
-  productCategoryMatchesPricingRoute,
 } from '@/lib/order/pricing-route';
 import { calculateCreateOrderBagCount } from '@/lib/order/create-order-packaging';
 import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
 import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
-import {
-  catalogPricingFactChoices,
-} from '@/lib/order/catalog-pricing-facts';
 import {
   shouldProtectOrderFormLeave,
   useOrderFormLeaveGuard,
@@ -201,7 +200,11 @@ export type ProductOption = {
   weight?: number | null;
 };
 
-type Props = {
+export type OrderFormProps = {
+  initialEditor?: OrderEditorSnapshot;
+  submissionId?: string;
+  registerEditor?: (editor: OrderCreationEditor | null) => void;
+  lifecycle?: OrderCreationLifecycle;
   workbenchTransferId?: string;
   crafts: readonly CraftOption[];
   products: readonly ProductOption[];
@@ -767,7 +770,11 @@ export function OrderForm({
   initialExternalPriceSnapshot,
   draftScope,
   workbenchTransferId,
-}: Props) {
+  initialEditor,
+  submissionId,
+  registerEditor,
+  lifecycle,
+}: OrderFormProps) {
   const { samplePurpose, chooseSamplePurpose } = useSampleOrderEntry(draftScope, workbenchTransferId);
   const isExternalSalesActor = settlementType === OrderSettlementType.EXTERNAL_SALES;
   const canAssignExternalSales = externalSalesAccounts !== undefined;
@@ -777,6 +784,7 @@ export function OrderForm({
     const item = createExternalOrderItem(
       crafts, products, externalCreateOrderOptions?.papers ?? [], firstFoil,
     );
+    item.designGroupKey = globalThis.crypto.randomUUID();
     if (!isExternalSalesActor) return item;
     return {
       ...item,
@@ -793,7 +801,7 @@ export function OrderForm({
     products,
     isExternalSalesActor,
   ]);
-  const [clientSubmissionId] = useState(() => globalThis.crypto.randomUUID());
+  const [clientSubmissionId] = useState(() => submissionId ?? globalThis.crypto.randomUUID());
   const form = useForm<CreateOrderInput>({
     // zodResolver's generics don't fully compose with preprocess-bearing
     // schemas (moneyOptionalField uses `z.preprocess`, which splits
@@ -806,6 +814,8 @@ export function OrderForm({
     defaultValues: {
       ...initialOrderFormValues(clientSubmissionId, initialItem),
       externalSalesUserId: null,
+      ...initialEditor?.values,
+      clientSubmissionId,
     },
   });
   const {
@@ -856,7 +866,7 @@ export function OrderForm({
   const [state, setState] = useState<CreateOrderMutationResult | null>(null);
   const [pendingDesigns, setPendingDesigns] = useState<
     Record<string, PendingDesignImage[]>
-  >({});
+  >(() => Object.fromEntries(itemsArray.fields.map((field, index) => [field.id, initialEditor?.files[index] ?? []])));
   const [createdDraft, setCreatedDraft] = useState<{
     orderId: string;
     orderNo: string;
@@ -866,6 +876,9 @@ export function OrderForm({
     manualQuote: boolean;
     quoteToken: string | null;
   } | null>(null);
+  const selectedDesignQueues = createdDraft ? pendingDesigns : designFileQueues(
+    watchedItems as CreateOrderInput['items'], itemsArray.fields, pendingDesigns,
+  );
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
     completed: number;
@@ -911,7 +924,7 @@ export function OrderForm({
   } | null>(null);
   const [expandedItem, setExpandedItem] = useState(0);
   const [localDraftDecisionComplete, setLocalDraftDecisionComplete] =
-    useState(false);
+    useState(Boolean(initialEditor));
   const [lastLocalDraftSavedAt, setLastLocalDraftSavedAt] = useState<
     string | null
   >(null);
@@ -919,7 +932,7 @@ export function OrderForm({
   const externalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
   const internalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
   const itemFieldIdsRef = useRef<string[]>([]);
-  const nextItemFigRef = useRef(2);
+  const nextItemFigRef = useRef(initialEditor ? resolveNextOrderItemFig(initialEditor.values) : 2);
   const [transferReady, setTransferReady] = useState(!workbenchTransferId);
   const existingLocalDraftKey = localOrderFormDraftStorageKey(
     draftScope,
@@ -1017,6 +1030,20 @@ export function OrderForm({
     },
     [localDraftPricingScope, localDraftStorageKey],
   );
+
+  useEffect(() => {
+    if (!registerEditor) return;
+    registerEditor({
+      canLeave: localDraftReady && !submitting && !uploading && !createdDraft && !pendingSubmission,
+      save: () => {
+        const values = getValues();
+        persistLocalDraftValues(values);
+        return { values: structuredClone(values), files: itemsArray.fields.map((field) => selectedDesignQueues[field.id] ?? []) };
+      },
+    });
+    return () => registerEditor(null);
+  }, [registerEditor, getValues, persistLocalDraftValues, itemsArray.fields, selectedDesignQueues,
+    localDraftReady, submitting, uploading, createdDraft, pendingSubmission]);
 
   useEffect(() => {
     itemFieldIdsRef.current = itemsArray.fields.map((field) => field.id);
@@ -1176,7 +1203,10 @@ export function OrderForm({
           OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS;
       }
 
-      if (usesExternalSalesPricing && draft.intent === 'submit') {
+      lifecycle?.onCompleted({ orderId: draft.orderId, orderNo: draft.orderNo, intent: draft.intent });
+      if (lifecycle?.retainResult && draft.intent !== 'fees') {
+        setPendingSubmission(null);
+      } else if (usesExternalSalesPricing && draft.intent === 'submit') {
         setSubmittedOrder({
           orderId: draft.orderId,
           orderNo: draft.orderNo,
@@ -1356,6 +1386,7 @@ export function OrderForm({
         return;
       }
 
+      lifecycle?.onCreated({ orderId: result.orderId, orderNo: result.orderNo, intent });
       clearLocalDraftAfterServerCreate();
 
       const draft = {
@@ -1428,7 +1459,7 @@ export function OrderForm({
     }
     const fieldIds = itemsArray.fields.map((field) => field.id);
     const queueSnapshot = Object.fromEntries(
-      fieldIds.map((fieldId) => [fieldId, pendingDesigns[fieldId] ?? []]),
+      fieldIds.map((fieldId) => [fieldId, selectedDesignQueues[fieldId] ?? []]),
     );
     const submitter = (event?.nativeEvent as SubmitEvent | undefined)
       ?.submitter as HTMLButtonElement | null | undefined;
@@ -1469,13 +1500,15 @@ export function OrderForm({
   };
 
   function updatePendingDesigns(fieldId: string, images: PendingDesignImage[]) {
+    const index = itemsArray.fields.findIndex((field) => field.id === fieldId);
+    const indexes = designItemIndexes(getValues('items'), index);
     setPendingDesigns((current) => {
-      if (images.length === 0) {
-        const next = { ...current };
-        delete next[fieldId];
-        return next;
+      const next = { ...current };
+      for (const member of indexes) {
+        const id = itemsArray.fields[member]?.id;
+        if (id) next[id] = images;
       }
-      return { ...current, [fieldId]: images };
+      return next;
     });
   }
 
@@ -1523,7 +1556,12 @@ export function OrderForm({
       }
       return current;
     });
-    updatePendingDesigns(fieldId, []);
+    // Preserve the selected design files when removing its first specification.
+    setPendingDesigns(() => {
+      const next = { ...selectedDesignQueues };
+      delete next[fieldId];
+      return next;
+    });
     invalidateStructuralQuotes();
     persistLocalDraftValues({
       ...getValues(),
@@ -1533,70 +1571,18 @@ export function OrderForm({
     });
   }
 
-  function addItem() {
-    const currentItems = getValues('items');
-    const shipments = getValues('additionalShipments');
-    const nextShipments = shipments.map((shipment) => ({
-      ...shipment,
-      itemQuantities: [...shipment.itemQuantities, 0],
-    }));
-    setValue(
-      'additionalShipments',
-      nextShipments,
-      { shouldDirty: true },
-    );
-    const groups = getValues('packagingGroups');
-    const nextItemIndex = itemsArray.fields.length;
-    const mixed = groups.some(
-      (group) => isMixedPackaging(group.mode),
-    );
-    const extendedGroups = groups.map((group) => ({
-      ...group,
-      itemUnitsPerBag: [
-        ...group.itemUnitsPerBag,
-        mixed ? 10 : 0,
-      ],
-    }));
-    if (!mixed) {
-      extendedGroups.push({
-        name: null,
-        mode: OrderPackagingMode.SINGLE_STYLE,
-        actualBagCount: 100,
-        itemUnitsPerBag: Array.from(
-          { length: nextItemIndex + 1 },
-          (_, index) => (index === nextItemIndex ? 10 : 0),
-        ),
-      });
-    }
-    setValue('packagingGroups', extendedGroups, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-    const nextFig = nextItemFigRef.current;
-    nextItemFigRef.current += 1;
-    setValue('nextItemFig', nextItemFigRef.current, { shouldDirty: true });
-    const nextItem = {
-      ...createExternalOrderItem(
-        crafts,
-        products,
-        externalCreateOrderOptions?.papers ?? [],
-        externalCreateOrderOptions?.foilColors[0]?.name ?? null,
-      ),
-      fig: nextFig,
-    };
-    itemsArray.append(nextItem);
-    invalidateStructuralQuotes();
-    persistLocalDraftValues({
-      ...getValues(),
-      items: [...currentItems, nextItem],
-      additionalShipments: nextShipments,
-      packagingGroups: extendedGroups,
-    });
-  }
-
-  function duplicateItem(index: number) {
+  function duplicateItem(index: number, sameDesign = false) {
+    if (getValues('items').length >= MAX_ORDER_ITEMS_PER_ORDER) return;
     const currentItems = getValues('items');
     const source = getValues(`items.${index}`);
+    const designGroupKey = sameDesign
+      ? source.designGroupKey ?? globalThis.crypto.randomUUID()
+      : globalThis.crypto.randomUUID();
+    if (sameDesign) {
+      source.designGroupKey = designGroupKey;
+      setValue(`items.${index}.designGroupKey`, designGroupKey, { shouldDirty: true });
+      currentItems[index] = source;
+    }
     const shipments = getValues('additionalShipments');
     const nextShipments = shipments.map((shipment) => ({
       ...shipment,
@@ -1640,11 +1626,13 @@ export function OrderForm({
     });
     const nextItem = {
       ...source,
+      designGroupKey,
+      adminPrice: undefined,
       fig: nextItemFigRef.current,
-      name: usesExternalSalesPricing
+      name: sameDesign || usesExternalSalesPricing
         ? source.name
         : source.name?.trim()
-          ? `${source.name} 副本`
+          ? `${source.name.slice(0, 61)} 副本`
           : '',
     };
     nextItemFigRef.current += 1;
@@ -1722,63 +1710,22 @@ export function OrderForm({
       ...normalizationOptions,
       preserveCustomSize: normalizationOptions.preserveCustomSize ?? true,
     });
-    const selectedProduct = products.find(
-      (product) => product.id === current.productId,
-    );
-    const selectedProductStillMatches = Boolean(
-      selectedProduct &&
-        productCategoryMatchesPricingRoute(
-          normalized.pricingRoute,
-          selectedProduct.category,
-        ) &&
-        catalogPricingFactChoices(selectedProduct.specification).includes(
-          normalized.specification ?? '',
-        ) &&
-        catalogPricingFactChoices(selectedProduct.paperType).includes(
-          normalized.paperType ?? '',
-        ),
-    );
     setValue(
       `items.${index}`,
       {
         ...normalized,
         name: current.name,
-        productId:
-          internalMaterialChange === null
-            ? current.productId
-            : normalized.productId ??
-              (selectedProductStillMatches ? current.productId : null),
-        productStructure:
-          internalMaterialChange === 'route'
-            ? normalized.productStructure
-            : current.productStructure,
-        specification:
-          internalMaterialChange === 'route' ||
-          internalMaterialChange === 'specification'
-            ? item.specification
-            : current.specification,
-        paperType:
-          internalMaterialChange === 'route' ||
-          internalMaterialChange === 'paper'
-            ? normalized.paperType
-            : current.paperType,
-        paperWeightGsm:
-          internalMaterialChange === 'route' ||
-          internalMaterialChange === 'paper'
-            ? normalized.paperWeightGsm
-            : internalMaterialChange === 'weight'
-              ? item.paperWeightGsm
-              : current.paperWeightGsm,
-        actualWidthMm:
-          internalMaterialChange === 'route' ||
-          internalMaterialChange === 'specification'
-            ? normalized.actualWidthMm
-            : current.actualWidthMm,
-        actualHeightMm:
-          internalMaterialChange === 'route' ||
-          internalMaterialChange === 'specification'
-            ? normalized.actualHeightMm
-            : current.actualHeightMm,
+        // Catalog facts are an atomic selection; mixing old paper/spec fields
+        // with a newly resolved product causes the server to reject the quote.
+        ...(internalMaterialChange === null ? {
+          productId: current.productId,
+          productStructure: current.productStructure,
+          specification: current.specification,
+          paperType: current.paperType,
+          paperWeightGsm: current.paperWeightGsm,
+          actualWidthMm: current.actualWidthMm,
+          actualHeightMm: current.actualHeightMm,
+        } : {}),
         crafts: resolveInternalOrderCraftIds(
           { ...normalized, crafts: current.crafts },
           crafts,
@@ -1797,7 +1744,7 @@ export function OrderForm({
     );
   }
 
-  function changeItemSelection(index: number, change: OrderItemSelectionChange) {
+  function applyItemSelection(index: number, change: OrderItemSelectionChange) {
     const selected = orderItemSelectionUpdate(
       getValues(`items.${index}`),
       change,
@@ -1813,6 +1760,28 @@ export function OrderForm({
     } else {
       commitOrderFormBItem(index, selected.item, selected.options);
     }
+  }
+  function changeDesignText(index: number, field: 'name' | 'artworkVersion', value: string) {
+    for (const member of designItemIndexes(getValues('items'), index)) {
+      setValue(`items.${member}.${field}`, value, { shouldDirty: true, shouldValidate: true });
+    }
+  }
+
+  function changeItemSelection(index: number, change: OrderItemSelectionChange) {
+    const indexes = change.type === 'specification' || change.type === 'customSize'
+      ? [index] : designItemIndexes(getValues('items'), index);
+    if (indexes.length > 1 && (change.type === 'paper' || change.type === 'weight')) {
+      const candidates = indexes.map((member) => {
+        const selected = orderItemSelectionUpdate(getValues(`items.${member}`), change, products, externalCreateOrderOptions);
+        return selected ? normalizeExternalOrderItem({ item: selected.item, crafts, products,
+          paperMaterials: externalCreateOrderOptions?.papers, ...selected.options }) : null;
+      });
+      if (candidates.some((candidate) => !candidate || candidate.paperType !== candidates[0]?.paperType || candidate.paperWeightGsm !== candidates[0]?.paperWeightGsm)) {
+        setState({ status: 'error', message: '该材料或克重无法同时用于当前设计款的所有规格，请先调整规格或增加独立设计款。' });
+        return;
+      }
+    }
+    for (const member of indexes) applyItemSelection(member, change);
   }
   const changeExternalRoute = (index: number, value: OrderItemPricingRoute) =>
     changeItemSelection(index, { type: 'route', value });
@@ -2810,14 +2779,14 @@ export function OrderForm({
     : null;
   const externalLocalIssues = submissionValidationVisible
     ? usesExternalSalesPricing
-      ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), pendingDesigns)
+      ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), selectedDesignQueues)
       : orderFormBGaps
     : [];
   const externalItemErrors: OrderFormBErrors['items'] =
     watchedItems.map((item, index) => {
       const fieldId = itemsArray.fields[index]?.id;
       const hasImage = fieldId
-        ? (pendingDesigns[fieldId] ?? []).some(
+        ? (selectedDesignQueues[fieldId] ?? []).some(
             (file) => file.prepared.fileType === DesignFileType.IMAGE,
           )
         : false;
@@ -2925,7 +2894,7 @@ export function OrderForm({
     items: externalItemErrors,
   };
   if (samplePurpose && externalCreateOrderOptions) {
-    return <OrderSampleEntry canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
+    return <OrderSampleEntry lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
       crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
       initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute} />;
   }
@@ -3155,12 +3124,12 @@ export function OrderForm({
                 {!isExternalSalesActor ? (
                   <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
                     <div>
-                      <Label htmlFor={`items.${expandedItem}.name`}>款式名</Label>
+                      <Label htmlFor={`items.${expandedItem}.name`}>设计款名称</Label>
                       <Input
                         id={`items.${expandedItem}.name`}
                         className="mt-2 h-10"
                         aria-invalid={Boolean(errors.items?.[expandedItem]?.name)}
-                        {...register(`items.${expandedItem}.name`)}
+                        {...register(`items.${expandedItem}.name`, { onChange: (event) => changeDesignText(expandedItem, 'name', event.target.value) })}
                       />
                     </div>
                     <div>
@@ -3170,7 +3139,7 @@ export function OrderForm({
                       <Input
                         id={`items.${expandedItem}.artworkVersion`}
                         className="mt-2 h-10"
-                        {...register(`items.${expandedItem}.artworkVersion`)}
+                        {...register(`items.${expandedItem}.artworkVersion`, { onChange: (event) => changeDesignText(expandedItem, 'artworkVersion', event.target.value) })}
                       />
                     </div>
                   </div>
@@ -3249,18 +3218,20 @@ export function OrderForm({
                         selectedIds={watchedItems[expandedItem]?.crafts ?? []}
                         disabled={orderFormControlsDisabled}
                         onToggle={(craftId, checked) => {
-                          const currentItem = getValues(`items.${expandedItem}`);
-                          const next = new Set(currentItem.crafts);
-                          if (checked) next.add(craftId);
-                          else next.delete(craftId);
-                          setValue(
-                            `items.${expandedItem}.crafts`,
-                            resolveInternalOrderCraftIds(
-                              { ...currentItem, crafts: [...next] },
-                              crafts,
-                            ),
-                            { shouldDirty: true, shouldValidate: true },
-                          );
+                          for (const member of designItemIndexes(getValues('items'), expandedItem)) {
+                            const currentItem = getValues(`items.${member}`);
+                            const next = new Set(currentItem.crafts);
+                            if (checked) next.add(craftId);
+                            else next.delete(craftId);
+                            setValue(
+                              `items.${member}.crafts`,
+                              resolveInternalOrderCraftIds(
+                                { ...currentItem, crafts: [...next] },
+                                crafts,
+                              ),
+                              { shouldDirty: true, shouldValidate: true },
+                            );
+                          }
                         }}
                       />
                     </fieldset>
@@ -3525,7 +3496,7 @@ export function OrderForm({
             items={watchedItems}
             itemFields={itemsArray.fields}
             activeIndex={expandedItem}
-            pendingDesigns={pendingDesigns}
+            pendingDesigns={selectedDesignQueues}
             packaging={{
               mode:
                 activePackagingGroup?.mode ??
@@ -3601,7 +3572,12 @@ export function OrderForm({
             onActiveIndexChange={setExpandedItem}
             onAdd={() => {
               const nextIndex = itemsArray.fields.length;
-              addItem();
+              duplicateItem(expandedItem);
+              setExpandedItem(nextIndex);
+            }}
+            onAddSpecification={() => {
+              const nextIndex = itemsArray.fields.length;
+              duplicateItem(expandedItem, true);
               setExpandedItem(nextIndex);
             }}
             onDuplicate={(index) => {
@@ -3660,8 +3636,10 @@ export function OrderForm({
               changeExternalPrintFoilMode(expandedItem, mode)
             }
             onLaminationChange={(lamination) => {
-              const current = getValues(`items.${expandedItem}`);
-              commitOrderFormBItem(expandedItem, { ...current, lamination });
+              for (const member of designItemIndexes(getValues('items'), expandedItem)) {
+                const current = getValues(`items.${member}`);
+                commitOrderFormBItem(member, { ...current, lamination });
+              }
             }}
             onQuantityChange={(quantity) => {
               setValue(`items.${expandedItem}.quantity`, quantity, {

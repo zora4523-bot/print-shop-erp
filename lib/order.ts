@@ -1253,6 +1253,7 @@ export async function createOrder(
           create: itemsWithSubtotals.map((it, idx) => ({
             sequence: idx + 1,
             fig: resolvedItemFigs[idx],
+            designGroupKey: it.designGroupKey ?? null,
             name: it.name,
             productId: it.productId ?? null,
             pricingRoute: it.pricingRoute,

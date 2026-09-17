@@ -1747,7 +1747,7 @@ export async function openFirstOrderItemEditor(page: Page): Promise<void> {
   const form = page.locator('[data-slot="order-form-b"]');
   await expect(form).toBeVisible();
   const firstStyle = form
-    .getByRole('navigation', { name: '款式' })
+    .getByRole('navigation', { name: /^(款式|设计款)$/ })
     .getByRole('button')
     .first();
   await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');

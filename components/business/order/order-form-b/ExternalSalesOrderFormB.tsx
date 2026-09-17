@@ -1,4 +1,6 @@
 'use client';
+import { orderDesignGroups } from '@/lib/order/design-groups';
+import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import { OrderPurposePicker } from '../OrderPurposePicker';
 import {
   isMixedPackaging,
@@ -178,6 +180,7 @@ export type OrderFormBProps = {
   rail: ReactNode;
   onActiveIndexChange: (index: number) => void;
   onAdd: () => void;
+  onAddSpecification?: () => void;
   onDuplicate: (index: number) => void;
   onRemove: (index: number) => void;
   onCustomNameChange: (value: string) => void;
@@ -508,6 +511,7 @@ export function OrderFormB({
   rail,
   onActiveIndexChange,
   onAdd,
+  onAddSpecification,
   onDuplicate,
   onRemove,
   onCustomNameChange,
@@ -537,6 +541,8 @@ export function OrderFormB({
     Math.max(0, activeIndex),
     Math.max(0, items.length - 1),
   );
+  const groups = orderDesignGroups(items.slice(0, itemFields.length));
+  const activeGroup = groups.find((group) => group.indexes.includes(safeActiveIndex));
   const item = items[safeActiveIndex];
   const field = itemFields[safeActiveIndex];
   const itemErrors = fieldErrors?.items?.[safeActiveIndex];
@@ -717,7 +723,7 @@ export function OrderFormB({
         ) : null}
       </header>
 
-      <div
+      {!onAddSpecification ? <><div
         role="group"
         aria-label="款式操作"
         className="mb-3 flex flex-wrap items-center gap-1.5"
@@ -800,7 +806,16 @@ export function OrderFormB({
             ) : null}
           </Button>
         ))}
-      </nav>
+      </nav></> : <div className="mb-4 space-y-3">
+        <p className="text-xs text-muted-foreground">{savedLabel} · {groups.length} 个设计款，{items.length} 个规格明细</p>
+        <nav ref={styleNavRef} aria-label="设计款" className="flex flex-wrap gap-2">
+          {groups.map((group, index) => <Button key={group.key} type="button" variant="outline"
+            disabled={disabled} aria-pressed={group === activeGroup}
+            onClick={() => { cancelIssueFocus(); onActiveIndexChange(group.indexes[0]); }}>
+            设计款 {index + 1}{group.indexes.some((member) => fieldErrors?.items?.[member]) ? ' · 待完善' : ''}
+          </Button>)}
+        </nav>
+      </div>}
 
       <div
         data-slot="order-form-layout"
@@ -875,6 +890,20 @@ export function OrderFormB({
             disabled={disabled}
             itemErrors={itemErrors}
             materialExtras={materialExtras}
+            specificationTabs={onAddSpecification ? <div className="mb-3 space-y-2">
+              <nav aria-label="规格明细" className="flex flex-wrap gap-2">
+                {activeGroup?.indexes.map((index) => <Button key={itemFields[index].id} type="button" variant="outline"
+                  disabled={disabled} aria-pressed={index === safeActiveIndex}
+                  onClick={() => { cancelIssueFocus(); onActiveIndexChange(index); }}>
+                  {items[index].specification || '选择规格'} · {items[index].quantity} 个
+                </Button>)}
+                <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAddSpecification}>＋ 增加规格</Button>
+                {itemFields.length > 1 ? <Button type="button" variant="outline" ref={removeButtonRef} disabled={disabled} onClick={() => { cancelIssueFocus(); restoreDeleteFocusRef.current = true; onRemove(safeActiveIndex); }}>
+                  {activeGroup?.indexes.length === 1 ? '删除设计款' : '移除当前规格'}
+                </Button> : null}
+              </nav>
+              <p className="text-xs text-muted-foreground">同一设计款共用设计文件、材料和工艺，各规格独立填写数量并计费。</p>
+            </div> : undefined}
             paperKey={paperKey}
             paperOptions={paperOptions}
             weightOptions={weightOptions}
@@ -1019,6 +1048,11 @@ export function OrderFormB({
           {pricingExtras}
 
           <Group title="文件">
+            {onAddSpecification ? <div className="mb-4 space-y-2">
+              <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 增加设计款</Button>
+              <p className="text-xs text-muted-foreground">新设计款沿用当前材料和工艺，请单独上传设计文件。每个设计款及其规格分别计费；多个文件可属于同一设计款。</p>
+              {items.length >= MAX_ORDER_ITEMS_PER_ORDER ? <p className="text-sm text-muted-foreground">每张工单最多 {MAX_ORDER_ITEMS_PER_ORDER} 个规格明细。</p> : null}
+            </div> : null}
             <fieldset>
               <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
                 设计文件

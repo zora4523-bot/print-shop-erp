@@ -1,5 +1,6 @@
 'use client';
 
+import type { OrderCreationLifecycle } from '@/components/business/order/order-creation-editor';
 import { type SampleOrderFormState, type SampleOrderContext, SampleOrderForm } from '@/components/business/order/SampleOrderForm';
 import { OrderPurposePicker } from '@/components/business/order/OrderPurposePicker';
 import { useSampleWorkbenchDraft } from './useSampleWorkbenchDraft';
@@ -67,6 +68,7 @@ export function WorkbenchCalculator({
   createEntry,
 }: {
   createEntry?: {
+    lifecycle?: OrderCreationLifecycle;
     canEditFees?: boolean;
     purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
     form: SampleOrderFormState;
@@ -145,7 +147,7 @@ export function WorkbenchCalculator({
               if (value === 'SAMPLE_SHIPMENT' || value === 'PROOF') { setPurpose(value); createEntry?.onPurposeChange(value); }
               else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') { if (createEntry) createEntry.onStandard(value, sampleFormProps.value); else { setPurpose('STANDARD'); select({ type: 'route', value }); } }
             }} />
-          {purpose === 'SAMPLE_SHIPMENT' ? <div className="mt-4"><SampleOrderForm canEditFees={createEntry?.canEditFees} purpose="SAMPLE_SHIPMENT" {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /></div> : !options.products.length ? <EmptyState title="暂无可报价产品" description="请联系管理员配置产品后重试" /> : <fieldset disabled={specialLocked} className="min-w-0">
+          {purpose === 'SAMPLE_SHIPMENT' ? <div className="mt-4"><SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} purpose="SAMPLE_SHIPMENT" {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /></div> : !options.products.length ? <EmptyState title="暂无可报价产品" description="请联系管理员配置产品后重试" /> : <fieldset disabled={specialLocked} className="min-w-0">
           <OrderItemCraftFields
             hideRoute={purpose === 'STANDARD'}
             uid={uid}
@@ -220,7 +222,7 @@ export function WorkbenchCalculator({
           </fieldset>}
         </Card>
         {purpose !== 'SAMPLE_SHIPMENT' && options.products.length > 0 ? <aside className="min-w-0 @min-[881px]:sticky @min-[881px]:top-20 @min-[881px]:self-start">
-          {purpose === 'PROOF' ? <SampleOrderForm canEditFees={createEntry?.canEditFees} purpose="PROOF" item={item} {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
+          {purpose === 'PROOF' ? <SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} purpose="PROOF" item={item} {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
             <h2
               ref={resultHeading}
               tabIndex={-1}

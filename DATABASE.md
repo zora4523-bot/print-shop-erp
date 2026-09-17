@@ -263,3 +263,7 @@ pnpm db:studio
 - `ProductionReport.wageSupplement` 是保持原 rate／chargeableQty 快照的计价差额，总额约束为 `round(chargeableQty × rate, 2) + wageSupplement`。数据库重新验证分档、倍率与首次固定费，不能任意填差额绕过自动计价。
 - `ADJUSTMENT` 仅以有效原报工为锚点，由有效管理员追加，零产量、同一未结算工作日，保留原工价身份和调整原因。原记录不可修改，已结算工资不能更改。
 - `ProductionOperation.payrollReviewRequired` 标识多人接手、合并款式颜色数不一致、继承进度或计价条件变化；人工核定后解除结算阻挡。分档报工冲正也需要复核。
+
+### 2026-09-18：建单设计分组
+
+前向迁移 `20260918120000_order_design_groups` 仅为 `OrderItem` 增加 nullable `designGroupKey TEXT`，无数据删除或历史回填。标识只在所属工单内分组，不是跨工单外键；金额、文件、生产任务和工资仍绑定独立 `OrderItem.id`。发布应用前须先应用迁移并生成 Prisma Client，旧应用兼容空字段。

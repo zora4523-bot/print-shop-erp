@@ -150,7 +150,7 @@ describe('OrderFormBRail', () => {
 
     expect(html).toContain('¥ 183.00');
     expect(html).toContain('外部销售应付工厂');
-    expect(html).toContain('1 款');
+    expect(html).toContain('1 条规格明细');
     expect(html).toContain('纸箱耗材');
     expect(html).toContain('¥ 3.00');
     expect(html).toContain('不含快递费');

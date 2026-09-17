@@ -1,5 +1,6 @@
 'use client';
 
+import type { OrderCreationLifecycle } from './order-creation-editor';
 import { useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createOrderAction, submitOrderAction } from '@/actions/order';
@@ -47,6 +48,7 @@ export type SampleOrderContext = Pick<CreateOrderInput, 'externalSalesUserId' | 
 export type SavedSampleDraft = { orderId: string; itemIds: string[] };
 
 type SampleOrderFormProps = {
+  lifecycle?: OrderCreationLifecycle;
   canEditFees?: boolean;
   context?: SampleOrderContext;
   purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
@@ -59,7 +61,18 @@ type SampleOrderFormProps = {
   onBusyChange?: (busy: boolean) => void;
 };
 
+function completeSavedSample(
+  draft: SavedSampleDraft, intent: 'draft' | 'submit' | 'fees',
+  lifecycle: OrderCreationLifecycle | undefined, onComplete: () => void, navigate: (url: string) => void,
+) {
+  lifecycle?.onCompleted({ orderId: draft.orderId, orderNo: draft.orderId, intent });
+  if (lifecycle?.retainResult && intent !== 'fees') return;
+  onComplete();
+  navigate(`/orders/${draft.orderId}${intent === 'fees' ? '#admin-fee-editor' : ''}`);
+}
+
 export function SampleOrderForm({
+  lifecycle,
   purpose,
   item,
   value,
@@ -163,6 +176,7 @@ export function SampleOrderForm({
       setError('报价暂时不可用，请重试');
     } finally {
       setBusy(false);
+      lifecycle?.onBusyChange?.(false);
     }
   }
   async function create() {
@@ -170,6 +184,7 @@ export function SampleOrderForm({
     if (!data || !currentQuote) return;
     setBusy(true);
     onBusyChange?.(true);
+    lifecycle?.onBusyChange?.(true);
     setError(null);
     try {
       if (requestId.current?.key !== factsKey)
@@ -177,7 +192,7 @@ export function SampleOrderForm({
       const result = await createOrderAction(
         null,
         {
-          ...buildExternalCreateOrderPayload({ ...data, clientSubmissionId: requestId.current.id }),
+          ...buildExternalCreateOrderPayload({ ...data, clientSubmissionId: lifecycle?.submissionId ?? requestId.current.id }),
           ...(context?.externalSalesUserId ? { externalSalesUserId: context.externalSalesUserId } : {}),
         },
       );
@@ -189,17 +204,20 @@ export function SampleOrderForm({
         );
         return;
       }
+      lifecycle?.onCreated({ orderId: result.orderId, orderNo: result.orderNo, intent: 'draft' });
       onDraftChange({ orderId: result.orderId, itemIds: result.itemIds });
     } catch {
       setError('工单保存失败，请重试');
     } finally {
       setBusy(false);
       onBusyChange?.(false);
+      lifecycle?.onBusyChange?.(false);
     }
   }
   async function submit(editFees = false) {
     if (!draft) return;
     setBusy(true);
+    lifecycle?.onBusyChange?.(true);
     setError(null);
     try {
       const result = await submitOrderAction(
@@ -208,9 +226,10 @@ export function SampleOrderForm({
       );
       if (result.status === 'success') {
         requestId.current = null;
-        onComplete();
-        router.push(`/orders/${draft.orderId}${editFees ? '#admin-fee-editor' : ''}`);
-        router.refresh();
+        completeSavedSample(draft, editFees ? 'fees' : 'submit', lifecycle, onComplete, (url) => {
+          router.push(url);
+          router.refresh();
+        });
         return;
       }
       if (result.status === 'quote_changed') {
@@ -238,6 +257,7 @@ export function SampleOrderForm({
       setError('提交失败，请重试');
     } finally {
       setBusy(false);
+      lifecycle?.onBusyChange?.(false);
     }
   }
   return (
@@ -340,9 +360,9 @@ export function SampleOrderForm({
           <Button
             type="button"
             variant="outline"
-            onClick={() => { requestId.current = null; onComplete(); router.push(`/orders/${draft.orderId}`); }}
+            onClick={() => { requestId.current = null; completeSavedSample(draft, 'draft', lifecycle, onComplete, (url) => router.push(url)); }}
           >
-            查看已保存工单
+            {lifecycle?.retainResult ? '保存并继续下一张' : '查看已保存工单'}
           </Button>
         </>
       )}

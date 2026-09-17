@@ -74,7 +74,7 @@ test.describe('notification urgent wire — golden path', () => {
       .getByRole('button', { name: '160g', exact: true })
       .click();
     await form
-      .getByRole('textbox', { name: '款式名', exact: true })
+      .getByRole('textbox', { name: '设计款名称', exact: true })
       .fill(itemName);
     await form
       .getByRole('spinbutton', { name: '数量', exact: true })

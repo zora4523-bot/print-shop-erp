@@ -96,17 +96,11 @@ export function orderItemFieldOptions(
     (specification) => ({
       value: specification,
       label: externalOrderSpecificationLabel(specification, item.pricingRoute),
-      disabled: !externalOrderPapersForRoute(
-        products,
+      disabled: !activeExternalPaper || !externalOrderWeightOptionsForSelection(
+        activeExternalPaper,
         item.pricingRoute,
-        options?.papers,
-      ).some((paper) =>
-        externalOrderWeightOptionsForSelection(
-          paper,
-          item.pricingRoute,
-          specification,
-        ).some((weight) => !weight.disabled),
-      ),
+        specification,
+      ).some((weight) => !weight.disabled && weight.value === item.paperWeightGsm),
     }),
   );
   return {

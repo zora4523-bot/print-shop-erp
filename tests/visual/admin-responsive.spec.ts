@@ -1465,7 +1465,7 @@ async function prepareConfiguredLocalFoilStyle(page: Page) {
   await expect(form).toBeVisible();
   await expect(
     form
-      .getByRole('navigation', { name: '款式' })
+      .getByRole('navigation', { name: /^(款式|设计款)$/ })
       .getByRole('button')
       .first(),
   ).toHaveAttribute('aria-pressed', 'true');
@@ -1550,7 +1550,7 @@ async function prepareAdminOrderCreationState(page: Page) {
     form.getByRole('textbox', { name: '客户名称/简称', exact: true }),
   ).toHaveCount(0);
   await form
-    .getByRole('textbox', { name: '款式名', exact: true })
+    .getByRole('textbox', { name: '设计款名称', exact: true })
     .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
   await form
     .getByRole('textbox', {
@@ -1577,7 +1577,7 @@ async function prepareSalesOrderCreationState(page: Page) {
   const form = await prepareConfiguredLocalFoilStyle(page);
   // 销售端款式名由已选计价事实生成，不提供人工命名入口。
   await expect(
-    form.getByRole('textbox', { name: '款式名', exact: true }),
+    form.getByRole('textbox', { name: '设计款名称', exact: true }),
   ).toHaveCount(0);
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })

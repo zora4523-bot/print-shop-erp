@@ -43,16 +43,16 @@ for (const actor of ['owner', 'sales'] as const) {
       await expect(pack).toHaveAttribute('aria-invalid', 'false');
       expect(await top(mode)).toBe(modeTop);
 
-      await page.getByRole('button', { name: /复制当前/ }).click();
+      await page.getByRole('button', { name: '＋ 增加设计款' }).click();
       await pack.fill('6');
-      const styles = page.getByRole('navigation', { name: '款式', exact: true }).getByRole('button');
+      const styles = page.getByRole('navigation', { name: '设计款', exact: true }).getByRole('button');
       await expect(styles).toHaveCount(2);
       await styles.first().click();
       await expect(pack).toHaveValue('12');
       await expect(quantity).toHaveValue('1200');
       await styles.last().click();
       await expect(pack).toHaveValue('6');
-      await page.getByRole('button', { name: '删除第 2 款', exact: true }).click();
+      await page.getByRole('button', { name: '删除设计款', exact: true }).click();
       await expect(styles).toHaveCount(1);
       await expect(pack).toHaveValue('12');
 

@@ -551,6 +551,7 @@ model OrderItem {
   orderId             String
   sequence            Int
   fig                 Int?
+  designGroupKey      String? // 建单设计分组；每个规格仍独立计价、生产和结算
   name                String
   productId           String?
   pricingRoute        OrderItemPricingRoute

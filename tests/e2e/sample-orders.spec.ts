@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { Client } from 'pg';
 import bcrypt from 'bcryptjs';
+import { login as loginWithIsolatedClient } from './_helpers';
 import {
   assertActivatedE2eDatabase,
   postgresDatabaseIdentity,
@@ -10,11 +11,7 @@ import {
 
 const password = 'e2e-test-password-1234';
 async function login(page: Page, username: string, path = '/workbench') {
-  await page.goto(`/login?from=${encodeURIComponent(path)}`);
-  await page.locator('#username').fill(username);
-  await page.locator('#password').fill(password);
-  await page.getByRole('button', { name: /登.*录/ }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await loginWithIsolatedClient(page, { username, password, from: path });
 }
 async function database() {
   const explicit = process.env.SAMPLE_TEST_DATABASE_URL;
@@ -194,6 +191,7 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
 
 test('新建工单样品入口六视口、明暗主题、触控和无障碍', async ({ page }) => {
   test.setTimeout(180_000);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await login(page, 'e2e-sample-admin', '/orders/new');
   for (const [width, height] of [
     [375, 667],
@@ -214,6 +212,7 @@ test('新建工单样品入口六视口、明暗主题、触控和无障碍', as
         const choice = page.getByRole('button', { name: purpose, exact: true });
         await choice.click();
         await expect(page.getByLabel('收货人', { exact: true })).toBeVisible();
+        await expect.poll(() => page.evaluate(() => document.getAnimations().filter((animation) => animation.playState === 'running' || animation.pending).length)).toBe(0);
         const box = await choice.boundingBox();
         expect(box!.height).toBeGreaterThanOrEqual(44);
         expect(
@@ -256,8 +255,9 @@ for (const purpose of ['寄样品', '打样'] as const) {
     await expect(page.getByRole('button', { name: '查看已保存工单', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '寄样品', exact: true })).toBeDisabled();
     await page.reload();
-    await expect(page.getByRole('button', { name: '查看已保存工单', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '查看已保存工单', exact: true }).click();
+    // Saved workspaces recover the existing order instead of reopening a create command.
+    await expect(page.getByRole('link', { name: '查看工单', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: '查看工单', exact: true }).click();
     await page.waitForURL(/\/orders\/(?!new$)[a-z0-9]+$/);
     const id = page.url().split('/').pop()!;
     const db = await database();
