@@ -1,3 +1,4 @@
+import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
@@ -246,7 +247,7 @@ export async function listMaterialsPage(opts: {
 export async function listActivePaperOrderOptions(): Promise<
   PaperOrderOption[]
 > {
-  return db.material.findMany({
+  const rows = await db.material.findMany({
     where: { category: MaterialCategory.PAPER, isActive: true },
     select: {
       id: true,
@@ -257,6 +258,7 @@ export async function listActivePaperOrderOptions(): Promise<
     },
     orderBy: [{ name: 'asc' }, { specification: 'asc' }, { id: 'asc' }],
   });
+  return rows.filter((row) => !isRetiredPaper(row));
 }
 
 function configuredPaperWeight(row: {
@@ -291,7 +293,7 @@ export async function listExternalCreateOrderPaperOptions(
     ],
   });
 
-  return rows.map((row) => ({
+  return rows.filter((row) => !isRetiredPaper(row)).map((row) => ({
     ...row,
     weight: configuredPaperWeight(row),
   }));
@@ -438,6 +440,9 @@ export async function setMaterialActive(
       select: MATERIAL_SELECT,
     });
     if (!target) throw new MaterialInvariantError('目标物料不存在');
+    if (isActive && target.category === MaterialCategory.PAPER && isRetiredPaper(target)) {
+      throw new MaterialInvariantError('120g 纸张已停用，请选择其他克重');
+    }
     if (target.isActive === isActive) return target;
 
     return tx.material.update({

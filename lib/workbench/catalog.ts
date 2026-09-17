@@ -1,3 +1,4 @@
+import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import { OrderItemPricingRoute } from '@/generated/prisma/enums';
 import {
@@ -11,9 +12,10 @@ export function workbenchPaperIssue(
   product: ExternalCreateOrderOptions['products'][number] | undefined,
   papers: ExternalCreateOrderOptions['papers'],
 ): string | null {
+  if (product && isRetiredPaper(product)) return '120g 纸张已停用，请选择其他克重';
   if (!product?.paperMaterialId) return null;
   const linked = papers.find((paper) => paper.id === product.paperMaterialId);
-  if (!linked || linked.outOfStock)
+  if (!linked || linked.outOfStock || isRetiredPaper(linked))
     return '所选产品的纸张已缺货或停用，请选择其他产品或联系管理员补充资料';
   if (
     product.weight === null &&
@@ -33,13 +35,13 @@ export function workbenchPaperChoices(
   product: ExternalCreateOrderOptions['products'][number] | undefined,
   papers: ExternalCreateOrderOptions['papers'],
 ): string[] {
-  if (!product) return [];
+  if (!product || isRetiredPaper(product)) return [];
   const linked = product.paperMaterialId
     ? papers.find((paper) => paper.id === product.paperMaterialId)
     : undefined;
   // The options reader returns active materials only. A missing linked paper
   // is unavailable even when the product still carries its saved paper label.
-  if (product.paperMaterialId && (!linked || linked.outOfStock)) return [];
+  if (product.paperMaterialId && (!linked || linked.outOfStock || isRetiredPaper(linked))) return [];
   const withWeight = (name: string, weight: number | null) =>
     parseCatalogPaperWeight(name) === null && weight !== null
       ? `${weight}g${name}`
@@ -61,7 +63,7 @@ export function workbenchPaperChoices(
       papers
         .filter(
           (paper) =>
-            !paper.outOfStock &&
+            !paper.outOfStock && !isRetiredPaper(paper) &&
             (!product.paperMaterialId || paper.id === product.paperMaterialId),
         )
         .flatMap((paper) => {

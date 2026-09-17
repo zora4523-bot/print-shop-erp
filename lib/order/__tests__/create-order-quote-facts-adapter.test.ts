@@ -721,3 +721,10 @@ describe('buildCreateOrderQuoteInputFromCatalog', () => {
     expect(error.code).toBe('INVALID_PACKAGING_FACTS');
   });
 });
+
+it.each([undefined, '管理员核价'])('rejects retired 120g for unlinked products, including manual pricing (%s)', async (manualQuoteReason) => {
+  const request = input([item({ paperType: '120g珠光艳闪', paperWeightGsm: 120, manualQuoteReason })]);
+  await expect(buildCreateOrderQuoteInputFromCatalog(client({ products: [product({
+    paperType: '120g珠光艳闪', paperMaterialId: null, weight: 120,
+  })] }), request)).rejects.toThrow('120g 纸张已停用');
+});

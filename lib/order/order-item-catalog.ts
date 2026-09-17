@@ -1,3 +1,4 @@
+import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import {
   OrderItemPricingRoute,
   OrderProductStructure,
@@ -93,7 +94,7 @@ function productPricingRoute(
   product: ExternalOrderCatalogProduct,
 ): OrderItemPricingRoute | null {
   const routes = AUTOMATIC_ROUTES.filter((route) =>
-    productCategoryMatchesPricingRoute(route, product.category),
+    !isRetiredPaper(product) && productCategoryMatchesPricingRoute(route, product.category),
   );
   return routes.length === 1 ? routes[0] : null;
 }
@@ -133,7 +134,7 @@ export function buildExternalOrderPapers<
       outOfStock,
     } = args;
     const label = paperFamilyLabel(paperType);
-    if (!label) return;
+    if (!label || isRetiredPaper({ paperType, weight })) return;
     const key = normalizeCatalogPricingText(label);
     const entry = byKey.get(key) ?? { label, variants: [] };
     if (
@@ -339,7 +340,7 @@ export function externalOrderSpecificationsForRoute(
     ...new Set(
       products
         .filter((product) =>
-          productCategoryMatchesPricingRoute(route, product.category),
+          !isRetiredPaper(product) && productCategoryMatchesPricingRoute(route, product.category),
         )
         .flatMap((product) =>
           catalogPricingFactChoices(product.specification),
@@ -374,7 +375,7 @@ export function externalOrderCatalogCandidates<
 ): T[] {
   const specificationMatches = products.filter(
     (product) =>
-      productCategoryMatchesPricingRoute(route, product.category) &&
+      !isRetiredPaper(product) && productCategoryMatchesPricingRoute(route, product.category) &&
       catalogPricingFactChoices(product.specification).some((choice) =>
         sameCatalogText(choice, specification),
       ),

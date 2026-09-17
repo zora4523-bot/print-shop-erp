@@ -1,3 +1,4 @@
+import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
@@ -674,6 +675,9 @@ export async function buildCreateOrderQuoteInputFromCatalog(
   }
 
   for (const item of input.items) {
+    if (isRetiredPaper({ weight: item.paperWeightGsm, paperType: item.paperType })) {
+      return fail('CATALOG_PAPER_CHANGED', '120g 纸张已停用，请选择其他克重');
+    }
     if (item.manualQuoteReason != null && !item.manualQuoteReason.trim()) {
       fail(
         'INVALID_ITEM_FACTS',

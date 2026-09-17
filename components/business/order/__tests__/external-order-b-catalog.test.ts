@@ -37,7 +37,7 @@ describe('external order B catalog', () => {
     },
   ];
 
-  it('derives the available weight from exact active product facts', () => {
+  it('excludes retired 120g while preserving other configured weights', () => {
     const pearlFlash = buildExternalOrderPapers(products).find(
       (paper) => paper.label === '珠光艳闪',
     );
@@ -49,7 +49,7 @@ describe('external order B catalog', () => {
         OrderItemPricingRoute.STOCK_BLANK,
         '迷你封50×80',
       ),
-    ).toEqual([120]);
+    ).toEqual([]);
     expect(
       externalOrderWeightsForSelection(
         pearlFlash!,

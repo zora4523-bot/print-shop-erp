@@ -1,3 +1,4 @@
+import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { externalShipmentContactIssues } from './external-shipment-contact';
 import Decimal from 'decimal.js';
 import { isTrustedAdminItemPricingSnapshot, isTrustedAdminPackagingPricingSnapshot, type AdminPackagingPricingSnapshotFacts, type AdminItemPricingSnapshotFacts } from './admin-pricing-snapshot';
@@ -383,7 +384,8 @@ async function assertSelectedPapersAvailable(
       continue;
     }
     const paper = matches[0]!;
-    if (!paper.isActive || paper.outOfStock) {
+    if (!paper.isActive || paper.outOfStock || isRetiredPaper(paper) ||
+      isRetiredPaper({ weight: item.paperWeightGsm, paperType: item.paperType })) {
       unavailableSelections.push(`${styleLabel}纸张“${paper.name}”`);
     }
   }

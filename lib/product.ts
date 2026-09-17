@@ -1,3 +1,4 @@
+import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { randomUUID } from 'node:crypto';
 import {
   Prisma,
@@ -456,7 +457,7 @@ export async function listExternalCreateOrderProductOptions(
   });
 
   return rows.flatMap(({ categoryNode, ...product }) =>
-    isRetiredProductCategory(categoryNode) ? [] : [product],
+    isRetiredProductCategory(categoryNode) || isRetiredPaper(product) ? [] : [product],
   );
 }
 

@@ -1126,6 +1126,19 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.orderCustomerCharge.upsert).toHaveBeenCalledTimes(2);
   });
 
+  it('拒绝停用前保存的 120g 草稿，即使纸张仍为启用状态', async () => {
+    const order = draftOrder({ items: [item({
+      product: { paperMaterialId: 'paper-120' },
+      paperType: '120g珠光艳闪', paperWeightGsm: 120,
+    })] });
+    const tx = txFor(order, [{ id: 'paper-120', name: '120g珠光艳闪',
+      normalizedName: '120g珠光艳闪', specification: null, isActive: true, outOfStock: false }]);
+    await expect(finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient,
+      'order-1', 'sales-1', NOW)).rejects.toThrow('已缺货或停用');
+    expect(mocks.readPublishedSnapshot).not.toHaveBeenCalled();
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
+  });
+
   it('纸张缺货时在读价目前拒绝提交', async () => {
     const order = draftOrder({
       items: [
