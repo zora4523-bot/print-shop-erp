@@ -74,7 +74,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
   const [scheduled, setScheduled] = useState(Boolean(draft.effectiveFrom));
   const [effective, setEffective] = useState(draft.effectiveFrom ? formatDateTimeLocalShanghai(new Date(draft.effectiveFrom)) : '');
   const validTime = effective && Number.isFinite(new Date(`${effective}+08:00`).getTime());
-  const ready = Boolean((personal || draft.sourceName) && draft.publishNote.length >= 2 && (draft.useUnifiedRates || fields.filter((f) => f.key !== 'box').every((field) => rateFor(draft, field))));
+  const ready = Boolean((personal || draft.sourceName) && draft.publishNote.length >= 2 && (draft.useUnifiedRates || fields.filter((f) => f.key !== 'box' && (personal || f.key !== 'bag')).every((field) => rateFor(draft, field))));
   return <div className="space-y-4">
     <p className="text-sm font-medium">第 {draft.version} 版 · 草稿</p>
     <form aria-busy={pending} action={action} onChange={() => { setDirty(true); setReview(false); }} className="space-y-4">
@@ -84,7 +84,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
       {personal && <div className="space-y-1 text-sm"><label htmlFor="piecework-personal-mode">工价模式</label><NativeSelect id="piecework-personal-mode" name="useUnifiedRates" value={unified ? 'true' : 'false'} onChange={(e) => setUnified(e.target.value === 'true')} disabled={pending}><option value="true">使用统一工价</option><option value="false">使用个人工价</option></NativeSelect></div>}
       <fieldset disabled={pending} className="grid min-w-0 gap-4 sm:grid-cols-2">
         {(personal && unified ? [] : fields).map((field) => <label key={field.key} className="space-y-1 text-sm" htmlFor={`piecework-${field.key}`}>
-          <span>{field.label}（{field.unitLabel}）{field.key === 'box' ? ' · 选填' : ''}</span>
+          <span>{field.label}（{field.unitLabel}）{(field.key === 'box' || (!personal && field.key === 'bag')) ? ' · 选填' : ''}</span>
           <Input id={`piecework-${field.key}`} name={field.key} aria-invalid={Boolean(fieldErrors?.[field.key])} aria-describedby={fieldErrors?.[field.key] ? `piecework-${field.key}-message` : undefined} inputMode="decimal" defaultValue={rateFor(draft, field) || ('defaultValue' in field ? field.defaultValue : field.key === 'partial' ? DEFAULT_FOIL_WAGES.PARTIAL.pieceRate : field.key === 'full' ? DEFAULT_FOIL_WAGES.FULL.pieceRate : '')} placeholder="待录" maxLength={15} pattern="[0-9]{1,10}(\.[0-9]{1,4})?" />
           {fieldErrors?.[field.key]?.map((message) => <FormMessage key={message} fieldId={`piecework-${field.key}`} tone="error">{message}</FormMessage>)}
         </label>)}
@@ -109,7 +109,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
           return <li key={field.key}>{field.label}：{old || '未配置'} → {next || '未配置'} {next && field.unitLabel}{difference && `（差额 ${difference.gte(0) ? '+' : ''}${formatUnitPrice(difference)}）`}</li>;
         })}
       </ul>
-      <p className="text-sm">生效时间：{draft.effectiveFrom ? formatDateTimeShanghai(new Date(draft.effectiveFrom)) : '发布后立即生效'}。生效后的报工使用新工价，已有工资保持不变。{personal && draft.useUnifiedRates && !unifiedReference && '统一工价尚未发布，计件报工将暂停。'}{!draft.useUnifiedRates && fields.some((f) => f.key === 'box') && !rateFor(draft, PIECEWORK_RATE_FIELDS[3]) && '未配置装盒工价，装盒报工将暂停。'}</p>
+      <p className="text-sm">生效时间：{draft.effectiveFrom ? formatDateTimeShanghai(new Date(draft.effectiveFrom)) : '发布后立即生效'}。生效后的报工使用新工价，已有工资保持不变。{personal && draft.useUnifiedRates && !unifiedReference && '统一工价尚未发布，计件报工将暂停。'}{!personal && !rateFor(draft, PIECEWORK_RATE_FIELDS[2]) && '未配置入袋工价，入袋报工将暂停。'}{!draft.useUnifiedRates && fields.some((f) => f.key === 'box') && !rateFor(draft, PIECEWORK_RATE_FIELDS[3]) && '未配置装盒工价，装盒报工将暂停。'}</p>
       <input type="hidden" name="version" value={draft.version} /><input type="hidden" name="updatedAt" value={draft.updatedAt} />
       <div className="flex gap-2"><Button name="intent" value="publish" type="submit" disabled={pending}>{pending ? '发布中…' : '发布工价'}</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setReview(false)}>返回编辑</Button></div>
     </form>}

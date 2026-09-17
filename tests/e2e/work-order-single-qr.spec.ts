@@ -133,7 +133,7 @@ test.describe('工单单码跨岗位入口', () => {
       await report(packerPage, '2', '20');
       const result = await withDb(async (db) => ({
         claims: (await db.query(`SELECT account.username FROM "ProductionScanClaim" claim JOIN "User" account ON account.id=claim."reporterId" WHERE claim."orderId"=$1`, [fixture.id])).rows,
-        reports: (await db.query(`SELECT account.username, operation."operationType", report."reportedCompletedQty"::text AS quantity, report.rate::text, report.amount::text, report."chargeableQty"::text, report.unit, report."priceBookId" FROM "ProductionReport" report JOIN "ProductionOperation" operation ON operation.id=report."operationId" JOIN "User" account ON account.id=report."reporterId" WHERE operation."orderId"=$1 ORDER BY report."reportedAt"`, [fixture.id])).rows,
+        reports: (await db.query(`SELECT account.username, operation."operationType", report."reportedCompletedQty"::text AS quantity, report.rate::text, report.amount::text, report."chargeableQty"::text, report.unit, report."priceBookId", rule."smallOrderAmount"::text AS "smallOrderAmount", rule."setupAmount"::text AS "setupAmount" FROM "ProductionReport" report JOIN "ProductionOperation" operation ON operation.id=report."operationId" JOIN "User" account ON account.id=report."reporterId" JOIN "PieceworkPriceRule" rule ON rule."priceBookId"=report."priceBookId" AND rule."operationType"=operation."operationType" AND rule.unit=report.unit WHERE operation."orderId"=$1 ORDER BY report."reportedAt"`, [fixture.id])).rows,
       }));
       expect(result.claims).toEqual([{ username: E2E_USERS.workerHandPress!.username }]);
       expect(result.reports.map(({ username, operationType, quantity }) => ({ username, operationType, quantity }))).toEqual([
@@ -142,7 +142,12 @@ test.describe('工单单码跨岗位入口', () => {
       ]);
       for (const report of result.reports) {
         expect(new Decimal(report.rate).isPositive(), '真实工价必须为正').toBe(true);
-        expect(report.amount).toBe(new Decimal(report.chargeableQty).times(report.rate).toFixed(2, Decimal.ROUND_HALF_UP));
+        // This 400-piece, one-pass fixture uses the saved small-order wage when
+        // its selected book has tiered fees; historical books retain per-unit pricing.
+        const expected = report.operationType === 'PARTIAL' && report.smallOrderAmount !== null && report.setupAmount !== null
+          ? new Decimal(report.smallOrderAmount).toFixed(2, Decimal.ROUND_HALF_UP)
+          : new Decimal(report.chargeableQty).times(report.rate).toFixed(2, Decimal.ROUND_HALF_UP);
+        expect(report.amount).toBe(expected);
         expect(report.priceBookId).toBeTruthy();
         expect(report.unit).toBe(report.operationType === 'PACKING' ? 'PER_BAG' : 'PER_PASS');
       }
