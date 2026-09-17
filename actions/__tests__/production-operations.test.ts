@@ -195,6 +195,7 @@ describe('reportProductionOperationAction', () => {
     await expect(
       reportProductionOperationAction('operation-1', null, formData()),
     ).resolves.toMatchObject({ status: 'success', reportId: 'report-1' });
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/salary');
     expect(requirePermissionMock).toHaveBeenCalledWith('task:report');
     expect(reportMock).toHaveBeenCalledWith(
       {
