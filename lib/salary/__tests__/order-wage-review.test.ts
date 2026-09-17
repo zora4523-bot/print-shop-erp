@@ -42,3 +42,14 @@ it('即使未修改金额，核定后新修订仍允许再次调整', async () =
   tx.productionOperation.findMany.mockResolvedValue([{ ...operation, updatedAt: new Date('2026-09-17T00:00:01Z') }]);
   expect((await listOrderWages('order', actor))[0]!.revision).not.toBe(first);
 });
+
+it('跨日只读冲正允许原额核定，禁止改写负数或给可编辑组设负数', async () => {
+  const reversed = { ...operation, reports: [report, { ...report, id: 'rev', entryType: 'REVERSAL', amount: '-24', reportedCompletedQty: '-1000', reportedAt: new Date('2026-09-17T04:00:00Z') }] };
+  tx.productionOperation.findMany.mockResolvedValue([reversed]);
+  tx.productionOperation.findUniqueOrThrow.mockResolvedValue(reversed);
+  const data = { ...await input('24'), targets: [{ anchorId: 'r1', amount: '24' }, { anchorId: 'rev', amount: '-24' }] };
+  await reviewOrderWages(data, actor);
+  expect(tx.productionReport.create).not.toHaveBeenCalled();
+  await expect(reviewOrderWages({ ...data, targets: [data.targets[0]!, { anchorId: 'rev', amount: '-23' }] }, actor)).rejects.toThrow('冲正记录');
+  await expect(reviewOrderWages({ ...data, targets: [{ anchorId: 'r1', amount: '-1' }, data.targets[1]!] }, actor)).rejects.toThrow('不能小于');
+});

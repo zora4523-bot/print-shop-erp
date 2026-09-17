@@ -15,7 +15,7 @@ type WageOperation = Prisma.ProductionOperationGetPayload<{ include: typeof incl
 export class WageReviewError extends Error {}
 export const wageReviewSchema = z.object({
   operationId: z.string().min(1), revision: z.string().length(64), reason: z.string().trim().min(2).max(500),
-  targets: z.array(z.object({ anchorId: z.string().min(1), amount: z.string().regex(/^\d{1,12}(\.\d{1,2})?$/) }).strict()).min(1).max(500),
+  targets: z.array(z.object({ anchorId: z.string().min(1), amount: z.string().regex(/^-?\d{1,12}(\.\d{1,2})?$/) }).strict()).min(1).max(500),
 }).strict();
 function summarize(operation: WageOperation) {
   const groups = new Map<string, { anchorId: string; reporterId: string; name: string; date: string; amount: Decimal; settled: boolean; quantity: Decimal }>();
@@ -63,7 +63,9 @@ export async function reviewOrderWages(raw: z.infer<typeof wageReviewSchema>, ac
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkSettlementLockKey(group.reporterId, group.date)}))`;
       const target = input.targets.find((t) => t.anchorId === group.anchorId);
       if (!target) throw new WageReviewError('核定对象不符，请刷新工单');
-      const delta = new Decimal(target.amount).minus(group.amount);
+      const amount = new Decimal(target.amount);
+      if (group.editable && amount.isNegative()) throw new WageReviewError('核定提成不能小于 0');
+      const delta = amount.minus(group.amount);
       if (delta.isZero()) continue;
       const settlement = await tx.pieceworkSettlement.findUnique({ where: { reporterId_workDate: { reporterId: group.reporterId, workDate: new Date(`${group.date}T00:00:00Z`) } } });
       if (settlement || group.settled) throw new WageReviewError(`${group.name} ${group.date} 已结算，不能修改该日工资`);
