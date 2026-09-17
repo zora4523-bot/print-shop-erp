@@ -27,3 +27,8 @@ it('发布仅传草稿修订，不接受临时金额', async () => {
   await mutatePersonalPieceworkAction('worker', null, data);
   expect(publish).toHaveBeenCalledWith({ workerId: 'worker', version: 2, updatedAt: '2026-09-17T00:00:00Z' }, actor);
 });
+it('不提交调价依据也可保存个人工价', async () => {
+  const data = form(); data.delete('sourceName');
+  expect(await mutatePersonalPieceworkAction('worker', null, data)).toMatchObject({ status: 'success' });
+  expect(save).toHaveBeenCalled();
+});

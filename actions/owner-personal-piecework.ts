@@ -18,7 +18,7 @@ export async function mutatePersonalPieceworkAction(workerId: string, _previous:
         partial: form.get('partial') ?? '', full: form.get('full') ?? '', bag: form.get('bag') ?? '', box: form.get('box') ?? '',
         partialSmall: form.get('partialSmall') ?? undefined, partialSetup: form.get('partialSetup') ?? undefined,
         fullSmall: form.get('fullSmall') ?? undefined, fullSetup: form.get('fullSetup') ?? undefined,
-        sourceName: form.get('sourceName'), publishNote: form.get('publishNote'), effectiveFrom: form.get('effectiveFrom'),
+        sourceName: form.get('sourceName') ?? undefined, publishNote: form.get('publishNote'), effectiveFrom: form.get('effectiveFrom'),
       });
       if (!parsed.success) return { status: 'error', message: '请检查工价、生效时间和调整说明', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
       await savePersonalPieceworkDraft(parsed.data, actor);

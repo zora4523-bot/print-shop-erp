@@ -15,7 +15,7 @@ async function publish(page: Page, workerId: string, rate: string | null, future
   await region.getByLabel('工价模式', { exact: true }).selectOption(rate === null ? 'true' : 'false');
   if (rate !== null) await region.getByLabel('局部烫金（元/下）').fill(rate);
   await expect(region.getByLabel('专版烫金（元/个）')).toHaveCount(0);
-  await region.getByLabel('调价依据', { exact: true }).fill('隔离测试本人合同');
+  await expect(region.getByLabel('调价依据', { exact: true })).toHaveCount(0);
   await region.getByLabel('调整说明').fill('账号个人工价验收');
   if (future) {
     await region.getByLabel('生效方式').selectOption('scheduled');

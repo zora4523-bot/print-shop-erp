@@ -411,7 +411,7 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 ### 师傅个人工价（2026-09-17）
 
 `mutatePersonalPieceworkAction(workerId, previous, form)` 仅 `salary:rule:manage` 管理员可调用，领域事务再次验证管理员与目标账号状态。账号取绑定参数，表单账号不能覆盖它。
-`intent=create/save/publish` 复用工价草稿流程；save 包含 `version/updatedAt/useUnifiedRates/partial/full/bag/box/sourceName/publishNote/effectiveFrom`。只保存当前岗位字段，空金额与零金额分开。publish 只接收已保存的版本和修订时间，不能直接带价发布。
+`intent=create/save/publish` 复用工价草稿流程；save 包含 `version/updatedAt/useUnifiedRates/partial/full/bag/box/sourceName/publishNote/effectiveFrom`。个人工价不再要求手填 `sourceName`；旧依据保留，缺省时发布来源自动记录为“管理员账号工价设置”。调整说明仍必填，统一工价的依据要求保持不变。只保存当前岗位字段，空金额与零金额分开。publish 只接收已保存的版本和修订时间，不能直接带价发布。
 扫码报工表单新增必填 `expectedRateKey`，为当前价格簿与个人模式版本的组合键。成功重试仍返回原记录；新报工工价已变化则拒绝并要求刷新。客户端不能指定结算价格或他人账号。
 
 ### 2026-09-17 师傅分档工价与工单提成核定

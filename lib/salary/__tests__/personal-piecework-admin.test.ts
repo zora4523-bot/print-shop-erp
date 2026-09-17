@@ -28,7 +28,7 @@ it('只保存目标岗位工价并推进修订', async () => {
 it('发布个人价不关闭统一工价', async () => {
   await publishPersonalPieceworkDraft(revision, actor);
   expect(tx.pieceworkPriceBook.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { workerId: 'worker', status: 'PUBLISHED', effectiveTo: null } }));
-  expect(tx.pieceworkPriceBook.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'PUBLISHED', publishedById: 'admin' }) }));
+  expect(tx.pieceworkPriceBook.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'PUBLISHED', publishedById: 'admin', sourceName: '正式依据' }) }));
 });
 it('未来生效按保存时间发布', async () => {
   const date = new Date('2030-01-01T00:00:00Z'); tx.pieceworkPriceBook.findUnique.mockResolvedValue({ ...book, effectiveFrom: date });
@@ -71,4 +71,15 @@ it('创建草稿使用全局唯一版本但只复制本人适用岗位', async (
   tx.pieceworkPriceBook.create.mockResolvedValue({ ...book, version: 11 });
   expect((await createPersonalPieceworkDraft('worker', actor)).version).toBe(11);
   expect(tx.pieceworkPriceBook.create.mock.calls[0][0].data.workerId).toBe('worker');
+});
+it('个人工价无需手填依据，发布自动记录真实来源并保留审计', async () => {
+  tx.pieceworkPriceBook.findUnique.mockResolvedValue({ ...book, sourceName: null });
+  await publishPersonalPieceworkDraft(revision, actor);
+  expect(tx.pieceworkPriceBook.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ sourceName: '管理员账号工价设置', publishedById: 'admin' }) }));
+  expect(audit).toHaveBeenCalledWith(tx, expect.objectContaining({ action: 'PUBLISH_VERSION' }));
+});
+it('移除依据输入不放宽调整说明要求', async () => {
+  tx.pieceworkPriceBook.findUnique.mockResolvedValue({ ...book, sourceName: null, publishNote: '' });
+  await expect(publishPersonalPieceworkDraft(revision, actor)).rejects.toThrow('调整说明');
+  expect(tx.pieceworkPriceBook.update).not.toHaveBeenCalled();
 });
