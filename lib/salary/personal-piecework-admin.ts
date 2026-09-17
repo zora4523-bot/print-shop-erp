@@ -11,7 +11,7 @@ import { assertActivePieceworkAdmin, PieceworkPriceBookAdminError } from './piec
 import { pieceworkDraftSchema, PIECEWORK_RATE_FIELDS } from './piecework-admin-input';
 import { projectPieceworkBook } from './piecework-admin';
 
-export const personalPieceworkSchema = pieceworkDraftSchema.extend({ workerId: z.string().min(1), useUnifiedRates: z.boolean() });
+export const personalPieceworkSchema = pieceworkDraftSchema.extend({ sourceName: pieceworkDraftSchema.shape.sourceName.optional(), workerId: z.string().min(1), useUnifiedRates: z.boolean() });
 const include = { rules: { orderBy: [{ operationType: 'asc' }, { unit: 'asc' }] } } satisfies Prisma.PieceworkPriceBookInclude;
 type PersonalBook = Prisma.PieceworkPriceBookGetPayload<{ include: typeof include }>;
 
@@ -70,7 +70,7 @@ function assertDraft(book: PersonalBook | null, workerId: string, updatedAt: str
   if (!book || book.workerId !== workerId || book.status !== 'DRAFT' || book.updatedAt.toISOString() !== updatedAt) throw new PieceworkPriceBookAdminError('工价已被修改，请重新加载后核对');
 }
 function assertPublishable(book: PersonalBook, lane: string) {
-  if (!book.sourceName?.trim() || (book.publishNote?.trim().length ?? 0) < 2) throw new PieceworkPriceBookAdminError('请填写调价依据和调整说明后保存');
+  if ((book.publishNote?.trim().length ?? 0) < 2) throw new PieceworkPriceBookAdminError('请填写调整说明后保存');
   const fields = PIECEWORK_RATE_FIELDS.filter((f) => f.operationType === lane && f.key !== 'box');
   if (!book.useUnifiedRates && (book.rules.some((r) => r.operationType !== lane || r.amount === null) || fields.some((f) => !book.rules.some((r) => r.unit === f.unit)))) throw new PieceworkPriceBookAdminError('请补齐当前岗位的个人工价后保存');
   if (book.useUnifiedRates && book.rules.length) throw new PieceworkPriceBookAdminError('工价模式与明细不符，请重新保存草稿');
@@ -94,9 +94,10 @@ export async function publishPersonalPieceworkDraft(input: { workerId: string; v
       if (previous.effectiveFrom! >= effectiveFrom || previous.version >= book.version) throw new PieceworkPriceBookAdminError('生效时间须晚于该账号上一版工价');
       await tx.pieceworkPriceBook.update({ where: { id: previous.id }, data: { effectiveTo: effectiveFrom } });
     }
-    const sha = createHash('sha256').update(JSON.stringify({ ...projectPieceworkBook(book), effectiveFrom: effectiveFrom.toISOString() })).digest('hex');
+    const sourceName = book.sourceName?.trim() || '管理员账号工价设置';
+    const sha = createHash('sha256').update(JSON.stringify({ ...projectPieceworkBook(book), sourceName, effectiveFrom: effectiveFrom.toISOString() })).digest('hex');
     const published = await tx.pieceworkPriceBook.update({ where: { id: book.id }, data: {
-      status: 'PUBLISHED', effectiveFrom, publishedAt: now, publishedById: admin.id,
+      sourceName, status: 'PUBLISHED', effectiveFrom, publishedAt: now, publishedById: admin.id,
       sourceSha256: sha, manifestSha256: sha, ruleSetSha256: sha,
     }, include });
     await writeAuditLogInTx(tx, { actor: admin, action: 'PUBLISH_VERSION', entityType: 'PieceworkPriceBook', entityId: published.id, before: projectPieceworkBook(book), after: projectPieceworkBook(published) });

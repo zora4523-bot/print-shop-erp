@@ -56,7 +56,7 @@ export function PieceworkPriceBookForm({ books, now, personal }: { books: Piecew
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">
           {(book.useUnifiedRates ? [] : allFields.filter((f) => (!personal || book.rules.some((r) => r.unit === f.unit)) && (!('column' in f) || rateFor(book, f) !== ''))).map((field) => <div key={field.key}><dt className="text-sm text-muted-foreground">{field.label}</dt><dd>{rateFor(book, field) || '未配置'} {rateFor(book, field) && field.unitLabel}</dd></div>)}
         </dl>
-        <p className="mt-3 break-words text-sm">调价依据：{book.sourceName}</p>
+        {!personal && <p className="mt-3 break-words text-sm">调价依据：{book.sourceName}</p>}
         <p className="break-words text-sm">调整说明：{book.publishNote}</p>
       </Disclosure>)}
     </div>
@@ -74,7 +74,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
   const [scheduled, setScheduled] = useState(Boolean(draft.effectiveFrom));
   const [effective, setEffective] = useState(draft.effectiveFrom ? formatDateTimeLocalShanghai(new Date(draft.effectiveFrom)) : '');
   const validTime = effective && Number.isFinite(new Date(`${effective}+08:00`).getTime());
-  const ready = Boolean(draft.sourceName && draft.publishNote.length >= 2 && (draft.useUnifiedRates || fields.filter((f) => f.key !== 'box').every((field) => rateFor(draft, field))));
+  const ready = Boolean((personal || draft.sourceName) && draft.publishNote.length >= 2 && (draft.useUnifiedRates || fields.filter((f) => f.key !== 'box').every((field) => rateFor(draft, field))));
   return <div className="space-y-4">
     <p className="text-sm font-medium">第 {draft.version} 版 · 草稿</p>
     <form aria-busy={pending} action={action} onChange={() => { setDirty(true); setReview(false); }} className="space-y-4">
@@ -88,7 +88,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
           <Input id={`piecework-${field.key}`} name={field.key} aria-invalid={Boolean(fieldErrors?.[field.key])} aria-describedby={fieldErrors?.[field.key] ? `piecework-${field.key}-message` : undefined} inputMode="decimal" defaultValue={rateFor(draft, field) || ('defaultValue' in field ? field.defaultValue : field.key === 'partial' ? DEFAULT_FOIL_WAGES.PARTIAL.pieceRate : field.key === 'full' ? DEFAULT_FOIL_WAGES.FULL.pieceRate : '')} placeholder="待录" maxLength={15} pattern="[0-9]{1,10}(\.[0-9]{1,4})?" />
           {fieldErrors?.[field.key]?.map((message) => <FormMessage key={message} fieldId={`piecework-${field.key}`} tone="error">{message}</FormMessage>)}
         </label>)}
-        <label className="space-y-1 text-sm" htmlFor="piecework-source"><span>调价依据</span><Input id="piecework-source" name="sourceName" maxLength={500} defaultValue={draft.sourceName} /></label>
+        {!personal && <label className="space-y-1 text-sm" htmlFor="piecework-source"><span>调价依据</span><Input id="piecework-source" name="sourceName" maxLength={500} defaultValue={draft.sourceName} /></label>}
         <label className="space-y-1 text-sm" htmlFor="piecework-note"><span>调整说明（发布时至少两字）</span><Input id="piecework-note" name="publishNote" maxLength={500} defaultValue={draft.publishNote} /></label>
         <label className="space-y-1 text-sm" htmlFor="piecework-mode"><span>生效方式</span><NativeSelect id="piecework-mode" value={scheduled ? 'scheduled' : 'immediate'} onChange={(e) => setScheduled(e.target.value === 'scheduled')}><option value="immediate">立即生效</option><option value="scheduled">指定时间</option></NativeSelect></label>
         {scheduled && <label className="space-y-1 text-sm" htmlFor="piecework-effective"><span>生效时间（北京时间）</span><Input id="piecework-effective" type="datetime-local" required value={effective} onChange={(e) => setEffective(e.target.value)} /></label>}

@@ -15,7 +15,7 @@ async function publish(page: Page, workerId: string, full = false, setup?: strin
   await panel.getByLabel('工价模式', { exact: true }).selectOption('false');
   await panel.getByLabel(full ? '专版烫金（元/个）' : '局部烫金（元/下）').fill(full ? '0.01' : '0.007');
   if (setup) await panel.getByLabel('局部大单装版费（元/次）').fill(setup);
-  await panel.getByLabel('调价依据', { exact: true }).fill('已确认分档规则隔离验收');
+  await expect(panel.getByLabel('调价依据', { exact: true })).toHaveCount(0);
   await panel.getByLabel('调整说明').fill('分档计薪验收');
   await panel.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect(panel.getByRole('status')).toContainText('草稿已保存');
