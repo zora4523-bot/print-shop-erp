@@ -63,13 +63,42 @@ const FOIL_OPTIONS: readonly OrderFoilSwatchOption[] = [
 ];
 
 function StickyOrderFormRail({ rail }: { rail: ReactNode }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLElement>(null);
+  const [fitsViewport, setFitsViewport] = useState(false);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const element = railRef.current;
+    if (!container || !element) return;
+    const measure = () => {
+      // Keep long fee summaries in document flow so every action is reachable.
+      const top = Math.max(70, container.getBoundingClientRect().top);
+      setFitsViewport(top + element.getBoundingClientRect().height <= window.innerHeight - 16);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(container);
+    observer?.observe(element);
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, { passive: true });
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure);
+    };
+  }, []);
+
   return (
-    <aside
-      data-slot="order-form-rail"
-      className="min-w-0 @min-[881px]:sticky @min-[881px]:top-[70px]"
-    >
-      {rail}
-    </aside>
+    <div ref={containerRef} className="min-w-0">
+      <aside
+        ref={railRef}
+        data-slot="order-form-rail"
+        className={cn('min-w-0', fitsViewport && '@min-[881px]:sticky @min-[881px]:top-[70px]')}
+      >
+        {rail}
+      </aside>
+    </div>
   );
 }
 

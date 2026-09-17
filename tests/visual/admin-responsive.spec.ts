@@ -180,6 +180,7 @@ test.describe('administrator workspace geometry', () => {
             indicator: rect('[data-slot="checkbox-indicator"]'),
             rail: rect('[data-slot="order-form-rail"]'),
             railPosition: getComputedStyle(rail).position,
+            viewportHeight: window.innerHeight,
             title: rect('[data-slot="urgent-order-title"]'),
           };
         });
@@ -198,7 +199,8 @@ test.describe('administrator workspace geometry', () => {
             geometry.editor.bottom - 1,
           );
         } else {
-          expect(geometry.railPosition).toBe('sticky');
+          const fits = Math.max(70, geometry.editor.top) + geometry.rail.height <= geometry.viewportHeight - 16;
+          expect(geometry.railPosition).toBe(fits ? 'sticky' : 'static');
           expect(Math.abs(geometry.rail.top - geometry.editor.top)).toBeLessThanOrEqual(
             1,
           );

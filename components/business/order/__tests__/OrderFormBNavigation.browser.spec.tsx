@@ -391,3 +391,25 @@ for (const theme of ['light', 'dark']) for (const width of [375, 393, 768, 1024,
     expect(await commands.checkShellAccessibility('[data-testid="navigation-fixture"]')).toEqual([]);
   });
 }
+
+it('long fee rail stays scrollable in document flow and short rail can stick', async () => {
+  await page.viewport(1280, 800);
+  const submit = vi.fn();
+  const renderRail = (height: number) => flushSync(() => root.render(
+    <OrderFormB {...baseProps} items={[baseItem]} itemFields={[{ id: 'rail-item' }]}
+      activeIndex={0} onActiveIndexChange={noop} onRemove={noop}
+      rail={<div style={{ height, display: 'flex', alignItems: 'flex-end' }}>
+        <Button onClick={submit}>核对并创建</Button>
+      </div>} />,
+  ));
+  renderRail(1200);
+  await layoutReady();
+  const rail = host.querySelector<HTMLElement>('[data-slot="order-form-rail"]')!;
+  await expect.poll(() => getComputedStyle(rail).position).toBe('static');
+  await page.getByRole('button', { name: '核对并创建', exact: true }).click();
+  expect(submit).toHaveBeenCalledOnce();
+  window.scrollTo(0, 0);
+  renderRail(100);
+  await expect.poll(() => getComputedStyle(rail).position).toBe('sticky');
+  expect(rail.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
+});
