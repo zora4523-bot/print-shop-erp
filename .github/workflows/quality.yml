@@ -126,6 +126,21 @@ jobs:
         # CLI grep-invert replaces the config filter, so retain both exclusions.
         run: pnpm test:release --grep-invert 'OrderPrintLayout 截图回归|deterministic external sales price tier fixture'
 
+      # Business E2E deliberately publishes successor wage books. Keep its
+      # append-only history intact and give later suites their own baseline.
+      - name: Prepare an independent artifact and compatibility database
+        env:
+          E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_artifacts_ci
+          E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_artifacts_ci
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_artifacts_ci'
+          pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
+          echo "E2E_DATABASE_URL=$E2E_DATABASE_URL" >> "$GITHUB_ENV"
+          echo "E2E_DATABASE_CONFIRM_DATABASE=$E2E_DATABASE_CONFIRM_DATABASE" >> "$GITHUB_ENV"
+
       - name: Durable worker queue, retry and authorized artifact downloads
         env:
           E2E_CANDIDATE_SHA: ${{ github.sha }}
