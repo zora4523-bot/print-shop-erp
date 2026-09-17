@@ -8,9 +8,9 @@
     },
     {
       "Effect": "Allow",
-      "Action": ["oss:ListObjects", "oss:ListMultipartUploads"],
+      "Action": ["oss:ListObjects"],
       "Resource": ["acs:oss:*:*:REPLACE_WITH_BACKUP_BUCKET"],
-      "Condition": {"StringLike": {"oss:Prefix": ["print-shop-erp/production", "print-shop-erp/production/*"]}}
+      "Condition": {"StringLike": {"oss:Prefix": ["print-shop-erp/production/", "print-shop-erp/production/*"]}}
     },
     {
       "Effect": "Allow",
