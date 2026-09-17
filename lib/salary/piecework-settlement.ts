@@ -470,8 +470,10 @@ export async function lockPieceworkSettlement(input: {
         amount: true,
         entryType: true,
         reportedAt: true,
+        unit: true,
+        priceBook: { select: { rules: { select: { operationType: true, unit: true, smallOrderAmount: true } } } },
         operation: {
-          select: { id: true, orderId: true, operationType: true, payrollReviewRequired: true },
+          select: { id: true, orderId: true, operationType: true, status: true, payrollReviewRequired: true },
         },
       },
     });
@@ -482,6 +484,15 @@ export async function lockPieceworkSettlement(input: {
       );
     }
     if (reports.some((report) => report.operation.payrollReviewRequired)) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在待人工核定的工单提成，请先在工单详情核定');
+    // Fixed fees can still need redistribution while another worker may report.
+    // Published rules, rather than optional JSON metadata, identify tiered wages.
+    const unfinished = reports.some((report) =>
+      report.operation.operationType !== 'PACKING' &&
+      report.operation.status !== 'COMPLETED' && report.operation.status !== 'CANCELLED' &&
+      report.priceBook.rules.some((rule) => rule.operationType === report.operation.operationType &&
+        rule.unit === report.unit && rule.smallOrderAmount !== null),
+    );
+    if (unfinished) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '分档烫金工序尚未结束，请待工序完成或取消并核定提成后结算');
     const aggregate = aggregatePieceworkSettlementReports(reports);
     const lockedAt = await databaseNow(tx);
     const snapshot = {

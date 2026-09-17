@@ -16,7 +16,7 @@ export function OrderWageReviewForm({ wage }: { wage: Wage }) {
   const [state, action, pending] = useActionState<PieceworkActionResult | null, FormData>(reviewOrderWagesAction, null);
   const [amounts, setAmounts] = useState(wage.groups.map((g) => g.amount));
   const [reason, setReason] = useState(''); const [review, setReview] = useState(false);
-  const valid = amounts.every((a) => /^\d{1,12}(\.\d{1,2})?$/.test(a)) && reason.trim().length >= 2;
+  const valid = amounts.every((a, i) => wage.groups[i]!.editable ? /^\d{1,12}(\.\d{1,2})?$/.test(a) : a === wage.groups[i]!.amount) && reason.trim().length >= 2;
   return <form action={action} aria-label={`${names[wage.type]}提成核定`} aria-busy={pending} className="space-y-3 rounded-lg border p-4">
     <div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{names[wage.type]}</h3>{wage.reviewRequired && <Badge variant="outline">需人工核定</Badge>}</div>
     {wage.reviewRequired && <p className="text-sm text-muted-foreground">多人接手或计薪条件有变化，请核对各师傅提成。</p>}

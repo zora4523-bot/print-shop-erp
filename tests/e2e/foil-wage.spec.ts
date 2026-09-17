@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
@@ -55,7 +56,28 @@ test('分档工资、多人转人工核定、不可变差额和页面响应式',
       const f = await fixture(qty, full, colors); await report(pages[full ? 2 : 0]!, f.op, qty, c);
       expect((await c.query('SELECT amount::text FROM "ProductionReport" WHERE "operationId"=$1', [f.op])).rows[0].amount).toBe(expected);
     }
-    const f = await fixture(2000); await report(pages[0]!, f.op, 1000, c); await report(pages[1]!, f.op, 1000, c);
+    const f = await fixture(2000); await report(pages[0]!, f.op, 1000, c);
+    // Simulate the next closed day through the domain clock seam; never rewrite reports.
+    const probe = execFileSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', '-e', `
+      const { db } = require('./lib/db.ts');
+      const { lockPieceworkSettlement } = require('./lib/salary/piecework-settlement.ts');
+      const { formatDateInputShanghai } = require('./lib/format/dates.ts');
+      (async () => {
+        const actor = await db.user.findFirstOrThrow({ where: { role: 'ADMIN', isActive: true } });
+        const row = await db.productionReport.findFirstOrThrow({ where: { operationId: process.argv[1] } });
+        try {
+          await lockPieceworkSettlement({ reporterId: row.reporterId, workDate: formatDateInputShanghai(row.reportedAt), actor,
+            now: new Date(row.reportedAt.getTime() + 86400000) });
+          throw Error('Unexpected early settlement');
+        } catch (error) {
+          if (error.code !== 'SETTLEMENT_STATE_CONFLICT' || !error.message.includes('尚未结束')) throw error;
+          console.log('EARLY_SETTLEMENT_BLOCKED');
+        }
+      })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => db.$disconnect());
+    `, f.op], { cwd: process.cwd(), env: { ...process.env, DATABASE_URL: assertActivatedE2eDatabase().url }, encoding: 'utf8', timeout: 30000 });
+    expect(probe).toContain('EARLY_SETTLEMENT_BLOCKED');
+    expect((await c.query('SELECT count(*)::int AS n FROM "PieceworkSettlement" WHERE "reporterId"=$1', [workers[0]])).rows[0].n).toBe(0);
+    await report(pages[1]!, f.op, 1000, c);
     const originals = (await c.query('SELECT id, amount::text FROM "ProductionReport" WHERE "operationId"=$1 ORDER BY "createdAt"', [f.op])).rows;
     expect(originals.map((r) => r.amount)).toEqual(['24.00', '14.00']);
     expect((await c.query('SELECT "payrollReviewRequired" FROM "ProductionOperation" WHERE id=$1', [f.op])).rows[0].payrollReviewRequired).toBe(true);
@@ -108,5 +130,20 @@ test('分档工资、多人转人工核定、不可变差额和页面响应式',
         expect((await new AxeBuilder({ page: worker }).include('main').analyze()).violations).toEqual([]);
       }
     }
+    // A reversal on another Shanghai day remains read-only but must be acknowledgeable.
+    const reversed = await fixture(800);
+    await report(pages[1]!, reversed.op, 800, c);
+    await c.query(`INSERT INTO "ProductionReport" (id,"operationId","reporterId","entryType","reversalOfId","reportedCompletedQty","defectQty","reworkQty","chargeableQty",unit,rate,amount,"wageSupplement","priceBookId","priceBookVersion","ruleSetSha256","reportedAt",snapshot,"idempotencyKey") SELECT $1::text,"operationId","reporterId",'REVERSAL',id,-"reportedCompletedQty",-"defectQty",-"reworkQty",-"chargeableQty",unit,rate,-amount,-"wageSupplement","priceBookId","priceBookVersion","ruleSetSha256","reportedAt"+interval '1 day',snapshot,$1::text FROM "ProductionReport" WHERE "operationId"=$2 AND "entryType"='REPORT'`, [randomUUID(), reversed.op]);
+    await page.goto(`/orders/${reversed.order}`);
+    const reversalDisclosure = page.getByRole('button', { name: /生产、用料与计件记录/ });
+    if (await reversalDisclosure.count()) await reversalDisclosure.click();
+    const negative = panel.getByRole('textbox', { name: /核定提成/ }).nth(1);
+    await expect(negative).toHaveValue('-24.00');
+    await expect(negative).toHaveAttribute('readonly', '');
+    await panel.getByLabel('核定原因').fill('确认跨日冲正原额');
+    await panel.getByRole('button', { name: '核对提成' }).click();
+    await panel.getByRole('button', { name: '保存核定' }).click();
+    await expect(panel.getByText('需人工核定', { exact: true })).toHaveCount(0);
+    expect((await c.query('SELECT count(*)::int AS n FROM "ProductionReport" WHERE "operationId"=$1', [reversed.op])).rows[0].n).toBe(2);
   } finally { await Promise.all(contexts.map((context) => context.close())); await c.end(); }
 });
