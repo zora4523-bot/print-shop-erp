@@ -29,6 +29,7 @@ async function report(page: Page, id: string, qty: number, c: Client) {
   for (const [name, value] of [['本次合格完成数', String(qty)], ['本次工单件数进度', '0'], ['缺陷数', '0'], ['返工数', '0']]) await panel.getByRole('spinbutton', { name, exact: true }).fill(value);
   const before = Number((await c.query('SELECT count(*) AS n FROM \"ProductionReport\" WHERE \"operationId\"=$1', [id])).rows[0].n);
   await panel.getByRole('button', { name: '提交扫码报工' }).click();
+  await panel.getByRole('button', { name: '确认报工', exact: true }).click();
   await expect.poll(async () => Number((await c.query('SELECT count(*) AS n FROM \"ProductionReport\" WHERE \"operationId\"=$1', [id])).rows[0].n)).toBe(before + 1);
 }
 test('分档工资、多人转人工核定、不可变差额和页面响应式', async ({ page, browser }) => {
@@ -81,6 +82,12 @@ test('分档工资、多人转人工核定、不可变差额和页面响应式',
     const originals = (await c.query('SELECT id, amount::text FROM "ProductionReport" WHERE "operationId"=$1 ORDER BY "createdAt"', [f.op])).rows;
     expect(originals.map((r) => r.amount)).toEqual(['24.00', '14.00']);
     expect((await c.query('SELECT "payrollReviewRequired" FROM "ProductionOperation" WHERE id=$1', [f.op])).rows[0].payrollReviewRequired).toBe(true);
+    await pages[0]!.goto('/worker/salary');
+    const wageOrderNo = (await c.query('SELECT "orderNo" FROM "Order" WHERE id=$1', [f.order])).rows[0].orderNo;
+    const pendingWages = pages[0]!.getByRole('region', { name: /未结算报工/ }).locator('li').filter({ hasText: wageOrderNo });
+    await expect(pendingWages.getByText('待核定', { exact: true })).toBeVisible();
+    await expect(pendingWages.getByText(/暂计提成：.*24\.00/)).toBeVisible();
+    await expect(pendingWages.getByText(/暂计提成：.*14\.00/)).toHaveCount(0);
     await page.goto(`/orders/${f.order}`);
     const disclosure = page.getByRole('button', { name: /生产、用料与计件记录/ }); if (await disclosure.count()) await disclosure.click();
     const panel = page.getByRole('region', { name: '工单提成明细', exact: true }); await expect(panel).toBeVisible();
@@ -93,6 +100,10 @@ test('分档工资、多人转人工核定、不可变差额和页面响应式',
     const totals = (await c.query('SELECT sum(amount)::text AS amount FROM "ProductionReport" WHERE "operationId"=$1 GROUP BY "reporterId"', [f.op])).rows;
     expect(totals.map((r) => r.amount)).toEqual(['19.00', '19.00']);
     expect((await c.query('SELECT count(*)::int AS n FROM "ProductionReport" WHERE "operationId"=$1 AND "entryType"=\'ADJUSTMENT\' AND "reportedCompletedQty"=0', [f.op])).rows[0].n).toBe(2);
+    await pages[0]!.reload();
+    await expect(pendingWages.getByText('待核定', { exact: true })).toHaveCount(0);
+    await expect(pendingWages.getByText(/人工调整/)).toHaveCount(1);
+    await expect(pendingWages.getByText(/调整金额：.*-.*5\.00/)).toBeVisible();
     // Independent SQL guards: an arbitrary supplement and a worker-authored adjustment both fail.
     const forged = `INSERT INTO "ProductionReport" (id,"operationId","reporterId","entryType","reportedCompletedQty","chargeableQty",unit,rate,amount,"wageSupplement","priceBookId","priceBookVersion","ruleSetSha256",snapshot,"idempotencyKey") SELECT $1::text,"operationId","reporterId",'REPORT',1,2,unit,rate,100.01,100,"priceBookId","priceBookVersion","ruleSetSha256",snapshot,$1::text FROM "ProductionReport" WHERE id=$2`;
     await expect(c.query(forged, [randomUUID(), originals[0].id])).rejects.toThrow(/Foil wage/);
@@ -128,6 +139,14 @@ test('分档工资、多人转人工核定、不可变差额和页面响应式',
         expect(await worker.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         for (const control of await worker.locator('main input:not([type=hidden]), main button').all()) if (await control.isVisible()) { const box = await control.boundingBox(); expect(box!.height).toBeGreaterThanOrEqual(44); }
         expect((await new AxeBuilder({ page: worker }).include('main').analyze()).violations).toEqual([]);
+        await worker.getByLabel('本次合格完成数', { exact: true }).fill('1');
+        await worker.getByLabel('本次工单件数进度', { exact: true }).fill('0');
+        await worker.getByRole('button', { name: '提交扫码报工', exact: true }).click();
+        await expect(worker.getByRole('region', { name: '核对本次报工' })).toBeVisible();
+        expect(await worker.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        expect((await new AxeBuilder({ page: worker }).include('main').analyze()).violations).toEqual([]);
+        await worker.getByRole('button', { name: '返回修改', exact: true }).click();
+
       }
     }
     // A reversal on another Shanghai day remains read-only but must be acknowledgeable.

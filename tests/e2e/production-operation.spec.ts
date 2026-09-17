@@ -69,6 +69,8 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
       await expect(reportSection).toContainText(
         `累计合格 ${completedQtyBefore} / ${fixture.plannedCompletedQty}`,
       );
+      await expect(reportSection.getByRole('spinbutton', { name: '本次合格完成数', exact: true })).toHaveValue('');
+      await expect(reportSection.getByRole('spinbutton', { name: '本次工单件数进度', exact: true })).toHaveValue('');
       await reportSection
         .getByRole('spinbutton', { name: '本次合格完成数', exact: true })
         .fill(String(reportedQty));
@@ -86,6 +88,13 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
       await reportSection
         .getByRole('button', { name: '提交扫码报工', exact: true })
         .click();
+
+      await expect(reportSection.getByRole('region', { name: '核对本次报工' })).toBeVisible();
+      await expect(reportSection).toContainText('工单件数进度：0');
+      await reportSection.getByRole('button', { name: '返回修改', exact: true }).click();
+      await expect(reportSection.getByRole('spinbutton', { name: '本次合格完成数', exact: true })).toHaveValue(String(reportedQty));
+      await reportSection.getByRole('button', { name: '提交扫码报工', exact: true }).click();
+      await reportSection.getByRole('button', { name: '确认报工', exact: true }).click();
 
       await expect(
         reportSection.getByRole('status'),
@@ -106,6 +115,11 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
         .locator('..')
         .locator('dd');
       await expect(completedMetric).toHaveText(expectedCompletedQty);
+      await page.goto('/worker/salary');
+      const pending = page.getByRole('region', { name: /未结算报工/ });
+      await expect(pending).toContainText(fixture.orderNo);
+      await expect(pending).toContainText('工序未完成');
+      await expect(pending).toContainText(`合格数量：${reportedQty}`);
     } finally {
       const cleanup = await cleanupE2eProductionOperationFixture(fixture);
       if (!cleanup.deleted) {

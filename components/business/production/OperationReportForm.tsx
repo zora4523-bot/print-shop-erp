@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import {
   reportProductionOperationAction,
   reportProductionProgressAction,
@@ -116,28 +116,37 @@ function ReportFields({
   explanation: string;
   successMessage: string | null;
 }) {
+  const [review, setReview] = useState<{ completed: string; progress: string | null; defect: string; rework: string } | null>(null);
   return (
     <form
       action={formAction}
+      onChange={() => setReview(null)}
+      onSubmit={(event) => {
+        if (review) { setReview(null); return; }
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        setReview({ completed: String(data.get('completedQty')), progress: workOrderProgressRemainingQty === null ? null : String(data.get('workOrderProgressQuantity')), defect: String(data.get('defectQty')), rework: String(data.get('reworkQty')) });
+      }}
       aria-busy={pending}
       className="space-y-4"
-      noValidate
     >
-      <fieldset disabled={pending} className="space-y-4 border-0 p-0">
+      <fieldset disabled={pending} hidden={Boolean(review)} className="space-y-4 border-0 p-0">
         {rateKey && <input type="hidden" name="expectedRateKey" value={rateKey} />}
         {payrollRevision !== undefined && <input type="hidden" name="expectedPayrollRevision" value={payrollRevision} />}
         <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
         <QuantityField
           id="completedQty"
           label="本次合格完成数"
-          defaultValue={remainingQty}
+          defaultValue=""
+          maximum={remainingQty}
           disabled={pending}
         />
         {workOrderProgressRemainingQty !== null ? (
           <QuantityField
             id="workOrderProgressQuantity"
             label="本次工单件数进度"
-            defaultValue={workOrderProgressRemainingQty}
+            defaultValue=""
+            maximum={workOrderProgressRemainingQty}
             disabled={pending}
           />
         ) : null}
@@ -170,6 +179,14 @@ function ReportFields({
           {pending ? '提交中…' : '提交扫码报工'}
         </Button>
       </fieldset>
+      {review && <section aria-label="核对本次报工" className="space-y-3 rounded-lg border bg-muted/20 p-4 text-sm">
+        <h3 className="font-semibold">核对本次报工</h3>
+        <p>合格完成数：{review.completed}</p>
+        {review.progress !== null && <p>工单件数进度：{review.progress}</p>}
+        <p>缺陷数：{review.defect} · 返工数：{review.rework}</p>
+        <p>{rateKey ? '提交后按本次数量记录生产进度和本人提成，需核定的提成由管理员确认。' : '提交后记录本次生产进度，不计入工资。'}</p>
+        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>确认报工</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setReview(null)}>返回修改</Button></div>
+      </section>}
     </form>
   );
 }
@@ -178,11 +195,13 @@ function QuantityField({
   id,
   label,
   defaultValue,
+  maximum,
   disabled,
 }: {
   id: string;
   label: string;
   defaultValue: string;
+  maximum?: string;
   disabled: boolean;
 }) {
   return (
@@ -194,6 +213,7 @@ function QuantityField({
         type="number"
         inputMode="numeric"
         min={0}
+        max={maximum}
         step={1}
         required
         disabled={disabled}

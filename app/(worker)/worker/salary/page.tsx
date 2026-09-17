@@ -1,3 +1,4 @@
+import { WorkerPendingReports } from '@/components/business/salary/WorkerPendingReports';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
@@ -31,7 +32,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '我的工资' };
 
 type PageProps = {
-  searchParams: Promise<{ from?: string; to?: string; page?: string | string[] }>;
+  searchParams: Promise<{ from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[] }>;
 };
 
 const HOURLY_WORKER_TYPES = new Set<WorkerType>([
@@ -89,7 +90,7 @@ async function OperationPieceworkSalaryContent({
   searchParams: sp,
 }: {
   actor: WorkerSalaryActor;
-  searchParams: { from?: string; to?: string; page?: string | string[] };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[] };
 }) {
   const from = sp.from ? parseStrictYmd(sp.from) : null;
   const to = sp.to ? parseStrictYmd(sp.to) : null;
@@ -111,7 +112,7 @@ async function OperationPieceworkSalaryContent({
   return (
     <section className="min-w-0 space-y-4">
       <SalaryHeader description="按日期查看报工明细。" />
-      <SalarySummary total={total} unpaid={unpaid} />
+      <SalarySummary total={total} unpaid={unpaid} totalLabel="已结算工资" />
       <SalaryRangeFilter
         inputType="date"
         fromLabel="开始日期"
@@ -119,6 +120,8 @@ async function OperationPieceworkSalaryContent({
         from={from ? sp.from : undefined}
         to={to ? sp.to : undefined}
       />
+      <WorkerPendingReports actor={actor} from={from ? sp.from : undefined} to={to ? sp.to : undefined} page={sp.pendingPage} />
+      <h2 className="font-semibold">已结算工资</h2>
       {settlements.length === 0 ? (
         <EmptyState
           icon={WalletCards}
@@ -168,7 +171,7 @@ async function PieceworkSalaryContent({
   historical = false,
 }: {
   actor: WorkerSalaryActor;
-  searchParams: { from?: string; to?: string; page?: string | string[] };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[] };
   historical?: boolean;
 }) {
   const from = sp.from ? parseStrictYmd(sp.from) : null;
@@ -263,7 +266,7 @@ async function HourlySalaryContent({
 }: {
   actor: WorkerSalaryActor;
   workerType: WorkerType;
-  searchParams: { from?: string; to?: string; page?: string | string[] };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[] };
   historical?: boolean;
 }) {
   const fromMonth = validMonth(sp.from) ? sp.from : undefined;
@@ -361,11 +364,11 @@ function SalaryHeader({
   );
 }
 
-function SalarySummary({ total, unpaid }: { total: Decimal; unpaid: Decimal }) {
+function SalarySummary({ total, unpaid, totalLabel = '累计工资' }: { total: Decimal; unpaid: Decimal; totalLabel?: string }) {
   return (
     <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
       <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
-        <p className="text-xs text-muted-foreground">累计工资</p>
+        <p className="text-xs text-muted-foreground">{totalLabel}</p>
         <p className="worker-wrap-anywhere mt-1 font-sans tabular-nums text-lg font-semibold">
           {formatMoney(total)}
         </p>

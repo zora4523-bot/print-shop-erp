@@ -16,6 +16,7 @@ async function reportTen(browser: Browser, operationId: string) {
     await form.getByRole('spinbutton', { name: '缺陷数', exact: true }).fill('0');
     await form.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
     await form.getByRole('button', { name: '提交扫码报工', exact: true }).click();
+    await form.getByRole('button', { name: '确认报工', exact: true }).click();
     await expect(form.getByRole('status')).toContainText('已记录本次报工，计件金额');
   } finally { await workerContext.close(); }
 }

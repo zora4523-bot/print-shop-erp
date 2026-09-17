@@ -423,3 +423,9 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 
 - 分档烫金报工锁定结算前，工序须已完成或取消，且不存在待人工核定标记。未结束返回 `SETTLEMENT_STATE_CONFLICT`，不创建结算或明细。
 - 提成核定 `targets[].amount` 接受带符号十进制金额以携带只读冲正行；领域校验禁止更改冲正行或已结算行，可编辑行目标不得小于零。原额核定仅清除待核定状态，不新增金额流水。
+
+### 2026-09-17 师傅报工核对与未结算流水
+
+扫码报工前端先核对本批数量，再调用原 `reportProductionOperationAction` 或共享进度 Action；完成数和工单件数进度默认空白。服务端数量、岗位、版本、工价及幂等校验保持不变，计件报工成功同时刷新 `/worker/salary`。
+
+`lib/salary/worker-pending-reports.ts` 供工资 Server Component 读取本人尚未关联结算项的流水。服务端重新核对账号启用状态及计件岗位，以会话 `actor.id` 限定 `reporterId`，不接受客户端指定其他师傅。按上海日期筛选，以 `pendingPage` 独立分页，每页 20 条；原报工、人工调整、冲正按原金额及符号展示，不重算工资、不改历史快照。

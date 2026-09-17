@@ -50,12 +50,13 @@ async function report(page: Page, quantity: string, progress: string) {
   await section.getByRole('spinbutton', { name: '缺陷数', exact: true }).fill('0');
   await section.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
   await section.getByRole('button', { name: '提交扫码报工', exact: true }).click();
+  await section.getByRole('button', { name: '确认报工', exact: true }).click();
   await expect(section.locator('[role="status"], [role="alert"]')).toContainText('已记录本次报工，计件金额', { timeout: 15_000 });
 }
 
 async function hasCurrentRates() {
   return withDb(async (db) => {
-    const rows = await db.query<{ count: number; operations: string[] }>(`SELECT count(DISTINCT book.id)::int AS count, array_agg(rule."operationType"::text) AS operations FROM "PieceworkPriceBook" book JOIN "PieceworkPriceRule" rule ON rule."priceBookId"=book.id WHERE book.status='PUBLISHED' AND book."effectiveFrom" <= CURRENT_TIMESTAMP AND (book."effectiveTo" IS NULL OR book."effectiveTo" > CURRENT_TIMESTAMP)`);
+    const rows = await db.query<{ count: number; operations: string[] }>(`SELECT count(DISTINCT book.id)::int AS count, array_agg(rule."operationType"::text) AS operations FROM "PieceworkPriceBook" book JOIN "PieceworkPriceRule" rule ON rule."priceBookId"=book.id WHERE book."workerId" IS NULL AND book.status='PUBLISHED' AND book."effectiveFrom" <= CURRENT_TIMESTAMP AND (book."effectiveTo" IS NULL OR book."effectiveTo" > CURRENT_TIMESTAMP)`);
     return rows.rows[0]?.count === 1 && ['PARTIAL', 'PACKING'].every((operation) => rows.rows[0]?.operations?.includes(operation));
   });
 }

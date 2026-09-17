@@ -103,6 +103,7 @@ export async function reportProductionOperationAction(
     revalidatePath(`/worker/tasks/${operationId}`);
     revalidatePath('/worker/orders');
     revalidatePath(`/worker/orders/${result.orderId}`);
+    revalidatePath('/worker/salary');
     revalidatePath(`/orders/${result.orderId}`);
     return {
       status: 'success',

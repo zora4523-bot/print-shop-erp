@@ -22,7 +22,7 @@ test('管理员调整计薪次数，旧师傅页面拒绝，后续工资按新�
     await login(worker, { username: 'e2e-worker-hand', password: E2E_PASSWORD, from: `/worker/tasks/${operationId}` });
     const report = worker.locator('section').filter({ has: worker.getByRole('heading', { name: '扫码报工', exact: true }) });
     await login(page, { from: `/orders/${operation.orderId}` });
-    const form = page.getByRole('form').filter({ has: page.locator(`input[name="operationId"][value="${operationId}"]`) });
+    const form = page.getByRole('form', { name: /计薪次数/ }).filter({ has: page.locator(`input[name="operationId"][value="${operationId}"]`) });
     await expect(form).toBeVisible();
     const before = await form.getByLabel('计薪过版次数').inputValue();
     const next = Number(before) === 3 ? '4' : '3';
@@ -34,11 +34,13 @@ test('管理员调整计薪次数，旧师傅页面拒绝，后续工资按新�
     await expect(form.getByRole('button', { name: '核对调整' })).toBeVisible();
     for (const [label, value] of [['本次合格完成数', '10'], ['本次工单件数进度', '0'], ['缺陷数', '0'], ['返工数', '0']]) await report.getByRole('spinbutton', { name: label, exact: true }).fill(value);
     await report.getByRole('button', { name: '提交扫码报工' }).click();
+    await report.getByRole('button', { name: '确认报工', exact: true }).click();
     await expect(report.getByRole('alert')).toContainText('计薪次数已调整');
     await worker.reload();
     await expect(report).toContainText(`计薪过版次数：${next} 次`);
     for (const [label, value] of [['本次合格完成数', '10'], ['本次工单件数进度', '0'], ['缺陷数', '0'], ['返工数', '0']]) await report.getByRole('spinbutton', { name: label, exact: true }).fill(value);
     await report.getByRole('button', { name: '提交扫码报工' }).click();
+    await report.getByRole('button', { name: '确认报工', exact: true }).click();
     await expect(report.getByRole('status')).toContainText('已记录本次报工');
     const added = (await client.query('SELECT "chargeableQty"::text, rate::text, amount::text, snapshot FROM "ProductionReport" WHERE "operationId"=$1 AND NOT (id = ANY($2::text[]))', [operationId, historical.map((r) => r.id)])).rows;
     expect(added).toHaveLength(1);
