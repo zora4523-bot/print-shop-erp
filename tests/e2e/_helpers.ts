@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { isolateE2eLoginClient } from './_login-client';
 
-async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
+export async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   try {

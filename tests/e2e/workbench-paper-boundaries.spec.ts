@@ -156,7 +156,7 @@ test('shared paper choices exclude unavailable facts, preserve a long name and r
     password: E2E_PASSWORD,
   });
   await page
-    .getByRole('group', { name: '工艺类型' })
+    .getByRole('group', { name: '工单类型' })
     .getByRole('button', { name: '专版烫金', exact: true })
     .click();
   const papers = page.getByRole('group', { name: '纸张材质', exact: true });

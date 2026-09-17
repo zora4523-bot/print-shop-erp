@@ -7,6 +7,7 @@ import {
   E2E_USERS,
   expectNoNextErrorOverlay,
   login,
+  withDb,
   productionOperationE2eIsolationFailure,
   seedE2eProductionOperationFixture,
 } from './_helpers';
@@ -118,7 +119,16 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
       await page.goto('/worker/salary');
       const pending = page.getByRole('region', { name: /未结算报工/ });
       await expect(pending).toContainText(fixture.orderNo);
-      await expect(pending).toContainText('工序未完成');
+      // The durable fixture retains earlier reports; changed rates/reporters can
+      // require manual review. Verify the UI against the persisted decision.
+      const reviewRequired = await withDb(async (db) => {
+        const result = await db.query<{ payrollReviewRequired: boolean }>(
+          'SELECT "payrollReviewRequired" FROM "ProductionOperation" WHERE id=$1', [fixture.operationId],
+        );
+        expect(result.rowCount).toBe(1);
+        return result.rows[0]!.payrollReviewRequired;
+      });
+      await expect(pending).toContainText(reviewRequired ? '待核定' : '工序未完成');
       await expect(pending).toContainText(`合格数量：${reportedQty}`);
     } finally {
       const cleanup = await cleanupE2eProductionOperationFixture(fixture);

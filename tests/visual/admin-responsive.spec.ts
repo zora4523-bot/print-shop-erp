@@ -1475,7 +1475,7 @@ async function prepareConfiguredLocalFoilStyle(page: Page) {
   const discardDraft = page.getByRole('button', {
     name: '放弃本地草稿', exact: true,
   });
-  const routePicker = form.getByRole('group', { name: '工艺类型' });
+  const routePicker = form.getByRole('group', { name: '工单类型' });
   const localFoil = routePicker.getByRole('button', {
     name: '局部烫金', exact: true,
   });

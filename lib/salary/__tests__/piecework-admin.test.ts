@@ -90,3 +90,19 @@ it('rejects a stale publication view even when another admin already published',
   await expect(publishSavedPieceworkDraft({ version: 1, updatedAt: input.updatedAt }, actor)).rejects.toThrow('已被修改');
   expect(mocks.publish).not.toHaveBeenCalled();
 });
+
+
+it('defers both packing rates without creating zero-price rules', async () => {
+  await savePieceworkDraft({ ...input, bag: '', box: '' }, actor);
+  expect(mocks.tx.pieceworkPriceRule.upsert).toHaveBeenCalledTimes(2);
+  for (const unit of ['PER_BAG', 'PER_BOX']) {
+    expect(mocks.tx.pieceworkPriceRule.deleteMany).toHaveBeenCalledWith({ where: { priceBookId: book.id, operationType: 'PACKING', unit } });
+  }
+});
+
+it('publishes saved foil-only rates when packing is deferred', async () => {
+  mocks.tx.pieceworkPriceBook.findUnique.mockResolvedValue({ ...book, sourceName: input.sourceName, publishNote: input.publishNote,
+    rules: rules.slice(0, 2).map((rule) => ({ ...rule, amount: { toFixed: () => '0.0100' } })) });
+  await publishSavedPieceworkDraft({ version: 1, updatedAt: input.updatedAt }, actor);
+  expect(mocks.publish.mock.calls[0][0].manifest.rules).toHaveLength(2);
+});

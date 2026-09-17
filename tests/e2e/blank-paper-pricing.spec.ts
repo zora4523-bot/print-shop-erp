@@ -135,7 +135,7 @@ test('新增纸张、缺价建单、发布自动报价、补规格与历史价�
       await openFirstOrderItemEditor(sales);
       const form = sales.locator('[data-slot="order-form-b"]');
       await form
-        .getByRole('group', { name: '工艺类型' })
+        .getByRole('group', { name: '工单类型' })
         .getByRole('button', { name: '局部烫金', exact: true })
         .click();
       await form
@@ -312,8 +312,8 @@ test('新增纸张、缺价建单、发布自动报价、补规格与历史价�
     await ui.goto('/owner/rules/customer-pricing/blank/new');
     await expect(ui.locator('[aria-current=page]').filter({ hasText: '新增纸张与规格价格' })).toBeVisible();
     if (width <= 768) {
-      await ui.getByText('新建纸张', { exact: true }).tap();
-      await ui.getByText('中号封', { exact: true }).tap();
+      await ui.getByRole('radio', { name: '新建纸张', exact: true }).locator('..').tap();
+      await ui.getByRole('checkbox', { name: '中号封', exact: true }).locator('..').tap();
       await expect(
         ui.getByRole('checkbox', { name: '中号封', exact: true }),
       ).toBeChecked();

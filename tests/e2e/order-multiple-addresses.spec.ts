@@ -179,7 +179,7 @@ test('外部销售建单页添加地址并纳入报价和提交复核', async ({
   await expect(form.getByRole('textbox', { name: '工单备注（选填）', exact: true })).toHaveValue(note);
 
   await form
-    .getByRole('group', { name: '工艺类型' })
+    .getByRole('group', { name: '工单类型' })
     .getByRole('button', { name: '局部烫金', exact: true })
     .click();
   await form

@@ -21,7 +21,7 @@ applies_to: repository source at last_verified
 
 不包装约束：`actualBagCount=0`、`unitPrice=0`、`subtotal=0`，建议小计为 0 或空；其余模式实际包装数量必须为正。常规装盒只含一款，混装至少两款。已有数据库列名 `actualBagCount` / `unitsPerBag` 保留兼容，新类型按袋/盒语义解释。
 
-打包生产工序支持 `PER_BAG` / `PER_BOX`；不包装不物化打包工序。工资规则唯一键变为 `(priceBookId, operationType, unit)`；已发布工资本保留原三条必需规则，可额外包含一条装盒规则。没有装盒工价时不套用入袋工价。客户报价与工资本仍独立。
+打包生产工序支持 `PER_BAG` / `PER_BOX`；不包装不物化打包工序。工资规则唯一键变为 `(priceBookId, operationType, unit)`；原发布约束要求三条基础规则；`20260917190000_optional_unified_packing_rates` 将统一工价调整为必需局部、专版两条规则，入袋和装盒各自选填。缺少对应包装工价时暂停该类计件报工，不按零元计算。个人包装工价的入袋必填约束、已发布规则及历史快照保护保持不变。没有装盒工价时不套用入袋工价。客户报价与工资本仍独立。
 
 空盒及装盒费写入新加工费价目版本，不修改已发布规则或旧工单快照。安装步骤见 [包装类型实施记录](./docs/包装类型实施-20260913.md)。
 

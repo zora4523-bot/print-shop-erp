@@ -35,7 +35,7 @@ async function transferCoatedOrder(
   role: 'sales' | 'owner' = 'sales',
 ) {
   await openWorkbench(page, role);
-  await choose(page, '工艺类型', '彩印');
+  await choose(page, '工单类型', '彩印');
   await choose(page, '纸张材质', '铜版纸');
   await choose(page, '覆膜', '触感膜');
   await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
@@ -96,7 +96,7 @@ test.describe('shared workbench calculator', () => {
     ).toHaveValue('1000');
     await expect(
       page
-        .getByRole('group', { name: '工艺类型' })
+        .getByRole('group', { name: '工单类型' })
         .getByRole('button', { name: '局部烫金', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
     await page
@@ -432,7 +432,7 @@ test.describe('shared workbench calculator', () => {
   }) => {
     await openWorkbench(page);
     await ready(page);
-    await choose(page, '工艺类型', '彩印');
+    await choose(page, '工单类型', '彩印');
     await choose(page, '纸张材质', '铜版纸');
     await choose(page, '覆膜', '触感膜');
     await choose(page, '叠加烫金', '局部烫金');

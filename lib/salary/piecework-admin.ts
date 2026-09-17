@@ -74,8 +74,8 @@ export async function savePieceworkDraft(raw: PieceworkDraftInput, actor: AuditA
     }
     for (const field of PIECEWORK_RATE_FIELDS) {
       const value = input[field.key];
-      if (field.key === 'box' && value === '') {
-        await tx.pieceworkPriceRule.deleteMany({ where: { priceBookId: book.id, unit: 'PER_BOX' } });
+      if (field.operationType === 'PACKING' && value === '') {
+        await tx.pieceworkPriceRule.deleteMany({ where: { priceBookId: book.id, operationType: 'PACKING', unit: field.unit } });
       } else {
         await tx.pieceworkPriceRule.upsert({
           where: { priceBookId_operationType_unit: { priceBookId: book.id, operationType: field.operationType, unit: field.unit } },
@@ -113,7 +113,7 @@ export async function publishSavedPieceworkDraft(raw: PieceworkRevision, actor: 
   }
   const manifest = manifestFrom(book);
   if (!manifest.sourceName || manifest.publishNote.trim().length < 2 || manifest.rules.some((r) => r.amount === null)) {
-    throw new PieceworkPriceBookAdminError('请补齐三项基础工价、调价依据和至少两字的调整说明后保存');
+    throw new PieceworkPriceBookAdminError('请补齐烫金工价、调价依据和至少两字的调整说明后保存');
   }
   const sourceSha256 = book.status === 'PUBLISHED' && book.sourceSha256
     ? book.sourceSha256

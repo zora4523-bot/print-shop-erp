@@ -358,7 +358,7 @@ describe('box wage publication and successor versions', () => {
     const receipt = await publishPieceworkPriceBookV1({ manifest: { ...boxed(), priceBookVersion: 1 }, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now);
     expect(receipt.rules).toHaveLength(4);
   });
-  it('rejects stale successors, duplicate box rules and a missing bag rule', async () => {
+  it('rejects stale successors, duplicate box rules without requiring a bag rule', async () => {
     dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
     dbMock.pieceworkPriceBook.findFirst.mockResolvedValue({ ...draftBook(), version: 2, status: 'PUBLISHED' });
     await expect(publishPieceworkPriceBookV1({ manifest: boxed(), actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('版本已变化');
@@ -391,4 +391,14 @@ it('preserves scheduled manifest hashes including timezone notation', async () =
   dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(draftBook());
   const receipt = await publishPieceworkPriceBookV1({ manifest: scheduled, sourceSha256, actor, expectedDraftUpdatedAt: draftUpdatedAt }, now);
   expect(receipt.manifestSha256).toBe(calculatePieceworkManifestSha256(scheduled));
+});
+
+
+it('publishes foil-only draft while packing rates are deferred', async () => {
+  const foil = manifest(); foil.rules = foil.rules.filter((rule) => rule.operationType !== 'PACKING');
+  const draft = draftBook(); draft.rules = draft.rules.filter((rule) => rule.operationType !== 'PACKING');
+  dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(draft);
+  const result = await publishPieceworkPriceBookV1({ manifest: foil, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now);
+  expect(result.rules).toHaveLength(2);
+  expect(result.rules.map((rule) => rule.operationType).sort()).toEqual(['FULL', 'PARTIAL']);
 });

@@ -259,8 +259,8 @@ export function validatePieceworkManifestForPublication(
   ) {
     issues.push('publishNote 长度必须为 2–500');
   }
-  if (manifest.rules.length < 3 || manifest.rules.length > 4) {
-    issues.push('必须提供三条基础工价，可增加一条按盒装盒工价');
+  if (manifest.rules.length < 2 || manifest.rules.length > 4) {
+    issues.push('必须提供局部与专版烫金工价，包装工价可选');
   }
 
   const seen = new Set<string>();
@@ -281,7 +281,7 @@ export function validatePieceworkManifestForPublication(
       issues.push(`${rule.operationType} 金额必须是最多 4 位小数的非负数`);
     }
   }
-  for (const operationType of PIECEWORK_OPERATION_TYPES) {
+  for (const operationType of PIECEWORK_OPERATION_TYPES.filter((type) => type !== 'PACKING')) {
     if (!seen.has(`${operationType}:${PIECEWORK_UNIT_BY_OPERATION[operationType]}`)) issues.push(`缺少 ${operationType} 规则`);
   }
   return [...new Set(issues)];
@@ -335,7 +335,7 @@ export async function previewPieceworkPriceBookPublication(
   if (book?.status === PieceworkPriceBookStatus.PUBLISHED) {
     issues.push('计件工价簿已发布；apply 只能做同 manifest 幂等复放');
   }
-  if (book && ![3, 4].includes(book.rules.length)) issues.push('草稿工价规则数量不正确');
+  if (book && ![2, 3, 4].includes(book.rules.length)) issues.push('草稿工价规则数量不正确');
 
   return {
     bookId: book?.id ?? null,
