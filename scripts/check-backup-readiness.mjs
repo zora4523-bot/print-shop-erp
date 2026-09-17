@@ -2,10 +2,12 @@
 
 // Read-only production gate. It inspects `pgbackrest info --output=json`;
 // it never creates, expires, restores, or deletes a backup.
+import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import nextEnv from '@next/env';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assessBackupReadiness } from './lib/backup-readiness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 nextEnv.loadEnvConfig(root, process.env.NODE_ENV !== 'production');
@@ -15,68 +17,23 @@ const maxAgeHours = positiveNumber(process.env.BACKUP_MAX_AGE_HOURS, 30);
 const requiredRepos = positiveInteger(process.env.BACKUP_REQUIRED_REPOS, 2);
 if (!stanza) fail('PGBACKREST_STANZA 未设，无法确定要验收的 pgBackRest stanza。');
 
-const result = spawnSync(
-  'pgbackrest',
-  [`--stanza=${stanza}`, 'info', '--output=json'],
-  { encoding: 'utf8', timeout: 30_000 },
-);
-if (result.error) {
-  fail(`pgbackrest 无法执行：${result.error.message}`);
+const args = process.argv.slice(2);
+if (args.length && (args.length !== 2 || args[0] !== '--info-file' || !args[1])) {
+  fail('用法：check-backup-readiness.mjs [--info-file <pgBackRest JSON 快照>]');
 }
-if (result.status !== 0) {
-  fail(`pgbackrest info 失败（exit ${result.status}）。请在 Pigsty 节点检查 stanza/repository 配置。`);
+let stdout;
+if (args.length) {
+  try { stdout = readFileSync(args[1], 'utf8'); } catch { fail('无法读取备份信息快照'); }
+  console.log('[backup-readiness] 离线快照检查；不证明当前连接、归档延迟或恢复成功');
+} else {
+  const result = spawnSync('pgbackrest', [`--stanza=${stanza}`, 'info', '--output=json'],
+    { encoding: 'utf8', timeout: 30_000 });
+  if (result.error || result.status !== 0) fail('pgBackRest info 执行失败，请检查主机配置');
+  stdout = result.stdout;
 }
-
 let stanzas;
-try {
-  stanzas = JSON.parse(result.stdout);
-} catch {
-  fail('pgbackrest info 未返回有效 JSON。');
-}
-const info = Array.isArray(stanzas)
-  ? stanzas.find((item) => item?.name === stanza) ?? stanzas[0]
-  : null;
-if (!info) fail(`未找到 stanza ${stanza} 的备份信息。`);
-
-const errors = [];
-const repos = Array.isArray(info.repo) ? info.repo : [];
-const healthyRepos = repos.filter((repo) => Number(repo?.status?.code) === 0);
-if (healthyRepos.length < requiredRepos) {
-  errors.push(
-    `健康 repository ${healthyRepos.length} 个，要求至少 ${requiredRepos} 个（本地 + 异地）`,
-  );
-}
-
-const nowSeconds = Date.now() / 1_000;
-const backups = Array.isArray(info.backup) ? info.backup : [];
-for (const repo of healthyRepos) {
-  const repoKey = Number(repo.key);
-  const fulls = backups.filter(
-    (backup) =>
-      backup?.type === 'full' &&
-      Number(backup?.database?.['repo-key'] ?? 1) === repoKey &&
-      backup?.error !== true,
-  );
-  const latest = fulls.sort(
-    (a, b) => Number(b?.timestamp?.stop ?? 0) - Number(a?.timestamp?.stop ?? 0),
-  )[0];
-  if (!latest) {
-    errors.push(`repo${repoKey} 没有可用 full backup`);
-    continue;
-  }
-  const ageHours = (nowSeconds - Number(latest.timestamp.stop)) / 3_600;
-  if (!Number.isFinite(ageHours) || ageHours > maxAgeHours) {
-    errors.push(`repo${repoKey} 最新 full backup 已 ${ageHours.toFixed(1)} 小时，上限 ${maxAgeHours} 小时`);
-  }
-
-  const hasWal = (Array.isArray(info.archive) ? info.archive : []).some(
-    (archive) =>
-      Number(archive?.database?.['repo-key'] ?? 1) === repoKey &&
-      typeof archive?.max === 'string' &&
-      archive.max.length > 0,
-  );
-  if (!hasWal) errors.push(`repo${repoKey} 未观察到已归档 WAL`);
-}
+try { stanzas = JSON.parse(stdout); } catch { fail('pgBackRest 未返回有效 JSON'); }
+const errors = assessBackupReadiness(stanzas, { stanza, maxAgeHours, requiredRepos });
 
 if (errors.length) {
   console.error('[backup-readiness] 失败');
@@ -85,16 +42,20 @@ if (errors.length) {
 }
 
 console.log(
-  `[backup-readiness] 通过：stanza=${stanza}, healthyRepos=${healthyRepos.length}, latestFull<=${maxAgeHours}h, WAL=present`,
+  `[backup-readiness] 通过：stanza=${stanza}, requiredRepos=${requiredRepos}, latestFull<=${maxAgeHours}h, WAL covers latest backup; retention/continuous archiving/restore require separate verification`,
 );
 
 function positiveNumber(value, fallback) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  if (value === undefined || value === '') return fallback;
+  if (!Number.isFinite(parsed) || parsed <= 0) fail('备份门禁参数必须为正数');
+  return parsed;
 }
 
 function positiveInteger(value, fallback) {
-  return Math.floor(positiveNumber(value, fallback));
+  const parsed = positiveNumber(value, fallback);
+  if (!Number.isInteger(parsed)) fail('备份仓库数量必须为正整数');
+  return parsed;
 }
 
 function fail(message) {

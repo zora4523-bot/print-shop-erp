@@ -1,0 +1,21 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["oss:GetBucketInfo", "oss:GetBucketLocation", "oss:GetBucketAcl"],
+      "Resource": ["acs:oss:*:*:REPLACE_WITH_BACKUP_BUCKET"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["oss:ListObjects", "oss:ListMultipartUploads"],
+      "Resource": ["acs:oss:*:*:REPLACE_WITH_BACKUP_BUCKET"],
+      "Condition": {"StringLike": {"oss:Prefix": ["print-shop-erp/production", "print-shop-erp/production/*"]}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["oss:GetObject", "oss:PutObject", "oss:DeleteObject", "oss:AbortMultipartUpload", "oss:ListParts"],
+      "Resource": ["acs:oss:*:*:REPLACE_WITH_BACKUP_BUCKET/print-shop-erp/production/*"]
+    }
+  ]
+}

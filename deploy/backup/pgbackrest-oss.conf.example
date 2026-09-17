@@ -1,0 +1,26 @@
+# Merge into the EXISTING /etc/pgbackrest/pgbackrest.conf, never replace pg1/socket/log settings.
+# Do not activate before bucket permissions, encryption key custody and initial backup are ready.
+[global]
+archive-async=y
+# Reuse existing postgres-owned durable spool; create before enabling if absent.
+spool-path=/pg/spool
+repo1-retention-full-type=time
+repo1-retention-full=30
+
+repo2-type=s3
+repo2-path=/print-shop-erp/production
+repo2-s3-bucket=REPLACE_WITH_PRIVATE_BACKUP_BUCKET
+repo2-s3-endpoint=s3.oss-REPLACE_WITH_REGION.aliyuncs.com
+repo2-s3-region=REPLACE_WITH_REGION
+repo2-s3-uri-style=host
+repo2-storage-verify-tls=y
+repo2-retention-full-type=time
+repo2-retention-full=30
+repo2-cipher-type=aes-256-cbc
+# Inject into a postgres-readable 0600 server-side config include; never commit real values.
+repo2-s3-key=REPLACE_WITH_BACKUP_ONLY_ACCESS_KEY
+repo2-s3-key-secret=REPLACE_WITH_BACKUP_ONLY_SECRET
+repo2-cipher-pass=REPLACE_WITH_SEPARATELY_ESCROWED_RANDOM_PASSPHRASE
+
+# Preserve archive-check. Do not set archive-push-queue-max: it can DROP unarchived WAL.
+# Do not add OSS lifecycle deletion/archival rules for the live repository.

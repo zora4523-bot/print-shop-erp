@@ -93,6 +93,7 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
           pnpm check:architecture
+          pnpm test:backup
           pnpm lint
           pnpm typecheck
 

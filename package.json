@@ -27,6 +27,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "deploy:smoke": "node scripts/deploy-smoke.mjs",
     "check:env": "node scripts/check-env.mjs",
+    "test:backup": "node --test scripts/__tests__/backup-*.test.mjs",
     "check:backup": "node scripts/check-backup-readiness.mjs",
     "check:architecture": "tsx scripts/check-architecture.ts --check",
     "check:dead-code": "node scripts/dead-code-scan.mjs",
