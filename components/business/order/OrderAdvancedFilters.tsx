@@ -1,5 +1,7 @@
 'use client';
 
+import { foilColorLabel } from '@/lib/order/foil-colors';
+
 import { useState } from 'react';
 import { SlidersHorizontal } from 'lucide-react';
 import {
@@ -247,7 +249,7 @@ export function OrderAdvancedFilters({
               id={controlId('foil-colors')}
               name="foilColor"
               label="烫金色"
-              value={encodeFoilColorFilterValues(filters.foilColors)}
+              value={encodeFoilColorFilterValues(filters.foilColors.map(foilColorLabel))}
               placeholder="多个颜色用逗号分隔；颜色名内的逗号写成 \,"
               maxLength={1000}
               className="sm:col-span-2"

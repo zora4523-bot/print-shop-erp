@@ -909,7 +909,7 @@ describe('processQueuedOrderExport', () => {
       '艳红珠光纸',
       1000,
       '铜版纸彩印+烫金',
-      '哑金、银色',
+      '哑金、银金',
     ]);
     expect(consumed.get('款式')?.[1]?.slice(13, 18)).toEqual([
       xlsxDecimal('0.1234'),

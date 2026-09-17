@@ -1,3 +1,4 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import { productCategoryMatchesPricingRoute } from '@/lib/order/pricing-route';
@@ -71,7 +72,7 @@ export function orderItemFieldOptions(
   const externalFoilOptions: OrderFoilSwatchOption[] =
     options?.foilColors.map((foil) => ({
       value: foil.name,
-      label: foil.name,
+      label: foilColorLabel(foil.name),
       color: foil.displayColor,
       imageSrc: foil.displayImage,
     })) ?? [];

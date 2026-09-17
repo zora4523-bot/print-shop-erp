@@ -1,3 +1,4 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import 'server-only';
 
 import { canChangeOrderPackaging } from './editable-fields';
@@ -481,8 +482,8 @@ function salesItemDetails(item: SalesOrderDetailRecord['items'][number], legacyP
   add('烫金方式', { UNSPECIFIED: '', NONE: '不烫金', FLAT: '平烫', RELIEF: '浮雕', RAISED: '激凸' }[item.foilTechnique]);
   const foil = resolveOrderItemFoilSides(item);
   if (foil.frontFoilColors.length || foil.backFoilColors.length) {
-    add('正面烫金', foil.frontFoilColors.join('、') || '不烫金');
-    add('反面烫金', foil.backFoilColors.join('、') || '不烫金');
+    add('正面烫金', foil.frontFoilColors.map(foilColorLabel).join('、') || '不烫金');
+    add('反面烫金', foil.backFoilColors.map(foilColorLabel).join('、') || '不烫金');
   }
   if (item.craft === 'PRINT' || item.pricingRoute === 'COLOR_PRINT') {
     add('彩印颜色', item.printColorsKnown ? (item.printColors.join('、') || '无') : '未记录');

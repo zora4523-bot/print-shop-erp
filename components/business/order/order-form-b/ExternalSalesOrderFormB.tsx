@@ -53,13 +53,13 @@ import {
 
 const FOIL_OPTIONS: readonly OrderFoilSwatchOption[] = [
   { value: '亚金', label: '亚金', tone: 'matte-gold' },
-  { value: '浅色', label: '浅色', tone: 'light-gold' },
-  { value: '红色', label: '红色', tone: 'red' },
-  { value: '黑色', label: '黑色', tone: 'black' },
-  { value: '银色', label: '银色', tone: 'silver' },
-  { value: '蓝色', label: '蓝色', tone: 'blue' },
-  { value: '透明色', label: '透明色', tone: 'clear' },
-  { value: '绿色', label: '绿色', tone: 'green' },
+  { value: '浅色', label: '浅金', tone: 'light-gold' },
+  { value: '红色', label: '红金', tone: 'red' },
+  { value: '黑色', label: '黑金', tone: 'black' },
+  { value: '银色', label: '银金', tone: 'silver' },
+  { value: '蓝色', label: '蓝金', tone: 'blue' },
+  { value: '透明色', label: '透明金', tone: 'clear' },
+  { value: '绿色', label: '绿金', tone: 'green' },
 ];
 
 function StickyOrderFormRail({ rail }: { rail: ReactNode }) {

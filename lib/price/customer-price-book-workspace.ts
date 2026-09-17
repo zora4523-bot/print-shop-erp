@@ -1,3 +1,4 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import 'server-only';
 
 import {
@@ -634,7 +635,7 @@ function businessScopeLabel(triggerCondition: unknown): string | null {
     scopes.push(`规格：${specifications.join('、')}`);
   }
   if (paperTypes.length > 0) scopes.push(`纸张：${paperTypes.join('、')}`);
-  if (foilColors.length > 0) scopes.push(`烫金色：${foilColors.join('、')}`);
+  if (foilColors.length > 0) scopes.push(`烫金色：${foilColors.map(foilColorLabel).join('、')}`);
   if (Number.isSafeInteger(triggerCondition.foilColorCount)) {
     scopes.push(`${Number(triggerCondition.foilColorCount)} 色烫金`);
   } else if (

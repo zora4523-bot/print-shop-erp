@@ -326,7 +326,7 @@ describe('OrderForm pricing routes', () => {
       /<button[^>]*aria-label="品牌金(?:，第 \d+ 色)?"[\s\S]*?<\/button>/,
     )?.[0];
     const clearButton = html.match(
-      /<button[^>]*aria-label="透明色"[\s\S]*?<\/button>/,
+      /<button[^>]*aria-label="透明金"[\s\S]*?<\/button>/,
     )?.[0];
 
     expect(brandGoldButton).toMatch(

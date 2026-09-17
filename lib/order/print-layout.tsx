@@ -1,3 +1,4 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import { packagingType, packagingModeLabel } from './packaging-mode';
 import type { CSSProperties, ReactNode } from 'react';
 import { printFontCss } from './print-fonts';
@@ -1017,9 +1018,9 @@ function foilColorsBySide(item: PrintOrderItem): {
   back: string[];
   all: string[];
 } {
-  const front = unique(item.frontFoilColors.map(externalPriceBusinessText));
-  const back = unique(item.backFoilColors.map(externalPriceBusinessText));
-  const legacy = unique(item.foilColors.map(externalPriceBusinessText));
+  const front = unique(item.frontFoilColors.map(foilColorLabel).map(externalPriceBusinessText));
+  const back = unique(item.backFoilColors.map(foilColorLabel).map(externalPriceBusinessText));
+  const legacy = unique(item.foilColors.map(foilColorLabel).map(externalPriceBusinessText));
   const normalizedFront = front.length > 0 ? front : back.length === 0 ? legacy : front;
   return {
     front: normalizedFront,

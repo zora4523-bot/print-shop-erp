@@ -1,4 +1,6 @@
 'use client';
+
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import { OrderSampleEntry, prepareSampleOrderEntry, useSampleOrderEntry } from './OrderSampleEntry';
 import { OrderCreateFeeDetails } from './OrderCreateFeeDetails';
 import { orderCreateFeeSummary } from './order-create-fee-summary';
@@ -393,8 +395,8 @@ function externalQuoteComponentLabel(
   ) {
     const foilSummary =
       item.backFoilColors.length > 0
-        ? `正 ${item.frontFoilColors.join('+')} / 反 ${item.backFoilColors.join('+')}`
-        : item.frontFoilColors.join('+');
+        ? `正 ${item.frontFoilColors.map(foilColorLabel).join('+')} / 反 ${item.backFoilColors.map(foilColorLabel).join('+')}`
+        : item.frontFoilColors.map(foilColorLabel).join('+');
     const passCount =
       item.frontFoilColors.length + item.backFoilColors.length;
     const calculation =
@@ -2678,8 +2680,8 @@ export function OrderForm({
         const foilSummary =
           item.frontFoilColors.length > 0
             ? item.backFoilColors.length > 0
-              ? `正 ${item.frontFoilColors.join('+')} / 反 ${item.backFoilColors.join('+')}`
-              : item.frontFoilColors.join('+')
+              ? `正 ${item.frontFoilColors.map(foilColorLabel).join('+')} / 反 ${item.backFoilColors.map(foilColorLabel).join('+')}`
+              : item.frontFoilColors.map(foilColorLabel).join('+')
             : '不烫金';
         const processSummary =
           item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT

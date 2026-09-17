@@ -1,3 +1,4 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import { Badge } from '@/components/ui/badge';
 import { TableScrollArea } from '@/components/ui-business';
 import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
@@ -140,7 +141,7 @@ function displayValue(field: string, value: unknown): string {
     const colors = Array.isArray(value)
       ? value.filter((color): color is string => typeof color === 'string')
       : [];
-    return colors.length > 0 ? colors.join('、') : '无';
+    return colors.length > 0 ? colors.map(foilColorLabel).join('、') : '无';
   }
   if (field === 'quantity' && typeof value === 'number') {
     return value.toLocaleString('zh-CN');

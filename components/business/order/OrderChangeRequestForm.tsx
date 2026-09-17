@@ -1,5 +1,7 @@
 'use client';
 
+import { foilColorInputLabel, restoreFoilColorInput } from '@/lib/order/foil-colors';
+
 import {
   useActionState,
   useMemo,
@@ -465,12 +467,12 @@ function ExistingOrderItemChanges({
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>正面烫金颜色（多个用顿号分隔）</span>
                   <Input
-                    value={current.frontFoilColors}
+                    value={foilColorInputLabel(current.frontFoilColors)}
                     maxLength={200}
                     disabled={pending}
                     onChange={(event) =>
                       updateItem(item.id, {
-                        frontFoilColors: event.target.value,
+                        frontFoilColors: restoreFoilColorInput(event.target.value, item.frontFoilColors ?? item.foilColors),
                       })
                     }
                   />
@@ -478,12 +480,12 @@ function ExistingOrderItemChanges({
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>反面烫金颜色（多个用顿号分隔）</span>
                   <Input
-                    value={current.backFoilColors}
+                    value={foilColorInputLabel(current.backFoilColors)}
                     maxLength={200}
                     disabled={pending}
                     onChange={(event) =>
                       updateItem(item.id, {
-                        backFoilColors: event.target.value,
+                        backFoilColors: restoreFoilColorInput(event.target.value, item.backFoilColors ?? item.foilColors),
                       })
                     }
                   />

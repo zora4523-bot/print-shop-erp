@@ -1,3 +1,4 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -881,7 +882,7 @@ async function* itemRows(membershipPath: string): AsyncGenerator<XlsxRow> {
           row.paperType,
           row.quantity,
           row.crafts.map((id) => craftNames.get(id) ?? '已删除工艺').join('、'),
-          row.foilColors.join('、'),
+          row.foilColors.map(foilColorLabel).join('、'),
           yesNo(row.isDoubleSided),
           yesNo(row.isDoubleColor),
           decimal(row.unitPrice, 4),

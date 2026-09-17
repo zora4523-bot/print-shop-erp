@@ -434,7 +434,7 @@ describe('OrderFormB', () => {
     const html = render(ordered, { onFoilSidesChange });
 
     expect(html.indexOf('aria-label="亚金，第 2 色"')).toBeLessThan(
-      html.indexOf('aria-label="红色，第 1 色"'),
+      html.indexOf('aria-label="红金，第 1 色"'),
     );
 
     recordedButtonProps
