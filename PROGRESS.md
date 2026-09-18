@@ -8,7 +8,7 @@
 
 ## 最后更新
 
-2026-09-18（对抗 review 修复批次 11 个提交在 `codex/memory-after-pr19`，未 push；PR #19 已合入 `main`；生产未部署）
+2026-09-18（对抗 review 修复批次 12 个提交在 `codex/memory-after-pr19`，未 push；PR #19 已合入 `main`；生产未部署）
 
 ## 已完成
 
@@ -16,7 +16,7 @@
 
 - 120g 退役只拦新建入口（`hasRetiredPaperItem`），共享报价适配器中立，含 120g 的历史工单可改单 / 取消结算；「关联物料已停用」的历史工单仍被既有规则挡，待拍板（HANDOFF 卡住的问题）。
 - 改单烫金色显示名反查并保护真实目录名；师傅工资汇总 / 未结算报工全量，链接只带显式日期；规格按可用克重启用 + 设计款分叉提示；珠光暗红显示名补齐详情 / 打印 / 导出 / 师傅端。
-- 11 个提交（`3f0ce6db` … `0957b0ae`），全量 Vitest 7024 通过、OrderCreationWorkspace browser spec 5/5，Codex 五轮对抗 review。
+- 12 个提交（`3f0ce6db` 起），全量 Vitest 7024 通过、OrderCreationWorkspace browser spec 5/5，Codex 六轮对抗 review。
 
 ### 2026-09-15 寄样品与打样
 
