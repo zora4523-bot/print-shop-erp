@@ -1,4 +1,5 @@
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -879,7 +880,7 @@ async function* itemRows(membershipPath: string): AsyncGenerator<XlsxRow> {
           row.product?.name,
           row.product ? productCategoryLabel(row.product.category) : null,
           row.specification,
-          row.paperType,
+          row.paperType ? paperDisplayLabel(row.paperType) : row.paperType,
           row.quantity,
           row.crafts.map((id) => craftNames.get(id) ?? '已删除工艺').join('、'),
           row.foilColors.map(foilColorLabel).join('、'),

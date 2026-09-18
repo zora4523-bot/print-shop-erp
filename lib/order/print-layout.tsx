@@ -1,4 +1,5 @@
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { packagingType, packagingModeLabel } from './packaging-mode';
 import type { CSSProperties, ReactNode } from 'react';
 import { printFontCss } from './print-fonts';
@@ -952,7 +953,7 @@ function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>): s
 }
 
 function formatPaper(item: PrintOrderItem): string | null {
-  const paper = clean(item.paperType) ? externalPriceBusinessText(item.paperType!) : null;
+  const paper = clean(item.paperType) ? paperDisplayLabel(externalPriceBusinessText(item.paperType!)) : null;
   if (!paper) return null;
   const weight = item.paperWeightGsm;
   if (!weight || new RegExp(`${weight}\\s*(?:g|克)`, 'i').test(paper)) return paper;

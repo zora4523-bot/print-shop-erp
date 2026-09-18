@@ -4,6 +4,7 @@ import { HighlightedRemark } from '@/components/business/order/HighlightedRemark
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 
 export function WorkerOperationSources({ sources }: { sources: ReporterOperationDetail['sources'] }) {
   return (
@@ -24,7 +25,7 @@ export function WorkerOperationSources({ sources }: { sources: ReporterOperation
                     : '未填规格'}
                   {' · '}
                   {source.item.paperType
-                    ? externalPriceBusinessText(source.item.paperType)
+                    ? paperDisplayLabel(externalPriceBusinessText(source.item.paperType))
                     : '未填纸张'}
                   {' · '}款式数量 {source.item.quantity}
                 </p>

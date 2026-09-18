@@ -1,4 +1,5 @@
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import 'server-only';
 
 import { canChangeOrderPackaging } from './editable-fields';
@@ -458,8 +459,9 @@ function mapSalesOrderDetail(
   };
 }
 
-function formatPaper(type: string | null, weight: number | null): string | null {
-  if (!type) return null;
+function formatPaper(rawType: string | null, weight: number | null): string | null {
+  if (!rawType) return null;
+  const type = paperDisplayLabel(rawType);
   if (weight && new RegExp(`(?:^|\\D)${weight}\\s*g\\b`, 'i').test(type)) return type;
   return weight ? `${type} ${weight}g` : type;
 }

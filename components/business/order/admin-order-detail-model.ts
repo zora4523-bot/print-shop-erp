@@ -1,4 +1,5 @@
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { packagingModeLabel, packagingUnit } from '@/lib/order/packaging-mode';
 import Decimal from 'decimal.js';
 import { adminOrderCraftTags, adminOrderDueHint } from '@/lib/order/admin-list-presentation';
@@ -115,7 +116,7 @@ function display(value: unknown, foil = false): string {
 }
 
 function paperDescription(type: string | null, weight: number | null): string {
-  const paper = type ? externalPriceBusinessText(type).trim() : '';
+  const paper = type ? paperDisplayLabel(externalPriceBusinessText(type)).trim() : '';
   // Keep the saved material name intact. Only omit the additional weight when
   // that exact value is already present; 160g must not match 60g or 1600g.
   const includesWeight = weight && new RegExp(`(?:^|[^\\d.])${weight}\\s*(?:gsm|g|克)(?![a-z])`, 'i').test(paper);
