@@ -88,8 +88,12 @@ async function OperationPieceworkSalaryContent({
   searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string };
 }) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-  const fromText = sp.from && parseStrictYmd(sp.from) ? sp.from : `${today.slice(0, 7)}-01`;
-  const toText = sp.to && parseStrictYmd(sp.to) ? sp.to : today;
+  // Only an explicit, valid range narrows unsettled reports; the list below
+  // defaults to the current month.
+  const explicitFrom = sp.from && parseStrictYmd(sp.from) ? sp.from : undefined;
+  const explicitTo = sp.to && parseStrictYmd(sp.to) ? sp.to : undefined;
+  const fromText = explicitFrom ?? `${today.slice(0, 7)}-01`;
+  const toText = explicitTo ?? today;
   const invalidRange = fromText > toText;
   const from = parseStrictYmd(fromText)!;
   const to = parseStrictYmd(toText)!;
@@ -101,7 +105,7 @@ async function OperationPieceworkSalaryContent({
   return (
     <section className="min-w-0 space-y-4">
       <SalaryHeader description="按日期查看报工明细。" />
-      <SalarySummary total={total} unpaid={unpaid} totalLabel="已结算工资" />
+      <SalarySummary total={total} unpaid={unpaid} totalLabel="累计已结算" />
       <SalaryRangeFilter
         inputType="date"
         fromLabel="开始日期"
@@ -110,9 +114,9 @@ async function OperationPieceworkSalaryContent({
         to={toText}
       />
       {invalidRange && <p role="alert" className="text-destructive">开始日期晚于结束日期，请修改后查询。</p>}
-      <WorkerPendingReports actor={actor} from={fromText} to={toText} page={sp.pendingPage} />
+      <WorkerPendingReports actor={actor} from={explicitFrom} to={explicitTo} page={sp.pendingPage} />
       <nav aria-label="发放状态" className="flex flex-wrap gap-2">{[['', '全部结算'], ['unpaid', '待发放'], ['paid', '已发放']].map(([value, label]) => <Link key={value} href={`/worker/salary?${new URLSearchParams({ from: fromText, to: toText, status: value })}`} aria-current={(sp.status ?? '') === value ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm ${(sp.status ?? '') === value ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>{label}</Link>)}</nav>
-      <h2 className="font-semibold">已结算工资</h2>
+      <h2 className="font-semibold">已结算工资（{fromText} 至 {toText}）</h2>
       {settlements.length === 0 ? (
         <EmptyState
           icon={WalletCards}

@@ -11,3 +11,14 @@ it('keeps period totals independent of pagination and scopes every query to self
   expect(tx.pieceworkSettlement.aggregate).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: expect.objectContaining({ reporterId: 'worker' }) }));
   expect(tx.pieceworkSettlement.aggregate.mock.calls[0]![0].where).not.toHaveProperty('status');
 });
+// Regression: the page defaults from/to to the current month; totals must still
+// include an unpaid settlement from an earlier month.
+it('keeps lifetime totals and unpaid amount independent of the period filter', async () => {
+  await listWorkerSettlementPage({ id: 'worker', role: Role.WORKER }, { from: new Date('2026-09-01'), to: new Date('2026-09-18') });
+  expect(tx.pieceworkSettlement.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workDate: expect.anything() }) }));
+  for (const call of tx.pieceworkSettlement.aggregate.mock.calls) {
+    expect(call[0].where).not.toHaveProperty('workDate');
+    expect(call[0].where).toMatchObject({ reporterId: 'worker' });
+  }
+  expect(tx.pieceworkSettlement.aggregate.mock.calls[1]![0].where).toMatchObject({ status: { not: 'PAID' } });
+});
