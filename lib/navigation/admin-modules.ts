@@ -126,7 +126,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'owner.orders',
-    label: '工单',
+    label: '工单列表',
     routeBase: '/orders',
     iconName: 'ClipboardList',
     breadcrumbLabel: '工单',
@@ -135,6 +135,21 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuOrder: 20,
     menuRoles: [Role.ADMIN],
     requiredPermission: 'order:view:all',
+  },
+  {
+    // First-level entry in the pinned「常用」group (AppSidebar PINNED_HREFS);
+    // SALES / CS already have their own /orders/new modules.
+    id: 'owner.orders.new',
+    label: '新建工单',
+    routeBase: '/orders/new',
+    iconName: 'PlusCircle',
+    // Crumb keeps the wording the rest of the shell already uses for this route.
+    breadcrumbLabel: '创建工单',
+    menuSection: 'workflow',
+    status: 'implemented',
+    menuOrder: 21,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'order:create',
   },
   {
     id: 'owner.purchases',
