@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { ClipboardEvent } from 'react';
 import {
   applyParsedReceiverFact,
   parseExternalReceiverDisplay,
   parsePastedReceiverAddress,
   parseReceiverAddressInput,
+  pastedTextareaValue,
   stripProvincePrefix,
 } from '../receiver-address-paste';
 
@@ -45,5 +47,23 @@ describe('stripProvincePrefix', () => {
     // A bare province name at the start may be a building or street name.
     expect(stripProvincePrefix('广东大厦1号', '广东')).toBe('广东大厦1号');
     expect(stripProvincePrefix('北京路88号', '北京')).toBe('北京路88号');
+  });
+});
+
+
+describe('pastedTextareaValue', () => {
+  function pasteEvent(text: string, current: string, start = current.length, end = start) {
+    return {
+      clipboardData: { getData: () => text },
+      currentTarget: { value: current, selectionStart: start, selectionEnd: end },
+    } as unknown as ClipboardEvent<HTMLTextAreaElement>;
+  }
+  it('normalizes clipboard CRLF to the LF the textarea value uses', () => {
+    expect(pastedTextareaValue(pasteEvent('张三\r\n13800000000\r\n', ''))).toBe('张三\n13800000000\n');
+    expect(pastedTextareaValue(pasteEvent('a\rb', ''))).toBe('a\nb');
+  });
+  it('inserts at the caret, replacing the selection', () => {
+    expect(pastedTextareaValue(pasteEvent('X', 'abcd', 1, 3))).toBe('aXd');
+    expect(pastedTextareaValue(pasteEvent('Y', 'ab', 2))).toBe('abY');
   });
 });

@@ -150,9 +150,13 @@ export function stripProvincePrefix(address: string, province: string | null): s
     .trim();
 }
 
-/** The textarea value as it would read after the paste lands at the caret. */
+/**
+ * The textarea value as it would read after the paste lands at the caret.
+ * `textarea.value` is LF-normalized by the HTML spec, so clipboard CRLF/CR is
+ * normalized too; otherwise an identical re-paste would compare unequal.
+ */
 export function pastedTextareaValue(event: ClipboardEvent<HTMLTextAreaElement>): string {
-  const pasted = event.clipboardData.getData('text');
+  const pasted = event.clipboardData.getData('text').replace(/\r\n?/g, '\n');
   const textarea = event.currentTarget;
   const start = textarea.selectionStart ?? textarea.value.length;
   const end = textarea.selectionEnd ?? start;
