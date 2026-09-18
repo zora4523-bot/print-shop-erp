@@ -54,13 +54,20 @@ export function appendReceipt(path: string, receipt: Receipt): string {
   return `${pathname}${search ? `?${search}` : ''}${hash}`;
 }
 
-/** 从页面 `searchParams` 里只取字典内的 key；数组取第一个，空白视为不存在。 */
+/**
+ * 从页面 `searchParams` 里取回执；数组取第一个，空白视为不存在。
+ *
+ * `keys` 是本页消费的回执白名单，默认整个字典。页面自己的筛选参数与回执
+ * key 同名时**必须**传（时薪页的 `paid=paid|unpaid` 就撞上了计件回执的
+ * `paid`），否则 `ReceiptUrlCleanup` 会把筛选当回执一起从地址栏清掉。
+ */
 export function readReceipt(
   searchParams: Record<string, SearchParamValue> | null | undefined,
+  keys: readonly ReceiptKey[] = RECEIPT_KEYS,
 ): Receipt {
   const receipt: Receipt = {};
   if (!searchParams) return receipt;
-  for (const key of RECEIPT_KEYS) {
+  for (const key of keys) {
     const raw = searchParams[key];
     const value = (Array.isArray(raw) ? raw[0] : raw)?.trim();
     if (value) receipt[key] = value;

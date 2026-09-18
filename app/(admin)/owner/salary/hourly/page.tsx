@@ -54,7 +54,8 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
   const returnTo = filterQuery.size
     ? `/owner/salary/hourly?${filterQuery.toString()}`
     : '/owner/salary/hourly';
-  const receipt = readReceipt(sp);
+  // paid=paid|unpaid 是本页筛选，与计件回执的 paid 同名：只消费自己的两个 key。
+  const receipt = readReceipt(sp, ['marked', 'markedPaid']);
 
   // 重算影响不能被页面的「已发 / 师傅」筛选误导：操作会
   // 扫描整个月份，因此额外读取该月全部现有月结，只将真实快照

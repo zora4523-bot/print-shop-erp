@@ -66,7 +66,7 @@ export default async function PieceworkSettlementPage({
   return (
     <div className="space-y-6">
       <ReceiptNotice
-        receipt={readReceipt(sp)}
+        receipt={readReceipt(sp, ['locked', 'lockedCount', 'paid'])}
         messages={{
           locked: (name) => ({
             title: '计件结算已锁定',

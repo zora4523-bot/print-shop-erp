@@ -65,6 +65,16 @@ describe('readReceipt', () => {
     expect(readReceipt(null)).toEqual({});
   });
 
+  it('only reads the whitelisted keys so page filters with the same name survive', () => {
+    // 时薪页：paid=paid|unpaid 是筛选，不是计件回执。
+    expect(
+      readReceipt(
+        { month: '2026-08', paid: 'unpaid', marked: 'Alice', markedPaid: '1' },
+        ['marked', 'markedPaid'],
+      ),
+    ).toEqual({ marked: 'Alice', markedPaid: '1' });
+  });
+
   it('round-trips through appendReceipt', () => {
     const href = appendReceipt('/x', { locked: '王 五', lockedCount: '3' });
     const query = Object.fromEntries(new URLSearchParams(href.split('?')[1]));
