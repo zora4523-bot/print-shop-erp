@@ -16,6 +16,14 @@
 
 ## 当前任务
 
+**2026-09-18（夜）：内部工单物流自动计价，2 个代码提交（`012feeea`、`f9faea24`），未 push、未部署。**
+- 起因：业主在建单页发现填了地址但费用栏没有快递费。查证是设计如此——运费自 2026-08-08 起被建模成「外销渠道的对客应收」，`quoteInternalCreateOrder` 明写 `includeOrderCharges: false`，工厂直接业务只能在详情页「编辑收费」补录，忘了补就漏收。业主拍板：**客服工单与工厂直接业务和外销用同一本已发布物流价目自动计价，顺丰到付维持运费 0、耗材照收**（取代 2026-07-30「totalAmount 只汇总款式小计」与 2026-09-15「内部结算不新增物流应收」在这两类结算下的口径）。
+- `012feeea`（建单 + 提交）：`settlementBillsLogistics`（除 NO_CHARGE 外全计物流）；`quoteInternalCreateOrder` 收与外销相同的 logistics 事实、返回同一份 `CreateOrderQuotePresentation`（含物流行与握手 token）；`submitOrder` 对内销 / 工厂直接也走共享 `finalizeExternalOrderQuoteInTx`，同一快照落款式价、入袋费、快递费 / 耗材收费明细与双价目版本锁。**客服业绩口径不变**：新增 `csSalesBasisAmountInTx` = 工单总额 − 代收物流，提交 / 取消 / 改单批准 / 终价确认四处按该口径记账与对平。
+- `f9faea24`（履约 + 核价）：`lib/order/settlement.ts` 的 `orderBillsLogistics`（有物流行即按物流行走）统一判定发货逐地址确认、承运商计费重量、`SHIPMENT_CHARGES_FINALIZED` 版本、顺丰到付切换、履约费用更正、追加地址重算、快捷编辑地址的省份复核、管理端详情与行内抽屉入口。**退役前提交、没有物流行的老工单维持原加工费流程**，完整编辑仍可补录。附加费用维护放宽到除免费工单外都可用。
+- Codex 对第一片的三条已在第二片一并修掉：核价完整编辑**补录**的物流行漏出业绩基数（取消时对不平）；内部「配置外」款式提交被 `assertSelectedPapersAvailable` 拦住进不了人工核价；管理员价工单首次提交必然误报 `quote_changed`（预览 token 不含管理员价快照 → finalizer 同时接受预览 token 与含管理员价的 token）。
+- 验证：typecheck / lint（仅既有 2 条 `window.location.assign` 警告）/ 架构门禁通过；`order.test` 243、`submit-external-order` / `pricing-review` / `change-request` / `components/business/order` 全绿；建单三个 browser spec 87/87。**未在真实浏览器目视**，也**没跑 e2e**。
+- **待办（下次会话接着做）**：① 全量 Vitest 与 Codex 对 `f9faea24` 的 review 结果在本次会话末尾，若有红需先收口；② e2e 里外销/内销发货与核价用例可能因「内销现在也要逐地址确认收费」而需要更新；③ SPEC §193「不计物流费用」与 §248 仍是旧口径，等这两片稳定后按 §9.3 更新并记 CHANGELOG。
+
 **2026-09-18（晚）：「保存后没反馈」审查 → 零依赖「跳转回执」推广，3 个代码提交 + 1 个记忆提交，未 push、未部署。**
 - 审查结论：项目没有 toast 库且 `docs/ui-规范.md §5.4` 明确不引入，`ActionNotice` 已是规范件。缺口在 18 处 `redirect()`：13 处不带任何标记（主数据新建 ×10、通知渠道/规则 ×3、工单编辑）、1 处出账 `?issued=1` 被 `/owner/bills/[id]` 兼容跳转丢掉、4 处计件/时薪用私有 `appendReceipt` 自成一套；另有 `TaskDisputeAdminPanel`（action 返回的 message 被丢）、`SalesTextEditForm`（「没变化」毫无提示）两个表单吞掉成功结果。失败反馈基本都有，只是 12px 红字不显眼，本轮没动。
 - 落地：`lib/admin/receipt.ts`（`RECEIPT_KEYS` 固定字典 + `appendReceipt` / `readReceipt` / `safeReturnTo`）、`components/ui-business/ReceiptNotice`（服务端渲染 ActionNotice；`ReceiptUrlCleanup` 挂载后 `history.replaceState` 清参数，写法同 `OrderListNavigationState`）。18 处 redirect 全部带回执；目标页渲染：账号 / 往来单位 / BOM / 采购单 / 采购新建（从采购流程新建供应商回来）/ 物料三条路由（owner、foreman、rules/papers 经 `MaterialCatalogPages`）/ 工艺 / 可建单组合 / 产品结构分类 / 工单详情两分支（SALES 分支加了一层 `space-y-4` 包裹）/ 客服业绩周期 / 账单归档详情（出账回执改落这里）/ 通知配置（区分 channel / rule）/ 计件 / 时薪（迁到公共件，保留零 JS 的「关闭提示」链接）。`TaskDisputeReviewForm` 改常驻挂载 + `open`，终态只留成功回执；`SalesTextEditForm` 「没有变化，未保存」显式播报。

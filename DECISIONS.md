@@ -1317,3 +1317,10 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - 理由：`useActionState` 的状态随旧页面丢失，18 处 redirect 里 13 处保存后毫无反馈，是业主感知最强的缺口；计件 / 时薪页已用私有 `appendReceipt` 跑通同一模式，推广它零依赖、服务端渲染、零 JS 可见。开源候选里 Base UI Toast 虽已随 `@base-ui/react` 装好（shadcn `base-nova` 风格自带），但 toast 只是展示层，跳转后仍需回执机制才触发得了，且是瞬态、与现有 45 个内联 role 断言冲突；两个 cookie flash 包一个 peer 锁 Next 15、一个已停更；next-safe-action 要求 JS `execute()`，与 138 个 `useActionState` action 的形状冲突。
 - 影响：新写的 redirect 必须带回执，否则视同无反馈；新增回执类型先登记 `RECEIPT_KEYS`；子表单若会因 revalidate 卸载，成功回执要么提升到页面级（redirect + 回执），要么让表单常驻、终态只留回执（`TaskDisputeReviewForm` 的 `open`）。若业主日后要全局瞬态提示，走 `pnpm dlx shadcn@latest add toast`（Base UI，零新依赖），叠加在回执机制之上，并回来改本条。
 - 相关文档：`docs/ui-规范.md §5.4`、`CLAUDE.md §15.3`、`lib/admin/receipt.ts` 头注释。
+
+## 2026-09-18：内部工单与外销共用同一本物流价目自动计费
+
+- 决策：客服工单（`INTERNAL_SALES`）与工厂直接业务（`FACTORY_DIRECT`）的快递费与打包耗材，与外部销售使用**同一本已发布 LOGISTICS 价目**自动计价——建单预览显示并计入合计，提交时由共享 finalizer 在同一快照内落 `OrderCustomerCharge` 与价目版本锁，发货逐地址确认承运商计费重量与终价。顺丰到付维持「运费 `WAIVED / 0`、打包耗材照收」。免费工单（`NO_CHARGE`）不计物流。
+- 理由：管理员自建工单多是补录与代录，功能必须完整；原设计只让外销自动算、直客靠详情页「编辑收费」补录，忘补就漏收运费。业主 2026-09-18 明确「价目一样、客服工单与外部销售一致、顺丰到付维持」。
+- 影响：取代 2026-07-30「工单 `totalAmount` 只汇总款式小计」与 2026-09-15「内部结算不新增物流应收」在这两类结算下的口径（顺丰到付标识与后期更正权限等其余内容仍有效）。**客服业绩口径不变**：`CsSalesEntry` 一律按 `csSalesBasisAmountInTx`（工单总额 − 代收快递费 / 打包耗材）记账与对平，代收物流不冒充客服销售额。判定统一走 `lib/order/settlement.ts`：新建/预览用 `settlementBillsLogistics`，履约与核价用 `orderBillsLogistics`（以工单**是否已有物流收费行**为准）——2026-09-18 之前提交、没有物流行的老工单维持原加工费流程，完整编辑仍可补录。SPEC §193 / §248 的旧口径待同步。
+- 相关文档：`SPEC-v1.2.md §J`、`lib/order/settlement.ts`、`lib/order/create-order-quote-service.ts`、`lib/order/submit-external-order.ts`、`lib/salary/cs-sales.ts`。
