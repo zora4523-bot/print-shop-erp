@@ -49,6 +49,28 @@ it('shows the receipt and strips only the receipt keys from the address bar', as
   await expect.element(page.getByRole('status')).toBeVisible();
 });
 
+it('cleans up again when a second receipt with the same keys arrives without remounting', async () => {
+  window.history.replaceState(null, '', '/owner/salary/hourly?month=2026-08&marked=Alice&markedPaid=1');
+  const messages = {
+    marked: (name: string) => ({ title: `${name} 已标记发放` }),
+  };
+  const read = () =>
+    readReceipt(
+      Object.fromEntries(new URLSearchParams(window.location.search)),
+      ['marked', 'markedPaid'],
+    );
+
+  flushSync(() => root.render(<ReceiptNotice receipt={read()} messages={messages} />));
+  await expect.poll(() => window.location.search).toBe('?month=2026-08');
+
+  // 第二次操作：Server Action 再次 redirect 到同一页，组件不重挂载。
+  window.history.replaceState(null, '', '/owner/salary/hourly?month=2026-08&marked=Bob&markedPaid=1');
+  flushSync(() => root.render(<ReceiptNotice receipt={read()} messages={messages} />));
+
+  await expect.element(page.getByRole('status')).toHaveTextContent('Bob 已标记发放');
+  await expect.poll(() => window.location.search).toBe('?month=2026-08');
+});
+
 it('leaves the address bar alone when nothing is rendered', async () => {
   window.history.replaceState(null, '', '/owner/bills/archive/b1?issued=1');
 

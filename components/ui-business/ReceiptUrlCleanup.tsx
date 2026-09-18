@@ -15,7 +15,18 @@ import { useEffect } from 'react';
  * Action 会用旧的 `?created=1` 把回执带回来。传 `null` 时 Next 自己会把
  * `__NA` / 内部 tree 复制进去（`copyNextJsInternalHistoryState`）。
  */
-export function ReceiptUrlCleanup({ keys }: { keys: readonly string[] }) {
+export function ReceiptUrlCleanup({
+  keys,
+  renderId,
+}: {
+  keys: readonly string[];
+  /**
+   * 每次服务端渲染都不同。同一页连续两次带回执的操作（连续给两个人标记
+   * 发放）时组件保持挂载、keys 不变，没有它 effect 不会重跑，第二张回执
+   * 会留在地址栏。
+   */
+  renderId: string;
+}) {
   const joined = keys.join(',');
   useEffect(() => {
     if (!joined) return;
@@ -28,6 +39,6 @@ export function ReceiptUrlCleanup({ keys }: { keys: readonly string[] }) {
       }
     }
     if (changed) window.history.replaceState(null, '', url);
-  }, [joined]);
+  }, [joined, renderId]);
   return null;
 }

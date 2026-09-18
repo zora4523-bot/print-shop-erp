@@ -65,6 +65,8 @@ export function ReceiptNotice({
     return message ? [{ key, message }] : [];
   });
   if (notices.length === 0) return null;
+  // 服务端每次渲染都发新 id，让客户端清理在连续回执时也重跑。
+  const renderId = crypto.randomUUID();
 
   return (
     <div data-slot="receipt-notice" className={cn('space-y-3', className)}>
@@ -77,7 +79,7 @@ export function ReceiptNotice({
           action={message.action}
         />
       ))}
-      <ReceiptUrlCleanup keys={presentKeys} />
+      <ReceiptUrlCleanup keys={presentKeys} renderId={renderId} />
     </div>
   );
 }
