@@ -17,7 +17,8 @@
 - 120g 退役只拦新建入口（`hasRetiredPaperItem`），共享报价适配器中立，含 120g 的历史工单可改单 / 取消结算；「关联物料已停用」的历史工单仍被既有规则挡，待拍板（HANDOFF 卡住的问题）。
 - 改单烫金色显示名反查并保护真实目录名；师傅工资汇总 / 未结算报工全量，链接只带显式日期；规格按可用克重启用 + 设计款分叉提示；珠光暗红显示名补齐详情 / 打印 / 导出 / 师傅端。
 - 12 个提交（`3f0ce6db` 起），全量 Vitest 7024 通过、OrderCreationWorkspace browser spec 5/5，Codex 六轮对抗 review。
-- 追加：收货地址输入统一复用粘贴自动识别组件 `ReceiverAddressPasteField`（`d58f5e79`），寄样品/打样、追加地址、工单编辑、建单额外地址、客户默认地址全部接入。
+- 追加：收货地址输入统一复用粘贴自动识别组件 `ReceiverAddressPasteField`（`d58f5e79` + 两轮 Codex 修正），寄样品/打样、追加地址、工单编辑、建单额外地址、客户默认地址全部接入。
+- 追加：管理员侧栏「工单」改「工单列表」，「新建工单」进「常用」一级入口（`lib/navigation/admin-modules.ts` 新增 `owner.orders.new`）。
 
 ### 2026-09-15 寄样品与打样
 
