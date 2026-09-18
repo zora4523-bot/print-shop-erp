@@ -1,4 +1,6 @@
 'use client';
+import { OrderSpecificationTabs } from './OrderSpecificationTabs';
+import { EditorTabs } from '@/components/ui/editor-tabs';
 import { orderDesignGroups } from '@/lib/order/design-groups';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import { OrderPurposePicker } from '../OrderPurposePicker';
@@ -14,7 +16,7 @@ import {
 } from '@/lib/order/packaging-mode';
 
 import { Group, FieldLabel, FieldError, RequiredMark, PillPicker } from './OrderFieldPrimitives';
-import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
+import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemSpecificationFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
 
 import { OrderReceiverContactFields } from '../OrderReceiverContactFields';
 
@@ -145,6 +147,7 @@ export type OrderFormBProps = {
   pricingExtras?: ReactNode;
   shippingExtras?: ReactNode;
   packagingExtras?: ReactNode;
+  orderPackagingExtras?: ReactNode;
   afterShipping?: ReactNode;
   footerExtras?: ReactNode;
   allowManualWeight?: boolean;
@@ -158,6 +161,7 @@ export type OrderFormBProps = {
     unitsPerBag: number;
     bagCount: number | null;
     error?: string | null;
+    scopeLabel?: string;
   };
   paperOptions: readonly OrderPaperSwatchOption[];
   paperKey: string | null;
@@ -489,6 +493,7 @@ export function OrderFormB({
   pricingExtras,
   shippingExtras,
   packagingExtras,
+  orderPackagingExtras,
   afterShipping,
   footerExtras,
   allowManualWeight = false,
@@ -543,6 +548,7 @@ export function OrderFormB({
   );
   const groups = orderDesignGroups(items.slice(0, itemFields.length));
   const activeGroup = groups.find((group) => group.indexes.includes(safeActiveIndex));
+  const designNumber = onAddSpecification ? groups.findIndex((group) => group === activeGroup) + 1 : safeActiveIndex + 1;
   const item = items[safeActiveIndex];
   const field = itemFields[safeActiveIndex];
   const itemErrors = fieldErrors?.items?.[safeActiveIndex];
@@ -808,13 +814,6 @@ export function OrderFormB({
         ))}
       </nav></> : <div className="mb-4 space-y-3">
         <p className="text-xs text-muted-foreground">{savedLabel} · {groups.length} 个设计款，{items.length} 个规格明细</p>
-        <nav ref={styleNavRef} aria-label="设计款" className="flex flex-wrap gap-2">
-          {groups.map((group, index) => <Button key={group.key} type="button" variant="outline"
-            disabled={disabled} aria-pressed={group === activeGroup}
-            onClick={() => { cancelIssueFocus(); onActiveIndexChange(group.indexes[0]); }}>
-            设计款 {index + 1}{group.indexes.some((member) => fieldErrors?.items?.[member]) ? ' · 待完善' : ''}
-          </Button>)}
-        </nav>
       </div>}
 
       <div
@@ -867,11 +866,24 @@ export function OrderFormB({
               else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') onRouteChange(value);
             }}
           /> : null}
+          {onAddSpecification ? <div className="mt-5 space-y-3 border-t pt-4">
+            <div className="flex flex-wrap items-start gap-2">
+              <EditorTabs ref={styleNavRef} id={`${uid}-design`} label="设计款" disabled={disabled}
+                tabs={groups.map((group, index) => ({ value: itemFields[group.indexes[0]].id,
+                  label: `设计款 ${index + 1}${group.indexes.some((member) => fieldErrors?.items?.[member]) ? ' · 待完善' : ''}` }))}
+                value={itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}
+                onChange={(value) => { cancelIssueFocus(); onActiveIndexChange(itemFields.findIndex((entry) => entry.id === value)); }} />
+              <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 增加设计款</Button>
+            </div>
+            {items.length >= MAX_ORDER_ITEMS_PER_ORDER ? <p className="text-sm text-muted-foreground">每张工单最多 {MAX_ORDER_ITEMS_PER_ORDER} 个规格明细。</p> : null}
+          </div> : null}
+          <div role={onAddSpecification ? 'tabpanel' : undefined} id={`${uid}-design-panel`}
+            aria-labelledby={onAddSpecification ? `${uid}-design-tab-${itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}` : undefined}>
           <OrderItemCraftFields
             hideRoute={Boolean(onPurposeChange)}
             uid={uid}
             item={item}
-            title={`工艺 · 第 ${safeActiveIndex + 1} 款`}
+            title={onAddSpecification ? `工艺 · 设计款 ${groups.findIndex((group) => group === activeGroup) + 1}` : `工艺 · 第 ${safeActiveIndex + 1} 款`}
             paperKey={paperKey}
             paperOptions={paperOptions}
             foilOptions={foilOptions}
@@ -890,20 +902,7 @@ export function OrderFormB({
             disabled={disabled}
             itemErrors={itemErrors}
             materialExtras={materialExtras}
-            specificationTabs={onAddSpecification ? <div className="mb-3 space-y-2">
-              <nav aria-label="规格明细" className="flex flex-wrap gap-2">
-                {activeGroup?.indexes.map((index) => <Button key={itemFields[index].id} type="button" variant="outline"
-                  disabled={disabled} aria-pressed={index === safeActiveIndex}
-                  onClick={() => { cancelIssueFocus(); onActiveIndexChange(index); }}>
-                  {items[index].specification || '选择规格'} · {items[index].quantity} 个
-                </Button>)}
-                <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAddSpecification}>＋ 增加规格</Button>
-                {itemFields.length > 1 ? <Button type="button" variant="outline" ref={removeButtonRef} disabled={disabled} onClick={() => { cancelIssueFocus(); restoreDeleteFocusRef.current = true; onRemove(safeActiveIndex); }}>
-                  {activeGroup?.indexes.length === 1 ? '删除设计款' : '移除当前规格'}
-                </Button> : null}
-              </nav>
-              <p className="text-xs text-muted-foreground">同一设计款共用设计文件、材料和工艺，各规格独立填写数量并计费。</p>
-            </div> : undefined}
+            hideSpecification={Boolean(onAddSpecification)}
             paperKey={paperKey}
             paperOptions={paperOptions}
             weightOptions={weightOptions}
@@ -916,6 +915,20 @@ export function OrderFormB({
             onCustomSizeChange={onCustomSizeChange}
           />
 
+          {onAddSpecification ? <OrderSpecificationTabs id={`${uid}-spec`}
+            indexes={activeGroup?.indexes ?? []} items={items} itemFields={itemFields}
+            activeIndex={safeActiveIndex} errors={fieldErrors} disabled={disabled} removeRef={removeButtonRef}
+            onSelect={(index) => { cancelIssueFocus(); onActiveIndexChange(index); }}
+            onAdd={onAddSpecification}
+            onRemove={() => { cancelIssueFocus(); restoreDeleteFocusRef.current = true; onRemove(safeActiveIndex); }}
+          /> : null}
+          <div role={onAddSpecification ? 'tabpanel' : undefined} id={`${uid}-spec-panel`}
+            aria-labelledby={onAddSpecification ? `${uid}-spec-tab-${field.id}` : undefined}>
+            {onAddSpecification ? <OrderItemSpecificationFields
+              uid={uid} item={item} disabled={disabled} itemErrors={itemErrors}
+              specificationOptions={specificationOptions} allowCustomSize={allowCustomSize}
+              onSpecificationChange={onSpecificationChange} onCustomSizeChange={onCustomSizeChange}
+            /> : null}
           <Group title="数量与包装">
             <div className="mb-5">
               <PillPicker
@@ -962,6 +975,7 @@ export function OrderFormB({
                 </div>
               ) : null}
             </div>
+            {packaging.scopeLabel ? <p className="mb-3 text-xs text-muted-foreground">{packaging.scopeLabel}</p> : null}
             <div className="grid grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
               <OrderItemQuantityField
                 uid={uid}
@@ -1036,8 +1050,9 @@ export function OrderFormB({
                     )
                   }
                 />
+                {onAddSpecification && itemFields.length > 1 && !isMixedPackaging(packaging.mode) ? <p className="mt-2 text-xs text-muted-foreground">混装范围：本工单全部规格</p> : null}
                 {itemFields.length < 2 ? (
-                  <p className="mt-2 text-xs text-muted-foreground">混装需至少 2 款</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{onAddSpecification ? '混装需至少 2 个规格明细' : '混装需至少 2 款'}</p>
                 ) : null}
               </div>
             ) : null}
@@ -1045,14 +1060,9 @@ export function OrderFormB({
 
           {packagingExtras ? <div className="mt-5">{packagingExtras}</div> : null}
 
-          {pricingExtras}
+          </div>
 
           <Group title="文件">
-            {onAddSpecification ? <div className="mb-4 space-y-2">
-              <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 增加设计款</Button>
-              <p className="text-xs text-muted-foreground">新设计款沿用当前材料和工艺，请单独上传设计文件。每个设计款及其规格分别计费；多个文件可属于同一设计款。</p>
-              {items.length >= MAX_ORDER_ITEMS_PER_ORDER ? <p className="text-sm text-muted-foreground">每张工单最多 {MAX_ORDER_ITEMS_PER_ORDER} 个规格明细。</p> : null}
-            </div> : null}
             <fieldset>
               <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
                 设计文件
@@ -1060,7 +1070,7 @@ export function OrderFormB({
               </legend>
               <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
                 <DesignFileBox
-                  itemNumber={safeActiveIndex + 1}
+                  itemNumber={designNumber}
                   fileType={DesignFileType.IMAGE}
                   entry={imageEntry}
                   disabled={disabled}
@@ -1083,7 +1093,7 @@ export function OrderFormB({
                 />
                 <div className="min-w-0 space-y-2">
                   <DesignFileBox
-                    itemNumber={safeActiveIndex + 1}
+                    itemNumber={designNumber}
                     fileType={DesignFileType.CDR}
                     disabled={disabled}
                     error={cdrFileError?.fieldId === field.id ? cdrFileError.message : undefined}
@@ -1100,7 +1110,7 @@ export function OrderFormB({
                       <Button
                         type="button" variant="outline" disabled={disabled}
                         className="min-h-11 min-w-11 shrink-0"
-                        aria-label={`移除第 ${safeActiveIndex + 1} 款 CDR 文件 ${entry.prepared.file.name}`}
+                        aria-label={`移除第 ${designNumber} 款 CDR 文件 ${entry.prepared.file.name}`}
                         onClick={() => onPendingDesignsChange(queue.filter((file) => file.id !== entry.id))}
                       >移除</Button>
                     </div>
@@ -1109,6 +1119,10 @@ export function OrderFormB({
               </div>
             </fieldset>
           </Group>
+
+          {pricingExtras}
+          </div>
+          {orderPackagingExtras}
 
           <Group title="收货">
             {shippingExtras}
@@ -1232,7 +1246,7 @@ function useOrderFormFocus(itemCount: number) {
   const handledErrorFocusRequestRef = useRef(0);
   const issueFocusTimerRef = useRef<number | null>(null);
   const removeButtonRef = useRef<HTMLButtonElement>(null);
-  const styleNavRef = useRef<HTMLElement>(null);
+  const styleNavRef = useRef<HTMLDivElement>(null);
   const restoreDeleteFocusRef = useRef(false);
 
   const cancelIssueFocus = useCallback(() => {
@@ -1250,7 +1264,7 @@ function useOrderFormFocus(itemCount: number) {
     const target =
       removeButtonRef.current ??
       styleNavRef.current?.querySelector<HTMLButtonElement>(
-        '[aria-pressed="true"]',
+        '[aria-selected="true"], [aria-pressed="true"]',
       );
     target?.focus({ preventScroll: true });
   }, [itemCount]);

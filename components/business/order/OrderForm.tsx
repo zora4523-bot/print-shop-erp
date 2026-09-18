@@ -1,8 +1,9 @@
 'use client';
 
+import { changeCreatePackagingMode, createPackagingGroupIndex, appendCreatePackagingGroup } from '@/lib/order/create-packaging-selection';
 import { foilColorLabel } from '@/lib/order/foil-colors';
 import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle, SampleOrderEditorSnapshot } from './order-creation-editor';
-import { designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
+import { orderDesignGroups, designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import { OrderSampleEntry, prepareSampleOrderEntry, useSampleOrderEntry } from './OrderSampleEntry';
 import { OrderCreateFeeDetails } from './OrderCreateFeeDetails';
@@ -10,9 +11,7 @@ import { orderCreateFeeSummary } from './order-create-fee-summary';
 import {
   isMixedPackaging,
   packagingModeWithStyleCount,
-  packagingType,
   packagingBoxType,
-  packagingCapacity,
   packagingUnit,
   packagingShipmentQuantities,
 } from '@/lib/order/packaging-mode';
@@ -1604,33 +1603,7 @@ export function OrderForm({
       nextShipments,
       { shouldDirty: true },
     );
-    const groups = getValues('packagingGroups');
-    const nextItemIndex = itemsArray.fields.length;
-    const mixed = groups.some(
-      (group) => isMixedPackaging(group.mode),
-    );
-    const sourceUnits =
-      groups.find((group) => (group.itemUnitsPerBag[index] ?? 0) > 0)
-        ?.itemUnitsPerBag[index] ?? 10;
-    const nextGroups = groups.map((group) => ({
-      ...group,
-      itemUnitsPerBag: [
-        ...group.itemUnitsPerBag,
-        mixed ? sourceUnits : 0,
-      ],
-    }));
-    if (!mixed) {
-      nextGroups.push({
-        name: null,
-        mode: groups.find((group) => (group.itemUnitsPerBag[index] ?? 0) > 0)?.mode ?? OrderPackagingMode.SINGLE_STYLE,
-        actualBagCount: 100,
-        itemUnitsPerBag: Array.from(
-          { length: nextItemIndex + 1 },
-          (_, itemIndex) =>
-            itemIndex === nextItemIndex ? sourceUnits : 0,
-        ),
-      });
-    }
+    const nextGroups = appendCreatePackagingGroup(getValues('packagingGroups'), index, currentItems.length);
     setValue('packagingGroups', nextGroups, {
       shouldDirty: true,
       shouldValidate: true,
@@ -1821,30 +1794,11 @@ export function OrderForm({
   function changeExternalPackagingMode(mode: OrderPackagingMode) {
     const items = getValues('items');
     const groups = getValues('packagingGroups');
-    const previousMode = groups[0]?.mode ?? OrderPackagingMode.SINGLE_STYLE;
-    const switchingType =
-      packagingType(mode) !== packagingType(previousMode) ||
-      packagingBoxType(mode) !== packagingBoxType(previousMode);
-    const capacity = packagingCapacity(mode) ?? 10;
-    const units = items.map((_, index) => {
-      const previous =
-        groups.find((group) => (group.itemUnitsPerBag[index] ?? 0) > 0)?.itemUnitsPerBag[index] ?? 10;
-      return switchingType ? Math.min(previous, capacity) : previous;
+    const next = changeCreatePackagingMode(groups, items.length, expandedItem, mode);
+    items.forEach((_, index) => {
+      const group = next[createPackagingGroupIndex(next, index)];
+      setValue(`items.${index}.pack`, group?.mode === OrderPackagingMode.UNPACKED ? null : group?.itemUnitsPerBag[index] ?? null, { shouldDirty: true });
     });
-    if (isMixedPackaging(mode) && items.length < 2) return;
-    const next = isMixedPackaging(mode)
-      ? [{ name: null, mode, actualBagCount: 1, itemUnitsPerBag: units }]
-      : items.map((_, index) => ({
-          name: null,
-          mode,
-          actualBagCount: mode === OrderPackagingMode.UNPACKED ? 0 : 1,
-          itemUnitsPerBag: items.map((__, candidate) => (candidate === index ? units[index] : 0)),
-        }));
-    items.forEach((_, index) =>
-      setValue(`items.${index}.pack`, mode === OrderPackagingMode.UNPACKED ? null : units[index], {
-        shouldDirty: true,
-      }),
-    );
     setValue('packagingGroups', next, { shouldDirty: true, shouldValidate: true });
   }
 
@@ -1857,15 +1811,7 @@ export function OrderForm({
       { shouldDirty: true, shouldValidate: true },
     );
     const groups = getValues('packagingGroups');
-    const matchedGroupIndex = groups.findIndex(
-      (group) => (group.itemUnitsPerBag[index] ?? 0) > 0,
-    );
-    const groupIndex =
-      matchedGroupIndex >= 0
-        ? matchedGroupIndex
-        : groups[0] && isMixedPackaging(groups[0].mode)
-          ? 0
-          : index;
+    const groupIndex = createPackagingGroupIndex(groups, index);
     if (groupIndex < 0) return;
     const next = groups.map((group, candidateGroupIndex) => ({
       ...group,
@@ -2474,13 +2420,14 @@ export function OrderForm({
   });
   const adminPriceGaps: Array<{ label: string; fieldId: string; itemIndex?: number }> = [
     ...adminPrices.flatMap((value, index) => value?.error ? [{ label: `款式 #${index + 1}：${value.error}`, fieldId: `items.${index}.adminPrice.amount`, itemIndex: index }] : []),
-    ...adminPackagingPrices.flatMap((value, index) => value?.error ? [{ label: `包装组 ${index + 1}：${value.error}`, fieldId: `packagingGroups.${index}.adminPrice.amount` }] : []),
+    ...adminPackagingPrices.flatMap((value, index) => value?.error ? [{ label: `包装组 ${index + 1}：${value.error}`, fieldId: `packagingGroups.${index}.adminPrice.amount`, itemIndex: watchedPackagingGroups[index].itemUnitsPerBag.findIndex((units) => units > 0) }] : []),
   ];
   const orderFormBGaps = [...(usesExternalSalesPricing ? [] : formGaps), ...adminPriceGaps].map((gap) => gap.label);
   const totalQuantity = watchedItems.reduce(
     (sum, item) => sum + (Number.isFinite(item.quantity) ? item.quantity : 0),
     0,
   );
+  const designGroups = orderDesignGroups(watchedItems);
   const railQuoteItems = itemGapInputs.map((item, index) => {
     const fieldId = itemsArray.fields[index]?.id ?? `item-${index}`;
     const view = quoteViews[fieldId];
@@ -2492,6 +2439,9 @@ export function OrderForm({
       !manualPrice && !usesExternalSalesPricing && Boolean(item.manualQuoteReason?.trim());
     return {
       key: fieldId,
+      design: { key: watchedItems[index]?.designGroupKey ?? fieldId,
+        label: `设计款 ${designGroups.findIndex((group) => group.indexes.includes(index)) + 1}` },
+      specificationLabel: `${watchedItems[index]?.specification || '待选规格'} · ${watchedItems[index]?.quantity ?? 0} 个`,
       label:
         watchedItems[index]?.name?.trim() ||
         ORDER_PRICING_ROUTE_LABELS[
@@ -2771,15 +2721,8 @@ export function OrderForm({
     products,
     externalCreateOrderOptions,
   );
-  const activeMixedPackagingGroup = watchedPackagingGroups.find(
-    (group) => isMixedPackaging(group.mode),
-  );
-  const activePackagingGroup =
-    activeMixedPackagingGroup ??
-    watchedPackagingGroups.find(
-      (group) => (group.itemUnitsPerBag[expandedItem] ?? 0) > 0,
-    ) ??
-    watchedPackagingGroups[expandedItem];
+  const activePackagingGroupIndex = createPackagingGroupIndex(watchedPackagingGroups, expandedItem);
+  const activePackagingGroup = watchedPackagingGroups[activePackagingGroupIndex];
   const activePackagingBagCount = activePackagingGroup
     ? calculateCreateOrderBagCount({
         mode: activePackagingGroup.mode,
@@ -3252,7 +3195,7 @@ export function OrderForm({
             </>}
             packagingExtras={
               <div className="space-y-3">
-                {canAssignExternalSales ? watchedPackagingGroups.map((group, index) => group.mode !== OrderPackagingMode.UNPACKED ? (
+                {canAssignExternalSales ? watchedPackagingGroups.map((group, index) => index === activePackagingGroupIndex && group.mode !== OrderPackagingMode.UNPACKED ? (
                   <AdminCreatePriceFields key={index} amountId={`packagingGroups.${index}.adminPrice.amount`} value={group.adminPrice} factsKey={adminPackagingFacts(group)} disabled={orderFormControlsDisabled}
                     title={`包装组 ${index + 1} 单价`} priceLabel={`包装单价（元 / ${packagingUnit(group.mode)}）`}
                     note={packagingBoxType(group.mode) ? '包含盒子和装盒费用。' : ''}
@@ -3261,6 +3204,10 @@ export function OrderForm({
                     onChange={(price) => setValue(`packagingGroups.${index}.adminPrice`, price, { shouldDirty: true, shouldValidate: true })}
                   />
                 ) : null) : null}
+              </div>
+            }
+            orderPackagingExtras={
+              <div className="mt-5 space-y-3 border-t pt-4">
                 <Label htmlFor="packageRequirement">包装补充说明（选填）</Label>
                 <Input
                   id="packageRequirement"
@@ -3509,6 +3456,9 @@ export function OrderForm({
             activeIndex={expandedItem}
             pendingDesigns={selectedDesignQueues}
             packaging={{
+              scopeLabel: activePackagingGroup && isMixedPackaging(activePackagingGroup.mode)
+                ? `当前混装：${activePackagingGroup.itemUnitsPerBag.flatMap((units, index) => units > 0 ? [`设计款 ${designGroups.findIndex((group) => group.indexes.includes(index)) + 1} · ${watchedItems[index]?.specification || '待选规格'}`] : []).join('、')}`
+                : undefined,
               mode:
                 activePackagingGroup?.mode ??
                 OrderPackagingMode.SINGLE_STYLE,
@@ -3572,6 +3522,10 @@ export function OrderForm({
                 onAttemptSubmit={(intent) => {
                   setErrorFocusMessage(undefined);
                   if (intent !== 'draft') setSubmissionValidationVisible(true);
+                }}
+                onItemClick={(key) => {
+                  const index = itemsArray.fields.findIndex((field) => field.id === key);
+                  if (index >= 0) setExpandedItem(index);
                 }}
                 onGapClick={(index) => {
                   setSubmissionValidationVisible(true);

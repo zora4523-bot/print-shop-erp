@@ -71,7 +71,7 @@ export type OrderItemCraftFieldsProps = Common & {
 };
 export type OrderItemMaterialFieldsProps = Common & {
   materialExtras?: ReactNode;
-  specificationTabs?: ReactNode;
+  hideSpecification?: boolean;
   paperKey: string | null;
   paperOptions: readonly OrderPaperSwatchOption[];
   weightOptions: readonly { value: number; disabled?: boolean }[];
@@ -367,7 +367,7 @@ export function OrderItemMaterialFields({
   disabled,
   itemErrors,
   materialExtras,
-  specificationTabs,
+  hideSpecification,
   paperKey,
   paperOptions,
   weightOptions,
@@ -379,8 +379,6 @@ export function OrderItemMaterialFields({
   onSpecificationChange,
   onCustomSizeChange,
 }: OrderItemMaterialFieldsProps) {
-  const customSizeSelected =
-    item.actualWidthMm === null && item.actualHeightMm === null;
   return (
     <Group title="材料" first={first}>
       {materialExtras}
@@ -442,8 +440,22 @@ export function OrderItemMaterialFields({
         ) : null}
       </div>
 
+      {!hideSpecification ? <OrderItemSpecificationFields
+        uid={uid} item={item} disabled={disabled} itemErrors={itemErrors}
+        specificationOptions={specificationOptions} allowCustomSize={allowCustomSize}
+        onSpecificationChange={onSpecificationChange} onCustomSizeChange={onCustomSizeChange}
+      /> : null}
+    </Group>
+  );
+}
+export function OrderItemSpecificationFields({
+  uid, item, disabled, itemErrors, specificationOptions, allowCustomSize,
+  onSpecificationChange, onCustomSizeChange,
+}: Pick<OrderItemMaterialFieldsProps, 'uid' | 'item' | 'disabled' | 'itemErrors' |
+  'specificationOptions' | 'allowCustomSize' | 'onSpecificationChange' | 'onCustomSizeChange'>) {
+  const customSizeSelected = item.actualWidthMm === null && item.actualHeightMm === null;
+  return (
       <div className="mt-5">
-        {specificationTabs}
         <PillPicker
           id={`${uid}-specification`}
           label="规格"
@@ -466,7 +478,6 @@ export function OrderItemMaterialFields({
           </label>
         ) : null}
       </div>
-    </Group>
   );
 }
 export function OrderItemQuantityField({

@@ -1658,3 +1658,42 @@ async function prepareSalesOrderCreationState(page: Page) {
   ).toBeVisible();
   await expect(form.getByText(fileName, { exact: false })).toBeVisible();
 }
+
+// Shared create form: both roles exercise the same two-level editor.
+for (const role of ['owner', 'sales'] as const) {
+  test(`${role} design and specification tabs fit light and dark viewports`, async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    await login(page, { username: E2E_USERS[role].username, password: E2E_PASSWORD, from: '/orders/new' });
+    const form = page.locator('[data-slot="order-form-b"]');
+    await expect(form).toBeVisible();
+    for (let index = 0; index < 3; index++) {
+      await form.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+      if (index < 2) await form.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+    }
+    const designs = form.getByRole('tablist', { name: '设计款', exact: true });
+    const specs = form.getByRole('tablist', { name: '规格明细', exact: true });
+    await expect(designs.getByRole('tab')).toHaveCount(3);
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+      await page.evaluate((value) => {
+        localStorage.setItem('erp-theme', value);
+        document.documentElement.classList.toggle('dark', value === 'dark');
+        document.documentElement.dataset.theme = value;
+        document.documentElement.style.colorScheme = value;
+      }, theme);
+      const design = designs.getByRole('tab').first();
+      if (testInfo.project.use.hasTouch) await design.tap();
+      else { await design.focus(); await page.keyboard.press('Home'); }
+      await expect(design).toHaveAttribute('aria-selected', 'true');
+      const specification = specs.getByRole('tab').last();
+      if (testInfo.project.use.hasTouch) await specification.tap();
+      else { await specs.getByRole('tab').first().focus(); await page.keyboard.press('End'); }
+      await expect(specification).toHaveAttribute('aria-selected', 'true');
+      await expect(specification).toBeFocused();
+      await expect.poll(() => page.evaluate(() => document.getAnimations().filter((animation) => animation.playState === 'running' || animation.pending).length)).toBe(0);
+      await expectViewportGate(page, testInfo);
+      await expectA11yGate(page);
+      await attachCandidateScreenshot(page, testInfo, 'admin', `order-tabs-${role}-${theme}`);
+    }
+  });
+}

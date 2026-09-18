@@ -1742,15 +1742,15 @@ export async function login(
 }
 
 // Every settlement mode now renders the B single-page form. The active style
-// is represented by a pressed button in the shared style navigation.
+// is represented by the selected design tab in the shared editor.
 export async function openFirstOrderItemEditor(page: Page): Promise<void> {
   const form = page.locator('[data-slot="order-form-b"]');
   await expect(form).toBeVisible();
   const firstStyle = form
-    .getByRole('navigation', { name: /^(款式|设计款)$/ })
-    .getByRole('button')
+    .getByRole('tablist', { name: '设计款', exact: true })
+    .getByRole('tab')
     .first();
-  await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');
+  await expect(firstStyle).toHaveAttribute('aria-selected', 'true');
   await expect(
     form.getByRole('spinbutton', { name: '数量', exact: true }),
   ).toBeVisible();

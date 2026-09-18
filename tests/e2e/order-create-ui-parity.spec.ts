@@ -52,7 +52,7 @@ for (const actor of ['owner', 'sales'] as const) {
       await page
         .getByLabel('关联外部销售')
         .selectOption({ label: 'E2E 销售 · e2e-sales' });
-      await expect(page.getByLabel('款式名', { exact: true })).toBeVisible();
+      await expect(page.getByLabel('设计款名称', { exact: true })).toBeVisible();
       await expect(page.getByLabel('稿件版本', { exact: true })).toBeVisible();
       await expect(
         page.getByRole('group', { name: '款式加工费', exact: true }),

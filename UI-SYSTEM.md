@@ -541,3 +541,13 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 布局回归在六标准视口明暗主题验证满 10 张工单，并断言批量栏与表单等宽对齐；专项几何测试增加用户截图的 1773px 和 2205px 宽屏。
 
 本次基于 `95212214` 的布局增量验证：目标 Vitest 23 项、浏览器组件 99 项通过；`pnpm typecheck`、`pnpm lint` 通过（2 条既存导航警告）。隔离库 `erp_e2e_releasefix20260917` 的 Release build/start 六视口检查共 7 项通过、5 项预期跳过（几何专项仅在 1280 项目执行一次，内部切换 911／1280／1773／2205 宽度）；命令为 `pnpm test:release tests/visual/admin-responsive.spec.ts --grep 'ten-order batch|order creation responds'` 加六个 admin project。本地 1773px 页面只读检查确认顶部与正文同为 1440px、费用栏 310px、文档未横向溢出；未改变用户草稿。日志为 `/tmp/erp-batch-layout-*.log`，未部署生产。
+
+### 建单设计款与规格标签（2026-09-18）
+
+管理员与外部销售的共享 `OrderFormB` 使用两层标签：设计款面板内排列工艺、材料、规格子面板（规格、数量、包装及当前组人工单价）、设计文件、加工收费及附加工艺。收货、整单包装补充说明与工单备注位于设计款面板外。增加设计款位于主标签旁，增加规格位于子标签旁。
+
+`EditorTabs` 统一 tablist/tab/tabpanel 关联、单个 Tab 焦点入口、方向键及 Home/End 操作，标签随宽度换行。表单状态保留在父表单，切换只改变编辑目标，不清空已填数量、文件或人工价。右侧按设计款归类规格费用，可点击定位；错误入口切换到目标设计款和规格后聚焦字段。包装混装显示参与范围，常规包装编辑限定当前规格。
+
+验收覆盖管理和销售真实建单、标签切换、文件归属、包装隔离、保存后的分组数据、人工价格权限；六视口明暗主题、触控、键盘、overflow 和 axe 由 `tests/visual/admin-responsive.spec.ts` 的 design and specification tabs 用例覆盖。
+
+验证结果见 [两层建单标签验收](docs/audits/2026-09-18-order-creation-tabs.md)：管理/销售 30 项 Release E2E、111 项浏览器组件测试、六视口两角色 12 项明暗主题门禁通过；全量 Vitest 7075 项通过，44 项既有跳过。

@@ -45,7 +45,7 @@ for (const actor of ['owner', 'sales'] as const) {
 
       await page.getByRole('button', { name: '＋ 增加设计款' }).click();
       await pack.fill('6');
-      const styles = page.getByRole('navigation', { name: '设计款', exact: true }).getByRole('button');
+      const styles = page.getByRole('tablist', { name: '设计款', exact: true }).getByRole('tab');
       await expect(styles).toHaveCount(2);
       await styles.first().click();
       await expect(pack).toHaveValue('12');

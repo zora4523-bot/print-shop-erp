@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatMoney } from '@/lib/dashboard/format';
 import { cn } from '@/lib/utils';
@@ -64,6 +65,7 @@ export function OrderCreateFeeDetails({
   plateFee,
   logistics,
   usesExternalSalesPricing,
+  onItemClick,
 }: Pick<
   OrderFormBRailProps,
   | 'quoteItems'
@@ -71,29 +73,26 @@ export function OrderCreateFeeDetails({
   | 'plateFee'
   | 'logistics'
   | 'usesExternalSalesPricing'
+  | 'onItemClick'
 >) {
   return (
     <div className="divide-y text-sm">
-      {quoteItems.map((item, index) => (
-        <dl key={item.key}>
-          <FeeRow
-            label={`${quoteItems.length > 1 ? `${index + 1}· ` : ''}${item.label}`}
-            status={item.status}
-            amount={item.amount}
-            source={item.pricingSource ?? 'AUTO'}
-          />
-          {item.status === 'complete' && item.pricingSource !== 'ADMIN'
-            ? item.components.map((line, i) => (
-                <FeeRow
-                  key={`${line.label}-${i}`}
-                  label={line.label}
-                  amount={line.amount}
-                  detail
-                />
-              ))
-            : null}
-        </dl>
-      ))}
+      {feeDesignGroups(quoteItems).map((group) => <section key={group.key}>
+        {group.label ? <h3 className="pt-3 font-semibold">{group.label}</h3> : null}
+        {group.items.map((item) => <div key={item.key}>
+          {onItemClick && item.design ? <Button type="button" variant="ghost"
+            className="mt-1 h-auto min-h-11 w-full justify-start whitespace-normal text-left"
+            onClick={() => onItemClick(item.key)} aria-label={`编辑${group.label} · ${item.specificationLabel}`}>
+            {item.specificationLabel}
+          </Button> : item.specificationLabel ? <p className="pt-2 text-xs">{item.specificationLabel}</p> : null}
+          <dl>
+            <FeeRow label={item.label} status={item.status} amount={item.amount} source={item.pricingSource ?? 'AUTO'} />
+            {item.status === 'complete' && item.pricingSource !== 'ADMIN' ? item.components.map((line, i) => (
+              <FeeRow key={`${line.label}-${i}`} label={line.label} amount={line.amount} detail />
+            )) : null}
+          </dl>
+        </div>)}
+      </section>)}
       <dl className="divide-y">
         <FeeRow
           label={packaging.label ?? '包装费'}
@@ -131,4 +130,15 @@ export function OrderCreateFeeDetails({
       </dl>
     </div>
   );
+}
+
+function feeDesignGroups(items: OrderFormBRailProps['quoteItems']) {
+  const groups = new Map<string, { key: string; label?: string; items: OrderFormBRailProps['quoteItems'][number][] }>();
+  for (const item of items) {
+    const key = item.design?.key ?? item.key;
+    const group = groups.get(key) ?? { key, label: item.design?.label, items: [] };
+    group.items.push(item);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
 }
