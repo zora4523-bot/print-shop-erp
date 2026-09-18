@@ -2,7 +2,18 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductionTaskDisputeStatus } from '@/generated/prisma/enums';
 
-const { refreshMock } = vi.hoisted(() => ({ refreshMock: vi.fn() }));
+const { refreshMock, actionState } = vi.hoisted(() => ({
+  refreshMock: vi.fn(),
+  actionState: { current: null as unknown, pending: false },
+}));
+// 注入 useActionState 结果：默认 null（首屏），单个用例里改成成功回执。
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react')>();
+  return {
+    ...actual,
+    useActionState: () => [actionState.current, vi.fn(), actionState.pending],
+  };
+});
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: refreshMock }),
 }));
@@ -16,7 +27,11 @@ import { TaskDisputeAdminPanel } from '../TaskDisputeAdminPanel';
 
 const createdAt = new Date('2026-08-26T06:00:00.000Z');
 
-beforeEach(() => refreshMock.mockReset());
+beforeEach(() => {
+  refreshMock.mockReset();
+  actionState.current = null;
+  actionState.pending = false;
+});
 
 describe('TaskDisputePanel', () => {
   it('offers an accessible create form when there is no pending record', () => {
@@ -107,5 +122,35 @@ describe('TaskDisputeAdminPanel', () => {
     expect(html).toContain('data-tone="success"');
     expect(html).toContain('已核对，后续按工资调整流程处理');
     expect(html).not.toContain('name="resolution"');
+  });
+
+  it('keeps the success receipt visible after the dispute leaves PENDING', () => {
+    // revalidate 之后 status 已是终态：表单字段收起，但 useActionState 的
+    // 成功回执必须留在原位，否则「确认已解决」看起来像什么也没发生。
+    actionState.current = {
+      status: 'success',
+      disputeId: 'dispute-1',
+      taskId: 'task-1',
+      orderId: 'order-1',
+      message: '已确认处理该异议',
+    };
+    const html = renderToStaticMarkup(
+      <TaskDisputeAdminPanel
+        disputes={[
+          {
+            ...base,
+            status: ProductionTaskDisputeStatus.RESOLVED,
+            resolution: '已核对',
+            resolvedAt: createdAt,
+            resolvedByName: '管理员',
+          },
+        ]}
+      />,
+    );
+    expect(html).toContain('data-slot="action-notice"');
+    expect(html).toContain('已确认处理该异议');
+    expect(html).toContain('role="status"');
+    expect(html).not.toContain('name="resolution"');
+    expect(html).toContain('已核对');
   });
 });

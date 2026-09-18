@@ -5,6 +5,7 @@ import { ProductionTaskDisputeStatus } from '@/generated/prisma/enums';
 import { reviewTaskDisputeAction } from '@/actions/task-disputes';
 import type { TaskDisputeMutationResult } from '@/actions/task-disputes.types';
 import { Button } from '@/components/ui/button';
+import { ActionNotice } from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { TaskDisputeStatusBadge } from './TaskDisputeStatusBadge';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -79,9 +80,14 @@ export function TaskDisputeAdminPanel({
                   <dd>{formatDateTimeShanghai(dispute.createdAt)}</dd>
                 </div>
               </dl>
-              {dispute.status === ProductionTaskDisputeStatus.PENDING ? (
-                <TaskDisputeReviewForm disputeId={dispute.id} />
-              ) : (
+              {/* 审核表单在异议处理后仍保持挂载：revalidate 之后 status 变成终态，
+                  若按 status 卸载，useActionState 里的成功回执会跟着一起丢掉
+                  （同 foreman/materials 页 StockTransactionForm 的注释）。 */}
+              <TaskDisputeReviewForm
+                disputeId={dispute.id}
+                open={dispute.status === ProductionTaskDisputeStatus.PENDING}
+              />
+              {dispute.status === ProductionTaskDisputeStatus.PENDING ? null : (
                 <div className="mt-3 border-t pt-3 text-xs">
                   <p className="font-medium">处理回复</p>
                   <p className="admin-wrap-anywhere mt-1 whitespace-pre-wrap">
@@ -101,12 +107,28 @@ export function TaskDisputeAdminPanel({
   );
 }
 
-function TaskDisputeReviewForm({ disputeId }: { disputeId: string }) {
+function TaskDisputeReviewForm({
+  disputeId,
+  open,
+}: {
+  disputeId: string;
+  /** 异议仍待处理时渲染表单；终态只保留成功回执。 */
+  open: boolean;
+}) {
   const bound = reviewTaskDisputeAction.bind(null, disputeId);
   const [state, action, pending] = useActionState<
     TaskDisputeMutationResult | null,
     FormData
   >(bound, null);
+
+  if (state?.status === 'success') {
+    return (
+      <div className="mt-3 border-t pt-3">
+        <ActionNotice tone="success" title={state.message} />
+      </div>
+    );
+  }
+  if (!open) return null;
 
   const resolutionError =
     state?.status === 'invalid' ? state.fieldErrors.resolution?.[0] : null;
