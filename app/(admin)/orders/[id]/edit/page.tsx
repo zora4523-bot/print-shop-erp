@@ -87,7 +87,11 @@ export default async function EditOrderPage({ params }: PageProps) {
       ? listActiveOrderChangeCatalogProducts()
       : Promise.resolve([]),
     getOrderExternalSalesAssociation(order.id, user),
-    user.role === Role.ADMIN ? listExternalCreateOrderFoilOptions() : Promise.resolve([]),
+    // Admin editor needs swatches; the change-request form (any role that can
+    // modify) needs the names so typed catalog colors are never re-mapped.
+    user.role === Role.ADMIN || (canModify && order.items.length > 0)
+      ? listExternalCreateOrderFoilOptions()
+      : Promise.resolve([]),
   ]);
   const external =
     'settlementType' in order &&

@@ -38,9 +38,20 @@ export function formatFoilColors(
  * keeps its stored name, so the text round-trips without ambiguity.
  */
 export function foilColorInputLabel(text: string, known: readonly string[] = []): string {
-  return text.split(/([,，、])/).map((part) => {
-    const label = foilColorLabel(part);
-    return label !== part && known.includes(label) ? part : label;
+  return mapFoilColorParts(text, (color) => {
+    const label = foilColorLabel(color);
+    return label !== color && known.includes(label) ? color : label;
+  });
+}
+
+/** Apply `resolve` to each delimited color, keeping delimiters and surrounding whitespace. */
+function mapFoilColorParts(text: string, resolve: (color: string) => string): string {
+  return text.split(/([,，、])/).map((part, index) => {
+    if (index % 2 === 1) return part;
+    const color = part.trim();
+    if (!color) return part;
+    const lead = part.slice(0, part.indexOf(color));
+    return lead + resolve(color) + part.slice(lead.length + color.length);
   }).join('');
 }
 
@@ -53,5 +64,5 @@ export function foilColorInputLabel(text: string, known: readonly string[] = [])
  */
 export function restoreFoilColorInput(text: string, saved: readonly string[], known: readonly string[] = []): string {
   const identities = new Set([...saved, ...known]);
-  return text.split(/([,，、])/).map((part) => identities.has(part) ? part : foilColorFromLabel(part)).join('');
+  return mapFoilColorParts(text, (color) => identities.has(color) ? color : foilColorFromLabel(color));
 }

@@ -56,3 +56,12 @@ it('keeps stored names visible and typed identities intact when a label collides
   expect(restoreFoilColorInput('红金、蓝金', ['亚金'], known)).toBe('红金、蓝色');
   expect(restoreFoilColorInput('红金', ['红色'], ['红金'])).toBe('红金');
 });
+
+// Submission trims each color later; whitespace around a label must not bypass
+// the reverse map and turn a no-op edit into a colour change.
+it('resolves trimmed colors while preserving whitespace and delimiters', () => {
+  expect(restoreFoilColorInput('红金 ', ['红色'])).toBe('红色 ');
+  expect(restoreFoilColorInput(' 红金 、 蓝金,黑金， 品牌金', [])).toBe(' 红色 、 蓝色,黑色， 品牌金');
+  expect(restoreFoilColorInput('、、 ', [])).toBe('、、 ');
+  expect(foilColorInputLabel(' 红色 、蓝色 ', [])).toBe(' 红金 、蓝金 ');
+});
