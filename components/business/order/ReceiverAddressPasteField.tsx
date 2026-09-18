@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import {
   parseReceiverAddressInput,
+  pastedTextareaValue,
   type ParsedReceiverAddress,
   type ReceiverFactSource,
 } from '@/lib/order/receiver-address-paste';
@@ -102,7 +103,14 @@ export function ReceiverAddressPasteField({
         className={cn('min-h-24 field-sizing-content', textareaClassName)}
         onPaste={
           onPaste ??
-          (() => {
+          ((event) => {
+            const next = pastedTextareaValue(event);
+            if (next === value) {
+              // Re-pasting the same text changes nothing in the DOM, so no
+              // input event follows; still let the parent re-apply the facts.
+              onChange(next, parseReceiverAddressInput(next), 'paste');
+              return;
+            }
             pasteRef.current = true;
             setTimeout(() => {
               pasteRef.current = false;

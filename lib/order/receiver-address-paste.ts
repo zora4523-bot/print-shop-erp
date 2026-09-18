@@ -138,11 +138,15 @@ export function applyParsedReceiverFact(
   return source === 'paste' || !existing.trim() ? candidate : existing;
 }
 
-/** Detail line for structured party addresses: drop the province the paste already produced. */
+/**
+ * Detail line for structured party addresses: drop the province the paste
+ * already produced, but only when an administrative suffix confirms it is the
+ * province (「广东大厦1号」keeps its building name; 「广东省…」is stripped).
+ */
 export function stripProvincePrefix(address: string, province: string | null): string {
   if (!province) return address.trim();
   return address
-    .replace(new RegExp(`^${province}(?:省|市|壮族自治区|回族自治区|维吾尔自治区|自治区)?`), '')
+    .replace(new RegExp(`^${province}(?:省|市|壮族自治区|回族自治区|维吾尔自治区|自治区)`), '')
     .trim();
 }
 

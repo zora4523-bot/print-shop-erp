@@ -241,10 +241,11 @@ export function PartyForm(props: Props) {
           value={receiverPaste}
           onChange={(next, parsed, source) => {
             setReceiverPaste(next);
-            // The four persisted fields are joined verbatim downstream, so a
-            // pasted address replaces the whole structured address: city and
-            // district are cleared and the province is not repeated in detail.
-            const replacing = source === 'paste' && Boolean(parsed.address);
+            // The four persisted fields are joined verbatim downstream. A pasted
+            // full address (one that names a province) replaces the whole
+            // structured address: city and district are cleared and the
+            // province is not repeated in detail. A street-only paste keeps them.
+            const replacing = source === 'paste' && Boolean(parsed.province);
             setReceiverDefaults((current) => ({
               name: applyParsedReceiverFact(current.name, parsed.receiverName, source),
               phone: applyParsedReceiverFact(current.phone, parsed.receiverPhone, source),

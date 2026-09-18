@@ -42,5 +42,8 @@ describe('stripProvincePrefix', () => {
     expect(stripProvincePrefix('浙江省杭州市西湖区测试路1号', '浙江')).toBe('杭州市西湖区测试路1号');
     expect(stripProvincePrefix('广西壮族自治区南宁市青秀区', '广西')).toBe('南宁市青秀区');
     expect(stripProvincePrefix('测试路1号', null)).toBe('测试路1号');
+    // A bare province name at the start may be a building or street name.
+    expect(stripProvincePrefix('广东大厦1号', '广东')).toBe('广东大厦1号');
+    expect(stripProvincePrefix('北京路88号', '北京')).toBe('北京路88号');
   });
 });
