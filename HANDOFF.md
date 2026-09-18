@@ -25,6 +25,7 @@
 - `cdd5000b`：自动激活用例 tx mock 补 `orderItem.findMany`。
 - `0957b0ae`：烫金显示名与真实目录名同名时以 known 身份集消歧，目录烫金名接到销售端。
 - 本轮末：客服编辑页也取目录烫金名；烫金输入的空白不再绕过反查。
+- `d58f5e79`（业主追加需求）：收货地址输入统一复用「粘贴自动识别」——新组件 `components/business/order/ReceiverAddressPasteField.tsx`，解析在 `lib/order/receiver-address-paste.ts`（原 OrderForm / 表单 B 的两个解析函数挪过去，旧导出位置 re-export）。接入：外销建单表单 B（DOM/id/占位文案不变）、寄样品/打样、追加收货地址、工单编辑主地址 + 逐票、建单额外地址、客户默认收货地址（粘贴框不提交）。语义：粘贴覆盖收货人/电话/省份，手输只补空；textarea 随内容增高。4 个 browser spec 112 例、SSR/单测通过；**未在真实浏览器里登录目视**（本机没有可用的登录账号），下次会话若有 dev server + 账号可在 `/workbench` 寄样品页核一眼。
 
 验证：全量 Vitest 7024 通过 / 56 跳过。**4 个文件在没有 `DATABASE_URL` 的 shell 下模块加载即抛**（`lib/db` 直连：`actions/__tests__/report-disputes`、`app/(worker)/__tests__/worker-task-legacy-dispute`、`app/(admin)/__tests__/owner-metadata-auth`、`order-detail-commercial-visibility`），带占位 URL 全过——跑全量前先 `export DATABASE_URL`。typecheck / eslint（保留既有 `window.location.assign` 警告）/ 架构门禁通过。打印视图只改纸张文字，darwin 像素基线未更新；release 配置跑 `order-print` 若基线含珠光闪红样本需按 §8.4 更新并在 commit 里写 `[visual-regression]`。
 Codex 前三轮（3f0ce6db、548b7d8d+7df2677d、3d53816d+05b31d1c+7b0b3a6f）意见已全部落地；第四轮（`38e321ff` / `67c39148`）指出目录同时有「红色」「红金」时显示名反查会改错身份，已在 `foilColorInputLabel` / `restoreFoilColorInput` 以 known 身份集消歧并把目录烫金名接到销售端（本轮最后一个提交）；第五轮（`0957b0ae`）再指出两处既存遗漏——客服编辑页没拿目录名、颜色旁空白绕过反查——已在本轮最后一个提交修掉（编辑页按「能改单」条件取目录名；`mapFoilColorParts` 按 trim 后的颜色匹配、保留空白与分隔符）。第六轮 review 若有新意见见下次会话。
@@ -430,3 +431,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-15：按业主决定修复半分金额（0.01 容差 + 拆分先舍入）、终价不再被就绪校验回滚、新增管理员补录生产资料路径（`order:production-facts:repair`）；Codex 实现、Claude 复审提交。
 - 2026-09-15（傍晚）：追 CI 三轮（`3caba196` / `ac61743c` / `5bdb907e`），账单恢复后 run 34927184124 全绿；PR #19 以 merge commit `d283b5a5` 合入 `main`，删 `codex/tijian-2` 与 `codex/gongdanceshi`。生产未部署。
 - 2026-09-18（下午）：对抗 review 建单分层 / 师傅端 11 个提交出 5 项缺陷，逐项修复 + Codex 五轮追加共 12 个提交（120g 拦截移位、烫金反查与同名消歧、工资汇总全量、规格克重解锁、珠光暗红补齐）；全量单测 7024 通过，OrderCreationWorkspace browser spec 5/5。未 push。
+- 2026-09-18（傍晚）：业主追加——收货地址输入统一复用粘贴自动识别组件（`d58f5e79`），六处接入，browser spec 4 文件 112 例通过。未 push。
