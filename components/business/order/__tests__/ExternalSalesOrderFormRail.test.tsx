@@ -68,8 +68,9 @@ describe('OrderFormBRail', () => {
     expect(html).toContain('未填写承诺交期');
     expect(html).not.toContain('入袋');
     expect(html).not.toContain('制烫金版费');
-    expect(html).not.toContain('纸箱耗材');
-    expect(html).not.toContain('快递费');
+    // Internal orders price delivery from the same logistics book since 2026-09-18.
+    expect(html).toContain('纸箱耗材');
+    expect(html).toContain('快递费');
   });
 
   it('uses the pure-engine known total for internal BAGGING without adding external-fee UI', () => {
@@ -90,8 +91,8 @@ describe('OrderFormBRail', () => {
     );
 
     expect(html).toContain('¥ 180.00');
-    expect(html).not.toContain('纸箱耗材');
-    expect(html).not.toContain('快递费');
+    expect(html).toContain('纸箱耗材');
+    expect(html).toContain('快递费');
   });
 
   it('marks an internal known total as incomplete while the plate fee is pending', () => {
@@ -293,7 +294,7 @@ describe('OrderFormBRail', () => {
       expect(manual).not.toContain('¥ 130.00');
       expect(manual).not.toContain('预估费用');
       for (const text of ['纸箱耗材', '运费待核', '不含快递费']) {
-        expect(manual.includes(text)).toBe(external);
+        expect(manual.includes(text)).toBe(true);
       }
     });
   }

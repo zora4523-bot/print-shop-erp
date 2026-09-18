@@ -193,6 +193,8 @@ vi.mock('@/lib/salary/cs-sales', () => ({
   assertCsOrderSalesLedgerReconciledInTx:
     assertCsOrderSalesLedgerReconciledMock,
   recordCsSalesEntryInTx: recordCsSalesEntryMock,
+  // No logistics charges in these fixtures: the basis equals the total.
+  csSalesBasisAmountInTx: vi.fn(async (_tx: unknown, _orderId: string, total: { toString(): string }) => new Decimal(total.toString()).toFixed(2)),
   CsSalesLedgerError: MockCsSalesLedgerError,
 }));
 const { appendPricingRevisionMock } = vi.hoisted(() => ({

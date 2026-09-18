@@ -187,7 +187,6 @@ export function collectOrderFormGaps(
         fieldId: shipment.receiverFieldId,
       });
     }
-    if (!shipping.usesExternalSalesPricing) continue;
 
     if (!shipping.isSfCollect && !hasText(shipment.province)) {
       gaps.push({

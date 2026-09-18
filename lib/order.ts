@@ -71,8 +71,9 @@ import {
   assertCsOrderSalesLedgerReconciledInTx,
   CsSalesLedgerError,
   recordCsSalesEntryInTx,
+  csSalesBasisAmountInTx,
 } from './salary/cs-sales';
-import { settlementTypeForOrderCreator } from './order/settlement';
+import { settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
 import {
   calculateCreateOrderQuoteFromCatalogInTx,
   CreateOrderQuoteError,
@@ -1929,6 +1930,32 @@ async function transitionWithLog(
   return transaction ? work(transaction) : db.$transaction(work);
 }
 
+/** Runs the shared submit-time quote finalizer and maps its errors to the order domain. */
+async function finalizeSubmittedOrderQuoteInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  actorId: string,
+  now: Date,
+  expectedQuoteToken: string | null,
+) {
+  try {
+    return await finalizeExternalOrderQuoteInTx(tx, orderId, actorId, now, expectedQuoteToken);
+  } catch (error) {
+    if (error instanceof ExternalOrderQuoteChangedError) {
+      throw new OrderQuoteChangedError(
+        error.quoteToken,
+        error.quotedFee,
+        error.quotedFeeCompleteness,
+        error.message,
+      );
+    }
+    if (error instanceof ExternalOrderQuoteFinalizeError) {
+      throw new OrderInvariantError(error.message);
+    }
+    throw error;
+  }
+}
+
 export async function submitOrder(
   orderId: string,
   actor: { id: string; role: Role },
@@ -2013,29 +2040,9 @@ export async function submitOrder(
               `第 ${itemWithoutImage.sequence} 款缺少设计图片，请上传后再提交`,
             );
           }
-          try {
-            finalizedExternalQuote.current =
-              await finalizeExternalOrderQuoteInTx(
-                prismaTx,
-                lockedOrderId,
-                actor.id,
-                now,
-                expectedQuoteToken,
-              );
-          } catch (error) {
-            if (error instanceof ExternalOrderQuoteChangedError) {
-              throw new OrderQuoteChangedError(
-                error.quoteToken,
-                error.quotedFee,
-                error.quotedFeeCompleteness,
-                error.message,
-              );
-            }
-            if (error instanceof ExternalOrderQuoteFinalizeError) {
-              throw new OrderInvariantError(error.message);
-            }
-            throw error;
-          }
+          finalizedExternalQuote.current = await finalizeSubmittedOrderQuoteInTx(
+            prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken,
+          );
         } else {
           // Internal drafts saved before the retirement are new business on
           // first submit. External drafts are checked in
@@ -2046,6 +2053,14 @@ export async function submitOrder(
           });
           if (hasRetiredPaperItem(items ?? [])) {
             throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
+          }
+          // Since 2026-09-18 internal and factory-direct orders price their
+          // delivery from the same published logistics book as external
+          // sales; the shared finalizer materializes the charges at submit.
+          if (settlementBillsLogistics(lockedOrder.settlementType)) {
+            finalizedExternalQuote.current = await finalizeSubmittedOrderQuoteInTx(
+              prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken,
+            );
           }
         }
 
@@ -2072,7 +2087,8 @@ export async function submitOrder(
               orderId: lockedOrderId,
               orderRevision: submittedOrder.revision,
               type: CsSalesEntryType.ORDER_SUBMITTED,
-              amount: submittedOrder.totalAmount,
+              // 客服业绩不含代收物流（快递费 / 打包耗材），见 cs-sales.ts。
+              amount: await csSalesBasisAmountInTx(prismaTx, lockedOrderId, submittedOrder.totalAmount),
               occurredAt: now,
               remark: '客服工单提交计入销售额',
             });
@@ -2463,18 +2479,15 @@ export async function cancelOrder(
         cancelledOrder.status !== OrderStatus.DRAFT
       ) {
         try {
-          await assertCsOrderSalesLedgerReconciledInTx(
-            prismaTx,
-            id,
-            cancelledOrder.totalAmount,
-          );
+          const salesBasis = await csSalesBasisAmountInTx(prismaTx, id, cancelledOrder.totalAmount);
+          await assertCsOrderSalesLedgerReconciledInTx(prismaTx, id, salesBasis);
           await recordCsSalesEntryInTx(prismaTx, {
             eventKey: `order:${id}:revision:${cancelledOrder.revision}:cancel`,
             csUserId: cancelledOrder.submitterId,
             orderId: id,
             orderRevision: cancelledOrder.revision,
             type: CsSalesEntryType.ORDER_CANCELLED,
-            amount: new Decimal(cancelledOrder.totalAmount).negated(),
+            amount: new Decimal(salesBasis).negated(),
             occurredAt: now,
             remark: `取消工单：${normalizedReason}`,
           });

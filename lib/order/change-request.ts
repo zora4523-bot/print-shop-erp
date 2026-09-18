@@ -5011,6 +5011,49 @@ type ProjectedOrderQuote = Awaited<
   ReturnType<typeof calculateProjectedOrderQuote>
 >;
 
+/** Pass-through delivery charges are excluded from 客服业绩 (cs-sales.ts). */
+function logisticsChargeAmount(
+  charges: readonly { amount: { toString(): string } | null; category: { code: string } }[],
+): Decimal {
+  return charges.reduce(
+    (sum, charge) =>
+      ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(String(charge.category.code)) && charge.amount !== null
+        ? sum.plus(charge.amount.toString())
+        : sum,
+    new Decimal(0),
+  );
+}
+
+/**
+ * 客服业绩不含代收物流（cs-sales.ts）：流水按扣除快递费 / 耗材后的口径记账。
+ * Returns the ledger basis before the change and the basis delta to record.
+ */
+async function csSalesBasisDeltaInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    previousTotal: { toString(): string };
+    previousCharges: Parameters<typeof logisticsChargeAmount>[0];
+    nextTotal: string;
+    chargesRewritten: boolean;
+  },
+): Promise<{ previousSalesBasis: string; salesDelta: Decimal }> {
+  const previousLogisticsAmount = logisticsChargeAmount(input.previousCharges);
+  const nextLogisticsAmount = input.chargesRewritten
+    ? new Decimal(
+        (await tx.orderCustomerCharge.aggregate({
+          where: { orderId: input.orderId, category: { code: { in: ['SHIPPING_FEE', 'PACKING_MATERIAL'] } } },
+          _sum: { amount: true },
+        }))._sum.amount ?? 0,
+      )
+    : previousLogisticsAmount;
+  const previousSalesBasis = new Decimal(input.previousTotal.toString()).minus(previousLogisticsAmount).toFixed(2);
+  return {
+    previousSalesBasis,
+    salesDelta: new Decimal(input.nextTotal).minus(nextLogisticsAmount).minus(previousSalesBasis),
+  };
+}
+
 async function persistApprovedModificationPricingInTx(input: {
   actor: { id: string; role: Role };
   catalogIdentityChanges: readonly CatalogIdentityAuditEntry[];
@@ -5097,7 +5140,13 @@ async function persistApprovedModificationPricingInTx(input: {
       new Decimal(nextProcessingAmount).plus(customerChargeTotal._sum.amount ?? 0),
     );
   }
-  const salesDelta = new Decimal(nextTotal).minus(request.order.totalAmount);
+  const { previousSalesBasis, salesDelta } = await csSalesBasisDeltaInTx(tx, {
+    orderId: request.order.id,
+    previousTotal: request.order.totalAmount,
+    previousCharges: request.order.customerCharges,
+    nextTotal,
+    chargesRewritten: Boolean(projected),
+  });
   await tx.order.update({
     where: { id: request.order.id },
     data: {
@@ -5301,6 +5350,7 @@ async function persistApprovedModificationPricingInTx(input: {
     pricingRevision,
     nextPricingStatus,
     salesDelta,
+    previousSalesBasis,
     versionedProductionChange,
   };
 }
@@ -5345,6 +5395,7 @@ async function finalizeApprovedModificationInTx(input: {
     pricingRevision,
     nextPricingStatus,
     salesDelta,
+    previousSalesBasis,
     versionedProductionChange,
   } = pricing;
   const rematerializedProduction = isReprintChangeStatus(request.order.status)
@@ -5499,7 +5550,7 @@ async function finalizeApprovedModificationInTx(input: {
       await assertCsOrderSalesLedgerReconciledInTx(
         tx,
         request.order.id,
-        request.order.totalAmount,
+        previousSalesBasis,
       );
       await recordCsSalesEntryInTx(tx, {
         eventKey: `order:${request.order.id}:revision:${nextRevision}:change`,

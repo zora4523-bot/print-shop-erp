@@ -29,6 +29,8 @@ function input(overrides: Partial<OrderFormGapInput> = {}): OrderFormGapInput {
           idPrefix: 'primary',
           receiverFieldId: 'receiverAddress',
           receiverAddress: '张三 13800000000 上海市',
+          province: '上海',
+          billableWeightKg: 'automatic',
         },
       ],
     },
@@ -118,6 +120,33 @@ describe('collectOrderFormGaps', () => {
         }),
       ),
     ).toEqual([]);
+  });
+
+  it('asks internal orders for the delivery province like external sales', () => {
+    const gaps = collectOrderFormGaps(
+      input({
+        shipping: {
+          usesExternalSalesPricing: false,
+          isSfCollect: false,
+          shipments: [
+            {
+              key: 'primary',
+              label: '主地址',
+              idPrefix: 'primary',
+              receiverFieldId: 'receiverAddress',
+              receiverAddress: '张三 13800000000 测试路 1 号',
+              province: '',
+              billableWeightKg: 'automatic',
+            },
+          ],
+        },
+      }),
+    );
+    expect(gaps.map((gap) => gap.fieldId)).toEqual(['primary-province']);
+    expect(collectOrderFormGaps(input({ shipping: { usesExternalSalesPricing: false, isSfCollect: true, shipments: [{
+      key: 'primary', label: '主地址', idPrefix: 'primary', receiverFieldId: 'receiverAddress',
+      receiverAddress: '张三 13800000000 测试路 1 号', province: '', billableWeightKg: null,
+    }] } }))).toEqual([]);
   });
 
   it('keeps external-sales logistics fact gaps without requiring charge amounts', () => {

@@ -22,6 +22,16 @@ export function settlementTypeForOrderCreator(
   }
 }
 
+/**
+ * Orders whose delivery is priced from the published logistics book (中通省份
+ * 阶梯 + 纸箱耗材) and billed as customer charges. Only free (NO_CHARGE) orders
+ * never bill logistics; internal and factory-direct orders follow the same
+ * rules as external sales (业主 2026-09-18 拍板，取代「内部结算不新增物流应收」).
+ */
+export function settlementBillsLogistics(settlementType: OrderSettlementType): boolean {
+  return settlementType !== OrderSettlementType.NO_CHARGE;
+}
+
 export const ORDER_SETTLEMENT_LABELS: Record<OrderSettlementType, string> = {
   [OrderSettlementType.EXTERNAL_SALES]: '外部销售应付工厂',
   [OrderSettlementType.INTERNAL_SALES]: '内部销售业绩',

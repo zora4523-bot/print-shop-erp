@@ -71,7 +71,8 @@ describe('OrderForm logistics quote authority', () => {
     expect(source).not.toContain(
       'setValue(packingPath, shipment.packaging.amount, {',
     );
-    expect(source).toContain('const railLogistics = usesExternalSalesPricing');
+    expect(source).toContain('const railLogistics = {');
+    expect(source).not.toContain('const railLogistics = usesExternalSalesPricing');
     expect(railSource).toContain('<OrderCreateFeeDetails {...props} />');
     expect(feeDetailsSource).toContain("packaging.label ?? '包装费'");
     expect(feeDetailsSource).toContain("logistics?.packagingLabel ?? '纸箱耗材'");

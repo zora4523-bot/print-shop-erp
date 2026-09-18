@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import Decimal from "decimal.js";
 import {
   OrderBillingMode,
   OrderItemPricingRoute,
@@ -84,6 +85,12 @@ const logisticsEvidence = {
   sourceName: "物流费.xlsx",
   sourceSha256: "b".repeat(64),
 };
+
+/** Internal order created before 2026-09-18: no logistics rows, processing-only review. */
+function legacyInternalOrder(settlementType: OrderSettlementType, overrides: Record<string, unknown> = {}) {
+  const order = pricingOrder({ settlementType, ...overrides });
+  return { ...order, customerCharges: order.customerCharges.filter((charge) => charge.shipmentId === null) };
+}
 
 function pricingOrder(overrides: Record<string, unknown> = {}) {
   return {
@@ -771,9 +778,9 @@ describe("snapshot-only order pricing review", () => {
     OrderSettlementType.INTERNAL_SALES,
     OrderSettlementType.FACTORY_DIRECT,
   ])(
-    "excludes shipment charges from the %s preview, aggregate, and writes",
+    "keeps the processing-only review for a legacy %s order without logistics rows",
     async (settlementType) => {
-      dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settlementType }));
+      dbMock.order.findUnique.mockResolvedValue(legacyInternalOrder(settlementType));
 
       await expect(
         previewOrderPricingReview("order-1", admin, now),
@@ -807,16 +814,39 @@ describe("snapshot-only order pricing review", () => {
   );
 
   it.each([
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.FACTORY_DIRECT,
+  ])(
+    "reviews and writes the logistics rows of a %s order exactly like external sales",
+    async (settlementType) => {
+      dbMock.order.findUnique.mockResolvedValue(pricingOrder());
+      const externalPreview = await previewOrderPricingReview("order-1", admin, now);
+      const externalResult = await finalizeOrderPricing(command(), admin, now);
+      const externalChargeWrites = dbMock.orderCustomerCharge.update.mock.calls.length;
+      vi.clearAllMocks();
+      dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settlementType }));
+      const preview = await previewOrderPricingReview("order-1", admin, now);
+      expect(preview.shipments).toHaveLength(externalPreview.shipments.length);
+      expect(preview.logisticsPriceBook).toEqual(externalPreview.logisticsPriceBook);
+      const result = await finalizeOrderPricing(command(), admin, now);
+      expect(result).toMatchObject({
+        processingAmount: externalResult.processingAmount,
+        totalAmount: externalResult.totalAmount,
+        confirmedFee: externalResult.confirmedFee,
+        logisticsPriceBookVersion: externalResult.logisticsPriceBookVersion,
+      });
+      expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledTimes(externalChargeWrites);
+    },
+  );
+
+  it.each([
     ["positive", "119.00", "28.00"],
     ["negative", "200.00", "-53.00"],
   ])(
     "records the %s INTERNAL_SALES final-price delta exactly once",
     async (_direction, previousTotal, expectedDelta) => {
       dbMock.order.findUnique.mockResolvedValue(
-        pricingOrder({
-          settlementType: OrderSettlementType.INTERNAL_SALES,
-          totalAmount: previousTotal,
-        }),
+        legacyInternalOrder(OrderSettlementType.INTERNAL_SALES, { totalAmount: previousTotal }),
       );
 
       await expect(
@@ -853,12 +883,28 @@ describe("snapshot-only order pricing review", () => {
     },
   );
 
+  it("records the INTERNAL_SALES delta on the 加工 basis: confirmed logistics never enter 客服业绩", async () => {
+    const order = pricingOrder({ settlementType: OrderSettlementType.INTERNAL_SALES, totalAmount: "119.00" });
+    dbMock.order.findUnique.mockResolvedValue(order);
+    const previousLogistics = order.customerCharges
+      .filter((charge) => charge.shipmentId !== null)
+      .reduce((sum, charge) => sum.plus(charge.amount ?? 0), new Decimal(0));
+    const result = await finalizeOrderPricing(command(), admin, now);
+    // The confirmed total now carries the logistics rows, but the ledger only
+    // moves by the processing delta (140 + 7 other charge − 119 = 28), exactly
+    // as for the legacy order above.
+    expect(new Decimal(result.totalAmount).gt("147.00")).toBe(true);
+    expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(
+      dbMock,
+      "order-1",
+      new Decimal("119.00").minus(previousLogistics).toFixed(2),
+    );
+    const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as { amount: { toFixed(places: number): string } };
+    expect(ledgerInput.amount.toFixed(2)).toBe("28.00");
+  });
   it("does not touch the CS ledger when INTERNAL_SALES final price is unchanged", async () => {
     dbMock.order.findUnique.mockResolvedValue(
-      pricingOrder({
-        settlementType: OrderSettlementType.INTERNAL_SALES,
-        totalAmount: "147.00",
-      }),
+      legacyInternalOrder(OrderSettlementType.INTERNAL_SALES, { totalAmount: "147.00" }),
     );
 
     await expect(
@@ -873,7 +919,7 @@ describe("snapshot-only order pricing review", () => {
     "fails before pricing writes when CS ledger %s fails",
     async (failureStage) => {
       dbMock.order.findUnique.mockResolvedValue(
-        pricingOrder({ settlementType: OrderSettlementType.INTERNAL_SALES }),
+        legacyInternalOrder(OrderSettlementType.INTERNAL_SALES),
       );
       const failure = new MockCsSalesLedgerError("客服业绩流水无法对平");
       if (failureStage === "reconcile") {
@@ -901,9 +947,7 @@ describe("snapshot-only order pricing review", () => {
   );
 
   it("rejects a negative final total before ledger or pricing writes", async () => {
-    const order = pricingOrder({
-      settlementType: OrderSettlementType.INTERNAL_SALES,
-    });
+    const order = legacyInternalOrder(OrderSettlementType.INTERNAL_SALES);
     dbMock.order.findUnique.mockResolvedValue({
       ...order,
       customerCharges: order.customerCharges.map((charge) =>
@@ -927,11 +971,11 @@ describe("snapshot-only order pricing review", () => {
   it.each([
     OrderSettlementType.INTERNAL_SALES,
     OrderSettlementType.FACTORY_DIRECT,
-  ])("rejects forged shipment charge input for %s orders", async (settlementType) => {
-    dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settlementType }));
+  ])("rejects shipment charge input for a %s order that has no logistics rows", async (settlementType) => {
+    dbMock.order.findUnique.mockResolvedValue(legacyInternalOrder(settlementType));
 
     await expect(finalizeOrderPricing(command(), admin, now)).rejects.toThrow(
-      /仅适用于外部销售结算工单/,
+      /没有快递费与打包耗材收费明细/,
     );
     expect(dbMock.orderItem.update).not.toHaveBeenCalled();
     expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
@@ -1160,9 +1204,8 @@ describe("snapshot-only order pricing review", () => {
   });
 
   it("confirms a factory-direct order-level pending plate fee without shipment charges", async () => {
-    const order = pricingOrder({
+    const order = legacyInternalOrder(OrderSettlementType.FACTORY_DIRECT, {
       status: OrderStatus.SUBMITTED,
-      settlementType: OrderSettlementType.FACTORY_DIRECT,
     });
     dbMock.order.findUnique.mockResolvedValue({
       ...order,

@@ -1,4 +1,5 @@
 import { canEditAllOrderFees, isEditableOrderCharge } from './admin-fee-policy';
+import { settlementBillsLogistics } from './settlement';
 import { packagingUnit } from './packaging-mode';
 import Decimal from "decimal.js";
 import type { Prisma } from "../../generated/prisma/client";
@@ -678,8 +679,15 @@ function isShipmentCustomerCharge(charge: PricingCustomerCharge): boolean {
   return code === "SHIPPING_FEE" || code === "PACKING_MATERIAL";
 }
 
-function reviewsShipmentCustomerCharges(order: PricingOrder, editAll = false): boolean {
-  return order.purpose !== 'PROOF' && (order.settlementType === OrderSettlementType.EXTERNAL_SALES || order.purpose === 'SAMPLE_SHIPMENT' || (editAll && order.settlementType === OrderSettlementType.FACTORY_DIRECT));
+function reviewsShipmentCustomerCharges(order: PricingOrder, editAll: boolean): boolean {
+  if (order.purpose === 'PROOF') return false;
+  if (order.settlementType === OrderSettlementType.EXTERNAL_SALES || order.purpose === 'SAMPLE_SHIPMENT') return true;
+  // Internal and factory-direct orders bill logistics since 2026-09-18 and
+  // review the rows like external sales. Orders created before that have no
+  // rows: they keep the processing-only review unless the full editor is
+  // used to 补录 the rows.
+  return settlementBillsLogistics(order.settlementType as OrderSettlementType) &&
+    (editAll || order.customerCharges.some(isShipmentCustomerCharge));
 }
 
 /**
@@ -862,7 +870,7 @@ export async function previewOrderPricingReview(
     assertSpecialOrderPrices(order);
     const includesShipmentCharges = reviewsShipmentCustomerCharges(order, editAll);
     const shipmentChargeByBusinessKey = includesShipmentCharges
-      ? assertShipmentCustomerChargeIdentity(order, editAll && order.settlementType === OrderSettlementType.FACTORY_DIRECT)
+      ? assertShipmentCustomerChargeIdentity(order, order.settlementType !== OrderSettlementType.EXTERNAL_SALES)
       : new Map<string, PricingCustomerCharge>();
 
     return {
@@ -1054,9 +1062,9 @@ function validateFinalPricingSubmissions(
   if ((order.purpose === 'PROOF' || order.purpose === 'SAMPLE_SHIPMENT') && (input.items.length || input.packagingGroups.some((group) => group.unitPrice != null && group.unitPrice !== '' && !new Decimal(group.unitPrice).isZero()))) {
     throw new OrderPricingReviewError('样品工单不接受额外款式或包装加工费');
   }
-  const includesShipmentCharges = reviewsShipmentCustomerCharges(order, input.editAll);
+  const includesShipmentCharges = reviewsShipmentCustomerCharges(order, Boolean(input.editAll));
   const shipmentChargeByBusinessKey = includesShipmentCharges
-    ? assertShipmentCustomerChargeIdentity(order, input.editAll && order.settlementType === OrderSettlementType.FACTORY_DIRECT)
+    ? assertShipmentCustomerChargeIdentity(order, order.settlementType !== OrderSettlementType.EXTERNAL_SALES)
     : new Map<string, PricingCustomerCharge>();
 
   const submittedItems = validateUniqueIds(
@@ -1095,7 +1103,7 @@ function validateFinalPricingSubmissions(
   }
   if (!includesShipmentCharges && input.shipments.length > 0) {
     throw new OrderPricingReviewError(
-      "快递费与打包耗材应收仅适用于外部销售结算工单",
+      "该工单没有快递费与打包耗材收费明细，不能提交物流收费",
     );
   }
   const submittedShipments = validateUniqueIds(
@@ -1405,7 +1413,18 @@ export async function finalizeOrderPricing(
     const packagingAmount = packagingTotal.toFixed(2);
     const processingAmount = processingTotal.toFixed(2);
     const totalAmount = total.toFixed(2);
-    const csSalesDelta = total.minus(order.totalAmount.toString());
+    // 客服业绩不含代收物流（cs-sales.ts）：比较扣除快递费 / 耗材后的口径。
+    const shipmentChargeAmount = (amountOf: (charge: PricingCustomerCharge) => Decimal.Value | null) =>
+      order.customerCharges.filter(isShipmentCustomerCharge).reduce((sum, charge) => {
+        const amount = amountOf(charge);
+        return amount === null ? sum : sum.plus(amount);
+      }, new Decimal(0));
+    const previousLogisticsAmount = shipmentChargeAmount((charge) => money(charge.amount));
+    const nextLogisticsAmount = includesShipmentCharges
+      ? shipmentChargeAmount((charge) => chargeAmountById.get(charge.id) ?? money(charge.amount))
+      : previousLogisticsAmount;
+    const previousSalesBasis = new Decimal(order.totalAmount.toString()).minus(previousLogisticsAmount).toFixed(2);
+    const csSalesDelta = total.minus(nextLogisticsAmount).minus(previousSalesBasis);
     if (
       order.settlementType === OrderSettlementType.INTERNAL_SALES &&
       order.billingMode === OrderBillingMode.CHARGE &&
@@ -1416,7 +1435,7 @@ export async function finalizeOrderPricing(
         await assertCsOrderSalesLedgerReconciledInTx(
           tx,
           order.id,
-          order.totalAmount.toString(),
+          previousSalesBasis,
         );
         await recordCsSalesEntryInTx(tx, {
           eventKey: `order:${order.id}:revision:${nextOrderRevision}:change`,

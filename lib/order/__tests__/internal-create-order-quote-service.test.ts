@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import Decimal from 'decimal.js';
 import {
   OrderFoilTechnique,
   OrderItemPricingRoute,
@@ -88,6 +89,12 @@ function input(
         itemUnitsPerBag: [10],
       },
     ],
+    logistics: {
+      isSfCollect: false,
+      shipments: [
+        { shipmentKey: '1', province: '上海', billableWeightKg: null, itemQuantity: 1_000, itemQuantities: [1_000] },
+      ],
+    },
     ...overrides,
   };
 }
@@ -123,19 +130,27 @@ beforeEach(() => {
 });
 
 describe('quoteInternalCreateOrder', () => {
-  it('uses the published pure engine for item and BAGGING but not external charges', async () => {
+  it('prices items, BAGGING and the published logistics charges with one handshake token', async () => {
     const result = await quoteInternalCreateOrder(input(), now);
 
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
     expect(mocks.readSnapshot).toHaveBeenCalledWith(tx, { now });
+    // 180.00 processing + the 上海 ZTO tariff and carton materials from the
+    // same published logistics book external sales use.
+    expect(result.logistics.complete).toBe(true);
+    expect(result.logistics.suggestedTotal).not.toBeNull();
+    expect(new Decimal(result.logistics.suggestedTotal!).gt(0)).toBe(true);
+    const expectedTotal = new Decimal('180.00').plus(result.logistics.suggestedTotal!).toFixed(2);
     expect(result).toMatchObject({
       factsKey: 'internal-facts-v1',
-      knownTotal: '180.00',
-      total: '180.00',
+      knownTotal: expectedTotal,
+      total: expectedTotal,
       hasManualPricing: false,
       totalSemantics: 'COMPLETE',
       plateFee: null,
     });
+    expect(typeof result.quoteToken).toBe('string');
+    expect(result.quoteToken.length).toBeGreaterThan(0);
     expect(result.items[0]?.snapshot).toMatchObject({
       engineVersion: 'CREATE_ORDER_PURE_V1',
       priceVersion: CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion,
@@ -164,8 +179,11 @@ describe('quoteInternalCreateOrder', () => {
       now,
     );
 
+    // Manual item: no processing amount is known, only the logistics lines.
+    const knownLogistics = new Decimal(result.logistics.suggestedShippingTotal ?? 0)
+      .plus(result.logistics.suggestedPackagingTotal ?? 0);
     expect(result).toMatchObject({
-      knownTotal: '0.00',
+      knownTotal: knownLogistics.toFixed(2),
       total: null,
       hasManualPricing: true,
       totalSemantics: 'EXCLUDES_MANUAL_ITEMS',
@@ -240,9 +258,11 @@ describe('quoteInternalCreateOrder', () => {
     expect(result.items[0]?.errors).toEqual([]);
     expect(result.items[0]).toMatchObject({ complete: true });
     expect(result.packaging).toMatchObject({ requiresAdminConfirmation: false });
+    const printTotal = new Decimal('320.00').plus(result.logistics.suggestedTotal ?? 0).toFixed(2);
+    expect(result.logistics.complete).toBe(true);
     expect(result).toMatchObject({
-      knownTotal: '320.00',
-      total: '320.00',
+      knownTotal: printTotal,
+      total: printTotal,
       hasManualPricing: false,
       totalSemantics: 'COMPLETE',
       plateFee: null,

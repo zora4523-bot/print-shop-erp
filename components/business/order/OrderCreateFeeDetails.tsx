@@ -64,7 +64,6 @@ export function OrderCreateFeeDetails({
   packaging,
   plateFee,
   logistics,
-  usesExternalSalesPricing,
   onItemClick,
 }: Pick<
   OrderFormBRailProps,
@@ -103,8 +102,6 @@ export function OrderCreateFeeDetails({
         {plateFee ? (
           <FeeRow label={plateFee.label} amount={null} status="incomplete" />
         ) : null}
-        {usesExternalSalesPricing ? (
-          <>
             <FeeRow
               label={logistics?.packagingLabel ?? '纸箱耗材'}
               amount={logistics?.packagingAmount ?? null}
@@ -125,8 +122,6 @@ export function OrderCreateFeeDetails({
               }
               source="AUTO"
             />
-          </>
-        ) : null}
       </dl>
     </div>
   );

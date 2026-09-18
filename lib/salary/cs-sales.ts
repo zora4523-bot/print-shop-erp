@@ -42,6 +42,29 @@ export class CsSalesPeriodMissingError extends CsSalesLedgerError {
  * period-level opening adjustment: whether such an order was included in the
  * old aggregate cannot be inferred safely.
  */
+/** Charge categories that are pass-through delivery costs, never 客服业绩. */
+const LOGISTICS_CHARGE_CODES = ['SHIPPING_FEE', 'PACKING_MATERIAL'] as const;
+
+/**
+ * 客服业绩口径 = 工单总额 − 代收物流（快递费、打包耗材）。Logistics became part
+ * of internal order totals on 2026-09-18; the ledger keeps the pre-existing
+ * 加工 + 附加费 basis so commission is never inflated by pass-through costs.
+ * Every ledger write and reconciliation must use this basis.
+ */
+export async function csSalesBasisAmountInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  totalAmount: Decimal.Value,
+): Promise<string> {
+  const logistics = await tx.orderCustomerCharge.aggregate({
+    where: { orderId, category: { code: { in: [...LOGISTICS_CHARGE_CODES] } } },
+    _sum: { amount: true },
+  });
+  return new Decimal(totalAmount)
+    .minus(logistics._sum.amount?.toString() ?? 0)
+    .toFixed(2);
+}
+
 export async function assertCsOrderSalesLedgerReconciledInTx(
   tx: Prisma.TransactionClient,
   orderId: string,

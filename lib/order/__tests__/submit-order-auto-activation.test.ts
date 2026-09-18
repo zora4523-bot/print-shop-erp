@@ -42,6 +42,19 @@ vi.mock('@/lib/notification/dispatch', () => ({
 vi.mock('@/lib/order/production-readiness', () => ({
   prepareOrderForProductionInTx: mocks.activate,
 }));
+// Since 2026-09-18 factory-direct submits run the shared quote finalizer
+// (items, BAGGING and logistics under one snapshot). This test only covers the
+// pricing-to-production handoff, so the finalizer is a stub.
+vi.mock('@/lib/order/submit-external-order', () => ({
+  finalizeExternalOrderQuoteInTx: vi.fn().mockResolvedValue({
+    pricingRevisionId: 'pricing-revision-1',
+    quotedFee: '0.00',
+    quotedFeeCompleteness: 'COMPLETE',
+    logisticsAmount: '0.00',
+  }),
+  ExternalOrderQuoteChangedError: class extends Error {},
+  ExternalOrderQuoteFinalizeError: class extends Error {},
+}));
 
 import { submitOrder } from '../../order';
 

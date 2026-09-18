@@ -1362,10 +1362,7 @@ export function OrderForm({
         manualQuote:
           result.pricingStatus ===
           ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
-        quoteToken:
-          usesExternalSalesPricing && intent !== 'draft'
-            ? expectedQuoteToken
-            : null,
+        quoteToken: intent !== 'draft' ? expectedQuoteToken : null,
       };
       setCreatedDraft(draft);
       await finishCreatedOrder(draft, queueSnapshot);
@@ -1446,8 +1443,8 @@ export function OrderForm({
         setErrorFocusRequest((current) => current + 1);
         return;
       }
-      const quoteToken = currentExternalOrderQuote?.quoteToken ?? '';
-      if (usesExternalSalesPricing && !quoteToken) return;
+      const quoteToken = currentCreateOrderQuote?.quoteToken ?? '';
+      if (!quoteToken) return;
       setSubmitQuoteChange(null);
       setPendingSubmission({ intent, data, fieldIds, queues: queueSnapshot, quoteToken });
       return;
@@ -1951,145 +1948,6 @@ export function OrderForm({
     })),
   });
 
-  const currentInternalQuoteFactsKey = compactOrderQuoteFactsKey({
-    itemFacts: watchedItems.map((item) =>
-      quoteFactsKey(item, watchedItems.length),
-    ),
-    packaging: currentPackagingInputKey,
-    logistics: JSON.stringify(packagingShipments),
-    openedPriceVersion: null,
-  });
-  const currentInternalQuoteInput = useCallback(() => {
-    const values = getValues();
-    const packaging = currentPackagingQuoteInput();
-    return {
-      factsKey: compactOrderQuoteFactsKey({
-        itemFacts: values.items.map((item) =>
-          quoteFactsKey(item, values.items.length),
-        ),
-        packaging: JSON.stringify(packaging),
-        logistics: JSON.stringify(packagingShipmentQuantities(values.items, values.additionalShipments)),
-        openedPriceVersion: null,
-      }),
-      settlementType,
-      shipmentQuantities: packagingShipmentQuantities(values.items, values.additionalShipments),
-      items: values.items.map(internalOrderItemQuoteFacts),
-      orderItemCount: values.items.length,
-      packagingGroups: packaging.groups,
-    };
-  }, [currentPackagingQuoteInput, getValues, settlementType]);
-  const currentInternalQuoteRequestReady = internalQuoteRequestReady(
-    watchedItems, watchedPackagingGroups, missingLaminationIndex,
-  );
-
-  const internalQuoteNeedsRefresh =
-    !usesExternalSalesPricing &&
-    currentInternalQuoteRequestReady &&
-    !(internalOrderQuote?.inputKey === currentInternalQuoteFactsKey &&
-      (internalOrderQuote.result || internalOrderQuote.error));
-
-  useEffect(() => {
-    if (
-      usesExternalSalesPricing ||
-      !localDraftReady ||
-      createdDraft ||
-      submitting ||
-      uploading ||
-      !currentInternalQuoteRequestReady ||
-      internalOrderQuote?.inputKey === currentInternalQuoteFactsKey
-    ) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const input = currentInternalQuoteInput();
-      if (input.factsKey !== currentInternalQuoteFactsKey) return;
-      const requestId = beginOrderQuoteRequest(
-        internalQuoteRequestGate.current,
-      );
-      const fieldIds = [...itemFieldIdsRef.current];
-      const packagingInputKey = JSON.stringify({
-        groups: input.packagingGroups,
-      });
-      setInternalOrderQuote({ inputKey: input.factsKey });
-      startQuote(async () => {
-        const response = await quoteInternalCreateOrderAction(input);
-        if (
-          !isCurrentOrderQuoteResponse({
-            gate: internalQuoteRequestGate.current,
-            requestId,
-            inputKey: input.factsKey,
-            currentInputKey: currentInternalQuoteInput().factsKey,
-            fieldIds,
-            currentFieldIds: itemFieldIdsRef.current,
-          })
-        ) {
-          return;
-        }
-        if (
-          response.status === 'success' &&
-          response.quote.factsKey === input.factsKey
-        ) {
-          setQuoteViews(
-            Object.fromEntries(
-              fieldIds.map((fieldId, index) => [
-                fieldId,
-                {
-                  inputKey: quoteFactsKey(
-                    input.items[index],
-                    input.orderItemCount,
-                  ),
-                  result: response.quote.items[index],
-                },
-              ]),
-            ),
-          );
-          setPackagingQuote({
-            inputKey: packagingInputKey,
-            result: response.quote.packaging,
-          });
-          setInternalOrderQuote({
-            inputKey: input.factsKey,
-            result: response.quote,
-          });
-          return;
-        }
-        const error =
-          response.status === 'error'
-            ? response.message
-            : response.status === 'invalid'
-              ? Object.values(response.fieldErrors).flat().join('；')
-              : '报价响应与当前工单不一致，请重试';
-        setQuoteViews(
-          Object.fromEntries(
-            fieldIds.map((fieldId, index) => [
-              fieldId,
-              {
-                inputKey: quoteFactsKey(
-                  input.items[index],
-                  input.orderItemCount,
-                ),
-                error,
-              },
-            ]),
-          ),
-        );
-        setPackagingQuote({ inputKey: packagingInputKey, error });
-        setInternalOrderQuote({ inputKey: input.factsKey, error });
-      });
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [
-    createdDraft,
-    currentInternalQuoteFactsKey,
-    currentInternalQuoteInput,
-    currentInternalQuoteRequestReady,
-    internalOrderQuote?.inputKey,
-    localDraftReady,
-    startQuote,
-    submitting,
-    uploading,
-    usesExternalSalesPricing,
-  ]);
 
   const watchedPrimaryQuantities = watchedItems.map((item, itemIndex) => {
     const allocated = watchedShipments.reduce(
@@ -2134,6 +1992,156 @@ export function OrderForm({
     ],
   };
   const currentLogisticsInputKey = JSON.stringify(currentLogisticsProjection);
+
+  const currentInternalQuoteFactsKey = compactOrderQuoteFactsKey({
+    itemFacts: watchedItems.map((item) =>
+      quoteFactsKey(item, watchedItems.length),
+    ),
+    packaging: currentPackagingInputKey,
+    logistics: currentLogisticsInputKey,
+    openedPriceVersion: null,
+  });
+  const currentInternalQuoteInput = useCallback(() => {
+    const values = getValues();
+    const packaging = currentPackagingQuoteInput();
+    // Same logistics facts as the external preview: the submit finalizer
+    // recomputes them and compares the handshake token.
+    const logistics = currentLogisticsQuoteInput();
+    return {
+      factsKey: compactOrderQuoteFactsKey({
+        itemFacts: values.items.map((item) =>
+          quoteFactsKey(item, values.items.length),
+        ),
+        packaging: JSON.stringify(packaging),
+        logistics: JSON.stringify(logistics),
+        openedPriceVersion: null,
+      }),
+      settlementType,
+      items: values.items.map(internalOrderItemQuoteFacts),
+      orderItemCount: values.items.length,
+      packagingGroups: packaging.groups,
+      logistics,
+    };
+  }, [currentLogisticsQuoteInput, currentPackagingQuoteInput, getValues, settlementType]);
+  const currentInternalQuoteRequestReady = internalQuoteRequestReady(
+    watchedItems, watchedPackagingGroups, missingLaminationIndex,
+  );
+
+  const internalQuoteNeedsRefresh =
+    !usesExternalSalesPricing &&
+    currentInternalQuoteRequestReady &&
+    !(internalOrderQuote?.inputKey === currentInternalQuoteFactsKey &&
+      (internalOrderQuote.result || internalOrderQuote.error));
+
+  useEffect(() => {
+    if (
+      usesExternalSalesPricing ||
+      !localDraftReady ||
+      createdDraft ||
+      submitting ||
+      uploading ||
+      !currentInternalQuoteRequestReady ||
+      internalOrderQuote?.inputKey === currentInternalQuoteFactsKey
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const input = currentInternalQuoteInput();
+      if (input.factsKey !== currentInternalQuoteFactsKey) return;
+      const requestId = beginOrderQuoteRequest(
+        internalQuoteRequestGate.current,
+      );
+      const fieldIds = [...itemFieldIdsRef.current];
+      const packagingInputKey = JSON.stringify({
+        groups: input.packagingGroups,
+      });
+      const logisticsInputKey = JSON.stringify(input.logistics);
+      setInternalOrderQuote({ inputKey: input.factsKey });
+      startQuote(async () => {
+        const response = await quoteInternalCreateOrderAction(input);
+        if (
+          !isCurrentOrderQuoteResponse({
+            gate: internalQuoteRequestGate.current,
+            requestId,
+            inputKey: input.factsKey,
+            currentInputKey: currentInternalQuoteInput().factsKey,
+            fieldIds,
+            currentFieldIds: itemFieldIdsRef.current,
+          })
+        ) {
+          return;
+        }
+        if (
+          response.status === 'success' &&
+          response.quote.factsKey === input.factsKey
+        ) {
+          setQuoteViews(
+            Object.fromEntries(
+              fieldIds.map((fieldId, index) => [
+                fieldId,
+                {
+                  inputKey: quoteFactsKey(
+                    input.items[index],
+                    input.orderItemCount,
+                  ),
+                  result: response.quote.items[index],
+                },
+              ]),
+            ),
+          );
+          setPackagingQuote({
+            inputKey: packagingInputKey,
+            result: response.quote.packaging,
+          });
+          setLogisticsQuote({
+            inputKey: logisticsInputKey,
+            result: response.quote.logistics,
+          });
+          setInternalOrderQuote({
+            inputKey: input.factsKey,
+            result: response.quote,
+          });
+          return;
+        }
+        const error =
+          response.status === 'error'
+            ? response.message
+            : response.status === 'invalid'
+              ? Object.values(response.fieldErrors).flat().join('；')
+              : '报价响应与当前工单不一致，请重试';
+        setQuoteViews(
+          Object.fromEntries(
+            fieldIds.map((fieldId, index) => [
+              fieldId,
+              {
+                inputKey: quoteFactsKey(
+                  input.items[index],
+                  input.orderItemCount,
+                ),
+                error,
+              },
+            ]),
+          ),
+        );
+        setPackagingQuote({ inputKey: packagingInputKey, error });
+        setLogisticsQuote({ inputKey: logisticsInputKey, error });
+        setInternalOrderQuote({ inputKey: input.factsKey, error });
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    createdDraft,
+    currentInternalQuoteFactsKey,
+    currentInternalQuoteInput,
+    currentLogisticsInputKey,
+    currentInternalQuoteRequestReady,
+    internalOrderQuote?.inputKey,
+    localDraftReady,
+    startQuote,
+    submitting,
+    uploading,
+    usesExternalSalesPricing,
+  ]);
   const currentLogisticsQuoteReady = currentLogisticsProjection.shipments.every(
     (shipment) => shipment.itemQuantity > 0,
   );
@@ -2365,7 +2373,7 @@ export function OrderForm({
       receiverFieldId: 'receiverAddress',
       receiverAddress: watchedReceiverAddress,
       province: watchedDestinationProvince,
-      billableWeightKg: usesExternalSalesPricing ? 'automatic' : null,
+      billableWeightKg: 'automatic',
     },
     ...watchedShipments.map((shipment, index) => ({
       key: `additional-${index}`,
@@ -2374,7 +2382,7 @@ export function OrderForm({
       receiverFieldId: `additionalShipments.${index}.receiverAddress`,
       receiverAddress: shipment.receiverAddress,
       province: shipment.destinationProvince,
-      billableWeightKg: usesExternalSalesPricing ? 'automatic' : null,
+      billableWeightKg: 'automatic',
     })),
   ];
   const formGaps = collectOrderFormGaps({
@@ -2452,9 +2460,9 @@ export function OrderForm({
   const primaryLogisticsShipment = currentLogisticsResult?.shipments[0];
   const billableWeight =
     primaryLogisticsShipment?.shipping.basis.billableWeightKg;
-  const railLogistics = usesExternalSalesPricing
-    ? {
-        status: externalQuoteQuoting
+  // Every billing settlement quotes delivery from the published logistics book.
+  const railLogistics = {
+        status: (usesExternalSalesPricing ? externalQuoteQuoting : quoting)
           ? ('loading' as const)
           : !logisticsQuote
             ? ('missing' as const)
@@ -2481,8 +2489,7 @@ export function OrderForm({
           logisticsQuote?.error ??
           currentLogisticsResult?.errors.join('；') ??
           null,
-      }
-    : null;
+      };
   const packagingQuoteStale =
     Boolean(packagingQuote) &&
     packagingQuote?.inputKey !== currentPackagingInputKey;
@@ -2534,12 +2541,12 @@ export function OrderForm({
       : currentPackagingResult?.groups[index]?.suggestedSubtotal),
     railLogistics?.shippingAmount, railLogistics?.packagingAmount,
   ]) : currentCreateOrderQuote?.knownTotal;
-  const displayedTotalSemantics = resolveCreatePriceTotalSemantics(hasAdminPrices, railQuoteItems, railPackaging.status, usesExternalSalesPricing ? railLogistics?.status : 'complete', currentCreateOrderQuote);
+  const displayedTotalSemantics = resolveCreatePriceTotalSemantics(hasAdminPrices, railQuoteItems, railPackaging.status, railLogistics.status, currentCreateOrderQuote);
 
   const externalRequiresManualQuote =
     railQuoteItems.some((item) => item.status !== 'complete') ||
     railPackaging.status !== 'complete' ||
-    (usesExternalSalesPricing && railLogistics?.status !== 'complete') ||
+    railLogistics.status !== 'complete' ||
     displayedTotalSemantics === 'EXCLUDES_MANUAL_ITEMS';
   const externalReviewRequiresManualQuote = submitQuoteChange
     ? submitQuoteChange.quotedFeeCompleteness ===
