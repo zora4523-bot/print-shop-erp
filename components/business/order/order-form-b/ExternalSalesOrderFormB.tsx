@@ -868,7 +868,7 @@ export function OrderFormB({
           /> : null}
           {onAddSpecification ? <div className="mt-5 space-y-3 border-t pt-4">
             <div className="flex flex-wrap items-start gap-2">
-              <EditorTabs ref={styleNavRef} id={`${uid}-design`} label="设计款" disabled={disabled}
+              <EditorTabs ref={styleNavRef} id={`${uid}-design`} label="设计款" variant="folder" disabled={disabled}
                 tabs={groups.map((group, index) => ({ value: itemFields[group.indexes[0]].id,
                   label: `设计款 ${index + 1}${group.indexes.some((member) => fieldErrors?.items?.[member]) ? ' · 待完善' : ''}` }))}
                 value={itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}

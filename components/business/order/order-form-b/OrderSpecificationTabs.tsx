@@ -22,7 +22,7 @@ export function OrderSpecificationTabs({ id, indexes, items, itemFields, activeI
   return <div className="mt-5 space-y-3 border-t pt-4">
     <h2 className="text-sm font-semibold">规格与数量</h2>
     <div className="flex flex-wrap items-start gap-2">
-      <EditorTabs id={id} label="规格明细" disabled={disabled}
+      <EditorTabs id={id} label="规格明细" variant="outline" disabled={disabled}
         tabs={indexes.map((index) => ({ value: itemFields[index].id,
           label: `${items[index].specification || '选择规格'} · ${items[index].quantity} 个${errors?.items?.[index] ? ' · 待完善' : ''}` }))}
         value={itemFields[activeIndex].id} onChange={(value) => onSelect(itemFields.findIndex((entry) => entry.id === value))} />

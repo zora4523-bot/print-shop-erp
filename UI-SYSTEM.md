@@ -563,3 +563,11 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 管理端与外部销售共用的 `orderItemFieldOptions` 将杂色珠光选项排到最后，其余纸张保持原相对顺序。排序仅作用于展示选项，不改变产品目录、默认选材、已选纸张或报价匹配。
 
 验证（基线 `80da8133`）：本地建单页面已核对选项顺序；目录 Vitest 11 项通过；隔离数据库 Release 模式的管理/销售建单和六视口明暗主题测试 14 项通过（无跳过），构建与 TypeScript 检查通过；`pnpm lint` 0 错误、2 条既有导航警告。命令范围沿用上一节，日志为 `/tmp/erp-paper-sort-unit.log`、`/tmp/erp-paper-sort-e2e.log`、`/tmp/erp-paper-sort-lint.log`。
+
+### 建单标签 B 样式（2026-09-18）
+
+按用户选定的 B 方案，`EditorTabs` 提供 `folder` 和 `outline` 两种外观。管理端、外部销售共用表单的设计款使用文件夹标签：圆角顶部、底部分隔线、选中时品牌色顶边并与内容底色衔接。规格子标签使用描边样式：选中时品牌色边框、浅色背景和加粗文字。两个层级均不再使用主按钮的实心填充，通过形状和选中边框区分层级。
+
+维持原有 tablist/tab/tabpanel 关联、方向键及 Home/End、焦点和禁用行为；标签换行并保留至少 44px 触控区域。表单数据、文件归属、数量包装与自动计价保持原逻辑。共享组件使用语义颜色令牌兼容明暗主题。
+
+验证（基线 `270ea5bd`，本节描述的样式增量）：`pnpm test:browser components/business/order/__tests__/OrderFormBNavigation.browser.spec.tsx` 70 项通过；隔离库 `erp_e2e_releasefix20260917` 的 `pnpm test:release tests/e2e/order-creation-groups.spec.ts tests/visual/admin-responsive.spec.ts --grep '设计、规格和批量工单互相独立|design and specification tabs'`（chromium 加六个 admin 视口项目）14 项通过，无跳过；覆盖两角色、明暗主题、键盘/触控、overflow 和 axe。Release 构建及 TypeScript 通过；`pnpm lint` 0 错误、2 条既有导航警告。日志：`/tmp/erp-tabs-b-browser.log`、`/tmp/erp-tabs-b-e2e.log`、`/tmp/erp-tabs-b-lint.log`；截图在 `test-results/release/`，已查看手机视口的标签布局。

@@ -2,9 +2,10 @@
 
 import type { Ref } from 'react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 /** Controlled tabs for an editor that retains its form state outside the panel. */
-export function EditorTabs({ id, label, tabs, value, disabled, onChange, ref }: {
+export function EditorTabs({ id, label, tabs, value, disabled, onChange, ref, variant = 'outline' }: {
   id: string;
   label: string;
   tabs: readonly { value: string; label: string }[];
@@ -12,12 +13,19 @@ export function EditorTabs({ id, label, tabs, value, disabled, onChange, ref }: 
   disabled?: boolean;
   onChange: (value: string) => void;
   ref?: Ref<HTMLDivElement>;
+  variant?: 'folder' | 'outline';
 }) {
-  return <div ref={ref} role="tablist" aria-label={label} className="flex min-w-0 flex-wrap gap-2">
+  return <div ref={ref} role="tablist" aria-label={label} data-variant={variant}
+    className={cn('flex min-w-0 flex-wrap', variant === 'folder' ? 'flex-1 gap-1 border-b border-border' : 'gap-2')}>
     {tabs.map((tab, index) => <Button
       key={tab.value} id={`${id}-tab-${tab.value}`} type="button" role="tab"
-      variant={tab.value === value ? 'default' : 'outline'}
-      className="h-auto min-h-11 min-w-11 max-w-full whitespace-normal break-words"
+      variant="ghost"
+      className={cn(
+        'h-auto min-h-11 min-w-11 max-w-full whitespace-normal break-words active:not-aria-[haspopup]:translate-y-0',
+        variant === 'folder'
+          ? '-mb-px rounded-b-none rounded-t-lg border border-t-2 border-border bg-muted px-4 py-3 aria-selected:border-b-card aria-selected:border-t-primary aria-selected:bg-card aria-selected:text-primary aria-selected:font-semibold aria-selected:hover:bg-card'
+          : 'rounded-lg border-2 border-border bg-card px-3 py-2 aria-selected:border-primary aria-selected:bg-primary/5 aria-selected:text-primary aria-selected:font-semibold aria-selected:hover:bg-primary/5',
+      )}
       aria-selected={tab.value === value} aria-controls={`${id}-panel`}
       tabIndex={tab.value === value ? 0 : -1} disabled={disabled}
       onClick={() => onChange(tab.value)}
