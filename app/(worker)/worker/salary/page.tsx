@@ -80,6 +80,13 @@ export default async function WorkerSalaryPage({ searchParams }: PageProps) {
   notFound();
 }
 
+// Links carry only what the user explicitly chose; a defaulted month must not
+// become an explicit filter on the next render (it would hide older unsettled
+// reports).
+function salaryQuery(params: Record<string, string | undefined>): string {
+  return new URLSearchParams(Object.entries(params).filter((entry): entry is [string, string] => Boolean(entry[1]))).toString();
+}
+
 async function OperationPieceworkSalaryContent({
   actor,
   searchParams: sp,
@@ -115,7 +122,7 @@ async function OperationPieceworkSalaryContent({
       />
       {invalidRange && <p role="alert" className="text-destructive">开始日期晚于结束日期，请修改后查询。</p>}
       <WorkerPendingReports actor={actor} from={explicitFrom} to={explicitTo} page={sp.pendingPage} />
-      <nav aria-label="发放状态" className="flex flex-wrap gap-2">{[['', '全部结算'], ['unpaid', '待发放'], ['paid', '已发放']].map(([value, label]) => <Link key={value} href={`/worker/salary?${new URLSearchParams({ from: fromText, to: toText, status: value })}`} aria-current={(sp.status ?? '') === value ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm ${(sp.status ?? '') === value ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>{label}</Link>)}</nav>
+      <nav aria-label="发放状态" className="flex flex-wrap gap-2">{[['', '全部结算'], ['unpaid', '待发放'], ['paid', '已发放']].map(([value, label]) => <Link key={value} href={`/worker/salary?${salaryQuery({ from: explicitFrom, to: explicitTo, status: value })}`} aria-current={(sp.status ?? '') === value ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm ${(sp.status ?? '') === value ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>{label}</Link>)}</nav>
       <h2 className="font-semibold">已结算工资（{fromText} 至 {toText}）</h2>
       {settlements.length === 0 ? (
         <EmptyState
@@ -155,7 +162,7 @@ async function OperationPieceworkSalaryContent({
           ))}
         </ul>
       )}
-      {result.pageCount > 1 && <AdminPagination basePath="/worker/salary" {...result} queryParams={{ from: fromText, to: toText, status: sp.status }} />}
+      {result.pageCount > 1 && <AdminPagination basePath="/worker/salary" {...result} queryParams={{ from: explicitFrom, to: explicitTo, status: sp.status }} />}
     </section>
   );
 }
