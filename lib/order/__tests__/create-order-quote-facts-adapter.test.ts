@@ -722,9 +722,14 @@ describe('buildCreateOrderQuoteInputFromCatalog', () => {
   });
 });
 
-it.each([undefined, '管理员核价'])('rejects retired 120g for unlinked products, including manual pricing (%s)', async (manualQuoteReason) => {
+// Retirement is a new-business rule enforced in createOrder / the workbench.
+// Change requests and cancellation settlement feed persisted 120g facts through
+// this adapter, so it must keep repricing them.
+it.each([undefined, '管理员核价'])('keeps repricing persisted 120g facts, including manual pricing (%s)', async (manualQuoteReason) => {
   const request = input([item({ paperType: '120g珠光艳闪', paperWeightGsm: 120, manualQuoteReason })]);
-  await expect(buildCreateOrderQuoteInputFromCatalog(client({ products: [product({
-    paperType: '120g珠光艳闪', paperMaterialId: null, weight: 120,
-  })] }), request)).rejects.toThrow('120g 纸张已停用');
+  const result = await buildCreateOrderQuoteInputFromCatalog(client({
+    products: [product({ paperType: '120g珠光艳闪', paperMaterialId: null, weight: 120 })],
+    papers: [paper({ id: 'paper-pearl-120', specification: '120g' })],
+  }), request);
+  expect(result.items[0]).toMatchObject({ itemKey: 'style-1', paperWeightGsm: 120 });
 });

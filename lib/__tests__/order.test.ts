@@ -6356,6 +6356,15 @@ describe('admin creates for an external salesperson', () => {
     if (changed) await expect(pending).rejects.toThrow('GD-concurrent');
     else await expect(pending).resolves.toMatchObject({ id: 'concurrent', itemIds: ['item'] });
   });
+  it.each([null, '管理员核价'])('rejects retired 120g paper before any write (manualQuoteReason=%s)', async (manualQuoteReason) => {
+    const input = delegatedInput();
+    await expect(createOrderDomain({
+      ...input,
+      items: [{ ...input.items[0]!, paperType: '120g珠光艳闪', paperWeightGsm: 120, manualQuoteReason }],
+    }, ownerActor)).rejects.toThrow('120g 纸张已停用');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
   it('rejects oversized bags even when a domain caller bypasses the schema', async () => {
     const input = delegatedInput();
     await expect(
