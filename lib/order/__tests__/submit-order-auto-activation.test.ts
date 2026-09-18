@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => {
     },
     orderLog: { create: vi.fn() },
     orderChangeRequest: { findFirst: vi.fn().mockResolvedValue(null) },
+    // submitOrder re-checks internal drafts for retired paper before handoff.
+    orderItem: { findMany: vi.fn().mockResolvedValue([]) },
   };
   return {
     tx,
