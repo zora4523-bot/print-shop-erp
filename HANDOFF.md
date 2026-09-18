@@ -16,6 +16,18 @@
 
 ## 当前任务
 
+**2026-09-18（下午）：对抗 review `d84f42d1` 之前的 11 个提交 → 5 项缺陷修复 + Codex 四轮追加，共 11 个代码提交（`3f0ce6db` … `0957b0ae`），未 push、未部署。**
+- `3f0ce6db` / `548b7d8d` / `38e321ff`：120g 退役拦截从共享报价适配器挪到新建入口（`createOrder`、两个报价预览、打样提交、内销旧草稿 `submitOrder`、销售工作台），`lib/rules/paper-availability.ts` 的 `hasRetiredPaperItem` 单点判定；改单 / 取消结算重算含 120g 历史工单不再被挡（**但见「卡住的问题」：关联物料已停用仍会挡**）。
+- `7df2677d` / `38e321ff`：改单表单烫金色显示名反查（`foilColorFromLabel`），`known` 列表保护真实目录名；管理端两页从 `listExternalCreateOrderFoilOptions` 取目录名，销售端只带工单上已有颜色。
+- `3d53816d` / `67c39148`：师傅工资页「累计已结算 / 尚未发放」全量，未结算报工只在显式区间时过滤，状态 / 分页链接只带显式日期。
+- `05b31d1c`：规格按「当前纸张在该规格下有任一可用克重」启用；同设计款材料分叉在 `changeItemSelection` 提示而不是灰按钮。
+- `7b0b3a6f`：珠光暗红显示名补齐工单详情 / 打印 / XLSX 导出 / 销售详情 / 师傅端工序来源。
+- `cdd5000b`：自动激活用例 tx mock 补 `orderItem.findMany`。
+- `0957b0ae`：烫金显示名与真实目录名同名时以 known 身份集消歧，目录烫金名接到销售端。
+
+验证：全量 Vitest 7024 通过 / 56 跳过。**4 个文件在没有 `DATABASE_URL` 的 shell 下模块加载即抛**（`lib/db` 直连：`actions/__tests__/report-disputes`、`app/(worker)/__tests__/worker-task-legacy-dispute`、`app/(admin)/__tests__/owner-metadata-auth`、`order-detail-commercial-visibility`），带占位 URL 全过——跑全量前先 `export DATABASE_URL`。typecheck / eslint（保留既有 `window.location.assign` 警告）/ 架构门禁通过。打印视图只改纸张文字，darwin 像素基线未更新；release 配置跑 `order-print` 若基线含珠光闪红样本需按 §8.4 更新并在 commit 里写 `[visual-regression]`。
+Codex 前三轮（3f0ce6db、548b7d8d+7df2677d、3d53816d+05b31d1c+7b0b3a6f）意见已全部落地；第四轮（`38e321ff` / `67c39148`）指出目录同时有「红色」「红金」时显示名反查会改错身份，已在 `foilColorInputLabel` / `restoreFoilColorInput` 以 known 身份集消歧并把目录烫金名接到销售端（本轮最后一个提交）；第五轮 review 结果若有新意见见下次会话。
+
 **2026-09-15（晚）：寄样品与打样主流程已实现，本地验证完成，未 push、未部署。**
 工作分支 `codex/memory-after-pr19`，开发基线 `f37d6448`。新增五入口中的寄样品/打样、外部销售权限、最小包装默认档、整单人工核价、用途胶囊与发货结算分支。
 开发主库已应用 2 项新增迁移（共 148 项）；业务写入验收仅在独立克隆库 `erp_samples_test_20260915`，隔离 Next dev 为 3107，用户开发服务仍为 3000。
@@ -250,6 +262,11 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 卡住的问题
 
+### 待业主拍板（2026-09-18：关联物料已停用的历史工单能否重算）
+
+- 共享报价适配器 `lib/order/create-order-quote-facts-adapter.ts:382` 对「产品关联纸张 `isActive=false`」一律 `CATALOG_PAPER_CHANGED`，早于 120g 任务存在、不限于 120g。正式库已停用两条 120g 物料，**关联了它们的历史工单**改单 / 取消结算仍会被挡（未关联物料的 120g 历史工单已放行）。
+- 选项 A：历史重算忽略物料当前启用状态、只看已发布价目——要改适配器，并补 change-request 层的真实回归（现有 `change-request.test.ts` mock 了整个报价服务，兜不住）。选项 B：维持现状，业务上用管理员终价绕过。本轮未擅自放宽。
+
 ### 待业主拍板（2026-09-14 深夜新增：代理商月度账单 review 结论）
 
 范围：`lib/agent-monthly-billing/*`、`actions/agent-monthly-bill*.ts`、`app/(billing)/owner/agent-bills`、`app/(admin)/sales/bills`。
@@ -411,3 +428,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-15（上午）：前端缺陷批次 6 个提交（登录跳转查询串、异议面板、改密页、工资分页、逐字段 alert、零 JS 退出）；Codex 审计 + 实现，Claude 复审。
 - 2026-09-15：按业主决定修复半分金额（0.01 容差 + 拆分先舍入）、终价不再被就绪校验回滚、新增管理员补录生产资料路径（`order:production-facts:repair`）；Codex 实现、Claude 复审提交。
 - 2026-09-15（傍晚）：追 CI 三轮（`3caba196` / `ac61743c` / `5bdb907e`），账单恢复后 run 34927184124 全绿；PR #19 以 merge commit `d283b5a5` 合入 `main`，删 `codex/tijian-2` 与 `codex/gongdanceshi`。生产未部署。
+- 2026-09-18（下午）：对抗 review 建单分层 / 师傅端 11 个提交出 5 项缺陷，逐项修复 + Codex 四轮追加共 11 个提交（120g 拦截移位、烫金反查与同名消歧、工资汇总全量、规格克重解锁、珠光暗红补齐）；全量单测 7024 通过，OrderCreationWorkspace browser spec 5/5。未 push。

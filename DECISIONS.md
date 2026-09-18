@@ -1303,3 +1303,10 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - 常规包装类型修改仅影响当前规格，保留其他规格包装和人工价。选择混装明确覆盖整单全部规格；已混装时变更类型作用于当前混装组，转常规装拆分当前组，其他组保持原值。
 - 增加设计款／规格时新明细独立包装，不隐式加入原混装组。混装组成仍受原有数量、容量和发货校验，错误不能以自动改数量或零费用掩盖。
 - 管理员仅在当前规格显示其包装组人工价；切换标签保留编辑值，报价依据变化继续要求重新核对。外部销售没有管理员收费编辑权限。
+
+## 2026-09-18：纸张退役拦截只在新建入口，共享报价适配器保持中立
+
+- 决策：`isRetiredPaper` / `hasRetiredPaperItem` 只在新建业务入口调用——`createOrder`、`quoteInternalCreateOrder` / `quoteExternalCreateOrder`、打样提交 `finalizeSampleOrderInTx`、内销旧草稿首次 `submitOrder`、销售工作台，外销提交沿用 `assertSelectedPapersAvailable`。`buildCreateOrderQuoteInputFromCatalog` 不做业务可用性裁决。
+- 理由：适配器被改单整单重算与取消结算复用，拦截放在这里会让含退役纸张的历史工单改不了、算不了，违反 2026-09-17 审计记录里「历史工单保留」的边界。
+- 影响：以后新增「停用 / 退役」类规则不要往适配器加判断，统一走 `lib/rules/paper-availability.ts`；历史工单因「关联物料 `isActive=false`」仍被挡是另一条既有规则，待业主拍板。
+- 相关文档：`docs/audits/2026-09-17-retire-120g-paper.md`、HANDOFF「卡住的问题」。
