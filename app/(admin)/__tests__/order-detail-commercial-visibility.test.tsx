@@ -534,6 +534,20 @@ describe('order detail commercial visibility', () => {
     },
   );
 
+  it.each([
+    [OrderSettlementType.EXTERNAL_SALES, true],
+    [OrderSettlementType.FACTORY_DIRECT, true],
+    [OrderSettlementType.INTERNAL_SALES, false],
+  ])('附加费用维护入口与服务端闸口一致：%s → %s', async (settlementType, visible) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(), status: OrderStatus.IN_PRODUCTION, settlementType,
+      pricingStatus: 'ADMIN_CONFIRMED', priceRevision: 2, pricingRevisions: [],
+    });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html.includes('commercial-details-manager')).toBe(visible);
+  });
+
   it('免费工单不显示工厂核价入口', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },

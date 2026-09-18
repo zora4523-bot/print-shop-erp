@@ -1,5 +1,5 @@
 import 'server-only';
-import { orderBillsLogistics, settlementBillsLogistics } from './settlement';
+import { hasLogisticsChargeRows, orderBillsLogistics, settlementBillsLogistics } from './settlement';
 import type { OrderSettlementType } from '@/generated/prisma/enums';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
@@ -139,15 +139,17 @@ export async function addOrderShipment(
       ),
     );
     // Internal drafts price the new address in the submit finalizer like
-    // external ones; internal orders with logistics rows requote; orders
-    // submitted before logistics billing keep their charges unchanged.
+    // external ones; internal orders with price-book-bound logistics rows
+    // requote; orders submitted before logistics billing keep their charges
+    // unchanged, including ones whose rows an administrator 补录-ed
+    // (`priceBookId: null`, see hasLogisticsChargeRows).
     const settlementType = order.settlementType as OrderSettlementType;
     const pricingMode =
       order.purpose === 'PROOF' || order.billingMode === 'NO_CHARGE'
         ? 'UNCHANGED'
         : order.status === 'DRAFT' && standard.length === 0 && settlementBillsLogistics(settlementType)
           ? 'ON_SUBMIT'
-          : orderBillsLogistics({ settlementType, purpose: order.purpose, hasLogisticsRows: standard.length > 0 })
+          : orderBillsLogistics({ settlementType, purpose: order.purpose, hasLogisticsRows: hasLogisticsChargeRows(standard) })
             ? 'REQUOTE'
             : 'UNCHANGED';
     if (

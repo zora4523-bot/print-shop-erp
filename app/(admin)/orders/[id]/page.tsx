@@ -282,10 +282,13 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
+  // Mirrors the gate in lib/order/commercial-details.ts: INTERNAL_SALES is
+  // excluded because that path records no 客服业绩 delta.
   const canAdminManageCommercialDetails =
     (order.purpose ?? 'STANDARD') === 'STANDARD' &&
     user.role === Role.ADMIN &&
-    isChargeableOrder &&
+    (isExternalSalesOrder ||
+      ('settlementType' in order && order.settlementType === OrderSettlementType.FACTORY_DIRECT)) &&
     order.status !== OrderStatus.SETTLED &&
     order.status !== OrderStatus.FINISHED &&
     order.status !== OrderStatus.CANCELLED;
@@ -479,7 +482,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               </dd>
             </div>
           </dl>
-          {user.role === Role.ADMIN && !pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails && isChargeableOrder} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
+          {user.role === Role.ADMIN && !pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
           {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">
               <OrderPricingReviewForm
@@ -505,7 +508,6 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         </section>
       ) : null}</>),
     commercial: (<>{canAdminManageCommercialDetails &&
-      isChargeableOrder &&
       priceRevision !== null ? (
         <OrderCommercialDetailsManager
           orderId={order.id}

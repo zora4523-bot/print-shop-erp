@@ -7,7 +7,6 @@ import {
   OrderCustomerChargeStatus,
   OrderPricingStatus,
   OrderQuotedFeeCompleteness,
-  OrderSettlementType,
   OrderStatus,
   Role,
   type Prisma,
