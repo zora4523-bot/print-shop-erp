@@ -83,6 +83,9 @@ export function hasReceipt(receipt: Receipt): boolean {
  * 表单里的 `returnTo` 只允许回到 `base` 本身、它的子路径或带查询串 / hash 的
  * 同一路径；其余（外站、协议相对、前缀相似的别的路由）一律回退到 `base`，
  * 防止开放重定向。
+ *
+ * 路径部分出现 `.` / `..` 段（含 `%2e` 编码）或反斜杠也回退：浏览器会把
+ * `base/../别的页` 规整成站内另一条路由，回执就落到了不是它的页面上。
  */
 export function safeReturnTo(
   value: FormDataEntryValue | null | undefined,
@@ -90,7 +93,14 @@ export function safeReturnTo(
 ): string {
   if (typeof value !== 'string' || !value.startsWith(base)) return base;
   const next = value.charAt(base.length);
-  return next === '' || next === '?' || next === '/' || next === '#'
-    ? value
-    : base;
+  if (next !== '' && next !== '?' && next !== '/' && next !== '#') return base;
+  let path: string;
+  try {
+    path = decodeURIComponent(value.split(/[?#]/, 1)[0]!);
+  } catch {
+    return base;
+  }
+  return path.includes('\\') || path.split('/').some((segment) => segment === '.' || segment === '..')
+    ? base
+    : value;
 }

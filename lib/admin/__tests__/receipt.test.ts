@@ -110,6 +110,13 @@ describe('safeReturnTo', () => {
     'https://example.com/steal',
     '//example.com/steal',
     `https://example.com${base}`,
+    `${base}/../hourly?marked=x`,
+    `${base}/%2e%2e/hourly`,
+    `${base}/%2E%2E%2Fhourly`,
+    `${base}/./detail`,
+    `${base}/..`,
+    `${base}/\\..\\hourly`,
+    `${base}/%E0%A4%A`,
   ])('falls back to base for %s', (value) => {
     expect(safeReturnTo(value as string | null | undefined, base)).toBe(base);
   });
