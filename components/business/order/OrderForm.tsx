@@ -1,6 +1,10 @@
 'use client';
 
 import { changeCreatePackagingMode, createPackagingGroupIndex, appendCreatePackagingGroup } from '@/lib/order/create-packaging-selection';
+import { parsePastedReceiverAddress, pastedTextareaValue } from '@/lib/order/receiver-address-paste';
+import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
+// Tests and older callers import the parser from here.
+export { parsePastedReceiverAddress } from '@/lib/order/receiver-address-paste';
 import { foilColorLabel } from '@/lib/order/foil-colors';
 import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle, SampleOrderEditorSnapshot } from './order-creation-editor';
 import { orderDesignGroups, designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
@@ -43,7 +47,6 @@ import {
   useState,
   useSyncExternalStore,
   useTransition,
-  type ClipboardEventHandler,
 } from 'react';
 import { formatMoney } from '@/lib/dashboard/format';
 import {
@@ -86,7 +89,6 @@ import type {
 import type { CustomerPartyOption } from '@/lib/party';
 import { externalPriceRuleDisplayName } from '@/lib/price/external-price-display';
 import {
-  ZTO_PROVINCE_OPTIONS,
   type ExternalOrderChargeQuote,
 } from '@/lib/price/external-order-charges';
 import type { PendingDesignImage } from './pending-design-image';
@@ -601,55 +603,7 @@ function formatLocalDraftTime(savedAt: string): string {
   }).format(date);
 }
 
-export function parsePastedReceiverAddress(value: string): {
-  receiverName: string | null;
-  receiverPhone: string | null;
-  province: string | null;
-} {
-  const normalized = value
-    .trim()
-    .replace(/[\r\n\t,，|]+/g, ' ')
-    .replace(/\s+/g, ' ');
-  const phoneMatch = normalized.match(
-    /(?<!\d)(1[3-9](?:[-\s]?\d){9}|0\d{2,3}[-\s]?\d{7,8})(?!\d)/,
-  );
-  const receiverPhone = phoneMatch?.[1]?.replace(/\s/g, '') ?? null;
-  const province =
-    ZTO_PROVINCE_OPTIONS.find((candidate) =>
-      new RegExp(`${candidate}(?:省|市|壮族自治区|回族自治区|维吾尔自治区|自治区)?`).test(
-        normalized,
-      ),
-    ) ?? null;
-  const explicitName = normalized.match(
-    /(?:收货人|联系人|姓名)\s*[:：]?\s*([\p{Script=Han}A-Za-z·]{2,32}?)(?=\s|1[3-9]|0\d{2,3}|$)/u,
-  )?.[1];
-  const nameCandidates = normalized
-    .replace(phoneMatch?.[0] ?? '', ' ')
-    .replace(/(?:收货人|联系人|姓名|电话|手机|地址)\s*[:：]?/g, ' ')
-    .split(/\s+/)
-    .map((candidate) => candidate.trim())
-    .filter(
-      (candidate) =>
-        /^[\p{Script=Han}A-Za-z·]{2,32}$/u.test(candidate) &&
-        !/[省市区县旗镇乡街道路巷号弄栋座单元室村组社区花园大厦]/u.test(candidate) &&
-        !ZTO_PROVINCE_OPTIONS.includes(candidate),
-    );
-  const receiverName = (explicitName ?? nameCandidates[0] ?? null)?.slice(
-    0,
-    64,
-  ) ?? null;
-  return { receiverName, receiverPhone, province };
-}
 
-function pastedTextareaValue(
-  event: Parameters<ClipboardEventHandler<HTMLTextAreaElement>>[0],
-): string {
-  const pasted = event.clipboardData.getData('text');
-  const textarea = event.currentTarget;
-  const start = textarea.selectionStart ?? textarea.value.length;
-  const end = textarea.selectionEnd ?? start;
-  return `${textarea.value.slice(0, start)}${pasted}${textarea.value.slice(end)}`;
-}
 
 function UrgentOrderField({
   control,
@@ -3387,46 +3341,27 @@ export function OrderForm({
                               />
                             </div>
                             <div className="@min-[560px]:col-span-2">
-                              <Label
-                                htmlFor={`additionalShipments.${shipmentIndex}.receiverAddress`}
-                              >
-                                详细地址
-                              </Label>
-                              <Textarea
+                              <ReceiverAddressPasteField
                                 id={`additionalShipments.${shipmentIndex}.receiverAddress`}
-                                className="mt-2 min-h-16"
-                                {...register(
-                                  `additionalShipments.${shipmentIndex}.receiverAddress`,
-                                  {
-                                    onChange: (event) => {
-                                      const parsed = parsePastedReceiverAddress(
-                                        event.target.value,
-                                      );
-                                      if (parsed.receiverName) {
-                                        setValue(
-                                          `additionalShipments.${shipmentIndex}.receiverName`,
-                                          parsed.receiverName,
-                                          { shouldDirty: true },
-                                        );
-                                      }
-                                      if (parsed.receiverPhone) {
-                                        setValue(
-                                          `additionalShipments.${shipmentIndex}.receiverPhone`,
-                                          parsed.receiverPhone,
-                                          { shouldDirty: true },
-                                        );
-                                      }
-                                      setValue(
-                                        `additionalShipments.${shipmentIndex}.destinationProvince`,
-                                        parsed.province,
-                                        {
-                                          shouldDirty: true,
-                                          shouldValidate: true,
-                                        },
-                                      );
-                                    },
-                                  },
-                                )}
+                                label="详细地址"
+                                value={watchedShipments[shipmentIndex]?.receiverAddress ?? ''}
+                                invalid={Boolean(errors.additionalShipments?.[shipmentIndex]?.receiverAddress)}
+                                onChange={(next, parsed) => {
+                                  setValue(`additionalShipments.${shipmentIndex}.receiverAddress`, next, {
+                                    shouldDirty: true,
+                                    shouldValidate: true,
+                                  });
+                                  if (parsed.receiverName) {
+                                    setValue(`additionalShipments.${shipmentIndex}.receiverName`, parsed.receiverName, { shouldDirty: true });
+                                  }
+                                  if (parsed.receiverPhone) {
+                                    setValue(`additionalShipments.${shipmentIndex}.receiverPhone`, parsed.receiverPhone, { shouldDirty: true });
+                                  }
+                                  setValue(`additionalShipments.${shipmentIndex}.destinationProvince`, parsed.province, {
+                                    shouldDirty: true,
+                                    shouldValidate: true,
+                                  });
+                                }}
                               />
                               <FieldError reservedLines={1}>
                                 {errors.additionalShipments?.[shipmentIndex]?.receiverAddress?.message}

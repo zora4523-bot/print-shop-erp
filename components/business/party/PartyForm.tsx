@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState } from 'react';
+import { useActionState, useState, type ChangeEvent } from 'react';
+import { ReceiverAddressPasteField } from '@/components/business/order/ReceiverAddressPasteField';
 import { PartyType } from '../../../generated/prisma/enums';
 import type { PartyMutationResult } from '@/actions/owner-parties.types';
 import { buttonVariants } from '@/components/ui/button';
@@ -84,6 +85,20 @@ export function PartyForm(props: Props) {
   >(props.action, null);
 
   const initial = props.mode === 'edit' ? props.initial : undefined;
+  // Default delivery address: a pasted receiver string fills the four fields;
+  // the paste box itself carries no `name`, so only the fields are submitted.
+  const [receiverPaste, setReceiverPaste] = useState('');
+  const [receiverDefaults, setReceiverDefaults] = useState({
+    name: initial?.defaultReceiverName ?? '',
+    phone: initial?.defaultReceiverPhone ?? '',
+    province: initial?.defaultProvince ?? '',
+    detail: initial?.defaultAddressDetail ?? '',
+  });
+  const bindReceiver = (key: keyof typeof receiverDefaults) => ({
+    value: receiverDefaults[key],
+    onChange: (event: ChangeEvent<HTMLInputElement>) =>
+      setReceiverDefaults((current) => ({ ...current, [key]: event.target.value })),
+  });
   const initialType =
     props.mode === 'create'
       ? (props.initialType ?? PartyType.CUSTOMER)
@@ -216,20 +231,35 @@ export function PartyForm(props: Props) {
 
       <section className="space-y-4">
         <h2 className="text-base font-semibold">默认收货地址</h2>
+        <ReceiverAddressPasteField
+          id="defaultReceiverPaste"
+          label="粘贴收货信息（自动识别收货人、电话、省份和详细地址）"
+          disabled={pending}
+          value={receiverPaste}
+          onChange={(next, parsed, source) => {
+            setReceiverPaste(next);
+            setReceiverDefaults((current) => ({
+              name: parsed.receiverName && (source === 'paste' || !current.name) ? parsed.receiverName : current.name,
+              phone: parsed.receiverPhone && (source === 'paste' || !current.phone) ? parsed.receiverPhone : current.phone,
+              province: parsed.province && (source === 'paste' || !current.province) ? parsed.province : current.province,
+              detail: parsed.address && (source === 'paste' || !current.detail) ? parsed.address : current.detail,
+            }));
+          }}
+        />
         <div className="grid gap-4 md:grid-cols-2">
           <TextField
             id="defaultReceiverName"
             label="收货人"
             disabled={pending}
             error={errs.defaultReceiverName?.[0]}
-            defaultValue={initial?.defaultReceiverName ?? ''}
+            {...bindReceiver('name')}
           />
           <TextField
             id="defaultReceiverPhone"
             label="收货电话"
             disabled={pending}
             error={errs.defaultReceiverPhone?.[0]}
-            defaultValue={initial?.defaultReceiverPhone ?? ''}
+            {...bindReceiver('phone')}
           />
         </div>
         <div className="grid gap-4 md:grid-cols-3">
@@ -238,7 +268,7 @@ export function PartyForm(props: Props) {
             label="省份"
             disabled={pending}
             error={errs.defaultProvince?.[0]}
-            defaultValue={initial?.defaultProvince ?? ''}
+            {...bindReceiver('province')}
           />
           <TextField
             id="defaultCity"
@@ -260,7 +290,7 @@ export function PartyForm(props: Props) {
           label="详细地址"
           disabled={pending}
           error={errs.defaultAddressDetail?.[0]}
-          defaultValue={initial?.defaultAddressDetail ?? ''}
+          {...bindReceiver('detail')}
         />
       </section>
 
@@ -303,6 +333,8 @@ function TextField({
   required?: boolean;
   disabled?: boolean;
   defaultValue?: string;
+  value?: string;
+  onChange?: (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
     <div className="space-y-2">

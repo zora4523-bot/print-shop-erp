@@ -9,7 +9,7 @@ import type {
 } from '@/lib/order/add-shipment-schema';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Label } from '@/components/ui/label';
 import { ActionNotice } from '@/components/ui-business';
@@ -177,18 +177,32 @@ export function AddOrderShipmentForm({
                     : 'min-w-0'
                 }
               >
-                <Label htmlFor={`${uid}-${key}`}>{label}</Label>
                 {key === 'receiverAddress' ? (
-                  <Textarea
+                  <ReceiverAddressPasteField
                     id={`${uid}-${key}`}
+                    label={label}
                     required
                     maxLength={256}
-                    value={receiver[key]}
-                    onChange={(event) =>
-                      setReceiver({ ...receiver, [key]: event.target.value })
+                    value={receiver.receiverAddress}
+                    onChange={(next, parsed, source) =>
+                      setReceiver((current) => ({
+                        ...current,
+                        receiverAddress: next,
+                        receiverName:
+                          source === 'paste'
+                            ? parsed.receiverName ?? current.receiverName
+                            : current.receiverName || parsed.receiverName || '',
+                        receiverPhone:
+                          source === 'paste'
+                            ? parsed.receiverPhone ?? current.receiverPhone
+                            : current.receiverPhone || parsed.receiverPhone || '',
+                        destinationProvince: parsed.province ?? current.destinationProvince,
+                      }))
                     }
                   />
                 ) : (
+                  <>
+                  <Label htmlFor={`${uid}-${key}`}>{label}</Label>
                   <Input
                     id={`${uid}-${key}`}
                     required
@@ -198,6 +212,7 @@ export function AddOrderShipmentForm({
                       setReceiver({ ...receiver, [key]: event.target.value })
                     }
                   />
+                  </>
                 )}
               </div>
             ))}

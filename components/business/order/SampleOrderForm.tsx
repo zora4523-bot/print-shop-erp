@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
+import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ActionNotice } from '@/components/ui-business';
@@ -422,6 +423,27 @@ function SampleOrderFields({
           </div>
         </>
       ) : null}
+      <ReceiverAddressPasteField
+        id={`${uid}-address`}
+        label="收货地址"
+        className={purpose === 'SAMPLE_SHIPMENT' ? 'sm:col-span-2' : undefined}
+        value={receiverAddress}
+        onChange={(next, parsed, source) =>
+          onChange({
+            ...value,
+            receiverAddress: next,
+            receiverName:
+              source === 'paste'
+                ? parsed.receiverName ?? value.receiverName
+                : value.receiverName || parsed.receiverName || '',
+            receiverPhone:
+              source === 'paste'
+                ? parsed.receiverPhone ?? value.receiverPhone
+                : value.receiverPhone || parsed.receiverPhone || '',
+            province: parsed.province ?? value.province,
+          })
+        }
+      />
       <div className="space-y-2">
         <Label htmlFor={`${uid}-receiver`}>收货人</Label>
         <Input
@@ -453,14 +475,6 @@ function SampleOrderFields({
             </option>
           ))}
         </NativeSelect>
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor={`${uid}-address`}>收货地址</Label>
-        <Textarea
-          id={`${uid}-address`}
-          value={receiverAddress}
-          onChange={(e) => change('receiverAddress', e.target.value)}
-        />
       </div>
       {purpose === 'SAMPLE_SHIPMENT' ? (
         <>

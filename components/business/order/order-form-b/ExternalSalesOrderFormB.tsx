@@ -19,6 +19,8 @@ import { Group, FieldLabel, FieldError, RequiredMark, PillPicker } from './Order
 import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemSpecificationFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
 
 import { OrderReceiverContactFields } from '../OrderReceiverContactFields';
+import { ReceiverAddressPasteField } from '../ReceiverAddressPasteField';
+import { parseExternalReceiverDisplay } from '@/lib/order/receiver-address-paste';
 
 import {
   useId,
@@ -34,7 +36,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import {
   DesignFileType,
   OrderFoilTechnique,
@@ -425,60 +426,8 @@ function DesignFileBox({
   );
 }
 
-export function parseExternalReceiverDisplay(raw: string): {
-  address: string;
-  platformCode: string | null;
-  receiverName: string | null;
-  receiverPhone: string | null;
-} {
-  const text = raw.trim();
-  if (!text) {
-    return {
-      address: '',
-      platformCode: null,
-      receiverName: null,
-      receiverPhone: null,
-    };
-  }
-  const phone =
-    text.match(/1[3-9]\d{9}/)?.[0] ??
-    text.match(/\d{3,4}-\d{7,8}/)?.[0] ??
-    '';
-  const platformCode =
-    text.match(/\[[0-9A-Za-z-]{2,}\]|[@#][0-9A-Za-z-]{4,}#?/)?.[0] ??
-    null;
-  const withoutPhone = text.replace(phone, ' ');
-  const parts = withoutPhone
-    .split(/[,，;；\n\t]|\s{2,}/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const hasSeparator = /[,，;；\n\t]|\s{2,}/.test(withoutPhone);
-  let inferredName = phone || hasSeparator ? (parts[0] ?? '') : '';
-  inferredName = inferredName
-    .replace(/\[[^\]]*\]/g, '')
-    .replace(/[@#].*$/, '')
-    .replace(/^(?:收货人|联系人|姓名)\s*[:：]?\s*/, '')
-    .trim();
-  if (
-    inferredName.length > 10 ||
-    /[省市区县旗镇乡街道路号栋楼层]/.test(inferredName)
-  ) {
-    inferredName = '';
-  }
-  const address = parts
-    .slice(inferredName ? 1 : 0)
-    .join(' ')
-    .replace(platformCode ?? '', ' ')
-    .replace(/^(?:地址)\s*[:：]?\s*/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return {
-    address,
-    platformCode,
-    receiverName: inferredName || null,
-    receiverPhone: phone || null,
-  };
-}
+// Tests and older callers import the parser from here.
+export { parseExternalReceiverDisplay };
 
 function OrderDesignFilesSection({ itemNumber, queue, disabled, required, grouped, imageError, cdrError, onImage, onCdrFiles, onChange }: {
   itemNumber: number;
@@ -1155,71 +1104,44 @@ export function OrderFormB({
           <div className={onAddSpecification ? 'space-y-6 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
           <Group title="收货" appearance={onAddSpecification ? 'plain' : 'divided'}>
             {shippingExtras}
-            <div>
-              <FieldLabel htmlFor={`${uid}-receiver-address-paste`} required>
-                收货地址
-              </FieldLabel>
-              <Textarea
-                id={`${uid}-receiver-address-paste`}
-                value={values.receiverAddress}
-                required
-                aria-required="true"
-                aria-invalid={Boolean(fieldErrors?.receiverAddress)}
-                aria-describedby={
-                  fieldErrors?.receiverAddress
-                    ? `${uid}-receiver-address-message`
-                    : undefined
-                }
+            <ReceiverAddressPasteField
+              id={`${uid}-receiver-address-paste`}
+              labelElement={
+                <FieldLabel htmlFor={`${uid}-receiver-address-paste`} required>
+                  收货地址
+                </FieldLabel>
+              }
+              value={values.receiverAddress}
+              required
+              disabled={disabled}
+              invalid={Boolean(fieldErrors?.receiverAddress)}
+              describedBy={
+                fieldErrors?.receiverAddress
+                  ? `${uid}-receiver-address-message`
+                  : undefined
+              }
+              onPaste={onReceiverAddressPaste}
+              onChange={(value) => onReceiverAddressChange(value)}
+              after={
+                <FieldError id={`${uid}-receiver-address-message`} reservedLines={1}>
+                  {fieldErrors?.receiverAddress}
+                </FieldError>
+              }
+            >
+              <OrderReceiverContactFields
+                key={`${uid}-contacts-${values.receiverAddress}`}
+                idPrefix={uid}
+                receiverName={values.receiverName || parsedReceiver.receiverName}
+                receiverPhone={receiverPhoneInitialValue}
+                nameRequired={receiverNameRequired}
+                phoneRequired={receiverPhoneRequired}
+                reserveErrorSpace
                 disabled={disabled}
-                placeholder="粘贴电商后台地址串，自动拆分"
-                className="min-h-16"
-                onPaste={onReceiverAddressPaste}
-                onChange={(event) =>
-                  onReceiverAddressChange(event.target.value)
-                }
+                errors={fieldErrors}
+                onNameChange={onReceiverNameChange}
+                onPhoneChange={onReceiverPhoneChange}
               />
-              <FieldError id={`${uid}-receiver-address-message`} reservedLines={1}>
-                {fieldErrors?.receiverAddress}
-              </FieldError>
-            </div>
-
-            {values.receiverAddress.trim() ? (
-              <div className="mt-3 overflow-hidden rounded-xl border">
-                <div className="border-b p-3">
-                  <OrderReceiverContactFields
-                    key={`${uid}-contacts-${values.receiverAddress}`}
-                    idPrefix={uid}
-                    receiverName={values.receiverName || parsedReceiver.receiverName}
-                    receiverPhone={receiverPhoneInitialValue}
-                    nameRequired={receiverNameRequired}
-                    phoneRequired={receiverPhoneRequired}
-                    reserveErrorSpace
-                    disabled={disabled}
-                    errors={fieldErrors}
-                    onNameChange={onReceiverNameChange}
-                    onPhoneChange={onReceiverPhoneChange}
-                  />
-                </div>
-                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center px-3 py-2.5">
-                  <span className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
-                    地址
-                  </span>
-                  <p className="min-w-0 break-words text-sm font-semibold">
-                    {parsedReceiver.address || '—'}
-                  </p>
-                </div>
-                {parsedReceiver.platformCode ? (
-                  <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center border-t px-3 py-2.5">
-                    <span className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
-                      平台码
-                    </span>
-                    <p className="min-w-0 break-words font-mono text-sm font-semibold">
-                      {parsedReceiver.platformCode}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            </ReceiverAddressPasteField>
 
             {afterShipping}
 
