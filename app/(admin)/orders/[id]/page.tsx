@@ -85,6 +85,7 @@ import { getOrderPieceworkSummary } from '@/lib/salary/daily';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import { listExternalCreateOrderFoilOptions } from '@/lib/material';
+import { hasLogisticsChargeRows, orderBillsLogistics } from '@/lib/order/settlement';
 import {
   getReworkCraftOptions,
   reworkItemRequiresUnitsPerBagInput,
@@ -237,6 +238,16 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   const isExternalSalesOrder =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+  // Delivery billed through logistics rows (external sales; internal orders
+  // submitted since 2026-09-18): ship-time confirmation, fulfilment
+  // corrections and the 顺丰到付 toggle behave the same for all of them.
+  const billsLogistics =
+    'settlementType' in order &&
+    orderBillsLogistics({
+      settlementType: order.settlementType as OrderSettlementType,
+      purpose: order.purpose,
+      hasLogisticsRows: hasLogisticsChargeRows(order.customerCharges),
+    });
   const isChargeableOrder =
     'settlementType' in order &&
     order.settlementType !== OrderSettlementType.NO_CHARGE;
@@ -284,13 +295,12 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     (isPricingPending || order.purpose === 'PROOF') &&
     isOrderPricingReviewAllowedStatus(order.status, order.purpose);
   const canReviewFulfillmentPricing =
-    order.purpose !== 'PROOF' &&
     user.role === Role.ADMIN &&
-    (isExternalSalesOrder || order.purpose === 'SAMPLE_SHIPMENT') &&
+    billsLogistics &&
     isFulfillmentPricingStatus(order.status);
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
-    isExternalSalesOrder;
+    billsLogistics;
   const canToggleSfCollect =
     order.purpose !== 'PROOF' &&
     canEditOrderSfCollect(order.status) &&
@@ -469,7 +479,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               </dd>
             </div>
           </dl>
-          {user.role === Role.ADMIN && !pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails && (isExternalSalesOrder || order.settlementType === OrderSettlementType.FACTORY_DIRECT)} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
+          {user.role === Role.ADMIN && !pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails && isChargeableOrder} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
           {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">
               <OrderPricingReviewForm
@@ -495,7 +505,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         </section>
       ) : null}</>),
     commercial: (<>{canAdminManageCommercialDetails &&
-      (isExternalSalesOrder || order.settlementType === OrderSettlementType.FACTORY_DIRECT) &&
+      isChargeableOrder &&
       priceRevision !== null ? (
         <OrderCommercialDetailsManager
           orderId={order.id}
@@ -583,7 +593,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 orderId={order.id}
                 currentValue={order.isSfCollect}
                 status={order.status}
-                isExternalSales={isExternalSalesOrder}
+                isExternalSales={billsLogistics}
                 mutationGuard={priceRevision !== null ? {
                   expectedOrderRevision: order.revision,
                   expectedEditVersion: order.editVersion,

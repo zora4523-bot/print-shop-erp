@@ -73,7 +73,7 @@ import {
   recordCsSalesEntryInTx,
   csSalesBasisAmountInTx,
 } from './salary/cs-sales';
-import { settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
+import { LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
 import {
   calculateCreateOrderQuoteFromCatalogInTx,
   CreateOrderQuoteError,
@@ -2545,12 +2545,24 @@ export async function assertShipOrderReadinessInTx(
       '发货请求缺少地址明细，请刷新页面后重新提交',
     );
   }
+  // Orders whose delivery is billed through logistics rows (external sales,
+  // and internal orders submitted since 2026-09-18) confirm every address's
+  // shipping and packing charges at ship time.
+  const logisticsRows =
+    input.settlementType === OrderSettlementType.EXTERNAL_SALES
+      ? [{ id: 'external' }]
+      : await tx.orderCustomerCharge.findMany({
+          where: { orderId: input.orderId, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } } },
+          select: { id: true },
+          take: 1,
+        });
   if (
-    input.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+    settlementBillsLogistics(input.settlementType) &&
+    (logisticsRows?.length ?? 0) > 0 &&
     !input.hasSubmittedShipmentDetails
   ) {
     throw new OrderInvariantError(
-      '外部销售工单发货前必须逐地址确认快递费与打包耗材费',
+      '发货前必须逐地址确认快递费与打包耗材费',
     );
   }
 
@@ -2657,21 +2669,25 @@ async function finalizeExternalShipmentChargesInTx(
     },
   });
   if (!chargeOrder) throw new OrderInvariantError('工单不存在');
-  if (chargeOrder.purpose === 'PROOF') return;
-  if (chargeOrder.settlementType !== OrderSettlementType.EXTERNAL_SALES && chargeOrder.purpose !== 'SAMPLE_SHIPMENT') return;
-
-  const standardCustomerCharges = chargeOrder.customerCharges.filter((charge) =>
+  const standardCustomerCharges = (chargeOrder.customerCharges ?? []).filter((charge) =>
     ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(String(charge.category.code)),
   );
+  if (!orderBillsLogistics({
+    settlementType: chargeOrder.settlementType,
+    purpose: chargeOrder.purpose,
+    hasLogisticsRows: standardCustomerCharges.length > 0,
+  })) {
+    return;
+  }
   const expectedChargeCount = input.storedShipments.length * 2;
   if (standardCustomerCharges.length !== expectedChargeCount) {
     throw new OrderInvariantError(
-      '外部销售工单的快递/耗材收费明细不完整，暂不能发货',
+      '快递/耗材收费明细不完整，暂不能发货',
     );
   }
   if (standardCustomerCharges.some((charge) => hasFulfillmentPricingConfirmation(charge.pricingSnapshot))) {
     if (!chargeOrder.isSfCollect && input.storedShipments.some((shipment) => !input.trustedWeightByShipmentId.get(shipment.id))) {
-      throw new OrderInvariantError('外部销售工单发货前必须填写每个地址的承运商最终计费重量');
+      throw new OrderInvariantError('发货前必须填写每个地址的承运商最终计费重量');
     }
     try {
       await finalizeConfirmedFulfillmentChargesForShipmentInTx(tx, {
@@ -2711,7 +2727,7 @@ async function finalizeExternalShipmentChargesInTx(
     )
   ) {
     throw new OrderInvariantError(
-      '外部销售工单发货前必须填写每个地址的承运商最终计费重量',
+      '发货前必须填写每个地址的承运商最终计费重量',
     );
   }
 
@@ -2952,9 +2968,17 @@ export async function shipOrder(
         }
       },
       afterTransition: async (tx, id, pricingOrder) => {
+        const logisticsRows = pricingOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
+          ? [{ id: 'external' }]
+          : await (tx as unknown as Prisma.TransactionClient).orderCustomerCharge.findMany({
+              where: { orderId: id, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } } },
+              select: { id: true },
+              take: 1,
+            });
         if (
-          pricingOrder.settlementType ===
-          OrderSettlementType.EXTERNAL_SALES
+          settlementBillsLogistics(pricingOrder.settlementType) &&
+          (logisticsRows?.length ?? 0) > 0 &&
+          requestedShipments.length > 0
         ) {
           await appendOrderPricingRevisionInTx(tx, {
             orderId: id,
@@ -3063,6 +3087,7 @@ type EditTxClient = {
           customerPartyId: string | null;
           shipments: EditableShipment[];
           changeRequests: { id: string }[];
+          customerCharges?: { id: string }[];
           receiverName: string | null;
           receiverPhone: string | null;
           receiverAddress: string | null;
@@ -3236,8 +3261,15 @@ async function updateOrderEditableFields(
       select: {
         id: true,
         status: true,
+        purpose: true,
         submitterId: true,
         settlementType: true,
+        // Only orders that already carry logistics rows need the province
+        // re-checked when the address changes outside the full editor.
+        customerCharges: {
+          where: { category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } } },
+          select: { id: true },
+        },
         processingAmount: true,
         totalAmount: true,
         customName: true,
@@ -3390,7 +3422,8 @@ async function updateOrderEditableFields(
           nextFields[key] = primary[key]?.trim() || null;
         }
       }
-    } else if ('receiverAddress' in nextFields && nextFields.receiverAddress !== order.receiverAddress && order.settlementType === OrderSettlementType.EXTERNAL_SALES && !order.isSfCollect) {
+    } else if ('receiverAddress' in nextFields && nextFields.receiverAddress !== order.receiverAddress && !order.isSfCollect &&
+      orderBillsLogistics({ settlementType: order.settlementType, purpose: order.purpose, hasLogisticsRows: (order.customerCharges?.length ?? 0) > 0 })) {
       throw new OrderInvariantError('请从完整编辑页核对配送省份后修改收货地址');
     }
     const changes = diffEditableFields(order, nextFields);
@@ -3751,6 +3784,18 @@ export async function setOrderSfCollect(
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
     if (order.purpose === 'PROOF') throw new OrderInvariantError('打样配送费用已包含在整单总价中');
+    // Internal orders submitted since 2026-09-18 carry logistics rows and
+    // switch 顺丰到付 exactly like external sales (waive shipping, keep packing).
+    const logisticsRows = await (tx as unknown as Prisma.TransactionClient).orderCustomerCharge.findMany({
+      where: { orderId, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } } },
+      select: { id: true },
+      take: 1,
+    });
+    const billsLogistics = orderBillsLogistics({
+      settlementType: order.settlementType,
+      purpose: order.purpose,
+      hasLogisticsRows: (logisticsRows?.length ?? 0) > 0,
+    });
     if (order.changeRequests?.length) {
       throw new OrderInvariantError('工单有待审批申请，请先处理申请再修改配送方式');
     }
@@ -3763,7 +3808,7 @@ export async function setOrderSfCollect(
       throw new OrderInvariantError('已完成或已取消的工单不能修改顺丰到付标识');
     }
     if (
-      (order.settlementType === OrderSettlementType.EXTERNAL_SALES || order.purpose === 'SAMPLE_SHIPMENT') &&
+      billsLogistics &&
       order.status === OrderStatus.SHIPPED &&
       actor.role !== Role.ADMIN
     ) {
@@ -3772,7 +3817,7 @@ export async function setOrderSfCollect(
       );
     }
     if (
-      (order.settlementType === OrderSettlementType.EXTERNAL_SALES || order.purpose === 'SAMPLE_SHIPMENT') &&
+      billsLogistics &&
       isFulfillmentPricingStatus(order.status)
     ) {
       if (!fulfillmentGuard) {
@@ -3812,7 +3857,7 @@ export async function setOrderSfCollect(
 
     let nextTotalAmount = new Decimal(order.totalAmount).toFixed(2);
     let nextQuotedFeeCompleteness: OrderQuotedFeeCompleteness | null = null;
-    if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
+    if (billsLogistics) {
       const prismaTx = tx as unknown as Prisma.TransactionClient;
       const chargeChangedAt = changedAt;
       const { chargeContext, standardCharges, priceBookIds,
@@ -4009,7 +4054,7 @@ export async function setOrderSfCollect(
       data: {
         isSfCollect,
         totalAmount: nextTotalAmount,
-        ...(order.settlementType === OrderSettlementType.EXTERNAL_SALES
+        ...(billsLogistics
           ? {
               confirmedFee: null,
               settledFee: null,
@@ -4019,7 +4064,7 @@ export async function setOrderSfCollect(
       select: { id: true, status: true },
     });
     const pricingRevision =
-      order.settlementType === OrderSettlementType.EXTERNAL_SALES
+      billsLogistics
         ? await appendOrderPricingRevisionInTx(
             tx as unknown as Prisma.TransactionClient,
             {

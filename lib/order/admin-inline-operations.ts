@@ -1,4 +1,5 @@
 import 'server-only';
+import { hasLogisticsChargeRows, orderBillsLogistics } from './settlement';
 
 import { OrderChangeRequestStatus, OrderPricingStatus, OrderSettlementType, Role } from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
@@ -44,11 +45,18 @@ export async function getAdminOrderInlineOperations(
   // A changed order must never acquire a new form under an old drawer header.
   if (!row) return null;
   const isPricingPending = row.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION;
-  const isExternalSales = row.settlementType === OrderSettlementType.EXTERNAL_SALES;
+  // Delivery billed through logistics rows: the ship form confirms per-address
+  // charges and fulfilment corrections apply, for external sales and for
+  // internal orders submitted since 2026-09-18.
+  const billsLogistics = orderBillsLogistics({
+    settlementType: row.settlementType,
+    purpose: row.purpose,
+    hasLogisticsRows: hasLogisticsChargeRows(row.customerCharges),
+  });
   const canPrice = row.settlementType !== OrderSettlementType.NO_CHARGE && (isPricingPending || row.purpose === 'PROOF');
   const pricing = canPrice && isOrderPricingReviewAllowedStatus(row.status, row.purpose)
     ? 'factory'
-    : canPrice && row.purpose !== 'PROOF' && (isExternalSales || row.purpose === 'SAMPLE_SHIPMENT') && isFulfillmentPricingStatus(row.status) && row.settledAt === null && row.settledFee === null
+    : canPrice && billsLogistics && isFulfillmentPricingStatus(row.status) && row.settledAt === null && row.settledFee === null
       ? 'fulfillment' : null;
   const charges = new Map(row.customerCharges.flatMap((charge) =>
     charge.shipmentId ? [[`${charge.shipmentId}:${charge.category.code}`, charge] as const] : [],
@@ -61,7 +69,7 @@ export async function getAdminOrderInlineOperations(
       expectedWorkOrderVersion: row.workOrderVersion,
       expectedPriceRevision: row.priceRevision,
       shipments: buildShipOrderShipmentInputs(row.shipments, charges),
-      isExternalSales,
+      isExternalSales: billsLogistics,
       isSfCollect: row.isSfCollect,
     } : null,
     fulfillment: pricing === 'fulfillment' ? {

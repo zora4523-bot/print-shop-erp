@@ -1420,8 +1420,10 @@ export async function finalizeOrderPricing(
         return amount === null ? sum : sum.plus(amount);
       }, new Decimal(0));
     const previousLogisticsAmount = shipmentChargeAmount((charge) => money(charge.amount));
+    // Rows created by the full editor (补录) are shipment charges as well; they
+    // are already inside `total` and must not leak into the ledger basis.
     const nextLogisticsAmount = includesShipmentCharges
-      ? shipmentChargeAmount((charge) => chargeAmountById.get(charge.id) ?? money(charge.amount))
+      ? shipmentChargeAmount((charge) => chargeAmountById.get(charge.id) ?? money(charge.amount)).plus(createdChargeTotal)
       : previousLogisticsAmount;
     const previousSalesBasis = new Decimal(order.totalAmount.toString()).minus(previousLogisticsAmount).toFixed(2);
     const csSalesDelta = total.minus(nextLogisticsAmount).minus(previousSalesBasis);

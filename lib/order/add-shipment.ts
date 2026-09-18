@@ -1,4 +1,6 @@
 import 'server-only';
+import { orderBillsLogistics, settlementBillsLogistics } from './settlement';
+import type { OrderSettlementType } from '@/generated/prisma/enums';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import { Role, type Prisma } from '@/generated/prisma/client';
@@ -136,13 +138,18 @@ export async function addOrderShipment(
         String(charge.category.code),
       ),
     );
+    // Internal drafts price the new address in the submit finalizer like
+    // external ones; internal orders with logistics rows requote; orders
+    // submitted before logistics billing keep their charges unchanged.
+    const settlementType = order.settlementType as OrderSettlementType;
     const pricingMode =
-      order.purpose === 'PROOF' || order.billingMode === 'NO_CHARGE' ||
-      (order.settlementType !== 'EXTERNAL_SALES' && order.purpose !== 'SAMPLE_SHIPMENT')
+      order.purpose === 'PROOF' || order.billingMode === 'NO_CHARGE'
         ? 'UNCHANGED'
-        : order.status === 'DRAFT' && standard.length === 0
+        : order.status === 'DRAFT' && standard.length === 0 && settlementBillsLogistics(settlementType)
           ? 'ON_SUBMIT'
-          : 'REQUOTE';
+          : orderBillsLogistics({ settlementType, purpose: order.purpose, hasLogisticsRows: standard.length > 0 })
+            ? 'REQUOTE'
+            : 'UNCHANGED';
     if (
       pricingMode !== 'REQUOTE' &&
       (input.shippingFee !== undefined ||

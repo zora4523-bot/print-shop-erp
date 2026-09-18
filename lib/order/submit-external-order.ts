@@ -358,6 +358,9 @@ async function assertSelectedPapersAvailable(
   const invalidSelections: string[] = [];
   const unavailableSelections: string[] = [];
   for (const item of items) {
+    // A configuration-outside item (internal manual pricing) names no catalog
+    // paper; the engine routes it to admin confirmation instead.
+    if (item.manualQuoteReason?.trim()) continue;
     const styleLabel = item.fig === null ? item.name : `第 ${item.fig} 款`;
     const linkedId = item.product?.paperMaterialId;
     let matches: PaperAvailabilityRow[];
@@ -1324,7 +1327,7 @@ function assertFinalizedQuoteAcknowledged(
       ),
     );
 
-  const currentQuoteToken = createExternalOrderQuoteToken({
+  const tokenEvidence = {
     items: pureInput.items,
     packagingGroups: pureInput.packagingGroups,
     logistics: {
@@ -1336,6 +1339,16 @@ function assertFinalizedQuoteAcknowledged(
       items: quote.items,
       packaging: quote.packagingGroups,
       logistics: quote.order,
+    },
+  };
+  // The create preview cannot know persisted admin-price snapshots, so its
+  // token omits them. It still proves the operator acknowledged the automatic
+  // quote; admin prices are server-confirmed trusted snapshots.
+  const previewQuoteToken = createExternalOrderQuoteToken(tokenEvidence);
+  const currentQuoteToken = createExternalOrderQuoteToken({
+    ...tokenEvidence,
+    result: {
+      ...tokenEvidence.result,
       ...(confirmedItems.length || confirmedGroups.length
         ? {
             adminPrices: [
@@ -1359,7 +1372,7 @@ function assertFinalizedQuoteAcknowledged(
     logistics: logisticsPreview,
     quoteToken: currentQuoteToken,
   });
-  if (expectedQuoteToken !== currentQuoteToken) {
+  if (expectedQuoteToken !== currentQuoteToken && expectedQuoteToken !== previewQuoteToken) {
     throw new ExternalOrderQuoteChangedError(
       currentQuoteToken,
       new Decimal(presentation.knownTotal).plus(confirmedDelta).toFixed(2),

@@ -32,6 +32,33 @@ export function settlementBillsLogistics(settlementType: OrderSettlementType): b
   return settlementType !== OrderSettlementType.NO_CHARGE;
 }
 
+export const LOGISTICS_CHARGE_CATEGORY_CODES = ['SHIPPING_FEE', 'PACKING_MATERIAL'] as const;
+
+/** SHIPPING_FEE / PACKING_MATERIAL rows exist on the order (written by the submit finalizer). */
+export function hasLogisticsChargeRows(
+  charges: readonly { category: { code: string } }[],
+): boolean {
+  return charges.some((charge) =>
+    (LOGISTICS_CHARGE_CATEGORY_CODES as readonly string[]).includes(String(charge.category.code)),
+  );
+}
+
+/**
+ * Whether the order's delivery is priced and finalized through logistics
+ * rows: external sales and samples always; internal / factory-direct orders
+ * once their rows exist (orders submitted before 2026-09-18 have none and
+ * keep the processing-only flows).
+ */
+export function orderBillsLogistics(order: {
+  settlementType: OrderSettlementType;
+  purpose?: string | null;
+  hasLogisticsRows: boolean;
+}): boolean {
+  if (order.purpose === 'PROOF') return false;
+  if (order.settlementType === OrderSettlementType.EXTERNAL_SALES || order.purpose === 'SAMPLE_SHIPMENT') return true;
+  return settlementBillsLogistics(order.settlementType) && order.hasLogisticsRows;
+}
+
 export const ORDER_SETTLEMENT_LABELS: Record<OrderSettlementType, string> = {
   [OrderSettlementType.EXTERNAL_SALES]: '外部销售应付工厂',
   [OrderSettlementType.INTERNAL_SALES]: '内部销售业绩',

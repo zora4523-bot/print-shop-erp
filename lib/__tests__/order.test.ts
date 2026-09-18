@@ -3612,7 +3612,7 @@ describe('shipOrder', () => {
     );
 
     await expect(shipOrder('o1', ownerActor, 'SF001')).rejects.toThrow(
-      /外部销售工单发货前必须逐地址确认快递费与打包耗材费/,
+      /发货前必须逐地址确认快递费与打包耗材费/,
     );
     expect(dbMock.orderChangeRequest.findFirst).not.toHaveBeenCalled();
     expect(dbMock.order.update).not.toHaveBeenCalled();

@@ -1203,6 +1203,21 @@ describe("snapshot-only order pricing review", () => {
     });
   });
 
+  it("keeps 补录 logistics rows out of 客服业绩 when a legacy INTERNAL_SALES order is fully edited", async () => {
+    const order = legacyInternalOrder(OrderSettlementType.INTERNAL_SALES, { settledFee: null, status: OrderStatus.CONFIRMED, totalAmount: "119.00" });
+    dbMock.order.findUnique.mockResolvedValue(order);
+    const input = command({ editAll: true, orderCharges: [{ chargeId: 'other-charge', expectedBusinessKey: 'ORDER:OTHER', amount: '7.00', reason: '保留' }] });
+    const result = await finalizeOrderPricing(input, admin, now);
+    // 99.00 shipping + 8.00 packing were created; the total carries them, the
+    // ledger delta is measured on the total without them.
+    expect(dbMock.orderCustomerCharge.create).toHaveBeenCalledTimes(2);
+    expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(dbMock, "order-1", "119.00");
+    const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as { amount: { toFixed(places: number): string } };
+    const basisDelta = new Decimal(result.totalAmount).minus("107.00").minus("119.00").toFixed(2);
+    expect(ledgerInput.amount.toFixed(2)).toBe(basisDelta);
+    expect(ledgerInput.amount.toFixed(2)).not.toBe(new Decimal(result.totalAmount).minus("119.00").toFixed(2));
+  });
+
   it("confirms a factory-direct order-level pending plate fee without shipment charges", async () => {
     const order = legacyInternalOrder(OrderSettlementType.FACTORY_DIRECT, {
       status: OrderStatus.SUBMITTED,

@@ -1,4 +1,5 @@
 import { packagingBoxType } from './packaging-mode';
+import { hasLogisticsChargeRows, orderBillsLogistics } from './settlement';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
@@ -208,7 +209,8 @@ function normalizedInput(input: PreviewFulfillmentPricingCommand): Required<Prev
 async function readOrder(tx: Prisma.TransactionClient, orderId: string): Promise<FulfillmentOrder> {
   const order = await tx.order.findUnique({ where: { id: orderId }, include });
   if (!order) throw new FulfillmentPricingError('工单不存在');
-  if ((order.settlementType !== OrderSettlementType.EXTERNAL_SALES && order.purpose !== 'SAMPLE_SHIPMENT') || !isFulfillmentPricingStatus(order.status) || order.settledAt !== null || order.settledFee !== null) {
+  const billsLogistics = orderBillsLogistics({ settlementType: order.settlementType, purpose: order.purpose, hasLogisticsRows: hasLogisticsChargeRows(order.customerCharges) });
+  if (!billsLogistics || !isFulfillmentPricingStatus(order.status) || order.settledAt !== null || order.settledFee !== null) {
     throw new FulfillmentPricingError('当前工单不允许履约费用更正；已结算或终态工单请走财务处理');
   }
   if (order._count.changeRequests > 0) throw new FulfillmentPricingError('工单仍有待裁决变更申请，不能同时确认履约费用');
