@@ -557,3 +557,9 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 建单纸张选项（管理端、外部销售）、工作台纸张目录和空白封报价矩阵通过 `paperDisplayLabel` 将“珠光闪红”显示为“珠光暗红”。材料 ID、选择值、产品计价事实及历史价格保持原身份；显示文案不参与价格键匹配。自动生成的设计款名称使用当前纸张显示名称，已保存的自定义名称不重写。
 
 验证（基线 `5f800367`）：目录单元测试 11 项通过；管理/销售改名后选择与计价、六视口明暗主题共 14 项 Release E2E 通过；Release 构建及 TypeScript、lint（0 错误，2 条既有导航警告）、架构门禁通过。日志：`/tmp/erp-paper-label-unit.log`、`/tmp/erp-paper-label-e2e.log`、`/tmp/erp-paper-label-lint.log`、`/tmp/erp-paper-label-architecture.log`。
+
+### 建单纸张显示顺序（2026-09-18）
+
+管理端与外部销售共用的 `orderItemFieldOptions` 将杂色珠光选项排到最后，其余纸张保持原相对顺序。排序仅作用于展示选项，不改变产品目录、默认选材、已选纸张或报价匹配。
+
+验证（基线 `80da8133`）：本地建单页面已核对选项顺序；目录 Vitest 11 项通过；隔离数据库 Release 模式的管理/销售建单和六视口明暗主题测试 14 项通过（无跳过），构建与 TypeScript 检查通过；`pnpm lint` 0 错误、2 条既有导航警告。命令范围沿用上一节，日志为 `/tmp/erp-paper-sort-unit.log`、`/tmp/erp-paper-sort-e2e.log`、`/tmp/erp-paper-sort-lint.log`。

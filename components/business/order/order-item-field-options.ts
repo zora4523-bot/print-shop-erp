@@ -68,7 +68,10 @@ export function orderItemFieldOptions(
           weightOptions.every((option) => option.disabled)
         );
       })(),
-    }));
+    })).sort((left, right) =>
+      Number(left.texture === 'variegated-pearl') -
+      Number(right.texture === 'variegated-pearl'),
+    );
   const externalFoilOptions: OrderFoilSwatchOption[] =
     options?.foilColors.map((foil) => ({
       value: foil.name,
