@@ -1,5 +1,5 @@
 'use client';
-import type { OrderCreationLifecycle } from './order-creation-editor';
+import type { OrderCreationLifecycle, SampleOrderEditorSnapshot } from './order-creation-editor';
 import { useEffect, useState } from 'react';
 import type { UseFormReturn } from 'react-hook-form';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
@@ -10,18 +10,18 @@ import { WorkbenchCalculator } from '@/components/business/workbench/WorkbenchCa
 import { EMPTY_SAMPLE_FORM, type SampleOrderFormState } from './SampleOrderForm';
 
 type SamplePurpose = 'SAMPLE_SHIPMENT' | 'PROOF';
-export function useSampleOrderEntry(draftScope: string, workbenchTransferId?: string) {
-  const [samplePurpose, setSamplePurpose] = useState<'SAMPLE_SHIPMENT' | 'PROOF' | null>(null);
+export function useSampleOrderEntry(draftScope: string, workbenchTransferId?: string, initialPurpose?: SamplePurpose | null) {
+  const [samplePurpose, setSamplePurpose] = useState<SamplePurpose | null>(initialPurpose ?? null);
   const sampleEntryKey = `order-create-purpose:v1:${draftScope}`;
   useEffect(() => {
-    if (workbenchTransferId) return;
+    if (workbenchTransferId || initialPurpose !== undefined) return;
     try {
       const saved = sessionStorage.getItem(sampleEntryKey);
       if (saved === 'PROOF' || saved === 'SAMPLE_SHIPMENT') {
         Promise.resolve().then(() => setSamplePurpose(saved));
       }
     } catch { /* In-memory editing remains available. */ }
-  }, [sampleEntryKey, workbenchTransferId]);
+  }, [sampleEntryKey, workbenchTransferId, initialPurpose]);
   function chooseSamplePurpose(value: 'SAMPLE_SHIPMENT' | 'PROOF' | null) {
     setSamplePurpose(value);
     try {
@@ -32,7 +32,9 @@ export function useSampleOrderEntry(draftScope: string, workbenchTransferId?: st
   return { samplePurpose, chooseSamplePurpose };
 }
 
-export function OrderSampleEntry({ lifecycle, form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees }: {
+export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees }: {
+  editorSnapshot?: SampleOrderEditorSnapshot;
+  onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void;
   lifecycle?: OrderCreationLifecycle;
   canEditFees?: boolean;
   form: UseFormReturn<CreateOrderInput>;
@@ -57,7 +59,7 @@ export function OrderSampleEntry({ lifecycle, form, purpose, options, crafts, dr
     <h1 className="text-xl font-semibold">新建工单</h1>
     <WorkbenchCalculator options={options} crafts={crafts}
       draftScope={`order-create:${draftScope}`}
-      createEntry={{ lifecycle, canEditFees, purpose, form: sampleForm,
+      createEntry={{ editorSnapshot, onEditorSnapshot, lifecycle, canEditFees, purpose, form: sampleForm,
         item: values.items[itemIndex] ?? initialItem,
         context: { customName: values.customName, packageRequirement: values.packageRequirement, externalSalesUserId: values.externalSalesUserId,
           customerRef: values.customerRef, promisedDate: values.promisedDate,

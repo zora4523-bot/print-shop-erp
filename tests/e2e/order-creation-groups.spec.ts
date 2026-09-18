@@ -122,3 +122,75 @@ test('批量创建并编辑收费仍进入收费编辑，返回后可继续未�
   await expect(page.getByRole('button', { name: '工单 2 · 已完成', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '新建工单', exact: true })).toBeVisible();
 });
+
+
+for (const purpose of ['寄样品', '打样'] as const) {
+  test(`${purpose}在浏览器存储失败时切换工单仍保留编辑内容`, async ({ page }) => {
+    await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/orders/new' });
+    await openFirstOrderItemEditor(page);
+    await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+    await page.evaluate(() => {
+      const get = Storage.prototype.getItem;
+      const set = Storage.prototype.setItem;
+      Storage.prototype.getItem = function(key) {
+        if (this === sessionStorage) throw new DOMException('blocked', 'SecurityError');
+        return get.call(this, key);
+      };
+      Storage.prototype.setItem = function(key, value) {
+        if (this === sessionStorage) throw new DOMException('full', 'QuotaExceededError');
+        return set.call(this, key, value);
+      };
+    });
+    await page.getByRole('button', { name: purpose, exact: true }).click();
+    await page.getByLabel('收货人', { exact: true }).fill('内存保留');
+    await page.getByLabel('收货地址', { exact: true }).fill('广东省佛山市不丢失地址');
+    await page.getByLabel(purpose === '打样' ? '打样要求' : '备注', { exact: true }).fill('切换后保留这段说明');
+    if (purpose === '寄样品') await page.getByLabel('样品数量').fill('37');
+    await page.getByRole('navigation', { name: '待建工单' }).getByRole('button', { name: '工单 1', exact: true }).click();
+    await page.getByRole('navigation', { name: '待建工单' }).getByRole('button', { name: '工单 2', exact: true }).click();
+    await expect(page.getByLabel('收货人', { exact: true })).toHaveValue('内存保留');
+    await expect(page.getByLabel('收货地址', { exact: true })).toHaveValue('广东省佛山市不丢失地址');
+    await expect(page.getByLabel(purpose === '打样' ? '打样要求' : '备注', { exact: true })).toHaveValue('切换后保留这段说明');
+    if (purpose === '寄样品') await expect(page.getByLabel('样品数量')).toHaveValue('37');
+  });
+}
+
+for (const changed of [false, true]) {
+  test(`寄样已写入但响应丢失后${changed ? '拒绝不同内容' : '安全重试同一内容'}`, async ({ page }) => {
+    await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/orders/new' });
+    await openFirstOrderItemEditor(page);
+    await page.getByRole('button', { name: '寄样品', exact: true }).click();
+    const name = `响应丢失 ${changed} ${Date.now()}`;
+    await page.getByLabel('样品名称').fill(name);
+    await page.getByLabel('收货人', { exact: true }).fill('张三');
+    await page.getByLabel('手机号', { exact: true }).fill('13800138000');
+    await page.getByLabel('收件省份').selectOption('广东');
+    await page.getByLabel('收货地址', { exact: true }).fill('广东省佛山市原始地址');
+    await page.getByRole('checkbox', { name: '顺丰到付', exact: true }).check();
+    await page.getByRole('button', { name: '核对费用', exact: true }).click();
+    let dropped = false;
+    await page.route('**/orders/new', async (route) => {
+      if (!dropped && route.request().method() === 'POST' && route.request().postData()?.includes('clientSubmissionId')) {
+        dropped = true;
+        await route.fetch();
+        await route.abort('failed');
+      } else await route.continue();
+    });
+    await page.getByRole('button', { name: '保存工单', exact: true }).click();
+    await expect(page.getByText('工单保存失败，请重试', { exact: true })).toBeVisible();
+    expect(dropped).toBe(true);
+    if (changed) {
+      await page.getByLabel('收货地址', { exact: true }).fill('广东省佛山市新地址');
+      await page.getByRole('button', { name: '核对费用', exact: true }).click();
+    }
+    await page.getByRole('button', { name: '保存工单', exact: true }).click();
+    if (changed) await expect(page.getByText(/本次填写与原记录不一致或无法核对/)).toBeVisible();
+    else await expect(page.getByRole('button', { name: '查看已保存工单', exact: true })).toBeVisible();
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    await db.connect();
+    try {
+      const rows = (await db.query('SELECT "receiverAddress" FROM "Order" WHERE "customName"=$1', [name])).rows;
+      expect(rows).toEqual([{ receiverAddress: '广东省佛山市原始地址' }]);
+    } finally { await db.end(); }
+  });
+}

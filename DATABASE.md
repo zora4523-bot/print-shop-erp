@@ -267,3 +267,7 @@ pnpm db:studio
 ### 2026-09-18：建单设计分组
 
 前向迁移 `20260918120000_order_design_groups` 仅为 `OrderItem` 增加 nullable `designGroupKey TEXT`，无数据删除或历史回填。标识只在所属工单内分组，不是跨工单外键；金额、文件、生产任务和工资仍绑定独立 `OrderItem.id`。发布应用前须先应用迁移并生成 Prisma Client，旧应用兼容空字段。
+
+### 2026-09-18：创建请求重试核对
+
+复用 `OrderLog.changedFields` JSON，在首条 `CREATE` 日志内写入 `createRequest: { version: 1, fingerprint: SHA256 }`，随工单创建事务原子保存。指纹取首次创建请求而非之后可修改的工单状态；普通工单、寄样、打样使用相同重试校验。无需新增迁移；已有日志不回填，缺指纹的历史重试要求打开原工单人工核对。业务展示忽略无 `before/after` 的元数据。

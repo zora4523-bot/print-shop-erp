@@ -1,6 +1,8 @@
 'use client';
 
 import type { OrderCreationLifecycle } from './order-creation-editor';
+import type { SampleOrderFormState, SampleOrderContext, SavedSampleDraft } from './sample-order-types';
+export type { SampleOrderFormState, SampleOrderContext, SavedSampleDraft } from './sample-order-types';
 import { useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createOrderAction, submitOrderAction } from '@/actions/order';
@@ -21,17 +23,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ActionNotice } from '@/components/ui-business';
 import { DesignUploadPanel } from './DesignUploadPanel';
 
-export type SampleOrderFormState = {
-  name: string;
-  quantity: string;
-  receiverName: string;
-  receiverPhone: string;
-  receiverAddress: string;
-  province: string;
-  packing: string;
-  collect: boolean;
-  remark: string;
-};
 export const EMPTY_SAMPLE_FORM: SampleOrderFormState = {
   name: '',
   quantity: '1',
@@ -43,10 +34,6 @@ export const EMPTY_SAMPLE_FORM: SampleOrderFormState = {
   collect: false,
   remark: '',
 };
-export type SampleOrderContext = Pick<CreateOrderInput, 'externalSalesUserId' | 'customerRef' | 'promisedDate' | 'isUrgent' | 'expressCode' | 'customName' | 'packageRequirement'>;
-
-export type SavedSampleDraft = { orderId: string; itemIds: string[] };
-
 type SampleOrderFormProps = {
   lifecycle?: OrderCreationLifecycle;
   canEditFees?: boolean;

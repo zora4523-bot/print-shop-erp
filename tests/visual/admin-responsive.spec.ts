@@ -86,6 +86,28 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('ten-order batch fits all viewports in light and dark themes', async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    const route: AdminRoute = {
+      name: 'ten-order-batch', path: '/orders/new', readyHeading: '新建工单',
+      prepareGateState: async (page) => {
+        const tabs = page.getByRole('navigation', { name: '待建工单' });
+        await expect(tabs.getByRole('button').first()).toBeVisible();
+        while (await tabs.getByRole('button').count() < 10) {
+          await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+        }
+        await expect(page.getByRole('button', { name: '＋ 增加工单', exact: true })).toBeDisabled();
+        await expect(page.getByText('本批已达 10 张，全部保存后可开始新一批。')).toBeVisible();
+        const first = tabs.getByRole('button', { name: '工单 1', exact: true });
+        if (testInfo.project.use.hasTouch) await first.tap();
+        else { await first.focus(); await page.keyboard.press('Enter'); }
+        await expect(first).toHaveAttribute('aria-pressed', 'true');
+      },
+    };
+    await checkRoutes(page, testInfo, [route], 'light');
+    await checkRoutes(page, testInfo, [route], 'dark');
+  });
+
   test('critical routes pass responsive and accessibility gates', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'light');
   });

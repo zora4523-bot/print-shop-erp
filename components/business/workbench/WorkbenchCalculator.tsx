@@ -1,6 +1,6 @@
 'use client';
 
-import type { OrderCreationLifecycle } from '@/components/business/order/order-creation-editor';
+import type { OrderCreationLifecycle, SampleOrderEditorSnapshot } from '@/components/business/order/order-creation-editor';
 import { type SampleOrderFormState, type SampleOrderContext, SampleOrderForm } from '@/components/business/order/SampleOrderForm';
 import { OrderPurposePicker } from '@/components/business/order/OrderPurposePicker';
 import { useSampleWorkbenchDraft } from './useSampleWorkbenchDraft';
@@ -68,6 +68,8 @@ export function WorkbenchCalculator({
   createEntry,
 }: {
   createEntry?: {
+    editorSnapshot?: SampleOrderEditorSnapshot;
+    onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void;
     lifecycle?: OrderCreationLifecycle;
     canEditFees?: boolean;
     purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
@@ -85,7 +87,7 @@ export function WorkbenchCalculator({
   const uid = useId().replaceAll(':', '');
   const router = useRouter();
   const [item, setItem] = useState(() =>
-    createEntry?.item ?? createExternalOrderItem(
+    createEntry?.editorSnapshot?.item ?? createEntry?.item ?? createExternalOrderItem(
       crafts,
       options.products,
       options.papers,

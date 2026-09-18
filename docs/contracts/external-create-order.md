@@ -29,4 +29,4 @@
 - 流程为校验 → 复核 → 确认。
 - 最终确认时服务端在同一事务重新校验缺货态和当前双价表、调用同一纯函数、追加不可变快照、只写 `quotedFee`，并转为 `PENDING_FACTORY`。
 - `confirmedFee`、`settledFee` 不得从 `quotedFee` 推导或覆盖。
-- `clientSubmissionId` 负责幂等；复核后事实或价表变化时返回 `QUOTE_CHANGED`，不得静默提交。
+- `clientSubmissionId` 负责幂等；创建重试核对首次请求指纹，不同内容或无法核对的历史请求返回原工单核对提示，不能静默视为新内容保存成功。复核后事实或价表变化时返回 `QUOTE_CHANGED`，不得静默提交。

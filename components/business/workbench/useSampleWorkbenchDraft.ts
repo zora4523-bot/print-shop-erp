@@ -1,4 +1,5 @@
 'use client';
+import type { SampleOrderEditorSnapshot } from '@/components/business/order/order-creation-editor';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { createOrderSchema, type CreateOrderInput } from '@/lib/auth/schemas';
@@ -25,20 +26,21 @@ export function useSampleWorkbenchDraft(
   item: CreateOrderInput['items'][number],
   setItem: (item: CreateOrderInput['items'][number]) => void,
   draftScope: string,
-  initial?: { purpose: 'SAMPLE_SHIPMENT' | 'PROOF'; form: SampleOrderFormState; context?: SampleOrderContext },
+  initial?: { purpose: 'SAMPLE_SHIPMENT' | 'PROOF'; form: SampleOrderFormState; context?: SampleOrderContext; editorSnapshot?: SampleOrderEditorSnapshot; onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void },
 ) {
   // Initial entry values are captured once; later edits belong to this draft.
   const [entryInitial] = useState(initial);
-  const [purpose, setPurpose] = useState<OrderPurposeValue>(initial?.purpose ?? 'STANDARD');
-  const [context, setContext] = useState(initial?.context);
+  const [purpose, setPurpose] = useState<OrderPurposeValue>(initial?.editorSnapshot?.purpose ?? initial?.purpose ?? 'STANDARD');
+  const [context, setContext] = useState(initial?.editorSnapshot?.context ?? initial?.context);
   const [specialBusy, setSpecialBusy] = useState(false);
   const [sampleForm, setSampleForm] =
-    useState<SampleOrderFormState>(initial?.form ?? EMPTY_SAMPLE_FORM);
-  const [sampleDraft, setSampleDraft] = useState<SavedSampleDraft | null>(null);
-  const [draftReady, setDraftReady] = useState(false);
+    useState<SampleOrderFormState>(initial?.editorSnapshot?.form ?? initial?.form ?? EMPTY_SAMPLE_FORM);
+  const [sampleDraft, setSampleDraft] = useState<SavedSampleDraft | null>(initial?.editorSnapshot?.draft ?? null);
+  const [draftReady, setDraftReady] = useState(Boolean(initial?.editorSnapshot));
   const sampleStorageKey = `workbench-sample:v1:${draftScope}`;
   const specialLocked = specialBusy || sampleDraft !== null;
   useEffect(() => {
+    if (entryInitial?.editorSnapshot) return;
     // Storage is scoped to the signed-in user. Restored facts still go through
     // the command schema; no cached quote is accepted as a price.
     Promise.resolve().then(() => {
@@ -98,6 +100,13 @@ export function useSampleWorkbenchDraft(
       /* In-memory editing remains available without browser storage. */
     }
   }, [draftReady, purpose, item, sampleForm, sampleDraft, sampleStorageKey, context]);
+  const onEditorSnapshot = initial?.onEditorSnapshot;
+  useEffect(() => {
+    if (draftReady && (purpose === 'SAMPLE_SHIPMENT' || purpose === 'PROOF')) {
+      onEditorSnapshot?.({ purpose, item, form: sampleForm, context, draft: sampleDraft });
+    }
+  }, [draftReady, purpose, item, sampleForm, context, sampleDraft, onEditorSnapshot]);
+
   function clearSampleDraft() {
     setSampleDraft(null);
     try {

@@ -111,6 +111,18 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
     if (unfinished) setActiveId(unfinished.id);
   }
 
+  const canStartNextBatch = entries.length > 0 && entries.every((entry) => entry.created) && showResult && !sampleBusy;
+
+  function startNextBatch() {
+    if (!canStartNextBatch) return;
+    const entry = { id: crypto.randomUUID() };
+    saveEntries([entry]);
+    setActiveId(entry.id);
+    setRemoved(null);
+    setSnapshots({});
+    setLocked(false);
+  }
+
   if (!active) return <p role="status" className="p-4 text-sm text-muted-foreground">正在恢复建单草稿…</p>;
   return <div className="min-w-0 space-y-4">
     <section aria-label="批量新建工单" className="space-y-3 rounded-xl border bg-card p-4">
@@ -119,9 +131,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
         {entries.length > 1 && !active.created ? <Button type="button" variant="outline" disabled={navigationLocked} onClick={removeCurrent}>移除当前工单</Button> : null}
         {removed ? <Button type="button" variant="outline" disabled={navigationLocked || entries.length >= MAX_BATCH_ORDERS}
           onClick={() => { if (!retainCurrent()) return; saveEntries([...entries, removed]); setActiveId(removed.id); setRemoved(null); }}>撤销移除</Button> : null}
-        {entries.every((entry) => entry.done) ? <Button type="button" variant="outline" onClick={() => {
-          const entry = { id: crypto.randomUUID() }; saveEntries([entry]); setActiveId(entry.id); setRemoved(null); setSnapshots({}); setLocked(false);
-        }}>开始新一批</Button> : null}
+        {canStartNextBatch ? <Button type="button" variant="outline" onClick={startNextBatch}>开始新一批</Button> : null}
         <span className="text-sm text-muted-foreground">已完成 {entries.filter((entry) => entry.done).length} / {entries.length} 张</span>
       </div>
       <p className="text-xs text-muted-foreground">每张工单独立填写地址、设计款和费用，逐张核对后创建。创建成功后继续下一张。</p>
@@ -133,7 +143,8 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
         </Button>)}
       </nav>
       {storageError ? <p role="alert" className="text-sm text-destructive">本次批量列表未能保存，请完成当前操作后再关闭页面。</p> : null}
-      {entries.length >= MAX_BATCH_ORDERS ? <p className="text-xs text-muted-foreground">每批最多 {MAX_BATCH_ORDERS} 张工单。</p> : null}
+      {entries.length >= MAX_BATCH_ORDERS ? <p role="status" className="text-sm text-muted-foreground">本批已达 {MAX_BATCH_ORDERS} 张，全部保存后可开始新一批。</p> : null}
+      {canStartNextBatch && entries.some((entry) => !entry.done) ? <p className="text-sm text-muted-foreground">工单均已保存，未完成的上传或提交可从工单详情继续。</p> : null}
     </section>
     {showResult && active.created ? <section className="space-y-3 rounded-xl border bg-card p-5" role="status">
       <h1 className="text-xl font-semibold">{active.done ? '工单已创建' : '工单已保存，请继续完善'}</h1>

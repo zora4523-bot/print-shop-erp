@@ -84,3 +84,27 @@ it('retains earlier success when a later order fails, and resumes the remaining 
   await page.getByRole('button', { name: '模拟创建完成' }).click();
   await expect.element(page.getByText('已完成 2 / 2 张')).toBeVisible();
 });
+
+
+it('starts a new batch after recovering ten saved orders without deleting server orders', async () => {
+  const saved = Array.from({ length: 10 }, (_, index) => ({ id: crypto.randomUUID(),
+    created: { orderId: `saved-${index}`, orderNo: `GD-${index}`, intent: 'submit' }, done: index > 0 }));
+  sessionStorage.setItem('order-creation-batch:v1:workspace-test:new', JSON.stringify(saved));
+  flushSync(() => root.unmount()); root = createRoot(host); mount();
+  await expect.element(page.getByRole('button', { name: '＋ 增加工单' })).toBeDisabled();
+  await expect.element(page.getByText('本批已达 10 张，全部保存后可开始新一批。')).toBeVisible();
+  await page.getByRole('button', { name: '开始新一批', exact: true }).click();
+  await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('');
+  await expect.element(page.getByRole('button', { name: '工单 1', exact: true })).toBeVisible();
+  const next = JSON.parse(sessionStorage.getItem('order-creation-batch:v1:workspace-test:new')!);
+  expect(next).toHaveLength(1);
+  expect(saved.some((entry) => entry.id === next[0].id)).toBe(false);
+});
+
+it('keeps unsaved work when the batch is full', async () => {
+  for (let index = 1; index < 10; index++) await page.getByRole('button', { name: '＋ 增加工单' }).click();
+  await page.getByLabelText('模拟工单名称').fill('尚未保存');
+  await expect.element(page.getByRole('button', { name: '＋ 增加工单' })).toBeDisabled();
+  await expect.element(page.getByRole('button', { name: '开始新一批', exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('尚未保存');
+});

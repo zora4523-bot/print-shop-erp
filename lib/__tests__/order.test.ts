@@ -1,3 +1,4 @@
+import { createOrderRequestFingerprint } from '@/lib/order/create-request-fingerprint';
 import * as quoteService from '../order/create-order-quote-service';
 vi.mock('@/lib/order/production-readiness', () => ({
   prepareOrderForProductionInTx: vi.fn(async (tx, orderId) => {
@@ -7,6 +8,7 @@ vi.mock('@/lib/order/production-readiness', () => ({
 }));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
+import { Prisma } from '../../generated/prisma/client';
 import {
   DesignFileType,
   OrderCostCategory,
@@ -6266,6 +6268,9 @@ describe('admin creates for an external salesperson', () => {
       customerRef: null,
       status: OrderStatus.DRAFT,
       priceRevision: 0,
+      logs: { create: expect.arrayContaining([expect.objectContaining({
+        action: 'CREATE', changedFields: { createRequest: { version: 1, fingerprint: createOrderRequestFingerprint(delegatedInput()) } },
+      })]) },
     });
     expect(dbMock.party.findUnique).not.toHaveBeenCalled();
     expect(
@@ -6298,6 +6303,7 @@ describe('admin creates for an external salesperson', () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'created',
       orderNo: 'GD-test',
+      logs: [{ changedFields: { createRequest: { version: 1, fingerprint: createOrderRequestFingerprint(delegatedInput()) } } }],
       createdById: ownerActor.id,
       submitterId: 'sales-2',
       pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
@@ -6319,6 +6325,36 @@ describe('admin creates for an external salesperson', () => {
       }),
     ).rejects.toThrow('提交标识');
     expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it('rejects changed facts after an ambiguous successful create instead of returning the old order', async () => {
+    const input = delegatedInput();
+    dbMock.order.findUnique.mockResolvedValue({ id: 'created', orderNo: 'GD-original',
+      createdById: ownerActor.id, submitterId: 'sales-2', items: [{ id: 'item' }],
+      logs: [{ changedFields: { createRequest: { version: 1, fingerprint: createOrderRequestFingerprint(input) } } }],
+    });
+    await expect(createOrderDomain({ ...input, receiverAddress: '新的收货地址' }, ownerActor)).rejects.toThrow('GD-original');
+    await expect(createOrderDomain({ ...input, items: [{ ...input.items[0]!, quantity: 2000 }] }, ownerActor)).rejects.toThrow('已保存');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it('does not silently replay historical requests without comparable creation facts', async () => {
+    dbMock.order.findUnique.mockResolvedValue({ id: 'legacy', orderNo: 'GD-legacy',
+      createdById: ownerActor.id, submitterId: 'sales-2', items: [{ id: 'item' }], logs: [],
+    });
+    await expect(createOrderDomain(delegatedInput(), ownerActor)).rejects.toThrow('工单列表');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('checks original facts after a concurrent unique conflict (changed=%s)', async (changed) => {
+    const input = delegatedInput();
+    dbMock.$transaction.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+      code: 'P2002', clientVersion: 'test', meta: { target: ['clientSubmissionId'] },
+    }));
+    dbMock.order.findUnique.mockResolvedValue({ id: 'concurrent', orderNo: 'GD-concurrent',
+      createdById: ownerActor.id, submitterId: 'sales-2', items: [{ id: 'item' }],
+      logs: [{ changedFields: { createRequest: { version: 1, fingerprint: createOrderRequestFingerprint(input) } } }],
+    });
+    const pending = createOrderDomain(changed ? { ...input, receiverAddress: '修改地址' } : input, ownerActor);
+    if (changed) await expect(pending).rejects.toThrow('GD-concurrent');
+    else await expect(pending).resolves.toMatchObject({ id: 'concurrent', itemIds: ['item'] });
   });
   it('rejects oversized bags even when a domain caller bypasses the schema', async () => {
     const input = delegatedInput();

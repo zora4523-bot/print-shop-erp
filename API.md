@@ -435,3 +435,5 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 `createOrderAction` 的 `items[].designGroupKey` 为可选 nullable UUID。同一工单内相同标识的材料、工艺和稿件版本必须一致，规格与数量可不同；缺失标识的明细独立处理。该字段只保存分组，不参与金额计算或赋予资源访问权限。外部销售仍经过禁止收费字段的命令边界。
 
 批量工作区复用单工单 create/quote/upload/submit，不新增绕过鉴权的批量 API。每张工单使用独立、稳定的 `clientSubmissionId`，创建结果立即记录；上传或提交失败继续已有草稿，不对已成功工单重放创建。
+
+创建事务在首条 `OrderLog(action=CREATE).changedFields.createRequest` 保存 v1 请求指纹（规范化对象键顺序后的 SHA-256）。同一提交标识的重试必须同时匹配创建人、归属销售及首次请求事实；事务内命中与唯一键冲突恢复均执行相同检查。不同内容或旧记录缺少指纹时返回含原工单号的核对提示，不能作为新内容保存成功，也不自动生成新提交标识。该元数据不展示为费用或操作变更；历史工单与价格快照不回填。

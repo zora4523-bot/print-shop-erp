@@ -1,3 +1,4 @@
+import { createOrderRequestFingerprint, matchesCreateOrderRequest } from './order/create-request-fingerprint';
 import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
 import { createOrderSchema } from './auth/schemas';
 import { isSampleOrder } from './order/purpose';
@@ -592,11 +593,23 @@ async function resolveCreationCraftsInTx(
   return { canonicalStockLocalFoilCraft, craftCodeById };
 }
 
+async function findOrderBySubmissionId(tx: Pick<Prisma.TransactionClient, 'order'>, clientSubmissionId: string) {
+  return tx.order.findUnique({
+    where: { clientSubmissionId },
+    select: {
+      id: true, orderNo: true, submitterId: true, createdById: true, pricingStatus: true,
+      logs: { where: { action: 'CREATE' }, orderBy: { createdAt: 'asc' }, take: 1, select: { changedFields: true } },
+      items: { select: { id: true }, orderBy: { sequence: 'asc' } },
+    },
+  });
+}
+
 export async function createOrder(
   input: CreateOrderCommand,
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<CreatedOrderSummary> {
+  const requestFingerprint = createOrderRequestFingerprint(input);
   const special = isSampleOrder(input.purpose);
   const sampleShipment = input.purpose === 'SAMPLE_SHIPMENT';
   if (special) {
@@ -670,26 +683,16 @@ export async function createOrder(
     }
 
     if (input.clientSubmissionId) {
-      const existing = await txClient.order.findUnique({
-        where: { clientSubmissionId: input.clientSubmissionId },
-        select: {
-          id: true,
-          orderNo: true,
-          submitterId: true,
-          createdById: true,
-          pricingStatus: true,
-          items: {
-            select: { id: true },
-            orderBy: { sequence: 'asc' },
-          },
-        },
-      });
+      const existing = await findOrderBySubmissionId(txClient, input.clientSubmissionId);
       if (existing) {
         if (
           existing.createdById !== actor.id ||
           existing.submitterId !== submitterId
         ) {
           throw new OrderInvariantError('提交标识已被其他账号使用');
+        }
+        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, requestFingerprint)) {
+          throw new OrderInvariantError(`工单 ${existing.orderNo} 已保存，本次填写与原记录不一致或无法核对。请从工单列表打开核对后修改。`);
         }
         return {
           id: existing.id,
@@ -1304,6 +1307,7 @@ export async function createOrder(
             {
               operatorId: actor.id,
               action: 'CREATE',
+              changedFields: { createRequest: { version: 1, fingerprint: requestFingerprint } },
               remark: `${input.isUrgent ? '创建急单' : '创建工单'}${
                 additionalShipments.length > 0
                   ? `（${additionalShipments.length + 1} 个收货地址）`
@@ -1539,21 +1543,11 @@ export async function createOrder(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      const existing = await db.order.findUnique({
-        where: { clientSubmissionId: input.clientSubmissionId },
-        select: {
-          id: true,
-          orderNo: true,
-          submitterId: true,
-          createdById: true,
-          pricingStatus: true,
-          items: {
-            select: { id: true },
-            orderBy: { sequence: 'asc' },
-          },
-        },
-      });
+      const existing = await findOrderBySubmissionId(db, input.clientSubmissionId);
       if (existing?.createdById === actor.id && existing.submitterId === submitterId) {
+        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, requestFingerprint)) {
+          throw new OrderInvariantError(`工单 ${existing.orderNo} 已保存，本次填写与原记录不一致或无法核对。请从工单列表打开核对后修改。`);
+        }
         return {
           id: existing.id,
           orderNo: existing.orderNo,

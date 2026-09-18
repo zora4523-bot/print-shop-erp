@@ -1,7 +1,7 @@
 'use client';
 
 import { foilColorLabel } from '@/lib/order/foil-colors';
-import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle } from './order-creation-editor';
+import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle, SampleOrderEditorSnapshot } from './order-creation-editor';
 import { designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import { OrderSampleEntry, prepareSampleOrderEntry, useSampleOrderEntry } from './OrderSampleEntry';
@@ -775,7 +775,18 @@ export function OrderForm({
   registerEditor,
   lifecycle,
 }: OrderFormProps) {
-  const { samplePurpose, chooseSamplePurpose } = useSampleOrderEntry(draftScope, workbenchTransferId);
+  const sampleEditorRef = useRef(initialEditor?.sample);
+  const [restoredSample, setRestoredSample] = useState(initialEditor?.sample);
+  const { samplePurpose, chooseSamplePurpose: persistSamplePurpose } = useSampleOrderEntry(
+    draftScope, workbenchTransferId, initialEditor ? initialEditor.sample?.purpose ?? null : undefined,
+  );
+  const captureSampleEditor = useCallback((snapshot: SampleOrderEditorSnapshot) => {
+    sampleEditorRef.current = snapshot;
+  }, []);
+  function chooseSamplePurpose(value: 'SAMPLE_SHIPMENT' | 'PROOF' | null) {
+    if (!value) { sampleEditorRef.current = undefined; setRestoredSample(undefined); }
+    persistSamplePurpose(value);
+  }
   const isExternalSalesActor = settlementType === OrderSettlementType.EXTERNAL_SALES;
   const canAssignExternalSales = externalSalesAccounts !== undefined;
   const router = useRouter();
@@ -1038,11 +1049,11 @@ export function OrderForm({
       save: () => {
         const values = getValues();
         persistLocalDraftValues(values);
-        return { values: structuredClone(values), files: itemsArray.fields.map((field) => selectedDesignQueues[field.id] ?? []) };
+        return { sample: samplePurpose ? structuredClone(sampleEditorRef.current) : undefined, values: structuredClone(values), files: itemsArray.fields.map((field) => selectedDesignQueues[field.id] ?? []) };
       },
     });
     return () => registerEditor(null);
-  }, [registerEditor, getValues, persistLocalDraftValues, itemsArray.fields, selectedDesignQueues,
+  }, [registerEditor, getValues, persistLocalDraftValues, itemsArray.fields, selectedDesignQueues, samplePurpose,
     localDraftReady, submitting, uploading, createdDraft, pendingSubmission]);
 
   useEffect(() => {
@@ -2894,7 +2905,7 @@ export function OrderForm({
     items: externalItemErrors,
   };
   if (samplePurpose && externalCreateOrderOptions) {
-    return <OrderSampleEntry lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
+    return <OrderSampleEntry editorSnapshot={restoredSample} onEditorSnapshot={captureSampleEditor} lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
       crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
       initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute} />;
   }
