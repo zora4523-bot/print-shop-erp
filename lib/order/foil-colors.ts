@@ -32,9 +32,16 @@ export function formatFoilColors(
   return colors && colors.length > 0 ? colors.map(foilColorLabel).join('、') : empty;
 }
 
-/** Keep delimiters while presenting editable historical color lists. */
-export function foilColorInputLabel(text: string): string {
-  return text.split(/([,，、])/).map((part) => foilColorLabel(part)).join('');
+/**
+ * Keep delimiters while presenting editable historical color lists. A color
+ * whose label is itself a known identity (the catalog has both 红色 and 红金)
+ * keeps its stored name, so the text round-trips without ambiguity.
+ */
+export function foilColorInputLabel(text: string, known: readonly string[] = []): string {
+  return text.split(/([,，、])/).map((part) => {
+    const label = foilColorLabel(part);
+    return label !== part && known.includes(label) ? part : label;
+  }).join('');
 }
 
 /**
@@ -45,7 +52,6 @@ export function foilColorInputLabel(text: string): string {
  * collides with a dictionary label. Unknown names pass through.
  */
 export function restoreFoilColorInput(text: string, saved: readonly string[], known: readonly string[] = []): string {
-  return text.split(/([,，、])/).map((part) =>
-    saved.find((color) => foilColorLabel(color) === part) ?? (known.includes(part) ? part : foilColorFromLabel(part)),
-  ).join('');
+  const identities = new Set([...saved, ...known]);
+  return text.split(/([,，、])/).map((part) => identities.has(part) ? part : foilColorFromLabel(part)).join('');
 }

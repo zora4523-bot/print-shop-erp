@@ -165,15 +165,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // pricing snapshots and internal costs, so SALES must branch before that
   // query runs. Keep real draft/design/change actions on the safe surface.
   if (user.role === Role.SALES) {
-    const [salesOrder, catalogProducts] = await Promise.all([
+    const [salesOrder, catalogProducts, foilColors] = await Promise.all([
       getSalesOrderDetailById({ id: user.id, role: user.role }, id),
       listActiveOrderChangeCatalogProducts(),
+      listExternalCreateOrderFoilOptions(),
     ]);
     if (!salesOrder) notFound();
     return (
       <SalesOrderDetailView
         order={salesOrder}
         catalogProducts={catalogProducts}
+        foilColorNames={foilColors.map((foil) => foil.name)}
       />
     );
   }

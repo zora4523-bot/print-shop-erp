@@ -477,7 +477,7 @@ function ExistingOrderItemChanges({
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>正面烫金颜色（多个用顿号分隔）</span>
                   <Input
-                    value={foilColorInputLabel(current.frontFoilColors)}
+                    value={foilColorInputLabel(current.frontFoilColors, knownFoilColors)}
                     maxLength={200}
                     disabled={pending}
                     onChange={(event) =>
@@ -490,7 +490,7 @@ function ExistingOrderItemChanges({
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>反面烫金颜色（多个用顿号分隔）</span>
                   <Input
-                    value={foilColorInputLabel(current.backFoilColors)}
+                    value={foilColorInputLabel(current.backFoilColors, knownFoilColors)}
                     maxLength={200}
                     disabled={pending}
                     onChange={(event) =>

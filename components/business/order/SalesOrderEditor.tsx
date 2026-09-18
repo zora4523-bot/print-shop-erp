@@ -4,6 +4,7 @@ import { OrderSettlementType, Role } from '@/generated/prisma/enums';
 import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { editableFieldsetForStatus } from '@/lib/order/editable-fields';
 import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
+import { listExternalCreateOrderFoilOptions } from '@/lib/material';
 import { buttonVariants } from '@/components/ui/button';
 import { AddOrderShipmentForm } from './AddOrderShipmentForm';
 import { SalesOrderEditGuard } from './SalesOrderEditGuard';
@@ -16,8 +17,8 @@ export async function SalesOrderEditor({ id, user }: { id: string; user: { id: s
   if (!order) notFound();
   const fieldset = editableFieldsetForStatus(order.status);
   if (fieldset === 'NONE') redirect(`/orders/${id}`);
-  const catalogProducts = await listActiveOrderChangeCatalogProducts();
-  return <SalesOrderEditGuard key={`${id}:${order.editVersion}`}><SalesOrderDetailView order={order} catalogProducts={catalogProducts} editForm={
+  const [catalogProducts, foilColors] = await Promise.all([listActiveOrderChangeCatalogProducts(), listExternalCreateOrderFoilOptions()]);
+  return <SalesOrderEditGuard key={`${id}:${order.editVersion}`}><SalesOrderDetailView order={order} catalogProducts={catalogProducts} foilColorNames={foilColors.map((foil) => foil.name)} editForm={
     <section className="space-y-4">
       <Link href={`/orders/${id}`} className={buttonVariants({ variant: 'outline' })}>返回工单</Link>
       <EditOrderForm key={`${id}:${order.editVersion}`} orderId={id}

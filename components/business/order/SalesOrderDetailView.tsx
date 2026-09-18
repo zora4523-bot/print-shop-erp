@@ -44,10 +44,12 @@ import { SalesOrderRefreshButton } from './SalesOrderRefreshButton';
 
 function SalesOrderChangeRequestSection({
   catalogProducts,
+  foilColorNames,
   canRequestCancellation,
   order,
 }: {
   catalogProducts: OrderChangeCatalogProduct[];
+  foilColorNames?: readonly string[];
   canRequestCancellation: boolean;
   order: SalesOrderDetail;
 }) {
@@ -63,6 +65,7 @@ function SalesOrderChangeRequestSection({
         </p>
       </div>
       <OrderChangeRequestForm
+              foilColorNames={foilColorNames}
               hasPackagingGroups={order.packagingGroups.length > 0}
         promisedDate={order.promisedDate?.slice(0, 10) ?? null}
         orderId={order.id}
@@ -103,10 +106,12 @@ function SalesOrderChangeRequestSection({
 
 export function SalesOrderDetailView({
   catalogProducts,
+  foilColorNames,
   order,
   editForm,
 }: {
   catalogProducts: OrderChangeCatalogProduct[];
+  foilColorNames?: readonly string[];
   order: SalesOrderDetail;
   editForm?: ReactNode;
 }) {
@@ -340,6 +345,7 @@ export function SalesOrderDetailView({
 
           {canRequestModify ? (
             <SalesOrderChangeRequestSection
+        foilColorNames={foilColorNames}
               catalogProducts={catalogProducts}
               canRequestCancellation={canRequestCancellation}
               order={order}

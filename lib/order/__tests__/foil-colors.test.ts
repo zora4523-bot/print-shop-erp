@@ -45,3 +45,14 @@ it('never rewrites a typed name that is itself a known identity', () => {
   expect(restoreFoilColorInput('红金', ['亚金'], ['亚金'])).toBe('红色');
   expect(restoreFoilColorInput('红金、黑金', ['红色'], ['黑金'])).toBe('红色、黑金');
 });
+
+// Catalog has both 红色 and 红金: the stored 红色 must not be displayed as 红金,
+// and continuous edits must keep whichever identity the user typed.
+it('keeps stored names visible and typed identities intact when a label collides with a real color', () => {
+  const known = ['红色', '红金', '亚金'];
+  expect(foilColorInputLabel('红色、蓝色', known)).toBe('红色、蓝金');
+  expect(foilColorInputLabel('红金', known)).toBe('红金');
+  expect(restoreFoilColorInput('红色、蓝金', ['亚金'], known)).toBe('红色、蓝色');
+  expect(restoreFoilColorInput('红金、蓝金', ['亚金'], known)).toBe('红金、蓝色');
+  expect(restoreFoilColorInput('红金', ['红色'], ['红金'])).toBe('红金');
+});
