@@ -1310,3 +1310,10 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - 理由：适配器被改单整单重算与取消结算复用，拦截放在这里会让含退役纸张的历史工单改不了、算不了，违反 2026-09-17 审计记录里「历史工单保留」的边界。
 - 影响：以后新增「停用 / 退役」类规则不要往适配器加判断，统一走 `lib/rules/paper-availability.ts`；历史工单因「关联物料 `isActive=false`」仍被挡是另一条既有规则，待业主拍板。
 - 相关文档：`docs/audits/2026-09-17-retire-120g-paper.md`、HANDOFF「卡住的问题」。
+
+## 2026-09-18：保存后跳转的反馈用「URL 回执 + ActionNotice」，仍不引入 toast
+
+- 决策：Server Action 成功后 `redirect()` 的路径一律用 `lib/admin/receipt.ts` 的 `appendReceipt` 带上固定字典 `RECEIPT_KEYS` 里的回执，目标页 `readReceipt(searchParams)` 交给 `components/ui-business/ReceiptNotice` 渲染；挂载后 `ReceiptUrlCleanup` 用原生 `history.replaceState` 清掉回执参数。维持 ui-规范 §5.4「不引入 toast 库」。
+- 理由：`useActionState` 的状态随旧页面丢失，18 处 redirect 里 13 处保存后毫无反馈，是业主感知最强的缺口；计件 / 时薪页已用私有 `appendReceipt` 跑通同一模式，推广它零依赖、服务端渲染、零 JS 可见。开源候选里 Base UI Toast 虽已随 `@base-ui/react` 装好（shadcn `base-nova` 风格自带），但 toast 只是展示层，跳转后仍需回执机制才触发得了，且是瞬态、与现有 45 个内联 role 断言冲突；两个 cookie flash 包一个 peer 锁 Next 15、一个已停更；next-safe-action 要求 JS `execute()`，与 138 个 `useActionState` action 的形状冲突。
+- 影响：新写的 redirect 必须带回执，否则视同无反馈；新增回执类型先登记 `RECEIPT_KEYS`；子表单若会因 revalidate 卸载，成功回执要么提升到页面级（redirect + 回执），要么让表单常驻、终态只留回执（`TaskDisputeReviewForm` 的 `open`）。若业主日后要全局瞬态提示，走 `pnpm dlx shadcn@latest add toast`（Base UI，零新依赖），叠加在回执机制之上，并回来改本条。
+- 相关文档：`docs/ui-规范.md §5.4`、`CLAUDE.md §15.3`、`lib/admin/receipt.ts` 头注释。

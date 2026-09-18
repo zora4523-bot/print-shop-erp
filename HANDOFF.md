@@ -16,6 +16,13 @@
 
 ## 当前任务
 
+**2026-09-18（晚）：「保存后没反馈」审查 → 零依赖「跳转回执」推广，3 个代码提交 + 1 个记忆提交，未 push、未部署。**
+- 审查结论：项目没有 toast 库且 `docs/ui-规范.md §5.4` 明确不引入，`ActionNotice` 已是规范件。缺口在 18 处 `redirect()`：13 处不带任何标记（主数据新建 ×10、通知渠道/规则 ×3、工单编辑）、1 处出账 `?issued=1` 被 `/owner/bills/[id]` 兼容跳转丢掉、4 处计件/时薪用私有 `appendReceipt` 自成一套；另有 `TaskDisputeAdminPanel`（action 返回的 message 被丢）、`SalesTextEditForm`（「没变化」毫无提示）两个表单吞掉成功结果。失败反馈基本都有，只是 12px 红字不显眼，本轮没动。
+- 落地：`lib/admin/receipt.ts`（`RECEIPT_KEYS` 固定字典 + `appendReceipt` / `readReceipt` / `safeReturnTo`）、`components/ui-business/ReceiptNotice`（服务端渲染 ActionNotice；`ReceiptUrlCleanup` 挂载后 `history.replaceState` 清参数，写法同 `OrderListNavigationState`）。18 处 redirect 全部带回执；目标页渲染：账号 / 往来单位 / BOM / 采购单 / 采购新建（从采购流程新建供应商回来）/ 物料三条路由（owner、foreman、rules/papers 经 `MaterialCatalogPages`）/ 工艺 / 可建单组合 / 产品结构分类 / 工单详情两分支（SALES 分支加了一层 `space-y-4` 包裹）/ 客服业绩周期 / 账单归档详情（出账回执改落这里）/ 通知配置（区分 channel / rule）/ 计件 / 时薪（迁到公共件，保留零 JS 的「关闭提示」链接）。`TaskDisputeReviewForm` 改常驻挂载 + `open`，终态只留成功回执；`SalesTextEditForm` 「没有变化，未保存」显式播报。
+- 验证：`pnpm typecheck` / `pnpm lint`（仅既有 2 条 `window.location.assign` 警告）通过；全量 Vitest（`DATABASE_URL` 取自 `.env`）7158 通过 / 44 跳过；`ReceiptNotice.browser.spec.tsx` 2/2（真实 chromium 里回执可见、只清回执 key、保留 hash）。10 个 action 测试里钉死的跳转路径已改成带 `?created=1` / `?updated=1`（往来单位那条 `supplier%201` 变 `supplier+1`：`URLSearchParams` 重序列化，语义不变）。
+- **未在真实浏览器目视**：内置浏览器访问 `localhost:3000` 被拒，且登录要密码。下次有登录会话时：`/owner/rules/crafts/new` 建一条工艺 → 详情页顶部应出现「工艺已创建」，地址栏 `?created=1` 随即消失；再到 `/owner/notifications` 改一个渠道保存 → 列表页顶部「通知目标已保存」。
+- 已知取舍：零 JS 下回执参数留在地址栏，刷新会再播报一次（接受）；e2e 里 `toHaveURL('/orders/{id}')` 精确断言（`sales-functional-review` / `order-create` / `order-external-sales-association`）依赖挂载后清参数，Playwright 会重试到超时所以预期能过，但本轮**没跑 e2e**。
+
 **2026-09-18（下午）：对抗 review `d84f42d1` 之前的 11 个提交 → 5 项缺陷修复 + Codex 四轮追加，共 12 个代码提交（`3f0ce6db` 起），未 push、未部署。**
 - `3f0ce6db` / `548b7d8d` / `38e321ff`：120g 退役拦截从共享报价适配器挪到新建入口（`createOrder`、两个报价预览、打样提交、内销旧草稿 `submitOrder`、销售工作台），`lib/rules/paper-availability.ts` 的 `hasRetiredPaperItem` 单点判定；改单 / 取消结算重算含 120g 历史工单不再被挡（**但见「卡住的问题」：关联物料已停用仍会挡**）。
 - `7df2677d` / `38e321ff`：改单表单烫金色显示名反查（`foilColorFromLabel`），`known` 列表保护真实目录名；管理端两页从 `listExternalCreateOrderFoilOptions` 取目录名，销售端只带工单上已有颜色。
@@ -183,6 +190,8 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 ---
 
 ## 下一步具体指令（给下次 AI）
+
+0. **跳转回执收尾（2026-09-18 晚）**：a) 隔离库跑 `pnpm exec playwright test tests/e2e/sales-functional-review.spec.ts tests/e2e/order-create.spec.ts tests/e2e/order-external-sales-association.spec.ts`，确认保存后 `toHaveURL('/orders/{id}')` 在回执参数被清掉后仍通过；若抖动，把这些断言改成 `toHaveURL(/\/orders\/{id}(\?updated=1)?$/)`。b) 有登录会话时按「当前任务」段落目视两条路径。c) 12px 红字失败提示迁 `ActionNotice` 另起一批（`UrgentToggleForm` / `SfCollectToggleForm` / `FinishOrderButton` / `TaskDisputeAdminPanel` 的 error 分支），不与本轮混。
 
 **PR #19 已合并（09-15）。下一步从这里起：**
 
@@ -432,3 +441,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-15（傍晚）：追 CI 三轮（`3caba196` / `ac61743c` / `5bdb907e`），账单恢复后 run 34927184124 全绿；PR #19 以 merge commit `d283b5a5` 合入 `main`，删 `codex/tijian-2` 与 `codex/gongdanceshi`。生产未部署。
 - 2026-09-18（下午）：对抗 review 建单分层 / 师傅端 11 个提交出 5 项缺陷，逐项修复 + Codex 五轮追加共 12 个提交（120g 拦截移位、烫金反查与同名消歧、工资汇总全量、规格克重解锁、珠光暗红补齐）；全量单测 7024 通过，OrderCreationWorkspace browser spec 5/5。未 push。
 - 2026-09-18（傍晚）：业主追加——收货地址输入统一复用粘贴自动识别组件（`d58f5e79`），六处接入，browser spec 4 文件 112 例通过；Codex 两轮追加修正（`090d3d01`、`9211fbed`：原生粘贴 + 统一「粘贴覆盖、手输补空」+ 客户地址城市/区县与省份前缀边界）。侧栏「工单」→「工单列表」、新增管理员「新建工单」常用入口（`feat(nav)`）。未 push。
+- 2026-09-18（晚）：「保存后没反馈」审查 → 零依赖跳转回执推广：`lib/admin/receipt.ts` + `ReceiptNotice` / `ReceiptUrlCleanup`，18 处 redirect 带回执、17 个目标页播报，异议审核与销售文本编辑不再吞掉成功结果；全量单测 7158 通过、browser spec 2/2；开源候选（Base UI Toast / sonner / nuqs / next-safe-action / 两个 cookie flash 包）评估记入 DECISIONS。未 push。
