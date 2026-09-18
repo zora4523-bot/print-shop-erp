@@ -34,6 +34,14 @@ describe('appendReceipt', () => {
     ).toBe('/owner/salary/hourly?marked=%E6%9D%8E%E5%9B%9B&markedPaid=1');
   });
 
+  it('keeps a literal ? inside the existing query string', () => {
+    expect(
+      appendReceipt('/owner/salary/hourly?workerId=w1&note=why?&month=2026-08', {
+        marked: 'Alice',
+      }),
+    ).toBe('/owner/salary/hourly?workerId=w1&note=why%3F&month=2026-08&marked=Alice');
+  });
+
   it('returns the path untouched when the receipt is empty', () => {
     expect(appendReceipt('/owner/notifications', {})).toBe('/owner/notifications');
   });

@@ -1,6 +1,6 @@
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { ReceiptNotice } from '../ReceiptNotice';
 import { readReceipt } from '@/lib/admin/receipt';
@@ -29,6 +29,7 @@ function receiptFromLocation() {
 
 it('shows the receipt and strips only the receipt keys from the address bar', async () => {
   window.history.replaceState(null, '', '/owner/boms/bom1?created=1&page=2#items');
+  const replaceState = vi.spyOn(window.history, 'replaceState');
 
   flushSync(() =>
     root.render(<ReceiptNotice receipt={receiptFromLocation()} noun="BOM" />),
@@ -38,6 +39,11 @@ it('shows the receipt and strips only the receipt keys from the address bar', as
   await expect.poll(() => window.location.search).toBe('?page=2');
   expect(window.location.pathname).toBe('/owner/boms/bom1');
   expect(window.location.hash).toBe('#items');
+  // Next 的 history 包装层只在 state 不带 __NA 时才同步 canonical URL，
+  // 所以这里必须是 null，让 Next 自己补内部字段。
+  expect(replaceState).toHaveBeenCalledTimes(1);
+  expect(replaceState.mock.calls[0]?.[0]).toBeNull();
+  replaceState.mockRestore();
   // The notice stays rendered after the URL is cleaned: the receipt lives in
   // the server-rendered tree, not in the address bar.
   await expect.element(page.getByRole('status')).toBeVisible();

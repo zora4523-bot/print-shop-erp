@@ -1577,6 +1577,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     });
     return <>
       <BreadcrumbEntity label={order.orderNo} />
+      <ReceiptNotice receipt={receipt} noun="工单" />
       <AdminOrderDetailView model={model} canEdit={canEdit} prints={presentation.prints}
         printHint={maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD
           ? `有款式含 ${maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度` : undefined}

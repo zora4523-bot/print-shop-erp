@@ -41,7 +41,10 @@ export function appendReceipt(path: string, receipt: Receipt): string {
   const hashIndex = path.indexOf('#');
   const hash = hashIndex >= 0 ? path.slice(hashIndex) : '';
   const beforeHash = hashIndex >= 0 ? path.slice(0, hashIndex) : path;
-  const [pathname, rawQuery = ''] = beforeHash.split('?', 2);
+  // 只在第一个 ? 处切分：查询串里再出现的 ? 是合法字符，不能丢。
+  const queryIndex = beforeHash.indexOf('?');
+  const pathname = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+  const rawQuery = queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : '';
   const query = new URLSearchParams(rawQuery);
   for (const key of RECEIPT_KEYS) {
     const value = receipt[key];
