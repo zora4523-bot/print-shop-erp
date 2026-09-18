@@ -10,6 +10,7 @@ import { appendOrderPricingRevisionInTx } from './pricing-revision';
 import { buildCreateOrderQuoteInputFromCatalog } from './create-order-quote-facts-adapter';
 import { isNewOrderPricingRoute } from './pricing-route';
 import { isSampleOrder } from './purpose';
+import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from '../rules/paper-availability';
 
 export class SampleOrderError extends Error {
   constructor(message: string) {
@@ -175,6 +176,8 @@ export async function finalizeSampleOrderInTx(
   if (!order.items.length || !order.shipments.length)
     throw new SampleOrderError('请补全样品与收件信息');
   if (order.purpose === 'PROOF') {
+    // Drafts saved before the retirement must not submit 120g as new business.
+    if (hasRetiredPaperItem(order.items)) throw new SampleOrderError(RETIRED_PAPER_MESSAGE);
     await buildCreateOrderQuoteInputFromCatalog(tx, {
       isSfCollect: order.isSfCollect,
       packagingGroups: [],

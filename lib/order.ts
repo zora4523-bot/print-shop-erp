@@ -1,5 +1,5 @@
 import { createOrderRequestFingerprint, matchesCreateOrderRequest } from './order/create-request-fingerprint';
-import { isRetiredPaper } from './rules/paper-availability';
+import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from './rules/paper-availability';
 import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
 import { createOrderSchema } from './auth/schemas';
 import { isSampleOrder } from './order/purpose';
@@ -638,12 +638,11 @@ export async function createOrder(
     ) {
       throw new OrderInvariantError(CREATE_ORDER_PACKAGING_LIMIT_MESSAGE);
     }
-    // New-business gate only. The shared quote adapter must stay neutral so
-    // change requests and cancellation settlement can still reprice orders
-    // that were created with 120g paper before it was retired.
-    if (isRetiredPaper({ weight: item.paperWeightGsm, paperType: item.paperType })) {
-      throw new OrderInvariantError('120g 纸张已停用，请选择其他克重');
-    }
+  }
+  // New-business gate only; see hasRetiredPaperItem for why the shared quote
+  // adapter must not do this.
+  if (hasRetiredPaperItem(input.items)) {
+    throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
   }
   const isExternalSalesDraft =
     settlementType === OrderSettlementType.EXTERNAL_SALES || special;

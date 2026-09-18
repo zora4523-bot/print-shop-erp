@@ -139,6 +139,12 @@ beforeEach(() => {
 });
 
 describe('quoteExternalCreateOrder', () => {
+  it('拒绝 120g 款式，且不进入事务', async () => {
+    await expect(quoteExternalCreateOrder(input({
+      items: [{ ...item, paperType: '120g珠光艳闪', paperWeightGsm: 120 }],
+    }), now)).rejects.toThrow('120g 纸张已停用');
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
   it('在一个事务内读取双版本并只调用新纯引擎', async () => {
     const result = await quoteExternalCreateOrder(input(), now);
 

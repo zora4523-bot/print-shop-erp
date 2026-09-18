@@ -6,6 +6,7 @@ import type {
   QuoteCreateOrderPackagingGroupsInput,
 } from '../auth/schemas';
 import { db } from '../db';
+import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from '../rules/paper-availability';
 import {
   calculateExternalOrderCharges,
   type ExternalOrderChargeQuote,
@@ -219,6 +220,9 @@ export async function quoteExternalCreateOrder(
   if (input.orderItemCount !== input.items.length) {
     throw new CreateOrderQuoteError('工单款式数与报价款式不一致');
   }
+  if (hasRetiredPaperItem(input.items)) {
+    throw new CreateOrderQuoteError(RETIRED_PAPER_MESSAGE);
+  }
 
   try {
     return await db.$transaction(async (tx) => {
@@ -287,6 +291,9 @@ export async function quoteInternalCreateOrder(
   }
   if (input.orderItemCount !== input.items.length) {
     throw new CreateOrderQuoteError('工单款式数与报价款式不一致');
+  }
+  if (hasRetiredPaperItem(input.items)) {
+    throw new CreateOrderQuoteError(RETIRED_PAPER_MESSAGE);
   }
 
   try {

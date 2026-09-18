@@ -65,6 +65,13 @@ const automaticItem = {
   isDoubleColor: false,
 };
 
+it.each([null, '管理员核价'])('拒绝 120g 款式且不进入事务（manualQuoteReason=%s）', async (manualQuoteReason) => {
+  await expect(quoteInternalCreateOrder(input({
+    items: [{ ...automaticItem, paperType: '120g珠光艳闪', paperWeightGsm: 120, manualQuoteReason }],
+  }), now)).rejects.toThrow('120g 纸张已停用');
+  expect(mocks.transaction).not.toHaveBeenCalled();
+});
+
 function input(
   overrides: Partial<InternalCreateOrderQuoteInput> = {},
 ): InternalCreateOrderQuoteInput {
