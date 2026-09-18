@@ -1754,6 +1754,22 @@ export function OrderForm({
   function changeItemSelection(index: number, change: OrderItemSelectionChange) {
     const indexes = change.type === 'specification' || change.type === 'customSize'
       ? [index] : designItemIndexes(getValues('items'), index);
+    if (change.type === 'specification') {
+      // A specification is local to one line, but normalizing it may move the
+      // paper/weight; the design group must keep one material (schema refines
+      // designGroupKey on that), so refuse instead of silently diverging.
+      const sibling = designItemIndexes(getValues('items'), index).find((member) => member !== index);
+      if (sibling !== undefined) {
+        const selected = orderItemSelectionUpdate(getValues(`items.${index}`), change, products, externalCreateOrderOptions);
+        const candidate = selected ? normalizeExternalOrderItem({ item: selected.item, crafts, products,
+          paperMaterials: externalCreateOrderOptions?.papers, ...selected.options }) : null;
+        const other = getValues(`items.${sibling}`);
+        if (!candidate || candidate.paperType !== other.paperType || candidate.paperWeightGsm !== other.paperWeightGsm) {
+          setState({ status: 'error', message: '该规格在当前材料或克重下不可用，无法与设计款的其他规格共用，请先调整材料或增加独立设计款。' });
+          return;
+        }
+      }
+    }
     if (indexes.length > 1 && (change.type === 'paper' || change.type === 'weight')) {
       const candidates = indexes.map((member) => {
         const selected = orderItemSelectionUpdate(getValues(`items.${member}`), change, products, externalCreateOrderOptions);

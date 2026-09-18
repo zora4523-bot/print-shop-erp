@@ -99,11 +99,15 @@ export function orderItemFieldOptions(
     (specification) => ({
       value: specification,
       label: externalOrderSpecificationLabel(specification, item.pricingRoute),
+      // Any enabled weight on the active paper makes the specification
+      // reachable; the weight renormalizes on selection. Requiring the current
+      // weight here would dead-lock with the weight picker, which is itself
+      // filtered by the current specification.
       disabled: !activeExternalPaper || !externalOrderWeightOptionsForSelection(
         activeExternalPaper,
         item.pricingRoute,
         specification,
-      ).some((weight) => !weight.disabled && weight.value === item.paperWeightGsm),
+      ).some((weight) => !weight.disabled),
     }),
   );
   return {
