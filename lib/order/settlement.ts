@@ -34,12 +34,18 @@ export function settlementBillsLogistics(settlementType: OrderSettlementType): b
 
 export const LOGISTICS_CHARGE_CATEGORY_CODES = ['SHIPPING_FEE', 'PACKING_MATERIAL'] as const;
 
-/** SHIPPING_FEE / PACKING_MATERIAL rows exist on the order (written by the submit finalizer). */
+/**
+ * SHIPPING_FEE / PACKING_MATERIAL rows written by the submit finalizer, i.e.
+ * bound to a published price book. Rows an administrator 补录-ed through the
+ * full fee editor carry `priceBookId: null` and cannot be requoted at ship
+ * time, so they must not switch the order onto the logistics path.
+ */
 export function hasLogisticsChargeRows(
-  charges: readonly { category: { code: string } }[],
+  charges: readonly { category: { code: string }; priceBookId?: string | null }[],
 ): boolean {
   return charges.some((charge) =>
-    (LOGISTICS_CHARGE_CATEGORY_CODES as readonly string[]).includes(String(charge.category.code)),
+    (LOGISTICS_CHARGE_CATEGORY_CODES as readonly string[]).includes(String(charge.category.code)) &&
+    charge.priceBookId != null,
   );
 }
 

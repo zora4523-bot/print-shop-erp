@@ -73,7 +73,7 @@ import {
   recordCsSalesEntryInTx,
   csSalesBasisAmountInTx,
 } from './salary/cs-sales';
-import { LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
+import { hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
 import {
   calculateCreateOrderQuoteFromCatalogInTx,
   CreateOrderQuoteError,
@@ -2552,7 +2552,7 @@ export async function assertShipOrderReadinessInTx(
     input.settlementType === OrderSettlementType.EXTERNAL_SALES
       ? [{ id: 'external' }]
       : await tx.orderCustomerCharge.findMany({
-          where: { orderId: input.orderId, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } } },
+          where: { orderId: input.orderId, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } }, priceBookId: { not: null } },
           select: { id: true },
           take: 1,
         });
@@ -2675,7 +2675,7 @@ async function finalizeExternalShipmentChargesInTx(
   if (!orderBillsLogistics({
     settlementType: chargeOrder.settlementType,
     purpose: chargeOrder.purpose,
-    hasLogisticsRows: standardCustomerCharges.length > 0,
+    hasLogisticsRows: hasLogisticsChargeRows(standardCustomerCharges),
   })) {
     return;
   }
@@ -2971,7 +2971,7 @@ export async function shipOrder(
         const logisticsRows = pricingOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
           ? [{ id: 'external' }]
           : await (tx as unknown as Prisma.TransactionClient).orderCustomerCharge.findMany({
-              where: { orderId: id, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } } },
+              where: { orderId: id, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } }, priceBookId: { not: null } },
               select: { id: true },
               take: 1,
             });
@@ -3267,7 +3267,7 @@ async function updateOrderEditableFields(
         // Only orders that already carry logistics rows need the province
         // re-checked when the address changes outside the full editor.
         customerCharges: {
-          where: { category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } } },
+          where: { category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } }, priceBookId: { not: null } },
           select: { id: true },
         },
         processingAmount: true,
@@ -3787,7 +3787,7 @@ export async function setOrderSfCollect(
     // Internal orders submitted since 2026-09-18 carry logistics rows and
     // switch 顺丰到付 exactly like external sales (waive shipping, keep packing).
     const logisticsRows = await (tx as unknown as Prisma.TransactionClient).orderCustomerCharge.findMany({
-      where: { orderId, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } } },
+      where: { orderId, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } }, priceBookId: { not: null } },
       select: { id: true },
       take: 1,
     });

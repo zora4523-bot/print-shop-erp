@@ -1342,9 +1342,15 @@ function assertFinalizedQuoteAcknowledged(
     },
   };
   // The create preview cannot know persisted admin-price snapshots, so its
-  // token omits them. It still proves the operator acknowledged the automatic
-  // quote; admin prices are server-confirmed trusted snapshots.
-  const previewQuoteToken = createExternalOrderQuoteToken(tokenEvidence);
+  // token omits them. Accept it only for the first submit of a never-quoted
+  // DRAFT — the create flow the preview belongs to. A re-submit (REJECTED, or
+  // any order that already has a quoted revision) must acknowledge the current
+  // admin prices, otherwise a stale preview token would wave through a price
+  // changed after the preview was taken.
+  const previewQuoteToken =
+    order.status === OrderStatus.DRAFT && !order.quotedPricingRevisionId
+      ? createExternalOrderQuoteToken(tokenEvidence)
+      : null;
   const currentQuoteToken = createExternalOrderQuoteToken({
     ...tokenEvidence,
     result: {
@@ -1372,7 +1378,7 @@ function assertFinalizedQuoteAcknowledged(
     logistics: logisticsPreview,
     quoteToken: currentQuoteToken,
   });
-  if (expectedQuoteToken !== currentQuoteToken && expectedQuoteToken !== previewQuoteToken) {
+  if (expectedQuoteToken !== currentQuoteToken && !(previewQuoteToken !== null && expectedQuoteToken === previewQuoteToken)) {
     throw new ExternalOrderQuoteChangedError(
       currentQuoteToken,
       new Decimal(presentation.knownTotal).plus(confirmedDelta).toFixed(2),

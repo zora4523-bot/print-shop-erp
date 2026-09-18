@@ -38,7 +38,7 @@ export async function getAdminOrderInlineOperations(
         },
       },
       customerCharges: {
-        select: { shipmentId: true, category: { select: { code: true } }, amount: true, overrideReason: true },
+        select: { shipmentId: true, category: { select: { code: true } }, amount: true, overrideReason: true, priceBookId: true },
       },
     },
   });
