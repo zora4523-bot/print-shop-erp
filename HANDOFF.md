@@ -16,6 +16,13 @@
 
 ## 当前任务
 
+**2026-09-19（凌晨）：grok 对抗审查 PR #20 / #21 / #22 全量 diff → 4 个修复提交（`c9a54cbb`、`b8e4ebc0`、`ad2a7164`、`1be6195b`），随后推送并合并，未部署。**
+- 做法：`grok`（`~/.grok/bin/grok` 1.0.25，模型 grok-4.6）无头模式、工具白名单 `read_file,grep,list_dir`（自带 `--sandbox read-only` 在本机因 `/var/run/docker.sock` 是符号链接起不来），按主题切 7 片并行：A = PR #21、B = PR #22、C = release 独有的备份脚本、D1a/D1b = 未推送 46 个提交的前段、D2 = 跳转回执、D3 = 内部工单物流。要求每条发现回到 HEAD 核实、避开 CLAUDE.md 已拍板例外。7 片全部 `MERGE_WITH_FOLLOWUPS`，无 P0；Claude 逐条回代码核实后才动手。
+- 已修 5 处（各带回归测试）：① `add-shipment` 仍用「有物流行」判定 REQUOTE，补录（`priceBookId: null`）过快递费的老内部工单加地址会报「原物流费用不完整」→ 改用 `hasLogisticsChargeRows`（新测试在修复前为红）；② 工单详情 `canAdminManageCommercialDetails` 仍对 `INTERNAL_SALES` 放行、服务端必拒 → 恢复为外销 / 工厂直接（这两处都是 `552fa165` 回退没改全）；③ 改单「新增款式」烫金色不走显示名反查，「红金」原样入库 → 与现有款共用 `knownOrderFoilColors` + `addedItemFoilColors`；④ `safeReturnTo` 放行 `..`，时薪回执可落到计件页 → 拒绝 `.` / `..` 段（含 `%2e`）与反斜杠；⑤ 省份解析无锚点、按价目表顺序匹配，「北京市朝阳区广东大厦」按广东计运费（**main 上的既有行为**，`d58f5e79` 只搬了位置）→ 带「省 / 市 / 自治区」后缀优先、同类取最先出现。
+- 核实后判定**不算缺陷**：B 片「`20260917011000_foil_wage_ledger` 在同一迁移里 `ADD VALUE` 后立即使用新枚举值会挂 `migrate deploy`」——开发库（PG 16.13）`_prisma_migrations` 已完成未回滚、PR #22 空库 CI 全绿、生产已应用；A 片「寄样包装默认最小档少收钱」——`docs/寄样与打样开发任务.md` 第 54 / 92 / 103 行写明的既定设计，测试也是特意这样断言。
+- 验证：typecheck 通过；lint 0 错误 3 警告（既有的 `window.location.assign` ×2 与 `_logistics`，顺手清掉了 `f9faea24` 留下的两个未使用标识）；全量 Vitest 导 `.env` 真实 URL 为 7134 通过 / 56 失败 / 44 跳过，**失败的 6 个文件与下方「全量测试基线」②完全一致**，换占位 `DATABASE_URL` 单跑这 6 个文件 403/403 全过。**没跑 e2e、没在真实浏览器目视**（同前两批）。
+- grok 未修的发现见「卡住的问题 → 待业主拍板（2026-09-19 grok 对抗审查）」与其下的「后续项」。
+
 **2026-09-18（夜）：内部工单物流自动计价，2 个代码提交（`012feeea`、`f9faea24`），未 push、未部署。**
 - 起因：业主在建单页发现填了地址但费用栏没有快递费。查证是设计如此——运费自 2026-08-08 起被建模成「外销渠道的对客应收」，`quoteInternalCreateOrder` 明写 `includeOrderCharges: false`，工厂直接业务只能在详情页「编辑收费」补录，忘了补就漏收。业主拍板：**客服工单与工厂直接业务和外销用同一本已发布物流价目自动计价，顺丰到付维持运费 0、耗材照收**（取代 2026-07-30「totalAmount 只汇总款式小计」与 2026-09-15「内部结算不新增物流应收」在这两类结算下的口径）。
 - `012feeea`（建单 + 提交）：`settlementBillsLogistics`（除 NO_CHARGE 外全计物流）；`quoteInternalCreateOrder` 收与外销相同的 logistics 事实、返回同一份 `CreateOrderQuotePresentation`（含物流行与握手 token）；`submitOrder` 对内销 / 工厂直接也走共享 `finalizeExternalOrderQuoteInTx`，同一快照落款式价、入袋费、快递费 / 耗材收费明细与双价目版本锁。**客服业绩口径不变**：新增 `csSalesBasisAmountInTx` = 工单总额 − 代收物流，提交 / 取消 / 改单批准 / 终价确认四处按该口径记账与对平。
@@ -284,6 +291,25 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 卡住的问题
 
+### 待业主拍板（2026-09-19 grok 对抗审查，均已回代码核实属实）
+
+- **跨日冲正 × 人工核定**（`lib/salary/order-wage-review.ts:20` 按「师傅 × 上海日」分组）：D1 报工 +24、D2 冲正 −24 后，D1 组仍可编辑，管理员把 D1 改成 0 → 师傅净额 −24；改成 48 → 冲正后又发一遍。先核定（写 ADJUSTMENT）再冲正，ADJUSTMENT 不会被冲掉、留下孤儿差额。**前提是应用层目前没有冲正入口，REVERSAL 只能手写 SQL 插入**（e2e 如此）。选项 A：存在未结算配对 REVERSAL 时把原报工日也锁只读；B：按 `reversalOfId` 把冲正与原报工轧差后再允许改价；C：禁止对已有 ADJUSTMENT 的 REPORT 冲正。做冲正入口之前必须先定。
+- **补录运费的内部工单切「顺丰到付」只改标记、不清运费**（`lib/order.ts` `setOrderSfCollect`，`billsLogistics` 为 false 时跳过改价分支）。本批之前内部工单切到付本来就不动费用；补录行是管理员手填的，到付后是否自动置 0 是业务口径。
+- **师傅工资页**：「待发放」页签仍套默认当月（`lib/salary/worker-settlement-page.ts:13` 列表始终带 `workDate` 区间），上月未发结算单在列表里看不到而汇总卡片含这笔；日期框预填「本月 1 日～今天」，师傅不改日期直接点「查询范围」会把上月未结算报工藏起来。不影响实发金额，是展示口径。
+- **寄样包装默认最小档**：当前按规划文档实现（数量 3000 也取最小档，可手动选更大档，但服务端只校验档位 code 存在、不校验数量是否落在该档）。若业主本意是大批量寄样按数量档收纸箱费，需改 `lib/price/external-order-charges.ts:863`。
+
+### 后续项（2026-09-19 grok 对抗审查，P2，未修）
+
+- 薪资：`publishSavedPieceworkDraft` / 个人工价发布不强制小单工资与装版费成对，绕过 UI 直接 POST 能发出退回线性计件的工价簿（ADMIN only）。
+- 回执：计件 / 时薪回执回放 URL 里的姓名（`?paid=张三` 可伪造「已标记发放」横幅，ADMIN only、无写入）；`MaterialCatalogPages.tsx:309` 兼容跳转丢回执 query；工单详情 ADMIN 分支 `!presentation` 早退不播回执；`ReceiptUrlCleanup` 在真实 App Router 下没有 e2e。
+- 地址：建单主地址（`OrderForm.tsx:3604`，仍 `preventDefault` 粘贴、无条件写姓名 / 电话 / 省份）与额外地址（`:3356`，忽略 `source`）没走「粘贴覆盖、手输补空」，`OrderForm-logistics-quote.test.ts:97` 还把无条件写省份锁成契约；手机号不去 `-`；姓名可能取到「中国」。服务端仍信任客户端 `destinationProvince`。
+- 烫金：反查只在浏览器端做，`lib/order/change-request.ts` 写入 `frontFoilColors` 前没有同样的兜底。
+- 寄样：管理员草稿完整编辑（`lib/order/admin-edit.ts:56`）不拦非 STANDARD 工单增改款式（改单申请有这道闸）；下发时内存校验 `CONFIRMED→RELEASED→PACKING` 但库里直接写 PACKING。
+- 上传：CDR 多选后服务端没有每款文件个数上限（单文件大小与 key 前缀有闸）。
+- 物流：内部工单改单 / 管理员编辑不重算物流行（`change-request.ts:2972`、`:5844` 仍只认 `EXTERNAL_SALES`）；`hasLogisticsChargeRows` 的 `priceBookId?` 可选类型会把「漏 select」当成「补录」。
+- 备份：`scripts/lib/backup-readiness.mjs:27` 按每个 repo 自己的最大 db id 认定当前库，集群重建且 repo2 没跟上 stanza-upgrade 时会误绿；两个 full timer 都 `Persistent=true` 无互斥，主机恰在 01:00–01:30 重启会并发抢 stanza 锁、`StartLimitBurst=3` 可能打掉当天 OSS full；门禁不证明 repo2 连续归档；`--info-file` 不校验快照新鲜度；`pgbackrest info` 失败时吞 stderr。
+- 迁移：`ProductionReportDispute` 的部分唯一索引 / CHECK / 触发器只在手写 SQL 里，schema 无对应，日后 `migrate dev` 可能生成删除它们的迁移。
+
 ### 待业主拍板（2026-09-18：关联物料已停用的历史工单能否重算）
 
 - 共享报价适配器 `lib/order/create-order-quote-facts-adapter.ts:382` 对「产品关联纸张 `isActive=false`」一律 `CATALOG_PAPER_CHANGED`，早于 120g 任务存在、不限于 120g。正式库已停用两条 120g 物料，**关联了它们的历史工单**改单 / 取消结算仍会被挡（未关联物料的 120g 历史工单已放行）。
@@ -453,3 +479,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-18（下午）：对抗 review 建单分层 / 师傅端 11 个提交出 5 项缺陷，逐项修复 + Codex 五轮追加共 12 个提交（120g 拦截移位、烫金反查与同名消歧、工资汇总全量、规格克重解锁、珠光暗红补齐）；全量单测 7024 通过，OrderCreationWorkspace browser spec 5/5。未 push。
 - 2026-09-18（傍晚）：业主追加——收货地址输入统一复用粘贴自动识别组件（`d58f5e79`），六处接入，browser spec 4 文件 112 例通过；Codex 两轮追加修正（`090d3d01`、`9211fbed`：原生粘贴 + 统一「粘贴覆盖、手输补空」+ 客户地址城市/区县与省份前缀边界）。侧栏「工单」→「工单列表」、新增管理员「新建工单」常用入口（`feat(nav)`）。未 push。
 - 2026-09-18（晚）：「保存后没反馈」审查 → 零依赖跳转回执推广：`lib/admin/receipt.ts` + `ReceiptNotice` / `ReceiptUrlCleanup`，18 处 redirect 带回执、17 个目标页播报，异议审核与销售文本编辑不再吞掉成功结果；全量单测 7158 通过、browser spec 2/2；开源候选（Base UI Toast / sonner / nuqs / next-safe-action / 两个 cookie flash 包）评估记入 DECISIONS。未 push。
+- 2026-09-19（凌晨）：grok 无头只读对抗审查 PR #20 / #21 / #22（7 片并行，全部 MERGE_WITH_FOLLOWUPS、无 P0）；Claude 逐条核实后修 5 处共 4 个提交（补录物流行加地址卡死、附加费用入口与闸口不一致、新增款烫金反查、`safeReturnTo` 放行 `..`、计费省份被地名盖掉），其余记入「卡住的问题」；推送并合并 PR #20。
