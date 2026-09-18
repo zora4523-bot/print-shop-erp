@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatFoilColors, foilColorLabel, foilColorSearchValues, foilColorInputLabel, restoreFoilColorInput } from '../foil-colors';
+import { formatFoilColors, foilColorLabel, foilColorFromLabel, foilColorSearchValues, foilColorInputLabel, restoreFoilColorInput } from '../foil-colors';
 
 describe('formatFoilColors', () => {
   it('joins multiple colors with a CJK list separator', () => {
@@ -24,4 +24,16 @@ it('uses foil labels while preserving saved identifiers, custom colors and order
   expect(foilColorSearchValues(['品牌色'])).toEqual(['品牌色']);
   expect(foilColorInputLabel('红色、蓝色')).toBe('红金、蓝金');
   expect(restoreFoilColorInput('红金、品牌金', ['红色'])).toBe('红色、品牌金');
+});
+
+// Regression: a renamed color typed in the change-request form that was not
+// already on the item must still be stored under its catalog name, otherwise
+// price rules scoped to 黑色 stop matching and lists show a phantom color.
+it('maps newly typed display names back to catalog names without relying on saved colors', () => {
+  expect(foilColorFromLabel('黑金')).toBe('黑色');
+  expect(foilColorFromLabel('品牌金')).toBe('品牌金');
+  expect(foilColorFromLabel('红色')).toBe('红色');
+  expect(restoreFoilColorInput('红金、黑金', ['红色'])).toBe('红色、黑色');
+  expect(restoreFoilColorInput('黑金', [])).toBe('黑色');
+  expect(restoreFoilColorInput('红金,蓝金，透明金', [])).toBe('红色,蓝色，透明色');
 });

@@ -11,6 +11,11 @@ export function foilColorLabel(color: string): string {
   return Object.hasOwn(FOIL_COLOR_LABELS, color) ? FOIL_COLOR_LABELS[color]! : color;
 }
 
+/** Inverse of foilColorLabel: a typed display name maps back to its stored catalog name. */
+export function foilColorFromLabel(label: string): string {
+  return Object.keys(FOIL_COLOR_LABELS).find((key) => FOIL_COLOR_LABELS[key] === label) ?? label;
+}
+
 /** Search both display names and legacy stored names without changing data. */
 export function foilColorSearchValues(colors: readonly string[]): string[] {
   return [...new Set(colors.flatMap((color) => {
@@ -32,9 +37,13 @@ export function foilColorInputLabel(text: string): string {
   return text.split(/([,，、])/).map((part) => foilColorLabel(part)).join('');
 }
 
-/** Editing a label must retain a matching saved identity. New names pass through. */
+/**
+ * Editing a label must retain a matching saved identity; a newly typed display
+ * name resolves through the dictionary so it is stored as the catalog name.
+ * Unknown names pass through.
+ */
 export function restoreFoilColorInput(text: string, saved: readonly string[]): string {
   return text.split(/([,，、])/).map((part) =>
-    saved.find((color) => foilColorLabel(color) === part) ?? part,
+    saved.find((color) => foilColorLabel(color) === part) ?? foilColorFromLabel(part),
   ).join('');
 }
