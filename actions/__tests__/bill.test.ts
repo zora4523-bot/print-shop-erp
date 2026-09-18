@@ -159,7 +159,7 @@ describe('issueBillAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     billMock.issueBill.mockResolvedValue({ id: 'b1', status: BillStatus.ISSUED });
     await expect(issueBillAction('b1')).rejects.toThrow(
-      'NEXT_REDIRECT:/owner/bills/b1?issued=1',
+      'NEXT_REDIRECT:/owner/bills/archive/b1?issued=1',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/bills');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/bills/b1');

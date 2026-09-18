@@ -2,14 +2,18 @@ import { notFound } from 'next/navigation';
 import { updatePartyAction } from '@/actions/owner-parties';
 import { PartyForm } from '@/components/business/party/PartyForm';
 import { TogglePartyActiveButton } from '@/components/business/party/TogglePartyActiveButton';
-import { PageHeader, StatusBadge } from '@/components/ui-business';
+import { PageHeader, StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getPartySummary,
   PARTY_TYPE_LABELS,
 } from '@/lib/party';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -19,7 +23,7 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function EditOwnerPartyPage({ params }: PageProps) {
+export default async function EditOwnerPartyPage({ params, searchParams }: PageProps) {
   await requirePermission('party:manage');
   const { id } = await params;
   const party = await getPartySummary(id);
@@ -42,8 +46,11 @@ export default async function EditOwnerPartyPage({ params }: PageProps) {
     defaultAddressDetail: party.defaultAddress?.detail ?? null,
   };
 
+  const receipt = readReceipt(await searchParams);
+
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="往来单位" />
       <PageHeader
         title={`编辑客户/供应商：${party.name}`}
         subtitle={`${PARTY_TYPE_LABELS[party.type]} · 编码 ${party.code}`}

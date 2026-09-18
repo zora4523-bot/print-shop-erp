@@ -13,7 +13,8 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ActionNotice, EmptyState, PageHeader, StatCard, TableScrollArea } from '@/components/ui-business';
+import { EmptyState, PageHeader, StatCard, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import {
   LockPieceworkSettlementDayForm,
   LockPieceworkSettlementForm,
@@ -64,27 +65,23 @@ export default async function PieceworkSettlementPage({
 
   return (
     <div className="space-y-6">
-      {sp.locked ? (
-        <ActionNotice
-          tone="success"
-          title="计件结算已锁定"
-          description={`${sp.locked} 的报工已结算。`}
-        />
-      ) : null}
-      {sp.lockedCount !== undefined ? (
-        <ActionNotice
-          tone="success"
-          title="当日结算处理完成"
-          description={`本次新锁定 ${Number(sp.lockedCount) || 0} 人。`}
-        />
-      ) : null}
-      {sp.paid ? (
-        <ActionNotice
-          tone="success"
-          title="已标记发放"
-          description={`${sp.paid} 的计件工资已标记为已发放。`}
-        />
-      ) : null}
+      <ReceiptNotice
+        receipt={readReceipt(sp)}
+        messages={{
+          locked: (name) => ({
+            title: '计件结算已锁定',
+            description: `${name} 的报工已结算。`,
+          }),
+          lockedCount: (count) => ({
+            title: '当日结算处理完成',
+            description: `本次新锁定 ${Number(count) || 0} 人。`,
+          }),
+          paid: (name) => ({
+            title: '已标记发放',
+            description: `${name} 的计件工资已标记为已发放。`,
+          }),
+        }}
+      />
 
       <PageHeader
         title="工序计件结算"

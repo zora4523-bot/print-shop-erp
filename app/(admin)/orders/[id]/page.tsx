@@ -58,7 +58,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ActionNotice, DisabledReason, TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { ActionNotice, DisabledReason, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { ChangeRequestStatusBadge } from '@/components/business/order/ChangeRequestStatusBadge';
@@ -134,7 +135,10 @@ import {
   orderShippingAvailability,
 } from '@/lib/order/shipping-availability';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 const DIRECT_CANCEL_STATUSES = new Set<OrderStatus>([
   OrderStatus.DRAFT,
@@ -157,9 +161,10 @@ export async function generateMetadata({ params }: PageProps) {
   return { title: orderDetailTitle(ref?.orderNo ?? null) };
 }
 
-export default async function OrderDetailPage({ params }: PageProps) {
+export default async function OrderDetailPage({ params, searchParams }: PageProps) {
   const { user } = await requireSession();
   const { id } = await params;
+  const receipt = readReceipt(await searchParams);
   // SALES uses a narrow, customer-facing query and operation page. The legacy
   // shared detail includes production tasks/workers, audit logs, plate data,
   // pricing snapshots and internal costs, so SALES must branch before that
@@ -172,11 +177,14 @@ export default async function OrderDetailPage({ params }: PageProps) {
     ]);
     if (!salesOrder) notFound();
     return (
-      <SalesOrderDetailView
-        order={salesOrder}
-        catalogProducts={catalogProducts}
-        foilColorNames={foilColors.map((foil) => foil.name)}
-      />
+      <div className="space-y-4">
+        <ReceiptNotice receipt={receipt} noun="工单" />
+        <SalesOrderDetailView
+          order={salesOrder}
+          catalogProducts={catalogProducts}
+          foilColorNames={foilColors.map((foil) => foil.name)}
+        />
+      </div>
     );
   }
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
@@ -1593,6 +1601,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的 order，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={order.orderNo} />
+      <ReceiptNotice receipt={receipt} noun="工单" />
       <OrderDetailStickyScope
         header={
           <>

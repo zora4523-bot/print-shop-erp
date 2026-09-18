@@ -163,7 +163,7 @@ describe('createMaterialAction', () => {
         fd({ ...validMaterial, routeBase: '/foreman/materials' }),
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
-    expect(redirectMock).toHaveBeenCalledWith('/foreman/materials/mat1');
+    expect(redirectMock).toHaveBeenCalledWith('/foreman/materials/mat1?created=1');
   });
 
   it('keeps paper creation inside the rule center', async () => {
@@ -177,7 +177,7 @@ describe('createMaterialAction', () => {
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
-    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/papers/mat1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/papers/mat1?created=1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/papers');
   });
 
@@ -200,7 +200,7 @@ describe('createMaterialAction', () => {
       expect.objectContaining({ category: MaterialCategory.PAPER }),
     );
     expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/rules/papers/paper-1',
+      '/owner/rules/papers/paper-1?created=1',
     );
   });
 
@@ -240,7 +240,7 @@ describe('createMaterialAction', () => {
     expect(materialMock.createMaterial).toHaveBeenCalledWith(
       expect.objectContaining({ category: MaterialCategory.FOIL }),
     );
-    expect(redirectMock).toHaveBeenCalledWith('/owner/materials/foil-1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/materials/foil-1?created=1');
   });
 
   it('maps P2002 on material code to invalid.code field error', async () => {

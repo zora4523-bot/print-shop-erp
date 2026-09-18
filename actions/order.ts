@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   createOrderSchema,
@@ -440,7 +441,7 @@ export async function updateOrderAction(
 
   revalidatePath('/orders');
   revalidatePath(`/orders/${orderId}`);
-  redirect(`/orders/${orderId}`);
+  redirect(appendReceipt(`/orders/${orderId}`, { updated: '1' }));
 }
 
 // Quick one-click 急单 toggle. Accepts `isUrgent` as a string form

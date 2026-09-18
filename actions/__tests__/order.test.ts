@@ -1212,7 +1212,7 @@ describe('updateOrderAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
-    expect(redirectMock).toHaveBeenCalledWith('/orders/o1');
+    expect(redirectMock).toHaveBeenCalledWith('/orders/o1?updated=1');
   });
 
   it.each([undefined, '', 'not-a-version', '1.5', '-1'])(

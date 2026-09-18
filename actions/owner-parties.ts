@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import {
   getFormString,
   getFormStringOr,
@@ -81,7 +82,10 @@ export async function createPartyAction(
 
   revalidatePartyPaths(createdId);
   redirect(
-    purchaseReturnPath(formData, createdId) ?? `/owner/parties/${createdId}`,
+    appendReceipt(
+      purchaseReturnPath(formData, createdId) ?? `/owner/parties/${createdId}`,
+      { created: '1' },
+    ),
   );
 }
 

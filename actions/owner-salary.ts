@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { appendReceipt, safeReturnTo } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   startCsPeriodSchema,
@@ -65,7 +66,7 @@ export async function startCsPeriodAction(
   try {
     const created = await startCsPeriod(parsed.data, new Date(), actor);
     revalidatePath('/owner/salary/cs');
-    redirect(`/owner/salary/cs/${created.id}`);
+    redirect(appendReceipt(`/owner/salary/cs/${created.id}`, { created: '1' }));
   } catch (err) {
     const mapped = mapCsError(err);
     if (mapped) return mapped;
@@ -242,14 +243,10 @@ export async function setHourlyPayrollPaidAction(
     throw err;
   }
   revalidatePath('/owner/salary/hourly');
-  const back = formData.get('returnTo');
-  const safeBack =
-    typeof back === 'string' && back.startsWith('/owner/salary/hourly')
-      ? back
-      : '/owner/salary/hourly';
-  const sep = safeBack.includes('?') ? '&' : '?';
   redirect(
-    `${safeBack}${sep}marked=${encodeURIComponent(marked.workerName)}` +
-      `&markedPaid=${parsed.data.isPaid ? '1' : '0'}`,
+    appendReceipt(safeReturnTo(formData.get('returnTo'), '/owner/salary/hourly'), {
+      marked: marked.workerName,
+      markedPaid: parsed.data.isPaid ? '1' : '0',
+    }),
   );
 }

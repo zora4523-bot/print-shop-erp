@@ -19,7 +19,9 @@ import { DeleteChannelButton } from '@/components/business/notification/DeleteCh
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
 import { LegacyNotificationChannels } from '@/components/business/notification/LegacyNotificationChannels';
 import { UnknownNotificationActions } from '@/components/business/notification/UnknownNotificationActions';
-import { EnvNotice, ErrorState, PageHeader, StatusBadge as UiStatusBadge, TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { EnvNotice, ErrorState, PageHeader, StatusBadge as UiStatusBadge, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
+import { firstSearchParam } from '@/lib/admin/table';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import type {
   BackgroundJobStatus,
@@ -48,11 +50,12 @@ const UNKNOWN_PAGE_SIZE = 25;
 export default async function OwnerNotificationsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ unknownPage?: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requirePermission('notification:config');
   const query = (await searchParams) ?? {};
-  const parsedPage = Number(query.unknownPage);
+  const receipt = readReceipt(query);
+  const parsedPage = Number(firstSearchParam(query.unknownPage));
   const unknownPage =
     Number.isSafeInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
@@ -88,6 +91,17 @@ export default async function OwnerNotificationsPage({
 
   return (
     <div className="space-y-8">
+      <ReceiptNotice
+        receipt={receipt}
+        messages={{
+          created: (value) => ({
+            title: value === 'rule' ? '通知规则已创建' : '通知目标已创建',
+          }),
+          updated: (value) => ({
+            title: value === 'rule' ? '通知规则已保存' : '通知目标已保存',
+          }),
+        }}
+      />
       <PageHeader
         title="推送配置"
         subtitle="管理企业微信通知目标、通知规则和投递记录。"

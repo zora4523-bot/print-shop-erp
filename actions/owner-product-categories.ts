@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import { Prisma } from '../generated/prisma/client';
 import {
   getFormString,
@@ -95,7 +96,11 @@ export async function createRuleCenterProductCategoryNodeAction(
   }
 
   revalidateProductCategoryPaths(createdId);
-  redirect(`${RULE_CENTER_HREFS.productCategories}/${createdId}`);
+  redirect(
+    appendReceipt(`${RULE_CENTER_HREFS.productCategories}/${createdId}`, {
+      created: '1',
+    }),
+  );
 }
 
 export async function updateProductCategoryNodeAction(

@@ -116,7 +116,7 @@ describe('createRuleCenterProductCategoryNodeAction', () => {
       sortOrder: 70,
     });
     expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/rules/product-categories/cat1',
+      '/owner/rules/product-categories/cat1?created=1',
     );
   });
 
@@ -135,7 +135,7 @@ describe('createRuleCenterProductCategoryNodeAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/rules/product-categories/cat1',
+      '/owner/rules/product-categories/cat1?created=1',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith(
       '/owner/rules/product-categories',
@@ -160,7 +160,7 @@ describe('createRuleCenterProductCategoryNodeAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/rules/product-categories/cat1',
+      '/owner/rules/product-categories/cat1?created=1',
     );
   });
 

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createCraftSchema, updateCraftSchema } from '@/lib/auth/schemas';
 import {
@@ -90,7 +91,9 @@ export async function createRuleCenterCraftAction(
   }
 
   revalidateCraftPaths(createdId);
-  redirect(`${RULE_CENTER_HREFS.crafts}/${createdId}`);
+  redirect(
+    appendReceipt(`${RULE_CENTER_HREFS.crafts}/${createdId}`, { created: '1' }),
+  );
 }
 
 export async function updateCraftAction(

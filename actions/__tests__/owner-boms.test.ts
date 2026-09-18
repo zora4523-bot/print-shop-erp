@@ -108,7 +108,7 @@ describe('createBomAction', () => {
       baseQuantity: 1000,
       items: [{ materialId: 'mat1', quantity: '500.0000', remark: null }],
     });
-    expect(redirectMock).toHaveBeenCalledWith('/owner/boms/bom1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/boms/bom1?created=1');
     expect(revalidatePathMock).toHaveBeenCalledWith(
       RULE_CENTER_HREFS.stockSkus,
     );

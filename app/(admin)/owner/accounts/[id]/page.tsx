@@ -3,6 +3,8 @@ import { listPieceworkAdminBooks } from '@/lib/salary/piecework-admin';
 import { listPersonalPieceworkBooks } from '@/lib/salary/personal-piecework-admin';
 import { operationTypeForReporterAccount } from '@/lib/production/reporter-operation-lane';
 import { notFound } from 'next/navigation';
+import { ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { getUserSummary } from '@/lib/account';
 import { updateUserAction } from '@/actions/owner-accounts';
 import { AccountForm } from '@/components/business/account/AccountForm';
@@ -14,6 +16,7 @@ import { getSession } from '@/lib/auth/session';
 
 type PageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -28,7 +31,7 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function EditAccountPage({ params }: PageProps) {
+export default async function EditAccountPage({ params, searchParams }: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('account:manage');
@@ -43,8 +46,11 @@ export default async function EditAccountPage({ params }: PageProps) {
   // Bind the id once so the form only has to pass (prev, fd).
   const boundUpdate = updateUserAction.bind(null, id);
 
+  const receipt = readReceipt(await searchParams);
+
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="账号" />
       <div>
         <h1 className="text-xl font-semibold">
           编辑账号：{account.displayName}

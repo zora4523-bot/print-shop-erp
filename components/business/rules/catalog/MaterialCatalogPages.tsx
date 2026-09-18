@@ -24,7 +24,8 @@ import { MaterialsTable } from '@/components/business/material/MaterialsTable';
 import { StockTransactionForm } from '@/components/business/material/StockTransactionForm';
 import { ToggleMaterialActiveButton } from '@/components/business/material/ToggleMaterialActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader, StatusBadge, TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { PageHeader, StatusBadge, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { RulePaperWorkspace } from '@/components/business/rules/catalog/RulePaperWorkspace';
 import { MaterialCategory } from '@/generated/prisma/enums';
@@ -65,6 +66,7 @@ export type MaterialCatalogListProps = {
 
 export type MaterialCatalogDetailProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
   routeBase: MaterialRouteBase;
   categoryScope?: MaterialCategory;
   redirectCategory?: MaterialCategory;
@@ -294,6 +296,7 @@ export async function NewMaterialCatalogItem({
 
 export async function EditMaterialCatalogItem({
   params,
+  searchParams,
   routeBase,
   categoryScope,
   redirectCategory,
@@ -301,6 +304,7 @@ export async function EditMaterialCatalogItem({
 }: MaterialCatalogDetailProps) {
   await requirePermission('material:manage');
   const { id } = await params;
+  const receipt = readReceipt(await searchParams);
   const material = await getMaterialSummary(id);
   if (
     material &&
@@ -340,6 +344,7 @@ export async function EditMaterialCatalogItem({
 
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun={paperOnly ? '纸张' : '物料'} />
       {paperOnly ? (
         <RuleCenterPageHeader
           title={`编辑纸张：${

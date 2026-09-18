@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   createUserSchema,
@@ -92,7 +93,7 @@ export async function createUserAction(
   // Send the operator straight to the edit page — clearer feedback than a
   // silent "✓ 已保存" and prevents accidental double-submit from a lingering
   // filled-in create form.
-  redirect(`/owner/accounts/${createdId}`);
+  redirect(appendReceipt(`/owner/accounts/${createdId}`, { created: '1' }));
 }
 
 export async function updateUserAction(

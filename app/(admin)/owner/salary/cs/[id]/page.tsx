@@ -25,8 +25,12 @@ import { csPeriodTitle } from '@/lib/page-title/titles';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
 import { formatMoney, formatMoneyDelta } from '@/lib/dashboard/format';
-import { TableScrollArea } from '@/components/ui-business';
-type PageProps = { params: Promise<{ id: string }> };
+import { TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -44,7 +48,7 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function CsPeriodDetailPage({ params }: PageProps) {
+export default async function CsPeriodDetailPage({ params, searchParams }: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('salary:view:all');
@@ -90,8 +94,11 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
     new Decimal(period.initialSales as Decimal.Value),
   );
 
+  const receipt = readReceipt(await searchParams);
+
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="业绩周期" />
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={period.csUser.displayName} />

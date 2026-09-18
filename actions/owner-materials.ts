@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import { MaterialCategory, TxDirection } from '../generated/prisma/enums';
 import {
   getFormString,
@@ -144,7 +145,9 @@ async function createMaterialWithScope(
   }
 
   revalidateMaterialPaths(createdId);
-  redirect(`${scope.redirectBase}/${createdId}`);
+  redirect(
+    appendReceipt(`${scope.redirectBase}/${createdId}`, { created: '1' }),
+  );
 }
 
 export async function updateMaterialAction(

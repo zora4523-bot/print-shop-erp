@@ -12,7 +12,8 @@ import {
 import { ProductCategoryNodesTable } from '@/components/business/product-category/ProductCategoryNodesTable';
 import { ToggleProductCategoryActiveButton } from '@/components/business/product-category/ToggleProductCategoryActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
@@ -26,6 +27,7 @@ import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatu
 
 export type ProductCategoryCatalogDetailProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
   routeBase: ProductCategoryRouteBase;
 };
 
@@ -120,10 +122,12 @@ export async function NewProductCategoryCatalogItem({
 
 export async function EditProductCategoryCatalogItem({
   params,
+  searchParams,
   routeBase,
 }: ProductCategoryCatalogDetailProps) {
   await requirePermission('dict:product:manage');
   const { id } = await params;
+  const receipt = readReceipt(await searchParams);
   const node = await getProductCategoryNodeSummary(id);
   if (!node) notFound();
   const isRetired = isRetiredProductCategory(node);
@@ -137,6 +141,7 @@ export async function EditProductCategoryCatalogItem({
 
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="产品结构分类" />
       <RuleCenterPageHeader
         title={`编辑产品结构分类：${node.name}`}
         effect="immediate"

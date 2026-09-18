@@ -7,7 +7,8 @@ import {
 import { MaterialForm } from '@/components/business/material/MaterialForm';
 import { StockTransactionForm } from '@/components/business/material/StockTransactionForm';
 import { ToggleMaterialActiveButton } from '@/components/business/material/ToggleMaterialActiveButton';
-import { PageHeader, StatusBadge, TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { PageHeader, StatusBadge, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getMaterialSummary,
@@ -17,7 +18,10 @@ import {
 import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 function decimal(value: unknown): string {
   if (value === null || value === undefined) return '-';
@@ -39,7 +43,7 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function EditForemanMaterialPage({ params }: PageProps) {
+export default async function EditForemanMaterialPage({ params, searchParams }: PageProps) {
   await requirePermission('material:manage');
   const { id } = await params;
   const [material, locationOptions, locationStocks] = await Promise.all([
@@ -61,8 +65,11 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
     averageCost: decimalInput(material.averageCost),
   };
 
+  const receipt = readReceipt(await searchParams);
+
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="物料" />
       <PageHeader
         title={`编辑物料：${externalPriceBusinessText(material.name)}`}
         subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
