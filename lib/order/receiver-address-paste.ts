@@ -22,6 +22,23 @@ export type ReceiverAddressDisplay = {
 export type ParsedReceiverAddress = PastedReceiverFacts &
   Pick<ReceiverAddressDisplay, 'address' | 'platformCode'>;
 
+const PROVINCE_SUFFIX = '(?:省|市|壮族自治区|回族自治区|维吾尔自治区|自治区)';
+
+/**
+ * The billing province drives the freight tier, so a province name inside a
+ * building, street or person name ("北京市朝阳区广东大厦", "青海省海南藏族自治州")
+ * must not win. A name carrying its administrative suffix beats a bare one,
+ * and within each class the earliest occurrence wins.
+ */
+function parseDestinationProvince(normalized: string): string | null {
+  const earliest = (suffix: string) =>
+    ZTO_PROVINCE_OPTIONS
+      .map((candidate) => ({ candidate, index: normalized.search(new RegExp(`${candidate}${suffix}`)) }))
+      .filter((match) => match.index >= 0)
+      .sort((a, b) => a.index - b.index || b.candidate.length - a.candidate.length)[0]?.candidate;
+  return earliest(PROVINCE_SUFFIX) ?? earliest('') ?? null;
+}
+
 export function parsePastedReceiverAddress(value: string): PastedReceiverFacts {
   const normalized = value
     .trim()
@@ -31,12 +48,7 @@ export function parsePastedReceiverAddress(value: string): PastedReceiverFacts {
     /(?<!\d)(1[3-9](?:[-\s]?\d){9}|0\d{2,3}[-\s]?\d{7,8})(?!\d)/,
   );
   const receiverPhone = phoneMatch?.[1]?.replace(/\s/g, '') ?? null;
-  const province =
-    ZTO_PROVINCE_OPTIONS.find((candidate) =>
-      new RegExp(`${candidate}(?:省|市|壮族自治区|回族自治区|维吾尔自治区|自治区)?`).test(
-        normalized,
-      ),
-    ) ?? null;
+  const province = parseDestinationProvince(normalized);
   const explicitName = normalized.match(
     /(?:收货人|联系人|姓名)\s*[:：]?\s*([\p{Script=Han}A-Za-z·]{2,32}?)(?=\s|1[3-9]|0\d{2,3}|$)/u,
   )?.[1];

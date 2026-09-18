@@ -26,6 +26,17 @@ describe('parseReceiverAddressInput', () => {
     expect(parseExternalReceiverDisplay('').address).toBe('');
     expect(parseReceiverAddressInput('   ')).toMatchObject({ receiverName: null, receiverPhone: null, province: null, address: '' });
   });
+
+  it.each([
+    ['张三，13800000000，北京市朝阳区广东大厦1号', '北京'],
+    ['浙江省杭州市西湖区上海路8号', '浙江'],
+    ['青海省海南藏族自治州共和县测试路1号', '青海'],
+    ['张广东 13800000000 江苏省南京市测试路1号', '江苏'],
+    ['广东深圳南山区北京路2号', '广东'],
+    ['广西壮族自治区南宁市广东路3号', '广西'],
+  ])('takes the billing province from the administrative prefix, not a later place name: %s', (text, province) => {
+    expect(parsePastedReceiverAddress(text).province).toBe(province);
+  });
 });
 
 describe('applyParsedReceiverFact', () => {
