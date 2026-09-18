@@ -1,3 +1,5 @@
+import { listOrderReportDisputes } from '@/lib/production/report-dispute';
+import { ReportDisputeAdminPanel } from '@/components/business/production/ReportDisputeAdminPanel';
 import { OrderWagePanel } from '@/components/business/salary/OrderWagePanel';
 import { PayrollPassForm } from '@/components/business/production/PayrollPassForm';
 import { productionOperationPassCount } from '@/lib/production/operation-quantity';
@@ -182,6 +184,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
     ...(order?.items ?? []).map((item) => item.designs.length),
   );
   if (!order) notFound();
+  const reportDisputes = user.role === Role.ADMIN ? await listOrderReportDisputes(order.id, user) : [];
   const adminActivity = user.role === Role.ADMIN ? await readOrderActivity(order.id, user) : null;
   const canViewCommercialAmounts = user.role !== Role.WORKER;
   const canCreateRework =
@@ -1277,7 +1280,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </ol>
         </section>
       ) : null}</>),
-    disputes: (<>{user.role === Role.ADMIN ? (
+    disputes: (<>{user.role === Role.ADMIN && <ReportDisputeAdminPanel disputes={reportDisputes} />}{user.role === Role.ADMIN ? (
         <TaskDisputeAdminPanel
           disputes={taskDisputes.map((dispute) => ({
             id: dispute.id,

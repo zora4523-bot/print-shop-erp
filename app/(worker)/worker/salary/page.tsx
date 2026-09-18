@@ -1,3 +1,4 @@
+import { listWorkerSettlementPage } from '@/lib/salary/worker-settlement-page';
 import { WorkerPendingReports } from '@/components/business/salary/WorkerPendingReports';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Decimal from 'decimal.js';
@@ -12,7 +13,6 @@ import {
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   listWorkerHourlyPayrolls,
-  listWorkerPieceworkSettlementsForPortal,
   listWorkerSalaries,
   type WorkerSalaryActor,
 } from '@/lib/worker-portal';
@@ -32,7 +32,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '我的工资' };
 
 type PageProps = {
-  searchParams: Promise<{ from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[] }>;
+  searchParams: Promise<{ from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string }>;
 };
 
 const HOURLY_WORKER_TYPES = new Set<WorkerType>([
@@ -52,26 +52,21 @@ export default async function WorkerSalaryPage({ searchParams }: PageProps) {
   };
   const sp = await searchParams;
 
-  if (user.workerType === WorkerType.MACHINE) {
-    return (
-      <div className="min-w-0 space-y-8">
-        <OperationPieceworkSalaryContent actor={actor} searchParams={sp} />
-        <PieceworkSalaryContent actor={actor} searchParams={sp} historical />
-      </div>
-    );
-  }
-  if (user.workerType === WorkerType.PACKER) {
-    return (
-      <div className="min-w-0 space-y-8">
-        <OperationPieceworkSalaryContent actor={actor} searchParams={sp} />
-        <HourlySalaryContent
-          actor={actor}
-          workerType={user.workerType}
-          searchParams={sp}
-          historical
-        />
-      </div>
-    );
+  if (user.workerType === WorkerType.MACHINE || user.workerType === WorkerType.PACKER) {
+    const history = sp.view === 'history';
+    let content = <OperationPieceworkSalaryContent actor={actor} searchParams={sp} />;
+    if (history) {
+      content = user.workerType === WorkerType.MACHINE
+        ? <PieceworkSalaryContent actor={actor} searchParams={sp} historical />
+        : <HourlySalaryContent actor={actor} workerType={user.workerType} searchParams={sp} historical />;
+    }
+    return <div className="min-w-0 space-y-5">
+      <nav aria-label="工资类型" className="flex gap-2 rounded-xl border bg-card p-2">
+        <Link href="/worker/salary" aria-current={!history ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg px-4 font-medium ${!history ? 'bg-primary text-primary-foreground' : ''}`}>计件工资</Link>
+        <Link href="/worker/salary?view=history" aria-current={history ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg px-4 font-medium ${history ? 'bg-primary text-primary-foreground' : ''}`}>历史工资档案</Link>
+      </nav>
+      {content}
+    </div>;
   }
   if (HOURLY_WORKER_TYPES.has(user.workerType)) {
     return (
@@ -90,24 +85,18 @@ async function OperationPieceworkSalaryContent({
   searchParams: sp,
 }: {
   actor: WorkerSalaryActor;
-  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[] };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string };
 }) {
-  const from = sp.from ? parseStrictYmd(sp.from) : null;
-  const to = sp.to ? parseStrictYmd(sp.to) : null;
-  const settlements = await listWorkerPieceworkSettlementsForPortal(actor, {
-    from: from ?? undefined,
-    to: to ?? undefined,
-  });
-  const total = settlements.reduce(
-    (sum, row) => sum.plus(new Decimal(row.payableAmount as Decimal.Value)),
-    new Decimal(0),
-  );
-  const unpaid = settlements
-    .filter((row) => row.status !== PieceworkSettlementStatus.PAID)
-    .reduce(
-      (sum, row) => sum.plus(new Decimal(row.payableAmount as Decimal.Value)),
-      new Decimal(0),
-    );
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const fromText = sp.from && parseStrictYmd(sp.from) ? sp.from : `${today.slice(0, 7)}-01`;
+  const toText = sp.to && parseStrictYmd(sp.to) ? sp.to : today;
+  const invalidRange = fromText > toText;
+  const from = parseStrictYmd(fromText)!;
+  const to = parseStrictYmd(toText)!;
+  const result = await listWorkerSettlementPage(actor, { from, to, page: sp.page, status: sp.status });
+  const settlements = result.rows;
+  const total = new Decimal(result.totalAmount);
+  const unpaid = new Decimal(result.unpaidAmount);
 
   return (
     <section className="min-w-0 space-y-4">
@@ -117,16 +106,17 @@ async function OperationPieceworkSalaryContent({
         inputType="date"
         fromLabel="开始日期"
         toLabel="结束日期"
-        from={from ? sp.from : undefined}
-        to={to ? sp.to : undefined}
+        from={fromText}
+        to={toText}
       />
-      <WorkerPendingReports actor={actor} from={from ? sp.from : undefined} to={to ? sp.to : undefined} page={sp.pendingPage} />
+      {invalidRange && <p role="alert" className="text-destructive">开始日期晚于结束日期，请修改后查询。</p>}
+      <WorkerPendingReports actor={actor} from={fromText} to={toText} page={sp.pendingPage} />
+      <nav aria-label="发放状态" className="flex flex-wrap gap-2">{[['', '全部结算'], ['unpaid', '待发放'], ['paid', '已发放']].map(([value, label]) => <Link key={value} href={`/worker/salary?${new URLSearchParams({ from: fromText, to: toText, status: value })}`} aria-current={(sp.status ?? '') === value ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm ${(sp.status ?? '') === value ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>{label}</Link>)}</nav>
       <h2 className="font-semibold">已结算工资</h2>
       {settlements.length === 0 ? (
         <EmptyState
           icon={WalletCards}
-          title="暂无已锁定的工序计件"
-          description="管理员按日锁定报工后，结算会显示在这里。"
+          title="暂无已结算工资"
         />
       ) : (
         <ul className="space-y-3">
@@ -149,7 +139,7 @@ async function OperationPieceworkSalaryContent({
                         {settlement._count.items} 条报工
                       </Badge>
                     </div>
-                    <p className="worker-wrap-anywhere mt-2 text-xs text-muted-foreground">
+                    <p className="worker-wrap-anywhere mt-2 text-sm text-muted-foreground">
                       报工金额 {formatMoney(settlement.reportAmount)} · 调整{' '}
                       {formatMoney(settlement.adjustmentAmount)}
                     </p>
@@ -161,6 +151,7 @@ async function OperationPieceworkSalaryContent({
           ))}
         </ul>
       )}
+      {result.pageCount > 1 && <AdminPagination basePath="/worker/salary" {...result} queryParams={{ from: fromText, to: toText, status: sp.status }} />}
     </section>
   );
 }
@@ -171,7 +162,7 @@ async function PieceworkSalaryContent({
   historical = false,
 }: {
   actor: WorkerSalaryActor;
-  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[] };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string };
   historical?: boolean;
 }) {
   const from = sp.from ? parseStrictYmd(sp.from) : null;
@@ -202,13 +193,13 @@ async function PieceworkSalaryContent({
         toLabel="结束日期"
         from={from ? sp.from : undefined}
         to={to ? sp.to : undefined}
+        historical={historical}
       />
 
       {salaries.length === 0 ? (
         <EmptyState
           icon={WalletCards}
           title="暂无计件工资"
-          description="任务报工并由系统生成日薪后，记录会显示在这里。"
         />
       ) : (
         <ul className="space-y-3">
@@ -228,11 +219,11 @@ async function PieceworkSalaryContent({
                         base={salary.baseSalary as Decimal.Value}
                       />
                     </div>
-                    <p className="worker-wrap-anywhere mt-2 text-xs text-muted-foreground">
+                    <p className="worker-wrap-anywhere mt-2 text-sm text-muted-foreground">
                       {MACHINE_TYPE_LABELS[salary.machineType]} · {salary.taskCount}{' '}
                       项任务 / {salary.orderCount} 个工单
                     </p>
-                    <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                    <p className="worker-wrap-anywhere mt-1 text-sm text-muted-foreground">
                       计件 {formatMoney(salary.totalPieceworkAmount)} · 保底 {formatMoney(salary.baseSalary)} · 调整{' '}
                       {Number(salary.adjustmentAmount) > 0 ? '+' : ''}
                       {String(salary.adjustmentAmount)}
@@ -253,7 +244,7 @@ async function PieceworkSalaryContent({
         </ul>
       )}
       <AdminPagination basePath="/worker/salary" {...salaryPage}
-        queryParams={{ from: sp.from, to: sp.to }} />
+        queryParams={{ from: sp.from, to: sp.to, view: historical ? 'history' : undefined }} />
     </div>
   );
 }
@@ -266,7 +257,7 @@ async function HourlySalaryContent({
 }: {
   actor: WorkerSalaryActor;
   workerType: WorkerType;
-  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[] };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string };
   historical?: boolean;
 }) {
   const fromMonth = validMonth(sp.from) ? sp.from : undefined;
@@ -294,13 +285,13 @@ async function HourlySalaryContent({
         toLabel="结束月份"
         from={fromMonth}
         to={toMonth}
+        historical={historical}
       />
 
       {payrolls.length === 0 ? (
         <EmptyState
           icon={WalletCards}
           title="暂无月结工资"
-          description="管理员完成该月工资结算后，记录会显示在这里。"
         />
       ) : (
         <ul className="space-y-3">
@@ -326,12 +317,12 @@ async function HourlySalaryContent({
                           : '历史岗位未知'}
                       </Badge>
                     </div>
-                    <p className="worker-wrap-anywhere mt-2 text-xs text-muted-foreground">
+                    <p className="worker-wrap-anywhere mt-2 text-sm text-muted-foreground">
                       {isCook
                         ? `工作 ${String(payroll.totalWorkHours)} 小时 · 代班 ${String(payroll.totalSpareHours)} 小时`
                         : `正常 ${String(payroll.totalWorkHours)} 小时 · 加班 ${String(payroll.totalOtHours)} 小时`}
                     </p>
-                    <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                    <p className="worker-wrap-anywhere mt-1 text-sm text-muted-foreground">
                       {isCook
                         ? `月薪 ${formatMoney(payroll.baseSalary)} · 代班费 ${formatMoney(payroll.spareSalary)}`
                         : `正常工资 ${formatMoney(payroll.baseSalary)} · 加班工资 ${formatMoney(payroll.otSalary)}`}
@@ -359,7 +350,7 @@ function SalaryHeader({
   return (
     <header className="worker-wrap-anywhere">
       <h1 className="text-lg font-semibold">{title}</h1>
-      <p className="text-xs text-muted-foreground">{description}</p>
+      <p className="text-sm text-muted-foreground">{description}</p>
     </header>
   );
 }
@@ -368,13 +359,13 @@ function SalarySummary({ total, unpaid, totalLabel = '累计工资' }: { total: 
   return (
     <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
       <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
-        <p className="text-xs text-muted-foreground">{totalLabel}</p>
+        <p className="text-sm text-muted-foreground">{totalLabel}</p>
         <p className="worker-wrap-anywhere mt-1 font-sans tabular-nums text-lg font-semibold">
           {formatMoney(total)}
         </p>
       </div>
       <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
-        <p className="text-xs text-muted-foreground">尚未发放</p>
+        <p className="text-sm text-muted-foreground">尚未发放</p>
         <p className="worker-wrap-anywhere mt-1 font-sans tabular-nums text-lg font-semibold">
           {formatMoney(unpaid)}
         </p>
@@ -384,12 +375,14 @@ function SalarySummary({ total, unpaid, totalLabel = '累计工资' }: { total: 
 }
 
 function SalaryRangeFilter({
+  historical = false,
   inputType,
   fromLabel,
   toLabel,
   from,
   to,
 }: {
+  historical?: boolean;
   inputType: 'date' | 'month';
   fromLabel: string;
   toLabel: string;
@@ -398,8 +391,9 @@ function SalaryRangeFilter({
 }) {
   return (
     <form className="grid min-w-0 grid-cols-1 gap-3 rounded-xl border bg-card p-3 text-sm min-[360px]:grid-cols-2">
+      {historical && <input type="hidden" name="view" value="history" />}
       <label className="space-y-1">
-        <span className="text-xs text-muted-foreground">{fromLabel}</span>
+        <span className="text-sm text-muted-foreground">{fromLabel}</span>
         <input
           type={inputType}
           name="from"
@@ -408,7 +402,7 @@ function SalaryRangeFilter({
         />
       </label>
       <label className="space-y-1">
-        <span className="text-xs text-muted-foreground">{toLabel}</span>
+        <span className="text-sm text-muted-foreground">{toLabel}</span>
         <input
           type={inputType}
           name="to"
@@ -421,7 +415,7 @@ function SalaryRangeFilter({
           查询范围
         </Button>
         <Link
-          href="/worker/salary"
+          href={historical ? '/worker/salary?view=history' : '/worker/salary'}
           className="inline-flex min-h-11 items-center px-3 text-sm underline"
         >
           清除
@@ -436,7 +430,7 @@ function SalaryRangeFilter({
 function SalaryAmount({ value }: { value: Decimal.Value }) {
   return (
     <div className="ml-auto shrink-0 text-right">
-      <p className="text-xs text-muted-foreground">实发</p>
+      <p className="text-sm text-muted-foreground">应发</p>
       <p className="font-sans tabular-nums text-lg font-semibold text-foreground">
         {formatMoney(value)}
       </p>

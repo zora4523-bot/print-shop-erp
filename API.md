@@ -437,3 +437,10 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 批量工作区复用单工单 create/quote/upload/submit，不新增绕过鉴权的批量 API。每张工单使用独立、稳定的 `clientSubmissionId`，创建结果立即记录；上传或提交失败继续已有草稿，不对已成功工单重放创建。
 
 创建事务在首条 `OrderLog(action=CREATE).changedFields.createRequest` 保存 v1 请求指纹（规范化对象键顺序后的 SHA-256）。同一提交标识的重试必须同时匹配创建人、归属销售及首次请求事实；事务内命中与唯一键冲突恢复均执行相同检查。不同内容或旧记录缺少指纹时返回含原工单号的核对提示，不能作为新内容保存成功，也不自动生成新提交标识。该元数据不展示为费用或操作变更；历史工单与价格快照不回填。
+
+### 2026-09-18 师傅报工问题反馈
+
+- `createReportDisputeAction(reportId, state, formData)`：`task:dispute:create`，仅活跃 WORKER 对本人 `ProductionReport` 发起问题；说明 5–1000 字。同一报工最多一个待处理问题，重复提交不产生第二条。
+- `reviewReportDisputeAction(disputeId, state, formData)`：`task:dispute:review`，仅活跃 ADMIN；处理结果 `RESOLVED` / `REJECTED`，回复 2–1000 字；已处理记录拒绝再次回复。
+- 两个 action 都返回 `{ status: 'success' | 'error', message }`；领域层重复校验权限和输入，事务写异议与工单日志。不修改报工数量、计件金额或结算记录。
+- `/worker/reports` 按当前会话账号分页查询计件报工与调整；`/worker/reports/[id]` 强制本人所有权。管理员在工单详情的生产记录区处理问题，师傅在报工明细查看回复。

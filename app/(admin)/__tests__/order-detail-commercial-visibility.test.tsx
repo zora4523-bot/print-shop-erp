@@ -1,3 +1,4 @@
+vi.mock('@/lib/production/report-dispute', () => ({ listOrderReportDisputes: vi.fn().mockResolvedValue([]) }));
 vi.mock('@/components/business/salary/OrderWagePanel', () => ({ OrderWagePanel: () => null }));
 vi.mock('@/actions/order-production-facts', () => ({ repairLegacyProductionFactsAction: vi.fn() }));
 const readinessQuery = vi.hoisted(() => vi.fn().mockResolvedValue({ ready: true, issues: [] }));

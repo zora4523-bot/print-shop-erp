@@ -110,6 +110,7 @@ model User {
   finalizedCustomerCharges    OrderCustomerCharge[]         @relation("OrderCustomerChargeFinalizer")
   createdPlateDetails         OrderItemPlateDetail[]        @relation("OrderItemPlateDetailCreator")
   removedPlateDetails         OrderItemPlateDetail[]        @relation("OrderItemPlateDetailRemover")
+  resolvedReportDisputes      ProductionReportDispute[]     @relation("ReportDisputeResolver")
   raisedTaskDisputes          ProductionTaskDispute[]       @relation("ProductionTaskDisputeWorker")
   resolvedTaskDisputes        ProductionTaskDispute[]       @relation("ProductionTaskDisputeResolver")
   confirmedOrderPricing       Order[]                       @relation("OrderPricingConfirmer")
@@ -1181,6 +1182,7 @@ model ProductionReport {
   priceBook         PieceworkPriceBook           @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
   reversalOf        ProductionReport?            @relation("ProductionReportReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
   reversedBy        ProductionReport?            @relation("ProductionReportReversal")
+  disputes          ProductionReportDispute[]
   settlementItem    PieceworkSettlementItem?
   workOrderProgress ProductionWorkOrderProgress?
 
@@ -3023,4 +3025,23 @@ model Setting {
   value     Json
   remark    String?
   updatedAt DateTime @updatedAt
+}
+
+// 新版报工异议独立于历史任务；报工记录本身即为所有权依据。
+model ProductionReportDispute {
+  id           String                      @id @default(cuid())
+  reportId     String
+  status       ProductionTaskDisputeStatus @default(PENDING)
+  reason       String                      @db.Text
+  resolution   String?                     @db.Text
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+  report       ProductionReport            @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  resolvedBy   User?                       @relation("ReportDisputeResolver", fields: [resolvedById], references: [id], onDelete: Restrict)
+
+  @@index([reportId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@index([resolvedById])
 }

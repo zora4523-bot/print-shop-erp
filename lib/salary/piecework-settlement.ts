@@ -244,6 +244,7 @@ export async function getPieceworkSettlementDetail(
               amount: true,
               priceBookVersion: true,
               ruleSetSha256: true,
+              snapshot: true,
               reportedAt: true,
               operation: {
                 select: {

@@ -13,7 +13,7 @@ import {
 
 let fixture: WorkerUiFixture;
 
-// Each project exercises seven routes serially, including axe, geometry and a
+// Each project exercises ten routes serially, including axe, geometry and a
 // full-page candidate screenshot per route. Keep gate-level thresholds strict
 // while giving the complete matrix the same explicit budget as the admin suite.
 test.describe.configure({ timeout: 90_000 });
@@ -118,6 +118,9 @@ function workerRoutes(data: WorkerUiFixture): readonly WorkerRoute[] {
       assertGateState: assertProductionContext,
     },
     { name: 'salary', path: '/worker/salary', readyHeading: '我的工资' },
+    { name: 'salary-history', path: '/worker/salary?view=history', readyHeading: '历史日薪档案' },
+    { name: 'reports', path: '/worker/reports', readyHeading: '我的报工' },
+    { name: 'account', path: '/worker/account', readyHeading: '我的账号' },
     {
       name: 'salary-detail',
       path: `/worker/salary/${data.salaryId}`,

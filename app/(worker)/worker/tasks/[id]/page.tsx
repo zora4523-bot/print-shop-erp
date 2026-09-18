@@ -1,3 +1,5 @@
+import { WorkerOperationSources } from '@/components/business/production/WorkerOperationSources';
+import { formatFoilColors } from '@/lib/order/foil-colors';
 import { resolveReporterPieceworkRate } from '@/lib/salary/piecework-rate-selection';
 import { PieceworkPricingError } from '@/lib/salary/piecework-pricing';
 import { db } from '@/lib/db';
@@ -111,7 +113,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           {operation.customName ? (
             <p className="text-sm font-semibold">{operation.customName}</p>
           ) : null}
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             计划 {operation.plannedCompletedQty}
             {operation.operationType === PieceworkOperationType.PACKING ? ' 袋' : ' 个'}
             {operation.promisedDate
@@ -120,13 +122,15 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           </p>
         </header>
 
+        <WorkerOperationSources sources={operation.sources} />
+
         {operation.status === ProductionOperationStatus.PENDING ||
         operation.status === ProductionOperationStatus.IN_PROGRESS ? (
           <section className="rounded-xl border bg-card p-4 shadow-sm">
             <h2 className="mb-1 text-sm font-semibold">扫码报工</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
+            <p className="mb-3 text-sm text-muted-foreground">
               报工人：{user.displayName} · 累计合格 {operation.completedQty} / {operation.plannedCompletedQty}
-              {' · '}本次提交的计件工资归本人
+
             </p>
             {operation.operationType === PieceworkOperationType.PACKING ? (
               <p className="mb-3 text-sm">剩余 {remainingQty} 袋</p>
@@ -135,6 +139,8 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             {currentRate ? <><p className="mb-3 text-sm">本人适用工价：{formatUnitPrice(currentRate.rule.amount.toString())}/{operation.unit === 'PER_PASS' ? '下' : operation.unit === 'PER_PIECE' ? '个' : operation.unit === 'PER_BOX' ? '盒' : '袋'} · {currentRate.source === 'PERSONAL' ? '个人工价' : '统一工价'} · 第 {currentRate.book.version} 版</p>
             {currentRate.rule.smallOrderAmount != null && currentRate.rule.setupAmount != null && <p className="mb-3 text-sm">小单（≤1000 个，含装版）：{formatUnitPrice(currentRate.rule.smallOrderAmount.toString())}/{operation.operationType === 'FULL' ? '色' : '次'}；大单装版费：{formatUnitPrice(currentRate.rule.setupAmount.toString())}/{operation.operationType === 'FULL' ? '色' : '次'}</p>}
             <OperationReportForm
+              quantityUnit={operation.operationType === 'PACKING' ? '袋' : '个'}
+              context={[`${operation.orderNo} · ${OPERATION_LABELS[operation.operationType]}`, ...operation.sources.flatMap((source) => source.item ? [`${source.item.name} · ${source.item.specification ?? ''} · ${formatFoilColors([...new Set([...source.item.frontFoilColors, ...source.item.backFoilColors])])}`] : []), ...(operation.operationType === 'PARTIAL' ? [`计薪过版 ${operation.payrollPassCount} 次`] : [])]}
               operationId={operation.id}
               payrollRevision={operation.payrollRevision}
               rateKey={currentRate.key}
@@ -145,6 +151,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           </section>
         ) : null}
 
+        <Link href={`/worker/reports?operationId=${operation.id}`} className="inline-flex min-h-11 items-center underline">查看我的报工记录与问题反馈</Link>
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
           <h2 className="font-semibold">工序进度</h2>
           <dl className="mt-3 grid grid-cols-2 gap-3">
@@ -168,81 +175,20 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             <h2 className="font-semibold">包装与工单备注</h2>
             <dl className="mt-3 space-y-2">
               <div>
-                <dt className="text-xs text-muted-foreground">包装补充说明</dt>
+                <dt className="text-sm text-muted-foreground">包装补充说明</dt>
                 <dd className="break-words">
                   {operation.packageRequirement ?? '—'}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">工单备注</dt>
+                <dt className="text-sm text-muted-foreground">工单备注</dt>
                 <dd className="break-words">{operation.orderRemark ?? '—'}</dd>
               </div>
             </dl>
           </section>
         ) : null}
 
-        <section className="min-w-0 space-y-3">
-          <h2 className="text-sm font-semibold">工序来源</h2>
-          {operation.sources.map((source, index) =>
-            source.item ? (
-              <article
-                key={source.item.id}
-                className="rounded-xl border bg-card p-4 shadow-sm"
-              >
-                <h3 className="worker-wrap-anywhere min-w-0 font-semibold">
-                  #{source.item.sequence} · {source.item.name}
-                </h3>
-                <p className="worker-wrap-anywhere mt-1 min-w-0 text-xs text-muted-foreground">
-                  {source.item.specification
-                    ? externalPriceBusinessText(source.item.specification)
-                    : '未填规格'}
-                  {' · '}
-                  {source.item.paperType
-                    ? externalPriceBusinessText(source.item.paperType)
-                    : '未填纸张'}
-                  {' · '}款式数量 {source.item.quantity}
-                </p>
-                {source.item.remark ? (
-                  <HighlightedRemark className="mt-3">
-                    {source.item.remark}
-                  </HighlightedRemark>
-                ) : null}
-                <DesignImageGallery
-                  images={source.item.designs.map((design) => ({
-                    ...design,
-                    fileUrl: signDesignReadUrl(design.fileUrl),
-                  }))}
-                />
-              </article>
-            ) : source.packagingGroup ? (
-              <article
-                key={source.packagingGroup.id}
-                className="rounded-xl border bg-card p-4 text-sm shadow-sm"
-              >
-                <h3 className="font-semibold">
-                  包装组 #{source.packagingGroup.sequence}
-                  {source.packagingGroup.name
-                    ? ` · ${source.packagingGroup.name}`
-                    : ''}
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  计划 {source.packagingGroup.actualBagCount} 袋
-                </p>
-                <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                  {source.packagingGroup.lines.map((line) => (
-                    <li key={line.orderItem.sequence}>
-                      #{line.orderItem.sequence} · {line.orderItem.name} · 每袋 {line.unitsPerBag} 个
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ) : (
-              <p key={index} className="text-sm text-muted-foreground">
-                来源记录不完整
-              </p>
-            ),
-          )}
-        </section>
+
       </div>
     );
   }
@@ -271,7 +217,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           <p className="text-sm">
             #{progress.orderItemSequence} · {progress.orderItemName}
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             计划 {progress.plannedQty} 个
             {progress.promisedDate
               ? ` · 交期 ${formatDateShanghai(progress.promisedDate)}`
@@ -283,7 +229,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
         progress.status === ProductionOperationStatus.IN_PROGRESS ? (
           <section className="rounded-xl border bg-card p-4 shadow-sm">
             <h2 className="mb-1 text-sm font-semibold">扫码报进度</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
+            <p className="mb-3 text-sm text-muted-foreground">
               累计合格 {progress.completedQty} / {progress.plannedQty}
             </p>
             <ProgressReportForm
@@ -302,7 +248,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             <Metric label="缺陷记录" value={progress.defectQty} />
             <Metric label="返工记录" value={progress.reworkQty} />
           </dl>
-          <p className="mt-3 text-xs text-muted-foreground">
+          <p className="mt-3 text-sm text-muted-foreground">
             此步骤仅推进生产进度，不产生计件工资。
           </p>
         </section>
@@ -312,13 +258,13 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             <h2 className="font-semibold">包装与工单备注</h2>
             <dl className="mt-3 space-y-2">
               <div>
-                <dt className="text-xs text-muted-foreground">包装补充说明</dt>
+                <dt className="text-sm text-muted-foreground">包装补充说明</dt>
                 <dd className="break-words">
                   {progress.packageRequirement ?? '—'}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">工单备注</dt>
+                <dt className="text-sm text-muted-foreground">工单备注</dt>
                 <dd className="break-words">{progress.orderRemark ?? '—'}</dd>
               </div>
             </dl>
@@ -329,7 +275,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           <h2 className="worker-wrap-anywhere min-w-0 font-semibold">
             #{progress.item.sequence} · {progress.item.name}
           </h2>
-          <p className="worker-wrap-anywhere mt-1 min-w-0 text-xs text-muted-foreground">
+          <p className="worker-wrap-anywhere mt-1 min-w-0 text-sm text-muted-foreground">
             {progress.item.specification
               ? externalPriceBusinessText(progress.item.specification)
               : '未填规格'}
@@ -401,7 +347,7 @@ function LegacyTaskDetail({
         <h1 className="text-lg font-semibold">
           #{task.orderItem.sequence} · {task.orderItem.name}
         </h1>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           {task.craft.name} · 此记录来自旧派工流程，仅供查阅
         </p>
       </header>
@@ -444,7 +390,7 @@ function LegacyTaskDetail({
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dt className="text-sm text-muted-foreground">{label}</dt>
       <dd className="worker-wrap-anywhere font-sans tabular-nums">{value}</dd>
     </div>
   );

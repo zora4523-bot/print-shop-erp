@@ -112,11 +112,13 @@ function currentVersionWorkerOrderPredicate(
 
 export async function listWorkerOrders(
   actor: WorkerActor,
-  options?: { page?: number },
+  options?: { page?: number; q?: string },
 ) {
   requireWorkerActor(actor);
   const operationType = await getReporterOperationTypeOrNull(actor);
-  const visibility = currentVersionWorkerOrderPredicate(operationType);
+  const search = options?.q?.trim().slice(0, 100);
+  const pattern = `%${search?.replace(/[\\%_]/g, '\\$&') ?? ''}%`;
+  const visibility = Prisma.sql`(${currentVersionWorkerOrderPredicate(operationType)}) ${search ? Prisma.sql`AND (current_order."orderNo" ILIKE ${pattern} OR current_order."customName" ILIKE ${pattern})` : Prisma.empty}`;
 
   return db.$transaction(
     async (tx) => {

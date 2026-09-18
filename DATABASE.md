@@ -271,3 +271,11 @@ pnpm db:studio
 ### 2026-09-18：创建请求重试核对
 
 复用 `OrderLog.changedFields` JSON，在首条 `CREATE` 日志内写入 `createRequest: { version: 1, fingerprint: SHA256 }`，随工单创建事务原子保存。指纹取首次创建请求而非之后可修改的工单状态；普通工单、寄样、打样使用相同重试校验。无需新增迁移；已有日志不回填，缺指纹的历史重试要求打开原工单人工核对。业务展示忽略无 `before/after` 的元数据。
+
+### 2026-09-18 新版报工异议
+
+新增前向迁移 `20260918060000_production_report_disputes`：创建 `ProductionReportDispute`，关联不可变的 `ProductionReport`；报工的 reporterId 即发起人所有权依据，回复人关联 User。保留旧 `ProductionTaskDispute` 及历史消费方。
+
+- 部分唯一索引保证每条报工最多一个 PENDING；事务锁串行化提交与回复。
+- CHECK 限制说明长度、状态与回复字段的一致性；触发器禁止删除、修改原始问题与关联，以及再次修改已处理记录。
+- 无历史数据回填，无计价、工资或报工账本更新。上线需先应用该迁移，再切换应用版本。

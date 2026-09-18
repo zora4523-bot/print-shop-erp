@@ -583,3 +583,12 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 验证（基线 `ce3b6d37` 加本节增量）：三份表单目标 Vitest（`ExternalSalesOrderFormB`、`OrderFormBVisuals`、`OrderFormB-unified-quote`）27 项、`OrderFormBNavigation.browser.spec.tsx` 70 项通过。隔离库 `erp_e2e_releasefix20260917` 的 Release 构建与 TypeScript 检查通过；`order-creation-groups` 两角色用例、`admin-create-pricing`、`order-create-ui-parity` 及 `admin-responsive` 的 design and specification tabs 用例，共 20 项通过，无跳过，涵盖实际提交、调价、销售权限、文件归属与六视口明暗主题、触控/键盘、overflow、axe。已查看管理端手机上传区和销售端桌面暗色截图。完整 lint 0 错误、2 条既有导航警告，最后样式调整的目标 ESLint 和 UI 门禁通过；架构门禁通过。
 
 本轮先发现旧“文件”标题断言需随已批准文案更新；新增高度断言两次检出全局 `.admin-viewport` 触控下限覆盖上传框自身高度，最终用控件属性选择器提高局部优先级后通过，未降低断言。上传区域提取后亦消除了超长函数增长。证据：`/tmp/erp-hierarchy-{unit,browser,e2e,lint,final-lint,architecture}.log`；初轮失败保留为 `/tmp/erp-hierarchy-e2e-initial.log` 和 `/tmp/erp-hierarchy-e2e-height-debug.log`；最终截图在 `test-results/release/`。
+
+### 2026-09-18 师傅端信息层级与反馈
+
+- 师傅壳保持移动端底部三项导航，内容上限为 `max-w-3xl`；账号移到顶部入口，集中显示岗位、适用工价及密码操作。
+- 任务区分岗位待做、共享不计薪进度和本人报工；任务与工单支持搜索、任务按当前版本分页取数。二维码继续由微信／相机打开版本化工单 URL，页面提供说明和工单搜索备用路径，不请求网页相机权限。
+- 计件详情先展示设计与生产要求，再填写报工；数量显示个／袋及最大可报数，核对层显示工单、款式、规格、颜色和局部计薪过版次数。合格数和工单件数进度保持独立。
+- 工资默认上海当月；历史档案独立入口，日期筛选不混用。新版已结算列表数据库分页，期间汇总不受分页影响。工资金额标记“应发”，按发放状态筛选。
+- 报工明细解释历史计件费、装版费、小单包价、冲正和人工调整；不使用当前工价重算旧记录。待结算与已结算条目均提供报工明细／问题反馈入口。
+- 新版问题反馈关联本人报工，后台工单详情回复；沿用状态 Badge 和共享 Disclosure，不另造状态颜色或原生折叠交互。

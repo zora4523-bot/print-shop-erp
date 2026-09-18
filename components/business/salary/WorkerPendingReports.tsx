@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { WorkerSalaryActor } from '@/lib/worker-portal';
 import { listWorkerPendingReports } from '@/lib/salary/worker-pending-reports';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -23,6 +24,7 @@ export async function WorkerPendingReports({ actor, from, to, page }: {
         <p>{entries[row.entryType]} · {formatDateTimeShanghai(row.reportedAt)}</p>
         {row.entryType !== 'ADJUSTMENT' && <p>合格数量：{row.quantity}</p>}
         <p className="worker-wrap-anywhere">{row.entryType === 'ADJUSTMENT' ? '调整金额' : '暂计提成'}：{formatMoney(row.amount)}</p>
+        <Link href={`/worker/reports/${row.id}`} className="inline-flex min-h-11 items-center underline">查看明细与反馈</Link>
       </li>)}</ul>
       <AdminPagination basePath="/worker/salary" {...result} pageParam="pendingPage" queryParams={{ from, to }} />
     </>}
