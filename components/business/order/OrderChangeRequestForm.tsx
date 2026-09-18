@@ -86,6 +86,8 @@ type Props = {
   catalogProducts: OrderChangeCatalogProduct[];
   promisedDate?: string | null;
   hasPackagingGroups?: boolean;
+  /** Catalog foil names; protects typed catalog names from the display-label reverse map. */
+  foilColorNames?: readonly string[];
 };
 
 export function orderChangeRequestDraftIdentity({
@@ -336,13 +338,21 @@ function ExistingOrderItemChanges({
   items,
   pending,
   updateItem,
+  foilColorNames = [],
 }: {
   catalogProducts: readonly OrderChangeCatalogProduct[];
   editable: Record<string, EditableItem>;
   items: ItemOption[];
   pending: boolean;
   updateItem: (itemId: string, patch: Partial<EditableItem>) => void;
+  foilColorNames?: readonly string[];
 }) {
+  // Every identity the user could legitimately type: catalog foils plus any
+  // color already on this order. See restoreFoilColorInput.
+  const knownFoilColors = [...new Set([
+    ...foilColorNames,
+    ...items.flatMap((entry) => [...(entry.frontFoilColors ?? []), ...(entry.backFoilColors ?? []), ...entry.foilColors]),
+  ])];
   return (
     <fieldset className="min-w-0 space-y-3">
       <legend className="sr-only">选择并修改现有款式</legend>
@@ -472,7 +482,7 @@ function ExistingOrderItemChanges({
                     disabled={pending}
                     onChange={(event) =>
                       updateItem(item.id, {
-                        frontFoilColors: restoreFoilColorInput(event.target.value, item.frontFoilColors ?? item.foilColors),
+                        frontFoilColors: restoreFoilColorInput(event.target.value, item.frontFoilColors ?? item.foilColors, knownFoilColors),
                       })
                     }
                   />
@@ -485,7 +495,7 @@ function ExistingOrderItemChanges({
                     disabled={pending}
                     onChange={(event) =>
                       updateItem(item.id, {
-                        backFoilColors: restoreFoilColorInput(event.target.value, item.backFoilColors ?? item.foilColors),
+                        backFoilColors: restoreFoilColorInput(event.target.value, item.backFoilColors ?? item.foilColors, knownFoilColors),
                       })
                     }
                   />
@@ -571,6 +581,7 @@ function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason,
 }
 
 function OrderChangeRequestDraftForm({
+  foilColorNames,
   orderId,
   expectedRevision,
   expectedWorkOrderVersion,
@@ -717,6 +728,7 @@ function OrderChangeRequestDraftForm({
         items={items}
         pending={pending}
         updateItem={updateItem}
+        foilColorNames={foilColorNames}
       /> : null}
       {unchangedSelectedCount > 0 ? (
         <p

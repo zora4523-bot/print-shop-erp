@@ -37,3 +37,11 @@ it('maps newly typed display names back to catalog names without relying on save
   expect(restoreFoilColorInput('黑金', [])).toBe('黑色');
   expect(restoreFoilColorInput('红金,蓝金，透明金', [])).toBe('红色,蓝色，透明色');
 });
+
+// A catalog material may legitimately be named like a dictionary label; the
+// form passes every known identity so such input is stored verbatim.
+it('never rewrites a typed name that is itself a known identity', () => {
+  expect(restoreFoilColorInput('红金', ['亚金'], ['红金', '亚金'])).toBe('红金');
+  expect(restoreFoilColorInput('红金', ['亚金'], ['亚金'])).toBe('红色');
+  expect(restoreFoilColorInput('红金、黑金', ['红色'], ['黑金'])).toBe('红色、黑金');
+});

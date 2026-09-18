@@ -2036,6 +2036,17 @@ export async function submitOrder(
             }
             throw error;
           }
+        } else {
+          // Internal drafts saved before the retirement are new business on
+          // first submit. External drafts are checked in
+          // assertSelectedPapersAvailable, sample drafts in finalizeSampleOrderInTx.
+          const items = await prismaTx.orderItem.findMany({
+            where: { orderId: lockedOrderId },
+            select: { paperType: true, paperWeightGsm: true },
+          });
+          if (hasRetiredPaperItem(items ?? [])) {
+            throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
+          }
         }
 
         const submittedOrder = await prismaTx.order.findUnique({

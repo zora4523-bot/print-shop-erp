@@ -138,6 +138,13 @@ beforeEach(() => {
   ]);
 });
 
+it('工作台报价拒绝 120g 且不进入事务', async () => {
+  const result = await calculateWorkbenchItem(
+    { ...item, paperType: '120g珠光艳闪', paperWeightGsm: 120 } as unknown as Parameters<typeof calculateWorkbenchItem>[0], 0);
+  expect(result).toEqual({ status: 'error', message: '120g 纸张已停用，请选择其他克重' });
+  expect(mocks.transaction).not.toHaveBeenCalled();
+});
+
 describe('quoteExternalCreateOrder', () => {
   it('拒绝 120g 款式，且不进入事务', async () => {
     await expect(quoteExternalCreateOrder(input({

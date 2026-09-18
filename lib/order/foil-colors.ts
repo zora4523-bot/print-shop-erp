@@ -40,10 +40,12 @@ export function foilColorInputLabel(text: string): string {
 /**
  * Editing a label must retain a matching saved identity; a newly typed display
  * name resolves through the dictionary so it is stored as the catalog name.
- * Unknown names pass through.
+ * `known` lists names that exist as real identities (catalog materials, colors
+ * already on the order): typing one of them is never rewritten, even when it
+ * collides with a dictionary label. Unknown names pass through.
  */
-export function restoreFoilColorInput(text: string, saved: readonly string[]): string {
+export function restoreFoilColorInput(text: string, saved: readonly string[], known: readonly string[] = []): string {
   return text.split(/([,，、])/).map((part) =>
-    saved.find((color) => foilColorLabel(color) === part) ?? foilColorFromLabel(part),
+    saved.find((color) => foilColorLabel(color) === part) ?? (known.includes(part) ? part : foilColorFromLabel(part)),
   ).join('');
 }

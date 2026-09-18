@@ -33,7 +33,7 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
     };
-    orderItem: { findFirst: ReturnType<typeof vi.fn> };
+    orderItem: { findFirst: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
     craft: { findMany: ReturnType<typeof vi.fn> };
     party: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
     user: { findUnique: ReturnType<typeof vi.fn> };
@@ -92,7 +92,7 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
       updateMany: vi.fn(),
     },
-    orderItem: { findFirst: vi.fn() },
+    orderItem: { findFirst: vi.fn(), findMany: vi.fn() },
     craft: { findMany: vi.fn() },
     party: { findUnique: vi.fn(), findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
@@ -529,6 +529,7 @@ beforeEach(() => {
   for (const fn of Object.values(dbMock.order)) fn.mockReset();
   dbMock.order.updateMany.mockResolvedValue({ count: 1 });
   dbMock.orderItem.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.orderItem.findMany.mockReset().mockResolvedValue([]);
   dbMock.craft.findMany.mockReset();
   dbMock.party.findUnique.mockReset();
   dbMock.party.findFirst.mockReset().mockResolvedValue({ id: 'customer-1' });
@@ -2550,6 +2551,13 @@ describe('submitOrder', () => {
       before: OrderStatus.DRAFT,
       after: OrderStatus.SUBMITTED,
     });
+  });
+
+  it('拒绝退役前保存的内销 120g 草稿首次提交', async () => {
+    dbMock.order.findUnique.mockResolvedValue(submittedRichRow);
+    dbMock.orderItem.findMany.mockResolvedValue([{ paperType: '120g珠光艳闪', paperWeightGsm: 120 }]);
+    await expect(submitOrder('o1', salesActor)).rejects.toThrow('120g 纸张已停用');
+    expect(dbMock.orderItem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { orderId: 'o1' } }));
   });
 
   it('refuses when a non-owner SALES tries to submit another SALES\'s order (Codex round 27 / P1)', async () => {

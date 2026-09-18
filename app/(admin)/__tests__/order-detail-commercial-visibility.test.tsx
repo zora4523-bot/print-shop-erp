@@ -91,6 +91,7 @@ vi.mock('@/lib/product', () => ({
 }));
 vi.mock('@/lib/material', () => ({
   listExternalCreateOrderPaperOptions: listExternalCreateOrderPaperOptionsMock,
+  listExternalCreateOrderFoilOptions: vi.fn().mockResolvedValue([]),
 }));
 // 标题取数模块直连 Prisma；不 mock 的话 import 链会拉起 lib/db，
 // 在没有 DATABASE_URL 的 node 测试环境里模块加载即抛。

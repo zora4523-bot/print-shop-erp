@@ -228,6 +228,7 @@ export default async function EditOrderPage({ params }: PageProps) {
               expectedRevision={order.revision}
               expectedWorkOrderVersion={order.workOrderVersion}
               catalogProducts={products}
+              foilColorNames={foilColors.map((foil) => foil.name)}
               items={order.items.map((item) => ({
                 id: item.id,
                 sequence: item.sequence,

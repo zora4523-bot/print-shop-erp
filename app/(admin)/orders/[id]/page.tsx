@@ -83,6 +83,7 @@ import {
 import { getOrderPieceworkSummary } from '@/lib/salary/daily';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { listExternalCreateOrderFoilOptions } from '@/lib/material';
 import {
   getReworkCraftOptions,
   reworkItemRequiresUnitsPerBagInput,
@@ -394,9 +395,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
       order.status === OrderStatus.FOILING ||
       order.status === OrderStatus.PACKING) &&
     !pendingChangeRequest;
-  const orderChangeCatalogProducts = canRequestChange
-    ? await listActiveOrderChangeCatalogProducts()
-    : [];
+  const [orderChangeCatalogProducts, orderChangeFoilColors] = canRequestChange
+    ? await Promise.all([listActiveOrderChangeCatalogProducts(), listExternalCreateOrderFoilOptions()])
+    : [[], []];
   const manualCustomerCharges = order.customerCharges.filter((charge) =>
     ['SAMPLE_FEE', 'OTHER_PACKAGING_FEE', 'APPROVED_ADJUSTMENT'].includes(
       String(charge.category.code),
@@ -1182,6 +1183,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             expectedRevision={order.revision}
             expectedWorkOrderVersion={order.workOrderVersion}
             catalogProducts={orderChangeCatalogProducts}
+            foilColorNames={orderChangeFoilColors.map((foil) => foil.name)}
             items={order.items.map((item) => ({
               id: item.id,
               sequence: item.sequence,
