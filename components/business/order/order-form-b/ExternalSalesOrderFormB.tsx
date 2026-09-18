@@ -293,9 +293,9 @@ function DesignFileBox({
               : '上传 CDR 文件'}
           {required && !entry ? <RequiredMark /> : null}
         </p>
-        {!image && !entry ? (
+        {!entry ? (
           <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-            可多选或拖放多个文件
+            {image ? '可粘贴或拖放图片' : '可多选或拖放多个文件'}
           </p>
         ) : null}
         {entry ? (
@@ -396,7 +396,7 @@ function DesignFileBox({
               : `拖放或选择${fileLabel}`
           }
           className={cn(
-            'flex min-h-[5.375rem] w-full cursor-pointer items-center justify-start gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-card p-3.5 text-left outline-none transition-colors hover:border-foreground hover:bg-card hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+            'flex h-auto data-[slot=button]:min-h-44 w-full cursor-pointer flex-col items-start justify-between gap-4 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-4 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
             error && 'border-destructive bg-destructive/5',
           )}
           onClick={openFilePicker}
@@ -480,6 +480,78 @@ export function parseExternalReceiverDisplay(raw: string): {
   };
 }
 
+function OrderDesignFilesSection({ itemNumber, queue, disabled, required, grouped, imageError, cdrError, onImage, onCdrFiles, onChange }: {
+  itemNumber: number;
+  queue: PendingDesignImage[];
+  disabled?: boolean;
+  required?: boolean;
+  grouped: boolean;
+  imageError?: string;
+  cdrError?: string;
+  onImage: (file: File) => void;
+  onCdrFiles: (files: File[]) => void;
+  onChange: (files: PendingDesignImage[]) => void;
+}) {
+  const imageEntry = queue.find((entry) => entry.prepared.fileType === DesignFileType.IMAGE);
+  const cdrEntries = queue.filter((entry) => entry.prepared.fileType === DesignFileType.CDR);
+  return (
+    <Group title="设计图与设计文件" appearance={grouped ? 'plain' : 'divided'}
+      description={grouped ? '当前设计款共用' : undefined}>
+      <fieldset>
+        <legend className="sr-only">
+          设计文件
+          {required ? <RequiredMark /> : null}
+        </legend>
+        <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
+          <DesignFileBox
+            itemNumber={itemNumber}
+            fileType={DesignFileType.IMAGE}
+            entry={imageEntry}
+            disabled={disabled}
+            required={required}
+            error={imageError}
+            onFile={onImage}
+            onRemove={() =>
+              onChange(
+                replacePendingDesignKind(
+                  queue,
+                  DesignFileType.IMAGE,
+                  null,
+                ),
+              )
+            }
+          />
+          <div className="min-w-0 space-y-2">
+            <DesignFileBox
+              itemNumber={itemNumber}
+              fileType={DesignFileType.CDR}
+              disabled={disabled}
+              error={cdrError}
+              onFiles={onCdrFiles}
+              onFile={(file) => onCdrFiles([file])}
+              onRemove={() => {}}
+            />
+            {cdrEntries.map((entry) => (
+              <div key={entry.id} className="flex min-w-0 items-center gap-2 rounded-xl border bg-card p-3">
+                <span data-slot="design-file-marker" className="shrink-0 text-xs font-bold text-muted-foreground"><span>CDR</span></span>
+                <p className="min-w-0 flex-1 truncate text-sm" title={entry.prepared.file.name}>
+                  {entry.prepared.file.name} · {formatDesignFileSize(entry.prepared.file.size)}
+                </p>
+                <Button
+                  type="button" variant="outline" disabled={disabled}
+                  className="min-h-11 min-w-11 shrink-0"
+                  aria-label={`移除第 ${itemNumber} 款 CDR 文件 ${entry.prepared.file.name}`}
+                  onClick={() => onChange(queue.filter((file) => file.id !== entry.id))}
+                >移除</Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </fieldset>
+    </Group>
+  );
+}
+
 export function OrderFormB({
   values,
   title = '新建工单',
@@ -553,12 +625,6 @@ export function OrderFormB({
   const field = itemFields[safeActiveIndex];
   const itemErrors = fieldErrors?.items?.[safeActiveIndex];
   const queue = field ? pendingDesigns[field.id] ?? [] : [];
-  const imageEntry = queue.find(
-    (entry) => entry.prepared.fileType === DesignFileType.IMAGE,
-  );
-  const cdrEntries = queue.filter(
-    (entry) => entry.prepared.fileType === DesignFileType.CDR,
-  );
   const [imageFileError, setImageFileError] = useState<{
     fieldId: string;
     message: string;
@@ -822,9 +888,10 @@ export function OrderFormB({
       >
         <div
           data-slot="order-form-editor"
-          className="@container min-w-0 rounded-xl border bg-card p-5"
+          className={cn('@container min-w-0', onAddSpecification ? 'space-y-6' : 'rounded-xl border bg-card p-5')}
         >
-          <Group title="工单" first>
+          <div className={onAddSpecification ? 'space-y-5 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
+          <Group title="工单" first appearance={onAddSpecification ? 'plain' : 'divided'}>
             <div>
               <FieldLabel
                 htmlFor={`${uid}-custom-name`}
@@ -866,7 +933,9 @@ export function OrderFormB({
               else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') onRouteChange(value);
             }}
           /> : null}
-          {onAddSpecification ? <div className="mt-5 space-y-3 border-t pt-4">
+          </div>
+          <div data-slot="order-design-section" className={onAddSpecification ? 'min-w-0 rounded-xl border bg-card' : undefined}>
+          {onAddSpecification ? <div className="space-y-3 rounded-t-xl bg-muted/30 px-4 pt-4 @min-[560px]:px-5">
             <div className="flex flex-wrap items-start gap-2">
               <EditorTabs ref={styleNavRef} id={`${uid}-design`} label="设计款" variant="folder" disabled={disabled}
                 tabs={groups.map((group, index) => ({ value: itemFields[group.indexes[0]].id,
@@ -878,12 +947,14 @@ export function OrderFormB({
             {items.length >= MAX_ORDER_ITEMS_PER_ORDER ? <p className="text-sm text-muted-foreground">每张工单最多 {MAX_ORDER_ITEMS_PER_ORDER} 个规格明细。</p> : null}
           </div> : null}
           <div role={onAddSpecification ? 'tabpanel' : undefined} id={`${uid}-design-panel`}
+            className={onAddSpecification ? 'space-y-7 p-4 @min-[560px]:p-5' : undefined}
             aria-labelledby={onAddSpecification ? `${uid}-design-tab-${itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}` : undefined}>
           <OrderItemCraftFields
+            appearance={onAddSpecification ? 'plain' : 'divided'}
             hideRoute={Boolean(onPurposeChange)}
             uid={uid}
             item={item}
-            title={onAddSpecification ? `工艺 · 设计款 ${groups.findIndex((group) => group === activeGroup) + 1}` : `工艺 · 第 ${safeActiveIndex + 1} 款`}
+            title={onAddSpecification ? '工艺' : `工艺 · 第 ${safeActiveIndex + 1} 款`}
             paperKey={paperKey}
             paperOptions={paperOptions}
             foilOptions={foilOptions}
@@ -897,6 +968,7 @@ export function OrderFormB({
             onFoilTechniqueChange={onFoilTechniqueChange}
           />
           <OrderItemMaterialFields
+            appearance={onAddSpecification ? 'plain' : 'divided'}
             uid={uid}
             item={item}
             disabled={disabled}
@@ -915,6 +987,7 @@ export function OrderFormB({
             onCustomSizeChange={onCustomSizeChange}
           />
 
+          <div data-slot="order-specification-section" className={onAddSpecification ? 'space-y-5 rounded-xl bg-muted/50 p-3 @min-[560px]:p-4' : undefined}>
           {onAddSpecification ? <OrderSpecificationTabs id={`${uid}-spec`}
             indexes={activeGroup?.indexes ?? []} items={items} itemFields={itemFields}
             activeIndex={safeActiveIndex} errors={fieldErrors} disabled={disabled} removeRef={removeButtonRef}
@@ -923,13 +996,14 @@ export function OrderFormB({
             onRemove={() => { cancelIssueFocus(); restoreDeleteFocusRef.current = true; onRemove(safeActiveIndex); }}
           /> : null}
           <div role={onAddSpecification ? 'tabpanel' : undefined} id={`${uid}-spec-panel`}
+            className={onAddSpecification ? 'space-y-5' : undefined}
             aria-labelledby={onAddSpecification ? `${uid}-spec-tab-${field.id}` : undefined}>
             {onAddSpecification ? <OrderItemSpecificationFields
               uid={uid} item={item} disabled={disabled} itemErrors={itemErrors}
               specificationOptions={specificationOptions} allowCustomSize={allowCustomSize}
               onSpecificationChange={onSpecificationChange} onCustomSizeChange={onCustomSizeChange}
             /> : null}
-          <Group title="数量与包装">
+          <Group title="数量与包装" appearance={onAddSpecification ? 'plain' : 'divided'}>
             <div className="mb-5">
               <PillPicker
                 id={`${uid}-packaging-type`}
@@ -1058,73 +1132,28 @@ export function OrderFormB({
             ) : null}
           </Group>
 
-          {packagingExtras ? <div className="mt-5">{packagingExtras}</div> : null}
-
+          </div>
           </div>
 
-          <Group title="文件">
-            <fieldset>
-              <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
-                设计文件
-                {designImageRequired ? <RequiredMark /> : null}
-              </legend>
-              <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
-                <DesignFileBox
-                  itemNumber={designNumber}
-                  fileType={DesignFileType.IMAGE}
-                  entry={imageEntry}
-                  disabled={disabled}
-                  required={designImageRequired}
-                  error={
-                    (imageFileError?.fieldId === field.id
-                      ? imageFileError.message
-                      : undefined) ?? itemErrors?.designImage
-                  }
-                  onFile={(file) => putFile(file, DesignFileType.IMAGE)}
-                  onRemove={() =>
-                    onPendingDesignsChange(
-                      replacePendingDesignKind(
-                        queue,
-                        DesignFileType.IMAGE,
-                        null,
-                      ),
-                    )
-                  }
-                />
-                <div className="min-w-0 space-y-2">
-                  <DesignFileBox
-                    itemNumber={designNumber}
-                    fileType={DesignFileType.CDR}
-                    disabled={disabled}
-                    error={cdrFileError?.fieldId === field.id ? cdrFileError.message : undefined}
-                    onFiles={appendCdrFiles}
-                    onFile={(file) => appendCdrFiles([file])}
-                    onRemove={() => {}}
-                  />
-                  {cdrEntries.map((entry) => (
-                    <div key={entry.id} className="flex min-w-0 items-center gap-2 rounded-xl border bg-card p-3">
-                      <span data-slot="design-file-marker" className="shrink-0 text-xs font-bold text-muted-foreground"><span>CDR</span></span>
-                      <p className="min-w-0 flex-1 truncate text-sm" title={entry.prepared.file.name}>
-                        {entry.prepared.file.name} · {formatDesignFileSize(entry.prepared.file.size)}
-                      </p>
-                      <Button
-                        type="button" variant="outline" disabled={disabled}
-                        className="min-h-11 min-w-11 shrink-0"
-                        aria-label={`移除第 ${designNumber} 款 CDR 文件 ${entry.prepared.file.name}`}
-                        onClick={() => onPendingDesignsChange(queue.filter((file) => file.id !== entry.id))}
-                      >移除</Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </fieldset>
-          </Group>
+          <OrderDesignFilesSection itemNumber={designNumber} queue={queue} disabled={disabled}
+            required={designImageRequired} grouped={Boolean(onAddSpecification)}
+            imageError={(imageFileError?.fieldId === field.id ? imageFileError.message : undefined) ?? itemErrors?.designImage}
+            cdrError={cdrFileError?.fieldId === field.id ? cdrFileError.message : undefined}
+            onImage={(file) => putFile(file, DesignFileType.IMAGE)}
+            onCdrFiles={appendCdrFiles} onChange={onPendingDesignsChange}
+          />
 
-          {pricingExtras}
+          {packagingExtras || pricingExtras ? <Group title="收费与其他要求" appearance={onAddSpecification ? 'plain' : 'divided'}>
+            {onAddSpecification ? <p className="mb-4 text-sm text-muted-foreground">当前规格：{item.specification || '待选规格'} · {item.quantity} 个</p> : null}
+            <div className="space-y-5">
+              {packagingExtras}
+              {pricingExtras}
+            </div>
+          </Group> : null}
           </div>
-          {orderPackagingExtras}
-
-          <Group title="收货">
+          </div>
+          <div className={onAddSpecification ? 'space-y-6 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
+          <Group title="收货" appearance={onAddSpecification ? 'plain' : 'divided'}>
             {shippingExtras}
             <div>
               <FieldLabel htmlFor={`${uid}-receiver-address-paste`} required>
@@ -1204,7 +1233,9 @@ export function OrderFormB({
               顺丰到付（本单不计快递费）
             </label>
           </Group>
+          {orderPackagingExtras}
           {footerExtras}
+          </div>
 
           {/* Async error summaries must not shift fields while they are being edited. */}
           {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (

@@ -47,6 +47,7 @@ type Common = {
   item: Item;
   disabled?: boolean;
   first?: boolean;
+  appearance?: 'divided' | 'plain';
   itemErrors?: {
     route?: string;
     paper?: string;
@@ -272,6 +273,7 @@ export function OrderItemCraftFields({
   item,
   title = '工艺',
   first,
+  appearance,
   paperKey,
   paperOptions,
   foilOptions,
@@ -295,7 +297,7 @@ export function OrderItemCraftFields({
     (item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
       printFoilMode === 'FULL');
   return (
-    <Group title={title} first={first}>
+    <Group title={title} first={first} appearance={appearance}>
       {!hideRoute ? <PillPicker
         id={`${uid}-route`}
         label="工艺类型"
@@ -364,6 +366,7 @@ export function OrderItemMaterialFields({
   uid,
   item,
   first,
+  appearance,
   disabled,
   itemErrors,
   materialExtras,
@@ -380,7 +383,7 @@ export function OrderItemMaterialFields({
   onCustomSizeChange,
 }: OrderItemMaterialFieldsProps) {
   return (
-    <Group title="材料" first={first}>
+    <Group title="材料" first={first} appearance={appearance}>
       {materialExtras}
       <OrderPaperSwatchPicker
         id={`${uid}-paper`}

@@ -19,8 +19,8 @@ export function OrderSpecificationTabs({ id, indexes, items, itemFields, activeI
   onAdd: () => void;
   onRemove: () => void;
 }) {
-  return <div className="mt-5 space-y-3 border-t pt-4">
-    <h2 className="text-sm font-semibold">规格与数量</h2>
+  return <div className="space-y-4">
+    <h2 className="text-base font-semibold">规格与数量</h2>
     <div className="flex flex-wrap items-start gap-2">
       <EditorTabs id={id} label="规格明细" variant="outline" disabled={disabled}
         tabs={indexes.map((index) => ({ value: itemFields[index].id,

@@ -571,3 +571,15 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 维持原有 tablist/tab/tabpanel 关联、方向键及 Home/End、焦点和禁用行为；标签换行并保留至少 44px 触控区域。表单数据、文件归属、数量包装与自动计价保持原逻辑。共享组件使用语义颜色令牌兼容明暗主题。
 
 验证（基线 `270ea5bd`，本节描述的样式增量）：`pnpm test:browser components/business/order/__tests__/OrderFormBNavigation.browser.spec.tsx` 70 项通过；隔离库 `erp_e2e_releasefix20260917` 的 `pnpm test:release tests/e2e/order-creation-groups.spec.ts tests/visual/admin-responsive.spec.ts --grep '设计、规格和批量工单互相独立|design and specification tabs'`（chromium 加六个 admin 视口项目）14 项通过，无跳过；覆盖两角色、明暗主题、键盘/触控、overflow 和 axe。Release 构建及 TypeScript 通过；`pnpm lint` 0 错误、2 条既有导航警告。日志：`/tmp/erp-tabs-b-browser.log`、`/tmp/erp-tabs-b-e2e.log`、`/tmp/erp-tabs-b-lint.log`；截图在 `test-results/release/`，已查看手机视口的标签布局。
+
+### 建单信息层级与上传区域（2026-09-18）
+
+管理与外部销售的两层标签表单采用三块外层区域：工单信息（含工单类型）、设计款编辑、收货及整单补充信息。设计款区域保留 B 文件夹标签，内容按工艺、材料、规格与数量、设计图与设计文件、收费与其他要求排列。`Group` 的 `plain` 外观以清晰标题和留白分组，代替连续横线；其他消费方默认保留原外观。
+
+规格子标签与其数量、包装字段置于独立浅底区域。图片和 CDR 上传位于规格区域之外、当前设计款面板之内，上传区标题为“设计图与设计文件”，标注“当前设计款共用”。空上传框使用加高的独立拖放区域（`min-h-44`），保留图片粘贴/拖放和 CDR 多选/批量拖放入口；桌面并排、窄屏堆叠。上传区域提取为 `OrderDesignFilesSection`，文件处理继续沿用原回调。
+
+管理员包装单价与加工费编辑移至文件之后，显示当前规格；价格字段、错误、重核和权限逻辑沿用原实现。其他要求保持展开，避免折叠隐藏待处理字段。外部销售无收费内容时不渲染空区域。收货、包装补充说明、整单备注集中在末尾独立区域；费用侧栏沿用设计款与规格分组及移动端文档流。
+
+验证（基线 `ce3b6d37` 加本节增量）：三份表单目标 Vitest（`ExternalSalesOrderFormB`、`OrderFormBVisuals`、`OrderFormB-unified-quote`）27 项、`OrderFormBNavigation.browser.spec.tsx` 70 项通过。隔离库 `erp_e2e_releasefix20260917` 的 Release 构建与 TypeScript 检查通过；`order-creation-groups` 两角色用例、`admin-create-pricing`、`order-create-ui-parity` 及 `admin-responsive` 的 design and specification tabs 用例，共 20 项通过，无跳过，涵盖实际提交、调价、销售权限、文件归属与六视口明暗主题、触控/键盘、overflow、axe。已查看管理端手机上传区和销售端桌面暗色截图。完整 lint 0 错误、2 条既有导航警告，最后样式调整的目标 ESLint 和 UI 门禁通过；架构门禁通过。
+
+本轮先发现旧“文件”标题断言需随已批准文案更新；新增高度断言两次检出全局 `.admin-viewport` 触控下限覆盖上传框自身高度，最终用控件属性选择器提高局部优先级后通过，未降低断言。上传区域提取后亦消除了超长函数增长。证据：`/tmp/erp-hierarchy-{unit,browser,e2e,lint,final-lint,architecture}.log`；初轮失败保留为 `/tmp/erp-hierarchy-e2e-initial.log` 和 `/tmp/erp-hierarchy-e2e-height-debug.log`；最终截图在 `test-results/release/`。

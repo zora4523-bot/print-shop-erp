@@ -20,6 +20,7 @@ export function AdminCreatePriceFields({
   title = '款式加工费',
   priceLabel = '本款加工费（元）',
   note = '包装费、版费和运费另列。',
+  divided = true,
 }: {
   value: Price | undefined;
   amountId?: string;
@@ -31,11 +32,12 @@ export function AdminCreatePriceFields({
   title?: string;
   priceLabel?: string;
   note?: string;
+  divided?: boolean;
 }) {
   const id = useId();
   const stale = value !== undefined && value.factsKey !== factsKey;
   return (
-    <fieldset disabled={disabled} className="space-y-3 border-t pt-4">
+    <fieldset disabled={disabled} className={divided ? 'space-y-3 border-t pt-4' : 'space-y-3'}>
       <legend className="text-sm font-semibold">{title}</legend>
       <div className="flex flex-wrap items-center gap-3">
         <Button

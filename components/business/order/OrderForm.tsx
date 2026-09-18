@@ -3116,8 +3116,9 @@ export function OrderForm({
                 />
               </>
             }
-            pricingExtras={<>
+            pricingExtras={canAssignExternalSales || !usesExternalSalesPricing || quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <>
               {canAssignExternalSales && expandedWatchedItem ? <AdminCreatePriceFields
+                divided={false}
                 amountId={`items.${expandedItem}.adminPrice.amount`}
                 value={expandedWatchedItem.adminPrice}
                 factsKey={adminPriceFacts(expandedWatchedItem)}
@@ -3130,8 +3131,9 @@ export function OrderForm({
               {!usesExternalSalesPricing ? (
                 <section
                   aria-label="内部生产信息"
-                  className="mt-4 border-t pt-4"
+                  className="mt-6 space-y-4"
                 >
+                  <h3 className="text-sm font-semibold">其他要求</h3>
                   <div className="grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
                     <div className="@min-[560px]:col-span-2">
                       <Label htmlFor={`items.${expandedItem}.manualQuoteReason`}>
@@ -3160,8 +3162,8 @@ export function OrderForm({
                     </div>
                   </div>
                   {internalAdditionalCraftOptions.length > 0 ? (
-                    <fieldset className="mt-5 border-t pt-4">
-                      <legend className="text-xs font-extrabold tracking-[0.18em] text-muted-foreground">
+                    <fieldset className="mt-5 space-y-3">
+                      <legend className="text-sm font-semibold">
                         附加工艺（选填）
                       </legend>
                       <p className="mt-2 text-xs text-muted-foreground">
@@ -3192,22 +3194,23 @@ export function OrderForm({
                   ) : null}
                 </section>
               ) : null}
-            </>}
-            packagingExtras={
+            </> : undefined}
+            packagingExtras={canAssignExternalSales ?
               <div className="space-y-3">
-                {canAssignExternalSales ? watchedPackagingGroups.map((group, index) => index === activePackagingGroupIndex && group.mode !== OrderPackagingMode.UNPACKED ? (
+                {watchedPackagingGroups.map((group, index) => index === activePackagingGroupIndex && group.mode !== OrderPackagingMode.UNPACKED ? (
                   <AdminCreatePriceFields key={index} amountId={`packagingGroups.${index}.adminPrice.amount`} value={group.adminPrice} factsKey={adminPackagingFacts(group)} disabled={orderFormControlsDisabled}
+                    divided={false}
                     title={`包装组 ${index + 1} 单价`} priceLabel={`包装单价（元 / ${packagingUnit(group.mode)}）`}
                     note={packagingBoxType(group.mode) ? '包含盒子和装盒费用。' : ''}
                     suggestedAmount={currentPackagingResult?.groups[index]?.suggestedUnitPrice}
                     error={adminPackagingPrices[index]?.error}
                     onChange={(price) => setValue(`packagingGroups.${index}.adminPrice`, price, { shouldDirty: true, shouldValidate: true })}
                   />
-                ) : null) : null}
+                ) : null)}
               </div>
-            }
+            : undefined}
             orderPackagingExtras={
-              <div className="mt-5 space-y-3 border-t pt-4">
+              <div className="space-y-3">
                 <Label htmlFor="packageRequirement">包装补充说明（选填）</Label>
                 <Input
                   id="packageRequirement"
@@ -3241,7 +3244,7 @@ export function OrderForm({
               ) : undefined
             }
             footerExtras={
-              <section className="mt-4 border-t pt-4">
+              <section className="space-y-3">
                 <Label htmlFor="remark">工单备注（选填）</Label>
                 <Textarea id="remark" maxLength={1000} className="mt-2 min-h-24"
                   disabled={orderFormControlsDisabled} aria-invalid={Boolean(errors.remark)}

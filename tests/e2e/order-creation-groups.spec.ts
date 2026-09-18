@@ -8,6 +8,20 @@ for (const role of ['owner', 'sales'] as const) {
     page.on('pageerror', (error) => errors.push(error.message));
     await login(page, { username: E2E_USERS[role].username, password: E2E_PASSWORD, from: '/orders/new' });
     await openFirstOrderItemEditor(page);
+    const files = page.locator('[data-slot="order-design-section"]').getByRole('region', { name: '设计图与设计文件', exact: true });
+    await expect(files.getByText('当前设计款共用', { exact: true })).toBeVisible();
+    await expect(files.locator('input[type="file"]')).toHaveCount(2);
+    const specificationSection = page.locator('[data-slot="order-specification-section"]');
+    await expect(specificationSection.locator('input[type="file"]')).toHaveCount(0);
+    const fileBox = await files.getByRole('button', { name: '拖放或选择第 1 款 CDR 文件', exact: true }).boundingBox();
+    expect(fileBox?.height).toBeGreaterThanOrEqual(128);
+    if (role === 'owner') {
+      const pricing = page.getByRole('region', { name: '收费与其他要求', exact: true });
+      await expect(pricing.getByRole('group', { name: '包装组 1 单价', exact: true })).toBeVisible();
+      await expect(specificationSection.getByRole('group', { name: '包装组 1 单价', exact: true })).toHaveCount(0);
+    } else {
+      await expect(page.getByRole('region', { name: '收费与其他要求', exact: true })).toHaveCount(0);
+    }
     const paperChoices = page.getByRole('group', { name: '纸张材质', exact: true });
     await expect(paperChoices.getByRole('button', { name: '珠光闪红', exact: true })).toHaveCount(0);
     await paperChoices.getByRole('button', { name: '珠光暗红', exact: true }).click();

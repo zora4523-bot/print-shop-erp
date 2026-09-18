@@ -237,7 +237,7 @@ describe('OrderFormB', () => {
       '工艺 · 第 1 款',
       '材料',
       '数量与包装',
-      '文件',
+      '设计图与设计文件',
       '收货',
     ]) {
       expect(html).toContain(`aria-label="${heading}"`);
