@@ -22,6 +22,8 @@
 - `f9faea24`（履约 + 核价）：`lib/order/settlement.ts` 的 `orderBillsLogistics`（有物流行即按物流行走）统一判定发货逐地址确认、承运商计费重量、`SHIPMENT_CHARGES_FINALIZED` 版本、顺丰到付切换、履约费用更正、追加地址重算、快捷编辑地址的省份复核、管理端详情与行内抽屉入口。**退役前提交、没有物流行的老工单维持原加工费流程**，完整编辑仍可补录。附加费用维护放宽到除免费工单外都可用。
 - Codex 对第一片的三条已在第二片一并修掉：核价完整编辑**补录**的物流行漏出业绩基数（取消时对不平）；内部「配置外」款式提交被 `assertSelectedPapersAvailable` 拦住进不了人工核价；管理员价工单首次提交必然误报 `quote_changed`（预览 token 不含管理员价快照 → finalizer 同时接受预览 token 与含管理员价的 token）。
 - 验证：typecheck / lint（仅既有 2 条 `window.location.assign` 警告）/ 架构门禁通过；`order.test` 243、`submit-external-order` / `pricing-review` / `change-request` / `components/business/order` 全绿；建单三个 browser spec 87/87。**未在真实浏览器目视**，也**没跑 e2e**。
+- `552fa165`（Codex 对第二片的三条）：附加费用维护误放开到 `INTERNAL_SALES` 已回退（该路径不记 `CsSalesEntry`，客服工单加附加费会让业绩对不平、取消被拒）；`hasLogisticsChargeRows` 收紧为只认 `priceBookId` 非空的行——管理员在完整费用编辑里**补录**的行是 `priceBookId: null`，不能当成按价目计费，否则发货重算报「未绑定唯一价目簿」卡死；预览 token 的兼容放行缩到「从未报价的 DRAFT 首次提交」，堵住驳回重提时用旧预览 token 绕过管理员改价确认。
+- **全量测试基线（重要，下次别再误判）**：本机 `pnpm test run` 的结果取决于有没有 `export DATABASE_URL`。① 不导出 / 导占位 URL：`.postgres.test.ts` 全部在模块加载期炸（28 个文件），其余全绿。② 导 `.env` 的真实 URL：postgres 文件能跑，但 `app/api/cron/notification-wire`、`lib/__tests__/{material,order,outsource,production-completion,purchase}` 这 6 个文件会挂 56 例——**已用 worktree 在本批次之前的 `6e1f9715` 上复现同样的 6 файла / 56 例，属既有问题，与本批无关**，根因是这些文件在真实 DB 存在时会走到未 mock 的连接路径（未深查）。③ 全量跑时另有几个 `.postgres` 迁移/发布用例因共用开发库并发而红，单独重跑 6/6 全绿（同 CLAUDE.md §14 对 e2e 的并发警告）。
 - **待办（下次会话接着做）**：① 全量 Vitest 与 Codex 对 `f9faea24` 的 review 结果在本次会话末尾，若有红需先收口；② e2e 里外销/内销发货与核价用例可能因「内销现在也要逐地址确认收费」而需要更新；③ SPEC §193「不计物流费用」与 §248 仍是旧口径，等这两片稳定后按 §9.3 更新并记 CHANGELOG。
 
 **2026-09-18（晚）：「保存后没反馈」审查 → 零依赖「跳转回执」推广，3 个代码提交 + 1 个记忆提交，未 push、未部署。**
