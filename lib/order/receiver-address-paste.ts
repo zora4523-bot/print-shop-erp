@@ -121,6 +121,31 @@ export function parseReceiverAddressInput(value: string): ParsedReceiverAddress 
   };
 }
 
+export type ReceiverFactSource = 'input' | 'paste';
+
+/**
+ * One rule for every address form: a paste replaces the fact it produced,
+ * typing only fills a blank. Keeps a chosen province (北京) from being
+ * overwritten by a street name that mentions another one (广东大厦).
+ */
+export function applyParsedReceiverFact(
+  current: string | null | undefined,
+  candidate: string | null | undefined,
+  source: ReceiverFactSource,
+): string {
+  const existing = current ?? '';
+  if (!candidate) return existing;
+  return source === 'paste' || !existing.trim() ? candidate : existing;
+}
+
+/** Detail line for structured party addresses: drop the province the paste already produced. */
+export function stripProvincePrefix(address: string, province: string | null): string {
+  if (!province) return address.trim();
+  return address
+    .replace(new RegExp(`^${province}(?:省|市|壮族自治区|回族自治区|维吾尔自治区|自治区)?`), '')
+    .trim();
+}
+
 /** The textarea value as it would read after the paste lands at the caret. */
 export function pastedTextareaValue(event: ClipboardEvent<HTMLTextAreaElement>): string {
   const pasted = event.clipboardData.getData('text');

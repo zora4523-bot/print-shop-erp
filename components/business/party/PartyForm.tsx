@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useActionState, useState, type ChangeEvent } from 'react';
 import { ReceiverAddressPasteField } from '@/components/business/order/ReceiverAddressPasteField';
+import { applyParsedReceiverFact, stripProvincePrefix } from '@/lib/order/receiver-address-paste';
 import { PartyType } from '../../../generated/prisma/enums';
 import type { PartyMutationResult } from '@/actions/owner-parties.types';
 import { buttonVariants } from '@/components/ui/button';
@@ -92,6 +93,8 @@ export function PartyForm(props: Props) {
     name: initial?.defaultReceiverName ?? '',
     phone: initial?.defaultReceiverPhone ?? '',
     province: initial?.defaultProvince ?? '',
+    city: initial?.defaultCity ?? '',
+    district: initial?.defaultDistrict ?? '',
     detail: initial?.defaultAddressDetail ?? '',
   });
   const bindReceiver = (key: keyof typeof receiverDefaults) => ({
@@ -238,11 +241,17 @@ export function PartyForm(props: Props) {
           value={receiverPaste}
           onChange={(next, parsed, source) => {
             setReceiverPaste(next);
+            // The four persisted fields are joined verbatim downstream, so a
+            // pasted address replaces the whole structured address: city and
+            // district are cleared and the province is not repeated in detail.
+            const replacing = source === 'paste' && Boolean(parsed.address);
             setReceiverDefaults((current) => ({
-              name: parsed.receiverName && (source === 'paste' || !current.name) ? parsed.receiverName : current.name,
-              phone: parsed.receiverPhone && (source === 'paste' || !current.phone) ? parsed.receiverPhone : current.phone,
-              province: parsed.province && (source === 'paste' || !current.province) ? parsed.province : current.province,
-              detail: parsed.address && (source === 'paste' || !current.detail) ? parsed.address : current.detail,
+              name: applyParsedReceiverFact(current.name, parsed.receiverName, source),
+              phone: applyParsedReceiverFact(current.phone, parsed.receiverPhone, source),
+              province: applyParsedReceiverFact(current.province, parsed.province, source),
+              city: replacing ? '' : current.city,
+              district: replacing ? '' : current.district,
+              detail: applyParsedReceiverFact(current.detail, stripProvincePrefix(parsed.address, parsed.province) || null, source),
             }));
           }}
         />
@@ -275,14 +284,14 @@ export function PartyForm(props: Props) {
             label="城市"
             disabled={pending}
             error={errs.defaultCity?.[0]}
-            defaultValue={initial?.defaultCity ?? ''}
+            {...bindReceiver('city')}
           />
           <TextField
             id="defaultDistrict"
             label="区县"
             disabled={pending}
             error={errs.defaultDistrict?.[0]}
-            defaultValue={initial?.defaultDistrict ?? ''}
+            {...bindReceiver('district')}
           />
         </div>
         <TextField

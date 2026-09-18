@@ -1,13 +1,13 @@
 'use client';
 
-import type { ClipboardEventHandler, ReactNode } from 'react';
+import { useRef, type ClipboardEventHandler, type ReactNode } from 'react';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import {
   parseReceiverAddressInput,
-  pastedTextareaValue,
   type ParsedReceiverAddress,
+  type ReceiverFactSource,
 } from '@/lib/order/receiver-address-paste';
 
 export const RECEIVER_ADDRESS_PASTE_PLACEHOLDER = '粘贴电商后台地址串，自动拆分';
@@ -19,8 +19,12 @@ type Props = {
   name?: string;
   value: string;
   /** `source` tells the parent whether to overwrite (paste) or only fill blanks (typing). */
-  onChange: (value: string, parsed: ParsedReceiverAddress, source: 'input' | 'paste') => void;
-  /** Overrides the default paste handling (which inserts at the caret and reports `paste`). */
+  onChange: (value: string, parsed: ParsedReceiverAddress, source: ReceiverFactSource) => void;
+  /**
+   * Overrides the default paste handling. By default the browser inserts the
+   * text natively (so form-level onChange / dirty tracking still fire) and the
+   * change that follows is reported as `paste`.
+   */
   onPaste?: ClipboardEventHandler<HTMLTextAreaElement>;
   label?: ReactNode;
   /** A complete label element, for forms with their own label primitive. */
@@ -68,6 +72,9 @@ export function ReceiverAddressPasteField({
 }: Props) {
   const parsed = parseReceiverAddressInput(value);
   const showPreview = preview && value.trim().length > 0;
+  // Set on paste, consumed by the input event the browser fires right after.
+  // Cleared on the next tick in case the paste inserted nothing (maxLength).
+  const pasteRef = useRef(false);
   return (
     <div className={cn('min-w-0', className)}>
       {labelElement ?? (
@@ -95,15 +102,18 @@ export function ReceiverAddressPasteField({
         className={cn('min-h-24 field-sizing-content', textareaClassName)}
         onPaste={
           onPaste ??
-          ((event) => {
-            event.preventDefault();
-            const next = pastedTextareaValue(event);
-            onChange(next, parseReceiverAddressInput(next), 'paste');
+          (() => {
+            pasteRef.current = true;
+            setTimeout(() => {
+              pasteRef.current = false;
+            }, 0);
           })
         }
-        onChange={(event) =>
-          onChange(event.target.value, parseReceiverAddressInput(event.target.value), 'input')
-        }
+        onChange={(event) => {
+          const source: ReceiverFactSource = pasteRef.current ? 'paste' : 'input';
+          pasteRef.current = false;
+          onChange(event.target.value, parseReceiverAddressInput(event.target.value), source);
+        }}
       />
       {after}
       {showPreview ? (

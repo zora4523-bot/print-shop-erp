@@ -9,6 +9,7 @@ import { OrderExternalSalesField } from './OrderExternalSalesField';
 import type { EditableShipment } from '@/lib/order/edit-shipment-fields';
 import { OrderReceiverContactFields } from './OrderReceiverContactFields';
 import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
+import { applyParsedReceiverFact } from '@/lib/order/receiver-address-paste';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ActionNotice } from '@/components/ui-business';
 import Link from 'next/link';
@@ -383,12 +384,10 @@ function OrderDeliveryFieldsSection({
                 value={row.receiverAddress ?? ''}
                 onChange={(next, parsed, source) => {
                   changeDelivery(index, 'receiverAddress', next);
-                  if (parsed.receiverName && (source === 'paste' || !row.receiverName)) {
-                    changeDelivery(index, 'receiverName', parsed.receiverName);
-                  }
-                  if (parsed.receiverPhone && (source === 'paste' || !row.receiverPhone)) {
-                    changeDelivery(index, 'receiverPhone', parsed.receiverPhone);
-                  }
+                  const name = applyParsedReceiverFact(row.receiverName, parsed.receiverName, source);
+                  if (name !== (row.receiverName ?? '')) changeDelivery(index, 'receiverName', name);
+                  const phone = applyParsedReceiverFact(row.receiverPhone, parsed.receiverPhone, source);
+                  if (phone !== (row.receiverPhone ?? '')) changeDelivery(index, 'receiverPhone', phone);
                 }}
               />
               <div className="grid gap-3 sm:grid-cols-2">
@@ -624,8 +623,8 @@ function OrderBasicFieldsSection({
                 onChange={(next, parsed, source) =>
                   setMainReceiver((current) => ({
                     address: next,
-                    name: parsed.receiverName && (source === 'paste' || !current.name) ? parsed.receiverName : current.name,
-                    phone: parsed.receiverPhone && (source === 'paste' || !current.phone) ? parsed.receiverPhone : current.phone,
+                    name: applyParsedReceiverFact(current.name, parsed.receiverName, source),
+                    phone: applyParsedReceiverFact(current.phone, parsed.receiverPhone, source),
                   }))
                 }
                 after={

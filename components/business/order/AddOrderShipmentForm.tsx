@@ -10,6 +10,7 @@ import type {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
+import { applyParsedReceiverFact } from '@/lib/order/receiver-address-paste';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Label } from '@/components/ui/label';
 import { ActionNotice } from '@/components/ui-business';
@@ -188,15 +189,9 @@ export function AddOrderShipmentForm({
                       setReceiver((current) => ({
                         ...current,
                         receiverAddress: next,
-                        receiverName:
-                          source === 'paste'
-                            ? parsed.receiverName ?? current.receiverName
-                            : current.receiverName || parsed.receiverName || '',
-                        receiverPhone:
-                          source === 'paste'
-                            ? parsed.receiverPhone ?? current.receiverPhone
-                            : current.receiverPhone || parsed.receiverPhone || '',
-                        destinationProvince: parsed.province ?? current.destinationProvince,
+                        receiverName: applyParsedReceiverFact(current.receiverName, parsed.receiverName, source),
+                        receiverPhone: applyParsedReceiverFact(current.receiverPhone, parsed.receiverPhone, source),
+                        destinationProvince: applyParsedReceiverFact(current.destinationProvince, parsed.province, source),
                       }))
                     }
                   />

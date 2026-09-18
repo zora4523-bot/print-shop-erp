@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
+import { applyParsedReceiverFact } from '@/lib/order/receiver-address-paste';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ActionNotice } from '@/components/ui-business';
@@ -432,15 +433,9 @@ function SampleOrderFields({
           onChange({
             ...value,
             receiverAddress: next,
-            receiverName:
-              source === 'paste'
-                ? parsed.receiverName ?? value.receiverName
-                : value.receiverName || parsed.receiverName || '',
-            receiverPhone:
-              source === 'paste'
-                ? parsed.receiverPhone ?? value.receiverPhone
-                : value.receiverPhone || parsed.receiverPhone || '',
-            province: parsed.province ?? value.province,
+            receiverName: applyParsedReceiverFact(value.receiverName, parsed.receiverName, source),
+            receiverPhone: applyParsedReceiverFact(value.receiverPhone, parsed.receiverPhone, source),
+            province: applyParsedReceiverFact(value.province, parsed.province, source),
           })
         }
       />
