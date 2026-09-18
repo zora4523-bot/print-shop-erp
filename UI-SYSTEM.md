@@ -551,3 +551,9 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 验收覆盖管理和销售真实建单、标签切换、文件归属、包装隔离、保存后的分组数据、人工价格权限；六视口明暗主题、触控、键盘、overflow 和 axe 由 `tests/visual/admin-responsive.spec.ts` 的 design and specification tabs 用例覆盖。
 
 验证结果见 [两层建单标签验收](docs/audits/2026-09-18-order-creation-tabs.md)：管理/销售 30 项 Release E2E、111 项浏览器组件测试、六视口两角色 12 项明暗主题门禁通过；全量 Vitest 7075 项通过，44 项既有跳过。
+
+### 珠光暗红显示名称（2026-09-18）
+
+建单纸张选项（管理端、外部销售）、工作台纸张目录和空白封报价矩阵通过 `paperDisplayLabel` 将“珠光闪红”显示为“珠光暗红”。材料 ID、选择值、产品计价事实及历史价格保持原身份；显示文案不参与价格键匹配。自动生成的设计款名称使用当前纸张显示名称，已保存的自定义名称不重写。
+
+验证（基线 `5f800367`）：目录单元测试 11 项通过；管理/销售改名后选择与计价、六视口明暗主题共 14 项 Release E2E 通过；Release 构建及 TypeScript、lint（0 错误，2 条既有导航警告）、架构门禁通过。日志：`/tmp/erp-paper-label-unit.log`、`/tmp/erp-paper-label-e2e.log`、`/tmp/erp-paper-label-lint.log`、`/tmp/erp-paper-label-architecture.log`。

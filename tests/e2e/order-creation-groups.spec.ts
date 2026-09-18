@@ -8,6 +8,12 @@ for (const role of ['owner', 'sales'] as const) {
     page.on('pageerror', (error) => errors.push(error.message));
     await login(page, { username: E2E_USERS[role].username, password: E2E_PASSWORD, from: '/orders/new' });
     await openFirstOrderItemEditor(page);
+    const paperChoices = page.getByRole('group', { name: '纸张材质', exact: true });
+    await expect(paperChoices.getByRole('button', { name: '珠光闪红', exact: true })).toHaveCount(0);
+    await paperChoices.getByRole('button', { name: '珠光暗红', exact: true }).click();
+    await expect(paperChoices.getByRole('button', { name: '珠光暗红', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-slot="order-form-rail"]').getByText('机烫费', { exact: true })).toBeVisible();
+
     await page.getByRole('textbox', { name: '工单名称', exact: true }).fill('批量第一单');
     await page.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '珠光艳闪', exact: true }).click();
     await page.locator('[data-slot="order-form-b"] input[type="file"]').last().setInputFiles({ name: 'shared-design.cdr', mimeType: 'application/octet-stream', buffer: Buffer.from('fixture-design-file') });

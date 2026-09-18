@@ -1,3 +1,4 @@
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { BOX_PRICE_RULES, boxPriceRuleDefinition } from '@/lib/price/box-packaging-rules';
 import 'server-only';
@@ -807,7 +808,7 @@ function paperParts(paperType: string | null | undefined): {
   paperName: string;
   weight: string;
 } {
-  const value = paperType?.trim() || '未设置纸张';
+  const value = paperDisplayLabel(paperType?.trim() || '未设置纸张');
   const match = /^(\d+)g(.+)$/u.exec(value);
   return match
     ? { paperName: match[2]!.trim(), weight: match[1]! }

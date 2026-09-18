@@ -1,3 +1,4 @@
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import {
   OrderItemPricingRoute,
@@ -234,7 +235,7 @@ export function buildExternalOrderPapers<
       .sort((left, right) => left - right);
     return {
       key,
-      label: entry.label,
+      label: paperDisplayLabel(entry.label),
       appearance: paperAppearance(entry.label),
       weights,
       paperTypeByWeight: Object.fromEntries(

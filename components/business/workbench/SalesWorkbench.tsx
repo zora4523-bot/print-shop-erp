@@ -1,5 +1,6 @@
 'use client';
 
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { useState } from 'react';
 import Link from 'next/link';
 import {
@@ -168,7 +169,7 @@ export function SalesWorkbench({
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {options.papers.map((paper) => (
                 <Card key={paper.id} className="p-4">
-                  <h3 className="font-semibold">{paper.name}</h3>
+                  <h3 className="font-semibold">{paperDisplayLabel(paper.name)}</h3>
                   <p className="text-sm text-muted-foreground">
                     {paper.specification || '规格待确认'}
                     {paper.weight !== null &&
