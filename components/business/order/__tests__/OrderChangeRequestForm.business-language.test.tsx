@@ -9,7 +9,9 @@ vi.mock('@/actions/order', () => ({
 
 import {
   buildOrderChangeRequestPayload,
+  addedItemFoilColors,
   buildSelectedOrderItemChanges,
+  knownOrderFoilColors,
   createOrderChangeEditableItem,
   hasOrderItemSemanticChange,
   orderChangeRequestDraftIdentity,
@@ -155,6 +157,18 @@ describe('OrderChangeRequestForm 业务语言投影', () => {
         specification: '中号封80×115',
       }),
     ]);
+  });
+
+  it('新增款式的烫金色与现有款式走同一套显示名反查', () => {
+    const known = knownOrderFoilColors(['红色', '黑色'], [
+      { frontFoilColors: ['浅色'], foilColors: [] },
+    ]);
+    expect(known).toEqual(['红色', '黑色', '浅色']);
+    // 界面到处展示「红金、黑金」，存库必须是目录名。
+    expect(addedItemFoilColors('红金、 黑金，红金', known)).toEqual(['红色', '黑色']);
+    // 目录里真有一个叫「红金」的物料时，不把它改写成「红色」。
+    expect(addedItemFoilColors('红金', [...known, '红金'])).toEqual(['红金']);
+    expect(addedItemFoilColors('  ', known)).toEqual([]);
   });
 
   it('把烫色按集合比较，顺序和重复值不产生虚假修改', () => {
