@@ -102,6 +102,13 @@ test.describe('administrator workspace', () => {
         if (testInfo.project.use.hasTouch) await first.tap();
         else { await first.focus(); await page.keyboard.press('Enter'); }
         await expect(first).toHaveAttribute('aria-pressed', 'true');
+        const batch = await page.getByRole('region', { name: '批量新建工单' }).boundingBox();
+        const form = await page.locator('[data-slot="order-form-b"]').boundingBox();
+        expect(batch).not.toBeNull();
+        expect(form).not.toBeNull();
+        expect(Math.abs(batch!.x - form!.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(batch!.width - form!.width)).toBeLessThanOrEqual(1);
+        expect(batch!.width).toBeLessThanOrEqual(1440);
       },
     };
     await checkRoutes(page, testInfo, [route], 'light');
@@ -158,12 +165,21 @@ test.describe('administrator workspace geometry', () => {
     for (const viewport of [
       { width: 911, height: 881, stacked: true },
       { width: 1280, height: 800, stacked: false },
+      { width: 1773, height: 1298, stacked: false },
+      { width: 2205, height: 1298, stacked: false },
     ]) {
       await test.step(`${viewport.width}x${viewport.height}`, async () => {
         await page.setViewportSize(viewport);
 
         const form = page.locator('[data-slot="order-form-b"]');
         await expect(form).toBeVisible();
+        const batchBounds = await page.getByRole('region', { name: '批量新建工单' }).boundingBox();
+        const formBounds = await form.boundingBox();
+        expect(batchBounds).not.toBeNull();
+        expect(formBounds).not.toBeNull();
+        expect(Math.abs(batchBounds!.x - formBounds!.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(batchBounds!.width - formBounds!.width)).toBeLessThanOrEqual(1);
+        if (viewport.width >= 1773) expect(formBounds!.width).toBe(1440);
         const urgentCheckbox = form.getByRole('checkbox', {
           name: '急单（提交后会推送至排产群）',
           exact: true,

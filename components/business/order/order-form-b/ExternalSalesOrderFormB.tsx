@@ -694,7 +694,7 @@ export function OrderFormB({
     <div
       ref={rootRef}
       data-slot="order-form-b"
-      className="@container mx-auto w-full max-w-[1180px] px-0 pb-10 font-sans tabular-nums [overflow-anchor:none]"
+      className="@container w-full min-w-0 px-0 pb-10 font-sans tabular-nums [overflow-anchor:none]"
       onPaste={(event) => {
         const target = event.target as HTMLElement;
         if (

@@ -124,7 +124,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   }
 
   if (!active) return <p role="status" className="p-4 text-sm text-muted-foreground">正在恢复建单草稿…</p>;
-  return <div className="min-w-0 space-y-4">
+  return <div className="mx-auto w-full min-w-0 max-w-[1440px] space-y-4">
     <section aria-label="批量新建工单" className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant="outline" disabled={(!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 增加工单</Button>
