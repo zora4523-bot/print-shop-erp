@@ -69,9 +69,11 @@ export async function withUniqueCronFixture<T>(event: CronEvent, action: (fixtur
       messageMarker = `E2E-DUE-${suffix.toUpperCase()}`;
       const sales = await db.query<{ id: string }>('SELECT id FROM "User" WHERE username=$1::citext AND role=\'SALES\' AND "isActive"=TRUE', [E2E_USERS.sales.username]);
       if (sales.rowCount !== 1) throw new Error('通知回归缺少隔离销售账号');
+      // promisedDate 的契约是「日历日的 UTC 零点」、逾期天数按上海今天算
+      // （lib/order/promised-date.ts）；NOW()-5 days 在 UTC 16–24 点会被算成 6 天。
       await db.query(
         `INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","settlementType","createdById",status,"customerRef","totalAmount","promisedDate","submittedAt","createdAt","updatedAt")
-         VALUES ($1,$2,$3,'SALES','EXTERNAL_SALES',$3,'IN_PRODUCTION','通知回归客户',100,NOW()-INTERVAL '5 days',NOW(),NOW(),NOW())`,
+         VALUES ($1,$2,$3,'SALES','EXTERNAL_SALES',$3,'IN_PRODUCTION','通知回归客户',100,((NOW() AT TIME ZONE 'Asia/Shanghai')::date-5)::timestamp,NOW(),NOW(),NOW())`,
         [entityId, messageMarker, sales.rows[0]!.id],
       );
     }

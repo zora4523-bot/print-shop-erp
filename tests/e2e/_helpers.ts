@@ -2181,12 +2181,20 @@ export async function submitDraftOrderAndWait(page: Page): Promise<void> {
   const orderId = new URL(page.url()).pathname.split('/')[2];
   if (!orderId || orderId === 'new') throw new Error('提交测试必须位于工单详情');
   await page.getByRole('button', { name: /^提交工单$/ }).click();
-  await expect.poll(async () => withDb(async (db) => {
+  const status = () => withDb(async (db) => {
     const result = await db.query<{ status: string }>(
       'SELECT status::text FROM "Order" WHERE id = $1', [orderId],
     );
     return result.rows[0]?.status;
-  }), { timeout: 20_000 }).toMatch(/^(SUBMITTED|CONFIRMED)$/);
+  });
+  // 详情页首次提交不带报价 token：计物流的工单（2026-09-18 起含内销 / 工厂直接）
+  // 会先回到「确认最新报价并提交」，与 order-packaging-types 的写法一致。
+  const latest = page.getByRole('button', { name: '确认最新报价并提交', exact: true });
+  await expect
+    .poll(async () => ((await latest.isVisible()) ? 'confirm' : await status()), { timeout: 20_000 })
+    .not.toBe('DRAFT');
+  if (await latest.isVisible()) await latest.click();
+  await expect.poll(status, { timeout: 20_000 }).toMatch(/^(SUBMITTED|CONFIRMED)$/);
   await expectNoNextErrorOverlay(page);
 }
 

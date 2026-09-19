@@ -1501,12 +1501,10 @@ async function prepareOrderDetailDesignPreview(
 async function prepareConfiguredLocalFoilStyle(page: Page) {
   const form = page.locator('[data-slot="order-form-b"]:visible');
   await expect(form).toBeVisible();
+  // ce3b6d37 起设计款是文件夹式 tablist（EditorTabs），不再是 aria-pressed 按钮导航。
   await expect(
-    form
-      .getByRole('navigation', { name: /^(款式|设计款)$/ })
-      .getByRole('button')
-      .first(),
-  ).toHaveAttribute('aria-pressed', 'true');
+    form.getByRole('tablist', { name: '设计款', exact: true }).getByRole('tab').first(),
+  ).toHaveAttribute('aria-selected', 'true');
 
   // A second theme visit encounters the local draft from the first visit.
   // Resolve that real recovery state before operating the protected form.
@@ -1601,7 +1599,8 @@ async function prepareAdminOrderCreationState(page: Page) {
     .getByRole('button', { name: '添加地址 2', exact: true })
     .click();
   await form
-    .locator('textarea[name="additionalShipments.0.receiverAddress"]')
+    // 公共粘贴组件（d58f5e79）是受控 textarea，只有 id 没有 name。
+    .locator('[id="additionalShipments.0.receiverAddress"]')
     .fill('额外收货地址ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
   await form
     .locator('input[name="additionalShipments.0.itemQuantities.0"]')
