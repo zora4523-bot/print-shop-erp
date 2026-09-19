@@ -16,6 +16,12 @@
 
 ## 当前任务
 
+**2026-09-19（晚）：CI 提速两步。业主目标「等待时间优先」，全绿等待 61.4 → 24.9（第一步）→ 9.1 分钟（第二步）。**
+- 第一步 PR #24 已合入 `main`（`3cbe6abf`）：`static` / `unit` 拆出先跑、各套件独立作业、**PR 两视口（375×667、1280×800）/ main 六视口**（CLAUDE.md §8.2 已同步）、`push: main` 只跑 `static` + `viewports-main`、纯文档改动不触发、`print-darwin` 拆成带路径过滤的独立 workflow、CI trace 改 `on-first-retry`、`.review/` 每次传而报告只在失败时传、浏览器缓存按需装。`main` 首次 push 运行 `static` 与六视口门禁已通过。
+- 第二步 PR #25：共享一次 release 构建 + E2E 六分片 + browser 组件两片，全绿 9.1 分钟（run 35447718850），分钟数合计与改动前持平。**踩坑**：共享构建必须 tar 传，`upload-artifact` 丢符号链接 → `sharp` 找不到 `detect-libc` → 症状是「提交后工单停在 DRAFT」；已在 `e2e-preflight` 加检查。详见 DECISIONS 2026-09-19 两条。
+- 注意：当天 Actions 预算被打满过一次（job 0 分钟失败、注解「an Actions budget is preventing further use」），业主已提高。推 workflow 文件需要 `gh` token 带 `workflow` scope（已补）。
+- 余量小：关键路径 = `build` 2.4 + 最长分片 6.6。若常态超过 10 分钟，把 chromium 拆四片；`compat` 也可以改成复用共享构建（只省计费分钟）。
+
 **2026-09-19：grok 对抗审查 PR #20 / #21 / #22 全量 diff → 4 个修复提交（`c9a54cbb`、`b8e4ebc0`、`ad2a7164`、`1be6195b`）+ e2e 收口 4 个提交；CI run 35417042155 全绿后 PR #20 以 merge commit `78e49183` 合入 `main`（2026-09-19 12:13 上海），#21 随之自动标记 merged，#22（base 不是 main）手动关闭并留言。随后 PR #23（业主拍板的 4 项）以 `09f1a1ca` 合入。**均未部署，生产仍是 `0e6c009b`；`main` 比生产多出的迁移与数据步骤见下文「部署前仍必须先做」。** 推送前的本地门禁请跑全 CI 第 11 步四条：`pnpm check:architecture && pnpm test:backup && pnpm lint && pnpm typecheck`（CLAUDE.md §6.3 只列了后两条加单测）。**
 - 做法：`grok`（`~/.grok/bin/grok` 1.0.25，模型 grok-4.6）无头模式、工具白名单 `read_file,grep,list_dir`（自带 `--sandbox read-only` 在本机因 `/var/run/docker.sock` 是符号链接起不来），按主题切 7 片并行：A = PR #21、B = PR #22、C = release 独有的备份脚本、D1a/D1b = 未推送 46 个提交的前段、D2 = 跳转回执、D3 = 内部工单物流。要求每条发现回到 HEAD 核实、避开 CLAUDE.md 已拍板例外。7 片全部 `MERGE_WITH_FOLLOWUPS`，无 P0；Claude 逐条回代码核实后才动手。
 - 已修 5 处（各带回归测试）：① `add-shipment` 仍用「有物流行」判定 REQUOTE，补录（`priceBookId: null`）过快递费的老内部工单加地址会报「原物流费用不完整」→ 改用 `hasLogisticsChargeRows`（新测试在修复前为红）；② 工单详情 `canAdminManageCommercialDetails` 仍对 `INTERNAL_SALES` 放行、服务端必拒 → 恢复为外销 / 工厂直接（这两处都是 `552fa165` 回退没改全）；③ 改单「新增款式」烫金色不走显示名反查，「红金」原样入库 → 与现有款共用 `knownOrderFoilColors` + `addedItemFoilColors`；④ `safeReturnTo` 放行 `..`，时薪回执可落到计件页 → 拒绝 `.` / `..` 段（含 `%2e`）与反斜杠；⑤ 省份解析无锚点、按价目表顺序匹配，「北京市朝阳区广东大厦」按广东计运费（**main 上的既有行为**，`d58f5e79` 只搬了位置）→ 带「省 / 市 / 自治区」后缀优先、同类取最先出现。
@@ -483,3 +489,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-19（凌晨）：grok 无头只读对抗审查 PR #20 / #21 / #22（7 片并行，全部 MERGE_WITH_FOLLOWUPS、无 P0）；Claude 逐条核实后修 5 处共 4 个提交（补录物流行加地址卡死、附加费用入口与闸口不一致、新增款烫金反查、`safeReturnTo` 放行 `..`、计费省份被地名盖掉），其余记入「卡住的问题」；推送后 CI 两轮红（46 个提交从未跑过 e2e），同步 42 例过时用例并修 2 类真回归（师傅端零 JS 退出、393px 规格标签挤行）；CI 全绿后合并 PR #20。
 - 2026-09-19（下午）：业主拍板 grok 带出的 4 项——补录运费切顺丰到付清零、冲正 = 作废原报工（只读 + 残留差额自动抵消）、师傅工资页只按显式日期筛选、寄样维持最小包装档；PR #23 以 `09f1a1ca` 合入 `main`。未部署。
 - 2026-09-19（傍晚）：业主授权后由 Claude Code 按 09-17 同一受控流程把生产从 `0e6c009b` 切到 `09f1a1ca`（156 → 158 条迁移，停机约 4 分 40 秒），上线后检查通过；发布记录 `docs/audits/2026-09-19-production-release-09f1a1ca.md`。
+- 2026-09-19（晚）：CI 提速——PR #24（快门禁先出、PR 两视口 / main 六视口等）合入 `main`；PR #25（共享构建 + E2E 分片）全绿 9.1 分钟，全绿等待 61.4 → 9.1 分钟。
