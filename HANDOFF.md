@@ -22,6 +22,9 @@
 - 核实后判定**不算缺陷**：B 片「`20260917011000_foil_wage_ledger` 在同一迁移里 `ADD VALUE` 后立即使用新枚举值会挂 `migrate deploy`」——开发库（PG 16.13）`_prisma_migrations` 已完成未回滚、PR #22 空库 CI 全绿、生产已应用；A 片「寄样包装默认最小档少收钱」——`docs/寄样与打样开发任务.md` 第 54 / 92 / 103 行写明的既定设计，测试也是特意这样断言。
 - 验证：typecheck 通过；lint 0 错误 3 警告（既有的 `window.location.assign` ×2 与 `_logistics`，顺手清掉了 `f9faea24` 留下的两个未使用标识）；全量 Vitest 导 `.env` 真实 URL 为 7134 通过 / 56 失败 / 44 跳过，**失败的 6 个文件与下方「全量测试基线」②完全一致**，换占位 `DATABASE_URL` 单跑这 6 个文件 403/403 全过。**没跑 e2e、没在真实浏览器目视**（同前两批）。
 - grok 未修的发现见「卡住的问题 → 待业主拍板（2026-09-19 grok 对抗审查）」与其下的「后续项」。
+- **推送后 CI 两轮红，都来自这 46 个从未跑过 e2e 的提交，不是 grok 修复引起的**（业主选「修到 CI 全绿再合并」）。第一轮 run 35368838680 红在 Browser component contracts：`ExternalSalesOrderFormRail.browser.spec` 仍断言「非外销不显示纸箱耗材」→ `9313aece`。第二轮 run 35370555955 红在第 18 步 44 例（225 过）：本地建隔离库逐个复现后，42 例是用例没同步（`493bd623`：提交二次确认、内销物流行、粘贴组件 label 星号、供应商回执撞 `getByLabel`、分层建单无「复制当前」、设计款 tablist、额外地址 textarea 无 name、交期夹具跨日 flake），**2 类是真回归**：① 师傅端零 JS 退出登录失效——`d84f42d1` 把退出表单挪进 `/worker/account`，而该页在 `app/(worker)/worker/loading.tsx` 的 streaming 边界里，无 JS 时永远停在骨架屏（§15.8 硬约束）→ `3ca23ed7` 照 `AdminHeader` 在外壳加 `<noscript><LogoutButton /></noscript>`；② 393px 下规格标签校验时变长、把「＋ 增加规格」挤到下一行，输入框下跳 52px → `ea50a1ab` 标签容器窄屏独占一行。
+- **教训**：只读代码判断「零 JS 没破」是错的（表单确实还是原生 form，但被 streaming 边界挡住），必须实际跑 `no-js` project。改动师傅端 / 后台外壳或把原生表单挪进带 `loading.tsx` 的路由时，跑 `pnpm exec playwright test tests/e2e/no-js.spec.ts`。本地 e2e 用开发配置即可（`:3000` 没起 dev server 时），冷编译可能把单例 45s 超时耗尽，重跑即过。
+- 隔离库 `erp_e2e_grok_20260919` 用完已 DROP。
 
 **2026-09-18（夜）：内部工单物流自动计价，2 个代码提交（`012feeea`、`f9faea24`），未 push、未部署。**
 - 起因：业主在建单页发现填了地址但费用栏没有快递费。查证是设计如此——运费自 2026-08-08 起被建模成「外销渠道的对客应收」，`quoteInternalCreateOrder` 明写 `includeOrderCharges: false`，工厂直接业务只能在详情页「编辑收费」补录，忘了补就漏收。业主拍板：**客服工单与工厂直接业务和外销用同一本已发布物流价目自动计价，顺丰到付维持运费 0、耗材照收**（取代 2026-07-30「totalAmount 只汇总款式小计」与 2026-09-15「内部结算不新增物流应收」在这两类结算下的口径）。
@@ -479,4 +482,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-18（下午）：对抗 review 建单分层 / 师傅端 11 个提交出 5 项缺陷，逐项修复 + Codex 五轮追加共 12 个提交（120g 拦截移位、烫金反查与同名消歧、工资汇总全量、规格克重解锁、珠光暗红补齐）；全量单测 7024 通过，OrderCreationWorkspace browser spec 5/5。未 push。
 - 2026-09-18（傍晚）：业主追加——收货地址输入统一复用粘贴自动识别组件（`d58f5e79`），六处接入，browser spec 4 文件 112 例通过；Codex 两轮追加修正（`090d3d01`、`9211fbed`：原生粘贴 + 统一「粘贴覆盖、手输补空」+ 客户地址城市/区县与省份前缀边界）。侧栏「工单」→「工单列表」、新增管理员「新建工单」常用入口（`feat(nav)`）。未 push。
 - 2026-09-18（晚）：「保存后没反馈」审查 → 零依赖跳转回执推广：`lib/admin/receipt.ts` + `ReceiptNotice` / `ReceiptUrlCleanup`，18 处 redirect 带回执、17 个目标页播报，异议审核与销售文本编辑不再吞掉成功结果；全量单测 7158 通过、browser spec 2/2；开源候选（Base UI Toast / sonner / nuqs / next-safe-action / 两个 cookie flash 包）评估记入 DECISIONS。未 push。
-- 2026-09-19（凌晨）：grok 无头只读对抗审查 PR #20 / #21 / #22（7 片并行，全部 MERGE_WITH_FOLLOWUPS、无 P0）；Claude 逐条核实后修 5 处共 4 个提交（补录物流行加地址卡死、附加费用入口与闸口不一致、新增款烫金反查、`safeReturnTo` 放行 `..`、计费省份被地名盖掉），其余记入「卡住的问题」；推送并合并 PR #20。
+- 2026-09-19（凌晨）：grok 无头只读对抗审查 PR #20 / #21 / #22（7 片并行，全部 MERGE_WITH_FOLLOWUPS、无 P0）；Claude 逐条核实后修 5 处共 4 个提交（补录物流行加地址卡死、附加费用入口与闸口不一致、新增款烫金反查、`safeReturnTo` 放行 `..`、计费省份被地名盖掉），其余记入「卡住的问题」；推送后 CI 两轮红（46 个提交从未跑过 e2e），同步 42 例过时用例并修 2 类真回归（师傅端零 JS 退出、393px 规格标签挤行）；CI 全绿后合并 PR #20。
