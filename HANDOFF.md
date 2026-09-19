@@ -1,12 +1,12 @@
 # 会话交接
 
-## 当前生产状态（2026-09-17 更新）
+## 当前生产状态（2026-09-19 更新）
 
-生产已运行 `0e6c009b`，156 条迁移；报价第 8 版与统一烫金工价已发布，包装工价暂缓。OSS 双仓库备份及恢复演练完成；企业微信连接已启用。负责人确认的历史测试业务已清理，正式库仅保留 admin，工单/账单/工资为空。详见 [发布记录](docs/audits/2026-09-17-production-application-release.md)、[通知接入](docs/audits/2026-09-17-production-wecom-config.md)、[测试数据清理](docs/audits/2026-09-17-production-test-data-cleanup.md)。
+生产已运行 `09f1a1ca`（`main`，PR #20 + PR #23），158 条迁移；2026-09-19 17:25–17:29 切换，停机约 4 分 40 秒，上线后检查全部通过。报价第 8 版与统一烫金工价第 1 版不变，包装工价仍暂缓；OSS 双仓库备份正常（切换前手动 full：repo1 `20260919-172512F`、repo2 `20260919-172531F`）；企业微信 `CONNECTED`。正式库仍只有 1 个管理员 + 3 个销售账号，工单 / 账单 / 报工为空。详见 [发布记录](docs/audits/2026-09-19-production-release-09f1a1ca.md)；上一次见 [09-17 发布](docs/audits/2026-09-17-production-application-release.md)。
 
-当前分支整合生产发布分支与备份/运维记录，PR #20 为汇总审查入口；以下各日期描述为历史过程，不作为当前生产状态。
+发布方式（两次都一样，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包 → 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。脚本在服务器 `/root/erp-release-20260919/`。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。Claude Code 做生产 SSH 需要业主在权限设置里放行，聊天里的授权不够。
 
-整合验证：app/actions/components/lib/prisma/tests 与生产发布分支逐路径比较无差异；备份专项 23 项通过，typecheck、架构门禁和 diff 空白检查通过。整合后的远端 CI 需以 PR 最新提交结果为准，不沿用旧提交的通过状态。
+未验收（不得写成已验收）：登录后的各角色页面逐页检查、真实写入、实体手机扫码、企业微信真实消息实收；Sentry 未配置。
 
 > **每次新对话开始前，先读这份文件。** 它记录了上次会话停在哪、下次该接着做什么。
 >
@@ -482,3 +482,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-18（晚）：「保存后没反馈」审查 → 零依赖跳转回执推广：`lib/admin/receipt.ts` + `ReceiptNotice` / `ReceiptUrlCleanup`，18 处 redirect 带回执、17 个目标页播报，异议审核与销售文本编辑不再吞掉成功结果；全量单测 7158 通过、browser spec 2/2；开源候选（Base UI Toast / sonner / nuqs / next-safe-action / 两个 cookie flash 包）评估记入 DECISIONS。未 push。
 - 2026-09-19（凌晨）：grok 无头只读对抗审查 PR #20 / #21 / #22（7 片并行，全部 MERGE_WITH_FOLLOWUPS、无 P0）；Claude 逐条核实后修 5 处共 4 个提交（补录物流行加地址卡死、附加费用入口与闸口不一致、新增款烫金反查、`safeReturnTo` 放行 `..`、计费省份被地名盖掉），其余记入「卡住的问题」；推送后 CI 两轮红（46 个提交从未跑过 e2e），同步 42 例过时用例并修 2 类真回归（师傅端零 JS 退出、393px 规格标签挤行）；CI 全绿后合并 PR #20。
 - 2026-09-19（下午）：业主拍板 grok 带出的 4 项——补录运费切顺丰到付清零、冲正 = 作废原报工（只读 + 残留差额自动抵消）、师傅工资页只按显式日期筛选、寄样维持最小包装档；PR #23 以 `09f1a1ca` 合入 `main`。未部署。
+- 2026-09-19（傍晚）：业主授权后由 Claude Code 按 09-17 同一受控流程把生产从 `0e6c009b` 切到 `09f1a1ca`（156 → 158 条迁移，停机约 4 分 40 秒），上线后检查通过；发布记录 `docs/audits/2026-09-19-production-release-09f1a1ca.md`。
