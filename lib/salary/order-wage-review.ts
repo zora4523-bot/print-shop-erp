@@ -17,19 +17,41 @@ export const wageReviewSchema = z.object({
   operationId: z.string().min(1), revision: z.string().length(64), reason: z.string().trim().min(2).max(500),
   targets: z.array(z.object({ anchorId: z.string().min(1), amount: z.string().regex(/^-?\d{1,12}(\.\d{1,2})?$/) }).strict()).min(1).max(500),
 }).strict();
+/** REPORT 锚定自己，REVERSAL 锚定被冲正的报工，ADJUSTMENT 锚定它核定的那笔报工。 */
+function anchorReportId(report: WageOperation['reports'][number]): string | null {
+  if (report.entryType === 'REPORT') return report.id;
+  if (report.entryType === 'REVERSAL') return report.reversalOfId;
+  return (report.snapshot as { anchorReportId?: string } | null)?.anchorReportId ?? null;
+}
+/**
+ * 台账只增不改，冲正是「作废原报工」（业主 2026-09-19 拍板按记账惯例）：被冲正的报工连同它的
+ * 冲正行、人工核定差额整体作废，单独成只读组，不再参与改价——否则原报工日还能被改成 0（倒扣）
+ * 或翻倍（冲正后又发一遍）。可核定的只有仍然有效的报工及其差额。
+ */
 function summarize(operation: WageOperation) {
-  const groups = new Map<string, { anchorId: string; reporterId: string; name: string; date: string; amount: Decimal; settled: boolean; quantity: Decimal }>();
+  const reversedIds = new Set(operation.reports.flatMap((r) => r.entryType === 'REVERSAL' && r.reversalOfId ? [r.reversalOfId] : []));
+  const groups = new Map<string, { anchorId: string; reporterId: string; name: string; date: string; amount: Decimal; settled: boolean; quantity: Decimal; voided: boolean }>();
   for (const report of operation.reports) {
-    const date = formatDateInputShanghai(report.reportedAt); const key = `${report.reporterId}:${date}`;
-    const group = groups.get(key) ?? { anchorId: report.id, reporterId: report.reporterId, name: report.reporter.displayName, date, amount: new Decimal(0), settled: false, quantity: new Decimal(0) };
+    const anchor = anchorReportId(report); const voided = anchor !== null && reversedIds.has(anchor);
+    const date = formatDateInputShanghai(report.reportedAt); const key = `${report.reporterId}:${date}:${voided ? 'void' : 'live'}`;
+    const group = groups.get(key) ?? { anchorId: report.id, reporterId: report.reporterId, name: report.reporter.displayName, date, amount: new Decimal(0), settled: false, quantity: new Decimal(0), voided };
     if (report.entryType === 'REPORT' && !operation.reports.some((r) => r.id === group.anchorId && r.entryType === 'REPORT')) group.anchorId = report.id;
     group.amount = group.amount.plus(report.amount.toString()); group.quantity = group.quantity.plus(report.reportedCompletedQty.toString());
     group.settled ||= Boolean(report.settlementItem); groups.set(key, group);
   }
   return { id: operation.id, orderId: operation.orderId, type: operation.operationType, reviewRequired: operation.payrollReviewRequired,
     revision: createHash('sha256').update(JSON.stringify({ updatedAt: operation.updatedAt?.toISOString(), reports: operation.reports.map((r) => [r.id, r.amount.toString()]) })).digest('hex'),
-    groups: [...groups.values()].map((g) => ({ ...g, editable: !g.settled && operation.reports.some((r) => r.id === g.anchorId && r.entryType === 'REPORT'), amount: g.amount.toFixed(2), quantity: g.quantity.toString() })),
+    groups: [...groups.values()].map((g) => ({ ...g, editable: !g.voided && !g.settled && operation.reports.some((r) => r.id === g.anchorId && r.entryType === 'REPORT'), amount: g.amount.toFixed(2), quantity: g.quantity.toString() })),
   };
+}
+/** 已作废报工上残留的人工核定差额：冲正只否定原报工金额，不含后来的 ADJUSTMENT。 */
+function voidedAdjustmentResiduals(operation: WageOperation) {
+  const reversedIds = new Set(operation.reports.flatMap((r) => r.entryType === 'REVERSAL' && r.reversalOfId ? [r.reversalOfId] : []));
+  return operation.reports.filter((r) => r.entryType === 'REPORT' && reversedIds.has(r.id)).flatMap((anchor) => {
+    const residual = operation.reports.filter((r) => r.entryType === 'ADJUSTMENT' && anchorReportId(r) === anchor.id)
+      .reduce((sum, r) => sum.plus(r.amount.toString()), new Decimal(0));
+    return residual.isZero() ? [] : [{ anchor, residual }];
+  });
 }
 export async function listOrderWages(orderId: string, actor: AuditActor) {
   await assertActivePieceworkAdmin(db, actor);
@@ -71,6 +93,7 @@ export async function reviewOrderWages(raw: z.infer<typeof wageReviewSchema>, ac
       if (settlement || group.settled) throw new WageReviewError(`${group.name} ${group.date} 已结算，不能修改该日工资`);
       const anchor = operation.reports.find((r) => r.id === group.anchorId)!;
       if (anchor.entryType !== 'REPORT') throw new WageReviewError('冲正记录不能单独改价，请核对原报工日期');
+      if (group.voided) throw new WageReviewError(`${group.name} ${group.date} 的报工已冲正，不能再核定金额`);
       const priorPayroll = (anchor.snapshot as { payroll?: Prisma.InputJsonObject } | null)?.payroll ?? {};
       await tx.productionReport.create({ data: {
         operationId: operation.id, reporterId: group.reporterId, entryType: 'ADJUSTMENT', adjustedById: admin.id,
@@ -79,6 +102,24 @@ export async function reviewOrderWages(raw: z.infer<typeof wageReviewSchema>, ac
         priceBookVersion: anchor.priceBookVersion, ruleSetSha256: anchor.ruleSetSha256, reportedAt: anchor.reportedAt,
         idempotencyKey: `wage:${input.revision}:${anchor.id}`,
         snapshot: { anchorReportId: anchor.id, reason: input.reason, before: group.amount, after: new Decimal(target.amount).toFixed(2), payroll: { ...priorPayroll, manual: true } },
+      } });
+    }
+    // 冲正要让作废的工作净额归零：把残留差额反向记在原报工日（触发器要求 ADJUSTMENT 与锚点同日）。
+    // 原报工日已结算就无处可记——明确拒绝，绝不悄悄少发 / 多发。
+    for (const { anchor, residual } of voidedAdjustmentResiduals(operation)) {
+      const date = formatDateInputShanghai(anchor.reportedAt);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkReportingDayGateLockKey(date)}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkSettlementLockKey(anchor.reporterId, date)}))`;
+      const settlement = await tx.pieceworkSettlement.findUnique({ where: { reporterId_workDate: { reporterId: anchor.reporterId, workDate: new Date(`${date}T00:00:00Z`) } } });
+      if (settlement || anchor.settlementItem) throw new WageReviewError(`${anchor.reporter.displayName} ${date} 已结算，已冲正报工上的人工核定差额 ${residual.toFixed(2)} 元无法自动抵消，请联系技术支持处理`);
+      const priorPayroll = (anchor.snapshot as { payroll?: Prisma.InputJsonObject } | null)?.payroll ?? {};
+      await tx.productionReport.create({ data: {
+        operationId: operation.id, reporterId: anchor.reporterId, entryType: 'ADJUSTMENT', adjustedById: admin.id,
+        reportedCompletedQty: 0, defectQty: 0, reworkQty: 0, chargeableQty: 0, unit: anchor.unit, rate: anchor.rate,
+        amount: residual.negated().toFixed(2), wageSupplement: residual.negated().toFixed(2), priceBookId: anchor.priceBookId,
+        priceBookVersion: anchor.priceBookVersion, ruleSetSha256: anchor.ruleSetSha256, reportedAt: anchor.reportedAt,
+        idempotencyKey: `wage-void:${input.revision}:${anchor.id}`,
+        snapshot: { anchorReportId: anchor.id, reason: `报工已冲正，抵消此前的人工核定差额：${input.reason}`, before: residual.toFixed(2), after: '0.00', voidedAnchor: true, payroll: { ...priorPayroll, manual: true } },
       } });
     }
     await tx.productionOperation.update({ where: { id: operation.id }, data: { payrollReviewRequired: false } });

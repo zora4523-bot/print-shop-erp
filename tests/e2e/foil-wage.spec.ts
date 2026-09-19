@@ -156,6 +156,10 @@ test('分档工资、多人转人工核定、不可变差额和页面响应式',
     await page.goto(`/orders/${reversed.order}`);
     const reversalDisclosure = page.getByRole('button', { name: /生产、用料与计件记录/ });
     if (await reversalDisclosure.count()) await reversalDisclosure.click();
+    // 被冲正的原报工日整笔作废，同样只读（DECISIONS 2026-09-19）。
+    const voided = panel.getByRole('textbox', { name: /核定提成/ }).nth(0);
+    await expect(voided).toHaveValue('24.00');
+    await expect(voided).toHaveAttribute('readonly', '');
     const negative = panel.getByRole('textbox', { name: /核定提成/ }).nth(1);
     await expect(negative).toHaveValue('-24.00');
     await expect(negative).toHaveAttribute('readonly', '');

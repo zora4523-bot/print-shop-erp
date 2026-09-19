@@ -20,10 +20,11 @@ export function OrderWageReviewForm({ wage }: { wage: Wage }) {
   return <form action={action} aria-label={`${names[wage.type]}提成核定`} aria-busy={pending} className="space-y-3 rounded-lg border p-4">
     <div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{names[wage.type]}</h3>{wage.reviewRequired && <Badge variant="outline">需人工核定</Badge>}</div>
     {wage.reviewRequired && <p className="text-sm text-muted-foreground">多人接手或计薪条件有变化，请核对各师傅提成。</p>}
+    {wage.groups.some((g) => g.voided) && <p className="text-sm text-muted-foreground">已冲正的报工整笔作废、不可改价；确认核定时会自动抵消此前对它做过的人工调整。</p>}
     <input type="hidden" name="operationId" value={wage.id} /><input type="hidden" name="revision" value={wage.revision} />
     <fieldset disabled={pending} className="space-y-3" onChange={() => setReview(false)}>
       {wage.groups.map((group, i) => <div key={group.anchorId} className="grid items-center gap-2 sm:grid-cols-[1fr_160px]">
-        <div className="min-w-0 text-sm"><label htmlFor={`wage-${group.anchorId}`}>{group.name} · {group.date}</label><p className="text-muted-foreground">已报 {group.quantity} · 当前提成 {formatMoney(group.amount)}{group.settled ? ' · 已结算' : !group.editable ? ' · 冲正记录' : ''}</p></div>
+        <div className="min-w-0 text-sm"><label htmlFor={`wage-${group.anchorId}`}>{group.name} · {group.date}</label><p className="text-muted-foreground">已报 {group.quantity} · 当前提成 {formatMoney(group.amount)}{group.settled ? ' · 已结算' : group.voided ? ' · 已冲正，不可改价' : !group.editable ? ' · 冲正记录' : ''}</p></div>
         <input type="hidden" name="anchorId" value={group.anchorId} />
         <Input id={`wage-${group.anchorId}`} name="amount" aria-label={`${group.name} ${group.date} 核定提成`} inputMode="decimal" readOnly={!group.editable} value={amounts[i]} onChange={(e) => setAmounts((old) => old.map((a, j) => j === i ? e.target.value : a))} />
       </div>)}
