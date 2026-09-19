@@ -444,7 +444,14 @@ await dispatchNotification('ORDER_SUBMITTED', { orderId, orderNo, submitterName 
   的 axe 门禁断言的是页面加载态，那条路径它一次都走不到。
   见 `components/business/order/__tests__/EditOrderForm.aria.test.tsx`。
 - **真实渲染用 Playwright**：`tests/visual/` 在真实 Chromium 下跑截图、响应式裁切/溢出/触控目标
-  与 axe 无障碍门禁（6 视口 × 明暗模式）。
+  与 axe 无障碍门禁（视口 × 明暗模式）。**CI 门禁是「PR 两视口、main 六视口」**（业主 2026-09-19
+  拍板，等待时间优先）：PR 只跑 375×667 与 1280×800 两个代表视口（管理端、师傅端、dev fixtures
+  同一口径），全部 6 个视口在合并进 `main` 后由 `viewports-main` 作业跑。只在中间视口
+  （393 / 768 / 1024 / 1920）出现的问题因此会晚到合并后才暴露——改响应式布局时，合并前先在本地
+  用 `pnpm test:admin-ui` / `pnpm test:worker-ui` 跑全六视口（E2E 前置见 §14）。
+  打印像素基线（`print-darwin`）只在打印相关路径变动时触发，路径清单在
+  `.github/workflows/print-darwin.yml`；改了清单外、却会影响打印视图的文件时，手动
+  `workflow_dispatch` 跑一次。
 
 - **组件交互契约用 Vitest Browser Mode**：需要真实事件循环、焦点、键盘与 axe 的组件级断言
   （Sheet/Dialog 确认流、Checkbox 键盘 wrapper、六视口 overflow）写成 `*.browser.spec.tsx`，

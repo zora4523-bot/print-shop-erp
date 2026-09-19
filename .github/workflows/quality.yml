@@ -1,20 +1,201 @@
 name: Quality
 
+# Phase 1 of the CI speed-up (DECISIONS 2026-09-19): fast gates fail in minutes
+# instead of after the 40-minute E2E step, pull requests gate on two
+# representative viewports, and `main` runs all six after the merge.
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   push:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
 
 permissions:
   contents: read
 
+# A newer push to the same ref supersedes the run in flight.
 concurrency:
-  group: quality-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/print_shop_erp_ci
+  AUTH_SECRET: ci-only-auth-secret-not-for-production-2026
+  AUTH_TRUST_HOST: "true"
+  SEED_ADMIN_USERNAME: ci-admin
+  SEED_ADMIN_PASSWORD: ci-only-admin-password-not-for-production
+  BACKGROUND_JOBS_MODE: inline
+  NOTIFICATION_MOCK_MODE: "true"
+  CDR_BUNDLE_MOCK_MODE: "true"
+  NEXT_TELEMETRY_DISABLED: "1"
+  TZ: Asia/Shanghai
+
 jobs:
-  verify:
+  # Runs on pull requests and on `main`. No database, no browsers: this is the
+  # job that answers "did lint / typecheck / architecture break?" first.
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node, pnpm and the Prisma client
+        uses: ./.github/actions/setup
+
+      - name: Audit production dependencies
+        run: |
+          mkdir -p .review
+          pnpm audit --prod --json > .review/dependency-audit.json
+
+      - name: Validate Prisma schema
+        run: pnpm exec prisma validate
+
+      - name: Static quality gates
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          pnpm check:architecture
+          pnpm test:backup
+          pnpm lint
+          pnpm typecheck
+
+      - name: Generate dead-code evidence
+        run: pnpm check:dead-code
+
+      - name: Upload review data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-static-${{ github.sha }}
+          path: .review/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  unit:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: print_shop_erp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d print_shop_erp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    # Same variables the single-job workflow exposed while the unit suite ran.
+    env:
+      E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_ci
+      E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node, pnpm and the Prisma client
+        uses: ./.github/actions/setup
+
+      - name: Verify the complete fresh migration chain
+        env:
+          FRESH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_ci
+          FRESH_DATABASE_CONFIRM_DATABASE: erp_e2e_ci
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_ci'
+          pnpm test:migrations:fresh
+
+      - name: Prepare isolated database
+        run: |
+          pnpm exec prisma migrate deploy
+          pnpm db:seed
+
+      - name: Audit review data integrity
+        run: pnpm audit:review-data
+
+      - name: Unit, regression, and PostgreSQL tests with coverage
+        run: |
+          mkdir -p .review
+          pnpm exec vitest run --coverage --maxWorkers=2 --reporter=default --reporter=json --outputFile=.review/unit-tests.json
+
+      - name: Upload review data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-unit-${{ github.sha }}
+          path: .review/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-unit-${{ github.sha }}
+          path: |
+            coverage/
+            .vitest-attachments/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  browser-components:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node, pnpm and the Prisma client
+        uses: ./.github/actions/setup
+
+      - name: Install test browsers
+        uses: ./.github/actions/browsers
+        with:
+          playwright: chromium
+
+      - name: Browser component contracts
+        run: |
+          mkdir -p .review
+          pnpm test:browser --no-file-parallelism --reporter=default --reporter=json --outputFile=.review/browser-components.json
+
+      - name: Upload review data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-browser-components-${{ github.sha }}
+          path: .review/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-browser-components-${{ github.sha }}
+          path: .vitest-attachments/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Business E2E plus the pull-request viewport gate (375x667 and 1280x800 for
+  # both the administrator and the worker shells). All six viewports run in
+  # `viewports-main` after the merge.
+  e2e:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     services:
@@ -31,116 +212,114 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
-
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/print_shop_erp_ci
       E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_ci
       E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_ci
-      AUTH_SECRET: ci-only-auth-secret-not-for-production-2026
-      AUTH_TRUST_HOST: "true"
-      SEED_ADMIN_USERNAME: ci-admin
-      SEED_ADMIN_PASSWORD: ci-only-admin-password-not-for-production
-      BACKGROUND_JOBS_MODE: inline
-      NOTIFICATION_MOCK_MODE: "true"
-      CDR_BUNDLE_MOCK_MODE: "true"
-      NEXT_TELEMETRY_DISABLED: "1"
-      TZ: Asia/Shanghai
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - name: Set up Node, pnpm and the Prisma client
+        uses: ./.github/actions/setup
+
+      - name: Install test browsers
+        uses: ./.github/actions/browsers
         with:
-          version: 10.33.1
-          run_install: false
+          playwright: chromium
+          puppeteer: "true"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Audit production dependencies
-        run: |
-          mkdir -p .review
-          pnpm audit --prod --json > .review/dependency-audit.json
-
-      - name: Install browser and PDF runtime dependencies
-        run: |
-          pnpm exec playwright install --with-deps chromium webkit
-          pnpm exec puppeteer browsers install chrome
-
-      - name: Generate and validate Prisma client
-        run: |
-          pnpm exec prisma generate
-          pnpm exec prisma validate
-
-      - name: Verify the complete fresh migration chain
-        env:
-          FRESH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_ci
-          FRESH_DATABASE_CONFIRM_DATABASE: erp_e2e_ci
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_ci'
-          pnpm test:migrations:fresh
-
-      - name: Static quality gates
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: |
-          pnpm check:architecture
-          pnpm test:backup
-          pnpm lint
-          pnpm typecheck
-
-      - name: Generate dead-code evidence
-        run: pnpm check:dead-code
-
-      - name: Prepare isolated database
+      - name: Prepare the regular and the disposable browser databases
         run: |
           pnpm exec prisma migrate deploy
           pnpm db:seed
-
-      - name: Audit review data integrity
-        run: pnpm audit:review-data
-
-      - name: Unit, regression, and PostgreSQL tests with coverage
-        run: pnpm exec vitest run --coverage --maxWorkers=2 --reporter=default --reporter=json --outputFile=.review/unit-tests.json
-
-      - name: Browser component contracts
-        run: pnpm test:browser --no-file-parallelism --reporter=default --reporter=json --outputFile=.review/browser-components.json
-
-      - name: Prepare the disposable browser database and fixture prices
-        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_ci'
           pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
           DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
           pnpm test:e2e:prepare
 
-      - name: Production build, business E2E and six-viewport gates
+      - name: Production build, business E2E and two-viewport gates
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-        # Existing print baselines are Darwin-only and run in print-darwin below.
+        # Existing print baselines are Darwin-only and run in print-darwin.yml.
         # CLI grep-invert replaces the config filter, so retain both exclusions.
-        run: pnpm test:release --grep-invert 'OrderPrintLayout 截图回归|deterministic external sales price tier fixture'
+        run: >-
+          pnpm test:release
+          --project=chromium
+          --project=no-js
+          --project=worker-375x667
+          --project=worker-1280x800
+          --project=admin-375x667
+          --project=admin-1280x800
+          --grep-invert 'OrderPrintLayout 截图回归|deterministic external sales price tier fixture'
 
-      # Business E2E deliberately publishes successor wage books. Keep its
-      # append-only history intact and give later suites their own baseline.
-      - name: Prepare an independent artifact and compatibility database
+      - name: Upload review data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-e2e-${{ github.sha }}
+          path: .review/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-e2e-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Business E2E deliberately publishes successor wage books, so the durable
+  # suite has always used its own baseline database; it now also has its own job.
+  durable:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
         env:
-          E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_artifacts_ci
-          E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_artifacts_ci
+          POSTGRES_DB: print_shop_erp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d print_shop_erp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_artifacts_ci
+      E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_artifacts_ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node, pnpm and the Prisma client
+        uses: ./.github/actions/setup
+
+      - name: Install test browsers
+        uses: ./.github/actions/browsers
+        with:
+          playwright: chromium
+          puppeteer: "true"
+
+      - name: Prepare the regular and the disposable artifact databases
         run: |
+          pnpm exec prisma migrate deploy
+          pnpm db:seed
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_artifacts_ci'
           pnpm test:e2e:preflight
           DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
           DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
           pnpm test:e2e:prepare
-          echo "E2E_DATABASE_URL=$E2E_DATABASE_URL" >> "$GITHUB_ENV"
-          echo "E2E_DATABASE_CONFIRM_DATABASE=$E2E_DATABASE_CONFIRM_DATABASE" >> "$GITHUB_ENV"
 
       - name: Durable worker queue, retry and authorized artifact downloads
         env:
@@ -148,136 +327,273 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm test:release:durable
 
-      - name: Cross-browser print compatibility
-        run: pnpm test:compat
-
-      - name: Development-only visual fixtures
-        run: pnpm test:release:dev-fixtures
-
-      - name: Upload validation evidence
+      - name: Upload review data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: quality-evidence-${{ github.sha }}
-          path: |
-            .review/
-            coverage/
-            playwright-report/
-            test-results/
-            playwright-report-durable/
-            test-results-durable/
-            .vitest-attachments/
+          name: review-durable-${{ github.sha }}
+          path: .review/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
 
-  print-darwin:
-    runs-on: macos-26
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash
-    env:
-      DATABASE_URL: postgresql://postgres@127.0.0.1:55432/print_shop_erp_print_ci
-      E2E_DATABASE_URL: postgresql://postgres@127.0.0.1:55432/erp_e2e_print_ci
-      E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_print_ci
-      FRESH_DATABASE_URL: postgresql://postgres@127.0.0.1:55432/erp_e2e_print_ci
-      FRESH_DATABASE_CONFIRM_DATABASE: erp_e2e_print_ci
-      E2E_BASE_URL: http://127.0.0.1:3200
-      AUTH_SECRET: ci-only-auth-secret-not-for-production-2026
-      AUTH_TRUST_HOST: "true"
-      SEED_ADMIN_USERNAME: ci-admin
-      SEED_ADMIN_PASSWORD: ci-only-admin-password-not-for-production
-      BACKGROUND_JOBS_MODE: inline
-      NOTIFICATION_MOCK_MODE: "true"
-      CDR_BUNDLE_MOCK_MODE: "true"
-      NEXT_TELEMETRY_DISABLED: "1"
-      NODE_OPTIONS: --max-old-space-size=4096
-      TZ: Asia/Shanghai
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-durable-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+            playwright-report-durable/
+            test-results-durable/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
 
+  # The only job that needs WebKit. PDFs here are rendered with Playwright's
+  # Chromium (see playwright.compat.config.ts), so no Puppeteer Chrome.
+  compat:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: print_shop_erp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d print_shop_erp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_compat_ci
+      E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_compat_ci
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - name: Set up Node, pnpm and the Prisma client
+        uses: ./.github/actions/setup
+
+      - name: Install test browsers
+        uses: ./.github/actions/browsers
         with:
-          version: 10.33.1
-          run_install: false
+          playwright: chromium webkit
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install locked dependencies and Chromium
+      - name: Prepare the regular and the disposable compatibility databases
         run: |
-          pnpm install --frozen-lockfile
-          pnpm exec playwright install chromium
-          pnpm exec prisma generate
-          pnpm exec prisma validate
-
-      - name: Install PostgreSQL 16
-        run: |
-          brew install postgresql@16
-          echo "$(brew --prefix postgresql@16)/bin" >> "$GITHUB_PATH"
-
-      - name: Start a dedicated loopback PostgreSQL cluster
-        # macOS runners cannot use Docker service containers. This job owns
-        # only its temporary cluster and port, never the Homebrew service data.
-        run: |
-          : "${RUNNER_TEMP:?GitHub runner temp is required}"
-          initdb -D "$RUNNER_TEMP/erp-print-pg" -U postgres -A trust --encoding=UTF8 --locale=C
-          pg_ctl -D "$RUNNER_TEMP/erp-print-pg" -l "$RUNNER_TEMP/erp-print-pg.log" -o '-h 127.0.0.1 -p 55432' -w start
-          createdb -h 127.0.0.1 -p 55432 -U postgres print_shop_erp_print_ci
-          createdb -h 127.0.0.1 -p 55432 -U postgres erp_e2e_print_ci
-
-      - name: Migrate and prepare disposable print fixtures
-        run: |
-          pnpm test:migrations:fresh
+          pnpm exec prisma migrate deploy
+          pnpm db:seed
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_compat_ci'
           pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
           DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
           pnpm test:e2e:prepare
 
-      - name: Record print runtime versions
-        run: |
-          mkdir -p .review
-          {
-            sw_vers
-            uname -m
-            node --version
-            pnpm --version
-            pnpm exec next --version
-            psql --version
-          } > .review/print-runtime.txt
+      - name: Cross-browser print compatibility
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: pnpm test:compat
 
-      - name: Production build and existing Darwin print baselines
-        # Use the release config's controlled build/start and original chromium
-        # project name. Missing or changed baselines fail; none are approved here.
-        run: pnpm test:release tests/visual/order-print.spec.ts --project=chromium --update-snapshots=none
-
-      - name: Stop and remove this job's PostgreSQL cluster
-        if: always()
-        run: |
-          : "${RUNNER_TEMP:?GitHub runner temp is required}"
-          ERP_PRINT_PG_DATA="$RUNNER_TEMP/erp-print-pg"
-          if [[ -f "$ERP_PRINT_PG_DATA/postmaster.pid" ]]; then
-            "$(brew --prefix postgresql@16)/bin/pg_ctl" -D "$ERP_PRINT_PG_DATA" -m fast -w stop
-          fi
-          rm -rf -- "$ERP_PRINT_PG_DATA"
-
-      - name: Upload Darwin print evidence
+      - name: Upload review data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: quality-print-darwin-${{ github.sha }}
-          path: |
-            .review/print-runtime.txt
-            .review/playwright-release.json
-            playwright-report/release/
-            test-results/release/
-            ${{ runner.temp }}/erp-print-pg.log
+          name: review-compat-${{ github.sha }}
+          path: .review/
           include-hidden-files: true
           if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-compat-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Development-server fixture routes; same two-viewport policy on pull requests.
+  dev-fixtures:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: print_shop_erp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d print_shop_erp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_fixtures_ci
+      E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_fixtures_ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node, pnpm and the Prisma client
+        uses: ./.github/actions/setup
+
+      - name: Install test browsers
+        uses: ./.github/actions/browsers
+        with:
+          playwright: chromium
+
+      - name: Prepare the regular and the disposable fixture databases
+        run: |
+          pnpm exec prisma migrate deploy
+          pnpm db:seed
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_fixtures_ci'
+          pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
+
+      - name: Development-only visual fixtures (two viewports)
+        run: >-
+          pnpm test:release:dev-fixtures
+          --project=admin-375x667
+          --project=admin-1280x800
+
+      - name: Upload review data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-dev-fixtures-${{ github.sha }}
+          path: .review/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-dev-fixtures-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # After the merge: the full six-viewport gate for both shells, plus the
+  # development fixtures at all six administrator viewports.
+  viewports-main:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: print_shop_erp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d print_shop_erp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_ci
+      E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node, pnpm and the Prisma client
+        uses: ./.github/actions/setup
+
+      - name: Install test browsers
+        uses: ./.github/actions/browsers
+        with:
+          playwright: chromium
+          puppeteer: "true"
+
+      - name: Prepare the regular and the disposable browser databases
+        run: |
+          pnpm exec prisma migrate deploy
+          pnpm db:seed
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_ci'
+          pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
+
+      - name: Production build and six-viewport gates
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: >-
+          pnpm test:release
+          --project=worker-375x667
+          --project=worker-393x852
+          --project=worker-768x1024
+          --project=worker-1024x768
+          --project=worker-1280x800
+          --project=worker-1920x1080
+          --project=admin-375x667
+          --project=admin-393x852
+          --project=admin-768x1024
+          --project=admin-1024x768
+          --project=admin-1280x800
+          --project=admin-1920x1080
+          --grep-invert 'OrderPrintLayout 截图回归|deterministic external sales price tier fixture'
+
+      - name: Prepare an independent fixture database
+        env:
+          E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_fixtures_ci
+          E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_fixtures_ci
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_fixtures_ci'
+          pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
+          echo "E2E_DATABASE_URL=$E2E_DATABASE_URL" >> "$GITHUB_ENV"
+          echo "E2E_DATABASE_CONFIRM_DATABASE=$E2E_DATABASE_CONFIRM_DATABASE" >> "$GITHUB_ENV"
+
+      - name: Development-only visual fixtures (six viewports)
+        run: pnpm test:release:dev-fixtures
+
+      - name: Upload review data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-viewports-main-${{ github.sha }}
+          path: .review/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-viewports-main-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+          include-hidden-files: true
+          if-no-files-found: ignore
           retention-days: 14

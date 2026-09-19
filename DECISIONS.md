@@ -1353,3 +1353,10 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - 影响：纯展示口径，不影响任何金额。选日期时保留当前页签。
 - 相关文档：`lib/salary/worker-settlement-page.ts`、`app/(worker)/worker/salary/page.tsx`。
 
+## 2026-09-19：CI 等待时间优先——快门禁先出结果，PR 两视口、main 六视口
+
+- 决策：业主单人开发、「改一点推一次」，40 分钟才知道 lint 挂了是主要痛点，因此 CI **等待时间优先、计费分钟其次**。第一步（零风险）：① `static`（架构 / 备份脚本 / lint / typecheck / 死代码 / 依赖审计）与 `unit` 拆成独立作业并行先出结果；② Browser 组件契约、业务 E2E、durable、compat、dev fixtures 各自独立作业，各带自己的一次性库；③ **六视口门禁改为「PR 只跑 375×667 与 1280×800，合并进 `main` 后跑全部 6 个」**（管理端、师傅端、dev fixtures 同一口径）；④ `push: main` 只跑 `static` + 六视口，不再重复 PR 已验证过的全套；⑤ 纯文档改动（`**/*.md`、`docs/**`）不触发；⑥ `print-darwin` 拆成独立 workflow，仅打印相关路径变动或手动触发（macOS 按 10 倍计费）；⑦ Playwright trace 在 CI 改 `on-first-retry`；⑧ `.review/` 每次上传、报告与 trace 只在失败时上传（原先每次 493 MB）；⑨ Playwright / Puppeteer 浏览器缓存并按需安装（WebKit 只给 compat，Puppeteer Chrome 只给 E2E / durable）。第二步（E2E 分片）等第一步跑通后，用 `.review/*.json` 的实测耗时定分片数，不按估算拆。
+- 理由：原 `verify` 是单作业全串行 61–75 分钟，其中 274 个 Playwright 用例 `workers: 1` 串行占约 38 分钟；2026-09-01 以来 60 次 run 里 38 次失败，很多跑到第 40–60 分钟才红。
+- 影响：只在中间视口出现的问题会晚到合并后才发现（`viewports-main` 红了要回头修）；`print-darwin` 的路径清单过窄会漏掉回归，改到清单外却影响打印的文件时要手动触发。`concurrency` 取消旧 run 的设置此前已存在，本次只统一了分组名。`main` 没有分支保护，`paths-ignore` 不会卡住合并。
+- 相关文档：`.github/workflows/quality.yml`、`.github/workflows/print-darwin.yml`、`.github/actions/`、`CLAUDE.md §8.2`。
+

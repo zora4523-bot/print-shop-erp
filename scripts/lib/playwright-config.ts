@@ -70,7 +70,10 @@ export function createE2eConfig(mode: 'development' | 'release') {
     use: {
       baseURL,
       // Preserve the first failure even when retries are disabled.
-      trace: 'retain-on-failure',
+      // CI retries once, so a failing test still leaves a trace from its retry
+      // without every passing test paying for one. Locally (no retries) keep
+      // the trace of the failure itself.
+      trace: process.env.CI ? 'on-first-retry' : 'retain-on-failure',
       screenshot: 'only-on-failure',
     },
     projects: [
