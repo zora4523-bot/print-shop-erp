@@ -220,9 +220,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: next-release-${{ github.sha }}
+          # Keep cache/.rscinfo and cache/.previewinfo: they hold the Server
+          # Actions encryption key and preview secrets the build was made with.
+          # Only the bulky compiler caches are dropped.
           path: |
             .next-release/
-            !.next-release/cache/
+            !.next-release/cache/turbopack/
+            !.next-release/cache/images/
+            !.next-release/cache/*.tsbuildinfo
+            !.next-release/cache/.tsbuildinfo
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
