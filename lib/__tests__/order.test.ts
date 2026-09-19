@@ -12,6 +12,7 @@ import { Prisma } from '../../generated/prisma/client';
 import {
   DesignFileType,
   OrderCostCategory,
+  OrderCustomerChargeStatus,
   OrderPackagingMode,
   OrderSettlementType,
   OrderStatus,
@@ -5735,6 +5736,94 @@ describe('setOrderSfCollect — 后期履约标识', () => {
       });
     },
   );
+
+  describe('补录快递费（priceBookId 为 null）× 顺丰到付', () => {
+    function manualFreightOrder(confirmedFee: string | null = '5062.00') {
+      return { ...sfSnapshot(OrderStatus.IN_PRODUCTION), totalAmount: '5062.00', confirmedFee };
+    }
+    function manualFreightRows(rows: Array<{ id: string; amount: string | null }>) {
+      // 第一次查询判定「是否按价目计物流」（priceBookId 非空的行），第二次取补录的快递费。
+      dbMock.orderCustomerCharge.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce(rows);
+    }
+
+    it('到付后补录快递费清零并标记 WAIVED，总额与已确认终价同步，追加一条不改价格状态的修订', async () => {
+      dbMock.order.findFirst.mockResolvedValue(manualFreightOrder());
+      dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.IN_PRODUCTION });
+      manualFreightRows([{ id: 'manual-freight-1', amount: '50.00' }, { id: 'manual-freight-2', amount: '12.00' }]);
+
+      const result = await setOrderSfCollect('order-1', true, ownerActor);
+
+      expect(dbMock.orderCustomerCharge.findMany).toHaveBeenLastCalledWith({
+        where: {
+          orderId: 'order-1', priceBookId: null, category: { code: 'SHIPPING_FEE' },
+          status: { not: OrderCustomerChargeStatus.WAIVED },
+        },
+        select: { id: true, amount: true },
+      });
+      for (const id of ['manual-freight-1', 'manual-freight-2']) {
+        expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith({
+          where: { id },
+          data: expect.objectContaining({
+            status: OrderCustomerChargeStatus.WAIVED, amount: '0.00',
+            overrideReason: '顺丰到付，运费由收件方支付', finalizedById: ownerActor.id,
+          }),
+        });
+      }
+      expect(dbMock.order.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { isSfCollect: true, totalAmount: '5000.00', confirmedFee: '5000.00' },
+      }));
+      expect(appendPricingRevisionMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        orderId: 'order-1', status: 'ADMIN_CONFIRMED', source: 'SF_COLLECT_MANUAL_FREIGHT_WAIVED',
+        expectedPriceRevision: 4, incrementOrderRevision: true,
+        metadata: { isSfCollect: true, waivedManualFreight: '62.00' },
+      }));
+      // 报价三元组只属于按价目重算的路径，这里不能被改写。
+      expect(dbMock.order.update).toHaveBeenCalledTimes(1);
+      expect(result.changedFields).toEqual(['isSfCollect', 'totalAmount']);
+    });
+
+    it('终价尚未确认时只改总额，不凭空写出 confirmedFee', async () => {
+      dbMock.order.findFirst.mockResolvedValue(manualFreightOrder(null));
+      dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.IN_PRODUCTION });
+      manualFreightRows([{ id: 'manual-freight-1', amount: '62.00' }]);
+
+      await setOrderSfCollect('order-1', true, ownerActor);
+
+      expect(dbMock.order.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { isSfCollect: true, totalAmount: '5000.00' },
+      }));
+    });
+
+    it('补录金额本来就是 0 时只标记 WAIVED，不动总额也不追加修订', async () => {
+      dbMock.order.findFirst.mockResolvedValue(manualFreightOrder());
+      dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.IN_PRODUCTION });
+      manualFreightRows([{ id: 'manual-freight-1', amount: '0.00' }]);
+
+      const result = await setOrderSfCollect('order-1', true, ownerActor);
+
+      expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledTimes(1);
+      expect(dbMock.order.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { isSfCollect: true, totalAmount: '5062.00' },
+      }));
+      expect(appendPricingRevisionMock).not.toHaveBeenCalled();
+      expect(result.changedFields).toEqual(['isSfCollect']);
+    });
+
+    it('取消到付不恢复已清零的补录运费，也不再查补录行', async () => {
+      dbMock.order.findFirst.mockResolvedValue({ ...manualFreightOrder(), totalAmount: '5000.00', confirmedFee: '5000.00', isSfCollect: true });
+      dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.IN_PRODUCTION });
+
+      const result = await setOrderSfCollect('order-1', false, ownerActor);
+
+      expect(dbMock.orderCustomerCharge.findMany).toHaveBeenCalledTimes(1);
+      expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
+      expect(dbMock.order.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { isSfCollect: false, totalAmount: '5000.00' },
+      }));
+      expect(appendPricingRevisionMock).not.toHaveBeenCalled();
+      expect(result.changedFields).toEqual(['isSfCollect']);
+    });
+  });
 
   it('refuses to enable SF collect when immutable shipping rows have a non-zero net amount', async () => {
     dbMock.order.findFirst.mockResolvedValue(
