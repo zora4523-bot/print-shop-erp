@@ -2,14 +2,12 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Role } from '../../../generated/prisma/enums';
 import { getSession } from '@/lib/auth/session';
-import { roleLabel } from '@/lib/auth/role-labels';
 import { LogoutButton } from '@/components/business/auth/LogoutButton';
 import { WorkerBottomNavigation } from '@/components/business/production/WorkerBottomNavigation';
 
 // H5 shell for 师傅端. WORKER only — ADMIN has its own
 // overrides in the action layer but view the worker tasks through the
-// foreman side. Tighter max-width (640) because this is designed for
-// phones in portrait, not desktop.
+// foreman side. Keep a readable 768px content width on larger displays.
 export default async function WorkerLayout({
   children,
 }: {
@@ -23,37 +21,23 @@ export default async function WorkerLayout({
   return (
     <div className="worker-viewport worker-bottom-nav-space bg-muted/40">
       <header className="border-b bg-background">
-        <div className="worker-safe-inline worker-safe-top mx-auto max-w-xl pb-3">
+        <div className="worker-safe-inline worker-safe-top mx-auto flex max-w-3xl items-center justify-between gap-3 pb-3">
           <Link
             href="/worker/tasks"
             className="inline-flex min-h-11 shrink-0 items-center text-base font-semibold"
           >
             师傅工作台
           </Link>
+          <Link href="/worker/account" className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm">我的账号</Link>
+          {/* 零 JS 硬约束（CLAUDE.md §15.8）：「我的账号」页在 worker/loading.tsx 的 streaming
+              边界里，JS 不可用时永远停在骨架屏，页内的退出表单出不来。与 AdminHeader 同样
+              在外壳里留一个原生退出；有 JS 时不渲染，不影响现有布局。 */}
+          <noscript><LogoutButton /></noscript>
         </div>
       </header>
-      <main className="worker-safe-inline mx-auto w-full max-w-xl pt-4">
+      <main className="worker-safe-inline mx-auto w-full max-w-3xl py-5">
         {children}
       </main>
-      <footer
-        id="worker-account"
-        className="worker-safe-inline worker-safe-bottom mx-auto mt-2 w-full max-w-xl border-t pt-4"
-      >
-        <section
-          aria-labelledby="worker-account-heading"
-          className="flex min-w-0 flex-wrap items-center gap-3 rounded-xl border bg-card p-4 text-sm shadow-sm [&_button]:min-h-11"
-        >
-          <div className="min-w-0 flex-1">
-            <h2 id="worker-account-heading" className="font-semibold">
-              我的
-            </h2>
-            <p className="worker-wrap-anywhere text-muted-foreground">
-              {user.displayName}（{roleLabel(user.role)}）
-            </p>
-          </div>
-          <LogoutButton />
-        </section>
-      </footer>
       <WorkerBottomNavigation />
     </div>
   );

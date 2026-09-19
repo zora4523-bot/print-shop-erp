@@ -127,12 +127,10 @@ export default async function RuleCenterPage() {
           <h2 id="piecework-price-boundary" className="font-semibold">
             工序计件工价
           </h2>
-          <Badge variant="outline">边界说明 · 未开放配置</Badge>
+          <Badge variant="outline">按工序计件</Badge>
         </div>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
-          计件工价将按工序类型 PARTIAL、FULL、PACKING 维护并版本发布，
-          用于扫码报工结算；它不是客户价格，也不做人员与工单匹配。
-          配置界面未上线前，这里仅说明边界，不展示无效的可写入口。
+          <Link href="/owner/rules/employee-pay" className="underline underline-offset-4">维护计件工价</Link>
         </p>
       </section>
     </div>

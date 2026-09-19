@@ -69,6 +69,13 @@ export type { TableScrollAreaProps } from './TableScrollArea';
 export { ActionNotice } from './ActionNotice';
 export type { ActionNoticeProps, ActionNoticeTone } from './ActionNotice';
 
+export { ReceiptNotice } from './ReceiptNotice';
+export type {
+  ReceiptMessage,
+  ReceiptMessageResolver,
+  ReceiptNoticeProps,
+} from './ReceiptNotice';
+
 export {
   FormMessage,
   formMessageA11yProps,

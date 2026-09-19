@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import { Prisma } from '../generated/prisma/client';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
@@ -114,7 +115,7 @@ export async function createChannelAction(
   }
 
   revalidatePath('/owner/notifications');
-  redirect('/owner/notifications');
+  redirect(appendReceipt('/owner/notifications', { created: 'channel' }));
 }
 
 export async function updateChannelAction(
@@ -167,7 +168,7 @@ export async function updateChannelAction(
 
   revalidatePath('/owner/notifications');
   revalidatePath(`/owner/notifications/channels/${channelId}`);
-  redirect('/owner/notifications');
+  redirect(appendReceipt('/owner/notifications', { updated: 'channel' }));
 }
 
 export async function createSmartBotBindingCodeAction(
@@ -335,7 +336,7 @@ export async function updateRuleAction(
 
   revalidatePath('/owner/notifications');
   revalidatePath(`/owner/notifications/rules/${eventType}`);
-  redirect('/owner/notifications');
+  redirect(appendReceipt('/owner/notifications', { updated: 'rule' }));
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -8,6 +8,8 @@ export type OrderFormBQuoteStatus =
 
 export type OrderFormBRailQuoteItem = {
   key: string;
+  design?: { key: string; label: string };
+  specificationLabel?: string;
   label: string;
   status: OrderFormBQuoteStatus;
   amount: string | null;
@@ -50,6 +52,7 @@ export type OrderFormBRailProps = {
   logistics: OrderFormBRailLogistics | null;
   usesExternalSalesPricing: boolean;
   allowSaveDraft?: boolean;
+  allowEditFees?: boolean;
   settlementLabel: string;
   knownTotal?: string | null;
   totalSemantics?: OrderFormBRailTotalSemantics;
@@ -57,5 +60,6 @@ export type OrderFormBRailProps = {
   gaps: readonly string[];
   busy: boolean;
   onAttemptSubmit: (intent: 'draft' | 'submit') => void;
+  onItemClick?: (key: string) => void;
   onGapClick?: (index: number) => void;
 };

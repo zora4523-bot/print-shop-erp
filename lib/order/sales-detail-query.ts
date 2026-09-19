@@ -1,3 +1,5 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import 'server-only';
 
 import { canChangeOrderPackaging } from './editable-fields';
@@ -27,6 +29,7 @@ const CARRIER_LABELS: Readonly<Record<string, string>> = { ZTO: '中通', SF: '�
 
 export type SalesOrderDetail = {
   id: string;
+  purpose?: import('./purpose').OrderPurposeValue;
   orderNo: string;
   customName: string | null;
   customerRef: string | null;
@@ -136,6 +139,7 @@ export type SalesOrderDetail = {
 // cross the sales-facing RSC boundary.
 export const salesOrderDetailSelect = {
   id: true,
+  purpose: true,
   orderNo: true,
   customName: true,
   customerRef: true,
@@ -341,6 +345,7 @@ function mapSalesOrderDetail(
 
   return {
     id: row.id,
+    purpose: row.purpose,
     orderNo: row.orderNo,
     customName: row.customName,
     customerRef: row.customerRef,
@@ -454,8 +459,9 @@ function mapSalesOrderDetail(
   };
 }
 
-function formatPaper(type: string | null, weight: number | null): string | null {
-  if (!type) return null;
+function formatPaper(rawType: string | null, weight: number | null): string | null {
+  if (!rawType) return null;
+  const type = paperDisplayLabel(rawType);
   if (weight && new RegExp(`(?:^|\\D)${weight}\\s*g\\b`, 'i').test(type)) return type;
   return weight ? `${type} ${weight}g` : type;
 }
@@ -478,8 +484,8 @@ function salesItemDetails(item: SalesOrderDetailRecord['items'][number], legacyP
   add('烫金方式', { UNSPECIFIED: '', NONE: '不烫金', FLAT: '平烫', RELIEF: '浮雕', RAISED: '激凸' }[item.foilTechnique]);
   const foil = resolveOrderItemFoilSides(item);
   if (foil.frontFoilColors.length || foil.backFoilColors.length) {
-    add('正面烫金', foil.frontFoilColors.join('、') || '不烫金');
-    add('反面烫金', foil.backFoilColors.join('、') || '不烫金');
+    add('正面烫金', foil.frontFoilColors.map(foilColorLabel).join('、') || '不烫金');
+    add('反面烫金', foil.backFoilColors.map(foilColorLabel).join('、') || '不烫金');
   }
   if (item.craft === 'PRINT' || item.pricingRoute === 'COLOR_PRINT') {
     add('彩印颜色', item.printColorsKnown ? (item.printColors.join('、') || '无') : '未记录');

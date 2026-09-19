@@ -152,7 +152,7 @@ describe('startCsPeriodAction', () => {
       }),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/cs');
-    expect(redirectMock).toHaveBeenCalledWith('/owner/salary/cs/period-1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/salary/cs/period-1?created=1');
   });
 
   it('maps CsPeriodError → error', async () => {

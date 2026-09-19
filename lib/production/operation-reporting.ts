@@ -1,9 +1,9 @@
+import { priceFoilReport } from '../salary/foil-report-wage';
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   OrderStatus,
   PieceworkOperationType,
-  PieceworkPriceBookStatus,
   ProductionOperationStatus,
   ProductionReportEntryType,
   ProductionReportSource,
@@ -22,7 +22,8 @@ import {
   type ProductionCompletionNotification,
   type ProductionCompletionTx,
 } from '../production-completion';
-import { calculatePieceworkAmount } from '../salary/piecework-pricing';
+import { resolveReporterPieceworkRate } from '../salary/piecework-rate-selection';
+import { PieceworkPricingError, calculatePieceworkAmount } from '../salary/piecework-pricing';
 import {
   pieceworkReportingDayGateLockKey,
   pieceworkSettlementLockKey,
@@ -54,6 +55,8 @@ export type OperationReportInput = {
    */
   workOrderProgressQuantity?: number;
   idempotencyKey: string;
+  expectedPayrollRevision?: number;
+  expectedRateKey?: string;
 };
 
 export type OperationReportActor = {
@@ -104,6 +107,8 @@ const OPERATION_REPORT_SELECT = {
   operationType: true,
   unit: true,
   status: true,
+  payrollPassCount: true,
+  payrollRevision: true,
   plannedQty: true,
   carriedCompletedQty: true,
   order: {
@@ -245,10 +250,11 @@ function validateInput(input: OperationReportInput) {
     defect,
     rework,
     workOrderProgress,
+    expectedRateKey: input.expectedRateKey,
   };
 }
 
-function operationLockKey(operationId: string): string {
+export function operationLockKey(operationId: string): string {
   return `print-shop-erp:production-operation:${operationId}`;
 }
 
@@ -655,6 +661,8 @@ async function appendPricedProductionReport(
   plan: OperationCompletionPlan,
   parsed: ValidatedOperationReportInput,
 ): Promise<{ reportId: string; reportedAt: Date; amount: string }> {
+  // Keep effective-time selection and report insertion atomic against publication.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext('print-shop-erp:piecework-price-book:publish'))`;
   // The locks above are followed by reporting-day gate -> reporter/day.
   const { reportedAt, workDate, workDateCol } =
     await lockCurrentPieceworkReportingDay(tx, account.id);
@@ -679,38 +687,16 @@ async function appendPricedProductionReport(
     );
   }
 
-  const books = await tx.pieceworkPriceBook.findMany({
-    where: {
-      status: PieceworkPriceBookStatus.PUBLISHED,
-      effectiveFrom: { lte: reportedAt },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: reportedAt } }],
-    },
-    select: {
-      id: true,
-      version: true,
-      ruleSetSha256: true,
-      rules: {
-        where: { operationType: operation.operationType, unit: operation.unit },
-        select: { operationType: true, unit: true, amount: true },
-      },
-    },
-    take: 2,
-  });
-  const book = books[0];
-  const rule = book?.rules[0];
-  if (
-    books.length !== 1 ||
-    !book ||
-    !book.ruleSetSha256 ||
-    book.rules.length !== 1 ||
-    !rule ||
-    rule.amount === null ||
-    rule.unit !== operation.unit
-  ) {
-    throw new OperationReportingError(
-      'PIECEWORK_RATE_UNAVAILABLE',
-      operation.unit === 'PER_BOX' ? '装盒工价尚未发布，请管理员配置按盒工价后报工' : '当前时点没有唯一、完整且已发布的工序工价',
-    );
+  let selected;
+  try {
+    selected = await resolveReporterPieceworkRate(tx, account.id, operation.operationType, operation.unit, reportedAt);
+  } catch (error) {
+    if (error instanceof PieceworkPricingError) throw new OperationReportingError('PIECEWORK_RATE_UNAVAILABLE', error.message);
+    throw error;
+  }
+  const { book, rule, policy } = selected;
+  if (parsed.expectedRateKey !== undefined && parsed.expectedRateKey !== selected.key) {
+    throw new OperationReportingError('PIECEWORK_RATE_UNAVAILABLE', '适用工价已调整，请刷新核对后重新报工');
   }
 
   const priced = calculatePieceworkAmount(
@@ -721,7 +707,7 @@ async function appendPricedProductionReport(
       defectQty: parsed.defect.toString(),
       reworkQty: parsed.rework.toString(),
       ...(operation.operationType === PieceworkOperationType.PARTIAL
-        ? { passCount: plan.passCount }
+        ? { passCount: operation.payrollPassCount ?? plan.passCount }
         : {}),
     },
     {
@@ -730,6 +716,10 @@ async function appendPricedProductionReport(
       amount: rule.amount.toString(),
     },
   );
+  const foil = await priceFoilReport(tx, { operation, reporterId: account.id, priceBookId: book.id,
+    completedQty: priced.completedQty, baseAmount: priced.amount, passCount: operation.payrollPassCount ?? plan.passCount, rule });
+  if (foil) priced.amount = foil.amount;
+  if (foil?.reviewRequired) await tx.productionOperation.update({ where: { id: operation.id }, data: { payrollReviewRequired: true } });
   const report = await tx.productionReport.create({
     data: {
       operationId: operation.id,
@@ -743,6 +733,7 @@ async function appendPricedProductionReport(
       unit: priced.unit,
       rate: priced.rate,
       amount: priced.amount,
+      wageSupplement: foil?.wageSupplement ?? '0.00',
       priceBookId: book.id,
       priceBookVersion: book.version,
       ruleSetSha256: book.ruleSetSha256,
@@ -766,6 +757,13 @@ async function appendPricedProductionReport(
             parsed.workOrderProgress?.toString() ?? null,
         },
         payroll: {
+          foilWage: foil?.detail ?? null,
+          rateSource: selected.source,
+          policyBookId: policy?.id ?? null,
+          policyBookVersion: policy?.version ?? null,
+          rateWorkerId: book.workerId ?? null,
+          passCount: operation.payrollPassCount ?? plan.passCount,
+          payrollRevision: operation.payrollRevision ?? 0,
           defectAndReworkExcluded: true,
           chargeableQty: priced.chargeableQty,
           rate: priced.rate,
@@ -897,6 +895,9 @@ async function reportProductionOperationInTx(
   }
 
   assertOperationIsReportable(operation);
+  if (input.expectedPayrollRevision !== undefined && input.expectedPayrollRevision !== (operation.payrollRevision ?? 0)) {
+    throw new OperationReportingError('INVALID_INPUT', '计薪次数已调整，请刷新页面核对后重新报工');
+  }
   const plan = plannedCompletedPieces(operation);
   const workOrderProgress = await prepareWorkOrderProgress(
     tx,

@@ -365,3 +365,82 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 事务内锁定价格写入，验证外部销售加工费草稿、更新时间、纸张身份与启用/缺货状态、产品分类和规格唯一性，创建或复用纸张/产品并保存草稿价格与审计。`null` 仅保留可建单组合，不生成价格规则；零元生成真实零价规则。重复价格格拒绝覆盖，价格修改沿用既有草稿矩阵 Action。返回 `{status:'success',paperId,priceBookId}` 或可预期业务错误 `{status:'error',message}`；权限与未知系统异常不吞掉。
 
 销售目录在保存后刷新，自动计价仍只消费已发布价目；历史工单不重算。`updateMaterial` 拒绝直接修改已关联建单产品的纸张名称、规格克重或分类，防止破坏产品与纸张身份。流程与验证范围见 [空白封纸张规格管理](./docs/空白封纸张规格管理-20260913.md)。
+
+## 2026-09-15 寄样品与打样
+
+- 工作台以 `quoteSampleOrderAction` 使用既有 `order:create` 权限和已发布价表读取器；返回整单 `total`（未知为 null）、`knownTotal`、快递/包装明细、可选包装规则及 `quoteToken`。独立 Server Action 位于现有建单报价模块，不增加 REST 路由。
+- `createOrderAction` 接受 `purpose=STANDARD|SAMPLE_SHIPMENT|PROOF` 和仅寄样可用的 `samplePackagingRuleCode`。不传用途兼容普通单。`pricingMode` 由服务端推导；外部销售仍不能提交金额、状态、价目版本或管理员定价字段。用途在建单后不可切换。
+- 特殊用途先存无价格草稿，再复用 `submitOrderAction(orderId,quoteToken)` 事务、所有权校验及报价变化响应。寄样保留真实数量，不要求生产工艺或设计图；打样须真实工艺与设计图片。寄样包装取当前已发布的最小数量档或指定有效规则，未录实际重量的寄付运费待核价。
+- 打样复用 `previewOrderPricingReviewAction` / `finalizeOrderPricingAction`，仅管理员填写单一「整单总价」。账本唯一收费键 `ORDER:PROOF:TOTAL`（SAMPLE_FEE）；款式、入袋加工均含在整单价内，保持零分项。空值、负数、超限、额外加工费及过期版本拒绝；明确 0 元须有定价依据。确认后的打样在下发/生产/打包阶段可沿此入口调整整单价，已结算禁止调整。普通工单核价状态范围保持原样。
+- 寄样下发进入 PACKING，不生成加工工序或计件工资；打样沿正常生产流程。打样发货不重算物流应收，附加收费/顺丰到付金额更正入口不适用。寄样沿原价目版本补录实际重量与运费，包装规格保持选中档位。
+- 首版样品用途的生产款式修改申请暂不开放；收件信息、备注、交期和取消沿原权限路径。变更生产款式应新建工单，保留原单历史。
+
+实现、测试及本地操作见 [寄样与打样开发任务](./docs/寄样与打样开发任务.md)。
+
+### 管理员全项收费编辑（2026-09-16）
+
+- `previewOrderPricingReviewAction({ orderId, editAll: true })` 返回当前可编辑的加工单价、一次性费用、包装加工费、订单级收费及逐地址快递／耗材费；默认省略 `editAll` 时仍为原待核价流程。
+- `finalizeOrderPricingAction` 接受相同的 `editAll` 标志及原有版本、金额、依据字段。在同一工单锁与事务中校验价格／工单版本、待审批申请、金额精度、合计、资源归属，保存可信人工价格和价格修订。仅 ADMIN 可使用；外部销售不可通过构造参数越权。
+- 全项模式用于已提交至发货后的未结算收费工单；草稿／驳回待修改／作废／结算／归档不可用。管理员新建入口“创建并编辑收费”先执行原提交与上传校验，再进入收费编辑，避免提交重新报价覆盖人工价。
+- 工厂直接业务允许首次补录逐地址物流费用。顺丰到付快递费必须为零。内部销售保持既有物流计费边界和销售额差额记账。
+- 寄样仅快递＋包装耗材；打样仅一条整单总价。逐款制版通过现有制版明细维护，不能同时重复恢复已免收的汇总版费；附加收费、优惠继续使用现有商业明细接口，工厂直接业务可维护。已有经审批调整允许有符号金额，普通费用不能为负数。
+
+## 计件工价管理（2026-09-16）
+
+`actions/owner-piecework-rules.ts` 的 `mutatePieceworkRulesAction` 要求
+`salary:rule:manage`（ADMIN），领域写操作再次核验管理员有效状态。
+
+- `intent=create`：取得唯一当前草稿；没有草稿时复制最后发布版创建连续后续版本。
+- `intent=save`：提交 `version`、ISO `updatedAt`、`partial/full/bag/box` 十进制字符串、
+  `sourceName`、`publishNote`、`effectiveFrom`。空生效时间表示发布时立即生效；有值必须带明确时区。
+  空金额只允许保存草稿；空 `box` 表示不配置按盒工价。
+- `intent=publish`：仅接收版本和修订时间，从已保存草稿取金额与说明。发布时再次校验，
+  不能以客户端金额覆盖保存值。返回 `{status: 'success'|'error', message}`；意外异常不吞掉。
+
+发布与草稿编辑共用事务锁；扫码报工在取价及写入期间取得共享锁。报工锁顺序为既有
+工单/工序/身份锁 → 工价共享锁 → 报工日/人员日锁；发布不取得报工日或工序锁。
+已发布版本只能创建后续版本调整，重复发布不重复记审计或改变生效时间。
+
+### 2026-09-16：管理员调整局部工序计薪次数
+
+`updatePayrollPassAction`（`salary:rule:manage` + 活跃管理员复核）接收
+`operationId / expectedRevision / passCount / reason`；次数为 1–999 整数、原因 2–500 字。
+只调整当前版本未完工局部工序，使用订单→工序锁、版本检查及工单审计。
+师傅报工 Action 新增必填 `expectedPayrollRevision`；旧页面须刷新，已成功请求重试仍返回原记录。
+
+### 师傅个人工价（2026-09-17）
+
+`mutatePersonalPieceworkAction(workerId, previous, form)` 仅 `salary:rule:manage` 管理员可调用，领域事务再次验证管理员与目标账号状态。账号取绑定参数，表单账号不能覆盖它。
+`intent=create/save/publish` 复用工价草稿流程；save 包含 `version/updatedAt/useUnifiedRates/partial/full/bag/box/sourceName/publishNote/effectiveFrom`。个人工价不再要求手填 `sourceName`；旧依据保留，缺省时发布来源自动记录为“管理员账号工价设置”。调整说明仍必填，统一工价的依据要求保持不变。只保存当前岗位字段，空金额与零金额分开。publish 只接收已保存的版本和修订时间，不能直接带价发布。
+扫码报工表单新增必填 `expectedRateKey`，为当前价格簿与个人模式版本的组合键。成功重试仍返回原记录；新报工工价已变化则拒绝并要求刷新。客户端不能指定结算价格或他人账号。
+
+### 2026-09-17 师傅分档工价与工单提成核定
+
+- 统一／个人工价草稿增加 `partialSmall`、`partialSetup`、`fullSmall`、`fullSetup`；同一工序的包干和装版金额必须一起填写，发布后随版本冻结。省略两项的旧调用仍表示历史线性规则。
+- `reviewOrderWagesAction`：仅 `salary:rule:manage`，领域层再次检查在职管理员。输入工序 ID、报工明细修订摘要、每位师傅／工作日的锚点报工 ID 和目标总额、至少两字原因。
+- 核定按工单→工序→工作日→人员锁序串行化；拒绝陈旧明细、漏项、重复对象、可编辑行的负目标金额及已结算日改价。原报工不变，仅追加 `ADJUSTMENT` 差额，产量全为零。重复请求不重复记账，改变已提交请求则要求刷新。
+- 多人接手或计薪条件变化标记 `payrollReviewRequired`；工单详情“工单提成明细”核定后方可锁定结算。核定不改变师傅账号工价规则。
+
+- 分档烫金报工锁定结算前，工序须已完成或取消，且不存在待人工核定标记。未结束返回 `SETTLEMENT_STATE_CONFLICT`，不创建结算或明细。
+- 提成核定 `targets[].amount` 接受带符号十进制金额以携带只读冲正行；领域校验禁止更改冲正行或已结算行，可编辑行目标不得小于零。原额核定仅清除待核定状态，不新增金额流水。
+
+### 2026-09-17 师傅报工核对与未结算流水
+
+扫码报工前端先核对本批数量，再调用原 `reportProductionOperationAction` 或共享进度 Action；完成数和工单件数进度默认空白。服务端数量、岗位、版本、工价及幂等校验保持不变，计件报工成功同时刷新 `/worker/salary`。
+
+`lib/salary/worker-pending-reports.ts` 供工资 Server Component 读取本人尚未关联结算项的流水。服务端重新核对账号启用状态及计件岗位，以会话 `actor.id` 限定 `reporterId`，不接受客户端指定其他师傅。按上海日期筛选，以 `pendingPage` 独立分页，每页 20 条；原报工、人工调整、冲正按原金额及符号展示，不重算工资、不改历史快照。
+
+### 建单设计分组与批量工作区（2026-09-18）
+
+`createOrderAction` 的 `items[].designGroupKey` 为可选 nullable UUID。同一工单内相同标识的材料、工艺和稿件版本必须一致，规格与数量可不同；缺失标识的明细独立处理。该字段只保存分组，不参与金额计算或赋予资源访问权限。外部销售仍经过禁止收费字段的命令边界。
+
+批量工作区复用单工单 create/quote/upload/submit，不新增绕过鉴权的批量 API。每张工单使用独立、稳定的 `clientSubmissionId`，创建结果立即记录；上传或提交失败继续已有草稿，不对已成功工单重放创建。
+
+创建事务在首条 `OrderLog(action=CREATE).changedFields.createRequest` 保存 v1 请求指纹（规范化对象键顺序后的 SHA-256）。同一提交标识的重试必须同时匹配创建人、归属销售及首次请求事实；事务内命中与唯一键冲突恢复均执行相同检查。不同内容或旧记录缺少指纹时返回含原工单号的核对提示，不能作为新内容保存成功，也不自动生成新提交标识。该元数据不展示为费用或操作变更；历史工单与价格快照不回填。
+
+### 2026-09-18 师傅报工问题反馈
+
+- `createReportDisputeAction(reportId, state, formData)`：`task:dispute:create`，仅活跃 WORKER 对本人 `ProductionReport` 发起问题；说明 5–1000 字。同一报工最多一个待处理问题，重复提交不产生第二条。
+- `reviewReportDisputeAction(disputeId, state, formData)`：`task:dispute:review`，仅活跃 ADMIN；处理结果 `RESOLVED` / `REJECTED`，回复 2–1000 字；已处理记录拒绝再次回复。
+- 两个 action 都返回 `{ status: 'success' | 'error', message }`；领域层重复校验权限和输入，事务写异议与工单日志。不修改报工数量、计件金额或结算记录。
+- `/worker/reports` 按当前会话账号分页查询计件报工与调整；`/worker/reports/[id]` 强制本人所有权。管理员在工单详情的生产记录区处理问题，师傅在报工明细查看回复。

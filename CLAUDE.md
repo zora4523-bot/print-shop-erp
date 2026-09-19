@@ -768,6 +768,9 @@ export async function createProductAction(
   salary / finance / notification，跨域字段 helper 在 `shared.ts`）。新增 schema 放进对应域文件，
   入口文件只做 re-export；`lib/order/__tests__/edit-field-inventory.test.ts` 会遍历整个目录。
 - 列表页分页/排序/筛选用 `lib/admin/table.ts` 的解析器，不要各页自己 parse searchParams。
+- 成功后 `redirect()` 的 action **必须**用 `lib/admin/receipt.ts` 的 `appendReceipt` 带回执，目标页
+  `readReceipt(searchParams)` + `ReceiptNotice` 播报（ui-规范 §5.4、DECISIONS 2026-09-18）。
+  `useActionState` 的状态随旧页面丢失，不带回执 = 保存后没有任何反馈。回执 key 只用 `RECEIPT_KEYS` 字典。
 
 ### 15.4 后台任务与 cron
 

@@ -63,6 +63,8 @@ export async function reportProductionOperationAction(
   formData: FormData,
 ): Promise<ReportProductionOperationActionResult> {
   const actor = await requirePermission('task:report');
+  const expectedRateKey = formData.get('expectedRateKey');
+  const expectedPayrollRevision = formInteger(formData, 'expectedPayrollRevision');
   const completedQty = formInteger(formData, 'completedQty');
   const defectQty = formInteger(formData, 'defectQty');
   const reworkQty = formInteger(formData, 'reworkQty');
@@ -72,6 +74,8 @@ export async function reportProductionOperationAction(
   );
   const idempotencyKey = formData.get('idempotencyKey');
   if (
+    typeof expectedRateKey !== 'string' || !expectedRateKey ||
+    expectedPayrollRevision === null ||
     completedQty === null ||
     defectQty === null ||
     reworkQty === null ||
@@ -85,6 +89,8 @@ export async function reportProductionOperationAction(
     const result = await reportProductionOperation(
       {
         operationId,
+        expectedPayrollRevision,
+        expectedRateKey,
         completedQty,
         defectQty,
         reworkQty,
@@ -97,6 +103,7 @@ export async function reportProductionOperationAction(
     revalidatePath(`/worker/tasks/${operationId}`);
     revalidatePath('/worker/orders');
     revalidatePath(`/worker/orders/${result.orderId}`);
+    revalidatePath('/worker/salary');
     revalidatePath(`/orders/${result.orderId}`);
     return {
       status: 'success',

@@ -148,19 +148,24 @@ export function Group({
   title,
   children,
   first = false,
+  appearance = 'divided',
+  description,
 }: {
   title: string;
   children: ReactNode;
   first?: boolean;
+  appearance?: 'divided' | 'plain';
+  description?: string;
 }) {
   return (
     <section
       aria-label={title}
-      className={cn('border-t pt-4', first ? 'border-0 pt-0' : 'mt-4')}
+      className={appearance === 'plain' ? 'min-w-0' : cn('border-t pt-4', first ? 'border-0 pt-0' : 'mt-4')}
     >
-      <h2 className="mb-3.5 text-xs font-extrabold tracking-[0.2em] text-muted-foreground">
+      <h2 className={appearance === 'plain' ? 'mb-4 text-base font-semibold text-foreground' : 'mb-3.5 text-xs font-extrabold tracking-[0.2em] text-muted-foreground'}>
         {title}
       </h2>
+      {description ? <p className="-mt-2 mb-4 text-sm text-muted-foreground">{description}</p> : null}
       {children}
     </section>
   );

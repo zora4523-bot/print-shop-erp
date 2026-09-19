@@ -1,3 +1,4 @@
+import { createOrderRequestFingerprint } from '@/lib/order/create-request-fingerprint';
 import * as quoteService from '../order/create-order-quote-service';
 vi.mock('@/lib/order/production-readiness', () => ({
   prepareOrderForProductionInTx: vi.fn(async (tx, orderId) => {
@@ -7,6 +8,7 @@ vi.mock('@/lib/order/production-readiness', () => ({
 }));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
+import { Prisma } from '../../generated/prisma/client';
 import {
   DesignFileType,
   OrderCostCategory,
@@ -31,7 +33,7 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
     };
-    orderItem: { findFirst: ReturnType<typeof vi.fn> };
+    orderItem: { findFirst: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
     craft: { findMany: ReturnType<typeof vi.fn> };
     party: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
     user: { findUnique: ReturnType<typeof vi.fn> };
@@ -90,7 +92,7 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
       updateMany: vi.fn(),
     },
-    orderItem: { findFirst: vi.fn() },
+    orderItem: { findFirst: vi.fn(), findMany: vi.fn() },
     craft: { findMany: vi.fn() },
     party: { findUnique: vi.fn(), findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
@@ -191,6 +193,8 @@ vi.mock('@/lib/salary/cs-sales', () => ({
   assertCsOrderSalesLedgerReconciledInTx:
     assertCsOrderSalesLedgerReconciledMock,
   recordCsSalesEntryInTx: recordCsSalesEntryMock,
+  // No logistics charges in these fixtures: the basis equals the total.
+  csSalesBasisAmountInTx: vi.fn(async (_tx: unknown, _orderId: string, total: { toString(): string }) => new Decimal(total.toString()).toFixed(2)),
   CsSalesLedgerError: MockCsSalesLedgerError,
 }));
 const { appendPricingRevisionMock } = vi.hoisted(() => ({
@@ -527,6 +531,7 @@ beforeEach(() => {
   for (const fn of Object.values(dbMock.order)) fn.mockReset();
   dbMock.order.updateMany.mockResolvedValue({ count: 1 });
   dbMock.orderItem.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.orderItem.findMany.mockReset().mockResolvedValue([]);
   dbMock.craft.findMany.mockReset();
   dbMock.party.findUnique.mockReset();
   dbMock.party.findFirst.mockReset().mockResolvedValue({ id: 'customer-1' });
@@ -2550,6 +2555,13 @@ describe('submitOrder', () => {
     });
   });
 
+  it('拒绝退役前保存的内销 120g 草稿首次提交', async () => {
+    dbMock.order.findUnique.mockResolvedValue(submittedRichRow);
+    dbMock.orderItem.findMany.mockResolvedValue([{ paperType: '120g珠光艳闪', paperWeightGsm: 120 }]);
+    await expect(submitOrder('o1', salesActor)).rejects.toThrow('120g 纸张已停用');
+    expect(dbMock.orderItem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { orderId: 'o1' } }));
+  });
+
   it('refuses when a non-owner SALES tries to submit another SALES\'s order (Codex round 27 / P1)', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
@@ -3600,7 +3612,7 @@ describe('shipOrder', () => {
     );
 
     await expect(shipOrder('o1', ownerActor, 'SF001')).rejects.toThrow(
-      /外部销售工单发货前必须逐地址确认快递费与打包耗材费/,
+      /发货前必须逐地址确认快递费与打包耗材费/,
     );
     expect(dbMock.orderChangeRequest.findFirst).not.toHaveBeenCalled();
     expect(dbMock.order.update).not.toHaveBeenCalled();
@@ -6266,6 +6278,9 @@ describe('admin creates for an external salesperson', () => {
       customerRef: null,
       status: OrderStatus.DRAFT,
       priceRevision: 0,
+      logs: { create: expect.arrayContaining([expect.objectContaining({
+        action: 'CREATE', changedFields: { createRequest: { version: 1, fingerprint: createOrderRequestFingerprint(delegatedInput()) } },
+      })]) },
     });
     expect(dbMock.party.findUnique).not.toHaveBeenCalled();
     expect(
@@ -6298,6 +6313,7 @@ describe('admin creates for an external salesperson', () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'created',
       orderNo: 'GD-test',
+      logs: [{ changedFields: { createRequest: { version: 1, fingerprint: createOrderRequestFingerprint(delegatedInput()) } } }],
       createdById: ownerActor.id,
       submitterId: 'sales-2',
       pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
@@ -6318,6 +6334,45 @@ describe('admin creates for an external salesperson', () => {
         role: Role.ADMIN,
       }),
     ).rejects.toThrow('提交标识');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it('rejects changed facts after an ambiguous successful create instead of returning the old order', async () => {
+    const input = delegatedInput();
+    dbMock.order.findUnique.mockResolvedValue({ id: 'created', orderNo: 'GD-original',
+      createdById: ownerActor.id, submitterId: 'sales-2', items: [{ id: 'item' }],
+      logs: [{ changedFields: { createRequest: { version: 1, fingerprint: createOrderRequestFingerprint(input) } } }],
+    });
+    await expect(createOrderDomain({ ...input, receiverAddress: '新的收货地址' }, ownerActor)).rejects.toThrow('GD-original');
+    await expect(createOrderDomain({ ...input, items: [{ ...input.items[0]!, quantity: 2000 }] }, ownerActor)).rejects.toThrow('已保存');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it('does not silently replay historical requests without comparable creation facts', async () => {
+    dbMock.order.findUnique.mockResolvedValue({ id: 'legacy', orderNo: 'GD-legacy',
+      createdById: ownerActor.id, submitterId: 'sales-2', items: [{ id: 'item' }], logs: [],
+    });
+    await expect(createOrderDomain(delegatedInput(), ownerActor)).rejects.toThrow('工单列表');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('checks original facts after a concurrent unique conflict (changed=%s)', async (changed) => {
+    const input = delegatedInput();
+    dbMock.$transaction.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+      code: 'P2002', clientVersion: 'test', meta: { target: ['clientSubmissionId'] },
+    }));
+    dbMock.order.findUnique.mockResolvedValue({ id: 'concurrent', orderNo: 'GD-concurrent',
+      createdById: ownerActor.id, submitterId: 'sales-2', items: [{ id: 'item' }],
+      logs: [{ changedFields: { createRequest: { version: 1, fingerprint: createOrderRequestFingerprint(input) } } }],
+    });
+    const pending = createOrderDomain(changed ? { ...input, receiverAddress: '修改地址' } : input, ownerActor);
+    if (changed) await expect(pending).rejects.toThrow('GD-concurrent');
+    else await expect(pending).resolves.toMatchObject({ id: 'concurrent', itemIds: ['item'] });
+  });
+  it.each([null, '管理员核价'])('rejects retired 120g paper before any write (manualQuoteReason=%s)', async (manualQuoteReason) => {
+    const input = delegatedInput();
+    await expect(createOrderDomain({
+      ...input,
+      items: [{ ...input.items[0]!, paperType: '120g珠光艳闪', paperWeightGsm: 120, manualQuoteReason }],
+    }, ownerActor)).rejects.toThrow('120g 纸张已停用');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
   it('rejects oversized bags even when a domain caller bypasses the schema', async () => {

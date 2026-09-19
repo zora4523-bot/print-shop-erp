@@ -39,8 +39,9 @@ for (const actor of ['owner', 'sales'] as const) {
     await expect(rail.getByText('机烫费', { exact: true })).toBeVisible();
     await expect(rail.getByText(/入袋 /)).toBeVisible();
     if (actor === 'owner') {
-      await expect(rail.getByText(/纸箱耗材/)).toHaveCount(0);
-      await expect(rail.getByText(/快递费/)).toHaveCount(0);
+      // 2026-09-18 起工厂直接 / 内销与外销共用物流价目，未关联外部销售时也列物流行。
+      await expect(rail.getByText(/纸箱耗材/)).toBeVisible();
+      await expect(rail.getByText(/快递费/)).toBeVisible();
       await setManualProcessingPrice(page);
       const priceInput = page.getByLabel('本款加工费（元）');
       await priceInput.fill('');
@@ -52,7 +53,7 @@ for (const actor of ['owner', 'sales'] as const) {
       await page
         .getByLabel('关联外部销售')
         .selectOption({ label: 'E2E 销售 · e2e-sales' });
-      await expect(page.getByLabel('款式名', { exact: true })).toBeVisible();
+      await expect(page.getByLabel('设计款名称', { exact: true })).toBeVisible();
       await expect(page.getByLabel('稿件版本', { exact: true })).toBeVisible();
       await expect(
         page.getByRole('group', { name: '款式加工费', exact: true }),
@@ -107,7 +108,8 @@ test('internal submit locates missing fields, reviews the exact manual price, an
   await expect(fees.getByText('人工价', { exact: true })).toBeVisible();
   await expect(fees.getByText('不包装', { exact: true })).toBeVisible();
   await expect(fees.getByText('¥ 0.00', { exact: true })).toBeVisible();
-  await expect(fees.getByText(/纸箱耗材|快递费/)).toHaveCount(0);
+  await expect(fees.getByText(/纸箱耗材/)).toBeVisible();
+  await expect(fees.getByText(/快递费/)).toBeVisible();
     await page.screenshot({ path: '/tmp/erp-order-ui-parity-20260913/internal-review.png', fullPage: true });
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();

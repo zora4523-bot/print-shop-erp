@@ -18,7 +18,8 @@ import { ProductReferenceImpact } from '@/components/business/product/ProductRef
 import { ProductsTable } from '@/components/business/product/ProductsTable';
 import { ToggleActiveButton } from '@/components/business/product/ToggleActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { RuleSpecWorkspace } from '@/components/business/rules/catalog/RuleSpecWorkspace';
 import type { ProductCategory } from '@/generated/prisma/enums';
@@ -56,6 +57,7 @@ export type ProductCatalogListProps = {
 
 export type ProductCatalogDetailProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
   routeBase: ProductRouteBase;
   categories?: readonly ProductCategory[];
 };
@@ -272,11 +274,13 @@ export async function NewProductCatalogItem({
 
 export async function EditProductCatalogItem({
   params,
+  searchParams,
   routeBase,
   categories,
 }: ProductCatalogDetailProps) {
   await requirePermission('dict:product:manage');
   const { id } = await params;
+  const receipt = readReceipt(await searchParams);
   const [product, referenceImpact] = await Promise.all([
     loadProduct(id),
     getProductReferenceImpact(id),
@@ -312,6 +316,7 @@ export async function EditProductCatalogItem({
 
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="可建单组合" />
       <RuleCenterPageHeader
         title={`编辑可建单组合：${
           externalPriceBusinessText(product.name) || '未命名组合'

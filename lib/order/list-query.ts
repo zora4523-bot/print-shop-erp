@@ -1,3 +1,4 @@
+import { foilColorSearchValues } from '@/lib/order/foil-colors';
 import {
   MachineType,
   OrderKind,
@@ -694,7 +695,7 @@ function globalSearchFilter(query: string): Prisma.OrderWhereInput {
               { name: contains },
               { specification: contains },
               { paperType: contains },
-              { foilColors: { has: query } },
+              ...(foilColorSearchValues([query]).map((color) => ({ foilColors: { has: color } }))),
               { product: { name: contains } },
               {
                 tasks: {
@@ -879,7 +880,7 @@ export function buildOrderWhere(
       : {}),
     ...(filters.craftIds.length > 0 ? { crafts: { hasSome: filters.craftIds } } : {}),
     ...(filters.foilColors.length > 0
-      ? { foilColors: { hasSome: filters.foilColors } }
+      ? { foilColors: { hasSome: foilColorSearchValues(filters.foilColors) } }
       : {}),
     ...(Object.keys(taskWhere).length > 0 ? { tasks: { some: taskWhere } } : {}),
   };

@@ -196,7 +196,7 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(html).toContain('修改款式 #1');
     expect(html).toContain('数量 1,000 → 1,200');
     expect(html).toContain('规格 90×165 → 100×180');
-    expect(html).toContain('正面烫金 金色 → 银色');
+    expect(html).toContain('正面烫金 金色 → 银金');
     expect(html).toContain('反面烫金 无 → 红金');
     expect(html).toContain('已自动计价');
   });

@@ -26,14 +26,10 @@ type SummaryInput = Pick<
 >;
 
 export function orderCreateFeeSummary(input: SummaryInput) {
-  const {
-    quoteItems,
-    packaging,
-    plateFee,
-    usesExternalSalesPricing,
-    totalSemantics,
-  } = input;
-  const logistics = usesExternalSalesPricing ? input.logistics : null;
+  const { quoteItems, packaging, plateFee, totalSemantics } = input;
+  // Every billing settlement quotes delivery from the published logistics
+  // book since 2026-09-18, so the summary reads logistics for internal orders too.
+  const logistics = input.logistics;
   const pending = (status: string) =>
     status === 'incomplete' || status === 'error';
   const candidates = [
@@ -73,12 +69,8 @@ export function orderCreateFeeSummary(input: SummaryInput) {
     ...(quoteItems.some((item) => pending(item.status)) ? ['待核价款'] : []),
     ...(pending(packaging.status) ? ['待核包装费'] : []),
     ...(plateFee ? ['制版费'] : []),
-    ...(usesExternalSalesPricing && logistics?.packagingAmount == null
-      ? ['待核纸箱费']
-      : []),
-    ...(usesExternalSalesPricing && logistics?.shippingAmount == null
-      ? ['快递费']
-      : []),
+    ...(logistics?.packagingAmount == null ? ['待核纸箱费'] : []),
+    ...(logistics?.shippingAmount == null ? ['快递费'] : []),
   ];
   if (totalSemantics === 'EXCLUDES_MANUAL_ITEMS' && excludedLabels.length === 0)
     excludedLabels.push('待核费用');

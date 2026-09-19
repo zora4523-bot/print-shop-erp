@@ -1,3 +1,4 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { ChevronDown, Search, SlidersHorizontal, X } from 'lucide-react';
@@ -672,7 +673,7 @@ function activeFilterChips(
   list(
     'foilColor',
     f.foilColors,
-    (value) => `烫金色：${value}`,
+    (value) => `烫金色：${foilColorLabel(value)}`,
     encodeFoilColorFilterValues,
   );
   list(

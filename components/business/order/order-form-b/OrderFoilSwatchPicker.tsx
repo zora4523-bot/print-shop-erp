@@ -1,5 +1,7 @@
 'use client';
 
+import { foilColorLabel } from '@/lib/order/foil-colors';
+
 import Image from 'next/image';
 import { ArrowDown, ArrowUp, X } from 'lucide-react';
 import type { CSSProperties } from 'react';
@@ -170,8 +172,8 @@ export function OrderFoilSwatchPicker({
               aria-pressed={isSelected}
               aria-label={
                 isSelected && maximum > 1
-                  ? `${option.label}，第 ${selectedIndex + 1} 色`
-                  : option.label
+                  ? `${foilColorLabel(option.label)}，第 ${selectedIndex + 1} 色`
+                  : foilColorLabel(option.label)
               }
               disabled={unavailable}
               className={cn(
@@ -226,7 +228,7 @@ export function OrderFoilSwatchPicker({
                 </span>
               ) : null}
               <span className="text-xs font-semibold leading-tight">
-                {option.label}
+                {foilColorLabel(option.label)}
               </span>
             </Button>
           );
@@ -242,7 +244,7 @@ export function OrderFoilSwatchPicker({
           <span className="sr-only">
             ，选择顺序：
             {selected
-              .map((color, index) => `第 ${index + 1} 色 ${color}`)
+              .map((color, index) => `第 ${index + 1} 色 ${foilColorLabel(color)}`)
               .join(' · ')}
           </span>
         ) : null}
@@ -258,7 +260,7 @@ export function OrderFoilSwatchPicker({
                 className="inline-flex min-h-7 items-center gap-1 rounded-full bg-muted py-0.5 pl-2.5 pr-1 text-xs text-foreground"
               >
                 <span className="font-semibold tabular-nums">{index + 1}</span>
-                <span className="font-medium">{color}</span>
+                <span className="font-medium">{foilColorLabel(color)}</span>
                 <span className="ml-0.5 inline-flex items-center">
                   {selected.length > 1 ? (
                     <>
@@ -266,7 +268,7 @@ export function OrderFoilSwatchPicker({
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        aria-label={`将第 ${index + 1} 色 ${color} 上移`}
+                        aria-label={`将第 ${index + 1} 色 ${foilColorLabel(color)} 上移`}
                         data-order-action="up"
                         disabled={disabled || index === 0}
                         className="size-11 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"
@@ -287,7 +289,7 @@ export function OrderFoilSwatchPicker({
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        aria-label={`将第 ${index + 1} 色 ${color} 下移`}
+                        aria-label={`将第 ${index + 1} 色 ${foilColorLabel(color)} 下移`}
                         data-order-action="down"
                         disabled={disabled || index === selected.length - 1}
                         className="size-11 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"
@@ -310,7 +312,7 @@ export function OrderFoilSwatchPicker({
                     type="button"
                     variant="ghost"
                     size="icon-xs"
-                    aria-label={`移除第 ${index + 1} 色 ${color}`}
+                    aria-label={`移除第 ${index + 1} 色 ${foilColorLabel(color)}`}
                     data-order-action="remove"
                     disabled={disabled || selected.length <= minimumSelections}
                     className="size-11 rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:bg-transparent disabled:opacity-30"

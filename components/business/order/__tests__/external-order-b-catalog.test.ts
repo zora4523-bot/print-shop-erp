@@ -37,7 +37,17 @@ describe('external order B catalog', () => {
     },
   ];
 
-  it('derives the available weight from exact active product facts', () => {
+  it('displays pearl dark red while retaining the existing catalog and price identity', () => {
+    const product = { ...products[1], paperType: '160g珠光闪红' };
+    const [paper] = buildExternalOrderPapers([product]);
+    expect(paper.label).toBe('珠光暗红');
+    expect(paper.key).toBe('珠光闪红');
+    expect(paper.paperTypeByWeight[160]).toBe('160g珠光闪红');
+    expect(paper.variants[0].paperType).toBe(product.paperType);
+    expect(externalOrderWeightOptionsForSelection(paper, OrderItemPricingRoute.STOCK_BLANK, product.specification)).toEqual([{ value: 160, disabled: false }]);
+  });
+
+  it('excludes retired 120g while preserving other configured weights', () => {
     const pearlFlash = buildExternalOrderPapers(products).find(
       (paper) => paper.label === '珠光艳闪',
     );
@@ -49,7 +59,7 @@ describe('external order B catalog', () => {
         OrderItemPricingRoute.STOCK_BLANK,
         '迷你封50×80',
       ),
-    ).toEqual([120]);
+    ).toEqual([]);
     expect(
       externalOrderWeightsForSelection(
         pearlFlash!,

@@ -1,5 +1,7 @@
 'use client';
 
+import { foilColorLabel } from '@/lib/order/foil-colors';
+
 import type * as React from 'react';
 
 import {
@@ -122,7 +124,7 @@ function hasSameTextSet(
 }
 
 function foilColorText(colors: readonly string[]): string {
-  return colors.length > 0 ? colors.join('、') : '无';
+  return colors.length > 0 ? colors.map(foilColorLabel).join('、') : '无';
 }
 
 function orderChangePreviewFactDescriptions(

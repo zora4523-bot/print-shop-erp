@@ -1,5 +1,9 @@
 'use client';
 
+import type { OrderCreationLifecycle, SampleOrderEditorSnapshot } from '@/components/business/order/order-creation-editor';
+import { type SampleOrderFormState, type SampleOrderContext, SampleOrderForm } from '@/components/business/order/SampleOrderForm';
+import { OrderPurposePicker } from '@/components/business/order/OrderPurposePicker';
+import { useSampleWorkbenchDraft } from './useSampleWorkbenchDraft';
 import { useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
@@ -32,11 +36,50 @@ import { Card } from '@/components/ui/card';
 import { ActionNotice, EmptyState } from '@/components/ui-business';
 import { useWorkbenchAutoQuote } from './useWorkbenchAutoQuote';
 
+function workbenchInputIssue(item: { productId: string | null; crafts: string[] }, valid: boolean) {
+  return !item.productId
+    ? '请选择可用的纸张、规格和匹配产品'
+    : item.crafts.length === 0
+      ? '所选工艺暂不可用，请联系管理员配置后重试'
+      : !valid
+        ? '请补全数量和工艺条件'
+        : null;
+}
+
+function selectWorkbenchItem(
+  item: import('@/lib/auth/schemas').CreateOrderInput['items'][number],
+  change: OrderItemSelectionChange,
+  options: ExternalCreateOrderOptions,
+  crafts: readonly PricingCraftIdentity[],
+) {
+  const next = orderItemSelectionUpdate(item, change, options.products, options);
+  if (!next) return null;
+  return change.type === 'customSize' ? next.item : normalizeExternalOrderItem({
+    ...next.options, item: next.item, crafts, products: options.products,
+    paperMaterials: options.papers,
+    preserveCustomSize: next.options.preserveCustomSize ?? true,
+  });
+}
+
 export function WorkbenchCalculator({
   options,
   crafts = [],
   draftScope = '',
+  createEntry,
 }: {
+  createEntry?: {
+    editorSnapshot?: SampleOrderEditorSnapshot;
+    onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void;
+    lifecycle?: OrderCreationLifecycle;
+    canEditFees?: boolean;
+    purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
+    form: SampleOrderFormState;
+    context: SampleOrderContext;
+    item: import('@/lib/auth/schemas').CreateOrderInput['items'][number];
+    onStandard: (route: import('@/generated/prisma/enums').OrderItemPricingRoute, form: SampleOrderFormState) => void;
+    onPurposeChange: (purpose: 'SAMPLE_SHIPMENT' | 'PROOF') => void;
+    onComplete: () => void;
+  };
   options: ExternalCreateOrderOptions;
   crafts?: readonly PricingCraftIdentity[];
   draftScope?: string;
@@ -44,27 +87,22 @@ export function WorkbenchCalculator({
   const uid = useId().replaceAll(':', '');
   const router = useRouter();
   const [item, setItem] = useState(() =>
-    createExternalOrderItem(
+    createEntry?.editorSnapshot?.item ?? createEntry?.item ?? createExternalOrderItem(
       crafts,
       options.products,
       options.papers,
       options.foilColors[0]?.name,
     ),
   );
+  const { purpose, setPurpose, specialLocked, sampleFormProps } = useSampleWorkbenchDraft(item, setItem, draftScope, createEntry);
   const [markup, setMarkup] = useState('35');
   const [transferError, setTransferError] = useState<string | null>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const fields = orderItemFieldOptions(item, options.products, options);
   const parsed = workbenchItemQuoteSchema.safeParse({ item });
-  const inputIssue = !item.productId
-    ? '请选择可用的纸张、规格和匹配产品'
-    : item.crafts.length === 0
-      ? '所选工艺暂不可用，请联系管理员配置后重试'
-      : !parsed.success
-        ? '请补全数量和工艺条件'
-        : null;
+  const inputIssue = workbenchInputIssue(item, parsed.success);
   const { result, pending, invalidate, calculate } = useWorkbenchAutoQuote(
-    parsed.success && !inputIssue ? parsed.data : null,
+    purpose === 'STANDARD' && parsed.success && !inputIssue ? parsed.data : null,
     resultHeading,
     inputIssue,
   );
@@ -74,25 +112,8 @@ export function WorkbenchCalculator({
     setItem(next);
   }
   function select(change: OrderItemSelectionChange) {
-    const next = orderItemSelectionUpdate(
-      item,
-      change,
-      options.products,
-      options,
-    );
-    if (next)
-      update(
-        change.type === 'customSize'
-          ? next.item
-          : normalizeExternalOrderItem({
-              ...next.options,
-              item: next.item,
-              crafts,
-              products: options.products,
-              paperMaterials: options.papers,
-              preserveCustomSize: next.options.preserveCustomSize ?? true,
-            }),
-      );
+    const next = selectWorkbenchItem(item, change, options, crafts);
+    if (next) update(next);
   }
   const quote = result?.status === 'success' ? result.quote : null;
   const markupValid =
@@ -117,19 +138,20 @@ export function WorkbenchCalculator({
       setTransferError('报价条件暂时无法带入，请检查浏览器存储权限后重试');
     }
   }
-  if (!options.products.length)
-    return (
-      <EmptyState
-        title="暂无可报价产品"
-        description="请联系管理员配置产品后重试"
-      />
-    );
   return (
     <div className="@container min-w-0">
-      <div className="grid min-w-0 gap-4 @min-[881px]:grid-cols-[minmax(0,1fr)_19rem]">
+      <div className={purpose === 'SAMPLE_SHIPMENT' ? 'grid min-w-0 gap-4' : 'grid min-w-0 gap-4 @min-[881px]:grid-cols-[minmax(0,1fr)_19rem]'}>
         <Card className="min-w-0 p-4 sm:p-6">
-          <h2 className="mb-4 text-lg font-semibold">款式条件</h2>
+          <h2 className="mb-4 text-lg font-semibold">{purpose === 'SAMPLE_SHIPMENT' ? '工单条件' : '款式条件'}</h2>
+          <OrderPurposePicker value={purpose === 'STANDARD' ? item.pricingRoute : purpose} disabled={specialLocked}
+            onChange={(value) => {
+              invalidate();
+              if (value === 'SAMPLE_SHIPMENT' || value === 'PROOF') { setPurpose(value); createEntry?.onPurposeChange(value); }
+              else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') { if (createEntry) createEntry.onStandard(value, sampleFormProps.value); else { setPurpose('STANDARD'); select({ type: 'route', value }); } }
+            }} />
+          {purpose === 'SAMPLE_SHIPMENT' ? <div className="mt-4"><SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} purpose="SAMPLE_SHIPMENT" {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /></div> : !options.products.length ? <EmptyState title="暂无可报价产品" description="请联系管理员配置产品后重试" /> : <fieldset disabled={specialLocked} className="min-w-0">
           <OrderItemCraftFields
+            hideRoute={purpose === 'STANDARD'}
             uid={uid}
             item={item}
             first
@@ -199,9 +221,10 @@ export function WorkbenchCalculator({
               onQuantityChange={(quantity) => update({ ...item, quantity })}
             />
           </div>
+          </fieldset>}
         </Card>
-        <aside className="min-w-0 @min-[881px]:sticky @min-[881px]:top-20 @min-[881px]:self-start">
-          <Card className="min-w-0 gap-4 p-4 sm:p-5">
+        {purpose !== 'SAMPLE_SHIPMENT' && options.products.length > 0 ? <aside className="min-w-0 @min-[881px]:sticky @min-[881px]:top-20 @min-[881px]:self-start">
+          {purpose === 'PROOF' ? <SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} purpose="PROOF" item={item} {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
             <h2
               ref={resultHeading}
               tabIndex={-1}
@@ -325,8 +348,8 @@ export function WorkbenchCalculator({
             {transferError ? (
               <ActionNotice tone="error" title={transferError} />
             ) : null}
-          </Card>
-        </aside>
+          </Card>}
+        </aside> : null}
       </div>
     </div>
   );

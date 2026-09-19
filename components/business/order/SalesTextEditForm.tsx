@@ -4,6 +4,7 @@ import { editSalesTextAction } from '@/actions/order-sales-text';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { ActionNotice } from '@/components/ui-business';
 export function SalesTextEditForm({ orderId, targetId, field, version, value, label }: {
   orderId: string; targetId: string; field: 'itemName' | 'itemRemark' | 'packagingName'; version: number; value: string; label: string;
 }) {
@@ -14,6 +15,9 @@ export function SalesTextEditForm({ orderId, targetId, field, version, value, la
     <input type="hidden" name="expectedEditVersion" value={version} />
     <label className="block space-y-1 text-sm"><span>{label}</span>{field === 'itemRemark' ? <Textarea name="value" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} disabled={busy} /> : <Input name="value" value={draft} onChange={(event) => setDraft(event.target.value)} required={field === 'itemName'} maxLength={64} disabled={busy} />}</label>
     {state?.error ? <p role="alert" className="text-sm text-destructive">{state.error}</p> : null}
+    {/* 有改动时父级按 editVersion 重挂载本表单、页面文字随之更新；只有「没变化」
+        这一种结果不会引起任何可见变化，所以必须在这里明确说出来。 */}
+    {state?.saved ? <ActionNotice tone={state.changed ? 'success' : 'info'} title={state.changed ? `${label}已保存` : `${label}没有变化，未保存`} /> : null}
     <Button type="submit" size="sm" disabled={busy}>{pending ? '保存中…' : `保存${label}`}</Button>
   </form>;
 }

@@ -1,5 +1,13 @@
 # 会话交接
 
+## 当前生产状态（2026-09-17 更新）
+
+生产已运行 `0e6c009b`，156 条迁移；报价第 8 版与统一烫金工价已发布，包装工价暂缓。OSS 双仓库备份及恢复演练完成；企业微信连接已启用。负责人确认的历史测试业务已清理，正式库仅保留 admin，工单/账单/工资为空。详见 [发布记录](docs/audits/2026-09-17-production-application-release.md)、[通知接入](docs/audits/2026-09-17-production-wecom-config.md)、[测试数据清理](docs/audits/2026-09-17-production-test-data-cleanup.md)。
+
+当前分支整合生产发布分支与备份/运维记录，PR #20 为汇总审查入口；以下各日期描述为历史过程，不作为当前生产状态。
+
+整合验证：app/actions/components/lib/prisma/tests 与生产发布分支逐路径比较无差异；备份专项 23 项通过，typecheck、架构门禁和 diff 空白检查通过。整合后的远端 CI 需以 PR 最新提交结果为准，不沿用旧提交的通过状态。
+
 > **每次新对话开始前，先读这份文件。** 它记录了上次会话停在哪、下次该接着做什么。
 >
 > 本文件每次 session 结束前**整体重写**（除"历史"小节是追加式时间线）。
@@ -7,6 +15,63 @@
 ---
 
 ## 当前任务
+
+**2026-09-19（凌晨）：grok 对抗审查 PR #20 / #21 / #22 全量 diff → 4 个修复提交（`c9a54cbb`、`b8e4ebc0`、`ad2a7164`、`1be6195b`），随后推送并合并，未部署。**
+- 做法：`grok`（`~/.grok/bin/grok` 1.0.25，模型 grok-4.6）无头模式、工具白名单 `read_file,grep,list_dir`（自带 `--sandbox read-only` 在本机因 `/var/run/docker.sock` 是符号链接起不来），按主题切 7 片并行：A = PR #21、B = PR #22、C = release 独有的备份脚本、D1a/D1b = 未推送 46 个提交的前段、D2 = 跳转回执、D3 = 内部工单物流。要求每条发现回到 HEAD 核实、避开 CLAUDE.md 已拍板例外。7 片全部 `MERGE_WITH_FOLLOWUPS`，无 P0；Claude 逐条回代码核实后才动手。
+- 已修 5 处（各带回归测试）：① `add-shipment` 仍用「有物流行」判定 REQUOTE，补录（`priceBookId: null`）过快递费的老内部工单加地址会报「原物流费用不完整」→ 改用 `hasLogisticsChargeRows`（新测试在修复前为红）；② 工单详情 `canAdminManageCommercialDetails` 仍对 `INTERNAL_SALES` 放行、服务端必拒 → 恢复为外销 / 工厂直接（这两处都是 `552fa165` 回退没改全）；③ 改单「新增款式」烫金色不走显示名反查，「红金」原样入库 → 与现有款共用 `knownOrderFoilColors` + `addedItemFoilColors`；④ `safeReturnTo` 放行 `..`，时薪回执可落到计件页 → 拒绝 `.` / `..` 段（含 `%2e`）与反斜杠；⑤ 省份解析无锚点、按价目表顺序匹配，「北京市朝阳区广东大厦」按广东计运费（**main 上的既有行为**，`d58f5e79` 只搬了位置）→ 带「省 / 市 / 自治区」后缀优先、同类取最先出现。
+- 核实后判定**不算缺陷**：B 片「`20260917011000_foil_wage_ledger` 在同一迁移里 `ADD VALUE` 后立即使用新枚举值会挂 `migrate deploy`」——开发库（PG 16.13）`_prisma_migrations` 已完成未回滚、PR #22 空库 CI 全绿、生产已应用；A 片「寄样包装默认最小档少收钱」——`docs/寄样与打样开发任务.md` 第 54 / 92 / 103 行写明的既定设计，测试也是特意这样断言。
+- 验证：typecheck 通过；lint 0 错误 3 警告（既有的 `window.location.assign` ×2 与 `_logistics`，顺手清掉了 `f9faea24` 留下的两个未使用标识）；全量 Vitest 导 `.env` 真实 URL 为 7134 通过 / 56 失败 / 44 跳过，**失败的 6 个文件与下方「全量测试基线」②完全一致**，换占位 `DATABASE_URL` 单跑这 6 个文件 403/403 全过。**没跑 e2e、没在真实浏览器目视**（同前两批）。
+- grok 未修的发现见「卡住的问题 → 待业主拍板（2026-09-19 grok 对抗审查）」与其下的「后续项」。
+- **推送后 CI 两轮红，都来自这 46 个从未跑过 e2e 的提交，不是 grok 修复引起的**（业主选「修到 CI 全绿再合并」）。第一轮 run 35368838680 红在 Browser component contracts：`ExternalSalesOrderFormRail.browser.spec` 仍断言「非外销不显示纸箱耗材」→ `9313aece`。第二轮 run 35370555955 红在第 18 步 44 例（225 过）：本地建隔离库逐个复现后，42 例是用例没同步（`493bd623`：提交二次确认、内销物流行、粘贴组件 label 星号、供应商回执撞 `getByLabel`、分层建单无「复制当前」、设计款 tablist、额外地址 textarea 无 name、交期夹具跨日 flake），**2 类是真回归**：① 师傅端零 JS 退出登录失效——`d84f42d1` 把退出表单挪进 `/worker/account`，而该页在 `app/(worker)/worker/loading.tsx` 的 streaming 边界里，无 JS 时永远停在骨架屏（§15.8 硬约束）→ `3ca23ed7` 照 `AdminHeader` 在外壳加 `<noscript><LogoutButton /></noscript>`；② 393px 下规格标签校验时变长、把「＋ 增加规格」挤到下一行，输入框下跳 52px → `ea50a1ab` 标签容器窄屏独占一行。
+- **教训**：只读代码判断「零 JS 没破」是错的（表单确实还是原生 form，但被 streaming 边界挡住），必须实际跑 `no-js` project。改动师傅端 / 后台外壳或把原生表单挪进带 `loading.tsx` 的路由时，跑 `pnpm exec playwright test tests/e2e/no-js.spec.ts`。本地 e2e 用开发配置即可（`:3000` 没起 dev server 时），冷编译可能把单例 45s 超时耗尽，重跑即过。
+- 隔离库 `erp_e2e_grok_20260919` 用完已 DROP。
+
+**2026-09-18（夜）：内部工单物流自动计价，2 个代码提交（`012feeea`、`f9faea24`），未 push、未部署。**
+- 起因：业主在建单页发现填了地址但费用栏没有快递费。查证是设计如此——运费自 2026-08-08 起被建模成「外销渠道的对客应收」，`quoteInternalCreateOrder` 明写 `includeOrderCharges: false`，工厂直接业务只能在详情页「编辑收费」补录，忘了补就漏收。业主拍板：**客服工单与工厂直接业务和外销用同一本已发布物流价目自动计价，顺丰到付维持运费 0、耗材照收**（取代 2026-07-30「totalAmount 只汇总款式小计」与 2026-09-15「内部结算不新增物流应收」在这两类结算下的口径）。
+- `012feeea`（建单 + 提交）：`settlementBillsLogistics`（除 NO_CHARGE 外全计物流）；`quoteInternalCreateOrder` 收与外销相同的 logistics 事实、返回同一份 `CreateOrderQuotePresentation`（含物流行与握手 token）；`submitOrder` 对内销 / 工厂直接也走共享 `finalizeExternalOrderQuoteInTx`，同一快照落款式价、入袋费、快递费 / 耗材收费明细与双价目版本锁。**客服业绩口径不变**：新增 `csSalesBasisAmountInTx` = 工单总额 − 代收物流，提交 / 取消 / 改单批准 / 终价确认四处按该口径记账与对平。
+- `f9faea24`（履约 + 核价）：`lib/order/settlement.ts` 的 `orderBillsLogistics`（有物流行即按物流行走）统一判定发货逐地址确认、承运商计费重量、`SHIPMENT_CHARGES_FINALIZED` 版本、顺丰到付切换、履约费用更正、追加地址重算、快捷编辑地址的省份复核、管理端详情与行内抽屉入口。**退役前提交、没有物流行的老工单维持原加工费流程**，完整编辑仍可补录。附加费用维护放宽到除免费工单外都可用。
+- Codex 对第一片的三条已在第二片一并修掉：核价完整编辑**补录**的物流行漏出业绩基数（取消时对不平）；内部「配置外」款式提交被 `assertSelectedPapersAvailable` 拦住进不了人工核价；管理员价工单首次提交必然误报 `quote_changed`（预览 token 不含管理员价快照 → finalizer 同时接受预览 token 与含管理员价的 token）。
+- 验证：typecheck / lint（仅既有 2 条 `window.location.assign` 警告）/ 架构门禁通过；`order.test` 243、`submit-external-order` / `pricing-review` / `change-request` / `components/business/order` 全绿；建单三个 browser spec 87/87。**未在真实浏览器目视**，也**没跑 e2e**。
+- `552fa165`（Codex 对第二片的三条）：附加费用维护误放开到 `INTERNAL_SALES` 已回退（该路径不记 `CsSalesEntry`，客服工单加附加费会让业绩对不平、取消被拒）；`hasLogisticsChargeRows` 收紧为只认 `priceBookId` 非空的行——管理员在完整费用编辑里**补录**的行是 `priceBookId: null`，不能当成按价目计费，否则发货重算报「未绑定唯一价目簿」卡死；预览 token 的兼容放行缩到「从未报价的 DRAFT 首次提交」，堵住驳回重提时用旧预览 token 绕过管理员改价确认。
+- **全量测试基线（重要，下次别再误判）**：本机 `pnpm test run` 的结果取决于有没有 `export DATABASE_URL`。① 不导出 / 导占位 URL：`.postgres.test.ts` 全部在模块加载期炸（28 个文件），其余全绿。② 导 `.env` 的真实 URL：postgres 文件能跑，但 `app/api/cron/notification-wire`、`lib/__tests__/{material,order,outsource,production-completion,purchase}` 这 6 个文件会挂 56 例——**已用 worktree 在本批次之前的 `6e1f9715` 上复现同样的 6 файла / 56 例，属既有问题，与本批无关**，根因是这些文件在真实 DB 存在时会走到未 mock 的连接路径（未深查）。③ 全量跑时另有几个 `.postgres` 迁移/发布用例因共用开发库并发而红，单独重跑 6/6 全绿（同 CLAUDE.md §14 对 e2e 的并发警告）。
+- **待办（下次会话接着做）**：① 全量 Vitest 与 Codex 对 `f9faea24` 的 review 结果在本次会话末尾，若有红需先收口；② e2e 里外销/内销发货与核价用例可能因「内销现在也要逐地址确认收费」而需要更新；③ SPEC §193「不计物流费用」与 §248 仍是旧口径，等这两片稳定后按 §9.3 更新并记 CHANGELOG。
+
+**2026-09-18（晚）：「保存后没反馈」审查 → 零依赖「跳转回执」推广，3 个代码提交 + 1 个记忆提交，未 push、未部署。**
+- 审查结论：项目没有 toast 库且 `docs/ui-规范.md §5.4` 明确不引入，`ActionNotice` 已是规范件。缺口在 18 处 `redirect()`：13 处不带任何标记（主数据新建 ×10、通知渠道/规则 ×3、工单编辑）、1 处出账 `?issued=1` 被 `/owner/bills/[id]` 兼容跳转丢掉、4 处计件/时薪用私有 `appendReceipt` 自成一套；另有 `TaskDisputeAdminPanel`（action 返回的 message 被丢）、`SalesTextEditForm`（「没变化」毫无提示）两个表单吞掉成功结果。失败反馈基本都有，只是 12px 红字不显眼，本轮没动。
+- 落地：`lib/admin/receipt.ts`（`RECEIPT_KEYS` 固定字典 + `appendReceipt` / `readReceipt` / `safeReturnTo`）、`components/ui-business/ReceiptNotice`（服务端渲染 ActionNotice；`ReceiptUrlCleanup` 挂载后 `history.replaceState` 清参数，写法同 `OrderListNavigationState`）。18 处 redirect 全部带回执；目标页渲染：账号 / 往来单位 / BOM / 采购单 / 采购新建（从采购流程新建供应商回来）/ 物料三条路由（owner、foreman、rules/papers 经 `MaterialCatalogPages`）/ 工艺 / 可建单组合 / 产品结构分类 / 工单详情两分支（SALES 分支加了一层 `space-y-4` 包裹）/ 客服业绩周期 / 账单归档详情（出账回执改落这里）/ 通知配置（区分 channel / rule）/ 计件 / 时薪（迁到公共件，保留零 JS 的「关闭提示」链接）。`TaskDisputeReviewForm` 改常驻挂载 + `open`，终态只留成功回执；`SalesTextEditForm` 「没有变化，未保存」显式播报。
+- 验证：`pnpm typecheck` / `pnpm lint`（仅既有 2 条 `window.location.assign` 警告）通过；全量 Vitest（`DATABASE_URL` 取自 `.env`）7158 通过 / 44 跳过；`ReceiptNotice.browser.spec.tsx` 2/2（真实 chromium 里回执可见、只清回执 key、保留 hash）。10 个 action 测试里钉死的跳转路径已改成带 `?created=1` / `?updated=1`（往来单位那条 `supplier%201` 变 `supplier+1`：`URLSearchParams` 重序列化，语义不变）。
+- **未在真实浏览器目视**：内置浏览器访问 `localhost:3000` 被拒，且登录要密码。下次有登录会话时：`/owner/rules/crafts/new` 建一条工艺 → 详情页顶部应出现「工艺已创建」，地址栏 `?created=1` 随即消失；再到 `/owner/notifications` 改一个渠道保存 → 列表页顶部「通知目标已保存」。
+- Codex 四轮：第一轮 3 条（`replaceState` 传带 `__NA` 的 state 会让 Next 跳过 canonical URL 同步 → 改传 null；工单详情 ADMIN 分支在回执前就 return → 补上；`split('?', 2)` 截断查询串 → 按首个 `?` 切分），第二轮 1 条（时薪页筛选 `paid` 与计件回执 `paid` 同名被一起清掉 → `readReceipt(sp, keys)` 白名单），第三轮 1 条（同一页连续两次带回执时组件不重挂载、清理 effect 不重跑 → `ReceiptNotice` 每次服务端渲染发 `renderId` 作 effect 依赖），第四轮「no discrete actionable issues」。四条均已修并各自单独提交（`4789807d` / `23729326` / `6e1f9715`）。
+- 已知取舍：零 JS 下回执参数留在地址栏，刷新会再播报一次（接受）；e2e 里 `toHaveURL('/orders/{id}')` 精确断言（`sales-functional-review` / `order-create` / `order-external-sales-association`）依赖挂载后清参数，Playwright 会重试到超时所以预期能过，但本轮**没跑 e2e**。
+
+**2026-09-18（下午）：对抗 review `d84f42d1` 之前的 11 个提交 → 5 项缺陷修复 + Codex 四轮追加，共 12 个代码提交（`3f0ce6db` 起），未 push、未部署。**
+- `3f0ce6db` / `548b7d8d` / `38e321ff`：120g 退役拦截从共享报价适配器挪到新建入口（`createOrder`、两个报价预览、打样提交、内销旧草稿 `submitOrder`、销售工作台），`lib/rules/paper-availability.ts` 的 `hasRetiredPaperItem` 单点判定；改单 / 取消结算重算含 120g 历史工单不再被挡（**但见「卡住的问题」：关联物料已停用仍会挡**）。
+- `7df2677d` / `38e321ff`：改单表单烫金色显示名反查（`foilColorFromLabel`），`known` 列表保护真实目录名；管理端两页从 `listExternalCreateOrderFoilOptions` 取目录名，销售端只带工单上已有颜色。
+- `3d53816d` / `67c39148`：师傅工资页「累计已结算 / 尚未发放」全量，未结算报工只在显式区间时过滤，状态 / 分页链接只带显式日期。
+- `05b31d1c`：规格按「当前纸张在该规格下有任一可用克重」启用；同设计款材料分叉在 `changeItemSelection` 提示而不是灰按钮。
+- `7b0b3a6f`：珠光暗红显示名补齐工单详情 / 打印 / XLSX 导出 / 销售详情 / 师傅端工序来源。
+- `cdd5000b`：自动激活用例 tx mock 补 `orderItem.findMany`。
+- `0957b0ae`：烫金显示名与真实目录名同名时以 known 身份集消歧，目录烫金名接到销售端。
+- 本轮末：客服编辑页也取目录烫金名；烫金输入的空白不再绕过反查。
+- `d58f5e79`（业主追加需求）：收货地址输入统一复用「粘贴自动识别」——新组件 `components/business/order/ReceiverAddressPasteField.tsx`，解析在 `lib/order/receiver-address-paste.ts`（原 OrderForm / 表单 B 的两个解析函数挪过去，旧导出位置 re-export）。接入：外销建单表单 B（DOM/id/占位文案不变）、寄样品/打样、追加收货地址、工单编辑主地址 + 逐票、建单额外地址、客户默认收货地址（粘贴框不提交）。语义：粘贴覆盖收货人/电话/省份，手输只补空（`applyParsedReceiverFact` 单点规则，`090d3d01`）；粘贴走浏览器原生插入、onPaste 只打标记，表单级 onChange/dirty 判定照常；客户默认地址粘贴时清城市/区县、详细地址去省份前缀；textarea 随内容增高。4 个 browser spec 112 例、SSR/单测通过；**未在真实浏览器里登录目视**（本机没有可用的登录账号），下次会话若有 dev server + 账号可在 `/workbench` 寄样品页核一眼。
+
+验证：全量 Vitest 7024 通过 / 56 跳过。**4 个文件在没有 `DATABASE_URL` 的 shell 下模块加载即抛**（`lib/db` 直连：`actions/__tests__/report-disputes`、`app/(worker)/__tests__/worker-task-legacy-dispute`、`app/(admin)/__tests__/owner-metadata-auth`、`order-detail-commercial-visibility`），带占位 URL 全过——跑全量前先 `export DATABASE_URL`。typecheck / eslint（保留既有 `window.location.assign` 警告）/ 架构门禁通过。打印视图只改纸张文字，darwin 像素基线未更新；release 配置跑 `order-print` 若基线含珠光闪红样本需按 §8.4 更新并在 commit 里写 `[visual-regression]`。
+Codex 前三轮（3f0ce6db、548b7d8d+7df2677d、3d53816d+05b31d1c+7b0b3a6f）意见已全部落地；第四轮（`38e321ff` / `67c39148`）指出目录同时有「红色」「红金」时显示名反查会改错身份，已在 `foilColorInputLabel` / `restoreFoilColorInput` 以 known 身份集消歧并把目录烫金名接到销售端（本轮最后一个提交）；第五轮（`0957b0ae`）再指出两处既存遗漏——客服编辑页没拿目录名、颜色旁空白绕过反查——已在本轮最后一个提交修掉（编辑页按「能改单」条件取目录名；`mapFoilColorParts` 按 trim 后的颜色匹配、保留空白与分隔符）。第六轮 review 若有新意见见下次会话。
+
+**2026-09-15（晚）：寄样品与打样主流程已实现，本地验证完成，未 push、未部署。**
+工作分支 `codex/memory-after-pr19`，开发基线 `f37d6448`。新增五入口中的寄样品/打样、外部销售权限、最小包装默认档、整单人工核价、用途胶囊与发货结算分支。
+开发主库已应用 2 项新增迁移（共 148 项）；业务写入验收仅在独立克隆库 `erp_samples_test_20260915`，隔离 Next dev 为 3107，用户开发服务仍为 3000。
+完整结果及复跑入口见 [寄样与打样开发任务](./docs/寄样与打样开发任务.md)。主流程、6839 单测、23 工作台浏览器回归、3 新 E2E（含六视口/明暗/axe）、typecheck/lint/架构与 fresh migration 通过。
+首版样品生产款式修改需新建单；OSS 未配置，设计图测试使用夹具，未验证真实上传。打样实际师傅报工使用既有路径，本轮结算验收用明确完成态夹具。生产发布仍需原部署前置检查。
+
+
+**2026-09-15（傍晚）：PR #19 已合并进 `main`（merge commit `d283b5a5`，19:34），`codex/tijian-2` / `codex/gongdanceshi` 远端与本地均已删除。**
+合并前最后一轮 CI（run 34927184124 第 5 次尝试，head `5bdb907e`）verify 67 分钟 / print-darwin 3 分钟全绿，是 `1d23b144` 之后
+第一次全绿。当天上午追 CI 修了三轮：`3caba196`（旧任务详情抽 `renderLegacyTaskDetail` 回到 300 行架构阈值）、`ac61743c`
+（建单 browser spec 改按 aria-invalid 判断）、`5bdb907e`（登录回跳 `?from=` 剔除 Next 内部 `_rsc` 参数，auth-logout-race 用例）。
+前 4 次尝试全部因 GitHub Actions 账单「payments failed / spending limit」根本没启动，业主处理后重跑才通过——
+**这已是 09-12 之后第二次撞账单，以后 job 在 10 秒内 0 步骤失败先看注解，不要当代码问题查。**
+**合并 ≠ 部署**：生产仍是 `aa42ba0` / 45 项 migration，`main` 现在 146 项；部署前置步骤见下文「部署前仍必须先做」。
 
 **2026-09-15（上午）：前端缺陷批次已落地（`codex/tijian-2`）**。Codex 只读审计出 4 条（我逐条核实）+ PROGRESS 技术债 2 项，
 Codex `gpt-6-astra` 写模式修、我复审提交：2afdb77e 登录跳转保留查询串（扫码 v/task 不再丢）；ace6f360 旧任务详情挂异议面板；
@@ -136,7 +201,8 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 ### 仍成立的 Git / 生产事实
 
 - remote：`https://github.com/zora4523-bot/print-shop-erp.git`（**私有，HTTPS**）。开发机 SSH 不通，**不要把 remote 改回 SSH**。
-- 远端只有 `main` 与 `codex/*`（`codex/fabuceshi`、`codex/gongdan`），**没有 `dev`**；本分支 `codex/gongdanceshi` 尚未推送。
+- 远端只有 `main` 与 `codex/*`（`codex/fabuceshi`、`codex/gongdan`），**没有 `dev`**。PR #19 的两个分支已于 09-15 删除；
+  `main` 头为 `d283b5a5`。本文档的更新走 `codex/memory-after-pr19` 分支的 PR。
 - **生产未动。** <https://bag.sshapi.cn> 上次记录仍是 `aa42ba0`（2026-08-02）/ 45 项 migration；本地迁移链已有 146 项。
   这些都**不是生产已 apply 事实**，部署前必须重新核对。
 - 本机开发库加工费价目簿已到 v10（`2026-09-13-attained-custom-tiers`），v8 是 print-sentinel 迁移版。
@@ -146,7 +212,19 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 下一步具体指令（给下次 AI）
 
-**先做：盯 PR #19 的 CI 跑完（run 34845568496，head `1d23b144`）**
+0. **跳转回执收尾（2026-09-18 晚）**：a) 隔离库跑 `pnpm exec playwright test tests/e2e/sales-functional-review.spec.ts tests/e2e/order-create.spec.ts tests/e2e/order-external-sales-association.spec.ts`，确认保存后 `toHaveURL('/orders/{id}')` 在回执参数被清掉后仍通过；若抖动，把这些断言改成 `toHaveURL(/\/orders\/{id}(\?updated=1)?$/)`。b) 有登录会话时按「当前任务」段落目视两条路径。c) 12px 红字失败提示迁 `ActionNotice` 另起一批（`UrgentToggleForm` / `SfCollectToggleForm` / `FinishOrderButton` / `TaskDisputeAdminPanel` 的 error 分支），不与本轮混。
+
+**PR #19 已合并（09-15）。下一步从这里起：**
+
+- 部署仍未做，先走「部署前仍必须先做」的 1-5 步与人工验收 6-9；部署本身需要业主明确授权（CLAUDE.md §12）。
+- 「卡住的问题」里 09-14 深夜新增的代理商账单 3 项、e2e 夹具是否改走领域层、6 处冗余 `router.refresh()`、
+  `pnpm test:browser` 是否进门禁，都还等业主拍板，拍板前不要动。
+- 本机 git 在 09-15 曾被 Xcode 许可协议挡住（`sudo xcodebuild -license accept` 后恢复）；再遇到 `gh` 报
+  「failed to determine base repo」先查这个，`gh api` 与 `-R zora4523-bot/print-shop-erp` 不受影响。
+
+**以下为合并前的 CI 追踪记录，仅供回溯：**
+
+先做：盯 PR #19 的 CI 跑完（run 34845568496，head `1d23b144`）
 
 第六轮（34838580706）只剩 1 失败 + 1 重试通过：多地址装盒用例的诊断信息显示保存被
 「纯引擎分项与小计不一致」拦下——CI 全套共库时表单默认纸张是 blank-paper-pricing 留下的「验证纸…」
@@ -175,8 +253,8 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 1. verify job 顺序：迁移链 → 静态门禁 → 单测覆盖率 → Browser Mode → 生产构建 + business E2E + 六视口 →
    **durable → 跨浏览器打印 → dev-fixtures**。前五步的 20 个失败已全部修掉（本地 release 配置逐条复现并
    验证），后三步仍是首次跑到；本地复现方式见 CLAUDE.md §14（隔离库 + `--config=playwright.release.config.ts`）。
-2. 绿了就合并 PR；合并后删 `codex/tijian-2`。不要再往 `codex/gongdanceshi` 直接推。
-3. 更新 `PROGRESS.md`：把 09-13 批次（建单定价 / 装盒 / 十一档 / 批量打印）与 09-14 体检收口写进「已完成」。
+2. ~~绿了就合并 PR；合并后删 `codex/tijian-2`~~（09-15 已做）。
+3. ~~更新 `PROGRESS.md`~~（09-14 / 09-15 已补）。
 4. 新建任务过程文件直接放 `docs/archive/`（规则见其 README），不要再往仓库根目录放 PLAN- / REPORT-。
 5. 新增 Zod schema 放进 `lib/auth/schemas/<域>.ts`，不要往入口文件 `lib/auth/schemas.ts` 里加。
 6. 不要把 `docs/archive/项目结构体检-2026-09-14.md` 里对 change-request / OrderForm / lib/order.ts 的拆分建议
@@ -215,6 +293,30 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 ---
 
 ## 卡住的问题
+
+### 待业主拍板（2026-09-19 grok 对抗审查，均已回代码核实属实）
+
+- **跨日冲正 × 人工核定**（`lib/salary/order-wage-review.ts:20` 按「师傅 × 上海日」分组）：D1 报工 +24、D2 冲正 −24 后，D1 组仍可编辑，管理员把 D1 改成 0 → 师傅净额 −24；改成 48 → 冲正后又发一遍。先核定（写 ADJUSTMENT）再冲正，ADJUSTMENT 不会被冲掉、留下孤儿差额。**前提是应用层目前没有冲正入口，REVERSAL 只能手写 SQL 插入**（e2e 如此）。选项 A：存在未结算配对 REVERSAL 时把原报工日也锁只读；B：按 `reversalOfId` 把冲正与原报工轧差后再允许改价；C：禁止对已有 ADJUSTMENT 的 REPORT 冲正。做冲正入口之前必须先定。
+- **补录运费的内部工单切「顺丰到付」只改标记、不清运费**（`lib/order.ts` `setOrderSfCollect`，`billsLogistics` 为 false 时跳过改价分支）。本批之前内部工单切到付本来就不动费用；补录行是管理员手填的，到付后是否自动置 0 是业务口径。
+- **师傅工资页**：「待发放」页签仍套默认当月（`lib/salary/worker-settlement-page.ts:13` 列表始终带 `workDate` 区间），上月未发结算单在列表里看不到而汇总卡片含这笔；日期框预填「本月 1 日～今天」，师傅不改日期直接点「查询范围」会把上月未结算报工藏起来。不影响实发金额，是展示口径。
+- **寄样包装默认最小档**：当前按规划文档实现（数量 3000 也取最小档，可手动选更大档，但服务端只校验档位 code 存在、不校验数量是否落在该档）。若业主本意是大批量寄样按数量档收纸箱费，需改 `lib/price/external-order-charges.ts:863`。
+
+### 后续项（2026-09-19 grok 对抗审查，P2，未修）
+
+- 薪资：`publishSavedPieceworkDraft` / 个人工价发布不强制小单工资与装版费成对，绕过 UI 直接 POST 能发出退回线性计件的工价簿（ADMIN only）。
+- 回执：计件 / 时薪回执回放 URL 里的姓名（`?paid=张三` 可伪造「已标记发放」横幅，ADMIN only、无写入）；`MaterialCatalogPages.tsx:309` 兼容跳转丢回执 query；工单详情 ADMIN 分支 `!presentation` 早退不播回执；`ReceiptUrlCleanup` 在真实 App Router 下没有 e2e。
+- 地址：建单主地址（`OrderForm.tsx:3604`，仍 `preventDefault` 粘贴、无条件写姓名 / 电话 / 省份）与额外地址（`:3356`，忽略 `source`）没走「粘贴覆盖、手输补空」，`OrderForm-logistics-quote.test.ts:97` 还把无条件写省份锁成契约；手机号不去 `-`；姓名可能取到「中国」。服务端仍信任客户端 `destinationProvince`。
+- 烫金：反查只在浏览器端做，`lib/order/change-request.ts` 写入 `frontFoilColors` 前没有同样的兜底。
+- 寄样：管理员草稿完整编辑（`lib/order/admin-edit.ts:56`）不拦非 STANDARD 工单增改款式（改单申请有这道闸）；下发时内存校验 `CONFIRMED→RELEASED→PACKING` 但库里直接写 PACKING。
+- 上传：CDR 多选后服务端没有每款文件个数上限（单文件大小与 key 前缀有闸）。
+- 物流：内部工单改单 / 管理员编辑不重算物流行（`change-request.ts:2972`、`:5844` 仍只认 `EXTERNAL_SALES`）；`hasLogisticsChargeRows` 的 `priceBookId?` 可选类型会把「漏 select」当成「补录」。
+- 备份：`scripts/lib/backup-readiness.mjs:27` 按每个 repo 自己的最大 db id 认定当前库，集群重建且 repo2 没跟上 stanza-upgrade 时会误绿；两个 full timer 都 `Persistent=true` 无互斥，主机恰在 01:00–01:30 重启会并发抢 stanza 锁、`StartLimitBurst=3` 可能打掉当天 OSS full；门禁不证明 repo2 连续归档；`--info-file` 不校验快照新鲜度；`pgbackrest info` 失败时吞 stderr。
+- 迁移：`ProductionReportDispute` 的部分唯一索引 / CHECK / 触发器只在手写 SQL 里，schema 无对应，日后 `migrate dev` 可能生成删除它们的迁移。
+
+### 待业主拍板（2026-09-18：关联物料已停用的历史工单能否重算）
+
+- 共享报价适配器 `lib/order/create-order-quote-facts-adapter.ts:382` 对「产品关联纸张 `isActive=false`」一律 `CATALOG_PAPER_CHANGED`，早于 120g 任务存在、不限于 120g。正式库已停用两条 120g 物料，**关联了它们的历史工单**改单 / 取消结算仍会被挡（未关联物料的 120g 历史工单已放行）。
+- 选项 A：历史重算忽略物料当前启用状态、只看已发布价目——要改适配器，并补 change-request 层的真实回归（现有 `change-request.test.ts` mock 了整个报价服务，兜不住）。选项 B：维持现状，业务上用管理员终价绕过。本轮未擅自放宽。
 
 ### 待业主拍板（2026-09-14 深夜新增：代理商月度账单 review 结论）
 
@@ -376,3 +478,8 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 
 - 2026-09-15（上午）：前端缺陷批次 6 个提交（登录跳转查询串、异议面板、改密页、工资分页、逐字段 alert、零 JS 退出）；Codex 审计 + 实现，Claude 复审。
 - 2026-09-15：按业主决定修复半分金额（0.01 容差 + 拆分先舍入）、终价不再被就绪校验回滚、新增管理员补录生产资料路径（`order:production-facts:repair`）；Codex 实现、Claude 复审提交。
+- 2026-09-15（傍晚）：追 CI 三轮（`3caba196` / `ac61743c` / `5bdb907e`），账单恢复后 run 34927184124 全绿；PR #19 以 merge commit `d283b5a5` 合入 `main`，删 `codex/tijian-2` 与 `codex/gongdanceshi`。生产未部署。
+- 2026-09-18（下午）：对抗 review 建单分层 / 师傅端 11 个提交出 5 项缺陷，逐项修复 + Codex 五轮追加共 12 个提交（120g 拦截移位、烫金反查与同名消歧、工资汇总全量、规格克重解锁、珠光暗红补齐）；全量单测 7024 通过，OrderCreationWorkspace browser spec 5/5。未 push。
+- 2026-09-18（傍晚）：业主追加——收货地址输入统一复用粘贴自动识别组件（`d58f5e79`），六处接入，browser spec 4 文件 112 例通过；Codex 两轮追加修正（`090d3d01`、`9211fbed`：原生粘贴 + 统一「粘贴覆盖、手输补空」+ 客户地址城市/区县与省份前缀边界）。侧栏「工单」→「工单列表」、新增管理员「新建工单」常用入口（`feat(nav)`）。未 push。
+- 2026-09-18（晚）：「保存后没反馈」审查 → 零依赖跳转回执推广：`lib/admin/receipt.ts` + `ReceiptNotice` / `ReceiptUrlCleanup`，18 处 redirect 带回执、17 个目标页播报，异议审核与销售文本编辑不再吞掉成功结果；全量单测 7158 通过、browser spec 2/2；开源候选（Base UI Toast / sonner / nuqs / next-safe-action / 两个 cookie flash 包）评估记入 DECISIONS。未 push。
+- 2026-09-19（凌晨）：grok 无头只读对抗审查 PR #20 / #21 / #22（7 片并行，全部 MERGE_WITH_FOLLOWUPS、无 P0）；Claude 逐条核实后修 5 处共 4 个提交（补录物流行加地址卡死、附加费用入口与闸口不一致、新增款烫金反查、`safeReturnTo` 放行 `..`、计费省份被地名盖掉），其余记入「卡住的问题」；推送后 CI 两轮红（46 个提交从未跑过 e2e），同步 42 例过时用例并修 2 类真回归（师傅端零 JS 退出、393px 规格标签挤行）；CI 全绿后合并 PR #20。

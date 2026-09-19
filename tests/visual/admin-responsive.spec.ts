@@ -86,6 +86,35 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('ten-order batch fits all viewports in light and dark themes', async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    const route: AdminRoute = {
+      name: 'ten-order-batch', path: '/orders/new', readyHeading: '新建工单',
+      prepareGateState: async (page) => {
+        const tabs = page.getByRole('navigation', { name: '待建工单' });
+        await expect(tabs.getByRole('button').first()).toBeVisible();
+        while (await tabs.getByRole('button').count() < 10) {
+          await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+        }
+        await expect(page.getByRole('button', { name: '＋ 增加工单', exact: true })).toBeDisabled();
+        await expect(page.getByText('本批已达 10 张，全部保存后可开始新一批。')).toBeVisible();
+        const first = tabs.getByRole('button', { name: '工单 1', exact: true });
+        if (testInfo.project.use.hasTouch) await first.tap();
+        else { await first.focus(); await page.keyboard.press('Enter'); }
+        await expect(first).toHaveAttribute('aria-pressed', 'true');
+        const batch = await page.getByRole('region', { name: '批量新建工单' }).boundingBox();
+        const form = await page.locator('[data-slot="order-form-b"]').boundingBox();
+        expect(batch).not.toBeNull();
+        expect(form).not.toBeNull();
+        expect(Math.abs(batch!.x - form!.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(batch!.width - form!.width)).toBeLessThanOrEqual(1);
+        expect(batch!.width).toBeLessThanOrEqual(1440);
+      },
+    };
+    await checkRoutes(page, testInfo, [route], 'light');
+    await checkRoutes(page, testInfo, [route], 'dark');
+  });
+
   test('critical routes pass responsive and accessibility gates', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'light');
   });
@@ -136,12 +165,21 @@ test.describe('administrator workspace geometry', () => {
     for (const viewport of [
       { width: 911, height: 881, stacked: true },
       { width: 1280, height: 800, stacked: false },
+      { width: 1773, height: 1298, stacked: false },
+      { width: 2205, height: 1298, stacked: false },
     ]) {
       await test.step(`${viewport.width}x${viewport.height}`, async () => {
         await page.setViewportSize(viewport);
 
         const form = page.locator('[data-slot="order-form-b"]');
         await expect(form).toBeVisible();
+        const batchBounds = await page.getByRole('region', { name: '批量新建工单' }).boundingBox();
+        const formBounds = await form.boundingBox();
+        expect(batchBounds).not.toBeNull();
+        expect(formBounds).not.toBeNull();
+        expect(Math.abs(batchBounds!.x - formBounds!.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(batchBounds!.width - formBounds!.width)).toBeLessThanOrEqual(1);
+        if (viewport.width >= 1773) expect(formBounds!.width).toBe(1440);
         const urgentCheckbox = form.getByRole('checkbox', {
           name: '急单（提交后会推送至排产群）',
           exact: true,
@@ -180,6 +218,7 @@ test.describe('administrator workspace geometry', () => {
             indicator: rect('[data-slot="checkbox-indicator"]'),
             rail: rect('[data-slot="order-form-rail"]'),
             railPosition: getComputedStyle(rail).position,
+            viewportHeight: window.innerHeight,
             title: rect('[data-slot="urgent-order-title"]'),
           };
         });
@@ -198,7 +237,8 @@ test.describe('administrator workspace geometry', () => {
             geometry.editor.bottom - 1,
           );
         } else {
-          expect(geometry.railPosition).toBe('sticky');
+          const fits = Math.max(70, geometry.editor.top) + geometry.rail.height <= geometry.viewportHeight - 16;
+          expect(geometry.railPosition).toBe(fits ? 'sticky' : 'static');
           expect(Math.abs(geometry.rail.top - geometry.editor.top)).toBeLessThanOrEqual(
             1,
           );
@@ -1461,19 +1501,17 @@ async function prepareOrderDetailDesignPreview(
 async function prepareConfiguredLocalFoilStyle(page: Page) {
   const form = page.locator('[data-slot="order-form-b"]:visible');
   await expect(form).toBeVisible();
+  // ce3b6d37 起设计款是文件夹式 tablist（EditorTabs），不再是 aria-pressed 按钮导航。
   await expect(
-    form
-      .getByRole('navigation', { name: '款式' })
-      .getByRole('button')
-      .first(),
-  ).toHaveAttribute('aria-pressed', 'true');
+    form.getByRole('tablist', { name: '设计款', exact: true }).getByRole('tab').first(),
+  ).toHaveAttribute('aria-selected', 'true');
 
   // A second theme visit encounters the local draft from the first visit.
   // Resolve that real recovery state before operating the protected form.
   const discardDraft = page.getByRole('button', {
     name: '放弃本地草稿', exact: true,
   });
-  const routePicker = form.getByRole('group', { name: '工艺类型' });
+  const routePicker = form.getByRole('group', { name: '工单类型' });
   const localFoil = routePicker.getByRole('button', {
     name: '局部烫金', exact: true,
   });
@@ -1548,7 +1586,7 @@ async function prepareAdminOrderCreationState(page: Page) {
     form.getByRole('textbox', { name: '客户名称/简称', exact: true }),
   ).toHaveCount(0);
   await form
-    .getByRole('textbox', { name: '款式名', exact: true })
+    .getByRole('textbox', { name: '设计款名称', exact: true })
     .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
   await form
     .getByRole('textbox', {
@@ -1561,7 +1599,8 @@ async function prepareAdminOrderCreationState(page: Page) {
     .getByRole('button', { name: '添加地址 2', exact: true })
     .click();
   await form
-    .locator('textarea[name="additionalShipments.0.receiverAddress"]')
+    // 公共粘贴组件（d58f5e79）是受控 textarea，只有 id 没有 name。
+    .locator('[id="additionalShipments.0.receiverAddress"]')
     .fill('额外收货地址ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
   await form
     .locator('input[name="additionalShipments.0.itemQuantities.0"]')
@@ -1575,7 +1614,7 @@ async function prepareSalesOrderCreationState(page: Page) {
   const form = await prepareConfiguredLocalFoilStyle(page);
   // 销售端款式名由已选计价事实生成，不提供人工命名入口。
   await expect(
-    form.getByRole('textbox', { name: '款式名', exact: true }),
+    form.getByRole('textbox', { name: '设计款名称', exact: true }),
   ).toHaveCount(0);
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })
@@ -1617,4 +1656,43 @@ async function prepareSalesOrderCreationState(page: Page) {
     }),
   ).toBeVisible();
   await expect(form.getByText(fileName, { exact: false })).toBeVisible();
+}
+
+// Shared create form: both roles exercise the same two-level editor.
+for (const role of ['owner', 'sales'] as const) {
+  test(`${role} design and specification tabs fit light and dark viewports`, async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    await login(page, { username: E2E_USERS[role].username, password: E2E_PASSWORD, from: '/orders/new' });
+    const form = page.locator('[data-slot="order-form-b"]');
+    await expect(form).toBeVisible();
+    for (let index = 0; index < 3; index++) {
+      await form.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+      if (index < 2) await form.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+    }
+    const designs = form.getByRole('tablist', { name: '设计款', exact: true });
+    const specs = form.getByRole('tablist', { name: '规格明细', exact: true });
+    await expect(designs.getByRole('tab')).toHaveCount(3);
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+      await page.evaluate((value) => {
+        localStorage.setItem('erp-theme', value);
+        document.documentElement.classList.toggle('dark', value === 'dark');
+        document.documentElement.dataset.theme = value;
+        document.documentElement.style.colorScheme = value;
+      }, theme);
+      const design = designs.getByRole('tab').first();
+      if (testInfo.project.use.hasTouch) await design.tap();
+      else { await design.focus(); await page.keyboard.press('Home'); }
+      await expect(design).toHaveAttribute('aria-selected', 'true');
+      const specification = specs.getByRole('tab').last();
+      if (testInfo.project.use.hasTouch) await specification.tap();
+      else { await specs.getByRole('tab').first().focus(); await page.keyboard.press('End'); }
+      await expect(specification).toHaveAttribute('aria-selected', 'true');
+      await expect(specification).toBeFocused();
+      await expect.poll(() => page.evaluate(() => document.getAnimations().filter((animation) => animation.playState === 'running' || animation.pending).length)).toBe(0);
+      await expectViewportGate(page, testInfo);
+      await expectA11yGate(page);
+      await attachCandidateScreenshot(page, testInfo, 'admin', `order-tabs-${role}-${theme}`);
+    }
+  });
 }

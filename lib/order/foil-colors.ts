@@ -1,9 +1,68 @@
 export const NO_FOIL_COLOR = '无颜色（纯彩印）';
 export const MAX_ORDER_ITEM_FOIL_COLORS = 5;
 
+/** Labels only: retain stored catalog names for pricing, ordering and history. */
+const FOIL_COLOR_LABELS: Readonly<Record<string, string>> = {
+  浅色: '浅金', 红色: '红金', 黑色: '黑金', 银色: '银金',
+  蓝色: '蓝金', 透明色: '透明金', 绿色: '绿金',
+};
+
+export function foilColorLabel(color: string): string {
+  return Object.hasOwn(FOIL_COLOR_LABELS, color) ? FOIL_COLOR_LABELS[color]! : color;
+}
+
+/** Inverse of foilColorLabel: a typed display name maps back to its stored catalog name. */
+export function foilColorFromLabel(label: string): string {
+  return Object.keys(FOIL_COLOR_LABELS).find((key) => FOIL_COLOR_LABELS[key] === label) ?? label;
+}
+
+/** Search both display names and legacy stored names without changing data. */
+export function foilColorSearchValues(colors: readonly string[]): string[] {
+  return [...new Set(colors.flatMap((color) => {
+    const label = foilColorLabel(color);
+    const aliases = Object.keys(FOIL_COLOR_LABELS).filter((key) => FOIL_COLOR_LABELS[key] === label);
+    return [color, label, ...aliases];
+  }))];
+}
+
 export function formatFoilColors(
   colors: readonly string[] | null | undefined,
   empty = '—',
 ): string {
-  return colors && colors.length > 0 ? colors.join('、') : empty;
+  return colors && colors.length > 0 ? colors.map(foilColorLabel).join('、') : empty;
+}
+
+/**
+ * Keep delimiters while presenting editable historical color lists. A color
+ * whose label is itself a known identity (the catalog has both 红色 and 红金)
+ * keeps its stored name, so the text round-trips without ambiguity.
+ */
+export function foilColorInputLabel(text: string, known: readonly string[] = []): string {
+  return mapFoilColorParts(text, (color) => {
+    const label = foilColorLabel(color);
+    return label !== color && known.includes(label) ? color : label;
+  });
+}
+
+/** Apply `resolve` to each delimited color, keeping delimiters and surrounding whitespace. */
+function mapFoilColorParts(text: string, resolve: (color: string) => string): string {
+  return text.split(/([,，、])/).map((part, index) => {
+    if (index % 2 === 1) return part;
+    const color = part.trim();
+    if (!color) return part;
+    const lead = part.slice(0, part.indexOf(color));
+    return lead + resolve(color) + part.slice(lead.length + color.length);
+  }).join('');
+}
+
+/**
+ * Editing a label must retain a matching saved identity; a newly typed display
+ * name resolves through the dictionary so it is stored as the catalog name.
+ * `known` lists names that exist as real identities (catalog materials, colors
+ * already on the order): typing one of them is never rewritten, even when it
+ * collides with a dictionary label. Unknown names pass through.
+ */
+export function restoreFoilColorInput(text: string, saved: readonly string[], known: readonly string[] = []): string {
+  const identities = new Set([...saved, ...known]);
+  return mapFoilColorParts(text, (color) => identities.has(color) ? color : foilColorFromLabel(color));
 }

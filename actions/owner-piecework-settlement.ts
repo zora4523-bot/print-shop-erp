@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { appendReceipt, safeReturnTo } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import {
@@ -17,20 +18,7 @@ export type PieceworkSettlementMutationResult =
   | { status: 'error'; message: string };
 
 function safeOwnerReturnTo(value: FormDataEntryValue | null): string {
-  return typeof value === 'string' &&
-    value.startsWith('/owner/salary/piecework')
-    ? value
-    : '/owner/salary/piecework';
-}
-
-function appendReceipt(
-  returnTo: string,
-  values: Record<string, string>,
-): string {
-  const [pathname, rawQuery = ''] = returnTo.split('?', 2);
-  const query = new URLSearchParams(rawQuery);
-  for (const [key, value] of Object.entries(values)) query.set(key, value);
-  return `${pathname}?${query.toString()}`;
+  return safeReturnTo(value, '/owner/salary/piecework');
 }
 
 export async function lockPieceworkSettlementAction(

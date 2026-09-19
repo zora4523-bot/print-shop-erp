@@ -10,7 +10,8 @@ import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourl
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
-import { ActionNotice, EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea } from '@/components/ui-business';
+import { EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import {
   getAttendanceSummaries,
   parseShanghaiMonth,
@@ -53,8 +54,8 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
   const returnTo = filterQuery.size
     ? `/owner/salary/hourly?${filterQuery.toString()}`
     : '/owner/salary/hourly';
-  const markedName = sp.marked?.trim();
-  const markedPaid = sp.markedPaid === '1';
+  // paid=paid|unpaid 是本页筛选，与计件回执的 paid 同名：只消费自己的两个 key。
+  const receipt = readReceipt(sp, ['marked', 'markedPaid']);
 
   // 重算影响不能被页面的「已发 / 师傅」筛选误导：操作会
   // 扫描整个月份，因此额外读取该月全部现有月结，只将真实快照
@@ -92,22 +93,24 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      {markedName ? (
-        <ActionNotice
-          tone="success"
-          title={markedPaid ? '已标记发放' : '已撤销发放标记'}
-          description={`${markedName} 的时薪月结已${markedPaid ? '标记为已发放' : '解除发放锁定'}。`}
-          action={
-            <Link
-              href={returnTo}
-              prefetch={false}
-              className="text-sm font-medium underline underline-offset-2"
-            >
-              关闭提示
-            </Link>
-          }
-        />
-      ) : null}
+      <ReceiptNotice
+        receipt={receipt}
+        messages={{
+          marked: (name, { markedPaid }) => ({
+            title: markedPaid === '1' ? '已标记发放' : '已撤销发放标记',
+            description: `${name} 的时薪月结已${markedPaid === '1' ? '标记为已发放' : '解除发放锁定'}。`,
+            action: (
+              <Link
+                href={returnTo}
+                prefetch={false}
+                className="text-sm font-medium underline underline-offset-2"
+              >
+                关闭提示
+              </Link>
+            ),
+          }),
+        }}
+      />
       <PageHeader
         title="时薪工月结"
         subtitle="清废与厨师的时薪月结；历史打包工资见归档记录。"

@@ -1,5 +1,7 @@
 'use client';
 
+import { foilColorInputLabel, restoreFoilColorInput } from '@/lib/order/foil-colors';
+
 import {
   useActionState,
   useMemo,
@@ -84,6 +86,8 @@ type Props = {
   catalogProducts: OrderChangeCatalogProduct[];
   promisedDate?: string | null;
   hasPackagingGroups?: boolean;
+  /** Catalog foil names; protects typed catalog names from the display-label reverse map. */
+  foilColorNames?: readonly string[];
 };
 
 export function orderChangeRequestDraftIdentity({
@@ -200,6 +204,25 @@ function splitColors(value: string): string[] {
         .filter(Boolean),
     ),
   ];
+}
+
+/**
+ * Every identity the user could legitimately type: catalog foils plus any
+ * color already on this order. See restoreFoilColorInput.
+ */
+export function knownOrderFoilColors(
+  foilColorNames: readonly string[],
+  items: readonly Pick<ItemOption, 'frontFoilColors' | 'backFoilColors' | 'foilColors'>[],
+): string[] {
+  return [...new Set([
+    ...foilColorNames,
+    ...items.flatMap((entry) => [...(entry.frontFoilColors ?? []), ...(entry.backFoilColors ?? []), ...entry.foilColors]),
+  ])];
+}
+
+/** An added item has no saved colors, so typed display names resolve to catalog names. */
+export function addedItemFoilColors(text: string, known: readonly string[]): string[] {
+  return splitColors(restoreFoilColorInput(text, [], known));
 }
 
 function hasSameColorSet(left: readonly string[], right: readonly string[]) {
@@ -334,13 +357,16 @@ function ExistingOrderItemChanges({
   items,
   pending,
   updateItem,
+  foilColorNames = [],
 }: {
   catalogProducts: readonly OrderChangeCatalogProduct[];
   editable: Record<string, EditableItem>;
   items: ItemOption[];
   pending: boolean;
   updateItem: (itemId: string, patch: Partial<EditableItem>) => void;
+  foilColorNames?: readonly string[];
 }) {
+  const knownFoilColors = knownOrderFoilColors(foilColorNames, items);
   return (
     <fieldset className="min-w-0 space-y-3">
       <legend className="sr-only">选择并修改现有款式</legend>
@@ -465,12 +491,12 @@ function ExistingOrderItemChanges({
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>正面烫金颜色（多个用顿号分隔）</span>
                   <Input
-                    value={current.frontFoilColors}
+                    value={foilColorInputLabel(current.frontFoilColors, knownFoilColors)}
                     maxLength={200}
                     disabled={pending}
                     onChange={(event) =>
                       updateItem(item.id, {
-                        frontFoilColors: event.target.value,
+                        frontFoilColors: restoreFoilColorInput(event.target.value, item.frontFoilColors ?? item.foilColors, knownFoilColors),
                       })
                     }
                   />
@@ -478,12 +504,12 @@ function ExistingOrderItemChanges({
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>反面烫金颜色（多个用顿号分隔）</span>
                   <Input
-                    value={current.backFoilColors}
+                    value={foilColorInputLabel(current.backFoilColors, knownFoilColors)}
                     maxLength={200}
                     disabled={pending}
                     onChange={(event) =>
                       updateItem(item.id, {
-                        backFoilColors: event.target.value,
+                        backFoilColors: restoreFoilColorInput(event.target.value, item.backFoilColors ?? item.foilColors, knownFoilColors),
                       })
                     }
                   />
@@ -569,6 +595,7 @@ function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason,
 }
 
 function OrderChangeRequestDraftForm({
+  foilColorNames,
   orderId,
   expectedRevision,
   expectedWorkOrderVersion,
@@ -655,6 +682,7 @@ function OrderChangeRequestDraftForm({
     event.preventDefault();
     if (pending || !canSubmit) return;
     const changes = buildSelectedOrderItemChanges(items, editable);
+    const knownFoilColors = knownOrderFoilColors(foilColorNames ?? [], items);
     if (addEnabled) {
       changes.push({
         operation: 'ADD',
@@ -667,8 +695,8 @@ function OrderChangeRequestDraftForm({
               specification: newSpecification,
             }
           : {}),
-        frontFoilColors: splitColors(newFrontFoilColors),
-        backFoilColors: splitColors(newBackFoilColors),
+        frontFoilColors: addedItemFoilColors(newFrontFoilColors, knownFoilColors),
+        backFoilColors: addedItemFoilColors(newBackFoilColors, knownFoilColors),
       });
     }
     startTransition(() =>
@@ -715,6 +743,7 @@ function OrderChangeRequestDraftForm({
         items={items}
         pending={pending}
         updateItem={updateItem}
+        foilColorNames={foilColorNames}
       /> : null}
       {unchangedSelectedCount > 0 ? (
         <p

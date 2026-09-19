@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createProductSchema, updateProductSchema } from '@/lib/auth/schemas';
 import {
@@ -83,7 +84,9 @@ export async function createQuoteProductAction(
   }
 
   revalidateProductPaths(createdId);
-  redirect(`${RULE_CENTER_HREFS.stockSkus}/${createdId}`);
+  redirect(
+    appendReceipt(`${RULE_CENTER_HREFS.stockSkus}/${createdId}`, { created: '1' }),
+  );
 }
 
 export async function updateQuoteProductAction(

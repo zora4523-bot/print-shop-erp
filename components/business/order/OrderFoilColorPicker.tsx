@@ -1,5 +1,7 @@
 'use client';
 
+import { foilColorLabel } from '@/lib/order/foil-colors';
+
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE } from '@/lib/order/pricing-route';
@@ -64,7 +66,7 @@ export function OrderFoilColorPicker({
             )
           }
         >
-          {color}
+          {foilColorLabel(color)}
         </Button>
       ))}
       {choices.length > visible.length ? (

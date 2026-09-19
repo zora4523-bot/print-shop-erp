@@ -17,6 +17,7 @@ describe('WorkerBottomNavigation', () => {
     expect(workerNavItemIsCurrent('/worker/tasks/task-1', '/worker/tasks')).toBe(
       true,
     );
+    expect(workerNavItemIsCurrent('/worker/reports/report-1', '/worker/tasks')).toBe(true);
     expect(workerNavItemIsCurrent('/worker/orders', '/worker/tasks')).toBe(
       false,
     );
@@ -42,7 +43,7 @@ describe('WorkerBottomNavigation', () => {
     );
 
     expect(layoutSource).toContain('<WorkerBottomNavigation />');
-    expect(layoutSource).toContain('id="worker-account"');
+    expect(layoutSource).toContain('href="/worker/account"');
     expect(layoutSource).not.toContain('grid-cols-4');
   });
 });

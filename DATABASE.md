@@ -21,7 +21,7 @@ applies_to: repository source at last_verified
 
 不包装约束：`actualBagCount=0`、`unitPrice=0`、`subtotal=0`，建议小计为 0 或空；其余模式实际包装数量必须为正。常规装盒只含一款，混装至少两款。已有数据库列名 `actualBagCount` / `unitsPerBag` 保留兼容，新类型按袋/盒语义解释。
 
-打包生产工序支持 `PER_BAG` / `PER_BOX`；不包装不物化打包工序。工资规则唯一键变为 `(priceBookId, operationType, unit)`；已发布工资本保留原三条必需规则，可额外包含一条装盒规则。没有装盒工价时不套用入袋工价。客户报价与工资本仍独立。
+打包生产工序支持 `PER_BAG` / `PER_BOX`；不包装不物化打包工序。工资规则唯一键变为 `(priceBookId, operationType, unit)`；原发布约束要求三条基础规则；`20260917190000_optional_unified_packing_rates` 将统一工价调整为必需局部、专版两条规则，入袋和装盒各自选填。缺少对应包装工价时暂停该类计件报工，不按零元计算。个人包装工价的入袋必填约束、已发布规则及历史快照保护保持不变。没有装盒工价时不套用入袋工价。客户报价与工资本仍独立。
 
 空盒及装盒费写入新加工费价目版本，不修改已发布规则或旧工单快照。安装步骤见 [包装类型实施记录](./docs/包装类型实施-20260913.md)。
 
@@ -217,3 +217,65 @@ pnpm db:studio
 手工表单携带服务端生成的请求键，仅在成功响应后换新键；网络失败重试沿用原键。服务在事务内先锁请求、核对操作者与规范化业务内容的摘要，再锁定物料和库位更新库存、写流水及通知 outbox。同键同内容返回首次流水，不再更新余额或发送预警；同键不同内容拒绝。上线前必须先应用前向迁移，不能只部署新的 Prisma Client。
 
 已发时薪再次提交同一“已发”状态时保留原 `paidAt` 和 `updatedAt`，不能把重试时间写成首次发放时间。验证与候选状态见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
+
+## 2026-09-15 样品用途与整单价
+
+新增前向迁移：
+
+1. `20260915120000_sample_order_purpose`：增加 Order.purpose（STANDARD / SAMPLE_SHIPMENT / PROOF）、pricingMode（ITEMIZED / MANUAL_TOTAL）、samplePackagingRuleCode，以及 purpose/createdAt 索引。旧行默认 STANDARD + ITEMIZED；CHECK 强制 PROOF 对应 MANUAL_TOTAL，其余用途对应 ITEMIZED。
+2. `20260915121000_sample_draft_revision`：扩展 Order_priceRevision_check，允许各创建角色的样品草稿在未报价时 priceRevision=0；仍要求 DRAFT 且没有报价修订引用。保留已应用迁移原文。
+
+寄样加工行零金额；运费与包装复用 OrderCustomerCharge 的逐地址键及物流价目锁。打样只用 `ORDER:PROOF:TOTAL` 的 SAMPLE_FEE 行作为总应收，未核价 amount=null；管理员确认后由原价格修订/审计/台账事务同步 totalAmount、confirmedFee，settledFee 仍在结算时写入。没有平行的人工总价列。
+
+报价冻结在既有 OrderPricingRevision 与 OrderPriceVersionLock。已报价/确认工单不会因发布规则而自动变价。样品用途不可通过现有编辑命令改写，历史普通单不重新计算。
+
+本轮已验证原本地开发库升级及独立空库 148 项完整迁移链。生产发布仍须执行既有迁移发布步骤，本次未部署。
+
+## 2026-09-16 计件工价草稿编辑
+
+迁移 `20260916190000_piecework_draft_metadata` 调整
+`PieceworkPriceBook_publication_shape_check`，允许草稿存储拟生效时间与调整说明。
+不增加列、不回填价格、不修改已发布数据；既有发布证据要求、已发布工价保护和后续版本约束保持生效。
+此 ALTER TABLE 需要短时表锁，按正式发布窗口执行。
+
+草稿规则保存与发布使用同一个 advisory lock；保存同时推进父版本 `updatedAt`，
+并追加审计。空拟生效时间在发布锁内使用数据库时钟确定，不预设为零价。
+新 seed 不再生成机型计价与包装时薪旧规则，但保留历史记录及历史查询依赖。
+
+### 2026-09-16：局部工序计薪次数
+
+前向迁移 `20260916153000_operation_payroll_pass_count` 增加
+`ProductionOperation.payrollPassCount`（可空正整数，限局部工序）与 `payrollRevision`。
+空值保留按颜色数的原行为；不回填、不更新历史报工，不改变来源数量与生产计划。
+报工 `snapshot.payroll` 保存实际次数和修订号；改版新工序重新使用默认次数。
+
+### 个人计件工价作用域（2026-09-17）
+
+迁移 `20260916200000_personal_piecework_rates` 给 `PieceworkPriceBook` 增加可空 `workerId` 外键及 `useUnifiedRates`。空账号表示统一工价；账号版本可为个人价格或无明细的统一模式。全局版本号保持唯一，各作用域生效区间互斥；关闭区间要求同作用域后继版本。发布触发器核验账号有效、岗位与单位完整。报工触发器独立检查实际报工人的有效个人模式与所用价格簿。原已发布不可变、冲正和历史保护继续生效。
+迁移 `20260917001000_personal_piecework_draft_scope` 将原全局单草稿索引改为每作用域单草稿。两条均为前向迁移，旧记录保留统一作用域，不回写工资、不自动发布任何正式价格。
+`ProductionReport.snapshot.payroll` 新增 `rateSource/policyBookId/policyBookVersion/rateWorkerId`，旧快照缺这些字段时解释为统一工价。
+
+### 2026-09-17 分档工资与人工核定账本
+
+增量迁移 `20260917010000_foil_wage_rule_components`、`20260917011000_foil_wage_ledger`、`20260917012000_foil_wage_fixed_rounding`：
+
+- `PieceworkPriceRule.smallOrderAmount/setupAmount` 为成对可空的金额；历史规则保持 NULL，不重新解释历史工资。PACKING 不使用烫金包干字段。
+- `ProductionReport.wageSupplement` 是保持原 rate／chargeableQty 快照的计价差额，总额约束为 `round(chargeableQty × rate, 2) + wageSupplement`。数据库重新验证分档、倍率与首次固定费，不能任意填差额绕过自动计价。
+- `ADJUSTMENT` 仅以有效原报工为锚点，由有效管理员追加，零产量、同一未结算工作日，保留原工价身份和调整原因。原记录不可修改，已结算工资不能更改。
+- `ProductionOperation.payrollReviewRequired` 标识多人接手、合并款式颜色数不一致、继承进度或计价条件变化；人工核定后解除结算阻挡。分档报工冲正也需要复核。
+
+### 2026-09-18：建单设计分组
+
+前向迁移 `20260918120000_order_design_groups` 仅为 `OrderItem` 增加 nullable `designGroupKey TEXT`，无数据删除或历史回填。标识只在所属工单内分组，不是跨工单外键；金额、文件、生产任务和工资仍绑定独立 `OrderItem.id`。发布应用前须先应用迁移并生成 Prisma Client，旧应用兼容空字段。
+
+### 2026-09-18：创建请求重试核对
+
+复用 `OrderLog.changedFields` JSON，在首条 `CREATE` 日志内写入 `createRequest: { version: 1, fingerprint: SHA256 }`，随工单创建事务原子保存。指纹取首次创建请求而非之后可修改的工单状态；普通工单、寄样、打样使用相同重试校验。无需新增迁移；已有日志不回填，缺指纹的历史重试要求打开原工单人工核对。业务展示忽略无 `before/after` 的元数据。
+
+### 2026-09-18 新版报工异议
+
+新增前向迁移 `20260918060000_production_report_disputes`：创建 `ProductionReportDispute`，关联不可变的 `ProductionReport`；报工的 reporterId 即发起人所有权依据，回复人关联 User。保留旧 `ProductionTaskDispute` 及历史消费方。
+
+- 部分唯一索引保证每条报工最多一个 PENDING；事务锁串行化提交与回复。
+- CHECK 限制说明长度、状态与回复字段的一致性；触发器禁止删除、修改原始问题与关联，以及再次修改已处理记录。
+- 无历史数据回填，无计价、工资或报工账本更新。上线需先应用该迁移，再切换应用版本。

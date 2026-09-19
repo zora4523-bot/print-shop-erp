@@ -243,7 +243,7 @@ describe('createUserAction', () => {
 
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/accounts');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/cs/new');
-    expect(redirectMock).toHaveBeenCalledWith('/owner/accounts/u1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/accounts/u1?created=1');
   });
 });
 

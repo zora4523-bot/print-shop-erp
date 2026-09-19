@@ -550,15 +550,15 @@ describe('administrator edit design', () => {
     const back = page.getByRole('group', { name: '第 1 款反面烫金', exact: true });
     await expect.element(front.getByRole('button', { name: '亚金', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect.element(back.getByRole('button', { name: '不烫', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await front.getByRole('button', { name: '红色', exact: true }).click();
+    await front.getByRole('button', { name: '红金', exact: true }).click();
     await front.getByRole('button', { name: '更多颜色', exact: true }).click();
-    await front.getByRole('button', { name: '蓝色', exact: true }).click();
-    await front.getByRole('button', { name: '蓝色', exact: true }).click();
+    await front.getByRole('button', { name: '蓝金', exact: true }).click();
+    await front.getByRole('button', { name: '蓝金', exact: true }).click();
     await back.getByRole('button', { name: '更多颜色', exact: true }).click();
-    await back.getByRole('button', { name: '蓝色', exact: true }).click();
+    await back.getByRole('button', { name: '蓝金', exact: true }).click();
     await expect.element(back.getByRole('button', { name: '不烫', exact: true })).toHaveAttribute('aria-pressed', 'false');
     await back.getByRole('button', { name: '不烫', exact: true }).click();
-    await expect.element(back.getByRole('button', { name: '蓝色', exact: true })).toHaveAttribute('aria-pressed', 'false');
+    await expect.element(back.getByRole('button', { name: '蓝金', exact: true })).toHaveAttribute('aria-pressed', 'false');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);
     expect(mocks.preview.mock.calls[0][0].items).toEqual([
@@ -591,10 +591,10 @@ describe('administrator edit design', () => {
     });
     const front = page.getByRole('group', { name: '第 1 款正面烫金', exact: true });
     await front.getByRole('button', { name: '更多颜色', exact: true }).click();
-    await expect.element(front.getByRole('button', { name: '黑色', exact: true })).toBeDisabled();
-    await front.getByRole('button', { name: '红色', exact: true }).click();
-    await expect.element(front.getByRole('button', { name: '黑色', exact: true })).toBeEnabled();
-    await front.getByRole('button', { name: '黑色', exact: true }).click();
+    await expect.element(front.getByRole('button', { name: '黑金', exact: true })).toBeDisabled();
+    await front.getByRole('button', { name: '红金', exact: true }).click();
+    await expect.element(front.getByRole('button', { name: '黑金', exact: true })).toBeEnabled();
+    await front.getByRole('button', { name: '黑金', exact: true }).click();
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);
     expect(mocks.preview.mock.calls[0][0].items[0].frontFoilColors).toEqual([
@@ -645,7 +645,7 @@ describe('administrator edit design', () => {
     await expect.element(page.getByRole('spinbutton', { name: '包装（个/包）', exact: true })).toBeDisabled();
     await expect.element(page.getByRole('combobox', { name: '规格', exact: true })).toBeDisabled();
     const foil = page.getByRole('group', { name: '第 1 款正面烫金', exact: true });
-    await expect.element(foil.getByRole('button', { name: '红色', exact: true })).toBeDisabled();
+    await expect.element(foil.getByRole('button', { name: '红金', exact: true })).toBeDisabled();
     await expect.element(page.getByRole('button', { name: /新增款式（沿用第/ })).not.toBeInTheDocument();
     await page.getByRole('textbox', { name: '第 1 款名称', exact: true }).fill('人工核价旧款');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
@@ -662,10 +662,10 @@ describe('administrator edit design', () => {
     });
     const front = page.getByRole('group', { name: '第 1 款正面烫金', exact: true });
     await expect.element(front.getByRole('button', { name: '亚金', exact: true })).toBeDisabled();
-    await expect.element(front.getByRole('button', { name: '红色', exact: true })).toBeEnabled();
-    await front.getByRole('button', { name: '红色', exact: true }).click();
+    await expect.element(front.getByRole('button', { name: '红金', exact: true })).toBeEnabled();
+    await front.getByRole('button', { name: '红金', exact: true }).click();
     await front.getByRole('button', { name: '亚金', exact: true }).click();
-    await expect.element(front.getByRole('button', { name: '红色', exact: true })).toBeDisabled();
+    await expect.element(front.getByRole('button', { name: '红金', exact: true })).toBeDisabled();
     await expect.element(front.getByRole('button', { name: '不烫', exact: true })).not.toBeInTheDocument();
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);

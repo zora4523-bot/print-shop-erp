@@ -43,7 +43,7 @@ test(`${role === 'SALES' ? '业务员' : '客服'}新增配送地址并申请每
     const region = page.getByRole('region', { name: '添加收货地址' });
     await region.getByLabel('收件人', { exact: true }).fill('第二收件人');
     await region.getByLabel('收货电话', { exact: true }).fill('13900139000');
-    await region.getByLabel('收货地址', { exact: true }).fill('江西省南昌市测试路2号');
+    await region.getByRole('textbox', { name: '收货地址', exact: true }).fill('江西省南昌市测试路2号');
     await region.getByLabel('计费省份', { exact: true }).fill('江西');
     await region.getByRole('spinbutton').fill('400');
     await region.getByRole('button', { name: '预览费用', exact: true }).click();

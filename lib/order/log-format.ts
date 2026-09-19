@@ -6,6 +6,7 @@ import { ORDER_STATUS_REGISTRY } from '../ui/status-registry';
 import { formatDateTimeShanghai } from '../format/dates';
 
 const FIELD_LABELS: Record<string, string> = {
+  payrollPassCount: '计薪过版次数',
   // Top-level Order fields the edit form can touch
   customName: '工单名称',
   customerRef: '客户名称/简称',
@@ -179,6 +180,7 @@ export function formatOrderLogChanges(changedFields: unknown): LogChangeRow[] {
 const ACTION_LABELS: Record<string, string> = {
   CREATE: '创建',
   UPDATE: '编辑',
+  PAYROLL_PASS_CHANGE: '调整计薪次数',
   STATUS_CHANGE: '状态变更',
   DELETE: '删除',
   // 旧派工/抢单写入器已移除；这些标签仅供历史 OrderLog 时间线解读。
@@ -191,6 +193,7 @@ const ACTION_LABELS: Record<string, string> = {
   TASK_DISPUTE_REJECTED: '任务异议已驳回',
   PRICING_CONFIRMED_NOT_READY: '终价已确认，生产资料待补齐',
   LEGACY_PRODUCTION_FACTS_REPAIRED: '补录生产资料',
+  SAMPLE_READY_TO_SHIP: '寄样品待发货',
   PRICING_ADMIN_CONFIRMED: '管理员终价确认',
   FULFILLMENT_PRICING_CONFIRMED: '确认物流费用',
   SF_COLLECT_FULFILLMENT_CHANGED: '提交到付费用更正',

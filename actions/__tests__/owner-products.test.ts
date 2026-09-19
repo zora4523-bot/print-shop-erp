@@ -209,7 +209,7 @@ describe('createQuoteProductAction', () => {
     expect(revalidatePathMock).not.toHaveBeenCalledWith(
       '/owner/rules/internal-pricing/tiers/new',
     );
-    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1?created=1');
   });
 
   it('keeps rule-center stock SKU creation inside the rule center', async () => {
@@ -226,7 +226,7 @@ describe('createQuoteProductAction', () => {
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
-    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1?created=1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
   });
 
@@ -245,7 +245,7 @@ describe('createQuoteProductAction', () => {
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
-    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1?created=1');
   });
 
   it('可建单组合创建不接受客户计价字段', async () => {

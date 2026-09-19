@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { isolateE2eLoginClient } from './_login-client';
 
-async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
+export async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   try {
@@ -1742,15 +1742,15 @@ export async function login(
 }
 
 // Every settlement mode now renders the B single-page form. The active style
-// is represented by a pressed button in the shared style navigation.
+// is represented by the selected design tab in the shared editor.
 export async function openFirstOrderItemEditor(page: Page): Promise<void> {
   const form = page.locator('[data-slot="order-form-b"]');
   await expect(form).toBeVisible();
   const firstStyle = form
-    .getByRole('navigation', { name: '款式' })
-    .getByRole('button')
+    .getByRole('tablist', { name: '设计款', exact: true })
+    .getByRole('tab')
     .first();
-  await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');
+  await expect(firstStyle).toHaveAttribute('aria-selected', 'true');
   await expect(
     form.getByRole('spinbutton', { name: '数量', exact: true }),
   ).toBeVisible();
@@ -1964,6 +1964,7 @@ export async function seedE2eProductionOperationFixture(): Promise<E2eProduction
            ON rule."priceBookId" = book.id
           AND rule."operationType" = 'PARTIAL'::"PieceworkOperationType"
         WHERE book.status = 'PUBLISHED'::"PieceworkPriceBookStatus"
+          AND book."workerId" IS NULL
           AND book."effectiveFrom" <= CURRENT_TIMESTAMP
           AND (book."effectiveTo" IS NULL OR book."effectiveTo" > CURRENT_TIMESTAMP)
         ORDER BY book.version DESC
@@ -2180,12 +2181,20 @@ export async function submitDraftOrderAndWait(page: Page): Promise<void> {
   const orderId = new URL(page.url()).pathname.split('/')[2];
   if (!orderId || orderId === 'new') throw new Error('提交测试必须位于工单详情');
   await page.getByRole('button', { name: /^提交工单$/ }).click();
-  await expect.poll(async () => withDb(async (db) => {
+  const status = () => withDb(async (db) => {
     const result = await db.query<{ status: string }>(
       'SELECT status::text FROM "Order" WHERE id = $1', [orderId],
     );
     return result.rows[0]?.status;
-  }), { timeout: 20_000 }).toMatch(/^(SUBMITTED|CONFIRMED)$/);
+  });
+  // 详情页首次提交不带报价 token：计物流的工单（2026-09-18 起含内销 / 工厂直接）
+  // 会先回到「确认最新报价并提交」，与 order-packaging-types 的写法一致。
+  const latest = page.getByRole('button', { name: '确认最新报价并提交', exact: true });
+  await expect
+    .poll(async () => ((await latest.isVisible()) ? 'confirm' : await status()), { timeout: 20_000 })
+    .not.toBe('DRAFT');
+  if (await latest.isVisible()) await latest.click();
+  await expect.poll(status, { timeout: 20_000 }).toMatch(/^(SUBMITTED|CONFIRMED)$/);
   await expectNoNextErrorOverlay(page);
 }
 

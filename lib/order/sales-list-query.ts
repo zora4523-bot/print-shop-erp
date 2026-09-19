@@ -51,6 +51,7 @@ export type SalesOrderListSummary = {
 };
 
 export type SalesOrderListRow = {
+  purpose?: import("./purpose").OrderPurposeValue;
   id: string;
   orderNo: string;
   customName: string | null;
@@ -152,6 +153,7 @@ function salesNeedsActionWhere(
 }
 
 const salesOrderSelect = {
+  purpose: true,
   id: true,
   orderNo: true,
   customName: true,
@@ -583,6 +585,7 @@ function mapSalesOrderRow(
   return {
     id: row.id,
     orderNo: row.orderNo,
+    purpose: row.purpose,
     customName: row.customName,
     customerRef: row.customerRef,
     status: row.status,

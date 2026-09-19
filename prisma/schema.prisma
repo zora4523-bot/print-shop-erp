@@ -110,11 +110,14 @@ model User {
   finalizedCustomerCharges    OrderCustomerCharge[]         @relation("OrderCustomerChargeFinalizer")
   createdPlateDetails         OrderItemPlateDetail[]        @relation("OrderItemPlateDetailCreator")
   removedPlateDetails         OrderItemPlateDetail[]        @relation("OrderItemPlateDetailRemover")
+  resolvedReportDisputes      ProductionReportDispute[]     @relation("ReportDisputeResolver")
   raisedTaskDisputes          ProductionTaskDispute[]       @relation("ProductionTaskDisputeWorker")
   resolvedTaskDisputes        ProductionTaskDispute[]       @relation("ProductionTaskDisputeResolver")
   confirmedOrderPricing       Order[]                       @relation("OrderPricingConfirmer")
   createdPricingRevisions     OrderPricingRevision[]        @relation("OrderPricingRevisionCreator")
+  personalPieceworkBooks      PieceworkPriceBook[]          @relation("PersonalPieceworkOwner")
   publishedPieceworkBooks     PieceworkPriceBook[]          @relation("PieceworkPriceBookPublisher")
+  adjustedProductionReports   ProductionReport[]            @relation("ProductionReportAdjuster")
   productionReports           ProductionReport[]            @relation("ProductionReportReporter")
   productionProgressReports   ProductionProgressReport[]    @relation("ProductionProgressReportReporter")
   productionWorkOrderProgress ProductionWorkOrderProgress[] @relation("ProductionWorkOrderProgressReporter")
@@ -250,6 +253,17 @@ enum OrderStatus {
   SHIPPED
   FINISHED
   CANCELLED
+}
+
+enum OrderPurpose {
+  STANDARD
+  SAMPLE_SHIPMENT
+  PROOF
+}
+
+enum OrderPricingMode {
+  ITEMIZED
+  MANUAL_TOTAL
 }
 
 enum OrderKind {
@@ -401,6 +415,9 @@ model Order {
   createdById               String // 代下单场景
   customerPartyId           String?
   status                    OrderStatus                 @default(DRAFT)
+  samplePackagingRuleCode   String?
+  purpose                   OrderPurpose                @default(STANDARD)
+  pricingMode               OrderPricingMode            @default(ITEMIZED)
   kind                      OrderKind                   @default(NORMAL)
   billingMode               OrderBillingMode            @default(CHARGE)
   settlementType            OrderSettlementType
@@ -505,6 +522,7 @@ model Order {
   @@index([submittedAt])
   @@index([completedAt])
   @@index([shippedAt])
+  @@index([purpose, createdAt])
 }
 
 // 每次形成暂定价、自动确认价或管理员终审价都追加一行。应用层没有更新/
@@ -534,6 +552,7 @@ model OrderItem {
   orderId             String
   sequence            Int
   fig                 Int?
+  designGroupKey      String? // 建单设计分组；每个规格仍独立计价、生产和结算
   name                String
   productId           String?
   pricingRoute        OrderItemPricingRoute
@@ -1015,6 +1034,7 @@ enum ProductionReportSource {
 }
 
 enum ProductionReportEntryType {
+  ADJUSTMENT
   REPORT
   REVERSAL
 }
@@ -1032,23 +1052,26 @@ enum PieceworkSettlementStatus {
   PAID
 }
 
-// 对内工价簿独立版本化。DRAFT 可补金额，PUBLISHED 一旦发布后
+// 对内工价簿独立版本化。DRAFT 可编辑金额、拟生效时间和说明，PUBLISHED 一旦发布后
 // 由数据库触发器禁止更改/删除；绝不复用 CustomerPriceBook。
 model PieceworkPriceBook {
-  id             String                   @id @default(cuid())
-  version        Int                      @unique
-  status         PieceworkPriceBookStatus @default(DRAFT)
-  effectiveFrom  DateTime?                @db.Timestamptz(3)
-  effectiveTo    DateTime?                @db.Timestamptz(3)
-  sourceName     String?                  @db.Text
-  sourceSha256   String?                  @db.VarChar(64)
-  manifestSha256 String?                  @db.VarChar(64)
-  ruleSetSha256  String?                  @db.VarChar(64)
-  publishNote    String?                  @db.Text
-  publishedById  String?
-  publishedAt    DateTime?                @db.Timestamptz(3)
-  createdAt      DateTime                 @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime                 @updatedAt @db.Timestamptz(3)
+  workerId        String?
+  useUnifiedRates Boolean                  @default(false)
+  worker          User?                    @relation("PersonalPieceworkOwner", fields: [workerId], references: [id], onDelete: Restrict)
+  id              String                   @id @default(cuid())
+  version         Int                      @unique
+  status          PieceworkPriceBookStatus @default(DRAFT)
+  effectiveFrom   DateTime?                @db.Timestamptz(3)
+  effectiveTo     DateTime?                @db.Timestamptz(3)
+  sourceName      String?                  @db.Text
+  sourceSha256    String?                  @db.VarChar(64)
+  manifestSha256  String?                  @db.VarChar(64)
+  ruleSetSha256   String?                  @db.VarChar(64)
+  publishNote     String?                  @db.Text
+  publishedById   String?
+  publishedAt     DateTime?                @db.Timestamptz(3)
+  createdAt       DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime                 @updatedAt @db.Timestamptz(3)
 
   publishedBy User?                @relation("PieceworkPriceBookPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
   rules       PieceworkPriceRule[]
@@ -1057,16 +1080,19 @@ model PieceworkPriceBook {
   @@index([status, effectiveFrom])
   @@index([publishedById])
   @@index([sourceSha256])
+  @@index([workerId, status, effectiveFrom])
 }
 
 model PieceworkPriceRule {
-  id            String                 @id @default(cuid())
-  priceBookId   String
-  operationType PieceworkOperationType
-  unit          PieceworkRateUnit
-  amount        Decimal?               @db.Decimal(14, 4)
-  createdAt     DateTime               @default(now()) @db.Timestamptz(3)
-  updatedAt     DateTime               @updatedAt @db.Timestamptz(3)
+  id               String                 @id @default(cuid())
+  priceBookId      String
+  operationType    PieceworkOperationType
+  unit             PieceworkRateUnit
+  amount           Decimal?               @db.Decimal(14, 4)
+  smallOrderAmount Decimal?               @db.Decimal(14, 4)
+  setupAmount      Decimal?               @db.Decimal(14, 4)
+  createdAt        DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime               @updatedAt @db.Timestamptz(3)
 
   priceBook PieceworkPriceBook @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
 
@@ -1083,6 +1109,10 @@ model ProductionOperation {
   operationType               PieceworkOperationType
   unit                        PieceworkRateUnit
   status                      ProductionOperationStatus @default(PENDING)
+  // 工资次数可调整；生产计划、来源数与历史报工不随之变更。
+  payrollPassCount            Int?
+  payrollReviewRequired       Boolean                   @default(false)
+  payrollRevision             Int                       @default(0)
   plannedQty                  Decimal                   @db.Decimal(14, 3)
   // 改版承接的合格量与工单件数，只参与进度，不生成计件工资。
   carriedCompletedQty         Decimal                   @default(0) @db.Decimal(14, 3)
@@ -1135,6 +1165,9 @@ model ProductionReport {
   chargeableQty        Decimal                   @db.Decimal(14, 3)
   unit                 PieceworkRateUnit
   rate                 Decimal                   @db.Decimal(14, 4)
+  wageSupplement       Decimal                   @default(0) @db.Decimal(14, 2)
+  adjustedById         String?
+  adjustedBy           User?                     @relation("ProductionReportAdjuster", fields: [adjustedById], references: [id], onDelete: Restrict)
   amount               Decimal                   @db.Decimal(14, 2)
   priceBookId          String
   priceBookVersion     Int
@@ -1149,6 +1182,7 @@ model ProductionReport {
   priceBook         PieceworkPriceBook           @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
   reversalOf        ProductionReport?            @relation("ProductionReportReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
   reversedBy        ProductionReport?            @relation("ProductionReportReversal")
+  disputes          ProductionReportDispute[]
   settlementItem    PieceworkSettlementItem?
   workOrderProgress ProductionWorkOrderProgress?
 
@@ -2991,4 +3025,23 @@ model Setting {
   value     Json
   remark    String?
   updatedAt DateTime @updatedAt
+}
+
+// 新版报工异议独立于历史任务；报工记录本身即为所有权依据。
+model ProductionReportDispute {
+  id           String                      @id @default(cuid())
+  reportId     String
+  status       ProductionTaskDisputeStatus @default(PENDING)
+  reason       String                      @db.Text
+  resolution   String?                     @db.Text
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+  report       ProductionReport            @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  resolvedBy   User?                       @relation("ReportDisputeResolver", fields: [resolvedById], references: [id], onDelete: Restrict)
+
+  @@index([reportId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@index([resolvedById])
 }

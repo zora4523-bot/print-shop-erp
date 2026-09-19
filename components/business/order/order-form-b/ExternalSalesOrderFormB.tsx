@@ -1,4 +1,9 @@
 'use client';
+import { OrderSpecificationTabs } from './OrderSpecificationTabs';
+import { EditorTabs } from '@/components/ui/editor-tabs';
+import { orderDesignGroups } from '@/lib/order/design-groups';
+import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
+import { OrderPurposePicker } from '../OrderPurposePicker';
 import {
   isMixedPackaging,
   packagingType,
@@ -11,9 +16,11 @@ import {
 } from '@/lib/order/packaging-mode';
 
 import { Group, FieldLabel, FieldError, RequiredMark, PillPicker } from './OrderFieldPrimitives';
-import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
+import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemSpecificationFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
 
 import { OrderReceiverContactFields } from '../OrderReceiverContactFields';
+import { ReceiverAddressPasteField } from '../ReceiverAddressPasteField';
+import { parseExternalReceiverDisplay } from '@/lib/order/receiver-address-paste';
 
 import {
   useId,
@@ -29,7 +36,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import {
   DesignFileType,
   OrderFoilTechnique,
@@ -52,23 +58,52 @@ import {
 
 const FOIL_OPTIONS: readonly OrderFoilSwatchOption[] = [
   { value: '亚金', label: '亚金', tone: 'matte-gold' },
-  { value: '浅色', label: '浅色', tone: 'light-gold' },
-  { value: '红色', label: '红色', tone: 'red' },
-  { value: '黑色', label: '黑色', tone: 'black' },
-  { value: '银色', label: '银色', tone: 'silver' },
-  { value: '蓝色', label: '蓝色', tone: 'blue' },
-  { value: '透明色', label: '透明色', tone: 'clear' },
-  { value: '绿色', label: '绿色', tone: 'green' },
+  { value: '浅色', label: '浅金', tone: 'light-gold' },
+  { value: '红色', label: '红金', tone: 'red' },
+  { value: '黑色', label: '黑金', tone: 'black' },
+  { value: '银色', label: '银金', tone: 'silver' },
+  { value: '蓝色', label: '蓝金', tone: 'blue' },
+  { value: '透明色', label: '透明金', tone: 'clear' },
+  { value: '绿色', label: '绿金', tone: 'green' },
 ];
 
 function StickyOrderFormRail({ rail }: { rail: ReactNode }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLElement>(null);
+  const [fitsViewport, setFitsViewport] = useState(false);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const element = railRef.current;
+    if (!container || !element) return;
+    const measure = () => {
+      // Keep long fee summaries in document flow so every action is reachable.
+      const top = Math.max(70, container.getBoundingClientRect().top);
+      setFitsViewport(top + element.getBoundingClientRect().height <= window.innerHeight - 16);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(container);
+    observer?.observe(element);
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, { passive: true });
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure);
+    };
+  }, []);
+
   return (
-    <aside
-      data-slot="order-form-rail"
-      className="min-w-0 @min-[881px]:sticky @min-[881px]:top-[70px]"
-    >
-      {rail}
-    </aside>
+    <div ref={containerRef} className="min-w-0">
+      <aside
+        ref={railRef}
+        data-slot="order-form-rail"
+        className={cn('min-w-0', fitsViewport && '@min-[881px]:sticky @min-[881px]:top-[70px]')}
+      >
+        {rail}
+      </aside>
+    </div>
   );
 }
 
@@ -113,6 +148,7 @@ export type OrderFormBProps = {
   pricingExtras?: ReactNode;
   shippingExtras?: ReactNode;
   packagingExtras?: ReactNode;
+  orderPackagingExtras?: ReactNode;
   afterShipping?: ReactNode;
   footerExtras?: ReactNode;
   allowManualWeight?: boolean;
@@ -126,6 +162,7 @@ export type OrderFormBProps = {
     unitsPerBag: number;
     bagCount: number | null;
     error?: string | null;
+    scopeLabel?: string;
   };
   paperOptions: readonly OrderPaperSwatchOption[];
   paperKey: string | null;
@@ -148,9 +185,11 @@ export type OrderFormBProps = {
   rail: ReactNode;
   onActiveIndexChange: (index: number) => void;
   onAdd: () => void;
+  onAddSpecification?: () => void;
   onDuplicate: (index: number) => void;
   onRemove: (index: number) => void;
   onCustomNameChange: (value: string) => void;
+  onPurposeChange?: (value: 'SAMPLE_SHIPMENT' | 'PROOF') => void;
   onRouteChange: (value: OrderItemPricingRoute) => void;
   onPaperChange: (value: string) => void;
   onWeightChange: (value: number) => void;
@@ -198,6 +237,7 @@ function DesignFileBox({
   required = false,
   error,
   onFile,
+  onFiles,
   onRemove,
 }: {
   itemNumber: number;
@@ -206,6 +246,7 @@ function DesignFileBox({
   disabled?: boolean;
   required?: boolean;
   error?: string;
+  onFiles?: (files: File[]) => void;
   onFile: (file: File) => void;
   onRemove: () => void;
 }) {
@@ -220,8 +261,9 @@ function DesignFileBox({
   const handleDrop: DragEventHandler<HTMLElement> = (event) => {
     if (disabled) return;
     event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (file) onFile(file);
+    const files = Array.from(event.dataTransfer.files);
+    if (onFiles) onFiles(files);
+    else if (files[0]) onFile(files[0]);
   };
 
   const uploadContent = (
@@ -252,6 +294,11 @@ function DesignFileBox({
               : '上传 CDR 文件'}
           {required && !entry ? <RequiredMark /> : null}
         </p>
+        {!entry ? (
+          <p className="mt-0.5 text-xs font-medium text-muted-foreground">
+            {image ? '可粘贴或拖放图片' : '可多选或拖放多个文件'}
+          </p>
+        ) : null}
         {entry ? (
           <p
             className="mt-0.5 truncate text-xs font-medium text-muted-foreground"
@@ -270,6 +317,7 @@ function DesignFileBox({
       <input
         ref={inputRef}
         type="file"
+        multiple={Boolean(onFiles)}
         className="sr-only"
         tabIndex={-1}
         disabled={disabled}
@@ -283,8 +331,9 @@ function DesignFileBox({
             : '.cdr,application/x-cdr,application/octet-stream'
         }
         onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) onFile(file);
+          const files = Array.from(event.target.files ?? []);
+          if (onFiles) onFiles(files);
+          else if (files[0]) onFile(files[0]);
           event.target.value = '';
         }}
       />
@@ -348,7 +397,7 @@ function DesignFileBox({
               : `拖放或选择${fileLabel}`
           }
           className={cn(
-            'flex min-h-[5.375rem] w-full cursor-pointer items-center justify-start gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-card p-3.5 text-left outline-none transition-colors hover:border-foreground hover:bg-card hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+            'flex h-auto data-[slot=button]:min-h-44 w-full cursor-pointer flex-col items-start justify-between gap-4 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-4 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
             error && 'border-destructive bg-destructive/5',
           )}
           onClick={openFilePicker}
@@ -377,59 +426,79 @@ function DesignFileBox({
   );
 }
 
-export function parseExternalReceiverDisplay(raw: string): {
-  address: string;
-  platformCode: string | null;
-  receiverName: string | null;
-  receiverPhone: string | null;
-} {
-  const text = raw.trim();
-  if (!text) {
-    return {
-      address: '',
-      platformCode: null,
-      receiverName: null,
-      receiverPhone: null,
-    };
-  }
-  const phone =
-    text.match(/1[3-9]\d{9}/)?.[0] ??
-    text.match(/\d{3,4}-\d{7,8}/)?.[0] ??
-    '';
-  const platformCode =
-    text.match(/\[[0-9A-Za-z-]{2,}\]|[@#][0-9A-Za-z-]{4,}#?/)?.[0] ??
-    null;
-  const withoutPhone = text.replace(phone, ' ');
-  const parts = withoutPhone
-    .split(/[,，;；\n\t]|\s{2,}/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const hasSeparator = /[,，;；\n\t]|\s{2,}/.test(withoutPhone);
-  let inferredName = phone || hasSeparator ? (parts[0] ?? '') : '';
-  inferredName = inferredName
-    .replace(/\[[^\]]*\]/g, '')
-    .replace(/[@#].*$/, '')
-    .replace(/^(?:收货人|联系人|姓名)\s*[:：]?\s*/, '')
-    .trim();
-  if (
-    inferredName.length > 10 ||
-    /[省市区县旗镇乡街道路号栋楼层]/.test(inferredName)
-  ) {
-    inferredName = '';
-  }
-  const address = parts
-    .slice(inferredName ? 1 : 0)
-    .join(' ')
-    .replace(platformCode ?? '', ' ')
-    .replace(/^(?:地址)\s*[:：]?\s*/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return {
-    address,
-    platformCode,
-    receiverName: inferredName || null,
-    receiverPhone: phone || null,
-  };
+// Tests and older callers import the parser from here.
+export { parseExternalReceiverDisplay };
+
+function OrderDesignFilesSection({ itemNumber, queue, disabled, required, grouped, imageError, cdrError, onImage, onCdrFiles, onChange }: {
+  itemNumber: number;
+  queue: PendingDesignImage[];
+  disabled?: boolean;
+  required?: boolean;
+  grouped: boolean;
+  imageError?: string;
+  cdrError?: string;
+  onImage: (file: File) => void;
+  onCdrFiles: (files: File[]) => void;
+  onChange: (files: PendingDesignImage[]) => void;
+}) {
+  const imageEntry = queue.find((entry) => entry.prepared.fileType === DesignFileType.IMAGE);
+  const cdrEntries = queue.filter((entry) => entry.prepared.fileType === DesignFileType.CDR);
+  return (
+    <Group title="设计图与设计文件" appearance={grouped ? 'plain' : 'divided'}
+      description={grouped ? '当前设计款共用' : undefined}>
+      <fieldset>
+        <legend className="sr-only">
+          设计文件
+          {required ? <RequiredMark /> : null}
+        </legend>
+        <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
+          <DesignFileBox
+            itemNumber={itemNumber}
+            fileType={DesignFileType.IMAGE}
+            entry={imageEntry}
+            disabled={disabled}
+            required={required}
+            error={imageError}
+            onFile={onImage}
+            onRemove={() =>
+              onChange(
+                replacePendingDesignKind(
+                  queue,
+                  DesignFileType.IMAGE,
+                  null,
+                ),
+              )
+            }
+          />
+          <div className="min-w-0 space-y-2">
+            <DesignFileBox
+              itemNumber={itemNumber}
+              fileType={DesignFileType.CDR}
+              disabled={disabled}
+              error={cdrError}
+              onFiles={onCdrFiles}
+              onFile={(file) => onCdrFiles([file])}
+              onRemove={() => {}}
+            />
+            {cdrEntries.map((entry) => (
+              <div key={entry.id} className="flex min-w-0 items-center gap-2 rounded-xl border bg-card p-3">
+                <span data-slot="design-file-marker" className="shrink-0 text-xs font-bold text-muted-foreground"><span>CDR</span></span>
+                <p className="min-w-0 flex-1 truncate text-sm" title={entry.prepared.file.name}>
+                  {entry.prepared.file.name} · {formatDesignFileSize(entry.prepared.file.size)}
+                </p>
+                <Button
+                  type="button" variant="outline" disabled={disabled}
+                  className="min-h-11 min-w-11 shrink-0"
+                  aria-label={`移除第 ${itemNumber} 款 CDR 文件 ${entry.prepared.file.name}`}
+                  onClick={() => onChange(queue.filter((file) => file.id !== entry.id))}
+                >移除</Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </fieldset>
+    </Group>
+  );
 }
 
 export function OrderFormB({
@@ -445,6 +514,7 @@ export function OrderFormB({
   pricingExtras,
   shippingExtras,
   packagingExtras,
+  orderPackagingExtras,
   afterShipping,
   footerExtras,
   allowManualWeight = false,
@@ -467,10 +537,12 @@ export function OrderFormB({
   rail,
   onActiveIndexChange,
   onAdd,
+  onAddSpecification,
   onDuplicate,
   onRemove,
   onCustomNameChange,
   onRouteChange,
+  onPurposeChange,
   onPaperChange,
   onWeightChange,
   onSpecificationChange,
@@ -495,16 +567,13 @@ export function OrderFormB({
     Math.max(0, activeIndex),
     Math.max(0, items.length - 1),
   );
+  const groups = orderDesignGroups(items.slice(0, itemFields.length));
+  const activeGroup = groups.find((group) => group.indexes.includes(safeActiveIndex));
+  const designNumber = onAddSpecification ? groups.findIndex((group) => group === activeGroup) + 1 : safeActiveIndex + 1;
   const item = items[safeActiveIndex];
   const field = itemFields[safeActiveIndex];
   const itemErrors = fieldErrors?.items?.[safeActiveIndex];
   const queue = field ? pendingDesigns[field.id] ?? [] : [];
-  const imageEntry = queue.find(
-    (entry) => entry.prepared.fileType === DesignFileType.IMAGE,
-  );
-  const cdrEntry = queue.find(
-    (entry) => entry.prepared.fileType === DesignFileType.CDR,
-  );
   const [imageFileError, setImageFileError] = useState<{
     fieldId: string;
     message: string;
@@ -626,11 +695,27 @@ export function OrderFormB({
     );
   };
 
+  const appendCdrFiles = (files: File[]) => {
+    const additions: PendingDesignImage[] = [];
+    const errors: string[] = [];
+    for (const file of files) {
+      const prepared = prepareDesignFile(file);
+      if (!prepared.ok) errors.push(`${file.name}：${prepared.message}`);
+      else if (prepared.value.fileType !== DesignFileType.CDR) {
+        errors.push(`${file.name}：请选择 CDR 文件`);
+      } else {
+        additions.push({ id: nextPendingId(), prepared: prepared.value });
+      }
+    }
+    setCdrFileError(errors.length ? { fieldId: field.id, message: errors.join('；') } : null);
+    if (additions.length) onPendingDesignsChange([...queue, ...additions]);
+  };
+
   return (
     <div
       ref={rootRef}
       data-slot="order-form-b"
-      className="@container mx-auto w-full max-w-[1180px] px-0 pb-10 font-sans tabular-nums [overflow-anchor:none]"
+      className="@container w-full min-w-0 px-0 pb-10 font-sans tabular-nums [overflow-anchor:none]"
       onPaste={(event) => {
         const target = event.target as HTMLElement;
         if (
@@ -659,7 +744,7 @@ export function OrderFormB({
         ) : null}
       </header>
 
-      <div
+      {!onAddSpecification ? <><div
         role="group"
         aria-label="款式操作"
         className="mb-3 flex flex-wrap items-center gap-1.5"
@@ -742,7 +827,9 @@ export function OrderFormB({
             ) : null}
           </Button>
         ))}
-      </nav>
+      </nav></> : <div className="mb-4 space-y-3">
+        <p className="text-xs text-muted-foreground">{savedLabel} · {groups.length} 个设计款，{items.length} 个规格明细</p>
+      </div>}
 
       <div
         data-slot="order-form-layout"
@@ -750,9 +837,10 @@ export function OrderFormB({
       >
         <div
           data-slot="order-form-editor"
-          className="@container min-w-0 rounded-xl border bg-card p-5"
+          className={cn('@container min-w-0', onAddSpecification ? 'space-y-6' : 'rounded-xl border bg-card p-5')}
         >
-          <Group title="工单" first>
+          <div className={onAddSpecification ? 'space-y-5 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
+          <Group title="工单" first appearance={onAddSpecification ? 'plain' : 'divided'}>
             <div>
               <FieldLabel
                 htmlFor={`${uid}-custom-name`}
@@ -787,10 +875,35 @@ export function OrderFormB({
             {orderExtras}
           </Group>
 
+          {onPurposeChange ? <OrderPurposePicker
+            value={item.pricingRoute} disabled={Boolean(disabled)}
+            onChange={(value) => {
+              if (value === 'PROOF' || value === 'SAMPLE_SHIPMENT') onPurposeChange(value);
+              else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') onRouteChange(value);
+            }}
+          /> : null}
+          </div>
+          <div data-slot="order-design-section" className={onAddSpecification ? 'min-w-0 rounded-xl border bg-card' : undefined}>
+          {onAddSpecification ? <div className="space-y-3 rounded-t-xl bg-muted/30 px-4 pt-4 @min-[560px]:px-5">
+            <div className="flex flex-wrap items-start gap-2">
+              <EditorTabs ref={styleNavRef} id={`${uid}-design`} label="设计款" variant="folder" disabled={disabled}
+                tabs={groups.map((group, index) => ({ value: itemFields[group.indexes[0]].id,
+                  label: `设计款 ${index + 1}${group.indexes.some((member) => fieldErrors?.items?.[member]) ? ' · 待完善' : ''}` }))}
+                value={itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}
+                onChange={(value) => { cancelIssueFocus(); onActiveIndexChange(itemFields.findIndex((entry) => entry.id === value)); }} />
+              <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 增加设计款</Button>
+            </div>
+            {items.length >= MAX_ORDER_ITEMS_PER_ORDER ? <p className="text-sm text-muted-foreground">每张工单最多 {MAX_ORDER_ITEMS_PER_ORDER} 个规格明细。</p> : null}
+          </div> : null}
+          <div role={onAddSpecification ? 'tabpanel' : undefined} id={`${uid}-design-panel`}
+            className={onAddSpecification ? 'space-y-7 p-4 @min-[560px]:p-5' : undefined}
+            aria-labelledby={onAddSpecification ? `${uid}-design-tab-${itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}` : undefined}>
           <OrderItemCraftFields
+            appearance={onAddSpecification ? 'plain' : 'divided'}
+            hideRoute={Boolean(onPurposeChange)}
             uid={uid}
             item={item}
-            title={`工艺 · 第 ${safeActiveIndex + 1} 款`}
+            title={onAddSpecification ? '工艺' : `工艺 · 第 ${safeActiveIndex + 1} 款`}
             paperKey={paperKey}
             paperOptions={paperOptions}
             foilOptions={foilOptions}
@@ -804,11 +917,13 @@ export function OrderFormB({
             onFoilTechniqueChange={onFoilTechniqueChange}
           />
           <OrderItemMaterialFields
+            appearance={onAddSpecification ? 'plain' : 'divided'}
             uid={uid}
             item={item}
             disabled={disabled}
             itemErrors={itemErrors}
             materialExtras={materialExtras}
+            hideSpecification={Boolean(onAddSpecification)}
             paperKey={paperKey}
             paperOptions={paperOptions}
             weightOptions={weightOptions}
@@ -821,7 +936,23 @@ export function OrderFormB({
             onCustomSizeChange={onCustomSizeChange}
           />
 
-          <Group title="数量与包装">
+          <div data-slot="order-specification-section" className={onAddSpecification ? 'space-y-5 rounded-xl bg-muted/50 p-3 @min-[560px]:p-4' : undefined}>
+          {onAddSpecification ? <OrderSpecificationTabs id={`${uid}-spec`}
+            indexes={activeGroup?.indexes ?? []} items={items} itemFields={itemFields}
+            activeIndex={safeActiveIndex} errors={fieldErrors} disabled={disabled} removeRef={removeButtonRef}
+            onSelect={(index) => { cancelIssueFocus(); onActiveIndexChange(index); }}
+            onAdd={onAddSpecification}
+            onRemove={() => { cancelIssueFocus(); restoreDeleteFocusRef.current = true; onRemove(safeActiveIndex); }}
+          /> : null}
+          <div role={onAddSpecification ? 'tabpanel' : undefined} id={`${uid}-spec-panel`}
+            className={onAddSpecification ? 'space-y-5' : undefined}
+            aria-labelledby={onAddSpecification ? `${uid}-spec-tab-${field.id}` : undefined}>
+            {onAddSpecification ? <OrderItemSpecificationFields
+              uid={uid} item={item} disabled={disabled} itemErrors={itemErrors}
+              specificationOptions={specificationOptions} allowCustomSize={allowCustomSize}
+              onSpecificationChange={onSpecificationChange} onCustomSizeChange={onCustomSizeChange}
+            /> : null}
+          <Group title="数量与包装" appearance={onAddSpecification ? 'plain' : 'divided'}>
             <div className="mb-5">
               <PillPicker
                 id={`${uid}-packaging-type`}
@@ -867,6 +998,7 @@ export function OrderFormB({
                 </div>
               ) : null}
             </div>
+            {packaging.scopeLabel ? <p className="mb-3 text-xs text-muted-foreground">{packaging.scopeLabel}</p> : null}
             <div className="grid grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
               <OrderItemQuantityField
                 uid={uid}
@@ -941,138 +1073,75 @@ export function OrderFormB({
                     )
                   }
                 />
+                {onAddSpecification && itemFields.length > 1 && !isMixedPackaging(packaging.mode) ? <p className="mt-2 text-xs text-muted-foreground">混装范围：本工单全部规格</p> : null}
                 {itemFields.length < 2 ? (
-                  <p className="mt-2 text-xs text-muted-foreground">混装需至少 2 款</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{onAddSpecification ? '混装需至少 2 个规格明细' : '混装需至少 2 款'}</p>
                 ) : null}
               </div>
             ) : null}
           </Group>
 
-          {packagingExtras ? <div className="mt-5">{packagingExtras}</div> : null}
+          </div>
+          </div>
 
-          {pricingExtras}
+          <OrderDesignFilesSection itemNumber={designNumber} queue={queue} disabled={disabled}
+            required={designImageRequired} grouped={Boolean(onAddSpecification)}
+            imageError={(imageFileError?.fieldId === field.id ? imageFileError.message : undefined) ?? itemErrors?.designImage}
+            cdrError={cdrFileError?.fieldId === field.id ? cdrFileError.message : undefined}
+            onImage={(file) => putFile(file, DesignFileType.IMAGE)}
+            onCdrFiles={appendCdrFiles} onChange={onPendingDesignsChange}
+          />
 
-          <Group title="文件">
-            <fieldset>
-              <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
-                设计文件
-                {designImageRequired ? <RequiredMark /> : null}
-              </legend>
-              <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
-                <DesignFileBox
-                  itemNumber={safeActiveIndex + 1}
-                  fileType={DesignFileType.IMAGE}
-                  entry={imageEntry}
-                  disabled={disabled}
-                  required={designImageRequired}
-                  error={
-                    (imageFileError?.fieldId === field.id
-                      ? imageFileError.message
-                      : undefined) ?? itemErrors?.designImage
-                  }
-                  onFile={(file) => putFile(file, DesignFileType.IMAGE)}
-                  onRemove={() =>
-                    onPendingDesignsChange(
-                      replacePendingDesignKind(
-                        queue,
-                        DesignFileType.IMAGE,
-                        null,
-                      ),
-                    )
-                  }
-                />
-                <DesignFileBox
-                  itemNumber={safeActiveIndex + 1}
-                  fileType={DesignFileType.CDR}
-                  entry={cdrEntry}
-                  disabled={disabled}
-                  error={
-                    cdrFileError?.fieldId === field.id
-                      ? cdrFileError.message
-                      : undefined
-                  }
-                  onFile={(file) => putFile(file, DesignFileType.CDR)}
-                  onRemove={() =>
-                    onPendingDesignsChange(
-                      replacePendingDesignKind(
-                        queue,
-                        DesignFileType.CDR,
-                        null,
-                      ),
-                    )
-                  }
-                />
-              </div>
-            </fieldset>
-          </Group>
-
-          <Group title="收货">
-            {shippingExtras}
-            <div>
-              <FieldLabel htmlFor={`${uid}-receiver-address-paste`} required>
-                收货地址
-              </FieldLabel>
-              <Textarea
-                id={`${uid}-receiver-address-paste`}
-                value={values.receiverAddress}
-                required
-                aria-required="true"
-                aria-invalid={Boolean(fieldErrors?.receiverAddress)}
-                aria-describedby={
-                  fieldErrors?.receiverAddress
-                    ? `${uid}-receiver-address-message`
-                    : undefined
-                }
-                disabled={disabled}
-                placeholder="粘贴电商后台地址串，自动拆分"
-                className="min-h-16"
-                onPaste={onReceiverAddressPaste}
-                onChange={(event) =>
-                  onReceiverAddressChange(event.target.value)
-                }
-              />
-              <FieldError id={`${uid}-receiver-address-message`} reservedLines={1}>
-                {fieldErrors?.receiverAddress}
-              </FieldError>
+          {packagingExtras || pricingExtras ? <Group title="收费与其他要求" appearance={onAddSpecification ? 'plain' : 'divided'}>
+            {onAddSpecification ? <p className="mb-4 text-sm text-muted-foreground">当前规格：{item.specification || '待选规格'} · {item.quantity} 个</p> : null}
+            <div className="space-y-5">
+              {packagingExtras}
+              {pricingExtras}
             </div>
-
-            {values.receiverAddress.trim() ? (
-              <div className="mt-3 overflow-hidden rounded-xl border">
-                <div className="border-b p-3">
-                  <OrderReceiverContactFields
-                    key={`${uid}-contacts-${values.receiverAddress}`}
-                    idPrefix={uid}
-                    receiverName={values.receiverName || parsedReceiver.receiverName}
-                    receiverPhone={receiverPhoneInitialValue}
-                    nameRequired={receiverNameRequired}
-                    phoneRequired={receiverPhoneRequired}
-                    reserveErrorSpace
-                    disabled={disabled}
-                    errors={fieldErrors}
-                    onNameChange={onReceiverNameChange}
-                    onPhoneChange={onReceiverPhoneChange}
-                  />
-                </div>
-                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center px-3 py-2.5">
-                  <span className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
-                    地址
-                  </span>
-                  <p className="min-w-0 break-words text-sm font-semibold">
-                    {parsedReceiver.address || '—'}
-                  </p>
-                </div>
-                {parsedReceiver.platformCode ? (
-                  <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center border-t px-3 py-2.5">
-                    <span className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
-                      平台码
-                    </span>
-                    <p className="min-w-0 break-words font-mono text-sm font-semibold">
-                      {parsedReceiver.platformCode}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+          </Group> : null}
+          </div>
+          </div>
+          <div className={onAddSpecification ? 'space-y-6 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
+          <Group title="收货" appearance={onAddSpecification ? 'plain' : 'divided'}>
+            {shippingExtras}
+            <ReceiverAddressPasteField
+              id={`${uid}-receiver-address-paste`}
+              labelElement={
+                <FieldLabel htmlFor={`${uid}-receiver-address-paste`} required>
+                  收货地址
+                </FieldLabel>
+              }
+              value={values.receiverAddress}
+              required
+              disabled={disabled}
+              invalid={Boolean(fieldErrors?.receiverAddress)}
+              describedBy={
+                fieldErrors?.receiverAddress
+                  ? `${uid}-receiver-address-message`
+                  : undefined
+              }
+              onPaste={onReceiverAddressPaste}
+              onChange={(value) => onReceiverAddressChange(value)}
+              after={
+                <FieldError id={`${uid}-receiver-address-message`} reservedLines={1}>
+                  {fieldErrors?.receiverAddress}
+                </FieldError>
+              }
+            >
+              <OrderReceiverContactFields
+                key={`${uid}-contacts-${values.receiverAddress}`}
+                idPrefix={uid}
+                receiverName={values.receiverName || parsedReceiver.receiverName}
+                receiverPhone={receiverPhoneInitialValue}
+                nameRequired={receiverNameRequired}
+                phoneRequired={receiverPhoneRequired}
+                reserveErrorSpace
+                disabled={disabled}
+                errors={fieldErrors}
+                onNameChange={onReceiverNameChange}
+                onPhoneChange={onReceiverPhoneChange}
+              />
+            </ReceiverAddressPasteField>
 
             {afterShipping}
 
@@ -1086,7 +1155,9 @@ export function OrderFormB({
               顺丰到付（本单不计快递费）
             </label>
           </Group>
+          {orderPackagingExtras}
           {footerExtras}
+          </div>
 
           {/* Async error summaries must not shift fields while they are being edited. */}
           {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
@@ -1128,7 +1199,7 @@ function useOrderFormFocus(itemCount: number) {
   const handledErrorFocusRequestRef = useRef(0);
   const issueFocusTimerRef = useRef<number | null>(null);
   const removeButtonRef = useRef<HTMLButtonElement>(null);
-  const styleNavRef = useRef<HTMLElement>(null);
+  const styleNavRef = useRef<HTMLDivElement>(null);
   const restoreDeleteFocusRef = useRef(false);
 
   const cancelIssueFocus = useCallback(() => {
@@ -1146,7 +1217,7 @@ function useOrderFormFocus(itemCount: number) {
     const target =
       removeButtonRef.current ??
       styleNavRef.current?.querySelector<HTMLButtonElement>(
-        '[aria-pressed="true"]',
+        '[aria-selected="true"], [aria-pressed="true"]',
       );
     target?.focus({ preventScroll: true });
   }, [itemCount]);

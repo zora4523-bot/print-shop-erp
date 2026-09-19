@@ -441,7 +441,20 @@ const confirmedShipmentChargeMoneyField = shipmentChargeMoneyField.refine(
   '请填写确认收费',
 );
 
+const signedOrderAdjustmentMoneyField = z.preprocess(
+  (value) => (value === null || value === undefined ? '' : value),
+  z
+    .string()
+    .trim()
+    .refine(
+      (value) =>
+        /^-?(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/.test(value),
+      '调整金额格式错误（整数部分最多 10 位、小数最多 2 位）',
+    ),
+);
+
 export const previewOrderPricingReviewSchema = z.object({
+  editAll: z.boolean().optional(),
   orderId: orderChangeId,
 });
 
@@ -451,6 +464,7 @@ export type PreviewOrderPricingReviewInput = z.infer<
 
 export const finalizeOrderPricingSchema = z
   .object({
+    editAll: z.boolean().optional(),
     orderId: orderChangeId,
     expectedOrderRevision: orderPricingRevisionField,
     expectedPriceRevision: orderPricingRevisionField,
@@ -501,7 +515,7 @@ export const finalizeOrderPricingSchema = z
             .trim()
             .min(1, '订单级收费业务键不能为空')
             .max(128, '订单级收费业务键过长'),
-          amount: confirmedShipmentChargeMoneyField,
+          amount: z.union([confirmedShipmentChargeMoneyField, signedOrderAdjustmentMoneyField]),
           reason: optionalTrimmedText('订单级收费定价依据', 500),
         }),
       )
@@ -578,18 +592,6 @@ export type FinalizeOrderPricingInput = z.infer<
 const orderCommercialMoneyField = orderItemMoneyOptionalField.refine(
   (value): value is string => value !== null,
   '请填写金额',
-);
-
-const signedOrderAdjustmentMoneyField = z.preprocess(
-  (value) => (value === null || value === undefined ? '' : value),
-  z
-    .string()
-    .trim()
-    .refine(
-      (value) =>
-        /^-?(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/.test(value),
-      '调整金额格式错误（整数部分最多 10 位、小数最多 2 位）',
-    ),
 );
 
 export const saveOrderManualChargeSchema = z

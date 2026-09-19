@@ -213,6 +213,20 @@ function reportInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe('reportProductionOperation', () => {
+  it('管理员设置的计薪次数独立于生产数量，报工保存新次数与工资', async () => {
+    arrangeOperation(operationFixture({ payrollPassCount: 3, payrollRevision: 1 }));
+    const result = await reportProductionOperation(reportInput({ expectedPayrollRevision: 1 }), ACTOR);
+    expect(result.amount).toBe('2.25');
+    expect(result.completedAggregate).toBe('100');
+    expect(dbMock.productionReport.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      chargeableQty: '300', snapshot: expect.objectContaining({ payroll: expect.objectContaining({ passCount: 3, payrollRevision: 1 }) }),
+    }) }));
+  });
+  it('师傅旧页面报工在计薪次数调整后拒绝，不能静默使用新次数', async () => {
+    arrangeOperation(operationFixture({ payrollPassCount: 3, payrollRevision: 1 }));
+    await expect(reportProductionOperation(reportInput({ expectedPayrollRevision: 0 }), ACTOR)).rejects.toThrow('计薪次数已调整');
+    expect(dbMock.productionReport.create).not.toHaveBeenCalled();
+  });
   it('承接已产后只为新增合格数记工资，累计数量包含承接量', async () => {
     arrangeOperation(operationFixture({ carriedCompletedQty: new Decimal(150) }));
     const result = await reportProductionOperation(reportInput({ completedQty: 50 }), ACTOR);
@@ -434,17 +448,18 @@ describe('reportProductionOperation', () => {
         },
       });
 
-      expect(dbMock.$executeRaw).toHaveBeenCalledTimes(6);
+      expect(dbMock.$executeRaw).toHaveBeenCalledTimes(7);
+      expect(dbMock.$executeRaw.mock.calls[4]?.[0].join('')).toContain("pg_advisory_xact_lock_shared(hashtext('print-shop-erp:piecework-price-book:publish'))");
       expect(dbMock.$executeRaw.mock.calls[3]?.[1]).toBe(
         'print-shop-erp:salary-identity:worker-1',
       );
-      expect(dbMock.$executeRaw.mock.calls[4]?.[1]).toBe(
+      expect(dbMock.$executeRaw.mock.calls[5]?.[1]).toBe(
         'print-shop-erp:piecework-reporting-day:2026-08-28',
       );
-      expect(dbMock.$executeRaw.mock.calls[5]?.[1]).toBe(
+      expect(dbMock.$executeRaw.mock.calls[6]?.[1]).toBe(
         'print-shop-erp:piecework-settlement:worker-1:2026-08-28',
       );
-      expect(dbMock.$executeRaw.mock.invocationCallOrder[5]).toBeLessThan(
+      expect(dbMock.$executeRaw.mock.invocationCallOrder[6]).toBeLessThan(
         dbMock.pieceworkSettlement.findUnique.mock.invocationCallOrder[0],
       );
       expect(dbMock.pieceworkPriceBook.findMany).not.toHaveBeenCalled();

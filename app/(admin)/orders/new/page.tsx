@@ -5,7 +5,7 @@ import { listActiveCraftOrderOptions } from "@/lib/craft";
 import { listSalesCustomerOptions } from "@/lib/order/sales-customer-scope";
 import { listCustomerPartyOptions } from "@/lib/party";
 import { listExternalSalesAccountOptions } from "@/lib/order/external-sales-association";
-import { OrderForm } from "@/components/business/order/OrderForm";
+import { OrderCreationWorkspace } from "@/components/business/order/OrderCreationWorkspace";
 import {
   ORDER_SETTLEMENT_LABELS,
   settlementTypeForOrderCreator,
@@ -49,7 +49,7 @@ export default async function NewOrderPage({
 
   return (
     <div className="space-y-4">
-      <OrderForm
+      <OrderCreationWorkspace
         key={workbenchTransferId ?? "new"}
         workbenchTransferId={workbenchTransferId}
         draftScope={user.id}

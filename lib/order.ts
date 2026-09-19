@@ -1,3 +1,8 @@
+import { createOrderRequestFingerprint, matchesCreateOrderRequest } from './order/create-request-fingerprint';
+import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from './rules/paper-availability';
+import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
+import { createOrderSchema } from './auth/schemas';
+import { isSampleOrder } from './order/purpose';
 import { subtotalReconciles } from './order/subtotal-reconciliation';
 import { salesCustomerScope } from './order/sales-customer-policy';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
@@ -66,8 +71,9 @@ import {
   assertCsOrderSalesLedgerReconciledInTx,
   CsSalesLedgerError,
   recordCsSalesEntryInTx,
+  csSalesBasisAmountInTx,
 } from './salary/cs-sales';
-import { settlementTypeForOrderCreator } from './order/settlement';
+import { hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
 import {
   calculateCreateOrderQuoteFromCatalogInTx,
   CreateOrderQuoteError,
@@ -589,11 +595,29 @@ async function resolveCreationCraftsInTx(
   return { canonicalStockLocalFoilCraft, craftCodeById };
 }
 
+async function findOrderBySubmissionId(tx: Pick<Prisma.TransactionClient, 'order'>, clientSubmissionId: string) {
+  return tx.order.findUnique({
+    where: { clientSubmissionId },
+    select: {
+      id: true, orderNo: true, submitterId: true, createdById: true, pricingStatus: true,
+      logs: { where: { action: 'CREATE' }, orderBy: { createdAt: 'asc' }, take: 1, select: { changedFields: true } },
+      items: { select: { id: true }, orderBy: { sequence: 'asc' } },
+    },
+  });
+}
+
 export async function createOrder(
   input: CreateOrderCommand,
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<CreatedOrderSummary> {
+  const requestFingerprint = createOrderRequestFingerprint(input);
+  const special = isSampleOrder(input.purpose);
+  const sampleShipment = input.purpose === 'SAMPLE_SHIPMENT';
+  if (special) {
+    const parsed = createOrderSchema.safeParse(input);
+    if (!parsed.success) throw new OrderInvariantError(parsed.error.issues.map((issue) => issue.message).join('；'));
+  }
   const additionalShipments = input.additionalShipments ?? [];
   const hasAdminPrices = validateAdminCreatePrices(input, actor.role, additionalShipments);
 
@@ -616,8 +640,13 @@ export async function createOrder(
       throw new OrderInvariantError(CREATE_ORDER_PACKAGING_LIMIT_MESSAGE);
     }
   }
+  // New-business gate only; see hasRetiredPaperItem for why the shared quote
+  // adapter must not do this.
+  if (hasRetiredPaperItem(input.items)) {
+    throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
+  }
   const isExternalSalesDraft =
-    settlementType === OrderSettlementType.EXTERNAL_SALES;
+    settlementType === OrderSettlementType.EXTERNAL_SALES || special;
   if (!input.receiverAddress?.trim()) {
     throw new OrderInvariantError('请填写收货地址');
   }
@@ -629,7 +658,7 @@ export async function createOrder(
       `请填写额外地址 ${missingAdditionalAddress + 1} 的收货地址`,
     );
   }
-  assertExternalSalesPackagingCoverage(
+  if (!sampleShipment) assertExternalSalesPackagingCoverage(
     settlementType,
     input.items.length,
     packagingGroupInputs,
@@ -661,26 +690,16 @@ export async function createOrder(
     }
 
     if (input.clientSubmissionId) {
-      const existing = await txClient.order.findUnique({
-        where: { clientSubmissionId: input.clientSubmissionId },
-        select: {
-          id: true,
-          orderNo: true,
-          submitterId: true,
-          createdById: true,
-          pricingStatus: true,
-          items: {
-            select: { id: true },
-            orderBy: { sequence: 'asc' },
-          },
-        },
-      });
+      const existing = await findOrderBySubmissionId(txClient, input.clientSubmissionId);
       if (existing) {
         if (
           existing.createdById !== actor.id ||
           existing.submitterId !== submitterId
         ) {
           throw new OrderInvariantError('提交标识已被其他账号使用');
+        }
+        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, requestFingerprint)) {
+          throw new OrderInvariantError(`工单 ${existing.orderNo} 已保存，本次填写与原记录不一致或无法核对。请从工单列表打开核对后修改。`);
         }
         return {
           id: existing.id,
@@ -1214,6 +1233,9 @@ export async function createOrder(
         createdById: actor.id,
         customerPartyId,
         status: OrderStatus.DRAFT,
+        purpose: input.purpose ?? 'STANDARD',
+        pricingMode: input.purpose === 'PROOF' ? 'MANUAL_TOTAL' : 'ITEMIZED',
+        samplePackagingRuleCode: sampleShipment ? input.samplePackagingRuleCode ?? null : null,
         kind: OrderKind.NORMAL,
         billingMode: OrderBillingMode.CHARGE,
         settlementType,
@@ -1241,6 +1263,7 @@ export async function createOrder(
           create: itemsWithSubtotals.map((it, idx) => ({
             sequence: idx + 1,
             fig: resolvedItemFigs[idx],
+            designGroupKey: it.designGroupKey ?? null,
             name: it.name,
             productId: it.productId ?? null,
             pricingRoute: it.pricingRoute,
@@ -1291,6 +1314,7 @@ export async function createOrder(
             {
               operatorId: actor.id,
               action: 'CREATE',
+              changedFields: { createRequest: { version: 1, fingerprint: requestFingerprint } },
               remark: `${input.isUrgent ? '创建急单' : '创建工单'}${
                 additionalShipments.length > 0
                   ? `（${additionalShipments.length + 1} 个收货地址）`
@@ -1526,21 +1550,11 @@ export async function createOrder(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      const existing = await db.order.findUnique({
-        where: { clientSubmissionId: input.clientSubmissionId },
-        select: {
-          id: true,
-          orderNo: true,
-          submitterId: true,
-          createdById: true,
-          pricingStatus: true,
-          items: {
-            select: { id: true },
-            orderBy: { sequence: 'asc' },
-          },
-        },
-      });
+      const existing = await findOrderBySubmissionId(db, input.clientSubmissionId);
       if (existing?.createdById === actor.id && existing.submitterId === submitterId) {
+        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, requestFingerprint)) {
+          throw new OrderInvariantError(`工单 ${existing.orderNo} 已保存，本次填写与原记录不一致或无法核对。请从工单列表打开核对后修改。`);
+        }
         return {
           id: existing.id,
           orderNo: existing.orderNo,
@@ -1572,6 +1586,7 @@ type StatusTxClient = {
       | {
           id: string;
           status: OrderStatus;
+          purpose?: string;
           submitterId: string;
           receiverAddress: string | null;
           receiverPhone: string | null;
@@ -1707,6 +1722,7 @@ type TransitionOptions = {
     tx: CascadeTxClient,
     orderId: string,
     order: {
+      purpose?: string;
       settlementType: OrderSettlementType;
       pricingStatus: string;
       workOrderVersion: number;
@@ -1763,6 +1779,7 @@ async function transitionWithLog(
         receiverPhone: true,
         settlementType: true,
         pricingStatus: true,
+        purpose: true,
         revision: true,
         editVersion: true,
         workOrderVersion: true,
@@ -1913,6 +1930,32 @@ async function transitionWithLog(
   return transaction ? work(transaction) : db.$transaction(work);
 }
 
+/** Runs the shared submit-time quote finalizer and maps its errors to the order domain. */
+async function finalizeSubmittedOrderQuoteInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  actorId: string,
+  now: Date,
+  expectedQuoteToken: string | null,
+) {
+  try {
+    return await finalizeExternalOrderQuoteInTx(tx, orderId, actorId, now, expectedQuoteToken);
+  } catch (error) {
+    if (error instanceof ExternalOrderQuoteChangedError) {
+      throw new OrderQuoteChangedError(
+        error.quoteToken,
+        error.quotedFee,
+        error.quotedFeeCompleteness,
+        error.message,
+      );
+    }
+    if (error instanceof ExternalOrderQuoteFinalizeError) {
+      throw new OrderInvariantError(error.message);
+    }
+    throw error;
+  }
+}
+
 export async function submitOrder(
   orderId: string,
   actor: { id: string; role: Role },
@@ -1931,6 +1974,7 @@ export async function submitOrder(
   )
     .then((setting) => setting.enabled)
     .catch(() => true);
+  const sampleFinalized: { current: { quotedFee: string; quotedFeeCompleteness: OrderQuotedFeeCompleteness } | null } = { current: null };
   let submissionNotificationKey = orderId;
   let submittedNotificationQueued = !submittedNotificationEnabled;
   let urgentNotificationQueued = false;
@@ -1973,7 +2017,14 @@ export async function submitOrder(
       cascade: async (tx, lockedOrderId, lockedOrder) => {
         const prismaTx = tx as unknown as Prisma.TransactionClient;
         if (await prismaTx.orderChangeRequest.findFirst({ where: { orderId: lockedOrderId, status: 'PENDING' }, select: { id: true } })) throw new OrderInvariantError('请先撤回或处理当前申请，再提交工单');
-        if (
+        if (isSampleOrder(lockedOrder.purpose)) {
+          try { sampleFinalized.current = await finalizeSampleOrderInTx(prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken); }
+          catch (error) {
+            if (error instanceof SampleQuoteChangedError) throw new OrderQuoteChangedError(error.quote.quoteToken, error.quote.knownTotal, error.quote.total === null ? OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS : OrderQuotedFeeCompleteness.COMPLETE, error.message);
+            if (error instanceof SampleOrderError) throw new OrderInvariantError(error.message);
+            throw error;
+          }
+        } else if (
           lockedOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
         ) {
           const itemWithoutImage = await prismaTx.orderItem.findFirst({
@@ -1989,28 +2040,27 @@ export async function submitOrder(
               `第 ${itemWithoutImage.sequence} 款缺少设计图片，请上传后再提交`,
             );
           }
-          try {
-            finalizedExternalQuote.current =
-              await finalizeExternalOrderQuoteInTx(
-                prismaTx,
-                lockedOrderId,
-                actor.id,
-                now,
-                expectedQuoteToken,
-              );
-          } catch (error) {
-            if (error instanceof ExternalOrderQuoteChangedError) {
-              throw new OrderQuoteChangedError(
-                error.quoteToken,
-                error.quotedFee,
-                error.quotedFeeCompleteness,
-                error.message,
-              );
-            }
-            if (error instanceof ExternalOrderQuoteFinalizeError) {
-              throw new OrderInvariantError(error.message);
-            }
-            throw error;
+          finalizedExternalQuote.current = await finalizeSubmittedOrderQuoteInTx(
+            prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken,
+          );
+        } else {
+          // Internal drafts saved before the retirement are new business on
+          // first submit. External drafts are checked in
+          // assertSelectedPapersAvailable, sample drafts in finalizeSampleOrderInTx.
+          const items = await prismaTx.orderItem.findMany({
+            where: { orderId: lockedOrderId },
+            select: { paperType: true, paperWeightGsm: true },
+          });
+          if (hasRetiredPaperItem(items ?? [])) {
+            throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
+          }
+          // Since 2026-09-18 internal and factory-direct orders price their
+          // delivery from the same published logistics book as external
+          // sales; the shared finalizer materializes the charges at submit.
+          if (settlementBillsLogistics(lockedOrder.settlementType)) {
+            finalizedExternalQuote.current = await finalizeSubmittedOrderQuoteInTx(
+              prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken,
+            );
           }
         }
 
@@ -2037,7 +2087,8 @@ export async function submitOrder(
               orderId: lockedOrderId,
               orderRevision: submittedOrder.revision,
               type: CsSalesEntryType.ORDER_SUBMITTED,
-              amount: submittedOrder.totalAmount,
+              // 客服业绩不含代收物流（快递费 / 打包耗材），见 cs-sales.ts。
+              amount: await csSalesBasisAmountInTx(prismaTx, lockedOrderId, submittedOrder.totalAmount),
               occurredAt: now,
               remark: '客服工单提交计入销售额',
             });
@@ -2162,9 +2213,9 @@ export async function submitOrder(
 
   return {
     ...result,
-    quotedFee: finalizedExternalQuote.current?.quotedFee ?? null,
+    quotedFee: finalizedExternalQuote.current?.quotedFee ?? sampleFinalized.current?.quotedFee ?? null,
     quotedFeeCompleteness:
-      finalizedExternalQuote.current?.quotedFeeCompleteness ?? null,
+      finalizedExternalQuote.current?.quotedFeeCompleteness ?? sampleFinalized.current?.quotedFeeCompleteness ?? null,
   };
 }
 
@@ -2428,18 +2479,15 @@ export async function cancelOrder(
         cancelledOrder.status !== OrderStatus.DRAFT
       ) {
         try {
-          await assertCsOrderSalesLedgerReconciledInTx(
-            prismaTx,
-            id,
-            cancelledOrder.totalAmount,
-          );
+          const salesBasis = await csSalesBasisAmountInTx(prismaTx, id, cancelledOrder.totalAmount);
+          await assertCsOrderSalesLedgerReconciledInTx(prismaTx, id, salesBasis);
           await recordCsSalesEntryInTx(prismaTx, {
             eventKey: `order:${id}:revision:${cancelledOrder.revision}:cancel`,
             csUserId: cancelledOrder.submitterId,
             orderId: id,
             orderRevision: cancelledOrder.revision,
             type: CsSalesEntryType.ORDER_CANCELLED,
-            amount: new Decimal(cancelledOrder.totalAmount).negated(),
+            amount: new Decimal(salesBasis).negated(),
             occurredAt: now,
             remark: `取消工单：${normalizedReason}`,
           });
@@ -2497,12 +2545,24 @@ export async function assertShipOrderReadinessInTx(
       '发货请求缺少地址明细，请刷新页面后重新提交',
     );
   }
+  // Orders whose delivery is billed through logistics rows (external sales,
+  // and internal orders submitted since 2026-09-18) confirm every address's
+  // shipping and packing charges at ship time.
+  const logisticsRows =
+    input.settlementType === OrderSettlementType.EXTERNAL_SALES
+      ? [{ id: 'external' }]
+      : await tx.orderCustomerCharge.findMany({
+          where: { orderId: input.orderId, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } }, priceBookId: { not: null } },
+          select: { id: true },
+          take: 1,
+        });
   if (
-    input.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+    settlementBillsLogistics(input.settlementType) &&
+    (logisticsRows?.length ?? 0) > 0 &&
     !input.hasSubmittedShipmentDetails
   ) {
     throw new OrderInvariantError(
-      '外部销售工单发货前必须逐地址确认快递费与打包耗材费',
+      '发货前必须逐地址确认快递费与打包耗材费',
     );
   }
 
@@ -2592,6 +2652,8 @@ async function finalizeExternalShipmentChargesInTx(
     where: { id: input.orderId },
     select: {
       settlementType: true,
+      purpose: true,
+      samplePackagingRuleCode: true,
       isSfCollect: true,
       processingAmount: true,
       customerCharges: {
@@ -2607,20 +2669,25 @@ async function finalizeExternalShipmentChargesInTx(
     },
   });
   if (!chargeOrder) throw new OrderInvariantError('工单不存在');
-  if (chargeOrder.settlementType !== OrderSettlementType.EXTERNAL_SALES) return;
-
-  const standardCustomerCharges = chargeOrder.customerCharges.filter((charge) =>
+  const standardCustomerCharges = (chargeOrder.customerCharges ?? []).filter((charge) =>
     ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(String(charge.category.code)),
   );
+  if (!orderBillsLogistics({
+    settlementType: chargeOrder.settlementType,
+    purpose: chargeOrder.purpose,
+    hasLogisticsRows: hasLogisticsChargeRows(standardCustomerCharges),
+  })) {
+    return;
+  }
   const expectedChargeCount = input.storedShipments.length * 2;
   if (standardCustomerCharges.length !== expectedChargeCount) {
     throw new OrderInvariantError(
-      '外部销售工单的快递/耗材收费明细不完整，暂不能发货',
+      '快递/耗材收费明细不完整，暂不能发货',
     );
   }
   if (standardCustomerCharges.some((charge) => hasFulfillmentPricingConfirmation(charge.pricingSnapshot))) {
     if (!chargeOrder.isSfCollect && input.storedShipments.some((shipment) => !input.trustedWeightByShipmentId.get(shipment.id))) {
-      throw new OrderInvariantError('外部销售工单发货前必须填写每个地址的承运商最终计费重量');
+      throw new OrderInvariantError('发货前必须填写每个地址的承运商最终计费重量');
     }
     try {
       await finalizeConfirmedFulfillmentChargesForShipmentInTx(tx, {
@@ -2660,7 +2727,7 @@ async function finalizeExternalShipmentChargesInTx(
     )
   ) {
     throw new OrderInvariantError(
-      '外部销售工单发货前必须填写每个地址的承运商最终计费重量',
+      '发货前必须填写每个地址的承运商最终计费重量',
     );
   }
 
@@ -2672,6 +2739,7 @@ async function finalizeExternalShipmentChargesInTx(
       tx,
       {
         isSfCollect: chargeOrder.isSfCollect,
+        samplePackaging: chargeOrder.purpose === 'SAMPLE_SHIPMENT' ? { ruleCode: chargeOrder.samplePackagingRuleCode } : undefined,
         shipments: input.storedShipments.map((shipment) => {
           const requested = input.requestByShipmentId.get(shipment.id);
           if (!requested) {
@@ -2900,9 +2968,17 @@ export async function shipOrder(
         }
       },
       afterTransition: async (tx, id, pricingOrder) => {
+        const logisticsRows = pricingOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
+          ? [{ id: 'external' }]
+          : await (tx as unknown as Prisma.TransactionClient).orderCustomerCharge.findMany({
+              where: { orderId: id, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } }, priceBookId: { not: null } },
+              select: { id: true },
+              take: 1,
+            });
         if (
-          pricingOrder.settlementType ===
-          OrderSettlementType.EXTERNAL_SALES
+          settlementBillsLogistics(pricingOrder.settlementType) &&
+          (logisticsRows?.length ?? 0) > 0 &&
+          requestedShipments.length > 0
         ) {
           await appendOrderPricingRevisionInTx(tx, {
             orderId: id,
@@ -2996,6 +3072,8 @@ type EditTxClient = {
     }) => Promise<
       | {
           id: string;
+          purpose?: string;
+          samplePackagingRuleCode?: string | null;
           status: OrderStatus;
           submitterId: string;
           settlementType: OrderSettlementType;
@@ -3009,6 +3087,7 @@ type EditTxClient = {
           customerPartyId: string | null;
           shipments: EditableShipment[];
           changeRequests: { id: string }[];
+          customerCharges?: { id: string }[];
           receiverName: string | null;
           receiverPhone: string | null;
           receiverAddress: string | null;
@@ -3182,8 +3261,15 @@ async function updateOrderEditableFields(
       select: {
         id: true,
         status: true,
+        purpose: true,
         submitterId: true,
         settlementType: true,
+        // Only orders that already carry logistics rows need the province
+        // re-checked when the address changes outside the full editor.
+        customerCharges: {
+          where: { category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } }, priceBookId: { not: null } },
+          select: { id: true },
+        },
         processingAmount: true,
         totalAmount: true,
         customName: true,
@@ -3336,7 +3422,8 @@ async function updateOrderEditableFields(
           nextFields[key] = primary[key]?.trim() || null;
         }
       }
-    } else if ('receiverAddress' in nextFields && nextFields.receiverAddress !== order.receiverAddress && order.settlementType === OrderSettlementType.EXTERNAL_SALES && !order.isSfCollect) {
+    } else if ('receiverAddress' in nextFields && nextFields.receiverAddress !== order.receiverAddress && !order.isSfCollect &&
+      orderBillsLogistics({ settlementType: order.settlementType, purpose: order.purpose, hasLogisticsRows: (order.customerCharges?.length ?? 0) > 0 })) {
       throw new OrderInvariantError('请从完整编辑页核对配送省份后修改收货地址');
     }
     const changes = diffEditableFields(order, nextFields);
@@ -3671,6 +3758,8 @@ export async function setOrderSfCollect(
       where: { id: orderId, ...getOrderScopeFilter(actor) },
       select: {
         id: true,
+        purpose: true,
+        samplePackagingRuleCode: true,
         status: true,
         submitterId: true,
         settlementType: true,
@@ -3694,6 +3783,19 @@ export async function setOrderSfCollect(
       },
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
+    if (order.purpose === 'PROOF') throw new OrderInvariantError('打样配送费用已包含在整单总价中');
+    // Internal orders submitted since 2026-09-18 carry logistics rows and
+    // switch 顺丰到付 exactly like external sales (waive shipping, keep packing).
+    const logisticsRows = await (tx as unknown as Prisma.TransactionClient).orderCustomerCharge.findMany({
+      where: { orderId, category: { code: { in: [...LOGISTICS_CHARGE_CATEGORY_CODES] } }, priceBookId: { not: null } },
+      select: { id: true },
+      take: 1,
+    });
+    const billsLogistics = orderBillsLogistics({
+      settlementType: order.settlementType,
+      purpose: order.purpose,
+      hasLogisticsRows: (logisticsRows?.length ?? 0) > 0,
+    });
     if (order.changeRequests?.length) {
       throw new OrderInvariantError('工单有待审批申请，请先处理申请再修改配送方式');
     }
@@ -3706,7 +3808,7 @@ export async function setOrderSfCollect(
       throw new OrderInvariantError('已完成或已取消的工单不能修改顺丰到付标识');
     }
     if (
-      order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+      billsLogistics &&
       order.status === OrderStatus.SHIPPED &&
       actor.role !== Role.ADMIN
     ) {
@@ -3715,7 +3817,7 @@ export async function setOrderSfCollect(
       );
     }
     if (
-      order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+      billsLogistics &&
       isFulfillmentPricingStatus(order.status)
     ) {
       if (!fulfillmentGuard) {
@@ -3755,7 +3857,7 @@ export async function setOrderSfCollect(
 
     let nextTotalAmount = new Decimal(order.totalAmount).toFixed(2);
     let nextQuotedFeeCompleteness: OrderQuotedFeeCompleteness | null = null;
-    if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
+    if (billsLogistics) {
       const prismaTx = tx as unknown as Prisma.TransactionClient;
       const chargeChangedAt = changedAt;
       const { chargeContext, standardCharges, priceBookIds,
@@ -3814,6 +3916,7 @@ export async function setOrderSfCollect(
           prismaTx,
           {
             isSfCollect,
+            samplePackaging: order.purpose === 'SAMPLE_SHIPMENT' ? { ruleCode: order.samplePackagingRuleCode ?? null } : undefined,
             shipments: shipmentChargeFacts.map((fact) => {
               const shipment = shipmentBySequence.get(fact.shipmentKey);
               if (!shipment) {
@@ -3951,7 +4054,7 @@ export async function setOrderSfCollect(
       data: {
         isSfCollect,
         totalAmount: nextTotalAmount,
-        ...(order.settlementType === OrderSettlementType.EXTERNAL_SALES
+        ...(billsLogistics
           ? {
               confirmedFee: null,
               settledFee: null,
@@ -3961,7 +4064,7 @@ export async function setOrderSfCollect(
       select: { id: true, status: true },
     });
     const pricingRevision =
-      order.settlementType === OrderSettlementType.EXTERNAL_SALES
+      billsLogistics
         ? await appendOrderPricingRevisionInTx(
             tx as unknown as Prisma.TransactionClient,
             {

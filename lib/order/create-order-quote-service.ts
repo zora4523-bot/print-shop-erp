@@ -6,6 +6,7 @@ import type {
   QuoteCreateOrderPackagingGroupsInput,
 } from '../auth/schemas';
 import { db } from '../db';
+import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from '../rules/paper-availability';
 import {
   calculateExternalOrderCharges,
   type ExternalOrderChargeQuote,
@@ -13,7 +14,6 @@ import {
 import { calculateCreateOrderQuote } from '../price/create-order';
 import type {
   CreateOrderPriceSnapshot,
-  CreateOrderPriceVersionBundle,
   CreateOrderQuoteInput as PureCreateOrderQuoteInput,
 } from '../price/create-order/types';
 import {
@@ -23,9 +23,7 @@ import {
 } from './create-order-quote-facts-adapter';
 import {
   type CreateOrderProcessingPresentation,
-  type CreateOrderPlateFeePreview,
   type CreateOrderQuotePresentation,
-  presentCreateOrderPlateFee,
   presentCreateOrderQuote,
   presentCreateOrderProcessingQuote,
 } from './create-order-quote-presentation';
@@ -64,19 +62,11 @@ export type InternalCreateOrderQuoteInput = {
   items: CreateOrderQuoteItemInput[];
   orderItemCount: number;
   packagingGroups: QuoteCreateOrderPackagingGroupsInput['groups'];
-  shipmentQuantities?: number[][];
+  logistics: QuoteExternalOrderChargesInput;
 };
 
-export type InternalCreateOrderQuoteResult =
-  CreateOrderProcessingPresentation & {
-    factsKey: string;
-    priceVersion: CreateOrderPriceVersionBundle;
-    knownTotal: string;
-    total: string | null;
-    hasManualPricing: boolean;
-    totalSemantics: 'COMPLETE' | 'EXCLUDES_MANUAL_ITEMS';
-    plateFee: CreateOrderPlateFeePreview | null;
-  };
+/** Internal previews carry the same logistics quote and handshake token as external ones. */
+export type InternalCreateOrderQuoteResult = CreateOrderQuotePresentation;
 
 export class CreateOrderQuoteError extends Error {
   constructor(message: string) {
@@ -111,7 +101,7 @@ function packagingFacts(
   }));
 }
 
-function shipmentFacts(input: CreateOrderQuoteInput) {
+function shipmentFacts(input: Pick<CreateOrderQuoteInput, 'items' | 'logistics'>) {
   const itemKeys = input.items.map((_, index) => String(index + 1));
   return input.logistics.shipments.map((shipment) => ({
     shipmentKey: shipment.shipmentKey,
@@ -219,6 +209,9 @@ export async function quoteExternalCreateOrder(
   if (input.orderItemCount !== input.items.length) {
     throw new CreateOrderQuoteError('工单款式数与报价款式不一致');
   }
+  if (hasRetiredPaperItem(input.items)) {
+    throw new CreateOrderQuoteError(RETIRED_PAPER_MESSAGE);
+  }
 
   try {
     return await db.$transaction(async (tx) => {
@@ -274,7 +267,12 @@ export async function quoteExternalCreateOrder(
   }
 }
 
-/** Internal create preview: processing + BAGGING only, never external charges. */
+/**
+ * Internal (客服 / 工厂直接) create preview. Since 2026-09-18 it prices the same
+ * things as the external preview — processing, BAGGING and the published
+ * logistics charges — and returns the same handshake token, so the submit
+ * finalizer can verify the quote the operator acknowledged.
+ */
 export async function quoteInternalCreateOrder(
   input: InternalCreateOrderQuoteInput,
   now: Date = new Date(),
@@ -287,6 +285,9 @@ export async function quoteInternalCreateOrder(
   }
   if (input.orderItemCount !== input.items.length) {
     throw new CreateOrderQuoteError('工单款式数与报价款式不一致');
+  }
+  if (hasRetiredPaperItem(input.items)) {
+    throw new CreateOrderQuoteError(RETIRED_PAPER_MESSAGE);
   }
 
   try {
@@ -310,28 +311,18 @@ export async function quoteInternalCreateOrder(
             };
           }),
           packagingGroups: packagingFacts(input.packagingGroups, itemKeys),
-          isSfCollect: false,
-          shipments: (input.shipmentQuantities ?? [input.items.map((item) => item.quantity)]).map((quantities, index) => ({
-            shipmentKey: String(index + 1),
-            province: null,
-            itemQuantities: Object.fromEntries(itemKeys.map((itemKey, itemIndex) => [itemKey, quantities[itemIndex] ?? 0])),
-          })),
+          isSfCollect: input.logistics.isSfCollect,
+          shipments: shipmentFacts(input),
         },
-        includeOrderCharges: false,
+        includeOrderCharges: true,
       });
-      const hasManualPricing = calculated.quote.status !== 'QUOTED';
-      return {
+      return presentCreateOrderQuote({
         factsKey: input.factsKey,
-        ...calculated.processing,
-        priceVersion: calculated.quote.priceVersion,
-        knownTotal: calculated.quote.knownTotal,
-        total: calculated.quote.total,
-        hasManualPricing,
-        totalSemantics: hasManualPricing
-          ? 'EXCLUDES_MANUAL_ITEMS'
-          : 'COMPLETE',
-        plateFee: presentCreateOrderPlateFee(calculated.quote),
-      };
+        input: calculated.input,
+        quote: calculated.quote,
+        logistics: trustedChargeQuote(calculated.input, calculated.snapshot),
+        quoteToken: calculated.quoteToken,
+      });
     });
   } catch (error) {
     if (error instanceof CreateOrderQuoteError) throw error;

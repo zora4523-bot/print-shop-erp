@@ -1,5 +1,6 @@
 'use client';
 
+import { OrderPurposeBadge } from './OrderPurposeBadge';
 import { OrderRemark } from './OrderRemark';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -130,6 +131,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
   }}>
     <OrderDetailStickyScope header={<div className={styles.header}>
       <div className={styles.identity}>
+        <OrderPurposeBadge purpose={model.purpose} />
         <h1 className="admin-wrap-anywhere text-2xl font-semibold">{model.name?.trim() || '未命名工单'}</h1>
         <StatusBadge tone={ORDER_STATUS_REGISTRY[model.status].tone}>{ORDER_STATUS_REGISTRY[model.status].label}</StatusBadge>
         {model.isUrgent ? <StatusBadge tone="warning">急单</StatusBadge> : null}

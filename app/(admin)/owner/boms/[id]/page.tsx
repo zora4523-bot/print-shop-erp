@@ -1,7 +1,8 @@
 import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
-import { PageHeader, TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { PageHeader, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { ToggleBomActiveButton } from '@/components/business/bom/ToggleBomActiveButton';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
@@ -13,7 +14,10 @@ import {
 } from '@/lib/product';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 async function targetLabel(
   bom: Awaited<ReturnType<typeof getBomDetail>>,
@@ -55,14 +59,17 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function OwnerBomDetailPage({ params }: PageProps) {
+export default async function OwnerBomDetailPage({ params, searchParams }: PageProps) {
   await requirePermission('bom:manage');
   const { id } = await params;
   const bom = await loadBom(id);
   if (!bom) notFound();
 
+  const receipt = readReceipt(await searchParams);
+
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="BOM" />
       <PageHeader
         title={externalPriceBusinessText(bom.name)}
         subtitle={`${await targetLabel(bom)} · v${bom.version} · 基准产量 ${bom.baseQuantity}`}

@@ -91,3 +91,13 @@ it('distinguishes missing weight from stock and inactive material facts', () => 
   expect(workbenchPaperIssue({ ...linkedProduct, paperType: '160g红卡' }, weightless)).toBeNull();
   expect(workbenchPaperIssue(undefined, weightless)).toBeNull();
 });
+
+
+it('excludes retired paper from explicit, linked and generic product choices', () => {
+  const retired = { ...papers[0]!, weight: 120, specification: '120g' };
+  const explicit = { ...product, paperType: '120g珠光艳闪' };
+  expect(workbenchPaperChoices(explicit, papers)).toEqual([]);
+  expect(workbenchPaperIssue(explicit, papers)).toContain('120g 纸张已停用');
+  expect(workbenchPaperChoices({ ...product, paperType: '红卡', paperMaterialId: 'red' }, [retired])).toEqual([]);
+  expect(workbenchPaperChoices(product, [retired])).toEqual([]);
+});

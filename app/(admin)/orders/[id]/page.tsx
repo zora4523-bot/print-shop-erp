@@ -1,3 +1,10 @@
+import { listOrderReportDisputes } from '@/lib/production/report-dispute';
+import { ReportDisputeAdminPanel } from '@/components/business/production/ReportDisputeAdminPanel';
+import { OrderWagePanel } from '@/components/business/salary/OrderWagePanel';
+import { PayrollPassForm } from '@/components/business/production/PayrollPassForm';
+import { productionOperationPassCount } from '@/lib/production/operation-quantity';
+import { canEditAllOrderFees } from '@/lib/order/admin-fee-policy';
+import { AdminOrderFeeEditor } from '@/components/business/order/AdminOrderFeeEditor';
 import { getOrderProductionReadiness } from '@/lib/order/production-readiness-query';
 import { ProductionReadinessWarning } from '@/components/business/order/ProductionReadinessWarning';
 import { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-facts-presentation';
@@ -51,7 +58,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ActionNotice, DisabledReason, TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { ActionNotice, DisabledReason, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { ChangeRequestStatusBadge } from '@/components/business/order/ChangeRequestStatusBadge';
@@ -76,6 +84,8 @@ import {
 import { getOrderPieceworkSummary } from '@/lib/salary/daily';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { listExternalCreateOrderFoilOptions } from '@/lib/material';
+import { hasLogisticsChargeRows, orderBillsLogistics } from '@/lib/order/settlement';
 import {
   getReworkCraftOptions,
   reworkItemRequiresUnitsPerBagInput,
@@ -126,7 +136,10 @@ import {
   orderShippingAvailability,
 } from '@/lib/order/shipping-availability';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 const DIRECT_CANCEL_STATUSES = new Set<OrderStatus>([
   OrderStatus.DRAFT,
@@ -149,24 +162,30 @@ export async function generateMetadata({ params }: PageProps) {
   return { title: orderDetailTitle(ref?.orderNo ?? null) };
 }
 
-export default async function OrderDetailPage({ params }: PageProps) {
+export default async function OrderDetailPage({ params, searchParams }: PageProps) {
   const { user } = await requireSession();
   const { id } = await params;
+  const receipt = readReceipt(await searchParams);
   // SALES uses a narrow, customer-facing query and operation page. The legacy
   // shared detail includes production tasks/workers, audit logs, plate data,
   // pricing snapshots and internal costs, so SALES must branch before that
   // query runs. Keep real draft/design/change actions on the safe surface.
   if (user.role === Role.SALES) {
-    const [salesOrder, catalogProducts] = await Promise.all([
+    const [salesOrder, catalogProducts, foilColors] = await Promise.all([
       getSalesOrderDetailById({ id: user.id, role: user.role }, id),
       listActiveOrderChangeCatalogProducts(),
+      listExternalCreateOrderFoilOptions(),
     ]);
     if (!salesOrder) notFound();
     return (
-      <SalesOrderDetailView
-        order={salesOrder}
-        catalogProducts={catalogProducts}
-      />
+      <div className="space-y-4">
+        <ReceiptNotice receipt={receipt} noun="工单" />
+        <SalesOrderDetailView
+          order={salesOrder}
+          catalogProducts={catalogProducts}
+          foilColorNames={foilColors.map((foil) => foil.name)}
+        />
+      </div>
     );
   }
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
@@ -177,6 +196,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
     ...(order?.items ?? []).map((item) => item.designs.length),
   );
   if (!order) notFound();
+  const reportDisputes = user.role === Role.ADMIN ? await listOrderReportDisputes(order.id, user) : [];
   const adminActivity = user.role === Role.ADMIN ? await readOrderActivity(order.id, user) : null;
   const canViewCommercialAmounts = user.role !== Role.WORKER;
   const canCreateRework =
@@ -213,11 +233,21 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // 发货与结算权限：order:ship = ADMIN（见 permissions.ts）。
   // action 层仍会重新校验，这里只控制界面入口。
   const canShipOrSettle = user.role === Role.ADMIN;
-  const canRepairProductionFacts = user.role === Role.ADMIN;
+  const canRepairProductionFacts = user.role === Role.ADMIN && order.purpose !== 'SAMPLE_SHIPMENT';
   const repairFacts = canRepairProductionFacts ? getLegacyProductionFactsRepair(order) : null;
   const isExternalSalesOrder =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+  // Delivery billed through logistics rows (external sales; internal orders
+  // submitted since 2026-09-18): ship-time confirmation, fulfilment
+  // corrections and the 顺丰到付 toggle behave the same for all of them.
+  const billsLogistics =
+    'settlementType' in order &&
+    orderBillsLogistics({
+      settlementType: order.settlementType as OrderSettlementType,
+      purpose: order.purpose,
+      hasLogisticsRows: hasLogisticsChargeRows(order.customerCharges),
+    });
   const isChargeableOrder =
     'settlementType' in order &&
     order.settlementType !== OrderSettlementType.NO_CHARGE;
@@ -252,25 +282,30 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
+  // Mirrors the gate in lib/order/commercial-details.ts: INTERNAL_SALES is
+  // excluded because that path records no 客服业绩 delta.
   const canAdminManageCommercialDetails =
+    (order.purpose ?? 'STANDARD') === 'STANDARD' &&
     user.role === Role.ADMIN &&
-    isChargeableOrder &&
+    (isExternalSalesOrder ||
+      ('settlementType' in order && order.settlementType === OrderSettlementType.FACTORY_DIRECT)) &&
     order.status !== OrderStatus.SETTLED &&
     order.status !== OrderStatus.FINISHED &&
     order.status !== OrderStatus.CANCELLED;
   const canShowPricingReviewForm =
     user.role === Role.ADMIN &&
     isChargeableOrder &&
-    isPricingPending &&
-    isOrderPricingReviewAllowedStatus(order.status);
+    (isPricingPending || order.purpose === 'PROOF') &&
+    isOrderPricingReviewAllowedStatus(order.status, order.purpose);
   const canReviewFulfillmentPricing =
     user.role === Role.ADMIN &&
-    isExternalSalesOrder &&
+    billsLogistics &&
     isFulfillmentPricingStatus(order.status);
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
-    isExternalSalesOrder;
+    billsLogistics;
   const canToggleSfCollect =
+    order.purpose !== 'PROOF' &&
     canEditOrderSfCollect(order.status) &&
     (order.submitterId === user.id || user.role === Role.ADMIN) &&
     (!isFinalizedExternalShipment || user.role === Role.ADMIN);
@@ -383,9 +418,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
       order.status === OrderStatus.FOILING ||
       order.status === OrderStatus.PACKING) &&
     !pendingChangeRequest;
-  const orderChangeCatalogProducts = canRequestChange
-    ? await listActiveOrderChangeCatalogProducts()
-    : [];
+  const [orderChangeCatalogProducts, orderChangeFoilColors] = canRequestChange
+    ? await Promise.all([listActiveOrderChangeCatalogProducts(), listExternalCreateOrderFoilOptions()])
+    : [[], []];
   const manualCustomerCharges = order.customerCharges.filter((charge) =>
     ['SAMPLE_FEE', 'OTHER_PACKAGING_FEE', 'APPROVED_ADJUSTMENT'].includes(
       String(charge.category.code),
@@ -447,6 +482,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </dd>
             </div>
           </dl>
+          {user.role === Role.ADMIN && !pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
           {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">
               <OrderPricingReviewForm
@@ -472,7 +508,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}</>),
     commercial: (<>{canAdminManageCommercialDetails &&
-      isExternalSalesOrder &&
       priceRevision !== null ? (
         <OrderCommercialDetailsManager
           orderId={order.id}
@@ -560,7 +595,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 orderId={order.id}
                 currentValue={order.isSfCollect}
                 status={order.status}
-                isExternalSales={isExternalSalesOrder}
+                isExternalSales={billsLogistics}
                 mutationGuard={priceRevision !== null ? {
                   expectedOrderRevision: order.revision,
                   expectedEditVersion: order.editVersion,
@@ -585,7 +620,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 外协
               </Link>
             ) : null}
-            {canSubmit ? <SubmitOrderButton orderId={order.id} /> : null}
+            {canSubmit ? <SubmitOrderButton orderId={order.id} purpose={order.purpose} /> : null}
             {canShipOrSettle && order.status === OrderStatus.SHIPPED ? (
               isPricingPending ? (
                 <DisabledReason
@@ -654,6 +689,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
       order, hasProductionOperations, productionOperations, productionProgressSteps,
       assignedWorkerNames, canViewCommercialAmounts,
     }} /></>),
+    payrollPass: (<>
+      {user.role === Role.ADMIN && ['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'].includes(order.status) && productionOperations.some((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)) && <section className="space-y-3 rounded-xl border bg-card p-4 sm:p-6">
+        <h2 className="text-base font-semibold">师傅计薪次数</h2>
+        <div className="grid gap-3 sm:grid-cols-2">{productionOperations.filter((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)).map((op) => <PayrollPassForm key={`${op.id}:${op.payrollRevision}`} operationId={op.id} revision={op.payrollRevision} passCount={op.payrollPassCount ?? productionOperationPassCount(op.operationType, op.sources)} sequences={op.sources.flatMap((s) => s.orderItem ? [s.orderItem.sequence] : [])} />)}</div>
+      </section>}
+    </>),
     customerCharges: (<>{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
@@ -1164,6 +1205,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             expectedRevision={order.revision}
             expectedWorkOrderVersion={order.workOrderVersion}
             catalogProducts={orderChangeCatalogProducts}
+            foilColorNames={orderChangeFoilColors.map((foil) => foil.name)}
             items={order.items.map((item) => ({
               id: item.id,
               sequence: item.sequence,
@@ -1262,7 +1304,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </ol>
         </section>
       ) : null}</>),
-    disputes: (<>{user.role === Role.ADMIN ? (
+    disputes: (<>{user.role === Role.ADMIN && <ReportDisputeAdminPanel disputes={reportDisputes} />}{user.role === Role.ADMIN ? (
         <TaskDisputeAdminPanel
           disputes={taskDisputes.map((dispute) => ({
             id: dispute.id,
@@ -1286,7 +1328,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         />
       ) : null}</>),
     material: (<><OrderMaterialUsageEstimate estimate={materialEstimate} /></>),
-    piecework: (<>{pieceworkSummary ? (
+    piecework: (<>{user.role === Role.ADMIN && <OrderWagePanel orderId={order.id} actor={user} />}{pieceworkSummary ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
@@ -1547,6 +1589,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
     });
     return <>
       <BreadcrumbEntity label={order.orderNo} />
+      <ReceiptNotice receipt={receipt} noun="工单" />
       <AdminOrderDetailView model={model} canEdit={canEdit} prints={presentation.prints}
         printHint={maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD
           ? `有款式含 ${maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度` : undefined}
@@ -1557,7 +1600,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           { id: 'detail-design-files', title: '设计文件与完整工艺资料', content: detailSections.designFiles },
           { id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> },
           { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
-          { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
+          { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
           { id: 'detail-business-records', title: '基本信息、成本与重做', content: <>{detailSections.basics}{detailSections.costs}{detailSections.rework}{detailSections.reworkForm}</> },
           { id: 'detail-audit-records', title: '工单动态', content: <>{adminActivity ? <OrderActivity key={`${order.id}:${adminActivity.events[0]?.id ?? "empty"}`} orderId={order.id} initialPage={adminActivity} /> : null}{detailSections.changeHistory}</> },
           { id: 'detail-other-actions', title: '其他工单操作', content: detailSections.otherActions },
@@ -1571,6 +1614,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的 order，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={order.orderNo} />
+      <ReceiptNotice receipt={receipt} noun="工单" />
       <OrderDetailStickyScope
         header={
           <>

@@ -126,9 +126,9 @@ describe('OrderFoilSwatchPicker', () => {
     );
 
     expect(html).toContain('aria-label="哑金，第 2 色"');
-    expect(html).toContain('aria-label="红色，第 1 色"');
+    expect(html).toContain('aria-label="红金，第 1 色"');
     expect(html.indexOf('aria-label="哑金，第 2 色"')).toBeLessThan(
-      html.indexOf('aria-label="红色，第 1 色"'),
+      html.indexOf('aria-label="红金，第 1 色"'),
     );
     expect(html).toContain('%2Fimages%2Forder%2Ffoil%2Fmatte-gold.png');
     expect(html).toMatch(/<img[^>]*alt=""[^>]*aria-hidden="true"/);
@@ -136,18 +136,18 @@ describe('OrderFoilSwatchPicker', () => {
     expect(html).toContain('data-selection-order="2"');
     expect(html).not.toContain('bg-black/85');
     expect(html).not.toContain('shadow-[0_4px_12px');
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="银色"/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="银金"/);
     expect(html).toContain('已选 2/2');
     expect(html).toMatch(
-      /class="sr-only">，选择顺序：第 1 色 红色 · 第 2 色 哑金<\/span>/,
+      /class="sr-only">，选择顺序：第 1 色 红金 · 第 2 色 哑金<\/span>/,
     );
     expect(html).toContain('烫印顺序');
     expect(html.indexOf('data-order-color="红色"')).toBeLessThan(
       html.indexOf('data-order-color="哑金"'),
     );
-    expect(html).toContain('aria-label="将第 1 色 红色 上移"');
-    expect(html).toContain('aria-label="将第 1 色 红色 下移"');
-    expect(html).toContain('aria-label="移除第 1 色 红色"');
+    expect(html).toContain('aria-label="将第 1 色 红金 上移"');
+    expect(html).toContain('aria-label="将第 1 色 红金 下移"');
+    expect(html).toContain('aria-label="移除第 1 色 红金"');
     expect(html).not.toContain('已选满，取消一个再换');
   });
 

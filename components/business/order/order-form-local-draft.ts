@@ -40,6 +40,7 @@ const ROOT_FACT_KEYS = [
 ] as const;
 
 const ITEM_FACT_KEYS = [
+  'designGroupKey',
   'fig',
   'name',
   'productId',

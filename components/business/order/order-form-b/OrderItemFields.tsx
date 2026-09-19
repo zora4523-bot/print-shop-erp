@@ -47,6 +47,7 @@ type Common = {
   item: Item;
   disabled?: boolean;
   first?: boolean;
+  appearance?: 'divided' | 'plain';
   itemErrors?: {
     route?: string;
     paper?: string;
@@ -57,6 +58,7 @@ type Common = {
   };
 };
 export type OrderItemCraftFieldsProps = Common & {
+  hideRoute?: boolean;
   title?: string;
   paperKey: string | null;
   paperOptions: readonly OrderPaperSwatchOption[];
@@ -70,6 +72,7 @@ export type OrderItemCraftFieldsProps = Common & {
 };
 export type OrderItemMaterialFieldsProps = Common & {
   materialExtras?: ReactNode;
+  hideSpecification?: boolean;
   paperKey: string | null;
   paperOptions: readonly OrderPaperSwatchOption[];
   weightOptions: readonly { value: number; disabled?: boolean }[];
@@ -265,10 +268,12 @@ function SpecialTechnique({
 }
 
 export function OrderItemCraftFields({
+  hideRoute = false,
   uid,
   item,
   title = '工艺',
   first,
+  appearance,
   paperKey,
   paperOptions,
   foilOptions,
@@ -292,8 +297,8 @@ export function OrderItemCraftFields({
     (item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
       printFoilMode === 'FULL');
   return (
-    <Group title={title} first={first}>
-      <PillPicker
+    <Group title={title} first={first} appearance={appearance}>
+      {!hideRoute ? <PillPicker
         id={`${uid}-route`}
         label="工艺类型"
         value={item.pricingRoute}
@@ -301,7 +306,7 @@ export function OrderItemCraftFields({
         disabled={disabled}
         error={itemErrors?.route}
         onChange={onRouteChange}
-      />
+      /> : null}
 
       {item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT ? (
         <div className="mt-5 space-y-5">
@@ -361,9 +366,11 @@ export function OrderItemMaterialFields({
   uid,
   item,
   first,
+  appearance,
   disabled,
   itemErrors,
   materialExtras,
+  hideSpecification,
   paperKey,
   paperOptions,
   weightOptions,
@@ -375,10 +382,8 @@ export function OrderItemMaterialFields({
   onSpecificationChange,
   onCustomSizeChange,
 }: OrderItemMaterialFieldsProps) {
-  const customSizeSelected =
-    item.actualWidthMm === null && item.actualHeightMm === null;
   return (
-    <Group title="材料" first={first}>
+    <Group title="材料" first={first} appearance={appearance}>
       {materialExtras}
       <OrderPaperSwatchPicker
         id={`${uid}-paper`}
@@ -438,6 +443,21 @@ export function OrderItemMaterialFields({
         ) : null}
       </div>
 
+      {!hideSpecification ? <OrderItemSpecificationFields
+        uid={uid} item={item} disabled={disabled} itemErrors={itemErrors}
+        specificationOptions={specificationOptions} allowCustomSize={allowCustomSize}
+        onSpecificationChange={onSpecificationChange} onCustomSizeChange={onCustomSizeChange}
+      /> : null}
+    </Group>
+  );
+}
+export function OrderItemSpecificationFields({
+  uid, item, disabled, itemErrors, specificationOptions, allowCustomSize,
+  onSpecificationChange, onCustomSizeChange,
+}: Pick<OrderItemMaterialFieldsProps, 'uid' | 'item' | 'disabled' | 'itemErrors' |
+  'specificationOptions' | 'allowCustomSize' | 'onSpecificationChange' | 'onCustomSizeChange'>) {
+  const customSizeSelected = item.actualWidthMm === null && item.actualHeightMm === null;
+  return (
       <div className="mt-5">
         <PillPicker
           id={`${uid}-specification`}
@@ -461,7 +481,6 @@ export function OrderItemMaterialFields({
           </label>
         ) : null}
       </div>
-    </Group>
   );
 }
 export function OrderItemQuantityField({

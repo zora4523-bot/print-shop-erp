@@ -152,6 +152,7 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 - 同一工作树内，先完成全量单测，再启动 E2E 开发服务器；避免路由/配置回归测试的临时文件被 Next 文件监听器读入。发生测试期间路由缓存异常时，停止该隔离服务器并重建它的 `.next`，不要清理日常工作区或重置数据库。
 - `tests/e2e/owner-notifications.spec.ts` 复用上述隔离预检且要求 `NOTIFICATION_MOCK_MODE=true`；绑定回调由 fixture 模拟，不连接真实企业微信。标准开发及发布 Playwright 配置为隔离服务设置测试 AUTH/CRON secret、mock 通知/CDR、inline jobs，不代表生产基础设施通过。
 - 默认 `playwright.config.ts` 仍用于 `next dev`。`playwright.release.config.ts` 明确执行 `prisma generate → next build → next start`，产物为 `.next-release`、使用 `tsconfig.release.json`，不复用开发服务。`playwright.dev-fixtures.config.ts` 仅执行开发专用价格 fixture，生产组明确排除该组。
+- CI 的业务 E2E 使用 `erp_e2e_ci`，调价用例会发布不可变的后继工价。后台任务、跨浏览器及开发价格 fixture 使用另建的 `erp_e2e_artifacts_ci`，独立 migrate/seed/prepare，不重置前一套数据库、不回写已发布工价。手动串行运行这些套件时也应切换至具备初始工价的独立 E2E 库。
 - `playwright.durable.config.ts` 使用 `BACKGROUND_JOBS_MODE=durable`、独立 `.next-durable` 产物和 `tsconfig.durable.json`；默认端口 3300，可用 `E2E_DURABLE_BASE_URL` 指定受同一预检约束的地址。该组由用例启动真实 HEAVY worker，验证持久队列、失败重试和下载；通知及 CDR 仍为 mock，不代表真实外部服务通过。
 - 同一工作目录不要同时运行 `next dev` 与 `next build`，也不要让生产测试复用未知开发实例。先停止开发服务再构建、启动，或使用独立工作目录及产物目录；切换模式后重新确认进程、端口和候选 SHA。
 - `test:admin-ui` 与 `test:worker-ui` 分别覆盖六个视口、明暗主题、overflow/touch/axe 等契约。

@@ -5,6 +5,9 @@ import { describe, expect, it } from 'vitest';
 const skippedDirectories = new Set([
   '.git',
   '.next',
+  // Isolated browser runs use the other generated directories in next.config.ts.
+  '.next-release',
+  '.next-durable',
   'coverage',
   'generated',
   'node_modules',

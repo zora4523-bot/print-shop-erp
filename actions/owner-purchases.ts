@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import {
   getFormString,
   getFormStringOr,
@@ -67,7 +68,7 @@ export async function createPurchaseOrderAction(
   }
 
   revalidatePurchasePaths(createdId);
-  redirect(`/owner/purchases/${createdId}`);
+  redirect(appendReceipt(`/owner/purchases/${createdId}`, { created: '1' }));
 }
 
 export async function createPurchaseReceiptAction(

@@ -87,14 +87,16 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [
         plateFee={{ status: 'PENDING', amount: null, displayAmount: '待定', label: '制烫金版费' }}
         logistics={{ status: 'incomplete', shippingAmount: null, packagingAmount: '3', totalAmount: null }}
         usesExternalSalesPricing={external} settlementLabel={external ? '外部销售应付工厂' : '工厂直接业务'}
-        knownTotal={external ? '173' : '170'} gaps={['未填写承诺交期']} busy={false}
+        knownTotal="173" gaps={['未填写承诺交期']} busy={false}
         onGapClick={onGapClick} onAttemptSubmit={onAttemptSubmit}
       />));
       expect(host.textContent).toContain('¥ 130.00');
       expect(host.textContent).toContain('¥ 40.00');
       expect(host.textContent).toContain('¥ 0.00人工价');
       expect(host.textContent).toContain('制烫金版费');
-      expect(host.textContent?.includes('纸箱耗材')).toBe(external);
+      // 2026-09-18 起内销 / 工厂直接与外销共用物流价目，费用栏同样列出纸箱耗材与快递费。
+      expect(host.textContent).toContain('纸箱耗材');
+      expect(host.textContent).toContain('快递费');
       for (const control of host.querySelectorAll('button')) expect(control.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
       await page.getByRole('button', { name: '未填写承诺交期', exact: true }).click();
       expect(onGapClick).toHaveBeenLastCalledWith(0);

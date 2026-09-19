@@ -57,7 +57,7 @@ test.describe('notification urgent wire — golden path', () => {
     await urgentCheckbox.click();
     await expect(urgentCheckbox).toBeChecked();
 
-    const routes = form.getByRole('group', { name: '工艺类型' });
+    const routes = form.getByRole('group', { name: '工单类型' });
     await routes
       .getByRole('button', { name: '局部烫金', exact: true })
       .click();
@@ -74,7 +74,7 @@ test.describe('notification urgent wire — golden path', () => {
       .getByRole('button', { name: '160g', exact: true })
       .click();
     await form
-      .getByRole('textbox', { name: '款式名', exact: true })
+      .getByRole('textbox', { name: '设计款名称', exact: true })
       .fill(itemName);
     await form
       .getByRole('spinbutton', { name: '数量', exact: true })

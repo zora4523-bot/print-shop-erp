@@ -62,7 +62,7 @@ test.describe('零 JS 降级', () => {
   test('退出登录在 JS 不可用时仍能清除 session', async ({ page }) => {
     await loginWithoutJs(page);
 
-    // 师傅端常驻原生退出表单。
+    // 师傅端外壳里的 <noscript> 原生退出表单（页内那个在 streaming 边界里，零 JS 下出不来）。
     await page.getByRole('button', { name: '退出登录' }).click();
     await page.waitForURL((url) => url.pathname.startsWith('/login'), {
       timeout: 15_000,

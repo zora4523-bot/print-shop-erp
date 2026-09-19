@@ -48,12 +48,13 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(36);
+    expect(items).toHaveLength(37);
     expect(items.map((i) => i.label)).toEqual([
       '工作台',
       '经营概览',
       '销售工作台',
-      '工单',
+      '工单列表',
+      '新建工单',
       '采购单',
       '工单修改申请',
       '外协',

@@ -87,7 +87,7 @@ test('管理员添加分货地址，预览不落库，保存后详情与费用�
       await form.getByLabel('收件人', { exact: true }).fill('第二地址收件人');
       await form.getByLabel('收货电话', { exact: true }).fill('13900139000');
       await form
-        .getByLabel('收货地址', { exact: true })
+        .getByRole('textbox', { name: '收货地址', exact: true })
         .fill('江西省南昌市测试路2号');
       await form.getByLabel('计费省份').fill('江西');
       await form.getByRole('spinbutton').fill('400');
@@ -179,7 +179,7 @@ test('外部销售建单页添加地址并纳入报价和提交复核', async ({
   await expect(form.getByRole('textbox', { name: '工单备注（选填）', exact: true })).toHaveValue(note);
 
   await form
-    .getByRole('group', { name: '工艺类型' })
+    .getByRole('group', { name: '工单类型' })
     .getByRole('button', { name: '局部烫金', exact: true })
     .click();
   await form

@@ -560,6 +560,13 @@ describe('buildOrderWhere', () => {
     });
   });
 
+  it('finds saved legacy foil names when filtering by the new label', () => {
+    const parsed = parseOrderListQuery({ foilColor: '红金' });
+    expect(buildOrderWhere(adminActor, parsed.query.filters)).toMatchObject({
+      AND: [{}, { items: { some: { foilColors: { hasSome: ['红金', '红色'] } } } }],
+    });
+  });
+
   it('round-trips a created custom foil color containing commas into the exact Prisma predicate', () => {
     const createdFoilColors = ['红,金渐变', 'PANTONE\\871 C', '哑金'];
     const formValue = encodeFoilColorFilterValues(createdFoilColors);

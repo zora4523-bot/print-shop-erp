@@ -578,7 +578,7 @@ export async function releaseFactoryOrder(
       return {
         result: {
           orderId: order.id,
-          status: OrderStatus.RELEASED,
+          status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
           printJobId: replay.id,
           idempotentReplay: true,
         },
@@ -596,7 +596,7 @@ export async function releaseFactoryOrder(
     }
 
     let releaseResult = null;
-    if (order.status !== OrderStatus.RELEASED) {
+    if (order.status !== OrderStatus.RELEASED && !(order.purpose === 'SAMPLE_SHIPMENT' && order.status === OrderStatus.PACKING)) {
       if (order.status !== OrderStatus.CONFIRMED) {
         throw new AdminOrderWorkflowError(
           'INVALID_STATUS',
@@ -647,7 +647,7 @@ export async function releaseFactoryOrder(
       return {
         result: {
           orderId: order.id,
-          status: OrderStatus.RELEASED,
+          status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
           printJobId: print?.jobId ?? null,
           idempotentReplay: print?.idempotentReplay ?? false,
         },
@@ -657,7 +657,7 @@ export async function releaseFactoryOrder(
     return {
       result: {
         orderId: order.id,
-        status: OrderStatus.RELEASED,
+        status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
         printJobId: print?.jobId ?? null,
         idempotentReplay: print?.idempotentReplay ?? false,
       },

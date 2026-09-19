@@ -154,7 +154,7 @@ describe('createPartyAction', () => {
       defaultDistrict: '番禺',
       defaultAddressDetail: '市桥街道 1 号',
     });
-    expect(redirectMock).toHaveBeenCalledWith('/owner/parties/party1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/parties/party1?created=1');
   });
 
   it('only honors the approved purchase return path and preselects the new supplier', async () => {
@@ -173,7 +173,7 @@ describe('createPartyAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/purchases/new?supplierPartyId=supplier%201',
+      '/owner/purchases/new?supplierPartyId=supplier+1&created=1',
     );
   });
 
@@ -188,7 +188,7 @@ describe('createPartyAction', () => {
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
-    expect(redirectMock).toHaveBeenCalledWith('/owner/parties/party1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/parties/party1?created=1');
   });
 
   it('maps P2002 on party code to invalid.code field error', async () => {

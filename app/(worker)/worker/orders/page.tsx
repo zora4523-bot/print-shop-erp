@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { ClipboardList } from 'lucide-react';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -7,27 +8,28 @@ import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { EmptyState } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { formatMoney } from '@/lib/dashboard/format';
-import { parsePositiveInt } from '@/lib/admin/table';
+import { parsePositiveInt, firstSearchParam } from '@/lib/admin/table';
 
 export const metadata = { title: '我的工单' };
 
 type PageProps = {
-  searchParams: Promise<{ page?: string | string[] }>;
+  searchParams: Promise<{ page?: string | string[]; q?: string | string[] }>;
 };
 
 const WORKER_ORDERS_PATH = '/worker/orders';
 
 // 纯链接翻页：不依赖 JS，师傅端弱网/微信内置浏览器也能用。
-function workerOrdersHref(page: number): string {
-  return page <= 1 ? WORKER_ORDERS_PATH : `${WORKER_ORDERS_PATH}?page=${page}`;
+function workerOrdersHref(page: number, q?: string): string {
+  return `${WORKER_ORDERS_PATH}?${new URLSearchParams({ page: String(page), q: q ?? '' })}`;
 }
 
 export default async function WorkerOrdersPage({ searchParams }: PageProps) {
   const user = await requirePermission('order:view:self');
-  const sp = await searchParams;
+  const raw = await searchParams;
+  const sp = { ...raw, q: firstSearchParam(raw.q) };
   const orderPage = await listWorkerOrders(
     { id: user.id, role: user.role },
-    { page: parsePositiveInt(sp.page, { defaultValue: 1, min: 1 }) },
+    { page: parsePositiveInt(sp.page, { defaultValue: 1, min: 1 }), q: sp.q },
   );
   const orders = orderPage.rows;
 
@@ -40,6 +42,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
         </p>
       </header>
 
+      <form className="flex flex-wrap gap-2 rounded-xl border bg-card p-3"><label className="min-w-0 flex-1"><span className="sr-only">工单号或名称</span><input name="q" defaultValue={sp.q} maxLength={100} placeholder="工单号或名称" className="w-full rounded-md border bg-background px-3 py-2" /></label><Button type="submit">搜索</Button>{sp.q && <Link href="/worker/orders" className="inline-flex min-h-11 items-center underline">清除</Link>}</form>
       {orders.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
@@ -110,7 +113,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
           <div className="ml-auto flex flex-wrap gap-2 text-sm">
             {orderPage.page > 1 ? (
               <Link
-                href={workerOrdersHref(orderPage.page - 1)}
+                href={workerOrdersHref(orderPage.page - 1, sp.q)}
                 prefetch={false}
                 className="inline-flex min-h-11 items-center rounded-md border bg-card px-4 hover:bg-muted"
               >
@@ -119,7 +122,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
             ) : null}
             {orderPage.page < orderPage.pageCount ? (
               <Link
-                href={workerOrdersHref(orderPage.page + 1)}
+                href={workerOrdersHref(orderPage.page + 1, sp.q)}
                 prefetch={false}
                 className="inline-flex min-h-11 items-center rounded-md border bg-card px-4 hover:bg-muted"
               >

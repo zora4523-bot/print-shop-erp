@@ -400,11 +400,10 @@ test.describe('automation smoke', () => {
         return url.pathname === '/owner/purchases/new' && Boolean(autoSupplierId);
       });
 
-      const selectedSupplier = page
-        .getByLabel('供应商')
-        .locator('option:checked');
-      await expect(selectedSupplier).toHaveText(/^PTY-\d{6} · Codex E2E 自动编码供应商 /);
-      await expect(page.getByLabel('供应商')).toHaveValue(autoSupplierId!);
+      // 新建供应商跳回时顶部有「供应商已创建」回执（aria-labelledby），按精确标签取下拉框。
+      const supplierSelect = page.getByLabel('供应商', { exact: true });
+      await expect(supplierSelect.locator('option:checked')).toHaveText(/^PTY-\d{6} · Codex E2E 自动编码供应商 /);
+      await expect(supplierSelect).toHaveValue(autoSupplierId!);
       await expectNoNextErrorOverlay(page);
     } finally {
       if (autoSupplierId) {

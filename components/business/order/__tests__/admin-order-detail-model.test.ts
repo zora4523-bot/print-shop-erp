@@ -82,6 +82,7 @@ describe('admin order detail projection', () => {
     ['1600g红卡', 160, '1600g红卡 · 160g'],
     ['160.5g珠光艳闪', 160, '160.5g珠光艳闪 · 160g'],
     ['珠光艳闪', null, '珠光艳闪'],
+    ['160g珠光闪红', 160, '160g珠光暗红'],
     [null, 160, '160g'],
     [null, null, '未记录'],
   ])('preserves paper facts without repeating the same weight: %s / %s', (paperType, paperWeightGsm, expected) => {

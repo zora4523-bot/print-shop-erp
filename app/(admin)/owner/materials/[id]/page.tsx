@@ -6,7 +6,7 @@ import {
 import { MaterialCategory } from '@/generated/prisma/enums';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
-type PageProps = Pick<MaterialCatalogDetailProps, 'params'>;
+type PageProps = Pick<MaterialCatalogDetailProps, 'params' | 'searchParams'>;
 
 export function generateMetadata(props: PageProps) {
   return getMaterialCatalogMetadata({ ...props, titleScope: '物料字典' });

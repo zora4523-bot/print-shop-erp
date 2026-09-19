@@ -10,7 +10,8 @@ import {
   PurchaseOrderStatusBadge,
   PurchaseReceiptStatusBadge,
 } from '@/components/business/purchase/PurchaseStatusBadge';
-import { PageHeader, TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { PageHeader, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getPurchaseOrderDetail } from '@/lib/purchase';
 import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
@@ -19,7 +20,10 @@ import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 function decimal(value: unknown): string {
   if (value === null || value === undefined) return '—';
@@ -40,7 +44,7 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
+export default async function OwnerPurchaseDetailPage({ params, searchParams }: PageProps) {
   await requirePermission('purchase:manage');
   const { id } = await params;
   const [order, locationOptions] = await Promise.all([
@@ -54,8 +58,11 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
     order.status !== PurchaseOrderStatus.CANCELLED &&
     order.status !== PurchaseOrderStatus.RECEIVED;
 
+  const receipt = readReceipt(await searchParams);
+
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="采购单" />
       <PageHeader
         title={`采购单：${order.purchaseNo}`}
         subtitle={`${order.supplierName} · ${order.supplierCode}`}

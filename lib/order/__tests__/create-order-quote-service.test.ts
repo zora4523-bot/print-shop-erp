@@ -138,7 +138,20 @@ beforeEach(() => {
   ]);
 });
 
+it('工作台报价拒绝 120g 且不进入事务', async () => {
+  const result = await calculateWorkbenchItem(
+    { ...item, paperType: '120g珠光艳闪', paperWeightGsm: 120 } as unknown as Parameters<typeof calculateWorkbenchItem>[0], 0);
+  expect(result).toEqual({ status: 'error', message: '120g 纸张已停用，请选择其他克重' });
+  expect(mocks.transaction).not.toHaveBeenCalled();
+});
+
 describe('quoteExternalCreateOrder', () => {
+  it('拒绝 120g 款式，且不进入事务', async () => {
+    await expect(quoteExternalCreateOrder(input({
+      items: [{ ...item, paperType: '120g珠光艳闪', paperWeightGsm: 120 }],
+    }), now)).rejects.toThrow('120g 纸张已停用');
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
   it('在一个事务内读取双版本并只调用新纯引擎', async () => {
     const result = await quoteExternalCreateOrder(input(), now);
 

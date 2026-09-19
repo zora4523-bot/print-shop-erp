@@ -442,3 +442,13 @@ describe('CustomerPricingDedicatedSection', () => {
     expect(twoDraftsHtml).toContain('aria-label="入袋费调价草稿状态"');
   });
 });
+
+it('hides retired 120g pricing rows while leaving persisted rules unchanged', () => {
+  const retired = { ...editableBagRule(), id: 'retired-120', code: 'RETIRED-120', draft: { ...editableBagRule().draft, id: 'retired-120', code: 'RETIRED-120', exclusiveGroup: 'STOCK_BASE', product: { id: 'retired-product', code: 'RETIRED-120', name: '120g珠光艳闪', paperType: '120g珠光艳闪', specification: '迷你封50×80' } } } as CustomerPriceSectionRuleDto;
+  const data = workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')], [retired]);
+  data.blankProducts = [{ id: 'retired-product', paperType: '120g珠光艳闪', specification: '迷你封50×80' }, { id: 'active', paperType: '160g珠光艳闪', specification: '大号封90×165' }];
+  const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
+  expect(html).not.toContain('120g');
+  expect(html).toContain('160g');
+  expect(data.rules).toHaveLength(1);
+});

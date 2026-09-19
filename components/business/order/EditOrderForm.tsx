@@ -8,6 +8,8 @@ import type { OrderExternalSalesAssociation } from '@/lib/order/external-sales-a
 import { OrderExternalSalesField } from './OrderExternalSalesField';
 import type { EditableShipment } from '@/lib/order/edit-shipment-fields';
 import { OrderReceiverContactFields } from './OrderReceiverContactFields';
+import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
+import { applyParsedReceiverFact } from '@/lib/order/receiver-address-paste';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ActionNotice } from '@/components/ui-business';
 import Link from 'next/link';
@@ -373,24 +375,21 @@ function OrderDeliveryFieldsSection({
                   receiverPhone: fieldErrors(state, `shipments.${index}.receiverPhone`)[0],
                 }}
               />
-              <div className="space-y-1.5">
-                <Label htmlFor={`shipment-address-${index}`}>
-                  收货地址
-                  <span aria-hidden="true" className="text-destructive">
-                    *
-                  </span>
-                </Label>
-                <textarea
-                  id={`shipment-address-${index}`}
-                  disabled={disabled}
-                  value={row.receiverAddress ?? ''}
-                  maxLength={256}
-                  required
-                  aria-required="true"
-                  className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  onChange={(event) => changeDelivery(index, 'receiverAddress', event.target.value)}
-                />
-              </div>
+              <ReceiverAddressPasteField
+                id={`shipment-address-${index}`}
+                label="收货地址"
+                required
+                maxLength={256}
+                disabled={disabled}
+                value={row.receiverAddress ?? ''}
+                onChange={(next, parsed, source) => {
+                  changeDelivery(index, 'receiverAddress', next);
+                  const name = applyParsedReceiverFact(row.receiverName, parsed.receiverName, source);
+                  if (name !== (row.receiverName ?? '')) changeDelivery(index, 'receiverName', name);
+                  const phone = applyParsedReceiverFact(row.receiverPhone, parsed.receiverPhone, source);
+                  if (phone !== (row.receiverPhone ?? '')) changeDelivery(index, 'receiverPhone', phone);
+                }}
+              />
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor={`shipment-express-${index}`}>快递代码</Label>
@@ -497,6 +496,14 @@ function OrderBasicFieldsSection({
   urgent,
   setUrgent,
 }: RenderOrderBasicFieldsOptions) {
+  // Main-address path (orders without delivery rows): contacts are controlled
+  // so a pasted address can fill them; inputs keep their `name` for FormData.
+  // The parent keys this form by order id + edit version, so initial is stable.
+  const [mainReceiver, setMainReceiver] = useState({
+    name: initial.receiverName ?? '',
+    phone: initial.receiverPhone ?? '',
+    address: initial.receiverAddress ?? '',
+  });
   return (
     <Card>
       <CardHeader>
@@ -583,8 +590,11 @@ function OrderBasicFieldsSection({
           <>
             <div className="sm:col-span-2">
               <OrderReceiverContactFields
-                receiverName={initial.receiverName ?? null}
-                receiverPhone={initial.receiverPhone ?? null}
+                controlled
+                receiverName={mainReceiver.name}
+                receiverPhone={mainReceiver.phone}
+                onNameChange={(name) => setMainReceiver((current) => ({ ...current, name }))}
+                onPhoneChange={(phone) => setMainReceiver((current) => ({ ...current, phone }))}
                 disabled={pendingLocked}
                 required={isExternalSales}
                 errors={{
@@ -600,16 +610,32 @@ function OrderBasicFieldsSection({
               initial={initial.expressCode}
               errors={fieldErrors(state, 'expressCode')}
             />
-            <Field
-              name="receiverAddress"
-              label="收货地址"
-              full
-              multiline
-              required
-              disabled={pendingLocked}
-              initial={initial.receiverAddress}
-              errors={fieldErrors(state, 'receiverAddress')}
-            />
+            <div className="sm:col-span-2">
+              <ReceiverAddressPasteField
+                id="receiverAddress"
+                name="receiverAddress"
+                label="收货地址"
+                required
+                disabled={pendingLocked}
+                value={mainReceiver.address}
+                invalid={fieldErrors(state, 'receiverAddress').length > 0}
+                describedBy={fieldErrors(state, 'receiverAddress')[0] ? 'receiverAddress-error' : undefined}
+                onChange={(next, parsed, source) =>
+                  setMainReceiver((current) => ({
+                    address: next,
+                    name: applyParsedReceiverFact(current.name, parsed.receiverName, source),
+                    phone: applyParsedReceiverFact(current.phone, parsed.receiverPhone, source),
+                  }))
+                }
+                after={
+                  fieldErrors(state, 'receiverAddress')[0] ? (
+                    <p id="receiverAddress-error" className="mt-1 text-xs text-destructive">
+                      {fieldErrors(state, 'receiverAddress')[0]}
+                    </p>
+                  ) : null
+                }
+              />
+            </div>
           </>
         ) : null}
         {designFields}

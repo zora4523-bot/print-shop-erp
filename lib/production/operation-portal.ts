@@ -29,7 +29,10 @@ export type ReporterOperationListItem = {
   defectQty: string;
   reworkQty: string;
   passCount: number;
+  payrollPassCount: number;
+  payrollRevision: number;
   sourceCount: number;
+  sourceLabels?: string[];
   workOrderStage: ProductionWorkOrderStage;
   workOrderTotalQty: string;
   workOrderProgressQty: string;
@@ -237,11 +240,13 @@ function workOrderProgressForOperation(
  */
 export async function listProductionOperationsForReporter(
   actor: { id: string; role: Role },
+  ids?: string[],
 ): Promise<ReporterOperationListItem[]> {
   const operationType = await getReporterOperationType(actor);
 
   const operations = await db.productionOperation.findMany({
     where: {
+      ...(ids ? { id: { in: ids } } : {}),
       operationType,
       status: {
         in: [
@@ -268,6 +273,8 @@ export async function listProductionOperationsForReporter(
       operationType: true,
       unit: true,
       status: true,
+      payrollPassCount: true,
+      payrollRevision: true,
       plannedQty: true,
       carriedCompletedQty: true,
       createdAt: true,
@@ -292,7 +299,7 @@ export async function listProductionOperationsForReporter(
       sources: {
         select: {
           orderItem: {
-            select: { frontFoilColors: true, backFoilColors: true },
+            select: { frontFoilColors: true, backFoilColors: true, name: true, specification: true },
           },
         },
       },
@@ -338,6 +345,7 @@ export async function listProductionOperationsForReporter(
       operation.order,
     );
     return {
+      sourceLabels: operation.sources.flatMap((source) => source.orderItem ? [`${source.orderItem.name}${source.orderItem.specification ? ` · ${source.orderItem.specification}` : ''}`] : []),
       id: operation.id,
       orderId: operation.orderId,
       orderNo: operation.order.orderNo,
@@ -354,6 +362,8 @@ export async function listProductionOperationsForReporter(
       defectQty: defectQty.toString(),
       reworkQty: reworkQty.toString(),
       passCount,
+      payrollPassCount: operation.payrollPassCount ?? passCount,
+      payrollRevision: operation.payrollRevision ?? 0,
       sourceCount: operation.sources.length,
       workOrderStage: workOrderProgress.stage,
       workOrderTotalQty: workOrderProgress.orderTotal.toString(),
@@ -380,6 +390,8 @@ export async function getProductionOperationForReporter(
       operationType: true,
       unit: true,
       status: true,
+      payrollPassCount: true,
+      payrollRevision: true,
       plannedQty: true,
       carriedCompletedQty: true,
       order: {
@@ -495,6 +507,8 @@ export async function getProductionOperationForReporter(
     defectQty: defectQty.toString(),
     reworkQty: reworkQty.toString(),
     passCount,
+    payrollPassCount: operation.payrollPassCount ?? passCount,
+    payrollRevision: operation.payrollRevision ?? 0,
     sourceCount: operation.sources.length,
     workOrderStage: workOrderProgress.stage,
     workOrderTotalQty: workOrderProgress.orderTotal.toString(),
@@ -512,10 +526,12 @@ export async function getProductionOperationForReporter(
 /** All active workers see active no-pay progress; there is no assignment. */
 export async function listProductionProgressForReporter(
   actor: { id: string; role: Role },
+  ids?: string[],
 ): Promise<ReporterProgressListItem[]> {
   await assertActiveProgressReporter(actor);
   const steps = await db.productionProgressStep.findMany({
     where: {
+      ...(ids ? { id: { in: ids } } : {}),
       status: {
         in: [
           ProductionOperationStatus.PENDING,

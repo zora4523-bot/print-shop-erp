@@ -513,7 +513,7 @@ export function OrderCommercialDetailsManager({
   const scope = useContext(OrderEditorAuxiliaryContext);
   const hasActiveEditor = scope?.mainBlocked || Object.values(scope?.entries ?? {}).some((entry) => entry.dirty || entry.pending);
   return (
-    <section className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+    <section id="commercial-fees" className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <div>
         <h2 className="text-base font-semibold">制版明细与其他费用</h2>
         {hasActiveEditor ? <p className="mt-1 text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}

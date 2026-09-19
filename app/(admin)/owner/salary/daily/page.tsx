@@ -215,33 +215,33 @@ function FilterBar({
 }) {
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
-      <label className="space-y-1">
+      <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">日期</span>
         <input
           type="date"
           name="date"
           defaultValue={selectedDate}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
         />
       </label>
-      <label className="space-y-1">
+      <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">历史发放状态</span>
         <select
           name="paid"
           defaultValue={paid ?? ''}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
         >
           <option value="">全部</option>
           <option value="unpaid">仅未发</option>
           <option value="paid">仅已发</option>
         </select>
       </label>
-      <label className="space-y-1">
+      <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">师傅</span>
         <select
           name="workerId"
           defaultValue={workerId ?? ''}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
         >
           <option value="">全部师傅</option>
           {workers.map((worker) => (

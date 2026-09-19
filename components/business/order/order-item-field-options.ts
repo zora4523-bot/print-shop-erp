@@ -1,3 +1,4 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import { productCategoryMatchesPricingRoute } from '@/lib/order/pricing-route';
@@ -67,11 +68,14 @@ export function orderItemFieldOptions(
           weightOptions.every((option) => option.disabled)
         );
       })(),
-    }));
+    })).sort((left, right) =>
+      Number(left.texture === 'variegated-pearl') -
+      Number(right.texture === 'variegated-pearl'),
+    );
   const externalFoilOptions: OrderFoilSwatchOption[] =
     options?.foilColors.map((foil) => ({
       value: foil.name,
-      label: foil.name,
+      label: foilColorLabel(foil.name),
       color: foil.displayColor,
       imageSrc: foil.displayImage,
     })) ?? [];
@@ -95,17 +99,15 @@ export function orderItemFieldOptions(
     (specification) => ({
       value: specification,
       label: externalOrderSpecificationLabel(specification, item.pricingRoute),
-      disabled: !externalOrderPapersForRoute(
-        products,
+      // Any enabled weight on the active paper makes the specification
+      // reachable; the weight renormalizes on selection. Requiring the current
+      // weight here would dead-lock with the weight picker, which is itself
+      // filtered by the current specification.
+      disabled: !activeExternalPaper || !externalOrderWeightOptionsForSelection(
+        activeExternalPaper,
         item.pricingRoute,
-        options?.papers,
-      ).some((paper) =>
-        externalOrderWeightOptionsForSelection(
-          paper,
-          item.pricingRoute,
-          specification,
-        ).some((weight) => !weight.disabled),
-      ),
+        specification,
+      ).some((weight) => !weight.disabled),
     }),
   );
   return {

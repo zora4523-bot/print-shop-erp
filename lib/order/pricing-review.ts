@@ -1,3 +1,5 @@
+import { canEditAllOrderFees, isEditableOrderCharge } from './admin-fee-policy';
+import { settlementBillsLogistics } from './settlement';
 import { packagingUnit } from './packaging-mode';
 import Decimal from "decimal.js";
 import type { Prisma } from "../../generated/prisma/client";
@@ -54,6 +56,7 @@ export class OrderPricingReviewError extends Error {
 }
 
 export type FinalizeOrderPricingCommand = {
+  editAll?: boolean;
   orderId: string;
   expectedOrderRevision: number;
   expectedPriceRevision: number;
@@ -106,6 +109,8 @@ type ChargePreview = {
 };
 
 export type OrderPricingReviewPreview = {
+  editAll?: boolean;
+  purpose?: string;
   productionReadiness?: { ready: boolean; issues: string[] };
   orderId: string;
   orderNo: string;
@@ -253,6 +258,8 @@ type PricingCustomerCharge = {
 };
 
 type PricingOrder = {
+  isSfCollect?: boolean;
+  purpose?: string;
   id: string;
   orderNo: string;
   submitterId: string;
@@ -268,6 +275,7 @@ type PricingOrder = {
   quotedFee: MoneyLike | null;
   confirmedFee: MoneyLike | null;
   settledFee: MoneyLike | null;
+  settledAt?: Date | null;
   items: PricingItem[];
   packagingGroups: PricingPackagingGroup[];
   shipments: PricingShipment[];
@@ -275,6 +283,8 @@ type PricingOrder = {
 };
 
 const pricingOrderSelect = {
+  isSfCollect: true,
+  purpose: true,
   id: true,
   orderNo: true,
   submitterId: true,
@@ -290,6 +300,7 @@ const pricingOrderSelect = {
   quotedFee: true,
   confirmedFee: true,
   settledFee: true,
+  settledAt: true,
   items: {
     orderBy: { sequence: "asc" },
     select: {
@@ -389,21 +400,40 @@ function assertAdmin(actor: { id: string; role: Role }): void {
   }
 }
 
-function assertReviewable(order: PricingOrder): void {
+function assertReviewable(order: PricingOrder, editAll = false): void {
+  if (editAll) {
+    if (!canEditAllOrderFees(order)) throw new OrderPricingReviewError("当前工单不能编辑收费，请先提交工单；已结算或已结束工单不能改价");
+    return;
+  }
+  if ((order.purpose === 'PROOF' || order.purpose === 'SAMPLE_SHIPMENT') && (order.settledFee != null || order.settledAt != null)) throw new OrderPricingReviewError('已结算工单不能修改终价');
   if (order.settlementType === OrderSettlementType.NO_CHARGE) {
     throw new OrderPricingReviewError("免费工单不进入工厂核价流程");
   }
-  if (!isOrderPricingReviewAllowedStatus(order.status)) {
+  if (!isOrderPricingReviewAllowedStatus(order.status, order.purpose)) {
     throw new OrderPricingReviewError(
       "工单未处于待工厂确认阶段，不能确认终价",
     );
   }
   if (
-    order.pricingStatus !== ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
+    order.pricingStatus !== ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION &&
+    !(order.purpose === 'PROOF' && order.pricingStatus === ORDER_PRICING_STATUS.ADMIN_CONFIRMED)
   ) {
     throw new OrderPricingReviewError(
       "工单价格不处于待管理员确认状态，不能重复确认终价",
     );
+  }
+}
+
+function assertSpecialOrderPrices(order: PricingOrder): void {
+  if (order.purpose !== 'PROOF' && order.purpose !== 'SAMPLE_SHIPMENT') return;
+  if (![order.processingAmount, order.packagingAmount, ...order.items.map((item) => item.subtotal), ...order.packagingGroups.map((group) => group.subtotal)].every((amount) => new Decimal(amount.toString()).isZero())) {
+    throw new OrderPricingReviewError('样品工单不单独计收加工费，请核对费用明细');
+  }
+  if (order.purpose === 'PROOF' && (order.customerCharges.length !== 1 || order.customerCharges[0]?.businessKey !== 'ORDER:PROOF:TOTAL')) {
+    throw new OrderPricingReviewError('打样费用明细不一致，请核对整单费用');
+  }
+  if (order.purpose === 'SAMPLE_SHIPMENT' && order.customerCharges.some((charge) => !isShipmentCustomerCharge(charge))) {
+    throw new OrderPricingReviewError('寄样品仅收取快递费和包装费');
   }
 }
 
@@ -649,8 +679,15 @@ function isShipmentCustomerCharge(charge: PricingCustomerCharge): boolean {
   return code === "SHIPPING_FEE" || code === "PACKING_MATERIAL";
 }
 
-function reviewsShipmentCustomerCharges(order: PricingOrder): boolean {
-  return order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+function reviewsShipmentCustomerCharges(order: PricingOrder, editAll: boolean): boolean {
+  if (order.purpose === 'PROOF') return false;
+  if (order.settlementType === OrderSettlementType.EXTERNAL_SALES || order.purpose === 'SAMPLE_SHIPMENT') return true;
+  // Internal and factory-direct orders bill logistics since 2026-09-18 and
+  // review the rows like external sales. Orders created before that have no
+  // rows: they keep the processing-only review unless the full editor is
+  // used to 补录 the rows.
+  return settlementBillsLogistics(order.settlementType as OrderSettlementType) &&
+    (editAll || order.customerCharges.some(isShipmentCustomerCharge));
 }
 
 /**
@@ -662,6 +699,7 @@ function reviewsShipmentCustomerCharges(order: PricingOrder): boolean {
  */
 function assertShipmentCustomerChargeIdentity(
   order: PricingOrder,
+  allowMissing = false,
 ): ReadonlyMap<string, PricingCustomerCharge> {
   const expectedByBusinessKey = new Map<
     string,
@@ -685,7 +723,7 @@ function assertShipmentCustomerChargeIdentity(
   }
 
   const shipmentCharges = order.customerCharges.filter(isShipmentCustomerCharge);
-  if (shipmentCharges.length !== expectedByBusinessKey.size) {
+  if (!allowMissing && shipmentCharges.length !== expectedByBusinessKey.size) {
     throw new OrderPricingReviewError(
       "每个发货地址必须且只能保存一条快递费和一条打包耗材费",
     );
@@ -721,7 +759,7 @@ function assertShipmentCustomerChargeIdentity(
   }
 
   if (
-    [...expectedByBusinessKey.keys()].some(
+    !allowMissing && [...expectedByBusinessKey.keys()].some(
       (businessKey) => !chargeByBusinessKey.has(businessKey),
     )
   ) {
@@ -774,6 +812,7 @@ function parseManualMoney(
   label: string,
   max: Decimal,
   decimalPlaces: number,
+  allowNegative = false,
 ): Decimal {
   if (value === null || value === undefined || value.trim() === "") {
     throw new OrderPricingReviewError(`${label}必须由管理员填写`);
@@ -786,9 +825,9 @@ function parseManualMoney(
   }
   if (
     !parsed.isFinite() ||
-    parsed.isNegative() ||
+    (!allowNegative && parsed.isNegative()) ||
     parsed.decimalPlaces() > decimalPlaces ||
-    parsed.gt(max)
+    parsed.abs().gt(max)
   ) {
     throw new OrderPricingReviewError(`${label}超出系统允许范围`);
   }
@@ -817,6 +856,7 @@ export async function previewOrderPricingReview(
   orderId: string,
   actor: { id: string; role: Role },
   _now: Date = new Date(),
+  editAll = false,
 ): Promise<OrderPricingReviewPreview> {
   assertAdmin(actor);
   // Kept for call-site compatibility and deterministic tests; snapshot reads
@@ -825,16 +865,19 @@ export async function previewOrderPricingReview(
   return db.$transaction(async (tx) => {
     const order = await readPricingOrder(tx, orderId);
     if (!order) throw new OrderPricingReviewError("工单不存在");
-    assertReviewable(order);
+    assertReviewable(order, editAll);
     assertStructuredPlateChargesConsistent(order);
-    const includesShipmentCharges = reviewsShipmentCustomerCharges(order);
+    assertSpecialOrderPrices(order);
+    const includesShipmentCharges = reviewsShipmentCustomerCharges(order, editAll);
     const shipmentChargeByBusinessKey = includesShipmentCharges
-      ? assertShipmentCustomerChargeIdentity(order)
+      ? assertShipmentCustomerChargeIdentity(order, order.settlementType !== OrderSettlementType.EXTERNAL_SALES)
       : new Map<string, PricingCustomerCharge>();
 
     return {
       orderId: order.id,
       orderNo: order.orderNo,
+      editAll,
+      purpose: order.purpose,
       productionReadiness: order.status === OrderStatus.SUBMITTED || order.status === OrderStatus.PENDING_FACTORY
         ? await inspectOrderProductionReadinessInTx(tx, order.id).then(({ ready, issues }) => ({ ready, issues }))
         : undefined,
@@ -938,11 +981,11 @@ export async function previewOrderPricingReview(
           (charge) =>
             charge.shipmentId === null &&
             !isShipmentCustomerCharge(charge) &&
-            chargeRequiresManual(charge),
+            ((editAll && isEditableOrderCharge(charge, order.customerCharges)) || chargeRequiresManual(charge) || (order.purpose === 'PROOF' && charge.businessKey === 'ORDER:PROOF:TOTAL')),
         )
         .map((charge) => {
           const errors = snapshotErrors(charge.pricingSnapshot);
-          if (errors.length === 0) {
+          if (!editAll && errors.length === 0) {
             errors.push("该订单级收费快照标记为待人工核价");
           }
           return {
@@ -1016,9 +1059,12 @@ function validateFinalPricingSubmissions(
   input: FinalizeOrderPricingCommand,
   order: PricingOrder,
 ) {
-  const includesShipmentCharges = reviewsShipmentCustomerCharges(order);
+  if ((order.purpose === 'PROOF' || order.purpose === 'SAMPLE_SHIPMENT') && (input.items.length || input.packagingGroups.some((group) => group.unitPrice != null && group.unitPrice !== '' && !new Decimal(group.unitPrice).isZero()))) {
+    throw new OrderPricingReviewError('样品工单不接受额外款式或包装加工费');
+  }
+  const includesShipmentCharges = reviewsShipmentCustomerCharges(order, Boolean(input.editAll));
   const shipmentChargeByBusinessKey = includesShipmentCharges
-    ? assertShipmentCustomerChargeIdentity(order)
+    ? assertShipmentCustomerChargeIdentity(order, order.settlementType !== OrderSettlementType.EXTERNAL_SALES)
     : new Map<string, PricingCustomerCharge>();
 
   const submittedItems = validateUniqueIds(
@@ -1057,7 +1103,7 @@ function validateFinalPricingSubmissions(
   }
   if (!includesShipmentCharges && input.shipments.length > 0) {
     throw new OrderPricingReviewError(
-      "快递费与打包耗材应收仅适用于外部销售结算工单",
+      "该工单没有快递费与打包耗材收费明细，不能提交物流收费",
     );
   }
   const submittedShipments = validateUniqueIds(
@@ -1098,7 +1144,7 @@ function validateFinalPricingSubmissions(
     (charge) =>
       charge.shipmentId === null &&
       !isShipmentCustomerCharge(charge) &&
-      chargeRequiresManual(charge),
+      ((input.editAll && isEditableOrderCharge(charge, order.customerCharges)) || chargeRequiresManual(charge) || (order.purpose === 'PROOF' && charge.businessKey === 'ORDER:PROOF:TOTAL')),
   );
   const submittedOrderCharges = validateUniqueIds(
     input.orderCharges,
@@ -1123,7 +1169,7 @@ function validateFinalPricingSubmissions(
   }
 
   const manualItems = order.items.flatMap((item) => {
-    if (!itemRequiresManual(item)) return [];
+    if (!itemRequiresManual(item) && (!input.editAll || !submittedItems.has(item.id))) return [];
     const submitted = submittedItems.get(item.id);
     const unitPrice = parseManualMoney(
       submitted?.unitPrice,
@@ -1137,6 +1183,7 @@ function validateFinalPricingSubmissions(
       DECIMAL_12_2_MAX,
       2,
     );
+    if (input.editAll && !itemRequiresManual(item) && unitPrice.eq(item.unitPrice.toString()) && fixedFee.eq(item.fixedFee.toString())) return [];
     const reason = requiredReason(
       submitted?.reason,
       `款式“${item.name}”需人工核价`,
@@ -1159,7 +1206,7 @@ function validateFinalPricingSubmissions(
     }];
   });
   const manualItemIds = new Set(manualItems.map(({ item }) => item.id));
-  if ([...submittedItems.keys()].some((id) => !manualItemIds.has(id))) {
+  if (!input.editAll && [...submittedItems.keys()].some((id) => !manualItemIds.has(id))) {
     throw new OrderPricingReviewError(
       "已锁定快照价的款式不接受人工改价，请刷新后重试",
     );
@@ -1192,7 +1239,7 @@ export async function finalizeOrderPricing(
     )}))`;
     const order = await readPricingOrder(tx, input.orderId);
     if (!order) throw new OrderPricingReviewError("工单不存在");
-    assertReviewable(order);
+    assertReviewable(order, input.editAll);
     const pendingRequest = await tx.orderChangeRequest.findFirst({
       where: { orderId: order.id, status: OrderChangeRequestStatus.PENDING },
       select: { id: true },
@@ -1200,6 +1247,7 @@ export async function finalizeOrderPricing(
     if (pendingRequest) throw new OrderPricingReviewError('存在待审批申请，请先处理申请后再核价');
 
     assertStructuredPlateChargesConsistent(order);
+    assertSpecialOrderPrices(order);
     if (order.priceRevision !== input.expectedPriceRevision) {
       throw new OrderPricingReviewError(
         "工单价格已被其他人更新，请刷新后重新核对",
@@ -1216,7 +1264,7 @@ export async function finalizeOrderPricing(
       validateFinalPricingSubmissions(input, order);
 
     const manualGroups = order.packagingGroups.flatMap((group) => {
-      if (!packagingRequiresManual(group)) return [];
+      if (!packagingRequiresManual(group) && (!input.editAll || sameNullableDecimal(submittedGroups.get(group.id)?.unitPrice ?? null, money(group.unitPrice, 4)))) return [];
       const submitted = submittedGroups.get(group.id)!;
       const unitPrice = parseManualMoney(
         submitted.unitPrice,
@@ -1247,7 +1295,9 @@ export async function finalizeOrderPricing(
       }];
     });
 
-    const manualOrderCharges = expectedOrderCharges.map((charge) => {
+    const manualOrderCharges = expectedOrderCharges.filter((charge) =>
+      !input.editAll || chargeRequiresManual(charge) || !sameNullableDecimal(submittedOrderCharges.get(charge.id)?.amount ?? null, money(charge.amount)),
+    ).map((charge) => {
       const submitted = submittedOrderCharges.get(charge.id)!;
       return {
         charge,
@@ -1256,6 +1306,7 @@ export async function finalizeOrderPricing(
           `订单级收费“${charge.description}”`,
           DECIMAL_12_2_MAX,
           2,
+          charge.isAdjustment && charge.category.code === 'APPROVED_ADJUSTMENT' && Boolean(charge.approvalReference),
         ).toFixed(2),
         reason: requiredReason(
           submitted.reason,
@@ -1287,7 +1338,7 @@ export async function finalizeOrderPricing(
           ),
         ),
       );
-      const reason = needsManual
+      const reason = (needsManual || (input.editAll && pairs.some(([code, amount]) => !sameNullableDecimal(amount, money(chargeByShipmentAndCode(shipmentChargeByBusinessKey, shipment, code)?.amount)))))
         ? requiredReason(
             submitted.reason,
             `地址 ${shipment.sequence} 存在待人工确认收费`,
@@ -1299,7 +1350,8 @@ export async function finalizeOrderPricing(
           shipment,
           code,
         );
-        if (!chargeRequiresManual(previous)) continue;
+        if (!chargeRequiresManual(previous) && (!input.editAll || sameNullableDecimal(rawAmount, money(previous?.amount)))) continue;
+        if (code === "SHIPPING_FEE" && order.isSfCollect && !new Decimal(rawAmount).isZero()) throw new OrderPricingReviewError("顺丰到付工单的快递费必须为 0");
         const amount = parseManualMoney(
           rawAmount,
           `地址 ${shipment.sequence} 的${label}`,
@@ -1351,6 +1403,7 @@ export async function finalizeOrderPricing(
     const customerChargeTotal = existingChargeTotal.plus(createdChargeTotal);
     const processingTotal = itemAmount.plus(packagingTotal);
     const total = processingTotal.plus(customerChargeTotal);
+    if (packagingTotal.gt(DECIMAL_12_2_MAX) || processingTotal.gt(DECIMAL_12_2_MAX)) throw new OrderPricingReviewError('加工费或包装费合计超出系统允许范围');
     if (total.isNegative()) {
       throw new OrderPricingReviewError("工单总额不能为负数");
     }
@@ -1360,7 +1413,20 @@ export async function finalizeOrderPricing(
     const packagingAmount = packagingTotal.toFixed(2);
     const processingAmount = processingTotal.toFixed(2);
     const totalAmount = total.toFixed(2);
-    const csSalesDelta = total.minus(order.totalAmount.toString());
+    // 客服业绩不含代收物流（cs-sales.ts）：比较扣除快递费 / 耗材后的口径。
+    const shipmentChargeAmount = (amountOf: (charge: PricingCustomerCharge) => Decimal.Value | null) =>
+      order.customerCharges.filter(isShipmentCustomerCharge).reduce((sum, charge) => {
+        const amount = amountOf(charge);
+        return amount === null ? sum : sum.plus(amount);
+      }, new Decimal(0));
+    const previousLogisticsAmount = shipmentChargeAmount((charge) => money(charge.amount));
+    // Rows created by the full editor (补录) are shipment charges as well; they
+    // are already inside `total` and must not leak into the ledger basis.
+    const nextLogisticsAmount = includesShipmentCharges
+      ? shipmentChargeAmount((charge) => chargeAmountById.get(charge.id) ?? money(charge.amount)).plus(createdChargeTotal)
+      : previousLogisticsAmount;
+    const previousSalesBasis = new Decimal(order.totalAmount.toString()).minus(previousLogisticsAmount).toFixed(2);
+    const csSalesDelta = total.minus(nextLogisticsAmount).minus(previousSalesBasis);
     if (
       order.settlementType === OrderSettlementType.INTERNAL_SALES &&
       order.billingMode === OrderBillingMode.CHARGE &&
@@ -1371,7 +1437,7 @@ export async function finalizeOrderPricing(
         await assertCsOrderSalesLedgerReconciledInTx(
           tx,
           order.id,
-          order.totalAmount.toString(),
+          previousSalesBasis,
         );
         await recordCsSalesEntryInTx(tx, {
           eventKey: `order:${order.id}:revision:${nextOrderRevision}:change`,

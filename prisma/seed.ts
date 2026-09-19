@@ -235,56 +235,8 @@ async function seedSalaryRules() {
       remark: '客服提成档位表（FLAT模式）',
     },
 
-    // --- 开机师傅规则 ---
-    {
-      ruleType: 'WORKER_MACHINE' as const,
-      ruleKey: 'HAND_PRESS',
-      ruleValue: {
-        dailyBase: 100,
-        pieceRate: 0.007,
-        boardRate: 5,
-        smallOrderThreshold: 1000,
-        smallOrderFlatPrice: 12,
-        multiplierFactors: ['DOUBLE_SIDED', 'DOUBLE_COLOR'],
-      },
-      remark: '开机仔计件规则',
-    },
-    {
-      ruleType: 'WORKER_MACHINE' as const,
-      ruleKey: 'WINDMILL',
-      ruleValue: {
-        dailyBase: 120,
-        pieceRate: 0.01,
-        boardRate: 0,
-        smallOrderThreshold: 1000,
-        smallOrderFlatPrice: 20,
-        smallOrderInclusive: true,
-        largeOrderSetupFee: 10,
-        multiplierFactors: ['DOUBLE_COLOR'],
-      },
-      remark: '风车机师傅计件规则（1000 个及以下 20 元；以上每个 0.01 元 + 装板 10 元）',
-    },
-    {
-      ruleType: 'WORKER_MACHINE' as const,
-      ruleKey: 'GLUE',
-      ruleValue: {
-        dailyBase: 120,
-        pieceRate: 0.002,
-        boardRate: 0,
-        smallOrderThreshold: null,
-        smallOrderFlatPrice: null,
-        multiplierFactors: [],
-      },
-      remark: '黏封机师傅计件规则',
-    },
-
+    // 工序计件只初始化独立工价草稿，不再生成旧机型工价。
     // --- 时薪工规则 ---
-    {
-      ruleType: 'WORKER_HOURLY' as const,
-      ruleKey: 'PACKER_HOURLY',
-      ruleValue: { hourlyRate: 11 },
-      remark: '打包工时薪（10-12元区间，默认11）',
-    },
     {
       ruleType: 'WORKER_HOURLY' as const,
       ruleKey: 'CLEANER_HOURLY',

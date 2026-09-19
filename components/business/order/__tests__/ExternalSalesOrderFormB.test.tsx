@@ -237,7 +237,7 @@ describe('OrderFormB', () => {
       '工艺 · 第 1 款',
       '材料',
       '数量与包装',
-      '文件',
+      '设计图与设计文件',
       '收货',
     ]) {
       expect(html).toContain(`aria-label="${heading}"`);
@@ -297,6 +297,7 @@ describe('OrderFormB', () => {
 
     expect(html).toContain('粘贴或上传设计图');
     expect(html).toContain('上传 CDR 文件');
+    expect(html).toContain('可多选或拖放多个文件');
     expect(html).not.toContain('data-slot="design-file-marker"');
     expect(html).not.toMatch(/>图</);
     expect(html).toContain('粘贴、拖放或选择第 1 款 设计图');
@@ -433,7 +434,7 @@ describe('OrderFormB', () => {
     const html = render(ordered, { onFoilSidesChange });
 
     expect(html.indexOf('aria-label="亚金，第 2 色"')).toBeLessThan(
-      html.indexOf('aria-label="红色，第 1 色"'),
+      html.indexOf('aria-label="红金，第 1 色"'),
     );
 
     recordedButtonProps

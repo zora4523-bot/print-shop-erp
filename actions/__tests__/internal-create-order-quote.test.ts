@@ -64,6 +64,10 @@ const raw = {
       itemUnitsPerBag: [10],
     },
   ],
+  logistics: {
+    isSfCollect: false,
+    shipments: [{ shipmentKey: '1', province: '上海', billableWeightKg: null, itemQuantity: 500, itemQuantities: [500] }],
+  },
 };
 
 beforeEach(() => {
@@ -96,8 +100,19 @@ describe('quoteInternalCreateOrderAction', () => {
             crafts: [],
           }),
         ],
+        logistics: expect.objectContaining({
+          isSfCollect: false,
+          shipments: [expect.objectContaining({ shipmentKey: '1', province: '上海', itemQuantities: [500] })],
+        }),
       }),
     );
+  });
+
+  it('rejects a request without logistics facts: internal delivery is priced like external sales', async () => {
+    const { logistics: _logistics, ...withoutLogistics } = raw;
+    const result = await quoteInternalCreateOrderAction(withoutLogistics);
+    expect(result).toMatchObject({ status: 'invalid' });
+    expect(mocks.quoteInternalCreateOrder).not.toHaveBeenCalled();
   });
 
   it('rejects an empty note when the configuration facts are absent', async () => {

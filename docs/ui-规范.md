@@ -251,7 +251,10 @@ gates:
 | 操作结果（成功 / 失败 / 警告 / 信息） | `ActionNotice tone`（自带 `role` 与 `aria-live`） |
 | 单字段错误 | `FormMessage` + `formMessageA11yProps` 连线 |
 | 多字段 / 多款错误摘要 | `FormErrorSummary`（提交失败后获得焦点） |
+| 保存成功后 `redirect()` 到别的页面 | action 用 `appendReceipt(path, { created: '1' })`（`lib/admin/receipt.ts`），目标页 `readReceipt(searchParams)` + `ReceiptNotice`（服务端渲染；挂载后自动清掉地址栏里的回执参数） |
 
+- Server Action 成功后跳转的，**必须带回执**：`useActionState` 的状态随旧页面一起丢失，目标页什么都不知道，不带回执就等于保存后没有任何反馈（2026-09-18 之前 18 处 redirect 里 13 处如此）。回执 key 是 `RECEIPT_KEYS` 固定字典（created / updated / issued / locked / lockedCount / paid / marked / markedPaid），新类型先登记再用；`ReceiptNotice` 的 `noun` 给「X已创建 / X已保存」默认文案，其余 key 用 `messages` 逐 key 给文案。页面自己的筛选参数与回执 key 同名时（时薪页 `paid=paid|unpaid`），`readReceipt(sp, keys)` 必须传白名单，否则清地址栏会把筛选一起删掉。
+- 子表单会因 revalidate 卸载（如异议处理后 status 变终态）时，不要把成功回执渲染在会卸载的分支里：要么让表单常驻、终态只留回执（`TaskDisputeReviewForm` 的 `open`），要么走 redirect + 回执。
 - 裸 `role="status"` / `role="alert"` / `<p className="text-destructive">` 只允许在 `components/ui-business/` 内部。存量手写不迁移，新代码按上表。
 - 失败提示 = 原因 + 恢复动作（§7 第 6 律）。
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatFoilColors } from '../foil-colors';
+import { formatFoilColors, foilColorLabel, foilColorFromLabel, foilColorSearchValues, foilColorInputLabel, restoreFoilColorInput } from '../foil-colors';
 
 describe('formatFoilColors', () => {
   it('joins multiple colors with a CJK list separator', () => {
@@ -12,4 +12,56 @@ describe('formatFoilColors', () => {
     expect(formatFoilColors([], '-')).toBe('-');
     expect(formatFoilColors(undefined)).toBe('—');
   });
+});
+
+
+it('uses foil labels while preserving saved identifiers, custom colors and order', () => {
+  const saved = ['浅色', '红色', '黑色', '银色', '蓝色', '透明色', '绿色', '哑金', '亚金', '品牌色'];
+  expect(formatFoilColors(saved)).toBe('浅金、红金、黑金、银金、蓝金、透明金、绿金、哑金、亚金、品牌色');
+  expect(saved[1]).toBe('红色');
+  expect(foilColorLabel('红金')).toBe('红金');
+  expect(foilColorSearchValues(['红金'])).toEqual(['红金', '红色']);
+  expect(foilColorSearchValues(['品牌色'])).toEqual(['品牌色']);
+  expect(foilColorInputLabel('红色、蓝色')).toBe('红金、蓝金');
+  expect(restoreFoilColorInput('红金、品牌金', ['红色'])).toBe('红色、品牌金');
+});
+
+// Regression: a renamed color typed in the change-request form that was not
+// already on the item must still be stored under its catalog name, otherwise
+// price rules scoped to 黑色 stop matching and lists show a phantom color.
+it('maps newly typed display names back to catalog names without relying on saved colors', () => {
+  expect(foilColorFromLabel('黑金')).toBe('黑色');
+  expect(foilColorFromLabel('品牌金')).toBe('品牌金');
+  expect(foilColorFromLabel('红色')).toBe('红色');
+  expect(restoreFoilColorInput('红金、黑金', ['红色'])).toBe('红色、黑色');
+  expect(restoreFoilColorInput('黑金', [])).toBe('黑色');
+  expect(restoreFoilColorInput('红金,蓝金，透明金', [])).toBe('红色,蓝色，透明色');
+});
+
+// A catalog material may legitimately be named like a dictionary label; the
+// form passes every known identity so such input is stored verbatim.
+it('never rewrites a typed name that is itself a known identity', () => {
+  expect(restoreFoilColorInput('红金', ['亚金'], ['红金', '亚金'])).toBe('红金');
+  expect(restoreFoilColorInput('红金', ['亚金'], ['亚金'])).toBe('红色');
+  expect(restoreFoilColorInput('红金、黑金', ['红色'], ['黑金'])).toBe('红色、黑金');
+});
+
+// Catalog has both 红色 and 红金: the stored 红色 must not be displayed as 红金,
+// and continuous edits must keep whichever identity the user typed.
+it('keeps stored names visible and typed identities intact when a label collides with a real color', () => {
+  const known = ['红色', '红金', '亚金'];
+  expect(foilColorInputLabel('红色、蓝色', known)).toBe('红色、蓝金');
+  expect(foilColorInputLabel('红金', known)).toBe('红金');
+  expect(restoreFoilColorInput('红色、蓝金', ['亚金'], known)).toBe('红色、蓝色');
+  expect(restoreFoilColorInput('红金、蓝金', ['亚金'], known)).toBe('红金、蓝色');
+  expect(restoreFoilColorInput('红金', ['红色'], ['红金'])).toBe('红金');
+});
+
+// Submission trims each color later; whitespace around a label must not bypass
+// the reverse map and turn a no-op edit into a colour change.
+it('resolves trimmed colors while preserving whitespace and delimiters', () => {
+  expect(restoreFoilColorInput('红金 ', ['红色'])).toBe('红色 ');
+  expect(restoreFoilColorInput(' 红金 、 蓝金,黑金， 品牌金', [])).toBe(' 红色 、 蓝色,黑色， 品牌金');
+  expect(restoreFoilColorInput('、、 ', [])).toBe('、、 ');
+  expect(foilColorInputLabel(' 红色 、蓝色 ', [])).toBe(' 红金 、蓝金 ');
 });

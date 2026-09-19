@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { createPurchaseOrderAction } from '@/actions/owner-purchases';
 import { PurchaseOrderForm } from '@/components/business/purchase/PurchaseOrderForm';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import { PageHeader, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listMaterials } from '@/lib/material';
@@ -15,14 +16,15 @@ export const metadata = {
 type PageProps = {
   searchParams: Promise<{
     supplierPartyId?: string | string[];
+    created?: string | string[];
   }>;
 };
 
 export default async function NewOwnerPurchasePage({ searchParams }: PageProps) {
   await requirePermission('purchase:manage');
-  const requestedSupplierPartyId = firstSearchParam(
-    (await searchParams).supplierPartyId,
-  );
+  const sp = await searchParams;
+  const requestedSupplierPartyId = firstSearchParam(sp.supplierPartyId);
+  const receipt = readReceipt(sp);
   const [suppliers, materials] = await Promise.all([
     listSupplierPartyOptions(),
     listMaterials(),
@@ -35,6 +37,7 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
 
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="供应商" />
       <PageHeader
         title="新建采购单"
         subtitle="创建采购单不会增加库存；到货后可分批收货。"

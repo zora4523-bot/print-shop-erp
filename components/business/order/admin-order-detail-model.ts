@@ -1,3 +1,5 @@
+import { foilColorLabel } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { packagingModeLabel, packagingUnit } from '@/lib/order/packaging-mode';
 import Decimal from 'decimal.js';
 import { adminOrderCraftTags, adminOrderDueHint } from '@/lib/order/admin-list-presentation';
@@ -38,6 +40,7 @@ export type DetailShipment = {
   address: string | null; trackingNo: string | null; carrier: string | null; items: string[];
 };
 export type AdminOrderDetailModel = {
+  purpose?: import('@/lib/order/purpose').OrderPurposeValue;
   remark?: string | null;
   id: string; no: string; name: string; version: number; status: AdminOrderWorkspaceRow['status'];
   customer: string; sales: string; craft: string; due: string | null; dueLeft: string;
@@ -104,16 +107,16 @@ function personName(value: unknown): string | null {
   return typeof name === 'string' ? name : null;
 }
 
-function display(value: unknown): string {
+function display(value: unknown, foil = false): string {
   if (value === null || value === undefined || value === '') return '—';
-  if (Array.isArray(value)) return value.filter((entry) => typeof entry === 'string').join('、') || '无';
+  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string').map((entry) => foil ? foilColorLabel(entry) : entry).join('、') || '无';
   if (typeof value === 'number') return value.toLocaleString('zh-CN');
   if (typeof value === 'boolean') return value ? '是' : '否';
   return typeof value === 'string' ? externalPriceBusinessText(value) : '未记录';
 }
 
 function paperDescription(type: string | null, weight: number | null): string {
-  const paper = type ? externalPriceBusinessText(type).trim() : '';
+  const paper = type ? paperDisplayLabel(externalPriceBusinessText(type)).trim() : '';
   // Keep the saved material name intact. Only omit the additional weight when
   // that exact value is already present; 160g must not match 60g or 1600g.
   const includesWeight = weight && new RegExp(`(?:^|[^\\d.])${weight}\\s*(?:gsm|g|克)(?![a-z])`, 'i').test(paper);
@@ -145,7 +148,7 @@ function changeDiffs(request: Order['changeRequests'][number], currentItemIds: S
       if (source && JSON.stringify(source[field] ?? null) === JSON.stringify(change[field] ?? null)) continue;
       rows.push({
         id: `${request.id}-${index}-${field}`, label: `${prefix}${label}`,
-        before: source ? display(source[field]) : '—（新增）', after: display(change[field]),
+        before: source ? display(source[field], field.endsWith('FoilColors') || field === 'foilColors') : '—（新增）', after: display(change[field], field.endsWith('FoilColors') || field === 'foilColors'),
         targetItemId: itemId && currentItemIds.has(itemId) ? itemId : null,
         ...(change.operation === 'ADD' ? { targetSection: 'items' as const } : {}),
       });
@@ -205,8 +208,8 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
         { label: '纸张', value: paperDescription(item.paperType, item.paperWeightGsm) },
         { label: '规格', value: item.specification ? externalPriceBusinessText(item.specification) : '未记录' },
         { label: '实尺', value: item.actualWidthMm != null && item.actualHeightMm != null ? `${item.actualWidthMm.toString()} × ${item.actualHeightMm.toString()} mm` : '未记录' },
-        { label: '正面烫金', value: foil.frontFoilColors.join('、') || '无' },
-        { label: '反面烫金', value: foil.backFoilColors.join('、') || '无' },
+        { label: '正面烫金', value: foil.frontFoilColors.map(foilColorLabel).join('、') || '无' },
+        { label: '反面烫金', value: foil.backFoilColors.map(foilColorLabel).join('、') || '无' },
       ],
       images: item.designs.filter((design) => design.fileType === 'IMAGE').map((design) => ({ id: design.id, url: signImageUrl(design.fileUrl), name: design.fileName })),
       hasCdr: item.designs.some((design) => design.fileType === 'CDR'), fees,
@@ -235,10 +238,11 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
   const dueLeft = adminOrderDueHint(workspace.dueAlert) ?? '';
   const feeStages = (['quoted', 'confirmed', 'settled'] as const).map((key) => ({
     key, title: { quoted: '提交报价', confirmed: '确认金额', settled: '结算金额' }[key],
-    total: amount(workspace.feeStages[key]), current: workspace.feeStages.active === key.toUpperCase(),
+    total: key === 'quoted' && order.purpose === 'PROOF' ? null : amount(workspace.feeStages[key]), current: workspace.feeStages.active === key.toUpperCase(),
   }));
   return {
     remark: order.remark,
+    purpose: order.purpose,
     id: order.id, no: order.orderNo, name: order.customName || '未命名工单',
     version: order.workOrderVersion, status: order.status, customer: workspace.customer.name,
     sales: workspace.submitter.name, craft: workspace.craftTags?.join(' · ') || workspace.craftSummary,

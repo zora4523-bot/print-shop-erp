@@ -1,3 +1,5 @@
+vi.mock('@/lib/production/report-dispute', () => ({ listOrderReportDisputes: vi.fn().mockResolvedValue([]) }));
+vi.mock('@/components/business/salary/OrderWagePanel', () => ({ OrderWagePanel: () => null }));
 vi.mock('@/actions/order-production-facts', () => ({ repairLegacyProductionFactsAction: vi.fn() }));
 const readinessQuery = vi.hoisted(() => vi.fn().mockResolvedValue({ ready: true, issues: [] }));
 vi.mock('@/lib/order/production-readiness-query', () => ({ getOrderProductionReadiness: readinessQuery }));
@@ -89,6 +91,7 @@ vi.mock('@/lib/product', () => ({
 }));
 vi.mock('@/lib/material', () => ({
   listExternalCreateOrderPaperOptions: listExternalCreateOrderPaperOptionsMock,
+  listExternalCreateOrderFoilOptions: vi.fn().mockResolvedValue([]),
 }));
 // 标题取数模块直连 Prisma；不 mock 的话 import 链会拉起 lib/db，
 // 在没有 DATABASE_URL 的 node 测试环境里模块加载即抛。
@@ -156,6 +159,7 @@ vi.mock('@/components/business/order/OrderChangeWithdrawButton', () => ({
 vi.mock('@/components/business/order/OrderChangeReviewForm', () => ({
   OrderChangeReviewForm: () => null,
 }));
+vi.mock('@/components/business/order/AdminOrderFeeEditor', () => ({ AdminOrderFeeEditor: () => <div>all-fee-editor</div> }));
 vi.mock('@/components/business/order/OrderPricingReviewForm', () => ({
   OrderPricingReviewForm: () => <div>factory-pricing-review</div>,
 }));
@@ -529,6 +533,20 @@ describe('order detail commercial visibility', () => {
       );
     },
   );
+
+  it.each([
+    [OrderSettlementType.EXTERNAL_SALES, true],
+    [OrderSettlementType.FACTORY_DIRECT, true],
+    [OrderSettlementType.INTERNAL_SALES, false],
+  ])('附加费用维护入口与服务端闸口一致：%s → %s', async (settlementType, visible) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(), status: OrderStatus.IN_PRODUCTION, settlementType,
+      pricingStatus: 'ADMIN_CONFIRMED', priceRevision: 2, pricingRevisions: [],
+    });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html.includes('commercial-details-manager')).toBe(visible);
+  });
 
   it('免费工单不显示工厂核价入口', async () => {
     requireSessionMock.mockResolvedValue({

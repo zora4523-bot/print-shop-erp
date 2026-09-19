@@ -490,7 +490,7 @@ test('销售编辑新增地址先分货复核费用，保存后地址与总价�
 
   await add.getByLabel('收件人', { exact: true }).fill('地址二收件人');
   await add.getByLabel('收货电话', { exact: true }).fill('13800138001');
-  await add.getByLabel('收货地址', { exact: true }).fill('江西省南昌市测试路2号');
+  await add.getByRole('textbox', { name: '收货地址', exact: true }).fill('江西省南昌市测试路2号');
   await add.getByLabel('计费省份', { exact: true }).fill('江西');
   await add.getByLabel(/分配数量/).fill('400');
   await expect(add.getByLabel(/人工/)).toHaveCount(0);

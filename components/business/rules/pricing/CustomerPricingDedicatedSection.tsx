@@ -1,3 +1,5 @@
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
+import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { BOX_PRICE_RULES, boxPriceRuleDefinition } from '@/lib/price/box-packaging-rules';
 import 'server-only';
 import { blankSpecificationKey } from '@/lib/price/blank-paper';
@@ -101,7 +103,6 @@ const BLANK_COLUMNS = [
 ] as const;
 
 const BLANK_PAPER_ORDER = [
-  '120g珠光艳闪',
   '160g珠光艳闪',
   '160g珠光闪红',
   '160g红卡',
@@ -807,7 +808,7 @@ function paperParts(paperType: string | null | undefined): {
   paperName: string;
   weight: string;
 } {
-  const value = paperType?.trim() || '未设置纸张';
+  const value = paperDisplayLabel(paperType?.trim() || '未设置纸张');
   const match = /^(\d+)g(.+)$/u.exec(value);
   return match
     ? { paperName: match[2]!.trim(), weight: match[1]! }
@@ -821,12 +822,13 @@ function renderBlank(
   const byPaper = new Map<string, CustomerPriceSectionRuleDto[]>();
   for (const rule of workspace.rules) {
     const paper = effectiveRule(rule)?.product?.paperType ?? '未设置纸张';
+    if (isRetiredPaper({ paperType: paper })) continue;
     const rows = byPaper.get(paper) ?? [];
     rows.push(rule);
     byPaper.set(paper, rows);
   }
   for (const product of workspace.blankProducts ?? []) {
-    if (product.paperType && !byPaper.has(product.paperType)) {
+    if (product.paperType && !isRetiredPaper(product) && !byPaper.has(product.paperType)) {
       byPaper.set(product.paperType, []);
     }
   }
@@ -1253,7 +1255,6 @@ function renderShip(
       ? policy.gramsPerItemByPaperWeightGsm
       : {};
   const unitWeights = [
-    { key: '120', label: '120g', value: grams['120'] ?? null },
     {
       key: '150',
       label: '150g 莱尼纹（按160算）',

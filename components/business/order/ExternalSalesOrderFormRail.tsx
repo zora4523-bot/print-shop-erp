@@ -135,7 +135,7 @@ export function OrderFormBRail(props: OrderFormBRailProps) {
             <h2 id={headingId} className="text-sm font-semibold">
               费用明细
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">{itemCount} 款</p>
+            <p className="mt-1 text-xs text-muted-foreground">{itemCount} 条规格明细</p>
           </div>
           <Badge variant="outline">{settlementLabel}</Badge>
         </div>
@@ -180,6 +180,7 @@ export function OrderFormBRail(props: OrderFormBRailProps) {
             {busy ? '处理中…' : '保存草稿'}
           </Button>
         ) : null}
+        {props.allowEditFees ? <Button type="submit" name="creationIntent" value="fees" variant="outline" className="mt-3 min-h-11 w-full" disabled={busy} onClick={() => onAttemptSubmit('submit')}>创建并编辑收费</Button> : null}
         <Button
           type="submit"
           name="creationIntent"

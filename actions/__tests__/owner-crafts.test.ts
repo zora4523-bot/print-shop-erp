@@ -192,7 +192,7 @@ describe('createRuleCenterCraftAction', () => {
       '/owner/rules/crafts/craft-new',
     );
     expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/rules/crafts/craft-new',
+      '/owner/rules/crafts/craft-new?created=1',
     );
   });
 
@@ -211,7 +211,7 @@ describe('createRuleCenterCraftAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/rules/crafts/craft-new',
+      '/owner/rules/crafts/craft-new?created=1',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/crafts');
   });
@@ -228,7 +228,7 @@ describe('createRuleCenterCraftAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/rules/crafts/craft-new',
+      '/owner/rules/crafts/craft-new?created=1',
     );
   });
 

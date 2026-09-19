@@ -358,11 +358,47 @@ describe('box wage publication and successor versions', () => {
     const receipt = await publishPieceworkPriceBookV1({ manifest: { ...boxed(), priceBookVersion: 1 }, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now);
     expect(receipt.rules).toHaveLength(4);
   });
-  it('rejects stale successors, duplicate box rules and a missing bag rule', async () => {
+  it('rejects stale successors, duplicate box rules without requiring a bag rule', async () => {
     dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
     dbMock.pieceworkPriceBook.findFirst.mockResolvedValue({ ...draftBook(), version: 2, status: 'PUBLISHED' });
     await expect(publishPieceworkPriceBookV1({ manifest: boxed(), actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('版本已变化');
     const duplicate = boxed(); duplicate.rules[2] = duplicate.rules[3];
     await expect(publishPieceworkPriceBookV1({ manifest: duplicate, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('重复规则');
   });
+});
+
+
+describe('immediate publication', () => {
+  it('uses the locked publication time and retains it on exact replay', async () => {
+    const input = { manifest: manifest({ effectiveFrom: null }), sourceSha256, actor, expectedDraftUpdatedAt: draftUpdatedAt, effectiveImmediately: true };
+    dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(draftBook());
+    const receipt = await publishPieceworkPriceBookV1(input, now);
+    expect(receipt.effectiveFrom).toBe(now.toISOString());
+    const normalized = manifest({ effectiveFrom: now.toISOString() });
+    dbMock.pieceworkPriceBook.findUnique.mockResolvedValue({ ...draftBook(), status: 'PUBLISHED', effectiveFrom: now,
+      sourceName: normalized.sourceName, sourceSha256, publishNote: normalized.publishNote,
+      manifestSha256: receipt.manifestSha256, ruleSetSha256: receipt.ruleSetSha256,
+      rules: normalized.rules.map((r, i) => ({ ...r, id: String(i) })),
+    });
+    dbMock.businessAuditLog.findFirst.mockResolvedValue({ id: receipt.auditLogId });
+    expect(await publishPieceworkPriceBookV1(input, new Date(now.getTime() + 10000))).toMatchObject({ outcome: 'ALREADY_PUBLISHED', effectiveFrom: now.toISOString() });
+  });
+});
+
+
+it('preserves scheduled manifest hashes including timezone notation', async () => {
+  const scheduled = manifest({ effectiveFrom: '2026-08-29T08:00:00+08:00' });
+  dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(draftBook());
+  const receipt = await publishPieceworkPriceBookV1({ manifest: scheduled, sourceSha256, actor, expectedDraftUpdatedAt: draftUpdatedAt }, now);
+  expect(receipt.manifestSha256).toBe(calculatePieceworkManifestSha256(scheduled));
+});
+
+
+it('publishes foil-only draft while packing rates are deferred', async () => {
+  const foil = manifest(); foil.rules = foil.rules.filter((rule) => rule.operationType !== 'PACKING');
+  const draft = draftBook(); draft.rules = draft.rules.filter((rule) => rule.operationType !== 'PACKING');
+  dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(draft);
+  const result = await publishPieceworkPriceBookV1({ manifest: foil, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now);
+  expect(result.rules).toHaveLength(2);
+  expect(result.rules.map((rule) => rule.operationType).sort()).toEqual(['FULL', 'PARTIAL']);
 });

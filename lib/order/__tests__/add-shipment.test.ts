@@ -338,6 +338,18 @@ it.each([
     expect(mocks.revision).not.toHaveBeenCalled();
   },
 );
+it('keeps 补录 logistics rows (priceBookId null) on the unchanged path for internal orders', async () => {
+  const order = fixture();
+  mocks.find.mockResolvedValue({
+    ...order,
+    settlementType: 'FACTORY_DIRECT',
+    status: 'SUBMITTED',
+    customerCharges: order.customerCharges.map((charge) => ({ ...charge, priceBookId: null })),
+  });
+  const preview = await addOrderShipment(input(), actor, 'preview');
+  expect(preview).toMatchObject({ pricingMode: 'UNCHANGED', charges: [] });
+  expect(mocks.quote).not.toHaveBeenCalled();
+});
 it('requires a manual fee reason and refuses nonzero SF freight', async () => {
   expect(
     addOrderShipmentSchema.safeParse({ ...input(), shippingFee: '12.34' })

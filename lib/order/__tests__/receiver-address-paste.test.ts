@@ -1,0 +1,80 @@
+import { describe, expect, it } from 'vitest';
+import type { ClipboardEvent } from 'react';
+import {
+  applyParsedReceiverFact,
+  parseExternalReceiverDisplay,
+  parsePastedReceiverAddress,
+  parseReceiverAddressInput,
+  pastedTextareaValue,
+  stripProvincePrefix,
+} from '../receiver-address-paste';
+
+describe('parseReceiverAddressInput', () => {
+  it('combines contact facts, province and a display address from one pasted string', () => {
+    const parsed = parseReceiverAddressInput('张三，13800000000，浙江省杭州市西湖区测试路1号 [AB12]');
+    expect(parsed).toEqual({
+      receiverName: '张三',
+      receiverPhone: '13800000000',
+      province: '浙江',
+      address: '浙江省杭州市西湖区测试路1号',
+      platformCode: '[AB12]',
+    });
+  });
+
+  it('keeps the two underlying parsers reachable for existing callers', () => {
+    expect(parsePastedReceiverAddress('李四 13900139000 江西省南昌市测试路2号').province).toBe('江西');
+    expect(parseExternalReceiverDisplay('').address).toBe('');
+    expect(parseReceiverAddressInput('   ')).toMatchObject({ receiverName: null, receiverPhone: null, province: null, address: '' });
+  });
+
+  it.each([
+    ['张三，13800000000，北京市朝阳区广东大厦1号', '北京'],
+    ['浙江省杭州市西湖区上海路8号', '浙江'],
+    ['青海省海南藏族自治州共和县测试路1号', '青海'],
+    ['张广东 13800000000 江苏省南京市测试路1号', '江苏'],
+    ['广东深圳南山区北京路2号', '广东'],
+    ['广西壮族自治区南宁市广东路3号', '广西'],
+  ])('takes the billing province from the administrative prefix, not a later place name: %s', (text, province) => {
+    expect(parsePastedReceiverAddress(text).province).toBe(province);
+  });
+});
+
+describe('applyParsedReceiverFact', () => {
+  it('lets a paste replace the fact and typing only fill a blank', () => {
+    expect(applyParsedReceiverFact('北京', '广东', 'input')).toBe('北京');
+    expect(applyParsedReceiverFact('', '广东', 'input')).toBe('广东');
+    expect(applyParsedReceiverFact('北京', '广东', 'paste')).toBe('广东');
+    expect(applyParsedReceiverFact('北京', null, 'paste')).toBe('北京');
+    expect(applyParsedReceiverFact(null, null, 'input')).toBe('');
+  });
+});
+
+describe('stripProvincePrefix', () => {
+  it('drops the province the structured address already carries', () => {
+    expect(stripProvincePrefix('上海市浦东新区世纪大道1号', '上海')).toBe('浦东新区世纪大道1号');
+    expect(stripProvincePrefix('浙江省杭州市西湖区测试路1号', '浙江')).toBe('杭州市西湖区测试路1号');
+    expect(stripProvincePrefix('广西壮族自治区南宁市青秀区', '广西')).toBe('南宁市青秀区');
+    expect(stripProvincePrefix('测试路1号', null)).toBe('测试路1号');
+    // A bare province name at the start may be a building or street name.
+    expect(stripProvincePrefix('广东大厦1号', '广东')).toBe('广东大厦1号');
+    expect(stripProvincePrefix('北京路88号', '北京')).toBe('北京路88号');
+  });
+});
+
+
+describe('pastedTextareaValue', () => {
+  function pasteEvent(text: string, current: string, start = current.length, end = start) {
+    return {
+      clipboardData: { getData: () => text },
+      currentTarget: { value: current, selectionStart: start, selectionEnd: end },
+    } as unknown as ClipboardEvent<HTMLTextAreaElement>;
+  }
+  it('normalizes clipboard CRLF to the LF the textarea value uses', () => {
+    expect(pastedTextareaValue(pasteEvent('张三\r\n13800000000\r\n', ''))).toBe('张三\n13800000000\n');
+    expect(pastedTextareaValue(pasteEvent('a\rb', ''))).toBe('a\nb');
+  });
+  it('inserts at the caret, replacing the selection', () => {
+    expect(pastedTextareaValue(pasteEvent('X', 'abcd', 1, 3))).toBe('aXd');
+    expect(pastedTextareaValue(pasteEvent('Y', 'ab', 2))).toBe('abY');
+  });
+});

@@ -1,3 +1,5 @@
+import { formatRate } from '@/lib/format/unit-price';
+import { reportWageLines } from '@/lib/salary/report-display';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -29,7 +31,7 @@ import Decimal from 'decimal.js';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
 import { formatMoney } from '@/lib/dashboard/format';
-import { formatRate } from '@/lib/format/unit-price';
+
 type PageProps = { params: Promise<{ id: string }> };
 
 const getWorkerPieceworkSalaryPageData = cache(
@@ -298,7 +300,7 @@ function OperationSettlementDetail({
           />
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          金额来自报工时已锁定的工价版本，本页不重算。
+          按报工和调整记录查看本人工资。
         </p>
         {settlement.paidAt ? (
           <p className="mt-1 text-xs text-muted-foreground">
@@ -329,7 +331,7 @@ function OperationSettlementDetail({
                   </Link>
                   <p className="worker-wrap-anywhere mt-1">
                     {OPERATION_LABELS[report.operation.operationType]}
-                    {report.entryType === ProductionReportEntryType.REVERSAL
+                    {report.entryType === ProductionReportEntryType.ADJUSTMENT ? ' · 人工调整' : report.entryType === ProductionReportEntryType.REVERSAL
                       ? ' · 冲正'
                       : ''}
                   </p>
@@ -337,9 +339,8 @@ function OperationSettlementDetail({
                     合格 {String(report.reportedCompletedQty)} · 缺陷{' '}
                     {String(report.defectQty)} · 返工 {String(report.reworkQty)}
                   </p>
-                  <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                    计薪 {String(report.chargeableQty)} {report.unit} × {formatRate(report.rate)} · 工价 v{report.priceBookVersion}
-                  </p>
+                  {reportWageLines({ ...report, operationType: report.operation.operationType, chargeableQty: String(report.chargeableQty), rate: String(report.rate), amount: String(report.amount) }).map((line, index) => <p key={index} className="mt-1 text-sm">{line}</p>)}
+                  <Link href={`/worker/reports/${report.id}`} className="inline-flex min-h-11 items-center text-sm underline">报工明细与问题反馈</Link>
                 </div>
                 <div className="ml-auto shrink-0 text-right">
                   <p className="font-sans tabular-nums font-medium">

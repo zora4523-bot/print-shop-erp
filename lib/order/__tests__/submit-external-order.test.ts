@@ -13,6 +13,7 @@ import {
   OrderSettlementType,
   OrderStatus,
 } from '../../../generated/prisma/enums';
+import { buildTrustedAdminItemPricingSnapshot } from '../admin-pricing-snapshot';
 import type { CreateOrderPriceSnapshot } from '../../price/create-order';
 import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '../../price/__tests__/fixtures/create-order-golden-fixtures';
 
@@ -1126,6 +1127,68 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.orderCustomerCharge.upsert).toHaveBeenCalledTimes(2);
   });
 
+  it('拒绝停用前保存的 120g 草稿，即使纸张仍为启用状态', async () => {
+    const order = draftOrder({ items: [item({
+      product: { paperMaterialId: 'paper-120' },
+      paperType: '120g珠光艳闪', paperWeightGsm: 120,
+    })] });
+    const tx = txFor(order, [{ id: 'paper-120', name: '120g珠光艳闪',
+      normalizedName: '120g珠光艳闪', specification: null, isActive: true, outOfStock: false }]);
+    await expect(finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient,
+      'order-1', 'sales-1', NOW)).rejects.toThrow('已缺货或停用');
+    expect(mocks.readPublishedSnapshot).not.toHaveBeenCalled();
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
+  });
+
+  it('内销工单的配置外款式不做纸张目录校验，进入人工核价而不是被拦', async () => {
+    const order = draftOrder({
+      settlementType: OrderSettlementType.INTERNAL_SALES,
+      items: [
+        item({
+          productId: null,
+          product: null,
+          paperType: null,
+          paperWeightGsm: null,
+          specification: null,
+          crafts: [],
+          manualQuoteReason: '客供纸与特殊工艺',
+        }),
+      ],
+      packagingGroups: [
+        {
+          id: 'pack-1',
+          sequence: 1,
+          name: '单款',
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          actualBagCount: 125,
+          lines: [{ orderItemId: 'item-1', unitsPerBag: 8 }],
+        },
+      ],
+      shipments: [
+        {
+          id: 'shipment-1',
+          sequence: 1,
+          receiverName: '收件人',
+          receiverPhone: null,
+          destinationProvince: '上海',
+          weightKg: null,
+          lines: [{ orderItemId: 'item-1', quantity: 1_000 }],
+        },
+      ],
+    });
+    const tx = txFor(order, []);
+    const outcome = await finalizeExternalOrderQuoteInTx(
+      tx as unknown as Prisma.TransactionClient,
+      'order-1',
+      'cs-1',
+      NOW,
+    ).catch((error: unknown) => error);
+    if (outcome instanceof Error) {
+      expect(outcome.message).not.toMatch(/纸张/);
+    }
+    expect(mocks.readPublishedSnapshot).toHaveBeenCalled();
+  });
+
   it('纸张缺货时在读价目前拒绝提交', async () => {
     const order = draftOrder({
       items: [
@@ -1345,6 +1408,40 @@ it.each(['receiverName', 'receiverPhone'])('旧草稿提交前重新验证额外
   await expect(finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient, order.id, 'admin', NOW, null)).rejects.toThrow('地址 2：请填写');
   expect(mocks.appendRevision).not.toHaveBeenCalled();
   expect(tx.order.update).not.toHaveBeenCalled();
+});
+
+it('一次性预览 token 只对从未报价的草稿放行，驳回重提必须确认当前管理员价', async () => {
+  // The create preview cannot include persisted admin-price snapshots, so its
+  // token omits them; the finalizer accepts it on the first submit of a DRAFT.
+  // A REJECTED re-submit must not wave through an admin price that changed
+  // after the preview was taken.
+  const adminItem = item({ orderId: 'order-1', pack: 8, printColorsKnown: true, unitPrice: '0.2000', fixedFee: '0.00', subtotal: '200.00', priceOverrideReason: null, craft: null });
+  const singleItemOrder = (extra: Record<string, unknown> = {}, priced = true) => draftOrder({
+    items: [priced
+      ? { ...adminItem, pricingSnapshot: buildTrustedAdminItemPricingSnapshot({
+          previous: null, now: NOW, actorId: 'owner-1', previousPriceRevision: 0,
+          item: { ...adminItem, orderId: 'order-1' } as never,
+        }) }
+      : adminItem],
+    packagingGroups: [{ id: 'pack-1', sequence: 1, name: '单款', mode: OrderPackagingMode.SINGLE_STYLE, actualBagCount: 125, lines: [{ orderItemId: 'item-1', unitsPerBag: 8 }] }],
+    shipments: [{ id: 'shipment-1', sequence: 1, receiverName: '收件人', receiverPhone: '13800138000', destinationProvince: '上海', weightKg: null, lines: [{ orderItemId: 'item-1', quantity: 1_000 }] }],
+    ...extra,
+  });
+
+  // Identical pure facts, no admin price: its token is exactly the shape the
+  // create preview produces for the admin-priced order.
+  const previewShapedToken = await currentQuoteToken(singleItemOrder({}, false));
+  expect(previewShapedToken).toBeTruthy();
+
+  const draftOutcome = await finalizeExternalOrderQuoteInTx(
+    txFor(singleItemOrder()) as unknown as Prisma.TransactionClient, 'order-1', 'sales-1', NOW, previewShapedToken,
+  ).catch((error: unknown) => error);
+  expect(draftOutcome).not.toBeInstanceOf(ExternalOrderQuoteChangedError);
+
+  const rejected = singleItemOrder({ status: OrderStatus.REJECTED, quotedPricingRevisionId: 'old-revision' });
+  await expect(
+    finalizeExternalOrderQuoteInTx(txFor(rejected) as unknown as Prisma.TransactionClient, 'order-1', 'sales-1', NOW, previewShapedToken),
+  ).rejects.toBeInstanceOf(ExternalOrderQuoteChangedError);
 });
 
 it('rejected orders with a previous quote reprice instead of reusing it', async () => {

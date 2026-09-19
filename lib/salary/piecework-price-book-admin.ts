@@ -10,6 +10,7 @@ import {
 } from '../../generated/prisma/enums';
 import { writeAuditLogInTx, type AuditActor } from '../audit-log';
 import { db } from '../db';
+import { databaseClockNow } from '../background-jobs/clock';
 import {
   PIECEWORK_OPERATION_TYPES,
   PIECEWORK_RATE_UNITS,
@@ -25,6 +26,8 @@ export type PieceworkPriceBookManifestRule = {
   operationType: PieceworkOperationTypeValue;
   unit: PieceworkRateUnitValue;
   amount: string | null;
+  smallOrderAmount?: string;
+  setupAmount?: string;
 };
 
 export type PieceworkPriceBookManifest = {
@@ -41,6 +44,8 @@ type StoredPieceworkRule = {
   operationType: PieceworkOperationTypeValue;
   unit: PieceworkRateUnitValue;
   amount: Decimal | string | null;
+  smallOrderAmount?: Decimal | string | null;
+  setupAmount?: Decimal | string | null;
 };
 
 export type PieceworkPublicationPreview = {
@@ -64,6 +69,8 @@ export type PieceworkPublicationReceipt = {
     operationType: PieceworkOperationTypeValue;
     unit: PieceworkRateUnitValue;
     rate: string;
+    smallOrderAmount?: string;
+    setupAmount?: string;
   }>;
   sourceSha256: string;
   manifestSha256: string;
@@ -77,6 +84,8 @@ export type PublishPieceworkPriceBookInput = {
   /** 版本化 manifest 文件的原始字节 SHA-256。 */
   sourceSha256: string;
   actor: AuditActor;
+  /** Resolve the effective instant under the publication lock; retries reuse it. */
+  effectiveImmediately?: boolean;
 };
 
 export class PieceworkPriceBookAdminError extends Error {
@@ -149,12 +158,13 @@ export function parsePieceworkPriceBookManifest(
   const rules = value.rules.map((candidate) => {
     if (
       !isRecord(candidate) ||
-      !hasExactKeys(candidate, ['operationType', 'unit', 'amount']) ||
+      (!hasExactKeys(candidate, ['operationType', 'unit', 'amount']) && !hasExactKeys(candidate, ['operationType', 'unit', 'amount', 'smallOrderAmount', 'setupAmount'])) ||
       !PIECEWORK_OPERATION_TYPES.includes(
         candidate.operationType as PieceworkOperationTypeValue,
       ) ||
       !PIECEWORK_RATE_UNITS.includes(candidate.unit as PieceworkRateUnitValue) ||
-      (candidate.amount !== null && typeof candidate.amount !== 'string')
+      (candidate.amount !== null && typeof candidate.amount !== 'string') ||
+      ('smallOrderAmount' in candidate && (typeof candidate.smallOrderAmount !== 'string' || typeof candidate.setupAmount !== 'string'))
     ) {
       throw new PieceworkPriceBookAdminError(
         '计件工价 manifest 规则结构非法',
@@ -164,6 +174,7 @@ export function parsePieceworkPriceBookManifest(
       operationType: candidate.operationType as PieceworkOperationTypeValue,
       unit: candidate.unit as PieceworkRateUnitValue,
       amount: candidate.amount as string | null,
+      ...(typeof candidate.smallOrderAmount === 'string' && typeof candidate.setupAmount === 'string' ? { smallOrderAmount: candidate.smallOrderAmount, setupAmount: candidate.setupAmount } : {}),
     };
   });
 
@@ -195,6 +206,7 @@ function canonicalRules(
     .map((rule) => ({
       operationType: rule.operationType,
       unit: rule.unit,
+      ...(rule.smallOrderAmount !== undefined && rule.setupAmount !== undefined ? { smallOrderAmount: normalizeRate(rule.smallOrderAmount) ?? rule.smallOrderAmount, setupAmount: normalizeRate(rule.setupAmount) ?? rule.setupAmount } : {}),
       amount:
         rule.amount === null ? null : (normalizeRate(rule.amount) ?? rule.amount),
     }));
@@ -247,8 +259,8 @@ export function validatePieceworkManifestForPublication(
   ) {
     issues.push('publishNote 长度必须为 2–500');
   }
-  if (manifest.rules.length < 3 || manifest.rules.length > 4) {
-    issues.push('必须提供三条基础工价，可增加一条按盒装盒工价');
+  if (manifest.rules.length < 2 || manifest.rules.length > 4) {
+    issues.push('必须提供局部与专版烫金工价，包装工价可选');
   }
 
   const seen = new Set<string>();
@@ -257,6 +269,9 @@ export function validatePieceworkManifestForPublication(
       issues.push(`${rule.operationType} 存在重复规则`);
     }
     seen.add(`${rule.operationType}:${rule.unit}`);
+    if (rule.smallOrderAmount !== undefined || rule.setupAmount !== undefined) {
+      if (rule.operationType === 'PACKING' || rule.smallOrderAmount === undefined || rule.setupAmount === undefined || normalizeRate(rule.smallOrderAmount) === null || normalizeRate(rule.setupAmount) === null) issues.push('烫金小单工资与装版费须同时填写有效金额');
+    }
     if (PIECEWORK_UNIT_BY_OPERATION[rule.operationType] !== rule.unit && !(rule.operationType === 'PACKING' && rule.unit === 'PER_BOX')) {
       issues.push(`${rule.operationType} 必须使用 ${PIECEWORK_UNIT_BY_OPERATION[rule.operationType]}`);
     }
@@ -266,7 +281,7 @@ export function validatePieceworkManifestForPublication(
       issues.push(`${rule.operationType} 金额必须是最多 4 位小数的非负数`);
     }
   }
-  for (const operationType of PIECEWORK_OPERATION_TYPES) {
+  for (const operationType of PIECEWORK_OPERATION_TYPES.filter((type) => type !== 'PACKING')) {
     if (!seen.has(`${operationType}:${PIECEWORK_UNIT_BY_OPERATION[operationType]}`)) issues.push(`缺少 ${operationType} 规则`);
   }
   return [...new Set(issues)];
@@ -292,7 +307,9 @@ function storedRulesMatch(
     return (
       actual?.unit === expected.unit &&
       actual.amount !== null &&
-      new Decimal(actual.amount).toFixed(4) === expected.amount
+      new Decimal(actual.amount).toFixed(4) === expected.amount &&
+      (actual.smallOrderAmount == null ? undefined : new Decimal(actual.smallOrderAmount).toFixed(4)) === expected.smallOrderAmount &&
+      (actual.setupAmount == null ? undefined : new Decimal(actual.setupAmount).toFixed(4)) === expected.setupAmount
     );
   });
 }
@@ -307,16 +324,18 @@ export async function previewPieceworkPriceBookPublication(
     where: { version: manifest.priceBookVersion },
     include: {
       rules: {
-        select: { id: true, operationType: true, unit: true, amount: true },
+        select: { id: true, operationType: true, unit: true, amount: true, smallOrderAmount: true, setupAmount: true },
       },
     },
   });
-  const latest = !book ? await db.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } }) : null;
-  if (!book && (!latest || manifest.priceBookVersion !== latest.version + 1 || latest.status !== 'PUBLISHED')) issues.push('新版本必须紧接当前已发布版本');
+  const latest = !book ? await db.pieceworkPriceBook.findFirst({ where: { workerId: null }, orderBy: { version: 'desc' } }) : null;
+  const highest = !book ? await db.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } }) : null;
+  if (!book && (!latest || manifest.priceBookVersion !== (highest?.version ?? 0) + 1 || latest.status !== 'PUBLISHED')) issues.push('新版本必须紧接当前已发布版本');
+  if (book?.workerId) throw new PieceworkPriceBookAdminError('个人工价请在师傅账号中维护');
   if (book?.status === PieceworkPriceBookStatus.PUBLISHED) {
     issues.push('计件工价簿已发布；apply 只能做同 manifest 幂等复放');
   }
-  if (book && ![3, 4].includes(book.rules.length)) issues.push('草稿工价规则数量不正确');
+  if (book && ![2, 3, 4].includes(book.rules.length)) issues.push('草稿工价规则数量不正确');
 
   return {
     bookId: book?.id ?? null,
@@ -339,10 +358,11 @@ function receiptRules(manifest: PieceworkPriceBookManifest) {
     operationType: rule.operationType,
     unit: rule.unit,
     rate: rule.amount,
+    ...(rule.smallOrderAmount !== undefined ? { smallOrderAmount: rule.smallOrderAmount, setupAmount: rule.setupAmount } : {}),
   }));
 }
 
-async function assertActiveAdmin(
+export async function assertActivePieceworkAdmin(
   tx: Prisma.TransactionClient,
   submitted: AuditActor,
 ): Promise<AuditActor> {
@@ -375,9 +395,11 @@ async function assertActiveAdmin(
 
 export async function publishPieceworkPriceBook(
   input: PublishPieceworkPriceBookInput,
-  now: Date = new Date(),
+  now?: Date,
 ): Promise<PieceworkPublicationReceipt> {
-  const issues = validatePieceworkManifestForPublication(input.manifest);
+  const issues = validatePieceworkManifestForPublication(input.effectiveImmediately
+    ? { ...input.manifest, effectiveFrom: (now ?? new Date()).toISOString() }
+    : input.manifest);
   if (issues.length > 0) {
     throw new PieceworkPriceBookAdminError(issues.join('；'));
   }
@@ -388,8 +410,6 @@ export async function publishPieceworkPriceBook(
     throw new PieceworkPriceBookAdminError('manifest 原始文件 SHA-256 非法');
   }
 
-  const effectiveFrom = new Date(input.manifest.effectiveFrom!);
-  const manifestSha256 = calculatePieceworkManifestSha256(input.manifest);
   const normalizedRules = manifestRulesWithNormalizedAmounts(input.manifest);
   const ruleSetSha256 = calculatePieceworkRuleSetSha256(normalizedRules);
 
@@ -398,26 +418,38 @@ export async function publishPieceworkPriceBook(
     await tx.$queryRaw`SELECT "id" FROM "PieceworkPriceBook" WHERE "version" = ${input.manifest.priceBookVersion} FOR UPDATE`;
     await tx.$queryRaw`SELECT rule."id" FROM "PieceworkPriceRule" rule INNER JOIN "PieceworkPriceBook" book ON book."id" = rule."priceBookId" WHERE book."version" = ${input.manifest.priceBookVersion} FOR UPDATE OF rule`;
 
-    const actor = await assertActiveAdmin(tx, input.actor);
+    const actor = await assertActivePieceworkAdmin(tx, input.actor);
     let book = await tx.pieceworkPriceBook.findUnique({
       where: { version: input.manifest.priceBookVersion },
       include: {
         rules: {
-          select: { id: true, operationType: true, unit: true, amount: true },
+          select: { id: true, operationType: true, unit: true, amount: true, smallOrderAmount: true, setupAmount: true },
         },
       },
     });
+    if (book?.workerId) throw new PieceworkPriceBookAdminError('个人工价请在师傅账号中维护');
     if (!book) {
-      const latest = await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } });
-      if (!latest || latest.status !== 'PUBLISHED' || latest.version + 1 !== input.manifest.priceBookVersion || latest.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
+      const latest = await tx.pieceworkPriceBook.findFirst({ where: { workerId: null }, orderBy: { version: 'desc' } });
+      const highest = await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } });
+      if (!latest || latest.status !== 'PUBLISHED' || (highest?.version ?? 0) + 1 !== input.manifest.priceBookVersion || latest.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
         throw new PieceworkPriceBookAdminError('当前工价版本已变化，请重新预览');
       }
       book = await tx.pieceworkPriceBook.create({
         data: { version: input.manifest.priceBookVersion, updatedAt: input.expectedDraftUpdatedAt,
           rules: { create: normalizedRules.map((rule) => ({ operationType: rule.operationType, unit: rule.unit, amount: null })) } },
-        include: { rules: { select: { id: true, operationType: true, unit: true, amount: true } } },
+        include: { rules: { select: { id: true, operationType: true, unit: true, amount: true, smallOrderAmount: true, setupAmount: true } } },
       });
     }
+
+    const publicationNow = now ?? await databaseClockNow(tx);
+    const effectiveFrom = input.effectiveImmediately
+      ? (book.status === PieceworkPriceBookStatus.PUBLISHED ? book.effectiveFrom! : publicationNow)
+      : new Date(input.manifest.effectiveFrom!);
+    // Keep scheduled CLI manifests byte-semantically compatible with existing
+    // publication hashes; only immediate publication needs a resolved time.
+    const manifestSha256 = calculatePieceworkManifestSha256(input.effectiveImmediately
+      ? { ...input.manifest, effectiveFrom: effectiveFrom.toISOString() }
+      : input.manifest);
 
     if (book.status === PieceworkPriceBookStatus.PUBLISHED) {
       const exactReplay =
@@ -458,11 +490,11 @@ export async function publishPieceworkPriceBook(
       };
     }
 
-    if (effectiveFrom < now) {
+    if (effectiveFrom < publicationNow) {
       throw new PieceworkPriceBookAdminError('计件工价簿不能追溯发布');
     }
     if (book.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
-      throw new PieceworkPriceBookAdminError('计件工价草稿已变更，请重新 dry-run');
+      throw new PieceworkPriceBookAdminError('计件工价草稿已变更，请重新加载后核对');
     }
     if (book.rules.length === 3 && normalizedRules.some((rule) => rule.unit === 'PER_BOX')) {
       const added = await tx.pieceworkPriceRule.create({ data: {
@@ -492,6 +524,16 @@ export async function publishPieceworkPriceBook(
           `草稿 ${expected.operationType} 已有不同金额，禁止覆盖`,
         );
       }
+      for (const column of ['smallOrderAmount', 'setupAmount'] as const) {
+        const stored = current[column];
+        if (stored != null && new Decimal(stored).toFixed(4) !== expected[column]) throw new PieceworkPriceBookAdminError('草稿小单工资或装版费不同，请重新核对');
+      }
+      if (current.smallOrderAmount == null && expected.smallOrderAmount !== undefined && expected.setupAmount !== undefined) {
+        await tx.pieceworkPriceRule.updateMany({
+          where: { id: current.id, smallOrderAmount: null, setupAmount: null },
+          data: { smallOrderAmount: new Prisma.Decimal(expected.smallOrderAmount), setupAmount: new Prisma.Decimal(expected.setupAmount) },
+        });
+      }
       if (current.amount === null) {
         const updated = await tx.pieceworkPriceRule.updateMany({
           where: { id: current.id, amount: null },
@@ -504,10 +546,10 @@ export async function publishPieceworkPriceBook(
     }
 
     const previous = await tx.pieceworkPriceBook.findFirst({
-      where: { status: 'PUBLISHED', effectiveTo: null }, orderBy: { version: 'desc' },
+      where: { workerId: null, status: 'PUBLISHED', effectiveTo: null }, orderBy: { version: 'desc' },
     });
     if (previous) {
-      if (!previous.effectiveFrom || previous.effectiveFrom >= effectiveFrom || previous.version + 1 !== book.version) {
+      if (!previous.effectiveFrom || previous.effectiveFrom >= effectiveFrom || previous.version >= book.version) {
         throw new PieceworkPriceBookAdminError('生效时间必须晚于当前工价版本');
       }
       await tx.pieceworkPriceBook.update({ where: { id: previous.id }, data: { effectiveTo: effectiveFrom } });
@@ -528,7 +570,7 @@ export async function publishPieceworkPriceBook(
         ruleSetSha256,
         publishNote: input.manifest.publishNote.trim(),
         publishedById: actor.id,
-        publishedAt: now,
+        publishedAt: publicationNow,
       },
     });
     if (published.count !== 1) {

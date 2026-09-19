@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from '@/lib/rules/paper-availability';
 import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
 import { calculateCreateOrderQuoteFromCatalogInTx } from '@/lib/order/create-order-quote-service';
 import { presentCreateOrderPlateFee } from '@/lib/order/create-order-quote-presentation';
@@ -12,6 +13,9 @@ export async function calculateWorkbenchItem(
   item: WorkbenchItemQuoteInput['item'],
   markup: number,
 ): Promise<WorkbenchQuoteResult> {
+  if (hasRetiredPaperItem([item])) {
+    return { status: 'error', message: RETIRED_PAPER_MESSAGE };
+  }
   const calculated = await db.$transaction((tx) =>
     calculateCreateOrderQuoteFromCatalogInTx(tx, {
       now: new Date(),

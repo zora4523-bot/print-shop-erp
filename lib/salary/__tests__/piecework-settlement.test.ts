@@ -58,6 +58,7 @@ function report(
   return {
     id,
     amount: new Decimal(amount),
+    priceBook: { rules: [] },
     entryType: amount.startsWith('-') ? 'REVERSAL' : 'REPORT',
     reportedAt: new Date('2026-08-27T04:00:00.000Z'),
     operation: { id: `operation-${id}`, orderId, operationType },
@@ -366,4 +367,25 @@ describe('markPieceworkSettlementPaid', () => {
       }),
     );
   });
+});
+
+it('待人工核定的多人提成不能进入结算', async () => {
+  const row = report('partial', '24.00', 'PARTIAL');
+  dbMock.productionReport.findMany.mockResolvedValue([{ ...row, operation: { ...row.operation, payrollReviewRequired: true } }]);
+  await expect(lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-08-27', actor: ACTOR })).rejects.toThrow('待人工核定');
+  expect(dbMock.pieceworkSettlement.create).not.toHaveBeenCalled();
+});
+
+it.each([['PENDING', 'PARTIAL', 'PER_PASS'], ['IN_PROGRESS', 'PARTIAL', 'PER_PASS'], ['IN_PROGRESS', 'FULL', 'PER_PIECE']] as const)('分档烫金工序 %s %s 时禁止提前锁定固定费', async (status, operationType, unit) => {
+  const row = report('foil', '24.00', operationType);
+  dbMock.productionReport.findMany.mockResolvedValue([{ ...row, unit, priceBook: { rules: [{ operationType, unit, smallOrderAmount: '12' }] }, operation: { ...row.operation, status, payrollReviewRequired: false } }]);
+  await expect(lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-08-27', actor: ACTOR })).rejects.toThrow('尚未结束');
+  expect(dbMock.pieceworkSettlement.create).not.toHaveBeenCalled();
+});
+
+it.each(['COMPLETED', 'CANCELLED'])('已结束且已核定的分档工序 %s 可结算', async (status) => {
+  const row = report('partial', '24.00', 'PARTIAL');
+  dbMock.productionReport.findMany.mockResolvedValue([{ ...row, unit: 'PER_PASS', priceBook: { rules: [{ operationType: 'PARTIAL', unit: 'PER_PASS', smallOrderAmount: '12' }] }, operation: { ...row.operation, status, payrollReviewRequired: false } }]);
+  await lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-08-27', actor: ACTOR });
+  expect(dbMock.pieceworkSettlement.create).toHaveBeenCalled();
 });

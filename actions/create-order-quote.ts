@@ -197,9 +197,24 @@ export async function quoteInternalCreateOrderAction(
   const packaging = quoteCreateOrderPackagingGroupsSchema.safeParse({
     groups: raw.packagingGroups,
   });
-  const shipmentQuantities = z.array(z.array(z.number().int().min(0).max(9_999_999)).max(MAX_ORDER_ITEMS_PER_ORDER)).min(1).max(10).optional().safeParse(raw.shipmentQuantities);
+  // Internal previews price delivery from the same published logistics book
+  // as external sales; the browser only supplies business facts.
+  const logisticsRaw = isRecord(raw.logistics) ? raw.logistics : {};
+  const authoritativeChargeItems = items.success
+    ? items.data.items.map((item, index) => ({
+        itemKey: String(index + 1),
+        quantity: item.quantity,
+        paperWeightGsm: item.paperWeightGsm,
+        paperType: item.paperType,
+        productStructure: item.productStructure,
+      }))
+    : undefined;
+  const logistics = quoteExternalOrderChargesSchema.safeParse({
+    ...logisticsRaw,
+    items: authoritativeChargeItems,
+  });
   const issues = [
-    ...(shipmentQuantities.success ? [] : prefixedIssues('shipmentQuantities', shipmentQuantities.error.issues)),
+    ...(logistics.success ? [] : prefixedIssues('logistics', logistics.error.issues)),
     ...(factsKey.success
       ? []
       : prefixedIssues('factsKey', factsKey.error.issues)),
@@ -226,7 +241,7 @@ export async function quoteInternalCreateOrderAction(
     !orderItemCount.success ||
     !items.success ||
     !packaging.success ||
-    !shipmentQuantities.success
+    !logistics.success
   ) {
     return { status: 'invalid', fieldErrors: { _: ['报价数据格式非法'] } };
   }
@@ -238,7 +253,7 @@ export async function quoteInternalCreateOrderAction(
       items: items.data.items,
       orderItemCount: orderItemCount.data,
       packagingGroups: packaging.data.groups,
-      shipmentQuantities: shipmentQuantities.data,
+      logistics: logistics.data,
     };
     const quote = await quoteInternalCreateOrder(input);
     return { status: 'success', quote };
@@ -250,5 +265,21 @@ export async function quoteInternalCreateOrderAction(
           ? `报价失败：${error.message}`
           : '报价失败，请检查价目配置后重试',
     };
+  }
+}
+
+/** Sample purposes share the create permission and the published price reader. */
+export async function quoteSampleOrderAction(raw: unknown): Promise<
+  | { status: 'success'; quote: import('@/lib/order/sample-order').SampleOrderQuote }
+  | { status: 'error'; message: string }
+> {
+  await requirePermission('order:create');
+  try {
+    const { quoteSampleOrder } = await import('@/lib/order/sample-order');
+    return { status: 'success', quote: await quoteSampleOrder(raw) };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { status: 'error', message: error.issues.map((issue) => issue.message).join('；') };
+    if (error instanceof Error && ['SampleOrderError', 'PublishedCreateOrderPriceAdapterError'].includes(error.name)) return { status: 'error', message: error.message };
+    throw error;
   }
 }

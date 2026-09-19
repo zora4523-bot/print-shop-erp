@@ -15,7 +15,8 @@ import {
 import { CraftsTable } from '@/components/business/craft/CraftsTable';
 import { ToggleActiveButton } from '@/components/business/craft/ToggleActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { parsePositiveInt, type TableHrefParams } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -33,6 +34,7 @@ export type CraftCatalogListProps = {
 
 export type CraftCatalogDetailProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
   routeBase: CraftRouteBase;
 };
 
@@ -139,10 +141,12 @@ export async function NewCraftCatalogItem({
 
 export async function EditCraftCatalogItem({
   params,
+  searchParams,
   routeBase,
 }: CraftCatalogDetailProps) {
   await requirePermission('dict:craft:manage');
   const { id } = await params;
+  const receipt = readReceipt(await searchParams);
   const craft = await getCraftSummary(id);
   if (!craft) notFound();
   const isRetired = isRetiredCraft(craft);
@@ -150,6 +154,7 @@ export async function EditCraftCatalogItem({
 
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun="工艺" />
       <RuleCenterPageHeader
         title={`编辑工艺：${craft.name}`}
         effect="immediate"

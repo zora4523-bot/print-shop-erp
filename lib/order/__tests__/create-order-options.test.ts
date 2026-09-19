@@ -281,3 +281,11 @@ describe('external create-order options', () => {
     expect(txMock.$executeRaw).not.toHaveBeenCalled();
   });
 });
+
+it('removes retired 120g products and materials from the shared admin/sales catalog', async () => {
+  txMock.product.findMany.mockResolvedValue([...products, { ...products[0], id: 'retired-product', code: 'RETIRED', paperType: '120g珠光艳闪', weight: null, paperMaterialId: null }]);
+  txMock.material.findMany.mockImplementation(async (args: { where: { category: MaterialCategory } }) => args.where.category === MaterialCategory.PAPER ? [...papers, { ...papers[0], id: 'retired-paper', code: 'RETIRED-PAPER', name: '120G 珠光艳闪', specification: '' }] : foilColors);
+  const result = await readExternalCreateOrderOptions(txMock as never);
+  expect(result.products.some(row => row.id === 'retired-product')).toBe(false);
+  expect(result.papers.some(row => row.id === 'retired-paper')).toBe(false);
+});

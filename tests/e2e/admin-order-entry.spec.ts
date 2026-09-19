@@ -177,7 +177,8 @@ test.describe("admin order entry", () => {
     await page
       .getByRole("textbox", { name: "工单名称", exact: true })
       .fill(`工厂直单 ${Date.now()}`);
-    await page.getByRole("button", { name: /复制当前/ }).click();
+    // 分层建单（64c9a350）没有「复制当前」：「＋ 增加设计款」同样复制当前款并切过去。
+    await page.getByRole("button", { name: "＋ 增加设计款", exact: true }).click();
     await page
       .getByRole("group", { name: "包装方式", exact: true })
       .getByRole("button", { name: "混装", exact: true })
@@ -189,8 +190,8 @@ test.describe("admin order entry", () => {
       .getByRole("spinbutton", { name: "每包数量", exact: true })
       .fill("6");
     await page
-      .getByRole("navigation", { name: "款式", exact: true })
-      .getByRole("button")
+      .getByRole("tablist", { name: "设计款", exact: true })
+      .getByRole("tab")
       .first()
       .click();
     await page

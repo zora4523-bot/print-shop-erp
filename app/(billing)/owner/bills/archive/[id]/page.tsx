@@ -5,18 +5,25 @@ import { getAdminBillDetail } from '@/lib/bill';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { buttonVariants } from '@/components/ui/button';
-import { TableEmptyState, TableScrollArea } from '@/components/ui-business';
+import { TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { readReceipt } from '@/lib/admin/receipt';
 import { BillStatusBadge } from '@/components/business/bill/BillStatusBadge';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
-export default async function LegacyBillArchiveDetailPage({ params }: PageProps) {
+export default async function LegacyBillArchiveDetailPage({ params, searchParams }: PageProps) {
   await requirePermission('bill:view:all');
   const { id } = await params;
   const bill = await getAdminBillDetail(id);
   if (!bill) notFound();
+  const receipt = readReceipt(await searchParams);
+
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} messages={{ issued: () => ({ title: '账单已出账', description: '账单已发出，进入应收跟进。' }) }} />
       <div>
         <Link href="/owner/bills/archive" className="text-sm text-muted-foreground hover:underline">
           ← 历史账单

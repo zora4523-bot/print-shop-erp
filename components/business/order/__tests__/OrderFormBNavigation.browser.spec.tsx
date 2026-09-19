@@ -10,7 +10,7 @@ import { OrderFormB, type OrderFormBProps } from '../order-form-b/ExternalSalesO
 
 vi.mock('next/link', () => ({ default: (props: ComponentProps<'a'>) => <a {...props} /> }));
 vi.mock('next/image', () => ({ default: ({ alt }: { alt: string }) => <span>{alt}</span> }));
-vi.mock('../design-upload-client', () => ({ prepareDesignFile: vi.fn() }));
+
 vi.mock('@/actions/design-upload', () => ({ recordDesignUploadAction: vi.fn(), signDesignUploadAction: vi.fn() }));
 
 let host: HTMLDivElement;
@@ -347,4 +347,69 @@ it('administrator gap targets select the affected style and focus its quantity f
   await expect.poll(() => document.activeElement?.id.endsWith('-quantity')).toBe(true);
   expect(selectedStyle().textContent).toContain('2.');
   expect(scroll).toHaveBeenCalledTimes(1);
+});
+
+function CdrFixture() {
+  const [files, setFiles] = useState<OrderFormBProps['pendingDesigns']>({});
+  const [active, setActive] = useState(0);
+  return <OrderFormB {...baseProps} items={[baseItem, baseItem]}
+    itemFields={[{ id: 'one' }, { id: 'two' }]} activeIndex={active}
+    onActiveIndexChange={setActive} onRemove={noop} pendingDesigns={files}
+    onPendingDesignsChange={(queue) => setFiles((old) => ({ ...old, [active ? 'two' : 'one']: queue }))}
+  />;
+}
+for (const theme of ['light', 'dark']) for (const width of [375, 393, 768, 1024, 1280, 1920]) {
+  it(`${width} ${theme}: CDR multi-selection appends, validates, drops and removes individual files`, async () => {
+    await page.viewport(width, 900);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<CdrFixture />));
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="第 1 款 CDR 文件"]')!;
+    expect(input.multiple).toBe(true);
+    await expect.element(page.getByText('可多选或拖放多个文件', { exact: true })).toBeVisible();
+    const select = (names: string[]) => {
+      const transfer = new DataTransfer();
+      names.forEach((name) => transfer.items.add(new File(['content'], name, { type: 'application/octet-stream' })));
+      input.files = transfer.files;
+      flushSync(() => input.dispatchEvent(new Event('change', { bubbles: true })));
+    };
+    select(['front.cdr', 'back.cdr']);
+    select(['detail.cdr', 'invalid.txt']);
+    for (const name of ['front.cdr', 'back.cdr', 'detail.cdr']) expect(host.querySelector(`[title="${name}"]`)).not.toBeNull();
+    expect(host.textContent).toContain('invalid.txt：');
+    const transfer = new DataTransfer();
+    for (const name of ['drop-one.cdr', 'drop-two.cdr']) transfer.items.add(new File(['cdr'], name));
+    const drop = host.querySelector('button[aria-label="拖放或选择第 1 款 CDR 文件"]')!;
+    flushSync(() => drop.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: transfer })));
+    expect(host.querySelector('[title="drop-two.cdr"]')).not.toBeNull();
+    await page.getByRole('button', { name: '移除第 1 款 CDR 文件 back.cdr', exact: true }).click();
+    expect(host.querySelector('[title="back.cdr"]')).toBeNull();
+    expect(host.querySelector('[title="front.cdr"]')).not.toBeNull();
+    await layoutReady();
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    const remove = host.querySelector('button[aria-label="移除第 1 款 CDR 文件 front.cdr"]')!;
+    expect(remove.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    expect(await commands.checkShellAccessibility('[data-testid="navigation-fixture"]')).toEqual([]);
+  });
+}
+
+it('long fee rail stays scrollable in document flow and short rail can stick', async () => {
+  await page.viewport(1280, 800);
+  const submit = vi.fn();
+  const renderRail = (height: number) => flushSync(() => root.render(
+    <OrderFormB {...baseProps} items={[baseItem]} itemFields={[{ id: 'rail-item' }]}
+      activeIndex={0} onActiveIndexChange={noop} onRemove={noop}
+      rail={<div style={{ height, display: 'flex', alignItems: 'flex-end' }}>
+        <Button onClick={submit}>核对并创建</Button>
+      </div>} />,
+  ));
+  renderRail(1200);
+  await layoutReady();
+  const rail = host.querySelector<HTMLElement>('[data-slot="order-form-rail"]')!;
+  await expect.poll(() => getComputedStyle(rail).position).toBe('static');
+  await page.getByRole('button', { name: '核对并创建', exact: true }).click();
+  expect(submit).toHaveBeenCalledOnce();
+  window.scrollTo(0, 0);
+  renderRail(100);
+  await expect.poll(() => getComputedStyle(rail).position).toBe('sticky');
+  expect(rail.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
 });

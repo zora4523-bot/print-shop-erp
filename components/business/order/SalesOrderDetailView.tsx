@@ -1,3 +1,4 @@
+import { OrderPurposeBadge } from './OrderPurposeBadge';
 import { packagingModeLabel, packagingUnit } from '@/lib/order/packaging-mode';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
@@ -43,10 +44,12 @@ import { SalesOrderRefreshButton } from './SalesOrderRefreshButton';
 
 function SalesOrderChangeRequestSection({
   catalogProducts,
+  foilColorNames,
   canRequestCancellation,
   order,
 }: {
   catalogProducts: OrderChangeCatalogProduct[];
+  foilColorNames?: readonly string[];
   canRequestCancellation: boolean;
   order: SalesOrderDetail;
 }) {
@@ -62,6 +65,7 @@ function SalesOrderChangeRequestSection({
         </p>
       </div>
       <OrderChangeRequestForm
+              foilColorNames={foilColorNames}
               hasPackagingGroups={order.packagingGroups.length > 0}
         promisedDate={order.promisedDate?.slice(0, 10) ?? null}
         orderId={order.id}
@@ -102,10 +106,12 @@ function SalesOrderChangeRequestSection({
 
 export function SalesOrderDetailView({
   catalogProducts,
+  foilColorNames,
   order,
   editForm,
 }: {
   catalogProducts: OrderChangeCatalogProduct[];
+  foilColorNames?: readonly string[];
   order: SalesOrderDetail;
   editForm?: ReactNode;
 }) {
@@ -119,7 +125,7 @@ export function SalesOrderDetailView({
     order.status === OrderStatus.SHIPPED &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
   const canToggleSfCollect =
-    !pendingChangeRequest && canEditOrderSfCollect(order.status) && !isFinalizedExternalShipment;
+    !pendingChangeRequest && order.purpose !== 'PROOF' && canEditOrderSfCollect(order.status) && !isFinalizedExternalShipment;
   const canEditDesigns =
     !pendingChangeRequest && (order.status === OrderStatus.DRAFT || order.status === OrderStatus.REJECTED);
   const canRequestModify =
@@ -143,6 +149,7 @@ export function SalesOrderDetailView({
                 {order.customName?.trim() || '未命名工单'}
               </h1>
               <SalesOrderStatusBadge status={order.status} />
+              <OrderPurposeBadge purpose={order.purpose} />
               {order.isUrgent ? (
                 <UrgentBadge />
               ) : null}
@@ -205,7 +212,7 @@ export function SalesOrderDetailView({
               />
             ) : null}
             {!pendingChangeRequest && (order.status === OrderStatus.DRAFT || order.status === OrderStatus.REJECTED) ? (
-              <SubmitOrderButton orderId={order.id} />
+              <SubmitOrderButton orderId={order.id} purpose={order.purpose} />
             ) : null}
           </div>
         </div>
@@ -338,6 +345,7 @@ export function SalesOrderDetailView({
 
           {canRequestModify ? (
             <SalesOrderChangeRequestSection
+        foilColorNames={foilColorNames}
               catalogProducts={catalogProducts}
               canRequestCancellation={canRequestCancellation}
               order={order}

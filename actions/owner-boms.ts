@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { appendReceipt } from '@/lib/admin/receipt';
 import {
   getFormString,
   getFormStringOr,
@@ -98,7 +99,7 @@ export async function createBomAction(
   }
 
   revalidateBomPaths(createdId);
-  redirect(`/owner/boms/${createdId}`);
+  redirect(appendReceipt(`/owner/boms/${createdId}`, { created: '1' }));
 }
 
 export async function setBomActiveAction(

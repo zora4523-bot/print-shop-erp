@@ -1,4 +1,6 @@
+import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { externalShipmentContactIssues } from './external-shipment-contact';
+import { settlementBillsLogistics } from './settlement';
 import Decimal from 'decimal.js';
 import { isTrustedAdminItemPricingSnapshot, isTrustedAdminPackagingPricingSnapshot, type AdminPackagingPricingSnapshotFacts, type AdminItemPricingSnapshotFacts } from './admin-pricing-snapshot';
 import type { Prisma } from '../../generated/prisma/client';
@@ -356,6 +358,9 @@ async function assertSelectedPapersAvailable(
   const invalidSelections: string[] = [];
   const unavailableSelections: string[] = [];
   for (const item of items) {
+    // A configuration-outside item (internal manual pricing) names no catalog
+    // paper; the engine routes it to admin confirmation instead.
+    if (item.manualQuoteReason?.trim()) continue;
     const styleLabel = item.fig === null ? item.name : `第 ${item.fig} 款`;
     const linkedId = item.product?.paperMaterialId;
     let matches: PaperAvailabilityRow[];
@@ -383,7 +388,8 @@ async function assertSelectedPapersAvailable(
       continue;
     }
     const paper = matches[0]!;
-    if (!paper.isActive || paper.outOfStock) {
+    if (!paper.isActive || paper.outOfStock || isRetiredPaper(paper) ||
+      isRetiredPaper({ weight: item.paperWeightGsm, paperType: item.paperType })) {
       unavailableSelections.push(`${styleLabel}纸张“${paper.name}”`);
     }
   }
@@ -420,6 +426,9 @@ function persistedQuoteFacts(
   const itemKeyById = new Map(
     order.items.map((item) => [item.id, persistedItemKey(item)]),
   );
+  // Internal operators may describe a configuration outside the catalog; the
+  // engine then marks the item MANUAL_PRICING_REQUIRED. External sales cannot.
+  const external = order.settlementType === OrderSettlementType.EXTERNAL_SALES;
   return {
     items: order.items.map((item) => {
       if (item.fig === null) {
@@ -432,7 +441,7 @@ function persistedQuoteFacts(
           `款式 ${item.sequence} 的计价路线不支持自动报价`,
         );
       }
-      if (item.manualQuoteReason?.trim() && !hasAdminCreatePrice(order, item)) {
+      if (external && item.manualQuoteReason?.trim() && !hasAdminCreatePrice(order, item)) {
         throw new ExternalOrderQuoteFinalizeError(
           `款式 ${item.sequence} 携带配置外备注，外部销售不能直接提交`,
         );
@@ -450,7 +459,7 @@ function persistedQuoteFacts(
         paperType: item.paperType,
         paperWeightGsm: item.paperWeightGsm,
         quantity: item.quantity,
-        ...(hasAdminCreatePrice(order, item) ? { manualQuoteReason: item.manualQuoteReason } : {}),
+        ...(hasAdminCreatePrice(order, item) || !external ? { manualQuoteReason: item.manualQuoteReason } : {}),
         crafts: item.crafts,
         foilColors: item.foilColors,
         frontFoilColors: item.frontFoilColors,
@@ -730,8 +739,8 @@ async function prepareExternalOrderQuote(
   if (order.quotedPricingRevisionId && order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
     return { kind: 'REUSE', result: resultFromExisting(order) };
   }
-  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
-    throw new ExternalOrderQuoteFinalizeError('仅外部销售工单需要生成提交报价');
+  if (!settlementBillsLogistics(order.settlementType)) {
+    throw new ExternalOrderQuoteFinalizeError('免费工单不需要生成提交报价');
   }
   if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
     throw new ExternalOrderQuoteFinalizeError('只能为草稿或驳回工单生成提交报价');
@@ -742,7 +751,10 @@ async function prepareExternalOrderQuote(
   if (order.shipments.length === 0) {
     throw new ExternalOrderQuoteFinalizeError('工单至少需要一个发货地址');
   }
-  const contactIssues = externalShipmentContactIssues(order.shipments.filter((shipment) => shipment.sequence > 1));
+  // Extra-address contacts are an external-channel rule; internal orders keep their looser create-form contract.
+  const contactIssues = order.settlementType === OrderSettlementType.EXTERNAL_SALES
+    ? externalShipmentContactIssues(order.shipments.filter((shipment) => shipment.sequence > 1))
+    : [];
   if (contactIssues.length) throw new ExternalOrderQuoteFinalizeError(contactIssues.map((issue) => issue.message).join('；'));
   // Canonical lock order for every quote/catalog transaction:
   // price snapshot -> PAPER rows. Material writers already use the same order.
@@ -1315,7 +1327,7 @@ function assertFinalizedQuoteAcknowledged(
       ),
     );
 
-  const currentQuoteToken = createExternalOrderQuoteToken({
+  const tokenEvidence = {
     items: pureInput.items,
     packagingGroups: pureInput.packagingGroups,
     logistics: {
@@ -1327,6 +1339,22 @@ function assertFinalizedQuoteAcknowledged(
       items: quote.items,
       packaging: quote.packagingGroups,
       logistics: quote.order,
+    },
+  };
+  // The create preview cannot know persisted admin-price snapshots, so its
+  // token omits them. Accept it only for the first submit of a never-quoted
+  // DRAFT — the create flow the preview belongs to. A re-submit (REJECTED, or
+  // any order that already has a quoted revision) must acknowledge the current
+  // admin prices, otherwise a stale preview token would wave through a price
+  // changed after the preview was taken.
+  const previewQuoteToken =
+    order.status === OrderStatus.DRAFT && !order.quotedPricingRevisionId
+      ? createExternalOrderQuoteToken(tokenEvidence)
+      : null;
+  const currentQuoteToken = createExternalOrderQuoteToken({
+    ...tokenEvidence,
+    result: {
+      ...tokenEvidence.result,
       ...(confirmedItems.length || confirmedGroups.length
         ? {
             adminPrices: [
@@ -1350,7 +1378,7 @@ function assertFinalizedQuoteAcknowledged(
     logistics: logisticsPreview,
     quoteToken: currentQuoteToken,
   });
-  if (expectedQuoteToken !== currentQuoteToken) {
+  if (expectedQuoteToken !== currentQuoteToken && !(previewQuoteToken !== null && expectedQuoteToken === previewQuoteToken)) {
     throw new ExternalOrderQuoteChangedError(
       currentQuoteToken,
       new Decimal(presentation.knownTotal).plus(confirmedDelta).toFixed(2),
