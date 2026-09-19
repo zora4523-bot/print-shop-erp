@@ -3742,6 +3742,42 @@ async function readSfCollectChargeContextInTx(
 // 顺丰到付是可后补的履约标识。外部销售工单切换时必须同步免收/恢复
 // 对客快递费并重算 totalAmount；打包耗材费始终保留。独立事务仍保留
 // 权限、所有权、串行化和完整修改日志。
+/**
+ * 补录的快递费（完整费用编辑手填，`priceBookId: null`）不走按价目重算，但到付后运费由收件方
+ * 直接付给顺丰，工厂不再代收（业主 2026-09-19 拍板），与完整费用编辑「顺丰到付工单的快递费
+ * 必须为 0」是同一条不变量。打包耗材照收。取消到付时不恢复：原金额是人工录入的，没有价目
+ * 可重算，需在编辑收费里重新录入。返回被清零的金额合计。
+ */
+async function waiveManualFreightForSfCollectInTx(
+  tx: Prisma.TransactionClient,
+  input: { orderId: string; actorId: string; changedAt: Date },
+): Promise<Decimal> {
+  const manualFreight = await tx.orderCustomerCharge.findMany({
+    where: {
+      orderId: input.orderId,
+      priceBookId: null,
+      category: { code: 'SHIPPING_FEE' },
+      status: { not: OrderCustomerChargeStatus.WAIVED },
+    },
+    select: { id: true, amount: true },
+  });
+  let waived = new Decimal(0);
+  for (const charge of manualFreight ?? []) {
+    if (charge.amount !== null) waived = waived.plus(charge.amount.toString());
+    await tx.orderCustomerCharge.update({
+      where: { id: charge.id },
+      data: {
+        status: OrderCustomerChargeStatus.WAIVED,
+        amount: '0.00',
+        overrideReason: '顺丰到付，运费由收件方支付',
+        finalizedById: input.actorId,
+        finalizedAt: input.changedAt,
+      },
+    });
+  }
+  return waived;
+}
+
 export async function setOrderSfCollect(
   orderId: string,
   isSfCollect: boolean,
@@ -4051,39 +4087,12 @@ export async function setOrderSfCollect(
         : OrderQuotedFeeCompleteness.COMPLETE;
     }
 
-    // 补录的快递费（完整费用编辑手填，`priceBookId: null`）不走上面的按价目重算，
-    // 但到付后运费由收件方直接付给顺丰，工厂不再代收（业主 2026-09-19 拍板），
-    // 与完整费用编辑「顺丰到付工单的快递费必须为 0」是同一条不变量。打包耗材照收。
-    // 取消到付时不恢复：原金额是人工录入的，没有价目可重算，需在编辑收费里重新录入。
-    let waivedManualFreight = new Decimal(0);
-    if (!billsLogistics && isSfCollect) {
-      const prismaTx = tx as unknown as Prisma.TransactionClient;
-      const manualFreight = await prismaTx.orderCustomerCharge.findMany({
-        where: {
-          orderId,
-          priceBookId: null,
-          category: { code: 'SHIPPING_FEE' },
-          status: { not: OrderCustomerChargeStatus.WAIVED },
-        },
-        select: { id: true, amount: true },
-      });
-      for (const charge of manualFreight ?? []) {
-        if (charge.amount !== null) waivedManualFreight = waivedManualFreight.plus(charge.amount.toString());
-        await prismaTx.orderCustomerCharge.update({
-          where: { id: charge.id },
-          data: {
-            status: OrderCustomerChargeStatus.WAIVED,
-            amount: '0.00',
-            overrideReason: '顺丰到付，运费由收件方支付',
-            finalizedById: actor.id,
-            finalizedAt: changedAt,
-          },
-        });
-      }
-      if (!waivedManualFreight.isZero()) {
-        nextTotalAmount = new Decimal(order.totalAmount).minus(waivedManualFreight).toFixed(2);
-        assertStorableOrderTotal(nextTotalAmount);
-      }
+    const waivedManualFreight = !billsLogistics && isSfCollect
+      ? await waiveManualFreightForSfCollectInTx(tx as unknown as Prisma.TransactionClient, { orderId, actorId: actor.id, changedAt })
+      : new Decimal(0);
+    if (!waivedManualFreight.isZero()) {
+      nextTotalAmount = new Decimal(order.totalAmount).minus(waivedManualFreight).toFixed(2);
+      assertStorableOrderTotal(nextTotalAmount);
     }
     const manualFreightWaived = !waivedManualFreight.isZero();
 
