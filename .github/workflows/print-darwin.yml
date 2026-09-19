@@ -1,0 +1,164 @@
+name: Print (Darwin)
+
+# The order-print pixel baselines are darwin-chromium only, and macOS runners
+# bill at 10x. Run them only when something the print view depends on changes
+# (DECISIONS 2026-09-19), or on demand.
+on:
+  pull_request:
+    paths:
+      - "app/print/**"
+      - "app/globals.css"
+      - "components/business/order/AutoPrint*"
+      - "lib/order/print-*"
+      - "lib/order/qr*"
+      - "lib/order/packaging-mode*"
+      - "lib/order/foil-colors*"
+      - "lib/rules/paper-label*"
+      - "lib/format/**"
+      - "lib/ui/status-registry*"
+      - "lib/price/external-price-display*"
+      - "lib/pdf/**"
+      - "public/fonts/**"
+      - "tests/visual/order-print.spec.ts"
+      - "tests/visual/order-print.spec.ts-snapshots/**"
+      - "tests/e2e/_helpers.ts"
+      - "tests/e2e/global-setup.ts"
+      - "scripts/lib/playwright-config.ts"
+      - "scripts/lib/e2e-environment.ts"
+      - "playwright.release.config.ts"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - "prisma/seed.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/print-darwin.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  print-darwin:
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      DATABASE_URL: postgresql://postgres@127.0.0.1:55432/print_shop_erp_print_ci
+      E2E_DATABASE_URL: postgresql://postgres@127.0.0.1:55432/erp_e2e_print_ci
+      E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_print_ci
+      FRESH_DATABASE_URL: postgresql://postgres@127.0.0.1:55432/erp_e2e_print_ci
+      FRESH_DATABASE_CONFIRM_DATABASE: erp_e2e_print_ci
+      E2E_BASE_URL: http://127.0.0.1:3200
+      AUTH_SECRET: ci-only-auth-secret-not-for-production-2026
+      AUTH_TRUST_HOST: "true"
+      SEED_ADMIN_USERNAME: ci-admin
+      SEED_ADMIN_PASSWORD: ci-only-admin-password-not-for-production
+      BACKGROUND_JOBS_MODE: inline
+      NOTIFICATION_MOCK_MODE: "true"
+      CDR_BUNDLE_MOCK_MODE: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: --max-old-space-size=4096
+      TZ: Asia/Shanghai
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies and Chromium
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install chromium
+          pnpm exec prisma generate
+          pnpm exec prisma validate
+
+      - name: Install PostgreSQL 16
+        run: |
+          brew install postgresql@16
+          echo "$(brew --prefix postgresql@16)/bin" >> "$GITHUB_PATH"
+
+      - name: Start a dedicated loopback PostgreSQL cluster
+        # macOS runners cannot use Docker service containers. This job owns
+        # only its temporary cluster and port, never the Homebrew service data.
+        run: |
+          : "${RUNNER_TEMP:?GitHub runner temp is required}"
+          initdb -D "$RUNNER_TEMP/erp-print-pg" -U postgres -A trust --encoding=UTF8 --locale=C
+          pg_ctl -D "$RUNNER_TEMP/erp-print-pg" -l "$RUNNER_TEMP/erp-print-pg.log" -o '-h 127.0.0.1 -p 55432' -w start
+          createdb -h 127.0.0.1 -p 55432 -U postgres print_shop_erp_print_ci
+          createdb -h 127.0.0.1 -p 55432 -U postgres erp_e2e_print_ci
+
+      - name: Migrate and prepare disposable print fixtures
+        run: |
+          pnpm test:migrations:fresh
+          pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
+
+      - name: Record print runtime versions
+        run: |
+          mkdir -p .review
+          {
+            sw_vers
+            uname -m
+            node --version
+            pnpm --version
+            pnpm exec next --version
+            psql --version
+          } > .review/print-runtime.txt
+
+      - name: Production build and existing Darwin print baselines
+        # Use the release config's controlled build/start and original chromium
+        # project name. Missing or changed baselines fail; none are approved here.
+        run: pnpm test:release tests/visual/order-print.spec.ts --project=chromium --update-snapshots=none
+
+      - name: Stop and remove this job's PostgreSQL cluster
+        if: always()
+        run: |
+          : "${RUNNER_TEMP:?GitHub runner temp is required}"
+          ERP_PRINT_PG_DATA="$RUNNER_TEMP/erp-print-pg"
+          if [[ -f "$ERP_PRINT_PG_DATA/postmaster.pid" ]]; then
+            "$(brew --prefix postgresql@16)/bin/pg_ctl" -D "$ERP_PRINT_PG_DATA" -m fast -w stop
+          fi
+          rm -rf -- "$ERP_PRINT_PG_DATA"
+
+      - name: Upload review data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-print-darwin-${{ github.sha }}
+          path: |
+            .review/print-runtime.txt
+            .review/playwright-release.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-print-darwin-${{ github.sha }}
+          path: |
+            playwright-report/release/
+            test-results/release/
+            ${{ runner.temp }}/erp-print-pg.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14

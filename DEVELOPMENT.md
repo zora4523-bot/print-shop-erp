@@ -129,9 +129,9 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 ## 当前 CI 与发布验证缺口
 
-[Quality 工作流](./.github/workflows/quality.yml) 的 Linux `verify` 配置执行冻结安装、依赖安全审计、Prisma generate/validate、完整 fresh 迁移链、架构/完整 lint/typecheck、死代码证据、业务数据审计、全量单测与覆盖率、浏览器组件、生产构建业务及六视口，以及真实 durable worker 排队/重试/授权下载。开发专用价格 fixture 单独运行。
+[Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 备份脚本 / 完整 lint / typecheck、死代码证据，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`、`e2e`（生产构建业务 E2E + 零 JS + **两视口**门禁 375×667 / 1280×800）、`durable`（真实 durable worker 排队 / 重试 / 授权下载）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部六视口及六视口 dev fixtures；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
 
-现有打印像素基线仅有 Darwin 版，独立 `print-darwin` 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。两个任务均在失败后上传明确的审计、JSON、覆盖率、截图和 trace 路径，启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。
+现有打印像素基线仅有 Darwin 版，独立的 [Print (Darwin) 工作流](./.github/workflows/print-darwin.yml) 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`；macOS 按 10 倍计费，因此只在打印相关路径变动或手动 `workflow_dispatch` 时运行。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。每个作业每次都上传 `.review/`（审计与各套件 JSON，用于分析耗时），覆盖率、报告、截图和 trace 只在失败时上传；均启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。CI 下 Playwright trace 为 `on-first-retry`。
 
 2026-09-11 PR #16 前两轮远端执行分别暴露了导入文案扫描、全仓按钮 AST 扫描的 5 秒超时。这两项集成扫描使用独立的 20 秒执行上限，扫描范围及全部语义断言保持。Darwin 仍有 13 项字体截图差异：CI PDF 出现额外 Helvetica 回退，对齐系统语言偏好未消除差异，该尝试已撤回。截图基线与比较阈值未改，CI 专用基线须先取得业务确认，修正结果以最新 PR checks 为准。
 
