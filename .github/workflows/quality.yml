@@ -216,22 +216,28 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm exec tsx scripts/e2e-release-build.ts
 
+      # upload-artifact does not preserve symlinks, and Turbopack links external
+      # packages (sharp, ...) from .next-release/node_modules into node_modules/.pnpm.
+      # Without the links the server fails with "Cannot find package 'detect-libc'"
+      # on every page that touches an image. Ship a tarball instead; only the
+      # bulky compiler caches are left out (cache/.rscinfo stays).
+      - name: Pack the release build
+        run: >-
+          tar
+          --exclude='.next-release/cache/turbopack'
+          --exclude='.next-release/cache/images'
+          --exclude='.next-release/cache/*.tsbuildinfo'
+          --exclude='.next-release/cache/.tsbuildinfo'
+          -czf next-release.tar.gz .next-release
+
       - name: Upload the release build
         uses: actions/upload-artifact@v4
         with:
           name: next-release-${{ github.sha }}
-          # Keep cache/.rscinfo and cache/.previewinfo: they hold the Server
-          # Actions encryption key and preview secrets the build was made with.
-          # Only the bulky compiler caches are dropped.
-          path: |
-            .next-release/
-            !.next-release/cache/turbopack/
-            !.next-release/cache/images/
-            !.next-release/cache/*.tsbuildinfo
-            !.next-release/cache/.tsbuildinfo
-          include-hidden-files: true
+          path: next-release.tar.gz
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
 
   # Business E2E plus the pull-request viewport gate (375x667 and 1280x800 for
   # both shells), sharded by measured duration: chromium ~12.6 min over three
@@ -296,7 +302,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: next-release-${{ github.sha }}
-          path: .next-release
+
+      - name: Unpack the release build
+        run: |
+          tar -xzf next-release.tar.gz
+          rm next-release.tar.gz
+          test -f .next-release/BUILD_ID
 
       - name: Prepare the regular and the disposable browser databases
         run: |
