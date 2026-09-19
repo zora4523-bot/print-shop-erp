@@ -94,17 +94,19 @@ async function OperationPieceworkSalaryContent({
   actor: WorkerSalaryActor;
   searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string };
 }) {
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-  // Only an explicit, valid range narrows unsettled reports; the list below
-  // defaults to the current month.
+  // Only an explicit, valid range narrows anything (业主 2026-09-19). The date
+  // boxes start empty: a prefilled current month hid last month's unpaid
+  // settlements from 待发放, and submitting it unchanged hid unsettled reports.
   const explicitFrom = sp.from && parseStrictYmd(sp.from) ? sp.from : undefined;
   const explicitTo = sp.to && parseStrictYmd(sp.to) ? sp.to : undefined;
-  const fromText = explicitFrom ?? `${today.slice(0, 7)}-01`;
-  const toText = explicitTo ?? today;
-  const invalidRange = fromText > toText;
-  const from = parseStrictYmd(fromText)!;
-  const to = parseStrictYmd(toText)!;
-  const result = await listWorkerSettlementPage(actor, { from, to, page: sp.page, status: sp.status });
+  const invalidRange = Boolean(explicitFrom && explicitTo && explicitFrom > explicitTo);
+  const rangeLabel = explicitFrom && explicitTo ? `（${explicitFrom} 至 ${explicitTo}）`
+    : explicitFrom ? `（${explicitFrom} 起）` : explicitTo ? `（截至 ${explicitTo}）` : '';
+  const result = await listWorkerSettlementPage(actor, {
+    from: explicitFrom ? parseStrictYmd(explicitFrom)! : undefined,
+    to: explicitTo ? parseStrictYmd(explicitTo)! : undefined,
+    page: sp.page, status: sp.status,
+  });
   const settlements = result.rows;
   const total = new Decimal(result.totalAmount);
   const unpaid = new Decimal(result.unpaidAmount);
@@ -117,13 +119,14 @@ async function OperationPieceworkSalaryContent({
         inputType="date"
         fromLabel="开始日期"
         toLabel="结束日期"
-        from={fromText}
-        to={toText}
+        from={explicitFrom}
+        to={explicitTo}
+        status={sp.status}
       />
       {invalidRange && <p role="alert" className="text-destructive">开始日期晚于结束日期，请修改后查询。</p>}
       <WorkerPendingReports actor={actor} from={explicitFrom} to={explicitTo} page={sp.pendingPage} />
       <nav aria-label="发放状态" className="flex flex-wrap gap-2">{[['', '全部结算'], ['unpaid', '待发放'], ['paid', '已发放']].map(([value, label]) => <Link key={value} href={`/worker/salary?${salaryQuery({ from: explicitFrom, to: explicitTo, status: value })}`} aria-current={(sp.status ?? '') === value ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm ${(sp.status ?? '') === value ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>{label}</Link>)}</nav>
-      <h2 className="font-semibold">已结算工资（{fromText} 至 {toText}）</h2>
+      <h2 className="font-semibold">{sp.status === 'unpaid' ? '待发放工资' : sp.status === 'paid' ? '已发放工资' : '已结算工资'}{rangeLabel}</h2>
       {settlements.length === 0 ? (
         <EmptyState
           icon={WalletCards}
@@ -392,6 +395,7 @@ function SalaryRangeFilter({
   toLabel,
   from,
   to,
+  status,
 }: {
   historical?: boolean;
   inputType: 'date' | 'month';
@@ -399,10 +403,13 @@ function SalaryRangeFilter({
   toLabel: string;
   from?: string;
   to?: string;
+  /** Keeps the active 发放状态 tab when the worker submits a range. */
+  status?: string;
 }) {
   return (
     <form className="grid min-w-0 grid-cols-1 gap-3 rounded-xl border bg-card p-3 text-sm min-[360px]:grid-cols-2">
       {historical && <input type="hidden" name="view" value="history" />}
+      {status === 'paid' || status === 'unpaid' ? <input type="hidden" name="status" value={status} /> : null}
       <label className="space-y-1">
         <span className="text-sm text-muted-foreground">{fromLabel}</span>
         <input

@@ -304,6 +304,14 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
     billsLogistics;
+  // 补录（priceBookId 为 null）的快递费在标记顺丰到付时会被清零，见 setOrderSfCollect。
+  const manualFreightToWaive = (() => {
+    if (!canViewCommercialAmounts || billsLogistics || order.isSfCollect) return null;
+    const total = order.customerCharges
+      .filter((charge) => String(charge.category.code) === 'SHIPPING_FEE' && charge.priceBookId == null && String(charge.status) !== 'WAIVED' && charge.amount != null)
+      .reduce((sum, charge) => sum.plus(String(charge.amount)), new Decimal(0));
+    return total.isZero() ? null : formatMoney(total);
+  })();
   const canToggleSfCollect =
     order.purpose !== 'PROOF' &&
     canEditOrderSfCollect(order.status) &&
@@ -596,6 +604,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 currentValue={order.isSfCollect}
                 status={order.status}
                 isExternalSales={billsLogistics}
+                manualFreightToWaive={manualFreightToWaive}
                 mutationGuard={priceRevision !== null ? {
                   expectedOrderRevision: order.revision,
                   expectedEditVersion: order.editVersion,

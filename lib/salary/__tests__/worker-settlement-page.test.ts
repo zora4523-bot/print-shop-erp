@@ -11,8 +11,18 @@ it('keeps period totals independent of pagination and scopes every query to self
   expect(tx.pieceworkSettlement.aggregate).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: expect.objectContaining({ reporterId: 'worker' }) }));
   expect(tx.pieceworkSettlement.aggregate.mock.calls[0]![0].where).not.toHaveProperty('status');
 });
-// Regression: the page defaults from/to to the current month; totals must still
-// include an unpaid settlement from an earlier month.
+it.each(['unpaid', 'paid', undefined])('lists every settlement for status %s until the worker picks a date', async (status) => {
+  await listWorkerSettlementPage({ id: 'worker', role: Role.WORKER }, { status });
+  for (const mock of [tx.pieceworkSettlement.count, tx.pieceworkSettlement.findMany]) expect(mock.mock.calls[0]![0].where).not.toHaveProperty('workDate');
+  if (status === 'unpaid') expect(tx.pieceworkSettlement.findMany.mock.calls[0]![0].where).toMatchObject({ reporterId: 'worker', status: { not: 'PAID' } });
+});
+it('applies a one-sided range without inventing the other bound', async () => {
+  await listWorkerSettlementPage({ id: 'worker', role: Role.WORKER }, { from: new Date('2026-08-01'), status: 'unpaid' });
+  expect(tx.pieceworkSettlement.findMany.mock.calls[0]![0].where.workDate).toEqual({ gte: new Date('2026-08-01') });
+  await listWorkerSettlementPage({ id: 'worker', role: Role.WORKER }, { to: new Date('2026-08-31') });
+  expect(tx.pieceworkSettlement.findMany.mock.calls[1]![0].where.workDate).toEqual({ lte: new Date('2026-08-31') });
+});
+// Totals must include an unpaid settlement from outside the chosen period.
 it('keeps lifetime totals and unpaid amount independent of the period filter', async () => {
   await listWorkerSettlementPage({ id: 'worker', role: Role.WORKER }, { from: new Date('2026-09-01'), to: new Date('2026-09-18') });
   expect(tx.pieceworkSettlement.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workDate: expect.anything() }) }));

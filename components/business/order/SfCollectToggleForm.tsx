@@ -14,6 +14,8 @@ type Props = {
   currentValue: boolean;
   status: OrderStatus;
   isExternalSales: boolean;
+  /** 补录（非按价目计）的快递费合计，已格式化；标记到付时会被清零，提前告诉操作人。 */
+  manualFreightToWaive?: string | null;
   mutationGuard?: {
     expectedOrderRevision: number;
     expectedEditVersion: number;
@@ -35,6 +37,7 @@ export function SfCollectToggleForm({
   currentValue,
   status,
   isExternalSales,
+  manualFreightToWaive = null,
   mutationGuard,
   shipments,
 }: Props) {
@@ -242,6 +245,11 @@ export function SfCollectToggleForm({
               ? '取消顺丰到付'
               : '标记顺丰到付'}
       </Button>
+      {!currentValue && manualFreightToWaive ? (
+        <p className="w-full text-xs text-muted-foreground">
+          标记后本单补录的快递费 {manualFreightToWaive} 将清零（到付由收件方支付），纸箱耗材不变。
+        </p>
+      ) : null}
       {awaitsLogisticsReview ? (
         <p className="w-full text-xs text-muted-foreground">
           更正后需管理员确认物流费用，确认前不能发货或结算；已审核款式价格不变。

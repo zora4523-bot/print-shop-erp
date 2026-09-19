@@ -3082,6 +3082,7 @@ type EditTxClient = {
           revision: number;
           processingAmount: Decimal.Value;
           totalAmount: Decimal.Value;
+          confirmedFee?: Decimal.Value | null;
           customName: string | null;
           customerRef: string | null;
           customerPartyId: string | null;
@@ -3741,6 +3742,42 @@ async function readSfCollectChargeContextInTx(
 // 顺丰到付是可后补的履约标识。外部销售工单切换时必须同步免收/恢复
 // 对客快递费并重算 totalAmount；打包耗材费始终保留。独立事务仍保留
 // 权限、所有权、串行化和完整修改日志。
+/**
+ * 补录的快递费（完整费用编辑手填，`priceBookId: null`）不走按价目重算，但到付后运费由收件方
+ * 直接付给顺丰，工厂不再代收（业主 2026-09-19 拍板），与完整费用编辑「顺丰到付工单的快递费
+ * 必须为 0」是同一条不变量。打包耗材照收。取消到付时不恢复：原金额是人工录入的，没有价目
+ * 可重算，需在编辑收费里重新录入。返回被清零的金额合计。
+ */
+async function waiveManualFreightForSfCollectInTx(
+  tx: Prisma.TransactionClient,
+  input: { orderId: string; actorId: string; changedAt: Date },
+): Promise<Decimal> {
+  const manualFreight = await tx.orderCustomerCharge.findMany({
+    where: {
+      orderId: input.orderId,
+      priceBookId: null,
+      category: { code: 'SHIPPING_FEE' },
+      status: { not: OrderCustomerChargeStatus.WAIVED },
+    },
+    select: { id: true, amount: true },
+  });
+  let waived = new Decimal(0);
+  for (const charge of manualFreight ?? []) {
+    if (charge.amount !== null) waived = waived.plus(charge.amount.toString());
+    await tx.orderCustomerCharge.update({
+      where: { id: charge.id },
+      data: {
+        status: OrderCustomerChargeStatus.WAIVED,
+        amount: '0.00',
+        overrideReason: '顺丰到付，运费由收件方支付',
+        finalizedById: input.actorId,
+        finalizedAt: input.changedAt,
+      },
+    });
+  }
+  return waived;
+}
+
 export async function setOrderSfCollect(
   orderId: string,
   isSfCollect: boolean,
@@ -3768,6 +3805,7 @@ export async function setOrderSfCollect(
         revision: true,
         processingAmount: true,
         totalAmount: true,
+        confirmedFee: true,
         customName: true,
         customerRef: true,
         receiverName: true,
@@ -4049,6 +4087,15 @@ export async function setOrderSfCollect(
         : OrderQuotedFeeCompleteness.COMPLETE;
     }
 
+    const waivedManualFreight = !billsLogistics && isSfCollect
+      ? await waiveManualFreightForSfCollectInTx(tx as unknown as Prisma.TransactionClient, { orderId, actorId: actor.id, changedAt })
+      : new Decimal(0);
+    if (!waivedManualFreight.isZero()) {
+      nextTotalAmount = new Decimal(order.totalAmount).minus(waivedManualFreight).toFixed(2);
+      assertStorableOrderTotal(nextTotalAmount);
+    }
+    const manualFreightWaived = !waivedManualFreight.isZero();
+
     const updated = await txClient.order.update({
       where: { id: orderId },
       data: {
@@ -4059,7 +4106,9 @@ export async function setOrderSfCollect(
               confirmedFee: null,
               settledFee: null,
             }
-          : {}),
+          : manualFreightWaived && order.confirmedFee != null
+            ? { confirmedFee: nextTotalAmount }
+            : {}),
       },
       select: { id: true, status: true },
     });
@@ -4086,8 +4135,25 @@ export async function setOrderSfCollect(
               metadata: { isSfCollect },
             },
           )
-        : null;
-    if (pricingRevision) {
+        : manualFreightWaived
+          // 金额由「到付 = 运费 0」这条硬规则决定，不是新的人工判断：沿用当前价格状态，
+          // 不打回待核价（非按价目计物流的工单在履约状态没有重新核价入口）。
+          ? await appendOrderPricingRevisionInTx(
+              tx as unknown as Prisma.TransactionClient,
+              {
+                orderId,
+                status: order.pricingStatus as OrderPricingStatusValue,
+                source: 'SF_COLLECT_MANUAL_FREIGHT_WAIVED',
+                actorId: actor.id,
+                now: changedAt,
+                expectedPriceRevision: order.priceRevision,
+                incrementOrderRevision: true,
+                remark: `顺丰到付：补录快递费 ${waivedManualFreight.toFixed(2)} 元清零`,
+                metadata: { isSfCollect, waivedManualFreight: waivedManualFreight.toFixed(2) },
+              },
+            )
+          : null;
+    if (pricingRevision && billsLogistics) {
       // The quote's amount, completeness and revision reference form one
       // database invariant. Legacy orders may have all three fields null;
       // write the whole tuple only after its immutable revision exists.

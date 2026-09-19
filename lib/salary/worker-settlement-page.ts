@@ -6,11 +6,13 @@ import type { Prisma } from '@/generated/prisma/client';
 
 export async function listWorkerSettlementPage(actor: { id: string; role: Role }, input: { from?: Date; to?: Date; page?: string | string[]; status?: string }) {
   await assertWorkerPortalActor(actor);
-  // The summary cards answer "what am I owed overall"; only the list is scoped
-  // to the selected period. A month-scoped default must never hide older
-  // unpaid settlements.
+  // The summary cards answer "what am I owed overall"; only the list is scoped,
+  // and only to dates the worker explicitly chose (业主 2026-09-19). A defaulted
+  // month used to hide older unpaid settlements from the 待发放 list while the
+  // 尚未发放 card still counted them.
   const selfWhere: Prisma.PieceworkSettlementWhereInput = { reporterId: actor.id };
-  const where: Prisma.PieceworkSettlementWhereInput = { ...selfWhere, workDate: { gte: input.from, lte: input.to } };
+  const where: Prisma.PieceworkSettlementWhereInput = { ...selfWhere };
+  if (input.from || input.to) where.workDate = { ...(input.from ? { gte: input.from } : {}), ...(input.to ? { lte: input.to } : {}) };
   if (input.status === 'paid') where.status = 'PAID';
   if (input.status === 'unpaid') where.status = { not: 'PAID' };
   return db.$transaction(async (tx) => {
