@@ -121,8 +121,11 @@ export function createE2eConfig(mode: 'development' | 'release') {
       })),
     ],
     webServer: {
+      // CI shards download one shared `.next-release` build (E2E_PREBUILT=1,
+      // produced by scripts/e2e-release-build.ts with this same environment)
+      // instead of each compiling their own.
       command: release
-        ? `pnpm exec tsx scripts/e2e-preflight.ts && pnpm exec prisma generate && pnpm exec next build && pnpm exec next start --hostname 127.0.0.1 --port ${port}`
+        ? `pnpm exec tsx scripts/e2e-preflight.ts && pnpm exec prisma generate && ${process.env.E2E_PREBUILT === '1' ? '' : 'pnpm exec next build && '}pnpm exec next start --hostname 127.0.0.1 --port ${port}`
         : `pnpm exec tsx scripts/e2e-preflight.ts && pnpm run dev --hostname 127.0.0.1 --port ${port}`,
       url: baseURL,
       env: serverEnv,

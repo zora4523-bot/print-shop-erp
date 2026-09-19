@@ -1360,3 +1360,10 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - 影响：只在中间视口出现的问题会晚到合并后才发现（`viewports-main` 红了要回头修）；`print-darwin` 的路径清单过窄会漏掉回归，改到清单外却影响打印的文件时要手动触发。`concurrency` 取消旧 run 的设置此前已存在，本次只统一了分组名。`main` 没有分支保护，`paths-ignore` 不会卡住合并。
 - 相关文档：`.github/workflows/quality.yml`、`.github/workflows/print-darwin.yml`、`.github/actions/`、`CLAUDE.md §8.2`。
 
+## 2026-09-19：CI 第二步——E2E 按实测耗时分片、共享一次 release 构建
+
+- 决策：在第一步基础上，`build` 作业用 `scripts/e2e-release-build.ts`（与 release web server 同一份环境）构建一次 `.next-release`，E2E 拆成 6 个分片——`chromium` 1/3–3/3、`admin-375x667`、`admin-1280x800`、`worker + no-js`——各自 `E2E_PREBUILT=1` 复用该构建；`browser-components` 分 2 片。分片数按第一步 `.review/*.json` 的实测定（chromium 150 例 12.6 分钟、两个 admin 视口 4.4 / 3.2 分钟），暂不拆四片，先观察波动。
+- 理由：第一步后关键路径是 `e2e` 单作业 24.8 分钟。每个分片独占 runner / 数据库 / 服务，片内仍 `workers: 1`，「所有 spec 共用同一个库、不能并发」的约束不变。实测（run 35447718850）全绿 9.1 分钟（改动前 61.4、第一步 24.9），各作业分钟数合计 62.8，与改动前持平。
+- 影响：**共享构建必须用 tar 传**。Turbopack 把外部包（sharp、ali-oss、@prisma/client…）以相对符号链接放在 `.next-release/node_modules`，`actions/upload-artifact` 不保留符号链接，`sharp` 在拷贝出来的位置找不到 `detect-libc`，凡是处理设计图的页面都进错误边界——症状却是「提交后工单停在 DRAFT」，两轮 CI 才定位到（第一轮误判为丢了 `cache/.rscinfo`）。`e2e-preflight` 在 `E2E_PREBUILT=1` 时会检查这些链接，坏了直接报因。新增 spec 不要依赖别的 spec 文件留下的数据：分片按文件切，顺序依赖会在分片后才暴露。
+- 相关文档：`.github/workflows/quality.yml`、`scripts/e2e-release-build.ts`、`scripts/e2e-preflight.ts`、`DEVELOPMENT.md`「当前 CI 与发布验证缺口」。
+
