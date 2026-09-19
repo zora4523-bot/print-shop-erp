@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Role } from '../../../generated/prisma/enums';
 import { getSession } from '@/lib/auth/session';
+import { LogoutButton } from '@/components/business/auth/LogoutButton';
 import { WorkerBottomNavigation } from '@/components/business/production/WorkerBottomNavigation';
 
 // H5 shell for 师傅端. WORKER only — ADMIN has its own
@@ -28,6 +29,10 @@ export default async function WorkerLayout({
             师傅工作台
           </Link>
           <Link href="/worker/account" className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm">我的账号</Link>
+          {/* 零 JS 硬约束（CLAUDE.md §15.8）：「我的账号」页在 worker/loading.tsx 的 streaming
+              边界里，JS 不可用时永远停在骨架屏，页内的退出表单出不来。与 AdminHeader 同样
+              在外壳里留一个原生退出；有 JS 时不渲染，不影响现有布局。 */}
+          <noscript><LogoutButton /></noscript>
         </div>
       </header>
       <main className="worker-safe-inline mx-auto w-full max-w-3xl py-5">
