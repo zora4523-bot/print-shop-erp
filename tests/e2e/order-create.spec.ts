@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
+import Decimal from 'decimal.js';
+import AxeBuilder from '@axe-core/playwright';
+import { assertActivatedE2eDatabase } from '../../scripts/lib/e2e-environment';
 import {
   E2E_PASSWORD,
   E2E_USERS,
@@ -375,5 +378,134 @@ test.describe('创建工单 — golden path', () => {
     expect((await readSavedOrder(orderId)).facts).toEqual(modified.facts);
     expect((await readSavedOrder(orderId)).order.isUrgent).toBe(true);
     await expectNoNextErrorOverlay(page);
+
+    // Text-priced blank items have no Product ID. Both UPDATE and ADD must
+    // carry the selected identity through the real preview/action/DB boundary.
+    type SavedItem = { id: string; productId: string | null; sequence: number; specification: string;
+      actualWidthMm: number; actualHeightMm: number; quantity: number; subtotal: number; quotedAmount: number };
+    const savedItems = async () => ((await readSavedOrder(orderId)).facts as { items: SavedItem[] }).items.sort((a, b) => a.sequence - b.sequence);
+    const large = (await savedItems())[0];
+    expect(large.productId).toBeNull();
+    await page.goto(`/orders/${orderId}/edit`);
+    await page.getByLabel('规格', { exact: true }).selectOption({ label: '中号封80×115' });
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('中号封80×115');
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
+    await expect(page).toHaveURL(`/orders/${orderId}`, routeTransitionOptions);
+    const mid = (await savedItems())[0];
+    expect(mid).toMatchObject({ productId: null, specification: '中号封80×115', actualWidthMm: 80, actualHeightMm: 115, quantity: 1200 });
+    expect(new Decimal(large.quotedAmount).minus(mid.quotedAmount).toFixed(2)).toBe('12.00');
+
+    await expectNoNextErrorOverlay(page);
   });
+});
+
+test('纸张身份冲突只标记未估算，工单详情仍可读取', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  assertActivatedE2eDatabase();
+  const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
+  const { urgentOrderId: orderId } = await seedDashboardSnapshot({ salesUserId });
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  const duplicateId = `e2e-bom-conflict-${uniqueSuffix()}`;
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await db.connect();
+  try {
+    await db.query(`INSERT INTO "OrderItem" (id,"orderId",sequence,name,"pricingRoute",craft,"productStructure",
+      specification,"actualWidthMm","actualHeightMm","paperType","paperWeightGsm",quantity,crafts,
+      "foilColors","frontFoilColors","backFoilColors","foilTechnique","hasLocalFoil","updatedAt")
+      VALUES ($1,$2,1,'用料冲突款','STOCK_BLANK','PARTIAL','STANDARD_ENVELOPE','中号封80×115',80,115,'160g珠光艳闪',160,1000,
+      ARRAY[(SELECT id FROM "Craft" WHERE code='FLAT_FOIL_PARTIAL')],ARRAY['哑金'],ARRAY['哑金'],ARRAY[]::text[],'FLAT',true,NOW())`,
+      [`${orderId}-bom-item`, orderId]);
+    await db.query(`INSERT INTO "Material" (id,code,name,category,specification,unit,"isActive","updatedAt")
+      VALUES ($1::text,$1::text,'160g珠光艳闪','PAPER','160g','张',false,NOW())`, [duplicateId]);
+    await login(page, { from: `/orders/${orderId}`, username: owner.username, password: E2E_PASSWORD });
+    const storageState = await page.context().storageState();
+    for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
+      const context = await browser.newContext({ storageState, viewport: { width, height }, hasTouch: width <= 768 });
+      const ui = await context.newPage();
+      ui.on('pageerror', (error) => errors.push(error.message));
+      try {
+        const response = await ui.goto(`/orders/${orderId}`);
+        expect(response?.status()).toBe(200);
+        const disclosure = ui.locator('summary:visible').filter({ hasText: /^生产、用料与计件记录$/ });
+        const details = disclosure.locator('..');
+        await expect(details).toHaveAttribute('open', '');
+        if (width <= 768) {
+          const box = await disclosure.boundingBox();
+          expect(box?.width).toBeGreaterThanOrEqual(44);
+          expect(box?.height).toBeGreaterThanOrEqual(44);
+          await disclosure.tap();
+          await expect(details).not.toHaveAttribute('open');
+          await disclosure.tap();
+        } else {
+          await disclosure.focus();
+          await disclosure.press('Enter');
+          await expect(details).not.toHaveAttribute('open');
+          await disclosure.press('Enter');
+        }
+        await expect(details).toHaveAttribute('open', '');
+        const estimate = ui.locator('section:visible').filter({ has: ui.getByRole('heading', { name: '物料用量估算', exact: true }) }).last();
+        await expect(estimate.getByText('空白封用料纸张身份重复，请先检查纸张资料', { exact: true }).first()).toBeVisible();
+        await expect(estimate.getByText('未估算', { exact: true }).first()).toBeVisible();
+        await expect(estimate.getByText('0 张', { exact: true })).toHaveCount(0);
+        await estimate.evaluate((element) => element.setAttribute('data-e2e-bom-diagnostic', ''));
+        for (const theme of ['light', 'dark']) {
+          await ui.evaluate((value) => {
+            document.documentElement.dataset.theme = value;
+            document.documentElement.classList.toggle('dark', value === 'dark');
+          }, theme);
+          expect(await ui.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+          expect((await new AxeBuilder({ page: ui }).include('[data-e2e-bom-diagnostic]').analyze()).violations).toEqual([]);
+          await estimate.screenshot({ path: test.info().outputPath(`bom-diagnostic-${width}-${theme}.png`) });
+        }
+      } finally { await context.close(); }
+    }
+    expect(errors).toEqual([]);
+  } finally {
+    await db.query('DELETE FROM "Material" WHERE id = $1', [duplicateId]);
+    await db.end();
+  }
+});
+
+test('管理员新增空白封正确提交目标规格，缺分袋资料仍拒绝写入', async ({ page }) => {
+  test.setTimeout(60_000);
+  assertActivatedE2eDatabase();
+  const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
+  const orderId = `e2e-blank-add-${uniqueSuffix()}`;
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  try {
+    // The ADD flow intentionally accepts drafts without packaging groups only.
+    // Seed that existing supported state; keep the original packaging golden path intact.
+    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","settlementType","createdById",status,"updatedAt")
+      VALUES ($1,$1,$2,'SALES','EXTERNAL_SALES',$2,'DRAFT',NOW())`, [orderId, salesUserId]);
+    await db.query(`INSERT INTO "OrderItem" (id,"orderId",sequence,name,"pricingRoute",craft,"productStructure",
+      specification,"actualWidthMm","actualHeightMm","paperType","paperWeightGsm",quantity,pack,crafts,
+      "foilColors","frontFoilColors","backFoilColors","foilTechnique","hasLocalFoil","updatedAt")
+      VALUES ($1,$2,1,'原中号款','STOCK_BLANK','PARTIAL','STANDARD_ENVELOPE','中号封80×115',80,115,'180g红卡',180,1000,10,
+      ARRAY[(SELECT id FROM "Craft" WHERE code='FLAT_FOIL_PARTIAL')],ARRAY['哑金'],ARRAY['哑金'],ARRAY[]::text[],'FLAT',true,NOW())`,
+      [`${orderId}-item`, orderId]);
+    await db.query(`INSERT INTO "OrderShipment" (id,"orderId",sequence,"receiverName","receiverPhone","receiverAddress","destinationProvince","weightKg","updatedAt")
+      VALUES ($1,$2,1,'测试收货人','13800138000','广东省佛山市测试路1号','广东',1,NOW())`, [`${orderId}-shipment`, orderId]);
+    await db.query(`INSERT INTO "OrderShipmentLine" (id,"shipmentId","orderItemId",quantity) VALUES ($1,$2,$3,1000)`,
+      [`${orderId}-line`, `${orderId}-shipment`, `${orderId}-item`]);
+    await login(page, { from: `/orders/${orderId}/edit`, username: owner.username, password: E2E_PASSWORD });
+    await page.getByRole('button', { name: '新增款式（沿用第 1 款工艺和纸张）', exact: true }).click();
+    await page.getByLabel('第 2 款名称', { exact: true }).fill('新增大号款');
+    await page.getByLabel('规格', { exact: true }).nth(1).selectOption({ label: '大号封90×165' });
+    const requests: string[] = [];
+    page.on('request', (request) => {
+      if (request.headers()['next-action']) requests.push(request.postData() ?? '');
+    });
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect(page.getByRole('alert', { name: '未完成保存' })).toContainText('入袋每包组成未完整');
+    expect(requests.some((body) => body.includes('targetBlankIdentity') && body.includes('大号封90×165'))).toBe(true);
+    // Existing financial guard is intentional: no synthetic free packaging,
+    // no silent template-size insertion, and no saved ADD without a complete quote.
+    const items = (await db.query(`SELECT specification,quantity,"quotedAmount"::text
+      FROM "OrderItem" WHERE "orderId"=$1 ORDER BY sequence`, [orderId])).rows;
+    expect(items).toEqual([{ specification: '中号封80×115', quantity: 1000, quotedAmount: null }]);
+    await expectNoNextErrorOverlay(page);
+  } finally { await db.end(); }
 });

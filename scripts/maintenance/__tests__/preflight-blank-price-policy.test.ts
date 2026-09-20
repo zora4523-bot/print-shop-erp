@@ -29,6 +29,25 @@ describe('positive blank price cutover preflight', () => {
     expect(report.prices.missingOrAmbiguousPaperRuleIds).toEqual(['rule', 'duplicate']);
     expect(report.historicalMaterialEvidence.stoppedItemsRequiringManualConfirmation).toEqual(['item']);
   });
+  it('blocks a live legacy zero price and lists its rule for explicit review', () => {
+    const input = data();
+    input.rules[0] = { ...input.rules[0]!, amount: '0', productId: 'old',
+      product: { code: 'OLD', paperType: '180g红卡', weight: 180, specification: '中号封' } };
+    expect(buildBlankPricePolicyPreflight(input)).toMatchObject({ readyForAutomaticCutover: false,
+      prices: { legacyZeroRuleIds: ['rule'], productIdentityIssues: [] } });
+  });
+  it('does not reinterpret new unbound zero prices as legacy free supply', () => {
+    const input = data(); input.rules[0]!.amount = '0';
+    expect(buildBlankPricePolicyPreflight(input)).toMatchObject({ readyForAutomaticCutover: true,
+      prices: { legacyZeroRuleIds: [] } });
+  });
+  it('blocks product and condition identity drift even in historical books', () => {
+    const input = data();
+    input.rules.push({ ...input.rules[0]!, id: 'old-rule', priceBookId: 'old-book', productId: 'old',
+      product: { code: 'OLD', paperType: '180g红卡', weight: 180, specification: '大号封' } });
+    expect(buildBlankPricePolicyPreflight(input)).toMatchObject({ readyForAutomaticCutover: false,
+      prices: { productIdentityIssues: [{ ruleId: 'old-rule', issue: expect.stringContaining('不一致') }] } });
+  });
   it('only SELECTs in a repeatable READ ONLY transaction and leaves no open transaction', async () => {
     const query = vi.fn(async (sql: string) => ({ rows: sql.includes('current_database()')
       ? [{ database: 'test_db', capturedAt: new Date('2026-09-20T00:00:00Z') }] : [] }));

@@ -1,3 +1,4 @@
+import { orderChangeDisplayFields } from '@/lib/order/change-request-display';
 import { foilColorLabel } from '@/lib/order/foil-colors';
 import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { packagingModeLabel, packagingUnit } from '@/lib/order/packaging-mode';
@@ -138,7 +139,8 @@ function changeDiffs(request: Order['changeRequests'][number], currentItemIds: S
   if ('promisedDate' in proposal && proposal.promisedDate !== before.promisedDate) {
     rows.push({ id: `${request.id}-due`, label: '承诺交期', before: display(before.promisedDate), after: display(proposal.promisedDate), targetItemId: null, targetSection: 'overview' });
   }
-  for (const [index, change] of records(proposal.items).entries()) {
+  for (const [index, raw] of records(proposal.items).entries()) {
+    const change = orderChangeDisplayFields(raw);
     const itemId = typeof change.itemId === 'string' ? change.itemId : null;
     const source = itemId ? beforeItems.get(itemId) : undefined;
     if (change.operation !== 'ADD' && (change.operation !== 'UPDATE' || !source)) continue;

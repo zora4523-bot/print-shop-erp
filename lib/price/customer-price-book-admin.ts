@@ -1,3 +1,4 @@
+import { inspectBlankDraftIdentity } from './blank-price-draft-identity';
 import { PERMISSIONS } from '../auth/permissions-dict';
 import { blankPriceIdentity, blankPriceIdentityFromCondition, blankPriceTriggerCondition } from './blank-price-identity';
 import { BlankPaperCatalogError, resolveBlankPaperInTx } from './blank-paper-catalog';
@@ -3622,20 +3623,9 @@ function normalizeBlankDraftRule<T extends { exclusiveGroup: string | null; trig
   productId: string | null; amount: Prisma.Decimal | null; isActive: boolean;
   product?: { code: string | null; paperType: string | null; weight: number | null; specification: string | null } | null }>(rule: T): T {
   if (rule.exclusiveGroup !== 'STOCK_BASE') return rule;
-  const identity = blankPriceIdentityFromCondition(rule.triggerCondition);
-  if (!identity) throw new CustomerPriceBookAdminError('空白封规则身份不完整，无法创建调价草稿');
-  const condition = parseCustomerRuleCondition(rule.triggerCondition).condition;
-  if (rule.productId !== null) {
-    const productIdentity = rule.product?.paperType && rule.product.specification ? blankPriceIdentity({
-      paperType: rule.product.paperType, paperWeightGsm: rule.product.weight, specification: rule.product.specification,
-    }) : null;
-    if (!productIdentity || productIdentity.key !== identity.key ||
-        (condition?.productCodes && (condition.productCodes.length !== 1 || condition.productCodes[0] !== rule.product?.code))) {
-      throw new CustomerPriceBookAdminError('空白封历史产品与价格文本不一致，请先修复后再创建调价草稿');
-    }
-  } else if (condition?.productCodes) {
-    throw new CustomerPriceBookAdminError('空白封价格仍有不明确的产品条件，请先修复');
-  }
+  const result = inspectBlankDraftIdentity(rule);
+  if (result.issue !== null) throw new CustomerPriceBookAdminError(result.issue);
+  const { identity } = result;
   return { ...rule, productId: null, triggerCondition: blankPriceTriggerCondition(identity),
     amount: rule.isActive ? rule.amount : new Prisma.Decimal(0), isActive: true };
 }

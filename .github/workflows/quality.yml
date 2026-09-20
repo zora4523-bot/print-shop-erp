@@ -86,18 +86,19 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: print_shop_erp_ci
+          POSTGRES_DB: erp_e2e_unit
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d print_shop_erp_ci"
+          --health-cmd "pg_isready -U postgres -d erp_e2e_unit"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
     # Same variables the single-job workflow exposed while the unit suite ran.
     env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_unit
       E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_ci
       E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_ci
     steps:
@@ -127,6 +128,7 @@ jobs:
         run: |
           mkdir -p .review
           pnpm exec vitest run --coverage --maxWorkers=2 --reporter=default --reporter=json --outputFile=.review/unit-tests.json
+          node scripts/check-blank-migration-tests.mjs
 
       - name: Upload review data
         if: always()

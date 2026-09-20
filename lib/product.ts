@@ -339,6 +339,15 @@ export async function listProductsPage(opts: {
   );
 }
 
+/** Read-only specification directory facts; all statuses remain visible here. */
+export async function listProductSpecificationFacts() {
+  return db.product.findMany({
+    where: { category: { in: [ProductCategory.CUSTOM_FLAT_FOIL, ProductCategory.COLOR_PRINT] } },
+    select: { id: true, category: true, specification: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
 const EXTERNAL_CREATE_ORDER_PRODUCT_CATEGORIES = [
   ProductCategory.CUSTOM_FLAT_FOIL,
   ProductCategory.COLOR_PRINT,

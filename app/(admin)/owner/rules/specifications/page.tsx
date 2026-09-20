@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePermission } from '@/lib/auth/permissions';
-import { db } from '@/lib/db';
+import { listProductSpecificationFacts } from '@/lib/product';
 import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
 import { REQUIRED_FULL_SPECIFICATIONS } from '@/lib/order/create-order-published-rule-adapter';
 import { canonicalizeCreateOrderSpecification } from '@/lib/price/create-order/canonical-facts';
@@ -10,10 +10,7 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 export const metadata = { title: '规格目录' };
 export default async function SpecificationsPage() {
   await requirePermission('dict:product:manage');
-  const products = await db.product.findMany({
-    where: { category: { in: ['CUSTOM_FLAT_FOIL', 'COLOR_PRINT'] } },
-    select: { id: true, category: true, specification: true }, orderBy: { id: 'asc' },
-  });
+  const products = await listProductSpecificationFacts();
   const full = [...REQUIRED_FULL_SPECIFICATIONS].map((name) => ({
     label: name,
     values: [...new Set(products.filter((product) => product.category === 'CUSTOM_FLAT_FOIL' &&

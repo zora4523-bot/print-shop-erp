@@ -872,6 +872,143 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     );
   });
 
+  it('非空白缺价时款式、包装和物流均转人工，不把 0 元当作报价', async () => {
+    const order = draftOrder({
+      items: [
+        item(),
+        item({
+          id: 'item-2',
+          sequence: 2,
+          fig: 2,
+          name: '款式 2',
+          productId: 'product-red-large',
+          pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+          crafts: ['craft-full'],
+          paperType: '180g红卡',
+          paperWeightGsm: 180,
+          quantity: 500,
+          product: { paperMaterialId: 'paper-red-180' },
+        }),
+      ],
+    });
+    const manualSnapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      full: { ...CREATE_ORDER_GOLDEN_SNAPSHOT.full, unitPrices: [] },
+      orderCharges: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges,
+        rules: CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges.rules.filter(
+          (rule) => rule.kind !== 'PACKAGING',
+        ),
+      },
+    };
+    mocks.readPublishedSnapshot.mockResolvedValue(manualSnapshot);
+    mocks.productFindMany.mockResolvedValue([
+      catalogProduct(),
+      catalogProduct({
+        id: 'product-red-large',
+        code: 'EXT-CUSTOM-RED-180-LARGE',
+        category: 'CUSTOM_FLAT_FOIL',
+        paperType: '180g红卡',
+        paperMaterialId: 'paper-red-180',
+        weight: 180,
+      }),
+    ]);
+    mocks.craftFindMany.mockResolvedValue([
+      { id: 'craft-partial', code: 'FLAT_FOIL_PARTIAL', isActive: true },
+      { id: 'craft-full', code: 'FLAT_FOIL_SINGLE', isActive: true },
+    ]);
+    mocks.materialFindMany.mockResolvedValue([
+      catalogPaper(),
+      catalogPaper({
+        id: 'paper-red-180',
+        name: '180g红卡',
+      }),
+    ]);
+    mocks.resolveLogistics.mockResolvedValue(
+      resolvedLogistics([
+        resolvedCharge({ code: 'SHIPPING_FEE', amount: '41.30' }),
+        resolvedCharge({
+          code: 'PACKING_MATERIAL',
+          amount: '0.00',
+          requiresAdmin: true,
+          ruleCode: null,
+        }),
+      ]),
+    );
+
+    const expectedQuoteToken = await currentQuoteToken(order);
+    const tx = txFor(order);
+    const result = await finalizeExternalOrderQuoteInTx(
+      tx as unknown as Prisma.TransactionClient,
+      'order-1',
+      'sales-1',
+      NOW,
+      expectedQuoteToken,
+    );
+
+    expect(result).toMatchObject({
+      quotedFee: '211.30',
+      quotedFeeCompleteness:
+        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+      processingAmount: '170.00',
+      packagingAmount: '0.00',
+      logisticsAmount: '41.30',
+      manualItemIds: ['item-2'],
+    });
+    expect(tx.orderItem.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: { id: 'item-2' },
+        data: expect.objectContaining({
+          quoteDisposition:
+            OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
+          quotedAmount: null,
+          pricingSnapshot: expect.objectContaining({
+            version: 1,
+            schemaVersion: 2,
+            complete: false,
+            suggestedSubtotal: null,
+            engineVersion: 'CREATE_ORDER_PURE_V1',
+            source: 'EXTERNAL_SUBMIT_MANUAL_REQUIRED',
+            actual: expect.objectContaining({ amount: null }),
+          }),
+        }),
+      }),
+    );
+    expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          suggestedSubtotal: null,
+          pricingSnapshot: expect.objectContaining({
+            actual: expect.objectContaining({ amount: null }),
+          }),
+        }),
+      }),
+    );
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        create: expect.objectContaining({
+          businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
+          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+          suggestedAmount: null,
+          amount: null,
+        }),
+        update: expect.objectContaining({
+          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+          amount: null,
+        }),
+      }),
+    );
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        status: 'PENDING_ADMIN_CONFIRMATION',
+        expectedPriceRevision: 1,
+      }),
+    );
+  });
+
   it('空白封缺价时拒绝首次提交且不写入任何金额', async () => {
     const order = draftOrder({
       items: [

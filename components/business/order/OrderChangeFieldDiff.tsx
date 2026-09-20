@@ -1,4 +1,5 @@
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { orderChangeDisplayFields } from '@/lib/order/change-request-display';
 import { Badge } from '@/components/ui/badge';
 import { TableScrollArea } from '@/components/ui-business';
 import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
@@ -164,7 +165,7 @@ function buildDiffGroups(
 
   return changes.flatMap<DiffGroup>((raw, changeIndex) => {
     if (!raw || typeof raw !== 'object') return [];
-    const change = raw as Record<string, unknown>;
+    const change = orderChangeDisplayFields(raw as Record<string, unknown>);
 
     if (change.operation === 'UPDATE' && typeof change.itemId === 'string') {
       const before = itemById.get(change.itemId);

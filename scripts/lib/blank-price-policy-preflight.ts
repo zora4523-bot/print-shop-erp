@@ -1,3 +1,4 @@
+import { inspectBlankDraftIdentity } from '../../lib/price/blank-price-draft-identity';
 import Decimal from 'decimal.js';
 import { blankPaperFact } from '../../lib/price/blank-paper';
 import { blankPriceIdentity, blankPriceIdentityFromCondition } from '../../lib/price/blank-price-identity';
@@ -6,7 +7,7 @@ import { planBlankBomMigration, type BlankBomMigrationInput } from '../../lib/bo
 
 type Paper = { id: string; name: string; specification: string | null; isActive: boolean; outOfStock: boolean };
 type Book = { id: string; version: number; isActive: boolean; effectiveFrom: string; effectiveTo: string | null; notes: unknown };
-type Rule = { id: string; priceBookId: string; productId: string | null; amount: string | null; isActive: boolean; kind: string; calculationType: string | null; triggerCondition: unknown };
+type Rule = { id: string; priceBookId: string; productId: string | null; amount: string | null; isActive: boolean; kind: string; calculationType: string | null; triggerCondition: unknown; product?: { code: string | null; paperType: string | null; weight: number | null; specification: string | null } | null };
 export type BlankPricePreflightInput = {
   at: Date; papers: Paper[]; books: Book[]; rules: Rule[];
   items: HistoricalBlankItem[];
@@ -27,6 +28,10 @@ export function buildBlankPricePolicyPreflight(input: BlankPricePreflightInput) 
     duplicatePaperGroups.set(key, [...duplicatePaperGroups.get(key) ?? [], paper.id]);
   }
   const validRules = input.rules.map((rule) => ({ rule, identity: blankPriceIdentityFromCondition(rule.triggerCondition) }));
+  const productIdentityIssues = input.rules.flatMap((rule) => {
+    const { issue } = inspectBlankDraftIdentity(rule);
+    return issue ? [{ ruleId: rule.id, issue }] : [];
+  });
   const invalidRuleIds = validRules.filter(({ rule, identity }) => !identity || rule.kind !== 'BASE' || rule.calculationType !== 'PER_PIECE' ||
     rule.amount === null || !new Decimal(rule.amount).isFinite() || new Decimal(rule.amount).isNegative() || new Decimal(rule.amount).decimalPlaces() > 4).map(({ rule }) => rule.id);
   const duplicateRules = new Map<string, string[]>();
@@ -36,6 +41,13 @@ export function buildBlankPricePolicyPreflight(input: BlankPricePreflightInput) 
     duplicateRules.set(key, [...duplicateRules.get(key) ?? [], rule.id]);
   }
   const currentRules = validRules.filter(({ rule }) => currentBooks.some((book) => book.id === rule.priceBookId));
+  const liveBookIds = new Set(input.books.filter((book) =>
+    (book.isActive && (!book.effectiveTo || new Date(book.effectiveTo) > input.at)) || workflowStatus(book.notes) === 'DRAFT',
+  ).map((book) => book.id));
+  // Bound historical rules used zero as an explicit quote. Unbound rules are
+  // already on the new policy, where zero intentionally disables a cell.
+  const legacyZeroRuleIds = input.rules.filter((rule) => liveBookIds.has(rule.priceBookId) &&
+    rule.productId !== null && rule.isActive && rule.amount !== null && new Decimal(rule.amount).isZero()).map((rule) => rule.id);
   const unavailablePaperRuleIds: string[] = [];
   const missingPaperRuleIds: string[] = [];
   const retired120RuleIds: string[] = [];
@@ -65,7 +77,7 @@ export function buildBlankPricePolicyPreflight(input: BlankPricePreflightInput) 
       positive: currentRules.filter(({ rule }) => rule.isActive && rule.amount !== null && new Decimal(rule.amount).gt(0)).length,
       zero: currentRules.filter(({ rule }) => rule.amount !== null && new Decimal(rule.amount).isZero()).length,
       inactive: currentRules.filter(({ rule }) => !rule.isActive).length,
-      invalidRuleIds, duplicateRuleGroups: [...duplicateRules.values()].filter((ids) => ids.length > 1),
+      legacyZeroRuleIds, productIdentityIssues, invalidRuleIds, duplicateRuleGroups: [...duplicateRules.values()].filter((ids) => ids.length > 1),
       unboundCurrentRows: currentRules.filter(({ rule }) => rule.productId === null).length,
       missingOrAmbiguousPaperRuleIds: missingPaperRuleIds, unavailablePaperRuleIds, retired120RuleIds },
     papers: { count: input.papers.length, duplicateIdentityGroups: [...duplicatePaperGroups.values()].filter((ids) => ids.length > 1) },
@@ -78,6 +90,7 @@ export function buildBlankPricePolicyPreflight(input: BlankPricePreflightInput) 
       proposedCopies: migration.copies.map((copy) => ({ targetId: copy.id, sourceId: copy.source.id, productIds: copy.productIds })),
       preservedTargetIds: migration.preserved },
     readyForAutomaticCutover: currentBooks.length === 1 && invalidRuleIds.length === 0 &&
+      productIdentityIssues.length === 0 && legacyZeroRuleIds.length === 0 &&
       [...duplicateRules.values()].every((ids) => ids.length <= 1) && missingPaperRuleIds.length === 0 && migration.issues.length === 0,
     /** External consumers, audit JSON and historical snapshots require a separate deletion audit. */
     cleanupAuthorized: false,

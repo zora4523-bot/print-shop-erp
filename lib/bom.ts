@@ -328,6 +328,8 @@ export type OrderMaterialUsageEstimate = {
     itemName: string;
     quantity: number;
     source: 'PRODUCT' | 'CATEGORY' | 'BLANK' | 'NONE';
+    /** Known catalog problems block the estimate, not order viewing. */
+    issue?: string;
     bom: Pick<
       BomDetail,
       'id' | 'name' | 'version' | 'baseQuantity' | 'productId' | 'categoryNodeId'
@@ -366,29 +368,44 @@ export async function estimateMaterialUsageForOrderItems(
 
   const blankItems = items.filter((item) => !item.productId && item.pricingRoute === 'STOCK_BLANK');
   const blankTargets = new Map<string, { paperId: string; specificationKey: string }>();
+  const blankIssues = new Map<string, string>();
   let blankCategoryId: string | null = null;
   if (blankItems.length) {
     const [papers, setting] = await Promise.all([
       db.material.findMany({ where: { category: 'PAPER' } }),
       db.setting.findUnique({ where: { key: BLANK_BOM_CATEGORY_SETTING } }),
     ]);
+    let categoryIssue: string | null = null;
     if (setting && setting.value !== null) {
-      if (typeof setting.value !== 'string' || !setting.value) throw new BomInvariantError('空白封默认用料分类配置无效');
-      const category = await db.productCategoryNode.findUnique({ where: { id: setting.value } });
-      if (!category?.isActive || category.legacyCategory !== 'BLANK_STOCK') {
-        throw new BomInvariantError('空白封默认用料分类不存在或已失效');
+      if (typeof setting.value !== 'string' || !setting.value) {
+        categoryIssue = '空白封默认用料分类配置无效';
+      } else {
+        const category = await db.productCategoryNode.findUnique({ where: { id: setting.value } });
+        if (!category?.isActive || category.legacyCategory !== 'BLANK_STOCK') {
+          categoryIssue = '空白封默认用料分类不存在或已失效';
+        } else {
+          blankCategoryId = category.id;
+          if (!categoryNodeIds.includes(category.id)) categoryNodeIds.push(category.id);
+        }
       }
-      blankCategoryId = category.id;
-      if (!categoryNodeIds.includes(category.id)) categoryNodeIds.push(category.id);
     }
     for (const item of blankItems) {
       const matches = findCatalogPaperIdentityMatches(papers, {
         name: item.paperType ?? '', specification: item.paperWeightGsm ? `${item.paperWeightGsm}g` : null,
       });
-      if (matches.length > 1) throw new BomInvariantError('空白封用料纸张身份重复，请先检查纸张资料');
+      if (matches.length > 1) {
+        blankIssues.set(item.id, '空白封用料纸张身份重复，请先检查纸张资料');
+        continue;
+      }
+      if (categoryIssue) {
+        blankIssues.set(item.id, categoryIssue);
+        continue;
+      }
       const specificationKey = blankSpecificationKey(item.specification);
       if (matches.length === 1 && specificationKey && catalogPaperIdentityKeys(matches[0]!).size === 1) {
         blankTargets.set(item.id, { paperId: matches[0]!.id, specificationKey });
+      } else {
+        blankIssues.set(item.id, '纸张或规格资料不完整，请先检查纸张与规格');
       }
     }
   }
@@ -446,6 +463,7 @@ export async function estimateMaterialUsageForOrderItems(
         source,
         bom: null,
         materials: [],
+        ...(blankIssues.has(item.id) ? { issue: blankIssues.get(item.id)! } : {}),
       };
     }
 

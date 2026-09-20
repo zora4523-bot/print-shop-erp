@@ -234,7 +234,7 @@ it('uses order conditions, calculates automatically and changes markup without r
   expect(mocks.quote.mock.calls[0]![0].item).toMatchObject({
     pricingRoute: 'STOCK_BLANK',
     quantity: 1000,
-    productId: 'stock',
+    productId: null,
     paperWeightGsm: 160,
   });
   await expect
@@ -408,7 +408,7 @@ it('keeps missing prices unknown and passes only item conditions to order creati
     window.sessionStorage.getItem(`workbench-order:sales:${id}`)!,
   );
   expect(transferred.item).toMatchObject({
-    productId: 'stock',
+    productId: null,
     quantity: 1000,
   });
   expect(transferred.item).not.toHaveProperty('suggestedSubtotal');
@@ -419,20 +419,22 @@ it('resolves duplicated products only after explicit selection and never silentl
     ...options,
     products: [
       ...options.products,
-      { ...options.products[0]!, id: 'stock2', name: '局部烫金二' },
+      { ...options.products[1]!, id: 'custom2', name: '专版烫金二' },
     ],
   };
   render(false, catalog);
+  await page.getByRole('button', { name: '专版烫金', exact: true }).click();
+  mocks.quote.mockClear();
   const select = page.getByRole('combobox', { name: '匹配产品' });
   await expect.element(select).toHaveValue('');
   expect(mocks.quote).not.toHaveBeenCalled();
-  await userEvent.selectOptions(select, 'stock2');
+  await userEvent.selectOptions(select, 'custom2');
   await expect
     .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.productId)
-    .toBe('stock2');
+    .toBe('custom2');
   await page.getByRole('spinbutton', { name: '数量', exact: true }).fill('500');
   await expect
     .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.quantity)
     .toBe(500);
-  expect(mocks.quote.mock.calls.at(-1)?.[0].item.productId).toBe('stock2');
+  expect(mocks.quote.mock.calls.at(-1)?.[0].item.productId).toBe('custom2');
 });

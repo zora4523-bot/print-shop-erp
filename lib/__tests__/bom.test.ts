@@ -351,6 +351,16 @@ describe('blank paper/specification BOM targets', () => {
     dbMock.billOfMaterial.findMany.mockResolvedValue([makeBom({ productId: null, categoryNodeId: 'cat1' })]);
     expect((await estimateMaterialUsageForOrderItems([blankItem])).items[0]).toMatchObject({ source: 'CATEGORY', materials: [{ quantity: '1000.0000' }] });
   });
+  it('reports ambiguous blank paper without guessing a BOM or hiding healthy product estimates', async () => {
+    dbMock.material.findMany.mockResolvedValue([paper, { ...paper, id: 'retired', isActive: false }]);
+    dbMock.billOfMaterial.findMany.mockResolvedValue([makeBom()]);
+    const result = await estimateMaterialUsageForOrderItems([
+      blankItem, { ...blankItem, id: 'history', productId: 'prod1' },
+    ]);
+    expect(result.items[0]).toMatchObject({ source: 'NONE', bom: null, materials: [], issue: expect.stringContaining('身份重复') });
+    expect(result.items[1]).toMatchObject({ source: 'PRODUCT', materials: [{ quantity: '1000.0000' }] });
+    expect(result.totals).toHaveLength(1);
+  });
   it('missing BOM remains a visible NONE row instead of silent success', async () => {
     dbMock.material.findMany.mockResolvedValue([paper]);
     dbMock.billOfMaterial.findMany.mockResolvedValue([]);
@@ -370,7 +380,7 @@ describe('blank paper/specification BOM targets', () => {
     dbMock.material.findMany.mockResolvedValue([paper]);
     dbMock.setting.findUnique.mockResolvedValue({ value: 'missing' });
     dbMock.productCategoryNode.findUnique.mockResolvedValue(null);
-    await expect(estimateMaterialUsageForOrderItems([blankItem])).rejects.toThrow('默认用料分类不存在或已失效');
+    expect((await estimateMaterialUsageForOrderItems([blankItem])).items[0]).toMatchObject({ source: 'NONE', issue: '空白封默认用料分类不存在或已失效', materials: [] });
   });
   it('does not read the current paper/default for historical Product orders', async () => {
     dbMock.billOfMaterial.findMany.mockResolvedValue([makeBom()]);

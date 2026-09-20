@@ -159,7 +159,7 @@ Knip、ts-prune 和循环依赖扫描共同生成证据；CI 对照稳定的文�
 - Vitest 的 Node 配置排除 `tests/e2e`、`tests/visual`、`.next` 和 `generated`；浏览器组件由 `vitest.browser.config.ts` 单独执行。
 - 开发 Playwright 固定默认 `http://127.0.0.1:3100`，发布配置默认 `http://127.0.0.1:3200`。`E2E_BASE_URL` 只接受本机独立端口，拒绝 3000、远程地址和带路径/query 的地址；所有模式 `reuseExistingServer=false`。
 - `E2E_DATABASE_URL` 与匹配库名的 `E2E_DATABASE_CONFIRM_DATABASE` 必填。库名须含独立 `test` / `e2e` / `ci` 分段且不含 `prod` / `production` / `live`；数据库名称必须与日常 `DATABASE_URL` 不同，即使主机不同也拒绝同名，避免 DNS 别名绕过隔离。主机百分号解码、大小写与末尾点规范化后比较，localhost、127.0.0.1、::1 视为同一主机。原目标标记只在已激活的 Playwright 子进程重载中保留；普通启动重新读取当前 URL。不要设置内部标记或 URL query 来替换主机/库名。`--list` 只收集，不连接；实际执行在 webServer/globalSetup 双重预检。
-- 全量 Vitest 的 PostgreSQL 测试也只对专用测试库运行，不能用 fixture 名称唯一代替隔离。
+- 全量 Vitest 的 PostgreSQL 测试也只对专用测试库运行，不能用 fixture 名称唯一代替隔离。CI unit 使用 `erp_e2e_unit`；生成 `.review/unit-tests.json` 后执行 `node scripts/check-blank-migration-tests.mjs`，强制空白封价格与 BOM 迁移套件实际通过，缺失、失败或跳过均失败。
 - 先 migrate/seed 隔离库，再执行 `test:e2e:prepare`。测试进程同时提供 `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`（或明确 E2E_ADMIN 覆盖）；只设置数据库不能完成登录前置。
 - `test:e2e:prepare` 先在已确认的隔离库执行 `prepare-e2e-catalog.ts`，复用 `retire-unused-paper-imports` 的完整库存、外键、历史快照、标准纸张唯一性检查及审计，再发布测试工价。空库迁移仍会恢复旧导入记录，因此不能省略此步骤或放宽工单纸张身份校验；记录已使用或改变时直接失败。此入口拒绝日常/生产库，不代替正式环境按运维流程演练和确认修复，也不修改旧迁移。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
@@ -238,7 +238,8 @@ Next、`@next/env`、`eslint-config-next` 锁定到本地已验证的 16.3.4，�
 
 ### 空白封单价改造工具（2026-09-20）
 
-- `scripts/maintenance/preflight-blank-price-policy.ts --database-url <目标库>`：显式目标、只读事务，报告现行规则身份、停售/缺价、历史材料价证据、BOM 映射和 Product 引用；不输出连接凭据，不授权删除。
+- `scripts/maintenance/preflight-blank-price-policy.ts --database-url <目标库>`：显式目标、只读事务，报告所有 STOCK_BASE 身份重复、存量绑定产品零价、产品与价格文本漂移、停售/缺价、历史材料价证据、BOM 映射和 Product 引用。零价清单及身份漂移会阻断自动切换；新政策无产品绑定的零价仍表示未启用。预检与调价草稿共用身份校验，不输出连接凭据，不授权删除。
+- 切换使用 `scripts/maintenance/deploy-blank-price-migrations.ts` 的显式目标保护，步骤只维护在[部署指南](./docs/部署指南.md#空白封按单价管理的升级前置2026-09-20)。该工具只允许这两条待执行迁移，不代替备份、停写和 BOM 复制。
 - `scripts/maintenance/migrate-blank-bom-targets.ts --database-url <目标库>`：默认只读；核对计划后 `--apply` 复制旧目标并审计，必要时明确 `--default-category-id`。多源歧义必须解决，不能猜第一条。
 - `scripts/maintenance/compare-paper-specs.ts`：对同库、同时间和相同用例读取前后真实目录及报价；按新政策捕获的准入差异必须逐项精确声明，正价金额不可加入忽略名单。完整实测参数与摘要见[验收记录](./docs/audits/2026-09-20-blank-price-implementation.md)。
 
