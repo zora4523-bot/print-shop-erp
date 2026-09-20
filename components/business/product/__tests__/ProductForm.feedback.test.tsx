@@ -182,3 +182,16 @@ describe('ProductForm structured feedback contract', () => {
     expect(pendingHtml).not.toContain('产品编码已被其他记录占用');
   });
 });
+
+it('受保护产品身份只显示原值，隐藏提交值保留长编码，名称仍可编辑', () => {
+  const code = `BLANK-${'a'.repeat(20)}-west-large`;
+  const html = renderToStaticMarkup(<ProductForm mode="edit" action={vi.fn()} categoryNodes={categoryNodes} identityReadOnly
+    initial={{ code, categoryNodeId: 'category-1', name: '组合', specification: '西封大号85×165', paperType: '160g红卡' }} />);
+  for (const field of ['code', 'categoryNodeId', 'specification', 'paperType']) {
+    expect(html).toContain(`type="hidden" name="${field}"`);
+    expect(html).not.toContain(`id="${field}"`);
+  }
+  expect(html).toContain(code);
+  expect(html).toContain('id="name"');
+  expect(html).toContain('/owner/rules/papers');
+});

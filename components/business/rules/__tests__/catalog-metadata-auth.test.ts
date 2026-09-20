@@ -25,6 +25,11 @@ const {
   }),
 }));
 
+vi.mock('@/actions/catalog-paper', () => ({ createCatalogPaperAction: vi.fn() }));
+vi.mock('@/actions/paper-specifications', () => ({ enablePaperSpecificationsAction: vi.fn() }));
+vi.mock('@/lib/price/read-paper-specifications', () => ({ readPaperSpecifications: vi.fn() }));
+vi.mock('../catalog/UnassignedPaperProducts', () => ({ UnassignedPaperProducts: vi.fn() }));
+
 vi.mock('@/lib/auth/session', () => ({ getSession: getSessionMock }));
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: requirePermissionMock,

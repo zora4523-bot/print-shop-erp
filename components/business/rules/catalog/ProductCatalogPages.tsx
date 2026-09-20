@@ -125,7 +125,7 @@ export async function ProductCatalogList({
         subtitle={
           specWorkspace
             ? '规格和纸张来自可建单组合；烫金颜色当前随工单事实维护。'
-            : '维护新建工单的产品结构、纸张与规格组合；系统根据工单参数隐式匹配，价格由已发布客户计价规则决定。'
+            : '查看产品组合、维护名称与启停；空白封适用规格在纸张页管理。'
         }
         actions={
           <Link
@@ -249,7 +249,7 @@ export async function NewProductCatalogItem({
       <RuleCenterPageHeader
         title="新建可建单组合"
         effect="immediate"
-        subtitle="组合只定义产品结构、纸张与规格匹配；价格及数量档请在客户计价规则中维护。"
+        subtitle="空白封适用规格在纸张页管理；本页保留产品组合创建。价格及数量档在客户计价规则中维护。"
         actions={
           <Link
             href={routeBase}
@@ -343,6 +343,7 @@ export async function EditProductCatalogItem({
           key={`${product.id}-${product.updatedAt.toISOString()}`}
           mode="edit"
           action={boundUpdate}
+          identityReadOnly={product.category === 'BLANK_STOCK' || product.category === 'COLOR_PRINT'}
           initial={formInitial}
           categoryNodes={categoryOptions}
           routeBase={routeBase}

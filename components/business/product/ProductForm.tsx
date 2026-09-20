@@ -32,6 +32,7 @@ export type ProductRouteBase = typeof RULE_CENTER_HREFS.stockSkus;
 type CommonProps = {
   routeBase?: ProductRouteBase;
   categoryManagementHref?: string;
+  identityReadOnly?: boolean;
 };
 
 type Props = CommonProps &
@@ -72,6 +73,7 @@ export function ProductForm(props: Props) {
     null,
   );
   const isCreate = props.mode === 'create';
+  const identityReadOnly = !isCreate && props.identityReadOnly;
   const initial = props.mode === 'edit' ? props.initial : undefined;
 
   const visibleState = pending ? null : state;
@@ -94,6 +96,21 @@ export function ProductForm(props: Props) {
     >
       <FormErrorSummary errors={summaryErrors} />
 
+      {identityReadOnly && initial ? (
+        <div className="space-y-3">
+          {([
+            ['code', '组合编码', initial.code],
+            ['categoryNodeId', '产品结构分类', props.categoryNodes.find((node) => node.id === initial.categoryNodeId)?.name],
+            ['specification', '规格', initial.specification],
+            ['paperType', '纸张', initial.paperType],
+          ] as const).map(([key, label, value]) => <div key={key}>
+            <p className="text-sm text-muted-foreground">{label}</p>
+            <p className="admin-wrap-anywhere text-sm">{externalPriceBusinessText(value ?? '') || '未填写'}</p>
+            <input type="hidden" name={key} value={initial[key] ?? ''} />
+          </div>)}
+          <Link href="/owner/rules/papers" className="text-sm text-primary underline">到纸张页管理空白封适用规格</Link>
+        </div>
+      ) : <>
       {isCreate ? (
         <Disclosure
           className="rounded-lg border border-dashed p-3"
@@ -171,6 +188,8 @@ export function ProductForm(props: Props) {
         ) : null}
       </div>
 
+      </>}
+
       {initial ? (
         <PreservedBusinessTextField
           id="name"
@@ -191,6 +210,7 @@ export function ProductForm(props: Props) {
         />
       )}
 
+      {!identityReadOnly && <>
       {initial ? (
         <PreservedBusinessTextField
           id="specification"
@@ -230,6 +250,8 @@ export function ProductForm(props: Props) {
           error={errs.paperType?.[0]}
         />
       )}
+
+      </>}
 
       {generalError ? (
         <ActionNotice

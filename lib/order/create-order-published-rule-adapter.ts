@@ -438,7 +438,7 @@ function projectPartial(
   };
 }
 
-const REQUIRED_FULL_SPECIFICATIONS = new Set([
+export const REQUIRED_FULL_SPECIFICATIONS = new Set([
   '\u4e2d\u53f7\u5c01',
   '\u65b9\u5f62\u5c01',
   '\u5927\u53f7\u5c01',

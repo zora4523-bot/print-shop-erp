@@ -358,6 +358,14 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 文件过期或读取失败 503；非法 view/id 400。所有响应 `Cache-Control: private, no-store`。
 下载前后重新检查所有工单内容标识及创建者权限，任意变化阻止整份文件下载。
 
+### 纸张目录与无草稿启用规格（2026-09-20）
+
+`actions/catalog-paper.ts` 的 `createCatalogPaperAction(prev, formData)` 要求 `material:manage`。接收 `name`、整数 `weight`（1–2000）与 `reviewed=yes`，复用草稿建纸校验，拒绝 120g；通过现有物料领域保护创建“克重g纸名”、规格“克重g”、单位“张”的 PAPER。成功跳转纸张详情并带 `created` 回执。
+
+`actions/paper-specifications.ts` 的 `enablePaperSpecificationsAction(paperId, prev, formData)` 先检查 `material:manage` 与 `dict:product:manage`。接收 1–6 个唯一 `specifications` 和 `reviewed=yes`；规格数组仅代表本次增量，不是全量适用关系。服务端提供操作者，领域写锁内重读纸张和产品，校验 S1/S2 后新建或重新启用。无价格权限要求，不创建价格、不补旧产品外键，成功跳转原纸张详情并带 `updated` 回执。两入口失败返回 `MutationResult` 的 `invalid/error`；权限和未知错误抛出。复核标记只用于流程校验，不代替领域授权与数据校验。
+
+纸张详情的可选状态复用建单目录，价格来自现行报价投影与文本选择器；价格读取失败单独提示，不能视作缺价或零价。`/owner/rules/specifications` 要求 `dict:product:manage`，仅展示空白封常量、专版五规格与现有产品尺寸、彩印现有规格串，无写入口。
+
 ### 空白封纸张与规格价格（2026-09-13）
 
 `actions/blank-paper.ts` 的 `addBlankPaperAction` 同时要求 `dict:price:manage`、`material:manage`、`dict:product:manage`。输入包括 `priceBookId`、ISO `expectedUpdatedAt`、`paper`（`mode: new` 的名称与整数克重，或 `mode: existing` 的纸张 ID）及 1–6 个唯一 `specifications`。规格 key 为 `mini / square / mid / large / west-mid / west-large`；`amount` 为非负、最多四位小数的十进制字符串或 `null`。

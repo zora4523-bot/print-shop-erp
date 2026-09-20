@@ -35,6 +35,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   warehouses: '仓库/库位',
   'customer-pricing': '客户计价规则',
   papers: '纸张',
+  specifications: '规格目录',
   'stock-skus': '可建单产品组合',
   'price-versions': '价格版本',
   'employee-pay': '员工薪酬规则',

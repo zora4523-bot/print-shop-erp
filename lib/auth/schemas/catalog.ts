@@ -140,3 +140,9 @@ export const updateProductSchema = z.object({
 });
 
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+
+// Same schema as the domain boundary; do not duplicate the allowed specification keys.
+export { enableBlankSpecificationsSchema } from '@/lib/price/blank-paper';
+
+import { addBlankPaperSchema } from '@/lib/price/blank-paper';
+export const newCatalogPaperSchema = addBlankPaperSchema.shape.paper.options[1];

@@ -80,7 +80,7 @@ export function RuleSpecWorkspace({
               规格主数据
             </h2>
             <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-              每行对应一条可建单组合，只维护产品结构、规格与纸张；价格及数量档由客户计价规则维护。
+              空白封适用规格在纸张页管理；这里保留组合查询、创建与启停，价格及数量档由客户计价规则维护。
             </p>
           </div>
           <span className="shrink-0 rounded-full border bg-background px-3 py-1 text-xs font-medium tabular-nums text-muted-foreground">

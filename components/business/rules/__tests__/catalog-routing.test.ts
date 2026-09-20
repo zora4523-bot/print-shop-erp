@@ -59,7 +59,8 @@ describe('rule-center feature routing', () => {
       'utf8',
     );
 
-    expect(materialCatalog).toContain('createPaperAction');
+    // PLAN S1: paper creation now uses the name/weight-only canonical entry.
+    expect(materialCatalog).toContain('createCatalogPaperAction');
     expect(materialCatalog).toContain('createNonPaperMaterialAction');
     expect(materialCatalog).toContain('updatePaperAction');
     expect(materialCatalog).toContain('setPaperActiveAction');
