@@ -354,10 +354,10 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
           effectiveFrom,
         }),
       ),
-    ).rejects.toThrow('缺少局部烫金空白封单价');
+    ).rejects.toThrow(expect.objectContaining({ code: 'MISSING_RULE' }));
   });
 
-  it('preserves null versus zero and fails closed on duplicate or missing rules', async () => {
+  it('rejects damaged blank prices, permits all unsold and fails closed on duplicates', async () => {
     const { at } = await readProjectionWindow(PROCESSING_BOOK_ID);
     const input = await readCurrentProjectionInput(at);
     const blank = input.rules.find(
@@ -370,20 +370,19 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
         rule.id === blank.id ? { ...rule, amount } : rule,
       ),
     });
-    const nullProjection = projectPublishedCreateOrderPriceSnapshot(
-      withAmount(null),
-    );
+    expect(() => projectPublishedCreateOrderPriceSnapshot(withAmount(null))).toThrow(expect.objectContaining({ code: 'INVALID_RULE' }));
+    const emptyProjection = projectPublishedCreateOrderPriceSnapshot({ ...input, rules: input.rules.filter((rule) => rule.exclusiveGroup !== 'STOCK_BASE') });
+    expect(emptyProjection.snapshot.partial.blankUnitPrices).toEqual([]);
     const zeroProjection = projectPublishedCreateOrderPriceSnapshot(
       withAmount('0'),
     );
-    const projectedBlank = (projection: typeof nullProjection) =>
+    const projectedBlank = (projection: typeof zeroProjection) =>
       projection.snapshot.partial.blankUnitPrices.find(
         (price) =>
           price.paperType === '珠光艳闪' &&
           price.paperWeightGsm === 160 &&
           price.specification === '中号封',
       )!;
-    expect(projectedBlank(nullProjection).unitPrice).toBeNull();
     expect(projectedBlank(zeroProjection).unitPrice).toBe('0');
 
     expect(() =>

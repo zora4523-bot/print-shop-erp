@@ -1,15 +1,11 @@
 import 'server-only';
-import { listExternalCreateOrderProductOptions } from '@/lib/product';
-import { listExternalCreateOrderPaperOptions } from '@/lib/material';
+import { listExternalCreateOrderOptions } from './create-order-options';
 import type { OrderChangeCatalogProduct } from './change-request-catalog-identity';
 
 export async function listActiveOrderChangeCatalogProducts(): Promise<
   OrderChangeCatalogProduct[]
 > {
-  const [products, papers] = await Promise.all([
-    listExternalCreateOrderProductOptions(),
-    listExternalCreateOrderPaperOptions(),
-  ]);
+  const { products, papers } = await listExternalCreateOrderOptions();
   const paperById = new Map(papers.map((paper) => [paper.id, paper]));
   return products.map((product) => {
     const paper = product.paperMaterialId
@@ -17,6 +13,8 @@ export async function listActiveOrderChangeCatalogProducts(): Promise<
       : null;
     return {
       id: product.id,
+      selectionKey: product.selectionKey,
+      source: product.source,
       category: product.category,
       specification: product.specification,
       paperType: product.paperType,

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { OrderStatus } from '@/generated/prisma/enums';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
-import type { CancellationSettlementReference } from '@/lib/order/change-request';
+import type { CancellationSettlementPreview } from '@/lib/order/change-request';
 import '@/app/globals.css';
 import { Button } from '@/components/ui/button';
 
@@ -47,7 +47,8 @@ import { AdminOrderDecisionPanel } from '../AdminOrderDecisionPanel';
 
 let host: HTMLDivElement;
 let root: Root;
-const reference: CancellationSettlementReference = {
+const reference: CancellationSettlementPreview = {
+  priceRevision: 3, quoteToken: `order-change-approval-v1:${'a'.repeat(64)}`,
   referenceSettleFee: '100.00', calculation: 'CURRENT_PUBLISHED_ENGINE_V1',
   components: { itemProcessing: '100.00', bagging: '0.00', carton: '0.00', preservedManualCharges: '0.00', shipping: '0.00' },
   allocation: [{ orderItemId: 'item-1', producedQty: 100 }],
@@ -116,6 +117,7 @@ describe('admin order decisions require review before mutation', () => {
     expect(actions.review).toHaveBeenCalledWith(null, expect.objectContaining({
       requestId: 'cancel-request-1', decision: 'APPROVE', producedQty: 100,
       settleFee: '120.00', settleFeeAdjustmentReason: '客户确认的人工调整',
+      expectedPriceRevision: reference.priceRevision, expectedQuoteToken: reference.quoteToken,
     }));
   });
 
@@ -147,7 +149,7 @@ describe('admin order decisions require review before mutation', () => {
   });
 
   it('locks preview inputs while pending and ignores a response from an earlier order version', async () => {
-    let finish!: (result: { status: 'success'; preview: CancellationSettlementReference }) => void;
+    let finish!: (result: { status: 'success'; preview: CancellationSettlementPreview }) => void;
     actions.preview.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     renderOrder();
     await page.getByRole('button', { name: '批准取消', exact: true }).click();

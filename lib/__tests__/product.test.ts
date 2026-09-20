@@ -11,6 +11,7 @@ import {
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     $executeRaw: vi.fn(),
+    setting: { findUnique: vi.fn() },
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
     businessAuditLog: {
@@ -68,9 +69,8 @@ import {
 } from '../product';
 
 describe('QUOTE_PRODUCT_CATEGORIES', () => {
-  it('覆盖三条计价路线的 SKU，排除已归并与自带纸料分类', () => {
+  it('独立产品资料仅保留非空白路线，空白封由单价表管理', () => {
     expect(QUOTE_PRODUCT_CATEGORIES).toEqual([
-      ProductCategory.BLANK_STOCK,
       ProductCategory.GENERIC_STOCK,
       ProductCategory.CUSTOM_FLAT_FOIL,
       ProductCategory.COLOR_PRINT,
@@ -85,6 +85,7 @@ describe('QUOTE_PRODUCT_CATEGORIES', () => {
 });
 
 beforeEach(() => {
+  dbMock.setting.findUnique.mockReset().mockResolvedValue(null);
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
   dbMock.$queryRaw.mockReset().mockResolvedValue([]);
   dbMock.businessAuditLog.create.mockReset().mockResolvedValue({ id: 'audit-1' });
@@ -1178,7 +1179,7 @@ describe('setProductActive', () => {
         ...activeChangeContext,
         reason: null,
       }),
-    ).rejects.toThrow(/属于已退役历史分类.*不能重新启用/u);
+    ).rejects.toThrow(identity.legacyCategory === ProductCategory.BLANK_STOCK ? /历史产品资料只读/u : /属于已退役历史分类.*不能重新启用/u);
     expect(dbMock.product.update).not.toHaveBeenCalled();
     expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
@@ -1285,50 +1286,53 @@ describe('setProductActiveInTx', () => {
   });
 });
 
-describe('blank product identity guards (PLAN S8)', () => {
-  const data = { code: 'BLANK-TEST', name: '测试组合', categoryNodeId: 'stock', paperType: '160g红卡',
+describe('blank products are historical read-only after price-only cutover', () => {
+  const data = { code: 'BLANK-TEST', name: '历史空白封', categoryNodeId: 'stock', paperType: '160g红卡',
     specification: '中号封80×115', baseUnitPrice: null };
   const row = (changes = {}) => ({ ...makeProduct(), id: 'existing', category: ProductCategory.BLANK_STOCK,
-    categoryNodeId: 'stock', paperType: '160g红卡', weight: 160, specification: '中号封80×115',
-    paperMaterialId: null, ...changes });
+    categoryNodeId: 'stock', paperType: '160g红卡', weight: 160, specification: '中号封80×115', paperMaterialId: null, ...changes });
   beforeEach(() => {
     dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode({ id: 'stock', legacyCategory: ProductCategory.BLANK_STOCK }));
-    dbMock.material.findMany.mockResolvedValue([{ id: 'paper', name: '160g红卡', specification: null }]);
   });
-  it.each([
-    {}, { isActive: false }, { specification: '中号封80x115' },
-    { paperMaterialId: 'wrong', isActive: false },
-    { specification: '中号封80×115 / 大号封90×165' },
-  ])('refuses creating a duplicate or blocked cell: %j', async (changes) => {
-    dbMock.product.findMany.mockResolvedValue([row(changes)]);
-    await expect(createProduct(data)).rejects.toThrow('请到纸张页');
+  it.each([{ products: [] }, { products: [row()] }, { products: [row({ isActive: false })] }])('rejects blank creation independently of existing Product rows', async ({ products }) => {
+    dbMock.product.findMany.mockResolvedValue(products);
+    await expect(createProduct(data)).rejects.toThrow('空白封单价表管理');
     expect(dbMock.product.create).not.toHaveBeenCalled();
-    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(dbMock.product.findMany.mock.invocationCallOrder[0]);
   });
-  it('inactive non-exact old rows do not block a new exact product', async () => {
-    dbMock.product.findMany.mockResolvedValue([row({ specification: '中号封', isActive: false })]);
-    await createProduct(data);
-    expect(dbMock.product.create).toHaveBeenCalledOnce();
-  });
-  it('moving a different category into blank uses the same duplicate guard', async () => {
+  it('rejects moving a different product into the blank category', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct());
-    dbMock.product.findMany.mockResolvedValue([row()]);
-    await expect(updateProduct('p1', data)).rejects.toThrow('请到纸张页');
+    await expect(updateProduct('p1', data)).rejects.toThrow('空白封单价表管理');
     expect(dbMock.product.update).not.toHaveBeenCalled();
   });
-  it.each([ProductCategory.BLANK_STOCK, ProductCategory.COLOR_PRINT])('protects identity without price references: %s', async (category) => {
-    const target = row({ category, code: data.code });
-    dbMock.product.findUnique.mockResolvedValue(target);
-    for (const changes of [{ code: 'NEW' }, { paperType: '180g红卡' }, { specification: '大号封90×165' }, { categoryNodeId: 'other' }]) {
-      await expect(updateProduct('existing', { ...data, ...changes })).rejects.toThrow('不可修改');
-    }
-    expect(dbMock.customerPriceRule.count).not.toHaveBeenCalled();
-    expect(dbMock.product.update).not.toHaveBeenCalled();
-  });
-  it('accepts a display edit while preserving an existing 37-character generated code', async () => {
+  it('rejects every historical blank edit, including display-only and unchanged long code', async () => {
     const code = `BLANK-${'a'.repeat(20)}-west-large`;
     dbMock.product.findUnique.mockResolvedValue(row({ code }));
-    await updateProduct('existing', { ...data, code, name: '展示名' });
-    expect(dbMock.product.update.mock.calls[0]![0].data.code).toBe(code);
+    for (const changes of [{}, { name: '展示名' }, { code: 'NEW' }, { paperType: '180g红卡' }, { specification: '大号封90×165' }, { categoryNodeId: 'other' }]) {
+      await expect(updateProduct('existing', { ...data, code, ...changes })).rejects.toThrow('只读');
+    }
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+  });
+  it.each([true, false])('rejects historical blank activation %s', async (isActive) => {
+    dbMock.product.findUnique.mockResolvedValue(row());
+    await expect(setProductActiveInTx(dbMock as unknown as Prisma.TransactionClient, 'existing', isActive, {
+      actor: { id: 'admin', username: 'admin', displayName: '管理员', role: Role.ADMIN }, reason: null,
+    })).rejects.toThrow('只读');
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+  });
+  it('keeps color-print identity protection', async () => {
+    dbMock.product.findUnique.mockResolvedValue(row({ category: ProductCategory.COLOR_PRINT, code: data.code }));
+    for (const changes of [{ code: 'NEW' }, { paperType: '180g红卡' }, { specification: '大号封90×165' }]) {
+      await expect(updateProduct('existing', { ...data, ...changes })).rejects.toThrow('不可修改');
+    }
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+  });
+  it('protects configured default BOM category against deactivation or reassignment, while display edit remains allowed', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode({ id: 'stock', legacyCategory: ProductCategory.BLANK_STOCK }));
+    dbMock.setting.findUnique.mockResolvedValue({ value: 'stock' });
+    await expect(setProductCategoryNodeActive('stock', false)).rejects.toThrow('默认用料');
+    await expect(updateProductCategoryNode('stock', { name: '分类', legacyCategory: ProductCategory.COLOR_PRINT, sortOrder: 1 })).rejects.toThrow('默认用料');
+    expect(dbMock.productCategoryNode.update).not.toHaveBeenCalled();
+    await updateProductCategoryNode('stock', { name: '空白封用料', legacyCategory: ProductCategory.BLANK_STOCK, sortOrder: 1 });
+    expect(dbMock.productCategoryNode.update).toHaveBeenCalledOnce();
   });
 });

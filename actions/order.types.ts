@@ -1,5 +1,5 @@
 import type {
-  CancellationSettlementReference,
+  CancellationSettlementPreview,
   OrderChangePricingPreview,
 } from '@/lib/order/change-request';
 import type { OrderPricingReviewPreview } from '@/lib/order/pricing-review';
@@ -65,7 +65,7 @@ export type PreviewOrderChangeRequestPricingResult =
   | { status: 'error'; message: string };
 
 export type PreviewOrderCancellationSettlementResult =
-  | { status: 'success'; preview: CancellationSettlementReference }
+  | { status: 'success'; preview: CancellationSettlementPreview }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
 

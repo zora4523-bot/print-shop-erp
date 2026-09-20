@@ -7,6 +7,8 @@ const paper = { id: 'paper', category: MaterialCategory.PAPER, name: '160g红卡
 function fixture() {
   const tx = {
     material: { findMany: vi.fn().mockResolvedValue([]) },
+    billOfMaterial: { count: vi.fn().mockResolvedValue(0) },
+    orderItem: { findMany: vi.fn().mockResolvedValue([]) },
     product: { findMany: vi.fn().mockResolvedValue([]) },
     customerPriceRule: { findMany: vi.fn().mockResolvedValue([]) },
   };
@@ -101,13 +103,19 @@ describe('PLAN S4 paper identity write guard', () => {
   ])('current/planned rule text protects identity without a productId: %j', async (triggerCondition) => {
     const { tx, client } = fixture();
     tx.customerPriceRule.findMany.mockResolvedValue([{ triggerCondition }]);
-    const now = new Date('2026-09-20T00:00:00Z');
-    expect(await paperIdentityMutationError(client, { ...paper, name: '160g新纸' }, paper, now)).toContain('计划生效');
-    expect(tx.customerPriceRule.findMany).toHaveBeenCalledWith({
-      where: { isActive: true, priceBook: { is: { isActive: true,
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-      } } }, select: { triggerCondition: true },
-    });
+    expect(await paperIdentityMutationError(client, { ...paper, name: '160g新纸' }, paper)).toContain('价格');
+    expect(tx.customerPriceRule.findMany).toHaveBeenCalledWith({ select: { triggerCondition: true } });
+  });
+  it('direct BOM identity reference is protected even when a duplicate paper exists', async () => {
+    const { tx, client } = fixture();
+    tx.material.findMany.mockResolvedValue([paper]);
+    tx.billOfMaterial.count.mockResolvedValue(1);
+    expect(await paperIdentityMutationError(client, { ...paper, name: '160g新纸' }, paper)).toContain('用料');
+  });
+  it('historical order facts protect paper identity after Product is removed', async () => {
+    const { tx, client } = fixture();
+    tx.orderItem.findMany.mockResolvedValue([{ paperType: '红卡', paperWeightGsm: 160 }]);
+    expect(await paperIdentityMutationError(client, { ...paper, category: MaterialCategory.OTHER }, paper)).toContain('历史订单');
   });
   it('unrelated and absent rule text does not prevent a legitimate rename', async () => {
     const { tx, client } = fixture();

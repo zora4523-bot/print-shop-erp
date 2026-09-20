@@ -20,7 +20,7 @@ import {
   previewOrderCancellationSettlementAction,
   reviewOrderChangeRequestAction,
 } from '@/actions/order';
-import type { CancellationSettlementReference } from '@/lib/order/change-request';
+import type { CancellationSettlementPreview } from '@/lib/order/change-request';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -258,7 +258,7 @@ function AdminDecisionForm({
   reasonCode: ReasonCode;
   figs: string;
   producedQty: string;
-  settlementPreview: CancellationSettlementReference | null;
+  settlementPreview: CancellationSettlementPreview | null;
   settlementPreviewQuantity: number | null;
   settleFee: string;
   settleFeeAdjustmentReason: string;
@@ -471,7 +471,7 @@ function submitAdminOrderDecision({
   producedQty: string;
   settleFee: string;
   settleFeeAdjustmentReason: string;
-  settlementPreview: CancellationSettlementReference | null;
+  settlementPreview: CancellationSettlementPreview | null;
   settlementPreviewQuantity: number | null;
   run: (task: DecisionTask) => void;
   setMessage: (value: string) => void;
@@ -537,7 +537,7 @@ function submitAdminOrderDecision({
       finalFee: settleFee,
       adjustmentReason: settleFeeAdjustmentReason,
     });
-    if (issue || parsedProduced === null) {
+    if (issue || parsedProduced === null || !settlementPreview) {
       setMessage(issue ?? '请核对已产数量。');
       return;
     }
@@ -547,6 +547,8 @@ function submitAdminOrderDecision({
         decision: 'APPROVE',
         reviewRemark: note.trim() || null,
         producedQty: parsedProduced,
+        expectedPriceRevision: settlementPreview.priceRevision,
+        expectedQuoteToken: settlementPreview.quoteToken,
         settleFee: settleFee.trim(),
         ...(settleFeeAdjustmentReason.trim()
           ? {
@@ -616,7 +618,7 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
   const [settleFeeAdjustmentReason, setSettleFeeAdjustmentReason] =
     useState('');
   const [settlementPreview, setSettlementPreview] =
-    useState<CancellationSettlementReference | null>(null);
+    useState<CancellationSettlementPreview | null>(null);
   const [settlementPreviewQuantity, setSettlementPreviewQuantity] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<{ text: string; tone: 'error' | 'success' | 'warning' }>({ text: '', tone: 'error' });
   const message = feedback.text;
@@ -834,7 +836,7 @@ type RenderDecisionPanelOptions = {
   reasonCode: ReasonCode;
   figs: string;
   producedQty: string;
-  settlementPreview: CancellationSettlementReference | null;
+  settlementPreview: CancellationSettlementPreview | null;
   settlementPreviewQuantity: number | null;
   settleFee: string;
   settleFeeAdjustmentReason: string;
@@ -844,7 +846,7 @@ type RenderDecisionPanelOptions = {
   producedQtyRef: React.RefObject<string>;
   setProducedQty: React.Dispatch<React.SetStateAction<string>>;
   setSettlementPreview: React.Dispatch<
-    React.SetStateAction<CancellationSettlementReference | null>
+    React.SetStateAction<CancellationSettlementPreview | null>
   >;
   setSettlementPreviewQuantity: React.Dispatch<React.SetStateAction<number | null>>;
   setSettleFee: React.Dispatch<React.SetStateAction<string>>;

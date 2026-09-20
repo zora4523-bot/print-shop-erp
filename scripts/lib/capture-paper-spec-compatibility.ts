@@ -5,6 +5,7 @@ import type * as Options from '../../lib/order/create-order-options';
 import type * as Quote from '../../lib/order/create-order-quote-service';
 import type * as Catalog from '../../lib/order/order-item-catalog';
 import { comparisonDigest, type PaperComparisonCase, type PaperComparisonCapture } from './paper-spec-comparison';
+import { canConfirmHistoricalBlankPrice } from '../../lib/order/historical-blank-price-input';
 
 /** Load the chosen checkout's actual readers, never the collector checkout's implementation. */
 export async function loadPaperComparisonReaders(sourceRoot: string) {
@@ -24,6 +25,7 @@ export async function capturePaperSpecCompatibility(
   cases: readonly PaperComparisonCase[],
   at: Date,
   revision: string,
+  policyPhase?: 'legacy' | 'positive',
 ): Promise<PaperComparisonCapture> {
   const metadata = await tx.$queryRaw<{ database: string; capturedAt: Date }[]>`SELECT current_database() AS database, CURRENT_TIMESTAMP AS "capturedAt"`;
   // Fingerprint all inputs used by the catalog/facts/price adapters, including inactive rows.
@@ -33,7 +35,9 @@ export async function capturePaperSpecCompatibility(
     tx.customerPriceBook.findMany({ orderBy: { id: 'asc' } }), tx.customerPriceRule.findMany({ orderBy: { id: 'asc' } }),
     tx.customerChargeCategory.findMany({ orderBy: { id: 'asc' } }),
   ]);
-  const options = await readers.readOptions(tx);
+  const historicalIds = [...new Set(cases.flatMap((entry) => entry.historicalOrderItemIds ?? []))].sort();
+  const historyFingerprint = historicalIds.length ? await tx.orderItem.findMany({ where: { id: { in: historicalIds } }, orderBy: { id: 'asc' } }) : null;
+  const options = await readers.readOptions(tx, { now: at });
   const papers = readers.buildPapers(options.products, options.papers);
   const choices = papers.map((paper) => ({ ...paper, selections: paper.variants.map((variant) => ({
     route: variant.route, specification: variant.specification,
@@ -41,7 +45,34 @@ export async function capturePaperSpecCompatibility(
   })) }));
   const results: PaperComparisonCapture['results'] = [];
   for (const entry of cases) {
-    const result = await readers.calculate(tx, { now: at, facts: entry.facts, includeOrderCharges: true });
+    const historicalItems = entry.historicalOrderItemIds?.length
+      ? await tx.orderItem.findMany({ where: { id: { in: entry.historicalOrderItemIds } }, include: { order: { select: { status: true } } } }) : undefined;
+    if (historicalItems && (historicalItems.length !== entry.historicalOrderItemIds!.length ||
+      historicalItems.some((item) => !canConfirmHistoricalBlankPrice(item.order.status)))) {
+      throw new Error(`${entry.id}: 历史款式缺失或尚未受理`);
+    }
+    let result: Awaited<ReturnType<typeof readers.calculate>>;
+    try {
+      result = await readers.calculate(tx, { now: at, facts: entry.facts, includeOrderCharges: true,
+        ...(policyPhase === 'positive' && historicalItems ? { historicalBlankItems: historicalItems } : {}),
+      });
+    } catch (error) {
+      if (policyPhase === 'positive' && ['zero-price', 'missing-price'].includes(entry.coverage) &&
+        entry.facts.items.some((item) => item.pricingRoute === 'STOCK_BLANK') &&
+        error instanceof Error && error.name === 'CreateOrderQuoteError' && error.message.includes('未启用')) {
+        results.push({ id: entry.id, coverage: entry.coverage, rejection: { code: 'BLANK_PRICE_NOT_ENABLED' },
+          input: entry.facts, quote: null, processing: null });
+        continue;
+      }
+      throw error;
+    }
+    if (policyPhase === 'positive' && ['zero-price', 'missing-price'].includes(entry.coverage)) {
+      throw new Error(`${entry.id}: 新业务停售未被拒绝`);
+    }
+    if (entry.coverage === 'historical-stopped' && policyPhase === 'positive' &&
+      !result.quote.items.some((item) => item.lines.some((line) => line.code === 'PARTIAL_BLANK' && line.basis.historicalPriceSource))) {
+      throw new Error(`${entry.id}: 未实际覆盖历史材料价回算`);
+    }
     if (entry.coverage === 'standard' && result.input.items.some((item) => item.configuration.specification !== 'CATALOG')) {
       throw new Error(`${entry.id}: 标准尺寸未按 CATALOG 判定`);
     }
@@ -55,9 +86,9 @@ export async function capturePaperSpecCompatibility(
           quoted.lines.some((line) => line.code === 'PARTIAL_BLANK' && line.amount !== null)));
       if (!hit) throw new Error(`${entry.id}: 未实际命中${entry.coverage}空白封单价`);
     }
-    results.push({ id: entry.id, input: result.input, quote: result.quote, processing: result.processing });
+    results.push({ id: entry.id, ...(policyPhase ? { coverage: entry.coverage } : {}), input: result.input, quote: result.quote, processing: result.processing });
   }
-  return { format: 1, provenance: { revision, database: metadata[0]!.database, capturedAt: metadata[0]!.capturedAt.toISOString() },
-    at: at.toISOString(), casesDigest: comparisonDigest(cases), dataDigest: comparisonDigest(tables),
+  return { format: policyPhase ? 2 : 1, ...(policyPhase ? { policyPhase } : {}), provenance: { revision, database: metadata[0]!.database, capturedAt: metadata[0]!.capturedAt.toISOString() },
+    at: at.toISOString(), casesDigest: comparisonDigest(cases), dataDigest: comparisonDigest(historyFingerprint ? [...tables, historyFingerprint] : tables),
     catalog: { options, papers: choices }, results };
 }

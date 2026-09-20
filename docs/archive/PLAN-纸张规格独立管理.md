@@ -1,6 +1,8 @@
+> 历史存档：记录上一阶段实现与验收，已由[空白封按单价管理](../空白封纸张规格管理-20260913.md)替代，不作为现行操作步骤。
+
 # 纸张、规格独立管理缩小方案
 
-> 后续方案（2026-09-20）：业主已要求空白封按已发布正价管理、移除独立组合维护，见 [空白封按单价管理](./PLAN-空白封按单价管理.md)。该方案待评审、未实现；本文保留上一阶段已实施范围与证据，不能继续作为下一轮建设的唯一要求，也不表示当前代码已切换。
+> 后续方案（2026-09-20）：业主已要求空白封按已发布正价管理、移除独立组合维护，见 [空白封按单价管理](../PLAN-空白封按单价管理.md)。该方案待评审、未实现；本文保留上一阶段已实施范围与证据，不能继续作为下一轮建设的唯一要求，也不表示当前代码已切换。
 
 状态：范围已确认，设计待实现。日期：2026-09-20。代码核对基线：`codex/maindev` @ `b1d65751`。
 
@@ -24,15 +26,15 @@
 
 | 仍成立的当前事实 | 依据 | 本期处理 |
 |---|---|---|
-| 产品含纸张、规格、分类及启停状态 | [Product 模型](../prisma/schema.prisma)、[产品查询](../lib/product.ts) | 保留产品及原 ID |
-| 建单规格从有效产品提取，尚无独立规格来源 | [建单选项](../lib/order/create-order-options.ts) | 新规格页只展示，目录读取不切换 |
-| 选项覆盖空白封、专版烫金、彩印三条路线 | [建单目录](../lib/order/order-item-catalog.ts) | 只新增空白封启用入口，产品组合页保留 |
-| 新增空白封纸张与价格会创建或复用产品 | [新增事务](../lib/price/customer-price-book-admin.ts)、[现行说明](./空白封纸张规格管理-20260913.md) | 抽取共用逻辑，将启用与录价分开 |
-| 工单、价格规则、BOM 引用产品身份 | [Schema](../prisma/schema.prisma)、[BOM](../lib/bom.ts) | 不删除历史关联；专版多纸共用规格产品，BOM 不能据此按纸张定位 |
-| 空白封矩阵没有产品且没有价格时显示“不适用” | [价格矩阵](../components/business/rules/pricing/CustomerPricingDedicatedSection.tsx) | 这是现有展示，不代表业主判定；新纸张页使用“待设置” |
-| 空白封和彩印用规范化纸张名、克重、规格文本取价；专版用计价组阶梯与纸张文本加价 | [选择器](../lib/price/create-order/selectors.ts)、[核价](../lib/price/create-order/item-quote.ts) | 产品 ID 正确不足以保证报价，文本必须同源 |
-| 专版规格产品通常不声明纸张，纸张来自有效 PAPER 目录 | [专版展开](../lib/order/order-item-catalog.ts) | 保留多纸共用规格产品及现行缺价转人工 |
-| 当前或计划生效价格引用的产品不能停用；启用规则引用停用产品会使草稿校验失败 | [产品保护](../lib/product.ts)、[草稿校验](../lib/price/customer-price-book-draft-validation.ts) | 保留既有保护，不把停用当作本期下架机制 |
+| 产品含纸张、规格、分类及启停状态 | [Product 模型](../../prisma/schema.prisma)、[产品查询](../../lib/product.ts) | 保留产品及原 ID |
+| 建单规格从有效产品提取，尚无独立规格来源 | [建单选项](../../lib/order/create-order-options.ts) | 新规格页只展示，目录读取不切换 |
+| 选项覆盖空白封、专版烫金、彩印三条路线 | [建单目录](../../lib/order/order-item-catalog.ts) | 只新增空白封启用入口，产品组合页保留 |
+| 新增空白封纸张与价格会创建或复用产品 | [新增事务](../../lib/price/customer-price-book-admin.ts)、[现行说明](../空白封纸张规格管理-20260913.md) | 抽取共用逻辑，将启用与录价分开 |
+| 工单、价格规则、BOM 引用产品身份 | [Schema](../../prisma/schema.prisma)、[BOM](../../lib/bom.ts) | 不删除历史关联；专版多纸共用规格产品，BOM 不能据此按纸张定位 |
+| 空白封矩阵没有产品且没有价格时显示“不适用” | [价格矩阵](../../components/business/rules/pricing/CustomerPricingDedicatedSection.tsx) | 这是现有展示，不代表业主判定；新纸张页使用“待设置” |
+| 空白封和彩印用规范化纸张名、克重、规格文本取价；专版用计价组阶梯与纸张文本加价 | [选择器](../../lib/price/create-order/selectors.ts)、[核价](../../lib/price/create-order/item-quote.ts) | 产品 ID 正确不足以保证报价，文本必须同源 |
+| 专版规格产品通常不声明纸张，纸张来自有效 PAPER 目录 | [专版展开](../../lib/order/order-item-catalog.ts) | 保留多纸共用规格产品及现行缺价转人工 |
+| 当前或计划生效价格引用的产品不能停用；启用规则引用停用产品会使草稿校验失败 | [产品保护](../../lib/product.ts)、[草稿校验](../../lib/price/customer-price-book-draft-validation.ts) | 保留既有保护，不把停用当作本期下架机制 |
 
 有合法产品但无价仍可进入待核价，不要求先定价才能建单。零价与缺价不同，单价精度和历史快照保持不变。
 
@@ -95,13 +97,13 @@
 
 契约测试锁定七处现有定义：
 
-1. [canonical-facts.ts](../lib/price/create-order/canonical-facts.ts) 的 `SPECIFICATION_ALIASES`。
-2. [款式适配器](../lib/order/create-order-quote-facts-adapter.ts) 的 `pricingGroup`。
-3. [规则适配器](../lib/order/create-order-published-rule-adapter.ts) 的 `pricingGroupForSpecification`。
+1. [canonical-facts.ts](../../lib/price/create-order/canonical-facts.ts) 的 `SPECIFICATION_ALIASES`。
+2. [款式适配器](../../lib/order/create-order-quote-facts-adapter.ts) 的 `pricingGroup`。
+3. [规则适配器](../../lib/order/create-order-published-rule-adapter.ts) 的 `pricingGroupForSpecification`。
 4. 同一规则适配器的 `REQUIRED_FULL_SPECIFICATIONS`。
-5. [blank-paper.ts](../lib/price/blank-paper.ts) 的 `BLANK_SPECIFICATIONS`。
-6. [改单身份](../lib/order/change-request-catalog-identity.ts) 的 `pricingGroupForSpecification`。
-7. [价格矩阵](../components/business/rules/pricing/CustomerPricingDedicatedSection.tsx) 的 `BLANK_COLUMNS`（键集合与空白封目录一致）。
+5. [blank-paper.ts](../../lib/price/blank-paper.ts) 的 `BLANK_SPECIFICATIONS`。
+6. [改单身份](../../lib/order/change-request-catalog-identity.ts) 的 `pricingGroupForSpecification`。
+7. [价格矩阵](../../components/business/rules/pricing/CustomerPricingDedicatedSection.tsx) 的 `BLANK_COLUMNS`（键集合与空白封目录一致）。
 
 产品生成与规则生成共用纸张标签及规格来源；测试断言产品三个字段与规则条件规范化后逐字一致。款式侧与改单侧分组一致，专版五规格集合与规则侧一致；迷你封与万元封在款式/改单侧均属 MID，不要求它们通过只服务专版五规格的规则侧分组。三条路线标准尺寸仍为 `CATALOG`，不因页面整理变成改尺寸核价。
 
@@ -145,11 +147,11 @@
 4. 新建或重新启用组合分别覆盖有文本匹配价/无价：可选后立即按现行价报价或待核价，复核显示实际后果；重新启用前后的目录和该组合报价按状态变化断言，其他组合报价不变，草稿保存/发布仍通过。
 5. 已有合法启用无外键产品重复勾选为空操作；重新启用只改变启用状态与审计、不补外键。产品组合页新建或改入造重复格被拒；受保护长编码产品可保存非身份修改。
 
-[黄金门禁](../lib/order/__tests__/current-create-order-golden-gate.postgres.test.ts) 仅提供断言，不能直接当逐例结果采集工具；后续工具须从真实目录/报价入口采集前后结果，不能以绕过适配器的纯引擎夹具替代。
+[黄金门禁](../../lib/order/__tests__/current-create-order-golden-gate.postgres.test.ts) 仅提供断言，不能直接当逐例结果采集工具；后续工具须从真实目录/报价入口采集前后结果，不能以绕过适配器的纯引擎夹具替代。
 
 草稿回归分两组：**保持不变**——权限、写锁、版本校验、价格查重/校验/审计、收费类目锚点、拒绝停用候选、S5 外键补写；**有意改变**——S2 同格匹配（含停用别名旧行不再挡新逐字产品录价）、产品分类节点来源、S4 多值身份查重。分类零产品/跨节点/无效节点、120g、事实冲突、P2002、并发与回滚均覆盖；身份测试含空集合、改入 PAPER、重复身份改名消除但外键仍保护。E2E 新用例自建隔离数据，不依赖 `master-data-flow` 留下的父/子分类；无克重 PAPER 的领域用例保留，纸张页 E2E 按 S1 新增约定调整。
 
-消费者只作回归范围，不改目录读取。完整实现批次按 [测试要求](../CONTRIBUTING.md#测试要求) 验证；阶段零分类归属不满足时先与业主确定，本次不运行应用测试、迁移或数据库查询。
+消费者只作回归范围，不改目录读取。完整实现批次按 [测试要求](../../CONTRIBUTING.md#测试要求) 验证；阶段零分类归属不满足时先与业主确定，本次不运行应用测试、迁移或数据库查询。
 
 ## 8. 移出本期：下架、不适用及 120g
 
@@ -163,22 +165,22 @@
 
 后续方案须遵守已确认决定：**改单新增款式（含原样复制模板）按新准入拦截，模板原款式历史重算不受影响。** 先解决“历史重算是否忽略产品与物料当前启用状态”的待确认问题，再评审共享适配器历史模式及真实调用链回归；第三轮 T9 重做工单并入该方案。可比较“关系表＋入口文本校验”与“停用规则/产品＋适配器历史模式”，不在本期替业主选择。
 
-**120g 保持现状，不收尾。** 根据 [退役记录](./audits/2026-09-17-retire-120g-paper.md)，两条物料已停用、产品与价格保留，`isRetiredPaper` 过滤新业务并拒绝物料重新启用；本次未重新查库。它还是内部配置外分支的文本闸口。矩阵已隐藏 120g，无日常收尾入口；再停用产品会把重算阻断从受物料校验影响的工单扩大到其他含该产品的工单。S1 纸张与产品两侧显式拒绝，S2 单独分桶不建产品。将来收尾前须只读确认正式库不存在可改单、可取消状态的含 120g 工单。
+**120g 保持现状，不收尾。** 根据 [退役记录](../audits/2026-09-17-retire-120g-paper.md)，两条物料已停用、产品与价格保留，`isRetiredPaper` 过滤新业务并拒绝物料重新启用；本次未重新查库。它还是内部配置外分支的文本闸口。矩阵已隐藏 120g，无日常收尾入口；再停用产品会把重算阻断从受物料校验影响的工单扩大到其他含该产品的工单。S1 纸张与产品两侧显式拒绝，S2 单独分桶不建产品。将来收尾前须只读确认正式库不存在可改单、可取消状态的含 120g 工单。
 
 ## 9. 待业主确认
 
-本主题仅保留两项待确认，已同步 [HANDOFF](../HANDOFF.md#卡住的问题) 与 [PROGRESS](../PROGRESS.md#待澄清的业务问题)：
+本主题仅保留两项待确认，已同步 [HANDOFF](../../HANDOFF.md#卡住的问题) 与 [PROGRESS](../../PROGRESS.md#待澄清的业务问题)：
 
 - 新纸张是否默认进入专版：保持待确认，本期专版无实现变更，新增物料沿用现状。
 - 历史重算是否忽略产品与物料当前启用状态：自 2026-09-18 起即为生产现状问题，不依赖下架方案启动；也是后续方案前置问题，本期不改适配器，原 A/B 选项见 HANDOFF。
 
-下架另立方案、120g 不收尾、彩印本期不做三项已确认，不再次登记待确认。页面实现遵循 [文案与确认](./ui-规范.md#文案与确认)，不外显表名、字段名或评审讨论。
+下架另立方案、120g 不收尾、彩印本期不做三项已确认，不再次登记待确认。页面实现遵循 [文案与确认](../ui-规范.md#文案与确认)，不外显表名、字段名或评审讨论。
 
 ## 10. 审查处理与交付记录
 
 ### 四轮意见处置
 
-完整背景见 [评审文件](./audits/2026-09-20-paper-spec-plan-review.md)，以其第四轮为范围依据、第五轮补足实现边界；第三轮末尾的交付要求已作废。旧方案由 Git 历史保留，不另存副本。
+完整背景见 [评审文件](../audits/2026-09-20-paper-spec-plan-review.md)，以其第四轮为范围依据、第五轮补足实现边界；第三轮末尾的交付要求已作废。旧方案由 Git 历史保留，不另存副本。
 
 | 轮次与意见 | 本次处置 |
 |---|---|

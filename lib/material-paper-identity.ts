@@ -7,10 +7,10 @@ type PaperIdentityInput = {
   name: string;
   specification: string | null;
 };
-type IdentityReadClient = Pick<Prisma.TransactionClient, 'material' | 'product' | 'customerPriceRule'>;
+type IdentityReadClient = Pick<Prisma.TransactionClient, 'material' | 'product' | 'customerPriceRule' | 'billOfMaterial' | 'orderItem'>;
 
 const DUPLICATE_MESSAGE = '同名同克重纸张已存在，请在纸张管理中使用或检查原记录';
-const REFERENCED_MESSAGE = '纸张身份仍被产品或当前、计划生效价格引用，名称、克重或分类不可直接修改';
+const REFERENCED_MESSAGE = '纸张身份仍被产品、价格、用料或历史订单引用，名称、克重或分类不可直接修改';
 
 function identityKeys(paper: PaperIdentityInput | null): Set<string> {
   return paper?.category === MaterialCategory.PAPER ? catalogPaperIdentityKeys(paper) : new Set();
@@ -32,13 +32,14 @@ export async function paperIdentityMutationError(
   tx: IdentityReadClient,
   next: PaperIdentityInput,
   previous: (PaperIdentityInput & { id: string }) | null = null,
-  now = new Date(),
 ): Promise<string | null> {
   const oldKeys = identityKeys(previous);
   const newKeys = identityKeys(next);
   const removed = [...oldKeys].filter((key) => !newKeys.has(key));
   const added = [...newKeys].filter((key) => !oldKeys.has(key));
   if (!removed.length && !added.length && previous?.category === next.category) return null;
+  if (previous && (removed.length || previous.category !== next.category) &&
+      await tx.billOfMaterial.count({ where: { blankPaperMaterialId: previous.id } }) > 0) return REFERENCED_MESSAGE;
   if (!oldKeys.size && !newKeys.size) return null;
 
   const papers = await tx.material.findMany({
@@ -62,15 +63,15 @@ export async function paperIdentityMutationError(
   })].some((key) => protectedKeys.has(key)))) return REFERENCED_MESSAGE;
 
   const rules = await tx.customerPriceRule.findMany({
-    where: {
-      isActive: true,
-      priceBook: { is: {
-        isActive: true,
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-      } },
-    },
     select: { triggerCondition: true },
   });
-  return rules.some((rule) => [...rulePaperIdentityKeys(rule.triggerCondition)]
-    .some((key) => protectedKeys.has(key))) ? REFERENCED_MESSAGE : null;
+  if (rules.some((rule) => [...rulePaperIdentityKeys(rule.triggerCondition)]
+    .some((key) => protectedKeys.has(key)))) return REFERENCED_MESSAGE;
+
+  const historicalItems = await tx.orderItem.findMany({
+    where: { paperType: { not: null } }, select: { paperType: true, paperWeightGsm: true },
+  });
+  return historicalItems.some((item) => [...catalogPaperIdentityKeys({
+    name: item.paperType ?? '', specification: item.paperWeightGsm === null ? null : `${item.paperWeightGsm}g`,
+  })].some((key) => protectedKeys.has(key))) ? REFERENCED_MESSAGE : null;
 }

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '../../price/__tests__/fixtures/create-order-golden-fixtures';
 import {
   MaterialCategory,
   OrderProductStructure,
   ProductCategory,
 } from '../../../generated/prisma/enums';
 
-const { dbMock, txMock } = vi.hoisted(() => {
+const { dbMock, txMock, readSnapshotMock } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
     material: { findMany: vi.fn() },
@@ -13,6 +14,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
   };
   return {
     txMock: tx,
+    readSnapshotMock: vi.fn(),
     dbMock: {
       $transaction: vi.fn(
         async (callback: (client: typeof tx) => Promise<unknown>) =>
@@ -24,11 +26,15 @@ const { dbMock, txMock } = vi.hoisted(() => {
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('server-only', () => ({}));
+vi.mock('../create-order-published-rule-adapter', () => ({
+  readPublishedCreateOrderPriceSnapshot: readSnapshotMock,
+}));
 
 import {
   listExternalCreateOrderOptions,
   readExternalCreateOrderOptions,
 } from '../create-order-options';
+import { assertBlankPriceAdmissionInTx } from '../blank-price-admission';
 
 const products = [
   {
@@ -93,30 +99,61 @@ const foilColors = [
   },
 ] as const;
 
+function paperRowsForQuery(where: { isActive?: boolean }, rows: readonly typeof papers[number][] = papers) {
+  return where.isActive === undefined ? rows.map((paper) => ({ ...paper, isActive: true })) : rows;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  readSnapshotMock.mockResolvedValue({ ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+    partial: { ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial, blankUnitPrices: [
+      { paperType: '珠光艳闪', paperWeightGsm: 160, specification: '西封中号', unitPrice: '0.12' },
+      { paperType: '珠光艳闪', paperWeightGsm: 160, specification: '西封大号', unitPrice: '0.12' },
+    ] },
+  });
   txMock.$executeRaw.mockResolvedValue(0);
   txMock.product.findMany.mockResolvedValue(products);
   txMock.material.findMany.mockImplementation(
-    async (args: { where: { category: MaterialCategory } }) =>
-      args.where.category === MaterialCategory.PAPER ? papers : foilColors,
+    async (args: { where: { category: MaterialCategory; isActive?: boolean } }) =>
+      args.where.category === MaterialCategory.PAPER ? paperRowsForQuery(args.where) : foilColors,
   );
 });
 
 describe('external create-order options', () => {
-  it('returns every active legal product independently from BASE rule coverage', async () => {
+  it('omits ambiguous blank identities even when the duplicate paper is inactive', async () => {
+    const allPapers = [
+      { ...papers[0], isActive: true, outOfStock: false },
+      { ...papers[0], id: 'inactive-duplicate', code: 'INACTIVE-DUPLICATE',
+        name: '160g珠光艳闪', isActive: false, outOfStock: false },
+    ];
+    txMock.material.findMany.mockImplementation(async (args: {
+      where: { category: MaterialCategory; isActive?: boolean };
+    }) => args.where.category === MaterialCategory.PAPER
+      ? allPapers.filter((paper) => args.where.isActive === undefined || paper.isActive === args.where.isActive)
+      : foilColors);
+    const result = await readExternalCreateOrderOptions(txMock as never);
+    await expect(assertBlankPriceAdmissionInTx(txMock as never, [{
+      pricingRoute: 'STOCK_BLANK', paperType: '珠光艳闪', paperWeightGsm: 160,
+      specification: '西封中号80×120',
+    }], new Date())).rejects.toThrow('资料不唯一');
+    expect(result.products.filter((product) => product.category === ProductCategory.BLANK_STOCK)).toEqual([]);
+    expect(result.products.map((product) => product.id)).toContain('product-unpriced-full');
+    expect(result.papers.map((paper) => paper.id)).toEqual(['paper-flash']);
+  });
+
+  it('derives blank selections from published prices without Product IDs and keeps nonblank products', async () => {
     const result = await readExternalCreateOrderOptions(txMock as never);
 
     expect(result.products.map((product) => product.id)).toEqual([
-      'product-stock',
       'product-unpriced-full',
+      null,
+      null,
     ]);
     expect(txMock.product.findMany).toHaveBeenCalledWith({
       where: {
         isActive: true,
         category: {
           in: [
-            ProductCategory.BLANK_STOCK,
             ProductCategory.CUSTOM_FLAT_FOIL,
             ProductCategory.COLOR_PRINT,
           ],
@@ -162,8 +199,8 @@ describe('external create-order options', () => {
 
   it('fails closed when the active FOIL catalog is empty', async () => {
     txMock.material.findMany.mockImplementation(
-      async (args: { where: { category: MaterialCategory } }) =>
-        args.where.category === MaterialCategory.PAPER ? papers : [],
+      async (args: { where: { category: MaterialCategory; isActive?: boolean } }) =>
+        args.where.category === MaterialCategory.PAPER ? paperRowsForQuery(args.where) : [],
     );
 
     await expect(
@@ -186,9 +223,9 @@ describe('external create-order options', () => {
       },
     ] as const;
     txMock.material.findMany.mockImplementation(
-      async (args: { where: { category: MaterialCategory } }) =>
+      async (args: { where: { category: MaterialCategory; isActive?: boolean } }) =>
         args.where.category === MaterialCategory.PAPER
-          ? papers
+          ? paperRowsForQuery(args.where)
           : configuredFoilColors,
     );
 
@@ -202,7 +239,7 @@ describe('external create-order options', () => {
     });
   });
 
-  it('derives specifications, dimensions and structure only from product config', async () => {
+  it('derives blank dimensions from standard specifications and other dimensions from products', async () => {
     const result = await readExternalCreateOrderOptions(txMock as never);
 
     expect(result.specifications).toEqual(
@@ -213,7 +250,7 @@ describe('external create-order options', () => {
           widthMm: 80,
           heightMm: 120,
           productStructure: OrderProductStructure.WESTERN_ENVELOPE,
-          productIds: ['product-stock'],
+          productIds: [],
         }),
         expect.objectContaining({
           specCode: '西封大号85×165',
@@ -221,7 +258,7 @@ describe('external create-order options', () => {
           widthMm: 85,
           heightMm: 165,
           productStructure: OrderProductStructure.WESTERN_ENVELOPE,
-          productIds: ['product-stock'],
+          productIds: [],
         }),
       ]),
     );
@@ -251,10 +288,11 @@ describe('external create-order options', () => {
 
   it('fails closed if case-insensitive option codes are duplicated', async () => {
     txMock.product.findMany.mockResolvedValue([
-      products[0],
+      products[1],
       {
         ...products[1],
-        code: 'product-stock',
+        id: 'duplicate-product',
+        code: 'product-unpriced-full',
       },
     ]);
 
@@ -272,8 +310,8 @@ describe('external create-order options', () => {
     vi.clearAllMocks();
     txMock.product.findMany.mockResolvedValue(products);
     txMock.material.findMany.mockImplementation(
-      async (args: { where: { category: MaterialCategory } }) =>
-        args.where.category === MaterialCategory.PAPER ? papers : foilColors,
+      async (args: { where: { category: MaterialCategory; isActive?: boolean } }) =>
+        args.where.category === MaterialCategory.PAPER ? paperRowsForQuery(args.where) : foilColors,
     );
     await readExternalCreateOrderOptions(txMock as never, {
       snapshotLockHeld: true,
@@ -284,7 +322,7 @@ describe('external create-order options', () => {
 
 it('removes retired 120g products and materials from the shared admin/sales catalog', async () => {
   txMock.product.findMany.mockResolvedValue([...products, { ...products[0], id: 'retired-product', code: 'RETIRED', paperType: '120g珠光艳闪', weight: null, paperMaterialId: null }]);
-  txMock.material.findMany.mockImplementation(async (args: { where: { category: MaterialCategory } }) => args.where.category === MaterialCategory.PAPER ? [...papers, { ...papers[0], id: 'retired-paper', code: 'RETIRED-PAPER', name: '120G 珠光艳闪', specification: '' }] : foilColors);
+  txMock.material.findMany.mockImplementation(async (args: { where: { category: MaterialCategory; isActive?: boolean } }) => args.where.category === MaterialCategory.PAPER ? [...paperRowsForQuery(args.where), { ...papers[0], id: 'retired-paper', code: 'RETIRED-PAPER', name: '120G 珠光艳闪', specification: '', isActive: true }] : foilColors);
   const result = await readExternalCreateOrderOptions(txMock as never);
   expect(result.products.some(row => row.id === 'retired-product')).toBe(false);
   expect(result.papers.some(row => row.id === 'retired-paper')).toBe(false);

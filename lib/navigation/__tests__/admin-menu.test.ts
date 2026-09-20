@@ -48,7 +48,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(37);
+    expect(items).toHaveLength(36);
     expect(items.map((i) => i.label)).toEqual([
       '工作台',
       '经营概览',
@@ -69,7 +69,6 @@ describe('getAdminMenuItems', () => {
       '包装与快递',
       '价格版本',
       '纸张',
-      '可建单产品组合',
       '产品结构',
       '建单工艺目录',
       '员工薪酬规则',
@@ -190,11 +189,6 @@ describe('getAdminMenuItems', () => {
         requiredPermission: 'material:manage',
       },
       {
-        label: '可建单产品组合',
-        href: '/owner/rules/stock-skus',
-        requiredPermission: 'dict:product:manage',
-      },
-      {
         label: '产品结构',
         href: '/owner/rules/product-categories',
         requiredPermission: 'dict:product:manage',
@@ -223,7 +217,6 @@ describe('getAdminMenuItems', () => {
       ['包装与快递', '客户计价规则'],
       ['价格版本', '客户计价规则'],
       ['纸张', '建单主数据'],
-      ['可建单产品组合', '建单主数据'],
       ['产品结构', '建单主数据'],
       ['建单工艺目录', '建单主数据'],
       ['员工薪酬规则', '员工薪酬规则'],
@@ -289,8 +282,8 @@ describe('getAdminMenuItems', () => {
       ['/owner/rules', '', '/owner/rules'],
       ['/owner/rules/papers', '', '/owner/rules/papers'],
       ['/owner/rules/papers/new', '', '/owner/rules/papers'],
-      ['/owner/rules/stock-skus', '', '/owner/rules/stock-skus'],
-      ['/owner/rules/stock-skus/sku-1', '', '/owner/rules/stock-skus'],
+      ['/owner/rules/product-categories/items', '', '/owner/rules/product-categories'],
+      ['/owner/rules/product-categories/items/product-1', '', '/owner/rules/product-categories'],
       [
         '/owner/rules/product-categories',
         '',

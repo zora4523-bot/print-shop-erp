@@ -173,6 +173,7 @@ describe('quoteInternalCreateOrder', () => {
             paperWeightGsm: null,
             crafts: [],
             manualQuoteReason: '客供纸与特殊工艺',
+            pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
           },
         ],
       }),

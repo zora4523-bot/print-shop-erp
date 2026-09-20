@@ -1,10 +1,14 @@
-import { BlankPaperCatalogError, ensureBlankPaperProductInTx, readBlankPaperCatalogInTx, resolveBlankPaperInTx } from './blank-paper-catalog';
+import { PERMISSIONS } from '../auth/permissions-dict';
+import { blankPriceIdentity, blankPriceIdentityFromCondition, blankPriceTriggerCondition } from './blank-price-identity';
+import { BlankPaperCatalogError, resolveBlankPaperInTx } from './blank-paper-catalog';
 import { BOX_PRICE_RULES, CONFIRMED_BOX_RATES } from './box-packaging-rules';
 import 'server-only';
 
 import { createHash } from 'node:crypto';
 import {
   addBlankPaperSchema,
+  blankPriceMatrixSchema,
+  type BlankPriceMatrixInput,
   blankSpecificationKey,
   BLANK_SPECIFICATIONS,
   type AddBlankPaperInput,
@@ -137,6 +141,7 @@ export type CustomerPriceBookDraftAdminDto = {
 };
 
 export type CustomerPriceBookDraftImpactPriceDto = {
+  blankSalesEnabled?: boolean;
   amount: string | null;
   includedUnits: string | null;
   incrementUnits: string | null;
@@ -754,6 +759,7 @@ function comparableImpactValue(
 
 function impactPrice(rule: ImpactRuleRow): CustomerPriceBookDraftImpactPriceDto {
   return {
+    ...(rule.exclusiveGroup === 'STOCK_BASE' ? { blankSalesEnabled: rule.isActive && rule.amount !== null && new Prisma.Decimal(String(rule.amount)).gt(0) } : {}),
     amount: decimalText(rule.amount),
     includedUnits: decimalText(rule.includedUnits),
     incrementUnits: decimalText(rule.incrementUnits),
@@ -1588,6 +1594,20 @@ export async function getCustomerPriceBookDraftRuleEditor(
   });
 }
 
+/** Controlled releases accept only the exact source or the prescribed blank-rule clone conversion. */
+function unchangedRulesSinceClone(before: DraftPriceRuleForValidation[], original: DraftPriceRuleForValidation[]): boolean {
+  const beforeHash = calculateCustomerPriceRuleSetSha256(before);
+  if (beforeHash === calculateCustomerPriceRuleSetSha256(original)) return true;
+  const converted = original.map((rule) => {
+    if (rule.exclusiveGroup !== 'STOCK_BASE') return rule;
+    const identity = blankPriceIdentityFromCondition(rule.triggerCondition);
+    if (!identity) throw new CustomerPriceBookAdminError('空白封规则身份不完整，请先修复');
+    return { ...rule, productId: null, product: null, triggerCondition: blankPriceTriggerCondition(identity),
+      amount: rule.isActive ? rule.amount : new Prisma.Decimal(0), isActive: true };
+  });
+  return beforeHash === calculateCustomerPriceRuleSetSha256(converted);
+}
+
 /** Add only the approved box rules to an unchanged draft, preserving all published history. */
 export async function prepareConfirmedBoxPackagingDraft(
   input: { priceBookId: string; expectedDraftUpdatedAt: Date },
@@ -1616,8 +1636,7 @@ export async function prepareConfirmedBoxPackagingDraft(
     const outsideBoxes = (rules: DraftPriceRuleForValidation[]) =>
       rules.filter((rule) => !BOX_PRICE_RULES.some((box) => box.code === rule.code));
     if (
-      calculateCustomerPriceRuleSetSha256(outsideBoxes(before)) !==
-        calculateCustomerPriceRuleSetSha256(outsideBoxes(original)) ||
+      !unchangedRulesSinceClone(outsideBoxes(before), outsideBoxes(original)) ||
       JSON.stringify(canonicalJson(notesRecord(draft.notes).constants)) !==
         JSON.stringify(canonicalJson(notesRecord(source.notes).constants))
     )
@@ -1725,8 +1744,7 @@ export async function prepareConfirmedCustomTierDraft(
       rules.filter(rule => rule.exclusiveGroup !== 'CUSTOM_BASE');
     const before = await validationRules(tx, draft.id);
     const original = await validationRules(tx, source.id);
-    if (calculateCustomerPriceRuleSetSha256(outsideTiers(before)) !==
-        calculateCustomerPriceRuleSetSha256(outsideTiers(original)) ||
+    if (!unchangedRulesSinceClone(outsideTiers(before), outsideTiers(original)) ||
         JSON.stringify(canonicalJson(notesRecord(draft.notes).constants)) !==
         JSON.stringify(canonicalJson(notesRecord(source.notes).constants))) {
       throw new CustomerPriceBookAdminError('草稿含其他调价，请先单独处理，避免一并发布');
@@ -1843,6 +1861,7 @@ export async function createCustomerPriceBookDraft(
             select: {
               categoryId: true,
               productId: true,
+              product: { select: { code: true, paperType: true, weight: true, specification: true } },
               code: true,
               name: true,
               kind: true,
@@ -1943,7 +1962,9 @@ export async function createCustomerPriceBookDraft(
       });
       if (source.rules.length > 0) {
         await tx.customerPriceRule.createMany({
-          data: source.rules.map((rule) => ({
+          data: source.rules.map((sourceRule) => {
+            const rule = normalizeBlankDraftRule(sourceRule);
+            return ({
             priceBookId: created.id,
             categoryId: rule.categoryId,
             productId: rule.productId,
@@ -1970,7 +1991,7 @@ export async function createCustomerPriceBookDraft(
             note: rule.note,
             blocksAutomaticQuote: rule.blocksAutomaticQuote,
             isActive: rule.isActive,
-          })),
+          }); }),
         });
       }
       await assertValidRuleSet(tx, created.id, source.purpose);
@@ -2044,6 +2065,7 @@ export async function updateCustomerPriceRuleDraft(
       if (!existing || existing.priceBookId !== input.priceBookId) {
         throw new CustomerPriceBookAdminError('草稿规则不存在');
       }
+      if (existing.exclusiveGroup === 'STOCK_BASE') throw new CustomerPriceBookAdminError('请到空白封现货单价表修改价格');
       const workflow = draftWorkflow(existing.priceBook.notes);
       if (
         existing.priceBook.settlementType !== EXTERNAL_SETTLEMENT ||
@@ -2679,6 +2701,8 @@ async function prepareCustomerPriceSectionDraft(
   if (sectionRules.length === 0) {
     throw new CustomerPriceBookAdminError('该业务板块暂无可编辑规则');
   }
+
+  if (input.section === 'blank') throw new CustomerPriceBookAdminError('请到空白封现货单价表修改价格');
 
   const submittedIds = input.rows.map((row) => row.ruleId);
   const sectionIds = sectionRules.map((rule) => rule.id);
@@ -3587,13 +3611,49 @@ export async function publishCustomerPriceBookDraft(
   }
 }
 
-/** Add catalog combinations and their draft prices under the same pricing write lock. */
+function assertBlankPricePermission(actor: AuditActor, createPaper = false) {
+  if (!actor.role || !(PERMISSIONS['dict:price:manage'] as readonly string[]).includes(actor.role) ||
+      (createPaper && !(PERMISSIONS['material:manage'] as readonly string[]).includes(actor.role))) {
+    throw new CustomerPriceBookAdminError('无权修改空白封价格或新增纸张');
+  }
+}
+
+function normalizeBlankDraftRule<T extends { exclusiveGroup: string | null; triggerCondition: unknown;
+  productId: string | null; amount: Prisma.Decimal | null; isActive: boolean;
+  product?: { code: string | null; paperType: string | null; weight: number | null; specification: string | null } | null }>(rule: T): T {
+  if (rule.exclusiveGroup !== 'STOCK_BASE') return rule;
+  const identity = blankPriceIdentityFromCondition(rule.triggerCondition);
+  if (!identity) throw new CustomerPriceBookAdminError('空白封规则身份不完整，无法创建调价草稿');
+  const condition = parseCustomerRuleCondition(rule.triggerCondition).condition;
+  if (rule.productId !== null) {
+    const productIdentity = rule.product?.paperType && rule.product.specification ? blankPriceIdentity({
+      paperType: rule.product.paperType, paperWeightGsm: rule.product.weight, specification: rule.product.specification,
+    }) : null;
+    if (!productIdentity || productIdentity.key !== identity.key ||
+        (condition?.productCodes && (condition.productCodes.length !== 1 || condition.productCodes[0] !== rule.product?.code))) {
+      throw new CustomerPriceBookAdminError('空白封历史产品与价格文本不一致，请先修复后再创建调价草稿');
+    }
+  } else if (condition?.productCodes) {
+    throw new CustomerPriceBookAdminError('空白封价格仍有不明确的产品条件，请先修复');
+  }
+  return { ...rule, productId: null, triggerCondition: blankPriceTriggerCondition(identity),
+    amount: rule.isActive ? rule.amount : new Prisma.Decimal(0), isActive: true };
+}
+
+async function blankBaseCategoryId(tx: Prisma.TransactionClient): Promise<string> {
+  const categories = await tx.customerChargeCategory.findMany({ where: { code: 'BASE_PROCESSING', isActive: true }, select: { id: true } });
+  if (categories.length !== 1) throw new CustomerPriceBookAdminError('基础加工费类目未配置或已停用，请先完善收费类目');
+  return categories[0]!.id;
+}
+
+/** Add paper facts and prices under the pricing write lock; never create products. */
 export async function addBlankPaperDraft(
   raw: AddBlankPaperInput,
   actor: AuditActor,
   now: Date = new Date(),
 ): Promise<{ paperId: string; priceBookId: string }> {
   const input = addBlankPaperSchema.parse(raw);
+  assertBlankPricePermission(actor, input.paper.mode === 'new');
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
     const book = await tx.customerPriceBook.findUnique({
@@ -3616,24 +3676,15 @@ export async function addBlankPaperDraft(
     }
     const rules = await tx.customerPriceRule.findMany({
       where: { priceBookId: book.id, exclusiveGroup: 'STOCK_BASE' },
-      include: { product: { include: { categoryNode: true } } },
     });
-    const anchor = rules.find(
-      (rule) =>
-        rule.product?.isActive &&
-        rule.product.categoryNode.isActive &&
-        rule.product.category === 'BLANK_STOCK',
-    );
-    if (!anchor?.product)
-      throw new CustomerPriceBookAdminError(
-        '空白封产品分类未配置，请先配置可建单产品组合',
-      );
-    const catalog = await readBlankPaperCatalogInTx(tx);
+    const categoryId = await blankBaseCategoryId(tx);
+    const catalog = { papers: await tx.material.findMany({ where: { category: 'PAPER' } }) };
     const resolved = await resolveBlankPaperInTx(tx, input.paper, catalog, actor);
     const { paper, fact, label, hash } = resolved;
     const createdRuleIds: string[] = [];
     for (const entry of input.specifications) {
       const spec = BLANK_SPECIFICATIONS.find((spec) => spec.key === entry.key)!;
+      if (entry.amount === null) continue;
       const duplicate = rules.some((rule) => {
         const condition = parseCustomerRuleCondition(
           rule.triggerCondition,
@@ -3655,14 +3706,11 @@ export async function addBlankPaperDraft(
         throw new CustomerPriceBookAdminError(
           `${spec.label}已有价格记录，请返回价格表修改`,
         );
-      const product = await ensureBlankPaperProductInTx(tx, catalog, resolved, spec, 'draft', actor);
-      // An enabled catalog combination without a rule uses the existing manual-pricing path.
-      if (entry.amount === null) continue;
       const rule = await tx.customerPriceRule.create({
         data: {
           priceBookId: book.id,
-          categoryId: anchor.categoryId,
-          productId: product.id,
+          categoryId,
+          productId: null,
           code: `STOCK-BASE-${hash}-${spec.key}`,
           name: `${label} ${spec.label}空白封单价`,
           kind: 'BASE',
@@ -3671,13 +3719,9 @@ export async function addBlankPaperDraft(
           minQty: 1,
           maxQty: null,
           exclusiveGroup: 'STOCK_BASE',
-          triggerCondition: {
-            schemaVersion: 1,
-            target: 'ITEM',
-            pricingRoutes: ['STOCK_BLANK'],
-            paperTypes: [label],
-            specifications: [spec.label],
-          },
+          triggerCondition: blankPriceTriggerCondition(blankPriceIdentity({
+            paperType: fact.paperType, paperWeightGsm: fact.paperWeightGsm, specification: spec.label,
+          })!),
         },
       });
       createdRuleIds.push(rule.id);
@@ -3724,5 +3768,70 @@ export async function addBlankPaperDraft(
   }).catch((error: unknown) => {
     if (error instanceof BlankPaperCatalogError) throw new CustomerPriceBookAdminError(error.message);
     throw error;
+  });
+}
+
+/** A single matrix save: absent fields stay unchanged; an explicit blank stops an existing price. */
+export async function updateBlankPriceMatrixDraft(
+  raw: BlankPriceMatrixInput,
+  actor: AuditActor,
+  now: Date = new Date(),
+): Promise<{ priceBookId: string; ruleIds: string[] }> {
+  assertBlankPricePermission(actor);
+  const input = blankPriceMatrixSchema.parse(raw);
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const book = await tx.customerPriceBook.findUnique({ where: { id: input.priceBookId } });
+    const workflow = book ? draftWorkflow(book.notes) : null;
+    if (!book || !workflow || book.isActive || book.purpose !== 'PROCESSING' || book.settlementType !== EXTERNAL_SETTLEMENT) {
+      throw new CustomerPriceBookAdminError('加工费草稿不可编辑，请返回价格表重新发起调价');
+    }
+    if (book.updatedAt.toISOString() !== input.expectedUpdatedAt) throw new CustomerPriceBookAdminError('草稿已变化，请刷新后重新提交');
+    const rules = await tx.customerPriceRule.findMany({
+      where: { priceBookId: book.id, exclusiveGroup: 'STOCK_BASE' },
+      include: { product: { select: { code: true, paperType: true, weight: true, specification: true } } },
+    });
+    const byKey = new Map<string, (typeof rules)[number]>();
+    for (const rule of rules) {
+      const identity = blankPriceIdentityFromCondition(normalizeBlankDraftRule(rule).triggerCondition);
+      if (!identity || byKey.has(identity.key)) throw new CustomerPriceBookAdminError('空白封价格有重复或不完整的纸张规格，请先修复');
+      byKey.set(identity.key, rule);
+    }
+    const catalog = { papers: await tx.material.findMany({ where: { category: 'PAPER' } }) };
+    const categoryId = await blankBaseCategoryId(tx);
+    const seen = new Set<string>();
+    const ruleIds: string[] = [];
+    const editedAt = new Date(Math.max(now.getTime(), book.updatedAt.getTime() + 1));
+    for (const cell of input.cells) {
+      const resolved = await resolveBlankPaperInTx(tx, { mode: 'existing', id: cell.paperId }, catalog, actor);
+      const spec = BLANK_SPECIFICATIONS.find((entry) => entry.key === cell.specificationKey)!;
+      const identity = blankPriceIdentity({ ...resolved.fact, specification: spec.label })!;
+      if (seen.has(identity.key)) throw new CustomerPriceBookAdminError('同一纸张规格不能重复提交');
+      seen.add(identity.key);
+      const existing = byKey.get(identity.key);
+      if (!existing && cell.amount === null) continue;
+      const amount = new Prisma.Decimal(cell.amount ?? '0');
+      if (existing && existing.isActive && existing.amount?.eq(amount) && existing.productId === null) continue;
+      const data = { productId: null, amount, isActive: true, triggerCondition: blankPriceTriggerCondition(identity), updatedAt: editedAt };
+      const rule = existing
+        ? await tx.customerPriceRule.update({ where: { id: existing.id }, data })
+        : await tx.customerPriceRule.create({ data: { ...data, priceBookId: book.id, categoryId,
+          code: `STOCK-BASE-${resolved.hash}-${spec.key}`, name: `${identity.paperLabel} ${spec.label}空白封单价`,
+          kind: 'BASE', calculationType: 'PER_PIECE', minQty: 1, maxQty: null, exclusiveGroup: 'STOCK_BASE' } });
+      ruleIds.push(rule.id);
+      await writeAuditLogInTx(tx, { actor, action: existing ? 'UPDATE_DRAFT_PRICE_SECTION_ROW' : 'CREATE_DRAFT_RULE',
+        entityType: 'CustomerPriceRule', entityId: rule.id, before: existing ?? null, after: rule });
+    }
+    await assertValidRuleSet(tx, book.id, book.purpose);
+    if (ruleIds.length) {
+      await tx.customerPriceBook.update({ where: { id: book.id }, data: { updatedAt: editedAt,
+        notes: notesInput({ ...notesRecord(book.notes), workflow: { ...workflow, lastEditedBy: actor.id, lastEditedAt: editedAt.toISOString() } }) } });
+      await writeAuditLogInTx(tx, { actor, action: 'UPDATE_DRAFT_PRICE_SECTION', entityType: 'CustomerPriceBook', entityId: book.id,
+        before: { updatedAt: book.updatedAt }, after: { updatedAt: editedAt, ruleIds }, requestMetadata: { section: 'blank' } });
+    }
+    return { priceBookId: book.id, ruleIds };
+  }).catch((error: unknown) => {
+    if (error instanceof BlankPaperCatalogError) throw new CustomerPriceBookAdminError(error.message);
+    throw mapConstraintError(error) ?? error;
   });
 }

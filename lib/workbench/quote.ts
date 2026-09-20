@@ -58,7 +58,8 @@ export function workbenchPricingReasons(
 
 export const workbenchQuoteSchema = z
   .object({
-    productId: z.string().trim().min(1).max(32),
+    productId: z.string().trim().min(1).max(128).nullable().default(null),
+    selectionKey: z.string().trim().min(1).max(256).optional(),
     specification: z.string().trim().min(1).max(64),
     // This is a catalog selection label: material name (64) + up to 2000g (5).
     // The action resolves it into paper name and weight before order validation.

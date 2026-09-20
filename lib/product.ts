@@ -28,10 +28,6 @@ import {
   type AuditActor,
 } from './audit-log';
 import { isRetiredProductCategory } from './rules/retired-catalog';
-import { catalogPricingFactChoices } from './order/catalog-pricing-facts';
-import { findCatalogPaperIdentityMatches } from './order/catalog-paper-identity';
-import { BLANK_SPECIFICATIONS, blankSpecificationKey } from './price/blank-paper';
-import { classifyBlankPaperCell } from './price/blank-paper-cell';
 
 export { isRetiredProductCategory } from './rules/retired-catalog';
 
@@ -68,13 +64,12 @@ export type ProductSummary = Pick<
 export type ProductActiveStatusFilter = 'all' | 'active' | 'inactive';
 
 /**
- * 工单、BOM 和自动价共用的建单产品范围。
+ * 非空白封产品资料的管理范围；空白封改由已发布材料单价提供新单候选。
  *
  * STOCK_FOIL_ADD 是旧的“现货加烫”同义分类，现已归并到通版现货；
  * BYO_MATERIAL 需人工确认纸料，不作为新建单产品创建选项。
  */
 export const QUOTE_PRODUCT_CATEGORIES = [
-  ProductCategory.BLANK_STOCK,
   ProductCategory.GENERIC_STOCK,
   ProductCategory.CUSTOM_FLAT_FOIL,
   ProductCategory.COLOR_PRINT,
@@ -110,7 +105,7 @@ export type ProductOrderOption = Pick<
 >;
 
 /**
- * 外部销售建单的产品配置事实。产品目录与是否存在自动价格规则解耦；
+ * 非空白封路线的产品配置事实。此范围的目录与自动价格覆盖解耦；
  * 缺价由计费引擎返回 MANUAL_PRICING_REQUIRED，而不是在这里隐藏选项。
  */
 export type ExternalCreateOrderProductOption = Pick<
@@ -421,13 +416,12 @@ export async function listActiveProductOrderOptions(): Promise<
 }
 
 const EXTERNAL_CREATE_ORDER_PRODUCT_CATEGORIES = [
-  ProductCategory.BLANK_STOCK,
   ProductCategory.CUSTOM_FLAT_FOIL,
   ProductCategory.COLOR_PRINT,
 ] as const;
 
 /**
- * 返回所有启用、分类有效且属于三条新建单路线的产品配置。
+ * 返回专版和彩印的启用产品配置；空白封选项由已发布正价规则生成。
  *
  * 这里刻意不读取 CustomerPriceRule：合法配置即使暂时缺价也必须可以
  * 建单，随后由纯函数引擎明确转人工核价。
@@ -750,6 +744,9 @@ export async function updateProductCategoryNode(
     throw new ProductInvariantError('不能将现行产品分类改为已退役分类');
   }
 
+  if (data.legacyCategory !== ProductCategory.BLANK_STOCK) {
+    await assertNotBlankBomDefault(id);
+  }
   // 刻意不允许改 path：移动子树需要级联改所有后代 path + 迁移产品
   // 归属，属独立功能；这里只改展示属性。
   return db.productCategoryNode.update({
@@ -773,6 +770,7 @@ export async function setProductCategoryNodeActive(
     throw new ProductInvariantError('历史产品分类已退役，不能重新启用');
   }
   if (target.isActive === isActive) return target;
+  if (!isActive) await assertNotBlankBomDefault(id);
 
   return db.productCategoryNode.update({
     where: { id },
@@ -791,28 +789,6 @@ export type CreateProductData = {
   minOrderQty?: number;
 };
 
-async function assertNoBlankProductDuplicate(
-  tx: Prisma.TransactionClient,
-  data: Pick<CreateProductData, 'paperType' | 'specification'>,
-): Promise<void> {
-  const products = await tx.product.findMany({ where: { category: ProductCategory.BLANK_STOCK } });
-  const papers = await tx.material.findMany({ where: { category: 'PAPER' } });
-  for (const name of catalogPricingFactChoices(data.paperType)) {
-    const identity = { name, specification: null };
-    const matches = findCatalogPaperIdentityMatches(papers, identity);
-    if (matches.length > 1) throw new ProductInvariantError('纸张存在重复身份，请先在纸张页处理');
-    const paper = matches[0] ?? { id: '', ...identity };
-    for (const specification of catalogPricingFactChoices(data.specification)) {
-      const spec = BLANK_SPECIFICATIONS.find((spec) => spec.key === blankSpecificationKey(specification));
-      if (!spec) continue;
-      const cell = classifyBlankPaperCell(products, paper, spec.key);
-      if (cell.candidates.length || cell.state === 'needs-attention') {
-        throw new ProductInvariantError('该纸张规格已有产品或待处理组合，请到纸张页启用或检查');
-      }
-    }
-  }
-}
-
 export async function createProduct(data: CreateProductData): Promise<ProductSummary> {
   // Preserve the invariant/error order before consuming an automatic business
   // code.  The category is checked again under the price snapshot write lock
@@ -823,7 +799,7 @@ export async function createProduct(data: CreateProductData): Promise<ProductSum
     await acquirePriceRuleSnapshotWriteLock(tx);
     const categoryNode = await requireActiveCategoryNode(tx, data.categoryNodeId);
     if (categoryNode.legacyCategory === ProductCategory.BLANK_STOCK) {
-      await assertNoBlankProductDuplicate(tx, data);
+      throw new ProductInvariantError('空白封请在空白封单价表管理，无需创建产品资料');
     }
     return tx.product.create({
       data: {
@@ -899,9 +875,10 @@ export async function updateProduct(
     await acquirePriceRuleSnapshotWriteLock(tx);
     const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
     if (!target) throw new ProductInvariantError('目标产品不存在');
-    if ((target.category === ProductCategory.BLANK_STOCK || target.category === ProductCategory.COLOR_PRINT) &&
+    if (target.category === ProductCategory.BLANK_STOCK) throw new ProductInvariantError('空白封历史产品资料只读，请在空白封单价表管理');
+    if (target.category === ProductCategory.COLOR_PRINT &&
       externalPricingFactsChanged(target, data)) {
-      throw new ProductInvariantError('空白封和彩印产品的编码、规格、纸张和分类不可修改，请到纸张页管理适用规格');
+      throw new ProductInvariantError('彩印产品的编码、规格、纸张和分类不可修改');
     }
     if (
       externalPricingFactsChanged(target, data) &&
@@ -914,8 +891,8 @@ export async function updateProduct(
         ? { id: target.categoryNodeId, legacyCategory: target.category }
         : await requireActiveCategoryNode(tx, data.categoryNodeId);
 
-    if (target.category !== ProductCategory.BLANK_STOCK && categoryNode.legacyCategory === ProductCategory.BLANK_STOCK) {
-      await assertNoBlankProductDuplicate(tx, data);
+    if (categoryNode.legacyCategory === ProductCategory.BLANK_STOCK) {
+      throw new ProductInvariantError('空白封请在空白封单价表管理，无需创建产品资料');
     }
 
     return tx.product.update({
@@ -954,6 +931,7 @@ export async function setProductActiveInTx(
 ): Promise<ProductSummary> {
   const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
   if (!target) throw new ProductInvariantError('目标产品不存在');
+  if (target.category === ProductCategory.BLANK_STOCK) throw new ProductInvariantError('空白封历史产品资料只读，请通过单价表启用或停售');
   if (isActive && isRetiredProductCategory(target.categoryNode)) {
     throw new ProductInvariantError('该建单产品属于已退役历史分类，不能重新启用');
   }
@@ -1013,4 +991,9 @@ export async function setProductActive(
     await acquirePriceRuleSnapshotWriteLock(tx);
     return setProductActiveInTx(tx, id, isActive, context);
   });
+}
+
+async function assertNotBlankBomDefault(id: string): Promise<void> {
+  const configured = await db.setting.findUnique({ where: { key: 'blank_stock_bom_category_node_id' } });
+  if (configured?.value === id) throw new ProductInvariantError('该分类用于空白封默认用料，请先调整默认用料分类');
 }

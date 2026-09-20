@@ -166,11 +166,11 @@ function validateOrderItemPricingFacts(
   }
 
   const manualPricingRequested = Boolean(item.manualQuoteReason?.trim());
-  if (!item.productId && !manualPricingRequested) {
+  if (!item.productId && item.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK && !manualPricingRequested) {
     ctx.addIssue({
       code: 'custom',
       path: ['productId'],
-      message: '自动计价路线必须选择精确的建单产品',
+      message: '请选择与计价路线匹配的产品资料',
     });
   }
   if (!item.paperType && !manualPricingRequested) {

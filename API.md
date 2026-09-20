@@ -172,9 +172,10 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 - `packageRequirement` / 外部创建命令 `packRaw` 保持既有字段契约，含义是选填的包装补充说明。保存该文字不变更包装组、分袋组成、实际袋数或入袋费用。
 - 联系信息保存只更新工单及对应配送联系人，不重建款式、分货、包装或历史价格。主地址同步、递增编辑版本与变更日志在同一事务中完成，过期版本拒绝覆盖。
 - `createOrderChangeRequestAction` 的 MODIFY 支持管理员及工单所有者（SALES / CUSTOMER_SERVICE），状态窗口由 `ORDER_MODIFIABLE_STATUSES` 统一定义，包含草稿、待工厂确认和已驳回。管理员新增的权限不开放 CANCEL 申请；取消继续沿用原有流程。申请人（包含管理员）只能撤回本人待审申请；待审批期间也禁止增删设计文件。
-- 修改申请中的规格变更须同时提交 `specification` 与 `targetProductId`；服务端从活动产品目录重新解析计价身份，不接受仅改规格文字而沿用旧产品的输入。
+- 修改申请中的规格变更：非空白路线同时提交 `specification` 与 `targetProductId`；空白封只提交 `targetBlankIdentity`（纸张、克重、规格），不能同时携带旧产品选择字段。服务端重新解析当前身份与准入，不能只改文字沿用旧产品。原样复制模板也单独检查当前正价。
 - `previewOrderChangeRequestPricingAction` 接受 `requestId`、可选的 `expectedPriceRevision` 与 `pendingChargeResolutions`。人工物流决议只适用于本次预览实际待核的收费，需携带收费业务键、发货记录、预览数量、省份、金额和依据。
-- 批准修改须提交 `expectedPriceRevision`；涉及重新计价时，还须将预览返回的 `quoteToken` 作为 `expectedQuoteToken` 提交（`order-change-approval-v1:` 前缀）。服务端持有订单锁后重新核对报价、版本及人工收费内容，变化时拒绝写入并要求刷新预览。无需重新计价的修改不提交报价令牌；拒绝申请不依赖价格版本，取消申请保留独立结算流程。
+- 批准修改须提交 `expectedPriceRevision`；涉及重新计价时，还须将预览返回的 `quoteToken` 作为 `expectedQuoteToken` 提交（`order-change-approval-v1:` 前缀）。服务端持有订单锁后重新核对报价、版本及人工收费内容，变化时拒绝写入并要求刷新预览。无需重新计价的修改不提交报价令牌；拒绝申请不依赖价格版本。
+- 取消参考结算预览返回原参考金额、明细及价目依据，并附 `priceRevision`、`quoteToken`。批准取消必须提交对应的 `expectedPriceRevision` 与 `expectedQuoteToken`；服务端持订单锁重算，核对材料补核、产量、发布价目与参考金额是否变化。过期预览拒绝批准；人工调整结算额仍保留原有依据要求。
 - `confirmFactoryOrderAction` 除工单修订号与生产版本外，要求提交 `expectedQuoteToken`：外部销售工单使用当前价预览的 `create-order-quote-v2:` 令牌，其他结算类型显式传 `null`。
 - 以上令牌是预览一致性证据，不授予权限，也不替代资源范围、状态机及服务端金额校验。
 - `finalizeOrderPricingAction` 将生产工序生成的预期校验失败返回为 `{ status: 'error', message }`，核价表单保留在当前页面。款式或包装信息缺失时不确认价格、不生成工序；事务继续整体回滚，不返回内部 `detail`，也不执行成功路径的缓存失效。未知异常仍交给错误边界处理。
@@ -358,21 +359,17 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 文件过期或读取失败 503；非法 view/id 400。所有响应 `Cache-Control: private, no-store`。
 下载前后重新检查所有工单内容标识及创建者权限，任意变化阻止整份文件下载。
 
-### 纸张目录与无草稿启用规格（2026-09-20）
+### 空白封单价与材料补核（2026-09-20）
 
-`actions/catalog-paper.ts` 的 `createCatalogPaperAction(prev, formData)` 要求 `material:manage`。接收 `name`、整数 `weight`（1–2000）与 `reviewed=yes`，复用草稿建纸校验，拒绝 120g；通过现有物料领域保护创建“克重g纸名”、规格“克重g”、单位“张”的 PAPER。成功跳转纸张详情并带 `created` 回执。
+`createCatalogPaperAction` 继续要求 `material:manage`，按名称、整数克重与复核标记创建基础纸张；该动作不授予空白封销售准入。旧 `enablePaperSpecificationsAction` 及其协议已删除。
 
-`actions/paper-specifications.ts` 的 `enablePaperSpecificationsAction(paperId, prev, formData)` 先检查 `material:manage` 与 `dict:product:manage`。接收 1–6 个唯一 `specifications` 和 `reviewed=yes`；规格数组仅代表本次增量，不是全量适用关系。服务端提供操作者，领域写锁内重读纸张和产品，校验 S1/S2 后新建或重新启用。无价格权限要求，不创建价格、不补旧产品外键，成功跳转原纸张详情并带 `updated` 回执。两入口失败返回 `MutationResult` 的 `invalid/error`；权限和未知错误抛出。复核标记只用于流程校验，不代替领域授权与数据校验。
+`actions/blank-paper.ts` 的 `addBlankPaperAction` 要求 `dict:price:manage`；仅新建纸张时额外要求 `material:manage`。接收 `priceBookId`、ISO `expectedUpdatedAt`、已有/新建 `paper` 及六种标准 `specifications` 的金额。`updateBlankPriceMatrixFormAction` 以服务端绑定的格子身份读取实际提交字段；未提交字段不变，已有格清空/0 保存为停售，新空格留空不写规则。事务持价格写锁，重验纸张、收费类别、草稿版本与金额，保存价格及审计；不创建或启用 Product。成功/已知业务失败返回结构化结果，授权与未知异常不吞掉。
 
-纸张详情的可选状态复用建单目录，价格来自现行报价投影与文本选择器；价格读取失败单独提示，不能视作缺价或零价。`/owner/rules/specifications` 要求 `dict:product:manage`，仅展示空白封常量、专版五规格与现有产品尺寸、彩印现有规格串，无写入口。
+空白封候选和新准入仅消费当前生效正价，纸张启用/缺货和 120g 保护继续有效。新明细 `productId=null`；纸张、克重、规格、实际尺寸及工艺仍须完整。STOCK_BLANK 允许不传 Product，其他路线仍要求匹配产品或合法人工核价说明。目录键不是数据库 ID，服务端重新从价目核验；新建、正式提交、改单新增/身份切换、打样和工作台共用准入。
 
-### 空白封纸张与规格价格（2026-09-13）
+`confirmHistoricalBlankPriceAction` 通过活动账号会话检查 `order:price:confirm`；领域层再次验证 ADMIN 角色、款式属于该订单、可核价状态、款式身份、`expectedOrderRevision` 和 `expectedPriceRevision`。接收 `orderId/itemId`、大于0且最多四位小数的 `unitPrice`、定价 `reason`。保存独立材料单价依据，写 `PriceRevision` 与 `OrderLog`，递增价格修订号，不改既有总额、不发布新规则。原历史款式当前停售且需重算时使用可验证材料快照/补核记录；客户端不能传历史豁免。新款式和复制模板一律按正价检查。
 
-`actions/blank-paper.ts` 的 `addBlankPaperAction` 同时要求 `dict:price:manage`、`material:manage`、`dict:product:manage`。输入包括 `priceBookId`、ISO `expectedUpdatedAt`、`paper`（`mode: new` 的名称与整数克重，或 `mode: existing` 的纸张 ID）及 1–6 个唯一 `specifications`。规格 key 为 `mini / square / mid / large / west-mid / west-large`；`amount` 为非负、最多四位小数的十进制字符串或 `null`。
-
-事务内锁定价格写入，验证外部销售加工费草稿、更新时间、纸张身份与启用/缺货状态、产品分类和规格唯一性，创建或复用纸张/产品并保存草稿价格与审计。`null` 仅保留可建单组合，不生成价格规则；零元生成真实零价规则。重复价格格拒绝覆盖，价格修改沿用既有草稿矩阵 Action。返回 `{status:'success',paperId,priceBookId}` 或可预期业务错误 `{status:'error',message}`；权限与未知系统异常不吞掉。
-
-销售目录在保存后刷新，自动计价仍只消费已发布价目；历史工单不重算。`updateMaterial` 拒绝直接修改已关联建单产品的纸张名称、规格克重或分类，防止破坏产品与纸张身份。流程与验证范围见 [空白封纸张规格管理](./docs/空白封纸张规格管理-20260913.md)。
+旧 `/owner/rules/stock-skus` 列表/新建跳转空白封单价；详情鉴权后按真实类别分流。非空白产品资料入口为 `/owner/rules/product-categories/items`。空白封旧产品的创建、修改、启停在服务端拒绝。资料及操作说明见[空白封单价管理](./docs/空白封纸张规格管理-20260913.md)。
 
 ## 2026-09-15 寄样品与打样
 

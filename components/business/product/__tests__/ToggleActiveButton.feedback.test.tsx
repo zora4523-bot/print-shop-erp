@@ -45,7 +45,7 @@ describe('product active toggle structured feedback', () => {
       />,
     );
     expect(successHtml).toContain('data-tone="success"');
-    expect(successHtml).toContain('组合已停用');
+    expect(successHtml).toContain('产品已停用');
 
     actionState.current = { status: 'error', message: '产品仍被有效报价引用' };
     const errorHtml = renderToStaticMarkup(
@@ -57,7 +57,7 @@ describe('product active toggle structured feedback', () => {
     );
     expect(errorHtml).toContain('data-tone="error"');
     expect(errorHtml).toContain('产品仍被有效报价引用');
-    expect(errorHtml).not.toContain('组合已停用');
+    expect(errorHtml).not.toContain('产品已停用');
   });
 
   it('sets form busy, gives a precise pending label and removes stale failure', () => {
@@ -73,7 +73,7 @@ describe('product active toggle structured feedback', () => {
     );
 
     expect(html).toMatch(/<form[^>]*aria-busy="true"/);
-    expect(html).toContain('正在停用组合…');
+    expect(html).toContain('正在停用产品…');
     expect(html).not.toContain('产品仍被有效报价引用');
   });
 
@@ -86,7 +86,7 @@ describe('product active toggle structured feedback', () => {
       />,
     );
     expect(html).toContain('aria-haspopup="dialog"');
-    expect(html).toContain('停用组合');
+    expect(html).toContain('停用产品');
     expect(html).not.toContain('新报价');
   });
 });

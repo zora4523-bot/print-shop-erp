@@ -106,6 +106,7 @@ export type CustomerPriceRuleWorkspaceGroupDto = {
 };
 
 type CustomerPriceRuleTechnicalMeta = {
+  triggerCondition: unknown;
   code: string;
   exclusiveGroup: string | null;
   productCode: string | null;
@@ -707,6 +708,7 @@ function businessRule(rule: InternalRuleRow): CustomerPriceRuleBusinessDto {
     isActive: rule.isActive,
   };
   CUSTOMER_PRICE_RULE_TECHNICAL_META.set(business, {
+    triggerCondition: rule.triggerCondition,
     code: String(rule.code),
     exclusiveGroup: rule.exclusiveGroup,
     productCode: rule.product ? String(rule.product.code) : null,

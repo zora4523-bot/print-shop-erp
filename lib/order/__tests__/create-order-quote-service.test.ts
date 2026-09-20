@@ -184,22 +184,10 @@ describe('quoteExternalCreateOrder', () => {
     expect(result.logistics.suggestedShippingTotal).toBe('41.30');
   });
 
-  it('改尺寸款转人工但不清空物流等已知费用', async () => {
-    const result = await quoteExternalCreateOrder(
-      input({ items: [{ ...item, actualWidthMm: 91 }] }),
-      now,
-    );
-
-    expect(result).toMatchObject({
-      total: null,
-      hasManualPricing: true,
-      totalSemantics: 'EXCLUDES_MANUAL_ITEMS',
-    });
-    expect(result.items[0]).toMatchObject({
-      complete: false,
-      suggestedSubtotal: null,
-    });
-    expect(Number(result.knownTotal)).toBeGreaterThan(0);
+  it('空白封不能用改尺寸绕过标准规格准入', async () => {
+    await expect(quoteExternalCreateOrder(
+      input({ items: [{ ...item, actualWidthMm: 91 }] }), now,
+    )).rejects.toThrow('标准尺寸');
   });
 
   it('相同服务端事实生成稳定 token，factsKey 和浏览器重量不参与', async () => {

@@ -63,6 +63,7 @@ type OrderItemChangePayload =
       name: string;
       quantity: number;
       targetProductId?: string;
+      targetBlankIdentity?: { paperType: string; paperWeightGsm: number; specification: string };
       specification?: string;
       frontFoilColors: string[];
       backFoilColors: string[];
@@ -73,6 +74,7 @@ type OrderItemChangePayload =
       name: string;
       quantity: number;
       targetProductId?: string;
+      targetBlankIdentity?: { paperType: string; paperWeightGsm: number; specification: string };
       specification?: string;
       frontFoilColors: string[];
       backFoilColors: string[];
@@ -309,7 +311,7 @@ export function buildSelectedOrderItemChanges(
     const targetProductId = current.targetProductId;
     if (
       specificationChanged &&
-      (!targetProductId || !current.specification.trim())
+      ((!targetProductId && item.pricingRoute !== 'STOCK_BLANK') || !current.specification.trim())
     ) {
       return [];
     }
@@ -321,8 +323,9 @@ export function buildSelectedOrderItemChanges(
         quantity: current.quantity,
         ...(item.packagingEditable && current.pack !== (item.pack == null ? '' : String(item.pack))
           ? { pack: Number(current.pack) } : {}),
-        ...(specificationChanged && targetProductId
-          ? {
+        ...(specificationChanged && item.pricingRoute === 'STOCK_BLANK'
+          ? { targetBlankIdentity: { paperType: item.paperType ?? '', paperWeightGsm: item.paperWeightGsm ?? 0, specification: current.specification } }
+          : specificationChanged && targetProductId ? {
               targetProductId,
               specification: current.specification,
             }
@@ -689,8 +692,9 @@ function OrderChangeRequestDraftForm({
         templateItemId,
         name: newName,
         quantity: newQuantity,
-        ...(newTargetProductId && newSpecification
-          ? {
+        ...(newSpecification && selectedTemplate?.pricingRoute === 'STOCK_BLANK'
+          ? { targetBlankIdentity: { paperType: selectedTemplate.paperType ?? '', paperWeightGsm: selectedTemplate.paperWeightGsm ?? 0, specification: newSpecification } }
+          : newTargetProductId && newSpecification ? {
               targetProductId: newTargetProductId,
               specification: newSpecification,
             }

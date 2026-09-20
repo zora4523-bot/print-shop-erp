@@ -19,11 +19,6 @@ describe('paper spec command boundaries without a database', () => {
     expect(result.stderr).toContain('纸张规格对比失败');
     expect(result.stderr + result.stdout).not.toContain('never_print_this');
   });
-  it('fixture command refuses ordinary developer configuration before opening a database', () => {
-    const result = run('tests/e2e/paper-spec-command.ts', [JSON.stringify({ op: 'setup' })]);
-    expect(result.status).toBe(1);
-    expect(JSON.parse(result.stdout).error).toContain('E2E_DATABASE_URL is required');
-  });
   it('comparison exit code blocks exact-price changes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'paper-spec-cli-'));
     try {

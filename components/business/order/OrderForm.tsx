@@ -191,7 +191,8 @@ export function additionalOrderCraftOptions(
 }
 
 export type ProductOption = {
-  id: string;
+  id: string | null;
+  selectionKey?: string;
   code?: string | null;
   name: string;
   category: string;
@@ -700,7 +701,7 @@ function internalQuoteRequestReady(
     items.every(
       (item) =>
         (Boolean(item.manualQuoteReason?.trim()) ||
-          (Boolean(item.productId) && item.crafts.length > 0)) &&
+          ((Boolean(item.productId) || (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK && Boolean(item.paperType && item.specification))) && item.crafts.length > 0)) &&
         Number.isSafeInteger(item.quantity) &&
         item.quantity >= 1,
     ) &&
@@ -2194,7 +2195,7 @@ export function OrderForm({
     watchedItems.length > 0 &&
     watchedItems.every(
       (item) =>
-        Boolean(item.productId) &&
+        (Boolean(item.productId) || (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK && Boolean(item.paperType && item.specification))) &&
         Number.isSafeInteger(item.quantity) &&
         item.quantity >= 1 &&
         item.crafts.length > 0,

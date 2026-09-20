@@ -535,15 +535,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       now: NOW,
       snapshotLockHeld: true,
     });
-    expect(mocks.productFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          id: {
-            in: ['product-stock-large-1', 'product-stock-large-2'],
-          },
-        },
-      }),
-    );
+    expect(mocks.productFindMany).not.toHaveBeenCalled();
     expect(mocks.resolveLogistics).toHaveBeenCalledWith(
       tx,
       {
@@ -880,7 +872,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     );
   });
 
-  it('查不到价时款式、包装和物流均转人工，不把 0 元当作报价', async () => {
+  it('空白封缺价时拒绝首次提交且不写入任何金额', async () => {
     const order = draftOrder({
       items: [
         item(),
@@ -943,77 +935,13 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       ]),
     );
 
-    const expectedQuoteToken = await currentQuoteToken(order);
     const tx = txFor(order);
-    const result = await finalizeExternalOrderQuoteInTx(
-      tx as unknown as Prisma.TransactionClient,
-      'order-1',
-      'sales-1',
-      NOW,
-      expectedQuoteToken,
-    );
-
-    expect(result).toMatchObject({
-      quotedFee: '211.30',
-      quotedFeeCompleteness:
-        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
-      processingAmount: '170.00',
-      packagingAmount: '0.00',
-      logisticsAmount: '41.30',
-      manualItemIds: ['item-2'],
-    });
-    expect(tx.orderItem.update).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        where: { id: 'item-2' },
-        data: expect.objectContaining({
-          quoteDisposition:
-            OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
-          quotedAmount: null,
-          pricingSnapshot: expect.objectContaining({
-            version: 1,
-            schemaVersion: 2,
-            complete: false,
-            suggestedSubtotal: null,
-            engineVersion: 'CREATE_ORDER_PURE_V1',
-            source: 'EXTERNAL_SUBMIT_MANUAL_REQUIRED',
-            actual: expect.objectContaining({ amount: null }),
-          }),
-        }),
-      }),
-    );
-    expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          suggestedSubtotal: null,
-          pricingSnapshot: expect.objectContaining({
-            actual: expect.objectContaining({ amount: null }),
-          }),
-        }),
-      }),
-    );
-    expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        create: expect.objectContaining({
-          businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
-          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
-          suggestedAmount: null,
-          amount: null,
-        }),
-        update: expect.objectContaining({
-          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
-          amount: null,
-        }),
-      }),
-    );
-    expect(mocks.appendRevision).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        status: 'PENDING_ADMIN_CONFIRMATION',
-        expectedPriceRevision: 1,
-      }),
-    );
+    await expect(finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient,
+      'order-1', 'sales-1', NOW, null)).rejects.toThrow('未启用');
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
+    expect(tx.orderPackagingGroup.update).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
   });
 
   it('顺丰到付与默认零版费仍可完整自动报价', async () => {
@@ -1140,7 +1068,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.orderItem.update).not.toHaveBeenCalled();
   });
 
-  it('内销工单的配置外款式不做纸张目录校验，进入人工核价而不是被拦', async () => {
+  it('内销空白封不能通过配置外说明绕过纸张规格准入', async () => {
     const order = draftOrder({
       settlementType: OrderSettlementType.INTERNAL_SALES,
       items: [
@@ -1184,8 +1112,10 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       NOW,
     ).catch((error: unknown) => error);
     if (outcome instanceof Error) {
-      expect(outcome.message).not.toMatch(/纸张/);
+      expect(outcome.message).toMatch(/空白封纸张、克重和标准规格/);
     }
+    expect(outcome).toBeInstanceOf(Error);
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
     expect(mocks.readPublishedSnapshot).toHaveBeenCalled();
   });
 

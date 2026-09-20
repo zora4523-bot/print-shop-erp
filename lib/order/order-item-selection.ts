@@ -9,6 +9,7 @@ import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-option
 import {
   externalOrderPapersForRoute,
   externalOrderWeightOptionsForSelection,
+  externalOrderAvailableSpecifications,
   externalOrderDefaultSpecification,
   externalOrderDimensions,
   type ExternalOrderCatalogProduct,
@@ -73,6 +74,8 @@ export function orderItemSelectionUpdate(
         catalog?.papers,
       ).find((paper) => paper.key === change.value);
       if (!paper) return null;
+      if (current.pricingRoute === OrderItemPricingRoute.STOCK_BLANK &&
+          externalOrderAvailableSpecifications(paper, current.pricingRoute).length === 0) return null;
       const weight =
         externalOrderWeightOptionsForSelection(
           paper,

@@ -1,3 +1,6 @@
+import { canConfirmHistoricalBlankPrice } from './historical-blank-price-input';
+import { sameHistoricalBlankIdentity } from './historical-blank-price';
+import { assertBlankPriceAdmissionInTx, BlankPriceAdmissionError } from './blank-price-admission';
 import { subtotalReconciles } from './subtotal-reconciliation';
 import { packagingBoxType } from './packaging-mode';
 import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
@@ -108,6 +111,7 @@ import { createOrderChangeApprovalToken } from './order-change-approval-token';
 import {
   OrderChangeCatalogIdentityError,
   resolveOrderChangeCatalogIdentity,
+  resolveOrderChangeBlankIdentity,
   type OrderChangeCatalogIdentity,
   type OrderChangeCatalogProduct,
 } from './change-request-catalog-identity';
@@ -541,10 +545,12 @@ export async function createOrderChangeRequest(
       }
       const itemById = new Map(order.items.map((item) => [item.id, item]));
       const normalizedChanges = normalizeProposedChanges(input.items, itemById);
+      const pricingNow = await databaseClockNow(tx);
       const resolvedChanges = await resolveProposedChangeCatalogIdentities(
         tx,
         normalizedChanges,
         itemById,
+        pricingNow,
       );
       assertNoSemanticNoopUpdates(resolvedChanges, itemById);
       const promisedDate = input.type === 'CANCEL' ? undefined : proposedDueDateText(input.promisedDate);
@@ -601,7 +607,8 @@ export async function createOrderChangeRequest(
         }
         await calculateProjectedOrderQuote({
           client: tx,
-          now: await databaseClockNow(tx),
+          now: pricingNow,
+          orderStatus: order.status,
           settlementType: order.settlementType,
           isSfCollect: order.isSfCollect,
           items: order.items,
@@ -873,6 +880,7 @@ async function resolveProposedChangeCatalogIdentities(
       specification: string | null;
     }
   >,
+  now: Date,
 ): Promise<ResolvedProposedItemChange[]> {
   const needsCatalog = changes.some(
     (change) => change.targetProductId !== undefined,
@@ -923,12 +931,24 @@ async function resolveProposedChangeCatalogIdentities(
     }),
   );
 
-  return changes.map((change) => {
+  const resolved = changes.map((change) => {
     const sourceId =
       change.operation === 'UPDATE' ? change.itemId : change.templateItemId;
     const sourceItem = itemById.get(sourceId);
     if (!sourceItem) {
       throw new OrderChangeRequestError('参考款式已不存在，请重新申请');
+    }
+    if (change.targetBlankIdentity) {
+      if (change.targetProductId !== undefined || change.specification !== undefined) {
+        throw new OrderChangeRequestError('空白封规格不能同时提交旧产品选择');
+      }
+      try {
+        const catalogIdentity = resolveOrderChangeBlankIdentity(sourceItem, change.targetBlankIdentity);
+        return { ...change, specification: catalogIdentity.specification, catalogIdentity };
+      } catch (error) {
+        if (error instanceof OrderChangeCatalogIdentityError) throw new OrderChangeRequestError(error.message);
+        throw error;
+      }
     }
     const hasTargetProduct = change.targetProductId !== undefined;
     const hasSpecification = change.specification !== undefined;
@@ -972,6 +992,24 @@ async function resolveProposedChangeCatalogIdentities(
       throw error;
     }
   });
+  const newIdentities = resolved.flatMap((change) => {
+    const sourceId = change.operation === 'UPDATE' ? change.itemId : change.templateItemId;
+    const source = itemById.get(sourceId)!;
+    const projectedIdentity = { ...source, ...(change.catalogIdentity ?? {}) };
+    const identityChanged = change.catalogIdentity &&
+      !sameHistoricalBlankIdentity(source, projectedIdentity);
+    return change.operation === 'ADD' || identityChanged
+      ? [projectedIdentity]
+      : [];
+  });
+  if (newIdentities.length > 0) {
+    try { await assertBlankPriceAdmissionInTx(client, newIdentities, now); }
+    catch (error) {
+      if (error instanceof BlankPriceAdmissionError) throw new OrderChangeRequestError(error.message);
+      throw error;
+    }
+  }
+  return resolved;
 }
 
 /**
@@ -989,6 +1027,7 @@ function toStoredProposedChange(
   delete stored.isDoubleColor;
   delete stored.foilFactsProvided;
   delete stored.catalogIdentity;
+  if (stored.targetBlankIdentity) delete stored.specification;
   if (!change.foilFactsProvided && change.operation === 'UPDATE') {
     delete stored.frontFoilColors;
     delete stored.backFoilColors;
@@ -2428,7 +2467,7 @@ type CatalogIdentityAuditEntry = {
     pricingGroup: string | null;
   } | null;
   after: {
-    productId: string;
+    productId: string | null;
     specification: string;
     productStructure: PricingProjectionItem['productStructure'];
     actualWidthMm: string | null;
@@ -2926,6 +2965,7 @@ function projectPackagingUnits(
 async function calculateProjectedOrderQuote(input: {
   client: Prisma.TransactionClient;
   now: Date;
+  orderStatus: OrderStatus;
   settlementType: OrderSettlementType;
   isSfCollect: boolean;
   items: readonly PricingProjectionItem[];
@@ -2956,6 +2996,7 @@ async function calculateProjectedOrderQuote(input: {
   try {
     calculation = await calculateCreateOrderQuoteFromCatalogInTx(input.client, {
       now: input.now,
+      historicalBlankItems: canConfirmHistoricalBlankPrice(input.orderStatus) ? input.items : undefined,
       facts: {
         items: projectedItems.map((item) => item.facts),
         packagingGroups: projectPackagingUnits(input.packagingGroups, input.changes).map((group) => ({
@@ -3795,10 +3836,9 @@ export async function previewOrderChangeRequestPricing(
       proposedChanges,
       itemById,
     );
+    const quotedAt = await databaseClockNow(tx);
     const changes = await resolveProposedChangeCatalogIdentities(
-      tx,
-      normalizedChanges,
-      itemById,
+      tx, normalizedChanges, itemById, quotedAt,
     );
     if (changes.length > 0 && !request.order.shipments.some((shipment) => shipment.sequence === 1)) {
       throw new OrderChangeRequestError('工单缺少主收货地址，不能安全更新数量');
@@ -3817,7 +3857,6 @@ export async function previewOrderChangeRequestPricing(
       );
     }
 
-    const quotedAt = new Date();
     const pricingChanged = hasPricingFactChanges(changes, itemById);
     assertProductionPlateFactsRemainScoped({
       status: request.order.status,
@@ -3838,6 +3877,7 @@ export async function previewOrderChangeRequestPricing(
     const projected = await calculateProjectedOrderQuote({
       client: tx,
       now: quotedAt,
+      orderStatus: request.order.status,
       settlementType: request.order.settlementType,
       isSfCollect: request.order.isSfCollect,
       items: request.order.items,
@@ -4117,6 +4157,7 @@ export async function confirmOrderPricingAtCurrentPublishedVersionInTx(
   const projected = await calculateProjectedOrderQuote({
     client: tx,
     now: input.now,
+    orderStatus: order.status,
     settlementType: order.settlementType,
     isSfCollect: order.isSfCollect,
     items: order.items,
@@ -4375,6 +4416,7 @@ export async function previewFactoryConfirmationPriceDiff(
     const projected = await calculateProjectedOrderQuote({
       client: tx,
       now,
+      orderStatus: order.status,
       settlementType: order.settlementType,
       isSfCollect: order.isSfCollect,
       items: order.items,
@@ -4453,6 +4495,30 @@ export type CancellationSettlementReference = {
   allocation: Array<{ orderItemId: string; producedQty: number }>;
   priceVersions: PriceVersionEvidence;
 };
+
+export type CancellationSettlementPreview = CancellationSettlementReference & {
+  priceRevision: number;
+  quoteToken: string;
+};
+
+function cancellationSettlementPreview(
+  request: CancellationRequest,
+  producedQty: number,
+  reference: CancellationSettlementReference,
+): CancellationSettlementPreview {
+  return { ...reference, priceRevision: request.order.priceRevision,
+    quoteToken: createOrderChangeApprovalToken({
+      requestId: request.id, baseRevision: request.baseRevision,
+      priceRevision: request.order.priceRevision,
+      // The existing approval envelope hashes the full, server-derived reference.
+      // This also catches rule publication between preview and approval when the
+      // order price revision itself has not changed.
+      pureQuoteToken: JSON.stringify({ kind: 'CANCELLATION_REFERENCE_V1',
+        workOrderVersion: request.order.workOrderVersion, producedQty, reference }),
+      pendingChargeResolutions: [],
+    }),
+  };
+}
 
 /** Deterministic largest-remainder allocation for the aggregate producedQty. */
 export function allocateCancellationProducedQuantity(
@@ -4670,6 +4736,7 @@ async function cancellationSettlementReferenceInTx(
   try {
     calculation = await calculateCreateOrderQuoteFromCatalogInTx(tx, {
       now,
+      historicalBlankItems: request.order.items,
       facts: {
         items: active.map((item) => ({
           ...item.facts,
@@ -4730,7 +4797,7 @@ async function cancellationSettlementReferenceInTx(
 export async function previewOrderCancellationSettlement(
   input: PreviewOrderCancellationSettlementInput,
   actor: { id: string; role: Role },
-): Promise<CancellationSettlementReference> {
+): Promise<CancellationSettlementPreview> {
   if (actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有管理员可以预览取消结算');
   }
@@ -4762,12 +4829,13 @@ export async function previewOrderCancellationSettlement(
       request,
       input.producedQty,
     );
-    return cancellationSettlementReferenceInTx(
+    const reference = await cancellationSettlementReferenceInTx(
       tx,
       request,
       producedQty,
       await databaseClockNow(tx),
     );
+    return cancellationSettlementPreview(request, producedQty, reference);
   });
 }
 
@@ -4897,6 +4965,12 @@ async function reviewOrderCancellationRequest(
       request,
       input.producedQty,
     );
+    if (input.expectedPriceRevision === undefined || input.expectedQuoteToken === undefined) {
+      throw new OrderChangeRequestError('批准取消前必须先计算并确认最新参考结算价');
+    }
+    if (input.expectedPriceRevision !== request.order.priceRevision) {
+      throw new OrderChangeRequestError('材料单价或价格版本已变化，请重新计算参考结算价');
+    }
     if (request.order.confirmedFee === null) {
       throw new OrderChangeRequestError('工单缺少已确认费用，禁止猜测取消结算');
     }
@@ -4906,6 +4980,9 @@ async function reviewOrderCancellationRequest(
       producedQty,
       reviewedAt,
     );
+    if (input.expectedQuoteToken !== cancellationSettlementPreview(request, producedQty, reference).quoteToken) {
+      throw new OrderChangeRequestError('参考结算价已变化，请重新计算并核对后批准取消');
+    }
     const settleFee = new Decimal(
       input.settleFee ?? reference.referenceSettleFee,
     ).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
@@ -5683,9 +5760,7 @@ export async function reviewOrderChangeRequest(
       itemById,
     );
     const changes = await resolveProposedChangeCatalogIdentities(
-      tx,
-      normalizedChanges,
-      itemById,
+      tx, normalizedChanges, itemById, reviewedAt,
     );
     const catalogIdentityChanges = buildCatalogIdentityAuditEntries(
       changes,
@@ -5748,6 +5823,7 @@ export async function reviewOrderChangeRequest(
       ? await calculateProjectedOrderQuote({
           client: tx,
           now: reviewedAt,
+          orderStatus: request.order.status,
           settlementType: request.order.settlementType,
           isSfCollect: request.order.isSfCollect,
           items: request.order.items,

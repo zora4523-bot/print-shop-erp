@@ -396,6 +396,7 @@ function priceSummary(
   calculationType: CustomerPriceCalculationType | null,
 ): string {
   if (!price) return '—';
+  if (price.blankSalesEnabled === false) return '未启用';
   const status = price.isActive ? '' : ' · 已停用';
   if (
     price.includedUnits &&
@@ -411,6 +412,7 @@ function priceSummary(
 }
 
 function deltaLabel(change: CustomerPriceBookDraftImpactChangeDto): string {
+  if (change.draft?.blankSalesEnabled === false) return '发布后停止用于新单';
   if (change.direction === 'ADDED') return '新增';
   if (change.direction === 'REMOVED') return '移除';
   if (change.direction === 'MIXED') return '多个金额涨跌不同';

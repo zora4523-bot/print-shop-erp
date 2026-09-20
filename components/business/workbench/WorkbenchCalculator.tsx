@@ -36,8 +36,8 @@ import { Card } from '@/components/ui/card';
 import { ActionNotice, EmptyState } from '@/components/ui-business';
 import { useWorkbenchAutoQuote } from './useWorkbenchAutoQuote';
 
-function workbenchInputIssue(item: { productId: string | null; crafts: string[] }, valid: boolean) {
-  return !item.productId
+function workbenchInputIssue(item: { productId: string | null; pricingRoute: string; paperType: string | null; specification: string | null; crafts: string[] }, valid: boolean) {
+  return !item.productId && !(item.pricingRoute === 'STOCK_BLANK' && item.paperType && item.specification)
     ? '请选择可用的纸张、规格和匹配产品'
     : item.crafts.length === 0
       ? '所选工艺暂不可用，请联系管理员配置后重试'

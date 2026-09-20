@@ -32,6 +32,7 @@ const { adapterMock, dbMock, MockPublishedCreateOrderPriceAdapterError } =
           delete: vi.fn(),
         },
         customerPriceRule: {
+          create: vi.fn(),
           findMany: vi.fn(),
           findUnique: vi.fn(),
           createMany: vi.fn(),
@@ -40,6 +41,7 @@ const { adapterMock, dbMock, MockPublishedCreateOrderPriceAdapterError } =
           deleteMany: vi.fn(),
         },
         customerChargeCategory: {
+          findFirst: vi.fn(),
           findMany: vi.fn(),
           findUnique: vi.fn(),
         },
@@ -75,6 +77,7 @@ import {
   listCustomerPriceBookVersionsAndDrafts,
   publishCustomerPriceBookDraft,
   prepareConfirmedCustomTierDraft,
+  prepareConfirmedBoxPackagingDraft,
   rescheduleCustomerPriceBook,
   updateCustomerPriceRuleDraft,
   updateCustomerPriceRuleDraftGroup,
@@ -669,6 +672,22 @@ describe('customer price-book draft lifecycle', () => {
     expect(dbMock.customerPriceRule.createMany).toHaveBeenCalledWith({
       data: [expect.objectContaining({ priceBookId: 'book-v2-draft', code: 'BASE_A' })],
     });
+  });
+
+  it.each([true, false])('克隆空白封草稿去除产品绑定并保留停售语义：%s', async (isActive) => {
+    const blank = { ...sourceRule, isActive, exclusiveGroup: 'STOCK_BASE', minQty: 1, maxQty: 9999999,
+      product: { code: 'PRODUCT_A', paperType: '180g红卡', weight: 180, specification: '中号封80×115' },
+      triggerCondition: { schemaVersion: 1, target: 'ITEM', pricingRoutes: ['STOCK_BLANK'], productCodes: ['PRODUCT_A'], paperTypes: ['180g红卡'], specifications: ['中号封'] } };
+    dbMock.customerPriceBook.findMany.mockResolvedValueOnce([{ id: 'book-v1', code: 'book', name: '加工费', settlementType: 'EXTERNAL_SALES', purpose: 'PROCESSING', version: 1, currency: 'CNY', notes: null, rules: [blank] }]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    dbMock.customerPriceBook.findFirst.mockResolvedValue({ version: 1 });
+    dbMock.customerPriceBook.create.mockResolvedValue({ id: 'book-v2-draft', version: 2, purpose: 'PROCESSING' });
+    dbMock.customerPriceRule.findMany.mockResolvedValue([validationRule()]);
+    await createCustomerPriceBookDraft({ purpose: 'PROCESSING', changeReason: '单价管理' }, actor, now);
+    const cloned = dbMock.customerPriceRule.createMany.mock.calls[0]![0].data[0];
+    expect(cloned).toMatchObject({ productId: null, isActive: true, triggerCondition: { paperTypes: ['180g红卡'], specifications: ['中号封'] } });
+    expect(cloned.triggerCondition).not.toHaveProperty('productCodes');
+    expect(String(cloned.amount)).toBe(isActive ? '0.1350' : '0');
+    expect(blank.productId).toBe('product-a');
   });
 
   it('refuses to create a second draft for the same purpose', async () => {
@@ -1970,7 +1989,7 @@ describe('customer price-book draft lifecycle', () => {
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('保留单本业务板块入口并仅开启一个事务', async () => {
+  it('旧空白封业务板块协议拒绝写入，统一使用矩阵协议', async () => {
     const sectionRule = editableSectionRule(
       'stock-base-rule',
       'processing-draft',
@@ -2022,14 +2041,12 @@ describe('customer price-book draft lifecycle', () => {
         actor,
         now,
       ),
-    ).resolves.toEqual({
-      priceBookId: 'processing-draft',
-      ruleIds: ['stock-base-rule'],
-    });
+    ).rejects.toThrow('空白封现货单价表');
+    expect(dbMock.customerPriceRule.updateMany).not.toHaveBeenCalled();
 
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
-    expect(dbMock.customerPriceRule.updateMany).toHaveBeenCalledTimes(1);
-    expect(dbMock.customerPriceBook.update).toHaveBeenCalledTimes(1);
+    expect(dbMock.customerPriceRule.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.update).not.toHaveBeenCalled();
   });
 
   it('整板块保存只写入并审计真实变化行', async () => {
@@ -3216,5 +3233,21 @@ describe('confirmed custom-tier draft release guards', () => {
       .mockResolvedValueOnce([validationRule({ amount: '1' })]);
     await expect(prepareConfirmedCustomTierDraft(input, actor)).rejects.toThrow('草稿含其他调价');
     expect(dbMock.customerPriceRule.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('controlled release after blank-price clone conversion', () => {
+  it.each([false, true])('仅允许既定解绑转换，真实价格修改仍拒绝：%s', async (changed) => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValueOnce({ id: 'draft', isActive: false, purpose: 'PROCESSING', settlementType: 'EXTERNAL_SALES', updatedAt: now, notes: draftNotes() })
+      .mockResolvedValueOnce({ id: 'book-v1', isActive: true, effectiveFrom: new Date('2026-01-01'), effectiveTo: null, notes: {} });
+    const condition = { schemaVersion: 1, target: 'ITEM', pricingRoutes: ['STOCK_BLANK'], paperTypes: ['180g红卡'], specifications: ['中号封'] };
+    const original = validationRule({ exclusiveGroup: 'STOCK_BASE', triggerCondition: { ...condition, productCodes: ['PRODUCT_A'] } });
+    const cloned = { ...original, amount: changed ? '0.1360' : original.amount, productId: null, product: null, triggerCondition: condition };
+    dbMock.customerPriceRule.findMany.mockResolvedValueOnce([cloned]).mockResolvedValueOnce([original]).mockResolvedValueOnce([validationRule()]);
+    dbMock.customerChargeCategory.findFirst.mockResolvedValue({ id: 'packing' });
+    dbMock.customerPriceBook.update.mockResolvedValue({ id: 'draft', updatedAt: now });
+    const operation = prepareConfirmedBoxPackagingDraft({ priceBookId: 'draft', expectedDraftUpdatedAt: now }, actor);
+    if (changed) { await expect(operation).rejects.toThrow('草稿含其他调价'); expect(dbMock.customerPriceRule.create).not.toHaveBeenCalled(); }
+    else { await expect(operation).resolves.toMatchObject({ id: 'draft' }); expect(dbMock.customerPriceRule.create).toHaveBeenCalled(); }
   });
 });

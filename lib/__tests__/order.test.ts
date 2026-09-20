@@ -504,7 +504,7 @@ function baseItem(over: Partial<Record<string, unknown>> = {}) {
     plateGroupId: null,
     pricingGroup: null,
     manualQuoteReason: null,
-    specification: null,
+    specification: '大号封90×165',
     actualWidthMm: null,
     actualHeightMm: null,
     paperType: '160g珠光艳闪',
@@ -1186,7 +1186,7 @@ describe('createOrder', () => {
     expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
-  it('acquires the shared price-rule lock exactly once before every product read', async () => {
+  it('locks published price reads and creates a blank item without reading Product', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1242,22 +1242,14 @@ describe('createOrder', () => {
         return sql.includes('pg_advisory_xact_lock_shared') ? [index] : [];
       },
     );
-    expect(sharedLockCallIndexes).toHaveLength(1);
-    expect(dbMock.product.findMany).toHaveBeenCalledTimes(2);
+    expect(sharedLockCallIndexes.length).toBeGreaterThan(0);
+    expect(dbMock.product.findMany).not.toHaveBeenCalled();
+    const firstSharedLock = dbMock.$executeRaw.mock.invocationCallOrder[sharedLockCallIndexes[0]!]!;
+    expect(publishedCreateOrderSnapshotMock).toHaveBeenCalled();
+    expect(publishedCreateOrderSnapshotMock.mock.invocationCallOrder.every((callOrder) => callOrder > firstSharedLock)).toBe(true);
+    const stored = dbMock.order.create.mock.calls[0]![0].data.items.create[0];
+    expect(stored.productId).toBeNull();
 
-    const sharedLockCallOrder =
-      dbMock.$executeRaw.mock.invocationCallOrder[
-        sharedLockCallIndexes[0]!
-      ]!;
-    expect(
-      dbMock.product.findMany.mock.invocationCallOrder.every(
-        (callOrder) => callOrder > sharedLockCallOrder,
-      ),
-    ).toBe(true);
-    expect(dbMock.product.findMany.mock.calls[1]![0]).toEqual({
-      where: { id: { in: ['product-1'] } },
-      select: { id: true, isActive: true },
-    });
   });
 
   it.each([['0.00', true], ['0.02', false]] as const)('建单半分复算允许舍入、固定费偏差 %s 的结果为 %s', async (fixedFee, allowed) => {
@@ -2343,7 +2335,7 @@ describe('createOrder', () => {
           promisedDate: null,
         isUrgent: false,
         isSfCollect: false,
-          items: [baseItem({ productId: 'p1' })],
+          items: [baseItem({ productId: 'p1', pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL' })],
         },
         salesActor,
         new Date('2026-04-23T09:00:00+08:00'),

@@ -674,9 +674,9 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     { name: 'accounts', path: '/owner/accounts', readyHeading: '账号管理' },
     { name: 'materials', path: '/owner/materials', readyHeading: '物料字典' },
     {
-      name: 'stock-skus',
-      path: RULE_CENTER_HREFS.stockSkus,
-      readyHeading: '可建单产品组合',
+      name: 'product-references',
+      path: RULE_CENTER_HREFS.productReferences,
+      readyHeading: '产品资料',
     },
     {
       name: 'rule-center',
@@ -710,7 +710,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     },
     {
       name: 'rule-center-specs',
-      path: `${RULE_CENTER_HREFS.stockSkus}?section=specs`,
+      path: `${RULE_CENTER_HREFS.productReferences}?section=specs`,
       readyHeading: '规格 · 烫金颜色',
     },
     {

@@ -36,6 +36,14 @@ const QUOTE_ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
 function quoteFailureMessage(error: unknown): string {
   if (error instanceof CreateOrderQuoteError) {
+    if (error.message === '请选择已启用的空白封纸张、克重和标准规格' ||
+        error.message.includes('未启用，请先发布大于 0 的空白封单价')) {
+      return '所选空白封规格未启用，请选择其他规格或联系管理员填写正价并发布';
+    }
+    if (error.message.includes('资料不唯一、已停用或缺货，请检查纸张资料')) {
+      return '所选纸张资料已变更、停用或缺货，请重新选择';
+    }
+
     const messages = error.message.split('；').map((message) => {
       if (
         message === '款式 1 的规格无法唯一解析' ||
@@ -68,7 +76,7 @@ export async function quoteWorkbenchAction(
       listActiveCraftOrderOptions(),
     ]);
     const product = options.products.find(
-      (item) => item.id === input.productId,
+      (item) => input.selectionKey ? item.selectionKey === input.selectionKey : item.id !== null && item.id === input.productId,
     );
     if (
       !product ||
@@ -132,6 +140,7 @@ export async function quoteWorkbenchAction(
       items: [
         {
           ...input,
+          productId: product.id,
           paperType: paperFact.paperType,
           actualWidthMm: null,
           actualHeightMm: null,

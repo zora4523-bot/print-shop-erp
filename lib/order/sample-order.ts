@@ -1,3 +1,4 @@
+import { assertBlankPriceAdmissionInTx, BlankPriceAdmissionError } from './blank-price-admission';
 import Decimal from 'decimal.js';
 import { db } from '../db';
 import type { Prisma } from '../../generated/prisma/client';
@@ -146,11 +147,19 @@ async function calculateSampleQuote(
 
 export async function quoteSampleOrder(raw: unknown) {
   const input = createOrderSchema.parse(raw);
-  return db.$transaction(
-    async (tx) =>
-      (await calculateSampleQuote(tx, sampleQuoteFacts(input), new Date()))
-        .result,
-  );
+  return db.$transaction(async (tx) => {
+    const now = new Date();
+    const quote = await calculateSampleQuote(tx, sampleQuoteFacts(input), now);
+    if (input.purpose === 'PROOF') {
+      try {
+        await assertBlankPriceAdmissionInTx(tx, input.items, now, { snapshot: quote.snapshot });
+      } catch (error) {
+        if (error instanceof BlankPriceAdmissionError) throw new SampleOrderError(error.message);
+        throw error;
+      }
+    }
+    return quote.result;
+  });
 }
 
 /** Used inside the existing submit transaction, under its ownership gate. */
@@ -178,6 +187,8 @@ export async function finalizeSampleOrderInTx(
   if (order.purpose === 'PROOF') {
     // Drafts saved before the retirement must not submit 120g as new business.
     if (hasRetiredPaperItem(order.items)) throw new SampleOrderError(RETIRED_PAPER_MESSAGE);
+    try { await assertBlankPriceAdmissionInTx(tx, order.items, now); }
+    catch (error) { if (error instanceof BlankPriceAdmissionError) throw new SampleOrderError(error.message); throw error; }
     await buildCreateOrderQuoteInputFromCatalog(tx, {
       isSfCollect: order.isSfCollect,
       packagingGroups: [],

@@ -85,7 +85,7 @@ export async function createQuoteProductAction(
 
   revalidateProductPaths(createdId);
   redirect(
-    appendReceipt(`${RULE_CENTER_HREFS.stockSkus}/${createdId}`, { created: '1' }),
+    appendReceipt(`${RULE_CENTER_HREFS.productReferences}/${createdId}`, { created: '1' }),
   );
 }
 
@@ -151,7 +151,7 @@ export async function setQuoteProductActiveAction(
   ) {
     return {
       status: 'error',
-      message: '目标建单产品不存在或属于已排除的历史分类',
+      message: '目标产品资料不存在或属于已排除的历史分类',
     };
   }
 
@@ -210,8 +210,8 @@ async function validateQuoteProductCategory(
 }
 
 function revalidateProductPaths(id: string) {
-  revalidatePath(RULE_CENTER_HREFS.stockSkus);
-  revalidatePath(`${RULE_CENTER_HREFS.stockSkus}/${id}`);
+  revalidatePath(RULE_CENTER_HREFS.productReferences);
+  revalidatePath(`${RULE_CENTER_HREFS.productReferences}/${id}`);
   revalidatePath('/orders/new');
   revalidatePath('/owner/boms/new');
   revalidatePath(RULE_CENTER_HREFS.customerPricing);

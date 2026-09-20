@@ -3,6 +3,7 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { TableScrollArea } from '@/components/ui-business';
 
 function sourceLabel(source: Estimate['items'][number]['source']): string {
+  if (source === 'BLANK') return '纸张规格物料清单';
   if (source === 'PRODUCT') return '产品物料清单';
   if (source === 'CATEGORY') return '分类物料清单';
   return '未匹配';

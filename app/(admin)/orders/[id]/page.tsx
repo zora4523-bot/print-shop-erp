@@ -1,3 +1,5 @@
+import { HistoricalBlankPriceEditor } from '@/components/business/order/HistoricalBlankPriceEditor';
+import { readHistoricalBlankPriceEditor } from '@/lib/order/confirm-historical-blank-price';
 import { listOrderReportDisputes } from '@/lib/production/report-dispute';
 import { ReportDisputeAdminPanel } from '@/components/business/production/ReportDisputeAdminPanel';
 import { OrderWagePanel } from '@/components/business/salary/OrderWagePanel';
@@ -198,6 +200,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   if (!order) notFound();
   const reportDisputes = user.role === Role.ADMIN ? await listOrderReportDisputes(order.id, user) : [];
   const adminActivity = user.role === Role.ADMIN ? await readOrderActivity(order.id, user) : null;
+  const historicalBlankPrices = user.role === Role.ADMIN ? await readHistoricalBlankPriceEditor(order.id, user) : null;
   const canViewCommercialAmounts = user.role !== Role.WORKER;
   const canCreateRework =
     user.role === Role.ADMIN &&
@@ -490,6 +493,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               </dd>
             </div>
           </dl>
+          {historicalBlankPrices ? <HistoricalBlankPriceEditor
+            key={`material-${historicalBlankPrices.orderRevision}-${historicalBlankPrices.priceRevision}`}
+            {...historicalBlankPrices} /> : null}
           {user.role === Role.ADMIN && !pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
           {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">

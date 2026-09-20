@@ -4,7 +4,8 @@ import { OrderFoilTechnique, OrderLamination, OrderPackagingMode } from '../../g
 
 export const comparisonCaseSchema = z.object({
   id: z.string().min(1),
-  coverage: z.enum(['standard', 'missing-price', 'zero-price', 'four-decimal']),
+  coverage: z.enum(['standard', 'missing-price', 'zero-price', 'four-decimal', 'historical-stopped']),
+  historicalOrderItemIds: z.array(z.string().min(1)).optional(),
   facts: z.object({
     items: z.array(z.object({
       itemKey: z.string().min(1), fig: z.number().int().positive(), productId: z.string().nullable(),
@@ -46,10 +47,11 @@ export function comparisonDigest(value: unknown): string {
   return createHash('sha256').update(stableComparisonJson(value)).digest('hex');
 }
 export type PaperComparisonCapture = {
-  format: 1;
+  format: 1 | 2;
+  policyPhase?: 'legacy' | 'positive';
   provenance: { revision: string; database: string; capturedAt: string };
   at: string; casesDigest: string; dataDigest: string;
-  catalog: unknown; results: { id: string; input: unknown; quote: unknown; processing: unknown }[];
+  catalog: unknown; results: { id: string; coverage?: PaperComparisonCase['coverage']; rejection?: { code: 'BLANK_PRICE_NOT_ENABLED' }; input: unknown; quote: unknown; processing: unknown }[];
 };
 
 export function comparePaperSpecCaptures(before: PaperComparisonCapture, after: PaperComparisonCapture): string[] {
@@ -61,4 +63,68 @@ export function comparePaperSpecCaptures(before: PaperComparisonCapture, after: 
   if (before.format !== 1 || after.format !== 1) differences.push('unsupported-format');
   if (!Array.isArray(before.results) || !before.results.length || !Array.isArray(after.results) || !after.results.length) differences.push('empty-results');
   return differences;
+}
+
+export const paperPricePolicyExpectationsSchema = z.object({
+  policy: z.literal('POSITIVE_BLANK_PRICE_V1'),
+  changes: z.array(z.object({
+    /** JSON pointer to one scalar (or empty collection), never a whole subtree. */
+    path: z.string().startsWith('/'),
+    before: z.string(), after: z.string(),
+    reason: z.enum(['CATALOG_IDENTITY', 'NEW_BUSINESS_DISABLED', 'HISTORICAL_MATERIAL']),
+  }).strict()).max(100000),
+}).strict();
+export type PaperPricePolicyExpectations = z.infer<typeof paperPricePolicyExpectationsSchema>;
+
+function leafChanges(before: unknown, after: unknown, path: string): Array<{ path: string; before: string; after: string }> {
+  const isCollection = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+  const encode = (value: unknown) => value === undefined ? 'MISSING' : stableComparisonJson(value);
+  if (isCollection(before) || isCollection(after)) {
+    const kind = (value: unknown) => value === undefined ? 'missing' : Array.isArray(value) ? 'array' : isCollection(value) ? 'object' : 'scalar';
+    const left = isCollection(before) ? Object.entries(before) : [];
+    const right = isCollection(after) ? Object.entries(after) : [];
+    const keys = [...new Set([...left.map(([key]) => key), ...right.map(([key]) => key)])].sort();
+    const beforeMap = new Map(left), afterMap = new Map(right);
+    const metadata = kind(before) !== kind(after)
+      ? [{ path: `${path}/$kind`, before: kind(before), after: kind(after) }] : [];
+    if (kind(before) === 'scalar' || kind(after) === 'scalar') metadata.push({ path: `${path}/$value`,
+      before: kind(before) === 'scalar' ? encode(before) : 'MISSING', after: kind(after) === 'scalar' ? encode(after) : 'MISSING' });
+    return [...metadata, ...keys.flatMap((key) => leafChanges(beforeMap.get(key), afterMap.get(key), `${path}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`))];
+  }
+  return encode(before) === encode(after) ? [] : [{ path, before: encode(before), after: encode(after) }];
+}
+
+/** Every changed leaf must match an exact, reviewable expected value. No ignored fields. */
+export function comparePaperPricePolicyCaptures(
+  before: PaperComparisonCapture,
+  after: PaperComparisonCapture,
+  expectations: PaperPricePolicyExpectations,
+): string[] {
+  const errors: string[] = [];
+  for (const key of ['format', 'at', 'casesDigest', 'dataDigest'] as const) {
+    if (before[key] === undefined || after[key] === undefined || before[key] !== after[key]) errors.push(key);
+  }
+  if (before.format !== 2 || after.format !== 2 || before.policyPhase !== 'legacy' || after.policyPhase !== 'positive') errors.push('policy-phase');
+  if (expectations.policy !== 'POSITIVE_BLANK_PRICE_V1') errors.push('unsupported-policy');
+  if (!before.results.length || !after.results.length) errors.push('empty-results');
+  if (before.results.length !== after.results.length || before.results.some((entry, index) =>
+    entry.id !== after.results[index]?.id || entry.coverage !== after.results[index]?.coverage)) errors.push('case-identity');
+  const expectedByPath = new Map(expectations.changes.map((change) => [change.path, change]));
+  if (expectedByPath.size !== expectations.changes.length) errors.push('duplicate-expectation');
+  const allowed = (change: PaperPricePolicyExpectations['changes'][number]): boolean => {
+    if (change.reason === 'CATALOG_IDENTITY') return change.path.startsWith('/catalog/');
+    const match = /^\/results\/(\d+)\/(?:input|quote|processing|rejection)(?:\/|$)/.exec(change.path);
+    const entry = match ? after.results[Number(match[1])] : null;
+    if (change.reason === 'NEW_BUSINESS_DISABLED') return Boolean(entry &&
+      ['zero-price', 'missing-price'].includes(entry.coverage ?? '') && entry.rejection?.code === 'BLANK_PRICE_NOT_ENABLED');
+    return Boolean(entry?.coverage === 'historical-stopped' && !entry.rejection);
+  };
+  const actual = [...leafChanges(before.catalog, after.catalog, '/catalog'), ...leafChanges(before.results, after.results, '/results')];
+  for (const change of actual) {
+    const expected = expectedByPath.get(change.path);
+    if (!expected || !allowed(expected) || expected.before !== change.before || expected.after !== change.after) errors.push(change.path);
+    expectedByPath.delete(change.path);
+  }
+  for (const unused of expectedByPath.keys()) errors.push(`unused-expectation:${unused}`);
+  return errors;
 }

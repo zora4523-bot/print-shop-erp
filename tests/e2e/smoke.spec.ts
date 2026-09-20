@@ -153,7 +153,7 @@ test.describe('automation smoke', () => {
     ).toHaveCount(0);
     await expect(
       ruleSubmenu.getByRole('link', { name: '可建单产品组合', exact: true }),
-    ).toHaveAttribute('href', RULE_CENTER_HREFS.stockSkus);
+    ).toHaveCount(0);
     for (const groupLabel of [
       '客户计价规则',
       '建单主数据',
@@ -304,7 +304,7 @@ test.describe('automation smoke', () => {
     ).toHaveAttribute('aria-current', 'page');
     await expect(
       mobileSidebar.getByRole('link', { name: '可建单产品组合', exact: true }),
-    ).toHaveAttribute('href', RULE_CENTER_HREFS.stockSkus);
+    ).toHaveCount(0);
     await expect(
       mobileSidebar.getByRole('link', { name: '客户计价', exact: true }),
     ).toHaveCount(0);
@@ -334,7 +334,7 @@ test.describe('automation smoke', () => {
     await expect(page.getByText('pg_pinyin').first()).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
-    await page.goto(`/owner/products?q=${fixture.productCode}`);
+    await page.goto(`${RULE_CENTER_HREFS.productReferences}?q=${fixture.productCode}`);
     await expect(page.getByText(fixture.productCode)).toBeVisible();
     await expect(page.getByText(fixture.productName)).toBeVisible();
     await expectNoNextErrorOverlay(page);

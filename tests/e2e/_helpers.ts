@@ -2304,11 +2304,12 @@ export async function seedSearchSmokeFixtures(opts: {
       `SELECT id, "legacyCategory" AS "legacyCategory"
          FROM "ProductCategoryNode"
         WHERE "isActive" = true
+          AND "legacyCategory" = 'CUSTOM_FLAT_FOIL'::"ProductCategory"
         ORDER BY "sortOrder" ASC, path ASC
         LIMIT 1`,
     );
     if (categoryNode.rowCount === 0) {
-      throw new Error('seedSearchSmokeFixtures: no active product category');
+      throw new Error('seedSearchSmokeFixtures: no active custom product category');
     }
 
     await db.query(

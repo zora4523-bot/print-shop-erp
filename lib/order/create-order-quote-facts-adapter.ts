@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { BLANK_SPECIFICATIONS } from '../price/blank-paper';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   MaterialCategory,
@@ -303,6 +304,7 @@ function resolvePaperFacts(args: {
   item: LegacyCreateOrderQuoteItemFacts;
   product: CatalogProduct | null;
   papers: readonly CatalogPaper[];
+  historicalBlank?: boolean;
 }): {
   paper: CanonicalCreateOrderPaperFact;
   configuration: Pick<CreateOrderConfigurationFacts, 'paper' | 'paperWeight'>;
@@ -321,6 +323,16 @@ function resolvePaperFacts(args: {
       'INVALID_ITEM_FACTS',
       `款式 ${item.itemKey} 的纸张名称与克重冲突或无法唯一解析`,
     );
+  }
+
+  if (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK) {
+    if (!args.historicalBlank) {
+      const matches = papers.filter((paper) => matchesPaperIdentity(paper, submitted));
+      if (matches.length !== 1 || !matches[0]!.isActive || matches[0]!.outOfStock) {
+        return fail('CATALOG_PAPER_CHANGED', `款式 ${item.itemKey} 的纸张资料不唯一、已停用或缺货`);
+      }
+    }
+    return { paper: submitted, configuration: { paper: 'CATALOG', paperWeight: 'CATALOG' } };
   }
 
   const declaredByProduct = product ? productPaperFacts(product) : [];
@@ -455,9 +467,9 @@ function resolveSpecificationFacts(args: {
     return fail('INVALID_ITEM_FACTS', `款式 ${item.itemKey} 的规格无法唯一解析`);
   }
 
-  const productChoices = product
-    ? catalogPricingFactChoices(product.specification)
-    : [];
+  const productChoices = item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK
+    ? BLANK_SPECIFICATIONS.map((spec) => spec.specification)
+    : product ? catalogPricingFactChoices(product.specification) : [];
   const matchedProductChoice = productChoices.find(
     (choice) => canonicalizeCreateOrderSpecification(choice) === submitted,
   );
@@ -636,6 +648,7 @@ function trustedWeight(
 export async function buildCreateOrderQuoteInputFromCatalog(
   client: CreateOrderQuoteFactsReadClient,
   input: CreateOrderQuoteFactsAdapterInput,
+  options: { historicalBlankItemKeys?: ReadonlySet<string> } = {},
 ): Promise<CreateOrderQuoteInput> {
   const itemKeys = input.items.map((item) => item.itemKey.trim());
   if (
@@ -666,7 +679,8 @@ export async function buildCreateOrderQuoteInputFromCatalog(
   );
 
   const productIds = uniqueNonEmpty(
-    automaticallyPricedItems.map((item) => item.productId),
+    automaticallyPricedItems.filter((item) => item.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK)
+      .map((item) => item.productId),
   );
   const craftIds = uniqueNonEmpty(
     automaticallyPricedItems.flatMap((item) => item.crafts),
@@ -760,7 +774,7 @@ export async function buildCreateOrderQuoteInputFromCatalog(
           printFinishing: undefined,
         };
       }
-      const product = item.productId
+      const product = item.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK && item.productId
         ? (productById.get(item.productId) ?? null)
         : null;
       if (
@@ -773,7 +787,8 @@ export async function buildCreateOrderQuoteInputFromCatalog(
         );
       }
       const foilSides = resolveOrderItemFoilSides(item);
-      const paper = resolvePaperFacts({ item, product, papers: paperRows });
+      const paper = resolvePaperFacts({ item, product, papers: paperRows,
+        historicalBlank: options.historicalBlankItemKeys?.has(item.itemKey) === true });
       const specification = resolveSpecificationFacts({ item, product });
       const craft = routeCraft(item.pricingRoute);
       const configuration: CreateOrderConfigurationFacts = {

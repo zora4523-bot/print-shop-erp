@@ -1,23 +1,12 @@
-import {
-  EditProductCatalogItem,
-  getProductCatalogMetadata,
-} from '@/components/business/rules/catalog/ProductCatalogPages';
-import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
-import { QUOTE_PRODUCT_CATEGORIES } from '@/lib/product';
-
-type PageProps = {
-  params: Promise<{ id: string }>;
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
-
-export function generateMetadata(props: PageProps) {
-  return getProductCatalogMetadata(props);
-}
-
-export default function EditStockSkuPage(props: PageProps) {
-  return EditProductCatalogItem({
-    ...props,
-    routeBase: RULE_CENTER_HREFS.stockSkus,
-    categories: QUOTE_PRODUCT_CATEGORIES,
-  });
+import { notFound, redirect } from 'next/navigation';
+import { requirePermission } from '@/lib/auth/permissions';
+import { getProductSummary } from '@/lib/product';
+export default async function LegacyStockSkuPage({ params }: { params: Promise<{ id: string }> }) {
+  await requirePermission('dict:product:manage');
+  const { id } = await params;
+  const product = await getProductSummary(id);
+  if (!product) notFound();
+  redirect(product.category === 'BLANK_STOCK'
+    ? '/owner/rules/customer-pricing?section=blank'
+    : `/owner/rules/product-categories/items/${encodeURIComponent(id)}`);
 }

@@ -68,7 +68,7 @@ const loadProduct = cache(getProductSummary);
 
 export async function getProductCatalogMetadata({
   params,
-  titleScope = '可建单产品组合',
+  titleScope = '产品资料',
 }: Pick<ProductCatalogDetailProps, 'params'> & { titleScope?: string }) {
   const { id } = await params;
   const session = await getSession();
@@ -78,8 +78,8 @@ export async function getProductCatalogMetadata({
   const product = await loadProduct(id);
   return {
     title: product
-      ? `编辑 ${externalPriceBusinessText(product.name) || '未命名组合'} · ${titleScope}`
-      : '可建单组合不存在',
+      ? `编辑 ${externalPriceBusinessText(product.name) || '未命名产品'} · ${titleScope}`
+      : '产品资料不存在',
   };
 }
 
@@ -92,7 +92,7 @@ export async function ProductCatalogList({
   const sp = await searchParams;
   const q = firstSearchParam(sp.q).trim();
   const specWorkspace =
-    routeBase === RULE_CENTER_HREFS.stockSkus &&
+    routeBase === RULE_CENTER_HREFS.productReferences &&
     firstSearchParam(sp.section) === 'specs';
   const rawStatus = firstSearchParam(sp.status);
   const status: ProductActiveStatusFilter =
@@ -120,12 +120,12 @@ export async function ProductCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title={specWorkspace ? '规格 · 烫金颜色' : '可建单产品组合'}
+        title={specWorkspace ? '规格 · 烫金颜色' : '产品资料'}
         effect="immediate"
         subtitle={
           specWorkspace
-            ? '规格和纸张来自可建单组合；烫金颜色当前随工单事实维护。'
-            : '查看产品组合、维护名称与启停；空白封适用规格在纸张页管理。'
+            ? '规格和纸张来自产品资料；烫金颜色当前随工单事实维护。'
+            : '维护专版和彩印等路线的产品资料；空白封在单价表直接配置。'
         }
         actions={
           <Link
@@ -133,7 +133,7 @@ export async function ProductCatalogList({
             prefetch={false}
             className={buttonVariants()}
           >
-            新建组合
+            新增产品资料
           </Link>
         }
       />
@@ -164,7 +164,7 @@ export async function ProductCatalogList({
             filters={
               <div
                 role="group"
-                aria-label="可建单组合状态筛选"
+                aria-label="产品资料状态筛选"
                 className="flex flex-wrap gap-1 rounded-lg border bg-muted/20 p-1"
               >
                 {(
@@ -196,7 +196,7 @@ export async function ProductCatalogList({
 
           <AdminTableCard
             isEmpty={productPage.rows.length === 0}
-            emptyTitle="暂无可建单产品组合"
+            emptyTitle="暂无产品资料"
             emptyDescription={
               q
                 ? '没有匹配当前搜索与状态条件的记录。'
@@ -220,7 +220,7 @@ export async function ProductCatalogList({
             <ProductsTable
               products={productPage.rows}
               editBase={routeBase}
-              label="可建单产品组合列表"
+              label="产品资料列表"
               categoryHeading="产品结构"
             />
           </AdminTableCard>
@@ -247,9 +247,9 @@ export async function NewProductCatalogItem({
   return (
     <div className="space-y-4">
       <RuleCenterPageHeader
-        title="新建可建单组合"
+        title="新建产品资料"
         effect="immediate"
-        subtitle="空白封适用规格在纸张页管理；本页保留产品组合创建。价格及数量档在客户计价规则中维护。"
+        subtitle="本页维护专版和彩印等路线的产品资料。价格及数量档在客户计价规则中维护。"
         actions={
           <Link
             href={routeBase}
@@ -316,10 +316,10 @@ export async function EditProductCatalogItem({
 
   return (
     <div className="space-y-6">
-      <ReceiptNotice receipt={receipt} noun="可建单组合" />
+      <ReceiptNotice receipt={receipt} noun="产品资料" />
       <RuleCenterPageHeader
-        title={`编辑可建单组合：${
-          externalPriceBusinessText(product.name) || '未命名组合'
+        title={`编辑产品资料：${
+          externalPriceBusinessText(product.name) || '未命名产品'
         }`}
         effect="immediate"
         subtitle={
@@ -359,7 +359,7 @@ export async function EditProductCatalogItem({
       {product.isActive || !isRetired ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-2 text-base font-semibold">
-            {product.isActive ? '停用可建单组合' : '启用可建单组合'}
+            {product.isActive ? '停用产品资料' : '启用产品资料'}
           </h2>
           <p className="mb-3 text-sm text-muted-foreground">
             {product.isActive

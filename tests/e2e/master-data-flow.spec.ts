@@ -12,7 +12,7 @@ import {
 
 const categories = '/owner/rules/product-categories';
 const papers = '/owner/rules/papers';
-const products = '/owner/rules/stock-skus';
+const products = '/owner/rules/product-categories/items';
 const crafts = '/owner/rules/crafts';
 
 test.use({ actionTimeout: 15_000, navigationTimeout: 30_000 });
@@ -47,7 +47,7 @@ async function createCategory(page: Page, name: string, parentId?: string) {
   await page.goto(`${categories}/new`);
   if (parentId) await page.getByLabel('上级分类', { exact: true }).selectOption(parentId);
   await page.getByLabel('分类名', { exact: true }).fill(name);
-  await page.getByLabel('适用计价方式', { exact: true }).selectOption('BLANK_STOCK');
+  await page.getByLabel('适用计价方式', { exact: true }).selectOption('CUSTOM_FLAT_FOIL');
   await page.getByLabel('排序', { exact: true }).fill('17');
   await page.getByRole('button', { name: '创建分类', exact: true }).click();
   return createdId(page, categories);
@@ -55,7 +55,8 @@ async function createCategory(page: Page, name: string, parentId?: string) {
 
 async function fillBom(page: Page, productId: string, materialId: string, name: string, version: number) {
   await page.goto('/owner/boms/new');
-  await page.getByLabel('建单产品', { exact: true }).selectOption(productId);
+  await page.getByLabel('适用对象', { exact: true }).selectOption('PRODUCT');
+  await page.getByLabel('其他产品', { exact: true }).selectOption(productId);
   await page.getByLabel('BOM 名称', { exact: true }).fill(name);
   await page.getByLabel('版本号', { exact: true }).fill(String(version));
   await page.getByLabel('基准产量', { exact: true }).fill('10');
@@ -235,7 +236,7 @@ test('工艺创建和修改保留编号，停用后新工单不可选择，启�
   await expect(page.getByRole('checkbox', { name: new RegExp(`^${newName} · 外协`) })).toBeVisible();
 });
 
-test('类别、纸张、SKU 与 BOM 按不可变边界维护，停用保留明细并阻止下游新选择', async ({ page }) => {
+test('类别、纸张、非空白封产品与 BOM 按不可变边界维护，停用保留明细并阻止下游新选择', async ({ page }) => {
   test.setTimeout(180_000);
   const actor = await seedMasterDataAdmin();
   await login(page, { username: actor.username, password: E2E_PASSWORD, from: `${categories}/new` });
@@ -260,12 +261,12 @@ test('类别、纸张、SKU 与 BOM 按不可变边界维护，停用保留明�
 
   await page.goto(`${products}/new`);
   await page.getByLabel('产品结构分类', { exact: true }).selectOption(categoryId);
-  await page.getByLabel('组合名称', { exact: true }).fill(`验收组合${actor.suffix}`);
+  await page.getByLabel('产品名称', { exact: true }).fill(`验收组合${actor.suffix}`);
   await page.getByLabel('纸张（选填）', { exact: true }).fill(paperName);
   await page.getByLabel('规格（选填）', { exact: true }).fill('验收中号');
-  await page.getByRole('button', { name: '创建组合', exact: true }).click();
+  await page.getByRole('button', { name: '创建产品', exact: true }).click();
   const productId = await createdId(page, products);
-  await page.getByLabel('组合名称', { exact: true }).fill(`已改名组合${actor.suffix}`);
+  await page.getByLabel('产品名称', { exact: true }).fill(`已改名组合${actor.suffix}`);
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await expect.poll(() => readMasterRow('product', productId)).toMatchObject({ name: `已改名组合${actor.suffix}`, categoryNodeId: categoryId, paperType: paperName });
 
@@ -305,7 +306,7 @@ test('类别、纸张、SKU 与 BOM 按不可变边界维护，停用保留明�
   await expect(page.getByRole('region', { name: 'BOM 物料明细', exact: true })).toContainText('已停用');
 
   await page.goto(`${products}/${productId}`);
-  await page.getByRole('button', { name: '停用组合', exact: true }).click();
+  await page.getByRole('button', { name: '停用产品', exact: true }).click();
   const productDialog = page.getByRole('alertdialog');
   const deactivate = productDialog.getByRole('button', { name: '确认停用', exact: true });
   await expect(deactivate).toBeDisabled();

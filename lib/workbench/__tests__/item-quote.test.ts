@@ -99,7 +99,9 @@ describe('shared order configuration', () => {
   );
   it('uses the same paper, weight and product identity and never prices an unavailable linked paper', () => {
     expect(initial()).toMatchObject({
-      productId: 'stock',
+      productId: null,
+      paperType: '160g珠光艳闪',
+      specification: '大号封90×165',
       paperWeightGsm: 160,
     });
     const unavailable = catalog.papers.map((p) => ({ ...p, outOfStock: true }));
@@ -143,26 +145,13 @@ describe('shared order configuration', () => {
       expect(parsed.item.lamination).toBe(OrderLamination.MATTE);
     }
   });
-  it('never chooses an arbitrary duplicate product; preserves an explicit choice', () => {
-    const products = [
-      ...catalog.products,
-      { ...catalog.products[0]!, id: 'duplicate' },
-    ];
-    const duplicated = createExternalOrderItem(
-      crafts,
-      products,
-      catalog.papers,
-      '亚金',
-    );
+  it('非空白路线仍不任选重复产品，并保留显式选择', () => {
+    const custom = catalog.products.find((product) => product.id === 'custom')!;
+    const products = [custom, { ...custom, id: 'duplicate' }];
+    const item = { ...initial(), pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL, productId: null };
+    const duplicated = normalizeExternalOrderItem({ item, crafts, products, paperMaterials: catalog.papers });
     expect(duplicated.productId).toBeNull();
-    expect(
-      normalizeExternalOrderItem({
-        item: { ...duplicated, productId: 'duplicate' },
-        crafts,
-        products,
-        paperMaterials: catalog.papers,
-      }).productId,
-    ).toBe('duplicate');
+    expect(normalizeExternalOrderItem({ item: { ...duplicated, productId: 'duplicate' }, crafts, products, paperMaterials: catalog.papers }).productId).toBe('duplicate');
   });
   it.each([0, 1.5, -1, 10000000])(
     'rejects invalid quantity %s with the order schema',

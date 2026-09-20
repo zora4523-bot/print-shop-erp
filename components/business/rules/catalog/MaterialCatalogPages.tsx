@@ -1,9 +1,5 @@
-import { UnassignedPaperProducts } from './UnassignedPaperProducts';
 import { createCatalogPaperAction } from '@/actions/catalog-paper';
 import { NewCatalogPaperForm } from './NewCatalogPaperForm';
-import { enablePaperSpecificationsAction } from '@/actions/paper-specifications';
-import { readPaperSpecifications } from '@/lib/price/read-paper-specifications';
-import { PaperSpecificationsForm } from './PaperSpecificationsForm';
 import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -235,7 +231,6 @@ export async function MaterialCatalogList({
           </AdminTableCard>
         </>
       )}
-      {paperOnly && hasPermission('dict:product:manage', actor.role) ? <UnassignedPaperProducts /> : null}
     </div>
   );
 }
@@ -325,9 +320,6 @@ export async function EditMaterialCatalogItem({
   ]);
 
   const paperOnly = categoryScope === MaterialCategory.PAPER;
-  const session = await getSession();
-  const specificationView = paperOnly && session && hasPermission('dict:product:manage', session.user.role)
-    ? await readPaperSpecifications(id) : null;
   const boundUpdate = (paperOnly ? updatePaperAction : updateMaterialAction).bind(
     null,
     id,
@@ -390,7 +382,7 @@ export async function EditMaterialCatalogItem({
         />
       </section>
 
-      {specificationView ? <PaperSpecificationsForm key={specificationView.cells.map((cell) => cell.state).join('-')} view={specificationView} action={enablePaperSpecificationsAction.bind(null, id)} /> : null}
+      {paperOnly ? <Link href="/owner/rules/customer-pricing?section=blank" className={buttonVariants({ variant: 'outline' })}>管理空白封单价</Link> : null}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">库存出入库</h2>

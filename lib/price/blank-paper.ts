@@ -38,13 +38,6 @@ const safeId = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9_-]{1,128}$/, '请选择有效记录');
-export const enableBlankSpecificationsSchema = z.object({
-  paperId: safeId,
-  specifications: z.array(z.enum(BLANK_SPECIFICATIONS.map((spec) => spec.key)))
-    .min(1, '请选择至少一种规格').max(6)
-    .refine((keys) => new Set(keys).size === keys.length, '规格不能重复'),
-}).strict();
-export type EnableBlankSpecificationsInput = z.infer<typeof enableBlankSpecificationsSchema>;
 const paperName = z
   .string()
   .trim()
@@ -112,3 +105,14 @@ export type AddBlankPaperInput = z.infer<typeof addBlankPaperSchema>;
 export type AddBlankPaperResult =
   | { status: 'success'; paperId: string; priceBookId: string }
   | { status: 'error'; message: string };
+
+export const blankPriceMatrixSchema = z.object({
+  priceBookId: safeId,
+  expectedUpdatedAt: z.iso.datetime(),
+  cells: z.array(z.object({
+    paperId: safeId,
+    specificationKey: z.enum(BLANK_SPECIFICATIONS.map((spec) => spec.key)),
+    amount: z.string().trim().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?$/, '单价须为非负数字，最多四位小数').nullable(),
+  }).strict()).max(1200),
+}).strict();
+export type BlankPriceMatrixInput = z.infer<typeof blankPriceMatrixSchema>;

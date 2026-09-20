@@ -28,6 +28,7 @@ export async function loadExternalCreateOrderBootstrap(
     });
     const options = await readExternalCreateOrderOptions(tx, {
       snapshotLockHeld: true,
+      now,
     });
     return { options, priceSnapshot };
   });

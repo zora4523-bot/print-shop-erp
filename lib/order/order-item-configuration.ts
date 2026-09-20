@@ -17,6 +17,7 @@ import {
   externalOrderSpecificationsForRoute,
   externalOrderDefaultSpecification,
   externalOrderWeightOptionsForSelection,
+  externalOrderAvailableSpecifications,
   externalOrderPaperFromType,
   externalOrderPaperType,
   externalOrderDimensions,
@@ -113,7 +114,7 @@ export function normalizeExternalOrderItem(args: {
     route,
   );
   const requestedSpecification = args.item.specification ?? '';
-  const specification =
+  let specification =
     !args.resetSpecification && specifications.includes(requestedSpecification)
       ? requestedSpecification
       : externalOrderDefaultSpecification(args.products, route) ||
@@ -131,9 +132,13 @@ export function normalizeExternalOrderItem(args: {
     args.item.paperType,
     args.paperMaterials,
   );
+  const selectablePapers = route === OrderItemPricingRoute.STOCK_BLANK
+    ? routePapers.filter((paper) => externalOrderAvailableSpecifications(paper, route).length > 0)
+    : availableRoutePapers;
   const requestedPaper = args.paperKey
-    ? availableRoutePapers.find((paper) => paper.key === args.paperKey)
+    ? selectablePapers.find((paper) => paper.key === args.paperKey)
     : undefined;
+  if (args.paperKey && !requestedPaper && route === OrderItemPricingRoute.STOCK_BLANK) return args.item;
   const paper =
     requestedPaper ??
     (!args.resetPaper &&
@@ -142,8 +147,14 @@ export function normalizeExternalOrderItem(args: {
       (candidate) => candidate.key === inferredPaper.key,
     )
       ? inferredPaper
-      : availableRoutePapers[0]);
+      : availableRoutePapers[0] ?? selectablePapers[0]);
   if (!paper) return args.item;
+  if (route === OrderItemPricingRoute.STOCK_BLANK) {
+    // Paper selection must remain reachable when papers offer disjoint sizes.
+    // Keep the current size when sold; otherwise choose a sold size on this paper.
+    const soldSpecifications = externalOrderAvailableSpecifications(paper, route);
+    if (!soldSpecifications.includes(specification)) specification = soldSpecifications[0] ?? '';
+  }
 
   const weightOptions = externalOrderWeightOptionsForSelection(
     paper,
@@ -233,7 +244,7 @@ export function normalizeExternalOrderItem(args: {
       weight,
       specification,
     }),
-    productId: catalogProduct?.id ?? null,
+    productId: route === OrderItemPricingRoute.STOCK_BLANK ? null : catalogProduct?.id ?? null,
     pricingRoute: route,
     productStructure: externalOrderProductStructure(specification),
     specification,

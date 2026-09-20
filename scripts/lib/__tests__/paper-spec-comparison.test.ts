@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '../../../generated/prisma/client';
-import { comparisonCaseSchema, comparisonCasesSchema, comparisonDigest, comparePaperSpecCaptures, type PaperComparisonCapture } from '../paper-spec-comparison';
+import { comparisonCaseSchema, comparisonCasesSchema, comparisonDigest, comparePaperSpecCaptures, comparePaperPricePolicyCaptures, type PaperComparisonCapture } from '../paper-spec-comparison';
 import { capturePaperSpecCompatibility, type loadPaperComparisonReaders } from '../capture-paper-spec-compatibility';
 
 const facts = { items: [{ itemKey: '1', fig: 1, productId: 'product', pricingRoute: 'STOCK_BLANK', specification: '中号封80×115',
@@ -55,15 +55,15 @@ function harness() {
   const readers = { readOptions: vi.fn().mockResolvedValue({ products: [], papers: [] }),
     calculate: vi.fn().mockResolvedValue(calculated), buildPapers: vi.fn().mockReturnValue([{ variants: [{ route: 'STOCK_BLANK', specification: '中号封' }] }]),
     weightOptions: vi.fn().mockReturnValue([{ value: 160, disabled: true }]) };
-  const run = (coverage: string) => capturePaperSpecCompatibility(tx as unknown as Prisma.TransactionClient,
-    readers as unknown as Awaited<ReturnType<typeof loadPaperComparisonReaders>>, [caseOf(coverage)], new Date('2026-09-20'), 'revision');
+  const run = (coverage: string, phase?: 'legacy' | 'positive') => capturePaperSpecCompatibility(tx as unknown as Prisma.TransactionClient,
+    readers as unknown as Awaited<ReturnType<typeof loadPaperComparisonReaders>>, [caseOf(coverage)], new Date('2026-09-20'), 'revision', phase);
   return { tx, readers, calculated, run };
 }
 
 describe('capture at real catalog and quote IO boundaries', () => {
   it('passes original facts and fixed clock to quote reader; preserves all result fields and disabled weights', async () => {
     const h = harness(); const output = await h.run('four-decimal');
-    expect(h.readers.readOptions).toHaveBeenCalledWith(h.tx);
+    expect(h.readers.readOptions).toHaveBeenCalledWith(h.tx, { now: new Date('2026-09-20') });
     expect(h.readers.calculate).toHaveBeenCalledWith(h.tx, { now: new Date('2026-09-20'), facts, includeOrderCharges: true });
     expect(output.results[0]).toEqual({ id: 'four-decimal', ...h.calculated });
     expect(output.catalog).toMatchObject({ papers: [{ selections: [{ weights: [{ value: 160, disabled: true }] }] }] });
@@ -85,5 +85,55 @@ describe('capture at real catalog and quote IO boundaries', () => {
     await expect(h.run('standard')).rejects.toThrow('CATALOG');
     h.readers.calculate.mockRejectedValue(new Error('catalog invalid'));
     await expect(h.run('standard')).rejects.toThrow('catalog invalid');
+  });
+  it('records only the intended new-business admission rejection in the positive phase', async () => {
+    const h = harness();
+    const admission = new Error('空白封单价未启用'); admission.name = 'CreateOrderQuoteError';
+    h.readers.calculate.mockRejectedValue(admission);
+    const output = await h.run('zero-price', 'positive');
+    expect(output).toMatchObject({ format: 2, policyPhase: 'positive', results: [{
+      id: 'zero-price', rejection: { code: 'BLANK_PRICE_NOT_ENABLED' }, quote: null, processing: null,
+    }] });
+    await expect(h.run('standard', 'positive')).rejects.toThrow(admission);
+    await expect(h.run('zero-price', 'legacy')).rejects.toThrow(admission);
+    h.readers.calculate.mockRejectedValue(new Error('database unavailable'));
+    await expect(h.run('missing-price', 'positive')).rejects.toThrow('database unavailable');
+  });
+  it('fails if a stopped new-business case unexpectedly receives a quote', async () => {
+    await expect(harness().run('missing-price', 'positive')).rejects.toThrow('停售未被拒绝');
+  });
+});
+
+
+describe('explicit positive-price policy differences', () => {
+  function policyCapture(phase: 'legacy' | 'positive'): PaperComparisonCapture {
+    return { ...capture(), format: 2, policyPhase: phase, catalog: { options: [{ id: phase === 'legacy' ? 'old-product' : null }] },
+      results: [{ id: 'positive', coverage: 'standard', input: {}, quote: { amount: '135.00' }, processing: {} }] };
+  }
+  const expected = { policy: 'POSITIVE_BLANK_PRICE_V1' as const, changes: [
+    { path: '/catalog/options/0/id', before: '"old-product"', after: 'null', reason: 'CATALOG_IDENTITY' as const },
+  ] };
+  it('requires exact individual catalog changes rather than ignoring the catalog subtree', () => {
+    const before = policyCapture('legacy'), after = policyCapture('positive');
+    expect(comparePaperPricePolicyCaptures(before, after, expected)).toEqual([]);
+    expect(comparePaperPricePolicyCaptures(before, after, { ...expected, changes: [] })).toContain('/catalog/options/0/id');
+    after.catalog = { options: [{ id: 'fabricated-product' }] };
+    expect(comparePaperPricePolicyCaptures(before, after, expected)).toContain('/catalog/options/0/id');
+  });
+  it('cannot whitelist a positive case price change as catalog or admission policy', () => {
+    const before = policyCapture('legacy'), after = policyCapture('positive');
+    after.results[0]!.quote = { amount: '136.00' };
+    for (const reason of ['CATALOG_IDENTITY', 'NEW_BUSINESS_DISABLED', 'HISTORICAL_MATERIAL'] as const) {
+      expect(comparePaperPricePolicyCaptures(before, after, { ...expected, changes: [...expected.changes,
+        { path: '/results/0/quote/amount', before: '"135.00"', after: '"136.00"', reason }] })).toContain('/results/0/quote/amount');
+    }
+  });
+  it('rejects duplicate and stale expectations', () => {
+    expect(comparePaperPricePolicyCaptures(policyCapture('legacy'), policyCapture('positive'), { ...expected, changes: [...expected.changes, ...expected.changes] })).toContain('duplicate-expectation');
+    expect(comparePaperPricePolicyCaptures(policyCapture('legacy'), policyCapture('positive'), { ...expected, changes: [...expected.changes,
+      { path: '/catalog/options/0/source', before: 'MISSING', after: '"BLANK_PRICE"', reason: 'CATALOG_IDENTITY' }] })).toContain('unused-expectation:/catalog/options/0/source');
+  });
+  it('rejects reversed or unstated policy phases', () => {
+    expect(comparePaperPricePolicyCaptures(policyCapture('positive'), policyCapture('legacy'), expected)).toContain('policy-phase');
   });
 });

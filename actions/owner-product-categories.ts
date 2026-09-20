@@ -151,8 +151,8 @@ function revalidateProductCategoryPaths(id: string) {
   revalidatePaths([
     RULE_CENTER_HREFS.productCategories,
     `${RULE_CENTER_HREFS.productCategories}/${id}`,
-    RULE_CENTER_HREFS.stockSkus,
-    `${RULE_CENTER_HREFS.stockSkus}/new`,
+    RULE_CENTER_HREFS.productReferences,
+    `${RULE_CENTER_HREFS.productReferences}/new`,
     '/owner/boms/new',
   ]);
 }

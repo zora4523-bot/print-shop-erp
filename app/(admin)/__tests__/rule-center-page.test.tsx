@@ -30,9 +30,9 @@ describe('rule center entry', () => {
     expect(html).toContain('客户计价规则');
     expect(html).toContain('建单主数据');
     expect(html).toContain('员工薪酬规则');
-    expect(html).toContain('可建单产品组合');
+    expect(html).not.toContain('可建单产品组合');
     expect(html).toContain('href="/owner/rules/customer-pricing?section=blank"');
-    expect(html).toContain('href="/owner/rules/stock-skus"');
+    expect(html).not.toContain('href="/owner/rules/stock-skus"');
     expect(html).toContain('href="/owner/rules/employee-pay"');
     expect(html).not.toContain('内部计价');
     expect(html).not.toContain('/owner/rules/internal-pricing');

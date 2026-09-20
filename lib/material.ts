@@ -410,7 +410,7 @@ export async function updateMaterial(
       (await tx.product.count({ where: { paperMaterialId: id } })) > 0
     ) {
       throw new MaterialInvariantError(
-        '纸张已用于建单产品，名称、克重或分类不可直接修改；请新增纸张并配置价格',
+        '纸张已用于历史产品，名称、克重或分类不可直接修改；请新增纸张并配置价格',
       );
     }
 

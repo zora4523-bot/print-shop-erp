@@ -1873,22 +1873,27 @@ model OrderCustomerCharge {
 // ============================================================
 
 model BillOfMaterial {
-  id             String   @id @default(cuid())
-  productId      String?
-  categoryNodeId String?
-  name           String
-  version        Int      @default(1)
-  baseQuantity   Int      @default(1)
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  blankPaperMaterialId  String?
+  blankSpecificationKey String?
+  id                    String   @id @default(cuid())
+  productId             String?
+  categoryNodeId        String?
+  name                  String
+  version               Int      @default(1)
+  baseQuantity          Int      @default(1)
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  product      Product?             @relation(fields: [productId], references: [id], onDelete: Cascade)
-  categoryNode ProductCategoryNode? @relation(fields: [categoryNodeId], references: [id], onDelete: Cascade)
-  items        BillOfMaterialItem[]
+  product            Product?             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  categoryNode       ProductCategoryNode? @relation(fields: [categoryNodeId], references: [id], onDelete: Restrict)
+  items              BillOfMaterialItem[]
+  blankPaperMaterial Material?            @relation("BlankBomPaperMaterial", fields: [blankPaperMaterialId], references: [id], onDelete: Restrict)
 
+  @@unique([blankPaperMaterialId, blankSpecificationKey, version], map: "BillOfMaterial_blank_target_version_key")
   @@unique([productId, version])
   @@unique([categoryNodeId, version])
+  @@index([blankPaperMaterialId, blankSpecificationKey], map: "BillOfMaterial_blank_target_idx")
   @@index([productId])
   @@index([categoryNodeId])
   @@index([isActive])
@@ -1948,6 +1953,7 @@ model Material {
   purchaseOrderItems   PurchaseOrderItem[]
   purchaseReceiptItems PurchaseReceiptItem[]
   locationStocks       MaterialLocationStock[]
+  blankTargetBoms      BillOfMaterial[]        @relation("BlankBomPaperMaterial")
   bomItems             BillOfMaterialItem[]
   paperProducts        Product[]               @relation("ProductPaperMaterial")
   stockTransfers       StockTransfer[]

@@ -43,7 +43,9 @@ export type ExternalOrderPaper = {
 };
 
 export type ExternalOrderCatalogProduct = {
-  id: string;
+  id: string | null;
+  selectionKey?: string;
+  source?: 'BLANK_PRICE';
   code?: string | null;
   category: string;
   specification: string | null;
@@ -101,9 +103,9 @@ function productPricingRoute(
 }
 
 /**
- * Build the new-order choices from the active quote products supplied by the
- * server. Published products are the source of truth; this module only derives
- * labels and swatch appearance and never invents a priceable combination.
+ * Build display choices from the server catalog: positive published blank prices
+ * and active nonblank product facts. This module derives labels and appearance;
+ * it never grants admission independently of the authoritative server checks.
  */
 export function buildExternalOrderPapers<
   T extends ExternalOrderCatalogProduct,
@@ -300,6 +302,15 @@ export function externalOrderWeightOptionsForSelection(
       value,
       disabled: stockStates.every(Boolean),
     }));
+}
+
+export function externalOrderAvailableSpecifications(
+  paper: ExternalOrderPaper,
+  route: OrderItemPricingRoute,
+): string[] {
+  return [...new Set(paper.variants
+    .filter((variant) => variant.route === route && !variant.outOfStock)
+    .map((variant) => variant.specification))];
 }
 
 export function externalOrderPaperFromType(

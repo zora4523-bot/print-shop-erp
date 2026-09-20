@@ -77,6 +77,7 @@ const mocks = vi.hoisted(() => {
     completion: vi.fn().mockResolvedValue({ completed: false }),
     completionDispatch: vi.fn(),
     calculate: vi.fn(),
+    admit: vi.fn(),
     finalizeCharges: vi.fn(),
     appendRevision: vi.fn(),
     createPrint: vi.fn(),
@@ -89,6 +90,11 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/db', () => ({ db: mocks.db }));
+vi.mock('@/lib/order/blank-price-admission', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/order/blank-price-admission')>(),
+  assertBlankPriceAdmissionInTx: mocks.admit,
+}));
+import { BlankPriceAdmissionError } from '../blank-price-admission';
 vi.mock('@/lib/order/create-order-quote-service', () => ({
   calculateCreateOrderQuoteFromCatalogInTx: mocks.calculate,
 }));
@@ -127,6 +133,7 @@ import {
   isChangeRequestQuoteAutomaticallyApplicable,
   previewFactoryConfirmationPriceDiff,
   previewOrderChangeRequestPricing,
+  previewOrderCancellationSettlement,
   reviewOrderChangeRequest,
   withdrawOrderChangeRequest,
 } from '../change-request';
@@ -656,7 +663,7 @@ describe('isChangeRequestQuoteAutomaticallyApplicable', () => {
 function item(overrides: Record<string, unknown> = {}) {
   return {
     id: 'item-1', orderId: 'order-1', sequence: 1, fig: 1, name: '红包 A', productId: 'product-1',
-    pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+    pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL as OrderItemPricingRoute,
     craft: null,
     productStructure: OrderProductStructure.STANDARD_ENVELOPE,
     artworkVersion: null, plateGroupId: null, pricingGroup: 'MID', manualQuoteReason: null,
@@ -983,6 +990,7 @@ function expectNoApprovalMutation(): void {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.admit.mockResolvedValue(undefined);
   mocks.completion.mockResolvedValue({ completed: false });
   mocks.getSetting.mockResolvedValue({ enabled: true });
   mocks.enqueueNotification.mockResolvedValue(false);
@@ -3344,6 +3352,66 @@ describe('previewFactoryConfirmationPriceDiff', () => {
 });
 
 describe('cancellation settlement reference', () => {
+  function readyCancellationRequest() {
+    return request({ type: OrderChangeRequestType.CANCEL, proposedChanges: { items: [] }, order: {
+      ...request().order, status: OrderStatus.RELEASED, workOrderVersion: 2, settledFee: null,
+      productionWorkOrderProgress: [], productionProgressSteps: [], outsourceOrders: [],
+    } });
+  }
+  it('取消审批必须携带最新预览凭证，零产量也不能省略', async () => {
+    const value = readyCancellationRequest();
+    locateCancellation(value);
+    await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      producedQty: 0, settleFee: '0.00',
+    }, admin)).rejects.toThrow('批准取消前必须先计算并确认最新参考结算价');
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+  it('发布规则变化但价格修订号未变时也拒绝旧取消参考价', async () => {
+    const value = readyCancellationRequest();
+    locateCancellation(value);
+    const preview = await previewOrderCancellationSettlement({ requestId: value.id, producedQty: 500 }, admin);
+    mocks.calculate.mockImplementation(async (_tx: unknown, args: ServiceArgs) => {
+      const result = pureResult(args);
+      return { ...result, quote: { ...result.quote, priceVersion: { ...priceVersion,
+        processing: { ...priceVersion.processing, version: 99 },
+      } } };
+    });
+    locateCancellation(value);
+    await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      producedQty: 500, settleFee: '510.00', settleFeeAdjustmentReason: '旧调整原因',
+      expectedPriceRevision: preview.priceRevision, expectedQuoteToken: preview.quoteToken,
+    }, admin)).rejects.toThrow('参考结算价已变化');
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+  it('材料补核后重新计算可批准，旧预览不会阻断新预览', async () => {
+    const value = readyCancellationRequest();
+    locateCancellation(value);
+    const before = await previewOrderCancellationSettlement({ requestId: value.id, producedQty: 0 }, admin);
+    value.order.priceRevision += 1;
+    locateCancellation(value);
+    const latest = await previewOrderCancellationSettlement({ requestId: value.id, producedQty: 0 }, admin);
+    expect(latest.priceRevision).toBe(before.priceRevision + 1);
+    expect(latest.quoteToken).not.toBe(before.quoteToken);
+    locateCancellation(value);
+    await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      producedQty: 0, settleFee: '0.00', expectedPriceRevision: latest.priceRevision, expectedQuoteToken: latest.quoteToken,
+    }, admin)).resolves.toEqual({ id: 'request-1' });
+    expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ settledFee: '0.00' }) }));
+  });
+  it('材料补核后即使已有调整原因也拒绝旧价格版本的取消审批', async () => {
+    const value = request({ type: OrderChangeRequestType.CANCEL, proposedChanges: { items: [] }, order: {
+      ...request().order, status: OrderStatus.RELEASED, priceRevision: 6,
+      workOrderVersion: 2, settledFee: null, productionWorkOrderProgress: [],
+      productionProgressSteps: [], outsourceOrders: [],
+    } });
+    locateCancellation(value);
+    await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      expectedPriceRevision: 5, expectedQuoteToken: quoteToken, producedQty: 500,
+      settleFee: '510.00', settleFeeAdjustmentReason: '旧预览下已核对的五元调整',
+    }, admin)).rejects.toThrow('材料单价或价格版本已变化');
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.db.productionOperation.updateMany).not.toHaveBeenCalled();
+  });
   it('取消结算的已产数量包含新版承接进度，不重复计算旧版', async () => {
     const value = request({
       type: OrderChangeRequestType.CANCEL,
@@ -3472,6 +3540,9 @@ describe('cancellation settlement reference', () => {
       },
     });
     locateCancellation(value);
+    const preview = await previewOrderCancellationSettlement({ requestId: value.id, producedQty: 500 }, admin);
+    mocks.db.$executeRaw.mockClear();
+    locateCancellation(value);
 
     await expect(
       reviewOrderChangeRequest(
@@ -3482,6 +3553,8 @@ describe('cancellation settlement reference', () => {
           producedQty: 500,
           settleFee: '510.00',
           settleFeeAdjustmentReason: '已发生额外制版损耗',
+          expectedPriceRevision: preview.priceRevision,
+          expectedQuoteToken: preview.quoteToken,
         },
         admin,
       ),
@@ -3579,6 +3652,8 @@ describe('cancellation settlement reference', () => {
       },
     });
     locateCancellation(value);
+    const preview = await previewOrderCancellationSettlement({ requestId: value.id, producedQty: 500 }, admin);
+    locateCancellation(value);
 
     await expect(
       reviewOrderChangeRequest(
@@ -3588,6 +3663,8 @@ describe('cancellation settlement reference', () => {
           reviewRemark: null,
           producedQty: 500,
           settleFee: '510.00',
+          expectedPriceRevision: preview.priceRevision,
+          expectedQuoteToken: preview.quoteToken,
         },
         admin,
       ),
@@ -5846,5 +5923,65 @@ describe('removed legacy chains', () => {
     const source = readFileSync(new URL('../change-request.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/productionTask\.(?:create|createMany|update|updateMany)/);
     expect(source).toContain('calculateCreateOrderQuoteFromCatalogInTx');
+  });
+});
+
+
+describe('new blank business cannot inherit historical sale permission', () => {
+  const copiedItem = { operation: 'ADD' as const, templateItemId: 'item-1', name: '原样复制', quantity: 300 };
+  it('checks changed dimensions even when the specification text is unchanged', async () => {
+    const value = createRequestOrder({ items: [item({
+      pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
+      specification: '中号封80×115', actualWidthMm: new Decimal(81),
+    })] });
+    mocks.db.order.findUnique.mockResolvedValue(value);
+    mocks.admit.mockRejectedValue(new BlankPriceAdmissionError('空白封未启用'));
+    await expect(createOrderChangeRequest({
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1, reason: '恢复标准尺寸',
+      items: [{ operation: 'UPDATE', itemId: 'item-1', targetBlankIdentity: {
+        paperType: '珠光艳闪', paperWeightGsm: 160, specification: '中号封80×115',
+      } }],
+    }, sales)).rejects.toThrow('未启用');
+    expect(mocks.admit).toHaveBeenCalledWith(mocks.db, [expect.objectContaining({
+      specification: '中号封80×115', actualWidthMm: 80, actualHeightMm: 115,
+    })], expect.any(Date));
+    expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+  it('does not treat an equivalent specification alias as new business', async () => {
+    const value = createRequestOrder({ items: [item({
+      pricingRoute: OrderItemPricingRoute.STOCK_BLANK, specification: '中号封', hasLocalFoil: true,
+    })] });
+    mocks.db.order.findUnique.mockResolvedValue(value);
+    mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-alias' });
+    mocks.admit.mockRejectedValue(new BlankPriceAdmissionError('空白封未启用'));
+    await expect(createOrderChangeRequest({
+      orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1, reason: '更正数量',
+      items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 1200, targetBlankIdentity: {
+        paperType: '160g珠光艳闪', paperWeightGsm: 160, specification: '中号封80×115',
+      } }],
+    }, sales)).resolves.toEqual({ id: 'request-alias' });
+    expect(mocks.admit).not.toHaveBeenCalled();
+  });
+  it('checks copied template text during application even without a target product', async () => {
+    const value = createRequestOrder();
+    value.items[0]!.pricingRoute = OrderItemPricingRoute.STOCK_BLANK;
+    mocks.db.order.findUnique.mockResolvedValue(value);
+    mocks.admit.mockRejectedValue(new BlankPriceAdmissionError('空白封未启用'));
+    await expect(createOrderChangeRequest({ orderId: 'order-1', expectedRevision: 2,
+      expectedWorkOrderVersion: 1, reason: '复制', items: [copiedItem] }, sales)).rejects.toThrow('未启用');
+    expect(mocks.admit).toHaveBeenCalledWith(mocks.db, [expect.objectContaining({ pricingRoute: 'STOCK_BLANK', paperType: value.items[0]!.paperType })], expect.any(Date));
+    expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+  it.each(['preview', 'approve'])('checks copied template again during %s', async (operation) => {
+    const value = request({ proposedChanges: { items: [copiedItem] } });
+    value.order.items[0]!.pricingRoute = OrderItemPricingRoute.STOCK_BLANK;
+    locate(value);
+    mocks.admit.mockRejectedValue(new BlankPriceAdmissionError('空白封未启用'));
+    const result = operation === 'preview'
+      ? previewOrderChangeRequestPricing(value.id, admin)
+      : reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+          expectedPriceRevision: 5, expectedQuoteToken: quoteToken }, admin);
+    await expect(result).rejects.toThrow('未启用');
+    expect(mocks.db.orderItem.create).not.toHaveBeenCalled();
   });
 });

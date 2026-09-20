@@ -2,11 +2,11 @@ import { createBomAction } from '@/actions/owner-boms';
 import { BomForm } from '@/components/business/bom/BomForm';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
+import { listBomProductOptions } from '@/lib/bom';
 import { listMaterials } from '@/lib/material';
 import {
   categoryChainLabelMap,
   listProductCategoryOptions,
-  listProductOptions,
 } from '@/lib/product';
 
 export const metadata = {
@@ -16,7 +16,7 @@ export const metadata = {
 export default async function NewBomPage() {
   await requirePermission('bom:manage');
   const [products, categories, materials] = await Promise.all([
-    listProductOptions(),
+    listBomProductOptions(),
     listProductCategoryOptions(),
     listMaterials(),
   ]);
@@ -25,7 +25,7 @@ export default async function NewBomPage() {
     <div className="space-y-6">
       <PageHeader
         title="新建 BOM"
-        subtitle="同一产品或同一产品分类只能有一个启用 BOM；旧版本可停用保留。"
+        subtitle="同一用料对象只能有一个启用版本。"
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -37,6 +37,7 @@ export default async function NewBomPage() {
             name: product.name,
             categoryName: product.categoryNode.name,
           }))}
+          papers={materials.filter((material) => material.category === 'PAPER' && material.isActive).map((paper) => ({ id: paper.id, name: paper.name, specification: paper.specification }))}
           categories={(() => {
             // 名称链标签（"定制 / 平面烫金"）消歧跨父级重名；链用全量
             // 节点算（父级可能已停用），选项只列激活节点。

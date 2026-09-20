@@ -2,7 +2,7 @@ import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { BOX_PRICE_RULES, boxPriceRuleDefinition } from '@/lib/price/box-packaging-rules';
 import 'server-only';
-import { blankSpecificationKey } from '@/lib/price/blank-paper';
+import { updateBlankPriceMatrixFormAction } from '@/actions/blank-paper';
 
 import { fixedCustomTierIssue } from '@/lib/price/fixed-custom-tiers';
 
@@ -88,6 +88,7 @@ type FieldTarget = {
 
 type FormAssembly = {
   rows: CustomerPriceSectionFormContext['rows'];
+  blankCells: Parameters<typeof updateBlankPriceMatrixFormAction>[0]['cells'];
   bindings: CustomerPriceSectionFormBinding[];
   rowIndexByRule: Map<CustomerPriceSectionRuleDto, number>;
   warnings: Set<string>;
@@ -331,6 +332,7 @@ function buildFormAssembly(
 ): FormAssembly {
   const assembly: FormAssembly = {
     rows: [],
+    blankCells: [],
     bindings: [],
     rowIndexByRule: new Map(),
     warnings: new Set(),
@@ -821,63 +823,42 @@ function renderBlank(
 ) {
   const byPaper = new Map<string, CustomerPriceSectionRuleDto[]>();
   for (const rule of workspace.rules) {
-    const paper = effectiveRule(rule)?.product?.paperType ?? '未设置纸张';
+    const selected = effectiveRule(rule);
+    const paper = selected?.blankIdentity?.paperLabel;
+    if (!paper) { assembly.warnings.add('部分空白封价格的纸张或规格资料不完整，请先修复价格规则。'); continue; }
     if (isRetiredPaper({ paperType: paper })) continue;
-    const rows = byPaper.get(paper) ?? [];
-    rows.push(rule);
-    byPaper.set(paper, rows);
+    byPaper.set(paper, [...(byPaper.get(paper) ?? []), rule]);
   }
-  for (const product of workspace.blankProducts ?? []) {
-    if (product.paperType && !isRetiredPaper(product) && !byPaper.has(product.paperType)) {
-      byPaper.set(product.paperType, []);
-    }
+  for (const paper of workspace.blankPapers ?? []) {
+    if (!isRetiredPaper({ paperType: paper.label }) && !byPaper.has(paper.label)) byPaper.set(paper.label, []);
   }
-  const paperPriority = new Map<string, number>(
-    BLANK_PAPER_ORDER.map((paper, index) => [paper, index]),
-  );
+  const draft = workspace.sources.find((source) => source.purpose === 'PROCESSING')?.draft;
+  const paperPriority = new Map<string, number>(BLANK_PAPER_ORDER.map((paper, index) => [paper, index]));
   const rows: CustomerBlankPricingRow[] = [...byPaper]
-    .sort(
-      ([left], [right]) =>
-        (paperPriority.get(left) ?? Number.MAX_SAFE_INTEGER) -
-          (paperPriority.get(right) ?? Number.MAX_SAFE_INTEGER) ||
-        left.localeCompare(right, 'zh-CN'),
-    )
+    .sort(([left], [right]) => (paperPriority.get(left) ?? Number.MAX_SAFE_INTEGER) -
+      (paperPriority.get(right) ?? Number.MAX_SAFE_INTEGER) || left.localeCompare(right, 'zh-CN'))
     .map(([paper, rules]) => {
       const parts = paperParts(paper);
+      const materials = workspace.blankPapers?.filter((entry) => entry.label === paper) ?? [];
+      const material = materials.length === 1 ? materials[0] : null;
+      const issue = materials.length > 1 ? '纸张资料重复' : !material ? '纸张资料缺失' : material.issue;
+      if (issue) assembly.warnings.add(`${paper}：${issue}，请到纸张管理修复。`);
       const cells: PricingMatrixCell[] = BLANK_COLUMNS.map((column) => {
-        const matched = rules.find(
-          (rule) =>
-            blankSpecificationKey(effectiveRule(rule)?.product?.specification) === column.key,
-        );
-        const catalogProduct = workspace.blankProducts?.find(
-          (product) => product.paperType === paper &&
-            blankSpecificationKey(product.specification) === column.key,
-        );
-        return {
-          ...(matched
-            ? ruleField(
-                assembly,
-                `blank.${effectiveRule(matched)!.id}.${column.key}`,
-                [matched],
-                'amount',
-              )
-            : missingField(`blank.${paper}.${column.key}`)),
-          columnKey: column.key,
-          emptyLabel: workspace.blankProducts && !matched && !catalogProduct
-            ? '不适用' : '— 转人工',
-        };
+        const matches = rules.filter((rule) => effectiveRule(rule)?.blankIdentity?.specificationKey === column.key);
+        const matched = matches.length === 1 ? matches[0] : null;
+        const selected = matched ? effectiveRule(matched) : null;
+        if (matches.length > 1) assembly.warnings.add(`${paper}${column.label}有重复价格，请先修复价格规则。`);
+        const id = `blank.${material?.id ?? paper}.${column.key}`;
+        const editable = Boolean(draft && material?.available && !issue && matches.length <= 1);
+        if (editable && material) assembly.blankCells.push({ inputName: id, paperId: material.id, specificationKey: column.key });
+        const amount = selected?.isActive ? selected.amount : null;
+        return { id, columnKey: column.key, value: amount !== null && amount !== undefined && Number(amount) > 0 ? amount : null,
+          editable, disabled: Boolean(issue || matches.length > 1), changed: matched?.changed ?? false,
+          emptyLabel: issue || matches.length > 1 ? '资料异常' : '未启用' };
       });
-      return {
-        key: paper,
-        paperName: parts.paperName,
-        weight: parts.weight,
-        cells,
-      };
+      return { key: paper, paperName: parts.paperName, weight: parts.weight, cells };
     });
-  const columns: PricingMatrixColumn[] = BLANK_COLUMNS.map(({ key, label }) => ({
-    key,
-    label,
-  }));
+  const columns: PricingMatrixColumn[] = BLANK_COLUMNS.map(({ key, label }) => ({ key, label }));
   return <CustomerBlankPricingSectionView columns={columns} rows={rows} />;
 }
 
@@ -1355,8 +1336,10 @@ export function CustomerPricingDedicatedSection({
     rows: assembly.rows,
     bindings: assembly.bindings,
   };
-  const saveAction =
-    context.rows.length > 0 && context.bindings.length > 0
+  const blankDraft = workspace.section === 'blank' ? workspace.sources.find((source) => source.purpose === 'PROCESSING')?.draft : null;
+  const saveAction = blankDraft && assembly.blankCells.length > 0
+    ? updateBlankPriceMatrixFormAction.bind(null, { priceBookId: blankDraft.id, expectedUpdatedAt: blankDraft.updatedAt, cells: assembly.blankCells })
+    : context.rows.length > 0 && context.bindings.length > 0
       ? updateCustomerPriceSectionDraftFormAction.bind(null, context)
       : undefined;
   const sectionViewWithStatus = cloneElement(sectionView, {

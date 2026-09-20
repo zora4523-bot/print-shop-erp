@@ -20,8 +20,8 @@ function businessText(value: string, fallback: string): string {
 
 export function ProductsTable({
   products,
-  editBase = RULE_CENTER_HREFS.stockSkus,
-  label = '可建单产品组合列表',
+  editBase = RULE_CENTER_HREFS.productReferences,
+  label = '产品资料列表',
   categoryHeading = '产品结构',
 }: {
   products: ProductListRow[];
@@ -39,7 +39,7 @@ export function ProductsTable({
         <TableRow>
           <TableHead className="hidden xl:table-cell">编码</TableHead>
           <TableHead>{categoryHeading}</TableHead>
-          <TableHead>组合名称</TableHead>
+          <TableHead>产品名称</TableHead>
           <TableHead>规格</TableHead>
           <TableHead>纸张</TableHead>
           <TableHead>状态</TableHead>
@@ -59,7 +59,7 @@ export function ProductsTable({
             <TableCell>
               {businessText(p.categoryNode.name, '未命名分类')}
             </TableCell>
-            <TableCell>{businessText(p.name, '未命名组合')}</TableCell>
+            <TableCell>{businessText(p.name, '未命名产品')}</TableCell>
             <TableCell className="text-muted-foreground">
               {p.specification
                 ? businessText(p.specification, '未标注规格')

@@ -220,3 +220,11 @@ Next、`@next/env`、`eslint-config-next` 锁定到本地已验证的 16.3.4，�
 ### 包装类型开发验收（2026-09-13）
 
 新增迁移及价格初始化步骤见 [包装类型实施记录](./docs/包装类型实施-20260913.md)。写入型测试必须使用独立数据库；包装 E2E 在 `tests/e2e/order-packaging-types.spec.ts`，纯计价边界在 `lib/price/__tests__/create-order-box-packaging.test.ts`，打印门禁在 `tests/visual/order-print.spec.ts`。不得用日常数据库运行写入夹具。
+
+### 空白封单价改造工具（2026-09-20）
+
+- `scripts/maintenance/preflight-blank-price-policy.ts --database-url <目标库>`：显式目标、只读事务，报告现行规则身份、停售/缺价、历史材料价证据、BOM 映射和 Product 引用；不输出连接凭据，不授权删除。
+- `scripts/maintenance/migrate-blank-bom-targets.ts --database-url <目标库>`：默认只读；核对计划后 `--apply` 复制旧目标并审计，必要时明确 `--default-category-id`。多源歧义必须解决，不能猜第一条。
+- `scripts/maintenance/compare-paper-specs.ts`：对同库、同时间和相同用例读取前后真实目录及报价；按新政策捕获的准入差异必须逐项精确声明，正价金额不可加入忽略名单。完整实测参数与摘要见[验收记录](./docs/audits/2026-09-20-blank-price-implementation.md)。
+
+以上工具用 `node --conditions=react-server --import tsx <脚本>` 执行。写入型验证继续遵循独立可丢弃 E2E 库要求；日常库预检结果不代替正式库。

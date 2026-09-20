@@ -1,3 +1,4 @@
+import { blankPriceIdentityFromCondition } from './blank-price-identity';
 import { BOX_PRICE_RULES, boxPriceRuleDefinition } from './box-packaging-rules';
 import Decimal from 'decimal.js';
 import { MAX_ORDER_ITEM_FOIL_COLORS } from '../order/foil-colors';
@@ -759,6 +760,25 @@ function colorBaseClosureIssues(
   return issues;
 }
 
+function blankStockBaseIssues(
+  rules: DraftPriceRuleForValidation[],
+): DraftPriceBookValidationIssue[] {
+  const issues: DraftPriceBookValidationIssue[] = [];
+  const blankKeys = new Set<string>();
+  for (const rule of rules.filter((row) => row.exclusiveGroup === 'STOCK_BASE')) {
+    const identity = blankPriceIdentityFromCondition(rule.triggerCondition);
+    if (!identity || rule.kind !== 'BASE' || rule.calculationType !== 'PER_PIECE' ||
+        rule.category.code !== 'BASE_PROCESSING' || rule.amount === null || rule.blocksAutomaticQuote) {
+      issues.push({ path: `rules.${rule.id}.triggerCondition`, ruleId: rule.id, message: '空白封价格必须包含唯一纸张、克重、标准规格和有效单价' });
+    } else if (blankKeys.has(identity.key)) {
+      issues.push({ path: `rules.${rule.id}.triggerCondition`, ruleId: rule.id, message: '同一纸张、克重和规格的空白封单价重复' });
+    } else {
+      blankKeys.add(identity.key);
+    }
+  }
+  return issues;
+}
+
 function processingIssues(
   rules: DraftPriceRuleForValidation[],
 ): DraftPriceBookValidationIssue[] {
@@ -779,6 +799,7 @@ function processingIssues(
       });
     }
   }
+  issues.push(...blankStockBaseIssues(rules));
   const active = rules.filter((rule) => rule.isActive);
   const itemRules: DraftPriceRuleForValidation[] = [];
   const packagingGroupRules: Array<{
@@ -998,8 +1019,8 @@ function processingIssues(
     }
   }
 
-  const bases = itemRules.filter((rule) => rule.kind === 'BASE');
-  if (bases.length === 0) {
+  const bases = itemRules.filter((rule) => rule.kind === 'BASE' && rule.exclusiveGroup !== 'STOCK_BASE');
+  if (itemRules.filter((rule) => rule.kind === 'BASE').length === 0) {
     issues.push({ path: 'rules', message: '加工费价目簿至少需要一条启用的基础报价规则' });
   }
   for (let i = 0; i < bases.length; i += 1) {
