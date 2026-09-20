@@ -16,21 +16,18 @@
 
 ## 当前任务
 
-**2026-09-20：纸张、规格缩小方案批次 4 已实现，本地提交 `9e05a4ee`，未推送、未部署。**
+**2026-09-20：纸张、规格批次 5 工具与用例已提交 `804438af`；S10 真实数据库验收尚未完成。未推送、未部署。**
 
-- 本轮用户要求继续任务；起点 `2b12f739`、工作区干净。按实施文件一次一批推进，本批次为 PLAN §3 S1/S3、§5 S6、§6 S8 页面与 Action 接入，方案偏离：无。批次 1–3 分别为 `7a81c801`、`30b813ca`、`f69fe343`。
-- [纸张规格表单](components/business/rules/catalog/PaperSpecificationsForm.tsx) 接入纸张详情：已启用格已选且不可取消，只提交增量键；待处理格链接相关组合，合法停用候选可重新勾选。复核列出状态变化、现行四位单价/待核价/价格读取失败、重新启用后果、物流单重缺失与专版保持现状。使用共享 Checkbox、原生 form action/useActionState、回执与错误反馈。
-- [展示纯函数](lib/price/paper-specification-view.ts) 调用 S2、现有建单目录与实际报价选择器；[读取编排](lib/price/read-paper-specifications.ts) 在共享价目读锁下取数。保留缺货禁选和无外键旧产品实际目录行为，零价不当缺价。纸张列表增加[未归属产品](components/business/rules/catalog/UnassignedPaperProducts.tsx)，不自动补物料。
-- [启用 Action](actions/paper-specifications.ts) 第一行物料权限、随后产品权限，调用批次 3 领域操作；新纸张通过 [catalog-paper Action](actions/catalog-paper.ts) 和专用表单输入名称/克重，沿用草稿校验与 S4 保护，统一标签、规格与张单位，复核说明专版现有影响。通用无克重物料入口仍保留。
-- 新增 [规格目录](app/(admin)/owner/rules/specifications/page.tsx)：空白封六常量、专版五必需规格及当前产品尺寸、彩印现有规格串，后者注明未建立统一目录。专版常量只增加导出，无值或读取行为变化。[产品表单](components/business/product/ProductForm.tsx) 对空白封/彩印编码、分类、规格、纸张只展示原值并保留隐藏提交值；名称仍可编辑，链接纸张页。菜单名不变。
-- API.md 已同步两个 Action 的权限、输入、回执和失败边界。旧路由契约按 S1 将 `createPaperAction` 调整为 `createCatalogPaperAction`，新增测试仍验证固定 PAPER 分类；metadata 测试补齐新服务端依赖 mock。没有弱化授权断言。
-- 门禁：`pnpm check:architecture && pnpm test:backup && pnpm lint && pnpm typecheck` 全通过；架构 1005 模块/4085 依赖/25 项既有长函数债务，备份 23/0/0，lint 0 错误/3 条既有警告。目标 7 文件 43/0/0；指定契约 3 文件 31/0/0；非数据库回归 645 文件 7306 通过/0 失败/43 跳过。最后的已启用单价展示补充后另跑浏览器、目标 eslint、lint:ui 与 typecheck，全通过；diff 检查通过。
-- 浏览器命令：`pnpm exec vitest run --config vitest.browser.config.ts components/business/rules/catalog/__tests__/PaperSpecificationsForm.browser.spec.tsx`，14/0/0；覆盖 375×667、393×852、768×1024、1024×768、1280×800、1920×1080 明暗主题、overflow、44px Checkbox、axe、键盘、增量 FormData、原生 action 与失败后修改。组件使用 mock Action，**不代表真实 Next 应用或数据库 E2E 通过**。未更新或提交截图基线。
-- 目标命令：`pnpm test run actions/__tests__/paper-specifications.test.ts actions/__tests__/catalog-paper.test.ts lib/price/__tests__/paper-specification-view.test.ts components/business/product/__tests__/ProductForm.feedback.test.tsx components/business/rules/__tests__/catalog-metadata-auth.test.ts components/business/rules/__tests__/catalog-routing.test.ts "app/(admin)/__tests__/specification-directory.test.tsx"`；指定契约为 `pnpm test run components/business/admin/__tests__/pending-form-contract.test.ts "app/(admin)/__tests__/status-registry-consumers.test.ts" lib/order/__tests__/edit-field-inventory.test.ts`。
-- 离线命令：`env -u BACKGROUND_JOBS_MODE DATABASE_URL='postgresql://offline:offline@127.0.0.1:1/erp_test_offline?connect_timeout=1' DOTENV_CONFIG_PATH=/dev/null pnpm test run --exclude '**/*.postgres.test.ts' --exclude 'lib/__tests__/database-session.test.ts'`。排除 28 个 PostgreSQL 文件及真实会话测试，不把 43 个 skip 计通过。日志 `/tmp/paper4-{target,offline,contracts,browser,architecture,backup,lint,types,final-ui}.log`。本轮没有连接或写入开发库、没有操作 :3000。
-- 批次 3 的本机只读预检仍有效为当时证据：用户明确指定 `localhost:5432/print_shop_erp`，2026-09-20 21:22:50+08，25 个启用空白封产品均在 `cat_blank_stock`，`nodeAssignmentReady=true`。3 组重复纸张身份（冰白纸160、红卡160、艳闪160）仍保留，未做数据修复；外键冲突 0，120g 产品 2。正式库必须另行预检，不能套用开发结果。
-- **下一步批次 5**：S10 改造前后目录/报价采集对比工具与 E2E；固定数据/价目版本比较三路线，另测新增纸张、重新启用有价/无价、非逐字/多值/重复异常、空操作与长编码保存。只能用 `E2E_DATABASE_URL` 一次性隔离库，自建分类及数据；没有隔离库只写不跑。需真实框架和数据库验证的部分仍未完成。
-- 没有新增业务待拍板项；专版默认准入、历史重算状态两项继续保持现状。下架/不适用另立、120g 不收尾、彩印启用不做。未改 DECISIONS、schema、迁移、报价公式、历史快照或目录读取行为。
+- 用户要求继续，起点 `08b12393`，工作区干净；沿用 `codex/maindev`，按实施文件只做批次 5。前四批实现分别为 `7a81c801`、`30b813ca`、`f69fe343`、`9e05a4ee`，本批没有改业务目录、公式、权限、历史快照、schema 或迁移。方案偏离：无。
+- [真实入口对比 CLI](scripts/maintenance/compare-paper-specs.ts) + [采集器](scripts/lib/capture-paper-spec-compatibility.ts) 调用指定源码目录的真实建单目录及 `calculateCreateOrderQuoteFromCatalogInTx`；固定报价时间，REPEATABLE READ READ ONLY，显式目标库，不使用默认 DATABASE_URL。启动前必须设置指向采集源码的 TSX_TSCONFIG_PATH，保证路径别名也同源。输出文件拒绝覆盖。
+- [对比契约](scripts/lib/paper-spec-comparison.ts) 保留目录/禁选状态、规范化事实、完整报价/加工费展示及精确金额字符串，校验三路线及标准/缺价/零价/四位小数覆盖；比较数据与用例摘要，差异非零退出。17 项工具测试含不显式选库拒绝、E2E 夹具隔离守卫和真实 CLI 退出码；这些离线测试不代表真实价格采集已通过。
+- 新增 [E2E](tests/e2e/paper-specifications.spec.ts) 8 例：新增纸张的专版既有口径、新建/重新启用有价或无价、零价/四位小数、其他组合报价不变、异常/重复组合、旧行不改写、无外键空操作与重新启用、长编码名称保存，以及产品组合页新建/改入拒绝重复。夹具自行确保分类并创建独立纸张/产品，真实草稿保存/发布复用领域入口；标准价目基础规则沿用 E2E prepare，不依赖 master-data-flow 分类。隔离库残留跨节点启用产品或竞争草稿时失败，不自动修复。
+- `master-data-flow.spec.ts` 的纸张创建改为名称/克重/复核；无克重 PAPER 领域用例未删。原 [录价 E2E](tests/e2e/blank-paper-pricing.spec.ts) 的页面保存发布、实际建单及历史金额链路继续保留。新夹具中直接安排旧数据、重映射测试价格引用、删除自己创建的测试产品，仅用于一次性隔离库造数，绝不能在开发库执行。
+- 门禁：`pnpm check:architecture` 通过；`pnpm test:backup` 23/0/0；`pnpm lint` 0 错误、3 条既有警告；`pnpm typecheck` 通过。工具目标测试 17/0/0；规定的 pending-form/status-registry/edit-field-inventory 三契约 31/0/0。
+- 离线全量 647 文件、7323 通过 / 0 失败 / 43 跳过。命令：`env -u BACKGROUND_JOBS_MODE DATABASE_URL='postgresql://offline:offline@127.0.0.1:1/erp_test_offline?connect_timeout=1' DOTENV_CONFIG_PATH=/dev/null pnpm test run --exclude '**/*.postgres.test.ts' --exclude 'lib/__tests__/database-session.test.ts'`。另显式排除 28 个 postgres 文件与真实会话测试，不将其视为通过。日志 `/tmp/paper-batch5-{full,final-target,target,backup,lint,typecheck,collection}.log`。
+- **真实验证未做**：当前没有 E2E_DATABASE_URL / E2E_DATABASE_CONFIRM_DATABASE。遵照实施文件只写不跑；`playwright --list` 仅收集三文件 13 例（新增 8 + 既有 5），不是 13 例通过。没有连接或写入开发库，没有操作 :3000，没有更新截图基线。对比工具也没有实际采集改造前后数据，不能写成报价已一致。
+- **下一步是验收，不是批次 6**：配置并明确一次性隔离库及库名确认，按现有 §14 流程准备后跑三个 E2E 文件；另外在明确的只读目标、同数据同时间同价目下，使用真实改造前源码与当前源码采集并比较。命令、用例格式和约束见 [验收操作说明](docs/空白封纸张规格管理-20260913.md)。没有既有历史基线时不得伪造，也不得自行复制仓库或把当前代码作为前后两边。
+- 既有本机只读预检仅代表 2026-09-20 21:22:50+08 的开发库：25 个启用空白封均在 `cat_blank_stock`，nodeAssignmentReady=true；3 组重复纸张身份（冰白纸160、红卡160、艳闪160）未修复，外键冲突 0、120g 产品 2。正式库必须重新预检。无新增业务待拍板；专版默认准入、历史重算状态两项维持现状；下架/不适用、120g 收尾、彩印启用均不在本期。DECISIONS 未改。
 
 **2026-09-19（晚）：CI 提速两步。业主目标「等待时间优先」，全绿等待 61.4 → 24.9（第一步）→ 9.1 分钟（第二步）。**
 - 第一步 PR #24 已合入 `main`（`3cbe6abf`）：`static` / `unit` 拆出先跑、各套件独立作业、**PR 两视口（375×667、1280×800）/ main 六视口**（CLAUDE.md §8.2 已同步）、`push: main` 只跑 `static` + `viewports-main`、纯文档改动不触发、`print-darwin` 拆成带路径过滤的独立 workflow、CI trace 改 `on-first-retry`、`.review/` 每次传而报告只在失败时传、浏览器缓存按需装。`main` 首次 push 运行 `static` 与六视口门禁已通过。
