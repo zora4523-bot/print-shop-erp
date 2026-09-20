@@ -65,8 +65,8 @@ jobs:
           pnpm lint
           pnpm typecheck
 
-      - name: Generate dead-code evidence
-        run: pnpm check:dead-code
+      - name: Check dead-code candidates against existing inventory
+        run: pnpm check:dead-code --check
 
       - name: Upload review data
         if: always()

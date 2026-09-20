@@ -3,6 +3,7 @@ import { readFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { compareDeadCodeBaseline } from './lib/dead-code-baseline.mjs';
 
 const PROJECT_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEFAULT_OUTPUT = path.join(PROJECT_ROOT, '.review', 'dead.json');
@@ -195,9 +196,21 @@ export async function runDeadCodeScan({
   rootDir = PROJECT_ROOT,
   outputPath = DEFAULT_OUTPUT,
   execute = executeTool,
+  check = false,
 } = {}) {
   const report = await collectDeadCodeReport({ rootDir, execute });
   await writeJsonAtomically(outputPath, report);
+  if (check) {
+    const baseline = JSON.parse(await readFile(path.join(rootDir, 'config/dead-code-baseline.json'), 'utf8'));
+    const { added, resolved } = compareDeadCodeBaseline(report, baseline);
+    if (added.length || resolved.length) {
+      throw new Error([
+        'Dead-code baseline differs; review .review/dead.json and actual consumers.',
+        ...added.map((id) => `NEW ${id}`),
+        ...resolved.map((id) => `RESOLVED (remove from baseline) ${id}`),
+      ].join('\n'));
+    }
+  }
   return report;
 }
 
@@ -206,7 +219,7 @@ const isMain =
   pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (isMain) {
-  runDeadCodeScan().then(
+  runDeadCodeScan({ check: process.argv.includes('--check') }).then(
     (report) => {
       const knipCount = report.tools.knip.issues.length;
       const pruneCount = report.tools.tsPrune.candidates.length;

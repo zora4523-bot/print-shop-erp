@@ -97,6 +97,8 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 | 类型检查 | `pnpm typecheck` |
 | 完整 lint（ESLint、UI 文案、语义令牌） | `pnpm lint` |
 | 架构门禁 | `pnpm check:architecture` |
+| 死代码候选盘点（生成 `.review/dead.json`） | `pnpm check:dead-code` |
+| 死代码候选增量门禁（与 CI 一致） | `pnpm check:dead-code --check` |
 | 目标 Vitest | `pnpm test --run <path>` |
 | 全量 Vitest | `pnpm test --run` |
 | 全量单测与覆盖率 | `pnpm exec vitest run --coverage` |
@@ -127,9 +129,22 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 完整 lint 不能用 `pnpm exec eslint .` 代替；后者不执行 UI 文案与令牌检查。单独运行 `vitest` 不会执行 `.browser.spec.tsx`。全量单测通过也不能替代浏览器或覆盖率门禁。若资源争用导致超时，可记录原因后用 `pnpm exec vitest run --coverage --maxWorkers=2` 复测；不得降低阈值或把未解释的失败记作通过。
 
+### 死代码候选审查
+
+`config/dead-code-baseline.json` 登记现存待核实候选，不代表其中代码可以删除。
+Knip、ts-prune 和循环依赖扫描共同生成证据；CI 对照稳定的文件/符号标识，忽略行号漂移。
+新增候选会失败；已消失候选也必须从基线移除，避免留下允许旧代码重新进入的豁免。
+扫描器错误、基线缺失或格式错误均失败，检查命令不会自动更新基线。
+
+处理失败时先读 `.review/dead.json`，核对实际入口、调用链、动态加载、脚本、公开 API、
+数据库外键和历史快照，再决定修复调用或删除代码。确需保留的新候选须逐项写明实际用途和证据，
+在同一审查中更新对应基线条目；不能批量刷新基线来消除红灯。
+测试引用不能证明生产使用，模块内使用也不代表整个函数可删；扫描绿灯不证明全仓没有遗留逻辑。
+本次已清理项和保留项见 [旧产品代码审查](docs/audits/2026-09-21-legacy-code-cleanup.md)。
+
 ## 当前 CI 与发布验证缺口
 
-[Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 备份脚本 / 完整 lint / typecheck、死代码证据，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`（2 片）、`build`（用 `scripts/e2e-release-build.ts` 构建一次 `.next-release`，以 tarball 传给分片——`upload-artifact` 不保留 Turbopack 的外部包符号链接，直接传目录会让 `sharp` 找不到依赖）、`e2e` 六个分片（`chromium` 1/3–3/3 业务 E2E、`admin-375x667`、`admin-1280x800`、`worker + no-js`；即 **两视口**门禁 375×667 / 1280×800；各自 `E2E_PREBUILT=1` 复用共享构建，独占 runner / 库 / 服务，片内仍 `workers: 1`）、`durable`（真实 durable worker 排队 / 重试 / 授权下载）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部六视口及六视口 dev fixtures；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
+[Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 备份脚本 / 完整 lint / typecheck、死代码候选增量门禁，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`（2 片）、`build`（用 `scripts/e2e-release-build.ts` 构建一次 `.next-release`，以 tarball 传给分片——`upload-artifact` 不保留 Turbopack 的外部包符号链接，直接传目录会让 `sharp` 找不到依赖）、`e2e` 六个分片（`chromium` 1/3–3/3 业务 E2E、`admin-375x667`、`admin-1280x800`、`worker + no-js`；即 **两视口**门禁 375×667 / 1280×800；各自 `E2E_PREBUILT=1` 复用共享构建，独占 runner / 库 / 服务，片内仍 `workers: 1`）、`durable`（真实 durable worker 排队 / 重试 / 授权下载）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部六视口及六视口 dev fixtures；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
 
 现有打印像素基线仅有 Darwin 版，独立的 [Print (Darwin) 工作流](./.github/workflows/print-darwin.yml) 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`；macOS 按 10 倍计费，因此只在打印相关路径变动或手动 `workflow_dispatch` 时运行。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。每个作业每次都上传 `.review/`（审计与各套件 JSON，用于分析耗时），覆盖率、报告、截图和 trace 只在失败时上传；均启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。CI 下 Playwright trace 为 `on-first-retry`。
 

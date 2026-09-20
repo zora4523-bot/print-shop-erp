@@ -16,6 +16,7 @@ import {
   runDeadCodeScan,
   writeJsonAtomically,
 } from '../dead-code-scan.mjs';
+import { compareDeadCodeBaseline, deadCodeCandidateIds } from '../lib/dead-code-baseline.mjs';
 
 const temporaryDirectories: string[] = [];
 
@@ -34,6 +35,29 @@ afterEach(async () => {
 });
 
 describe('dead-code report writer', () => {
+  it('fails check for new debt and retired allowances without rewriting the baseline', async () => {
+    const rootDir = await temporaryDirectory();
+    const outputPath = path.join(rootDir, 'dead.json');
+    await writeFile(path.join(rootDir, 'package.json'), '{}');
+    await mkdir(path.join(rootDir, 'config'));
+    const baselinePath = path.join(rootDir, 'config/dead-code-baseline.json');
+    const baseline = JSON.stringify({ schemaVersion: 1, candidates: [] });
+    await writeFile(baselinePath, baseline);
+    const execute = async ({ name }: { name: string }) => ({
+      stdout: name === 'knip' ? '{"issues":[]}' : name === 'madge' ? '[]' : 'lib/old.ts:12 - obsolete',
+      stderr: '',
+    });
+    await expect(runDeadCodeScan({ rootDir, outputPath, execute, check: true })).rejects.toThrow('NEW');
+    expect(await readFile(baselinePath, 'utf8')).toBe(baseline);
+    const report = JSON.parse(await readFile(outputPath, 'utf8'));
+    await writeFile(baselinePath, JSON.stringify({ schemaVersion: 1, candidates: deadCodeCandidateIds(report) }));
+    await expect(runDeadCodeScan({ rootDir, outputPath, execute, check: true })).resolves.toEqual(report);
+    const noDebt = async ({ name }: { name: string }) => ({
+      stdout: name === 'knip' ? '{"issues":[]}' : name === 'madge' ? '[]' : '', stderr: '',
+    });
+    await expect(runDeadCodeScan({ rootDir, outputPath, execute: noDebt, check: true })).rejects.toThrow('RESOLVED');
+  });
+
   it.runIf(process.platform !== 'win32')(
     'accepts only madge cycle exit code 1 and still rejects real failures',
     async () => {
@@ -167,5 +191,47 @@ describe('dead-code report writer', () => {
     expect(
       invocations.find((invocation) => invocation.name === 'madge'),
     ).toMatchObject({ acceptedExitCodes: [0, 1] });
+  });
+});
+
+describe('dead-code candidate ledger', () => {
+  const report = (line = 1) => ({
+    schemaVersion: 1,
+    tools: {
+      knip: { issues: [{ file: 'lib/old.ts', exports: [{ name: 'old', line, col: line, pos: line }], duplicates: [[{ name: 'alias' }, { name: 'old' }]] }] },
+      tsPrune: { candidates: [`lib/old.ts:${line} - old (used in module)`] },
+      madge: { circular: [['a.ts', 'b.ts', 'c.ts']] },
+    },
+  });
+
+  it('ignores position shifts and equivalent cycle rotations', () => {
+    const baseline = { schemaVersion: 1, candidates: deadCodeCandidateIds(report()) };
+    const moved = report(100);
+    moved.tools.madge.circular = [['b.ts', 'c.ts', 'a.ts']];
+    moved.tools.tsPrune.candidates = ['lib/old.ts:100 - old'];
+    expect(compareDeadCodeBaseline(moved, baseline)).toEqual({ added: [], resolved: [] });
+  });
+
+  it('detects new names and reverse cycle edges even when counts are unchanged', () => {
+    const baseline = { schemaVersion: 1, candidates: deadCodeCandidateIds(report()) };
+    const changed = report();
+    changed.tools.knip.issues[0].exports[0].name = 'new';
+    changed.tools.madge.circular = [['a.ts', 'c.ts', 'b.ts']];
+    const result = compareDeadCodeBaseline(changed, baseline);
+    expect(result.added).toHaveLength(2);
+    expect(result.resolved).toHaveLength(2);
+  });
+
+  it('rejects malformed or duplicate baseline entries', () => {
+    for (const baseline of [null, {}, { schemaVersion: 2, candidates: [] }, { schemaVersion: 1, candidates: [1] }, { schemaVersion: 1, candidates: ['x', 'x'] }]) {
+      expect(() => compareDeadCodeBaseline(report(), baseline)).toThrow('Invalid dead-code baseline');
+    }
+  });
+
+  it('does not silently skip unknown scanner output formats', () => {
+    const changed = report();
+    changed.tools.tsPrune.candidates = ['unexpected output'];
+    expect(() => deadCodeCandidateIds(changed)).toThrow('Invalid ts-prune');
+    expect(() => deadCodeCandidateIds({ ...report(), schemaVersion: 2 })).toThrow('Unsupported');
   });
 });

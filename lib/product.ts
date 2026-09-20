@@ -6,11 +6,6 @@ import {
   type Product,
   type ProductCategoryNode,
 } from '../generated/prisma/client';
-import {
-  CustomerPriceBookPurpose,
-  CustomerPriceRuleKind,
-  OrderSettlementType,
-} from '../generated/prisma/enums';
 import { db } from './db';
 import {
   paginatedResult,
@@ -18,11 +13,7 @@ import {
   type PaginatedResult,
 } from './admin/table';
 import { resolveBusinessCode } from './business-code';
-import {
-  acquirePriceRuleSnapshotReadLock,
-  acquirePriceRuleSnapshotWriteLock,
-} from './price/rule-snapshot-lock';
-import { sortBySearchRelevance } from './search-ranking';
+import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
 import {
   writeAuditLogInTx,
   type AuditActor,
@@ -90,18 +81,6 @@ export type ProductListRow = ProductSummary & {
 export type ProductCategoryOption = Pick<
   ProductCategoryNode,
   'id' | 'path' | 'name' | 'legacyCategory' | 'sortOrder' | 'isActive'
->;
-
-export type ProductOption = Pick<
-  Product,
-  'id' | 'code' | 'name' | 'isActive'
-> & {
-  categoryNode: Pick<ProductCategoryNode, 'name'>;
-};
-
-export type ProductOrderOption = Pick<
-  Product,
-  'id' | 'code' | 'name' | 'category' | 'specification' | 'paperType'
 >;
 
 /**
@@ -190,18 +169,6 @@ const CATEGORY_NODE_SUMMARY_SELECT = {
   createdAt: true,
   updatedAt: true,
   _count: { select: { products: true } },
-} as const;
-
-const PRODUCT_OPTION_SELECT = {
-  id: true,
-  code: true,
-  name: true,
-  isActive: true,
-  categoryNode: {
-    select: {
-      name: true,
-    },
-  },
 } as const;
 
 type ProductReferenceImpactRaw = {
@@ -335,32 +302,6 @@ function productSearchFilter(
   };
 }
 
-export async function listProducts(
-  opts: {
-    q?: string | null;
-    status?: ProductActiveStatusFilter;
-    categories?: readonly ProductCategory[];
-  } = {},
-): Promise<ProductSummary[]> {
-  const query = normalizeSearchQuery(opts.q);
-  const where = productSearchFilter(query, opts.status, opts.categories);
-  const rows = await db.product.findMany({
-    where,
-    select: SUMMARY_SELECT,
-    orderBy: [{ isActive: 'desc' }, { category: 'asc' }, { name: 'asc' }],
-  });
-  return sortBySearchRelevance(rows, query, (row) => ({
-    fields: [
-      row.code,
-      row.name,
-      row.categoryNode.name,
-      row.specification,
-      row.paperType,
-    ],
-    pinyinFields: [row.searchPinyin, row.searchPinyinInitials],
-  }));
-}
-
 export async function listProductsPage(opts: {
   q?: string | null;
   status?: ProductActiveStatusFilter;
@@ -396,23 +337,6 @@ export async function listProductsPage(opts: {
     total,
     window,
   );
-}
-
-export async function listActiveProductOrderOptions(): Promise<
-  ProductOrderOption[]
-> {
-  return db.product.findMany({
-    where: { isActive: true },
-    select: {
-      id: true,
-      code: true,
-      name: true,
-      category: true,
-      specification: true,
-      paperType: true,
-    },
-    orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
-  });
 }
 
 const EXTERNAL_CREATE_ORDER_PRODUCT_CATEGORIES = [
@@ -459,81 +383,6 @@ export async function listExternalCreateOrderProductOptions(
   );
 }
 
-/**
- * Return only products that can anchor a quote in the unique currently active
- * external-sales processing price book.
- *
- * Product codes are internal identifiers, not catalog membership flags. The
- * published BASE-rule productId is the authoritative binding used by the quote
- * engine, so the new-order catalog must be derived from the same snapshot.
- */
-export async function listCurrentExternalSalesProductOrderOptions(
-  now: Date = new Date(),
-): Promise<ProductOrderOption[]> {
-  return db.$transaction(async (tx) => {
-    await acquirePriceRuleSnapshotReadLock(tx);
-    const books = await tx.customerPriceBook.findMany({
-      where: {
-        settlementType: OrderSettlementType.EXTERNAL_SALES,
-        purpose: CustomerPriceBookPurpose.PROCESSING,
-        isActive: true,
-        effectiveFrom: { lte: now },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-      },
-      select: { id: true },
-      orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
-      take: 2,
-    });
-    if (books.length === 0) return [];
-    if (books.length > 1) {
-      throw new ProductInvariantError(
-        '同一结算方向同时存在多个生效加工费价目簿，请管理员修正有效期',
-      );
-    }
-
-    const rules = await tx.customerPriceRule.findMany({
-      where: {
-        priceBookId: books[0]!.id,
-        kind: CustomerPriceRuleKind.BASE,
-        isActive: true,
-        category: { isActive: true },
-        product: { is: { isActive: true } },
-        NOT: {
-          triggerCondition: {
-            path: ['target'],
-            equals: 'PACKAGING_GROUP',
-          },
-        },
-      },
-      select: {
-        product: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            category: true,
-            specification: true,
-            paperType: true,
-          },
-        },
-      },
-      orderBy: [
-        { product: { category: 'asc' } },
-        { product: { name: 'asc' } },
-        { product: { id: 'asc' } },
-        { minQty: 'asc' },
-        { id: 'asc' },
-      ],
-    });
-
-    const products = new Map<string, ProductOrderOption>();
-    for (const rule of rules) {
-      if (rule.product) products.set(rule.product.id, rule.product);
-    }
-    return [...products.values()];
-  });
-}
-
 export async function listProductCategoryOptions(
   opts: { includeInactiveIds?: readonly string[] } = {},
 ): Promise<ProductCategoryOption[]> {
@@ -555,23 +404,6 @@ export async function listProductCategoryOptions(
       explicitlyIncludedIds.has(node.id) ||
       !isRetiredProductCategory(node),
   );
-}
-
-export async function listProductOptions(
-  opts: { includeInactiveIds?: readonly string[] } = {},
-): Promise<ProductOption[]> {
-  const includeInactiveIds = [...new Set(opts.includeInactiveIds ?? [])].filter(
-    Boolean,
-  );
-  const where =
-    includeInactiveIds.length > 0
-      ? { OR: [{ isActive: true }, { id: { in: includeInactiveIds } }] }
-      : { isActive: true };
-  return db.product.findMany({
-    where,
-    select: PRODUCT_OPTION_SELECT,
-    orderBy: [{ name: 'asc' }, { code: 'asc' }],
-  });
 }
 
 // 树序（DFS）：父节点在前、子节点紧随其后，兄弟按 sortOrder → 名称。
