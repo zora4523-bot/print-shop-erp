@@ -16,18 +16,19 @@
 
 ## 当前任务
 
-**2026-09-20：纸张、规格缩小方案批次 2 已实现，本地提交 `30b813ca`，未推送、未部署。**
+**2026-09-20：纸张、规格缩小方案批次 3 已实现，本地提交 `f69fe343`，未推送、未部署。**
 
-- 用户授权继续任务并要求符合编码规范。本批次起点 `222b183e`、工作区干净；仅实现 PLAN §4 S4。批次 1 已提交 `7a81c801`（格子纯函数、身份函数抽取、预检脚本和七处规格契约）。
-- [共享身份模块](lib/order/catalog-paper-identity.ts) 增加身份键集合和多值匹配；[身份保护](lib/material-paper-identity.ts) 由 [物料创建/更新](lib/material.ts) 在既有价目写锁内调用；[草稿建纸](lib/price/customer-price-book-admin.ts) 在原写锁内使用相同多值匹配。没有新增权限、改 schema/迁移、目录读取、计价公式或历史快照。
-- 创建 PAPER 对全部纸张（含停用）查重；更新仅在身份集合或分类变化时检查，新身份集合存在新增或改入 PAPER 时排除自身查重。被移除的旧身份仍被空白封/彩印产品文本或当前/计划生效规则引用时拒绝；引用规则无 `effectiveFrom` 上界，包含计划发布，排除过期/未启用价目及未启用规则。
-- 保留空身份/无克重验收纸张、非 PAPER、无关字段编辑；另有 PAPER 承载旧身份时允许消除重复，原有物料外键保护优先且不变。草稿保留单一已有纸张复用语义，多值查重属于 S4 有意改变；未改既有断言，仅新增测试和所需 mock。
-- 验证：目标 4 文件 **77 通过 / 0 失败 / 0 跳过**，指定 3 契约文件 **31/0/0**，备份 **23/0/0**；非数据库回归 640 文件 **7228 通过 / 0 失败 / 43 跳过**，之后补的 3 个边界用例已另跑并包含在目标 77 项中。架构通过（993 模块、4002 依赖、25 项既有长函数债务）；lint 0 错误/3 条既有警告、typecheck、diff 检查通过。方案偏离：无。
-- 实际命令：`pnpm test run lib/__tests__/material.test.ts lib/__tests__/material-paper-identity.test.ts lib/price/__tests__/blank-paper-admin.test.ts lib/order/__tests__/catalog-paper-identity.test.ts`；指定契约为 `pnpm test run components/business/admin/__tests__/pending-form-contract.test.ts "app/(admin)/__tests__/status-registry-consumers.test.ts" lib/order/__tests__/edit-field-inventory.test.ts`；静态门禁为 `pnpm check:architecture && pnpm test:backup && pnpm lint && pnpm typecheck`。
-- 非数据库回归命令：`env -u BACKGROUND_JOBS_MODE DATABASE_URL='postgresql://offline:offline@127.0.0.1:1/erp_test_offline?connect_timeout=1' DOTENV_CONFIG_PATH=/dev/null pnpm test run --exclude '**/*.postgres.test.ts' --exclude 'lib/__tests__/database-session.test.ts'`。显式排除 28 个 PostgreSQL 文件和真实数据库会话测试；43 个跳过不计通过，也不把本次记作完整数据库集成验收。没有连接目标库、没有读写开发库、没有运行 E2E 或操作 `:3000`。
-- 本机临时证据：`/tmp/paper-batch2-target.log`、`/tmp/paper-batch2-offline.log`、`/tmp/paper-batch2-contracts.log`、`/tmp/paper-batch2-backup.log`、`/tmp/paper-batch2-lint.log`、`/tmp/paper-batch2-typecheck.log`。
-- **下一步批次 3**：抽草稿领域 helper，新增无草稿启用规格，抽 `setProductActiveInTx`，实现 S1/S2/S5 与 S8 产品身份守卫。开始节点归属写操作前，操作者设置 `TARGET_DATABASE_URL` 并运行 `pnpm exec tsx scripts/maintenance/preflight-blank-paper-specs.ts --database-url "$TARGET_DATABASE_URL"`，提供结果；`nodeAssignmentReady=false` 时先由业主确定归属规则，不自行选节点。本批次身份保护与节点无关，因此可在不连接目标库的情况下完成。
-- 本批次无新增业务问题。既有待确认的专版默认准入、历史重算状态口径继续保留；下架/不适用另立方案，120g 不收尾，彩印本期不做，专版保持现状。未修改 `DECISIONS.md`。
+- 起点 `11a75c61`，工作区干净；沿用批次 1 `7a81c801`、批次 2 `30b813ca`。本批次实现 PLAN §3 S1/S2、§4 S5 与 §6 S8；方案偏离：无。
+- [共享目录写入](lib/price/blank-paper-catalog.ts) 从草稿抽取纸张解析、产品匹配/创建；[无草稿启用](lib/price/enable-blank-specifications.ts) 在单一价目写锁和事务内执行，只新建或重新启用，不写价格、不补旧产品外键。草稿保留旧外键补齐但拒绝重新启用停用候选，收费类目仍来自价格锚点，产品节点来自启用空白封产品的唯一有效节点。
+- [产品领域](lib/product.ts) 抽出 `setProductActiveInTx`，原公开函数只包装事务与锁；保留引用影响审计。新增/改入空白封按 S2 查重，空白封和彩印身份不可变；[编辑 Action](actions/owner-products.ts) 沿用库内编码，避免 32 字符手工输入校验挡住自动长编码。
+- 唯一有意调整的既有 blank-paper 断言：停用分类错误由“产品组合已停用”变为先检查“确定新产品的分类归属”；该例改用逐字规格继续验证补齐外键。已列入实现提交正文，其他既有断言未改。
+- **本轮用户明确指定本机开发库，只读预检已执行**：`localhost:5432/print_shop_erp`，采样 `2026-09-20 21:22:50+08`，`nodeAssignmentReady=true`；25 个启用空白封产品都在 `cat_blank_stock` / `product.blank_stock`。重复纸张身份 3 组（冰白纸160、红卡160、艳闪160），外键事实冲突 0，无启用产品但有文本规则格子 0，120g 产品 2。四个启用非逐字产品属于彩印，不能当作空白封异常。未修复数据；正式库仍须单独只读预检，开发结果不能替代正式结果。
+- 门禁全部通过：`pnpm check:architecture && pnpm test:backup && pnpm lint && pnpm typecheck`；架构 995 模块/4020 依赖/25 项既有长函数债务，备份 23/0/0，lint 0 错误/3 条既有警告。目标 7 文件 217/0/0；指定契约 3 文件 31/0/0；完整离线回归 641 文件 7283 通过/0 失败/43 跳过（包含最后一次测试数据形态修正）。`git diff --check` 通过。
+- 目标命令：`pnpm test run lib/price/__tests__/enable-blank-specifications.test.ts lib/price/__tests__/blank-paper-admin.test.ts lib/price/__tests__/blank-paper.test.ts lib/price/__tests__/blank-paper-cell.test.ts lib/price/__tests__/blank-specification-contract.test.ts lib/__tests__/product.test.ts actions/__tests__/owner-products.test.ts`。指定契约：`pnpm test run components/business/admin/__tests__/pending-form-contract.test.ts "app/(admin)/__tests__/status-registry-consumers.test.ts" lib/order/__tests__/edit-field-inventory.test.ts`。
+- 离线命令：`env -u BACKGROUND_JOBS_MODE DATABASE_URL='postgresql://offline:offline@127.0.0.1:1/erp_test_offline?connect_timeout=1' DOTENV_CONFIG_PATH=/dev/null pnpm test run --exclude '**/*.postgres.test.ts' --exclude 'lib/__tests__/database-session.test.ts'`。显式排除 28 个 PostgreSQL 文件和真实会话测试；并发/回滚验证使用 mock，不代表真实数据库验收。没有开发库写入、E2E 或操作 `:3000`。
+- 临时证据：`/tmp/paper-batch3-preflight.json`、`/tmp/paper-batch3-target.log`、`/tmp/paper-batch3-offline.log`、`/tmp/paper-batch3-contracts.log`、`/tmp/paper-batch3-architecture.log`、`/tmp/paper-batch3-backup.log`、`/tmp/paper-batch3-lint.log`、`/tmp/paper-batch3-typecheck.log`。
+- **下一步批次 4**：双权限 Server Action、纸张详情适用规格网格及保存复核、只读规格页、产品身份只读界面；菜单名称不改，不更新截图基线。批次 3 只交付领域能力，UI 尚未接入。批次 5 再做报价对比与隔离库 E2E。
+- 本批次无新增待拍板问题；专版默认准入、历史重算状态口径两项继续保留现状，不阻挡批次 4。下架/不适用另立、120g 不收尾、彩印启用不做。未修改 `DECISIONS.md`、schema、迁移、目录读取行为、公式或历史快照。
 
 **2026-09-19（晚）：CI 提速两步。业主目标「等待时间优先」，全绿等待 61.4 → 24.9（第一步）→ 9.1 分钟（第二步）。**
 - 第一步 PR #24 已合入 `main`（`3cbe6abf`）：`static` / `unit` 拆出先跑、各套件独立作业、**PR 两视口（375×667、1280×800）/ main 六视口**（CLAUDE.md §8.2 已同步）、`push: main` 只跑 `static` + `viewports-main`、纯文档改动不触发、`print-darwin` 拆成带路径过滤的独立 workflow、CI trace 改 `on-first-retry`、`.review/` 每次传而报告只在失败时传、浏览器缓存按需装。`main` 首次 push 运行 `static` 与六视口门禁已通过。
