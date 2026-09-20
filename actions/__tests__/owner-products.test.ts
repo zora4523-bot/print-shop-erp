@@ -467,3 +467,13 @@ describe('setQuoteProductActiveAction', () => {
     expect(productMock.setProductActive).not.toHaveBeenCalled();
   });
 });
+
+it.each(['square', 'west-mid', 'west-large'])('编辑受保护产品沿用库内长编码（%s），不采信表单编码', async (key) => {
+  permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+  const code = `BLANK-${'a'.repeat(20)}-${key}`;
+  productMock.getProductSummary.mockResolvedValue({ id: 'p1', category: ProductCategory.BLANK_STOCK, code });
+  productMock.updateProduct.mockResolvedValue({ id: 'p1' });
+  const result = await updateQuoteProductAction('p1', null, fd({ ...validCreate, code: '伪造的替换编码' }));
+  expect(result.status).toBe('success');
+  expect(productMock.updateProduct.mock.calls[0]![1].code).toBe(code);
+});

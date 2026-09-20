@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Prisma } from '../../generated/prisma/client';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceRuleKind,
@@ -25,6 +26,7 @@ const { dbMock } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    material: { findMany: vi.fn() },
     customerPriceRule: {
       count: vi.fn(),
       findMany: vi.fn(),
@@ -58,6 +60,7 @@ import {
   createProduct,
   updateProduct,
   setProductActive,
+  setProductActiveInTx,
   ProductInvariantError,
   QUOTE_PRODUCT_CATEGORIES,
   orderCategoryNodesAsTree,
@@ -92,6 +95,8 @@ beforeEach(() => {
     );
   dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.product)) fn.mockReset();
+  dbMock.material.findMany.mockReset().mockResolvedValue([]);
+  dbMock.product.findMany.mockResolvedValue([]);
   dbMock.customerPriceRule.count.mockReset().mockResolvedValue(0);
   dbMock.customerPriceRule.findMany.mockReset().mockResolvedValue([]);
   dbMock.customerPriceBook.findMany.mockReset().mockResolvedValue([]);
@@ -1061,11 +1066,11 @@ describe('updateProduct', () => {
     );
     dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
     await updateProduct('p1', {
-      code: null,
+      code: 'HB001',
       categoryNodeId: 'cat_disabled',
       name: '改名',
-      specification: null,
-      paperType: null,
+      specification: '100×200',
+      paperType: '铜版纸',
       baseUnitPrice: null,
     });
     expect(dbMock.productCategoryNode.findUnique).not.toHaveBeenCalled();
@@ -1242,5 +1247,88 @@ describe('getProductSummary', () => {
   it('returns null when absent', async () => {
     dbMock.product.findUnique.mockResolvedValue(null);
     expect(await getProductSummary('nope')).toBeNull();
+  });
+});
+
+
+describe('setProductActiveInTx', () => {
+  it('uses the supplied transaction without starting another transaction or taking another lock', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: false }));
+    dbMock.product.update.mockResolvedValue(makeProduct({ isActive: true }));
+    await setProductActiveInTx(dbMock as unknown as Prisma.TransactionClient, 'p1', true, {
+      ...activeChangeContext, reason: null,
+    });
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.$executeRaw).not.toHaveBeenCalled();
+    expect(dbMock.product.update).toHaveBeenCalledWith(expect.objectContaining({ data: { isActive: true } }));
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ action: 'PRODUCT_ACTIVATE',
+        requestMetadata: expect.objectContaining({ referenceImpact: expect.any(Object) }),
+      }),
+    }));
+  });
+  it('the public wrapper still takes exactly one write lock before any reads', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: false }));
+    dbMock.product.update.mockResolvedValue(makeProduct({ isActive: true }));
+    await setProductActive('p1', true, { ...activeChangeContext, reason: null });
+    expect(dbMock.$transaction).toHaveBeenCalledOnce();
+    expect(dbMock.$executeRaw).toHaveBeenCalledOnce();
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(dbMock.product.findUnique.mock.invocationCallOrder[0]);
+  });
+  it('propagates audit failures so the caller can roll back the whole transaction', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: false }));
+    dbMock.product.update.mockResolvedValue(makeProduct({ isActive: true }));
+    dbMock.businessAuditLog.create.mockRejectedValue(new Error('audit failed'));
+    await expect(setProductActiveInTx(dbMock as unknown as Prisma.TransactionClient, 'p1', true, {
+      ...activeChangeContext, reason: null,
+    })).rejects.toThrow('audit failed');
+  });
+});
+
+describe('blank product identity guards (PLAN S8)', () => {
+  const data = { code: 'BLANK-TEST', name: '测试组合', categoryNodeId: 'stock', paperType: '160g红卡',
+    specification: '中号封80×115', baseUnitPrice: null };
+  const row = (changes = {}) => ({ ...makeProduct(), id: 'existing', category: ProductCategory.BLANK_STOCK,
+    categoryNodeId: 'stock', paperType: '160g红卡', weight: 160, specification: '中号封80×115',
+    paperMaterialId: null, ...changes });
+  beforeEach(() => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode({ id: 'stock', legacyCategory: ProductCategory.BLANK_STOCK }));
+    dbMock.material.findMany.mockResolvedValue([{ id: 'paper', name: '160g红卡', specification: null }]);
+  });
+  it.each([
+    {}, { isActive: false }, { specification: '中号封80x115' },
+    { paperMaterialId: 'wrong', isActive: false },
+    { specification: '中号封80×115 / 大号封90×165' },
+  ])('refuses creating a duplicate or blocked cell: %j', async (changes) => {
+    dbMock.product.findMany.mockResolvedValue([row(changes)]);
+    await expect(createProduct(data)).rejects.toThrow('请到纸张页');
+    expect(dbMock.product.create).not.toHaveBeenCalled();
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(dbMock.product.findMany.mock.invocationCallOrder[0]);
+  });
+  it('inactive non-exact old rows do not block a new exact product', async () => {
+    dbMock.product.findMany.mockResolvedValue([row({ specification: '中号封', isActive: false })]);
+    await createProduct(data);
+    expect(dbMock.product.create).toHaveBeenCalledOnce();
+  });
+  it('moving a different category into blank uses the same duplicate guard', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.product.findMany.mockResolvedValue([row()]);
+    await expect(updateProduct('p1', data)).rejects.toThrow('请到纸张页');
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+  });
+  it.each([ProductCategory.BLANK_STOCK, ProductCategory.COLOR_PRINT])('protects identity without price references: %s', async (category) => {
+    const target = row({ category, code: data.code });
+    dbMock.product.findUnique.mockResolvedValue(target);
+    for (const changes of [{ code: 'NEW' }, { paperType: '180g红卡' }, { specification: '大号封90×165' }, { categoryNodeId: 'other' }]) {
+      await expect(updateProduct('existing', { ...data, ...changes })).rejects.toThrow('不可修改');
+    }
+    expect(dbMock.customerPriceRule.count).not.toHaveBeenCalled();
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+  });
+  it('accepts a display edit while preserving an existing 37-character generated code', async () => {
+    const code = `BLANK-${'a'.repeat(20)}-west-large`;
+    dbMock.product.findUnique.mockResolvedValue(row({ code }));
+    await updateProduct('existing', { ...data, code, name: '展示名' });
+    expect(dbMock.product.update.mock.calls[0]![0].data.code).toBe(code);
   });
 });

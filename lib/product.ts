@@ -28,6 +28,10 @@ import {
   type AuditActor,
 } from './audit-log';
 import { isRetiredProductCategory } from './rules/retired-catalog';
+import { catalogPricingFactChoices } from './order/catalog-pricing-facts';
+import { findCatalogPaperIdentityMatches } from './order/catalog-paper-identity';
+import { BLANK_SPECIFICATIONS, blankSpecificationKey } from './price/blank-paper';
+import { classifyBlankPaperCell } from './price/blank-paper-cell';
 
 export { isRetiredProductCategory } from './rules/retired-catalog';
 
@@ -787,6 +791,28 @@ export type CreateProductData = {
   minOrderQty?: number;
 };
 
+async function assertNoBlankProductDuplicate(
+  tx: Prisma.TransactionClient,
+  data: Pick<CreateProductData, 'paperType' | 'specification'>,
+): Promise<void> {
+  const products = await tx.product.findMany({ where: { category: ProductCategory.BLANK_STOCK } });
+  const papers = await tx.material.findMany({ where: { category: 'PAPER' } });
+  for (const name of catalogPricingFactChoices(data.paperType)) {
+    const identity = { name, specification: null };
+    const matches = findCatalogPaperIdentityMatches(papers, identity);
+    if (matches.length > 1) throw new ProductInvariantError('纸张存在重复身份，请先在纸张页处理');
+    const paper = matches[0] ?? { id: '', ...identity };
+    for (const specification of catalogPricingFactChoices(data.specification)) {
+      const spec = BLANK_SPECIFICATIONS.find((spec) => spec.key === blankSpecificationKey(specification));
+      if (!spec) continue;
+      const cell = classifyBlankPaperCell(products, paper, spec.key);
+      if (cell.candidates.length || cell.state === 'needs-attention') {
+        throw new ProductInvariantError('该纸张规格已有产品或待处理组合，请到纸张页启用或检查');
+      }
+    }
+  }
+}
+
 export async function createProduct(data: CreateProductData): Promise<ProductSummary> {
   // Preserve the invariant/error order before consuming an automatic business
   // code.  The category is checked again under the price snapshot write lock
@@ -796,6 +822,9 @@ export async function createProduct(data: CreateProductData): Promise<ProductSum
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
     const categoryNode = await requireActiveCategoryNode(tx, data.categoryNodeId);
+    if (categoryNode.legacyCategory === ProductCategory.BLANK_STOCK) {
+      await assertNoBlankProductDuplicate(tx, data);
+    }
     return tx.product.create({
       data: {
         code,
@@ -870,6 +899,10 @@ export async function updateProduct(
     await acquirePriceRuleSnapshotWriteLock(tx);
     const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
     if (!target) throw new ProductInvariantError('目标产品不存在');
+    if ((target.category === ProductCategory.BLANK_STOCK || target.category === ProductCategory.COLOR_PRINT) &&
+      externalPricingFactsChanged(target, data)) {
+      throw new ProductInvariantError('空白封和彩印产品的编码、规格、纸张和分类不可修改，请到纸张页管理适用规格');
+    }
     if (
       externalPricingFactsChanged(target, data) &&
       (await countProtectedExternalPriceRules(tx, id, new Date())) > 0
@@ -880,6 +913,10 @@ export async function updateProduct(
       data.categoryNodeId === target.categoryNodeId
         ? { id: target.categoryNodeId, legacyCategory: target.category }
         : await requireActiveCategoryNode(tx, data.categoryNodeId);
+
+    if (target.category !== ProductCategory.BLANK_STOCK && categoryNode.legacyCategory === ProductCategory.BLANK_STOCK) {
+      await assertNoBlankProductDuplicate(tx, data);
+    }
 
     return tx.product.update({
       where: { id },
@@ -908,6 +945,65 @@ export type ProductActiveChangeContext = {
   reason: string | null;
 };
 
+/** Caller owns the transaction and holds the price snapshot write lock. */
+export async function setProductActiveInTx(
+  tx: Prisma.TransactionClient,
+  id: string,
+  isActive: boolean,
+  context: ProductActiveChangeContext,
+): Promise<ProductSummary> {
+  const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
+  if (!target) throw new ProductInvariantError('目标产品不存在');
+  if (isActive && isRetiredProductCategory(target.categoryNode)) {
+    throw new ProductInvariantError('该建单产品属于已退役历史分类，不能重新启用');
+  }
+  if (target.isActive === isActive) return target;
+
+  const reason = context.reason?.trim() || null;
+  if (!isActive && !reason) {
+    throw new ProductInvariantError('停用产品必须填写业务理由');
+  }
+  if (reason && reason.length > 500) {
+    throw new ProductInvariantError('操作理由不能超过 500 个字符');
+  }
+
+  // Re-read the submit-time impact after taking the same exclusive lock used
+  // by cooperating price-rule writes and order quote snapshots. BOM writes
+  // do not take this lock, so their count is a statement-time snapshot, not
+  // a global serializable snapshot. The observed impact, audit record, and
+  // status flip still commit atomically in this transaction.
+  const impact =
+    (
+      await readProductReferenceImpacts(tx, [id], new Date())
+    ).get(id) ?? emptyProductReferenceImpact();
+
+  if (
+    !isActive &&
+    (await countProtectedExternalPriceRules(tx, id, new Date())) > 0
+  ) {
+    throw new ProductInvariantError(protectedExternalPricingFactsMessage());
+  }
+
+  const updated = await tx.product.update({
+    where: { id },
+    data: { isActive },
+    select: SUMMARY_SELECT,
+  });
+  await writeAuditLogInTx(tx, {
+    actor: context.actor,
+    action: isActive ? 'PRODUCT_ACTIVATE' : 'PRODUCT_DEACTIVATE',
+    entityType: 'Product',
+    entityId: id,
+    before: { isActive: target.isActive },
+    after: { isActive: updated.isActive },
+    requestMetadata: {
+      reason,
+      referenceImpact: impact,
+    },
+  });
+  return updated;
+}
+
 export async function setProductActive(
   id: string,
   isActive: boolean,
@@ -915,55 +1011,6 @@ export async function setProductActive(
 ): Promise<ProductSummary> {
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
-    const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
-    if (!target) throw new ProductInvariantError('目标产品不存在');
-    if (isActive && isRetiredProductCategory(target.categoryNode)) {
-      throw new ProductInvariantError('该建单产品属于已退役历史分类，不能重新启用');
-    }
-    if (target.isActive === isActive) return target;
-
-    const reason = context.reason?.trim() || null;
-    if (!isActive && !reason) {
-      throw new ProductInvariantError('停用产品必须填写业务理由');
-    }
-    if (reason && reason.length > 500) {
-      throw new ProductInvariantError('操作理由不能超过 500 个字符');
-    }
-
-    // Re-read the submit-time impact after taking the same exclusive lock used
-    // by cooperating price-rule writes and order quote snapshots. BOM writes
-    // do not take this lock, so their count is a statement-time snapshot, not
-    // a global serializable snapshot. The observed impact, audit record, and
-    // status flip still commit atomically in this transaction.
-    const impact =
-      (
-        await readProductReferenceImpacts(tx, [id], new Date())
-      ).get(id) ?? emptyProductReferenceImpact();
-
-    if (
-      !isActive &&
-      (await countProtectedExternalPriceRules(tx, id, new Date())) > 0
-    ) {
-      throw new ProductInvariantError(protectedExternalPricingFactsMessage());
-    }
-
-    const updated = await tx.product.update({
-      where: { id },
-      data: { isActive },
-      select: SUMMARY_SELECT,
-    });
-    await writeAuditLogInTx(tx, {
-      actor: context.actor,
-      action: isActive ? 'PRODUCT_ACTIVATE' : 'PRODUCT_DEACTIVATE',
-      entityType: 'Product',
-      entityId: id,
-      before: { isActive: target.isActive },
-      after: { isActive: updated.isActive },
-      requestMetadata: {
-        reason,
-        referenceImpact: impact,
-      },
-    });
-    return updated;
+    return setProductActiveInTx(tx, id, isActive, context);
   });
 }

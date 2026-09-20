@@ -38,6 +38,13 @@ const safeId = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9_-]{1,128}$/, '请选择有效记录');
+export const enableBlankSpecificationsSchema = z.object({
+  paperId: safeId,
+  specifications: z.array(z.enum(BLANK_SPECIFICATIONS.map((spec) => spec.key)))
+    .min(1, '请选择至少一种规格').max(6)
+    .refine((keys) => new Set(keys).size === keys.length, '规格不能重复'),
+}).strict();
+export type EnableBlankSpecificationsInput = z.infer<typeof enableBlankSpecificationsSchema>;
 const paperName = z
   .string()
   .trim()

@@ -1,11 +1,10 @@
-import { findCatalogPaperIdentityMatches } from '../order/catalog-paper-identity';
+import { BlankPaperCatalogError, ensureBlankPaperProductInTx, readBlankPaperCatalogInTx, resolveBlankPaperInTx } from './blank-paper-catalog';
 import { BOX_PRICE_RULES, CONFIRMED_BOX_RATES } from './box-packaging-rules';
 import 'server-only';
 
 import { createHash } from 'node:crypto';
 import {
   addBlankPaperSchema,
-  blankPaperFact,
   blankSpecificationKey,
   BLANK_SPECIFICATIONS,
   type AddBlankPaperInput,
@@ -3629,63 +3628,9 @@ export async function addBlankPaperDraft(
       throw new CustomerPriceBookAdminError(
         '空白封产品分类未配置，请先配置可建单产品组合',
       );
-    const papers = await tx.material.findMany({ where: { category: 'PAPER' } });
-    const existingPaperId =
-      input.paper.mode === 'existing' ? input.paper.id : null;
-    const selected = papers.find((paper) => paper.id === existingPaperId);
-    const fact =
-      input.paper.mode === 'new'
-        ? canonicalizeCreateOrderPaperFact(input.paper.name, input.paper.weight)
-        : selected
-          ? blankPaperFact(selected)
-          : null;
-    if (!fact || fact.paperWeightGsm > 2000)
-      throw new CustomerPriceBookAdminError(
-        '纸张名称或克重不完整，请先完善纸张资料',
-      );
-    const label = `${fact.paperWeightGsm}g${fact.paperType}`;
-    const matches = findCatalogPaperIdentityMatches(papers, {
-      name: label, specification: `${fact.paperWeightGsm}g`,
-    });
-    if (matches.length > 1)
-      throw new CustomerPriceBookAdminError(
-        '同名同克重纸张存在重复记录，请先在纸张管理中处理',
-      );
-    let paper = selected ?? matches[0];
-    if (paper && (!paper.isActive || paper.outOfStock))
-      throw new CustomerPriceBookAdminError(
-        '纸张已停用或缺货，请先在纸张管理中处理',
-      );
-    if (
-      input.paper.mode === 'existing' &&
-      (!selected || matches[0]?.id !== selected.id)
-    ) {
-      throw new CustomerPriceBookAdminError('纸张资料已变化，请刷新后重新选择');
-    }
-    const hash = createHash('sha256').update(label).digest('hex').slice(0, 20);
-    if (!paper) {
-      paper = await tx.material.create({
-        data: {
-          code: `PAPER-${hash}`,
-          name: label,
-          specification: `${fact.paperWeightGsm}g`,
-          category: 'PAPER',
-          unit: '张',
-        },
-      });
-      await writeAuditLogInTx(tx, {
-        actor,
-        action: 'CREATE',
-        entityType: 'Material',
-        entityId: paper.id,
-        before: null,
-        after: paper,
-      });
-    }
-    const products = await tx.product.findMany({
-      where: { category: 'BLANK_STOCK' },
-      include: { categoryNode: true },
-    });
+    const catalog = await readBlankPaperCatalogInTx(tx);
+    const resolved = await resolveBlankPaperInTx(tx, input.paper, catalog, actor);
+    const { paper, fact, label, hash } = resolved;
     const createdRuleIds: string[] = [];
     for (const entry of input.specifications) {
       const spec = BLANK_SPECIFICATIONS.find((spec) => spec.key === entry.key)!;
@@ -3710,76 +3655,7 @@ export async function addBlankPaperDraft(
         throw new CustomerPriceBookAdminError(
           `${spec.label}已有价格记录，请返回价格表修改`,
         );
-      const matchingProducts = products.filter((product) => {
-        const candidate = product.paperType
-          ? canonicalizeCreateOrderPaperFact(product.paperType, product.weight)
-          : null;
-        return (
-          (product.paperMaterialId === paper.id ||
-            (candidate?.paperType === fact.paperType &&
-              candidate.paperWeightGsm === fact.paperWeightGsm)) &&
-          blankSpecificationKey(product.specification) === entry.key
-        );
-      });
-      if (matchingProducts.length > 1)
-        throw new CustomerPriceBookAdminError(
-          `${spec.label}有重复产品组合，请先在产品组合中处理`,
-        );
-      let product = matchingProducts[0];
-      const productFact = product?.paperType
-        ? canonicalizeCreateOrderPaperFact(product.paperType, product.weight)
-        : null;
-      if (
-        product &&
-        (!product.isActive ||
-          !product.categoryNode.isActive ||
-          productFact?.paperType !== fact.paperType ||
-          productFact.paperWeightGsm !== fact.paperWeightGsm ||
-          (product.paperMaterialId && product.paperMaterialId !== paper.id))
-      ) {
-        throw new CustomerPriceBookAdminError(
-          `${spec.label}产品组合已停用或纸张关联不一致，请先检查产品组合`,
-        );
-      }
-      if (!product) {
-        product = await tx.product.create({
-          data: {
-            code: `BLANK-${hash}-${spec.key}`,
-            name: `${label} ${spec.label}`,
-            category: 'BLANK_STOCK',
-            categoryNodeId: anchor.product.categoryNodeId,
-            paperMaterialId: paper.id,
-            paperType: label,
-            weight: fact.paperWeightGsm,
-            specification: spec.specification,
-          },
-          include: { categoryNode: true },
-        });
-        await writeAuditLogInTx(tx, {
-          actor,
-          action: 'CREATE',
-          entityType: 'Product',
-          entityId: product.id,
-          before: null,
-          after: product,
-        });
-      }
-      if (!product.paperMaterialId) {
-        const before = product;
-        product = await tx.product.update({
-          where: { id: product.id },
-          data: { paperMaterialId: paper.id },
-          include: { categoryNode: true },
-        });
-        await writeAuditLogInTx(tx, {
-          actor,
-          action: 'LINK_PAPER',
-          entityType: 'Product',
-          entityId: product.id,
-          before,
-          after: product,
-        });
-      }
+      const product = await ensureBlankPaperProductInTx(tx, catalog, resolved, spec, 'draft', actor);
       // An enabled catalog combination without a rule uses the existing manual-pricing path.
       if (entry.amount === null) continue;
       const rule = await tx.customerPriceRule.create({
@@ -3845,5 +3721,8 @@ export async function addBlankPaperDraft(
       },
     });
     return { paperId: paper.id, priceBookId: book.id };
+  }).catch((error: unknown) => {
+    if (error instanceof BlankPaperCatalogError) throw new CustomerPriceBookAdminError(error.message);
+    throw error;
   });
 }

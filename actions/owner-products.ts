@@ -96,7 +96,12 @@ export async function updateQuoteProductAction(
 ): Promise<ProductMutationResult> {
   await requirePermission('dict:product:manage');
 
-  const parsed = updateProductSchema.safeParse(normalizeFormInput(formData));
+  const target = await getProductSummary(id);
+  const preserveCode = target?.category === 'BLANK_STOCK' || target?.category === 'COLOR_PRINT';
+  const formInput = normalizeFormInput(formData);
+  // Generated blank codes can exceed the manual input limit. Never validate or trust
+  // a submitted replacement for the immutable code; use the server-owned value.
+  const parsed = updateProductSchema.safeParse({ ...formInput, code: preserveCode ? '' : formInput.code });
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
   }
@@ -106,7 +111,7 @@ export async function updateQuoteProductAction(
   if (scopeError) return scopeError;
 
   const updateData: UpdateProductData = {
-    code: parsed.data.code,
+    code: preserveCode ? target.code : parsed.data.code,
     categoryNodeId: parsed.data.categoryNodeId,
     name: parsed.data.name,
     specification: parsed.data.specification,

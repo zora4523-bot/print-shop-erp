@@ -51,6 +51,11 @@ const book = {
     },
   },
 };
+const node = { id: 'stock', path: 'product.blank_stock', legacyCategory: 'BLANK_STOCK', isActive: true };
+const catalogAnchor = {
+  id: 'anchor-product', category: 'BLANK_STOCK', categoryNodeId: 'stock', categoryNode: node,
+  paperType: '160g旧纸张', weight: 160, specification: '中号封80×115', paperMaterialId: null, isActive: true,
+};
 const anchor = {
   categoryId: 'base-category',
   product: {
@@ -68,10 +73,11 @@ beforeEach(() => {
     Promise.resolve(args.include ? [anchor] : []),
   );
   mocks.tx.material.findMany.mockResolvedValue([]);
-  mocks.tx.product.findMany.mockResolvedValue([]);
+  mocks.tx.product.findMany.mockResolvedValue([{ ...catalogAnchor }]);
   mocks.tx.material.create.mockResolvedValue({
     id: 'paper-new',
     name: '160g测试纸',
+    specification: '160g',
     isActive: true,
     outOfStock: false,
   });
@@ -152,21 +158,22 @@ it('拒绝停用或缺货纸张', async () => {
 
 it('已有组合绑定纸张身份，拒绝停用分类', async () => {
   const product = {
+    ...catalogAnchor,
     id: 'existing-product',
     isActive: true,
     paperType: '160g测试纸',
     weight: 160,
-    specification: '中号封',
+    specification: '中号封80×115',
     paperMaterialId: null,
-    categoryNode: { isActive: false },
+    categoryNode: { ...node, isActive: false },
   };
   mocks.tx.product.findMany.mockResolvedValue([product]);
   await expect(addBlankPaperDraft(input, actor)).rejects.toThrow(
-    '产品组合已停用',
+    '确定新产品的分类归属',
   );
   expect(mocks.tx.customerPriceRule.create).not.toHaveBeenCalled();
   mocks.tx.product.findMany.mockResolvedValue([
-    { ...product, categoryNode: { isActive: true } },
+    { ...product, categoryNode: node },
   ]);
   mocks.tx.product.update.mockResolvedValue({
     ...product,
@@ -187,13 +194,14 @@ it('相同毫秒或时钟回退仍推进草稿版本', async () => {
 it('纸张关联与产品计价身份不一致时拒绝复用', async () => {
   mocks.tx.product.findMany.mockResolvedValue([
     {
+      ...catalogAnchor,
       id: 'bad-product',
       paperMaterialId: 'paper-new',
       paperType: '160g另一种纸',
       weight: 160,
       specification: '中号封80×115',
       isActive: true,
-      categoryNode: { isActive: true },
+      categoryNode: node,
     },
   ]);
   await expect(addBlankPaperDraft(input, actor)).rejects.toThrow(
@@ -219,4 +227,34 @@ it('多值身份同时命中两条纸张时拒绝，不以停用消除重复', a
   await expect(addBlankPaperDraft(input, actor)).rejects.toThrow('重复记录');
   expect(mocks.tx.material.create).not.toHaveBeenCalled();
   expect(mocks.tx.product.create).not.toHaveBeenCalled();
+});
+
+it('草稿按启用产品解析分类节点，收费类目仍取价格锚点', async () => {
+  mocks.tx.customerPriceRule.findMany.mockImplementation((args) => Promise.resolve(args.include ? [
+    { ...anchor, product: { ...anchor.product, categoryNodeId: 'price-anchor-node' } },
+  ] : []));
+  await addBlankPaperDraft(input, actor);
+  expect(mocks.tx.product.create.mock.calls[0]![0].data.categoryNodeId).toBe('stock');
+  expect(mocks.tx.customerPriceRule.create.mock.calls[0]![0].data.categoryId).toBe('base-category');
+});
+it('草稿拒绝合法停用候选，不代办重新启用', async () => {
+  mocks.tx.product.findMany.mockResolvedValue([
+    catalogAnchor, { ...catalogAnchor, id: 'off', paperType: '160g测试纸', isActive: false },
+  ]);
+  await expect(addBlankPaperDraft(input, actor)).rejects.toThrow('先到纸张页启用');
+  expect(mocks.tx.product.update).not.toHaveBeenCalled();
+  expect(mocks.tx.customerPriceRule.create).not.toHaveBeenCalled();
+});
+it('草稿忽略停用非逐字旧行，创建新逐字产品而不修补旧行', async () => {
+  mocks.tx.product.findMany.mockResolvedValue([
+    catalogAnchor, { ...catalogAnchor, id: 'old', paperType: '160g测试纸', specification: '中号封', isActive: false },
+  ]);
+  await addBlankPaperDraft(input, actor);
+  expect(mocks.tx.product.create.mock.calls[0]![0].data.specification).toBe('中号封80×115');
+  expect(mocks.tx.product.update).not.toHaveBeenCalled();
+});
+it('草稿沿用错误类型报告编码冲突，不提示重试', async () => {
+  mocks.tx.product.create.mockRejectedValueOnce({ code: 'P2002' });
+  await expect(addBlankPaperDraft(input, actor)).rejects.toThrow('产品编码与已有组合冲突');
+  expect(mocks.tx.customerPriceRule.create).not.toHaveBeenCalled();
 });
