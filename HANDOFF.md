@@ -16,19 +16,21 @@
 
 ## 当前任务
 
-**2026-09-20：纸张、规格缩小方案批次 3 已实现，本地提交 `f69fe343`，未推送、未部署。**
+**2026-09-20：纸张、规格缩小方案批次 4 已实现，本地提交 `9e05a4ee`，未推送、未部署。**
 
-- 起点 `11a75c61`，工作区干净；沿用批次 1 `7a81c801`、批次 2 `30b813ca`。本批次实现 PLAN §3 S1/S2、§4 S5 与 §6 S8；方案偏离：无。
-- [共享目录写入](lib/price/blank-paper-catalog.ts) 从草稿抽取纸张解析、产品匹配/创建；[无草稿启用](lib/price/enable-blank-specifications.ts) 在单一价目写锁和事务内执行，只新建或重新启用，不写价格、不补旧产品外键。草稿保留旧外键补齐但拒绝重新启用停用候选，收费类目仍来自价格锚点，产品节点来自启用空白封产品的唯一有效节点。
-- [产品领域](lib/product.ts) 抽出 `setProductActiveInTx`，原公开函数只包装事务与锁；保留引用影响审计。新增/改入空白封按 S2 查重，空白封和彩印身份不可变；[编辑 Action](actions/owner-products.ts) 沿用库内编码，避免 32 字符手工输入校验挡住自动长编码。
-- 唯一有意调整的既有 blank-paper 断言：停用分类错误由“产品组合已停用”变为先检查“确定新产品的分类归属”；该例改用逐字规格继续验证补齐外键。已列入实现提交正文，其他既有断言未改。
-- **本轮用户明确指定本机开发库，只读预检已执行**：`localhost:5432/print_shop_erp`，采样 `2026-09-20 21:22:50+08`，`nodeAssignmentReady=true`；25 个启用空白封产品都在 `cat_blank_stock` / `product.blank_stock`。重复纸张身份 3 组（冰白纸160、红卡160、艳闪160），外键事实冲突 0，无启用产品但有文本规则格子 0，120g 产品 2。四个启用非逐字产品属于彩印，不能当作空白封异常。未修复数据；正式库仍须单独只读预检，开发结果不能替代正式结果。
-- 门禁全部通过：`pnpm check:architecture && pnpm test:backup && pnpm lint && pnpm typecheck`；架构 995 模块/4020 依赖/25 项既有长函数债务，备份 23/0/0，lint 0 错误/3 条既有警告。目标 7 文件 217/0/0；指定契约 3 文件 31/0/0；完整离线回归 641 文件 7283 通过/0 失败/43 跳过（包含最后一次测试数据形态修正）。`git diff --check` 通过。
-- 目标命令：`pnpm test run lib/price/__tests__/enable-blank-specifications.test.ts lib/price/__tests__/blank-paper-admin.test.ts lib/price/__tests__/blank-paper.test.ts lib/price/__tests__/blank-paper-cell.test.ts lib/price/__tests__/blank-specification-contract.test.ts lib/__tests__/product.test.ts actions/__tests__/owner-products.test.ts`。指定契约：`pnpm test run components/business/admin/__tests__/pending-form-contract.test.ts "app/(admin)/__tests__/status-registry-consumers.test.ts" lib/order/__tests__/edit-field-inventory.test.ts`。
-- 离线命令：`env -u BACKGROUND_JOBS_MODE DATABASE_URL='postgresql://offline:offline@127.0.0.1:1/erp_test_offline?connect_timeout=1' DOTENV_CONFIG_PATH=/dev/null pnpm test run --exclude '**/*.postgres.test.ts' --exclude 'lib/__tests__/database-session.test.ts'`。显式排除 28 个 PostgreSQL 文件和真实会话测试；并发/回滚验证使用 mock，不代表真实数据库验收。没有开发库写入、E2E 或操作 `:3000`。
-- 临时证据：`/tmp/paper-batch3-preflight.json`、`/tmp/paper-batch3-target.log`、`/tmp/paper-batch3-offline.log`、`/tmp/paper-batch3-contracts.log`、`/tmp/paper-batch3-architecture.log`、`/tmp/paper-batch3-backup.log`、`/tmp/paper-batch3-lint.log`、`/tmp/paper-batch3-typecheck.log`。
-- **下一步批次 4**：双权限 Server Action、纸张详情适用规格网格及保存复核、只读规格页、产品身份只读界面；菜单名称不改，不更新截图基线。批次 3 只交付领域能力，UI 尚未接入。批次 5 再做报价对比与隔离库 E2E。
-- 本批次无新增待拍板问题；专版默认准入、历史重算状态口径两项继续保留现状，不阻挡批次 4。下架/不适用另立、120g 不收尾、彩印启用不做。未修改 `DECISIONS.md`、schema、迁移、目录读取行为、公式或历史快照。
+- 本轮用户要求继续任务；起点 `2b12f739`、工作区干净。按实施文件一次一批推进，本批次为 PLAN §3 S1/S3、§5 S6、§6 S8 页面与 Action 接入，方案偏离：无。批次 1–3 分别为 `7a81c801`、`30b813ca`、`f69fe343`。
+- [纸张规格表单](components/business/rules/catalog/PaperSpecificationsForm.tsx) 接入纸张详情：已启用格已选且不可取消，只提交增量键；待处理格链接相关组合，合法停用候选可重新勾选。复核列出状态变化、现行四位单价/待核价/价格读取失败、重新启用后果、物流单重缺失与专版保持现状。使用共享 Checkbox、原生 form action/useActionState、回执与错误反馈。
+- [展示纯函数](lib/price/paper-specification-view.ts) 调用 S2、现有建单目录与实际报价选择器；[读取编排](lib/price/read-paper-specifications.ts) 在共享价目读锁下取数。保留缺货禁选和无外键旧产品实际目录行为，零价不当缺价。纸张列表增加[未归属产品](components/business/rules/catalog/UnassignedPaperProducts.tsx)，不自动补物料。
+- [启用 Action](actions/paper-specifications.ts) 第一行物料权限、随后产品权限，调用批次 3 领域操作；新纸张通过 [catalog-paper Action](actions/catalog-paper.ts) 和专用表单输入名称/克重，沿用草稿校验与 S4 保护，统一标签、规格与张单位，复核说明专版现有影响。通用无克重物料入口仍保留。
+- 新增 [规格目录](app/(admin)/owner/rules/specifications/page.tsx)：空白封六常量、专版五必需规格及当前产品尺寸、彩印现有规格串，后者注明未建立统一目录。专版常量只增加导出，无值或读取行为变化。[产品表单](components/business/product/ProductForm.tsx) 对空白封/彩印编码、分类、规格、纸张只展示原值并保留隐藏提交值；名称仍可编辑，链接纸张页。菜单名不变。
+- API.md 已同步两个 Action 的权限、输入、回执和失败边界。旧路由契约按 S1 将 `createPaperAction` 调整为 `createCatalogPaperAction`，新增测试仍验证固定 PAPER 分类；metadata 测试补齐新服务端依赖 mock。没有弱化授权断言。
+- 门禁：`pnpm check:architecture && pnpm test:backup && pnpm lint && pnpm typecheck` 全通过；架构 1005 模块/4085 依赖/25 项既有长函数债务，备份 23/0/0，lint 0 错误/3 条既有警告。目标 7 文件 43/0/0；指定契约 3 文件 31/0/0；非数据库回归 645 文件 7306 通过/0 失败/43 跳过。最后的已启用单价展示补充后另跑浏览器、目标 eslint、lint:ui 与 typecheck，全通过；diff 检查通过。
+- 浏览器命令：`pnpm exec vitest run --config vitest.browser.config.ts components/business/rules/catalog/__tests__/PaperSpecificationsForm.browser.spec.tsx`，14/0/0；覆盖 375×667、393×852、768×1024、1024×768、1280×800、1920×1080 明暗主题、overflow、44px Checkbox、axe、键盘、增量 FormData、原生 action 与失败后修改。组件使用 mock Action，**不代表真实 Next 应用或数据库 E2E 通过**。未更新或提交截图基线。
+- 目标命令：`pnpm test run actions/__tests__/paper-specifications.test.ts actions/__tests__/catalog-paper.test.ts lib/price/__tests__/paper-specification-view.test.ts components/business/product/__tests__/ProductForm.feedback.test.tsx components/business/rules/__tests__/catalog-metadata-auth.test.ts components/business/rules/__tests__/catalog-routing.test.ts "app/(admin)/__tests__/specification-directory.test.tsx"`；指定契约为 `pnpm test run components/business/admin/__tests__/pending-form-contract.test.ts "app/(admin)/__tests__/status-registry-consumers.test.ts" lib/order/__tests__/edit-field-inventory.test.ts`。
+- 离线命令：`env -u BACKGROUND_JOBS_MODE DATABASE_URL='postgresql://offline:offline@127.0.0.1:1/erp_test_offline?connect_timeout=1' DOTENV_CONFIG_PATH=/dev/null pnpm test run --exclude '**/*.postgres.test.ts' --exclude 'lib/__tests__/database-session.test.ts'`。排除 28 个 PostgreSQL 文件及真实会话测试，不把 43 个 skip 计通过。日志 `/tmp/paper4-{target,offline,contracts,browser,architecture,backup,lint,types,final-ui}.log`。本轮没有连接或写入开发库、没有操作 :3000。
+- 批次 3 的本机只读预检仍有效为当时证据：用户明确指定 `localhost:5432/print_shop_erp`，2026-09-20 21:22:50+08，25 个启用空白封产品均在 `cat_blank_stock`，`nodeAssignmentReady=true`。3 组重复纸张身份（冰白纸160、红卡160、艳闪160）仍保留，未做数据修复；外键冲突 0，120g 产品 2。正式库必须另行预检，不能套用开发结果。
+- **下一步批次 5**：S10 改造前后目录/报价采集对比工具与 E2E；固定数据/价目版本比较三路线，另测新增纸张、重新启用有价/无价、非逐字/多值/重复异常、空操作与长编码保存。只能用 `E2E_DATABASE_URL` 一次性隔离库，自建分类及数据；没有隔离库只写不跑。需真实框架和数据库验证的部分仍未完成。
+- 没有新增业务待拍板项；专版默认准入、历史重算状态两项继续保持现状。下架/不适用另立、120g 不收尾、彩印启用不做。未改 DECISIONS、schema、迁移、报价公式、历史快照或目录读取行为。
 
 **2026-09-19（晚）：CI 提速两步。业主目标「等待时间优先」，全绿等待 61.4 → 24.9（第一步）→ 9.1 分钟（第二步）。**
 - 第一步 PR #24 已合入 `main`（`3cbe6abf`）：`static` / `unit` 拆出先跑、各套件独立作业、**PR 两视口（375×667、1280×800）/ main 六视口**（CLAUDE.md §8.2 已同步）、`push: main` 只跑 `static` + `viewports-main`、纯文档改动不触发、`print-darwin` 拆成带路径过滤的独立 workflow、CI trace 改 `on-first-retry`、`.review/` 每次传而报告只在失败时传、浏览器缓存按需装。`main` 首次 push 运行 `static` 与六视口门禁已通过。
