@@ -139,16 +139,16 @@ test('新增纸张、缺价建单、发布自动报价、补规格与历史价�
         .getByRole('button', { name: '局部烫金', exact: true })
         .click();
       await form
-        .getByRole('group', { name: '规格', exact: true })
-        .getByRole('button', { name: '中号封', exact: true })
-        .click();
-      await form
         .getByRole('group', { name: '纸张材质' })
         .getByRole('button', { name: paperName, exact: true })
         .click();
       await form
         .getByRole('group', { name: '克重', exact: true })
         .getByRole('button', { name: '160g', exact: true })
+        .click();
+      await form
+        .getByRole('group', { name: '规格', exact: true })
+        .getByRole('button', { name: '中号封', exact: true })
         .click();
       if (unpublished) await expect(form).toContainText(/待核价|人工/);
       await sales
@@ -292,67 +292,73 @@ test('新增纸张、缺价建单、发布自动报价、补规格与历史价�
       expect.objectContaining({ specification: '迷你封', unitPrice: '0' }),
     ]),
   );
-  await prepareDraft();
+  const viewportDraft = await prepareDraft();
   const ownerState = await page.context().storageState();
-  for (const [width, height] of [
-    [375, 667],
-    [393, 852],
-    [768, 1024],
-    [1024, 768],
-    [1280, 800],
-    [1920, 1080],
-  ]) {
-    const uiContext = await browser.newContext({
-      storageState: ownerState,
-      viewport: { width, height },
-      hasTouch: width <= 768,
-    });
-    const ui = await uiContext.newPage();
-    ui.on('pageerror', (error) => errors.push(error.message));
-    await ui.goto('/owner/rules/customer-pricing/blank/new');
-    await expect(ui.locator('[aria-current=page]').filter({ hasText: '新增纸张与规格价格' })).toBeVisible();
-    if (width <= 768) {
-      await ui.getByRole('radio', { name: '新建纸张', exact: true }).locator('..').tap();
-      await ui.getByRole('checkbox', { name: '中号封', exact: true }).locator('..').tap();
-      await expect(
-        ui.getByRole('checkbox', { name: '中号封', exact: true }),
-      ).toBeChecked();
-    } else await ui.getByRole('radio', { name: '新建纸张' }).check();
-    for (const theme of ['light', 'dark']) {
-      await ui.evaluate((value) => {
-        document.documentElement.dataset.theme = value;
-        document.documentElement.classList.toggle('dark', value === 'dark');
-      }, theme);
-      await expect
-        .poll(() =>
-          ui.evaluate(
-            () =>
-              document
-                .getAnimations()
-                .filter(
-                  (a) =>
-                    a instanceof CSSTransition && a.playState === 'running',
-                ).length,
-          ),
-        )
-        .toBe(0);
-      await ui.evaluate(() => window.scrollTo(0, 0));
-      await expectViewportGate(ui, {
-        ...testInfo,
-        project: {
-          ...testInfo.project,
-          use: { ...testInfo.project.use, viewport: { width, height } },
-        },
+  try {
+    for (const [width, height] of [
+      [375, 667],
+      [393, 852],
+      [768, 1024],
+      [1024, 768],
+      [1280, 800],
+      [1920, 1080],
+    ]) {
+      const uiContext = await browser.newContext({
+        storageState: ownerState,
+        viewport: { width, height },
+        hasTouch: width <= 768,
       });
-      await expectA11yGate(ui);
-      if (theme === 'light' && (width === 375 || width === 1280)) {
-        await ui.screenshot({
-          path: `/tmp/blank-paper-${width}.png`,
-          fullPage: true,
+      const ui = await uiContext.newPage();
+      ui.on('pageerror', (error) => errors.push(error.message));
+      await ui.goto('/owner/rules/customer-pricing/blank/new');
+      await expect(ui.locator('[aria-current=page]').filter({ hasText: '新增纸张与规格价格' })).toBeVisible();
+      if (width <= 768) {
+        await ui.getByRole('radio', { name: '新建纸张', exact: true }).locator('..').tap();
+        await ui.getByRole('checkbox', { name: '中号封', exact: true }).locator('..').tap();
+        await expect(
+          ui.getByRole('checkbox', { name: '中号封', exact: true }),
+        ).toBeChecked();
+      } else await ui.getByRole('radio', { name: '新建纸张' }).check();
+      for (const theme of ['light', 'dark']) {
+        await ui.evaluate((value) => {
+          document.documentElement.dataset.theme = value;
+          document.documentElement.classList.toggle('dark', value === 'dark');
+        }, theme);
+        await expect
+          .poll(() =>
+            ui.evaluate(
+              () =>
+                document
+                  .getAnimations()
+                  .filter(
+                    (a) =>
+                      a instanceof CSSTransition && a.playState === 'running',
+                  ).length,
+            ),
+          )
+          .toBe(0);
+        await ui.evaluate(() => window.scrollTo(0, 0));
+        await expectViewportGate(ui, {
+          ...testInfo,
+          project: {
+            ...testInfo.project,
+            use: { ...testInfo.project.use, viewport: { width, height } },
+          },
         });
+        await expectA11yGate(ui);
+        if (theme === 'light' && (width === 375 || width === 1280)) {
+          await ui.screenshot({
+            path: `/tmp/blank-paper-${width}.png`,
+            fullPage: true,
+          });
+        }
       }
+      await uiContext.close();
     }
-    await uiContext.close();
+  } finally {
+    await query(`const book=await db.customerPriceBook.findUniqueOrThrow({where:{id:${JSON.stringify(viewportDraft.id)}}});
+      const actor=await db.user.findUniqueOrThrow({where:{username:'e2e-owner'}});
+      await admin.discardCustomerPriceBookDraft({priceBookId:book.id,expectedDraftUpdatedAt:book.updatedAt},actor);return true;`);
   }
   expect(errors).toEqual([]);
 });

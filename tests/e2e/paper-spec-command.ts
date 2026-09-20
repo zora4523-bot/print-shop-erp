@@ -54,7 +54,7 @@ async function main() {
           actualWidthMm: 80, actualHeightMm: 115, paperType: paper.name, paperWeightGsm: 160,
           quantity: 2000, crafts: [craft.id], frontFoilColors: ['哑金'], backFoilColors: [],
           foilTechnique: 'FLAT', hasLocalFoil: !full, lamination: 'NONE' }],
-        packagingGroups: [], isSfCollect: true, shipments: [] } }));
+        packagingGroups: [], isSfCollect: true, shipments: [{ shipmentKey: 'shipment', province: '广东', itemQuantities: { item: 2000 } }] } }));
       return { input: result.input, quote: result.quote, processing: result.processing };
     }
     if (command.op === 'full-product') {
