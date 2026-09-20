@@ -74,6 +74,36 @@ describe('collectOrderFormGaps', () => {
     expect(collectOrderFormGaps(input())).toEqual([]);
   });
 
+  it('allows a fully quoted blank paper/specification without a legacy product', () => {
+    const base = input();
+    expect(collectOrderFormGaps(input({ items: [{
+      ...base.items[0], productId: null, pricingRoute: 'STOCK_BLANK',
+      specification: '大号封90×165',
+    }] }))).toEqual([]);
+  });
+
+  it.each(['missing', 'error', 'incomplete', 'stale'] as const)(
+    'still blocks a blank item whose quote is %s', (quoteStatus) => {
+      const base = input();
+      const gaps = collectOrderFormGaps(input({ items: [{
+        ...base.items[0], productId: null, pricingRoute: 'STOCK_BLANK',
+        specification: '大号封90×165', quoteStatus,
+      }] }));
+      expect(gaps.map((gap) => gap.id)).toEqual(['item-0-quote']);
+    },
+  );
+
+  it('keeps missing specification and nonblank catalog admission gaps', () => {
+    const base = input();
+    for (const item of [
+      { ...base.items[0], productId: null, pricingRoute: 'STOCK_BLANK' as const },
+      { ...base.items[0], productId: null, pricingRoute: 'COLOR_PRINT' as const, specification: '大号封90×165' },
+    ]) {
+      expect(collectOrderFormGaps(input({ items: [item] })).map((gap) => gap.id))
+        .toEqual(['item-0-product']);
+    }
+  });
+
   it('points missing catalog/quote facts at the configuration-outside note', () => {
     const gaps = collectOrderFormGaps(
       input({

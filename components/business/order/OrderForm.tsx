@@ -2059,7 +2059,12 @@ export function OrderForm({
       const logisticsInputKey = JSON.stringify(input.logistics);
       setInternalOrderQuote({ inputKey: input.factsKey });
       startQuote(async () => {
-        const response = await quoteInternalCreateOrderAction(input);
+        // Transport failures must use the same stale-response gate and retry UI
+        // as domain errors, rather than escaping the transition to error.tsx.
+        const response = await quoteInternalCreateOrderAction(input).catch(() => ({
+          status: 'error' as const,
+          message: '自动核价请求失败，请检查网络后点击重新报价',
+        }));
         if (
           !isCurrentOrderQuoteResponse({
             gate: internalQuoteRequestGate.current,
@@ -2243,7 +2248,10 @@ export function OrderForm({
       const logisticsInputKey = JSON.stringify(input.logistics);
       setExternalOrderQuote({ inputKey: input.factsKey });
       startExternalQuote(async () => {
-        const response = await quoteExternalCreateOrderAction(input);
+        const response = await quoteExternalCreateOrderAction(input).catch(() => ({
+          status: 'error' as const,
+          message: '自动核价请求失败，请检查网络后点击重新报价',
+        }));
         if (
           !isCurrentOrderQuoteResponse({
             gate: externalQuoteRequestGate.current,

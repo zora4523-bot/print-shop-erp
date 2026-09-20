@@ -1,3 +1,5 @@
+import { OrderItemPricingRoute } from '@/generated/prisma/enums';
+
 export type OrderFormStep = 'customer' | 'items' | 'shipping';
 
 export type OrderFormGap = {
@@ -19,7 +21,9 @@ export type OrderFormQuoteStatus =
 export type OrderFormGapItem = {
   name?: string | null;
   productId?: string | null;
+  pricingRoute?: OrderItemPricingRoute;
   paperType?: string | null;
+  specification?: string | null;
   quantity?: number | null;
   crafts?: string[] | null;
   quoteStatus?: OrderFormQuoteStatus;
@@ -123,7 +127,12 @@ export function collectOrderFormGaps(
         fieldId: `items.${index}.name`,
       });
     }
-    if (!hasText(item.productId) && !manualPricingRequested) {
+    // Blank admission is paper/specification + published price; it no longer
+    // creates a Product. Quote readiness below and server admission still apply.
+    const hasBlankIdentity =
+      item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK &&
+      hasText(item.paperType) && hasText(item.specification);
+    if (!hasText(item.productId) && !hasBlankIdentity && !manualPricingRequested) {
       gaps.push({
         id: `item-${index}-product`,
         step: 'items',
