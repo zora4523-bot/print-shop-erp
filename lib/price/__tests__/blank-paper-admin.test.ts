@@ -201,3 +201,22 @@ it('纸张关联与产品计价身份不一致时拒绝复用', async () => {
   );
   expect(mocks.tx.customerPriceRule.create).not.toHaveBeenCalled();
 });
+
+it('草稿建纸识别名称和规格中的多值身份，避免建立重复纸张', async () => {
+  mocks.tx.material.findMany.mockResolvedValue([
+    { id: 'existing', name: '160g其他纸', specification: '160g测试纸 ／ 珠光', isActive: true, outOfStock: false },
+  ]);
+  await addBlankPaperDraft(input, actor);
+  expect(mocks.tx.material.create).not.toHaveBeenCalled();
+  expect(mocks.tx.product.create.mock.calls[0]?.[0].data.paperMaterialId).toBe('existing');
+  expect(mocks.tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(mocks.tx.material.findMany.mock.invocationCallOrder[0]);
+});
+it('多值身份同时命中两条纸张时拒绝，不以停用消除重复', async () => {
+  mocks.tx.material.findMany.mockResolvedValue([
+    { id: 'one', name: '160g其他纸 / 测试纸', specification: null, isActive: false },
+    { id: 'two', name: '160g测试纸', specification: null, isActive: true },
+  ]);
+  await expect(addBlankPaperDraft(input, actor)).rejects.toThrow('重复记录');
+  expect(mocks.tx.material.create).not.toHaveBeenCalled();
+  expect(mocks.tx.product.create).not.toHaveBeenCalled();
+});

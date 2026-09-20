@@ -24,6 +24,7 @@ import { sortBySearchRelevance } from './search-ranking';
 import { parseCatalogPaperWeight } from './order/catalog-pricing-facts';
 import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
 import { materialStockAlertForCrossing } from './material-stock-alert';
+import { paperIdentityMutationError } from './material-paper-identity';
 
 export { MATERIAL_CATEGORY_LABELS } from './material-labels';
 
@@ -368,6 +369,8 @@ export async function createMaterial(
   const code = await resolveBusinessCode('MATERIAL', data.code);
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
+    const identityError = await paperIdentityMutationError(tx, data);
+    if (identityError) throw new MaterialInvariantError(identityError);
     return tx.material.create({
       data: {
         code,
@@ -410,6 +413,9 @@ export async function updateMaterial(
         '纸张已用于建单产品，名称、克重或分类不可直接修改；请新增纸张并配置价格',
       );
     }
+
+    const identityError = await paperIdentityMutationError(tx, data, target);
+    if (identityError) throw new MaterialInvariantError(identityError);
 
     return tx.material.update({
       where: { id },

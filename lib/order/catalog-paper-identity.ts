@@ -31,3 +31,20 @@ export function catalogPaperPricingFacts(paper: {
   );
   return [...byIdentity.values()];
 }
+
+export function catalogPaperIdentityKeys(paper: {
+  name: string;
+  specification: string | null;
+}): Set<string> {
+  return new Set(catalogPaperPricingFacts(paper).map((fact) =>
+    `${normalizeCatalogPricingText(fact.paperType)}:${fact.paperWeightGsm}`,
+  ));
+}
+
+export function findCatalogPaperIdentityMatches<T extends { name: string; specification: string | null }>(
+  papers: readonly T[],
+  identity: { name: string; specification: string | null },
+): T[] {
+  const keys = catalogPaperIdentityKeys(identity);
+  return papers.filter((paper) => [...catalogPaperIdentityKeys(paper)].some((key) => keys.has(key)));
+}

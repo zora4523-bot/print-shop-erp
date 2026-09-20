@@ -1,3 +1,4 @@
+import { findCatalogPaperIdentityMatches } from '../order/catalog-paper-identity';
 import { BOX_PRICE_RULES, CONFIRMED_BOX_RATES } from './box-packaging-rules';
 import 'server-only';
 
@@ -3643,12 +3644,8 @@ export async function addBlankPaperDraft(
         '纸张名称或克重不完整，请先完善纸张资料',
       );
     const label = `${fact.paperWeightGsm}g${fact.paperType}`;
-    const matches = papers.filter((paper) => {
-      const candidate = blankPaperFact(paper);
-      return (
-        candidate?.paperType === fact.paperType &&
-        candidate.paperWeightGsm === fact.paperWeightGsm
-      );
+    const matches = findCatalogPaperIdentityMatches(papers, {
+      name: label, specification: `${fact.paperWeightGsm}g`,
     });
     if (matches.length > 1)
       throw new CustomerPriceBookAdminError(
