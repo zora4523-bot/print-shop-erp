@@ -16,15 +16,19 @@
 
 ## 当前任务
 
-**2026-09-20：纸张、规格独立管理缩小方案完成第五轮修订，仅文档，未实现、未部署。**
+**2026-09-20：纸张、规格缩小方案批次 1 已实现，本地提交 `7a81c801`，未推送、未部署。**
 
-- [方案](docs/PLAN-纸张规格独立管理.md) 已重写：本期只做空白封无草稿启用适用规格、确定性产品匹配、纸张身份保护、只读规格页及契约测试，保留产品组合页并收紧编辑，采用缩小后的报价对比门禁。启用产品承载适用关系，不新建关系表，不改 schema 或目录读取方。
-- **业主已于 2026-09-20 确认三项**：下架/不适用整体另立后续方案；120g 保持现状不收尾；彩印本期不做。专版业务保持现状。
-- **已确认、约束后续下架方案**：改单新增款式（含不切换目标、原样复制模板）按新准入拦截，模板原款式历史重算不受影响。本期不实现新准入校验。
-- 此前关系禁用、文本准入和重做工单（R2、补充 A、N1–N3、T1、T8、T9）移入后续下架方案；关系回填、两次发布及实际上一版本兼容约束本期不再适用。第三轮末尾交付要求作废，不再沿用“整体获批后才追加决策”的旧待办；上一轮已向 [DECISIONS](DECISIONS.md) 追加业主决定，本轮无新决定、保持原文。
-- 本主题仍待确认仅两项：新纸张是否默认进入专版；历史重算是否忽略产品与物料当前启用状态。见下方「卡住的问题」，不把三项已确认范围再次列为待确认。
-- 第五轮 U1–U6 与小修已逐条核对代码并落实：同格两级筛选、草稿入口共用匹配且不代办启用、多值纸张身份保护、产品页查重/长编码保护、节点归属前置、增量勾选及现行价复核；记录见方案 §10。核对基线 `codex/maindev` @ `b1d65751`；评审文件保留原有未跟踪状态，不修改。仅检查文档链接/锚点、`git diff --check` 与文件范围，未运行应用测试、迁移、服务或数据库查询。
-- 下一步：获准实施时先执行阶段零目标库只读预检（本次未执行），核对六类异常、外键/纸张身份、120g 分桶、现行价及启用产品节点归属；目标库节点不满足时先与业主确定归属规则再实施；下架另立方案并先澄清历史重算状态口径。本次按用户要求不暂存、不提交，由调用方提交四份文档。
+- 按业主提供的 `codex-implement-prompt.md` 本次只做批次 1（PLAN §3 S2/S4/S6），起点 `09dcb022`，工作区起始干净。方案无偏离，不改页面、schema、迁移、目录读取、计价公式或历史快照。
+- [格子纯函数](lib/price/blank-paper-cell.ts)：六种筛选结果、冲突优先、严格规格候选、多值展开定位、停用非逐字行排除、120g 独立状态。输出同格行、候选、冲突和选定行，供后续领域与页面共用。
+- [纸张身份函数](lib/order/catalog-paper-identity.ts) 从报价适配器原样抽出；原位置保留 re-export，维护脚本及现有调用不变。身份保护写操作留给批次 2。
+- [只读预检脚本](scripts/maintenance/preflight-blank-paper-specs.ts) 调用 [共用报告函数](lib/price/blank-paper-preflight.ts)：显式传连接串，READ ONLY / REPEATABLE READ 事务中仅 SELECT，输出库名、六类异常、外键冲突、全部 PAPER 身份重复、节点归属、文本价目命中和 120g 分桶。异常外键行参与同格多行计数；价格文本匹配不沿用身份比较的额外字符归一化。
+- [规格契约](lib/price/__tests__/blank-specification-contract.test.ts) 锁定七处定义，包括万元封/迷你封款式与改单侧 MID、规则侧五种规格、矩阵六列；没有增加彩印常量。
+- 验证（本地 Vitest node，数据库客户端 mock，无目标库连接）：相关 9 文件 **137 通过 / 0 失败 / 0 跳过**；指定 3 契约文件 **31/0/0**；`pnpm test:backup` **23/0/0**。`pnpm check:architecture` 通过（992 模块、3999 依赖、25 项原有长函数债务），`pnpm lint` 通过（0 错误、3 条既有警告），`pnpm typecheck` 与 `git diff --check` 通过。首轮新测试曾因缺连接串提示未明确“显式”而失败，修正文案后原断言通过；未降低门禁或修改既有断言。
+- 实际相关测试命令：`pnpm test run lib/price/__tests__/blank-paper-cell.test.ts lib/price/__tests__/blank-specification-contract.test.ts lib/price/__tests__/blank-paper.test.ts lib/price/__tests__/blank-paper-admin.test.ts lib/order/__tests__/catalog-paper-identity.test.ts lib/order/__tests__/create-order-quote-facts-adapter.test.ts lib/order/__tests__/change-request-catalog-identity.test.ts scripts/maintenance/__tests__`。指定契约命令：`pnpm test run components/business/admin/__tests__/pending-form-contract.test.ts "app/(admin)/__tests__/status-registry-consumers.test.ts" lib/order/__tests__/edit-field-inventory.test.ts`。
+- 验证输出：本机临时 `/tmp/paper-spec-tests.log`、`/tmp/paper-spec-required-tests.log`、`/tmp/paper-spec-lint.log`、`/tmp/paper-spec-typecheck.log`；备份与架构结果在任务工具输出。**未跑全量 Vitest、PostgreSQL 集成、E2E 或目标库预检**，这些不计作已通过；未读写开发库、未操作正在运行的 `:3000`。
+- 操作者设置 `TARGET_DATABASE_URL` 后，在仓库根运行：`pnpm exec tsx scripts/maintenance/preflight-blank-paper-specs.ts --database-url "$TARGET_DATABASE_URL"`。本批次按要求只交付命令，不自行连库；目标库是否满足节点归属尚无结论。
+- 下一批次是 **批次 2 / S4 纸张身份保护**：`createMaterial`、`updateMaterial`、草稿建纸三入口复用身份函数，同一价目写锁；按 S4 保留空身份、非 PAPER、非身份字段编辑和消除重复例外。先获取目标库预检结果；`nodeAssignmentReady=false` 时由业主确定归属规则，禁止自行选节点。
+- 已确认范围继续有效：下架/不适用另立方案、120g 不收尾、彩印本期不做、专版保持现状；改单新增款式含原样复制模板的准入决定属于后续下架方案。本次不改 `DECISIONS.md`。两项既有待确认（新纸张专版默认准入、历史重算状态口径）保留在下方，不代业主选择；本批次无新增业务问题。
 
 **2026-09-19（晚）：CI 提速两步。业主目标「等待时间优先」，全绿等待 61.4 → 24.9（第一步）→ 9.1 分钟（第二步）。**
 - 第一步 PR #24 已合入 `main`（`3cbe6abf`）：`static` / `unit` 拆出先跑、各套件独立作业、**PR 两视口（375×667、1280×800）/ main 六视口**（CLAUDE.md §8.2 已同步）、`push: main` 只跑 `static` + `viewports-main`、纯文档改动不触发、`print-darwin` 拆成带路径过滤的独立 workflow、CI trace 改 `on-first-retry`、`.review/` 每次传而报告只在失败时传、浏览器缓存按需装。`main` 首次 push 运行 `static` 与六视口门禁已通过。
@@ -228,7 +232,7 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 下一步具体指令（给下次 AI）
 
-纸张/规格任务按 [缩小方案](docs/PLAN-纸张规格独立管理.md) 接续：获准实施后先做阶段零只读预检，节点归属不满足时先与业主确定规则；不恢复旧关系表、回填或两次发布待办。下架另立后续方案，先确认历史重算是否忽略产品与物料当前启用状态。
+纸张/规格任务从批次 2（S4 纸张身份保护）接续，批次 1 已提交 `7a81c801`。先由操作者显式选库运行上方只读预检并提供结果；节点归属不满足时先与业主确定。批次 2 共用 `catalogPaperPricingFacts`，覆盖创建/改名/改入 PAPER、移除旧身份、消除重复例外、空身份放行与同一价目写锁；不要提前做批次 3–5 或恢复关系表、下架准入、120g 收尾、彩印。
 
 0. **跳转回执收尾（2026-09-18 晚）**：a) 隔离库跑 `pnpm exec playwright test tests/e2e/sales-functional-review.spec.ts tests/e2e/order-create.spec.ts tests/e2e/order-external-sales-association.spec.ts`，确认保存后 `toHaveURL('/orders/{id}')` 在回执参数被清掉后仍通过；若抖动，把这些断言改成 `toHaveURL(/\/orders\/{id}(\?updated=1)?$/)`。b) 有登录会话时按「当前任务」段落目视两条路径。c) 12px 红字失败提示迁 `ActionNotice` 另起一批（`UrgentToggleForm` / `SfCollectToggleForm` / `FinishOrderButton` / `TaskDisputeAdminPanel` 的 error 分支），不与本轮混。
 
@@ -510,3 +514,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-19（傍晚）：业主授权后由 Claude Code 按 09-17 同一受控流程把生产从 `0e6c009b` 切到 `09f1a1ca`（156 → 158 条迁移，停机约 4 分 40 秒），上线后检查通过；发布记录 `docs/audits/2026-09-19-production-release-09f1a1ca.md`。
 - 2026-09-19（晚）：CI 提速——PR #24（快门禁先出、PR 两视口 / main 六视口等）合入 `main`；PR #25（共享构建 + E2E 分片）全绿 9.1 分钟，全绿等待 61.4 → 9.1 分钟。
 - 2026-09-20：第四轮缩小纸张/规格方案并登记业主决定；第五轮继续落实 U1–U6 与小修，恢复 09-18 待拍板 A/B 原文，DECISIONS 保持上轮内容。累计仅四份文档未提交，未运行应用或数据库操作。
+- 2026-09-20：完成纸张/规格缩小方案批次 1（`7a81c801`）：格子纯函数、身份函数抽取、只读预检与七处规格契约；137 + 31 + 23 项测试通过，未连目标库；批次 2 待接续。
