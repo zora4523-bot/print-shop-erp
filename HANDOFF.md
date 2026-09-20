@@ -16,18 +16,16 @@
 
 ## 当前任务
 
-**2026-09-20：纸张、规格批次 5 工具与用例已提交 `804438af`；S10 真实数据库验收尚未完成。未推送、未部署。**
+**2026-09-20：纸张、规格缩小方案五批次及本地 S10 验收已完成；验收修正提交 `18551e8c`。未推送、未部署。**
 
-- 用户要求继续，起点 `08b12393`，工作区干净；沿用 `codex/maindev`，按实施文件只做批次 5。前四批实现分别为 `7a81c801`、`30b813ca`、`f69fe343`、`9e05a4ee`，本批没有改业务目录、公式、权限、历史快照、schema 或迁移。方案偏离：无。
-- [真实入口对比 CLI](scripts/maintenance/compare-paper-specs.ts) + [采集器](scripts/lib/capture-paper-spec-compatibility.ts) 调用指定源码目录的真实建单目录及 `calculateCreateOrderQuoteFromCatalogInTx`；固定报价时间，REPEATABLE READ READ ONLY，显式目标库，不使用默认 DATABASE_URL。启动前必须设置指向采集源码的 TSX_TSCONFIG_PATH，保证路径别名也同源。输出文件拒绝覆盖。
-- [对比契约](scripts/lib/paper-spec-comparison.ts) 保留目录/禁选状态、规范化事实、完整报价/加工费展示及精确金额字符串，校验三路线及标准/缺价/零价/四位小数覆盖；比较数据与用例摘要，差异非零退出。17 项工具测试含不显式选库拒绝、E2E 夹具隔离守卫和真实 CLI 退出码；这些离线测试不代表真实价格采集已通过。
-- 新增 [E2E](tests/e2e/paper-specifications.spec.ts) 8 例：新增纸张的专版既有口径、新建/重新启用有价或无价、零价/四位小数、其他组合报价不变、异常/重复组合、旧行不改写、无外键空操作与重新启用、长编码名称保存，以及产品组合页新建/改入拒绝重复。夹具自行确保分类并创建独立纸张/产品，真实草稿保存/发布复用领域入口；标准价目基础规则沿用 E2E prepare，不依赖 master-data-flow 分类。隔离库残留跨节点启用产品或竞争草稿时失败，不自动修复。
-- `master-data-flow.spec.ts` 的纸张创建改为名称/克重/复核；无克重 PAPER 领域用例未删。原 [录价 E2E](tests/e2e/blank-paper-pricing.spec.ts) 的页面保存发布、实际建单及历史金额链路继续保留。新夹具中直接安排旧数据、重映射测试价格引用、删除自己创建的测试产品，仅用于一次性隔离库造数，绝不能在开发库执行。
-- 门禁：`pnpm check:architecture` 通过；`pnpm test:backup` 23/0/0；`pnpm lint` 0 错误、3 条既有警告；`pnpm typecheck` 通过。工具目标测试 17/0/0；规定的 pending-form/status-registry/edit-field-inventory 三契约 31/0/0。
-- 离线全量 647 文件、7323 通过 / 0 失败 / 43 跳过。命令：`env -u BACKGROUND_JOBS_MODE DATABASE_URL='postgresql://offline:offline@127.0.0.1:1/erp_test_offline?connect_timeout=1' DOTENV_CONFIG_PATH=/dev/null pnpm test run --exclude '**/*.postgres.test.ts' --exclude 'lib/__tests__/database-session.test.ts'`。另显式排除 28 个 postgres 文件与真实会话测试，不将其视为通过。日志 `/tmp/paper-batch5-{full,final-target,target,backup,lint,typecheck,collection}.log`。
-- **真实验证未做**：当前没有 E2E_DATABASE_URL / E2E_DATABASE_CONFIRM_DATABASE。遵照实施文件只写不跑；`playwright --list` 仅收集三文件 13 例（新增 8 + 既有 5），不是 13 例通过。没有连接或写入开发库，没有操作 :3000，没有更新截图基线。对比工具也没有实际采集改造前后数据，不能写成报价已一致。
-- **下一步是验收，不是批次 6**：配置并明确一次性隔离库及库名确认，按现有 §14 流程准备后跑三个 E2E 文件；另外在明确的只读目标、同数据同时间同价目下，使用真实改造前源码与当前源码采集并比较。命令、用例格式和约束见 [验收操作说明](docs/空白封纸张规格管理-20260913.md)。没有既有历史基线时不得伪造，也不得自行复制仓库或把当前代码作为前后两边。
-- 既有本机只读预检仅代表 2026-09-20 21:22:50+08 的开发库：25 个启用空白封均在 `cat_blank_stock`，nodeAssignmentReady=true；3 组重复纸张身份（冰白纸160、红卡160、艳闪160）未修复，外键冲突 0、120g 产品 2。正式库必须重新预检。无新增业务待拍板；专版默认准入、历史重算状态两项维持现状；下架/不适用、120g 收尾、彩印启用均不在本期。DECISIONS 未改。
+- 用户明确要求开始测试验证。本轮从 `cdfe6d66` 干净工作区开始，沿用 `codex/maindev`。前五批实现为 `7a81c801`、`30b813ca`、`f69fe343`、`9e05a4ee`、`804438af`；本轮只修测试准备并记录真实结果，未改业务代码、公式、权限、历史快照、schema、迁移或 DECISIONS。方案偏离无。
+- 创建本机一次性库 `erp_e2e_paper_1789915500470` / `erp_e2e_paper_1789915668619`，158 条迁移、seed、`test:e2e:prepare` 全部成功。使用 `playwright.release.config.ts` 的 `.next-release` / 3200 服务；没有连接写入开发库或操作 3000。完成后两个自建库已删除、连接信息临时文件已清理，3200 服务已退出，3000 原服务仍在运行。
+- 真实 E2E 三文件：`paper-specifications.spec.ts`、`blank-paper-pricing.spec.ts`、`master-data-flow.spec.ts`，最终 **13/0/0（1.9 分钟）**。覆盖真实纸张/规格操作、价目发布及建单、历史金额、三类异常、无外键/重复/长编码守卫，并包括录价页面六视口明暗、overflow、axe。合成图片上传沿用旧用例中断 PUT + 数据库图纸夹具，不代表 OSS 上传通过；未更新截图基线。
+- 首轮 8 通过/5 失败，第二轮 10 通过/3 失败，均为测试准备问题：旧录价 E2E 的规格先于纸张/克重导致禁用；新真实报价夹具缺发货分配；响应式用例遗留草稿阻挡后续发布。修复为正确选择顺序、完整 2000 件分配、finally 通过正式放弃服务清理自建草稿。没有放宽断言或业务校验；修正后完整重跑通过。
+- **前后真实采集已通过**：[比较工具](scripts/maintenance/compare-paper-specs.ts) 对已有历史工作树 `6e1f9715` 与当前业务源码 `cdfe6d66`，同一隔离库、固定 `2026-09-20T14:51:36.607Z` 采集。历史树比实施起点早，但静态追踪 192 个本地依赖后，已跟踪变更仅涉及报价服务文件；实际调用的共享报价函数和异常类声明文本与 `09dcb022` 一致，差异在未调用内部预览及类型/辅助函数，schema 无变化。未修改该历史树或复制仓库。
+- 比较结果 `equal=true, differences=[]`，退出码0：65个产品、40个纸张分组及禁选状态一致；6例覆盖空白封/专版/彩印标准报价、缺价、零价、四位小数。全部规格 CATALOG，零价0.0000、四位价0.1234、缺价人工原因保持一致，完整报价分项/小计/展示均一致。摘要和解释见 [实际验收记录](docs/空白封纸张规格管理-20260913.md)。本地 `/tmp/paper-acceptance-{before,after,cases}.json`，不提交采集数据。
+- 门禁：架构/typecheck/lint通过（lint 3条既有警告），工具17/0/0、指定契约31/0/0、备份23/0/0；离线全量647文件7323通过/0失败/43跳过，另排除28个postgres文件与真实会话测试。真实E2E通过不表示被排除的单测也已运行。日志 `/tmp/paper-acceptance-{e2e-3,compare,architecture,types,lint,tools,contracts,backup,offline}.log`。构建有2条既有动态文件追踪警告，无构建失败。
+- 本期实现与本地验收已闭环，不再等待隔离库配置。若后续安排发布，正式库仍须重新只读预检；开发库当时25个启用空白封同节点、3组重复纸张身份未修复等历史结果不能代替正式库。专版默认准入、历史重算状态待确认项维持现状；下架/不适用、120g收尾、彩印启用均不在本期，无新增业务待拍板。
 
 **2026-09-19（晚）：CI 提速两步。业主目标「等待时间优先」，全绿等待 61.4 → 24.9（第一步）→ 9.1 分钟（第二步）。**
 - 第一步 PR #24 已合入 `main`（`3cbe6abf`）：`static` / `unit` 拆出先跑、各套件独立作业、**PR 两视口（375×667、1280×800）/ main 六视口**（CLAUDE.md §8.2 已同步）、`push: main` 只跑 `static` + `viewports-main`、纯文档改动不触发、`print-darwin` 拆成带路径过滤的独立 workflow、CI trace 改 `on-first-retry`、`.review/` 每次传而报告只在失败时传、浏览器缓存按需装。`main` 首次 push 运行 `static` 与六视口门禁已通过。
