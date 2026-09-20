@@ -16,19 +16,18 @@
 
 ## 当前任务
 
-**2026-09-20：纸张、规格缩小方案批次 1 已实现，本地提交 `7a81c801`，未推送、未部署。**
+**2026-09-20：纸张、规格缩小方案批次 2 已实现，本地提交 `30b813ca`，未推送、未部署。**
 
-- 按业主提供的 `codex-implement-prompt.md` 本次只做批次 1（PLAN §3 S2/S4/S6），起点 `09dcb022`，工作区起始干净。方案无偏离，不改页面、schema、迁移、目录读取、计价公式或历史快照。
-- [格子纯函数](lib/price/blank-paper-cell.ts)：六种筛选结果、冲突优先、严格规格候选、多值展开定位、停用非逐字行排除、120g 独立状态。输出同格行、候选、冲突和选定行，供后续领域与页面共用。
-- [纸张身份函数](lib/order/catalog-paper-identity.ts) 从报价适配器原样抽出；原位置保留 re-export，维护脚本及现有调用不变。身份保护写操作留给批次 2。
-- [只读预检脚本](scripts/maintenance/preflight-blank-paper-specs.ts) 调用 [共用报告函数](lib/price/blank-paper-preflight.ts)：显式传连接串，READ ONLY / REPEATABLE READ 事务中仅 SELECT，输出库名、六类异常、外键冲突、全部 PAPER 身份重复、节点归属、文本价目命中和 120g 分桶。异常外键行参与同格多行计数；价格文本匹配不沿用身份比较的额外字符归一化。
-- [规格契约](lib/price/__tests__/blank-specification-contract.test.ts) 锁定七处定义，包括万元封/迷你封款式与改单侧 MID、规则侧五种规格、矩阵六列；没有增加彩印常量。
-- 验证（本地 Vitest node，数据库客户端 mock，无目标库连接）：相关 9 文件 **137 通过 / 0 失败 / 0 跳过**；指定 3 契约文件 **31/0/0**；`pnpm test:backup` **23/0/0**。`pnpm check:architecture` 通过（992 模块、3999 依赖、25 项原有长函数债务），`pnpm lint` 通过（0 错误、3 条既有警告），`pnpm typecheck` 与 `git diff --check` 通过。首轮新测试曾因缺连接串提示未明确“显式”而失败，修正文案后原断言通过；未降低门禁或修改既有断言。
-- 实际相关测试命令：`pnpm test run lib/price/__tests__/blank-paper-cell.test.ts lib/price/__tests__/blank-specification-contract.test.ts lib/price/__tests__/blank-paper.test.ts lib/price/__tests__/blank-paper-admin.test.ts lib/order/__tests__/catalog-paper-identity.test.ts lib/order/__tests__/create-order-quote-facts-adapter.test.ts lib/order/__tests__/change-request-catalog-identity.test.ts scripts/maintenance/__tests__`。指定契约命令：`pnpm test run components/business/admin/__tests__/pending-form-contract.test.ts "app/(admin)/__tests__/status-registry-consumers.test.ts" lib/order/__tests__/edit-field-inventory.test.ts`。
-- 验证输出：本机临时 `/tmp/paper-spec-tests.log`、`/tmp/paper-spec-required-tests.log`、`/tmp/paper-spec-lint.log`、`/tmp/paper-spec-typecheck.log`；备份与架构结果在任务工具输出。**未跑全量 Vitest、PostgreSQL 集成、E2E 或目标库预检**，这些不计作已通过；未读写开发库、未操作正在运行的 `:3000`。
-- 操作者设置 `TARGET_DATABASE_URL` 后，在仓库根运行：`pnpm exec tsx scripts/maintenance/preflight-blank-paper-specs.ts --database-url "$TARGET_DATABASE_URL"`。本批次按要求只交付命令，不自行连库；目标库是否满足节点归属尚无结论。
-- 下一批次是 **批次 2 / S4 纸张身份保护**：`createMaterial`、`updateMaterial`、草稿建纸三入口复用身份函数，同一价目写锁；按 S4 保留空身份、非 PAPER、非身份字段编辑和消除重复例外。先获取目标库预检结果；`nodeAssignmentReady=false` 时由业主确定归属规则，禁止自行选节点。
-- 已确认范围继续有效：下架/不适用另立方案、120g 不收尾、彩印本期不做、专版保持现状；改单新增款式含原样复制模板的准入决定属于后续下架方案。本次不改 `DECISIONS.md`。两项既有待确认（新纸张专版默认准入、历史重算状态口径）保留在下方，不代业主选择；本批次无新增业务问题。
+- 用户授权继续任务并要求符合编码规范。本批次起点 `222b183e`、工作区干净；仅实现 PLAN §4 S4。批次 1 已提交 `7a81c801`（格子纯函数、身份函数抽取、预检脚本和七处规格契约）。
+- [共享身份模块](lib/order/catalog-paper-identity.ts) 增加身份键集合和多值匹配；[身份保护](lib/material-paper-identity.ts) 由 [物料创建/更新](lib/material.ts) 在既有价目写锁内调用；[草稿建纸](lib/price/customer-price-book-admin.ts) 在原写锁内使用相同多值匹配。没有新增权限、改 schema/迁移、目录读取、计价公式或历史快照。
+- 创建 PAPER 对全部纸张（含停用）查重；更新仅在身份集合或分类变化时检查，新身份集合存在新增或改入 PAPER 时排除自身查重。被移除的旧身份仍被空白封/彩印产品文本或当前/计划生效规则引用时拒绝；引用规则无 `effectiveFrom` 上界，包含计划发布，排除过期/未启用价目及未启用规则。
+- 保留空身份/无克重验收纸张、非 PAPER、无关字段编辑；另有 PAPER 承载旧身份时允许消除重复，原有物料外键保护优先且不变。草稿保留单一已有纸张复用语义，多值查重属于 S4 有意改变；未改既有断言，仅新增测试和所需 mock。
+- 验证：目标 4 文件 **77 通过 / 0 失败 / 0 跳过**，指定 3 契约文件 **31/0/0**，备份 **23/0/0**；非数据库回归 640 文件 **7228 通过 / 0 失败 / 43 跳过**，之后补的 3 个边界用例已另跑并包含在目标 77 项中。架构通过（993 模块、4002 依赖、25 项既有长函数债务）；lint 0 错误/3 条既有警告、typecheck、diff 检查通过。方案偏离：无。
+- 实际命令：`pnpm test run lib/__tests__/material.test.ts lib/__tests__/material-paper-identity.test.ts lib/price/__tests__/blank-paper-admin.test.ts lib/order/__tests__/catalog-paper-identity.test.ts`；指定契约为 `pnpm test run components/business/admin/__tests__/pending-form-contract.test.ts "app/(admin)/__tests__/status-registry-consumers.test.ts" lib/order/__tests__/edit-field-inventory.test.ts`；静态门禁为 `pnpm check:architecture && pnpm test:backup && pnpm lint && pnpm typecheck`。
+- 非数据库回归命令：`env -u BACKGROUND_JOBS_MODE DATABASE_URL='postgresql://offline:offline@127.0.0.1:1/erp_test_offline?connect_timeout=1' DOTENV_CONFIG_PATH=/dev/null pnpm test run --exclude '**/*.postgres.test.ts' --exclude 'lib/__tests__/database-session.test.ts'`。显式排除 28 个 PostgreSQL 文件和真实数据库会话测试；43 个跳过不计通过，也不把本次记作完整数据库集成验收。没有连接目标库、没有读写开发库、没有运行 E2E 或操作 `:3000`。
+- 本机临时证据：`/tmp/paper-batch2-target.log`、`/tmp/paper-batch2-offline.log`、`/tmp/paper-batch2-contracts.log`、`/tmp/paper-batch2-backup.log`、`/tmp/paper-batch2-lint.log`、`/tmp/paper-batch2-typecheck.log`。
+- **下一步批次 3**：抽草稿领域 helper，新增无草稿启用规格，抽 `setProductActiveInTx`，实现 S1/S2/S5 与 S8 产品身份守卫。开始节点归属写操作前，操作者设置 `TARGET_DATABASE_URL` 并运行 `pnpm exec tsx scripts/maintenance/preflight-blank-paper-specs.ts --database-url "$TARGET_DATABASE_URL"`，提供结果；`nodeAssignmentReady=false` 时先由业主确定归属规则，不自行选节点。本批次身份保护与节点无关，因此可在不连接目标库的情况下完成。
+- 本批次无新增业务问题。既有待确认的专版默认准入、历史重算状态口径继续保留；下架/不适用另立方案，120g 不收尾，彩印本期不做，专版保持现状。未修改 `DECISIONS.md`。
 
 **2026-09-19（晚）：CI 提速两步。业主目标「等待时间优先」，全绿等待 61.4 → 24.9（第一步）→ 9.1 分钟（第二步）。**
 - 第一步 PR #24 已合入 `main`（`3cbe6abf`）：`static` / `unit` 拆出先跑、各套件独立作业、**PR 两视口（375×667、1280×800）/ main 六视口**（CLAUDE.md §8.2 已同步）、`push: main` 只跑 `static` + `viewports-main`、纯文档改动不触发、`print-darwin` 拆成带路径过滤的独立 workflow、CI trace 改 `on-first-retry`、`.review/` 每次传而报告只在失败时传、浏览器缓存按需装。`main` 首次 push 运行 `static` 与六视口门禁已通过。
@@ -232,7 +231,7 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 下一步具体指令（给下次 AI）
 
-纸张/规格任务从批次 2（S4 纸张身份保护）接续，批次 1 已提交 `7a81c801`。先由操作者显式选库运行上方只读预检并提供结果；节点归属不满足时先与业主确定。批次 2 共用 `catalogPaperPricingFacts`，覆盖创建/改名/改入 PAPER、移除旧身份、消除重复例外、空身份放行与同一价目写锁；不要提前做批次 3–5 或恢复关系表、下架准入、120g 收尾、彩印。
+纸张/规格任务从批次 3 接续，批次 2 已提交 `30b813ca`。先获得目标库预检结果，节点归属异常须业主确定后再做相关写操作；按 S1/S2/S5 抽事务 helper、新增空白封启用入口，并完成 S8 产品身份守卫。保持草稿不代办重新启用及外键补写的现有边界，不提前做页面、下架、120g 收尾或彩印。
 
 0. **跳转回执收尾（2026-09-18 晚）**：a) 隔离库跑 `pnpm exec playwright test tests/e2e/sales-functional-review.spec.ts tests/e2e/order-create.spec.ts tests/e2e/order-external-sales-association.spec.ts`，确认保存后 `toHaveURL('/orders/{id}')` 在回执参数被清掉后仍通过；若抖动，把这些断言改成 `toHaveURL(/\/orders\/{id}(\?updated=1)?$/)`。b) 有登录会话时按「当前任务」段落目视两条路径。c) 12px 红字失败提示迁 `ActionNotice` 另起一批（`UrgentToggleForm` / `SfCollectToggleForm` / `FinishOrderButton` / `TaskDisputeAdminPanel` 的 error 分支），不与本轮混。
 
@@ -515,3 +514,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-19（晚）：CI 提速——PR #24（快门禁先出、PR 两视口 / main 六视口等）合入 `main`；PR #25（共享构建 + E2E 分片）全绿 9.1 分钟，全绿等待 61.4 → 9.1 分钟。
 - 2026-09-20：第四轮缩小纸张/规格方案并登记业主决定；第五轮继续落实 U1–U6 与小修，恢复 09-18 待拍板 A/B 原文，DECISIONS 保持上轮内容。累计仅四份文档未提交，未运行应用或数据库操作。
 - 2026-09-20：完成纸张/规格缩小方案批次 1（`7a81c801`）：格子纯函数、身份函数抽取、只读预检与七处规格契约；137 + 31 + 23 项测试通过，未连目标库；批次 2 待接续。
+- 2026-09-20：完成纸张/规格批次 2（`30b813ca`）：三入口共用多值身份，增加查重及文本引用保护；目标 77/0/0、非数据库回归 7228/0/43，批次 3 待目标库预检。
