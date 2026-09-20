@@ -830,6 +830,9 @@ function renderBlank(
     byPaper.set(paper, [...(byPaper.get(paper) ?? []), rule]);
   }
   for (const paper of workspace.blankPapers ?? []) {
+    // Rules already contribute their rows. Keep stopped materials in the full
+    // catalog for duplicate checks, without adding unpriced historical rows.
+    if (!paper.isActive) continue;
     if (!isRetiredPaper({ paperType: paper.label }) && !byPaper.has(paper.label)) byPaper.set(paper.label, []);
   }
   const draft = workspace.sources.find((source) => source.purpose === 'PROCESSING')?.draft;

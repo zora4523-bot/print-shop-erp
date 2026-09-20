@@ -96,7 +96,7 @@ export type CustomerPriceSectionWorkspaceDto = {
   sources: CustomerPriceSectionWorkspaceStateDto[];
   rules: CustomerPriceSectionRuleDto[];
   shippingWeightPolicy: CustomerPriceShippingWeightPolicyDto | null;
-  blankPapers?: Array<{ id: string; label: string; available: boolean; issue: string | null }>;
+  blankPapers?: Array<{ id: string; label: string; isActive: boolean; available: boolean; issue: string | null }>;
 };
 
 export type CustomerPriceSectionProjectionSource = {
@@ -420,6 +420,7 @@ export async function getCustomerPriceSectionWorkspace(
         blankPapers: (await db.material.findMany({ where: { category: 'PAPER' } })).map((paper) => {
           const fact = blankPaperFact(paper);
           return { id: paper.id, label: fact ? `${fact.paperWeightGsm}g${fact.paperType}` : paper.name,
+            isActive: paper.isActive,
             available: paper.isActive && !paper.outOfStock && fact !== null,
             issue: !fact ? '纸张名称或克重不完整' : !paper.isActive ? '纸张已停用' : paper.outOfStock ? '纸张缺货' : null };
         }),
