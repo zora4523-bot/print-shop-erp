@@ -36,10 +36,10 @@ async function confirmState(page: Page, action: string, beforeConfirm?: () => Pr
 
 async function createPaper(page: Page, name: string) {
   await page.goto(`${papers}/new`);
-  await page.getByLabel('物料名称', { exact: true }).fill(name);
-  await page.getByLabel('规格（选填）', { exact: true }).fill('验收专用 210×297');
-  await page.getByLabel('单位', { exact: true }).fill('张');
-  await page.getByRole('button', { name: '创建物料', exact: true }).click();
+  await page.getByLabel('纸张名称', { exact: true }).fill(name);
+  await page.getByLabel('克重（g）', { exact: true }).fill('160');
+  await page.getByRole('button', { name: '复核新增纸张', exact: true }).click();
+  await page.getByRole('button', { name: '新增纸张', exact: true }).click();
   return createdId(page, papers);
 }
 
