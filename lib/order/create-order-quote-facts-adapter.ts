@@ -36,6 +36,9 @@ import {
   resolveOrderItemFoilSides,
   type NewOrderPricingRoute,
 } from './pricing-route';
+import { catalogPaperPricingFacts } from './catalog-paper-identity';
+
+export { catalogPaperPricingFacts } from './catalog-paper-identity';
 
 type DecimalLike = number | string | { toString(): string };
 
@@ -252,30 +255,6 @@ function positiveDimension(
     return fail('INVALID_ITEM_FACTS', `款式 ${itemKey} 的${label}无效`);
   }
   return parsed.toNumber();
-}
-
-export function catalogPaperPricingFacts(paper: {
-  name: string;
-  specification: string | null;
-}): CanonicalCreateOrderPaperFact[] {
-  const configuredWeight =
-    parseCatalogPaperWeight(paper.specification) ??
-    parseCatalogPaperWeight(paper.name);
-  if (configuredWeight === null) return [];
-  const facts = [paper.name, paper.specification]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .flatMap(catalogPricingFactChoices)
-    .flatMap((choice) => {
-      const fact = canonicalizeCreateOrderPaperFact(choice, configuredWeight);
-      return fact ? [fact] : [];
-    });
-  const byIdentity = new Map(
-    facts.map((fact) => [
-      `${normalizeCatalogPricingText(fact.paperType)}:${fact.paperWeightGsm}`,
-      fact,
-    ]),
-  );
-  return [...byIdentity.values()];
 }
 
 function samePaperType(left: string, right: string): boolean {
