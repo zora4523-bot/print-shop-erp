@@ -60,7 +60,8 @@ const success: WorkbenchQuoteResult = {
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(async () => {
-  await commands.setReducedMotion(true);
+  await commands.setReducedMotion(false);
+  expect(matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(false);
   vi.clearAllMocks();
   mocks.quote.mockResolvedValue(success);
   document.documentElement.lang = 'zh-CN';
@@ -438,4 +439,14 @@ it('resolves duplicated products only after explicit selection and never silentl
     .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.quantity)
     .toBe(500);
   expect(mocks.quote.mock.calls.at(-1)?.[0].item.productId).toBe('custom2');
+});
+
+it('also supports reduced-motion without making it the normal-animation test prerequisite', async () => {
+  await commands.setReducedMotion(true);
+  await page.viewport(393, 852);
+  render();
+  await page.getByRole('button', { name: '话术应对', exact: true }).click();
+  await waitForStableLayout(host);
+  geometry(393);
+  await expect.element(page.getByText('17 个应对场景')).toBeVisible();
 });
