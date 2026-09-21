@@ -235,3 +235,29 @@ describe('dead-code candidate ledger', () => {
     expect(() => deadCodeCandidateIds({ ...report(), schemaVersion: 2 })).toThrow('Unsupported');
   });
 });
+
+describe('platform-specific scanner identities', () => {
+  const candidate = JSON.stringify(['ts-prune', 'component.tsx', 'Props']);
+  const makeReport = (candidates: string[]) => ({ schemaVersion: 1, tools: {
+    knip: { issues: [] }, tsPrune: { candidates }, madge: { circular: [] },
+  } });
+  const baseline = { schemaVersion: 1, candidates: [candidate], platformOmissions: { linux: [candidate] } };
+
+  it('compares exact platform inventories without allowing new or stale entries', () => {
+    const present = makeReport(['component.tsx:1 - Props']);
+    const absent = makeReport([]);
+    expect(compareDeadCodeBaseline(absent, baseline, 'linux')).toEqual({ added: [], resolved: [] });
+    expect(compareDeadCodeBaseline(present, baseline, 'darwin')).toEqual({ added: [], resolved: [] });
+    expect(compareDeadCodeBaseline(present, baseline, 'linux').added).toEqual([candidate]);
+    expect(compareDeadCodeBaseline(absent, baseline, 'darwin').resolved).toEqual([candidate]);
+    expect(compareDeadCodeBaseline(makeReport(['new.ts:1 - newExport']), baseline, 'linux').added).toHaveLength(1);
+  });
+
+  it('rejects unknown identities and malformed platform inventories', () => {
+    for (const omissions of [['unknown'], [candidate, candidate], 'all']) {
+      expect(() => compareDeadCodeBaseline(makeReport([]), {
+        ...baseline, platformOmissions: { linux: omissions },
+      }, 'linux')).toThrow('Invalid dead-code platform baseline');
+    }
+  });
+});

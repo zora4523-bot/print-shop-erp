@@ -101,3 +101,13 @@ pnpm exec playwright test --config=playwright.release.config.ts --workers=1 \
 本机日志 `/tmp/legacy-cleanup-*.log`；扫描报告 `.review/dead.json`；浏览器报告 `.review/playwright-release.json`。
 验证产物不提交。真实通知、OSS 上传及 durable worker 不在本轮范围；通知/CDR 使用 mock，后台任务使用 inline。
 没有推送、部署或修改日常价目。
+
+## PR #26 合并检查补正
+
+2026-09-21，候选 dc016445 的首次远程 CI 静态检查发现：Linux 的 ts-prune 比 macOS 少报 38 个导出候选；knip、madge 无差异。macOS 日常工作区与 `git archive HEAD` 干净检出均报告 711 个 ts-prune 候选，远端 Linux 报告 673 个。修改 TypeScript 文件大小写检测的单点实验未消除差异，不能将这些条目宣称为已删除或确实无引用。
+
+这些条目集中在 OrderFormB 导出及规则页面 Props：如 OrderItemCraftFieldsProps、CustomerPricingDedicatedSectionProps 均有同模块消费者，OrderFoilSwatchTone 还通过 index.ts 重导出。未删除任何实现。基线新增精确的 Linux platformOmissions 清单，仅记录本次 CI 报告中 38 个已复现差异；两平台各自仍要求完全相等，遗漏重新出现、新候选及过期基线继续报错，不放宽门禁。工具内部跨平台差异的进一步定位留待工具维护；记录用于复现，不代表死代码确认。
+
+同时按已批准的默认价格界面更新旧单测：已取消历史记录不再展示，计划改期与取消入口继续验证。Linux CI 下载报告及本地完整报告分别与对应基线比较均为 added/resolved 空集。新增回归覆盖两平台精确比较、新增/消失/重新出现和非法清单。
+
+本轮本地验证：扫描器与价格面板 15 项测试通过、改动文件 ESLint 通过、typecheck 通过；日志 `/tmp/pr26-fixes.log`、`/tmp/pr26-types.log`。远程 CI 将在推送后按新候选完整重跑。

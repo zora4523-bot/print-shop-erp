@@ -1091,5 +1091,47 @@
     "[\"ts-prune\",\"lib/workbench/quote.ts\",\"WorkbenchQuoteInput\"]",
     "[\"ts-prune\",\"lib/worker-portal.ts\",\"WORKER_SALARY_PAGE_SIZE\"]",
     "[\"ts-prune\",\"lib/worker-portal.ts\",\"WorkerActor\"]"
-  ]
+  ],
+  "platformOmissions": {
+    "linux": [
+      "[\"ts-prune\",\"components/business/order/order-form-b/OrderItemFields.tsx\",\"OrderItemCraftFieldsProps\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/OrderItemFields.tsx\",\"OrderItemMaterialFieldsProps\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderFoilSwatchOption\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderFoilSwatchPickerProps\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderFoilSwatchTone\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderFormB\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderFormBErrors\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderFormBProps\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewArtwork\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewCharge\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewContent\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewContentProps\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewDialog\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewDialogProps\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewFact\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewItem\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionReviewReceiver\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionSuccess\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionSuccessAction\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"OrderSubmissionSuccessProps\"]",
+      "[\"ts-prune\",\"components/business/order/order-form-b/index.ts\",\"replacePendingDesignKind\"]",
+      "[\"ts-prune\",\"components/business/rules/catalog/CraftCatalogPages.tsx\",\"CraftCatalogDetailProps\"]",
+      "[\"ts-prune\",\"components/business/rules/catalog/ProductCatalogPages.tsx\",\"ProductCatalogDetailProps\"]",
+      "[\"ts-prune\",\"components/business/rules/catalog/ProductCategoryCatalogPages.tsx\",\"ProductCategoryCatalogDetailProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingCreateDraftDialog.tsx\",\"CustomerPricingCreateDraftDialogProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingDedicatedSection.tsx\",\"CustomerPricingDedicatedSectionProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionDraftForm.tsx\",\"CustomerPricingSectionDraftFormProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerAddsPricingSectionViewProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerBagPricingFields\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerBlankPricingSectionViewProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerCartonPricingFields\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerMachinePricingSectionViewProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerPrintPricingSectionViewProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerShipPricingSectionViewProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerShippingPricingFields\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerShippingUnitWeightRow\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/CustomerPricingSectionViews.tsx\",\"CustomerTiersPricingSectionViewProps\"]",
+      "[\"ts-prune\",\"components/business/rules/pricing/PriceDataBoundary.tsx\",\"PriceDataBoundaryProps\"]"
+    ]
+  }
 }
