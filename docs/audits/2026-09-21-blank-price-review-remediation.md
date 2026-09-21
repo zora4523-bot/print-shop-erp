@@ -78,3 +78,23 @@ pnpm exec playwright test --config=playwright.release.config.ts --project=chromi
 最终全量单测 `/tmp/blank-review-full-unit-final2.log`；完整组件 `/tmp/blank-review-full-browser.log`；真实迁移 `/tmp/blank-review-real-cutover.log`；八文件 E2E `/tmp/blank-review-e2e-final.log`；新增保护 `/tmp/blank-review-e2e-target4.log` 与用料最终 `/tmp/blank-review-e2e-bom-final.log`。复核后的 typecheck、lint、架构、备份及死代码日志均在 `/tmp/blank-review-*.log`。JSON 单测报告 `.review/unit-tests.json` 包含迁移实际执行结果；截图位于 `test-results/release/`，均不入 Git。
 
 边界：无远端 CI / 生产存量验收；通知/CDR mock、后台任务 inline，未验证真实消息、OSS 上传或 durable worker。浏览器回归有页面离开导致的服务器 `destination stream closed early` 日志，未改这些无关流式导航路径，当前交互断言通过；新增用料用例另外要求 pageerror 为空。正式发布仍按部署指南独立放行。
+
+
+## 2026-09-21 复审补测：ADD 目标空白封身份
+
+基线 `ca86a46e`，`codex/maindev`，开始时工作区及暂存区干净。本轮仅增加领域回归测试与任务记录，不修改生产逻辑、schema、迁移、超时或包装完整性校验。
+
+- 复审指出的覆盖缺口成立：此前 ADD 只验证目标身份报文及缺包装时拒绝保存，没有成功审批写库参数的回归断言。
+- 新用例以大号封模板（0.13 元）新增中号封（0.12 元）300 个，断言投影身份的规格、MID 计价组、结构、80×115 尺寸与空 productId；断言 `orderItem.create` 写入目标规格及 36.00 元，而非模板的 39.00 元。
+- 报价服务替身根据真实传入的规格计算金额；数据库为 mock，测试覆盖审批领域链路及写库参数，不宣称真实数据库落库或完整 ADD 浏览器成功链路。现有未分袋金额待定拒绝保存边界保持。
+- 负控：临时将 ADD 投影改为仅取 template，新用例失败（纯引擎金额与持久化金额不一致）；随后完整恢复生产文件，确认无生产代码差异。日志 `/tmp/blank-add-mutation.log`。
+
+实际验证（当前基线 + 本节描述的测试增量，无数据库连接）：
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm exec vitest run lib/order/__tests__/change-request.test.ts` | 1 文件，161 通过，0 失败/跳过；`/tmp/blank-add-tests.log` |
+| `pnpm typecheck` | 退出 0；`/tmp/blank-add-types.log` |
+| `pnpm exec eslint lib/order/__tests__/change-request.test.ts` | 退出 0；`/tmp/blank-add-lint.log` |
+
+本轮为测试覆盖补充，未重复上一轮全量、数据库及 E2E 门禁，不将之前结果标为本轮重跑。复审报告的两个 PostgreSQL 迁移用例并发超时仍是待处理的稳定性风险：源码确认会创建/删除 schema，本轮未对日常库执行；“单跑 419ms 通过”为复审提供的证据，不是本轮结果。迁移守卫、BOM 降级和差异渲染的后续复审结论尚未收到，不能据此宣称整轮审查结束。

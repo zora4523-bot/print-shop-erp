@@ -5854,6 +5854,63 @@ describe('reviewOrderChangeRequest', () => {
     expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
   });
 
+  it('ADD 空白封目标身份决定投影规格及写库金额，不继承模板', async () => {
+    const value = request({
+      order: { ...request().order, status: OrderStatus.DRAFT, items: [item({
+        pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
+        specification: '大号封', pricingGroup: 'LARGE', hasLocalFoil: true,
+        actualWidthMm: new Decimal(90), actualHeightMm: new Decimal(170),
+        unitPrice: new Decimal('0.13'), subtotal: new Decimal('130'),
+      })] },
+      proposedChanges: { items: [{
+        operation: 'ADD', templateItemId: 'item-1', name: '目标中号封', quantity: 300,
+        targetBlankIdentity: {
+          paperType: '珠光艳闪', paperWeightGsm: 160, specification: '中号封80×115',
+        },
+      }] },
+    });
+    locate(value);
+    // 隔离目录/包装服务，只按实际收到的规格返回不同价格，避免固定金额掩盖投影回归。
+    mocks.calculate.mockImplementation(async (_tx: unknown, args: ServiceArgs) => {
+      const result = pureResult(args, { plateApplies: false });
+      result.processing.items = args.facts.items.map((fact, index) => {
+        const rate = fact.specification === '中号封80×115' ? '0.12' : '0.13';
+        return { ...result.processing.items[index]!, suggestedUnitPrice: rate,
+          suggestedSubtotal: new Decimal(rate).times(fact.quantity).toFixed(2) };
+      });
+      result.quote.items = result.quote.items.map((quoted, index) => {
+        const priced = result.processing.items[index]!;
+        return { ...quoted, unitPrice: priced.suggestedUnitPrice,
+          amount: priced.suggestedSubtotal, processingAmount: priced.suggestedSubtotal,
+          knownAmount: priced.suggestedSubtotal };
+      });
+      result.quote.total = result.quote.knownTotal = result.quote.items.reduce(
+        (sum, quoted) => sum.plus(quoted.amount), new Decimal(result.quote.order.knownAmount),
+      ).toFixed(2);
+      return result;
+    });
+    mocks.db.orderItem.findMany.mockResolvedValue([
+      { subtotal: new Decimal('130') }, { subtotal: new Decimal('36') },
+    ]);
+    await reviewOrderChangeRequest({
+      requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      expectedPriceRevision: 5, expectedQuoteToken: quoteToken,
+    }, admin);
+    const args = mocks.calculate.mock.calls[0]![1] as ServiceArgs;
+    expect(args.facts.items[1]).toMatchObject({
+      itemKey: 'ADD:1', productId: null, specification: '中号封80×115',
+      pricingGroup: 'MID', productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+      actualWidthMm: 80, actualHeightMm: 115, quantity: 300,
+    });
+    expect(mocks.db.orderItem.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      data: expect.objectContaining({
+        name: '目标中号封', productId: null, specification: '中号封80×115',
+        pricingGroup: 'MID', actualWidthMm: 80, actualHeightMm: 115,
+        unitPrice: '0.12', subtotal: '36.00', suggestedSubtotal: '36.00',
+      }),
+    }));
+  });
+
   it('新增款式进入整单投影，不复制旧任务/人员分配', async () => {
     const value = request({ proposedChanges: { items: [{
       operation: 'ADD', templateItemId: 'item-1', name: '红包 B', quantity: 300,
