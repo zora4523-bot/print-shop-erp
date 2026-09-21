@@ -1152,6 +1152,8 @@ model ProductionOperationSource {
 
 // 每次扫码都追加一行。报工人、工价版本和金额快照同行锁定；
 // 更正只能追加一条 REVERSAL，数据库触发器禁止 UPDATE / DELETE。
+// INSERT REPORT is guarded against the parent operation's current order generation.
+// Historical financial corrections retain their existing anchor/settlement guards.
 model ProductionReport {
   id                   String                    @id @default(cuid())
   operationId          String
@@ -1271,6 +1273,7 @@ model ProductionProgressStep {
 
 // 无计件进度的每次扫码也是只追加事实。质量数量只记录，
 // 没有 rate / amount / priceBook 字段，因此不可能被计入工资。
+// INSERT is guarded against the parent step's current order generation.
 model ProductionProgressReport {
   id             String   @id @default(cuid())
   progressStepId String

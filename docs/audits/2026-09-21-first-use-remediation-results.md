@@ -5,7 +5,7 @@
 - 作业书：[整改指令](2026-09-21-first-use-remediation-brief.md)；配套[审查](2026-09-21-first-use-readiness.md)。
 - 起点 `1021a604`，分支 `codex/maindev`；比较基线只用 `origin/main`（`ef6fa012`）。
 - 起始工作区只有上述两份未跟踪文档；它们不属于本次新增内容，保留原样。
-- 未连接生产、未 SSH、未推送、未部署、未 seed、未发布价格或工价。
+- 未连接生产、未 SSH、未推送、未部署、未运行业务 seed 脚本、未在业务库发布价格或工价。测试夹具仅写入隔离测试库。
 
 ## 批次进度
 
@@ -42,9 +42,9 @@
 
 本次完整门禁：`pnpm check:architecture` 原命令通过；`pnpm test:backup` 23/23；`pnpm lint` 0 错误/3 既有警告；`pnpm typecheck` 通过；全量 `pnpm test run` **684 文件通过/4 既有条件跳过，7,487 项通过/54 既有跳过，0 失败**。仅用 dotenv 解析本地 `.env` 的 DATABASE_URL，未 source 整份环境，并确认 localhost 后运行；日志在 `/tmp/first-use-direct/b1-{architecture,backup,lint,types,unit}.log`。相对作业书 7,484 基线，新增的三条回归全部通过。
 
-### 批次 2、4、3、7、6、5
+### 历史暂停记录（已由下文继续执行记录取代）
 
-尚未修改。预读批次 4.1 发现下述实质前提冲突，按作业书 §1.6、§11 停止后续实现；先独立提交已经完整验证的批次 1。B 类选项维持下文，不改相关业务代码。
+当时尚未修改。预读批次 4.1 发现下述实质前提冲突，按作业书 §1.6、§11 停止后续实现；先独立提交已经完整验证的批次 1。B 类选项维持下文，不改相关业务代码。
 
 ## 与作业书事实不同的发现
 
@@ -55,7 +55,7 @@
 - 计件工序详情则已经调用 `getReporterOperationType`；没有固定计件岗位的账号会被拒绝。作业书“任何 WORKER 含无车道 CLEANER/COOK”不能一概套到这条计件读取路径。
 - 两个详情缺少列表同款工单状态限制仍然成立，但“无计件详情补车道过滤”会改变现有明确行为，需要先确定采用“保持所有在职 WORKER 可见、只补状态”还是建立无计件工艺的岗位映射。未擅自改测试或新增岗位规则。
 
-另有编号冲突：§1.4 指定唯一迁移在“批次 6”，详细授权实际在批次 5.3；尚未进入或执行迁移。
+另有编号冲突：§1.4 指定唯一迁移在“批次 6”，详细授权实际在批次 5.3；后续仅按 5.3 的范围实施并验证。
 
 ## B 类选项（仅供业主决定，未改代码）
 
@@ -165,3 +165,171 @@ smoke 增加只读全库无效索引检查，拒绝任何无效索引，额外�
 v2 候选读取缺少守恒检查、旧 cron 适配器又固定返回 errors=[]；现用 Decimal 核对加工费＋逐项收费＝总额＝settledFee，非法/缺失金额拒绝。按工单号记录错误，整张问题销售的当月账单不创建、不删改成员，其他销售可继续；手动确认调用同一读取器也先失败，不会删草稿成员。内部 errors 经旧契约 salesUserId 映射流向 failed/errorCount，手动生成不再报纯成功。未改取消单准入、费用口径、旧实现或历史冻结金额。生成器原本是一笔整体事务，不是逐代理商独立事务，保留现有边界。
 
 红绿：旧实现下 5 条新增断言失败/5 通过（b6-red.log）。修复后账单/cron/action 82 项通过，追加隔离销售与手动确认两项通过。全量首次发现 mockResolvedValueOnce 队列跨测试残留（异常用例提前拒绝不消费原 mock）；修正测试重置后，全量 7,514 通过/54 既有跳过/0 失败，40.24s。架构、备份 23/23、lint、类型通过（b6-*.log、b6-final-unit.log）。
+
+### 批次 5
+
+- 5.1：默认池与事务等待预算隐含、心跳另借连接可能耗尽池；显式 web 25 / worker 5、连接等待 10s、事务 maxWait 15s / timeout 20s，环境覆盖优先于 URL。worker 启动检查容量至少为并发两倍；保留独立心跳与现有锁粒度。建单、报工及扫码认领在授权查询和业务写入阶段识别 P2024/P2028，只返回繁忙信息，不吞权限错误。数值是工程默认值，生产连接 URL / 并发配置仍须业主复核。
+- 5.2：每次 SSR randomUUID 导致刷新失去幂等性；服务端依据工序、会话人员、数量（含工单件数进度）、上海日期和显式批次序号派生 SHA-256。URL 中 reportBatch 保持刷新一致；“再报一批”递增序号并重新挂载表单。保留旧客户端键兼容、确认步骤与权限检查。
+- 5.3：两个报工表缺数据库代次保护；唯一新迁移先取得同款 order-cascade 锁，再核对父工序与工单代次。新 REPORT 受保护，历史 REVERSAL/ADJUSTMENT 继续由原有锚点、管理员及结算触发器约束；一刀切拒绝旧代次会阻断现有工资核定，是审查中新发现的前提差异。
+- 5.4：动画快照与布局采样时机不稳定；等待字体、当前有限动画及连续两帧几何稳定后测量。SalesWorkbench fixture 使用真实 admin-viewport 并设置系统减少动态效果；44px 门槛不变、无 force click。全量首次 807 通过 / 1 失败：17 场景单用例在并行 UI 编译时触及原 15s 预算，已按类别拆分，所有场景和断言保留，预算未提高。
+
+迁移证据：一次性库 `first_use_test_20260921_1789983546084` 完成 158→161、161 条全部 applied；新增 SQL 再执行两次成功；库已 DROP。真实 PostgreSQL 回归在无触发器时旧代次插入成功导致断言红，安装触发器后拒绝旧代次、允许当前代次与合法历史财务入口；隔离 schema 清理完成。
+
+UI 环境为本地数据复制出的独立可丢弃库，未执行 seed 命令或发布受保护规则。首次服务器受到已有 :3000 开发锁阻挡；独立运行后 Turbopack 恢复旧缓存发生 Rust panic，隔离缓存重新执行。不能将这两次失败记为页面通过。计薪端到端用例因隔离库没有当前有效计件工价而缺前置；本轮禁止发布工价，故保留用例并明确跳过，不宣称已完成工资端到端验收。
+
+
+批次 5 红绿补充：池预算回归在旧实现下 1 失败 / 3 通过（`b5-red.log`）；触发器回归见 `b5-migration-red.log`；修复后核心集 128 项通过。新增授权阶段繁忙测试与原 action 集共 114 项通过。真实页面无计薪报工验证：首次 1 条 → 刷新重提仍 1 条 → “再报一批”后 2 条，1 项通过 / 1 项计薪前置缺失跳过（`b5-refresh-e2e.log`，51.9s）。
+
+管理端全六视口：首轮 112 通过 / 4 超时 / 10 限定视口跳过，18.6 分钟；缓存就绪并停止并发单测后，4 个失败项使用原断言和原 360s 预算重跑全部通过，1.4 分钟。合计 116 项验证通过，10 项分别为仅 1280 执行的容器几何用例和仅 393 执行的移动筛选用例在其他视口的有意跳过。保留首轮日志，未更新截图基线或放宽断言。
+
+## 提交序列与文件清单
+
+顺序按作业书执行；全部为当前分支的本地提交，未推送。
+
+### 批次 1 · `899fd8ed`
+
+fix(cron): 显示结算批次漏算数量（SPEC §3.7 / §3.9 / §J.1）
+
+- `API.md`
+- `app/api/cron/__tests__/notification-wire.test.ts`
+- `docs/audits/2026-09-21-first-use-remediation-results.md`
+- `lib/cron/__tests__/partial-batch.test.ts`
+- `lib/cron/tasks.ts`
+
+### 批次 2 · `2daf64ab`
+
+docs(readiness): 更正生产与安全模型说明（SPEC §3.5）
+
+- `CLAUDE.md`
+- `DEPLOYMENT.md`
+- `HANDOFF.md`
+- `app/api/cdr/bundles/[id]/route.ts`
+- `docs/audits/2026-09-21-first-use-remediation-results.md`
+- `docs/上线前置操作清单.md`
+- `docs/部署指南.md`
+- `lib/cron-auth.ts`
+- `lib/production/status-machine.ts`
+- `scripts/check-env.mjs`
+
+### 批次 4 · `b99202ba`
+
+fix(security): 收紧详情读取与审计导出边界（SPEC §3.5 / §3.9）
+
+- `CLAUDE.md`
+- `actions/__tests__/owner-parties.test.ts`
+- `actions/admin-order-edit.ts`
+- `actions/owner-materials.ts`
+- `actions/owner-parties.ts`
+- `app/(admin)/owner/salary/piecework/[id]/page.tsx`
+- `config/dead-code-baseline.json`
+- `docs/audits/2026-09-21-first-use-remediation-results.md`
+- `lib/__tests__/order-design.test.ts`
+- `lib/__tests__/party-audit.postgres.test.ts`
+- `lib/__tests__/party.test.ts`
+- `lib/__tests__/worker-portal.test.ts`
+- `lib/auth/__tests__/permissions.test.ts`
+- `lib/auth/permissions-dict.ts`
+- `lib/background-jobs/__tests__/repository.test.ts`
+- `lib/background-jobs/cdr.ts`
+- `lib/background-jobs/repository.ts`
+- `lib/cdr/__tests__/bundle.test.ts`
+- `lib/cdr/bundle.ts`
+- `lib/order-design.ts`
+- `lib/order/__tests__/export.test.ts`
+- `lib/order/change-request.ts`
+- `lib/order/export.ts`
+- `lib/party.ts`
+- `lib/production/__tests__/operation-portal.test.ts`
+- `lib/production/operation-portal.ts`
+- `lib/salary/__tests__/piecework-settlement.test.ts`
+- `lib/salary/piecework-settlement.ts`
+- `lib/worker-portal.ts`
+
+### 批次 3 · `07d07b9a`
+
+fix(deploy): 阻断无效索引并识别重复调度（SPEC §3.7 / §J.1）
+
+- `deploy/crontab.example`
+- `deploy/run-cron.sh`
+- `docs/audits/2026-09-21-first-use-remediation-results.md`
+- `docs/部署指南.md`
+- `lib/__tests__/cron-deployment-config.test.ts`
+- `scripts/__tests__/deploy-index-gate.test.ts`
+- `scripts/deploy-smoke.mjs`
+
+### 批次 7 · `c6ccff2a`
+
+fix(pricing): 保留分项舍入总额并消除负固定费（SPEC §8）
+
+- `docs/audits/2026-09-21-first-use-remediation-results.md`
+- `lib/order.ts`
+- `lib/order/__tests__/create-order-quote-presentation.test.ts`
+- `lib/order/create-order-quote-presentation.ts`
+
+### 批次 6 · `86603e71`
+
+fix(billing): 月账单入账前核对金额并报告漏算（SPEC §J.1）
+
+- `API.md`
+- `actions/__tests__/agent-monthly-bill.test.ts`
+- `actions/agent-monthly-bill.ts`
+- `docs/audits/2026-09-21-first-use-remediation-results.md`
+- `lib/agent-monthly-billing/__tests__/cron-cutover.test.ts`
+- `lib/agent-monthly-billing/__tests__/generation.test.ts`
+- `lib/agent-monthly-billing/generation.ts`
+- `lib/agent-monthly-billing/types.ts`
+- `lib/bill.ts`
+
+### 批次 5 · 本报告所在提交
+
+- `.env.example`
+- `API.md`
+- `DATABASE.md`
+- `actions/__tests__/order.test.ts`
+- `actions/__tests__/production-operations.test.ts`
+- `actions/order.ts`
+- `actions/owner-parties.ts`
+- `actions/production-operations.ts`
+- `app/(worker)/__tests__/worker-task-legacy-dispute.test.tsx`
+- `app/(worker)/worker/tasks/[id]/page.tsx`
+- `components/business/order/__tests__/ReworkOrderForm.browser.spec.tsx`
+- `components/business/production/OperationReportForm.tsx`
+- `components/business/production/__tests__/OperationReportForm.browser.spec.tsx`
+- `components/business/workbench/__tests__/SalesWorkbench.browser.spec.tsx`
+- `docs/audits/2026-09-21-first-use-remediation-results.md`
+- `docs/部署指南.md`
+- `lib/__tests__/database-session.test.ts`
+- `lib/database-errors.ts`
+- `lib/database-session.ts`
+- `lib/db.ts`
+- `lib/production/__tests__/report-generation.postgres.test.ts`
+- `lib/production/__tests__/report-idempotency.test.ts`
+- `lib/production/report-idempotency.ts`
+- `prisma/migrations/20260921100000_production_report_generation_guard/migration.sql`
+- `prisma/schema.prisma`
+- `scripts/__tests__/background-worker-runtime.test.ts`
+- `scripts/background-worker-runtime.ts`
+- `scripts/background-worker.ts`
+- `tests/browser/wait-for-layout.ts`
+- `tests/e2e/production-operation.spec.ts`
+- `vitest.browser.config.ts`
+
+
+## 最终验收结果
+
+候选为 `86603e71` 加上本报告列出的批次 5 增量，分支 `codex/maindev`。批次 1→2→4→3→7→6→5 的授权代码修复均已实现；B 类 11 条未改，选项见上文。计薪真实报工 E2E 缺生效工价，不能声称全部端到端验收清零。
+
+| 门禁 | 最终结果 | 证据（本机） |
+|---|---|---|
+| architecture / backup / lint / typecheck | 全部通过；备份 23 项，lint 3 条既有警告 | `/tmp/first-use-direct/b5-complete-{architecture,backup,lint,types}.log` |
+| 完整单测与覆盖率 | 688 文件、7,539 项通过；4 文件/54 项既有跳过；0 失败，33.87s | `b5-isolated-unit.log` |
+| 覆盖率 | statements 86.15%、branches 80.24%、functions 91.82%、lines 88.10%；全部水位门禁通过 | `b5-isolated-unit.log` |
+| 全量浏览器组件 | 51 文件、813 项全部通过，52.01s | `b5-isolated-browser.log` |
+| 管理端六视口 | 116 项通过；10 项原有视口限定跳过；4 个冷编译超时项原样重跑通过 | `b5-admin-ui.log`、`b5-admin-ui-retry.log` |
+| 师傅端六视口 | 12 项全部通过，1.1 分钟 | `b5-worker-ui.log` |
+| 刷新报工真实页面 | 不计薪 1 项通过；计薪 1 项缺工价前置跳过 | `b5-refresh-e2e.log` |
+| 增量迁移 | 隔离库 158→161、重复执行通过，库已删除 | `b5-migrate-158.log`、`b5-migrate-161.log` |
+
+并行负载下全量单测曾出现 4 项超时（7,535 通过），串行重跑全量并开启覆盖率后 7,539 全部通过，未提高原有预算。新增端到端夹具曾遗漏 foilTechnique、scheduledAt 及 UTC 会话，已按真实约束补齐；未修改应用校验来迁就夹具。测试采用 next dev、mock 通知及 inline jobs，只证明本地指定链路，不代表生产构建、真实推送和 durable worker 发布验收。
+
+隔离 UI 库 `first_use_ui_test_20260921_1789983657118` 已 DROP，包含测试生成的不可变报工事实；真实业务库未写入这些夹具。开发服务器已恢复 :3000，`/orders` 未登录响应 307。未 push、未部署、未改生产配置；导出大批量容量尚无生产规模实测，连接池工程默认值须在发布前复核。

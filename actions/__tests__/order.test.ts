@@ -2092,3 +2092,16 @@ it('accepts an admin recipient and rejects external-sales attempts to assign one
   expect(result).toMatchObject({ status: 'invalid' });
   expect(orderMock.createOrder).not.toHaveBeenCalled();
 });
+
+it.each(['P2024', 'P2028'])('建单遇到 %s 返回可重试提示', async code => {
+  permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+  orderMock.createOrder.mockRejectedValue({ code });
+  await expect(createOrderAction(null, baseOrderInput())).resolves.toEqual({ status: 'error', message: '系统繁忙，请稍后重试' });
+});
+
+
+it.each(['P2024', 'P2028'])('建单认证查询遇到 %s 不继续写入', async code => {
+  permissionsMock.requirePermission.mockRejectedValue({ code });
+  await expect(createOrderAction(null, baseOrderInput())).resolves.toEqual({ status: 'error', message: '系统繁忙，请稍后重试' });
+  expect(orderMock.createOrder).not.toHaveBeenCalled();
+});

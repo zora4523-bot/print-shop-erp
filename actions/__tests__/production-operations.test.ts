@@ -223,3 +223,35 @@ describe('reportProductionOperationAction', () => {
     expect(reportMock).not.toHaveBeenCalled();
   });
 });
+
+it.each(['P2024', 'P2028'])('returns a retryable busy message for %s', async code => {
+  reportMock.mockRejectedValue({ code });
+  await expect(reportProductionOperationAction('operation-1', null, formData())).resolves.toEqual({ status: 'error', message: '系统繁忙，请稍后重试' });
+  progressReportMock.mockRejectedValue({ code });
+  await expect(reportProductionProgressAction('progress-1', null, formData())).resolves.toEqual({ status: 'error', message: '系统繁忙，请稍后重试' });
+});
+
+it('derives identical keys across refresh, different keys only for another explicit batch', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date('2026-09-21T00:00:00Z'));
+    for (const batch of ['0', '0', '1']) {
+      const form = formData(); form.set('idempotencyKey', `batch:${batch}`);
+      await reportProductionOperationAction('operation-1', null, form);
+    }
+    const keys = reportMock.mock.calls.map(([input]) => input.idempotencyKey);
+    expect(keys[0]).toMatch(/^report:[0-9a-f]{64}$/);
+    expect(keys[1]).toBe(keys[0]); expect(keys[2]).not.toBe(keys[0]);
+  } finally { vi.useRealTimers(); }
+});
+
+
+it.each(['P2024', 'P2028'])('auth database %s returns busy without any reporting write', async code => {
+  requirePermissionMock.mockRejectedValue({ code });
+  for (const action of [reportProductionOperationAction, reportProductionProgressAction, claimProductionOperationAction]) {
+    await expect(action('operation-1', null, formData())).resolves.toEqual({ status: 'error', message: '系统繁忙，请稍后重试' });
+  }
+  expect(reportMock).not.toHaveBeenCalled();
+  expect(progressReportMock).not.toHaveBeenCalled();
+  expect(claimMock).not.toHaveBeenCalled();
+});

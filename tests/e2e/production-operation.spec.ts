@@ -208,3 +208,89 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
     }
   });
 });
+
+
+test('报工刷新重提不重复入账，显式再报一批允许相同数量', async ({ page }) => {
+  test.setTimeout(120_000);
+  const isolationFailure = productionOperationE2eIsolationFailure();
+  requireReleasePrerequisite(isolationFailure);
+  test.skip(Boolean(isolationFailure), isolationFailure ?? '');
+  const seeded = await seedE2eProductionOperationFixture();
+  if (!seeded.ready) {
+    requireReleasePrerequisite(seeded.reason);
+    test.skip(true, seeded.reason);
+    return;
+  }
+  const { fixture } = seeded;
+  // The append-only fixture deliberately survives runs; each run starts a fresh
+  // explicit batch, while refreshes within this test must retain its identity.
+  const batch = Math.floor(Math.random() * 900_000_000);
+  const countReports = () => withDb(async (db) => Number((await db.query(
+    'SELECT count(*) AS count FROM "ProductionReport" WHERE "operationId"=$1',
+    [fixture.operationId],
+  )).rows[0].count));
+  const before = await countReports();
+  try {
+    await login(page, { from: `/worker/tasks/${fixture.operationId}?reportBatch=${batch}`, username: worker.username, password: E2E_PASSWORD });
+    const submit = async () => {
+      const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报工', exact: true }) });
+      await section.getByRole('spinbutton', { name: '本次合格完成数', exact: true }).fill(String(E2E_PRODUCTION_REPORT_INCREMENT));
+      await section.getByRole('spinbutton', { name: '本次工单件数进度', exact: true }).fill('0');
+      await section.getByRole('spinbutton', { name: '缺陷数', exact: true }).fill('0');
+      await section.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
+      await section.getByRole('button', { name: '提交扫码报工', exact: true }).click();
+      await section.getByRole('button', { name: '确认报工', exact: true }).click();
+      await expect(section.getByRole('status')).toContainText('已记录本次报工', { timeout: 15_000 });
+    };
+    await submit();
+    await expect.poll(countReports).toBe(before + 1);
+    await page.reload();
+    await submit();
+    await expect.poll(countReports).toBe(before + 1);
+    await page.getByRole('link', { name: '再报一批', exact: true }).click();
+    await expect(page).toHaveURL(`/worker/tasks/${fixture.operationId}?reportBatch=${batch + 1}`);
+    await submit();
+    await expect.poll(countReports).toBe(before + 2);
+    await expectNoNextErrorOverlay(page);
+  } finally {
+    await cleanupE2eProductionOperationFixture(fixture);
+  }
+});
+
+// This independent path needs no protected wage book. Its append-only facts
+// stay in the explicitly disposable E2E database until that database is dropped.
+test('不计薪报工刷新去重与再报一批经过真实页面和数据库', async ({ page }) => {
+  test.setTimeout(120_000);
+  const isolationFailure = productionOperationE2eIsolationFailure();
+  expect(isolationFailure, 'requires a disposable E2E database').toBeNull();
+  const id = `e2e-refresh-progress-${Date.now()}`;
+  const stepId = `${id}-step`;
+  await withDb(async db => {
+    await db.query("SET TIME ZONE 'UTC'");
+    const owner = (await db.query('SELECT id FROM "User" WHERE username=$1', [E2E_USERS.owner!.username])).rows[0].id;
+    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"workOrderVersion","customName","scheduledAt","createdAt","updatedAt") VALUES ($1,$1,$2,'ADMIN',$2,'FACTORY_DIRECT','RELEASED',1,'刷新报工测试',NOW(),NOW(),NOW())`, [id, owner]);
+    await db.query(`INSERT INTO "OrderItem" (id,"orderId",sequence,name,"pricingRoute","productStructure",quantity,"foilTechnique",crafts,"createdAt","updatedAt") VALUES ($1,$2,1,'刷新报工款','CUSTOM_SINGLE_FLAT_FOIL','STANDARD_ENVELOPE',1000,'FLAT',ARRAY[]::text[],NOW(),NOW())`, [`${id}-item`, id]);
+    await db.query(`INSERT INTO "ProductionProgressStep" (id,"orderId","workOrderVersion","orderItemId","craftId","craftCode","craftName",status,"plannedQty","createdAt","updatedAt") VALUES ($1,$2,1,$3,$4,'REFRESH_TEST','覆膜','PENDING',1000,NOW(),NOW())`, [stepId, id, `${id}-item`, `${id}-craft`]);
+  });
+  const count = () => withDb(async db => Number((await db.query('SELECT count(*) AS count FROM "ProductionProgressReport" WHERE "progressStepId"=$1', [stepId])).rows[0].count));
+  await login(page, { from: `/worker/tasks/${stepId}`, username: worker.username, password: E2E_PASSWORD });
+  const submit = async () => {
+    const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报进度', exact: true }) });
+    await section.getByRole('spinbutton', { name: '本次合格完成数', exact: true }).fill('10');
+    await section.getByRole('spinbutton', { name: '缺陷数', exact: true }).fill('0');
+    await section.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
+    await section.getByRole('button', { name: '提交扫码报工', exact: true }).click();
+    await section.getByRole('button', { name: '确认报工', exact: true }).click();
+    await expect(section.getByRole('status')).toContainText('已记录本次生产进度');
+  };
+  await submit();
+  await expect.poll(count).toBe(1);
+  await page.reload();
+  await submit();
+  await expect.poll(count).toBe(1);
+  await page.getByRole('link', { name: '再报一批', exact: true }).click();
+  await expect(page).toHaveURL(`/worker/tasks/${stepId}?reportBatch=1`);
+  await submit();
+  await expect.poll(count).toBe(2);
+  await expectNoNextErrorOverlay(page);
+});

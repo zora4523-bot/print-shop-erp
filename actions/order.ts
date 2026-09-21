@@ -1,5 +1,6 @@
 'use server';
 
+import { DATABASE_BUSY_MESSAGE, isDatabaseBusyError } from '@/lib/database-errors';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { appendReceipt } from '@/lib/admin/receipt';
@@ -93,7 +94,13 @@ export async function createOrderAction(
   _prev: CreateOrderMutationResult | null,
   raw: unknown,
 ): Promise<CreateOrderMutationResult> {
-  const actor = await requirePermission('order:create');
+  let actor: Awaited<ReturnType<typeof requirePermission>>;
+  try {
+    actor = await requirePermission('order:create');
+  } catch (error) {
+    if (isDatabaseBusyError(error)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
+    throw error;
+  }
   const settlementType = settlementTypeForOrderCreator(actor.role);
   let input: CreateOrderInput;
   if (settlementType === OrderSettlementType.EXTERNAL_SALES) {
@@ -120,6 +127,7 @@ export async function createOrderAction(
   try {
     created = await createOrder(input, actor);
   } catch (err) {
+    if (isDatabaseBusyError(err)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
     }

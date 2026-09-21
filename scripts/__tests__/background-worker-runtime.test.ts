@@ -71,6 +71,9 @@ beforeEach(() => {
   initialExitCode = process.exitCode;
   process.exitCode = undefined;
   vi.stubEnv('BACKGROUND_JOB_QUEUE', 'LIGHT');
+  vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test_worker');
+  vi.stubEnv('DATABASE_POOL_MAX', '5');
+  vi.stubEnv('LIGHT_WORKER_CONCURRENCY', '2');
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('NOTIFICATION_MOCK_MODE', 'false');
   vi.stubEnv('WECOM_SMART_BOT_ID', 'bot-id-placeholder');
@@ -171,4 +174,12 @@ describe('LIGHT worker smart-bot isolation', () => {
     expect(stopSmartBotMock).toHaveBeenCalledOnce();
     expect(process.exitCode).toBeUndefined();
   });
+});
+
+it('refuses lane concurrency that would exhaust independent heartbeat connections', async () => {
+  vi.stubEnv('LIGHT_WORKER_CONCURRENCY', '3');
+  await runBackgroundWorkerProcess();
+  expect(process.exitCode).toBe(1);
+  expect(runBackgroundWorkerMock).not.toHaveBeenCalled();
+  expect(startWorkerHeartbeatMock).not.toHaveBeenCalled();
 });

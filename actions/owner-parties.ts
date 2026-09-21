@@ -15,7 +15,6 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { createPartySchema, updatePartySchema } from '@/lib/auth/schemas';
 import {
   createParty,
-  getPartySummary,
   PartyInvariantError,
   setPartyActive,
   updateParty,

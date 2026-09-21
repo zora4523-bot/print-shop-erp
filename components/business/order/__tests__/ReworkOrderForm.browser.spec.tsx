@@ -1,3 +1,4 @@
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
@@ -41,7 +42,7 @@ for (const [width, height] of [[375,667],[393,852],[768,1024],[1024,768],[1280,8
   it(`${width} ${theme}: confirmation fits and remains accessible`, async () => {
     await page.viewport(width,height); document.documentElement.classList.toggle('dark',theme==='dark');
     await prepare();
-    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
+    await waitForStableLayout();
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     expect(await commands.checkShellAccessibility('[role="alertdialog"]')).toEqual([]);
     const dialog = document.querySelector('[role="alertdialog"]')!;

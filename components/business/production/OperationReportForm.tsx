@@ -50,6 +50,7 @@ export function OperationReportForm({
       formAction={formAction}
       pending={pending}
       idempotencyKey={idempotencyKey}
+      nextBatchHref={nextBatchHref(operationId, idempotencyKey)}
       remainingQty={remainingQty}
       workOrderProgressRemainingQty={workOrderProgressRemainingQty}
       explanation={quantityUnit === '袋' ? '合格完成数填袋数；工单件数进度填完成包装的产品个数。例如每袋 10 个，完成 10 袋对应 100 个。' : '合格完成数填本工序完成的个数，不用乘过版次数；工单件数进度填本次完成全部烫金的产品个数。'}
@@ -83,6 +84,7 @@ export function ProgressReportForm({
       formAction={formAction}
       pending={pending}
       idempotencyKey={idempotencyKey}
+      nextBatchHref={nextBatchHref(progressStepId, idempotencyKey)}
       remainingQty={remainingQty}
       workOrderProgressRemainingQty={null}
       explanation="合格数用于推进工序；缺陷数与返工数只做记录，此步骤不计薪。"
@@ -93,6 +95,12 @@ export function ProgressReportForm({
       }
     />
   );
+}
+
+function nextBatchHref(targetId: string, key: string): string | undefined {
+  if (!/^batch:(0|[1-9]\d{0,8})$/.test(key)) return undefined;
+  const sequence = Number(key.slice(6));
+  return sequence < 999_999_999 ? `/worker/tasks/${encodeURIComponent(targetId)}?reportBatch=${sequence + 1}` : undefined;
 }
 
 type ReportFormState =
@@ -109,6 +117,7 @@ function ReportFields({
   formAction,
   pending,
   idempotencyKey,
+  nextBatchHref,
   remainingQty,
   workOrderProgressRemainingQty,
   explanation,
@@ -122,6 +131,7 @@ function ReportFields({
   formAction: (payload: FormData) => void;
   pending: boolean;
   idempotencyKey: string;
+  nextBatchHref?: string;
   remainingQty: string;
   workOrderProgressRemainingQty: string | null;
   explanation: string;
@@ -204,6 +214,9 @@ function ReportFields({
         <p>{rateKey ? '提交后按本次数量记录生产进度和本人提成，需核定的提成由管理员确认。' : '提交后记录本次生产进度，不计入工资。'}</p>
         <div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>确认报工</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setReview(null)}>返回修改</Button></div>
       </section>}
+      {nextBatchHref && !pending && !review ? (
+        <Link href={nextBatchHref} prefetch={false} className="inline-flex min-h-11 items-center underline">再报一批</Link>
+      ) : null}
     </form>
   );
 }

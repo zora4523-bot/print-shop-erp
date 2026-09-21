@@ -292,3 +292,7 @@ pnpm db:studio
 
 
 2026-09-21 审查补充：上述两条迁移已在本机日常库应用，不修改其 SQL 或校验和。升级入口先检查全部存量 STOCK_BASE 身份重复、旧语义零价与产品文本漂移，再持有价目排他 advisory lock 执行这两条迁移；详见[部署指南](./docs/部署指南.md#空白封按单价管理的升级前置2026-09-20)。此保护不能追溯修复已失败的迁移，也不代表正式库数据已通过。用料估算遇纸张身份冲突或默认分类异常时逐款返回“未估算”及原因，正常款式照常计算，汇总明确仅含已估算款式；不猜测物料或把异常算作零用量。
+
+## 报工代次插入保护（2026-09-21）
+
+增量迁移 `20260921100000_production_report_generation_guard` 对 ProductionReport 的新 REPORT 与全部 ProductionProgressReport 新增 BEFORE INSERT 闸口：从父工序/步骤读取工单，在 order-cascade advisory lock 下比较父代次与工单当前版本。触发器排序在既有工序行锁之前。报工表本身没有 orderId/workOrderVersion，不能直接套用父表触发函数。历史 REVERSAL/ADJUSTMENT 继续走已有锚点、管理员与结算保护，不把工资纠错当作旧代追加生产。迁移可重复执行，不更新历史行、不修改既有迁移。

@@ -457,3 +457,7 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 - `reviewReportDisputeAction(disputeId, state, formData)`：`task:dispute:review`，仅活跃 ADMIN；处理结果 `RESOLVED` / `REJECTED`，回复 2–1000 字；已处理记录拒绝再次回复。
 - 两个 action 都返回 `{ status: 'success' | 'error', message }`；领域层重复校验权限和输入，事务写异议与工单日志。不修改报工数量、计件金额或结算记录。
 - `/worker/reports` 按当前会话账号分页查询计件报工与调整；`/worker/reports/[id]` 强制本人所有权。管理员在工单详情的生产记录区处理问题，师傅在报工明细查看回复。
+
+### 报工刷新防重（2026-09-21）
+
+扫码页面使用 `batch:N` 请求作用域；报工 action 在身份与数量验证后，将工序/步骤、当前登录人、合格/缺陷/返工数量、工单件数进度、上海日期和批次序号派生为 SHA256 标识，交给原有事务幂等校验。同日相同事实刷新重试复用标识；“再报一批”链接显式推进 URL 的 reportBatch 并重建表单，允许新的同量批次。原有不带 batch 前缀的客户端请求标识仍兼容。P2024/P2028 在建单和报工 action 返回可重试错误，不暴露数据库异常。

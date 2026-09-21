@@ -7,7 +7,6 @@ import { databaseClockNow } from '@/lib/background-jobs/clock';
 import { PieceworkRateUnit } from '@/generated/prisma/enums';
 import { listWorkerTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputePanel } from '@/components/business/production/TaskDisputePanel';
-import { randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -39,7 +38,7 @@ import { formatUnitPrice } from '@/lib/format/unit-price';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PRODUCTION_OPERATION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = { params: Promise<{ id: string }>; searchParams: Promise<{ reportBatch?: string | string[] }> };
 
 export const metadata = { title: '生产工序' };
 
@@ -59,9 +58,11 @@ async function readWorkerRate(workerId: string, operation: NonNullable<Awaited<R
   }
 }
 
-export default async function WorkerTaskDetailPage({ params }: PageProps) {
+export default async function WorkerTaskDetailPage({ params, searchParams }: PageProps) {
   const { user } = await requireSession();
   const { id } = await params;
+  const requestedBatch = (await searchParams)?.reportBatch;
+  const reportBatch = typeof requestedBatch === 'string' && /^(0|[1-9]\d{0,8})$/.test(requestedBatch) ? requestedBatch : '0';
   const actor = { id: user.id, role: user.role };
   let operation: Awaited<ReturnType<typeof getProductionOperationForReporter>> =
     null;
@@ -144,7 +145,8 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
               operationId={operation.id}
               payrollRevision={operation.payrollRevision}
               rateKey={currentRate.key}
-              idempotencyKey={randomUUID()}
+              key={reportBatch}
+              idempotencyKey={`batch:${reportBatch}`}
               remainingQty={remainingQty}
               workOrderProgressRemainingQty={workOrderProgressRemainingQty}
             /></> : <p role="alert" className="text-sm text-destructive">{rateError}</p>}
@@ -234,7 +236,8 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             </p>
             <ProgressReportForm
               progressStepId={progress.id}
-              idempotencyKey={randomUUID()}
+              key={reportBatch}
+              idempotencyKey={`batch:${reportBatch}`}
               remainingQty={remainingQty}
             />
           </section>
