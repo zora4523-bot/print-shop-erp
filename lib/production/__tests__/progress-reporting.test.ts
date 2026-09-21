@@ -30,6 +30,7 @@ const {
       create: vi.fn(),
     },
     user: { findUnique: vi.fn() },
+    craft: { findMany: vi.fn() },
     order: { update: vi.fn() },
     orderLog: { create: vi.fn() },
     $executeRaw: vi.fn(),
@@ -61,6 +62,7 @@ function stepFixture(overrides: Record<string, unknown> = {}) {
     workOrderVersion: 1,
     status: ProductionOperationStatus.PENDING,
     plannedQty: new Decimal(100),
+    craftId: 'craft-gluing',
     craftCode: 'GLUING',
     craftName: '粘封',
     orderItem: { id: 'item-1', sequence: 1 },
@@ -115,9 +117,12 @@ beforeEach(() => {
     uncoveredItems: [],
   });
   completionDispatchMock.mockReset().mockResolvedValue(undefined);
+  dbMock.craft.findMany.mockReset().mockImplementation(async ({ where }) => where.defaultWorkerType === 'MACHINE' ? [{ id: 'craft-gluing' }] : []);
   arrangeStep();
   dbMock.user.findUnique.mockResolvedValue({
     id: ACTOR.id,
+    workerType: 'MACHINE',
+    machineType: 'GLUE',
     role: Role.WORKER,
     isActive: true,
   });
@@ -202,7 +207,7 @@ describe('reportProductionProgress', () => {
     expect(createData).not.toHaveProperty('priceBookId');
     expect(dbMock.user.findUnique).toHaveBeenCalledWith({
       where: { id: ACTOR.id },
-      select: { id: true, role: true, isActive: true },
+      select: { id: true, role: true, isActive: true, workerType: true, machineType: true },
     });
   });
 
@@ -366,3 +371,9 @@ describe('reportProductionProgress', () => {
     ).rejects.toMatchObject({ code: 'ACCOUNT_NOT_AUTHORIZED' });
   });
 });
+
+ it('拒绝无对应工艺车道的账号写入进度', async () => {
+  dbMock.user.findUnique.mockResolvedValue({ id: ACTOR.id, role: Role.WORKER, isActive: true, workerType: 'COOK', machineType: null });
+  await expect(reportProductionProgress(input(), ACTOR)).rejects.toMatchObject({ code: 'ACCOUNT_NOT_AUTHORIZED' });
+  expect(dbMock.productionProgressReport.create).not.toHaveBeenCalled();
+ });

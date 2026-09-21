@@ -270,9 +270,19 @@ test('不计薪报工刷新去重与再报一批经过真实页面和数据库',
     const owner = (await db.query('SELECT id FROM "User" WHERE username=$1', [E2E_USERS.owner!.username])).rows[0].id;
     await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"workOrderVersion","customName","scheduledAt","createdAt","updatedAt") VALUES ($1,$1,$2,'ADMIN',$2,'FACTORY_DIRECT','RELEASED',1,'刷新报工测试',NOW(),NOW(),NOW())`, [id, owner]);
     await db.query(`INSERT INTO "OrderItem" (id,"orderId",sequence,name,"pricingRoute","productStructure",quantity,"foilTechnique",crafts,"createdAt","updatedAt") VALUES ($1,$2,1,'刷新报工款','CUSTOM_SINGLE_FLAT_FOIL','STANDARD_ENVELOPE',1000,'FLAT',ARRAY[]::text[],NOW(),NOW())`, [`${id}-item`, id]);
+    await db.query(`INSERT INTO "Craft" (id,name,code,"defaultWorkerType","defaultMachineType","inHouseMachineTypes","isActive","isOutsource","createdAt","updatedAt") VALUES ($1,$1,$1,'MACHINE','HAND_PRESS',ARRAY[]::"MachineType"[],true,false,NOW(),NOW())`, [`${id}-craft`]);
     await db.query(`INSERT INTO "ProductionProgressStep" (id,"orderId","workOrderVersion","orderItemId","craftId","craftCode","craftName",status,"plannedQty","createdAt","updatedAt") VALUES ($1,$2,1,$3,$4,'REFRESH_TEST','覆膜','PENDING',1000,NOW(),NOW())`, [stepId, id, `${id}-item`, `${id}-craft`]);
   });
   const count = () => withDb(async db => Number((await db.query('SELECT count(*) AS count FROM "ProductionProgressReport" WHERE "progressStepId"=$1', [stepId])).rows[0].count));
+  // Same resource must be hidden from a different machine lane, including direct URLs.
+  const otherContext = await page.context().browser()!.newContext();
+  try {
+    const otherPage = await otherContext.newPage();
+    await login(otherPage, { from: `/worker/tasks/${stepId}`, username: E2E_USERS.workerWindmill!.username, password: E2E_PASSWORD });
+    await expect(otherPage.getByRole('heading', { name: '找不到这个页面，或你没有访问权限' })).toBeVisible();
+    await otherPage.goto('/worker/tasks');
+    await expect(otherPage.locator(`a[href="/worker/tasks/${stepId}"]`)).toHaveCount(0);
+  } finally { await otherContext.close(); }
   await login(page, { from: `/worker/tasks/${stepId}`, username: worker.username, password: E2E_PASSWORD });
   const submit = async () => {
     const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报进度', exact: true }) });

@@ -461,3 +461,7 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 ### 报工刷新防重（2026-09-21）
 
 扫码页面使用 `batch:N` 请求作用域；报工 action 在身份与数量验证后，将工序/步骤、当前登录人、合格/缺陷/返工数量、工单件数进度、上海日期和批次序号派生为 SHA256 标识，交给原有事务幂等校验。同日相同事实刷新重试复用标识；“再报一批”链接显式推进 URL 的 reportBatch 并重建表单，允许新的同量批次。原有不带 batch 前缀的客户端请求标识仍兼容。P2024/P2028 在建单和报工 action 返回可重试错误，不暴露数据库异常。
+
+### 无计薪进度车道（2026-09-21 业主确认）
+
+`listProductionProgressForReporter`、`getProductionProgressForReporter` 与 `reportProductionProgress` 共用 `progressCraftIdsForReporter`。账号必须为在职 WORKER，岗位匹配有效自产 Craft 的 defaultWorkerType；机器岗位还须匹配 inHouseMachineTypes（有配置时）或 defaultMachineType。缺配置不默认放行。列表与直接详情将 craftId 限定在匹配集合；提交在事务内复核，不满足返回 ACCOUNT_NOT_AUTHORIZED，不能通过直接调用 Action 绕过页面限制。此规则不采用个人认领绑定，不改变计件工价或历史快照；生产打印用途权限沿用独立规则。

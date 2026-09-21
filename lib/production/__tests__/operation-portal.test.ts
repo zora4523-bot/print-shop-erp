@@ -11,6 +11,7 @@ import {
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     user: { findUnique: vi.fn() },
+    craft: { findMany: vi.fn() },
     productionOperation: { findMany: vi.fn(), findFirst: vi.fn() },
     productionProgressStep: { findMany: vi.fn(), findFirst: vi.fn() },
   },
@@ -26,6 +27,7 @@ import {
 } from '../operation-portal';
 
 beforeEach(() => {
+  dbMock.craft.findMany.mockReset().mockResolvedValue([{ id: 'craft-1' }]);
   dbMock.user.findUnique.mockReset().mockResolvedValue({
     id: 'packer-1',
     role: Role.WORKER,
@@ -66,9 +68,11 @@ beforeEach(() => {
 });
 
 describe('no-pay production progress portal', () => {
-  it('活跃 WORKER 可见所有待处理进度，不加人员/岗位/机型匹配', async () => {
+  it('清废岗位只读取其工艺车道进度', async () => {
     dbMock.user.findUnique.mockResolvedValue({
       id: 'cleaner-1',
+      workerType: WorkerType.CLEANER,
+      machineType: null,
       role: Role.WORKER,
       isActive: true,
     });
@@ -116,10 +120,10 @@ describe('no-pay production progress portal', () => {
     ]);
     const where = dbMock.productionProgressStep.findMany.mock.calls[0]![0]
       .where;
-    expect(JSON.stringify(where)).not.toMatch(/worker|machine|capabilit/iu);
+    expect(where.craftId).toEqual({ in: ['craft-1'] });
   });
 
-  it('无计件进度详情只按步骤 id 取数，保留款式生产信息', async () => {
+  it('无计件详情同时限定步骤 id 和工艺车道，保留款式生产信息', async () => {
     dbMock.productionProgressStep.findFirst.mockResolvedValue({
       id: 'progress-1',
       orderId: 'order-1',
@@ -162,7 +166,7 @@ describe('no-pay production progress portal', () => {
       item: { id: 'item-1', sequence: 1 },
     });
     expect(dbMock.productionProgressStep.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ id: 'progress-1' }) }),
+      expect.objectContaining({ where: expect.objectContaining({ id: 'progress-1', craftId: { in: ['craft-1'] } }) }),
     );
     expect(
       JSON.stringify(dbMock.productionProgressStep.findFirst.mock.calls[0]),

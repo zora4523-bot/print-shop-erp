@@ -49,7 +49,8 @@ export type ProductionProgressPlan =
  *
  * This is intentionally a code whitelist. It never reads worker defaults,
  * machines, capabilities, or assignments, and a newly added active in-house
- * craft automatically remains visible as progress instead of disappearing.
+ * craft is materialized as progress. Reporter visibility is checked separately
+ * against its configured job/machine lane.
  */
 export const PIECEWORK_CRAFT_CODE_WHITELIST = new Set([
   'FLAT_FOIL_PARTIAL',

@@ -1,3 +1,4 @@
+import { progressCraftIdsForReporter } from './progress-reporter-lane';
 import Decimal from 'decimal.js';
 import {
   DesignFileType,
@@ -112,10 +113,10 @@ export type ReporterProgressDetail = ReporterProgressListItem & {
 async function assertActiveProgressReporter(actor: {
   id: string;
   role: Role;
-}): Promise<void> {
+}): Promise<string[]> {
   const account = await db.user.findUnique({
     where: { id: actor.id },
-    select: { id: true, role: true, isActive: true },
+    select: { id: true, role: true, isActive: true, workerType: true, machineType: true },
   });
   if (
     !account ||
@@ -128,6 +129,7 @@ async function assertActiveProgressReporter(actor: {
       '报工账号无效或已停用',
     );
   }
+  return progressCraftIdsForReporter(db, account);
 }
 
 function progressTotals(
@@ -523,15 +525,16 @@ export async function getProductionOperationForReporter(
   };
 }
 
-/** All active workers see active no-pay progress; there is no assignment. */
+/** Active workers see progress in their configured craft lane, without personal assignment. */
 export async function listProductionProgressForReporter(
   actor: { id: string; role: Role },
   ids?: string[],
 ): Promise<ReporterProgressListItem[]> {
-  await assertActiveProgressReporter(actor);
+  const craftIds = await assertActiveProgressReporter(actor);
   const steps = await db.productionProgressStep.findMany({
     where: {
       ...(ids ? { id: { in: ids } } : {}),
+      craftId: { in: craftIds },
       status: {
         in: [
           ProductionOperationStatus.PENDING,
@@ -600,14 +603,14 @@ export async function listProductionProgressForReporter(
   }));
 }
 
-/** Detail has no worker, capability or machine predicate by design. */
+/** Apply the same craft lane as the list, including direct URL reads. */
 export async function getProductionProgressForReporter(
   progressStepId: string,
   actor: { id: string; role: Role },
 ): Promise<ReporterProgressDetail | null> {
-  await assertActiveProgressReporter(actor);
+  const craftIds = await assertActiveProgressReporter(actor);
   const step = await db.productionProgressStep.findFirst({
-    where: { id: progressStepId, order: { status: { in: [OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] } } },
+    where: { id: progressStepId, craftId: { in: craftIds }, order: { status: { in: [OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] } } },
     select: {
       id: true,
       orderId: true,
