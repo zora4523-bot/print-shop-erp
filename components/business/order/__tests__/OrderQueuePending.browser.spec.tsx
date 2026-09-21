@@ -47,19 +47,22 @@ afterEach(() => {
   host.remove();
 });
 
-it('shows pending feedback without moving or replacing the old results', async () => {
+it('delays the inline spinner and never adds a notice or moves old results', async () => {
   const row = page.getByText('切换前的工单');
   const top = row.element().getBoundingClientRect().top;
   const notice = page.getByText('正在切换，当前仍显示切换前的结果', { exact: true });
-  await expect.element(notice).not.toBeVisible();
+  await expect.element(notice).not.toBeInTheDocument();
   expect(host.getAnimations({ subtree: true }).filter((animation) => animation.effect?.getTiming().iterations === Infinity)).toHaveLength(0);
   await page.getByRole('link', { name: '待打印', exact: true }).click();
-  await expect.element(notice).toBeVisible();
+  const spinner = host.querySelector('svg')!;
+  expect(getComputedStyle(spinner).visibility).toBe('hidden');
+  await expect.poll(() => getComputedStyle(spinner).visibility).toBe('visible');
+  await expect.element(notice).not.toBeInTheDocument();
   await expect.element(row).toBeVisible();
   expect(row.element().getBoundingClientRect().top).toBe(top);
-  expect(getComputedStyle(row.element().parentElement!).outlineStyle).toBe('dashed');
+  expect(getComputedStyle(row.element().parentElement!).outlineStyle).toBe('none');
   await page.getByRole('button', { name: '完成请求' }).click();
-  await expect.element(notice).not.toBeVisible();
+  await expect.element(notice).not.toBeInTheDocument();
   expect(host.getAnimations({ subtree: true }).filter((animation) => animation.effect?.getTiming().iterations === Infinity)).toHaveLength(0);
   expect(row.element().getBoundingClientRect().top).toBe(top);
 });
@@ -76,4 +79,13 @@ it('keeps keyboard focus and moves the announcement to the latest pending link',
   await expect.element(page.getByRole('status').filter({ hasText: '正在切换至生产中' })).toHaveTextContent('正在切换至生产中');
   expect(host.textContent).not.toContain('正在切换至待打印');
   await expect.element(page.getByRole('link', { name: /^生产中/ })).toHaveFocus();
+});
+
+it('cancels the delayed indicator when a fast navigation completes', async () => {
+  await page.getByRole('link', { name: '待打印', exact: true }).click();
+  await page.getByRole('button', { name: '完成请求' }).click();
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  expect(host.querySelector('[data-order-queue-pending="true"]')).toBeNull();
+  expect(getComputedStyle(host.querySelector('svg')!).visibility).toBe('hidden');
+  expect(host.getAnimations({ subtree: true })).toHaveLength(0);
 });

@@ -167,7 +167,7 @@ test('待核价详情不把部分报价当应收，完整报价在上下两处�
   await expect(page.getByRole('region', { name: '订单级费用', exact: true })).toContainText(/28\.00.*估/);
 });
 
-test('队列切换立即提示旧结果，连续点击只采用最后选择', async ({ page }) => {
+test('队列切换仅延迟显示按钮图标，连续点击只采用最后选择', async ({ page }) => {
   await login(page, { from: `/orders?queue=all&q=${prefix}`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
   const queues = page.getByRole('navigation', { name: '工单队列' });
   await expect(queues.getByRole('link', { name: /^全部/ })).toHaveAttribute('aria-current', 'page');
@@ -199,7 +199,8 @@ test('队列切换立即提示旧结果，连续点击只采用最后选择', as
   try {
     const began = performance.now();
     await queues.getByRole('link', { name: /^待打印/ }).click();
-    await expect(page.getByText('正在切换，当前仍显示切换前的结果', { exact: true })).toBeVisible();
+    await expect(page.getByText('正在切换，当前仍显示切换前的结果', { exact: true })).toHaveCount(0);
+    await expect(queues.getByRole('link', { name: /^待打印/ }).locator('svg')).toBeVisible();
     console.log('QUEUE_FEEDBACK_MS', { automation: performance.now() - began, browser: await page.evaluate(() => performance.getEntriesByName('queue-feedback')[0]?.duration) });
     await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('当前筛选 8 单');
     await expect(queues.getByRole('link', { name: /^全部/ })).toHaveAttribute('aria-current', 'page');
