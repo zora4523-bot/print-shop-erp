@@ -453,11 +453,11 @@ export async function failBackgroundJob(
     });
     if (updated.count !== 1) throw new BackgroundJobLeaseLostError(job.id);
 
-    if (exhausted && job.type === 'CDR_BUNDLE') {
+    if (job.type === 'CDR_BUNDLE') {
       await tx.designBundle.updateMany({
-        where: { backgroundJobId: job.id },
+        where: { backgroundJobId: job.id, status: 'PENDING' },
         data: {
-          status: 'FAILED',
+          status: exhausted ? 'FAILED' : 'PENDING',
           lastErrorCode: errorCode,
         },
       });

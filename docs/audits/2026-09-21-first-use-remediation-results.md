@@ -134,3 +134,16 @@
 已更正八项文档/注释事实：生产 ef6fa012 / 160 迁移、10 个 cron、旧 TaskStatus 与新运行时区别、当前生产禁止 update.sh 且 check-applied 已无法防误用、CDR cuid 与预签名安全模型、09-11 前置清单的历史属性。HANDOFF 当前任务小节逐字保留，未操作生产。
 
 验证：架构、备份 23/23、lint（3 既有警告）、类型通过；完整单测 7,487 通过/54 既有跳过，0 失败（`/tmp/first-use-direct/b2-*.log`）。本批只改事实描述，无业务行为变化，不适用红绿测试。
+
+### 批次 4
+
+- 4.1：详情遗漏列表状态谓词；有计件/无计件详情补相同状态范围，保留无计件对所有在职 WORKER 的既有可见性（前提差异见上文）。
+- 4.2：归属检查顺序泄露他人状态；移到所有业务状态检查之前。
+- 4.3/4.5：删除零调用的跨销售申请列表导出及 material:issue 空授权；调用链搜索仅找到定义/字典与基线或测试，无运行时注册消费者；同步死代码基线。
+- 4.4：计件详情的可选 reporterId 能绕过行过滤；改为必填 actor，WORKER 强制 own-only、ADMIN 明确全量，缺 actor/其他角色先拒绝。
+- 4.6：资料事务与 action 审计分离；将 before/after 与审计移入 updateParty 的同一事务。原实现已有资料事务，不是作业书所述的单条隐式事务，但审计缺口成立。
+- 4.7：CDR handler 与任务失败处理器重复写失败态；统一在租约校验后的任务事务内处理，终态拒绝执行，上传落库限定 PENDING，防迟到结果复活 FAILED。
+- 4.8：15 张 sheet 的逐行读取走全局池；改为同一个 RepeatableRead tx，成员 manifest 与所有 sheet 读取同快照，沿用月账单导出的事务预算。现有 workbook 测试覆盖全部 sheet 与输出；尚不将测试 fixture 的耗时当作生产大批量容量证明。
+- 4.9：9 处适配层补实际授权函数注释，CLAUDE 登记第 4 类模块。
+
+红绿证据：原实现下 4 个新增断言失败（`b4-red.log`）；目标集 548 项通过。真实 PostgreSQL 独立 schema 制造 BusinessAuditLog CHECK 失败，确认触发 reject_test_audit 且 Party 名称回滚；schema 最终删除。全量并发时首次该集成测试 5s 预算不足，改为包含建表/清理的 30s 独立预算，未削弱断言。两个 worker 调用断言同步必填 actor 契约。最终架构、备份 23/23、lint、类型全绿；完整单测 7,497 通过 / 54 条既有跳过 / 0 失败，25.61s（`/tmp/first-use-direct/b4-final-*.log`）。

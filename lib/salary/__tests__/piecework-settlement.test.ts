@@ -230,7 +230,7 @@ describe('piecework settlement read models', () => {
     dbMock.pieceworkSettlement.findFirst.mockResolvedValue(null);
 
     await listWorkerPieceworkSettlements({ reporterId: 'worker-1' });
-    await getPieceworkSettlementDetail('settlement-1', 'worker-1');
+    await getPieceworkSettlementDetail('settlement-1', { id: 'worker-1', role: Role.WORKER });
 
     expect(dbMock.pieceworkSettlement.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { reporterId: 'worker-1' } }),
@@ -241,6 +241,18 @@ describe('piecework settlement read models', () => {
       }),
     );
   });
+});
+
+it('fails closed before querying when the settlement actor is missing or unrelated', async () => {
+  // @ts-expect-error runtime callers cannot bypass the required actor either
+  await expect(getPieceworkSettlementDetail('settlement-1')).rejects.toThrow('无权');
+  await expect(getPieceworkSettlementDetail('settlement-1', { id: 'sales', role: Role.SALES })).rejects.toThrow('无权');
+  expect(dbMock.pieceworkSettlement.findFirst).not.toHaveBeenCalled();
+});
+
+it('allows an explicit admin actor to read a settlement', async () => {
+  await getPieceworkSettlementDetail('settlement-1', { id: 'admin', role: Role.ADMIN });
+  expect(dbMock.pieceworkSettlement.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'settlement-1' } }));
 });
 
 describe('lockPieceworkSettlement', () => {

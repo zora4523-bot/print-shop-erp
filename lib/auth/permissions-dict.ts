@@ -42,7 +42,6 @@ export const PERMISSIONS = {
 
   // 物料
   'material:manage':            [Role.ADMIN],
-  'material:issue':             [Role.ADMIN, Role.WORKER],
 
   // 采购
   'purchase:manage':            [Role.ADMIN],

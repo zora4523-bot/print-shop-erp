@@ -454,7 +454,7 @@ export async function getWorkerPieceworkSettlementDetail(
   actor: WorkerSalaryActor,
 ) {
   requireOperationSalaryActor(actor);
-  return getPieceworkSettlementDetail(settlementId, actor.id);
+  return getPieceworkSettlementDetail(settlementId, actor);
 }
 
 export async function getWorkerSalaryDetail(

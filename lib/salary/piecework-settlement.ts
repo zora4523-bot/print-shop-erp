@@ -205,12 +205,15 @@ export async function getPieceworkSettlementDay(input: {
 
 export async function getPieceworkSettlementDetail(
   settlementId: string,
-  reporterId?: string,
+  actor: { id: string; role: Role },
 ) {
+  if (!actor?.id || (actor.role !== Role.ADMIN && actor.role !== Role.WORKER)) {
+    throw new Error('无权查看计件结算');
+  }
   return db.pieceworkSettlement.findFirst({
     where: {
       id: settlementId,
-      ...(reporterId ? { reporterId } : {}),
+      ...(actor.role === Role.ADMIN ? {} : { reporterId: actor.id }),
     },
     select: {
       id: true,

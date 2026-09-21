@@ -765,7 +765,6 @@
     "[\"ts-prune\",\"lib/order/change-request-list.ts\",\"PendingOrderChangeRequestListInput\"]",
     "[\"ts-prune\",\"lib/order/change-request.ts\",\"OrderChangePricingPreviewItem\"]",
     "[\"ts-prune\",\"lib/order/change-request.ts\",\"OrderChangeTransactionContext\"]",
-    "[\"ts-prune\",\"lib/order/change-request.ts\",\"listOrderChangeRequests\"]",
     "[\"ts-prune\",\"lib/order/commercial-details.ts\",\"OrderManualChargeCategoryCode\"]",
     "[\"ts-prune\",\"lib/order/create-order-price-snapshot.ts\",\"ExternalCreateOrderPriceBookMetadata\"]",
     "[\"ts-prune\",\"lib/order/create-order-price-snapshot.ts\",\"ExternalCreateOrderPriceSnapshotError\"]",

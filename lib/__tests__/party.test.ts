@@ -342,7 +342,7 @@ describe('updateParty', () => {
         defaultCity: null,
         defaultDistrict: null,
         defaultAddressDetail: null,
-      }),
+      }, { id: 'admin', role: 'ADMIN', username: 'admin', displayName: 'Admin' }),
     ).rejects.toBeInstanceOf(PartyInvariantError);
   });
 
@@ -368,7 +368,7 @@ describe('updateParty', () => {
         defaultCity: null,
         defaultDistrict: null,
         defaultAddressDetail: null,
-      }),
+      }, { id: 'admin', role: 'ADMIN', username: 'admin', displayName: 'Admin' }),
     ).rejects.toThrowError(/不能移除供应商类型/);
     expect(txMock.party.update).not.toHaveBeenCalled();
   });
@@ -395,7 +395,7 @@ describe('updateParty', () => {
         defaultCity: null,
         defaultDistrict: null,
         defaultAddressDetail: null,
-      }),
+      }, { id: 'admin', role: 'ADMIN', username: 'admin', displayName: 'Admin' }),
     ).rejects.toThrowError(/不能移除客户类型/);
     expect(txMock.party.update).not.toHaveBeenCalled();
   });

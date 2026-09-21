@@ -358,6 +358,7 @@ export async function processQueuedBundle(
     select: { id: true, designIds: true, downloadUrl: true, status: true },
   });
   if (!bundle) throw new CdrBundleError('CDR 下载包不存在');
+  if (bundle.status === DesignBundleStatus.FAILED) throw new CdrBundleError('下载包已失败，请重新生成');
   if (bundle.status === DesignBundleStatus.READY) {
     return { bundleId, fileCount: bundle.designIds.length, isMock: false };
   }
@@ -395,8 +396,8 @@ export async function processQueuedBundle(
   );
   await context.assertLease?.();
   context.signal?.throwIfAborted();
-  await db.designBundle.update({
-    where: { id: bundleId },
+  const changed = await db.designBundle.updateMany({
+    where: { id: bundleId, status: DesignBundleStatus.PENDING },
     data: {
       zipFileUrl: upload.zipFileUrl,
       expiresAt: upload.expiresAt,
@@ -404,21 +405,8 @@ export async function processQueuedBundle(
       lastErrorCode: null,
     },
   });
+  if (changed.count !== 1) throw new CdrBundleError('下载包状态已变更');
   return { bundleId, fileCount: designs.length, isMock: upload.isMock };
-}
-
-export async function markQueuedBundleFailure(
-  bundleId: string,
-  errorCode: string,
-  terminal: boolean,
-): Promise<void> {
-  await db.designBundle.updateMany({
-    where: { id: bundleId, status: DesignBundleStatus.PENDING },
-    data: {
-      status: terminal ? DesignBundleStatus.FAILED : DesignBundleStatus.PENDING,
-      lastErrorCode: errorCode,
-    },
-  });
 }
 
 // ─── 3. 下载查询（route 用）───

@@ -349,7 +349,7 @@ describe('worker salary visibility', () => {
       );
       expect(getSettlementMock).toHaveBeenCalledWith(
         'settlement-1',
-        actor.id,
+        actor,
       );
     },
   );

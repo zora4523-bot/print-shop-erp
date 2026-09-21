@@ -382,7 +382,7 @@ export async function getProductionOperationForReporter(
 ): Promise<ReporterOperationDetail | null> {
   const operationType = await getReporterOperationType(actor);
   const operation = await db.productionOperation.findFirst({
-    where: { id: operationId, operationType },
+    where: { id: operationId, operationType, order: { status: { in: [OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] } } },
     select: {
       id: true,
       orderId: true,
@@ -607,7 +607,7 @@ export async function getProductionProgressForReporter(
 ): Promise<ReporterProgressDetail | null> {
   await assertActiveProgressReporter(actor);
   const step = await db.productionProgressStep.findFirst({
-    where: { id: progressStepId },
+    where: { id: progressStepId, order: { status: { in: [OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] } } },
     select: {
       id: true,
       orderId: true,

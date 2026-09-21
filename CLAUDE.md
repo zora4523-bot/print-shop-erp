@@ -278,14 +278,14 @@ export async function createOrder(data: OrderInput) {
 
 **禁止**：在 `components/` 或 `app/` 的 JSX 中做权限判断来显示/隐藏按钮。正确做法是在 Server Component 里预先判断权限、传给 Client Component 一个 boolean 属性。
 
-**三类例外**（2026-09-14 复核 138 个 Server Action，仍只有这 3 个，全部合理，不要"修复"它们）：
+**四类例外**（2026-09-21 局部复核；例外类别不等于函数数量）：
 
 1. **鉴权入口本身**：`actions/auth.ts` 的 `signInWithCredentials` —— 登录前定义上没有 session。
 2. **自助操作**：`actions/account.ts` 的 `changeMyPassword` / `signOutAction` —— 只作用于调用者
    自己，用 `lib/auth/session.ts` 的 `requireSession()` 而不是权限字典。权限字典里没有也不该有
    `account:self` 这类 key（这三条正是 §15.8 单列的零 JS 硬约束路径）。
-3. **纯签名适配层**：如 `actions/production.ts` 的 `beginTaskFormAction`，函数体只是
-   `return beginTaskAction(taskId)`，真闸口在被调方。这类必须在注释里写明闸口在哪。
+3. **纯签名适配层**：已核对 9 处：`actions/admin-order-edit.ts` 的 2 个入口委托 `runEdit`；`actions/owner-materials.ts` 的 7 个入口委托相应 `*WithScope`。权限在被调方 `requirePermission`，各适配入口必须注明闸口。
+4. **actions 目录外的软授权读取**：`components/business/rules/RuleCenterPriceWorkspaceData.ts` 为 `'use server'` 模块，以 `hasPermission` 返回 `hidden`；审计必须覆盖该模块，不能只搜索 actions/。
 
 ### 4.7 金额处理
 

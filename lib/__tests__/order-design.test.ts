@@ -306,3 +306,8 @@ describe('rejected artwork correction', () => {
     await expect(assertCanUploadDesign('o1', 'i1', salesActor)).rejects.toThrow('只能修改自己');
   });
 });
+
+it.each([OrderStatus.DRAFT, OrderStatus.SUBMITTED])('does not reveal foreign order state %s before ownership', async (status) => {
+  dbMock.orderItem.findFirst.mockResolvedValue(draftItem({ status, submitterId: 'sales-other', _count: { changeRequests: 1 } }));
+  await expect(assertCanUploadDesign('o1', 'i1', salesActor)).rejects.toThrow('只能修改自己创建');
+});

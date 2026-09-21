@@ -3,12 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     order: { findMany: vi.fn() },
+    orderItemDesign: { findMany: vi.fn() },
     $transaction: vi.fn(),
     // 链接有效期现在从 Setting 读（cdr_link_expire_hours）
     setting: { findUnique: vi.fn() },
     designBundle: {
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -37,6 +39,7 @@ import {
   consumeBundle,
   createBundle,
   enqueueBundle,
+  processQueuedBundle,
   listEligibleOrders,
   listRecentBundles,
 } from '../bundle';
@@ -478,4 +481,21 @@ describe('listRecentBundles', () => {
     expect(args.orderBy).toEqual({ createdAt: 'desc' });
     expect(args.take).toBe(20);
   });
+});
+
+it('never retries a terminal FAILED bundle into READY', async () => {
+  dbMock.designBundle.findUnique.mockResolvedValue({ id: 'dead', designIds: ['d1'], status: 'FAILED' });
+  await expect(processQueuedBundle('dead')).rejects.toThrow('失败');
+  expect(uploadMock).not.toHaveBeenCalled();
+  expect(dbMock.designBundle.update).not.toHaveBeenCalled();
+});
+
+it('does not overwrite a terminal transition during CDR upload', async () => {
+  dbMock.designBundle.findUnique.mockResolvedValue({ id: 'bundle', status: 'PENDING', designIds: ['design'] });
+  dbMock.orderItemDesign.findMany.mockResolvedValue([{ id: 'design', fileName: 'a.cdr', fileUrl: 'mock://a', orderItem: { order: { orderNo: 'GD-1' } } }]);
+  uploadMock.mockResolvedValue({ zipFileUrl: 'mock://zip', expiresAt: new Date(), isMock: true });
+  dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
+  await expect(processQueuedBundle('bundle')).rejects.toThrow('状态已变更');
+  expect(dbMock.designBundle.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'bundle', status: 'PENDING' } }));
+  expect(dbMock.designBundle.update).not.toHaveBeenCalled();
 });

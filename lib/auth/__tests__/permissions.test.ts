@@ -58,7 +58,6 @@ describe('PERMISSIONS map', () => {
       'design:upload',
       'design:bundle:create',
       'material:manage',
-      'material:issue',
       'purchase:manage',
       'warehouse:manage',
       'bill:manage',

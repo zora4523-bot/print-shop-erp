@@ -12,6 +12,7 @@ import {
   type SortDirection,
 } from './admin/table';
 import { db } from './db';
+import { writeAuditLogInTx, type AuditActor } from './audit-log';
 import { resolveBusinessCode } from './business-code';
 import { sortBySearchRelevance } from './search-ranking';
 import type { CreatePartyInput, UpdatePartyInput } from './auth/schemas';
@@ -428,8 +429,9 @@ export async function createParty(data: CreatePartyData): Promise<PartySummary> 
 export async function updateParty(
   id: string,
   data: UpdatePartyData,
+  actor: AuditActor,
 ): Promise<PartySummary> {
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const target = await tx.party.findUnique({
       where: { id },
       select: {
@@ -464,6 +466,8 @@ export async function updateParty(
       );
     }
 
+    const beforeRow = await tx.party.findUnique({ where: { id }, select: PARTY_SELECT });
+    const before = beforeRow ? normalizePartyRow(beforeRow) : null;
     await tx.party.update({
       where: { id },
       data: {
@@ -510,11 +514,15 @@ export async function updateParty(
     } else if (existingAddress) {
       await tx.partyAddress.delete({ where: { id: existingAddress.id } });
     }
+    const afterRow = await tx.party.findUnique({ where: { id }, select: PARTY_SELECT });
+    if (!afterRow) throw new PartyInvariantError('客户/供应商保存后读取失败');
+    const after = normalizePartyRow(afterRow);
+    await writeAuditLogInTx(tx, {
+      actor, action: 'UPDATE', entityType: 'Party', entityId: id, before, after,
+      requestMetadata: { source: 'owner-parties.updatePartyAction', route: `/owner/parties/${id}` },
+    });
+    return after;
   });
-
-  const summary = await getPartySummary(id);
-  if (!summary) throw new PartyInvariantError('客户/供应商保存后读取失败');
-  return summary;
 }
 
 export async function setPartyActive(

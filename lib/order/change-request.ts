@@ -6215,30 +6215,6 @@ async function applyApprovedItemChangesInTx({
   }
 }
 
-export async function listOrderChangeRequests(input?: {
-  status?: OrderChangeRequestStatus;
-  limit?: number;
-}) {
-  return db.orderChangeRequest.findMany({
-    where: input?.status ? { status: input.status } : undefined,
-    orderBy: { createdAt: 'desc' },
-    take: input?.limit ?? 100,
-    include: {
-      requester: { select: { displayName: true, role: true } },
-      reviewedBy: { select: { displayName: true } },
-      order: {
-        select: {
-          id: true,
-          orderNo: true,
-          customName: true,
-          status: true,
-          revision: true,
-        },
-      },
-    },
-  });
-}
-
 function buildModificationItemPricing(
   projected: ProjectedOrderQuote | null,
   requestId: string,

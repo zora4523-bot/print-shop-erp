@@ -100,14 +100,14 @@ function assertDesignEditAllowed(
   order: { status: OrderStatus; submitterId: string; _count?: { changeRequests: number } },
   actor: { id: string; role: Role },
 ): void {
-  if (order._count?.changeRequests) throw new OrderDesignError('工单存在待审批申请，暂不能修改设计文件');
-  if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
-    throw new OrderDesignError('只有草稿或驳回状态的工单可以增删设计图');
-  }
   const globalOverride =
     actor.role === Role.ADMIN;
   if (!globalOverride && order.submitterId !== actor.id) {
     throw new OrderDesignError('只能修改自己创建的工单的设计图');
+  }
+  if (order._count?.changeRequests) throw new OrderDesignError('工单存在待审批申请，暂不能修改设计文件');
+  if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
+    throw new OrderDesignError('只有草稿或驳回状态的工单可以增删设计图');
   }
 }
 

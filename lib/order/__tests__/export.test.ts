@@ -182,6 +182,7 @@ beforeEach(() => {
   dbMock.orderExport.findUnique.mockReset().mockResolvedValue(null);
   dbMock.orderExport.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderExport.updateMany.mockReset().mockResolvedValue({ count: 1 });
+  Object.assign(txMock, Object.fromEntries(Object.entries(dbMock).filter(([key]) => !['orderExport', '$transaction'].includes(key))));
   dbMock.$transaction.mockReset().mockImplementation(async (callback: unknown) =>
     (callback as (tx: typeof txMock) => Promise<unknown>)(txMock),
   );
@@ -1128,7 +1129,9 @@ describe('processQueuedOrderExport', () => {
     expect(deleteArtifactMock).toHaveBeenCalledExactlyOnceWith(
       attemptedPath.slice('/tmp/'.length),
     );
-    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'RepeatableRead', maxWait: 10000, timeout: 600000 });
+    expect(txMock.orderExport.updateMany).not.toHaveBeenCalled();
     await expect(access('/tmp/export-1.xlsx.orders')).rejects.toThrow();
   });
 
@@ -1188,6 +1191,7 @@ describe('processQueuedOrderExport', () => {
         byteSize: BigInt(128),
       }),
     );
+    dbMock.$transaction.mockImplementationOnce(async (callback) => callback(txMock));
     dbMock.$transaction.mockImplementationOnce(async (callback: unknown) => {
       await (callback as (tx: typeof txMock) => Promise<unknown>)(txMock);
       throw responseLost;

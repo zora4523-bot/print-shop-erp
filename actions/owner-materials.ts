@@ -75,6 +75,7 @@ function requestedRouteBase(
   return '/owner/materials';
 }
 
+// 签名适配层：权限闸口在 createMaterialWithScope 的 requirePermission。
 export async function createMaterialAction(
   _prev: MaterialMutationResult | null,
   formData: FormData,
@@ -84,6 +85,7 @@ export async function createMaterialAction(
   });
 }
 
+// 签名适配层：权限闸口在 createMaterialWithScope 的 requirePermission。
 export async function createPaperAction(
   _prev: MaterialMutationResult | null,
   formData: FormData,
@@ -94,6 +96,7 @@ export async function createPaperAction(
   });
 }
 
+// 签名适配层：权限闸口在 createMaterialWithScope 的 requirePermission。
 export async function createNonPaperMaterialAction(
   _prev: MaterialMutationResult | null,
   formData: FormData,
@@ -150,6 +153,7 @@ async function createMaterialWithScope(
   );
 }
 
+// 签名适配层：权限闸口在 updateMaterialWithScope 的 requirePermission。
 export async function updateMaterialAction(
   id: string,
   _prev: MaterialMutationResult | null,
@@ -158,6 +162,7 @@ export async function updateMaterialAction(
   return updateMaterialWithScope(id, formData);
 }
 
+// 签名适配层：权限闸口在 updateMaterialWithScope 的 requirePermission。
 export async function updatePaperAction(
   id: string,
   _prev: MaterialMutationResult | null,
@@ -251,6 +256,7 @@ export async function setPaperActiveAction(
   return { status: 'success' };
 }
 
+// 签名适配层：权限闸口在 createMaterialTransactionWithScope 的 requirePermission。
 export async function createMaterialTransactionAction(
   materialId: string,
   _prev: MaterialMutationResult | null,
@@ -259,6 +265,7 @@ export async function createMaterialTransactionAction(
   return createMaterialTransactionWithScope(materialId, formData);
 }
 
+// 签名适配层：权限闸口在 createMaterialTransactionWithScope 的 requirePermission。
 export async function createPaperTransactionAction(
   materialId: string,
   _prev: MaterialMutationResult | null,
