@@ -1,10 +1,10 @@
 # 会话交接
 
-## 当前生产状态（2026-09-19 更新）
+## 当前生产状态（2026-09-21 更新）
 
-生产已运行 `09f1a1ca`（`main`，PR #20 + PR #23），158 条迁移；2026-09-19 17:25–17:29 切换，停机约 4 分 40 秒，上线后检查全部通过。报价第 8 版与统一烫金工价第 1 版不变，包装工价仍暂缓；OSS 双仓库备份正常（切换前手动 full：repo1 `20260919-172512F`、repo2 `20260919-172531F`）；企业微信 `CONNECTED`。正式库仍只有 1 个管理员 + 3 个销售账号，工单 / 账单 / 报工为空。详见 [发布记录](docs/audits/2026-09-19-production-release-09f1a1ca.md)；上一次见 [09-17 发布](docs/audits/2026-09-17-production-application-release.md)。
+生产已运行 `ef6fa012`（PR #26 合并提交），160 条迁移；2026-09-21 14:10（上海时间）完成切换，上线后检查通过。两条已获批的停售 120g 零元规则已停用，金额、历史记录和审计保留；其余价目及工价未发布或改写。Web/LIGHT/HEAVY 同一 SHA 在线，OSS 双仓库备份通过，企业微信 `CONNECTED`。正式库仍只有 1 个管理员 + 3 个销售账号，工单 / 账单 / 报工为空。详见 [09-21 发布记录](docs/audits/2026-09-21-production-release-ef6fa012.md)；此前 [09-19 发布](docs/audits/2026-09-19-production-release-09f1a1ca.md)与 [09-17 发布](docs/audits/2026-09-17-production-application-release.md)保留为历史证据。
 
-发布方式（两次都一样，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包 → 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。脚本在服务器 `/root/erp-release-20260919/`。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。Claude Code 做生产 SSH 需要业主在权限设置里放行，聊天里的授权不够。
+发布方式（当前生产沿用，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包 → 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。当前候选目录切换步骤及证据以 09-21 发布记录为准。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。Claude Code 做生产 SSH 需要业主在权限设置里放行，聊天里的授权不够。
 
 未验收（不得写成已验收）：登录后的各角色页面逐页检查、真实写入、实体手机扫码、企业微信真实消息实收；Sentry 未配置。
 

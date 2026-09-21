@@ -181,7 +181,7 @@ import type { Prisma } from '../../generated/prisma/client';
 - `lib/salary/machine-piecework.ts`：机台计件
 - `lib/salary/cs-commission.ts`：客服提成
 - `lib/salary/hourly-payroll.ts`：时薪月结
-- `lib/**/status-machine.ts`：全部状态机（order / production / bill / outsource / cs）
+- `lib/**/status-machine.ts`：现有状态机文件（order / production / bill / outsource / cs）。其中 `TASK_TRANSITIONS` 只覆盖已退役的 `TaskStatus` 历史工单路径；现行 `ProductionOperation` 没有状态机保护，不能把文件覆盖率当作新运行时状态流转覆盖率。
 
 `lib/**` 的其余部分（多为读路径与管理 CRUD）设**当前水位**阈值，只防倒退、不强求 100%。
 水位随实测调整，抬高可以、调低要说明理由。
@@ -226,10 +226,11 @@ await db.productionTask.update({
 
 工单/任务/周期的状态流转必须通过**状态机函数**，禁止裸写`status: 'XXX'`。
 
-**批量路径是显式例外**（业主 2026-08-19 拍板）：`lib/production.ts` 的 `beginTasks` /
-`reportTasks` 用 `where: { status: <前置状态> }` 在 SQL 层表达同一个守卫，换取单条语句的
-原子批量更新——逐行调用状态机会迫使先查后写、丢掉原子性。代价是没有编译期保障，改这两处时
-必须自己维持 `where` 子句与转换表一致。单条路径（`beginTask` / `reportTask`）不适用本例外。
+**生产运行时的现状与例外**：旧 `lib/production.ts` 已于 `674cf8fc` 删除，
+`beginTasks` / `reportTasks` 不再是现行入口。当前运行时为 `ProductionOperation`，
+`lib/order.ts` 与 `lib/order/change-request.ts` 的状态更新使用 `updateMany` 与
+`where: { status: { in: [...] } }` SQL 前置状态守卫；没有对应的状态机或转换表。
+修改这些写入口必须维护其 SQL 状态约束，不能引用历史 `TASK_TRANSITIONS` 作为保护证据。
 
 ```typescript
 // lib/order/status-machine.ts

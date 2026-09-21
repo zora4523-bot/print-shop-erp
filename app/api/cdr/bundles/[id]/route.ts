@@ -16,7 +16,9 @@ export const dynamic = 'force-dynamic';
 //
 // **不走 session 认证**——业务上 foreman 复制链接发外协模具厂，外协方
 // 不可能登录我们系统。安全模型：
-//   - bundle.id 是 cuid（~125 bits 熵），URL slug 即 token；猜不到。
+//   - 链接即凭证，无 session、无吊销入口。bundle.id 为 cuid v1：
+//     时间戳、计数器、进程 fingerprint 可预测/固定；不可猜部分约 41 bits，
+//     来自非加密 Math.random()，不能当作密码学随机 token。
 //   - 24h 过期（DesignBundle.expiresAt），lib/cdr/bundle.consumeBundle
 //     校验。
 //   - downloadCount 自增审计；管理员 dashboard 看异常活跃 bundle。
@@ -24,9 +26,8 @@ export const dynamic = 'force-dynamic';
 // proxy.ts matcher 已排除 `api/cron` 和本路由 `api/cdr`，避免公开下载被
 // session Proxy 重定向到登录页。
 //
-// MVP / OSS 未接入：consumeBundle 返的 zipFileUrl 形如 `mock://bundle/<id>.zip`，
-// 这里识别后返 503，提示 "OSS 未配置"。STS SDK 接进来后，把 mock 路径
-// 替换为 ossSignGetUrl(zipFileUrl, 60s) → 302 redirect。
+// lib/cdr/zip.ts 为私有 OSS 产物签发与 expiresAt 对齐的预签名 URL。
+// consumeBundle 仍可能返回 mock:// 产物；本路由对此返回 503，不开放下载。
 //
 // Usage（用户在浏览器粘贴）：GET /api/cdr/bundles/<bundleId>
 
