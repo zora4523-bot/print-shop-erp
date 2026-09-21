@@ -42,6 +42,7 @@ vi.mock('@/generated/prisma/client', async () => ({
 }));
 vi.mock('@/lib/db', () => ({ db: {} }));
 vi.mock('next/link', () => ({
+  useLinkStatus: () => ({ pending: false }),
   __esModule: true,
   default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => {
     void prefetch;

@@ -12,6 +12,7 @@ import '@/app/globals.css';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('next/link', () => ({
+  useLinkStatus: () => ({ pending: false }),
   __esModule: true,
   default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => {
     void prefetch;

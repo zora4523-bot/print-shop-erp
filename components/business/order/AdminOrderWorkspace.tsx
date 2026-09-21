@@ -21,6 +21,8 @@ import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui-business';
 import { AdminOrderWorkspaceList } from './AdminOrderWorkspaceList';
 import styles from './AdminOrderWorkspace.module.css';
+import { OrderQueuePending } from './OrderQueuePending';
+import { OrderQueueResults } from './OrderQueueResults';
 
 const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
   { key: 'todo', label: '待办' },
@@ -246,6 +248,7 @@ export function AdminOrderWorkspace({
         ) : null}
       </section>
 
+      <OrderQueueResults>
       <section
         aria-label="当前筛选合计"
         className="flex min-w-0 flex-wrap gap-x-5 gap-y-1 px-1 text-xs font-medium text-muted-foreground"
@@ -315,6 +318,7 @@ export function AdminOrderWorkspace({
           />
         }
       />
+      </OrderQueueResults>
     </div>
   );
 }
@@ -347,6 +351,7 @@ function OrderQueuesSection({ query, data }: { query: AdminOrderWorkspaceQuery; 
             <span className="font-sans text-xs tabular-nums">
               {data.counts.queues[queue.key].toLocaleString('zh-CN')}
             </span>
+            <OrderQueuePending label={queue.label} />
           </Link>
         );
       })}

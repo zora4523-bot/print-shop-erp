@@ -70,3 +70,18 @@
     grid-template-columns: 20px 34px minmax(210px, 1.35fr) minmax(150px, 1fr) 96px 130px 120px 100px;
   }
 }
+
+/* Reserve the notice line: pending feedback must not push existing results. */
+.pendingNotice {
+  visibility: hidden;
+}
+
+.surface:has([data-order-queue-pending='true']) .pendingNotice {
+  visibility: visible;
+}
+
+.surface:has([data-order-queue-pending='true']) .results {
+  outline: 1px dashed var(--border);
+  outline-offset: 4px;
+  background: var(--muted);
+}
