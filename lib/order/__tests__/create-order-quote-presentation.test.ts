@@ -272,3 +272,32 @@ describe('create-order pure quote presentation', () => {
     expect(presentation.hasManualPricing).toBe(true);
   });
 });
+
+it('preserves the 122.00 component sum for 1010 × (0.1004 + 0.0204)', () => {
+  const input = createGoldenOrderInput([createGoldenOrderItem({ craft: 'FULL', paperType: '触感纸', paperWeightGsm: 200, quantity: 1010 })]);
+  const snapshot = { ...CREATE_ORDER_GOLDEN_SNAPSHOT, full: {
+    ...CREATE_ORDER_GOLDEN_SNAPSHOT.full,
+    unitPrices: CREATE_ORDER_GOLDEN_SNAPSHOT.full.unitPrices.map(rule => ({ ...rule, unitPrice: '0.1004' })),
+    paperSurcharges: CREATE_ORDER_GOLDEN_SNAPSHOT.full.paperSurcharges.map(rule => ({ ...rule, unitSurcharge: '0.0204' })),
+  } };
+  const quote = calculateCreateOrderQuote(input, snapshot);
+  expect(quote.items[0]).toMatchObject({ status: 'QUOTED', unitPrice: '0.1208', amount: '122.00' });
+  const preview = presentCreateOrderQuote({ factsKey: 'rounding', input, quote, logistics: quoteLogistics(input), quoteToken: 'token' }).items[0]!;
+  expect(preview.complete).toBe(true);
+  expect(new Decimal(preview.suggestedFixedFee!).gte(0)).toBe(true);
+  const storedSubtotal = new Decimal(preview.suggestedUnitPrice!).times(1010).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).plus(preview.suggestedFixedFee!).toFixed(2);
+  expect(storedSubtotal).toBe('122.00');
+  expect(preview.suggestedSubtotal).toBe(storedSubtotal);
+  expect(preview.snapshot.suggestedSubtotal).toBe(storedSubtotal);
+  expect(preview.components.reduce((sum, line) => sum.plus(line.amount), new Decimal(0)).toFixed(2)).toBe(storedSubtotal);
+});
+
+it('reports the item and uncomputable difference for invalid monetary facts', () => {
+  const input = createGoldenOrderInput([createGoldenOrderItem()]);
+  const original = calculateCreateOrderQuote(input, CREATE_ORDER_GOLDEN_SNAPSHOT);
+  const quote = { ...original, items: [{ ...original.items[0]!, amount: 'NaN' }] };
+  const preview = presentCreateOrderQuote({ factsKey: 'invalid', input, quote, logistics: quoteLogistics(input), quoteToken: 'token' }).items[0]!;
+  expect(preview.complete).toBe(false);
+  expect(preview.errors.join()).toContain('style-1');
+  expect(preview.errors.join()).toContain('差额=无法计算');
+});

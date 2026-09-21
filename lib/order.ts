@@ -945,7 +945,8 @@ export async function createOrder(
         presentation.suggestedFixedFee === null ||
         presentation.suggestedSubtotal === null
       ) {
-        const details = [...quote.errors, ...presentation.errors].join('；');
+        const details = [...quote.errors, ...presentation.errors].join('；') ||
+          `报价状态=${quote.status}，小计=${quote.amount}，单价=${quote.unitPrice}，数量=${it.quantity}，分项=${quote.lines.map(line => `${line.code}:${line.amount}`).join(',')}`;
         throw new OrderInvariantError(
           `款式“${it.name}”无法生成可保存的自动报价${details ? `：${details}` : ''}`,
         );
