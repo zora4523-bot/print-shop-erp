@@ -513,10 +513,12 @@ export function quoteFactsKey(
     paperType: item?.paperType ?? null,
     pricingRoute: item?.pricingRoute ?? null,
     productStructure: item?.productStructure ?? null,
-    artworkVersion: item?.artworkVersion ?? null,
+    // DOM registration may turn restored null text into an empty string without
+    // notifying useWatch. Match the optional-text schema before comparing quote facts.
+    artworkVersion: item?.artworkVersion?.trim() || null,
     plateGroupId: item?.plateGroupId ?? null,
     pricingGroup: item?.pricingGroup ?? null,
-    manualQuoteReason: item?.manualQuoteReason ?? null,
+    manualQuoteReason: item?.manualQuoteReason?.trim() || null,
     actualWidthMm: item?.actualWidthMm ?? null,
     actualHeightMm: item?.actualHeightMm ?? null,
     paperWeightGsm: item?.paperWeightGsm ?? null,
