@@ -21,7 +21,8 @@ CRON_SECRET_FILE=/root/.print-shop-erp-cron-secret
 */10 * * * * /usr/local/sbin/print-shop-erp-cron production-alerts
 # 工单导出过期产物与筛选隐私清理（每日 02:15）
 15 2 * * * /usr/local/sbin/print-shop-erp-cron order-export-cleanup
-# 时薪工月结（每月 1 号 00:00）
-0 0 1 * * /usr/local/sbin/print-shop-erp-cron hourly-payroll
+# 时薪工月结（每月 1 号 00:10）
+10 0 1 * * /usr/local/sbin/print-shop-erp-cron hourly-payroll
+# 避开整点，降低应用时钟与数据库时钟跨月偏差；账单保留 00:40。
 # 销售应收账单生成（每月 1 号 00:40）
 40 0 1 * * /usr/local/sbin/print-shop-erp-cron generate-bills

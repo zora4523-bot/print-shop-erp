@@ -147,3 +147,9 @@
 - 4.9：9 处适配层补实际授权函数注释，CLAUDE 登记第 4 类模块。
 
 红绿证据：原实现下 4 个新增断言失败（`b4-red.log`）；目标集 548 项通过。真实 PostgreSQL 独立 schema 制造 BusinessAuditLog CHECK 失败，确认触发 reject_test_audit 且 Party 名称回滚；schema 最终删除。全量并发时首次该集成测试 5s 预算不足，改为包含建表/清理的 30s 独立预算，未削弱断言。两个 worker 调用断言同步必填 actor 契约。最终架构、备份 23/23、lint、类型全绿；完整单测 7,497 通过 / 54 条既有跳过 / 0 失败，25.61s（`/tmp/first-use-direct/b4-final-*.log`）。
+
+### 批次 3
+
+smoke 增加只读全库无效索引检查，拒绝任何无效索引，额外标记通知去重依赖；cron runner 严格解析 created/requeued 区分 queued 与 skipped，畸形响应失败；月结改 00:10，账单保留 00:40。同步部署指南。
+
+红绿：旧调度新增断言 1 失败/20 通过（b3-red.log）；脚本目标 40/40。真实本地 PostgreSQL 无效索引查询 8ms，通过。全量架构、备份 23/23、lint、类型通过；7,504 单测通过/54 既有跳过/0 失败，29.20s（b3-final-*.log）。未跑生产 smoke、未调用真实 cron。8 个 cron 应用时钟改数据库时钟仍按授权留 TODO。
