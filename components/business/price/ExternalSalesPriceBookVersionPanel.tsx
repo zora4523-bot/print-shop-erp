@@ -182,13 +182,6 @@ function DraftChangeQuantity({ change, draft }: {
   ) : <span>{change.quantityLabel}</span>;
 }
 
-function historyTimestamp(version: CustomerPriceBookVersionAdminDto): number {
-  const value =
-    version.status === 'DRAFT' ? version.updatedAt : version.effectiveFrom;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
 function VersionHistoryEntry({
   version,
 }: {
@@ -198,10 +191,10 @@ function VersionHistoryEntry({
     <li className="min-w-0 border-b py-4 last:border-b-0">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-medium">第 {version.version} 版</p>
+          <p className="font-medium">{version.status === 'CURRENT' ? '默认价格' : version.status === 'DRAFT' ? '调价草稿' : '待生效价格'}</p>
           <p className="mt-1 font-sans text-sm tabular-nums text-muted-foreground">
             {version.status === 'DRAFT'
-              ? `基于第 ${version.basedOnVersion ?? '—'} 版 · 最后更新 ${formatShanghaiDateTime(
+              ? `最后更新 ${formatShanghaiDateTime(
                   version.updatedAt,
                 )}`
               : `${formatShanghaiDateTime(
@@ -293,28 +286,9 @@ function VersionHistory({
   const draft = versions.find((version) => version.status === 'DRAFT');
   const hasCurrent = versions.some((version) => version.status === 'CURRENT');
   const hasScheduled = versions.some((version) => version.status === 'SCHEDULED');
-  const lineageMap = new Map<string, CustomerPriceBookVersionAdminDto[]>();
-  for (const version of versions) {
-    const lineage = lineageMap.get(version.code) ?? [];
-    lineage.push(version);
-    lineageMap.set(version.code, lineage);
-  }
-  const lineages = [...lineageMap.entries()]
-    .map(([code, lineageVersions]) => ({
-      code,
-      name: externalPriceBusinessText(lineageVersions[0]?.name ?? code),
-      versions: [...lineageVersions].sort(
-        (left, right) =>
-          historyTimestamp(right) - historyTimestamp(left) ||
-          right.version - left.version,
-      ),
-    }))
-    .sort(
-      (left, right) =>
-        historyTimestamp(right.versions[0]!) -
-          historyTimestamp(left.versions[0]!) ||
-        left.code.localeCompare(right.code),
-    );
+  const visibleVersions = versions.filter((version) =>
+    version.status === 'CURRENT' || version.status === 'DRAFT' || version.status === 'SCHEDULED',
+  );
 
   return (
     <section
@@ -325,38 +299,15 @@ function VersionHistory({
         <h2 id={`price-book-history-${purpose}`} className="font-semibold">
           {PURPOSE_LABELS[purpose]}
         </h2>
-        <span className="font-sans text-sm tabular-nums text-muted-foreground">
-          {lineages.length} 个价目序列 · {versions.length} 个版本
-        </span>
       </div>
-
-      {lineages.length > 0 ? (
-        <div className="mt-4 space-y-4">
-          {lineages.map((lineage) => (
-            <section key={lineage.code} className="min-w-0">
-              <div className="mb-2 min-w-0 border-l-2 border-foreground/25 pl-2">
-                <h3 className="admin-wrap-anywhere text-sm font-semibold">
-                  {lineage.name}
-                </h3>
-                <p className="admin-wrap-anywhere mt-0.5 text-xs text-muted-foreground">
-                  最近变更：
-                  {formatShanghaiDateTime(
-                    lineage.versions[0]?.status === 'DRAFT'
-                      ? lineage.versions[0].updatedAt
-                      : lineage.versions[0]?.effectiveFrom ?? null,
-                  )}
-                </p>
-              </div>
-              <ol className="divide-y">
-                {lineage.versions.map((version) => (
-                  <VersionHistoryEntry key={version.id} version={version} />
-                ))}
-              </ol>
-            </section>
+      {visibleVersions.length > 0 ? (
+        <ol className="mt-4 divide-y">
+          {visibleVersions.map((version) => (
+            <VersionHistoryEntry key={version.id} version={version} />
           ))}
-        </div>
+        </ol>
       ) : (
-        <p className="mt-4 text-sm text-muted-foreground">尚无可用价目版本。</p>
+        <p className="mt-4 text-sm text-muted-foreground">尚无可用价格。</p>
       )}
 
       {draft ? null : hasScheduled ? (
@@ -524,7 +475,7 @@ function DraftPublishPanel({
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 rounded-xl border bg-muted/20 p-4">
         <div className="min-w-0">
           <h2 id="selected-price-book-draft-heading" className="font-semibold">
-            {PURPOSE_LABELS[draft.purpose]} v{preview.basedOnVersion} → v{draft.version}
+            {PURPOSE_LABELS[draft.purpose]}调价草稿
           </h2>
           <p className="admin-wrap-anywhere mt-1 text-sm text-muted-foreground">
             调价原因：{draft.changeReason}
@@ -632,8 +583,8 @@ export function ExternalSalesPriceBookVersionPanel({
               <Link key={purpose} href={href} prefetch={false} aria-current={activePurpose === purpose ? 'page' : undefined}
                 className={cn(buttonVariants({ variant: activePurpose === purpose ? 'secondary' : 'ghost' }), 'min-h-11 h-auto flex-wrap gap-2')}>
                 <span className="font-semibold">{PURPOSE_LABELS[purpose]}</span>
-                <span className="text-xs text-muted-foreground">{current ? `当前 v${current.version}` : '无生效版本'}</span>
-                {pendingDraft ? <span className="text-xs text-warning-foreground">草稿 v{pendingDraft.version}</span> : null}
+                <span className="text-xs text-muted-foreground">{current ? '默认价格' : '无生效版本'}</span>
+                {pendingDraft ? <span className="text-xs text-warning-foreground">待发布</span> : null}
               </Link>
             );
           })}
@@ -661,7 +612,7 @@ export function ExternalSalesPriceBookVersionPanel({
       {draft && preview ? (
         <Disclosure className="min-w-0 rounded-lg border bg-card p-3">
           <DisclosureSummary className="justify-between gap-3">
-            <span>版本历史（{versions.filter(version => !activePurpose || version.purpose === activePurpose).length} 个版本）</span>
+            <span>当前价格</span>
             <ChevronDown
               aria-hidden="true"
               className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"

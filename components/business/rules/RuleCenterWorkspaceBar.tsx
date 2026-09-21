@@ -86,16 +86,16 @@ function PriceStreamStatus({
       </span>
       {stream.currentVersion !== null ? (
         <span className="font-mono text-background dark:text-card-foreground">
-          当前 v{stream.currentVersion}
+          默认价格
         </span>
       ) : (
         <span>暂无生效版</span>
       )}
       {stream.draftVersion !== null ? (
-        <span className="text-warning">草稿 v{stream.draftVersion}</span>
+        <span className="text-warning">待发布</span>
       ) : null}
       {stream.scheduledVersion !== null ? (
-        <span className="text-info">计划 v{stream.scheduledVersion}</span>
+        <span className="text-info">待生效</span>
       ) : null}
     </span>
   );
