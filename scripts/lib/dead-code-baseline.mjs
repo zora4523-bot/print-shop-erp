@@ -36,27 +36,14 @@ export function deadCodeCandidateIds(report) {
   return [...new Set(ids)].sort();
 }
 
-export function compareDeadCodeBaseline(report, baseline, platform = process.platform) {
+export function compareDeadCodeBaseline(report, baseline) {
   if (baseline?.schemaVersion !== 1 || !Array.isArray(baseline.candidates) ||
       baseline.candidates.some((id) => typeof id !== 'string') ||
       new Set(baseline.candidates).size !== baseline.candidates.length) {
     throw new Error('Invalid dead-code baseline');
   }
-  // Scanner results differ across macOS/Linux even for a clean checkout.
-  // Exact recorded omissions remain strict: reappearing names are NEW findings.
-  const omissionsByPlatform = baseline.platformOmissions ?? {};
-  if (!omissionsByPlatform || typeof omissionsByPlatform !== 'object' || Array.isArray(omissionsByPlatform)) {
-    throw new Error('Invalid dead-code platform baseline');
-  }
-  for (const omissions of Object.values(omissionsByPlatform)) {
-    if (!Array.isArray(omissions) || new Set(omissions).size !== omissions.length ||
-        omissions.some((id) => typeof id !== 'string' || !baseline.candidates.includes(id))) {
-      throw new Error('Invalid dead-code platform baseline');
-    }
-  }
-  const omitted = new Set(omissionsByPlatform[platform] ?? []);
   const current = new Set(deadCodeCandidateIds(report));
-  const previous = new Set(baseline.candidates.filter((id) => !omitted.has(id)));
+  const previous = new Set(baseline.candidates);
   return {
     added: [...current].filter((id) => !previous.has(id)).sort(),
     resolved: [...previous].filter((id) => !current.has(id)).sort(),

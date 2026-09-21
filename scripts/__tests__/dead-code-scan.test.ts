@@ -1,5 +1,6 @@
 import {
   chmod,
+  symlink,
   mkdir,
   mkdtemp,
   readFile,
@@ -13,6 +14,7 @@ import { rm } from 'node:fs/promises';
 
 import {
   executeTool,
+  TS_PRUNE_INPUT_SKIP_PATTERN,
   runDeadCodeScan,
   writeJsonAtomically,
 } from '../dead-code-scan.mjs';
@@ -236,28 +238,17 @@ describe('dead-code candidate ledger', () => {
   });
 });
 
-describe('platform-specific scanner identities', () => {
-  const candidate = JSON.stringify(['ts-prune', 'component.tsx', 'Props']);
-  const makeReport = (candidates: string[]) => ({ schemaVersion: 1, tools: {
-    knip: { issues: [] }, tsPrune: { candidates }, madge: { circular: [] },
-  } });
-  const baseline = { schemaVersion: 1, candidates: [candidate], platformOmissions: { linux: [candidate] } };
-
-  it('compares exact platform inventories without allowing new or stale entries', () => {
-    const present = makeReport(['component.tsx:1 - Props']);
-    const absent = makeReport([]);
-    expect(compareDeadCodeBaseline(absent, baseline, 'linux')).toEqual({ added: [], resolved: [] });
-    expect(compareDeadCodeBaseline(present, baseline, 'darwin')).toEqual({ added: [], resolved: [] });
-    expect(compareDeadCodeBaseline(present, baseline, 'linux').added).toEqual([candidate]);
-    expect(compareDeadCodeBaseline(absent, baseline, 'darwin').resolved).toEqual([candidate]);
-    expect(compareDeadCodeBaseline(makeReport(['new.ts:1 - newExport']), baseline, 'linux').added).toHaveLength(1);
-  });
-
-  it('rejects unknown identities and malformed platform inventories', () => {
-    for (const omissions of [['unknown'], [candidate, candidate], 'all']) {
-      expect(() => compareDeadCodeBaseline(makeReport([]), {
-        ...baseline, platformOmissions: { linux: omissions },
-      }, 'linux')).toThrow('Invalid dead-code platform baseline');
-    }
-  });
+// Exercise ts-prune itself: mocked/namespace test imports must not mark every
+// production export as live, while ordinary application imports still count.
+it('scans production consumers without treating test namespace imports as live code', async () => {
+  const rootDir = await temporaryDirectory();
+  await symlink(path.join(process.cwd(), 'node_modules'), path.join(rootDir, 'node_modules'), 'dir');
+  await mkdir(path.join(rootDir, '__tests__'));
+  await writeFile(path.join(rootDir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { types: [] }, include: ['**/*.ts'] }));
+  await writeFile(path.join(rootDir, 'domain.ts'), 'export const onlyTest = 1; export const live = 2;');
+  await writeFile(path.join(rootDir, 'app.ts'), "import { live } from './domain'; console.log(live);");
+  await writeFile(path.join(rootDir, '__tests__/mock.ts'), "import * as subject from '../domain'; console.log(subject);");
+  const result = await executeTool({ rootDir, name: 'ts-prune', args: ['--project', 'tsconfig.json', '--skip', TS_PRUNE_INPUT_SKIP_PATTERN] });
+  expect(result.stdout).toContain('onlyTest');
+  expect(result.stdout).not.toMatch(/ - live/);
 });
