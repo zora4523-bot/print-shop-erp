@@ -23,4 +23,5 @@ export type AgentMonthlyBillGenerationRow = {
 export type AgentMonthlyBillGenerationResult = {
   period: string;
   generated: AgentMonthlyBillGenerationRow[];
+  errors: Array<{ agentUserId: string; message: string }>;
 };

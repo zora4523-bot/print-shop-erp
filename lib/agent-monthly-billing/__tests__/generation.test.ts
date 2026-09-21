@@ -50,7 +50,7 @@ vi.mock('../locks', () => ({
   lockAgentBillCredit: vi.fn(async () => events.push('credit')),
 }));
 
-import { generateAgentMonthlyBillsForPeriod } from '../generation';
+import { generateAgentMonthlyBillsForPeriod, synchronizeDraftBillInTx } from '../generation';
 
 const ORDER = {
   id: 'order-1',
@@ -60,6 +60,9 @@ const ORDER = {
   customerRef: '客户甲',
   workOrderVersion: 2,
   settledFee: '25.00',
+  processingAmount: '20.00',
+  totalAmount: '25.00',
+  customerCharges: [{ amount: '5.00' }],
   settledAt: new Date('2026-05-01T00:00:00.000Z'),
 };
 
@@ -72,6 +75,7 @@ beforeEach(() => {
     { id: 'agent-1', username: 'sales01', displayName: '代理商一' },
   ]);
   tx.agentMonthlyBill.findUnique
+    .mockReset()
     .mockResolvedValueOnce(null)
     .mockResolvedValue({ status: AgentMonthlyBillStatus.DRAFT });
   tx.agentMonthlyBill.create.mockResolvedValue({
@@ -122,6 +126,7 @@ describe('generateAgentMonthlyBillsForPeriod', () => {
       ),
     ).resolves.toEqual({
       period: '2026-05',
+      errors: [],
       generated: [
         expect.objectContaining({
           billId: 'bill-1',
@@ -171,4 +176,36 @@ describe('generateAgentMonthlyBillsForPeriod', () => {
     expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
     expect(tx.agentMonthlyBill.update).not.toHaveBeenCalled();
   });
+});
+
+it.each([
+  { processingAmount: '20.00', totalAmount: '25.00', customerCharges: [{ amount: '4.99' }] },
+  { processingAmount: '20.00', totalAmount: '26.00', customerCharges: [{ amount: '6.00' }] },
+  { processingAmount: 'NaN', totalAmount: '25.00', customerCharges: [] },
+  { processingAmount: '20.00', totalAmount: '25.00', customerCharges: [{ amount: 'NaN' }] },
+])('refuses an inconsistent order before creating or rewriting its agent bill: %j', async (facts) => {
+  tx.order.findMany.mockResolvedValue([{ ...ORDER, ...facts }]);
+  const result = await generateAgentMonthlyBillsForPeriod('2026-05', { id: 'admin-1', role: Role.ADMIN }, { now: new Date('2026-06-02T00:00:00Z') });
+  expect(result).toMatchObject({ generated: [], errors: [{ agentUserId: 'agent-1', message: expect.stringContaining(ORDER.orderNo) }] });
+  expect(tx.agentMonthlyBill.create).not.toHaveBeenCalled();
+  expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
+  expect(tx.agentMonthlyBillItem.deleteMany).not.toHaveBeenCalled();
+});
+
+it('keeps a corrupt agent untouched while generating another consistent agent', async () => {
+  const rows = [ORDER, { ...ORDER, id: 'bad', orderNo: 'GD-BAD', submitterId: 'agent-2', settledFee: '99.00' }];
+  tx.order.findMany.mockImplementation(async ({ where }) => rows.filter(order => !where.submitterId || order.submitterId === where.submitterId));
+  const result = await generateAgentMonthlyBillsForPeriod('2026-05', { id: 'admin', role: Role.ADMIN }, { now: new Date('2026-06-02T00:00:00Z') });
+  expect(result.generated.map(row => row.agentUserId)).toEqual(['agent-1']);
+  expect(result.errors).toEqual([{ agentUserId: 'agent-2', message: expect.stringContaining('GD-BAD') }]);
+  expect(tx.agentMonthlyBillItem.upsert).toHaveBeenCalledTimes(1);
+});
+
+it('rejects direct draft synchronization before removing existing members', async () => {
+  tx.agentMonthlyBill.findUnique.mockReset().mockResolvedValue({ status: AgentMonthlyBillStatus.DRAFT });
+  tx.order.findMany.mockResolvedValue([{ ...ORDER, totalAmount: '99.00' }]);
+  // The same eligibility guard protects manual confirmation, not just cron.
+  await expect(synchronizeDraftBillInTx(tx as never, { billId: 'bill-1', agentUserId: 'agent-1', period: '2026-05' })).rejects.toThrow(ORDER.orderNo);
+  expect(tx.agentMonthlyBillItem.deleteMany).not.toHaveBeenCalled();
+  expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
 });

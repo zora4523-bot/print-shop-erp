@@ -309,7 +309,7 @@ export async function generateBillsForPeriod(
       sequence: 1,
       isSupplemental: false,
     })),
-    errors: [],
+    errors: result.errors.map(({ agentUserId, message }) => ({ salesUserId: agentUserId, message })),
   };
 
   /* c8 ignore start -- preserved historical implementation for archive archaeology */

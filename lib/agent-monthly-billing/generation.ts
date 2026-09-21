@@ -39,6 +39,9 @@ const ELIGIBLE_ORDER_SELECT = {
   customerRef: true,
   workOrderVersion: true,
   settledFee: true,
+  processingAmount: true,
+  totalAmount: true,
+  customerCharges: { select: { amount: true } },
   settledAt: true,
 } as const;
 
@@ -94,11 +97,31 @@ async function readEligibleOrders(
   tx: Tx,
   agentUserId: string | undefined,
   period: string,
+  onInvalid?: (error: AgentMonthlyBillGenerationResult['errors'][number]) => void,
 ): Promise<EligibleOrder[]> {
-  return tx.order.findMany({
+  const orders = await tx.order.findMany({
     where: candidateWhere(agentUserId, period),
     select: ELIGIBLE_ORDER_SELECT,
     orderBy: [{ settledAt: 'asc' }, { id: 'asc' }],
+  });
+  return orders.filter((order) => {
+    try {
+      const total = decimal(order.totalAmount);
+      const charges = order.customerCharges.reduce((sum, charge) => sum.plus(decimal(charge.amount)), new Decimal(0));
+      if (!decimal(order.processingAmount).plus(charges).eq(total)) {
+        throw new AgentMonthlyBillingError('工单总额与加工费及对客收费明细不一致');
+      }
+      if (!decimal(order.settledFee).eq(total)) {
+        throw new AgentMonthlyBillingError('结算金额与工单总额不一致');
+      }
+      return true;
+    } catch (error) {
+      if (!(error instanceof AgentMonthlyBillingError)) throw error;
+      const message = `工单 ${order.orderNo}：${error.message}`;
+      if (!onInvalid) throw new AgentMonthlyBillingError(message);
+      onInvalid({ agentUserId: order.submitterId, message });
+      return false;
+    }
   });
 }
 
@@ -369,8 +392,9 @@ export async function generateAgentMonthlyBillsForPeriod(
 
   return db.$transaction(async (tx) => {
     await lockSettlementCutoffExclusive(tx);
+    const errors: AgentMonthlyBillGenerationResult['errors'] = [];
     const [candidates, existingBills] = await Promise.all([
-      readEligibleOrders(tx, undefined, period),
+      readEligibleOrders(tx, undefined, period, (error) => errors.push(error)),
       tx.agentMonthlyBill.findMany({
         where: { period },
         select: { id: true, agentUserId: true },
@@ -380,6 +404,7 @@ export async function generateAgentMonthlyBillsForPeriod(
       new Set([
         ...candidates.map((order) => order.submitterId),
         ...existingBills.map((bill) => bill.agentUserId),
+        ...errors.map((error) => error.agentUserId),
       ]),
     ).sort();
 
@@ -393,7 +418,11 @@ export async function generateAgentMonthlyBillsForPeriod(
     const userById = new Map(users.map((user) => [user.id, user] as const));
     const generated: AgentMonthlyBillGenerationRow[] = [];
 
+    const rejectedAgents = new Set(errors.map((error) => error.agentUserId));
     for (const agentUserId of agentIds) {
+      // Refuse the entire agent/month; filtering one corrupt order must never
+      // silently remove an existing draft member or publish a partial bill.
+      if (rejectedAgents.has(agentUserId)) continue;
       await assertExecutionFence(options.fence);
       let bill = await tx.agentMonthlyBill.findUnique({
         where: { agentUserId_period: { agentUserId, period } },
@@ -459,6 +488,6 @@ export async function generateAgentMonthlyBillsForPeriod(
       });
     }
 
-    return { period, generated };
+    return { period, generated, errors };
   });
 }

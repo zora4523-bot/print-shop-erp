@@ -96,6 +96,8 @@ applies_to: repository source at last_verified
 并增加同值 `failed` 与去重字符串数组 `errorCodes`，供后台任务错误摘要展示。
 非空错误数组分别使用 `HourlyAggregateError`、`CsSettlementIncomplete`、
 `BillGenerationIncomplete` 类别码；不把人员、客户信息或逐行错误正文放入错误码。
+v2 月账单入账前使用 Decimal 核对加工费＋对客收费明细＝工单总额＝结算金额。异常工单包含工单号写入内部 `errors`，所属销售当月账单整张保持原样，其他销售正常继续；cron 将这些失败计入 `failed/errorCount`，手动生成返回明确的部分失败结果。
+
 无错误时 `errorCodes` 为 `[]`；`daily-salary` 成功结果另带 `failed: 0`。
 
 ### 下载、导出与查询

@@ -92,6 +92,9 @@ export async function generateAgentMonthlyBillsAction(
       actor,
     );
     refreshBillPages();
+    if (result.errors.length > 0) {
+      return { status: 'error', message: `已生成或更新 ${result.generated.length} 张账单；${result.errors.length} 个工单金额异常，所属销售当月账单未更新：${result.errors.map(error => error.message).join('；')}` };
+    }
     return {
       status: 'success',
       message: `已生成或更新 ${result.generated.length} 张 ${result.period} 账单`,
