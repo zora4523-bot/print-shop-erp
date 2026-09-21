@@ -48,10 +48,10 @@ for (const width of [375, 393, 768, 1024, 1280, 1920]) for (const dark of [false
     });
   }
 }
-it('差异完整精度及历史展开', async () => {
+it('差异完整精度及默认价格展开', async () => {
   mount();
   expect(host.textContent).toContain('¥ 0.325 / 个'); expect(host.textContent).toContain('¥ 0.3251 / 个');
-  const history = page.getByText('版本历史（2 个版本）', { exact: true });
+  const history = page.getByText('当前价格', { exact: true });
   await userEvent.click(history);
   await expect.element(page.getByText('当前生效', { exact: true })).toBeVisible();
 });
@@ -78,4 +78,14 @@ it('无修改也保留真实校验错误', () => {
     preview={preview} invalidDraftSelection={false} defaultPublishAt="" />));
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('缺少大号规格');
   expect(host.querySelector('[aria-label="发布价目草稿"]')).toBeNull();
+});
+
+it('默认价格不显示历史发布记录和版本号', () => {
+  const current = versionList.find(version => version.status === 'CURRENT')!;
+  flushSync(() => root.render(<ExternalSalesPriceBookVersionPanel
+    versions={[{ ...current, id: 'old-published', status: 'HISTORICAL', version: 9, changeReason: '历史价格专用标记' }, { ...current, version: 10 }]}
+    draft={null} preview={null} invalidDraftSelection={false} defaultPublishAt="" />));
+  expect(host.textContent).toContain('默认价格');
+  expect(host.textContent).not.toContain('历史价格专用标记');
+  expect(host.textContent).not.toMatch(/第 \d+ 版|v\d+|价目序列|版本历史/);
 });

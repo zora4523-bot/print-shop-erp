@@ -1,5 +1,6 @@
 import 'server-only';
-import { listExternalCreateOrderProductOptions } from '../product';
+import { blankPaperFact } from './blank-paper';
+import { blankPriceIdentityFromCondition, type BlankPriceIdentity } from './blank-price-identity';
 
 import Decimal from 'decimal.js';
 import {
@@ -48,6 +49,7 @@ export type CustomerPriceSectionRuleValueDto = Pick<
   | 'isActive'
 > & {
   code: string;
+  blankIdentity?: BlankPriceIdentity | null;
   product: {
     id: string;
     code: string;
@@ -94,9 +96,7 @@ export type CustomerPriceSectionWorkspaceDto = {
   sources: CustomerPriceSectionWorkspaceStateDto[];
   rules: CustomerPriceSectionRuleDto[];
   shippingWeightPolicy: CustomerPriceShippingWeightPolicyDto | null;
-  blankProducts?: Array<{
-    id: string; paperType: string | null; specification: string | null;
-  }>;
+  blankPapers?: Array<{ id: string; label: string; isActive: boolean; available: boolean; issue: string | null }>;
 };
 
 export type CustomerPriceSectionProjectionSource = {
@@ -160,6 +160,7 @@ function sectionRuleValue(
       }
     : null;
   return {
+    blankIdentity: blankPriceIdentityFromCondition(technical?.triggerCondition),
     ...rule,
     code,
     product,
@@ -416,9 +417,13 @@ export async function getCustomerPriceSectionWorkspace(
       ]),
       shippingWeightPolicy: null,
       ...(section === 'blank' ? {
-        blankProducts: (await listExternalCreateOrderProductOptions())
-          .filter(product => product.category === 'BLANK_STOCK')
-          .map(({ id, paperType, specification }) => ({ id, paperType, specification })),
+        blankPapers: (await db.material.findMany({ where: { category: 'PAPER' } })).map((paper) => {
+          const fact = blankPaperFact(paper);
+          return { id: paper.id, label: fact ? `${fact.paperWeightGsm}g${fact.paperType}` : paper.name,
+            isActive: paper.isActive,
+            available: paper.isActive && !paper.outOfStock && fact !== null,
+            issue: !fact ? '纸张名称或克重不完整' : !paper.isActive ? '纸张已停用' : paper.outOfStock ? '纸张缺货' : null };
+        }),
       } : {}),
     };
   }

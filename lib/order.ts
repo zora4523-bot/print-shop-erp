@@ -1,3 +1,5 @@
+import { OrderItemPricingRoute } from '../generated/prisma/enums';
+import { assertBlankPriceAdmissionInTx, BlankPriceAdmissionError } from './order/blank-price-admission';
 import { createOrderRequestFingerprint, matchesCreateOrderRequest } from './order/create-request-fingerprint';
 import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from './rules/paper-availability';
 import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
@@ -721,6 +723,13 @@ export async function createOrder(
       }
     }
 
+    try {
+      if (!sampleShipment) await assertBlankPriceAdmissionInTx(tx, input.items, now);
+    } catch (error) {
+      if (error instanceof BlankPriceAdmissionError) throw new OrderInvariantError(error.message);
+      throw error;
+    }
+
     // (1) allocate a fresh GD-YYMMDD-XXX (advisory lock inside).
     const orderNo = await nextOrderNumber(txClient, now);
 
@@ -873,7 +882,7 @@ export async function createOrder(
     // trips inside the tx). No productId → no query at all. Deliberately
     // NOT filtering isActive in the where: 不存在 and 已停用 are two
     // distinct messages, and the per-item loop keeps first-error order.
-    await assertCreateOrderProductsInTx(txClient, items);
+    await assertCreateOrderProductsInTx(txClient, items.filter((item) => item.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK));
 
     // (5) processing totals and per-shipment allocation facts.
     const automaticItems = items.map((it, index) => {
@@ -1265,7 +1274,7 @@ export async function createOrder(
             fig: resolvedItemFigs[idx],
             designGroupKey: it.designGroupKey ?? null,
             name: it.name,
-            productId: it.productId ?? null,
+            productId: it.pricingRoute === OrderItemPricingRoute.STOCK_BLANK ? null : it.productId ?? null,
             pricingRoute: it.pricingRoute,
             craft: canonicalCraftForPricingRoute(it.pricingRoute),
             productStructure: it.productStructure,
@@ -2049,10 +2058,15 @@ export async function submitOrder(
           // assertSelectedPapersAvailable, sample drafts in finalizeSampleOrderInTx.
           const items = await prismaTx.orderItem.findMany({
             where: { orderId: lockedOrderId },
-            select: { paperType: true, paperWeightGsm: true },
+            select: { pricingRoute: true, paperType: true, paperWeightGsm: true, specification: true, actualWidthMm: true, actualHeightMm: true, manualQuoteReason: true },
           });
           if (hasRetiredPaperItem(items ?? [])) {
             throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
+          }
+          try { await assertBlankPriceAdmissionInTx(prismaTx, items, now); }
+          catch (error) {
+            if (error instanceof BlankPriceAdmissionError) throw new OrderInvariantError(error.message);
+            throw error;
           }
           // Since 2026-09-18 internal and factory-direct orders price their
           // delivery from the same published logistics book as external

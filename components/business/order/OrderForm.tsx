@@ -191,7 +191,8 @@ export function additionalOrderCraftOptions(
 }
 
 export type ProductOption = {
-  id: string;
+  id: string | null;
+  selectionKey?: string;
   code?: string | null;
   name: string;
   category: string;
@@ -512,10 +513,12 @@ export function quoteFactsKey(
     paperType: item?.paperType ?? null,
     pricingRoute: item?.pricingRoute ?? null,
     productStructure: item?.productStructure ?? null,
-    artworkVersion: item?.artworkVersion ?? null,
+    // DOM registration may turn restored null text into an empty string without
+    // notifying useWatch. Match the optional-text schema before comparing quote facts.
+    artworkVersion: item?.artworkVersion?.trim() || null,
     plateGroupId: item?.plateGroupId ?? null,
     pricingGroup: item?.pricingGroup ?? null,
-    manualQuoteReason: item?.manualQuoteReason ?? null,
+    manualQuoteReason: item?.manualQuoteReason?.trim() || null,
     actualWidthMm: item?.actualWidthMm ?? null,
     actualHeightMm: item?.actualHeightMm ?? null,
     paperWeightGsm: item?.paperWeightGsm ?? null,
@@ -700,7 +703,7 @@ function internalQuoteRequestReady(
     items.every(
       (item) =>
         (Boolean(item.manualQuoteReason?.trim()) ||
-          (Boolean(item.productId) && item.crafts.length > 0)) &&
+          ((Boolean(item.productId) || (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK && Boolean(item.paperType && item.specification))) && item.crafts.length > 0)) &&
         Number.isSafeInteger(item.quantity) &&
         item.quantity >= 1,
     ) &&
@@ -2058,7 +2061,12 @@ export function OrderForm({
       const logisticsInputKey = JSON.stringify(input.logistics);
       setInternalOrderQuote({ inputKey: input.factsKey });
       startQuote(async () => {
-        const response = await quoteInternalCreateOrderAction(input);
+        // Transport failures must use the same stale-response gate and retry UI
+        // as domain errors, rather than escaping the transition to error.tsx.
+        const response = await quoteInternalCreateOrderAction(input).catch(() => ({
+          status: 'error' as const,
+          message: '自动核价请求失败，请检查网络后点击重新报价',
+        }));
         if (
           !isCurrentOrderQuoteResponse({
             gate: internalQuoteRequestGate.current,
@@ -2194,7 +2202,7 @@ export function OrderForm({
     watchedItems.length > 0 &&
     watchedItems.every(
       (item) =>
-        Boolean(item.productId) &&
+        (Boolean(item.productId) || (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK && Boolean(item.paperType && item.specification))) &&
         Number.isSafeInteger(item.quantity) &&
         item.quantity >= 1 &&
         item.crafts.length > 0,
@@ -2242,7 +2250,10 @@ export function OrderForm({
       const logisticsInputKey = JSON.stringify(input.logistics);
       setExternalOrderQuote({ inputKey: input.factsKey });
       startExternalQuote(async () => {
-        const response = await quoteExternalCreateOrderAction(input);
+        const response = await quoteExternalCreateOrderAction(input).catch(() => ({
+          status: 'error' as const,
+          message: '自动核价请求失败，请检查网络后点击重新报价',
+        }));
         if (
           !isCurrentOrderQuoteResponse({
             gate: externalQuoteRequestGate.current,

@@ -6,11 +6,6 @@ import {
   type Product,
   type ProductCategoryNode,
 } from '../generated/prisma/client';
-import {
-  CustomerPriceBookPurpose,
-  CustomerPriceRuleKind,
-  OrderSettlementType,
-} from '../generated/prisma/enums';
 import { db } from './db';
 import {
   paginatedResult,
@@ -18,11 +13,7 @@ import {
   type PaginatedResult,
 } from './admin/table';
 import { resolveBusinessCode } from './business-code';
-import {
-  acquirePriceRuleSnapshotReadLock,
-  acquirePriceRuleSnapshotWriteLock,
-} from './price/rule-snapshot-lock';
-import { sortBySearchRelevance } from './search-ranking';
+import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
 import {
   writeAuditLogInTx,
   type AuditActor,
@@ -64,13 +55,12 @@ export type ProductSummary = Pick<
 export type ProductActiveStatusFilter = 'all' | 'active' | 'inactive';
 
 /**
- * 工单、BOM 和自动价共用的建单产品范围。
+ * 非空白封产品资料的管理范围；空白封改由已发布材料单价提供新单候选。
  *
  * STOCK_FOIL_ADD 是旧的“现货加烫”同义分类，现已归并到通版现货；
  * BYO_MATERIAL 需人工确认纸料，不作为新建单产品创建选项。
  */
 export const QUOTE_PRODUCT_CATEGORIES = [
-  ProductCategory.BLANK_STOCK,
   ProductCategory.GENERIC_STOCK,
   ProductCategory.CUSTOM_FLAT_FOIL,
   ProductCategory.COLOR_PRINT,
@@ -93,20 +83,8 @@ export type ProductCategoryOption = Pick<
   'id' | 'path' | 'name' | 'legacyCategory' | 'sortOrder' | 'isActive'
 >;
 
-export type ProductOption = Pick<
-  Product,
-  'id' | 'code' | 'name' | 'isActive'
-> & {
-  categoryNode: Pick<ProductCategoryNode, 'name'>;
-};
-
-export type ProductOrderOption = Pick<
-  Product,
-  'id' | 'code' | 'name' | 'category' | 'specification' | 'paperType'
->;
-
 /**
- * 外部销售建单的产品配置事实。产品目录与是否存在自动价格规则解耦；
+ * 非空白封路线的产品配置事实。此范围的目录与自动价格覆盖解耦；
  * 缺价由计费引擎返回 MANUAL_PRICING_REQUIRED，而不是在这里隐藏选项。
  */
 export type ExternalCreateOrderProductOption = Pick<
@@ -191,18 +169,6 @@ const CATEGORY_NODE_SUMMARY_SELECT = {
   createdAt: true,
   updatedAt: true,
   _count: { select: { products: true } },
-} as const;
-
-const PRODUCT_OPTION_SELECT = {
-  id: true,
-  code: true,
-  name: true,
-  isActive: true,
-  categoryNode: {
-    select: {
-      name: true,
-    },
-  },
 } as const;
 
 type ProductReferenceImpactRaw = {
@@ -336,32 +302,6 @@ function productSearchFilter(
   };
 }
 
-export async function listProducts(
-  opts: {
-    q?: string | null;
-    status?: ProductActiveStatusFilter;
-    categories?: readonly ProductCategory[];
-  } = {},
-): Promise<ProductSummary[]> {
-  const query = normalizeSearchQuery(opts.q);
-  const where = productSearchFilter(query, opts.status, opts.categories);
-  const rows = await db.product.findMany({
-    where,
-    select: SUMMARY_SELECT,
-    orderBy: [{ isActive: 'desc' }, { category: 'asc' }, { name: 'asc' }],
-  });
-  return sortBySearchRelevance(rows, query, (row) => ({
-    fields: [
-      row.code,
-      row.name,
-      row.categoryNode.name,
-      row.specification,
-      row.paperType,
-    ],
-    pinyinFields: [row.searchPinyin, row.searchPinyinInitials],
-  }));
-}
-
 export async function listProductsPage(opts: {
   q?: string | null;
   status?: ProductActiveStatusFilter;
@@ -399,31 +339,22 @@ export async function listProductsPage(opts: {
   );
 }
 
-export async function listActiveProductOrderOptions(): Promise<
-  ProductOrderOption[]
-> {
+/** Read-only specification directory facts; all statuses remain visible here. */
+export async function listProductSpecificationFacts() {
   return db.product.findMany({
-    where: { isActive: true },
-    select: {
-      id: true,
-      code: true,
-      name: true,
-      category: true,
-      specification: true,
-      paperType: true,
-    },
-    orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+    where: { category: { in: [ProductCategory.CUSTOM_FLAT_FOIL, ProductCategory.COLOR_PRINT] } },
+    select: { id: true, category: true, specification: true },
+    orderBy: { id: 'asc' },
   });
 }
 
 const EXTERNAL_CREATE_ORDER_PRODUCT_CATEGORIES = [
-  ProductCategory.BLANK_STOCK,
   ProductCategory.CUSTOM_FLAT_FOIL,
   ProductCategory.COLOR_PRINT,
 ] as const;
 
 /**
- * 返回所有启用、分类有效且属于三条新建单路线的产品配置。
+ * 返回专版和彩印的启用产品配置；空白封选项由已发布正价规则生成。
  *
  * 这里刻意不读取 CustomerPriceRule：合法配置即使暂时缺价也必须可以
  * 建单，随后由纯函数引擎明确转人工核价。
@@ -461,81 +392,6 @@ export async function listExternalCreateOrderProductOptions(
   );
 }
 
-/**
- * Return only products that can anchor a quote in the unique currently active
- * external-sales processing price book.
- *
- * Product codes are internal identifiers, not catalog membership flags. The
- * published BASE-rule productId is the authoritative binding used by the quote
- * engine, so the new-order catalog must be derived from the same snapshot.
- */
-export async function listCurrentExternalSalesProductOrderOptions(
-  now: Date = new Date(),
-): Promise<ProductOrderOption[]> {
-  return db.$transaction(async (tx) => {
-    await acquirePriceRuleSnapshotReadLock(tx);
-    const books = await tx.customerPriceBook.findMany({
-      where: {
-        settlementType: OrderSettlementType.EXTERNAL_SALES,
-        purpose: CustomerPriceBookPurpose.PROCESSING,
-        isActive: true,
-        effectiveFrom: { lte: now },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-      },
-      select: { id: true },
-      orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
-      take: 2,
-    });
-    if (books.length === 0) return [];
-    if (books.length > 1) {
-      throw new ProductInvariantError(
-        '同一结算方向同时存在多个生效加工费价目簿，请管理员修正有效期',
-      );
-    }
-
-    const rules = await tx.customerPriceRule.findMany({
-      where: {
-        priceBookId: books[0]!.id,
-        kind: CustomerPriceRuleKind.BASE,
-        isActive: true,
-        category: { isActive: true },
-        product: { is: { isActive: true } },
-        NOT: {
-          triggerCondition: {
-            path: ['target'],
-            equals: 'PACKAGING_GROUP',
-          },
-        },
-      },
-      select: {
-        product: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            category: true,
-            specification: true,
-            paperType: true,
-          },
-        },
-      },
-      orderBy: [
-        { product: { category: 'asc' } },
-        { product: { name: 'asc' } },
-        { product: { id: 'asc' } },
-        { minQty: 'asc' },
-        { id: 'asc' },
-      ],
-    });
-
-    const products = new Map<string, ProductOrderOption>();
-    for (const rule of rules) {
-      if (rule.product) products.set(rule.product.id, rule.product);
-    }
-    return [...products.values()];
-  });
-}
-
 export async function listProductCategoryOptions(
   opts: { includeInactiveIds?: readonly string[] } = {},
 ): Promise<ProductCategoryOption[]> {
@@ -557,23 +413,6 @@ export async function listProductCategoryOptions(
       explicitlyIncludedIds.has(node.id) ||
       !isRetiredProductCategory(node),
   );
-}
-
-export async function listProductOptions(
-  opts: { includeInactiveIds?: readonly string[] } = {},
-): Promise<ProductOption[]> {
-  const includeInactiveIds = [...new Set(opts.includeInactiveIds ?? [])].filter(
-    Boolean,
-  );
-  const where =
-    includeInactiveIds.length > 0
-      ? { OR: [{ isActive: true }, { id: { in: includeInactiveIds } }] }
-      : { isActive: true };
-  return db.product.findMany({
-    where,
-    select: PRODUCT_OPTION_SELECT,
-    orderBy: [{ name: 'asc' }, { code: 'asc' }],
-  });
 }
 
 // 树序（DFS）：父节点在前、子节点紧随其后，兄弟按 sortOrder → 名称。
@@ -746,6 +585,9 @@ export async function updateProductCategoryNode(
     throw new ProductInvariantError('不能将现行产品分类改为已退役分类');
   }
 
+  if (data.legacyCategory !== ProductCategory.BLANK_STOCK) {
+    await assertNotBlankBomDefault(id);
+  }
   // 刻意不允许改 path：移动子树需要级联改所有后代 path + 迁移产品
   // 归属，属独立功能；这里只改展示属性。
   return db.productCategoryNode.update({
@@ -769,6 +611,7 @@ export async function setProductCategoryNodeActive(
     throw new ProductInvariantError('历史产品分类已退役，不能重新启用');
   }
   if (target.isActive === isActive) return target;
+  if (!isActive) await assertNotBlankBomDefault(id);
 
   return db.productCategoryNode.update({
     where: { id },
@@ -796,6 +639,9 @@ export async function createProduct(data: CreateProductData): Promise<ProductSum
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
     const categoryNode = await requireActiveCategoryNode(tx, data.categoryNodeId);
+    if (categoryNode.legacyCategory === ProductCategory.BLANK_STOCK) {
+      throw new ProductInvariantError('空白封请在空白封单价表管理，无需创建产品资料');
+    }
     return tx.product.create({
       data: {
         code,
@@ -870,6 +716,11 @@ export async function updateProduct(
     await acquirePriceRuleSnapshotWriteLock(tx);
     const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
     if (!target) throw new ProductInvariantError('目标产品不存在');
+    if (target.category === ProductCategory.BLANK_STOCK) throw new ProductInvariantError('空白封历史产品资料只读，请在空白封单价表管理');
+    if (target.category === ProductCategory.COLOR_PRINT &&
+      externalPricingFactsChanged(target, data)) {
+      throw new ProductInvariantError('彩印产品的编码、规格、纸张和分类不可修改');
+    }
     if (
       externalPricingFactsChanged(target, data) &&
       (await countProtectedExternalPriceRules(tx, id, new Date())) > 0
@@ -880,6 +731,10 @@ export async function updateProduct(
       data.categoryNodeId === target.categoryNodeId
         ? { id: target.categoryNodeId, legacyCategory: target.category }
         : await requireActiveCategoryNode(tx, data.categoryNodeId);
+
+    if (categoryNode.legacyCategory === ProductCategory.BLANK_STOCK) {
+      throw new ProductInvariantError('空白封请在空白封单价表管理，无需创建产品资料');
+    }
 
     return tx.product.update({
       where: { id },
@@ -908,6 +763,66 @@ export type ProductActiveChangeContext = {
   reason: string | null;
 };
 
+/** Caller owns the transaction and holds the price snapshot write lock. */
+export async function setProductActiveInTx(
+  tx: Prisma.TransactionClient,
+  id: string,
+  isActive: boolean,
+  context: ProductActiveChangeContext,
+): Promise<ProductSummary> {
+  const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
+  if (!target) throw new ProductInvariantError('目标产品不存在');
+  if (target.category === ProductCategory.BLANK_STOCK) throw new ProductInvariantError('空白封历史产品资料只读，请通过单价表启用或停售');
+  if (isActive && isRetiredProductCategory(target.categoryNode)) {
+    throw new ProductInvariantError('该建单产品属于已退役历史分类，不能重新启用');
+  }
+  if (target.isActive === isActive) return target;
+
+  const reason = context.reason?.trim() || null;
+  if (!isActive && !reason) {
+    throw new ProductInvariantError('停用产品必须填写业务理由');
+  }
+  if (reason && reason.length > 500) {
+    throw new ProductInvariantError('操作理由不能超过 500 个字符');
+  }
+
+  // Re-read the submit-time impact after taking the same exclusive lock used
+  // by cooperating price-rule writes and order quote snapshots. BOM writes
+  // do not take this lock, so their count is a statement-time snapshot, not
+  // a global serializable snapshot. The observed impact, audit record, and
+  // status flip still commit atomically in this transaction.
+  const impact =
+    (
+      await readProductReferenceImpacts(tx, [id], new Date())
+    ).get(id) ?? emptyProductReferenceImpact();
+
+  if (
+    !isActive &&
+    (await countProtectedExternalPriceRules(tx, id, new Date())) > 0
+  ) {
+    throw new ProductInvariantError(protectedExternalPricingFactsMessage());
+  }
+
+  const updated = await tx.product.update({
+    where: { id },
+    data: { isActive },
+    select: SUMMARY_SELECT,
+  });
+  await writeAuditLogInTx(tx, {
+    actor: context.actor,
+    action: isActive ? 'PRODUCT_ACTIVATE' : 'PRODUCT_DEACTIVATE',
+    entityType: 'Product',
+    entityId: id,
+    before: { isActive: target.isActive },
+    after: { isActive: updated.isActive },
+    requestMetadata: {
+      reason,
+      referenceImpact: impact,
+    },
+  });
+  return updated;
+}
+
 export async function setProductActive(
   id: string,
   isActive: boolean,
@@ -915,55 +830,11 @@ export async function setProductActive(
 ): Promise<ProductSummary> {
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
-    const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
-    if (!target) throw new ProductInvariantError('目标产品不存在');
-    if (isActive && isRetiredProductCategory(target.categoryNode)) {
-      throw new ProductInvariantError('该建单产品属于已退役历史分类，不能重新启用');
-    }
-    if (target.isActive === isActive) return target;
-
-    const reason = context.reason?.trim() || null;
-    if (!isActive && !reason) {
-      throw new ProductInvariantError('停用产品必须填写业务理由');
-    }
-    if (reason && reason.length > 500) {
-      throw new ProductInvariantError('操作理由不能超过 500 个字符');
-    }
-
-    // Re-read the submit-time impact after taking the same exclusive lock used
-    // by cooperating price-rule writes and order quote snapshots. BOM writes
-    // do not take this lock, so their count is a statement-time snapshot, not
-    // a global serializable snapshot. The observed impact, audit record, and
-    // status flip still commit atomically in this transaction.
-    const impact =
-      (
-        await readProductReferenceImpacts(tx, [id], new Date())
-      ).get(id) ?? emptyProductReferenceImpact();
-
-    if (
-      !isActive &&
-      (await countProtectedExternalPriceRules(tx, id, new Date())) > 0
-    ) {
-      throw new ProductInvariantError(protectedExternalPricingFactsMessage());
-    }
-
-    const updated = await tx.product.update({
-      where: { id },
-      data: { isActive },
-      select: SUMMARY_SELECT,
-    });
-    await writeAuditLogInTx(tx, {
-      actor: context.actor,
-      action: isActive ? 'PRODUCT_ACTIVATE' : 'PRODUCT_DEACTIVATE',
-      entityType: 'Product',
-      entityId: id,
-      before: { isActive: target.isActive },
-      after: { isActive: updated.isActive },
-      requestMetadata: {
-        reason,
-        referenceImpact: impact,
-      },
-    });
-    return updated;
+    return setProductActiveInTx(tx, id, isActive, context);
   });
+}
+
+async function assertNotBlankBomDefault(id: string): Promise<void> {
+  const configured = await db.setting.findUnique({ where: { key: 'blank_stock_bom_category_node_id' } });
+  if (configured?.value === id) throw new ProductInvariantError('该分类用于空白封默认用料，请先调整默认用料分类');
 }

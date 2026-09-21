@@ -97,6 +97,8 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 | 类型检查 | `pnpm typecheck` |
 | 完整 lint（ESLint、UI 文案、语义令牌） | `pnpm lint` |
 | 架构门禁 | `pnpm check:architecture` |
+| 死代码候选盘点（生成 `.review/dead.json`） | `pnpm check:dead-code` |
+| 死代码候选增量门禁（与 CI 一致） | `pnpm check:dead-code --check` |
 | 目标 Vitest | `pnpm test --run <path>` |
 | 全量 Vitest | `pnpm test --run` |
 | 全量单测与覆盖率 | `pnpm exec vitest run --coverage` |
@@ -127,9 +129,23 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 完整 lint 不能用 `pnpm exec eslint .` 代替；后者不执行 UI 文案与令牌检查。单独运行 `vitest` 不会执行 `.browser.spec.tsx`。全量单测通过也不能替代浏览器或覆盖率门禁。若资源争用导致超时，可记录原因后用 `pnpm exec vitest run --coverage --maxWorkers=2` 复测；不得降低阈值或把未解释的失败记作通过。
 
+### 死代码候选审查
+
+`config/dead-code-baseline.json` 登记现存待核实候选，不代表其中代码可以删除。
+Knip、ts-prune 和循环依赖扫描共同生成证据；CI 对照稳定的文件/符号标识，忽略行号漂移。
+ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫描单独使用 `tsconfig.dead-code.json` 的 `node` 解析，保证别名指向的目录入口可被识别。应用继续使用原 `tsconfig.json`。
+新增候选会失败；已消失候选也必须从基线移除，避免留下允许旧代码重新进入的豁免。
+扫描器错误、基线缺失或格式错误均失败，检查命令不会自动更新基线。
+
+处理失败时先读 `.review/dead.json`，核对实际入口、调用链、动态加载、脚本、公开 API、
+数据库外键和历史快照，再决定修复调用或删除代码。确需保留的新候选须逐项写明实际用途和证据，
+在同一审查中更新对应基线条目；不能批量刷新基线来消除红灯。
+测试引用不能证明生产使用，模块内使用也不代表整个函数可删；扫描绿灯不证明全仓没有遗留逻辑。
+本次已清理项和保留项见 [旧产品代码审查](docs/audits/2026-09-21-legacy-code-cleanup.md)。
+
 ## 当前 CI 与发布验证缺口
 
-[Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 备份脚本 / 完整 lint / typecheck、死代码证据，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`（2 片）、`build`（用 `scripts/e2e-release-build.ts` 构建一次 `.next-release`，以 tarball 传给分片——`upload-artifact` 不保留 Turbopack 的外部包符号链接，直接传目录会让 `sharp` 找不到依赖）、`e2e` 六个分片（`chromium` 1/3–3/3 业务 E2E、`admin-375x667`、`admin-1280x800`、`worker + no-js`；即 **两视口**门禁 375×667 / 1280×800；各自 `E2E_PREBUILT=1` 复用共享构建，独占 runner / 库 / 服务，片内仍 `workers: 1`）、`durable`（真实 durable worker 排队 / 重试 / 授权下载）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部六视口及六视口 dev fixtures；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
+[Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 备份脚本 / 完整 lint / typecheck、死代码候选增量门禁，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`（2 片）、`build`（用 `scripts/e2e-release-build.ts` 构建一次 `.next-release`，以 tarball 传给分片——`upload-artifact` 不保留 Turbopack 的外部包符号链接，直接传目录会让 `sharp` 找不到依赖）、`e2e` 六个分片（`chromium` 1/3–3/3 业务 E2E、`admin-375x667`、`admin-1280x800`、`worker + no-js`；即 **两视口**门禁 375×667 / 1280×800；各自 `E2E_PREBUILT=1` 复用共享构建，独占 runner / 库 / 服务，片内仍 `workers: 1`）、`durable`（真实 durable worker 排队 / 重试 / 授权下载）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部六视口及六视口 dev fixtures；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
 
 现有打印像素基线仅有 Darwin 版，独立的 [Print (Darwin) 工作流](./.github/workflows/print-darwin.yml) 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`；macOS 按 10 倍计费，因此只在打印相关路径变动或手动 `workflow_dispatch` 时运行。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。每个作业每次都上传 `.review/`（审计与各套件 JSON，用于分析耗时），覆盖率、报告、截图和 trace 只在失败时上传；均启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。CI 下 Playwright trace 为 `on-first-retry`。
 
@@ -144,7 +160,7 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 - Vitest 的 Node 配置排除 `tests/e2e`、`tests/visual`、`.next` 和 `generated`；浏览器组件由 `vitest.browser.config.ts` 单独执行。
 - 开发 Playwright 固定默认 `http://127.0.0.1:3100`，发布配置默认 `http://127.0.0.1:3200`。`E2E_BASE_URL` 只接受本机独立端口，拒绝 3000、远程地址和带路径/query 的地址；所有模式 `reuseExistingServer=false`。
 - `E2E_DATABASE_URL` 与匹配库名的 `E2E_DATABASE_CONFIRM_DATABASE` 必填。库名须含独立 `test` / `e2e` / `ci` 分段且不含 `prod` / `production` / `live`；数据库名称必须与日常 `DATABASE_URL` 不同，即使主机不同也拒绝同名，避免 DNS 别名绕过隔离。主机百分号解码、大小写与末尾点规范化后比较，localhost、127.0.0.1、::1 视为同一主机。原目标标记只在已激活的 Playwright 子进程重载中保留；普通启动重新读取当前 URL。不要设置内部标记或 URL query 来替换主机/库名。`--list` 只收集，不连接；实际执行在 webServer/globalSetup 双重预检。
-- 全量 Vitest 的 PostgreSQL 测试也只对专用测试库运行，不能用 fixture 名称唯一代替隔离。
+- 全量 Vitest 的 PostgreSQL 测试也只对专用测试库运行，不能用 fixture 名称唯一代替隔离。CI unit 使用 `erp_e2e_unit`；生成 `.review/unit-tests.json` 后执行 `node scripts/check-blank-migration-tests.mjs`，强制空白封价格与 BOM 迁移套件实际通过，缺失、失败或跳过均失败。
 - 先 migrate/seed 隔离库，再执行 `test:e2e:prepare`。测试进程同时提供 `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`（或明确 E2E_ADMIN 覆盖）；只设置数据库不能完成登录前置。
 - `test:e2e:prepare` 先在已确认的隔离库执行 `prepare-e2e-catalog.ts`，复用 `retire-unused-paper-imports` 的完整库存、外键、历史快照、标准纸张唯一性检查及审计，再发布测试工价。空库迁移仍会恢复旧导入记录，因此不能省略此步骤或放宽工单纸张身份校验；记录已使用或改变时直接失败。此入口拒绝日常/生产库，不代替正式环境按运维流程演练和确认修复，也不修改旧迁移。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
@@ -220,3 +236,12 @@ Next、`@next/env`、`eslint-config-next` 锁定到本地已验证的 16.3.4，�
 ### 包装类型开发验收（2026-09-13）
 
 新增迁移及价格初始化步骤见 [包装类型实施记录](./docs/包装类型实施-20260913.md)。写入型测试必须使用独立数据库；包装 E2E 在 `tests/e2e/order-packaging-types.spec.ts`，纯计价边界在 `lib/price/__tests__/create-order-box-packaging.test.ts`，打印门禁在 `tests/visual/order-print.spec.ts`。不得用日常数据库运行写入夹具。
+
+### 空白封单价改造工具（2026-09-20）
+
+- `scripts/maintenance/preflight-blank-price-policy.ts --database-url <目标库>`：显式目标、只读事务，报告所有 STOCK_BASE 身份重复、存量绑定产品零价、产品与价格文本漂移、停售/缺价、历史材料价证据、BOM 映射和 Product 引用。零价清单及身份漂移会阻断自动切换；新政策无产品绑定的零价仍表示未启用。预检与调价草稿共用身份校验，不输出连接凭据，不授权删除。
+- 切换使用 `scripts/maintenance/deploy-blank-price-migrations.ts` 的显式目标保护，步骤只维护在[部署指南](./docs/部署指南.md#空白封按单价管理的升级前置2026-09-20)。该工具只允许这两条待执行迁移，不代替备份、停写和 BOM 复制。
+- `scripts/maintenance/migrate-blank-bom-targets.ts --database-url <目标库>`：默认只读；核对计划后 `--apply` 复制旧目标并审计，必要时明确 `--default-category-id`。多源歧义必须解决，不能猜第一条。
+- `scripts/maintenance/compare-paper-specs.ts`：对同库、同时间和相同用例读取前后真实目录及报价；按新政策捕获的准入差异必须逐项精确声明，正价金额不可加入忽略名单。完整实测参数与摘要见[验收记录](./docs/audits/2026-09-20-blank-price-implementation.md)。
+
+以上工具用 `node --conditions=react-server --import tsx <脚本>` 执行。写入型验证继续遵循独立可丢弃 E2E 库要求；日常库预检结果不代替正式库。

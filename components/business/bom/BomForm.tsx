@@ -7,6 +7,7 @@ import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 export type BomProductOption = {
@@ -34,6 +35,7 @@ type Props = {
     prev: BomMutationResult | null,
     fd: FormData,
   ) => Promise<BomMutationResult>;
+  papers: Array<{ id: string; name: string; specification: string | null }>;
   products: BomProductOption[];
   categories: BomCategoryOption[];
   materials: BomMaterialOption[];
@@ -42,20 +44,20 @@ type Props = {
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
-export function BomForm({ action, products, categories, materials }: Props) {
+export function BomForm({ action, products, categories, materials, papers }: Props) {
   const [state, formAction, pending] = useActionState<
     BomMutationResult | null,
     FormData
   >(action, null);
   const [rows, setRows] = useState([{ key: 0 }]);
-  const [targetType, setTargetType] = useState<'PRODUCT' | 'CATEGORY'>('PRODUCT');
+  const [targetType, setTargetType] = useState<'PRODUCT' | 'CATEGORY' | 'BLANK'>('BLANK');
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const error = state?.status === 'error' ? state.message : null;
   const missingProducts = products.length === 0;
   const missingCategories = categories.length === 0;
   const missingMaterials = materials.length === 0;
   const missingTarget =
-    targetType === 'PRODUCT' ? missingProducts : missingCategories;
+    targetType === 'BLANK' ? papers.length === 0 : targetType === 'PRODUCT' ? missingProducts : missingCategories;
 
   return (
     <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
@@ -70,11 +72,12 @@ export function BomForm({ action, products, categories, materials }: Props) {
             className={selectClass}
             value={targetType}
             onChange={(event) =>
-              setTargetType(event.target.value as 'PRODUCT' | 'CATEGORY')
+              setTargetType(event.target.value as 'PRODUCT' | 'CATEGORY' | 'BLANK')
             }
             disabled={pending}
           >
-            <option value="PRODUCT">建单产品</option>
+            <option value="BLANK">空白封纸张与规格</option>
+            <option value="PRODUCT">其他产品</option>
             <option value="CATEGORY">产品结构分类</option>
           </select>
           {errs.targetType?.[0] ? (
@@ -92,14 +95,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="productId">建单产品</Label>
-            <PendingLink
-              href={`${RULE_CENTER_HREFS.stockSkus}/new`}
-              pending={pending}
-              className="text-xs text-primary hover:underline"
-            >
-              新建可建单组合
-            </PendingLink>
+            <Label htmlFor="productId">其他产品</Label>
           </div>
           <select
             id="productId"
@@ -108,7 +104,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
             defaultValue=""
             disabled={pending || targetType !== 'PRODUCT' || missingProducts}
           >
-            <option value="">请选择建单产品</option>
+            <option value="">请选择其他产品</option>
             {products.map((product) => (
               <option key={product.id} value={product.id}>
                 {product.code ? `${product.code} · ` : ''}
@@ -153,10 +149,31 @@ export function BomForm({ action, products, categories, materials }: Props) {
         </div>
       </div>
 
+      {targetType === 'BLANK' ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="blankPaperMaterialId">纸张</Label>
+            <select id="blankPaperMaterialId" name="blankPaperMaterialId" className={selectClass} disabled={pending} defaultValue="">
+              <option value="">请选择纸张</option>
+              {papers.map((paper) => <option key={paper.id} value={paper.id}>{externalPriceBusinessText(paper.name)} {externalPriceBusinessText(paper.specification ?? '')}</option>)}
+            </select>
+            {errs.blankPaperMaterialId?.[0] ? <p className="text-sm text-destructive">{errs.blankPaperMaterialId[0]}</p> : null}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="blankSpecificationKey">规格</Label>
+            <select id="blankSpecificationKey" name="blankSpecificationKey" className={selectClass} disabled={pending} defaultValue="">
+              <option value="">请选择规格</option>
+              {BLANK_SPECIFICATIONS.map((spec) => <option key={spec.key} value={spec.key}>{spec.specification}</option>)}
+            </select>
+            {errs.blankSpecificationKey?.[0] ? <p className="text-sm text-destructive">{errs.blankSpecificationKey[0]}</p> : null}
+          </div>
+        </div>
+      ) : null}
+
       {missingTarget ? (
         <p className="text-sm text-muted-foreground">
-          {targetType === 'PRODUCT'
-            ? '暂无可用建单产品，请先创建并启用。'
+          {targetType === 'BLANK' ? '暂无可用纸张，请先维护纸张资料。' : targetType === 'PRODUCT'
+            ? '暂无可用产品。'
             : '暂无可用产品结构分类，请先创建并启用。'}
         </p>
       ) : null}

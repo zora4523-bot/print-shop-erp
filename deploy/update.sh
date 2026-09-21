@@ -118,6 +118,9 @@ if ! command -v pm2 >/dev/null 2>&1; then
   exit 1
 fi
 node --check deploy/ecosystem.config.cjs
+# Fail while the old release is still online if this one-time cutover was not
+# completed through its explicit target/preflight/locking entry point.
+pnpm exec tsx scripts/maintenance/deploy-blank-price-migrations.ts --check-applied
 
 echo "==> [4/9] 生成 Prisma Client"
 pnpm exec prisma generate

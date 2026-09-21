@@ -1,3 +1,4 @@
+import { assertBlankPriceAdmissionInTx, BlankPriceAdmissionError } from './blank-price-admission';
 import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { externalShipmentContactIssues } from './external-shipment-contact';
 import { settlementBillsLogistics } from './settlement';
@@ -818,12 +819,14 @@ export async function finalizeExternalOrderQuoteInTx(
       now,
       snapshotLockHeld: true,
     });
+    await assertBlankPriceAdmissionInTx(tx, order.items, now, { snapshot: priceSnapshot });
     pureInput = await buildCreateOrderQuoteInputFromCatalog(
       tx,
       persistedQuoteFacts(order),
     );
   } catch (error) {
     if (
+      error instanceof BlankPriceAdmissionError ||
       error instanceof CreateOrderQuoteFactsAdapterError ||
       error instanceof PublishedCreateOrderPriceAdapterError
     ) {

@@ -13,10 +13,11 @@ import {
 import { requirePermission } from '@/lib/auth/permissions';
 import { createBomSchema } from '@/lib/auth/schemas';
 import { BomInvariantError, createBom, setBomActive } from '@/lib/bom';
-import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import type { BomMutationResult } from './owner-boms.types';
 
 const BOM_UNIQUE_VIOLATIONS = [
+  { field: 'blankSpecificationKey', targets: [['blankPaperMaterialId', 'blankSpecificationKey'], ['BillOfMaterial_active_blank_target_key']], message: '该纸张规格已有启用 BOM' },
+  { field: 'version', targets: [['blankPaperMaterialId', 'blankSpecificationKey', 'version'], ['BillOfMaterial_blank_target_version_key']], message: '该纸张规格已有相同版本号 BOM' },
   {
     field: 'version',
     targets: [['productId', 'version'], ['BillOfMaterial_productId_version_key']],
@@ -68,6 +69,8 @@ function normalizeBomFormInput(formData: FormData) {
 
   return {
     targetType: getFormString(formData, 'targetType'),
+    blankPaperMaterialId: getFormStringOr(formData, 'blankPaperMaterialId', ''),
+    blankSpecificationKey: getFormStringOr(formData, 'blankSpecificationKey', ''),
     productId: getFormStringOr(formData, 'productId', ''),
     categoryNodeId: getFormStringOr(formData, 'categoryNodeId', ''),
     name: getFormString(formData, 'name'),
@@ -129,7 +132,6 @@ function revalidateBomPaths(id: string) {
   revalidatePaths([
     '/owner/boms',
     `/owner/boms/${id}`,
-    RULE_CENTER_HREFS.stockSkus,
     '/orders',
   ]);
 }

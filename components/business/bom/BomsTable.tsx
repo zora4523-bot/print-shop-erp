@@ -9,12 +9,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import type { BomSummary } from '@/lib/bom';
+import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 function targetLabel(
   bom: BomSummary,
   categoryLabelById: Record<string, string>,
 ): string {
+  if (bom.blankPaperMaterial) {
+    return `${externalPriceBusinessText(bom.blankPaperMaterial.name)} ${externalPriceBusinessText(bom.blankPaperMaterial.specification ?? '')} · ${BLANK_SPECIFICATIONS.find((spec) => spec.key === bom.blankSpecificationKey)?.label ?? bom.blankSpecificationKey}`;
+  }
   if (bom.product) {
     return `${bom.product.code ? `${bom.product.code} · ` : ''}${externalPriceBusinessText(bom.product.name)}`;
   }

@@ -27,11 +27,12 @@ type EditInitial = {
   paperType: string | null;
 };
 
-export type ProductRouteBase = typeof RULE_CENTER_HREFS.stockSkus;
+export type ProductRouteBase = typeof RULE_CENTER_HREFS.productReferences;
 
 type CommonProps = {
   routeBase?: ProductRouteBase;
   categoryManagementHref?: string;
+  identityReadOnly?: boolean;
 };
 
 type Props = CommonProps &
@@ -59,9 +60,9 @@ const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const PRODUCT_FIELD_LABELS: Record<string, string> = {
-  code: '组合编码',
+  code: '产品编码',
   categoryNodeId: '分类',
-  name: '组合名称',
+  name: '产品名称',
   specification: '规格',
   paperType: '纸张',
 };
@@ -72,6 +73,7 @@ export function ProductForm(props: Props) {
     null,
   );
   const isCreate = props.mode === 'create';
+  const identityReadOnly = !isCreate && props.identityReadOnly;
   const initial = props.mode === 'edit' ? props.initial : undefined;
 
   const visibleState = pending ? null : state;
@@ -81,7 +83,7 @@ export function ProductForm(props: Props) {
   const summaryErrors = toProductErrorSummary(errs);
   const missingCategoryNodes = props.categoryNodes.length === 0;
   const defaultCategoryNodeId = initial?.categoryNodeId ?? props.categoryNodes[0]?.id ?? '';
-  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.stockSkus;
+  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.productReferences;
   const categoryManagementHref =
     props.categoryManagementHref ?? RULE_CENTER_HREFS.productCategories;
 
@@ -94,13 +96,27 @@ export function ProductForm(props: Props) {
     >
       <FormErrorSummary errors={summaryErrors} />
 
+      {identityReadOnly && initial ? (
+        <div className="space-y-3">
+          {([
+            ['code', '产品编码', initial.code],
+            ['categoryNodeId', '产品结构分类', props.categoryNodes.find((node) => node.id === initial.categoryNodeId)?.name],
+            ['specification', '规格', initial.specification],
+            ['paperType', '纸张', initial.paperType],
+          ] as const).map(([key, label, value]) => <div key={key}>
+            <p className="text-sm text-muted-foreground">{label}</p>
+            <p className="admin-wrap-anywhere text-sm">{externalPriceBusinessText(value ?? '') || '未填写'}</p>
+            <input type="hidden" name={key} value={initial[key] ?? ''} />
+          </div>)}
+        </div>
+      ) : <>
       {isCreate ? (
         <Disclosure
           className="rounded-lg border border-dashed p-3"
           open={Boolean(errs.code?.[0])}
         >
           <DisclosureSummary className="text-muted-foreground">
-            自定义组合编码
+            自定义产品编码
           </DisclosureSummary>
           <div className="mt-3">
             <TextField
@@ -115,7 +131,7 @@ export function ProductForm(props: Props) {
       ) : (
         <TextField
           id="code"
-          label="组合编码"
+          label="产品编码"
           hint="大小写不敏感。"
           disabled={pending}
           error={errs.code?.[0]}
@@ -171,11 +187,13 @@ export function ProductForm(props: Props) {
         ) : null}
       </div>
 
+      </>}
+
       {initial ? (
         <PreservedBusinessTextField
           id="name"
-          label="组合名称"
-          fallback="未命名组合"
+          label="产品名称"
+          fallback="未命名产品"
           required
           disabled={pending}
           error={errs.name?.[0]}
@@ -184,13 +202,14 @@ export function ProductForm(props: Props) {
       ) : (
         <TextField
           id="name"
-          label="组合名称"
+          label="产品名称"
           required
           disabled={pending}
           error={errs.name?.[0]}
         />
       )}
 
+      {!identityReadOnly && <>
       {initial ? (
         <PreservedBusinessTextField
           id="specification"
@@ -231,24 +250,26 @@ export function ProductForm(props: Props) {
         />
       )}
 
+      </>}
+
       {generalError ? (
         <ActionNotice
           tone="error"
-          title="组合保存失败"
+          title="产品保存失败"
           description={generalError}
         />
       ) : null}
       {success ? (
-        <ActionNotice tone="success" title="组合已保存" />
+        <ActionNotice tone="success" title="产品已保存" />
       ) : null}
 
       <div className="flex gap-3">
         <PendingButton
           pending={pending}
-          pendingLabel="正在保存组合…"
+          pendingLabel="正在保存产品…"
           disabled={missingCategoryNodes}
         >
-          {isCreate ? '创建组合' : '保存修改'}
+          {isCreate ? '创建产品' : '保存修改'}
         </PendingButton>
         <Link href={routeBase} className={buttonVariants({ variant: 'outline' })}>
           返回列表

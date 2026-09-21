@@ -101,6 +101,8 @@ describe('createBomAction', () => {
 
     expect(bomMock.createBom).toHaveBeenCalledWith({
       targetType: 'PRODUCT',
+      blankPaperMaterialId: null,
+      blankSpecificationKey: '',
       productId: 'prod1',
       categoryNodeId: null,
       name: '红包标准 BOM',
@@ -109,7 +111,7 @@ describe('createBomAction', () => {
       items: [{ materialId: 'mat1', quantity: '500.0000', remark: null }],
     });
     expect(redirectMock).toHaveBeenCalledWith('/owner/boms/bom1?created=1');
-    expect(revalidatePathMock).toHaveBeenCalledWith(
+    expect(revalidatePathMock).not.toHaveBeenCalledWith(
       RULE_CENTER_HREFS.stockSkus,
     );
     expect(revalidatePathMock).not.toHaveBeenCalledWith('/owner/products');

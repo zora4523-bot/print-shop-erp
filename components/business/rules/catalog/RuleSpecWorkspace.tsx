@@ -80,11 +80,11 @@ export function RuleSpecWorkspace({
               规格主数据
             </h2>
             <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-              每行对应一条可建单组合，只维护产品结构、规格与纸张；价格及数量档由客户计价规则维护。
+              专版和彩印的规格与纸张资料。
             </p>
           </div>
           <span className="shrink-0 rounded-full border bg-background px-3 py-1 text-xs font-medium tabular-nums text-muted-foreground">
-            {pagination.total} 条组合
+            {pagination.total} 条产品
           </span>
         </div>
 
@@ -130,7 +130,7 @@ export function RuleSpecWorkspace({
                 defaultValue={query}
                 maxLength={120}
                 className="min-h-11 pl-9"
-                placeholder="搜索组合编码、名称、规格或纸张"
+                placeholder="搜索产品编码、名称、规格或纸张"
               />
             </div>
             <div className="flex flex-wrap gap-2">
@@ -143,7 +143,7 @@ export function RuleSpecWorkspace({
 
           <div
             role="group"
-            aria-label="组合建单可选状态筛选"
+            aria-label="产品建单可选状态筛选"
             className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border bg-muted/20 p-1"
           >
             {(
@@ -176,7 +176,7 @@ export function RuleSpecWorkspace({
       {products.length > 0 ? (
         <ul aria-label="规格主数据列表" className="divide-y">
           {products.map((product) => {
-            const name = displayText(product.name, '未命名组合');
+            const name = displayText(product.name, '未命名产品');
             const code = displayText(product.code, '未设置编码');
             const category = displayText(
               product.categoryNode.name,
@@ -231,7 +231,7 @@ export function RuleSpecWorkspace({
                   <Link
                     href={`${routeBase}/${product.id}`}
                     prefetch={false}
-                    aria-label={`编辑可建单组合：${name}`}
+                    aria-label={`编辑产品资料：${name}`}
                     className={cn(
                       buttonVariants({ variant: 'outline' }),
                       'min-h-11',
@@ -249,7 +249,7 @@ export function RuleSpecWorkspace({
         <div className="p-4 sm:p-5">
           <EmptyState
             kind={query ? 'no-result' : 'no-data'}
-            noun="可建单组合"
+            noun="产品资料"
             onClear={query ? clearSearch : undefined}
             onCreate={
               query ? undefined : (
@@ -257,7 +257,7 @@ export function RuleSpecWorkspace({
                   href={`${routeBase}/new`}
                   className={cn(buttonVariants(), 'min-h-11')}
                 >
-                  新建组合
+                  新建产品
                 </Link>
               )
             }

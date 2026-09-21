@@ -233,8 +233,8 @@ describe('workbench current-price quote', () => {
     }
     expect(result.quote.lines.reduce((sum, line) => sum.plus(line.amount), new Decimal(0)).toFixed(2)).toBe(result.quote.baseAmount);
   });
-  it('revalidates catalog facts inside the engine transaction', async () => {
-    mocks.products.mockResolvedValue([]);
+  it('revalidates paper facts inside the engine transaction', async () => {
+    mocks.materials.mockResolvedValue([]);
     expect(await quoteWorkbenchAction(input)).toMatchObject({
       status: 'error',
     });
@@ -252,15 +252,15 @@ describe('workbench current-price quote', () => {
       ...CREATE_ORDER_GOLDEN_SNAPSHOT,
       partial: { ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial, blankUnitPrices: [] },
     });
-    expect(await quoteWorkbenchAction(input)).toMatchObject({
-      status: 'success',
-      quote: {
-        needsPricing: true,
-        baseAmount: null,
-        suggestedAmount: null,
-        markupAmount: null,
-      },
+    expect(await quoteWorkbenchAction(input)).toEqual({
+      status: 'error', message: '所选空白封规格未启用，请选择其他规格或联系管理员填写正价并发布',
     });
+  });
+  it('quotes a text-only blank-price selection without any Product row', async () => {
+    const priceOption = { ...product, id: null, selectionKey: 'blank:paper:large', source: 'BLANK_PRICE', paperMaterialId: 'paper' };
+    mocks.options.mockResolvedValue({ products: [priceOption], papers: [{ id: 'paper', name: '160g珠光艳闪', specification: '160g', weight: 160, outOfStock: false }], foilColors: [{ name: '哑金' }] });
+    mocks.products.mockResolvedValue([]);
+    expect(await quoteWorkbenchAction({ ...input, productId: null, selectionKey: priceOption.selectionKey })).toMatchObject({ status: 'success', quote: { needsPricing: false } });
   });
   it('quotes size-only custom products using the current paper material catalog', async () => {
     const custom = {
@@ -423,7 +423,7 @@ describe('workbench automatic quote failure guidance', () => {
       mocks.products.mockResolvedValue([configuredProduct]);
       expect(await quoteWorkbenchAction({ ...input, specification })).toEqual({
         status: 'error',
-        message: '所选规格无法自动报价，请选择其他规格或联系管理员补充产品资料',
+        message: '所选空白封规格未启用，请选择其他规格或联系管理员填写正价并发布',
       });
     },
   );

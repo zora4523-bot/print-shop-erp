@@ -8,7 +8,7 @@ const ROOT = process.cwd();
 const STATIC_PREREQUISITES: ReadonlyArray<
   readonly [relativePath: string, copy: string]
 > = [
-  ['bom/BomForm.tsx', '暂无可用建单产品，请先创建并启用。'],
+  ['bom/BomForm.tsx', '暂无可用产品。'],
   ['bom/BomForm.tsx', '暂无可用物料，请先创建并启用至少一种物料。'],
   [
     'purchase/PurchaseOrderForm.tsx',

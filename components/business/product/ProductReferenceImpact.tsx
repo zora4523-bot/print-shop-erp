@@ -27,7 +27,7 @@ export function productReferenceImpactItems(
       label: '当前客户计价规则',
       count: impact.currentExternalPriceRuleCount,
       unit: '条',
-      description: '已发布规则保持原样；停用组合不会修改价表。',
+      description: '已发布规则保持原样；停用产品不会修改价表。',
     },
   ];
 }
@@ -38,14 +38,14 @@ export function productActiveChangeImpactItems(
 ): string[] {
   if (nextActive) {
     return [
-      '该组合会重新参与新建工单的产品结构、纸张与规格匹配。',
+      '该产品会重新参与新建工单的产品结构、纸张与规格匹配。',
       `当前绑定 ${impact.currentExternalPriceRuleCount} 条客户计价规则；重新启用不会改写已发布价格。`,
       `${impact.orderCount} 张已有工单与 ${impact.bomCount} 个 BOM 版本不会被改写。`,
     ];
   }
 
   return [
-    '该组合将退出新建工单的产品结构、纸张与规格匹配。',
+    '该产品将退出新建工单的产品结构、纸张与规格匹配。',
     `${impact.currentExternalPriceRuleCount} 条当前客户计价规则保留且不被改写。`,
     `${impact.orderCount} 张已有工单的产品和成交价保留。`,
     `${impact.bomCount} 个 BOM 版本和已有用料记录继续保留。`,

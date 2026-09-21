@@ -3,6 +3,7 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { TableScrollArea } from '@/components/ui-business';
 
 function sourceLabel(source: Estimate['items'][number]['source']): string {
+  if (source === 'BLANK') return '纸张规格物料清单';
   if (source === 'PRODUCT') return '产品物料清单';
   if (source === 'CATEGORY') return '分类物料清单';
   return '未匹配';
@@ -54,12 +55,14 @@ export function OrderMaterialUsageEstimate({
                           </div>
                         </>
                       ) : (
-                        <span className="text-muted-foreground">尚未配置物料清单</span>
+                        <span className={item.issue ? 'text-destructive' : 'text-muted-foreground'}>
+                          {item.issue ?? '尚未配置物料清单'}
+                        </span>
                       )}
                     </td>
                     <td className="py-3 pr-3 align-top">
                       {item.materials.length === 0 ? (
-                        <span className="text-muted-foreground">暂无物料</span>
+                        <span className="text-muted-foreground">{item.issue ? '未估算' : '暂无物料'}</span>
                       ) : (
                         <ul className="space-y-1">
                           {item.materials.map((material) => (
@@ -81,7 +84,9 @@ export function OrderMaterialUsageEstimate({
 
           {estimate.totals.length > 0 ? (
             <div className="rounded-lg border p-4">
-              <h3 className="mb-3 text-sm font-medium">汇总</h3>
+              <h3 className="mb-3 text-sm font-medium">
+                {estimate.items.some((item) => item.source === 'NONE') ? '已估算款式汇总' : '汇总'}
+              </h3>
               <div className="grid gap-2 md:grid-cols-2">
                 {estimate.totals.map((material) => (
                   <div

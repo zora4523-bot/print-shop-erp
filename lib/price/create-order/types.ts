@@ -67,7 +67,19 @@ export type CreateOrderConfigurationFacts = {
   craft: 'CATALOG' | 'CUSTOM';
 };
 
+export type HistoricalBlankUnitPrice = {
+  unitPrice: string;
+  source: 'CONFIRMED_ITEM_MATERIAL_LINE' | 'ADMIN_MATERIAL_CONFIRMATION';
+  sourcePriceBookId: string | null;
+  sourcePriceBookVersion: number | null;
+  confirmedAt: string | null;
+  actorId: string | null;
+  sourceItemId: string;
+};
+
 export type CreateOrderQuoteItemInput = {
+  /** Server-verified original item only; ignored while a current positive price exists. */
+  historicalBlankPrice?: HistoricalBlankUnitPrice;
   itemKey: string;
   fig: number;
   craft: CreateOrderCraft;

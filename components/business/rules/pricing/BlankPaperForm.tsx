@@ -10,7 +10,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 const selectClass =
   'h-11 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
 
@@ -27,7 +26,6 @@ export function BlankPaperForm({
   const [mode, setMode] = useState<'new' | 'existing'>(
     papers.length ? 'existing' : 'new',
   );
-  const [selected, setSelected] = useState<string[]>([]);
   const [result, action, pending] = useActionState(
     async (_previous: AddBlankPaperResult | null, form: FormData) => {
       return addBlankPaperAction({
@@ -41,9 +39,7 @@ export function BlankPaperForm({
                 name: String(form.get('paperName') ?? ''),
                 weight: Number(form.get('weight')),
               },
-        specifications: BLANK_SPECIFICATIONS.filter((spec) =>
-          selected.includes(spec.key),
-        ).map((spec) => ({
+        specifications: BLANK_SPECIFICATIONS.map((spec) => ({
           key: spec.key,
           amount: String(form.get(`price-${spec.key}`) ?? '').trim() || null,
         })),
@@ -140,39 +136,27 @@ export function BlankPaperForm({
       </fieldset>
       <fieldset disabled={pending} className="space-y-3">
         <legend className="mb-3 font-semibold">
-          适用规格与单价（元 / 个）
+          规格单价（元 / 个）
         </legend>
         <p className="text-sm text-muted-foreground">
-          至少选择一种规格；单价最多四位小数，留空为待核价。
+          单价最多四位小数；发布后正价可用于新单，0 或留空为未启用。
         </p>
         {BLANK_SPECIFICATIONS.map((spec) => (
           <div
             key={spec.key}
             className="grid grid-cols-[minmax(0,1fr)_140px] items-center gap-4 border-b pb-3 last:border-b-0"
           >
-            <label className="flex min-h-11 cursor-pointer items-center gap-2">
-              <Checkbox
-                checked={selected.includes(spec.key)}
-                disabled={pending}
-                onCheckedChange={(checked) =>
-                  setSelected((values) =>
-                    checked
-                      ? [...values, spec.key]
-                      : values.filter((value) => value !== spec.key),
-                  )
-                }
-              />
-              {spec.label}
-            </label>
+            <Label htmlFor={`price-${spec.key}`}>{spec.label}</Label>
             <Input
+              id={`price-${spec.key}`}
               name={`price-${spec.key}`}
               aria-label={`${spec.label}单价`}
               type="number"
               min={0}
               max="9999999999.9999"
               step="0.0001"
-              placeholder="待核价"
-              disabled={pending || !selected.includes(spec.key)}
+              placeholder="未启用"
+              disabled={pending}
             />
           </div>
         ))}
@@ -182,7 +166,7 @@ export function BlankPaperForm({
           {result.message}
         </p>
       ) : null}
-      <Button type="submit" disabled={pending || selected.length === 0}>
+      <Button type="submit" disabled={pending}>
         {pending ? '正在保存…' : '保存纸张与规格价格'}
       </Button>
     </form>

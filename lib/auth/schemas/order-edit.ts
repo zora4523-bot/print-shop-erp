@@ -124,6 +124,12 @@ const orderChangeId = z
   .trim()
   .regex(/^[A-Za-z0-9_-]+$/, '记录 id 格式非法');
 
+const targetBlankIdentitySchema = z.object({
+  paperType: z.string().trim().min(1).max(100),
+  paperWeightGsm: z.number().int().min(1).max(2000),
+  specification: z.string().trim().min(1).max(64),
+}).strict();
+
 const updateOrderItemChangeSchema = z
   .object({
     operation: z.literal('UPDATE'),
@@ -133,6 +139,7 @@ const updateOrderItemChangeSchema = z
     pack: z.number().int().min(1).max(9_999_999).optional(),
     specification: optionalTrimmedText('规格', 64).optional(),
     targetProductId: orderChangeId.optional(),
+    targetBlankIdentity: targetBlankIdentitySchema.optional(),
     frontFoilColors: orderItemFoilSideColorsField.optional(),
     backFoilColors: orderItemFoilSideColorsField.optional(),
     // Historical clients only submitted one aggregate array. It remains
@@ -147,6 +154,7 @@ const updateOrderItemChangeSchema = z
       value.pack !== undefined ||
       value.specification !== undefined ||
       value.targetProductId !== undefined ||
+      value.targetBlankIdentity !== undefined ||
       value.frontFoilColors !== undefined ||
       value.backFoilColors !== undefined ||
       value.foilColors !== undefined,
@@ -160,6 +168,7 @@ const addOrderItemChangeSchema = z.object({
   quantity: orderItemQuantityField,
   specification: optionalTrimmedText('规格', 64).optional(),
   targetProductId: orderChangeId.optional(),
+  targetBlankIdentity: targetBlankIdentitySchema.optional(),
   frontFoilColors: orderItemFoilSideColorsField.optional(),
   backFoilColors: orderItemFoilSideColorsField.optional(),
   foilColors: orderItemFoilColorsField.optional(),
@@ -292,6 +301,12 @@ const modifyOrderChangeRequestSchema = z
       ctx.addIssue({ code: 'custom', path: ['items'], message: '至少填写一项款式或交期修改' });
     }
     value.items.forEach((item, index) => {
+      if (item.targetBlankIdentity !== undefined) {
+        if (item.targetProductId !== undefined || item.specification !== undefined) {
+          ctx.addIssue({ code: 'custom', path: ['items', index, 'targetBlankIdentity'], message: '空白封规格不能同时提交旧产品选择' });
+        }
+        return;
+      }
       const hasSpecification = typeof item.specification === 'string';
       const hasTargetProduct = item.targetProductId !== undefined;
       if (hasSpecification === hasTargetProduct) return;

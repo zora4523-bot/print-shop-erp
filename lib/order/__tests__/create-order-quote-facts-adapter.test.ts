@@ -147,7 +147,7 @@ async function adapterError(
 }
 
 describe('buildCreateOrderQuoteInputFromCatalog', () => {
-  it('从活动 DB 产品、纸张与工艺推导规范化计价事实', async () => {
+  it('空白封从纸张、标准规格与工艺推导事实，无需读取 Product', async () => {
     const db = client();
 
     const result = await buildCreateOrderQuoteInputFromCatalog(db, input());
@@ -172,9 +172,7 @@ describe('buildCreateOrderQuoteInputFromCatalog', () => {
         },
       }),
     ]);
-    expect(db.product.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: ['product-partial-large'] } } }),
-    );
+    expect(db.product.findMany).not.toHaveBeenCalled();
     expect(db.material.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { category: 'PAPER' } }),
     );
@@ -361,83 +359,31 @@ describe('buildCreateOrderQuoteInputFromCatalog', () => {
     expect(error.code).toBe('CATALOG_PAPER_CHANGED');
   });
 
-  it('把改尺寸、手工克重和自定义纸张只标成类型化人工核价事实', async () => {
-    const items = [
-      item({ actualWidthMm: 95, actualHeightMm: 170 }),
-      item({
-        itemKey: 'style-2',
-        fig: 2,
-        productId: 'product-handmade',
-        paperType: '手工纸',
-        paperWeightGsm: 180,
-      }),
-      item({
-        itemKey: 'style-3',
-        fig: 3,
-        productId: 'product-custom-paper',
-        paperType: '客供云纹纸',
-        paperWeightGsm: 210,
-      }),
-    ];
-    const db = client({
-      products: [
-        product(),
-        product({
-          id: 'product-handmade',
-          code: 'HANDMADE-LARGE',
-          paperType: '手工纸',
-          paperMaterialId: 'paper-handmade',
-          weight: null,
-        }),
-        product({
-          id: 'product-custom-paper',
-          code: 'CUSTOM-PAPER-LARGE',
-          paperType: null,
-          paperMaterialId: null,
-          weight: null,
-        }),
-      ],
-      papers: [
-        paper(),
-        paper({
-          id: 'paper-handmade',
-          name: '手工纸',
-          specification: null,
-        }),
-      ],
-    });
-
+  it('事实层保留空白封改尺寸事实，准入层另行拒绝新业务', async () => {
     const result = await buildCreateOrderQuoteInputFromCatalog(
-      db,
-      input(items),
+      client({ products: [] }), input([item({ actualWidthMm: 95, actualHeightMm: 170 })]),
     );
-
     expect(result.items[0]?.configuration.specification).toBe('RESIZED');
-    expect(result.items[1]?.configuration).toEqual({
-      paper: 'CATALOG',
-      paperWeight: 'MANUAL',
-      specification: 'CATALOG',
-      craft: 'CATALOG',
-    });
-    expect(result.items[2]?.configuration).toEqual({
-      paper: 'CUSTOM',
-      paperWeight: 'MANUAL',
-      specification: 'CATALOG',
-      craft: 'CATALOG',
-    });
+  });
+
+  it.each(['手工纸', '客供云纹纸'])('空白封不能使用目录外纸张 %s', async (paperType) => {
+    const error = await adapterError(buildCreateOrderQuoteInputFromCatalog(
+      client({ products: [] }), input([item({ paperType, paperWeightGsm: 180 })]),
+    ));
+    expect(error.code).toBe('CATALOG_PAPER_CHANGED');
   });
 
   it.each([
     {
       label: '产品已停用',
-      db: client({ products: [product({ isActive: false })] }),
-      request: input(),
+      db: client({ products: [product({ category: 'CUSTOM_FLAT_FOIL', isActive: false })] }),
+      request: input([item({ pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL })]),
       code: 'CATALOG_PRODUCT_CHANGED',
     },
     {
       label: '产品分类与路线不符',
       db: client({ products: [product({ category: 'COLOR_PRINT' })] }),
-      request: input(),
+      request: input([item({ pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL })]),
       code: 'CATALOG_PRODUCT_MISMATCH',
     },
     {
@@ -453,16 +399,16 @@ describe('buildCreateOrderQuoteInputFromCatalog', () => {
       code: 'CATALOG_CRAFT_MISMATCH',
     },
     {
-      label: '产品关联纸已停用',
+      label: '纸张已停用',
       db: client({ papers: [paper({ isActive: false })] }),
       request: input(),
       code: 'CATALOG_PAPER_CHANGED',
     },
     {
-      label: '产品关联纸克重与报价事实不符',
+      label: '纸张克重与报价事实不符',
       db: client({ papers: [paper({ specification: '180g' })] }),
       request: input(),
-      code: 'CATALOG_PRODUCT_MISMATCH',
+      code: 'CATALOG_PAPER_CHANGED',
     },
   ])('对$label失败关闭', async ({ db, request, code }) => {
     const error = await adapterError(

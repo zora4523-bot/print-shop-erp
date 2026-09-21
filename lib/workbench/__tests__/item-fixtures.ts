@@ -22,7 +22,9 @@ export const WORKBENCH_CRAFTS = [
 export const WORKBENCH_CATALOG: ExternalCreateOrderOptions = {
   products: [
     {
-      id: 'stock',
+      id: null,
+      selectionKey: 'blank:paper:large',
+      source: 'BLANK_PRICE',
       code: null,
       name: '局部烫金',
       category: ProductCategory.BLANK_STOCK,
@@ -81,7 +83,7 @@ export const WORKBENCH_CATALOG: ExternalCreateOrderOptions = {
       widthMm: 90,
       heightMm: 165,
       productStructure: OrderProductStructure.STANDARD_ENVELOPE,
-      productIds: ['stock', 'custom', 'color'],
+      productIds: ['blank:paper:large', 'custom', 'color'],
       productCategories: [
         ProductCategory.BLANK_STOCK,
         ProductCategory.CUSTOM_FLAT_FOIL,

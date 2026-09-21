@@ -45,11 +45,11 @@ export function ToggleActiveButton({
           >
             {pending
               ? currentlyActive
-                ? '正在停用组合…'
-                : '正在启用组合…'
+                ? '正在停用产品…'
+                : '正在启用产品…'
               : currentlyActive
-                ? '停用组合'
-                : '启用组合'}
+                ? '停用产品'
+                : '启用产品'}
           </Button>
         }
         formId={formId}
@@ -57,19 +57,19 @@ export function ToggleActiveButton({
         reasonName="reason"
         reasonPlaceholder="例如：旧款停产，已由新产品替代"
         disabled={pending}>
-        <ConfirmActionDialog action={currentlyActive ? '停用该组合？' : '重新启用该组合？'} changes={[]} consequences={productActiveChangeImpactItems(impact, nextActive)} confirmText={currentlyActive ? '确认停用' : '确认启用'} />
+        <ConfirmActionDialog action={currentlyActive ? '停用产品' : '启用产品'} changes={[]} consequences={productActiveChangeImpactItems(impact, nextActive)} confirmText={currentlyActive ? '确认停用' : '确认启用'} />
       </ConfirmActionController>
       {error ? (
         <ActionNotice
           tone="error"
-          title={currentlyActive ? '组合停用失败' : '组合启用失败'}
+          title={currentlyActive ? '产品停用失败' : '产品启用失败'}
           description={error}
         />
       ) : null}
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? '组合已停用' : '组合已启用'}
+          title={currentlyActive ? '产品已停用' : '产品已启用'}
         />
       ) : null}
     </div>

@@ -33,7 +33,7 @@ export function ToggleProductCategoryActiveButton({
         pending={pending}
         formId={formId}
         deactivateImpactItems={[
-          '新建可建单组合和 BOM 不可选择该分类',
+          '新建产品资料和 BOM 不可选择该分类',
           '已有产品、BOM、工单和分类层级保留',
         ]}
       />

@@ -1,3 +1,7 @@
+vi.mock('@/lib/order/change-request-catalog-query', () => ({ listActiveOrderChangeCatalogProducts: vi.fn().mockResolvedValue([]) }));
+const { readHistoricalBlankPriceEditorMock } = vi.hoisted(() => ({ readHistoricalBlankPriceEditorMock: vi.fn().mockResolvedValue(null) }));
+vi.mock('@/lib/order/confirm-historical-blank-price', () => ({ readHistoricalBlankPriceEditor: readHistoricalBlankPriceEditorMock }));
+vi.mock('@/components/business/order/HistoricalBlankPriceEditor', () => ({ HistoricalBlankPriceEditor: () => null }));
 vi.mock('@/lib/production/report-dispute', () => ({ listOrderReportDisputes: vi.fn().mockResolvedValue([]) }));
 vi.mock('@/components/business/salary/OrderWagePanel', () => ({ OrderWagePanel: () => null }));
 vi.mock('@/actions/order-production-facts', () => ({ repairLegacyProductionFactsAction: vi.fn() }));
@@ -204,6 +208,7 @@ import OrderDetailPage from '@/app/(admin)/orders/[id]/page';
 import { readOrderActivity } from '@/lib/order/activity';
 
 beforeEach(() => {
+  readHistoricalBlankPriceEditorMock.mockClear();
   vi.mocked(readOrderActivity).mockReset().mockResolvedValue({ events: [], nextCursor: null });
   getOrderDetailMock.mockReset();
   getSalesOrderDetailByIdMock.mockReset();
@@ -586,6 +591,8 @@ describe('order detail commercial visibility', () => {
       role: Role.WORKER,
     });
     expect(getAdminOrderDetailPresentationMock).not.toHaveBeenCalled();
+    expect(readHistoricalBlankPriceEditorMock).not.toHaveBeenCalled();
+    expect(html).not.toContain('历史材料单价');
     expect(html).not.toContain('结算路径');
     expect(html).not.toContain('对客应收总额');
     expect(html).not.toContain('款式加工费');

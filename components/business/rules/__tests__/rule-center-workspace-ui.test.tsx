@@ -102,8 +102,8 @@ describe('rule center workspace UI', () => {
     );
 
     expect(visibleText(html)).toContain('规则配置中心/ 空白封单价');
-    expect(visibleText(html)).toContain('加工费当前 v3草稿 v4');
-    expect(visibleText(html)).toContain('物流费当前 v6计划 v7');
+    expect(visibleText(html)).toContain('加工费默认价格待发布');
+    expect(visibleText(html)).toContain('物流费默认价格待生效');
     expect(html).toContain('aria-label="规则中心版本与发布"');
     expect(html).toContain('aria-label="审阅价格版本变更"');
     expect(html).toContain('aria-label="进入价格版本发布"');
@@ -141,8 +141,8 @@ describe('rule center workspace UI', () => {
       />,
     );
 
-    expect(visibleText(html)).toContain('加工费当前 v4');
-    expect(visibleText(html)).toContain('物流费当前 v2');
+    expect(visibleText(html)).toContain('加工费默认价格');
+    expect(visibleText(html)).toContain('物流费默认价格');
     expect(visibleText(html)).toContain('审阅变更');
     expect(visibleText(html)).not.toContain('发布');
     expect(html).not.toContain('aria-label="进入价格版本发布"');
@@ -173,7 +173,7 @@ describe('rule center workspace UI', () => {
       />,
     );
 
-    expect(visibleText(html)).toContain('加工费当前 v4草稿 v5');
+    expect(visibleText(html)).toContain('加工费默认价格待发布');
     expect(html).not.toContain('aria-label="审阅价格版本变更"');
     expect(html).not.toContain('aria-label="进入价格版本发布"');
   });

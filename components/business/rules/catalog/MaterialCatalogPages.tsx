@@ -1,3 +1,5 @@
+import { createCatalogPaperAction } from '@/actions/catalog-paper';
+import { NewCatalogPaperForm } from './NewCatalogPaperForm';
 import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -5,7 +7,6 @@ import {
   createMaterialAction,
   createNonPaperMaterialAction,
   createMaterialTransactionAction,
-  createPaperAction,
   createPaperTransactionAction,
   setPaperActiveAction,
   updateMaterialAction,
@@ -109,7 +110,7 @@ export async function MaterialCatalogList({
   category,
   excludeCategory,
 }: MaterialCatalogListProps) {
-  await requirePermission('material:manage');
+  const actor = await requirePermission('material:manage');
   const sp = await searchParams;
   const q = firstSearchParam(sp.q).trim();
   const page = parsePositiveInt(sp.page, { defaultValue: 1, min: 1 });
@@ -145,9 +146,10 @@ export async function MaterialCatalogList({
           title="纸张"
           subtitle="维护建单可选纸张与库存运营状态；历史工单引用保留。"
           actions={
-            <Link href={`${routeBase}/new`} className={buttonVariants()}>
-              新建纸张
-            </Link>
+            <div className="flex flex-wrap gap-3">
+              {hasPermission('dict:product:manage', actor.role) ? <Link href="/owner/rules/specifications" className={buttonVariants({ variant: 'outline' })}>规格目录</Link> : null}
+              <Link href={`${routeBase}/new`} className={buttonVariants()}>新建纸张</Link>
+            </div>
           }
         />
       ) : (
@@ -250,7 +252,6 @@ export async function NewMaterialCatalogItem({
         <RuleCenterPageHeader
           title="新建纸张"
           effect="immediate"
-          subtitle="默认启用；库存通过出入库维护。"
           actions={
             <Link
               href={routeBase}
@@ -276,19 +277,15 @@ export async function NewMaterialCatalogItem({
       )}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
-        <MaterialForm
+        {paperOnly ? <NewCatalogPaperForm action={createCatalogPaperAction} /> : <MaterialForm
           mode="create"
           action={
-            paperOnly
-              ? createPaperAction
-              : excludesPaper
-                ? createNonPaperMaterialAction
-                : createMaterialAction
+            excludesPaper ? createNonPaperMaterialAction : createMaterialAction
           }
           routeBase={routeBase}
           categoryScope={categoryScope}
           excludedCategories={excludedCategories}
-        />
+        />}
       </section>
     </div>
   );
@@ -384,6 +381,8 @@ export async function EditMaterialCatalogItem({
           categoryScope={categoryScope}
         />
       </section>
+
+      {paperOnly ? <Link href="/owner/rules/customer-pricing?section=blank" className={buttonVariants({ variant: 'outline' })}>管理空白封单价</Link> : null}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">库存出入库</h2>

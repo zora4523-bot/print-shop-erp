@@ -19,6 +19,7 @@ describe('业务路径的导入来源标识隔离', () => {
           },
         ]}
         categories={[]}
+        papers={[{ id: 'paper-1', name: '红卡（纸张表!A1）', specification: '180g' }]}
         materials={[
           {
             id: 'material-1',
@@ -33,7 +34,7 @@ describe('业务路径的导入来源标识隔离', () => {
     expect(html).toContain('现货大号');
     expect(html).toContain('通版现货');
     expect(html).toContain('纸张未标');
-    expect(html).not.toMatch(/产品表!C2|分类表!A4|烫金!B13/);
+    expect(html).not.toMatch(/产品表!C2|分类表!A4|烫金!B13|纸张表!A1/);
   });
 
   it('BOM 列表与用量估算不泄漏来源坐标', () => {

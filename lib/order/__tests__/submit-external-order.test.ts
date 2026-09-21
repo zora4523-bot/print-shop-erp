@@ -535,15 +535,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       now: NOW,
       snapshotLockHeld: true,
     });
-    expect(mocks.productFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          id: {
-            in: ['product-stock-large-1', 'product-stock-large-2'],
-          },
-        },
-      }),
-    );
+    expect(mocks.productFindMany).not.toHaveBeenCalled();
     expect(mocks.resolveLogistics).toHaveBeenCalledWith(
       tx,
       {
@@ -880,7 +872,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     );
   });
 
-  it('查不到价时款式、包装和物流均转人工，不把 0 元当作报价', async () => {
+  it('非空白缺价时款式、包装和物流均转人工，不把 0 元当作报价', async () => {
     const order = draftOrder({
       items: [
         item(),
@@ -890,6 +882,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
           fig: 2,
           name: '款式 2',
           productId: 'product-red-large',
+          pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+          crafts: ['craft-full'],
           paperType: '180g红卡',
           paperWeightGsm: 180,
           quantity: 500,
@@ -899,13 +893,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     });
     const manualSnapshot: CreateOrderPriceSnapshot = {
       ...CREATE_ORDER_GOLDEN_SNAPSHOT,
-      partial: {
-        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
-        blankUnitPrices:
-          CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map((row) =>
-            row.paperType === '红卡' ? { ...row, unitPrice: null } : row,
-          ),
-      },
+      full: { ...CREATE_ORDER_GOLDEN_SNAPSHOT.full, unitPrices: [] },
       orderCharges: {
         ...CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges,
         rules: CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges.rules.filter(
@@ -918,11 +906,16 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       catalogProduct(),
       catalogProduct({
         id: 'product-red-large',
-        code: 'EXT-STOCK-RED-180-LARGE',
+        code: 'EXT-CUSTOM-RED-180-LARGE',
+        category: 'CUSTOM_FLAT_FOIL',
         paperType: '180g红卡',
         paperMaterialId: 'paper-red-180',
         weight: 180,
       }),
+    ]);
+    mocks.craftFindMany.mockResolvedValue([
+      { id: 'craft-partial', code: 'FLAT_FOIL_PARTIAL', isActive: true },
+      { id: 'craft-full', code: 'FLAT_FOIL_SINGLE', isActive: true },
     ]);
     mocks.materialFindMany.mockResolvedValue([
       catalogPaper(),
@@ -1014,6 +1007,78 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         expectedPriceRevision: 1,
       }),
     );
+  });
+
+  it('空白封缺价时拒绝首次提交且不写入任何金额', async () => {
+    const order = draftOrder({
+      items: [
+        item(),
+        item({
+          id: 'item-2',
+          sequence: 2,
+          fig: 2,
+          name: '款式 2',
+          productId: 'product-red-large',
+          paperType: '180g红卡',
+          paperWeightGsm: 180,
+          quantity: 500,
+          product: { paperMaterialId: 'paper-red-180' },
+        }),
+      ],
+    });
+    const manualSnapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      partial: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
+        blankUnitPrices:
+          CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map((row) =>
+            row.paperType === '红卡' ? { ...row, unitPrice: null } : row,
+          ),
+      },
+      orderCharges: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges,
+        rules: CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges.rules.filter(
+          (rule) => rule.kind !== 'PACKAGING',
+        ),
+      },
+    };
+    mocks.readPublishedSnapshot.mockResolvedValue(manualSnapshot);
+    mocks.productFindMany.mockResolvedValue([
+      catalogProduct(),
+      catalogProduct({
+        id: 'product-red-large',
+        code: 'EXT-STOCK-RED-180-LARGE',
+        paperType: '180g红卡',
+        paperMaterialId: 'paper-red-180',
+        weight: 180,
+      }),
+    ]);
+    mocks.materialFindMany.mockResolvedValue([
+      catalogPaper(),
+      catalogPaper({
+        id: 'paper-red-180',
+        name: '180g红卡',
+      }),
+    ]);
+    mocks.resolveLogistics.mockResolvedValue(
+      resolvedLogistics([
+        resolvedCharge({ code: 'SHIPPING_FEE', amount: '41.30' }),
+        resolvedCharge({
+          code: 'PACKING_MATERIAL',
+          amount: '0.00',
+          requiresAdmin: true,
+          ruleCode: null,
+        }),
+      ]),
+    );
+
+    const tx = txFor(order);
+    await expect(finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient,
+      'order-1', 'sales-1', NOW, null)).rejects.toThrow('未启用');
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
+    expect(tx.orderPackagingGroup.update).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
   });
 
   it('顺丰到付与默认零版费仍可完整自动报价', async () => {
@@ -1140,7 +1205,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.orderItem.update).not.toHaveBeenCalled();
   });
 
-  it('内销工单的配置外款式不做纸张目录校验，进入人工核价而不是被拦', async () => {
+  it('内销空白封不能通过配置外说明绕过纸张规格准入', async () => {
     const order = draftOrder({
       settlementType: OrderSettlementType.INTERNAL_SALES,
       items: [
@@ -1184,8 +1249,10 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       NOW,
     ).catch((error: unknown) => error);
     if (outcome instanceof Error) {
-      expect(outcome.message).not.toMatch(/纸张/);
+      expect(outcome.message).toMatch(/空白封纸张、克重和标准规格/);
     }
+    expect(outcome).toBeInstanceOf(Error);
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
     expect(mocks.readPublishedSnapshot).toHaveBeenCalled();
   });
 

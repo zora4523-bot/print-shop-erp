@@ -178,7 +178,9 @@ function quotePartialProcessing(
     };
   }
   const selected = selectPartialUnitPrice(item, snapshot.partial);
-  if (!selected) {
+  const currentRate = selected?.unitPrice == null ? null : decimalValue(selected.unitPrice);
+  const historicalPrice = !currentRate?.gt(0) ? item.historicalBlankPrice : undefined;
+  if (!selected && !historicalPrice) {
     return {
       lines: [],
       amount: null,
@@ -192,8 +194,9 @@ function quotePartialProcessing(
       errors: [],
     };
   }
-  const blankRate =
-    selected.unitPrice === null ? null : decimalValue(selected.unitPrice);
+  const blankRate = historicalPrice
+    ? decimalValue(historicalPrice.unitPrice)
+    : currentRate;
   const fixedPerPass = decimalValue(
     snapshot.partial.machineFee.fixedFeePerPass,
   );
@@ -276,6 +279,15 @@ function quotePartialProcessing(
           paperType: item.paperType,
           paperWeightGsm: item.paperWeightGsm,
           specification: item.specification,
+          ...(historicalPrice ? {
+            historicalPriceSource: historicalPrice.source,
+            sourceItemId: historicalPrice.sourceItemId,
+            sourcePriceBookId: historicalPrice.sourcePriceBookId,
+            sourcePriceBookVersion: historicalPrice.sourcePriceBookVersion,
+            confirmedAt: historicalPrice.confirmedAt,
+            actorId: historicalPrice.actorId,
+            historicalPriceReason: 'CURRENT_BLANK_PRICE_UNAVAILABLE',
+          } : {}),
         },
       }),
       quotedItemLine({

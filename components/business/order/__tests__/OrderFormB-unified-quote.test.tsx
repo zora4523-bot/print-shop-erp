@@ -129,6 +129,21 @@ function quoteInput(args: {
 }
 
 describe('OrderForm B unified external-sales quote', () => {
+  it.each(['manualQuoteReason', 'artworkVersion'] as const)(
+    'keeps %s blank DOM input and restored null draft on the same quote key',
+    (field) => {
+      const watched = { quantity: 1000, [field]: null };
+      const registered = { ...watched, [field]: '' };
+      expect(quoteFactsKey(watched, 1)).toBe(quoteFactsKey(registered, 1));
+      expect(quoteFactsKey(watched, 1)).toBe(
+        quoteFactsKey({ ...watched, [field]: '  ' }, 1),
+      );
+      expect(quoteFactsKey(watched, 1)).not.toBe(
+        quoteFactsKey({ ...watched, [field]: '需核实' }, 1),
+      );
+    },
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

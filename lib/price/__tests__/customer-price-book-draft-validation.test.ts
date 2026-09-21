@@ -840,3 +840,23 @@ describe('validateDraftPriceBookRules', () => {
     );
   });
 });
+
+describe('空白封文本价格唯一性', () => {
+  const blank = (id: string, specification: string, amount = '0.1350') => rule({
+    id, code: id, productId: null, product: null, exclusiveGroup: 'STOCK_BASE', minQty: 1, maxQty: null, amount,
+    category: { code: 'BASE_PROCESSING', name: '基础加工费', isActive: true },
+    triggerCondition: { schemaVersion: 1, target: 'ITEM', pricingRoutes: ['STOCK_BLANK'], paperTypes: ['180g红卡'], specifications: [specification] },
+  });
+  it('无产品不同规格与全部零价不会被当作基础阶梯重叠', () => {
+    expect(validateDraftPriceBookRules({ purpose: 'PROCESSING', rules: [blank('mid', '中号封'), blank('large', '大号封')] })).toEqual([]);
+    expect(validateDraftPriceBookRules({ purpose: 'PROCESSING', rules: [blank('mid', '中号封', '0'), blank('large', '大号封', '0')] })).toEqual([]);
+  });
+  it('规格别名同键仍拒绝，即使两条价格相同', () => {
+    expect(validateDraftPriceBookRules({ purpose: 'PROCESSING', rules: [blank('mid', '中号封'), blank('alias', '中号80×115')] }))
+      .toContainEqual(expect.objectContaining({ message: expect.stringContaining('单价重复') }));
+  });
+  it('损坏纸张身份与 null 金额不能伪装未启用', () => {
+    const broken = blank('broken', '中号封'); broken.amount = null;
+    expect(validateDraftPriceBookRules({ purpose: 'PROCESSING', rules: [broken] })).not.toEqual([]);
+  });
+});

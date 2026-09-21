@@ -1,3 +1,4 @@
+import { blankPriceIdentity } from '@/lib/price/blank-price-identity';
 import type { ComponentProps, ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,7 @@ import type {
 } from '@/lib/price/customer-price-section-workspace';
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/actions/blank-paper', () => ({ updateBlankPriceMatrixFormAction: vi.fn() }));
 
 vi.mock('@/actions/customer-price-books', () => ({
   updateCustomerPriceSectionDraftFormAction: vi.fn(),
@@ -201,14 +203,54 @@ function editablePrintFoilRule(): CustomerPriceSectionRuleDto {
 }
 
 describe('CustomerPricingDedicatedSection', () => {
-  it('无价格的已启用规格显示转人工，未配置规格显示不适用', () => {
+  it('移除未被现行价目引用的停用占位纸张，保留缺货和在用异常资料', () => {
     const data = workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')]);
-    data.blankProducts = [{ id: 'new-product', paperType: '160g新纸张', specification: '中号封80×115' }];
+    data.blankPapers = [
+      ...['纸张未标（烫金!B13）', '纸张未标（烫金!B6）', '纸张未标（烫金!B7）', '触感纸（克重未标）'].map((label, index) => ({
+        id: `legacy-${index}`, label, isActive: false, available: false, issue: '纸张名称或克重不完整',
+      })),
+      { id: 'out-of-stock', label: '180g红卡', isActive: true, available: false, issue: '纸张缺货' },
+      { id: 'incomplete', label: '待补克重新纸张', isActive: true, available: false, issue: '纸张名称或克重不完整' },
+    ];
+    const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
+    expect(html).not.toMatch(/纸张未标|克重未标|烫金!B/u);
+    expect(html).toContain('红卡');
+    expect(html).toContain('纸张缺货');
+    expect(html).toContain('待补克重新纸张');
+  });
+
+  it('停用纸张仍有价目引用时保留价格和异常提示', () => {
+    const rule = editableBagRule();
+    rule.draft = { ...rule.draft!, amount: '0.135', isActive: true,
+      exclusiveGroup: 'STOCK_BASE', blankIdentity: blankPriceIdentity({ paperType: '180g红卡', specification: '中号封' }) };
+    const data = workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')], [rule]);
+    data.blankPapers = [{ id: 'stopped', label: '180g红卡', isActive: false, available: false, issue: '纸张已停用' }];
+    const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
+    expect(html).toContain('红卡');
+    expect(html).toContain('0.135');
+    expect(html).toContain('纸张已停用');
+  });
+
+  it('停用重复记录仍参与身份查重，不把同名在用记录误开放编辑', () => {
+    const data = workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')]);
+    data.blankPapers = [
+      { id: 'active', label: '160g冰白纸', isActive: true, available: true, issue: null },
+      { id: 'stopped', label: '160g冰白纸', isActive: false, available: false, issue: '纸张已停用' },
+    ];
+    const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
+    expect(html).toContain('纸张资料重复');
+    expect(html).not.toContain('<input');
+  });
+
+  it('已有纸张的六种规格均可直接录价，空格显示未启用', () => {
+    const data = workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')]);
+    data.blankPapers = [{ id: 'paper', label: '160g新纸张', isActive: true, available: true, issue: null }];
     const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
     expect(html).toContain('新纸张');
     expect(html).toContain('新增纸张 / 规格');
-    expect(html).toContain('— 转人工');
-    expect(html).toContain('不适用');
+    expect(html).toContain('未启用');
+    expect(html).not.toContain('不适用');
+    expect([...html.matchAll(/<input/gu)]).toHaveLength(6);
   });
 
   it('新编码按规格进入正确列，同克重中文纸张的输入框不重名', () => {
@@ -216,14 +258,16 @@ describe('CustomerPricingDedicatedSection', () => {
       ...editableBagRule(),
       id: `blank-${index}`, code: `NEW-CODE-${index}`,
       draft: { ...editableBagRule().draft, id: `blank-${index}`, code: `NEW-CODE-${index}`,
-        exclusiveGroup: 'STOCK_BASE', product: { id: `product-${index}`, code: `NEW-CODE-${index}`, paperType: `160g${name}`, specification: '中号封80×115' } },
+        exclusiveGroup: 'STOCK_BASE', blankIdentity: blankPriceIdentity({ paperType: `160g${name}`, specification: '中号封' }), product: { id: `product-${index}`, code: `NEW-CODE-${index}`, paperType: `160g${name}`, specification: '中号封80×115' } },
     } as CustomerPriceSectionRuleDto));
-    const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')], rules)} createDraftPurpose={null} />);
+    const data = workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')], rules);
+    data.blankPapers = ['甲纸', '乙纸'].map((name, index) => ({ id: `paper-${index}`, label: `160g${name}`, isActive: true, available: true, issue: null }));
+    const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
     expect(html).toContain('甲纸160g中号封单价');
     expect(html).toContain('乙纸160g中号封单价');
     const ids = [...html.matchAll(/<input[^>]*id="([^"]+)"/gu)].map(match => match[1]);
-    expect(ids).toHaveLength(2);
-    expect(new Set(ids).size).toBe(2);
+    expect(ids).toHaveLength(12);
+    expect(new Set(ids).size).toBe(12);
   });
 
   it.each([
@@ -444,9 +488,9 @@ describe('CustomerPricingDedicatedSection', () => {
 });
 
 it('hides retired 120g pricing rows while leaving persisted rules unchanged', () => {
-  const retired = { ...editableBagRule(), id: 'retired-120', code: 'RETIRED-120', draft: { ...editableBagRule().draft, id: 'retired-120', code: 'RETIRED-120', exclusiveGroup: 'STOCK_BASE', product: { id: 'retired-product', code: 'RETIRED-120', name: '120g珠光艳闪', paperType: '120g珠光艳闪', specification: '迷你封50×80' } } } as CustomerPriceSectionRuleDto;
+  const retired = { ...editableBagRule(), id: 'retired-120', code: 'RETIRED-120', draft: { ...editableBagRule().draft, id: 'retired-120', code: 'RETIRED-120', exclusiveGroup: 'STOCK_BASE', blankIdentity: blankPriceIdentity({ paperType: '120g珠光艳闪', specification: '迷你封' }), product: { id: 'retired-product', code: 'RETIRED-120', name: '120g珠光艳闪', paperType: '120g珠光艳闪', specification: '迷你封50×80' } } } as CustomerPriceSectionRuleDto;
   const data = workspace('blank', [source(CustomerPriceBookPurpose.PROCESSING, 'draft')], [retired]);
-  data.blankProducts = [{ id: 'retired-product', paperType: '120g珠光艳闪', specification: '迷你封50×80' }, { id: 'active', paperType: '160g珠光艳闪', specification: '大号封90×165' }];
+  data.blankPapers = [{ id: 'retired', label: '120g珠光艳闪', isActive: true, available: true, issue: null }, { id: 'active', label: '160g珠光艳闪', isActive: true, available: true, issue: null }];
   const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
   expect(html).not.toContain('120g');
   expect(html).toContain('160g');

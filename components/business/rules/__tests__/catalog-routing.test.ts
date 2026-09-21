@@ -8,9 +8,9 @@ const CANONICAL_RULE_ROUTES = [
   ['app/(admin)/owner/rules/papers/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/papers/new/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/papers/[id]/page.tsx', '/catalog/'],
-  ['app/(admin)/owner/rules/stock-skus/page.tsx', '/catalog/'],
-  ['app/(admin)/owner/rules/stock-skus/new/page.tsx', '/catalog/'],
-  ['app/(admin)/owner/rules/stock-skus/[id]/page.tsx', '/catalog/'],
+  ['app/(admin)/owner/rules/product-categories/items/page.tsx', '/catalog/'],
+  ['app/(admin)/owner/rules/product-categories/items/new/page.tsx', '/catalog/'],
+  ['app/(admin)/owner/rules/product-categories/items/[id]/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/product-categories/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/product-categories/new/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/product-categories/[id]/page.tsx', '/catalog/'],
@@ -59,7 +59,8 @@ describe('rule-center feature routing', () => {
       'utf8',
     );
 
-    expect(materialCatalog).toContain('createPaperAction');
+    // PLAN S1: paper creation now uses the name/weight-only canonical entry.
+    expect(materialCatalog).toContain('createCatalogPaperAction');
     expect(materialCatalog).toContain('createNonPaperMaterialAction');
     expect(materialCatalog).toContain('updatePaperAction');
     expect(materialCatalog).toContain('setPaperActiveAction');
@@ -95,7 +96,7 @@ describe('rule-center feature routing', () => {
     expect(paperWorkspace).not.toContain('MaterialsTable');
   });
 
-  it('规格分区使用独立工作台，默认 SKU 列表保留通用表格', () => {
+  it('其他路线产品资料保留规格工作台与资料表格', () => {
     const productCatalog = readFileSync(
       join(
         ROOT,
@@ -112,7 +113,7 @@ describe('rule-center feature routing', () => {
     );
 
     expect(productCatalog).toContain(
-      'routeBase === RULE_CENTER_HREFS.stockSkus',
+      'routeBase === RULE_CENTER_HREFS.productReferences',
     );
     expect(productCatalog).toContain("firstSearchParam(sp.section) === 'specs'");
     expect(productCatalog).toMatch(
@@ -131,7 +132,7 @@ describe('rule-center feature routing', () => {
       'utf8',
     );
 
-    expect(bomForm).toContain('RULE_CENTER_HREFS.stockSkus');
+    expect(bomForm).not.toContain('RULE_CENTER_HREFS.stockSkus');
     expect(bomForm).toContain('RULE_CENTER_HREFS.productCategories');
     expect(bomForm).not.toContain('/owner/products/new');
     expect(bomForm).not.toContain('/owner/product-categories/new');

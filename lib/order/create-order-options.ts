@@ -1,4 +1,4 @@
-import { Prisma, type ProductCategory } from '../../generated/prisma/client';
+import { Prisma, ProductCategory } from '../../generated/prisma/client';
 import { db } from '../db';
 import {
   listExternalCreateOrderFoilOptions,
@@ -19,6 +19,13 @@ import {
   normalizeCatalogPricingText,
   parseCatalogDimensions,
 } from './catalog-pricing-facts';
+import Decimal from 'decimal.js';
+import { BLANK_SPECIFICATIONS } from '../price/blank-paper';
+import { blankPriceIdentity } from '../price/blank-price-identity';
+import { catalogPaperPricingFacts } from './catalog-paper-identity';
+import { isRetiredPaper } from '../rules/paper-availability';
+import { readPublishedCreateOrderPriceSnapshot } from './create-order-published-rule-adapter';
+import type { CreateOrderPriceSnapshot } from '../price/create-order/types';
 import { canonicalizeCreateOrderSpecification } from '../price/create-order/canonical-facts';
 
 export type ExternalCreateOrderSpecificationOption = {
@@ -32,8 +39,15 @@ export type ExternalCreateOrderSpecificationOption = {
   productCategories: readonly ProductCategory[];
 };
 
+/** Catalog selection identity is distinct from an optional persisted Product FK. */
+export type CreateOrderCatalogOption = Omit<ExternalCreateOrderProductOption, 'id'> & {
+  id: string | null;
+  selectionKey?: string;
+  source?: 'BLANK_PRICE';
+};
+
 export type ExternalCreateOrderOptions = {
-  products: readonly ExternalCreateOrderProductOption[];
+  products: readonly CreateOrderCatalogOption[];
   papers: readonly ExternalCreateOrderPaperOption[];
   specifications: readonly ExternalCreateOrderSpecificationOption[];
   foilColors: readonly ExternalCreateOrderFoilOption[];
@@ -42,7 +56,7 @@ export type ExternalCreateOrderOptions = {
 export type ExternalCreateOrderOptionsReadClient =
   CreateOrderMaterialReadClient &
     CreateOrderProductReadClient &
-    Pick<Prisma.TransactionClient, '$executeRaw'>;
+    Pick<Prisma.TransactionClient, '$executeRaw' | 'customerPriceBook' | 'customerPriceRule'>;
 
 export class ExternalCreateOrderOptionsError extends Error {
   constructor(
@@ -59,18 +73,19 @@ export class ExternalCreateOrderOptionsError extends Error {
 
 function assertUniqueOptionIdentities(
   kind: string,
-  options: readonly { id: string; code: string | null }[],
+  options: readonly { id: string | null; selectionKey?: string; code: string | null }[],
 ): void {
   const ids = new Set<string>();
   const codes = new Set<string>();
   for (const option of options) {
-    if (ids.has(option.id)) {
+    const key = option.selectionKey ?? option.id;
+    if (!key || ids.has(key)) {
       throw new ExternalCreateOrderOptionsError(
         'DUPLICATE_ID',
         `${kind}配置存在重复 id：${option.id}`,
       );
     }
-    ids.add(option.id);
+    ids.add(key);
 
     const code = option.code?.trim().toLocaleUpperCase('en-US');
     if (!code) continue;
@@ -85,7 +100,7 @@ function assertUniqueOptionIdentities(
 }
 
 function configuredSpecifications(
-  products: readonly ExternalCreateOrderProductOption[],
+  products: readonly CreateOrderCatalogOption[],
 ): ExternalCreateOrderSpecificationOption[] {
   type MutableSpecification = {
     specCode: string;
@@ -118,7 +133,7 @@ function configuredSpecifications(
           productIds: new Set<string>(),
           productCategories: new Set<ProductCategory>(),
         } satisfies MutableSpecification);
-      configured.productIds.add(product.id);
+      if (product.id) configured.productIds.add(product.id);
       configured.productCategories.add(product.category);
       byCode.set(specCode, configured);
     }
@@ -145,17 +160,25 @@ function configuredSpecifications(
  */
 export async function readExternalCreateOrderOptions(
   client: ExternalCreateOrderOptionsReadClient,
-  options: { snapshotLockHeld?: boolean } = {},
+  options: { snapshotLockHeld?: boolean; now?: Date } = {},
 ): Promise<ExternalCreateOrderOptions> {
   if (!options.snapshotLockHeld) {
     await acquirePriceRuleSnapshotReadLock(client);
   }
 
-  const [products, papers, foilColors] = await Promise.all([
+  const [legacyProducts, papers, foilColors, prices, blankPaperIdentities] = await Promise.all([
     listExternalCreateOrderProductOptions(client),
     listExternalCreateOrderPaperOptions(client),
     listExternalCreateOrderFoilOptions(client),
+    readPublishedCreateOrderPriceSnapshot(client, { now: options.now, snapshotLockHeld: true }),
+    // Blank admission resolves against all PAPER records, including retired
+    // identities. Keep its ambiguity boundary identical in the picker.
+    client.material.findMany({ where: { category: 'PAPER' },
+      select: { id: true, name: true, specification: true, isActive: true } }),
   ]);
+
+  const products = [...legacyProducts.filter((product) => product.category !== ProductCategory.BLANK_STOCK),
+    ...blankPriceCatalogOptions(prices, blankPaperIdentities)];
 
   if (foilColors.length === 0) {
     throw new ExternalCreateOrderOptionsError(
@@ -179,4 +202,25 @@ export async function readExternalCreateOrderOptions(
 /** Standalone server entry point; composition code should use the reader above. */
 export async function listExternalCreateOrderOptions(): Promise<ExternalCreateOrderOptions> {
   return db.$transaction((tx) => readExternalCreateOrderOptions(tx));
+}
+
+/** Positive published prices provide selections without allocating Product records. */
+export function blankPriceCatalogOptions(
+  snapshot: CreateOrderPriceSnapshot,
+  papers: readonly { id: string; name: string; specification: string | null; isActive: boolean }[],
+): CreateOrderCatalogOption[] {
+  return snapshot.partial.blankUnitPrices.flatMap((price) => {
+    const identity = blankPriceIdentity(price);
+    if (!identity || price.unitPrice === null || !new Decimal(price.unitPrice).gt(0) ||
+        isRetiredPaper({ weight: identity.paperWeightGsm })) return [];
+    const matches = papers.filter((paper) => catalogPaperPricingFacts(paper).some((fact) =>
+      fact.paperType === identity.paperType && fact.paperWeightGsm === identity.paperWeightGsm));
+    if (matches.length !== 1 || !matches[0]!.isActive) return [];
+    const paper = matches[0]!;
+    const spec = BLANK_SPECIFICATIONS.find((candidate) => candidate.key === identity.specificationKey)!;
+    return [{ id: null, selectionKey: `blank:${paper.id}:${spec.key}`, source: 'BLANK_PRICE' as const,
+      code: null, name: `${identity.paperLabel} ${spec.label}`, category: ProductCategory.BLANK_STOCK,
+      specification: spec.specification, paperType: identity.paperLabel,
+      paperMaterialId: paper.id, weight: identity.paperWeightGsm }];
+  });
 }

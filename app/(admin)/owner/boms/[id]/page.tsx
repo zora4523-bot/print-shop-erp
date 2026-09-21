@@ -12,6 +12,7 @@ import {
   categoryChainLabelMap,
   listProductCategoryNodes,
 } from '@/lib/product';
+import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type PageProps = {
@@ -23,6 +24,9 @@ async function targetLabel(
   bom: Awaited<ReturnType<typeof getBomDetail>>,
 ): Promise<string> {
   if (!bom) return '—';
+  if (bom.blankPaperMaterial) {
+    return `${externalPriceBusinessText(bom.blankPaperMaterial.name)} ${externalPriceBusinessText(bom.blankPaperMaterial.specification ?? '')} · ${BLANK_SPECIFICATIONS.find((spec) => spec.key === bom.blankSpecificationKey)?.label ?? bom.blankSpecificationKey}`;
+  }
   if (bom.product) {
     return `${bom.product.code ? `${bom.product.code} · ` : ''}${externalPriceBusinessText(bom.product.name)}`;
   }
@@ -124,15 +128,15 @@ export default async function OwnerBomDetailPage({ params, searchParams }: PageP
         </TableScrollArea>
       </section>
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm">
+      {bom.product?.category === 'BLANK_STOCK' ? <p className="text-sm text-muted-foreground">此清单用于历史工单，不能再修改。</p> : <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-2 text-base font-semibold">
           {bom.isActive ? '停用 BOM' : '启用 BOM'}
         </h2>
         <p className="mb-3 text-sm text-muted-foreground">
-          启用时会检查同一产品或分类是否已有启用 BOM；停用后不会用于新估算。
+          启用时会检查同一用料对象是否已有启用 BOM；停用后不会用于新估算。
         </p>
         <ToggleBomActiveButton bomId={bom.id} currentlyActive={bom.isActive} />
-      </section>
+      </section>}
     </div>
   );
 }

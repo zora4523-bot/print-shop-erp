@@ -40,7 +40,6 @@ vi.mock('@/lib/product', () => ({
   getProductCategoryNodeSummary: productMock.getProductCategoryNodeSummary,
   getProductSummary: productMock.getProductSummary,
   QUOTE_PRODUCT_CATEGORIES: [
-    'BLANK_STOCK',
     'GENERIC_STOCK',
     'CUSTOM_FLAT_FOIL',
     'COLOR_PRINT',
@@ -67,8 +66,8 @@ const ownerActor = {
 
 const validCreate = {
   code: '',
-  categoryNodeId: 'cat_blank_stock',
-  name: '空白红包',
+  categoryNodeId: 'cat_custom',
+  name: '专版红包',
   specification: '',
   paperType: '',
 };
@@ -87,12 +86,12 @@ beforeEach(() => {
   productMock.getProductCategoryNodeSummary.mockReset();
   productMock.getProductSummary.mockReset();
   productMock.getProductCategoryNodeSummary.mockResolvedValue({
-    id: 'cat_blank_stock',
-    legacyCategory: ProductCategory.BLANK_STOCK,
+    id: 'cat_custom',
+    legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
   });
   productMock.getProductSummary.mockResolvedValue({
     id: 'p1',
-    category: ProductCategory.BLANK_STOCK,
+    category: ProductCategory.CUSTOM_FLAT_FOIL,
   });
   revalidatePathMock.mockReset();
   redirectMock.mockReset().mockImplementation((path: string) => {
@@ -130,9 +129,9 @@ describe('createQuoteProductAction', () => {
     );
     expect(productMock.createProduct).toHaveBeenCalledWith(
       expect.objectContaining({
-        categoryNodeId: 'cat_blank_stock',
+        categoryNodeId: 'cat_custom',
         code: null,
-        name: '空白红包',
+        name: '专版红包',
         specification: null,
         paperType: null,
         baseUnitPrice: null,
@@ -197,9 +196,9 @@ describe('createQuoteProductAction', () => {
     await expect(createQuoteProductAction(null, fd(validCreate))).rejects.toThrow(
       /NEXT_REDIRECT/,
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/product-categories/items');
     expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/rules/stock-skus/p1',
+      '/owner/rules/product-categories/items/p1',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
@@ -209,7 +208,7 @@ describe('createQuoteProductAction', () => {
     expect(revalidatePathMock).not.toHaveBeenCalledWith(
       '/owner/rules/internal-pricing/tiers/new',
     );
-    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1?created=1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/product-categories/items/p1?created=1');
   });
 
   it('keeps rule-center stock SKU creation inside the rule center', async () => {
@@ -221,20 +220,20 @@ describe('createQuoteProductAction', () => {
         null,
         fd({
           ...validCreate,
-          routeBase: '/owner/rules/stock-skus',
+          routeBase: '/owner/rules/product-categories/items',
         }),
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
-    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1?created=1');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/product-categories/items/p1?created=1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/product-categories/items');
   });
 
-  it('建单产品专用 action 只接受三条路线分类且固定 canonical 路径', async () => {
+  it('产品资料 action 只接受非空白封路线分类且固定 canonical 路径', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
-      id: 'cat_blank_stock',
-      legacyCategory: ProductCategory.BLANK_STOCK,
+      id: 'cat_custom',
+      legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
     });
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
 
@@ -245,14 +244,14 @@ describe('createQuoteProductAction', () => {
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
-    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1?created=1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/product-categories/items/p1?created=1');
   });
 
-  it('可建单组合创建不接受客户计价字段', async () => {
+  it('产品资料创建不接受客户计价字段', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
-      id: 'cat_blank_stock',
-      legacyCategory: ProductCategory.BLANK_STOCK,
+      id: 'cat_custom',
+      legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
     });
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
 
@@ -322,8 +321,8 @@ describe('updateQuoteProductAction', () => {
   it('可建单组合更新忽略伪造的旧单价与起订量', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
-      id: 'cat_blank_stock',
-      legacyCategory: ProductCategory.BLANK_STOCK,
+      id: 'cat_custom',
+      legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
     });
     productMock.updateProduct.mockResolvedValue({ id: 'p1' });
 
@@ -351,9 +350,9 @@ describe('updateQuoteProductAction', () => {
     productMock.updateProduct.mockResolvedValue({ id: 'p1' });
     const result = await updateQuoteProductAction('p1', null, fd(baseUpdate));
     expect(result.status).toBe('success');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/product-categories/items');
     expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/rules/stock-skus/p1',
+      '/owner/rules/product-categories/items/p1',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
@@ -444,9 +443,9 @@ describe('setQuoteProductActiveAction', () => {
       fd({ reason: '旧款停产' }),
     );
     expect(r.status).toBe('success');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/product-categories/items');
     expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/rules/stock-skus/p1',
+      '/owner/rules/product-categories/items/p1',
     );
   });
 
@@ -466,4 +465,14 @@ describe('setQuoteProductActiveAction', () => {
     expect(result.status).toBe('error');
     expect(productMock.setProductActive).not.toHaveBeenCalled();
   });
+});
+
+it.each(['square', 'west-mid', 'west-large'])('编辑受保护产品沿用库内长编码（%s），不采信表单编码', async (key) => {
+  permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+  const code = `PRINT-${'a'.repeat(20)}-${key}`;
+  productMock.getProductSummary.mockResolvedValue({ id: 'p1', category: ProductCategory.COLOR_PRINT, code });
+  productMock.updateProduct.mockResolvedValue({ id: 'p1' });
+  const result = await updateQuoteProductAction('p1', null, fd({ ...validCreate, code: '伪造的替换编码' }));
+  expect(result.status).toBe('success');
+  expect(productMock.updateProduct.mock.calls[0]![1].code).toBe(code);
 });

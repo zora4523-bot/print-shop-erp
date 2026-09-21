@@ -1,3 +1,4 @@
+import { blankPriceIdentityFromCondition } from '../price/blank-price-identity';
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
@@ -320,12 +321,6 @@ function projectPartial(
   const blankRules = rules.filter(
     (rule) => rule.exclusiveGroup === 'STOCK_BASE',
   );
-  if (blankRules.length === 0) {
-    throw new PublishedCreateOrderPriceAdapterError(
-      'MISSING_RULE',
-      '\u5df2\u53d1\u5e03\u52a0\u5de5\u8d39\u4ef7\u76ee\u7c3f\u7f3a\u5c11\u5c40\u90e8\u70eb\u91d1\u7a7a\u767d\u5c01\u5355\u4ef7',
-    );
-  }
   const seen = new Map<string, PublishedCreateOrderRuleRow>();
   const blankUnitPrices = blankRules.map((rule) => {
     consumed.add(rule.id);
@@ -340,15 +335,10 @@ function projectPartial(
     ) {
       invalidRule(rule, '\u7a7a\u767d\u5c01\u89c4\u5219\u672a\u552f\u4e00\u9650\u5b9a\u5c40\u90e8\u70eb\u91d1\u8def\u7ebf');
     }
-    const paper = canonicalPaperFromRule(
-      exactlyOne(condition.paperTypes, rule, '\u7eb8\u5f20'),
-      rule,
-    );
-    const specification = canonicalSpecificationFromRule(
-      exactlyOne(condition.specifications, rule, '\u89c4\u683c'),
-      rule,
-    );
-    const key = `${paperKey(paper)}\u0000${specification}`;
+    const identity = blankPriceIdentityFromCondition(rule.triggerCondition);
+    if (!identity) invalidRule(rule, '空白封纸张、克重或规格无法唯一识别');
+    const { paperType, paperWeightGsm, specification, key } = identity;
+    const paper = { paperType, paperWeightGsm };
     const previous = seen.get(key);
     if (previous) {
       throw new PublishedCreateOrderPriceAdapterError(
@@ -364,7 +354,7 @@ function projectPartial(
       unitPrice: normalizedDecimal(rule.amount, {
         rule,
         label: '\u7a7a\u767d\u5c01\u5355\u4ef7',
-        nullable: true,
+        nullable: false,
       }),
     };
   });
@@ -438,7 +428,7 @@ function projectPartial(
   };
 }
 
-const REQUIRED_FULL_SPECIFICATIONS = new Set([
+export const REQUIRED_FULL_SPECIFICATIONS = new Set([
   '\u4e2d\u53f7\u5c01',
   '\u65b9\u5f62\u5c01',
   '\u5927\u53f7\u5c01',

@@ -30,7 +30,7 @@ const RULE_GROUPS = [
   {
     label: '建单主数据',
     description:
-      '维护纸张、可建单产品组合、产品结构与工艺字典，用于建单校验和隐式匹配。',
+      '维护纸张、产品结构与工艺；空白封在单价表直接录价和启用。',
     effect: 'immediate',
     icon: Database,
   },

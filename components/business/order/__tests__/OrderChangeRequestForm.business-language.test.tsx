@@ -135,7 +135,7 @@ describe('OrderChangeRequestForm 业务语言投影', () => {
     expect(html).not.toMatch(/产品表!C2|规格表!A4:C4/);
   });
 
-  it('规格变更同时提交目标产品与目录规格', () => {
+  it('空白封规格变更直接提交纸张克重规格身份', () => {
     const editable = createOrderChangeEditableItem(
       sourceItem,
       catalogProducts,
@@ -153,8 +153,7 @@ describe('OrderChangeRequestForm 业务语言投影', () => {
       expect.objectContaining({
         operation: 'UPDATE',
         itemId: 'item-1',
-        targetProductId: 'product-mid',
-        specification: '中号封80×115',
+        targetBlankIdentity: { paperType: sourceItem.paperType, paperWeightGsm: sourceItem.paperWeightGsm, specification: '中号封80×115' },
       }),
     ]);
   });

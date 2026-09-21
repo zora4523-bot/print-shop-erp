@@ -140,3 +140,6 @@ export const updateProductSchema = z.object({
 });
 
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+
+import { addBlankPaperSchema } from '@/lib/price/blank-paper';
+export const newCatalogPaperSchema = addBlankPaperSchema.shape.paper.options[1];

@@ -702,6 +702,19 @@ function updateEditorMetadata({
   }, 0);
 }
 
+function editorCatalogChange(source: AdminEditorItem, draft: DraftItem) {
+  if (draft.productId === source.productId && draft.specification === (source.specification ?? '')) return {};
+  if (source.pricingRoute === 'STOCK_BLANK') {
+    return { targetBlankIdentity: {
+      paperType: source.paperType ?? '',
+      paperWeightGsm: source.paperWeightGsm ?? 0,
+      specification: draft.specification,
+    } };
+  }
+  if (!draft.productId) return {};
+  return { targetProductId: draft.productId, specification: draft.specification };
+}
+
 function buildEditorChanges(
   metadataChanges: Difference[],
   drafts: DraftItem[],
@@ -722,13 +735,7 @@ function buildEditorChanges(
         quantity: Number(draft.quantity),
         frontFoilColors: colors(draft.front),
         backFoilColors: colors(draft.back),
-        ...(draft.productId &&
-        (draft.productId !== source.productId || draft.specification !== original.specification)
-          ? {
-              targetProductId: draft.productId,
-              specification: draft.specification,
-            }
-          : {}),
+        ...editorCatalogChange(source, draft),
       });
       differences.push({
         label: '新增款式',
@@ -766,8 +773,7 @@ function buildEditorChanges(
       });
     }
     if (draft.productId !== original.productId || draft.specification !== original.specification) {
-      if (draft.productId) change.targetProductId = draft.productId;
-      change.specification = draft.specification;
+      Object.assign(change, editorCatalogChange(source, draft));
       differences.push({
         label: `${label} · 规格`,
         before: externalPriceBusinessText(original.specification),

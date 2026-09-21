@@ -25,6 +25,8 @@ const {
   }),
 }));
 
+vi.mock('@/actions/catalog-paper', () => ({ createCatalogPaperAction: vi.fn() }));
+
 vi.mock('@/lib/auth/session', () => ({ getSession: getSessionMock }));
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: requirePermissionMock,

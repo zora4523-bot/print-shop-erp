@@ -1,6 +1,7 @@
 // 物料字典与库存流水（SPEC §5）、仓库 / 库位（A18）、盘点、BOM（A19）、采购与收货（A17）
 // 由 lib/auth/schemas.ts 按域拆出（2026-09-14）；对外仍通过 lib/auth/schemas.ts 统一导出。
 import { z } from 'zod';
+import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
 import { MaterialCategory } from '../../../generated/prisma/enums';
 import { productTextFieldOptional } from './shared';
 
@@ -329,7 +330,9 @@ const bomMaterialQuantityField = decimalRequiredField({
 
 export const createBomSchema = z
   .object({
-    targetType: z.enum(['PRODUCT', 'CATEGORY']),
+    targetType: z.enum(['PRODUCT', 'CATEGORY', 'BLANK']),
+    blankPaperMaterialId: optionalBomIdField('纸张').optional(),
+    blankSpecificationKey: z.union([z.literal(''), z.enum(BLANK_SPECIFICATIONS.map((spec) => spec.key))]).nullish(),
     productId: optionalBomIdField('产品'),
     categoryNodeId: optionalBomIdField('产品分类'),
     name: z
@@ -364,6 +367,10 @@ export const createBomSchema = z
         path: ['categoryNodeId'],
         message: '请选择产品分类',
       });
+    }
+    if (data.targetType === 'BLANK') {
+      if (!data.blankPaperMaterialId) ctx.addIssue({ code: 'custom', path: ['blankPaperMaterialId'], message: '请选择纸张' });
+      if (!data.blankSpecificationKey) ctx.addIssue({ code: 'custom', path: ['blankSpecificationKey'], message: '请选择标准规格' });
     }
     const seen = new Set<string>();
     data.items.forEach((item, index) => {

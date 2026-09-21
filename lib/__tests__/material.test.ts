@@ -12,8 +12,11 @@ const { dbMock, txMock } = vi.hoisted(() => {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
     },
-    material: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
-    product: { count: vi.fn() },
+    material: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn() },
+    product: { count: vi.fn(), findMany: vi.fn() },
+    customerPriceRule: { findMany: vi.fn() },
+    billOfMaterial: { count: vi.fn() },
+    orderItem: { findMany: vi.fn() },
     materialLocationStock: { update: vi.fn() },
     materialTransaction: { create: vi.fn(), findUnique: vi.fn() },
   };
@@ -64,6 +67,11 @@ import {
 
 beforeEach(() => {
   txMock.product.count.mockReset().mockResolvedValue(0);
+  txMock.material.findMany.mockReset().mockResolvedValue([]);
+  txMock.product.findMany.mockReset().mockResolvedValue([]);
+  txMock.customerPriceRule.findMany.mockReset().mockResolvedValue([]);
+  txMock.billOfMaterial.count.mockReset().mockResolvedValue(0);
+  txMock.orderItem.findMany.mockReset().mockResolvedValue([]);
   dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.material)) fn.mockReset();
   dbMock.materialTransaction.create.mockReset();
@@ -335,7 +343,7 @@ describe('updateMaterial', () => {
     txMock.product.count.mockResolvedValue(1);
     await expect(updateMaterial('mat1', { code: material.code, name: '改名', category: MaterialCategory.PAPER,
       specification: material.specification, unit: '张', safetyStock: null, averageCost: null,
-    })).rejects.toThrow('纸张已用于建单产品');
+    })).rejects.toThrow('纸张已用于历史产品');
     expect(txMock.material.update).not.toHaveBeenCalled();
   });
 
@@ -690,4 +698,43 @@ describe('manual material movement request replay', () => {
       expect(txMock.materialTransaction.create).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe('paper identity guard entry points', () => {
+  const data = {
+    code: 'PAPER-IDENTITY', name: '160g红卡', category: MaterialCategory.PAPER,
+    specification: null, unit: '张', safetyStock: null, averageCost: null,
+  };
+  it('checks duplicates under the existing write lock before creating', async () => {
+    txMock.material.findMany.mockResolvedValue([makeMaterial({ name: '红卡', specification: '160g', isActive: false })]);
+    await expect(createMaterial(data)).rejects.toBeInstanceOf(MaterialInvariantError);
+    expect(txMock.material.create).not.toHaveBeenCalled();
+    expect(txMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(txMock.material.findMany.mock.invocationCallOrder[0]);
+  });
+  it('rejects a rename referenced only by product text under the same lock', async () => {
+    txMock.material.findUnique.mockResolvedValue(makeMaterial(data));
+    txMock.product.findMany.mockResolvedValue([{ paperType: '160g红卡', weight: 160 }]);
+    await expect(updateMaterial('mat1', { ...data, name: '160g新纸' })).rejects.toBeInstanceOf(MaterialInvariantError);
+    expect(txMock.material.update).not.toHaveBeenCalled();
+    expect(txMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(txMock.product.findMany.mock.invocationCallOrder[0]);
+  });
+  it('keeps FK protection when another material carries the same identity', async () => {
+    txMock.material.findUnique.mockResolvedValue(makeMaterial(data));
+    txMock.material.findMany.mockResolvedValue([makeMaterial({ ...data, id: 'duplicate' })]);
+    txMock.product.count.mockResolvedValue(1);
+    await expect(updateMaterial('mat1', { ...data, name: '160g新纸' })).rejects.toThrow('纸张已用于历史产品');
+    expect(txMock.material.update).not.toHaveBeenCalled();
+  });
+  it('ordinary metadata edits on duplicate paper remain editable', async () => {
+    txMock.material.findUnique.mockResolvedValue(makeMaterial(data));
+    txMock.material.findMany.mockResolvedValue([makeMaterial({ ...data, id: 'duplicate' })]);
+    await updateMaterial('mat1', { ...data, averageCost: '0.1200' });
+    expect(txMock.material.findMany).not.toHaveBeenCalled();
+    expect(txMock.material.update).toHaveBeenCalledOnce();
+  });
+  it('unweighted acceptance paper creation retains existing behavior', async () => {
+    await createMaterial({ ...data, name: '验收纸张20260920' });
+    expect(txMock.material.findMany).not.toHaveBeenCalled();
+    expect(txMock.material.create).toHaveBeenCalledOnce();
+  });
 });

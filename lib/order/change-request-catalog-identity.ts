@@ -1,3 +1,4 @@
+import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
 import {
   OrderItemPricingRoute,
   OrderProductStructure,
@@ -15,7 +16,9 @@ import {
 } from '@/lib/price/create-order/canonical-facts';
 
 export type OrderChangeCatalogProduct = {
-  id: string;
+  id: string | null;
+  selectionKey?: string;
+  source?: 'BLANK_PRICE';
   category: string;
   specification: string | null;
   paperType: string | null;
@@ -41,7 +44,7 @@ export type OrderChangeCatalogSourceItem = {
 };
 
 export type OrderChangeCatalogIdentity = {
-  productId: string;
+  productId: string | null;
   specification: string;
   canonicalSpecification: string;
   productStructure: OrderProductStructure;
@@ -300,6 +303,31 @@ export function resolveOrderChangeCatalogIdentity(input: {
   };
 }
 
+export type OrderChangeBlankIdentityInput = {
+  paperType: string;
+  paperWeightGsm: number;
+  specification: string;
+};
+
+export function resolveOrderChangeBlankIdentity(
+  sourceItem: OrderChangeCatalogSourceItem,
+  target: OrderChangeBlankIdentityInput,
+): OrderChangeCatalogIdentity {
+  const source = canonicalizeCreateOrderPaperFact(sourceItem.paperType ?? '', sourceItem.paperWeightGsm);
+  const paper = canonicalizeCreateOrderPaperFact(target.paperType, target.paperWeightGsm);
+  const spec = BLANK_SPECIFICATIONS.find((candidate) =>
+    candidate.label === canonicalizeCreateOrderSpecification(target.specification));
+  if (sourceItem.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK || !samePaperIdentity(source, paper) || !spec) {
+    throw new OrderChangeCatalogIdentityError('TARGET_PAPER_MISMATCH', '请选择与原款式纸张、克重一致的空白封规格');
+  }
+  const dimensions = parseCatalogDimensions(spec.specification)!;
+  return { productId: null, specification: spec.specification, canonicalSpecification: spec.label,
+    productStructure: inferCatalogProductStructure(spec.specification),
+    actualWidthMm: dimensions.widthMm, actualHeightMm: dimensions.heightMm,
+    pricingGroup: pricingGroupForSpecification(spec.label)!,
+  };
+}
+
 /**
  * Build browser choices from active catalog rows. If more than one product
  * represents the same canonical specification for the current route/paper,
@@ -313,6 +341,13 @@ export function listOrderChangeSpecificationOptions(input: {
     catalogPricingFactChoices(product.specification).flatMap(
       (targetSpecification) => {
         try {
+          if (product.id === null) {
+            if (product.source !== 'BLANK_PRICE' || !product.isActive || !hasAvailableLinkedPaper(product)) return [];
+            return [resolveOrderChangeBlankIdentity(input.sourceItem, {
+              paperType: product.paperType ?? '', paperWeightGsm: product.weight ?? 0,
+              specification: targetSpecification,
+            })];
+          }
           const identity = resolveOrderChangeCatalogIdentity({
             sourceItem: input.sourceItem,
             targetProductId: product.id,

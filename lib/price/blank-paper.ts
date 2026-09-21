@@ -105,3 +105,14 @@ export type AddBlankPaperInput = z.infer<typeof addBlankPaperSchema>;
 export type AddBlankPaperResult =
   | { status: 'success'; paperId: string; priceBookId: string }
   | { status: 'error'; message: string };
+
+export const blankPriceMatrixSchema = z.object({
+  priceBookId: safeId,
+  expectedUpdatedAt: z.iso.datetime(),
+  cells: z.array(z.object({
+    paperId: safeId,
+    specificationKey: z.enum(BLANK_SPECIFICATIONS.map((spec) => spec.key)),
+    amount: z.string().trim().regex(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?$/, '单价须为非负数字，最多四位小数').nullable(),
+  }).strict()).max(1200),
+}).strict();
+export type BlankPriceMatrixInput = z.infer<typeof blankPriceMatrixSchema>;

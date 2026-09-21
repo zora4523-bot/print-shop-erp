@@ -18,8 +18,8 @@ const sourceItem = {
 
 function product(
   overrides: Partial<OrderChangeCatalogProduct> &
-    Pick<OrderChangeCatalogProduct, 'id' | 'specification'>,
-): OrderChangeCatalogProduct {
+    Pick<OrderChangeCatalogProduct, 'specification'> & { id: string },
+): OrderChangeCatalogProduct & { id: string } {
   return {
     category: 'BLANK_STOCK',
     paperType: '160g珠光艳闪',
@@ -261,5 +261,24 @@ describe('order-change catalog identity', () => {
         products: [available, unavailable],
       }),
     ).toMatchObject([{ productId: 'available-product' }]);
+  });
+});
+
+describe('blank prices without a product identity', () => {
+  it('uses published paper/spec choices with a null product ID', () => {
+    const options = listOrderChangeSpecificationOptions({ sourceItem,
+      products: [{ id: null, source: 'BLANK_PRICE', selectionKey: 'blank:paper:mid',
+        category: 'BLANK_STOCK', specification: '中号封80×115', paperType: '160g珠光艳闪', weight: 160,
+        isActive: true, paperMaterialId: 'paper', linkedPaper: { isActive: true, outOfStock: false } }],
+    });
+    expect(options).toHaveLength(1);
+    expect(options[0]).toMatchObject({ productId: null, specification: '中号封80×115', actualWidthMm: 80, actualHeightMm: 115 });
+  });
+  it('does not expose a different paper or an unavailable paper as a compatible specification', () => {
+    expect(listOrderChangeSpecificationOptions({ sourceItem, products: [
+      { id: null, source: 'BLANK_PRICE', category: 'BLANK_STOCK', specification: '中号封80×115', paperType: '红卡', weight: 180, isActive: true },
+      { id: null, source: 'BLANK_PRICE', category: 'BLANK_STOCK', specification: '中号封80×115', paperType: '160g珠光艳闪', weight: 160, isActive: true,
+        paperMaterialId: 'paper', linkedPaper: { isActive: true, outOfStock: true } },
+    ] })).toEqual([]);
   });
 });

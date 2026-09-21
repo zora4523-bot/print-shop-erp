@@ -526,11 +526,12 @@ export function OrderItemProductField({
   disabled,
 }: {
   value: string | null;
-  products: readonly { id: string; name: string }[];
+  products: readonly { id: string | null; name: string }[];
   onChange: (id: string) => void;
   disabled?: boolean;
 }) {
-  if (products.length < 2) return null;
+  const persistedProducts = products.filter((product): product is { id: string; name: string } => product.id !== null);
+  if (persistedProducts.length < 2) return null;
   return (
     <label className="mt-4 block space-y-2 text-sm">
       匹配产品
@@ -541,7 +542,7 @@ export function OrderItemProductField({
         onChange={(event) => onChange(event.target.value)}
       >
         <option value="">请选择产品</option>
-        {products.map((product) => (
+        {persistedProducts.map((product) => (
           <option key={product.id} value={product.id}>
             {product.name}
           </option>

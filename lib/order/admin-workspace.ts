@@ -978,7 +978,7 @@ export function summarizeAdminOrderChange(
     if (change.quantity !== undefined && change.quantity !== current.quantity) {
       facts.push(`${label}数量 ${current.quantity.toLocaleString('zh-CN')} → ${change.quantity.toLocaleString('zh-CN')}`);
     }
-    if ((change.specification !== undefined && change.specification !== current.specification) || change.targetProductId !== undefined) {
+    if ((change.specification !== undefined && change.specification !== current.specification) || change.targetProductId !== undefined || change.targetBlankIdentity !== undefined) {
       facts.push(`${label}调整规格`);
     }
     if (change.name !== undefined && change.name !== current.name) facts.push(`${label}修改名称`);

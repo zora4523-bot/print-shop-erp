@@ -229,10 +229,10 @@ describe('updateProductCategoryNodeAction', () => {
       '/owner/rules/product-categories/cat1',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/rules/stock-skus',
+      '/owner/rules/product-categories/items',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/rules/stock-skus/new',
+      '/owner/rules/product-categories/items/new',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
   });

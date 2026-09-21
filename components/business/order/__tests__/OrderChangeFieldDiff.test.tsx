@@ -16,6 +16,14 @@ const beforeSnapshot = {
 };
 
 describe('OrderChangeFieldDiff', () => {
+  it.each(['ADD', 'UPDATE'])('renders blank identity specification for %s', (operation) => {
+    const html = renderToStaticMarkup(<OrderChangeFieldDiff beforeSnapshot={beforeSnapshot}
+      proposedChanges={{ items: [{ operation, itemId: 'item-1', templateItemId: 'item-1',
+        targetBlankIdentity: { paperType: '红卡', paperWeightGsm: 180, specification: '中号封80×115' } }] }} />);
+    expect(html).toContain('中号封80×115');
+    expect(html).toContain('规格');
+    expect(html).not.toContain('targetBlankIdentity');
+  });
   it('renders real before-to-after changes without repeating production instructions', () => {
     const html = renderToStaticMarkup(
       <OrderChangeFieldDiff

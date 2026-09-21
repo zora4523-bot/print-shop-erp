@@ -575,6 +575,7 @@ it('切换或关闭裁决模式会清空上一模式的表单、预览和消息'
     status: 'success',
     preview: {
       referenceSettleFee: '100.00',
+      priceRevision: 3, quoteToken: `order-change-approval-v1:${'a'.repeat(64)}`,
       calculation: 'CURRENT_PUBLISHED_ENGINE_V1',
       components: {
         itemProcessing: '80.00',

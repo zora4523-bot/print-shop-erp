@@ -85,7 +85,7 @@ export async function createQuoteProductAction(
 
   revalidateProductPaths(createdId);
   redirect(
-    appendReceipt(`${RULE_CENTER_HREFS.stockSkus}/${createdId}`, { created: '1' }),
+    appendReceipt(`${RULE_CENTER_HREFS.productReferences}/${createdId}`, { created: '1' }),
   );
 }
 
@@ -96,7 +96,12 @@ export async function updateQuoteProductAction(
 ): Promise<ProductMutationResult> {
   await requirePermission('dict:product:manage');
 
-  const parsed = updateProductSchema.safeParse(normalizeFormInput(formData));
+  const target = await getProductSummary(id);
+  const preserveCode = target?.category === 'BLANK_STOCK' || target?.category === 'COLOR_PRINT';
+  const formInput = normalizeFormInput(formData);
+  // Generated blank codes can exceed the manual input limit. Never validate or trust
+  // a submitted replacement for the immutable code; use the server-owned value.
+  const parsed = updateProductSchema.safeParse({ ...formInput, code: preserveCode ? '' : formInput.code });
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
   }
@@ -106,7 +111,7 @@ export async function updateQuoteProductAction(
   if (scopeError) return scopeError;
 
   const updateData: UpdateProductData = {
-    code: parsed.data.code,
+    code: preserveCode ? target.code : parsed.data.code,
     categoryNodeId: parsed.data.categoryNodeId,
     name: parsed.data.name,
     specification: parsed.data.specification,
@@ -146,7 +151,7 @@ export async function setQuoteProductActiveAction(
   ) {
     return {
       status: 'error',
-      message: '目标建单产品不存在或属于已排除的历史分类',
+      message: '目标产品资料不存在或属于已排除的历史分类',
     };
   }
 
@@ -205,8 +210,8 @@ async function validateQuoteProductCategory(
 }
 
 function revalidateProductPaths(id: string) {
-  revalidatePath(RULE_CENTER_HREFS.stockSkus);
-  revalidatePath(`${RULE_CENTER_HREFS.stockSkus}/${id}`);
+  revalidatePath(RULE_CENTER_HREFS.productReferences);
+  revalidatePath(`${RULE_CENTER_HREFS.productReferences}/${id}`);
   revalidatePath('/orders/new');
   revalidatePath('/owner/boms/new');
   revalidatePath(RULE_CENTER_HREFS.customerPricing);

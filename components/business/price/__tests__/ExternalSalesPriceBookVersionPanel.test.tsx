@@ -45,7 +45,7 @@ const FORBIDDEN_TECHNICAL_TEXT =
   /issue\.path|ADD_ON|PER_BAG|PACKAGING_GROUP_MODE|SINGLE_STYLE|MIXED_STYLE|exclusiveGroup|carrierCode|provinces|FIXED_AMOUNT|ZTO_PROVINCE_RATE|unitsPerSheet/;
 
 describe('ExternalSalesPriceBookVersionPanel', () => {
-  it('只为计划版提供改期和取消入口，并展示取消审计原因', () => {
+  it('只为计划版提供改期和取消入口，隐藏已取消的历史记录', () => {
     const base = {
       code: 'EXTERNAL_SALES_PROCESSING_RULES',
       name: '外部销售加工费',
@@ -94,8 +94,8 @@ describe('ExternalSalesPriceBookVersionPanel', () => {
     expect(html).toContain('调整生效时间 book-v2-scheduled');
     expect(html).toContain('取消计划 book-v2-scheduled');
     expect(html).not.toContain('调整生效时间 book-v3-cancelled');
-    expect(html).toContain('已取消');
-    expect(html).toContain('价格复核尚未完成');
+    expect(html).not.toContain('已取消');
+    expect(html).not.toContain('价格复核尚未完成');
   });
 
   it('把历史校验结果中的内部字段和枚举转换为业务文案', () => {

@@ -416,12 +416,34 @@ describe('administrator edit design', () => {
       expect.objectContaining({
         operation: 'ADD',
         templateItemId: 'item-1',
-        targetProductId: 'product-1',
-        specification: '中号封80×115',
+        targetBlankIdentity: { paperType: '珠光艳闪', paperWeightGsm: 160, specification: '中号封80×115' },
         name: '中号红包',
       }),
     ]);
   });
+  for (const productId of [null, 'legacy-blank']) {
+    for (const operation of ['ADD', 'UPDATE'] as const) {
+      it(`${operation} sends blank identity with source product ${productId}`, async () => {
+        mount({
+          canAdd: true, status: 'DRAFT',
+          items: [{ ...item, productId, specification: '大号封90×165' }],
+          products: [{ id: null, source: 'BLANK_PRICE', selectionKey: 'blank:paper:mid',
+            category: 'BLANK_STOCK', specification: '中号封80×115', paperType: '160g珠光艳闪', weight: 160, isActive: true }],
+        });
+        if (operation === 'ADD') await page.getByRole('button', { name: '新增款式（沿用第 1 款工艺和纸张）' }).click();
+        const select = page.getByRole('combobox', { name: '规格', exact: true }).nth(operation === 'ADD' ? 1 : 0);
+        await select.selectOptions(select.getByRole('option', { name: '中号封80×115', exact: true }));
+        await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+        await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);
+        const change = mocks.preview.mock.calls[0][0].items[0];
+        expect(change).toMatchObject({ operation, targetBlankIdentity: {
+          paperType: '珠光艳闪', paperWeightGsm: 160, specification: '中号封80×115',
+        } });
+        expect(change).not.toHaveProperty('targetProductId');
+        expect(change).not.toHaveProperty('specification');
+      });
+    }
+  }
   it('asks before discarding a changed draft', async () => {
     mount();
     await page

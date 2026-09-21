@@ -1,4 +1,5 @@
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { OrderItemPricingRoute } from '@/generated/prisma/enums';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import { productCategoryMatchesPricingRoute } from '@/lib/order/pricing-route';
@@ -6,6 +7,7 @@ import {
   externalOrderPaperFromType,
   externalOrderPapersForRoute,
   externalOrderWeightOptionsForSelection,
+  externalOrderAvailableSpecifications,
   externalOrderSpecificationsForRoute,
   externalOrderSpecificationLabel,
   type ExternalOrderPaper,
@@ -58,6 +60,9 @@ export function orderItemFieldOptions(
       label: paper.label,
       texture: externalPaperSwatchTexture(paper.appearance),
       disabled: (() => {
+        if (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK) {
+          return externalOrderAvailableSpecifications(paper, item.pricingRoute).length === 0;
+        }
         const weightOptions = externalOrderWeightOptionsForSelection(
           paper,
           item.pricingRoute,

@@ -11,8 +11,6 @@ export const metadata = { title: '新增纸张与规格价格' };
 
 export default async function NewBlankPaperPage() {
   await requirePermission('dict:price:manage');
-  await requirePermission('material:manage');
-  await requirePermission('dict:product:manage');
   const [workspace, papers] = await Promise.all([
     getCustomerPriceSectionWorkspace('blank'),
     listExternalCreateOrderPaperOptions(),

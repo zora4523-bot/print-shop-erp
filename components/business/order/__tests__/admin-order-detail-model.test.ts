@@ -208,6 +208,21 @@ describe('admin order detail projection', () => {
     expect(buildAdminOrderDetailModel(input).vdiff).toBeNull();
   });
 
+  it.each(['ADD', 'UPDATE'])('shows the blank target specification in %s approval differences', (operation) => {
+    const input = fixture();
+    const request = change({
+      beforeSnapshot: { items: [{ id: 'item-1', sequence: 1, specification: '中号封80×115' }] },
+      proposedChanges: { items: [{ operation, itemId: 'item-1', templateItemId: 'item-1',
+        targetBlankIdentity: { paperType: '红卡', paperWeightGsm: 180, specification: '大号封90×165' } }] },
+    });
+    input.order.changeRequests = [request];
+    const original = JSON.stringify(request.proposedChanges);
+    expect(buildAdminOrderDetailModel(input).vdiff?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: expect.stringContaining('规格'), after: '大号封90×165' }),
+    ]));
+    expect(JSON.stringify(request.proposedChanges)).toBe(original);
+  });
+
   it('marks new items only when the approved snapshot proves they were absent', () => {
     const input = fixture();
     input.order.changeRequests = [change({ beforeSnapshot: { items: [] } })];

@@ -99,7 +99,7 @@ describe('ProductForm structured feedback contract', () => {
     );
 
     expect(html.match(/<input[^>]*id="name"[^>]*>/)?.[0]).toContain(
-      'value="未命名组合"',
+      'value="未命名产品"',
     );
     expect(
       html.match(/<input[^>]*id="specification"[^>]*>/)?.[0],
@@ -178,7 +178,20 @@ describe('ProductForm structured feedback contract', () => {
     actionState.pending = true;
     const pendingHtml = render();
     expect(pendingHtml).toMatch(/<form[^>]*aria-busy="true"/);
-    expect(pendingHtml).toContain('正在保存组合…');
+    expect(pendingHtml).toContain('正在保存产品…');
     expect(pendingHtml).not.toContain('产品编码已被其他记录占用');
   });
+});
+
+it('受保护产品身份只显示原值，隐藏提交值保留长编码，名称仍可编辑', () => {
+  const code = `BLANK-${'a'.repeat(20)}-west-large`;
+  const html = renderToStaticMarkup(<ProductForm mode="edit" action={vi.fn()} categoryNodes={categoryNodes} identityReadOnly
+    initial={{ code, categoryNodeId: 'category-1', name: '产品', specification: '西封大号85×165', paperType: '160g红卡' }} />);
+  for (const field of ['code', 'categoryNodeId', 'specification', 'paperType']) {
+    expect(html).toContain(`type="hidden" name="${field}"`);
+    expect(html).not.toContain(`id="${field}"`);
+  }
+  expect(html).toContain(code);
+  expect(html).toContain('id="name"');
+  expect(html).not.toContain('到纸张页管理空白封适用规格');
 });

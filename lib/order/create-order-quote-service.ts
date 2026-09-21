@@ -1,3 +1,7 @@
+import { assertBlankPriceAdmissionInTx, BlankPriceAdmissionError } from './blank-price-admission';
+import { readConfirmedHistoricalBlankPrice, sameHistoricalBlankIdentity, type HistoricalBlankItem } from './historical-blank-price';
+import { blankPriceIdentity } from '../price/blank-price-identity';
+import Decimal from 'decimal.js';
 import { OrderSettlementType } from '../../generated/prisma/enums';
 import type { Prisma } from '../../generated/prisma/client';
 import type {
@@ -142,18 +146,36 @@ export async function calculateCreateOrderQuoteFromCatalogInTx(
     now: Date;
     facts: CreateOrderQuoteFactsAdapterInput;
     includeOrderCharges: boolean;
+    historicalBlankItems?: readonly HistoricalBlankItem[];
   },
 ): Promise<CatalogCreateOrderQuoteCalculation> {
   try {
     const snapshot = await readPublishedCreateOrderPriceSnapshot(tx, {
       now: args.now,
     });
+    const historical = new Map(args.facts.items.flatMap((item) => {
+      const stored = args.historicalBlankItems?.find((candidate) => candidate.id === item.itemKey);
+      return stored && sameHistoricalBlankIdentity(stored, item) ? [[item.itemKey, stored] as const] : [];
+    }));
+    await assertBlankPriceAdmissionInTx(tx, args.facts.items.filter((item) => !historical.has(item.itemKey)), args.now, { snapshot });
     const catalogInput = await buildCreateOrderQuoteInputFromCatalog(
       tx,
       args.facts,
+      { historicalBlankItemKeys: new Set(historical.keys()) },
     );
     const input: PureCreateOrderQuoteInput = {
       ...catalogInput,
+      items: catalogInput.items.map((item) => {
+        const stored = historical.get(item.itemKey);
+        if (!stored) return item;
+        const identity = blankPriceIdentity(item);
+        const prices = snapshot.partial.blankUnitPrices.filter((price) =>
+          blankPriceIdentity(price)?.key === identity?.key);
+        if (prices.length === 1 && prices[0]!.unitPrice !== null && new Decimal(prices[0]!.unitPrice!).gt(0)) return item;
+        const confirmed = readConfirmedHistoricalBlankPrice(stored);
+        if (!confirmed) throw new CreateOrderQuoteError(`款式 ${item.fig} 缺少可验证的材料单价，请在工单的历史材料单价中补核价`);
+        return { ...item, historicalBlankPrice: confirmed };
+      }),
       includeOrderCharges: args.includeOrderCharges,
     };
     const quote = calculateCreateOrderQuote(input, snapshot);
@@ -186,6 +208,7 @@ export async function calculateCreateOrderQuoteFromCatalogInTx(
   } catch (error) {
     if (error instanceof CreateOrderQuoteError) throw error;
     if (
+      error instanceof BlankPriceAdmissionError ||
       error instanceof CreateOrderQuoteFactsAdapterError ||
       error instanceof PublishedCreateOrderPriceAdapterError
     ) {
@@ -258,6 +281,7 @@ export async function quoteExternalCreateOrder(
   } catch (error) {
     if (error instanceof CreateOrderQuoteError) throw error;
     if (
+      error instanceof BlankPriceAdmissionError ||
       error instanceof CreateOrderQuoteFactsAdapterError ||
       error instanceof PublishedCreateOrderPriceAdapterError
     ) {
@@ -327,6 +351,7 @@ export async function quoteInternalCreateOrder(
   } catch (error) {
     if (error instanceof CreateOrderQuoteError) throw error;
     if (
+      error instanceof BlankPriceAdmissionError ||
       error instanceof CreateOrderQuoteFactsAdapterError ||
       error instanceof PublishedCreateOrderPriceAdapterError
     ) {
