@@ -1,6 +1,5 @@
 import {
   chmod,
-  symlink,
   mkdir,
   mkdtemp,
   readFile,
@@ -14,7 +13,6 @@ import { rm } from 'node:fs/promises';
 
 import {
   executeTool,
-  TS_PRUNE_INPUT_SKIP_PATTERN,
   runDeadCodeScan,
   writeJsonAtomically,
 } from '../dead-code-scan.mjs';
@@ -236,19 +234,4 @@ describe('dead-code candidate ledger', () => {
     expect(() => deadCodeCandidateIds(changed)).toThrow('Invalid ts-prune');
     expect(() => deadCodeCandidateIds({ ...report(), schemaVersion: 2 })).toThrow('Unsupported');
   });
-});
-
-// Exercise ts-prune itself: mocked/namespace test imports must not mark every
-// production export as live, while ordinary application imports still count.
-it('scans production consumers without treating test namespace imports as live code', async () => {
-  const rootDir = await temporaryDirectory();
-  await symlink(path.join(process.cwd(), 'node_modules'), path.join(rootDir, 'node_modules'), 'dir');
-  await mkdir(path.join(rootDir, '__tests__'));
-  await writeFile(path.join(rootDir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { types: [] }, include: ['**/*.ts'] }));
-  await writeFile(path.join(rootDir, 'domain.ts'), 'export const onlyTest = 1; export const live = 2;');
-  await writeFile(path.join(rootDir, 'app.ts'), "import { live } from './domain'; console.log(live);");
-  await writeFile(path.join(rootDir, '__tests__/mock.ts'), "import * as subject from '../domain'; console.log(subject);");
-  const result = await executeTool({ rootDir, name: 'ts-prune', args: ['--project', 'tsconfig.json', '--skip', TS_PRUNE_INPUT_SKIP_PATTERN] });
-  expect(result.stdout).toContain('onlyTest');
-  expect(result.stdout).not.toMatch(/ - live/);
 });

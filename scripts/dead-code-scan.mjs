@@ -8,7 +8,6 @@ import { compareDeadCodeBaseline } from './lib/dead-code-baseline.mjs';
 const PROJECT_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEFAULT_OUTPUT = path.join(PROJECT_ROOT, '.review', 'dead.json');
 const TS_PRUNE_OUTPUT_IGNORE_PATTERN = String.raw`(?:^|/)(?:\.next|generated|prisma/migrations|__tests__|tests|scripts|deploy)(?:/|$)|\.(?:test|spec)\.[cm]?[jt]sx?:|(?:^|/)app/(?:.*/)?(?:page|layout|loading|error|global-error|not-found|default|template|route|sitemap|robots|manifest)\.[cm]?[jt]sx?:|(?:^|/)(?:instrumentation|proxy|[^/]+\.config)\.[cm]?[jt]sx?:|\.d\.ts:`;
-export const TS_PRUNE_INPUT_SKIP_PATTERN = String.raw`(?:^|/)(?:__tests__|tests|\.next)(?:/|$)|\.(?:test|spec)\.[cm]?[jt]sx?$`;
 const MADGE_EXCLUDE_PATTERN =
   String.raw`(?:^|/)(?:generated|prisma/migrations|__tests__|tests)(?:/|$)|\.(?:test|spec)\.[cm]?[jt]sx?$`;
 
@@ -115,8 +114,6 @@ export async function collectDeadCodeReport({
         'tsconfig.json',
         '--ignore',
         TS_PRUNE_OUTPUT_IGNORE_PATTERN,
-        '--skip',
-        TS_PRUNE_INPUT_SKIP_PATTERN,
       ],
     }),
     execute({
