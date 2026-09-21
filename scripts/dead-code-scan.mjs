@@ -111,7 +111,7 @@ export async function collectDeadCodeReport({
       name: 'ts-prune',
       args: [
         '--project',
-        'tsconfig.json',
+        'tsconfig.dead-code.json',
         '--ignore',
         TS_PRUNE_OUTPUT_IGNORE_PATTERN,
       ],

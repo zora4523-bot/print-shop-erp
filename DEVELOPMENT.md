@@ -133,6 +133,7 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 `config/dead-code-baseline.json` 登记现存待核实候选，不代表其中代码可以删除。
 Knip、ts-prune 和循环依赖扫描共同生成证据；CI 对照稳定的文件/符号标识，忽略行号漂移。
+ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫描单独使用 `tsconfig.dead-code.json` 的 `node` 解析，保证别名指向的目录入口可被识别。应用继续使用原 `tsconfig.json`。
 新增候选会失败；已消失候选也必须从基线移除，避免留下允许旧代码重新进入的豁免。
 扫描器错误、基线缺失或格式错误均失败，检查命令不会自动更新基线。
 

@@ -1,5 +1,6 @@
 import {
   chmod,
+  symlink,
   mkdir,
   mkdtemp,
   readFile,
@@ -191,6 +192,9 @@ describe('dead-code report writer', () => {
     expect(
       invocations.find((invocation) => invocation.name === 'madge'),
     ).toMatchObject({ acceptedExitCodes: [0, 1] });
+    expect(invocations.find((invocation) => invocation.name === 'ts-prune')).toMatchObject({
+      args: expect.arrayContaining(['--project', 'tsconfig.dead-code.json']),
+    });
   });
 });
 
@@ -235,3 +239,21 @@ describe('dead-code candidate ledger', () => {
     expect(() => deadCodeCandidateIds({ ...report(), schemaVersion: 2 })).toThrow('Unsupported');
   });
 });
+
+it('resolves path aliases and directory entrypoints with the scanner compiler', async () => {
+  const rootDir = await temporaryDirectory();
+  await symlink(path.join(process.cwd(), 'node_modules'), path.join(rootDir, 'node_modules'), 'dir');
+  await mkdir(path.join(rootDir, 'feature'));
+  await writeFile(path.join(rootDir, 'tsconfig.json'), JSON.stringify({
+    compilerOptions: { module: 'esnext', moduleResolution: 'bundler', paths: { '@/*': ['./*'] }, types: [] },
+    include: ['**/*.ts'],
+  }));
+  await writeFile(path.join(rootDir, 'tsconfig.dead-code.json'), await readFile('tsconfig.dead-code.json', 'utf8'));
+  await writeFile(path.join(rootDir, 'feature/index.ts'), 'export const live = 1; export const unused = 2;');
+  await writeFile(path.join(rootDir, 'entry.ts'), "import { live } from '@/feature'; console.log(live);");
+  const before = await executeTool({ rootDir, name: 'ts-prune', args: ['--project', 'tsconfig.json'] });
+  expect(before.stdout).toContain(' - live');
+  const after = await executeTool({ rootDir, name: 'ts-prune', args: ['--project', 'tsconfig.dead-code.json'] });
+  expect(after.stdout).not.toContain(' - live');
+  expect(after.stdout).toContain(' - unused');
+}, 20_000);

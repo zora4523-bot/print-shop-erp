@@ -111,3 +111,13 @@ pnpm exec playwright test --config=playwright.release.config.ts --workers=1 \
 两次扫描器/基线调整均已撤回，最终仍为本任务开始时的原始扫描器和基线；没有放宽新增/过期门禁、删除业务代码或以失败结果合并。只保留已验证的价格面板测试修正（4 项通过）。这些实验不应被视为已完成的 CI 修复。
 
 证据：GitHub PR #26；Quality runs 35561864239、35562541032、35563160377；本地 `/tmp/pr26-static.log`、`/tmp/pr26-static2.log`、`/tmp/pr26-static3.log`、`/tmp/pr26-dead-local.log`、`/tmp/pr26-dead-clean.log`。需进一步定位 ts-prune 引用分析不稳定的原因，并在同一最终候选上完整通过 CI 后再合并。
+
+## PR #26 继续排查：扫描器模块解析兼容性
+
+基线 e830c759，工作区起始干净。本次用真实扫描器确认：ts-prune 0.10.3 内置 ts-morph 13.0.3 / TypeScript 4.5.5，应用的 `moduleResolution: bundler` 被解析为 undefined；配合 `module: esnext` 后，目录入口引用无法识别。真实最小回归复现 `@/feature` 已引用的 `feature/index.ts:live` 仍被报告，使用独立 `tsconfig.dead-code.json` 的 `node` 解析后，live 不再报告，unused 仍报告。
+
+正式扫描切换到该独立配置，应用配置不改；未排除测试、未新增平台豁免、未修改比较门禁。两次 macOS 完整扫描均为 646 个 ts-prune 候选，较原 711 个仅消除 65 个误报，新增为 0，knip/madge 不变。移除的基线条目严格限于 5 个目录入口：order-form-b（5）、ui-business（36）、notification（2）、price/create-order（9）、settings（13）。例如 OrderForm 导入 ActionNotice、owner-settings action 和打印页面导入 settings、通知规则页导入 NOTIFICATION_EVENTS，均是实际消费者；没有删除这些导出。
+
+本次测试还断言正式扫描调用所用配置；真实工具回归使用独立临时目录，完成后清理，不接触数据库。完整跨系统及远端结果以本节后续验证记录为准，前一节失败尝试不作为通过证据。
+
+本地 10 项扫描器回归、完整 lint（3 条既有警告）、typecheck 通过。原生 Linux 容器扫描因 Node 默认约 2GB 堆上限耗尽而未产出报告，不计通过；初始两个模拟架构扫描主动终止，随后将临时启动的 Docker Desktop 恢复为停止状态。CI 扫描步骤明确采用与静态检查相同的 4GB Node 堆上限，后续以远端结果核验。本地日志 `/tmp/pr26-final-regression.log`、`/tmp/pr26-resolution-lint.log`、`/tmp/pr26-resolution-types.log`、`/tmp/pr26-fixed-scan.log`。

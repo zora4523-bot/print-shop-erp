@@ -66,6 +66,8 @@ jobs:
           pnpm typecheck
 
       - name: Check dead-code candidates against existing inventory
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm check:dead-code --check
 
       - name: Upload review data
