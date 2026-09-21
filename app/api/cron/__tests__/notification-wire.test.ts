@@ -125,6 +125,7 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
       date: '2026-04-27',
       workerCount: 2,
       errorCount: 0,
+      failed: 0,
     });
     expect(dispatchMock).toHaveBeenCalledWith(
       'DAILY_WORKER_SALARY',
@@ -190,6 +191,8 @@ describe('POST /api/cron/cs-settle → settlement service owns CS_PERIOD_SETTLED
       status: 'ok',
       settledCount: 2,
       errorCount: 0,
+      failed: 0,
+      errorCodes: [],
     });
     expect(dispatchMock).not.toHaveBeenCalled();
     expect(dbMock.user.findMany).not.toHaveBeenCalled();

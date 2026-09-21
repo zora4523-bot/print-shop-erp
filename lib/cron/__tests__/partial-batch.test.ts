@@ -74,6 +74,7 @@ import {
   runHourlyPayrollTask,
   runCsSettleTask,
 } from '../tasks';
+import { backgroundJobFailureSummary } from '../../background-jobs/result-summary';
 
 beforeEach(() => {
   generateBillsMock.mockReset();
@@ -95,6 +96,22 @@ afterEach(() => {
 });
 
 describe('cron task partial batch failures', () => {
+  it.each([
+    { task: 'hourly-payroll', mock: computeHourlyMock, run: () => runHourlyPayrollTask('2026-07'), code: 'HourlyAggregateError' },
+    { task: 'cs-settle', mock: settleReadyCsMock, run: () => runCsSettleTask(), code: 'CsSettlementIncomplete' },
+    { task: 'generate-bills', mock: generateBillsMock, run: () => runGenerateBillsTask('2026-07'), code: 'BillGenerationIncomplete' },
+  ])('$task exposes every omitted row in the operations failure summary', async ({ mock, run, code }) => {
+    mock.mockResolvedValue({
+      period: '2026-07', settled: [], generated: [],
+      errors: [{ message: 'business error' }, { message: 'business error' }],
+    });
+    const result = await run();
+    const summary = backgroundJobFailureSummary({ lastErrorCode: null, result });
+    expect(summary).not.toBeNull();
+    expect(summary).toContain('failed=2');
+    expect(result).toMatchObject({ errorCount: 2, failed: 2, errorCodes: [code] });
+  });
+
   it('does not announce a piecework day with unresolved reporter errors', async () => {
     lockPieceworkMock.mockResolvedValue({
       settled: [{ reporterId: 'w1' }],
@@ -127,6 +144,7 @@ describe('cron task partial batch failures', () => {
       date: '2026-07-31',
       workerCount: 2,
       errorCount: 0,
+      failed: 0,
     });
     expect(lockPieceworkMock).toHaveBeenCalledWith({
       workDate: '2026-07-31',
@@ -187,6 +205,8 @@ describe('cron task partial batch failures', () => {
       status: 'ok',
       settledCount: 1,
       errorCount: 0,
+      failed: 0,
+      errorCodes: [],
     });
     expect(dispatchMock).not.toHaveBeenCalled();
   });

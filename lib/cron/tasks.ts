@@ -97,6 +97,7 @@ export async function runDailySalaryTask(
     date,
     workerCount: day.settlements.length,
     errorCount: 0,
+    failed: 0,
   };
 }
 
@@ -130,6 +131,8 @@ export async function runHourlyPayrollTask(month: string, fence?: ExecutionFence
     month,
     workerCount: settled.length,
     errorCount: errors.length,
+    failed: errors.length,
+    errorCodes: errors.length > 0 ? ['HourlyAggregateError'] : [],
   };
 }
 
@@ -154,6 +157,8 @@ export async function runCsSettleTask(fence?: ExecutionFence) {
     status: 'ok' as const,
     settledCount: settled.length,
     errorCount: errors.length,
+    failed: errors.length,
+    errorCodes: errors.length > 0 ? ['CsSettlementIncomplete'] : [],
   };
 }
 
@@ -186,6 +191,8 @@ export async function runGenerateBillsTask(
     period: result.period,
     generatedCount: result.generated.length,
     errorCount: result.errors.length,
+    failed: result.errors.length,
+    errorCodes: result.errors.length > 0 ? ['BillGenerationIncomplete'] : [],
   };
 }
 

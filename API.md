@@ -92,6 +92,12 @@ applies_to: repository source at last_verified
 
 调用方不得依赖响应中的金额、人员清单或逐行错误；cron 响应保持 counts/status 级别，细节在受权限保护的后台页面和日志中查看。
 
+`hourly-payroll`、`cs-settle`、`generate-bills` 的执行结果保留 `errorCount`，
+并增加同值 `failed` 与去重字符串数组 `errorCodes`，供后台任务错误摘要展示。
+非空错误数组分别使用 `HourlyAggregateError`、`CsSettlementIncomplete`、
+`BillGenerationIncomplete` 类别码；不把人员、客户信息或逐行错误正文放入错误码。
+无错误时 `errorCodes` 为 `[]`；`daily-salary` 成功结果另带 `failed: 0`。
+
 ### 下载、导出与查询
 
 | 方法与路径 | 认证 | 输入 | 主要响应 |
