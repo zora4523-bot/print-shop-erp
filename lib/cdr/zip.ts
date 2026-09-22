@@ -8,21 +8,21 @@ import { SETTING_DEFINITIONS } from '../settings/definitions';
 //
 //   - prod / OSS 已配齐（readOssConfig.configured=true）+ 默认非 mock
 //     → 真打包：流式从 OSS 拉每个 CDR 文件 → archiver 边收边压 →
-//        流式 PUT 到 `bundles/<bundleId>.zip` → 生成 24h 预签 GET URL。
+//        流式 PUT 到 `bundles/<bundleId>.zip` → 保存对象 key，下载时签发 60 秒 GET URL。
 //   - dev / OSS 未配齐 OR `CDR_BUNDLE_MOCK_MODE=true`
 //     → 写"mock 占位"到 DesignBundle.zipFileUrl（`mock://bundle/<id>.zip`），
-//        让 UI / E2E 流程跑通；下载路由 `/api/cdr/bundles/<id>` 在 mock
+//        让 UI / E2E 流程跑通；下载路由 `/api/cdr/bundles/<access-token>` 在 mock
 //        路径返 503。
 //
 // 凭证模型（DECISIONS 2026-07-05）：服务端打包用 RAM 子账号**长期凭证**
-// 直连，不走 STS——预签 URL 的寿命受签发凭证寿命限制，STS 临时凭证
-// 最长 1h，签不出 24h 链接。因此 RAM 子账号必须直接挂对象读写策略
-// （design/* 读 + bundles/* 读写），而不仅是 AssumeRole。
+// 直连，不走 STS。下载凭证由应用 token 控制，OSS 只在路由校验通过后
+// 签发 60 秒 GET URL，因此不再把长期签名 URL 写入数据库。
 
 export type ZipUploadResult = {
-  // 24h 预签 GET URL（真实路径）或 mock 占位 URL；写到 DesignBundle.zipFileUrl
+  // OSS 预签 URL（真实路径）或 mock 占位；历史字段名保留。
   zipFileUrl: string;
-  // 24 小时后过期；写到 DesignBundle.expiresAt
+  zipObjectKey: string | null;
+  // 过期时间写到 DesignBundle.expiresAt；真实下载 URL 在 token 校验后临时签发
   expiresAt: Date;
   // mock-mode=true 时 UI 显示"OSS 未配置"告警条
   isMock: boolean;
@@ -43,7 +43,6 @@ export class CdrZipError extends Error {
 }
 
 const MS_PER_HOUR = 60 * 60 * 1000;
-const SECONDS_PER_HOUR = 60 * 60;
 
 // 兜底时长。这个模块是 OSS 适配层，**不读库**——阈值由调用方
 // （lib/cdr/bundle.ts，本来就在事务里）从 Setting 取好传进来，
@@ -179,17 +178,13 @@ async function generateRealZip(
     await context.assertLease?.();
     context.signal?.throwIfAborted();
 
-    // 预签 GET URL。**上传完成后**取当前时间——URL 的寿命从签发起算，
-    // DB 的 expiresAt 必须与之对齐；用打包开始时间会让慢任务白白缩短
-    // 外协的下载窗口。两处都用同一个 expireHours，不能各写各的。
+    // 有效期从打包完成时起算；不生成可绕过停用检查的长时 OSS 链接。
     const signedAt = nowFn();
-    const zipFileUrl = client.signatureUrl(zipObjectKey, {
-      expires: expireHours * SECONDS_PER_HOUR,
-      method: 'GET',
-    });
+    const zipFileUrl = zipObjectKey;
 
     return {
       zipFileUrl,
+      zipObjectKey,
       expiresAt: new Date(signedAt.getTime() + expireHours * MS_PER_HOUR),
       isMock: false,
     };
@@ -226,6 +221,7 @@ export async function uploadBundleZip(
     const now = opts.now ?? new Date();
     return {
       zipFileUrl: `mock://bundle/${input.bundleId}.zip`,
+      zipObjectKey: null,
       // mock 路径也用同一个时长，否则本地/测试环境算出来的过期时间和
       // 生产不一致，过期相关的逻辑就没法在 mock 下验证。
       expiresAt: new Date(now.getTime() + expireHours * MS_PER_HOUR),

@@ -1437,7 +1437,11 @@ model DesignBundle {
   orderIds        String[]
   designIds       String[]
   zipFileUrl      String
+  zipObjectKey    String?
   downloadUrl     String
+  accessTokenHash String?            @unique
+  downloadUrlCiphertext String?
+  revokedAt       DateTime?          @db.Timestamptz(3)
   expiresAt       DateTime
   downloadCount   Int                @default(0)
   status          DesignBundleStatus @default(PENDING)

@@ -1,5 +1,6 @@
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { decryptBundleDownloadUrl } from '../../lib/cdr/access-token';
 import { readWorkbookXml } from './_xlsx';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { E2E_PASSWORD, E2E_USERS, login, midPreviousShanghaiMonth, seedSettledExternalSalesOrder, uniqueSuffix } from '../e2e/_helpers';
@@ -137,10 +138,10 @@ test('CDR排队到mock完成的下载状态、过期后重新生成与真实PDF�
   await page.getByRole('button', { name: '生成下载包', exact: true }).click();
   await expect(page.getByText('已受理：正在生成 1 个 CDR 文件', { exact: true })).toBeVisible();
   await expect(page.locator('#cdr-bundle-form')).toHaveAttribute('aria-busy', 'false');
-  const bundle = await withSupplyChainDb((db) => db.query<{ id: string; status: string; backgroundJobId: string }>('SELECT id,status::text,"backgroundJobId" FROM "DesignBundle" WHERE "orderIds"=ARRAY[$1]::text[] ORDER BY "createdAt" DESC LIMIT 1', [fixture.orderId]));
+  const bundle = await withSupplyChainDb((db) => db.query<{ id: string; status: string; backgroundJobId: string; downloadUrlCiphertext: string }>('SELECT id,status::text,"backgroundJobId","downloadUrlCiphertext" FROM "DesignBundle" WHERE "orderIds"=ARRAY[$1]::text[] ORDER BY "createdAt" DESC LIMIT 1', [fixture.orderId]));
   expect(bundle.rows).toHaveLength(1);
   const row = bundle.rows[0]!;
-  const href = `/api/cdr/bundles/${row.id}`;
+  const href = decryptBundleDownloadUrl(row.downloadUrlCiphertext)!;
   const pending = await request.get(href);
   expect(pending.status()).toBe(409);
   expect(await pending.json()).toEqual({ error: '下载包正在生成' });

@@ -177,11 +177,9 @@ describe('uploadBundleZip — real path', () => {
     ]);
     expect(putStreamMock).toHaveBeenCalledTimes(1);
     expect(putStreamMock.mock.calls[0][0]).toBe('bundles/b1.zip');
-    expect(signatureUrlMock).toHaveBeenCalledWith('bundles/b1.zip', {
-      expires: 24 * 60 * 60,
-      method: 'GET',
-    });
-    expect(r.zipFileUrl).toBe('https://signed.example/bundles/b1.zip?sig=abc');
+    expect(signatureUrlMock).not.toHaveBeenCalled();
+    expect(r.zipFileUrl).toBe('bundles/b1.zip');
+    expect(r.zipObjectKey).toBe('bundles/b1.zip');
     expect(r.expiresAt.toISOString()).toBe('2026-07-06T00:00:00.000Z');
     expect(r.isMock).toBe(false);
   });

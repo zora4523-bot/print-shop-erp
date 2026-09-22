@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { BillStatus } from '../../generated/prisma/enums';
+import { AgentMonthlyBillStatus } from '../../generated/prisma/enums';
 import { db } from '../db';
 import {
   currentShanghaiMonth,
@@ -100,22 +100,24 @@ export async function getMonthlyBillStats(
   now: Date = new Date(),
 ): Promise<MonthlyBillStats> {
   const month = currentShanghaiMonth(now);
-  const aggregation = await db.bill.aggregate({
-    where: {
-      period: month,
-      status: {
-        in: [
-          BillStatus.ISSUED,
-          BillStatus.PARTIAL_PAID,
-          BillStatus.FULLY_PAID,
-        ],
+  const [aggregation, receipts] = await Promise.all([
+    db.agentMonthlyBill.aggregate({
+      where: {
+        period: month,
+        status: {
+          in: [AgentMonthlyBillStatus.CONFIRMED, AgentMonthlyBillStatus.PAID],
+        },
       },
-    },
-    _sum: { totalAmount: true, paidAmount: true },
-  });
+      _sum: { totalAmount: true },
+    }),
+    db.agentMonthlyBillReceipt.aggregate({
+      where: { bill: { period: month, status: AgentMonthlyBillStatus.PAID } },
+      _sum: { amount: true },
+    }),
+  ]);
 
   const total = new Decimal(aggregation._sum.totalAmount?.toString() ?? '0');
-  const paid = new Decimal(aggregation._sum.paidAmount?.toString() ?? '0');
+  const paid = new Decimal(receipts._sum.amount?.toString() ?? '0');
   const outstanding = total.minus(paid);
 
   return {

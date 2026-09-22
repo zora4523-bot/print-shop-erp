@@ -225,13 +225,18 @@ async function CdrRecentBundlesSection({
                         <DesignBundleStatusBadge
                           status={DESIGN_BUNDLE_DISPLAY_STATUS.MOCK}
                         />
-                      ) : (
+                      ) : bundle.downloadUrl ? (
                         <a
                           href={bundle.downloadUrl}
                           className="font-mono text-xs break-all underline-offset-2 hover:underline"
                         >
                           {bundle.downloadUrl}
                         </a>
+                      ) : (
+                        <div className="space-y-2 text-xs text-muted-foreground">
+                          <p>链接需要重新生成。</p>
+                          <RegenerateBundleForm {...regenerateProps} />
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs">

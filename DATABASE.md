@@ -52,6 +52,8 @@ Schema 中的模型按以下业务域组织；字段、关系、索引和约束�
 | 通知与任务 | `NotificationChannel`、`NotificationRule`、`NotificationLog`、`BackgroundJob`、`BackgroundJobAttempt`、`BackgroundWorkerHeartbeat` |
 | 系统配置 | `Setting`、业务编号序列模型 |
 
+`DesignBundle.accessTokenHash` 只保存 CDR 外部下载 token 的 SHA-256；`zipObjectKey` 保存服务端生成的 bundles 对象键，公开路由只在 token 校验后签发短期下载地址。
+
 ## 数据类型与历史正确性
 
 - 金额、单价、比例、库存和工时使用带明确 scale 的 `Decimal`。应用层不得先转为 JavaScript `number` 再做最终财务计算。
@@ -170,6 +172,11 @@ pnpm test:migrations:fresh
 详细步骤不要从本文拼接执行，统一使用 [DEPLOYMENT.md](./DEPLOYMENT.md) 指向的部署 runbook。
 
 ## 安全检查
+
+`DesignBundle.accessTokenHash` 只保存 256 位随机下载令牌的 SHA-256 摘要；
+`downloadUrlCiphertext` 使用 `AUTH_SECRET` 加密管理员历史页需要展示的原始链接，
+`zipObjectKey` 保存受控对象键而不是长期 OSS 签名 URL。`revokedAt` 用于令牌失效
+校验；下载接口始终在令牌校验通过后重新签发短时对象存储 URL。
 
 - `.env` 不进 Git；输出或截图中隐藏连接串和密码。
 - 开发、E2E、fresh DB 和生产使用不同数据库身份与连接串。

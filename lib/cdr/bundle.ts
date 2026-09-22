@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { createBundleAccessToken, decryptBundleDownloadUrl, encryptBundleDownloadUrl, hashBundleAccessToken, isBundleAccessToken } from './access-token';
 import { uploadBundleZip, type ZipUploadResult } from './zip';
 import { getSetting } from '../settings';
 import { parseStrictYmd } from '../auth/schemas';
@@ -124,7 +125,7 @@ export type CreateBundleResult = {
   zipFileUrl: string;
   // 绝对 URL，外协方可直接复制粘贴（base 来自 APP_PUBLIC_URL / AUTH_URL）
   downloadUrl: string;
-  // /api/cdr/bundles/<id>——E2E / 同源测试用
+  // /api/cdr/bundles/<access-token>——E2E / 同源测试用
   relativePath: string;
   expiresAt: Date;
   fileCount: number;
@@ -211,9 +212,10 @@ export async function createBundle(
   actor: { id: string },
 ): Promise<CreateBundleResult> {
   const collected = await collectBundle(input);
+  const accessToken = createBundleAccessToken();
   const { hours: expireHours } = await getSetting('cdr_link_expire_hours');
 
-  // 先创建 DesignBundle 拿 id（即作为 token / object key 的一部分）。
+  // 先创建 DesignBundle 拿对象 key 所需 id；公开凭证为独立随机 token。
   // zipFileUrl + downloadUrl + expiresAt 占位，下面 ZIP 步骤后 update。
   // 不在 tx 内 wait OSS，因为 OSS 调用是 minutes-level 的网络 IO，挂
   // 在 PG tx 里会 hold lock。
@@ -225,7 +227,9 @@ export async function createBundle(
       orderIds: collected.orderIds,
       designIds: collected.designIds,
       zipFileUrl: '',
+      zipObjectKey: null,
       downloadUrl: '',
+      accessTokenHash: hashBundleAccessToken(accessToken),
       // tentative expiry——下面 OSS 步骤会覆写。用同一个阈值，免得打包
       // 失败留下的占位行带着一个和配置无关的过期时间。
       expiresAt: new Date(Date.now() + expireHours * 60 * 60 * 1000),
@@ -255,23 +259,19 @@ export async function createBundle(
     throw new CdrBundleError(`CDR 打包上传失败：${detail}`);
   }
 
-  // 下载链接走我们自己的 token-route，不直接暴露 OSS 对象 URL：
-  // 下载时再签 OSS GET URL（TODO: STS 接进来后实现 ossSignGetUrl）。
-  // 当前 mock-mode 下，route 看到 `mock://...` 直接 503。
-  //
-  // **绝对 URL**——SPEC §3.5 是&ldquo;复制链接发外协&rdquo;的语义，外协在
-  // WeChat / 邮件里点链接得直接打开。
-  // baseUrl 由 action 层从 request headers 推导（host + x-forwarded-
-  // proto / x-forwarded-host），保证 dev (127.0.0.1 / ngrok) 也得对的
-  // 域而不是回到 localhost。
+  // 公开链接仅返回给已授权管理员，数据库只存 token hash。
   const baseUrl = input.baseUrl.replace(/\/+$/, '');
-  const downloadUrl = `${baseUrl}/api/cdr/bundles/${bundle.id}`;
+  const downloadUrl = `${baseUrl}/api/cdr/bundles/${accessToken}`;
 
   await db.designBundle.update({
     where: { id: bundle.id },
     data: {
       zipFileUrl: upload.zipFileUrl,
-      downloadUrl,
+      zipObjectKey: upload.zipObjectKey ?? null,
+      // Keep the recipient URL encrypted for durable admin history; raw token
+      // is never persisted in plaintext.
+      downloadUrl: '',
+      downloadUrlCiphertext: encryptBundleDownloadUrl(downloadUrl),
       expiresAt: upload.expiresAt,
       status: DesignBundleStatus.READY,
       lastErrorCode: null,
@@ -282,7 +282,7 @@ export async function createBundle(
     bundleId: bundle.id,
     zipFileUrl: upload.zipFileUrl,
     downloadUrl,
-    relativePath: `/api/cdr/bundles/${bundle.id}`,
+    relativePath: `/api/cdr/bundles/${accessToken}`,
     expiresAt: upload.expiresAt,
     fileCount: collected.files.length,
     isMock: upload.isMock,
@@ -298,6 +298,7 @@ export async function enqueueBundle(
   actor: { id: string },
 ): Promise<EnqueueBundleResult> {
   const collected = await collectBundle(input);
+  const accessToken = createBundleAccessToken();
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const baseUrl = input.baseUrl.replace(/\/+$/, '');
 
@@ -310,13 +311,16 @@ export async function enqueueBundle(
         orderIds: collected.orderIds,
         designIds: collected.designIds,
         zipFileUrl: '',
+        zipObjectKey: null,
         downloadUrl: '',
+        accessTokenHash: hashBundleAccessToken(accessToken),
+        downloadUrlCiphertext: encryptBundleDownloadUrl(`${baseUrl}/api/cdr/bundles/${accessToken}`),
         expiresAt,
         status: DesignBundleStatus.PENDING,
       },
       select: { id: true },
     });
-    const downloadUrl = `${baseUrl}/api/cdr/bundles/${bundle.id}`;
+    const downloadUrl = `${baseUrl}/api/cdr/bundles/${accessToken}`;
     const { job } = await enqueueBackgroundJob(
       {
         type: BACKGROUND_JOB_TYPES.CDR_BUNDLE,
@@ -330,13 +334,13 @@ export async function enqueueBundle(
     );
     await tx.designBundle.update({
       where: { id: bundle.id },
-      data: { backgroundJobId: job.id, downloadUrl },
+      data: { backgroundJobId: job.id },
     });
     return {
       bundleId: bundle.id,
       jobId: job.id,
       downloadUrl,
-      relativePath: `/api/cdr/bundles/${bundle.id}`,
+      relativePath: `/api/cdr/bundles/${accessToken}`,
       fileCount: collected.files.length,
     };
   });
@@ -400,6 +404,7 @@ export async function processQueuedBundle(
     where: { id: bundleId, status: DesignBundleStatus.PENDING },
     data: {
       zipFileUrl: upload.zipFileUrl,
+      zipObjectKey: upload.zipObjectKey ?? null,
       expiresAt: upload.expiresAt,
       status: DesignBundleStatus.READY,
       lastErrorCode: null,
@@ -414,6 +419,7 @@ export async function processQueuedBundle(
 export type BundleAccessRow = {
   id: string;
   zipFileUrl: string;
+  zipObjectKey: string | null;
   expiresAt: Date;
   downloadCount: number;
 };
@@ -438,35 +444,36 @@ export class BundleNotReadyError extends Error {
 }
 
 /**
- * 路由用：按 id 取 bundle，校验未过期，自增 downloadCount。
- * 返 zipFileUrl（mock-mode 是 `mock://...`，prod 是 OSS object key 或
- * 已 sign 的 GET URL，由 STS 接入决定）。
+ * 按 token hash 读取并校验停用、有效期及状态，返回受控对象 key。
  */
 export async function consumeBundle(
-  bundleId: string,
+  accessToken: string,
   now: Date = new Date(),
 ): Promise<BundleAccessRow> {
+  if (!isBundleAccessToken(accessToken)) throw new BundleNotFoundError();
   const row = await db.designBundle.findUnique({
-    where: { id: bundleId },
+    where: { accessTokenHash: hashBundleAccessToken(accessToken) },
     select: {
       id: true,
       zipFileUrl: true,
+      zipObjectKey: true,
       expiresAt: true,
       downloadCount: true,
       status: true,
+      revokedAt: true,
     },
   });
-  if (!row) throw new BundleNotFoundError();
+  if (!row || row.revokedAt) throw new BundleNotFoundError();
   if (row.status !== DesignBundleStatus.READY) {
     throw new BundleNotReadyError(row.status);
   }
-  if (row.expiresAt.getTime() < now.getTime()) {
+  if (row.expiresAt.getTime() <= now.getTime()) {
     throw new BundleExpiredError(row.expiresAt);
   }
   // 增 1（best-effort，失败不阻下载）
   await db.designBundle
     .update({
-      where: { id: bundleId },
+      where: { id: row.id },
       data: { downloadCount: { increment: 1 } },
     })
     .catch(() => {});
@@ -508,6 +515,7 @@ export async function listRecentBundles(
       designIds: true,
       zipFileUrl: true,
       downloadUrl: true,
+      downloadUrlCiphertext: true,
       expiresAt: true,
       downloadCount: true,
       createdById: true,
@@ -525,7 +533,7 @@ export async function listRecentBundles(
     orderCount: r.orderIds.length,
     fileCount: r.designIds.length,
     zipFileUrl: r.zipFileUrl,
-    downloadUrl: r.downloadUrl,
+    downloadUrl: r.downloadUrlCiphertext ? (decryptBundleDownloadUrl(r.downloadUrlCiphertext) ?? '') : '',
     expiresAt: r.expiresAt,
     downloadCount: r.downloadCount,
     createdById: r.createdById,

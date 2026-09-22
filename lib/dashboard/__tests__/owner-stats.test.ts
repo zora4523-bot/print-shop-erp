@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     order: { count: vi.fn() },
-    bill: { aggregate: vi.fn() },
+    agentMonthlyBill: { aggregate: vi.fn() },
+    agentMonthlyBillReceipt: { aggregate: vi.fn() },
   };
   return { dbMock: mock };
 });
@@ -13,7 +14,9 @@ import { getMonthlyBillStats, getTodayOrderStats } from '../owner-stats';
 
 beforeEach(() => {
   dbMock.order.count.mockReset();
-  dbMock.bill.aggregate.mockReset();
+  dbMock.agentMonthlyBill.aggregate.mockReset();
+  dbMock.agentMonthlyBillReceipt.aggregate.mockReset();
+  dbMock.agentMonthlyBillReceipt.aggregate.mockResolvedValue({ _sum: { amount: null } });
 });
 
 describe('getTodayOrderStats', () => {
@@ -120,8 +123,8 @@ describe('getTodayOrderStats', () => {
 
 describe('getMonthlyBillStats', () => {
   it('空 DB → 全 "0.00"', async () => {
-    dbMock.bill.aggregate.mockResolvedValue({
-      _sum: { totalAmount: null, paidAmount: null },
+    dbMock.agentMonthlyBill.aggregate.mockResolvedValue({
+      _sum: { totalAmount: null },
     });
     const s = await getMonthlyBillStats(new Date('2026-04-25T08:00:00Z'));
     expect(s.month).toBe('2026-04');
@@ -131,9 +134,8 @@ describe('getMonthlyBillStats', () => {
   });
 
   it('数据库聚合值 + outstanding = total - paid', async () => {
-    dbMock.bill.aggregate.mockResolvedValue({
-      _sum: { totalAmount: '9500.50', paidAmount: '5000.00' },
-    });
+    dbMock.agentMonthlyBill.aggregate.mockResolvedValue({ _sum: { totalAmount: '9500.50' } });
+    dbMock.agentMonthlyBillReceipt.aggregate.mockResolvedValue({ _sum: { amount: '5000.00' } });
     const s = await getMonthlyBillStats(new Date('2026-04-25T08:00:00Z'));
     expect(s.total).toBe('9500.50');
     expect(s.paid).toBe('5000.00');
@@ -141,9 +143,8 @@ describe('getMonthlyBillStats', () => {
   });
 
   it('Decimal 聚合值不经过 JS Number', async () => {
-    dbMock.bill.aggregate.mockResolvedValue({
-      _sum: { totalAmount: '3.00', paidAmount: '1.00' },
-    });
+    dbMock.agentMonthlyBill.aggregate.mockResolvedValue({ _sum: { totalAmount: '3.00' } });
+    dbMock.agentMonthlyBillReceipt.aggregate.mockResolvedValue({ _sum: { amount: '1.00' } });
     const s = await getMonthlyBillStats(new Date('2026-04-25T08:00:00Z'));
     expect(s.total).toBe('3.00');
     expect(s.paid).toBe('1.00');
@@ -151,34 +152,33 @@ describe('getMonthlyBillStats', () => {
   });
 
   it('查询 period 用 currentShanghaiMonth(now)', async () => {
-    dbMock.bill.aggregate.mockResolvedValue({
-      _sum: { totalAmount: null, paidAmount: null },
+    dbMock.agentMonthlyBill.aggregate.mockResolvedValue({
+      _sum: { totalAmount: null },
     });
     await getMonthlyBillStats(new Date('2026-04-25T08:00:00Z'));
-    const args = dbMock.bill.aggregate.mock.calls[0][0];
+    const args = dbMock.agentMonthlyBill.aggregate.mock.calls[0][0];
     const where = args.where;
     expect(where.period).toBe('2026-04');
-    expect(args._sum).toEqual({ totalAmount: true, paidAmount: true });
+    expect(args._sum).toEqual({ totalAmount: true });
   });
 
   it('排除 DRAFT 账单（与 /owner/bills 的应收口径一致，Codex round 98 P1）', async () => {
-    dbMock.bill.aggregate.mockResolvedValue({
-      _sum: { totalAmount: null, paidAmount: null },
+    dbMock.agentMonthlyBill.aggregate.mockResolvedValue({
+      _sum: { totalAmount: null },
     });
     await getMonthlyBillStats(new Date('2026-04-25T08:00:00Z'));
-    const where = dbMock.bill.aggregate.mock.calls[0][0].where;
+    const where = dbMock.agentMonthlyBill.aggregate.mock.calls[0][0].where;
     // 必须有 status 过滤，且不能含 DRAFT
     expect(where.status).toBeDefined();
     const allowed = where.status.in as string[];
-    expect(allowed).toContain('ISSUED');
-    expect(allowed).toContain('PARTIAL_PAID');
-    expect(allowed).toContain('FULLY_PAID');
+    expect(allowed).toContain('CONFIRMED');
+    expect(allowed).toContain('PAID');
     expect(allowed).not.toContain('DRAFT');
   });
 
   it('跨月边界月份 flip', async () => {
-    dbMock.bill.aggregate.mockResolvedValue({
-      _sum: { totalAmount: null, paidAmount: null },
+    dbMock.agentMonthlyBill.aggregate.mockResolvedValue({
+      _sum: { totalAmount: null },
     });
     // Shanghai 2026-04-30 23:59 还是 4 月
     const apr = await getMonthlyBillStats(
@@ -186,9 +186,11 @@ describe('getMonthlyBillStats', () => {
     );
     expect(apr.month).toBe('2026-04');
 
-    dbMock.bill.aggregate.mockReset();
-    dbMock.bill.aggregate.mockResolvedValue({
-      _sum: { totalAmount: null, paidAmount: null },
+    dbMock.agentMonthlyBill.aggregate.mockReset();
+    dbMock.agentMonthlyBillReceipt.aggregate.mockReset();
+    dbMock.agentMonthlyBillReceipt.aggregate.mockResolvedValue({ _sum: { amount: null } });
+    dbMock.agentMonthlyBill.aggregate.mockResolvedValue({
+      _sum: { totalAmount: null },
     });
     // Shanghai 2026-05-01 00:00 已是 5 月
     const may = await getMonthlyBillStats(
@@ -199,9 +201,8 @@ describe('getMonthlyBillStats', () => {
 
   it('paid > total（异常但允许）→ outstanding 为负', async () => {
     // 业务上不期望，但模型不约束；不要因数据脏让聚合崩。
-    dbMock.bill.aggregate.mockResolvedValue({
-      _sum: { totalAmount: '100.00', paidAmount: '150.00' },
-    });
+    dbMock.agentMonthlyBill.aggregate.mockResolvedValue({ _sum: { totalAmount: '100.00' } });
+    dbMock.agentMonthlyBillReceipt.aggregate.mockResolvedValue({ _sum: { amount: '150.00' } });
     const s = await getMonthlyBillStats(new Date('2026-04-25T08:00:00Z'));
     expect(s.outstanding).toBe('-50.00');
   });

@@ -43,6 +43,7 @@ import {
   listEligibleOrders,
   listRecentBundles,
 } from '../bundle';
+import { hashBundleAccessToken } from '../access-token';
 
 beforeEach(() => {
   Object.values(dbMock.order).forEach((fn) => fn.mockReset());
@@ -257,8 +258,8 @@ describe('createBundle', () => {
     expect(r.isMock).toBe(true);
     // 绝对 URL（base 由调用方提供，通常 action 层从 request headers 推；
     // Codex round 119 high → round 121 medium）
-    expect(r.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/b1');
-    expect(r.relativePath).toBe('/api/cdr/bundles/b1');
+    expect(r.downloadUrl).toMatch(/^https:\/\/erp\.example\.com\/api\/cdr\/bundles\/[A-Za-z0-9_-]{43}$/);
+    expect(r.relativePath).toMatch(/^\/api\/cdr\/bundles\/[A-Za-z0-9_-]{43}$/);
 
     // create 第一次：占位 row（zipFileUrl/downloadUrl 空字符串）
     const createData = dbMock.designBundle.create.mock.calls[0][0].data;
@@ -281,9 +282,7 @@ describe('createBundle', () => {
     const updateCall = dbMock.designBundle.update.mock.calls[0][0];
     expect(updateCall.where).toEqual({ id: 'b1' });
     expect(updateCall.data.zipFileUrl).toBe('mock://bundle/b1.zip');
-    expect(updateCall.data.downloadUrl).toBe(
-      'https://erp.example.com/api/cdr/bundles/b1',
-    );
+    expect(updateCall.data.downloadUrl).toBe('');
     expect(updateCall.data.expiresAt).toEqual(new Date('2026-05-06T00:00:00Z'));
   });
 
@@ -309,7 +308,7 @@ describe('createBundle', () => {
       },
       { id: 'u1' },
     );
-    expect(r.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/b1');
+    expect(r.downloadUrl).toMatch(/^https:\/\/erp\.example\.com\/api\/cdr\/bundles\/[A-Za-z0-9_-]{43}$/);
   });
 
   it('uploadBundleZip 失败 → 删占位 + CdrBundleError 友好文案', async () => {
@@ -393,18 +392,17 @@ describe('enqueueBundle durable path', () => {
     );
     expect(dbMock.designBundle.update).toHaveBeenCalledWith({
       where: { id: 'b1' },
-      data: {
-        backgroundJobId: 'job-1',
-        downloadUrl: 'https://erp.example.com/api/cdr/bundles/b1',
-      },
+      data: { backgroundJobId: 'job-1' },
     });
   });
 });
 
 describe('consumeBundle', () => {
+  const token = 'A'.repeat(43);
+  const tokenHash = hashBundleAccessToken(token);
   it('id 不存在 → BundleNotFoundError', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue(null);
-    await expect(consumeBundle('ghost')).rejects.toBeInstanceOf(
+    await expect(consumeBundle('B'.repeat(43))).rejects.toBeInstanceOf(
       BundleNotFoundError,
     );
   });
@@ -412,25 +410,31 @@ describe('consumeBundle', () => {
   it('已过期 → BundleExpiredError', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      accessTokenHash: tokenHash,
+      revokedAt: null,
+      zipObjectKey: 'bundles/b1.zip',
       status: 'READY',
       zipFileUrl: 'mock://bundle/b1.zip',
       expiresAt: new Date('2026-05-04T00:00:00Z'), // 已过
       downloadCount: 0,
     });
     await expect(
-      consumeBundle('b1', new Date('2026-05-05T00:00:00Z')),
+      consumeBundle(token, new Date('2026-05-05T00:00:00Z')),
     ).rejects.toBeInstanceOf(BundleExpiredError);
   });
 
   it('未过期 → 返 row + 增 downloadCount（best-effort）', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      accessTokenHash: tokenHash,
+      revokedAt: null,
+      zipObjectKey: 'bundles/b1.zip',
       status: 'READY',
       zipFileUrl: 'mock://bundle/b1.zip',
       expiresAt: new Date('2026-05-06T00:00:00Z'),
       downloadCount: 5,
     });
-    const r = await consumeBundle('b1', new Date('2026-05-05T00:00:00Z'));
+    const r = await consumeBundle(token, new Date('2026-05-05T00:00:00Z'));
     expect(r.id).toBe('b1');
     expect(dbMock.designBundle.update).toHaveBeenCalledWith({
       where: { id: 'b1' },
@@ -441,6 +445,9 @@ describe('consumeBundle', () => {
   it('downloadCount 自增写入失败不影响下载（best-effort）', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      accessTokenHash: tokenHash,
+      revokedAt: null,
+      zipObjectKey: 'bundles/b1.zip',
       status: 'READY',
       zipFileUrl: 'https://oss/b1.zip',
       expiresAt: new Date('2026-05-06T00:00:00Z'),
@@ -448,7 +455,7 @@ describe('consumeBundle', () => {
     });
     dbMock.designBundle.update.mockRejectedValue(new Error('connection lost'));
     await expect(
-      consumeBundle('b1', new Date('2026-05-05T00:00:00Z')),
+      consumeBundle(token, new Date('2026-05-05T00:00:00Z')),
     ).resolves.toBeDefined();
   });
 });

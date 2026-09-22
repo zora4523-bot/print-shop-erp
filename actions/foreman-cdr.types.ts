@@ -14,7 +14,7 @@ export type CreateBundleResult =
       bundleId: string;
       // 绝对 URL（含 host），外协方复制粘贴用
       downloadUrl: string;
-      // 相对路径 /api/cdr/bundles/<id>，同源链接 / E2E 用
+      // 相对路径 /api/cdr/bundles/<access-token>，同源链接 / E2E 用
       relativePath: string;
       expiresAt: string; // ISO
       fileCount: number;

@@ -20,7 +20,7 @@ import { createOssClient } from './client';
 //
 // **只给 IMAGE 用**。CDR 源文件在详情页/打印视图都不渲染、不提供
 // 链接——给无 design:bundle 权限的角色发放可用的 CDR 下载 URL 是
-// 越权（SPEC §2.2）。CDR 的受控下载口只有 /api/cdr/bundles/<id>。
+// 越权（SPEC §2.2）。CDR 的受控下载口只有 /api/cdr/bundles/<access-token>。
 
 const READ_URL_EXPIRES_SECONDS = 30 * 60;
 
