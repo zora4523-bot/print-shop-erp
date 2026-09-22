@@ -23,3 +23,7 @@ export type CreateBundleResult =
     }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
+
+export type RevokeBundleResult =
+  | { status: 'success' }
+  | { status: 'error'; message: string };

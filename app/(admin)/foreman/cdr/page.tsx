@@ -9,6 +9,7 @@ import { parseStrictYmd } from '@/lib/auth/schemas';
 import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { RegenerateBundleForm } from '@/components/business/cdr/RegenerateBundleForm';
+import { RevokeBundleForm } from '@/components/business/cdr/RevokeBundleForm';
 import { Button } from '@/components/ui/button';
 import { EmptyState, EnvNotice, ErrorBoundary, PageHeader, SectionLoading, StatusBadge, TableScrollArea } from '@/components/ui-business';
 import {
@@ -226,12 +227,15 @@ async function CdrRecentBundlesSection({
                           status={DESIGN_BUNDLE_DISPLAY_STATUS.MOCK}
                         />
                       ) : bundle.downloadUrl ? (
-                        <a
-                          href={bundle.downloadUrl}
-                          className="font-mono text-xs break-all underline-offset-2 hover:underline"
-                        >
-                          {bundle.downloadUrl}
-                        </a>
+                        <div className="space-y-1">
+                          <a
+                            href={bundle.downloadUrl}
+                            className="font-mono text-xs break-all underline-offset-2 hover:underline"
+                          >
+                            {bundle.downloadUrl}
+                          </a>
+                          <RevokeBundleForm bundleId={bundle.id} />
+                        </div>
                       ) : (
                         <div className="space-y-2 text-xs text-muted-foreground">
                           <p>链接需要重新生成。</p>

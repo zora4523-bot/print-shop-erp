@@ -480,6 +480,21 @@ export async function consumeBundle(
   return row;
 }
 
+/** Immediately invalidate an issued CDR bearer token while retaining its audit row. */
+export async function revokeBundleAccess(bundleId: string): Promise<void> {
+  const result = await db.designBundle.updateMany({
+    where: {
+      id: bundleId,
+      accessTokenHash: { not: null },
+      revokedAt: null,
+    },
+    data: { revokedAt: new Date() },
+  });
+  if (result.count !== 1) {
+    throw new CdrBundleError('下载链接不存在或已经撤销');
+  }
+}
+
 // ─── 4. 列表（owner / foreman 复看） ───
 
 export type RecentBundleRow = {

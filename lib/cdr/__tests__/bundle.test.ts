@@ -42,6 +42,7 @@ import {
   processQueuedBundle,
   listEligibleOrders,
   listRecentBundles,
+  revokeBundleAccess,
 } from '../bundle';
 import { hashBundleAccessToken } from '../access-token';
 
@@ -487,6 +488,22 @@ describe('listRecentBundles', () => {
     const args = dbMock.designBundle.findMany.mock.calls[0][0];
     expect(args.orderBy).toEqual({ createdAt: 'desc' });
     expect(args.take).toBe(20);
+  });
+});
+
+describe('revokeBundleAccess', () => {
+  it('marks an issued token revoked without deleting its audit row', async () => {
+    dbMock.designBundle.updateMany.mockResolvedValue({ count: 1 });
+    await revokeBundleAccess('b1');
+    expect(dbMock.designBundle.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'b1', accessTokenHash: { not: null }, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    }));
+  });
+
+  it('rejects a missing or already revoked token row', async () => {
+    dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
+    await expect(revokeBundleAccess('b1')).rejects.toThrow('不存在或已经撤销');
   });
 });
 
