@@ -151,9 +151,9 @@ test.describe('创建工单 — golden path', () => {
     ).toHaveAttribute('aria-pressed', 'true');
 
     const paper = form.getByRole('group', { name: '纸张材质' });
-    await paper.getByRole('button', { name: '珠光艳闪', exact: true }).click();
+    await paper.getByRole('button', { name: '艳红珠光纸', exact: true }).click();
     await expect(
-      paper.getByRole('button', { name: '珠光艳闪', exact: true }),
+      paper.getByRole('button', { name: '艳红珠光纸', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
 
     const specification = form.getByRole('group', { name: '规格' });
@@ -225,7 +225,7 @@ test.describe('创建工单 — golden path', () => {
         .locator('dd');
     await expect(itemFact('工艺')).toContainText('局部烫金');
     await expect(itemFact('规格')).toHaveText('大号封90×165');
-    await expect(itemFact('纸张')).toHaveText('160g珠光艳闪');
+    await expect(itemFact('纸张')).toHaveText('160g艳红珠光纸');
     await page.getByText('工单信息', { exact: true }).click();
     await expect(page.getByText(/^GD-\d{6}-\d{3}$/).first()).toBeVisible();
 
@@ -270,7 +270,7 @@ test.describe('创建工单 — golden path', () => {
       exact: true,
     });
     await expect(productionDetails).toBeVisible();
-    await expect(productionDetails).toContainText('160g珠光艳闪');
+    await expect(productionDetails).toContainText('160g艳红珠光纸');
     await expect(productionDetails).toContainText('大号封90×165');
     await productionDetails
       .getByRole('button', { name: '关闭', exact: true })

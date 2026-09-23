@@ -45,7 +45,7 @@ const baseProps: Omit<OrderFormBProps, 'items' | 'itemFields' | 'activeIndex' | 
   values: { customName: '测试工单', receiverName: '', receiverPhone: '', receiverAddress: '', isSfCollect: false },
   pendingDesigns: {},
   packaging: packagingView(),
-  paperOptions: [{ value: 'pearl', label: '珠光艳闪', texture: 'matte-red' }],
+  paperOptions: [{ value: 'pearl', label: '艳红珠光纸' }],
   paperKey: 'pearl', weightOptions: [{ value: 160 }],
   specificationOptions: [{ value: '大号封', label: '大号封' }],
   savedLabel: '草稿已保存 11:26:30', rail: <div>费用明细</div>,

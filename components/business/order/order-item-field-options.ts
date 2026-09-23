@@ -10,35 +10,11 @@ import {
   externalOrderAvailableSpecifications,
   externalOrderSpecificationsForRoute,
   externalOrderSpecificationLabel,
-  type ExternalOrderPaper,
   type ExternalOrderCatalogProduct,
 } from '@/lib/order/order-item-catalog';
-import type { OrderPaperSwatchOption } from './order-form-b/OrderPaperSwatchPicker';
+import { paperDisplayRank } from '@/lib/rules/paper-label';
+import type { OrderPaperOption } from './order-form-b/OrderItemFields';
 import type { OrderFoilSwatchOption } from './order-form-b/OrderFoilSwatchPicker';
-function externalPaperSwatchTexture(
-  appearance: ExternalOrderPaper['appearance'],
-): OrderPaperSwatchOption['texture'] {
-  switch (appearance) {
-    case 'pearl':
-      return 'pearl';
-    case 'pearl-red':
-      return 'pearl-red';
-    case 'solid-red':
-      return 'solid-red';
-    case 'matte-red':
-      return 'matte-red';
-    case 'variegated':
-      return 'variegated-pearl';
-    case 'glitter':
-      return 'glitter-red';
-    case 'linen':
-      return 'linen-red';
-    case 'ice-white':
-      return 'ice-white';
-    case 'coated':
-      return 'coated-white';
-  }
-}
 
 export function orderItemFieldOptions(
   item: CreateOrderInput['items'][number],
@@ -50,7 +26,9 @@ export function orderItemFieldOptions(
     item.paperType,
     options?.papers,
   );
-  const externalPaperOptions: OrderPaperSwatchOption[] =
+  // Display order only (stable sort): normalizeExternalOrderItem still picks the
+  // default paper from the catalog order, so reordering buttons cannot change it.
+  const externalPaperOptions: OrderPaperOption[] =
     externalOrderPapersForRoute(
       products,
       item.pricingRoute,
@@ -58,7 +36,6 @@ export function orderItemFieldOptions(
     ).map((paper) => ({
       value: paper.key,
       label: paper.label,
-      texture: externalPaperSwatchTexture(paper.appearance),
       disabled: (() => {
         if (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK) {
           return externalOrderAvailableSpecifications(paper, item.pricingRoute).length === 0;
@@ -73,10 +50,7 @@ export function orderItemFieldOptions(
           weightOptions.every((option) => option.disabled)
         );
       })(),
-    })).sort((left, right) =>
-      Number(left.texture === 'variegated-pearl') -
-      Number(right.texture === 'variegated-pearl'),
-    );
+    })).sort((left, right) => paperDisplayRank(left.label) - paperDisplayRank(right.label));
   const externalFoilOptions: OrderFoilSwatchOption[] =
     options?.foilColors.map((foil) => ({
       value: foil.name,

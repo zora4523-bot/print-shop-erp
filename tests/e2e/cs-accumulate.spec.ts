@@ -74,7 +74,7 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
           .click();
         await form
           .getByRole('group', { name: '纸张材质' })
-          .getByRole('button', { name: '珠光艳闪', exact: true })
+          .getByRole('button', { name: '艳红珠光纸', exact: true })
           .click();
         await form
           .getByRole('group', { name: '规格' })

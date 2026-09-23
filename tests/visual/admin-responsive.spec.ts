@@ -1530,7 +1530,7 @@ async function prepareConfiguredLocalFoilStyle(page: Page) {
 
   const paperPicker = form.getByRole('group', { name: '纸张材质' });
   await paperPicker
-    .getByRole('button', { name: '珠光艳闪', exact: true })
+    .getByRole('button', { name: '艳红珠光纸', exact: true })
     .click();
   const specificationPicker = form.getByRole('group', { name: '规格' });
   await specificationPicker
@@ -1550,7 +1550,7 @@ async function prepareConfiguredLocalFoilStyle(page: Page) {
   ).toBeVisible();
   await expect(
     paperPicker.getByRole('button', {
-      name: '珠光艳闪',
+      name: '艳红珠光纸',
       exact: true,
       pressed: true,
     }),

@@ -640,6 +640,26 @@ describe('buildOrderWhere', () => {
     });
   });
 
+  it('matches a paper typed with its displayed name against the stored name', () => {
+    const { query } = parseOrderListQuery({ paperType: '160g艳红珠光纸' });
+
+    expect(buildOrderWhere(salesActor, query.filters)).toEqual({
+      AND: [
+        { submitterId: 'sales-1' },
+        {
+          items: {
+            some: {
+              OR: [
+                { paperType: { contains: '160g艳红珠光纸', mode: 'insensitive' } },
+                { paperType: { contains: '160g珠光艳闪', mode: 'insensitive' } },
+              ],
+            },
+          },
+        },
+      ],
+    });
+  });
+
   it('ANDs role scope with filters and keeps shipment/item/task predicates on the same child', () => {
     const { query } = parseOrderListQuery({
       receiverName: '张',
@@ -671,7 +691,7 @@ describe('buildOrderWhere', () => {
           items: {
             some: {
               name: { contains: '礼盒', mode: 'insensitive' },
-              paperType: { contains: '珠光', mode: 'insensitive' },
+              OR: [{ paperType: { contains: '珠光', mode: 'insensitive' } }],
               crafts: { hasSome: ['craft-1'] },
               tasks: {
                 some: {

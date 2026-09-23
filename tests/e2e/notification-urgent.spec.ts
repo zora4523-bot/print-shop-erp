@@ -63,7 +63,7 @@ test.describe('notification urgent wire — golden path', () => {
       .click();
     await form
       .getByRole('group', { name: '纸张材质' })
-      .getByRole('button', { name: '珠光艳闪', exact: true })
+      .getByRole('button', { name: '艳红珠光纸', exact: true })
       .click();
     await form
       .getByRole('group', { name: '规格' })

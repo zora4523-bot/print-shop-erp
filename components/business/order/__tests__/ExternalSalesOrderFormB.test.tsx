@@ -127,8 +127,8 @@ function render(
         summary: `合计 ${items.length * 2000} 个`,
       }}
       paperOptions={[
-        { value: 'touch', label: '触感纸', texture: 'matte-red' },
-        { value: 'tbz', label: '铜版纸', texture: 'coated-white' },
+        { value: 'touch', label: '触感纸' },
+        { value: 'tbz', label: '铜版纸', disabled: true },
       ]}
       paperKey={options.paperKey ?? 'touch'}
       weightOptions={
@@ -414,6 +414,23 @@ describe('OrderFormB', () => {
     )?.[0];
     expect(unavailable).toContain('disabled=""');
     expect(available).not.toContain('disabled=""');
+  });
+
+  it('offers paper as capsule buttons without material swatches', () => {
+    const html = render();
+
+    const paper = html.match(/<fieldset[^>]*>\s*<legend[^>]*>纸张材质[\s\S]*?<\/fieldset>/)?.[0];
+    expect(paper).toBeDefined();
+    const touch = paper!.match(/<button[^>]*id="[^"]*-paper-touch"[^>]*>/)?.[0];
+    const coated = paper!.match(/<button[^>]*id="[^"]*-paper-tbz"[^>]*>/)?.[0];
+    expect(touch).toContain('aria-pressed="true"');
+    expect(touch).toContain('rounded-full');
+    expect(coated).toContain('aria-pressed="false"');
+    expect(coated).toContain('disabled=""');
+    // The option order is kept exactly as given; no swatch artwork remains.
+    expect(paper!.indexOf('触感纸')).toBeLessThan(paper!.indexOf('铜版纸'));
+    expect(paper).not.toContain('gradient');
+    expect(paper).not.toContain('aria-hidden="true"');
   });
 
   it('does not offer an unpersistable manual paper weight', () => {

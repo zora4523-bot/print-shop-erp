@@ -10,6 +10,7 @@ import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
 // Tests and older callers import the parser from here.
 export { parsePastedReceiverAddress } from '@/lib/order/receiver-address-paste';
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle, SampleOrderEditorSnapshot } from './order-creation-editor';
 import { orderDesignGroups, designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
@@ -2621,10 +2622,11 @@ export function OrderForm({
           item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT
             ? `彩印${item.lamination !== OrderLamination.NONE ? ` · 覆${LAMINATION_LABELS[item.lamination]}` : ''}${item.frontFoilColors.length > 0 ? ` · ${item.hasLocalFoil ? '局部烫金' : '专版烫金'} ${foilSummary}` : ''}`
             : `烫金 ${foilSummary}${item.foilTechnique === OrderFoilTechnique.RELIEF ? ' · 浮雕' : item.foilTechnique === OrderFoilTechnique.RAISED ? ' · 激凸' : ''}`;
+        // The signed quote keeps the engine's wording; only the rail shows current paper names.
         const manualQuoteReasons =
           quote?.status === 'complete'
             ? []
-            : [quote?.message || '当前参数需由工厂核价'];
+            : [paperDisplayLabel(quote?.message || '当前参数需由工厂核价')];
         return {
           id: fieldId,
           number: item.fig ?? index + 1,
@@ -2636,7 +2638,7 @@ export function OrderForm({
               : undefined,
           specification,
           dimensions,
-          materialSummary: `${ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]} · ${paper?.label ?? item.paperType ?? '未选纸张'} ${item.paperWeightGsm ?? '—'}g`,
+          materialSummary: `${ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]} · ${paper?.label ?? (item.paperType ? paperDisplayLabel(item.paperType) : '未选纸张')} ${item.paperWeightGsm ?? '—'}g`,
           specificationWarning:
             item.actualWidthMm === null
               ? '自定义尺寸 · 需工厂核价'

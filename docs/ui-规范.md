@@ -67,7 +67,7 @@ gates:
 - 全局 `primary` / `background` / `foreground` / `muted-foreground` / `border` / `muted` / `success-foreground` / `warning` 已对齐原型 hex 的 OKLCH 等值（P1-1，2026-09-09，业主目视确认）。
 - 不新增 `seal` / `gold` / `ok` 别名；`--color-chart-*` 别名、`--radius-3xl`、`--sidebar-primary-foreground` 已删除（P1-3，2026-09-09）。
 - 通用 `Tone` 只允许六档：`primary | warning | info | success | danger | neutral`（`components/ui-business/_tones.ts`）。业务枚举到 Tone 的映射只在 `lib/ui/status-registry.ts` 定义一次。
-- 唯一允许的裸色：模拟真实材料外观的色卡数据（纸张、烫金 swatch），登记在附录 A-1。
+- 唯一允许的裸色：模拟真实材料外观的色卡数据（烫金 swatch），登记在附录 A-1。纸张自 2026-09-23 起改为胶囊按钮，不再有色卡。
 - 局部强调（如工单详情「当前待办」列的深色主操作）用作用域数据属性 + `Button` 变体里的 `in-data-[emphasis=inverse]:*`，**不得**在 CSS Module 里反转 token：同一 token 在同页出现两个值会让所有引用它的规则跟着错（P2-12 曾因此让拒绝按钮也变深色）。
 
 ### 2.2 字号与字重
@@ -425,8 +425,9 @@ gates:
 
 | 位置 | 处数 | 迁移项 / 处置 |
 |---|---|---|
-| `components/business/order/order-form-b/OrderPaperSwatchPicker.tsx:41-67` | 11 行 31 值 | **永久例外**：纸张材料外观（§2.7），保留在 baseline |
 | `components/business/order/order-form-b/OrderFoilSwatchPicker.tsx:48-75` | 9 行 28 值 | **永久例外**：烫金材料外观 |
+
+纸张色卡（原 `OrderPaperSwatchPicker.tsx`，11 行 31 值）已于 2026-09-23 随纸张改为胶囊按钮删除，baseline 中的 11 条豁免同步移除。
 
 ### A-2 金额格式化（§4.1）
 

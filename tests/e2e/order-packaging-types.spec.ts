@@ -181,7 +181,7 @@ test('管理员多地址装盒分别进位，保存两盒而非一盒', async ({
   await page.getByRole('textbox', {name: '工单名称', exact: true}).fill('分址装盒验证');
   // 显式选纸：全套 spec 共库时表单默认纸张会变成别的 spec 造的夹具纸（CI 第六轮选中了
   // blank-paper-pricing 的「验证纸…」，其 4 位小数单价让金额守卫拒绝保存）。
-  await page.getByRole('group', {name: '纸张材质'}).getByRole('button', {name: '珠光艳闪', exact: true}).click();
+  await page.getByRole('group', {name: '纸张材质'}).getByRole('button', {name: '艳红珠光纸', exact: true}).click();
   await page.getByRole('group', {name: '克重'}).getByRole('button', {name: '160g', exact: true}).click();
   await page.getByRole('group', {name: '规格'}).getByRole('button', {name: '大号封', exact: true}).click();
   await page.getByRole('spinbutton', {name: '数量', exact: true}).fill('10');

@@ -295,10 +295,10 @@ it('field validation keeps aria links without interrupting screen readers', () =
 });
 
 it('paper and foil field errors keep their accessible description without alerts', async () => {
-  const { OrderPaperSwatchPicker } = await import('../order-form-b/OrderPaperSwatchPicker');
+  const { PillPicker } = await import('../order-form-b/OrderFieldPrimitives');
   const { OrderFoilSwatchPicker } = await import('../order-form-b/OrderFoilSwatchPicker');
   for (const element of [
-    <OrderPaperSwatchPicker key="paper" id="paper" value={null} options={[]} onChange={() => {}} error="请选择纸张" />,
+    <PillPicker key="paper" id="paper" label="纸张材质" value="" options={[]} onChange={() => {}} error="请选择纸张" />,
     <OrderFoilSwatchPicker key="foil" id="foil" value={[]} options={[]} onChange={() => {}} error="请选择烫金色" />,
   ]) {
     const html = renderToStaticMarkup(element);

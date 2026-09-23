@@ -40,7 +40,7 @@ describe('external order B catalog', () => {
   it('displays pearl dark red while retaining the existing catalog and price identity', () => {
     const product = { ...products[1], paperType: '160g珠光闪红' };
     const [paper] = buildExternalOrderPapers([product]);
-    expect(paper.label).toBe('珠光暗红');
+    expect(paper.label).toBe('暗红珠光纸');
     expect(paper.key).toBe('珠光闪红');
     expect(paper.paperTypeByWeight[160]).toBe('160g珠光闪红');
     expect(paper.variants[0].paperType).toBe(product.paperType);
@@ -49,7 +49,7 @@ describe('external order B catalog', () => {
 
   it('excludes retired 120g while preserving other configured weights', () => {
     const pearlFlash = buildExternalOrderPapers(products).find(
-      (paper) => paper.label === '珠光艳闪',
+      (paper) => paper.label === '艳红珠光纸',
     );
     expect(pearlFlash).toBeDefined();
 
@@ -128,7 +128,7 @@ describe('external order B catalog', () => {
         weight: 180,
         outOfStock: false,
       },
-    ]).find((candidate) => candidate.label === '珠光艳闪');
+    ]).find((candidate) => candidate.label === '艳红珠光纸');
 
     expect(paper).toBeDefined();
     expect(
@@ -285,7 +285,7 @@ describe('external order B catalog', () => {
         weight: null,
       },
     ]);
-    const customPaper = papers.find((paper) => paper.label === '珠光艳闪');
+    const customPaper = papers.find((paper) => paper.label === '艳红珠光纸');
 
     expect(customPaper).toBeDefined();
     expect(customPaper?.variants).toEqual([

@@ -1,4 +1,5 @@
 import { foilColorSearchValues } from '@/lib/order/foil-colors';
+import { paperSearchValues } from '@/lib/rules/paper-label';
 import {
   MachineType,
   OrderKind,
@@ -694,7 +695,7 @@ function globalSearchFilter(query: string): Prisma.OrderWhereInput {
             OR: [
               { name: contains },
               { specification: contains },
-              { paperType: contains },
+              ...paperSearchValues(query).map((value) => ({ paperType: textContains(value) })),
               ...(foilColorSearchValues([query]).map((color) => ({ foilColors: { has: color } }))),
               { product: { name: contains } },
               {
@@ -874,7 +875,9 @@ export function buildOrderWhere(
     ...(filters.specification
       ? { specification: textContains(filters.specification) }
       : {}),
-    ...(filters.paperType ? { paperType: textContains(filters.paperType) } : {}),
+    ...(filters.paperType
+      ? { OR: paperSearchValues(filters.paperType).map((value) => ({ paperType: textContains(value) })) }
+      : {}),
     ...(filters.quantityMin !== undefined || filters.quantityMax !== undefined
       ? { quantity: rangeFilter(filters.quantityMin, filters.quantityMax) }
       : {}),

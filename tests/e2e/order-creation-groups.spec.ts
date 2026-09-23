@@ -26,12 +26,12 @@ for (const role of ['owner', 'sales'] as const) {
     }
     const paperChoices = page.getByRole('group', { name: '纸张材质', exact: true });
     await expect(paperChoices.getByRole('button', { name: '珠光闪红', exact: true })).toHaveCount(0);
-    await paperChoices.getByRole('button', { name: '珠光暗红', exact: true }).click();
-    await expect(paperChoices.getByRole('button', { name: '珠光暗红', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await paperChoices.getByRole('button', { name: '暗红珠光纸', exact: true }).click();
+    await expect(paperChoices.getByRole('button', { name: '暗红珠光纸', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('[data-slot="order-form-rail"]').getByText('机烫费', { exact: true })).toBeVisible();
 
     await page.getByRole('textbox', { name: '工单名称', exact: true }).fill('批量第一单');
-    await page.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '珠光艳闪', exact: true }).click();
+    await page.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '艳红珠光纸', exact: true }).click();
     await page.locator('[data-slot="order-form-b"] input[type="file"]').last().setInputFiles({ name: 'shared-design.cdr', mimeType: 'application/octet-stream', buffer: Buffer.from('fixture-design-file') });
     await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
     await expect(page.getByText('shared-design.cdr', { exact: false })).toBeVisible();
@@ -93,7 +93,7 @@ test('管理员按材料和克重限制规格，切换克重后报价正常', as
   const form = page.locator('[data-slot="order-form-b"]');
   await form.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '杂色珠光', exact: true }).click();
   await expect(form.getByRole('group', { name: '规格', exact: true }).getByRole('button', { name: '西封大号', exact: true })).toBeDisabled();
-  await form.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '红卡', exact: true }).click();
+  await form.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '红卡纸', exact: true }).click();
   await form.getByRole('group', { name: '克重', exact: true }).getByRole('button', { name: '230g', exact: true }).click();
   await expect(page.locator('form[aria-busy]')).toHaveAttribute('aria-busy', 'false');
   await expect(form.getByRole('group', { name: '克重', exact: true }).getByRole('button', { name: '230g', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -106,7 +106,7 @@ test('批量逐张保存，规格分组持久化，刷新后不会重新创建',
   await openFirstOrderItemEditor(page);
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(names[0]);
   await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('张三 13800138000 广东省佛山市测试路一号');
-  await page.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '珠光艳闪', exact: true }).click();
+  await page.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '艳红珠光纸', exact: true }).click();
   await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
   await page.getByRole('group', { name: '规格', exact: true }).getByRole('button', { name: '西封大号', exact: true }).click();
   await page.getByRole('spinbutton', { name: '数量', exact: true }).fill('100');

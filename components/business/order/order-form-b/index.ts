@@ -1,10 +1,4 @@
 export {
-  OrderPaperSwatchPicker,
-  type OrderPaperSwatchOption,
-  type OrderPaperSwatchPickerProps,
-  type OrderPaperSwatchTexture,
-} from './OrderPaperSwatchPicker';
-export {
   nextOrderFoilSelection,
   OrderFoilSwatchPicker,
   type OrderFoilSwatchOption,

@@ -105,3 +105,24 @@ it('preserves color-print paper filtering by current specification', () => {
     productId: 'color-0', paperType: '160g珠光艳闪', specification: '大号封90×165',
   });
 });
+
+it('orders paper buttons by the owner display order without changing the default paper', () => {
+  const stock = (id: string, paperType: string) => ({
+    id, code: `EXT-STOCK-${id}`, category: ProductCategory.BLANK_STOCK, specification: '大号封90×165', paperType,
+  });
+  // The catalog order deliberately differs from the display order.
+  const catalog = [
+    stock('coated', '160g铜版纸'), stock('linen', '150g莱尼纹'), stock('variegated', '160g杂色珠光纸'),
+    stock('red', '160g红卡'), stock('pearl', '160g珠光艳闪'), stock('touch', '200g触感纸'),
+  ];
+  const item = {
+    ...createExternalOrderItem([], catalog, []),
+    pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
+    specification: '大号封90×165',
+  };
+  expect(orderItemFieldOptions(item, catalog).externalPaperOptions.map((option) => option.label))
+    .toEqual(['艳红珠光纸', '触感纸', '红卡纸', '杂色珠光纸', '铜版纸', '莱尼纹']);
+  // Button order is display-only: a reset still takes the catalog's first paper.
+  expect(normalizeExternalOrderItem({ item, crafts: [], products: catalog, resetPaper: true }).paperType)
+    .toBe('160g铜版纸');
+});

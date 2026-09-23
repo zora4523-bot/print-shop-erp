@@ -8,7 +8,7 @@ import type { PackagingBoxType, PackagingType } from '@/lib/order/packaging-mode
 import { OrderPackagingSection, type OrderPackagingView } from './OrderPackagingSection';
 
 import { Group, FieldLabel, FieldError, RequiredMark } from './OrderFieldPrimitives';
-import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemSpecificationFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
+import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemSpecificationFields, OrderItemQuantityField, ROUTE_OPTIONS, type OrderPaperOption } from './OrderItemFields';
 
 import { OrderReceiverContactFields } from '../OrderReceiverContactFields';
 import { ReceiverAddressPasteField } from '../ReceiverAddressPasteField';
@@ -43,9 +43,6 @@ import { prepareDesignFile } from '../design-upload-client';
 import {
   type OrderFoilSwatchOption,
 } from './OrderFoilSwatchPicker';
-import {
-  type OrderPaperSwatchOption,
-} from './OrderPaperSwatchPicker';
 
 const FOIL_OPTIONS: readonly OrderFoilSwatchOption[] = [
   { value: '亚金', label: '亚金', tone: 'matte-gold' },
@@ -150,7 +147,7 @@ export type OrderFormBProps = {
   activeIndex: number;
   pendingDesigns: Readonly<Record<string, PendingDesignImage[]>>;
   packaging: OrderPackagingView;
-  paperOptions: readonly OrderPaperSwatchOption[];
+  paperOptions: readonly OrderPaperOption[];
   paperKey: string | null;
   weightOptions: readonly {
     value: number;

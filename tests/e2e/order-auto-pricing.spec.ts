@@ -21,7 +21,7 @@ async function startQuote(page: Page, actor: 'owner' | 'sales') {
   await page.getByRole('textbox', { name: '收货地址', exact: true })
     .fill('张先生 13800138000 广东省佛山市南海区测试路1号');
   await page.getByRole('checkbox', { name: /顺丰到付/ }).check({ timeout: 10_000 });
-  await choose(page, '纸张材质', '珠光艳闪');
+  await choose(page, '纸张材质', '艳红珠光纸');
   await choose(page, '规格', '大号封');
   return page.locator('[data-slot="order-form-rail"]');
 }
@@ -33,7 +33,7 @@ for (const actor of ['owner', 'sales'] as const) {
     page.on('pageerror', (error) => errors.push(error.message));
     const rail = await startQuote(page, actor);
     const quantity = page.getByRole('spinbutton', { name: '数量', exact: true });
-    await choose(page, '纸张材质', '红卡');
+    await choose(page, '纸张材质', '红卡纸');
     await choose(page, '克重', '180g');
     await choose(page, '规格', '中号封');
     await quantity.fill('999');
@@ -52,7 +52,7 @@ for (const actor of ['owner', 'sales'] as const) {
     await expectFee(rail, /快递费/, '0.00');
 
     await choose(page, '工单类型', '专版烫金');
-    await choose(page, '纸张材质', '珠光艳闪');
+    await choose(page, '纸张材质', '艳红珠光纸');
     await choose(page, '规格', '大号封');
     await quantity.fill('1000');
     await expectFee(rail, /^专版烫金阶梯价$/, '325.00');
@@ -68,7 +68,7 @@ for (const actor of ['owner', 'sales'] as const) {
     await expectFee(rail, /^彩印阶梯总价$/, '450.00');
 
     await choose(page, '工单类型', '局部烫金');
-    await choose(page, '纸张材质', '红卡');
+    await choose(page, '纸张材质', '红卡纸');
     await choose(page, '克重', '180g');
     await choose(page, '规格', '中号封');
     await expectFee(rail, /^空白封$/, '270.00');

@@ -156,7 +156,7 @@ test('待核价详情不把部分报价当应收，完整报价在上下两处�
   const fees = page.getByRole('region', { name: '订单级费用', exact: true });
   await expect(fees).toContainText('待工厂核价');
   await expect(fees).not.toContainText('13.30');
-  await expect(page.getByTestId('admin-order-detail')).not.toContainText(/160g珠光艳闪\s*[·/]\s*160g/);
+  await expect(page.getByTestId('admin-order-detail')).not.toContainText(/160g艳红珠光纸\s*[·/]\s*160g/);
 
   const response = await page.goto(`/orders/${prefix}-quote`);
   expect(response?.status()).toBe(200);

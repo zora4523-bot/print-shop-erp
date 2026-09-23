@@ -172,7 +172,7 @@ test('shared paper choices exclude unavailable facts, preserve a long name and r
   const quote = page.getByRole('region', { name: '报价计算', exact: true });
   await expect(quote.locator('p.text-3xl')).toHaveText('待核价');
   await expect(quote.locator('summary')).toContainText('费用明细');
-  await papers.getByRole('button', { name: '珠光艳闪', exact: true }).click();
+  await papers.getByRole('button', { name: '艳红珠光纸', exact: true }).click();
   await page
     .getByRole('group', { name: '克重', exact: true })
     .getByRole('button', { name: '160g', exact: true })

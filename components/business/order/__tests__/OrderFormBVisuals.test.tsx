@@ -7,42 +7,11 @@ import {
   nextOrderFoilSelection,
   OrderFoilSwatchPicker,
 } from '../order-form-b/OrderFoilSwatchPicker';
-import { OrderPaperSwatchPicker } from '../order-form-b/OrderPaperSwatchPicker';
 import { OrderSubmissionReviewContent } from '../order-form-b/OrderSubmissionReviewDialog';
 import { OrderSubmissionSuccess } from '../order-form-b/OrderSubmissionSuccess';
 import { DesignFileType } from '@/generated/prisma/enums';
 
 const noop = vi.fn();
-
-describe('OrderPaperSwatchPicker', () => {
-  it('renders B-style material cards with pressed and disabled semantics', () => {
-    const html = renderToStaticMarkup(
-      <OrderPaperSwatchPicker
-        id="paper"
-        value="touch"
-        options={[
-          { value: 'pearl', label: '珠光纸艳闪', texture: 'pearl' },
-          { value: 'touch', label: '触感纸', texture: 'matte-red' },
-          {
-            value: 'glitter',
-            label: '金葱',
-            texture: 'glitter-red',
-            disabled: true,
-          },
-        ]}
-        onChange={noop}
-      />,
-    );
-
-    expect(html).toContain('<legend');
-    expect(html).toContain('纸张材质');
-    expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain('linear-gradient(115deg');
-    expect(html).toContain('radial-gradient(circle at 18% 22%');
-    expect(html).toMatch(/disabled=""[^>]*>[\s\S]*?金葱<\/span>/);
-    expect(html).toContain('w-[5.375rem]');
-  });
-});
 
 describe('OrderFoilSwatchPicker', () => {
   it('keeps selection order, respects the minimum, and replaces in single-select mode', () => {
