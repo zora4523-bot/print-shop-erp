@@ -217,19 +217,20 @@ function positiveInt(value: number | undefined, fallback: number): number {
   return Math.floor(value);
 }
 
+// The worker passes one process-lifetime signal into every idle poll, so the
+// timer path must detach its abort listener; `{ once: true }` only removes it
+// when abort actually fires, which would otherwise leak one listener per poll.
 async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return;
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
     timer.unref();
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    signal?.addEventListener('abort', finish, { once: true });
   });
 }
 

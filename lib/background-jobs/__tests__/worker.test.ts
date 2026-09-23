@@ -1,3 +1,4 @@
+import { getEventListeners } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -256,5 +257,35 @@ describe('runBackgroundWorker', () => {
 
     expect(onError).toHaveBeenCalledWith(reaperError);
     expect(reconcileExpiredBackgroundJobLeasesMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps abort listeners on the process-wide signal constant across idle polls', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    claimNextBackgroundJobMock.mockResolvedValue(null);
+
+    const running = runBackgroundWorker({
+      queue: BackgroundJobQueue.LIGHT,
+      workerId: 'worker-idle',
+      handlers: {},
+      concurrency: 2,
+      pollIntervalMs: 1_000,
+      leaseMs: 300_000,
+      signal: controller.signal,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const initialListeners = getEventListeners(controller.signal, 'abort').length;
+    // Two lanes + one reaper are each parked in exactly one delay.
+    expect(initialListeners).toBe(3);
+
+    await vi.advanceTimersByTimeAsync(200_000);
+
+    expect(claimNextBackgroundJobMock.mock.calls.length).toBeGreaterThan(300);
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(
+      initialListeners,
+    );
+
+    controller.abort();
+    await running;
   });
 });
