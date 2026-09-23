@@ -10,6 +10,7 @@ import {
 const {
   dbMock,
   operationTypeMock,
+  progressCraftIdsMock,
   listSettlementMock,
   getSettlementMock,
 } = vi.hoisted(() => ({
@@ -21,12 +22,14 @@ const {
     hourlyWorkerPayroll: { findMany: vi.fn(), findFirst: vi.fn() },
   },
   operationTypeMock: vi.fn(),
+  progressCraftIdsMock: vi.fn(),
   listSettlementMock: vi.fn(),
   getSettlementMock: vi.fn(),
 }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/production/operation-portal', () => ({
   getReporterOperationTypeOrNull: operationTypeMock,
+  getProgressCraftIdsForReporter: progressCraftIdsMock,
 }));
 vi.mock('@/lib/salary/piecework-settlement', () => ({
   listWorkerPieceworkSettlements: listSettlementMock,
@@ -79,11 +82,28 @@ beforeEach(() => {
   operationTypeMock
     .mockReset()
     .mockResolvedValue(PieceworkOperationType.PARTIAL);
+  progressCraftIdsMock.mockReset().mockResolvedValue(['craft-emboss']);
   listSettlementMock.mockReset().mockResolvedValue([]);
   getSettlementMock.mockReset().mockResolvedValue(null);
 });
 
 describe('worker order visibility', () => {
+  // 审计 L-8：工单页可见范围不变，但他车道进度只能看、不能点进报工（详情页按车道 404）。
+  it('marks which current progress steps belong to the reporter\'s craft lane', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'order-1', workOrderVersion: 2, productionOperations: [],
+      productionProgressSteps: [
+        { id: 'emboss', workOrderVersion: 2, craftId: 'craft-emboss', status: ProductionOperationStatus.PENDING },
+        { id: 'glue', workOrderVersion: 2, craftId: 'craft-glue', status: ProductionOperationStatus.PENDING },
+      ],
+    });
+    await expect(getWorkerOrderDetail('order-1', worker)).resolves.toMatchObject({
+      productionProgressSteps: [{ id: 'emboss', reportable: true }, { id: 'glue', reportable: false }],
+    });
+    expect(progressCraftIdsMock).toHaveBeenCalledWith(worker);
+    expect(dbMock.order.findFirst.mock.calls[0][0].select.productionProgressSteps.select).toMatchObject({ craftId: true });
+  });
+
   it('shows the account lane plus shared no-pay progress without personnel matching', async () => {
     dbMock.$queryRaw
       .mockReset()

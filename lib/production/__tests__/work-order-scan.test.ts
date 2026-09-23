@@ -5,14 +5,16 @@ import {
   Role,
 } from '../../../generated/prisma/enums';
 
-const { dbMock, operationTypeMock } = vi.hoisted(() => ({
+const { dbMock, operationTypeMock, progressCraftIdsMock } = vi.hoisted(() => ({
   dbMock: { order: { findUnique: vi.fn() } },
   operationTypeMock: vi.fn(),
+  progressCraftIdsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('../operation-portal', () => ({
   getReporterOperationTypeOrNull: operationTypeMock,
+  getProgressCraftIdsForReporter: progressCraftIdsMock,
 }));
 
 import { resolveWorkerWorkOrderScan } from '../work-order-scan';
@@ -24,6 +26,7 @@ beforeEach(() => {
   operationTypeMock
     .mockReset()
     .mockResolvedValue(PieceworkOperationType.PARTIAL);
+  progressCraftIdsMock.mockReset().mockResolvedValue(['craft-emboss']);
 });
 
 describe('resolveWorkerWorkOrderScan', () => {
@@ -81,15 +84,15 @@ describe('resolveWorkerWorkOrderScan', () => {
     });
   });
 
-  it('无计件 lane 的在职师傅仍可达当前版本共享进度', async () => {
+  it('无计件 lane 的在职师傅仍可达当前版本本车道进度', async () => {
     operationTypeMock.mockResolvedValue(null);
     dbMock.order.findUnique.mockResolvedValue({
       id: 'order-2',
       workOrderVersion: 5,
       productionOperations: [],
       productionProgressSteps: [
-        { id: 'progress-v4', workOrderVersion: 4 },
-        { id: 'progress-v5', workOrderVersion: 5, status: ProductionOperationStatus.PENDING },
+        { id: 'progress-v4', workOrderVersion: 4, craftId: 'craft-emboss' },
+        { id: 'progress-v5', workOrderVersion: 5, craftId: 'craft-emboss', status: ProductionOperationStatus.PENDING },
       ],
     });
 
@@ -139,11 +142,11 @@ describe('resolveWorkerWorkOrderScan', () => {
     await expect(resolveWorkerWorkOrderScan('GD-001', actor)).resolves.toMatchObject({ orderId: 'order-1', defaultTaskId: null });
   });
 
-  it('付费工序和共享进度同时待报工时进入选择页', async () => {
+  it('付费工序和本车道进度同时待报工时进入选择页', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'order-1', workOrderVersion: 3,
       productionOperations: [{ id: 'foil', workOrderVersion: 3, status: ProductionOperationStatus.PENDING }],
-      productionProgressSteps: [{ id: 'clean', workOrderVersion: 3, status: ProductionOperationStatus.PENDING }],
+      productionProgressSteps: [{ id: 'emboss', workOrderVersion: 3, craftId: 'craft-emboss', status: ProductionOperationStatus.PENDING }],
     });
     await expect(resolveWorkerWorkOrderScan('GD-001', actor)).resolves.toMatchObject({ defaultTaskId: null });
   });
@@ -159,5 +162,36 @@ describe('resolveWorkerWorkOrderScan', () => {
     await expect(
       resolveWorkerWorkOrderScan('GD-001', actor),
     ).resolves.toBeNull();
+  });
+
+  // 审计 L-8：扫码直达与 ?task= 只认本人车道（计件工序 + 进度工艺车道），不能跳到打不开的
+  // 他车道步骤；工单页本身的可见范围不变。
+  it('他车道进度不作为直达目标，也不接受 task 参数，但工单仍可进入选择页', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-3', workOrderVersion: 2,
+      productionOperations: [{ id: 'foil-done', workOrderVersion: 2, status: ProductionOperationStatus.COMPLETED }],
+      productionProgressSteps: [
+        { id: 'glue-open', workOrderVersion: 2, craftId: 'craft-glue', status: ProductionOperationStatus.PENDING },
+      ],
+    });
+    await expect(resolveWorkerWorkOrderScan('GD-003', actor)).resolves.toEqual({
+      orderId: 'order-3', workOrderVersion: 2, defaultTaskId: null, requestedTaskAllowed: true,
+    });
+    await expect(resolveWorkerWorkOrderScan('GD-003', actor, 'glue-open')).resolves.toMatchObject({ requestedTaskAllowed: false });
+    expect(progressCraftIdsMock).toHaveBeenCalledWith(actor);
+    expect(dbMock.order.findUnique.mock.calls[0][0].select.productionProgressSteps.select).toMatchObject({ craftId: true });
+  });
+
+  it('本车道进度与他车道进度并存时，只按本车道未完成项决定直达', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-4', workOrderVersion: 1,
+      productionOperations: [],
+      productionProgressSteps: [
+        { id: 'emboss-open', workOrderVersion: 1, craftId: 'craft-emboss', status: ProductionOperationStatus.IN_PROGRESS },
+        { id: 'glue-open', workOrderVersion: 1, craftId: 'craft-glue', status: ProductionOperationStatus.PENDING },
+      ],
+    });
+    await expect(resolveWorkerWorkOrderScan('GD-004', actor)).resolves.toMatchObject({ defaultTaskId: 'emboss-open' });
+    await expect(resolveWorkerWorkOrderScan('GD-004', actor, 'emboss-open')).resolves.toMatchObject({ requestedTaskAllowed: true });
   });
 });

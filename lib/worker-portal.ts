@@ -10,7 +10,7 @@ import {
 } from '../generated/prisma/enums';
 import { paginatedResult, paginationWindow, parsePositiveInt } from './admin/table';
 import { db } from './db';
-import { getReporterOperationTypeOrNull } from './production/operation-portal';
+import { getProgressCraftIdsForReporter, getReporterOperationTypeOrNull } from './production/operation-portal';
 import { getHourlyPayrollWorkerType } from './salary/hourly-aggregate';
 import {
   getPieceworkSettlementDetail,
@@ -253,6 +253,7 @@ export async function getWorkerOrderDetail(
 ) {
   requireWorkerActor(actor);
   const operationType = await getReporterOperationTypeOrNull(actor);
+  const progressCraftIds = new Set(await getProgressCraftIdsForReporter(actor));
   const order = await db.order.findFirst({
     where: { id: orderId, ...operationOrderWhere(operationType) },
     select: {
@@ -348,6 +349,7 @@ export async function getWorkerOrderDetail(
         select: {
           id: true,
           workOrderVersion: true,
+          craftId: true,
           craftCode: true,
           craftName: true,
           status: true,
@@ -375,10 +377,11 @@ export async function getWorkerOrderDetail(
     (operation) => operation.workOrderVersion === order.workOrderVersion &&
       operation.status !== ProductionOperationStatus.CANCELLED,
   );
+  // 工单页仍列出全部当前进度（可见范围不变），但只有本人工艺车道的进度可以点进报工。
   const productionProgressSteps = order.productionProgressSteps.filter(
     (step) => step.workOrderVersion === order.workOrderVersion &&
       step.status !== ProductionOperationStatus.CANCELLED,
-  );
+  ).map((step) => ({ ...step, reportable: progressCraftIds.has(step.craftId) }));
   if (
     productionOperations.length === 0 &&
     productionProgressSteps.length === 0

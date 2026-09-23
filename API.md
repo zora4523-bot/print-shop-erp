@@ -464,4 +464,4 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 
 ### 无计薪进度车道（2026-09-21 业主确认）
 
-`listProductionProgressForReporter`、`getProductionProgressForReporter` 与 `reportProductionProgress` 共用 `progressCraftIdsForReporter`。账号必须为在职 WORKER，岗位匹配有效自产 Craft 的 defaultWorkerType；机器岗位还须匹配 inHouseMachineTypes（有配置时）或 defaultMachineType。缺配置不默认放行。列表与直接详情将 craftId 限定在匹配集合；提交在事务内复核，不满足返回 ACCOUNT_NOT_AUTHORIZED，不能通过直接调用 Action 绕过页面限制。此规则不采用个人认领绑定，不改变计件工价或历史快照；生产打印用途权限沿用独立规则。
+`listProductionProgressForReporter`、`getProductionProgressForReporter` 与 `reportProductionProgress` 共用 `progressCraftIdsForReporter`。账号必须为在职 WORKER，岗位匹配有效自产 Craft 的 defaultWorkerType；机器岗位还须匹配 inHouseMachineTypes（有配置时）或 defaultMachineType。缺配置不默认放行。列表与直接详情将 craftId 限定在匹配集合；提交在事务内复核，不满足返回 ACCOUNT_NOT_AUTHORIZED，不能通过直接调用 Action 绕过页面限制。此规则不采用个人认领绑定，不改变计件工价或历史快照；生产打印用途权限沿用独立规则。师傅任务列表（`listWorkerTaskPage`）进度视图的计数与分页、扫码直达（`resolveWorkerWorkOrderScan` 的唯一未完成项与 `?task=`）同样只认本人车道；工单页（`getWorkerOrderDetail`）仍列出全部当前进度，工单级可见范围不变，他车道进度带 `reportable: false`，只读展示、不链接报工页。

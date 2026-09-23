@@ -15,6 +15,8 @@ export type WorkerOrderTaskCard = {
   remaining: string;
   unit: '个' | '袋' | '盒';
   myAmount?: string;
+  /** 他岗位的进度：本人打不开报工页，只展示不链接。 */
+  readOnly?: boolean;
 };
 
 export function WorkerOrderTaskList({
@@ -83,12 +85,24 @@ function TaskGroup({ title, tasks, paid }: {
 }
 
 function TaskCard({ task, paid }: { task: WorkerOrderTaskCard; paid: boolean }) {
-  const status = PRODUCTION_OPERATION_STATUS_REGISTRY[task.status];
+  const body = <TaskCardBody task={task} paid={paid} />;
+  if (task.readOnly) {
+    return <div className="worker-wrap-anywhere block min-h-11 min-w-0 rounded-xl border bg-muted/20 p-4">{body}</div>;
+  }
   return (
     <Link
       href={`/worker/tasks/${encodeURIComponent(task.id)}`}
       className="worker-wrap-anywhere block min-h-11 min-w-0 rounded-xl border bg-card p-4 hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
+      {body}
+    </Link>
+  );
+}
+
+function TaskCardBody({ task, paid }: { task: WorkerOrderTaskCard; paid: boolean }) {
+  const status = PRODUCTION_OPERATION_STATUS_REGISTRY[task.status];
+  return (
+    <>
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <strong className="text-sm">{task.title}</strong>
         <StatusBadge tone={status.tone} dot={status.dot}>{status.label}</StatusBadge>
@@ -100,8 +114,10 @@ function TaskCard({ task, paid }: { task: WorkerOrderTaskCard; paid: boolean }) 
       </p>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
         <span className="text-muted-foreground">{paid ? `我的已报计件 ${task.myAmount ?? '—'}` : '不计薪'}</span>
-        <span className="font-semibold">{isUnfinished(task) ? '进入报工 →' : '查看进度 →'}</span>
+        {task.readOnly
+          ? <span className="text-muted-foreground">由其他岗位报工</span>
+          : <span className="font-semibold">{isUnfinished(task) ? '进入报工 →' : '查看进度 →'}</span>}
       </div>
-    </Link>
+    </>
   );
 }

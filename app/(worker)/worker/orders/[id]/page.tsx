@@ -148,6 +148,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
               new Decimal(step.plannedQty).minus(completed), 0,
             ).toString(),
             unit: '个',
+            readOnly: !step.reportable,
           };
         })}
       />
