@@ -3671,6 +3671,118 @@ describe('cancellation settlement reference', () => {
     ).rejects.toThrow(/调整参考结算金额必须填写原因/);
     expect(mocks.db.order.update).not.toHaveBeenCalled();
   });
+
+  describe('客服业绩冲销（SPEC §3.7：工单取消追加全额负数流水）', () => {
+    function internalCancellationRequest(billingMode: OrderBillingMode = OrderBillingMode.CHARGE) {
+      return request({
+        type: OrderChangeRequestType.CANCEL,
+        proposedChanges: { items: [] },
+        requesterId: 'cs-1',
+        requester: { id: 'cs-1', displayName: '客服', role: Role.CUSTOMER_SERVICE },
+        order: {
+          ...request().order,
+          status: OrderStatus.CONFIRMED,
+          submitterId: 'cs-1',
+          submitterRole: Role.CUSTOMER_SERVICE,
+          settlementType: OrderSettlementType.INTERNAL_SALES,
+          billingMode,
+          workOrderVersion: 2,
+          settledFee: null,
+          productionWorkOrderProgress: [],
+          productionProgressSteps: [],
+          outsourceOrders: [],
+        },
+      });
+    }
+
+    async function approveZeroProduction(value: ReturnType<typeof request>) {
+      locateCancellation(value);
+      const preview = await previewOrderCancellationSettlement({ requestId: value.id, producedQty: 0 }, admin);
+      locateCancellation(value);
+      return reviewOrderChangeRequest({
+        requestId: value.id, decision: 'APPROVE', reviewRemark: null, producedQty: 0, settleFee: '0.00',
+        expectedPriceRevision: preview.priceRevision, expectedQuoteToken: preview.quoteToken,
+      }, admin);
+    }
+
+    function openPeriodWithReconciledLedger(recorded = '1000.00') {
+      // 工单 1008 = 加工 1000 + 代收物流 8（快递 3 + 耗材 5）；业绩口径不含物流。
+      mocks.db.csSalesEntry.aggregate.mockResolvedValue({ _sum: { amount: new Decimal(recorded) } });
+      mocks.db.csSalesEntry.findUnique.mockResolvedValue(null);
+      mocks.db.csSalesEntry.create.mockResolvedValue({ id: 'cs-entry-cancel' });
+      mocks.db.salaryPeriod.findFirst.mockResolvedValue({
+        id: 'period-1', totalSales: new Decimal('1000.00'), initialSales: new Decimal(0),
+      });
+      mocks.db.salaryPeriod.update.mockResolvedValue({ id: 'period-1' });
+    }
+
+    it('内部客服收费单批准取消时，同一事务追加全额负数 ORDER_CANCELLED 流水', async () => {
+      openPeriodWithReconciledLedger();
+
+      await expect(approveZeroProduction(internalCancellationRequest())).resolves.toEqual({ id: 'request-1' });
+
+      expect(mocks.db.csSalesEntry.create).toHaveBeenCalledTimes(1);
+      expect(mocks.db.csSalesEntry.create).toHaveBeenCalledWith({
+        data: {
+          eventKey: 'order:order-1:revision:3:cancel',
+          csUserId: 'cs-1',
+          salaryPeriodId: 'period-1',
+          orderId: 'order-1',
+          orderRevision: 3,
+          type: 'ORDER_CANCELLED',
+          amount: '-1000.00',
+          occurredAt: new Date('2026-09-02T02:00:00.000Z'),
+          remark: '取消申请 request-1 审核通过',
+        },
+        select: { id: true },
+      });
+      expect(mocks.db.salaryPeriod.update).toHaveBeenCalledWith({
+        where: { id: 'period-1' },
+        data: { totalSales: { increment: '-1000.00' } },
+        select: { id: true },
+      });
+      expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ status: OrderStatus.CANCELLED, revision: { increment: 1 } }),
+      }));
+    });
+
+    it('业绩流水与工单金额未对平时失败关闭，不写入任何取消事实', async () => {
+      openPeriodWithReconciledLedger('900.00');
+
+      await expect(approveZeroProduction(internalCancellationRequest())).rejects.toThrow(
+        /客服业绩流水未与当前金额对平/,
+      );
+      expectNoApprovalMutation();
+    });
+
+    it('没有覆盖审批日期的客服周期时整体回滚，不静默漏记冲销', async () => {
+      openPeriodWithReconciledLedger();
+      mocks.db.salaryPeriod.findFirst.mockResolvedValue(null);
+
+      const approval = approveZeroProduction(internalCancellationRequest());
+      await expect(approval).rejects.toThrow(/没有可用的工资周期/);
+      await expect(approval).rejects.toMatchObject({ name: 'OrderChangeRequestError' });
+      expect(mocks.db.order.update).not.toHaveBeenCalled();
+      expect(mocks.db.csSalesEntry.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['不收费的内部单', internalCancellationRequest(OrderBillingMode.NO_CHARGE)],
+      ['外部销售单', request({
+        type: OrderChangeRequestType.CANCEL,
+        proposedChanges: { items: [] },
+        order: {
+          ...request().order, status: OrderStatus.CONFIRMED, workOrderVersion: 2, settledFee: null,
+          productionWorkOrderProgress: [], productionProgressSteps: [], outsourceOrders: [],
+        },
+      })],
+    ])('%s批准取消不触碰客服业绩流水', async (_label, value) => {
+      await expect(approveZeroProduction(value)).resolves.toEqual({ id: 'request-1' });
+      expect(mocks.db.csSalesEntry.aggregate).not.toHaveBeenCalled();
+      expect(mocks.db.csSalesEntry.create).not.toHaveBeenCalled();
+      expect(mocks.db.salaryPeriod.update).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('reviewOrderChangeRequest', () => {

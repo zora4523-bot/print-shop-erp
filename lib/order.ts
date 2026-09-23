@@ -70,11 +70,11 @@ import { enqueueNotificationInTransaction } from './notification/transactional-o
 import type { EnqueueClient } from './background-jobs/repository';
 import { backgroundJobsMode } from './background-jobs/mode';
 import {
-  assertCsOrderSalesLedgerReconciledInTx,
   CsSalesLedgerError,
   recordCsSalesEntryInTx,
   csSalesBasisAmountInTx,
 } from './salary/cs-sales';
+import { reverseCsSalesOnOrderCancelInTx } from './order/cs-sales-ledger';
 import { hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
 import {
   calculateCreateOrderQuoteFromCatalogInTx,
@@ -2484,25 +2484,12 @@ export async function cancelOrder(
           revision: true,
         },
       });
-      if (
-        cancelledOrder?.settlementType === OrderSettlementType.INTERNAL_SALES &&
-        cancelledOrder.billingMode === OrderBillingMode.CHARGE &&
-        // A DRAFT has never emitted ORDER_SUBMITTED, so there is no positive
-        // sales event to reverse. Using the pre-transition status here avoids
-        // creating a phantom negative balance when an abandoned draft is
-        // cancelled.
-        cancelledOrder.status !== OrderStatus.DRAFT
-      ) {
+      // Pre-transition status: a DRAFT never emitted ORDER_SUBMITTED, so the
+      // shared helper skips it instead of creating a phantom negative balance.
+      if (cancelledOrder) {
         try {
-          const salesBasis = await csSalesBasisAmountInTx(prismaTx, id, cancelledOrder.totalAmount);
-          await assertCsOrderSalesLedgerReconciledInTx(prismaTx, id, salesBasis);
-          await recordCsSalesEntryInTx(prismaTx, {
-            eventKey: `order:${id}:revision:${cancelledOrder.revision}:cancel`,
-            csUserId: cancelledOrder.submitterId,
-            orderId: id,
+          await reverseCsSalesOnOrderCancelInTx(prismaTx, { ...cancelledOrder, id }, {
             orderRevision: cancelledOrder.revision,
-            type: CsSalesEntryType.ORDER_CANCELLED,
-            amount: new Decimal(salesBasis).negated(),
             occurredAt: now,
             remark: `取消工单：${normalizedReason}`,
           });

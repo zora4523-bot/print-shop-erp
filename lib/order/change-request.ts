@@ -65,6 +65,7 @@ import {
   CsSalesLedgerError,
   recordCsSalesEntryInTx,
 } from '../salary/cs-sales';
+import { reverseCsSalesOnOrderCancelInTx } from './cs-sales-ledger';
 import { maybeCompleteProductionOrder, dispatchProductionCompletionNotification, type ProductionCompletionNotification, type ProductionCompletionTx } from '../production-completion';
 import { MAX_ORDER_ITEMS_PER_ORDER } from './limits';
 import { resolveOrderChangeStageInTx } from './change-stage';
@@ -4884,6 +4885,43 @@ async function terminateObsoleteCompletionDeliveryInTx(
   });
 }
 
+/**
+ * 取消审批与直接取消共用同一冲销口径（SPEC §3.7、DECISIONS 2026-08-02
+ * 「取消时追加全额负数」）。审批把 revision + 1，冲销流水归属取消后的版本，
+ * 与修改审批的 ORDER_CHANGED 事件键同一规则。账本错误（含缺少进行中周期）
+ * 映射为申请领域错误，整个审批事务回滚。
+ */
+async function reverseApprovedCancellationCsSalesInTx(
+  tx: Prisma.TransactionClient,
+  request: CancellationRequest,
+  actualStatus: OrderStatus,
+  reviewedAt: Date,
+): Promise<void> {
+  try {
+    await reverseCsSalesOnOrderCancelInTx(
+      tx,
+      {
+        id: request.order.id,
+        submitterId: request.order.submitterId,
+        settlementType: request.order.settlementType,
+        billingMode: request.order.billingMode,
+        status: actualStatus,
+        totalAmount: request.order.totalAmount,
+      },
+      {
+        orderRevision: request.order.revision + 1,
+        occurredAt: reviewedAt,
+        remark: `取消申请 ${request.id} 审核通过`,
+      },
+    );
+  } catch (error) {
+    if (error instanceof CsSalesLedgerError) {
+      throw new OrderChangeRequestError(error.message);
+    }
+    throw error;
+  }
+}
+
 async function reviewOrderCancellationRequest(
   input: ReviewOrderChangeRequestInput,
   actor: { id: string; role: Role },
@@ -5000,6 +5038,7 @@ async function reviewOrderCancellationRequest(
       throw new OrderChangeRequestError('调整参考结算金额必须填写原因');
     }
     transitionOrder(request.order.status, OrderStatus.CANCELLED);
+    await reverseApprovedCancellationCsSalesInTx(tx, request, actualStatus, reviewedAt);
 
     await tx.productionOperation.updateMany({
       where: {
