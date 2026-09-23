@@ -4893,6 +4893,75 @@ describe('reviewOrderChangeRequest', () => {
     ).toBe(false);
   });
 
+  it('工厂直接业务生产期待核价（confirmedFee 已撤回）批准改价后确认为新总额', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        settlementType: OrderSettlementType.FACTORY_DIRECT,
+        status: OrderStatus.CONFIRMED,
+        workOrderVersion: 2,
+        // 例如顺丰到付切换后：价格待管理员确认，confirmedFee 已置空。
+        pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+        confirmedFee: null,
+        settledFee: null,
+        totalAmount: new Decimal('1108.00'),
+        customerCharges: [
+          ...request().order.customerCharges,
+          {
+            id: 'plate-confirmed',
+            orderId: 'order-1',
+            shipmentId: null,
+            businessKey: PENDING_PLATE_BUSINESS_KEY,
+            priceBookId: null,
+            ...EMPTY_CHARGE_BASIS,
+            status: OrderCustomerChargeStatus.ESTIMATED,
+            amount: new Decimal('100.00'),
+            pricingSnapshot: adminConfirmedChargeSnapshot({
+              businessKey: PENDING_PLATE_BUSINESS_KEY,
+              shipmentId: null,
+              categoryCode: 'PLATE_MAKING_FEE',
+              amount: '100.00',
+              overrideReason: '已发生制版费',
+            }),
+            overrideReason: '已发生制版费',
+            category: { code: 'PLATE_MAKING_FEE' },
+          },
+        ],
+      },
+    });
+    locate(value);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValueOnce({
+      _sum: { amount: new Decimal('108.00') },
+    });
+
+    await reviewOrderChangeRequest(
+      {
+        requestId: value.id,
+        decision: 'APPROVE',
+        reviewRemark: '确认改量',
+        expectedPriceRevision: 5,
+        expectedQuoteToken: quoteToken,
+      },
+      admin,
+    );
+
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        status: 'ADMIN_CONFIRMED',
+        orderFeeSnapshot: {
+          quotedFee: value.order.quotedFee,
+          confirmedFee: '1308.00',
+          settledFee: null,
+        },
+      }),
+    );
+    expect(mocks.db.order.update).toHaveBeenLastCalledWith({
+      where: { id: 'order-1' },
+      data: { confirmedFee: '1308.00', settledFee: null },
+    });
+  });
+
   it('工厂直接业务待核价的改价批准撤回旧 confirmedFee，不保留过期确认金额', async () => {
     const value = request({
       order: {

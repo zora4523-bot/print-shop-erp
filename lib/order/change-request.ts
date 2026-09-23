@@ -5195,8 +5195,9 @@ type ApprovedModificationFeeInput = {
 
 /**
  * Fee lifecycle written together with an approved repricing modification.
- * External sales re-snapshot the quote or lock the administrator-confirmed
- * fee. Internal / factory-direct orders do not maintain quotedFee here; their
+ * An administrator-confirmed result locks confirmedFee to the approved total
+ * for every settlement type. Otherwise external sales re-snapshot the quote.
+ * Internal / factory-direct orders do not maintain quotedFee here; their
  * confirmedFee is stamped at factory confirmation (production-readiness.ts)
  * and, once present, must follow the approved total (or be withdrawn while
  * pricing is pending) so shipment, settlement and fulfilment repricing never
@@ -5204,16 +5205,17 @@ type ApprovedModificationFeeInput = {
  */
 function approvedModificationFeeSnapshot(input: ApprovedModificationFeeInput) {
   const { order, nextTotal } = input;
+  if (input.locksAdministratorConfirmedFee) {
+    // quotedFee is the sales-side estimate and keeps its original immutable
+    // revision pointer. Administrator resolution creates the distinct
+    // confirmed snapshot.
+    return { quotedFee: order.quotedFee, confirmedFee: nextTotal, settledFee: null };
+  }
   if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
-    return input.locksAdministratorConfirmedFee
-      ? // quotedFee is the sales-side estimate and keeps its original
-        // immutable revision pointer. Administrator resolution creates the
-        // distinct confirmed snapshot.
-        { quotedFee: order.quotedFee, confirmedFee: nextTotal, settledFee: null }
-      : // Match external submit: an automatic quote has a confirmed pricing
-        // status, but confirmedFee remains a later factory/customer-fee
-        // lifecycle snapshot.
-        { quotedFee: nextTotal, confirmedFee: null, settledFee: null };
+    // Match external submit: an automatic quote has a confirmed pricing
+    // status, but confirmedFee remains a later factory/customer-fee
+    // lifecycle snapshot.
+    return { quotedFee: nextTotal, confirmedFee: null, settledFee: null };
   }
   if (order.confirmedFee === null) return null;
   return {
