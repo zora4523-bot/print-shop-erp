@@ -67,3 +67,18 @@ describe('listWorkerTaskPage progress lane', () => {
     }
   });
 });
+
+describe('listWorkerTaskPage enum comparisons', () => {
+  // 审计 L-9：枚举列转 text 再比较会让 status / operationType 索引失效；比较值侧做类型转换。
+  it.each(['paid', 'progress'] as const)('compares %s enum columns against typed values', async (view) => {
+    mocks.operationType.mockResolvedValue('PARTIAL');
+    await listWorkerTaskPage(actor, { view, q: '' });
+    expect(queries()).toHaveLength(2);
+    for (const query of queries()) {
+      expect(query.sql).not.toMatch(/::text\s*(=|IN)/);
+      expect(query.sql).toContain(`step.status IN ('PENDING'::"ProductionOperationStatus", 'IN_PROGRESS'::"ProductionOperationStatus")`);
+      expect(query.sql).toContain(`current_order.status IN ('RELEASED'::"OrderStatus", 'FOILING'::"OrderStatus", 'PACKING'::"OrderStatus", 'SCHEDULING'::"OrderStatus", 'IN_PRODUCTION'::"OrderStatus")`);
+      if (view === 'paid') expect(query.sql).toMatch(/step\."operationType" = \?::"PieceworkOperationType"/);
+    }
+  });
+});

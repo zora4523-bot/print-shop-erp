@@ -14,13 +14,14 @@ export async function listWorkerTaskPage(actor: { id: string; role: Role }, filt
   if (filters.view === 'paid' ? !lane : craftIds.length === 0) return { ...paginatedResult([], 0, paginationWindow(0, 1, 20)), operations: [], progressSteps: [] };
   const table = filters.view === 'paid' ? Prisma.sql`"ProductionOperation"` : Prisma.sql`"ProductionProgressStep"`;
   const q = `%${filters.q.trim().slice(0, 100).replace(/[\\%_]/g, '\\$&')}%`;
-  const lanePredicate = filters.view === 'paid' ? Prisma.sql`AND step."operationType"::text = ${lane}` : Prisma.sql`AND step."craftId" = ANY(${craftIds}::text[])`;
+  // 枚举列保持原类型、在值一侧转换，才能用上 status / (operationType, status) 索引。
+  const lanePredicate = filters.view === 'paid' ? Prisma.sql`AND step."operationType" = ${lane}::"PieceworkOperationType"` : Prisma.sql`AND step."craftId" = ANY(${craftIds}::text[])`;
   const sourcePredicate = filters.view === 'paid'
     ? Prisma.sql`EXISTS (SELECT 1 FROM "ProductionOperationSource" src JOIN "OrderItem" item ON item.id=src."orderItemId" WHERE src."operationId"=step.id AND item.name ILIKE ${q})`
     : Prisma.sql`EXISTS (SELECT 1 FROM "OrderItem" item WHERE item.id=step."orderItemId" AND item.name ILIKE ${q})`;
   const where = Prisma.sql`step."workOrderVersion" = current_order."workOrderVersion"
-    AND step.status::text IN ('PENDING', 'IN_PROGRESS')
-    AND current_order.status::text IN ('RELEASED','FOILING','PACKING','SCHEDULING','IN_PRODUCTION')
+    AND step.status IN ('PENDING'::"ProductionOperationStatus", 'IN_PROGRESS'::"ProductionOperationStatus")
+    AND current_order.status IN ('RELEASED'::"OrderStatus", 'FOILING'::"OrderStatus", 'PACKING'::"OrderStatus", 'SCHEDULING'::"OrderStatus", 'IN_PRODUCTION'::"OrderStatus")
     ${lanePredicate}
     AND (current_order."orderNo" ILIKE ${q} OR current_order."customName" ILIKE ${q} OR ${sourcePredicate})`;
   const result = await db.$transaction(async (tx) => {
