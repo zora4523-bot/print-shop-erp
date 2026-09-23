@@ -11,6 +11,8 @@ import { orderCascadeLockKey } from './locks';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
 import { repriceShipmentBoxes } from './shipment-box-pricing';
 import { packagingBoxType } from './packaging-mode';
+import { orderAccruesCsSales, recordCsSalesBasisChangeInTx } from './cs-sales-ledger';
+import { CsSalesLedgerError, csSalesBasisAmountInTx } from '@/lib/salary/cs-sales';
 import {
   addOrderShipmentSchema,
   type AddOrderShipmentInput,
@@ -371,6 +373,10 @@ async function persistAddedShipment(
 ) {
   const noCharge =
     order.billingMode === 'NO_CHARGE' || order.settlementType === 'NO_CHARGE';
+  // 改写收费行之前取原业绩口径，分货后按新总额比较（SPEC §3.7）。
+  const previousCsSalesBasis = orderAccruesCsSales(order)
+    ? await csSalesBasisAmountInTx(tx, order.id, order.totalAmount.toString())
+    : null;
   const packagingDelta = preview.packaging.reduce(
     (sum, group) => sum.plus(group.delta),
     new Decimal(0),
@@ -523,6 +529,12 @@ async function persistAddedShipment(
       incrementOrderRevision: true,
       remark: `添加地址 ${sequence}，从地址 ${source.sequence} 分货`,
     });
+    await recordSplitCsSalesChangeInTx(tx, order, previousCsSalesBasis, {
+      nextTotalAmount: preview.newTotal,
+      orderRevision: revision.orderRevision,
+      occurredAt: now,
+      remark: `添加地址 ${sequence}，从地址 ${source.sequence} 分货`,
+    });
     await tx.order.update({
       where: { id: order.id },
       data: {
@@ -564,6 +576,30 @@ async function persistAddedShipment(
     },
   });
   return null;
+}
+
+/**
+ * 分货改变盒数会改变已计入业绩工单的非物流金额：同一事务按口径差额追加
+ * ORDER_CHANGED（事件键 order:<id>:revision:<新版本>:shipment-added），原流水
+ * 未对平或缺少进行中周期时整笔分货回滚，避免之后取消、改单、核价被卡死。
+ */
+async function recordSplitCsSalesChangeInTx(
+  tx: Prisma.TransactionClient,
+  order: ShipmentOrder,
+  previousBasis: string | null,
+  change: { nextTotalAmount: string; orderRevision: number; occurredAt: Date; remark: string },
+): Promise<void> {
+  if (previousBasis === null) return;
+  try {
+    await recordCsSalesBasisChangeInTx(tx, order, {
+      previousBasis,
+      eventName: 'shipment-added',
+      ...change,
+    });
+  } catch (error) {
+    if (error instanceof CsSalesLedgerError) throw new AddOrderShipmentError(error.message);
+    throw error;
+  }
 }
 
 function shipmentPreviewToken(

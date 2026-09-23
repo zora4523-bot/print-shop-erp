@@ -18,7 +18,7 @@ vi.mock('@/lib/salary/cs-sales', () => ({
   recordCsSalesEntryInTx: mocks.record,
 }));
 
-import { reverseCsSalesOnOrderCancelInTx } from '../cs-sales-ledger';
+import { recordCsSalesBasisChangeInTx, reverseCsSalesOnOrderCancelInTx } from '../cs-sales-ledger';
 
 const tx = {} as never;
 const occurredAt = new Date('2026-09-02T02:00:00.000Z');
@@ -84,6 +84,59 @@ describe('reverseCsSalesOnOrderCancelInTx', () => {
     mocks.reconcile.mockRejectedValue(failure);
 
     await expect(reverseCsSalesOnOrderCancelInTx(tx, order(), event)).rejects.toBe(failure);
+    expect(mocks.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('recordCsSalesBasisChangeInTx', () => {
+  const change = {
+    previousBasis: '1000.00',
+    nextTotalAmount: new Decimal('1010.30'),
+    eventName: 'shipment-added',
+    orderRevision: 5,
+    occurredAt,
+    remark: '添加地址 2，从地址 1 分货',
+  };
+
+  it('按改写后的新口径与原口径差额追加 ORDER_CHANGED，先对平原口径', async () => {
+    mocks.basis.mockResolvedValue('1002.30');
+
+    await recordCsSalesBasisChangeInTx(tx, order(), change);
+
+    expect(mocks.basis).toHaveBeenCalledWith(tx, 'order-1', new Decimal('1010.30'));
+    expect(mocks.reconcile).toHaveBeenCalledWith(tx, 'order-1', '1000.00');
+    expect(mocks.record).toHaveBeenCalledWith(tx, {
+      eventKey: 'order:order-1:revision:5:shipment-added',
+      csUserId: 'cs-1',
+      orderId: 'order-1',
+      orderRevision: 5,
+      type: 'ORDER_CHANGED',
+      amount: '2.30',
+      occurredAt,
+      remark: '添加地址 2，从地址 1 分货',
+    });
+    expect(mocks.reconcile.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.record.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('口径没有变化时不核对、不写流水', async () => {
+    mocks.basis.mockResolvedValue('1000.00');
+
+    await recordCsSalesBasisChangeInTx(tx, order(), change);
+
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+    expect(mocks.record).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['草稿', order({ status: OrderStatus.DRAFT })],
+    ['不收费单', order({ billingMode: OrderBillingMode.NO_CHARGE })],
+    ['外部销售单', order({ settlementType: OrderSettlementType.EXTERNAL_SALES })],
+  ])('%s未计入业绩：不读不写', async (_label, value) => {
+    await recordCsSalesBasisChangeInTx(tx, value, change);
+
+    expect(mocks.basis).not.toHaveBeenCalled();
     expect(mocks.record).not.toHaveBeenCalled();
   });
 });
