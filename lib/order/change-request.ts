@@ -163,6 +163,18 @@ function checkedOrderTotal(value: Decimal): string {
   return value.toFixed(2);
 }
 
+/**
+ * Only external sales re-quote (includeOrderCharges) and rewrite their
+ * SHIPPING_FEE / PACKING_MATERIAL rows when a change is approved. Every other
+ * settlement type keeps its persisted logistics rows inside the approved
+ * total, so the approval preview must keep them too.
+ */
+function refreshesLogisticsChargesOnChange(
+  settlementType: OrderSettlementType,
+): boolean {
+  return settlementType === OrderSettlementType.EXTERNAL_SALES;
+}
+
 function shouldSyncPlateCharge(
   status: OrderStatus,
   settlementType: OrderSettlementType,
@@ -3971,8 +3983,9 @@ export async function previewOrderChangeRequestPricing(
     );
 
     const recalculatedChargeCodes = new Set([
-      'SHIPPING_FEE',
-      'PACKING_MATERIAL',
+      ...(refreshesLogisticsChargesOnChange(request.order.settlementType)
+        ? ['SHIPPING_FEE', 'PACKING_MATERIAL']
+        : []),
       ...(!quoteHasDefaultZeroPlateCharge(projected.calculation.quote) && shouldSyncPlateCharge(
         request.order.status,
         request.order.settlementType,
@@ -5998,7 +6011,7 @@ export async function reviewOrderChangeRequest(
           orderId: request.order.id,
           actorId: actor.id,
           refreshExternalLogistics:
-            request.order.settlementType === OrderSettlementType.EXTERNAL_SALES,
+            refreshesLogisticsChargesOnChange(request.order.settlementType),
           // A production generation can already have consumed and finalized
           // physical plates. Pre-production changes instead synchronize the
           // one aggregate manual-pricing exit with projected foil facts.

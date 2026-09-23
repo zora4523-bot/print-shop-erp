@@ -2043,6 +2043,62 @@ describe('previewOrderChangeRequestPricing', () => {
       });
   });
 
+  it.each([
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.FACTORY_DIRECT,
+  ])('%s 已有快递费/耗材行时改价预览与批准同口径，保留现有物流金额', async (settlementType) => {
+    // 加工费 1000 + 快递 3 + 耗材 5：批准不刷新非外部单的物流行。
+    const value = request({
+      order: {
+        ...request().order,
+        settlementType,
+        status: OrderStatus.SUBMITTED,
+        confirmedFee: null,
+        settledFee: null,
+      },
+    });
+    locate(value);
+
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves
+      .toMatchObject({
+        oldTotal: '1008.00',
+        newTotal: '1208.00',
+        delta: '200.00',
+      });
+
+    locate(value);
+    mocks.db.csSalesEntry.aggregate.mockResolvedValue({
+      _sum: { amount: new Decimal('1000.00') },
+    });
+    mocks.db.csSalesEntry.findUnique.mockResolvedValue(null);
+    mocks.db.salaryPeriod.findFirst.mockResolvedValue({
+      id: 'period-1',
+      totalSales: new Decimal('1000.00'),
+      initialSales: new Decimal(0),
+    });
+    mocks.db.csSalesEntry.create.mockResolvedValue({ id: 'entry-1' });
+    mocks.db.salaryPeriod.update.mockResolvedValue({ id: 'period-1' });
+    await reviewOrderChangeRequest(
+      {
+        requestId: value.id,
+        decision: 'APPROVE',
+        reviewRemark: null,
+        expectedPriceRevision: 5,
+        expectedQuoteToken: quoteToken,
+      },
+      admin,
+    );
+
+    expect(mocks.finalizeCharges).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: expect.objectContaining({
+        processingAmount: '1200.00',
+        totalAmount: '1208.00',
+      }),
+    });
+  });
+
   it('已确认生产版本预览保留已发生制版费', async () => {
     const value = request({
       order: {
