@@ -75,6 +75,7 @@ import {
   csSalesBasisAmountInTx,
 } from './salary/cs-sales';
 import { reverseCsSalesOnOrderCancelInTx } from './order/cs-sales-ledger';
+import { isDirectCancelStatus } from './order/direct-cancel';
 import { hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
 import {
   calculateCreateOrderQuoteFromCatalogInTx,
@@ -2253,17 +2254,14 @@ export async function cancelOrder(
     remark: `取消：${normalizedReason}`,
     now,
     // Direct cancellation is only the withdrawal path for an order that has
-    // not entered the confirmed production contract. Once confirmed, every
-    // cancellation must be an OrderChangeRequest so producedQty, settlement
-    // and the administrator decision are written atomically and auditable.
+    // not entered the confirmed production contract (see direct-cancel.ts,
+    // which includes the internal SUBMITTED waiting state). Once confirmed,
+    // every cancellation must be an OrderChangeRequest so producedQty,
+    // settlement and the administrator decision are written atomically.
     authz: (order) => {
       if (actor.role !== Role.ADMIN && (actor.role !== Role.SALES || order.submitterId !== actor.id)) throw new OrderInvariantError('只能取消自己创建的工单');
       if (actor.role === Role.SALES && (!Number.isSafeInteger(expectedEditVersion) || expectedEditVersion !== order.editVersion)) throw new OrderInvariantError('工单已更新，请刷新后重新取消');
-      if (
-        order.status !== OrderStatus.DRAFT &&
-        order.status !== OrderStatus.PENDING_FACTORY &&
-        order.status !== OrderStatus.REJECTED
-      ) {
+      if (!isDirectCancelStatus(order.status)) {
         throw new OrderInvariantError(
           '已确认或已生产工单不能直接取消，请提交取消申请由管理员裁决',
         );

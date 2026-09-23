@@ -137,21 +137,12 @@ import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDeta
 import {
   orderShippingAvailability,
 } from '@/lib/order/shipping-availability';
+import { canShowAdminDirectCancel } from '@/lib/order/direct-cancel';
 
 type PageProps = {
   params: Promise<{ id: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
-
-const DIRECT_CANCEL_STATUSES = new Set<OrderStatus>([
-  OrderStatus.DRAFT,
-  OrderStatus.PENDING_FACTORY,
-  OrderStatus.REJECTED,
-]);
-
-function canUseDirectCancel(role: Role, status: OrderStatus): boolean {
-  return role === Role.ADMIN && DIRECT_CANCEL_STATUSES.has(status);
-}
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -232,7 +223,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   const canSubmit =
     order.status === OrderStatus.DRAFT &&
     (order.submitterId === user.id || user.role === Role.ADMIN);
-  const canCancel = canUseDirectCancel(user.role, order.status);
+  const canCancel = canShowAdminDirectCancel(user.role, order.status);
   // 发货与结算权限：order:ship = ADMIN（见 permissions.ts）。
   // action 层仍会重新校验，这里只控制界面入口。
   const canShipOrSettle = user.role === Role.ADMIN;

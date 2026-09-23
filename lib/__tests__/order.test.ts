@@ -3385,6 +3385,66 @@ describe('cancelOrder', () => {
     ).rejects.toThrow(/历史财务校准/);
     expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
   });
+
+  describe('SUBMITTED（内部/直营单待资料或核价，尚未进入已确认生产合同）', () => {
+    function submittedInternalOrder() {
+      return {
+        id: 'o1',
+        status: OrderStatus.SUBMITTED,
+        submitterId: 'cs-1',
+        submitterRole: Role.CUSTOMER_SERVICE,
+        settlementType: OrderSettlementType.INTERNAL_SALES,
+        billingMode: 'CHARGE',
+        totalAmount: '3200.50',
+        revision: 2,
+        editVersion: 1,
+      };
+    }
+
+    it('管理员可直接撤回，并在同一事务追加全额负数客服业绩冲销', async () => {
+      const clock = new Date('2026-09-20T03:00:00.000Z');
+      dbMock.order.findUnique.mockResolvedValue(submittedInternalOrder());
+      dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
+
+      await expect(cancelOrder('o1', ownerActor, '客户放弃', clock)).resolves.toMatchObject({
+        status: OrderStatus.CANCELLED,
+      });
+
+      expect(dbMock.order.update.mock.calls[0][0].data.status).toBe(OrderStatus.CANCELLED);
+      expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(dbMock, 'o1', '3200.50');
+      expect(recordCsSalesEntryMock).toHaveBeenCalledTimes(1);
+      const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as {
+        eventKey: string;
+        type: string;
+        amount: { toFixed: (places: number) => string };
+      };
+      expect(ledgerInput).toMatchObject({
+        eventKey: 'order:o1:revision:2:cancel',
+        type: 'ORDER_CANCELLED',
+      });
+      expect(ledgerInput.amount.toFixed(2)).toBe('-3200.50');
+    });
+
+    it('已有报工的 SUBMITTED 单仍拒绝直接取消，不写任何取消事实', async () => {
+      dbMock.order.findUnique.mockResolvedValue(submittedInternalOrder());
+      dbMock.productionOperation.findMany.mockResolvedValue([
+        { id: 'op-1', status: ProductionOperationStatus.PENDING, _count: { reports: 1 } },
+      ]);
+
+      await expect(cancelOrder('o1', ownerActor, '客户放弃')).rejects.toThrow(/已报工的生产工序/);
+      expect(dbMock.order.update).not.toHaveBeenCalled();
+      expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
+    });
+
+    it('客服仍不能直接取消（权限口径不变，只放开状态）', async () => {
+      dbMock.order.findUnique.mockResolvedValue(submittedInternalOrder());
+
+      await expect(
+        cancelOrder('o1', { id: 'cs-1', role: Role.CUSTOMER_SERVICE }, '客户放弃'),
+      ).rejects.toThrow(/只能取消自己创建的工单/);
+      expect(dbMock.order.update).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('shipOrder', () => {
