@@ -16,6 +16,7 @@ const {
     finalize: vi.fn(),
     abort: vi.fn(),
     on: vi.fn(),
+    once: vi.fn(),
   };
   return {
     ossCtorMock: vi.fn(),
@@ -67,7 +68,19 @@ beforeEach(() => {
     .mockReset()
     .mockReturnValue('https://signed.example/bundles/b1.zip?sig=abc');
   archiveMock.pipe.mockReset();
-  archiveMock.append.mockReset();
+  // 生产代码逐个追加条目、等 archiver 的 'entry' 事件再打开下一个 GET；
+  // mock 在 append 后异步回放该事件，模拟"条目已处理完"。
+  let onEntry: (() => void) | null = null;
+  archiveMock.once.mockReset().mockImplementation((event: string, fn: () => void) => {
+    if (event === 'entry') onEntry = fn;
+    return archiveMock;
+  });
+  archiveMock.append.mockReset().mockImplementation(() => {
+    const fire = onEntry;
+    onEntry = null;
+    setImmediate(() => fire?.());
+    return archiveMock;
+  });
   archiveMock.finalize.mockReset().mockResolvedValue(undefined);
   archiveMock.abort.mockReset();
   archiveMock.on.mockReset();

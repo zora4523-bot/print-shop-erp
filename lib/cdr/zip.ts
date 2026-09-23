@@ -1,10 +1,10 @@
-import { PassThrough } from 'node:stream';
+import { finished, PassThrough, type Readable } from 'node:stream';
 import { ZipArchive } from 'archiver';
 import { readOssConfig } from '../oss/config';
 import { createOssClient } from '../oss/client';
 import { SETTING_DEFINITIONS } from '../settings/definitions';
 
-// CDR 汇总下载（SPEC §3.6）的"打包到 OSS"步骤。
+// CDR 汇总下载（SPEC §3.5）的"打包到 OSS"步骤。
 //
 //   - prod / OSS 已配齐（readOssConfig.configured=true）+ 默认非 mock
 //     → 真打包：流式从 OSS 拉每个 CDR 文件 → archiver 边收边压 →
@@ -87,6 +87,105 @@ function deriveObjectKey(fileUrl: string): string {
   return key;
 }
 
+// ali-oss 默认 timeout=60s，且 urllib 的响应计时器从建连起算、收到响应才取消：
+// 流式 PUT 的响应要等整包传完，默认值等于"压缩 + 上传必须在 60 秒内完成"。
+// 这里按 [建连超时, 响应超时] 显式放宽；urllib 会同步把 socket 空闲超时抬到
+// 响应超时 + 0.5s，所以响应超时同时也是连接停滞多久算失败。
+const OSS_CONNECT_TIMEOUT_MS = 60 * 1000;
+// PUT：覆盖整段压缩 + 上传。
+const BUNDLE_PUT_TIMEOUT: [number, number] = [OSS_CONNECT_TIMEOUT_MS, 2 * MS_PER_HOUR];
+// GET：流式响应收到响应头即取消响应计时；之后只剩 socket 空闲超时，源流
+// 只会因 PUT 背压短暂暂停，停滞 10 分钟即视为失败。
+const DESIGN_GET_TIMEOUT: [number, number] = [OSS_CONNECT_TIMEOUT_MS, 10 * 60 * 1000];
+
+// ali-oss 的类型把 timeout 声明成 number（且 mime/meta/callback 必填），
+// 运行时实际透传给 urllib，支持 [connect, response] 二元组。
+type OssStreamClient = {
+  getStream(name: string, options: { timeout: [number, number] }): Promise<{ stream?: unknown }>;
+  putStream(name: string, stream: Readable, options: { timeout: [number, number] }): Promise<unknown>;
+};
+
+type BundleUpload = {
+  // 追加一个条目，等 archiver 把它处理完再返回；任一环节失败立即 reject。
+  append(source: Readable, name: string): Promise<void>;
+  // finalize 与 PUT 都完成才 resolve；任一失败立即 reject。
+  finish(): Promise<void>;
+  // 终止整条流水线（archiver、当前源流、上传），之后所有等待都以 err reject。
+  abort(err: Error): void;
+};
+
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+// archiver 的 finalize() 只在内部 zip 模块 end/error 时 settle：输出被销毁或
+// 源流中途关闭时它会被背压永远卡住（abort() 也解不开）。所以不能只 await
+// finalize，而要让每一次等待都和"任一环节失败"赛跑。
+function startBundleUpload(client: OssStreamClient, zipObjectKey: string): BundleUpload {
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  const out = new PassThrough();
+  let failure: Error | null = null;
+  let current: Readable | null = null;
+  let rejectFailed: (err: Error) => void = () => {};
+  const failed = new Promise<never>((_, reject) => {
+    rejectFailed = reject;
+  });
+  // 成功路径不会 await failed；先挂空处理，避免 unhandled rejection。
+  failed.catch(() => {});
+
+  const abort = (err: Error) => {
+    if (failure) return;
+    failure = err;
+    rejectFailed(err);
+    archive.abort();
+    current?.destroy();
+    // destroy 让 ali-oss 的 pump 拆掉请求，PUT 随之失败，不会留下半截对象。
+    out.destroy(err);
+  };
+
+  // destroy(err) 会在 out 上 emit 'error'；错误本体已经走 failed 传递。
+  out.on('error', () => {});
+  archive.on('error', (err) => abort(err));
+  archive.pipe(out);
+  // PUT 与 append 并发：archiver 边压边写，整包不落内存/磁盘。
+  const put = client
+    .putStream(zipObjectKey, out, { timeout: BUNDLE_PUT_TIMEOUT })
+    .then(
+      () => undefined,
+      (err: unknown) => abort(toError(err)),
+    );
+
+  const append = (source: Readable, name: string): Promise<void> => {
+    if (failure) {
+      source.destroy();
+      return Promise.reject(failure);
+    }
+    current = source;
+    const processed = new Promise<void>((resolve) => {
+      archive.once('entry', () => resolve());
+    });
+    // archiver 只监听它自己套的 PassThrough：源流报错或没读完就 close
+    // 时它永远等不到 end，必须由这里把整条流水线判失败。
+    finished(source, { writable: false }, (err) => {
+      if (err) {
+        abort(new CdrZipError(`设计文件读取中断：${name}（${err.message}）`));
+      }
+    });
+    archive.append(source, { name });
+    return Promise.race([failed, processed]);
+  };
+
+  const finish = async (): Promise<void> => {
+    if (failure) throw failure;
+    current = null;
+    await Promise.race([failed, Promise.all([archive.finalize(), put])]);
+    // put 的失败分支只调 abort 不抛错，这里再确认一次。
+    if (failure) throw failure;
+  };
+
+  return { append, finish, abort };
+}
+
 async function generateRealZip(
   input: ZipUploadInput,
   nowFn: () => Date,
@@ -113,46 +212,18 @@ async function generateRealZip(
 
   // endpoint 用 config 已校验的值（支持 OSS_ENDPOINT 覆盖：VPC 内网、
   // 自定义端口等），不能只凭 region 拼默认公网域名。
-  const client = createOssClient(cfg);
+  const client = createOssClient(cfg) as unknown as OssStreamClient;
 
   const zipObjectKey = `bundles/${input.bundleId}.zip`;
-  const archive = new ZipArchive({ zlib: { level: 9 } });
-  const out = new PassThrough();
+  const upload = startBundleUpload(client, zipObjectKey);
   const abortUpload = () => {
-    archive.abort();
-    out.destroy(
+    upload.abort(
       context.signal?.reason instanceof Error
         ? context.signal.reason
         : new Error('CDR bundle lease lost'),
     );
   };
   context.signal?.addEventListener('abort', abortUpload, { once: true });
-  // destroy(err) 会在流上 emit 'error'；没有监听器时 Node 视为
-  // uncaught exception 直接崩进程。错误本体已经通过 putSettled /
-  // archiveError 传递，这里只需吞掉事件。
-  out.on('error', () => {});
-  let archiveError: Error | null = null;
-  archive.on('error', (err) => {
-    archiveError = err;
-    // 让下游 putStream 立刻失败，而不是挂在半截 ZIP 上等超时。
-    out.destroy(err);
-  });
-  archive.pipe(out);
-
-  // putStream 与 append 并发：archiver 边压边写，整包不落内存/磁盘。
-  // 立刻折叠成 settled 对象（永不 reject）：PUT 在 append 循环期间早期
-  // 失败（403 / DNS / socket）时不会成为 unhandled rejection，同时
-  // destroy 输出流释放 archiver 背压，让 finalize 尽快失败而不是挂死。
-  const putSettled: Promise<
-    { ok: true } | { ok: false; err: Error }
-  > = client.putStream(zipObjectKey, out).then(
-    () => ({ ok: true as const }),
-    (err: unknown) => {
-      const e = err instanceof Error ? err : new Error(String(err));
-      out.destroy(e);
-      return { ok: false as const, err: e };
-    },
-  );
 
   try {
     // ZIP 内按工单号分目录；同名文件追加序号，避免静默覆盖。
@@ -160,8 +231,11 @@ async function generateRealZip(
     for (const entry of entries) {
       await context.assertLease?.();
       context.signal?.throwIfAborted();
-      const result = await client.getStream(entry.objectKey);
-      context.signal?.throwIfAborted();
+      // 逐个打开：上一个条目处理完才发起下一个 GET，排队中的响应不会因
+      // 长时间空闲被 agentkeepalive 销毁。
+      const result = await client.getStream(entry.objectKey, {
+        timeout: DESIGN_GET_TIMEOUT,
+      });
       const baseName = `${entry.orderNo}/${entry.fileName}`;
       const seen = usedNames.get(baseName) ?? 0;
       usedNames.set(baseName, seen + 1);
@@ -169,12 +243,9 @@ async function generateRealZip(
         seen === 0
           ? baseName
           : `${entry.orderNo}/(${seen + 1}) ${entry.fileName}`;
-      archive.append(result.stream, { name });
+      await upload.append(result.stream as Readable, name);
     }
-    await archive.finalize();
-    const putResult = await putSettled;
-    if (!putResult.ok) throw putResult.err;
-    if (archiveError) throw archiveError;
+    await upload.finish();
     await context.assertLease?.();
     context.signal?.throwIfAborted();
 
@@ -189,10 +260,8 @@ async function generateRealZip(
       isMock: false,
     };
   } catch (err) {
-    // 半途失败：终止 archiver；putSettled 永不 reject，等它收尾即可。
-    archive.abort();
-    out.destroy();
-    await putSettled;
+    // 半途失败：拆掉 archiver、源流与上传；重复 abort 是空操作。
+    upload.abort(toError(err));
     throw err;
   } finally {
     context.signal?.removeEventListener('abort', abortUpload);
