@@ -47,6 +47,43 @@ export type StockTransferSummary = Prisma.StockTransferGetPayload<{
   select: typeof STOCK_TRANSFER_SELECT;
 }>;
 
+// 幂等重放只回放「同一请求」：同键不同物料 / 库位 / 数量 / 备注 / 操作人
+// 必须拒绝，否则操作员改过的内容会被旧调拨单静默顶替（与手工出入库
+// lib/material.ts 的同键异载荷拒绝一致）。表里已存全部请求字段，不需要指纹列。
+const STOCK_TRANSFER_REQUEST_SELECT = {
+  id: true,
+  materialId: true,
+  sourceLocationId: true,
+  destinationLocationId: true,
+  quantity: true,
+  remark: true,
+  operatorId: true,
+} satisfies Prisma.StockTransferSelect;
+
+type StockTransferRequestRecord = Prisma.StockTransferGetPayload<{
+  select: typeof STOCK_TRANSFER_REQUEST_SELECT;
+}>;
+
+function assertSameTransferRequest(
+  existing: StockTransferRequestRecord,
+  input: CreateStockTransferInput,
+  quantity: Decimal,
+  actor: { id: string },
+): void {
+  const same =
+    existing.materialId === input.materialId &&
+    existing.sourceLocationId === input.sourceLocationId &&
+    existing.destinationLocationId === input.destinationLocationId &&
+    new Decimal(existing.quantity.toString()).eq(quantity) &&
+    (existing.remark ?? null) === (input.remark ?? null) &&
+    existing.operatorId === actor.id;
+  if (!same) {
+    throw new StockTransferInvariantError(
+      '调拨请求与原记录不一致，请刷新页面后重新核对',
+    );
+  }
+}
+
 export async function createStockTransfer(
   input: CreateStockTransferInput,
   actor: { id: string },
@@ -62,9 +99,10 @@ export async function createStockTransfer(
 
   const existingBeforeReservation = await db.stockTransfer.findUnique({
     where: { idempotencyKey: input.idempotencyKey },
-    select: { id: true },
+    select: STOCK_TRANSFER_REQUEST_SELECT,
   });
   if (existingBeforeReservation) {
+    assertSameTransferRequest(existingBeforeReservation, input, quantity, actor);
     return readStockTransfer(existingBeforeReservation.id);
   }
 
@@ -84,9 +122,12 @@ export async function createStockTransfer(
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:stock-transfer-request:${input.idempotencyKey}`}))`;
     const existing = await tx.stockTransfer.findUnique({
       where: { idempotencyKey: input.idempotencyKey },
-      select: { id: true },
+      select: STOCK_TRANSFER_REQUEST_SELECT,
     });
-    if (existing) return existing.id;
+    if (existing) {
+      assertSameTransferRequest(existing, input, quantity, actor);
+      return existing.id;
+    }
 
     const [material, source, destination] = await Promise.all([
       tx.material.findUnique({
