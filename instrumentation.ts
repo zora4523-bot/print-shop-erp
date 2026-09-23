@@ -19,7 +19,7 @@ export async function register() {
 
   // Header / body / URL-query / CDR-token scrubber — see
   // lib/observability/sentry-scrub.ts for the sweep points and history.
-  const { scrubSentryEvent } = await import('./lib/observability/sentry-scrub');
+  const { SENTRY_SCRUB_HOOKS } = await import('./lib/observability/sentry-scrub');
 
   const baseInit = {
     dsn: process.env.SENTRY_DSN,
@@ -31,8 +31,7 @@ export async function register() {
     // customer refs may end up in messages — keep send-default-pii
     // off and let specific call sites attach context explicitly.
     sendDefaultPii: false,
-    beforeSend: scrubSentryEvent,
-    beforeSendTransaction: scrubSentryEvent,
+    ...SENTRY_SCRUB_HOOKS,
   };
 
   if (process.env.NEXT_RUNTIME === 'nodejs') {

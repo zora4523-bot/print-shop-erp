@@ -47,7 +47,12 @@ vi.mock('@sentry/nextjs', () => ({
   flush: vi.fn(async () => true),
 }));
 
+import * as Sentry from '@sentry/nextjs';
 import { runBackgroundWorkerProcess } from '../background-worker-runtime';
+import {
+  scrubSentryBreadcrumb,
+  scrubSentryEvent,
+} from '../../lib/observability/sentry-scrub';
 import { WORKER_HEARTBEAT_MAX_INTERVAL_MS } from '../../lib/background-jobs/heartbeat-policy';
 
 type SignalHandler = () => void;
@@ -182,4 +187,24 @@ it('refuses lane concurrency that would exhaust independent heartbeat connection
   expect(process.exitCode).toBe(1);
   expect(runBackgroundWorkerMock).not.toHaveBeenCalled();
   expect(startWorkerHeartbeatMock).not.toHaveBeenCalled();
+});
+
+describe('worker Sentry scrubbing', () => {
+  it('installs the shared event, transaction and breadcrumb scrubbers', async () => {
+    vi.stubEnv('SENTRY_DSN', 'https://public@sentry.example/1');
+    vi.mocked(Sentry.init).mockClear();
+
+    await runBackgroundWorkerProcess();
+
+    expect(Sentry.init).toHaveBeenCalledOnce();
+    expect(Sentry.init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dsn: 'https://public@sentry.example/1',
+        sendDefaultPii: false,
+        beforeSend: scrubSentryEvent,
+        beforeSendTransaction: scrubSentryEvent,
+        beforeBreadcrumb: scrubSentryBreadcrumb,
+      }),
+    );
+  });
 });

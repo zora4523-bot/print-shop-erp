@@ -10,8 +10,13 @@
 //   - event.request          → 收窄为 { url=path, method }            (round 65 P1)
 //   - event.spans[*].data    → 只留白名单 key，丢掉完整 URL           (round 67 P2)
 //   - contexts.nextjs.request_path → 去 query                          (round 67 P2)
+//   - contexts.trace.data / breadcrumbs[*].data → URL 去 query 与 fragment，
+//     删掉单独的 query / fragment 字段（根 span 的 http.target 带搜索词；
+//     旧版企业微信 Webhook 的 ?key= 会进 fetch 面包屑与 url.full）
 //   - 全事件字符串           → 遮蔽 CDR 外发链接的 bearer token        (2026-09-23)
-// beforeSend（异常）与 beforeSendTransaction（采样 trace）都要挂（round 66 P1）。
+// beforeSend（异常）与 beforeSendTransaction（采样 trace）都要挂（round 66 P1）；
+// beforeBreadcrumb 挂 scrubSentryBreadcrumb。Web（instrumentation.ts）与
+// 后台 worker（scripts/background-worker-runtime.ts）共用 SENTRY_SCRUB_HOOKS。
 
 // CDR 外协下载链接把 256-bit token 放在路径里（/api/cdr/bundles/<token>），
 // 链接即凭证。路径会出现在 request.url、transaction 名、http span 描述、
@@ -70,6 +75,41 @@ const SAFE_SPAN_DATA_KEYS = new Set([
   'origin',
 ]);
 
+// URL-valued attributes (legacy + current OTel semantic conventions, plus
+// Sentry's own `url`) keep scheme / host / path; query and fragment drop.
+const URL_VALUED_DATA_KEYS = new Set(['url', 'url.full', 'http.url', 'http.target']);
+// Attributes that hold nothing but a query string or fragment.
+const QUERY_ONLY_DATA_KEYS = new Set([
+  'url.query',
+  'url.fragment',
+  'http.query',
+  'http.fragment',
+]);
+
+function stripUrlQueryAndFragment(value: string): string {
+  const cut = value.search(/[?#]/);
+  return cut >= 0 ? value.slice(0, cut) : value;
+}
+
+function scrubUrlData(data: unknown): void {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+  const record = data as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (QUERY_ONLY_DATA_KEYS.has(key)) {
+      delete record[key];
+    } else if (URL_VALUED_DATA_KEYS.has(key) && typeof record[key] === 'string') {
+      record[key] = stripUrlQueryAndFragment(record[key]);
+    }
+  }
+}
+
+/** beforeBreadcrumb hook: fetch / http breadcrumbs record the outgoing URL. */
+export function scrubSentryBreadcrumb<T>(breadcrumb: T): T {
+  scrubUrlData((breadcrumb as { data?: unknown }).data);
+  redactStringsDeep(breadcrumb, new WeakSet());
+  return breadcrumb;
+}
+
 export function scrubSentryEvent<T>(event: T): T {
   // Sentry's ErrorEvent / TransactionEvent share these fields; we
   // mutate via a permissive view so one helper covers both.
@@ -81,8 +121,10 @@ export function scrubSentryEvent<T>(event: T): T {
     }>;
     contexts?: {
       nextjs?: { request_path?: unknown };
+      trace?: { data?: unknown };
       [k: string]: unknown;
     };
+    breadcrumbs?: unknown;
   };
 
   if (e.request) {
@@ -126,6 +168,22 @@ export function scrubSentryEvent<T>(event: T): T {
     );
   }
 
+  scrubUrlData(e.contexts?.trace?.data);
+  if (Array.isArray(e.breadcrumbs)) {
+    for (const breadcrumb of e.breadcrumbs) {
+      if (breadcrumb && typeof breadcrumb === 'object') {
+        scrubUrlData((breadcrumb as { data?: unknown }).data);
+      }
+    }
+  }
+
   redactStringsDeep(event, new WeakSet());
   return event;
 }
+
+/** Shared Sentry.init hooks for the Web runtime and the background worker. */
+export const SENTRY_SCRUB_HOOKS = {
+  beforeSend: scrubSentryEvent,
+  beforeSendTransaction: scrubSentryEvent,
+  beforeBreadcrumb: scrubSentryBreadcrumb,
+};

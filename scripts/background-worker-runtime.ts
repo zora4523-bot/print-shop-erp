@@ -17,6 +17,7 @@ import {
 } from '../lib/background-jobs/worker';
 import { db } from '../lib/db';
 import { databasePoolConfig, assertWorkerPoolCapacity } from '../lib/database-session';
+import { SENTRY_SCRUB_HOOKS } from '../lib/observability/sentry-scrub';
 
 export async function runBackgroundWorkerProcess(): Promise<void> {
   try {
@@ -65,6 +66,9 @@ async function main(): Promise<void> {
       environment: process.env.NODE_ENV || 'development',
       sendDefaultPii: false,
       tracesSampleRate: 0.05,
+      // Same scrubbers as the Web runtime: outgoing fetch breadcrumbs and
+      // sampled client spans carry full URLs (legacy webhook ?key=…).
+      ...SENTRY_SCRUB_HOOKS,
     });
   }
 
