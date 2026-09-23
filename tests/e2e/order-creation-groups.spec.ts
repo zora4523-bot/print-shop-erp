@@ -91,7 +91,7 @@ test('管理员按材料和克重限制规格，切换克重后报价正常', as
   await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/orders/new' });
   await openFirstOrderItemEditor(page);
   const form = page.locator('[data-slot="order-form-b"]');
-  await form.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '杂色珠光', exact: true }).click();
+  await form.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '杂色珠光纸', exact: true }).click();
   await expect(form.getByRole('group', { name: '规格', exact: true }).getByRole('button', { name: '西封大号', exact: true })).toBeDisabled();
   await form.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '红卡纸', exact: true }).click();
   await form.getByRole('group', { name: '克重', exact: true }).getByRole('button', { name: '230g', exact: true }).click();

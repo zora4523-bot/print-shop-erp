@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { blankPriceIdentity } from '@/lib/price/blank-price-identity';
 import { PAPER_DISPLAY_ORDER, paperDisplayLabel, paperDisplayRank, paperSearchValues } from '../paper-label';
 
 // Display-only: persisted catalog facts keep their stored names; every render site
@@ -12,10 +13,14 @@ describe('paperDisplayLabel', () => {
     expect(paperDisplayLabel('230g金葱')).toBe('230g金葱纸');
     expect(paperDisplayLabel('180g红卡')).toBe('180g红卡纸');
     expect(paperDisplayLabel('160克冰白纸')).toBe('160克冰白珠光纸');
+    // The kept legacy identity shows the owner's name; the stored text stays the pricing key.
+    expect(paperDisplayLabel('160g杂色珠光')).toBe('160g杂色珠光纸');
+    expect(paperDisplayLabel('杂色珠光 160g · 大号封')).toBe('杂色珠光纸 160g · 大号封');
+    expect(paperDisplayLabel('160g杂色珠光 / 红卡')).toBe('160g杂色珠光纸 / 红卡纸');
   });
 
   it('is idempotent and leaves other papers and box names untouched', () => {
-    for (const current of ['艳红珠光纸', '暗红珠光纸', '金葱纸', '红卡纸', '冰白珠光纸']) {
+    for (const current of ['艳红珠光纸', '暗红珠光纸', '金葱纸', '红卡纸', '冰白珠光纸', '杂色珠光纸']) {
       expect(paperDisplayLabel(current)).toBe(current);
     }
     expect(paperDisplayLabel('200g艳闪')).toBe('200g艳闪');
@@ -47,6 +52,7 @@ describe('paperSearchValues', () => {
     expect(paperSearchValues('暗红珠光纸')).toEqual(['暗红珠光纸', '珠光闪红', '珠光暗红']);
     expect(paperSearchValues('金葱纸')).toEqual(['金葱纸', '金葱']);
     expect(paperSearchValues('冰白珠光纸')).toEqual(['冰白珠光纸', '冰白纸']);
+    expect(paperSearchValues('160g杂色珠光纸')).toEqual(['160g杂色珠光纸', '160g杂色珠光']);
   });
 
   it('keeps stored or partial text as the only term', () => {
@@ -54,4 +60,16 @@ describe('paperSearchValues', () => {
     expect(paperSearchValues('珠光')).toEqual(['珠光']);
     expect(paperSearchValues('触感纸')).toEqual(['触感纸']);
   });
+});
+
+// Both stored spellings display as 杂色珠光纸, but they must stay separate pricing
+// identities: folding them would give two published rules the same key and every
+// quote would fail with DUPLICATE_RULE. Merge in display only.
+it('keeps 160g杂色珠光 and 160g杂色珠光纸 as distinct pricing identities', () => {
+  const kept = blankPriceIdentity({ paperType: '160g杂色珠光', paperWeightGsm: 160, specification: '大号封' });
+  const retired = blankPriceIdentity({ paperType: '160g杂色珠光纸', paperWeightGsm: 160, specification: '大号封' });
+  expect(kept?.key).toBeTruthy();
+  expect(retired?.key).toBeTruthy();
+  expect(kept!.key).not.toBe(retired!.key);
+  expect(paperDisplayLabel(kept!.paperLabel)).toBe(paperDisplayLabel(retired!.paperLabel));
 });

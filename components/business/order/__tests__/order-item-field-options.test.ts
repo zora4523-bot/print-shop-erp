@@ -112,7 +112,7 @@ it('orders paper buttons and the default paper by the owner display order', () =
   });
   // The catalog order deliberately differs from the display order.
   const catalog = [
-    stock('coated', '160g铜版纸'), stock('linen', '150g莱尼纹'), stock('variegated', '160g杂色珠光纸'),
+    stock('coated', '160g铜版纸'), stock('linen', '150g莱尼纹'), stock('variegated', '160g杂色珠光'),
     stock('red', '160g红卡'), stock('pearl', '160g珠光艳闪'), stock('touch', '200g触感纸'),
   ];
   const item = {
@@ -139,7 +139,7 @@ it('falls back to the next paper in owner order when the first is unavailable fo
   const catalog = [
     stock('touch', '200g触感纸', '大号封90×165'),
     stock('pearl-mini', '160g珠光艳闪', '迷你封50×80'),
-    stock('variegated', '160g杂色珠光纸', '大号封90×165'),
+    stock('variegated', '160g杂色珠光', '大号封90×165'),
   ];
   const item = { ...createExternalOrderItem([], catalog, []), specification: '大号封90×165' };
   // 艳红珠光纸 has no 大号封 here, so the next listed paper with that size wins: 触感纸 before 杂色珠光纸.

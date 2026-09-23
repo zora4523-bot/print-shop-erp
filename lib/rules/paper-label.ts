@@ -9,6 +9,8 @@ const PAPER_TERMS: ReadonlyArray<readonly [RegExp, string]> = [
   // 「红卡盒子」是包装盒型，不是纸张。
   [/红卡(?![纸盒])/gu, '红卡纸'],
   [/冰白纸/gu, '冰白珠光纸'],
+  // 业主保留「160g杂色珠光」（带专版 +0.03），重复的「160g杂色珠光纸」已停用。
+  [/杂色珠光(?!纸)/gu, '杂色珠光纸'],
 ];
 
 /** Current paper terminology; persisted catalog facts and historical prices keep their identity. */
@@ -23,6 +25,7 @@ const STORED_PAPER_TERMS: ReadonlyArray<readonly [string, readonly string[]]> = 
   ['金葱纸', ['金葱']],
   ['红卡纸', ['红卡']],
   ['冰白珠光纸', ['冰白纸']],
+  ['杂色珠光纸', ['杂色珠光']],
 ];
 
 /** The typed text plus the stored spellings it may refer to, for contains-matching. */
