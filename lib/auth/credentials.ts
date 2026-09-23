@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { randomBytes } from 'node:crypto';
 import { AuthError, CredentialsSignin } from '@auth/core/errors';
 import bcrypt from 'bcryptjs';
 import { db } from '../db';
@@ -19,6 +20,18 @@ export class LoginRateLimitUnavailableError extends AuthError {
       cause instanceof Error ? cause : new Error('login rate limiter unavailable');
     super('login rate limiter unavailable', { cause: { err: error } });
   }
+}
+
+// Must match the cost every stored hash is written with (lib/account.ts,
+// actions/account.ts, prisma/seed.ts all hash with 10) so a miss costs the
+// same bcrypt work as a real compare.
+const DUMMY_HASH_COST = 10;
+let dummyPasswordHash: Promise<string> | undefined;
+
+/** Created once per process on the first miss; its plaintext is never kept. */
+function getDummyPasswordHash(): Promise<string> {
+  dummyPasswordHash ??= bcrypt.hash(randomBytes(16).toString('hex'), DUMMY_HASH_COST);
+  return dummyPasswordHash;
 }
 
 export async function authorizeCredentials(
@@ -42,10 +55,10 @@ export async function authorizeCredentials(
 
   const { username, password } = parsed.data;
   const user = await db.user.findUnique({ where: { username } });
-  if (!user || !user.isActive) return null;
-
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) return null;
+  // Always pay one bcrypt compare, even for a missing or inactive account, so
+  // response time does not reveal which usernames exist and can sign in.
+  const ok = await bcrypt.compare(password, user?.password ?? (await getDummyPasswordHash()));
+  if (!user || !user.isActive || !ok) return null;
 
   return {
     id: user.id,
