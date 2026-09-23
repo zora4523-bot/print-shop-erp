@@ -9,6 +9,7 @@ import { resolveExternalOrderChargesForFinalization, type ResolvedOrderCustomerC
 import { editableFieldsetForStatus } from './editable-fields';
 import { orderCascadeLockKey } from './locks';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
+import { hasAdminPricingConfirmationMarker } from './admin-pricing-snapshot';
 import { repriceShipmentBoxes } from './shipment-box-pricing';
 import { packagingBoxType } from './packaging-mode';
 import { orderAccruesCsSales, recordCsSalesBasisChangeInTx } from './cs-sales-ledger';
@@ -389,24 +390,7 @@ async function persistAddedShipment(
       where: { id: change.groupId },
       data: {
         actualBagCount: change.boxCount,
-        ...(noCharge
-          ? {}
-          : {
-              subtotal: change.subtotal,
-              suggestedSubtotal: null,
-              priceOverrideReason: null,
-              pricingSnapshot: {
-                source: 'SHIPMENT_SPLIT',
-                quotedAt: now.toISOString(),
-                previousSnapshot: previous.pricingSnapshot,
-                previousPriceRevision: order.priceRevision,
-                actual: {
-                  actualBagCount: change.boxCount,
-                  unitPrice: change.unitPrice,
-                  subtotal: change.subtotal,
-                },
-              },
-            }),
+        ...(noCharge ? {} : splitPackagingPriceFields(previous, change, order.priceRevision, now)),
       },
     });
   }
@@ -576,6 +560,38 @@ async function persistAddedShipment(
     },
   });
   return null;
+}
+
+/**
+ * 分货沿用已保存的包装单价，不读最新价格本（docs/管理员建单定价与装盒修复-20260913.md）。
+ * 管理员议定价的组保留顶层确认信封与原因：确认绑定旧盒数，盒数变化后不再受信任，
+ * 核价、提交终结器与工厂确认都把它当作待重新确认（fail-closed），不会按价目簿静默改价；
+ * 其余组沿用 SHIPMENT_SPLIT 信封。
+ */
+function splitPackagingPriceFields(
+  previous: ShipmentOrder['packagingGroups'][number],
+  change: AddOrderShipmentPreview['packaging'][number],
+  previousPriceRevision: number,
+  now: Date,
+) {
+  const split = {
+    quotedAt: now.toISOString(),
+    previousPriceRevision,
+    actual: { actualBagCount: change.boxCount, unitPrice: change.unitPrice, subtotal: change.subtotal },
+  };
+  const adminAgreed = hasAdminPricingConfirmationMarker(previous.pricingSnapshot);
+  return {
+    subtotal: change.subtotal,
+    suggestedSubtotal: null,
+    priceOverrideReason: adminAgreed ? previous.priceOverrideReason : null,
+    pricingSnapshot: adminAgreed
+      ? {
+          ...(previous.pricingSnapshot as Prisma.InputJsonObject),
+          pendingReason: '分货改变盒数，请重新确认人工包装单价',
+          shipmentSplit: split,
+        }
+      : { source: 'SHIPMENT_SPLIT', previousSnapshot: previous.pricingSnapshot, ...split },
+  };
 }
 
 /**

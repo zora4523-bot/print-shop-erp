@@ -3,7 +3,7 @@ import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { externalShipmentContactIssues } from './external-shipment-contact';
 import { settlementBillsLogistics } from './settlement';
 import Decimal from 'decimal.js';
-import { isTrustedAdminItemPricingSnapshot, isTrustedAdminPackagingPricingSnapshot, type AdminPackagingPricingSnapshotFacts, type AdminItemPricingSnapshotFacts } from './admin-pricing-snapshot';
+import { hasAdminPricingConfirmationMarker, isTrustedAdminItemPricingSnapshot, isTrustedAdminPackagingPricingSnapshot, type AdminPackagingPricingSnapshotFacts, type AdminItemPricingSnapshotFacts } from './admin-pricing-snapshot';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   CustomerPriceBookPurpose,
@@ -419,6 +419,16 @@ function hasAdminCreatePrice(order: FinalizeOrderRow, item: FinalizeOrderItem): 
 
 function hasAdminPackagingPrice(order: FinalizeOrderRow, group: FinalizeOrderRow['packagingGroups'][number]): boolean {
   return group.orderId === order.id && group.unitPrice !== undefined && group.subtotal !== undefined && group.priceOverrideReason !== undefined && isTrustedAdminPackagingPricingSnapshot(group.pricingSnapshot, group as AdminPackagingPricingSnapshotFacts);
+}
+
+/**
+ * 带管理员确认标记、但议定前提已变（如分货改盒数）而不再受信任的包装组：
+ * 沿用已保存的单价与小计，不按最新价目簿改价，整单转待管理员重新确认
+ * （docs/管理员建单定价与装盒修复-20260913.md「分货条件变化后，需重新确认」）。
+ */
+function hasStaleAdminPackagingPrice(order: FinalizeOrderRow, group: FinalizeOrderRow['packagingGroups'][number]): boolean {
+  return group.orderId === order.id && group.unitPrice !== undefined && group.subtotal !== undefined &&
+    hasAdminPricingConfirmationMarker(group.pricingSnapshot) && !hasAdminPackagingPrice(order, group);
 }
 
 function persistedQuoteFacts(
@@ -999,10 +1009,12 @@ export async function finalizeExternalOrderQuoteInTx(
         `包装组 ${group.sequence} 报价与工单不一致`,
       );
     }
-    if (hasAdminPackagingPrice(order, group)) {
+    const staleAdminPrice = hasStaleAdminPackagingPrice(order, group);
+    if (staleAdminPrice || hasAdminPackagingPrice(order, group)) {
       knownPackagingAmount = knownPackagingAmount.plus(group.subtotal!.toString());
       adminPriceDelta = adminPriceDelta.plus(group.subtotal!.toString()).minus(pureGroup.knownAmount);
       adminPriceCount += 1;
+      hasManualPackaging ||= staleAdminPrice;
       continue;
     }
     knownPackagingAmount = knownPackagingAmount.plus(pureGroup.knownAmount);

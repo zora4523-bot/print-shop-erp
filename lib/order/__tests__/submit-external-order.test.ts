@@ -13,7 +13,10 @@ import {
   OrderSettlementType,
   OrderStatus,
 } from '../../../generated/prisma/enums';
-import { buildTrustedAdminItemPricingSnapshot } from '../admin-pricing-snapshot';
+import {
+  buildTrustedAdminItemPricingSnapshot,
+  buildTrustedAdminPackagingPricingSnapshot,
+} from '../admin-pricing-snapshot';
 import type { CreateOrderPriceSnapshot } from '../../price/create-order';
 import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '../../price/__tests__/fixtures/create-order-golden-fixtures';
 
@@ -1518,4 +1521,43 @@ it('rejected orders with a previous quote reprice instead of reusing it', async 
   const tx = txFor(order);
   const result = await finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient, order.id, 'sales-1', NOW, token);
   expect(result.reused).toBe(false);
+});
+
+it('管理员议定盒价的前提已变（分货改盒数）时提交不按价目簿改价，沿用已保存单价并转待管理员确认', async () => {
+  mocks.readPublishedSnapshot.mockResolvedValue({
+    ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+    boxing: { redCardEmptyBox: '1.5000', tactileEmptyBox: '1.8000', packingPerBox: '0.5000' },
+  });
+  const base = draftOrder();
+  const agreed = {
+    ...base.packagingGroups[0]!, orderId: 'order-1', name: '触感盒混装', mode: OrderPackagingMode.BOX_TACTILE_MIXED,
+    lines: [{ orderItemId: 'item-1', unitsPerBag: 4 }, { orderItemId: 'item-2', unitsPerBag: 2 }],
+    actualBagCount: 249, unitPrice: '3.0000', subtotal: '747.00', priceOverrideReason: '老客户议价',
+  };
+  const confirmed = buildTrustedAdminPackagingPricingSnapshot({
+    previous: null, now: NOW, actorId: 'owner-1', previousPriceRevision: 0, group: agreed,
+  });
+  // 分货后盒数 249 → 250：沿用原单价重算小计，管理员确认仍停在 249 盒，不再受信任。
+  const order = draftOrder({
+    packagingGroups: [{
+      ...agreed, actualBagCount: 250, subtotal: '750.00',
+      pricingSnapshot: { ...confirmed, pendingReason: '分货改变盒数，请重新确认人工包装单价' },
+    }],
+  });
+  const token = await currentQuoteToken(order);
+  const tx = txFor(order);
+
+  const result = await finalizeExternalOrderQuoteInTx(
+    tx as unknown as Prisma.TransactionClient, 'order-1', 'sales-1', NOW, token,
+  );
+
+  expect(tx.orderPackagingGroup.update).not.toHaveBeenCalled();
+  expect(result).toMatchObject({
+    packagingAmount: '750.00',
+    quotedFeeCompleteness: OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+  });
+  expect(mocks.appendRevision).toHaveBeenCalledWith(
+    tx,
+    expect.objectContaining({ status: 'PENDING_ADMIN_CONFIRMATION' }),
+  );
 });

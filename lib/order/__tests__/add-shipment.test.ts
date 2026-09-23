@@ -2,6 +2,11 @@ import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
 import { addOrderShipmentSchema } from '../add-shipment-schema';
+import {
+  buildTrustedAdminPackagingPricingSnapshot,
+  hasAdminPricingConfirmationMarker,
+  isTrustedAdminPackagingPricingSnapshot,
+} from '../admin-pricing-snapshot';
 vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
@@ -493,6 +498,32 @@ describe('split boxed deliveries', () => {
     expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actualBagCount: 14, subtotal: '32.20' }) }));
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ packagingAmount: '32.20', processingAmount: '85.33', totalAmount: '85.33' }) }));
     expect(mocks.revision).toHaveBeenCalled();
+  });
+  it('管理员议定盒价分货后沿用原单价与原因，保留管理员标记转待重新确认，不当作自动价', async () => {
+    const order = boxes();
+    const group = order.packagingGroups[0]!;
+    const agreed = { ...group, orderId: 'order', priceOverrideReason: '老客户议价' };
+    const snapshot = buildTrustedAdminPackagingPricingSnapshot({
+      previous: { source: 'INTERNAL_CREATE_AUTO' }, now: new Date('2026-09-01T00:00:00.000Z'),
+      actorId: 'admin', previousPriceRevision: 0, group: agreed,
+    });
+    Object.assign(group, { priceOverrideReason: '老客户议价', pricingSnapshot: snapshot });
+    expect(isTrustedAdminPackagingPricingSnapshot(snapshot, agreed)).toBe(true);
+    mocks.find.mockResolvedValue(order); tx.productionOperation.count.mockResolvedValue(0);
+    const split = { ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] };
+    const preview = await addOrderShipment(split, actor, 'preview');
+    await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
+
+    const data = tx.orderPackagingGroup.update.mock.calls[0]![0].data;
+    expect(data).toMatchObject({ actualBagCount: 14, subtotal: '32.20', priceOverrideReason: '老客户议价' });
+    expect(hasAdminPricingConfirmationMarker(data.pricingSnapshot)).toBe(true);
+    expect(isTrustedAdminPackagingPricingSnapshot(data.pricingSnapshot, {
+      ...agreed, actualBagCount: 14, subtotal: '32.20',
+    })).toBe(false);
+    expect(data.pricingSnapshot).toMatchObject({
+      pendingReason: expect.stringContaining('重新确认'),
+      shipmentSplit: { actual: { actualBagCount: 14, unitPrice: '2.3000', subtotal: '32.20' } },
+    });
   });
   it('updates free rework box quantities without reopening price confirmation or erasing free snapshots', async () => {
     const order = boxes();
