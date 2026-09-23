@@ -2,6 +2,7 @@ import { Role, OrderStatus, DesignFileType } from '../generated/prisma/enums';
 import { db } from './db';
 import { readOssConfig } from './oss/config';
 import { createOssClient } from './oss/client';
+import { designFileNameIssue } from './oss/design-file-name';
 import { ALLOWED_EXTENSIONS, FILE_SIZE_LIMITS } from './oss/types';
 import { orderCascadeLockKey } from './order/locks';
 
@@ -163,7 +164,10 @@ export async function recordOrderItemDesign(
     input.fileType,
   );
   const fileName = input.fileName.trim().slice(0, 256);
-  if (!fileName) throw new OrderDesignError('文件名不能为空');
+  // 签发与登记是两次独立调用：登记时必须按同一规则重校文件名，它会原样
+  // 成为 CDR 下载包里的 ZIP 条目名。
+  const fileNameIssue = designFileNameIssue(fileName, input.fileType);
+  if (fileNameIssue) throw new OrderDesignError(fileNameIssue);
 
   // 便宜的预检（拦掉绝大多数非法请求），真正的守卫在 tx 锁内重校。
   await assertCanUploadDesign(input.orderId, input.orderItemId, actor);

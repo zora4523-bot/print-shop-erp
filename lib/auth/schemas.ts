@@ -13,4 +13,5 @@ export * from './schemas/outsource';
 export * from './schemas/salary';
 export * from './schemas/finance';
 export * from './schemas/notification';
+export * from './schemas/design-upload';
 export { YMD_RE, parseStrictYmd, parseStrictShanghaiDateTimeLocal } from './schemas/shared';

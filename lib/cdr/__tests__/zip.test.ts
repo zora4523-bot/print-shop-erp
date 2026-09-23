@@ -214,6 +214,34 @@ describe('uploadBundleZip — real path', () => {
     ]);
   });
 
+  it('条目名只取文件名最后一段并去掉控制/双向字符，历史脏数据也不能穿越出工单目录', async () => {
+    const names = [
+      '..\\..\\Startup\\a.bat',
+      '../../x.cdr',
+      'a\u0001b\u202Eexe.cdr',
+      '..',
+      'noext',
+    ];
+    await uploadBundleZip(
+      {
+        files: names.map((fileName, i) => ({
+          orderNo: 'O-1',
+          fileName,
+          fileUrl: designUrl(`cdr-${i}.cdr`),
+        })),
+        bundleId: 'b1',
+      },
+      { mockMode: false, now, env: configuredEnv },
+    );
+    expect(archiveMock.append.mock.calls.map((c) => c[1])).toEqual([
+      { name: 'O-1/a.bat.cdr' },
+      { name: 'O-1/x.cdr' },
+      { name: 'O-1/abexe.cdr' },
+      { name: 'O-1/design.cdr' },
+      { name: 'O-1/noext.cdr' },
+    ]);
+  });
+
   it('拒绝 design/ 前缀之外的文件 URL，且不发起任何 OSS 调用', async () => {
     await expect(
       uploadBundleZip(

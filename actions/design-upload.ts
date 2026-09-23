@@ -3,6 +3,10 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/permissions';
+import {
+  recordDesignUploadSchema,
+  signDesignUploadSchema,
+} from '@/lib/auth/schemas';
 import { signDesignUpload } from '@/lib/oss/sign';
 import type { SignUploadResult } from '@/lib/oss/types';
 import {
@@ -11,21 +15,11 @@ import {
   recordOrderItemDesign,
   removeOrderItemDesign,
 } from '@/lib/order-design';
-import { DesignFileType } from '../generated/prisma/enums';
 import { invalidFromIssues } from '@/lib/admin/action-helpers';
 
 // Client form submits a small JSON payload; Zod validates shape before
 // we commit server resources. Keep the UI call site thin: POST { orderId,
 // orderItemId, fileType, fileName, fileSize, mimeType } → SignUploadResult.
-const signDesignUploadSchema = z.object({
-  orderId: z.string().trim().min(1).max(64),
-  orderItemId: z.string().trim().min(1).max(64),
-  fileType: z.nativeEnum(DesignFileType),
-  fileName: z.string().trim().min(1).max(256),
-  fileSize: z.number().int().min(1),
-  mimeType: z.string().trim().min(1).max(128),
-});
-
 export async function signDesignUploadAction(raw: unknown): Promise<SignUploadResult> {
   // Open to every role that can create / edit orders + their designs.
   // Per SPEC §2.2 'design:upload' covers SALES / CUSTOMER_SERVICE / ADMIN
@@ -67,22 +61,17 @@ export type DesignMutationResult =
   | { ok: true }
   | { ok: false; message: string };
 
-// fileSize 不收客户端申报值——lib 层以 OSS HEAD 的 Content-Length 为准。
-const recordDesignUploadSchema = z.object({
-  orderId: z.string().trim().min(1).max(64),
-  orderItemId: z.string().trim().min(1).max(64),
-  objectKey: z.string().trim().min(1).max(512),
-  fileType: z.nativeEnum(DesignFileType),
-  fileName: z.string().trim().min(1).max(256),
-});
-
 export async function recordDesignUploadAction(
   raw: unknown,
 ): Promise<DesignMutationResult> {
   const user = await requirePermission('design:upload');
   const parsed = recordDesignUploadSchema.safeParse(raw);
   if (!parsed.success) {
-    return { ok: false, message: '参数校验失败' };
+    // 文件名规则的自定义提示可直接给用户看；其余是形状错误，统一兜底。
+    const fileNameIssue = parsed.error.issues.find(
+      (issue) => issue.code === 'custom' && issue.path[0] === 'fileName',
+    );
+    return { ok: false, message: fileNameIssue?.message ?? '参数校验失败' };
   }
   try {
     await recordOrderItemDesign(parsed.data, { id: user.id, role: user.role });

@@ -2,6 +2,7 @@ import { finished, PassThrough, type Readable } from 'node:stream';
 import { ZipArchive } from 'archiver';
 import { readOssConfig } from '../oss/config';
 import { createOssClient } from '../oss/client';
+import { stripUnsafeFileNameChars } from '../oss/design-file-name';
 import { SETTING_DEFINITIONS } from '../settings/definitions';
 
 // CDR 汇总下载（SPEC §3.5）的"打包到 OSS"步骤。
@@ -85,6 +86,16 @@ function deriveObjectKey(fileUrl: string): string {
     throw new CdrZipError(`设计文件不在 design/ 前缀内：${key}`);
   }
   return key;
+}
+
+// ZIP 条目名的防御性清洗。登记时已按 designFileNameIssue 拒绝路径分隔符、
+// 控制与双向字符及非 .cdr 扩展名；这里再兜住历史数据：只取最后一段、去掉
+// 不可见字符、强制 .cdr 扩展名，条目永远落在 `<工单号>/` 目录内。
+function safeEntryFileName(fileName: string): string {
+  const lastSegment = fileName.split(/[/\\]/).pop() ?? '';
+  const cleaned = stripUnsafeFileNameChars(lastSegment).trim();
+  const named = cleaned === '' || cleaned === '.' || cleaned === '..' ? 'design' : cleaned;
+  return /\.cdr$/i.test(named) ? named : `${named}.cdr`;
 }
 
 // ali-oss 默认 timeout=60s，且 urllib 的响应计时器从建连起算、收到响应才取消：
@@ -250,13 +261,14 @@ async function generateRealZip(
         client.getStream(entry.objectKey, { timeout: DESIGN_GET_TIMEOUT }),
         (late) => (late.stream as Readable | undefined)?.destroy(),
       );
-      const baseName = `${entry.orderNo}/${entry.fileName}`;
+      const fileName = safeEntryFileName(entry.fileName);
+      const baseName = `${entry.orderNo}/${fileName}`;
       const seen = usedNames.get(baseName) ?? 0;
       usedNames.set(baseName, seen + 1);
       const name =
         seen === 0
           ? baseName
-          : `${entry.orderNo}/(${seen + 1}) ${entry.fileName}`;
+          : `${entry.orderNo}/(${seen + 1}) ${fileName}`;
       await upload.append(result.stream as Readable, name);
     }
     await upload.finish();
