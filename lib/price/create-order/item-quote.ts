@@ -20,6 +20,7 @@ import type {
   CreateOrderPriceSnapshot,
   CreateOrderQuoteItemInput,
   CreateOrderQuoteLine,
+  PrintPerOrderPrice,
 } from './types';
 
 function quotedItemLine(args: {
@@ -606,6 +607,22 @@ function printFoilCapabilityManualReasons(
   ];
 }
 
+/**
+ * An explicit film must be covered by the published per-order row: ice-white
+ * rows are published without film only. No film fact keeps the paper's
+ * default finishing, as before.
+ */
+function printPriceCoversFinishing(
+  item: CreateOrderQuoteItemInput,
+  price: PrintPerOrderPrice,
+): boolean {
+  return (
+    item.printFinishing === undefined ||
+    price.laminations === undefined ||
+    (item.printFinishing === 'MATTE' && price.laminations.includes('MATTE'))
+  );
+}
+
 function quotePrintProcessing(
   item: CreateOrderQuoteItemInput,
   snapshot: CreateOrderPriceSnapshot,
@@ -668,6 +685,20 @@ function quotePrintProcessing(
         manualReason(
           'PRINT_PRICE_NOT_FOUND',
           '彩印纸张、规格或数量档没有配置价格',
+        ),
+      ],
+      errors: [],
+    };
+  }
+  if (!printPriceCoversFinishing(item, selected)) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [
+        manualReason(
+          'PRINT_FINISHING_PRICE_NOT_FOUND',
+          '彩印当前纸张的阶梯价不含亚膜，需管理员核价',
         ),
       ],
       errors: [],

@@ -527,6 +527,39 @@ describe('calculateCreateOrderQuote · 彩印 PER_ORDER 黄金用例', () => {
     },
   );
 
+  it('冰白纸彩印阶梯价只含不覆膜，提交亚膜时转人工核价', () => {
+    const iceWhite = {
+      paperType: '冰白纸',
+      paperWeightGsm: 160,
+      specification: '中号封',
+      pricingGroup: 'MID',
+      quantity: 1_000,
+    } as const;
+
+    expect(quoteSingle(printItem(iceWhite)).items[0]).toMatchObject({
+      status: 'QUOTED',
+      amount: '320.00',
+    });
+    const matte = quoteSingle(printItem({ ...iceWhite, printFinishing: 'MATTE' }));
+    expect(matte.items[0]).toMatchObject({
+      status: 'MANUAL_PRICING_REQUIRED',
+      amount: null,
+      knownAmount: '0.00',
+    });
+    expect(matte.manualReasons.map((reason) => reason.code)).toEqual([
+      'PRINT_FINISHING_PRICE_NOT_FOUND',
+    ]);
+  });
+
+  it.each([
+    ['默认亚膜', undefined],
+    ['明确亚膜', 'MATTE'],
+  ] as const)('铜版纸彩印阶梯价含亚膜，%s按原价自动报价', (_label, printFinishing) => {
+    expect(
+      quoteSingle(printItem({ printFinishing })).items[0],
+    ).toMatchObject({ status: 'QUOTED', amount: '310.00' });
+  });
+
 });
 
 describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () => {

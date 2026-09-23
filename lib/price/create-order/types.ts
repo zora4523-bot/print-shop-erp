@@ -3,7 +3,10 @@ import type {
   ExternalOrderLogisticsPolicy,
   ExternalOrderProductStructure,
 } from '../external-order-charges';
-import type { OrderPackagingMode } from '@/generated/prisma/enums';
+import type {
+  OrderLamination,
+  OrderPackagingMode,
+} from '@/generated/prisma/enums';
 
 export type CreateOrderCraft = 'PARTIAL' | 'FULL' | 'PRINT';
 
@@ -103,6 +106,10 @@ export type CreateOrderQuoteItemInput = {
   configuration: CreateOrderConfigurationFacts;
   specialEffect?: CreateOrderSpecialEffect;
   printFoilMode?: CreateOrderPrintFoilMode;
+  /**
+   * Explicit film only. Absent means no film fact (lamination NONE), which the
+   * engine keeps quoting as the paper's default finishing.
+   */
   printFinishing?: 'MATTE' | 'TACTILE' | 'GLOSS' | 'LASER';
 };
 
@@ -171,6 +178,11 @@ export type PrintPerOrderPrice = {
   tierQuantity: number;
   /** A configured blank is intentional and must trigger manual pricing. */
   amount: string | null;
+  /**
+   * Published lamination facts this total covers. Absent only when the
+   * published row carries no lamination condition.
+   */
+  laminations?: readonly OrderLamination[];
 };
 
 export type PrintFoilPerOrderPrice = {

@@ -861,6 +861,10 @@ function projectPrint(
         label: '\u5f69\u5370\u9636\u68af\u603b\u4ef7',
         nullable: true,
       }),
+      // The published lamination matcher is part of the price identity.
+      ...(condition.laminations
+        ? { laminations: [...condition.laminations].sort(compareText) }
+        : {}),
     };
   });
 

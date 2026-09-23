@@ -371,6 +371,7 @@ export const CREATE_ORDER_GOLDEN_SNAPSHOT = {
         specification: '大号封',
         tierQuantity,
         amount,
+        laminations: ['MATTE' as const],
       })),
       {
         paperType: '冰白纸',
@@ -378,6 +379,7 @@ export const CREATE_ORDER_GOLDEN_SNAPSHOT = {
         specification: '中号封',
         tierQuantity: 1_000,
         amount: '320.00',
+        laminations: ['NONE' as const],
       },
       {
         paperType: '冰白纸',
@@ -385,6 +387,7 @@ export const CREATE_ORDER_GOLDEN_SNAPSHOT = {
         specification: '中号封',
         tierQuantity: 2_000,
         amount: null,
+        laminations: ['NONE' as const],
       },
     ],
     foilPricingPolicy: 'ATOMIC_BUNDLE_INCLUDES_PLATE',
