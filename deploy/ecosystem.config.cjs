@@ -44,6 +44,13 @@ const common = {
       '/usr/local/share/ca-certificates/pigsty-print-shop.crt',
     PUPPETEER_EXECUTABLE_PATH:
       process.env.PUPPETEER_EXECUTABLE_PATH ?? '/usr/bin/chromium',
+    // startOrReload 用本文件的 env 启动/重载应用，不会带上调用 shell 的变量。
+    // deploy/update.sh 导出的发布 SHA 必须经这里交给 Web 与两个 worker，jobs
+    // 门禁才能区分本次启动的 worker 和被 SIGKILL 的旧进程残留心跳。shell 没有
+    // 值时不写这个键，继续由 .env 提供。
+    ...(process.env.APP_VERSION?.trim()
+      ? { APP_VERSION: process.env.APP_VERSION.trim() }
+      : {}),
   },
 };
 

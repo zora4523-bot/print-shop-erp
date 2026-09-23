@@ -106,8 +106,9 @@ if [ "$PREV_COMMIT" = "$NEW_COMMIT" ]; then
   echo "==> 代码无更新（仍是 $PREV_COMMIT）。如只想重启：pm2 startOrReload deploy/ecosystem.config.cjs --update-env"
 fi
 
-# 发布版本钉成本次 commit，经 startOrReload --update-env 交给 Web 与两个
-# worker（进程环境优先于 .env）。jobs 门禁只认与 Web 同版本的 worker 心跳：
+# 发布版本钉成本次 commit，由 deploy/ecosystem.config.cjs 的 env 读取并经
+# startOrReload 交给 Web 与两个 worker（进程环境优先于 .env；ecosystem 重载
+# 不会自动带上 shell 变量）。jobs 门禁只认与 Web 同版本的 worker 心跳：
 # 旧 worker 被 SIGKILL 留下的新鲜心跳行版本不同，新 worker 启动即崩溃时
 # 门禁报 version-mismatch 拦住发布，而不是被旧行放行。
 APP_VERSION="$(git rev-parse HEAD)"
