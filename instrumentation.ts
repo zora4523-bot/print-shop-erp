@@ -17,105 +17,9 @@ export async function register() {
   const Sentry = await import('@sentry/nextjs');
   const release = process.env.APP_VERSION || 'dev';
 
-  // Defense-in-depth header / body / URL-query scrubber. Sentry's
-  // captureRequestError + the default RequestData integration would
-  // otherwise forward `event.request.headers` (Authorization, Cookie,
-  // any custom API keys) and `event.request.data` (Server Action
-  // FormData with 薪资金额 / customer refs) to the Sentry server.
-  // `sendDefaultPii: false` only gates IP collection (Codex round 65).
-  //
-  // Three sweep points — each was a separate Codex finding:
-  //   - event.request          → minimize to { url=path, method }       (round 65 P1)
-  //   - event.spans[*].data    → drop full URLs from sampled spans      (round 67 P2)
-  //   - contexts.nextjs.req_path → strip query string                   (round 67 P2)
-  // Applied to BOTH beforeSend (exceptions) and beforeSendTransaction
-  // (sampled traces, since tracesSampleRate=0.2; round 66 P1).
-  function stripQuery(s: string | undefined): string | undefined {
-    if (!s) return s;
-    try {
-      // Parse with dummy base so relative / absolute both work; we keep
-      // only .pathname so query / hash / host all drop.
-      return new URL(s, 'http://scrubbed.local').pathname;
-    } catch {
-      // Unparseable — drop rather than forward something unexpected.
-      return undefined;
-    }
-  }
-
-  // Whitelist of span-data keys that don't carry URL / query / header
-  // info and are useful for debugging. Anything else (http.url,
-  // http.target, http.query, db.statement, etc.) is dropped.
-  // Includes BOTH legacy (http.method) and current OTel semantic-
-  // conventions (http.request.method) keys — the @sentry/nextjs SDK
-  // emits the new form on Node runtimes; allowing only the legacy
-  // dropped method entirely (Codex round 68 / P2).
-  const SAFE_SPAN_DATA_KEYS = new Set([
-    'http.method',
-    'http.request.method',
-    'http.response.status_code',
-    'http.status_code',
-    'op',
-    'origin',
-  ]);
-
-  function scrubEvent<T>(event: T): T {
-    // Sentry's ErrorEvent / TransactionEvent share these fields; we
-    // mutate via a permissive view so one helper covers both.
-    const e = event as unknown as {
-      request?: { url?: string; method?: string };
-      spans?: Array<{
-        description?: string;
-        data?: Record<string, unknown>;
-      }>;
-      contexts?: {
-        nextjs?: { request_path?: unknown };
-        [k: string]: unknown;
-      };
-    };
-
-    if (e.request) {
-      e.request = {
-        url: stripQuery(e.request.url),
-        method: e.request.method,
-      };
-    }
-
-    if (Array.isArray(e.spans)) {
-      for (const span of e.spans) {
-        const isHttpSpan =
-          typeof (span as { op?: unknown }).op === 'string' &&
-          ((span as { op: string }).op.startsWith('http.') ||
-            (span as { op: string }).op === 'http');
-        // ONLY HTTP-flavored span descriptions look like `<METHOD>
-        // <URL>` and need the query stripped. Prisma / db spans use
-        // raw SQL as description — and SQL legitimately contains `?`
-        // (JSONB operators, prepared-statement placeholders); cutting
-        // those would corrupt the span name (Codex round 68 / P3).
-        if (isHttpSpan && typeof span.description === 'string') {
-          const q = span.description.indexOf('?');
-          if (q >= 0) span.description = span.description.slice(0, q);
-        }
-        if (span.data && typeof span.data === 'object') {
-          const safe: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(span.data)) {
-            if (SAFE_SPAN_DATA_KEYS.has(k)) safe[k] = v;
-          }
-          span.data = safe;
-        }
-      }
-    }
-
-    if (
-      e.contexts?.nextjs &&
-      typeof e.contexts.nextjs.request_path === 'string'
-    ) {
-      e.contexts.nextjs.request_path = stripQuery(
-        e.contexts.nextjs.request_path,
-      );
-    }
-
-    return event;
-  }
+  // Header / body / URL-query / CDR-token scrubber — see
+  // lib/observability/sentry-scrub.ts for the sweep points and history.
+  const { scrubSentryEvent } = await import('./lib/observability/sentry-scrub');
 
   const baseInit = {
     dsn: process.env.SENTRY_DSN,
@@ -127,8 +31,8 @@ export async function register() {
     // customer refs may end up in messages — keep send-default-pii
     // off and let specific call sites attach context explicitly.
     sendDefaultPii: false,
-    beforeSend: scrubEvent,
-    beforeSendTransaction: scrubEvent,
+    beforeSend: scrubSentryEvent,
+    beforeSendTransaction: scrubSentryEvent,
   };
 
   if (process.env.NEXT_RUNTIME === 'nodejs') {
