@@ -139,7 +139,7 @@ export function applySpecPackagingType(
   return changeCreatePackagingMode(groups, itemCount, itemIndex, packagingModeFor(type, false, box));
 }
 
-export type CreatePackagingRow = {
+type CreatePackagingRow = {
   groupIndex: number;
   mode: OrderPackagingMode;
   unitsPerBag: number;

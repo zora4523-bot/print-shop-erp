@@ -16,7 +16,7 @@ import {
 } from '@/lib/order/packaging-mode';
 import { FieldError, Group, PillPicker } from './OrderFieldPrimitives';
 
-export type OrderPackagingRowView = {
+type OrderPackagingRowView = {
   /** 例：设计款 1 · 大号封 */
   label: string;
   quantity: number;

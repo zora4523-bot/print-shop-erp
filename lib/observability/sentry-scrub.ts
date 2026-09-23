@@ -18,7 +18,7 @@
 // contexts.trace.data（url.path / http.target …）、breadcrumb 等处，逐个
 // 字段追不全，所以对整个事件的字符串做一次遍历遮蔽。
 const CDR_BUNDLE_TOKEN_PATH = /(\/api\/cdr\/bundles\/)[^/?#\s"']+/g;
-export const CDR_BUNDLE_TOKEN_PLACEHOLDER = '[token]';
+const CDR_BUNDLE_TOKEN_PLACEHOLDER = '[token]';
 
 export function redactCdrBundleToken(value: string): string {
   return value.replace(CDR_BUNDLE_TOKEN_PATH, `$1${CDR_BUNDLE_TOKEN_PLACEHOLDER}`);
@@ -42,7 +42,7 @@ function redactStringsDeep(value: unknown, seen: WeakSet<object>): unknown {
   return value;
 }
 
-export function stripQuery(s: string | undefined): string | undefined {
+function stripQuery(s: string | undefined): string | undefined {
   if (!s) return s;
   try {
     // Parse with dummy base so relative / absolute both work; we keep
