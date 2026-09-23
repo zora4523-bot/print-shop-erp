@@ -73,11 +73,15 @@ function transactionMock(
       create: vi.fn().mockImplementation(async () => ({
         id: `operation-${++operationCounter}`,
       })),
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     productionProgressStep: {
       create: vi.fn().mockImplementation(async () => ({
         id: `progress-${++progressCounter}`,
       })),
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     craft: { findMany: vi.fn().mockResolvedValue(crafts) },
     orderLog: { create: vi.fn().mockResolvedValue({ id: 'log-1' }) },
@@ -167,6 +171,41 @@ describe('activateProductionOperationsInTx', () => {
         requiresOutsource: false,
       },
     });
+  });
+
+  // 审计 M-7：旧代次未结束的工序再也不能报工，升版事务必须终止它们并把分档报工转人工核定。
+  it('terminates the superseded generation in the same rematerialization transaction', async () => {
+    const tx = transactionMock(orderFixture({ status: OrderStatus.RELEASED, workOrderVersion: 2 }));
+    tx.productionOperation.findMany.mockResolvedValue([
+      { id: 'old-foil', operationType: 'FULL', reports: [{ unit: 'PER_PIECE', priceBook: { rules: [{ operationType: 'FULL', unit: 'PER_PIECE', smallOrderAmount: '20.0000' }] } }] },
+    ]);
+    tx.productionProgressStep.findMany.mockResolvedValue([{ id: 'old-step' }]);
+    await activateProductionOperationsInTx(tx as never, 'order-1', { id: 'admin-1' }, AT,
+      { targetStatus: OrderStatus.RELEASED, allowVersionRematerialization: true });
+    const unfinished = { in: [ProductionOperationStatus.PENDING, ProductionOperationStatus.IN_PROGRESS] };
+    expect(tx.productionOperation.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { orderId: 'order-1', workOrderVersion: { lt: 2 }, status: unfinished },
+    }));
+    expect(tx.productionOperation.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['old-foil'] } }, data: { payrollReviewRequired: true } });
+    expect(tx.productionOperation.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['old-foil'] }, status: unfinished }, data: { status: ProductionOperationStatus.CANCELLED },
+    });
+    expect(tx.productionProgressStep.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['old-step'] }, status: unfinished }, data: { status: ProductionOperationStatus.CANCELLED },
+    });
+    expect(tx.orderLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      changedFields: expect.objectContaining({ supersededProduction: {
+        operationIds: ['old-foil'], payrollReviewOperationIds: ['old-foil'], progressStepIds: ['old-step'],
+      } }),
+    }) }));
+  });
+
+  it('never touches older rows on a first materialization', async () => {
+    const tx = transactionMock();
+    await activateProductionOperationsInTx(tx as never, 'order-1', { id: 'sales-1' }, AT, { targetStatus: OrderStatus.SCHEDULING });
+    expect(tx.productionOperation.findMany).not.toHaveBeenCalled();
+    expect(tx.productionOperation.updateMany).not.toHaveBeenCalled();
+    expect(tx.productionProgressStep.updateMany).not.toHaveBeenCalled();
   });
 
   it('restarts the release clock when materializing a new work-order version', async () => {
