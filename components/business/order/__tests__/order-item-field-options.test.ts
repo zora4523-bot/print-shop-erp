@@ -106,7 +106,7 @@ it('preserves color-print paper filtering by current specification', () => {
   });
 });
 
-it('orders paper buttons by the owner display order without changing the default paper', () => {
+it('orders paper buttons and the default paper by the owner display order', () => {
   const stock = (id: string, paperType: string) => ({
     id, code: `EXT-STOCK-${id}`, category: ProductCategory.BLANK_STOCK, specification: '大号封90×165', paperType,
   });
@@ -122,7 +122,27 @@ it('orders paper buttons by the owner display order without changing the default
   };
   expect(orderItemFieldOptions(item, catalog).externalPaperOptions.map((option) => option.label))
     .toEqual(['艳红珠光纸', '触感纸', '红卡纸', '杂色珠光纸', '铜版纸', '莱尼纹']);
-  // Button order is display-only: a reset still takes the catalog's first paper.
+  // The default is the first selectable paper in the owner order, not the catalog's
+  // first row, so adding papers (铜版纸 is listed first here) cannot change it.
   expect(normalizeExternalOrderItem({ item, crafts: [], products: catalog, resetPaper: true }).paperType)
+    .toBe('160g珠光艳闪');
+  expect(createExternalOrderItem([], catalog, []).paperType).toBe('160g珠光艳闪');
+  // An explicitly chosen paper is kept even though it ranks later.
+  expect(normalizeExternalOrderItem({ item: { ...item, paperType: '160g铜版纸' }, crafts: [], products: catalog }).paperType)
     .toBe('160g铜版纸');
+});
+
+it('falls back to the next paper in owner order when the first is unavailable for the size', () => {
+  const stock = (id: string, paperType: string, specification: string) => ({
+    id, code: `EXT-STOCK-${id}`, category: ProductCategory.BLANK_STOCK, specification, paperType,
+  });
+  const catalog = [
+    stock('touch', '200g触感纸', '大号封90×165'),
+    stock('pearl-mini', '160g珠光艳闪', '迷你封50×80'),
+    stock('variegated', '160g杂色珠光纸', '大号封90×165'),
+  ];
+  const item = { ...createExternalOrderItem([], catalog, []), specification: '大号封90×165' };
+  // 艳红珠光纸 has no 大号封 here, so the next listed paper with that size wins: 触感纸 before 杂色珠光纸.
+  expect(normalizeExternalOrderItem({ item, crafts: [], products: catalog, resetPaper: true }).paperType)
+    .toBe('200g触感纸');
 });

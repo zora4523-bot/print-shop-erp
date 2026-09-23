@@ -28,6 +28,7 @@ import {
   type ExternalOrderPaperKey,
   type ExternalOrderCatalogProduct,
 } from '@/lib/order/order-item-catalog';
+import { paperDisplayRank } from '@/lib/rules/paper-label';
 
 export function createBlankItem(
   crafts: readonly PricingCraftIdentity[],
@@ -104,11 +105,13 @@ export function normalizeExternalOrderItem(args: {
   preserveCustomSize?: boolean;
 }): CreateOrderInput['items'][number] {
   const route = args.item.pricingRoute;
-  const routePapers = externalOrderPapersForRoute(
+  // Fallback picks follow the owner's paper order (DECISIONS 2026-09-23), so adding
+  // papers to the catalog cannot silently change the default. Stable sort.
+  const routePapers = [...externalOrderPapersForRoute(
     args.products,
     route,
     args.paperMaterials,
-  );
+  )].sort((left, right) => paperDisplayRank(left.label) - paperDisplayRank(right.label));
   const specifications = externalOrderSpecificationsForRoute(
     args.products,
     route,
