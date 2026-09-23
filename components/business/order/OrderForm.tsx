@@ -1,6 +1,10 @@
 'use client';
 
-import { changeCreatePackagingMode, createPackagingGroupIndex, appendCreatePackagingGroup } from '@/lib/order/create-packaging-selection';
+import {
+  appendCreatePackagingGroup, applyOrderPackagingMixing, applyOrderPackagingType, applySpecPackagingType,
+  createPackagingGroupIndex, createPackagingRows, orderPackagingSelection, summarizeCreatePackaging,
+} from '@/lib/order/create-packaging-selection';
+import type { OrderPackagingView } from './order-form-b/OrderPackagingSection';
 import { parsePastedReceiverAddress, pastedTextareaValue } from '@/lib/order/receiver-address-paste';
 import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
 // Tests and older callers import the parser from here.
@@ -18,6 +22,8 @@ import {
   packagingBoxType,
   packagingUnit,
   packagingShipmentQuantities,
+  type PackagingBoxType,
+  type PackagingType,
 } from '@/lib/order/packaging-mode';
 import { AdminCreatePriceFields } from './AdminCreatePriceFields';
 import { adminCreatePriceFactsKey, calculateAdminCreatePrice, sumCreateKnownAmounts, adminPackagingPriceFactsKey, calculateAdminPackagingPrice } from '@/lib/order/admin-create-price';
@@ -1761,15 +1767,25 @@ export function OrderForm({
     value: 'NONE' | 'PARTIAL' | 'FULL',
   ) => changeItemSelection(index, { type: 'printFoil', value });
 
-  function changeExternalPackagingMode(mode: OrderPackagingMode) {
-    const items = getValues('items');
-    const groups = getValues('packagingGroups');
-    const next = changeCreatePackagingMode(groups, items.length, expandedItem, mode);
-    items.forEach((_, index) => {
+  function commitPackagingGroups(next: CreateOrderInput['packagingGroups']) {
+    getValues('items').forEach((_, index) => {
       const group = next[createPackagingGroupIndex(next, index)];
       setValue(`items.${index}.pack`, group?.mode === OrderPackagingMode.UNPACKED ? null : group?.itemUnitsPerBag[index] ?? null, { shouldDirty: true });
     });
     setValue('packagingGroups', next, { shouldDirty: true, shouldValidate: true });
+  }
+
+  /** 整单包装区：itemIndex 缺省时统一作用于全部规格（DECISIONS 2026-09-23）。 */
+  function changePackagingType(type: PackagingType, box: PackagingBoxType, itemIndex?: number) {
+    const groups = getValues('packagingGroups');
+    const itemCount = getValues('items').length;
+    commitPackagingGroups(itemIndex === undefined
+      ? applyOrderPackagingType(groups, itemCount, type, box)
+      : applySpecPackagingType(groups, itemCount, itemIndex, type, box));
+  }
+
+  function changePackagingMixing(mixed: boolean) {
+    commitPackagingGroups(applyOrderPackagingMixing(getValues('packagingGroups'), getValues('items').length, mixed));
   }
 
   function changeExternalUnitsPerBag(index: number, unitsPerBag: number) {
@@ -2709,16 +2725,29 @@ export function OrderForm({
     products,
     externalCreateOrderOptions,
   );
-  const activePackagingGroupIndex = createPackagingGroupIndex(watchedPackagingGroups, expandedItem);
-  const activePackagingGroup = watchedPackagingGroups[activePackagingGroupIndex];
-  const activePackagingBagCount = activePackagingGroup
-    ? calculateCreateOrderBagCount({
-        mode: activePackagingGroup.mode,
-        itemQuantities: watchedItems.map((item) => item.quantity),
-        itemUnitsPerBag: activePackagingGroup.itemUnitsPerBag,
-        shipmentQuantities: packagingShipments,
-      })
-    : null;
+  const packagingRows = createPackagingRows({
+    groups: watchedPackagingGroups,
+    itemQuantities: watchedItems.map((item) => item.quantity),
+    shipmentQuantities: packagingShipments,
+  });
+  const packagingRowLabel = (index: number) =>
+    `设计款 ${designGroups.findIndex((group) => group.indexes.includes(index)) + 1} · ${watchedItems[index]?.specification || '待选规格'}`;
+  const packagingView: OrderPackagingView = {
+    rows: packagingRows.map((row, index) => ({
+      label: packagingRowLabel(index),
+      quantity: watchedItems[index]?.quantity ?? 0,
+      mode: row.mode,
+      unitsPerBag: row.unitsPerBag,
+      bagCount: row.bagCount,
+      error: row.error,
+    })),
+    selection: orderPackagingSelection(watchedPackagingGroups, watchedItems.length),
+    summary: summarizeCreatePackaging({
+      rows: packagingRows,
+      itemQuantities: watchedItems.map((item) => item.quantity),
+      designCount: designGroups.length,
+    }),
+  };
   const externalLocalIssues = submissionValidationVisible
     ? usesExternalSalesPricing
       ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), selectedDesignQueues)
@@ -2829,10 +2858,6 @@ export function OrderForm({
       !getValues('receiverAddress')?.trim()
         ? '收货地址必填'
         : undefined),
-    packaging:
-      activePackagingBagCount && !activePackagingBagCount.complete
-        ? activePackagingBagCount.errors.join('；')
-        : undefined,
     items: externalItemErrors,
   };
   if (samplePurpose && externalCreateOrderOptions) {
@@ -3185,10 +3210,11 @@ export function OrderForm({
             </> : undefined}
             packagingExtras={canAssignExternalSales ?
               <div className="space-y-3">
-                {watchedPackagingGroups.map((group, index) => index === activePackagingGroupIndex && group.mode !== OrderPackagingMode.UNPACKED ? (
+                {watchedPackagingGroups.map((group, index) => group.mode !== OrderPackagingMode.UNPACKED ? (
                   <AdminCreatePriceFields key={index} amountId={`packagingGroups.${index}.adminPrice.amount`} value={group.adminPrice} factsKey={adminPackagingFacts(group)} disabled={orderFormControlsDisabled}
                     divided={false}
                     title={`包装组 ${index + 1} 单价`} priceLabel={`包装单价（元 / ${packagingUnit(group.mode)}）`}
+                    scope={packagingRows.flatMap((row, item) => row.groupIndex === index ? [packagingRowLabel(item)] : []).join('、')}
                     note={packagingBoxType(group.mode) ? '包含盒子和装盒费用。' : ''}
                     suggestedAmount={currentPackagingResult?.groups[index]?.suggestedUnitPrice}
                     error={adminPackagingPrices[index]?.error}
@@ -3427,24 +3453,7 @@ export function OrderForm({
             itemFields={itemsArray.fields}
             activeIndex={expandedItem}
             pendingDesigns={selectedDesignQueues}
-            packaging={{
-              scopeLabel: activePackagingGroup && isMixedPackaging(activePackagingGroup.mode)
-                ? `当前混装：${activePackagingGroup.itemUnitsPerBag.flatMap((units, index) => units > 0 ? [`设计款 ${designGroups.findIndex((group) => group.indexes.includes(index)) + 1} · ${watchedItems[index]?.specification || '待选规格'}`] : []).join('、')}`
-                : undefined,
-              mode:
-                activePackagingGroup?.mode ??
-                OrderPackagingMode.SINGLE_STYLE,
-              unitsPerBag:
-                activePackagingGroup?.itemUnitsPerBag[expandedItem] ?? 0,
-              bagCount:
-                activePackagingBagCount?.complete === true
-                  ? activePackagingBagCount.bagCount
-                  : null,
-              error:
-                activePackagingBagCount && !activePackagingBagCount.complete
-                  ? activePackagingBagCount.errors.join('；')
-                  : null,
-            }}
+            packaging={packagingView}
             paperOptions={externalPaperOptions}
             paperKey={activeExternalPaper?.key ?? null}
             weightOptions={externalWeightOptions}
@@ -3584,10 +3593,9 @@ export function OrderForm({
                 shouldValidate: true,
               });
             }}
-            onPackagingModeChange={changeExternalPackagingMode}
-            onUnitsPerBagChange={(units) =>
-              changeExternalUnitsPerBag(expandedItem, units)
-            }
+            onPackagingTypeChange={changePackagingType}
+            onPackagingMixingChange={changePackagingMixing}
+            onUnitsPerBagChange={changeExternalUnitsPerBag}
             onPendingDesignsChange={(images) => {
               const field = itemsArray.fields[expandedItem];
               if (field) updatePendingDesigns(field.id, images);

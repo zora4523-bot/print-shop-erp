@@ -116,9 +116,15 @@ function render(
       activeIndex={options.activeIndex ?? 0}
       pendingDesigns={options.pendingDesigns ?? {}}
       packaging={{
-        mode: OrderPackagingMode.SINGLE_STYLE,
-        unitsPerBag: 10,
-        bagCount: 200,
+        rows: items.map((entry, index) => ({
+          label: `设计款 ${index + 1} · ${entry.specification ?? '待选规格'}`,
+          quantity: entry.quantity,
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          unitsPerBag: 10,
+          bagCount: Math.ceil(entry.quantity / 10),
+        })),
+        selection: { type: 'BAG', box: null, mixing: 'SINGLE_STYLE' },
+        summary: `合计 ${items.length * 2000} 个`,
       }}
       paperOptions={[
         { value: 'touch', label: '触感纸', texture: 'matte-red' },
@@ -151,7 +157,8 @@ function render(
       onPrintFoilModeChange={vi.fn()}
       onLaminationChange={vi.fn()}
       onQuantityChange={vi.fn()}
-      onPackagingModeChange={vi.fn()}
+      onPackagingTypeChange={vi.fn()}
+      onPackagingMixingChange={vi.fn()}
       onUnitsPerBagChange={vi.fn()}
       onPendingDesignsChange={vi.fn()}
       onReceiverAddressChange={vi.fn()}
@@ -236,8 +243,9 @@ describe('OrderFormB', () => {
       '工单',
       '工艺 · 第 1 款',
       '材料',
-      '数量与包装',
+      '数量',
       '设计图与设计文件',
+      '包装',
       '收货',
     ]) {
       expect(html).toContain(`aria-label="${heading}"`);

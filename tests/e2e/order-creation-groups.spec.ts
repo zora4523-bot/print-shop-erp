@@ -15,10 +15,12 @@ for (const role of ['owner', 'sales'] as const) {
     await expect(specificationSection.locator('input[type="file"]')).toHaveCount(0);
     const fileBox = await files.getByRole('button', { name: '拖放或选择第 1 款 CDR 文件', exact: true }).boundingBox();
     expect(fileBox?.height).toBeGreaterThanOrEqual(128);
+    // 包装是整单区域，在设计款卡片之外（DECISIONS 2026-09-23）。
+    const packaging = page.locator('[data-slot="order-packaging-section"]').getByRole('region', { name: '包装', exact: true });
+    await expect(page.locator('[data-slot="order-design-section"]').getByRole('region', { name: '包装', exact: true })).toHaveCount(0);
     if (role === 'owner') {
-      const pricing = page.getByRole('region', { name: '收费与其他要求', exact: true });
-      await expect(pricing.getByRole('group', { name: '包装组 1 单价', exact: true })).toBeVisible();
-      await expect(specificationSection.getByRole('group', { name: '包装组 1 单价', exact: true })).toHaveCount(0);
+      await expect(packaging.getByRole('group', { name: '包装组 1 单价', exact: true })).toBeVisible();
+      await expect(page.locator('[data-slot="order-design-section"]').getByRole('group', { name: '包装组 1 单价', exact: true })).toHaveCount(0);
     } else {
       await expect(page.getByRole('region', { name: '收费与其他要求', exact: true })).toHaveCount(0);
     }
@@ -43,15 +45,19 @@ for (const role of ['owner', 'sales'] as const) {
     await expect(specPanel.getByRole('spinbutton', { name: '数量', exact: true })).toHaveValue('100');
     await expect(specPanel.getByText('shared-design.cdr', { exact: false })).toHaveCount(0);
     await expect(designPanel.getByText('shared-design.cdr', { exact: false })).toBeVisible();
-    // Packaging on one spec must not reset the first spec.
-    await specPanel.getByRole('button', { name: '不包装', exact: true }).click();
+    // One packaging row per specification; changing one row must not reset the other.
+    await expect(specPanel.getByRole('button', { name: '不包装', exact: true })).toHaveCount(0);
+    const rowTypes = packaging.getByRole('combobox', { name: '包装类型', exact: true });
+    await expect(rowTypes).toHaveCount(2);
+    await rowTypes.nth(1).selectOption('UNPACKED');
+    await expect(rowTypes.nth(0)).toHaveValue('BAG');
+    await expect(packaging.getByRole('group', { name: '包装类型', exact: true }).getByRole('button', { name: '入袋', exact: true })).toHaveAttribute('aria-pressed', 'false');
     await specs.getByRole('tab').first().click();
-    await expect(specPanel.getByRole('button', { name: '入袋', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(specPanel.getByRole('spinbutton', { name: '数量', exact: true })).toHaveValue('1000');
     await specs.getByRole('tab').first().press('ArrowRight');
     await expect(specs.getByRole('tab').nth(1)).toBeFocused();
     await expect(specs.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
-    await expect(specPanel.getByRole('button', { name: '不包装', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(rowTypes.nth(1)).toHaveValue('UNPACKED');
     await expect(specPanel.getByRole('spinbutton', { name: '数量', exact: true })).toHaveValue('100');
     await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
     await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
@@ -104,7 +110,8 @@ test('批量逐张保存，规格分组持久化，刷新后不会重新创建',
   await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
   await page.getByRole('group', { name: '规格', exact: true }).getByRole('button', { name: '西封大号', exact: true }).click();
   await page.getByRole('spinbutton', { name: '数量', exact: true }).fill('100');
-  await page.getByRole('button', { name: '不包装', exact: true }).click();
+  // 只给第二个规格不包装：整单区里改该行，顶部类型会作用于全部规格。
+  await page.getByRole('combobox', { name: '包装类型', exact: true }).nth(1).selectOption('UNPACKED');
   await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(names[1]);
   await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('李四 13800138001 广东省佛山市测试路二号');

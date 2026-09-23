@@ -186,17 +186,11 @@ test.describe("admin order entry", () => {
     await expect(
       page.getByText("每包数量不能超过 12 个，请调整包装数量").first(),
     ).toBeVisible();
-    await page
-      .getByRole("spinbutton", { name: "每包数量", exact: true })
-      .fill("6");
-    await page
-      .getByRole("tablist", { name: "设计款", exact: true })
-      .getByRole("tab")
-      .first()
-      .click();
-    await page
-      .getByRole("spinbutton", { name: "每包数量", exact: true })
-      .fill("6");
+    // 混装组的每个规格在整单包装区各占一行。
+    const packs = page.getByRole("spinbutton", { name: "每包数量", exact: true });
+    await expect(packs).toHaveCount(2);
+    await packs.nth(0).fill("6");
+    await packs.nth(1).fill("6");
     await expect(
       page.getByText("每包数量不能超过 12 个，请调整包装数量"),
     ).toHaveCount(0);

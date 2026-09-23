@@ -20,6 +20,7 @@ export function AdminCreatePriceFields({
   title = '款式加工费',
   priceLabel = '本款加工费（元）',
   note = '包装费、版费和运费另列。',
+  scope,
   divided = true,
 }: {
   value: Price | undefined;
@@ -32,6 +33,8 @@ export function AdminCreatePriceFields({
   title?: string;
   priceLabel?: string;
   note?: string;
+  /** 始终显示在标题下，说明这笔价格覆盖哪些明细（如包装组的规格）。 */
+  scope?: string;
   divided?: boolean;
 }) {
   const id = useId();
@@ -39,6 +42,7 @@ export function AdminCreatePriceFields({
   return (
     <fieldset disabled={disabled} className={divided ? 'space-y-3 border-t pt-4' : 'space-y-3'}>
       <legend className="text-sm font-semibold">{title}</legend>
+      {scope ? <p className="text-xs text-muted-foreground">{scope}</p> : null}
       <div className="flex flex-wrap items-center gap-3">
         <Button
           className="min-h-11"
