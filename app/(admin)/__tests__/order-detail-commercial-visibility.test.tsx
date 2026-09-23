@@ -151,6 +151,10 @@ vi.mock('@/components/business/production/TaskDisputeAdminPanel', () => ({
 vi.mock('@/components/business/order/ReworkOrderForm', () => ({
   ReworkOrderForm: () => null,
 }));
+// 该表单经 server action 引入 lib/db；不 mock 时本文件在无 DATABASE_URL 的单测环境无法加载。
+vi.mock('@/components/business/production/PayrollPassForm', () => ({
+  PayrollPassForm: () => null,
+}));
 vi.mock('@/components/business/order/OrderChangeRequestForm', () => ({
   OrderChangeRequestForm: () => null,
 }));
@@ -951,6 +955,24 @@ describe('order detail — 暂不能完工横幅', () => {
     );
 
     expect(html).not.toContain('暂不能完工');
+  });
+});
+
+describe('order detail — 售后重做入口', () => {
+  it.each([OrderStatus.SHIPPED, OrderStatus.SETTLED])('ADMIN 可在 %s 原单上发起重做', async (status) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({ ...orderFixture(), status });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(reworkCraftOptionsMock).toHaveBeenCalledTimes(1);
+    expect(html).toContain('发起重做工单');
+  });
+
+  it('未发货的原单不显示重做入口', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({ ...orderFixture(), status: OrderStatus.PACKING });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(reworkCraftOptionsMock).not.toHaveBeenCalled();
+    expect(html).not.toContain('发起重做工单');
   });
 });
 

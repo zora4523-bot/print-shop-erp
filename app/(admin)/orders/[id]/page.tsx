@@ -46,6 +46,7 @@ import { getOrderDetail } from '@/lib/order';
 import { getOrderTitleRef } from '@/lib/page-title/refs';
 import { orderDetailTitle } from '@/lib/page-title/titles';
 import { canAttachOutsource } from '@/lib/order/status-machine';
+import { canCreateReworkFromStatus } from '@/lib/order/rework-eligibility';
 import {
   canEditOrderSfCollect,
   canRequestOrderModification,
@@ -196,8 +197,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   const canCreateRework =
     user.role === Role.ADMIN &&
     order.kind !== OrderKind.REWORK &&
-    (order.status === OrderStatus.SHIPPED ||
-      order.status === OrderStatus.FINISHED);
+    canCreateReworkFromStatus(order.status);
   const [
     materialEstimate,
     pieceworkSummary,

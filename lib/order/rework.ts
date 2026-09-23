@@ -29,6 +29,7 @@ import {
   ProductionOperationMaterializationError,
 } from '../production/operation-materialization-service';
 import { getSetting } from '../settings';
+import { canCreateReworkFromStatus } from './rework-eligibility';
 
 export class ReworkOrderError extends Error {
   constructor(message: string) {
@@ -199,11 +200,8 @@ export async function createReworkOrder(
         '重做工单不能再次发起重做，请返回原工单创建新的重做单',
       );
     }
-    if (
-      source.status !== OrderStatus.SHIPPED &&
-      source.status !== OrderStatus.FINISHED
-    ) {
-      throw new ReworkOrderError('只有已发货或已完成工单可以发起重做');
+    if (!canCreateReworkFromStatus(source.status)) {
+      throw new ReworkOrderError('只有已发货、已结算或已完成的工单可以发起重做');
     }
 
     const primarySourceShipment = source.shipments.find(
