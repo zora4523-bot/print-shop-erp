@@ -70,6 +70,27 @@ const summary = {
   countedBy: { displayName: '管理员' },
   items: [],
 };
+// 幂等命中时读取的「原请求」：盘点单持久化的操作人、原因、已过账行
+// （账面数 = 当时回传的账面回声，实盘数）与未过账行的 key。
+function storedCount(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'count1',
+    countedById: 'owner1',
+    remark: '月末例行盘点',
+    staleKeys: [] as string[],
+    staleMessage: null as string | null,
+    items: [
+      {
+        materialId: 'mat1',
+        locationId: 'loc1',
+        bookQuantity: '5.00',
+        countedQuantity: '8.00',
+      },
+    ],
+    ...overrides,
+  };
+}
+const REQUEST_MISMATCH = '盘点请求与原记录不一致，请刷新页面后重新核对';
 
 beforeEach(() => {
   txMock.$executeRaw.mockReset().mockResolvedValue(1);
@@ -162,7 +183,9 @@ describe('postInventoryCount', () => {
   });
 
   it('does not reserve a number or post differences again for an idempotent replay', async () => {
-    dbMock.inventoryCount.findUnique.mockResolvedValue(summary);
+    dbMock.inventoryCount.findUnique
+      .mockResolvedValueOnce(storedCount())
+      .mockResolvedValueOnce(summary);
 
     await postInventoryCount(input, { id: 'owner1' });
 
@@ -179,16 +202,75 @@ describe('postInventoryCount', () => {
     dbMock.inventoryCount.findUnique
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(summary);
-    txMock.inventoryCount.findUnique.mockResolvedValue({
-      id: 'count1',
-      staleKeys: ['mat2:loc2'],
-      staleMessage,
-    });
+    txMock.inventoryCount.findUnique.mockResolvedValue(
+      storedCount({ staleKeys: ['mat2:loc2'], staleMessage }),
+    );
 
-    const replayed = await postInventoryCount(input, { id: 'owner1' });
+    const replayed = await postInventoryCount(
+      {
+        ...input,
+        items: [
+          ...input.items,
+          { materialId: 'mat2', locationId: 'loc2', bookQuantity: '5.00', countedQuantity: '9.00' },
+        ],
+      },
+      { id: 'owner1' },
+    );
 
     expect(replayed.staleKeys).toEqual(['mat2:loc2']);
     expect(replayed.staleMessage).toBe(staleMessage);
+    expect(numberMock).not.toHaveBeenCalled();
+    expect(txMock.$queryRaw).not.toHaveBeenCalled();
+    expect(txMock.inventoryCount.create).not.toHaveBeenCalled();
+  });
+
+  it('replays when only the decimal spelling of the same quantities differs', async () => {
+    dbMock.inventoryCount.findUnique
+      .mockResolvedValueOnce(storedCount())
+      .mockResolvedValueOnce(summary);
+
+    const replayed = await postInventoryCount(
+      { ...input, items: [{ ...input.items[0]!, bookQuantity: '5', countedQuantity: '8.0' }] },
+      { id: 'owner1' },
+    );
+
+    expect(replayed.count.countNo).toBe('IC20260717-0001');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  // L-10：同一幂等键、内容不同的重提必须拒绝，不能把旧盘点单当作已过账
+  // 返回、静默丢掉操作员改过的实盘数。
+  it.each([
+    ['counted quantity', { items: [{ materialId: 'mat1', locationId: 'loc1', bookQuantity: '5.00', countedQuantity: '9.00' }] }, 'owner1'],
+    ['book echo', { items: [{ materialId: 'mat1', locationId: 'loc1', bookQuantity: '6.00', countedQuantity: '8.00' }] }, 'owner1'],
+    ['row set (extra row)', { items: [...input.items, { materialId: 'mat2', locationId: 'loc2', bookQuantity: '1.00', countedQuantity: '1.00' }] }, 'owner1'],
+    ['row set (different row)', { items: [{ materialId: 'mat1', locationId: 'loc9', bookQuantity: '5.00', countedQuantity: '8.00' }] }, 'owner1'],
+    ['reason', { remark: '临时抽盘' }, 'owner1'],
+    ['operator', {}, 'owner2'],
+  ])('rejects a fast-path replay whose %s differs from the posted count', async (_label, change, actorId) => {
+    dbMock.inventoryCount.findUnique.mockResolvedValueOnce(storedCount());
+
+    await expect(
+      postInventoryCount({ ...input, ...change }, { id: actorId }),
+    ).rejects.toThrow(new InventoryCountInvariantError(REQUEST_MISMATCH));
+
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(numberMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a changed replay found after the request lock inside the transaction', async () => {
+    dbMock.inventoryCount.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(summary);
+    txMock.inventoryCount.findUnique.mockResolvedValue(storedCount());
+
+    await expect(
+      postInventoryCount(
+        { ...input, items: [{ ...input.items[0]!, countedQuantity: '9.00' }] },
+        { id: 'owner1' },
+      ),
+    ).rejects.toThrow(new InventoryCountInvariantError(REQUEST_MISMATCH));
+
     expect(numberMock).not.toHaveBeenCalled();
     expect(txMock.$queryRaw).not.toHaveBeenCalled();
     expect(txMock.inventoryCount.create).not.toHaveBeenCalled();
@@ -364,11 +446,16 @@ describe('postInventoryCount 账面回声守卫', () => {
     const transactionCalls = dbMock.$transaction.mock.calls.length;
     dbMock.inventoryCount.findUnique
       .mockReset()
-      .mockResolvedValueOnce({
-        id: 'count1',
-        staleKeys: ['mat2:loc2'],
-        staleMessage: posted.staleMessage,
-      })
+      .mockResolvedValueOnce(
+        storedCount({
+          staleKeys: ['mat2:loc2'],
+          staleMessage: posted.staleMessage,
+          items: [
+            { materialId: 'mat1', locationId: 'loc1', bookQuantity: '5.00', countedQuantity: '8.00' },
+            { materialId: 'mat3', locationId: 'loc3', bookQuantity: '5.00', countedQuantity: '10.00' },
+          ],
+        }),
+      )
       .mockResolvedValueOnce(summary);
 
     const replayed = await postInventoryCount(threeRowInput, { id: 'owner1' });
@@ -590,7 +677,16 @@ describe('postInventoryCount 安全库存通知', () => {
     expect(dispatchMock).not.toHaveBeenCalled();
 
     // A replay returns the committed count without reserving another delivery.
-    dbMock.inventoryCount.findUnique.mockResolvedValue(summary);
+    dbMock.inventoryCount.findUnique
+      .mockResolvedValueOnce(
+        storedCount({
+          items: [
+            { materialId: 'mat1', locationId: 'loc0', bookQuantity: '60.00', countedQuantity: '10.00' },
+            { materialId: 'mat1', locationId: 'loc1', bookQuantity: '40.00', countedQuantity: '10.00' },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(summary);
     await postInventoryCount(request, { id: 'owner1' });
     expect(enqueueMock).toHaveBeenCalledOnce();
   });
@@ -693,7 +789,13 @@ describe('postInventoryCount 安全库存通知', () => {
       safetyStock: '50.00',
       locations: [{ book: '100.00', counted: '20.00' }],
     });
-    txMock.inventoryCount.findUnique.mockResolvedValue(summary);
+    txMock.inventoryCount.findUnique.mockResolvedValue(
+      storedCount({
+        items: [
+          { materialId: 'mat1', locationId: 'loc0', bookQuantity: '100.00', countedQuantity: '20.00' },
+        ],
+      }),
+    );
     await postInventoryCount(request, { id: 'owner1' });
     expect(enqueueMock).not.toHaveBeenCalled();
     expect(dispatchMock).not.toHaveBeenCalled();

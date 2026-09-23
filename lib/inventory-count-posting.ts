@@ -228,6 +228,67 @@ function normalizeInventoryCountItems(
   return items;
 }
 
+// 幂等重放只回放「同一请求」：同键不同操作人 / 原因 / 盘点行 / 实盘数必须
+// 拒绝，否则操作员改过的实盘数会被旧盘点单静默顶替。已过账行持久化了
+// 账面回声（入账时与回传值相等）和实盘数，可逐行比对；未过账行只存了
+// key（staleKeys），只能比对它仍在请求里——这些行本来就没过账，重放结果
+// 会原样告诉操作员重盘，不会被当作已过账。
+const INVENTORY_COUNT_REQUEST_SELECT = {
+  id: true,
+  countedById: true,
+  remark: true,
+  staleKeys: true,
+  staleMessage: true,
+  items: {
+    select: {
+      materialId: true,
+      locationId: true,
+      bookQuantity: true,
+      countedQuantity: true,
+    },
+  },
+} satisfies Prisma.InventoryCountSelect;
+
+type InventoryCountRequestRecord = Prisma.InventoryCountGetPayload<{
+  select: typeof INVENTORY_COUNT_REQUEST_SELECT;
+}>;
+
+function isSameInventoryCountRequest(
+  existing: InventoryCountRequestRecord,
+  items: readonly NormalizedCountItem[],
+  remark: string | null | undefined,
+  actor: { id: string },
+): boolean {
+  if (existing.countedById !== actor.id) return false;
+  if ((existing.remark ?? null) !== (remark ?? null)) return false;
+  const postedByKey = new Map(
+    existing.items.map((row) => [`${row.materialId}:${row.locationId}`, row]),
+  );
+  const staleKeys = new Set(existing.staleKeys);
+  if (postedByKey.size + staleKeys.size !== items.length) return false;
+  return items.every((item) => {
+    const posted = postedByKey.get(item.key);
+    if (!posted) return staleKeys.has(item.key);
+    return (
+      new Decimal(posted.bookQuantity.toString()).eq(item.expectedBook) &&
+      new Decimal(posted.countedQuantity.toString()).eq(item.counted)
+    );
+  });
+}
+
+function assertSameInventoryCountRequest(
+  existing: InventoryCountRequestRecord,
+  items: readonly NormalizedCountItem[],
+  remark: string | null | undefined,
+  actor: { id: string },
+): void {
+  if (!isSameInventoryCountRequest(existing, items, remark, actor)) {
+    throw new InventoryCountInvariantError(
+      '盘点请求与原记录不一致，请刷新页面后重新核对',
+    );
+  }
+}
+
 export async function postInventoryCount(
   input: PostInventoryCountInput,
   actor: { id: string },
@@ -237,9 +298,10 @@ export async function postInventoryCount(
 
   const existingBeforeReservation = await db.inventoryCount.findUnique({
     where: { idempotencyKey: input.idempotencyKey },
-    select: { id: true, staleKeys: true, staleMessage: true },
+    select: INVENTORY_COUNT_REQUEST_SELECT,
   });
   if (existingBeforeReservation) {
+    assertSameInventoryCountRequest(existingBeforeReservation, items, input.remark, actor);
     return {
       count: await readInventoryCount(existingBeforeReservation.id),
       staleKeys: existingBeforeReservation.staleKeys,
@@ -255,9 +317,10 @@ export async function postInventoryCount(
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:inventory-count-request:${input.idempotencyKey}`}))`;
       const existing = await tx.inventoryCount.findUnique({
         where: { idempotencyKey: input.idempotencyKey },
-        select: { id: true, staleKeys: true, staleMessage: true },
+        select: INVENTORY_COUNT_REQUEST_SELECT,
       });
       if (existing) {
+        assertSameInventoryCountRequest(existing, items, input.remark, actor);
         return {
           id: existing.id,
           staleKeys: existing.staleKeys,
