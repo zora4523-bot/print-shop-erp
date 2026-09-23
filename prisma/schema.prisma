@@ -1430,24 +1430,24 @@ model OutsourcePayment {
 // ============================================================
 
 model DesignBundle {
-  id              String             @id @default(cuid())
-  createdById     String
-  dateRangeFrom   DateTime
-  dateRangeTo     DateTime
-  orderIds        String[]
-  designIds       String[]
-  zipFileUrl      String
-  zipObjectKey    String?
-  downloadUrl     String
-  accessTokenHash String?            @unique
+  id                    String             @id @default(cuid())
+  createdById           String
+  dateRangeFrom         DateTime
+  dateRangeTo           DateTime
+  orderIds              String[]
+  designIds             String[]
+  zipFileUrl            String
+  zipObjectKey          String?
+  downloadUrl           String
+  accessTokenHash       String?            @unique
   downloadUrlCiphertext String?
-  revokedAt       DateTime?          @db.Timestamptz(3)
-  expiresAt       DateTime
-  downloadCount   Int                @default(0)
-  status          DesignBundleStatus @default(PENDING)
-  backgroundJobId String?            @unique
-  lastErrorCode   String?
-  createdAt       DateTime           @default(now())
+  revokedAt             DateTime?          @db.Timestamptz(3)
+  expiresAt             DateTime
+  downloadCount         Int                @default(0)
+  status                DesignBundleStatus @default(PENDING)
+  backgroundJobId       String?            @unique
+  lastErrorCode         String?
+  createdAt             DateTime           @default(now())
 
   createdBy User @relation(fields: [createdById], references: [id])
 
