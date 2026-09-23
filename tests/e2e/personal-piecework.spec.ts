@@ -54,7 +54,8 @@ test('不同师傅个人价、未来生效、切回统一价、历史和账号�
     await login(a, { username: workerA, password: E2E_PASSWORD, from: task });
     await report(a);
     const old = (await c.query('SELECT id, amount::text, snapshot FROM "ProductionReport" WHERE "reporterId"=$1', [workerA])).rows;
-    await a.reload();
+    // 重新进入是新的一批；刷新同一地址会把同量重提当作同一批。
+    await a.goto(task);
     await login(page, { from: `/owner/accounts/${workerA}` });
     await publish(page, workerA, '0.1234');
     await report(a, false);

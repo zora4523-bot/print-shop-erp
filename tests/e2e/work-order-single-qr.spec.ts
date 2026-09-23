@@ -78,7 +78,8 @@ test.describe('工单单码跨岗位入口', () => {
       await login(workerPage, { from: '/worker/tasks', username: E2E_USERS.workerHandPress!.username, password: E2E_PASSWORD });
       await expect(workerPage.getByRole('heading', { name: '生产工序', exact: true })).toBeVisible({ timeout: 30_000 });
       await workerPage.goto(`/wo/${fixture.id}?v=2`);
-      await expect(workerPage).toHaveURL(`/worker/tasks/${fixture.foilId}`, { timeout: 30_000 });
+      // 报工页把缺省批次固定进地址栏（?reportBatch=本人已有报工条数）。
+      await expect(workerPage).toHaveURL(new RegExp(`/worker/tasks/${fixture.foilId}\\?reportBatch=\\d+$`), { timeout: 30_000 });
       const packerPage = await packerContext.newPage();
       await login(packerPage, { from: '/worker/tasks', username: E2E_USERS.workerPacker!.username, password: E2E_PASSWORD });
       await expect(packerPage.getByRole('heading', { name: '生产工序', exact: true })).toBeVisible({ timeout: 30_000 });
@@ -90,7 +91,7 @@ test.describe('工单单码跨岗位入口', () => {
       await expect(packerPage.getByRole('link', { name: /包装组 #1/ })).toContainText('剩余 20 袋');
       await expect(packerPage.getByRole('link', { name: /局部烫金/ })).toHaveCount(0);
       await packerPage.getByRole('link', { name: /包装组 #1/ }).click();
-      await expect(packerPage).toHaveURL(`/worker/tasks/${fixture.packId}`);
+      await expect(packerPage).toHaveURL(new RegExp(`/worker/tasks/${fixture.packId}\\?reportBatch=\\d+$`));
       await expect(packerPage.getByText('#1 · 花好月圆 · 每袋 10 个')).toBeVisible();
       await workerPage.goto(`/wo/${fixture.id}?v=1&task=${fixture.foilId}`);
       await expect(workerPage.getByRole('main').getByRole('alert').filter({ hasText: '此工单已作废' })).toContainText('此工单已作废，当前版本 v2');

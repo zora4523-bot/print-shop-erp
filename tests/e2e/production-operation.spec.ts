@@ -210,6 +210,8 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
 });
 
 
+const REPEATED_BATCH_TEXT = '这一批已经记录过，本次没有重复计入';
+
 test('报工刷新重提不重复入账，显式再报一批允许相同数量', async ({ page }) => {
   test.setTimeout(120_000);
   const isolationFailure = productionOperationE2eIsolationFailure();
@@ -232,7 +234,7 @@ test('报工刷新重提不重复入账，显式再报一批允许相同数量',
   const before = await countReports();
   try {
     await login(page, { from: `/worker/tasks/${fixture.operationId}?reportBatch=${batch}`, username: worker.username, password: E2E_PASSWORD });
-    const submit = async () => {
+    const submit = async (expected = '已记录本次报工') => {
       const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报工', exact: true }) });
       await section.getByRole('spinbutton', { name: '本次合格完成数', exact: true }).fill(String(E2E_PRODUCTION_REPORT_INCREMENT));
       await section.getByRole('spinbutton', { name: '本次工单件数进度', exact: true }).fill('0');
@@ -240,12 +242,12 @@ test('报工刷新重提不重复入账，显式再报一批允许相同数量',
       await section.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
       await section.getByRole('button', { name: '提交扫码报工', exact: true }).click();
       await section.getByRole('button', { name: '确认报工', exact: true }).click();
-      await expect(section.getByRole('status')).toContainText('已记录本次报工', { timeout: 15_000 });
+      await expect(section.getByRole('status')).toContainText(expected, { timeout: 15_000 });
     };
     await submit();
     await expect.poll(countReports).toBe(before + 1);
     await page.reload();
-    await submit();
+    await submit(REPEATED_BATCH_TEXT);
     await expect.poll(countReports).toBe(before + 1);
     await page.getByRole('link', { name: '再报一批', exact: true }).click();
     await expect(page).toHaveURL(`/worker/tasks/${fixture.operationId}?reportBatch=${batch + 1}`);
@@ -284,23 +286,29 @@ test('不计薪报工刷新去重与再报一批经过真实页面和数据库',
     await expect(otherPage.locator(`a[href="/worker/tasks/${stepId}"]`)).toHaveCount(0);
   } finally { await otherContext.close(); }
   await login(page, { from: `/worker/tasks/${stepId}`, username: worker.username, password: E2E_PASSWORD });
-  const submit = async () => {
+  const submit = async (expected = '已记录本次生产进度') => {
     const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报进度', exact: true }) });
     await section.getByRole('spinbutton', { name: '本次合格完成数', exact: true }).fill('10');
     await section.getByRole('spinbutton', { name: '缺陷数', exact: true }).fill('0');
     await section.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
     await section.getByRole('button', { name: '提交扫码报工', exact: true }).click();
     await section.getByRole('button', { name: '确认报工', exact: true }).click();
-    await expect(section.getByRole('status')).toContainText('已记录本次生产进度');
+    await expect(section.getByRole('status')).toContainText(expected);
   };
+  await expect(page).toHaveURL(`/worker/tasks/${stepId}?reportBatch=0`);
   await submit();
   await expect.poll(count).toBe(1);
   await page.reload();
-  await submit();
+  await submit(REPEATED_BATCH_TEXT);
   await expect.poll(count).toBe(1);
-  await page.getByRole('link', { name: '再报一批', exact: true }).click();
+  // 重新扫码 / 从列表进入（不带批次号）是新的一批：同样数量照常入账。
+  await page.goto(`/worker/tasks/${stepId}`);
   await expect(page).toHaveURL(`/worker/tasks/${stepId}?reportBatch=1`);
   await submit();
   await expect.poll(count).toBe(2);
+  await page.getByRole('link', { name: '再报一批', exact: true }).click();
+  await expect(page).toHaveURL(`/worker/tasks/${stepId}?reportBatch=2`);
+  await submit();
+  await expect.poll(count).toBe(3);
   await expectNoNextErrorOverlay(page);
 });

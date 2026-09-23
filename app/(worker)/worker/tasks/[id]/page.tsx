@@ -9,7 +9,7 @@ import { listWorkerTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputePanel } from '@/components/business/production/TaskDisputePanel';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import {
   PieceworkOperationType,
   ProductionOperationStatus,
@@ -22,6 +22,7 @@ import {
   getProductionProgressForReporter,
 } from '@/lib/production/operation-portal';
 import { getLegacyProductionTaskDetail } from '@/lib/production/legacy-task-reader';
+import { defaultReportBatch } from '@/lib/production/report-batch';
 import { OperationReportingError } from '@/lib/production/operation-reporting';
 import {
   OperationReportForm,
@@ -62,7 +63,6 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
   const { user } = await requireSession();
   const { id } = await params;
   const requestedBatch = (await searchParams)?.reportBatch;
-  const reportBatch = typeof requestedBatch === 'string' && /^(0|[1-9]\d{0,8})$/.test(requestedBatch) ? requestedBatch : '0';
   const actor = { id: user.id, role: user.role };
   let operation: Awaited<ReturnType<typeof getProductionOperationForReporter>> =
     null;
@@ -79,6 +79,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
     }
   }
   if (operation) {
+    const reportBatch = await pinnedReportBatch(id, requestedBatch, 'operation', operation.status, user.id);
     const { currentRate, rateError } = await readWorkerRate(user.id, operation);
     const remainingQty = Decimal.max(
       new Decimal(operation.plannedCompletedQty).minus(operation.completedQty),
@@ -197,6 +198,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
 
   const progress = await getProductionProgressForReporter(id, actor);
   if (progress) {
+    const reportBatch = await pinnedReportBatch(id, requestedBatch, 'progress', progress.status, user.id);
     const remainingQty = Decimal.max(
       new Decimal(progress.plannedQty).minus(progress.completedQty),
       0,
@@ -305,6 +307,20 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
   }
 
   return renderLegacyTaskDetail(id, actor);
+}
+
+// 扫码、任务列表和工单页的入口都不带批次号。缺省批次按本人已有报工条数推导并固定进地址栏：
+// 刷新同一地址沿用同一批（重提去重），报成功后重新进入得到新批（同量第二批照常入账）。
+async function pinnedReportBatch(
+  id: string,
+  requested: string | string[] | undefined,
+  kind: 'operation' | 'progress',
+  status: ProductionOperationStatus,
+  reporterId: string,
+): Promise<string> {
+  if (typeof requested === 'string' && /^(0|[1-9]\d{0,8})$/.test(requested)) return requested;
+  if (status !== ProductionOperationStatus.PENDING && status !== ProductionOperationStatus.IN_PROGRESS) return '0';
+  redirect(`/worker/tasks/${encodeURIComponent(id)}?reportBatch=${await defaultReportBatch(kind, id, reporterId)}`);
 }
 
 // 旧任务分支单独成函数：WorkerTaskDetailPage 已贴着 300 行的架构门禁阈值。
