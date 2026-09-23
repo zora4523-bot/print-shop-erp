@@ -526,7 +526,7 @@ function resolveSpecificationFacts(args: {
   };
 }
 
-const REPRESENTED_CRAFT_CODES: Readonly<Record<CreateOrderCraft, ReadonlySet<string>>> = {
+export const CREATE_ORDER_REPRESENTED_CRAFT_CODES: Readonly<Record<CreateOrderCraft, ReadonlySet<string>>> = {
   PARTIAL: new Set(['FLAT_FOIL_PARTIAL', 'PACKING']),
   FULL: new Set([
     'FLAT_FOIL_SINGLE',
@@ -570,7 +570,7 @@ function craftConfiguration(args: {
       );
     }
   }
-  const represented = REPRESENTED_CRAFT_CODES[routeCraft(item.pricingRoute)];
+  const represented = CREATE_ORDER_REPRESENTED_CRAFT_CODES[routeCraft(item.pricingRoute)];
   return selectedCodes.every((code) => represented.has(code))
     ? 'CATALOG'
     : 'CUSTOM';

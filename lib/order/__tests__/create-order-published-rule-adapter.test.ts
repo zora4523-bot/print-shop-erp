@@ -14,10 +14,13 @@ import { ZTO_PROVINCE_OPTIONS } from '../../price/external-order-charges';
 vi.mock('../../db', () => ({ db: {} }));
 
 import {
+  ENGINE_ENFORCED_BLOCKING_REFERENCES,
   projectPublishedCreateOrderPriceSnapshot,
   type PublishedCreateOrderPriceProjectionInput,
   type PublishedCreateOrderRuleRow,
 } from '../create-order-published-rule-adapter';
+import { CREATE_ORDER_REPRESENTED_CRAFT_CODES } from '../create-order-quote-facts-adapter';
+import type { CreateOrderQuoteItemInput } from '../../price/create-order';
 
 const PROCESSING_BOOK_ID = 'book-processing-unit';
 const LOGISTICS_BOOK_ID = 'book-logistics-unit';
@@ -452,5 +455,253 @@ describe('projectPublishedCreateOrderPriceSnapshot · 彩印覆膜条件', () =>
       status: 'QUOTED',
       amount: '310.00',
     });
+  });
+});
+
+function fullItem(
+  overrides: Partial<CreateOrderQuoteItemInput> = {},
+): CreateOrderQuoteItemInput {
+  return createGoldenOrderItem({
+    craft: 'FULL',
+    paperType: '珠光艳闪',
+    paperWeightGsm: 160,
+    specification: '大号封',
+    pricingGroup: 'LARGE',
+    quantity: 2_000,
+    frontColors: ['哑金'],
+    backColors: [],
+    ...overrides,
+  });
+}
+
+/**
+ * Items that satisfy each published blocking condition. Every engine-enforced
+ * code must appear here, so a newly supported code cannot skip this check.
+ */
+const BLOCKED_ITEMS: Readonly<Record<string, readonly CreateOrderQuoteItemInput[]>> = {
+  COLOR_BACK_SIDE_FOIL_MANUAL: [
+    printItem({ frontColors: [], backColors: ['哑金'], printFoilMode: 'PARTIAL' }),
+    printItem({ frontColors: ['哑金'], backColors: ['亮金'], printFoilMode: 'PARTIAL' }),
+  ],
+  COLOR_MULTI_FOIL_MANUAL: [
+    printItem({ frontColors: ['哑金', '亮金'], printFoilMode: 'PARTIAL' }),
+    printItem({ frontColors: ['哑金', '亮金', '银'], printFoilMode: 'FULL' }),
+  ],
+  COLOR_NON_FLAT_FOIL_MANUAL: (['RELIEF', 'RAISED'] as const).flatMap((specialEffect) =>
+    (['PARTIAL', 'FULL'] as const).map((printFoilMode) =>
+      printItem({ frontColors: ['哑金'], printFoilMode, specialEffect }),
+    ),
+  ),
+  COLOR_NONSTANDARD_LAMINATION_MANUAL: (['TACTILE', 'GLOSS', 'LASER'] as const).map(
+    (printFinishing) => printItem({ printFinishing }),
+  ),
+  COLOR_NONSTANDARD_PROCESS_MANUAL: [
+    {
+      ...printItem({ frontColors: ['哑金'], printFoilMode: 'PARTIAL' }),
+      configuration: {
+        paper: 'CATALOG',
+        paperWeight: 'CATALOG',
+        specification: 'CATALOG',
+        craft: 'CUSTOM',
+      },
+    },
+  ],
+  COLOR_SINGLE_FRONT_FOIL_LT_1000_MANUAL: [500, 999].map((quantity) =>
+    printItem({ quantity, frontColors: ['哑金'], printFoilMode: 'PARTIAL' }),
+  ),
+  CUSTOM_DOUBLE_SIDED_MANUAL: [fullItem({ backColors: ['亮金'] })],
+  CUSTOM_TEN_THOUSAND_MANUAL: [
+    fullItem({ productStructure: 'TEN_THOUSAND_ENVELOPE' }),
+  ],
+  CUSTOM_THREE_PLUS_COLORS_MANUAL: [
+    fullItem({ frontColors: ['哑金', '亮金', '银'] }),
+  ],
+};
+
+function withRule(
+  code: string,
+  change: (rule: PublishedCreateOrderRuleRow) => PublishedCreateOrderRuleRow,
+): PublishedCreateOrderPriceProjectionInput {
+  const rules = publishedRules();
+  expect(rules.some((candidate) => candidate.code === code)).toBe(true);
+  return projectionInput(
+    rules.map((candidate) => (candidate.code === code ? change(candidate) : candidate)),
+  );
+}
+
+function withCondition(
+  code: string,
+  condition: Record<string, unknown>,
+): PublishedCreateOrderPriceProjectionInput {
+  return withRule(code, (candidate) => ({
+    ...candidate,
+    triggerCondition: {
+      ...(candidate.triggerCondition as Record<string, unknown>),
+      ...condition,
+    },
+  }));
+}
+
+describe('projectPublishedCreateOrderPriceSnapshot · 阻断规则必须由引擎执行', () => {
+  it('每条可接受的阻断规则都映射到引擎的人工核价结果', () => {
+    const { snapshot, audit } = projectPublishedCreateOrderPriceSnapshot(
+      projectionInput(),
+    );
+
+    expect(Object.keys(ENGINE_ENFORCED_BLOCKING_REFERENCES).sort()).toEqual(
+      Object.keys(BLOCKED_ITEMS).sort(),
+    );
+    expect(audit.processingRuleCodes).toEqual(
+      expect.arrayContaining(Object.keys(ENGINE_ENFORCED_BLOCKING_REFERENCES)),
+    );
+    for (const [code, enforcement] of Object.entries(
+      ENGINE_ENFORCED_BLOCKING_REFERENCES,
+    )) {
+      for (const item of BLOCKED_ITEMS[code]!) {
+        const quote = calculateCreateOrderQuote(
+          createGoldenOrderInput([item]),
+          snapshot,
+        );
+        const context = `${code}: ${JSON.stringify(item)}`;
+        expect(quote.items[0]?.status, context).toBe(enforcement.engine.status);
+        expect(quote.items[0]?.amount, context).toBeNull();
+        if (enforcement.engine.status === 'MANUAL_PRICING_REQUIRED') {
+          expect(
+            quote.manualReasons.map((reason) => reason.code),
+            context,
+          ).toContain(enforcement.engine.reason);
+        } else {
+          expect(quote.items[0]?.errors, context).toContain(
+            enforcement.engine.error,
+          );
+        }
+      }
+    }
+  });
+
+  it('同一快照下正面单色平烫与铜版纸亚膜仍自动报价', () => {
+    const { snapshot } = projectPublishedCreateOrderPriceSnapshot(
+      projectionInput(),
+    );
+    const quote = (item: CreateOrderQuoteItemInput) =>
+      calculateCreateOrderQuote(createGoldenOrderInput([item]), snapshot)
+        .items[0];
+
+    for (const printFoilMode of ['PARTIAL', 'FULL'] as const) {
+      expect(
+        quote(printItem({ frontColors: ['哑金'], printFoilMode })),
+      ).toMatchObject({ status: 'QUOTED', amount: '510.00' });
+    }
+    expect(quote(printItem({ quantity: 2_000, printFinishing: 'MATTE' }))).toMatchObject({
+      status: 'QUOTED',
+      amount: '450.00',
+    });
+    expect(quote(fullItem({ specialEffect: 'RELIEF' }))).toMatchObject({
+      status: 'QUOTED',
+    });
+  });
+
+  it('事实层彩印已定价工艺不超出已发布的彩印工艺白名单', () => {
+    const allowList = ENGINE_ENFORCED_BLOCKING_REFERENCES
+      .COLOR_NONSTANDARD_PROCESS_MANUAL.condition.anyCraftCodeOutside as readonly string[];
+
+    expect([...CREATE_ORDER_REPRESENTED_CRAFT_CODES.PRINT].filter(
+      (code) => !allowList.includes(code),
+    )).toEqual([]);
+    expect(CREATE_ORDER_REPRESENTED_CRAFT_CODES.PRINT.has('EMBOSS')).toBe(false);
+    expect(CREATE_ORDER_REPRESENTED_CRAFT_CODES.PRINT.has('BUMP')).toBe(false);
+  });
+
+  it('条件书写顺序不同但语义相同的阻断规则仍可投影', () => {
+    expect(() =>
+      projectPublishedCreateOrderPriceSnapshot(
+        withRule('COLOR_NON_FLAT_FOIL_MANUAL', (candidate) => ({
+          ...candidate,
+          triggerCondition: {
+            foilTechniques: ['RAISED', 'RELIEF'],
+            pricingRoutes: ['COLOR_PRINT'],
+          },
+        })),
+      ),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ['扩大到平烫', 'COLOR_NON_FLAT_FOIL_MANUAL', { foilTechniques: ['FLAT', 'RELIEF', 'RAISED'] }],
+    ['扩大到专版', 'COLOR_BACK_SIDE_FOIL_MANUAL', { pricingRoutes: ['COLOR_PRINT', 'CUSTOM_SINGLE_FLAT_FOIL'] }],
+    ['改为按纸张阻断', 'COLOR_MULTI_FOIL_MANUAL', { paperTypes: ['200g铜版纸'] }],
+    ['缩小工艺白名单', 'COLOR_NONSTANDARD_PROCESS_MANUAL', { anyCraftCodeOutside: ['COLOR_PRINT'] }],
+    ['专版多色从两色起阻断', 'CUSTOM_THREE_PLUS_COLORS_MANUAL', { minFoilColorCount: 2 }],
+  ] as const)(
+    '阻断规则条件%s后引擎无法执行，拒绝投影',
+    (_label, code, condition) => {
+      expect(() =>
+        projectPublishedCreateOrderPriceSnapshot(withCondition(code, condition)),
+      ).toThrow(
+        expect.objectContaining({
+          code: 'UNSUPPORTED_RULE',
+          rule: expect.objectContaining({ code }),
+        }),
+      );
+    },
+  );
+
+  it('1000 个以下单色烫金阻断只接受引擎确实没有套餐价的数量区间', () => {
+    const lessThan = (maxQty: number) =>
+      withRule('COLOR_SINGLE_FRONT_FOIL_LT_1000_MANUAL', (candidate) => ({
+        ...candidate,
+        maxQty,
+      }));
+
+    expect(() =>
+      projectPublishedCreateOrderPriceSnapshot(lessThan(499)),
+    ).not.toThrow();
+    expect(() =>
+      projectPublishedCreateOrderPriceSnapshot(lessThan(1_999)),
+    ).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_RULE' }));
+  });
+
+  it.each([
+    ['未登记的阻断编码', (candidate: PublishedCreateOrderRuleRow) => ({
+      ...candidate,
+      id: 'rule-unknown',
+      code: 'COLOR_GOLD_EDGE_MANUAL',
+    })],
+    ['不再阻断自动报价', (candidate: PublishedCreateOrderRuleRow) => ({
+      ...candidate,
+      blocksAutomaticQuote: false,
+    })],
+  ] as const)('%s的参考规则不能被静默吞掉', (_label, change) => {
+    expect(() =>
+      projectPublishedCreateOrderPriceSnapshot(
+        withRule('COLOR_NON_FLAT_FOIL_MANUAL', change),
+      ),
+    ).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_RULE' }));
+  });
+
+  it('彩印阶梯价或烫金套餐只覆盖部分烫金方式时拒绝投影', () => {
+    const baseCode = 'BASE_COLOR-COATED-200-LARGE_Q1000';
+    expect(() =>
+      projectPublishedCreateOrderPriceSnapshot(
+        withCondition(baseCode, { foilTechniques: ['NONE'] }),
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'INVALID_RULE',
+        rule: expect.objectContaining({ code: baseCode }),
+      }),
+    );
+    expect(() =>
+      projectPublishedCreateOrderPriceSnapshot(
+        withCondition('COLOR_SINGLE_FRONT_FOIL_Q1000', {
+          foilTechniques: ['RELIEF'],
+        }),
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'INVALID_RULE',
+        rule: expect.objectContaining({ code: 'COLOR_SINGLE_FRONT_FOIL_Q1000' }),
+      }),
+    );
   });
 });
