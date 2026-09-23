@@ -132,6 +132,11 @@ async function assertActiveProgressReporter(actor: {
   return progressCraftIdsForReporter(db, account);
 }
 
+/** 本人可报的无计薪进度工艺车道；任务列表的计数、分页与水合共用这一车道。 */
+export function getProgressCraftIdsForReporter(actor: { id: string; role: Role }): Promise<string[]> {
+  return assertActiveProgressReporter(actor);
+}
+
 function progressTotals(
   reports: Array<{
     completedQty: { toString(): string };

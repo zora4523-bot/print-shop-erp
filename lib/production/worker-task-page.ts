@@ -2,17 +2,19 @@ import { Prisma } from '@/generated/prisma/client';
 import type { Role } from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
 import { paginationWindow, paginatedResult, parsePositiveInt } from '@/lib/admin/table';
-import { getReporterOperationTypeOrNull, listProductionOperationsForReporter, listProductionProgressForReporter } from './operation-portal';
+import { getProgressCraftIdsForReporter, getReporterOperationTypeOrNull, listProductionOperationsForReporter, listProductionProgressForReporter } from './operation-portal';
 import { assertWorkerPortalActor } from './worker-report-portal';
 
 /** Page current-version IDs before hydrating report aggregates and design labels. */
 export async function listWorkerTaskPage(actor: { id: string; role: Role }, filters: { view: 'paid' | 'progress'; q: string; page?: string }) {
   await assertWorkerPortalActor(actor);
   const lane = await getReporterOperationTypeOrNull(actor);
-  if (filters.view === 'paid' && !lane) return { ...paginatedResult([], 0, paginationWindow(0, 1, 20)), operations: [], progressSteps: [] };
+  // 进度视图的计数与分页必须和水合用同一条工艺车道，否则本车道步骤会被他车道挤到后页。
+  const craftIds = filters.view === 'progress' ? await getProgressCraftIdsForReporter(actor) : [];
+  if (filters.view === 'paid' ? !lane : craftIds.length === 0) return { ...paginatedResult([], 0, paginationWindow(0, 1, 20)), operations: [], progressSteps: [] };
   const table = filters.view === 'paid' ? Prisma.sql`"ProductionOperation"` : Prisma.sql`"ProductionProgressStep"`;
   const q = `%${filters.q.trim().slice(0, 100).replace(/[\\%_]/g, '\\$&')}%`;
-  const lanePredicate = filters.view === 'paid' ? Prisma.sql`AND step."operationType"::text = ${lane}` : Prisma.empty;
+  const lanePredicate = filters.view === 'paid' ? Prisma.sql`AND step."operationType"::text = ${lane}` : Prisma.sql`AND step."craftId" = ANY(${craftIds}::text[])`;
   const sourcePredicate = filters.view === 'paid'
     ? Prisma.sql`EXISTS (SELECT 1 FROM "ProductionOperationSource" src JOIN "OrderItem" item ON item.id=src."orderItemId" WHERE src."operationId"=step.id AND item.name ILIKE ${q})`
     : Prisma.sql`EXISTS (SELECT 1 FROM "OrderItem" item WHERE item.id=step."orderItemId" AND item.name ILIKE ${q})`;
