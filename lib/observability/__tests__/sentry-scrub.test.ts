@@ -173,3 +173,45 @@ describe('URL query scrubbing outside request / spans', () => {
     });
   });
 });
+
+// At beforeSend / beforeSendTransaction time the SDK still carries
+// `sdkProcessingMetadata` (captured scopes → client → promise buffer with
+// getter-only members). Sentry deletes it when building the envelope, so it
+// is never sent; walking it would throw on assignment and drop the event.
+describe('SDK-internal metadata', () => {
+  function sdkLikeMetadata() {
+    const promiseBuffer = { pending: [] as unknown[] };
+    Object.defineProperty(promiseBuffer, '$', {
+      enumerable: true,
+      get: () => promiseBuffer.pending,
+    });
+    return {
+      capturedSpanScope: {
+        _client: { _promiseBuffer: promiseBuffer, _options: { tunnel: PATH } },
+      },
+    };
+  }
+
+  it('does not throw on getter-only SDK members and leaves the metadata alone', () => {
+    const metadata = sdkLikeMetadata();
+    const event = {
+      type: 'transaction',
+      transaction: `GET ${PATH}`,
+      sdkProcessingMetadata: metadata,
+    };
+
+    expect(() => scrubSentryEvent(event)).not.toThrow();
+    expect(event.transaction).toBe('GET /api/cdr/bundles/[token]');
+    expect(event.sdkProcessingMetadata).toBe(metadata);
+    expect(metadata.capturedSpanScope._client._options.tunnel).toBe(PATH);
+  });
+
+  it('does not reassign unchanged values, so read-only event members survive', () => {
+    const extra = { note: 'plain text' };
+    Object.defineProperty(extra, 'computed', { enumerable: true, get: () => 'no token here' });
+    const event = { exception: { values: [{ value: 'NOTIFICATION_DELIVERY_FAILED' }] }, extra };
+
+    expect(() => scrubSentryEvent(event)).not.toThrow();
+    expect(event.extra).toEqual({ note: 'plain text', computed: 'no token here' });
+  });
+});

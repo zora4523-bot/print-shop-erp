@@ -29,22 +29,33 @@ export function redactCdrBundleToken(value: string): string {
   return value.replace(CDR_BUNDLE_TOKEN_PATH, `$1${CDR_BUNDLE_TOKEN_PLACEHOLDER}`);
 }
 
-function redactStringsDeep(value: unknown, seen: WeakSet<object>): unknown {
-  if (typeof value === 'string') return redactCdrBundleToken(value);
-  if (!value || typeof value !== 'object') return value;
-  if (seen.has(value)) return value;
+// Present while beforeSend / beforeSendTransaction run, deleted by the SDK
+// when it builds the envelope (never sent). It holds live scopes and the
+// client, whose getter-only members make blind reassignment throw — and a
+// throwing hook drops the whole event.
+const SDK_INTERNAL_EVENT_KEYS = new Set(['sdkProcessingMetadata']);
+
+// Mutates in place and only writes a string back when redaction changed it,
+// so read-only members that carry no token are never assigned.
+function redactStringsDeep(
+  value: unknown,
+  seen: WeakSet<object>,
+  skipKeys: ReadonlySet<string> = new Set(),
+): void {
+  if (!value || typeof value !== 'object') return;
+  if (seen.has(value)) return;
   seen.add(value);
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i += 1) {
-      value[i] = redactStringsDeep(value[i], seen);
-    }
-    return value;
-  }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
-    record[key] = redactStringsDeep(record[key], seen);
+    if (skipKeys.has(key)) continue;
+    const current = record[key];
+    if (typeof current === 'string') {
+      const redacted = redactCdrBundleToken(current);
+      if (redacted !== current) record[key] = redacted;
+    } else {
+      redactStringsDeep(current, seen);
+    }
   }
-  return value;
 }
 
 function stripQuery(s: string | undefined): string | undefined {
@@ -177,7 +188,7 @@ export function scrubSentryEvent<T>(event: T): T {
     }
   }
 
-  redactStringsDeep(event, new WeakSet());
+  redactStringsDeep(event, new WeakSet(), SDK_INTERNAL_EVENT_KEYS);
   return event;
 }
 
