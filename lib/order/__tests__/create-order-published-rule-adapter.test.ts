@@ -661,6 +661,52 @@ describe('projectPublishedCreateOrderPriceSnapshot · 阻断规则必须由引�
     ).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_RULE' }));
   });
 
+  it('套餐只有万档时 8000 个会向上取整命中套餐，9999 个以下的阻断区间不能被接受', () => {
+    const tenThousandOnly = publishedRules()
+      .filter((candidate) => !String(candidate.code).startsWith('COLOR_SINGLE_FRONT_FOIL_Q'))
+      .map((candidate) =>
+        candidate.code === 'COLOR_SINGLE_FRONT_FOIL_LT_1000_MANUAL'
+          ? { ...candidate, maxQty: 9_999 }
+          : candidate,
+      );
+    const tenThousandFoil = rule({
+      code: 'COLOR_SINGLE_FRONT_FOIL_Q10000',
+      amount: '700',
+      minQty: 8_000,
+      maxQty: 14_999,
+      exclusiveGroup: 'COLOR_SINGLE_FRONT_FOIL',
+      triggerCondition: {
+        schemaVersion: 1,
+        target: 'ITEM',
+        pricingRoutes: ['COLOR_PRINT'],
+        foilTechniques: ['FLAT'],
+        foilPassCount: 1,
+      },
+    });
+    const input = projectionInput([...tenThousandOnly, tenThousandFoil]);
+
+    expect(() => projectPublishedCreateOrderPriceSnapshot(input)).toThrow(
+      expect.objectContaining({
+        code: 'UNSUPPORTED_RULE',
+        rule: expect.objectContaining({
+          code: 'COLOR_SINGLE_FRONT_FOIL_LT_1000_MANUAL',
+        }),
+      }),
+    );
+    expect(() =>
+      projectPublishedCreateOrderPriceSnapshot(
+        projectionInput([
+          ...tenThousandOnly.map((candidate) =>
+            candidate.code === 'COLOR_SINGLE_FRONT_FOIL_LT_1000_MANUAL'
+              ? { ...candidate, maxQty: 7_000 }
+              : candidate,
+          ),
+          tenThousandFoil,
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
   it.each([
     ['未登记的阻断编码', (candidate: PublishedCreateOrderRuleRow) => ({
       ...candidate,

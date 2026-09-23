@@ -19,6 +19,10 @@ import type {
   CreateOrderPricingGroup,
 } from '../price/create-order/types';
 import { CREATE_ORDER_PRINT_FOIL_PRICING_POLICY } from '../price/create-order/types';
+import {
+  PRINT_AUTOMATIC_QUANTITY_LIMIT,
+  resolvePrintTierQuantity,
+} from '../price/create-order/selectors';
 import { BOX_PRICE_RULES } from '@/lib/price/box-packaging-rules';
 import { parseCustomerRuleCondition } from '../price/customer-rule-condition';
 import type {
@@ -1324,10 +1328,10 @@ export type BlockingReferenceEnforcement = {
     | { status: 'MANUAL_PRICING_REQUIRED'; reason: CreateOrderManualReasonCode }
     | { status: 'INVALID_INPUT'; error: string };
   /**
-   * Quantity-bounded blocks are enforced only below the smallest projected
-   * color-print foil tier, where no automatic bundle can be selected.
+   * Quantity-bounded blocks are enforced only when no quantity in the
+   * published window can select a color-print foil bundle.
    */
-  belowSmallestPrintFoilTier?: true;
+  printFoilBundleUnreachable?: true;
 };
 
 /**
@@ -1383,7 +1387,7 @@ export const ENGINE_ENFORCED_BLOCKING_REFERENCES = {
       foilPassCount: 1,
     },
     engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'PRINT_FOIL_PRICE_NOT_FOUND' },
-    belowSmallestPrintFoilTier: true,
+    printFoilBundleUnreachable: true,
   },
   CUSTOM_DOUBLE_SIDED_MANUAL: {
     condition: { pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'], isDoubleSided: true },
@@ -1416,6 +1420,32 @@ function canonicalConditionKey(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/**
+ * Mirrors the engine's color-print foil tier selection, including its
+ * rounding up of 7001-14999 pieces to the 10000 tier: true only when no
+ * quantity in the published window can reach a foil bundle row.
+ */
+function printFoilBundleUnreachable(
+  rule: PublishedCreateOrderRuleRow,
+  print: CreateOrderPriceSnapshot['print'],
+): boolean {
+  if (rule.maxQty === null) return false;
+  const baseTiers = print.perOrderPrices.map((price) => price.tierQuantity);
+  const foilTiers = new Set(
+    print.foilPerOrderPrices.map((price) => price.tierQuantity),
+  );
+  const upper = Math.min(rule.maxQty, PRINT_AUTOMATIC_QUANTITY_LIMIT);
+  for (
+    let quantity = Math.max(rule.minQty ?? 1, 1);
+    quantity <= upper;
+    quantity += 1
+  ) {
+    const tier = resolvePrintTierQuantity(quantity, baseTiers);
+    if (tier !== null && foilTiers.has(tier)) return false;
+  }
+  return true;
+}
+
 function assertBlockingReferenceEnforced(
   rule: PublishedCreateOrderRuleRow,
   print: CreateOrderPriceSnapshot['print'],
@@ -1440,15 +1470,12 @@ function assertBlockingReferenceEnforced(
   }
   const published = parseCustomerRuleCondition(rule.triggerCondition).condition;
   const expected = parseCustomerRuleCondition(enforcement.condition).condition;
-  const smallestFoilTier = Math.min(
-    ...print.foilPerOrderPrices.map((price) => price.tierQuantity),
-  );
   if (
     !published ||
     !expected ||
     canonicalConditionKey(published) !== canonicalConditionKey(expected) ||
-    (enforcement.belowSmallestPrintFoilTier &&
-      (rule.maxQty === null || rule.maxQty >= smallestFoilTier))
+    (enforcement.printFoilBundleUnreachable &&
+      !printFoilBundleUnreachable(rule, print))
   ) {
     throw new PublishedCreateOrderPriceAdapterError(
       'UNSUPPORTED_RULE',

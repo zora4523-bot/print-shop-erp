@@ -8,6 +8,7 @@ import {
   unitPrice,
 } from './money';
 import {
+  PRINT_AUTOMATIC_QUANTITY_LIMIT,
   resolvePrintTierQuantity,
   selectFullUnitPrice,
   selectPartialUnitPrice,
@@ -658,7 +659,7 @@ function quotePrintProcessing(
       errors: [],
     };
   }
-  if (item.quantity > 20_000) {
+  if (item.quantity > PRINT_AUTOMATIC_QUANTITY_LIMIT) {
     return {
       lines: [],
       amount: null,
