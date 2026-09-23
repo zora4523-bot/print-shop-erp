@@ -63,12 +63,61 @@ describe('renderTemplate', () => {
   it('does not rewrite unrelated fields or noncanonical deep links', () => {
     vi.stubEnv('APP_PUBLIC_URL', 'https://erp.example.com');
 
+    // summary is plain text: never promoted to an absolute link, and its
+    // markdown `#` is neutralised like any other non-deepLink value.
     expect(
       renderTemplate('{summary}\n{deepLink}', {
         summary: '/orders#wo=GD-001',
         deepLink: '//other.example.com/orders#wo=GD-001',
       }),
-    ).toBe('/orders#wo=GD-001\n//other.example.com/orders#wo=GD-001');
+    ).toBe('/orders＃wo=GD-001\n//other.example.com/orders#wo=GD-001');
+  });
+
+  // Payload values such as customerRef are typed by external sales agents and
+  // land in a WeCom markdown message: they must stay one line of inert text.
+  it('neutralises markdown links and forged lines in placeholder values', () => {
+    const rendered = renderTemplate(
+      '🚚 **交期逾期**\n客户：{customerRef}\n当前状态：{status}',
+      {
+        customerRef: '[x](https://evil.example)\n当前状态：已发货',
+        status: '生产中',
+      },
+    );
+
+    expect(rendered).toBe(
+      '🚚 **交期逾期**\n客户：［x］（https://evil.example） 当前状态：已发货\n当前状态：生产中',
+    );
+    expect(rendered.split('\n')).toHaveLength(3);
+    expect(rendered).not.toMatch(/\[[^\]]*\]\(/);
+  });
+
+  it.each([
+    ['**bold** and __under__', '＊＊bold＊＊ and ＿＿under＿＿'],
+    ['`code`', '｀code｀'],
+    ['<font color="warning">红</font> <@all>', '＜font color="warning"＞红＜/font＞ ＜@all＞'],
+    ['# 伪标题', '＃ 伪标题'],
+    ['> 伪引用', '＞ 伪引用'],
+    ['~~删~~', '～～删～～'],
+    ['a\\b', 'a＼b'],
+    ['第一行\r\n\r\n第二行\u2028第三行', '第一行 第二行 第三行'],
+    ['tab\there', 'tab here'],
+  ])('escapes %j in a placeholder value', (value, expected) => {
+    expect(renderTemplate('客户：{customerRef}', { customerRef: value })).toBe(
+      `客户：${expected}`,
+    );
+  });
+
+  it('leaves the system-generated deepLink and the template markup untouched', () => {
+    vi.stubEnv('APP_PUBLIC_URL', 'https://erp.example.com');
+
+    expect(
+      renderTemplate('**新工单提交**\n[查看工单]({deepLink})\n{summary}', {
+        deepLink: '/orders#wo=GD-001',
+        summary: '新工单已提交，待工厂确认',
+      }),
+    ).toBe(
+      '**新工单提交**\n[查看工单](https://erp.example.com/orders#wo=GD-001)\n新工单已提交，待工厂确认',
+    );
   });
 
   it('replaces a single placeholder', () => {
