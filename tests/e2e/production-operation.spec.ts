@@ -224,16 +224,19 @@ test('报工刷新重提不重复入账，显式再报一批允许相同数量',
     return;
   }
   const { fixture } = seeded;
-  // The append-only fixture deliberately survives runs; each run starts a fresh
-  // explicit batch, while refreshes within this test must retain its identity.
-  const batch = Math.floor(Math.random() * 900_000_000);
+  // The append-only fixture deliberately survives runs. The page derives each
+  // run's batch from the reporter's report count, so a new run gets a new batch
+  // while refreshes within this test keep the pinned one.
+  const batchUrl = new RegExp(`/worker/tasks/${fixture.operationId}\\?reportBatch=\\d+$`);
   const countReports = () => withDb(async (db) => Number((await db.query(
     'SELECT count(*) AS count FROM "ProductionReport" WHERE "operationId"=$1',
     [fixture.operationId],
   )).rows[0].count));
   const before = await countReports();
   try {
-    await login(page, { from: `/worker/tasks/${fixture.operationId}?reportBatch=${batch}`, username: worker.username, password: E2E_PASSWORD });
+    await login(page, { from: `/worker/tasks/${fixture.operationId}`, username: worker.username, password: E2E_PASSWORD });
+    await expect(page).toHaveURL(batchUrl);
+    const pinnedUrl = page.url();
     const submit = async (expected = '已记录本次报工') => {
       const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报工', exact: true }) });
       await section.getByRole('spinbutton', { name: '本次合格完成数', exact: true }).fill(String(E2E_PRODUCTION_REPORT_INCREMENT));
@@ -247,12 +250,13 @@ test('报工刷新重提不重复入账，显式再报一批允许相同数量',
     await submit();
     await expect.poll(countReports).toBe(before + 1);
     await page.reload();
+    await expect(page).toHaveURL(pinnedUrl);
     await submit(REPEATED_BATCH_TEXT);
     await expect.poll(countReports).toBe(before + 1);
     await page.getByRole('link', { name: '再报一批', exact: true }).click();
     // 再报一批回到入口，由本人已有报工条数推导新批次（夹具跨运行保留，条数不固定）。
-    await expect(page).toHaveURL(new RegExp(`/worker/tasks/${fixture.operationId}\\?reportBatch=\\d+$`));
-    await expect(page).not.toHaveURL(`/worker/tasks/${fixture.operationId}?reportBatch=${batch}`);
+    await expect(page).toHaveURL(batchUrl);
+    await expect(page).not.toHaveURL(pinnedUrl);
     await submit();
     await expect.poll(countReports).toBe(before + 2);
     await expectNoNextErrorOverlay(page);

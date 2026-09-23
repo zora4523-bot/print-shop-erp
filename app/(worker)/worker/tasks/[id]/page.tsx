@@ -311,6 +311,8 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
 
 // 扫码、任务列表和工单页的入口都不带批次号。缺省批次按本人已有报工条数推导并固定进地址栏：
 // 刷新同一地址沿用同一批（重提去重），报成功后重新进入得到新批（同量第二批照常入账）。
+// 地址栏里的批次号只接受不大于当前条数的（即曾经推导过的），更大的改回推导值，否则写入后
+// 会被之后推导出的批次撞上。
 async function pinnedReportBatch(
   id: string,
   requested: string | string[] | undefined,
@@ -318,9 +320,10 @@ async function pinnedReportBatch(
   status: ProductionOperationStatus,
   reporterId: string,
 ): Promise<string> {
-  if (typeof requested === 'string' && /^(0|[1-9]\d{0,8})$/.test(requested)) return requested;
   if (status !== ProductionOperationStatus.PENDING && status !== ProductionOperationStatus.IN_PROGRESS) return '0';
-  redirect(`/worker/tasks/${encodeURIComponent(id)}?reportBatch=${await defaultReportBatch(kind, id, reporterId)}`);
+  const derived = await defaultReportBatch(kind, id, reporterId);
+  if (typeof requested === 'string' && /^(0|[1-9]\d{0,8})$/.test(requested) && Number(requested) <= derived) return requested;
+  redirect(`/worker/tasks/${encodeURIComponent(id)}?reportBatch=${derived}`);
 }
 
 // 旧任务分支单独成函数：WorkerTaskDetailPage 已贴着 300 行的架构门禁阈值。

@@ -93,13 +93,23 @@ it('pins a fresh progress entry to the reporter\'s existing progress report coun
 
 it('keeps the batch already in the address bar so a refresh reuses the same key', async () => {
   mocks.operation.mockResolvedValue(operationFixture);
+  mocks.defaultBatch.mockResolvedValue(8);
   await render({ reportBatch: '7' }, 'op-1');
   expect(mocks.operationForm).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'batch:7' }));
   mocks.progress.mockResolvedValue(progressFixture);
   mocks.operation.mockResolvedValue(null);
+  mocks.defaultBatch.mockResolvedValue(0);
   await render({ reportBatch: '0' }, 'step-1');
   expect(mocks.progressForm).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'batch:0' }));
-  expect(mocks.defaultBatch).not.toHaveBeenCalled();
+});
+
+// Codex 复核：批次号只能是已推导过的（不大于本人当前报工条数）。手工或旧链接带来的更大
+// 批次号若被写入，之后按条数推导的批次会撞上它，“再报一批”回到入口也跳不出去。
+it('replaces a batch beyond the reporter\'s report count with the derived one', async () => {
+  mocks.operation.mockResolvedValue(operationFixture);
+  mocks.defaultBatch.mockResolvedValue(1);
+  await expect(render({ reportBatch: '2' }, 'op-1')).rejects.toThrow('REDIRECT:/worker/tasks/op-1?reportBatch=1');
+  expect(mocks.operationForm).not.toHaveBeenCalled();
 });
 
 it('replaces a malformed address bar batch with the derived one', async () => {
