@@ -82,18 +82,37 @@ describe('durable order PDF jobs', () => {
     }));
   });
 
-  it('enqueues a fresh regeneration in the same scope once no job is pending or running', async () => {
+  it('anchors a regeneration on the latest finished job so concurrent retries coalesce into one job', async () => {
     const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
     enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job-new' } });
     await enqueueOrderPdfJob(input);
-    await expect(enqueueOrderPdfJob({ ...input, regenerationKey: 'r1' })).resolves.toBe('job-new');
-    await expect(enqueueOrderPdfJob({ ...input, regenerationKey: 'r2' })).resolves.toBe('job-new');
-    const [windowKey, firstRetry, secondRetry] = enqueueBackgroundJobMock.mock.calls
+    // 两个同时到达的重新生成都没查到在途任务，最近一个任务都是已失败的 job-dead。
+    let latest: { id: string; status: BackgroundJobStatus } = { id: 'job-dead', status: BackgroundJobStatus.DEAD };
+    dbMock.backgroundJob.findFirst.mockImplementation(async ({ where }: { where: { status?: unknown } }) =>
+      where.status ? null : latest);
+    await Promise.all([
+      enqueueOrderPdfJob({ ...input, regenerationKey: 'r1' }),
+      enqueueOrderPdfJob({ ...input, regenerationKey: 'r2' }),
+    ]);
+    // 之后那个任务也结束了，再次重新生成应当另起一个任务。
+    latest = { id: 'job-done', status: BackgroundJobStatus.SUCCEEDED };
+    await enqueueOrderPdfJob({ ...input, regenerationKey: 'r3' });
+
+    const [windowKey, firstRetry, concurrentRetry, laterRetry] = enqueueBackgroundJobMock.mock.calls
       .map(([call]) => (call as { dedupeKey: string }).dedupeKey);
     const scopePrefix = windowKey.slice(0, windowKey.lastIndexOf(':') + 1);
     expect(firstRetry.startsWith(scopePrefix)).toBe(true);
-    expect(secondRetry.startsWith(scopePrefix)).toBe(true);
-    expect(new Set([windowKey, firstRetry, secondRetry]).size).toBe(3);
+    expect(concurrentRetry).toBe(firstRetry);
+    expect(laterRetry.startsWith(scopePrefix)).toBe(true);
+    expect(new Set([windowKey, firstRetry, laterRetry]).size).toBe(3);
+  });
+
+  it('reuses a job that became pending between the in-flight lookup and the anchor lookup', async () => {
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    dbMock.backgroundJob.findFirst.mockImplementation(async ({ where }: { where: { status?: unknown } }) =>
+      where.status ? null : { id: 'job-just-queued', status: BackgroundJobStatus.PENDING });
+    await expect(enqueueOrderPdfJob({ ...input, regenerationKey: 'r1' })).resolves.toBe('job-just-queued');
+    expect(enqueueBackgroundJobMock).not.toHaveBeenCalled();
   });
 
   it.each(['tasks', 'unknown'])('does not serve retired or invalid PDF jobs (%s)', async (mode) => {
