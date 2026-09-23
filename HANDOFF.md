@@ -16,6 +16,8 @@
 
 ## 当前任务
 
+2026-09-23：**纸张改用现行叫法、按业主顺序胶囊展示**（DECISIONS 2026-09-23，`3e1a3151`）。建单与销售工作台的纸张选择改为胶囊按钮（复用 `PillPicker`），删掉色卡组件；按业主清单排序（`PAPER_DISPLAY_ORDER`），清单外的纸排最后；显示名改为艳红珠光纸/暗红珠光纸/金葱纸/红卡纸/冰白珠光纸，补到已保存配置、改单纸张、费用栏；列表按纸张搜索同时匹配新旧名称。库里名称、计价键、价格、快照、报价令牌不变；价格/物料配置页仍显示库里名称。验证：全量 Vitest 7,478 通过（14 个失败文件同改前，均为未提交改动）；浏览器组件 644 项中仅 ReworkOrderForm 一例偶发（单独重跑两次 13/13）；release E2E 53 项全通过；六视口 admin-responsive 91 通过 / 12 失败（均为时薪页标题改名，同上）。**待业主确认**：米金/紫色/黄色/粉色/金色/玫红/暗紫/紫色红珠光纸 8 种库里没有，只预留了排序位置；「按杂色价、可勾选、克重不变」是后台建物料按杂色价发布，还是新增计价规则，未定。
+
 2026-09-23：**新建工单的包装改为整单区域**（业主拍板，DECISIONS 2026-09-23）。包装从「设计款 → 规格」面板移到设计款卡片与收货之间：顶部显示合计数量/设计款数/规格数/包盒数，「包装类型」「包装方式」默认作用于全部规格，常规装下单个规格可单独改类型，每个规格一行填每包/每盒数量；管理员「包装组 N 单价」（标题下注明覆盖哪些规格）与「包装补充说明」收进该区。设计款标签内其余区块位置未动（业主要求本轮只移包装）。只改界面：`OrderPackagingGroup/Line`、报价、袋数进位、打包工序、打印口径不变，无迁移。新增纯函数在 `lib/order/create-packaging-selection.ts`（整单选择/统一类型/混装进出/单行改类型/分行/汇总），组件 `components/business/order/order-form-b/OrderPackagingSection.tsx`。验证：纯函数 22 项；订单组件+lib 单测 1,919 通过；浏览器组件 OrderFormBNavigation 74、AdminCreatePriceFields 等 129 项通过（新增整单包装 4 例：设计款外、单行改盒、整单统一、混装容量）；release E2E 31 项通过（改了 order-creation-groups / order-entry-stability / admin-order-entry 的选择器）；release 六视口 `admin-responsive` 91 通过 / 5 既有跳过 / 12 失败（12 项均为工作区未提交改动把时薪页标题改名，`/orders/new` 在该路由之前已通过；建单相关专项 24 次全部通过），期间修正了单元格标签被裁切门禁判错的问题；修正后在最新构建上复跑 E2E 31 项通过。E2E 隔离库 `erp_e2e_20260923` 用完即删。
 
 2026-09-23：**CDR 下载链接审查修复**。对抗审查 Codex 的 `8ecbd09f`/`4a26e489`（256 位 token、哈希入库、60 秒签名、撤销）：修复撤销后列表仍显示原链接与撤销按钮、无重新生成入口（`024801aa`）；token 在 URL 路径里会原样进 Sentry 与 nginx 访问日志，改为全事件遮蔽 + `erp_redacted` 日志格式（`2e0779d0`，清洗逻辑抽到 `lib/observability/sentry-scrub.ts` 并补测）。`8ecbd09f` 的 schema 未格式化导致 `prisma-client-sync-contract` 失败，已 `prisma format`（`7d5f22f5`，仅空白）。本机开发库补跑了 `20260921100000_production_report_generation_guard`、`20260922100000_secure_cdr_bundle_tokens` 两条迁移。
@@ -284,6 +286,8 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 **2026-09-23 新增：**
 
+- 8 种彩色珠光纸的建档与计价方式待业主确认（见当前任务）；确认前不要自行建物料或改计价引擎。
+- `pnpm check:dead-code --check` 在 09-23 之前的已提交代码（`4a26e489`）上就失败：52 条差异（Codex CDR 提交新增 `cdrDownloadRateLimitBucketKey`，以及约 50 条已解决未清的候选）；工作区另有 `lib/salary/rule-catalog.ts` 的 2 条来自未提交改动。本轮只清理了自己造成的条目，基线未整体刷新（基线说明禁止）。推 PR 前需要有人对照已提交代码逐条核实后更新。
 - 生产 nginx 需同步 `deploy/nginx.conf.example` 的 `map $request_uri $erp_log_uri`、`log_format erp_redacted` 与 HTTPS server 的 `access_log … erp_redacted;`，`nginx -t && systemctl reload nginx`。涉及生产，须业主授权（§12）。`error_log` 里的上游报错行仍含原始 CDR 路径，按敏感日志管理。
 - 09-23 验证时工作区有未提交改动（账号/考勤/时薪/工价规则/seed 等），它们导致全量 Vitest 14 个文件失败、`admin-responsive` 的「关键路由」在时薪页找不到旧标题「时薪工月结」（改成了「历史时薪档案」）。这些不是包装改动引起的；那批改动收尾时要一并处理对应测试。
 
@@ -577,3 +581,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-20：完成纸张/规格缩小方案批次 1（`7a81c801`）：格子纯函数、身份函数抽取、只读预检与七处规格契约；137 + 31 + 23 项测试通过，未连目标库；批次 2 待接续。
 - 2026-09-20：完成纸张/规格批次 2（`30b813ca`）：三入口共用多值身份，增加查重及文本引用保护；目标 77/0/0、非数据库回归 7228/0/43，批次 3 待目标库预检。
 - 2026-09-23：CDR 下载链接两笔提交对抗审查并修复撤销显示与 token 日志泄露；新建工单包装改为设计款标签外的整单区域（DECISIONS 2026-09-23）。
+- 2026-09-23：纸张改为胶囊按钮并按业主顺序与现行叫法展示（DECISIONS 2026-09-23），8 种彩色珠光纸建档方式待确认。
