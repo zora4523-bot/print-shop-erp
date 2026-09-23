@@ -30,8 +30,19 @@ export async function enqueueOrderPdfJob(input: {
   snapshotKey?: string;
   regenerationKey?: string;
 }): Promise<string> {
+  // The authorized scope (order, actor, work-order version, content snapshot,
+  // base URL) excludes the regeneration key, so every job of one scope shares
+  // this dedupe-key prefix whether it came from the window or a regeneration.
+  const { regenerationKey, ...scope } = input;
+  const scopeDigest = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
+  const scopePrefix = `order-pdf:v2:${scopeDigest}:`;
+  if (regenerationKey !== undefined) {
+    // A failure-recovery link must not stack HEAVY jobs: while one render of
+    // this scope is still queued or running, every retry waits on that job.
+    const inFlight = await findInFlightOrderPdfJob(scopePrefix);
+    if (inFlight) return inFlight;
+  }
   const enqueuedAt = await databaseNow();
-  const snapshotDigest = createHash('sha256').update(JSON.stringify(input)).digest('hex');
   const reuseWindow = Math.floor(enqueuedAt.getTime() / PDF_JOB_REUSE_WINDOW_MS);
   const { job } = await enqueueBackgroundJob({
     type: BACKGROUND_JOB_TYPES.ORDER_PDF,
@@ -39,12 +50,27 @@ export async function enqueueOrderPdfJob(input: {
     // Unique DB key coalesces concurrent requests for the same authorized
     // snapshot within a 15-minute window. A new window allows recovery when a
     // completed artifact expired; all downloads still recheck current access.
-    dedupeKey: `order-pdf:v2:${snapshotDigest}:${reuseWindow}`,
+    dedupeKey: regenerationKey === undefined
+      ? `${scopePrefix}${reuseWindow}`
+      : `${scopePrefix}regenerate:${regenerationKey}`,
     payload: JSON.parse(JSON.stringify(input)) as Prisma.InputJsonValue,
     priority: 120,
     maxAttempts: 2,
   });
   return job.id;
+}
+
+async function findInFlightOrderPdfJob(scopePrefix: string): Promise<string | null> {
+  const job = await db.backgroundJob.findFirst({
+    where: {
+      type: BACKGROUND_JOB_TYPES.ORDER_PDF,
+      dedupeKey: { startsWith: scopePrefix },
+      status: { in: [BackgroundJobStatus.PENDING, BackgroundJobStatus.RUNNING] },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true },
+  });
+  return job?.id ?? null;
 }
 
 export async function handleOrderPdfJob(
