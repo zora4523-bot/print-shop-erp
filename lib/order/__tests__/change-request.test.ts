@@ -4716,6 +4716,142 @@ describe('reviewOrderChangeRequest', () => {
     expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
   });
 
+  it.each([
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.FACTORY_DIRECT,
+  ])('%s 已确认工单批准改价后 confirmedFee 与新总额同步，价格修订快照一致', async (settlementType) => {
+    const quotedFee = new Decimal('1008.00');
+    const plateCharge = {
+      id: 'plate-confirmed',
+      orderId: 'order-1',
+      shipmentId: null,
+      businessKey: PENDING_PLATE_BUSINESS_KEY,
+      priceBookId: null,
+      ...EMPTY_CHARGE_BASIS,
+      status: OrderCustomerChargeStatus.ESTIMATED,
+      amount: new Decimal('100.00'),
+      pricingSnapshot: adminConfirmedChargeSnapshot({
+        businessKey: PENDING_PLATE_BUSINESS_KEY,
+        shipmentId: null,
+        categoryCode: 'PLATE_MAKING_FEE',
+        amount: '100.00',
+        overrideReason: '已发生制版费',
+      }),
+      overrideReason: '已发生制版费',
+      category: { code: 'PLATE_MAKING_FEE' },
+    };
+    const value = request({
+      order: {
+        ...request().order,
+        settlementType,
+        status: OrderStatus.CONFIRMED,
+        workOrderVersion: 2,
+        quotedFee,
+        confirmedFee: new Decimal('1108.00'),
+        settledFee: null,
+        totalAmount: new Decimal('1108.00'),
+        customerCharges: [...request().order.customerCharges, plateCharge],
+      },
+    });
+    locate(value);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValueOnce({
+      _sum: { amount: new Decimal('108.00') },
+    });
+    // 客服业绩流水按扣除快递费 / 耗材后的口径对平：1108 − 3 − 5。
+    mocks.db.csSalesEntry.aggregate.mockResolvedValue({
+      _sum: { amount: new Decimal('1100.00') },
+    });
+    mocks.db.csSalesEntry.findUnique.mockResolvedValue(null);
+    mocks.db.salaryPeriod.findFirst.mockResolvedValue({
+      id: 'period-1',
+      totalSales: new Decimal('1100.00'),
+      initialSales: new Decimal(0),
+    });
+    mocks.db.csSalesEntry.create.mockResolvedValue({ id: 'entry-1' });
+    mocks.db.salaryPeriod.update.mockResolvedValue({ id: 'period-1' });
+
+    await reviewOrderChangeRequest(
+      {
+        requestId: value.id,
+        decision: 'APPROVE',
+        reviewRemark: '确认改量',
+        expectedPriceRevision: 5,
+        expectedQuoteToken: quoteToken,
+      },
+      admin,
+    );
+
+    expect(mocks.db.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: expect.objectContaining({
+        processingAmount: '1200.00',
+        totalAmount: '1308.00',
+      }),
+    });
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        status: 'ADMIN_CONFIRMED',
+        source: 'CHANGE_REQUEST_APPROVED_CURRENT_PUBLISHED',
+        orderFeeSnapshot: {
+          quotedFee,
+          confirmedFee: '1308.00',
+          settledFee: null,
+        },
+      }),
+    );
+    expect(mocks.db.order.update).toHaveBeenLastCalledWith({
+      where: { id: 'order-1' },
+      data: { confirmedFee: '1308.00', settledFee: null },
+    });
+    expect(
+      mocks.db.order.update.mock.calls.some(
+        ([call]) => call.data?.quotedFee !== undefined,
+      ),
+    ).toBe(false);
+  });
+
+  it('工厂直接业务待核价的改价批准撤回旧 confirmedFee，不保留过期确认金额', async () => {
+    const value = request({
+      order: {
+        ...request().order,
+        settlementType: OrderSettlementType.FACTORY_DIRECT,
+        status: OrderStatus.SUBMITTED,
+        confirmedFee: new Decimal('1008.00'),
+        settledFee: null,
+      },
+    });
+    locate(value);
+
+    await reviewOrderChangeRequest(
+      {
+        requestId: value.id,
+        decision: 'APPROVE',
+        reviewRemark: null,
+        expectedPriceRevision: 5,
+        expectedQuoteToken: quoteToken,
+      },
+      admin,
+    );
+
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      mocks.db,
+      expect.objectContaining({
+        status: 'PENDING_ADMIN_CONFIRMATION',
+        source: 'CHANGE_REQUEST_APPLIED_PENDING',
+        orderFeeSnapshot: {
+          quotedFee: value.order.quotedFee,
+          confirmedFee: null,
+          settledFee: null,
+        },
+      }),
+    );
+    expect(mocks.db.order.update).toHaveBeenLastCalledWith({
+      where: { id: 'order-1' },
+      data: { confirmedFee: null, settledFee: null },
+    });
+  });
+
   it('生产版本批准在制版费待定且无可信历史覆盖时零写入失败', async () => {
     const value = request({
       order: { ...request().order, status: OrderStatus.CONFIRMED },
@@ -5723,6 +5859,8 @@ describe('reviewOrderChangeRequest', () => {
       settlementType,
       billingMode: OrderBillingMode.CHARGE,
       status: OrderStatus.DRAFT,
+      // 草稿尚未经工厂确认：内部/直营单此时没有 confirmedFee / settledFee。
+      confirmedFee: null, settledFee: null,
       totalAmount: new Decimal(1000), customerCharges: [],
     } });
     locate(value);
@@ -5750,6 +5888,11 @@ describe('reviewOrderChangeRequest', () => {
     expect(mocks.appendRevision.mock.calls[0]?.[1]).not.toHaveProperty(
       'orderFeeSnapshot',
     );
+    expect(
+      mocks.db.order.update.mock.calls.some(
+        ([call]) => call.data?.confirmedFee !== undefined,
+      ),
+    ).toBe(false);
     expect(mocks.db.orderPriceVersionLock.createMany).toHaveBeenCalledTimes(1);
   });
 

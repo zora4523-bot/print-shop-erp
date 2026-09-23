@@ -5170,6 +5170,68 @@ async function csSalesBasisDeltaInTx(
   };
 }
 
+type ApprovedModificationFeeInput = {
+  order: Pick<
+    ModificationReviewRequest['order'],
+    'settlementType' | 'quotedFee' | 'confirmedFee'
+  >;
+  locksAdministratorConfirmedFee: boolean;
+  pricingPending: boolean;
+  nextTotal: string;
+};
+
+/**
+ * Fee lifecycle written together with an approved repricing modification.
+ * External sales re-snapshot the quote or lock the administrator-confirmed
+ * fee. Internal / factory-direct orders do not maintain quotedFee here; their
+ * confirmedFee is stamped at factory confirmation (production-readiness.ts)
+ * and, once present, must follow the approved total (or be withdrawn while
+ * pricing is pending) so shipment, settlement and fulfilment repricing never
+ * read a stale confirmed amount. `null` means the lifecycle is unchanged.
+ */
+function approvedModificationFeeSnapshot(input: ApprovedModificationFeeInput) {
+  const { order, nextTotal } = input;
+  if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
+    return input.locksAdministratorConfirmedFee
+      ? // quotedFee is the sales-side estimate and keeps its original
+        // immutable revision pointer. Administrator resolution creates the
+        // distinct confirmed snapshot.
+        { quotedFee: order.quotedFee, confirmedFee: nextTotal, settledFee: null }
+      : // Match external submit: an automatic quote has a confirmed pricing
+        // status, but confirmedFee remains a later factory/customer-fee
+        // lifecycle snapshot.
+        { quotedFee: nextTotal, confirmedFee: null, settledFee: null };
+  }
+  if (order.confirmedFee === null) return null;
+  return {
+    quotedFee: order.quotedFee,
+    confirmedFee: input.pricingPending ? null : nextTotal,
+    settledFee: null,
+  };
+}
+
+function approvedModificationFeeOrderData(
+  input: ApprovedModificationFeeInput & {
+    pricingRevisionId: string;
+    quotedFeeCompleteness: OrderQuotedFeeCompleteness;
+  },
+): Prisma.OrderUncheckedUpdateInput | null {
+  const snapshot = approvedModificationFeeSnapshot(input);
+  if (!snapshot) return null;
+  const replacesExternalQuote =
+    input.order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+    !input.locksAdministratorConfirmedFee;
+  return replacesExternalQuote
+    ? {
+        quotedFee: input.nextTotal,
+        quotedFeeCompleteness: input.quotedFeeCompleteness,
+        quotedPricingRevisionId: input.pricingRevisionId,
+        confirmedFee: null,
+        settledFee: null,
+      }
+    : { confirmedFee: snapshot.confirmedFee, settledFee: null };
+}
+
 async function persistApprovedModificationPricingInTx(input: {
   actor: { id: string; role: Role };
   catalogIdentityChanges: readonly CatalogIdentityAuditEntry[];
@@ -5340,6 +5402,13 @@ async function persistApprovedModificationPricingInTx(input: {
           ? ORDER_PRICING_STATUS.ADMIN_CONFIRMED
           : ORDER_PRICING_STATUS.AUTO_CONFIRMED
         : ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
+  const feeInput: ApprovedModificationFeeInput = {
+    order: request.order,
+    locksAdministratorConfirmedFee: Boolean(locksAdministratorConfirmedFee),
+    pricingPending: nextPricingStatus === ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+    nextTotal,
+  };
+  const orderFeeSnapshot = approvedModificationFeeSnapshot(feeInput);
   const pricingRevision =
     projected &&
     request.order.settlementType !== OrderSettlementType.NO_CHARGE &&
@@ -5359,28 +5428,7 @@ async function persistApprovedModificationPricingInTx(input: {
           expectedPriceRevision: request.order.priceRevision,
           incrementOrderRevision: false,
           remark: reviewRemark ?? request.reason,
-          ...(request.order.settlementType ===
-          OrderSettlementType.EXTERNAL_SALES
-            ? {
-                orderFeeSnapshot: locksAdministratorConfirmedFee
-                  ? {
-                      // quotedFee is the sales-side estimate and keeps its
-                      // original immutable revision pointer. Administrator
-                      // resolution creates the distinct confirmed snapshot.
-                      quotedFee: request.order.quotedFee,
-                      confirmedFee: nextTotal,
-                      settledFee: null,
-                    }
-                  : {
-                      // Match external submit: an automatic quote has a
-                      // confirmed pricing status, but confirmedFee remains a
-                      // later factory/customer-fee lifecycle snapshot.
-                      quotedFee: nextTotal,
-                      confirmedFee: null,
-                      settledFee: null,
-                    },
-              }
-            : {}),
+          ...(orderFeeSnapshot ? { orderFeeSnapshot } : {}),
           metadata: {
             changeRequestId: request.id,
             workOrderVersion: nextWorkOrderVersion,
@@ -5440,20 +5488,13 @@ async function persistApprovedModificationPricingInTx(input: {
         },
       ],
     });
-    if (request.order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
-      await tx.order.update({
-        where: { id: request.order.id },
-        data:
-          locksAdministratorConfirmedFee
-          ? { confirmedFee: nextTotal, settledFee: null }
-          : {
-              quotedFee: nextTotal,
-              quotedFeeCompleteness: pureQuoteCompleteness!,
-              quotedPricingRevisionId: pricingRevision.pricingRevisionId,
-              confirmedFee: null,
-              settledFee: null,
-            },
-      });
+    const feeOrderData = approvedModificationFeeOrderData({
+      ...feeInput,
+      pricingRevisionId: pricingRevision.pricingRevisionId,
+      quotedFeeCompleteness: pureQuoteCompleteness!,
+    });
+    if (feeOrderData) {
+      await tx.order.update({ where: { id: request.order.id }, data: feeOrderData });
     }
   }
   return {
