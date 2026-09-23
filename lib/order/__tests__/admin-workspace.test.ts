@@ -481,6 +481,30 @@ describe('admin order workspace predicates', () => {
     expect(capabilities.reject).toBe(true);
   });
 
+  // 审计 L-13：只有当前代次还有待开工/进行中的工序或进度步骤时，“下发后无人扫码”才算停滞。
+  it.each([
+    ['open current operation', {}, true],
+    ['sample shipment without operations', { purpose: 'SAMPLE_SHIPMENT', productionOperations: [] }, false],
+    ['new generation fully carried over', { workOrderVersion: 2, productionOperations: [
+      { workOrderVersion: 1, status: ProductionOperationStatus.IN_PROGRESS },
+      { workOrderVersion: 2, status: ProductionOperationStatus.COMPLETED },
+    ] }, false],
+    ['open current progress step only', { productionOperations: [
+      { workOrderVersion: 1, status: ProductionOperationStatus.COMPLETED },
+    ], productionProgressSteps: [{ workOrderVersion: 1, status: ProductionOperationStatus.PENDING }] }, true],
+  ])('flags production stagnation only when the current generation is claimable: %s', async (_name, overrides, expected) => {
+    const row = adminOrderRecord({
+      status: OrderStatus.PACKING,
+      scheduledAt: new Date('2026-09-01T00:00:00.000Z'),
+      confirmedFee: new Prisma.Decimal('100.00'),
+      productionOperations: [{ workOrderVersion: 1, status: ProductionOperationStatus.PENDING }],
+      ...overrides,
+    });
+    dbMock.order.findFirst.mockResolvedValue(row);
+    const detail = await getAdminOrderByOrderNo(actor, row.orderNo, new Date('2026-09-10T00:00:00.000Z'), 2);
+    expect(detail?.progress.stagnant).toBe(expected);
+  });
+
   it('keeps shipping disabled for an incomplete progress step when legacy tasks are the fallback', async () => {
     const row = adminOrderRecord({
       status: OrderStatus.COMPLETED,

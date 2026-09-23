@@ -191,6 +191,21 @@ describe('scanStagnantProductionOrders', () => {
     expect(parameters).toContainEqual(new Date('2026-08-31T08:00:00.000Z'));
     expect(sql).not.toMatch(/ProductionTask|PER_BAG|ProductionReport/);
   });
+
+  // 审计 L-13：寄样单、改单后全部承接完成的新代次在结构上不可能被扫码认领，不能判停滞。
+  it('只把当前代次仍有待开工/进行中工序或进度步骤、且不是寄样单的工单列为停滞候选', async () => {
+    await scanStagnantProductionOrders({ thresholdDays: 2, batchSize: 200 });
+    const [segments, ...parameters] = dbMock.$queryRaw.mock.calls[0]!;
+    const sql = Array.from(segments as TemplateStringsArray).join('?');
+    expect(sql).toContain('orders."purpose" <> ?::"OrderPurpose"');
+    expect(parameters).toContain('SAMPLE_SHIPMENT');
+    for (const table of ['"ProductionOperation" unit', '"ProductionProgressStep" unit']) {
+      expect(sql).toContain(`FROM ${table}`);
+    }
+    expect(sql).toContain('unit."workOrderVersion" = orders."workOrderVersion"');
+    expect(sql).toContain('unit."status" IN (?::"ProductionOperationStatus", ?::"ProductionOperationStatus")');
+    expect(parameters).toEqual(expect.arrayContaining(['PENDING', 'IN_PROGRESS']));
+  });
 });
 
 describe('loadProductionAlertFacts', () => {
@@ -201,6 +216,9 @@ describe('loadProductionAlertFacts', () => {
         orderNo: 'GD-260902-001',
         workOrderVersion: 2,
         scheduledAt: new Date('2026-08-31T08:00:00.000Z'),
+        purpose: 'STANDARD',
+        productionOperations: [{ workOrderVersion: 2 }],
+        productionProgressSteps: [],
       },
     ]);
     dbMock.productionWorkOrderProgress.findMany.mockResolvedValue([
@@ -274,6 +292,31 @@ describe('loadProductionAlertFacts', () => {
     });
   });
 
+  it('寄样单与当前代次没有待认领工序的工单不进入停滞候选，但进度事实照常读取', async () => {
+    const scheduledAt = new Date('2026-08-31T08:00:00.000Z');
+    const base = { scheduledAt, workOrderVersion: 2, purpose: 'STANDARD', productionOperations: [], productionProgressSteps: [] };
+    dbMock.order.findMany.mockResolvedValue([
+      { ...base, id: 'sample', orderNo: 'GD-S', purpose: 'SAMPLE_SHIPMENT' },
+      { ...base, id: 'carried-done', orderNo: 'GD-C' },
+      { ...base, id: 'old-only', orderNo: 'GD-O', productionOperations: [{ workOrderVersion: 1 }] },
+      { ...base, id: 'progress-open', orderNo: 'GD-P', productionProgressSteps: [{ workOrderVersion: 2 }] },
+      { ...base, id: 'sample-with-step', orderNo: 'GD-SS', purpose: 'SAMPLE_SHIPMENT', productionOperations: [{ workOrderVersion: 2 }] },
+    ]);
+    const facts = await loadProductionAlertFacts({ orderLimit: 50 });
+    expect(facts.releasedOrders.map((row) => row.orderId)).toEqual(['progress-open']);
+    const unfinished = { status: { in: ['PENDING', 'IN_PROGRESS'] } };
+    expect(dbMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        purpose: true,
+        productionOperations: { where: unfinished, select: { workOrderVersion: true } },
+        productionProgressSteps: { where: unfinished, select: { workOrderVersion: true } },
+      }),
+    }));
+    expect(dbMock.productionWorkOrderProgress.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { orderId: { in: ['sample', 'carried-done', 'old-only', 'progress-open', 'sample-with-step'] } },
+    }));
+  });
+
   it('用 scheduledAt + id 键集游标翻过已提醒的最旧页，不让后续工单饥饿', async () => {
     const scheduledAt = new Date('2026-08-31T08:00:00.000Z');
     dbMock.order.findMany
@@ -283,12 +326,18 @@ describe('loadProductionAlertFacts', () => {
           orderNo: 'GD-260902-001',
           workOrderVersion: 1,
           scheduledAt,
+          purpose: 'STANDARD',
+          productionOperations: [{ workOrderVersion: 1 }],
+          productionProgressSteps: [],
         },
         {
           id: 'order-2',
           orderNo: 'GD-260902-002',
           workOrderVersion: 1,
           scheduledAt,
+          purpose: 'STANDARD',
+          productionOperations: [{ workOrderVersion: 1 }],
+          productionProgressSteps: [],
         },
       ])
       .mockResolvedValueOnce([
@@ -297,6 +346,9 @@ describe('loadProductionAlertFacts', () => {
           orderNo: 'GD-260902-002',
           workOrderVersion: 1,
           scheduledAt,
+          purpose: 'STANDARD',
+          productionOperations: [{ workOrderVersion: 1 }],
+          productionProgressSteps: [],
         },
       ]);
 

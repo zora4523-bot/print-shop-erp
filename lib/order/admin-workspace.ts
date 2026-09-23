@@ -843,6 +843,11 @@ function mapAdminOrderRow(
     status: row.status,
     scheduledAt: row.scheduledAt,
     firstClaimedAt,
+    // 扫码认领只能落在当前代次待开工/进行中的工序或进度步骤上；寄样单、改单后全部
+    // 承接完成的新代次没有可认领对象，不算停滞（审计 L-13）。
+    claimable: row.purpose !== 'SAMPLE_SHIPMENT' &&
+      [...currentProductionOperations, ...currentProductionProgressSteps].some((unit) =>
+        unit.status === ProductionOperationStatus.PENDING || unit.status === ProductionOperationStatus.IN_PROGRESS),
     now,
     stagnationDays,
   });
@@ -1064,10 +1069,11 @@ function isProductionStagnant(input: {
   status: OrderStatus;
   scheduledAt: Date | null;
   firstClaimedAt: Date | null;
+  claimable: boolean;
   now: Date;
   stagnationDays: number;
 }): boolean {
-  if (input.firstClaimedAt || !input.scheduledAt) return false;
+  if (input.firstClaimedAt || !input.scheduledAt || !input.claimable) return false;
   if (
     input.status !== OrderStatus.RELEASED &&
     input.status !== OrderStatus.FOILING &&

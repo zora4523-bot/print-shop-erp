@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { Prisma } from '../../generated/prisma/client';
-import { OrderStatus, ProductionWorkOrderStage } from '../../generated/prisma/enums';
+import { OrderPurpose, OrderStatus, ProductionOperationStatus, ProductionWorkOrderStage } from '../../generated/prisma/enums';
 import { databaseClockNow } from '../background-jobs/clock';
 import { db } from '../db';
 
@@ -9,6 +9,23 @@ const ACTIVE_PRODUCTION_STATUSES = [
   OrderStatus.FOILING,
   OrderStatus.PACKING,
 ] as const;
+
+// 扫码认领只能落在当前代次待开工/进行中的工序或进度步骤上。寄样单不物化工序，改单后
+// 全部承接完成的新代次也没有可认领对象，这两类工单“无人认领”不是停滞（审计 L-13）。
+const CLAIMABLE_UNIT_WHERE = {
+  status: { in: [ProductionOperationStatus.PENDING, ProductionOperationStatus.IN_PROGRESS] },
+};
+
+function hasClaimableCurrentGeneration(order: {
+  purpose: OrderPurpose;
+  workOrderVersion: number;
+  productionOperations: ReadonlyArray<{ workOrderVersion: number }>;
+  productionProgressSteps: ReadonlyArray<{ workOrderVersion: number }>;
+}): boolean {
+  return order.purpose !== OrderPurpose.SAMPLE_SHIPMENT &&
+    [...order.productionOperations, ...order.productionProgressSteps]
+      .some((unit) => unit.workOrderVersion === order.workOrderVersion);
+}
 
 export type WorkOrderProgressProjection = {
   orderId: string;
@@ -203,6 +220,23 @@ export async function scanStagnantProductionOrders(input: {
     )
       AND orders."scheduledAt" IS NOT NULL
       AND orders."scheduledAt" <= ${cutoff}
+      AND orders."purpose" <> ${OrderPurpose.SAMPLE_SHIPMENT}::"OrderPurpose"
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM "ProductionOperation" unit
+          WHERE unit."orderId" = orders."id"
+            AND unit."workOrderVersion" = orders."workOrderVersion"
+            AND unit."status" IN (${ProductionOperationStatus.PENDING}::"ProductionOperationStatus", ${ProductionOperationStatus.IN_PROGRESS}::"ProductionOperationStatus")
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM "ProductionProgressStep" unit
+          WHERE unit."orderId" = orders."id"
+            AND unit."workOrderVersion" = orders."workOrderVersion"
+            AND unit."status" IN (${ProductionOperationStatus.PENDING}::"ProductionOperationStatus", ${ProductionOperationStatus.IN_PROGRESS}::"ProductionOperationStatus")
+        )
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM "ProductionScanClaim" claim
@@ -303,6 +337,9 @@ export async function loadProductionAlertFacts(input: {
       orderNo: true,
       workOrderVersion: true,
       scheduledAt: true,
+      purpose: true,
+      productionOperations: { where: CLAIMABLE_UNIT_WHERE, select: { workOrderVersion: true } },
+      productionProgressSteps: { where: CLAIMABLE_UNIT_WHERE, select: { workOrderVersion: true } },
     },
     orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
     take: input.orderLimit + 1,
@@ -371,7 +408,7 @@ export async function loadProductionAlertFacts(input: {
         reportedAt: row.reportedAt,
       })),
     releasedOrders: orders.flatMap((order) =>
-      order.scheduledAt
+      order.scheduledAt && hasClaimableCurrentGeneration(order)
         ? [
             {
               orderId: order.id,
