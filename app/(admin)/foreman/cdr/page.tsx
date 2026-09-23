@@ -215,6 +215,13 @@ async function CdrRecentBundlesSection({
                           />
                           <RegenerateBundleForm {...regenerateProps} />
                         </div>
+                      ) : bundle.revokedAt ? (
+                        <div>
+                          <DesignBundleStatusBadge
+                            status={DESIGN_BUNDLE_DISPLAY_STATUS.REVOKED}
+                          />
+                          <RegenerateBundleForm {...regenerateProps} />
+                        </div>
                       ) : expired ? (
                         <div>
                           <DesignBundleStatusBadge

@@ -508,6 +508,8 @@ export type RecentBundleRow = {
   zipFileUrl: string;
   downloadUrl: string;
   expiresAt: Date;
+  /** 已撤销的链接不再回显明文，页面改为「已撤销」+ 重新生成。 */
+  revokedAt: Date | null;
   downloadCount: number;
   createdById: string;
   createdByName: string;
@@ -532,6 +534,7 @@ export async function listRecentBundles(
       downloadUrl: true,
       downloadUrlCiphertext: true,
       expiresAt: true,
+      revokedAt: true,
       downloadCount: true,
       createdById: true,
       createdAt: true,
@@ -548,8 +551,12 @@ export async function listRecentBundles(
     orderCount: r.orderIds.length,
     fileCount: r.designIds.length,
     zipFileUrl: r.zipFileUrl,
-    downloadUrl: r.downloadUrlCiphertext ? (decryptBundleDownloadUrl(r.downloadUrlCiphertext) ?? '') : '',
+    downloadUrl:
+      r.downloadUrlCiphertext && !r.revokedAt
+        ? (decryptBundleDownloadUrl(r.downloadUrlCiphertext) ?? '')
+        : '',
     expiresAt: r.expiresAt,
+    revokedAt: r.revokedAt,
     downloadCount: r.downloadCount,
     createdById: r.createdById,
     createdByName: r.createdBy.displayName,

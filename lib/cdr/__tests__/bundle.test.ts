@@ -491,6 +491,37 @@ describe('listRecentBundles', () => {
   });
 });
 
+describe('listRecentBundles revoked links', () => {
+  it('surfaces revokedAt and never decrypts a revoked recipient URL', async () => {
+    const { encryptBundleDownloadUrl } = await import('../access-token');
+    const base = {
+      dateRangeFrom: new Date('2026-05-04T16:00:00Z'),
+      dateRangeTo: new Date('2026-05-05T16:00:00Z'),
+      orderIds: ['o1'],
+      designIds: ['d1'],
+      zipFileUrl: 'bundles/b.zip',
+      downloadUrl: '',
+      downloadUrlCiphertext: encryptBundleDownloadUrl('https://erp.example.com/api/cdr/bundles/tok'),
+      expiresAt: new Date('2026-05-06T00:00:00Z'),
+      downloadCount: 0,
+      createdById: 'u1',
+      createdAt: new Date('2026-05-05T10:00:00Z'),
+      createdBy: { displayName: '车间张主管' },
+    };
+    const revokedAt = new Date('2026-05-05T12:00:00Z');
+    dbMock.designBundle.findMany.mockResolvedValue([
+      { ...base, id: 'live', revokedAt: null },
+      { ...base, id: 'dead', revokedAt },
+    ]);
+    const [live, dead] = await listRecentBundles(20);
+    expect(dbMock.designBundle.findMany.mock.calls.at(-1)![0].select.revokedAt).toBe(true);
+    expect(live!.revokedAt).toBeNull();
+    expect(live!.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/tok');
+    expect(dead!.revokedAt).toEqual(revokedAt);
+    expect(dead!.downloadUrl).toBe('');
+  });
+});
+
 describe('revokeBundleAccess', () => {
   it('marks an issued token revoked without deleting its audit row', async () => {
     dbMock.designBundle.updateMany.mockResolvedValue({ count: 1 });
