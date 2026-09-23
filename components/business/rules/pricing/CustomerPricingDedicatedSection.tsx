@@ -845,7 +845,11 @@ function renderBlank(
       const materials = workspace.blankPapers?.filter((entry) => entry.label === paper) ?? [];
       const material = materials.length === 1 ? materials[0] : null;
       const issue = materials.length > 1 ? '纸张资料重复' : !material ? '纸张资料缺失' : material.issue;
-      if (issue) assembly.warnings.add(`${paper}：${issue}，请到纸张管理修复。`);
+      // A deliberately stopped paper is not a data fault: its remaining rule cannot
+      // price new orders, so say so instead of prompting a repair (DECISIONS 2026-09-23).
+      const stopped = Boolean(material && !material.isActive);
+      if (stopped) assembly.warnings.add(`${paper}：纸张已停用，此价格对新工单不生效。`);
+      else if (issue) assembly.warnings.add(`${paper}：${issue}，请到纸张管理修复。`);
       const cells: PricingMatrixCell[] = BLANK_COLUMNS.map((column) => {
         const matches = rules.filter((rule) => effectiveRule(rule)?.blankIdentity?.specificationKey === column.key);
         const matched = matches.length === 1 ? matches[0] : null;
@@ -857,9 +861,9 @@ function renderBlank(
         const amount = selected?.isActive ? selected.amount : null;
         return { id, columnKey: column.key, value: amount !== null && amount !== undefined && Number(amount) > 0 ? amount : null,
           editable, disabled: Boolean(issue || matches.length > 1), changed: matched?.changed ?? false,
-          emptyLabel: issue || matches.length > 1 ? '资料异常' : '未启用' };
+          emptyLabel: stopped ? '已停用' : issue || matches.length > 1 ? '资料异常' : '未启用' };
       });
-      return { key: paper, paperName: parts.paperName, weight: parts.weight, cells };
+      return { key: paper, paperName: stopped ? `${parts.paperName}（已停用）` : parts.paperName, weight: parts.weight, cells };
     });
   const columns: PricingMatrixColumn[] = BLANK_COLUMNS.map(({ key, label }) => ({ key, label }));
   return <CustomerBlankPricingSectionView columns={columns} rows={rows} />;
