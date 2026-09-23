@@ -11,6 +11,7 @@ import { db } from '../db';
 import { orderCascadeLockKey } from './locks';
 import { resolveOrderChangeStageInTx } from './change-stage';
 import { OrderChangeRequestError } from './change-request-error';
+import { canConfirmOrderPrinted, ORDER_PRINTABLE_STATUSES } from './print-eligibility';
 
 export type OrderPrintActor = { id: string; role: Role };
 
@@ -31,11 +32,7 @@ export class OrderPrintJobError extends Error {
   }
 }
 
-const PRINTABLE_STATUSES = new Set<OrderStatus>([
-  OrderStatus.RELEASED,
-  OrderStatus.FOILING,
-  OrderStatus.PACKING,
-]);
+const PRINTABLE_STATUSES = new Set<OrderStatus>(ORDER_PRINTABLE_STATUSES);
 
 function assertAdmin(actor: OrderPrintActor): void {
   if (actor.role !== Role.ADMIN) {
@@ -218,7 +215,7 @@ export async function markOrderPrintRequestPrintedInTx(
       reason: true,
       state: true,
       resolution: { select: { id: true, printedById: true } },
-      order: { select: { workOrderVersion: true } },
+      order: { select: { workOrderVersion: true, status: true } },
     },
   });
   if (!request || request.state !== OrderPrintJobState.PENDING) {
@@ -226,6 +223,9 @@ export async function markOrderPrintRequestPrintedInTx(
   }
   if (request.workOrderVersion !== request.order.workOrderVersion) {
     throw new OrderPrintJobError('VERSION_STALE', `该打印任务属于旧版 v${request.workOrderVersion}`);
+  }
+  if (!canConfirmOrderPrinted(request.order.status)) {
+    throw new OrderPrintJobError('ORDER_NOT_PRINTABLE', '工单已不在生产中，不能确认打印，请刷新后核对');
   }
   if (request.resolution) {
     // A replay is valid only when the caller presents the key stored on the

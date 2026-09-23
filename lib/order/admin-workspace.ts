@@ -32,6 +32,7 @@ import {
   MISSING_ORDER_CUSTOMER_FILTER_VALUE,
 } from './list-query';
 import { promisedDaysLeft } from './promised-date';
+import { canConfirmOrderPrinted } from './print-eligibility';
 import {
   type FactoryConfirmationPriceDiff,
 } from './change-request';
@@ -231,7 +232,7 @@ export function resolveAdminPrintFacts(input: {
     printPending: printable && (Boolean(pendingRequest) || !hasPrinted),
     pendingPrintJobId: pendingRequest?.id ?? null,
     canCreatePrint: printable && !pendingRequest,
-    canMarkPrinted: Boolean(pendingRequest),
+    canMarkPrinted: Boolean(pendingRequest) && canConfirmOrderPrinted(input.status),
   };
 }
 

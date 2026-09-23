@@ -271,7 +271,7 @@ describe('versioned order print jobs', () => {
         reason: '首次下发',
         state: OrderPrintJobState.PENDING,
         resolution: null,
-        order: { workOrderVersion: 3 },
+        order: { workOrderVersion: 3, status: OrderStatus.RELEASED },
       });
     await expect(
       markOrderPrintRequestPrintedInTx(
@@ -298,7 +298,7 @@ describe('versioned order print jobs', () => {
         reason: '首次下发',
         state: OrderPrintJobState.PENDING,
         resolution: null,
-        order: { workOrderVersion: 3 },
+        order: { workOrderVersion: 3, status: OrderStatus.RELEASED },
       });
     tx.orderPrintJob.create.mockResolvedValue({ id: 'receipt-1' });
     await expect(
@@ -326,6 +326,69 @@ describe('versioned order print jobs', () => {
     });
   });
 
+  it.each([OrderStatus.CANCELLED, OrderStatus.SHIPPED, OrderStatus.SETTLED])(
+    '%s 工单不能再确认已打印，不写收据或日志',
+    async (status) => {
+      const tx = txMock();
+      tx.orderPrintJob.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'request-1',
+          orderId: 'order-1',
+          workOrderVersion: 3,
+          printKind: OrderPrintKind.INITIAL,
+          reason: '首次下发',
+          state: OrderPrintJobState.PENDING,
+          resolution: null,
+          order: { workOrderVersion: 3, status },
+        });
+      tx.orderPrintJob.create.mockResolvedValue({ id: 'receipt-1' });
+
+      await expect(
+        markOrderPrintRequestPrintedInTx(
+          tx as never,
+          { requestJobId: 'request-1', idempotencyKey: 'printed-request-1-v3' },
+          admin,
+        ),
+      ).rejects.toMatchObject({ code: 'ORDER_NOT_PRINTABLE' });
+      expect(tx.orderPrintJob.findUnique).toHaveBeenLastCalledWith(expect.objectContaining({
+        select: expect.objectContaining({
+          order: { select: { workOrderVersion: true, status: true } },
+        }),
+      }));
+      expect(tx.orderPrintJob.create).not.toHaveBeenCalled();
+      expect(tx.orderLog.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([OrderStatus.PACKING, OrderStatus.ON_HOLD])(
+    '%s 工单仍可确认当前版待打印任务',
+    async (status) => {
+      const tx = txMock();
+      tx.orderPrintJob.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'request-1',
+          orderId: 'order-1',
+          workOrderVersion: 3,
+          printKind: OrderPrintKind.REPRINT,
+          reason: '修改申请批准，旧版纸质工单作废',
+          state: OrderPrintJobState.PENDING,
+          resolution: null,
+          order: { workOrderVersion: 3, status },
+        });
+      tx.orderPrintJob.create.mockResolvedValue({ id: 'receipt-1' });
+
+      await expect(
+        markOrderPrintRequestPrintedInTx(
+          tx as never,
+          { requestJobId: 'request-1', idempotencyKey: 'printed-request-1-v3' },
+          admin,
+        ),
+      ).resolves.toMatchObject({ receiptId: 'receipt-1' });
+    },
+  );
+
   it('rejects an unused key after the print request already has a resolution', async () => {
     const tx = txMock();
     tx.orderPrintJob.findUnique
@@ -338,7 +401,7 @@ describe('versioned order print jobs', () => {
         reason: '首次下发',
         state: OrderPrintJobState.PENDING,
         resolution: { id: 'receipt-existing', printedById: admin.id },
-        order: { workOrderVersion: 3 },
+        order: { workOrderVersion: 3, status: OrderStatus.RELEASED },
       });
 
     await expect(
@@ -453,7 +516,7 @@ describe('versioned order print jobs', () => {
         reason: '首次下发',
         state: OrderPrintJobState.PENDING,
         resolution: null,
-        order: { workOrderVersion: 3 },
+        order: { workOrderVersion: 3, status: OrderStatus.RELEASED },
       });
     tx.orderPrintJob.create.mockResolvedValue({ id: 'receipt-1' });
     await markOrderPrintRequestPrinted(

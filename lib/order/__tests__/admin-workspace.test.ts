@@ -357,6 +357,31 @@ describe('admin order workspace predicates', () => {
     });
   });
 
+  it.each([
+    OrderStatus.CANCELLED,
+    OrderStatus.SHIPPED,
+    OrderStatus.SETTLED,
+    OrderStatus.CONFIRMED,
+  ])('%s 工单即使留有当前版待打印任务也不再提供确认已打印', (status) => {
+    expect(
+      resolveAdminPrintFacts({
+        status,
+        workOrderVersion: 2,
+        requests: [{ id: 'v2', workOrderVersion: 2, resolution: null }],
+      }),
+    ).toMatchObject({ printPending: false, canCreatePrint: false, canMarkPrinted: false });
+  });
+
+  it('暂停期间批准改单生成的补打任务仍可确认已打印', () => {
+    expect(
+      resolveAdminPrintFacts({
+        status: OrderStatus.ON_HOLD,
+        workOrderVersion: 3,
+        requests: [{ id: 'v3-reprint', workOrderVersion: 3, resolution: null }],
+      }),
+    ).toMatchObject({ pendingPrintJobId: 'v3-reprint', canMarkPrinted: true });
+  });
+
   it('keeps pending changes out of the production queue', () => {
     expect(adminQueueWhere('production')).toEqual(
       expect.objectContaining({
