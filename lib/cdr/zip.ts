@@ -1,8 +1,9 @@
 import { finished, PassThrough, type Readable } from 'node:stream';
 import { ZipArchive } from 'archiver';
-import { readOssConfig } from '../oss/config';
+import { readOssConfig, type OssConfig } from '../oss/config';
 import { createOssClient } from '../oss/client';
 import { stripUnsafeFileNameChars } from '../oss/design-file-name';
+import { objectKeyFromReadUrl } from '../oss/object-key';
 import { SETTING_DEFINITIONS } from '../settings/definitions';
 
 // CDR 汇总下载（SPEC §3.5）的"打包到 OSS"步骤。
@@ -70,17 +71,21 @@ export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.NODE_ENV !== 'production';
 }
 
-// 从存储的 fileUrl 反推 OSS 对象 key。fileUrl 由 sign.ts 以
+// 从存储的 fileUrl 反推 OSS 对象 key。fileUrl 登记时以
 // `${publicBaseUrl}/${objectKey}` 生成；bucket 私有，直接 fetch 该
-// URL 是 403，必须用凭证走 getStream(objectKey)。
-function deriveObjectKey(fileUrl: string): string {
+// URL 是 403，必须用凭证走 getStream(objectKey)。按读取域剥掉
+// OSS_PUBLIC_BASE_URL 的路径前缀；读取域都不匹配（例如登记后换过 CDN
+// 域名的历史数据）时沿用整段 pathname。
+function deriveObjectKey(fileUrl: string, cfg: OssConfig): string {
   let url: URL;
   try {
     url = new URL(fileUrl);
   } catch {
     throw new CdrZipError(`设计文件 URL 非法：${fileUrl}`);
   }
-  const key = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+  const key =
+    objectKeyFromReadUrl(url, cfg) ??
+    decodeURIComponent(url.pathname).replace(/^\/+/, '');
   // 只允许 design/ 前缀——防止历史数据/脏数据把打包器指向任意对象。
   if (!key.startsWith('design/')) {
     throw new CdrZipError(`设计文件不在 design/ 前缀内：${key}`);
@@ -231,7 +236,7 @@ async function generateRealZip(
   // 先做纯校验（全部 key 可反推），任何一个不合法都在发起网络 IO 前失败。
   const entries = input.files.map((f) => ({
     ...f,
-    objectKey: deriveObjectKey(f.fileUrl),
+    objectKey: deriveObjectKey(f.fileUrl, cfg),
   }));
 
   // endpoint 用 config 已校验的值（支持 OSS_ENDPOINT 覆盖：VPC 内网、

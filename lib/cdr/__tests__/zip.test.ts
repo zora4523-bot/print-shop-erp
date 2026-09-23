@@ -242,6 +242,23 @@ describe('uploadBundleZip — real path', () => {
     ]);
   });
 
+  it.each([
+    ['CDN 域名带路径前缀', 'https://cdn.example.com/assets', 'https://cdn.example.com/assets/design/o1/i1/cdr-1.cdr'],
+    ['CDN 域名带路径前缀（末尾斜杠）', 'https://cdn.example.com/assets/', 'https://cdn.example.com/assets/design/o1/i1/cdr-1.cdr'],
+    ['CDN 域名不带路径', 'https://cdn.example.com', 'https://cdn.example.com/design/o1/i1/cdr-1.cdr'],
+    ['配了 CDN 后的 bucket 直连历史地址', 'https://cdn.example.com/assets', designUrl('cdr-1.cdr')],
+  ])('OSS_PUBLIC_BASE_URL 为%s时按读取域剥掉路径前缀反推 objectKey', async (_label, publicBaseUrl, fileUrl) => {
+    await uploadBundleZip(
+      { files: [{ orderNo: 'O-1', fileName: 'a.cdr', fileUrl }], bundleId: 'b1' },
+      {
+        mockMode: false,
+        now,
+        env: { ...configuredEnv, OSS_PUBLIC_BASE_URL: publicBaseUrl } as NodeJS.ProcessEnv,
+      },
+    );
+    expect(getStreamMock.mock.calls.map((c) => c[0])).toEqual(['design/o1/i1/cdr-1.cdr']);
+  });
+
   it('拒绝 design/ 前缀之外的文件 URL，且不发起任何 OSS 调用', async () => {
     await expect(
       uploadBundleZip(
