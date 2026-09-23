@@ -6,7 +6,7 @@
 #
 # 流程（构建完成后进入短停机窗口；数据库迁移只允许向前修复）：
 #   1. 记录当前 commit
-#   2. git pull
+#   2. git pull，并把 APP_VERSION 钉成本次 commit
 #   3. pnpm install（完整依赖，构建 + seed 都需要）
 #   4. check:env 预检环境变量（抓 mock-mode 等陷阱）
 #   5. prisma generate + build（旧进程仍在线）
@@ -105,6 +105,14 @@ NEW_COMMIT="$(git rev-parse --short HEAD)"
 if [ "$PREV_COMMIT" = "$NEW_COMMIT" ]; then
   echo "==> 代码无更新（仍是 $PREV_COMMIT）。如只想重启：pm2 startOrReload deploy/ecosystem.config.cjs --update-env"
 fi
+
+# 发布版本钉成本次 commit，经 startOrReload --update-env 交给 Web 与两个
+# worker（进程环境优先于 .env）。jobs 门禁只认与 Web 同版本的 worker 心跳：
+# 旧 worker 被 SIGKILL 留下的新鲜心跳行版本不同，新 worker 启动即崩溃时
+# 门禁报 version-mismatch 拦住发布，而不是被旧行放行。
+APP_VERSION="$(git rev-parse HEAD)"
+export APP_VERSION
+echo "==> 发布版本（APP_VERSION）：$APP_VERSION"
 
 echo "==> [2/9] 安装依赖"
 CI=true pnpm install --frozen-lockfile
