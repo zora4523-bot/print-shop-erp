@@ -35,6 +35,8 @@ export type CreateOrderManualReasonCode =
   | 'PRINT_QUANTITY_OVER_LIMIT'
   | 'PRINT_FINISHING_PRICE_NOT_FOUND'
   | 'PRINT_FOIL_PRICE_NOT_FOUND'
+  | 'PRINT_NON_FLAT_FOIL'
+  | 'PRINT_BACK_SIDE_FOIL'
   | 'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE';
 
 export type CreateOrderManualReason = {

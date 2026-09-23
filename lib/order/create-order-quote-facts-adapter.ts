@@ -536,13 +536,13 @@ const REPRESENTED_CRAFT_CODES: Readonly<Record<CreateOrderCraft, ReadonlySet<str
     'BUMP',
     'PACKING',
   ]),
+  // Color-print relief/raised (EMBOSS/BUMP) is outside the published
+  // COLOR_NONSTANDARD_PROCESS_MANUAL allow-list and must stay administrator-priced.
   PRINT: new Set([
     'COATED_COLOR_PRINT',
     'COATED_COLOR_PRINT_FOIL',
     'COLOR_PRINT',
     'COLOR_PRINT_FOIL',
-    'EMBOSS',
-    'BUMP',
     'PACKING',
   ]),
 };

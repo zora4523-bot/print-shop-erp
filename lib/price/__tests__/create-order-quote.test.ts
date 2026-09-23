@@ -442,6 +442,91 @@ describe('calculateCreateOrderQuote · 彩印 PER_ORDER 黄金用例', () => {
     },
   );
 
+  it.each(['PARTIAL', 'FULL'] as const)(
+    '彩印正面单色平烫（%s）仍按阶梯总价加含版费套餐自动报价',
+    (printFoilMode) => {
+      const result = quoteSingle(
+        printItem({
+          quantity: 2_000,
+          frontColors: ['哑金'],
+          printFoilMode,
+          specialEffect: 'NONE',
+        }),
+      );
+
+      expect(result.items[0]).toMatchObject({
+        status: 'QUOTED',
+        amount: '700.00',
+      });
+      expect(itemLine(result, 'PRINT_PER_ORDER').amount).toBe('450.00');
+      expect(itemLine(result, 'PRINT_FOIL_PER_ORDER').amount).toBe('250.00');
+      expect(result.manualReasons).toEqual([]);
+    },
+  );
+
+  it.each(['RELIEF', 'RAISED'] as const)(
+    '彩印烫金选择 %s 时转人工核价，不按平烫套餐自动报价',
+    (specialEffect) => {
+      const result = quoteSingle(
+        printItem({
+          quantity: 2_000,
+          frontColors: ['哑金'],
+          printFoilMode: 'FULL',
+          specialEffect,
+        }),
+      );
+
+      expect(result.status).toBe('MANUAL_PRICING_REQUIRED');
+      expect(result.total).toBeNull();
+      expect(result.items[0]).toMatchObject({
+        status: 'MANUAL_PRICING_REQUIRED',
+        amount: null,
+        processingAmount: null,
+        knownAmount: '0.00',
+      });
+      expect(result.manualReasons.map((reason) => reason.code)).toEqual([
+        'PRINT_NON_FLAT_FOIL',
+        'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+      ]);
+      expect(
+        result.items[0]?.lines.every((line) => !line.includedInKnownTotal),
+      ).toBe(true);
+      expect(result.order.lines.map((line) => line.code)).not.toContain(
+        'PLATE_FEE',
+      );
+    },
+  );
+
+  it.each([
+    ['只烫反面', [], ['哑金']],
+    ['正反面各烫一色', ['哑金'], ['亮金']],
+  ] as const)(
+    '彩印局部烫金%s时转人工核价，反面烫金没有自动价',
+    (_label, frontColors, backColors) => {
+      const result = quoteSingle(
+        printItem({
+          quantity: 2_000,
+          frontColors,
+          backColors,
+          printFoilMode: 'PARTIAL',
+        }),
+      );
+
+      expect(result.items[0]).toMatchObject({
+        status: 'MANUAL_PRICING_REQUIRED',
+        amount: null,
+        knownAmount: '0.00',
+      });
+      expect(result.manualReasons.map((reason) => reason.code)).toEqual([
+        'PRINT_BACK_SIDE_FOIL',
+        'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+      ]);
+      expect(result.order.lines.map((line) => line.code)).not.toContain(
+        'PLATE_FEE',
+      );
+    },
+  );
+
 });
 
 describe('calculateCreateOrderQuote · 规则结构与 no-fallback 契约', () => {

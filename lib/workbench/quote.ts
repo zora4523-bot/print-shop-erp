@@ -34,6 +34,8 @@ const PRICING_REASON_MESSAGES: Record<CreateOrderManualReasonCode, string> = {
   PRINT_FINISHING_PRICE_NOT_FOUND: '所选彩印工艺暂无完整价格，请联系管理员核价',
   PRINT_FOIL_PRICE_NOT_FOUND:
     '所选彩印加烫金组合暂无完整价格，请联系管理员核价',
+  PRINT_NON_FLAT_FOIL: '彩印浮雕、激凸需要管理员核价',
+  PRINT_BACK_SIDE_FOIL: '彩印反面烫金需要管理员核价',
   PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE:
     '彩印加烫金需核对包含制版费的整款报价',
 };

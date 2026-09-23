@@ -588,6 +588,24 @@ function quoteFullProcessing(
   };
 }
 
+/**
+ * Published color-print foil prices cover one flat front-side pass only.
+ * Relief/raised effects and back-side foil have no automatic price, so they
+ * leave automatic pricing before any flat bundle can be matched.
+ */
+function printFoilCapabilityManualReasons(
+  item: CreateOrderQuoteItemInput,
+): CreateOrderManualReason[] {
+  return [
+    ...((item.specialEffect ?? 'NONE') !== 'NONE'
+      ? [manualReason('PRINT_NON_FLAT_FOIL', '彩印浮雕、激凸没有自动价，需管理员核价')]
+      : []),
+    ...(item.backColors.length > 0
+      ? [manualReason('PRINT_BACK_SIDE_FOIL', '彩印反面烫金没有自动价，需管理员核价')]
+      : []),
+  ];
+}
+
 function quotePrintProcessing(
   item: CreateOrderQuoteItemInput,
   snapshot: CreateOrderPriceSnapshot,
@@ -598,6 +616,16 @@ function quotePrintProcessing(
   manualReasons: CreateOrderManualReason[];
   errors: string[];
 } {
+  const foilCapabilityReasons = printFoilCapabilityManualReasons(item);
+  if (foilCapabilityReasons.length > 0) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: foilCapabilityReasons,
+      errors: [],
+    };
+  }
   const finishing = item.printFinishing ?? 'MATTE';
   if (finishing !== 'MATTE') {
     return {

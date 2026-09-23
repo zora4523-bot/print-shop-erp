@@ -73,6 +73,17 @@ describe('workbench controlled pricing guidance', () => {
       '冰白珠光纸专版烫金由管理员手动核价，请提交工单后等待核价',
     ]);
   });
+  it('explains color-print relief, raised and back-side foil as administrator pricing', () => {
+    expect(
+      workbenchPricingReasons([
+        { code: 'PRINT_NON_FLAT_FOIL' },
+        { code: 'PRINT_BACK_SIDE_FOIL' },
+      ]),
+    ).toEqual([
+      '彩印浮雕、激凸需要管理员核价',
+      '彩印反面烫金需要管理员核价',
+    ]);
+  });
   it('uses a safe fallback for an empty or newly introduced engine reason', () => {
     const expected = ['该组合暂未取得完整加工费，请联系管理员核价'];
     expect(workbenchPricingReasons([])).toEqual(expected);
