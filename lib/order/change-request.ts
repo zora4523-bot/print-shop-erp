@@ -5346,7 +5346,10 @@ async function persistApprovedModificationPricingInTx(input: {
       ...(versionedProductionChange
         ? {
             workOrderVersion: nextWorkOrderVersion,
-            scheduledAt: reviewedAt,
+            // scheduledAt is the release boundary of the current generation.
+            // Only a released order is rematerialized now; CONFIRMED gets its
+            // boundary when it is actually released.
+            ...(isReprintChangeStatus(request.order.status) ? { scheduledAt: reviewedAt } : {}),
             // completedAt is the canonical production-readiness marker for
             // one work-order generation. A production-changing revision
             // rematerializes unfinished work and must reopen that marker.
@@ -5628,7 +5631,7 @@ async function finalizeApprovedModificationInTx(input: {
           before: currentWorkOrderVersion,
           after: nextWorkOrderVersion,
         },
-        ...(versionedProductionChange
+        ...(isReprintChangeStatus(request.order.status)
           ? {
               scheduledAt: {
                 before: request.order.scheduledAt?.toISOString() ?? null,

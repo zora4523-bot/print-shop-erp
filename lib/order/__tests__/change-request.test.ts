@@ -3927,6 +3927,27 @@ describe('reviewOrderChangeRequest', () => {
     expect(mocks.completion).toHaveBeenCalledTimes(paused ? 0 : 1);
   });
 
+  it.each([false, true])('待下发工单批准改单升版但不提前写下发时间 scheduledAt；暂停=%s', async (paused) => {
+    const value = request({ baseWorkOrderVersion: 2, proposedChanges: { items: [], promisedDate: '2026-09-20' },
+      order: { ...request().order, status: paused ? OrderStatus.ON_HOLD : OrderStatus.CONFIRMED, workOrderVersion: 2, promisedDate: null, scheduledAt: null } });
+    locate(value);
+    mocks.db.orderWorkflowDecision.findFirst.mockResolvedValue({ fromStatus: OrderStatus.CONFIRMED });
+    mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+    expect(mocks.db.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: expect.objectContaining({ workOrderVersion: 3, completedAt: null }),
+    });
+    // 下发（CONFIRMED → RELEASED）才是当前代次的停滞计时起点。
+    expect(mocks.db.order.update.mock.calls.some(([call]) => call.data !== undefined && 'scheduledAt' in call.data)).toBe(false);
+    expect(mocks.activateProduction).not.toHaveBeenCalled();
+    const approvedLog = mocks.db.orderLog.create.mock.calls
+      .map(([call]) => call.data)
+      .find((data) => data.action === 'CHANGE_REQUEST_APPROVED');
+    expect(approvedLog?.changedFields).toMatchObject({ workOrderVersion: { before: 2, after: 3 } });
+    expect(approvedLog?.changedFields).not.toHaveProperty('scheduledAt');
+  });
+
   it('persists DENIED with a mandatory reason and writes the rejection audit', async () => {
     const value = request();
     locate(value);
@@ -4744,11 +4765,16 @@ describe('reviewOrderChangeRequest', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           workOrderVersion: 3,
-          scheduledAt: new Date('2026-09-02T02:00:00.000Z'),
           completedAt: null,
         }),
       }),
     );
+    // 尚未下发：审批不改写下发边界，保留原值，待真正下发时再定。
+    expect(
+      mocks.db.order.update.mock.calls.some(
+        ([call]) => call.data !== undefined && 'scheduledAt' in call.data,
+      ),
+    ).toBe(false);
     expect(mocks.db.order.update).toHaveBeenCalledWith({
       where: { id: 'order-1' },
       data: { confirmedFee: '1308.00', settledFee: null },
@@ -5117,6 +5143,7 @@ describe('reviewOrderChangeRequest', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           workOrderVersion: 5,
+          scheduledAt: new Date('2026-09-02T02:00:00.000Z'),
           completedAt: null,
         }),
       }),
