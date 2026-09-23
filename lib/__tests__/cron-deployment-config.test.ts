@@ -165,6 +165,30 @@ function runCronWithUrl(
   });
 }
 
+// L-11：客服周期的结束日是包含式上海自然日，下一周期只能在结束日次日由
+// cs-settle 结算时建立；在此之前，内部客服工单的提交 / 取消 / 改单审批 /
+// 核价都会因没有覆盖当天的周期而整体回滚。所以 cs-settle 必须紧跟上海零点
+// 运行（留 1 分钟避开整点），而不是拖到 01:00 留出一小时的停摆窗口。
+it('settles CS periods one minute after Shanghai midnight so the next period exists almost immediately', async () => {
+  const cron = await readFile(resolve('deploy/crontab.example'), 'utf8');
+  expect(cron).toMatch(/^CRON_TZ=Asia\/Shanghai$/m);
+  expect(cron).toMatch(/^1 0 \* \* \* \S+ cs-settle$/m);
+});
+
+it('keeps the deployment guide crontab template in sync with deploy/crontab.example', async () => {
+  const [cron, guide] = await Promise.all([
+    readFile(resolve('deploy/crontab.example'), 'utf8'),
+    readFile(resolve('docs/部署指南.md'), 'utf8'),
+  ]);
+  const scheduleLines = (text: string) =>
+    Array.from(
+      text.matchAll(/^(\S+ \S+ \S+ \S+ \S+) \/usr\/local\/sbin\/print-shop-erp-cron ([a-z-]+)$/gm),
+      (match) => `${match[1]} ${match[2]}`,
+    ).sort();
+  expect(scheduleLines(guide)).toEqual(scheduleLines(cron));
+  expect(scheduleLines(cron)).toHaveLength(EXPECTED_ENDPOINTS.length);
+});
+
 it('runs hourly payroll ten minutes after the Shanghai month boundary', async () => {
   const cron = await readFile(resolve('deploy/crontab.example'), 'utf8');
   expect(cron).toMatch(/^10 0 1 \* \* .* hourly-payroll$/m);
