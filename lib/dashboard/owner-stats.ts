@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { AgentMonthlyBillStatus } from '../../generated/prisma/enums';
+import { agentBillPeriodRange } from '../agent-monthly-billing/period';
 import { db } from '../db';
 import {
   currentShanghaiMonth,
@@ -9,7 +10,7 @@ import {
 
 // Read-only KPIs for the owner dashboard. Two top-level helpers:
 //   - getTodayOrderStats(now)   → 4 counters around today's order flow
-//   - getMonthlyBillStats(now)  → totals for the current Shanghai month
+//   - getMonthlyBillStats(now)  → 本月出账 / 本月收款 / 当前待收款
 //
 // All money returned as plain decimal-string ("0.00") so server →
 // client serialization is safe (Decimal can't cross the wire).
@@ -25,9 +26,9 @@ export type TodayOrderStats = {
 
 export type MonthlyBillStats = {
   month: string; // YYYY-MM
-  total: string; // 千分位 已交给 UI；这里只到 toFixed(2)
-  paid: string;
-  outstanding: string;
+  total: string; // 本月确认出账；千分位交给 UI，这里只到 toFixed(2)
+  paid: string; // 本月收款
+  outstanding: string; // 当前全部待收款（不限账期）
 };
 
 /**
@@ -85,45 +86,52 @@ export async function getTodayOrderStats(
 }
 
 /**
- * 当月账单：已发的部分（ISSUED / PARTIAL_PAID / FULLY_PAID）的总额、已
- * 收、应收差额。
+ * 老板首页「本月已出账金额」卡片（业主 2026-09-23 拍板的口径，M-8）：
  *
- * 与 /owner/bills 的口径对齐（appel/(admin)/owner/bills/page.tsx 注释
- * 明示&ldquo;DRAFT 未发单不算应收&rdquo;）——dashboard 把
- * DRAFT 也算进来会让&ldquo;一生成账单数字就跳&rdquo;，与发单页不一致。DRAFT
- * 是&ldquo;未对外&rdquo;的草稿期，不应进应收。
+ * - total：确认时间（confirmedAt）落在上海本月的代理商月度账单总额，
+ *   状态为已确认或已收。v2 只能为已结束的月份出账，账期（period）永远
+ *   早于本月，所以不能按「账期 = 本月」统计——那是结构上的空集。
+ * - paid：收款时间（receivedAt）落在上海本月的收款合计，不论账单何时确认。
+ * - outstanding：当前所有已确认、尚未收款的账单总额，不限账期；与
+ *   /owner/agent-bills 的「待收款」同口径。v2 没有部分收款，整单结清。
  *
- * 聚合交给数据库，避免把当月全部账单行搬回 Node；Prisma Decimal 转成
- * 字符串后再交给 Decimal.js 做 outstanding，始终不经过 JS Number。
+ * 三个数各自独立，不再满足 outstanding = total - paid。草稿账单不算出账
+ * 也不算待收。聚合交给数据库；Prisma Decimal 转字符串后交给 Decimal.js，
+ * 始终不经过 JS Number。
  */
 export async function getMonthlyBillStats(
   now: Date = new Date(),
 ): Promise<MonthlyBillStats> {
   const month = currentShanghaiMonth(now);
-  const [aggregation, receipts] = await Promise.all([
+  const { start, end } = agentBillPeriodRange(month);
+  const [confirmedThisMonth, receivedThisMonth, receivable] = await Promise.all([
     db.agentMonthlyBill.aggregate({
       where: {
-        period: month,
         status: {
           in: [AgentMonthlyBillStatus.CONFIRMED, AgentMonthlyBillStatus.PAID],
         },
+        confirmedAt: { gte: start, lt: end },
       },
       _sum: { totalAmount: true },
     }),
     db.agentMonthlyBillReceipt.aggregate({
-      where: { bill: { period: month, status: AgentMonthlyBillStatus.PAID } },
+      where: { receivedAt: { gte: start, lt: end } },
       _sum: { amount: true },
+    }),
+    db.agentMonthlyBill.aggregate({
+      where: { status: AgentMonthlyBillStatus.CONFIRMED },
+      _sum: { totalAmount: true },
     }),
   ]);
 
-  const total = new Decimal(aggregation._sum.totalAmount?.toString() ?? '0');
-  const paid = new Decimal(receipts._sum.amount?.toString() ?? '0');
-  const outstanding = total.minus(paid);
-
   return {
     month,
-    total: total.toFixed(2),
-    paid: paid.toFixed(2),
-    outstanding: outstanding.toFixed(2),
+    total: sumToFixed(confirmedThisMonth._sum.totalAmount),
+    paid: sumToFixed(receivedThisMonth._sum.amount),
+    outstanding: sumToFixed(receivable._sum.totalAmount),
   };
+}
+
+function sumToFixed(value: { toString(): string } | null | undefined): string {
+  return new Decimal(value?.toString() ?? '0').toFixed(2);
 }

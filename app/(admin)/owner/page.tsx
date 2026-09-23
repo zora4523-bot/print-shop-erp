@@ -215,7 +215,7 @@ async function MonthlyStatsSection({
       value={formatMoney(monthly.total)}
       hint={(
         <>
-          已收 {formatMoney(monthly.paid)} · 未收 {formatMoney(monthly.outstanding)}
+          本月已收 {formatMoney(monthly.paid)} · 待收款 {formatMoney(monthly.outstanding)}
         </>
       )}
     />

@@ -61,4 +61,22 @@ describe('owner dashboard fault isolation', () => {
     await expect(NotificationAttention({ countPromise: Promise.resolve(0) })).resolves.toBeNull();
     await expect(NotificationAttention({ countPromise: Promise.reject(new Error('failed')) })).rejects.toThrow('failed');
   });
+  it('labels the monthly bill card by what each figure counts (M-8)', async () => {
+    const stats = Promise.resolve({ month: '2026-04', total: '3550.50', paid: '3300.50', outstanding: '1350.00' });
+    mocks.monthly.mockReturnValue(stats);
+    const page = await OwnerDashboardPage();
+    let section: React.ReactElement<Record<string, unknown>> | undefined;
+    visit(page, node => {
+      if (node.props.resultPromise === stats) section = node;
+      return false;
+    });
+    expect(section).toBeDefined();
+    const render = section!.type as (props: Record<string, unknown>) => Promise<ReactNode>;
+    const html = renderToStaticMarkup(await render(section!.props));
+    expect(html).toContain('本月已出账金额');
+    expect(html).toContain('3,550.50');
+    expect(html).toContain('本月已收 ¥ 3,300.50');
+    expect(html).toContain('待收款 ¥ 1,350.00');
+    expect(html).not.toContain('未收');
+  });
 });
