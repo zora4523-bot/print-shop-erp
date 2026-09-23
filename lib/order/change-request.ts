@@ -6,6 +6,7 @@ import { packagingBoxType } from './packaging-mode';
 import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
 import { prepareOrderForProductionInTx } from './production-readiness';
 import { OrderChangeRequestError } from './change-request-error';
+import { assertChangeRequestRespectsShippedShipments } from './change-request-shipment-guard';
 import { ORDER_MODIFIABLE_STATUSES, canChangeOrderPackaging } from './editable-fields';
 import Decimal from 'decimal.js';
 import {
@@ -273,6 +274,7 @@ const MODIFICATION_REVIEW_REQUEST_INCLUDE = {
           sequence: true,
           destinationProvince: true,
           weightKg: true,
+          status: true,
         },
       },
       packagingGroups: {
@@ -478,6 +480,7 @@ async function readChangeRequestOrderInTx(
           sequence: true,
           destinationProvince: true,
           weightKg: true,
+          status: true,
         },
       },
       productionOperations: {
@@ -542,6 +545,7 @@ export async function createOrderChangeRequest(
           '只有已确认且未发货的工单可以提交取消申请',
         );
       }
+      assertChangeRequestRespectsShippedShipments({ phase: 'REQUEST', isCancellation: input.type === 'CANCEL', itemChangeCount: input.items.length, shipments: order.shipments });
       if (order.changeRequests.length > 0) {
         throw new OrderChangeRequestError('该工单已有待审核申请，请等待管理员处理');
       }
@@ -5006,6 +5010,7 @@ async function reviewOrderCancellationRequest(
     if (!CANCELLABLE_BY_REQUEST_STATUSES.includes(request.order.status)) {
       throw new OrderChangeRequestError('当前工单状态不允许批准取消');
     }
+    assertChangeRequestRespectsShippedShipments({ phase: 'REVIEW', isCancellation: true, itemChangeCount: 0, shipments: request.order.shipments });
     if (request.order.outsourceOrders.length > 0) {
       throw new OrderChangeRequestError(
         '工单存在已发出或进行中的外协单，请先处理外协',
@@ -5848,6 +5853,7 @@ export async function reviewOrderChangeRequest(
     }
 
     const proposedChanges = readProposedChanges(request.proposedChanges);
+    assertChangeRequestRespectsShippedShipments({ phase: 'REVIEW', isCancellation: false, itemChangeCount: proposedChanges.length, shipments: request.order.shipments });
     // Re-check the live item count under the per-order lock. This is the
     // authoritative guard for legacy pending requests and any state change
     // that occurred after the proposal was recorded.

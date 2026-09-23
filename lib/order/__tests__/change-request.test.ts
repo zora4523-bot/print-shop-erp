@@ -1394,7 +1394,7 @@ describe('createOrderChangeRequest', () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
-      items: [item()], changeRequests: [], packagingGroups: [],
+      items: [item()], changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [],
     });
     mocks.db.product.findMany.mockResolvedValue([
@@ -1446,7 +1446,7 @@ describe('createOrderChangeRequest', () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
-      items: [item()], changeRequests: [], packagingGroups: [],
+      items: [item()], changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [],
     });
     mocks.db.product.findMany.mockResolvedValue(products);
@@ -1481,7 +1481,7 @@ describe('createOrderChangeRequest', () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 3,
-      items: [item()], changeRequests: [], packagingGroups: [],
+      items: [item()], changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [],
     });
 
@@ -1500,7 +1500,7 @@ describe('createOrderChangeRequest', () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
-      items: [item()], changeRequests: [], packagingGroups: [],
+      items: [item()], changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [],
     });
 
@@ -1518,7 +1518,7 @@ describe('createOrderChangeRequest', () => {
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
       items: [item()],
-      changeRequests: [], packagingGroups: [], productionOperations: [],
+      changeRequests: [], shipments: [], packagingGroups: [], productionOperations: [],
     });
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
 
@@ -1551,7 +1551,7 @@ describe('createOrderChangeRequest', () => {
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
       items: [item()],
-      changeRequests: [], packagingGroups: [], productionOperations: [],
+      changeRequests: [], shipments: [], packagingGroups: [], productionOperations: [],
     });
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-off' });
 
@@ -1569,7 +1569,7 @@ describe('createOrderChangeRequest', () => {
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.IN_PRODUCTION, revision: 2, workOrderVersion: 1,
       items: [item()],
-      changeRequests: [], packagingGroups: [],
+      changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [{ id: 'op-1', reports: [{ id: 'report-1' }] }],
     };
     mocks.db.order.findUnique.mockResolvedValue(order);
@@ -1596,7 +1596,7 @@ describe('createOrderChangeRequest', () => {
       revision: 4,
       workOrderVersion: 4,
       items: [item()],
-      changeRequests: [],
+      changeRequests: [], shipments: [],
       packagingGroups: [],
       productionOperations: [
         { id: 'op-v1', reports: [{ id: 'report-v1' }] },
@@ -1630,6 +1630,57 @@ describe('createOrderChangeRequest', () => {
         }),
       }),
     );
+  });
+
+  describe('已有地址发货的待发货工单', () => {
+    const partlyShipped = () => [
+      { id: 'shipment-1', sequence: 1, destinationProvince: '广东', weightKg: new Decimal('2.000'), status: 'SHIPPED' },
+      { id: 'shipment-2', sequence: 2, destinationProvince: '湖南', weightKg: null, status: 'PLANNED' },
+    ];
+    const packingOrder = () => createRequestOrder({
+      status: OrderStatus.PACKING,
+      promisedDate: new Date('2026-09-10T00:00:00Z'),
+      shipments: partlyShipped(),
+    });
+
+    it('拒绝取消申请，不写申请记录', async () => {
+      mocks.db.order.findUnique.mockResolvedValue(packingOrder());
+      mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'cancel-1' });
+      await expect(createOrderChangeRequest({
+        orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+        type: 'CANCEL', reason: '客户不要剩余的货', items: [],
+      }, sales)).rejects.toThrow('工单已有地址发货，不能申请取消');
+      expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+      expect(mocks.db.orderLog.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: '改数量', items: [{ operation: 'UPDATE' as const, itemId: 'item-1', quantity: 1_200 }] },
+      { label: '改名称', items: [{ operation: 'UPDATE' as const, itemId: 'item-1', name: '改名红包' }] },
+    ])('$label申请被拒，已发货地址的分货不能被改写', async ({ items }) => {
+      mocks.db.order.findUnique.mockResolvedValue(packingOrder());
+      mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'modify-1' });
+      await expect(createOrderChangeRequest({
+        orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+        type: 'MODIFY', modifyKind: 'OTHER', reason: '客户加量', items,
+      }, sales)).rejects.toThrow('工单已有地址发货，只能申请修改交期');
+      expect(mocks.calculate).not.toHaveBeenCalled();
+      expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('只改交期仍可提交，并按发货状态读取地址', async () => {
+      mocks.db.order.findUnique.mockResolvedValue(packingOrder());
+      mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'due-date-request' });
+      await expect(createOrderChangeRequest(createOrderChangeRequestSchema.parse({
+        orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+        type: 'MODIFY', modifyKind: 'DUE_DATE', reason: '剩余地址延期', items: [], promisedDate: '2026-09-12',
+      }), sales)).resolves.toEqual({ id: 'due-date-request' });
+      expect(mocks.db.order.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+        select: expect.objectContaining({
+          shipments: expect.objectContaining({ select: expect.objectContaining({ status: true }) }),
+        }),
+      }));
+    });
   });
 });
 
@@ -3839,6 +3890,33 @@ describe('cancellation settlement reference', () => {
       expect(mocks.db.salaryPeriod.update).not.toHaveBeenCalled();
     });
   });
+
+  it('已有地址发货的待发货工单不能批准取消，仍可驳回', async () => {
+    const value = request({ type: OrderChangeRequestType.CANCEL, proposedChanges: { items: [] }, order: {
+      ...request().order, status: OrderStatus.PACKING, workOrderVersion: 2, settledFee: null,
+      productionWorkOrderProgress: [], productionProgressSteps: [], outsourceOrders: [],
+      shipments: [
+        { id: 'shipment-1', sequence: 1, destinationProvince: '广东', weightKg: new Decimal('2.000'), status: 'SHIPPED' },
+        { id: 'shipment-2', sequence: 2, destinationProvince: '湖南', weightKg: null, status: 'PLANNED' },
+      ],
+    } });
+    locateCancellation(value);
+    const preview = await previewOrderCancellationSettlement({ requestId: value.id, producedQty: 0 }, admin);
+    locateCancellation(value);
+    await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      producedQty: 0, settleFee: '0.00', expectedPriceRevision: preview.priceRevision, expectedQuoteToken: preview.quoteToken,
+    }, admin)).rejects.toThrow('工单已有地址发货，不能批准取消，请驳回该申请');
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.db.productionOperation.updateMany).not.toHaveBeenCalled();
+    expect(mocks.db.orderChangeRequest.update).not.toHaveBeenCalled();
+
+    locateCancellation(value);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'DENY', reviewRemark: '已有地址发货' }, admin);
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: OrderChangeRequestStatus.DENIED }),
+    }));
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('reviewOrderChangeRequest', () => {
@@ -3984,6 +4062,55 @@ describe('reviewOrderChangeRequest', () => {
       }),
     });
     expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+
+  describe('已有地址发货的待发货工单', () => {
+    const partlyShipped = () => [
+      { id: 'shipment-1', sequence: 1, destinationProvince: '广东', weightKg: new Decimal('2.000'), status: 'SHIPPED' },
+      { id: 'shipment-2', sequence: 2, destinationProvince: '湖南', weightKg: null, status: 'PLANNED' },
+    ];
+
+    it('批准改数量失败关闭，不改写已发货地址的分货和物流', async () => {
+      const base = request().order;
+      const value = request({ order: {
+        ...base, status: OrderStatus.PACKING, shipments: partlyShipped(),
+        items: [plainPrintItem({ shipmentLines: [
+          { quantity: 600, shipment: { id: 'shipment-1', sequence: 1 } },
+          { quantity: 400, shipment: { id: 'shipment-2', sequence: 2 } },
+        ] })],
+        customerCharges: [...base.customerCharges, ...base.customerCharges.map((charge) => ({
+          ...charge, id: `${charge.id}-2`, shipmentId: 'shipment-2',
+          businessKey: charge.businessKey.replace('SHIPMENT:1:', 'SHIPMENT:2:'),
+        }))],
+      } });
+      locate(value);
+      mocks.calculate.mockImplementationOnce(
+        async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+      );
+      await expect(reviewOrderChangeRequest({
+        requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+        expectedPriceRevision: 5, expectedQuoteToken: quoteToken,
+      }, admin)).rejects.toThrow('工单已有地址发货，不能批准款式或数量修改，请驳回该申请');
+      expect(mocks.calculate).not.toHaveBeenCalled();
+      expectNoApprovalMutation();
+    });
+
+    it('只改交期仍可批准，并按发货状态读取地址', async () => {
+      const value = request({ proposedChanges: { items: [], promisedDate: '2026-09-20' },
+        order: { ...request().order, status: OrderStatus.PACKING, promisedDate: null, shipments: partlyShipped() } });
+      locate(value);
+      mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+      await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+      expect(mocks.db.orderChangeRequest.findUnique).toHaveBeenLastCalledWith(expect.objectContaining({
+        include: expect.objectContaining({ order: expect.objectContaining({ include: expect.objectContaining({
+          shipments: expect.objectContaining({ select: expect.objectContaining({ status: true }) }),
+        }) }) }),
+      }));
+      expect(mocks.db.orderShipmentLine.upsert).not.toHaveBeenCalled();
+      expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ status: 'APPROVED' }),
+      }));
+    });
   });
 
   it.each([
