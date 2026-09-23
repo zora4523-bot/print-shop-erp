@@ -106,6 +106,9 @@ type OssStreamClient = {
 };
 
 type BundleUpload = {
+  // 等一个外部异步步骤（如 GET 响应头）；等待期间流水线失败立即 reject，
+  // 迟到的结果交给 discard 释放（ali-oss 的请求不接受 AbortSignal）。
+  guard<T>(pending: Promise<T>, discard: (late: T) => void): Promise<T>;
   // 追加一个条目，等 archiver 把它处理完再返回；任一环节失败立即 reject。
   append(source: Readable, name: string): Promise<void>;
   // finalize 与 PUT 都完成才 resolve；任一失败立即 reject。
@@ -155,6 +158,16 @@ function startBundleUpload(client: OssStreamClient, zipObjectKey: string): Bundl
       (err: unknown) => abort(toError(err)),
     );
 
+  const guard = <T>(pending: Promise<T>, discard: (late: T) => void): Promise<T> => {
+    pending.then(
+      (value) => {
+        if (failure) discard(value);
+      },
+      () => {},
+    );
+    return Promise.race([failed, pending]);
+  };
+
   const append = (source: Readable, name: string): Promise<void> => {
     if (failure) {
       source.destroy();
@@ -183,7 +196,7 @@ function startBundleUpload(client: OssStreamClient, zipObjectKey: string): Bundl
     if (failure) throw failure;
   };
 
-  return { append, finish, abort };
+  return { guard, append, finish, abort };
 }
 
 async function generateRealZip(
@@ -233,9 +246,10 @@ async function generateRealZip(
       context.signal?.throwIfAborted();
       // 逐个打开：上一个条目处理完才发起下一个 GET，排队中的响应不会因
       // 长时间空闲被 agentkeepalive 销毁。
-      const result = await client.getStream(entry.objectKey, {
-        timeout: DESIGN_GET_TIMEOUT,
-      });
+      const result = await upload.guard(
+        client.getStream(entry.objectKey, { timeout: DESIGN_GET_TIMEOUT }),
+        (late) => (late.stream as Readable | undefined)?.destroy(),
+      );
       const baseName = `${entry.orderNo}/${entry.fileName}`;
       const seen = usedNames.get(baseName) ?? 0;
       usedNames.set(baseName, seen + 1);

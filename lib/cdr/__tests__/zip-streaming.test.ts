@@ -169,6 +169,34 @@ describe('uploadBundleZip — 真实 archiver 流式失败必须及时结束', (
     ).rejects.toThrow('CDR bundle lease lost');
   });
 
+  it('GET 还在等响应时 PUT 失败 → 不等 GET，及时 reject；迟到的响应流被销毁', async () => {
+    let rejectPut: (err: Error) => void = () => {};
+    putStreamMock.mockImplementation(
+      (_key: string, stream: Readable) =>
+        new Promise((_, reject) => {
+          stream.resume();
+          rejectPut = reject;
+        }),
+    );
+    let resolveGet: (value: { stream: Readable }) => void = () => {};
+    getStreamMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveGet = resolve;
+        }),
+    );
+
+    const pending = uploadBundleZip(twoFiles, realOpts);
+    await vi.waitFor(() => expect(getStreamMock).toHaveBeenCalledTimes(1));
+    rejectPut(new Error('AccessDenied: bundles'));
+    await expect(withinDeadline(pending)).rejects.toThrow('AccessDenied: bundles');
+
+    const late = chunkedStream(Buffer.from('late-bytes'));
+    resolveGet({ stream: late });
+    await vi.waitFor(() => expect(late.destroyed).toBe(true));
+    expect(getStreamMock).toHaveBeenCalledTimes(1);
+  });
+
   it('设计文件逐个打开：上一个读完才发起下一个 GET，排队的 socket 不会空闲超时', async () => {
     const { put } = collectingPut();
     putStreamMock.mockImplementation(put);
