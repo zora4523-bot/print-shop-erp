@@ -104,10 +104,11 @@ export function ProgressReportForm({
   );
 }
 
+// 回到不带批次号的入口，由页面按本人最新报工条数重新推导批次：本批已入账就得到新批次，
+// 尚未入账则仍是本批；不在客户端自增，避免跳号后与重新进入推导出的批次相撞。
 function nextBatchHref(targetId: string, key: string): string | undefined {
   if (!/^batch:(0|[1-9]\d{0,8})$/.test(key)) return undefined;
-  const sequence = Number(key.slice(6));
-  return sequence < 999_999_999 ? `/worker/tasks/${encodeURIComponent(targetId)}?reportBatch=${sequence + 1}` : undefined;
+  return `/worker/tasks/${encodeURIComponent(targetId)}`;
 }
 
 type ReportFormState =

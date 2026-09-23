@@ -71,7 +71,7 @@ test('不同师傅个人价、未来生效、切回统一价、历史和账号�
     }
     expect((await c.query('SELECT id, amount::text, snapshot FROM "ProductionReport" WHERE id=ANY($1::text[])', [old.map((r) => r.id)])).rows).toEqual(old);
     await publish(page, workerA, null);
-    await a.reload(); await expect(a.getByText(/本人适用工价/)).toContainText('统一工价'); await report(a);
+    await a.goto(task); await expect(a.getByText(/本人适用工价/)).toContainText('统一工价'); await report(a);
     await publish(page, workerB, '0.9000', true);
     await b.reload(); await expect(b.getByText(/本人适用工价/)).toContainText('0.4321');
     // Database guard must independently reject using a different account's price.

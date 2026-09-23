@@ -250,7 +250,9 @@ test('报工刷新重提不重复入账，显式再报一批允许相同数量',
     await submit(REPEATED_BATCH_TEXT);
     await expect.poll(countReports).toBe(before + 1);
     await page.getByRole('link', { name: '再报一批', exact: true }).click();
-    await expect(page).toHaveURL(`/worker/tasks/${fixture.operationId}?reportBatch=${batch + 1}`);
+    // 再报一批回到入口，由本人已有报工条数推导新批次（夹具跨运行保留，条数不固定）。
+    await expect(page).toHaveURL(new RegExp(`/worker/tasks/${fixture.operationId}\\?reportBatch=\\d+$`));
+    await expect(page).not.toHaveURL(`/worker/tasks/${fixture.operationId}?reportBatch=${batch}`);
     await submit();
     await expect.poll(countReports).toBe(before + 2);
     await expectNoNextErrorOverlay(page);
