@@ -206,6 +206,27 @@ describe('SDK-internal metadata', () => {
     expect(metadata.capturedSpanScope._client._options.tunnel).toBe(PATH);
   });
 
+  // The one metadata member that IS sent: Sentry copies it into the envelope
+  // `trace` header (createEventEnvelopeHeaders).
+  it('still scrubs the dynamic sampling context that becomes the envelope trace header', () => {
+    const metadata = {
+      ...sdkLikeMetadata(),
+      dynamicSamplingContext: {
+        trace_id: 'a'.repeat(32),
+        public_key: 'public',
+        transaction: `GET ${PATH}?q=张三#top`,
+      },
+    };
+    const event = { message: `failed ${PATH}`, sdkProcessingMetadata: metadata };
+
+    expect(() => scrubSentryEvent(event)).not.toThrow();
+    expect(metadata.dynamicSamplingContext).toEqual({
+      trace_id: 'a'.repeat(32),
+      public_key: 'public',
+      transaction: 'GET /api/cdr/bundles/[token]',
+    });
+  });
+
   it('does not reassign unchanged values, so read-only event members survive', () => {
     const extra = { note: 'plain text' };
     Object.defineProperty(extra, 'computed', { enumerable: true, get: () => 'no token here' });

@@ -30,9 +30,10 @@ export function redactCdrBundleToken(value: string): string {
 }
 
 // Present while beforeSend / beforeSendTransaction run, deleted by the SDK
-// when it builds the envelope (never sent). It holds live scopes and the
-// client, whose getter-only members make blind reassignment throw — and a
-// throwing hook drops the whole event.
+// when it builds the envelope. It holds live scopes and the client, whose
+// getter-only members make blind reassignment throw — and a throwing hook
+// drops the whole event. Only its dynamicSamplingContext is sent (copied
+// into the envelope `trace` header), so that member is scrubbed on its own.
 const SDK_INTERNAL_EVENT_KEYS = new Set(['sdkProcessingMetadata']);
 
 // Mutates in place and only writes a string back when redaction changed it,
@@ -188,8 +189,21 @@ export function scrubSentryEvent<T>(event: T): T {
     }
   }
 
+  scrubDynamicSamplingContext(
+    (event as { sdkProcessingMetadata?: { dynamicSamplingContext?: unknown } })
+      .sdkProcessingMetadata?.dynamicSamplingContext,
+  );
   redactStringsDeep(event, new WeakSet(), SDK_INTERNAL_EVENT_KEYS);
   return event;
+}
+
+function scrubDynamicSamplingContext(dsc: unknown): void {
+  if (!dsc || typeof dsc !== 'object') return;
+  const record = dsc as Record<string, unknown>;
+  if (typeof record.transaction === 'string') {
+    record.transaction = stripUrlQueryAndFragment(record.transaction);
+  }
+  redactStringsDeep(record, new WeakSet());
 }
 
 /** Shared Sentry.init hooks for the Web runtime and the background worker. */
