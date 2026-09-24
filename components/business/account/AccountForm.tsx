@@ -75,8 +75,6 @@ const ROLE_OPTIONS = [
 const WORKER_TYPE_OPTIONS = [
   WorkerType.MACHINE,
   WorkerType.PACKER,
-  WorkerType.CLEANER,
-  WorkerType.COOK,
 ] as const;
 
 const MACHINE_TYPE_OPTIONS = [

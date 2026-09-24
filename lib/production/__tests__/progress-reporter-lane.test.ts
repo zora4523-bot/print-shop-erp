@@ -26,7 +26,7 @@ describe('progress craft lane', () => {
   });
   it('non-machine lane uses job type without imposing a personal assignment', async () => {
     const { db, findMany } = client();
-    await progressCraftIdsForReporter(db, { ...account, workerType: WorkerType.CLEANER, machineType: null });
-    expect(findMany).toHaveBeenCalledWith({ where: { isActive: true, isOutsource: false, defaultWorkerType: 'CLEANER' }, select: { id: true } });
+    await progressCraftIdsForReporter(db, { ...account, workerType: WorkerType.PACKER, machineType: null });
+    expect(findMany).toHaveBeenCalledWith({ where: { isActive: true, isOutsource: false, defaultWorkerType: 'PACKER' }, select: { id: true } });
   });
 });

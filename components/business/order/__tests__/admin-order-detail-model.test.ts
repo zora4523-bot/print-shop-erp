@@ -249,8 +249,8 @@ describe('admin order detail projection', () => {
     const input = fixture();
     input.productionOperations = [{ id: 'lane', carriedCompletedQty: new Decimal('100'), sources: [{ orderItemId: 'item-1' }, { orderItemId: 'item-2' }] }] as unknown as NonNullable<AdminOrderDetailInput['productionOperations']>;
     expect(buildAdminOrderDetailModel(input).items[0]!.progress).toEqual([]);
-    input.productionProgressSteps = [{ id: 'step', orderItemId: 'item-1', craftName: '清废', plannedQty: new Decimal('1000'), carriedCompletedQty: new Decimal('100'), reports: [{ completedQty: new Decimal('200') }, { completedQty: new Decimal('300') }] }] as unknown as NonNullable<AdminOrderDetailInput['productionProgressSteps']>;
-    expect(buildAdminOrderDetailModel(input).items[0]!.progress).toEqual([{ label: '清废', done: '600', total: '1000', unit: '个' }]);
+    input.productionProgressSteps = [{ id: 'step', orderItemId: 'item-1', craftName: '粘封', plannedQty: new Decimal('1000'), carriedCompletedQty: new Decimal('100'), reports: [{ completedQty: new Decimal('200') }, { completedQty: new Decimal('300') }] }] as unknown as NonNullable<AdminOrderDetailInput['productionProgressSteps']>;
+    expect(buildAdminOrderDetailModel(input).items[0]!.progress).toEqual([{ label: '粘封', done: '600', total: '1000', unit: '个' }]);
   });
 
   it('keeps only current-version work reports without inventing a cumulative total', () => {

@@ -50,8 +50,6 @@ describe('current production print access', () => {
     [WorkerType.MACHINE, MachineType.WINDMILL, PieceworkOperationType.FULL],
     [WorkerType.PACKER, null, PieceworkOperationType.PACKING],
     [WorkerType.MACHINE, MachineType.GLUE, null],
-    [WorkerType.CLEANER, null, null],
-    [WorkerType.COOK, null, null],
   ])('limits %s/%s to current, non-cancelled lane %s or public progress', async (workerType, machineType, operationType) => {
     dbMock.user.findUnique.mockResolvedValue({ role: Role.WORKER, isActive: true, workerType, machineType });
     const scope = await getOrderPrintScope('order-1', { id: 'worker-1', role: Role.WORKER });

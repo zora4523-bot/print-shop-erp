@@ -183,7 +183,7 @@ describe('missing detail-page metadata', () => {
   });
 
   it('uses a non-enumerating missing-record fallback for worker salary', async () => {
-    getSessionMock.mockResolvedValue(session(Role.WORKER, WorkerType.CLEANER));
+    getSessionMock.mockResolvedValue(session(Role.WORKER, WorkerType.PACKER));
     getWorkerHourlySalaryMock.mockResolvedValue(null);
 
     await expect(

@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  MachineType,
   PieceworkOperationType,
   PieceworkRateUnit,
   ProductionOperationStatus,
@@ -68,11 +69,11 @@ beforeEach(() => {
 });
 
 describe('no-pay production progress portal', () => {
-  it('清废岗位只读取其工艺车道进度', async () => {
+  it('无计件岗位只读取其工艺车道进度', async () => {
     dbMock.user.findUnique.mockResolvedValue({
-      id: 'cleaner-1',
-      workerType: WorkerType.CLEANER,
-      machineType: null,
+      id: 'glue-1',
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.GLUE,
       role: Role.WORKER,
       isActive: true,
     });
@@ -81,8 +82,8 @@ describe('no-pay production progress portal', () => {
         id: 'progress-1',
         orderId: 'order-1',
         workOrderVersion: 1,
-        craftCode: 'CLEANING',
-        craftName: '清废',
+        craftCode: 'GLUING',
+        craftName: '粘封',
         status: ProductionOperationStatus.IN_PROGRESS,
         plannedQty: new Decimal(100),
         createdAt: new Date('2026-08-28T00:00:00.000Z'),
@@ -106,13 +107,13 @@ describe('no-pay production progress portal', () => {
 
     await expect(
       listProductionProgressForReporter({
-        id: 'cleaner-1',
+        id: 'glue-1',
         role: Role.WORKER,
       }),
     ).resolves.toEqual([
       expect.objectContaining({
         id: 'progress-1',
-        craftCode: 'CLEANING',
+        craftCode: 'GLUING',
         completedQty: '40',
         defectQty: '2',
         reworkQty: '1',
@@ -334,7 +335,7 @@ it('detail readers use the same active order predicate as their lists', async ()
 });
 
 it('rejects a worker without a paid lane before reading paid operation details', async () => {
-  dbMock.user.findUnique.mockResolvedValue({ id: 'cleaner', role: Role.WORKER, isActive: true, workerType: WorkerType.CLEANER });
-  await expect(getProductionOperationForReporter('packing-1', { id: 'cleaner', role: Role.WORKER })).rejects.toThrow();
+  dbMock.user.findUnique.mockResolvedValue({ id: 'glue', role: Role.WORKER, isActive: true, workerType: WorkerType.MACHINE, machineType: MachineType.GLUE });
+  await expect(getProductionOperationForReporter('packing-1', { id: 'glue', role: Role.WORKER })).rejects.toThrow();
   expect(dbMock.productionOperation.findFirst).not.toHaveBeenCalled();
 });

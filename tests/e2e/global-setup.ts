@@ -28,7 +28,7 @@ export const E2E_PASSWORD = 'e2e-test-password-1234';
 // String literal unions matching the Prisma enums; we don't import
 // the generated enums object (CJS / ESM tangle, see file header).
 type Role = 'ADMIN' | 'SALES' | 'CUSTOMER_SERVICE' | 'WORKER';
-type WorkerType = 'MACHINE' | 'PACKER' | 'CLEANER' | 'COOK';
+type WorkerType = 'MACHINE' | 'PACKER';
 type MachineType = 'HAND_PRESS' | 'WINDMILL' | 'GLUE';
 type EmploymentType = 'FULL_TIME' | 'PART_TIME' | 'TEMPORARY';
 

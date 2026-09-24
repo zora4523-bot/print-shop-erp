@@ -875,8 +875,8 @@ describe('order detail commercial visibility', () => {
     productionProgressStepsMock.mockResolvedValue([
       {
         id: 'progress-1',
-        craftCode: 'CLEANING',
-        craftName: '清废',
+        craftCode: 'GLUING',
+        craftName: '粘封',
         status: ProductionOperationStatus.IN_PROGRESS,
         plannedQty: '100',
         orderItemId: 'item-1',
@@ -893,7 +893,7 @@ describe('order detail commercial visibility', () => {
 
     expect(html).toContain('无计件生产进度');
     expect(html).toContain('无计件进度（不计薪）');
-    expect(html).toContain('清废：进行中（40/100）');
+    expect(html).toContain('粘封：进行中（40/100）');
     expect(html).not.toContain('提交扫码报工');
   });
 
