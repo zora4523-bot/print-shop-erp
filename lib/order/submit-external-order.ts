@@ -1314,8 +1314,14 @@ function assertFinalizedQuoteAcknowledged(
   const confirmedItems = order.items.filter((item) =>
     hasAdminCreatePrice(order, item),
   );
+  // Persistence keeps the saved subtotal for trusted AND stale negotiated
+  // packaging prices (see the packaging loop in finalizeExternalOrderQuoteInTx);
+  // the confirmation amount and token must describe the same facts.
   const confirmedGroups = order.packagingGroups.filter((group) =>
-    hasAdminPackagingPrice(order, group),
+    hasAdminPackagingPrice(order, group) || hasStaleAdminPackagingPrice(order, group),
+  );
+  const hasStalePackagingPrice = order.packagingGroups.some((group) =>
+    hasStaleAdminPackagingPrice(order, group),
   );
   const confirmedDelta = confirmedItems
     .reduce(
@@ -1380,6 +1386,11 @@ function assertFinalizedQuoteAcknowledged(
               ...confirmedGroups.map((group) => ({
                 id: group.id,
                 snapshot: group.pricingSnapshot,
+                // A stale negotiated price is no longer bound by its snapshot;
+                // the saved amounts that persistence will use are.
+                ...(hasStaleAdminPackagingPrice(order, group)
+                  ? { saved: { unitPrice: String(group.unitPrice), subtotal: String(group.subtotal) } }
+                  : {}),
               })),
             ],
           }
@@ -1411,6 +1422,7 @@ function assertFinalizedQuoteAcknowledged(
               (group) => String(group.sequence) === line.groupKey,
             ),
         ) &&
+        !hasStalePackagingPrice &&
         logisticsPreview.complete &&
         !presentation.plateFee
         ? OrderQuotedFeeCompleteness.COMPLETE
