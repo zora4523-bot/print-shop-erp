@@ -282,6 +282,7 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
             subtotal: 'subtotal' in item ? String(item.subtotal) : null,
             details: (
               <OrderSavedItemDetails
+                key={item.id}
                 order={order}
                 item={item}
                 includeDesigns={false}
@@ -318,7 +319,7 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
               expressCode: row.expressCode,
               destinationProvince: row.destinationProvince,
             })),
-            packagingDetails: <OrderSavedPackaging order={order} />,
+            packagingDetails: <OrderSavedPackaging key="packaging" order={order} />,
             isExternalSales: external,
             isSfCollect: order.isSfCollect,
             blocked: Boolean(pending),
@@ -339,13 +340,13 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
           }}
           pendingNotice={
             pending ? (
-              <PendingModificationNoticeSection {...{
+              <PendingModificationNoticeSection key="pending" {...{
                 pending: pending, id: id,
               }} />
             ) : null
           }
           itemRemarks={!pending ? (
-            <section aria-label="款式备注" className="space-y-4">
+            <section key="item-remarks" aria-label="款式备注" className="space-y-4">
               {order.items.map((item) => (
                 <OrderItemRemarkForm key={`${item.id}:${order.editVersion}`} orderId={order.id}
                   itemId={item.id} sequence={item.sequence} version={order.editVersion} initial={item.remark} />
@@ -357,6 +358,7 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
             !order.shipments.some((row) => row.status === 'SHIPPED') &&
             'priceRevision' in order ? (
               <AddOrderShipmentForm
+                key="add-shipment"
                 orderId={order.id}
                 expectedRevision={order.revision}
                 expectedEditVersion={order.editVersion}
@@ -379,7 +381,7 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
               />
             ) : null
           }
-          fees=<EditorFeesSection {...{
+          fees=<EditorFeesSection key="fees" {...{
               order, external, pending, pricingPending,
               canPrice, canCorrectFreight,
             }} />
