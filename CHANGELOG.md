@@ -2,15 +2,35 @@
 status: historical
 owner: project-maintainers
 last_verified: 2026-08-24
-applies_to: SPEC v1.0 through v1.2.1; not product releases
+applies_to: SPEC v1.0 through v1.2.1 plus SPEC addenda (2026-09-24 §L); not product releases
 ---
 
 # SPEC 变更日志
 
 > 本文件只记录业务规格与技术基线在 v1.0–v1.2.1 期间的历史变化，**不是当前产品发布日志**。
+> 2026-09-24 起，SPEC 补充章节与代码冲突的处理按 CLAUDE.md §9.3 也记在这里（新条目在最上方）。
 > 仓库目前没有可据实补写的正式产品 release 清单，因此不从未提交工作区、计划或测试结果伪造版本。
 > 产品发布记录的建立与字段要求见
 > [`CONTRIBUTING.md` 的“产品发布记录策略”](./CONTRIBUTING.md#产品发布记录策略)。
+
+## 2026-09-24 SPEC 补充 §L：删除客服、内部/工厂直单结算、清废与厨师（业主决定）
+
+本条按 CLAUDE.md §9.3 记录 SPEC 与代码的冲突及解决方式。冲突来源不是代码偏离 SPEC，而是业主
+2026-09-24 决定删除一批业务（DECISIONS 同日四条），代码先按决定删除，SPEC 随后同步。
+
+| SPEC 原描述 | 现状（以 §L 为准） | 处理 |
+|---|---|---|
+| §1.1、§2.1、§2.2：客服 `CUSTOMER_SERVICE` 角色及权限列 | `Role = ADMIN \| SALES \| WORKER` | 删除客服角色与权限列 |
+| §J.1：客服 → `INTERNAL_SALES`、管理员未关联销售 → `FACTORY_DIRECT` | 只有 `EXTERNAL_SALES` 与免费重做 `NO_CHARGE`；管理员建单必须选择外部销售 | 删除两行结算方向，§3.1 写明管理员代建规则 |
+| §3.7、§5.3、§5.5、§7.3：客服周期、提成、历史业绩导入 | 全部删除（含 cron `cs-settle` / `cs-period-ending`、通知 `CS_PERIOD_*`） | 章节保留编号，标记“已删除” |
+| §2.1、§6.1：清废 `CLEANER`、厨师 `COOK`、清废工艺 `CLEANING` | `WorkerType = MACHINE \| PACKER`，清废工艺删除 | 删除对应岗位与工艺行 |
+| §3.9、§5.4、§7.4：时薪工月结生成（含加班倍率、厨师月薪） | 不再生成；打包旧月结只读存档，存档月考勤冻结；cron `hourly-payroll` 删除 | 改写为存档口径，示例标记已删除 |
+| §3.6：部分发货后能否取消未写明 | 任一地址发货后没有取消选项，修改申请只能改交期 | 补写规则 |
+| §8.1：15 个通知事件 | 13 个 | 删除两行客服周期事件 |
+
+章节编号保持不变，历史提交中的 “SPEC §x” 引用仍可对照；被删除章节只保留一行说明。
+
+---
 
 ## v1.2.1 技术栈校准（2026-04-22，脚手架初始化时发现）
 
