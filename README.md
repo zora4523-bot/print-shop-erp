@@ -205,7 +205,7 @@ pnpm dev
 | `DATABASE_URL` | Pigsty PG 连接串 | 应用起不来 |
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
-| `CRON_SECRET` | Web/worker 服务端校验 cron endpoints 的 `Authorization: Bearer <secret>` | 10 个 `/api/cron/*` 全部 503 |
+| `CRON_SECRET` | Web/worker 服务端校验 cron endpoints 的 `Authorization: Bearer <secret>` | 7 个 `/api/cron/*` 全部 503 |
 | `BACKGROUND_JOBS_MODE` | 生产设 `durable`，通知/cron/PDF/CDR/工单导出进 PostgreSQL 任务账本 | `inline` 会失去持久重试和资源隔离 |
 | `ORDER_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的私有 XLSX 目录，单机建议 `/var/tmp/print-shop-erp/order-exports` | 留空回退到系统临时目录；多机或临时目录清理后待下载文件会丢失 |
 | `AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的月账单 XLSX 私有目录，必须与工单导出目录分离 | 留空回退到独立系统临时目录；多机部署时会无法稳定下载 |
@@ -247,7 +247,7 @@ Bot ID + Secret 智能机器人使用企业微信官方的
 
 ### 2. Cron 调度：服务端环境 + root-only 发送文件
 
-P0 + P1 #2 期间建立的 cron 通道现有 10 个 endpoints，用 shared-secret + 外部 cron 调用。
+cron 通道现有 7 个 endpoints（2026-09-24 删除 `hourly-payroll`、`cs-settle`、`cs-period-ending`），用 shared-secret + 外部 cron 调用。
 
 > 调度时间的唯一事实源是 `deploy/crontab.example`。下方命令仅用于人工触发示例，
 > 不定义生产执行时间。
@@ -300,7 +300,7 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 角色可通过 `current_setting()` 读取数据库级设置。
 `pg_cron` + `pg_net` HTTP 调度已经退役，前向迁移会撤销遗留 ERP job 并清理旧设置。
 
-**10 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
+**7 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
 ### 3. 备份（pgBackRest）
 
