@@ -16,6 +16,8 @@
 
 ## 当前任务
 
+2026-09-25：**文档同步（仅文档，不改代码）**。分支 `codex/docs-sync-0925`（基于 `4800b043`，未推送）。以 HEAD 代码与 `37313bad..4800b043` 的提交为准，把现行文档与 2026-09-24 业主决定（删除客服 / 内部与工厂直单结算 / 清废厨师 / 时薪月结生成、发货后无取消、历史清理脚本）和 GPT-6 对抗审查的 11 个修复提交（`3402cd7f`..`4800b043`）对齐：SPEC 补 §L 第 5 条与 §3.1 / §3.6 / §J.3 / §E.1 / §G.1 / §H.4；CLAUDE.md 1.5（计数、`db` 直连 8 处、已删除任务不可重试）；README / ARCHITECTURE / DATABASE / API / DEVELOPMENT / DEPLOYMENT / TROUBLESHOOTING / UI-SYSTEM / PIGSTY-EXTENSIONS；部署指南新增三条迁移的只读预查与部署后验收 SQL；[上线前置操作清单](docs/上线前置操作清单.md) 按下一批发布重写；9 份过程文件归档到 `docs/archive/`（清单见其 README），留在原处的带日期文档加“历史记录”提示；DECISIONS 追加 2026-09-25 四条；[09-23 证据审查](docs/audits/2026-09-23-evidence-review.md) 补 §7（GPT-6 审查 13 项结论与验证数字）。**下一步**：按「卡住的问题 → 2026-09-24 删除客服 / 清废厨师之后」逐项完成部署前置；OPEN 项等业主拍板。
+
 2026-09-24：**按业主当日四项决定删除客服、内部/工厂直单结算、清废/厨师与时薪月结生成，发货后无取消，并提供历史数据清理脚本**（DECISIONS 2026-09-24 四条，SPEC 新增 §L）。分支 `codex/remove-cs-cleaner-cook`（基于 `37313bad`，已合入 `codex/maindev` 的 `2520cef0`；未推送、未部署）。代码：`Role = ADMIN | SALES | WORKER`，`OrderSettlementType = EXTERNAL_SALES | NO_CHARGE`，管理员建单必须选择外部销售；`WorkerType = MACHINE | PACKER`，时薪月结只剩打包只读存档、存档月考勤冻结；cron 剩 7 个（删除 `hourly-payroll`、`cs-settle`、`cs-period-ending`）；任一地址发货后所有界面都没有取消、改单只剩交期；新增 `scripts/maintenance/cleanup-stuck-production-history.ts`（M-7 / L-14，默认只读 dry-run）。两条新迁移 `20260924100000_remove_cleaner_cook_cleaning`、`20260924110000_remove_customer_service_role` 遇到业务数据引用即整体中止（fail closed）。文档已同步：SPEC（§L、§J、§1–§3、§5–§9、附录）、CLAUDE.md 1.4、DECISIONS、09-23 审查记录 §6、CHANGELOG 及现行 docs。**下一步**：见下方「卡住的问题 → 2026-09-24 删除客服 / 清废厨师之后」各项，部署前逐项完成。
 
 2026-09-24：**证据驱动全仓审查与整改**（记录见 [docs/audits/2026-09-23-evidence-review.md](docs/audits/2026-09-23-evidence-review.md)）。整改在独立分支 `codex/audit-fixes` 上完成（基线 `02ae7026`，未推送、未部署、未合并），没有碰主检出里的在制改动。共修 30 项：2 项高危（彩印浮雕、激凸、反面烫金转人工核价；取消申请冲销客服业绩）、13 项中危、15 项低危，其中 L-11 只做到部分修复。H-3（取消费入账）业主本轮决定不动。集成验证：architecture、backup、lint、typecheck、dead-code 全部通过；全量 Vitest（开发库）7831 项通过、0 失败，覆盖率高于门禁；浏览器组件 821 项通过；E2E 20 个 spec 56 通过，5 个失败已逐一归因（2 个基线上同样失败，2 个复跑通过，1 个用例已随 M-2 同步修好）。隔离库 `erp_e2e_20260923_audit`、`erp_e2e_20260923_base` 用完即删。**合并前**：先让在制改动的作者处理 M-15、L-17、N-5 并确定 H-3 方向；合并时 `lib/auth/credentials.ts` 要保留「先比较、后判定」的结构，并与 `isRetiredWorkerType` 合在一起。（同日稍后：M-15、L-17、N-5 已随清废/厨师彻底删除而消失，见上一条。）
@@ -283,8 +285,8 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 - remote：`https://github.com/zora4523-bot/print-shop-erp.git`（**私有，HTTPS**）。开发机 SSH 不通，**不要把 remote 改回 SSH**。
 - 远端只有 `main` 与 `codex/*`（`codex/fabuceshi`、`codex/gongdan`），**没有 `dev`**。PR #19 的两个分支已于 09-15 删除；
   `main` 头为 `d283b5a5`。本文档的更新走 `codex/memory-after-pr19` 分支的 PR。
-- **生产未动。** <https://bag.sshapi.cn> 上次记录仍是 `aa42ba0`（2026-08-02）/ 45 项 migration；本地迁移链已有 146 项。
-  这些都**不是生产已 apply 事实**，部署前必须重新核对。
+- **生产**：<https://bag.sshapi.cn> 运行 `ef6fa012` / 160 项 migration（2026-09-21，见顶部「当前生产状态」）；仓库迁移链已有 165 项，
+  多出的 5 项未在生产执行，部署前必须重新核对（[上线前置操作清单](docs/上线前置操作清单.md)）。
 - 本机开发库加工费价目簿已到 v10（`2026-09-13-attained-custom-tiers`），v8 是 print-sentinel 迁移版。
   golden-gate 测试现在按谱系读 v8，**不要**为了让它过去回滚开发库版本。
 
@@ -356,7 +358,7 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
    当成已拍板；那三个文件的拆分没有立项。
 
 
-**部署前仍必须先做（顺序不能反）**
+**部署前仍必须先做（顺序不能反）**——历史：以下 1–9 为 2026-08-21 批次的部署前置，相关迁移已随 09-17 / 09-19 / 09-21 三次发布应用到生产，不再适用于下一批；下一批见 [上线前置操作清单](docs/上线前置操作清单.md)。原步骤 1 引用的旧清单“§一”已随清单重写移除，原文见 `git show 4800b043:docs/上线前置操作清单.md`。
 
 1. **跑 `docs/上线前置操作清单.md` §一的"底数核对" + 查询 1**（只读，可反复跑）。
    ⚠️ **查询 1 返回 0 行有两种完全不同的含义**：真的没缺口，或谓词根本没匹配到任何东西。2026-08-21 在开发库上实测就是后者（6 个外协工艺、1 张有效外协单，但"应外协款式数 = 0"），那次执行**只证明了 SQL 语法可用，没有证明判定逻辑对**。先看底数核对的三个数字再解读查询 1。
@@ -391,13 +393,16 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ### 2026-09-24 删除客服 / 清废厨师之后（部署前必做与待业主拍板）
 
-- **生产部署前查询两条迁移的 fail-closed 条件**：`20260924100000_remove_cleaner_cook_cleaning`（清废/厨师账号、考勤快照、空闲打包工时、清废/厨师月结、派工岗位、工艺接单岗位、CLEANING 的款式/派工/日工资/待审改单/进度引用、运行中的时薪任务）与 `20260924110000_remove_customer_service_role`（客服账号、客服提交工单、内部/工厂直单结算的工单/改价快照/价目簿、客服考勤与审计日志、四张客服表的数据、运行中的客服任务）。只读查询，任一命中即迁移会中止，需业主决定如何处理对应历史数据后再部署。
+- **生产部署前查询两条迁移的 fail-closed 条件**（可直接运行的只读 SQL 见 [部署指南「删除客服 / 清废厨师的三条迁移」](docs/部署指南.md#删除客服--清废厨师的三条迁移2026-09-24)，第三条 `20260924150000_prune_removed_sensitive_column_policies` 无前置、部署后验收 `dangling_policies = 0`）：`20260924100000_remove_cleaner_cook_cleaning`（清废/厨师账号、考勤快照、空闲打包工时、清废/厨师月结、派工岗位、工艺接单岗位、CLEANING 的款式/派工/日工资/待审改单/进度引用、运行中的时薪任务）与 `20260924110000_remove_customer_service_role`（客服账号、客服提交工单、内部/工厂直单结算的工单/改价快照/价目簿、客服考勤与审计日志、四张客服表的数据、运行中的客服任务）。只读查询，任一命中即迁移会中止，需业主决定如何处理对应历史数据后再部署。
 - **生产 crontab 删除 3 行并重装**：`hourly-payroll`、`cs-settle`、`cs-period-ending`，按 `docs/部署指南.md` 的 `install` + `crontab` 两步重装，再 `sudo crontab -l` 确认。
 - **清理脚本生产 dry-run 待业主核对**：`scripts/maintenance/cleanup-stuck-production-history.ts --database=<库名>` 只读输出后交业主核对数量与 id，业主确认并指定 `--actor` 后才 `--apply`（DECISIONS 2026-09-24）。
 - **外部销售表单是否支持手填款名**：合并 `2520cef0` 时内部表单的自动款名修复成为死代码已移除；外部销售表单沿用自动款名，是否保留手填款名待业主决定。
 - **H-3 / B8 取消费入账（仍待定）**：真值文档 `docs/工单变更与版本规则.md:103` 规定有 settledFee 就要收钱。HEAD 上 `86603e71` 的对账闸口会让含取消单的代理商整月出不了账；在制改动把 CANCELLED 从候选中剔除后，取消费会被静默漏收。两种状态都没有发布，业主尚未拍板。
 - **仍待业主决策的审计口径**：**N-4** SQL 冲正后进度不可更正；**N-6** 工单级只读视图是否按车道收紧；**L-16** ORDER_SUBMITTED 推送摘要口径。（H-2、L-11、N-2、N-3、直营单取消、M-15、L-17、N-5 已随 09-24 决定失效或解决。）
-- **既有 E2E 失败**：`inventory-flow` 在首笔出入库就失败；`owner-dashboard` 的夹具仍写旧 Bill 表。两者在基线上同样失败，需要另立任务。
+- **非彩印专版烫金带反面颜色（OPEN，勿替业主决定）**：现行代码以“专版烫金只能使用正面”拒绝，与 DECISIONS 2026-08-27“合法但待人工定价”不一致；彩印叠加（局部或专版）部分已按该决策转人工（`4800b043`，DECISIONS 2026-09-25）。
+- **升级前 RETRYING 通知的边角（OPEN）**：已删除事件的通知不再允许“确认未送达并重发”（`3ebdfb2d`），但升级前已处于 `RETRYING` 的日志在其最后一条 `UNKNOWN` 日志被确认已送达时仍可能重新入队；是否另修待定。
+- **生产 nginx**：同步 `erp_redacted` 日志格式（见「下一步具体指令」09-23 条），部署同批执行。
+- **既有 E2E 失败**：`inventory-flow` 在首笔出入库就失败（2026-09-24 在 `4800b043` 上复跑仍是唯一失败，86 通过）。`owner-dashboard` 已在 `b5bb7d95` 随客服删除改夹具，同一轮通过。`inventory-flow` 需要另立任务。
 
 ### 需业主确认（2026-09-20：新纸张是否默认进入专版）
 
@@ -417,7 +422,7 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 - 烫金：反查只在浏览器端做，`lib/order/change-request.ts` 写入 `frontFoilColors` 前没有同样的兜底。
 - 寄样：管理员草稿完整编辑（`lib/order/admin-edit.ts:56`）不拦非 STANDARD 工单增改款式（改单申请有这道闸）；下发时内存校验 `CONFIRMED→RELEASED→PACKING` 但库里直接写 PACKING。
 - 上传：CDR 多选后服务端没有每款文件个数上限（单文件大小与 key 前缀有闸）。
-- 物流：内部工单改单 / 管理员编辑不重算物流行（`change-request.ts:2972`、`:5844` 仍只认 `EXTERNAL_SALES`）；`hasLogisticsChargeRows` 的 `priceBookId?` 可选类型会把「漏 select」当成「补录」。
+- 物流：~~内部工单改单 / 管理员编辑不重算物流行~~（2026-09-24 起不再有内部工单，此半条失效）；`hasLogisticsChargeRows` 的 `priceBookId?` 可选类型会把「漏 select」当成「补录」。
 - 备份：`scripts/lib/backup-readiness.mjs:27` 按每个 repo 自己的最大 db id 认定当前库，集群重建且 repo2 没跟上 stanza-upgrade 时会误绿；两个 full timer 都 `Persistent=true` 无互斥，主机恰在 01:00–01:30 重启会并发抢 stanza 锁、`StartLimitBurst=3` 可能打掉当天 OSS full；门禁不证明 repo2 连续归档；`--info-file` 不校验快照新鲜度；`pgbackrest info` 失败时吞 stderr。
 - 迁移：`ProductionReportDispute` 的部分唯一索引 / CHECK / 触发器只在手写 SQL 里，schema 无对应，日后 `migrate dev` 可能生成删除它们的迁移。
 
@@ -496,7 +501,7 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 
 ### 上一批带出、仍未拍板
 
-- **薪资「当天 / 当月」重算的残余风险**：现只拒绝**严格未来**（日薪 `date > 今天`、月结 `month > 本月`）。(1) 当天日薪——上午 10 点点一次全员重算，当天还没报工的师傅会被写出一条只有 `dailyBase` 的正式行，能被标记已发，晚上真报工后重算又被 paid guard 挡住，只能人工撤销。（原第 (2) 项月中重算厨师月结已随 2026-09-24 删除厨师与时薪月结生成失效。）选项 A（现状）/ C（连当天也拒）。任一选择都只动谓词里一个比较符 + 一条测试断言。
+- ~~**薪资「当天 / 当月」重算的残余风险**~~（2026-09-25 核对：已不成立，非业主拍板——`daily-salary` 带当天日期返回 `400 open date`、领域闸口同样拒绝当天；时薪月结生成已于 09-24 删除）：现只拒绝**严格未来**（日薪 `date > 今天`、月结 `month > 本月`）。(1) 当天日薪——上午 10 点点一次全员重算，当天还没报工的师傅会被写出一条只有 `dailyBase` 的正式行，能被标记已发，晚上真报工后重算又被 paid guard 挡住，只能人工撤销。（原第 (2) 项月中重算厨师月结已随 2026-09-24 删除厨师与时薪月结生成失效。）选项 A（现状）/ C（连当天也拒）。任一选择都只动谓词里一个比较符 + 一条测试断言。
 - **交期预警口径**：(1) 未提交的草稿单 `DRAFT` 该不该继续留在 `PROMISE_ALERT_STATUSES`？摘掉的影响不止看板——工单详情页 `PromisedDateBadge` 用同一份清单，草稿单详情页会同时不再显示「已逾期」红标。(2) 逾期超过多少天后停止预警/推送？要设就按 `outsource_overdue_days` 的样子加 `Setting`（建议 key `order_overdue_alert_max_days`），不硬编码。
 - **师傅端「我的工单」**：是否接受不再急单置顶（待办队列仍在 `/worker/tasks`，那里保持急单分组）；每页 20 条（`WORKER_ORDER_PAGE_SIZE`）对手机端是否合适。
 - **登录限流配套**：厂区 NAT 出口 IP 是否加 `geo` 白名单；429 是否配 `error_page` 友好提示；应用层账号级失败锁定是否另立项（现状完全没有）。
@@ -610,3 +615,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-23：空白封价格表中停用纸张的行标「（已停用）」并改写提示文字，不隐藏、不删规则。
 - 2026-09-24：证据驱动全仓审查（20+5 切片、对抗验证）与整改：`codex/audit-fixes` 修复 30 项（2 高 13 中 15 低），全量门禁、DB 单测、浏览器组件和相关 E2E 均已归因通过；H-3 与若干口径待业主拍板，未合并、未部署。
 - 2026-09-24：按业主决定删除客服角色与内部/工厂直单结算、清废/厨师与时薪月结生成，发货后无取消，新增历史数据清理脚本（`codex/remove-cs-cleaner-cook`，未推送、未部署）；SPEC 新增 §L，CLAUDE.md、DECISIONS、审查记录、CHANGELOG 与现行文档同步。
+- 2026-09-25：文档同步（`codex/docs-sync-0925`，仅文档）：SPEC / CLAUDE.md / 根目录文档 / docs 现行文档对齐 09-24 决定与 GPT-6 修复；部署指南补三条迁移只读预查 SQL；上线前置清单重写；9 份过程文件归档；DECISIONS 2026-09-25 四条；09-23 审查补 §7。
