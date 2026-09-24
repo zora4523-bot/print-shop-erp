@@ -36,28 +36,42 @@ export async function enqueueOrderPdfJob(input: {
   const { regenerationKey, ...scope } = input;
   const scopeDigest = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
   const scopePrefix = `order-pdf:v2:${scopeDigest}:`;
-  let dedupeKey: string;
-  if (regenerationKey === undefined) {
-    const enqueuedAt = await databaseNow();
-    const reuseWindow = Math.floor(enqueuedAt.getTime() / PDF_JOB_REUSE_WINDOW_MS);
-    dedupeKey = `${scopePrefix}${reuseWindow}`;
-  } else {
-    const regeneration = await resolveOrderPdfRegeneration(scopePrefix);
-    if ('jobId' in regeneration) return regeneration.jobId;
-    dedupeKey = regeneration.dedupeKey;
-  }
-  const { job } = await enqueueBackgroundJob({
-    type: BACKGROUND_JOB_TYPES.ORDER_PDF,
-    queue: BackgroundJobQueue.HEAVY,
-    // Unique DB key coalesces concurrent requests for the same authorized
-    // snapshot within a 15-minute window. A new window allows recovery when a
-    // completed artifact expired; all downloads still recheck current access.
-    dedupeKey,
-    payload: JSON.parse(JSON.stringify(input)) as Prisma.InputJsonValue,
-    priority: 120,
-    maxAttempts: 2,
+  // Every entry (plain download and failure-page regeneration) runs the same
+  // check-or-create under one transaction-scoped lock per authorized scope, so
+  // a plain download can neither requeue a DEAD window job nor open a new
+  // window job while a regeneration of the same scope is queued or running
+  // (and vice versa). Two HEAVY renders of one scope would only waste the
+  // single-concurrency queue.
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${scopePrefix}))`;
+    const inFlight = await findInFlightOrderPdfJob(tx, scopePrefix);
+    if (inFlight) return inFlight;
+    let dedupeKey: string;
+    if (regenerationKey === undefined) {
+      const enqueuedAt = await databaseNow(tx);
+      const reuseWindow = Math.floor(enqueuedAt.getTime() / PDF_JOB_REUSE_WINDOW_MS);
+      dedupeKey = `${scopePrefix}${reuseWindow}`;
+    } else {
+      const regeneration = await resolveOrderPdfRegeneration(tx, scopePrefix);
+      if ('jobId' in regeneration) return regeneration.jobId;
+      dedupeKey = regeneration.dedupeKey;
+    }
+    const { job } = await enqueueBackgroundJob(
+      {
+        type: BACKGROUND_JOB_TYPES.ORDER_PDF,
+        queue: BackgroundJobQueue.HEAVY,
+        // Unique DB key coalesces requests for the same authorized snapshot
+        // within a 15-minute window. A new window allows recovery when a
+        // completed artifact expired; all downloads still recheck access.
+        dedupeKey,
+        payload: JSON.parse(JSON.stringify(input)) as Prisma.InputJsonValue,
+        priority: 120,
+        maxAttempts: 2,
+      },
+      tx,
+    );
+    return job.id;
   });
-  return job.id;
 }
 
 const IN_FLIGHT_STATUSES: readonly BackgroundJobStatus[] = [
@@ -65,30 +79,41 @@ const IN_FLIGHT_STATUSES: readonly BackgroundJobStatus[] = [
   BackgroundJobStatus.RUNNING,
 ];
 
-// A failure-recovery link must not stack HEAVY jobs. While one render of this
-// scope is queued or running, every retry waits on it. Otherwise the new job's
-// key is anchored on the latest (finished) job of the scope, so retries that
-// race past both lookups compute the same key and the unique dedupe key folds
-// them into one job; once that job finishes, the anchor moves on.
-async function resolveOrderPdfRegeneration(
-  scopePrefix: string,
-): Promise<{ jobId: string } | { dedupeKey: string }> {
-  const scope = {
+type PdfEnqueueTx = Pick<Prisma.TransactionClient, 'backgroundJob' | '$queryRaw'>;
+
+function orderPdfScope(scopePrefix: string) {
+  return {
     type: BACKGROUND_JOB_TYPES.ORDER_PDF,
     dedupeKey: { startsWith: scopePrefix },
   };
-  const inFlight = await db.backgroundJob.findFirst({
-    where: { ...scope, status: { in: [...IN_FLIGHT_STATUSES] } },
+}
+
+async function findInFlightOrderPdfJob(
+  tx: PdfEnqueueTx,
+  scopePrefix: string,
+): Promise<string | null> {
+  const inFlight = await tx.backgroundJob.findFirst({
+    where: { ...orderPdfScope(scopePrefix), status: { in: [...IN_FLIGHT_STATUSES] } },
     orderBy: { createdAt: 'desc' },
     select: { id: true },
   });
-  if (inFlight) return { jobId: inFlight.id };
-  const latest = await db.backgroundJob.findFirst({
-    where: scope,
+  return inFlight?.id ?? null;
+}
+
+// A failure-recovery link must not stack HEAVY jobs. The caller already holds
+// the scope lock and found nothing in flight, so the new job's key is anchored
+// on the latest (finished) job of the scope; once that job finishes, the
+// anchor moves on. An operator retry of a DEAD job does not take the scope
+// lock, so a job that turned PENDING meanwhile is still reused.
+async function resolveOrderPdfRegeneration(
+  tx: PdfEnqueueTx,
+  scopePrefix: string,
+): Promise<{ jobId: string } | { dedupeKey: string }> {
+  const latest = await tx.backgroundJob.findFirst({
+    where: orderPdfScope(scopePrefix),
     orderBy: { createdAt: 'desc' },
     select: { id: true, status: true },
   });
-  // Inserted by a concurrent request between the two lookups.
   if (latest && IN_FLIGHT_STATUSES.includes(latest.status)) return { jobId: latest.id };
   return { dedupeKey: `${scopePrefix}regenerate:after:${latest?.id ?? 'none'}` };
 }

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { dbMock, enqueueBackgroundJobMock, getOrderForPrintMock, renderMock, writeFileMock } = vi.hoisted(() => ({
   dbMock: {
+    $transaction: vi.fn(),
+    $executeRaw: vi.fn(),
     backgroundJob: { findUnique: vi.fn(), findFirst: vi.fn() },
     backgroundWorkerHeartbeat: { findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
@@ -39,6 +41,9 @@ import {
 beforeEach(() => {
   dbMock.backgroundJob.findUnique.mockReset();
   dbMock.backgroundJob.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.$executeRaw.mockReset().mockResolvedValue(1);
+  dbMock.$transaction.mockReset().mockImplementation(async (callback: (tx: typeof dbMock) => unknown) =>
+    callback(dbMock));
   dbMock.backgroundWorkerHeartbeat.findFirst.mockReset();
   enqueueBackgroundJobMock.mockReset();
   getOrderForPrintMock.mockReset();
@@ -107,6 +112,40 @@ describe('durable order PDF jobs', () => {
     expect(new Set([windowKey, firstRetry, laterRetry]).size).toBe(3);
   });
 
+  it('a plain download reuses an in-flight regeneration instead of requeueing the dead window job', async () => {
+    // A: window job, DEAD. B: in-flight regeneration of the same authorized scope.
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    dbMock.backgroundJob.findFirst.mockImplementation(async ({ where }: { where: { status?: unknown } }) =>
+      where.status ? { id: 'job-b-regenerating' } : null);
+
+    await expect(enqueueOrderPdfJob(input)).resolves.toBe('job-b-regenerating');
+
+    expect(enqueueBackgroundJobMock).not.toHaveBeenCalled();
+  });
+
+  it('serializes every PDF entry of one scope on the same transaction lock and enqueues inside it', async () => {
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job-x' } });
+    const order: string[] = [];
+    dbMock.$executeRaw.mockImplementation(async () => { order.push('lock'); return 1; });
+    dbMock.backgroundJob.findFirst.mockImplementation(async () => { order.push('lookup'); return null; });
+    enqueueBackgroundJobMock.mockImplementation(async (_input, client) => {
+      order.push(client === dbMock ? 'enqueue:tx' : 'enqueue:global');
+      return { job: { id: 'job-x' } };
+    });
+
+    await enqueueOrderPdfJob(input);
+    await enqueueOrderPdfJob({ ...input, regenerationKey: 'r1' });
+    await enqueueOrderPdfJob({ ...input, actor: { id: 'b', role: Role.ADMIN } });
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(3);
+    expect(order.slice(0, 3)).toEqual(['lock', 'lookup', 'enqueue:tx']);
+    expect(order).not.toContain('enqueue:global');
+    const lockKeys = dbMock.$executeRaw.mock.calls.map((call) => JSON.stringify(call.slice(1)));
+    expect(lockKeys[0]).toBe(lockKeys[1]);
+    expect(lockKeys[2]).not.toBe(lockKeys[0]);
+  });
+
   it('reuses a job that became pending between the in-flight lookup and the anchor lookup', async () => {
     const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
     dbMock.backgroundJob.findFirst.mockImplementation(async ({ where }: { where: { status?: unknown } }) =>
@@ -163,6 +202,7 @@ describe('durable order PDF jobs', () => {
           baseUrl: 'https://erp.example.com',
         },
       }),
+      dbMock,
     );
   });
 
