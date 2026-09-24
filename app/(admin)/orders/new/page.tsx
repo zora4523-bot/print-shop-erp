@@ -1,12 +1,11 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Role } from "../../../../generated/prisma/enums";
 import { requireSession } from "@/lib/auth/session";
 import { listActiveCraftOrderOptions } from "@/lib/craft";
 import { listExternalSalesAccountOptions } from "@/lib/order/external-sales-association";
 import { OrderCreationWorkspace } from "@/components/business/order/OrderCreationWorkspace";
-import { EmptyState, PageHeader } from "@/components/ui-business";
-import { buttonVariants } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui-business";
+import { NoExternalSalesEmptyState } from "@/components/business/order/NoExternalSalesEmptyState";
 import { loadExternalCreateOrderBootstrap } from "@/lib/order/create-order-bootstrap";
 
 export const metadata = {
@@ -32,15 +31,7 @@ export default async function NewOrderPage({
     return (
       <div className="space-y-4">
         <PageHeader title="新建工单" />
-        <EmptyState
-          title="暂无可关联的外部销售账号"
-          description="管理员建单必须归属一个启用的外部销售。请先在账号管理中创建或启用外部销售账号，再回来新建工单。"
-          action={
-            <Link href="/owner/accounts" className={buttonVariants()}>
-              前往账号管理
-            </Link>
-          }
-        />
+        <NoExternalSalesEmptyState />
       </div>
     );
   }

@@ -29,14 +29,17 @@ import {
 } from '@/components/ui-business';
 import { WorkbenchCalculator } from './WorkbenchCalculator';
 import type { PricingCraftIdentity } from '@/lib/order/pricing-route';
+import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
 
 export function SalesWorkbench({
   options,
   crafts = [],
   draftScope = '',
   catalogUnavailable = false,
+  externalSalesAccounts,
 }: {
   options: ExternalCreateOrderOptions;
+  externalSalesAccounts?: readonly ExternalSalesAccountOption[];
   catalogUnavailable?: boolean;
   crafts?: readonly PricingCraftIdentity[];
   draftScope?: string;
@@ -121,6 +124,7 @@ export function SalesWorkbench({
             options={options}
             crafts={crafts}
             draftScope={draftScope}
+            externalSalesAccounts={externalSalesAccounts}
           />
         )}
       </section>

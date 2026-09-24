@@ -1350,6 +1350,12 @@ export function OrderForm({
     });
   }
 
+  function changeExternalSales(externalSalesUserId: string | null) {
+    setValue('externalSalesUserId', externalSalesUserId, { shouldDirty: true });
+    if (externalSalesUserId) clearErrors('externalSalesUserId');
+    invalidateStructuralQuotes();
+  }
+
   function invalidateStructuralQuotes() {
     invalidateOrderQuoteRequests(externalQuoteRequestGate.current);
     setQuoteViews({});
@@ -2494,7 +2500,8 @@ export function OrderForm({
   if (samplePurpose && externalCreateOrderOptions) {
     return <OrderSampleEntry editorSnapshot={restoredSample} onEditorSnapshot={captureSampleEditor} lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
       crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
-      initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute} />;
+      initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute}
+      externalSalesAccounts={externalSalesAccounts} onExternalSalesChange={changeExternalSales} />;
   }
   if (submittedOrder) {
     return (
