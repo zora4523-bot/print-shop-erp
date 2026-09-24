@@ -26,9 +26,9 @@ UI：Tailwind CSS + shadcn/ui
 表单：React Hook Form + Zod
 状态：Server Components 优先，必要时用 useState
 测试：
-  - 单元测试：Vitest（node 环境，`vitest.config.ts`；2026-09-14 实测 618 个测试文件 / 6757 项，
-    其中 27 个 `*.postgres.test.ts` 需要 `DATABASE_URL`，缺失时整文件跳过）
-  - 组件交互契约：Vitest Browser Mode（`vitest.browser.config.ts`，`*.browser.spec.tsx`，47 个文件，
+  - 单元测试：Vitest（node 环境，`vitest.config.ts`；2026-09-24 实测 703 个测试文件 / 7549 项，
+    7505 通过、44 跳过；其中 34 个 `*.postgres.test.ts` 需要 `DATABASE_URL`，缺失时整文件跳过）
+  - 组件交互契约：Vitest Browser Mode（`vitest.browser.config.ts`，`*.browser.spec.tsx`，52 个文件 / 825 项，
     `pnpm test:browser`；CI 有独立步骤，**尚未**纳入 §6.3 的 commit 前门禁，是否纳入待业主拍板）
   - 渲染/交互断言：Playwright（`tests/e2e`）+ 截图与响应式门禁（`tests/visual`）
 后台任务：PostgreSQL 任务账本（`BackgroundJob`）+ PM2 light/heavy worker
@@ -72,7 +72,7 @@ PDF生成：Puppeteer（headless Chrome 渲染打印视图；生产用系统 Chr
 
 ```
 print-shop-erp/
-├── app/                          # Next.js App Router（页面层，118 个 page/route）
+├── app/                          # Next.js App Router（页面层，119 个 page/route）
 │   ├── (auth)/login/             # 登录
 │   ├── (admin)/                  # 后台工作台外壳（侧边栏/面包屑/header）
 │   │   ├── owner/                # ADMIN only（字典、价格、薪资、运维…）
@@ -87,13 +87,13 @@ print-shop-erp/
 │   ├── api/                      # cron(7) / orders / owner / health / salary / admin / cdr / auth
 │   ├── print/orders/[id]/        # 打印视图（Puppeteer 渲染源）
 │   └── dev/showcase/             # 设计系统演示页（非业务）
-├── actions/                      # Server Actions（业务编排层，69 个文件 / 138 个 action）
+├── actions/                      # Server Actions（业务编排层，78 个 .ts 含 28 个 *.types.ts / 143 个 action）
 │   ├── order.ts                  # 'use server'，只能导出 async 函数
 │   └── order.types.ts            # 配套返回类型（'use server' 不能导出类型）
 ├── components/
 │   ├── ui/                       # shadcn 原子件（唯一允许 Tailwind 调色板字面量的目录）
 │   ├── ui-business/              # 跨领域业务原子件（PageHeader/StatCard/StatusBadge…）
-│   └── business/<领域>/          # 业务组件（order 最重，112 个文件；其余 ≤ 21）
+│   └── business/<领域>/          # 业务组件（order 最重，127 个文件；其余 ≤ 22）
 ├── hooks/                        # 客户端通用 hook（目前只有 use-mobile）
 ├── lib/                          # 核心业务逻辑层（Prisma 调用集中于此）
 │   ├── db.ts                     # Prisma client 单例（唯一的 Prisma 入口）
@@ -103,7 +103,7 @@ print-shop-erp/
 │   ├── background-jobs/          # 持久化任务账本 + worker + handler registry
 │   ├── cron/  notification/  oss/  pdf/  cdr/  export/  dashboard/  navigation/  settings/
 │   ├── format/  page-title/  ui/ # 展示层纯函数（金额/日期格式、页标题、状态注册表）
-│   ├── <域>.ts                   # 38 个尚未归目录的域根模块（bill/bom/craft/material*/purchase*/…）
+│   ├── <域>.ts                   # 尚未归目录的域根模块（lib/*.ts 共 40 个，含 db.ts；bill/bom/craft/material*/purchase*/…）
 │   └── __tests__/                # 领域根模块（lib/order.ts 等）的测试
 ├── config/                       # architecture-debt.json（架构门禁债务表）、价目簿发布清单
 ├── generated/prisma/             # Prisma 7 生成产物（已 gitignore，勿手改）
@@ -135,9 +135,11 @@ print-shop-erp/
 - Prisma import 不得出现在 `app/` 和 `actions/` 以外的页面/组件文件中
 - `actions/` 中可以 import Prisma，但应委托给 `lib/` 的函数处理复杂业务
 - `components/` 中不得有任何数据库调用
-- 现状（2026-09-14 实测）：`db` 的直接使用集中在 `lib/`（111 个文件）；`lib/` 之外只有 6 处遗留直连
+- 现状（2026-09-25 实测）：`db` 的直接使用集中在 `lib/`（124 个文件）；`lib/` 之外有 8 处遗留直连
   —— `actions/account.ts`、`actions/order-workspace.ts`（收藏工单）、`app/api/health/*` 两个探针、
-  `app/wo/[orderNo]/page.tsx`、`app/api/orders/.../labels/[labelId]/route.ts` —— 新代码不要扩大这个口子
+  `app/wo/[orderNo]/page.tsx`、`app/api/orders/.../labels/[labelId]/route.ts`，以及师傅端
+  `app/(worker)/worker/account/page.tsx`、`app/(worker)/worker/tasks/[id]/page.tsx`（把 `db` 作为
+  client 传给 `lib/` 的工价解析函数）—— 新代码不要扩大这个口子
 
 **Prisma 生成物的 import 约定**（易踩坑）：
 
@@ -431,12 +433,12 @@ await dispatchNotification('ORDER_SUBMITTED', { orderId, orderNo, submitterName 
 ### 8.2 组件/渲染测试
 
 **现状（2026-09-14 更新，以此为准）**：`vitest.config.ts` 是 node 环境；组件交互契约走独立的
-`vitest.browser.config.ts`（Vitest Browser Mode，Playwright chromium，`*.browser.spec.tsx`，47 个文件，
+`vitest.browser.config.ts`（Vitest Browser Mode，Playwright chromium，`*.browser.spec.tsx`，52 个文件，
 `pnpm test:browser`），CI 单独跑一步。组件层的验证分四处落地：
 
 - **纯逻辑部分用 Vitest**：Zod schema 校验、报工数量约束、打印布局的网格计算、导航菜单与权限
   相关的可见性推导 —— 抽成纯函数放 `lib/`，在 node 环境测。
-- **SSR markup 断言也用 Vitest**（110 个测试文件在用）：`renderToStaticMarkup` +
+- **SSR markup 断言也用 Vitest**（118 个测试文件在用，2026-09-25）：`renderToStaticMarkup` +
   `vi.mock('react')` 注入 `useActionState` 状态，断言渲染出的 HTML。用于**Playwright 结构上够
   不到**的场景 —— 典型是逐字段错误的 aria 连线：错误 DOM 只在提交失败后存在，而 `tests/visual`
   的 axe 门禁断言的是页面加载态，那条路径它一次都走不到。
@@ -787,6 +789,11 @@ export async function createProductAction(
 - 7 个 `/api/cron/*` 端点全部用 `requireCronAuth(req)` 校验 `Authorization: Bearer $CRON_SECRET`；
   未配置 secret → 503（部署漏配时快速失败）。响应形状对外部调度器是契约，不要改。
 - handler 抛未知异常时必须**携带部分进度重抛**，让 durable job 重试，绝不把漏算的批次标成成功。
+- 已删除功能的任务类型（`CRON_HOURLY_PAYROLL` / `CRON_CS_SETTLE` / `CRON_CS_PERIOD_ENDING`）与已删除
+  通知事件（`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED`）的历史行保留为运行记录，但不能重试 / 重发：
+  `retryDeadBackgroundJob` 以 `isRegisteredBackgroundJobType` 判定并抛 `RetiredBackgroundJobTypeError`，
+  `resolveUnknownNotification` 对不在 `NOTIFICATION_EVENTS` 的事件拒绝 `NOT_DELIVERED_RETRY`
+  （`RETIRED_EVENT`），界面同步不给按钮。以后删除任务类型或事件时沿用这一做法。
 
 ### 15.5 金额与规则快照的实现细节
 
@@ -840,7 +847,7 @@ const [state, formAction, pending] = useActionState(action.bind(null, id), null)
 <form action={formAction}>
 ```
 
-- **现状**：111 个 `<form>`（2026-09-14）里仍有一部分后台表单是被箭头函数包裹的（2026-08-17 盘点约
+- **现状**：119 个 `<form>`（2026-09-25）里仍有一部分后台表单是被箭头函数包裹的（2026-08-17 盘点约
   15 处，此后未重新清点），**这是已知且被接受的**，
   不要顺手"修复"——真要动先看 DECISIONS 2026-08-17 的影响一节。
 - **SPEC 有三处强制要求 JS**（§H.1 OSS 直传、§E.1 打印弹窗、浏览器端算建议价），所以
@@ -848,9 +855,10 @@ const [state, formAction, pending] = useActionState(action.bind(null, id), null)
 
 ---
 
-**本文档版本**：1.4（2026-09-24 按业主删除客服 / 内部与工厂直单结算 / 清废与厨师的决定同步：
+**本文档版本**：1.5（2026-09-25 按 HEAD 复核：§2 测试数量、§3 目录计数与 `db` 直连清单、§8.2 计数、
+§15.4 已删除任务 / 通知不可重试、§15.8 表单计数）。1.4（2026-09-24 按业主删除客服 / 内部与工厂直单结算 / 清废与厨师的决定同步：
 §3 目录注释与 cron 数、§4.3 覆盖清单与边界 case、§5.3 术语表、§8.3 E2E 关键路径、§15.1 角色、
 §15.4 cron 数量、§15.5 去掉 fallback-to-0 例外。1.3 为 2026-09-14 结构体检；
 未动 §4.5 / §15.7 等待业主落笔的条款，见 HANDOFF「CLAUDE.md 待业主落笔」）
-**最后更新**：2026-09-24
+**最后更新**：2026-09-25
 **维护者**：业主 + Claude Code / Codex
