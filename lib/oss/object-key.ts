@@ -20,10 +20,17 @@ export function objectKeyFromReadUrl(
       continue; // config 派生值不合法时跳过
     }
     if (url.host !== baseUrl.host) continue;
-    const basePath = baseUrl.pathname.replace(/\/+$/, '');
-    const fullPath = decodeURIComponent(url.pathname);
+    // 前缀匹配在同一编码态（URL 解析后的百分号编码、统一大写十六进制）下
+    // 进行，剥掉前缀后再解码剩余部分。先解码整段再和编码态的 basePath 比，
+    // 会让 `assets%20v1`、中文路径前缀永远匹配不上。
+    const basePath = canonicalPercentEncoding(baseUrl.pathname).replace(/\/+$/, '');
+    const fullPath = canonicalPercentEncoding(url.pathname);
     if (basePath && !fullPath.startsWith(`${basePath}/`)) continue;
-    return fullPath.slice(basePath.length).replace(/^\/+/, '');
+    return decodeURIComponent(fullPath.slice(basePath.length)).replace(/^\/+/, '');
   }
   return null;
+}
+
+function canonicalPercentEncoding(pathname: string): string {
+  return pathname.replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase());
 }

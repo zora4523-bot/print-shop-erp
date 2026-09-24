@@ -31,4 +31,22 @@ describe('objectKeyFromReadUrl', () => {
       'design/o1/i1/红包.cdr',
     );
   });
+
+  it('读取域路径前缀含百分号编码或中文时同样剥掉前缀，再解码剩余 key', () => {
+    for (const base of [
+      'https://cdn.example.com/assets%20v1',
+      'https://cdn.example.com/资源/设计',
+      'https://cdn.example.com/%E8%B5%84%E6%BA%90',
+    ]) {
+      expect(derive(`${base}/${key}`, base), base).toBe(key);
+      expect(derive(`${base}/design/o1/i1/红包 副本.cdr`, `${base}/`), base).toBe(
+        'design/o1/i1/红包 副本.cdr',
+      );
+    }
+    // 大小写不同的百分号编码视为同一前缀；不在前缀下仍返回 null。
+    expect(derive(`https://cdn.example.com/a%2fb/${key}`, 'https://cdn.example.com/a%2Fb')).toBe(key);
+    expect(
+      derive(`https://cdn.example.com/assets%20v2/${key}`, 'https://cdn.example.com/assets%20v1'),
+    ).toBeNull();
+  });
 });
