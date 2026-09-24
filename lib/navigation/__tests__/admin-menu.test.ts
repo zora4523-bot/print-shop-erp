@@ -18,8 +18,8 @@ function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
 }
 
 describe('getAdminMenuItems', () => {
-  it('销售与客服有工作台入口，管理员入口独立于经营工作台，师傅不可见', () => {
-    for (const role of [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN]) {
+  it('销售有工作台入口，管理员入口独立于经营工作台，师傅不可见', () => {
+    for (const role of [Role.SALES, Role.ADMIN]) {
       const items = flatten(getAdminMenuItems({ role }));
       const workbench = items.find((item) => item.href === '/workbench');
       expect(workbench?.label).toBe(role === Role.ADMIN ? '销售工作台' : '工作台');
@@ -31,7 +31,7 @@ describe('getAdminMenuItems', () => {
     const adminItems = flatten(getAdminMenuItems({ role: Role.ADMIN }));
     expect(getActiveAdminMenuHref('/owner/analytics', adminItems)).toBe('/owner/analytics');
     expect(getActiveAdminMenuHref('/owner', adminItems)).toBe('/owner');
-    for (const role of [Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER]) {
+    for (const role of [Role.SALES, Role.WORKER]) {
       expect(flatten(getAdminMenuItems({ role })).map((item) => item.href)).not.toContain('/owner/analytics');
     }
     expect(getAdminQuickLinks({ role: Role.ADMIN }).map((item) => item.href)).not.toContain('/owner/analytics');
@@ -48,7 +48,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(36);
+    expect(items).toHaveLength(35);
     expect(items.map((i) => i.label)).toEqual([
       '工作台',
       '经营概览',
@@ -76,7 +76,6 @@ describe('getAdminMenuItems', () => {
       '薪资总览',
       '工序计件结算',
       '历史日薪档案',
-      '客服周期',
       '历史时薪档案',
       '物料',
       '仓库/库位',
@@ -375,22 +374,6 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('报价查询');
   });
 
-  it('CUSTOMER_SERVICE 看到自己专属的"我的业绩 / 我的工资单"', () => {
-    const labels = flatten(
-      getAdminMenuItems({ role: Role.CUSTOMER_SERVICE }),
-    ).map((i) => i.label);
-    expect(labels).not.toContain('我的 Dashboard');
-    expect(labels).toContain('创建工单');
-    expect(labels).toContain('我的业绩');
-    expect(labels).toContain('我的工资单');
-    // CS 不出现"我的账单"（账单只属销售）
-    expect(labels).not.toContain('我的账单');
-    expect(labels).not.toContain('外部销售收费');
-    expect(labels).not.toContain('内部报价（低频）');
-    expect(labels).not.toContain('规则配置中心');
-    expect(labels).not.toContain('报价查询');
-  });
-
   it('WORKER 返回空（师傅走独立 (worker) 壳，不应进 (admin)）', () => {
     expect(getAdminMenuItems({ role: Role.WORKER })).toEqual([]);
   });
@@ -406,7 +389,7 @@ describe('getAdminMenuItems', () => {
   });
 
   it('所有 requiredPermission 都是 PERMISSIONS 字典里的合法 key', () => {
-    for (const role of [Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE]) {
+    for (const role of [Role.ADMIN, Role.SALES]) {
       const items = flatten(getAdminMenuItems({ role }));
       for (const item of items) {
         if (item.requiredPermission) {
@@ -420,7 +403,7 @@ describe('getAdminMenuItems', () => {
   });
 
   it('header quick links are real implemented routes', () => {
-    for (const role of [Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE]) {
+    for (const role of [Role.ADMIN, Role.SALES]) {
       const links = getAdminQuickLinks({ role });
       expect(links.length, `${role} should have quick links`).toBeGreaterThan(0);
       for (const link of links) {

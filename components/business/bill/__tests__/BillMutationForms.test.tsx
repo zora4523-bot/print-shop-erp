@@ -58,7 +58,7 @@ describe('bill mutation confirmations', () => {
     expect(html).toContain('data-risk-level="L2"');
     expect(html).toContain('data-slot="alert-dialog-trigger"');
     expect(html).toContain('aria-haspopup="dialog"');
-    expect(html).toContain('发单给销售 / 客服');
+    expect(html).toContain('发单给销售');
   });
 
   it('uses structured issue feedback and hides stale state while pending', () => {

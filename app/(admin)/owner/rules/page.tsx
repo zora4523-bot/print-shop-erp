@@ -37,7 +37,7 @@ const RULE_GROUPS = [
   {
     label: '员工薪酬规则',
     description:
-      '维护客服提成、计时工与固定工资版本。工序计件工价不在这里配置。',
+      '维护标准工时与加班起点版本。工序计件工价不在这里配置。',
     effect: 'effective-dated',
     icon: Users,
   },

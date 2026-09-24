@@ -1911,19 +1911,6 @@ describe('administrator edits all applicable fees', () => {
   });
 });
 
-describe('factory-direct missing logistics charges', () => {
-  it('allows administrators to create both shipment fee rows with trusted snapshots', async () => {
-    const order = pricingOrder({ settledFee: null, settlementType: OrderSettlementType.FACTORY_DIRECT, status: OrderStatus.CONFIRMED });
-    dbMock.order.findUnique.mockResolvedValue({ ...order, customerCharges: order.customerCharges.filter((charge) => charge.shipmentId === null) });
-    const preview = await previewOrderPricingReview('order-1', admin, now, true);
-    expect(preview.shipments[0].shipping.currentAmount).toBeNull();
-    const input = command({ editAll: true, orderCharges: [{ chargeId: 'other-charge', expectedBusinessKey: 'ORDER:OTHER', amount: '7.00', reason: '保留' }] });
-    await finalizeOrderPricing(input, admin, now);
-    expect(dbMock.orderCustomerCharge.create).toHaveBeenCalledTimes(2);
-    expect(dbMock.orderCustomerCharge.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ businessKey: 'SHIPMENT:1:SHIPPING_FEE', amount: '99.00' }) }));
-  });
-});
-
 it('accepts a signed approved adjustment in the full editor without allowing precision loss', async () => {
   const order = pricingOrder({ settledFee: null, status: OrderStatus.CONFIRMED });
   dbMock.order.findUnique.mockResolvedValue({ ...order, customerCharges: order.customerCharges.map((charge) => charge.id === 'other-charge' ? { ...charge, category: { code: 'APPROVED_ADJUSTMENT', name: '调整' }, isAdjustment: true, approvalReference: '管理员审批' } : charge) });

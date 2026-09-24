@@ -22,10 +22,7 @@ type PageProps = {
 
 export default async function OrdersListPage({ searchParams }: PageProps) {
   const { user } = await requireSession();
-  const canCreate =
-    user.role === Role.SALES ||
-    user.role === Role.CUSTOMER_SERVICE ||
-    user.role === Role.ADMIN;
+  const canCreate = user.role === Role.SALES || user.role === Role.ADMIN;
   return (
     <div className="space-y-6">
       {user.role !== Role.ADMIN ? (

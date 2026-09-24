@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table';
 
 // Generic watchlist table for the owner dashboard. Each Slice B list
-// (待发货 / 超期外协 / 即将结算客服周期) has its own column shape and
+// (待发货 / 超期外协 / 交期预警 / 超计划报工) has its own column shape and
 // row data, but the chrome — title + description + empty fallback +
 // header / body / hint footer — is the same. Centralising it keeps
 // /owner/page.tsx readable and makes future extension (e.g. a "view

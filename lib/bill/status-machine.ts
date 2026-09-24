@@ -4,7 +4,7 @@ import { BillStatus } from '../../generated/prisma/enums';
 //
 // Happy path: DRAFT → ISSUED → {PARTIAL_PAID | FULLY_PAID}
 //   - DRAFT: 月初自动生成，owner 复核前的待发单状态
-//   - ISSUED: owner 把账单推给销售 / 客服（事实上的"生效"）
+//   - ISSUED: owner 把账单推给销售（事实上的"生效"）
 //   - PARTIAL_PAID: 客户分期付款中（累计 < totalAmount）
 //   - FULLY_PAID: 累计已收 === totalAmount，终态
 //

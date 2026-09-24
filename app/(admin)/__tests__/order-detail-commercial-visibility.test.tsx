@@ -1,5 +1,12 @@
 vi.mock('@/lib/order/change-request-catalog-query', () => ({ listActiveOrderChangeCatalogProducts: vi.fn().mockResolvedValue([]) }));
 const { readHistoricalBlankPriceEditorMock } = vi.hoisted(() => ({ readHistoricalBlankPriceEditorMock: vi.fn().mockResolvedValue(null) }));
+// SalesOrderDetailView still renders the change forms for SALES.
+vi.mock('@/components/business/order/OrderChangeRequestForm', () => ({
+  OrderChangeRequestForm: () => null,
+}));
+vi.mock('@/components/business/order/OrderCancellationRequestForm', () => ({
+  OrderCancellationRequestForm: () => null,
+}));
 vi.mock('@/lib/order/confirm-historical-blank-price', () => ({ readHistoricalBlankPriceEditor: readHistoricalBlankPriceEditorMock }));
 vi.mock('@/components/business/order/HistoricalBlankPriceEditor', () => ({ HistoricalBlankPriceEditor: () => null }));
 vi.mock('@/lib/production/report-dispute', () => ({ listOrderReportDisputes: vi.fn().mockResolvedValue([]) }));
@@ -155,12 +162,6 @@ vi.mock('@/components/business/order/ReworkOrderForm', () => ({
 vi.mock('@/components/business/production/PayrollPassForm', () => ({
   PayrollPassForm: () => null,
 }));
-vi.mock('@/components/business/order/OrderChangeRequestForm', () => ({
-  OrderChangeRequestForm: () => null,
-}));
-vi.mock('@/components/business/order/OrderCancellationRequestForm', () => ({
-  OrderCancellationRequestForm: () => null,
-}));
 vi.mock('@/components/business/order/OrderChangeWithdrawButton', () => ({
   OrderChangeWithdrawButton: () => null,
 }));
@@ -271,7 +272,7 @@ describe('order detail amount consistency', () => {
     expect(html).toContain(`>当前金额</span><strong><span class="text-primary">${expected}`);
   });
 
-  it.each([Role.ADMIN, Role.CUSTOMER_SERVICE])('%s does not present unpriced placeholders or shipping estimates as a complete fee', async (role) => {
+  it.each([Role.ADMIN])('%s does not present unpriced placeholders or shipping estimates as a complete fee', async (role) => {
     requireSessionMock.mockResolvedValue({ user: { id: 'sales-1', role } });
     const order = { ...orderFixture(), pricingRevisions: [], priceRevision: 1, status: OrderStatus.PENDING_FACTORY, pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
       quotedFeeCompleteness: 'EXCLUDES_MANUAL_ITEMS', quotedFee: '13.30', confirmedFee: null, settledFee: null,
@@ -423,8 +424,6 @@ describe('order detail commercial visibility', () => {
 
   it.each([
     OrderSettlementType.EXTERNAL_SALES,
-    OrderSettlementType.INTERNAL_SALES,
-    OrderSettlementType.FACTORY_DIRECT,
   ])('管理员可为收费结算路径 %s 进入工厂核价', async (settlementType) => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },
@@ -545,8 +544,7 @@ describe('order detail commercial visibility', () => {
 
   it.each([
     [OrderSettlementType.EXTERNAL_SALES, true],
-    [OrderSettlementType.FACTORY_DIRECT, true],
-    [OrderSettlementType.INTERNAL_SALES, false],
+    [OrderSettlementType.NO_CHARGE, false],
   ])('附加费用维护入口与服务端闸口一致：%s → %s', async (settlementType, visible) => {
     requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
     getOrderDetailMock.mockResolvedValue({
@@ -578,55 +576,17 @@ describe('order detail commercial visibility', () => {
     expect(html).not.toContain('工单价格状态');
   });
 
-  it('does not render customer charges, overrides, or internal costs for WORKER', async () => {
+  it('非管理员非销售账号直接 404，不读取任何工单资料', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'worker-1', role: Role.WORKER },
     });
-    getOrderDetailMock.mockResolvedValue(orderFixture());
 
-    const html = renderToStaticMarkup(
-      await OrderDetailPage({
-        params: Promise.resolve({ id: 'order-1' }),
-      }),
-    );
-
-    expect(getOrderDetailMock).toHaveBeenCalledWith('order-1', {
-      id: 'worker-1',
-      role: Role.WORKER,
-    });
+    await expect(
+      OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    ).rejects.toThrow();
+    expect(getOrderDetailMock).not.toHaveBeenCalled();
     expect(getAdminOrderDetailPresentationMock).not.toHaveBeenCalled();
     expect(readHistoricalBlankPriceEditorMock).not.toHaveBeenCalled();
-    expect(html).not.toContain('历史材料单价');
-    expect(html).not.toContain('结算路径');
-    expect(html).not.toContain('对客应收总额');
-    expect(html).not.toContain('款式加工费');
-    expect(html).not.toContain('入袋费');
-    expect(html).not.toContain('加工费合计');
-    expect(html).not.toContain('入袋单价');
-    expect(html).not.toContain('入袋小计');
-    expect(html).not.toContain('入袋费改价说明');
-    expect(html).not.toContain('包装协议改价机密');
-    expect(html).not.toContain('入袋计价明细');
-    expect(html).not.toContain('对客快递与打包耗材费');
-    expect(html).not.toContain('外部销售快递费');
-    expect(html).not.toContain('外部销售打包耗材费');
-    expect(html).not.toContain('物流人工改价秘密');
-    expect(html).not.toContain('一次性费用');
-    expect(html).not.toContain('系统建议小计');
-    expect(html).not.toContain('人工改价说明');
-    expect(html).not.toContain('98765.43');
-    expect(html).not.toContain('87654.32');
-    expect(html).not.toContain('协议改价机密说明');
-    expect(html).not.toContain('收费项目明细');
-    expect(html).not.toContain('外部销售专属收费项');
-    expect(html).not.toContain('客户要求非标准工艺人工核价');
-    expect(html).not.toContain('内部材料成本秘密');
-    expect(html).not.toContain('沿用原价 87654.32');
-    expect(html).not.toContain('日志沿用原价 76543.21');
-    expect(html).toContain('历史生产记录');
-    expect(html).toContain('张师傅');
-    expect(html).toContain('--order-detail-timeline-top:calc(var(--admin-header-offset, 0px) + 16px)');
-    expect(html).toContain('data-slot="order-page-heading"');
   });
 
   it.each([OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED])('exposes the permitted sales modification flow in %s', async (status) => {
@@ -708,52 +668,9 @@ describe('order detail commercial visibility', () => {
     expect(html.match(/佛山市/g)).toHaveLength(1);
   });
 
-  it('清晰展示结构化款式事实与包装组组成', async () => {
-    requireSessionMock.mockResolvedValue({
-      user: { id: 'sales-1', role: Role.CUSTOMER_SERVICE },
-    });
-    getOrderDetailMock.mockResolvedValue(orderFixture());
-
-    const html = renderToStaticMarkup(
-      await OrderDetailPage({
-        params: Promise.resolve({ id: 'order-1' }),
-      }),
-    );
-
-    expect(html).toContain('计价路线');
-    expect(html).toContain('待管理员终价');
-    expect(html).not.toContain('历史兼容');
-    expect(html).toContain('万元封');
-    expect(html).toContain('229.00 × 162.00 mm');
-    expect(html).toContain('200 g/㎡');
-    expect(html).toContain('客户确认版 V3');
-    expect(html).not.toContain('PLATE-GROUP-7');
-    expect(html).not.toContain('专版计价组');
-    expect(html).toContain('浮雕');
-    expect(html).toContain('哑金（1 色）');
-    expect(html).toContain('青、品红（2 色）');
-    expect(html).toContain('人工报价原因');
-    expect(html).toContain('客户要求非标准工艺人工核价');
-    expect(html).toContain('包装组（1）');
-    expect(html).toContain('单款装');
-    expect(html).toContain('礼盒单款装');
-    expect(html).toContain('每袋 8 个 · 全组 1,000 个');
-    expect(html).toContain('入袋单价');
-    expect(html).toContain('¥ 0.2000 / 袋');
-    expect(html).toContain('入袋小计');
-    expect(html).toContain('¥ 25.00');
-    expect(html).toContain('基于业务第 1 版');
-    expect(html).toContain('基于生产版本 历史未记录');
-    expect(html).toContain('批准后生产版本 v2');
-    expect(html).toContain('系统建议小计');
-    expect(html).toContain('入袋费改价说明');
-    expect(html).toContain('包装协议改价机密');
-    expect(html).toContain('入袋计价明细（1）');
-  });
-
   it('价格状态和来源不回显未知内部标识', async () => {
     requireSessionMock.mockResolvedValue({
-      user: { id: 'sales-1', role: Role.CUSTOMER_SERVICE },
+      user: { id: 'admin-1', role: Role.ADMIN },
     });
     getOrderDetailMock.mockResolvedValue({
       ...orderFixture(),
@@ -944,18 +861,6 @@ describe('order detail — 暂不能完工横幅', () => {
     expect(html).not.toContain('暂不能完工');
   });
 
-  it('非 ADMIN 看不到横幅（只有他们能建外协单）', async () => {
-    requireSessionMock.mockResolvedValue({
-      user: { id: 'sales-1', role: Role.CUSTOMER_SERVICE },
-    });
-    getOrderDetailMock.mockResolvedValue(inProductionWithGap());
-
-    const html = renderToStaticMarkup(
-      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
-    );
-
-    expect(html).not.toContain('暂不能完工');
-  });
 });
 
 describe('order detail — 售后重做入口', () => {

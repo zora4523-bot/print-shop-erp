@@ -506,9 +506,3 @@ it('protects already-settled fees even when an old order has a mutable status', 
   await expect(saveOrderManualCharge({ orderId: 'order-1', chargeId: null, expectedPriceRevision: 2, categoryCode: 'APPROVED_ADJUSTMENT', description: '优惠', amount: '-1', reason: '优惠', approvalReference: '管理员确认' }, actor)).rejects.toThrow('已结算');
   expect(dbMock.tx.orderCustomerCharge.create).not.toHaveBeenCalled();
 });
-
-it('allows factory-direct administrative charges through the existing audited path', async () => {
-  dbMock.tx.order.findUnique.mockResolvedValue({ ...mutableOrder(), settlementType: OrderSettlementType.FACTORY_DIRECT });
-  await saveOrderManualCharge({ orderId: 'order-1', chargeId: null, expectedPriceRevision: 2, categoryCode: 'APPROVED_ADJUSTMENT', description: '优惠', amount: '-1', reason: '优惠', approvalReference: '管理员确认' }, actor);
-  expect(appendRevisionMock).toHaveBeenCalled();
-});

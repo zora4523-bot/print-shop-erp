@@ -2,9 +2,7 @@ import { getOrderProductionReadiness } from '@/lib/order/production-readiness-qu
 import { ProductionReadinessWarning } from '@/components/business/order/ProductionReadinessWarning';
 import { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-facts-presentation';
 import { LegacyProductionFactsRepairForm } from '@/components/business/order/LegacyProductionFactsRepairForm';
-import { InternalOrderEditWorkspace } from '@/components/business/order/InternalOrderEditWorkspace';
 import { OrderItemRemarkForm } from '@/components/business/order/OrderItemRemarkForm';
-import { canChangeOrderPackaging } from '@/lib/order/editable-fields';
 import { SalesOrderEditor } from '@/components/business/order/SalesOrderEditor';
 import { AddOrderShipmentForm } from '@/components/business/order/AddOrderShipmentForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
@@ -12,7 +10,6 @@ import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { AdminOrderEditor } from '@/components/business/order/AdminOrderEditor';
 import { deriveLegacyOrderItemFoilFacts } from '@/lib/order/pricing-route';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
-import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getSession, requireSession } from '@/lib/auth/session';
@@ -29,19 +26,16 @@ import { getOrderExternalSalesAssociation } from '@/lib/order/external-sales-ass
 import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
 import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
 import { isOrderPricingReviewAllowedStatus } from '@/lib/order/pricing-status';
-import { EditOrderForm } from '@/components/business/order/EditOrderForm';
 import {
   OrderSavedConfiguration,
   OrderSavedPackaging,
   OrderSavedItemDetails,
 } from '@/components/business/order/OrderSavedConfiguration';
-import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
-import { OrderChangeWithdrawButton } from '@/components/business/order/OrderChangeWithdrawButton';
 import { OrderPricingReviewForm } from '@/components/business/order/OrderPricingReviewForm';
 import { FulfillmentPricingReviewForm } from '@/components/business/order/FulfillmentPricingReviewForm';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { ActionNotice } from '@/components/ui-business';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { buttonVariants } from '@/components/ui/button';
 import {
   OrderStatus,
@@ -62,37 +56,26 @@ export async function generateMetadata({ params }: PageProps) {
 
 export default async function EditOrderPage({ params }: PageProps) {
   const { user } = await requireSession();
-  if (
-    user.role !== Role.ADMIN &&
-    user.role !== Role.SALES &&
-    user.role !== Role.CUSTOMER_SERVICE
-  )
-    notFound();
+  if (user.role !== Role.ADMIN && user.role !== Role.SALES) notFound();
   const { id } = await params;
   if (user.role === Role.SALES) return <SalesOrderEditor id={id} user={user} />;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
-  if (!order || (user.role !== Role.ADMIN && order.submitterId !== user.id))
-    notFound();
+  if (!order) notFound();
   const fieldset = editableFieldsetForStatus(order.status);
   if (fieldset === 'NONE') redirect(`/orders/${id}`);
   const pending = order.changeRequests.find(
     (request) => request.status === 'PENDING',
   );
   const canModify = canRequestOrderModification(user, order, Boolean(pending));
-  const [customers, products, externalSalesAssociation, foilColors] = await Promise.all([
-    user.role === Role.ADMIN
-      ? Promise.resolve([])
-      : listCustomerPartyOptions(order.customerPartyId),
+  const [products, externalSalesAssociation, foilColors] = await Promise.all([
     canModify && order.items.length > 0
       ? listActiveOrderChangeCatalogProducts()
       : Promise.resolve([]),
     getOrderExternalSalesAssociation(order.id, user),
-    // Admin editor needs swatches; the change-request form (any role that can
-    // modify) needs the names so typed catalog colors are never re-mapped.
-    user.role === Role.ADMIN || (canModify && order.items.length > 0)
-      ? listExternalCreateOrderFoilOptions()
-      : Promise.resolve([]),
+    // The admin editor needs swatches and typed catalog color names.
+    listExternalCreateOrderFoilOptions(),
   ]);
+  const customers: Awaited<ReturnType<typeof listCustomerPartyOptions>> = [];
   const external =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
@@ -110,186 +93,11 @@ export default async function EditOrderPage({ params }: PageProps) {
     external &&
     isFulfillmentPricingStatus(order.status) &&
     order.settledAt === null;
-  if (user.role === Role.ADMIN) {
-    const showSavedPricingReadiness = 'pricingStatus' in order && order.pricingStatus === OrderPricingStatus.ADMIN_CONFIRMED && (order.status === OrderStatus.SUBMITTED || order.status === OrderStatus.PENDING_FACTORY);
-    const readiness = showSavedPricingReadiness ? await getOrderProductionReadiness(order.id) : undefined;
-    return <><ProductionReadinessWarning readiness={readiness} saved /><AdministratorOrderEdit {...{order, external, pending, pricingPending, canPrice,
-      canCorrectFreight, id, canModify, products, foilColors, fieldset, customers, externalSalesAssociation}} /></>;
-  }
+  const showSavedPricingReadiness = 'pricingStatus' in order && order.pricingStatus === OrderPricingStatus.ADMIN_CONFIRMED && (order.status === OrderStatus.SUBMITTED || order.status === OrderStatus.PENDING_FACTORY);
+  const readiness = showSavedPricingReadiness ? await getOrderProductionReadiness(order.id) : undefined;
+  return <><ProductionReadinessWarning readiness={readiness} saved /><AdministratorOrderEdit {...{order, external, pending, pricingPending, canPrice,
+    canCorrectFreight, id, canModify, products, foilColors, fieldset, customers, externalSalesAssociation}} /></>;
 
-  return (
-    <div className="mx-auto min-w-0 max-w-6xl space-y-5 [&_button]:min-h-11 [&_input:not([type=hidden])]:min-h-11 [&_select]:min-h-11">
-      <BreadcrumbEntity label={order.orderNo} />
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="break-words text-xl font-semibold">
-            编辑工单{' '}
-            <span className="text-base">{order.customName?.trim() || '未命名工单'}</span>
-          </h1>
-          <div className="mt-2">
-            <OrderStatusBadge status={order.status} />
-          </div>
-        </div>
-        <Link
-          href={`/orders/${id}`}
-          className={buttonVariants({ variant: 'outline' })}
-        >
-          返回工单
-        </Link>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        基本信息与配送保存后生效；款式和费用通过下方审批、核价处理。
-      </p>
-      <InternalOrderEditWorkspace key={`${order.id}:${order.editVersion}`} auxiliary={
-        <>
-          {!pending ? order.items.map((item) => (
-            <OrderItemRemarkForm key={item.id} orderId={order.id} itemId={item.id}
-              sequence={item.sequence} version={order.editVersion} initial={item.remark} />
-          )) : null}
-          {!pending && order.shipments.length < 10 &&
-            !order.shipments.some((row) => row.status === 'SHIPPED') && 'priceRevision' in order ? (
-              <AddOrderShipmentForm orderId={order.id} expectedRevision={order.revision}
-                expectedEditVersion={order.editVersion} expectedWorkOrderVersion={order.workOrderVersion}
-                expectedPriceRevision={Number(order.priceRevision)} allowManualPricing={false}
-                nextSequence={Math.max(0, ...order.shipments.map((row) => row.sequence)) + 1}
-                sources={order.shipments.filter((row) => !row.trackingNo && row.weightKg === null && row.registrationVersion === 0)
-                  .map((row) => ({ id: row.id, sequence: row.sequence, receiverAddress: row.receiverAddress,
-                    lines: row.lines.filter((line) => line.quantity > 0).map((line) => ({
-                      orderItemId: line.orderItem.id, name: line.orderItem.name, quantity: line.quantity,
-                    })),
-                  }))} />
-          ) : null}
-        </>
-      }>
-      <EditOrderForm
-        key={`${order.id}:${order.editVersion}`}
-        orderId={order.id}
-        expectedEditVersion={order.editVersion}
-        fieldset={fieldset}
-        customers={customers}
-        externalSalesAssociation={externalSalesAssociation}
-        shipments={order.shipments}
-        packagingDetails={<OrderSavedPackaging order={order} />}
-        isExternalSales={external}
-        isSfCollect={order.isSfCollect}
-        blocked={Boolean(pending)}
-        initial={{
-          customName: order.customName,
-          customerRef: order.customerRef,
-          customerPartyId: order.customerPartyId,
-          receiverName: order.receiverName,
-          receiverPhone: order.receiverPhone,
-          receiverAddress: order.receiverAddress,
-          expressCode: order.expressCode,
-          packageRequirement: order.packageRequirement,
-          remark: order.remark,
-          promisedDate: order.promisedDate
-            ? formatDateInputShanghai(order.promisedDate)
-            : null,
-          isUrgent: order.isUrgent,
-        }}
-      />
-      </InternalOrderEditWorkspace>
-      <OrderSavedConfiguration
-        order={order}
-        canEditDesigns={order.status === OrderStatus.DRAFT && !pending}
-      />
-      {pending ? (
-        <ActionNotice
-          tone="info"
-          title="修改申请待处理"
-          description={pending.reason}
-          action={
-            <div className="flex flex-wrap items-center gap-2">
-              <Link
-                href={`/orders/${id}`}
-                className={buttonVariants({ variant: 'outline' })}
-              >
-                查看申请
-              </Link>
-              {pending.requesterId === user.id ? (
-                <OrderChangeWithdrawButton requestId={pending.id} />
-              ) : null}
-            </div>
-          }
-        />
-      ) : null}
-      {canModify ? (
-        <Card id="modify-order">
-          <CardHeader>
-            <h2 className="text-base font-semibold">申请修改工单</h2>
-            <p className="text-sm text-muted-foreground">
-              可申请调整款式或交期，管理员批准后生效。
-            </p>
-          </CardHeader>
-          <CardContent>
-            <OrderChangeRequestForm
-              hasPackagingGroups={order.packagingGroups.length > 0}
-              promisedDate={
-                formatDateInputShanghai(order.promisedDate, '') || null
-              }
-              orderId={order.id}
-              expectedRevision={order.revision}
-              expectedWorkOrderVersion={order.workOrderVersion}
-              catalogProducts={products}
-              foilColorNames={foilColors.map((foil) => foil.name)}
-              items={order.items.map((item) => ({
-                id: item.id,
-                sequence: item.sequence,
-                name: item.name,
-                quantity: item.quantity,
-                pack: order.packagingGroups.flatMap((group) => group.lines)
-                  .find((line) => line.orderItem.id === item.id)?.unitsPerBag ?? item.pack,
-                packagingEditable: canChangeOrderPackaging(order.status) &&
-                  order.packagingGroups.flatMap((group) => group.lines)
-                    .filter((line) => line.orderItem.id === item.id).length === 1,
-                productId: item.productId,
-                pricingRoute: item.pricingRoute,
-                specification: item.specification,
-                paperType: item.paperType,
-                paperWeightGsm: item.paperWeightGsm,
-                frontFoilColors: item.frontFoilColors,
-                backFoilColors: item.backFoilColors,
-                foilColors: item.foilColors,
-                isDoubleSided: item.isDoubleSided,
-              }))}
-            />
-          </CardContent>
-        </Card>
-      ) : null}
-      {canPrice ? (
-        <Card>
-          <CardHeader>
-            <h2 className="text-base font-semibold">核对费用</h2>
-          </CardHeader>
-          <CardContent>
-            <OrderPricingReviewForm
-              key={`${order.revision}:${order.editVersion}`}
-              orderId={order.id}
-            />
-          </CardContent>
-        </Card>
-      ) : null}
-      {canCorrectFreight ? (
-        <Card>
-          <CardContent className="pt-4">
-            <FulfillmentPricingReviewForm
-              key={`${order.revision}:${order.editVersion}`}
-              orderId={order.id}
-              currentValue={order.isSfCollect}
-              isPricingPending={pricingPending}
-              shipments={order.shipments.map((shipment) => ({
-                id: shipment.id,
-                sequence: shipment.sequence,
-                destinationProvince: shipment.destinationProvince,
-                weightKg: shipment.weightKg?.toString() ?? null,
-              }))}
-            />
-          </CardContent>
-        </Card>
-      ) : null}
-    </div>
-  );
 }
 
 function PendingModificationNoticeSection({ pending, id }: { pending: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>['changeRequests'][number]; id: string; }

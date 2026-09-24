@@ -9,7 +9,7 @@ import { currentShanghaiMonth, todayShanghai } from './shanghai-clock';
 //
 // 3 datasets:
 //   - getProductionTrend(now)       近 30 天每日完工 / 发货 / 完结
-//   - getSalesRanking(now)          本月销售 / 客服业绩 Top 10（按提交时间）
+//   - getSalesRanking(now)          本月销售业绩 Top 10（按提交时间）
 //   - getCategoryDistribution(now)  本月各产品线工单数（按提交时间）
 //
 // 业绩归属时间口径走 DECISIONS 2026-04-26：销售排行 / 产品分布按

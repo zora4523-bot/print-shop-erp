@@ -313,8 +313,7 @@ function assertCanRequest(
 ): void {
   if (
     !(actor.role === Role.ADMIN && isModification) &&
-    actor.role !== Role.SALES &&
-    actor.role !== Role.CUSTOMER_SERVICE
+    actor.role !== Role.SALES
   ) {
     throw new OrderChangeRequestError('当前账号无权提交此类工单申请');
   }
@@ -736,7 +735,7 @@ export async function withdrawOrderChangeRequest(
   input: WithdrawOrderChangeRequestInput,
   actor: { id: string; role: Role },
 ) {
-  if (actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE && actor.role !== Role.ADMIN) {
+  if (actor.role !== Role.SALES && actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有申请人可以撤回工单变更申请');
   }
   const locator = await db.orderChangeRequest.findUnique({

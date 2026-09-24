@@ -22,7 +22,7 @@ import { invalidFromIssues } from '@/lib/admin/action-helpers';
 // orderItemId, fileType, fileName, fileSize, mimeType } → SignUploadResult.
 export async function signDesignUploadAction(raw: unknown): Promise<SignUploadResult> {
   // Open to every role that can create / edit orders + their designs.
-  // Per SPEC §2.2 'design:upload' covers SALES / CUSTOMER_SERVICE / ADMIN
+  // Per SPEC §2.2 'design:upload' covers SALES / ADMIN
   // / ADMIN.
   const user = await requirePermission('design:upload');
 

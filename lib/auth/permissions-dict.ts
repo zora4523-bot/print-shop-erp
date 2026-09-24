@@ -11,16 +11,16 @@ import { Role } from '../../generated/prisma/enums';
 
 export const PERMISSIONS = {
   // 工单
-  'order:create':               [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
-  'order:update:pre-schedule':  [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:create':               [Role.SALES, Role.ADMIN],
+  'order:update:pre-schedule':  [Role.SALES, Role.ADMIN],
   'order:update:post-schedule': [Role.ADMIN],
   'order:view:all':             [Role.ADMIN],
-  'order:view:self':            [Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER],
+  'order:view:self':            [Role.SALES, Role.WORKER],
   'order:export:all':           [Role.ADMIN],
   'order:ship':                 [Role.ADMIN],
-  'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:mark-urgent':          [Role.SALES, Role.ADMIN],
   'order:cancel':               [Role.ADMIN, Role.SALES],
-  'order:change:request':       [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:change:request':       [Role.SALES, Role.ADMIN],
   'order:change:review':        [Role.ADMIN],
   'order:production-facts:repair': [Role.ADMIN],
   'order:price:confirm':        [Role.ADMIN],
@@ -37,7 +37,7 @@ export const PERMISSIONS = {
   'outsource:manage':           [Role.ADMIN],
 
   // 设计文件
-  'design:upload':              [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'design:upload':              [Role.SALES, Role.ADMIN],
   'design:bundle:create':       [Role.ADMIN],
 
   // 物料
@@ -57,7 +57,7 @@ export const PERMISSIONS = {
 
   // 薪资
   'salary:view:all':            [Role.ADMIN],
-  'salary:view:self':           [Role.CUSTOMER_SERVICE, Role.WORKER],
+  'salary:view:self':           [Role.WORKER],
   'salary:view:team':           [Role.ADMIN],
   'salary:rule:manage':         [Role.ADMIN],
 

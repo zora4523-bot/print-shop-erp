@@ -2016,8 +2016,8 @@ describe('submitOrder', () => {
     status: OrderStatus.DRAFT,
     submitterId: 'sales-1',
     receiverAddress: '佛山市南海区测试路 1 号',
-    receiverPhone: null,
-    settlementType: OrderSettlementType.INTERNAL_SALES,
+    receiverPhone: '13800000000',
+    settlementType: OrderSettlementType.EXTERNAL_SALES,
     orderNo: 'O-1',
     customerRef: '苹果福',
     totalAmount: '5000.00',
@@ -2026,15 +2026,15 @@ describe('submitOrder', () => {
     submitter: { displayName: '张三' },
   };
 
-  it('transitions DRAFT → SUBMITTED and stamps submittedAt from the injected clock', async () => {
+  it('transitions DRAFT → PENDING_FACTORY and stamps submittedAt from the injected clock', async () => {
     dbMock.order.findUnique.mockResolvedValue(submittedRichRow);
-    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.PENDING_FACTORY });
 
     const clock = new Date('2026-04-23T10:00:00+08:00');
     const r = await submitOrder('o1', salesActor, clock);
-    expect(r.status).toBe(OrderStatus.SUBMITTED);
+    expect(r.status).toBe(OrderStatus.PENDING_FACTORY);
     const updateArg = dbMock.order.update.mock.calls[0][0];
-    expect(updateArg.data.status).toBe(OrderStatus.SUBMITTED);
+    expect(updateArg.data.status).toBe(OrderStatus.PENDING_FACTORY);
     expect(updateArg.data.submittedAt).toBe(clock);
 
     // Exactly one STATUS_CHANGE log with before/after.
@@ -2042,15 +2042,8 @@ describe('submitOrder', () => {
     expect(logArg.data.action).toBe('STATUS_CHANGE');
     expect(logArg.data.changedFields.status).toEqual({
       before: OrderStatus.DRAFT,
-      after: OrderStatus.SUBMITTED,
+      after: OrderStatus.PENDING_FACTORY,
     });
-  });
-
-  it('拒绝退役前保存的内销 120g 草稿首次提交', async () => {
-    dbMock.order.findUnique.mockResolvedValue(submittedRichRow);
-    dbMock.orderItem.findMany.mockResolvedValue([{ paperType: '120g珠光艳闪', paperWeightGsm: 120 }]);
-    await expect(submitOrder('o1', salesActor)).rejects.toThrow('120g 纸张已停用');
-    expect(dbMock.orderItem.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { orderId: 'o1' } }));
   });
 
   it('refuses when a non-owner SALES tries to submit another SALES\'s order (Codex round 27 / P1)', async () => {
@@ -2181,22 +2174,6 @@ describe('submitOrder', () => {
     expect(dbMock.order.update).not.toHaveBeenCalled();
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
     expect(notifyMock).not.toHaveBeenCalled();
-  });
-
-  it('内部工单保持既有流程，不要求手机号或设计图片', async () => {
-    dbMock.order.findUnique.mockResolvedValue({
-      ...submittedRichRow,
-      receiverPhone: null,
-    });
-    dbMock.order.update.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.SUBMITTED,
-    });
-
-    await expect(submitOrder('o1', salesActor)).resolves.toMatchObject({
-      status: OrderStatus.SUBMITTED,
-    });
-    expect(dbMock.orderItem.findFirst).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -4428,7 +4405,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
       expect(dbMock.orderShipment.updateMany).not.toHaveBeenCalled();
     });
-    it.each([Role.SALES, Role.CUSTOMER_SERVICE])('rejects reassignment from %s even for an owned order', async (role) => {
+    it.each([Role.SALES])('rejects reassignment from %s even for an owned order', async (role) => {
       await expect(updateOrderFields('order-1', editInput({ externalSalesUserId: 'sales-2' }), { id: 'sales-1', role })).rejects.toThrow('只有管理员');
       expect(dbMock.order.updateMany).not.toHaveBeenCalled();
     });

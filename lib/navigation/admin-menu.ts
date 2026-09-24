@@ -221,7 +221,6 @@ export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
       '/owner/warehouses',
     ],
     [Role.SALES]: ['/orders/new', '/orders', '/sales/bills'],
-    [Role.CUSTOMER_SERVICE]: ['/orders/new', '/orders'],
   };
   const visible = flattenAdminMenuItems(
     getAdminMenuItems(user).flatMap((group) => group.items),

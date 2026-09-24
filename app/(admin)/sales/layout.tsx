@@ -3,8 +3,8 @@ import { Role } from '../../../generated/prisma/enums';
 import { getSession } from '@/lib/auth/session';
 
 // External SALES only. Parent (admin) layout already gates the shell;
-// this keeps internal CUSTOMER_SERVICE accounts out of external-sales
-// receivables. ADMIN hitting
+// this keeps administrators out of the salesperson's own receivables view.
+// ADMIN hitting
 // /sales/bills/<id> bounces to / (not /owner/bills — App Router
 // layout can't get pathname, so a one-shot
 // redirect to a list view would lose the deep-link id).

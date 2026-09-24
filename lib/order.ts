@@ -1479,19 +1479,18 @@ export async function submitOrder(
       ReturnType<typeof finalizeExternalOrderQuoteInTx>
     > | null;
   } = { current: null };
+  // Only chargeable external-sales drafts (and their rejected corrections)
+  // are submitted here; free rework orders are created directly as SUBMITTED.
   const result = await transitionWithLog(
     orderId,
-    (order) =>
-      order.settlementType === OrderSettlementType.EXTERNAL_SALES
-        ? OrderStatus.PENDING_FACTORY
-        : OrderStatus.SUBMITTED,
+    OrderStatus.PENDING_FACTORY,
     actor,
     {
       remark: '提交工单',
       now,
       authz: (order) => {
         if (order.status === OrderStatus.REJECTED) submissionNotificationKey = `${orderId}:correction:${order.revision}`;
-        // 'order:create' permission lets SALES / CS create AND submit — but
+        // 'order:create' permission lets SALES create AND submit — but
         // only for their own rows. ADMIN keeps the global override.
         const globalOverride = actor.role === Role.ADMIN;
         if (!globalOverride && order.submitterId !== actor.id) {
@@ -1502,12 +1501,13 @@ export async function submitOrder(
             '工单缺少收货地址，请先补全收货地址再提交',
           );
         }
-        if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
-          if (!order.receiverPhone?.trim()) {
-            throw new OrderInvariantError(
-              '工单缺少收货人手机号，请先补全再提交',
-            );
-          }
+        if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
+          throw new OrderInvariantError('只有外部销售收费工单可以提交');
+        }
+        if (!order.receiverPhone?.trim()) {
+          throw new OrderInvariantError(
+            '工单缺少收货人手机号，请先补全再提交',
+          );
         }
       },
       cascade: async (tx, lockedOrderId, lockedOrder) => {
@@ -1520,9 +1520,7 @@ export async function submitOrder(
             if (error instanceof SampleOrderError) throw new OrderInvariantError(error.message);
             throw error;
           }
-        } else if (
-          lockedOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
-        ) {
+        } else {
           const itemWithoutImage = await prismaTx.orderItem.findFirst({
             where: {
               orderId: lockedOrderId,
@@ -1539,30 +1537,6 @@ export async function submitOrder(
           finalizedExternalQuote.current = await finalizeSubmittedOrderQuoteInTx(
             prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken,
           );
-        } else {
-          // Internal drafts saved before the retirement are new business on
-          // first submit. External drafts are checked in
-          // assertSelectedPapersAvailable, sample drafts in finalizeSampleOrderInTx.
-          const items = await prismaTx.orderItem.findMany({
-            where: { orderId: lockedOrderId },
-            select: { pricingRoute: true, paperType: true, paperWeightGsm: true, specification: true, actualWidthMm: true, actualHeightMm: true, manualQuoteReason: true },
-          });
-          if (hasRetiredPaperItem(items ?? [])) {
-            throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
-          }
-          try { await assertBlankPriceAdmissionInTx(prismaTx, items, now); }
-          catch (error) {
-            if (error instanceof BlankPriceAdmissionError) throw new OrderInvariantError(error.message);
-            throw error;
-          }
-          // Since 2026-09-18 internal and factory-direct orders price their
-          // delivery from the same published logistics book as external
-          // sales; the shared finalizer materializes the charges at submit.
-          if (settlementBillsLogistics(lockedOrder.settlementType)) {
-            finalizedExternalQuote.current = await finalizeSubmittedOrderQuoteInTx(
-              prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken,
-            );
-          }
         }
       },
       afterTransition: async (tx, lockedOrderId, previousOrder) => {
@@ -2666,7 +2640,7 @@ async function updateOrderEditableFields(
   actor: { id: string; role: Role },
   transaction?: Prisma.TransactionClient,
 ): Promise<UpdateOrderResult> {
-  if (![Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE].some((role) => role === actor.role)) {
+  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES) {
     throw new OrderInvariantError('无权编辑工单');
   }
   const work = async (tx: Prisma.TransactionClient): Promise<UpdateOrderResult> => {
@@ -2712,7 +2686,7 @@ async function updateOrderEditableFields(
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
 
-    // SALES / CUSTOMER_SERVICE can only edit their own orders. ADMIN
+    // SALES can only edit their own orders. ADMIN
     // has a global override so they can correct field data for
     // anyone. Same pattern as submitOrder's ownership guard.
     const globalOverride = actor.role === Role.ADMIN;

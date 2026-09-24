@@ -11,15 +11,15 @@ vi.mock('@/lib/db', () => ({ db: { $transaction: mocks.transaction } }));
 import { editItemRemark } from '../edit-item-remark';
 
 const input = { orderId: 'order', itemId: 'item', expectedEditVersion: 3, remark: '新备注' };
-const actor = { id: 'cs', role: Role.CUSTOMER_SERVICE };
+const actor = { id: 'admin', role: Role.ADMIN };
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.transaction.mockImplementation((work) => work(mocks.tx));
   mocks.tx.order.findUnique.mockResolvedValue({ submitterId: 'cs', status: 'DRAFT', editVersion: 3, _count: { changeRequests: 0 } });
   mocks.tx.orderItem.findFirst.mockResolvedValue({ remark: '旧备注', sequence: 2 });
 });
-it.each([Role.CUSTOMER_SERVICE, Role.ADMIN])('saves only the remark and audits as %s', async (role) => {
-  expect(await editItemRemark(input, { ...actor, role })).toBe(true);
+it('saves only the remark and audits as ADMIN', async () => {
+  expect(await editItemRemark(input, actor)).toBe(true);
   expect(mocks.tx.orderItem.findFirst).toHaveBeenCalledWith({ where: { id: 'item', orderId: 'order' }, select: { remark: true, sequence: true } });
   expect(mocks.tx.orderItem.update).toHaveBeenCalledWith({ where: { id: 'item' }, data: { remark: '新备注' } });
   expect(mocks.tx.order.update).toHaveBeenCalledWith({ where: { id: 'order' }, data: { revision: { increment: 1 }, editVersion: { increment: 1 } } });
@@ -39,7 +39,7 @@ it('normalizes browser form line endings before persisting', async () => {
   await editItemRemark({ ...input, remark: ' 第一行\r\n第二行\r第三行 ' }, actor);
   expect(mocks.tx.orderItem.update).toHaveBeenCalledWith({ where: { id: 'item' }, data: { remark: '第一行\n第二行\n第三行' } });
 });
-it.each([{ submitterId: 'other' }, { status: 'SETTLED' }, { status: 'SHIPPED' }, { editVersion: 4 }, { _count: { changeRequests: 1 } }])('rejects unavailable order %j without writes', async (override) => {
+it.each([{ status: 'SETTLED' }, { status: 'SHIPPED' }, { editVersion: 4 }, { _count: { changeRequests: 1 } }])('rejects unavailable order %j without writes', async (override) => {
   mocks.tx.order.findUnique.mockResolvedValue({ submitterId: 'cs', status: 'DRAFT', editVersion: 3, _count: { changeRequests: 0 }, ...override });
   await expect(editItemRemark(input, actor)).rejects.toThrow();
   expect(mocks.tx.orderItem.update).not.toHaveBeenCalled();

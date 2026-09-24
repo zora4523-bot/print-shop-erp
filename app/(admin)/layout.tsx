@@ -30,11 +30,7 @@ export default async function AdminShellLayout({
   const { user } = session;
   // WORKER goes to /(worker), not here. Anything else means a bad
   // session or a future role we haven't planned for — bounce home.
-  const ALLOWED: readonly Role[] = [
-    Role.ADMIN,
-    Role.SALES,
-    Role.CUSTOMER_SERVICE,
-  ];
+  const ALLOWED: readonly Role[] = [Role.ADMIN, Role.SALES];
   if (!ALLOWED.includes(user.role)) redirect('/');
 
   const menuGroups = getAdminMenuItems(user);

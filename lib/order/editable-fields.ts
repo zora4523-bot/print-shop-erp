@@ -101,7 +101,7 @@ export const ORDER_MODIFIABLE_STATUSES: readonly OrderStatus[] = [
 
 export function canRequestOrderModification(actor: { id: string; role: Role }, order: { submitterId: string; status: OrderStatus }, hasPendingRequest = false) {
   return !hasPendingRequest && ORDER_MODIFIABLE_STATUSES.includes(order.status) && (
-    actor.role === Role.ADMIN || ((actor.role === Role.SALES || actor.role === Role.CUSTOMER_SERVICE) && actor.id === order.submitterId)
+    actor.role === Role.ADMIN || (actor.role === Role.SALES && actor.id === order.submitterId)
   );
 }
 

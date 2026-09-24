@@ -18,8 +18,8 @@ export function isDirectCancelStatus(status: OrderStatus): boolean {
 }
 
 /**
- * 管理后台工单详情页是否显示直接取消入口。外部销售走 SalesOrderDetailView，
- * 客服没有 order:cancel 权限；action 层仍由 requirePermission 与 cancelOrder
+ * 管理后台工单详情页是否显示直接取消入口。外部销售走 SalesOrderDetailView；
+ * action 层仍由 requirePermission 与 cancelOrder
  * 的领域校验把关，这里只决定界面入口。
  */
 export function canShowAdminDirectCancel(role: Role, status: OrderStatus): boolean {

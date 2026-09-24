@@ -173,8 +173,7 @@ function buildCurrentProductionSteps(input: {
 
 // Loads the narrow shape the production print layout needs. SALES uses the
 // customer-facing list drawer and must not receive a production sheet (it
-// contains internal production details). CUSTOMER_SERVICE can
-// print its own submissions, ADMIN sees everything, and WORKER sees only
+// contains internal production details). ADMIN sees everything, and WORKER sees only
 // current-version orders in its reporting lane or with public progress.
 // Returns null when the actor can't see the order — the page
 // maps that to notFound() so there's no "this order exists but you

@@ -45,7 +45,7 @@ export function IssueBillButton({
         disabled={pending}
         trigger={
           <Button type="button" disabled={pending} aria-busy={pending}>
-            {pending ? '正在发单…' : '发单给销售 / 客服'}
+            {pending ? '正在发单…' : '发单给销售'}
           </Button>
         }>
         <ConfirmActionDialog action={`确认发布 ${period} 账单？`} changes={[]} consequences={[

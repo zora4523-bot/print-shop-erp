@@ -454,22 +454,22 @@ it('sales cannot forge manual charges', async () => {
   expect(mocks.transaction).not.toHaveBeenCalled();
 });
 
-it('allows customer service to split its own order through the existing quote protocol', async () => {
+it('allows sales to split its own order through the existing quote protocol', async () => {
   const order = fixture();
-  order.submitterId = 'cs';
+  order.submitterId = 'sales-own';
   mocks.find.mockResolvedValue(order);
-  const cs = { id: 'cs', role: Role.CUSTOMER_SERVICE };
+  const cs = { id: 'sales-own', role: Role.SALES };
   const preview = await addOrderShipment(input(), cs, 'preview');
   expect(mocks.create).not.toHaveBeenCalled();
   await addOrderShipment({ ...input(), previewToken: preview!.token }, cs, 'save');
   expect(mocks.create).toHaveBeenCalledOnce();
 });
-it('rejects customer service editing another submitter order', async () => {
-  await expect(addOrderShipment(input(), { id: 'cs', role: Role.CUSTOMER_SERVICE }, 'preview')).rejects.toThrow('自己创建');
+it('rejects sales editing another submitter order', async () => {
+  await expect(addOrderShipment(input(), { id: 'sales-own', role: Role.SALES }, 'preview')).rejects.toThrow('自己创建');
   expect(mocks.create).not.toHaveBeenCalled();
 });
-it('rejects customer service manual pricing before the transaction', async () => {
-  await expect(addOrderShipment({ ...input(), packingMaterialFee: '1', overrideReason: '测试' }, { id: 'cs', role: Role.CUSTOMER_SERVICE }, 'preview')).rejects.toThrow('人工物流费用');
+it('rejects sales manual pricing before the transaction', async () => {
+  await expect(addOrderShipment({ ...input(), packingMaterialFee: '1', overrideReason: '测试' }, { id: 'sales-own', role: Role.SALES }, 'preview')).rejects.toThrow('人工物流费用');
   expect(mocks.transaction).not.toHaveBeenCalled();
 });
 

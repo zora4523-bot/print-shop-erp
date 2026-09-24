@@ -36,7 +36,7 @@ export async function addOrderShipment(
   actor: { id: string; role: Role },
   mode: 'preview' | 'save',
 ) {
-  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE)
+  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES)
     throw new AddOrderShipmentError('当前账号不能添加发货地址');
   const input = addOrderShipmentSchema.parse(raw);
   if (actor.role !== Role.ADMIN && (input.shippingFee !== undefined || input.packingMaterialFee !== undefined || input.overrideReason !== undefined))

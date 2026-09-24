@@ -302,15 +302,15 @@ export async function createUser(data: CreateUserData): Promise<AccountSummary> 
             : null,
         isActive: true,
         employmentType:
-          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+          data.role === Role.WORKER
             ? (data.employmentType ?? null)
             : null,
         employmentStartDate:
-          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+          data.role === Role.WORKER
             ? (data.employmentStartDate ?? null)
             : null,
         employmentEndDate:
-          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+          data.role === Role.WORKER
             ? (data.employmentEndDate ?? null)
             : null,
       },
@@ -351,15 +351,15 @@ export async function updateUser(
     const nextWorkerType =
       data.role === Role.WORKER ? (data.workerType ?? null) : null;
     const nextEmploymentType =
-      data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+      data.role === Role.WORKER
         ? (data.employmentType ?? null)
         : null;
     const nextEmploymentStartDate =
-      data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+      data.role === Role.WORKER
         ? (data.employmentStartDate ?? null)
         : null;
     const nextEmploymentEndDate =
-      data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+      data.role === Role.WORKER
         ? (data.employmentEndDate ?? null)
         : null;
     const roleChanging = data.role !== target.role;

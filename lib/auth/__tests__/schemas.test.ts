@@ -975,21 +975,6 @@ describe('createUserSchema', () => {
     expect(invalid.success).toBe(false);
   });
 
-  it('requires employment type for internal customer service', () => {
-    expect(
-      createUserSchema.safeParse({
-        ...validCreate,
-        role: Role.CUSTOMER_SERVICE,
-      }).success,
-    ).toBe(false);
-    expect(
-      createUserSchema.safeParse({
-        ...validCreate,
-        role: Role.CUSTOMER_SERVICE,
-        employmentType: EmploymentType.FULL_TIME,
-      }).success,
-    ).toBe(true);
-  });
 });
 
 describe('updateUserSchema', () => {

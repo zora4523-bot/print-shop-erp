@@ -12,7 +12,6 @@ import { ProductionReadinessWarning } from '@/components/business/order/Producti
 import { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-facts-presentation';
 import { LegacyProductionFactsRepairForm } from '@/components/business/order/LegacyProductionFactsRepairForm';
 import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
-import { canChangeOrderPackaging } from '@/lib/order/editable-fields';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
 import { readOrderActivity } from '@/lib/order/activity';
 import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
@@ -49,7 +48,6 @@ import { canAttachOutsource } from '@/lib/order/status-machine';
 import { canCreateReworkFromStatus } from '@/lib/order/rework-eligibility';
 import {
   canEditOrderSfCollect,
-  canRequestOrderModification,
   editableFieldsetForStatus,
   isOrderEditable,
 } from '@/lib/order/editable-fields';
@@ -67,7 +65,6 @@ import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity'
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { ChangeRequestStatusBadge } from '@/components/business/order/ChangeRequestStatusBadge';
 import { ShipmentStatusBadge } from '@/components/business/order/ShipmentStatusBadge';
-import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
@@ -81,7 +78,6 @@ import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMater
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
 import {
   formatDateInputShanghai,
-  formatDateShanghai,
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
 import { getOrderPieceworkSummary } from '@/lib/salary/daily';
@@ -94,8 +90,6 @@ import {
   reworkItemRequiresUnitsPerBagInput,
 } from '@/lib/order/rework';
 import { ReworkOrderForm } from '@/components/business/order/ReworkOrderForm';
-import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
-import { OrderCancellationRequestForm } from '@/components/business/order/OrderCancellationRequestForm';
 import { OrderPricingReviewForm } from '@/components/business/order/OrderPricingReviewForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
 import { OrderChangeFieldDiff } from '@/components/business/order/OrderChangeFieldDiff';
@@ -121,12 +115,7 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
 import { orderDetailAmounts } from '@/lib/order/detail-amounts';
 import { OrderAmount } from '@/components/business/order/OrderAmount';
-import { OrderDetailTimeline } from '@/components/business/order/OrderDetailTimeline';
-import { OrderDetailStickyScope } from '@/components/business/order/OrderDetailStickyScope';
-import {
-  buildOrderDetailTimeline,
-  orderCancelImpact,
-} from '@/components/business/order/order-detail-timeline';
+import { orderCancelImpact } from '@/components/business/order/order-detail-timeline';
 import { listOrderTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputeAdminPanel } from '@/components/business/production/TaskDisputeAdminPanel';
 import {
@@ -182,6 +171,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       </div>
     );
   }
+  // 业主 2026-09-24：后台只剩管理员与外部销售两类账号，销售已在上面分流。
+  if (user.role !== Role.ADMIN) notFound();
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   // 打印网格是按款式排的，所以阈值也按「单个款式的设计图数」判定，
   // 不是整单累加。
@@ -190,12 +181,11 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     ...(order?.items ?? []).map((item) => item.designs.length),
   );
   if (!order) notFound();
-  const reportDisputes = user.role === Role.ADMIN ? await listOrderReportDisputes(order.id, user) : [];
-  const adminActivity = user.role === Role.ADMIN ? await readOrderActivity(order.id, user) : null;
-  const historicalBlankPrices = user.role === Role.ADMIN ? await readHistoricalBlankPriceEditor(order.id, user) : null;
-  const canViewCommercialAmounts = user.role !== Role.WORKER;
+  const reportDisputes = await listOrderReportDisputes(order.id, user);
+  const adminActivity = await readOrderActivity(order.id, user);
+  const historicalBlankPrices = await readHistoricalBlankPriceEditor(order.id, user);
+  const canViewCommercialAmounts = true;
   const canCreateRework =
-    user.role === Role.ADMIN &&
     order.kind !== OrderKind.REWORK &&
     canCreateReworkFromStatus(order.status);
   const [
@@ -207,12 +197,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     productionProgressSteps,
   ] = await Promise.all([
     estimateMaterialUsageForOrderItems(order.items),
-    user.role === Role.ADMIN
-      ? getOrderPieceworkSummary(order.id)
-      : Promise.resolve(null),
-    user.role === Role.ADMIN
-      ? listOrderTaskDisputes(order.id, { id: user.id, role: user.role })
-      : Promise.resolve([]),
+    getOrderPieceworkSummary(order.id),
+    listOrderTaskDisputes(order.id, { id: user.id, role: user.role }),
     canCreateRework
       ? getReworkCraftOptions(order.items.flatMap((item) => item.crafts))
       : Promise.resolve([]),
@@ -220,14 +206,12 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     listOrderProductionProgressSteps(order.id),
   ]);
 
-  const canSubmit =
-    order.status === OrderStatus.DRAFT &&
-    (order.submitterId === user.id || user.role === Role.ADMIN);
+  const canSubmit = order.status === OrderStatus.DRAFT;
   const canCancel = canShowAdminDirectCancel(user.role, order.status);
   // 发货与结算权限：order:ship = ADMIN（见 permissions.ts）。
   // action 层仍会重新校验，这里只控制界面入口。
-  const canShipOrSettle = user.role === Role.ADMIN;
-  const canRepairProductionFacts = user.role === Role.ADMIN && order.purpose !== 'SAMPLE_SHIPMENT';
+  const canShipOrSettle = true;
+  const canRepairProductionFacts = order.purpose !== 'SAMPLE_SHIPMENT';
   const repairFacts = canRepairProductionFacts ? getLegacyProductionFactsRepair(order) : null;
   const isExternalSalesOrder =
     'settlementType' in order &&
@@ -264,40 +248,30 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       row.status === OutsourceStatus.SENT ||
       row.status === OutsourceStatus.IN_PROGRESS,
   );
-  // Editing follows SPEC §3.6. Ownership mirrors the action-layer
-  // guard: SALES / CUSTOMER_SERVICE only their own; ADMIN
-  // any. Server still re-verifies on submit — this is UI-only.
+  // Editing follows SPEC §3.6. SALES uses its own editor above; this
+  // shared detail only serves ADMIN. Server still re-verifies on submit — this is UI-only.
   const pendingChangeRequest = order.changeRequests.find(
     (request) => request.status === OrderChangeRequestStatus.PENDING,
   );
   const canEdit =
     !pendingChangeRequest &&
-    isOrderEditable(order.status) &&
-    (order.submitterId === user.id || user.role === Role.ADMIN);
+    isOrderEditable(order.status);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
-  // Mirrors the gate in lib/order/commercial-details.ts: INTERNAL_SALES is
-  // excluded because that path records no 客服业绩 delta.
+  // Mirrors the gate in lib/order/commercial-details.ts.
   const canAdminManageCommercialDetails =
     (order.purpose ?? 'STANDARD') === 'STANDARD' &&
-    user.role === Role.ADMIN &&
-    (isExternalSalesOrder ||
-      ('settlementType' in order && order.settlementType === OrderSettlementType.FACTORY_DIRECT)) &&
+    isExternalSalesOrder &&
     order.status !== OrderStatus.SETTLED &&
     order.status !== OrderStatus.FINISHED &&
     order.status !== OrderStatus.CANCELLED;
   const canShowPricingReviewForm =
-    user.role === Role.ADMIN &&
     isChargeableOrder &&
     (isPricingPending || order.purpose === 'PROOF') &&
     isOrderPricingReviewAllowedStatus(order.status, order.purpose);
   const canReviewFulfillmentPricing =
-    user.role === Role.ADMIN &&
     billsLogistics &&
     isFulfillmentPricingStatus(order.status);
-  const isFinalizedExternalShipment =
-    order.status === OrderStatus.SHIPPED &&
-    billsLogistics;
   // 补录（priceBookId 为 null）的快递费在标记顺丰到付时会被清零，见 setOrderSfCollect。
   const manualFreightToWaive = (() => {
     if (!canViewCommercialAmounts || billsLogistics || order.isSfCollect) return null;
@@ -308,9 +282,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   })();
   const canToggleSfCollect =
     order.purpose !== 'PROOF' &&
-    canEditOrderSfCollect(order.status) &&
-    (order.submitterId === user.id || user.role === Role.ADMIN) &&
-    (!isFinalizedExternalShipment || user.role === Role.ADMIN);
+    canEditOrderSfCollect(order.status);
   // 设计图增删仅 DRAFT（提交后的增删属于 A05，等业主拍板）；所有权
   // 与编辑一致。lib/order-design.ts 是真闸口，这里 UI-only。
   const canEditDesigns = order.status === OrderStatus.DRAFT && canEdit;
@@ -319,9 +291,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   // out the door — no new production work attaches there.
   // canAttachOutsource() is the canonical gate;
   // lib/outsource.ts re-checks the same predicate.
-  const canCreateOutsource =
-    (user.role === Role.ADMIN) &&
-    canAttachOutsource(order.status);
+  const canCreateOutsource = canAttachOutsource(order.status);
   const assignedWorkerNames = [
     ...new Set(
       order.items.flatMap((item) =>
@@ -383,58 +353,22 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       hasShipment: order.shipments.length > 0,
       hasPendingChange: Boolean(pendingChangeRequest),
     });
-  const timelineSteps = buildOrderDetailTimeline({
-    status: order.status,
-    createdAt: order.createdAt,
-    submittedAt: order.submittedAt ?? null,
-    completedAt: order.completedAt ?? null,
-    promisedDate: order.promisedDate,
-    submitterName: order.submitter.displayName,
-    logs: order.logs.map((log) => ({
-      action: log.action,
-      createdAt: log.createdAt,
-      operatorName: log.operator.displayName,
-      changedFields: 'changedFields' in log ? log.changedFields : undefined,
-    })),
-    productionUnits: productionUnits.map((unit) => ({ status: unit.status })),
-    uncoveredOutsourceNames: order.uncoveredOutsourceItems.map(
-      (item) => `#${item.sequence} ${item.name}`,
-    ),
-    hasLiveOutsource,
-    pendingChangeRequest: Boolean(pendingChangeRequest),
-  });
   const cancelImpact = orderCancelImpact({
     pendingProductionCount,
     inProgressProductionCount,
     completedProductionCount,
     liveOutsourceCount,
   });
-  const canRequestChange =
-    user.role === Role.CUSTOMER_SERVICE &&
-    canRequestOrderModification(user, order, Boolean(pendingChangeRequest));
-  const canRequestCancellation =
-    user.role === Role.CUSTOMER_SERVICE &&
-    order.submitterId === user.id &&
-    (order.status === OrderStatus.CONFIRMED ||
-      order.status === OrderStatus.RELEASED ||
-      order.status === OrderStatus.FOILING ||
-      order.status === OrderStatus.PACKING) &&
-    !pendingChangeRequest;
-  const [orderChangeCatalogProducts, orderChangeFoilColors] = canRequestChange
-    ? await Promise.all([listActiveOrderChangeCatalogProducts(), listExternalCreateOrderFoilOptions()])
-    : [[], []];
   const manualCustomerCharges = order.customerCharges.filter((charge) =>
     ['SAMPLE_FEE', 'OTHER_PACKAGING_FEE', 'APPROVED_ADJUSTMENT'].includes(
       String(charge.category.code),
     ),
   );
-  const presentation = user.role === Role.ADMIN
-    ? await getAdminOrderDetailPresentation(user, {
-        id: order.id, orderNo: order.orderNo, revision: order.revision,
-        editVersion: order.editVersion, workOrderVersion: order.workOrderVersion,
-        priceRevision: 'priceRevision' in order && typeof order.priceRevision === 'number' ? order.priceRevision : undefined,
-      })
-    : null;
+  const presentation = await getAdminOrderDetailPresentation(user, {
+    id: order.id, orderNo: order.orderNo, revision: order.revision,
+    editVersion: order.editVersion, workOrderVersion: order.workOrderVersion,
+    priceRevision: 'priceRevision' in order && typeof order.priceRevision === 'number' ? order.priceRevision : undefined,
+  });
   const inlineOperations = presentation?.workspace.inlineOperations;
 
   const detailSections = {
@@ -487,7 +421,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           {historicalBlankPrices ? <HistoricalBlankPriceEditor
             key={`material-${historicalBlankPrices.orderRevision}-${historicalBlankPrices.priceRevision}`}
             {...historicalBlankPrices} /> : null}
-          {user.role === Role.ADMIN && !pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
+          {!pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
           {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">
               <OrderPricingReviewForm
@@ -691,12 +625,12 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               </>
             ) : null}
           </div></>),
-    basics: (<><OrderBasicSummarySection hideRemark={user.role === Role.ADMIN} {...{
+    basics: (<><OrderBasicSummarySection hideRemark {...{
       order, hasProductionOperations, productionOperations, productionProgressSteps,
       assignedWorkerNames, canViewCommercialAmounts,
     }} /></>),
     payrollPass: (<>
-      {user.role === Role.ADMIN && ['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'].includes(order.status) && productionOperations.some((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)) && <section className="space-y-3 rounded-xl border bg-card p-4 sm:p-6">
+      {['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'].includes(order.status) && productionOperations.some((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)) && <section className="space-y-3 rounded-xl border bg-card p-4 sm:p-6">
         <h2 className="text-base font-semibold">师傅计薪次数</h2>
         <div className="grid gap-3 sm:grid-cols-2">{productionOperations.filter((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)).map((op) => <PayrollPassForm key={`${op.id}:${op.payrollRevision}`} operationId={op.id} revision={op.payrollRevision} passCount={op.payrollPassCount ?? productionOperationPassCount(op.operationType, op.sources)} sequences={op.sources.flatMap((s) => s.orderItem ? [s.orderItem.sequence] : [])} />)}</div>
       </section>}
@@ -853,7 +787,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                   运单号：{shipment.trackingNo}
                 </p>
               ) : null}
-              {user.role === Role.ADMIN && order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.FINISHED ? (
+              {order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.FINISHED ? (
                 <ShipmentRegistrationForm key={`${shipment.id}:${shipment.registrationVersion}`}
                   orderId={order.id} shipmentId={shipment.id} version={shipment.registrationVersion}
                   revision={order.revision} editVersion={order.editVersion} workOrderVersion={order.workOrderVersion} priceRevision={priceRevision ?? 0}
@@ -915,11 +849,10 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           ) : null}
         </section>
       ) : null}</>),
-    designFiles: (<><section className={user.role === Role.ADMIN ? "space-y-3" : "space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6"}>
-        {user.role !== Role.ADMIN ? <h2 className="text-base font-semibold">款式（{order.items.length}）</h2> : null}
+    designFiles: (<><section className="space-y-3">
         <ol className="space-y-3">
           {order.items.map((item) => (
-            <li key={item.id} className={user.role === Role.ADMIN ? "min-w-0 text-sm" : "min-w-0 rounded-lg border text-sm"}>
+            <li key={item.id} className="min-w-0 text-sm">
               <Disclosure id={`detail-design-item-${item.id}`} className="group/design-item min-w-0">
                 <DisclosureSummary className="flex-wrap items-start justify-between gap-2 px-4 py-3">
                   <span className="admin-wrap-anywhere min-w-0 font-medium">
@@ -936,7 +869,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                     <span className="ml-2 hidden group-open/design-item:inline">收起</span>
                   </span>
                 </DisclosureSummary>
-              <div className={user.role === Role.ADMIN ? "space-y-3 px-4 pb-4" : "space-y-3 border-t px-4 py-4"}>
+              <div className="space-y-3 px-4 pb-4">
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <h3 className="sr-only">
                   #{item.sequence} {item.name}
@@ -992,41 +925,6 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                       : null
                   }
                 />
-                {user.role !== Role.ADMIN ? <>
-                <Row
-                  label="规格"
-                  value={
-                    item.specification
-                      ? externalPriceBusinessText(item.specification)
-                      : null
-                  }
-                />
-                <Row
-                  label="实际尺寸"
-                  value={formatActualSize(
-                    item.actualWidthMm,
-                    item.actualHeightMm,
-                  )}
-                  tabular
-                />
-                <Row
-                  label="纸张"
-                  value={
-                    item.paperType
-                      ? externalPriceBusinessText(item.paperType)
-                      : null
-                  }
-                />
-                <Row
-                  label="纸张克重"
-                  value={
-                    item.paperWeightGsm === null
-                      ? null
-                      : `${formatQuantity(item.paperWeightGsm)} g/㎡`
-                  }
-                  tabular
-                />
-                </> : null}
                 <Row label="稿件版本" value={item.artworkVersion} />
                 <Row
                   label="加工面"
@@ -1196,56 +1094,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         order={order}
         canViewCommercialAmounts={canViewCommercialAmounts}
       /></>),
-    changeForm: (<>{canRequestChange ? (
-        <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-          <div>
-            <h2 className="text-base font-semibold">申请修改工单</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              管理员批准后才会更新款式和待生产任务。
-            </p>
-          </div>
-          <OrderChangeRequestForm
-              hasPackagingGroups={order.packagingGroups.length > 0}
-            promisedDate={formatDateInputShanghai(order.promisedDate, '') || null}
-            orderId={order.id}
-            expectedRevision={order.revision}
-            expectedWorkOrderVersion={order.workOrderVersion}
-            catalogProducts={orderChangeCatalogProducts}
-            foilColorNames={orderChangeFoilColors.map((foil) => foil.name)}
-            items={order.items.map((item) => ({
-              id: item.id,
-              sequence: item.sequence,
-              name: item.name,
-              quantity: item.quantity,
-              pack: order.packagingGroups.flatMap((group) => group.lines)
-                .find((line) => line.orderItem.id === item.id)?.unitsPerBag ?? item.pack,
-              packagingEditable: canChangeOrderPackaging(order.status) &&
-                order.packagingGroups.flatMap((group) => group.lines)
-                  .filter((line) => line.orderItem.id === item.id).length === 1,
-              productId: item.productId,
-              pricingRoute: item.pricingRoute,
-              specification: item.specification,
-              paperType: item.paperType,
-              paperWeightGsm: item.paperWeightGsm,
-              frontFoilColors: item.frontFoilColors,
-              backFoilColors: item.backFoilColors,
-              foilColors: item.foilColors,
-              isDoubleSided: item.isDoubleSided,
-            }))}
-          />
-          {canRequestCancellation ? (
-            <div className="border-t pt-4">
-              <h3 className="mb-2 text-sm font-semibold">申请取消</h3>
-              <OrderCancellationRequestForm
-                orderId={order.id}
-                expectedRevision={order.revision}
-                expectedWorkOrderVersion={order.workOrderVersion}
-              />
-            </div>
-          ) : null}
-        </section>
-      ) : null}</>),
-    changeHistory: (<>{user.role !== Role.WORKER && order.changeRequests.length > 0 ? (
+    changeHistory: (<>{order.changeRequests.length > 0 ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -1293,8 +1142,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                     审核备注：{request.reviewRemark}
                   </p>
                 ) : null}
-                {user.role === Role.ADMIN &&
-                request.status === OrderChangeRequestStatus.PENDING ? (
+                {request.status === OrderChangeRequestStatus.PENDING ? (
                   <div className="mt-3 border-t pt-3">
                     <Link
                       href="#order-detail-actions"
@@ -1310,7 +1158,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           </ol>
         </section>
       ) : null}</>),
-    disputes: (<>{user.role === Role.ADMIN && <ReportDisputeAdminPanel disputes={reportDisputes} />}{user.role === Role.ADMIN ? (
+    disputes: (<><ReportDisputeAdminPanel disputes={reportDisputes} />{(
         <TaskDisputeAdminPanel
           disputes={taskDisputes.map((dispute) => ({
             id: dispute.id,
@@ -1332,9 +1180,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             },
           }))}
         />
-      ) : null}</>),
+      )}</>),
     material: (<><OrderMaterialUsageEstimate estimate={materialEstimate} /></>),
-    piecework: (<>{user.role === Role.ADMIN && <OrderWagePanel orderId={order.id} actor={user} />}{pieceworkSummary ? (
+    piecework: (<><OrderWagePanel orderId={order.id} actor={user} />{pieceworkSummary ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
@@ -1373,7 +1221,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           )}
         </section>
       ) : null}</>),
-    costs: (<>{user.role === Role.ADMIN ? (
+    costs: (<>{(
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
             <h2 className="text-base font-semibold">成本补录与调整</h2>
@@ -1442,7 +1290,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             />
           </div>
         </section>
-      ) : null}</>),
+      )}</>),
     logs: (<><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <h2 className="text-base font-semibold">修改日志</h2>
         {order.logs.length === 0 ? (
@@ -1497,8 +1345,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         )}
       </section></>),
     shippingForm: null,
-    completionBlock: (<>{user.role === Role.ADMIN &&
-      (order.status === OrderStatus.SCHEDULING ||
+    completionBlock: (<>{(order.status === OrderStatus.SCHEDULING ||
         order.status === OrderStatus.IN_PRODUCTION) &&
       order.uncoveredOutsourceItems.length > 0 ? (
         <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
@@ -1586,157 +1433,33 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       ) : null}</>),
   };
 
-  if (user.role === Role.ADMIN) {
-    if (!presentation) return <ActionNotice tone="warning" title="工单已更新，请刷新后查看最新资料"
-      action={<Link href={`/orders/${order.id}`} className={buttonVariants({ variant: 'outline' })}>重新加载</Link>} />;
-    const model = buildAdminOrderDetailModel({
-      order, workspace: presentation.workspace, productionOperations, productionProgressSteps,
-      workReports: presentation.workReports, signImageUrl: signDesignReadUrl,
-    });
-    return <>
-      <BreadcrumbEntity label={order.orderNo} />
-      <ReceiptNotice receipt={receipt} noun="工单" />
-      <AdminOrderDetailView model={model} canEdit={canEdit} prints={presentation.prints}
-        printHint={maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD
-          ? `有款式含 ${maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度` : undefined}
-        decision={<AdminOrderDetailDecision key={`${order.revision}:${order.workOrderVersion}:${presentation.workspace.pendingPrintJobId}`} order={presentation.workspace}
-          requiresPaperRecall={presentation.prints.some((print) => print.version < order.workOrderVersion || print.state === 'PRINTED')} />}
-        packaging={detailSections.packaging}
-        supplementary={[
-          { id: 'detail-design-files', title: '设计文件与完整工艺资料', content: detailSections.designFiles },
-          { id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> },
-          { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
-          { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
-          { id: 'detail-business-records', title: '基本信息、成本与重做', content: <>{detailSections.basics}{detailSections.costs}{detailSections.rework}{detailSections.reworkForm}</> },
-          { id: 'detail-audit-records', title: '工单动态', content: <>{adminActivity ? <OrderActivity key={`${order.id}:${adminActivity.events[0]?.id ?? "empty"}`} orderId={order.id} initialPage={adminActivity} /> : null}{detailSections.changeHistory}</> },
-          { id: 'detail-other-actions', title: '其他工单操作', content: detailSections.otherActions },
-        ]}
-      />
-    </>;
-  }
+  if (!presentation) return <ActionNotice tone="warning" title="工单已更新，请刷新后查看最新资料"
+    action={<Link href={`/orders/${order.id}`} className={buttonVariants({ variant: 'outline' })}>重新加载</Link>} />;
+  const model = buildAdminOrderDetailModel({
+    order, workspace: presentation.workspace, productionOperations, productionProgressSteps,
+    workReports: presentation.workReports, signImageUrl: signDesignReadUrl,
+  });
+  return <>
+    <BreadcrumbEntity label={order.orderNo} />
+    <ReceiptNotice receipt={receipt} noun="工单" />
+    <AdminOrderDetailView model={model} canEdit={canEdit} prints={presentation.prints}
+      printHint={maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD
+        ? `有款式含 ${maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度` : undefined}
+      decision={<AdminOrderDetailDecision key={`${order.revision}:${order.workOrderVersion}:${presentation.workspace.pendingPrintJobId}`} order={presentation.workspace}
+        requiresPaperRecall={presentation.prints.some((print) => print.version < order.workOrderVersion || print.state === 'PRINTED')} />}
+      packaging={detailSections.packaging}
+      supplementary={[
+        { id: 'detail-design-files', title: '设计文件与完整工艺资料', content: detailSections.designFiles },
+        { id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> },
+        { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
+        { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
+        { id: 'detail-business-records', title: '基本信息、成本与重做', content: <>{detailSections.basics}{detailSections.costs}{detailSections.rework}{detailSections.reworkForm}</> },
+        { id: 'detail-audit-records', title: '工单动态', content: <>{adminActivity ? <OrderActivity key={`${order.id}:${adminActivity.events[0]?.id ?? "empty"}`} orderId={order.id} initialPage={adminActivity} /> : null}{detailSections.changeHistory}</> },
+        { id: 'detail-other-actions', title: '其他工单操作', content: detailSections.otherActions },
+      ]}
+    />
+  </>;
 
-  return (
-    <div className="space-y-4">
-      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的 order，
-          不产生额外请求；组件自身不渲染任何 DOM。 */}
-      <BreadcrumbEntity label={order.orderNo} />
-      <ReceiptNotice receipt={receipt} noun="工单" />
-      <OrderDetailStickyScope
-        header={
-          <>
-        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
-              <span className="admin-wrap-anywhere min-w-0 font-sans tabular-nums">
-                {order.customName?.trim() || '未命名工单'}
-              </span>
-              <OrderStatusBadge status={order.status} />
-              {order.isUrgent ? (
-                <UrgentBadge />
-              ) : null}
-              {order.uncoveredOutsourceItems.length > 0 ? (
-                <Badge
-                  variant="outline"
-                  className="border-warning/50 bg-warning/10 text-warning-foreground"
-                >
-                  {order.uncoveredOutsourceItems.length} 项阻断
-                </Badge>
-              ) : null}
-              {order.isSfCollect ? (
-                <Badge
-                  variant="outline"
-                  className="border-warning/50 bg-warning/10 text-warning-foreground"
-                >
-                  顺丰到付 · 自行预约
-                </Badge>
-              ) : null}
-              {order.shipments.length > 1 ? (
-                <Badge variant="outline">多地址 ×{order.shipments.length}</Badge>
-              ) : null}
-              {order.kind === OrderKind.REWORK ? (
-                <Badge variant="outline">重做单</Badge>
-              ) : null}
-            </h1>
-            <Disclosure className="mt-2"><DisclosureSummary>工单信息</DisclosureSummary>
-              <p className="admin-wrap-anywhere py-2">{order.orderNo} · v{order.workOrderVersion}</p>
-            </Disclosure>
-            <p className="admin-wrap-anywhere text-sm text-muted-foreground">
-              提交人 {order.submitter.displayName}（{roleLabel(order.submitter.role)}）
-              {order.promisedDate
-                ? ` · 承诺交期 ${formatDateShanghai(order.promisedDate)}`
-                : ''}
-              {` · ${order.items.length} 款 ${formatQuantity(
-                order.items.reduce((sum, item) => sum + item.quantity, 0),
-              )} 个`}
-            </p>
-          </div>
-          {detailSections.otherActions}
-        </div>
-        {maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD ? (
-          // 这条提示原来写在 /print 页里且带 .no-print，而那个页面
-          // autoprint=1 会立刻弹打印对话框并自行关闭——等于永远没人
-          // 看得到。放在打印按钮旁，用户才有机会在点之前读到。
-          <p className="text-xs text-warning-foreground">
-            有款式含 {maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度
-          </p>
-        ) : null}
-          </>
-        }
-      >
-
-      {detailSections.pricing}
-
-      {detailSections.commercial}
-
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(15rem,16.75rem)_minmax(0,1fr)]">
-        <OrderDetailTimeline steps={timelineSteps} />
-        <div className="min-w-0 space-y-3">
-
-      {detailSections.basics}
-
-      {detailSections.customerCharges}
-
-      {detailSections.shipments}
-
-      {detailSections.rework}
-
-      {detailSections.designFiles}
-
-      {detailSections.packaging}
-
-      {detailSections.changeForm}
-
-      {detailSections.changeHistory}
-
-      {detailSections.disputes}
-
-      {detailSections.material}
-
-      {detailSections.piecework}
-
-      {detailSections.costs}
-
-      {detailSections.logs}
-
-      {detailSections.shippingForm}
-
-      {/* 「暂不能完工」常驻横幅：数据源 getOrderDetail.uncoveredOutsourceItems，
-          与 lib/production-completion.ts 的闸口共用 outsourceCoverageApplies +
-          findUndercoveredOutsourceItems，页面提示与实际能否完工不会打架。
-          仅 ADMIN 可见——只有他们能建外协单。 */}
-      {detailSections.completionBlock}
-
-      {detailSections.shippingBlock}
-
-      {detailSections.settlementBlock}
-
-      {detailSections.reworkForm}
-
-        </div>
-      </div>
-      </OrderDetailStickyScope>
-    </div>
-  );
 }
 
 type RenderOrderBasicSummaryOptions = {
@@ -2038,16 +1761,6 @@ function productionOperationStatusLabel(
   if (status === ProductionOperationStatus.IN_PROGRESS) return '进行中';
   if (status === ProductionOperationStatus.COMPLETED) return '已完工';
   return '已取消';
-}
-
-function formatActualSize(
-  width: unknown,
-  height: unknown,
-): string {
-  if (width === null || width === undefined || height === null || height === undefined) {
-    return '—';
-  }
-  return `${String(width)} × ${String(height)} mm`;
 }
 
 function formatFoilColorFacts(

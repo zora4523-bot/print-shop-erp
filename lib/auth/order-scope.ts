@@ -7,7 +7,7 @@ import { OrderStatus, Role } from '../../generated/prisma/enums';
 // Returns a Prisma `where` fragment to apply to Order queries so role
 // visibility matches SPEC §2.2:
 //   - ADMIN: see every order
-//   - SALES / CUSTOMER_SERVICE: only their own submissions
+//   - SALES: only their own submissions
 //   - WORKER: historical ProductionTask ownership only; new operation views use
 //     the fixed-lane worker portal instead of this legacy scope
 //   - unknown role: an impossible filter (hard-fail rather than leak)
@@ -15,7 +15,7 @@ export function getOrderScopeFilter(user: { id: string; role: Role }) {
   if (user.role === Role.ADMIN) {
     return {};
   }
-  if (user.role === Role.SALES || user.role === Role.CUSTOMER_SERVICE) {
+  if (user.role === Role.SALES) {
     return { submitterId: user.id };
   }
   if (user.role === Role.WORKER) {

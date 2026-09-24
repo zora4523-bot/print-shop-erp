@@ -30,7 +30,7 @@ export default async function LegacyBillArchivePage() {
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">账期 / 序号</th>
-                <th className="px-4 py-2 text-left">销售 / 客服</th>
+                <th className="px-4 py-2 text-left">销售</th>
                 <th className="px-4 py-2 text-right">总额</th>
                 <th className="px-4 py-2 text-right">已收</th>
                 <th className="px-4 py-2 text-center">状态</th>

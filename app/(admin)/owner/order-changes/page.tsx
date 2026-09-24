@@ -79,7 +79,7 @@ export default async function OrderChangesPage({ searchParams }: PageProps) {
         <EmptyState
           icon={FilePenLine}
           title="暂无待审核的工单申请"
-          description="销售或客服提交修改、取消申请后会出现在这里。"
+          description="销售提交修改、取消申请后会出现在这里。"
         />
       ) : (
         <>

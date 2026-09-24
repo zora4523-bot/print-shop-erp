@@ -147,7 +147,6 @@ describe('requirePermission', () => {
 
   it.each([
     [Role.SALES, 'order:create'],
-    [Role.CUSTOMER_SERVICE, 'order:create'],
     [Role.ADMIN, 'order:create'],
     [Role.ADMIN, 'account:manage'],
     [Role.ADMIN, 'bill:manage'],
@@ -167,13 +166,11 @@ describe('requirePermission', () => {
   it.each([
     [Role.WORKER, 'order:create'],
     [Role.SALES, 'bill:manage'],
-    [Role.CUSTOMER_SERVICE, 'bill:manage'],
     [Role.WORKER, 'bill:manage'],
     [Role.SALES, 'account:manage'],
-    [Role.CUSTOMER_SERVICE, 'salary:rule:manage'],
     [Role.WORKER, 'order:view:all'],
     [Role.SALES, 'order:export:all'],
-    [Role.CUSTOMER_SERVICE, 'bill:view:self'],
+    [Role.ADMIN, 'bill:view:self'],
     [Role.SALES, 'task:report'],
   ] as const)('role %s is denied for %s', async (role, perm) => {
     mockedRequireSession.mockResolvedValue(session(role));
@@ -263,12 +260,6 @@ describe('getOrderScopeFilter', () => {
 
   it('SALES sees only their own orders', () => {
     expect(getOrderScopeFilter({ id: 's1', role: Role.SALES })).toEqual({ submitterId: 's1' });
-  });
-
-  it('CUSTOMER_SERVICE sees only their own orders', () => {
-    expect(getOrderScopeFilter({ id: 'c1', role: Role.CUSTOMER_SERVICE })).toEqual({
-      submitterId: 'c1',
-    });
   });
 
   it('WORKER legacy scope reads only their historical task-linked orders', () => {
