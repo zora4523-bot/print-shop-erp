@@ -18,7 +18,7 @@
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client';
-import { OrderStatus, OrderWorkflowAction, Role } from '../../generated/prisma/enums';
+import { OrderStatus, OrderWorkflowAction, ProductionOperationStatus, Role } from '../../generated/prisma/enums';
 import type { AuditActor } from '../../lib/audit-log';
 import { orderCascadeLockKey } from '../../lib/order/locks';
 import {
@@ -208,6 +208,34 @@ async function writeAuditLogInTx(...args: Parameters<typeof import('../../lib/au
   return write(...args);
 }
 
+type StaleGenerationOriginals = {
+  operations: { id: string; status: ProductionOperationStatus; payrollReviewRequired: boolean }[];
+  progressSteps: { id: string; status: ProductionOperationStatus }[];
+};
+
+/** 与 planPreviousProductionGenerationSupersedeInTx 同一选择口径，只读原值。 */
+async function readStaleGenerationOriginals(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  currentWorkOrderVersion: number,
+): Promise<StaleGenerationOriginals> {
+  const where = {
+    orderId,
+    workOrderVersion: { lt: currentWorkOrderVersion },
+    status: { in: [ProductionOperationStatus.PENDING, ProductionOperationStatus.IN_PROGRESS] },
+  };
+  const operations = await tx.productionOperation.findMany({
+    where,
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, status: true, payrollReviewRequired: true },
+  });
+  const progressSteps = await tx.productionProgressStep.findMany({ where, select: { id: true, status: true } });
+  return {
+    operations: operations.map(({ id, status, payrollReviewRequired }) => ({ id, status, payrollReviewRequired })),
+    progressSteps: progressSteps.map(({ id, status }) => ({ id, status })),
+  };
+}
+
 async function applyStaleGeneration(
   tx: Prisma.TransactionClient,
   actor: AuditActor,
@@ -217,6 +245,9 @@ async function applyStaleGeneration(
   // 锁内重新读取：并发升版或报工可能已经改变了当前代次。
   const [locked] = await findStaleGenerationOrderIds(tx, candidate.id);
   if (!locked) return null;
+  // 写入前、锁内记下每行原值（待开工/进行中、人工核定标志是否早已存在），
+  // 否则事后无法按审计前向恢复。
+  const before = await readStaleGenerationOriginals(tx, locked.id, locked.workOrderVersion);
   const superseded = await supersedePreviousProductionGenerationInTx(tx, locked.id, locked.workOrderVersion);
   if (superseded.operationIds.length === 0 && superseded.progressStepIds.length === 0) return null;
   const maintenance = { audit: 'M-7', script: SCRIPT };
@@ -225,7 +256,7 @@ async function applyStaleGeneration(
       orderId: locked.id,
       operatorId: actor.id,
       action: STALE_GENERATION_LOG_ACTION,
-      changedFields: { supersededProduction: superseded, workOrderVersion: locked.workOrderVersion, maintenance },
+      changedFields: { supersededProduction: superseded, before, workOrderVersion: locked.workOrderVersion, maintenance },
       remark: '历史清理：终止旧代次未完成的工序与进度步骤，分档烫金报工转人工核定',
     },
   });
@@ -234,7 +265,7 @@ async function applyStaleGeneration(
     action: STALE_GENERATION_LOG_ACTION,
     entityType: 'Order',
     entityId: locked.id,
-    before: { workOrderVersion: locked.workOrderVersion, unfinishedPreviousGeneration: superseded },
+    before: { workOrderVersion: locked.workOrderVersion, unfinishedPreviousGeneration: superseded, ...before },
     after: { cancelled: superseded, payrollReviewRequired: superseded.payrollReviewOperationIds },
     requestMetadata: maintenance,
   });

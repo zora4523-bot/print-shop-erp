@@ -35,7 +35,7 @@ type State = {
   database: string;
   stale: { id: string; orderNo: string; status: OrderStatus; workOrderVersion: number }[];
   operations: unknown[];
-  steps: { id: string }[];
+  steps: { id: string; status?: ProductionOperationStatus }[];
   schedules: PrematureScheduleRow[];
   clearedCount: number;
 };
@@ -45,10 +45,10 @@ function harness(overrides: Partial<State> = {}) {
     database: 'erp_cleanup_test',
     stale: [{ id: 'order-stale', orderNo: 'GD-260901-009', status: OrderStatus.PACKING, workOrderVersion: 3 }],
     operations: [
-      { id: 'op-tiered', operationType: 'PARTIAL', reports: [{ unit: 'PER_PASS', priceBook: tieredBook }] },
-      { id: 'op-pending', operationType: 'FULL', reports: [] },
+      { id: 'op-tiered', operationType: 'PARTIAL', status: ProductionOperationStatus.IN_PROGRESS, payrollReviewRequired: false, reports: [{ unit: 'PER_PASS', priceBook: tieredBook }] },
+      { id: 'op-pending', operationType: 'FULL', status: ProductionOperationStatus.PENDING, payrollReviewRequired: true, reports: [] },
     ],
-    steps: [{ id: 'step-old' }],
+    steps: [{ id: 'step-old', status: ProductionOperationStatus.IN_PROGRESS }],
     schedules: [
       scheduleRow(),
       scheduleRow({ id: 'order-held', orderNo: 'GD-260910-002', status: OrderStatus.ON_HOLD, workflowDecisions: [{ fromStatus: OrderStatus.CONFIRMED }] }),
@@ -203,6 +203,36 @@ describe('runStuckProductionCleanup', () => {
       changedFields: expect.objectContaining({ supersededProduction: expect.objectContaining({ payrollReviewOperationIds: ['op-tiered'] }) }),
     }) });
     expect(report.staleGenerations).toMatchObject({ orderCount: 1, operationCount: 2, payrollReviewOperationCount: 1 });
+  });
+
+  it('--apply 在写入前于锁内记下每行原状态与人工核定标志，OrderLog 与审计 before 足以前向恢复', async () => {
+    const order: string[] = [];
+    h.tx.productionOperation.findMany.mockImplementation(async () => { order.push('read'); return h.state.operations; });
+    h.tx.productionOperation.updateMany.mockImplementation(async () => { order.push('write'); return { count: 2 }; });
+    h.tx.$executeRaw.mockImplementation(async (strings: TemplateStringsArray) => {
+      if (strings.join('?').includes('pg_advisory_xact_lock')) order.push('lock');
+      return 0;
+    });
+    await runStuckProductionCleanup(h.client, { apply: true, database: 'erp_cleanup_test', actorUsername: 'owner' });
+
+    const original = {
+      operations: [
+        { id: 'op-tiered', status: ProductionOperationStatus.IN_PROGRESS, payrollReviewRequired: false },
+        { id: 'op-pending', status: ProductionOperationStatus.PENDING, payrollReviewRequired: true },
+      ],
+      progressSteps: [{ id: 'step-old', status: ProductionOperationStatus.IN_PROGRESS }],
+    };
+    expect(h.tx.orderLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      orderId: 'order-stale',
+      action: STALE_GENERATION_LOG_ACTION,
+      changedFields: expect.objectContaining({ before: original }),
+    }) });
+    expect(h.tx.businessAuditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      entityId: 'order-stale',
+      before: expect.objectContaining(original),
+    }) }));
+    expect(order.indexOf('lock')).toBeLessThan(order.indexOf('read'));
+    expect(order.indexOf('read')).toBeLessThan(order.indexOf('write'));
   });
 
   it('--apply 只清空从未下发工单的 scheduledAt，以原值作并发前置条件并留痕', async () => {
