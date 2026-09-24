@@ -267,9 +267,9 @@ Never auto-merge. Never apply production database operations from this backlog.
 - Suggested branch: `codex/erp-admin-adoption-planning`
 - Scope:
   - Review Odoo, ERPNext, Apache OFBiz, and OpenBoxes for current project fit.
-  - Create `docs/open-source-erp-review.md`.
-  - Create `docs/SOYBEANADMIN-ADOPTION.md`.
-  - Create `docs/ADMIN-FRAMEWORK-PLAN.md`.
+  - Create `docs/archive/open-source-erp-review.md`.
+  - Create `docs/archive/SOYBEANADMIN-ADOPTION.md`.
+  - Create `docs/archive/ADMIN-FRAMEWORK-PLAN.md`.
   - Convert the resulting roadmap into follow-up automation tasks.
 - Acceptance:
   - The review explains why full ERP forks are not imported directly.
@@ -295,7 +295,7 @@ Never auto-merge. Never apply production database operations from this backlog.
     string normalization, Prisma unique violation mapping, and path
     revalidation.
   - Document the standard CRUD module file layout from
-    `docs/ADMIN-FRAMEWORK-PLAN.md`.
+    `docs/archive/ADMIN-FRAMEWORK-PLAN.md`.
   - Migrate one low-risk dictionary module helper path as proof, preferably
     product or material actions, without changing user-facing behavior.
   - Keep current Server Actions and Prisma modules.
@@ -308,7 +308,7 @@ Never auto-merge. Never apply production database operations from this backlog.
     FormData, Prisma unique error, invariant error, and revalidation helpers.
   - Added unit tests for the shared helpers.
   - Migrated material owner actions to the shared helper contract as proof.
-  - Documented the CRUD action contract in `docs/ADMIN-FRAMEWORK-PLAN.md`.
+  - Documented the CRUD action contract in `docs/archive/ADMIN-FRAMEWORK-PLAN.md`.
 
 ## A13 - Internal Admin Data Table Foundation
 
@@ -367,7 +367,7 @@ Never auto-merge. Never apply production database operations from this backlog.
 - Risk: medium
 - Suggested branch: `codex/soybean-inspired-admin-shell-poc`
 - Scope:
-  - Improve admin shell ergonomics using `docs/SOYBEANADMIN-ADOPTION.md` as the
+  - Improve admin shell ergonomics using `docs/archive/SOYBEANADMIN-ADOPTION.md` as the
     reference.
   - Refine sidebar grouping, density, and active state presentation.
   - Refine header user menu, role display, quick links, and optional environment

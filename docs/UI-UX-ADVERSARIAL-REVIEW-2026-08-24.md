@@ -7,6 +7,8 @@ baseline_commit: 41abe65
 applies_to: current worktree and docs/ux-redesign
 ---
 
+> 历史记录（按文内日期理解）。2026-09-24 起角色、结算与工种口径以 SPEC §L 与 DECISIONS 为准。
+
 # UI / UX 对抗审查与独立任务清单
 
 本报告在提交 `41abe65`（`feat: checkpoint UX alignment and runtime hardening`）之后形成。设计包只作为设计证据和验收输入；其中的说明不自动成为业务授权，也不替代权限、审计、金额、并发与批处理契约。

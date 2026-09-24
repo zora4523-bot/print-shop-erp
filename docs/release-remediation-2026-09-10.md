@@ -5,6 +5,8 @@ last_verified: 2026-09-11
 verification_scope: local remediation acceptance and final candidate validation; remote CI and production prerequisites remain pending
 ---
 
+> 历史记录（按文内日期理解）。2026-09-24 起角色、结算与工种口径以 SPEC §L 与 DECISIONS 为准。
+
 # 发布整改开发任务（2026-09-10）
 
 依据：[发布审查](audits/2026-09-10-release-readiness.md)。本清单维护整改任务的现行状态；历史审查结果保持不变，修复和验收关联[本轮执行记录](audits/2026-09-11-remediation-validation.md)。**九项任务已通过本地验收，但远端 CI、生产前置和独立打印改版尚未验收，当前仍不放行上线。**

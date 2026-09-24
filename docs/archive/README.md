@@ -39,3 +39,22 @@
 `docs/LOAD-TEST-RESULTS-2026-08-25.md`（`LOAD-TEST-PLAN.md` 的配套实测）、`docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`
 与 `docs/codex-ui-brief.md`（被 `ux-redesign/*.dc.html` 交互稿和在用的 UI 覆盖文档引用）、`docs/*-20260913.md`
 （前一日的实施说明，仍被 `API.md` / `DATABASE.md` / `DEVELOPMENT.md` / `加工费计费规则.md` 作为现行说明引用）。
+
+## 2026-09-25 第二批归档清单
+
+原 `docs/`（任务已完成、不再随代码更新，且未被 `docs/audits/evidence/*.json` 或现行文档作为现行说明引用）：
+`piecework-rate-admin-plan-2026-09-16.md`、`worker-personal-piecework-plan-2026-09-16.md`、
+`worker-ux-remediation-2026-09-18.md`、`师傅报工与未结算明细修复-20260917.md`、`生产发布回归修复-20260917.md`、
+`管理员收费编辑验收.md`、`ADMIN-FRAMEWORK-PLAN.md`、`SOYBEANADMIN-ADOPTION.md`、`open-source-erp-review.md`。
+`DECISIONS.md` 与 `docs/AGENT-BACKLOG.md` 中的路径已同步改为 `docs/archive/…`；`piecework-rate-admin-plan-2026-09-16.md`
+的相对链接已按新位置修正。
+
+刻意**没有**归档、改为在文首加“历史记录”提示的文件及原因：
+
+- `docs/PLAN-空白封按单价管理.md`：被 `docs/audits/2026-09-20-blank-price-implementation.md` 以相对链接引用（审查记录不改），
+  且 `DECISIONS.md` / `HANDOFF.md` / `PROGRESS.md` 以其 §6 作为空白封历史停售规则的现行说明。
+- `docs/寄样与打样开发任务.md`：`API.md` 以它作为寄样 / 打样实现、测试与本地操作的现行说明。
+- `docs/UI迁移清单.md`、`docs/UI现状盘点.md`：`docs/ui-规范.md` 的 front matter 与附录把它们作为现行迁移项与违例清单，
+  `docs/audits/2026-09-08-UI对照裁决表.md` 也以相对链接引用。
+- 上一批已说明的 `docs/release-remediation-2026-09-10.md`、`docs/LOAD-TEST-RESULTS-2026-08-25.md`、
+  `docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`、`docs/*-20260913.md`（5 份）继续留在原地，同样加了提示行。
