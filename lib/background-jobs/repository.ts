@@ -16,6 +16,7 @@ import {
   type BackgroundJobResult,
   type ClaimedBackgroundJob,
   type EnqueueBackgroundJobInput,
+  isRegisteredBackgroundJobType,
 } from './types';
 import { databaseNow } from './clock';
 import { backgroundJobErrorCode, retryDelayMs } from './policy';
@@ -548,6 +549,13 @@ export async function listBackgroundJobs(limit = 100) {
   });
 }
 
+export class RetiredBackgroundJobTypeError extends Error {
+  constructor(public readonly type: string) {
+    super(`retired background job type cannot be retried: ${type}`);
+    this.name = 'RetiredBackgroundJobTypeError';
+  }
+}
+
 export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
   return db.$transaction(async (tx) => {
     const job = await tx.backgroundJob.findUnique({
@@ -561,6 +569,11 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
       },
     });
     if (!job || job.status !== BackgroundJobStatus.DEAD) return false;
+    // A job whose type lost its handler (feature removed) would only fail
+    // again with UnknownBackgroundJobTypeError. Keep the history row as is.
+    if (!isRegisteredBackgroundJobType(job.type)) {
+      throw new RetiredBackgroundJobTypeError(job.type);
+    }
     // Terminal export rows no longer retain their raw filter params. Reusing
     // the old job would therefore be both invalid and misleading; the admin
     // must request a fresh export from the order list with current filters.

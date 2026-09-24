@@ -1,6 +1,6 @@
 import { BackgroundJobStatus } from '../../generated/prisma/enums';
 import { backgroundJobRequiresOwnerResolution } from './terminal-policy';
-import { BACKGROUND_JOB_TYPES } from './types';
+import { BACKGROUND_JOB_TYPES, isRegisteredBackgroundJobType } from './types';
 
 export type BackgroundJobOperatorAction =
   | 'RETRY'
@@ -15,6 +15,11 @@ export function backgroundJobOperatorAction(job: {
   lastErrorCode?: string | null;
 }): BackgroundJobOperatorAction {
   if (job.status === BackgroundJobStatus.DEAD) {
+    if (!isRegisteredBackgroundJobType(job.type)) {
+      // The handler was removed with its feature. Re-queueing can only fail
+      // again with UnknownBackgroundJobTypeError; keep the row as history.
+      return 'NONE';
+    }
     if (job.type === BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST) {
       // Test sends have no provider idempotency key. If their ACK was lost,
       // retrying the same job can duplicate the message; inspect the group/log

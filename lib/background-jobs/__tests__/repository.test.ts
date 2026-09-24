@@ -40,6 +40,7 @@ import {
   failBackgroundJob,
   heartbeatBackgroundJob,
   releaseUndispatchedBackgroundJobClaim,
+  RetiredBackgroundJobTypeError,
   retryDeadBackgroundJob,
 } from '../repository';
 import { backgroundJobErrorCode, retryDelayMs } from '../policy';
@@ -1000,6 +1001,27 @@ describe('claim and lease lifecycle', () => {
 
     expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
   });
+
+  it.each(['CRON_HOURLY_PAYROLL', 'CRON_CS_SETTLE', 'CRON_CS_PERIOD_ENDING'])(
+    'refuses to requeue a dead %s job whose handler was removed, keeping the history row',
+    async (type) => {
+      dbMock.backgroundJob.findUnique.mockResolvedValue({
+        status: BackgroundJobStatus.DEAD,
+        type,
+        attempts: 5,
+        maxAttempts: 5,
+        lastErrorCode: 'SalaryRuleMissingError',
+      });
+      dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(retryDeadBackgroundJob('retired-1')).rejects.toBeInstanceOf(
+        RetiredBackgroundJobTypeError,
+      );
+
+      expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+      expect(dbMock.backgroundJob.update).not.toHaveBeenCalled();
+    },
+  );
 
   it('an operator channel-test retry authorizes exactly one more execution', async () => {
     dbMock.backgroundJob.findUnique.mockResolvedValue({
