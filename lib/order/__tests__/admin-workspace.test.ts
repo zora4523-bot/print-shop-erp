@@ -551,6 +551,39 @@ describe('admin order workspace predicates', () => {
     expect(detail?.shipDisabledReason).toBeNull();
   });
 
+  it('已有地址发货时待审取消 / 改款式申请标记为只能驳回，只改交期仍可批准', async () => {
+    const shipments = [
+      { trackingNo: null, status: 'PLANNED' },
+      { trackingNo: 'SF100', status: 'SHIPPED' },
+    ];
+    const pending = (type: 'CANCEL' | 'MODIFY', proposedChanges: unknown) => adminOrderRecord({
+      status: OrderStatus.PACKING,
+      shipments,
+      changeRequests: [{ id: 'change-1', type, reason: '客户要求', proposedChanges, createdAt: new Date('2026-09-01T00:00:00.000Z') }],
+    });
+
+    dbMock.order.findFirst.mockResolvedValue(pending('CANCEL', { items: [] }));
+    let detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+    expect(detail?.pendingChangeRequest?.approvalBlockedReason).toBe('工单已有地址发货，不能批准取消，请驳回该申请');
+    expect(detail?.trackingNo).toBe('SF100');
+
+    dbMock.order.findFirst.mockResolvedValue(pending('MODIFY', { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 2000 }] }));
+    detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+    expect(detail?.pendingChangeRequest?.approvalBlockedReason).toBe('工单已有地址发货，不能批准款式或数量修改，请驳回该申请');
+
+    dbMock.order.findFirst.mockResolvedValue(pending('MODIFY', { items: [], promisedDate: '2026-09-30' }));
+    detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+    expect(detail?.pendingChangeRequest?.approvalBlockedReason).toBeNull();
+
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({
+      status: OrderStatus.PACKING,
+      shipments: [{ trackingNo: null, status: 'PLANNED' }],
+      changeRequests: [{ id: 'change-2', type: 'CANCEL', reason: '客户要求', proposedChanges: { items: [] }, createdAt: new Date('2026-09-01T00:00:00.000Z') }],
+    }));
+    detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+    expect(detail?.pendingChangeRequest?.approvalBlockedReason).toBeNull();
+  });
+
   it('keeps missing-delivery guidance actionable in packing', async () => {
     dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({ status: OrderStatus.PACKING, _count: { shipments: 0 } }));
 

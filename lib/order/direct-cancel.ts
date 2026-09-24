@@ -1,4 +1,6 @@
 import { OrderStatus, Role } from '../../generated/prisma/enums';
+import type { ShipmentStatus } from '../../generated/prisma/enums';
+import { hasShippedShipment } from './change-request-shipment-guard';
 
 /**
  * 可直接撤回的工单状态：尚未进入已确认生产合同（SPEC §4.3「任意非终态均可转
@@ -22,6 +24,11 @@ export function isDirectCancelStatus(status: OrderStatus): boolean {
  * action 层仍由 requirePermission 与 cancelOrder
  * 的领域校验把关，这里只决定界面入口。
  */
-export function canShowAdminDirectCancel(role: Role, status: OrderStatus): boolean {
-  return role === Role.ADMIN && isDirectCancelStatus(status);
+export function canShowAdminDirectCancel(
+  role: Role,
+  status: OrderStatus,
+  shipments: readonly { status: ShipmentStatus }[] = [],
+): boolean {
+  // 任一地址已发货即正常收费、没有取消选项（业主 2026-09-24）。
+  return role === Role.ADMIN && isDirectCancelStatus(status) && !hasShippedShipment(shipments);
 }

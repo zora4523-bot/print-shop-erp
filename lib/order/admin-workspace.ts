@@ -32,6 +32,7 @@ import {
   MISSING_ORDER_CUSTOMER_FILTER_VALUE,
 } from './list-query';
 import { promisedDaysLeft } from './promised-date';
+import { shippedShipmentViolation } from './change-request-shipment-guard';
 import { canConfirmOrderPrinted } from './print-eligibility';
 import {
   type FactoryConfirmationPriceDiff,
@@ -160,6 +161,8 @@ export type AdminOrderWorkspaceRow = {
     type: 'MODIFY' | 'CANCEL';
     reason: string;
     summary?: string | null;
+    /** 已有地址发货时批准会被服务端拒绝（只能驳回）；界面据此隐藏批准入口。 */
+    approvalBlockedReason?: string | null;
     createdAt: string;
   } | null;
   printPending: boolean;
@@ -381,11 +384,10 @@ const adminOrderSelect = {
       bill: { select: { id: true, period: true, status: true } },
     },
   },
+  // 最多 10 个地址；同时供运单号展示与「已有地址发货」闸口使用。
   shipments: {
-    where: { trackingNo: { not: null } },
     orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
-    take: 1,
-    select: { trackingNo: true },
+    select: { trackingNo: true, status: true },
   },
   workflowDecisions: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -933,13 +935,21 @@ function mapAdminOrderRow(
           summary: pendingChange.type === 'MODIFY'
             ? summarizeAdminOrderChange(pendingChange.proposedChanges, row.items)
             : null,
+          approvalBlockedReason: shippedShipmentViolation({
+            phase: 'REVIEW',
+            isCancellation: pendingChange.type === 'CANCEL',
+            itemChangeCount: proposedItemChangeCount(pendingChange.proposedChanges),
+            shipments: row.shipments,
+          }),
           createdAt: pendingChange.createdAt.toISOString(),
         }
       : null,
     printPending,
     pendingPrintJobId,
     trackingNo:
-      row.shipments[0]?.trackingNo?.trim() || row.trackingNo?.trim() || null,
+      row.shipments.find((shipment) => shipment.trackingNo !== null)?.trackingNo?.trim() ||
+      row.trackingNo?.trim() ||
+      null,
     progress: {
       orderTotal: progress?.orderTotal ?? String(
         row.items.reduce((sum, item) => sum + item.quantity, 0),
@@ -964,6 +974,11 @@ function mapAdminOrderRow(
 }
 
 /** Project only validated business facts; malformed or legacy payloads keep the request reason. */
+function proposedItemChangeCount(proposedChanges: unknown): number {
+  if (!proposedChanges || typeof proposedChanges !== 'object' || !('items' in proposedChanges)) return 0;
+  return Array.isArray(proposedChanges.items) ? proposedChanges.items.length : 0;
+}
+
 export function summarizeAdminOrderChange(
   proposedChanges: unknown,
   items: readonly Pick<AdminOrderWorkspaceRow['items'][number], 'id' | 'sequence' | 'quantity' | 'name' | 'specification'>[],

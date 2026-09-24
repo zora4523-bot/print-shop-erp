@@ -3692,6 +3692,7 @@ async function readReviewableChangeRequestInTx(
               sequence: true,
               destinationProvince: true,
               weightKg: true,
+              status: true,
             },
           },
           packagingGroups: {
@@ -3839,6 +3840,8 @@ export async function previewOrderChangeRequestPricing(
     );
 
     const proposedChanges = readProposedChanges(request.proposedChanges);
+    // 与批准路径同一道发货闸口：已有地址发货后不给出改款式/数量的计价预览。
+    assertChangeRequestRespectsShippedShipments({ phase: 'REVIEW', isCancellation: false, itemChangeCount: proposedChanges.length, shipments: request.order.shipments });
     const itemById = new Map(request.order.items.map((item) => [item.id, item]));
     const normalizedChanges = normalizeProposedChanges(
       proposedChanges,
@@ -4834,6 +4837,8 @@ export async function previewOrderCancellationSettlement(
     if (versionMismatchReason) {
       throw new OrderChangeRequestError(versionMismatchReason);
     }
+    // 已有地址发货即正常收费（业主 2026-09-24），不给出任何取消结算参考价。
+    assertChangeRequestRespectsShippedShipments({ phase: 'REVIEW', isCancellation: true, itemChangeCount: 0, shipments: request.order.shipments });
     const producedQty = validateCancellationProducedQuantity(
       request,
       input.producedQty,

@@ -10,7 +10,6 @@ import {
 import type { SalesOrderDetail } from '@/lib/order/sales-detail-query';
 import {
   canEditOrderSfCollect,
-  ORDER_MODIFIABLE_STATUSES,
   editableFieldsetForStatus,
   isOrderEditable,
 } from '@/lib/order/editable-fields';
@@ -19,6 +18,10 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
+import {
+  resolveOrderChangeRequestOptions,
+  type OrderChangeRequestOptions,
+} from '@/lib/order/change-request-options';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -45,12 +48,12 @@ import { SalesOrderRefreshButton } from './SalesOrderRefreshButton';
 function SalesOrderChangeRequestSection({
   catalogProducts,
   foilColorNames,
-  canRequestCancellation,
+  options,
   order,
 }: {
   catalogProducts: OrderChangeCatalogProduct[];
   foilColorNames?: readonly string[];
-  canRequestCancellation: boolean;
+  options: OrderChangeRequestOptions;
   order: SalesOrderDetail;
 }) {
   return (
@@ -63,8 +66,14 @@ function SalesOrderChangeRequestSection({
         <p className="mt-1 text-xs text-muted-foreground">
           管理员批准后才会更新工单内容。
         </p>
+        {options.shipped ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            工单已有地址发货，按正常收费，不能取消或修改款式数量，只能申请修改交期。
+          </p>
+        ) : null}
       </div>
       <OrderChangeRequestForm
+        dueDateOnly={!options.allowItemChanges}
               foilColorNames={foilColorNames}
               hasPackagingGroups={order.packagingGroups.length > 0}
         promisedDate={order.promisedDate?.slice(0, 10) ?? null}
@@ -90,7 +99,7 @@ function SalesOrderChangeRequestSection({
           isDoubleSided: item.isDoubleSided,
         }))}
       />
-      {canRequestCancellation ? (
+      {options.canRequestCancellation ? (
         <div className="border-t pt-4">
           <h3 className="mb-2 text-sm font-semibold">申请取消</h3>
           <OrderCancellationRequestForm
@@ -128,14 +137,11 @@ export function SalesOrderDetailView({
     !pendingChangeRequest && order.purpose !== 'PROOF' && canEditOrderSfCollect(order.status) && !isFinalizedExternalShipment;
   const canEditDesigns =
     !pendingChangeRequest && (order.status === OrderStatus.DRAFT || order.status === OrderStatus.REJECTED);
-  const canRequestModify =
-    ORDER_MODIFIABLE_STATUSES.includes(order.status) && !pendingChangeRequest;
-  const canRequestCancellation =
-    (order.status === OrderStatus.ON_HOLD || order.status === OrderStatus.CONFIRMED ||
-      order.status === OrderStatus.RELEASED ||
-      order.status === OrderStatus.FOILING ||
-      order.status === OrderStatus.PACKING) &&
-    !pendingChangeRequest;
+  const changeOptions = resolveOrderChangeRequestOptions({
+    status: order.status,
+    hasPendingChange: Boolean(pendingChangeRequest),
+    shipments: order.shipments,
+  });
 
   return (
     <div data-slot="sales-order-detail" className="space-y-4">
@@ -218,7 +224,7 @@ export function SalesOrderDetailView({
         </div>
       </section>
 
-      {!pendingChangeRequest && [OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED].some((status) => status === order.status) ? (
+      {!pendingChangeRequest && !changeOptions.shipped && [OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED].some((status) => status === order.status) ? (
         <CancelOrderForm orderId={order.id} orderNo={order.orderNo} expectedEditVersion={order.editVersion}
           impact={[{ label: '工单', value: `${order.orderNo} 将取消，停止后续处理` }]} compact />
       ) : null}
@@ -343,11 +349,11 @@ export function SalesOrderDetailView({
             ) : null}
           </section>
 
-          {canRequestModify ? (
+          {changeOptions.canRequestModify ? (
             <SalesOrderChangeRequestSection
         foilColorNames={foilColorNames}
               catalogProducts={catalogProducts}
-              canRequestCancellation={canRequestCancellation}
+              options={changeOptions}
               order={order}
             />
           ) : null}

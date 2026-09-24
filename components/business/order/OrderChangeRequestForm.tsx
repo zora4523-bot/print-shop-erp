@@ -90,6 +90,8 @@ type Props = {
   hasPackagingGroups?: boolean;
   /** Catalog foil names; protects typed catalog names from the display-label reverse map. */
   foilColorNames?: readonly string[];
+  /** 已有地址发货：只能申请修改交期，不提供款式 / 数量修改（服务端同样拒绝）。 */
+  dueDateOnly?: boolean;
 };
 
 export function orderChangeRequestDraftIdentity({
@@ -100,6 +102,7 @@ export function orderChangeRequestDraftIdentity({
   catalogProducts,
   promisedDate = null,
   hasPackagingGroups = false,
+  dueDateOnly = false,
 }: Pick<
   Props,
   | 'orderId'
@@ -109,6 +112,7 @@ export function orderChangeRequestDraftIdentity({
   | 'catalogProducts'
   | 'promisedDate'
   | 'hasPackagingGroups'
+  | 'dueDateOnly'
 >): string {
   const catalogFacts = catalogProducts
     .map((product) => ({
@@ -138,6 +142,7 @@ export function orderChangeRequestDraftIdentity({
     expectedWorkOrderVersion,
     promisedDate,
     hasPackagingGroups,
+    dueDateOnly,
     items: items.map((item) => ({
       id: item.id,
       sequence: item.sequence,
@@ -605,7 +610,7 @@ function OrderChangeRequestDraftForm({
   items,
   catalogProducts,
   promisedDate = null,
-  hasPackagingGroups = false,
+  hasPackagingGroups = false, dueDateOnly = false,
 }: Props) {
   const [state, action] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
@@ -613,7 +618,7 @@ function OrderChangeRequestDraftForm({
   >(createOrderChangeRequestAction, null);
   const [pending, startTransition] = useTransition();
   const [reason, setReason] = useState('');
-  const hasItems = items.length > 0;
+  const hasItems = items.length > 0 && !dueDateOnly;
   const [modifyKind, setModifyKind] = useState<ModifyKind>(hasItems ? 'QTY' : 'DUE_DATE');
   const [dueDate, setDueDate] = useState(promisedDate ?? '');
   const dueDateChanged = modifyKind === 'DUE_DATE' && (dueDate || null) !== promisedDate;
@@ -739,7 +744,7 @@ function OrderChangeRequestDraftForm({
           {items.some((item) => item.packagingEditable) ? '未进入生产且包装明细明确的款式，可申请调整每袋数量。' : null}
           规格只显示与当前计价路线、纸张和克重一致的活动目录选项。
           已产数量将在改版后承接，历史报工和工资保留。
-        </> : '未记录款式，本次可申请调整交期。'}
+        </> : dueDateOnly ? '工单已有地址发货，本次只能申请调整交期。' : '未记录款式，本次可申请调整交期。'}
       </p>
       {hasItems ? <ExistingOrderItemChanges
         catalogProducts={catalogProducts}

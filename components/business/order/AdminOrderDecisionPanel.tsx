@@ -217,9 +217,11 @@ function AdminDecisionActions({
       {order.capabilities.reviewChange &&
       order.pendingChangeRequest?.type === 'CANCEL' ? (
         <>
-          <Button type="button" size="sm" disabled={pending} onClick={() => openMode('change-approve')}>
-            批准取消
-          </Button>
+          {order.pendingChangeRequest.approvalBlockedReason ? null : (
+            <Button type="button" size="sm" disabled={pending} onClick={() => openMode('change-approve')}>
+              批准取消
+            </Button>
+          )}
           <Button type="button" size="sm" variant="destructive" disabled={pending} onClick={() => openMode('change-deny')}>
             拒绝申请
           </Button>
@@ -948,6 +950,11 @@ function DecisionPanelSection({
             fixLabel="查看发货前置条件"
             className="mt-3"
           />
+        ) : null}
+        {order.capabilities.reviewChange && order.pendingChangeRequest?.approvalBlockedReason ? (
+          <p data-slot="change-approval-blocked" role="note" className="mt-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+            {order.pendingChangeRequest.approvalBlockedReason}
+          </p>
         ) : null}
         {order.capabilities.reviewChange && order.pendingChangeRequest?.type === 'MODIFY' ? (
           <div className="mt-3">

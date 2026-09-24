@@ -26,6 +26,7 @@ import { getOrderExternalSalesAssociation } from '@/lib/order/external-sales-ass
 import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
 import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
 import { isOrderPricingReviewAllowedStatus } from '@/lib/order/pricing-status';
+import { hasShippedShipment } from '@/lib/order/change-request-shipment-guard';
 import {
   OrderSavedConfiguration,
   OrderSavedPackaging,
@@ -249,7 +250,9 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
       OrderStatus.IN_PRODUCTION,
       OrderStatus.SCHEDULING,
       OrderStatus.ON_HOLD,
-    ].some((status) => status === order.status);
+    ].some((status) => status === order.status) ||
+      // 已有地址发货：款式与数量锁定，只能改交期（服务端同样拒绝）。
+      hasShippedShipment(order.shipments);
     return (
       <>
         <BreadcrumbEntity label={order.orderNo} />

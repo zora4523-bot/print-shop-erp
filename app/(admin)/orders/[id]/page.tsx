@@ -207,7 +207,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   ]);
 
   const canSubmit = order.status === OrderStatus.DRAFT;
-  const canCancel = canShowAdminDirectCancel(user.role, order.status);
+  const canCancel = canShowAdminDirectCancel(user.role, order.status, order.shipments);
   // 发货与结算权限：order:ship = ADMIN（见 permissions.ts）。
   // action 层仍会重新校验，这里只控制界面入口。
   const canShipOrSettle = true;

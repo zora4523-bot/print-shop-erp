@@ -15,17 +15,34 @@ const MESSAGES = {
 } as const;
 
 /**
+ * 任一收货地址已发货（SHIPPED）即视为履约开始：工单正常收费，不再提供取消选项
+ * （业主 2026-09-24），款式或数量也不能再改，只能改交期。界面入口与服务端闸口共用此判断。
+ */
+export function hasShippedShipment(shipments: readonly ShipmentFact[]): boolean {
+  return shipments.some((shipment) => shipment.status === ShipmentStatus.SHIPPED);
+}
+
+/**
  * 已发货地址的分货与物流是履约事实（与 add-shipment / 收货信息编辑的边界一致）。
  * 任一地址发货后，工单不能再整单取消，款式或数量变更也不能改写已发货地址；
  * 只改交期的申请不触及分货，仍然放行。
  */
-export function assertChangeRequestRespectsShippedShipments(input: {
+type ShippedShipmentGuardInput = {
   phase: keyof typeof MESSAGES;
   isCancellation: boolean;
   itemChangeCount: number;
   shipments: readonly ShipmentFact[];
-}): void {
-  if (!input.shipments.some((shipment) => shipment.status === ShipmentStatus.SHIPPED)) return;
-  if (input.isCancellation) throw new OrderChangeRequestError(MESSAGES[input.phase].CANCEL);
-  if (input.itemChangeCount > 0) throw new OrderChangeRequestError(MESSAGES[input.phase].ITEMS);
+};
+
+/** 违反发货闸口时返回拒绝原因，否则 null；界面据此隐藏入口并说明原因。 */
+export function shippedShipmentViolation(input: ShippedShipmentGuardInput): string | null {
+  if (!hasShippedShipment(input.shipments)) return null;
+  if (input.isCancellation) return MESSAGES[input.phase].CANCEL;
+  if (input.itemChangeCount > 0) return MESSAGES[input.phase].ITEMS;
+  return null;
+}
+
+export function assertChangeRequestRespectsShippedShipments(input: ShippedShipmentGuardInput): void {
+  const violation = shippedShipmentViolation(input);
+  if (violation) throw new OrderChangeRequestError(violation);
 }

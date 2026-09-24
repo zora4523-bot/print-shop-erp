@@ -668,6 +668,26 @@ describe('order detail commercial visibility', () => {
     expect(html.match(/佛山市/g)).toHaveLength(1);
   });
 
+  it('已有地址发货的生产中工单：销售详情不提供取消入口，只提示改交期', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'sales-1', role: Role.SALES } });
+    const base = salesDetailFixture();
+    getSalesOrderDetailByIdMock.mockResolvedValue({ ...base, status: OrderStatus.PACKING });
+    const open = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(open).toContain('申请修改工单');
+    expect(open).toContain('申请取消');
+    expect(open).not.toContain('工单已有地址发货');
+
+    getSalesOrderDetailByIdMock.mockResolvedValue({
+      ...base,
+      status: OrderStatus.PACKING,
+      shipments: base.shipments.map((shipment, index) => index === 0 ? { ...shipment, status: 'SHIPPED' } : shipment),
+    });
+    const shipped = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(shipped).toContain('申请修改工单');
+    expect(shipped).toContain('工单已有地址发货，按正常收费，不能取消或修改款式数量，只能申请修改交期。');
+    expect(shipped).not.toContain('申请取消');
+  });
+
   it('价格状态和来源不回显未知内部标识', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },

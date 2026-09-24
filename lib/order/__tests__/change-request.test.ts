@@ -3687,7 +3687,7 @@ describe('cancellation settlement reference', () => {
     expect(mocks.db.order.update).not.toHaveBeenCalled();
   });
 
-  it('已有地址发货的待发货工单不能批准取消，仍可驳回', async () => {
+  it('已有地址发货的待发货工单不能预览或批准取消，仍可驳回', async () => {
     const value = request({ type: OrderChangeRequestType.CANCEL, proposedChanges: { items: [] }, order: {
       ...request().order, status: OrderStatus.PACKING, workOrderVersion: 2, settledFee: null,
       productionWorkOrderProgress: [], productionProgressSteps: [], outsourceOrders: [],
@@ -3697,10 +3697,12 @@ describe('cancellation settlement reference', () => {
       ],
     } });
     locateCancellation(value);
-    const preview = await previewOrderCancellationSettlement({ requestId: value.id, producedQty: 0 }, admin);
+    // 已有地址发货即正常收费：连取消结算参考价都不给出。
+    await expect(previewOrderCancellationSettlement({ requestId: value.id, producedQty: 0 }, admin))
+      .rejects.toThrow('工单已有地址发货，不能批准取消，请驳回该申请');
     locateCancellation(value);
     await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
-      producedQty: 0, settleFee: '0.00', expectedPriceRevision: preview.priceRevision, expectedQuoteToken: preview.quoteToken,
+      producedQty: 0, settleFee: '0.00', expectedPriceRevision: value.order.priceRevision, expectedQuoteToken: 'stale-token',
     }, admin)).rejects.toThrow('工单已有地址发货，不能批准取消，请驳回该申请');
     expect(mocks.db.order.update).not.toHaveBeenCalled();
     expect(mocks.db.productionOperation.updateMany).not.toHaveBeenCalled();
@@ -3886,6 +3888,26 @@ describe('reviewOrderChangeRequest', () => {
       }, admin)).rejects.toThrow('工单已有地址发货，不能批准款式或数量修改，请驳回该申请');
       expect(mocks.calculate).not.toHaveBeenCalled();
       expectNoApprovalMutation();
+    });
+
+    it('改款式数量的计价预览同样拒绝，不给出新报价', async () => {
+      const value = request({ order: { ...request().order, status: OrderStatus.PACKING, shipments: partlyShipped() } });
+      locate(value);
+      await expect(previewOrderChangeRequestPricing(value.id, admin))
+        .rejects.toThrow('工单已有地址发货，不能批准款式或数量修改，请驳回该申请');
+      expect(mocks.calculate).not.toHaveBeenCalled();
+      expect(mocks.db.orderChangeRequest.findUnique).toHaveBeenLastCalledWith(expect.objectContaining({
+        include: expect.objectContaining({ order: expect.objectContaining({ include: expect.objectContaining({
+          shipments: expect.objectContaining({ select: expect.objectContaining({ status: true }) }),
+        }) }) }),
+      }));
+    });
+
+    it('只改交期的计价预览仍然放行', async () => {
+      const value = request({ proposedChanges: { items: [], promisedDate: '2026-09-20' },
+        order: { ...request().order, status: OrderStatus.PACKING, promisedDate: null, shipments: partlyShipped() } });
+      locate(value);
+      await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({ complete: true });
     });
 
     it('只改交期仍可批准，并按发货状态读取地址', async () => {

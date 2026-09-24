@@ -256,3 +256,18 @@ it('does not submit an unchanged packaging value or erase missing legacy packagi
   const editable = { ...createOrderChangeEditableItem(item), selected: true, quantity: 3000 };
   expect(buildSelectedOrderItemChanges([item], { [item.id]: editable })[0]).not.toHaveProperty('pack');
 });
+
+it('已有地址发货时只提供交期修改：不渲染款式勾选、新增款式与数量类别', () => {
+  const props = { orderId: 'order-1', expectedRevision: 4, expectedWorkOrderVersion: 2, items: [sourceItem], catalogProducts };
+  const full = renderToStaticMarkup(<OrderChangeRequestForm {...props} />);
+  const dueDateOnly = renderToStaticMarkup(<OrderChangeRequestForm {...props} dueDateOnly />);
+  expect(full).toContain('选择款式 1');
+  expect(full).toContain('<option value="QTY" selected="">数量</option>');
+  expect(dueDateOnly).not.toContain('选择款式 1');
+  expect(dueDateOnly).not.toContain('本次申请需要新增一款');
+  expect(dueDateOnly).not.toContain('<option value="QTY">');
+  expect(dueDateOnly).toContain('<option value="DUE_DATE"');
+  expect(dueDateOnly).toContain('新的承诺交期');
+  expect(dueDateOnly).toContain('工单已有地址发货，本次只能申请调整交期。');
+  expect(orderChangeRequestDraftIdentity({ ...props, dueDateOnly: true })).not.toBe(orderChangeRequestDraftIdentity(props));
+});

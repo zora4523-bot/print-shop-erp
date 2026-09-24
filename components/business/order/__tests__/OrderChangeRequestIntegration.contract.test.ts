@@ -27,7 +27,16 @@ describe('工单变更申请 UI 集成契约', () => {
     expect(salesDetailSource).toContain(
       'expectedWorkOrderVersion={order.workOrderVersion}',
     );
-    expect(salesDetailSource).toContain('ORDER_MODIFIABLE_STATUSES.includes(order.status)');
+    // 入口判断集中在 lib/order/change-request-options.ts（含「已有地址发货」闸口）。
+    expect(salesDetailSource).toContain('resolveOrderChangeRequestOptions({');
+    expect(salesDetailSource).toContain('shipments: order.shipments');
+  });
+
+  it('已有地址发货：销售详情不渲染取消入口，修改申请只剩交期', () => {
+    expect(salesDetailSource).toContain('{options.canRequestCancellation ? (');
+    expect(salesDetailSource).toContain('dueDateOnly={!options.allowItemChanges}');
+    expect(salesDetailSource).toContain('!changeOptions.shipped &&');
+    expect(adminDecisionSource).toContain('approvalBlockedReason ? null : (');
   });
 
   it('管理员详情不再渲染客服专属的修改 / 取消申请表单', () => {
