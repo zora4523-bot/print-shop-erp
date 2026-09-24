@@ -66,7 +66,8 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
         `已完成 ${completedQtyBefore} / ${fixture.plannedCompletedQty}`,
       );
       await operationLink.click();
-      await expect(page).toHaveURL(`/worker/tasks/${fixture.operationId}`);
+      // 报工页缺少 reportBatch 时会重定向到服务端推导的批次号；等重定向落定再操作表单。
+      await expect(page).toHaveURL(new RegExp(`/worker/tasks/${fixture.operationId}\\?reportBatch=\\d+$`));
 
       const reportSection = page.locator('section').filter({
         has: page.getByRole('heading', { name: '扫码报工', exact: true }),
