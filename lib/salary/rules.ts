@@ -114,7 +114,7 @@ async function getActiveHourlyRule<T>(
   );
 }
 
-export type WorkHoursConfig = {
+type WorkHoursConfig = {
   morning: { start: string; end: string };
   afternoon: { start: string; end: string };
   // Hour (inclusive lower bound) at which OT starts. `>= otStart`
