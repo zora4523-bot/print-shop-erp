@@ -315,7 +315,7 @@ describe('administrator adds a delivery with conserved allocations and frozen lo
 });
 
 it.each([
-  ['FACTORY_DIRECT', 'SUBMITTED', 'UNCHANGED'],
+  ['NO_CHARGE', 'SUBMITTED', 'UNCHANGED'],
   ['EXTERNAL_SALES', 'DRAFT', 'ON_SUBMIT'],
 ])(
   'preserves the existing charge lifecycle for %s %s',
@@ -343,11 +343,11 @@ it.each([
     expect(mocks.revision).not.toHaveBeenCalled();
   },
 );
-it('keeps 补录 logistics rows (priceBookId null) on the unchanged path for internal orders', async () => {
+it('keeps 补录 logistics rows (priceBookId null) on the unchanged path for free rework orders', async () => {
   const order = fixture();
   mocks.find.mockResolvedValue({
     ...order,
-    settlementType: 'FACTORY_DIRECT',
+    settlementType: 'NO_CHARGE',
     status: 'SUBMITTED',
     customerCharges: order.customerCharges.map((charge) => ({ ...charge, priceBookId: null })),
   });
@@ -476,7 +476,7 @@ it('rejects sales manual pricing before the transaction', async () => {
 describe('split boxed deliveries', () => {
   function boxes() {
     const order = fixture();
-    return { ...order, settlementType: 'FACTORY_DIRECT', processingAmount: new Decimal('83.03'),
+    return { ...order, settlementType: 'EXTERNAL_SALES', processingAmount: new Decimal('83.03'),
       packagingAmount: new Decimal('29.90'), totalAmount: new Decimal('83.03'),
       customerCharges: [], items: [{ ...order.items[0], quantity: 101 }],
       shipments: [{ ...order.shipments[0], lines: [{ orderItemId: 'item', quantity: 101 }] }],
@@ -487,14 +487,14 @@ describe('split boxed deliveries', () => {
     };
   }
   it('updates box count, processing and receivable amounts with a pricing revision', async () => {
-    const order = boxes(); mocks.find.mockResolvedValue(order);
+    const order = boxes(); mocks.find.mockResolvedValue({ ...order, customerCharges: fixture().customerCharges });
     tx.productionOperation.count.mockResolvedValue(0);
     const split = { ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] };
     const preview = await addOrderShipment(split, actor, 'preview');
-    expect(preview).toMatchObject({ oldTotal: '83.03', newTotal: '85.33', packaging: [{ boxCount: 14, subtotal: '32.20' }] });
+    expect(preview).toMatchObject({ packaging: [{ boxCount: 14, subtotal: '32.20' }] });
     await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
     expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actualBagCount: 14, subtotal: '32.20' }) }));
-    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ packagingAmount: '32.20', processingAmount: '85.33', totalAmount: '85.33' }) }));
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ packagingAmount: '32.20', processingAmount: '85.33' }) }));
     expect(mocks.revision).toHaveBeenCalled();
   });
   it('管理员议定盒价分货后沿用原单价与原因，保留管理员标记转待重新确认，不当作自动价', async () => {
@@ -507,7 +507,7 @@ describe('split boxed deliveries', () => {
     });
     Object.assign(group, { priceOverrideReason: '老客户议价', pricingSnapshot: snapshot });
     expect(isTrustedAdminPackagingPricingSnapshot(snapshot, agreed)).toBe(true);
-    mocks.find.mockResolvedValue(order); tx.productionOperation.count.mockResolvedValue(0);
+    mocks.find.mockResolvedValue({ ...order, customerCharges: fixture().customerCharges }); tx.productionOperation.count.mockResolvedValue(0);
     const split = { ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] };
     const preview = await addOrderShipment(split, actor, 'preview');
     await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
@@ -541,7 +541,7 @@ describe('split boxed deliveries', () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
   it('keeps both boxed destinations pending until actual freight is known', async () => {
-    const order = boxes(); order.settlementType = 'EXTERNAL_SALES';
+    const order = boxes();
     mocks.find.mockResolvedValue({ ...order, customerCharges: fixture().customerCharges });
     tx.productionOperation.count.mockResolvedValue(0);
     const quote = await mocks.quote();

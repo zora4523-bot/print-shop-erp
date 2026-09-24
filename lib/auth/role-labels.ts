@@ -12,7 +12,6 @@ import {
 export const ROLE_LABELS: Record<Role, string> = {
   [Role.ADMIN]: '管理员',
   [Role.SALES]: '外部销售',
-  [Role.CUSTOMER_SERVICE]: '内部销售/客服',
   [Role.WORKER]: '师傅',
 };
 

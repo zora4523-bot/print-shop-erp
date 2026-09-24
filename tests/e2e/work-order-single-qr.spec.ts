@@ -21,7 +21,7 @@ async function createFixture() {
     if (!owner.rows[0]) throw new Error('E2E owner account missing');
     await db.query('BEGIN');
     try {
-      await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"workOrderVersion","customName","scheduledAt","createdAt","updatedAt") VALUES ($1,$1,$2,'ADMIN',$2,'FACTORY_DIRECT','RELEASED',2,'统一扫码计件测试',timezone('UTC',CURRENT_TIMESTAMP)-interval '1 day',NOW(),NOW())`, [id, owner.rows[0].id]);
+      await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"workOrderVersion","customName","scheduledAt","createdAt","updatedAt") VALUES ($1,$1,$2,'SALES',$2,'EXTERNAL_SALES','RELEASED',2,'统一扫码计件测试',timezone('UTC',CURRENT_TIMESTAMP)-interval '1 day',NOW(),NOW())`, [id, owner.rows[0].id]);
       await db.query(`INSERT INTO "ProductionOperation" (id,"orderId","operationType",unit,status,"plannedQty","workOrderVersion","createdAt","updatedAt") VALUES ($1,$2,'PARTIAL','PER_PASS','PENDING',400,2,NOW(),NOW())`, [`${id}-foil`, id]);
       for (const sequence of [1, 2]) {
         const itemId = `${id}-item-${sequence}`;

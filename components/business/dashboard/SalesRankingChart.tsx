@@ -40,9 +40,8 @@ function renderRankingTick({ x, y, payload }: YAxisTickContentProps) {
 // 轴、Y 轴当类目（recharts 的 vertical 命名跟人的直觉相反，但这是
 // 它的约定）。
 //
-// 配色按角色：SALES = 蓝色，CUSTOMER_SERVICE = 绿色。ADMIN
-// 在 dashboard 看排行的概率不大，但管理员自己接的工单也可能上榜
-// → 用 muted 灰色。
+// 配色按角色：SALES = 蓝色。收费工单都归属外部销售；历史上管理员
+// 自己接的工单也可能上榜 → 用 muted 灰色。
 
 export type SalesRankingChartProps = {
   data: ReadonlyArray<{
@@ -56,7 +55,6 @@ export type SalesRankingChartProps = {
 
 const ROLE_COLORS: Record<string, string> = {
   SALES: 'var(--chart-1)',
-  CUSTOMER_SERVICE: 'var(--chart-3)',
   // 注释上面写的是「用 muted 灰色」，之前却实现成 chart-5——那是一支
   // 蓝，和 SALES 的 chart-1 对比度只有 2.25:1，两个角色看起来一样。
   ADMIN: 'var(--muted-foreground)',
@@ -64,7 +62,6 @@ const ROLE_COLORS: Record<string, string> = {
 
 const ROLE_LEGEND: ReadonlyArray<{ role: string; label: string }> = [
   { role: 'SALES', label: '销售' },
-  { role: 'CUSTOMER_SERVICE', label: '客服' },
   { role: 'ADMIN', label: '管理员' },
 ];
 
@@ -82,7 +79,7 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
   // recharts 期望 number 类型给 BarChart 数值轴；从 decimal-string 转
   // 一道。Top 10 总额一般在百万级，Number 精度足够（千分位由 tick 显示）。
   // 只带图表真正要用的字段。之前是 `{...d}` 整行摊平，recharts 会把
-  // payload 上的属性透传到 <path>，于是渲染出 role="CUSTOMER_SERVICE"
+  // payload 上的属性透传到 <path>，于是渲染出 role="SALES"
   // 这种非法 ARIA 角色，axe aria-roles 直接报错。
   const rows = data.map((d) => ({
     displayName: d.displayName,

@@ -12,7 +12,7 @@ test('逐地址登记、面单历史与最后一票应收确认', async ({ page 
   const id = `ship-e2e-${randomUUID()}`;
   try {
     const users = await db.query('SELECT id FROM "User" WHERE username=$1', ['e2e-owner']);
-    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"pricingStatus","pricingConfirmedAt","pricingConfirmedById","confirmedFee","totalAmount","receiverAddress","receiverPhone","revision","editVersion","workOrderVersion","priceRevision","updatedAt") VALUES ($1,$1,$2,'ADMIN',$2,'FACTORY_DIRECT','PACKING','ADMIN_CONFIRMED',NOW(),$2,25,25,'测试地址','13800138000',1,1,1,1,NOW())`, [id, users.rows[0].id]);
+    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"pricingStatus","pricingConfirmedAt","pricingConfirmedById","confirmedFee","totalAmount","receiverAddress","receiverPhone","revision","editVersion","workOrderVersion","priceRevision","updatedAt") VALUES ($1,$1,$2,'SALES',$2,'EXTERNAL_SALES','PACKING','ADMIN_CONFIRMED',NOW(),$2,25,25,'测试地址','13800138000',1,1,1,1,NOW())`, [id, users.rows[0].id]);
     for (const number of [1, 2]) await db.query(`INSERT INTO "OrderShipment" (id,"orderId",sequence,"receiverName","receiverPhone","receiverAddress","updatedAt") VALUES ($1,$2,$3,'测试收件人','13800138000','测试地址',NOW())`, [`${id}-${number}`, id, number]);
     await login(page, { username: 'e2e-owner', password: 'e2e-test-password-1234' });
     await page.goto(`/orders/${id}`);

@@ -36,7 +36,6 @@ describe('root role dispatcher', () => {
   it.each([
     [Role.ADMIN, '/owner'],
     [Role.SALES, '/orders'],
-    [Role.CUSTOMER_SERVICE, '/orders'],
     [Role.WORKER, '/worker/tasks'],
   ])('redirects %s to %s', async (role, destination) => {
     getSessionMock.mockResolvedValue({ user: { role } });

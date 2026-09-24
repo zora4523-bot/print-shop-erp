@@ -13,7 +13,7 @@ describe('normalizeSessionRole', () => {
     },
   );
 
-  it.each([Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])(
+  it.each([Role.ADMIN, Role.SALES, Role.WORKER])(
     'keeps the current %s role unchanged',
     (role) => {
       expect(normalizeSessionRole(role)).toBe(role);

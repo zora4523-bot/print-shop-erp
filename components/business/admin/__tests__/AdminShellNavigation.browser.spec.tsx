@@ -205,14 +205,6 @@ describe.each([Role.SALES, Role.ADMIN])('%s shared navigation', (role) => {
   }
 });
 
-it('客服同样平铺，生产环境不显示环境标记', async () => {
-  await page.viewport(1280, 800);
-  route.pathname = '/orders/new';
-  await renderShell(Role.CUSTOMER_SERVICE, 'light', 'production');
-  assertMenuLinks(Role.CUSTOMER_SERVICE);
-  expect(host.querySelector('[data-slot="admin-environment"]')).toBeNull();
-});
-
 it('主题和账号菜单保持键盘、焦点与退出表单契约', async () => {
   await page.viewport(393, 852);
   route.pathname = '/orders/new';

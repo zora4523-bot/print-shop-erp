@@ -7,7 +7,7 @@ import '@/app/globals.css';
 
 const data = [
   { userId: 'sales-1', displayName: '销售甲', role: 'SALES', totalAmount: '5000.50', orderCount: 1 },
-  { userId: 'cs-1', displayName: '客服乙', role: 'CUSTOMER_SERVICE', totalAmount: '12345.67', orderCount: 2 },
+  { userId: 'sales-2', displayName: '销售乙', role: 'SALES', totalAmount: '12345.67', orderCount: 2 },
 ];
 let host: HTMLDivElement;
 let root: Root;
@@ -66,7 +66,7 @@ for (const theme of ['light', 'dark']) {
       if (interaction === 'keyboard') {
         // Recharts' vertical chart maps ArrowLeft to the next data index.
         await userEvent.keyboard('{ArrowLeft}');
-        await expect.element(tooltip).toHaveTextContent('客服乙');
+        await expect.element(tooltip).toHaveTextContent('销售乙');
         await expect.element(tooltip).toHaveTextContent('¥ 12,345.67');
       }
       const background = luminance(getComputedStyle(tooltip.element()).backgroundColor);
@@ -101,7 +101,7 @@ it('393: long display names are ellipsized inside the axis instead of overflowin
   // 自定义 tick 渲染器不带 recharts 的刻度类名，按分类文字内容从 SVG 里找两条 Y 轴标签。
   const findLabels = () =>
     [...host.querySelectorAll<SVGTextElement>('svg text')].filter((node) =>
-      /客服乙|E2E/.test(node.textContent ?? ''),
+      /销售乙|E2E/.test(node.textContent ?? ''),
     );
   await expect.poll(() => findLabels().length).toBe(2);
   const labels = findLabels();

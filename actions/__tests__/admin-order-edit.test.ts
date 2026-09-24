@@ -40,7 +40,7 @@ describe('administrator edit actions', () => {
     expect(mocks.permission).toHaveBeenCalledWith('order:update:post-schedule');
     expect(mocks.edit).not.toHaveBeenCalled();
   });
-  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])('rejects %s at both action entrances', async (role) => {
+  it.each([Role.SALES, Role.WORKER])('rejects %s at both action entrances', async (role) => {
     mocks.permission.mockImplementation(async (permission: keyof typeof PERMISSIONS) => {
       if (!(PERMISSIONS[permission] as readonly Role[]).includes(role)) throw new Error('无权访问');
       return { id: 'non-admin', role };

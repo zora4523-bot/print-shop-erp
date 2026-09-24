@@ -146,7 +146,7 @@ describe('getSalesRanking', () => {
     ]);
     dbMock.user.findMany.mockResolvedValue([
       { id: 'u-sales', displayName: '张销售', role: 'SALES' },
-      { id: 'u-cs', displayName: '李客服', role: 'CUSTOMER_SERVICE' },
+      { id: 'u-cs', displayName: '李管理员', role: 'ADMIN' },
     ]);
     const r = await getSalesRanking(new Date('2026-04-25T08:00:00Z'));
     expect(r).toHaveLength(2);
@@ -157,7 +157,7 @@ describe('getSalesRanking', () => {
       totalAmount: '5000.00',
       orderCount: 3,
     });
-    expect(r[1]!.role).toBe('CUSTOMER_SERVICE');
+    expect(r[1]!.role).toBe('ADMIN');
   });
 
   it('user 查不到 → 该行被过滤', async () => {

@@ -9,8 +9,7 @@ export const ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE = '请选择关联外部销�
 /**
  * Orders whose delivery is priced from the published logistics book (中通省份
  * 阶梯 + 纸箱耗材) and billed as customer charges. Only free (NO_CHARGE) orders
- * never bill logistics; internal and factory-direct orders follow the same
- * rules as external sales (业主 2026-09-18 拍板，取代「内部结算不新增物流应收」).
+ * never bill logistics.
  */
 export function settlementBillsLogistics(settlementType: OrderSettlementType): boolean {
   return settlementType !== OrderSettlementType.NO_CHARGE;
@@ -35,9 +34,10 @@ export function hasLogisticsChargeRows(
 
 /**
  * Whether the order's delivery is priced and finalized through logistics
- * rows: external sales and samples always; internal / factory-direct orders
- * once their rows exist (orders submitted before 2026-09-18 have none and
- * keep the processing-only flows).
+ * rows: external sales and samples always, proofs and free (NO_CHARGE)
+ * rework never. `hasLogisticsRows` only matters for a settlement type that
+ * bills logistics but is not external sales; none remains since the
+ * 2026-09-24 removal of internal / factory-direct settlement.
  */
 export function orderBillsLogistics(order: {
   settlementType: OrderSettlementType;
@@ -51,7 +51,5 @@ export function orderBillsLogistics(order: {
 
 export const ORDER_SETTLEMENT_LABELS: Record<OrderSettlementType, string> = {
   [OrderSettlementType.EXTERNAL_SALES]: '外部销售应付工厂',
-  [OrderSettlementType.INTERNAL_SALES]: '内部销售业绩',
-  [OrderSettlementType.FACTORY_DIRECT]: '工厂直接业务',
   [OrderSettlementType.NO_CHARGE]: '免费工单',
 };

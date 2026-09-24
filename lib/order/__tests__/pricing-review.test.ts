@@ -73,17 +73,11 @@ const logisticsEvidence = {
   sourceSha256: "b".repeat(64),
 };
 
-/** Internal order created before 2026-09-18: no logistics rows, processing-only review. */
-function legacyInternalOrder(settlementType: OrderSettlementType, overrides: Record<string, unknown> = {}) {
-  const order = pricingOrder({ settlementType, ...overrides });
-  return { ...order, customerCharges: order.customerCharges.filter((charge) => charge.shipmentId === null) };
-}
-
 function pricingOrder(overrides: Record<string, unknown> = {}) {
   return {
     id: "order-1",
     orderNo: "GD-260828-001",
-    submitterId: "cs-1",
+    submitterId: "sales-1",
     status: OrderStatus.SUBMITTED,
     billingMode: OrderBillingMode.CHARGE,
     settlementType: OrderSettlementType.EXTERNAL_SALES,
@@ -759,100 +753,19 @@ describe("snapshot-only order pricing review", () => {
     },
   );
 
-  it.each([
-    OrderSettlementType.INTERNAL_SALES,
-    OrderSettlementType.FACTORY_DIRECT,
-  ])(
-    "keeps the processing-only review for a legacy %s order without logistics rows",
-    async (settlementType) => {
-      dbMock.order.findUnique.mockResolvedValue(legacyInternalOrder(settlementType));
-
-      await expect(
-        previewOrderPricingReview("order-1", admin, now),
-      ).resolves.toMatchObject({
-        orderId: "order-1",
-        logisticsPriceBook: null,
-        shipments: [],
-      });
-      await expect(
-        finalizeOrderPricing(command({ shipments: [] }), admin, now),
-      ).resolves.toMatchObject({
-        processingAmount: "140.00",
-        totalAmount: "147.00",
-        confirmedFee: "147.00",
-        logisticsPriceBookVersion: null,
-      });
-
-      expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
-      expect(dbMock.orderCustomerCharge.create).not.toHaveBeenCalled();
-      expect(dbMock.customerChargeCategory.findUnique).not.toHaveBeenCalled();
-      expect(appendPricingRevisionMock).toHaveBeenCalledWith(
-        dbMock,
-        expect.objectContaining({
-          metadata: expect.objectContaining({
-            manualCustomerChargeKeys: [],
-            customerChargeAmount: "7.00",
-          }),
-        }),
-      );
-    },
-  );
-
-  it.each([
-    OrderSettlementType.INTERNAL_SALES,
-    OrderSettlementType.FACTORY_DIRECT,
-  ])(
-    "reviews and writes the logistics rows of a %s order exactly like external sales",
-    async (settlementType) => {
-      dbMock.order.findUnique.mockResolvedValue(pricingOrder());
-      const externalPreview = await previewOrderPricingReview("order-1", admin, now);
-      const externalResult = await finalizeOrderPricing(command(), admin, now);
-      const externalChargeWrites = dbMock.orderCustomerCharge.update.mock.calls.length;
-      vi.clearAllMocks();
-      dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settlementType }));
-      const preview = await previewOrderPricingReview("order-1", admin, now);
-      expect(preview.shipments).toHaveLength(externalPreview.shipments.length);
-      expect(preview.logisticsPriceBook).toEqual(externalPreview.logisticsPriceBook);
-      const result = await finalizeOrderPricing(command(), admin, now);
-      expect(result).toMatchObject({
-        processingAmount: externalResult.processingAmount,
-        totalAmount: externalResult.totalAmount,
-        confirmedFee: externalResult.confirmedFee,
-        logisticsPriceBookVersion: externalResult.logisticsPriceBookVersion,
-      });
-      expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledTimes(externalChargeWrites);
-    },
-  );
-
   it("rejects a negative final total before pricing writes", async () => {
-    const order = legacyInternalOrder(OrderSettlementType.INTERNAL_SALES);
+    const order = pricingOrder();
     dbMock.order.findUnique.mockResolvedValue({
       ...order,
       customerCharges: order.customerCharges.map((charge) =>
-        charge.id === "other-charge" ? { ...charge, amount: "-200.00" } : charge,
+        charge.id === "other-charge" ? { ...charge, amount: "-2000.00" } : charge,
       ),
     });
 
     await expect(
-      finalizeOrderPricing(command({ shipments: [] }), admin, now),
+      finalizeOrderPricing(command(), admin, now),
     ).rejects.toThrow(/工单总额不能为负数/);
 
-    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
-    expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
-    expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
-    expect(dbMock.order.update).not.toHaveBeenCalled();
-    expect(appendPricingRevisionMock).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    OrderSettlementType.INTERNAL_SALES,
-    OrderSettlementType.FACTORY_DIRECT,
-  ])("rejects shipment charge input for a %s order that has no logistics rows", async (settlementType) => {
-    dbMock.order.findUnique.mockResolvedValue(legacyInternalOrder(settlementType));
-
-    await expect(finalizeOrderPricing(command(), admin, now)).rejects.toThrow(
-      /没有快递费与打包耗材收费明细/,
-    );
     expect(dbMock.orderItem.update).not.toHaveBeenCalled();
     expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
     expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
@@ -1079,101 +992,6 @@ describe("snapshot-only order pricing review", () => {
     });
   });
 
-  it("confirms a factory-direct order-level pending plate fee without shipment charges", async () => {
-    const order = legacyInternalOrder(OrderSettlementType.FACTORY_DIRECT, {
-      status: OrderStatus.SUBMITTED,
-    });
-    dbMock.order.findUnique.mockResolvedValue({
-      ...order,
-      customerCharges: [
-        ...order.customerCharges,
-        {
-          id: "plate-pending",
-          orderId: "order-1",
-          shipmentId: null,
-          businessKey: "ORDER:PLATE_MAKING_FEE:PENDING",
-          description: "制版费",
-          quantity: null,
-          unit: null,
-          suggestedAmount: null,
-          amount: null,
-          pricingSnapshot: {
-            schemaVersion: 2,
-            status: "PENDING_AMOUNT",
-            pendingReason: {
-              code: "PLATE_AMOUNT_PENDING",
-              message: "制烫金版费始终由管理员按实际制版成本确认",
-            },
-            actual: {
-              amount: null,
-              provisional: true,
-              requiresAdminConfirmation: true,
-            },
-          },
-          overrideReason: null,
-          status: "PENDING_AMOUNT",
-          priceBookId: null,
-          sourceRuleId: null,
-          unitPrice: null,
-          isAdjustment: false,
-          approvalReference: null,
-          category: { code: "PLATE_MAKING_FEE", name: "制版费" },
-        },
-      ],
-    });
-
-    const preview = await previewOrderPricingReview("order-1", admin, now);
-    expect(preview.shipments).toEqual([]);
-    expect(preview.logisticsPriceBook).toBeNull();
-    expect(preview.orderCharges).toEqual([
-      expect.objectContaining({
-        chargeId: "plate-pending",
-        businessKey: "ORDER:PLATE_MAKING_FEE:PENDING",
-        categoryCode: "PLATE_MAKING_FEE",
-        complete: false,
-        errors: ["制烫金版费始终由管理员按实际制版成本确认"],
-      }),
-    ]);
-
-    const result = await finalizeOrderPricing(
-      command({
-        shipments: [],
-        orderCharges: [
-          {
-            chargeId: "plate-pending",
-            expectedBusinessKey: "ORDER:PLATE_MAKING_FEE:PENDING",
-            amount: "30.00",
-            reason: "工厂确认制版成本",
-          },
-        ],
-      }),
-      admin,
-      now,
-    );
-
-    expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith({
-      where: { id: "plate-pending" },
-      data: expect.objectContaining({
-        amount: "30.00",
-        status: "ESTIMATED",
-        overrideReason: "工厂确认制版成本",
-        pricingSnapshot: expect.objectContaining({
-          source: "ADMIN_SNAPSHOT_CONFIRMATION",
-          status: "ADMIN_CONFIRMED",
-        }),
-      }),
-      select: { id: true },
-    });
-    expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledTimes(1);
-    expect(result.confirmedFee).toBe("177.00");
-    expect(prepareProductionMock).toHaveBeenCalledWith(
-      dbMock,
-      "order-1",
-      admin,
-      now,
-    );
-  });
-
   it("does not trust partial administrator markers for items, packaging, or charges", async () => {
     const order = pricingOrder();
     dbMock.order.findUnique.mockResolvedValue({
@@ -1313,7 +1131,6 @@ describe("snapshot-only order pricing review", () => {
   it("accepts only an internally consistent structured plate breakdown", async () => {
     const order = pricingOrder({
       status: OrderStatus.SUBMITTED,
-      settlementType: OrderSettlementType.FACTORY_DIRECT,
     });
     const validDetail = {
       id: "plate-detail-charge",

@@ -48,7 +48,7 @@ describe.skipIf(!isolated)('real PostgreSQL + XLSX export snapshot', () => {
     expect(preview.suggestedFixedFee).toBe('0.09');
     const key = `snapshot-${randomUUID()}`;
     const order = await db.order.create({ data: {
-      orderNo: key, submitterId: actor.id, createdById: actor.id, submitterRole: 'ADMIN', settlementType: 'FACTORY_DIRECT',
+      orderNo: key, submitterId: actor.id, createdById: actor.id, submitterRole: 'SALES', settlementType: 'EXTERNAL_SALES',
       totalAmount: '122.00', processingAmount: '122.00',
       items: { create: { sequence: 1, name: 'snapshot fixture', pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL', productStructure: 'STANDARD_ENVELOPE', quantity: 1010, foilTechnique: 'FLAT', crafts: [], unitPrice: preview.suggestedUnitPrice!, fixedFee: preview.suggestedFixedFee!, subtotal: preview.suggestedSubtotal! } },
     } });
@@ -85,7 +85,7 @@ describe.skipIf(!isolated)('real PostgreSQL + XLSX export snapshot', () => {
     const actor = await db.user.findFirstOrThrow({ where: { role: 'ADMIN', isActive: true }, select: { id: true, role: true, username: true, displayName: true } });
     const prefix = `capacity-${randomUUID()}`;
     const ids = Array.from({ length: 5000 }, (_, index) => `${prefix}-${index}`);
-    await db.order.createMany({ data: ids.map(id => ({ id, orderNo: id, submitterId: actor.id, createdById: actor.id, submitterRole: 'ADMIN', settlementType: 'FACTORY_DIRECT', totalAmount: '122.00', processingAmount: '122.00' })) });
+    await db.order.createMany({ data: ids.map(id => ({ id, orderNo: id, submitterId: actor.id, createdById: actor.id, submitterRole: 'SALES', settlementType: 'EXTERNAL_SALES', totalAmount: '122.00', processingAmount: '122.00' })) });
     await db.orderItem.createMany({ data: ids.map(orderId => ({ orderId, sequence: 1, name: 'capacity fixture', pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL', productStructure: 'STANDARD_ENVELOPE', quantity: 1010, foilTechnique: 'FLAT', crafts: [], unitPrice: '0.1207', fixedFee: '0.09', subtotal: '122.00' })) });
     const request = await requestOrderExport({ actor, requestKey: randomUUID(), scope: 'selected', params: {}, selectedOrderIds: ids, durable: false });
     const start = performance.now();

@@ -276,7 +276,7 @@ test('不计薪报工刷新去重与再报一批经过真实页面和数据库',
   await withDb(async db => {
     await db.query("SET TIME ZONE 'UTC'");
     const owner = (await db.query('SELECT id FROM "User" WHERE username=$1', [E2E_USERS.owner!.username])).rows[0].id;
-    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"workOrderVersion","customName","scheduledAt","createdAt","updatedAt") VALUES ($1,$1,$2,'ADMIN',$2,'FACTORY_DIRECT','RELEASED',1,'刷新报工测试',NOW(),NOW(),NOW())`, [id, owner]);
+    await db.query(`INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"workOrderVersion","customName","scheduledAt","createdAt","updatedAt") VALUES ($1,$1,$2,'SALES',$2,'EXTERNAL_SALES','RELEASED',1,'刷新报工测试',NOW(),NOW(),NOW())`, [id, owner]);
     await db.query(`INSERT INTO "OrderItem" (id,"orderId",sequence,name,"pricingRoute","productStructure",quantity,"foilTechnique",crafts,"createdAt","updatedAt") VALUES ($1,$2,1,'刷新报工款','CUSTOM_SINGLE_FLAT_FOIL','STANDARD_ENVELOPE',1000,'FLAT',ARRAY[]::text[],NOW(),NOW())`, [`${id}-item`, id]);
     await db.query(`INSERT INTO "Craft" (id,name,code,"defaultWorkerType","defaultMachineType","inHouseMachineTypes","isActive","isOutsource","createdAt","updatedAt") VALUES ($1,$1,$1,'MACHINE','HAND_PRESS',ARRAY[]::"MachineType"[],true,false,NOW(),NOW())`, [`${id}-craft`]);
     await db.query(`INSERT INTO "ProductionProgressStep" (id,"orderId","workOrderVersion","orderItemId","craftId","craftCode","craftName",status,"plannedQty","createdAt","updatedAt") VALUES ($1,$2,1,$3,$4,'REFRESH_TEST','覆膜','PENDING',1000,NOW(),NOW())`, [stepId, id, `${id}-item`, `${id}-craft`]);

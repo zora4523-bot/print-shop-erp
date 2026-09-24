@@ -62,7 +62,7 @@ describe('durable order PDF jobs', () => {
   });
 
   it('reuses a pending/running job of the same authorized scope instead of enqueueing another regeneration', async () => {
-    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.CUSTOMER_SERVICE }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
     enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job-window' } });
     await enqueueOrderPdfJob(input);
     const windowKey = (enqueueBackgroundJobMock.mock.calls[0][0] as { dedupeKey: string }).dedupeKey;

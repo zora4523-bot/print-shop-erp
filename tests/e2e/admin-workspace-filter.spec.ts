@@ -45,7 +45,7 @@ test.beforeAll(async () => {
              "settlementContractVersion", "settledAt", "pricingStatus", "pricingConfirmedAt", "pricingConfirmedById",
              "submittedAt", "createdAt", "updatedAt"
            ) VALUES (
-             $1, $2, $3, $4, 'ADMIN', $4, 'FACTORY_DIRECT', $5::"OrderStatus",
+             $1, $2, $3, $4, 'SALES', $4, 'EXTERNAL_SALES', $5::"OrderStatus",
              $6, '测试收件人', '13800138000', '隔离测试地址',
              $7::numeric, $8::numeric, $9::numeric, $10::numeric,
              CASE WHEN $5 = 'SETTLED' THEN 2 ELSE NULL END,

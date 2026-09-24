@@ -126,7 +126,7 @@ function useFoilCatalog(category: 'CUSTOM_FLAT_FOIL' | 'COLOR_PRINT') {
 }
 
 describe('workbench current-price quote', () => {
-  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN])(
+  it.each([Role.SALES, Role.ADMIN])(
     'uses the real published pricing engine for %s and returns a minimal projection',
     async (role) => {
       mocks.permission.mockResolvedValue({ id: 'u', role });

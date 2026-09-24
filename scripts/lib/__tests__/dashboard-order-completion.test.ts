@@ -150,8 +150,8 @@ describe('dashboard shell eligibility', () => {
     ['different display number', { orderNo: 'GD-260907-001' }],
     ['different submitter', { submitterId: 'real-sales' }],
     ['different creator', { createdById: 'real-admin' }],
-    ['different role snapshot', { submitterRole: 'CUSTOMER_SERVICE' }],
-    ['different settlement path', { settlementType: 'FACTORY_DIRECT' }],
+    ['different role snapshot', { submitterRole: 'ADMIN' }],
+    ['different settlement path', { settlementType: 'NO_CHARGE' }],
     ['completed state', { status: 'COMPLETED' }],
     ['customer association', { customerPartyId: 'actual-customer' }],
     ['parent order', { sourceOrderId: 'actual-order' }],
@@ -182,7 +182,7 @@ describe('dashboard shell eligibility', () => {
 
   it.each([
     { isActive: true },
-    { role: 'CUSTOMER_SERVICE' as const },
+    { role: 'ADMIN' as const },
     { username: 'e2e-unrelated-account' },
     { id: 'different-owner' },
   ])('refuses a changed fixture principal: %j', (patch) => {

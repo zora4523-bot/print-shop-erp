@@ -475,8 +475,8 @@ describe('worker salary visibility', () => {
     ).rejects.toBeInstanceOf(WorkerPortalError);
     await expect(
       listWorkerHourlyPayrolls({
-        id: 'cs-1',
-        role: Role.CUSTOMER_SERVICE,
+        id: 'sales-1',
+        role: Role.SALES,
         workerType: null,
       }),
     ).rejects.toBeInstanceOf(WorkerPortalError);

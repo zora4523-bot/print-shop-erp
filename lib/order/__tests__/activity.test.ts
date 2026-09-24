@@ -6,7 +6,7 @@ import { readOrderActivity } from '../activity';
 const admin = { id: 'admin', role: Role.ADMIN };
 beforeEach(() => { vi.clearAllMocks(); order.mockResolvedValue({ id: 'order' }); logs.mockResolvedValue([]); });
 describe('admin activity access and pagination', () => {
-  it.each([Role.SALES, Role.WORKER, Role.CUSTOMER_SERVICE])('rejects %s before querying commercial audit records', async role => {
+  it.each([Role.SALES, Role.WORKER])('rejects %s before querying commercial audit records', async role => {
     expect(await readOrderActivity('order', { id: 'user', role })).toBeNull();
     expect(order).not.toHaveBeenCalled(); expect(logs).not.toHaveBeenCalled();
   });

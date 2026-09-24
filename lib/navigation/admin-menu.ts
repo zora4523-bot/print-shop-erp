@@ -236,6 +236,5 @@ export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
 export const ADMIN_ROLE_BADGE: Record<Role, string> = {
   [Role.ADMIN]: '管理员后台',
   [Role.SALES]: '外部销售',
-  [Role.CUSTOMER_SERVICE]: '客服',
   [Role.WORKER]: '师傅',
 };

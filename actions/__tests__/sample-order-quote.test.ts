@@ -13,7 +13,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 describe('sample quote action authorization', () => {
-  it.each(['SALES', 'CUSTOMER_SERVICE', 'ADMIN'])(
+  it.each(['SALES', 'ADMIN'])(
     'allows %s with order:create',
     async (role) => {
       mocks.permission.mockResolvedValue({ id: 'actor', role });

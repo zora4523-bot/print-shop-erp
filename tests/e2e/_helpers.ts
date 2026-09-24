@@ -494,7 +494,7 @@ export async function seedPrintableOrder(opts: {
         "promisedDate", "packageRequirement", remark, "totalAmount",
         "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType", $3,
+        $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
         'RELEASED'::"OrderStatus", FALSE,
         $10,
         $4,
@@ -1255,7 +1255,9 @@ export async function seedDashboardSnapshot(opts: {
       if (opts.ownerUserId) {
         rankingSpecs.push({
           submitterId: opts.ownerUserId,
-          submitterRole: 'ADMIN',
+          // 收费工单的身份快照只能是 SALES；排行按账号当前角色着色，
+          // 管理员账号仍显示为 muted。
+          submitterRole: 'SALES',
           amount: '1500.00',
           daysOffset: -2,
           productSuffix: null, // → UNCATEGORIZED bucket
@@ -1286,10 +1288,7 @@ export async function seedDashboardSnapshot(opts: {
             "submittedAt", "createdAt", "updatedAt"
           ) VALUES (
             $1, $2, $3, $4::"Role",
-            CASE $4::"Role"
-              WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
-              WHEN 'ADMIN'::"Role" THEN 'FACTORY_DIRECT'::"OrderSettlementType"
-            END,
+            'EXTERNAL_SALES'::"OrderSettlementType",
             $3,
             'SUBMITTED'::"OrderStatus", FALSE, $5,
             $6, $6, $6
@@ -1771,7 +1770,7 @@ export async function seedE2eProductionOperationFixture(): Promise<E2eProduction
            "pricingConfirmedAt", "isUrgent", "customName", "customerRef",
            "clientSubmissionId", "scheduledAt", "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType",
+           $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType",
            $3, 'SCHEDULING'::"OrderStatus",
            'ADMIN_CONFIRMED'::"OrderPricingStatus", $3, NOW(), TRUE, $4, $5,
            'e2e-production-main-v1', NOW(), NOW(), NOW()
@@ -2168,7 +2167,7 @@ export async function seedSearchSmokeFixtures(opts: {
         "receiverAddress", "expressCode", "trackingNo", "createdAt",
         "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType", $3,
+        $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
         'DRAFT'::"OrderStatus", true, $4, 'Codex E2E 收货人',
         '13900001111', 'E2E 测试地址', 'SF-CODX-E2E',
         'SF123456789E2E', NOW(), NOW()

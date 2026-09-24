@@ -31,7 +31,7 @@ it('requires a session before reading account or salary data', async () => {
   expect(mocks.load).not.toHaveBeenCalled();
   expect(mocks.workbook).not.toHaveBeenCalled();
 });
-it.each([Role.WORKER, Role.SALES, Role.CUSTOMER_SERVICE])('rejects current database role %s despite an old ADMIN token', async (role) => {
+it.each([Role.WORKER, Role.SALES])('rejects current database role %s despite an old ADMIN token', async (role) => {
   mocks.user.mockResolvedValue({ id: 'user-1', role, isActive: true });
   const response = await handlePieceworkSettlementExportGet(request());
   expect(response.status).toBe(401);

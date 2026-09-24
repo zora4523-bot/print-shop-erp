@@ -166,8 +166,12 @@ async function main() {
       assert(command.success, JSON.stringify(command));
       const quote = await quoteSampleOrder(command.data);
       if (purpose === 'PROOF') assert.equal(quote.total, null);
-      const created = await createOrder(command.data, creator);
-      const replay = await createOrder(command.data, creator);
+      // 业主 2026-09-24：管理员代建必须指定外部销售。
+      const createCommand = adminCreated
+        ? { ...command.data, externalSalesUserId: sales.id }
+        : command.data;
+      const created = await createOrder(createCommand, creator);
+      const replay = await createOrder(createCommand, creator);
       assert.equal(created.id, replay.id);
       await assert.rejects(() =>
         submitOrder(created.id, other, new Date(), quote.quoteToken),
@@ -205,7 +209,7 @@ async function main() {
         include: { shipments: true, customerCharges: true },
       });
       assert.equal(order.processingAmount.toFixed(2), '0.00');
-      assert.equal(order.settlementType, adminCreated ? 'FACTORY_DIRECT' : 'EXTERNAL_SALES');
+      assert.equal(order.settlementType, 'EXTERNAL_SALES');
       if (purpose === 'PROOF')
         order = await verifyProofPricing(order, pricingServices);
       if (purpose === 'SAMPLE_SHIPMENT' && !collect) {

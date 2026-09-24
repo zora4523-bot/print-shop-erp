@@ -114,7 +114,7 @@ Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到�
 
 工单 PDF 仅输出每页一个主码的生产主单。工序流转单已移除：`mode=tasks` 下载请求返回 `400`，浏览器打印页返回 `404`。后台任务继续绑定用户、工单和生产版本；兼容缺省或 `mode=order` 的历史任务，拒绝生成或下载旧流转单任务。浏览器打印页 `/print/orders/:id` 使用相同模板与分页规则。
 
-生产打印范围统一由 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 提供，适用于网页正文、页面标题、同步 PDF 及后台 PDF。每次读取复核账号仍启用且角色未变化：ADMIN 可查看全部，CUSTOMER_SERVICE 仅查看自己提交的工单，SALES 不可查看生产打印件。WORKER 按当前账号的固定报工岗位匹配当前版本未取消的计件工序，或读取包含当前版本公共进度工序的工单；`SUBMITTED` 不向师傅开放。旧 `ProductionTask.workerId` 派工关系不授予打印权限，无权访问的页面标题不含工单号。
+生产打印范围统一由 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 提供，适用于网页正文、页面标题、同步 PDF 及后台 PDF。每次读取复核账号仍启用且角色未变化：ADMIN 可查看全部，SALES 不可查看生产打印件。WORKER 按当前账号的固定报工岗位匹配当前版本未取消的计件工序，或读取包含当前版本公共进度工序的工单；`SUBMITTED` 不向师傅开放。旧 `ProductionTask.workerId` 派工关系不授予打印权限，无权访问的页面标题不含工单号。
 
 打印工序只读取当前 `workOrderVersion` 的 `ProductionOperation` / `ProductionProgressStep`，排除已取消工序；缺记录时显示空态，不生成旧任务或推测进度。状态来自当前工单，待审批标记只来自真实的 PENDING 修改申请。后台渲染后、下载响应前继续复核账号、范围及生产版本；撤权不返回产物，响应前发现升版返回 `409` 并要求重新生成。
 
@@ -156,7 +156,7 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 
 ### 工单修改与价格确认
 
-- MODIFY 提案可携带 `promisedDate: YYYY-MM-DD | null`；省略代表不改、`null` 代表清除。允许 `items: []` 的纯交期申请，但拒绝无实际变化。预览返回 `promisedDateChange: { before, after }`，批准后才写入交期。纯交期等不影响计价的变更保留原加工费、总价和费用快照，不从历史明细重建金额，不产生客服业绩差额。
+- MODIFY 提案可携带 `promisedDate: YYYY-MM-DD | null`；省略代表不改、`null` 代表清除。允许 `items: []` 的纯交期申请，但拒绝无实际变化。预览返回 `promisedDateChange: { before, after }`，批准后才写入交期。纯交期等不影响计价的变更保留原加工费、总价和费用快照，不从历史明细重建金额。
 - 普通独立制版费默认 `QUOTED / 0.00`，不再生成版费待定原因。管理员逐款制版明细入口继续保留；人工金额加入应收和新费用快照。彩印烫金含版费套餐、其他未知价格和待补运费的规则不变。旧待定快照可读，重算只将尚未核价的版费转为零，不覆盖已确认人工版费。
 - 待审申请不自动暂停生产。工厂可在待审期间暂停/恢复；这两个仅切换执行状态的操作不使现有申请版本失效。批准暂停中的申请保持暂停，恢复仍须提供恢复证据。已经下发生产的暂停工单可为批准的新版本创建重打任务，仍禁止首次下发绕过暂停。
 - 生产改版只承接能唯一对应同一工序、款式或包装组的已完成量；过版工资不重复计入。低于已产量、已产来源无法对应或多款汇总后无法确认各款剩余量的变更整体拒绝。新版完工条件重新检查，旧版报工继续拒绝。旧版仍待开工/进行中的工序与无计件进度步骤在同一批准事务内置为已取消（报工事实不改）；其中带分档烫金报工的旧工序标记需人工核定，管理员在工单提成明细确认后，这些报工日才能锁定计件结算。
@@ -169,13 +169,13 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 - `createOrderAction` 的 `externalSalesUserId`：ADMIN 建单**必填**（2026-09-24 起取消工厂直单），缺失时返回 `invalid` 且 `fieldErrors.externalSalesUserId = ['请选择关联外部销售']`；只能指定启用的 SALES 账号。事务内锁定并验证账号，写入 `submitterId` 与 `EXTERNAL_SALES` 结算方向，`submitterRole=SALES` 满足结算一致性约束，实际管理员保留在 `createdById` 和创建日志。SALES 本人建单时原始输入出现该字段（包括 null）直接拒绝；其他角色不能建单。管理员新建页在没有启用的外部销售账号时不渲染表单，提示先去账号管理创建或启用。重复创建按实际创建人和原归属校验。
 - 管理员新建页移除 `customerPartyId/customerRef` 输入；管理员新建时这两个值统一为空，忽略旧浏览器草稿中的残留。其他角色和既有工单的客户关联保持原契约。
 - 新建的 `items[].pack` 上限为 12；`packagingGroups[].itemUnitsPerBag` 的一包合计最多 12，混装按各款相加。预报价、创建 schema、创建领域及页面同步校验，不改变旧工单包装及历史报价。数量为正整数；超限须调整，不能自动截断或按零费用放行。
-- `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；`customerPartyId` 只能选择活动客户（不变的历史关联可保留）。ADMIN 可修改范围内工单，SALES / CUSTOMER_SERVICE 仅可修改自己创建的工单；存在待审批申请时拒绝保存。
-- 管理员编辑页的“关联外部销售”使用 `externalSalesUserId`，只列出启用的 SALES 账号。它更新工单 `submitterId`，同步销售访问范围及后续对账归属，不写入客户主数据 `customerPartyId`。仅 ADMIN 可更换 DRAFT / PENDING_FACTORY / REJECTED / SUBMITTED 的 EXTERNAL_SALES 工单；已有结算、发货、账单（含草稿）、客服业绩或重做关联时拒绝转移。非外部销售工单不得借此转换结算方向。空账号和无效账号拒绝；未更换的历史账号可保留。事务内锁定工单与目标账号并验证递增编辑版本，保留创建人、创建时角色、客户简称、配送及全部金额快照；日志记录前后账号名称与账号 ID。
+- `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；`customerPartyId` 只能选择活动客户（不变的历史关联可保留）。ADMIN 可修改范围内工单，SALES 仅可修改自己的工单；存在待审批申请时拒绝保存。
+- 管理员编辑页的“关联外部销售”使用 `externalSalesUserId`，只列出启用的 SALES 账号。它更新工单 `submitterId`，同步销售访问范围及后续对账归属，不写入客户主数据 `customerPartyId`。仅 ADMIN 可更换 DRAFT / PENDING_FACTORY / REJECTED / SUBMITTED 的 EXTERNAL_SALES 工单；已有结算、发货、账单（含草稿）或重做关联时拒绝转移。非外部销售工单不得借此转换结算方向。空账号和无效账号拒绝；未更换的历史账号可保留。事务内锁定工单与目标账号并验证递增编辑版本，保留创建人、创建时角色、客户简称、配送及全部金额快照；日志记录前后账号名称与账号 ID。
 - 完整编辑页用 `shipments` JSON 提交全部现有配送记录的 `id`、收件人、电话、地址、快递代码、`expectedDestinationProvince` 和 `sameDestination`。服务端校验记录集合与工单归属，拒绝新增、遗漏、重复和已发货记录的修改；外部销售需完整联系人。寄付地址变更必须明确确认原计费省份与条件未变；跨省、未核定或计费条件变化不能用普通编辑跳过物流核价。未带配送 JSON 的旧入口不能修改外部寄付地址。
 - 外部销售工单显式修改 `customName` 时不得清空，领域层按工单保存的 `settlementType` 校验，不能以操作者角色绕过；未传该字段的历史局部更新仍按原白名单执行。
 - `packageRequirement` / 外部创建命令 `packRaw` 保持既有字段契约，含义是选填的包装补充说明。保存该文字不变更包装组、分袋组成、实际袋数或入袋费用。
 - 联系信息保存只更新工单及对应配送联系人，不重建款式、分货、包装或历史价格。主地址同步、递增编辑版本与变更日志在同一事务中完成，过期版本拒绝覆盖。
-- `createOrderChangeRequestAction` 的 MODIFY 支持管理员及工单所有者（SALES / CUSTOMER_SERVICE），状态窗口由 `ORDER_MODIFIABLE_STATUSES` 统一定义，包含草稿、待工厂确认和已驳回。管理员新增的权限不开放 CANCEL 申请；取消继续沿用原有流程。申请人（包含管理员）只能撤回本人待审申请；待审批期间也禁止增删设计文件。
+- `createOrderChangeRequestAction` 的 MODIFY 支持管理员及工单所有者（SALES），状态窗口由 `ORDER_MODIFIABLE_STATUSES` 统一定义，包含草稿、待工厂确认和已驳回。管理员新增的权限不开放 CANCEL 申请；取消继续沿用原有流程。申请人（包含管理员）只能撤回本人待审申请；待审批期间也禁止增删设计文件。
 - 修改申请中的规格变更：非空白路线同时提交 `specification` 与 `targetProductId`；空白封只提交 `targetBlankIdentity`（纸张、克重、规格），不能同时携带旧产品选择字段。服务端重新解析当前身份与准入，不能只改文字沿用旧产品。原样复制模板也单独检查当前正价。
 - `previewOrderChangeRequestPricingAction` 接受 `requestId`、可选的 `expectedPriceRevision` 与 `pendingChargeResolutions`。人工物流决议只适用于本次预览实际待核的收费，需携带收费业务键、发货记录、预览数量、省份、金额和依据。
 - 批准修改须提交 `expectedPriceRevision`；涉及重新计价时，还须将预览返回的 `quoteToken` 作为 `expectedQuoteToken` 提交（`order-change-approval-v1:` 前缀）。服务端持有订单锁后重新核对报价、版本及人工收费内容，变化时拒绝写入并要求刷新预览。无需重新计价的修改不提交报价令牌；拒绝申请不依赖价格版本。
@@ -322,10 +322,10 @@ F47：同一文字编辑入口增加 `itemRemark`，最多1000字符，空字符
 
 F48：同一入口增加 `packagingName`，仅更新该工单所属包装组名称，允许清空；不改变 mode、actualBagCount、成员组成、入袋费或报价。款式文字及包装组文字可在非终态、无待审申请时直接保存；工单名称的确认后锁定保持不变。
 
-### 内部款式备注与客服配送补齐（2026-09-12）
+### 内部款式备注与配送补齐（2026-09-12；2026-09-24 删除客服角色后更新）
 
-- `editItemRemarkAction(orderId, itemId, previous, formData)`：要求 `order:create`；领域层仅允许管理员及该工单的客服创建者。接收 `expectedEditVersion` 与最长 1000 字的 `remark`，统一换行符为 LF，空白清空为 null；待审批和不可编辑状态拒绝。校验款式归属，事务内保存备注、推进编辑/业务版本并记审计；不改变金额、价格版本、纸质工单版本或生产数据。返回 `success`、带 `fieldErrors` 的 `invalid` 或业务 `error`。
-- `addOrderShipmentAction` 沿用既有预览凭证与四版本校验，新增允许客服对本人创建的工单调用；客服和销售均不可传人工物流费用。其他分货、物流登记、已结算和收费历史限制保持不变。
+- `editItemRemarkAction(orderId, itemId, previous, formData)`：要求 `order:create`；领域层仅允许管理员。接收 `expectedEditVersion` 与最长 1000 字的 `remark`，统一换行符为 LF，空白清空为 null；待审批和不可编辑状态拒绝。校验款式归属，事务内保存备注、推进编辑/业务版本并记审计；不改变金额、价格版本、纸质工单版本或生产数据。返回 `success`、带 `fieldErrors` 的 `invalid` 或业务 `error`。
+- `addOrderShipmentAction` 沿用既有预览凭证与四版本校验，销售可对本人工单调用；销售不可传人工物流费用。其他分货、物流登记、已结算和收费历史限制保持不变。
 - 共享修改申请表单支持既有款式 `pack`（每袋数量），只在领域允许的未生产阶段、且款式有唯一包装明细时提供输入。它仍经过修改申请、计价预检与管理员审批，不通过基础资料保存直接改包装或金额。
 
 ### 发布整改后的认证与表单契约（2026-09-11）
@@ -391,8 +391,8 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 - `previewOrderPricingReviewAction({ orderId, editAll: true })` 返回当前可编辑的加工单价、一次性费用、包装加工费、订单级收费及逐地址快递／耗材费；默认省略 `editAll` 时仍为原待核价流程。
 - `finalizeOrderPricingAction` 接受相同的 `editAll` 标志及原有版本、金额、依据字段。在同一工单锁与事务中校验价格／工单版本、待审批申请、金额精度、合计、资源归属，保存可信人工价格和价格修订。仅 ADMIN 可使用；外部销售不可通过构造参数越权。
 - 全项模式用于已提交至发货后的未结算收费工单；草稿／驳回待修改／作废／结算／归档不可用。管理员新建入口“创建并编辑收费”先执行原提交与上传校验，再进入收费编辑，避免提交重新报价覆盖人工价。
-- 工厂直接业务允许首次补录逐地址物流费用。顺丰到付快递费必须为零。内部销售保持既有物流计费边界和销售额差额记账。
-- 寄样仅快递＋包装耗材；打样仅一条整单总价。逐款制版通过现有制版明细维护，不能同时重复恢复已免收的汇总版费；附加收费、优惠继续使用现有商业明细接口，工厂直接业务可维护。已有经审批调整允许有符号金额，普通费用不能为负数。
+- 顺丰到付快递费必须为零。2026-09-24 起不再有工厂直单与内部销售工单，全项收费编辑只对外部销售收费工单开放。
+- 寄样仅快递＋包装耗材；打样仅一条整单总价。逐款制版通过现有制版明细维护，不能同时重复恢复已免收的汇总版费；附加收费、优惠继续使用现有商业明细接口。已有经审批调整允许有符号金额，普通费用不能为负数。
 
 ## 计件工价管理（2026-09-16）
 

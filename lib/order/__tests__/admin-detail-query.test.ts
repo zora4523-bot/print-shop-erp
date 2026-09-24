@@ -34,7 +34,7 @@ beforeEach(() => {
 });
 
 describe('admin order detail presentation query', () => {
-  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])('rejects %s before reading any commercial, address or production data', async (role) => {
+  it.each([Role.SALES, Role.WORKER])('rejects %s before reading any commercial, address or production data', async (role) => {
     await expect(getAdminOrderDetailPresentation({ id: 'other-user', role }, order)).rejects.toThrow('仅管理员');
     expect(workspaceMock).not.toHaveBeenCalled();
     expect(inlineMock).not.toHaveBeenCalled();

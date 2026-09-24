@@ -35,7 +35,7 @@ describe('canShowAdminDirectCancel（工单详情页入口）', () => {
     expect(canShowAdminDirectCancel(Role.ADMIN, OrderStatus.CONFIRMED)).toBe(false);
   });
 
-  it.each([Role.CUSTOMER_SERVICE, Role.SALES, Role.WORKER])(
+  it.each([Role.SALES, Role.WORKER])(
     '%s 在管理后台详情页不显示直接取消入口',
     (role) => {
       expect(canShowAdminDirectCancel(role, OrderStatus.SUBMITTED)).toBe(false);

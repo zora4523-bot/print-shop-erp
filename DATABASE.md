@@ -47,7 +47,7 @@ Schema 中的模型按以下业务域组织；字段、关系、索引和约束�
 | 生产与外协 | `ProductionTask`、`OutsourceOrder`、`OutsourceOrderItemSnapshot`、`OutsourcePayment` |
 | 定价 | `PriceTier`、`PriceAdjustment`、`CustomerPriceBook`、`CustomerPriceRule`、`OrderCustomerCharge` |
 | BOM、库存与采购 | `BillOfMaterial`、`Material`、`Warehouse`、`MaterialLocationStock`、`MaterialTransaction`、`InventoryCount`、`PurchaseOrder`、`PurchaseReceipt` |
-| 薪资与考勤 | `SalaryRule`、`WorkerMachineSalaryRule`、`DailyWorkerSalary`、`SalaryPeriod`、`CustomerServiceCommission`、`HourlyWorkerPayroll`、`Attendance` |
+| 薪资与考勤 | `SalaryRule`、`WorkerMachineSalaryRule`、`DailyWorkerSalary`、`HourlyWorkerPayroll`、`Attendance` |
 | 账单与成本 | `Bill`、`BillPayment`、`BillItem`、`OrderCostEntry` |
 | 通知与任务 | `NotificationChannel`、`NotificationRule`、`NotificationLog`、`BackgroundJob`、`BackgroundJobAttempt`、`BackgroundWorkerHeartbeat` |
 | 系统配置 | `Setting`、业务编号序列模型 |
@@ -95,11 +95,11 @@ Seed 不是通用发布后修复脚本。生产首次部署后的变更走 migra
 任一款计价不完整或金额/分货不守恒会整批回滚。它不修改已有价格历史、账号、已完成工单或正式 seed，
 已补齐工单也不会再次覆盖。备份用于核对原始资料；已有不可变报价不能通过删除快照回退，应保留测试审计记录。
 
-- [`seedDashboardSnapshot`](./tests/e2e/_helpers.ts) 每次运行生成独立的 `e2e-dash-<runId>` 命名空间，只追加本轮测试所需的数据。销售与客服 fixture 从角色匹配的 `e2e-*` 来源账号创建独立、停用的用户；不能借此克隆真实账号或产生可登录的新账号。
+- [`seedDashboardSnapshot`](./tests/e2e/_helpers.ts) 每次运行生成独立的 `e2e-dash-<runId>` 命名空间，只追加本轮测试所需的数据。销售 fixture 从角色匹配的 `e2e-*` 来源账号创建独立、停用的用户；不能借此克隆真实账号或产生可登录的新账号。
 - 工作台 fixture 的用户、工单、账单、外协、周期和可选图表数据在同一事务中写入；任一步失败则整体回滚。重试创建新的命名空间，不删除或重写既有工单、账本、工资支付、价格快照或共享账号的历史记录。
 - 测试应在完整关注列表中按本轮返回的记录 ID 查找，必要时翻页；不能为了使待办总数或第一屏顺序固定而清空历史数据。追加的数据随专用、可丢弃测试数据库的生命周期管理，不把该 helper 当作共享开发库的数据清理工具。
-- [`worker-ui-fixture.ts`](./tests/visual/worker-ui-fixture.ts) 为每个视口命名空间创建独立、停用的客服用户，避免争用同一客服只能有一个进行中周期的约束。客服展示周期使用 `2098-01-01` 至 `2098-04-30`，工单展示交期使用 `2099-12-31`，使展示 fixture 不进入当前临近结算、过期结算或交期提醒窗口。
-- 响应式 fixture 的工资日期也放在 2098 年。客服展示业绩使用期初金额，不伪造业绩事件账本；重建时只按该命名空间的明确 ID 清理自有数据，不按共享用户或全表删除。若自有记录出现新的账本引用，应检查引用与测试生命周期，不绕过外键约束。
+- [`worker-ui-fixture.ts`](./tests/visual/worker-ui-fixture.ts) 的工单展示交期使用 `2099-12-31`，使展示 fixture 不进入当前交期提醒窗口。
+- 响应式 fixture 的工资日期也放在 2098 年。重建时只按该命名空间的明确 ID 清理自有数据，不按共享用户或全表删除。若自有记录出现新的账本引用，应检查引用与测试生命周期，不绕过外键约束。
 
 工作台追加隔离与事务失败回滚由
 [`dashboard-fixture-isolation.test.ts`](./tests/regression/dashboard-fixture-isolation.test.ts)

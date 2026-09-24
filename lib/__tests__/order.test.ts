@@ -2771,16 +2771,16 @@ describe('cancelOrder', () => {
     expect(remarks).toEqual(['取消：清理草稿']);
   });
 
-  describe('SUBMITTED（内部/直营单待资料或核价，尚未进入已确认生产合同）', () => {
+  describe('SUBMITTED（免费重做单待资料，尚未进入已确认生产合同）', () => {
     function submittedInternalOrder() {
       return {
         id: 'o1',
         status: OrderStatus.SUBMITTED,
-        submitterId: 'cs-1',
-        submitterRole: Role.CUSTOMER_SERVICE,
-        settlementType: OrderSettlementType.INTERNAL_SALES,
-        billingMode: 'CHARGE',
-        totalAmount: '3200.50',
+        submitterId: 'admin-rework',
+        submitterRole: Role.ADMIN,
+        settlementType: OrderSettlementType.NO_CHARGE,
+        billingMode: 'NO_CHARGE',
+        totalAmount: '0.00',
         revision: 2,
         editVersion: 1,
       };
@@ -2796,11 +2796,11 @@ describe('cancelOrder', () => {
       expect(dbMock.order.update).not.toHaveBeenCalled();
     });
 
-    it('客服仍不能直接取消（权限口径不变，只放开状态）', async () => {
+    it('销售不能直接取消他人的工单（权限口径不变，只放开状态）', async () => {
       dbMock.order.findUnique.mockResolvedValue(submittedInternalOrder());
 
       await expect(
-        cancelOrder('o1', { id: 'cs-1', role: Role.CUSTOMER_SERVICE }, '客户放弃'),
+        cancelOrder('o1', { id: 'sales-1', role: Role.SALES }, '客户放弃'),
       ).rejects.toThrow(/只能取消自己创建的工单/);
       expect(dbMock.order.update).not.toHaveBeenCalled();
     });
@@ -2828,7 +2828,7 @@ describe('shipOrder', () => {
       status: OrderStatus.COMPLETED,
       submitterId: 'sales-1',
       orderNo: 'O-1',
-      settlementType: OrderSettlementType.INTERNAL_SALES,
+      settlementType: OrderSettlementType.NO_CHARGE,
       pricingStatus: 'AUTO_CONFIRMED',
       ...shipOrderVersionSnapshot,
       ...overrides,
@@ -2989,8 +2989,6 @@ describe('shipOrder', () => {
 
   it.each([
     OrderSettlementType.EXTERNAL_SALES,
-    OrderSettlementType.INTERNAL_SALES,
-    OrderSettlementType.FACTORY_DIRECT,
     OrderSettlementType.NO_CHARGE,
   ])('blocks %s shipping when the authoritative shipment set is empty', async (settlementType) => {
     dbMock.order.findUnique.mockResolvedValue(
@@ -3091,7 +3089,7 @@ describe('shipOrder', () => {
       id: 'o1',
       status: OrderStatus.COMPLETED,
       submitterId: 'sales-1',
-      settlementType: OrderSettlementType.INTERNAL_SALES,
+      settlementType: OrderSettlementType.NO_CHARGE,
       pricingStatus: 'AUTO_CONFIRMED',
       revision: 4,
       editVersion: 9,
@@ -3121,7 +3119,7 @@ describe('shipOrder', () => {
       status: OrderStatus.COMPLETED,
       submitterId: 'sales-1',
       orderNo: 'O-1',
-      settlementType: OrderSettlementType.INTERNAL_SALES,
+      settlementType: OrderSettlementType.NO_CHARGE,
       pricingStatus: 'AUTO_CONFIRMED',
       ...shipOrderVersionSnapshot,
     };
@@ -4409,14 +4407,12 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       await expect(updateOrderFields('order-1', editInput({ externalSalesUserId: 'sales-2' }), { id: 'sales-1', role })).rejects.toThrow('只有管理员');
       expect(dbMock.order.updateMany).not.toHaveBeenCalled();
     });
-    it.each([null, { ...target, role: Role.ADMIN, isActive: true }, { ...target, role: Role.CUSTOMER_SERVICE, isActive: true }, { ...target, role: Role.SALES, isActive: false }])('rejects inactive, absent or non-sales target %j', async (account) => {
+    it.each([null, { ...target, role: Role.ADMIN, isActive: true }, { ...target, role: Role.WORKER, isActive: true }, { ...target, role: Role.SALES, isActive: false }])('rejects inactive, absent or non-sales target %j', async (account) => {
       dbMock.user.findUnique.mockResolvedValue(account);
       await expect(updateOrderFields('order-1', editInput({ externalSalesUserId: 'sales-2' }), ownerActor)).rejects.toThrow('所选账号');
       expect(dbMock.order.updateMany).not.toHaveBeenCalled();
     });
     it.each([
-      { settlementType: OrderSettlementType.INTERNAL_SALES },
-      { settlementType: OrderSettlementType.FACTORY_DIRECT },
       { settlementType: OrderSettlementType.NO_CHARGE },
       { status: OrderStatus.CONFIRMED },
       { settledAt: new Date() }, { settledFee: new Decimal(0) }, { shippedAt: new Date() },
@@ -4443,7 +4439,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       expect(dbMock.order.updateMany).not.toHaveBeenCalled();
     });
     it('does not allow direct submitter or settlement fields through the general whitelist', async () => {
-      const result = await updateOrderFields('order-1', editInput({ submitterId: 'sales-2', settlementType: 'INTERNAL_SALES', createdById: 'sales-2' }), ownerActor);
+      const result = await updateOrderFields('order-1', editInput({ submitterId: 'sales-2', settlementType: 'NO_CHARGE', createdById: 'sales-2' }), ownerActor);
       expect(result.changed).toBe(false);
       expect(dbMock.order.updateMany).not.toHaveBeenCalled();
     });
@@ -4487,7 +4483,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
   });
 
   it('allows an optional internal name and saves packaging notes without changing bag or price facts', async () => {
-    dbMock.order.findFirst.mockResolvedValue(snapshot({ settlementType: OrderSettlementType.INTERNAL_SALES, customName: '原工单' }));
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ settlementType: OrderSettlementType.NO_CHARGE, customName: '原工单' }));
     await updateOrderFields('order-1', editInput({ customName: null, packageRequirement: '贴客户标签' }), ownerActor);
     expect(dbMock.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { customName: null, packageRequirement: '贴客户标签' } }));
   });
@@ -5029,7 +5025,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     status: OrderStatus,
     isSfCollect = false,
     submitterId = 'sales-1',
-    settlementType: OrderSettlementType = OrderSettlementType.INTERNAL_SALES,
+    settlementType: OrderSettlementType = OrderSettlementType.NO_CHARGE,
   ) {
     return {
       id: 'order-1',
@@ -5804,7 +5800,7 @@ describe('admin creates for an external salesperson', () => {
     ).rejects.toThrow('当前账号不能创建工单');
     expect(dbMock.$transaction).not.toHaveBeenCalled();
   });
-  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])(
+  it.each([Role.SALES, Role.WORKER])(
     'rejects assignment by %s before writing',
     async (role) => {
       await expect(

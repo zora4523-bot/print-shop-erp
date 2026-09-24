@@ -26,7 +26,6 @@ datasource db {
 enum Role {
   ADMIN
   SALES
-  CUSTOMER_SERVICE
   WORKER
 }
 
@@ -76,8 +75,6 @@ model User {
   createdOrders               Order[]                       @relation("OrderCreator")
   assignedTasks               ProductionTask[]
   orderLogs                   OrderLog[]
-  salaryPeriods               SalaryPeriod[]
-  csCommissions               CustomerServiceCommission[]
   dailyWorkerSalaries         DailyWorkerSalary[]
   hourlyPayrolls              HourlyWorkerPayroll[]
   attendanceRecords           Attendance[]                  @relation("AttendanceWorker")
@@ -98,12 +95,10 @@ model User {
   requestedOrderChanges       OrderChangeRequest[]          @relation("OrderChangeRequester")
   reviewedOrderChanges        OrderChangeRequest[]          @relation("OrderChangeReviewer")
   recordedBillPayments        BillPayment[]                 @relation("BillPaymentRecorder")
-  recordedCsPayrollPayments   CsPayrollPayment[]            @relation("CsPayrollPaymentRecorder")
   createdOrderCosts           OrderCostEntry[]              @relation("OrderCostCreator")
   createdOutsourceOrders      OutsourceOrder[]              @relation("OutsourceOrderCreator")
   outsourceAmountChanges      OutsourceAmountChange[]       @relation("OutsourceAmountChanger")
   recordedOutsourcePayments   OutsourcePayment[]            @relation("OutsourcePaymentRecorder")
-  csSalesEntries              CsSalesEntry[]
   createdCustomerCharges      OrderCustomerCharge[]         @relation("OrderCustomerChargeCreator")
   finalizedCustomerCharges    OrderCustomerCharge[]         @relation("OrderCustomerChargeFinalizer")
   createdPlateDetails         OrderItemPlateDetail[]        @relation("OrderItemPlateDetailCreator")
@@ -275,11 +270,11 @@ enum OrderBillingMode {
 }
 
 // 工单的结算路径在创建时锁定，不随账号后续改岗而改变。
-// Role 只负责权限；资金方向由本字段表达。
+// Role 只负责权限；资金方向由本字段表达。业主 2026-09-24：所有收费业务都以
+// 外部销售身份开展（管理员代建也必须归属一个外部销售），不再有内部销售 /
+// 工厂直单；免费重做仍为 NO_CHARGE。
 enum OrderSettlementType {
   EXTERNAL_SALES // 外部销售应付工厂加工费
-  INTERNAL_SALES // 工厂内部销售/客服业绩归属
-  FACTORY_DIRECT // 管理员代录/工厂直接业务
   NO_CHARGE // 免费重做等不产生应收的工单
 }
 
@@ -482,7 +477,6 @@ model Order {
   changeRequests              OrderChangeRequest[]
   costEntries                 OrderCostEntry[]
   customerCharges             OrderCustomerCharge[]
-  csSalesEntries              CsSalesEntry[]
   pricingRevisions            OrderPricingRevision[]        @relation("OrderPricingRevisions")
   quotedPricingRevision       OrderPricingRevision?         @relation("OrderQuotedPricingRevision", fields: [quotedPricingRevisionId], references: [id], onDelete: Restrict)
   productionOperations        ProductionOperation[]
@@ -2239,7 +2233,6 @@ model PurchaseReceiptItem {
 // ============================================================
 
 enum SalaryRuleType {
-  CS_COMMISSION
   WORKER_MACHINE
   WORKER_HOURLY
 }
@@ -2383,121 +2376,6 @@ model SalaryAdjustment {
 
   @@index([dailySalaryId, createdAt])
   @@index([createdById])
-}
-
-// 客服业绩周期
-enum SalaryPeriodStatus {
-  IN_PROGRESS
-  SETTLED
-}
-
-model SalaryPeriod {
-  id             String             @id @default(cuid())
-  csUserId       String
-  periodStart    DateTime           @db.Date
-  periodEnd      DateTime           @db.Date
-  durationMonths Int                @default(4)
-  totalSales     Decimal            @default(0) @db.Decimal(12, 2)
-  initialSales   Decimal            @default(0) @db.Decimal(12, 2) // 导入的期初业绩
-  monthlyBase    Decimal            @db.Decimal(10, 2)
-  status         SalaryPeriodStatus @default(IN_PROGRESS)
-  settledAt      DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-
-  csUser          User                        @relation(fields: [csUserId], references: [id])
-  commissions     CustomerServiceCommission[]
-  salesEntries    CsSalesEntry[]
-  payrollPayments CsPayrollPayment[]
-
-  @@index([csUserId])
-  @@index([status])
-  @@index([periodEnd])
-}
-
-enum CsSalesEntryType {
-  ORDER_SUBMITTED
-  ORDER_CHANGED
-  ORDER_CANCELLED
-  MANUAL_ADJUSTMENT
-}
-
-model CsSalesEntry {
-  id             String           @id @default(cuid())
-  eventKey       String           @unique
-  csUserId       String
-  salaryPeriodId String
-  orderId        String?
-  orderRevision  Int?
-  type           CsSalesEntryType
-  amount         Decimal          @db.Decimal(12, 2)
-  occurredAt     DateTime
-  remark         String?
-  createdAt      DateTime         @default(now())
-
-  csUser       User         @relation(fields: [csUserId], references: [id], onDelete: Restrict)
-  salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id], onDelete: Restrict)
-  order        Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
-
-  @@index([csUserId, createdAt])
-  @@index([salaryPeriodId, createdAt])
-  @@index([orderId])
-  @@index([occurredAt])
-}
-
-// 客服提成记录
-model CustomerServiceCommission {
-  id                 String    @id @default(cuid())
-  csUserId           String
-  salaryPeriodId     String    @unique
-  totalSales         Decimal   @db.Decimal(12, 2)
-  tierRate           Decimal   @db.Decimal(6, 4)
-  commissionAmount   Decimal   @db.Decimal(12, 2)
-  monthlyBaseTotal   Decimal   @db.Decimal(12, 2)
-  totalIncome        Decimal   @db.Decimal(13, 2)
-  paidBase           Decimal   @default(0) @db.Decimal(12, 2)
-  paidCommission     Decimal   @default(0) @db.Decimal(12, 2)
-  isFullyPaid        Boolean   @default(false)
-  settledAt          DateTime
-  paidAt             DateTime?
-  // Full rule snapshot at settlement time: CS_TIERS (including mode),
-  // CS_BASE_SALARY, CS_PERIOD_LENGTH. Enough to reproduce WHY this
-  // specific tierRate was picked even after the tier table is edited
-  // (CLAUDE.md §4.4 rule-snapshot bedrock).
-  salaryRuleSnapshot Json?
-  createdAt          DateTime  @default(now())
-
-  csUser       User         @relation(fields: [csUserId], references: [id])
-  salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id])
-
-  @@index([csUserId])
-  @@index([settledAt])
-  // 总览的「已结算周期剩余未发」按 isFullyPaid 全表聚合。settledAt 作
-  // 第二列，让「未发且最近结算优先」不必再建一棵索引。
-  @@index([isFullyPaid, settledAt])
-}
-
-// 客服工资发放流水。底薪可在四个月周期进行中按月发放；提成只能在周期
-// 结算、金额锁定后发放。CustomerServiceCommission.paidBase / paidCommission
-// 是便于查询的累计快照，本表才是不可覆盖的财务事实。
-model CsPayrollPayment {
-  id               String   @id @default(cuid())
-  idempotencyKey   String   @unique
-  salaryPeriodId   String
-  baseAmount       Decimal  @default(0) @db.Decimal(12, 2)
-  commissionAmount Decimal  @default(0) @db.Decimal(12, 2)
-  paidAt           DateTime
-  paymentMethod    String?
-  referenceNo      String?
-  remark           String?
-  recordedById     String
-  createdAt        DateTime @default(now())
-
-  salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id], onDelete: Restrict)
-  recordedBy   User         @relation("CsPayrollPaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
-
-  @@index([salaryPeriodId, paidAt])
-  @@index([recordedById, createdAt])
 }
 
 // 历史打包时薪月结存档（只读）：打包已切换工序计件，不再生成新月结。

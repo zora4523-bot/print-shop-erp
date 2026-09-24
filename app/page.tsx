@@ -13,7 +13,6 @@ import { getSession } from '@/lib/auth/session';
 const ROLE_LANDING: Record<Role, string> = {
   ADMIN: '/owner',
   SALES: '/orders',
-  CUSTOMER_SERVICE: '/orders',
   WORKER: '/worker/tasks',
 };
 

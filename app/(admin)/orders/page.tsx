@@ -8,7 +8,6 @@ import { ErrorBoundary, PageHeader } from '@/components/ui-business';
 import { OrdersListContent } from './_components/OrdersListContent';
 import {
   AdminOrdersWorkspaceSkeleton,
-  OrdersListContentSkeleton,
   SalesOrdersListContentSkeleton,
 } from './_components/OrdersListContentSkeleton';
 
@@ -46,10 +45,8 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
           fallback={
             user.role === Role.ADMIN ? (
               <AdminOrdersWorkspaceSkeleton />
-            ) : user.role === Role.SALES ? (
-              <SalesOrdersListContentSkeleton />
             ) : (
-              <OrdersListContentSkeleton />
+              <SalesOrdersListContentSkeleton />
             )
           }
         >

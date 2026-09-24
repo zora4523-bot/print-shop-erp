@@ -92,7 +92,7 @@ export async function getProductionTrend(
 export type SalesRankingRow = {
   userId: string;
   displayName: string;
-  role: Role; // SALES / CUSTOMER_SERVICE 才会现身（按角色着色）
+  role: Role; // 通常是 SALES；历史管理员工单按 ADMIN 着色
   totalAmount: string; // ¥
   orderCount: number;
 };

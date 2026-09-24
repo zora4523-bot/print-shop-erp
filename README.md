@@ -94,7 +94,7 @@ pnpm dev
    - 产品基础管理
 
 3. **工单核心**（2周）
-   - 销售/客服：创建工单、多款式、双面双色、工艺多选
+   - 销售（管理员可代建并必须选择外部销售）：创建工单、多款式、双面双色、工艺多选
    - 上传JPG设计图 + CDR源文件（OSS）
    - 工单列表、详情、修改（按状态限制）
    - 服务端稳定分页、逐项筛选、管理员异步多表 XLSX 导出
@@ -110,7 +110,6 @@ pnpm dev
 5. **薪资系统（核心难点）**（2周）
    - 三套薪资规则配置界面
    - 开机师傅日薪计算（调度时间以 `deploy/crontab.example` 为准）
-   - 客服业绩周期累计 + 结算
    - 员工考勤录入
 
 6. **应收账单**（3天）
@@ -163,7 +162,6 @@ pnpm dev
 - [ ] 销售能在手机上10秒内录完一张简单工单
 - [ ] 师傅能在30秒内完成扫码报工
 - [ ] 管理员能30秒内汇总当日CDR并拿到分享链接
-- [ ] 客服能实时看到自己当前周期的业绩和距离下一档的差额
 - [ ] 管理员能在Dashboard上一眼看到今日工单、产量、待发货
 - [ ] 急单提交后企业微信群3秒内收到推送
 
@@ -377,7 +375,7 @@ fc-list :lang=zh | head
 - [ ] `chromium --version`、`fc-list :lang=zh`，并按部署指南用 `/usr/bin/chromium` 真生成一份中文 PDF
 - [ ] `CI=true NODE_ENV=production NOTIFICATION_MOCK_MODE=false BACKGROUND_JOBS_MODE=durable PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn pnpm deploy:smoke --skip-build --require-base-url`
 - [ ] 管理员登录 `/owner/accounts` 改默认密码
-- [ ] 销售 / 客服 / 师傅各创一个测试账号
+- [ ] 销售 / 师傅各创一个测试账号
 - [ ] 跑通 工单创建 → 工厂确认 → 下发（`CONFIRMED → RELEASED`）→ 报工 → 生产完成 → 发货一条链
 - [ ] 触发一次 `/api/cron/daily-salary` 验证 shared-secret + 入库
 - [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成

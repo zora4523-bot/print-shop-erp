@@ -116,7 +116,7 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
   [`lib/auth/permissions-dict.ts`](./lib/auth/permissions-dict.ts)。
 - Server Actions 使用 `requirePermission`；被 `auth(handler)` 包装的 Route Handler 使用 `requireSessionPermission`。
 - 所有者范围、工单范围和师傅任务范围在领域查询中继续收窄，不能因角色通过粗粒度权限就跳过资源级检查。
-- 生产打印使用 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 的独立范围，网页正文、标题与同步/后台 PDF 共用。ADMIN 查看全部，CUSTOMER_SERVICE 限本人提交，SALES 拒绝；WORKER 按当前账号固定报工岗位匹配当前版本未取消工序，或访问当前版本公共进度工序，排除 `SUBMITTED`。查询复核账号启用状态与角色，不以旧派工关系授权；后台生成后及下载前再次复核范围与生产版本。
+- 生产打印使用 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 的独立范围，网页正文、标题与同步/后台 PDF 共用。ADMIN 查看全部，SALES 拒绝；WORKER 按当前账号固定报工岗位匹配当前版本未取消工序，或访问当前版本公共进度工序，排除 `SUBMITTED`。查询复核账号启用状态与角色，不以旧派工关系授权；后台生成后及下载前再次复核范围与生产版本。
 - cron 使用 `CRON_SECRET`；CDR 外协下载使用不可猜测且限时的 bundle id，不依赖登录 session。
 
 ## 数据与一致性

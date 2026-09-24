@@ -16,7 +16,7 @@ beforeEach(() => {
 });
 
 describe('admin external sales account options', () => {
-  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])('does not query accounts for %s', async (role) => {
+  it.each([Role.SALES, Role.WORKER])('does not query accounts for %s', async (role) => {
     expect(await getOrderExternalSalesAssociation('order-1', { role })).toBeUndefined();
     expect(order).not.toHaveBeenCalled();
     expect(users).not.toHaveBeenCalled();

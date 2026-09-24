@@ -71,7 +71,7 @@ function rawOrderInserts(): RawOrderInsert[] {
 }
 
 describe('raw Order INSERT settlement contract', () => {
-  it('makes every non-migration raw insert declare a role-correct settlement direction', () => {
+  it('makes every non-migration raw insert declare the external-sales or free settlement direction', () => {
     const inserts = rawOrderInserts();
     // Keep a floor so a broken scanner cannot make the contract pass on an
     // empty/partial corpus. New fixtures and operational seed scripts may add
@@ -98,21 +98,22 @@ describe('raw Order INSERT settlement contract', () => {
           `'NO_CHARGE'::"OrderSettlementType"`,
         );
       } else {
+        // 业主 2026-09-24：收费工单只剩“外部销售提交、按外部销售结算”。
         if (insert.statement.includes(`'SALES'::"Role"`)) {
           expect(insert.statement, `${location} SALES settlement`).toContain(
             `'EXTERNAL_SALES'::"OrderSettlementType"`,
           );
         }
-        if (insert.statement.includes(`'CUSTOMER_SERVICE'::"Role"`)) {
+        for (const removed of [
+          `'CUSTOMER_SERVICE'::"Role"`,
+          `'ADMIN'::"Role"`,
+          `'INTERNAL_SALES'::"OrderSettlementType"`,
+          `'FACTORY_DIRECT'::"OrderSettlementType"`,
+        ]) {
           expect(
             insert.statement,
-            `${location} CUSTOMER_SERVICE settlement`,
-          ).toContain(`'INTERNAL_SALES'::"OrderSettlementType"`);
-        }
-        if (insert.statement.includes(`'ADMIN'::"Role"`)) {
-          expect(insert.statement, `${location} ADMIN settlement`).toContain(
-            `'FACTORY_DIRECT'::"OrderSettlementType"`,
-          );
+            `${location} chargeable orders must not use ${removed}`,
+          ).not.toContain(removed);
         }
       }
     }

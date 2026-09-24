@@ -163,18 +163,11 @@ describe.skip('legacy generateBillsForPeriod implementation', () => {
         totalAmount: '1200.00',
       }),
       billableOrder({
-        id: 'internal-sales-order',
-        submitterId: 'cs-a',
-        submitterRole: Role.CUSTOMER_SERVICE,
-        settlementType: OrderSettlementType.INTERNAL_SALES,
-        totalAmount: '800.00',
-      }),
-      billableOrder({
-        id: 'admin-order',
+        id: 'free-rework-order',
         submitterId: 'admin-a',
         submitterRole: Role.ADMIN,
-        settlementType: OrderSettlementType.FACTORY_DIRECT,
-        totalAmount: '500.00',
+        settlementType: OrderSettlementType.NO_CHARGE,
+        totalAmount: '0.00',
       }),
     ];
     dbMock.order.findMany.mockImplementation(
@@ -236,7 +229,7 @@ describe.skip('legacy generateBillsForPeriod implementation', () => {
       id: 'role-only-sales-order',
       submitterId: 'sales-a',
       submitterRole: Role.SALES,
-      settlementType: OrderSettlementType.INTERNAL_SALES,
+      settlementType: OrderSettlementType.NO_CHARGE,
       totalAmount: '999.00',
     });
     dbMock.order.findMany.mockImplementation(
@@ -972,7 +965,7 @@ describe.skip('legacy recordPayment implementation', () => {
 
   it('stores payment method, reference number, remark and injected paidAt', async () => {
     dbMock.bill.findUnique.mockResolvedValue(
-      billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
+      billFixture({ salesUserRole: Role.SALES }),
     );
     dbMock.bill.update.mockResolvedValue({});
     const paidAt = new Date('2026-06-08T02:30:00Z');
@@ -997,7 +990,7 @@ describe.skip('legacy recordPayment implementation', () => {
 
   it('payment ledger and bill balance share one transaction', async () => {
     dbMock.bill.findUnique.mockResolvedValue(
-      billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
+      billFixture({ salesUserRole: Role.SALES }),
     );
     dbMock.bill.update.mockResolvedValue({});
     await recordPayment('bill-1', 500, ownerActor);

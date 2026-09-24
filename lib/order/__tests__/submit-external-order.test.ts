@@ -1208,57 +1208,6 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.orderItem.update).not.toHaveBeenCalled();
   });
 
-  it('内销空白封不能通过配置外说明绕过纸张规格准入', async () => {
-    const order = draftOrder({
-      settlementType: OrderSettlementType.INTERNAL_SALES,
-      items: [
-        item({
-          productId: null,
-          product: null,
-          paperType: null,
-          paperWeightGsm: null,
-          specification: null,
-          crafts: [],
-          manualQuoteReason: '客供纸与特殊工艺',
-        }),
-      ],
-      packagingGroups: [
-        {
-          id: 'pack-1',
-          sequence: 1,
-          name: '单款',
-          mode: OrderPackagingMode.SINGLE_STYLE,
-          actualBagCount: 125,
-          lines: [{ orderItemId: 'item-1', unitsPerBag: 8 }],
-        },
-      ],
-      shipments: [
-        {
-          id: 'shipment-1',
-          sequence: 1,
-          receiverName: '收件人',
-          receiverPhone: null,
-          destinationProvince: '上海',
-          weightKg: null,
-          lines: [{ orderItemId: 'item-1', quantity: 1_000 }],
-        },
-      ],
-    });
-    const tx = txFor(order, []);
-    const outcome = await finalizeExternalOrderQuoteInTx(
-      tx as unknown as Prisma.TransactionClient,
-      'order-1',
-      'cs-1',
-      NOW,
-    ).catch((error: unknown) => error);
-    if (outcome instanceof Error) {
-      expect(outcome.message).toMatch(/空白封纸张、克重和标准规格/);
-    }
-    expect(outcome).toBeInstanceOf(Error);
-    expect(tx.orderItem.update).not.toHaveBeenCalled();
-    expect(mocks.readPublishedSnapshot).toHaveBeenCalled();
-  });
-
   it('纸张缺货时在读价目前拒绝提交', async () => {
     const order = draftOrder({
       items: [

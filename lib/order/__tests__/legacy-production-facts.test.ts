@@ -17,8 +17,8 @@ function fixture() {
   return {
     id: 'order-1', revision: 2, priceRevision: 3, status: OrderStatus.SUBMITTED as OrderStatus,
     packageRequirement: '单款装', packagingAmount: new Decimal('0'), processingAmount: new Decimal('10'), totalAmount: new Decimal('10'),
-    pricingStatus: 'ADMIN_CONFIRMED', settlementType: 'INTERNAL_SALES', confirmedFee: new Decimal('10'),
-    settledAt: null, settledFee: null, receiverAddress: '广东省测试地址', receiverPhone: null,
+    pricingStatus: 'ADMIN_CONFIRMED', settlementType: 'EXTERNAL_SALES', confirmedFee: new Decimal('10'),
+    settledAt: null, settledFee: null, receiverAddress: '广东省测试地址', receiverPhone: '13800000000',
     _count: { changeRequests: 0 }, customerCharges: [], shipments: [],
     items: [{ orderId: 'order-1', productId: null, pricingRoute: 'MANUAL_QUOTE', productStructure: 'STANDARD_ENVELOPE', plateGroupId: null, pricingGroup: null, specification: null, actualWidthMm: null, actualHeightMm: null, paperType: null, paperWeightGsm: null, foilColors: ['哑金'], foilTechnique: 'FLAT', lamination: 'NONE', printColors: [], printColorsKnown: true, isDoubleSided: false, isDoubleColor: false, unitPrice: new Decimal('0'), fixedFee: new Decimal('10'), priceOverrideReason: null, id: 'item-1', sequence: 1, name: '红包', craft: null as OrderCraft | null, pack: 10 as number | null, quantity: 101,
       frontFoilColors: ['哑金'], backFoilColors: [], hasLocalFoil: true, crafts: [], subtotal: new Decimal('10'), pricingSnapshot: {} as Record<string, unknown>, quoteDisposition: 'PRICED', manualQuoteReason: null }],

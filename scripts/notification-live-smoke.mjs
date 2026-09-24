@@ -158,8 +158,8 @@ async function run() {
   const actor = await database.user.create({ data: { username: `notify-smoke-${batch}`,
     password: 'disabled-test-account', role: 'ADMIN', displayName: '通知验收测试员', isActive: false } });
   const order = await database.order.create({ data: { orderNo: `TEST-NOTIFY-${batch}`,
-    submitterId: actor.id, createdById: actor.id, submitterRole: 'ADMIN',
-    settlementType: 'FACTORY_DIRECT', status: 'PACKING', completedAt: new Date(), workOrderVersion: 1 } });
+    submitterId: actor.id, createdById: actor.id, submitterRole: 'SALES',
+    settlementType: 'EXTERNAL_SALES', status: 'PACKING', completedAt: new Date(), workOrderVersion: 1 } });
   const payloads = Object.fromEntries(events.map((event) => [event, syntheticPayload(event, order)]));
   for (const event of events) {
     const message = renderTemplate(sourceRules.get(event).messageTemplate, sanitizeNotificationPayload(event, payloads[event]));

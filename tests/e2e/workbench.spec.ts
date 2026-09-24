@@ -3,7 +3,7 @@ import { login, E2E_USERS, E2E_PASSWORD } from './_helpers';
 
 async function openWorkbench(
   page: Page,
-  role: 'sales' | 'owner' | 'customerService' = 'sales',
+  role: 'sales' | 'owner' = 'sales',
 ) {
   await login(page, {
     from: '/workbench',
@@ -460,7 +460,7 @@ test.describe('shared workbench calculator', () => {
       fullPage: true,
     });
   });
-  for (const role of ['owner', 'customerService'] as const)
+  for (const role of ['owner'] as const)
     test(`${role} can calculate without impersonating an external sales account`, async ({
       page,
     }) => {

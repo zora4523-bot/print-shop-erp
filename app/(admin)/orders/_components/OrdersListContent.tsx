@@ -1,21 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { Suspense } from 'react';
+import { notFound } from 'next/navigation';
 import { Role } from '@/generated/prisma/enums';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { OrderExportControls } from '@/components/business/order/OrderExportControls';
-import { OrderListFilters } from '@/components/business/order/OrderListFilters';
 import { SalesOrderListFilters } from '@/components/business/order/SalesOrderListFilters';
 import { SalesOrdersList } from '@/components/business/order/SalesOrdersList';
-import { OrdersTable } from '@/components/business/order/OrdersTable';
 import { AdminOrderWorkspace } from '@/components/business/order/AdminOrderWorkspace';
 import { OrderListScrollState } from '@/components/business/order/OrderListNavigationState';
 import { ErrorBoundary } from '@/components/ui-business';
 import {
-  getOrderListPageWindow,
   getOrderListFilterOptions,
-  listOrdersPage,
   parseOrderListQuery,
-  sanitizeOrderListQueryForActor,
   serializeOrderListQuery,
   type OrderListSearchParams,
 } from '@/lib/order/list-query';
@@ -33,23 +29,13 @@ import {
   listSalesOrdersPage,
   sanitizeSalesOrderListQuery,
 } from '@/lib/order/sales-list-query';
+import { listRecentOrderExports } from '@/lib/order/export';
 import {
-  listRecentOrderExports,
-  orderExportParamsFromQuery,
-} from '@/lib/order/export';
-import {
-  OrderExportControlsSkeleton,
-  OrdersListFiltersSkeleton,
-  OrdersListTableSkeleton,
   SalesOrdersFiltersSkeleton,
   SalesOrdersListSkeleton,
 } from './OrdersListContentSkeleton';
 
 type OrdersActor = { id: string; role: Role };
-type OrdersPagePromise = ReturnType<typeof listOrdersPage>;
-type OrderListPageWindowPromise = ReturnType<typeof getOrderListPageWindow>;
-type FilterOptionsPromise = ReturnType<typeof getOrderListFilterOptions>;
-type RecentExportsPromise = ReturnType<typeof listRecentOrderExports>;
 type SalesOrdersPagePromise = ReturnType<typeof listSalesOrdersPage>;
 type SalesOrderListSummaryPromise = ReturnType<
   typeof getSalesOrderListSummary
@@ -98,58 +84,8 @@ export async function OrdersListContent({
       />
     );
   }
-  const query = sanitizeOrderListQueryForActor(actor, parsed.query);
-  // count + pagination 和行数据分开：筛选区只等待窗口与选项，
-  // 行查询失败时不会连带替换已可用的筛选控件。列表复用同一窗口
-  // Promise，因此 count 仍只执行一次。
-  const orderListPageWindowPromise = getOrderListPageWindow(actor, query);
-  const orderPagePromise = listOrdersPage(
-    actor,
-    query,
-    orderListPageWindowPromise,
-  );
-  const filterOptionsPromise = loadOrderListFilterOptions(actor);
-  const recentExportsPromise: RecentExportsPromise = Promise.resolve([]);
-  const advancedRequested = rawValueIncludes(rawSearchParams.advanced, '1');
-
-  return (
-    <>
-      <OrderListScrollState
-        selectedOrderId={query.selectedOrderId}
-        scrollY={query.scrollY}
-      />
-      <ErrorBoundary
-        scope="section"
-        title="工单筛选暂时无法加载"
-        description="页头和工单列表仍可继续使用；请重试筛选区域。"
-      >
-        <Suspense fallback={<OrdersListFiltersSkeleton />}>
-          <OrdersListFiltersSection
-            query={query}
-            issues={parsed.issues}
-            advancedRequested={advancedRequested}
-            actor={actor}
-            orderListPageWindowPromise={orderListPageWindowPromise}
-            filterOptionsPromise={filterOptionsPromise}
-            recentExportsPromise={recentExportsPromise}
-          />
-        </Suspense>
-      </ErrorBoundary>
-      <ErrorBoundary
-        scope="section"
-        title="工单数据暂时无法加载"
-        description="页头和已加载的筛选仍可继续使用；请重试工单列表区域。"
-      >
-        <Suspense fallback={<OrdersListTableSkeleton />}>
-          <OrdersListTableSection
-            query={query}
-            actor={actor}
-            orderPagePromise={orderPagePromise}
-          />
-        </Suspense>
-      </ErrorBoundary>
-    </>
-  );
+  // 业主 2026-09-24：后台只剩管理员与外部销售，其他角色没有工单列表。
+  notFound();
 }
 
 export async function AdminOrdersWorkspaceContent({
@@ -173,7 +109,7 @@ export async function AdminOrdersWorkspaceContent({
         ),
       ),
       optionalAdminRead(
-        loadOrderListFilterOptions(actor),
+        getOrderListFilterOptions(actor),
         { submitters: [], workers: [], crafts: [] },
         '筛选选项暂时无法加载',
       ),
@@ -227,11 +163,6 @@ export async function AdminOrdersWorkspaceContent({
       selectedExportRequestKey={randomUUID()}
     />
   );
-}
-
-function loadOrderListFilterOptions(actor: OrdersActor): FilterOptionsPromise {
-  const filterOptionsPromise = getOrderListFilterOptions(actor);
-  return filterOptionsPromise;
 }
 
 export async function SalesOrdersListContent({
@@ -340,130 +271,3 @@ export async function SalesOrdersListSection({
   );
 }
 
-export async function OrdersListFiltersSection({
-  query,
-  issues,
-  advancedRequested,
-  actor,
-  orderListPageWindowPromise,
-  filterOptionsPromise,
-  recentExportsPromise,
-}: {
-  query: ReturnType<typeof sanitizeOrderListQueryForActor>;
-  issues: readonly string[];
-  advancedRequested: boolean;
-  actor: OrdersActor;
-  orderListPageWindowPromise: OrderListPageWindowPromise;
-  filterOptionsPromise: FilterOptionsPromise;
-  recentExportsPromise: RecentExportsPromise;
-}) {
-  const [orderListPageWindow, filterOptions] = await Promise.all([
-    orderListPageWindowPromise,
-    filterOptionsPromise,
-  ]);
-  const displayedQuery = { ...query, page: orderListPageWindow.page };
-  const showCommercialAmounts = actor.role !== Role.WORKER;
-
-  return (
-    <OrderListFilters
-      query={displayedQuery}
-      options={filterOptions}
-      issues={issues}
-      total={orderListPageWindow.total}
-      showCommercialAmounts={showCommercialAmounts}
-      advancedRequested={advancedRequested}
-      canReviewChanges={actor.role === Role.ADMIN}
-      exportControls={
-        actor.role === Role.ADMIN ? (
-          <ErrorBoundary
-            scope="field"
-            title="导出记录暂时无法加载"
-            description="筛选与工单列表不受影响；请重试导出区域。"
-          >
-            <Suspense fallback={<OrderExportControlsSkeleton />}>
-              <OrderExportsSection
-                query={displayedQuery}
-                filteredTotal={orderListPageWindow.total}
-                recentExportsPromise={recentExportsPromise}
-              />
-            </Suspense>
-          </ErrorBoundary>
-        ) : null
-      }
-    />
-  );
-}
-
-export async function OrderExportsSection({
-  query,
-  filteredTotal,
-  recentExportsPromise,
-}: {
-  query: ReturnType<typeof sanitizeOrderListQueryForActor>;
-  filteredTotal: number;
-  recentExportsPromise: RecentExportsPromise;
-}) {
-  const recentExports = await recentExportsPromise;
-  const exportParams = orderExportParamsFromQuery(query);
-
-  return (
-    <OrderExportControls
-      params={exportParams}
-      filteredTotal={filteredTotal}
-      hasFilters={Object.keys(exportParams).length > 0}
-      filteredRequestKey={randomUUID()}
-      allRequestKey={randomUUID()}
-      recent={recentExports.map((item) => ({
-        ...item,
-        createdAt: item.createdAt.toISOString(),
-        completedAt: item.completedAt?.toISOString() ?? null,
-        expiresAt: item.expiresAt.toISOString(),
-      }))}
-    />
-  );
-}
-
-export async function OrdersListTableSection({
-  query,
-  actor,
-  orderPagePromise,
-}: {
-  query: ReturnType<typeof sanitizeOrderListQueryForActor>;
-  actor: OrdersActor;
-  orderPagePromise: OrdersPagePromise;
-}) {
-  const orderPage = await orderPagePromise;
-  const displayedQuery = { ...query, page: orderPage.page };
-  const queryParams = serializeOrderListQuery(displayedQuery);
-  const showCommercialAmounts = actor.role !== Role.WORKER;
-
-  return (
-    <OrdersTable
-      orders={orderPage.rows}
-      showCommercialAmounts={showCommercialAmounts}
-      showPieceworkCost={actor.role === Role.ADMIN}
-      canSchedule={actor.role === Role.ADMIN}
-      query={displayedQuery}
-      queryParams={queryParams}
-      footer={
-        <div className="border-t px-4 py-3">
-          <AdminPagination
-            basePath="/orders"
-            page={orderPage.page}
-            pageCount={orderPage.pageCount}
-            total={orderPage.total}
-            pageSize={orderPage.pageSize}
-            queryParams={queryParams}
-          />
-        </div>
-      }
-    />
-  );
-}
-
-function rawValueIncludes(
-  value: string | string[] | undefined,
-  expected: string,
-): boolean {
-  return Array.isArray(value) ? value.includes(expected) : value === expected;
-}
