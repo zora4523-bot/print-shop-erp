@@ -77,14 +77,14 @@ print-shop-erp/
 │   ├── (admin)/                  # 后台工作台外壳（侧边栏/面包屑/header）
 │   │   ├── owner/                # ADMIN only（字典、价格、薪资、运维…）
 │   │   ├── foreman/              # ADMIN only（排产、外协、考勤、CDR、领料）
-│   │   ├── orders/               # ADMIN + SALES + CUSTOMER_SERVICE
+│   │   ├── orders/               # ADMIN + SALES
 │   │   └── sales/                # 外部 SALES only（应收、报价）
 │   ├── (billing)/owner/          # 账单 / 代理商账单页：复用 (admin) 鉴权与外壳，但不走它的
 │   │                             #   streaming loading 边界，保证原生财务表单零 JS 可提交；URL 不变
 │   ├── (worker)/worker/          # 师傅端 H5（WORKER only，独立外壳）
 │   ├── account/password/         # 自助改密（§4.6 例外 2）
 │   ├── wo/[orderNo]/             # 工单二维码落地页
-│   ├── api/                      # cron(10) / orders / owner / health / salary / admin / cdr / auth
+│   ├── api/                      # cron(7) / orders / owner / health / salary / admin / cdr / auth
 │   ├── print/orders/[id]/        # 打印视图（Puppeteer 渲染源）
 │   └── dev/showcase/             # 设计系统演示页（非业务）
 ├── actions/                      # Server Actions（业务编排层，69 个文件 / 138 个 action）
@@ -178,10 +178,10 @@ import type { Prisma } from '../../generated/prisma/client';
 （业主 2026-08-19 拍板；阈值配在 `vitest.config.ts` 的 `coverage.thresholds`，
 `pnpm vitest run --coverage` 不达标即 exit 1）：
 
-- `lib/salary/machine-piecework.ts`：机台计件
-- `lib/salary/cs-commission.ts`：客服提成
-- `lib/salary/hourly-payroll.ts`：时薪月结
-- `lib/**/status-machine.ts`：现有状态机文件（order / production / bill / outsource / cs）。其中 `TASK_TRANSITIONS` 只覆盖已退役的 `TaskStatus` 历史工单路径；现行 `ProductionOperation` 没有状态机保护，不能把文件覆盖率当作新运行时状态流转覆盖率。
+- `lib/salary/piecework-pricing.ts`：工序计件工价
+- `lib/order/admin-create-price.ts`：管理员建单定价
+- `lib/order/shipment-box-pricing.ts`：发货装盒计价
+- `lib/**/status-machine.ts`：现有状态机文件（order / production / bill / outsource）。其中 `TASK_TRANSITIONS` 只覆盖已退役的 `TaskStatus` 历史工单路径；现行 `ProductionOperation` 没有状态机保护，不能把文件覆盖率当作新运行时状态流转覆盖率。
 
 `lib/**` 的其余部分（多为读路径与管理 CRUD）设**当前水位**阈值，只防倒退、不强求 100%。
 水位随实测调整，抬高可以、调低要说明理由。
@@ -189,8 +189,6 @@ import type { Prisma } from '../../generated/prisma/client';
 **测试必须覆盖边界case**：
 - 小单（<1000）、超大单
 - 单面单色、双面单色、单面双色、双面双色
-- 客服业绩在档位边界（刚好10万、9.99万、10.01万）
-- 客服业绩超过最高档（100万以上）
 - 师傅当日无任务、请假全休
 
 ### 4.4 薪资规则快照化（铁律）
@@ -252,7 +250,7 @@ export function transitionOrder(order: Order, targetStatus: OrderStatus) {
 'use server';
 export async function createOrder(data: OrderInput) {
   const session = await getSession();
-  if (!session || !['SALES', 'CUSTOMER_SERVICE'].includes(session.user.role)) {
+  if (!session || !['SALES', 'ADMIN'].includes(session.user.role)) {
     throw new UnauthorizedError();
   }
   // ...
@@ -342,7 +340,6 @@ amount: 12.34     // JS float 精度问题
 | 返工数 | reworkQty | — |
 | 计件 | piecework | — |
 | 保底 | dailyBase | — |
-| 业绩周期 | SalaryPeriod | 客服专用 |
 
 ---
 
@@ -465,10 +462,9 @@ await dispatchNotification('ORDER_SUBMITTED', { orderId, orderNo, submitterName 
 
 **必须覆盖的关键路径**：
 1. 销售创建工单 → 车间主管排产 → 师傅报工 → 工单完工 → 发货
-2. 客服4月周期结算（需要 mock 时间推进）
-3. CDR打包下载流程
-4. 工单修改的权限控制（不同角色、不同状态下的允许/拒绝）
-5. 企业微信推送触发（mock Webhook）
+2. CDR打包下载流程
+3. 工单修改的权限控制（不同角色、不同状态下的允许/拒绝）
+4. 企业微信推送触发（mock Webhook）
 
 ### 8.4 截图回归（Playwright Visual Regression）
 
@@ -721,12 +717,14 @@ pnpm test:admin-ui               # 或 test:worker-ui / test:e2e / test:release
 
 ## 15. 架构现状速查（读代码前先看这里）
 
-### 15.1 角色只有 4 个
+### 15.1 角色只有 3 个
 
-`Role = ADMIN | SALES | CUSTOMER_SERVICE | WORKER`（`prisma/schema.prisma`）。
+`Role = ADMIN | SALES | WORKER`（`prisma/schema.prisma`）；`WorkerType = MACHINE | PACKER`。
 原「老板 OWNER」与「车间主管 FOREMAN」已合并为唯一的 **ADMIN**（DECISIONS 2026-07-19）。
+客服 `CUSTOMER_SERVICE`、清废 `CLEANER`、厨师 `COOK` 已删除（DECISIONS 2026-09-24，SPEC §L）：
+收费工单只有 `EXTERNAL_SALES`（免费重做为 `NO_CHARGE`），管理员建单必须选择外部销售。
 `/owner/*` 与 `/foreman/*` 只是保留的 URL 分区，两者都是 ADMIN only；`/sales/*` 是外部 SALES
-only（把内部客服挡在外部应收之外）。SPEC 里的「老板 / 主管」是业务称谓，不是角色枚举。
+only。SPEC 里的「老板 / 主管」是业务称谓，不是角色枚举。
 
 ### 15.2 会话与权限是三道防线
 
@@ -786,7 +784,7 @@ export async function createProductAction(
   durable 模式下通知、cron、CDR 打包、PDF、XLSX 导出先落 `BackgroundJob` 账本，由 PM2 的
   light/heavy worker 领取执行；heavy 队列（CDR/PDF/导出）并发固定 1。
 - 入队必须带 `dedupeKey`；任务类型用 `BACKGROUND_JOB_TYPES` 常量，不写字符串字面量。
-- 10 个 `/api/cron/*` 端点全部用 `requireCronAuth(req)` 校验 `Authorization: Bearer $CRON_SECRET`；
+- 7 个 `/api/cron/*` 端点全部用 `requireCronAuth(req)` 校验 `Authorization: Bearer $CRON_SECRET`；
   未配置 secret → 503（部署漏配时快速失败）。响应形状对外部调度器是契约，不要改。
 - handler 抛未知异常时必须**携带部分进度重抛**，让 durable job 重试，绝不把漏算的批次标成成功。
 
@@ -801,11 +799,9 @@ export async function createProductAction(
   `lib/salary/rules.ts` 与 `lib/price/rule-snapshot-lock.ts`。**新增读取规则的结算路径必须把
   事务 client（`tx`）传进去，用同一把锁**，不要用全局 `db` 读。
 - 没有生效规则时**拒绝继续**，绝不 fallback 到 0 —— 静默按 0 发工资/报价是本项目的头号事故。
-  **唯一显式例外**：厨师的空闲打包时薪（`lib/salary/hourly-aggregate.ts` 的
-  `cookSpareRate ?? 0`）。空闲打包对厨师是可选职责，没配 `COOK_SPARE_HOURLY` 更可能表示
-  「这个厨师不打包」而非配置遗漏，所以按 0 计空闲工资而不是让整个月结失败。同一 if/else 里
-  PACKER / CLEANER / COOK_MONTHLY 三个分支**仍然全部 throw**。业主 2026-08-19 拍板，行为由
-  `lib/salary/__tests__/hourly-payroll.test.ts:186` 锁定 —— 别当 bug 修掉。
+  **没有任何例外**：原厨师空闲打包时薪的 `cookSpareRate ?? 0` 例外已随厨师岗位与时薪月结生成
+  一并删除（DECISIONS 2026-09-24）；时薪月结只剩打包历史只读存档（`lib/salary/hourly-aggregate.ts`），
+  不再计算。
 
 ### 15.6 设计系统门禁（eslint 会 fail）
 
@@ -852,8 +848,9 @@ const [state, formAction, pending] = useActionState(action.bind(null, id), null)
 
 ---
 
-**本文档版本**：1.3（2026-09-14 按结构体检同步现状：§2 测试体系、§3 目录树、§3 直连清单、
-§4.6 例外基数、§6.1 分支现状、§8.2 Browser Mode、§15.4 cron 数量、§15.8 表单基数；
+**本文档版本**：1.4（2026-09-24 按业主删除客服 / 内部与工厂直单结算 / 清废与厨师的决定同步：
+§3 目录注释与 cron 数、§4.3 覆盖清单与边界 case、§5.3 术语表、§8.3 E2E 关键路径、§15.1 角色、
+§15.4 cron 数量、§15.5 去掉 fallback-to-0 例外。1.3 为 2026-09-14 结构体检；
 未动 §4.5 / §15.7 等待业主落笔的条款，见 HANDOFF「CLAUDE.md 待业主落笔」）
-**最后更新**：2026-09-14
+**最后更新**：2026-09-24
 **维护者**：业主 + Claude Code / Codex
