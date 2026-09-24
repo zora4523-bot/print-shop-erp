@@ -150,13 +150,12 @@ Expected:
 - `503` when `CRON_SECRET` is missing.
 - Never `200` for an invalid token.
 
-Since 2026-08-21 two endpoints have one extra rejection: `daily-salary` returns
+Since 2026-08-21 `daily-salary` has one extra rejection: it returns
 `400 { "error": "future date: <date>" }` when `body.date` is strictly after
-today in Shanghai, and `hourly-payroll` returns
-`400 { "error": "future month: <month>" }` when `body.month` is strictly after
-the current Shanghai month. The scheduled calls carry no body and settle
-yesterday / last month, so they never hit this branch; only a manual re-run with
-an explicit body can. All other response shapes (`202`, `200`, `401`, `500`,
+today in Shanghai. The scheduled call carries no body and settles yesterday, so
+it never hits this branch; only a manual re-run with an explicit body can.
+The `hourly-payroll` endpoint was removed on 2026-09-24 (no cleaners or cooks
+remain); make sure the installed crontab no longer calls it. All other response shapes (`202`, `200`, `401`, `500`,
 `503`) are unchanged.
 
 After deployment, trigger the daily export-retention job once and confirm the
