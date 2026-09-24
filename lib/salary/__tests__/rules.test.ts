@@ -8,13 +8,7 @@ const { dbMock } = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
-import {
-  getActiveCleanerHourlyRate,
-  getActiveCookSpareHourlyRate,
-  getActiveOtMultiplier,
-  getActiveWorkHours,
-  getActiveCookMonthlyBase,
-} from '../rules';
+import { getActiveWorkHours } from '../rules';
 
 beforeEach(() => {
   dbMock.salaryRule.findFirst.mockReset();
@@ -28,58 +22,6 @@ function mockRule(byKey: Record<string, unknown>) {
     return value === undefined ? null : { ruleValue: value };
   });
 }
-
-describe('getActiveCleanerHourlyRate', () => {
-  it('returns the active cleaner rate and uses its effective window', async () => {
-    mockRule({ CLEANER_HOURLY: { hourlyRate: 12 } });
-    const now = new Date('2026-05-01T00:00:00Z');
-
-    await expect(getActiveCleanerHourlyRate(now)).resolves.toBe(12);
-
-    const where = dbMock.salaryRule.findFirst.mock.calls[0]![0].where;
-    expect(where.ruleType).toBe(SalaryRuleType.WORKER_HOURLY);
-    expect(where.ruleKey).toBe('CLEANER_HOURLY');
-    expect(where.effectiveFrom.lte).toEqual(now);
-    expect(where.OR).toContainEqual({ effectiveTo: null });
-    expect(where.OR).toContainEqual({ effectiveTo: { gt: now } });
-  });
-
-  it('returns null when the cleaner rule is missing', async () => {
-    mockRule({});
-    await expect(getActiveCleanerHourlyRate()).resolves.toBeNull();
-  });
-});
-
-describe('getActiveCookSpareHourlyRate', () => {
-  it('uses the dedicated cook spare-work rate', async () => {
-    mockRule({
-      COOK_SPARE_HOURLY: { hourlyRate: 13 },
-    });
-    expect(await getActiveCookSpareHourlyRate()).toBe(13);
-  });
-
-  it('returns null when unset (caller decides whether to fall back)', async () => {
-    mockRule({});
-    expect(await getActiveCookSpareHourlyRate()).toBeNull();
-  });
-});
-
-describe('getActiveOtMultiplier', () => {
-  it('defaults to seed value 1.0', async () => {
-    mockRule({ OT_MULTIPLIER: { multiplier: 1.0 } });
-    expect(await getActiveOtMultiplier()).toBe(1.0);
-  });
-
-  it('can go above 1.0 when owner adjusts policy', async () => {
-    mockRule({ OT_MULTIPLIER: { multiplier: 1.5 } });
-    expect(await getActiveOtMultiplier()).toBe(1.5);
-  });
-
-  it('returns null when unset (calcHourlyPayroll then defaults to 1.0)', async () => {
-    mockRule({});
-    expect(await getActiveOtMultiplier()).toBeNull();
-  });
-});
 
 describe('getActiveWorkHours', () => {
   it('returns { morning, afternoon, otStart } from rule, NOT hardcoded', async () => {
@@ -114,30 +56,20 @@ describe('getActiveWorkHours', () => {
     expect(wh?.otStart).toBe('19:00');
   });
 
+  it('reads WORKER_HOURLY/WORK_HOURS within its effective window', async () => {
+    mockRule({});
+    const now = new Date('2026-05-01T00:00:00Z');
+    await getActiveWorkHours(now);
+    const where = dbMock.salaryRule.findFirst.mock.calls[0]![0].where;
+    expect(where.ruleType).toBe(SalaryRuleType.WORKER_HOURLY);
+    expect(where.ruleKey).toBe('WORK_HOURS');
+    expect(where.effectiveFrom.lte).toEqual(now);
+    expect(where.OR).toContainEqual({ effectiveTo: null });
+    expect(where.OR).toContainEqual({ effectiveTo: { gt: now } });
+  });
+
   it('returns null when rule is missing (UI must tolerate and show a no-hint state)', async () => {
     mockRule({});
     expect(await getActiveWorkHours()).toBeNull();
-  });
-});
-
-describe('getActiveCookMonthlyBase (COOK_SALARY ruleType, separate from WORKER_HOURLY)', () => {
-  it('reads COOK_MONTHLY with COOK_SALARY ruleType', async () => {
-    dbMock.salaryRule.findFirst.mockImplementation(async (args: {
-      where: { ruleType: SalaryRuleType; ruleKey: string };
-    }) => {
-      if (
-        args.where.ruleType === SalaryRuleType.COOK_SALARY &&
-        args.where.ruleKey === 'COOK_MONTHLY'
-      ) {
-        return { ruleValue: { monthlyBase: 3000 } };
-      }
-      return null;
-    });
-    expect(await getActiveCookMonthlyBase()).toBe(3000);
-  });
-
-  it('returns null when unset', async () => {
-    dbMock.salaryRule.findFirst.mockResolvedValue(null);
-    expect(await getActiveCookMonthlyBase()).toBeNull();
   });
 });

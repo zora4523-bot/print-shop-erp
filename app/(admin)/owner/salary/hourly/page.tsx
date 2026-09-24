@@ -1,17 +1,13 @@
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Link from 'next/link';
 import { Calculator, FileText } from 'lucide-react';
-import { listHourlyPayrolls, getHourlyPayrollMonthContext } from '@/lib/salary/hourly-aggregate';
+import { listHourlyPayrolls, listHourlyPayrollWorkerIds } from '@/lib/salary/hourly-aggregate';
 import { listUsers } from '@/lib/account';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { Role, WorkerType } from '@/generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourlyForm';
-import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
-import { EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
-import { readReceipt } from '@/lib/admin/receipt';
+import { EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea } from '@/components/ui-business';
 import {
   getAttendanceSummaries,
   parseShanghaiMonth,
@@ -19,7 +15,7 @@ import {
 import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 
 import { formatMoney } from '@/lib/dashboard/format';
-export const metadata = { title: '时薪工月结' };
+export const metadata = { title: '历史时薪档案' };
 
 type PageProps = {
   searchParams: Promise<{
@@ -28,8 +24,6 @@ type PageProps = {
     workerId?: string;
     page?: string | string[];
     pageSize?: string | string[];
-    marked?: string;
-    markedPaid?: string;
   }>;
 };
 
@@ -45,22 +39,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       : currentMonth;
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
-  const filterQuery = new URLSearchParams();
-  if (sp.month) filterQuery.set('month', sp.month);
-  if (sp.paid) filterQuery.set('paid', sp.paid);
-  if (sp.workerId) filterQuery.set('workerId', sp.workerId);
-  if (sp.page) filterQuery.set('page', Array.isArray(sp.page) ? sp.page[0] : sp.page);
-  if (sp.pageSize) filterQuery.set('pageSize', Array.isArray(sp.pageSize) ? sp.pageSize[0] : sp.pageSize);
-  const returnTo = filterQuery.size
-    ? `/owner/salary/hourly?${filterQuery.toString()}`
-    : '/owner/salary/hourly';
-  // paid=paid|unpaid 是本页筛选，与计件回执的 paid 同名：只消费自己的两个 key。
-  const receipt = readReceipt(sp, ['marked', 'markedPaid']);
-
-  // 重算影响不能被页面的「已发 / 师傅」筛选误导：操作会
-  // 扫描整个月份，因此额外读取该月全部现有月结，只将真实快照
-  // 传给客户端确认层。
-  const [salaryPage, monthContext, accounts] = await Promise.all([
+  const [salaryPage, archivedWorkerIds, accounts] = await Promise.all([
     listHourlyPayrolls({
       month: selectedMonth,
       workerId: sp.workerId,
@@ -68,18 +47,15 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       page: sp.page,
       pageSize: sp.pageSize,
     }),
-    getHourlyPayrollMonthContext(selectedMonth),
+    listHourlyPayrollWorkerIds(selectedMonth),
     listUsers(),
   ]);
   const { rows } = salaryPage;
-  const payrollWorkerIds = new Set(monthContext.workerIds);
+  const payrollWorkerIds = new Set(archivedWorkerIds);
   const workers = accounts.filter(
     (account) =>
       account.id === sp.workerId ||
-      payrollWorkerIds.has(account.id) ||
-      (account.role === Role.WORKER &&
-        (account.workerType === WorkerType.CLEANER ||
-          account.workerType === WorkerType.COOK)),
+      payrollWorkerIds.has(account.id),
   );
   const monthRange = parseShanghaiMonth(selectedMonth);
   const attendanceSummaries = await getAttendanceSummaries(
@@ -89,40 +65,10 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
 
   const totalSalary = salaryPage.totalSalary;
   const unpaidSalary = salaryPage.unpaidSalary;
-  const recomputeContext = monthContext.context;
 
   return (
     <div className="space-y-6">
-      <ReceiptNotice
-        receipt={receipt}
-        messages={{
-          marked: (name, { markedPaid }) => ({
-            title: markedPaid === '1' ? '已标记发放' : '已撤销发放标记',
-            description: `${name} 的时薪月结已${markedPaid === '1' ? '标记为已发放' : '解除发放锁定'}。`,
-            action: (
-              <Link
-                href={returnTo}
-                prefetch={false}
-                className="text-sm font-medium underline underline-offset-2"
-              >
-                关闭提示
-              </Link>
-            ),
-          }),
-        }}
-      />
-      <PageHeader
-        title="时薪工月结"
-        subtitle="清废与厨师的时薪月结；历史打包工资见归档记录。"
-      />
-
-      <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <RecomputeHourlyForm
-          month={selectedMonth}
-          maxMonth={currentMonth}
-          context={recomputeContext}
-        />
-      </section>
+      <PageHeader title="历史时薪档案" />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <UiStatCard
@@ -156,7 +102,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
         <EmptyState
           icon={FileText}
           title={`${selectedMonth} 暂无月结记录`}
-          description="暂无记录。请选择月份生成清废与厨师的月结。"
+          description="可选择其他月份查看历史记录。"
         />
       ) : (
         <TableScrollArea label="时薪月结列表" className="rounded-xl border bg-card shadow-sm">
@@ -167,10 +113,10 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                 <th className="px-4 py-2 text-left">师傅</th>
                 <th className="px-4 py-2 text-left">类型</th>
                 <th className="px-4 py-2 text-right">正常工时</th>
-                <th className="px-4 py-2 text-right">加班 / 代班</th>
+                <th className="px-4 py-2 text-right">加班</th>
                 <th className="px-4 py-2 text-right">上班 / 请假</th>
                 <th className="px-4 py-2 text-right">底薪</th>
-                <th className="px-4 py-2 text-right">加班费 / 代班费</th>
+                <th className="px-4 py-2 text-right">加班费</th>
                 <th className="px-4 py-2 text-right">实发</th>
                 <th className="px-4 py-2 text-center">状态</th>
                 <th className="px-4 py-2"></th>
@@ -179,10 +125,8 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
             <tbody className="divide-y">
               {rows.map((r) => {
                 // Render the immutable payroll snapshot, never the employee's
-                // current account type. A later transfer must not relabel a
-                // historical PACKER row as COOK and swap overtime for spare pay.
+                // current account type.
                 const wt = r.payrollWorkerType;
-                const isCook = wt === WorkerType.COOK;
                 const attendance = attendanceSummaries.get(r.workerId) ?? {
                   workUnits: '0',
                   leaveUnits: '0',
@@ -198,9 +142,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       {String(r.totalWorkHours)}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
-                      {isCook
-                        ? `${String(r.totalSpareHours)} (代班)`
-                        : `${String(r.totalOtHours)} (加班)`}
+                      {String(r.totalOtHours)}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                       {attendance.workUnits} / {attendance.leaveUnits} 天
@@ -209,7 +151,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       {String(r.baseSalary)}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums text-xs text-muted-foreground">
-                      {isCook ? String(r.spareSalary) : String(r.otSalary)}
+                      {String(r.otSalary)}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
                       {formatMoney(r.totalSalary)}
@@ -218,20 +160,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       <PaymentStatusBadge isPaid={r.isPaid} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {wt === WorkerType.PACKER ? (
-                        <span className="text-xs text-muted-foreground">
-                          已归档
-                        </span>
-                      ) : (
-                        <MarkHourlyPaidForm
-                          id={r.id}
-                          currentPaid={r.isPaid}
-                          workerName={r.worker.displayName}
-                          month={r.month}
-                          totalSalary={String(r.totalSalary)}
-                          returnTo={returnTo}
-                        />
-                      )}
+                      <span className="text-xs text-muted-foreground">已归档</span>
                     </td>
                   </tr>
                 );

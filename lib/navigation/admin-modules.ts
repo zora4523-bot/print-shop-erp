@@ -238,10 +238,10 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'owner.salary.hourly',
-    label: '时薪工月结',
+    label: '历史时薪档案',
     routeBase: '/owner/salary/hourly',
     iconName: 'Clock',
-    breadcrumbLabel: '时薪工月结',
+    breadcrumbLabel: '历史时薪档案',
     menuSection: 'finance',
     status: 'implemented',
     menuOrder: 70,

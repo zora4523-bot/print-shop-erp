@@ -656,11 +656,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     // label / select-name 违规（筛选栏 <label> 没有 htmlFor），修完补进
     // 路由表，避免再次退化。
     {
-      name: 'salary-hourly', path: '/owner/salary/hourly', readyHeading: '时薪工月结',
+      // 历史存档页的师傅下拉只列当月有存档的人与当前筛选对象；用筛选把长姓名带进来。
+      name: 'salary-hourly', path: `/owner/salary/hourly?workerId=${data.hourlyWorkerId}`, readyHeading: '历史时薪档案',
       prepareGateState: async (page) => {
         const worker = page.getByRole('combobox', { name: '师傅', exact: true });
         await expect(worker.locator(`option[value="${data.hourlyWorkerId}"]`)).toHaveText(
-          `长姓名清废师傅ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证筛选不会撑开小屏（${data.hourlyWorkerId} · 已停用）`,
+          `长姓名打包师傅ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证筛选不会撑开小屏（${data.hourlyWorkerId} · 已停用）`,
         );
       },
     },

@@ -180,7 +180,6 @@ async function seedCrafts() {
     { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 900, isActive: false },
     { name: 'UV', code: 'UV', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 901 },
     { name: '啤（模切）', code: 'DIE_CUT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 902 },
-    { name: '清废', code: 'CLEANING', isOutsource: false, defaultWorkerType: WorkerType.CLEANER, defaultMachineType: null, sortOrder: 903 },
   ];
 
   // Seed 只补齐缺失的初始字典。名称、岗位、机型、排序和启用状态都可在
@@ -236,25 +235,7 @@ async function seedSalaryRules() {
     },
 
     // 工序计件只初始化独立工价草稿，不再生成旧机型工价。
-    // --- 时薪工规则 ---
-    {
-      ruleType: 'WORKER_HOURLY' as const,
-      ruleKey: 'CLEANER_HOURLY',
-      ruleValue: { hourlyRate: 11 },
-      remark: '清废工时薪',
-    },
-    {
-      ruleType: 'WORKER_HOURLY' as const,
-      ruleKey: 'COOK_SPARE_HOURLY',
-      ruleValue: { hourlyRate: 11 },
-      remark: '厨师打包兼职时薪',
-    },
-    {
-      ruleType: 'WORKER_HOURLY' as const,
-      ruleKey: 'OT_MULTIPLIER',
-      ruleValue: { multiplier: 1.0 },
-      remark: '加班倍率',
-    },
+    // --- 考勤工时段（录入 UI 的"全勤"快捷值） ---
     {
       ruleType: 'WORKER_HOURLY' as const,
       ruleKey: 'WORK_HOURS',
@@ -264,14 +245,6 @@ async function seedSalaryRules() {
         otStart: '18:00',
       },
       remark: '标准工时段',
-    },
-
-    // --- 厨师月薪 ---
-    {
-      ruleType: 'COOK_SALARY' as const,
-      ruleKey: 'COOK_MONTHLY',
-      ruleValue: { monthlyBase: 3000 },
-      remark: '厨师月薪',
     },
   ];
 

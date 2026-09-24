@@ -1,7 +1,7 @@
-// 薪资：客服周期、提成发放、考勤、时薪月结（SPEC §5）
+// 薪资：客服周期、提成发放、考勤（SPEC §5）
 // 由 lib/auth/schemas.ts 按域拆出（2026-09-14）；对外仍通过 lib/auth/schemas.ts 统一导出。
 import { z } from 'zod';
-import { YMD_RE, decimalStringToScaledInteger, formBoolean, optionalTrimmedText, parseStrictYmd, safeId, shanghaiDateTimeField, ymField } from './shared';
+import { YMD_RE, decimalStringToScaledInteger, optionalTrimmedText, parseStrictYmd, safeId, shanghaiDateTimeField } from './shared';
 
 // Reusable strict-calendar YYYY-MM-DD field for salary-period resolution.
 const ymdField = (label: string) =>
@@ -202,7 +202,6 @@ export const recordAttendanceSchema = z
     date: ymdField('考勤日期'),
     normalHours: hoursField('正常工时'),
     otHours: hoursField('加班工时'),
-    spareHours: hoursField('空闲打包工时'),
     workUnits: attendanceUnitField('实际上班', 1),
     leaveUnits: attendanceUnitField('请假', 0),
     leaveType: optionalTrimmedText('请假类型', 50).optional(),
@@ -225,16 +224,3 @@ export const removeAttendanceSchema = z.object({
 });
 
 export type RemoveAttendanceInput = z.infer<typeof removeAttendanceSchema>;
-
-export const recomputeHourlyPayrollSchema = z.object({
-  month: ymField('月份'),
-  workerId: safeId('工人 id').optional(),
-});
-
-export type RecomputeHourlyPayrollInput = z.infer<typeof recomputeHourlyPayrollSchema>;
-
-export const markHourlyPayrollPaidSchema = z.object({
-  isPaid: formBoolean,
-});
-
-export type MarkHourlyPayrollPaidInput = z.infer<typeof markHourlyPayrollPaidSchema>;

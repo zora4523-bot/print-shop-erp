@@ -2,20 +2,17 @@ import Decimal from 'decimal.js';
 import {
   EmploymentType,
   Role,
-  WorkerType,
+  type WorkerType,
 } from '../generated/prisma/enums';
 import { Prisma } from '../generated/prisma/client';
 import { db } from './db';
 import { parseStrictYmd } from './auth/schemas';
 import { employmentCoversDate } from './salary/employment';
-import {
-  hourlyPayrollLockKey,
-  salaryIdentityLockKey,
-} from './salary/hourly-lock';
+import { salaryIdentityLockKey } from './salary/hourly-lock';
 
-// 正式员工考勤：管理员按天记录实际上班/请假天数（支持半天），
-// 时薪工额外记录正常、加班与厨师空闲打包工时。WORK_HOURS 规则仅用于
-// 录入 UI 的“全勤”快捷值，不在后端派生考勤。
+// 正式员工考勤：管理员按天记录实际上班/请假天数（支持半天）以及正常、
+// 加班工时。WORK_HOURS 规则仅用于录入 UI 的“全勤”快捷值，不在后端派生考勤。
+// 已有历史打包时薪月结存档的月份整月冻结：存档不再重算，考勤不得再改。
 
 export class AttendanceError extends Error {
   constructor(message: string) {
@@ -58,9 +55,6 @@ export async function listActiveAttendanceEmployees(): Promise<
 export type RecordAttendanceInput = {
   normalHours: string | number | Decimal;
   otHours: string | number | Decimal;
-  // COOK only — dropped silently for non-COOK so the foreman UI can
-  // send the same shape for every worker type.
-  spareHours?: string | number | Decimal;
   remark?: string | null;
   workUnits?: string | number | Decimal;
   leaveUnits?: string | number | Decimal;
@@ -73,7 +67,6 @@ export type AttendanceRow = {
   date: Date;
   normalHours: string;
   otHours: string;
-  spareHours: string;
   remark: string | null;
   workUnits: string;
   leaveUnits: string;
@@ -86,46 +79,29 @@ export type AttendanceRow = {
   employmentType: EmploymentType;
 };
 
-type MutableAttendanceSnapshot = {
-  normalHours: Decimal.Value;
-  otHours: Decimal.Value;
-  spareHours: Decimal.Value;
-  workUnits: Decimal.Value;
-  leaveUnits: Decimal.Value;
-  leaveType: string | null;
-  remark: string | null;
-};
-
-type NormalizedAttendanceFacts = {
-  normalHours: string;
-  otHours: string;
-  spareHours: string;
-  workUnits: string;
-  leaveUnits: string;
-  leaveType: string | null;
-  remark: string | null;
-};
-
-function sameAttendanceFacts(
-  current: MutableAttendanceSnapshot,
-  next: NormalizedAttendanceFacts,
-): boolean {
-  return (
-    new Decimal(current.normalHours).equals(next.normalHours) &&
-    new Decimal(current.otHours).equals(next.otHours) &&
-    new Decimal(current.spareHours).equals(next.spareHours) &&
-    new Decimal(current.workUnits).equals(next.workUnits) &&
-    new Decimal(current.leaveUnits).equals(next.leaveUnits) &&
-    current.leaveType === next.leaveType &&
-    current.remark === next.remark
-  );
-}
-
 function isPrismaNotFound(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2025'
   );
+}
+
+// 历史打包时薪月结存档只读保留；存档月份的考勤是它的来源事实，不能再改。
+async function assertMonthNotArchived(
+  tx: Prisma.TransactionClient,
+  workerId: string,
+  month: string,
+  verb: '修改' | '删除',
+): Promise<void> {
+  const archived = await tx.hourlyWorkerPayroll.findUnique({
+    where: { workerId_month: { workerId, month } },
+    select: { id: true },
+  });
+  if (archived) {
+    throw new AttendanceError(
+      `该员工 ${month} 月已有历史时薪月结存档，考勤已冻结，不能${verb}`,
+    );
+  }
 }
 
 // Idempotent upsert: re-recording the same (workerId, date) overwrites
@@ -150,10 +126,7 @@ export async function recordAttendance(
 
   const normal = dec(input.normalHours);
   const ot = dec(input.otHours);
-  const spare =
-    input.spareHours === undefined ? new Decimal(0) : dec(input.spareHours);
-
-  if (normal.lt(0) || ot.lt(0) || spare.lt(0)) {
+  if (normal.lt(0) || ot.lt(0)) {
     throw new AttendanceError('工时不能为负');
   }
   // Upper bound — a single day can't plausibly exceed 24 hours in any
@@ -161,7 +134,6 @@ export async function recordAttendance(
   for (const [label, v] of [
     ['正常工时', normal],
     ['加班工时', ot],
-    ['空闲打包工时', spare],
   ] as const) {
     if (v.gt(24)) {
       throw new AttendanceError(`${label}超出 24 小时`);
@@ -185,15 +157,11 @@ export async function recordAttendance(
   const month = date.slice(0, 7);
 
   return db.$transaction(async (tx) => {
-    // Identity precedes worker-month everywhere. Account role/active/date
-    // changes use the same identity key, so the snapshot is read only after a
-    // concurrent account mutation has committed (or before it begins).
+    // Account role/active/date changes use the same identity key, so the
+    // snapshot is read only after a concurrent account mutation has committed
+    // (or before it begins).
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
       workerId,
-    )}))`;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyPayrollLockKey(
-      workerId,
-      month,
     )}))`;
 
     const worker = await tx.user.findUnique({
@@ -218,28 +186,13 @@ export async function recordAttendance(
       throw new AttendanceError('考勤日期不在该员工的雇佣区间内');
     }
 
-    const payroll = await tx.hourlyWorkerPayroll.findUnique({
-      where: { workerId_month: { workerId, month } },
-      select: { id: true, isPaid: true },
-    });
-    if (payroll?.isPaid) {
-      throw new AttendanceError(
-        `该员工 ${month} 月工资已发放；请先撤销发放再修改考勤`,
-      );
-    }
+    await assertMonthNotArchived(tx, workerId, month, '修改');
 
     const existing = await tx.attendance.findUnique({
       where: { workerId_date: { workerId, date: dateCol } },
       select: {
         roleSnapshot: true,
         workerTypeSnapshot: true,
-        normalHours: true,
-        otHours: true,
-        spareHours: true,
-        workUnits: true,
-        leaveUnits: true,
-        leaveType: true,
-        remark: true,
       },
     });
     const roleSnapshot = existing?.roleSnapshot ?? worker.role;
@@ -252,22 +205,14 @@ export async function recordAttendance(
       throw new AttendanceError('师傅账号未配置工种，不能录入考勤');
     }
 
-    // spareHours silently drops to zero for non-COOK while retaining an
-    // existing row's immutable identity snapshot.
-    const effectiveSpare =
-      workerTypeSnapshot === WorkerType.COOK ? spare : new Decimal(0);
-    const nextFacts: NormalizedAttendanceFacts = {
+    const nextFacts = {
       normalHours: normal.toFixed(2),
       otHours: ot.toFixed(2),
-      spareHours: effectiveSpare.toFixed(2),
       workUnits: workUnits.toFixed(1),
       leaveUnits: leaveUnits.toFixed(1),
       leaveType,
       remark,
     };
-    const factsChanged =
-      existing === null || !sameAttendanceFacts(existing, nextFacts);
-
     const saved = await tx.attendance.upsert({
       where: { workerId_date: { workerId, date: dateCol } },
       create: {
@@ -291,7 +236,6 @@ export async function recordAttendance(
         date: true,
         normalHours: true,
         otHours: true,
-        spareHours: true,
         workUnits: true,
         leaveUnits: true,
         leaveType: true,
@@ -301,25 +245,12 @@ export async function recordAttendance(
       },
     });
 
-    // An unpaid payroll is a recomputable derivative. Keeping it after a real
-    // source change would allow mark-paid to freeze a stale amount, so remove
-    // it atomically under the same worker-month lock.
-    if (factsChanged && payroll) {
-      const invalidated = await tx.hourlyWorkerPayroll.deleteMany({
-        where: { id: payroll.id, isPaid: false },
-      });
-      if (invalidated.count !== 1) {
-        throw new AttendanceError('工资状态已变化，请刷新后重试');
-      }
-    }
-
     return {
       id: saved.id,
       workerId: saved.workerId,
       date: saved.date,
       normalHours: String(saved.normalHours),
       otHours: String(saved.otHours),
-      spareHours: String(saved.spareHours),
       workUnits: String(saved.workUnits),
       leaveUnits: String(saved.leaveUnits),
       leaveType: saved.leaveType,
@@ -350,20 +281,8 @@ export async function removeAttendance(
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
       workerId,
     )}))`;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyPayrollLockKey(
-      workerId,
-      month,
-    )}))`;
 
-    const payroll = await tx.hourlyWorkerPayroll.findUnique({
-      where: { workerId_month: { workerId, month } },
-      select: { id: true, isPaid: true },
-    });
-    if (payroll?.isPaid) {
-      throw new AttendanceError(
-        `该员工 ${month} 月工资已发放；请先撤销发放再删除考勤`,
-      );
-    }
+    await assertMonthNotArchived(tx, workerId, month, '删除');
 
     const existing = await tx.attendance.findUnique({
       where: { workerId_date: { workerId, date: dateCol } },
@@ -381,15 +300,6 @@ export async function removeAttendance(
       // remain visible to the action/caller.
       if (isPrismaNotFound(error)) return { removed: false };
       throw error;
-    }
-
-    if (payroll) {
-      const invalidated = await tx.hourlyWorkerPayroll.deleteMany({
-        where: { id: payroll.id, isPaid: false },
-      });
-      if (invalidated.count !== 1) {
-        throw new AttendanceError('工资状态已变化，请刷新后重试');
-      }
     }
     return { removed: true };
   });
@@ -415,7 +325,6 @@ export async function listMonthlyAttendance(
       date: true,
       normalHours: true,
       otHours: true,
-      spareHours: true,
       workUnits: true,
       leaveUnits: true,
       leaveType: true,
@@ -436,7 +345,6 @@ export async function listMonthlyAttendance(
     date: r.date,
     normalHours: String(r.normalHours),
     otHours: String(r.otHours),
-    spareHours: String(r.spareHours),
     workUnits: String(r.workUnits),
     leaveUnits: String(r.leaveUnits),
     leaveType: r.leaveType,

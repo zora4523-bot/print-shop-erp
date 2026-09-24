@@ -32,7 +32,6 @@ export async function createSalaryRuleVersionAction(
     const created = await createSalaryRuleVersion(parsed.data, actor);
     revalidatePath('/owner/salary');
     revalidatePath('/owner/salary/cs');
-    revalidatePath('/owner/salary/hourly');
     revalidatePath(RULE_CENTER_HREFS.employeePay);
     return { status: 'success', ruleId: created.id };
   } catch (error) {

@@ -28,9 +28,7 @@ export { salaryRuleLockKey } from './rules';
 // rate from accidentally becoming a sales commission or vice versa.
 
 const MAX_MONEY = new Decimal('99999999.99');
-const MAX_HOURLY_RATE = new Decimal('9999.99');
 const MAX_RATE = new Decimal(1);
-const MAX_MULTIPLIER = new Decimal('99.99');
 
 const moneyText = z
   .string()
@@ -43,20 +41,6 @@ const moneyText = z
     }
   });
 
-// HourlyWorkerPayroll.hourlyRate is Decimal(6,2). Keep the rule input inside
-// that exact storage domain; downstream combination fields are independently
-// bounded before persistence.
-const hourlyMoneyText = z
-  .string()
-  .trim()
-  .regex(/^\d{1,4}(?:\.\d{1,2})?$/, '请输入非负时薪，最多两位小数')
-  .superRefine((value, ctx) => {
-    const amount = new Decimal(value);
-    if (amount.gt(MAX_HOURLY_RATE)) {
-      ctx.addIssue({ code: 'custom', message: '时薪不能超过 9,999.99 元' });
-    }
-  });
-
 const rateText = z
   .string()
   .trim()
@@ -65,23 +49,6 @@ const rateText = z
     const rate = new Decimal(value);
     if (rate.gt(MAX_RATE)) {
       ctx.addIssue({ code: 'custom', message: '比例不能超过 100%' });
-    }
-  });
-
-const multiplierText = z
-  .string()
-  .trim()
-  .regex(
-    /^\d{1,2}(?:\.\d{1,2})?$/,
-    '请输入大于 0 且不超过 99.99 的倍率，最多两位小数',
-  )
-  .superRefine((value, ctx) => {
-    const multiplier = new Decimal(value);
-    if (multiplier.lte(0) || multiplier.gt(MAX_MULTIPLIER)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: '加班倍率必须大于 0 且不超过 99.99',
-      });
     }
   });
 
@@ -103,11 +70,7 @@ const RULE_TYPE_BY_KEY: Record<SalaryRuleKey, SalaryRuleType> = {
   CS_BASE_SALARY: SalaryRuleType.CS_COMMISSION,
   CS_PERIOD_LENGTH: SalaryRuleType.CS_COMMISSION,
   CS_TIERS: SalaryRuleType.CS_COMMISSION,
-  CLEANER_HOURLY: SalaryRuleType.WORKER_HOURLY,
-  COOK_SPARE_HOURLY: SalaryRuleType.WORKER_HOURLY,
-  OT_MULTIPLIER: SalaryRuleType.WORKER_HOURLY,
   WORK_HOURS: SalaryRuleType.WORKER_HOURLY,
-  COOK_MONTHLY: SalaryRuleType.COOK_SALARY,
 };
 
 export const SALARY_RULE_DEFINITIONS: readonly SalaryRuleDefinition[] =
@@ -157,18 +120,6 @@ const salaryRuleVersionRawSchema = z.discriminatedUnion('ruleKey', [
     tierRate: z.array(rateText).min(1, '至少需要一个提成档位').max(20),
   }),
   baseInput.extend({
-    ruleKey: z.literal('CLEANER_HOURLY'),
-    hourlyRate: hourlyMoneyText,
-  }),
-  baseInput.extend({
-    ruleKey: z.literal('COOK_SPARE_HOURLY'),
-    hourlyRate: hourlyMoneyText,
-  }),
-  baseInput.extend({
-    ruleKey: z.literal('OT_MULTIPLIER'),
-    multiplier: multiplierText,
-  }),
-  baseInput.extend({
     ruleKey: z.literal('WORK_HOURS'),
     morningStart: timeText,
     morningEnd: timeText,
@@ -176,7 +127,6 @@ const salaryRuleVersionRawSchema = z.discriminatedUnion('ruleKey', [
     afternoonEnd: timeText,
     otStart: timeText,
   }),
-  baseInput.extend({ ruleKey: z.literal('COOK_MONTHLY'), monthlyBase: moneyText }),
 ]);
 
 export const salaryRuleVersionInputSchema = salaryRuleVersionRawSchema
@@ -231,7 +181,6 @@ export const salaryRuleVersionInputSchema = salaryRuleVersionRawSchema
     };
     switch (input.ruleKey) {
       case 'CS_BASE_SALARY':
-      case 'COOK_MONTHLY':
         return { ...common, ruleValue: { monthlyBase: numeric(input.monthlyBase) } };
       case 'CS_PERIOD_LENGTH':
         return { ...common, ruleValue: { months: input.months } };
@@ -246,11 +195,6 @@ export const salaryRuleVersionInputSchema = salaryRuleVersionRawSchema
             })),
           },
         };
-      case 'CLEANER_HOURLY':
-      case 'COOK_SPARE_HOURLY':
-        return { ...common, ruleValue: { hourlyRate: numeric(input.hourlyRate) } };
-      case 'OT_MULTIPLIER':
-        return { ...common, ruleValue: { multiplier: numeric(input.multiplier) } };
       case 'WORK_HOURS':
         return {
           ...common,
@@ -286,8 +230,6 @@ export function parseSalaryRuleVersionFormData(formData: FormData) {
     months: formData.get('months'),
     tierMinSales: formData.getAll('tierMinSales'),
     tierRate: formData.getAll('tierRate'),
-    hourlyRate: formData.get('hourlyRate'),
-    multiplier: formData.get('multiplier'),
     morningStart: formData.get('morningStart'),
     morningEnd: formData.get('morningEnd'),
     afternoonStart: formData.get('afternoonStart'),

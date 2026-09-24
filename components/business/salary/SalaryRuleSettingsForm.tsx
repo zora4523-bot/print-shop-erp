@@ -31,14 +31,10 @@ function tiersFrom(value: SalaryRuleValue | null | undefined): TierRow[] {
 function defaultValues(current: SalaryRuleSettingsData[SalaryRuleKey]) {
   const value = current?.ruleValue;
   const monthlyBase = value && 'monthlyBase' in value ? value.monthlyBase : undefined;
-  const hourlyRate = value && 'hourlyRate' in value ? value.hourlyRate : undefined;
-  const multiplier = value && 'multiplier' in value ? value.multiplier : undefined;
   const months = value && 'months' in value ? value.months : undefined;
   const workHours = value && 'morning' in value ? value : undefined;
   return {
     monthlyBase: valueAsText(monthlyBase),
-    hourlyRate: valueAsText(hourlyRate),
-    multiplier: valueAsText(multiplier),
     months: valueAsText(months),
     morningStart: workHours?.morning.start ?? '08:00',
     morningEnd: workHours?.morning.end ?? '12:00',
@@ -130,7 +126,7 @@ export function SalaryRuleSettingsForm({
         </p>
       </div>
 
-      {selectedKey === 'CS_BASE_SALARY' || selectedKey === 'COOK_MONTHLY' ? (
+      {selectedKey === 'CS_BASE_SALARY' ? (
         <Field label="每月固定工资（元）">
           <Input name="monthlyBase" inputMode="decimal" defaultValue={defaults.monthlyBase} required disabled={pending} />
         </Field>
@@ -187,16 +183,6 @@ export function SalaryRuleSettingsForm({
             增加档位
           </Button>
         </fieldset>
-      ) : null}
-      {selectedKey === 'CLEANER_HOURLY' || selectedKey === 'COOK_SPARE_HOURLY' ? (
-        <Field label="时薪（元/小时）">
-          <Input name="hourlyRate" inputMode="decimal" defaultValue={defaults.hourlyRate} required disabled={pending} />
-        </Field>
-      ) : null}
-      {selectedKey === 'OT_MULTIPLIER' ? (
-        <Field label="加班倍率">
-          <Input name="multiplier" inputMode="decimal" defaultValue={defaults.multiplier} required disabled={pending} />
-        </Field>
       ) : null}
       {selectedKey === 'WORK_HOURS' ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

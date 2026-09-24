@@ -376,7 +376,6 @@ function HourlySalaryDetail({
   payroll: HourlySalaryDetailData;
 }) {
   const workerType = payroll.payrollWorkerType;
-  const isCook = workerType === WorkerType.COOK;
   const dailyDetails = parseHourlyDailyDetails(payroll.dailyDetail);
 
   return (
@@ -401,32 +400,22 @@ function HourlySalaryDetail({
       <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
         <Metric label="正常工时" value={`${String(payroll.totalWorkHours)} 小时`} />
         <Metric
-          label={isCook ? '代班工时' : '加班工时'}
-          value={`${String(
-            isCook ? payroll.totalSpareHours : payroll.totalOtHours,
-          )} 小时`}
+          label="加班工时"
+          value={`${String(payroll.totalOtHours)} 小时`}
         />
         <Metric
-          label={isCook ? '代班时薪' : '正常时薪'}
+          label="正常时薪"
           value={`${formatRate(payroll.hourlyRate)} / 小时`}
         />
-        {isCook ? null : (
-          <Metric
-            label="加班倍率"
-            value={`${String(payroll.otMultiplier)} 倍`}
-          />
-        )}
+        <Metric
+          label="加班倍率"
+          value={`${String(payroll.otMultiplier)} 倍`}
+        />
       </section>
 
       <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
-        <Money
-          label={isCook ? '月薪' : '正常工时工资'}
-          value={payroll.baseSalary}
-        />
-        <Money
-          label={isCook ? '代班工资' : '加班工资'}
-          value={isCook ? payroll.spareSalary : payroll.otSalary}
-        />
+        <Money label="正常工时工资" value={payroll.baseSalary} />
+        <Money label="加班工资" value={payroll.otSalary} />
         <Money label="实发工资" value={payroll.totalSalary} strong />
       </section>
 
@@ -444,10 +433,7 @@ function HourlySalaryDetail({
                   {detail.date}
                 </p>
                 <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                  正常 {detail.normalHours} 小时 ·{' '}
-                  {isCook
-                    ? `代班 ${detail.spareHours} 小时`
-                    : `加班 ${detail.otHours} 小时`}
+                  正常 {detail.normalHours} 小时 · 加班 {detail.otHours} 小时
                 </p>
               </li>
             ))}
@@ -469,7 +455,6 @@ type HourlyDailyDetail = {
   date: string;
   normalHours: string;
   otHours: string;
-  spareHours: string;
 };
 
 function parseHourlyDailyDetails(value: unknown): HourlyDailyDetail[] {
@@ -483,7 +468,6 @@ function parseHourlyDailyDetails(value: unknown): HourlyDailyDetail[] {
         date: row.date,
         normalHours: String(row.normalHours ?? '0'),
         otHours: String(row.otHours ?? '0'),
-        spareHours: String(row.spareHours ?? '0'),
       },
     ];
   });

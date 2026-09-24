@@ -1,8 +1,3 @@
-export type SalaryMutationResult =
-  | { status: 'success' }
-  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
-  | { status: 'error'; message: string };
-
 export type CsPayrollPaymentResult =
   | {
       status: 'success';
@@ -45,13 +40,3 @@ export type SettleReadyCsResult =
     }
   | { status: 'error'; message: string };
 
-export type RecomputeHourlyResult =
-  | {
-      status: 'success';
-      month: string;
-      workerCount: number;
-      errorCount: number;
-      errors: Array<{ workerId: string; workerName: string; message: string }>;
-    }
-  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
-  | { status: 'error'; message: string };

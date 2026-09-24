@@ -111,7 +111,7 @@ pnpm dev
    - 三套薪资规则配置界面
    - 开机师傅日薪计算（调度时间以 `deploy/crontab.example` 为准）
    - 客服业绩周期累计 + 结算
-   - 时薪工工时录入 + 月结
+   - 员工考勤录入
 
 6. **应收账单**（3天）
    - 月度自动生成销售账单
@@ -265,10 +265,6 @@ P0 + P1 #2 期间建立的 cron 通道现有 10 个 endpoints，用 shared-secre
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/daily-salary
 
-# 时薪工月结
-printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
-  curl -X POST --header @- https://host/api/cron/hourly-payroll
-
 # 扫描已到期客服周期（每条结算推 CS_PERIOD_SETTLED 到规则绑定的单个授权共享群）
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/cs-settle
@@ -302,10 +298,9 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/production-alerts
 ```
 
-**手工带 body 重跑日薪 / 月结时会多一个 400**（2026-08-21 起）：`daily-salary` 的
-`body.date` 严格晚于上海日历今天、`hourly-payroll` 的 `body.month` 严格晚于上海本月时，
-直接返回 `400 { "error": "future date: <date>" }` / `{ "error": "future month: <month>" }`，
-不入队。crontab 里不带 body 的默认调用算的是「昨天 / 上月」，永远不会命中这个分支；
+**手工带 body 重跑日薪时会多一个 400**（2026-08-21 起）：`daily-salary` 的
+`body.date` 严格晚于上海日历今天时，直接返回 `400 { "error": "future date: <date>" }`，
+不入队。crontab 里不带 body 的默认调用算的是「昨天」，永远不会命中这个分支；
 `202 queued` / `200` / `401` / `503` 的既有形状一律不变。
 
 生产固定使用 `deploy/run-cron.sh` + 系统 crontab。同一个密钥必须存在两个

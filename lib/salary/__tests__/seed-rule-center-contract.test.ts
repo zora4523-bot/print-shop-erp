@@ -53,11 +53,7 @@ describe('seed.ts 规则中心数据保护', () => {
       'CS_BASE_SALARY',
       'CS_PERIOD_LENGTH',
       'CS_TIERS',
-      'CLEANER_HOURLY',
-      'COOK_SPARE_HOURLY',
-      'OT_MULTIPLIER',
       'WORK_HOURS',
-      'COOK_MONTHLY',
     ]);
   });
 

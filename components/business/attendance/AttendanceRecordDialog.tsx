@@ -18,7 +18,6 @@ type Props = {
   existing?: {
     normalHours: string;
     otHours: string;
-    spareHours: string;
     remark: string | null;
     workUnits: string;
     leaveUnits: string;
@@ -42,7 +41,6 @@ export function AttendanceRecordDialog({
 }: Props) {
   const [normal, setNormal] = useState(existing?.normalHours ?? '');
   const [ot, setOt] = useState(existing?.otHours ?? '');
-  const [spare, setSpare] = useState(existing?.spareHours ?? '');
   const [remark, setRemark] = useState(existing?.remark ?? '');
   const [workUnits, setWorkUnits] = useState(existing?.workUnits ?? '1');
   const [leaveUnits, setLeaveUnits] = useState(existing?.leaveUnits ?? '0');
@@ -60,17 +58,12 @@ export function AttendanceRecordDialog({
   // 重新挂载，同时避免在「保存中…」旁还显示过期的「已保存」。
   const state = pending ? null : recordState;
 
-  const isCook = workerType === WorkerType.COOK;
-  const usesHourlyFields =
-    workerType === WorkerType.PACKER ||
-    workerType === WorkerType.CLEANER ||
-    workerType === WorkerType.COOK;
+  const usesHourlyFields = workerType === WorkerType.PACKER;
 
   function onApplyFullDay() {
     if (!quickFill) return;
     setNormal(String(quickFill.normalHours));
     setOt('0');
-    setSpare('');
     setWorkUnits('1');
     setLeaveUnits('0');
     setLeaveType('');
@@ -83,7 +76,6 @@ export function AttendanceRecordDialog({
         date,
         normalHours: normal || '0',
         otHours: ot || '0',
-        spareHours: isCook ? (spare || '0') : '0',
         workUnits,
         leaveUnits,
         leaveType: leaveType || null,
@@ -95,7 +87,6 @@ export function AttendanceRecordDialog({
   function onMarkLeave() {
     setNormal('0');
     setOt('0');
-    setSpare('0');
     setWorkUnits('0');
     setLeaveUnits('1');
     setLeaveType('请假');
@@ -157,7 +148,7 @@ export function AttendanceRecordDialog({
       </div>
 
       {usesHourlyFields ? (
-        <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
           <NumberField
             label="正常工时"
             value={normal}
@@ -170,14 +161,6 @@ export function AttendanceRecordDialog({
             onChange={setOt}
             errors={fieldErr(state, 'otHours')}
           />
-          {isCook ? (
-          <NumberField
-            label="代班打包工时"
-            value={spare}
-            onChange={setSpare}
-            errors={fieldErr(state, 'spareHours')}
-          />
-          ) : null}
         </div>
       ) : null}
 
@@ -259,10 +242,6 @@ function workerTypeLabel(t: WorkerType | null): string {
   switch (t) {
     case WorkerType.PACKER:
       return '打包工';
-    case WorkerType.CLEANER:
-      return '清废工';
-    case WorkerType.COOK:
-      return '厨师';
     default:
       return t ?? '正式员工';
   }

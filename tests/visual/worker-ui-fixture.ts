@@ -72,7 +72,7 @@ function fixtureFor(namespace: string): WorkerUiFixture {
     salaryItemId: `${prefix}-salary-item`,
     adjustmentId: `${prefix}-adjustment`,
     salaryDate,
-    hourlyWorkerId: `${prefix}-long-cleaner`,
+    hourlyWorkerId: `${prefix}-long-packer`,
     csUserId: `${prefix}-cs-user`,
     csPeriodId: `${prefix}-cs-period`,
   };
@@ -89,7 +89,7 @@ async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
 }
 
 async function deleteUnusedHourlyWorker(db: Client, id: string): Promise<void> {
-  if (!/^e2e-worker-ui-[a-z0-9-]+-long-cleaner$/.test(id)) {
+  if (!/^e2e-worker-ui-[a-z0-9-]+-long-packer$/.test(id)) {
     throw new Error('Only the dedicated visual hourly worker may be cleaned up.');
   }
   const user = await db.query('SELECT id FROM "User" WHERE id = $1 FOR UPDATE', [id]);
@@ -194,8 +194,8 @@ export async function seedWorkerUiFixture(
 
       await db.query(
         `INSERT INTO "User" (id, username, password, role, "workerType", "displayName", "isActive", "createdAt", "updatedAt")
-         SELECT $1::text, $1::text::citext, password, 'WORKER'::"Role", 'CLEANER'::"WorkerType",
-                '长姓名清废师傅ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证筛选不会撑开小屏', FALSE, NOW(), NOW()
+         SELECT $1::text, $1::text::citext, password, 'WORKER'::"Role", 'PACKER'::"WorkerType",
+                '长姓名打包师傅ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证筛选不会撑开小屏', FALSE, NOW(), NOW()
          FROM "User" WHERE id = $2`,
         [fixture.hourlyWorkerId, adminId],
       );

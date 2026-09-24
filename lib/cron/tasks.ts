@@ -35,14 +35,9 @@ import {
   lockPieceworkSettlementsForDate,
   type PieceworkSettlementBatchResult,
 } from '../salary/piecework-settlement';
-import {
-  computeHourlyForAllInMonth,
-  HourlyBatchUnexpectedError,
-  type BatchHourlyResult,
-} from '../salary/hourly-aggregate';
 
 function logPartialBatchProgress(
-  task: 'daily-salary' | 'hourly-payroll' | 'generate-bills',
+  task: 'daily-salary' | 'generate-bills',
   committedCount: number,
   businessErrorCount: number,
 ): void {
@@ -109,31 +104,6 @@ export class DailySalaryBatchIncompleteError extends Error {
     this.name = 'DailySalaryBatchIncompleteError';
     this.partialResult = partialResult;
   }
-}
-
-export async function runHourlyPayrollTask(month: string, fence?: ExecutionFence) {
-  let unexpected: HourlyBatchUnexpectedError | null = null;
-  let result: BatchHourlyResult;
-  try {
-    result = await computeHourlyForAllInMonth(month, undefined, fence);
-  } catch (error) {
-    if (!(error instanceof HourlyBatchUnexpectedError)) throw error;
-    unexpected = error;
-    result = error.partialResult;
-  }
-  const { settled, errors } = result;
-  if (unexpected) {
-    logPartialBatchProgress('hourly-payroll', settled.length, errors.length);
-    throw unexpected;
-  }
-  return {
-    status: 'ok' as const,
-    month,
-    workerCount: settled.length,
-    errorCount: errors.length,
-    failed: errors.length,
-    errorCodes: errors.length > 0 ? ['HourlyAggregateError'] : [],
-  };
 }
 
 export async function runCsSettleTask(fence?: ExecutionFence) {

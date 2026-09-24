@@ -35,12 +35,6 @@ type PageProps = {
   searchParams: Promise<{ from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string }>;
 };
 
-const HOURLY_WORKER_TYPES = new Set<WorkerType>([
-  WorkerType.PACKER,
-  WorkerType.CLEANER,
-  WorkerType.COOK,
-]);
-
 export default async function WorkerSalaryPage({ searchParams }: PageProps) {
   const user = await requirePermission('salary:view:self');
   if (user.role !== Role.WORKER || !user.workerType) notFound();
@@ -67,15 +61,6 @@ export default async function WorkerSalaryPage({ searchParams }: PageProps) {
       </nav>
       {content}
     </div>;
-  }
-  if (HOURLY_WORKER_TYPES.has(user.workerType)) {
-    return (
-      <HourlySalaryContent
-        actor={actor}
-        workerType={user.workerType}
-        searchParams={sp}
-      />
-    );
   }
   notFound();
 }
@@ -311,7 +296,6 @@ async function HourlySalaryContent({
         <ul className="space-y-3">
           {payrolls.map((payroll) => {
             const payrollWorkerType = payroll.payrollWorkerType;
-            const isCook = payrollWorkerType === WorkerType.COOK;
             return (
             <li key={payroll.id}>
               <Link
@@ -332,14 +316,10 @@ async function HourlySalaryContent({
                       </Badge>
                     </div>
                     <p className="worker-wrap-anywhere mt-2 text-sm text-muted-foreground">
-                      {isCook
-                        ? `工作 ${String(payroll.totalWorkHours)} 小时 · 代班 ${String(payroll.totalSpareHours)} 小时`
-                        : `正常 ${String(payroll.totalWorkHours)} 小时 · 加班 ${String(payroll.totalOtHours)} 小时`}
+                      {`正常 ${String(payroll.totalWorkHours)} 小时 · 加班 ${String(payroll.totalOtHours)} 小时`}
                     </p>
                     <p className="worker-wrap-anywhere mt-1 text-sm text-muted-foreground">
-                      {isCook
-                        ? `月薪 ${formatMoney(payroll.baseSalary)} · 代班费 ${formatMoney(payroll.spareSalary)}`
-                        : `正常工资 ${formatMoney(payroll.baseSalary)} · 加班工资 ${formatMoney(payroll.otSalary)}`}
+                      {`正常工资 ${formatMoney(payroll.baseSalary)} · 加班工资 ${formatMoney(payroll.otSalary)}`}
                     </p>
                   </div>
                   <SalaryAmount value={payroll.totalSalary} />

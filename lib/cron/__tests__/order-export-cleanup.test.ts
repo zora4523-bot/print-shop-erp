@@ -47,10 +47,6 @@ vi.mock('@/lib/salary/daily', () => ({
   DailyBatchUnexpectedError: class extends Error {},
   computeDailyForAllMachineWorkers: vi.fn(),
 }));
-vi.mock('@/lib/salary/hourly-aggregate', () => ({
-  HourlyBatchUnexpectedError: class extends Error {},
-  computeHourlyForAllInMonth: vi.fn(),
-}));
 
 import { runOrderExportCleanupTask } from '../tasks';
 

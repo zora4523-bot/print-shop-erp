@@ -13,7 +13,6 @@ export const lightBackgroundJobHandlers: BackgroundJobHandlers = {
   [BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST]:
     handleNotificationChannelTestJob,
   [BACKGROUND_JOB_TYPES.CRON_DAILY_SALARY]: handleCronJob,
-  [BACKGROUND_JOB_TYPES.CRON_HOURLY_PAYROLL]: handleCronJob,
   [BACKGROUND_JOB_TYPES.CRON_CS_SETTLE]: handleCronJob,
   [BACKGROUND_JOB_TYPES.CRON_GENERATE_BILLS]: handleCronJob,
   [BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE]: handleCronJob,

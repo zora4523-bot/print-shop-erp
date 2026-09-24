@@ -374,12 +374,12 @@ describe('worker salary visibility', () => {
     },
   );
 
-  it('rejects non-operation workers before querying the new ledger', async () => {
+  it('rejects workers without a worker type before querying the new ledger', async () => {
     await expect(
       listWorkerPieceworkSettlementsForPortal({
-        id: 'cleaner-1',
+        id: 'untyped-1',
         role: Role.WORKER,
-        workerType: WorkerType.CLEANER,
+        workerType: null,
       }),
     ).rejects.toBeInstanceOf(WorkerPortalError);
     expect(listSettlementMock).not.toHaveBeenCalled();
@@ -401,13 +401,9 @@ describe('worker salary visibility', () => {
     );
   });
 
-  it.each([
-    WorkerType.PACKER,
-    WorkerType.CLEANER,
-    WorkerType.COOK,
-  ])('lists only the current %s worker monthly payrolls', async (workerType) => {
+  it('lists only the current packer archived monthly payrolls', async () => {
     await listWorkerHourlyPayrolls(
-      { id: 'hourly-a', role: Role.WORKER, workerType },
+      { id: 'hourly-a', role: Role.WORKER, workerType: WorkerType.PACKER },
       { fromMonth: '2026-01', toMonth: '2026-06' },
     );
 
@@ -443,13 +439,8 @@ describe('worker salary visibility', () => {
       id: 'payroll-1',
       salaryRuleSnapshot: { workerType: WorkerType.PACKER },
     });
-    const currentCook = { ...packer, workerType: WorkerType.COOK };
-
-    const list = await listWorkerHourlyPayrolls(currentCook);
-    const detail = await getWorkerHourlyPayrollDetail(
-      'payroll-1',
-      currentCook,
-    );
+    const list = await listWorkerHourlyPayrolls(packer);
+    const detail = await getWorkerHourlyPayrollDetail('payroll-1', packer);
 
     expect(list[0].payrollWorkerType).toBe(WorkerType.PACKER);
     expect(detail?.payrollWorkerType).toBe(WorkerType.PACKER);

@@ -16,6 +16,7 @@ const { dbMock } = vi.hoisted(() => {
     },
     customerServiceCommission: { aggregate: vi.fn(), findMany: vi.fn() },
     salaryPeriod: { count: vi.fn() },
+    // The historical hourly archive is no longer part of the summary.
     hourlyWorkerPayroll: {
       groupBy: vi.fn(),
       aggregate: vi.fn(),
@@ -108,16 +109,6 @@ describe('getSalaryIndexSummary', () => {
     dbMock.salaryPeriod.count
       .mockResolvedValueOnce(1) // ready to settle
       .mockResolvedValueOnce(3); // active
-    // Hourly current month: 3 rows totaling 6368 (2 unpaid = 4300)
-    dbMock.hourlyWorkerPayroll.groupBy.mockResolvedValue([
-      { isPaid: true, _count: { _all: 1 }, _sum: { totalSalary: '2068.00' } },
-      { isPaid: false, _count: { _all: 2 }, _sum: { totalSalary: '4300.00' } },
-    ]);
-    // All-time unpaid: 4 rows totaling 8400
-    dbMock.hourlyWorkerPayroll.aggregate.mockResolvedValue({
-      _count: { _all: 4 },
-      _sum: { totalSalary: '8400.00' },
-    });
 
     const s = await getSalaryIndexSummary();
 
@@ -154,12 +145,6 @@ describe('getSalaryIndexSummary', () => {
     expect(s.csReadyToSettle).toBe(1);
     expect(s.csActivePeriods).toBe(3);
 
-    // Hourly month total = 2068 + 2232 + 2068 = 6368; unpaid = 4300
-    expect(s.hourlyCurrentMonth.count).toBe(3);
-    expect(s.hourlyCurrentMonth.totalSalary).toBe('6368.00');
-    expect(s.hourlyCurrentMonth.unpaidTotal).toBe('4300.00');
-    expect(s.hourlyUnpaidAllTime.count).toBe(4);
-    expect(s.hourlyUnpaidAllTime.totalSalary).toBe('8400.00');
     expect(s.currentMonth).toMatch(/^\d{4}-\d{2}$/);
   });
 
@@ -172,15 +157,12 @@ describe('getSalaryIndexSummary', () => {
     expect(dbMock.pieceworkSettlement.findMany).not.toHaveBeenCalled();
     expect(dbMock.customerServiceCommission.findMany).not.toHaveBeenCalled();
     expect(dbMock.hourlyWorkerPayroll.findMany).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.groupBy).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.aggregate).not.toHaveBeenCalled();
     expect(dbMock.dailyWorkerSalary.aggregate).toHaveBeenCalledWith({
       where: { isPaid: false },
       _count: { _all: true },
       _sum: { actualSalary: true },
-    });
-    expect(dbMock.hourlyWorkerPayroll.aggregate).toHaveBeenCalledWith({
-      where: { isPaid: false },
-      _count: { _all: true },
-      _sum: { totalSalary: true },
     });
     expect(dbMock.pieceworkSettlement.aggregate).toHaveBeenCalledWith({
       where: { status: { not: 'PAID' } },
@@ -191,11 +173,6 @@ describe('getSalaryIndexSummary', () => {
       by: ['isPaid'],
       _count: { _all: true },
       _sum: { actualSalary: true },
-    });
-    expect(dbMock.hourlyWorkerPayroll.groupBy.mock.calls[0][0]).toMatchObject({
-      by: ['isPaid'],
-      _count: { _all: true },
-      _sum: { totalSalary: true },
     });
   });
 
@@ -210,25 +187,17 @@ describe('getSalaryIndexSummary', () => {
     expect(s.csUnpaid.count).toBe(0);
     expect(s.csUnpaid.totalIncome).toBe('0.00');
     expect(s.csReadyToSettle).toBe(0);
-    expect(s.hourlyCurrentMonth.totalSalary).toBe('0.00');
-    expect(s.hourlyUnpaidAllTime.totalSalary).toBe('0.00');
   });
 
   it('handles a single bucket (all paid / all unpaid)', async () => {
     dbMock.dailyWorkerSalary.groupBy.mockResolvedValue([
       { isPaid: true, _count: { _all: 4 }, _sum: { actualSalary: '800.00' } },
     ]);
-    dbMock.hourlyWorkerPayroll.groupBy.mockResolvedValue([
-      { isPaid: false, _count: { _all: 2 }, _sum: { totalSalary: '4200.00' } },
-    ]);
 
     const s = await getSalaryIndexSummary();
     expect(s.dailyToday.count).toBe(4);
     expect(s.dailyToday.actualTotal).toBe('800.00');
     expect(s.dailyToday.unpaidTotal).toBe('0.00');
-    expect(s.hourlyCurrentMonth.count).toBe(2);
-    expect(s.hourlyCurrentMonth.totalSalary).toBe('4200.00');
-    expect(s.hourlyCurrentMonth.unpaidTotal).toBe('4200.00');
   });
 
   it('uses Asia/Shanghai date for today (UTC midnight date column)', async () => {

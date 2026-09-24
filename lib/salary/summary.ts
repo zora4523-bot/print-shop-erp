@@ -45,17 +45,6 @@ export type SalaryIndexSummary = {
   csReadyToSettle: number;
   // 客服活跃周期统计：每位客服一条 IN_PROGRESS
   csActivePeriods: number;
-  // 时薪工本月月结
-  hourlyCurrentMonth: {
-    count: number;
-    totalSalary: string;
-    unpaidTotal: string;
-  };
-  // 所有时薪工月结未发合计
-  hourlyUnpaidAllTime: {
-    count: number;
-    totalSalary: string;
-  };
 };
 
 export async function getSalaryIndexSummary(
@@ -86,8 +75,6 @@ export async function getSalaryIndexSummary(
     csUnpaidAgg,
     csReadyCount,
     csActiveCount,
-    hourlyMonthGroups,
-    hourlyUnpaidAgg,
   ] = await Promise.all([
     db.pieceworkSettlement.groupBy({
       by: ['status'],
@@ -140,26 +127,11 @@ export async function getSalaryIndexSummary(
     db.salaryPeriod.count({
       where: { status: SalaryPeriodStatus.IN_PROGRESS },
     }),
-    db.hourlyWorkerPayroll.groupBy({
-      by: ['isPaid'],
-      where: { month },
-      _count: { _all: true },
-      _sum: { totalSalary: true },
-    }),
-    db.hourlyWorkerPayroll.aggregate({
-      where: { isPaid: false },
-      _count: { _all: true },
-      _sum: { totalSalary: true },
-    }),
   ]);
 
   const dailyToday = foldPaidGroups(
     dailyTodayGroups,
     (group) => group._sum.actualSalary,
-  );
-  const hourlyMonth = foldPaidGroups(
-    hourlyMonthGroups,
-    (group) => group._sum.totalSalary,
   );
   const csUnpaidTotal = decimalFromSum(csUnpaidAgg._sum.monthlyBaseTotal)
     .minus(decimalFromSum(csUnpaidAgg._sum.paidBase))
@@ -206,15 +178,6 @@ export async function getSalaryIndexSummary(
     },
     csReadyToSettle: csReadyCount,
     csActivePeriods: csActiveCount,
-    hourlyCurrentMonth: {
-      count: hourlyMonth.count,
-      totalSalary: hourlyMonth.total.toFixed(2),
-      unpaidTotal: hourlyMonth.unpaid.toFixed(2),
-    },
-    hourlyUnpaidAllTime: {
-      count: hourlyUnpaidAgg._count._all,
-      totalSalary: decimalFromSum(hourlyUnpaidAgg._sum.totalSalary).toFixed(2),
-    },
   };
 }
 

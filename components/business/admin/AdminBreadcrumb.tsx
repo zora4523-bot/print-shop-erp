@@ -49,7 +49,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   pigsty: 'Pigsty 运维',
   salary: '薪资',
   daily: '计件工资',
-  hourly: '时薪工月结',
+  hourly: '历史时薪档案',
   cs: '客服周期',
   scheduling: '排产',
   outsource: '外协',

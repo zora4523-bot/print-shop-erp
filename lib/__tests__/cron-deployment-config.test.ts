@@ -9,7 +9,6 @@ const EXPECTED_ENDPOINTS = [
   'cs-settle',
   'daily-salary',
   'generate-bills',
-  'hourly-payroll',
   'order-export-cleanup',
   'order-overdue',
   'outsource-overdue',
@@ -189,9 +188,9 @@ it('keeps the deployment guide crontab template in sync with deploy/crontab.exam
   expect(scheduleLines(cron)).toHaveLength(EXPECTED_ENDPOINTS.length);
 });
 
-it('runs hourly payroll ten minutes after the Shanghai month boundary', async () => {
+it('runs bill generation after the Shanghai month boundary and no hourly payroll', async () => {
   const cron = await readFile(resolve('deploy/crontab.example'), 'utf8');
-  expect(cron).toMatch(/^10 0 1 \* \* .* hourly-payroll$/m);
+  expect(cron).not.toMatch(/hourly-payroll/);
   expect(cron).toMatch(/^40 0 1 \* \* .* generate-bills$/m);
 });
 

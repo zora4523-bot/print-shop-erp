@@ -9,10 +9,9 @@ const { dbMock, attendanceState } = vi.hoisted(() => {
     workerId: 'worker-paid',
     date: new Date('2026-05-17T00:00:00.000Z'),
     roleSnapshot: 'WORKER',
-    workerTypeSnapshot: 'CLEANER',
+    workerTypeSnapshot: 'PACKER',
     normalHours: '8.00',
     otHours: '0.00',
-    spareHours: '0.00',
     workUnits: '1.0',
     leaveUnits: '0.0',
     leaveType: null,
@@ -36,7 +35,6 @@ const { dbMock, attendanceState } = vi.hoisted(() => {
     },
     hourlyWorkerPayroll: {
       findUnique: vi.fn(),
-      deleteMany: vi.fn(),
     },
     $executeRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -59,13 +57,12 @@ const { dbMock, attendanceState } = vi.hoisted(() => {
   mock.user.findUnique.mockResolvedValue({
     id: 'worker-paid',
     role: 'WORKER',
-    workerType: 'CLEANER',
+    workerType: 'PACKER',
     isActive: true,
-    displayName: '清废员工',
+    displayName: '打包员工',
     employmentType: 'FULL_TIME',
   });
   mock.hourlyWorkerPayroll.findUnique.mockResolvedValue(paidPayroll);
-  mock.hourlyWorkerPayroll.deleteMany.mockResolvedValue({ count: 1 });
   mock.$executeRaw.mockResolvedValue(undefined);
 
   return { dbMock: mock, attendanceState };
@@ -99,9 +96,6 @@ beforeEach(() => {
     month: '2026-05',
     isPaid: true,
   });
-  dbMock.hourlyWorkerPayroll.deleteMany
-    .mockReset()
-    .mockResolvedValue({ count: 1 });
   dbMock.$executeRaw.mockClear();
 });
 
@@ -123,7 +117,7 @@ describe('removeAttendance — paid payroll regression', () => {
       rowExists: attendanceState.rowExists,
     }).toEqual({
       isAttendanceError: true,
-      message: expect.stringMatching(/已发|发放/),
+      message: expect.stringMatching(/存档.*冻结/),
       deleteCalls: 0,
       rowExists: true,
     });
@@ -145,7 +139,6 @@ describe('removeAttendance — paid payroll regression', () => {
     ).rejects.toBeInstanceOf(AttendanceError);
 
     expect(dbMock.attendance.upsert).not.toHaveBeenCalled();
-    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
   });
 
   it('rethrows a non-not-found Prisma failure instead of reporting removed=false', async () => {

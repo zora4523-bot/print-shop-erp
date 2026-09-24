@@ -77,7 +77,7 @@ describe('salary rule editor validation', () => {
 
   it('rejects invalid Shanghai calendar dates and negative money', () => {
     const result = parseSalaryRuleVersionFormData(form({
-      ruleKey: 'CLEANER_HOURLY', effectiveFrom: '2026-02-31T09:30', hourlyRate: '-1',
+      ruleKey: 'CS_BASE_SALARY', effectiveFrom: '2026-02-31T09:30', monthlyBase: '-1',
     }));
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.issues.length).toBeGreaterThanOrEqual(2);
@@ -91,58 +91,18 @@ describe('salary rule editor validation', () => {
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.issues.some((issue) => issue.path.join('.') === 'otStart')).toBe(true);
   });
-
-  it('accepts a 1.5 overtime multiplier and rejects zero or database overflow', () => {
-    const accepted = parseSalaryRuleVersionFormData(form({
-      ruleKey: 'OT_MULTIPLIER',
-      effectiveFrom: '2026-08-07T09:30',
-      multiplier: '1.5',
-    }));
-    expect(accepted.success).toBe(true);
-    if (accepted.success) {
-      expect(accepted.data.ruleValue).toEqual({ multiplier: 1.5 });
-    }
-
-    for (const multiplier of ['0', '100']) {
-      expect(
-        parseSalaryRuleVersionFormData(form({
-          ruleKey: 'OT_MULTIPLIER',
-          effectiveFrom: '2026-08-07T09:30',
-          multiplier,
-        })).success,
-        multiplier,
-      ).toBe(false);
-    }
-  });
-
-  it('closes hourly rule input to HourlyWorkerPayroll Decimal(6,2)', () => {
-    for (const [hourlyRate, accepted] of [
-      ['9999.99', true],
-      ['10000', false],
-      ['99999999.99', false],
-    ] as const) {
-      const result = parseSalaryRuleVersionFormData(
-        form({
-          ruleKey: 'CLEANER_HOURLY',
-          effectiveFrom: '2026-08-07T09:30',
-          hourlyRate,
-        }),
-      );
-      expect(result.success, hourlyRate).toBe(accepted);
-    }
-  });
 });
 
 describe('createSalaryRuleVersion', () => {
   it('serializes writers, closes an overlapping prior version, writes the next boundary and audit record', async () => {
     txMock.salaryRule.findUnique.mockResolvedValue(null);
     txMock.salaryRule.findFirst.mockResolvedValue({ effectiveFrom: new Date('2026-10-01T00:00:00.000Z') });
-    txMock.salaryRule.findMany.mockResolvedValue([{ id: 'old', ruleValue: { hourlyRate: 11 }, effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null, remark: null }]);
+    txMock.salaryRule.findMany.mockResolvedValue([{ id: 'old', ruleValue: { monthlyBase: 2800 }, effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null, remark: null }]);
     txMock.salaryRule.create.mockResolvedValue({
-      id: 'new', ruleType: SalaryRuleType.WORKER_HOURLY, ruleKey: 'CLEANER_HOURLY', ruleValue: { hourlyRate: 12 },
+      id: 'new', ruleType: SalaryRuleType.CS_COMMISSION, ruleKey: 'CS_BASE_SALARY', ruleValue: { monthlyBase: 3000 },
       effectiveFrom: new Date('2026-08-07T01:30:00.000Z'), effectiveTo: new Date('2026-10-01T00:00:00.000Z'), remark: '调薪',
     });
-    const parsed = parseSalaryRuleVersionFormData(form({ ruleKey: 'CLEANER_HOURLY', effectiveFrom: '2026-08-07T09:30', hourlyRate: '12', remark: '调薪' }));
+    const parsed = parseSalaryRuleVersionFormData(form({ ruleKey: 'CS_BASE_SALARY', effectiveFrom: '2026-08-07T09:30', monthlyBase: '3000', remark: '调薪' }));
     if (!parsed.success) throw parsed.error;
 
     await createSalaryRuleVersion(parsed.data, actor);
@@ -168,15 +128,15 @@ describe('createSalaryRuleVersion', () => {
 
   it('rejects duplicate version timestamps before changing an old row', async () => {
     txMock.salaryRule.findUnique.mockResolvedValue({ id: 'existing' });
-    const parsed = parseSalaryRuleVersionFormData(form({ ruleKey: 'CLEANER_HOURLY', effectiveFrom: '2026-08-07T09:30', hourlyRate: '12' }));
+    const parsed = parseSalaryRuleVersionFormData(form({ ruleKey: 'CS_BASE_SALARY', effectiveFrom: '2026-08-07T09:30', monthlyBase: '3000' }));
     if (!parsed.success) throw parsed.error;
     await expect(createSalaryRuleVersion(parsed.data, actor)).rejects.toThrow('同一生效时间');
     expect(txMock.salaryRule.updateMany).not.toHaveBeenCalled();
   });
 
   it('uses a stable per-rule lock key so unrelated salary rules do not share a lock', () => {
-    expect(salaryRuleLockKey(SalaryRuleType.WORKER_HOURLY, 'CLEANER_HOURLY')).not.toBe(
-      salaryRuleLockKey(SalaryRuleType.WORKER_HOURLY, 'COOK_SPARE_HOURLY'),
+    expect(salaryRuleLockKey(SalaryRuleType.WORKER_HOURLY, 'WORK_HOURS')).not.toBe(
+      salaryRuleLockKey(SalaryRuleType.CS_COMMISSION, 'CS_BASE_SALARY'),
     );
   });
 });
@@ -185,12 +145,14 @@ describe('listSalaryRuleSettings', () => {
   it('selects only the newest currently-effective version for each known key', async () => {
     const now = new Date('2026-08-07T00:00:00.000Z');
     dbMock.salaryRule.findMany.mockResolvedValue([
-      { id: 'new', ruleType: SalaryRuleType.WORKER_HOURLY, ruleKey: 'CLEANER_HOURLY', ruleValue: { hourlyRate: 12 }, effectiveFrom: now, effectiveTo: null, remark: 'new' },
-      { id: 'old', ruleType: SalaryRuleType.WORKER_HOURLY, ruleKey: 'CLEANER_HOURLY', ruleValue: { hourlyRate: 11 }, effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null, remark: 'old' },
+      { id: 'new', ruleType: SalaryRuleType.CS_COMMISSION, ruleKey: 'CS_BASE_SALARY', ruleValue: { monthlyBase: 3000 }, effectiveFrom: now, effectiveTo: null, remark: 'new' },
+      { id: 'old', ruleType: SalaryRuleType.CS_COMMISSION, ruleKey: 'CS_BASE_SALARY', ruleValue: { monthlyBase: 2800 }, effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null, remark: 'old' },
+      { id: 'retired', ruleType: SalaryRuleType.WORKER_HOURLY, ruleKey: 'PACKER_HOURLY', ruleValue: { hourlyRate: 11 }, effectiveFrom: now, effectiveTo: null, remark: 'retired' },
     ]);
     const settings = await listSalaryRuleSettings(now);
-    expect(settings.CLEANER_HOURLY?.id).toBe('new');
-    expect(settings.COOK_MONTHLY).toBeNull();
+    expect(settings.CS_BASE_SALARY?.id).toBe('new');
+    expect(settings.WORK_HOURS).toBeNull();
+    expect(Object.keys(settings)).not.toContain('PACKER_HOURLY');
     expect(dbMock.salaryRule.findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { effectiveFrom: 'desc' } }));
   });
 });

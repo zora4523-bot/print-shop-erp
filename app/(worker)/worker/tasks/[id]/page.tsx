@@ -69,7 +69,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
   try {
     operation = await getProductionOperationForReporter(id, actor);
   } catch (error) {
-    // 旧工资/审计链接可能属于清废等新计件域未定义的岗位。
+    // 旧工资/审计链接可能属于新计件域未定义的历史任务。
     // 只在账号没有新工序 lane 时允许继续查旧任务；其他报工错误不吞。
     if (
       !(error instanceof OperationReportingError) ||

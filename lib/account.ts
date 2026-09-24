@@ -20,10 +20,7 @@ import {
   monthlySalaryWindowWithinEmployment,
   type EmploymentWindow,
 } from './salary/employment';
-import {
-  hourlyPayrollLockKey,
-  salaryIdentityLockKey,
-} from './salary/hourly-lock';
+import { salaryIdentityLockKey } from './salary/hourly-lock';
 import {
   acquireSalaryRuleSnapshotReadLock,
   getActiveRuleValue,
@@ -89,12 +86,9 @@ type TxClient = {
   hourlyWorkerPayroll: {
     findMany: (args: {
       where: { workerId: string };
-      select: { id: true; month: true; isPaid: true };
+      select: { month: true };
       orderBy: { month: 'asc' };
-    }) => Promise<Array<{ id: string; month: string; isPaid: boolean }>>;
-    deleteMany: (args: {
-      where: { workerId: string; isPaid: false };
-    }) => Promise<{ count: number }>;
+    }) => Promise<Array<{ month: string }>>;
   };
 };
 
@@ -150,63 +144,34 @@ function sameEmploymentCoverageForPayrollMonth(
 }
 
 /**
- * Identity edits invalidate every unpaid hourly derivative for the user.
- *
- * The caller already holds salaryIdentityLockKey(userId). We discover all
- * existing month coordinates, lock them in lexical YYYY-MM order, then re-read
- * before deciding. This makes a concurrent mark-paid operation linearizable:
- * either the account edit deletes the unpaid row first, or it observes the
- * committed paid snapshot and preserves it.
+ * Historical PACKER hourly payroll rows are a read-only archive: nothing
+ * recomputes them any more. A direct edit of a worker's employment dates must
+ * not silently change the eligible days of an archived month.
  */
-async function invalidateUnpaidHourlyPayrollsInTx(
+async function assertHourlyArchiveCoverageUnchangedInTx(
   tx: TxClient,
   userId: string,
-  options: {
-    employmentDatesChanged: boolean;
-    previousEmployment: EmploymentWindow;
-    nextEmployment: EmploymentWindow;
-  },
+  previousEmployment: EmploymentWindow,
+  nextEmployment: EmploymentWindow,
 ): Promise<void> {
-  const locators = await tx.hourlyWorkerPayroll.findMany({
+  const archived = await tx.hourlyWorkerPayroll.findMany({
     where: { workerId: userId },
-    select: { id: true, month: true, isPaid: true },
+    select: { month: true },
     orderBy: { month: 'asc' },
   });
-  if (locators.length === 0) return;
-
-  const months = [...new Set(locators.map((row) => row.month))].sort();
-  for (const month of months) {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyPayrollLockKey(
-      userId,
-      month,
-    )}))`;
-  }
-
-  const currentRows = await tx.hourlyWorkerPayroll.findMany({
-    where: { workerId: userId },
-    select: { id: true, month: true, isPaid: true },
-    orderBy: { month: 'asc' },
-  });
-
-  if (options.employmentDatesChanged) {
-    const excludedPaid = currentRows.find((row) => {
-      if (!row.isPaid) return false;
-      return !sameEmploymentCoverageForPayrollMonth(
+  const changed = archived.find(
+    (row) =>
+      !sameEmploymentCoverageForPayrollMonth(
         row.month,
-        options.previousEmployment,
-        options.nextEmployment,
-      );
-    });
-    if (excludedPaid) {
-      throw new AccountInvariantError(
-        `已发放的 ${excludedPaid.month} 时薪工资所覆盖的雇佣日期会变化，不能修改雇佣日期`,
-      );
-    }
+        previousEmployment,
+        nextEmployment,
+      ),
+  );
+  if (changed) {
+    throw new AccountInvariantError(
+      `历史时薪月结存档 ${changed.month} 所覆盖的雇佣日期会变化，不能修改雇佣日期`,
+    );
   }
-
-  await tx.hourlyWorkerPayroll.deleteMany({
-    where: { workerId: userId, isPaid: false },
-  });
 }
 
 async function assertCsPeriodHistoryWithinEmploymentInTx(
@@ -623,19 +588,11 @@ export async function updateUser(
         ? (data.employmentEndDate ?? null)
         : null;
     const roleChanging = data.role !== target.role;
-    const workerTypeChanging = nextWorkerType !== target.workerType;
-    const employmentTypeChanging =
-      nextEmploymentType !== target.employmentType;
     const employmentChanging =
       (nextEmploymentStartDate?.getTime() ?? null) !==
         (target.employmentStartDate?.getTime() ?? null) ||
       (nextEmploymentEndDate?.getTime() ?? null) !==
         (target.employmentEndDate?.getTime() ?? null);
-    const hourlyIdentityChanging =
-      roleChanging ||
-      workerTypeChanging ||
-      employmentTypeChanging ||
-      employmentChanging;
     const currentWorkerEmploymentChanging =
       !roleChanging &&
       target.role === Role.WORKER &&
@@ -676,24 +633,22 @@ export async function updateUser(
         employmentEndDate: nextEmploymentEndDate,
       });
     }
-    // Global order: identity -> CS (when applicable) -> worker-month(s).
-    // Invalidating all unpaid rows also covers zero-attendance COOK monthly
-    // salary, whose amount can become stale solely from an identity change.
-    if (hourlyIdentityChanging) {
-      await invalidateUnpaidHourlyPayrollsInTx(txClient, id, {
-        // Paid rows are immutable historical snapshots across role changes.
-        // Only a direct edit of a current worker's employment dates can
-        // retroactively alter the exact eligible dates of that paid month.
-        employmentDatesChanged: currentWorkerEmploymentChanging,
-        previousEmployment: {
+    // Archived rows are immutable snapshots across role changes. Only a direct
+    // edit of a current worker's employment dates can retroactively alter the
+    // eligible dates of an archived month.
+    if (currentWorkerEmploymentChanging) {
+      await assertHourlyArchiveCoverageUnchangedInTx(
+        txClient,
+        id,
+        {
           employmentStartDate: target.employmentStartDate,
           employmentEndDate: target.employmentEndDate,
         },
-        nextEmployment: {
+        {
           employmentStartDate: nextEmploymentStartDate,
           employmentEndDate: nextEmploymentEndDate,
         },
-      });
+      );
     }
     const updated = await txClient.user.update({
       where: { id },

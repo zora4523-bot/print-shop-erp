@@ -4,7 +4,6 @@ import {
   runCsSettleTask,
   runDailySalaryTask,
   runGenerateBillsTask,
-  runHourlyPayrollTask,
   runOrderExportCleanupTask,
   runOrderOverdueTask,
   runOutsourceOverdueTask,
@@ -20,7 +19,6 @@ import {
 
 const CRON_TYPES: ReadonlySet<string> = new Set([
   BACKGROUND_JOB_TYPES.CRON_DAILY_SALARY,
-  BACKGROUND_JOB_TYPES.CRON_HOURLY_PAYROLL,
   BACKGROUND_JOB_TYPES.CRON_CS_SETTLE,
   BACKGROUND_JOB_TYPES.CRON_GENERATE_BILLS,
   BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE,
@@ -61,8 +59,6 @@ export async function handleCronJob(
   switch (job.type) {
     case BACKGROUND_JOB_TYPES.CRON_DAILY_SALARY:
       return runDailySalaryTask(requiredString(payload.date), fence);
-    case BACKGROUND_JOB_TYPES.CRON_HOURLY_PAYROLL:
-      return runHourlyPayrollTask(requiredString(payload.month), fence);
     case BACKGROUND_JOB_TYPES.CRON_CS_SETTLE:
       return runCsSettleTask(fence);
     case BACKGROUND_JOB_TYPES.CRON_GENERATE_BILLS:

@@ -56,7 +56,6 @@ describe('attendance schema', () => {
     date: '2026-08-30',
     normalHours: 16,
     otHours: 8,
-    spareHours: 0,
     workUnits: 1,
     leaveUnits: 0,
   };

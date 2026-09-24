@@ -64,7 +64,6 @@ describe('recordAttendanceAction', () => {
         date: '2026-05-01',
         normalHours: '8',
         otHours: '0',
-        spareHours: '0',
       }),
     ).rejects.toBeInstanceOf(UnauthorizedError);
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith('attendance:manage');
@@ -77,7 +76,6 @@ describe('recordAttendanceAction', () => {
       date: '2026-02-31',
       normalHours: '8',
       otHours: '0',
-      spareHours: '0',
     });
     expect(r.status).toBe('invalid');
   });
@@ -89,7 +87,6 @@ describe('recordAttendanceAction', () => {
       date: '2026-05-01',
       normalHours: '8',
       otHours: '0',
-      spareHours: '0',
     });
     expect(r.status).toBe('invalid');
   });
@@ -102,7 +99,6 @@ describe('recordAttendanceAction', () => {
       date: '2026-05-01',
       normalHours: '8',
       otHours: '2.5',
-      spareHours: '',
       remark: '加班到 20:30',
     });
     expect(r.status).toBe('success');
@@ -112,7 +108,6 @@ describe('recordAttendanceAction', () => {
     expect(args[2]).toEqual({
       normalHours: 8,
       otHours: 2.5,
-      spareHours: 0, // empty string → 0
       workUnits: 1,
       leaveUnits: 0,
       leaveType: undefined,
@@ -128,7 +123,6 @@ describe('recordAttendanceAction', () => {
       date: '2026-05-01',
       normalHours: '4',
       otHours: '0',
-      spareHours: '0',
       workUnits: '0.5',
       leaveUnits: '0.5',
       leaveType: '事假',
@@ -148,7 +142,6 @@ describe('recordAttendanceAction', () => {
       date: '2026-05-01',
       normalHours: '-1',
       otHours: '0',
-      spareHours: '0',
     });
     expect(r.status).toBe('invalid');
   });
@@ -160,7 +153,6 @@ describe('recordAttendanceAction', () => {
       date: '2026-05-01',
       normalHours: '88',
       otHours: '0',
-      spareHours: '0',
     });
     expect(r.status).toBe('invalid');
   });
@@ -175,7 +167,6 @@ describe('recordAttendanceAction', () => {
       date: '2026-05-01',
       normalHours: '8',
       otHours: '0',
-      spareHours: '0',
     });
     expect(r.status).toBe('error');
     if (r.status === 'error') expect(r.message).toMatch(/在职员工/);
@@ -189,7 +180,6 @@ describe('recordAttendanceAction', () => {
       date: '2026-05-01',
       normalHours: '8',
       otHours: '0',
-      spareHours: '0',
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/attendance');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary');

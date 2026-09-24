@@ -18,7 +18,6 @@ const { dbMock } = vi.hoisted(() => {
     },
     hourlyWorkerPayroll: {
       findUnique: vi.fn(),
-      deleteMany: vi.fn(),
     },
     $executeRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -76,7 +75,6 @@ beforeEach(() => {
     date: create.date,
     normalHours: create.normalHours,
     otHours: create.otHours,
-    spareHours: create.spareHours,
     workUnits: create.workUnits,
     leaveUnits: create.leaveUnits,
     leaveType: create.leaveType ?? null,
@@ -89,9 +87,6 @@ beforeEach(() => {
   dbMock.attendance.findMany.mockReset().mockResolvedValue([]);
   dbMock.attendance.groupBy.mockReset().mockResolvedValue([]);
   dbMock.hourlyWorkerPayroll.findUnique.mockReset().mockResolvedValue(null);
-  dbMock.hourlyWorkerPayroll.deleteMany
-    .mockReset()
-    .mockResolvedValue({ count: 1 });
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(
     async (callback: (tx: typeof dbMock) => unknown) => callback(dbMock),
@@ -275,7 +270,7 @@ describe('recordAttendance — hours validation', () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture());
   });
 
-  it('rejects negative hours (normal / ot / spare)', async () => {
+  it('rejects negative hours (normal / ot)', async () => {
     await expect(
       recordAttendance(
         'worker-1',
@@ -402,9 +397,9 @@ describe('recordAttendance — upsert idempotency (注意事项 2)', () => {
     expect('identitySnapshotVerified' in updateArg).toBe(false);
   });
 
-  it('T1 PACKER -> T2 COOK -> T3 re-entry keeps the T1 payroll identity', async () => {
+  it('T1 PACKER -> T2 MACHINE -> T3 re-entry keeps the T1 identity snapshot', async () => {
     dbMock.user.findUnique.mockResolvedValue(
-      workerFixture({ workerType: WorkerType.COOK }),
+      workerFixture({ workerType: WorkerType.MACHINE }),
     );
     dbMock.attendance.upsert.mockResolvedValue({
       id: 'att-1',
@@ -412,7 +407,6 @@ describe('recordAttendance — upsert idempotency (注意事项 2)', () => {
       date: new Date('2026-05-01T00:00:00.000Z'),
       normalHours: '8.00',
       otHours: '0.00',
-      spareHours: '0.00',
       workUnits: '1.0',
       leaveUnits: '0.0',
       leaveType: null,
@@ -423,57 +417,33 @@ describe('recordAttendance — upsert idempotency (注意事项 2)', () => {
     dbMock.attendance.findUnique.mockResolvedValue({
       roleSnapshot: Role.WORKER,
       workerTypeSnapshot: WorkerType.PACKER,
-      normalHours: '8.00',
-      otHours: '0.00',
-      spareHours: '0.00',
-      workUnits: '1.0',
-      leaveUnits: '0.0',
-      leaveType: null,
-      remark: null,
     });
 
     const result = await recordAttendance(
       'worker-1',
       '2026-05-01',
-      { normalHours: 8, otHours: 0, spareHours: 3 },
+      { normalHours: 8, otHours: 0 },
       foremanActor,
     );
 
     const updateArg = dbMock.attendance.upsert.mock.calls[0][0].update;
     expect(updateArg).not.toHaveProperty('roleSnapshot');
     expect(updateArg).not.toHaveProperty('workerTypeSnapshot');
-    expect(updateArg.spareHours).toBe('0.00');
     expect(result.workerType).toBe(WorkerType.PACKER);
     expect(result.workerRole).toBe(Role.WORKER);
   });
 });
 
-describe('recordAttendance — paid payroll source lock', () => {
+describe('recordAttendance — historical hourly archive freeze', () => {
   beforeEach(() => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture());
   });
 
   it.each([
     ['新增', null],
-    [
-      '覆盖',
-      {
-        roleSnapshot: Role.WORKER,
-        workerTypeSnapshot: WorkerType.CLEANER,
-        normalHours: '7.00',
-        otHours: '0.00',
-        spareHours: '0.00',
-        workUnits: '1.0',
-        leaveUnits: '0.0',
-        leaveType: null,
-        remark: null,
-      },
-    ],
-  ])('rejects %s when the worker-month payroll is paid', async (_label, existing) => {
-    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
-      id: 'payroll-paid',
-      isPaid: true,
-    });
+    ['覆盖', { roleSnapshot: Role.WORKER, workerTypeSnapshot: WorkerType.PACKER }],
+  ])('rejects %s when the worker-month has an archived payroll (paid or not)', async (_label, existing) => {
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({ id: 'payroll-archived' });
     dbMock.attendance.findUnique.mockResolvedValue(existing);
 
     await expect(
@@ -483,29 +453,12 @@ describe('recordAttendance — paid payroll source lock', () => {
         { normalHours: 8, otHours: 0 },
         foremanActor,
       ),
-    ).rejects.toThrow(/工资已发放/);
+    ).rejects.toThrow(/2026-05 月已有历史时薪月结存档，考勤已冻结，不能修改/);
 
     expect(dbMock.attendance.upsert).not.toHaveBeenCalled();
-    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
   });
 
-  it('invalidates an unpaid derivative after a real attendance change', async () => {
-    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
-      id: 'payroll-unpaid',
-      isPaid: false,
-    });
-    dbMock.attendance.findUnique.mockResolvedValue({
-      roleSnapshot: Role.WORKER,
-      workerTypeSnapshot: WorkerType.PACKER,
-      normalHours: '7.00',
-      otHours: '0.00',
-      spareHours: '0.00',
-      workUnits: '1.0',
-      leaveUnits: '0.0',
-      leaveType: null,
-      remark: null,
-    });
-
+  it('checks the archive under the identity lock before writing', async () => {
     await recordAttendance(
       'worker-1',
       '2026-05-01',
@@ -513,84 +466,19 @@ describe('recordAttendance — paid payroll source lock', () => {
       foremanActor,
     );
 
-    expect(dbMock.hourlyWorkerPayroll.deleteMany).toHaveBeenCalledWith({
-      where: { id: 'payroll-unpaid', isPaid: false },
-    });
-    expect(dbMock.$executeRaw.mock.calls[0]?.[1]).toBe(
+    expect(dbMock.$executeRaw.mock.calls.map((call) => call[1])).toEqual([
       'print-shop-erp:salary-identity:worker-1',
-    );
-    expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
-      'print-shop-erp:hourly:worker-1:2026-05',
-    );
+    ]);
+    expect(dbMock.hourlyWorkerPayroll.findUnique).toHaveBeenCalledWith({
+      where: { workerId_month: { workerId: 'worker-1', month: '2026-05' } },
+      select: { id: true },
+    });
     expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      dbMock.$executeRaw.mock.invocationCallOrder[1]!,
-    );
-    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]).toBeLessThan(
       dbMock.hourlyWorkerPayroll.findUnique.mock.invocationCallOrder[0]!,
     );
     expect(
       dbMock.hourlyWorkerPayroll.findUnique.mock.invocationCallOrder[0],
     ).toBeLessThan(dbMock.attendance.upsert.mock.invocationCallOrder[0]!);
-  });
-
-  it('keeps an unpaid derivative when a re-entry does not change any fact', async () => {
-    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
-      id: 'payroll-unpaid',
-      isPaid: false,
-    });
-    dbMock.attendance.findUnique.mockResolvedValue({
-      roleSnapshot: Role.WORKER,
-      workerTypeSnapshot: WorkerType.PACKER,
-      normalHours: '8.00',
-      otHours: '0.00',
-      spareHours: '0.00',
-      workUnits: '1.0',
-      leaveUnits: '0.0',
-      leaveType: null,
-      remark: null,
-    });
-
-    await recordAttendance(
-      'worker-1',
-      '2026-05-01',
-      { normalHours: 8, otHours: 0 },
-      foremanActor,
-    );
-
-    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
-  });
-});
-
-describe('recordAttendance — COOK spare hours', () => {
-  it('COOK spare hours are persisted', async () => {
-    dbMock.user.findUnique.mockResolvedValue(
-      workerFixture({ workerType: WorkerType.COOK }),
-    );
-    await recordAttendance(
-      'worker-1',
-      '2026-05-01',
-      { normalHours: 8, otHours: 0, spareHours: 2 },
-      foremanActor,
-    );
-    const create = dbMock.attendance.upsert.mock.calls[0][0].create;
-    expect(create.spareHours).toBe('2.00');
-  });
-
-  it('non-COOK spare hours are silently dropped even if sent', async () => {
-    // Foreman UI may send the same shape for every worker type;
-    // backend just zeroes spare for PACKER / CLEANER so the column
-    // stays semantically accurate.
-    dbMock.user.findUnique.mockResolvedValue(
-      workerFixture({ workerType: WorkerType.PACKER }),
-    );
-    await recordAttendance(
-      'worker-1',
-      '2026-05-01',
-      { normalHours: 8, otHours: 0, spareHours: 5 },
-      foremanActor,
-    );
-    const create = dbMock.attendance.upsert.mock.calls[0][0].create;
-    expect(create.spareHours).toBe('0.00');
   });
 });
 
@@ -653,46 +541,24 @@ describe('removeAttendance', () => {
     ).rejects.toBe(genericFailure);
   });
 
-  it('rejects deletion when the worker-month payroll is paid', async () => {
+  it('rejects deletion when the worker-month has an archived payroll', async () => {
     dbMock.attendance.findUnique.mockResolvedValue({ id: 'att-1' });
-    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
-      id: 'payroll-paid',
-      isPaid: true,
-    });
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({ id: 'payroll-archived' });
 
     await expect(
       removeAttendance('worker-1', '2026-05-01', foremanActor),
-    ).rejects.toThrow(/工资已发放/);
+    ).rejects.toThrow(/考勤已冻结，不能删除/);
     expect(dbMock.attendance.delete).not.toHaveBeenCalled();
   });
 
-  it('rejects a paid-month delete request even when the target row is absent', async () => {
-    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
-      id: 'payroll-paid',
-      isPaid: true,
-    });
+  it('rejects an archived-month delete request even when the target row is absent', async () => {
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({ id: 'payroll-archived' });
 
     await expect(
       removeAttendance('worker-1', '2026-05-01', foremanActor),
-    ).rejects.toThrow(/工资已发放/);
+    ).rejects.toThrow(/考勤已冻结/);
     expect(dbMock.attendance.findUnique).not.toHaveBeenCalled();
     expect(dbMock.attendance.delete).not.toHaveBeenCalled();
-  });
-
-  it('invalidates an unpaid payroll after a real deletion', async () => {
-    dbMock.attendance.findUnique.mockResolvedValue({ id: 'att-1' });
-    dbMock.attendance.delete.mockResolvedValue({ id: 'att-1' });
-    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
-      id: 'payroll-unpaid',
-      isPaid: false,
-    });
-
-    await expect(
-      removeAttendance('worker-1', '2026-05-01', foremanActor),
-    ).resolves.toEqual({ removed: true });
-    expect(dbMock.hourlyWorkerPayroll.deleteMany).toHaveBeenCalledWith({
-      where: { id: 'payroll-unpaid', isPaid: false },
-    });
   });
 
   it('rejects invalid date format', async () => {
@@ -723,7 +589,6 @@ describe('listMonthlyAttendance', () => {
         date: new Date('2026-05-01'),
         normalHours: '8.00',
         otHours: '0.00',
-        spareHours: '0.00',
         workUnits: '1.0',
         leaveUnits: '0.0',
         leaveType: null,

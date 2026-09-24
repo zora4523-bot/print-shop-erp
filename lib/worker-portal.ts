@@ -60,12 +60,8 @@ function requireOperationSalaryActor(actor: WorkerSalaryActor): void {
 
 function requireHourlySalaryActor(actor: WorkerSalaryActor): void {
   requireWorkerActor(actor);
-  if (
-    actor.workerType !== WorkerType.PACKER &&
-    actor.workerType !== WorkerType.CLEANER &&
-    actor.workerType !== WorkerType.COOK
-  ) {
-    throw new WorkerPortalError('仅打包、清废或厨师账号可访问时薪月结');
+  if (actor.workerType !== WorkerType.PACKER) {
+    throw new WorkerPortalError('仅打包师傅可访问历史时薪档案');
   }
 }
 
@@ -512,12 +508,10 @@ export async function listWorkerHourlyPayrolls(
       month: true,
       totalWorkHours: true,
       totalOtHours: true,
-      totalSpareHours: true,
       hourlyRate: true,
       otMultiplier: true,
       baseSalary: true,
       otSalary: true,
-      spareSalary: true,
       totalSalary: true,
       salaryRuleSnapshot: true,
       isPaid: true,
@@ -544,12 +538,10 @@ export async function getWorkerHourlyPayrollDetail(
       month: true,
       totalWorkHours: true,
       totalOtHours: true,
-      totalSpareHours: true,
       hourlyRate: true,
       otMultiplier: true,
       baseSalary: true,
       otSalary: true,
-      spareSalary: true,
       totalSalary: true,
       dailyDetail: true,
       salaryRuleSnapshot: true,

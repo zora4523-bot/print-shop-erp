@@ -25,7 +25,6 @@ const { dbMock } = vi.hoisted(() => {
     };
     hourlyWorkerPayroll: {
       findMany: ReturnType<typeof vi.fn>;
-      deleteMany: ReturnType<typeof vi.fn>;
     };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
@@ -39,7 +38,7 @@ const { dbMock } = vi.hoisted(() => {
     },
     salaryRule: { findFirst: vi.fn() },
     salaryPeriod: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
-    hourlyWorkerPayroll: { findMany: vi.fn(), deleteMany: vi.fn() },
+    hourlyWorkerPayroll: { findMany: vi.fn() },
     // $executeRaw is only used to acquire the advisory lock; no return value.
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     // $transaction runs the callback with the same mock as tx so every
@@ -113,9 +112,6 @@ beforeEach(() => {
   dbMock.salaryPeriod.findMany.mockReset().mockResolvedValue([]);
   dbMock.salaryPeriod.create.mockReset().mockResolvedValue({ id: 'period-1' });
   dbMock.hourlyWorkerPayroll.findMany.mockReset().mockResolvedValue([]);
-  dbMock.hourlyWorkerPayroll.deleteMany
-    .mockReset()
-    .mockResolvedValue({ count: 0 });
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -569,30 +565,25 @@ describe('updateUser invariants', () => {
     );
   });
 
-  it('invalidates every unpaid hourly derivative under identity then sorted month locks', async () => {
+  it('never deletes the historical hourly archive when a worker changes type', async () => {
     const worker = makeUser({
       id: 'worker-1',
       role: Role.WORKER,
-      workerType: WorkerType.CLEANER,
+      workerType: WorkerType.PACKER,
       employmentType: EmploymentType.FULL_TIME,
       employmentStartDate: new Date('2026-01-01T00:00:00.000Z'),
     });
-    const updated = { ...worker, workerType: WorkerType.COOK };
-    const payrolls = [
-      { id: 'pay-june', month: '2026-06', isPaid: false },
-      { id: 'pay-may', month: '2026-05', isPaid: false },
-    ];
+    const updated = { ...worker, workerType: WorkerType.MACHINE };
     dbMock.user.findUnique.mockResolvedValue(worker);
     dbMock.user.update.mockResolvedValue(updated);
-    dbMock.hourlyWorkerPayroll.findMany.mockResolvedValue(payrolls);
-    dbMock.hourlyWorkerPayroll.deleteMany.mockResolvedValue({ count: 2 });
 
     await updateUser(
       worker.id,
       {
         displayName: worker.displayName,
         role: Role.WORKER,
-        workerType: WorkerType.COOK,
+        workerType: WorkerType.MACHINE,
+        machineType: MachineType.HAND_PRESS,
         employmentType: worker.employmentType,
         employmentStartDate: worker.employmentStartDate,
       },
@@ -601,30 +592,25 @@ describe('updateUser invariants', () => {
 
     expect(dbMock.$executeRaw.mock.calls.slice(1).map((call) => call[1])).toEqual([
       'print-shop-erp:salary-identity:worker-1',
-      'print-shop-erp:hourly:worker-1:2026-05',
-      'print-shop-erp:hourly:worker-1:2026-06',
     ]);
-    expect(dbMock.hourlyWorkerPayroll.findMany).toHaveBeenCalledTimes(2);
-    expect(dbMock.hourlyWorkerPayroll.deleteMany).toHaveBeenCalledWith({
-      where: { workerId: 'worker-1', isPaid: false },
-    });
-    expect(
-      dbMock.hourlyWorkerPayroll.deleteMany.mock.invocationCallOrder[0]!,
-    ).toBeLessThan(dbMock.user.update.mock.invocationCallOrder[0]!);
+    // Only an employment-date edit consults the archive; nothing deletes it.
+    expect(dbMock.hourlyWorkerPayroll.findMany).not.toHaveBeenCalled();
+    expect(dbMock.user.update).toHaveBeenCalled();
   });
 
-  it('rejects a same-month employment edit that changes a paid payroll date intersection', async () => {
+  it('rejects an employment edit that changes an archived hourly month intersection', async () => {
     const worker = makeUser({
       id: 'worker-1',
       role: Role.WORKER,
-      workerType: WorkerType.CLEANER,
+      workerType: WorkerType.PACKER,
       employmentType: EmploymentType.FULL_TIME,
       employmentStartDate: new Date('2026-04-01T00:00:00.000Z'),
       employmentEndDate: new Date('2026-06-30T00:00:00.000Z'),
     });
     dbMock.user.findUnique.mockResolvedValue(worker);
+    // Unpaid archive rows are as frozen as paid ones: nothing recomputes them.
     dbMock.hourlyWorkerPayroll.findMany.mockResolvedValue([
-      { id: 'paid-may', month: '2026-05', isPaid: true },
+      { month: '2026-05' },
     ]);
 
     await expect(
@@ -640,10 +626,9 @@ describe('updateUser invariants', () => {
         },
         baseActor,
       ),
-    ).rejects.toThrow(/已发放的 2026-05 时薪工资所覆盖的雇佣日期会变化/);
+    ).rejects.toThrow(/历史时薪月结存档 2026-05 所覆盖的雇佣日期会变化/);
 
     expect(dbMock.user.update).not.toHaveBeenCalled();
-    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
   });
 
   it('rolls back a CS employment edit that would leave an active period outside employment', async () => {
@@ -836,11 +821,11 @@ describe('setUserActive invariants', () => {
     }
   });
 
-  it('preserves unpaid hourly liabilities when only active state changes', async () => {
+  it('does not consult the hourly archive when only active state changes', async () => {
     const worker = makeUser({
       id: 'worker-1',
       role: Role.WORKER,
-      workerType: WorkerType.COOK,
+      workerType: WorkerType.PACKER,
       isActive: true,
     });
     dbMock.user.findUnique.mockResolvedValue(worker);
@@ -852,7 +837,6 @@ describe('setUserActive invariants', () => {
       'print-shop-erp:salary-identity:worker-1',
     ]);
     expect(dbMock.hourlyWorkerPayroll.findMany).not.toHaveBeenCalled();
-    expect(dbMock.hourlyWorkerPayroll.deleteMany).not.toHaveBeenCalled();
   });
 
   it('refuses self-deactivation even when other OWNERs exist', async () => {

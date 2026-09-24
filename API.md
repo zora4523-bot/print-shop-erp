@@ -76,13 +76,12 @@ applies_to: repository source at last_verified
 
 ### Cron
 
-以下八个端点都是 `POST`、Node runtime、动态响应并使用 Bearer 认证。在 `durable` 模式下正常接受返回 `202 {status:"queued", ...}`；`inline` 模式直接执行并返回任务汇总。`CRON_SECRET` 未配置返回 `503`，不匹配返回 `401`。调度时间以
+以下七个端点都是 `POST`、Node runtime、动态响应并使用 Bearer 认证。在 `durable` 模式下正常接受返回 `202 {status:"queued", ...}`；`inline` 模式直接执行并返回任务汇总。`CRON_SECRET` 未配置返回 `503`，不匹配返回 `401`。调度时间以
 [`deploy/crontab.example`](./deploy/crontab.example) 为唯一事实源。
 
 | 路径 | 可选 JSON 输入 | 默认业务范围 |
 |---|---|---|
 | `/api/cron/daily-salary` | `{ "date": "YYYY-MM-DD" }` | 上海日历昨天；格式错误或未来日期为 `400` |
-| `/api/cron/hourly-payroll` | `{ "month": "YYYY-MM" }` | 上海日历上月；格式错误或未来月份为 `400` |
 | `/api/cron/cs-settle` | 无 | 当前上海业务日扫描 |
 | `/api/cron/generate-bills` | `{ "period": "YYYY-MM" }` | 上海日历上月；显式空值或格式错误为 `400` |
 | `/api/cron/outsource-overdue` | 无 | 当前上海业务日扫描 |
@@ -92,9 +91,9 @@ applies_to: repository source at last_verified
 
 调用方不得依赖响应中的金额、人员清单或逐行错误；cron 响应保持 counts/status 级别，细节在受权限保护的后台页面和日志中查看。
 
-`hourly-payroll`、`cs-settle`、`generate-bills` 的执行结果保留 `errorCount`，
+`cs-settle`、`generate-bills` 的执行结果保留 `errorCount`，
 并增加同值 `failed` 与去重字符串数组 `errorCodes`，供后台任务错误摘要展示。
-非空错误数组分别使用 `HourlyAggregateError`、`CsSettlementIncomplete`、
+非空错误数组分别使用 `CsSettlementIncomplete`、
 `BillGenerationIncomplete` 类别码；不把人员、客户信息或逐行错误正文放入错误码。
 v2 月账单入账前使用 Decimal 核对加工费＋对客收费明细＝工单总额＝结算金额。异常工单包含工单号写入内部 `errors`，所属销售当月账单整张保持原样，其他销售正常继续；cron 将这些失败计入 `failed/errorCount`，手动生成返回明确的部分失败结果。
 

@@ -21,25 +21,15 @@ vi.mock('react', async (importOriginal) => {
 });
 
 vi.mock('@/actions/owner-salary', () => ({
-  setHourlyPayrollPaidAction: vi.fn(),
   recordCsPayrollPaymentAction: vi.fn(),
-  recomputeHourlyPayrollAction: vi.fn(),
   settleCsPeriodAction: vi.fn(),
   settleReadyCsPeriodsAction: vi.fn(),
 }));
 
 import {
-  MarkHourlyPaidForm,
-  hourlyPaidImpactItems,
-} from './MarkHourlyPaidForm';
-import {
   CsPayrollPaymentForm,
   csPayrollPaymentImpactItems,
 } from './CsPayrollPaymentForm';
-import {
-  RecomputeHourlyForm,
-  hourlyRecomputeImpactItems,
-} from './RecomputeHourlyForm';
 import {
   SettleCsPeriodButton,
   csPeriodSettlementImpactItems,
@@ -50,9 +40,7 @@ import {
 } from './SettleReadyCsButton';
 
 const salarySources = [
-  'MarkHourlyPaidForm.tsx',
   'CsPayrollPaymentForm.tsx',
-  'RecomputeHourlyForm.tsx',
   'SettleCsPeriodButton.tsx',
   'SettleReadyCsButton.tsx',
 ].map((file) =>
@@ -61,17 +49,6 @@ const salarySources = [
     'utf8',
   ),
 );
-
-const hourlyContext = {
-  existingRecordCount: 3,
-  unpaidRecordCount: 2,
-  paidRecordCount: 1,
-  unpaidTotal: '1800.00',
-  sampleRows: [
-    { workerName: '李师傅', totalSalary: '1000.00', isPaid: false },
-    { workerName: '王师傅', totalSalary: '900.00', isPaid: true },
-  ],
-};
 
 const settlementContext = {
   csUserName: '陈客服',
@@ -107,34 +84,6 @@ beforeEach(() => {
 });
 
 describe('salary critical-action confirmations', () => {
-  it('shows the exact hourly payment target before changing finance state', () => {
-    expect(
-      hourlyPaidImpactItems({
-        currentPaid: true,
-        workerName: '李师傅',
-        month: '2026-07',
-        totalSalary: '4800.00',
-      }).join('\n'),
-    ).toContain('不会冲销外部付款');
-
-    const hourlyHtml = renderToStaticMarkup(
-      <MarkHourlyPaidForm
-        id="hourly-1"
-        currentPaid={false}
-        workerName="李师傅"
-        month="2026-07"
-        totalSalary="4800.00"
-        returnTo="/owner/salary/hourly?month=2026-07&paid=unpaid"
-      />,
-    );
-
-    expect(hourlyHtml).toContain('data-slot="alert-dialog-trigger"');
-    expect(hourlyHtml).toContain('aria-haspopup="dialog"');
-    expect(hourlyHtml).toContain(
-      'name="returnTo" value="/owner/salary/hourly?month=2026-07&amp;paid=unpaid"',
-    );
-  });
-
   it('previews the immutable CS payroll ledger with the same idempotent request', () => {
     const impact = csPayrollPaymentImpactItems({
       preview: {
@@ -174,35 +123,11 @@ describe('salary critical-action confirmations', () => {
     expect(html).toMatch(/type="datetime-local"[^>]*required=""/);
     expect(html).toContain('核对并记录工资发放');
 
-    const source = salarySources[1]!;
+    const source = salarySources[0]!;
     expect(source).toContain('form.reportValidity()');
     expect(source).toContain('onSubmit={handleSubmit}');
     expect(source).toContain('confirmedRef.current = true');
     expect(source).toContain('setIdempotencyKey(window.crypto.randomUUID())');
-  });
-
-  it('shows the real month snapshot and partial-success contract before hourly recompute', () => {
-    const impact = hourlyRecomputeImpactItems(
-      '2026-07',
-      hourlyContext,
-    ).join('\n');
-    expect(impact).toContain('目标月期：2026-07');
-    expect(impact).toContain('3 条月结：2 条未发、1 条已发');
-    expect(impact).toContain('当前未发记录合计 ¥ 1,800.00');
-    expect(impact).toContain('逐人处理');
-    expect(impact).not.toContain('服务器');
-    expect(impact).not.toContain('独立事务');
-    expect(impact).not.toContain('规则快照');
-
-    const html = renderToStaticMarkup(
-      <RecomputeHourlyForm
-        month="2026-07"
-        maxMonth="2026-08"
-        context={hourlyContext}
-      />,
-    );
-    expect(html).toContain('data-slot="alert-dialog-trigger"');
-    expect(html).toContain('核对并重算 2026-07 全员月结');
   });
 
   it('shows settlement amounts, terminal state and next-period behavior', () => {

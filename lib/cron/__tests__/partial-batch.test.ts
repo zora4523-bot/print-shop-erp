@@ -4,11 +4,9 @@ const {
   generateBillsMock,
   lockPieceworkMock,
   readPieceworkDayMock,
-  computeHourlyMock,
   settleReadyCsMock,
   dispatchMock,
   MockBillGenerationUnexpectedError,
-  MockHourlyBatchUnexpectedError,
 } = vi.hoisted(() => {
   class PartialResultError extends Error {
     readonly partialResult: unknown;
@@ -24,17 +22,11 @@ const {
     generateBillsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
     lockPieceworkMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
     readPieceworkDayMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-    computeHourlyMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
     settleReadyCsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
     dispatchMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
     MockBillGenerationUnexpectedError: class extends PartialResultError {
       constructor(partialResult: unknown) {
         super('BillGenerationUnexpectedError', partialResult);
-      }
-    },
-    MockHourlyBatchUnexpectedError: class extends PartialResultError {
-      constructor(partialResult: unknown) {
-        super('HourlyBatchUnexpectedError', partialResult);
       }
     },
   };
@@ -47,10 +39,6 @@ vi.mock('@/lib/bill', () => ({
 vi.mock('@/lib/salary/piecework-settlement', () => ({
   lockPieceworkSettlementsForDate: lockPieceworkMock,
   getPieceworkSettlementDay: readPieceworkDayMock,
-}));
-vi.mock('@/lib/salary/hourly-aggregate', () => ({
-  computeHourlyForAllInMonth: computeHourlyMock,
-  HourlyBatchUnexpectedError: MockHourlyBatchUnexpectedError,
 }));
 vi.mock('@/lib/salary/cs', () => ({
   settleReadyCsPeriods: settleReadyCsMock,
@@ -71,7 +59,6 @@ import {
   runDailySalaryTask,
   DailySalaryBatchIncompleteError,
   runGenerateBillsTask,
-  runHourlyPayrollTask,
   runCsSettleTask,
 } from '../tasks';
 import { backgroundJobFailureSummary } from '../../background-jobs/result-summary';
@@ -86,7 +73,6 @@ beforeEach(() => {
     settlements: [],
     candidates: [],
   });
-  computeHourlyMock.mockReset();
   settleReadyCsMock.mockReset();
   dispatchMock.mockReset().mockResolvedValue(undefined);
 });
@@ -97,7 +83,6 @@ afterEach(() => {
 
 describe('cron task partial batch failures', () => {
   it.each([
-    { task: 'hourly-payroll', mock: computeHourlyMock, run: () => runHourlyPayrollTask('2026-07'), code: 'HourlyAggregateError' },
     { task: 'cs-settle', mock: settleReadyCsMock, run: () => runCsSettleTask(), code: 'CsSettlementIncomplete' },
     { task: 'generate-bills', mock: generateBillsMock, run: () => runGenerateBillsTask('2026-07'), code: 'BillGenerationIncomplete' },
   ])('$task exposes every omitted row in the operations failure summary', async ({ mock, run, code }) => {
@@ -157,23 +142,6 @@ describe('cron task partial batch failures', () => {
         dedupeKey:
           'notification:DAILY_WORKER_SALARY:piecework-v1:2026-07-31',
       },
-    );
-  });
-
-  it('reports hourly committed counts and rethrows for durable retry', async () => {
-    const error = new MockHourlyBatchUnexpectedError({
-      settled: [{ workerId: 'w1' }, { workerId: 'w2' }],
-      errors: [{ workerId: 'known', message: 'business error' }],
-    });
-    computeHourlyMock.mockRejectedValue(error);
-    const consoleError = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-
-    await expect(runHourlyPayrollTask('2026-07')).rejects.toBe(error);
-    expect(consoleError).toHaveBeenCalledWith(
-      '[cron:hourly-payroll] unexpected failure after partial progress:',
-      { committedCount: 2, businessErrorCount: 1 },
     );
   });
 

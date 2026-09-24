@@ -95,17 +95,11 @@ export async function getActiveCsTiers(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 时薪工 (CLEANER / COOK) rules — PACKER 已切换工序计件
+// 考勤工时规则
 // ─────────────────────────────────────────────────────────────────────
 //
 // Rule keys under WORKER_HOURLY:
-//   - CLEANER_HOURLY:   { hourlyRate }
-//   - COOK_SPARE_HOURLY:{ hourlyRate }  // 独立兼职工价
-//   - OT_MULTIPLIER:    { multiplier }
 //   - WORK_HOURS:       { morning, afternoon, otStart } — 不硬编码
-//
-// COOK_MONTHLY lives under its own ruleType COOK_SALARY for the same
-// dictionary-family-per-rule pattern.
 
 async function getActiveHourlyRule<T>(
   ruleKey: string,
@@ -118,43 +112,6 @@ async function getActiveHourlyRule<T>(
     now,
     client,
   );
-}
-
-export async function getActiveCleanerHourlyRate(
-  now: Date = new Date(),
-  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
-): Promise<number | null> {
-  const v = await getActiveHourlyRule<{ hourlyRate: number }>(
-    'CLEANER_HOURLY',
-    now,
-    client,
-  );
-  return v?.hourlyRate ?? null;
-}
-
-// COOK 空闲时间打包使用独立时薪，不读取已退役的包装工时薪规则。
-export async function getActiveCookSpareHourlyRate(
-  now: Date = new Date(),
-  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
-): Promise<number | null> {
-  const v = await getActiveHourlyRule<{ hourlyRate: number }>(
-    'COOK_SPARE_HOURLY',
-    now,
-    client,
-  );
-  return v?.hourlyRate ?? null;
-}
-
-export async function getActiveOtMultiplier(
-  now: Date = new Date(),
-  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
-): Promise<number | null> {
-  const v = await getActiveHourlyRule<{ multiplier: number }>(
-    'OT_MULTIPLIER',
-    now,
-    client,
-  );
-  return v?.multiplier ?? null;
 }
 
 export type WorkHoursConfig = {
@@ -172,18 +129,4 @@ export async function getActiveWorkHours(
   client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<WorkHoursConfig | null> {
   return getActiveHourlyRule<WorkHoursConfig>('WORK_HOURS', now, client);
-}
-
-// COOK_SALARY / COOK_MONTHLY — separate ruleType from WORKER_HOURLY.
-export async function getActiveCookMonthlyBase(
-  now: Date = new Date(),
-  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
-): Promise<number | null> {
-  const v = await getActiveRuleValue<{ monthlyBase: number }>(
-    SalaryRuleType.COOK_SALARY,
-    'COOK_MONTHLY',
-    now,
-    client,
-  );
-  return v?.monthlyBase ?? null;
 }

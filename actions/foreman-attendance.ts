@@ -46,7 +46,6 @@ export async function recordAttendanceAction(
       {
         normalHours: parsed.data.normalHours,
         otHours: parsed.data.otHours,
-        spareHours: parsed.data.spareHours,
         workUnits: parsed.data.workUnits,
         leaveUnits: parsed.data.leaveUnits,
         leaveType: parsed.data.leaveType,

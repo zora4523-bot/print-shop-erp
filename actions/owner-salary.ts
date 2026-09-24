@@ -2,13 +2,11 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { appendReceipt, safeReturnTo } from '@/lib/admin/receipt';
+import { appendReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   startCsPeriodSchema,
   recordCsPayrollPaymentSchema,
-  recomputeHourlyPayrollSchema,
-  markHourlyPayrollPaidSchema,
 } from '@/lib/auth/schemas';
 import {
   startCsPeriod,
@@ -18,18 +16,10 @@ import {
   CsPeriodError,
   InvalidCsPeriodTransitionError,
 } from '@/lib/salary/cs';
-import {
-  computeHourlyPayroll,
-  computeHourlyForAllInMonth,
-  markHourlyPayrollPaid,
-  HourlyAggregateError,
-} from '@/lib/salary/hourly-aggregate';
 import type {
-  SalaryMutationResult,
   StartCsPeriodResult,
   SettleCsPeriodResult,
   SettleReadyCsResult,
-  RecomputeHourlyResult,
   CsPayrollPaymentResult,
 } from './owner-salary.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
@@ -167,86 +157,4 @@ export async function recordCsPayrollPaymentAction(
     if (mapped) return mapped;
     throw err;
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// 时薪工 (PACKER / CLEANER / COOK) actions — SPEC §5.4 / §3.9
-// ─────────────────────────────────────────────────────────────────────
-
-// Owner kicks the monthly hourly-payroll computation. With a workerId,
-// recomputes that one row; without, runs the batch over every active
-// hourly worker.
-export async function recomputeHourlyPayrollAction(
-  _prev: RecomputeHourlyResult | null,
-  raw: unknown,
-): Promise<RecomputeHourlyResult> {
-  await requirePermission('salary:rule:manage');
-
-  const parsed = recomputeHourlyPayrollSchema.safeParse(raw);
-  if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
-  }
-
-  try {
-    if (parsed.data.workerId) {
-      await computeHourlyPayroll(parsed.data.workerId, parsed.data.month);
-      revalidatePath('/owner/salary/hourly');
-      return {
-        status: 'success',
-        month: parsed.data.month,
-        workerCount: 1,
-        errorCount: 0,
-        errors: [],
-      };
-    }
-    const { settled, errors } = await computeHourlyForAllInMonth(
-      parsed.data.month,
-    );
-    revalidatePath('/owner/salary/hourly');
-    return {
-      status: 'success',
-      month: parsed.data.month,
-      workerCount: settled.length,
-      errorCount: errors.length,
-      errors,
-    };
-  } catch (err) {
-    if (err instanceof HourlyAggregateError) {
-      return { status: 'error', message: err.message };
-    }
-    throw err;
-  }
-}
-
-// Finance toggle — same shape as the daily-salary mark-paid action.
-export async function setHourlyPayrollPaidAction(
-  id: string,
-  _prev: SalaryMutationResult | null,
-  formData: FormData,
-): Promise<SalaryMutationResult> {
-  await requirePermission('salary:view:all');
-
-  const parsed = markHourlyPayrollPaidSchema.safeParse({
-    isPaid: formData.get('isPaid'),
-  });
-  if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
-  }
-
-  let marked: Awaited<ReturnType<typeof markHourlyPayrollPaid>>;
-  try {
-    marked = await markHourlyPayrollPaid(id, parsed.data.isPaid);
-  } catch (err) {
-    if (err instanceof HourlyAggregateError) {
-      return { status: 'error', message: err.message };
-    }
-    throw err;
-  }
-  revalidatePath('/owner/salary/hourly');
-  redirect(
-    appendReceipt(safeReturnTo(formData.get('returnTo'), '/owner/salary/hourly'), {
-      marked: marked.workerName,
-      markedPaid: parsed.data.isPaid ? '1' : '0',
-    }),
-  );
 }

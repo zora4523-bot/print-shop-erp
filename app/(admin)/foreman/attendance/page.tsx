@@ -202,11 +202,6 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                               <br />O {String(att.otHours)}
                             </>
                           ) : null}
-                          {Number(att.spareHours) > 0 ? (
-                            <>
-                              <br />S {String(att.spareHours)}
-                            </>
-                          ) : null}
                         </span>
                       ) : (
                         <Badge variant="outline" className="mt-1 text-xs">
@@ -224,7 +219,6 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                           ? {
                               normalHours: String(att.normalHours),
                               otHours: String(att.otHours),
-                              spareHours: String(att.spareHours),
                               workUnits: String(att.workUnits),
                               leaveUnits: String(att.leaveUnits),
                               leaveType: att.leaveType,
@@ -233,10 +227,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                           : undefined
                       }
                       quickFill={
-                        selectedWorker.workerType &&
-                        (selectedWorker.workerType === WorkerType.PACKER ||
-                          selectedWorker.workerType === WorkerType.CLEANER ||
-                          selectedWorker.workerType === WorkerType.COOK) &&
+                        selectedWorker.workerType === WorkerType.PACKER &&
                         fullDayNormal !== null &&
                         workHours
                           ? {

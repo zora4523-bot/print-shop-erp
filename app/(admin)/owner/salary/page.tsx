@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Archive, Calculator, CalendarClock, Clock } from 'lucide-react';
+import { Archive, Calculator, CalendarClock } from 'lucide-react';
 import { getSalaryIndexSummary } from '@/lib/salary/summary';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader, StatCard } from '@/components/ui-business';
@@ -134,44 +134,9 @@ export default async function SalaryIndexPage() {
         </div>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-base font-semibold">
-          时薪工月结（清废 / 厨师）
-        </h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <StatCard
-            label={`${s.currentMonth} 记录`}
-            value={`${s.hourlyCurrentMonth.count} 条`}
-            icon={Clock}
-            tone="info"
-            hint={`合计 ${formatMoney(s.hourlyCurrentMonth.totalSalary)}`}
-          />
-          <StatCard
-            label={`${s.currentMonth} 未发`}
-            value={formatMoney(s.hourlyCurrentMonth.unpaidTotal)}
-            icon={Clock}
-            tone="warning"
-          />
-          <StatCard
-            label="累计未发（所有月份）"
-            value={formatMoney(s.hourlyUnpaidAllTime.totalSalary)}
-            icon={Clock}
-            tone="primary"
-            hint={`${s.hourlyUnpaidAllTime.count} 条`}
-          />
-        </div>
-        <div>
-          <Link
-            href="/owner/salary/hourly"
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            查看时薪工月结 →
-          </Link>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          历史打包时薪记录
-        </p>
-      </section>
+      <Link href="/owner/salary/hourly" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+        历史时薪档案
+      </Link>
     </div>
   );
 }
