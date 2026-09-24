@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
-import Decimal from 'decimal.js';
 import AxeBuilder from '@axe-core/playwright';
 import { assertActivatedE2eDatabase } from '../../scripts/lib/e2e-environment';
 import {
@@ -129,7 +128,10 @@ test.describe('创建工单 — golden path', () => {
     const customName = `E2E 中秋礼盒 ${suffix}`;
 
     await page.getByRole('textbox', { name: '工单名称' }).fill(customName);
-    await expect(page.getByLabel('关联外部销售（选填）')).toHaveValue('');
+    // 业主 2026-09-24：管理员建单必须选择一个外部销售。
+    const recipient = page.getByLabel('关联外部销售（必填）');
+    await expect(recipient).toHaveValue('');
+    await recipient.selectOption({ label: 'E2E 销售 · e2e-sales' });
     await expect(page.locator('input[name="customerRef"]')).toHaveCount(0);
 
     // 当前单页表单默认打开第一个款式。建单事实由三条
@@ -170,9 +172,11 @@ test.describe('创建工单 — golden path', () => {
       weight.getByRole('button', { name: '160g', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
 
-    await form
-      .getByRole('textbox', { name: '设计款名称', exact: true })
-      .fill('E2E 测试款式');
+    // 管理员建单现在一律走外部销售计价：本分支的外部销售表单按工艺 / 纸张 /
+    // 规格自动生成款名（事实变化会覆盖手填款名）。
+    await expect(
+      form.getByRole('textbox', { name: '设计款名称', exact: true }),
+    ).toHaveValue('局部烫金（通版现货） · 艳红珠光纸 160g · 大号封');
     // B 版数量输入是受控组件，用可访问名称绑定用户行为，
     // 不再依赖旧面板的 input name 实现细节。
     await form
@@ -215,7 +219,7 @@ test.describe('创建工单 — golden path', () => {
     await expect(customerFact).toHaveText('—');
     const itemDetails = page
       .locator('article[id^="order-detail-item-"]')
-      .filter({ hasText: 'E2E 测试款式' });
+      .filter({ hasText: '局部烫金（通版现货） · 艳红珠光纸 160g · 大号封' });
     await expect(itemDetails).toHaveCount(1);
     const itemFact = (label: string) =>
       itemDetails
@@ -250,18 +254,19 @@ test.describe('创建工单 — golden path', () => {
     }
     const before = await readSavedOrder(orderId);
     expect(before.order.packageRequirement).toBe('创建时贴客户标签');
-    expect(before.order.pricingStatus).toBe('AUTO_CONFIRMED');
+    // 代外部销售建的草稿与销售本人建单一样，报价在提交时由管理员确认。
+    expect(before.order.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
     expect(before.order.promisedDate).toContain(originalPromisedDate);
     expect(before.order.isUrgent).toBe(true);
     await page.goto(`/orders/${orderId}/edit`);
-    await expect(page.getByLabel('工单名称', { exact: true })).toHaveValue(
+    await expect(page.getByRole('textbox', { name: '工单名称', exact: true })).toHaveValue(
       customName,
     );
     await expect(page.getByLabel('客户名称/简称（选填）')).toHaveValue('');
-    await expect(page.getByLabel('收件人', { exact: true })).toHaveValue(
+    await expect(page.getByRole('textbox', { name: '收件人', exact: true })).toHaveValue(
       before.order.receiverName ?? '',
     );
-    await expect(page.getByLabel('收货电话', { exact: true })).toHaveValue(
+    await expect(page.getByRole('textbox', { name: '收货电话', exact: true })).toHaveValue(
       before.order.receiverPhone ?? '',
     );
     await page.getByRole('button', { name: '更多生产信息', exact: true }).click();
@@ -283,12 +288,12 @@ test.describe('创建工单 — golden path', () => {
     // Two tabs share the same starting version. Only the first may save.
     const stalePage = await context.newPage();
     await stalePage.goto(`/orders/${orderId}/edit`);
-    await expect(stalePage.getByLabel('工单名称', { exact: true })).toHaveValue(
+    await expect(stalePage.getByRole('textbox', { name: '工单名称', exact: true })).toHaveValue(
       customName,
     );
     await page.getByLabel('包装补充说明（选填）').fill('封口后贴客户标签');
-    await page.getByLabel('收件人', { exact: true }).fill('修改后的收件人');
-    await page.getByLabel('收货电话', { exact: true }).fill('13900139000');
+    await page.getByRole('textbox', { name: '收件人', exact: true }).fill('修改后的收件人');
+    await page.getByRole('textbox', { name: '收货电话', exact: true }).fill('13900139000');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await expect(page.getByRole('alertdialog')).toBeVisible();
     expect((await readSavedOrder(orderId)).facts).toEqual(before.facts);
@@ -309,7 +314,7 @@ test.describe('创建工单 — golden path', () => {
     expect(after.order.editVersion).toBeGreaterThan(before.order.editVersion);
     expect(after.updateLogs).toBe(before.updateLogs + 1);
 
-    await stalePage.getByLabel('收货电话', { exact: true }).fill('13700137000');
+    await stalePage.getByRole('textbox', { name: '收货电话', exact: true }).fill('13700137000');
     await stalePage
       .getByRole('button', { name: '保存修改…', exact: true })
       .click();
@@ -319,7 +324,7 @@ test.describe('创建工单 — golden path', () => {
     expect(await readSavedOrder(orderId)).toEqual(after);
     await stalePage.close();
     await page.goto(`/orders/${orderId}/edit`);
-    await expect(page.getByLabel('收货电话', { exact: true })).toHaveValue(
+    await expect(page.getByRole('textbox', { name: '收货电话', exact: true })).toHaveValue(
       '13900139000',
     );
     await expectNoNextErrorOverlay(page);
@@ -329,44 +334,10 @@ test.describe('创建工单 — golden path', () => {
       fullPage: true,
     });
 
-    await page.getByLabel('数量（个）', { exact: true }).fill('1200');
-    await page.getByLabel('包装（个/包）', { exact: true }).fill('20');
-    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await expect(page.getByRole('alertdialog')).toBeVisible();
-    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
-    await page.getByRole('button', { name: '再改改', exact: true }).click();
-    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
-    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await page.getByRole('button', { name: '保存修改', exact: true }).click();
-    await expect(page).toHaveURL(`/orders/${orderId}`, routeTransitionOptions);
-    const modified = await readSavedOrder(orderId);
-    expect(modified.order.promisedDate).toBe(before.order.promisedDate);
-    expect(modified.order.isUrgent).toBe(true);
-    const facts = modified.facts as {
-      items: Array<{
-        quantity: number;
-        pack: number;
-        pricingSnapshot: {
-          version: number;
-          schemaVersion: number;
-          complete: boolean;
-        };
-        subtotal: number;
-        quotedAmount: number;
-      }>;
-      packaging: Array<{ actualBagCount: number }>;
-      packagingLines: Array<{ unitsPerBag: number }>;
-    };
-    expect(facts.items[0]).toMatchObject({ quantity: 1200, pack: 20 });
-    expect(facts.items[0].pricingSnapshot).toMatchObject({
-      version: 1,
-      schemaVersion: 2,
-      complete: true,
-    });
-    expect(facts.items[0].quotedAmount).toBe(facts.items[0].subtotal);
-    expect(facts.packaging[0].actualBagCount).toBe(60);
-    expect(facts.packagingLines[0].unitsPerBag).toBe(20);
-    // Date-only save preserves the newly established production/financial snapshots.
+    // 代外部销售建的草稿改数量 / 规格要先补齐快递与耗材收费明细再重新核价，
+    // 该路径由 sales-functional-review 的编辑用例覆盖；这里只验证
+    // 与计价无关的字段保存不改动生产与财务快照。
+    // Date-only save preserves the saved production/financial snapshots.
     await page.goto(`/orders/${orderId}/edit`);
     await page.getByLabel('承诺交期', { exact: true }).fill('2026-10-20');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
@@ -375,26 +346,9 @@ test.describe('创建工单 — golden path', () => {
     await expect
       .poll(async () => (await readSavedOrder(orderId)).order.promisedDate)
       .toContain('2026-10-20');
-    expect((await readSavedOrder(orderId)).facts).toEqual(modified.facts);
+    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
     expect((await readSavedOrder(orderId)).order.isUrgent).toBe(true);
     await expectNoNextErrorOverlay(page);
-
-    // Text-priced blank items have no Product ID. Both UPDATE and ADD must
-    // carry the selected identity through the real preview/action/DB boundary.
-    type SavedItem = { id: string; productId: string | null; sequence: number; specification: string;
-      actualWidthMm: number; actualHeightMm: number; quantity: number; subtotal: number; quotedAmount: number };
-    const savedItems = async () => ((await readSavedOrder(orderId)).facts as { items: SavedItem[] }).items.sort((a, b) => a.sequence - b.sequence);
-    const large = (await savedItems())[0];
-    expect(large.productId).toBeNull();
-    await page.goto(`/orders/${orderId}/edit`);
-    await page.getByLabel('规格', { exact: true }).selectOption({ label: '中号封80×115' });
-    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-    await expect(page.getByRole('alertdialog')).toContainText('中号封80×115');
-    await page.getByRole('button', { name: '保存修改', exact: true }).click();
-    await expect(page).toHaveURL(`/orders/${orderId}`, routeTransitionOptions);
-    const mid = (await savedItems())[0];
-    expect(mid).toMatchObject({ productId: null, specification: '中号封80×115', actualWidthMm: 80, actualHeightMm: 115, quantity: 1200 });
-    expect(new Decimal(large.quotedAmount).minus(mid.quotedAmount).toFixed(2)).toBe('12.00');
 
     await expectNoNextErrorOverlay(page);
   });

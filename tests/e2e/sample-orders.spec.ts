@@ -239,6 +239,11 @@ for (const purpose of ['寄样品', '打样'] as const) {
   test(`管理员新建页保存并提交${purpose}，类型与费用正确`, async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, 'e2e-sample-admin', '/orders/new');
+    // 业主 2026-09-24：管理员建单必须归属一个外部销售。
+    const lookup = await database();
+    const sales = (await lookup.query('SELECT id FROM "User" WHERE username=$1', ['e2e-sample-sales'])).rows[0].id;
+    await lookup.end();
+    await page.getByLabel('关联外部销售（必填）', { exact: true }).selectOption(sales);
     await page.getByLabel('工单名称', { exact: false }).fill('管理员样品工单名称');
     await page.getByRole('button', { name: purpose, exact: true }).click();
     await contact(page);
@@ -264,7 +269,7 @@ for (const purpose of ['寄样品', '打样'] as const) {
     try {
       const { rows: [order] } = await db.query('SELECT purpose, "pricingMode", "confirmedFee", "createdById", "submitterRole", "customName" FROM "Order" WHERE id=$1', [id]);
       expect(order.purpose).toBe(purpose === '寄样品' ? 'SAMPLE_SHIPMENT' : 'PROOF');
-      expect(order.submitterRole).toBe('ADMIN');
+      expect(order.submitterRole).toBe('SALES');
       if (purpose === '打样') {
         expect(order.customName).toBe('管理员样品工单名称');
         expect(order.pricingMode).toBe('MANUAL_TOTAL');
@@ -302,7 +307,7 @@ test('管理员关联销售后切换寄样、刷新仍保留工单归属', async
   const db = await database();
   try {
     const sales = (await db.query('SELECT id FROM "User" WHERE username=$1', ['e2e-sample-sales'])).rows[0].id;
-    await page.getByLabel('关联外部销售（选填）', { exact: true }).selectOption(sales);
+    await page.getByLabel('关联外部销售（必填）', { exact: true }).selectOption(sales);
     await page.getByRole('button', { name: '寄样品', exact: true }).click();
     await page.getByLabel('样品名称').fill('归属保留验收');
     await contact(page);

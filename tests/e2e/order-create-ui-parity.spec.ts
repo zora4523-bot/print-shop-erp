@@ -39,7 +39,7 @@ for (const actor of ['owner', 'sales'] as const) {
     await expect(rail.getByText('机烫费', { exact: true })).toBeVisible();
     await expect(rail.getByText(/入袋 /)).toBeVisible();
     if (actor === 'owner') {
-      // 2026-09-18 起工厂直接 / 内销与外销共用物流价目，未关联外部销售时也列物流行。
+      // 2026-09-18 起统一物流价目：尚未选择外部销售时也列物流行。
       await expect(rail.getByText(/纸箱耗材/)).toBeVisible();
       await expect(rail.getByText(/快递费/)).toBeVisible();
       await setManualProcessingPrice(page);

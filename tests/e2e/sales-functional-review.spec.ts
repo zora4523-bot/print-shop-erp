@@ -353,7 +353,9 @@ test('销售客户响应按身份隔离，详情与编辑均不暴露内部改�
   await salesLogin(page, '/orders/new');
   const created = await page.goto('/orders/new');
   const response = await created!.text();
-  expect(response).toContain(own);
+  // 业主 2026-09-24：建单页只剩外部销售表单，从未展示客户下拉，
+  // 因此不再下发任何客户列表（含自己的客户）。
+  expect(response).not.toContain(own);
   expect(response).not.toContain(other);
   expect(response).not.toContain(privatePhone);
   const errors = trackErrors(page);

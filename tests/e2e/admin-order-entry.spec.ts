@@ -23,7 +23,7 @@ test.describe("admin order entry", () => {
     const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
     const ownerId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const recipient = page.getByRole("combobox", {
-      name: "关联外部销售（选填）",
+      name: "关联外部销售（必填）",
     });
     await expect(recipient).toBeVisible();
     await expect(page.getByLabel("客户名称/简称", { exact: true })).toHaveCount(
@@ -71,7 +71,7 @@ test.describe("admin order entry", () => {
       )
       .toBe(true);
     await page.reload();
-    await page.getByRole("button", { name: /恢复.*草稿/ }).click();
+    // 管理员建单与外部销售共用同一张表单：本地草稿在刷新后自动恢复。
     await expect(recipient).toHaveValue(salesId);
     await expect(pack).toHaveValue("12");
     await expect(
@@ -166,7 +166,7 @@ test.describe("admin order entry", () => {
     expect(errors).toEqual([]);
   });
 
-  test("unassigned admin orders remain factory direct and mixed bags validate the total", async ({
+  test("admin must choose an external salesperson and mixed bags validate the total", async ({
     page,
   }) => {
     await login(page, {
@@ -174,9 +174,14 @@ test.describe("admin order entry", () => {
       username: E2E_USERS.owner!.username,
       password: E2E_PASSWORD,
     });
+    const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
+    const recipient = page.getByRole("combobox", {
+      name: "关联外部销售（必填）",
+    });
+    await expect(recipient).toHaveValue("");
     await page
       .getByRole("textbox", { name: "工单名称", exact: true })
-      .fill(`工厂直单 ${Date.now()}`);
+      .fill(`管理员代建 ${Date.now()}`);
     // 分层建单（64c9a350）没有「复制当前」：「＋ 增加设计款」同样复制当前款并切过去。
     await page.getByRole("button", { name: "＋ 增加设计款", exact: true }).click();
     await page
@@ -197,6 +202,16 @@ test.describe("admin order entry", () => {
     await page
       .getByRole("textbox", { name: "收货地址", exact: true })
       .fill("张先生 13800138000 广东省佛山市南海区测试路1号");
+    // 业主 2026-09-24：管理员建单必须归属一个外部销售，未选择时就地拦截。
+    await expect(
+      page.getByRole("button", { name: "保存草稿", exact: true }),
+    ).toBeEnabled({ timeout: 20_000 });
+    await page.getByRole("button", { name: "保存草稿", exact: true }).click();
+    await expect(recipient).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("请选择关联外部销售").first()).toBeVisible();
+    await expect(page).toHaveURL(/\/orders\/new/);
+    await recipient.selectOption(salesId);
+    await expect(recipient).toHaveAttribute("aria-invalid", "false");
     await expect(
       page.getByRole("button", { name: "保存草稿", exact: true }),
     ).toBeEnabled({ timeout: 20_000 });
@@ -207,11 +222,13 @@ test.describe("admin order entry", () => {
     await db.connect();
     try {
       const result = await db.query(
-        'SELECT "settlementType", "customerRef", "customerPartyId" FROM "Order" WHERE id=$1',
+        'SELECT "submitterId", "submitterRole", "settlementType", "customerRef", "customerPartyId" FROM "Order" WHERE id=$1',
         [id],
       );
       expect(result.rows[0]).toEqual({
-        settlementType: "FACTORY_DIRECT",
+        submitterId: salesId,
+        submitterRole: "SALES",
+        settlementType: "EXTERNAL_SALES",
         customerRef: null,
         customerPartyId: null,
       });
