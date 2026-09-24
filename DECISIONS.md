@@ -202,7 +202,7 @@
 
 ## 2026-04-24：厨师请假 MVP 按"不折扣月薪"处理（TODO 需业主确认）
 
-- **决策**：COOK workerType 的月薪 `monthlyBase`（默认 3000）与 `normalHours` / `otHours` 完全解耦——请假整月照发 3000，请假 + 代班打包则额外 + `spareHours × PACKER 时薪`。`calcHourlyPayroll` 的 COOK 分支对 normal/ot 一律忽略。
+- **决策**：COOK workerType 的月薪 `monthlyBase`（默认 3000）与 `normalHours` / `otHours` 完全解耦——请假整月照发 3000，请假 + 代班打包则额外 + `spareHours × PACKER 时薪`。`calcHourlyPayroll` 的 COOK 分支对 normal/ot 一律忽略。（已被 2026-09-24「删除清废/厨师工种与清废工艺」取代）
 - **理由**：SPEC §5.4 / §7.4 只给了 `base + spare_pay` 公式，未定义请假扣款；业主没明确表达过扣款需求。MVP 简化为"月薪常量"避免引入应出勤天数 / 自然天数 / 法定假日等配置项。如果未来业主说"请假多了要扣"，改 `calcHourlyPayroll` COOK 分支一行 + 加 `absenceDays` migration 即可，历史 snapshot 保护已发放月份。
 - **影响**：`lib/salary/hourly-payroll.ts calcHourlyPayroll` + `lib/salary/__tests__/hourly-payroll.test.ts "请假整月"` 用例 pin 住当前语义。PROGRESS.md 列为待澄清问题；DECISIONS 重审时如业主推翻，测试会先 red。
 - **相关文档**：`lib/salary/hourly-payroll.ts:88`、`lib/salary/__tests__/hourly-payroll.test.ts "场景: 请假整月"`、SPEC §5.4 / §7.4、Codex rounds 48-49。
@@ -618,7 +618,7 @@
 
 ## 2026-08-02：客服业绩、客户付款与工资发放是三本独立账
 
-- **业绩归属**：收费客服工单提交时追加 `CsSalesEntry(ORDER_SUBMITTED)`；批准金额变更时追加新旧差额；取消时追加全额负数。事件键幂等，流水与 `SalaryPeriod.totalSales` 在同一事务更新。没有覆盖业务日期的进行中周期时，工单操作必须整体失败，不得静默漏记。
+- **业绩归属**：收费客服工单提交时追加 `CsSalesEntry(ORDER_SUBMITTED)`；批准金额变更时追加新旧差额；取消时追加全额负数。事件键幂等，流水与 `SalaryPeriod.totalSales` 在同一事务更新。没有覆盖业务日期的进行中周期时，工单操作必须整体失败，不得静默漏记。（已被 2026-09-24「删除客服角色与内部/工厂直单结算」取代）
 - **应收与工资**：客户付款只追加 `BillPayment` 并更新 `Bill.paidAmount`，绝不修改客服业绩。客服底薪/提成发放另外追加 `CsPayrollPayment`：底薪可在周期内分次发，提成只能在结算后发，已入账流水不覆盖。
 - **账单不变量**：`Bill.totalAmount = openingAmount + 当前收费工单金额 + 追加调整项`；草稿重算不得吞掉历史已保存调整。账单总额必须大于等于零，已收不得超过总额；当前不提供退款/贷项工作流，也不以负数账单伪装冲账。所有付款和成本请求使用幂等键且相同键必须匹配完整业务载荷。
 - **周期边界**：创建在职客服账号时按当前规则自动建立周期。`periodEnd` 是包含式的上海自然日；定时结算只处理 `periodEnd < 今天`，即结束日的次日才结算。提成档位按 `totalSales + initialSales` 计算，结算后为仍在职的客服无缝建立下一周期。
@@ -661,7 +661,7 @@
 
 ## 2026-08-07：结算方向在工单创建时冻结，五类资金事实分账
 
-- **决策**：新增 `Order.settlementType`，把外部销售应收、内部客服业绩、工厂直接业务和免费工单在创建时冻结。角色只决定权限和创建时默认方向，不得用账号当前角色重算历史资金归属。
+- **决策**：新增 `Order.settlementType`，把外部销售应收、内部客服业绩、工厂直接业务和免费工单在创建时冻结。角色只决定权限和创建时默认方向，不得用账号当前角色重算历史资金归属。（部分已被 2026-09-24「删除客服角色与内部/工厂直单结算」取代）
 - **账本边界**：外部销售只进入 `Bill/BillPayment`；客服销售额和工资走 `CsSalesEntry/SalaryPeriod/CsPayrollPayment`；开机师傅、时薪员工各走原工资账本；供应商应付走 `OutsourceOrder/OutsourceAmountChange/OutsourcePayment`。外部销售自助账单使用服务端最小投影，不查询或展示工厂计件、外协、重做、伙食、电费等内部成本。
 - **外协边界**：外协款式必须在 order lock 内证明属于当前工单，合计数量由服务端从款式派生；客户端数量只作旧页面/篡改探针。尚无供应商合同价模型时，管理员人工确认应付比复用对客价格规则更安全；每次更正和付款追加留痕，禁止超付。
 - **迁移**：历史工单按创建时角色快照回填方向。旧账单若已发、已付、有付款、所有权不一致或期初方向不可证明，migration 明确中止；只自动清理可证明安全的未发未付草稿污染项。
@@ -760,7 +760,7 @@
 
 ## 2026-08-19：厨师空闲打包时薪缺失时按 0 计，是 §15.5 的唯一显式例外
 
-- **决策**：维持 `lib/salary/hourly-aggregate.ts` 的 `spareHourlyRate: cookSpareRate ?? 0`。同一 if/else 里 PACKER_HOURLY、CLEANER_HOURLY、COOK_MONTHLY 三个分支继续 `throw`，只有厨师的**空闲打包**时薪走 0。
+- **决策**：维持 `lib/salary/hourly-aggregate.ts` 的 `spareHourlyRate: cookSpareRate ?? 0`。同一 if/else 里 PACKER_HOURLY、CLEANER_HOURLY、COOK_MONTHLY 三个分支继续 `throw`，只有厨师的**空闲打包**时薪走 0。（已被 2026-09-24「删除清废/厨师工种与清废工艺」取代）
 - **理由**：空闲打包对厨师是可选职责，没配 `COOK_SPARE_HOURLY` 更可能表示「这个厨师不打包」，而不是「配置漏了」。改成 throw 会让已有未配该规则的厨师**整月月结直接失败**，用一个更响的故障替换一个语义正确的 0。该行为并非疏忽：`lib/salary/__tests__/hourly-payroll.test.ts:186` 有一条名为 `COOK without spare rate: sparePay = 0 even with spare hours` 的用例，传 20 小时空闲工时并断言 `sparePay === '0'`，即当前行为是被测试固定的设计。
 - **影响**：CLAUDE.md §15.5 补写这条例外，代码现场也加了注释说明「为什么和另外三个分支不同」——此前它看起来就是一处待修的 bug，合规审查确实把它报成了违反。**不改行为、不改测试**。若将来要收紧，正确做法是先在规则表层面加「厨师是否承担空闲打包」的显式开关，而不是让缺失配置去 throw。
 - **相关文档**：`lib/salary/hourly-aggregate.ts:296,301`、`lib/salary/hourly-payroll.ts:87-88`、`lib/salary/__tests__/hourly-payroll.test.ts:186`、CLAUDE.md §15.5
@@ -1073,7 +1073,7 @@
 
 ## 2026-08-30：考勤是时薪工资的源事实，已发月份冻结、未发快照随源变更失效
 
-- **决策**：`recordAttendance`、`removeAttendance`、时薪重算和标记已发共用唯一的 `(workerId, month)` PostgreSQL advisory transaction lock。当 `HourlyWorkerPayroll.isPaid=true` 时，该月考勤不得新增、覆盖或删除；考勤真实变更时，同一事务删除未发工资派生快照，由下次重算重建。
+- **决策**：`recordAttendance`、`removeAttendance`、时薪重算和标记已发共用唯一的 `(workerId, month)` PostgreSQL advisory transaction lock。当 `HourlyWorkerPayroll.isPaid=true` 时，该月考勤不得新增、覆盖或删除；考勤真实变更时，同一事务删除未发工资派生快照，由下次重算重建。（部分已被 2026-09-24「删除清废/厨师工种与清废工艺」取代）
 - **理由**：只加 `isPaid` 查询会留下 TOCTOU；只锁考勤写入也会让“先修考勤、后把旧金额标已发”成立。未发工资是可重算的派生数据，考勤才是事实源。
 - **边界**：完全相同的幂等重录不使未发快照失效；删除只把真实 Prisma `P2025` 视为幂等不存在。直接 SQL 绕过应用仍不受 advisory lock 契约保护，如需开放直连写入必须另加数据库 trigger。
 - **相关实现与验收**：`lib/attendance.ts`、`lib/salary/hourly-lock.ts`、`lib/salary/hourly-aggregate.ts`及 PostgreSQL 并发测试。
@@ -1320,7 +1320,7 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 
 ## 2026-09-18：内部工单与外销共用同一本物流价目自动计费
 
-- 决策：客服工单（`INTERNAL_SALES`）与工厂直接业务（`FACTORY_DIRECT`）的快递费与打包耗材，与外部销售使用**同一本已发布 LOGISTICS 价目**自动计价——建单预览显示并计入合计，提交时由共享 finalizer 在同一快照内落 `OrderCustomerCharge` 与价目版本锁，发货逐地址确认承运商计费重量与终价。顺丰到付维持「运费 `WAIVED / 0`、打包耗材照收」。免费工单（`NO_CHARGE`）不计物流。
+- 决策：客服工单（`INTERNAL_SALES`）与工厂直接业务（`FACTORY_DIRECT`）的快递费与打包耗材，与外部销售使用**同一本已发布 LOGISTICS 价目**自动计价——建单预览显示并计入合计，提交时由共享 finalizer 在同一快照内落 `OrderCustomerCharge` 与价目版本锁，发货逐地址确认承运商计费重量与终价。顺丰到付维持「运费 `WAIVED / 0`、打包耗材照收」。免费工单（`NO_CHARGE`）不计物流。（已被 2026-09-24「删除客服角色与内部/工厂直单结算」取代）
 - 理由：管理员自建工单多是补录与代录，功能必须完整；原设计只让外销自动算、直客靠详情页「编辑收费」补录，忘补就漏收运费。业主 2026-09-18 明确「价目一样、客服工单与外部销售一致、顺丰到付维持」。
 - 影响：取代 2026-07-30「工单 `totalAmount` 只汇总款式小计」与 2026-09-15「内部结算不新增物流应收」在这两类结算下的口径（顺丰到付标识与后期更正权限等其余内容仍有效）。**客服业绩口径不变**：`CsSalesEntry` 一律按 `csSalesBasisAmountInTx`（工单总额 − 代收快递费 / 打包耗材）记账与对平，代收物流不冒充客服销售额。判定统一走 `lib/order/settlement.ts`：新建/预览用 `settlementBillsLogistics`，履约与核价用 `orderBillsLogistics`（以工单**是否已有物流收费行**为准）——2026-09-18 之前提交、没有物流行的老工单维持原加工费流程，完整编辑仍可补录。SPEC §193 / §248 的旧口径待同步。
 - 相关文档：`SPEC-v1.2.md §J`、`lib/order/settlement.ts`、`lib/order/create-order-quote-service.ts`、`lib/order/submit-external-order.ts`、`lib/salary/cs-sales.ts`。
@@ -1432,7 +1432,38 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 
 ## 2026-09-24：部分发货后的改单与取消、已结算单的售后重做
 
-- **决策**：工单只要有任一地址已 SHIPPED，就拒绝取消申请，也拒绝任何改动款式、数量或分货的修改申请，只允许改交期等不涉及分货的内容；提交和批准两处都校验。已结算（SETTLED）的工单可以像已发货、已完成的工单一样发起售后重做（SPEC-v1.2 §3.4.1）。
+- **决策**：工单只要有任一地址已 SHIPPED，就拒绝取消申请，也拒绝任何改动款式、数量或分货的修改申请，只允许改交期等不涉及分货的内容；提交和批准两处都校验。已结算（SETTLED）的工单可以像已发货、已完成的工单一样发起售后重做（SPEC-v1.2 §3.4.1）。（部分已被 2026-09-24「发货后无取消选项」取代）
 - **理由**：逐地址发货期间，工单保持 PACKING 状态。原先的改单和取消会改写已发包裹的分货并重算物流费，与现有边界不一致（`add-shipment`、`edit-shipment-fields` 早已禁止改动已发货地址）。逐地址发货在同一事务里自动结算为 SETTLED，所以按原来的来源白名单，新工单永远走不到售后重做。
 - **影响**：「部分发货后取消剩余」没有实现，其结算口径（已发地址快递费是否计入）待业主拍板。申请入口仍按工单状态显示，提交后才出现拒绝提示。重做单不改原单应收（DECISIONS.md 中 2026-09 的重做决策）。
 - **相关文档**：`lib/order/change-request-shipment-guard.ts`、`lib/order/rework-eligibility.ts`、`docs/audits/2026-09-23-evidence-review.md` M-4 / M-11。
+
+## 2026-09-24：删除客服角色与内部/工厂直单结算（管理员建单必须挂外部销售）
+
+- **决策**：业主决定彻底删除客服（`CUSTOMER_SERVICE`）角色，`Role = ADMIN | SALES | WORKER`；客服提成、客服工资周期、客服业绩流水、客服工资发放及四张表（`SalaryPeriod` / `CsSalesEntry` / `CustomerServiceCommission` / `CsPayrollPayment`）、定时任务 `cs-settle` / `cs-period-ending`、通知事件 `CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED` 一并删除。所有收费业务都以外部销售身份开展：`OrderSettlementType = EXTERNAL_SALES | NO_CHARGE`，删除 `INTERNAL_SALES`（内部销售）与 `FACTORY_DIRECT`（工厂直单）；管理员建单必须选择一个启用的外部销售，工单按 `EXTERNAL_SALES` 结算，提交人为该销售，管理员保留为创建人。
+- **理由**：业主 2026-09-24 明确：客服角色不再存在，所有业务都以外部销售身份开展。按业主要求彻底删除而不是停用，代码里不再保留客服与工厂直单分支。
+- **影响**：迁移 `20260924110000_remove_customer_service_role` 在业务数据仍引用客服或内部/工厂直单（账号、工单身份与结算快照、价格修订快照、价目簿、考勤快照、审计日志、四张客服表中的数据、运行中的客服任务）时整体中止，不静默改写历史；生产部署前必须先查询这些条件。管理员没有启用的外部销售账号时不能建单。生产 crontab 需按 `docs/部署指南.md` 重装以去掉两条客服 cron。审计 H-2 的冲销口径、M-6 的直营单取消规则、L-11、N-3 随之失效。
+- **取代关系**：取代 2026-08-02「客服业绩、客户付款与工资发放是三本独立账」、2026-09-18「内部工单与外销共用同一本物流价目自动计费」，以及 2026-08-07「结算方向在工单创建时冻结」中客服与工厂直单的部分（结算方向在创建时冻结的原则继续有效）。
+- **相关文档**：`SPEC-v1.2.md` §L、§J.1、§2、§3.1、§3.7、§5.3；`prisma/migrations/20260924110000_remove_customer_service_role/migration.sql`；`docs/audits/2026-09-23-evidence-review.md` §6。
+
+## 2026-09-24：删除清废/厨师工种与清废工艺（时薪月结只保留打包历史存档，存档月考勤只读）
+
+- **决策**：业主决定删除清废（`CLEANER`）、厨师（`COOK`）工种与清废工艺（`CLEANING`），`WorkerType = MACHINE | PACKER`。时薪月结生成链路（含定时任务 `hourly-payroll`、重算与标记发放）删除；已有的打包 `HourlyWorkerPayroll` 只作只读历史存档，存档月份的考勤不能再新增、修改或删除。规则 `OT_MULTIPLIER`、`COOK_SALARY`、`CLEANER_HOURLY`、`COOK_SPARE_HOURLY` 删除；CLAUDE.md §15.5 的 `cookSpareRate ?? 0` 例外随之消失，缺少生效规则一律拒绝继续。
+- **理由**：打包已切换为工序计件，时薪月结此前只为清废与厨师生成；两类岗位不再存在后，整条生成链路没有使用者。
+- **影响**：迁移 `20260924100000_remove_cleaner_cook_cleaning` 在账号岗位、考勤快照、空闲打包工时、清废/厨师月结、派工、工艺接单岗位、工单款式/派工/日工资明细/待审改单/进度步骤对 `CLEANING` 的引用或运行中的时薪任务存在时整体中止；生产部署前必须先查询。改岗与雇佣日期修改不再删除未发月结，只拒绝会改变存档月覆盖日期的雇佣日期修改。生产 crontab 需重装以去掉 `hourly-payroll`。审计 M-15、L-17、N-5 随之失效。
+- **取代关系**：取代 2026-04-24「厨师请假 MVP 按不折扣月薪处理」、2026-08-19「厨师空闲打包时薪缺失时按 0 计」，以及 2026-08-30「考勤是时薪工资的源事实」中重算与未发快照失效的部分（考勤按月冻结的原则改为按存档冻结）。
+- **相关文档**：`SPEC-v1.2.md` §L、§3.9、§5.4、§6.1；`prisma/migrations/20260924100000_remove_cleaner_cook_cleaning/migration.sql`；`lib/attendance.ts`、`lib/salary/hourly-aggregate.ts`；CLAUDE.md §15.5。
+
+## 2026-09-24：发货后无取消选项（M-4）
+
+- **决策**：业主决定：工单只要有任一收货地址已发货（SHIPPED），就正常收费，任何界面都不提供取消选项（销售申请取消、管理员直接取消、批准取消都不可用，已发货的取消申请只能拒绝）；修改申请只能改交期。改款式数量的预览与取消结算预览对已发货工单同样拒绝。
+- **理由**：业主 2026-09-24 原话口径：“只要发货了就正常收费，没有取消的选项。”服务端早已拒绝发货后的取消与改款式数量，界面入口与预览端点随之保持一致，不再让用户提交后才看到拒绝。
+- **影响**：`lib/order/change-request-options.ts` 是销售详情页修改/取消入口的唯一判断，界面与服务端闸口共用 `hasShippedShipment` / `shippedShipmentViolation`。「部分发货后取消剩余」不再作为待定需求（审计 N-2 关闭）。
+- **取代关系**：取代同日较早条目「部分发货后的改单与取消、已结算单的售后重做」中“部分发货后取消剩余待业主拍板”与“申请入口仍按工单状态显示，提交后才出现拒绝提示”两处表述；该条关于已结算工单可发起售后重做的决策继续有效。
+- **相关文档**：`SPEC-v1.2.md` §L、§3.6；`lib/order/change-request-options.ts`、`lib/order/change-request-shipment-guard.ts`；`docs/audits/2026-09-23-evidence-review.md` M-4。
+
+## 2026-09-24：历史数据清理脚本的执行口径
+
+- **决策**：业主决定清理已经卡住或写脏的历史数据（审计 M-7 旧代次卡住的工序与进度步骤、L-14 从未下发却提前写入的 `scheduledAt`），使用 `scripts/maintenance/cleanup-stuck-production-history.ts`。执行口径：先在目标库只读 dry-run（`--database=<库名>` 必须与实际连接库一致）；业主核对输出的数量与 id 后，才用 `--apply --actor=<管理员用户名>` 写入，`--actor` 由业主指定且必须是活跃管理员；`skipped` 中的工单不手工改库，按原因人工核对。
+- **理由**：修复提交只对上线后发生的情况生效，已存在的脏数据需要一次性清理；生产数据修改必须经业主确认（CLAUDE.md §12），所以默认只读、写入需要显式参数和指定操作人。
+- **影响**：写入在单事务内逐单持工单级联锁并在锁内重判，任一并发变化即整体回滚；每单写 OrderLog 与 BusinessAuditLog；带分档烫金报工的旧代次工序只标记 `payrollReviewRequired` 转管理员人工核定，从不计算工资；重复执行无写入。生产尚未执行 dry-run。
+- **相关文档**：`docs/部署指南.md`（历史数据清理发布步骤）、`scripts/maintenance/cleanup-stuck-production-history.ts`、`docs/audits/2026-09-23-evidence-review.md` M-7 / L-14。
