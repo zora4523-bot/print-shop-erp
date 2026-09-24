@@ -363,14 +363,14 @@ fc-list :lang=zh | head
 
 脚本先在旧进程在线时完成依赖安装、生产环境预检、Prisma Client 生成和构建；随后停止 Web、LIGHT worker、HEAVY worker，执行 `prisma migrate deploy`，立即启动新版本并检查 `/api/health/ready`。进入停机窗口后的任何失败都会让三个进程保持停止，防止旧代码继续写入新数据库结构。
 
-数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。Fresh DB 必须完整应用 `prisma/migrations/` 中的全部 migration，并用 `pnpm exec prisma migrate status` 核对；不要把 README 中的固定数量当门禁。当前仓库快照、最新 migration 和完整规则见 `DATABASE.md`，发布批次的外协历史快照对账、无效索引检查和视觉 fixture 见 `docs/部署指南.md` §14 与 `docs/上线前置操作清单.md`。`20260821120100_notification_log_delivery_key_unique` 的唯一索引仍是通知重试的正确性依赖，必须验收 `indisvalid`；仓库状态不代表生产已经迁移。
+数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。Fresh DB 必须完整应用 `prisma/migrations/` 中的全部 migration，并用 `pnpm exec prisma migrate status` 核对；不要把 README 中的固定数量当门禁。当前仓库快照、最新 migration 和完整规则见 `DATABASE.md`，无效索引检查和视觉 fixture 见 `docs/部署指南.md` §14，下一批发布的迁移前置见 `docs/上线前置操作清单.md`。`20260821120100_notification_log_delivery_key_unique` 的唯一索引仍是通知重试的正确性依赖，必须验收 `indisvalid`；仓库状态不代表生产已经迁移。
 
 ### 8. 上线 smoke checklist
 
 按顺序跑一遍（**本次发布批次另有前置排查与单向门，先过一遍 `docs/上线前置操作清单.md`**）：
-- [ ] `docs/上线前置操作清单.md` §零的历史外协逐款数量已凭原始证据对账，§一的覆盖缺口也已清零
+- [ ] `docs/上线前置操作清单.md` §二的两段只读预查每列为 0（2026-09-24 两条删除迁移遇到业务引用即中止）
 - [ ] `pnpm prisma migrate deploy`（生产 migration）
-- [ ] `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 为 `t`（`docs/上线前置操作清单.md` §二）
+- [ ] `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 为 `t`（部署指南 §14 的无效并发索引检查）
 - [ ] `pnpm prisma db seed`（仅首次部署且确认 seed 行为后执行）
 - [ ] `chromium --version`、`fc-list :lang=zh`，并按部署指南用 `/usr/bin/chromium` 真生成一份中文 PDF
 - [ ] `CI=true NODE_ENV=production NOTIFICATION_MOCK_MODE=false BACKGROUND_JOBS_MODE=durable PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn pnpm deploy:smoke --skip-build --require-base-url`
