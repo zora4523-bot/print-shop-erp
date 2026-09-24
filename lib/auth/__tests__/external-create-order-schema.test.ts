@@ -75,7 +75,8 @@ describe('external create-order command contract', () => {
     );
   });
 
-  it('allows print plus partial foil on the back but rejects full foil on the back', () => {
+  // DECISIONS 2026-08-27：彩印反面烫金（叠加局部或专版）是合法事实，由计价引擎转人工核价。
+  it('allows print plus partial or full foil on the back', () => {
     const partial = validInput();
     partial.styles[0] = {
       ...partial.styles[0]!,
@@ -89,7 +90,7 @@ describe('external create-order command contract', () => {
       ...partial,
       styles: [{ ...partial.styles[0]!, printFoilMode: 'FULL' as const }],
     };
-    expect(externalCreateOrderSubmitSchema.safeParse(full).success).toBe(false);
+    expect(externalCreateOrderSubmitSchema.safeParse(full).success).toBe(true);
   });
 
   it('rejects duplicate fig values and reports the affected fig', () => {

@@ -69,9 +69,9 @@ function printFoilValidationErrors(
   const errors: string[] = [];
   const foilMode = item.printFoilMode ?? 'NONE';
   const foilPassCount = item.frontColors.length + item.backColors.length;
-  if (foilMode === 'FULL' && item.backColors.length > 0) {
-    errors.push('彩印叠加专版烫金只能使用正面');
-  }
+  // Back-side foil (with either foil mode) is a legal fact without an
+  // automatic price: printFoilCapabilityManualReasons routes it to manual
+  // pricing (DECISIONS 2026-08-27). Only contradictory facts are rejected here.
   if (foilMode === 'NONE' && foilPassCount > 0) {
     errors.push('彩印未叠加烫金时不能携带烫金颜色');
   }

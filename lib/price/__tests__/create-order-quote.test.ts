@@ -527,6 +527,42 @@ describe('calculateCreateOrderQuote · 彩印 PER_ORDER 黄金用例', () => {
     },
   );
 
+  // DECISIONS 2026-08-27：彩印反面烫金是合法但待人工定价的组合。叠加专版烫金
+  // （printFoilMode FULL，即 hasLocalFoil=false）与局部烫金一样转人工，不得判为非法输入。
+  it.each([
+    ['只烫反面', [], ['哑金']],
+    ['正反面各烫一色', ['哑金'], ['亮金']],
+  ] as const)(
+    '彩印叠加专版烫金%s时转人工核价（沿用人工整款价含制版费），不判为非法输入',
+    (_label, frontColors, backColors) => {
+      const result = quoteSingle(
+        printItem({ quantity: 2_000, frontColors, backColors, printFoilMode: 'FULL' }),
+      );
+
+      expect(result.status).toBe('MANUAL_PRICING_REQUIRED');
+      expect(result.errors).toEqual([]);
+      expect(result.items[0]).toMatchObject({
+        status: 'MANUAL_PRICING_REQUIRED',
+        amount: null,
+        knownAmount: '0.00',
+        errors: [],
+      });
+      expect(result.manualReasons.map((reason) => reason.code)).toEqual([
+        'PRINT_BACK_SIDE_FOIL',
+        'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+      ]);
+      expect(result.order.lines.map((line) => line.code)).not.toContain('PLATE_FEE');
+    },
+  );
+
+  it.each([
+    ['叠加烫金却没有任何烫金颜色', { printFoilMode: 'FULL' as const, frontColors: [], backColors: [] }, '彩印叠加烫金时必须选择至少一种烫金颜色'],
+    ['未叠加烫金却携带反面烫金颜色', { printFoilMode: 'NONE' as const, frontColors: [], backColors: ['哑金'] }, '彩印未叠加烫金时不能携带烫金颜色'],
+  ])('彩印%s仍判为非法输入', (_label, overrides, message) => {
+    const result = quoteSingle(printItem({ quantity: 2_000, ...overrides }));
+    expect(result.items[0]).toMatchObject({ status: 'INVALID_INPUT', errors: [message] });
+  });
+
   it('冰白纸彩印阶梯价只含不覆膜，提交亚膜时转人工核价', () => {
     const iceWhite = {
       paperType: '冰白纸',

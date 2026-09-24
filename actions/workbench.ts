@@ -30,8 +30,6 @@ const QUOTE_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   烫金款必须选择正面烫金颜色: '请至少选择一种正面烫金颜色后自动计算',
   专版烫金只能使用正面:
     '专版反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
-  彩印叠加专版烫金只能使用正面:
-    '彩印加反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
 };
 
 function quoteFailureMessage(error: unknown): string {
