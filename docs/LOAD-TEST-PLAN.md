@@ -98,7 +98,7 @@ pnpm test:load read \
   --output test-results/load/staging-read-28.json
 ```
 
-`load-test-users.json` 是 28 个 `{ "username": "...", "password": "..." }` 对象的 JSON 数组，文件必须 `chmod 600`。正式模式会根据登录后实际角色强制验证 20+3+5，并默认把销售/客服分配到 `/orders`、主管分配到 `/owner` 和 `/orders`、师傅分配到 `/worker`。登录会话会顺序预热，避免把登录限流混入业务指标。凭据文件不应放入仓库。
+`load-test-users.json` 是 28 个 `{ "username": "...", "password": "..." }` 对象的 JSON 数组，文件必须 `chmod 600`。正式模式会根据登录后实际角色强制验证 SALES=20、ADMIN=3、WORKER=5（2026-09-24 删除客服角色后，20 个名额全部是外部销售），并默认把销售分配到 `/orders`、主管分配到 `/owner` 和 `/orders`、师傅分配到 `/worker`。登录会话会顺序预热，避免把登录限流混入业务指标。凭据文件不应放入仓库。
 
 `read --smoke` 仍可用单个账号共享会话做快速路径验证，但报告会明确标记为无容量效力。开单/报工将使用现有 Playwright 业务流程，并在隔离账号和数据就绪后执行。
 
