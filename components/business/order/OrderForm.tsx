@@ -37,6 +37,7 @@ import { OrderItemProductField } from './order-form-b/OrderItemFields';
 import { FieldError } from './order-form-b/OrderFieldPrimitives';
 import { externalOrderCatalogCandidates } from '@/lib/order/order-item-catalog';
 import { orderItemFieldOptions } from './order-item-field-options';
+import { copyOrderItemName, syncAutomaticOrderItemName } from './order-item-name';
 import {
   createBlankItem,
   createExternalOrderItem,
@@ -967,6 +968,21 @@ export function OrderForm({
   });
   const orderFormControlsDisabled =
     !localDraftReady || submitting || uploading;
+  useEffect(() => {
+    if (usesExternalSalesPricing || orderFormControlsDisabled || createdDraft) return;
+    // Repair recognizable stale automatic names when a local draft or an
+    // editor snapshot is restored, including copies made before this fix.
+    getValues('items').forEach((item, index) => {
+      const name = syncAutomaticOrderItemName(item, item, {
+        products,
+        paperMaterials: externalCreateOrderOptions?.papers,
+      });
+      if (name !== item.name) {
+        setValue(`items.${index}.name`, name, { shouldDirty: true, shouldValidate: true });
+      }
+    });
+  }, [watchedItems, usesExternalSalesPricing, orderFormControlsDisabled, createdDraft,
+    getValues, setValue, products, externalCreateOrderOptions?.papers]);
   const pendingDesignFileCount = Object.values(pendingDesigns).reduce(
     (total, queue) => total + queue.length,
     0,
@@ -1576,9 +1592,7 @@ export function OrderForm({
       fig: nextItemFigRef.current,
       name: sameDesign || usesExternalSalesPricing
         ? source.name
-        : source.name?.trim()
-          ? `${source.name.slice(0, 61)} 副本`
-          : '',
+        : copyOrderItemName(source.name),
     };
     nextItemFigRef.current += 1;
     setValue('nextItemFig', nextItemFigRef.current, { shouldDirty: true });
@@ -1655,35 +1669,41 @@ export function OrderForm({
       ...normalizationOptions,
       preserveCustomSize: normalizationOptions.preserveCustomSize ?? true,
     });
+    const next = {
+      ...normalized,
+      // Catalog facts are an atomic selection; mixing old paper/spec fields
+      // with a newly resolved product causes the server to reject the quote.
+      ...(internalMaterialChange === null ? {
+        productId: current.productId,
+        productStructure: current.productStructure,
+        specification: current.specification,
+        paperType: current.paperType,
+        paperWeightGsm: current.paperWeightGsm,
+        actualWidthMm: current.actualWidthMm,
+        actualHeightMm: current.actualHeightMm,
+      } : {}),
+      crafts: resolveInternalOrderCraftIds(
+        { ...normalized, crafts: current.crafts },
+        crafts,
+      ),
+      artworkVersion: current.artworkVersion,
+      plateGroupId: null,
+      pricingGroup: null,
+      manualQuoteReason: current.manualQuoteReason,
+      unitPrice: null,
+      fixedFee: null,
+      suggestedSubtotal: null,
+      priceOverrideReason: null,
+      remark: current.remark,
+    };
     setValue(
       `items.${index}`,
       {
-        ...normalized,
-        name: current.name,
-        // Catalog facts are an atomic selection; mixing old paper/spec fields
-        // with a newly resolved product causes the server to reject the quote.
-        ...(internalMaterialChange === null ? {
-          productId: current.productId,
-          productStructure: current.productStructure,
-          specification: current.specification,
-          paperType: current.paperType,
-          paperWeightGsm: current.paperWeightGsm,
-          actualWidthMm: current.actualWidthMm,
-          actualHeightMm: current.actualHeightMm,
-        } : {}),
-        crafts: resolveInternalOrderCraftIds(
-          { ...normalized, crafts: current.crafts },
-          crafts,
-        ),
-        artworkVersion: current.artworkVersion,
-        plateGroupId: null,
-        pricingGroup: null,
-        manualQuoteReason: current.manualQuoteReason,
-        unitPrice: null,
-        fixedFee: null,
-        suggestedSubtotal: null,
-        priceOverrideReason: null,
-        remark: current.remark,
+        ...next,
+        name: syncAutomaticOrderItemName(current, next, {
+          products,
+          paperMaterials: externalCreateOrderOptions?.papers,
+        }),
       },
       { shouldDirty: true, shouldValidate: true },
     );
