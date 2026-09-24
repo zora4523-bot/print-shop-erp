@@ -1,4 +1,3 @@
-import Decimal from 'decimal.js';
 import { z } from 'zod';
 import {
   Prisma,
@@ -27,31 +26,6 @@ export { salaryRuleLockKey } from './rules';
 // decides the formula.  Keeping the dictionary explicit prevents a packing
 // rate from accidentally becoming a sales commission or vice versa.
 
-const MAX_MONEY = new Decimal('99999999.99');
-const MAX_RATE = new Decimal(1);
-
-const moneyText = z
-  .string()
-  .trim()
-  .regex(/^\d{1,8}(?:\.\d{1,2})?$/, '请输入非负金额，最多两位小数')
-  .superRefine((value, ctx) => {
-    const amount = new Decimal(value);
-    if (amount.gt(MAX_MONEY)) {
-      ctx.addIssue({ code: 'custom', message: '金额不能超过 99,999,999.99 元' });
-    }
-  });
-
-const rateText = z
-  .string()
-  .trim()
-  .regex(/^\d(?:\.\d{1,4})?$/, '请输入 0 到 1 之间的比例，最多四位小数')
-  .superRefine((value, ctx) => {
-    const rate = new Decimal(value);
-    if (rate.gt(MAX_RATE)) {
-      ctx.addIssue({ code: 'custom', message: '比例不能超过 100%' });
-    }
-  });
-
 const timeText = z
   .string()
   .trim()
@@ -67,9 +41,6 @@ export type SalaryRuleDefinition = {
 };
 
 const RULE_TYPE_BY_KEY: Record<SalaryRuleKey, SalaryRuleType> = {
-  CS_BASE_SALARY: SalaryRuleType.CS_COMMISSION,
-  CS_PERIOD_LENGTH: SalaryRuleType.CS_COMMISSION,
-  CS_TIERS: SalaryRuleType.CS_COMMISSION,
   WORK_HOURS: SalaryRuleType.WORKER_HOURLY,
 };
 
@@ -82,10 +53,6 @@ export const SALARY_RULE_DEFINITIONS: readonly SalaryRuleDefinition[] =
 const definitionByKey = new Map(
   SALARY_RULE_DEFINITIONS.map((definition) => [definition.key, definition]),
 );
-
-function numeric(value: string): number {
-  return new Decimal(value).toNumber();
-}
 
 function timeMinutes(value: string): number {
   const [hour, minute] = value.split(':').map(Number);
@@ -109,16 +76,6 @@ const baseInput = z.object({
 });
 
 const salaryRuleVersionRawSchema = z.discriminatedUnion('ruleKey', [
-  baseInput.extend({ ruleKey: z.literal('CS_BASE_SALARY'), monthlyBase: moneyText }),
-  baseInput.extend({
-    ruleKey: z.literal('CS_PERIOD_LENGTH'),
-    months: z.coerce.number().int('结算周期必须是整数').min(1).max(24),
-  }),
-  baseInput.extend({
-    ruleKey: z.literal('CS_TIERS'),
-    tierMinSales: z.array(moneyText).min(1, '至少需要一个提成档位').max(20),
-    tierRate: z.array(rateText).min(1, '至少需要一个提成档位').max(20),
-  }),
   baseInput.extend({
     ruleKey: z.literal('WORK_HOURS'),
     morningStart: timeText,
@@ -131,28 +88,6 @@ const salaryRuleVersionRawSchema = z.discriminatedUnion('ruleKey', [
 
 export const salaryRuleVersionInputSchema = salaryRuleVersionRawSchema
   .superRefine((input, ctx) => {
-    if (input.ruleKey === 'CS_TIERS') {
-      if (input.tierMinSales.length !== input.tierRate.length) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['tierRate'],
-          message: '每个业绩门槛都必须对应一个提成比例',
-        });
-        return;
-      }
-      let previous: Decimal | null = null;
-      for (const [index, threshold] of input.tierMinSales.entries()) {
-        const current = new Decimal(threshold);
-        if (previous && current.lte(previous)) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['tierMinSales', index],
-            message: '业绩门槛必须从低到高且不能重复',
-          });
-        }
-        previous = current;
-      }
-    }
     if (input.ruleKey === 'WORK_HOURS') {
       const morningStart = timeMinutes(input.morningStart);
       const morningEnd = timeMinutes(input.morningEnd);
@@ -180,21 +115,6 @@ export const salaryRuleVersionInputSchema = salaryRuleVersionRawSchema
       remark: input.remark || null,
     };
     switch (input.ruleKey) {
-      case 'CS_BASE_SALARY':
-        return { ...common, ruleValue: { monthlyBase: numeric(input.monthlyBase) } };
-      case 'CS_PERIOD_LENGTH':
-        return { ...common, ruleValue: { months: input.months } };
-      case 'CS_TIERS':
-        return {
-          ...common,
-          ruleValue: {
-            mode: 'FLAT',
-            tiers: input.tierMinSales.map((minSales, index) => ({
-              minSales: numeric(minSales),
-              rate: numeric(input.tierRate[index]),
-            })),
-          },
-        };
       case 'WORK_HOURS':
         return {
           ...common,
@@ -226,10 +146,6 @@ export function parseSalaryRuleVersionFormData(formData: FormData) {
     ruleKey: formData.get('ruleKey'),
     effectiveFrom: formData.get('effectiveFrom'),
     remark: formData.get('remark') || undefined,
-    monthlyBase: formData.get('monthlyBase'),
-    months: formData.get('months'),
-    tierMinSales: formData.getAll('tierMinSales'),
-    tierRate: formData.getAll('tierRate'),
     morningStart: formData.get('morningStart'),
     morningEnd: formData.get('morningEnd'),
     afternoonStart: formData.get('afternoonStart'),

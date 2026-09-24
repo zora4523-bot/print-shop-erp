@@ -12,7 +12,6 @@ import {
   ProductionTaskDisputeStatus,
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
-  SalaryPeriodStatus,
   ShipmentStatus,
   TaskStatus,
 } from '@/generated/prisma/enums';
@@ -46,8 +45,6 @@ import {
   RULE_CENTER_EFFECT_REGISTRY,
   SALARY_FLOOR_DISPLAY_STATUS,
   SALARY_FLOOR_STATUS_REGISTRY,
-  SALARY_PERIOD_DISPLAY_STATUS,
-  SALARY_PERIOD_STATUS_REGISTRY,
   SENSITIVE_COLUMN_MASKING_STATUS,
   SENSITIVE_COLUMN_MASKING_STATUS_REGISTRY,
   SHIPMENT_STATUS_REGISTRY,
@@ -57,7 +54,6 @@ import {
   paymentStatusDefinition,
   promisedDateAlertDefinition,
   salaryFloorStatusDefinition,
-  salaryPeriodStatusDefinition,
   sensitiveColumnMaskingDefinition,
   statusFilterLabel,
   type StatusDefinition,
@@ -458,27 +454,13 @@ describe('status registry', () => {
     }
   });
 
-  it('uses consistent salary period and payment semantics', () => {
+  it('uses consistent payment semantics', () => {
     expect(paymentStatusDefinition(true)).toEqual(
       PAYMENT_STATUS_REGISTRY.PAID,
     );
     expect(paymentStatusDefinition(false)).toEqual(
       PAYMENT_STATUS_REGISTRY.UNPAID,
     );
-    expect(
-      salaryPeriodStatusDefinition(SalaryPeriodStatus.IN_PROGRESS, {
-        readyToSettle: true,
-      }),
-    ).toEqual(
-      SALARY_PERIOD_STATUS_REGISTRY[
-        SALARY_PERIOD_DISPLAY_STATUS.READY_TO_SETTLE
-      ],
-    );
-    expect(
-      SALARY_PERIOD_STATUS_REGISTRY[
-        SALARY_PERIOD_DISPLAY_STATUS.READY_TO_SETTLE
-      ].tone,
-    ).toBe('warning');
   });
 
   it('derives active, salary-floor, readiness and masking definitions', () => {

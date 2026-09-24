@@ -1,9 +1,8 @@
 import { SalaryRuleType } from '../../generated/prisma/enums';
 import { db } from '../db';
-import type { CsTiersConfig } from './cs-commission';
 
 // 最小客户端面：既接全局 db，也接 $transaction 的 tx（结算类调用必须
-// 传 tx，让规则读参与结算快照的事务隔离——见 settleCsPeriod）。直接复用
+// 传 tx，让规则读参与结算快照的事务隔离）。直接复用
 // Prisma delegate 的函数类型，避免用 unknown 重写参数后破坏函数参数逆变兼容性。
 export type SalaryRuleClient = {
   salaryRule: Pick<typeof db.salaryRule, 'findFirst'>;
@@ -42,8 +41,7 @@ export async function acquireSalaryRuleSnapshotWriteLock(
   await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${SALARY_RULE_SNAPSHOT_LOCK_KEY}))`;
 }
 
-// 版本化规则"当前生效"查询的**唯一实现**（此前同形 findFirst 复制
-// 6 处：machine/cs/hourly/cook + cs.ts 的 tx 版）。语义：effectiveFrom
+// 版本化规则"当前生效"查询的**唯一实现**。语义：effectiveFrom
 // <= now 中最新一条，且 effectiveTo 为 null 或 > now。
 // ruleValue 是 Prisma Json——形状由 seed / owner 规则编辑器在写入侧
 // 保证，读侧信任断言为 T。
@@ -65,33 +63,6 @@ export async function getActiveRuleValue<T>(
   });
   if (!rule) return null;
   return rule.ruleValue as unknown as T;
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// CS (客服) rules — SPEC §5.3
-// ─────────────────────────────────────────────────────────────────────
-//
-// Three rule keys under ruleType=CS_COMMISSION:
-//   - CS_BASE_SALARY:  ruleValue = { monthlyBase: number }
-//   - CS_PERIOD_LENGTH: ruleValue = { months: number }
-//   - CS_TIERS:        ruleValue = { mode: 'FLAT', tiers: [...] }
-//
-// All three together define the commission scheme. We fetch the
-// active version of each at period start / settle time and snapshot
-// the tier config onto CustomerServiceCommission (via tierRate +
-// totalSales, which is enough to reproduce the applied tier).
-
-async function getActiveCsRule<T>(
-  ruleKey: string,
-  now: Date,
-): Promise<T | null> {
-  return getActiveRuleValue<T>(SalaryRuleType.CS_COMMISSION, ruleKey, now);
-}
-
-export async function getActiveCsTiers(
-  now: Date = new Date(),
-): Promise<CsTiersConfig | null> {
-  return getActiveCsRule<CsTiersConfig>('CS_TIERS', now);
 }
 
 // ─────────────────────────────────────────────────────────────────────

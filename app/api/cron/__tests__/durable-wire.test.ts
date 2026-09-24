@@ -22,8 +22,6 @@ vi.mock('@/lib/cron/schedule', () => ({
   yesterdayShanghai: () => '2026-07-16',
 }));
 vi.mock('@/lib/cron/tasks', () => ({
-  runCsPeriodEndingTask: vi.fn(),
-  runCsSettleTask: vi.fn(),
   runDailySalaryTask: vi.fn(),
   runGenerateBillsTask: vi.fn(),
   runHourlyPayrollTask: vi.fn(),
@@ -40,8 +38,6 @@ vi.mock('@/lib/notification/production-alerts', () => ({
 
 import { BACKGROUND_JOB_TYPES } from '@/lib/background-jobs/types';
 import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
-import { POST as csPeriodEndingPost } from '../cs-period-ending/route';
-import { POST as csSettlePost } from '../cs-settle/route';
 import { POST as dailySalaryPost } from '../daily-salary/route';
 import { POST as generateBillsPost } from '../generate-bills/route';
 import { POST as orderExportCleanupPost } from '../order-export-cleanup/route';
@@ -89,16 +85,6 @@ describe('cron durable wires', () => {
       },
     },
     {
-      name: 'CS settle',
-      post: csSettlePost,
-      path: '/api/cron/cs-settle',
-      expected: {
-        type: BACKGROUND_JOB_TYPES.CRON_CS_SETTLE,
-        scope: '2026-07-17',
-        payload: { runDate: '2026-07-17' },
-      },
-    },
-    {
       name: 'generate bills',
       post: generateBillsPost,
       path: '/api/cron/generate-bills',
@@ -115,16 +101,6 @@ describe('cron durable wires', () => {
       path: '/api/cron/outsource-overdue',
       expected: {
         type: BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE,
-        scope: '2026-07-17',
-        payload: { runDate: '2026-07-17' },
-      },
-    },
-    {
-      name: 'CS period ending',
-      post: csPeriodEndingPost,
-      path: '/api/cron/cs-period-ending',
-      expected: {
-        type: BACKGROUND_JOB_TYPES.CRON_CS_PERIOD_ENDING,
         scope: '2026-07-17',
         payload: { runDate: '2026-07-17' },
       },

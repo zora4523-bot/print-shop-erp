@@ -83,7 +83,7 @@ function shell(
     _count: {
       reworkOrders: 0, items: 0, packagingGroups: 0, shipments: 0,
       outsourceOrders: 0, logs: 0, billItems: 0, changeRequests: 0,
-      costEntries: 0, customerCharges: 0, csSalesEntries: 0,
+      costEntries: 0, customerCharges: 0,
       pricingRevisions: 0, productionOperations: 0, productionProgressSteps: 0,
       productionWorkOrderProgress: 0, productionScanClaims: 0, stars: 0,
       printJobs: 0, workflowDecisions: 0, exportSelections: 0,
@@ -134,7 +134,7 @@ describe('dashboard shell eligibility', () => {
 
   const protectedRelations = [
     'items', 'packagingGroups', 'shipments', 'pricingRevisions', 'customerCharges',
-    'costEntries', 'billItems', 'csSalesEntries', 'changeRequests', 'workflowDecisions',
+    'costEntries', 'billItems', 'changeRequests', 'workflowDecisions',
     'printJobs', 'outsourceOrders', 'productionOperations', 'productionProgressSteps',
     'productionWorkOrderProgress', 'productionScanClaims', 'reworkOrders', 'exportSelections',
   ] as const;

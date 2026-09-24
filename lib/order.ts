@@ -13,7 +13,6 @@ import Decimal from 'decimal.js';
 import { calculateAdminCreatePrice, adminCreatePriceFactsKey, calculateAdminPackagingPrice, adminPackagingPriceFactsKey } from './order/admin-create-price';
 import { buildTrustedAdminItemPricingSnapshot, buildTrustedAdminPackagingPricingSnapshot } from './order/admin-pricing-snapshot';
 import {
-  CsSalesEntryType,
   CustomerPriceBookPurpose,
   DesignFileType,
   OrderBillingMode,
@@ -69,12 +68,6 @@ import { dispatchNotification } from './notification/dispatch';
 import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
 import type { EnqueueClient } from './background-jobs/repository';
 import { backgroundJobsMode } from './background-jobs/mode';
-import {
-  CsSalesLedgerError,
-  recordCsSalesEntryInTx,
-  csSalesBasisAmountInTx,
-} from './salary/cs-sales';
-import { reverseCsSalesOnOrderCancelInTx } from './order/cs-sales-ledger';
 import { isDirectCancelStatus } from './order/direct-cancel';
 import { hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
 import {
@@ -2079,42 +2072,6 @@ export async function submitOrder(
             );
           }
         }
-
-        const submittedOrder = await prismaTx.order.findUnique({
-          where: { id: lockedOrderId },
-          select: {
-            submitterId: true,
-            submitterRole: true,
-            billingMode: true,
-            settlementType: true,
-            totalAmount: true,
-            revision: true,
-          },
-        });
-        if (
-          submittedOrder?.settlementType ===
-            OrderSettlementType.INTERNAL_SALES &&
-          submittedOrder.billingMode === OrderBillingMode.CHARGE
-        ) {
-          try {
-            await recordCsSalesEntryInTx(prismaTx, {
-              eventKey: `order:${lockedOrderId}:revision:${submittedOrder.revision}:submit`,
-              csUserId: submittedOrder.submitterId,
-              orderId: lockedOrderId,
-              orderRevision: submittedOrder.revision,
-              type: CsSalesEntryType.ORDER_SUBMITTED,
-              // 客服业绩不含代收物流（快递费 / 打包耗材），见 cs-sales.ts。
-              amount: await csSalesBasisAmountInTx(prismaTx, lockedOrderId, submittedOrder.totalAmount),
-              occurredAt: now,
-              remark: '客服工单提交计入销售额',
-            });
-          } catch (error) {
-            if (error instanceof CsSalesLedgerError) {
-              throw new OrderInvariantError(error.message);
-            }
-            throw error;
-          }
-        }
       },
       afterTransition: async (tx, lockedOrderId, previousOrder) => {
         const currentPricing = await tx.order.findUnique({
@@ -2467,35 +2424,6 @@ export async function cancelOrder(
               remark: `随历史工单取消 ${pendingLegacyTasks.length} 个未开工任务`,
             },
           });
-        }
-      }
-      const prismaTx = tx as unknown as Prisma.TransactionClient;
-      const cancelledOrder = await prismaTx.order.findUnique({
-        where: { id },
-        select: {
-          submitterId: true,
-          submitterRole: true,
-          billingMode: true,
-          settlementType: true,
-          status: true,
-          totalAmount: true,
-          revision: true,
-        },
-      });
-      // Pre-transition status: a DRAFT never emitted ORDER_SUBMITTED, so the
-      // shared helper skips it instead of creating a phantom negative balance.
-      if (cancelledOrder) {
-        try {
-          await reverseCsSalesOnOrderCancelInTx(prismaTx, { ...cancelledOrder, id }, {
-            orderRevision: cancelledOrder.revision,
-            occurredAt: now,
-            remark: `取消工单：${normalizedReason}`,
-          });
-        } catch (error) {
-          if (error instanceof CsSalesLedgerError) {
-            throw new OrderInvariantError(error.message);
-          }
-          throw error;
         }
       }
     },

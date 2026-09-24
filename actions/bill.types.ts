@@ -23,7 +23,6 @@ export type RecordBillPaymentResult =
       newPaidAmount: string;
       totalAmount: string;
       billStatus: BillStatus;
-      csAccumulated: boolean;
     }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };

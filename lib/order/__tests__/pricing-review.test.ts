@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import Decimal from "decimal.js";
 import {
   OrderBillingMode,
   OrderItemPricingRoute,
@@ -18,9 +17,6 @@ const {
   appendPricingRevisionMock,
   inspectProductionMock,
   prepareProductionMock,
-  assertCsOrderSalesLedgerReconciledMock,
-  recordCsSalesEntryMock,
-  MockCsSalesLedgerError,
 } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
@@ -42,9 +38,6 @@ const {
     appendPricingRevisionMock: vi.fn(),
     inspectProductionMock: vi.fn(),
     prepareProductionMock: vi.fn(),
-    assertCsOrderSalesLedgerReconciledMock: vi.fn(),
-    recordCsSalesEntryMock: vi.fn(),
-    MockCsSalesLedgerError: class extends Error {},
   };
 });
 
@@ -55,12 +48,6 @@ vi.mock("@/lib/order/pricing-revision", () => ({
 vi.mock("@/lib/order/production-readiness", () => ({
   inspectOrderProductionReadinessInTx: inspectProductionMock,
   prepareOrderForProductionInTx: prepareProductionMock,
-}));
-vi.mock("@/lib/salary/cs-sales", () => ({
-  assertCsOrderSalesLedgerReconciledInTx:
-    assertCsOrderSalesLedgerReconciledMock,
-  recordCsSalesEntryInTx: recordCsSalesEntryMock,
-  CsSalesLedgerError: MockCsSalesLedgerError,
 }));
 import {
   finalizeOrderPricing,
@@ -569,8 +556,6 @@ beforeEach(() => {
     operationsCreated: 0,
     idempotentReplay: false,
   });
-  assertCsOrderSalesLedgerReconciledMock.mockResolvedValue(undefined);
-  recordCsSalesEntryMock.mockResolvedValue(null);
 });
 
 describe("snapshot-only order pricing review", () => {
@@ -839,114 +824,7 @@ describe("snapshot-only order pricing review", () => {
     },
   );
 
-  it.each([
-    ["positive", "119.00", "28.00"],
-    ["negative", "200.00", "-53.00"],
-  ])(
-    "records the %s INTERNAL_SALES final-price delta exactly once",
-    async (_direction, previousTotal, expectedDelta) => {
-      dbMock.order.findUnique.mockResolvedValue(
-        legacyInternalOrder(OrderSettlementType.INTERNAL_SALES, { totalAmount: previousTotal }),
-      );
-
-      await expect(
-        finalizeOrderPricing(command({ shipments: [] }), admin, now),
-      ).resolves.toMatchObject({ totalAmount: "147.00" });
-
-      expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledOnce();
-      expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(
-        dbMock,
-        "order-1",
-        previousTotal,
-      );
-      expect(recordCsSalesEntryMock).toHaveBeenCalledOnce();
-      const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as {
-        eventKey: string;
-        csUserId: string;
-        orderId: string;
-        orderRevision: number;
-        type: string;
-        amount: { toFixed(places: number): string };
-        occurredAt: Date;
-        remark: string;
-      };
-      expect(ledgerInput).toMatchObject({
-        eventKey: "order:order-1:revision:9:change",
-        csUserId: "cs-1",
-        orderId: "order-1",
-        orderRevision: 9,
-        type: "ORDER_CHANGED",
-        occurredAt: now,
-        remark: "管理员确认工单终价",
-      });
-      expect(ledgerInput.amount.toFixed(2)).toBe(expectedDelta);
-    },
-  );
-
-  it("records the INTERNAL_SALES delta on the 加工 basis: confirmed logistics never enter 客服业绩", async () => {
-    const order = pricingOrder({ settlementType: OrderSettlementType.INTERNAL_SALES, totalAmount: "119.00" });
-    dbMock.order.findUnique.mockResolvedValue(order);
-    const previousLogistics = order.customerCharges
-      .filter((charge) => charge.shipmentId !== null)
-      .reduce((sum, charge) => sum.plus(charge.amount ?? 0), new Decimal(0));
-    const result = await finalizeOrderPricing(command(), admin, now);
-    // The confirmed total now carries the logistics rows, but the ledger only
-    // moves by the processing delta (140 + 7 other charge − 119 = 28), exactly
-    // as for the legacy order above.
-    expect(new Decimal(result.totalAmount).gt("147.00")).toBe(true);
-    expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(
-      dbMock,
-      "order-1",
-      new Decimal("119.00").minus(previousLogistics).toFixed(2),
-    );
-    const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as { amount: { toFixed(places: number): string } };
-    expect(ledgerInput.amount.toFixed(2)).toBe("28.00");
-  });
-  it("does not touch the CS ledger when INTERNAL_SALES final price is unchanged", async () => {
-    dbMock.order.findUnique.mockResolvedValue(
-      legacyInternalOrder(OrderSettlementType.INTERNAL_SALES, { totalAmount: "147.00" }),
-    );
-
-    await expect(
-      finalizeOrderPricing(command({ shipments: [] }), admin, now),
-    ).resolves.toMatchObject({ totalAmount: "147.00" });
-
-    expect(assertCsOrderSalesLedgerReconciledMock).not.toHaveBeenCalled();
-    expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
-  });
-
-  it.each(["reconcile", "record"])(
-    "fails before pricing writes when CS ledger %s fails",
-    async (failureStage) => {
-      dbMock.order.findUnique.mockResolvedValue(
-        legacyInternalOrder(OrderSettlementType.INTERNAL_SALES),
-      );
-      const failure = new MockCsSalesLedgerError("客服业绩流水无法对平");
-      if (failureStage === "reconcile") {
-        assertCsOrderSalesLedgerReconciledMock.mockRejectedValueOnce(failure);
-      } else {
-        recordCsSalesEntryMock.mockRejectedValueOnce(failure);
-      }
-
-      await expect(
-        finalizeOrderPricing(command({ shipments: [] }), admin, now),
-      ).rejects.toThrow(/客服业绩流水无法对平/);
-
-      expect(dbMock.orderItem.update).not.toHaveBeenCalled();
-      expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
-      expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
-      expect(dbMock.orderCustomerCharge.create).not.toHaveBeenCalled();
-      expect(dbMock.order.update).not.toHaveBeenCalled();
-      expect(appendPricingRevisionMock).not.toHaveBeenCalled();
-      expect(prepareProductionMock).not.toHaveBeenCalled();
-      expect(dbMock.orderLog.create).not.toHaveBeenCalled();
-      if (failureStage === "reconcile") {
-        expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
-      }
-    },
-  );
-
-  it("rejects a negative final total before ledger or pricing writes", async () => {
+  it("rejects a negative final total before pricing writes", async () => {
     const order = legacyInternalOrder(OrderSettlementType.INTERNAL_SALES);
     dbMock.order.findUnique.mockResolvedValue({
       ...order,
@@ -959,8 +837,6 @@ describe("snapshot-only order pricing review", () => {
       finalizeOrderPricing(command({ shipments: [] }), admin, now),
     ).rejects.toThrow(/工单总额不能为负数/);
 
-    expect(assertCsOrderSalesLedgerReconciledMock).not.toHaveBeenCalled();
-    expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
     expect(dbMock.orderItem.update).not.toHaveBeenCalled();
     expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
     expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
@@ -1201,21 +1077,6 @@ describe("snapshot-only order pricing review", () => {
       complete: false,
       advisory: true,
     });
-  });
-
-  it("keeps 补录 logistics rows out of 客服业绩 when a legacy INTERNAL_SALES order is fully edited", async () => {
-    const order = legacyInternalOrder(OrderSettlementType.INTERNAL_SALES, { settledFee: null, status: OrderStatus.CONFIRMED, totalAmount: "119.00" });
-    dbMock.order.findUnique.mockResolvedValue(order);
-    const input = command({ editAll: true, orderCharges: [{ chargeId: 'other-charge', expectedBusinessKey: 'ORDER:OTHER', amount: '7.00', reason: '保留' }] });
-    const result = await finalizeOrderPricing(input, admin, now);
-    // 99.00 shipping + 8.00 packing were created; the total carries them, the
-    // ledger delta is measured on the total without them.
-    expect(dbMock.orderCustomerCharge.create).toHaveBeenCalledTimes(2);
-    expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(dbMock, "order-1", "119.00");
-    const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as { amount: { toFixed(places: number): string } };
-    const basisDelta = new Decimal(result.totalAmount).minus("107.00").minus("119.00").toFixed(2);
-    expect(ledgerInput.amount.toFixed(2)).toBe(basisDelta);
-    expect(ledgerInput.amount.toFixed(2)).not.toBe(new Decimal(result.totalAmount).minus("119.00").toFixed(2));
   });
 
   it("confirms a factory-direct order-level pending plate fee without shipment charges", async () => {

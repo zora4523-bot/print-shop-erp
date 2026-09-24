@@ -3,7 +3,6 @@ import { StatusBadge } from '@/components/ui-business';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
-import { SalaryPeriodStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import {
@@ -16,7 +15,6 @@ import type {
   DueOrdersResult,
   OverdueOutsourceRow,
   OverReportsResult,
-  EndingPeriodRow,
   PendingShipmentRow,
   DueOrderRow,
   OverReportRow,
@@ -217,40 +215,6 @@ export async function OverReportsWatchlist({
   );
 }
 
-export async function EndingPeriodsWatchlist({
-  resultPromise,
-}: {
-  resultPromise: Promise<EndingPeriodRow[]>;
-}) {
-  const rows = await resultPromise;
-  return (
-    <AttentionPanel
-      kind="settlements"
-      count={rows.length}
-      emptyText="未来 7 天无客服周期到期"
-    >
-      {rows.slice(0, DASHBOARD_PREVIEW_LIMIT).map((row) => (
-        <li
-          key={row.id}
-          className="flex min-w-0 items-start justify-between gap-3 px-4 py-3 text-sm"
-        >
-          <div>
-            <Link className={linkClass} href={`/owner/salary/cs/${row.id}`}>
-              {row.csDisplayName}
-            </Link>
-            <p className="mt-1 text-xs text-muted-foreground">
-              截至 {formatDateShanghai(row.periodEnd)}
-            </p>
-          </div>
-          <StatusBadge tone={row.daysUntilEnd <= 1 ? 'warning' : 'neutral'}>
-            {row.daysUntilEnd === 0 ? '今日到期' : `${row.daysUntilEnd} 天后到期`}
-          </StatusBadge>
-        </li>
-      ))}
-    </AttentionPanel>
-  );
-}
-
 export function pendingShipmentColumns(
   now: Date,
 ): readonly WatchlistColumn<PendingShipmentRow>[] {
@@ -349,25 +313,4 @@ export const overReportColumns: readonly WatchlistColumn<OverReportRow>[] = [
     ),
   },
   { header: '时间', cell: (row) => formatDateTimeShanghai(row.createdAt) },
-];
-
-export const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
-  {
-    header: '客服',
-    cell: (row) => (
-      <Link className={linkClass} href={`/owner/salary/cs/${row.id}`}>
-        {row.csDisplayName}
-      </Link>
-    ),
-  },
-  {
-    header: '周期',
-    cell: (row) =>
-      `${formatDateShanghai(row.periodStart)} — ${formatDateShanghai(row.periodEnd)}`,
-  },
-  {
-    header: '到期',
-    cell: (row) => row.daysUntilEnd === 0 ? '今日' : `${row.daysUntilEnd} 天后`,
-  },
-  { header: '状态', cell: () => <SalaryPeriodStatusBadge status="IN_PROGRESS" /> },
 ];

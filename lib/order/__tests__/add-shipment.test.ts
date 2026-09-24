@@ -112,8 +112,6 @@ const tx = {
   orderShipmentLine: { update: mocks.line, delete: mocks.remove },
   orderCustomerCharge: { update: mocks.charge, create: mocks.charge, aggregate: vi.fn() },
   orderLog: { create: mocks.log },
-  csSalesEntry: { aggregate: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
-  salaryPeriod: { findFirst: vi.fn(), update: vi.fn() },
 };
 beforeEach(() => {
   vi.resetAllMocks();
@@ -555,81 +553,5 @@ describe('split boxed deliveries', () => {
     expect(preview!.charges.every((charge) => charge.shippingFee === null)).toBe(true);
     await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
     expect(mocks.charge).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ amount: null, status: 'PENDING_AMOUNT' }) }));
-  });
-
-  describe('客服业绩流水（SPEC §3.7：已提交内部收费单金额变化追加差额流水）', () => {
-    const cs = { id: 'cs', role: Role.CUSTOMER_SERVICE };
-    const split = () => ({ ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] });
-    function internalBoxes(status = 'SUBMITTED') {
-      return { ...boxes(), settlementType: 'INTERNAL_SALES', billingMode: 'CHARGE', submitterId: 'cs', status };
-    }
-    function ledger(recorded = '83.03') {
-      tx.productionOperation.count.mockResolvedValue(0);
-      tx.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: null } });
-      tx.csSalesEntry.aggregate.mockResolvedValue({ _sum: { amount: new Decimal(recorded) } });
-      tx.csSalesEntry.findUnique.mockResolvedValue(null);
-      tx.csSalesEntry.create.mockResolvedValue({ id: 'cs-entry' });
-      tx.salaryPeriod.findFirst.mockResolvedValue({
-        id: 'period-1', totalSales: new Decimal('83.03'), initialSales: new Decimal(0),
-      });
-      tx.salaryPeriod.update.mockResolvedValue({ id: 'period-1' });
-      mocks.revision.mockResolvedValue({ pricingRevisionId: 'new-revision', orderRevision: 2 });
-    }
-    async function saveSplit(order: ReturnType<typeof internalBoxes>) {
-      mocks.find.mockResolvedValue(order);
-      const preview = await addOrderShipment(split(), cs, 'preview');
-      return addOrderShipment({ ...split(), previewToken: preview!.token }, cs, 'save');
-    }
-
-    it('分货多出一盒：先核对原口径对平，再追加盒费差额 ORDER_CHANGED 流水', async () => {
-      ledger();
-
-      await expect(saveSplit(internalBoxes())).resolves.toBeNull();
-
-      expect(tx.csSalesEntry.aggregate).toHaveBeenCalledWith({ where: { orderId: 'order' }, _sum: { amount: true } });
-      expect(tx.csSalesEntry.create).toHaveBeenCalledTimes(1);
-      expect(tx.csSalesEntry.create).toHaveBeenCalledWith({
-        data: {
-          eventKey: 'order:order:revision:2:shipment-added',
-          csUserId: 'cs',
-          salaryPeriodId: 'period-1',
-          orderId: 'order',
-          orderRevision: 2,
-          type: 'ORDER_CHANGED',
-          amount: '2.30',
-          occurredAt: expect.any(Date),
-          remark: '添加地址 2，从地址 1 分货',
-        },
-        select: { id: true },
-      });
-      expect(tx.salaryPeriod.update).toHaveBeenCalledWith({
-        where: { id: 'period-1' },
-        data: { totalSales: { increment: '2.30' } },
-        select: { id: true },
-      });
-    });
-
-    it('原流水未对平时整笔分货失败关闭，不追加流水', async () => {
-      ledger('80.00');
-
-      await expect(saveSplit(internalBoxes())).rejects.toThrow(/客服业绩流水未与当前金额对平/);
-      expect(tx.csSalesEntry.create).not.toHaveBeenCalled();
-    });
-
-    it('没有覆盖当天的客服周期时整笔回滚，不静默漏记', async () => {
-      ledger();
-      tx.salaryPeriod.findFirst.mockResolvedValue(null);
-
-      await expect(saveSplit(internalBoxes())).rejects.toThrow(/没有可用的工资周期/);
-      expect(tx.csSalesEntry.create).not.toHaveBeenCalled();
-    });
-
-    it('草稿尚未计入业绩，分货不读不写业绩流水', async () => {
-      ledger();
-
-      await expect(saveSplit(internalBoxes('DRAFT'))).resolves.toBeNull();
-      expect(tx.csSalesEntry.aggregate).not.toHaveBeenCalled();
-      expect(tx.csSalesEntry.create).not.toHaveBeenCalled();
-    });
   });
 });

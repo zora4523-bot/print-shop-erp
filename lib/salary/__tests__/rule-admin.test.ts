@@ -52,35 +52,36 @@ beforeEach(() => {
 });
 
 describe('salary rule editor validation', () => {
-  it('normalizes a well-formed CS FLAT tier schedule without using floats', () => {
+  it('normalizes a well-formed work schedule into Shanghai time', () => {
     const result = parseSalaryRuleVersionFormData(form({
-      ruleKey: 'CS_TIERS', effectiveFrom: '2026-08-07T09:30', remark: '新周期',
-      tierMinSales: ['100000', '200000'], tierRate: ['0.01', '0.025'],
+      ruleKey: 'WORK_HOURS', effectiveFrom: '2026-08-07T09:30', remark: '夏令时',
+      morningStart: '08:00', morningEnd: '12:00', afternoonStart: '13:30', afternoonEnd: '17:30', otStart: '18:00',
     }));
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.ruleValue).toEqual({
-        mode: 'FLAT', tiers: [{ minSales: 100000, rate: 0.01 }, { minSales: 200000, rate: 0.025 }],
+        morning: { start: '08:00', end: '12:00' },
+        afternoon: { start: '13:30', end: '17:30' },
+        otStart: '18:00',
       });
       expect(result.data.effectiveFrom.toISOString()).toBe('2026-08-07T01:30:00.000Z');
     }
   });
 
-  it('rejects descending or duplicate tier thresholds', () => {
+  it('rejects invalid Shanghai calendar dates and malformed times', () => {
     const result = parseSalaryRuleVersionFormData(form({
-      ruleKey: 'CS_TIERS', effectiveFrom: '2026-08-07T09:30',
-      tierMinSales: ['200000', '200000'], tierRate: ['0.01', '0.02'],
-    }));
-    expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.issues.some((issue) => issue.message.includes('从低到高'))).toBe(true);
-  });
-
-  it('rejects invalid Shanghai calendar dates and negative money', () => {
-    const result = parseSalaryRuleVersionFormData(form({
-      ruleKey: 'CS_BASE_SALARY', effectiveFrom: '2026-02-31T09:30', monthlyBase: '-1',
+      ruleKey: 'WORK_HOURS', effectiveFrom: '2026-02-31T09:30',
+      morningStart: '8点', morningEnd: '12:00', afternoonStart: '13:30', afternoonEnd: '17:30', otStart: '18:00',
     }));
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.issues.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('rejects rule keys that are no longer configurable', () => {
+    const result = parseSalaryRuleVersionFormData(form({
+      ruleKey: 'CS_BASE_SALARY', effectiveFrom: '2026-08-07T09:30', monthlyBase: '3000',
+    }));
+    expect(result.success).toBe(false);
   });
 
   it('rejects a work schedule whose OT begins before the afternoon shift ends', () => {
@@ -97,12 +98,12 @@ describe('createSalaryRuleVersion', () => {
   it('serializes writers, closes an overlapping prior version, writes the next boundary and audit record', async () => {
     txMock.salaryRule.findUnique.mockResolvedValue(null);
     txMock.salaryRule.findFirst.mockResolvedValue({ effectiveFrom: new Date('2026-10-01T00:00:00.000Z') });
-    txMock.salaryRule.findMany.mockResolvedValue([{ id: 'old', ruleValue: { monthlyBase: 2800 }, effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null, remark: null }]);
+    txMock.salaryRule.findMany.mockResolvedValue([{ id: 'old', ruleValue: { otStart: '18:30' }, effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null, remark: null }]);
     txMock.salaryRule.create.mockResolvedValue({
-      id: 'new', ruleType: SalaryRuleType.CS_COMMISSION, ruleKey: 'CS_BASE_SALARY', ruleValue: { monthlyBase: 3000 },
-      effectiveFrom: new Date('2026-08-07T01:30:00.000Z'), effectiveTo: new Date('2026-10-01T00:00:00.000Z'), remark: '调薪',
+      id: 'new', ruleType: SalaryRuleType.WORKER_HOURLY, ruleKey: 'WORK_HOURS', ruleValue: { otStart: '18:00' },
+      effectiveFrom: new Date('2026-08-07T01:30:00.000Z'), effectiveTo: new Date('2026-10-01T00:00:00.000Z'), remark: '调整',
     });
-    const parsed = parseSalaryRuleVersionFormData(form({ ruleKey: 'CS_BASE_SALARY', effectiveFrom: '2026-08-07T09:30', monthlyBase: '3000', remark: '调薪' }));
+    const parsed = parseSalaryRuleVersionFormData(form({ ruleKey: 'WORK_HOURS', effectiveFrom: '2026-08-07T09:30', morningStart: '08:00', morningEnd: '12:00', afternoonStart: '13:30', afternoonEnd: '17:30', otStart: '18:00', remark: '调整' }));
     if (!parsed.success) throw parsed.error;
 
     await createSalaryRuleVersion(parsed.data, actor);
@@ -128,7 +129,7 @@ describe('createSalaryRuleVersion', () => {
 
   it('rejects duplicate version timestamps before changing an old row', async () => {
     txMock.salaryRule.findUnique.mockResolvedValue({ id: 'existing' });
-    const parsed = parseSalaryRuleVersionFormData(form({ ruleKey: 'CS_BASE_SALARY', effectiveFrom: '2026-08-07T09:30', monthlyBase: '3000' }));
+    const parsed = parseSalaryRuleVersionFormData(form({ ruleKey: 'WORK_HOURS', effectiveFrom: '2026-08-07T09:30', morningStart: '08:00', morningEnd: '12:00', afternoonStart: '13:30', afternoonEnd: '17:30', otStart: '18:00' }));
     if (!parsed.success) throw parsed.error;
     await expect(createSalaryRuleVersion(parsed.data, actor)).rejects.toThrow('同一生效时间');
     expect(txMock.salaryRule.updateMany).not.toHaveBeenCalled();
@@ -136,7 +137,7 @@ describe('createSalaryRuleVersion', () => {
 
   it('uses a stable per-rule lock key so unrelated salary rules do not share a lock', () => {
     expect(salaryRuleLockKey(SalaryRuleType.WORKER_HOURLY, 'WORK_HOURS')).not.toBe(
-      salaryRuleLockKey(SalaryRuleType.CS_COMMISSION, 'CS_BASE_SALARY'),
+      salaryRuleLockKey(SalaryRuleType.WORKER_MACHINE, 'WORK_HOURS'),
     );
   });
 });
@@ -145,13 +146,13 @@ describe('listSalaryRuleSettings', () => {
   it('selects only the newest currently-effective version for each known key', async () => {
     const now = new Date('2026-08-07T00:00:00.000Z');
     dbMock.salaryRule.findMany.mockResolvedValue([
-      { id: 'new', ruleType: SalaryRuleType.CS_COMMISSION, ruleKey: 'CS_BASE_SALARY', ruleValue: { monthlyBase: 3000 }, effectiveFrom: now, effectiveTo: null, remark: 'new' },
-      { id: 'old', ruleType: SalaryRuleType.CS_COMMISSION, ruleKey: 'CS_BASE_SALARY', ruleValue: { monthlyBase: 2800 }, effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null, remark: 'old' },
+      { id: 'new', ruleType: SalaryRuleType.WORKER_HOURLY, ruleKey: 'WORK_HOURS', ruleValue: { otStart: '18:00' }, effectiveFrom: now, effectiveTo: null, remark: 'new' },
+      { id: 'old', ruleType: SalaryRuleType.WORKER_HOURLY, ruleKey: 'WORK_HOURS', ruleValue: { otStart: '18:30' }, effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null, remark: 'old' },
+      { id: 'mismatch', ruleType: SalaryRuleType.WORKER_MACHINE, ruleKey: 'WORK_HOURS', ruleValue: { otStart: '19:00' }, effectiveFrom: now, effectiveTo: null, remark: 'wrong type' },
       { id: 'retired', ruleType: SalaryRuleType.WORKER_HOURLY, ruleKey: 'PACKER_HOURLY', ruleValue: { hourlyRate: 11 }, effectiveFrom: now, effectiveTo: null, remark: 'retired' },
     ]);
     const settings = await listSalaryRuleSettings(now);
-    expect(settings.CS_BASE_SALARY?.id).toBe('new');
-    expect(settings.WORK_HOURS).toBeNull();
+    expect(settings.WORK_HOURS?.id).toBe('new');
     expect(Object.keys(settings)).not.toContain('PACKER_HOURLY');
     expect(dbMock.salaryRule.findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { effectiveFrom: 'desc' } }));
   });

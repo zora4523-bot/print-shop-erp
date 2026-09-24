@@ -265,10 +265,6 @@ P0 + P1 #2 期间建立的 cron 通道现有 10 个 endpoints，用 shared-secre
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/daily-salary
 
-# 扫描已到期客服周期（每条结算推 CS_PERIOD_SETTLED 到规则绑定的单个授权共享群）
-printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
-  curl -X POST --header @- https://host/api/cron/cs-settle
-
 # 销售应收账单
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/generate-bills
@@ -276,10 +272,6 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 # P1 #2 新增：每日扫超期外协 → OUTSOURCE_OVERDUE 推送到管理群
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/outsource-overdue
-
-# P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到规则绑定的单个授权共享群
-printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
-  curl -X POST --header @- https://host/api/cron/cs-period-ending
 
 # 2026-07-07 新增：每日扫承诺交期已过仍未发货的工单 → ORDER_OVERDUE 推送到管理群
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
@@ -391,10 +383,9 @@ fc-list :lang=zh | head
 - [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
 - [ ] ADMIN 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
 - [ ] 用受控测试错误确认 Sentry 收到事件；生产未配置 `SENTRY_DSN` 时此项明确不通过，禁止临时破坏真实业务 action
-- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 逐项核对 15 条预置 rule + 按业务启用并绑定收件群 + 用&ldquo;测试&rdquo;按钮验证真发**。Webhook 通道核对 URL；智能机器人通道先轮换已暴露 Secret，成对注入两个 `WECOM_SMART_BOT_*` 变量，确认只有一个 LIGHT worker 进程，再于目标群 `@机器人` 并发送一次性绑定码。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
+- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 逐项核对 13 条预置 rule + 按业务启用并绑定收件群 + 用&ldquo;测试&rdquo;按钮验证真发**。Webhook 通道核对 URL；智能机器人通道先轮换已暴露 Secret，成对注入两个 `WECOM_SMART_BOT_*` 变量，确认只有一个 LIGHT worker 进程，再于目标群 `@机器人` 并发送一次性绑定码。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
 - [ ] 真实触发一次 `ORDER_SCHEDULED`（下发 `RELEASED`）与 `ORDER_COMPLETED`（当前 work-order generation 通过生产完成闸口），核对群消息和投递日志各只有一次。
-- [ ] `CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED` 当前最多只能绑定 1 个授权共享群；尚未实现&ldquo;管理员群 + 对应客服&rdquo;按人双路由，不得按已完成验收。
-- [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
+- [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/order-overdue` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
 - [ ] `pm2 status` 显示 Web、LIGHT worker、HEAVY worker 三个进程都 online
 - [ ] `/api/health/ready` 返回 200，且两类 worker 心跳存在
 - [ ] `/api/health/jobs` 返回 200（有死信 / 卡死 RUNNING / worker 缺失会 503）；把它接进外部监控，否则「死信 30 分钟响应」这条 SLO 不生效

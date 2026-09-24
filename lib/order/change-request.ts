@@ -11,10 +11,8 @@ import { ORDER_MODIFIABLE_STATUSES, canChangeOrderPackaging } from './editable-f
 import Decimal from 'decimal.js';
 import {
   BackgroundJobStatus,
-  CsSalesEntryType,
   CustomerPriceBookPurpose,
   MaterialCategory,
-  OrderBillingMode,
   OrderChangeRequestStatus,
   OrderChangeRequestType,
   OrderCustomerChargeStatus,
@@ -61,12 +59,6 @@ import {
   resolveExternalOrderChargesForFinalization,
 } from '../price/order-charge-service';
 import { calculateExternalOrderCharges } from '../price/external-order-charges';
-import {
-  assertCsOrderSalesLedgerReconciledInTx,
-  CsSalesLedgerError,
-  recordCsSalesEntryInTx,
-} from '../salary/cs-sales';
-import { reverseCsSalesOnOrderCancelInTx } from './cs-sales-ledger';
 import { maybeCompleteProductionOrder, dispatchProductionCompletionNotification, type ProductionCompletionNotification, type ProductionCompletionTx } from '../production-completion';
 import { MAX_ORDER_ITEMS_PER_ORDER } from './limits';
 import { resolveOrderChangeStageInTx } from './change-stage';
@@ -4902,43 +4894,6 @@ async function terminateObsoleteCompletionDeliveryInTx(
   });
 }
 
-/**
- * 取消审批与直接取消共用同一冲销口径（SPEC §3.7、DECISIONS 2026-08-02
- * 「取消时追加全额负数」）。审批把 revision + 1，冲销流水归属取消后的版本，
- * 与修改审批的 ORDER_CHANGED 事件键同一规则。账本错误（含缺少进行中周期）
- * 映射为申请领域错误，整个审批事务回滚。
- */
-async function reverseApprovedCancellationCsSalesInTx(
-  tx: Prisma.TransactionClient,
-  request: CancellationRequest,
-  actualStatus: OrderStatus,
-  reviewedAt: Date,
-): Promise<void> {
-  try {
-    await reverseCsSalesOnOrderCancelInTx(
-      tx,
-      {
-        id: request.order.id,
-        submitterId: request.order.submitterId,
-        settlementType: request.order.settlementType,
-        billingMode: request.order.billingMode,
-        status: actualStatus,
-        totalAmount: request.order.totalAmount,
-      },
-      {
-        orderRevision: request.order.revision + 1,
-        occurredAt: reviewedAt,
-        remark: `取消申请 ${request.id} 审核通过`,
-      },
-    );
-  } catch (error) {
-    if (error instanceof CsSalesLedgerError) {
-      throw new OrderChangeRequestError(error.message);
-    }
-    throw error;
-  }
-}
-
 async function reviewOrderCancellationRequest(
   input: ReviewOrderChangeRequestInput,
   actor: { id: string; role: Role },
@@ -5056,7 +5011,6 @@ async function reviewOrderCancellationRequest(
       throw new OrderChangeRequestError('调整参考结算金额必须填写原因');
     }
     transitionOrder(request.order.status, OrderStatus.CANCELLED);
-    await reverseApprovedCancellationCsSalesInTx(tx, request, actualStatus, reviewedAt);
 
     await tx.productionOperation.updateMany({
       where: {
@@ -5144,49 +5098,6 @@ async function reviewOrderCancellationRequest(
 type ProjectedOrderQuote = Awaited<
   ReturnType<typeof calculateProjectedOrderQuote>
 >;
-
-/** Pass-through delivery charges are excluded from 客服业绩 (cs-sales.ts). */
-function logisticsChargeAmount(
-  charges: readonly { amount: { toString(): string } | null; category: { code: string } }[],
-): Decimal {
-  return charges.reduce(
-    (sum, charge) =>
-      ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(String(charge.category.code)) && charge.amount !== null
-        ? sum.plus(charge.amount.toString())
-        : sum,
-    new Decimal(0),
-  );
-}
-
-/**
- * 客服业绩不含代收物流（cs-sales.ts）：流水按扣除快递费 / 耗材后的口径记账。
- * Returns the ledger basis before the change and the basis delta to record.
- */
-async function csSalesBasisDeltaInTx(
-  tx: Prisma.TransactionClient,
-  input: {
-    orderId: string;
-    previousTotal: { toString(): string };
-    previousCharges: Parameters<typeof logisticsChargeAmount>[0];
-    nextTotal: string;
-    chargesRewritten: boolean;
-  },
-): Promise<{ previousSalesBasis: string; salesDelta: Decimal }> {
-  const previousLogisticsAmount = logisticsChargeAmount(input.previousCharges);
-  const nextLogisticsAmount = input.chargesRewritten
-    ? new Decimal(
-        (await tx.orderCustomerCharge.aggregate({
-          where: { orderId: input.orderId, category: { code: { in: ['SHIPPING_FEE', 'PACKING_MATERIAL'] } } },
-          _sum: { amount: true },
-        }))._sum.amount ?? 0,
-      )
-    : previousLogisticsAmount;
-  const previousSalesBasis = new Decimal(input.previousTotal.toString()).minus(previousLogisticsAmount).toFixed(2);
-  return {
-    previousSalesBasis,
-    salesDelta: new Decimal(input.nextTotal).minus(nextLogisticsAmount).minus(previousSalesBasis),
-  };
-}
 
 type ApprovedModificationFeeInput = {
   order: Pick<
@@ -5338,13 +5249,6 @@ async function persistApprovedModificationPricingInTx(input: {
       new Decimal(nextProcessingAmount).plus(customerChargeTotal._sum.amount ?? 0),
     );
   }
-  const { previousSalesBasis, salesDelta } = await csSalesBasisDeltaInTx(tx, {
-    orderId: request.order.id,
-    previousTotal: request.order.totalAmount,
-    previousCharges: request.order.customerCharges,
-    nextTotal,
-    chargesRewritten: Boolean(projected),
-  });
   await tx.order.update({
     where: { id: request.order.id },
     data: {
@@ -5529,8 +5433,6 @@ async function persistApprovedModificationPricingInTx(input: {
     nextWorkOrderVersion,
     pricingRevision,
     nextPricingStatus,
-    salesDelta,
-    previousSalesBasis,
     versionedProductionChange,
   };
 }
@@ -5574,8 +5476,6 @@ async function finalizeApprovedModificationInTx(input: {
     nextWorkOrderVersion,
     pricingRevision,
     nextPricingStatus,
-    salesDelta,
-    previousSalesBasis,
     versionedProductionChange,
   } = pricing;
   const rematerializedProduction = isReprintChangeStatus(request.order.status)
@@ -5721,34 +5621,6 @@ async function finalizeApprovedModificationInTx(input: {
     },
   });
 
-  if (
-    request.order.settlementType === OrderSettlementType.INTERNAL_SALES &&
-    request.order.billingMode === OrderBillingMode.CHARGE &&
-    request.order.status !== OrderStatus.DRAFT
-  ) {
-    try {
-      await assertCsOrderSalesLedgerReconciledInTx(
-        tx,
-        request.order.id,
-        previousSalesBasis,
-      );
-      await recordCsSalesEntryInTx(tx, {
-        eventKey: `order:${request.order.id}:revision:${nextRevision}:change`,
-        csUserId: request.order.submitterId,
-        orderId: request.order.id,
-        orderRevision: nextRevision,
-        type: CsSalesEntryType.ORDER_CHANGED,
-        amount: salesDelta,
-        occurredAt: reviewedAt,
-        remark: `工单修改申请 ${request.id} 审核通过`,
-      });
-    } catch (error) {
-      if (error instanceof CsSalesLedgerError) {
-        throw new OrderChangeRequestError(error.message);
-      }
-      throw error;
-    }
-  }
   return reviewed;
 }
 

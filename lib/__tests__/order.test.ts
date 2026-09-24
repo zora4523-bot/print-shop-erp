@@ -179,25 +179,6 @@ vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: notifyMock,
 }));
 vi.mock('@/lib/settings', () => ({ getSetting: getSettingMock }));
-const {
-  assertCsOrderSalesLedgerReconciledMock,
-  recordCsSalesEntryMock,
-  MockCsSalesLedgerError,
-} = vi.hoisted(() => ({
-  assertCsOrderSalesLedgerReconciledMock: vi.fn<
-    (...args: unknown[]) => Promise<void>
-  >(),
-  recordCsSalesEntryMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-  MockCsSalesLedgerError: class extends Error {},
-}));
-vi.mock('@/lib/salary/cs-sales', () => ({
-  assertCsOrderSalesLedgerReconciledInTx:
-    assertCsOrderSalesLedgerReconciledMock,
-  recordCsSalesEntryInTx: recordCsSalesEntryMock,
-  // No logistics charges in these fixtures: the basis equals the total.
-  csSalesBasisAmountInTx: vi.fn(async (_tx: unknown, _orderId: string, total: { toString(): string }) => new Decimal(total.toString()).toFixed(2)),
-  CsSalesLedgerError: MockCsSalesLedgerError,
-}));
 const { appendPricingRevisionMock } = vi.hoisted(() => ({
   appendPricingRevisionMock: vi.fn(),
 }));
@@ -639,10 +620,6 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue(CREATE_ORDER_GOLDEN_SNAPSHOT);
   notifyMock.mockReset().mockResolvedValue(undefined);
-  assertCsOrderSalesLedgerReconciledMock
-    .mockReset()
-    .mockResolvedValue(undefined);
-  recordCsSalesEntryMock.mockReset().mockResolvedValue(null);
   appendPricingRevisionMock.mockReset().mockResolvedValue({
     pricingRevisionId: 'pricing-revision-2',
     priceRevision: 2,
@@ -3296,96 +3273,6 @@ describe('cancelOrder', () => {
     expect(remarks).toEqual(['取消：清理草稿']);
   });
 
-  it('does not subtract CS sales when cancelling a draft that was never accrued', async () => {
-    dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.DRAFT,
-      submitterId: 'cs-1',
-      submitterRole: Role.CUSTOMER_SERVICE,
-      settlementType: OrderSettlementType.INTERNAL_SALES,
-      billingMode: 'CHARGE',
-      totalAmount: '5000.00',
-      revision: 1,
-    });
-    dbMock.order.update.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.CANCELLED,
-    });
-
-    await cancelOrder('o1', ownerActor, '放弃草稿');
-
-    expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
-  });
-
-  it('subtracts the exact current amount when cancelling an accrued CS order', async () => {
-    const clock = new Date('2026-08-02T03:04:00.000Z');
-    dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.PENDING_FACTORY,
-      submitterId: 'cs-1',
-      submitterRole: Role.CUSTOMER_SERVICE,
-      settlementType: OrderSettlementType.INTERNAL_SALES,
-      billingMode: 'CHARGE',
-      totalAmount: '5000.25',
-      revision: 3,
-    });
-    dbMock.order.update.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.CANCELLED,
-    });
-
-    await cancelOrder('o1', ownerActor, '客户取消', clock);
-
-    expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(
-      dbMock,
-      'o1',
-      '5000.25',
-    );
-    expect(recordCsSalesEntryMock).toHaveBeenCalledTimes(1);
-    expect(recordCsSalesEntryMock).toHaveBeenCalledWith(
-      dbMock,
-      {
-        eventKey: 'order:o1:revision:3:cancel',
-        csUserId: 'cs-1',
-        orderId: 'o1',
-        orderRevision: 3,
-        type: 'ORDER_CANCELLED',
-        amount: expect.objectContaining({}),
-        occurredAt: clock,
-        remark: '取消工单：客户取消',
-      },
-    );
-    const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as {
-      amount: { toFixed: (places: number) => string };
-    };
-    expect(ledgerInput.amount.toFixed(2)).toBe('-5000.25');
-  });
-
-  it('rolls back cancellation when legacy CS sales cannot be reconciled', async () => {
-    dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.PENDING_FACTORY,
-      submitterId: 'cs-1',
-      submitterRole: Role.CUSTOMER_SERVICE,
-      settlementType: OrderSettlementType.INTERNAL_SALES,
-      billingMode: 'CHARGE',
-      totalAmount: '5000.25',
-      revision: 3,
-    });
-    dbMock.order.update.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.CANCELLED,
-    });
-    assertCsOrderSalesLedgerReconciledMock.mockRejectedValue(
-      new MockCsSalesLedgerError('历史财务校准后再操作'),
-    );
-
-    await expect(
-      cancelOrder('o1', ownerActor, '客户取消'),
-    ).rejects.toThrow(/历史财务校准/);
-    expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
-  });
-
   describe('SUBMITTED（内部/直营单待资料或核价，尚未进入已确认生产合同）', () => {
     function submittedInternalOrder() {
       return {
@@ -3401,30 +3288,6 @@ describe('cancelOrder', () => {
       };
     }
 
-    it('管理员可直接撤回，并在同一事务追加全额负数客服业绩冲销', async () => {
-      const clock = new Date('2026-09-20T03:00:00.000Z');
-      dbMock.order.findUnique.mockResolvedValue(submittedInternalOrder());
-      dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
-
-      await expect(cancelOrder('o1', ownerActor, '客户放弃', clock)).resolves.toMatchObject({
-        status: OrderStatus.CANCELLED,
-      });
-
-      expect(dbMock.order.update.mock.calls[0][0].data.status).toBe(OrderStatus.CANCELLED);
-      expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(dbMock, 'o1', '3200.50');
-      expect(recordCsSalesEntryMock).toHaveBeenCalledTimes(1);
-      const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as {
-        eventKey: string;
-        type: string;
-        amount: { toFixed: (places: number) => string };
-      };
-      expect(ledgerInput).toMatchObject({
-        eventKey: 'order:o1:revision:2:cancel',
-        type: 'ORDER_CANCELLED',
-      });
-      expect(ledgerInput.amount.toFixed(2)).toBe('-3200.50');
-    });
-
     it('已有报工的 SUBMITTED 单仍拒绝直接取消，不写任何取消事实', async () => {
       dbMock.order.findUnique.mockResolvedValue(submittedInternalOrder());
       dbMock.productionOperation.findMany.mockResolvedValue([
@@ -3433,7 +3296,6 @@ describe('cancelOrder', () => {
 
       await expect(cancelOrder('o1', ownerActor, '客户放弃')).rejects.toThrow(/已报工的生产工序/);
       expect(dbMock.order.update).not.toHaveBeenCalled();
-      expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
     });
 
     it('客服仍不能直接取消（权限口径不变，只放开状态）', async () => {
@@ -5026,7 +4888,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       settlementType: OrderSettlementType.EXTERNAL_SALES, status: OrderStatus.DRAFT,
       settledAt: null, settledFee: null, shippedAt: null, finishedAt: null,
       sourceOrderId: null, agentMonthlyBillItem: null,
-      _count: { billItems: 0, csSalesEntries: 0, reworkOrders: 0, changeRequests: 0 },
+      _count: { billItems: 0, reworkOrders: 0, changeRequests: 0 },
     };
     beforeEach(() => {
       dbMock.order.findFirst.mockResolvedValue(snapshot({ settlementType: OrderSettlementType.EXTERNAL_SALES }));
@@ -5062,7 +4924,6 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       { settledAt: new Date() }, { settledFee: new Decimal(0) }, { shippedAt: new Date() },
       { agentMonthlyBillItem: { id: 'bill-item' } },
       { _count: { ...association._count, billItems: 1 } },
-      { _count: { ...association._count, csSalesEntries: 1 } },
       { _count: { ...association._count, changeRequests: 1 } },
       { _count: { ...association._count, reworkOrders: 1 } },
       { sourceOrderId: 'source' },

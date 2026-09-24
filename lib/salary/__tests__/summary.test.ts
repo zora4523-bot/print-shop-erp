@@ -14,8 +14,6 @@ const { dbMock } = vi.hoisted(() => {
       aggregate: vi.fn(),
       findMany: vi.fn(),
     },
-    customerServiceCommission: { aggregate: vi.fn(), findMany: vi.fn() },
-    salaryPeriod: { count: vi.fn() },
     // The historical hourly archive is no longer part of the summary.
     hourlyWorkerPayroll: {
       groupBy: vi.fn(),
@@ -44,17 +42,6 @@ beforeEach(() => {
     _sum: { actualSalary: null },
   });
   dbMock.dailyWorkerSalary.findMany.mockReset();
-  dbMock.customerServiceCommission.aggregate.mockReset().mockResolvedValue({
-    _count: { _all: 0 },
-    _sum: {
-      monthlyBaseTotal: null,
-      commissionAmount: null,
-      paidBase: null,
-      paidCommission: null,
-    },
-  });
-  dbMock.customerServiceCommission.findMany.mockReset();
-  dbMock.salaryPeriod.count.mockReset().mockResolvedValue(0);
   dbMock.hourlyWorkerPayroll.groupBy.mockReset().mockResolvedValue([]);
   dbMock.hourlyWorkerPayroll.aggregate.mockReset().mockResolvedValue({
     _count: { _all: 0 },
@@ -64,7 +51,7 @@ beforeEach(() => {
 });
 
 describe('getSalaryIndexSummary', () => {
-  it('aggregates today + unpaid + CS stats with Decimal precision', async () => {
+  it('aggregates today + unpaid stats with Decimal precision', async () => {
     dbMock.pieceworkSettlement.groupBy.mockResolvedValue([
       {
         status: 'LOCKED',
@@ -92,24 +79,6 @@ describe('getSalaryIndexSummary', () => {
       _count: { _all: 5 },
       _sum: { actualSalary: '1234.56' },
     });
-    // Settled CS periods only: remaining = (base due - base paid) +
-    // (commission due - commission paid), rather than the original
-    // totalIncome snapshot. IN_PROGRESS future base is not accrued here.
-    // Two rows' worth of column sums: 16000 - 14000 + 66000 - 40000.
-    dbMock.customerServiceCommission.aggregate.mockResolvedValue({
-      _count: { _all: 2 },
-      _sum: {
-        monthlyBaseTotal: '16000.00',
-        commissionAmount: '66000.00',
-        paidBase: '14000.00',
-        paidCommission: '40000.00',
-      },
-    });
-    // Ready: 1 period; active: 3 periods
-    dbMock.salaryPeriod.count
-      .mockResolvedValueOnce(1) // ready to settle
-      .mockResolvedValueOnce(3); // active
-
     const s = await getSalaryIndexSummary();
 
     expect(s.pieceworkToday).toEqual({
@@ -130,21 +99,6 @@ describe('getSalaryIndexSummary', () => {
     expect(s.dailyUnpaidAllTime.count).toBe(5);
     expect(s.dailyUnpaidAllTime.actualTotal).toBe('1234.56');
 
-    expect(s.csUnpaid.count).toBe(2);
-    expect(s.csUnpaid.totalIncome).toBe('28000.00');
-    expect(dbMock.customerServiceCommission.aggregate).toHaveBeenCalledWith({
-      where: { isFullyPaid: false },
-      _count: { _all: true },
-      _sum: {
-        monthlyBaseTotal: true,
-        commissionAmount: true,
-        paidBase: true,
-        paidCommission: true,
-      },
-    });
-    expect(s.csReadyToSettle).toBe(1);
-    expect(s.csActivePeriods).toBe(3);
-
     expect(s.currentMonth).toMatch(/^\d{4}-\d{2}$/);
   });
 
@@ -155,7 +109,6 @@ describe('getSalaryIndexSummary', () => {
     // tables must not drive memory or payload size.
     expect(dbMock.dailyWorkerSalary.findMany).not.toHaveBeenCalled();
     expect(dbMock.pieceworkSettlement.findMany).not.toHaveBeenCalled();
-    expect(dbMock.customerServiceCommission.findMany).not.toHaveBeenCalled();
     expect(dbMock.hourlyWorkerPayroll.findMany).not.toHaveBeenCalled();
     expect(dbMock.hourlyWorkerPayroll.groupBy).not.toHaveBeenCalled();
     expect(dbMock.hourlyWorkerPayroll.aggregate).not.toHaveBeenCalled();
@@ -184,9 +137,6 @@ describe('getSalaryIndexSummary', () => {
     expect(s.pieceworkUnpaidAllTime.payableTotal).toBe('0.00');
     expect(s.dailyToday.actualTotal).toBe('0.00');
     expect(s.dailyUnpaidAllTime.actualTotal).toBe('0.00');
-    expect(s.csUnpaid.count).toBe(0);
-    expect(s.csUnpaid.totalIncome).toBe('0.00');
-    expect(s.csReadyToSettle).toBe(0);
   });
 
   it('handles a single bucket (all paid / all unpaid)', async () => {
@@ -212,15 +162,6 @@ describe('getSalaryIndexSummary', () => {
     expect((where.date as Date).getUTCMinutes()).toBe(0);
   });
 
-  it('does not mark an inclusive periodEnd due during its final Shanghai day', async () => {
-    await getSalaryIndexSummary(new Date('2026-04-30T15:59:59.999Z'));
-
-    const dueWhere = dbMock.salaryPeriod.count.mock.calls[0][0].where;
-    expect(dueWhere.periodEnd.lt.toISOString()).toBe(
-      '2026-04-30T00:00:00.000Z',
-    );
-  });
-
   it('keeps the SQL sum exact instead of routing it through a float', async () => {
     // 9007199254740993.03 is past float64's integer resolution: Number()
     // would silently return 9007199254740992. The Decimal string path
@@ -232,38 +173,5 @@ describe('getSalaryIndexSummary', () => {
 
     const s = await getSalaryIndexSummary();
     expect(s.dailyUnpaidAllTime.actualTotal).toBe('9007199254740993.03');
-  });
-
-  it('combines the four CS column sums without float drift', async () => {
-    // 0.1 + 0.2 style residue on every column; the combination must
-    // land exactly on 0.10.
-    dbMock.customerServiceCommission.aggregate.mockResolvedValue({
-      _count: { _all: 7 },
-      _sum: {
-        monthlyBaseTotal: '0.10',
-        commissionAmount: '0.20',
-        paidBase: '0.10',
-        paidCommission: '0.10',
-      },
-    });
-
-    const s = await getSalaryIndexSummary();
-    expect(s.csUnpaid.count).toBe(7);
-    expect(s.csUnpaid.totalIncome).toBe('0.10');
-  });
-
-  it('treats a null SQL sum as zero rather than NaN', async () => {
-    dbMock.customerServiceCommission.aggregate.mockResolvedValue({
-      _count: { _all: 0 },
-      _sum: {
-        monthlyBaseTotal: null,
-        commissionAmount: null,
-        paidBase: null,
-        paidCommission: null,
-      },
-    });
-
-    const s = await getSalaryIndexSummary();
-    expect(s.csUnpaid.totalIncome).toBe('0.00');
   });
 });

@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest';
 const ROOT = process.cwd();
 const LOCKED_FORM_FILES = [
   'production/OperationReportForm.tsx',
-  'salary/StartCsPeriodForm.tsx',
   'setting/SettingsForm.tsx',
 ] as const;
 const LOCKED_NAVIGATION_FORM_FILES = [
@@ -14,7 +13,6 @@ const LOCKED_NAVIGATION_FORM_FILES = [
   'craft/CraftForm.tsx',
   'product-category/ProductCategoryForm.tsx',
   'purchase/PurchaseOrderForm.tsx',
-  'salary/StartCsPeriodForm.tsx',
 ] as const;
 
 describe('pending mutation field locks', () => {

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Archive, Calculator, CalendarClock } from 'lucide-react';
+import { Archive, Calculator } from 'lucide-react';
 import { getSalaryIndexSummary } from '@/lib/salary/summary';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader, StatCard } from '@/components/ui-business';
@@ -97,41 +97,6 @@ export default async function SalaryIndexPage() {
         >
           查看历史日薪档案 →
         </Link>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-base font-semibold">客服周期 / 提成</h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <StatCard
-            label="活跃周期"
-            value={`${s.csActivePeriods} 个`}
-            icon={CalendarClock}
-            tone="info"
-            hint="每位客服最多一条进行中周期"
-          />
-          <StatCard
-            label="待结算（已到期）"
-            value={`${s.csReadyToSettle} 个`}
-            icon={CalendarClock}
-            tone={s.csReadyToSettle > 0 ? 'warning' : 'neutral'}
-            hint="周期已结束"
-          />
-          <StatCard
-            label="已结算周期剩余未发"
-            value={formatMoney(s.csUnpaid.totalIncome)}
-            icon={CalendarClock}
-            tone="primary"
-            hint={`${s.csUnpaid.count} 个已结算但未全额发放周期（剩余底薪 + 提成）`}
-          />
-        </div>
-        <div>
-          <Link
-            href="/owner/salary/cs"
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            查看客服周期 →
-          </Link>
-        </div>
       </section>
 
       <Link href="/owner/salary/hourly" className={buttonVariants({ variant: 'outline', size: 'sm' })}>

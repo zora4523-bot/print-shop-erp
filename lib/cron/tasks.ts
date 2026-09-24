@@ -7,11 +7,7 @@ import {
   generateBillsForPeriod,
   type BillGenerationResult,
 } from '../bill';
-import { formatMoneyPlain } from '../dashboard/format';
-import {
-  getEndingPeriods,
-  getOverdueOutsourcing,
-} from '../dashboard/owner-watchlist';
+import { getOverdueOutsourcing } from '../dashboard/owner-watchlist';
 import { formatDateShanghai } from '../format/dates';
 import { dispatchNotification } from '../notification/dispatch';
 import {
@@ -25,11 +21,6 @@ import {
   ORDER_OVERDUE_NOTIFY_CAP,
   scanOverdueOrders,
 } from '../order/overdue-scan';
-import {
-  CsBatchUnexpectedError,
-  settleReadyCsPeriods,
-  type BatchSettleResult,
-} from '../salary/cs';
 import {
   getPieceworkSettlementDay,
   lockPieceworkSettlementsForDate,
@@ -106,32 +97,6 @@ export class DailySalaryBatchIncompleteError extends Error {
   }
 }
 
-export async function runCsSettleTask(fence?: ExecutionFence) {
-  let unexpected: CsBatchUnexpectedError | null = null;
-  let result: BatchSettleResult;
-  try {
-    result = await settleReadyCsPeriods(undefined, undefined, fence);
-  } catch (error) {
-    if (!(error instanceof CsBatchUnexpectedError)) throw error;
-    unexpected = error;
-    result = error.partialResult;
-  }
-  const { settled, errors } = result;
-  // settleReadyCsPeriods performs each inline fallback immediately after that
-  // period commits; durable mode already owns a transactionally inserted
-  // notification job. Do not dispatch the returned rows again here.
-  // Rethrow so Sentry and the durable cron job retry the unprocessed tail
-  // rather than silently marking a partial run OK.
-  if (unexpected) throw unexpected;
-  return {
-    status: 'ok' as const,
-    settledCount: settled.length,
-    errorCount: errors.length,
-    failed: errors.length,
-    errorCodes: errors.length > 0 ? ['CsSettlementIncomplete'] : [],
-  };
-}
-
 export async function runGenerateBillsTask(
   period: string,
   fence?: ExecutionFence,
@@ -191,29 +156,6 @@ export async function runOutsourceOverdueTask(
     );
   }
   return { status: 'ok' as const, overdueCount: rows.length };
-}
-export async function runCsPeriodEndingTask(
-  runDate: string,
-  fence?: ExecutionFence,
-) {
-  const rows = await getEndingPeriods();
-  for (const [index, row] of rows.entries()) {
-    await assertExecutionFence(fence);
-    await dispatchNotification(
-      'CS_PERIOD_ENDING',
-      {
-        periodId: row.id,
-        csName: row.csDisplayName,
-        daysLeft: row.daysUntilEnd,
-        totalSales: formatMoneyPlain(row.salesForTier),
-      },
-      {
-        dedupeKey: `notification:CS_PERIOD_ENDING:${runDate}:${row.id}`,
-        spreadIndex: index,
-      },
-    );
-  }
-  return { status: 'ok' as const, endingCount: rows.length };
 }
 
 export async function runOrderOverdueTask(

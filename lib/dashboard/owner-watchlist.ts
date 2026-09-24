@@ -1,10 +1,8 @@
-import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   OrderStatus,
   OutsourceStatus,
   Role,
-  SalaryPeriodStatus,
 } from '../../generated/prisma/enums';
 import { db } from '../db';
 import {
@@ -17,18 +15,15 @@ import {
   PROMISE_ALERT_STATUSES,
   promisedDaysLeft,
 } from '../order/promised-date';
-import { calcCsCommission } from '../salary/cs-commission';
-import { getActiveCsTiers } from '../salary/rules';
 import { getSetting } from '../settings';
 import { shanghaiDayBoundary, todayShanghai } from './shanghai-clock';
 
-// Owner dashboard watchlists — 3 read-only lists that surface things
+// Owner dashboard watchlists — read-only lists that surface things
 // the owner needs to do or notice "right now":
 //
 //   - getPendingShipments — completedAt 已落、尚未发货的工单
 //   - getOverdueOutsourcing — outsource orders past expectedDate
-//   - getEndingPeriods — CS salary periods with periodEnd in the
-//                        next 7 days (with predicted commission)
+//   - getDueOrders / getRecentOverReports — 交期预警与超计划报工
 //
 // Each function returns plain JSON-serialisable rows; Decimal columns
 // are always handed to the caller as strings (`.toFixed(2)`). Page-
@@ -423,121 +418,6 @@ function overReportQuantities(
   return Number.isSafeInteger(totalQty)
     ? { completedQty, defectQty, reworkQty, totalQty }
     : null;
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// 即将结算客服周期 — periodEnd ∈ [今日, 今日+7d)，按结束日正序
-// ─────────────────────────────────────────────────────────────────────
-
-export type EndingPeriodRow = {
-  id: string;
-  csUserId: string;
-  csDisplayName: string;
-  periodStart: Date;
-  periodEnd: Date;
-  durationMonths: number;
-  totalSales: string; // 本期累计（不含期初）
-  initialSales: string; // 期初导入
-  // 业绩合计（算档用） = totalSales + initialSales。这是 calcCsCommission
-  // 实际喂入的数字，UI 渲染&ldquo;业绩合计&rdquo;列时直接用，避免显示数与提成
-  // 计算口径分裂。
-  salesForTier: string;
-  monthlyBase: string;
-  daysUntilEnd: number;
-  // null = 找不到生效中的 tier 规则（极少见，UI 显示&ldquo;—&rdquo;不崩）
-  predictedCommission: string | null;
-  predictedTotalIncome: string | null;
-  predictedBelowAllTiers: boolean | null;
-};
-
-/**
- * 7 天内结算的客服周期。periodEnd ∈ [今日 Shanghai 0:00, 今日 + 7d)，
- * status = IN_PROGRESS。预测金额：用 `totalSales + initialSales` 走
- * `calcCsCommission`，得到 commission；底薪合计 = monthlyBase ×
- * durationMonths；预测总收入 = 底薪 + commission。
- *
- * 业绩口径：周期预测直接读 SalaryPeriod.totalSales + initialSales。
- * totalSales 的权威来源是 CsSalesEntry 事件账本（客服提交工单记正数、
- * 批准变更记差额、取消记负数）；initialSales 只表示历史期初导入。
- * 客户付款 BillPayment 只影响应收，不改变客服业绩。Dashboard Slice C 的
- * 销售排行 / 产品分布仍按 Order.submittedAt 聚合，不在此重算周期账本。
- */
-export async function getEndingPeriods(
-  now: Date = new Date(),
-): Promise<EndingPeriodRow[]> {
-  const today = todayShanghai(now);
-  const { start: todayStart } = shanghaiDayBoundary(today);
-  const sevenDaysOut = new Date(todayStart.getTime() + 7 * MS_PER_DAY);
-
-  const periods = await db.salaryPeriod.findMany({
-    where: {
-      status: SalaryPeriodStatus.IN_PROGRESS,
-      periodEnd: { gte: todayStart, lt: sevenDaysOut },
-    },
-    orderBy: [{ periodEnd: 'asc' }, { id: 'asc' }],
-    select: {
-      id: true,
-      csUserId: true,
-      periodStart: true,
-      periodEnd: true,
-      durationMonths: true,
-      totalSales: true,
-      initialSales: true,
-      monthlyBase: true,
-      csUser: { select: { displayName: true } },
-    },
-  });
-
-  if (periods.length === 0) return [];
-
-  // 一次取活动 tier；所有 period 共用（dashboard 是 owner 单帧视图，
-  // 按当前生效规则预测就够了）。
-  const tiers = await getActiveCsTiers(now);
-
-  return periods.map((p) => {
-    const totalForCommission = new Decimal(p.totalSales as unknown as Decimal.Value)
-      .plus(new Decimal(p.initialSales as unknown as Decimal.Value));
-    const monthlyBaseTotal = new Decimal(
-      p.monthlyBase as unknown as Decimal.Value,
-    ).times(p.durationMonths);
-
-    let predictedCommission: string | null = null;
-    let predictedTotalIncome: string | null = null;
-    let predictedBelowAllTiers: boolean | null = null;
-    if (tiers) {
-      const breakdown = calcCsCommission(totalForCommission, tiers);
-      predictedCommission = breakdown.commissionAmount.toFixed(2);
-      predictedTotalIncome = monthlyBaseTotal
-        .plus(breakdown.commissionAmount)
-        .toFixed(2);
-      predictedBelowAllTiers = breakdown.belowAllTiers;
-    }
-
-    return {
-      id: p.id,
-      csUserId: p.csUserId,
-      csDisplayName: p.csUser.displayName,
-      periodStart: p.periodStart as Date,
-      periodEnd: p.periodEnd as Date,
-      durationMonths: p.durationMonths,
-      totalSales: new Decimal(
-        p.totalSales as unknown as Decimal.Value,
-      ).toFixed(2),
-      initialSales: new Decimal(
-        p.initialSales as unknown as Decimal.Value,
-      ).toFixed(2),
-      salesForTier: totalForCommission.toFixed(2),
-      monthlyBase: new Decimal(
-        p.monthlyBase as unknown as Decimal.Value,
-      ).toFixed(2),
-      daysUntilEnd: Math.floor(
-        ((p.periodEnd as Date).getTime() - todayStart.getTime()) / MS_PER_DAY,
-      ),
-      predictedCommission,
-      predictedTotalIncome,
-      predictedBelowAllTiers,
-    };
-  });
 }
 
 // Re-export the Role enum value used by callers that want to label the

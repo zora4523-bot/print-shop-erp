@@ -53,10 +53,8 @@ describe('high-risk status registry consumers', () => {
     );
   });
 
-  it('shares salary period and payment badge adapters', () => {
+  it('shares the payment badge adapter', () => {
     const files = [
-      'app/(admin)/owner/salary/cs/page.tsx',
-      'app/(admin)/owner/salary/cs/[id]/page.tsx',
       'app/(admin)/owner/salary/daily/page.tsx',
       'app/(admin)/owner/salary/daily/[id]/page.tsx',
       'app/(admin)/owner/salary/hourly/page.tsx',
@@ -66,12 +64,9 @@ describe('high-risk status registry consumers', () => {
 
     for (const file of files) {
       expect(source(file), file).toMatch(
-        /(?:Payment|SalaryPeriod)StatusBadge/,
+        /PaymentStatusBadge/,
       );
     }
-    expect(source(files[1]!)).not.toContain(
-      '<Badge variant="destructive">待结算</Badge>',
-    );
   });
 
   it('centralizes order-change, outsource, production-task, and price-version states', () => {

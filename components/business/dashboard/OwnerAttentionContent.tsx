@@ -5,14 +5,12 @@ import {
   dueOrderColumns,
   overdueOutsourceColumns,
   overReportColumns,
-  endingPeriodColumns,
 } from '@/components/business/dashboard/OwnerWatchlists';
 import {
   getPendingShipments,
   getDueOrders,
   getOverdueOutsourcing,
   getRecentOverReports,
-  getEndingPeriods,
 } from '@/lib/dashboard/owner-watchlist';
 import {
   ATTENTION_TITLES,
@@ -88,23 +86,7 @@ export async function AttentionContent({
       </div>
     );
   }
-  if (kind === 'outsource') {
-    const rows = await getOverdueOutsourcing(now);
-    const window = paginationWindow(rows.length, page, ATTENTION_PAGE_SIZE);
-    return (
-      <div className="space-y-4">
-        <WatchlistTable
-          title={ATTENTION_TITLES[kind]}
-          rows={rows.slice(window.skip, window.skip + window.take)}
-          rowKey={(row) => row.id}
-          columns={overdueOutsourceColumns}
-          emptyText="暂无超期外协"
-        />
-        {pagination({ ...window, total: rows.length })}
-      </div>
-    );
-  }
-  const rows = await getEndingPeriods(now);
+  const rows = await getOverdueOutsourcing(now);
   const window = paginationWindow(rows.length, page, ATTENTION_PAGE_SIZE);
   return (
     <div className="space-y-4">
@@ -112,8 +94,8 @@ export async function AttentionContent({
         title={ATTENTION_TITLES[kind]}
         rows={rows.slice(window.skip, window.skip + window.take)}
         rowKey={(row) => row.id}
-        columns={endingPeriodColumns}
-        emptyText="未来 7 天无客服周期到期"
+        columns={overdueOutsourceColumns}
+        emptyText="暂无超期外协"
       />
       {pagination({ ...window, total: rows.length })}
     </div>

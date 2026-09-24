@@ -22,10 +22,6 @@ const { dbMock } = vi.hoisted(() => {
     billItem: { findMany: vi.fn(), createMany: vi.fn(), update: vi.fn() },
     billPayment: { findUnique: vi.fn(), create: vi.fn() },
     orderCostEntry: { findUnique: vi.fn(), create: vi.fn() },
-    salaryPeriod: {
-      findFirst: vi.fn(),
-      update: vi.fn(),
-    },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
@@ -69,8 +65,6 @@ beforeEach(() => {
   dbMock.billPayment.findUnique.mockReset().mockResolvedValue(null);
   dbMock.orderCostEntry.findUnique.mockReset().mockResolvedValue(null);
   dbMock.orderCostEntry.create.mockReset().mockResolvedValue({ id: 'cost-1' });
-  dbMock.salaryPeriod.findFirst.mockReset().mockResolvedValue(null);
-  dbMock.salaryPeriod.update.mockReset();
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -976,43 +970,17 @@ describe.skip('legacy recordPayment implementation', () => {
     expect(lockValues[1]).toBe('print-shop-erp:bill:bill-1');
   });
 
-  it('SALES account: does NOT call accumulateCsSales', async () => {
-    dbMock.bill.findUnique.mockResolvedValue(
-      billFixture({ salesUserRole: Role.SALES }),
-    );
-    dbMock.bill.update.mockResolvedValue({});
-    const r = await recordPayment('bill-1', 500, ownerActor);
-    expect(r.csAccumulated).toBe(false);
-    // salaryPeriod never touched
-    expect(dbMock.salaryPeriod.findFirst).not.toHaveBeenCalled();
-  });
-
-  it('CUSTOMER_SERVICE payments do not change commission sales', async () => {
-    dbMock.bill.findUnique.mockResolvedValue(
-      billFixture({
-        salesUserRole: Role.CUSTOMER_SERVICE,
-        paidAmount: '100.00', // already some paid
-      }),
-    );
-    dbMock.bill.update.mockResolvedValue({});
-    const r = await recordPayment('bill-1', 400, ownerActor);
-    expect(r.csAccumulated).toBe(false);
-    expect(dbMock.salaryPeriod.findFirst).not.toHaveBeenCalled();
-    expect(dbMock.salaryPeriod.update).not.toHaveBeenCalled();
-  });
-
   it('stores payment method, reference number, remark and injected paidAt', async () => {
     dbMock.bill.findUnique.mockResolvedValue(
       billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
     );
     dbMock.bill.update.mockResolvedValue({});
     const paidAt = new Date('2026-06-08T02:30:00Z');
-    const r = await recordPayment('bill-1', 500, ownerActor, paidAt, {
+    await recordPayment('bill-1', 500, ownerActor, paidAt, {
       paymentMethod: ' 银行转账 ',
       referenceNo: ' TX-20260608 ',
       remark: ' 首付款 ',
     });
-    expect(r.csAccumulated).toBe(false);
     expect(dbMock.billPayment.create).toHaveBeenCalledWith({
       data: {
         idempotencyKey: expect.any(String),
@@ -1530,7 +1498,6 @@ describe('bill detail read models', () => {
       'costEntries',
       'outsourceOrders',
       'reworkOrders',
-      'csSalesEntries',
       'shipments',
     ]) {
       expect(query.select.items.select.order.select).not.toHaveProperty(

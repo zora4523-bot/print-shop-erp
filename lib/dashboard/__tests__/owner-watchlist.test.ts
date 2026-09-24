@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { dbMock, getActiveCsTiersMock } = vi.hoisted(() => {
+const { dbMock } = vi.hoisted(() => {
   const mock = {
     // getDueOrders 现在同时跑 findMany（前 N 条）和 count（总数）
     order: { findMany: vi.fn(), count: vi.fn() },
     outsourceOrder: { findMany: vi.fn() },
-    salaryPeriod: { findMany: vi.fn() },
     // 超计划报工看板：OrderLog where action='TASK_OVER_REPORT'
     orderLog: { findMany: vi.fn(), count: vi.fn() },
     // 超期阈值现在从 Setting 读（outsource_overdue_days）
@@ -13,18 +12,13 @@ const { dbMock, getActiveCsTiersMock } = vi.hoisted(() => {
   };
   return {
     dbMock: mock,
-    getActiveCsTiersMock: vi.fn(),
   };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
-vi.mock('../../salary/rules', () => ({
-  getActiveCsTiers: getActiveCsTiersMock,
-}));
 
 import {
   DUE_ORDERS_DEFAULT_LIMIT,
   OVER_REPORT_WINDOW_DAYS,
-  getEndingPeriods,
   getDueOrders,
   getOverdueOutsourcing,
   getPendingShipments,
@@ -36,14 +30,12 @@ beforeEach(() => {
   dbMock.order.count.mockReset();
   dbMock.order.count.mockResolvedValue(0);
   dbMock.outsourceOrder.findMany.mockReset();
-  dbMock.salaryPeriod.findMany.mockReset();
   dbMock.orderLog.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderLog.count.mockReset().mockResolvedValue(0);
   dbMock.setting.findUnique.mockReset();
   // 默认「没有配置行」→ resolveSetting 退回内置默认 1 天，也就是这些用例
   // 原本断言的行为。需要别的阈值的用例自己覆盖。
   dbMock.setting.findUnique.mockResolvedValue(null);
-  getActiveCsTiersMock.mockReset();
 });
 
 describe('getPendingShipments', () => {
@@ -385,157 +377,6 @@ describe('getOverdueOutsourcing', () => {
     const r = await getOverdueOutsourcing(new Date('2026-04-26T08:00:00Z'));
     // 上海今天 2026-04-26，所以依次是逾期 1/2/3/4 天
     expect(r.map((x) => x.daysOverdue)).toEqual([1, 2, 3, 4]);
-  });
-});
-
-describe('getEndingPeriods', () => {
-  it('空 → []，且不调 getActiveCsTiers', async () => {
-    dbMock.salaryPeriod.findMany.mockResolvedValue([]);
-    const r = await getEndingPeriods();
-    expect(r).toEqual([]);
-    expect(getActiveCsTiersMock).not.toHaveBeenCalled();
-  });
-
-  it('查询条件：status=IN_PROGRESS + periodEnd ∈ [todayStart, todayStart+7d)', async () => {
-    dbMock.salaryPeriod.findMany.mockResolvedValue([]);
-    await getEndingPeriods(new Date('2026-04-26T08:00:00Z'));
-    const args = dbMock.salaryPeriod.findMany.mock.calls[0][0];
-    expect(args.where.status).toBe('IN_PROGRESS');
-    // 同一天到期的周期跨页不能因数据库返回顺序变化而重复或遗漏。
-    expect(args.orderBy).toEqual([{ periodEnd: 'asc' }, { id: 'asc' }]);
-    // todayStart = UTC 2026-04-25T16:00
-    expect((args.where.periodEnd.gte as Date).toISOString()).toBe(
-      '2026-04-25T16:00:00.000Z',
-    );
-    // +7 天
-    expect((args.where.periodEnd.lt as Date).toISOString()).toBe(
-      '2026-05-02T16:00:00.000Z',
-    );
-  });
-
-  it('预测提成 = (totalSales + initialSales) × 命中档位 rate', async () => {
-    dbMock.salaryPeriod.findMany.mockResolvedValue([
-      {
-        id: 'p1',
-        csUserId: 'u1',
-        periodStart: new Date('2026-01-01T00:00:00Z'),
-        periodEnd: new Date('2026-04-30T00:00:00Z'),
-        durationMonths: 4,
-        totalSales: '300000',
-        initialSales: '0',
-        monthlyBase: '5000',
-        csUser: { displayName: 'CS 张' },
-      },
-    ]);
-    getActiveCsTiersMock.mockResolvedValue({
-      mode: 'FLAT',
-      tiers: [
-        { minSales: 100000, rate: 0.01 },
-        { minSales: 300000, rate: 0.03 },
-      ],
-    });
-
-    const r = await getEndingPeriods(new Date('2026-04-26T08:00:00Z'));
-    expect(r).toHaveLength(1);
-    // 300000 命中第二档 0.03 → 9000 提成
-    expect(r[0]!.predictedCommission).toBe('9000.00');
-    // 底薪合计 = 5000 × 4 = 20000；总收入 = 20000 + 9000 = 29000
-    expect(r[0]!.predictedTotalIncome).toBe('29000.00');
-    expect(r[0]!.predictedBelowAllTiers).toBe(false);
-  });
-
-  it('initialSales 累加到预测里（业绩归属时间口径）', async () => {
-    dbMock.salaryPeriod.findMany.mockResolvedValue([
-      {
-        id: 'p1',
-        csUserId: 'u1',
-        periodStart: new Date('2026-01-01T00:00:00Z'),
-        periodEnd: new Date('2026-04-30T00:00:00Z'),
-        durationMonths: 4,
-        totalSales: '50000', // 期内
-        initialSales: '60000', // 期初导入
-        monthlyBase: '5000',
-        csUser: { displayName: 'CS 张' },
-      },
-    ]);
-    getActiveCsTiersMock.mockResolvedValue({
-      mode: 'FLAT',
-      tiers: [{ minSales: 100000, rate: 0.01 }],
-    });
-    const r = await getEndingPeriods(new Date('2026-04-26T08:00:00Z'));
-    // (50000 + 60000) ≥ 100000 → 命中 0.01 → 1100 提成
-    expect(r[0]!.predictedCommission).toBe('1100.00');
-    // salesForTier = totalSales + initialSales = 110000.00（UI 列&ldquo;业绩
-    // 合计&rdquo;直接用，避免显示数和提成口径分裂；Codex round 99 medium）。
-    expect(r[0]!.salesForTier).toBe('110000.00');
-    expect(r[0]!.totalSales).toBe('50000.00');
-    expect(r[0]!.initialSales).toBe('60000.00');
-  });
-
-  it('totalSales 未达档 → predictedBelowAllTiers=true，提成=0.00', async () => {
-    dbMock.salaryPeriod.findMany.mockResolvedValue([
-      {
-        id: 'p1',
-        csUserId: 'u1',
-        periodStart: new Date('2026-01-01T00:00:00Z'),
-        periodEnd: new Date('2026-04-30T00:00:00Z'),
-        durationMonths: 4,
-        totalSales: '5000',
-        initialSales: '0',
-        monthlyBase: '5000',
-        csUser: { displayName: 'CS 张' },
-      },
-    ]);
-    getActiveCsTiersMock.mockResolvedValue({
-      mode: 'FLAT',
-      tiers: [{ minSales: 100000, rate: 0.01 }],
-    });
-    const r = await getEndingPeriods(new Date('2026-04-26T08:00:00Z'));
-    expect(r[0]!.predictedBelowAllTiers).toBe(true);
-    expect(r[0]!.predictedCommission).toBe('0.00');
-    // 总收入 = 底薪 20000 + 0 提成 = 20000
-    expect(r[0]!.predictedTotalIncome).toBe('20000.00');
-  });
-
-  it('getActiveCsTiers 返 null（无活动规则）→ 预测字段全 null', async () => {
-    dbMock.salaryPeriod.findMany.mockResolvedValue([
-      {
-        id: 'p1',
-        csUserId: 'u1',
-        periodStart: new Date('2026-01-01T00:00:00Z'),
-        periodEnd: new Date('2026-04-30T00:00:00Z'),
-        durationMonths: 4,
-        totalSales: '300000',
-        initialSales: '0',
-        monthlyBase: '5000',
-        csUser: { displayName: 'CS 张' },
-      },
-    ]);
-    getActiveCsTiersMock.mockResolvedValue(null);
-    const r = await getEndingPeriods(new Date('2026-04-26T08:00:00Z'));
-    expect(r[0]!.predictedCommission).toBeNull();
-    expect(r[0]!.predictedTotalIncome).toBeNull();
-    expect(r[0]!.predictedBelowAllTiers).toBeNull();
-  });
-
-  it('daysUntilEnd：周期 periodEnd = today+3d → 3', async () => {
-    // todayStart = UTC 2026-04-25T16:00
-    dbMock.salaryPeriod.findMany.mockResolvedValue([
-      {
-        id: 'p1',
-        csUserId: 'u1',
-        periodStart: new Date('2026-01-01T00:00:00Z'),
-        periodEnd: new Date('2026-04-28T16:00:00Z'), // todayStart + 3d
-        durationMonths: 4,
-        totalSales: '0',
-        initialSales: '0',
-        monthlyBase: '5000',
-        csUser: { displayName: 'CS 张' },
-      },
-    ]);
-    getActiveCsTiersMock.mockResolvedValue(null);
-    const r = await getEndingPeriods(new Date('2026-04-26T08:00:00Z'));
-    expect(r[0]!.daysUntilEnd).toBe(3);
   });
 });
 

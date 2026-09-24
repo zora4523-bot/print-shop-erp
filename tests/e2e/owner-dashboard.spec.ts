@@ -20,8 +20,7 @@ async function findLinkedRecord(page: Page, href: string) {
 test('工作台重点记录、完整关注列表和经营概览可连续使用', async ({ page }) => {
   test.setTimeout(120_000);
   const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
-  const csUserId = await getUserIdByUsername(E2E_USERS.customerService.username);
-  const seeded = await seedDashboardSnapshot({ salesUserId, csUserId });
+  const seeded = await seedDashboardSnapshot({ salesUserId });
   await login(page, { from: '/owner', username: ADMIN_USERNAME, password: ADMIN_PASSWORD });
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
   const kpis = page.locator('[data-slot="dashboard-kpi"]');
@@ -37,14 +36,12 @@ test('工作台重点记录、完整关注列表和经营概览可连续使用',
   expect(Number(amount?.replace(/,/g, ''))).toBeGreaterThanOrEqual(5000);
   await expect(page.locator('[data-slot="dashboard-queue"]')).toHaveCount(0);
   await expect(page.locator('[data-slot="dashboard-charts-deferred"]')).toHaveCount(0);
-  for (const kind of ['due', 'shipments', 'outsource', 'over-reports', 'settlements']) {
+  for (const kind of ['due', 'shipments', 'outsource', 'over-reports']) {
     const panel = page.locator(`[data-slot="dashboard-watchlist-${kind}"]`);
     await expect(panel).toBeVisible();
     expect(await panel.locator('li').count()).toBeLessThanOrEqual(3);
   }
-  const settlements = page.locator('[data-slot="dashboard-watchlist-settlements"]');
-  await expect(settlements).not.toContainText('预测提成');
-  await expect(settlements).not.toContainText('预测总收入');
+  await expect(page.locator('[data-slot="dashboard-watchlist-settlements"]')).toHaveCount(0);
 
   await page.getByRole('link', { name: '查看全部待发货工单' }).click();
   await expect(page).toHaveURL(/kind=shipments/, { timeout: 15_000 });
@@ -58,14 +55,6 @@ test('工作台重点记录、完整关注列表和经营概览可连续使用',
   await page.goto('/owner/attention?kind=outsource');
   await expect(page.locator('main [data-slot="table-body"]')).toBeVisible();
   await expect(await findLinkedRecord(page, `/foreman/outsource/${seeded.outsourceId}`)).toBeVisible();
-  if (seeded.csPeriodId) {
-    await page.goto('/owner/attention?kind=settlements');
-    await expect(page.locator('main [data-slot="table-body"]')).toBeVisible();
-    const period = await findLinkedRecord(page, `/owner/salary/cs/${seeded.csPeriodId}`);
-    await period.click();
-    await expect(page).toHaveURL(new RegExp(`/owner/salary/cs/${seeded.csPeriodId}`), { timeout: 15_000 });
-    await expect(page.getByText('预测总收入', { exact: true })).toBeVisible();
-  }
 
   await page.goto('/owner');
   await page.getByRole('navigation', { name: '工作台快捷操作' }).getByRole('link', { name: '经营概览' }).click();

@@ -36,8 +36,6 @@ export const NOTIFICATION_EVENTS = {
   OUTSOURCE_OVERDUE: 'OUTSOURCE_OVERDUE',
   ORDER_OVERDUE: 'ORDER_OVERDUE',
   STOCK_ALERT: 'STOCK_ALERT',
-  CS_PERIOD_ENDING: 'CS_PERIOD_ENDING',
-  CS_PERIOD_SETTLED: 'CS_PERIOD_SETTLED',
   DAILY_WORKER_SALARY: 'DAILY_WORKER_SALARY',
 } as const;
 
@@ -184,25 +182,6 @@ export type NotificationPayloads = {
     currentStock: string; // 已 toFixed(2)，如 '1.50'——number 会丢尾零（1.50 → '1.5'）
     safetyStock: string; // 同上
   };
-  CS_PERIOD_ENDING: {
-    periodId: string;
-    csName: string;
-    daysLeft: number;
-    // **业绩合计（含期初 initialSales）**——同 dashboard `salesForTier`
-    // 口径，与提成档位计算一致。CS_TIERS 是
-    // 按 totalSales + initialSales 算的；如果这里只发 totalSales，
-    // initialSales != 0 时消息&ldquo;业绩&rdquo;会比命中档位低，管理员看不出 why。
-    // Slice D wire (`/api/cron/cs-period-ending`) 用 lib/dashboard/
-    // owner-watchlist.salesForTier 喂入。seed.ts 模板&ldquo;业绩合计&rdquo;标签
-    // 同步反映这一点。
-    totalSales: string; // Decimal-string，已 formatMoneyPlain
-  };
-  CS_PERIOD_SETTLED: {
-    settledCount: number;
-    csName: string;
-    totalSales: string; // Decimal-string
-    commission: string; // Decimal-string
-  };
   DAILY_WORKER_SALARY: {
     date: string; // YYYY-MM-DD
     workerCount: number;
@@ -258,20 +237,6 @@ export function sanitizeNotificationPayload<E extends NotificationEvent>(
 // 而非 admin.ts/notify.ts（那会让发送管道反向依赖管理端 CRUD 模块）。
 // ─────────────────────────────────────────────────────────────────────
 
-// CS_PERIOD_* 事件含具体客服的业绩/提成金额，schema 没有 per-user
-// 路由（P2 才加 User.notificationChannelId），多 channel 即广播隐私。
-// 写侧（admin.updateRuleWithGuard）与发送侧（notify fan-out cap）共用
-// 这一份判定。注意保持 ReadonlySet<string>：调用方传的是 string 列值。
-const PRIVATE_PER_CS_EVENTS: ReadonlySet<string> = new Set([
-  NOTIFICATION_EVENTS.CS_PERIOD_ENDING,
-  NOTIFICATION_EVENTS.CS_PERIOD_SETTLED,
-]);
-
-export function isPrivatePerCsEvent(eventType: string): boolean {
-  return PRIVATE_PER_CS_EVENTS.has(eventType);
-}
-
-export const PRIVATE_EVENT_MAX_CHANNELS = 1;
 
 // owner "测试发送" 写入 NotificationLog 的哨兵 eventType。**不并入**
 // NOTIFICATION_EVENTS —— 那会让 '__TEST__' 变成可配置规则事件

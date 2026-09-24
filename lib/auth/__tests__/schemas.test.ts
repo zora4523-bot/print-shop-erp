@@ -38,8 +38,6 @@ import {
   recordOutsourcePaymentSchema,
   updateEditableOrderSchema,
   setOrderSfCollectSchema,
-  startCsPeriodSchema,
-  recordCsPayrollPaymentSchema,
   recordBillPaymentSchema,
   createOrderCostEntrySchema,
   createOrderChangeRequestSchema,
@@ -2141,43 +2139,6 @@ describe('external-sales shipment charge schemas', () => {
   });
 });
 
-describe('finance decimal boundaries', () => {
-  it('keeps CS monthly base within Decimal(10,2)', () => {
-    const base = {
-      csUserId: 'cs-1',
-      periodStart: '2026-08-01',
-      durationMonths: 1,
-      initialSales: '9999999999.99',
-    };
-
-    expect(
-      startCsPeriodSchema.safeParse({
-        ...base,
-        monthlyBase: '99999999.99',
-      }).success,
-    ).toBe(true);
-    expect(
-      startCsPeriodSchema.safeParse({
-        ...base,
-        monthlyBase: '100000000.00',
-      }).success,
-    ).toBe(false);
-    expect(
-      startCsPeriodSchema.safeParse({
-        ...base,
-        durationMonths: 4,
-        monthlyBase: '99999999.99',
-      }).success,
-    ).toBe(false);
-    expect(
-      startCsPeriodSchema.safeParse({
-        ...base,
-        monthlyBase: -1,
-      }).success,
-    ).toBe(false);
-  });
-});
-
 describe('createOrderCostEntrySchema', () => {
   const base = {
     idempotencyKey: '00000000-0000-4000-8000-000000000001',
@@ -2284,65 +2245,6 @@ describe('createOrderCostEntrySchema', () => {
         amount: '0.01',
       }).success,
     ).toBe(true);
-  });
-});
-
-describe('recordCsPayrollPaymentSchema', () => {
-  const base = {
-    idempotencyKey: '00000000-0000-4000-8000-000000000003',
-    paidAt: '2026-05-01T10:30',
-    paymentMethod: null,
-    referenceNo: null,
-    remark: null,
-  };
-
-  it('accepts separate bottom-salary and commission amounts', () => {
-    const result = recordCsPayrollPaymentSchema.safeParse({
-      ...base,
-      baseAmount: '2000.00',
-      commissionAmount: '33000.00',
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.paidAt.toISOString()).toBe(
-        '2026-05-01T02:30:00.000Z',
-      );
-    }
-  });
-
-  it('rejects zero total, negative values, overflow, and invalid request keys', () => {
-    for (const input of [
-      { ...base, baseAmount: '', commissionAmount: '' },
-      { ...base, baseAmount: '-1', commissionAmount: '0' },
-      { ...base, baseAmount: '10000000000.00', commissionAmount: '0' },
-      {
-        ...base,
-        idempotencyKey: 'not-a-uuid',
-        baseAmount: '1',
-        commissionAmount: '0',
-      },
-    ]) {
-      expect(recordCsPayrollPaymentSchema.safeParse(input).success).toBe(false);
-    }
-  });
-
-  it('rejects impossible Shanghai calendar dates instead of rolling them forward', () => {
-    for (const paidAt of [
-      '2026-02-31T10:30',
-      '2026-04-31T10:30',
-      '2026-05-01T24:00',
-      '2026-05-01T10:60',
-    ]) {
-      expect(
-        recordCsPayrollPaymentSchema.safeParse({
-          ...base,
-          paidAt,
-          baseAmount: '1.00',
-          commissionAmount: '0',
-        }).success,
-        paidAt,
-      ).toBe(false);
-    }
   });
 });
 

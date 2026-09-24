@@ -42,8 +42,6 @@ export const NOTIFICATION_PAYLOAD_FIELDS = {
     'status',
   ],
   STOCK_ALERT: ['materialName', 'currentStock', 'safetyStock'],
-  CS_PERIOD_ENDING: ['periodId', 'csName', 'daysLeft', 'totalSales'],
-  CS_PERIOD_SETTLED: ['settledCount', 'csName', 'totalSales', 'commission'],
   DAILY_WORKER_SALARY: ['date', 'workerCount', 'totalAmount'],
 } as const satisfies Record<NotificationEvent, readonly string[]>;
 

@@ -15,10 +15,6 @@ const STATIC_PREREQUISITES: ReadonlyArray<
     '只有启用的“供应商”或“客户/供应商”主数据可用于采购。',
   ],
   ['purchase/PurchaseOrderForm.tsx', '请先创建并启用至少一种物料。'],
-  [
-    'salary/StartCsPeriodForm.tsx',
-    '暂无启用的客服账号，请先在用户管理中创建或启用客服。',
-  ],
 ];
 
 const SUCCESS_FEEDBACK: ReadonlyArray<

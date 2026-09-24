@@ -4,14 +4,12 @@ import { describe, expect, it } from 'vitest';
 import { OrderStatus, OutsourceStatus } from '@/generated/prisma/enums';
 import type {
   DueOrderRow,
-  EndingPeriodRow,
   OverdueOutsourceRow,
   OverReportRow,
   PendingShipmentRow,
 } from '@/lib/dashboard/owner-watchlist';
 import {
   DueOrdersWatchlist,
-  EndingPeriodsWatchlist,
   OverdueOutsourcingWatchlist,
   OverReportsWatchlist,
   PendingShipmentsWatchlist,
@@ -69,25 +67,6 @@ function overReportRow(index: number): OverReportRow {
   };
 }
 
-function endingRow(index: number): EndingPeriodRow {
-  return {
-    id: `period-${index}`,
-    csUserId: `cs-${index}`,
-    csDisplayName: `结算客服-${index}`,
-    periodStart: new Date('2026-06-08T00:00:00Z'),
-    periodEnd: new Date('2026-09-08T00:00:00Z'),
-    durationMonths: 3,
-    totalSales: '1234.56',
-    initialSales: '100.00',
-    salesForTier: '1334.56',
-    monthlyBase: '2000.00',
-    daysUntilEnd: 0,
-    predictedCommission: '123.45',
-    predictedTotalIncome: '6123.45',
-    predictedBelowAllTiers: false,
-  };
-}
-
 const indices = [1, 2, 3, 4, 5];
 const scenarios: Array<{
   kind: string;
@@ -128,12 +107,6 @@ const scenarios: Array<{
         ...pagination, rows: empty ? [] : indices.map(overReportRow),
         total: empty ? 0 : 12, sinceYmd: '2026-09-02',
       }),
-    }),
-  },
-  {
-    kind: 'settlements', label: '结算客服', count: 5, emptyText: '未来 7 天无客服周期到期',
-    render: (empty) => EndingPeriodsWatchlist({
-      resultPromise: Promise.resolve(empty ? [] : indices.map(endingRow)),
     }),
   },
 ];
@@ -179,16 +152,6 @@ describe('工作台关注列表预览', () => {
     }));
     expect(html).toContain('未设交期');
     expect(html).not.toContain('今日到期');
-  });
-
-  it('结算预览保留客服、到期与详情入口，预测金额留在周期详情', async () => {
-    const html = renderToStaticMarkup(await scenarios[4].render(false));
-    expect(html).toContain('href="/owner/salary/cs/period-1"');
-    expect(html).toContain('截至 2026/09/08');
-    expect(html).toContain('今日到期');
-    expect(html).not.toContain('1234.56');
-    expect(html).not.toContain('123.45');
-    expect(html).not.toContain('6123.45');
   });
 
   it('读取失败继续抛给区域错误边界，不能伪装成空态', async () => {

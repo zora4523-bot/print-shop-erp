@@ -223,7 +223,6 @@ describe('recordBillPaymentAction', () => {
       newPaidAmount: '1000.00',
       totalAmount: '1000.00',
       status: BillStatus.FULLY_PAID,
-      csAccumulated: true,
     });
     const r = await recordBillPaymentAction(
       'b1',
@@ -234,7 +233,6 @@ describe('recordBillPaymentAction', () => {
     if (r.status === 'success') {
       expect(r.newPaidAmount).toBe('1000.00');
       expect(r.billStatus).toBe(BillStatus.FULLY_PAID);
-      expect(r.csAccumulated).toBe(true);
     }
     expect(billMock.recordPayment).toHaveBeenCalledWith(
       'b1',

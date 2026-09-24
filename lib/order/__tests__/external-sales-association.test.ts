@@ -10,7 +10,7 @@ beforeEach(() => {
   order.mockResolvedValue({
     submitterId: current.id, submitter: current, status: 'DRAFT', settlementType: 'EXTERNAL_SALES',
     settledAt: null, settledFee: null, shippedAt: null, finishedAt: null, sourceOrderId: null,
-    _count: { billItems: 0, csSalesEntries: 0, reworkOrders: 0, changeRequests: 0 }, agentMonthlyBillItem: null,
+    _count: { billItems: 0, reworkOrders: 0, changeRequests: 0 }, agentMonthlyBillItem: null,
   });
   users.mockResolvedValue([current]);
 });

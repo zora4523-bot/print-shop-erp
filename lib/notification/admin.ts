@@ -10,10 +10,8 @@ import { randomBytes } from 'node:crypto';
 import { db } from '../db';
 import {
   NOTIFICATION_EVENTS,
-  PRIVATE_EVENT_MAX_CHANNELS,
   SUPERSEDED_BEFORE_SEND_ERROR,
   TEST_EVENT_TYPE,
-  isPrivatePerCsEvent,
   managementNotificationRoleForEvent,
   type ManagementNotificationRole,
   type NotificationEvent,
@@ -704,33 +702,9 @@ export class EmptyChannelIdsError extends Error {
   }
 }
 
-// CS 业绩 / 提成事件（含具体客服金额）只能绑 ≤ 1 个 channel——多绑
-// 会让所有 channel 看到所有客服的金额。schema 没 per-user 路由
-// （SPEC §8.1 &ldquo;对应客服&rdquo; 1:1 推送等 P2 加 User.notificationChannelId
-// 后实现）。
-// 直接 POST / replay 绕开，server side 必须 enforce。
-
-export class TooManyChannelsForPrivateEventError extends Error {
-  constructor(
-    public readonly eventType: string,
-    public readonly count: number,
-  ) {
-    super(
-      `${eventType} 含具体客服金额，最多绑 ${PRIVATE_EVENT_MAX_CHANNELS} 个 channel（当前 ${count}）`,
-    );
-    this.name = 'TooManyChannelsForPrivateEventError';
-  }
-}
-
 /**
- * Action 层调用：跨字段 + 跨事件类型的多重校验（schema 不能跨字段，
- * 留给 action）：
- *   1. 启用规则 + channelIds 空 → EmptyChannelIdsError
- *   2. **启用规则** + CS_PERIOD_* + channelIds > 1 →
- *      TooManyChannelsForPrivateEventError（
- *      privacy enforcement，UI 警告必须有 server-side guard 兜底）
- *      只对 isActive=true 生效——禁用 draft 即使 channelIds 多也允许保存
- *      （&ldquo;disable first, clean up later&rdquo;的 owner 操作模式不被打断）。
+ * Action 层调用：跨字段校验（schema 不能跨字段，留给 action）：
+ * 启用规则 + channelIds 空 → EmptyChannelIdsError。
  * 校验通过后委托给 updateRule。
  */
 export async function updateRuleWithGuard(
@@ -743,16 +717,6 @@ export async function updateRuleWithGuard(
     !managementNotificationRoleForEvent(eventType)
   ) {
     throw new EmptyChannelIdsError(eventType);
-  }
-  if (
-    input.isActive &&
-    isPrivatePerCsEvent(eventType) &&
-    input.channelIds.length > PRIVATE_EVENT_MAX_CHANNELS
-  ) {
-    throw new TooManyChannelsForPrivateEventError(
-      eventType,
-      input.channelIds.length,
-    );
   }
   return updateRule(eventType, input);
 }

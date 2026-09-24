@@ -225,18 +225,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'salary:view:all',
   },
   {
-    id: 'owner.salary.cs',
-    label: '客服周期',
-    routeBase: '/owner/salary/cs',
-    iconName: 'CalendarClock',
-    breadcrumbLabel: '客服周期',
-    menuSection: 'finance',
-    status: 'implemented',
-    menuOrder: 60,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'salary:view:all',
-  },
-  {
     id: 'owner.salary.hourly',
     label: '历史时薪档案',
     routeBase: '/owner/salary/hourly',

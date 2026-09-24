@@ -5,8 +5,6 @@ import { spawn } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const EXPECTED_ENDPOINTS = [
-  'cs-period-ending',
-  'cs-settle',
   'daily-salary',
   'generate-bills',
   'order-export-cleanup',
@@ -164,14 +162,10 @@ function runCronWithUrl(
   });
 }
 
-// L-11：客服周期的结束日是包含式上海自然日，下一周期只能在结束日次日由
-// cs-settle 结算时建立；在此之前，内部客服工单的提交 / 取消 / 改单审批 /
-// 核价都会因没有覆盖当天的周期而整体回滚。所以 cs-settle 必须紧跟上海零点
-// 运行（留 1 分钟避开整点），而不是拖到 01:00 留出一小时的停摆窗口。
-it('settles CS periods one minute after Shanghai midnight so the next period exists almost immediately', async () => {
+it('runs every cron line on Shanghai time', async () => {
   const cron = await readFile(resolve('deploy/crontab.example'), 'utf8');
   expect(cron).toMatch(/^CRON_TZ=Asia\/Shanghai$/m);
-  expect(cron).toMatch(/^1 0 \* \* \* \S+ cs-settle$/m);
+  expect(cron).not.toMatch(/cs-settle|cs-period-ending/);
 });
 
 it('keeps the deployment guide crontab template in sync with deploy/crontab.example', async () => {

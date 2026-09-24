@@ -4,8 +4,6 @@ import { packagingUnit } from './packaging-mode';
 import Decimal from "decimal.js";
 import type { Prisma } from "../../generated/prisma/client";
 import {
-  CsSalesEntryType,
-  OrderBillingMode,
   OrderChangeRequestStatus,
   OrderCustomerChargeStatus,
   OrderItemQuoteDisposition,
@@ -35,11 +33,6 @@ import {
 } from "./pricing-status";
 import { appendOrderPricingRevisionInTx } from "./pricing-revision";
 import { inspectOrderProductionReadinessInTx, prepareOrderForProductionInTx } from "./production-readiness";
-import {
-  assertCsOrderSalesLedgerReconciledInTx,
-  CsSalesLedgerError,
-  recordCsSalesEntryInTx,
-} from "../salary/cs-sales";
 
 const DECIMAL_10_4_MAX = new Decimal("999999.9999");
 const DECIMAL_12_2_MAX = new Decimal("9999999999.99");
@@ -1413,50 +1406,6 @@ export async function finalizeOrderPricing(
     const packagingAmount = packagingTotal.toFixed(2);
     const processingAmount = processingTotal.toFixed(2);
     const totalAmount = total.toFixed(2);
-    // 客服业绩不含代收物流（cs-sales.ts）：比较扣除快递费 / 耗材后的口径。
-    const shipmentChargeAmount = (amountOf: (charge: PricingCustomerCharge) => Decimal.Value | null) =>
-      order.customerCharges.filter(isShipmentCustomerCharge).reduce((sum, charge) => {
-        const amount = amountOf(charge);
-        return amount === null ? sum : sum.plus(amount);
-      }, new Decimal(0));
-    const previousLogisticsAmount = shipmentChargeAmount((charge) => money(charge.amount));
-    // Rows created by the full editor (补录) are shipment charges as well; they
-    // are already inside `total` and must not leak into the ledger basis.
-    const nextLogisticsAmount = includesShipmentCharges
-      ? shipmentChargeAmount((charge) => chargeAmountById.get(charge.id) ?? money(charge.amount)).plus(createdChargeTotal)
-      : previousLogisticsAmount;
-    const previousSalesBasis = new Decimal(order.totalAmount.toString()).minus(previousLogisticsAmount).toFixed(2);
-    const csSalesDelta = total.minus(nextLogisticsAmount).minus(previousSalesBasis);
-    if (
-      order.settlementType === OrderSettlementType.INTERNAL_SALES &&
-      order.billingMode === OrderBillingMode.CHARGE &&
-      !csSalesDelta.isZero()
-    ) {
-      const nextOrderRevision = order.revision + 1;
-      try {
-        await assertCsOrderSalesLedgerReconciledInTx(
-          tx,
-          order.id,
-          previousSalesBasis,
-        );
-        await recordCsSalesEntryInTx(tx, {
-          eventKey: `order:${order.id}:revision:${nextOrderRevision}:change`,
-          csUserId: order.submitterId,
-          orderId: order.id,
-          orderRevision: nextOrderRevision,
-          type: CsSalesEntryType.ORDER_CHANGED,
-          amount: csSalesDelta,
-          occurredAt: now,
-          remark: "管理员确认工单终价",
-        });
-      } catch (error) {
-        if (error instanceof CsSalesLedgerError) {
-          throw new OrderPricingReviewError(error.message);
-        }
-        throw error;
-      }
-    }
-
     for (const manual of manualItems) {
       await tx.orderItem.update({
         where: { id: manual.item.id },

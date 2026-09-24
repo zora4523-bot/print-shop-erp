@@ -102,8 +102,7 @@ export type SalesRankingRow = {
  * 排行，Top 10。两步查询：先 groupBy submitter 求 sum + count，按
  * sum desc 截 10；再 findMany 拉用户姓名 / 角色拼回。
  *
- * 业绩口径见 DECISIONS 2026-04-26：本表用 submittedAt（夯实即时反馈）；
- * 不与 SalaryPeriod.totalSales（按 mark-paid 累加）混用。
+ * 业绩口径见 DECISIONS 2026-04-26：本表用 submittedAt（夯实即时反馈）。
  */
 export async function getSalesRanking(
   now: Date = new Date(),

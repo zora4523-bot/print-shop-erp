@@ -21,7 +21,6 @@ export const completionInclude = {
     changeRequests: true,
     costEntries: true,
     customerCharges: true,
-    csSalesEntries: true,
     pricingRevisions: true,
     productionOperations: true,
     productionProgressSteps: true,

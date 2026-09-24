@@ -22,15 +22,6 @@
     },
     {
       "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": ".toFixed(2)}%",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "百分比展示，非金额"
-    },
-    {
-      "rule": "money",
       "file": "components/business/dashboard/SalesRankingChart.tsx",
       "text": "return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(v);",
       "clause": "§4.1",
@@ -175,15 +166,6 @@
     },
     {
       "rule": "money",
-      "file": "components/business/salary/SettleCsPeriodButton.tsx",
-      "text": "{(Number(visibleState.tierRate) * 100).toFixed(2)}% = 提成 ¥{' '}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "百分比展示，非金额"
-    },
-    {
-      "rule": "money",
       "file": "components/business/dashboard/SalesRankingChart.tsx",
       "text": "`¥ ${formatTooltipMoney(Number(value))}`,",
       "clause": "§4.1",
@@ -208,24 +190,6 @@
       "migration": "P0-1",
       "count": 1,
       "reason": "用户输入运费的原样回显，服务端确认后走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "components/business/salary/CsPayrollPaymentForm.tsx",
-      "text": "`本次底薪 ${Number.isFinite(baseAmount) ? formatMoney(baseAmount) : `¥ ${preview.baseAmount}`}；记录后预计剩余 ${formatMoney(baseAfter)}。`,",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "服务端返回非数字时的原样回显兜底，正常路径已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "components/business/salary/CsPayrollPaymentForm.tsx",
-      "text": "? `本次提成 ${Number.isFinite(commissionAmount) ? formatMoney(commissionAmount) : `¥ ${preview.commissionAmount}`}；记录后预计剩余 ${formatMoney(commissionAfter)}。`",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "服务端返回非数字时的原样回显兜底，正常路径已走 formatMoney"
     },
     {
       "rule": "money",
@@ -262,105 +226,6 @@
       "migration": "P0-1",
       "count": 1,
       "reason": "采购剩余件数（数量），非金额"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "baseTotal={baseTotal.toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "tierSalesTotal={tierSalesTotal.toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "tierSalesTotal: tierSalesTotal.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "baseTotal: baseTotal.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "paidBase: paidBase.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "paidCommission: paidCommission.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "remainingBase={remainingBase.toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "remainingCommission={remainingCommission.toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/page.tsx",
-      "text": "tierSalesTotal: tierSalesTotal.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/page.tsx",
-      "text": "baseTotal: baseTotal.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/page.tsx",
-      "text": ".toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 2,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
     },
     {
       "rule": "money",

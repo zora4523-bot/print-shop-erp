@@ -183,7 +183,6 @@ describe('bill mutation confirmations', () => {
       newPaidAmount: '500.00',
       totalAmount: '1000.00',
       billStatus: 'PARTIAL_PAID',
-      csAccumulated: false,
     };
     let html = renderToStaticMarkup(
       <RecordPaymentForm

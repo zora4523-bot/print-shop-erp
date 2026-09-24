@@ -1,16 +1,13 @@
 import Decimal from 'decimal.js';
-import {
-  PieceworkSettlementStatus,
-  SalaryPeriodStatus,
-} from '../../generated/prisma/enums';
+import { PieceworkSettlementStatus } from '../../generated/prisma/enums';
 import { db } from '../db';
 import { currentShanghaiMonth, todayShanghai } from '../dashboard/shanghai-clock';
 import { shanghaiDayRange } from './daily-common';
 
 // Read-only aggregates for the owner's salary index page. Every query
 // here is a sum over existing tables — no new state, no writes. Kept
-// out of lib/salary/daily.ts and lib/salary/cs.ts so imports stay
-// one-directional (daily / cs are sources; summary is a consumer).
+// out of lib/salary/daily.ts so imports stay one-directional (daily is a
+// source; summary is a consumer).
 
 export type SalaryIndexSummary = {
   today: string;
@@ -36,15 +33,6 @@ export type SalaryIndexSummary = {
     count: number;
     actualTotal: string;
   };
-  // 已结算客服周期（剩余底薪 + 提成未发放合计）
-  csUnpaid: {
-    count: number;
-    totalIncome: string;
-  };
-  // 待结算周期：periodEnd < now 但 status=IN_PROGRESS 的个数
-  csReadyToSettle: number;
-  // 客服活跃周期统计：每位客服一条 IN_PROGRESS
-  csActivePeriods: number;
 };
 
 export async function getSalaryIndexSummary(
@@ -72,9 +60,6 @@ export async function getSalaryIndexSummary(
     pieceworkUnpaidAgg,
     dailyTodayGroups,
     dailyUnpaidAgg,
-    csUnpaidAgg,
-    csReadyCount,
-    csActiveCount,
   ] = await Promise.all([
     db.pieceworkSettlement.groupBy({
       by: ['status'],
@@ -100,43 +85,12 @@ export async function getSalaryIndexSummary(
       _count: { _all: true },
       _sum: { actualSalary: true },
     }),
-    // The card wants SUM(base - paidBase + commission - paidCommission).
-    // Summation is linear, so the per-row combination is identical to
-    // combining the four column sums, and each column sum is exact
-    // numeric arithmetic in PostgreSQL. No per-row clamping exists on
-    // this path, so nothing blocks the pushdown.
-    db.customerServiceCommission.aggregate({
-      where: { isFullyPaid: false },
-      _count: { _all: true },
-      _sum: {
-        monthlyBaseTotal: true,
-        commissionAmount: true,
-        paidBase: true,
-        paidCommission: true,
-      },
-    }),
-    db.salaryPeriod.count({
-      where: {
-        status: SalaryPeriodStatus.IN_PROGRESS,
-        // SalaryPeriod.periodEnd is an inclusive PostgreSQL DATE. It becomes
-        // due only when the Shanghai calendar has advanced to the next day;
-        // comparing it with a timestamp would mark it due during its final day.
-        periodEnd: { lt: todayDateCol },
-      },
-    }),
-    db.salaryPeriod.count({
-      where: { status: SalaryPeriodStatus.IN_PROGRESS },
-    }),
   ]);
 
   const dailyToday = foldPaidGroups(
     dailyTodayGroups,
     (group) => group._sum.actualSalary,
   );
-  const csUnpaidTotal = decimalFromSum(csUnpaidAgg._sum.monthlyBaseTotal)
-    .minus(decimalFromSum(csUnpaidAgg._sum.paidBase))
-    .plus(decimalFromSum(csUnpaidAgg._sum.commissionAmount))
-    .minus(decimalFromSum(csUnpaidAgg._sum.paidCommission));
   let pieceworkTodayCount = 0;
   let pieceworkTodayTotal = new Decimal(0);
   let pieceworkTodayUnpaid = new Decimal(0);
@@ -172,12 +126,6 @@ export async function getSalaryIndexSummary(
       count: dailyUnpaidAgg._count._all,
       actualTotal: decimalFromSum(dailyUnpaidAgg._sum.actualSalary).toFixed(2),
     },
-    csUnpaid: {
-      count: csUnpaidAgg._count._all,
-      totalIncome: csUnpaidTotal.toFixed(2),
-    },
-    csReadyToSettle: csReadyCount,
-    csActivePeriods: csActiveCount,
   };
 }
 

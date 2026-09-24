@@ -94,17 +94,15 @@ export function RuleForm({
             </span>
           ))}
         </p>
-        {/* totalAmount / totalSales / commission 是&ldquo;千分位 + 2 位小数&rdquo;
+        {/* totalAmount 是&ldquo;千分位 + 2 位小数&rdquo;
             纯数字，**不**含 ¥ 前缀。需要货币符号请在模板里手写
             （如默认 `金额：¥{totalAmount}` →&ldquo;金额：¥1,234.56&rdquo;）。
             避免 owner 误以为占位符已含 ¥。 */}
         {payloadFields.some((f) =>
-          /^(totalAmount|totalSales|commission)$/.test(f),
+          /^totalAmount$/.test(f),
         ) ? (
           <p className="text-xs text-muted-foreground">
             金额类占位符（<code className="rounded-md bg-muted px-1">totalAmount</code>
-            / <code className="rounded-md bg-muted px-1">totalSales</code> /
-            <code className="rounded-md bg-muted px-1">commission</code>
             ）只是千分位数字，<strong>不含</strong>货币符号。需要 ¥ 请在模板里手写。
           </p>
         ) : null}
@@ -114,13 +112,6 @@ export function RuleForm({
         <legend className="text-sm font-medium">
           {managementRole ? '收件角色（固定）' : '推送到群（多选）'}
         </legend>
-        {(eventType === 'CS_PERIOD_ENDING' ||
-          eventType === 'CS_PERIOD_SETTLED') && channels.length > 0 ? (
-          <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
-            此事件包含客服业绩和提成。为避免不同客服看到彼此金额，
-            启用时<strong>只能选择一个推送群</strong>；停用时可暂存多个选项。
-          </p>
-        ) : null}
         {managementRole ? (
           <div className="rounded-md border bg-muted/20 px-3 py-3 text-sm">
             <p>

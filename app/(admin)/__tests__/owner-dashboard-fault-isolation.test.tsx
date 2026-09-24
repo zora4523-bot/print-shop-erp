@@ -5,17 +5,17 @@ import { ErrorBoundary } from '@/components/ui-business';
 
 vi.mock('@/components/business/dashboard/OrderAttentionSection', () => ({ OrderAttentionSection: () => null, OrderAttentionLoading: () => null }));
 const mocks = vi.hoisted(() => ({
-  permission: vi.fn(), today: vi.fn(), monthly: vi.fn(), shipments: vi.fn(), outsource: vi.fn(), due: vi.fn(), overReports: vi.fn(), settlements: vi.fn(), failures: vi.fn(),
+  permission: vi.fn(), today: vi.fn(), monthly: vi.fn(), shipments: vi.fn(), outsource: vi.fn(), due: vi.fn(), overReports: vi.fn(), failures: vi.fn(),
 }));
 vi.mock('@/lib/auth/permissions', () => ({ requirePermission: mocks.permission }));
 vi.mock('@/lib/dashboard/owner-stats', () => ({ getTodayOrderStats: mocks.today, getMonthlyBillStats: mocks.monthly }));
-vi.mock('@/lib/dashboard/owner-watchlist', () => ({ getPendingShipments: mocks.shipments, getOverdueOutsourcing: mocks.outsource, getDueOrders: mocks.due, getRecentOverReports: mocks.overReports, getEndingPeriods: mocks.settlements }));
+vi.mock('@/lib/dashboard/owner-watchlist', () => ({ getPendingShipments: mocks.shipments, getOverdueOutsourcing: mocks.outsource, getDueOrders: mocks.due, getRecentOverReports: mocks.overReports }));
 vi.mock('@/lib/notification/admin', () => ({ countRecentFailures: mocks.failures }));
 import OwnerDashboardPage from '../owner/page';
 import { NotificationAttention } from '@/components/business/dashboard/NotificationAttention';
 import { DueOrdersWatchlist, PendingShipmentsWatchlist } from '@/components/business/dashboard/OwnerWatchlists';
 
-const reads = [mocks.today, mocks.monthly, mocks.shipments, mocks.outsource, mocks.due, mocks.overReports, mocks.settlements, mocks.failures];
+const reads = [mocks.today, mocks.monthly, mocks.shipments, mocks.outsource, mocks.due, mocks.overReports, mocks.failures];
 function visit(node: ReactNode, predicate: (node: React.ReactElement<Record<string, unknown>>) => boolean): boolean {
   if (Array.isArray(node)) return node.some(child => visit(child, predicate));
   if (!isValidElement<Record<string, unknown>>(node)) return false;
@@ -38,7 +38,7 @@ describe('owner dashboard fault isolation', () => {
       expect(read).toHaveBeenCalledOnce();
       expect(mocks.permission.mock.invocationCallOrder[0]).toBeLessThan(read.mock.invocationCallOrder[0]);
     }
-    const labels = ['工单待办', '推送异常', '交期预警', '待发货工单', '超期外协', '超计划报工记录', '即将结算客服周期', '今日工单指标', '本月已出账金额'];
+    const labels = ['工单待办', '推送异常', '交期预警', '待发货工单', '超期外协', '超计划报工记录', '今日工单指标', '本月已出账金额'];
     for (const label of labels) {
       expect(visit(result, node => node.type === ErrorBoundary && node.props.title === `${label}暂时无法加载`)).toBe(true);
     }

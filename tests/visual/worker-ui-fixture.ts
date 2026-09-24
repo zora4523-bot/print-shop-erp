@@ -28,8 +28,6 @@ export type WorkerUiFixture = {
   adjustmentId: string;
   salaryDate: string;
   hourlyWorkerId: string;
-  csUserId: string;
-  csPeriodId: string;
 };
 
 function fixtureFor(namespace: string): WorkerUiFixture {
@@ -73,8 +71,6 @@ function fixtureFor(namespace: string): WorkerUiFixture {
     adjustmentId: `${prefix}-adjustment`,
     salaryDate,
     hourlyWorkerId: `${prefix}-long-packer`,
-    csUserId: `${prefix}-cs-user`,
-    csPeriodId: `${prefix}-cs-period`,
   };
 }
 
@@ -199,31 +195,6 @@ export async function seedWorkerUiFixture(
          FROM "User" WHERE id = $2`,
         [fixture.hourlyWorkerId, adminId],
       );
-
-      // Each viewport owns a separate CS identity: the database permits only
-      // one IN_PROGRESS period per user. Never remove shared e2e-cs periods.
-      await db.query(`DELETE FROM "SalaryPeriod" WHERE id = $1`, [fixture.csPeriodId]);
-      await db.query(`DELETE FROM "User" WHERE id = $1`, [fixture.csUserId]);
-      await db.query(
-        `INSERT INTO "User" (
-           id, username, password, role, "displayName", "isActive", "createdAt", "updatedAt"
-         ) SELECT $1::text, $1::text::citext, password, 'CUSTOMER_SERVICE'::"Role",
-                  '响应式客服', FALSE, NOW(), NOW()
-           FROM "User" WHERE id = $2`,
-        [fixture.csUserId, salesId],
-      );
-      await db.query(
-        `INSERT INTO "SalaryPeriod" (
-           id, "csUserId", "periodStart", "periodEnd", "durationMonths",
-           "totalSales", "initialSales", "monthlyBase", status, "createdAt", "updatedAt"
-         ) VALUES (
-           $1, $2, DATE '2098-01-01', DATE '2098-04-30', 4,
-           0.00, 12345678.90, 4321.09, 'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
-         )`,
-        [fixture.csPeriodId, fixture.csUserId],
-      );
-      // Future dates keep this read-only fixture out of settlement jobs and
-      // upcoming-period alerts. The opening balance needs no fabricated ledger.
 
       await db.query(
         `INSERT INTO "Order" (
@@ -638,8 +609,6 @@ export async function cleanupWorkerUiFixture(
         fixture.overrideSchedulingOrderId,
       ]);
       await db.query(`DELETE FROM "Order" WHERE id = $1`, [fixture.orderId]);
-      await db.query(`DELETE FROM "SalaryPeriod" WHERE id = $1`, [fixture.csPeriodId]);
-      await db.query(`DELETE FROM "User" WHERE id = $1`, [fixture.csUserId]);
       await db.query('COMMIT');
     } catch (error) {
       await db.query('ROLLBACK');

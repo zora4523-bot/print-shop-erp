@@ -16,10 +16,6 @@
       "maxLines": 324
     },
     {
-      "id": "app/(admin)/owner/salary/cs/[id]/page.tsx::function:CsPeriodDetailPage",
-      "maxLines": 324
-    },
-    {
       "id": "app/dev/showcase/page.tsx::function:ShowcasePage",
       "maxLines": 441
     },

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readNotificationLogs } from './_helpers';
-import { withUniqueCronFixture } from './_cs-notification-fixtures';
+import { withUniqueCronFixture } from './_cron-notification-fixtures';
 
 // Real production handlers, inline after() delivery and a mock destination.
 // Each run owns its channel/entity; historical rows are never cleanup targets.
@@ -9,7 +9,6 @@ const CRON_SECRET = process.env.CRON_SECRET;
 
 const cases = [
   { endpoint: 'outsource-overdue', event: 'OUTSOURCE_OVERDUE', count: 'overdueCount', copy: ['外协超期'] },
-  { endpoint: 'cs-period-ending', event: 'CS_PERIOD_ENDING', count: 'endingCount', copy: ['客服周期即将结束', '100,000.00'] },
   { endpoint: 'order-overdue', event: 'ORDER_OVERDUE', count: 'overdueCount', copy: ['交期逾期', '已逾期：5 天', '生产中'] },
 ] as const;
 

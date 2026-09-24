@@ -230,121 +230,6 @@ export async function resetBillsForUser(userId: string): Promise<void> {
   });
 }
 
-// Seeds one Order with status=FINISHED, no items. Bills E2E uses this
-// to skip the whole submit→schedule→report→cascade chain (that's
-// wave 2's job). Returns the new order's id + orderNo.
-//
-// `finishedAt` is REQUIRED and must be passed by the caller. The
-// earlier version used PG's NOW(), which depends on the PG session
-// timezone; on UTC-configured Postgres (CI / containers) a Shanghai
-// "today" near month boundaries seeds the order into the wrong
-// month from the perspective of generateBillsForPeriod's JS-side
-// month math, and the bill never generates (Codex round 79 / P2).
-// Caller computes the timestamp deterministically from JS Date.
-export async function seedFinishedOrder(opts: {
-  submitterId: string;
-  submitterRole: 'SALES' | 'CUSTOMER_SERVICE';
-  customerRef: string;
-  totalAmount: string; // decimal string, e.g. "5000.00"
-  finishedAt: Date;
-}): Promise<{ orderId: string; orderNo: string }> {
-  const orderId = `e2e-ord-${randomBytes(8).toString('hex')}`;
-  // orderNo is UNIQUE — we don't follow the YYYYMMDD-NNNN convention
-  // because that would race with real production code's nextOrderNumber.
-  // Prefix lets us spot test rows in the dev DB.
-  const orderNo = `E2E-${randomBytes(4).toString('hex').toUpperCase()}`;
-  await withDb(async (db) => {
-    await db.query('BEGIN');
-    try {
-      // A FINISHED external-sales fixture must satisfy the same fail-closed
-      // bill eligibility contract as production data. Use the dedicated E2E
-      // owner as the final-price confirmer and persist one explicit waived
-      // shipping charge instead of relying on the pre-ledger aggregate shape.
-      let pricingConfirmedById: string | null = null;
-      if (opts.submitterRole === 'SALES') {
-        const confirmer = await db.query<{ id: string }>(
-          `SELECT id FROM "User"
-            WHERE username = $1 AND role = 'ADMIN'::"Role" AND "isActive" = TRUE`,
-          [E2E_USERS.owner.username],
-        );
-        if (confirmer.rowCount !== 1) {
-          throw new Error(
-            'seedFinishedOrder requires the active E2E owner fixture to confirm external-sales pricing',
-          );
-        }
-        pricingConfirmedById = confirmer.rows[0]!.id;
-      }
-
-      await db.query(
-        `
-        INSERT INTO "Order" (
-          id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-          status, "isUrgent", "customerRef", "processingAmount", "totalAmount",
-          "confirmedFee", "pricingStatus", "pricingConfirmedAt", "pricingConfirmedById",
-          "submittedAt", "scheduledAt", "completedAt", "shippedAt", "finishedAt",
-          "createdAt", "updatedAt"
-        ) VALUES (
-          $1, $2, $3, $4::"Role",
-          CASE $4::"Role"
-            WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
-            WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
-          END,
-          $3,
-          'FINISHED'::"OrderStatus", FALSE, $5, $6, $6,
-          CASE WHEN $4::"Role" = 'SALES'::"Role" THEN $6::numeric ELSE NULL END,
-          CASE
-            WHEN $4::"Role" = 'SALES'::"Role"
-              THEN 'ADMIN_CONFIRMED'::"OrderPricingStatus"
-            ELSE 'AUTO_CONFIRMED'::"OrderPricingStatus"
-          END,
-          $7, $8,
-          $7, $7, $7, $7, $7,
-          NOW(), NOW()
-        )
-        `,
-        [
-          orderId,
-          orderNo,
-          opts.submitterId,
-          opts.submitterRole,
-          opts.customerRef,
-          opts.totalAmount,
-          opts.finishedAt.toISOString(),
-          pricingConfirmedById,
-        ],
-      );
-
-      if (pricingConfirmedById) {
-        await db.query(
-          `
-          INSERT INTO "OrderCustomerCharge" (
-            id, "orderId", "categoryId", "businessKey", status, description,
-            amount, "createdById", "finalizedById", "finalizedAt",
-            "createdAt", "updatedAt"
-          ) VALUES (
-            $1, $2, 'ccc_shipping_fee', 'ORDER:E2E:WAIVED_SHIPPING',
-            'WAIVED'::"OrderCustomerChargeStatus", 'E2E 顺丰到付，快递费已豁免',
-            0, $3, $4, $5, NOW(), NOW()
-          )
-          `,
-          [
-            `${orderId}-charge-shipping`,
-            orderId,
-            opts.submitterId,
-            pricingConfirmedById,
-            opts.finishedAt.toISOString(),
-          ],
-        );
-      }
-      await db.query('COMMIT');
-    } catch (error) {
-      await db.query('ROLLBACK');
-      throw error;
-    }
-  });
-  return { orderId, orderNo };
-}
-
 // Seeds one immutable v2 billing candidate for a fresh E2E-only external
 // sales identity. A new identity is intentional: CONFIRMED/PAID v2 bills are
 // protected from deletion by database triggers, so a repeatable golden-path
@@ -875,100 +760,6 @@ export async function seedPrintableOrder(opts: {
   };
 }
 
-// Wipes ALL SalaryPeriods + CommissionRecords for an e2e-* user.
-// Required for CS-accumulate E2E so each run starts with a known-
-// empty period (totalSales=0). Same e2e-* guard as resetBillsForUser
-// so this can never wipe a real CS user's salary state.
-//
-// The append-only sales/payroll ledgers and CustomerServiceCommission all
-// reference SalaryPeriod, so dependent facts must be removed first.
-export async function resetCsSalaryStateForUser(userId: string): Promise<void> {
-  await withDb(async (db) => {
-    const r = await db.query<{ username: string }>(
-      'SELECT username FROM "User" WHERE id = $1',
-      [userId],
-    );
-    if (r.rowCount === 0) {
-      throw new Error(`resetCsSalaryStateForUser: user id ${userId} not found`);
-    }
-    const username = r.rows[0]!.username;
-    if (!username.startsWith('e2e-')) {
-      throw new Error(
-        `resetCsSalaryStateForUser refuses to wipe non-E2E user "${username}".`,
-      );
-    }
-    await db.query(
-      `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
-         SELECT id FROM "SalaryPeriod" WHERE "csUserId" = $1
-       )`,
-      [userId],
-    );
-    await db.query(`DELETE FROM "CsSalesEntry" WHERE "csUserId" = $1`, [
-      userId,
-    ]);
-    await db.query(
-      `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
-      [userId],
-    );
-    await db.query(`DELETE FROM "SalaryPeriod" WHERE "csUserId" = $1`, [userId]);
-  });
-}
-
-// Seeds an IN_PROGRESS SalaryPeriod that brackets `now`. The CS
-// accumulate path looks for a period where periodStart ≤ at AND
-// periodEnd ≥ at AND status = IN_PROGRESS — these dates give us a
-// generous window so test wall-clock drift can't push us out of it.
-export async function seedActiveCsPeriod(opts: {
-  csUserId: string;
-  monthlyBase: string; // decimal string, e.g. "5000.00"
-}): Promise<{ periodId: string }> {
-  const periodId = `e2e-csp-${randomBytes(8).toString('hex')}`;
-  const now = new Date();
-  // [1 month ago, 3 months from now] in UTC; @db.Date strips time so
-  // the day-level grain is enough.
-  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 3, 0);
-  await withDb(async (db) => {
-    await db.query(
-      `
-      INSERT INTO "SalaryPeriod" (
-        id, "csUserId", "periodStart", "periodEnd",
-        "durationMonths", "totalSales", "initialSales", "monthlyBase",
-        status, "createdAt", "updatedAt"
-      ) VALUES (
-        $1, $2, $3, $4, 4, 0, 0, $5, 'IN_PROGRESS'::"SalaryPeriodStatus",
-        NOW(), NOW()
-      )
-      `,
-      [
-        periodId,
-        opts.csUserId,
-        start.toISOString().slice(0, 10),
-        end.toISOString().slice(0, 10),
-        opts.monthlyBase,
-      ],
-    );
-  });
-  return { periodId };
-}
-
-// Reads SalaryPeriod.totalSales for the user's currently active
-// (IN_PROGRESS) period. Returns null if the user has no active
-// period — caller decides what that means.
-export async function readActiveCsTotalSales(
-  csUserId: string,
-): Promise<{ periodId: string; totalSales: string } | null> {
-  return withDb(async (db) => {
-    const r = await db.query<{ id: string; totalSales: string }>(
-      `SELECT id, "totalSales"::text AS "totalSales" FROM "SalaryPeriod"
-        WHERE "csUserId" = $1 AND status = 'IN_PROGRESS'`,
-      [csUserId],
-    );
-    if (r.rowCount === 0) return null;
-    return { periodId: r.rows[0]!.id, totalSales: r.rows[0]!.totalSales };
-  });
-}
-
 export async function readE2eOrderPricingSnapshot(opts: {
   orderId: string;
   customerRef: string;
@@ -1060,7 +851,7 @@ export async function resetNotificationFixture(): Promise<void> {
 //
 // Seeds a deterministic snapshot for /owner. Slice A KPI cards +
 // Slice B watchlist tables share one fixture so the page renders all
-// 4 cards + 3 lists from a single seed call:
+// 4 cards + the watchlists from a single seed call:
 //
 //   Slice A (KPI cards):
 //     - 3 orders submitted today (1 urgent) → 今日提交 / 急单 cards
@@ -1073,17 +864,14 @@ export async function resetNotificationFixture(): Promise<void> {
 //     - 2 COMPLETED orders above            → 待发货工单 list
 //     - 1 OutsourceOrder w/ expectedDate=今日 - 3d, status=IN_PROGRESS
 //                                           → 超期外协 list
-//     - 1 SalaryPeriod (e2e-cs) periodEnd=今日 + 3d, IN_PROGRESS
-//                                           → 即将结算客服周期 list
 //
 // Every invocation appends a separate fixture population. Dedicated inactive
-// E2E principals isolate bill and salary-period ownership; a run prefix isolates
+// E2E principals isolate bill ownership; a run prefix isolates
 // order numbers and related entities. Existing pricing revisions, bill/payment
 // ledgers, and payroll history are never deleted or rewritten by this helper.
 export type DashboardSnapshot = {
   fixtureRunId: string;
   salesUserId: string;
-  csUserId: string | null;
   submittedOrderIds: string[];
   urgentOrderId: string;
   completedOrderIds: string[];
@@ -1094,8 +882,6 @@ export type DashboardSnapshot = {
   // Slice B fixtures
   outsourceId: string;
   outsourceDaysOverdue: number; // 3
-  csPeriodId: string;
-  csPeriodDaysUntilEnd: number; // 3
   // Slice C chart fixtures (only present when chartFixture=true)
   chartProductIds: string[];
   trendCompletedOrderIds: string[];
@@ -1105,17 +891,13 @@ export type DashboardSnapshot = {
 export async function seedDashboardSnapshot(opts: {
   // 克隆销售 fixture 的来源：必须是 globalSetup 建好的 e2e-* SALES 用户。
   salesUserId: string;
-  // 克隆客服 fixture 的来源：必须是 e2e-* CUSTOMER_SERVICE 用户。
-  // 没传时不新增 Slice B 的 ending-period fixture。
-  csUserId?: string;
   // Slice C 图表 fixture：seed 30 天产量曲线 + 销售排行 + 产品分布。
   // 默认 false（Slice A/B E2E 不需要图表数据，节省运行时）。
   // 视觉回归 spec / preview 走 true。
   chartFixture?: boolean;
-  // Slice C 排行 fixture 还要一个额外的销售用户（不同于 salesUserId）
-  // 来体现"3 个不同 submitter / 3 种不同业绩高度"。e2e-cs (CS) 提供
-  // 第二种角色色（绿）；admin (ADMIN) 提供第三种（muted）。foreman 是
-  // ADMIN 角色，用其 id 喂入则角色色用 muted 同色板。
+  // Slice C 排行 fixture 还要一个额外的 submitter（不同于 salesUserId）
+  // 来体现"不同 submitter / 不同业绩高度"。admin (ADMIN) 提供第二种
+  // 角色色（muted）。
   ownerUserId?: string;
 }): Promise<DashboardSnapshot> {
   const fixtureRunId = randomBytes(8).toString('hex');
@@ -1135,8 +917,8 @@ export async function seedDashboardSnapshot(opts: {
   );
   const period = `${yyyy}-${String(mm).padStart(2, '0')}`;
 
-  // Slice B stores both expectedDate and SalaryPeriod.periodEnd as calendar
-  // dates represented by UTC midnight. Seed relative to Shanghai's YYYY-MM-DD,
+  // Slice B stores expectedDate as a calendar date represented by UTC
+  // midnight. Seed relative to Shanghai's YYYY-MM-DD,
   // not relative to an instant, so the result is stable around UTC/Shanghai
   // day boundaries.
   const dayMs = 24 * 60 * 60 * 1000;
@@ -1146,14 +928,11 @@ export async function seedDashboardSnapshot(opts: {
   const overdueExpectedDate = new Date(
     Date.UTC(yyyy!, mm! - 1, dd! - 3, 0, 0, 0),
   );
-  // For SalaryPeriod (@db.Date), PG reads back UTC 00:00 of the stored
-  // date. We pass `'YYYY-MM-DD'` strings; date-add via JS Date.UTC.
-  const csPeriodEndUtcMidnight = new Date(Date.UTC(yyyy!, mm! - 1, dd! + 3));
 
   return withFixtureTransaction(async (db) => {
     async function createFixturePrincipal(
       sourceId: string,
-      role: 'SALES' | 'CUSTOMER_SERVICE',
+      role: 'SALES',
     ): Promise<string> {
       const id = `${fixturePrefix}-${role.toLowerCase()}`;
       const result = await db.query(
@@ -1175,9 +954,6 @@ export async function seedDashboardSnapshot(opts: {
     }
 
     const salesUserId = await createFixturePrincipal(opts.salesUserId, 'SALES');
-    const csUserId = opts.csUserId
-      ? await createFixturePrincipal(opts.csUserId, 'CUSTOMER_SERVICE')
-      : null;
 
     // All rows below belong to this invocation. Roll back the entire seed on
     // failure so a retry cannot inherit a half-written fixture population.
@@ -1346,58 +1122,6 @@ export async function seedDashboardSnapshot(opts: {
       ],
     );
 
-    // Step 5 (Slice B): seed one IN_PROGRESS salary period that ends in
-    // ~3 days (only when caller provides csUserId). totalSales=300000
-    // hits the highest tier in the seeded CS_TIERS rule (commission
-    // visible in UI as a non-"—" non-"未达档位" value).
-    let csPeriodId = '';
-    const csPeriodDaysUntilEnd = 3;
-    if (csUserId) {
-      csPeriodId = `${fixturePrefix}-csp`;
-      await db.query(
-        `
-        WITH target AS (
-          SELECT $3::date AS period_end
-        ), candidate AS (
-          SELECT
-            (
-              target.period_end + interval '1 day'
-              - make_interval(months => months.value)
-            )::date AS period_start,
-            months.value AS duration_months
-          FROM target
-          CROSS JOIN generate_series(1, 24) AS months(value)
-          WHERE (
-            (
-              target.period_end + interval '1 day'
-              - make_interval(months => months.value)
-            )::date
-            + make_interval(months => months.value)
-            - interval '1 day'
-          )::date = target.period_end
-          ORDER BY ABS(months.value - 4), months.value
-          LIMIT 1
-        )
-        INSERT INTO "SalaryPeriod" (
-          id, "csUserId", "periodStart", "periodEnd",
-          "durationMonths", "totalSales", "initialSales", "monthlyBase",
-          status, "createdAt", "updatedAt"
-        )
-        SELECT
-          $1, $2, candidate.period_start, target.period_end,
-          candidate.duration_months, 300000, 0, 5000,
-          'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
-        FROM target
-        CROSS JOIN candidate
-        `,
-        [
-          csPeriodId,
-          csUserId,
-          csPeriodEndUtcMidnight.toISOString().slice(0, 10),
-        ],
-      );
-    }
-
     // Step 6 (Slice C): chart-shape fixture. Adds:
     //   - 6 Products spanning 3 ProductCategory values + 1 OrderItem
     //     left without productId (UNCATEGORIZED bucket).
@@ -1502,7 +1226,6 @@ export async function seedDashboardSnapshot(opts: {
 
       // Sales ranking: 3 submitters × different total amounts.
       //   - salesUserId (SALES, blue):       ¥5,000
-      //   - csUserId (CS, green):            ¥3,000   (only when provided)
       //   - ownerUserId (ADMIN, muted):      ¥1,500   (only when provided)
       // Each order goes through the current month at varying days so
       // submittedAt is a believable spread.
@@ -1521,16 +1244,14 @@ export async function seedDashboardSnapshot(opts: {
           daysOffset: -10,
           productSuffix: 'p-blank-1',
         },
-      ];
-      if (csUserId) {
-        rankingSpecs.push({
-          submitterId: csUserId,
-          submitterRole: 'CUSTOMER_SERVICE',
+        {
+          submitterId: salesUserId,
+          submitterRole: 'SALES',
           amount: '3000.00',
           daysOffset: -5,
           productSuffix: 'p-foil-1',
-        });
-      }
+        },
+      ];
       if (opts.ownerUserId) {
         rankingSpecs.push({
           submitterId: opts.ownerUserId,
@@ -1567,7 +1288,6 @@ export async function seedDashboardSnapshot(opts: {
             $1, $2, $3, $4::"Role",
             CASE $4::"Role"
               WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
-              WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
               WHEN 'ADMIN'::"Role" THEN 'FACTORY_DIRECT'::"OrderSettlementType"
             END,
             $3,
@@ -1644,7 +1364,6 @@ export async function seedDashboardSnapshot(opts: {
     return {
       fixtureRunId,
       salesUserId,
-      csUserId,
       submittedOrderIds,
       urgentOrderId: `${fixturePrefix}-sub-3-urgent`,
       completedOrderIds,
@@ -1654,8 +1373,6 @@ export async function seedDashboardSnapshot(opts: {
       monthlyPaid,
       outsourceId,
       outsourceDaysOverdue: 3,
-      csPeriodId,
-      csPeriodDaysUntilEnd,
       chartProductIds,
       trendCompletedOrderIds,
       rankingOrderIds,
@@ -2854,8 +2571,8 @@ export async function seedNotificationWireFixture(): Promise<{
        WHERE "eventType" IN (
          'ORDER_SUBMITTED', 'URGENT_ORDER', 'ORDER_SCHEDULED',
          'ORDER_COMPLETED', 'ORDER_SHIPPED',
-         'DAILY_WORKER_SALARY', 'CS_PERIOD_SETTLED',
-         'OUTSOURCE_OVERDUE', 'CS_PERIOD_ENDING', 'ORDER_OVERDUE'
+         'DAILY_WORKER_SALARY',
+         'OUTSOURCE_OVERDUE', 'ORDER_OVERDUE'
        )
       `,
       [channelId],
@@ -2947,68 +2664,6 @@ export async function seedOverdueOutsourceForCron(): Promise<{
       [outsourceId, fiveDaysAgo.toISOString()],
     );
     return { outsourceId };
-  });
-}
-
-// Seeds 1 ending-soon SalaryPeriod for /api/cron/cs-period-ending.
-// periodEnd = 今日 + 3d Shanghai → daysUntilEnd = 3 (matches
-// seedDashboardSnapshot's csPeriod 计算)。csUserId 必传；调用方 wipe
-// 其他 SalaryPeriod 通过 resetCsSalaryStateForUser。
-export async function seedEndingPeriodForCron(opts: {
-  csUserId: string;
-}): Promise<{ periodId: string }> {
-  return withDb(async (db) => {
-    // Same wipe-by-user pattern as resetCsSalaryStateForUser
-    await db.query(
-      `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
-         SELECT id FROM "SalaryPeriod" WHERE "csUserId" = $1
-       )`,
-      [opts.csUserId],
-    );
-    await db.query(`DELETE FROM "CsSalesEntry" WHERE "csUserId" = $1`, [
-      opts.csUserId,
-    ]);
-    await db.query(
-      `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
-      [opts.csUserId],
-    );
-    await db.query(`DELETE FROM "SalaryPeriod" WHERE "csUserId" = $1`, [
-      opts.csUserId,
-    ]);
-
-    const now = new Date();
-    const ymd = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(now);
-    const [yyyy, mm, dd] = ymd.split('-').map(Number);
-    // periodEnd = today + 3d (UTC midnight of that date — @db.Date strips
-    // time anyway). periodStart = today - 90d.
-    const periodEnd = new Date(Date.UTC(yyyy!, mm! - 1, dd! + 3));
-    const periodStart = new Date(Date.UTC(yyyy!, mm! - 1, dd! - 90));
-
-    const periodId = `e2e-cron-csp-${randomBytes(4).toString('hex')}`;
-    await db.query(
-      `
-      INSERT INTO "SalaryPeriod" (
-        id, "csUserId", "periodStart", "periodEnd",
-        "durationMonths", "totalSales", "initialSales", "monthlyBase",
-        status, "createdAt", "updatedAt"
-      ) VALUES (
-        $1, $2, $3, $4, 4, 100000, 0, 5000,
-        'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
-      )
-      `,
-      [
-        periodId,
-        opts.csUserId,
-        periodStart.toISOString().slice(0, 10),
-        periodEnd.toISOString().slice(0, 10),
-      ],
-    );
-    return { periodId };
   });
 }
 

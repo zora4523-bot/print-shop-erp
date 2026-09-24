@@ -1,7 +1,5 @@
 import { BackgroundJobQueue, Prisma } from '../../generated/prisma/client';
 import {
-  runCsPeriodEndingTask,
-  runCsSettleTask,
   runDailySalaryTask,
   runGenerateBillsTask,
   runOrderExportCleanupTask,
@@ -19,10 +17,8 @@ import {
 
 const CRON_TYPES: ReadonlySet<string> = new Set([
   BACKGROUND_JOB_TYPES.CRON_DAILY_SALARY,
-  BACKGROUND_JOB_TYPES.CRON_CS_SETTLE,
   BACKGROUND_JOB_TYPES.CRON_GENERATE_BILLS,
   BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE,
-  BACKGROUND_JOB_TYPES.CRON_CS_PERIOD_ENDING,
   BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE,
   BACKGROUND_JOB_TYPES.CRON_PENDING_FACTORY_BACKLOG,
   BACKGROUND_JOB_TYPES.CRON_PRODUCTION_ALERTS,
@@ -59,14 +55,10 @@ export async function handleCronJob(
   switch (job.type) {
     case BACKGROUND_JOB_TYPES.CRON_DAILY_SALARY:
       return runDailySalaryTask(requiredString(payload.date), fence);
-    case BACKGROUND_JOB_TYPES.CRON_CS_SETTLE:
-      return runCsSettleTask(fence);
     case BACKGROUND_JOB_TYPES.CRON_GENERATE_BILLS:
       return runGenerateBillsTask(requiredString(payload.period), fence);
     case BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE:
       return runOutsourceOverdueTask(requiredString(payload.runDate), fence);
-    case BACKGROUND_JOB_TYPES.CRON_CS_PERIOD_ENDING:
-      return runCsPeriodEndingTask(requiredString(payload.runDate), fence);
     case BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE:
       return runOrderOverdueTask(requiredString(payload.runDate), fence);
     case BACKGROUND_JOB_TYPES.CRON_PENDING_FACTORY_BACKLOG:

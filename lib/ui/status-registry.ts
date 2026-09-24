@@ -14,7 +14,6 @@ import {
   PurchaseReceiptStatus,
   ProductionOperationStatus,
   ProductionTaskDisputeStatus,
-  SalaryPeriodStatus,
   ShipmentStatus,
   TaskStatus,
 } from '@/generated/prisma/enums';
@@ -261,44 +260,6 @@ export function activeStatusDefinition(isActive: boolean): StatusDefinition {
   return ACTIVE_STATUS_REGISTRY[
     isActive ? ACTIVE_DISPLAY_STATUS.ENABLED : ACTIVE_DISPLAY_STATUS.DISABLED
   ];
-}
-
-export const SALARY_PERIOD_DISPLAY_STATUS = {
-  IN_PROGRESS: SalaryPeriodStatus.IN_PROGRESS,
-  READY_TO_SETTLE: 'READY_TO_SETTLE',
-  SETTLED: SalaryPeriodStatus.SETTLED,
-} as const;
-
-export type SalaryPeriodDisplayStatus =
-  (typeof SALARY_PERIOD_DISPLAY_STATUS)[keyof typeof SALARY_PERIOD_DISPLAY_STATUS];
-
-export const SALARY_PERIOD_STATUS_REGISTRY: StatusRegistry<SalaryPeriodDisplayStatus> = {
-  [SALARY_PERIOD_DISPLAY_STATUS.IN_PROGRESS]: {
-    label: '进行中',
-    tone: 'info',
-    dot: true,
-  },
-  [SALARY_PERIOD_DISPLAY_STATUS.READY_TO_SETTLE]: {
-    label: '待结算',
-    tone: 'warning',
-    dot: true,
-  },
-  [SALARY_PERIOD_DISPLAY_STATUS.SETTLED]: {
-    label: '已结算',
-    tone: 'success',
-  },
-};
-
-export function salaryPeriodStatusDefinition(
-  status: SalaryPeriodStatus,
-  options: { readyToSettle?: boolean } = {},
-): StatusDefinition {
-  const displayStatus =
-    status === SalaryPeriodStatus.IN_PROGRESS &&
-    options.readyToSettle === true
-      ? SALARY_PERIOD_DISPLAY_STATUS.READY_TO_SETTLE
-      : status;
-  return SALARY_PERIOD_STATUS_REGISTRY[displayStatus];
 }
 
 /**

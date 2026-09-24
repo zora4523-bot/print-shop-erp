@@ -122,7 +122,6 @@ describe('bill detail visibility boundary', () => {
             processingAmount: '488.00',
             finishedAt,
             status: OrderStatus.FINISHED,
-            csSalesEntries: [],
             shipments: [],
             customerCharges: [
               {

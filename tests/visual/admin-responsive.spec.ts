@@ -45,8 +45,8 @@ test.describe('administrator workspace', () => {
   });
 
   test('owner dashboard focused light and dark gates', async ({ page }, testInfo) => {
-    const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention') || route.path === `/owner/salary/cs/${fixture.csPeriodId}`);
-    expect(routes).toHaveLength(8);
+    const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention'));
+    expect(routes).toHaveLength(6);
     await checkRoutes(page, testInfo, routes, 'light');
     await checkRoutes(page, testInfo, routes, 'dark');
   });
@@ -602,18 +602,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       name: 'owner-analytics', path: '/owner/analytics', readyHeading: '经营概览',
       prepareGateState: prepareDashboardChartsState,
     },
-    ...(['due', 'shipments', 'outsource', 'over-reports', 'settlements'] as const).map(kind => ({
+    ...(['due', 'shipments', 'outsource', 'over-reports'] as const).map(kind => ({
       name: `owner-attention-${kind}`, path: `/owner/attention?kind=${kind}`, readyHeading: '关注事项',
       prepareGateState: async (page: Page) => {
         await expect(page.getByText(/共 \d+ 条 · 每页/).and(page.locator(':visible'))).toHaveCount(1);
       },
     })),
-    {
-      name: 'owner-cs-forecast', path: `/owner/salary/cs/${data.csPeriodId}`, readyHeading: '客服周期 · 响应式客服',
-      prepareGateState: async (page) => {
-        await expect(page.locator('[data-slot="cs-period-forecast"]:visible')).toHaveCount(1);
-      },
-    },
     {
       name: 'orders',
       path: '/orders',
@@ -671,7 +665,6 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '历史开机师傅日薪档案',
     },
     { name: 'cdr', path: '/foreman/cdr', readyHeading: 'CDR 汇总下载' },
-    { name: 'cs-period-new', path: '/owner/salary/cs/new', readyHeading: '新建客服周期' },
     { name: 'accounts', path: '/owner/accounts', readyHeading: '账号管理' },
     { name: 'materials', path: '/owner/materials', readyHeading: '物料字典' },
     {
