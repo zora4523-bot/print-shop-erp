@@ -1430,6 +1430,19 @@ export const ADMIN_PASSWORD = (() => {
   return v;
 })();
 
+/**
+ * 业主 2026-09-24：管理员建单必须归属一个外部销售（没有工厂直单）。
+ * 在管理员的新建工单页选择 e2e 外部销售账号。
+ */
+export async function selectExternalSalesForAdminOrder(
+  page: Page,
+  label = `${E2E_USERS.sales.displayName} · ${E2E_USERS.sales.username}`,
+) {
+  await page
+    .getByRole('combobox', { name: '关联外部销售（必填）', exact: true })
+    .selectOption({ label });
+}
+
 // Logs in via the /login form. `from` is the protected URL the caller
 // will go to next — the form preserves it as ?from=... so the post-
 // login redirect lands the test where it expects to be (avoids a
@@ -1903,14 +1916,16 @@ export async function submitDraftOrderAndWait(page: Page): Promise<void> {
     );
     return result.rows[0]?.status;
   });
-  // 详情页首次提交不带报价 token：计物流的工单（2026-09-18 起含内销 / 工厂直接）
-  // 会先回到「确认最新报价并提交」，与 order-packaging-types 的写法一致。
+  // 详情页首次提交不带报价 token：计物流的工单会先回到「确认最新报价并提交」，
+  // 与 order-packaging-types 的写法一致。
   const latest = page.getByRole('button', { name: '确认最新报价并提交', exact: true });
   await expect
     .poll(async () => ((await latest.isVisible()) ? 'confirm' : await status()), { timeout: 20_000 })
     .not.toBe('DRAFT');
   if (await latest.isVisible()) await latest.click();
-  await expect.poll(status, { timeout: 20_000 }).toMatch(/^(SUBMITTED|CONFIRMED)$/);
+  // 业主 2026-09-24：工单一律按外部销售结算，提交后进入待工厂处理，满足
+  // 自动接单条件时直接确认。
+  await expect.poll(status, { timeout: 20_000 }).toMatch(/^(PENDING_FACTORY|SUBMITTED|CONFIRMED)$/);
   await expectNoNextErrorOverlay(page);
 }
 

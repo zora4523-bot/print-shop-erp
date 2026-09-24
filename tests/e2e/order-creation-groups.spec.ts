@@ -1,6 +1,6 @@
 import { Client } from 'pg';
 import { expect, test } from '@playwright/test';
-import { E2E_PASSWORD, E2E_USERS, login, openFirstOrderItemEditor } from './_helpers';
+import { E2E_PASSWORD, E2E_USERS, login, openFirstOrderItemEditor, selectExternalSalesForAdminOrder } from './_helpers';
 
 for (const role of ['owner', 'sales'] as const) {
   test(`${role} 设计、规格和批量工单互相独立并保留编辑内容`, async ({ page }) => {
@@ -104,6 +104,8 @@ test('批量逐张保存，规格分组持久化，刷新后不会重新创建',
   const names = [`批量规格 A ${Date.now()}`, `批量规格 B ${Date.now()}`];
   await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/orders/new' });
   await openFirstOrderItemEditor(page);
+  // 业主 2026-09-24：管理员建单的每张工单都必须归属一个外部销售。
+  await selectExternalSalesForAdminOrder(page);
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(names[0]);
   await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('张三 13800138000 广东省佛山市测试路一号');
   await page.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '艳红珠光纸', exact: true }).click();
@@ -113,6 +115,7 @@ test('批量逐张保存，规格分组持久化，刷新后不会重新创建',
   // 只给第二个规格不包装：整单区里改该行，顶部类型会作用于全部规格。
   await page.getByRole('combobox', { name: '包装类型', exact: true }).nth(1).selectOption('UNPACKED');
   await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+  await selectExternalSalesForAdminOrder(page);
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(names[1]);
   await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('李四 13800138001 广东省佛山市测试路二号');
   const orders = page.getByRole('navigation', { name: '待建工单' });
@@ -146,6 +149,8 @@ test('批量寄样工单保存后继续下一张普通工单', async ({ page }) 
   await openFirstOrderItemEditor(page);
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill('下一张普通工单');
   await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+  // 业主 2026-09-24：管理员建单的每张工单都必须归属一个外部销售。
+  await selectExternalSalesForAdminOrder(page);
   await page.getByRole('button', { name: '寄样品', exact: true }).click();
   await page.getByLabel('样品名称').fill(`批量样品 ${Date.now()}`);
   await page.getByLabel('收货人', { exact: true }).fill('张三');
@@ -160,20 +165,30 @@ test('批量寄样工单保存后继续下一张普通工单', async ({ page }) 
   await expect(page.getByRole('button', { name: '工单 2 · 已完成', exact: true })).toBeVisible();
 });
 
-test('批量创建并编辑收费仍进入收费编辑，返回后可继续未创建工单', async ({ page }) => {
+// 业主 2026-09-24：管理员建单一律代外部销售，“创建并编辑收费”会同时提交，
+// 与销售提交一样必须先有设计图（上传链路由 OSS 集成覆盖，这里不走真实上传）。
+test('批量创建并编辑收费缺设计图时就地拦截，不创建工单且可继续其他工单', async ({ page }) => {
   await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/orders/new' });
   await openFirstOrderItemEditor(page);
+  await selectExternalSalesForAdminOrder(page);
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill('后续普通工单');
   await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
-  await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(`批量编辑收费 ${Date.now()}`);
+  await selectExternalSalesForAdminOrder(page);
+  const name = `批量编辑收费 ${Date.now()}`;
+  await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(name);
   await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('张三 13800138000 广东省佛山市测试地址');
   await page.locator('#promisedDate').fill('2026-12-30');
   await page.getByRole('button', { name: '创建并编辑收费', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: '确认无误，提交', exact: true }).click();
-  await expect(page).toHaveURL(/\/orders\/[a-z0-9]+#admin-fee-editor$/);
-  await page.goto('/orders/new');
-  await expect(page.getByRole('button', { name: '工单 2 · 已完成', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: '新建工单', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '第 1 款：请上传设计图', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page).toHaveURL(/\/orders\/new/);
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  try {
+    expect((await db.query('SELECT id FROM "Order" WHERE "customName"=$1', [name])).rows).toEqual([]);
+  } finally { await db.end(); }
+  await page.getByRole('navigation', { name: '待建工单' }).getByRole('button', { name: '工单 1', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: '工单名称', exact: true })).toHaveValue('后续普通工单');
 });
 
 
@@ -212,6 +227,8 @@ for (const changed of [false, true]) {
   test(`寄样已写入但响应丢失后${changed ? '拒绝不同内容' : '安全重试同一内容'}`, async ({ page }) => {
     await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/orders/new' });
     await openFirstOrderItemEditor(page);
+    // 业主 2026-09-24：管理员建单必须归属一个外部销售。
+    await selectExternalSalesForAdminOrder(page);
     await page.getByRole('button', { name: '寄样品', exact: true }).click();
     const name = `响应丢失 ${changed} ${Date.now()}`;
     await page.getByLabel('样品名称').fill(name);

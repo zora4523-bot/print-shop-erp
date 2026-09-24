@@ -235,15 +235,13 @@ test.describe('shared workbench calculator', () => {
     ).toBe('SOFT_TOUCH');
     expect(errors).toEqual([]);
   });
-  test('restores internal-sales finishing and requires a selection for incomplete legacy drafts', async ({
+  test('restores admin finishing and requires a selection for incomplete legacy drafts', async ({
     page,
   }) => {
     await transferCoatedOrder(page, 'owner');
     const url = page.url();
+    // 业主 2026-09-24：管理员建单与外部销售共用同一张表单，本地草稿自动恢复。
     await page.reload();
-    await page
-      .getByRole('button', { name: '恢复本地草稿', exact: true })
-      .click();
     await expect(
       page
         .getByRole('group', { name: '覆膜' })
@@ -267,9 +265,6 @@ test.describe('shared workbench calculator', () => {
         posts.push(request.postData() ?? '');
     });
     await page.goto(url);
-    await page
-      .getByRole('button', { name: '恢复本地草稿', exact: true })
-      .click();
     await expect(
       page.getByText('第 1 款覆膜资料缺失，请重新选择覆膜', { exact: true }),
     ).toBeVisible();

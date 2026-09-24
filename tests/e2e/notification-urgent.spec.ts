@@ -7,14 +7,16 @@ import {
   seedNotificationWireFixture,
   readNotificationLogs,
   openFirstOrderItemEditor,
+  selectExternalSalesForAdminOrder,
   submitDraftOrderAndWait,
+  withDb,
 } from './_helpers';
 
 // P1 #2 Slice C — URGENT_ORDER wire smoke。
 //
 // production-flow.spec.ts 的主链路用的是非急单，所以 ORDER_SUBMITTED
 // 单触发；急单这条路（SPEC §8.1：急单 → 排产群+管理员群，**两条事件
-// 都触发**）需要单独一个内部工单 fixture：勾"急单"创建并提交 →
+// 都触发**）需要单独一个工单 fixture：管理员代外部销售勾"急单"创建并提交 →
 // 断言 NotificationLog 同时多 1 行 ORDER_SUBMITTED + 1 行 URGENT_ORDER。
 //
 // Mock-mode 下两条 log 都 status=SUCCESS errorMessage='MOCK'。
@@ -28,7 +30,6 @@ test.describe('notification urgent wire — golden path', () => {
 
     const orderRef = `e2e-urgent-${uniqueSuffix()}`;
     const customName = `E2E 急单通知 ${orderRef}`;
-    const itemName = `E2E 急单款 ${orderRef}`;
 
     const { channelId } = await seedNotificationWireFixture();
 
@@ -41,6 +42,8 @@ test.describe('notification urgent wire — golden path', () => {
     // 新版内部建单按三条计价路线 + 纸张 / 规格选项创建，不再暴露
     // 报价产品或人工金额输入；这里仍只关注急单通知的业务边界。
     await openFirstOrderItemEditor(page);
+    // 业主 2026-09-24：管理员建单必须归属一个外部销售。
+    await selectExternalSalesForAdminOrder(page);
     const form = page.locator('[data-slot="order-form-b"]');
     await form
       .getByRole('textbox', { name: '工单名称', exact: true })
@@ -74,9 +77,6 @@ test.describe('notification urgent wire — golden path', () => {
       .getByRole('button', { name: '160g', exact: true })
       .click();
     await form
-      .getByRole('textbox', { name: '设计款名称', exact: true })
-      .fill(itemName);
-    await form
       .getByRole('spinbutton', { name: '数量', exact: true })
       .fill('1000');
     await form
@@ -98,6 +98,13 @@ test.describe('notification urgent wire — golden path', () => {
       timeout: 45_000,
     });
     const orderId = new URL(page.url()).pathname.split('/').filter(Boolean).pop()!;
+    // 外部销售工单提交前必须有设计图；上传链路另有测试，这里直接登记一张。
+    await withDb((db) => db.query(
+      `INSERT INTO "OrderItemDesign" (id,"orderItemId","fileType","fileUrl","fileName","fileSize","uploadedBy")
+       SELECT $1||i.id,i.id,'IMAGE',$2,'fixture.png',68,o."createdById" FROM "OrderItem" i JOIN "Order" o ON o.id=i."orderId" WHERE o.id=$3`,
+      [`${orderId}-design-`, 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=', orderId],
+    ));
+    await page.reload();
 
     // 提交工单 → notify('ORDER_SUBMITTED') + notify('URGENT_ORDER') 都触发
     await submitDraftOrderAndWait(page);

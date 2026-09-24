@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { Client } from 'pg';
 import bcrypt from 'bcryptjs';
+import { selectExternalSalesForAdminOrder, submitDraftOrderAndWait } from './_helpers';
 import { assertActivatedE2eDatabase, postgresDatabaseIdentity, isDisposableE2eDatabaseName } from '../../scripts/lib/e2e-environment';
 async function database() {
   // The standard runner already replaces DATABASE_URL with the validated
@@ -32,14 +33,31 @@ test.beforeAll(async () => {
 test('管理员新建后编辑完整收费，重载保留且外部销售无入口', async ({ page, browser }) => {
   test.setTimeout(180_000);
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
+  // Object storage is outside this boundary: the artwork PUT fails on purpose
+  // and a DB design fixture completes the submission (same as blank-price-only).
+  await page.route((url) => url.hostname.endsWith('.aliyuncs.com'), (route) =>
+    route.request().method() === 'PUT' ? route.abort('failed') : route.continue());
   await login(page, 'e2e-sample-admin', '/orders/new');
-  await page.getByLabel('工单名称', { exact: true }).fill(`收费验收 ${Date.now()}`);
+  // 业主 2026-09-24：管理员建单必须归属一个外部销售；“创建并编辑收费”同时提交，须有设计图。
+  await selectExternalSalesForAdminOrder(page);
+  const orderName = `收费验收 ${Date.now()}`;
+  await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(orderName);
   await page.getByPlaceholder('粘贴电商后台地址串，自动拆分').fill('张三，13800000000，浙江省杭州市西湖区测试路1号');
   await page.getByLabel('承诺交期', { exact: true }).fill('2026-10-01');
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=';
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'fees.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
   await page.getByRole('button', { name: '创建并编辑收费', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: /^确认/ }).click();
-  await page.waitForURL(/\/orders\/(?!new)[a-z0-9]+#admin-fee-editor$/);
-  const orderId = new URL(page.url()).pathname.split('/').pop()!;
+  await expect(page.getByRole('dialog').getByRole('button', { name: '继续完成', exact: true })).toBeVisible();
+  const fixtureDb = await database();
+  let orderId = '';
+  try {
+    orderId = (await fixtureDb.query('SELECT id FROM "Order" WHERE "customName"=$1', [orderName])).rows[0].id;
+    await fixtureDb.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileType","fileUrl","fileName","fileSize","uploadedBy") SELECT $1||i.id,i.id,'IMAGE',$2,'fees.png',68,o."createdById" FROM "OrderItem" i JOIN "Order" o ON o.id=i."orderId" WHERE o.id=$3`, [`${orderId}-design-`, `data:image/png;base64,${png}`, orderId]);
+  } finally { await fixtureDb.end(); }
+  await page.goto(`/orders/${orderId}`);
+  await submitDraftOrderAndWait(page);
+  await page.goto(`/orders/${orderId}#admin-fee-editor`);
   await page.getByRole('button', { name: '编辑全部收费', exact: true }).click();
   const editor = page.locator('#admin-fee-editor');
   await expect(editor.getByLabel('加工单价（元）', { exact: true })).toBeVisible();
@@ -80,7 +98,8 @@ for (const purpose of ['寄样品', '打样']) test(`管理员新建${purpose}�
   test.setTimeout(90_000);
   const name = `收费入口-${crypto.randomUUID()}`;
   await login(page, 'e2e-sample-admin', '/orders/new');
-  await page.getByLabel('工单名称', { exact: true }).fill(name);
+  await selectExternalSalesForAdminOrder(page);
+  await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(name);
   await page.getByRole('button', { name: purpose, exact: true }).click();
   if (purpose === '寄样品') await page.getByLabel('样品名称').fill(name);
   await page.getByLabel('收货人', { exact: true }).fill('收费验收');

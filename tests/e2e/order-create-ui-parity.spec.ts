@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { Client } from 'pg';
-import { E2E_PASSWORD, E2E_USERS, login } from './_helpers';
+import { E2E_PASSWORD, E2E_USERS, login, selectExternalSalesForAdminOrder } from './_helpers';
+
+const PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=';
 
 async function setManualProcessingPrice(page: Page) {
   const processing = page.getByRole('group', {
@@ -50,9 +53,7 @@ for (const actor of ['owner', 'sales'] as const) {
       await priceInput.fill('123.45');
       await expect(rail.getByText('人工价', { exact: true })).toBeVisible();
       await expect(rail.getByText('空白封', { exact: true })).toHaveCount(0);
-      await page
-        .getByLabel('关联外部销售')
-        .selectOption({ label: 'E2E 销售 · e2e-sales' });
+      await selectExternalSalesForAdminOrder(page);
       await expect(page.getByLabel('设计款名称', { exact: true })).toBeVisible();
       await expect(page.getByLabel('稿件版本', { exact: true })).toBeVisible();
       await expect(
@@ -76,7 +77,8 @@ for (const actor of ['owner', 'sales'] as const) {
   });
 }
 
-test('internal submit locates missing fields, reviews the exact manual price, and persists once', async ({
+// 业主 2026-09-24：管理员建单必须归属外部销售，提交前先定位到销售下拉。
+test('admin submit locates the missing salesperson, reviews the exact manual price, and persists once', async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -94,12 +96,23 @@ test('internal submit locates missing fields, reviews the exact manual price, an
     .fill('张先生 13800138000 广东省佛山市南海区测试路1号');
   await page.getByRole('button', { name: '不包装', exact: true }).click();
   await setManualProcessingPrice(page);
+  await page.getByLabel('承诺交期', { exact: true }).fill('2099-01-01');
+  // Object storage is outside this boundary; the saved-draft artwork fixture
+  // below completes the authoritative submission.
+  await page.route((url) => url.hostname.endsWith('.aliyuncs.com'), (route) =>
+    route.request().method() === 'PUT' ? route.abort('failed') : route.continue());
+  await page.locator('input[type="file"]').first().setInputFiles({
+    name: 'review.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64'),
+  });
   const submit = page.getByRole('button', { name: '创建并提交', exact: true });
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   await submit.click();
-  await expect(page.getByLabel('承诺交期', { exact: true })).toBeFocused();
+  const salesperson = page.getByRole('combobox', { name: '关联外部销售（必填）', exact: true });
+  await expect(salesperson).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByText('请选择关联外部销售').first()).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByLabel('承诺交期', { exact: true }).fill('2099-01-01');
+  await selectExternalSalesForAdminOrder(page);
+  await expect(salesperson).toHaveAttribute('aria-invalid', 'false');
   await submit.click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
@@ -110,7 +123,6 @@ test('internal submit locates missing fields, reviews the exact manual price, an
   await expect(fees.getByText('¥ 0.00', { exact: true })).toBeVisible();
   await expect(fees.getByText(/纸箱耗材/)).toBeVisible();
   await expect(fees.getByText(/快递费/)).toBeVisible();
-    await page.screenshot({ path: '/tmp/erp-order-ui-parity-20260913/internal-review.png', fullPage: true });
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   try {
@@ -128,10 +140,27 @@ test('internal submit locates missing fields, reviews the exact manual price, an
     await dialog
       .getByRole('button', { name: '确认无误，提交', exact: true })
       .click();
-    await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+$/, { timeout: 45_000 });
+    await expect.poll(async () => (await orders()).length).toBe(1);
+    const [created] = await orders();
+    // The aborted artwork upload leaves a saved draft; register the design and
+    // finish submission from the detail page exactly once.
+    await expect(page.getByRole('dialog').getByRole('button', { name: '继续完成', exact: true }))
+      .toBeVisible();
+    await db.query(
+      `INSERT INTO "OrderItemDesign" (id,"orderItemId","fileType","fileUrl","fileName","fileSize","uploadedBy")
+       SELECT $1,i.id,'IMAGE',$2,'review.png',68,o."createdById" FROM "OrderItem" i
+       JOIN "Order" o ON o.id=i."orderId" WHERE o.id=$3`,
+      [crypto.randomUUID(), `data:image/png;base64,${PNG}`, created.id],
+    );
+    await page.goto(`/orders/${created.id}`);
+    await page.getByRole('button', { name: '提交工单', exact: true }).click();
+    const latest = page.getByRole('button', { name: '确认最新报价并提交', exact: true });
+    await expect.poll(async () => (await latest.isVisible()) ? 'confirm' : (await orders())[0].status)
+      .not.toBe('DRAFT');
+    if (await latest.isVisible()) await latest.click();
+    await expect.poll(async () => (await orders())[0].status).not.toBe('DRAFT');
     const result = await orders();
     expect(result).toHaveLength(1);
-    expect(result[0].status).not.toBe('DRAFT');
     const item = (
       await db.query(
         'SELECT subtotal::text, "pricingSnapshot" FROM "OrderItem" WHERE "orderId"=$1',

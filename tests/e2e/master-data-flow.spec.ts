@@ -203,7 +203,7 @@ test('客户及供应商维护、停用过滤和已创建采购快照保持一�
   } finally { await stale.close(); }
 });
 
-test('工艺创建和修改保留编号，停用后新工单不可选择，启用后恢复', async ({ page }) => {
+test('工艺创建和修改保留编号，停用与启用状态持久化', async ({ page }) => {
   test.setTimeout(90_000);
   const actor = await seedMasterDataAdmin();
   const name = `验收工艺${actor.suffix}`;
@@ -220,20 +220,16 @@ test('工艺创建和修改保留编号，停用后新工单不可选择，启�
   await page.getByLabel('排序', { exact: true }).fill('20');
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await expect.poll(() => readMasterRow('craft', craftId)).toMatchObject({ name: newName, code: original?.code, sortOrder: 20 });
-  await page.goto('/orders/new');
-  await expect(page.getByRole('checkbox', { name: new RegExp(`^${newName} · 外协`) })).toBeVisible();
+  // 业主 2026-09-24：建单一律走外部销售表单，不再提供工厂直单的“附加工艺”
+  // 勾选，新建工单页没有可见的工艺选项可断言；启停只核对持久化状态。
   await page.goto(`${crafts}/${craftId}`);
   await confirmState(page, '停用工艺', async () => {
     expect((await readMasterRow('craft', craftId))?.isActive).toBe(true);
   });
   await expect.poll(() => readMasterRow('craft', craftId)).toMatchObject({ isActive: false, code: original?.code });
-  await page.goto('/orders/new');
-  await expect(page.getByRole('checkbox', { name: new RegExp(`^${newName} · 外协`) })).toHaveCount(0);
   await page.goto(`${crafts}/${craftId}`);
   await confirmState(page, '启用工艺');
   await expect.poll(() => readMasterRow('craft', craftId)).toMatchObject({ isActive: true });
-  await page.goto('/orders/new');
-  await expect(page.getByRole('checkbox', { name: new RegExp(`^${newName} · 外协`) })).toBeVisible();
 });
 
 test('类别、纸张、非空白封产品与 BOM 按不可变边界维护，停用保留明细并阻止下游新选择', async ({ page }) => {
