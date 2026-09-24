@@ -1465,5 +1465,5 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 
 - **决策**：业主决定清理已经卡住或写脏的历史数据（审计 M-7 旧代次卡住的工序与进度步骤、L-14 从未下发却提前写入的 `scheduledAt`），使用 `scripts/maintenance/cleanup-stuck-production-history.ts`。执行口径：先在目标库只读 dry-run（`--database=<库名>` 必须与实际连接库一致）；业主核对输出的数量与 id 后，才用 `--apply --actor=<管理员用户名>` 写入，`--actor` 由业主指定且必须是活跃管理员；`skipped` 中的工单不手工改库，按原因人工核对。
 - **理由**：修复提交只对上线后发生的情况生效，已存在的脏数据需要一次性清理；生产数据修改必须经业主确认（CLAUDE.md §12），所以默认只读、写入需要显式参数和指定操作人。
-- **影响**：写入在单事务内逐单持工单级联锁并在锁内重判，任一并发变化即整体回滚；每单写 OrderLog 与 BusinessAuditLog；带分档烫金报工的旧代次工序只标记 `payrollReviewRequired` 转管理员人工核定，从不计算工资；重复执行无写入。生产尚未执行 dry-run。
+- **影响**：写入在单事务内逐单持工单级联锁，锁内重新判定，已不适用的候选跳过；条件更新失败或其他异常时整体回滚；每单写 OrderLog 与 BusinessAuditLog；带分档烫金报工的旧代次工序只标记 `payrollReviewRequired` 转管理员人工核定，从不计算工资；重复执行无写入。生产尚未执行 dry-run。
 - **相关文档**：`docs/部署指南.md`（历史数据清理发布步骤）、`scripts/maintenance/cleanup-stuck-production-history.ts`、`docs/audits/2026-09-23-evidence-review.md` M-7 / L-14。
