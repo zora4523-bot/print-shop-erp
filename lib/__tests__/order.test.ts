@@ -1,5 +1,4 @@
 import { createOrderRequestFingerprint } from '@/lib/order/create-request-fingerprint';
-import * as quoteService from '../order/create-order-quote-service';
 vi.mock('@/lib/order/production-readiness', () => ({
   prepareOrderForProductionInTx: vi.fn(async (tx, orderId) => {
     const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -736,78 +735,6 @@ describe('createOrder', () => {
     });
   });
 
-  it('内部配置外项目只保存说明并进入工厂人工核价', async () => {
-    const result = await createOrder(
-      {
-        customerRef: '客户来样',
-        receiverName: '王小姐',
-        receiverPhone: '13800000000',
-        receiverAddress: '广东佛山测试收货地址',
-        expressCode: null,
-        packageRequirement: null,
-        remark: null,
-        promisedDate: null,
-        isUrgent: false,
-        isSfCollect: false,
-        shippingFee: null,
-        packingMaterialFee: null,
-        customerChargeOverrideReason: null,
-        items: [
-          baseItem({
-            pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
-            productId: null,
-            paperType: null,
-            crafts: [],
-            manualQuoteReason: '  客户来样纸与特殊击凸未进入规则配置  ',
-            unitPrice: null,
-            fixedFee: null,
-            priceOverrideReason: null,
-          }),
-        ],
-        packagingGroups: [
-          {
-            name: '客供纸测试包装组',
-            mode: OrderPackagingMode.SINGLE_STYLE,
-            actualBagCount: 100,
-            itemUnitsPerBag: [10],
-          },
-        ],
-      },
-      ownerActor,
-      new Date('2026-08-28T09:00:00+08:00'),
-    );
-
-    expect(result.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
-    expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
-      processingAmount: '0.00',
-      totalAmount: '0.00',
-      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
-      pricingConfirmedAt: null,
-      items: {
-        create: [
-          expect.objectContaining({
-            productId: null,
-            paperType: null,
-            crafts: [],
-            manualQuoteReason: '客户来样纸与特殊击凸未进入规则配置',
-            unitPrice: '0',
-            fixedFee: '0',
-            subtotal: '0.00',
-            quoteDisposition: 'MANUAL_PRICING_REQUIRED',
-            pricingSnapshot: expect.objectContaining({
-              version: 1,
-              schemaVersion: 2,
-              complete: false,
-              suggestedSubtotal: null,
-              source: 'INTERNAL_CREATE_MANUAL_REQUIRED',
-            }),
-            priceOverrideReason: null,
-          }),
-        ],
-      },
-    });
-  });
-
   it('在服务边界拒绝没有任何包装组的外部销售工单', async () => {
     await expect(
       createOrder(
@@ -1163,93 +1090,6 @@ describe('createOrder', () => {
     expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
-  it('locks published price reads and creates a blank item without reading Product', async () => {
-    dbMock.product.findMany.mockResolvedValue([
-      {
-        id: 'product-1',
-        code: 'PRODUCT_1',
-        category: 'BLANK_STOCK',
-        specification: '大号封90×165',
-        paperType: '160g珠光艳闪',
-        paperMaterialId: null,
-        weight: 160,
-        isActive: true,
-        baseUnitPrice: '0.5000',
-        minOrderQty: null,
-      },
-    ]);
-
-    await createOrderDomain(
-      {
-        customerRef: null,
-        receiverName: null,
-        receiverPhone: null,
-        receiverAddress: '广东佛山测试收货地址',
-        expressCode: null,
-        packageRequirement: null,
-        remark: null,
-        promisedDate: null,
-        isUrgent: false,
-        isSfCollect: false,
-        items: [
-          baseItem({
-            productId: 'product-1',
-            specification: '大号封90×165',
-            actualWidthMm: 90,
-            actualHeightMm: 165,
-            pricingGroup: 'LARGE',
-          }),
-        ],
-        packagingGroups: [
-          {
-            name: '内部建单测试包装组',
-            mode: OrderPackagingMode.SINGLE_STYLE,
-            actualBagCount: 100,
-            itemUnitsPerBag: [10],
-          },
-        ],
-      },
-      ownerActor,
-      new Date('2026-04-23T09:00:00+08:00'),
-    );
-
-    const sharedLockCallIndexes = dbMock.$executeRaw.mock.calls.flatMap(
-      (call, index) => {
-        const sql = (call[0] as TemplateStringsArray).join('?');
-        return sql.includes('pg_advisory_xact_lock_shared') ? [index] : [];
-      },
-    );
-    expect(sharedLockCallIndexes.length).toBeGreaterThan(0);
-    expect(dbMock.product.findMany).not.toHaveBeenCalled();
-    const firstSharedLock = dbMock.$executeRaw.mock.invocationCallOrder[sharedLockCallIndexes[0]!]!;
-    expect(publishedCreateOrderSnapshotMock).toHaveBeenCalled();
-    expect(publishedCreateOrderSnapshotMock.mock.invocationCallOrder.every((callOrder) => callOrder > firstSharedLock)).toBe(true);
-    const stored = dbMock.order.create.mock.calls[0]![0].data.items.create[0];
-    expect(stored.productId).toBeNull();
-
-  });
-
-  it.each([['0.00', true], ['0.02', false]] as const)('建单半分复算允许舍入、固定费偏差 %s 的结果为 %s', async (fixedFee, allowed) => {
-    dbMock.product.findMany.mockResolvedValue([{ id: 'product-1', code: 'EXT-STOCK-PEARL-FLASH-160-LARGE', category: 'BLANK_STOCK', specification: '大号封90×165', paperType: '160g珠光艳闪', paperMaterialId: null, weight: 160, isActive: true }]);
-    const actual = quoteService.calculateCreateOrderQuoteFromCatalogInTx;
-    const spy = vi.spyOn(quoteService, 'calculateCreateOrderQuoteFromCatalogInTx').mockImplementation(async (...args) => {
-      const result = await actual(...args);
-      result.quote = { ...result.quote, knownTotal: new Decimal(result.quote.knownTotal).minus(result.quote.items[0]!.amount!).plus('244.08').toFixed(2), items: [{ ...result.quote.items[0]!, status: 'QUOTED', amount: '244.08' }] };
-      result.processing.items[0] = { ...result.processing.items[0]!, complete: true, suggestedUnitPrice: '0.3250', suggestedFixedFee: fixedFee, suggestedSubtotal: '244.08' };
-      return result;
-    });
-    try {
-      const call = createOrder({ shippingFee: null, packingMaterialFee: null, customerChargeOverrideReason: null, customerRef: null, receiverName: null, receiverPhone: null, receiverAddress: '广东测试地址', expressCode: null, packageRequirement: null, remark: null, promisedDate: null, isUrgent: false, isSfCollect: false,
-        items: [baseItem({ quantity: 751, productId: 'product-1', specification: '大号封90×165', actualWidthMm: 90, actualHeightMm: 165, pricingGroup: 'LARGE', unitPrice: null, fixedFee: null, priceOverrideReason: null })],
-        packagingGroups: [{ name: '包装', mode: OrderPackagingMode.SINGLE_STYLE, actualBagCount: 76, itemUnitsPerBag: [10] }],
-      }, ownerActor);
-      if (allowed) {
-        await expect(call).resolves.toBeDefined();
-        expect(dbMock.order.create.mock.calls.at(-1)![0].data.items.create[0]).toMatchObject({ unitPrice: '0.3250', fixedFee, subtotal: '244.08' });
-      } else await expect(call).rejects.toThrow('纯引擎分项与小计不一致');
-    } finally { spy.mockRestore(); }
-  });
-
   it('assigns GD-YYMMDD-001 when the day has no existing orders', async () => {
     const result = await createOrder(
       {
@@ -1296,195 +1136,6 @@ describe('createOrder', () => {
     expect(createArg.data.settlementType).toBe(
       OrderSettlementType.EXTERNAL_SALES,
     );
-  });
-
-  it('defaults plate fees to zero and automatically quotes an internal order', async () => {
-    dbMock.product.findMany.mockResolvedValue([
-      {
-        id: 'product-1',
-        code: 'EXT-STOCK-PEARL-FLASH-160-LARGE',
-        category: 'BLANK_STOCK',
-        specification: '大号封90×165',
-        paperType: '160g珠光艳闪',
-        paperMaterialId: null,
-        weight: 160,
-        isActive: true,
-      },
-    ]);
-    const result = await createOrderDomain(
-      {
-        customerRef: null,
-        receiverName: null,
-        receiverPhone: null,
-        receiverAddress: '广东佛山测试收货地址',
-        expressCode: null,
-        destinationProvince: '广东',
-        quotedWeightKg: '1',
-        shippingFee: null,
-        packingMaterialFee: null,
-        customerChargeOverrideReason: null,
-        packageRequirement: null,
-        remark: null,
-        promisedDate: null,
-        isUrgent: false,
-        isSfCollect: false,
-        items: [
-          baseItem({
-            productId: 'product-1',
-            specification: '大号封90×165',
-            actualWidthMm: 90,
-            actualHeightMm: 165,
-            pricingGroup: 'LARGE',
-          }),
-        ],
-        packagingGroups: [
-          {
-            name: '内部建单测试包装组',
-            mode: OrderPackagingMode.SINGLE_STYLE,
-            actualBagCount: 100,
-            itemUnitsPerBag: [10],
-          },
-        ],
-      },
-      ownerActor,
-      new Date('2026-04-23T09:00:00+08:00'),
-    );
-
-    expect(dbMock.order.create.mock.calls[0]![0].data.pricingStatus).toBe(
-      'AUTO_CONFIRMED',
-    );
-    expect(
-      dbMock.order.create.mock.calls[0]![0].data.items.create[0]
-        .pricingSnapshot,
-    ).toMatchObject({
-      version: 1,
-      schemaVersion: 2,
-      complete: true,
-      suggestedSubtotal: '170.00',
-      source: 'INTERNAL_CREATE_AUTO',
-    });
-    expect(result.pricingStatus).toBe('AUTO_CONFIRMED');
-    expect(dbMock.orderCustomerCharge.upsert).not.toHaveBeenCalled();
-    expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
-      maxWait: 10_000,
-      timeout: 30_000,
-    });
-    expect(dbMock.orderShipment.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          destinationProvince: '广东',
-          quotedWeightKg: '1',
-        }),
-      }),
-    );
-    expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        revision: 1,
-        status: 'AUTO_CONFIRMED',
-        source: 'ORDER_CREATED_AUTO',
-      }),
-    });
-    expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          unitPrice: '0.1000',
-          subtotal: '10.00',
-          suggestedSubtotal: '10.00',
-        }),
-      }),
-    );
-  });
-
-  it('内部纯彩印无烫金建单不查也不写制版收费，价格自动确认', async () => {
-    dbMock.product.findMany.mockResolvedValue([
-      {
-        id: 'product-print',
-        code: 'PRINT-COATED-200-LARGE',
-        category: 'COLOR_PRINT',
-        specification: '大号封90×165',
-        paperType: '200g铜版纸',
-        paperMaterialId: null,
-        weight: 200,
-        isActive: true,
-      },
-    ]);
-    dbMock.craft.findMany.mockResolvedValue([
-      { id: 'craft-print', code: 'COATED_COLOR_PRINT', isActive: true },
-    ]);
-    dbMock.material.findMany.mockImplementation(
-      async ({ where }: { where: { category?: string; name?: { in: string[] } } }) =>
-        where.category
-          ? [
-              {
-                id: 'paper-coated-200',
-                name: '铜版纸',
-                specification: '200g',
-                outOfStock: false,
-                isActive: true,
-              },
-            ]
-          : (where.name?.in ?? []).map((name) => ({ name })),
-    );
-
-    const result = await createOrderDomain(
-      {
-        customerRef: null,
-        receiverName: null,
-        receiverPhone: null,
-        receiverAddress: '广东佛山测试收货地址',
-        expressCode: null,
-        packageRequirement: null,
-        remark: null,
-        promisedDate: null,
-        isUrgent: false,
-        isSfCollect: false,
-        items: [
-          baseItem({
-            name: '纯彩印款',
-            productId: 'product-print',
-            pricingRoute: 'COLOR_PRINT',
-            specification: '大号封90×165',
-            actualWidthMm: 90,
-            actualHeightMm: 165,
-            pricingGroup: 'LARGE',
-            paperType: '200g铜版纸',
-            paperWeightGsm: 200,
-            crafts: ['craft-print'],
-            frontFoilColors: [],
-            backFoilColors: [],
-            foilColors: [],
-            foilTechnique: 'NONE',
-            hasLocalFoil: false,
-            printColors: ['CMYK'],
-          }),
-        ],
-        packagingGroups: [
-          {
-            name: '纯彩印包装组',
-            mode: OrderPackagingMode.SINGLE_STYLE,
-            actualBagCount: 100,
-            itemUnitsPerBag: [10],
-          },
-        ],
-      },
-      ownerActor,
-      new Date('2026-04-23T09:00:00+08:00'),
-    );
-
-    expect(result.pricingStatus).toBe('AUTO_CONFIRMED');
-    expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
-      pricingStatus: 'AUTO_CONFIRMED',
-      processingAmount: '320.00',
-      totalAmount: '320.00',
-    });
-    expect(dbMock.customerChargeCategory.findUnique).not.toHaveBeenCalled();
-    expect(dbMock.orderCustomerCharge.upsert).not.toHaveBeenCalled();
-    expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        status: 'AUTO_CONFIRMED',
-        source: 'ORDER_CREATED_AUTO',
-      }),
-    });
   });
 
   it('ignores external-sales weight and fee overrides at order creation', async () => {
@@ -1967,136 +1618,6 @@ describe('createOrder', () => {
     expect(createdItem).not.toHaveProperty('pricingSnapshot');
     expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
     expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
-  });
-
-  it('rejects an automatically derived subtotal that exceeds Decimal(12,2)', async () => {
-    dbMock.product.findMany.mockResolvedValue([
-      {
-        id: 'product-1',
-        code: 'PRODUCT_1',
-        category: 'BLANK_STOCK',
-        specification: '大号封90×165',
-        paperType: '160g珠光艳闪',
-        paperMaterialId: null,
-        weight: 160,
-        isActive: true,
-        baseUnitPrice: '999999.9999',
-      },
-    ]);
-    publishedCreateOrderSnapshotMock.mockResolvedValue({
-      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
-      partial: {
-        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
-        blankUnitPrices: CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map(
-          (row, index) =>
-            index === 0 ? { ...row, unitPrice: '999999.9999' } : row,
-        ),
-      },
-    });
-
-    await expect(
-      createOrderDomain(
-        {
-          customerRef: null,
-          receiverName: null,
-          receiverPhone: null,
-          receiverAddress: '广东佛山测试收货地址',
-          expressCode: null,
-          packageRequirement: null,
-          remark: null,
-          promisedDate: null,
-          isUrgent: false,
-          isSfCollect: false,
-          items: [
-            baseItem({
-              productId: 'product-1',
-              quantity: 9_999_999,
-              specification: '大号封90×165',
-              actualWidthMm: 90,
-              actualHeightMm: 165,
-              pricingGroup: 'LARGE',
-              unitPrice: null,
-              fixedFee: null,
-              priceOverrideReason: null,
-            }),
-          ],
-        },
-        ownerActor,
-        new Date('2026-04-23T09:00:00+08:00'),
-      ),
-    ).rejects.toThrow(/建议(?:金额|小计)超过系统上限/);
-    expect(dbMock.order.create).not.toHaveBeenCalled();
-  });
-
-  it('rejects a multi-item total that exceeds Decimal(12,2)', async () => {
-    dbMock.product.findMany.mockResolvedValue([
-      {
-        id: 'product-1',
-        code: 'EXT-STOCK-PEARL-FLASH-160-LARGE',
-        category: 'BLANK_STOCK',
-        specification: '大号封90×165',
-        paperType: '160g珠光艳闪',
-        paperMaterialId: null,
-        weight: 160,
-        isActive: true,
-      },
-    ]);
-    publishedCreateOrderSnapshotMock.mockResolvedValue({
-      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
-      partial: {
-        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
-        blankUnitPrices: CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map(
-          (row, index) =>
-            index === 0 ? { ...row, unitPrice: '999999.0000' } : row,
-        ),
-      },
-    });
-    const hugeLine = baseItem({
-      productId: 'product-1',
-      quantity: 6_000,
-      specification: '大号封90×165',
-      actualWidthMm: 90,
-      actualHeightMm: 165,
-      pricingGroup: 'LARGE',
-      unitPrice: null,
-      fixedFee: null,
-      priceOverrideReason: null,
-    });
-
-    await expect(
-      createOrder(
-        {
-          customerRef: null,
-          receiverName: null,
-          receiverPhone: null,
-          receiverAddress: null,
-          expressCode: null,
-          packageRequirement: null,
-          remark: null,
-          promisedDate: null,
-          isUrgent: false,
-          isSfCollect: false,
-          items: [hugeLine, { ...hugeLine, name: '烫金款 B' }],
-          packagingGroups: [
-            {
-              name: '烫金款 A 包装组',
-              mode: OrderPackagingMode.SINGLE_STYLE,
-              actualBagCount: 1,
-              itemUnitsPerBag: [10, 0],
-            },
-            {
-              name: '烫金款 B 包装组',
-              mode: OrderPackagingMode.SINGLE_STYLE,
-              actualBagCount: 1,
-              itemUnitsPerBag: [0, 10],
-            },
-          ],
-        },
-        ownerActor,
-        new Date('2026-04-23T09:00:00+08:00'),
-      ),
-    ).rejects.toThrow(/工单总金额超过系统上限/);
-    expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 
   it('stores the custom name and returns item ids in sequence order', async () => {
@@ -6290,6 +5811,21 @@ describe('admin creates for an external salesperson', () => {
         sql.join('').includes('FOR SHARE'),
       ),
     ).toBe(true);
+  });
+  it('rejects an admin create without an external salesperson before writing', async () => {
+    await expect(
+      createOrderDomain({ ...delegatedInput(), externalSalesUserId: null }, ownerActor),
+    ).rejects.toThrow('请选择关联外部销售');
+    await expect(
+      createOrderDomain({ ...delegatedInput(), externalSalesUserId: '   ' }, ownerActor),
+    ).rejects.toThrow('请选择关联外部销售');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+  it('rejects order creation by a worker even without an assignment', async () => {
+    await expect(
+      createOrderDomain({ ...delegatedInput(), externalSalesUserId: null }, workerActor),
+    ).rejects.toThrow('当前账号不能创建工单');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
   });
   it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])(
     'rejects assignment by %s before writing',

@@ -165,8 +165,8 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 [`actions/admin-order-workflow.ts`](./actions/admin-order-workflow.ts) 和
 [`lib/order/change-request.ts`](./lib/order/change-request.ts)。
 
-- `quoteExternalCreateOrderAction` 同时允许 SALES 自助报价与 ADMIN 代建预览；仍使用同一已发布价目、参数校验和报价 token，不允许客服伪造外部结算。关联账号的有效性在实际创建事务中重验。
-- `createOrderAction` 新增选填 `externalSalesUserId`：仅 ADMIN 可指定启用的 SALES 账号。事务内锁定并验证账号，写入 `submitterId` 与 `EXTERNAL_SALES` 结算方向，`submitterRole=SALES` 满足结算一致性约束，实际管理员保留在 `createdById` 和创建日志；未指定仍为 `FACTORY_DIRECT`。外部销售原始输入出现该字段（包括 null）直接拒绝；客服/师傅不能代指定。重复创建按实际创建人和原归属校验。
+- `quoteExternalCreateOrderAction` 同时允许 SALES 自助报价与 ADMIN 代建预览；仍使用同一已发布价目、参数校验和报价 token，其他角色一律拒绝。关联账号的有效性在实际创建事务中重验。内部/工厂直单预览 `quoteInternalCreateOrderAction` 已于 2026-09-24 删除（业主拍板：所有业务都以外部销售身份开展）。
+- `createOrderAction` 的 `externalSalesUserId`：ADMIN 建单**必填**（2026-09-24 起取消工厂直单），缺失时返回 `invalid` 且 `fieldErrors.externalSalesUserId = ['请选择关联外部销售']`；只能指定启用的 SALES 账号。事务内锁定并验证账号，写入 `submitterId` 与 `EXTERNAL_SALES` 结算方向，`submitterRole=SALES` 满足结算一致性约束，实际管理员保留在 `createdById` 和创建日志。SALES 本人建单时原始输入出现该字段（包括 null）直接拒绝；其他角色不能建单。管理员新建页在没有启用的外部销售账号时不渲染表单，提示先去账号管理创建或启用。重复创建按实际创建人和原归属校验。
 - 管理员新建页移除 `customerPartyId/customerRef` 输入；管理员新建时这两个值统一为空，忽略旧浏览器草稿中的残留。其他角色和既有工单的客户关联保持原契约。
 - 新建的 `items[].pack` 上限为 12；`packagingGroups[].itemUnitsPerBag` 的一包合计最多 12，混装按各款相加。预报价、创建 schema、创建领域及页面同步校验，不改变旧工单包装及历史报价。数量为正整数；超限须调整，不能自动截断或按零费用放行。
 - `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；`customerPartyId` 只能选择活动客户（不变的历史关联可保留）。ADMIN 可修改范围内工单，SALES / CUSTOMER_SERVICE 仅可修改自己创建的工单；存在待审批申请时拒绝保存。

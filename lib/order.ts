@@ -5,7 +5,6 @@ import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from './rules/paper-availa
 import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
 import { createOrderSchema } from './auth/schemas';
 import { isSampleOrder } from './order/purpose';
-import { subtotalReconciles } from './order/subtotal-reconciliation';
 import { salesCustomerScope } from './order/sales-customer-policy';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
@@ -13,7 +12,6 @@ import Decimal from 'decimal.js';
 import { calculateAdminCreatePrice, adminCreatePriceFactsKey, calculateAdminPackagingPrice, adminPackagingPriceFactsKey } from './order/admin-create-price';
 import { buildTrustedAdminItemPricingSnapshot, buildTrustedAdminPackagingPricingSnapshot } from './order/admin-pricing-snapshot';
 import {
-  CustomerPriceBookPurpose,
   DesignFileType,
   OrderBillingMode,
   OrderChangeRequestStatus,
@@ -69,12 +67,7 @@ import { enqueueNotificationInTransaction } from './notification/transactional-o
 import type { EnqueueClient } from './background-jobs/repository';
 import { backgroundJobsMode } from './background-jobs/mode';
 import { isDirectCancelStatus } from './order/direct-cancel';
-import { hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
-import {
-  calculateCreateOrderQuoteFromCatalogInTx,
-  CreateOrderQuoteError,
-  type CatalogCreateOrderQuoteCalculation,
-} from './order/create-order-quote-service';
+import { ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE, hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics } from './order/settlement';
 import {
   OrderCustomerChargeError,
   resolveExternalOrderChargesForFinalization,
@@ -94,16 +87,9 @@ import {
   type FulfillmentPricingMutationGuard,
 } from './order/fulfillment-pricing';
 import {
-  PendingPlateChargeError,
-  quoteHasPendingPlateCharge,
-  requireActivePlateCategoryIdInTx,
-  upsertPendingPlateChargeInTx,
-} from './order/pending-plate-charge';
-import {
   LEGACY_STOCK_FOIL_CRAFT_CODE,
   STOCK_LOCAL_FOIL_CRAFT_CODE,
   deriveLegacyOrderItemFoilFacts,
-  isNewOrderPricingRoute,
 } from './order/pricing-route';
 import {
   calculateCreateOrderBagCount,
@@ -143,7 +129,6 @@ export class OrderQuoteChangedError extends Error {
   }
 }
 
-const DECIMAL_10_4_MAX = new Decimal('999999.9999');
 const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
 const ORDER_TOTAL_LIMIT_MESSAGE =
   '工单总金额超过系统上限 9,999,999,999.99 元';
@@ -154,32 +139,6 @@ function assertOrderQuantity(quantity: number, itemName: string): void {
       `款式“${itemName}”数量必须是 1 至 9,999,999 的整数`,
     );
   }
-}
-
-function assertStorableMoney(
-  value: string,
-  itemName: string,
-  label: string,
-  max: Decimal,
-  scale: number,
-): Decimal {
-  let amount: Decimal;
-  try {
-    amount = new Decimal(value);
-  } catch {
-    throw new OrderInvariantError(`款式“${itemName}”${label}格式非法`);
-  }
-  if (
-    !amount.isFinite() ||
-    amount.isNegative() ||
-    amount.decimalPlaces() > scale ||
-    amount.gt(max)
-  ) {
-    throw new OrderInvariantError(
-      `款式“${itemName}”${label}超出系统允许范围`,
-    );
-  }
-  return amount;
 }
 
 function assertStorableOrderTotal(value: string): void {
@@ -197,29 +156,6 @@ function assertStorableOrderTotal(value: string): void {
   ) {
     throw new OrderInvariantError(ORDER_TOTAL_LIMIT_MESSAGE);
   }
-}
-
-function rethrowCreateOrderQuoteError(error: unknown): never {
-  if (!(error instanceof CreateOrderQuoteError)) throw error;
-  if (error.message.includes('整单已知金额合计超过可保存上限')) {
-    throw new OrderInvariantError(ORDER_TOTAL_LIMIT_MESSAGE);
-  }
-  throw new OrderInvariantError(error.message);
-}
-
-// Decimal(12,2) column — 12 total digits, 2 after the point. Quantity is
-// an int and unitPrice is a string like '0.1234'. The multiplication must
-// happen in Decimal.js to preserve precision (plain JS floats round).
-function computeSubtotal(
-  quantity: number,
-  unitPrice: string | null,
-  fixedFee: string | null | undefined,
-): string {
-  const price = new Decimal(unitPrice ?? '0');
-  return price
-    .times(quantity)
-    .plus(new Decimal(fixedFee ?? '0'))
-    .toFixed(2);
 }
 
 function sumTotals(subtotals: string[]): string {
@@ -622,10 +558,17 @@ export async function createOrder(
   if (externalSalesUserId && actor.role !== Role.ADMIN) {
     throw new OrderInvariantError('只有管理员可以关联外部销售');
   }
+  // 业主 2026-09-24：所有业务都以外部销售身份开展。销售本人建单；管理员
+  // 代建必须指定一个启用的外部销售，工单归属该销售并按 EXTERNAL_SALES 结算。
+  if (actor.role === Role.ADMIN) {
+    if (!externalSalesUserId) {
+      throw new OrderInvariantError(ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE);
+    }
+  } else if (actor.role !== Role.SALES) {
+    throw new OrderInvariantError('当前账号不能创建工单');
+  }
   const submitterId = externalSalesUserId ?? actor.id;
-  const settlementType = externalSalesUserId
-    ? OrderSettlementType.EXTERNAL_SALES
-    : settlementTypeForOrderCreator(actor.role);
+  const settlementType = OrderSettlementType.EXTERNAL_SALES;
   for (const item of input.items) {
     if (
       item.pack != null &&
@@ -641,8 +584,6 @@ export async function createOrder(
   if (hasRetiredPaperItem(input.items)) {
     throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
   }
-  const isExternalSalesDraft =
-    settlementType === OrderSettlementType.EXTERNAL_SALES || special;
   if (!input.receiverAddress?.trim()) {
     throw new OrderInvariantError('请填写收货地址');
   }
@@ -787,90 +728,6 @@ export async function createOrder(
         throw new OrderInvariantError('所选往来单位不是客户');
       }
     }
-    let internalQuote: CatalogCreateOrderQuoteCalculation | null = null;
-    if (!isExternalSalesDraft) {
-      try {
-        const itemKeys = items.map((_, index) => String(index + 1));
-        const primaryQuantities = items.map((item, itemIndex) => {
-          const extraQuantity = additionalShipments.reduce(
-            (sum, shipment) =>
-              sum + (shipment.itemQuantities[itemIndex] ?? 0),
-            0,
-          );
-          return item.quantity - extraQuantity;
-        });
-        internalQuote = await calculateCreateOrderQuoteFromCatalogInTx(tx, {
-          now,
-          includeOrderCharges: false,
-          facts: {
-            items: items.map((item, index) => {
-              if (!isNewOrderPricingRoute(item.pricingRoute)) {
-                throw new OrderInvariantError(
-                  `款式“${item.name}”必须选择有效计价路线`,
-                );
-              }
-              return {
-                ...item,
-                pricingRoute: item.pricingRoute,
-                itemKey: itemKeys[index]!,
-                fig: resolvedItemFigs[index]!,
-                productId: item.productId ?? null,
-                specification: item.specification ?? null,
-                actualWidthMm: item.actualWidthMm ?? null,
-                actualHeightMm: item.actualHeightMm ?? null,
-                paperType: item.paperType ?? null,
-                paperWeightGsm: item.paperWeightGsm ?? null,
-                frontFoilColors: item.frontFoilColors,
-                backFoilColors: item.backFoilColors,
-                manualQuoteReason: item.manualQuoteReason ?? null,
-              };
-            }),
-            packagingGroups: packagingGroups.map((group, groupIndex) => ({
-              groupKey: String(groupIndex + 1),
-              mode: group.mode,
-              actualBagCount: group.actualBagCount,
-              items: group.itemUnitsPerBag.flatMap(
-                (unitsPerBag, itemIndex) =>
-                  unitsPerBag > 0 && itemKeys[itemIndex]
-                    ? [
-                        {
-                          itemKey: itemKeys[itemIndex]!,
-                          unitsPerBag,
-                        },
-                      ]
-                    : [],
-              ),
-            })),
-            isSfCollect: false,
-            shipments: [
-              {
-                shipmentKey: '1',
-                province: input.destinationProvince ?? null,
-                itemQuantities: Object.fromEntries(
-                  itemKeys.map((itemKey, index) => [
-                    itemKey,
-                    primaryQuantities[index] ?? 0,
-                  ]),
-                ),
-              },
-              ...additionalShipments.map((shipment, shipmentIndex) => ({
-                shipmentKey: String(shipmentIndex + 2),
-                province: shipment.destinationProvince ?? null,
-                itemQuantities: Object.fromEntries(
-                  itemKeys.map((itemKey, index) => [
-                    itemKey,
-                    shipment.itemQuantities[index] ?? 0,
-                  ]),
-                ),
-              })),
-            ],
-          },
-        });
-      } catch (error) {
-        rethrowCreateOrderQuoteError(error);
-      }
-    }
-
     // (4) product FK check — one batch findMany over the distinct ids
     // (was per-item findUnique: a 10-item order paid up to 10 round
     // trips inside the tx). No productId → no query at all. Deliberately
@@ -879,214 +736,37 @@ export async function createOrder(
     await assertCreateOrderProductsInTx(txClient, items.filter((item) => item.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK));
 
     // (5) processing totals and per-shipment allocation facts.
-    const automaticItems = items.map((it, index) => {
-      if (isExternalSalesDraft) {
-        return {
-          ...it,
-          priceOverrideReason: null,
-          unitPrice: '0',
-          fixedFee: '0',
-          subtotal: '0.00',
-          suggestedSubtotal: null,
-          quoteDisposition: null,
-          quotedAmount: null,
-          requiresAdminConfirmation: true,
-          pricingSnapshot: null,
-        };
-      }
-
-      const quote = internalQuote!.quote.items[index];
-      const presentation = internalQuote!.processing.items[index];
-      if (!quote || !presentation || quote.itemKey !== String(index + 1)) {
-        throw new OrderInvariantError(
-          `款式“${it.name}”的纯引擎结果与建单事实不一致`,
-        );
-      }
-      if (quote.status === 'MANUAL_PRICING_REQUIRED' || (it.adminPrice && quote.status !== 'QUOTED')) {
-        return {
-          ...it,
-          manualQuoteReason: it.manualQuoteReason?.trim() || null,
-          priceOverrideReason: null,
-          unitPrice: '0',
-          fixedFee: '0',
-          subtotal: '0.00',
-          suggestedSubtotal: null,
-          quoteDisposition:
-            OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
-          quotedAmount: null,
-          requiresAdminConfirmation: true,
-          pricingSnapshot: {
-            ...presentation.snapshot,
-            // Compatibility fence for OrderItem_suggested_snapshot_consistent.
-            // The pure-engine schemaVersion remains unchanged; `version` is
-            // the legacy persistence envelope expected by the database.
-            version: 1,
-            source: 'INTERNAL_CREATE_MANUAL_REQUIRED',
-            quotedAt: now.toISOString(),
-            actual: {
-              amount: null,
-              overrideReason: null,
-              provisional: true,
-            },
-          } satisfies Prisma.InputJsonObject,
-        };
-      }
-
-      if (
-        quote.status !== 'QUOTED' ||
-        !presentation.complete ||
-        presentation.suggestedUnitPrice === null ||
-        presentation.suggestedFixedFee === null ||
-        presentation.suggestedSubtotal === null
-      ) {
-        const details = [...quote.errors, ...presentation.errors].join('；') ||
-          `报价状态=${quote.status}，小计=${quote.amount}，单价=${quote.unitPrice}，数量=${it.quantity}，分项=${quote.lines.map(line => `${line.code}:${line.amount}`).join(',')}`;
-        throw new OrderInvariantError(
-          `款式“${it.name}”无法生成可保存的自动报价${details ? `：${details}` : ''}`,
-        );
-      }
-      const unitPrice = presentation.suggestedUnitPrice;
-      const fixedFee = presentation.suggestedFixedFee;
-      const subtotal = presentation.suggestedSubtotal;
-      assertStorableMoney(
-        unitPrice,
-        it.name,
-        '成交单价',
-        DECIMAL_10_4_MAX,
-        4,
-      );
-      assertStorableMoney(
-        fixedFee,
-        it.name,
-        '一次性费用',
-        DECIMAL_12_2_MAX,
-        2,
-      );
-      assertStorableMoney(
-        subtotal,
-        it.name,
-        '款式小计',
-        DECIMAL_12_2_MAX,
-        2,
-      );
-      if (
-        !subtotalReconciles(computeSubtotal(it.quantity, unitPrice, fixedFee),
-          subtotal,
-        )
-      ) {
-        throw new OrderInvariantError(
-          `款式“${it.name}”纯引擎分项与小计不一致`,
-        );
-      }
-      return {
-        ...it,
-        priceOverrideReason: null,
-        unitPrice,
-        fixedFee,
-        subtotal,
-        suggestedSubtotal: subtotal,
-        quoteDisposition: OrderItemQuoteDisposition.PRICED,
-        quotedAmount: subtotal,
-        requiresAdminConfirmation: false,
-        pricingSnapshot: {
-          ...presentation.snapshot,
-          version: 1,
-          source: 'INTERNAL_CREATE_AUTO',
-          quotedAt: now.toISOString(),
-          actual: {
-            unitPrice,
-            fixedFee,
-            subtotal,
-            overrideReason: null,
-            provisional: false,
-          },
-        } satisfies Prisma.InputJsonObject,
-      };
-    });
+    // Every create is an external-sales draft: amounts are server-owned and
+    // priced by the submit finalizer; only explicit admin prices apply now.
+    const automaticItems = items.map((it) => ({
+      ...it,
+      priceOverrideReason: null,
+      unitPrice: '0',
+      fixedFee: '0',
+      subtotal: '0.00',
+      suggestedSubtotal: null,
+      quoteDisposition: null,
+      quotedAmount: null,
+      requiresAdminConfirmation: true,
+      pricingSnapshot: null,
+    }));
     const itemsWithSubtotals = automaticItems.map(applyAdminCreateItemPrice);
-    const adminPriceDelta = itemsWithSubtotals.reduce((sum, item, index) =>
-      sum.plus(item.subtotal).minus(automaticItems[index].subtotal), new Decimal(0));
     const itemProcessingAmount = sumTotals(
       itemsWithSubtotals.map((i) => i.subtotal),
     );
-    if (
-      !isExternalSalesDraft &&
-      (internalQuote!.quote.packagingGroups.length !== packagingGroups.length ||
-        internalQuote!.processing.packaging.groups.length !==
-          packagingGroups.length)
-    ) {
-      throw new OrderInvariantError('纯引擎包装组结果与建单事实不一致');
-    }
-    const automaticPackagingGroups = packagingGroups.map((group, index) => {
-      if (isExternalSalesDraft) return {
-        ...group,
-        unitPrice: '0.0000',
-        subtotal: '0.00',
-        suggestedSubtotal: null,
-        complete: false,
-        pricingSnapshot: null,
-      };
-      const quote = internalQuote!.quote.packagingGroups[index];
-      const presentation = internalQuote!.processing.packaging.groups[index];
-      if (!quote || !presentation || quote.groupKey !== String(index + 1)) {
-        throw new OrderInvariantError(
-          `包装组 ${index + 1} 的纯引擎结果与建单事实不一致`,
-        );
-      }
-      if (
-        quote.status === 'QUOTED' &&
-        presentation.complete &&
-        presentation.suggestedUnitPrice !== null &&
-        presentation.suggestedSubtotal !== null
-      ) {
-        return {
-          ...group,
-          unitPrice: presentation.suggestedUnitPrice,
-          subtotal: presentation.suggestedSubtotal,
-          suggestedSubtotal: presentation.suggestedSubtotal,
-          complete: true,
-          pricingSnapshot: {
-            ...presentation.snapshot,
-            source: 'INTERNAL_CREATE_AUTO',
-            quotedAt: now.toISOString(),
-            actual: {
-              unitPrice: presentation.suggestedUnitPrice,
-              subtotal: presentation.suggestedSubtotal,
-              overrideReason: null,
-              provisional: false,
-            },
-          } satisfies Prisma.InputJsonObject,
-        };
-      }
-      if (quote.status === 'EXCLUDED_MANUAL' || group.adminPrice) {
-        return {
-          ...group,
-          unitPrice: '0.0000',
-          subtotal: '0.00',
-          suggestedSubtotal: null,
-          complete: false,
-          pricingSnapshot: {
-            ...presentation.snapshot,
-            source: 'INTERNAL_CREATE_MANUAL_REQUIRED',
-            quotedAt: now.toISOString(),
-            actual: {
-              amount: null,
-              overrideReason: null,
-              provisional: true,
-            },
-          } satisfies Prisma.InputJsonObject,
-        };
-      }
-      throw new OrderInvariantError(
-        `包装组 ${index + 1} 无法生成可保存的入袋报价${presentation.errors.length > 0 ? `：${presentation.errors.join('；')}` : ''}`,
-      );
-    });
+    const automaticPackagingGroups = packagingGroups.map((group) => ({
+      ...group,
+      unitPrice: '0.0000',
+      subtotal: '0.00',
+      suggestedSubtotal: null,
+      complete: false,
+      pricingSnapshot: null,
+    }));
     const packagingGroupsWithPrices = automaticPackagingGroups.map((group): Omit<typeof group, 'pricingSnapshot'> & { pricingSnapshot: Prisma.InputJsonObject | null; priceOverrideReason: string | null } => {
       if (!group.adminPrice) return { ...group, priceOverrideReason: null };
       try { return { ...group, ...calculateAdminPackagingPrice(group.adminPrice, group.actualBagCount), complete: true }; }
       catch (error) { throw new OrderInvariantError(error instanceof Error ? error.message : '包装价格无效'); }
     });
-    const adminPackagingDelta = packagingGroupsWithPrices.reduce((sum, group, index) => sum.plus(group.subtotal).minus(automaticPackagingGroups[index].subtotal), new Decimal(0));
     const packagingAmount = sumTotals(
       packagingGroupsWithPrices.map((group) => group.subtotal),
     );
@@ -1094,13 +774,6 @@ export async function createOrder(
       .plus(packagingAmount)
       .toFixed(2);
     assertStorableOrderTotal(processingAmount);
-    if (
-      !isExternalSalesDraft &&
-      !new Decimal(processingAmount).minus(adminPriceDelta).minus(adminPackagingDelta).equals(internalQuote!.quote.knownTotal)
-    ) {
-      throw new OrderInvariantError('建单持久化合计与纯引擎已知合计不一致');
-    }
-
     const primaryQuantities = items.map((item, itemIndex) => {
       const extraQuantity = additionalShipments.reduce(
         (sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0),
@@ -1108,7 +781,7 @@ export async function createOrder(
       );
       return item.quantity - extraQuantity;
     });
-    let shipmentInputs = [
+    const draftShipmentInputs = [
       {
         receiverName: input.receiverName,
         receiverPhone: input.receiverPhone,
@@ -1118,122 +791,58 @@ export async function createOrder(
         // External sales create orders from a browser and cannot establish a
         // carrier billable weight. The browser value is discarded here; only
         // validated item/allocation facts are kept for the submit finalizer's
-        // server-owned weight policy. Non-external callers keep their shape.
-        quotedWeightKg:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : input.quotedWeightKg ?? null,
-        shippingFee:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : input.shippingFee ?? null,
-        packingMaterialFee:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : input.packingMaterialFee ?? null,
-        customerChargeOverrideReason:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : input.customerChargeOverrideReason ?? null,
+        // server-owned weight policy.
+        quotedWeightKg: null,
+        shippingFee: null,
+        packingMaterialFee: null,
+        customerChargeOverrideReason: null,
         itemQuantities: primaryQuantities,
       },
       ...additionalShipments.map((shipment) => ({
         ...shipment,
         destinationProvince: shipment.destinationProvince ?? null,
-        quotedWeightKg:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : shipment.quotedWeightKg ?? null,
-        shippingFee:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : shipment.shippingFee ?? null,
-        packingMaterialFee:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : shipment.packingMaterialFee ?? null,
-        customerChargeOverrideReason:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : shipment.customerChargeOverrideReason ?? null,
+        quotedWeightKg: null,
+        shippingFee: null,
+        packingMaterialFee: null,
+        customerChargeOverrideReason: null,
       })),
     ];
 
-    const externalChargeShipments =
-      settlementType === OrderSettlementType.EXTERNAL_SALES
-        ? deriveExternalOrderChargeShipments({
-            isSfCollect: input.isSfCollect,
-            items: items.map((item, index) => ({
-              itemKey: String(index + 1),
-              quantity: item.quantity,
-              paperWeightGsm: item.paperWeightGsm,
-              paperType: item.paperType,
-              productStructure: item.productStructure,
-            })),
-            shipments: shipmentInputs.map((shipment, index) => ({
-              shipmentKey: String(index + 1),
-              province: shipment.destinationProvince,
-              billableWeightKg: shipment.quotedWeightKg,
-              itemQuantities: shipment.itemQuantities,
-            })),
-          })
-        : null;
-    if (externalChargeShipments) {
-      shipmentInputs = shipmentInputs.map((shipment, index) => ({
-        ...shipment,
-        quotedWeightKg:
-          externalChargeShipments[index]?.billableWeightKg ?? null,
-      }));
-    }
-
-    const suppliedCustomerChargeFacts = shipmentInputs.some(
-      (shipment) =>
-        shipment.shippingFee != null ||
-        shipment.packingMaterialFee != null ||
-        shipment.customerChargeOverrideReason != null,
-    );
-    if (
-      settlementType !== OrderSettlementType.EXTERNAL_SALES &&
-      suppliedCustomerChargeFacts
-    ) {
-      throw new OrderInvariantError(
-        '快递费与打包耗材应收仅适用于外部销售结算工单',
-      );
-    }
+    const externalChargeShipments = deriveExternalOrderChargeShipments({
+      isSfCollect: input.isSfCollect,
+      items: items.map((item, index) => ({
+        itemKey: String(index + 1),
+        quantity: item.quantity,
+        paperWeightGsm: item.paperWeightGsm,
+        paperType: item.paperType,
+        productStructure: item.productStructure,
+      })),
+      shipments: draftShipmentInputs.map((shipment, index) => ({
+        shipmentKey: String(index + 1),
+        province: shipment.destinationProvince,
+        billableWeightKg: shipment.quotedWeightKg,
+        itemQuantities: shipment.itemQuantities,
+      })),
+    });
+    const shipmentInputs = draftShipmentInputs.map((shipment, index) => ({
+      ...shipment,
+      quotedWeightKg:
+        externalChargeShipments[index]?.billableWeightKg ?? null,
+    }));
 
     // No customer charge is materialized for an external DRAFT. The submit
     // finalizer prices these persisted shipment/item facts under one snapshot.
     const totalAmount = processingAmount;
     assertStorableOrderTotal(totalAmount);
-    const requiresAdminPricing =
-      isExternalSalesDraft ||
-      itemsWithSubtotals.some((item) => item.requiresAdminConfirmation) ||
-      packagingGroupsWithPrices.some((group) => !group.complete) ||
-      Boolean(internalQuote && quoteHasPendingPlateCharge(internalQuote.quote));
-    const pricingStatus = requiresAdminPricing
-      ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
-      : hasAdminPrices ? ORDER_PRICING_STATUS.ADMIN_CONFIRMED : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
-    let internalPlateCategoryId: string | null = null;
-    const internalHasPendingPlate =
-      !isExternalSalesDraft &&
-      quoteHasPendingPlateCharge(internalQuote!.quote);
-    if (internalHasPendingPlate) {
-      try {
-        internalPlateCategoryId = await requireActivePlateCategoryIdInTx(tx);
-      } catch (error) {
-        if (error instanceof PendingPlateChargeError) {
-          throw new OrderInvariantError(error.message);
-        }
-        throw error;
-      }
-    }
+    // External drafts are always priced by the admin/submit finalizer.
+    const pricingStatus = ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
 
     // (5) one nested write: Order + items + first OrderLog.
     const created = await txClient.order.create({
       data: {
         orderNo,
         submitterId,
-        submitterRole: externalSalesUserId ? Role.SALES : actor.role,
+        submitterRole: Role.SALES,
         createdById: actor.id,
         customerPartyId,
         status: OrderStatus.DRAFT,
@@ -1260,9 +869,9 @@ export async function createOrder(
         processingAmount,
         totalAmount,
         pricingStatus,
-        priceRevision: isExternalSalesDraft ? 0 : 1,
-        pricingConfirmedAt: requiresAdminPricing ? null : now,
-        pricingConfirmedById: hasAdminPrices && !requiresAdminPricing ? actor.id : null,
+        priceRevision: 0,
+        pricingConfirmedAt: null,
+        pricingConfirmedById: null,
         items: {
           create: itemsWithSubtotals.map((it, idx) => ({
             sequence: idx + 1,
@@ -1340,24 +949,6 @@ export async function createOrder(
 
     await confirmCreatedAdminItemPricesInTx(txClient, created.id, itemsWithSubtotals, actor.id, now);
 
-    if (internalHasPendingPlate) {
-      try {
-        await upsertPendingPlateChargeInTx({
-          tx,
-          orderId: created.id,
-          actorId: actor.id,
-          categoryId: internalPlateCategoryId!,
-          quote: internalQuote!.quote,
-          source: 'INTERNAL_CREATE_PENDING_PLATE',
-        });
-      } catch (error) {
-        if (error instanceof PendingPlateChargeError) {
-          throw new OrderInvariantError(error.message);
-        }
-        throw error;
-      }
-    }
-
     const itemBySequence = new Map(
       created.items.map((item) => [item.sequence, item.id]),
     );
@@ -1434,105 +1025,6 @@ export async function createOrder(
       if (lines.length > 0) {
         await txClient.orderShipmentLine.createMany({ data: lines });
       }
-    }
-
-    if (!isExternalSalesDraft) {
-      await txClient.orderPricingRevision.create({
-        data: {
-          orderId: created.id,
-          revision: 1,
-          status: pricingStatus,
-          source: hasAdminPrices ? 'ORDER_CREATED_ADMIN' : requiresAdminPricing
-            ? 'ORDER_CREATED_PROVISIONAL'
-            : 'ORDER_CREATED_AUTO',
-          createdById: actor.id,
-          createdAt: now,
-          priceVersionLocks: {
-            create: [
-              {
-                purpose: CustomerPriceBookPurpose.PROCESSING,
-                priceBookId: internalQuote!.quote.priceVersion.processing.id,
-                priceBookVersion:
-                  internalQuote!.quote.priceVersion.processing.version,
-                sourceSha256:
-                  internalQuote!.quote.priceVersion.processing.sourceSha256,
-                createdAt: now,
-              },
-              {
-                purpose: CustomerPriceBookPurpose.LOGISTICS,
-                priceBookId: internalQuote!.quote.priceVersion.logistics.id,
-                priceBookVersion:
-                  internalQuote!.quote.priceVersion.logistics.version,
-                sourceSha256:
-                  internalQuote!.quote.priceVersion.logistics.sourceSha256,
-                createdAt: now,
-              },
-            ],
-          },
-          snapshot: {
-            version: 2,
-            engineVersion: 'CREATE_ORDER_PURE_V1',
-            priceVersion: internalQuote!.quote.priceVersion,
-            engineStatus: internalQuote!.quote.status,
-            knownTotal: processingAmount,
-            automaticKnownTotal: internalQuote!.quote.knownTotal,
-            manualReasons: internalQuote!.quote.manualReasons,
-            pendingReasons: internalQuote!.quote.pendingReasons,
-            source: hasAdminPrices ? 'ORDER_CREATED_ADMIN' : requiresAdminPricing
-              ? 'ORDER_CREATED_PROVISIONAL'
-              : 'ORDER_CREATED_AUTO',
-            pricedAt: now.toISOString(),
-            order: {
-              id: created.id,
-              orderNo: created.orderNo,
-              settlementType,
-              pricingStatus,
-              priceRevision: 1,
-              packagingAmount,
-              processingAmount,
-              totalAmount,
-            },
-            items: itemsWithSubtotals.map((item, index) => ({
-              id: created.items[index]?.id ?? null,
-              sequence: index + 1,
-              fig: resolvedItemFigs[index],
-              name: item.name,
-              pricingRoute: item.pricingRoute,
-              craft: canonicalCraftForPricingRoute(item.pricingRoute),
-              pack:
-                item.pack ??
-                packagingGroupsWithPrices.find(
-                  (group) => (group.itemUnitsPerBag[index] ?? 0) > 0,
-                )?.itemUnitsPerBag[index] ??
-                null,
-              manualQuoteReason: item.manualQuoteReason ?? null,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              fixedFee: item.fixedFee,
-              subtotal: item.subtotal,
-              quoteDisposition: item.quoteDisposition,
-              suggestedSubtotal: item.suggestedSubtotal,
-              priceOverrideReason: item.priceOverrideReason ?? null,
-              requiresAdminConfirmation: item.requiresAdminConfirmation,
-              pricingSnapshot: item.pricingSnapshot,
-            })),
-            packagingGroups: packagingGroupsWithPrices.map((group, index) => ({
-              sequence: index + 1,
-              name: group.name ?? null,
-              mode: group.mode,
-              actualBagCount: group.actualBagCount,
-              itemUnitsPerBag: [...group.itemUnitsPerBag],
-              unitPrice: group.unitPrice,
-              subtotal: group.subtotal,
-              suggestedSubtotal: group.suggestedSubtotal,
-              priceOverrideReason: group.priceOverrideReason,
-              requiresAdminConfirmation: !group.complete,
-              pricingSnapshot: group.pricingSnapshot,
-            })),
-            customerCharges: [],
-          },
-        },
-      });
     }
 
     return {

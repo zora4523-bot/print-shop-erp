@@ -10,7 +10,6 @@ vi.mock('@/actions/order', () => ({
 }));
 vi.mock('@/actions/create-order-quote', () => ({
   quoteExternalCreateOrderAction: vi.fn(),
-  quoteInternalCreateOrderAction: vi.fn(),
   quoteSampleOrderAction: vi.fn(),
 }));
 vi.mock('@/actions/workbench', () => ({ quoteWorkbenchItemAction: vi.fn() }));

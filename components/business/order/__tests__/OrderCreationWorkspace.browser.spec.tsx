@@ -11,7 +11,7 @@ import '@/app/globals.css';
 vi.mock('next/image', () => ({ default: ({ alt }: { alt: string }) => <span>{alt}</span> }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
 vi.mock('@/actions/order', () => ({ createOrderAction: vi.fn(), submitOrderAction: vi.fn() }));
-vi.mock('@/actions/create-order-quote', () => ({ quoteExternalCreateOrderAction: vi.fn(), quoteInternalCreateOrderAction: vi.fn(), quoteSampleOrderAction: vi.fn() }));
+vi.mock('@/actions/create-order-quote', () => ({ quoteExternalCreateOrderAction: vi.fn(), quoteSampleOrderAction: vi.fn() }));
 vi.mock('@/actions/workbench', () => ({ quoteWorkbenchItemAction: vi.fn() }));
 vi.mock('@/actions/design-upload', () => ({ deleteOrderItemDesignAction: vi.fn(), recordDesignUploadAction: vi.fn(), signDesignUploadAction: vi.fn() }));
 vi.mock('next/link', () => ({ __esModule: true, default: (props: ComponentProps<'a'>) => <a {...props} /> }));
@@ -39,7 +39,7 @@ vi.mock('@/components/business/order/OrderForm', () => ({
 import { OrderCreationWorkspace } from '../OrderCreationWorkspace';
 let host: HTMLDivElement;
 let root: Root;
-const props: OrderFormProps = { crafts: [], products: [], settlementType: 'FACTORY_DIRECT', settlementLabel: '工厂直单', draftScope: 'workspace-test' };
+const props: OrderFormProps = { crafts: [], products: [], externalSalesAccounts: [], draftScope: 'workspace-test' };
 function mount() { flushSync(() => root.render(<OrderCreationWorkspace {...props} />)); }
 beforeEach(() => {
   sessionStorage.clear();

@@ -1,5 +1,4 @@
-vi.mock('@/lib/order/external-sales-association', () => ({ listExternalSalesAccountOptions: vi.fn().mockResolvedValue([{ id: 'sales-2', displayName: '外部销售', username: 'sales-2' }]) }));
-vi.mock('@/lib/order/sales-customer-scope', () => ({ listSalesCustomerOptions: vi.fn().mockResolvedValue([]) }));
+vi.mock('@/lib/order/external-sales-association', () => ({ listExternalSalesAccountOptions: listSalesAccountsMock }));
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductCategory, Role } from '@/generated/prisma/enums';
@@ -7,14 +6,14 @@ import { ProductCategory, Role } from '@/generated/prisma/enums';
 const {
   externalBootstrapMock,
   listCraftsMock,
-  listCustomersMock,
+  listSalesAccountsMock,
   orderFormPropsMock,
   redirectMock,
   requireSessionMock,
 } = vi.hoisted(() => ({
   externalBootstrapMock: vi.fn(),
   listCraftsMock: vi.fn(),
-  listCustomersMock: vi.fn(),
+  listSalesAccountsMock: vi.fn(),
   orderFormPropsMock: vi.fn(),
   redirectMock: vi.fn(),
   requireSessionMock: vi.fn(),
@@ -26,9 +25,6 @@ vi.mock('@/lib/craft', () => ({
 }));
 vi.mock('@/lib/order/create-order-bootstrap', () => ({
   loadExternalCreateOrderBootstrap: externalBootstrapMock,
-}));
-vi.mock('@/lib/party', () => ({
-  listCustomerPartyOptions: listCustomersMock,
 }));
 vi.mock('@/components/business/order/OrderCreationWorkspace', () => ({
   OrderCreationWorkspace: (props: unknown) => {
@@ -54,7 +50,7 @@ describe('new-order price catalog binding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listCraftsMock.mockResolvedValue([]);
-    listCustomersMock.mockResolvedValue([]);
+    listSalesAccountsMock.mockResolvedValue([{ id: 'sales-2', displayName: '外部销售', username: 'sales-2' }]);
     externalBootstrapMock.mockResolvedValue({
       options: {
         products: currentPriceBookProducts,
@@ -80,7 +76,6 @@ describe('new-order price catalog binding', () => {
     expect(orderFormPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         products: currentPriceBookProducts,
-        settlementType: 'EXTERNAL_SALES',
         externalCreateOrderOptions: expect.objectContaining({
           products: currentPriceBookProducts,
         }),
@@ -92,7 +87,7 @@ describe('new-order price catalog binding', () => {
     );
   });
 
-  it('工厂直单与外部销售使用同一已发布配置快照', async () => {
+  it('管理员代建与外部销售使用同一已发布配置快照，并必须选择外部销售', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },
     });
@@ -103,8 +98,6 @@ describe('new-order price catalog binding', () => {
     expect(orderFormPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         products: currentPriceBookProducts,
-        settlementType: 'FACTORY_DIRECT',
-        customers: [],
         externalSalesAccounts: [{ id: 'sales-2', displayName: '外部销售', username: 'sales-2' }],
         externalCreateOrderOptions: expect.objectContaining({
           products: currentPriceBookProducts,
@@ -115,5 +108,29 @@ describe('new-order price catalog binding', () => {
         }),
       }),
     );
+  });
+
+  it('没有启用的外部销售账号时管理员看到明确提示，不渲染建单表单', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    listSalesAccountsMock.mockResolvedValue([]);
+
+    const html = renderToStaticMarkup(await NewOrderPage());
+
+    expect(html).toContain('暂无可关联的外部销售账号');
+    expect(html).toContain('href="/owner/accounts"');
+    expect(orderFormPropsMock).not.toHaveBeenCalled();
+    expect(externalBootstrapMock).not.toHaveBeenCalled();
+  });
+
+  it('销售与管理员以外的角色回到工单列表', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'worker-1', role: Role.WORKER },
+    });
+    redirectMock.mockImplementation(() => { throw new Error('NEXT_REDIRECT'); });
+
+    await expect(NewOrderPage()).rejects.toThrow('NEXT_REDIRECT');
+    expect(redirectMock).toHaveBeenCalledWith('/orders');
   });
 });

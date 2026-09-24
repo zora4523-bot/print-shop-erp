@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { OrderSettlementType } from '@/generated/prisma/enums';
 
 const { fieldState } = vi.hoisted(() => ({ fieldState: { errors: {} as Record<string, { type: string; message: string }> } }));
 vi.mock('react-hook-form', async (importOriginal) => {
@@ -24,7 +23,6 @@ vi.mock('@/actions/order', () => ({
 }));
 vi.mock('@/actions/create-order-quote', () => ({
   quoteExternalCreateOrderAction: vi.fn(),
-  quoteInternalCreateOrderAction: vi.fn(),
   quoteSampleOrderAction: vi.fn(),
 }));
 vi.mock('@/actions/workbench', () => ({ quoteWorkbenchItemAction: vi.fn() }));
@@ -45,38 +43,32 @@ const crafts: CraftOption[] = [
   { id: 'craft-2', name: '击凸', isOutsource: true, isLowFrequency: true },
 ];
 
-function render(usesExternalSalesPricing = true) {
+function render(salesActor = true) {
   return renderToStaticMarkup(
     <OrderForm
       draftScope="test-user"
       crafts={crafts}
       products={[]}
-      externalSalesAccounts={usesExternalSalesPricing ? undefined : []}
-      settlementLabel="内部结算"
-      settlementType={
-        usesExternalSalesPricing
-          ? OrderSettlementType.EXTERNAL_SALES
-          : OrderSettlementType.FACTORY_DIRECT
+      externalSalesAccounts={
+        salesActor
+          ? undefined
+          : [{ id: 'sales-1', displayName: '外部销售甲', username: 'sales-a' }]
       }
-      externalCreateOrderOptions={
-        usesExternalSalesPricing
-          ? {
-              products: [],
-              papers: [],
-              specifications: [],
-              foilColors: [
-                {
-                  id: 'foil-1',
-                  code: 'MATTE_GOLD',
-                  name: '品牌金',
-                  displayColor: '#b98f2c',
-                  displayImage: null,
-                  sortOrder: 1,
-                },
-              ],
-            }
-          : undefined
-      }
+      externalCreateOrderOptions={{
+        products: [],
+        papers: [],
+        specifications: [],
+        foilColors: [
+          {
+            id: 'foil-1',
+            code: 'MATTE_GOLD',
+            name: '品牌金',
+            displayColor: '#b98f2c',
+            displayImage: null,
+            sortOrder: 1,
+          },
+        ],
+      }}
     />,
   );
 }
@@ -92,6 +84,19 @@ function tagWithIdSuffix(html: string, suffix: string): string {
 describe('OrderForm 必填字段的 required 语义', () => {
   it.each([true, false])('两种建单身份均可添加第 2 个收货地址：%s', (external) => {
     expect(render(external)).toContain('添加地址 2');
+  });
+  it('管理员代建必须选择外部销售，不再提供工厂直接业务选项', () => {
+    const html = render(false);
+    const select = tagWithIdSuffix(html, 'externalSalesUserId');
+    expect(select).toContain('required');
+    expect(select).toContain('aria-required="true"');
+    expect(html).toContain('关联外部销售（必填）');
+    expect(html).toContain('请选择外部销售');
+    expect(html).toContain('外部销售甲 · sales-a');
+    expect(html).not.toContain('工厂直接业务');
+  });
+  it('外部销售本人建单不显示关联外部销售', () => {
+    expect(render(true)).not.toContain('externalSalesUserId');
   });
   it('服务端错误只展示去重后的业务文案，不显示内部字段路径', () => {
     const messages = orderServerFieldErrorMessages({
@@ -136,21 +141,21 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(html).not.toContain('id="expressCode"');
   });
 
-  it('管理员端同样渲染 B 表单，并提供内部结算专属字段', () => {
+  it('管理员端同样渲染 B 表单，按外部销售结算并必须选择外部销售', () => {
     const html = render(false);
 
     expect(html).toContain('data-slot="order-form-b"');
-    expect(html).toContain('内部结算');
+    expect(html).toContain('外部销售应付工厂');
     expect(html).not.toContain('id="customerRef"');
     expect(html).toContain('id="externalSalesUserId"');
-    expect(html).toContain('id="expressCode"');
-    expect(html).toContain('id="items.0.manualQuoteReason"');
-    expect(html).toContain('需人工核价的要求（选填）');
+    expect(html).not.toContain('id="expressCode"');
+    expect(html).not.toContain('id="items.0.manualQuoteReason"');
+    expect(html).not.toContain('需人工核价的要求（选填）');
     expect(html).toContain('id="items.0.artworkVersion"');
     expect(html).not.toContain('id="items.0.plateGroupId"');
     expect(html).not.toContain('id="items.0.pricingGroup"');
-    expect(html).toContain('id="items.0.remark"');
-    expect(tagWithIdSuffix(html, '-custom-name')).not.toContain('required=""');
+    expect(html).not.toContain('id="items.0.remark"');
+    expect(tagWithIdSuffix(html, '-custom-name')).toContain('required=""');
   });
 
   it('管理员急单使用统一 44px 复选框并保留表单语义', () => {

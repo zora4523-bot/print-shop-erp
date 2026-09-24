@@ -104,7 +104,7 @@ describe('OrderForm logistics quote authority', () => {
     expect(source).toContain('busy={');
     expect(source).toContain('pendingState.busy ||');
     expect(source).toMatch(
-      /if\s*\(\s*createdDraft\s*\|\|\s*quoting\s*\|\|\s*externalQuoteQuoting\s*\|\|\s*externalQuoteNeedsRefresh\s*\|\|\s*internalQuoteNeedsRefresh\s*\)\s*\{\s*return;\s*\}/,
+      /if\s*\(\s*createdDraft\s*\|\|\s*externalQuoteQuoting\s*\|\|\s*externalQuoteNeedsRefresh\s*\)\s*\{\s*return;\s*\}/,
     );
   });
 
@@ -180,9 +180,7 @@ describe('OrderForm processing quote concurrency', () => {
     expect(source).toContain(
       'invalidateOrderQuoteRequests(externalQuoteRequestGate.current);',
     );
-    expect(source).toContain(
-      'invalidateOrderQuoteRequests(internalQuoteRequestGate.current);',
-    );
+    expect(source).not.toContain('internalQuoteRequestGate');
     expect(source).toContain('setQuoteViews({});');
     expect(source).toContain('setLogisticsQuote(null);');
     expect(source).toContain('setPackagingQuote(null);');
@@ -190,16 +188,14 @@ describe('OrderForm processing quote concurrency', () => {
     expect(source).toContain('onRemove={(index) => {');
   });
 
-  it('offers only B business routes and reserves configuration-outside notes for internal create', () => {
+  it('offers only B business routes and never sends configuration-outside notes from create', () => {
     expect(formBSource).toContain('<OrderItemCraftFields');
     const sharedSource = readFileSync(path.join(process.cwd(), 'components/business/order/order-form-b/OrderItemFields.tsx'), 'utf8');
     expect(sharedSource).toContain('options={ROUTE_OPTIONS}');
     expect(sharedSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
     expect(formBSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
-    expect(source).toContain(
-      'manualQuoteReason: usesExternalSalesPricing',
-    );
-    expect(source).toContain(': item.manualQuoteReason');
+    expect(source).toContain('manualQuoteReason: null,');
+    expect(source).not.toContain('quoteInternalCreateOrderAction');
   });
 });
 

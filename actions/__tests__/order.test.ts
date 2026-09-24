@@ -187,14 +187,16 @@ const salesActor = {
   machineType: null,
 };
 
-const internalSalesActor = {
+// 管理员代建：必须指定外部销售，走完整 schema（允许管理员价格字段）。
+const adminCreateActor = {
   ...salesActor,
-  id: 'internal-sales-1',
-  role: Role.CUSTOMER_SERVICE,
+  id: 'admin-create-1',
+  role: Role.ADMIN,
 };
 
 function baseOrderInput(over: Record<string, unknown> = {}) {
   return {
+    externalSalesUserId: 'sales-1',
     customerRef: '苹果福',
     receiverName: null,
     receiverPhone: null,
@@ -405,8 +407,21 @@ describe('createOrderAction', () => {
     expect(orderMock.createOrder).not.toHaveBeenCalled();
   });
 
-  it('内部销售保持原 schema，兼容现有价格字段', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+  it('管理员代建未选择外部销售时返回字段错误，不进入领域创建', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
+    const result = await createOrderAction(
+      null,
+      baseOrderInput({ externalSalesUserId: null }),
+    );
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: { externalSalesUserId: ['请选择关联外部销售'] },
+    });
+    expect(orderMock.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('管理员代建保持完整 schema，兼容现有价格字段', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
     orderMock.createOrder.mockResolvedValue({
       id: 'order-internal',
       orderNo: '20260423-0002',
@@ -425,12 +440,12 @@ describe('createOrderAction', () => {
         shippingFee: '12.30',
         items: [expect.objectContaining({ unitPrice: '0.5' })],
       }),
-      internalSalesActor,
+      adminCreateActor,
     );
   });
 
   it('short-circuits on schema failure (empty items)', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
     const result = await createOrderAction(null, baseOrderInput({ items: [] }));
     expect(result.status).toBe('invalid');
     if (result.status === 'invalid') {
@@ -445,7 +460,7 @@ describe('createOrderAction', () => {
     ['纯空格', '   '],
     ['缺失', undefined],
   ])('主收货地址为%s时不进入领域创建', async (_label, receiverAddress) => {
-    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
 
     const result = await createOrderAction(
       null,
@@ -460,7 +475,7 @@ describe('createOrderAction', () => {
   });
 
   it('flattens nested error paths (items.0.quantity) into dotted keys', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
     const input = baseOrderInput();
     // Tamper: quantity = 0, which fails min(1) inside an item.
     const badItems = input.items.map((it) => ({ ...it, quantity: 0 }));
@@ -474,7 +489,7 @@ describe('createOrderAction', () => {
   });
 
   it('trims a custom name and rejects names longer than 100 characters', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
     orderMock.createOrder.mockResolvedValue({
       id: 'order-new',
       orderNo: '20260423-0001',
@@ -488,7 +503,7 @@ describe('createOrderAction', () => {
     );
     expect(orderMock.createOrder).toHaveBeenCalledWith(
       expect.objectContaining({ customName: '王总中秋礼盒首批' }),
-      internalSalesActor,
+      adminCreateActor,
     );
 
     orderMock.createOrder.mockClear();
@@ -501,7 +516,7 @@ describe('createOrderAction', () => {
   });
 
   it('maps OrderInvariantError → error status', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
     orderMock.createOrder.mockRejectedValueOnce(
       new MockOrderInvariantError('工艺不存在：craft-X'),
     );
@@ -536,7 +551,7 @@ describe('createOrderAction', () => {
   });
 
   it('returns a catalog-route invariant as a create error instead of an unhandled failure', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
     orderMock.createOrder.mockRejectedValueOnce(
       new MockOrderInvariantError(
         '建单产品“EXT-CUSTOM”的分类与计价路线“局部烫金（通版现货）”不一致',
@@ -553,7 +568,7 @@ describe('createOrderAction', () => {
   });
 
   it('revalidates and returns ordered item ids for post-create design uploads', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+    permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
     orderMock.createOrder.mockResolvedValue({
       id: 'order-new',
       orderNo: '20260423-0001',
@@ -2094,7 +2109,7 @@ it('accepts an admin recipient and rejects external-sales attempts to assign one
 });
 
 it.each(['P2024', 'P2028'])('建单遇到 %s 返回可重试提示', async code => {
-  permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+  permissionsMock.requirePermission.mockResolvedValue(adminCreateActor);
   orderMock.createOrder.mockRejectedValue({ code });
   await expect(createOrderAction(null, baseOrderInput())).resolves.toEqual({ status: 'error', message: '系统繁忙，请稍后重试' });
 });

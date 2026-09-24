@@ -6,8 +6,6 @@ import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import type {
   CreateOrderQuoteActionInput,
   CreateOrderQuoteMutationResult,
-  InternalCreateOrderQuoteActionInput,
-  InternalCreateOrderQuoteMutationResult,
 } from './create-order-quote.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -19,9 +17,7 @@ import {
 import {
   CreateOrderQuoteError,
   quoteExternalCreateOrder,
-  quoteInternalCreateOrder,
 } from '@/lib/order/create-order-quote-service';
-import { settlementTypeForOrderCreator } from '@/lib/order/settlement';
 
 const factsKeySchema = z
   .string()
@@ -52,11 +48,7 @@ export async function quoteExternalCreateOrderAction(
 ): Promise<CreateOrderQuoteMutationResult> {
   const actor = await requirePermission('order:create');
 
-  if (
-    actor.role !== Role.ADMIN &&
-    settlementTypeForOrderCreator(actor.role) !==
-    OrderSettlementType.EXTERNAL_SALES
-  ) {
+  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES) {
     return { status: 'error', message: '当前账号不使用外部销售结算' };
   }
   if (!isRecord(raw)) {
@@ -157,105 +149,6 @@ export async function quoteExternalCreateOrderAction(
       logistics: logistics.data,
     };
     const quote = await quoteExternalCreateOrder(input);
-    return { status: 'success', quote };
-  } catch (error) {
-    return {
-      status: 'error',
-      message:
-        error instanceof CreateOrderQuoteError
-          ? `报价失败：${error.message}`
-          : '报价失败，请检查价目配置后重试',
-    };
-  }
-}
-
-export async function quoteInternalCreateOrderAction(
-  raw: unknown,
-): Promise<InternalCreateOrderQuoteMutationResult> {
-  const actor = await requirePermission('order:create');
-  const actorSettlementType = settlementTypeForOrderCreator(actor.role);
-  if (actorSettlementType === OrderSettlementType.EXTERNAL_SALES) {
-    return { status: 'error', message: '当前账号使用外部销售结算' };
-  }
-  if (!isRecord(raw)) {
-    return { status: 'invalid', fieldErrors: { _: ['报价数据格式非法'] } };
-  }
-
-  const factsKey = factsKeySchema.safeParse(raw.factsKey);
-  const orderItemCount = orderItemCountSchema.safeParse(raw.orderItemCount);
-  const settlementType = z
-    .union([
-      z.literal(OrderSettlementType.INTERNAL_SALES),
-      z.literal(OrderSettlementType.FACTORY_DIRECT),
-    ])
-    .refine((value) => value === actorSettlementType, '建单结算方向与当前账号不一致')
-    .safeParse(raw.settlementType);
-  const items = createOrderQuoteItemsSchema.safeParse({
-    items: raw.items,
-    orderItemCount: raw.orderItemCount,
-  });
-  const packaging = quoteCreateOrderPackagingGroupsSchema.safeParse({
-    groups: raw.packagingGroups,
-  });
-  // Internal previews price delivery from the same published logistics book
-  // as external sales; the browser only supplies business facts.
-  const logisticsRaw = isRecord(raw.logistics) ? raw.logistics : {};
-  const authoritativeChargeItems = items.success
-    ? items.data.items.map((item, index) => ({
-        itemKey: String(index + 1),
-        quantity: item.quantity,
-        paperWeightGsm: item.paperWeightGsm,
-        paperType: item.paperType,
-        productStructure: item.productStructure,
-      }))
-    : undefined;
-  const logistics = quoteExternalOrderChargesSchema.safeParse({
-    ...logisticsRaw,
-    items: authoritativeChargeItems,
-  });
-  const issues = [
-    ...(logistics.success ? [] : prefixedIssues('logistics', logistics.error.issues)),
-    ...(factsKey.success
-      ? []
-      : prefixedIssues('factsKey', factsKey.error.issues)),
-    ...(settlementType.success
-      ? []
-      : prefixedIssues('settlementType', settlementType.error.issues)),
-    ...(orderItemCount.success
-      ? []
-      : prefixedIssues('orderItemCount', orderItemCount.error.issues)),
-    ...(items.success ? [] : items.error.issues),
-    ...(packaging.success
-      ? []
-      : packaging.error.issues.map((issue) => ({
-          path: ['packagingGroups', ...issue.path.slice(1)],
-          message: issue.message,
-        }))),
-  ];
-  if (issues.length > 0) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(issues) };
-  }
-  if (
-    !factsKey.success ||
-    !settlementType.success ||
-    !orderItemCount.success ||
-    !items.success ||
-    !packaging.success ||
-    !logistics.success
-  ) {
-    return { status: 'invalid', fieldErrors: { _: ['报价数据格式非法'] } };
-  }
-
-  try {
-    const input: InternalCreateOrderQuoteActionInput = {
-      factsKey: factsKey.data,
-      settlementType: settlementType.data,
-      items: items.data.items,
-      orderItemCount: orderItemCount.data,
-      packagingGroups: packaging.data.groups,
-      logistics: logistics.data,
-    };
-    const quote = await quoteInternalCreateOrder(input);
     return { status: 'success', quote };
   } catch (error) {
     return {

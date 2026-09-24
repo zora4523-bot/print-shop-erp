@@ -41,7 +41,6 @@ import {
   createBlankItem,
   createExternalOrderItem,
   normalizeExternalOrderItem,
-  resolveExternalOrderCraftIds,
 } from '@/lib/order/order-item-configuration';
 
 import { externalShipmentContactIssues } from '@/lib/order/external-shipment-contact';
@@ -85,15 +84,12 @@ import {
 } from '@/generated/prisma/enums';
 import { createOrderAction, submitOrderAction } from '@/actions/order';
 import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';
-import { quoteInternalCreateOrderAction } from '@/actions/create-order-quote';
 import type { CreateOrderMutationResult } from '@/actions/order.types';
 import type { CreateOrderPackagingQuotePreview } from '@/lib/order/create-order-quote-presentation';
 import type {
   CreateOrderItemQuotePreview,
   CreateOrderQuoteResult,
-  InternalCreateOrderQuoteResult,
 } from '@/lib/order/create-order-quote-service';
-import type { CustomerPartyOption } from '@/lib/party';
 import { externalPriceRuleDisplayName } from '@/lib/price/external-price-display';
 import {
   type ExternalOrderChargeQuote,
@@ -149,7 +145,7 @@ import {
 } from '@/lib/order/pricing-route';
 import { calculateCreateOrderBagCount } from '@/lib/order/create-order-packaging';
 import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
-import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
+import { ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE, ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
 import {
   shouldProtectOrderFormLeave,
@@ -217,10 +213,8 @@ export type OrderFormProps = {
   workbenchTransferId?: string;
   crafts: readonly CraftOption[];
   products: readonly ProductOption[];
-  customers?: readonly CustomerPartyOption[];
+  /** Present only for administrators, who must pick the external salesperson. */
   externalSalesAccounts?: readonly ExternalSalesAccountOption[];
-  settlementLabel: string;
-  settlementType: OrderSettlementType;
   externalCreateOrderOptions?: ExternalCreateOrderOptions;
   initialExternalPriceSnapshot?: ExternalCreateOrderPriceSnapshot;
   draftScope: string;
@@ -247,12 +241,6 @@ type PackagingQuoteViewState = {
 type ExternalCreateOrderQuoteViewState = {
   inputKey: string;
   result?: CreateOrderQuoteResult;
-  error?: string;
-};
-
-type InternalCreateOrderQuoteViewState = {
-  inputKey: string;
-  result?: InternalCreateOrderQuoteResult;
   error?: string;
 };
 
@@ -358,29 +346,6 @@ export function removeOrderItemRelations({
         ? defaultPackagingGroups(remainingItemCount)
         : nextGroups,
   };
-}
-
-/**
- * Keep only genuinely additional production steps from the previous value and
- * replace every route-owned craft with the facts derived from the current
- * structured selections. This also cleans stale route crafts from recovered
- * local drafts and from PARTIAL/FULL/PRINT route switches.
- */
-export function resolveInternalOrderCraftIds(
-  item: CreateOrderInput['items'][number],
-  crafts: readonly CraftOption[],
-): string[] {
-  const craftById = new Map(crafts.map((craft) => [craft.id, craft]));
-  const additionalIds = item.crafts.filter((id) => {
-    const craft = craftById.get(id);
-    return craft ? isAdditionalOrderCraft(craft) : false;
-  });
-  return [
-    ...new Set([
-      ...resolveExternalOrderCraftIds(item, crafts),
-      ...additionalIds,
-    ]),
-  ];
 }
 
 function compactDecimal(value: string): string {
@@ -593,15 +558,6 @@ function orderItemQuoteFacts(
   };
 }
 
-function internalOrderItemQuoteFacts(
-  item: CreateOrderInput['items'][number],
-): NonNullable<QuoteFacts> {
-  return {
-    ...orderItemQuoteFacts(item),
-    manualQuoteReason: item.manualQuoteReason,
-  };
-}
-
 function formatLocalDraftTime(savedAt: string): string {
   const date = new Date(savedAt);
   if (Number.isNaN(date.getTime())) return '时间未知';
@@ -665,70 +621,10 @@ function UrgentOrderField({
   );
 }
 
-function InternalAdditionalCraftChoices({
-  options,
-  selectedIds,
-  disabled,
-  onToggle,
-}: {
-  options: readonly CraftOption[];
-  selectedIds: readonly string[];
-  disabled: boolean;
-  onToggle: (craftId: string, checked: boolean) => void;
-}) {
-  return (
-    <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 @min-[560px]:grid-cols-2">
-      {options.map((craft) => (
-        <label
-          key={craft.id}
-          className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border pr-3 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
-        >
-          <Checkbox
-            checked={selectedIds.includes(craft.id)}
-            disabled={disabled}
-            aria-label={`${craft.name}${craft.isOutsource ? ' · 外协' : ''}${craft.isLowFrequency ? ' · 低频' : ''}`}
-            onCheckedChange={(checked) => onToggle(craft.id, checked)}
-          />
-          <span className="min-w-0">
-            {craft.name}
-            {craft.isOutsource ? ' · 外协' : ''}
-            {craft.isLowFrequency ? ' · 低频' : ''}
-          </span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function internalQuoteRequestReady(
-  items: CreateOrderInput['items'],
-  groups: CreateOrderInput['packagingGroups'],
-  missingLaminationIndex: number,
-): boolean {
-  return missingLaminationIndex < 0 &&
-    items.length > 0 &&
-    items.every(
-      (item) =>
-        (Boolean(item.manualQuoteReason?.trim()) ||
-          ((Boolean(item.productId) || (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK && Boolean(item.paperType && item.specification))) && item.crafts.length > 0)) &&
-        Number.isSafeInteger(item.quantity) &&
-        item.quantity >= 1,
-    ) &&
-    groups.length > 0 &&
-    groups.every(
-      (group) =>
-        Number.isSafeInteger(group.actualBagCount) &&
-        (group.mode === OrderPackagingMode.UNPACKED ? group.actualBagCount === 0 : group.actualBagCount >= 1),
-    );
-}
-
 export function OrderForm({
   crafts,
   products,
-  customers = [],
   externalSalesAccounts,
-  settlementLabel: defaultSettlementLabel,
-  settlementType,
   externalCreateOrderOptions,
   initialExternalPriceSnapshot,
   draftScope,
@@ -750,8 +646,10 @@ export function OrderForm({
     if (!value) { sampleEditorRef.current = undefined; setRestoredSample(undefined); }
     persistSamplePurpose(value);
   }
-  const isExternalSalesActor = settlementType === OrderSettlementType.EXTERNAL_SALES;
+  // 业主 2026-09-24：所有工单都按外部销售结算。销售本人建单；管理员
+  // （持有 externalSalesAccounts）代建时必须选择外部销售。
   const canAssignExternalSales = externalSalesAccounts !== undefined;
+  const isExternalSalesActor = !canAssignExternalSales;
   const router = useRouter();
   const initialItem = useMemo(() => {
     const firstFoil = externalCreateOrderOptions?.foilColors[0]?.name;
@@ -759,7 +657,6 @@ export function OrderForm({
       crafts, products, externalCreateOrderOptions?.papers ?? [], firstFoil,
     );
     item.designGroupKey = globalThis.crypto.randomUUID();
-    if (!isExternalSalesActor) return item;
     return {
       ...item,
       frontFoilColors: firstFoil ? [firstFoil] : [],
@@ -773,7 +670,6 @@ export function OrderForm({
     externalCreateOrderOptions?.foilColors,
     externalCreateOrderOptions?.papers,
     products,
-    isExternalSalesActor,
   ]);
   const [clientSubmissionId] = useState(() => submissionId ?? globalThis.crypto.randomUUID());
   const form = useForm<CreateOrderInput>({
@@ -798,6 +694,8 @@ export function OrderForm({
     handleSubmit,
     formState: { errors, isDirty, dirtyFields },
     setValue,
+    setError,
+    clearErrors,
     getValues,
     reset,
   } = form;
@@ -815,16 +713,7 @@ export function OrderForm({
   });
   const watchedCustomName = useWatch({ control, name: 'customName' });
   const watchedCustomerRef = useWatch({ control, name: 'customerRef' });
-  const watchedExternalSalesUserId = useWatch({
-    control,
-    name: 'externalSalesUserId',
-  });
-  const usesExternalSalesPricing =
-    isExternalSalesActor ||
-    (canAssignExternalSales && Boolean(watchedExternalSalesUserId));
-  const settlementLabel = usesExternalSalesPricing
-    ? ORDER_SETTLEMENT_LABELS.EXTERNAL_SALES
-    : defaultSettlementLabel;
+  const settlementLabel = ORDER_SETTLEMENT_LABELS.EXTERNAL_SALES;
   const watchedPromisedDate = useWatch({ control, name: 'promisedDate' });
   const watchedReceiverAddress = useWatch({
     control,
@@ -860,7 +749,6 @@ export function OrderForm({
   } | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [submitting, startSubmit] = useTransition();
-  const [quoting, startQuote] = useTransition();
   const [externalQuoteQuoting, startExternalQuote] = useTransition();
   const [quoteViews, setQuoteViews] = useState<Record<string, QuoteViewState>>(
     {},
@@ -871,8 +759,6 @@ export function OrderForm({
     useState<PackagingQuoteViewState | null>(null);
   const [externalOrderQuote, setExternalOrderQuote] =
     useState<ExternalCreateOrderQuoteViewState | null>(null);
-  const [internalOrderQuote, setInternalOrderQuote] =
-    useState<InternalCreateOrderQuoteViewState | null>(null);
   const [submissionValidationVisible, setSubmissionValidationVisible] =
     useState(false);
   const [errorFocusRequest, setErrorFocusRequest] = useState(0);
@@ -904,7 +790,6 @@ export function OrderForm({
   >(null);
   const [localDraftError, setLocalDraftError] = useState<string | null>(null);
   const externalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
-  const internalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
   const itemFieldIdsRef = useRef<string[]>([]);
   const nextItemFigRef = useRef(initialEditor ? resolveNextOrderItemFig(initialEditor.values) : 2);
   const [transferReady, setTransferReady] = useState(!workbenchTransferId);
@@ -962,7 +847,7 @@ export function OrderForm({
     localDraftReady,
     submitting,
     uploading,
-    quoting: quoting || externalQuoteQuoting,
+    quoting: externalQuoteQuoting,
     logisticsQuoting: externalQuoteQuoting,
   });
   const orderFormControlsDisabled =
@@ -1024,7 +909,7 @@ export function OrderForm({
   }, [itemsArray.fields]);
 
   useEffect(() => {
-    if (!usesExternalSalesPricing || !pendingLocalDraft || !transferReady) return;
+    if (!pendingLocalDraft || !transferReady) return;
     const timer = window.setTimeout(() => {
       nextItemFigRef.current = resolveNextOrderItemFig(
         pendingLocalDraft.values,
@@ -1044,7 +929,7 @@ export function OrderForm({
       setLocalDraftError(null);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [clientSubmissionId, pendingLocalDraft, reset, usesExternalSalesPricing, transferReady]);
+  }, [clientSubmissionId, pendingLocalDraft, reset, transferReady]);
 
   useEffect(() => {
     if (!localDraftReady || pendingLocalDraft || createdDraft || !isDirty) {
@@ -1180,7 +1065,7 @@ export function OrderForm({
       lifecycle?.onCompleted({ orderId: draft.orderId, orderNo: draft.orderNo, intent: draft.intent });
       if (lifecycle?.retainResult && draft.intent !== 'fees') {
         setPendingSubmission(null);
-      } else if (usesExternalSalesPricing && draft.intent === 'submit') {
+      } else if (draft.intent === 'submit') {
         setSubmittedOrder({
           orderId: draft.orderId,
           orderNo: draft.orderNo,
@@ -1243,22 +1128,11 @@ export function OrderForm({
       ...(pendingLocalDraft.values as unknown as CreateOrderInput),
       clientSubmissionId,
     };
-    reset(
-      usesExternalSalesPricing
-        ? restoredValues
-        : {
-            ...restoredValues,
-            items: restoredValues.items.map((item) => ({
-              ...item,
-              crafts: resolveInternalOrderCraftIds(item, crafts),
-            })),
-          },
-    );
+    reset(restoredValues);
     setQuoteViews({});
     setLogisticsQuote(null);
     setPackagingQuote(null);
     setExternalOrderQuote(null);
-    setInternalOrderQuote(null);
     setPendingDesigns({});
     setExpandedItem(0);
     setLastLocalDraftSavedAt(pendingLocalDraft.savedAt);
@@ -1310,13 +1184,8 @@ export function OrderForm({
           ...item,
           plateGroupId: null,
           pricingGroup: null,
-          crafts: usesExternalSalesPricing
-            ? item.crafts
-            : resolveInternalOrderCraftIds(item, crafts),
           // Automatic amounts remain server-owned; explicit adminPrice is separately authorized.
-          manualQuoteReason: usesExternalSalesPricing
-            ? null
-            : item.manualQuoteReason,
+          manualQuoteReason: null,
           unitPrice: null,
           fixedFee: null,
           suggestedSubtotal: null,
@@ -1344,14 +1213,9 @@ export function OrderForm({
       const result = await runCreateOrderAction(() =>
         createOrderAction(
           null,
-          usesExternalSalesPricing && !canAssignExternalSales
-            ? {
-                ...buildExternalCreateOrderPayload(submittedData),
-                ...(canAssignExternalSales
-                  ? { externalSalesUserId: submittedData.externalSalesUserId }
-                  : {}),
-              }
-            : submittedData,
+          canAssignExternalSales
+            ? submittedData
+            : buildExternalCreateOrderPayload(submittedData),
         ),
       );
       setState(result);
@@ -1421,10 +1285,8 @@ export function OrderForm({
     // key or programmatic submits while an authoritative quote is in flight.
     if (
       createdDraft ||
-      quoting ||
       externalQuoteQuoting ||
-      externalQuoteNeedsRefresh ||
-      internalQuoteNeedsRefresh
+      externalQuoteNeedsRefresh
     ) {
       return;
     }
@@ -1437,6 +1299,13 @@ export function OrderForm({
     const intent: OrderCreationIntent =
       submitter?.value === 'fees' && canAssignExternalSales ? 'fees' : submitter?.value === 'submit' ? 'submit' : 'draft';
 
+    if (canAssignExternalSales && !data.externalSalesUserId?.trim()) {
+      setError('externalSalesUserId', { type: 'required', message: ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE });
+      setSubmissionValidationVisible(true);
+      setErrorFocusMessage(ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE);
+      setErrorFocusRequest((current) => current + 1);
+      return;
+    }
     if (adminPriceGaps.length) {
       setSubmissionValidationVisible(true);
       setErrorFocusMessage(adminPriceGaps[0].label);
@@ -1446,9 +1315,7 @@ export function OrderForm({
     if (intent !== 'draft') {
       setSubmissionValidationVisible(true);
       setErrorFocusMessage(undefined);
-      const issues = usesExternalSalesPricing
-        ? externalSubmissionIssues(data, fieldIds, queueSnapshot)
-        : formGaps.map((gap) => gap.label);
+      const issues = externalSubmissionIssues(data, fieldIds, queueSnapshot);
       if (issues.length > 0) {
         setErrorFocusRequest((current) => current + 1);
         return;
@@ -1485,12 +1352,10 @@ export function OrderForm({
 
   function invalidateStructuralQuotes() {
     invalidateOrderQuoteRequests(externalQuoteRequestGate.current);
-    invalidateOrderQuoteRequests(internalQuoteRequestGate.current);
     setQuoteViews({});
     setLogisticsQuote(null);
     setPackagingQuote(null);
     setExternalOrderQuote(null);
-    setInternalOrderQuote(null);
     setPendingSubmission(null);
   }
 
@@ -1574,11 +1439,7 @@ export function OrderForm({
       designGroupKey,
       adminPrice: undefined,
       fig: nextItemFigRef.current,
-      name: sameDesign || usesExternalSalesPricing
-        ? source.name
-        : source.name?.trim()
-          ? `${source.name.slice(0, 61)} 副本`
-          : '',
+      name: source.name,
     };
     nextItemFigRef.current += 1;
     setValue('nextItemFig', nextItemFigRef.current, { shouldDirty: true });
@@ -1624,69 +1485,14 @@ export function OrderForm({
       resetPaper?: boolean;
       resetSpecification?: boolean;
       preserveCustomSize?: boolean;
-      internalMaterialChange?:
-        | 'route'
-        | 'paper'
-        | 'weight'
-        | 'specification';
     } = {},
   ) {
-    if (usesExternalSalesPricing) {
-      const externalOptions = {
-        paperKey: options.paperKey,
-        resetPaper: options.resetPaper,
-        resetSpecification: options.resetSpecification,
-        preserveCustomSize: options.preserveCustomSize,
-      };
-      commitExternalItem(index, item, externalOptions);
-      return;
-    }
-
-    const current = getValues(`items.${index}`);
-    const {
-      internalMaterialChange = null,
-      ...normalizationOptions
-    } = options;
-    const normalized = normalizeExternalOrderItem({
-      item,
-      crafts,
-      products,
-      paperMaterials: externalCreateOrderOptions?.papers,
-      ...normalizationOptions,
-      preserveCustomSize: normalizationOptions.preserveCustomSize ?? true,
+    commitExternalItem(index, item, {
+      paperKey: options.paperKey,
+      resetPaper: options.resetPaper,
+      resetSpecification: options.resetSpecification,
+      preserveCustomSize: options.preserveCustomSize,
     });
-    setValue(
-      `items.${index}`,
-      {
-        ...normalized,
-        name: current.name,
-        // Catalog facts are an atomic selection; mixing old paper/spec fields
-        // with a newly resolved product causes the server to reject the quote.
-        ...(internalMaterialChange === null ? {
-          productId: current.productId,
-          productStructure: current.productStructure,
-          specification: current.specification,
-          paperType: current.paperType,
-          paperWeightGsm: current.paperWeightGsm,
-          actualWidthMm: current.actualWidthMm,
-          actualHeightMm: current.actualHeightMm,
-        } : {}),
-        crafts: resolveInternalOrderCraftIds(
-          { ...normalized, crafts: current.crafts },
-          crafts,
-        ),
-        artworkVersion: current.artworkVersion,
-        plateGroupId: null,
-        pricingGroup: null,
-        manualQuoteReason: current.manualQuoteReason,
-        unitPrice: null,
-        fixedFee: null,
-        suggestedSubtotal: null,
-        priceOverrideReason: null,
-        remark: current.remark,
-      },
-      { shouldDirty: true, shouldValidate: true },
-    );
   }
 
   function applyItemSelection(index: number, change: OrderItemSelectionChange) {
@@ -1884,7 +1690,7 @@ export function OrderForm({
     .map((item) => quoteFactsKey(item, watchedItems.length))
     .join('|');
   useEffect(() => {
-    if (!usesExternalSalesPricing || !localDraftReady || createdDraft) return;
+    if (!localDraftReady || createdDraft) return;
     watchedItems.forEach((item, index) => {
       const normalized = normalizeExternalOrderItem({
         item,
@@ -1917,7 +1723,6 @@ export function OrderForm({
     externalCreateOrderOptions?.papers,
     externalCreateOrderOptions?.foilColors,
     setValue,
-    usesExternalSalesPricing,
     watchedItems,
     watchedPackagingGroups.length,
   ]);
@@ -2013,160 +1818,6 @@ export function OrderForm({
   };
   const currentLogisticsInputKey = JSON.stringify(currentLogisticsProjection);
 
-  const currentInternalQuoteFactsKey = compactOrderQuoteFactsKey({
-    itemFacts: watchedItems.map((item) =>
-      quoteFactsKey(item, watchedItems.length),
-    ),
-    packaging: currentPackagingInputKey,
-    logistics: currentLogisticsInputKey,
-    openedPriceVersion: null,
-  });
-  const currentInternalQuoteInput = useCallback(() => {
-    const values = getValues();
-    const packaging = currentPackagingQuoteInput();
-    // Same logistics facts as the external preview: the submit finalizer
-    // recomputes them and compares the handshake token.
-    const logistics = currentLogisticsQuoteInput();
-    return {
-      factsKey: compactOrderQuoteFactsKey({
-        itemFacts: values.items.map((item) =>
-          quoteFactsKey(item, values.items.length),
-        ),
-        packaging: JSON.stringify(packaging),
-        logistics: JSON.stringify(logistics),
-        openedPriceVersion: null,
-      }),
-      settlementType,
-      items: values.items.map(internalOrderItemQuoteFacts),
-      orderItemCount: values.items.length,
-      packagingGroups: packaging.groups,
-      logistics,
-    };
-  }, [currentLogisticsQuoteInput, currentPackagingQuoteInput, getValues, settlementType]);
-  const currentInternalQuoteRequestReady = internalQuoteRequestReady(
-    watchedItems, watchedPackagingGroups, missingLaminationIndex,
-  );
-
-  const internalQuoteNeedsRefresh =
-    !usesExternalSalesPricing &&
-    currentInternalQuoteRequestReady &&
-    !(internalOrderQuote?.inputKey === currentInternalQuoteFactsKey &&
-      (internalOrderQuote.result || internalOrderQuote.error));
-
-  useEffect(() => {
-    if (
-      usesExternalSalesPricing ||
-      !localDraftReady ||
-      createdDraft ||
-      submitting ||
-      uploading ||
-      !currentInternalQuoteRequestReady ||
-      internalOrderQuote?.inputKey === currentInternalQuoteFactsKey
-    ) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const input = currentInternalQuoteInput();
-      if (input.factsKey !== currentInternalQuoteFactsKey) return;
-      const requestId = beginOrderQuoteRequest(
-        internalQuoteRequestGate.current,
-      );
-      const fieldIds = [...itemFieldIdsRef.current];
-      const packagingInputKey = JSON.stringify({
-        groups: input.packagingGroups,
-      });
-      const logisticsInputKey = JSON.stringify(input.logistics);
-      setInternalOrderQuote({ inputKey: input.factsKey });
-      startQuote(async () => {
-        // Transport failures must use the same stale-response gate and retry UI
-        // as domain errors, rather than escaping the transition to error.tsx.
-        const response = await quoteInternalCreateOrderAction(input).catch(() => ({
-          status: 'error' as const,
-          message: '自动核价请求失败，请检查网络后点击重新报价',
-        }));
-        if (
-          !isCurrentOrderQuoteResponse({
-            gate: internalQuoteRequestGate.current,
-            requestId,
-            inputKey: input.factsKey,
-            currentInputKey: currentInternalQuoteInput().factsKey,
-            fieldIds,
-            currentFieldIds: itemFieldIdsRef.current,
-          })
-        ) {
-          return;
-        }
-        if (
-          response.status === 'success' &&
-          response.quote.factsKey === input.factsKey
-        ) {
-          setQuoteViews(
-            Object.fromEntries(
-              fieldIds.map((fieldId, index) => [
-                fieldId,
-                {
-                  inputKey: quoteFactsKey(
-                    input.items[index],
-                    input.orderItemCount,
-                  ),
-                  result: response.quote.items[index],
-                },
-              ]),
-            ),
-          );
-          setPackagingQuote({
-            inputKey: packagingInputKey,
-            result: response.quote.packaging,
-          });
-          setLogisticsQuote({
-            inputKey: logisticsInputKey,
-            result: response.quote.logistics,
-          });
-          setInternalOrderQuote({
-            inputKey: input.factsKey,
-            result: response.quote,
-          });
-          return;
-        }
-        const error =
-          response.status === 'error'
-            ? response.message
-            : response.status === 'invalid'
-              ? Object.values(response.fieldErrors).flat().join('；')
-              : '报价响应与当前工单不一致，请重试';
-        setQuoteViews(
-          Object.fromEntries(
-            fieldIds.map((fieldId, index) => [
-              fieldId,
-              {
-                inputKey: quoteFactsKey(
-                  input.items[index],
-                  input.orderItemCount,
-                ),
-                error,
-              },
-            ]),
-          ),
-        );
-        setPackagingQuote({ inputKey: packagingInputKey, error });
-        setLogisticsQuote({ inputKey: logisticsInputKey, error });
-        setInternalOrderQuote({ inputKey: input.factsKey, error });
-      });
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [
-    createdDraft,
-    currentInternalQuoteFactsKey,
-    currentInternalQuoteInput,
-    currentLogisticsInputKey,
-    currentInternalQuoteRequestReady,
-    internalOrderQuote?.inputKey,
-    localDraftReady,
-    startQuote,
-    submitting,
-    uploading,
-    usesExternalSalesPricing,
-  ]);
   const currentLogisticsQuoteReady = currentLogisticsProjection.shipments.every(
     (shipment) => shipment.itemQuantity > 0,
   );
@@ -2237,13 +1888,11 @@ export function OrderForm({
       (externalOrderQuote.result || externalOrderQuote.error),
   );
   const externalQuoteNeedsRefresh =
-    usesExternalSalesPricing &&
     currentExternalQuoteRequestReady &&
     !externalQuoteHasCurrentResponse;
 
   useEffect(() => {
     if (
-      !usesExternalSalesPricing ||
       !localDraftReady ||
       createdDraft ||
       submitting ||
@@ -2354,7 +2003,6 @@ export function OrderForm({
     startExternalQuote,
     submitting,
     uploading,
-    usesExternalSalesPricing,
   ]);
   // RHF renders client-side field errors next to their controls. The server
   // can still reject backend-only facts such as a disabled product/craft;
@@ -2362,7 +2010,7 @@ export function OrderForm({
   const serverFieldErrors =
     state?.status === 'invalid' ? state.fieldErrors : undefined;
   const serverGeneralError = state?.status === 'error' ? state.message : null;
-  const { adminPriceFacts, adminPackagingFacts, adminPrices, adminPackagingPrices, hasAdminPrices } = adminCreatePricingState(watchedItems, watchedPackagingGroups, watchedShipments, canAssignExternalSales, usesExternalSalesPricing, crafts);
+  const { adminPriceFacts, adminPackagingFacts, adminPrices, adminPackagingPrices, hasAdminPrices } = adminCreatePricingState(watchedItems, watchedPackagingGroups, watchedShipments, canAssignExternalSales);
 
   const itemGapInputs = watchedItems.map((item, index) => {
     const fieldId = itemsArray.fields[index]?.id;
@@ -2371,9 +2019,7 @@ export function OrderForm({
     let quoteStatus: OrderFormQuoteStatus = 'missing';
     if (
       fieldId &&
-      (usesExternalSalesPricing
-        ? externalQuoteQuoting
-        : quoting)
+      externalQuoteQuoting
     ) {
       quoteStatus = 'loading';
     } else if (view?.inputKey !== undefined && view.inputKey !== currentKey) {
@@ -2419,7 +2065,7 @@ export function OrderForm({
     promisedDate: watchedPromisedDate,
     items: itemGapInputs,
     shipping: {
-      usesExternalSalesPricing,
+      usesExternalSalesPricing: true,
       isSfCollect: watchedIsSfCollect,
       shipments: shipmentGapInputs,
     },
@@ -2428,7 +2074,7 @@ export function OrderForm({
     ...adminPrices.flatMap((value, index) => value?.error ? [{ label: `款式 #${index + 1}：${value.error}`, fieldId: `items.${index}.adminPrice.amount`, itemIndex: index }] : []),
     ...adminPackagingPrices.flatMap((value, index) => value?.error ? [{ label: `包装组 ${index + 1}：${value.error}`, fieldId: `packagingGroups.${index}.adminPrice.amount`, itemIndex: watchedPackagingGroups[index].itemUnitsPerBag.findIndex((units) => units > 0) }] : []),
   ];
-  const orderFormBGaps = [...(usesExternalSalesPricing ? [] : formGaps), ...adminPriceGaps].map((gap) => gap.label);
+  const orderFormBGaps = adminPriceGaps.map((gap) => gap.label);
   const totalQuantity = watchedItems.reduce(
     (sum, item) => sum + (Number.isFinite(item.quantity) ? item.quantity : 0),
     0,
@@ -2441,8 +2087,6 @@ export function OrderForm({
       view?.inputKey === quoteFactsKey(watchedItems[index], watchedItems.length);
     const result = current ? view?.result : undefined;
     const manualPrice = adminPrices[index]?.price;
-    const manualPricingRequested =
-      !manualPrice && !usesExternalSalesPricing && Boolean(item.manualQuoteReason?.trim());
     return {
       key: fieldId,
       design: { key: watchedItems[index]?.designGroupKey ?? fieldId,
@@ -2453,13 +2097,13 @@ export function OrderForm({
         ORDER_PRICING_ROUTE_LABELS[
           watchedItems[index]?.pricingRoute ?? OrderItemPricingRoute.STOCK_BLANK
         ],
-      status: manualPricingRequested ? 'incomplete' : item.quoteStatus,
+      status: item.quoteStatus,
       amount: manualPrice?.subtotal ?? (
-        !manualPricingRequested && item.quoteStatus === 'complete'
+        item.quoteStatus === 'complete'
           ? (result?.suggestedSubtotal ?? null)
           : null),
       components:
-        !manualPrice && !manualPricingRequested && item.quoteStatus === 'complete'
+        !manualPrice && item.quoteStatus === 'complete'
             ? (result?.components ?? []).map((component) => ({
                 label: externalQuoteComponentLabel(
                   watchedItems[index] ?? item,
@@ -2470,9 +2114,7 @@ export function OrderForm({
             : [],
       pricingSource: manualPrice ? 'ADMIN' as const : 'AUTO' as const,
       message: manualPrice ? '人工定价' :
-        manualPricingRequested
-          ? `配置外项目：${item.manualQuoteReason?.trim()}`
-          : item.quoteStatus === 'error'
+        item.quoteStatus === 'error'
           ? view?.error
           : item.quoteStatus === 'incomplete'
             ? result?.errors.join('；')
@@ -2490,7 +2132,7 @@ export function OrderForm({
     primaryLogisticsShipment?.shipping.basis.billableWeightKg;
   // Every billing settlement quotes delivery from the published logistics book.
   const railLogistics = {
-        status: (usesExternalSalesPricing ? externalQuoteQuoting : quoting)
+        status: externalQuoteQuoting
           ? ('loading' as const)
           : !logisticsQuote
             ? ('missing' as const)
@@ -2525,7 +2167,7 @@ export function OrderForm({
     ? undefined
     : packagingQuote?.result;
   const railPackaging: ExternalSalesPackagingQuote = {
-    status: (usesExternalSalesPricing ? externalQuoteQuoting : quoting)
+    status: externalQuoteQuoting
       ? 'loading'
       : !packagingQuote
         ? 'missing'
@@ -2555,13 +2197,7 @@ export function OrderForm({
     externalOrderQuote?.inputKey === currentExternalQuoteFactsKey
       ? externalOrderQuote.result
       : undefined;
-  const currentInternalOrderQuote =
-    internalOrderQuote?.inputKey === currentInternalQuoteFactsKey
-      ? internalOrderQuote.result
-      : undefined;
-  const currentCreateOrderQuote = usesExternalSalesPricing
-    ? currentExternalOrderQuote
-    : currentInternalOrderQuote;
+  const currentCreateOrderQuote = currentExternalOrderQuote;
   const displayedKnownTotal = hasAdminPrices ? sumCreateKnownAmounts([
     ...railQuoteItems.map((item) => item.status === 'complete' ? item.amount : null),
     ...watchedPackagingGroups.map((_, index) => adminPackagingPrices[index]
@@ -2715,7 +2351,6 @@ export function OrderForm({
   // 这一帧 watchedItems[expandedItem] 为 undefined；凡按下标取当前款的渲染都要经此别名守卫，
   // 否则管理员人工定价区会抛 TypeError 把整页送进错误边界（PR #19 CI 首次暴露）。
   const expandedWatchedItem = watchedItems[expandedItem];
-  const internalAdditionalCraftOptions = additionalOrderCraftOptions(crafts);
   const {
     activeExternalPaper,
     externalPaperOptions,
@@ -2751,9 +2386,7 @@ export function OrderForm({
     }),
   };
   const externalLocalIssues = submissionValidationVisible
-    ? usesExternalSalesPricing
-      ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), selectedDesignQueues)
-      : orderFormBGaps
+    ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), selectedDesignQueues)
     : [];
   const externalItemErrors: OrderFormBErrors['items'] =
     watchedItems.map((item, index) => {
@@ -2776,7 +2409,7 @@ export function OrderForm({
         quantity:
           quantityMessage,
         designImage:
-          usesExternalSalesPricing && submissionValidationVisible && !hasImage
+          submissionValidationVisible && !hasImage
             ? '请上传设计图'
             : undefined,
       };
@@ -2834,29 +2467,25 @@ export function OrderForm({
     ],
     customName:
       errors.customName?.message ??
-      (usesExternalSalesPricing &&
-      submissionValidationVisible &&
+      (submissionValidationVisible &&
       !getValues('customName')?.trim()
         ? '工单名称必填'
         : undefined),
     receiverName:
       errors.receiverName?.message ??
-      (usesExternalSalesPricing &&
-      submissionValidationVisible &&
+      (submissionValidationVisible &&
       !getValues('receiverName')?.trim()
         ? '收件人必填'
         : undefined),
     receiverPhone:
       errors.receiverPhone?.message ??
-      (usesExternalSalesPricing &&
-      submissionValidationVisible &&
+      (submissionValidationVisible &&
       !getValues('receiverPhone')?.trim()
         ? '收货电话必填'
         : undefined),
     receiverAddress:
       errors.receiverAddress?.message ??
-      (usesExternalSalesPricing &&
-      submissionValidationVisible &&
+      (submissionValidationVisible &&
       !getValues('receiverAddress')?.trim()
         ? '收货地址必填'
         : undefined),
@@ -2867,7 +2496,7 @@ export function OrderForm({
       crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
       initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute} />;
   }
-  if (usesExternalSalesPricing && submittedOrder) {
+  if (submittedOrder) {
     return (
       <OrderSubmissionSuccess
         orderNumber={submittedOrder.orderNo}
@@ -2959,10 +2588,10 @@ export function OrderForm({
           <OrderFormB
             title="新建工单"
             settlementLabel={settlementLabel}
-            customNameRequired={usesExternalSalesPricing}
-            designImageRequired={usesExternalSalesPricing}
-            receiverNameRequired={usesExternalSalesPricing}
-            receiverPhoneRequired={usesExternalSalesPricing}
+            customNameRequired
+            designImageRequired
+            receiverNameRequired
+            receiverPhoneRequired
             values={{
               customName: watchedCustomName ?? '',
               receiverName: watchedReceiverName ?? '',
@@ -2979,12 +2608,15 @@ export function OrderForm({
                   {canAssignExternalSales ? (
                     <div className="@min-[560px]:col-span-2">
                       <Label htmlFor="externalSalesUserId">
-                        关联外部销售（选填）
+                        关联外部销售（必填）
                       </Label>
                       <select
                         id="externalSalesUserId"
                         className={`${selectClass} mt-2`}
+                        required
+                        aria-required="true"
                         aria-invalid={Boolean(errors.externalSalesUserId)}
+                        aria-describedby="externalSalesUserId-hint"
                         {...register('externalSalesUserId', {
                           setValueAs: (value) => (value === '' ? null : value),
                         })}
@@ -2994,80 +2626,26 @@ export function OrderForm({
                             event.target.value || null,
                             { shouldDirty: true, shouldValidate: true },
                           );
+                          if (event.target.value) clearErrors('externalSalesUserId');
                           invalidateStructuralQuotes();
                         }}
                       >
-                        <option value="">工厂直接业务</option>
+                        <option value="">请选择外部销售</option>
                         {externalSalesAccounts.map((account) => (
                           <option key={account.id} value={account.id}>
                             {account.displayName} · {account.username}
                           </option>
                         ))}
                       </select>
-                      <FieldError reservedLines={1}>
+                      <FieldError
+                        id="externalSalesUserId-hint"
+                        reservedLines={1}
+                        hint="工单归属所选外部销售并按外部销售结算。"
+                      >
                         {errors.externalSalesUserId?.message}
                       </FieldError>
                     </div>
-                  ) : (
-                    <>
-                      <div>
-                        <Label htmlFor="customerPartyId">关联客户（选填）</Label>
-                        <select
-                          id="customerPartyId"
-                          className={`${selectClass} mt-2`}
-                          {...register('customerPartyId', {
-                            setValueAs: (value) => (value === '' ? null : value),
-                            onChange: (event) => {
-                              const customer = customers.find(
-                                (candidate) => candidate.id === event.target.value,
-                              );
-                              if (!customer) return;
-                              setValue(
-                                'customerRef',
-                                customer.shortName ?? customer.name,
-                                { shouldDirty: true, shouldValidate: true },
-                              );
-                              if (!getValues('receiverName') && customer.receiverName) {
-                                setValue('receiverName', customer.receiverName, {
-                                  shouldDirty: true,
-                                });
-                              }
-                              if (!getValues('receiverPhone') && customer.receiverPhone) {
-                                setValue('receiverPhone', customer.receiverPhone, {
-                                  shouldDirty: true,
-                                });
-                              }
-                              if (!getValues('receiverAddress') && customer.receiverAddress) {
-                                setValue('receiverAddress', customer.receiverAddress, {
-                                  shouldDirty: true,
-                                  shouldValidate: true,
-                                });
-                              }
-                            },
-                          })}
-                        >
-                          <option value="">— 临时客户 / 仅填写简称 —</option>
-                          {customers.map((customer) => (
-                            <option key={customer.id} value={customer.id}>
-                              {customer.code} · {customer.shortName ?? customer.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <Label htmlFor="customerRef">客户名称/简称</Label>
-                        <Input
-                          id="customerRef"
-                          className="mt-2 h-10"
-                          aria-invalid={Boolean(errors.customerRef)}
-                          {...register('customerRef')}
-                        />
-                        <FieldError reservedLines={1}>
-                          {errors.customerRef?.message}
-                        </FieldError>
-                      </div>
-                    </>
-                  )}
+                  ) : null}
                   <div>
                     <Label htmlFor="promisedDate">承诺交期</Label>
                     <Input
@@ -3131,7 +2709,7 @@ export function OrderForm({
                 />
               </>
             }
-            pricingExtras={canAssignExternalSales || !usesExternalSalesPricing || quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <>
+            pricingExtras={canAssignExternalSales || quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <>
               {canAssignExternalSales && expandedWatchedItem ? <AdminCreatePriceFields
                 divided={false}
                 amountId={`items.${expandedItem}.adminPrice.amount`}
@@ -3142,73 +2720,7 @@ export function OrderForm({
                 error={adminPrices[expandedItem]?.error}
                 onChange={(price) => setValue(`items.${expandedItem}.adminPrice`, price, { shouldDirty: true, shouldValidate: true })}
               /> : null}
-              {quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <div className="mt-3"><Button type="button" variant="outline" disabled={orderFormControlsDisabled || quoting || externalQuoteQuoting} onClick={() => { setInternalOrderQuote(null); setExternalOrderQuote(null); }}>重新报价</Button></div> : null}
-              {!usesExternalSalesPricing ? (
-                <section
-                  aria-label="内部生产信息"
-                  className="mt-6 space-y-4"
-                >
-                  <h3 className="text-sm font-semibold">其他要求</h3>
-                  <div className="grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-                    <div className="@min-[560px]:col-span-2">
-                      <Label htmlFor={`items.${expandedItem}.manualQuoteReason`}>
-                        需人工核价的要求（选填）
-                      </Label>
-                      <Textarea
-                        id={`items.${expandedItem}.manualQuoteReason`}
-                        className="mt-2 min-h-20"
-                        placeholder="选项中没有所需纸张、规格或工艺时，请在此填写具体要求"
-                        aria-invalid={Boolean(
-                          errors.items?.[expandedItem]?.manualQuoteReason,
-                        )}
-                        {...register(`items.${expandedItem}.manualQuoteReason`)}
-                      />
-                    </div>
-                    <div className="@min-[560px]:col-span-2">
-                      <Label htmlFor={`items.${expandedItem}.remark`}>
-                        款式备注
-                      </Label>
-                      <Textarea
-                        id={`items.${expandedItem}.remark`}
-                        className="mt-2 min-h-16"
-                        placeholder="颜色、方向和工艺注意事项"
-                        {...register(`items.${expandedItem}.remark`)}
-                      />
-                    </div>
-                  </div>
-                  {internalAdditionalCraftOptions.length > 0 ? (
-                    <fieldset className="mt-5 space-y-3">
-                      <legend className="text-sm font-semibold">
-                        附加工艺（选填）
-                      </legend>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        选择额外工序。
-                      </p>
-                      <InternalAdditionalCraftChoices
-                        options={internalAdditionalCraftOptions}
-                        selectedIds={watchedItems[expandedItem]?.crafts ?? []}
-                        disabled={orderFormControlsDisabled}
-                        onToggle={(craftId, checked) => {
-                          for (const member of designItemIndexes(getValues('items'), expandedItem)) {
-                            const currentItem = getValues(`items.${member}`);
-                            const next = new Set(currentItem.crafts);
-                            if (checked) next.add(craftId);
-                            else next.delete(craftId);
-                            setValue(
-                              `items.${member}.crafts`,
-                              resolveInternalOrderCraftIds(
-                                { ...currentItem, crafts: [...next] },
-                                crafts,
-                              ),
-                              { shouldDirty: true, shouldValidate: true },
-                            );
-                          }
-                        }}
-                      />
-                    </fieldset>
-                  ) : null}
-                </section>
-              ) : null}
+              {quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <div className="mt-3"><Button type="button" variant="outline" disabled={orderFormControlsDisabled || externalQuoteQuoting} onClick={() => { setExternalOrderQuote(null); }}>重新报价</Button></div> : null}
             </> : undefined}
             packagingExtras={canAssignExternalSales ?
               <div className="space-y-3">
@@ -3244,20 +2756,6 @@ export function OrderForm({
                   {errors.packageRequirement?.message}
                 </FieldError>
               </div>
-            }
-            shippingExtras={
-              !usesExternalSalesPricing ? (
-                <div className="mb-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-                  <div>
-                    <Label htmlFor="expressCode">快递代码</Label>
-                    <Input
-                      id="expressCode"
-                      className="mt-2 h-10"
-                      {...register('expressCode')}
-                    />
-                  </div>
-                </div>
-              ) : undefined
             }
             footerExtras={
               <section className="space-y-3">
@@ -3340,16 +2838,16 @@ export function OrderForm({
                               </Label>
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverName`}
-                                required={usesExternalSalesPricing}
-                                aria-invalid={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim()}
-                                aria-describedby={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? `extra-${shipmentIndex}-receiverName-error` : undefined}
+                                required
+                                aria-invalid={submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim()}
+                                aria-describedby={submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? `extra-${shipmentIndex}-receiverName-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverName`,
                                 )}
                               />
                               <FieldError id={`extra-${shipmentIndex}-receiverName-error`} reservedLines={1}>
-                                {usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? '请填写收件人' : undefined}
+                                {submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? '请填写收件人' : undefined}
                               </FieldError>
                             </div>
                             <div>
@@ -3360,16 +2858,16 @@ export function OrderForm({
                               </Label>
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverPhone`}
-                                required={usesExternalSalesPricing}
-                                aria-invalid={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim()}
-                                aria-describedby={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? `extra-${shipmentIndex}-receiverPhone-error` : undefined}
+                                required
+                                aria-invalid={submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim()}
+                                aria-describedby={submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? `extra-${shipmentIndex}-receiverPhone-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverPhone`,
                                 )}
                               />
                               <FieldError id={`extra-${shipmentIndex}-receiverPhone-error`} reservedLines={1}>
-                                {usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? '请填写联系电话' : undefined}
+                                {submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? '请填写联系电话' : undefined}
                               </FieldError>
                             </div>
                             <div>
@@ -3462,7 +2960,7 @@ export function OrderForm({
             specificationOptions={externalSpecificationOptions}
             foilOptions={externalCreateOrderOptions ? externalFoilOptions : undefined}
             allowManualWeight={canAssignExternalSales}
-            allowCustomSize={usesExternalSalesPricing || canAssignExternalSales}
+            allowCustomSize
             disabled={
               !localDraftReady ||
               submitting ||
@@ -3474,7 +2972,7 @@ export function OrderForm({
                 ? localDraftStatusError
                 : lastLocalDraftSavedAt
                 ? `草稿已保存 ${formatLocalDraftTime(lastLocalDraftSavedAt)}`
-                : initialExternalPriceSnapshot && usesExternalSalesPricing
+                : initialExternalPriceSnapshot
                   ? `加工 v${initialExternalPriceSnapshot.processing.version} / 物流 v${initialExternalPriceSnapshot.logistics.version} · 草稿未保存`
                   : '草稿未保存'
             }
@@ -3487,7 +2985,7 @@ export function OrderForm({
                 quoteItems={railQuoteItems}
                 packaging={railPackaging}
                 logistics={railLogistics}
-                usesExternalSalesPricing={usesExternalSalesPricing}
+                usesExternalSalesPricing
                 allowSaveDraft={!isExternalSalesActor}
                 settlementLabel={settlementLabel}
                 knownTotal={displayedKnownTotal}
@@ -3496,8 +2994,6 @@ export function OrderForm({
                 gaps={orderFormBGaps}
                 busy={
                   pendingState.busy ||
-                  quoting ||
-                  internalQuoteNeedsRefresh ||
                   externalQuoteQuoting ||
                   externalQuoteNeedsRefresh ||
                   Boolean(createdDraft)
@@ -3673,7 +3169,7 @@ export function OrderForm({
           />
         )}
       </fieldset>
-      {createdDraft && (!usesExternalSalesPricing || createdDraft.intent === 'draft') ? (
+      {createdDraft && createdDraft.intent === 'draft' ? (
         <section
           className={
             uploadError
@@ -3735,7 +3231,7 @@ export function OrderForm({
           }))}
           feeDetails={<OrderCreateFeeDetails
             quoteItems={railQuoteItems} packaging={railPackaging} logistics={railLogistics}
-            usesExternalSalesPricing={usesExternalSalesPricing} plateFee={currentCreateOrderQuote?.plateFee}
+            usesExternalSalesPricing plateFee={currentCreateOrderQuote?.plateFee}
           />}
           totalLabel={
             submitQuoteChange
@@ -3749,7 +3245,7 @@ export function OrderForm({
           }
           totalNote={uploadError ?? serverGeneralError ?? orderCreateFeeSummary({
             quoteItems: railQuoteItems, packaging: railPackaging, logistics: railLogistics,
-            usesExternalSalesPricing, totalSemantics: displayedTotalSemantics,
+            usesExternalSalesPricing: true, totalSemantics: displayedTotalSemantics,
             plateFee: currentCreateOrderQuote?.plateFee,
           }).totalNote ?? undefined}
           confirmLabel={
@@ -3863,17 +3359,9 @@ function adminCreatePricingState(
   watchedPackagingGroups: CreateOrderInput['packagingGroups'],
   watchedShipments: CreateOrderInput['additionalShipments'],
   canAssignExternalSales: boolean,
-  usesExternalSalesPricing: boolean,
-  crafts: readonly CraftOption[],
 ) {
   function adminPriceFacts(item: CreateOrderInput['items'][number]) {
-    return adminCreatePriceFactsKey({
-      ...item,
-      manualQuoteReason: usesExternalSalesPricing ? null : item.manualQuoteReason,
-      crafts: usesExternalSalesPricing
-        ? item.crafts
-        : resolveInternalOrderCraftIds(item, crafts),
-    });
+    return adminCreatePriceFactsKey({ ...item, manualQuoteReason: null });
   }
   const adminPrices = watchedItems.map((item) => {
     if (!canAssignExternalSales || !item.adminPrice) return null;

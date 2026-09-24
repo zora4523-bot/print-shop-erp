@@ -74,14 +74,6 @@ function arrangeSubmit(pricingStatus: OrderPricingStatus) {
       priceRevision: 1,
     })
     .mockResolvedValueOnce({
-      submitterId: 'owner-1',
-      submitterRole: Role.ADMIN,
-      billingMode: OrderBillingMode.CHARGE,
-      settlementType: OrderSettlementType.FACTORY_DIRECT,
-      totalAmount: '180.00',
-      revision: 1,
-    })
-    .mockResolvedValueOnce({
       billingMode: OrderBillingMode.CHARGE,
       pricingStatus,
     })
