@@ -47,7 +47,7 @@ Schema 中的模型按以下业务域组织；字段、关系、索引和约束�
 | 生产与外协 | `ProductionTask`、`OutsourceOrder`、`OutsourceOrderItemSnapshot`、`OutsourcePayment` |
 | 定价 | `PriceTier`、`PriceAdjustment`、`CustomerPriceBook`、`CustomerPriceRule`、`OrderCustomerCharge` |
 | BOM、库存与采购 | `BillOfMaterial`、`Material`、`Warehouse`、`MaterialLocationStock`、`MaterialTransaction`、`InventoryCount`、`PurchaseOrder`、`PurchaseReceipt` |
-| 薪资与考勤 | `SalaryRule`、`WorkerMachineSalaryRule`、`DailyWorkerSalary`、`HourlyWorkerPayroll`、`Attendance` |
+| 薪资与考勤 | `SalaryRule`、`WorkerMachineSalaryRule`、`DailyWorkerSalary`、`HourlyWorkerPayroll`（只读打包历史存档）、`Attendance` |
 | 账单与成本 | `Bill`、`BillPayment`、`BillItem`、`OrderCostEntry` |
 | 通知与任务 | `NotificationChannel`、`NotificationRule`、`NotificationLog`、`BackgroundJob`、`BackgroundJobAttempt`、`BackgroundWorkerHeartbeat` |
 | 系统配置 | `Setting`、业务编号序列模型 |
@@ -303,3 +303,30 @@ pnpm db:studio
 ## 报工代次插入保护（2026-09-21）
 
 增量迁移 `20260921100000_production_report_generation_guard` 对 ProductionReport 的新 REPORT 与全部 ProductionProgressReport 新增 BEFORE INSERT 闸口：从父工序/步骤读取工单，在 order-cascade advisory lock 下比较父代次与工单当前版本。触发器排序在既有工序行锁之前。报工表本身没有 orderId/workOrderVersion，不能直接套用父表触发函数。历史 REVERSAL/ADJUSTMENT 继续走已有锚点、管理员与结算保护，不把工资纠错当作旧代追加生产。迁移可重复执行，不更新历史行、不修改既有迁移。
+
+## 删除客服 / 清废厨师与脱敏策略清理（2026-09-24）
+
+业主 2026-09-24 决定（DECISIONS 同日、SPEC §L）由三条前向迁移落地，迁移链共 165 条：
+
+- `20260924100000_remove_cleaner_cook_cleaning`：`WorkerType` 只剩 `MACHINE | PACKER`；删除
+  `SalaryRuleType.COOK_SALARY`、`CLEANING` 工艺及其能力行、规则 `CLEANER_HOURLY` / `COOK_SPARE_HOURLY` /
+  `OT_MULTIPLIER`，删除列 `Attendance.spareHours`、`HourlyWorkerPayroll.totalSpareHours` / `spareSalary`
+  并重建 `HourlyWorkerPayroll_component_total_reconciles`（`totalSalary = baseSalary + otSalary`）；
+  排队中的 `CRON_HOURLY_PAYROLL` 任务标记 `CANCELLED`（`lastErrorCode = JOB_TYPE_REMOVED`）。
+- `20260924110000_remove_customer_service_role`：`Role` 只剩 `ADMIN | SALES | WORKER`；
+  `OrderSettlementType` 只剩 `EXTERNAL_SALES | NO_CHARGE`；删除 `SalaryRuleType.CS_COMMISSION` 及其规则行、
+  `SalaryPeriod` / `CsSalesEntry` / `CustomerServiceCommission` / `CsPayrollPayment` 四张表与
+  `SalaryPeriodStatus` / `CsSalesEntryType` 枚举、`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED` 通知规则；
+  排队中的客服 cron 与客服通知任务标记 `CANCELLED`；重建 `Order_protect_billed_settlement` 触发器与相关
+  CHECK 约束，`Order_settlement_role_consistent` 收紧为收费单必须 `SALES + EXTERNAL_SALES`。
+- `20260924150000_prune_removed_sensitive_column_policies`：删除 `app_ops.sensitive_column_policy` 中指向
+  上述已删列 / 表的 10 条策略（`HourlyWorkerPayroll.spareSalary`、`SalaryPeriod` 3 列、
+  `CustomerServiceCommission` 6 列），且只在对应列确已不存在时删除，可重复执行。否则
+  `app_ops.security_extension_readiness` 会持续报 `sensitive_policy_references_missing_columns`。
+
+前两条迁移是 fail closed：任何业务数据（账号、工单身份与结算快照、价格修订快照、价目簿、考勤快照、
+审计日志、四张客服表中的数据、工艺 / 派工 / 日工资明细 / 待审改单 / 进度步骤对 `CLEANING` 的引用、
+运行中的相关任务）仍引用被删除的值时 `RAISE` 中止并整体回滚，不静默改写历史。已结束的历史任务与
+通知日志保留为运行记录，应用层不再允许重试 / 重发（见 API.md「已删除功能的历史任务与通知」）。
+生产执行前的只读预查 SQL 见 [部署指南](./docs/部署指南.md#删除客服--清废厨师的三条迁移2026-09-24)。
+以后删除列或表时，同一迁移或紧随的前向迁移必须清理对应脱敏策略。

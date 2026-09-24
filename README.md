@@ -108,7 +108,7 @@ pnpm dev
    - 不良/返工记录
 
 5. **薪资系统（核心难点）**（2周）
-   - 三套薪资规则配置界面
+   - 三套薪资规则配置界面（历史规划；现行为师傅工序计件工价与日薪结算，客服 / 时薪月结已删除，见 SPEC §K、§L）
    - 开机师傅日薪计算（调度时间以 `deploy/crontab.example` 为准）
    - 员工考勤录入
 
@@ -122,7 +122,7 @@ pnpm dev
 
 8. **推送与Dashboard**（1周）
    - 企业微信Webhook配置
-   - 15个预置事件
+   - 15个预置事件（历史规划；现行 13 个，见 SPEC §8.1）
    - 管理员Dashboard
 
 9. **测试与上线准备**（3天）
@@ -194,7 +194,7 @@ pnpm dev
 > 可执行部署步骤的唯一入口是 `DEPLOYMENT.md`，详细 runbook 是
 > `docs/部署指南.md`。本节包含带日期的历史快照，不应替代目标环境核验。
 
-截至 2026-08-02，`aa42ba0` 已运行在 <https://bag.sshapi.cn>，生产数据库为 45 / 45 migrations。本节记录当前生产口径和后续发布门禁，不再把“首次生产激活”当作待办。
+截至 2026-09-21，生产运行 `ef6fa012`，160 条迁移（见 [09-21 发布记录](./docs/audits/2026-09-21-production-release-ef6fa012.md)）。当前仓库有 165 条迁移，`20260921100000` 起的 5 条（含 2026-09-24 删除客服 / 清废厨师的三条）尚未在生产执行，发布前置见 [上线前置操作清单](./docs/上线前置操作清单.md)。本节记录当前生产口径和后续发布门禁，不再把“首次生产激活”当作待办。
 
 > 当前已确认 Web、LIGHT worker、HEAVY worker、ready 和系统 Chromium PDF 正常；仍需补异地备份 repo2、30 天保留与恢复演练、`SENTRY_DSN / APP_VERSION`，并将 1.6 GiB 应用机升级到至少 4 GiB。生产只有 repo1 不能算备份基线通过。
 
@@ -289,8 +289,8 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 ```
 
 **手工带 body 重跑日薪时会多一个 400**（2026-08-21 起）：`daily-salary` 的
-`body.date` 严格晚于上海日历今天时，直接返回 `400 { "error": "future date: <date>" }`，
-不入队。crontab 里不带 body 的默认调用算的是「昨天」，永远不会命中这个分支；
+`body.date` 等于上海日历今天时返回 `400 { "error": "open date: <date>" }`，严格晚于今天时返回
+`400 { "error": "future date: <date>" }`，都不入队（只能结算已经结束的业务日）。crontab 里不带 body 的默认调用算的是「昨天」，永远不会命中这个分支；
 `202 queued` / `200` / `401` / `503` 的既有形状一律不变。
 
 生产固定使用 `deploy/run-cron.sh` + 系统 crontab。同一个密钥必须存在两个

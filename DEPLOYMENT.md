@@ -37,6 +37,11 @@ applies_to: repository deployment workflow at last_verified
 当前生产不是 `main` 检出，应用机 1.6 GiB 内存不能承担本机构建，不得直接运行 `deploy/update.sh`。
 2026-09-21 两条空白封迁移已 applied，脚本的 `--check-applied` 门禁会放行，不能再依赖它防止误用。
 
+下一批发布（2026-09-24 删除客服 / 清废厨师）含三条迁移
+`20260924100000_remove_cleaner_cook_cleaning`、`20260924110000_remove_customer_service_role`、
+`20260924150000_prune_removed_sensitive_column_policies`，前两条遇到业务数据引用即整体中止；发布前的只读预查、
+crontab 重装和历史数据清理脚本步骤见 [`docs/上线前置操作清单.md`](./docs/上线前置操作清单.md)。
+
 ## 不可跳过的边界
 
 - 先确认受审查的 release SHA，不能把分支名或本地脏工作区当作发布版本。

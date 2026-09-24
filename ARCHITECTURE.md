@@ -104,8 +104,13 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 - HEAVY：CDR、PDF、XLSX 等资源密集任务；部署配置保持低并发。
 - `/api/health/ready` 判断实例能否接流量。
 - `/api/health/jobs` 单独表达队列积压、worker 或死信告警，避免队列故障错误地触发 Web 发布回退。
+- 任务类型以 `BACKGROUND_JOB_TYPES`（与处理器表一一对应）为准。已删除功能的历史任务
+  （`CRON_HOURLY_PAYROLL`、`CRON_CS_SETTLE`、`CRON_CS_PERIOD_ENDING`）与已删除事件的通知任务保留为
+  运行记录，运维页不给重试，`retryDeadBackgroundJob` 抛 `RetiredBackgroundJobTypeError`；已删除事件的
+  “送达未知”通知只能确认已送达或忽略（`lib/notification/resolve.ts` 的 `RETIRED_EVENT`）。
 
-定时调度由主机系统 crontab 调用八个受 Bearer secret 保护的端点。调度事实以
+定时调度由主机系统 crontab 调用七个受 Bearer secret 保护的端点（2026-09-24 删除 `hourly-payroll`、
+`cs-settle`、`cs-period-ending`）。调度事实以
 [`deploy/crontab.example`](./deploy/crontab.example) 为准，不使用数据库内的 `pg_cron + pg_net` HTTP 调度。
 
 ## 认证与授权
@@ -184,7 +189,7 @@ Next 16.3 默认会在 Proxy 前规范化并剥离 Flight 标头；`skipProxyUrl
 
 ### 跨设备打印输出（2026-09-11）
 
-正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。单张 PDF 的所有入口（普通下载、失败页重新生成）在同一事务里先取该授权范围的 `pg_advisory_xact_lock`，有在途任务则复用，否则按 15 分钟窗口键或重新生成锚点创建 / 复活，同一授权范围不会同时有两个在途任务（`lib/background-jobs/pdf.ts`）。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。
 
 
 ### 工单批量 PDF

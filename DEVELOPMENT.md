@@ -245,3 +245,11 @@ Next、`@next/env`、`eslint-config-next` 锁定到本地已验证的 16.3.4，�
 - `scripts/maintenance/compare-paper-specs.ts`：对同库、同时间和相同用例读取前后真实目录及报价；按新政策捕获的准入差异必须逐项精确声明，正价金额不可加入忽略名单。完整实测参数与摘要见[验收记录](./docs/audits/2026-09-20-blank-price-implementation.md)。
 
 以上工具用 `node --conditions=react-server --import tsx <脚本>` 执行。写入型验证继续遵循独立可丢弃 E2E 库要求；日常库预检结果不代替正式库。
+
+### 历史生产数据清理脚本（2026-09-24）
+
+`scripts/maintenance/cleanup-stuck-production-history.ts` 处理审计 M-7（旧代次卡住的工序 / 进度步骤）与
+L-14（从未下发却提前写入的 `scheduledAt`）。`--database=<库名>` 必须等于实际连接库；默认只读事务 dry-run，
+`--apply --actor=<活跃管理员>` 才写入，并在锁内、写入前把逐行原状态与 `payrollReviewRequired` 记进
+OrderLog 与 BusinessAuditLog 的 before。生产执行步骤（dry-run → 业主核对 → `--apply`）只维护在
+[部署指南](./docs/部署指南.md#卡住--写脏的历史生产数据清理2026-09-24)。本地验证只在一次性隔离库上写入。
