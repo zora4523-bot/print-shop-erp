@@ -1,5 +1,6 @@
 import { BackgroundJobStatus } from '../../generated/prisma/enums';
 import { backgroundJobRequiresOwnerResolution } from './terminal-policy';
+import { isNotificationEvent } from '../notification/events';
 import { BACKGROUND_JOB_TYPES, isRegisteredBackgroundJobType } from './types';
 
 export type BackgroundJobOperatorAction =
@@ -13,11 +14,23 @@ export function backgroundJobOperatorAction(job: {
   type: string;
   status: BackgroundJobStatus;
   lastErrorCode?: string | null;
+  /** NOTIFICATION 任务 payload 里的事件名（listBackgroundJobs 提取）。 */
+  notificationEvent?: string | null;
 }): BackgroundJobOperatorAction {
   if (job.status === BackgroundJobStatus.DEAD) {
     if (!isRegisteredBackgroundJobType(job.type)) {
       // The handler was removed with its feature. Re-queueing can only fail
       // again with UnknownBackgroundJobTypeError; keep the row as history.
+      return 'NONE';
+    }
+    if (
+      job.type === BACKGROUND_JOB_TYPES.NOTIFICATION &&
+      typeof job.notificationEvent === 'string' &&
+      !isNotificationEvent(job.notificationEvent) &&
+      !backgroundJobRequiresOwnerResolution(job)
+    ) {
+      // Retired event: the handler rejects its payload. An UNKNOWN delivery
+      // still goes to the notification log so it can be confirmed / ignored.
       return 'NONE';
     }
     if (job.type === BACKGROUND_JOB_TYPES.NOTIFICATION_CHANNEL_TEST) {

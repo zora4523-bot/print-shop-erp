@@ -120,6 +120,7 @@ function JobOperation({ job }: {
     type: string;
     status: BackgroundJobStatus;
     lastErrorCode: string | null;
+    notificationEvent: string | null;
   };
 }) {
   const operation = backgroundJobOperatorAction(job);

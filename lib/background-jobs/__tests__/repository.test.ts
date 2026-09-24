@@ -1023,6 +1023,23 @@ describe('claim and lease lifecycle', () => {
     },
   );
 
+  it('refuses to requeue a dead notification whose event was retired', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'NOTIFICATION',
+      attempts: 5,
+      maxAttempts: 5,
+      lastErrorCode: 'NotificationDeliveryFailedError',
+      payload: { event: 'CS_PERIOD_ENDING', payload: { periodId: 'p-1' } },
+    });
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(retryDeadBackgroundJob('retired-n')).rejects.toBeInstanceOf(
+      RetiredBackgroundJobTypeError,
+    );
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+  });
+
   it('an operator channel-test retry authorizes exactly one more execution', async () => {
     dbMock.backgroundJob.findUnique.mockResolvedValue({
       status: BackgroundJobStatus.DEAD,

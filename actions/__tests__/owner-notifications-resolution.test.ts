@@ -207,4 +207,12 @@ describe('UNKNOWN notification resolution actions', () => {
       retryUnknownNotificationAction(null, form()),
     ).rejects.toThrow('database unavailable');
   });
+
+  it('explains that a retired event can only be confirmed or ignored', async () => {
+    resolveMock.mockRejectedValue(new UnknownNotificationResolutionError('RETIRED_EVENT'));
+
+    const result = await retryUnknownNotificationAction(null, form());
+    expect(result.status).toBe('error');
+    expect(result.status === 'error' ? result.message : '').toContain('已停用');
+  });
 });

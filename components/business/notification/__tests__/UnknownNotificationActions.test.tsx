@@ -47,13 +47,13 @@ vi.mock('@/actions/owner-notifications', () => ({
 
 import { UnknownNotificationActions } from '../UnknownNotificationActions';
 
-function render(canRetry: boolean) {
+function render(retryUnavailableReason: string | null) {
   actionState.call = 0;
   return renderToStaticMarkup(
     <UnknownNotificationActions
       logId="log-1"
       stateVersion={7}
-      canRetry={canRetry}
+      retryUnavailableReason={retryUnavailableReason}
     />,
   );
 }
@@ -71,7 +71,7 @@ beforeEach(() => {
 
 describe('UnknownNotificationActions', () => {
   it('renders three explicit decisions and posts an opaque id plus version CAS', () => {
-    const html = render(true);
+    const html = render(null);
 
     expect(html).toContain('确认已送达');
     expect(html).toContain('确认未送达并重发');
@@ -83,7 +83,7 @@ describe('UnknownNotificationActions', () => {
   });
 
   it('disables resend when no original durable background job key exists', () => {
-    const html = render(false);
+    const html = render('该消息缺少重发记录，无法自动重发');
     const retryButton = html.match(/<button[^>]*disabled=""[^>]*>/)?.[0];
 
     expect(retryButton).toBeDefined();
@@ -93,13 +93,21 @@ describe('UnknownNotificationActions', () => {
     expect(html).not.toContain('title="该日志没有');
   });
 
+  it('disables resend for a retired event with the server-provided reason', () => {
+    const html = render('该通知事件已停用，只能确认已送达或忽略');
+
+    expect(html).toContain('该通知事件已停用，只能确认已送达或忽略');
+    expect(html).not.toContain('该消息缺少重发记录');
+    expect(html.match(/<button[^>]*disabled=""[^>]*>/)?.[0]).toBeDefined();
+  });
+
   it('renders a server-side concurrency conflict as an alert', () => {
     actionState.active = 'delivered';
     actionState.delivered = {
       status: 'error',
       message: '该推送已被其他管理员处置',
     };
-    const html = render(true);
+    const html = render(null);
 
     expect(html).toContain('role="alert"');
     expect(html).toContain('该推送已被其他管理员处置');

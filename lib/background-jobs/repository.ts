@@ -9,6 +9,7 @@ import {
   type BackgroundJobQueue,
 } from '../../generated/prisma/client';
 import { db } from '../db';
+import { isNotificationEvent } from '../notification/events';
 import { scrubAgentMonthlyBillExportFiltersForBackgroundJob } from '../agent-monthly-billing/export-retention';
 import { scrubOrderExportFiltersForBackgroundJob } from '../order/export-retention';
 import {
@@ -519,8 +520,18 @@ function durationMs(start: Date, end: Date): number {
   return Math.min(2_147_483_647, Math.max(0, end.getTime() - start.getTime()));
 }
 
+function notificationEventOf(job: {
+  type: string;
+  payload: Prisma.JsonValue;
+}): string | null {
+  if (job.type !== BACKGROUND_JOB_TYPES.NOTIFICATION) return null;
+  const payload = job.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  return typeof payload.event === 'string' ? payload.event : null;
+}
+
 export async function listBackgroundJobs(limit = 100) {
-  return db.backgroundJob.findMany({
+  const rows = await db.backgroundJob.findMany({
     orderBy: { createdAt: 'desc' },
     take: Math.min(200, Math.max(1, limit)),
     select: {
@@ -545,8 +556,14 @@ export async function listBackgroundJobs(limit = 100) {
         take: 1,
         select: { durationMs: true },
       },
+      // 只用来提取通知事件名（判断事件是否已停用），不把业务 payload 交给页面。
+      payload: true,
     },
   });
+  return rows.map(({ payload, ...row }) => ({
+    ...row,
+    notificationEvent: notificationEventOf({ type: row.type, payload }),
+  }));
 }
 
 export class RetiredBackgroundJobTypeError extends Error {
@@ -566,6 +583,7 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
         attempts: true,
         maxAttempts: true,
         lastErrorCode: true,
+        payload: true,
       },
     });
     if (!job || job.status !== BackgroundJobStatus.DEAD) return false;
@@ -573,6 +591,12 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
     // again with UnknownBackgroundJobTypeError. Keep the history row as is.
     if (!isRegisteredBackgroundJobType(job.type)) {
       throw new RetiredBackgroundJobTypeError(job.type);
+    }
+    // Same for a notification whose event left the registry: the handler
+    // rejects the payload (InvalidNotificationJobPayloadError).
+    const notificationEvent = notificationEventOf(job);
+    if (notificationEvent !== null && !isNotificationEvent(notificationEvent)) {
+      throw new RetiredBackgroundJobTypeError(`${job.type}:${notificationEvent}`);
     }
     // Terminal export rows no longer retain their raw filter params. Reusing
     // the old job would therefore be both invalid and misleading; the admin

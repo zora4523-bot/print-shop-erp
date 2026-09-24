@@ -269,6 +269,61 @@ describe('resolveUnknownNotification', () => {
     });
   });
 
+  describe('retired events (客服周期通知已于 2026-09-24 删除)', () => {
+    const retiredLog = {
+      ...log,
+      eventType: 'CS_PERIOD_ENDING',
+      deliveryKey: 'notification:CS_PERIOD_ENDING:period-1',
+    };
+    const retiredJob = {
+      ...job,
+      payload: { event: 'CS_PERIOD_ENDING', payload: { periodId: 'period-1' } },
+      result: { event: 'CS_PERIOD_ENDING', unknown: 1 },
+    };
+
+    it('refuses to re-arm a resend that the current handler can only reject', async () => {
+      txMock.notificationLog.findUnique.mockResolvedValue(retiredLog);
+      lockDurableJob(retiredJob);
+
+      await expect(
+        resolveUnknownNotification('log-1', 'NOT_DELIVERED_RETRY', actor, 7),
+      ).rejects.toMatchObject({ code: 'RETIRED_EVENT' });
+
+      expect(txMock.notificationLog.updateMany).not.toHaveBeenCalled();
+      expect(txMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+      expect(txMock.businessAuditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('still lets the owner ignore it and closes the dead job', async () => {
+      txMock.notificationLog.findUnique.mockResolvedValue(retiredLog);
+      lockDurableJob(retiredJob);
+
+      await expect(
+        resolveUnknownNotification('log-1', 'IGNORED', actor, 7, '客服已删除'),
+      ).resolves.toMatchObject({ completed: true, rearmed: false });
+      expect(txMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: BackgroundJobStatus.SUCCEEDED }),
+        }),
+      );
+    });
+
+    it('still lets the owner confirm it as delivered', async () => {
+      txMock.notificationLog.findUnique.mockResolvedValue({
+        ...retiredLog,
+        eventType: 'CS_PERIOD_SETTLED',
+      });
+      lockDurableJob({
+        ...retiredJob,
+        payload: { event: 'CS_PERIOD_SETTLED', payload: {} },
+      });
+
+      await expect(
+        resolveUnknownNotification('log-1', 'DELIVERED', actor, 7),
+      ).resolves.toMatchObject({ completed: true });
+    });
+  });
+
   it('waits for every channel decision, then re-arms once with only original ledger targets', async () => {
     const secondLog = {
       ...log,

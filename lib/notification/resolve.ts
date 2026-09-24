@@ -12,6 +12,7 @@ import {
 } from '../background-jobs/terminal-policy';
 import { BACKGROUND_JOB_TYPES } from '../background-jobs/types';
 import { db } from '../db';
+import { isNotificationEvent } from './events';
 
 // ──────────────────────────────────────────────────────────────────────
 // UNKNOWN 人工处置
@@ -30,6 +31,7 @@ export type UnknownNotificationResolutionErrorCode =
   | 'JOB_NOT_READY'
   | 'PAYLOAD_MISMATCH'
   | 'INVALID_REASON'
+  | 'RETIRED_EVENT'
   | 'CONFLICT';
 
 export class UnknownNotificationResolutionError extends Error {
@@ -73,6 +75,15 @@ export async function resolveUnknownNotification(
     }
     if (log.deliveryStateVersion !== expectedStateVersion) {
       throw new UnknownNotificationResolutionError('CONFLICT');
+    }
+    // The event was removed from the registry; handleNotificationJob would
+    // reject the re-armed job and leave the row RETRYING, after which it can no
+    // longer be confirmed or ignored. Only the closing decisions stay open.
+    if (
+      resolution === 'NOT_DELIVERED_RETRY' &&
+      !isNotificationEvent(log.eventType)
+    ) {
+      throw new UnknownNotificationResolutionError('RETIRED_EVENT');
     }
 
     // Inline/test UNKNOWN rows can be acknowledged as delivered or deliberately

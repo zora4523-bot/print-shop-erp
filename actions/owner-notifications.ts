@@ -497,6 +497,11 @@ function mapUnknownResolutionError(
       };
     case 'INVALID_REASON':
       return { status: 'error', message: '请填写 1–500 字的忽略理由' };
+    case 'RETIRED_EVENT':
+      return {
+        status: 'error',
+        message: '该通知事件已停用，无法重发；请核对后确认已送达或忽略',
+      };
   }
 }
 

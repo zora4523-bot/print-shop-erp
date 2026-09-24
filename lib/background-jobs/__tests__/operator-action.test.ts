@@ -58,6 +58,25 @@ describe('backgroundJobOperatorAction', () => {
     },
   );
 
+  it('does not offer retry for a dead notification of a retired event', () => {
+    expect(
+      backgroundJobOperatorAction({
+        type: 'NOTIFICATION',
+        status: BackgroundJobStatus.DEAD,
+        lastErrorCode: 'NotificationDeliveryFailedError',
+        notificationEvent: 'CS_PERIOD_SETTLED',
+      }),
+    ).toBe('NONE');
+    expect(
+      backgroundJobOperatorAction({
+        type: 'NOTIFICATION',
+        status: BackgroundJobStatus.DEAD,
+        lastErrorCode: 'NotificationDeliveryFailedError',
+        notificationEvent: 'ORDER_SUBMITTED',
+      }),
+    ).toBe('RETRY');
+  });
+
   it.each([
     [BackgroundJobStatus.DEAD, 'NOTIFICATION', 'RETRY'],
     [BackgroundJobStatus.PENDING, 'ORDER_EXPORT', 'CANCEL'],

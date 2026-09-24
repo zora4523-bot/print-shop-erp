@@ -42,6 +42,19 @@ export const NOTIFICATION_EVENTS = {
 export type NotificationEvent =
   (typeof NOTIFICATION_EVENTS)[keyof typeof NOTIFICATION_EVENTS];
 
+const NOTIFICATION_EVENT_SET: ReadonlySet<string> = new Set(
+  Object.values(NOTIFICATION_EVENTS),
+);
+
+/**
+ * 当前注册表里的事件。已删除事件（如 2026-09-24 的 CS_PERIOD_ENDING /
+ * CS_PERIOD_SETTLED）的历史日志与任务保留为记录，但通知处理器只接受本表
+ * 内的事件，重发必然失败。
+ */
+export function isNotificationEvent(value: string): value is NotificationEvent {
+  return NOTIFICATION_EVENT_SET.has(value);
+}
+
 export const MANAGEMENT_NOTIFICATION_ROLES = {
   FACTORY_CONFIRMER: 'factoryConfirmer',
   OWNER: 'owner',

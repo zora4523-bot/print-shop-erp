@@ -33,6 +33,7 @@ import {
   NOTIFICATION_STATUS_REGISTRY,
 } from '@/lib/ui/status-registry';
 import { managementNotificationRoleForEvent } from '@/lib/notification/events';
+import { unknownNotificationRetryUnavailableReason } from '@/lib/notification/unknown-retry-availability';
 import {
   getBackgroundJobHealth,
   summarizeSmartBotConnection,
@@ -207,7 +208,7 @@ export default async function OwnerNotificationsPage({
                         <UnknownNotificationActions
                           logId={log.id}
                           stateVersion={log.deliveryStateVersion}
-                          canRetry={log.deliveryKey !== null}
+                          retryUnavailableReason={unknownNotificationRetryUnavailableReason(log)}
                         />
                       ) : (
                         <Link
