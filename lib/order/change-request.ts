@@ -8,6 +8,7 @@ import { prepareOrderForProductionInTx } from './production-readiness';
 import { OrderChangeRequestError } from './change-request-error';
 import { assertChangeRequestRespectsShippedShipments } from './change-request-shipment-guard';
 import { ORDER_MODIFIABLE_STATUSES, canChangeOrderPackaging } from './editable-fields';
+import { LOGISTICS_CHARGE_CATEGORY_CODES } from './settlement';
 import Decimal from 'decimal.js';
 import {
   BackgroundJobStatus,
@@ -166,6 +167,24 @@ function refreshesLogisticsChargesOnChange(
   settlementType: OrderSettlementType,
 ): boolean {
   return settlementType === OrderSettlementType.EXTERNAL_SALES;
+}
+
+/**
+ * An external-sales DRAFT has no SHIPPING_FEE / PACKING_MATERIAL rows yet:
+ * finalizeExternalOrderQuoteInTx generates them authoritatively at submission.
+ * Modifying such a draft therefore re-quotes processing only, like the other
+ * settlement types, instead of demanding rows that cannot exist. Submitted
+ * orders (and drafts that already carry the rows) keep the full refresh and
+ * the fail-closed identity check.
+ */
+function requotesLogisticsChargesOnChange(order: {
+  settlementType: OrderSettlementType;
+  status: OrderStatus;
+  customerCharges: readonly { category: { code: string } }[];
+}): boolean {
+  if (!refreshesLogisticsChargesOnChange(order.settlementType)) return false;
+  return order.status !== OrderStatus.DRAFT || order.customerCharges.some((charge) =>
+    (LOGISTICS_CHARGE_CATEGORY_CODES as readonly string[]).includes(String(charge.category.code)));
 }
 
 function shouldSyncPlateCharge(
@@ -2984,6 +3003,8 @@ async function calculateProjectedOrderQuote(input: {
   customerCharges?: readonly LogisticsProjectionCharge[];
   changes: ResolvedProposedItemChange[];
   preserveAdminConfirmedManual?: boolean;
+  /** Defaults to the settlement rule; unsubmitted drafts pass false. */
+  includeOrderCharges?: boolean;
 }): Promise<{
   calculation: CatalogCreateOrderQuoteCalculation;
   projectedItems: ProjectedQuoteItem[];
@@ -3019,6 +3040,7 @@ async function calculateProjectedOrderQuote(input: {
         shipments: shipmentFacts,
       },
       includeOrderCharges:
+        input.includeOrderCharges ??
         input.settlementType === OrderSettlementType.EXTERNAL_SALES,
     });
   } catch (error) {
@@ -3885,6 +3907,7 @@ export async function previewOrderChangeRequestPricing(
     const primaryShipment = request.order.shipments.find(
       (shipment) => shipment.sequence === 1,
     )!;
+    const requotesLogistics = requotesLogisticsChargesOnChange(request.order);
     const projected = await calculateProjectedOrderQuote({
       client: tx,
       now: quotedAt,
@@ -3897,6 +3920,7 @@ export async function previewOrderChangeRequestPricing(
       primaryShipmentId: primaryShipment.id,
       packagingGroups: request.order.packagingGroups ?? [],
       changes,
+      includeOrderCharges: requotesLogistics,
     });
     assertPreservedPlateDoesNotOverlapAtomicBundle({
       status: request.order.status,
@@ -3981,7 +4005,7 @@ export async function previewOrderChangeRequestPricing(
     );
 
     const recalculatedChargeCodes = new Set([
-      ...(refreshesLogisticsChargesOnChange(request.order.settlementType)
+      ...(requotesLogistics
         ? ['SHIPPING_FEE', 'PACKING_MATERIAL']
         : []),
       ...(!quoteHasDefaultZeroPlateCharge(projected.calculation.quote) && shouldSyncPlateCharge(
@@ -5799,6 +5823,7 @@ export async function reviewOrderChangeRequest(
       request.order.status,
       pricingChanged,
     );
+    const requotesLogistics = requotesLogisticsChargesOnChange(request.order);
     const projected = pricingChanged
       ? await calculateProjectedOrderQuote({
           client: tx,
@@ -5812,6 +5837,7 @@ export async function reviewOrderChangeRequest(
           primaryShipmentId: primaryShipment!.id,
           packagingGroups: request.order.packagingGroups ?? [],
           changes,
+          includeOrderCharges: requotesLogistics,
         })
       : null;
     if (projected) {
@@ -5827,10 +5853,7 @@ export async function reviewOrderChangeRequest(
         customerCharges: request.order.customerCharges,
       });
     }
-    if (
-      projected &&
-      request.order.settlementType === OrderSettlementType.EXTERNAL_SALES
-    ) {
+    if (projected && requotesLogistics) {
       // Validate persisted charge identity before item/package mutations. A
       // transaction rollback is the final safety net, not a substitute for a
       // zero-write preflight when legacy data is cross-linked.
@@ -5897,8 +5920,7 @@ export async function reviewOrderChangeRequest(
           customerCharges: request.order.customerCharges,
           orderId: request.order.id,
           actorId: actor.id,
-          refreshExternalLogistics:
-            refreshesLogisticsChargesOnChange(request.order.settlementType),
+          refreshExternalLogistics: requotesLogistics,
           // A production generation can already have consumed and finalized
           // physical plates. Pre-production changes instead synchronize the
           // one aggregate manual-pricing exit with projected foil facts.

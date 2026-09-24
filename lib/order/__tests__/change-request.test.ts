@@ -6112,3 +6112,89 @@ describe('new blank business cannot inherit historical sale permission', () => {
     expect(mocks.db.orderItem.create).not.toHaveBeenCalled();
   });
 });
+
+// 外部销售工单的快递 / 耗材收费明细在提交时才由 finalizeExternalOrderQuoteInTx
+// 权威生成；尚未提交的草稿没有这些行。草稿改数量 / 规格不能因此被拒绝，
+// 已提交工单缺行时仍必须失败关闭。
+describe('unsubmitted external-sales draft modification', () => {
+  type Requester = { id: string; displayName: string; role: Role };
+  const salesRequester: Requester = { id: 'sales-1', displayName: '销售', role: Role.SALES };
+  const adminRequester: Requester = { id: 'admin-1', displayName: '管理员', role: Role.ADMIN };
+  function draftRequest(requester: Requester, overrides: Record<string, unknown> = {}) {
+    return request({
+      requesterId: requester.id,
+      requester,
+      order: {
+        ...request().order,
+        status: OrderStatus.DRAFT,
+        pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+        quotedFee: null, confirmedFee: null, settledFee: null,
+        processingAmount: new Decimal(0), packagingAmount: new Decimal(0), totalAmount: new Decimal(0),
+        items: [plainPrintItem()],
+        customerCharges: [],
+        ...overrides,
+      },
+    });
+  }
+
+  it.each([
+    ['外部销售本人草稿', salesRequester],
+    ['管理员代外部销售建的草稿', adminRequester],
+  ])('%s：预览只重算加工费，快递 / 耗材留到提交时权威生成', async (_label, requester) => {
+    const value = draftRequest(requester);
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+    );
+    const result = await previewOrderChangeRequestPricing(value.id, admin);
+    expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(false);
+    expect(result).toMatchObject({ oldTotal: '0.00', newTotal: '1200.00', complete: true, pendingCharges: [] });
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['外部销售本人草稿', salesRequester],
+    ['管理员代外部销售建的草稿', adminRequester],
+  ])('%s：批准改数量不要求物流收费行，也不凭空生成物流行', async (_label, requester) => {
+    const value = draftRequest(requester);
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+    );
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: null } });
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null, expectedPriceRevision: 5, expectedQuoteToken: quoteToken },
+      admin,
+    );
+    expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(false);
+    expect(mocks.finalizeCharges).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ processingAmount: '1200.00', totalAmount: '1200.00' }),
+    }));
+  });
+
+  it('已提交外部销售工单缺少快递 / 耗材收费明细时仍在首写入前拒绝批准', async () => {
+    const value = draftRequest(salesRequester, { status: OrderStatus.SUBMITTED });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+    );
+    await expect(reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null, expectedPriceRevision: 5, expectedQuoteToken: quoteToken },
+      admin,
+    )).rejects.toThrow('外部销售工单的快递/耗材收费明细不完整');
+    expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(true);
+    expectNoApprovalMutation();
+  });
+
+  it('草稿已有物流收费行时仍按外部销售口径一并重算', async () => {
+    const value = draftRequest(salesRequester, { customerCharges: request().order.customerCharges, totalAmount: new Decimal(8) });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+    );
+    await previewOrderChangeRequestPricing(value.id, admin);
+    expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(true);
+  });
+});

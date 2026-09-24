@@ -25,6 +25,7 @@ async function readSavedOrder(id: string) {
     const { rows } = await db.query<{
       order: {
         editVersion: number;
+        status: string;
         pricingStatus: string;
         promisedDate: string | null;
         isUrgent: boolean;
@@ -334,9 +335,53 @@ test.describe('创建工单 — golden path', () => {
       fullPage: true,
     });
 
-    // 代外部销售建的草稿改数量 / 规格要先补齐快递与耗材收费明细再重新核价，
-    // 该路径由 sales-functional-review 的编辑用例覆盖；这里只验证
-    // 与计价无关的字段保存不改动生产与财务快照。
+    // 代外部销售建的草稿改数量 / 规格：草稿尚无快递、耗材收费明细（提交时才权威
+    // 生成），保存修改只重算加工费，不能因缺物流行被拒。
+    await page.getByLabel('数量（个）', { exact: true }).fill('1200');
+    await page.getByLabel('包装（个/包）', { exact: true }).fill('20');
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toBeVisible();
+    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
+    await page.getByRole('button', { name: '再改改', exact: true }).click();
+    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
+    await expect(page).toHaveURL(`/orders/${orderId}`, routeTransitionOptions);
+    const modified = await readSavedOrder(orderId);
+    expect(modified.order.promisedDate).toBe(before.order.promisedDate);
+    expect(modified.order.isUrgent).toBe(true);
+    type DraftFacts = {
+      items: Array<{ id: string; productId: string | null; sequence: number; specification: string;
+        actualWidthMm: number; actualHeightMm: number; quantity: number; pack: number;
+        pricingSnapshot: { complete: boolean } | null; subtotal: number; quotedAmount: number }>;
+      packaging: Array<{ actualBagCount: number }>;
+      packagingLines: Array<{ unitsPerBag: number }>;
+      charges: Array<{ businessKey: string }> | null;
+    };
+    const modifiedFacts = modified.facts as DraftFacts;
+    expect(modifiedFacts.items[0]).toMatchObject({ quantity: 1200, pack: 20 });
+    expect(modifiedFacts.items[0].pricingSnapshot).toMatchObject({ complete: true });
+    expect(modifiedFacts.items[0].quotedAmount).toBe(modifiedFacts.items[0].subtotal);
+    expect(modifiedFacts.packaging[0].actualBagCount).toBe(60);
+    expect(modifiedFacts.packagingLines[0].unitsPerBag).toBe(20);
+    expect(modifiedFacts.charges ?? []).toEqual([]);
+
+    // 规格 UPDATE 同样穿过真实预览 / 保存 / 数据库边界（空白封按文本计价，无产品 ID）。
+    const large = modifiedFacts.items[0];
+    expect(large.productId).toBeNull();
+    await page.goto(`/orders/${orderId}/edit`);
+    await page.getByLabel('规格', { exact: true }).selectOption({ label: '中号封80×115' });
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('中号封80×115');
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
+    await expect(page).toHaveURL(`/orders/${orderId}`, routeTransitionOptions);
+    const respecified = await readSavedOrder(orderId);
+    const mid = (respecified.facts as DraftFacts).items[0];
+    expect(mid).toMatchObject({ productId: null, specification: '中号封80×115', actualWidthMm: 80, actualHeightMm: 115, quantity: 1200 });
+    expect(Number(mid.quotedAmount)).toBeLessThan(Number(large.quotedAmount));
+    expect((respecified.facts as DraftFacts).charges ?? []).toEqual([]);
+    expect(respecified.order.status).toBe('DRAFT');
+
     // Date-only save preserves the saved production/financial snapshots.
     await page.goto(`/orders/${orderId}/edit`);
     await page.getByLabel('承诺交期', { exact: true }).fill('2026-10-20');
@@ -346,10 +391,28 @@ test.describe('创建工单 — golden path', () => {
     await expect
       .poll(async () => (await readSavedOrder(orderId)).order.promisedDate)
       .toContain('2026-10-20');
-    expect((await readSavedOrder(orderId)).facts).toEqual(after.facts);
+    expect((await readSavedOrder(orderId)).facts).toEqual(respecified.facts);
     expect((await readSavedOrder(orderId)).order.isUrgent).toBe(true);
     await expectNoNextErrorOverlay(page);
 
+    // 提交时才按最新价目簿权威生成快递 / 耗材两行并重算整单。隔离环境没有 OSS，
+    // 用设计图夹具满足提交资料完整性（缺图拒绝由领域测试覆盖）。
+    const designDb = new Client({ connectionString: process.env.DATABASE_URL });
+    await designDb.connect();
+    try {
+      await designDb.query(`INSERT INTO "OrderItemDesign" (id,"orderItemId","fileType","fileUrl","fileName","fileSize","uploadedBy") SELECT $1,i.id,'IMAGE',$2,'fixture.png',68,o."createdById" FROM "OrderItem" i JOIN "Order" o ON o.id=i."orderId" WHERE o.id=$3`,
+        [crypto.randomUUID(), 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=', orderId]);
+    } finally { await designDb.end(); }
+    await page.reload();
+    await page.getByRole('button', { name: '提交工单', exact: true }).click();
+    await page.getByRole('button', { name: '确认最新报价并提交', exact: true }).click();
+    await expect
+      .poll(async () => (await readSavedOrder(orderId)).order.status)
+      .not.toBe('DRAFT');
+    const submitted = await readSavedOrder(orderId);
+    const submittedCharges = ((submitted.facts as DraftFacts).charges ?? []).map((charge) => charge.businessKey).sort();
+    expect(submittedCharges).toEqual(expect.arrayContaining(['SHIPMENT:1:PACKING_MATERIAL', 'SHIPMENT:1:SHIPPING_FEE']));
+    expect((submitted.facts as DraftFacts).items[0]).toMatchObject({ specification: '中号封80×115', quantity: 1200 });
     await expectNoNextErrorOverlay(page);
   });
 });
