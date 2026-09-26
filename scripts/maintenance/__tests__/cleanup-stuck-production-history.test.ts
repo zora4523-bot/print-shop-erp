@@ -31,14 +31,39 @@ function scheduleRow(overrides: Partial<PrematureScheduleRow> = {}): PrematureSc
   };
 }
 
+type OperationRow = {
+  id: string;
+  operationType: string;
+  status: ProductionOperationStatus;
+  payrollReviewRequired: boolean;
+  reports: { unit: string; priceBook: typeof tieredBook }[];
+};
+type StepRow = { id: string; status: ProductionOperationStatus };
+
 type State = {
   database: string;
   stale: { id: string; orderNo: string; status: OrderStatus; workOrderVersion: number }[];
-  operations: unknown[];
-  steps: { id: string; status?: ProductionOperationStatus }[];
+  operations: OperationRow[];
+  steps: StepRow[];
   schedules: PrematureScheduleRow[];
   clearedCount: number;
 };
+
+type RowWhere = { id?: { in: string[] }; status?: { in: ProductionOperationStatus[] } };
+type FindArgs = { where: RowWhere; select: Record<string, unknown> };
+type UpdateArgs<T> = { where: RowWhere; data: Partial<T> };
+
+/** Minimal Prisma filter: the fields the script and generation-supersede use. */
+function matches(row: { id: string; status: ProductionOperationStatus }, where: RowWhere): boolean {
+  return (!where.id || where.id.in.includes(row.id)) && (!where.status || where.status.in.includes(row.status));
+}
+
+/** Updates really mutate the fixture, so a read placed after a write sees CANCELLED rows. */
+function applyUpdate<T extends { id: string; status: ProductionOperationStatus }>(rows: T[], { where, data }: UpdateArgs<T>) {
+  const hit = rows.filter((row) => matches(row, where));
+  for (const row of hit) Object.assign(row, data);
+  return { count: hit.length };
+}
 
 function harness(overrides: Partial<State> = {}) {
   const state: State = {
@@ -58,9 +83,15 @@ function harness(overrides: Partial<State> = {}) {
     ...overrides,
   };
   const executed: string[] = [];
+  // Ordered trace: 'lock', 'snapshot:operations' / 'snapshot:steps' (the script's
+  // own original-value reads, selecting status), 'plan:operations' / 'plan:steps'
+  // (generation-supersede's selection query) and 'write:operations' / 'write:steps'.
+  const events: string[] = [];
   const tx = {
     $executeRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
-      executed.push(strings.join('?') + (values.length ? ` :: ${values.join(',')}` : ''));
+      const sql = strings.join('?');
+      if (sql.includes('pg_advisory_xact_lock')) events.push('lock');
+      executed.push(sql + (values.length ? ` :: ${values.join(',')}` : ''));
       return 0;
     }),
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -81,12 +112,24 @@ function harness(overrides: Partial<State> = {}) {
     orderLog: { create: vi.fn(async () => ({})) },
     businessAuditLog: { create: vi.fn(async () => ({})) },
     productionOperation: {
-      findMany: vi.fn(async () => state.operations),
-      updateMany: vi.fn(async () => ({ count: state.operations.length })),
+      findMany: vi.fn(async ({ where, select }: FindArgs) => {
+        events.push(`${'reports' in select ? 'plan' : 'snapshot'}:operations`);
+        return state.operations.filter((row) => matches(row, where)).map((row) => ({ ...row }));
+      }),
+      updateMany: vi.fn(async (args: UpdateArgs<OperationRow>) => {
+        events.push('write:operations');
+        return applyUpdate(state.operations, args);
+      }),
     },
     productionProgressStep: {
-      findMany: vi.fn(async () => state.steps),
-      updateMany: vi.fn(async () => ({ count: state.steps.length })),
+      findMany: vi.fn(async ({ where, select }: FindArgs) => {
+        events.push(`${'status' in select ? 'snapshot' : 'plan'}:steps`);
+        return state.steps.filter((row) => matches(row, where)).map((row) => ({ ...row }));
+      }),
+      updateMany: vi.fn(async (args: UpdateArgs<StepRow>) => {
+        events.push('write:steps');
+        return applyUpdate(state.steps, args);
+      }),
     },
   };
   const client = {
@@ -95,7 +138,7 @@ function harness(overrides: Partial<State> = {}) {
       return fn(tx);
     }),
   };
-  return { state, tx, client: client as never, transaction: client.$transaction, executed };
+  return { state, tx, client: client as never, transaction: client.$transaction, executed, events };
 }
 
 const writes = (tx: ReturnType<typeof harness>['tx']) => [
@@ -206,13 +249,6 @@ describe('runStuckProductionCleanup', () => {
   });
 
   it('--apply 在写入前于锁内记下每行原状态与人工核定标志，OrderLog 与审计 before 足以前向恢复', async () => {
-    const order: string[] = [];
-    h.tx.productionOperation.findMany.mockImplementation(async () => { order.push('read'); return h.state.operations; });
-    h.tx.productionOperation.updateMany.mockImplementation(async () => { order.push('write'); return { count: 2 }; });
-    h.tx.$executeRaw.mockImplementation(async (strings: TemplateStringsArray) => {
-      if (strings.join('?').includes('pg_advisory_xact_lock')) order.push('lock');
-      return 0;
-    });
     await runStuckProductionCleanup(h.client, { apply: true, database: 'erp_cleanup_test', actorUsername: 'owner' });
 
     const original = {
@@ -231,8 +267,19 @@ describe('runStuckProductionCleanup', () => {
       entityId: 'order-stale',
       before: expect.objectContaining(original),
     }) }));
-    expect(order.indexOf('lock')).toBeLessThan(order.indexOf('read'));
-    expect(order.indexOf('read')).toBeLessThan(order.indexOf('write'));
+    // The fixture really was cancelled, so a snapshot read after the first
+    // write would have recorded CANCELLED rows / nothing at all.
+    expect(h.state.operations.map((row) => row.status)).toEqual([ProductionOperationStatus.CANCELLED, ProductionOperationStatus.CANCELLED]);
+    expect(h.state.steps.map((row) => row.status)).toEqual([ProductionOperationStatus.CANCELLED]);
+    const firstWrite = h.events.findIndex((event) => event.startsWith('write:'));
+    expect(firstWrite).toBeGreaterThan(-1);
+    for (const snapshot of ['snapshot:operations', 'snapshot:steps']) {
+      expect(h.events.indexOf(snapshot)).toBeGreaterThan(h.events.indexOf('lock'));
+      expect(h.events.indexOf(snapshot)).toBeLessThan(firstWrite);
+    }
+    // The plan query is recorded separately and cannot stand in for a snapshot.
+    expect(h.events).toContain('plan:operations');
+    expect(h.events).toContain('plan:steps');
   });
 
   it('--apply 只清空从未下发工单的 scheduledAt，以原值作并发前置条件并留痕', async () => {
