@@ -1303,7 +1303,8 @@ export function OrderForm({
 
     if (canAssignExternalSales && !data.externalSalesUserId?.trim()) {
       setError('externalSalesUserId', { type: 'required', message: ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE });
-      setSubmissionValidationVisible(true);
+      // 与费用栏一致：保存草稿只拦外部销售，不亮出提交阶段才要求的名称、收货、设计图等校验。
+      if (intent !== 'draft') setSubmissionValidationVisible(true);
       setErrorFocusMessage(ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE);
       setErrorFocusRequest((current) => current + 1);
       return;
@@ -2438,6 +2439,7 @@ export function OrderForm({
     : [];
   const externalRHFOrderIssues = submissionValidationVisible
     ? [
+        errors.externalSalesUserId?.message ?? null,
         errors.promisedDate?.message ? `承诺交期：${errors.promisedDate.message}` : null,
         errors.customerRef?.message ? `产品客户：${errors.customerRef.message}` : null,
         errors.remark?.message ? `工单备注：${errors.remark.message}` : null,
@@ -2456,7 +2458,10 @@ export function OrderForm({
       ].filter((message): message is string => Boolean(message))
     : [];
   const externalFieldErrors: OrderFormBErrors = {
-    targets: Object.fromEntries([...formGaps, ...adminPriceGaps].map((gap) => [gap.label, { fieldId: gap.fieldId, itemIndex: gap.itemIndex }])),
+    targets: {
+      ...Object.fromEntries([...formGaps, ...adminPriceGaps].map((gap) => [gap.label, { fieldId: gap.fieldId, itemIndex: gap.itemIndex }])),
+      [ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE]: { fieldId: 'externalSalesUserId' },
+    },
     summary: [
       ...new Set([
         ...externalLocalIssues,

@@ -209,6 +209,9 @@ test.describe("admin order entry", () => {
     await page.getByRole("button", { name: "保存草稿", exact: true }).click();
     await expect(recipient).toHaveAttribute("aria-invalid", "true");
     await expect(page.getByText("请选择关联外部销售").first()).toBeVisible();
+    // 保存草稿只拦外部销售：焦点落在销售下拉，不亮出提交阶段才要求的设计图等校验。
+    await expect(recipient).toBeFocused();
+    await expect(page.getByText(/请上传设计图/)).toHaveCount(0);
     await expect(page).toHaveURL(/\/orders\/new/);
     await recipient.selectOption(salesId);
     await expect(recipient).toHaveAttribute("aria-invalid", "false");
