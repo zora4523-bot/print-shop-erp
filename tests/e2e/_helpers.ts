@@ -235,6 +235,24 @@ export async function resetBillsForUser(userId: string): Promise<void> {
 // protected from deletion by database triggers, so a repeatable golden-path
 // test must never weaken those production invariants just to recycle a fixed
 // (agent, period) unique key.
+/** Draft v2 agent monthly bill for a closed period; confirm it through the admin UI. */
+export async function seedDraftAgentMonthlyBill(fixture: {
+  agentUserId: string;
+  agentUsername: string;
+  agentDisplayName: string;
+  period: string;
+}): Promise<string> {
+  const billId = `e2e-agent-bill-${randomBytes(6).toString('hex')}`;
+  await withDb((db) =>
+    db.query(
+      `INSERT INTO "AgentMonthlyBill" (id,"agentUserId",period,"agentUsernameSnapshot","agentDisplayNameSnapshot","updatedAt")
+       VALUES ($1,$2,$3,$4,$5,NOW())`,
+      [billId, fixture.agentUserId, fixture.period, fixture.agentUsername, fixture.agentDisplayName],
+    ),
+  );
+  return billId;
+}
+
 export async function seedSettledExternalSalesOrder(opts: {
   customerRef: string;
   settledFee: string;
@@ -876,9 +894,6 @@ export type DashboardSnapshot = {
   urgentOrderId: string;
   completedOrderIds: string[];
   shippedOrderId: string;
-  billId: string;
-  monthlyTotal: string; // 5000.00
-  monthlyPaid: string; // 2000.00
   // Slice B fixtures
   outsourceId: string;
   outsourceDaysOverdue: number; // 3
@@ -915,8 +930,6 @@ export async function seedDashboardSnapshot(opts: {
   const todayShanghaiNoonUtc = new Date(
     Date.UTC(yyyy!, mm! - 1, dd!, 4, 0, 0),
   );
-  const period = `${yyyy}-${String(mm).padStart(2, '0')}`;
-
   // Slice B stores expectedDate as a calendar date represented by UTC
   // midnight. Seed relative to Shanghai's YYYY-MM-DD,
   // not relative to an instant, so the result is stable around UTC/Shanghai
@@ -1035,38 +1048,9 @@ export async function seedDashboardSnapshot(opts: {
       [shippedOrderId, salesUserId, todayShanghaiNoonUtc.toISOString()],
     );
 
-    // Step 3: seed one bill in the current Shanghai month.
-    // 5000 总额 / 2000 已收 → outstanding 3000；UI 显示三个数字时都好认。
-    // 状态 PARTIAL_PAID（已发 + 部分付款），issuedAt 必填——dashboard
-    // getMonthlyBillStats 排除 DRAFT（Codex round 98 P1）。DRAFT 状态
-    // 不会进 KPI；只有 ISSUED / PARTIAL_PAID / FULLY_PAID 算&ldquo;应收&rdquo;。
-    const billId = `${fixturePrefix}-bill`;
-    const monthlyTotal = '5000.00';
-    const monthlyPaid = '2000.00';
-    await db.query(
-      `
-      INSERT INTO "Bill" (
-        id, "salesUserId", period, "totalAmount", "paidAmount",
-        status, "issuedAt", "createdAt", "updatedAt"
-      ) VALUES (
-        $1, $2, $3, $4, $5,
-        'PARTIAL_PAID'::"BillStatus", NOW(), NOW(), NOW()
-      )
-      `,
-      [billId, salesUserId, period, monthlyTotal, monthlyPaid],
-    );
-    // A material/issued bill must have a provenance row.  Besides matching
-    // the production ledger, this lets settlement migrations prove that the
-    // receivable belongs to an external-sales order without guessing from the
-    // account's current role.
-    await db.query(
-      `
-      INSERT INTO "BillItem" (
-        id, "billId", "orderId", "orderAmount", "createdAt"
-      ) VALUES ($1, $2, $3, $4, NOW())
-      `,
-      [`${billId}-item`, billId, completedOrderIds[0], monthlyTotal],
-    );
+    // Step 3: the owner dashboard reads v2 AgentMonthlyBill (confirmedAt in the
+    // current Shanghai month); the owner-dashboard spec confirms a real v2 bill
+    // through the admin UI instead of seeding the retired legacy Bill table.
 
     // Step 4 (Slice B): seed one overdue outsource order linked to the
     // first completed order, so 超期外协 list has one row with a real
@@ -1367,9 +1351,6 @@ export async function seedDashboardSnapshot(opts: {
       urgentOrderId: `${fixturePrefix}-sub-3-urgent`,
       completedOrderIds,
       shippedOrderId,
-      billId,
-      monthlyTotal,
-      monthlyPaid,
       outsourceId,
       outsourceDaysOverdue: 3,
       chartProductIds,

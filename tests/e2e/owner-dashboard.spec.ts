@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { ADMIN_PASSWORD, ADMIN_USERNAME, E2E_USERS, expectNoNextErrorOverlay, getUserIdByUsername, login, seedDashboardSnapshot } from './_helpers';
+import { ADMIN_PASSWORD, ADMIN_USERNAME, E2E_USERS, expectNoNextErrorOverlay, getUserIdByUsername, login, seedDashboardSnapshot, seedDraftAgentMonthlyBill, seedSettledExternalSalesOrder } from './_helpers';
 
 async function findLinkedRecord(page: Page, href: string) {
   // Full lists paginate all qualifying records, including earlier fixture runs.
@@ -21,7 +21,18 @@ test('工作台重点记录、完整关注列表和经营概览可连续使用',
   test.setTimeout(120_000);
   const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
   const seeded = await seedDashboardSnapshot({ salesUserId });
-  await login(page, { from: '/owner', username: ADMIN_USERNAME, password: ADMIN_PASSWORD });
+  // 「本月已出账」统计本月确认的 v2 代理商月账单（DECISIONS 2026-09-24）：为上一个已结束的
+  // 上海自然月造一张 5000 元的已结算外部销售单，由管理员在账单页真实确认。
+  const now = new Date();
+  const [year, month] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' })
+    .format(now).split('-').map(Number);
+  const previousMonthMid = new Date(Date.UTC(year!, month! - 2, 15, 4, 0, 0));
+  const settled = await seedSettledExternalSalesOrder({ customerRef: '工作台月账单', settledFee: '5000.00', settledAt: previousMonthMid });
+  const billId = await seedDraftAgentMonthlyBill(settled);
+  await login(page, { from: `/owner/agent-bills/${billId}`, username: ADMIN_USERNAME, password: ADMIN_PASSWORD });
+  await page.getByRole('button', { name: /确认.*账单/ }).click();
+  await expect(page.getByRole('button', { name: '标记已收' })).toBeVisible();
+  await page.goto('/owner');
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
   const kpis = page.locator('[data-slot="dashboard-kpi"]');
   await expect(kpis).toHaveCount(4);

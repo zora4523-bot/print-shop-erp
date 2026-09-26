@@ -35,7 +35,7 @@ describe('dashboard fixture isolation', () => {
 
     expect(second.fixtureRunId).not.toBe(first.fixtureRunId);
     expect(second.salesUserId).not.toBe(first.salesUserId);
-    expect(second.billId).not.toBe(first.billId);
+    expect(second.outsourceId).not.toBe(first.outsourceId);
     const firstOrders = new Set([
       ...first.submittedOrderIds,
       ...first.completedOrderIds,
@@ -61,7 +61,7 @@ describe('dashboard fixture isolation', () => {
   it('rolls back a partial seed if a ledger insert fails', async () => {
     const { seedDashboardSnapshot } = await import('../e2e/_helpers');
     database.query.mockImplementation(async (sql: string) => {
-      if (sql.includes('INSERT INTO "Bill"')) throw new Error('fixture insert failed');
+      if (sql.includes('INSERT INTO "OutsourceOrder"')) throw new Error('fixture insert failed');
       return { rowCount: 1, rows: [] };
     });
 
