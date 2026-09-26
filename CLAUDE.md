@@ -135,7 +135,7 @@ print-shop-erp/
 - Prisma import 不得出现在 `app/` 和 `actions/` 以外的页面/组件文件中
 - `actions/` 中可以 import Prisma，但应委托给 `lib/` 的函数处理复杂业务
 - `components/` 中不得有任何数据库调用
-- 现状（2026-09-25 实测）：`db` 的直接使用集中在 `lib/`（124 个文件）；`lib/` 之外有 8 处遗留直连
+- 现状（2026-09-25 实测）：`db` 的直接使用绝大多数集中在 `lib/`；`lib/` 之外有 8 处遗留直连
   —— `actions/account.ts`、`actions/order-workspace.ts`（收藏工单）、`app/api/health/*` 两个探针、
   `app/wo/[orderNo]/page.tsx`、`app/api/orders/.../labels/[labelId]/route.ts`，以及师傅端
   `app/(worker)/worker/account/page.tsx`、`app/(worker)/worker/tasks/[id]/page.tsx`（把 `db` 作为
