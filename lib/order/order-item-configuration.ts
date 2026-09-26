@@ -72,7 +72,7 @@ export function createBlankItem(
   };
 }
 
-export function resolveExternalOrderCraftIds(
+function resolveExternalOrderCraftIds(
   item: CreateOrderInput['items'][number],
   crafts: readonly PricingCraftIdentity[],
 ): string[] {

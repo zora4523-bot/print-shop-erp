@@ -1320,7 +1320,7 @@ function projectLogistics(
   };
 }
 
-export type BlockingReferenceEnforcement = {
+type BlockingReferenceEnforcement = {
   /** The exact published trigger condition the engine check implements. */
   condition: Readonly<Record<string, unknown>>;
   /** What the pure engine returns for every item this condition matches. */
@@ -1340,7 +1340,9 @@ export type BlockingReferenceEnforcement = {
  * condition is exactly the one the engine implements; any other published
  * block fails projection instead of being silently accepted.
  */
-export const ENGINE_ENFORCED_BLOCKING_REFERENCES = {
+export const ENGINE_ENFORCED_BLOCKING_REFERENCES: Readonly<
+  Record<string, BlockingReferenceEnforcement>
+> = {
   COLOR_BACK_SIDE_FOIL_MANUAL: {
     condition: { pricingRoutes: ['COLOR_PRINT'], isDoubleSided: true },
     engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'PRINT_BACK_SIDE_FOIL' },
@@ -1404,7 +1406,7 @@ export const ENGINE_ENFORCED_BLOCKING_REFERENCES = {
     condition: { pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'], minFoilColorCount: 3 },
     engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'FULL_THREE_OR_MORE_COLORS' },
   },
-} as const satisfies Readonly<Record<string, BlockingReferenceEnforcement>>;
+};
 
 /** Order-insensitive identity of a parsed condition (every list is a set). */
 function canonicalConditionKey(value: unknown): string {
@@ -1454,7 +1456,7 @@ function assertBlockingReferenceEnforced(
   const enforcement: BlockingReferenceEnforcement | undefined =
     Object.hasOwn(ENGINE_ENFORCED_BLOCKING_REFERENCES, code)
       ? ENGINE_ENFORCED_BLOCKING_REFERENCES[
-          code as keyof typeof ENGINE_ENFORCED_BLOCKING_REFERENCES
+          code
         ]
       : undefined;
   if (

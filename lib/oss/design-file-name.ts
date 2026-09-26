@@ -13,7 +13,7 @@ const PATH_SEPARATOR_RE = /[/\\]/;
 const UNSAFE_CHARS_RE = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
 const UNSAFE_CHARS_GLOBAL_RE = new RegExp(UNSAFE_CHARS_RE.source, 'g');
 
-export function extractFileExtension(fileName: string): string | null {
+function extractFileExtension(fileName: string): string | null {
   const idx = fileName.lastIndexOf('.');
   if (idx < 0 || idx === fileName.length - 1) return null;
   return fileName.slice(idx + 1).toLowerCase();

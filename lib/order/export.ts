@@ -94,7 +94,7 @@ type StoredExportFilterReceipt = Pick<StoredExportFilter, 'scope'>;
 type MembershipKey = { id: string; orderNo: string };
 type RowCounts = Record<string, number>;
 
-export function orderExportParamsFromQuery(query: OrderListQuery): OrderExportParams {
+function orderExportParamsFromQuery(query: OrderListQuery): OrderExportParams {
   const serialized = serializeOrderListQuery({
     ...query,
     page: 1,

@@ -99,7 +99,6 @@ vi.mock('@/lib/settings', () => ({
 
 vi.mock('@/lib/order/export', () => ({
   listRecentOrderExports: listRecentOrderExportsMock,
-  orderExportParamsFromQuery: vi.fn(() => ({})),
 }));
 
 vi.mock('@/components/business/admin/AdminDataTable', () => ({

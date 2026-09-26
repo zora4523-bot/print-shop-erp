@@ -17,11 +17,6 @@ export const ORDER_PDF_IN_FLIGHT_STATUSES: readonly BackgroundJobStatus[] = [
   BackgroundJobStatus.RUNNING,
 ];
 
-export type OrderPdfScopeTx = Pick<
-  Prisma.TransactionClient,
-  'backgroundJob' | '$executeRaw' | '$queryRaw'
->;
-
 export function orderPdfScopePrefix(scope: unknown): string {
   const scopeDigest = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
   return `order-pdf:v2:${scopeDigest}:`;

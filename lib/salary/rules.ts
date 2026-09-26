@@ -4,7 +4,7 @@ import { db } from '../db';
 // 最小客户端面：既接全局 db，也接 $transaction 的 tx（结算类调用必须
 // 传 tx，让规则读参与结算快照的事务隔离）。直接复用
 // Prisma delegate 的函数类型，避免用 unknown 重写参数后破坏函数参数逆变兼容性。
-export type SalaryRuleClient = {
+type SalaryRuleClient = {
   salaryRule: Pick<typeof db.salaryRule, 'findFirst'>;
 };
 
@@ -25,16 +25,6 @@ export function salaryRuleLockKey(
   return `print-shop-erp:salary-rule:${ruleType}:${ruleKey}`;
 }
 
-// Finance calculations read several independently versioned rows. A shared
-// advisory lock lets payroll readers run concurrently while excluding the
-// admin writer, so one immutable snapshot cannot mix rows from before and
-// after the same rule edit under PostgreSQL READ COMMITTED.
-export async function acquireSalaryRuleSnapshotReadLock(
-  client: SalaryRuleSnapshotLockClient,
-): Promise<void> {
-  await client.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${SALARY_RULE_SNAPSHOT_LOCK_KEY}))`;
-}
-
 export async function acquireSalaryRuleSnapshotWriteLock(
   client: SalaryRuleSnapshotLockClient,
 ): Promise<void> {
@@ -45,7 +35,7 @@ export async function acquireSalaryRuleSnapshotWriteLock(
 // <= now 中最新一条，且 effectiveTo 为 null 或 > now。
 // ruleValue 是 Prisma Json——形状由 seed / owner 规则编辑器在写入侧
 // 保证，读侧信任断言为 T。
-export async function getActiveRuleValue<T>(
+async function getActiveRuleValue<T>(
   ruleType: SalaryRuleType,
   ruleKey: string,
   now: Date,

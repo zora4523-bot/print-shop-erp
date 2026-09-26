@@ -16,7 +16,7 @@ const BURST_TOLERANCE_MS = 30 * ATTEMPT_INTERVAL_MS;
  * is only a fallback for local/test proxies; taking its final hop avoids
  * trusting a client-supplied prefix. The address is hashed before persistence.
  */
-export function cdrDownloadRateLimitBucketKey(headers: Headers): string {
+function cdrDownloadRateLimitBucketKey(headers: Headers): string {
   const realIp = headers.get('x-real-ip')?.trim();
   const forwardedFor = headers
     .get('x-forwarded-for')
