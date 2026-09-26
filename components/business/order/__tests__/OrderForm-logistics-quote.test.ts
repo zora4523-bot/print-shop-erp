@@ -208,7 +208,9 @@ describe('OrderForm local draft recovery', () => {
     expect(source).toContain(
       'if (!isExternalSalesActor || !pendingLocalDraft || !transferReady) return;',
     );
-    expect(source).toContain('...(pendingLocalDraft.values as unknown as CreateOrderInput)');
+    expect(source).toContain('const restored = pendingLocalDraft.values as unknown as CreateOrderInput;');
+    // 旧草稿里同一设计款的规格行可能是不同的自动款名，恢复时统一为首行名称。
+    expect(source).toContain('items: unifyDesignNames(restored.items),');
     expect(source).toContain('clientSubmissionId,');
     expect(source).toMatch(
       /<fieldset[\s\S]{0,120}disabled=\{orderFormControlsDisabled\}/,

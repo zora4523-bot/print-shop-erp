@@ -1608,13 +1608,14 @@ async function prepareAdminOrderCreationState(page: Page) {
 
 async function prepareSalesOrderCreationState(page: Page) {
   const form = await prepareConfiguredLocalFoilStyle(page);
-  // 销售端款式名由已选计价事实生成，不提供人工命名入口。
-  await expect(
-    form.getByRole('textbox', { name: '设计款名称', exact: true }),
-  ).toHaveCount(0);
+  const orderName = '外部销售建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })
-    .fill('外部销售建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+    .fill(orderName);
+  // 业主 2026-09-26：外部销售同样填写设计款名称，单款默认跟随工单名称。
+  await expect(
+    form.getByRole('textbox', { name: '设计款名称', exact: true }),
+  ).toHaveValue(orderName);
   await form
     .getByRole('spinbutton', { name: '数量', exact: true })
     .fill('1234567');

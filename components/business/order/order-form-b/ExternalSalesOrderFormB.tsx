@@ -114,6 +114,8 @@ export type OrderFormBErrors = {
       }
     | undefined
   )[];
+  /** 设计款级问题（如设计款名称），按设计款首行下标登记，只用于设计款标签的“待完善”。 */
+  designs?: Readonly<Record<number, string>>;
 };
 
 export type OrderFormBProps = {
@@ -877,7 +879,7 @@ export function OrderFormB({
             <div className="flex flex-wrap items-start gap-2">
               <EditorTabs ref={styleNavRef} id={`${uid}-design`} label="设计款" variant="folder" disabled={disabled}
                 tabs={groups.map((group, index) => ({ value: itemFields[group.indexes[0]].id,
-                  label: `设计款 ${index + 1}${group.indexes.some((member) => fieldErrors?.items?.[member]) ? ' · 待完善' : ''}` }))}
+                  label: `设计款 ${index + 1}${group.indexes.some((member) => fieldErrors?.items?.[member]) || fieldErrors?.designs?.[group.indexes[0]] ? ' · 待完善' : ''}` }))}
                 value={itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}
                 onChange={(value) => { cancelIssueFocus(); onActiveIndexChange(itemFields.findIndex((entry) => entry.id === value)); }} />
               <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 增加设计款</Button>

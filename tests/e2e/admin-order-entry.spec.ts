@@ -184,6 +184,10 @@ test.describe("admin order entry", () => {
       .fill(`管理员代建 ${Date.now()}`);
     // 分层建单（64c9a350）没有「复制当前」：「＋ 增加设计款」同样复制当前款并切过去。
     await page.getByRole("button", { name: "＋ 增加设计款", exact: true }).click();
+    // 业主 2026-09-26：新增设计款的名称留空、须手动填写，且与第 1 款不重名。
+    const secondDesignName = page.getByRole("textbox", { name: "设计款名称", exact: true });
+    await expect(secondDesignName).toHaveValue("");
+    await secondDesignName.fill("第二设计款");
     await page
       .getByRole("group", { name: "包装方式", exact: true })
       .getByRole("button", { name: "混装", exact: true })

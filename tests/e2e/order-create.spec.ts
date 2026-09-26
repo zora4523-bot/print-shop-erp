@@ -173,11 +173,11 @@ test.describe('创建工单 — golden path', () => {
       weight.getByRole('button', { name: '160g', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
 
-    // 管理员建单现在一律走外部销售计价：本分支的外部销售表单按工艺 / 纸张 /
-    // 规格自动生成款名（事实变化会覆盖手填款名）。
+    // 业主 2026-09-26：设计款名称由建单人填写，单款默认跟随工单名称，
+    // 改克重等计价事实不再覆盖。
     await expect(
       form.getByRole('textbox', { name: '设计款名称', exact: true }),
-    ).toHaveValue('局部烫金（通版现货） · 艳红珠光纸 160g · 大号封');
+    ).toHaveValue(customName);
     // B 版数量输入是受控组件，用可访问名称绑定用户行为，
     // 不再依赖旧面板的 input name 实现细节。
     await form
@@ -211,7 +211,8 @@ test.describe('创建工单 — golden path', () => {
     await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
       timeout: 45_000,
     });
-    await expect(page.getByRole('heading', { name: customName, exact: true })).toBeVisible(routeTransitionOptions);
+    // 单款设计款名称默认跟随工单名称（DECISIONS 2026-09-26），款式卡标题同名，只认页面主标题。
+    await expect(page.getByRole('heading', { level: 1, name: customName, exact: true })).toBeVisible(routeTransitionOptions);
     await expectNoNextErrorOverlay(page);
 
     // 按当前详情页核对建单结果；款式信息直接展示，工单号按需展开。
@@ -220,7 +221,7 @@ test.describe('创建工单 — golden path', () => {
     await expect(customerFact).toHaveText('—');
     const itemDetails = page
       .locator('article[id^="order-detail-item-"]')
-      .filter({ hasText: '局部烫金（通版现货） · 艳红珠光纸 160g · 大号封' });
+      .filter({ hasText: customName });
     await expect(itemDetails).toHaveCount(1);
     const itemFact = (label: string) =>
       itemDetails

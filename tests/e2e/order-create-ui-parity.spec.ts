@@ -54,13 +54,16 @@ for (const actor of ['owner', 'sales'] as const) {
       await expect(rail.getByText('人工价', { exact: true })).toBeVisible();
       await expect(rail.getByText('空白封', { exact: true })).toHaveCount(0);
       await selectExternalSalesForAdminOrder(page);
-      await expect(page.getByLabel('设计款名称', { exact: true })).toBeVisible();
+      await expect(page.getByRole('textbox', { name: '设计款名称', exact: true })).toBeVisible();
       await expect(page.getByLabel('稿件版本', { exact: true })).toBeVisible();
       await expect(
         page.getByRole('group', { name: '款式加工费', exact: true }),
       ).toBeVisible();
       await expect(rail.getByText(/纸箱耗材/)).toBeVisible();
     } else {
+      // 业主 2026-09-26：外部销售也填写设计款名称；稿件版本仍只给管理员。
+      await expect(page.getByRole('textbox', { name: '设计款名称', exact: true })).toBeVisible();
+      await expect(page.getByLabel('稿件版本', { exact: true })).toHaveCount(0);
       await expect(rail.getByText(/纸箱耗材/)).toBeVisible();
       await expect(
         page.getByRole('button', { name: '人工定价', exact: true }),

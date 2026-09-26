@@ -13,6 +13,14 @@ import { foilColorLabel } from '@/lib/order/foil-colors';
 import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle, SampleOrderEditorSnapshot } from './order-creation-editor';
 import { orderDesignGroups, designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
+import {
+  DESIGN_NAME_MAX_LENGTH,
+  designNameIssueSummary,
+  designNameIssues,
+  followingDesignName,
+  hasOnlyDesignNameErrors,
+  unifyDesignNames,
+} from './order-form-design-names';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import { OrderSampleEntry, prepareSampleOrderEntry, useSampleOrderEntry } from './OrderSampleEntry';
 import { OrderCreateFeeDetails } from './OrderCreateFeeDetails';
@@ -34,7 +42,7 @@ import { ActionNotice } from '@/components/ui-business';
 import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
 import { orderItemSelectionUpdate, type OrderItemSelectionChange } from '@/lib/order/order-item-selection';
 import { OrderItemProductField } from './order-form-b/OrderItemFields';
-import { FieldError } from './order-form-b/OrderFieldPrimitives';
+import { FieldError, FieldLabel } from './order-form-b/OrderFieldPrimitives';
 import { externalOrderCatalogCandidates } from '@/lib/order/order-item-catalog';
 import { orderItemFieldOptions } from './order-item-field-options';
 import {
@@ -46,6 +54,7 @@ import {
 import { externalShipmentContactIssues } from '@/lib/order/external-shipment-contact';
 
 import {
+  type BaseSyntheticEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -61,6 +70,7 @@ import {
   useFieldArray,
   useWatch,
   type Control,
+  type FieldErrors,
   type SubmitHandler,
 } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -659,6 +669,8 @@ export function OrderForm({
     item.designGroupKey = globalThis.crypto.randomUUID();
     return {
       ...item,
+      // 设计款名称由建单人填写（DECISIONS 2026-09-26）：单款默认跟随工单名称。
+      name: '',
       frontFoilColors: firstFoil ? [firstFoil] : [],
       backFoilColors: [],
       foilColors: firstFoil ? [firstFoil] : [],
@@ -761,6 +773,11 @@ export function OrderForm({
     useState<ExternalCreateOrderQuoteViewState | null>(null);
   const [submissionValidationVisible, setSubmissionValidationVisible] =
     useState(false);
+  // 保存草稿只因设计款名称被拦时，只提示设计款名称与外部销售，不打开提交阶段校验。
+  const [designNameValidationVisible, setDesignNameValidationVisible] =
+    useState(false);
+  // 本次编辑中各设计款是否手动命名（按设计款分组键）；没有记录时按值推断。
+  const handNamedDesignsRef = useRef(new Map<string, boolean>());
   const [errorFocusRequest, setErrorFocusRequest] = useState(0);
   const [errorFocusMessage, setErrorFocusMessage] = useState<string>();
   const [externalInputRevision, setExternalInputRevision] = useState(0);
@@ -916,8 +933,11 @@ export function OrderForm({
       nextItemFigRef.current = resolveNextOrderItemFig(
         pendingLocalDraft.values,
       );
+      const restored = pendingLocalDraft.values as unknown as CreateOrderInput;
+      handNamedDesignsRef.current.clear();
       reset({
-        ...(pendingLocalDraft.values as unknown as CreateOrderInput),
+        ...restored,
+        items: unifyDesignNames(restored.items),
         clientSubmissionId,
       });
       setQuoteViews({});
@@ -1112,9 +1132,14 @@ export function OrderForm({
       ]);
     if (facts(normalized) !== facts(requested))
       return '产品资料已变更，请返回工作台重新选择';
-    const values = initialOrderFormValues(clientSubmissionId, normalized);
+    const values = initialOrderFormValues(clientSubmissionId, {
+      ...normalized,
+      name: '',
+      designGroupKey: globalThis.crypto.randomUUID(),
+    });
     if (!persistLocalDraftValues(values))
       return '报价条件保存失败，请释放浏览器存储空间后返回工作台重试';
+    handNamedDesignsRef.current.clear();
     reset(values);
     setLocalDraftDecisionComplete(true);
     setTransferReady(true);
@@ -1126,11 +1151,13 @@ export function OrderForm({
     nextItemFigRef.current = resolveNextOrderItemFig(
       pendingLocalDraft.values,
     );
-    const restoredValues = {
-      ...(pendingLocalDraft.values as unknown as CreateOrderInput),
+    const restored = pendingLocalDraft.values as unknown as CreateOrderInput;
+    handNamedDesignsRef.current.clear();
+    reset({
+      ...restored,
+      items: unifyDesignNames(restored.items),
       clientSubmissionId,
-    };
-    reset(restoredValues);
+    });
     setQuoteViews({});
     setLogisticsQuote(null);
     setPackagingQuote(null);
@@ -1333,11 +1360,30 @@ export function OrderForm({
     persistOrder(data, fieldIds, queueSnapshot, intent);
   };
 
-  const onInvalid = () => {
+  const onInvalid = (invalid: FieldErrors<CreateOrderInput>, event?: BaseSyntheticEvent) => {
+    setPendingSubmission(null);
+    const submitter = (event?.nativeEvent as SubmitEvent | undefined)
+      ?.submitter as HTMLButtonElement | null | undefined;
+    if (submitter?.value === 'draft' && hasOnlyDesignNameErrors(invalid)) {
+      // 与草稿的外部销售拦截一致：只提示外部销售与设计款名称，不亮出提交阶段校验。
+      setDesignNameValidationVisible(true);
+      const salespersonMissing =
+        canAssignExternalSales && !getValues('externalSalesUserId')?.trim();
+      if (salespersonMissing) {
+        setError('externalSalesUserId', { type: 'required', message: ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE });
+      }
+      const firstNameIssue = designNameIssues(getValues('items'))[0];
+      setErrorFocusMessage(
+        salespersonMissing
+          ? ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE
+          : firstNameIssue ? designNameIssueSummary(firstNameIssue) : undefined,
+      );
+      setErrorFocusRequest((current) => current + 1);
+      return;
+    }
     setErrorFocusMessage(undefined);
     setSubmissionValidationVisible(true);
     setErrorFocusRequest((current) => current + 1);
-    setPendingSubmission(null);
   };
 
   function updatePendingDesigns(fieldId: string, images: PendingDesignImage[]) {
@@ -1394,6 +1440,12 @@ export function OrderForm({
       { shouldDirty: true, shouldValidate: true },
     );
     itemsArray.remove(index);
+    // 回到单个设计款时，未手动命名的设计款重新跟随工单名称。
+    const following = syncSingleDesignName(getValues('customName'), getValues('customName'));
+    const persistedItems = following
+      ? remainingItems.map((item, itemIndex) =>
+          following.indexes.includes(itemIndex) ? { ...item, name: following.name } : item)
+      : remainingItems;
     setExpandedItem((current) => {
       if (current > index) return current - 1;
       if (current === index) {
@@ -1410,7 +1462,7 @@ export function OrderForm({
     invalidateStructuralQuotes();
     persistLocalDraftValues({
       ...getValues(),
-      items: remainingItems,
+      items: persistedItems,
       additionalShipments: relations.additionalShipments,
       packagingGroups: relations.packagingGroups,
     });
@@ -1424,6 +1476,11 @@ export function OrderForm({
       ? source.designGroupKey ?? globalThis.crypto.randomUUID()
       : globalThis.crypto.randomUUID();
     if (sameDesign) {
+      if (!source.designGroupKey) {
+        // 无分组键的设计款（历史 / 工作台转入）在此获得键，手动命名记录随之迁移。
+        const recorded = handNamedDesignsRef.current.get(`legacy:${index}`);
+        if (recorded !== undefined) handNamedDesignsRef.current.set(designGroupKey, recorded);
+      }
       source.designGroupKey = designGroupKey;
       setValue(`items.${index}.designGroupKey`, designGroupKey, { shouldDirty: true });
       currentItems[index] = source;
@@ -1448,7 +1505,8 @@ export function OrderForm({
       designGroupKey,
       adminPrice: undefined,
       fig: nextItemFigRef.current,
-      name: source.name,
+      // 新增设计款须手动命名；同一设计款的规格共用名称。
+      name: sameDesign ? source.name : '',
     };
     nextItemFigRef.current += 1;
     setValue('nextItemFig', nextItemFigRef.current, { shouldDirty: true });
@@ -1481,6 +1539,7 @@ export function OrderForm({
         paperMaterials: externalCreateOrderOptions?.papers,
         ...options,
         preserveCustomSize: options.preserveCustomSize ?? true,
+        preserveName: true,
       }),
       { shouldDirty: true, shouldValidate: true },
     );
@@ -1522,9 +1581,36 @@ export function OrderForm({
     }
   }
   function changeDesignText(index: number, field: 'name' | 'artworkVersion', value: string) {
-    for (const member of designItemIndexes(getValues('items'), index)) {
+    const items = getValues('items');
+    if (field === 'name') {
+      // 输入非空名称即视为手动命名，清空则恢复跟随工单名称。
+      const design = orderDesignGroups(items).find((group) => group.indexes.includes(index));
+      if (design) handNamedDesignsRef.current.set(design.key, Boolean(value.trim()));
+    }
+    for (const member of designItemIndexes(items, index)) {
       setValue(`items.${member}.${field}`, value, { shouldDirty: true, shouldValidate: true });
     }
+  }
+  /** 单个且未手动命名的设计款跟随工单名称（DECISIONS 2026-09-26）。 */
+  function syncSingleDesignName(
+    orderName: string | null | undefined,
+    orderNameForInference: string | null | undefined,
+  ) {
+    const items = getValues('items');
+    const following = followingDesignName(
+      items, orderName, orderNameForInference,
+      (key) => handNamedDesignsRef.current.get(key),
+    );
+    if (!following) return null;
+    handNamedDesignsRef.current.set(following.key, false);
+    for (const index of following.indexes) {
+      if (items[index]?.name === following.name) continue;
+      setValue(`items.${index}.name`, following.name, {
+        shouldDirty: true,
+        shouldValidate: form.getFieldState(`items.${index}.name`).invalid,
+      });
+    }
+    return following;
   }
 
   function changeItemSelection(index: number, change: OrderItemSelectionChange) {
@@ -1709,6 +1795,7 @@ export function OrderForm({
         resetPaper: !item.paperType,
         resetSpecification: !item.specification,
         preserveCustomSize: true,
+        preserveName: true,
       });
       if (JSON.stringify(normalized) !== JSON.stringify(item)) {
         setValue(`items.${index}`, normalized, {
@@ -2397,6 +2484,13 @@ export function OrderForm({
   const externalLocalIssues = submissionValidationVisible
     ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), selectedDesignQueues)
     : [];
+  // 缺名只在尝试保存/提交后提示；超长与重名随输随提示。
+  const shownDesignNameIssues = designNameIssues(watchedItems).filter(
+    (issue) => submissionValidationVisible || designNameValidationVisible || issue.kind !== 'missing',
+  );
+  const activeDesignNameIssue = shownDesignNameIssues.find((issue) =>
+    designItemIndexes(watchedItems, expandedItem).includes(issue.index),
+  );
   const externalItemErrors: OrderFormBErrors['items'] =
     watchedItems.map((item, index) => {
       const fieldId = itemsArray.fields[index]?.id;
@@ -2458,14 +2552,24 @@ export function OrderForm({
       ].filter((message): message is string => Boolean(message))
     : [];
   const externalFieldErrors: OrderFormBErrors = {
+    designs: Object.fromEntries(shownDesignNameIssues.map((issue) => [issue.index, issue.message])),
     targets: {
       ...Object.fromEntries([...formGaps, ...adminPriceGaps].map((gap) => [gap.label, { fieldId: gap.fieldId, itemIndex: gap.itemIndex }])),
+      ...Object.fromEntries(shownDesignNameIssues.map((issue) => [
+        designNameIssueSummary(issue), { fieldId: `items.${issue.index}.name`, itemIndex: issue.index },
+      ])),
       [ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE]: { fieldId: 'externalSalesUserId' },
     },
     summary: [
       ...new Set([
         ...externalLocalIssues,
         ...externalRHFOrderIssues,
+        ...(designNameValidationVisible && errors.externalSalesUserId?.message
+          ? [errors.externalSalesUserId.message]
+          : []),
+        ...(submissionValidationVisible || designNameValidationVisible
+          ? shownDesignNameIssues.map(designNameIssueSummary)
+          : []),
         ...externalRHFItemIssues,
         ...(serverGeneralError ? [serverGeneralError] : []),
         ...(serverFieldErrors
@@ -2682,29 +2786,44 @@ export function OrderForm({
             }
             materialExtras={
               <>
-                {!isExternalSalesActor ? (
-                  <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-                    <div>
-                      <Label htmlFor={`items.${expandedItem}.name`}>设计款名称</Label>
-                      <Input
-                        id={`items.${expandedItem}.name`}
-                        className="mt-2 h-10"
-                        aria-invalid={Boolean(errors.items?.[expandedItem]?.name)}
-                        {...register(`items.${expandedItem}.name`, { onChange: (event) => changeDesignText(expandedItem, 'name', event.target.value) })}
-                      />
-                    </div>
+                <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
+                  {/* 设计款名称由建单人填写（DECISIONS 2026-09-26）：单款默认跟随工单名称，
+                      新增设计款须手动命名，同一工单内不重名；同一设计款的规格共用名称。 */}
+                  <div>
+                    <FieldLabel htmlFor={`items.${expandedItem}.name`} required>
+                      设计款名称
+                    </FieldLabel>
+                    <Input
+                      // 同一个输入框在各设计款 / 规格间复用；按行重挂载，RHF 才会写入该行的值，
+                      // 否则切换后显示上一款的文字，失焦时还会写回当前行。
+                      key={itemsArray.fields[expandedItem]?.id}
+                      id={`items.${expandedItem}.name`}
+                      className="h-10"
+                      maxLength={DESIGN_NAME_MAX_LENGTH}
+                      placeholder="如：福字款"
+                      aria-required="true"
+                      aria-invalid={Boolean(activeDesignNameIssue)}
+                      aria-describedby={activeDesignNameIssue ? `items.${expandedItem}.name-error` : undefined}
+                      {...register(`items.${expandedItem}.name`, { onChange: (event) => changeDesignText(expandedItem, 'name', event.target.value) })}
+                    />
+                    <FieldError id={`items.${expandedItem}.name-error`} reservedLines={1}>
+                      {activeDesignNameIssue?.message}
+                    </FieldError>
+                  </div>
+                  {!isExternalSalesActor ? (
                     <div>
                       <Label htmlFor={`items.${expandedItem}.artworkVersion`}>
                         稿件版本
                       </Label>
                       <Input
+                        key={itemsArray.fields[expandedItem]?.id}
                         id={`items.${expandedItem}.artworkVersion`}
                         className="mt-2 h-10"
                         {...register(`items.${expandedItem}.artworkVersion`, { onChange: (event) => changeDesignText(expandedItem, 'artworkVersion', event.target.value) })}
                       />
                     </div>
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
                 <OrderItemProductField
                   value={activeExternalItem.productId}
                   products={externalOrderCatalogCandidates(
@@ -3048,6 +3167,7 @@ export function OrderForm({
               if (field) removeItem(index, field.id);
             }}
             onCustomNameChange={(value) => {
+              syncSingleDesignName(value, getValues('customName'));
               setValue('customName', value, {
                 shouldDirty: true,
               });

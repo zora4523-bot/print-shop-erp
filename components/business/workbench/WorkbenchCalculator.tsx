@@ -12,6 +12,7 @@ import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-asso
 import {
   createExternalOrderItem,
   normalizeExternalOrderItem,
+  withGeneratedStyleName,
 } from '@/lib/order/order-item-configuration';
 import {
   orderItemSelectionUpdate,
@@ -229,7 +230,7 @@ export function WorkbenchCalculator({
           </fieldset>}
         </Card>
         {purpose !== 'SAMPLE_SHIPMENT' && options.products.length > 0 ? <aside className="min-w-0 @min-[881px]:sticky @min-[881px]:top-20 @min-[881px]:self-start">
-          {purpose === 'PROOF' ? <SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} externalSalesAccounts={externalSalesAccounts} purpose="PROOF" item={item} {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
+          {purpose === 'PROOF' ? <SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} externalSalesAccounts={externalSalesAccounts} purpose="PROOF" item={withGeneratedStyleName(item, crafts, options.products, options.papers)} {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
             <h2
               ref={resultHeading}
               tabIndex={-1}
