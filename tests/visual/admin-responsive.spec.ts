@@ -730,7 +730,11 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '员工工资规则',
       prepareGateState: async (page) => {
         await expect(page.getByRole('combobox', { name: '工资规则', exact: true })).toBeVisible();
-        await expect(page.getByRole('textbox', { name: '每月固定工资（元）', exact: true })).toBeVisible();
+        // DECISIONS 2026-09-24：客服工资体系删除后，员工工资规则只剩标准工时。
+        // 开发服务器水合期间偶有一帧同时存在服务端与客户端两份输入框，等收敛到一份再断言。
+        const morningStart = page.getByLabel('上午上班', { exact: true });
+        await expect(morningStart).toHaveCount(1);
+        await expect(morningStart).toBeVisible();
       },
     },
     {
@@ -1574,7 +1578,7 @@ async function prepareAdminOrderCreationState(page: Page) {
   const form = await prepareConfiguredLocalFoilStyle(page);
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })
-    .fill('管理员内部建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+    .fill('管理员代建超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
   // DECISIONS 2026-09-13：管理员创建不再录入工单客户及简称，该输入框已从建单页移除。
   await expect(
     form.getByRole('textbox', { name: '客户名称/简称', exact: true }),
@@ -1582,12 +1586,10 @@ async function prepareAdminOrderCreationState(page: Page) {
   await form
     .getByRole('textbox', { name: '设计款名称', exact: true })
     .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
+  // DECISIONS 2026-09-24：管理员建单必须挂外部销售，内部建单的「需人工核价的要求」字段随之删除。
   await form
-    .getByRole('textbox', {
-      name: '需人工核价的要求（选填）',
-      exact: true,
-    })
-    .fill('客户要求追加配置外特殊工艺，请工厂确认环节人工核价并保留完整客需说明。');
+    .getByRole('combobox', { name: '关联外部销售（必填）', exact: true })
+    .selectOption({ label: 'E2E 销售 · e2e-sales' });
 
   await form
     .getByRole('button', { name: '添加地址 2', exact: true })
