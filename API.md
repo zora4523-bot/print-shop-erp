@@ -254,17 +254,20 @@ pnpm test --run
 
 `events` 仅包含展示所需的操作标题、时间、人员、备注和已格式化变更；不返回原始 `changedFields` 或内部报价修订标识。首屏使用同一领域查询；非管理员详情继续使用原有授权裁剪结果，不使用该分页入口。查询不修改审计记录或财务数据。
 
-### 管理员添加发货地址
+### 添加发货地址（管理员 / 工单本人销售）
 
-`actions/order-shipment.ts:addOrderShipmentAction(payload, mode)`：权限
-`order:update:post-schedule`，领域层再次限定 ADMIN。`mode` 为 `preview` 或
-`save`；预览只读，保存必须提交预览返回的 `previewToken`。
+`actions/order-shipment.ts:addOrderShipmentAction(payload, mode)`：入口权限
+`order:create`（ADMIN、SALES）；领域层 `lib/order/add-shipment.ts` 再次限定为
+ADMIN（任意工单）或工单本人 SALES（`submitterId` 为本人），其他账号拒绝。`mode`
+为 `preview` 或 `save`；预览只读，保存必须提交预览返回的 `previewToken`。
+销售侧入口与限制另见下文「销售编辑页新增收货地址（2026-09-12）」。
 
 输入包含 `orderId`、`sourceShipmentId`、`expectedRevision`、
 `expectedEditVersion`、`expectedWorkOrderVersion`、`expectedPriceRevision`，
 新地址的 `receiverName / receiverPhone / receiverAddress / destinationProvince`，
 以及 `lines: { orderItemId, quantity }[]`。新地址的 `shippingFee`、
-`packingMaterialFee` 可选，填写时必须有 `overrideReason`，仅适用于已提交的
+`packingMaterialFee` 可选，**仅 ADMIN 可填**（SALES 传入人工运费、纸箱费或
+`overrideReason` 一律拒绝），填写时必须有 `overrideReason`，仅适用于已提交的
 外部销售工单。返回 `preview`（原总额、新总额、差额、各地址费用）、`saved`
 或 `error`。
 
