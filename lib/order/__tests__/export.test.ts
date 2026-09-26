@@ -9,6 +9,7 @@ import {
   OrderBillingMode,
   OrderChangeRequestStatus,
   OrderExportStatus,
+  OrderItemPricingRoute,
   OrderKind,
   OrderSettlementType,
   OrderStatus,
@@ -607,7 +608,6 @@ describe('processQueuedOrderExport', () => {
     ];
     const singleRowSheets = new Set([
       '工单',
-      '款式',
       '包装组及组成',
       '对客收费',
       '价格修订',
@@ -616,7 +616,7 @@ describe('processQueuedOrderExport', () => {
     ]);
     const rowCounts = Object.fromEntries(sheetNames.map((name) => [
       name,
-      singleRowSheets.has(name) ? 1 : name === '操作记录' ? 2 : 0,
+      singleRowSheets.has(name) ? 1 : name === '款式' || name === '操作记录' ? 2 : 0,
     ]));
     const consumed = new Map<string, XlsxRow[]>();
     const order = {
@@ -668,6 +668,8 @@ describe('processQueuedOrderExport', () => {
       },
       specification: '大号',
       paperType: '160g珠光闪红',
+      paperWeightGsm: 160,
+      pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
       quantity: 1000,
       crafts: ['craft-1'],
       foilColors: ['哑金', '银色'],
@@ -680,6 +682,18 @@ describe('processQueuedOrderExport', () => {
       priceOverrideReason: '客户协议价',
       remark: '红色高亮',
       createdAt: NOW,
+    };
+    // 历史款式：未记录克重（导出留空）、无产品；类型按计价路线的业务称呼。
+    const legacyItem = {
+      ...item,
+      id: 'item-2',
+      sequence: 2,
+      name: '款式 A',
+      product: null,
+      specification: '中号封',
+      paperType: '艳红珠光纸',
+      paperWeightGsm: null,
+      pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
     };
     const packagingGroup = {
       orderId: 'order-1',
@@ -806,7 +820,7 @@ describe('processQueuedOrderExport', () => {
     // 款式表查询带 product 关联；外协表借道的款式标签查询只取 {id, sequence, name}。
     dbMock.orderItem.findMany.mockImplementation(
       async (args: { select?: Record<string, unknown> }) =>
-        args.select?.product ? [item] : [],
+        args.select?.product ? [item, legacyItem] : [],
     );
     dbMock.orderPackagingGroup.findMany.mockResolvedValue([packagingGroup]);
     dbMock.orderCustomerCharge.findMany.mockResolvedValue([customerCharge]);
@@ -898,8 +912,15 @@ describe('processQueuedOrderExport', () => {
       '工单版本',
     ]);
     expect(consumed.get('工单')?.[1]?.slice(19, 21)).toEqual([2, 3]);
-    expect(consumed.get('款式')).toHaveLength(2);
-    expect(consumed.get('款式')?.[1]?.slice(0, 11)).toEqual([
+    expect(consumed.get('款式')).toHaveLength(3);
+    expect(consumed.get('款式')?.[0]?.slice(6, 11)).toEqual([
+      '规格',
+      '纸张',
+      '克重',
+      '类型',
+      '数量',
+    ]);
+    expect(consumed.get('款式')?.[1]?.slice(0, 13)).toEqual([
       'GD-260807-001',
       1,
       '款式 A',
@@ -908,11 +929,25 @@ describe('processQueuedOrderExport', () => {
       '彩印',
       '大号',
       '160g暗红珠光纸',
+      '160g',
+      '彩印',
       1000,
       '铜版纸彩印+烫金',
       '哑金、银金',
     ]);
-    expect(consumed.get('款式')?.[1]?.slice(13, 18)).toEqual([
+    expect(consumed.get('款式')?.[2]?.slice(0, 10)).toEqual([
+      'GD-260807-001',
+      2,
+      '款式 A',
+      undefined,
+      undefined,
+      null,
+      '中号封',
+      '艳红珠光纸',
+      null,
+      '局部烫金（通版现货）',
+    ]);
+    expect(consumed.get('款式')?.[1]?.slice(15, 20)).toEqual([
       xlsxDecimal('0.1234'),
       xlsxDecimal('12.00'),
       xlsxDecimal('135.40'),
@@ -1019,6 +1054,12 @@ describe('processQueuedOrderExport', () => {
       .map(([args]) => args.select as Record<string, unknown>)
       .find((select) => select.product);
     expect(itemSelect).not.toHaveProperty('pricingSnapshot');
+    expect(itemSelect).toMatchObject({
+      paperWeightGsm: true,
+      pricingRoute: true,
+    });
+    // 类型与打印单同一口径，只看计价路线（orderItemTypeLabel）。
+    expect(itemSelect).not.toHaveProperty('order');
     expect(sheetQueries[6].mock.calls[0]?.[0].select)
       .not.toHaveProperty('salaryRuleSnapshot');
     const chargeSelect = sheetQueries[4].mock.calls[0]?.[0].select as Record<

@@ -644,6 +644,42 @@ test.describe('OrderPrintLayout 截图回归', () => {
     await expectDeclaredPagination(page);
   });
 
+  // 业主 2026-09-26：款名由建单人自定后不再携带纸张；混用纸张 / 克重的工单逐行标出，
+  // 分页按多出的这一行重新估算，声明页数仍须等于实际 PDF 页数。只核结构，不落截图基线。
+  test('混用纸张的 20 款工单逐行标纸张克重且分页与实际页数一致', async ({ page }) => {
+    const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
+    const { orderId } = await seedPrintableOrder({
+      submitterId: adminId,
+      designCount: 1,
+      variant: 'large-items',
+      itemCount: 20,
+    });
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query(
+        `UPDATE "OrderItem" SET "paperType"='红卡', "paperWeightGsm"=250 WHERE "orderId"=$1 AND sequence % 2 = 0`,
+        [orderId],
+      );
+    } finally {
+      await client.end();
+    }
+
+    await login(page, {
+      from: `/print/orders/${orderId}`,
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+    await expect(page).toHaveURL(`/print/orders/${orderId}`);
+    await waitForPrintReady(page);
+
+    await expect(page.locator('.items tbody > tr')).toHaveCount(20);
+    await expect(page.locator('.items tbody > tr .item-material')).toHaveCount(20);
+    await expect(page.locator('.items tbody > tr .item-material', { hasText: '红卡纸 250g' })).toHaveCount(10);
+    await expectSingleOrderQrPerSheet(page);
+    await expectDeclaredPagination(page);
+  });
+
   test('50 款边界的声明页数与实际 PDF 页数一致', async ({ page }) => {
     const adminId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const { orderId } = await seedPrintableOrder({

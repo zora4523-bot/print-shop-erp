@@ -522,6 +522,84 @@ describe('buildPrintHtml', () => {
     expect(html.match(/鸿运当头/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('混用纸张或克重时款名下逐行印纸张与克重，图稿标题与工序行仍只用款名', async () => {
+    const html = await renderPrintHtml(fixtureOrder({
+      items: [
+        fixtureItem({
+          name: '福字款',
+          pricingRoute: 'STOCK_BLANK',
+          paperType: '珠光艳闪',
+          hasLocalFoil: true,
+        }),
+        fixtureItem({
+          id: 'item-2',
+          sequence: 2,
+          name: '招财款',
+          pricingRoute: 'COLOR_PRINT',
+          paperType: '160g杂色珠光',
+          designs: [fixtureDesign({ id: 'design-2' })],
+        }),
+      ],
+      packagingGroups: [],
+    }));
+
+    expect(html).toContain(
+      '<div>福字款</div><div class="item-material">艳红珠光纸 160g</div><div class="item-process">局部平烫 · 哑金</div>',
+    );
+    // 克重已写在纸张名里时不重复追加；类型不另印，工艺行已写明。
+    expect(html).toContain('<div>招财款</div><div class="item-material">160g杂色珠光纸</div>');
+    expect(html.match(/class="item-material"/g)).toHaveLength(2);
+    expect(html).not.toContain('局部烫金（通版现货）');
+    expect(html).toContain('<span class="txt">福字款</span>');
+    expect(html).toContain('<small class="flow-item">图 1 · 福字款</small>');
+    expect(html).toContain('<div class="lbl">纸张类型</div>');
+  });
+
+  it('全单只用一种纸张时不逐行重复，纸张只看顶部栏；缺纸张的行不单独算一种', async () => {
+    const samePaper = await renderPrintHtml(fixtureOrder({
+      items: [
+        fixtureItem({ name: '福字款', paperType: '珠光艳闪', paperWeightGsm: 160 }),
+        fixtureItem({
+          id: 'item-2',
+          sequence: 2,
+          name: '寿字款',
+          paperType: '珠光艳闪',
+          paperWeightGsm: 160,
+          designs: [fixtureDesign({ id: 'design-2' })],
+        }),
+        fixtureItem({
+          id: 'item-3',
+          sequence: 3,
+          name: '样品',
+          pricingRoute: 'MANUAL_QUOTE',
+          paperType: '  ',
+          paperWeightGsm: null,
+          designs: [fixtureDesign({ id: 'design-3' })],
+        }),
+      ],
+      packagingGroups: [],
+    }));
+    expect(samePaper).not.toContain('class="item-material"');
+    expect(samePaper).not.toContain('待管理员终价');
+
+    const sameNameDifferentWeight = await renderPrintHtml(fixtureOrder({
+      items: [
+        fixtureItem({ name: '红卡款', paperType: '红卡', paperWeightGsm: 250 }),
+        fixtureItem({
+          id: 'item-2',
+          sequence: 2,
+          name: '红卡轻款',
+          paperType: '红卡',
+          paperWeightGsm: 230,
+          designs: [fixtureDesign({ id: 'design-2' })],
+        }),
+      ],
+      packagingGroups: [],
+    }));
+    expect(sameNameDifferentWeight).toContain('<div>红卡款</div><div class="item-material">红卡纸 250g</div>');
+    expect(sameNameDifferentWeight).toContain('<div>红卡轻款</div><div class="item-material">红卡纸 230g</div>');
+  });
+
   it('按包装组显示每袋数量，合计真实袋数', async () => {
     const items = [
       fixtureItem({ id: 'item-1', sequence: 1, quantity: 1_000 }),

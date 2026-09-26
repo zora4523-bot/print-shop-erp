@@ -37,6 +37,7 @@ import { db } from '../db';
 import { writeXlsxFile, xlsxDecimal, type XlsxRow, type XlsxSheet } from '../export/xlsx';
 import { formatDateShanghai, formatDateTimeShanghai } from '../format/dates';
 import { actionLabel, formatOrderLogChanges, orderStatusZh } from './log-format';
+import { orderItemTypeLabel } from './item-label';
 import { ORDER_SETTLEMENT_LABELS } from './settlement';
 import {
   buildOrderWhere,
@@ -704,7 +705,7 @@ async function clearDeletedOrderExportArtifact(
 function buildWorkbookSheets(membershipPath: string, rowCounts: RowCounts, tx: Prisma.TransactionClient): XlsxSheet[] {
   return [
     trackedSheet('工单', orderRows(membershipPath, tx), rowCounts, [18, 22, 12, 12, 12, 18, 12, 12, 12, 18, 18, 18, 18, 18, 18, 18, 18, 14, 12, 14, 18, 22, 20, 20, 20, 20, 20, 20]),
-    trackedSheet('款式', itemRows(membershipPath, tx), rowCounts, [18, 8, 20, 16, 16, 14, 16, 14, 12, 24, 20, 10, 10, 14, 14, 14, 28, 20]),
+    trackedSheet('款式', itemRows(membershipPath, tx), rowCounts, [18, 8, 20, 16, 16, 14, 16, 14, 8, 18, 12, 24, 20, 10, 10, 14, 14, 14, 28, 20]),
     trackedSheet('包装组及组成', packagingGroupRows(membershipPath, tx), rowCounts),
     trackedSheet('制版明细', plateDetailRows(membershipPath, tx), rowCounts),
     trackedSheet('对客收费', customerChargeRows(membershipPath, tx), rowCounts),
@@ -840,7 +841,7 @@ async function* orderRows(membershipPath: string, tx: Prisma.TransactionClient):
 async function* itemRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '款式序号', '款式名称', '产品编码', '产品名称', '产品分类', '规格',
-    '纸张', '数量', '工艺', '烫金颜色', '双面', '双色', '成交单价', '一次性费用', '成交小计', '系统建议小计',
+    '纸张', '克重', '类型', '数量', '工艺', '烫金颜色', '双面', '双色', '成交单价', '一次性费用', '成交小计', '系统建议小计',
     '人工改价说明', '款式备注', '创建时间',
   ];
   const crafts = await tx.craft.findMany({ select: { id: true, name: true } });
@@ -856,6 +857,8 @@ async function* itemRows(membershipPath: string, tx: Prisma.TransactionClient): 
         name: true,
         specification: true,
         paperType: true,
+        paperWeightGsm: true,
+        pricingRoute: true,
         quantity: true,
         crafts: true,
         foilColors: true,
@@ -884,6 +887,8 @@ async function* itemRows(membershipPath: string, tx: Prisma.TransactionClient): 
           row.product ? productCategoryLabel(row.product.category) : null,
           row.specification,
           row.paperType ? paperDisplayLabel(row.paperType) : row.paperType,
+          row.paperWeightGsm === null ? null : `${row.paperWeightGsm}g`,
+          orderItemTypeLabel(row.pricingRoute),
           row.quantity,
           row.crafts.map((id) => craftNames.get(id) ?? '已删除工艺').join('、'),
           row.foilColors.map(foilColorLabel).join('、'),
