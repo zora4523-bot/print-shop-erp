@@ -172,8 +172,8 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 ## 外部销售读取边界（2026-09-12）
 
 销售详情及编辑复用 `lib/order/sales-detail-query.ts` 的同一查询/序列化契约；
-`SalesOrderEditor` 不接触通用工单 DTO。客户选项在服务端按当前销售关联工单限定，
-客户表尚无独立销售分配字段，不能把无关联客户默认为销售可见。
+`SalesOrderEditor` 不接触通用工单 DTO。工单“客户名称/简称”自 2026-09-27 停用，
+销售端不再读取或返回客户；按工单指认归属一律用 `lib/order/external-sales-name.ts`。
 `lib/agent-monthly-billing/sales-query.ts` 只读取本人的 `AgentMonthlyBill` 及冻结明细，
 不复用包含管理员内部关系的月账单详情。旧 Bill 仅保留管理历史归档用途。
 

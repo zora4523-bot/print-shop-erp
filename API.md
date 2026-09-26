@@ -171,10 +171,10 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 
 - `quoteExternalCreateOrderAction` 同时允许 SALES 自助报价与 ADMIN 代建预览；仍使用同一已发布价目、参数校验和报价 token，其他角色一律拒绝。关联账号的有效性在实际创建事务中重验。内部/工厂直单预览 `quoteInternalCreateOrderAction` 已于 2026-09-24 删除（业主拍板：所有业务都以外部销售身份开展）。
 - `createOrderAction` 的 `externalSalesUserId`：ADMIN 建单**必填**（2026-09-24 起取消工厂直单），缺失时返回 `invalid` 且 `fieldErrors.externalSalesUserId = ['请选择关联外部销售']`；只能指定启用的 SALES 账号。事务内锁定并验证账号，写入 `submitterId` 与 `EXTERNAL_SALES` 结算方向，`submitterRole=SALES` 满足结算一致性约束，实际管理员保留在 `createdById` 和创建日志。SALES 本人建单时原始输入出现该字段（包括 null）直接拒绝；其他角色不能建单。管理员新建页在没有启用的外部销售账号时不渲染表单，提示先去账号管理创建或启用。重复创建按实际创建人和原归属校验。寄样品 / 打样（`purpose=SAMPLE_SHIPMENT|PROOF`）同样适用：管理员从 `/workbench` 或 `/orders/new` 直接进入样品流程时，样品表单渲染「关联外部销售（必填）」并在保存前校验，服务端返回的同一字段错误显示在该字段下；没有启用的外部销售时显示与新建页相同的空状态。
-- 管理员新建页移除 `customerPartyId/customerRef` 输入；管理员新建时这两个值统一为空，忽略旧浏览器草稿中的残留。其他角色和既有工单的客户关联保持原契约。
+- 工单“客户名称/简称”自 2026-09-27 停用（DECISIONS 同日）：建单页不再有客户输入。`createOrderAction` 仍接受旧客户端或旧草稿带来的 `customerPartyId/customerRef`（不校验、不查客户主数据），但领域层对 SALES 与 ADMIN 一律写入空值；重做单不再复制原单客户。既有工单已存的客户列原样保留。
 - 新建的 `items[].pack` 上限为 12；`packagingGroups[].itemUnitsPerBag` 的一包合计最多 12，混装按各款相加。预报价、创建 schema、创建领域及页面同步校验，不改变旧工单包装及历史报价。数量为正整数；超限须调整，不能自动截断或按零费用放行。
-- `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；`customerPartyId` 只能选择活动客户（不变的历史关联可保留）。ADMIN 可修改范围内工单，SALES 仅可修改自己的工单；存在待审批申请时拒绝保存。
-- 管理员编辑页的“关联外部销售”使用 `externalSalesUserId`，只列出启用的 SALES 账号。它更新工单 `submitterId`，同步销售访问范围及后续对账归属，不写入客户主数据 `customerPartyId`。仅 ADMIN 可更换 DRAFT / PENDING_FACTORY / REJECTED / SUBMITTED 的 EXTERNAL_SALES 工单；已有结算、发货、账单（含草稿）或重做关联时拒绝转移。非外部销售工单不得借此转换结算方向。空账号和无效账号拒绝；未更换的历史账号可保留。事务内锁定工单与目标账号并验证递增编辑版本，保留创建人、创建时角色、客户简称、配送及全部金额快照；日志记录前后账号名称与账号 ID。
+- `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；客户不在白名单内，旧表单带来的 `customerRef/customerPartyId` 被丢弃，已存客户列不改动。ADMIN 可修改范围内工单，SALES 仅可修改自己的工单；存在待审批申请时拒绝保存。
+- 管理员编辑页的“关联外部销售”使用 `externalSalesUserId`，只列出启用的 SALES 账号。它更新工单 `submitterId`，同步销售访问范围及后续对账归属，不写入客户主数据 `customerPartyId`。仅 ADMIN 可更换 DRAFT / PENDING_FACTORY / REJECTED / SUBMITTED 的 EXTERNAL_SALES 工单；已有结算、发货、账单（含草稿）或重做关联时拒绝转移。非外部销售工单不得借此转换结算方向。空账号和无效账号拒绝；未更换的历史账号可保留。事务内锁定工单与目标账号并验证递增编辑版本，保留创建人、创建时角色、已存客户列、配送及全部金额快照；日志记录前后账号名称与账号 ID。
 - 完整编辑页用 `shipments` JSON 提交全部现有配送记录的 `id`、收件人、电话、地址、快递代码、`expectedDestinationProvince` 和 `sameDestination`。服务端校验记录集合与工单归属，拒绝新增、遗漏、重复和已发货记录的修改；外部销售需完整联系人。寄付地址变更必须明确确认原计费省份与条件未变；跨省、未核定或计费条件变化不能用普通编辑跳过物流核价。未带配送 JSON 的旧入口不能修改外部寄付地址。
 - 外部销售工单显式修改 `customName` 时不得清空，领域层按工单保存的 `settlementType` 校验，不能以操作者角色绕过；未传该字段的历史局部更新仍按原白名单执行。
 - `packageRequirement` / 外部创建命令 `packRaw` 保持既有字段契约，含义是选填的包装补充说明。保存该文字不变更包装组、分袋组成、实际袋数或入袋费用。
@@ -309,7 +309,7 @@ ADMIN（任意工单）或工单本人 SALES（`submitterId` 为本人），其�
 
 ### 外部销售补正与账单（2026-09-12）
 
-- 建单客户选项使用 `listSalesCustomerOptions`：以 session 销售 ID 限制 `Party.customerOrders.some.submitterId`，仅返回 ID、编码、名称、简称。客户联系人、电话和地址不进入该投影。建单和编辑写入同时校验客户范围，管理员原权限不变。
+- 建单与编辑不再提供客户选项（2026-09-27 客户字段停用）；原按销售限定的客户查询与写入校验随之删除。销售列表、详情与 `GET /api/orders/sales/[orderNo]` 不再返回 `customerRef/customerPartyId`。
 - 销售工单详情及编辑共同使用 `getSalesOrderDetailById` 的显式查询与序列化；通用 `getOrderDetail` 不再用于销售编辑。工单自身收件信息继续可见，内部改价说明、成本及生产记录不进入销售 DTO。
 - `cancelOrderAction` 允许 ADMIN / SALES。SALES 必须提交 `expectedEditVersion` 和取消原因；领域事务再次校验所有权、版本、无待审申请及 DRAFT / PENDING_FACTORY / REJECTED 状态。已确认订单仍走审批取消；ON_HOLD 通过已保存暂停决定还原原生产阶段后校验取消申请和结算。
 - `submitOrderAction` 支持 REJECTED 补正重提：禁止待审申请、缺图或失效报价；重新计算并确认报价，回到 PENDING_FACTORY 由工厂复核。补正通知使用独立去重键。
