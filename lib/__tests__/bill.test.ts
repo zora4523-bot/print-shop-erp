@@ -38,7 +38,6 @@ import {
   recordPayment,
   listBills,
   getAdminBillDetail,
-  getSalesBillDetail,
   addOrderCostEntry,
   BillError,
   BillGenerationUnexpectedError,
@@ -1405,6 +1404,9 @@ describe('bill detail read models', () => {
     const orderSelect = query.select.items.select.order.select;
     expect(orderSelect.id).toBe(true);
     expect(orderSelect.settlementType).toBe(true);
+    // 归档明细“工单名称”列读 customName；停用的客户名称/简称不再读取。
+    expect(orderSelect.customName).toBe(true);
+    expect(orderSelect).not.toHaveProperty('customerRef');
     expect(orderSelect.costEntries.include.createdBy).toEqual({
       select: { displayName: true },
     });
@@ -1424,78 +1426,5 @@ describe('bill detail read models', () => {
       },
     });
     void salesActor; // reference to avoid unused import
-  });
-
-  it('scopes the external-sales query before reading and returns only receivable fields', async () => {
-    dbMock.bill.findUnique.mockResolvedValue({
-      id: 'bill-1',
-      salesUserId: 'sales-1',
-      items: [],
-      payments: [],
-    });
-
-    await getSalesBillDetail('bill-1', 'sales-1');
-
-    const query = dbMock.bill.findUnique.mock.calls[0][0];
-    expect(query.where).toEqual({ id: 'bill-1', salesUserId: 'sales-1' });
-    expect(query.select.sequence).toBe(true);
-    expect(query.select).not.toHaveProperty('salesUser');
-    expect(query.select).not.toHaveProperty('createdAt');
-    expect(query.select).not.toHaveProperty('updatedAt');
-
-    expect(query.select.payments.select).toEqual({
-      id: true,
-      amount: true,
-      paidAt: true,
-      paymentMethod: true,
-      referenceNo: true,
-      remark: true,
-      idempotencyKey: true,
-    });
-    expect(query.select.payments).not.toHaveProperty('include');
-    expect(query.select.payments.select).not.toHaveProperty('recordedBy');
-
-    expect(query.select.items.where).toEqual({
-      order: {
-        submitterId: 'sales-1',
-        settlementType: OrderSettlementType.EXTERNAL_SALES,
-      },
-    });
-    expect(query.select.items.select.order.select).toEqual({
-      id: true,
-      orderNo: true,
-      customerRef: true,
-      processingAmount: true,
-      finishedAt: true,
-      status: true,
-      customerCharges: {
-        orderBy: { createdAt: 'asc' },
-        select: {
-          amount: true,
-          status: true,
-          category: { select: { code: true, name: true } },
-          shipment: { select: { sequence: true } },
-        },
-      },
-      items: {
-        orderBy: { sequence: 'asc' },
-        select: {
-          id: true,
-          sequence: true,
-          name: true,
-          pricingSnapshot: true,
-        },
-      },
-    });
-    for (const internalField of [
-      'costEntries',
-      'outsourceOrders',
-      'reworkOrders',
-      'shipments',
-    ]) {
-      expect(query.select.items.select.order.select).not.toHaveProperty(
-        internalField,
-      );
-    }
   });
 });

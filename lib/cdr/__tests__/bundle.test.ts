@@ -108,7 +108,10 @@ describe('listEligibleOrders', () => {
       {
         id: 'o1',
         orderNo: 'O-1',
-        customerRef: '苹果福',
+        customName: '中秋礼盒',
+        settlementType: 'EXTERNAL_SALES',
+        submitter: { displayName: '桂林' },
+        sourceOrder: null,
         submittedAt: new Date('2026-05-05T08:00:00Z'),
         items: [
           { designs: [{ id: 'd1' }, { id: 'd2' }] },
@@ -121,10 +124,50 @@ describe('listEligibleOrders', () => {
       {
         id: 'o1',
         orderNo: 'O-1',
-        customerRef: '苹果福',
+        customName: '中秋礼盒',
+        externalSalesName: '桂林',
         submittedAt: new Date('2026-05-05T08:00:00Z'),
         cdrCount: 3,
       },
+    ]);
+  });
+
+  it('按工单名称与外部销售指认候选工单，不再读取客户名称/简称', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      {
+        id: 'rework-1',
+        orderNo: 'O-2',
+        customName: null,
+        // 管理员发起的免费重做：外部销售取原单的提交人，而不是管理员。
+        settlementType: 'NO_CHARGE',
+        submitter: { displayName: '管理员' },
+        sourceOrder: { submitter: { displayName: '桂林' } },
+        submittedAt: new Date('2026-05-05T09:00:00Z'),
+        items: [{ designs: [{ id: 'd4' }] }],
+      },
+      {
+        id: 'free-1',
+        orderNo: 'O-3',
+        customName: '样品',
+        settlementType: 'NO_CHARGE',
+        submitter: { displayName: '管理员' },
+        sourceOrder: null,
+        submittedAt: new Date('2026-05-05T10:00:00Z'),
+        items: [{ designs: [{ id: 'd5' }] }],
+      },
+    ]);
+    const r = await listEligibleOrders({ from: '2026-05-05' });
+    const select = dbMock.order.findMany.mock.calls[0][0].select;
+    expect(select).toMatchObject({
+      customName: true,
+      settlementType: true,
+      submitter: { select: { displayName: true } },
+      sourceOrder: { select: { submitter: { select: { displayName: true } } } },
+    });
+    expect(select).not.toHaveProperty('customerRef');
+    expect(r.map(({ orderNo, customName, externalSalesName }) => ({ orderNo, customName, externalSalesName }))).toEqual([
+      { orderNo: 'O-2', customName: null, externalSalesName: '桂林' },
+      { orderNo: 'O-3', customName: '样品', externalSalesName: null },
     ]);
   });
 

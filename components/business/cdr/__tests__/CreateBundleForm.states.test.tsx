@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
@@ -26,11 +27,12 @@ vi.mock('@/actions/foreman-cdr', () => ({
 
 import { CreateBundleForm } from '../CreateBundleForm';
 
-const eligible = [
+const eligible: ComponentProps<typeof CreateBundleForm>['eligible'] = [
   {
     id: 'order-1',
     orderNo: '20260824001',
-    customerRef: '测试客户',
+    customName: '中秋礼盒',
+    externalSalesName: '桂林',
     submittedAt: '2026-08-24T01:00:00.000Z',
     cdrCount: 3,
   },
@@ -58,6 +60,25 @@ describe('CreateBundleForm state contract', () => {
     expect(html).toMatch(
       /<input[^>]*name="orderIds"[^>]*value="order-1"/,
     );
+  });
+
+  it('按“工单名称 · 外部销售”指认候选工单，缺失时给出明确占位', () => {
+    const html = render([
+      ...eligible,
+      {
+        id: 'order-2',
+        orderNo: '20260824002',
+        customName: '  ',
+        externalSalesName: null,
+        submittedAt: '2026-08-24T02:00:00.000Z',
+        cdrCount: 1,
+      },
+    ]);
+    const headers = (html.match(/<th[^>]*>[^<]*<\/th>/g) ?? []).map((cell) => cell.replace(/<[^>]+>/g, ''));
+    expect(headers).toEqual(['工单号', '工单名称 · 外部销售', 'CDR 数', '提交时间', '']);
+    expect(html).toContain('<td class="px-3 py-2">中秋礼盒 · 桂林</td>');
+    expect(html).toContain('<td class="px-3 py-2">未命名工单 · 外部销售未填</td>');
+    expect(html).not.toContain('客户');
   });
 
   it('生成中锁定全选与逐单复选框', () => {

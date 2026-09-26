@@ -38,6 +38,7 @@ import { writeXlsxFile, xlsxDecimal, type XlsxRow, type XlsxSheet } from '../exp
 import { formatDateShanghai, formatDateTimeShanghai } from '../format/dates';
 import { actionLabel, formatOrderLogChanges, orderStatusZh } from './log-format';
 import { orderItemTypeLabel } from './item-label';
+import { ORDER_EXTERNAL_SALES_SELECT, orderExternalSalesName } from './external-sales-name';
 import { ORDER_SETTLEMENT_LABELS } from './settlement';
 import {
   buildOrderWhere,
@@ -743,7 +744,7 @@ function trackedSheet(
 async function* orderRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '工单名称', '状态', '类型', '计费方式', '结算路径', '来源重做单', '重做原因',
-    '重做说明', '需外协', '急单', '顺丰到付', '客户名称/简称', '主收件人', '收件电话',
+    '重做说明', '需外协', '急单', '顺丰到付', '外部销售', '主收件人', '收件电话',
     '主收货地址', '快递代码', '快递单号', '工单总额', '数据修订版本', '工单版本', '承诺交期', '包装要求',
     '工单备注', '提交人', '提交人角色', '代建人', '代建人角色', '提交时间', '排产时间', '完工时间', '发货时间',
     '结束时间', '创建时间', '更新时间',
@@ -766,7 +767,6 @@ async function* orderRows(membershipPath: string, tx: Prisma.TransactionClient):
         requiresOutsource: true,
         isUrgent: true,
         isSfCollect: true,
-        customerRef: true,
         receiverName: true,
         receiverPhone: true,
         receiverAddress: true,
@@ -788,7 +788,10 @@ async function* orderRows(membershipPath: string, tx: Prisma.TransactionClient):
         updatedAt: true,
         submitter: { select: { displayName: true } },
         createdBy: { select: { displayName: true, role: true } },
-        sourceOrder: { select: { orderNo: true } },
+        // 免费重做的“外部销售”取原单提交人（ORDER_EXTERNAL_SALES_SELECT 同一口径）。
+        sourceOrder: {
+          select: { orderNo: true, ...ORDER_EXTERNAL_SALES_SELECT.sourceOrder.select },
+        },
       },
     });
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -810,7 +813,8 @@ async function* orderRows(membershipPath: string, tx: Prisma.TransactionClient):
         yesNo(row.requiresOutsource),
         yesNo(row.isUrgent),
         yesNo(row.isSfCollect),
-        row.customerRef,
+        // 原“客户名称/简称”列位（业主 2026-09-27 停用），其后各列位置不变。
+        orderExternalSalesName(row),
         row.receiverName,
         row.receiverPhone,
         row.receiverAddress,
@@ -1703,7 +1707,7 @@ function normalizeStoredFilter(
     const params: OrderExportParams = {};
     return { scope, params, filterHash: hashExportParams(params) };
   }
-  const normalized = normalizeParams(params);
+  const normalized = withoutRetiredCustomerParams(normalizeParams(params));
   if (isAdminOrderWorkspaceExportParams(normalized)) {
     const parsed = parseAdminOrderWorkspaceQuery(normalized);
     if (parsed.issues.length > 0) {
@@ -1735,11 +1739,17 @@ function parseStoredFilter(value: Prisma.JsonValue): StoredExportFilter {
     throw new InvalidOrderExportStoredFilterError();
   }
   try {
-    const normalized = normalizeStoredFilter(scope, normalizeParams(params));
+    const storedParams = normalizeParams(params);
+    const normalized = normalizeStoredFilter(scope, storedParams);
     // filterHash was added before the first production rollout. Accepting a
     // missing value keeps fixtures/forward compatibility safe, while a stored
     // value that disagrees with the canonical params is corrupt and must fail.
-    if (value.filterHash !== undefined && value.filterHash !== normalized.filterHash) {
+    const retiredHash = retiredCustomerFilterHash(normalized.params, storedParams);
+    if (
+      value.filterHash !== undefined &&
+      value.filterHash !== normalized.filterHash &&
+      (retiredHash === null || value.filterHash !== retiredHash)
+    ) {
       throw new InvalidOrderExportStoredFilterError();
     }
     return normalized;
@@ -2078,6 +2088,33 @@ function isUniqueViolation(error: unknown): boolean {
 function orderExportErrorCode(error: unknown): string {
   if (error instanceof Error && error.name) return error.name.slice(0, 120);
   return 'OrderExportFailed';
+}
+
+// 客户名称/简称筛选随客户字段停用（业主 2026-09-27，SPEC §3.1.1“旧链接里的客户条件
+// 被忽略”）。这三个旧键仍留在白名单里：旧书签链接和停用前入队、尚待生成的导出都可能
+// 带着它们，删掉会让 normalizeParams 整单拒绝；它们在规范化前被丢弃，导出不再按客户筛选。
+const RETIRED_CUSTOMER_EXPORT_PARAM_KEYS: ReadonlySet<string> = new Set([
+  'customerRef', 'customerPartyId', 'customerRefExact',
+]);
+
+function withoutRetiredCustomerParams(params: OrderExportParams): OrderExportParams {
+  return Object.fromEntries(
+    Object.entries(params).filter(([key]) => !RETIRED_CUSTOMER_EXPORT_PARAM_KEYS.has(key)),
+  );
+}
+
+/**
+ * 停用前入队的导出，filterHash 按当时含客户键的规范参数计算。只把本次丢弃的客户键
+ * 原样补回现行规范参数再比对：其余参数仍须与现行规范形式逐字一致，被篡改的摘要照样拒绝。
+ */
+function retiredCustomerFilterHash(
+  canonical: OrderExportParams,
+  stored: OrderExportParams,
+): string | null {
+  const retired = Object.entries(stored).filter(([key]) => RETIRED_CUSTOMER_EXPORT_PARAM_KEYS.has(key));
+  return retired.length > 0
+    ? hashExportParams({ ...canonical, ...Object.fromEntries(retired) })
+    : null;
 }
 
 const EXPORT_PARAM_KEYS = new Set([

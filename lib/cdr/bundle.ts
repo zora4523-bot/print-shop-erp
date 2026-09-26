@@ -9,6 +9,10 @@ import {
 } from '../../generated/prisma/enums';
 import { enqueueBackgroundJob } from '../background-jobs/repository';
 import { BACKGROUND_JOB_TYPES } from '../background-jobs/types';
+import {
+  ORDER_EXTERNAL_SALES_SELECT,
+  orderExternalSalesName,
+} from '../order/external-sales-name';
 
 // CDR 汇总下载（SPEC §3.5 / §3.6）业务层。
 //
@@ -52,7 +56,9 @@ function shanghaiDayBoundary(ymd: string): { start: Date; end: Date } {
 export type EligibleOrderRow = {
   id: string;
   orderNo: string;
-  customerRef: string | null;
+  // 候选表按“工单名称 · 外部销售”指认工单（客户名称/简称已于 2026-09-27 停用）。
+  customName: string | null;
+  externalSalesName: string | null;
   submittedAt: Date;
   cdrCount: number;
 };
@@ -80,7 +86,8 @@ export async function listEligibleOrders(input: {
     select: {
       id: true,
       orderNo: true,
-      customerRef: true,
+      customName: true,
+      ...ORDER_EXTERNAL_SALES_SELECT,
       submittedAt: true,
       items: {
         select: {
@@ -97,7 +104,8 @@ export async function listEligibleOrders(input: {
   return rows.map((r) => ({
     id: r.id,
     orderNo: r.orderNo,
-    customerRef: r.customerRef,
+    customName: r.customName,
+    externalSalesName: orderExternalSalesName(r),
     submittedAt: r.submittedAt as Date,
     cdrCount: r.items.reduce((acc, it) => acc + it.designs.length, 0),
   }));

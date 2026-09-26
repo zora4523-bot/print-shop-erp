@@ -19,8 +19,9 @@ const bill = {
   confirmedAt: null, paidAt: new Date('2026-09-02T00:00:00Z'), receipt: null,
   adjustments: [], items: ['CANCELLED', 'SETTLED'].map((status, index) => ({
     id: `item-${index}`, orderId: `order-${index}`, orderNoSnapshot: `WO-${index}`,
-    orderStatusSnapshot: status, workOrderVersionSnapshot: 2, customerRefSnapshot: null,
+    orderStatusSnapshot: status, workOrderVersionSnapshot: 2,
     settledFeeSnapshot: new Decimal('60.15'), settledAtSnapshot: new Date('2026-08-20T00:00:00Z'),
+    order: { customName: index === 0 ? null : '中秋礼盒' },
   })),
 };
 beforeEach(() => {
@@ -68,6 +69,17 @@ it('distinguishes CANCELLED and SETTLED snapshot rows and links their order ids'
   expect(settled).toContain('已结算');
   expect(settled).toContain('href="/orders/order-1"');
   expect(settled).not.toContain('取消费');
+});
+it('lists members by order name and marks unnamed orders instead of repeating the order number', async () => {
+  const html = await renderDetail();
+  const headers = (html.match(/<th[^>]*>[^<]*<\/th>/g) ?? []).map((cell) => cell.replace(/<[^>]+>/g, ''));
+  expect(headers).toEqual(['工单', '工单名称', '结算状态', '版本', '结算时间', '金额']);
+  const rows = html.match(/<tr class="border-t">[\s\S]*?<\/tr>/g) ?? [];
+  const nameCell = (row: string | undefined) =>
+    (row?.match(/<td class="p-3">[\s\S]*?<\/td>/g) ?? [])[1]?.replace(/<[^>]+>/g, '');
+  expect(nameCell(rows.find((row) => row.includes('/orders/order-0')))).toBe('未命名工单');
+  expect(nameCell(rows.find((row) => row.includes('/orders/order-1')))).toBe('中秋礼盒');
+  expect(html).not.toContain('客户');
 });
 it('marks a DRAFT bill detail as provisional and falls back to the raw snapshot for unknown item status', async () => {
   detail.mockResolvedValue({ ...bill, status: 'DRAFT', paidAt: null, items: [{ ...bill.items[0], orderStatusSnapshot: 'SHIPPED' }] });

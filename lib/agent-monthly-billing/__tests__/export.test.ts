@@ -65,6 +65,7 @@ import {
   AgentMonthlyBillExportActorInvalidError,
   AgentMonthlyBillExportExpiredError,
   AgentMonthlyBillExportNotFoundError,
+  AgentMonthlyBillExportSnapshotError,
   InvalidAgentMonthlyBillExportRequestError,
   prepareAgentMonthlyBillExportDownload,
   processQueuedAgentMonthlyBillExport,
@@ -148,6 +149,50 @@ function snapshotSource(
     adjustments: [],
     receipt: null,
   };
+}
+
+function snapshotItem(overrides: Record<string, unknown> = {}) {
+  return {
+    orderNoSnapshot: 'GD-260815-001',
+    orderStatusSnapshot: 'SETTLED',
+    workOrderVersionSnapshot: 2,
+    settledFeeSnapshot: '100.00',
+    settledAtSnapshot: NOW.toISOString(),
+    ...overrides,
+  };
+}
+
+async function processStoredPayload(
+  payload: Record<string, unknown>,
+): Promise<Map<string, unknown[][]>> {
+  dbMock.agentMonthlyBillExport.findUnique.mockResolvedValueOnce(
+    exportRow({ createdBy: { ...actor, isActive: true } }),
+  );
+  dbMock.agentMonthlyBillExportSnapshot.findMany
+    .mockResolvedValueOnce([{ id: 'snapshot-1' }])
+    .mockResolvedValue([{ payload }]);
+  dbMock.agentMonthlyBillExport.findUniqueOrThrow.mockResolvedValue(
+    exportRow({
+      status: AgentMonthlyBillExportStatus.READY,
+      artifactName: 'export-1.xlsx',
+      byteSize: BigInt(321),
+      matchedBillCount: 1,
+      rowCounts: { '月账单': 1 },
+      completedAt: NOW,
+    }),
+  );
+  dbMock.agentMonthlyBillExport.findMany.mockResolvedValue([]);
+  const sheets = new Map<string, unknown[][]>();
+  xlsxMock.mockImplementationOnce(async ({ sheets: input }) => {
+    for (const sheet of input) {
+      const rows: unknown[][] = [];
+      for await (const row of sheet.rows) rows.push([...row]);
+      sheets.set(sheet.name, rows);
+    }
+    return { byteLength: 321, sheetCount: input.length };
+  });
+  await processQueuedAgentMonthlyBillExport('export-1');
+  return sheets;
 }
 
 beforeEach(() => {
@@ -395,6 +440,93 @@ describe('processQueuedAgentMonthlyBillExport', () => {
       kind: 'xlsx-decimal',
       value: '100.00',
     });
+  });
+});
+
+describe('结算成员表：客户名称/简称停用后的工单名称列', () => {
+  it('freezes the request-time order name and no longer copies the customer snapshot', async () => {
+    dbMock.agentMonthlyBillExport.findUnique.mockResolvedValueOnce(null);
+    dbMock.agentMonthlyBill.findMany.mockResolvedValueOnce([
+      {
+        ...snapshotSource(),
+        items: [
+          {
+            orderNoSnapshot: 'GD-260815-001',
+            orderStatusSnapshot: 'SETTLED',
+            workOrderVersionSnapshot: 2,
+            settledFeeSnapshot: new Prisma.Decimal('100'),
+            settledAtSnapshot: NOW,
+            order: { customName: '中秋礼盒' },
+          },
+        ],
+      },
+    ]);
+    dbMock.agentMonthlyBillExport.create.mockResolvedValue(
+      exportRow({ backgroundJobId: null }),
+    );
+    dbMock.agentMonthlyBillExportSnapshot.createMany.mockResolvedValue({ count: 1 });
+
+    await requestAgentMonthlyBillExport({
+      actor,
+      requestKey: REQUEST_KEY,
+      filter: { period: '2026-08' },
+      durable: false,
+    });
+
+    const itemSelect = dbMock.agentMonthlyBill.findMany.mock.calls[0]?.[0].select
+      .items.select;
+    expect(itemSelect.order).toEqual({ select: { customName: true } });
+    expect(itemSelect).not.toHaveProperty('customerRefSnapshot');
+    const persisted = dbMock.agentMonthlyBillExportSnapshot.createMany.mock
+      .calls[0]?.[0].data[0].payload;
+    expect(persisted.items).toEqual([
+      {
+        orderNoSnapshot: 'GD-260815-001',
+        orderNameSnapshot: '中秋礼盒',
+        orderStatusSnapshot: 'SETTLED',
+        workOrderVersionSnapshot: 2,
+        settledFeeSnapshot: '100.00',
+        settledAtSnapshot: NOW.toISOString(),
+      },
+    ]);
+
+    const sheets = await processStoredPayload(persisted);
+    expect(sheets.get('结算成员')).toEqual([
+      ['账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间'],
+      [
+        '2026-08', '代理商 A', 'GD-260815-001', '中秋礼盒', 'SETTLED', 2,
+        { kind: 'xlsx-decimal', value: '100.00' }, '2026/09/02 11:00',
+      ],
+    ]);
+  });
+
+  it('still renders a snapshot queued before the change, leaving the order name blank instead of showing the customer', async () => {
+    const sheets = await processStoredPayload(snapshotPayload({
+      bill: { ...snapshotPayload().bill as Record<string, unknown>, orderCount: 1 },
+      // 停用前写入的快照形状：带 customerRefSnapshot，没有 orderNameSnapshot。
+      items: [snapshotItem({ customerRefSnapshot: '客户甲' })],
+    }));
+    const members = sheets.get('结算成员');
+    expect(members?.[0]?.[3]).toBe('工单名称');
+    expect(members?.[1]?.slice(2, 4)).toEqual(['GD-260815-001', null]);
+    for (const rows of sheets.values()) expect(JSON.stringify(rows)).not.toContain('客户');
+  });
+
+  it('leaves the order name cell blank rather than repeating the order number', async () => {
+    const sheets = await processStoredPayload(snapshotPayload({
+      items: [
+        snapshotItem({ orderNameSnapshot: '  ' }),
+        snapshotItem({ orderNoSnapshot: 'GD-260815-002', orderNameSnapshot: null }),
+      ],
+    }));
+    expect(sheets.get('结算成员')?.slice(1).map((row) => row[3])).toEqual([null, null]);
+  });
+
+  it('keeps rejecting unknown snapshot keys', async () => {
+    await expect(processStoredPayload(snapshotPayload({
+      items: [snapshotItem({ customerName: '客户甲' })],
+    }))).rejects.toBeInstanceOf(AgentMonthlyBillExportSnapshotError);
+    expect(artifactMock.deleteAgentMonthlyBillExportArtifact).toHaveBeenCalled();
   });
 });
 

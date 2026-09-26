@@ -149,6 +149,11 @@ describe('generateAgentMonthlyBillsForPeriod', () => {
         }),
       }),
     );
+    // 客户名称/简称已不展示，但确认触发器仍要求快照与 Order.customerRef 一致
+    // （IS DISTINCT FROM 比对），生成必须照旧逐字写入，不能省略或改写。
+    const member = tx.agentMonthlyBillItem.upsert.mock.calls[0]?.[0];
+    expect(member.create.customerRefSnapshot).toBe(ORDER.customerRef);
+    expect(member.update.customerRefSnapshot).toBe(ORDER.customerRef);
   });
 
   it('fails closed when a frozen month has a newly visible candidate', async () => {

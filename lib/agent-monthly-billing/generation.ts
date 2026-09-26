@@ -36,6 +36,8 @@ const ELIGIBLE_ORDER_SELECT = {
   orderNo: true,
   submitterId: true,
   status: true,
+  // 客户名称/简称已停用、不再展示（业主 2026-09-27），但确认触发器要求成员
+  // customerRefSnapshot 与 Order.customerRef 一致，这里必须照旧读取并写入快照。
   customerRef: true,
   workOrderVersion: true,
   settledFee: true,

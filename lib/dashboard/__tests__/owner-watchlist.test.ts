@@ -92,21 +92,46 @@ describe('getPendingShipments', () => {
     expect(r.hasMore).toBe(true);
   });
 
-  it('row 投影：customerRef / submitter.displayName / isUrgent', async () => {
+  it('row 投影：工单名称 / 外部销售 / isUrgent，不再读取客户名称/简称', async () => {
     const completedAt = new Date('2026-04-25T08:00:00Z');
     dbMock.order.findMany.mockResolvedValue([
-      makePendingRow('o1', 'E2E-1', completedAt, true, '小王', 'CUST-A'),
+      makePendingRow('o1', 'E2E-1', completedAt, true, '小王', '中秋礼盒'),
     ]);
     const r = await getPendingShipments();
     expect(r.rows[0]).toEqual({
       id: 'o1',
       orderNo: 'E2E-1',
-      customerRef: 'CUST-A',
+      customName: '中秋礼盒',
       isUrgent: true,
       completedAt,
       promisedDate: null,
-      submitterDisplayName: '小王',
+      externalSalesName: '小王',
     });
+    const select = dbMock.order.findMany.mock.calls[0][0].select;
+    expect(select).toMatchObject({
+      customName: true,
+      settlementType: true,
+      submitter: { select: { displayName: true } },
+      sourceOrder: { select: { submitter: { select: { displayName: true } } } },
+    });
+    expect(select).not.toHaveProperty('customerRef');
+  });
+
+  it('免费重做的外部销售取原单提交人，而不是发起重做的管理员', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      {
+        ...makePendingRow('rework-1', 'E2E-R', new Date(), false, '管理员'),
+        settlementType: 'NO_CHARGE',
+        sourceOrder: { submitter: { displayName: '桂林' } },
+      },
+      {
+        ...makePendingRow('free-1', 'E2E-F', new Date(), false, '管理员'),
+        settlementType: 'NO_CHARGE',
+        sourceOrder: null,
+      },
+    ]);
+    const r = await getPendingShipments();
+    expect(r.rows.map((row) => row.externalSalesName)).toEqual(['桂林', null]);
   });
 
   it('总数与列表共用状态条件，承诺交期保留数据库日历日', async () => {
@@ -173,7 +198,7 @@ describe('getDueOrders', () => {
     const row = (id: string, ymd: string) => ({
       id,
       orderNo: `O-${id}`,
-      customerRef: null,
+      customName: null,
       status: 'IN_PRODUCTION',
       isUrgent: false,
       promisedDate: new Date(`${ymd}T00:00:00Z`),
@@ -187,6 +212,41 @@ describe('getDueOrders', () => {
     const r = await getDueOrders(NOW);
     expect(r.rows.map((x) => x.daysLeft)).toEqual([-2, 0, 3]);
     expect(r.total).toBe(3);
+  });
+
+  it('交期行按工单名称指认并带外部销售（免费重做取原单），不再读取客户名称/简称', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      {
+        id: 'a',
+        orderNo: 'O-a',
+        customName: '中秋礼盒',
+        status: 'IN_PRODUCTION',
+        isUrgent: false,
+        promisedDate: new Date('2026-07-07T00:00:00Z'),
+        settlementType: 'EXTERNAL_SALES',
+        submitter: { displayName: '桂林' },
+        sourceOrder: null,
+      },
+      {
+        id: 'b',
+        orderNo: 'O-b',
+        customName: null,
+        status: 'IN_PRODUCTION',
+        isUrgent: false,
+        promisedDate: new Date('2026-07-08T00:00:00Z'),
+        settlementType: 'NO_CHARGE',
+        submitter: { displayName: '管理员' },
+        sourceOrder: { submitter: { displayName: '桂林' } },
+      },
+    ]);
+    const r = await getDueOrders(NOW);
+    expect(r.rows.map(({ orderNo, customName, externalSalesName }) => ({ orderNo, customName, externalSalesName }))).toEqual([
+      { orderNo: 'O-a', customName: '中秋礼盒', externalSalesName: '桂林' },
+      { orderNo: 'O-b', customName: null, externalSalesName: '桂林' },
+    ]);
+    const select = dbMock.order.findMany.mock.calls[0][0].select;
+    expect(select).toMatchObject({ customName: true, settlementType: true });
+    expect(select).not.toHaveProperty('customerRef');
   });
 
   it('首屏查询有界：默认 take = DUE_ORDERS_DEFAULT_LIMIT，传 limit 时跟随', async () => {
@@ -214,7 +274,7 @@ describe('getDueOrders', () => {
     const row = (id: string, ymd: string) => ({
       id,
       orderNo: `O-${id}`,
-      customerRef: null,
+      customName: null,
       status: 'IN_PRODUCTION',
       isUrgent: false,
       promisedDate: new Date(`${ymd}T00:00:00Z`),
@@ -388,16 +448,18 @@ function makePendingRow(
   completedAt: Date,
   isUrgent: boolean,
   submitterName: string,
-  customerRef: string | null = null,
+  customName: string | null = null,
 ) {
   return {
     id,
     orderNo,
-    customerRef,
+    customName,
     isUrgent,
     completedAt,
     promisedDate: null,
+    settlementType: 'EXTERNAL_SALES',
     submitter: { displayName: submitterName },
+    sourceOrder: null,
   };
 }
 

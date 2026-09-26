@@ -25,17 +25,20 @@ import type { WatchlistColumn } from './WatchlistTable';
 const linkClass =
   'admin-wrap-anywhere font-medium text-primary underline-offset-2 hover:underline';
 
+// 主标签为工单名称、次行为工单号；未填名称时只显示工单号（客户名称/简称
+// 已于 2026-09-27 停用）。
 function OrderIdentity({
   id,
   orderNo,
-  customerRef,
+  customName,
   isUrgent = false,
 }: {
   id: string;
   orderNo: string;
-  customerRef?: string | null;
+  customName?: string | null;
   isUrgent?: boolean;
 }) {
+  const name = customName?.trim();
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -43,8 +46,8 @@ function OrderIdentity({
           href={`/orders/${id}`}
           className={`${linkClass} flex min-h-11 min-w-0 flex-col items-start justify-center`}
         >
-          <span>{customerRef || orderNo}</span>
-          {customerRef ? (
+          <span>{name || orderNo}</span>
+          {name ? (
             <span className="mt-1 font-sans text-xs font-normal tabular-nums text-muted-foreground">
               {orderNo}
             </span>
@@ -219,7 +222,7 @@ export function pendingShipmentColumns(
   now: Date,
 ): readonly WatchlistColumn<PendingShipmentRow>[] {
   return [
-    { header: '工单 / 客户', cell: (row) => <OrderIdentity {...row} /> },
+    { header: '工单', cell: (row) => <OrderIdentity {...row} /> },
     {
       header: '承诺交期',
       cell: (row) =>
@@ -243,17 +246,18 @@ export function pendingShipmentColumns(
         </div>
       ),
     },
-    { header: '提交人', cell: (row) => row.submitterDisplayName },
+    { header: '外部销售', cell: (row) => row.externalSalesName ?? '未填' },
   ];
 }
 
 export const dueOrderColumns: readonly WatchlistColumn<DueOrderRow>[] = [
-  { header: '工单 / 客户', cell: (row) => <OrderIdentity {...row} /> },
+  { header: '工单', cell: (row) => <OrderIdentity {...row} /> },
   { header: '当前阶段', cell: (row) => <OrderStatusBadge status={row.status} /> },
   {
     header: '承诺交期',
     cell: (row) => <DueDate date={row.promisedDate} daysLeft={row.daysLeft} />,
   },
+  { header: '外部销售', cell: (row) => row.externalSalesName ?? '未填' },
 ];
 
 export const overdueOutsourceColumns:

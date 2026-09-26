@@ -1027,8 +1027,8 @@ export async function getAdminBillDetail(id: string) {
             select: {
               id: true,
               orderNo: true,
+              customName: true,
               settlementType: true,
-              customerRef: true,
               processingAmount: true,
               finishedAt: true,
               status: true,
@@ -1110,88 +1110,6 @@ export async function getAdminBillDetail(id: string) {
                       createdBy: { select: { displayName: true } },
                     },
                   },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-}
-
-/**
- * Least-privilege external-sales view.
- *
- * Ownership is part of the database predicate (not a post-query check), and
- * the projection deliberately excludes every internal cost/commission source
- * and the employee who recorded a payment. Bill items are independently
- * constrained to the same external salesperson so a historically-corrupted
- * BillItem cannot disclose another account's order.
- */
-export async function getSalesBillDetail(id: string, salesUserId: string) {
-  return db.bill.findUnique({
-    where: { id, salesUserId },
-    select: {
-      id: true,
-      salesUserId: true,
-      period: true,
-      sequence: true,
-      openingAmount: true,
-      totalAmount: true,
-      paidAmount: true,
-      status: true,
-      issuedAt: true,
-      paidAt: true,
-      remark: true,
-      payments: {
-        orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
-        select: {
-          id: true,
-          amount: true,
-          paidAt: true,
-          paymentMethod: true,
-          referenceNo: true,
-          remark: true,
-          idempotencyKey: true,
-        },
-      },
-      items: {
-        where: {
-          order: {
-            submitterId: salesUserId,
-            settlementType: OrderSettlementType.EXTERNAL_SALES,
-          },
-        },
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true,
-          orderId: true,
-          orderAmount: true,
-          order: {
-            select: {
-              id: true,
-              orderNo: true,
-              customerRef: true,
-              processingAmount: true,
-              finishedAt: true,
-              status: true,
-              customerCharges: {
-                orderBy: { createdAt: 'asc' },
-                select: {
-                  amount: true,
-                  status: true,
-                  category: { select: { code: true, name: true } },
-                  shipment: { select: { sequence: true } },
-                },
-              },
-              items: {
-                orderBy: { sequence: 'asc' },
-                select: {
-                  id: true,
-                  sequence: true,
-                  name: true,
-                  pricingSnapshot: true,
                 },
               },
             },

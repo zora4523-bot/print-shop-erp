@@ -13,10 +13,17 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 type EligibleOrder = {
   id: string;
   orderNo: string;
-  customerRef: string | null;
+  customName: string | null;
+  externalSalesName: string | null;
   submittedAt: string; // ISO（server 端 toISOString 后传过来）
   cdrCount: number;
 };
+
+// 客户名称/简称停用后（业主 2026-09-27）按“工单名称 · 外部销售”指认候选工单；
+// 工单号已单列，名称缺失时不重复工单号，外部销售缺失时与打印单同一提示。
+function orderIdentityLabel(order: EligibleOrder): string {
+  return `${order.customName?.trim() || '未命名工单'} · ${order.externalSalesName ?? '外部销售未填'}`;
+}
 
 export function CreateBundleForm({
   from,
@@ -122,7 +129,7 @@ export function CreateBundleForm({
                   />
                 </th>
                 <th className="px-3 py-2 text-left">工单号</th>
-                <th className="px-3 py-2 text-left">客户名称/简称</th>
+                <th className="px-3 py-2 text-left">工单名称 · 外部销售</th>
                 <th className="px-3 py-2 text-right">CDR 数</th>
                 <th className="px-3 py-2 text-left">提交时间</th>
                 <th className="px-3 py-2"></th>
@@ -146,7 +153,7 @@ export function CreateBundleForm({
                     <td className="px-3 py-2 font-sans tabular-nums text-xs">
                       {o.orderNo}
                     </td>
-                    <td className="px-3 py-2">{o.customerRef ?? '—'}</td>
+                    <td className="px-3 py-2">{orderIdentityLabel(o)}</td>
                     <td className="px-3 py-2 text-right font-sans tabular-nums">{o.cdrCount}</td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {formatDateTimeShanghai(new Date(o.submittedAt))}

@@ -106,7 +106,7 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">工单</th>
-                <th className="px-4 py-2 text-left">客户</th>
+                <th className="px-4 py-2 text-left">工单名称</th>
                 <th className="px-4 py-2 text-left">状态 / 纸单版本</th>
                 <th className="px-4 py-2 text-left">结算时间</th>
                 <th className="px-4 py-2 text-right">结算费</th>
@@ -131,7 +131,9 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
                       />
                     ) : null}
                   </td>
-                  <td className="px-4 py-3 align-top">{item.customerRefSnapshot ?? '未填'}</td>
+                  <td className="px-4 py-3 align-top">
+                    {item.order.customName?.trim() || '未命名工单'}
+                  </td>
                   <td className="px-4 py-3 align-top text-xs text-muted-foreground">
                     {item.orderStatusSnapshot} · v{item.workOrderVersionSnapshot}
                   </td>

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { access } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -633,6 +634,7 @@ describe('processQueuedOrderExport', () => {
       requiresOutsource: false,
       isUrgent: true,
       isSfCollect: false,
+      // 历史工单仍可能存着客户名称/简称；停用后导出既不读取也不输出它。
       customerRef: '客户甲',
       receiverName: '张三',
       receiverPhone: '13800000000',
@@ -904,6 +906,27 @@ describe('processQueuedOrderExport', () => {
       '计费',
       '外部销售应付工厂',
     ]);
+    // 原“客户名称/简称”列位改为外部销售（收费单即提交人），其后列位不变。
+    expect(consumed.get('工单')?.[0]?.slice(11, 14)).toEqual([
+      '顺丰到付',
+      '外部销售',
+      '主收件人',
+    ]);
+    expect(consumed.get('工单')?.[1]?.slice(11, 14)).toEqual(['否', '销售甲', '张三']);
+    expect(consumed.get('工单')?.[0]).toHaveLength(35);
+    expect(consumed.get('工单')?.[0]?.slice(24, 26)).toEqual(['提交人', '提交人角色']);
+    expect(JSON.stringify(consumed.get('工单'))).not.toMatch(/客户甲|客户名称/);
+    const orderSheetSelect = dbMock.order.findMany.mock.calls
+      .map(([args]) => args.select as Record<string, unknown>)
+      .find((select) => select.customName);
+    expect(orderSheetSelect).not.toHaveProperty('customerRef');
+    expect(orderSheetSelect).toMatchObject({
+      settlementType: true,
+      submitter: { select: { displayName: true } },
+      sourceOrder: {
+        select: { orderNo: true, submitter: { select: { displayName: true } } },
+      },
+    });
     expect(consumed.get('工单')?.[1]?.[18]).toEqual(
       xlsxDecimal('1234.56'),
     );
@@ -1317,6 +1340,168 @@ describe('processQueuedOrderExport', () => {
         },
       },
     });
+  });
+});
+
+// 与 lib/order/export.ts 的 hashExportParams 同一存储格式：按键排序后的 entries 做 SHA-256。
+function storedFilterHash(params: Record<string, string>): string {
+  const stable = Object.entries(params).sort(([left], [right]) => left.localeCompare(right));
+  return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
+}
+
+describe('客户名称/简称停用（业主 2026-09-27）', () => {
+  const retiredCustomerParams = {
+    customerRef: '客户甲',
+    customerPartyId: 'party-1',
+    customerRefExact: '客户甲',
+  };
+
+  async function membershipWhereFor(filters: Record<string, unknown>) {
+    const stop = new Error('membership captured');
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow({ filters }));
+    writeXlsxFileMock.mockRejectedValueOnce(stop);
+    await expect(processQueuedOrderExport('export-1')).rejects.toBe(stop);
+    return JSON.stringify(dbMock.order.findMany.mock.calls[0]?.[0].where);
+  }
+
+  it('processes a filter saved before the retirement and ignores its customer conditions', async () => {
+    // 停用前入队：客户键与 filterHash 按当时的规范参数一起保存。
+    const params = { ...retiredCustomerParams, status: 'SUBMITTED' };
+    const where = await membershipWhereFor({
+      scope: 'filtered',
+      params,
+      filterHash: storedFilterHash(params),
+    });
+    expect(where).toContain('"SUBMITTED"');
+    expect(where).not.toMatch(/客户甲|party-1|customerRef|customerPartyId/);
+  });
+
+  it('processes a saved workspace filter with customer keys through the workspace predicate', async () => {
+    const stop = new Error('resolved workspace predicate');
+    resolveAdminWorkspaceResultWhereMock.mockRejectedValueOnce(stop);
+    const params = { adminWorkspace: 'v1', queue: 'production', customerRef: '客户甲' };
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow({
+      filters: { scope: 'filtered', params, filterHash: storedFilterHash(params) },
+    }));
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toBe(stop);
+    const query = resolveAdminWorkspaceResultWhereMock.mock.calls[0]?.[1];
+    expect(query).toMatchObject({ queue: 'production' });
+    expect(JSON.stringify(query)).not.toContain('客户甲');
+  });
+
+  it.each([
+    ['a digest over a different customer value', { ...retiredCustomerParams, customerRef: '客户乙', status: 'SUBMITTED' }],
+    ['a digest over different remaining filters', { ...retiredCustomerParams, status: 'CONFIRMED' }],
+    ['a digest that omits the customer keys but not the status', { status: 'CONFIRMED' }],
+  ])('still rejects a stored filter whose hash is %s', async (_label, hashed) => {
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow({
+      filters: {
+        scope: 'filtered',
+        params: { ...retiredCustomerParams, status: 'SUBMITTED' },
+        filterHash: storedFilterHash(hashed),
+      },
+    }));
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toMatchObject({
+      name: 'InvalidOrderExportStoredFilterError',
+    });
+    expect(dbMock.order.findMany).not.toHaveBeenCalled();
+  });
+
+  it('still rejects a null filterHash when the stored filter carries no customer keys', async () => {
+    // 兼容摘要只在停用前的客户键确实存在时才参与比对，不能让 null 摘要绕过校验。
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow({
+      filters: { scope: 'filtered', params: { status: 'CONFIRMED' }, filterHash: null },
+    }));
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toMatchObject({
+      name: 'InvalidOrderExportStoredFilterError',
+    });
+    expect(dbMock.order.findMany).not.toHaveBeenCalled();
+  });
+
+  it('accepts customer keys on a new request but neither stores nor applies them', async () => {
+    await requestOrderExport({
+      actor,
+      requestKey: REQUEST_KEY,
+      scope: 'filtered',
+      params: { ...retiredCustomerParams, status: 'SUBMITTED' },
+      durable: false,
+      now: NOW,
+    });
+
+    expect(txMock.orderExport.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        filters: {
+          scope: 'filtered',
+          params: { status: 'SUBMITTED' },
+          filterHash: storedFilterHash({ status: 'SUBMITTED' }),
+        },
+      }),
+    });
+  });
+
+  it('lists the source order salesperson as 外部销售 for an admin-created free rework', async () => {
+    const rework = {
+      id: 'rework-1',
+      orderNo: 'GD-260807-009',
+      customName: '重做 · 中秋礼盒',
+      status: OrderStatus.SUBMITTED,
+      kind: OrderKind.REWORK,
+      billingMode: OrderBillingMode.NO_CHARGE,
+      settlementType: OrderSettlementType.NO_CHARGE,
+      sourceOrder: { orderNo: 'GD-260801-001', submitter: { displayName: '桂林' } },
+      reworkCause: null,
+      reworkReason: '返工',
+      requiresOutsource: false,
+      isUrgent: false,
+      isSfCollect: false,
+      receiverName: null,
+      receiverPhone: null,
+      receiverAddress: null,
+      expressCode: null,
+      trackingNo: null,
+      totalAmount: new Prisma.Decimal('0'),
+      revision: 1,
+      workOrderVersion: 1,
+      promisedDate: null,
+      packageRequirement: null,
+      remark: null,
+      submitter: { displayName: '管理员' },
+      submitterRole: Role.ADMIN,
+      createdBy: { displayName: '管理员', role: Role.ADMIN },
+      submittedAt: NOW,
+      scheduledAt: null,
+      completedAt: null,
+      shippedAt: null,
+      finishedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow());
+    dbMock.order.findMany.mockImplementation(
+      async (args: { select?: Record<string, unknown> }) =>
+        args.select?.customName
+          ? [rework]
+          : [{ id: 'rework-1', orderNo: 'GD-260807-009' }],
+    );
+    const stop = new Error('order sheet captured');
+    let orderSheet: XlsxRow[] = [];
+    writeXlsxFileMock.mockImplementationOnce(
+      async (input: { sheets: readonly XlsxSheet[] }) => {
+        const rows: XlsxRow[] = [];
+        for await (const row of input.sheets[0]!.rows) rows.push(row);
+        orderSheet = rows;
+        throw stop;
+      },
+    );
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toBe(stop);
+    expect(orderSheet[0]?.[12]).toBe('外部销售');
+    expect(orderSheet[1]?.[6]).toBe('GD-260801-001');
+    expect(orderSheet[1]?.[12]).toBe('桂林');
+    expect(orderSheet[1]?.[24]).toBe('管理员');
   });
 });
 

@@ -29,7 +29,9 @@ export async function getSalesMonthlyBill(actor: Actor, id: string) {
       receipt: { select: { amount: true, receivedAt: true, paymentMethod: true, referenceNo: true } },
       items: { orderBy: [{ settledAtSnapshot: 'asc' }, { id: 'asc' }], select: {
         id: true, orderId: true, orderNoSnapshot: true, workOrderVersionSnapshot: true, orderStatusSnapshot: true,
-        customerRefSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true,
+        settledFeeSnapshot: true, settledAtSnapshot: true,
+        // 只取工单名称作明细标签；当前价格等工单事实仍不出现在销售账单投影里。
+        order: { select: { customName: true } },
       } },
       adjustments: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {
         id: true, amount: true, credit: { select: { sourceItem: { select: { orderNoSnapshot: true } } } },

@@ -11,6 +11,10 @@ import {
   type PaginatedResult,
 } from '../admin/table';
 import {
+  ORDER_EXTERNAL_SALES_SELECT,
+  orderExternalSalesName,
+} from '../order/external-sales-name';
+import {
   DUE_SOON_DAYS,
   PROMISE_ALERT_STATUSES,
   promisedDaysLeft,
@@ -35,15 +39,17 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // 待发货 — 已完成生产但尚未发货，按 (急单优先, 完工时间正序) 排列
 // ─────────────────────────────────────────────────────────────────────
 
+// 关注列表按“工单名称 + 工单号”指认工单、另列工单归属的外部销售（收费单即
+// 提交人，免费重做取原单），取代已停用的客户名称/简称（业主 2026-09-27）。
+// 外部销售不代表生产跟进人或当前负责人。
 export type PendingShipmentRow = {
   id: string;
   orderNo: string;
-  customerRef: string | null;
+  customName: string | null;
   isUrgent: boolean;
   completedAt: Date;
   promisedDate: Date | null;
-  // 工单提交人，不代表生产跟进人或当前负责人。
-  submitterDisplayName: string;
+  externalSalesName: string | null;
 };
 
 export type PendingShipmentsResult = PaginatedResult<PendingShipmentRow> & {
@@ -81,23 +87,23 @@ export async function getPendingShipments(
     select: {
       id: true,
       orderNo: true,
-      customerRef: true,
+      customName: true,
       isUrgent: true,
       completedAt: true,
       promisedDate: true,
-      submitter: { select: { displayName: true } },
+      ...ORDER_EXTERNAL_SALES_SELECT,
     },
   });
 
   const rows: PendingShipmentRow[] = raw.slice(0, window.take).map((r) => ({
     id: r.id,
     orderNo: r.orderNo,
-    customerRef: r.customerRef,
+    customName: r.customName,
     isUrgent: r.isUrgent,
     // where.completedAt != null guarantees this projection is present.
     completedAt: r.completedAt as Date,
     promisedDate: r.promisedDate,
-    submitterDisplayName: r.submitter.displayName,
+    externalSalesName: orderExternalSalesName(r),
   }));
 
   return {
@@ -186,7 +192,8 @@ export async function getOverdueOutsourcing(
 export type DueOrderRow = {
   id: string;
   orderNo: string;
-  customerRef: string | null;
+  customName: string | null;
+  externalSalesName: string | null;
   status: OrderStatus;
   isUrgent: boolean;
   promisedDate: Date;
@@ -264,10 +271,11 @@ export async function getDueOrders(
     select: {
       id: true,
       orderNo: true,
-      customerRef: true,
+      customName: true,
       status: true,
       isUrgent: true,
       promisedDate: true,
+      ...ORDER_EXTERNAL_SALES_SELECT,
     },
   });
 
@@ -276,7 +284,8 @@ export async function getDueOrders(
       raw.map((r) => ({
         id: r.id,
         orderNo: r.orderNo,
-        customerRef: r.customerRef,
+        customName: r.customName,
+        externalSalesName: orderExternalSalesName(r),
         status: r.status,
         isUrgent: r.isUrgent,
         promisedDate: r.promisedDate as Date,
