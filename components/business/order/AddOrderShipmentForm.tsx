@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
 import { applyParsedReceiverFact } from '@/lib/order/receiver-address-paste';
+import { orderItemRowLabel } from '@/lib/order/item-label';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Label } from '@/components/ui/label';
 import { ActionNotice } from '@/components/ui-business';
@@ -31,7 +32,14 @@ type Props = Pick<
     id: string;
     sequence: number;
     receiverAddress: string | null;
-    lines: { orderItemId: string; name: string; quantity: number }[];
+    // 同一设计款的规格行共用款名，标签靠序号与规格区分（见 orderItemRowLabel）。
+    lines: {
+      orderItemId: string;
+      sequence: number;
+      name: string;
+      specification: string | null;
+      quantity: number;
+    }[];
   }[];
 };
 
@@ -214,7 +222,7 @@ export function AddOrderShipmentForm({
             {source?.lines.map((line) => (
               <div key={line.orderItemId} className="min-w-0">
                 <Label htmlFor={`${uid}-${line.orderItemId}`}>
-                  {line.name} · 分配数量（最多 {line.quantity}）
+                  {orderItemRowLabel(line)} · 分配数量（最多 {line.quantity}）
                 </Label>
                 <Input
                   id={`${uid}-${line.orderItemId}`}
@@ -274,7 +282,7 @@ export function AddOrderShipmentForm({
                 .filter((line) => Number(quantities[line.orderItemId]) > 0)
                 .map((line) => (
                   <p key={line.orderItemId}>
-                    {line.name}：地址 {source.sequence} {line.quantity} →{' '}
+                    {orderItemRowLabel(line)}：地址 {source.sequence} {line.quantity} →{' '}
                     {line.quantity - Number(quantities[line.orderItemId])}{' '}
                     件；地址 {preview.sequence} {quantities[line.orderItemId]}{' '}
                     件

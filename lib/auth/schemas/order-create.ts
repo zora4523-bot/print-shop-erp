@@ -9,6 +9,7 @@ import { MAX_ORDER_ITEM_PRINT_COLORS } from '../../order/print-colors';
 import { MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE, isNewOrderPricingRoute, resolveOrderItemFoilSides } from '../../order/pricing-route';
 import { calculateCreateOrderBagCount, MAX_CREATE_ORDER_UNITS_PER_BAG, CREATE_ORDER_PACKAGING_LIMIT_MESSAGE } from '../../order/create-order-packaging';
 import { isMixedPackaging, packagingCapacity, packagingCapacityError } from '../../order/packaging-mode';
+import { duplicateDesignNameMessage, findDuplicateDesignNames } from '../../order/design-groups';
 import { craftIdSchema, decimalStringToScaledInteger, formBoolean, moneyOptionalField, nullableFormBoolean, optionalDateField, optionalShipmentText, optionalTrimmedText, orderItemFoilColorsArray, orderItemFoilSideColorsField, orderItemMoneyOptionalField, orderItemQuantityField, requiredTrimmedText, shipmentBillableWeightField, shipmentChargeMoneyField } from './shared';
 
 // A new command can carry three explicit colors per side. The retired
@@ -776,6 +777,8 @@ export const createOrderSchema = z
         path: ['items', index, 'designGroupKey'], message: '同一设计款的材料和工艺必须一致，不同设计请增加设计款' });
       designFacts.set(item.designGroupKey, facts);
     });
+    for (const duplicate of findDuplicateDesignNames(input.items)) ctx.addIssue({ code: 'custom',
+      path: ['items', duplicate.index, 'name'], message: duplicateDesignNameMessage(duplicate.name) });
     const sample = input.purpose === 'SAMPLE_SHIPMENT';
     if (!sample && input.samplePackagingRuleCode) ctx.addIssue({ code: 'custom', path: ['samplePackagingRuleCode'], message: '只有寄样品工单可以选择寄样包装' });
     input.items.forEach((item, index) => {

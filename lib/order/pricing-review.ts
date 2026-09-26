@@ -33,6 +33,7 @@ import {
 } from "./pricing-status";
 import { appendOrderPricingRevisionInTx } from "./pricing-revision";
 import { inspectOrderProductionReadinessInTx, prepareOrderForProductionInTx } from "./production-readiness";
+import { orderItemMessageLabel } from "./item-label";
 
 const DECIMAL_10_4_MAX = new Decimal("999999.9999");
 const DECIMAL_12_2_MAX = new Decimal("9999999999.99");
@@ -1164,22 +1165,23 @@ function validateFinalPricingSubmissions(
   const manualItems = order.items.flatMap((item) => {
     if (!itemRequiresManual(item) && (!input.editAll || !submittedItems.has(item.id))) return [];
     const submitted = submittedItems.get(item.id);
+    const itemLabel = orderItemMessageLabel(item);
     const unitPrice = parseManualMoney(
       submitted?.unitPrice,
-      `款式“${item.name}”的客户单价`,
+      `${itemLabel}的客户单价`,
       DECIMAL_10_4_MAX,
       4,
     );
     const fixedFee = parseManualMoney(
       submitted?.fixedFee,
-      `款式“${item.name}”的一次性费用`,
+      `${itemLabel}的一次性费用`,
       DECIMAL_12_2_MAX,
       2,
     );
     if (input.editAll && !itemRequiresManual(item) && unitPrice.eq(item.unitPrice.toString()) && fixedFee.eq(item.fixedFee.toString())) return [];
     const reason = requiredReason(
       submitted?.reason,
-      `款式“${item.name}”需人工核价`,
+      `${itemLabel}需人工核价`,
     );
     const subtotal = unitPrice
       .times(item.quantity)
@@ -1187,7 +1189,7 @@ function validateFinalPricingSubmissions(
       .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
     if (subtotal.gt(DECIMAL_12_2_MAX)) {
       throw new OrderPricingReviewError(
-        `款式“${item.name}”的小计超出系统允许范围`,
+        `${itemLabel}的小计超出系统允许范围`,
       );
     }
     return [{

@@ -377,7 +377,9 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
                     receiverAddress: row.receiverAddress,
                     lines: row.lines.filter((line) => line.quantity > 0).map((line) => ({
                       orderItemId: line.orderItem.id,
+                      sequence: line.orderItem.sequence,
                       name: line.orderItem.name,
+                      specification: line.orderItem.specification,
                       quantity: line.quantity,
                     })),
                   }))}

@@ -12,7 +12,8 @@ type Props = {
   orderId: string;
   orderRevision: number;
   priceRevision: number;
-  items: Array<{ id: string; name: string; unitPrice: string | null }>;
+  // label 由 orderItemRowLabel 生成：同一设计款的规格行共用款名，靠序号与规格区分。
+  items: Array<{ id: string; label: string; unitPrice: string | null }>;
 };
 
 export function HistoricalBlankPriceEditor(props: Props) {
@@ -27,7 +28,7 @@ export function HistoricalBlankPriceEditor(props: Props) {
       const value = drafts[item.id] ?? item.unitPrice ?? '';
       return <div key={item.id} className="flex min-w-0 flex-wrap items-end gap-3 rounded-md border p-3">
         <label className="min-w-0 flex-1 space-y-1 text-sm">
-          <span className="admin-wrap-anywhere">{item.name} · 材料单价（元 / 个，最多四位小数）</span>
+          <span className="admin-wrap-anywhere">{item.label} · 材料单价（元 / 个，最多四位小数）</span>
           <Input inputMode="decimal" value={value} placeholder="待核价" disabled={pending}
             onChange={(event) => setDrafts((previous) => ({ ...previous, [item.id]: event.target.value }))} />
         </label>
@@ -41,7 +42,7 @@ export function HistoricalBlankPriceEditor(props: Props) {
             if (result.status === 'success') router.refresh();
           })}>
           <ConfirmActionDialog action="确认材料单价"
-            changes={[{ label: item.name, old: item.unitPrice ? `${item.unitPrice} 元 / 个` : '待核价', new: `${value} 元 / 个` }]}
+            changes={[{ label: item.label, old: item.unitPrice ? `${item.unitPrice} 元 / 个` : '待核价', new: `${value} 元 / 个` }]}
             consequences={['当前单价未启用时，原款式重算使用此材料单价；本次不改变已确认工单金额。']}
             confirmText="确认材料单价" />
         </ConfirmActionController>

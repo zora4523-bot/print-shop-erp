@@ -18,6 +18,7 @@ import type {
 import { orderCascadeLockKey } from '@/lib/order/locks';
 import { appendOrderPricingRevisionInTx } from '@/lib/order/pricing-revision';
 import { itemAllowsIndependentPlateDetail } from '@/lib/order/plate-charge-integrity';
+import { orderItemMessageLabel } from '@/lib/order/item-label';
 import {
   ORDER_PRICING_STATUS,
   type OrderPricingStatusValue,
@@ -460,7 +461,9 @@ export async function saveOrderPlateDetail(
       where: { id: input.orderItemId, orderId: order.id },
       select: {
         id: true,
+        sequence: true,
         name: true,
+        specification: true,
         pricingRoute: true,
         frontFoilColors: true,
         backFoilColors: true,
@@ -638,7 +641,7 @@ export async function saveOrderPlateDetail(
         action: input.plateDetailId
           ? 'ORDER_PLATE_DETAIL_UPDATED'
           : 'ORDER_PLATE_DETAIL_CREATED',
-        remark: `${item.name} · ${input.name} · ${amount.toFixed(2)} 元`,
+        remark: `${orderItemMessageLabel(item)} · ${input.name} · ${amount.toFixed(2)} 元`,
       })),
     };
   });

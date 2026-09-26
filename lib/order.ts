@@ -5,6 +5,8 @@ import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from './rules/paper-availa
 import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
 import { createOrderSchema } from './auth/schemas';
 import { isSampleOrder } from './order/purpose';
+import { orderItemMessageLabel, type OrderItemIdentity } from './order/item-label';
+import { duplicateDesignNameMessage, findDuplicateDesignNames } from './order/design-groups';
 import { salesCustomerScope } from './order/sales-customer-policy';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
@@ -133,10 +135,11 @@ const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
 const ORDER_TOTAL_LIMIT_MESSAGE =
   '工单总金额超过系统上限 9,999,999,999.99 元';
 
-function assertOrderQuantity(quantity: number, itemName: string): void {
+function assertOrderQuantity(item: OrderItemIdentity & { quantity: number }): void {
+  const { quantity } = item;
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 9_999_999) {
     throw new OrderInvariantError(
-      `款式“${itemName}”数量必须是 1 至 9,999,999 的整数`,
+      `${orderItemMessageLabel(item)}数量必须是 1 至 9,999,999 的整数`,
     );
   }
 }
@@ -606,6 +609,10 @@ export async function createOrder(
   if (new Set(resolvedItemFigs).size !== resolvedItemFigs.length) {
     throw new OrderInvariantError('款式编号不能重复');
   }
+  const duplicateDesignName = findDuplicateDesignNames(input.items)[0];
+  if (duplicateDesignName) {
+    throw new OrderInvariantError(duplicateDesignNameMessage(duplicateDesignName.name));
+  }
   const minimumNextItemFig = Math.max(...resolvedItemFigs) + 1;
   if (
     input.nextItemFig !== undefined &&
@@ -705,8 +712,8 @@ export async function createOrder(
     // is a review aid, not a financial write: the submit finalizer re-quotes
     // persisted facts, locks price versions and creates revision 1 atomically.
     // Internal settlement keeps its existing create-time quote behavior.
-    for (const item of items) {
-      assertOrderQuantity(item.quantity, item.name);
+    for (const [index, item] of items.entries()) {
+      assertOrderQuantity({ ...item, sequence: index + 1 });
     }
     const customerPartyId =
       actor.role === Role.ADMIN ? null : input.customerPartyId ?? null;
@@ -3722,7 +3729,7 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
           lines: {
             orderBy: { orderItem: { sequence: 'asc' } },
             include: {
-              orderItem: { select: { id: true, sequence: true, name: true } },
+              orderItem: { select: { id: true, sequence: true, name: true, specification: true } },
             },
           },
         },

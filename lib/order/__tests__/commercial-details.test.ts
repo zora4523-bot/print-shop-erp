@@ -56,7 +56,9 @@ const actor = { id: 'admin-1', role: Role.ADMIN };
 function plateEligibleItem() {
   return {
     id: 'item-1',
+    sequence: 1,
     name: '款式 A',
+    specification: '大号封',
     pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
     frontFoilColors: ['哑金'],
     backFoilColors: [],
@@ -294,6 +296,18 @@ describe('order plate details', () => {
       }),
     );
     expect(result).toMatchObject({ priceRevision: 3, totalAmount: '135.00' });
+    // 同一设计款的规格行共用款名，日志须带序号与规格才能指认是哪一行。
+    expect(appendRevisionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        remark: '第 1 款“款式 A”（大号封） · 烫金版 · 35.00 元',
+      }),
+    );
+    expect(dbMock.tx.orderItem.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ sequence: true, specification: true }),
+      }),
+    );
   });
 
   it('waives the aggregate pending plate fee before structured plate rows become authoritative', async () => {

@@ -856,6 +856,42 @@ describe('createOrder', () => {
     expect(dbMock.$transaction).not.toHaveBeenCalled();
   });
 
+  it('在服务边界拒绝同一工单内不同设计款重名（去空白、忽略大小写）', async () => {
+    await expect(
+      createOrder(
+        {
+          customerRef: null,
+          receiverName: null,
+          receiverPhone: null,
+          receiverAddress: '广东佛山测试收货地址',
+          expressCode: null,
+          packageRequirement: null,
+          remark: null,
+          promisedDate: null,
+          isUrgent: false,
+          isSfCollect: false,
+          packagingGroups: [
+            {
+              name: '第一组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 10,
+              itemUnitsPerBag: [1, 0],
+            },
+            {
+              name: '第二组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 10,
+              itemUnitsPerBag: [0, 1],
+            },
+          ],
+          items: [baseItem({ name: 'Fu 字款' }), baseItem({ name: ' fu 字款 ' })],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow('设计款名称不能重复：fu 字款');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
   it('拒绝将供应商当作客户绑定到工单', async () => {
     dbMock.party.findUnique.mockResolvedValue({
       id: 'supplier-1',
@@ -882,6 +918,45 @@ describe('createOrder', () => {
         salesActor,
       ),
     ).rejects.toThrow('所选往来单位不是客户');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+
+  it('数量越界时按序号与规格指认款式，同一设计款的规格行不会混淆', async () => {
+    await expect(
+      createOrder(
+        {
+          customerRef: null,
+          receiverName: null,
+          receiverPhone: null,
+          receiverAddress: '广东佛山测试收货地址',
+          expressCode: null,
+          packageRequirement: null,
+          remark: null,
+          promisedDate: null,
+          isUrgent: false,
+          isSfCollect: false,
+          packagingGroups: [
+            {
+              name: '第一组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 10,
+              itemUnitsPerBag: [10, 0],
+            },
+            {
+              name: '第二组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 1,
+              itemUnitsPerBag: [0, 10],
+            },
+          ],
+          items: [
+            baseItem({ name: '福字款', designGroupKey: 'design-fu' }),
+            baseItem({ name: '福字款', designGroupKey: 'design-fu', quantity: 10_000_000 }),
+          ],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow('第 2 款“福字款”（大号封90×165）数量必须是 1 至 9,999,999 的整数');
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 

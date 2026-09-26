@@ -38,7 +38,8 @@ export async function SalesOrderEditor({ id, user }: { id: string; user: { id: s
             id: shipment.id, sequence: shipment.sequence, receiverAddress: shipment.receiverAddress,
             lines: shipment.lines.flatMap((line) => {
               const item = order.items.find((candidate) => candidate.sequence === line.itemSequence);
-              return item ? [{ orderItemId: item.id, name: line.itemName, quantity: line.quantity }] : [];
+              return item ? [{ orderItemId: item.id, sequence: item.sequence, name: line.itemName,
+                specification: item.specification, quantity: line.quantity }] : [];
             }),
           }))} /> : null}
     </section>

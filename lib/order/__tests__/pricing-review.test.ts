@@ -1503,6 +1503,24 @@ describe("snapshot-only order pricing review", () => {
     expect(dbMock.orderItem.update).not.toHaveBeenCalled();
   });
 
+  it("names a manual item by sequence and specification so spec rows sharing a design name stay distinct", async () => {
+    await expect(
+      finalizeOrderPricing(
+        command({ items: [{ itemId: "item-manual", unitPrice: "0.2000", fixedFee: "5.00", reason: " " }] }),
+        admin,
+        now,
+      ),
+    ).rejects.toThrow("第 2 款“配置外纸张”（中号封）需人工核价，请填写管理员定价依据");
+    await expect(
+      finalizeOrderPricing(
+        command({ items: [{ itemId: "item-manual", unitPrice: null, fixedFee: "5.00", reason: "工厂确认" }] }),
+        admin,
+        now,
+      ),
+    ).rejects.toThrow("第 2 款“配置外纸张”（中号封）的客户单价必须由管理员填写");
+    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+  });
+
   it("writes confirmedFee and aggregates without touching quotedFee or settledFee", async () => {
     await finalizeOrderPricing(command(), admin, now);
 
