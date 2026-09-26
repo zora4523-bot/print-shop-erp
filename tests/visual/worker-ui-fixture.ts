@@ -1,5 +1,23 @@
+import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { E2E_USERS } from '../e2e/global-setup';
+
+/**
+ * 师傅端工单页显示工单归属的外部销售（业主 2026-09-27，取代「客户名称/简称」与「接单人」）。
+ * 超长姓名接替原超长客户代号做中英混排不裁切检查：含一段不可断开的英文数字串，
+ * 且不超过姓名上限 64 字。
+ */
+export const WORKER_UI_LONG_SALES_NAME =
+  '超长外部销售姓名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证中英混排不裁切';
+const WORKER_UI_LONG_SALES_USERNAME = 'e2e-worker-ui-long-sales';
+
+export type WorkerUiFixtureOptions = {
+  /**
+   * 主工单改归一位超长姓名的停用外部销售。只给师傅端门禁用：管理端门禁以 e2e-sales
+   * 身份打开同一张主工单（外部销售只看得到自己提交的单），默认必须仍归 e2e-sales。
+   */
+  longExternalSales?: boolean;
+};
 
 export type WorkerUiFixture = {
   craftId: string;
@@ -113,8 +131,28 @@ async function deleteUnusedHourlyWorker(db: Client, id: string): Promise<void> {
   await db.query('DELETE FROM "User" WHERE id = $1', [id]);
 }
 
+// 停用且口令不是 bcrypt 哈希：不能登录，也不进建单的外部销售下拉；清理时保留（与打印
+// 夹具的 e2e-vr-long-sales 同一做法）。id 只在首次插入时用：并发的门禁 project 以
+// username 为唯一冲突目标，按行锁先后更新同一行，不会因主键撞车而失败。
+async function upsertLongExternalSales(db: Client): Promise<string> {
+  const result = await db.query<{ id: string }>(
+    `INSERT INTO "User" (id, username, "displayName", password, role, "isActive", "createdAt", "updatedAt")
+     VALUES ($1, $2, $3, 'fixture-no-login', 'SALES'::"Role", FALSE, NOW(), NOW())
+     ON CONFLICT (username) DO UPDATE SET
+       "displayName" = EXCLUDED."displayName", role = EXCLUDED.role, "isActive" = FALSE, "updatedAt" = NOW()
+     RETURNING id`,
+    [
+      `e2e-${randomBytes(12).toString('hex')}`,
+      WORKER_UI_LONG_SALES_USERNAME,
+      WORKER_UI_LONG_SALES_NAME,
+    ],
+  );
+  return result.rows[0]!.id;
+}
+
 export async function seedWorkerUiFixture(
   namespace = 'default',
+  options: WorkerUiFixtureOptions = {},
 ): Promise<WorkerUiFixture> {
   const fixture = fixtureFor(namespace);
   await withDb(async (db) => {
@@ -196,24 +234,27 @@ export async function seedWorkerUiFixture(
         [fixture.hourlyWorkerId, adminId],
       );
 
+      // 业主 2026-09-27：工单页以归属的外部销售取代「客户名称/简称」，夹具不再写 customerRef。
+      const mainOrderSubmitterId = options.longExternalSales
+        ? await upsertLongExternalSales(db)
+        : salesId;
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById", status,
            "pricingStatus", "pricingConfirmedAt",
-           "isUrgent", "isSfCollect", "customerRef", "customName", "packageRequirement", remark, "promisedDate",
+           "isUrgent", "isSfCollect", "customName", "packageRequirement", remark, "promisedDate",
            "totalAmount", "submittedAt", "scheduledAt", "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3, 'IN_PRODUCTION'::"OrderStatus",
            'LEGACY_CONFIRMED'::"OrderPricingStatus", TIMESTAMP '2026-07-19 08:00:00',
-           TRUE, TRUE, $4, $5, $6, $7, DATE '2099-12-31',
+           TRUE, TRUE, $4, $5, $6, DATE '2099-12-31',
            646172.57, TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00',
            TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00'
          )`,
         [
           fixture.orderId,
           fixture.orderNo,
-          salesId,
-          '超长客户代号ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证中英混排不裁切',
+          mainOrderSubmitterId,
           '自定义工单名称：七夕红包加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
           '包装要求：请将每一万个分组装箱并标注ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
           '工单备注：这是用于响应式裁切回归的超长中文文本与UnbrokenToken0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
@@ -223,12 +264,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-           status, "pricingStatus", "pricingConfirmedAt", "customerRef", "customName", "submittedAt",
+           status, "pricingStatus", "pricingConfirmedAt", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
            'SUBMITTED'::"OrderStatus", 'LEGACY_CONFIRMED'::"OrderPricingStatus",
-           TIMESTAMP '2026-07-19 08:10:00', '混合机型批量排产客户',
+           TIMESTAMP '2026-07-19 08:10:00',
            '手动烫金与风车机分步排产测试',
            TIMESTAMP '2026-07-19 08:10:00',
            TIMESTAMP '2026-07-19 08:10:00',
@@ -265,12 +306,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-           status, "pricingStatus", "pricingConfirmedAt", "customerRef", "customName", "submittedAt",
+           status, "pricingStatus", "pricingConfirmedAt", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
            'SUBMITTED'::"OrderStatus", 'LEGACY_CONFIRMED'::"OrderPricingStatus",
-           TIMESTAMP '2026-07-19 08:15:00', '非推荐派工测试客户',
+           TIMESTAMP '2026-07-19 08:15:00',
            '管理员最终派工原因测试',
            TIMESTAMP '2026-07-19 08:15:00',
            TIMESTAMP '2026-07-19 08:15:00',
@@ -335,12 +376,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-           status, "pricingStatus", "pricingConfirmedAt", "customerRef", "customName", "submittedAt",
+           status, "pricingStatus", "pricingConfirmedAt", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
            'SUBMITTED'::"OrderStatus", 'LEGACY_CONFIRMED'::"OrderPricingStatus",
-           TIMESTAMP '2026-07-19 08:05:00', '第二批量排产客户',
+           TIMESTAMP '2026-07-19 08:05:00',
            '第二张跨工单批量排产测试',
            TIMESTAMP '2026-07-19 08:05:00',
            TIMESTAMP '2026-07-19 08:05:00',
@@ -376,12 +417,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-           status, "pricingStatus", "pricingConfirmedAt", "customerRef", "customName", "submittedAt",
+           status, "pricingStatus", "pricingConfirmedAt", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
            'SUBMITTED'::"OrderStatus", 'LEGACY_CONFIRMED'::"OrderPricingStatus",
-           TIMESTAMP '2026-07-19 08:00:00', '批量排产客户',
+           TIMESTAMP '2026-07-19 08:00:00',
            '批量排产响应式与无障碍测试',
            TIMESTAMP '2026-07-19 08:00:00',
            TIMESTAMP '2026-07-19 08:00:00',

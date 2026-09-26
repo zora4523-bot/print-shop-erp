@@ -10,6 +10,7 @@ import {
 } from '../generated/prisma/enums';
 import { paginatedResult, paginationWindow, parsePositiveInt } from './admin/table';
 import { db } from './db';
+import { ORDER_EXTERNAL_SALES_SELECT, orderExternalSalesName } from './order/external-sales-name';
 import { getProgressCraftIdsForReporter, getReporterOperationTypeOrNull } from './production/operation-portal';
 import { getHourlyPayrollWorkerType } from './salary/hourly-aggregate';
 import {
@@ -160,11 +161,10 @@ export async function listWorkerOrders(
           customName: true,
           status: true,
           isUrgent: true,
-          customerRef: true,
           promisedDate: true,
           createdAt: true,
           workOrderVersion: true,
-          submitter: { select: { displayName: true } },
+          ...ORDER_EXTERNAL_SALES_SELECT,
           productionOperations: {
             where: {
               operationType: operationType ?? { in: [] },
@@ -211,10 +211,11 @@ export async function listWorkerOrders(
               customName: order.customName,
               status: order.status,
               isUrgent: order.isUrgent,
-              customerRef: order.customerRef,
               promisedDate: order.promisedDate,
               createdAt: order.createdAt,
-              submitterName: order.submitter?.displayName ?? '未记录',
+              // 工单归属的外部销售（业主 2026-09-27，取代「客户名称/简称」与「接单人」）：
+              // 免费重做由管理员发起，显示原单的外部销售而不是管理员。
+              externalSalesName: orderExternalSalesName(order),
               operationCount: operations.length + progressSteps.length,
               completedOperationCount:
                 operations.filter(
@@ -258,13 +259,12 @@ export async function getWorkerOrderDetail(
       customName: true,
       status: true,
       isUrgent: true,
-      customerRef: true,
       promisedDate: true,
       packageRequirement: true,
       remark: true,
       createdAt: true,
       workOrderVersion: true,
-      submitter: { select: { displayName: true } },
+      ...ORDER_EXTERNAL_SALES_SELECT,
       items: {
         orderBy: { sequence: 'asc' },
         select: {
@@ -384,7 +384,14 @@ export async function getWorkerOrderDetail(
   ) {
     return null;
   }
-  return { ...order, productionOperations, productionProgressSteps };
+  // 只交出归属结论：页面拿不到提交人，免费重做就不会误显示发起的管理员。
+  const { settlementType, submitter, sourceOrder, ...detail } = order;
+  return {
+    ...detail,
+    externalSalesName: orderExternalSalesName({ settlementType, submitter, sourceOrder }),
+    productionOperations,
+    productionProgressSteps,
+  };
 }
 
 export async function listWorkerSalaries(

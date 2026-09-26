@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  OrderSettlementType,
   OrderStatus,
   PieceworkOperationType,
   ProductionOperationStatus,
@@ -116,11 +117,12 @@ describe('worker order visibility', () => {
         customName: null,
         status: OrderStatus.IN_PRODUCTION,
         isUrgent: false,
-        customerRef: null,
         promisedDate: null,
         createdAt: new Date(),
         workOrderVersion: 3,
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
         submitter: { displayName: '销售 A' },
+        sourceOrder: null,
         productionOperations: [
           {
             id: 'operation-v2',
@@ -163,6 +165,7 @@ describe('worker order visibility', () => {
       operationCount: 2,
       completedOperationCount: 1,
       pieceworkAmount: '12.00',
+      externalSalesName: '销售 A',
     });
     const visibilitySql = dbMock.$queryRaw.mock.calls[0][0];
     expect(visibilitySql.strings.join('')).toContain(
@@ -266,6 +269,131 @@ describe('worker order visibility', () => {
     });
     await expect(getWorkerOrderDetail('order-1', packer)).resolves.toMatchObject({
       productionOperations: [{ id: 'pack-current' }], productionProgressSteps: [],
+    });
+  });
+});
+
+// 业主 2026-09-27：师傅端不再显示「客户名称/简称」与单独的「接单人」，合成一行
+// 「外部销售」——收费单取提交的外部销售；免费重做由管理员发起，取原单的外部销售。
+describe('worker order external salesperson', () => {
+  const EXTERNAL_SALES_FACTS = {
+    settlementType: true,
+    submitter: { select: { displayName: true } },
+    sourceOrder: { select: { submitter: { select: { displayName: true } } } },
+  };
+
+  function listRow(overrides: Record<string, unknown>) {
+    return {
+      orderNo: '20260927-0001',
+      customName: null,
+      status: OrderStatus.IN_PRODUCTION,
+      isUrgent: false,
+      promisedDate: null,
+      createdAt: new Date('2026-09-27T01:00:00.000Z'),
+      workOrderVersion: 1,
+      productionOperations: [],
+      productionProgressSteps: [],
+      ...overrides,
+    };
+  }
+
+  it('reads the attribution facts instead of the retired customer field', async () => {
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ total: BigInt(1) }])
+      .mockResolvedValueOnce([{ id: 'order-1' }]);
+    await listWorkerOrders(worker);
+    await getWorkerOrderDetail('order-1', worker);
+
+    const listQuery = dbMock.order.findMany.mock.calls[0][0];
+    const detailQuery = dbMock.order.findFirst.mock.calls[0][0];
+    for (const query of [listQuery, detailQuery]) {
+      expect(query.select).toMatchObject(EXTERNAL_SALES_FACTS);
+      expect(query.select).not.toHaveProperty('customerRef');
+      expect(query.select).not.toHaveProperty('customerPartyId');
+    }
+  });
+
+  it('labels a free rework card with the source order salesperson, never the admin', async () => {
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ total: BigInt(3) }])
+      .mockResolvedValueOnce([{ id: 'charged' }, { id: 'rework' }, { id: 'orphan' }]);
+    dbMock.order.findMany.mockResolvedValue([
+      listRow({
+        id: 'charged',
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        submitter: { displayName: '桂林' },
+        sourceOrder: null,
+      }),
+      listRow({
+        id: 'rework',
+        settlementType: OrderSettlementType.NO_CHARGE,
+        submitter: { displayName: '管理员' },
+        sourceOrder: { submitter: { displayName: '桂林' } },
+      }),
+      // 原单已删（sourceOrderId SetNull）：宁可显示“未填”，也不回退成发起的管理员。
+      listRow({
+        id: 'orphan',
+        settlementType: OrderSettlementType.NO_CHARGE,
+        submitter: { displayName: '管理员' },
+        sourceOrder: null,
+      }),
+    ]);
+
+    const result = await listWorkerOrders(worker);
+
+    expect(result.rows.map((row) => [row.id, row.externalSalesName])).toEqual([
+      ['charged', '桂林'],
+      ['rework', '桂林'],
+      ['orphan', null],
+    ]);
+    for (const row of result.rows) {
+      expect(row).not.toHaveProperty('customerRef');
+      expect(row).not.toHaveProperty('submitterName');
+    }
+  });
+
+  it('hands the detail page the attribution only, not the admin who created a rework', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'rework',
+      workOrderVersion: 1,
+      settlementType: OrderSettlementType.NO_CHARGE,
+      submitter: { displayName: '管理员' },
+      sourceOrder: { submitter: { displayName: '桂林' } },
+      productionOperations: [
+        { id: 'op-1', workOrderVersion: 1, status: ProductionOperationStatus.PENDING },
+      ],
+      productionProgressSteps: [],
+    });
+
+    const detail = await getWorkerOrderDetail('rework', worker);
+
+    expect(detail).toMatchObject({
+      id: 'rework',
+      externalSalesName: '桂林',
+      productionOperations: [{ id: 'op-1' }],
+    });
+    expect(detail).not.toHaveProperty('submitter');
+    expect(detail).not.toHaveProperty('sourceOrder');
+    expect(detail).not.toHaveProperty('settlementType');
+  });
+
+  it('keeps a charged order on its submitting salesperson in the detail', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'charged',
+      workOrderVersion: 1,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      submitter: { displayName: ' 桂林 ' },
+      sourceOrder: null,
+      productionOperations: [],
+      productionProgressSteps: [
+        { id: 'step-1', workOrderVersion: 1, craftId: 'craft-emboss', status: ProductionOperationStatus.PENDING },
+      ],
+    });
+
+    await expect(getWorkerOrderDetail('charged', worker)).resolves.toMatchObject({
+      externalSalesName: '桂林',
     });
   });
 });
