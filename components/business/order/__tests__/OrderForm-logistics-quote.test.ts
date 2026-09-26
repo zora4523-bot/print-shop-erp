@@ -203,6 +203,11 @@ describe('OrderForm local draft recovery', () => {
   it('requires an explicit restore/discard decision before enabling the form', () => {
     expect(source).toContain('恢复本地草稿');
     expect(source).toContain('放弃本地草稿');
+    // 只有外部销售自动恢复；管理员的恢复/放弃提示不能被自动恢复一帧收走。
+    // 真实渲染断言见 OrderFormLocalDraft.browser.spec.tsx。
+    expect(source).toContain(
+      'if (!isExternalSalesActor || !pendingLocalDraft || !transferReady) return;',
+    );
     expect(source).toContain('...(pendingLocalDraft.values as unknown as CreateOrderInput)');
     expect(source).toContain('clientSubmissionId,');
     expect(source).toMatch(

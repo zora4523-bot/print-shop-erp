@@ -909,7 +909,9 @@ export function OrderForm({
   }, [itemsArray.fields]);
 
   useEffect(() => {
-    if (!pendingLocalDraft || !transferReady) return;
+    // 只有外部销售账号自动恢复；管理员（代建）须在恢复/放弃提示里明确选择，
+    // 该提示同时说明图片和 CDR 文件不会保存在本地草稿中。
+    if (!isExternalSalesActor || !pendingLocalDraft || !transferReady) return;
     const timer = window.setTimeout(() => {
       nextItemFigRef.current = resolveNextOrderItemFig(
         pendingLocalDraft.values,
@@ -929,7 +931,7 @@ export function OrderForm({
       setLocalDraftError(null);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [clientSubmissionId, pendingLocalDraft, reset, transferReady]);
+  }, [clientSubmissionId, isExternalSalesActor, pendingLocalDraft, reset, transferReady]);
 
   useEffect(() => {
     if (!localDraftReady || pendingLocalDraft || createdDraft || !isDirty) {

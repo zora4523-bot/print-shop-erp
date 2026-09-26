@@ -71,7 +71,7 @@ test.describe("admin order entry", () => {
       )
       .toBe(true);
     await page.reload();
-    // 管理员建单与外部销售共用同一张表单：本地草稿在刷新后自动恢复。
+    await page.getByRole("button", { name: /恢复.*草稿/ }).click();
     await expect(recipient).toHaveValue(salesId);
     await expect(pack).toHaveValue("12");
     await expect(

@@ -66,8 +66,9 @@ for (const actor of ['owner', 'sales'] as const) {
           ),
         )
         .toBe(true);
-      // 管理员与外部销售共用同一张外部销售表单，本地草稿刷新后自动恢复。
       await page.reload();
+      // 外部销售自动恢复本地草稿；管理员须在恢复/放弃提示里明确选择。
+      if (actor === 'owner') await page.getByRole('button', { name: /恢复.*草稿/ }).click();
       await expect(
         type.getByRole('button', {
           name: variant.mode === 'UNPACKED' ? '不包装' : '装盒',
