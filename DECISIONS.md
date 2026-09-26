@@ -1496,6 +1496,13 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 
 - **决策**：升级前遗留的 `CRON_HOURLY_PAYROLL`、`CRON_CS_SETTLE`、`CRON_CS_PERIOD_ENDING` 死信任务，以及事件已不在 `NOTIFICATION_EVENTS` 的通知死信，运维页不给“重试”，`retryDeadBackgroundJob` 抛 `RetiredBackgroundJobTypeError` 拒绝；已删除事件（`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED`）的“送达未知”通知拒绝“确认未送达并重发”（`RETIRED_EVENT`，写入前拒绝），“确认已送达 / 忽略”照常可用。历史行原样保留。
 - **理由**：GPT-6 对抗审查（R1-2、R4-3、R2）确认：两条删除迁移只取消 `PENDING` 任务，保留的 `DEAD` 行重试后必然因处理器 / 事件已删除再次失败；通知重发后日志已不是 `UNKNOWN`，连“忽略”都无法收尾。保留记录而拒绝无效重试，符合 2026-09-24「删除客服角色」「删除清废/厨师」两条决策“不静默改写历史”的口径，未经业主另行拍板。
-- **影响**：`ea4449d1`、`3ebdfb2d`。已知边角未修：升级前已处于 `RETRYING` 的通知日志，在其最后一条 `UNKNOWN` 日志被确认已送达时仍可能重新入队（HANDOFF「卡住的问题」）。以后删除任务类型或通知事件时沿用这一做法（CLAUDE.md §15.4）。
+- **影响**：`ea4449d1`、`3ebdfb2d`。已知边角未修：升级前已处于 `RETRYING` 的通知日志，在其最后一条 `UNKNOWN` 日志被确认已送达时仍可能重新入队（HANDOFF「卡住的问题」）（已由 `ec43cf66` 修复：已删除事件收尾时不再重新入队，同组 `RETRYING` 日志关闭为 `FAILED`，死信任务保留为历史）。以后删除任务类型或通知事件时沿用这一做法（CLAUDE.md §15.4）。
 - **取代关系**：无；补充 2026-09-24 两条删除决策的历史数据处理。
 - **相关文档**：`SPEC-v1.2.md` §L 第 5 条；`API.md`「已删除功能的历史任务与通知」；`lib/background-jobs/types.ts`、`lib/background-jobs/repository.ts`、`lib/notification/resolve.ts`、`lib/notification/unknown-retry-availability.ts`。
+
+## 2026-09-26：已删除事件的待重发通知收尾口径与 PDF 运维重试并入在途复用
+
+- **决策**：对已删除事件（如客服周期通知）的“送达未知”通知，管理员选“确认已送达”或“忽略”时不再重新入队；同一投递键下仍处于 `RETRYING` 的日志在同一事务内按 CAS 关闭为 `FAILED`——选“忽略”时沿用忽略理由，选“确认已送达”时记为“人工核对：未送达；事件已停用，不再重发”（这些行此前已被管理员确认未送达，不改写成已送达），死信任务保留为 `DEAD` 历史并逐条写入审计。运维页重试失败的 PDF 任务与下载、重新生成共用同一授权范围锁；同范围已有排队或生成中的任务时不复活旧任务，提示“已有同一工单 PDF 正在生成”。
+- **理由**：GPT-6 对抗复审（2026-09-25，gpt-6-astra）确认两处遗漏：收尾分支会把已删除事件的任务重新入队，处理器必然拒绝并让日志永久停在 `RETRYING`；运维重试绕过了 `86b49c9b` 的在途复用，可能让同一工单两个 PDF 任务同时占用大文件队列。
+- **影响**：`ec43cf66`、`9273e1b2`。2026-09-11 之前旧格式的 PDF 去重键不含范围摘要，无法重建范围，这类历史任务重试照旧处理。取代 2026-09-25「已删除任务 / 通知不可重试」条目中“已知边角未修”一句。
+- **相关文档**：`lib/notification/resolve.ts`、`lib/background-jobs/pdf-scope.ts`、SPEC §E.1、§L、API.md、`docs/audits/2026-09-23-evidence-review.md` §8。
