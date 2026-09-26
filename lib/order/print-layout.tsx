@@ -75,7 +75,7 @@ const MAX_SUPPLEMENT_CHARACTERS_PER_PAGE = 600;
 const MAX_SUPPLEMENT_LINES_PER_PAGE = 22;
 const SUPPLEMENT_CHARACTERS_PER_LINE = 36;
 const MAX_HEADER_FACTORY_CHARACTERS = 24;
-const MAX_HEADER_CUSTOMER_CHARACTERS = 16;
+const MAX_HEADER_SALES_CHARACTERS = 16;
 const MAX_HEADER_ORDER_NAME_CHARACTERS = 100;
 const MAX_HEADER_ORDER_NAME_LINES = 3;
 const MAX_INLINE_ORDER_NUMBER_CHARACTERS = 64;
@@ -165,10 +165,10 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
       mainLimit: MAX_HEADER_FACTORY_CHARACTERS,
     },
     {
-      key: 'customer',
-      label: '客户',
-      value: clean(order.customerName),
-      mainLimit: MAX_HEADER_CUSTOMER_CHARACTERS,
+      key: 'external-sales',
+      label: '外部销售',
+      value: clean(order.externalSalesName),
+      mainLimit: MAX_HEADER_SALES_CHARACTERS,
     },
     {
       key: 'order-name',
@@ -314,13 +314,16 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
             </section>
           ) : null}
 
-          <section className="sec">
-            {mainFlowRows.length === 0 && flowRows.length > 0 ? (
-              <p className="flow-empty">工序明细见附页</p>
-            ) : (
-              <FlowTable rows={mainFlowRows} />
-            )}
-          </section>
+          {/* 工序在下发生产时生成；还没有工序时不占位（原“暂无生产工序记录”）。 */}
+          {flowRows.length > 0 ? (
+            <section className="sec">
+              {mainFlowRows.length === 0 ? (
+                <p className="flow-empty">工序明细见附页</p>
+              ) : (
+                <FlowTable rows={mainFlowRows} />
+              )}
+            </section>
+          ) : null}
 
           <section className="sec">
             {hasShipmentAnnex ? (
@@ -532,9 +535,9 @@ function WorkOrderHeader({
     clean(factoryName),
     MAX_HEADER_FACTORY_CHARACTERS,
   );
-  const displayCustomerName = previewForHeader(
-    clean(order.customerName),
-    MAX_HEADER_CUSTOMER_CHARACTERS,
+  const displaySalesName = previewForHeader(
+    clean(order.externalSalesName),
+    MAX_HEADER_SALES_CHARACTERS,
   );
   const fullOrderName = clean(order.customName);
   const displayOrderName =
@@ -546,8 +549,9 @@ function WorkOrderHeader({
     <header className="hd">
       <div className="hd-main">
         <div className="factory">{displayFactoryName}</div>
-        <div className={classNames('cust', !displayCustomerName && 'miss')}>
-          {displayCustomerName ?? '客户未填'}
+        {/* 抬头为工单归属的外部销售（原“客户”自 2026-09-13 起不再录入） */}
+        <div className={classNames('cust', !displaySalesName && 'miss')}>
+          {displaySalesName ?? '外部销售未填'}
         </div>
         {displayOrderName ? (
           <div className="order-name">工单 <b>{displayOrderName}</b></div>
@@ -743,7 +747,6 @@ function ArtworkGrid({ artworks, onAnnex }: { artworks: Artwork[]; onAnnex: bool
 }
 
 function FlowTable({ rows }: { rows: FlowRow[] }) {
-  if (rows.length === 0) return <p className="flow-empty">暂无生产工序记录</p>;
   return (
     <table className="flow flow-compact">
       <thead>
@@ -923,7 +926,7 @@ function hasCompleteBagFacts(
 
 function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>): string[] {
   const warnings: string[] = [];
-  if (!clean(order.customerName)) warnings.push('客户未填');
+  if (!clean(order.externalSalesName)) warnings.push('外部销售未填');
   if (!order.promisedDate) warnings.push('交货日期未填');
   // Keep the legacy paper warning only when both the note and bag facts are
   // missing. Complete structured packaging needs no additional free-text note.

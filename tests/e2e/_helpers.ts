@@ -392,6 +392,9 @@ const COLOR_ARTWORK_DATA_URL =
       '</svg>',
   ).toString('base64');
 
+/** 超长文本打印夹具的外部销售姓名（姓名上限 64 字）。 */
+export const PRINT_STRESS_SALES_NAME = '销'.repeat(64);
+
 export async function seedPrintableOrder(opts: {
   submitterId: string;
   designCount: number;
@@ -502,6 +505,17 @@ export async function seedPrintableOrder(opts: {
 
   await withFixtureTransaction(async (db) => {
     await deletePrintableOrderFixture(db, orderId);
+    // 打印单抬头是工单归属的外部销售（2026-09-27）。超长文本夹具归属一位 64 字姓名
+    // （姓名上限）的停用销售：停用账号不进建单下拉，不影响其他用例。
+    const submitterId = stressText
+      ? (await db.query<{ id: string }>(
+          `INSERT INTO "User" (id, username, "displayName", password, role, "isActive", "createdAt", "updatedAt")
+           VALUES ('e2e-vr-long-sales', 'e2e-vr-long-sales', $1, 'fixture-no-login', 'SALES'::"Role", FALSE, NOW(), NOW())
+           ON CONFLICT (username) DO UPDATE SET "displayName" = EXCLUDED."displayName", "isActive" = FALSE, "updatedAt" = NOW()
+           RETURNING id`,
+          [PRINT_STRESS_SALES_NAME],
+        )).rows[0]!.id
+      : opts.submitterId;
 
     await db.query(
       `
@@ -532,7 +546,7 @@ export async function seedPrintableOrder(opts: {
       [
         orderId,
         orderNo,
-        opts.submitterId,
+        submitterId,
         customName,
         variant === 'three-items'
           ? '佛山市测试主地址 88 号'

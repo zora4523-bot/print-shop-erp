@@ -32,7 +32,7 @@ const request = (query = '') => handleOrderPdfGet(Object.assign(new NextRequest(
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.session.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
-  mocks.order.mockResolvedValue({ id: 'order-1', orderNo: 'GD-001', customerName: '客户', workOrderVersion: 3, items: [] });
+  mocks.order.mockResolvedValue({ id: 'order-1', orderNo: 'GD-001', externalSalesName: '外销甲', workOrderVersion: 3, items: [] });
   mocks.mode.mockReturnValue('inline');
   mocks.html.mockResolvedValue('<html>ready</html>');
   mocks.render.mockResolvedValue(Buffer.from('pdf'));
@@ -88,7 +88,7 @@ describe('order PDF route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('application/pdf');
     expect(mocks.html).toHaveBeenCalledWith(expect.anything(), { factoryName: '测试工厂' });
-    expect(decodeURIComponent(response.headers.get('content-disposition') ?? '')).toContain('_客户.pdf');
+    expect(decodeURIComponent(response.headers.get('content-disposition') ?? '')).toContain('_外销甲.pdf');
   });
 
   it('binds a queued PDF to the actor, order and version on retries', async () => {

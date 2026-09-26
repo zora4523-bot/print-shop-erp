@@ -99,11 +99,11 @@ export async function buildPrintHtml(
 }
 
 export function buildOrderPdfFilename(
-  order: Pick<PrintOrder, 'orderNo' | 'customerName'>,
+  order: Pick<PrintOrder, 'orderNo' | 'externalSalesName'>,
 ): string {
   const orderNo = sanitizeFilenameComponent(order.orderNo) || '工单';
-  const customerName = sanitizeFilenameComponent(order.customerName ?? '');
-  return `${orderNo}${customerName ? `_${customerName}` : ''}.pdf`;
+  const salesName = sanitizeFilenameComponent(order.externalSalesName ?? '');
+  return `${orderNo}${salesName ? `_${salesName}` : ''}.pdf`;
 }
 
 function sanitizeFilenameComponent(value: string): string {

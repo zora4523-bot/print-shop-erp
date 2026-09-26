@@ -4,6 +4,7 @@ import { db } from '../db';
 import {
   PieceworkOperationType,
   OrderChangeRequestStatus,
+  OrderSettlementType,
   ProductionOperationStatus,
   Role,
 } from '../../generated/prisma/enums';
@@ -192,8 +193,8 @@ export async function getOrderForPrint(
   const order = await db.order.findFirst({
     where,
     include: {
-      customerParty: { select: { name: true } },
-      sourceOrder: { select: { orderNo: true } },
+      submitter: { select: { displayName: true } },
+      sourceOrder: { select: { orderNo: true, submitter: { select: { displayName: true } } } },
       changeRequests: {
         where: { status: OrderChangeRequestStatus.PENDING },
         take: 1,
@@ -411,9 +412,10 @@ export async function getOrderForPrint(
     isUrgent: order.isUrgent,
     isSfCollect: order.isSfCollect,
     promisedDate: order.promisedDate,
-    customerName:
-      order.customerParty?.name?.trim() || order.customerRef?.trim() || null,
-    customerRef: order.customerRef,
+    externalSalesName:
+      (order.settlementType === OrderSettlementType.EXTERNAL_SALES
+        ? order.submitter.displayName.trim()
+        : order.sourceOrder?.submitter.displayName.trim()) || null,
     receiverName: order.receiverName,
     receiverPhone: order.receiverPhone,
     receiverAddress: order.receiverAddress,
