@@ -38,6 +38,9 @@ describe('SalesOrderListFilters', () => {
     expect(html).toContain('3 单需关注 · 本月已发 6 单');
     expect(html).toContain('aria-current="page"');
     expect(html).toContain('name="q"');
+    expect(html).toContain('aria-label="搜索工单名或工单号"');
+    expect(html).toContain('placeholder="搜工单名 / 单号"');
+    expect(html).not.toContain('客户');
     expect(html).toContain('value="福明"');
     expect(html).toContain('name="view" value="todo"');
     expect(html).not.toContain('全部师傅');

@@ -321,7 +321,7 @@ function cancellationOrder(): AdminOrderWorkspaceRow {
 function baseOrder(): AdminOrderWorkspaceRow {
   return {
     id: 'order-1', orderNo: 'GD-260907-001', revision: 2, workOrderVersion: 1,
-    customName: '春节红包', customer: { id: 'customer-1', name: '客户甲', filterValue: '客户甲' },
+    customName: '春节红包',
     submitter: { id: 'sales-1', name: '业务员甲' }, status: OrderStatus.CONFIRMED,
     statusSummary: null, isUrgent: false, isStarred: false,
     createdAt: '2026-09-07T01:00:00.000Z', submittedAt: '2026-09-07T01:00:00.000Z',

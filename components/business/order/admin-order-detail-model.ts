@@ -13,6 +13,7 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { orderDetailAmounts } from '@/lib/order/detail-amounts';
+import { orderExternalSalesName } from '@/lib/order/external-sales-name';
 
 export type DetailFee = { id: string; label: string; amount: string | null; estimated?: boolean };
 export type DetailDiff = { id: string; label: string; before: string; after: string; targetItemId: string | null; targetSection?: 'items' | 'fees' | 'overview' };
@@ -44,7 +45,8 @@ export type AdminOrderDetailModel = {
   purpose?: import('@/lib/order/purpose').OrderPurposeValue;
   remark?: string | null;
   id: string; no: string; name: string; version: number; status: AdminOrderWorkspaceRow['status'];
-  customer: string; sales: string; craft: string; due: string | null; dueLeft: string;
+  /** 工单归属的外部销售（免费重做取原单销售）；客户名称/简称已退役，不再投影。 */
+  sales: string | null; craft: string; due: string | null; dueLeft: string;
   qty: number; isUrgent: boolean; items: DetailItem[]; orderFees: DetailFee[];
   total: string | null; feeSource: AdminOrderWorkspaceRow['fee']['source'];
   pricingStatus?: OrderPricingStatus; totalEstimated?: boolean;
@@ -159,6 +161,16 @@ function changeDiffs(request: Order['changeRequests'][number], currentItemIds: S
   return rows;
 }
 
+function detailExternalSalesName(order: Order): string | null {
+  // The worker branch of getOrderDetail omits settlementType; admin details always carry it.
+  if (!('settlementType' in order) || typeof order.settlementType !== 'string') return null;
+  return orderExternalSalesName({
+    settlementType: order.settlementType,
+    submitter: order.submitter,
+    sourceOrder: order.sourceOrder,
+  });
+}
+
 const WORKFLOW_LOG_LABELS: Record<string, string> = {
   FACTORY_CONFIRMED: '工厂确认', FACTORY_REJECTED: '工厂驳回',
   ORDER_RELEASED: '下发生产', ORDER_PRINT_REQUESTED: '创建打印任务', ORDER_PRINTED: '标记已打印',
@@ -246,8 +258,9 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
     remark: order.remark,
     purpose: order.purpose,
     id: order.id, no: order.orderNo, name: order.customName || '未命名工单',
-    version: order.workOrderVersion, status: order.status, customer: workspace.customer.name,
-    sales: workspace.submitter.name, craft: workspace.craftTags?.join(' · ') || workspace.craftSummary,
+    version: order.workOrderVersion, status: order.status,
+    sales: detailExternalSalesName(order),
+    craft: workspace.craftTags?.join(' · ') || workspace.craftSummary,
     due: workspace.promisedDate?.slice(0, 10) ?? null, dueLeft, qty: workspace.totalQuantity, isUrgent: order.isUrgent,
     items, orderFees, total: amount(workspace.fee.amount), feeSource: workspace.fee.source, feeStages,
     pricingStatus: monetaryFacts.pricingStatus, totalEstimated: workspace.fee.estimated,

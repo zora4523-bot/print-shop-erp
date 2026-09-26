@@ -51,6 +51,15 @@ describe('external create-order command contract', () => {
     expect(result.data.styles[0]).not.toHaveProperty('sideCount');
   });
 
+  it('keeps accepting the retired customer keys without validating them (业主 2026-09-27)', () => {
+    const { customerPartyId: _party, customerRef: _ref, ...withoutCustomer } = validInput();
+    expect([_party, _ref]).toEqual([null, null]);
+    expect(externalCreateOrderSubmitSchema.safeParse(withoutCustomer).success).toBe(true);
+    expect(externalCreateOrderSubmitSchema.safeParse({
+      ...validInput(), customerPartyId: 'x'.repeat(200), customerRef: '客'.repeat(200),
+    }).success).toBe(true);
+  });
+
   it('rejects client supplied price, version and status facts', () => {
     const input = {
       ...validInput(),

@@ -21,7 +21,6 @@ import {
   editableFieldsetForStatus,
 } from '@/lib/order/editable-fields';
 import { listExternalCreateOrderFoilOptions } from '@/lib/material';
-import { listCustomerPartyOptions } from '@/lib/party';
 import { getOrderExternalSalesAssociation } from '@/lib/order/external-sales-association';
 import { listActiveOrderChangeCatalogProducts } from '@/lib/order/change-request-catalog-query';
 import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
@@ -76,7 +75,6 @@ export default async function EditOrderPage({ params }: PageProps) {
     // The admin editor needs swatches and typed catalog color names.
     listExternalCreateOrderFoilOptions(),
   ]);
-  const customers: Awaited<ReturnType<typeof listCustomerPartyOptions>> = [];
   const external =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
@@ -97,7 +95,7 @@ export default async function EditOrderPage({ params }: PageProps) {
   const showSavedPricingReadiness = 'pricingStatus' in order && order.pricingStatus === OrderPricingStatus.ADMIN_CONFIRMED && (order.status === OrderStatus.SUBMITTED || order.status === OrderStatus.PENDING_FACTORY);
   const readiness = showSavedPricingReadiness ? await getOrderProductionReadiness(order.id) : undefined;
   return <><ProductionReadinessWarning readiness={readiness} saved /><AdministratorOrderEdit {...{order, external, pending, pricingPending, canPrice,
-    canCorrectFreight, id, canModify, products, foilColors, fieldset, customers, externalSalesAssociation}} /></>;
+    canCorrectFreight, id, canModify, products, foilColors, fieldset, externalSalesAssociation}} /></>;
 
 }
 
@@ -232,13 +230,12 @@ function EditorFeesSection({
 }
 
 function AdministratorOrderEdit({order, external, pending, pricingPending, canPrice,
-  canCorrectFreight, id, canModify, products, foilColors, fieldset, customers, externalSalesAssociation}:
+  canCorrectFreight, id, canModify, products, foilColors, fieldset, externalSalesAssociation}:
   RenderEditorFeesOptions & {
     id: string; canModify: boolean;
     products: Awaited<ReturnType<typeof listActiveOrderChangeCatalogProducts>>;
     foilColors: Awaited<ReturnType<typeof listExternalCreateOrderFoilOptions>>;
     fieldset: Exclude<ReturnType<typeof editableFieldsetForStatus>, 'NONE'>;
-    customers: Awaited<ReturnType<typeof listCustomerPartyOptions>>;
     externalSalesAssociation: Awaited<ReturnType<typeof getOrderExternalSalesAssociation>>;
   }) {
     const repairFacts = getLegacyProductionFactsRepair(order);
@@ -310,7 +307,6 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
             orderId: order.id,
             expectedEditVersion: order.editVersion,
             fieldset,
-            customers,
             externalSalesAssociation,
             shipments: order.shipments.map((row) => ({
               id: row.id,
@@ -328,8 +324,6 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
             blocked: Boolean(pending),
             initial: {
               customName: order.customName,
-              customerRef: order.customerRef,
-              customerPartyId: order.customerPartyId,
               receiverName: order.receiverName,
               receiverPhone: order.receiverPhone,
               receiverAddress: order.receiverAddress,

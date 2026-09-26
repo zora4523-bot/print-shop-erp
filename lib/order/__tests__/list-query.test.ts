@@ -12,9 +12,6 @@ import {
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
-    order: { count: vi.fn(), findMany: vi.fn() },
-    productionTask: { findMany: vi.fn() },
-    dailyWorkerSalaryItem: { groupBy: vi.fn() },
     craft: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
   },
@@ -25,12 +22,8 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 import {
   buildOrderWhere,
   getOrderListFilterOptions,
-  getOrderListPageWindow,
-  listOrdersPage,
-  MISSING_ORDER_CUSTOMER_FILTER_VALUE,
   orderListOrderBy,
   parseOrderListQuery,
-  sanitizeOrderListQueryForActor,
   serializeOrderListQuery,
 } from '../list-query';
 import { encodeFoilColorFilterValues } from '../foil-color-filter-codec';
@@ -40,10 +33,6 @@ const adminActor = { id: 'admin-1', role: Role.ADMIN };
 const workerActor = { id: 'worker-1', role: Role.WORKER };
 
 beforeEach(() => {
-  dbMock.order.count.mockReset().mockResolvedValue(0);
-  dbMock.order.findMany.mockReset().mockResolvedValue([]);
-  dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
-  dbMock.dailyWorkerSalaryItem.groupBy.mockReset().mockResolvedValue([]);
   dbMock.craft.findMany.mockReset().mockResolvedValue([]);
   dbMock.user.findMany.mockReset().mockResolvedValue([]);
 });
@@ -58,9 +47,6 @@ describe('parseOrderListQuery', () => {
         q: undefined,
         orderNo: undefined,
         customName: undefined,
-        customerRef: undefined,
-        customerPartyId: undefined,
-        customerRefExact: undefined,
         receiverName: undefined,
         receiverPhone: undefined,
         receiverAddress: undefined,
@@ -152,7 +138,6 @@ describe('parseOrderListQuery', () => {
       q: '  苹果福  ',
       orderNo: 'GD-260807',
       customName: '中秋礼盒',
-      customerRef: '客户甲',
       receiverName: '张三',
       receiverPhone: '138',
       receiverAddress: '佛山',
@@ -197,9 +182,6 @@ describe('parseOrderListQuery', () => {
         q: '苹果福',
         orderNo: 'GD-260807',
         customName: '中秋礼盒',
-        customerRef: '客户甲',
-        customerPartyId: undefined,
-        customerRefExact: undefined,
         receiverName: '张三',
         receiverPhone: '138',
         receiverAddress: '佛山',
@@ -318,7 +300,6 @@ describe('parseOrderListQuery', () => {
   it('preserves commas in scalar text filters instead of treating them as lists', () => {
     const result = parseOrderListQuery({
       q: '华南,东区',
-      customerRef: '客户,甲',
       receiverAddress: '佛山,南海',
       itemName: '款式,A',
       supplierName: '外协,一厂',
@@ -328,53 +309,44 @@ describe('parseOrderListQuery', () => {
     expect(result.query.filters).toEqual(
       expect.objectContaining({
         q: '华南,东区',
-        customerRef: '客户,甲',
         receiverAddress: '佛山,南海',
         itemName: '款式,A',
         supplierName: '外协,一厂',
       }),
     );
   });
+
+  it('silently ignores retired customer params carried by old bookmarks', () => {
+    const current = parseOrderListQuery({ q: '福明', status: 'SUBMITTED' });
+    const bookmarked = parseOrderListQuery({
+      q: '福明',
+      status: 'SUBMITTED',
+      customerRef: '客户甲',
+      customerPartyId: 'party-1',
+      customerRefExact: '__MISSING_CUSTOMER__',
+    });
+    // Values the retired parsers used to reject must not surface either.
+    const malformed = parseOrderListQuery({
+      customerRef: 'X'.repeat(5_000),
+      customerPartyId: '../not-an-id',
+      customerRefExact: ['旧客户甲', '旧客户乙'],
+    });
+
+    expect(bookmarked.issues).toEqual([]);
+    expect(malformed.issues).toEqual([]);
+    expect(bookmarked.query).toEqual(current.query);
+    expect(malformed.query).toEqual(parseOrderListQuery({}).query);
+    for (const key of ['customerRef', 'customerPartyId', 'customerRefExact']) {
+      expect(bookmarked.query.filters).not.toHaveProperty(key);
+      expect(serializeOrderListQuery(bookmarked.query)).not.toHaveProperty(key);
+    }
+    const where = buildOrderWhere(adminActor, bookmarked.query.filters);
+    expect(where).toEqual(buildOrderWhere(adminActor, current.query.filters));
+    expect(JSON.stringify(where)).not.toMatch(/customer/i);
+  });
 });
 
 describe('worker commercial-query boundary', () => {
-  it('drops sales-only views for non-SALES actors', () => {
-    const requested = parseOrderListQuery({ view: 'todo' }).query;
-
-    expect(
-      sanitizeOrderListQueryForActor(
-        { role: Role.ADMIN },
-        requested,
-      ).view,
-    ).toBeUndefined();
-    expect(sanitizeOrderListQueryForActor(salesActor, requested)).toBe(
-      requested,
-    );
-  });
-
-  it('removes amount ranges and restores newest-first sorting for WORKER URLs', () => {
-    const requested = parseOrderListQuery({
-      amountMin: '10',
-      amountMax: '500',
-      sort: 'totalAmount',
-      dir: 'asc',
-    }).query;
-
-    expect(sanitizeOrderListQueryForActor(workerActor, requested)).toEqual({
-      ...requested,
-      filters: {
-        ...requested.filters,
-        amountMin: undefined,
-        amountMax: undefined,
-      },
-      sort: 'createdAt',
-      dir: 'desc',
-    });
-    expect(sanitizeOrderListQueryForActor(salesActor, requested)).toBe(
-      requested,
-    );
-  });
-
   it('ignores amount filters inside the scoped where builder for WORKER callers', () => {
     const query = parseOrderListQuery({
       amountMin: '10',
@@ -432,132 +404,76 @@ describe('worker commercial-query boundary', () => {
 });
 
 describe('buildOrderWhere', () => {
-  it('uses Party identity and unlinked snapshots for exact clickable customer filters', () => {
-    const byParty = parseOrderListQuery({
-      customerPartyId: 'party-1',
-    }).query;
-    const byLegacySnapshot = parseOrderListQuery({
-      customerRefExact: '苹果福',
-    }).query;
-    const missing = parseOrderListQuery({
-      customerRefExact: MISSING_ORDER_CUSTOMER_FILTER_VALUE,
-    }).query;
+  it('applies the role scope alone when no filter is active', () => {
+    const { filters } = parseOrderListQuery({ q: '   ' }).query;
 
-    expect(serializeOrderListQuery(byParty)).toEqual(
-      expect.objectContaining({
-        customerPartyId: 'party-1',
-        customerRefExact: undefined,
-        customerRef: undefined,
-      }),
-    );
-    expect(buildOrderWhere(adminActor, byParty.filters)).toEqual({
-      AND: [{}, { customerPartyId: 'party-1' }],
+    expect(filters.q).toBeUndefined();
+    expect(buildOrderWhere(salesActor, filters)).toEqual({
+      submitterId: 'sales-1',
     });
-    expect(buildOrderWhere(adminActor, byLegacySnapshot.filters)).toEqual({
-      AND: [
-        {},
-        {
-          customerParty: { is: null },
-          customerRef: { equals: '苹果福' },
-        },
-      ],
-    });
-    expect(buildOrderWhere(adminActor, missing.filters)).toEqual({
-      AND: [
-        {},
-        {
-          customerParty: { is: null },
-          OR: [{ customerRef: null }, { customerRef: '' }],
-        },
-      ],
-    });
+    expect(buildOrderWhere(adminActor, filters)).toEqual({});
   });
 
-  it('matches displayed Party names and reserves an unambiguous missing-customer sentinel', () => {
-    const byParty = parseOrderListQuery({
-      customerRef: '苹果福',
-    }).query.filters;
-    const missing = parseOrderListQuery({
-      customerRef: MISSING_ORDER_CUSTOMER_FILTER_VALUE,
-    }).query.filters;
-    const literalSameAsLabel = parseOrderListQuery({
-      customerRef: '未填客户',
-    }).query.filters;
+  it('combines global search with the role scope and never searches the retired customer fields', () => {
+    const { filters } = parseOrderListQuery({ q: ' 苹果福 ' }).query;
+    const contains = { contains: '苹果福', mode: 'insensitive' };
 
-    expect(buildOrderWhere(adminActor, byParty)).toEqual({
+    expect(buildOrderWhere(salesActor, filters)).toEqual({
       AND: [
-        {},
+        { submitterId: 'sales-1' },
         {
           OR: [
+            { orderNo: contains },
+            { customName: contains },
+            { receiverName: contains },
+            { receiverPhone: contains },
+            { receiverAddress: contains },
+            { trackingNo: contains },
+            { expressCode: contains },
+            { submitter: { displayName: contains } },
             {
-              customerRef: { contains: '苹果福', mode: 'insensitive' },
+              shipments: {
+                some: {
+                  OR: [
+                    { receiverName: contains },
+                    { receiverPhone: contains },
+                    { receiverAddress: contains },
+                    { trackingNo: contains },
+                    { expressCode: contains },
+                  ],
+                },
+              },
             },
             {
-              customerParty: {
-                is: {
+              items: {
+                some: {
                   OR: [
-                    { name: { contains: '苹果福', mode: 'insensitive' } },
+                    { name: contains },
+                    { specification: contains },
+                    { paperType: contains },
+                    { foilColors: { has: '苹果福' } },
+                    { product: { name: contains } },
                     {
-                      shortName: {
-                        contains: '苹果福',
-                        mode: 'insensitive',
+                      tasks: {
+                        some: {
+                          status: { not: TaskStatus.CANCELLED },
+                          worker: { displayName: contains },
+                        },
                       },
                     },
                   ],
                 },
               },
             },
+            { searchPinyin: contains },
+            { searchPinyinInitials: contains },
           ],
         },
       ],
     });
-    expect(buildOrderWhere(adminActor, missing)).toEqual({
-      AND: [
-        {},
-        {
-          customerParty: { is: null },
-          OR: [{ customerRef: null }, { customerRef: '' }],
-        },
-      ],
-    });
-    expect(buildOrderWhere(adminActor, literalSameAsLabel)).toEqual(
-      expect.objectContaining({
-        AND: [
-          {},
-          expect.objectContaining({ OR: expect.any(Array) }),
-        ],
-      }),
+    expect(JSON.stringify(buildOrderWhere(adminActor, filters))).not.toMatch(
+      /customer/i,
     );
-    expect(JSON.stringify(buildOrderWhere(adminActor, literalSameAsLabel))).not
-      .toContain('"customerParty":{"is":null}');
-  });
-
-  it('includes linked Party names in global search', () => {
-    const filters = parseOrderListQuery({ q: '苹果福' }).query.filters;
-    expect(buildOrderWhere(adminActor, filters)).toEqual({
-      AND: [
-        {},
-        expect.objectContaining({
-          OR: expect.arrayContaining([
-            {
-              customerParty: {
-                is: {
-                  OR: [
-                    { name: { contains: '苹果福', mode: 'insensitive' } },
-                    {
-                      shortName: {
-                        contains: '苹果福',
-                        mode: 'insensitive',
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          ]),
-        }),
-      ],
-    });
   });
 
   it('finds saved legacy foil names when filtering by the new label', () => {
@@ -755,162 +671,6 @@ describe('buildOrderWhere', () => {
   });
 });
 
-describe('listOrdersPage', () => {
-  it('reuses a prepared page window without repeating the count read', async () => {
-    dbMock.order.count.mockResolvedValue(41);
-    const query = parseOrderListQuery({ page: '3' }).query;
-    const windowPromise = getOrderListPageWindow(adminActor, query);
-
-    const result = await listOrdersPage(adminActor, query, windowPromise);
-
-    expect(dbMock.order.count).toHaveBeenCalledOnce();
-    expect(dbMock.order.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ skip: 40, take: 20 }),
-    );
-    expect(result).toMatchObject({
-      total: 41,
-      page: 3,
-      pageCount: 3,
-      pageSize: 20,
-    });
-  });
-
-  it('does not select, filter, sort, or return commercial totals for WORKER', async () => {
-    dbMock.order.count.mockResolvedValue(1);
-    dbMock.order.findMany.mockResolvedValue([
-      {
-        id: 'worker-order-1',
-        orderNo: 'GD-260807-001',
-        customName: '师傅可见工单',
-        status: OrderStatus.IN_PRODUCTION,
-        kind: OrderKind.NORMAL,
-        isUrgent: false,
-        isSfCollect: false,
-        customerRef: null,
-        customerParty: { name: '客户全称', shortName: '苹果福' },
-        receiverName: null,
-        receiverPhone: null,
-        receiverAddress: null,
-        trackingNo: null,
-        expressCode: null,
-        // Deliberately over-rich mock: the return mapping must not leak a
-        // value even if a future adapter supplies more than Prisma selected.
-        totalAmount: '98765.43',
-        submitterId: 'sales-1',
-        submitter: { displayName: '销售甲' },
-        sourceOrder: null,
-        _count: { shipments: 1 },
-        createdAt: new Date('2026-08-07T08:00:00Z'),
-        updatedAt: new Date('2026-08-07T08:00:00Z'),
-      },
-    ]);
-    const query = parseOrderListQuery({
-      amountMin: '100',
-      amountMax: '99999',
-      sort: 'totalAmount',
-      dir: 'asc',
-    }).query;
-
-    const result = await listOrdersPage(workerActor, query);
-
-    const countArg = dbMock.order.count.mock.calls[0]![0];
-    const findArg = dbMock.order.findMany.mock.calls[0]![0];
-    expect(JSON.stringify(countArg.where)).not.toContain('totalAmount');
-    expect(findArg.select).not.toHaveProperty('totalAmount');
-    expect(findArg.orderBy).toEqual([
-      { createdAt: 'desc' },
-      { id: 'desc' },
-    ]);
-    expect(result.rows[0]).toMatchObject({
-      id: 'worker-order-1',
-      totalAmount: null,
-      pieceworkCost: null,
-    });
-  });
-
-  it('uses strict newest-first stable order, clamps the requested page and only aggregates current-page ids', async () => {
-    dbMock.order.count.mockResolvedValue(21);
-    dbMock.order.findMany.mockResolvedValue([
-      {
-        id: 'order-21',
-        orderNo: 'GD-260807-021',
-        customName: null,
-        status: OrderStatus.SUBMITTED,
-        kind: OrderKind.NORMAL,
-        isUrgent: false,
-        isSfCollect: false,
-        customerRef: null,
-        customerParty: { name: '客户全称', shortName: '苹果福' },
-        receiverName: null,
-        receiverPhone: null,
-        receiverAddress: null,
-        trackingNo: null,
-        expressCode: null,
-        totalAmount: '100.00',
-        submitterId: 'sales-1',
-        submitter: { displayName: '销售甲' },
-        sourceOrder: null,
-        _count: { shipments: 2 },
-        createdAt: new Date('2026-08-07T08:00:00Z'),
-        updatedAt: new Date('2026-08-07T08:00:00Z'),
-      },
-    ]);
-    dbMock.productionTask.findMany.mockResolvedValue([
-      {
-        orderItem: { orderId: 'order-21' },
-        worker: { displayName: '张师傅' },
-      },
-    ]);
-    dbMock.dailyWorkerSalaryItem.groupBy.mockResolvedValue([
-      { orderId: 'order-21', _sum: { pieceworkAmount: '12.30' } },
-    ]);
-    const query = parseOrderListQuery({ page: '99' }).query;
-
-    const result = await listOrdersPage(adminActor, query);
-
-    expect(dbMock.order.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip: 20,
-        take: 20,
-      }),
-    );
-    expect(dbMock.productionTask.findMany.mock.calls[0]![0].where).toEqual({
-      orderItem: { orderId: { in: ['order-21'] } },
-      workerId: { not: null },
-      status: { not: TaskStatus.CANCELLED },
-    });
-    expect(dbMock.dailyWorkerSalaryItem.groupBy.mock.calls[0]![0].where).toEqual({
-      orderId: { in: ['order-21'] },
-    });
-    expect(result).toEqual({
-      rows: [
-        expect.objectContaining({
-          id: 'order-21',
-          customerRef: '苹果福',
-          shipmentCount: 2,
-          workerNames: ['张师傅'],
-          pieceworkCost: '12.30',
-        }),
-      ],
-      total: 21,
-      page: 2,
-      pageSize: 20,
-      pageCount: 2,
-    });
-  });
-
-  it('does not query relation aggregates for an empty page', async () => {
-    const query = parseOrderListQuery({}).query;
-
-    const result = await listOrdersPage(salesActor, query);
-
-    expect(result.rows).toEqual([]);
-    expect(dbMock.productionTask.findMany).not.toHaveBeenCalled();
-    expect(dbMock.dailyWorkerSalaryItem.groupBy).not.toHaveBeenCalled();
-  });
-});
-
 describe('order list URL and options', () => {
   it('serializes normalized filters without default pagination noise', () => {
     const query = parseOrderListQuery({
@@ -925,9 +685,6 @@ describe('order list URL and options', () => {
       q: '苹果福',
       orderNo: undefined,
       customName: undefined,
-      customerRef: undefined,
-      customerPartyId: undefined,
-      customerRefExact: undefined,
       receiverName: undefined,
       receiverPhone: undefined,
       receiverAddress: undefined,

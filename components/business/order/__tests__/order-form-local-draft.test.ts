@@ -11,7 +11,9 @@ import {
 function formValues() {
   return {
     nextItemFig: 7,
+    // 客户名称/简称与关联客户已退役（业主 2026-09-27）；旧表单值与旧草稿仍可能带着。
     customerRef: '星河礼品',
+    customerPartyId: 'customer-1',
     promisedDate: new Date('2026-09-01T00:00:00.000Z'),
     isUrgent: false,
     isSfCollect: false,
@@ -154,7 +156,10 @@ describe('order form local draft', () => {
           lamination: 'SOFT_TOUCH',
         }),
       ).toBe(false);
-      expect(restored.values.customerRef).toBe(values.customerRef);
+      // 旧草稿里的退役客户字段在恢复时丢弃，不会回填进建单表单。
+      expect(restored.values).not.toHaveProperty('customerRef');
+      expect(restored.values).not.toHaveProperty('customerPartyId');
+      expect(restored.values.nextItemFig).toBe(7);
       expect(restored.values.packagingGroups).toEqual([
         expect.objectContaining({ actualBagCount: 100 }),
       ]);
@@ -207,6 +212,10 @@ describe('order form local draft', () => {
     expect(serialized).not.toBeNull();
     expect(serialized).not.toContain('pendingDesigns');
     expect(serialized).not.toContain('designFile');
+    // 退役的客户字段不再写入本机草稿。
+    expect(serialized).not.toContain('customerRef');
+    expect(serialized).not.toContain('customerPartyId');
+    expect(serialized).not.toContain('星河礼品');
     const parsed = parseLocalOrderFormDraft(serialized!, 'internal');
     const internalItem = (
       parsed?.values.items as Array<Record<string, unknown>>

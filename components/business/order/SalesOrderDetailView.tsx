@@ -165,7 +165,7 @@ export function SalesOrderDetailView({
             </div>
             <p className="admin-wrap-anywhere mt-2 text-sm text-muted-foreground">{order.orderNo}</p>
             <p className="admin-wrap-anywhere mt-1 text-sm text-muted-foreground">
-              {order.customerRef ?? '未填客户'} · 第 {order.revision} 版 ·{' '}
+              第 {order.revision} 版 ·{' '}
               {order.items.length} 款{' '}
               {order.items
                 .reduce((sum, item) => sum + item.quantity, 0)

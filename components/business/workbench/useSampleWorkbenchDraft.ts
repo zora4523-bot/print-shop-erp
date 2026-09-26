@@ -16,7 +16,6 @@ const sampleContextSchema = z.object({
   customName: createOrderSchema.shape.customName,
   packageRequirement: createOrderSchema.shape.packageRequirement,
   externalSalesUserId: createOrderSchema.shape.externalSalesUserId,
-  customerRef: createOrderSchema.shape.customerRef,
   promisedDate: createOrderSchema.shape.promisedDate,
   isUrgent: createOrderSchema.shape.isUrgent,
   expressCode: createOrderSchema.shape.expressCode,

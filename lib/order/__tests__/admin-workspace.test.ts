@@ -70,7 +70,6 @@ import {
   parseAdminOrderWorkspaceQuery,
 } from '../admin-workspace-query';
 import { OrderChangeRequestError } from '../change-request';
-import { MISSING_ORDER_CUSTOMER_FILTER_VALUE } from '../list-query';
 
 const actor = { id: 'admin-1', role: Role.ADMIN };
 
@@ -105,7 +104,6 @@ function adminOrderRecord(overrides: Record<string, unknown> = {}) {
     priceRevision: 1,
     updatedAt,
     customName: null,
-    customerRef: null,
     status: OrderStatus.SUBMITTED,
     isUrgent: false,
     totalAmount: new Prisma.Decimal('100.00'),
@@ -120,7 +118,6 @@ function adminOrderRecord(overrides: Record<string, unknown> = {}) {
     pricingStatus: OrderPricingStatus.LEGACY_CONFIRMED,
     trackingNo: null,
     submitter: { id: 'sales-1', displayName: '销售甲' },
-    customerParty: null,
     _count: { shipments: 1 },
     stars: [],
     items: [
@@ -244,7 +241,7 @@ describe('admin order workspace predicates', () => {
 
     const query = parseAdminOrderWorkspaceQuery({
       signal: 'pending-release',
-      customerPartyId: 'party-1',
+      submitterId: 'sales-1',
       starred: 'yes',
     }).query;
     const now = new Date('2026-09-07T00:00:00.000Z');
@@ -262,7 +259,7 @@ describe('admin order workspace predicates', () => {
         pendingRelease,
       ],
     });
-    expect(JSON.stringify(where)).toContain('party-1');
+    expect(JSON.stringify(where)).toContain('"submitterId":"sales-1"');
     // Exports must retain the same status, change-request and user filters.
     await expect(resolveAdminWorkspaceResultWhere(actor, query, now)).resolves.toEqual(
       where,
@@ -977,58 +974,18 @@ describe('admin order workspace predicates', () => {
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('does not confuse a real customer named like the empty-state label with the missing sentinel', async () => {
-    const realNamedCustomer = adminOrderRecord({
-      status: OrderStatus.DRAFT,
-      customerParty: {
-        id: 'party-1',
-        name: '未填客户',
-        shortName: null,
-      },
-    });
-    const missingCustomer = adminOrderRecord({
-      id: 'order-2',
-      orderNo: 'GD-260902-002',
-      status: OrderStatus.DRAFT,
-    });
-    const emptySnapshotCustomer = adminOrderRecord({
-      id: 'order-3',
-      orderNo: 'GD-260902-003',
-      status: OrderStatus.DRAFT,
-      customerRef: '',
-    });
-    dbMock.order.findFirst
-      .mockResolvedValueOnce(realNamedCustomer)
-      .mockResolvedValueOnce(missingCustomer)
-      .mockResolvedValueOnce(emptySnapshotCustomer);
+  it('never selects or exposes the retired order customer', async () => {
+    const row = adminOrderRecord({ status: OrderStatus.DRAFT });
+    dbMock.order.findFirst.mockResolvedValue(row);
 
-    const real = await getAdminOrderByOrderNo(
-      actor,
-      realNamedCustomer.orderNo,
-    );
-    const missing = await getAdminOrderByOrderNo(
-      actor,
-      missingCustomer.orderNo,
-    );
-    const emptySnapshot = await getAdminOrderByOrderNo(
-      actor,
-      emptySnapshotCustomer.orderNo,
-    );
+    const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
 
-    expect(real?.customer).toEqual({
-      id: 'party-1',
-      name: '未填客户',
-      filterValue: '未填客户',
-    });
-    expect(missing?.customer).toEqual({
-      id: null,
-      name: '未填客户',
-      filterValue: MISSING_ORDER_CUSTOMER_FILTER_VALUE,
-    });
-    expect(emptySnapshot?.customer).toEqual({
-      id: null,
-      name: '未填客户',
-      filterValue: MISSING_ORDER_CUSTOMER_FILTER_VALUE,
-    });
+    const select = dbMock.order.findFirst.mock.calls[0]![0].select;
+    expect(select).not.toHaveProperty('customerRef');
+    expect(select).not.toHaveProperty('customerParty');
+    expect(select).not.toHaveProperty('customerPartyId');
+    expect(detail).not.toBeNull();
+    expect(detail).not.toHaveProperty('customer');
+    expect(JSON.stringify(detail)).not.toContain('未填客户');
   });
 });

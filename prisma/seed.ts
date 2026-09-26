@@ -314,7 +314,7 @@ async function seedNotificationEvents() {
     },
     {
       eventType: 'ORDER_OVERDUE',
-      messageTemplate: '🚚 **交期逾期**\n工单：{orderNo}\n客户：{customerRef}\n承诺交期：{promisedDate}\n已逾期：{daysOverdue} 天\n当前状态：{status}',
+      messageTemplate: '🚚 **交期逾期**\n工单：{orderNo}\n外部销售：{externalSalesName}\n承诺交期：{promisedDate}\n已逾期：{daysOverdue} 天\n当前状态：{status}',
     },
     {
       eventType: 'STOCK_ALERT',

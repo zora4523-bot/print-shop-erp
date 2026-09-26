@@ -82,7 +82,6 @@ function pendingForms(): Record<string, string> {
         fieldset="FULL"
         initial={{
           customName: '测试工单',
-          customerRef: null,
           receiverAddress: null,
           expressCode: null,
           packageRequirement: null,

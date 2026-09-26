@@ -248,9 +248,41 @@ describe('sales list query boundary', () => {
       'logs',
       'costEntries',
       'outsourceOrders',
+      'customerRef',
+      'customerParty',
+      'customerPartyId',
     ]) {
       expect(serializedSelect).not.toContain(`"${forbidden}"`);
     }
+  });
+
+  it('searches only order number, name and pinyin, never the retired customer', () => {
+    const parsed = parseOrderListQuery({
+      q: '张三商贸',
+      customerRef: '张三商贸',
+      customerPartyId: 'party-1',
+      customerRefExact: '__MISSING_CUSTOMER__',
+    });
+    const query = sanitizeSalesOrderListQuery(parsed.query);
+    const contains = { contains: '张三商贸', mode: 'insensitive' };
+
+    expect(parsed.issues).toEqual([]);
+    expect(query).toEqual(
+      sanitizeSalesOrderListQuery(parseOrderListQuery({ q: '张三商贸' }).query),
+    );
+    expect(buildSalesOrderWhere(actor, query)).toEqual({
+      AND: [
+        { submitterId: actor.id },
+        {
+          OR: [
+            { orderNo: contains },
+            { customName: contains },
+            { searchPinyin: contains },
+            { searchPinyinInitials: contains },
+          ],
+        },
+      ],
+    });
   });
 
   it('only treats the newest change-request result as a current rejection', async () => {
@@ -298,6 +330,10 @@ describe('sales list query boundary', () => {
       craftSummary: '局部烫金 · 触感纸',
     });
     expect(result).not.toHaveProperty('manualPricing');
+    // The drawer API returns this DTO verbatim; the retired customer never leaves the server.
+    expect(result).not.toHaveProperty('customerRef');
+    expect(JSON.stringify(result)).not.toContain('张三商贸');
+    expect(dbMock.order.findFirst.mock.calls[0]![0].select).not.toHaveProperty('customerRef');
     expect(dbMock.order.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {

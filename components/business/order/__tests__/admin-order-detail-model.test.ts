@@ -315,3 +315,42 @@ it('keeps the order-level note separate from style notes', () => {
   input.order.remark = '先核对样稿\n再安排生产';
   expect(buildAdminOrderDetailModel(input).remark).toBe(input.order.remark);
 });
+
+// 业主 2026-09-27：客户名称/简称已退役；详情头部的“业务员”取工单归属的外部销售，
+// 免费重做（管理员提交）取原单的外部销售，不再依赖列表行的客户或提交人。
+describe('external salesperson projection', () => {
+  it('uses the charged order submitter and never projects the retired customer', () => {
+    const input = fixture();
+    Object.assign(input.order, {
+      settlementType: 'EXTERNAL_SALES',
+      customerRef: '旧客户简称',
+      submitter: { id: 'sales-1', displayName: '外部销售甲', username: 'sales-a', role: 'SALES' },
+      sourceOrder: null,
+    });
+    const model = buildAdminOrderDetailModel(input);
+    expect(model.sales).toBe('外部销售甲');
+    expect(model).not.toHaveProperty('customer');
+    expect(JSON.stringify(model)).not.toContain('旧客户简称');
+  });
+
+  it('shows the source order salesperson for an admin-submitted free rework', () => {
+    const input = fixture();
+    Object.assign(input.order, {
+      settlementType: 'NO_CHARGE',
+      submitter: { id: 'admin-1', displayName: '管理员', username: 'admin', role: 'ADMIN' },
+      sourceOrder: { id: 'source-1', orderNo: 'GD-260901-001', customName: '原单', status: 'SHIPPED',
+        submitter: { displayName: '原单销售' } },
+    });
+    expect(buildAdminOrderDetailModel(input).sales).toBe('原单销售');
+  });
+
+  it('leaves the salesperson empty when no external salesperson can be derived', () => {
+    const input = fixture();
+    Object.assign(input.order, {
+      settlementType: 'NO_CHARGE',
+      submitter: { id: 'admin-1', displayName: '管理员', username: 'admin', role: 'ADMIN' },
+      sourceOrder: null,
+    });
+    expect(buildAdminOrderDetailModel(input).sales).toBeNull();
+  });
+});

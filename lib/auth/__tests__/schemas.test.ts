@@ -1603,18 +1603,19 @@ describe('createOrderSchema foil colors', () => {
     }
   });
 
-  it('保留选中的客户主数据编号，并将空选择规范为 null', () => {
-    const selected = createOrderSchema.parse({
-      ...order,
-      customerPartyId: '  customer-1  ',
-    });
-    const temporary = createOrderSchema.parse({
-      ...order,
-      customerPartyId: '',
-    });
-
-    expect(selected.customerPartyId).toBe('customer-1');
-    expect(temporary.customerPartyId).toBeNull();
+  // 客户名称/简称与关联客户已退役（业主 2026-09-27）：建单命令仍兼容旧客户端携带的
+  // 这两个 key，但既不要求、也不再校验（写库与否由 createOrder 决定：一律不写）。
+  it('建单兼容但不要求、不校验已退役的客户字段', () => {
+    const withoutCustomer: Record<string, unknown> = { ...order };
+    delete withoutCustomer.customerRef;
+    expect(createOrderSchema.safeParse(withoutCustomer).success).toBe(true);
+    for (const legacy of [
+      { customerRef: null, customerPartyId: null },
+      { customerRef: '', customerPartyId: '' },
+      { customerRef: '客'.repeat(200), customerPartyId: 'x'.repeat(200) },
+    ]) {
+      expect(createOrderSchema.safeParse({ ...order, ...legacy }).success).toBe(true);
+    }
   });
 
   it('defaults an omitted color array to empty for compatibility', () => {
@@ -1782,6 +1783,16 @@ describe('createOrderSchema foil colors', () => {
       }
     },
   );
+
+  it('普通编辑剥离已退役的客户字段，工单已存的客户值保持原样（业主 2026-09-27）', () => {
+    const parsed = updateEditableOrderSchema.parse({
+      expectedEditVersion: '7',
+      customerRef: '旧客户简称',
+      customerPartyId: 'customer-1',
+      remark: '只改备注',
+    });
+    expect(parsed).toEqual({ expectedEditVersion: 7, remark: '只改备注' });
+  });
 
   it('普通编辑修剪地址，且不再解析专用的 isSfCollect 字段', () => {
     const parsed = updateEditableOrderSchema.parse({

@@ -4,10 +4,10 @@ import { db } from '../db';
 import {
   PieceworkOperationType,
   OrderChangeRequestStatus,
-  OrderSettlementType,
   ProductionOperationStatus,
   Role,
 } from '../../generated/prisma/enums';
+import { ORDER_EXTERNAL_SALES_SELECT, orderExternalSalesName } from './external-sales-name';
 import { getOrderPrintScope } from './print-access';
 import { productionOperationPassCount } from '../production/operation-quantity';
 import { signDesignReadUrl } from '../oss/read-url';
@@ -193,8 +193,8 @@ export async function getOrderForPrint(
   const order = await db.order.findFirst({
     where,
     include: {
-      submitter: { select: { displayName: true } },
-      sourceOrder: { select: { orderNo: true, submitter: { select: { displayName: true } } } },
+      submitter: ORDER_EXTERNAL_SALES_SELECT.submitter,
+      sourceOrder: { select: { orderNo: true, ...ORDER_EXTERNAL_SALES_SELECT.sourceOrder.select } },
       changeRequests: {
         where: { status: OrderChangeRequestStatus.PENDING },
         take: 1,
@@ -412,10 +412,7 @@ export async function getOrderForPrint(
     isUrgent: order.isUrgent,
     isSfCollect: order.isSfCollect,
     promisedDate: order.promisedDate,
-    externalSalesName:
-      (order.settlementType === OrderSettlementType.EXTERNAL_SALES
-        ? order.submitter.displayName.trim()
-        : order.sourceOrder?.submitter.displayName.trim()) || null,
+    externalSalesName: orderExternalSalesName(order),
     receiverName: order.receiverName,
     receiverPhone: order.receiverPhone,
     receiverAddress: order.receiverAddress,

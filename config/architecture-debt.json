@@ -40,10 +40,6 @@
       "maxLines": 723
     },
     {
-      "id": "components/business/order/OrdersTable.tsx::function:OrdersTable",
-      "maxLines": 347
-    },
-    {
       "id": "components/business/order/SalesOrderDetailView.tsx::function:SalesOrderDetailView",
       "maxLines": 361
     },

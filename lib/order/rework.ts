@@ -30,6 +30,11 @@ import {
 } from '../production/operation-materialization-service';
 import { getSetting } from '../settings';
 import { canCreateReworkFromStatus } from './rework-eligibility';
+import {
+  ORDER_EXTERNAL_SALES_SELECT,
+  orderExternalSalesName,
+  type OrderExternalSalesFacts,
+} from './external-sales-name';
 
 export class ReworkOrderError extends Error {
   constructor(message: string) {
@@ -99,13 +104,22 @@ type ReworkPricingRevisionTxClient = {
   };
 };
 
-type ReworkNotificationPayload = {
+type ReworkNotificationPayload = OrderExternalSalesFacts & {
   id: string;
   orderNo: string;
   customerRef: string | null;
   isUrgent: boolean;
   submitter: { displayName: string };
 };
+
+// 重做单是 NO_CHARGE、由管理员提交；通知里的外部销售取原单提交人。
+const REWORK_NOTIFICATION_SELECT = {
+  id: true,
+  orderNo: true,
+  customerRef: true,
+  isUrgent: true,
+  ...ORDER_EXTERNAL_SALES_SELECT,
+} as const;
 
 async function enqueueReworkNotificationsInTx(
   tx: EnqueueClient,
@@ -136,6 +150,7 @@ async function enqueueReworkNotificationsInTx(
           orderId: payload.id,
           orderNo: payload.orderNo,
           submitterName: payload.submitter.displayName,
+          externalSalesName: orderExternalSalesName(payload) ?? '未填',
           customerRef: payload.customerRef,
         },
         { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
@@ -598,7 +613,10 @@ export async function createReworkOrder(
         submitterId: actor.id,
         submitterRole: actor.role,
         createdById: actor.id,
-        customerPartyId: source.customerPartyId,
+        // 客户名称/简称与关联客户已退役（业主 2026-09-27）：重做单不再沿用原单客户；
+        // 归属的外部销售经 sourceOrderId 取原单提交人（orderExternalSalesName）。
+        customerPartyId: null,
+        customerRef: null,
         status: OrderStatus.SUBMITTED,
         kind: OrderKind.REWORK,
         billingMode: OrderBillingMode.NO_CHARGE,
@@ -613,7 +631,6 @@ export async function createReworkOrder(
         isUrgent: source.isUrgent,
         isSfCollect: source.isSfCollect,
         customName: `重做 · ${source.customName ?? source.orderNo}`,
-        customerRef: source.customerRef,
         receiverName: source.receiverName,
         receiverPhone: source.receiverPhone,
         receiverAddress,
@@ -905,13 +922,7 @@ export async function createReworkOrder(
     if (backgroundJobsMode() === 'durable') {
       const payload = await tx.order.findUniqueOrThrow({
         where: { id: createdOrder.id },
-        select: {
-          id: true,
-          orderNo: true,
-          customerRef: true,
-          isUrgent: true,
-          submitter: { select: { displayName: true } },
-        },
+        select: REWORK_NOTIFICATION_SELECT,
       });
       return {
         created: createdOrder,
@@ -942,13 +953,7 @@ export async function createReworkOrder(
       ? null
       : await db.order.findUnique({
           where: { id: created.id },
-          select: {
-            id: true,
-            orderNo: true,
-            customerRef: true,
-            isUrgent: true,
-            submitter: { select: { displayName: true } },
-          },
+          select: REWORK_NOTIFICATION_SELECT,
         });
   if (payload) {
     if (submittedNotificationEnabled && !submittedNotificationQueued) {
@@ -973,6 +978,7 @@ export async function createReworkOrder(
           orderId: payload.id,
           orderNo: payload.orderNo,
           submitterName: payload.submitter.displayName,
+          externalSalesName: orderExternalSalesName(payload) ?? '未填',
           customerRef: payload.customerRef,
         },
         { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },

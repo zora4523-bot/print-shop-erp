@@ -28,8 +28,4 @@ describe('PDF download navigation', () => {
   it('uses a native PDF link in batch results', () => {
     expect(hrefTags('components/business/order/AdminOrderBatchResultProvider.tsx', (href) => href.includes('/pdf'))).toEqual(['a']);
   });
-
-  it('renders row menu download destinations as native anchors', () => {
-    expect(hrefTags('components/business/order/OrderRowActions.tsx', (href) => href === '{action.href}')).toEqual(['a']);
-  });
 });

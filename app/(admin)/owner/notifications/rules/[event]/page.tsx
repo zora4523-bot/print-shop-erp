@@ -7,7 +7,10 @@ import {
   listChannelsWithRefCount,
 } from '@/lib/notification/admin';
 import { NOTIFICATION_EVENTS } from '@/lib/notification';
-import { NOTIFICATION_PAYLOAD_FIELDS } from '@/lib/notification/payload-fields';
+import {
+  NOTIFICATION_PAYLOAD_FIELDS,
+  RETIRED_NOTIFICATION_PAYLOAD_FIELDS,
+} from '@/lib/notification/payload-fields';
 import { managementNotificationRoleForEvent } from '@/lib/notification/events';
 
 export const metadata = { title: '编辑事件规则 · 推送配置' };
@@ -35,10 +38,12 @@ export default async function EditRulePage({
   // payloadFields 是事件 payload 类型对应的可用 placeholder。从
   // lib/notification/payload-fields 取（runtime const，与 events.ts
   // 类型一一对应）。
-  const payloadFields =
+  // 已停用的占位符（如客户 {customerRef}）仍随载荷发送以兼容旧模板，但不再推荐。
+  const payloadFields = (
     NOTIFICATION_PAYLOAD_FIELDS[
       event as keyof typeof NOTIFICATION_PAYLOAD_FIELDS
-    ] ?? [];
+    ] ?? []
+  ).filter((field) => !RETIRED_NOTIFICATION_PAYLOAD_FIELDS.has(field));
 
   const action = updateRuleAction.bind(null, event);
   const managementRole = managementNotificationRoleForEvent(event);

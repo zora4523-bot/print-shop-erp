@@ -83,6 +83,17 @@ describe('atomic administrator edit', () => {
     ).toBe(false);
   });
 
+  it('drops the retired customer fields from an admin edit command (业主 2026-09-27)', () => {
+    const parsed = adminOrderEditSchema.parse({
+      ...input(),
+      fields: {
+        expectedEditVersion: '0', remark: '修改备注',
+        customerRef: '旧客户简称', customerPartyId: 'customer-1',
+      } as AdminOrderEditInput['fields'],
+    });
+    expect(parsed.fields).toEqual({ expectedEditVersion: 0, remark: '修改备注' });
+  });
+
   it.each(['2026-02-29', '2026-02-31', '2026-13-01', '09/20/2026'])(
     'rejects invalid business dates before entering an edit transaction: %s',
     (promisedDate) => {

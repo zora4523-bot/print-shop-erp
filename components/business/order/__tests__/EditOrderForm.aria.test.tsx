@@ -32,7 +32,6 @@ import { EditOrderForm } from '../EditOrderForm';
 
 const initial = {
   customName: null,
-  customerRef: null,
   receiverAddress: null,
   expressCode: null,
   packageRequirement: null,
@@ -71,8 +70,8 @@ describe('EditOrderForm 字段错误的 aria 连线', () => {
     const html = render();
     // customName 有错
     expect(html).toMatch(/id="customName"[^>]*aria-invalid="true"/);
-    // customerRef 无错——不能被误标
-    expect(html).not.toMatch(/id="customerRef"[^>]*aria-invalid="true"/);
+    // remark 无错——不能被误标
+    expect(html).toMatch(/id="remark"[^>]*aria-invalid="false"/);
   });
 
   it('aria-describedby 指向的 id 真实存在于输出里', () => {
@@ -129,19 +128,29 @@ describe('EditOrderForm 字段错误的 aria 连线', () => {
   });
 });
 
- describe('销售编辑客户字段', () => {
-  it.each(['FULL', 'SHIPPING_ONLY'] as const)('在 %s 中不渲染或提交客户字段，保留其他编辑入口', (fieldset) => {
-    const html = renderToStaticMarkup(<EditOrderForm orderId="sales-order" expectedEditVersion={7}
-      fieldset={fieldset} hideCustomerFields initial={{ ...initial, customerRef: '已有简称', customerPartyId: 'existing-customer' }} />);
+describe('客户字段已退役（业主 2026-09-27）', () => {
+  const association = {
+    current: { id: 'sales-1', displayName: '渠道张先生', username: 'sales-one' },
+    options: [],
+    blockedReason: null,
+  };
+  it.each([
+    ['销售', 'FULL', undefined],
+    ['销售', 'SHIPPING_ONLY', undefined],
+    ['管理员', 'FULL', association],
+    ['管理员', 'SHIPPING_ONLY', association],
+  ] as const)('%s在 %s 中不渲染或提交客户字段，保留其他编辑入口', (_role, fieldset, externalSalesAssociation) => {
+    const html = renderToStaticMarkup(<EditOrderForm orderId="order-1" expectedEditVersion={7}
+      fieldset={fieldset} initial={initial} externalSalesAssociation={externalSalesAssociation} />);
     expect(html).not.toContain('name="customerRef"');
     expect(html).not.toContain('name="customerPartyId"');
     expect(html).not.toContain('关联客户');
     expect(html).not.toContain('客户名称/简称');
+    expect(html).not.toContain('采用客户');
+    expect(html).not.toContain('客户归属');
     expect(html).toContain('name="remark"');
     expect(html).toContain('name="customName"');
-  });
-  it('管理端默认保留客户字段', () => {
-    expect(render()).toContain('name="customerRef"');
-    expect(render()).toContain('name="customerPartyId"');
+    // 工单归属只由管理员的“关联外部销售”表达；销售编辑页不出现该控件。
+    expect(html.includes('name="externalSalesUserId"')).toBe(externalSalesAssociation !== undefined);
   });
 });

@@ -19,6 +19,7 @@ const payload = {
   orderId: 'order-1',
   orderNo: 'O-1',
   workOrderVersion: 1,
+  externalSalesName: '外销甲',
   customerRef: null,
 };
 const tx = { backgroundJob: {}, $queryRaw: vi.fn() } as unknown as EnqueueClient;

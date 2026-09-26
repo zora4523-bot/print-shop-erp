@@ -67,6 +67,7 @@ function syntheticPayload(event, order) {
     orderId: order.id,
     orderNo: order.orderNo,
     submitterName: '合成测试提交人',
+    externalSalesName: '合成测试外部销售',
     customerRef: '合成测试客户',
     urgentMark: '系统测试急单',
     summary: '系统测试：合成业务数据，无需处理',

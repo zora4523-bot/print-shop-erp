@@ -41,7 +41,7 @@ export const EMPTY_SAMPLE_FORM: SampleOrderFormState = {
   remark: '',
 };
 const emptySampleContext: SampleOrderContext = {
-  externalSalesUserId: null, customerRef: null, promisedDate: null, isUrgent: false,
+  externalSalesUserId: null, promisedDate: null, isUrgent: false,
   expressCode: null, customName: undefined, packageRequirement: null,
 };
 type SampleOrderFormProps = {
@@ -125,7 +125,6 @@ export function SampleOrderForm({
     customName: purpose === 'PROOF' ? context?.customName || item?.name : name,
     samplePackagingRuleCode:
       purpose === 'SAMPLE_SHIPMENT' ? packing || null : null,
-    customerRef: context?.customerRef ?? null,
     externalSalesUserId: context?.externalSalesUserId ?? null,
     promisedDate: context?.promisedDate ?? null,
     receiverName,

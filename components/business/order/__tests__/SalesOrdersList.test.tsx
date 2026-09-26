@@ -29,7 +29,8 @@ describe('SalesOrdersList', () => {
       'data-slot="sales-orders-pagination" class="mt-4"',
     );
     expect(html).toContain('端午定制');
-    expect(html).toContain('张三商贸');
+    // 业主 2026-09-27：销售卡片不再展示客户，也不再有「未填客户」占位。
+    expect(html).not.toContain('未填客户');
     expect(html).toContain('GD-260827-001');
     expect(html).toContain('>2</b> 款');
     expect(html).toContain('2,000');
@@ -169,7 +170,6 @@ function row(): SalesOrderListRow {
     id: 'order-1',
     orderNo: 'GD-260827-001',
     customName: '端午定制',
-    customerRef: '张三商贸',
     status: OrderStatus.SUBMITTED,
     isUrgent: false,
     revision: 2,

@@ -1,13 +1,16 @@
 import { OrderItemPricingRoute } from '../generated/prisma/enums';
 import { assertBlankPriceAdmissionInTx, BlankPriceAdmissionError } from './order/blank-price-admission';
-import { createOrderRequestFingerprint, matchesCreateOrderRequest } from './order/create-request-fingerprint';
+import {
+  acceptedCreateOrderRequestFingerprints,
+  createOrderRequestFingerprint,
+  matchesCreateOrderRequest,
+} from './order/create-request-fingerprint';
 import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from './rules/paper-availability';
 import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
 import { createOrderSchema } from './auth/schemas';
 import { isSampleOrder } from './order/purpose';
 import { orderItemMessageLabel, type OrderItemIdentity } from './order/item-label';
 import { duplicateDesignNameMessage, findDuplicateDesignNames } from './order/design-groups';
-import { salesCustomerScope } from './order/sales-customer-policy';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
@@ -26,7 +29,6 @@ import {
   OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
-  PartyType,
   Prisma,
   ProductionOperationStatus,
   Role,
@@ -53,6 +55,10 @@ import {
   externalSalesAssociationSelect,
   type ExternalSalesAccountOption,
 } from './order/external-sales-association';
+import {
+  ORDER_EXTERNAL_SALES_SELECT,
+  orderExternalSalesName,
+} from './order/external-sales-name';
 import {
   collectOutsourceCraftIds,
   findUndercoveredOutsourceItems,
@@ -105,12 +111,6 @@ import {
 } from './order/submit-external-order';
 import { prepareOrderForProductionInTx } from './order/production-readiness';
 import { getSetting } from './settings';
-
-export {
-  listOrders,
-  listOrdersPage,
-  type OrderListRow,
-} from './order/list-query';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -273,10 +273,9 @@ type CreateOrderCommand = Omit<
   | 'items'
   | 'additionalShipments'
   | 'packagingGroups'
-  | 'customerPartyId'
   | ShipmentChargeField
 > &
-  Partial<Pick<CreateOrderInput, ShipmentChargeField | 'customerPartyId'>> & {
+  Partial<Pick<CreateOrderInput, ShipmentChargeField>> & {
     items: CreateOrderItemCommand[];
     additionalShipments?: AdditionalShipmentCommand[];
     packagingGroups?: CreateOrderInput['packagingGroups'];
@@ -547,6 +546,7 @@ export async function createOrder(
   now: Date = new Date(),
 ): Promise<CreatedOrderSummary> {
   const requestFingerprint = createOrderRequestFingerprint(input);
+  const acceptedRequestFingerprints = acceptedCreateOrderRequestFingerprints(input);
   const special = isSampleOrder(input.purpose);
   const sampleShipment = input.purpose === 'SAMPLE_SHIPMENT';
   if (special) {
@@ -642,7 +642,7 @@ export async function createOrder(
         ) {
           throw new OrderInvariantError('提交标识已被其他账号使用');
         }
-        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, requestFingerprint)) {
+        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, acceptedRequestFingerprints)) {
           throw new OrderInvariantError(`工单 ${existing.orderNo} 已保存，本次填写与原记录不一致或无法核对。请从工单列表打开核对后修改。`);
         }
         return {
@@ -715,26 +715,9 @@ export async function createOrder(
     for (const [index, item] of items.entries()) {
       assertOrderQuantity({ ...item, sequence: index + 1 });
     }
-    const customerPartyId =
-      actor.role === Role.ADMIN ? null : input.customerPartyId ?? null;
-    if (customerPartyId) {
-      const customer = await txClient.party.findUnique({
-        where: { id: customerPartyId },
-        select: { id: true, type: true, isActive: true },
-      });
-      if (actor.role === Role.SALES && !await txClient.party.findFirst({ where: { id: customerPartyId, ...salesCustomerScope(actor.id) }, select: { id: true } })) {
-        throw new OrderInvariantError('只能选择自己关联的客户');
-      }
-      if (!customer || !customer.isActive) {
-        throw new OrderInvariantError('所选客户不存在或已停用');
-      }
-      if (
-        customer.type !== PartyType.CUSTOMER &&
-        customer.type !== PartyType.BOTH
-      ) {
-        throw new OrderInvariantError('所选往来单位不是客户');
-      }
-    }
+    // 客户名称/简称与关联客户已退役（业主 2026-09-27）：命令里即便带着
+    // customerRef / customerPartyId 也不校验、不写库，新工单的客户字段恒为空；
+    // “是谁的单”统一看工单归属的外部销售（lib/order/external-sales-name.ts）。
     // (4) product FK check — one batch findMany over the distinct ids
     // (was per-item findUnique: a 10-item order paid up to 10 round
     // trips inside the tx). No productId → no query at all. Deliberately
@@ -851,7 +834,9 @@ export async function createOrder(
         submitterId,
         submitterRole: Role.SALES,
         createdById: actor.id,
-        customerPartyId,
+        // 客户字段已退役：无论命令里带什么，一律写空（见上方说明）。
+        customerPartyId: null,
+        customerRef: null,
         status: OrderStatus.DRAFT,
         purpose: input.purpose ?? 'STANDARD',
         pricingMode: input.purpose === 'PROOF' ? 'MANUAL_TOTAL' : 'ITEMIZED',
@@ -864,7 +849,6 @@ export async function createOrder(
         isUrgent: input.isUrgent,
         isSfCollect: input.isSfCollect,
         customName: input.customName ?? null,
-        customerRef: actor.role === Role.ADMIN ? null : input.customerRef,
         receiverName: input.receiverName,
         receiverPhone: input.receiverPhone,
         receiverAddress: input.receiverAddress,
@@ -1055,7 +1039,7 @@ export async function createOrder(
     ) {
       const existing = await findOrderBySubmissionId(db, input.clientSubmissionId);
       if (existing?.createdById === actor.id && existing.submitterId === submitterId) {
-        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, requestFingerprint)) {
+        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, acceptedRequestFingerprints)) {
           throw new OrderInvariantError(`工单 ${existing.orderNo} 已保存，本次填写与原记录不一致或无法核对。请从工单列表打开核对后修改。`);
         }
         return {
@@ -1568,6 +1552,7 @@ export async function submitOrder(
             orderNo: true,
             customerRef: true,
             isUrgent: true,
+            ...ORDER_EXTERNAL_SALES_SELECT,
             submitter: { select: { displayName: true } },
           },
         });
@@ -1595,6 +1580,7 @@ export async function submitOrder(
               orderId: payload.id,
               orderNo: payload.orderNo,
               submitterName: payload.submitter.displayName,
+              externalSalesName: orderExternalSalesName(payload) ?? '未填',
               customerRef: payload.customerRef,
             },
             { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
@@ -1620,6 +1606,7 @@ export async function submitOrder(
       orderNo: true,
       customerRef: true,
       isUrgent: true,
+      ...ORDER_EXTERNAL_SALES_SELECT,
       submitter: { select: { displayName: true } },
     },
         });
@@ -1650,6 +1637,7 @@ export async function submitOrder(
           orderId: payload.id,
           orderNo: payload.orderNo,
           submitterName: payload.submitter.displayName,
+          externalSalesName: orderExternalSalesName(payload) ?? '未填',
           customerRef: payload.customerRef,
         },
         { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
@@ -2485,8 +2473,6 @@ type EditTxClient = {
           totalAmount: Decimal.Value;
           confirmedFee?: Decimal.Value | null;
           customName: string | null;
-          customerRef: string | null;
-          customerPartyId: string | null;
           shipments: EditableShipment[];
           changeRequests: { id: string }[];
           customerCharges?: { id: string }[];
@@ -2538,9 +2524,7 @@ type EditTxClient = {
 type EditableOrderFieldValue = string | boolean | Date | null;
 
 type EditableOrderSnapshot = {
-  customerPartyId: string | null;
   customName: string | null;
-  customerRef: string | null;
   receiverName: string | null;
   receiverPhone: string | null;
   receiverAddress: string | null;
@@ -2592,9 +2576,10 @@ function editableValueEquals(
 }
 
 // Shallow-pick only the fields that are editable at this status. Anything
-// else in `input` is silently dropped. The action extracts the canonical
-// FULL_EDITABLE_FIELDS tuple before Zod parsing; this remains a second
-// defense for direct domain callers.
+// else in `input` is silently dropped — including the retired customerRef /
+// customerPartyId (业主 2026-09-27), so an edit never changes a stored customer.
+// The action extracts the canonical FULL_EDITABLE_FIELDS tuple before Zod
+// parsing; this remains a second defense for direct domain callers.
 function pickEditableFields(
   input: Record<string, unknown>,
   allowed: readonly string[],
@@ -2675,8 +2660,6 @@ async function updateOrderEditableFields(
         processingAmount: true,
         totalAmount: true,
         customName: true,
-        customerRef: true,
-        customerPartyId: true,
         isSfCollect: true,
         changeRequests: { where: { status: 'PENDING' }, select: { id: true } },
         shipments: { select: { id: true, sequence: true, status: true, receiverName: true, receiverPhone: true, receiverAddress: true, expressCode: true, destinationProvince: true } },
@@ -2789,22 +2772,6 @@ async function updateOrderEditableFields(
       // Action 层会经过 Zod trim；领域层也做同样归一化，
       // 避免测试/脚本等直接调用者把首尾空格持久化。
       nextFields.receiverAddress = receiverAddress.trim();
-    }
-    if ('customerPartyId' in nextFields && nextFields.customerPartyId !== (order.customerPartyId ?? null)) {
-      const customerId = nextFields.customerPartyId;
-      if (typeof customerId === 'string') {
-        const customer = await tx.party.findUnique({
-          where: { id: customerId },
-          select: { id: true, isActive: true, type: true },
-        });
-        if (actor.role === Role.SALES && !await tx.party.findFirst({ where: { id: customerId, ...salesCustomerScope(actor.id) }, select: { id: true } })) {
-          throw new OrderInvariantError('只能选择自己关联的客户');
-        }
-        if (!customer || !customer.isActive ||
-          (customer.type !== PartyType.CUSTOMER && customer.type !== PartyType.BOTH)) {
-          throw new OrderInvariantError('所选客户不存在、已停用或不是客户，请重新选择');
-        }
-      }
     }
     const shipmentInput = command.kind === 'full-form' && 'shipments' in command.input ? command.input.shipments : undefined;
     let shipmentEdits: ReturnType<typeof planOrderShipmentEdits> = [];
@@ -3208,7 +3175,6 @@ export async function setOrderSfCollect(
         totalAmount: true,
         confirmedFee: true,
         customName: true,
-        customerRef: true,
         receiverName: true,
         receiverPhone: true,
         receiverAddress: true,
@@ -3734,8 +3700,16 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
           },
         },
       },
+      // 原单的外部销售：免费重做（NO_CHARGE）的归属销售取原单提交人，
+      // 与 ORDER_EXTERNAL_SALES_SELECT / orderExternalSalesName 同一口径。
       sourceOrder: {
-        select: { id: true, orderNo: true, customName: true, status: true },
+        select: {
+          id: true,
+          orderNo: true,
+          customName: true,
+          status: true,
+          submitter: { select: { displayName: true } },
+        },
       },
       reworkOrders: {
         orderBy: { createdAt: 'desc' },

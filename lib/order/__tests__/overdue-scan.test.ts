@@ -19,6 +19,9 @@ const row = (id: string, ymd: string) => ({
   id,
   orderNo: `O-${id}`,
   customerRef: null,
+  settlementType: 'EXTERNAL_SALES',
+  submitter: { displayName: '外销甲' },
+  sourceOrder: null,
   status: 'IN_PRODUCTION',
   promisedDate: new Date(`${ymd}T00:00:00Z`),
 });
@@ -115,8 +118,25 @@ describe('scanOverdueOrders', () => {
       id: true,
       orderNo: true,
       customerRef: true,
+      settlementType: true,
+      submitter: { select: { displayName: true } },
+      sourceOrder: { select: { submitter: { select: { displayName: true } } } },
       status: true,
       promisedDate: true,
     });
+  });
+
+  it('每行带工单归属的外部销售：收费单取提交人，免费重做取原单销售', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      row('a', '2026-07-05'),
+      {
+        ...row('b', '2026-07-05'),
+        settlementType: 'NO_CHARGE',
+        submitter: { displayName: '管理员' },
+        sourceOrder: { submitter: { displayName: '原单销售' } },
+      },
+    ]);
+    const r = await scanOverdueOrders(NOW);
+    expect(r.rows.map((x) => x.externalSalesName)).toEqual(['外销甲', '原单销售']);
   });
 });

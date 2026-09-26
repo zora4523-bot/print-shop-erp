@@ -74,16 +74,6 @@ export type SupplierPartyOption = {
   contactPhone: string | null;
 };
 
-export type CustomerPartyOption = {
-  id: string;
-  code: string;
-  name: string;
-  shortName: string | null;
-  receiverName?: string | null;
-  receiverPhone?: string | null;
-  receiverAddress?: string | null;
-};
-
 export const PARTY_LIST_SORT_KEYS = [
   'default',
   'code',
@@ -306,38 +296,6 @@ export async function listSupplierPartyOptions(): Promise<SupplierPartyOption[]>
       shortName: party.shortName,
       contactName: party.primaryContact?.name ?? null,
       contactPhone: party.primaryContact?.phone ?? null,
-    };
-  });
-}
-
-export async function listCustomerPartyOptions(currentCustomerId?: string | null): Promise<CustomerPartyOption[]> {
-  const rows = await db.party.findMany({
-    where: {
-      ...(currentCustomerId ? { AND: [{ OR: [{ isActive: true }, { id: currentCustomerId }] }] } : { isActive: true }),
-      OR: [{ type: PartyType.CUSTOMER }, { type: PartyType.BOTH }],
-    },
-    select: PARTY_SELECT,
-    orderBy: [{ code: 'asc' }, { name: 'asc' }],
-  });
-
-  return rows.map((row) => {
-    const party = normalizePartyRow(row);
-    const address = party.defaultAddress;
-    const receiverAddress = address
-      ? [address.province, address.city, address.district, address.detail]
-          .filter((part): part is string => Boolean(part?.trim()))
-          .join('') || null
-      : null;
-    return {
-      id: party.id,
-      code: party.code,
-      name: party.name,
-      shortName: party.shortName,
-      receiverName:
-        address?.receiverName ?? party.primaryContact?.name ?? null,
-      receiverPhone:
-        address?.receiverPhone ?? party.primaryContact?.phone ?? null,
-      receiverAddress,
     };
   });
 }

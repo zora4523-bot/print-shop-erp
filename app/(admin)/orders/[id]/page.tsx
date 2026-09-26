@@ -1525,7 +1525,6 @@ function OrderBasicSummarySection({
         ) : assignedWorkerNames.length > 0 ? (
           <Row label="历史派工" value={assignedWorkerNames.join('、')} />
         ) : null}
-        <Row label="客户名称/简称" value={order.customerRef} />
         {canViewCommercialAmounts && 'settlementType' in order ? (
           <Row
             label="结算路径"

@@ -217,8 +217,9 @@ test.describe('创建工单 — golden path', () => {
 
     // 按当前详情页核对建单结果；款式信息直接展示，工单号按需展开。
     // The compact mobile header intentionally hides its duplicate metadata.
-    const customerFact = page.locator('dt').filter({ hasText: /^客户名称\/简称$/ }).locator('..').locator('dd');
-    await expect(customerFact).toHaveText('—');
+    // 业主 2026-09-27：客户名称/简称退役，详情不再有客户行；头部业务员即所选外部销售。
+    await expect(page.locator('dt').filter({ hasText: /^客户名称\/简称$/ })).toHaveCount(0);
+    await expect(page.locator('#order-detail-overview')).toContainText('业务员：E2E 销售');
     const itemDetails = page
       .locator('article[id^="order-detail-item-"]')
       .filter({ hasText: customName });
@@ -264,7 +265,8 @@ test.describe('创建工单 — golden path', () => {
     await expect(page.getByRole('textbox', { name: '工单名称', exact: true })).toHaveValue(
       customName,
     );
-    await expect(page.getByLabel('客户名称/简称（选填）')).toHaveValue('');
+    await expect(page.getByLabel('客户名称/简称（选填）')).toHaveCount(0);
+    await expect(page.locator('[name="customerRef"], [name="customerPartyId"]')).toHaveCount(0);
     await expect(page.getByRole('textbox', { name: '收件人', exact: true })).toHaveValue(
       before.order.receiverName ?? '',
     );

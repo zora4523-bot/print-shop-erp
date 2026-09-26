@@ -66,7 +66,7 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
       createEntry={{ onExternalSalesChange, editorSnapshot, onEditorSnapshot, lifecycle, canEditFees, purpose, form: sampleForm,
         item: values.items[itemIndex] ?? initialItem,
         context: { customName: values.customName, packageRequirement: values.packageRequirement, externalSalesUserId: values.externalSalesUserId,
-          customerRef: values.customerRef, promisedDate: values.promisedDate,
+          promisedDate: values.promisedDate,
           isUrgent: values.isUrgent, expressCode: values.expressCode },
         onPurposeChange: choosePurpose,
         onComplete: () => choosePurpose(null),
@@ -99,7 +99,7 @@ export function prepareSampleOrderEntry(current: CreateOrderInput, itemIndex: nu
         collect: current.isSfCollect ?? false, remark: current.remark ?? '' },
       draft: null,
       context: { customName: current.customName, packageRequirement: current.packageRequirement, externalSalesUserId: current.externalSalesUserId,
-        customerRef: current.customerRef, promisedDate: current.promisedDate,
+        promisedDate: current.promisedDate,
         isUrgent: current.isUrgent, expressCode: current.expressCode },
     }));
   } catch { /* Initial props cover browsers without storage. */ }

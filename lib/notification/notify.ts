@@ -17,6 +17,7 @@ import {
   type NotificationPayloadFor,
 } from './events';
 import { renderTemplate } from './render';
+import { withLegacyExternalSalesName } from './legacy-external-sales';
 import {
   mockWebhookSender,
   prepareWebhookSend,
@@ -803,7 +804,10 @@ export async function notify<E extends NotificationEvent>(
 ): Promise<NotifyOutcome> {
   const outcome = emptyOutcome(event);
   try {
-    const safePayload = sanitizeNotificationPayload(event, payload);
+    const safePayload = await withLegacyExternalSalesName(
+      event,
+      sanitizeNotificationPayload(event, payload),
+    );
     const mock = opts.mockMode ?? isMockMode();
     const webhookSender: WebhookSender =
       opts.webhookSender ?? (mock ? mockWebhookSender : sendWebhook);

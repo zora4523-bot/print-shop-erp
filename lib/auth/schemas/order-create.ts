@@ -732,8 +732,11 @@ export const createOrderSchema = z
       .optional(),
     customName: optionalTrimmedText('工单名称', 100).optional(),
     externalSalesUserId: optionalTrimmedText('关联外部销售', 64).optional(),
-    customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
-    customerRef: optionalTrimmedText('客户名称/简称', 64),
+    // 客户名称/简称与关联客户已退役（业主 2026-09-27）：建单不再录入、也不写库。
+    // 旧客户端、脚本和测试仍可能带着这两个 key（多为 null），这里只为兼容继续接受、
+    // 可省略，不再校验内容；createOrder 一律忽略，新工单的客户字段恒为空。
+    customerPartyId: z.string().nullable().optional(),
+    customerRef: z.string().nullable().optional(),
     receiverName: optionalTrimmedText('收货人', 64),
     receiverPhone: optionalTrimmedText('收货电话', 32),
     receiverAddress: optionalTrimmedText('收货地址', 256)

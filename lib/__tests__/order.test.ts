@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createOrderRequestFingerprint } from '@/lib/order/create-request-fingerprint';
 vi.mock('@/lib/order/production-readiness', () => ({
   prepareOrderForProductionInTx: vi.fn(async (tx, orderId) => {
@@ -15,7 +16,6 @@ import {
   OrderPackagingMode,
   OrderSettlementType,
   OrderStatus,
-  PartyType,
   ProductionOperationStatus,
   Role,
   TaskStatus,
@@ -214,7 +214,6 @@ import {
   cancelOrder,
   shipOrder,
   finishOrder,
-  listOrders,
   getOrderDetail,
   updateOrderFields,
   setOrderUrgent,
@@ -697,17 +696,17 @@ describe('createOrder', () => {
     expect(dbMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it('校验并保存建单时选中的客户主数据', async () => {
-    dbMock.party.findUnique.mockResolvedValue({
-      id: 'customer-1',
-      type: PartyType.CUSTOMER,
-      isActive: true,
-    });
-
+  // 客户名称/简称与关联客户已退役（业主 2026-09-27）：旧客户端、脚本仍可能携带客户字段，
+  // 建单既不校验往来单位（哪怕指向供应商或他人的客户），也不写库，新工单客户恒为空。
+  it.each([
+    ['客户', 'customer-1', '苹果福'],
+    ['供应商', 'supplier-1', '错误客户'],
+    ['他人关联的客户', 'foreign-customer', '他人客户简称'],
+  ])('外部销售建单忽略携带的客户字段（%s），不查往来单位也不写库', async (_kind, customerPartyId, customerRef) => {
     await createOrder(
       {
-        customerPartyId: 'customer-1',
-        customerRef: '苹果福',
+        customerPartyId,
+        customerRef,
         receiverName: '王小姐',
         receiverPhone: '13800000000',
         receiverAddress: '广东佛山测试收货地址',
@@ -722,17 +721,18 @@ describe('createOrder', () => {
       salesActor,
     );
 
-    expect(dbMock.party.findUnique).toHaveBeenCalledWith({
-      where: { id: 'customer-1' },
-      select: { id: true, type: true, isActive: true },
-    });
-    expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
-      customerPartyId: 'customer-1',
-      customerRef: '苹果福',
+    expect(dbMock.party.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.party.findFirst).not.toHaveBeenCalled();
+    const data = dbMock.order.create.mock.calls[0]![0].data;
+    expect(data).toMatchObject({
+      submitterId: salesActor.id,
+      customerPartyId: null,
+      customerRef: null,
       items: {
         create: [expect.objectContaining({ lamination: 'NONE' })],
       },
     });
+    expect(JSON.stringify(data)).not.toContain(customerRef);
   });
 
   it('在服务边界拒绝没有任何包装组的外部销售工单', async () => {
@@ -892,34 +892,6 @@ describe('createOrder', () => {
     expect(dbMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it('拒绝将供应商当作客户绑定到工单', async () => {
-    dbMock.party.findUnique.mockResolvedValue({
-      id: 'supplier-1',
-      type: PartyType.SUPPLIER,
-      isActive: true,
-    });
-
-    await expect(
-      createOrder(
-        {
-          customerPartyId: 'supplier-1',
-          customerRef: '错误客户',
-          receiverName: null,
-          receiverPhone: null,
-          receiverAddress: '广东佛山测试收货地址',
-          expressCode: null,
-          packageRequirement: null,
-          remark: null,
-          promisedDate: null,
-          isUrgent: false,
-          isSfCollect: false,
-          items: [baseItem()],
-        },
-        salesActor,
-      ),
-    ).rejects.toThrow('所选往来单位不是客户');
-    expect(dbMock.order.create).not.toHaveBeenCalled();
-  });
 
   it('数量越界时按序号与规格指认款式，同一设计款的规格行不会混淆', async () => {
     await expect(
@@ -2336,11 +2308,32 @@ describe('submitOrder', () => {
     expect(first[0]).toBe('ORDER_SUBMITTED');
     expect((first[1] as { urgentMark: string }).urgentMark).toBe('🚨 急单');
     expect(second[0]).toBe('URGENT_ORDER');
+    // 急单通知点名工单归属的外部销售（收费单即提交人）；customerRef 仅为旧模板保留。
     expect(second[1]).toEqual({
       orderId: 'o1',
       orderNo: 'O-1',
       submitterName: '张三',
+      externalSalesName: '张三',
       customerRef: '苹果福',
+    });
+  });
+
+  it('急单通知在外部销售名缺失时传“未填”，不让占位符原样漏出', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      ...submittedRichRow,
+      isUrgent: true,
+      customerRef: null,
+      submitter: { displayName: '   ' },
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
+    await submitOrder('o1', salesActor);
+    const urgent = notifyMock.mock.calls.find(([event]) => event === 'URGENT_ORDER');
+    expect(urgent?.[1]).toMatchObject({ externalSalesName: '未填', customerRef: null });
+    // 通知取数一并读取外部销售事实（原单提交人供免费重做回退）。
+    const payloadQuery = dbMock.order.findUnique.mock.calls.at(-1)?.[0] as { select: Record<string, unknown> };
+    expect(payloadQuery.select).toMatchObject({
+      settlementType: true,
+      sourceOrder: { select: { submitter: { select: { displayName: true } } } },
     });
   });
 
@@ -3926,178 +3919,7 @@ describe('transitionWithLog — per-order advisory lock (Codex round 87 / P2)', 
   });
 });
 
-describe('listOrders / getOrderDetail — scope filter application', () => {
-  it('applies getOrderScopeFilter (SALES sees only own) to list', async () => {
-    dbMock.order.findMany.mockResolvedValue([]);
-    await listOrders(salesActor);
-    const where = dbMock.order.findMany.mock.calls[0][0].where;
-    expect(where).toEqual({ submitterId: 'sales-1' });
-  });
-
-  it('ADMIN sees everything (empty where)', async () => {
-    dbMock.order.findMany.mockResolvedValue([]);
-    await listOrders(ownerActor);
-    const where = dbMock.order.findMany.mock.calls[0][0].where;
-    expect(where).toEqual({});
-  });
-
-  it('WORKER list scope hides assigned tasks while the order is still a scheduling draft', async () => {
-    dbMock.order.findMany.mockResolvedValue([]);
-    await listOrders(workerActor);
-    const where = dbMock.order.findMany.mock.calls[0][0].where;
-    expect(where).toEqual({
-      status: { not: OrderStatus.SUBMITTED },
-      items: { some: { tasks: { some: { workerId: 'worker-1' } } } },
-    });
-  });
-
-  it('combines q search with role scope instead of replacing it', async () => {
-    dbMock.order.findMany.mockResolvedValue([]);
-    await listOrders(salesActor, { q: ' 苹果福 ' });
-    const where = dbMock.order.findMany.mock.calls[0][0].where;
-    expect(where).toEqual({
-      AND: [
-        { submitterId: 'sales-1' },
-        {
-          OR: [
-            { orderNo: { contains: '苹果福', mode: 'insensitive' } },
-            { customName: { contains: '苹果福', mode: 'insensitive' } },
-            { customerRef: { contains: '苹果福', mode: 'insensitive' } },
-            {
-              customerParty: {
-                is: {
-                  OR: [
-                    { name: { contains: '苹果福', mode: 'insensitive' } },
-                    {
-                      shortName: {
-                        contains: '苹果福',
-                        mode: 'insensitive',
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-            { receiverName: { contains: '苹果福', mode: 'insensitive' } },
-            { receiverPhone: { contains: '苹果福', mode: 'insensitive' } },
-            { receiverAddress: { contains: '苹果福', mode: 'insensitive' } },
-            { trackingNo: { contains: '苹果福', mode: 'insensitive' } },
-            { expressCode: { contains: '苹果福', mode: 'insensitive' } },
-            {
-              submitter: { displayName: { contains: '苹果福', mode: 'insensitive' } },
-            },
-            {
-              shipments: {
-                some: {
-                  OR: [
-                    { receiverName: { contains: '苹果福', mode: 'insensitive' } },
-                    { receiverPhone: { contains: '苹果福', mode: 'insensitive' } },
-                    { receiverAddress: { contains: '苹果福', mode: 'insensitive' } },
-                    { trackingNo: { contains: '苹果福', mode: 'insensitive' } },
-                    { expressCode: { contains: '苹果福', mode: 'insensitive' } },
-                  ],
-                },
-              },
-            },
-            {
-              items: {
-                some: {
-                  OR: [
-                    { name: { contains: '苹果福', mode: 'insensitive' } },
-                    { specification: { contains: '苹果福', mode: 'insensitive' } },
-                    { paperType: { contains: '苹果福', mode: 'insensitive' } },
-                    { foilColors: { has: '苹果福' } },
-                    {
-                      product: {
-                        name: { contains: '苹果福', mode: 'insensitive' },
-                      },
-                    },
-                    {
-                      tasks: {
-                        some: {
-                          status: { not: TaskStatus.CANCELLED },
-                          worker: {
-                            displayName: {
-                              contains: '苹果福',
-                              mode: 'insensitive',
-                            },
-                          },
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-            { searchPinyin: { contains: '苹果福', mode: 'insensitive' } },
-            { searchPinyinInitials: { contains: '苹果福', mode: 'insensitive' } },
-          ],
-        },
-      ],
-    });
-  });
-
-  it('ignores blank q and keeps the plain scope filter', async () => {
-    dbMock.order.findMany.mockResolvedValue([]);
-    await listOrders(salesActor, { q: '   ' });
-    const where = dbMock.order.findMany.mock.calls[0][0].where;
-    expect(where).toEqual({ submitterId: 'sales-1' });
-  });
-
-  it('keeps the database order for search and requests strict newest-first sorting', async () => {
-    const base = {
-      status: OrderStatus.DRAFT,
-      kind: 'NORMAL',
-      isUrgent: false,
-      isSfCollect: false,
-      customName: null,
-      customerRef: null,
-      receiverName: null,
-      receiverPhone: null,
-      receiverAddress: null,
-      trackingNo: null,
-      expressCode: null,
-      searchPinyin: null,
-      searchPinyinInitials: null,
-      totalAmount: '0.00',
-      submitterId: 'sales-1',
-      submitter: { displayName: '销售小王' },
-      sourceOrder: null,
-      _count: { shipments: 1 },
-      createdAt: new Date('2026-06-28T00:00:00Z'),
-      updatedAt: new Date('2026-06-28T00:00:00Z'),
-    };
-    dbMock.order.findMany.mockResolvedValue([
-      { ...base, id: 'contains', orderNo: '20260628-0001', customerRef: '佛山苹果福' },
-      { ...base, id: 'exact', orderNo: '苹果福' },
-      { ...base, id: 'prefix', orderNo: '苹果福-加急' },
-    ]);
-    dbMock.productionTask.findMany.mockResolvedValue([
-      {
-        orderItem: { orderId: 'exact' },
-        worker: { displayName: '张师傅' },
-      },
-      {
-        orderItem: { orderId: 'exact' },
-        worker: { displayName: '张师傅' },
-      },
-      {
-        orderItem: { orderId: 'exact' },
-        worker: { displayName: '李师傅' },
-      },
-    ]);
-
-    const rows = await listOrders(salesActor, { q: '苹果福' });
-
-    expect(dbMock.order.findMany.mock.calls[0]![0].orderBy).toEqual([
-      { createdAt: 'desc' },
-      { id: 'desc' },
-    ]);
-    expect(rows.map((row) => row.id)).toEqual(['contains', 'exact', 'prefix']);
-    expect(rows[1]?.submitterName).toBe('销售小王');
-    expect(rows[1]?.workerNames).toEqual(['李师傅', '张师傅']);
-  });
-
+describe('getOrderDetail — scope filter application', () => {
   it('getOrderDetail enforces the scope filter by id (SALES cannot peek at others)', async () => {
     dbMock.order.findFirst.mockResolvedValue(null);
     const result = await getOrderDetail('someone-elses-order', salesActor);
@@ -4401,6 +4223,22 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
     });
   });
 
+  it('getOrderDetail loads the source order salesperson so a free rework shows its external sales', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'rework-order',
+      items: [{ id: 'item-1', crafts: [] }],
+    });
+    await getOrderDetail('rework-order', ownerActor);
+    const query = dbMock.order.findFirst.mock.calls[0]![0];
+    expect(query.include.sourceOrder).toEqual({
+      select: {
+        id: true, orderNo: true, customName: true, status: true,
+        submitter: { select: { displayName: true } },
+      },
+    });
+    expect(query.include.submitter.select).toMatchObject({ displayName: true });
+  });
+
   it('getOrderDetail hides a SUBMITTED scheduling draft from its assigned WORKER', async () => {
     dbMock.order.findFirst.mockResolvedValue(null);
 
@@ -4563,53 +4401,46 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     expect(dbMock.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { customName: null, packageRequirement: '贴客户标签' } }));
   });
 
-  it('validates a changed customer association and logs the actual relationship change', async () => {
+  // 客户名称/简称与关联客户已退役（业主 2026-09-27）：任何编辑入口都不改客户字段，
+  // 工单已存的客户值原样保留（DB 列保留、只作历史），也不再校验往来单位。
+  it.each([
+    ['ADMIN', ownerActor],
+    ['SALES', salesActor],
+  ])('%s edit never changes the stored customer, even when the payload carries it', async (_role, actor) => {
     dbMock.order.findFirst.mockResolvedValue(
-      snapshot({ customerPartyId: 'old-customer' }),
+      snapshot({ customerPartyId: 'old-customer', remark: null }),
     );
-    dbMock.party.findUnique.mockResolvedValue({
-      id: 'new-customer',
-      isActive: true,
-      type: PartyType.CUSTOMER,
-    });
-    await updateOrderFields(
+    const result = await updateOrderFields(
       'order-1',
-      editInput({ customerPartyId: 'new-customer' }),
-      ownerActor,
+      editInput({ customerPartyId: 'new-customer', customerRef: '新客户', remark: '新备注' }),
+      actor,
     );
+    expect(result.changedFields).toEqual(['remark']);
+    expect(dbMock.party.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.party.findFirst).not.toHaveBeenCalled();
     expect(dbMock.order.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { customerPartyId: 'new-customer' } }),
+      expect.objectContaining({ data: { remark: '新备注' } }),
     );
     expect(dbMock.orderLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          changedFields: {
-            customerPartyId: { before: 'old-customer', after: 'new-customer' },
-          },
+          changedFields: { remark: { before: null, after: '新备注' } },
         }),
       }),
     );
   });
 
-  it.each([
-    null,
-    { id: 'supplier', isActive: true, type: PartyType.SUPPLIER },
-    { id: 'inactive', isActive: false, type: PartyType.CUSTOMER },
-  ])(
-    'rejects an invalid customer without changing the order',
-    async (customer) => {
-      dbMock.order.findFirst.mockResolvedValue(snapshot());
-      dbMock.party.findUnique.mockResolvedValue(customer);
-      await expect(
-        updateOrderFields(
-          'order-1',
-          editInput({ customerPartyId: 'new-customer' }),
-          ownerActor,
-        ),
-      ).rejects.toThrow('所选客户');
-      expect(dbMock.order.updateMany).not.toHaveBeenCalled();
-    },
-  );
+  it('treats a payload that only changes the retired customer fields as a no-op', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ customerPartyId: 'old-customer' }));
+    const result = await updateOrderFields(
+      'order-1',
+      editInput({ customerPartyId: null, customerRef: '' }),
+      ownerActor,
+    );
+    expect(result).toMatchObject({ changed: false, changedFields: [] });
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
 
   it('writes secondary shipment contacts under the order version without changing prices or allocations', async () => {
     const primary = {
@@ -4746,15 +4577,16 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
-  it('DRAFT / FULL fieldset: customerRef and isUrgent are both applied', async () => {
+  it('DRAFT / FULL fieldset: customName and isUrgent are applied, the retired customerRef is not', async () => {
     dbMock.order.findFirst.mockResolvedValue(snapshot());
     await updateOrderFields(
       'order-1',
-      editInput({ customerRef: '新客户', isUrgent: true, remark: '新备注' }),
+      editInput({ customName: '新名称', customerRef: '新客户', isUrgent: true, remark: '新备注' }),
       salesActor,
     );
     const data = dbMock.order.updateMany.mock.calls[0][0].data as Record<string, unknown>;
-    expect(data.customerRef).toBe('新客户');
+    expect(data.customName).toBe('新名称');
+    expect(data).not.toHaveProperty('customerRef');
     expect(data.isUrgent).toBe(true);
     expect(data.remark).toBe('新备注');
   });
@@ -4835,16 +4667,18 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
-  it('SHIPPING_ONLY fieldset: customerRef and isUrgent are dropped even if submitted', async () => {
+  it('SHIPPING_ONLY fieldset: customName, customerRef and isUrgent are dropped even if submitted', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       snapshot({ status: OrderStatus.IN_PRODUCTION }),
     );
     await updateOrderFields(
       'order-1',
       editInput({
-        // These two live outside the SHIPPING_ONLY allowlist and MUST be
+        // These live outside the SHIPPING_ONLY allowlist and MUST be
         // ignored even if the action hands them down — SPEC §3.6 forbids
-        // changing them once production starts.
+        // changing them once production starts (customerRef is retired
+        // everywhere since 2026-09-27).
+        customName: '攻击者改名',
         customerRef: '攻击者改',
         isUrgent: true,
         isSfCollect: true,
@@ -4854,6 +4688,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       ownerActor,
     );
     const data = dbMock.order.updateMany.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('customName');
     expect(data).not.toHaveProperty('customerRef');
     expect(data).not.toHaveProperty('isUrgent');
     expect(data).not.toHaveProperty('isSfCollect');
@@ -4908,7 +4743,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     dbMock.order.findFirst.mockResolvedValue(snapshot());
     const result = await updateOrderFields(
       'order-1',
-      editInput({ remark: null, customerRef: '苹果福' }),
+      editInput({ remark: null, receiverName: '张三' }),
       salesActor,
     );
     expect(result.changed).toBe(false);
@@ -5799,13 +5634,6 @@ describe('sales early cancellation boundaries', () => {
   });
 });
 
-it('sales cannot bind an active customer belonging to another salesperson', async () => {
-  dbMock.party.findUnique.mockResolvedValue({ id: 'foreign-customer', type: PartyType.CUSTOMER, isActive: true });
-  dbMock.party.findFirst.mockResolvedValue(null);
-  await expect(createOrder({ customerPartyId: 'foreign-customer', customerRef: '客户', receiverName: '收件人', receiverPhone: '13800000000', receiverAddress: '广东佛山测试收货地址', expressCode: null, packageRequirement: null, remark: null, promisedDate: null, isUrgent: false, isSfCollect: false, items: [baseItem()] }, salesActor)).rejects.toThrow('只能选择自己关联的客户');
-  expect(dbMock.order.create).not.toHaveBeenCalled();
-});
-
 describe('admin creates for an external salesperson', () => {
   function delegatedInput(): Parameters<typeof createOrderDomain>[0] {
     return {
@@ -5930,6 +5758,30 @@ describe('admin creates for an external salesperson', () => {
     });
     await expect(createOrderDomain({ ...input, receiverAddress: '新的收货地址' }, ownerActor)).rejects.toThrow('GD-original');
     await expect(createOrderDomain({ ...input, items: [{ ...input.items[0]!, quantity: 2000 }] }, ownerActor)).rejects.toThrow('已保存');
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['no customer keys', {}],
+    ['blank customer strings from an old client', { customerPartyId: '', customerRef: '  ' }],
+  ])('replays an order created before the customer retirement (%s)', async (_label, retryCustomer) => {
+    // 2026-09-27 前的指纹：原样的 sha256(键排序 JSON)，建单表单总带 customerPartyId / customerRef = null。
+    const sorted = (value: unknown): unknown => Array.isArray(value)
+      ? value.map(sorted)
+      : value !== null && typeof value === 'object'
+        ? Object.fromEntries(Object.entries(value).sort(([x], [y]) => x.localeCompare(y)).map(([k, v]) => [k, sorted(v)]))
+        : value;
+    const facts: Record<string, unknown> = { ...delegatedInput() };
+    delete facts.customerPartyId;
+    delete facts.customerRef;
+    const legacy = createHash('sha256')
+      .update(JSON.stringify(sorted(JSON.parse(JSON.stringify({ ...facts, customerPartyId: null, customerRef: null })))))
+      .digest('hex');
+    dbMock.order.findUnique.mockResolvedValue({ id: 'created', orderNo: 'GD-before-retirement',
+      createdById: ownerActor.id, submitterId: 'sales-2', pricingStatus: 'PENDING', items: [{ id: 'item' }],
+      logs: [{ changedFields: { createRequest: { version: 1, fingerprint: legacy } } }],
+    });
+    await expect(createOrderDomain({ ...facts, ...retryCustomer } as Parameters<typeof createOrderDomain>[0], ownerActor))
+      .resolves.toMatchObject({ id: 'created', itemIds: ['item'] });
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
   it('does not silently replay historical requests without comparable creation facts', async () => {

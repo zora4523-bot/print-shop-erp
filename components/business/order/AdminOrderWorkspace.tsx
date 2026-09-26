@@ -5,7 +5,6 @@ import type { ReactNode } from 'react';
 import { OrderStatus } from '@/generated/prisma/enums';
 import type { AdminOrderWorkspacePage } from '@/lib/order/admin-workspace';
 import type { OrderListFilterOptions } from '@/lib/order/list-query';
-import { MISSING_ORDER_CUSTOMER_FILTER_VALUE } from '@/lib/order/list-query';
 import {
   serializeAdminOrderWorkspaceQuery,
   updateAdminOrderWorkspaceQuery,
@@ -79,16 +78,11 @@ export function AdminOrderWorkspace({
       value !== undefined &&
       value !== '',
   );
-  const exactCustomerFilterActive = Boolean(
-    query.list.filters.customerPartyId ||
-      query.list.filters.customerRefExact,
-  );
   const rejectedFilterActive = query.list.filters.statuses.length === 1
     && query.list.filters.statuses[0] === OrderStatus.REJECTED;
   const clearFiltersHref = buildTableHref('/orders', {}, {
     queue: query.queue === 'todo' ? undefined : query.queue,
   });
-  const exactCustomerFilterLabel = selectedCustomerLabel(query, data);
 
   return (
     <div data-slot="admin-order-workspace" style={{ backgroundColor: 'transparent' }} className={cn(styles.surface, "w-full min-w-0 max-w-none space-y-3.5")}>
@@ -140,40 +134,12 @@ export function AdminOrderWorkspace({
             <Input
               name="q"
               defaultValue={query.list.filters.q}
-              placeholder="搜工单号 / 产品客户 / 名称 / 运单号"
+              placeholder="搜工单号 / 名称 / 运单号"
               aria-label="搜索工单"
               className="pl-9"
             />
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 [&_a]:rounded-full">
-          {exactCustomerFilterActive ? (
-            <Link
-              href={buildTableHref('/orders', params, {
-                customerPartyId: undefined,
-                customerRefExact: undefined,
-                page: undefined,
-              })}
-              prefetch={false}
-              aria-label={`清除精确产品客户筛选：${exactCustomerFilterLabel}`}
-              className={cn(
-                buttonVariants({ variant: 'outline' }),
-                'min-w-0 justify-start xl:w-48',
-              )}
-            >
-              <span className="truncate">
-                产品客户：{exactCustomerFilterLabel}（精确）
-              </span>
-              <span aria-hidden="true">×</span>
-            </Link>
-          ) : (
-            <Input
-              name="customerRef"
-              defaultValue={query.list.filters.customerRef}
-              placeholder="产品客户"
-              aria-label="按产品客户筛选"
-              className="w-32 grow sm:grow-0"
-            />
-          )}
           <Button type="submit">应用筛选</Button>
           <Link
             href={buildTableHref('/orders', {}, adminRejectedFilterParams(query))}
@@ -439,7 +405,6 @@ function hiddenFilterInputs(
 ) {
   const visible = new Set([
     'q',
-    'customerRef',
     'submitterId',
     'craftId',
     'page',
@@ -455,9 +420,6 @@ export function adminSubmitterFilterParams(
   submitter: AdminOrderWorkspacePage['rows'][number]['submitter'],
 ): Record<string, string | undefined> {
   return {
-    customerRef: undefined,
-    customerPartyId: undefined,
-    customerRefExact: undefined,
     submitterId: submitter.id,
     page: undefined,
   };
@@ -494,15 +456,4 @@ function OrderWorkspaceHeader({ exportControls }: { exportControls: ReactNode })
         }
       />
   );
-}
-
-function selectedCustomerLabel(query: AdminOrderWorkspaceQuery, data: AdminOrderWorkspacePage) {
-  return query.list.filters.customerPartyId
-    ? data.rows.find(
-        (order) => order.customer.id === query.list.filters.customerPartyId,
-      )?.customer.name ?? '已选产品客户'
-    : query.list.filters.customerRefExact ===
-        MISSING_ORDER_CUSTOMER_FILTER_VALUE
-      ? '未填产品客户'
-      : query.list.filters.customerRefExact;
 }

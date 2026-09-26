@@ -182,6 +182,7 @@ export async function runOrderOverdueTask(
       {
         orderId: row.id,
         orderNo: row.orderNo,
+        externalSalesName: row.externalSalesName ?? '未填',
         customerRef: row.customerRef ?? '未填',
         promisedDate: formatDateShanghai(row.promisedDate),
         daysOverdue: row.daysOverdue,

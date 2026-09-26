@@ -163,7 +163,6 @@ function formValues(data: FormData): Record<string, string> {
 }
 const fieldNames: Record<string, string> = {
   customName: '工单名称',
-  customerRef: '客户简称',
   externalSalesUserId: '关联外部销售',
   remark: '工单备注',
   packageRequirement: '包装补充说明',

@@ -27,10 +27,7 @@ import {
   type WorkOrderProgressProjection,
 } from '../production/work-order-progress-query';
 import { selectOrderCustomerFee } from './customer-fee';
-import {
-  buildOrderWhere,
-  MISSING_ORDER_CUSTOMER_FILTER_VALUE,
-} from './list-query';
+import { buildOrderWhere } from './list-query';
 import { promisedDaysLeft } from './promised-date';
 import { shippedShipmentViolation } from './change-request-shipment-guard';
 import { canConfirmOrderPrinted } from './print-eligibility';
@@ -85,7 +82,6 @@ export type AdminOrderWorkspaceRow = {
   workOrderVersion: number;
   customName: string | null;
   remark?: string | null;
-  customer: { id: string | null; name: string; filterValue: string };
   submitter: { id: string; name: string };
   status: OrderStatus;
   statusSummary: string | null;
@@ -306,7 +302,6 @@ const adminOrderSelect = {
   updatedAt: true,
   customName: true,
   remark: true,
-  customerRef: true,
   status: true,
   isUrgent: true,
   totalAmount: true,
@@ -321,7 +316,6 @@ const adminOrderSelect = {
   pricingStatus: true,
   trackingNo: true,
   submitter: { select: { id: true, displayName: true } },
-  customerParty: { select: { id: true, name: true, shortName: true } },
   _count: { select: { shipments: true } },
   stars: { select: { userId: true } },
   items: {
@@ -833,13 +827,6 @@ function mapAdminOrderRow(
       outsource.status === OutsourceStatus.SENT ||
       outsource.status === OutsourceStatus.IN_PROGRESS,
   );
-  const customerName =
-    row.customerParty?.shortName?.trim() ||
-    row.customerParty?.name.trim() ||
-    row.customerRef?.trim() ||
-    '未填客户';
-  const customerMissing =
-    row.customerParty === null && !row.customerRef?.trim();
   const firstClaimedAt = progress?.firstClaimedAt ?? null;
   const stagnant = isProductionStagnant({
     status: row.status,
@@ -874,15 +861,6 @@ function mapAdminOrderRow(
     workOrderVersion: row.workOrderVersion,
     customName: row.customName,
     remark: row.remark,
-    customer: {
-      id: row.customerParty?.id ?? null,
-      name: customerName,
-      filterValue: customerMissing
-        ? MISSING_ORDER_CUSTOMER_FILTER_VALUE
-        : row.customerParty
-          ? customerName
-          : row.customerRef!,
-    },
     submitter: { id: row.submitter.id, name: row.submitter.displayName },
     status: row.status,
     statusSummary: statusSummary(

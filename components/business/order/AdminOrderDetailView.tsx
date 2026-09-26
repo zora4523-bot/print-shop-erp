@@ -135,7 +135,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         <h1 className="admin-wrap-anywhere text-2xl font-semibold">{model.name?.trim() || '未命名工单'}</h1>
         <StatusBadge tone={ORDER_STATUS_REGISTRY[model.status].tone}>{ORDER_STATUS_REGISTRY[model.status].label}</StatusBadge>
         {model.isUrgent ? <StatusBadge tone="warning">急单</StatusBadge> : null}
-        <p id="order-detail-overview" tabIndex={-1} className={cn(styles.meta, highlighted === 'order-detail-overview' && styles.highlight)}><span>业务员：{model.sales || '未命名账号'}</span><span>交期：{model.due ?? '未设置'}{model.dueLeft ? ` · ${model.dueLeft}` : ''}</span><span>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')} 个</span></p>
+        <p id="order-detail-overview" tabIndex={-1} className={cn(styles.meta, highlighted === 'order-detail-overview' && styles.highlight)}><span>业务员：{model.sales ?? '未填'}</span><span>交期：{model.due ?? '未设置'}{model.dueLeft ? ` · ${model.dueLeft}` : ''}</span><span>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')} 个</span></p>
         <Disclosure className="basis-full">
           <DisclosureSummary>工单信息</DisclosureSummary>
           <div className="flex flex-wrap items-center gap-3 pb-3">

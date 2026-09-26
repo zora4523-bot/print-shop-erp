@@ -620,9 +620,10 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     },
     {
       name: 'orders-filtered',
+      // 业主 2026-09-27：客户筛选已退役，长筛选值改由搜索框承载。
       path:
-        '/orders?status=SUBMITTED,IN_PRODUCTION&customerRef=' +
-        encodeURIComponent('超长客户名称用于验证筛选标签在小屏幕上能够自然换行而不会裁切') +
+        '/orders?status=SUBMITTED,IN_PRODUCTION&q=' +
+        encodeURIComponent('超长搜索词用于验证筛选输入在小屏幕上不会撑破布局或被裁切') +
         '&receiverAddress=' +
         encodeURIComponent('广东省深圳市南山区科技园长地址压力测试大厦A座12345678901234567890') +
         '&foilColor=' +
@@ -815,7 +816,8 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
     ).toBeVisible();
   }
   await expect(workspace.getByLabel('搜索工单')).toBeVisible();
-  await expect(workspace.getByLabel('按产品客户筛选')).toBeVisible();
+  // 业主 2026-09-27：工单列表不再按客户筛选。
+  await expect(workspace.getByLabel('按产品客户筛选')).toHaveCount(0);
   await expect(workspace.getByLabel('按业务员筛选')).toBeVisible();
   await expect(workspace.getByLabel('按工艺线筛选')).toBeVisible();
 
@@ -1265,7 +1267,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   }
   await expect(
     filters.getByRole('searchbox', {
-      name: '搜索工单名、客户或工单号',
+      name: '搜索工单名或工单号',
     }),
   ).toBeVisible();
 

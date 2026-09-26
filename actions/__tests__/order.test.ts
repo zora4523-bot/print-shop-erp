@@ -1032,6 +1032,18 @@ describe('updateOrderAction', () => {
     }, expect.objectContaining({ role: Role.ADMIN }));
   });
 
+  // 客户名称/简称与关联客户已退役（业主 2026-09-27）：旧表单即便仍提交客户字段，
+  // action 也不读取、不下传，编辑不会改动工单已存的客户值。
+  it.each([Role.ADMIN, Role.SALES])('%s edits never forward the retired customer fields', async (role) => {
+    permissionsMock.requirePermission.mockResolvedValue({ id: 'actor-1', role });
+    await expect(updateOrderAction('o1', null, editFd({
+      customerRef: '旧客户简称', customerPartyId: 'customer-1', remark: '只改备注',
+    }))).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(orderMock.updateOrderFields).toHaveBeenCalledWith('o1', {
+      expectedEditVersion: 7, remark: '只改备注',
+    }, expect.objectContaining({ role }));
+  });
+
   it('rejects an empty external sales account instead of clearing ownership', async () => {
     const result = await updateOrderAction('o1', null, editFd({ externalSalesUserId: '' }));
     expect(result).toMatchObject({ status: 'invalid', fieldErrors: { externalSalesUserId: expect.any(Array) } });

@@ -728,7 +728,6 @@ export function OrderForm({
     name: 'packagingGroups',
   });
   const watchedCustomName = useWatch({ control, name: 'customName' });
-  const watchedCustomerRef = useWatch({ control, name: 'customerRef' });
   const settlementLabel = ORDER_SETTLEMENT_LABELS.EXTERNAL_SALES;
   const watchedPromisedDate = useWatch({ control, name: 'promisedDate' });
   const watchedReceiverAddress = useWatch({
@@ -1209,9 +1208,6 @@ export function OrderForm({
     startSubmit(async () => {
       const submittedData: CreateOrderInput = {
         ...data,
-        ...(canAssignExternalSales
-          ? { customerPartyId: null, customerRef: null }
-          : {}),
         packagingGroups: data.packagingGroups.map((group) => group.mode === OrderPackagingMode.UNPACKED ? { ...group, adminPrice: undefined } : group),
         items: data.items.map((item) => ({
           ...item,
@@ -2160,8 +2156,6 @@ export function OrderForm({
     })),
   ];
   const formGaps = collectOrderFormGaps({
-    customerRef: watchedCustomerRef,
-    requiresCustomerRef: !canAssignExternalSales,
     promisedDate: watchedPromisedDate,
     items: itemGapInputs,
     shipping: {
@@ -2539,7 +2533,6 @@ export function OrderForm({
     ? [
         errors.externalSalesUserId?.message ?? null,
         errors.promisedDate?.message ? `承诺交期：${errors.promisedDate.message}` : null,
-        errors.customerRef?.message ? `产品客户：${errors.customerRef.message}` : null,
         errors.remark?.message ? `工单备注：${errors.remark.message}` : null,
         errors.customName?.message
           ? `工单名称：${errors.customName.message}`
@@ -3479,8 +3472,6 @@ function initialOrderFormValues(clientSubmissionId: string, initialItem: ReturnT
       clientSubmissionId,
       nextItemFig: 2,
       customName: null,
-      customerPartyId: null,
-      customerRef: null,
       receiverName: null,
       receiverPhone: null,
       receiverAddress: null,

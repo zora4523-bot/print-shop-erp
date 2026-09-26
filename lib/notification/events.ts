@@ -150,6 +150,9 @@ export type NotificationPayloads = {
     orderId: string;
     orderNo: string;
     submitterName: string;
+    /** 工单归属的外部销售（orderExternalSalesName；免费重做取原单销售），缺失传 '未填'。 */
+    externalSalesName: string;
+    /** @deprecated 客户自 2026-09-13 起不再录入；仅供管理员自定义旧模板渲染，恒为空。 */
     customerRef?: string | null;
   };
   ORDER_SCHEDULED: {
@@ -162,6 +165,9 @@ export type NotificationPayloads = {
     orderId: string;
     orderNo: string;
     workOrderVersion: number;
+    /** 工单归属的外部销售，缺失传 '未填'。 */
+    externalSalesName: string;
+    /** @deprecated 客户自 2026-09-13 起不再录入；仅供管理员自定义旧模板渲染。 */
     customerRef?: string | null;
   };
   ORDER_SHIPPED: {
@@ -184,7 +190,12 @@ export type NotificationPayloads = {
   ORDER_OVERDUE: {
     orderId: string;
     orderNo: string;
-    // 必填 string——seed 模板引用 {customerRef}；调用方负责 null → '未填'
+    /** 工单归属的外部销售；默认模板引用 {externalSalesName}，缺失传 '未填'。 */
+    externalSalesName: string;
+    /**
+     * @deprecated 客户自 2026-09-13 起不再录入。管理员自定义的旧模板可能仍引用
+     * {customerRef}，保留为必填 string（缺失传 '未填'）避免原样漏出占位符。
+     */
     customerRef: string;
     promisedDate: string; // YYYY/MM/DD（已 zh-CN format）
     daysOverdue: number;

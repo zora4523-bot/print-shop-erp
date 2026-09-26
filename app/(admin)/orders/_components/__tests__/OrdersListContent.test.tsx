@@ -4,12 +4,8 @@ import { Role } from '@/generated/prisma/enums';
 
 const {
   getOrderListFilterOptionsMock,
-  getOrderListPageWindowMock,
-  listOrdersPageMock,
   listRecentOrderExportsMock,
   orderExportControlsMock,
-  orderListFiltersMock,
-  ordersTableMock,
   getSalesOrderListPageWindowMock,
   getSalesOrderListSummaryMock,
   getSalesLatestRejectedOrderIdsMock,
@@ -23,12 +19,8 @@ const {
   getSettingMock,
 } = vi.hoisted(() => ({
   getOrderListFilterOptionsMock: vi.fn(),
-  getOrderListPageWindowMock: vi.fn(),
-  listOrdersPageMock: vi.fn(),
   listRecentOrderExportsMock: vi.fn(),
   orderExportControlsMock: vi.fn(() => null),
-  orderListFiltersMock: vi.fn(() => null),
-  ordersTableMock: vi.fn(() => null),
   getSalesOrderListPageWindowMock: vi.fn(),
   getSalesOrderListSummaryMock: vi.fn(),
   getSalesLatestRejectedOrderIdsMock: vi.fn(),
@@ -44,8 +36,6 @@ const {
 
 vi.mock('@/lib/order/list-query', () => ({
   getOrderListFilterOptions: getOrderListFilterOptionsMock,
-  getOrderListPageWindow: getOrderListPageWindowMock,
-  listOrdersPage: listOrdersPageMock,
   parseOrderListQuery: vi.fn(() => ({
     issues: [],
     query: {
@@ -65,7 +55,6 @@ vi.mock('@/lib/order/list-query', () => ({
       dir: 'desc',
     },
   })),
-  sanitizeOrderListQueryForActor: vi.fn((actor, query) => query),
   serializeOrderListQuery: vi.fn(() => ({})),
 }));
 
@@ -109,14 +98,6 @@ vi.mock('@/components/business/order/OrderExportControls', () => ({
   OrderExportControls: orderExportControlsMock,
 }));
 
-vi.mock('@/components/business/order/OrderListFilters', () => ({
-  OrderListFilters: orderListFiltersMock,
-}));
-
-vi.mock('@/components/business/order/OrdersTable', () => ({
-  OrdersTable: ordersTableMock,
-}));
-
 vi.mock('@/components/business/order/SalesOrderListFilters', () => ({
   SalesOrderListFilters: salesOrderListFiltersMock,
 }));
@@ -138,21 +119,6 @@ import {
 } from '../OrdersListContent';
 
 beforeEach(() => {
-  getOrderListPageWindowMock.mockReset().mockResolvedValue({
-    total: 0,
-    page: 1,
-    pageCount: 1,
-    pageSize: 20,
-    skip: 0,
-    take: 20,
-  });
-  listOrdersPageMock.mockReset().mockResolvedValue({
-    rows: [],
-    total: 0,
-    page: 1,
-    pageCount: 0,
-    pageSize: 20,
-  });
   getOrderListFilterOptionsMock.mockReset().mockResolvedValue({
     submitters: [],
     workers: [],
@@ -243,8 +209,9 @@ describe('OrdersListContent', () => {
         user: { id: 'worker-1', role: Role.WORKER },
       }),
     ).rejects.toThrow();
-    expect(listOrdersPageMock).not.toHaveBeenCalled();
-    expect(getOrderListPageWindowMock).not.toHaveBeenCalled();
+    expect(loadAdminOrderWorkspaceMock).not.toHaveBeenCalled();
+    expect(getSalesOrderListPageWindowMock).not.toHaveBeenCalled();
+    expect(listSalesOrdersPageMock).not.toHaveBeenCalled();
   });
 
 
@@ -254,8 +221,7 @@ describe('OrdersListContent', () => {
       user: { id: 'admin-1', role: Role.ADMIN },
     });
 
-    expect(listOrdersPageMock).not.toHaveBeenCalled();
-    expect(getOrderListPageWindowMock).not.toHaveBeenCalled();
+    expect(listSalesOrdersPageMock).not.toHaveBeenCalled();
     expect(listRecentOrderExportsMock).not.toHaveBeenCalled();
     const contentElement = findElement(node, AdminOrdersWorkspaceContent);
     expect(contentElement).not.toBeNull();
@@ -332,8 +298,7 @@ describe('OrdersListContent', () => {
       user: { id: 'sales-1', role: Role.SALES },
     });
 
-    expect(listOrdersPageMock).not.toHaveBeenCalled();
-    expect(getOrderListPageWindowMock).not.toHaveBeenCalled();
+    expect(loadAdminOrderWorkspaceMock).not.toHaveBeenCalled();
     expect(getOrderListFilterOptionsMock).not.toHaveBeenCalled();
     expect(listRecentOrderExportsMock).not.toHaveBeenCalled();
     const salesContentElement = findElement(node, SalesOrdersListContent);

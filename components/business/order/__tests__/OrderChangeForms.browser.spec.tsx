@@ -125,7 +125,6 @@ function decisionOrder(): AdminOrderWorkspaceRow {
     revision: 4,
     workOrderVersion: 2,
     customName: '裁决表单测试',
-    customer: { id: 'party-1', name: '客户甲', filterValue: '客户甲' },
     submitter: { id: 'sales-1', name: '业务员甲' },
     status: OrderStatus.CONFIRMED,
     statusSummary: null,

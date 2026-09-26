@@ -11,6 +11,6 @@ export type SampleOrderFormState = {
   collect: boolean;
   remark: string;
 };
-export type SampleOrderContext = Pick<CreateOrderInput, 'externalSalesUserId' | 'customerRef' | 'promisedDate' | 'isUrgent' | 'expressCode' | 'customName' | 'packageRequirement'>;
+export type SampleOrderContext = Pick<CreateOrderInput, 'externalSalesUserId' | 'promisedDate' | 'isUrgent' | 'expressCode' | 'customName' | 'packageRequirement'>;
 
 export type SavedSampleDraft = { orderId: string; itemIds: string[] };

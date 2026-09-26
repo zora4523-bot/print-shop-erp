@@ -127,8 +127,8 @@ export function SalesOrderListFilters({
               type="search"
               name="q"
               defaultValue={q}
-              aria-label="搜索工单名、客户或工单号"
-              placeholder="搜工单名 / 客户 / 单号"
+              aria-label="搜索工单名或工单号"
+              placeholder="搜工单名 / 单号"
               className="h-10 rounded-full pl-9 pr-9"
             />
             {q ? (

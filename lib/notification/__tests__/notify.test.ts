@@ -336,6 +336,75 @@ describe('notify', () => {
     expect(data.sentAt).toBeInstanceOf(Date);
   });
 
+  it('部署前入队的逾期载荷缺 externalSalesName → 按工单补上，新模板不漏出占位符', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_OVERDUE',
+      channelIds: ['c1'],
+      messageTemplate: '工单：{orderNo}\n外部销售：{externalSalesName}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/x', isActive: true },
+    ]);
+    dbMock.order.findUnique.mockResolvedValueOnce({
+      settlementType: 'NO_CHARGE',
+      submitter: { displayName: '管理员' },
+      sourceOrder: { submitter: { displayName: '桂林' } },
+    });
+
+    await notify(
+      'ORDER_OVERDUE',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        customerRef: '未填',
+        promisedDate: '2026/09/20',
+        daysOverdue: 2,
+        status: '生产中',
+      } as unknown as NotificationPayloadFor<'ORDER_OVERDUE'>,
+      { mockMode: true },
+    );
+
+    expect(dbMock.order.findUnique).toHaveBeenCalledWith({
+      where: { id: 'o1' },
+      select: expect.objectContaining({ settlementType: true }),
+    });
+    expect(dbMock.notificationLog.create.mock.calls[0][0].data.messageContent).toBe(
+      '工单：O-1\n外部销售：桂林',
+    );
+  });
+
+  it('载荷已带 externalSalesName → 不回查工单', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_OVERDUE',
+      channelIds: ['c1'],
+      messageTemplate: '外部销售：{externalSalesName}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/x', isActive: true },
+    ]);
+
+    await notify(
+      'ORDER_OVERDUE',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        externalSalesName: '未填',
+        customerRef: '未填',
+        promisedDate: '2026/09/20',
+        daysOverdue: 2,
+        status: '生产中',
+      },
+      { mockMode: true },
+    );
+
+    expect(dbMock.order.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.create.mock.calls[0][0].data.messageContent).toBe(
+      '外部销售：未填',
+    );
+  });
+
   it('多 channel → 每 channel 一条 log', async () => {
     dbMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'URGENT_ORDER',
@@ -354,6 +423,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       { webhookSender: okSender, mockMode: false },
@@ -395,6 +465,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       { webhookSender, smartBotSender, mockMode: false },
@@ -442,6 +513,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       { smartBotSender, mockMode: false },
@@ -484,6 +556,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       {
@@ -534,6 +607,7 @@ describe('notify', () => {
           orderId: 'o1',
           orderNo: 'O-1',
           workOrderVersion: 2,
+          externalSalesName: '外销甲',
           customerRef: null,
         },
         { webhookSender: okSender, mockMode: false },
@@ -571,6 +645,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         workOrderVersion: 2,
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       { webhookSender: okSender, mockMode: false },
@@ -636,6 +711,7 @@ describe('notify', () => {
             orderId: 'o1',
             orderNo: 'O-1',
             workOrderVersion: 2,
+            externalSalesName: '外销甲',
             customerRef: null,
           },
           {
@@ -699,6 +775,7 @@ describe('notify', () => {
             orderId: 'o1',
             orderNo: 'O-1',
             workOrderVersion: 2,
+            externalSalesName: '外销甲',
             customerRef: null,
           },
           {
@@ -760,6 +837,7 @@ describe('notify', () => {
             orderId: 'o1',
             orderNo: 'O-1',
             workOrderVersion: 2,
+            externalSalesName: '外销甲',
             customerRef: null,
           },
           {
@@ -830,6 +908,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         workOrderVersion: 2,
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       {
@@ -879,6 +958,7 @@ describe('notify', () => {
           orderId: 'o1',
           orderNo: 'O-1',
           workOrderVersion: 2,
+          externalSalesName: '外销甲',
           customerRef: null,
         },
         { webhookSender: okSender, mockMode: false },

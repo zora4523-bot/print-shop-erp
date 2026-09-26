@@ -610,8 +610,6 @@ export function OrderFormB({
         : null;
       const directSelector = (explicitTarget ? `[id="${CSS.escape(explicitTarget.fieldId)}"]` : null) ?? extraContact ?? packagingSelector ?? (message.includes('承诺交期')
         ? '#promisedDate'
-        : message.includes('产品客户')
-        ? '#customerRef'
         : message.includes('工单备注')
         ? '#remark'
         : message.includes('工单名称')

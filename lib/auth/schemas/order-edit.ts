@@ -728,13 +728,13 @@ export const editOrderShipmentSchema = z.object({
   sameDestination: z.boolean(),
 }).strict();
 
+// 客户名称/简称与关联客户已退役（业主 2026-09-27）：编辑不再改动客户字段。这里不声明
+// 这两个 key，旧表单若仍提交会被 z.object 默认剥离，工单已存的客户值保持原样。
 export const updateEditableOrderSchema = z.object({
   expectedEditVersion: expectedOrderEditVersionField,
   externalSalesUserId: requiredTrimmedText('关联外部销售', 64).optional(),
-  customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
   shipments: z.array(editOrderShipmentSchema).max(10, '单工单不超过 10 个收货地址').optional().refine((rows) => !rows || new Set(rows.map((row) => row.id)).size === rows.length, '收货地址不能重复'),
   customName: optionalTrimmedText('工单名称', 100).optional(),
-  customerRef: optionalTrimmedText('客户名称/简称', 64).optional(),
   receiverName: optionalTrimmedText('收货人', 64).optional(),
   receiverPhone: optionalTrimmedText('收货电话', 32).optional(),
   // 普通编辑允许不传该 key（partial update），但只要传了就不能清空。

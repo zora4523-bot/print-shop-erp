@@ -105,8 +105,10 @@ const externalCreateOrderFactsObject = z
   .object({
     clientSubmissionId: z.string().uuid('提交标识无效'),
     customName: trimmedRequired('工单名称', 100),
-    customerPartyId: optionalTrimmed(64),
-    customerRef: optionalTrimmed(64),
+    // 客户名称/简称与关联客户已退役（业主 2026-09-27）。严格 schema 仍接受这两个
+    // key，免得旧客户端被 strict 拒绝；toCanonicalFacts 不再传入，值不校验、不产生效果。
+    customerPartyId: z.string().nullable().optional(),
+    customerRef: z.string().nullable().optional(),
     receiverName: trimmedRequired('收件人', 64),
     receiverPhone: trimmedRequired('联系电话', 32),
     receiverAddress: trimmedRequired('收件地址', 256),

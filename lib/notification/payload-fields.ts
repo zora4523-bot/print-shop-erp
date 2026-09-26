@@ -17,12 +17,13 @@ export const NOTIFICATION_PAYLOAD_FIELDS = {
   PRODUCTION_PROGRESS_ANOMALY: ['orderId', 'orderNo', 'summary', 'deepLink'],
   PRODUCTION_STAGNANT: ['orderId', 'orderNo', 'summary', 'deepLink'],
   PENDING_FACTORY_BACKLOG: ['orderId', 'orderNo', 'summary', 'deepLink'],
-  URGENT_ORDER: ['orderId', 'orderNo', 'submitterName', 'customerRef'],
+  URGENT_ORDER: ['orderId', 'orderNo', 'submitterName', 'externalSalesName', 'customerRef'],
   ORDER_SCHEDULED: ['orderId', 'orderNo', 'taskCount'],
   ORDER_COMPLETED: [
     'orderId',
     'orderNo',
     'workOrderVersion',
+    'externalSalesName',
     'customerRef',
   ],
   ORDER_SHIPPED: ['orderId', 'orderNo', 'trackingNo'],
@@ -36,6 +37,7 @@ export const NOTIFICATION_PAYLOAD_FIELDS = {
   ORDER_OVERDUE: [
     'orderId',
     'orderNo',
+    'externalSalesName',
     'customerRef',
     'promisedDate',
     'daysOverdue',
@@ -44,6 +46,12 @@ export const NOTIFICATION_PAYLOAD_FIELDS = {
   STOCK_ALERT: ['materialName', 'currentStock', 'safetyStock'],
   DAILY_WORKER_SALARY: ['date', 'workerCount', 'totalAmount'],
 } as const satisfies Record<NotificationEvent, readonly string[]>;
+
+/**
+ * 已停用、只为兼容管理员自定义旧模板而保留在载荷里的占位符；规则编辑页不再
+ * 列为“可用占位符”（客户自 2026-09-13 起不再录入，恒为空）。
+ */
+export const RETIRED_NOTIFICATION_PAYLOAD_FIELDS: ReadonlySet<string> = new Set(['customerRef']);
 
 export type NotificationPayloadField =
   (typeof NOTIFICATION_PAYLOAD_FIELDS)[NotificationEvent][number];

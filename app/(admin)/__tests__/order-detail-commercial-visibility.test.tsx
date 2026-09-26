@@ -234,7 +234,6 @@ beforeEach(() => {
     return {
       workspace: batchOrder({
         ...version, status: order.status, customName: order.customName,
-        customer: { id: null, name: order.customerRef, filterValue: order.customerRef },
         submitter: { id: order.submitter.id, name: order.submitter.displayName },
         totalQuantity: order.items.reduce((total: number, item: { quantity: number }) => total + item.quantity, 0),
         itemCount: order.items.length, promisedDate: order.promisedDate?.toISOString() ?? null,
@@ -636,6 +635,9 @@ describe('order detail commercial visibility', () => {
     expect(html).not.toContain('基于生产版本');
     expect(html).not.toContain('批准后生产版本');
     expect(html).toContain(salesDetailFixture().orderNo);
+    // 业主 2026-09-27：销售详情抬头只剩版次与款数，不再展示客户或「未填客户」。
+    expect(html).not.toContain('客户甲');
+    expect(html).not.toContain('未填客户');
     expect(html.match(/>估<\/span>/g)).toHaveLength(2);
     expect(html).not.toContain('师傅');
     expect(html).not.toContain('生产安排');
@@ -881,6 +883,41 @@ describe('order detail — 暂不能完工横幅', () => {
     expect(html).not.toContain('暂不能完工');
   });
 
+});
+
+// 业主 2026-09-27：客户名称/简称退役。详情不再展示客户行；头部“业务员”是工单归属的
+// 外部销售——收费单为提交人，免费重做（管理员提交）为原单的外部销售。
+describe('order detail — 外部销售取代客户', () => {
+  it('不再展示客户名称/简称，头部业务员为收费单的外部销售', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue(orderFixture());
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).not.toContain('客户名称/简称');
+    expect(html).not.toContain('客户甲');
+    expect(html).toContain('业务员：销售甲');
+    // 基本信息里的提交人保持原样。
+    expect(basicAmount(html, '提交人')).toContain('销售甲');
+  });
+
+  it('免费重做的头部业务员取原单外部销售，而非提交重做的管理员', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      kind: OrderKind.REWORK,
+      settlementType: OrderSettlementType.NO_CHARGE,
+      customerRef: null,
+      submitterId: 'admin-1',
+      submitter: { id: 'admin-1', displayName: '管理员乙', username: 'admin-1', role: Role.ADMIN },
+      sourceOrder: {
+        id: 'source-1', orderNo: 'GD-260801-001', customName: '原单', status: OrderStatus.SHIPPED,
+        submitter: { displayName: '原单销售丙' },
+      },
+    });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).toContain('业务员：原单销售丙');
+    expect(html).not.toContain('业务员：管理员乙');
+    expect(html).not.toContain('客户名称/简称');
+  });
 });
 
 describe('order detail — 售后重做入口', () => {
