@@ -141,7 +141,9 @@ test('CDR排队到mock完成的下载状态、过期后重新生成与真实PDF�
   const bundle = await withSupplyChainDb((db) => db.query<{ id: string; status: string; backgroundJobId: string; downloadUrlCiphertext: string }>('SELECT id,status::text,"backgroundJobId","downloadUrlCiphertext" FROM "DesignBundle" WHERE "orderIds"=ARRAY[$1]::text[] ORDER BY "createdAt" DESC LIMIT 1', [fixture.orderId]));
   expect(bundle.rows).toHaveLength(1);
   const row = bundle.rows[0]!;
-  const href = decryptBundleDownloadUrl(row.downloadUrlCiphertext)!;
+  // APP_PUBLIC_URL is pinned to http://localhost:3000 for QR snapshots; the
+  // durable server listens elsewhere, so request the link's path via baseURL.
+  const href = new URL(decryptBundleDownloadUrl(row.downloadUrlCiphertext)!).pathname;
   const pending = await request.get(href);
   expect(pending.status()).toBe(409);
   expect(await pending.json()).toEqual({ error: '下载包正在生成' });
