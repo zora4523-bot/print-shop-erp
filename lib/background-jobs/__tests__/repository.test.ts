@@ -4,6 +4,7 @@ const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     backgroundJob: {
       createMany: vi.fn(),
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -39,6 +40,7 @@ import {
   enqueueBackgroundJob,
   failBackgroundJob,
   heartbeatBackgroundJob,
+  OrderPdfScopeInFlightError,
   releaseUndispatchedBackgroundJobClaim,
   RetiredBackgroundJobTypeError,
   retryDeadBackgroundJob,
@@ -1110,6 +1112,72 @@ describe('claim and lease lifecycle', () => {
 
     expect(results.sort()).toEqual([false, true]);
     expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('retryDeadBackgroundJob · ORDER_PDF authorized scope', () => {
+  const scopePrefix = `order-pdf:v2:${'a'.repeat(64)}:`;
+  const deadPdf = {
+    status: BackgroundJobStatus.DEAD,
+    type: 'ORDER_PDF',
+    attempts: 2,
+    maxAttempts: 2,
+    lastErrorCode: 'PdfRenderError',
+    dedupeKey: `${scopePrefix}1234`,
+    payload: { orderId: 'order-1' },
+  };
+
+  it('does not revive a DEAD PDF job while another job of the same scope is in flight', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue(deadPdf);
+    dbMock.backgroundJob.findFirst.mockResolvedValue({ id: 'job-regenerate' });
+
+    await expect(retryDeadBackgroundJob('job-dead-pdf')).rejects.toBeInstanceOf(
+      OrderPdfScopeInFlightError,
+    );
+
+    // Same transaction-scoped lock as the download / regenerate entries.
+    const lockCall = dbMock.$executeRaw.mock.calls[0];
+    expect(lockCall?.[0].join('?')).toContain('pg_advisory_xact_lock(hashtext(');
+    expect(lockCall?.slice(1)).toEqual([scopePrefix]);
+    expect(dbMock.backgroundJob.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          type: 'ORDER_PDF',
+          dedupeKey: { startsWith: scopePrefix },
+          status: { in: [BackgroundJobStatus.PENDING, BackgroundJobStatus.RUNNING] },
+        },
+      }),
+    );
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('revives a DEAD PDF job under the scope lock when nothing of the scope is in flight', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue(deadPdf);
+    dbMock.backgroundJob.findFirst.mockResolvedValue(null);
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(retryDeadBackgroundJob('job-dead-pdf')).resolves.toBe(true);
+
+    const lockOrder = dbMock.$executeRaw.mock.invocationCallOrder[0] ?? Infinity;
+    const findOrder = dbMock.backgroundJob.findFirst.mock.invocationCallOrder[0] ?? -1;
+    const updateOrder = dbMock.backgroundJob.updateMany.mock.invocationCallOrder[0] ?? -1;
+    expect(lockOrder).toBeLessThan(findOrder);
+    expect(findOrder).toBeLessThan(updateOrder);
+  });
+
+  it('leaves non-PDF retries free of the PDF scope lock', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'CDR_BUNDLE',
+      attempts: 3,
+      maxAttempts: 3,
+      dedupeKey: 'cdr-bundle:b1',
+    });
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(retryDeadBackgroundJob('job-cdr')).resolves.toBe(true);
+    expect(dbMock.$executeRaw).not.toHaveBeenCalled();
+    expect(dbMock.backgroundJob.findFirst).not.toHaveBeenCalled();
   });
 });
 

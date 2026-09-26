@@ -20,6 +20,11 @@ import {
   isRegisteredBackgroundJobType,
 } from './types';
 import { databaseNow } from './clock';
+import {
+  findInFlightOrderPdfJob,
+  lockOrderPdfScope,
+  orderPdfScopePrefixOfDedupeKey,
+} from './pdf-scope';
 import { backgroundJobErrorCode, retryDelayMs } from './policy';
 import {
   NOTIFICATION_DELIVERY_UNKNOWN_ERROR_CODE,
@@ -573,6 +578,32 @@ export class RetiredBackgroundJobTypeError extends Error {
   }
 }
 
+/**
+ * An operator retry of a DEAD ORDER_PDF job whose authorized scope already has
+ * another job queued or running (typically a failure-page regeneration). The
+ * DEAD row stays as history; the in-flight job will produce the PDF.
+ */
+export class OrderPdfScopeInFlightError extends Error {
+  constructor(public readonly inFlightJobId: string) {
+    super(`order PDF scope already has an in-flight job: ${inFlightJobId}`);
+    this.name = 'OrderPdfScopeInFlightError';
+  }
+}
+
+// Same lock and in-flight check as enqueueOrderPdfJob (pdf.ts): at most one
+// in-flight job per authorized scope, whichever entry acts first.
+async function assertOrderPdfScopeIdle(
+  tx: Prisma.TransactionClient,
+  dedupeKey: string,
+): Promise<void> {
+  const scopePrefix = orderPdfScopePrefixOfDedupeKey(dedupeKey);
+  // Pre-v2 rows (before 2026-09-11) carry no scope digest; nothing to lock.
+  if (scopePrefix === null) return;
+  await lockOrderPdfScope(tx, scopePrefix);
+  const inFlight = await findInFlightOrderPdfJob(tx, scopePrefix);
+  if (inFlight) throw new OrderPdfScopeInFlightError(inFlight);
+}
+
 export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
   return db.$transaction(async (tx) => {
     const job = await tx.backgroundJob.findUnique({
@@ -584,6 +615,7 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
         maxAttempts: true,
         lastErrorCode: true,
         payload: true,
+        dedupeKey: true,
       },
     });
     if (!job || job.status !== BackgroundJobStatus.DEAD) return false;
@@ -614,6 +646,9 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
     }
     if (backgroundJobRequiresOwnerResolution(job)) {
       return false;
+    }
+    if (job.type === BACKGROUND_JOB_TYPES.ORDER_PDF) {
+      await assertOrderPdfScopeIdle(tx, job.dedupeKey);
     }
     // 「立刻可跑」必须用库时钟表达：web 进程的 new Date() 快了就把重试
     // 推迟到未来，慢了则无所谓 —— 两种都不该由 web 的时钟说了算。

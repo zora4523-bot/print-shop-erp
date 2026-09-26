@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   cancelPendingBackgroundJob,
+  OrderPdfScopeInFlightError,
   RetiredBackgroundJobTypeError,
   retryDeadBackgroundJob,
 } from '@/lib/background-jobs/repository';
@@ -26,6 +27,13 @@ export async function retryBackgroundJobAction(
       return {
         status: 'error',
         message: '该任务类型对应的功能已停用，无法重试；记录保留为运行历史',
+      };
+    }
+    if (err instanceof OrderPdfScopeInFlightError) {
+      revalidatePath(JOBS_PATH);
+      return {
+        status: 'error',
+        message: '已有同一工单 PDF 正在生成，无需重试；本条失败记录保留为运行历史',
       };
     }
     throw err;

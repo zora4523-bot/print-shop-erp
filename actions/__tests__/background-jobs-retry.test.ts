@@ -14,7 +14,13 @@ vi.mock('@/lib/background-jobs/repository', () => {
       super(`retired background job type: ${type}`);
     }
   }
+  class OrderPdfScopeInFlightError extends Error {
+    constructor(public readonly inFlightJobId: string) {
+      super(`order PDF scope already in flight: ${inFlightJobId}`);
+    }
+  }
   return {
+    OrderPdfScopeInFlightError,
     RetiredBackgroundJobTypeError,
     cancelPendingBackgroundJob: vi.fn(),
     retryDeadBackgroundJob: retryMock,
@@ -22,7 +28,10 @@ vi.mock('@/lib/background-jobs/repository', () => {
 });
 
 import { retryBackgroundJobAction } from '../background-jobs';
-import { RetiredBackgroundJobTypeError } from '@/lib/background-jobs/repository';
+import {
+  OrderPdfScopeInFlightError,
+  RetiredBackgroundJobTypeError,
+} from '@/lib/background-jobs/repository';
 
 function form(jobId: string): FormData {
   const data = new FormData();
@@ -52,6 +61,16 @@ describe('retryBackgroundJobAction', () => {
     expect(result).toEqual({
       status: 'error',
       message: expect.stringContaining('已停用'),
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/background-jobs');
+  });
+
+  it('refuses to revive a PDF job while the same order PDF is already being generated', async () => {
+    retryMock.mockRejectedValue(new OrderPdfScopeInFlightError('job-b'));
+    const result = await retryBackgroundJobAction(null, form('job-4'));
+    expect(result).toEqual({
+      status: 'error',
+      message: expect.stringContaining('已有同一工单 PDF 正在生成'),
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/background-jobs');
   });

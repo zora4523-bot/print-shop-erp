@@ -21,8 +21,22 @@ postgresDescribe.sequential('order PDF enqueue · PostgreSQL scope lock', () => 
   };
 
   async function load() {
-    const [{ db }, pdf] = await Promise.all([import('../../db'), import('../pdf')]);
-    return { db, enqueueOrderPdfJob: pdf.enqueueOrderPdfJob };
+    const [{ db }, pdf, repository] = await Promise.all([
+      import('../../db'),
+      import('../pdf'),
+      import('../repository'),
+    ]);
+    return {
+      db,
+      enqueueOrderPdfJob: pdf.enqueueOrderPdfJob,
+      retryDeadBackgroundJob: repository.retryDeadBackgroundJob,
+      OrderPdfScopeInFlightError: repository.OrderPdfScopeInFlightError,
+    };
+  }
+
+  function inFlight(jobs: Awaited<ReturnType<typeof scopeJobs>>) {
+    return jobs.filter((job) =>
+      job.status === BackgroundJobStatus.PENDING || job.status === BackgroundJobStatus.RUNNING);
   }
 
   async function scopeJobs() {
@@ -79,9 +93,39 @@ postgresDescribe.sequential('order PDF enqueue · PostgreSQL scope lock', () => 
     ]);
     expect(new Set(burst).size).toBe(1);
     jobs = await scopeJobs();
-    expect(
-      jobs.filter((job) =>
-        job.status === BackgroundJobStatus.PENDING || job.status === BackgroundJobStatus.RUNNING),
-    ).toHaveLength(1);
+    expect(inFlight(jobs)).toHaveLength(1);
+  });
+
+  it('an ops retry of a DEAD job cannot put a second job of the scope in flight', async () => {
+    const { enqueueOrderPdfJob, retryDeadBackgroundJob, OrderPdfScopeInFlightError } = await load();
+    for (const job of inFlight(await scopeJobs())) await markDead(job.id);
+
+    // A fails; the failure page starts regeneration B; the admin then retries
+    // A on /owner/background-jobs while B is still queued.
+    const a = await enqueueOrderPdfJob(input);
+    await markDead(a);
+    const b = await enqueueOrderPdfJob({ ...input, regenerationKey: 'ops-r1' });
+    expect(b).not.toBe(a);
+    await expect(retryDeadBackgroundJob(a)).rejects.toBeInstanceOf(OrderPdfScopeInFlightError);
+    let jobs = await scopeJobs();
+    expect(jobs.find((job) => job.id === a)?.status).toBe(BackgroundJobStatus.DEAD);
+    expect(inFlight(jobs).map((job) => job.id)).toEqual([b]);
+
+    // Interleaved the other way round: ops retry and regenerations/downloads
+    // race for the same idle scope; exactly one job ends up in flight.
+    await markDead(b);
+    const race = await Promise.allSettled([
+      retryDeadBackgroundJob(a),
+      enqueueOrderPdfJob({ ...input, regenerationKey: 'ops-r2' }),
+      retryDeadBackgroundJob(b),
+      enqueueOrderPdfJob(input),
+    ]);
+    for (const outcome of race) {
+      if (outcome.status === 'rejected') {
+        expect(outcome.reason).toBeInstanceOf(OrderPdfScopeInFlightError);
+      }
+    }
+    jobs = await scopeJobs();
+    expect(inFlight(jobs)).toHaveLength(1);
   });
 });
