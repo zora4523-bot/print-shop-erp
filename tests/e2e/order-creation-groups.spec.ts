@@ -14,7 +14,9 @@ for (const role of ['owner', 'sales'] as const) {
     const specificationSection = page.locator('[data-slot="order-specification-section"]');
     await expect(specificationSection.locator('input[type="file"]')).toHaveCount(0);
     const fileBox = await files.getByRole('button', { name: '拖放或选择第 1 款 CDR 文件', exact: true }).boundingBox();
-    expect(fileBox?.height).toBeGreaterThanOrEqual(128);
+    // 业主 2026-09-27：上传区改紧凑，仍保留完整拖放区域。
+    expect(fileBox?.height).toBeGreaterThanOrEqual(80);
+    expect(fileBox?.height).toBeLessThanOrEqual(96);
     // 包装是整单区域，在设计款卡片之外（DECISIONS 2026-09-23）。
     const packaging = page.locator('[data-slot="order-packaging-section"]').getByRole('region', { name: '包装', exact: true });
     await expect(page.locator('[data-slot="order-design-section"]').getByRole('region', { name: '包装', exact: true })).toHaveCount(0);

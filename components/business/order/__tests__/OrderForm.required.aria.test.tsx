@@ -170,7 +170,9 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(html).toContain('aria-labelledby="urgent-order-accessible-label"');
     expect(html).toContain('name="isUrgent"');
     expect(html).toContain('size-11');
-    expect(html).toContain('@min-[560px]:grid-cols-2');
+    // 承诺交期固定窄列，急单并排在右侧（不再单独占一整行）。
+    expect(html).toContain('data-slot="order-form-schedule"');
+    expect(html).toContain('grid-cols-[minmax(0,11rem)_minmax(0,1fr)]');
     expect(html).not.toContain('class="size-4 shrink-0"');
   });
 

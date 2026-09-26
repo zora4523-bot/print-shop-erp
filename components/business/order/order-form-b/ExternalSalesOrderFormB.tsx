@@ -226,6 +226,7 @@ function DesignFileBox({
   onFile,
   onFiles,
   onRemove,
+  files,
 }: {
   itemNumber: number;
   fileType: DesignFileType;
@@ -236,6 +237,8 @@ function DesignFileBox({
   onFiles?: (files: File[]) => void;
   onFile: (file: File) => void;
   onRemove: () => void;
+  /** 已选文件列表（CDR 多文件），紧跟上传框、排在错误提示之前。 */
+  files?: ReactNode;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const image = fileType === DesignFileType.IMAGE;
@@ -258,7 +261,7 @@ function DesignFileBox({
       {entry ? (
         <div
           data-slot="design-file-marker"
-          className="flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-xs font-bold text-muted-foreground"
+          className="flex h-12 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-xs font-bold text-muted-foreground"
         >
           {image ? (
             <LocalDesignImagePreview
@@ -328,7 +331,7 @@ function DesignFileBox({
         <div
           data-invalid={Boolean(error)}
           className={cn(
-            'flex min-h-[5.375rem] w-full items-center gap-3 rounded-xl border bg-card p-3.5 text-left',
+            'flex w-full items-center gap-3 rounded-xl border bg-card p-3 text-left',
             error && 'border-destructive bg-destructive/5',
             disabled && 'opacity-50',
           )}
@@ -338,7 +341,7 @@ function DesignFileBox({
           onDrop={handleDrop}
         >
           {uploadContent}
-          <div className="flex shrink-0 flex-col gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             <Button
               type="button"
               size="xs"
@@ -384,7 +387,7 @@ function DesignFileBox({
               : `拖放或选择${fileLabel}`
           }
           className={cn(
-            'flex h-auto data-[slot=button]:min-h-44 w-full cursor-pointer flex-col items-start justify-between gap-4 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-4 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+            'flex h-auto data-[slot=button]:min-h-20 w-full cursor-pointer items-center justify-between gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-3.5 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
             error && 'border-destructive bg-destructive/5',
           )}
           onClick={openFilePicker}
@@ -408,7 +411,8 @@ function DesignFileBox({
           </span>
         </Button>
       )}
-      <FieldError id={errorId} reservedLines={2}>{error}</FieldError>
+      {files}
+      <FieldError id={errorId} reservedLines={1}>{error}</FieldError>
     </div>
   );
 }
@@ -457,31 +461,33 @@ function OrderDesignFilesSection({ itemNumber, queue, disabled, required, groupe
               )
             }
           />
-          <div className="min-w-0 space-y-2">
-            <DesignFileBox
-              itemNumber={itemNumber}
-              fileType={DesignFileType.CDR}
-              disabled={disabled}
-              error={cdrError}
-              onFiles={onCdrFiles}
-              onFile={(file) => onCdrFiles([file])}
-              onRemove={() => {}}
-            />
-            {cdrEntries.map((entry) => (
-              <div key={entry.id} className="flex min-w-0 items-center gap-2 rounded-xl border bg-card p-3">
-                <span data-slot="design-file-marker" className="shrink-0 text-xs font-bold text-muted-foreground"><span>CDR</span></span>
-                <p className="min-w-0 flex-1 truncate text-sm" title={entry.prepared.file.name}>
-                  {entry.prepared.file.name} · {formatDesignFileSize(entry.prepared.file.size)}
-                </p>
-                <Button
-                  type="button" variant="outline" disabled={disabled}
-                  className="min-h-11 min-w-11 shrink-0"
-                  aria-label={`移除第 ${itemNumber} 款 CDR 文件 ${entry.prepared.file.name}`}
-                  onClick={() => onChange(queue.filter((file) => file.id !== entry.id))}
-                >移除</Button>
-              </div>
-            ))}
-          </div>
+          <DesignFileBox
+            itemNumber={itemNumber}
+            fileType={DesignFileType.CDR}
+            disabled={disabled}
+            error={cdrError}
+            onFiles={onCdrFiles}
+            onFile={(file) => onCdrFiles([file])}
+            onRemove={() => {}}
+            files={cdrEntries.length > 0 ? (
+              <ul className="mt-1.5 space-y-1.5">
+                {cdrEntries.map((entry) => (
+                  <li key={entry.id} className="flex min-w-0 items-center gap-2 rounded-lg border bg-card py-1 pr-1 pl-3">
+                    <span data-slot="design-file-marker" className="shrink-0 text-xs font-bold text-muted-foreground"><span>CDR</span></span>
+                    <p className="min-w-0 flex-1 truncate text-sm" title={entry.prepared.file.name}>
+                      {entry.prepared.file.name} · {formatDesignFileSize(entry.prepared.file.size)}
+                    </p>
+                    <Button
+                      type="button" variant="outline" disabled={disabled}
+                      className="min-h-11 min-w-11 shrink-0"
+                      aria-label={`移除第 ${itemNumber} 款 CDR 文件 ${entry.prepared.file.name}`}
+                      onClick={() => onChange(queue.filter((file) => file.id !== entry.id))}
+                    >移除</Button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          />
         </div>
       </fieldset>
     </Group>

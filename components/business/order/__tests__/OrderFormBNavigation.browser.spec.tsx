@@ -407,6 +407,12 @@ for (const theme of ['light', 'dark']) for (const width of [375, 393, 768, 1024,
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const remove = host.querySelector('button[aria-label="移除第 1 款 CDR 文件 front.cdr"]')!;
     expect(remove.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    // 上传框保持紧凑，已选文件紧跟其下（错误提示位排在列表之后）。
+    const dropBox = drop.getBoundingClientRect();
+    expect(dropBox.height).toBeLessThanOrEqual(96);
+    const firstFile = remove.closest('li')!.parentElement!.firstElementChild!.getBoundingClientRect();
+    expect(firstFile.top - dropBox.bottom).toBeGreaterThanOrEqual(0);
+    expect(firstFile.top - dropBox.bottom).toBeLessThanOrEqual(12);
     expect(await commands.checkShellAccessibility('[data-testid="navigation-fixture"]')).toEqual([]);
   });
 }

@@ -593,38 +593,42 @@ function UrgentOrderField({
       control={control}
       name="isUrgent"
       render={({ field }) => (
+        // 与左侧“承诺交期”同一结构：标签行 + 44px 控件行，勾选框与日期输入框对齐。
         <label
           htmlFor="isUrgent"
           data-slot="urgent-order-field"
-          className="flex min-h-16 min-w-0 cursor-pointer items-center gap-2 self-end rounded-xl border bg-background py-2 pr-2 pl-3 transition-colors hover:bg-muted/50 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+          className="grid min-w-0 cursor-pointer gap-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
         >
           <span id="urgent-order-accessible-label" className="sr-only">
             急单（提交后会推送至排产群）
           </span>
-          <span className="min-w-0 flex-1">
-            <span
-              data-slot="urgent-order-title"
-              className="block text-sm font-semibold"
-            >
-              急单
+          <span
+            data-slot="urgent-order-title"
+            className="text-sm leading-none font-medium"
+          >
+            急单
+          </span>
+          <span className="flex min-w-0 items-center gap-1">
+            {/* 44px 触控目标里的 20px 勾选框与标题左对齐 */}
+            <span className="-ml-3 shrink-0">
+              <Checkbox
+                id="isUrgent"
+                name={field.name}
+                checked={field.value ?? false}
+                disabled={disabled}
+                inputRef={field.ref}
+                aria-labelledby="urgent-order-accessible-label"
+                onBlur={field.onBlur}
+                onCheckedChange={field.onChange}
+              />
             </span>
             <span
               data-slot="urgent-order-description"
-              className="mt-0.5 block text-xs leading-5 text-muted-foreground"
+              className="min-w-0 text-xs leading-4 text-muted-foreground"
             >
               提交后会推送至排产群
             </span>
           </span>
-          <Checkbox
-            id="isUrgent"
-            name={field.name}
-            checked={field.value ?? false}
-            disabled={disabled}
-            inputRef={field.ref}
-            aria-labelledby="urgent-order-accessible-label"
-            onBlur={field.onBlur}
-            onCheckedChange={field.onChange}
-          />
         </label>
       )}
     />
@@ -2721,10 +2725,10 @@ export function OrderForm({
               !isExternalSalesActor ? (
                 <div
                   data-slot="order-form-order-extras"
-                  className="mt-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2"
+                  className="mt-4 grid min-w-0 grid-cols-1 gap-3.5"
                 >
                   {canAssignExternalSales ? (
-                    <div className="@min-[560px]:col-span-2">
+                    <div>
                       <Label htmlFor="externalSalesUserId">
                         关联外部销售（必填）
                       </Label>
@@ -2764,29 +2768,37 @@ export function OrderForm({
                       </FieldError>
                     </div>
                   ) : null}
-                  <div>
-                    <Label htmlFor="promisedDate">承诺交期</Label>
-                    <Input
-                      id="promisedDate"
-                      type="date"
-                      className="mt-2 h-10"
-                      aria-invalid={Boolean(errors.promisedDate)}
-                      {...register('promisedDate')}
+                  {/* 交期只需放下一个日期，固定窄列；急单并排在右侧，不再单独占一整行。 */}
+                  <div
+                    data-slot="order-form-schedule"
+                    className="grid min-w-0 grid-cols-[minmax(0,11rem)_minmax(0,1fr)] items-start gap-3.5"
+                  >
+                    <div className="min-w-0">
+                      <Label htmlFor="promisedDate">承诺交期</Label>
+                      <Input
+                        id="promisedDate"
+                        type="date"
+                        className="mt-2 h-10"
+                        aria-invalid={Boolean(errors.promisedDate)}
+                        {...register('promisedDate')}
+                      />
+                      <FieldError reservedLines={1}>
+                        {errors.promisedDate?.message as string | undefined}
+                      </FieldError>
+                    </div>
+                    <UrgentOrderField
+                      control={control}
+                      disabled={orderFormControlsDisabled}
                     />
-                    <FieldError reservedLines={1}>
-                      {errors.promisedDate?.message as string | undefined}
-                    </FieldError>
                   </div>
-                  <UrgentOrderField
-                    control={control}
-                    disabled={orderFormControlsDisabled}
-                  />
                 </div>
               ) : undefined
             }
             materialExtras={
               <>
-                <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
+                <div
+                  className={`mb-5 grid min-w-0 gap-3.5 ${isExternalSalesActor ? 'grid-cols-1' : 'grid-cols-[minmax(0,1fr)_minmax(0,8rem)]'}`}
+                >
                   {/* 设计款名称由建单人填写（DECISIONS 2026-09-26）：单款默认跟随工单名称，
                       新增设计款须手动命名，同一工单内不重名；同一设计款的规格共用名称。 */}
                   <div>
@@ -2811,14 +2823,15 @@ export function OrderForm({
                     </FieldError>
                   </div>
                   {!isExternalSalesActor ? (
-                    <div>
-                      <Label htmlFor={`items.${expandedItem}.artworkVersion`}>
+                    <div className="min-w-0">
+                      {/* 稿件版本是次要信息，窄列放在设计款名称右侧 */}
+                      <FieldLabel htmlFor={`items.${expandedItem}.artworkVersion`}>
                         稿件版本
-                      </Label>
+                      </FieldLabel>
                       <Input
                         key={itemsArray.fields[expandedItem]?.id}
                         id={`items.${expandedItem}.artworkVersion`}
-                        className="mt-2 h-10"
+                        className="h-10"
                         {...register(`items.${expandedItem}.artworkVersion`, { onChange: (event) => changeDesignText(expandedItem, 'artworkVersion', event.target.value) })}
                       />
                     </div>

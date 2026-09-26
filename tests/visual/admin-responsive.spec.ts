@@ -212,6 +212,7 @@ test.describe('administrator workspace geometry', () => {
 
           return {
             checkbox: rect('[data-slot="checkbox"]'),
+            dateInput: rect('#promisedDate'),
             description: rect('[data-slot="urgent-order-description"]'),
             editor: rect('[data-slot="order-form-editor"]'),
             field: rect('[data-slot="urgent-order-field"]'),
@@ -230,6 +231,9 @@ test.describe('administrator workspace geometry', () => {
         expect(geometry.field.width).toBeGreaterThanOrEqual(240);
         expect(geometry.title.height).toBeLessThanOrEqual(24);
         expect(geometry.description.height).toBeLessThanOrEqual(40);
+        // 承诺交期固定窄列，急单勾选与日期输入框同一行对齐。
+        expect(geometry.dateInput.width).toBeLessThanOrEqual(180);
+        expect(Math.abs(geometry.checkbox.top - geometry.dateInput.top)).toBeLessThanOrEqual(1);
 
         if (viewport.stacked) {
           expect(geometry.railPosition).toBe('static');
