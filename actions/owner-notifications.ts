@@ -361,9 +361,11 @@ export async function confirmUnknownNotificationDeliveredAction(
     message:
       result.pendingUnknownCount > 0
         ? `已记录该群已送达；同一任务仍有 ${result.pendingUnknownCount} 条待核对`
-        : result.rearmed
-          ? '已记录该群已送达，其他已确认未送达的消息已重新入队'
-          : '已记录人工核对：消息已送达',
+        : result.retiredClosedCount > 0
+          ? `已记录该群已送达；${retiredClosedNotice(result.retiredClosedCount)}`
+          : result.rearmed
+            ? '已记录该群已送达，其他已确认未送达的消息已重新入队'
+            : '已记录人工核对：消息已送达',
   };
 }
 
@@ -434,10 +436,16 @@ export async function ignoreUnknownNotificationAction(
     message:
       result.pendingUnknownCount > 0
         ? `已记录忽略理由；同一任务仍有 ${result.pendingUnknownCount} 条待核对`
-        : result.rearmed
-          ? '已忽略该条，其他已确认未送达的消息已重新入队'
-          : '已记录忽略理由并关闭该条待办',
+        : result.retiredClosedCount > 0
+          ? `已忽略该条；${retiredClosedNotice(result.retiredClosedCount)}`
+          : result.rearmed
+            ? '已忽略该条，其他已确认未送达的消息已重新入队'
+            : '已记录忽略理由并关闭该条待办',
   };
+}
+
+function retiredClosedNotice(count: number): string {
+  return `其余 ${count} 条已确认未送达的消息因事件已停用不再重发，已关闭`;
 }
 
 function notificationResolutionInput(

@@ -8,6 +8,7 @@ import { writeAuditLogInTx, type AuditActor } from '../audit-log';
 import { databaseNow } from '../background-jobs/clock';
 import {
   NOTIFICATION_DELIVERY_UNKNOWN_ERROR_CODE,
+  NOTIFICATION_REPLAY_TERMINAL_ERROR_CODE,
   backgroundJobRequiresOwnerResolution,
 } from '../background-jobs/terminal-policy';
 import { BACKGROUND_JOB_TYPES } from '../background-jobs/types';
@@ -52,6 +53,8 @@ export async function resolveUnknownNotification(
   pendingUnknownCount: number;
   rearmed: boolean;
   completed: boolean;
+  /** RETRYING siblings closed because their event left the registry. */
+  retiredClosedCount: number;
 }> {
   const normalizedReason = normalizeResolutionReason(resolution, reason);
 
@@ -117,6 +120,7 @@ export async function resolveUnknownNotification(
         pendingUnknownCount: 0,
         rearmed: false,
         completed: true,
+        retiredClosedCount: 0,
       };
     }
 
@@ -156,6 +160,7 @@ export async function resolveUnknownNotification(
 
     let rearmed = false;
     let completed = false;
+    let retiredEventClosedLogs: RetiredEventClosedLog[] = [];
     let jobAfter: {
       id: string;
       status: BackgroundJobStatus;
@@ -178,7 +183,32 @@ export async function resolveUnknownNotification(
         select: { id: true, deliveryStateVersion: true },
       });
 
-      if (retrying.length > 0) {
+      if (retrying.length > 0 && !isNotificationEvent(log.eventType)) {
+        // The event left the registry: a re-armed job would only be rejected
+        // by handleNotificationJob and leave these rows RETRYING for good
+        // (the owner flow only accepts UNKNOWN). Close them with the owner's
+        // closing decision instead and keep the DEAD job as history.
+        retiredEventClosedLogs = await closeRetiredEventRetryingLogs(
+          tx,
+          log.deliveryKey,
+          retrying,
+          resolution,
+          normalizedReason,
+          at,
+        );
+        const closed = await tx.backgroundJob.updateMany({
+          where: backgroundJobResolutionCas(job),
+          data: {
+            // Still DEAD, but no longer waiting for an owner decision, so the
+            // ops page stops pointing at the notification log.
+            lastErrorCode: NOTIFICATION_REPLAY_TERMINAL_ERROR_CODE,
+            result: manuallyResolvedResult(job.result),
+          },
+        });
+        if (closed.count !== 1) {
+          throw new UnknownNotificationResolutionError('CONFLICT');
+        }
+      } else if (retrying.length > 0) {
         const nextMaxAttempts = Math.max(job.maxAttempts, job.attempts + 3);
         const rearmedJob = await tx.backgroundJob.updateMany({
           where: backgroundJobResolutionCas(job),
@@ -248,12 +278,14 @@ export async function resolveUnknownNotification(
         maxAttempts: job.maxAttempts,
       },
       jobAfter,
+      ...(retiredEventClosedLogs.length > 0 ? { retiredEventClosedLogs } : {}),
     });
     return {
       backgroundJobId: job.id,
       pendingUnknownCount,
       rearmed,
       completed,
+      retiredClosedCount: retiredEventClosedLogs.length,
     };
   });
 }
@@ -343,6 +375,61 @@ async function updateUnknownLogWithCas(
   }
 }
 
+type RetiredEventClosedLog = {
+  id: string;
+  stateVersionBefore: number;
+  status: NotificationStatusType;
+  errorMessage: string;
+};
+
+// Rows the owner already confirmed as not delivered can no longer be resent
+// once their event is retired. They end FAILED: an IGNORED decision carries its
+// reason over, a DELIVERED decision on the last UNKNOWN row says nothing about
+// these siblings, so they are recorded as not delivered and not resent.
+async function closeRetiredEventRetryingLogs(
+  tx: Prisma.TransactionClient,
+  deliveryKey: string,
+  retrying: Array<{ id: string; deliveryStateVersion: number }>,
+  resolution: UnknownNotificationResolution,
+  reason: string | null,
+  at: Date,
+): Promise<RetiredEventClosedLog[]> {
+  const errorMessage =
+    resolution === 'IGNORED'
+      ? resolutionLogOutcome(resolution, reason).errorMessage
+      : '人工核对：未送达；事件已停用，不再重发';
+  const closed: RetiredEventClosedLog[] = [];
+  for (const row of retrying) {
+    const updated = await tx.notificationLog.updateMany({
+      where: {
+        id: row.id,
+        deliveryKey,
+        status: NotificationStatus.RETRYING,
+        deliveryStateVersion: row.deliveryStateVersion,
+      },
+      data: {
+        status: NotificationStatus.FAILED,
+        errorMessage,
+        sentAt: null,
+        deliveryAttemptId: null,
+        deliveryJobAttempt: null,
+        deliveryStateVersion: { increment: 1 },
+        updatedAt: at,
+      },
+    });
+    if (updated.count !== 1) {
+      throw new UnknownNotificationResolutionError('CONFLICT');
+    }
+    closed.push({
+      id: row.id,
+      stateVersionBefore: row.deliveryStateVersion,
+      status: NotificationStatus.FAILED,
+      errorMessage,
+    });
+  }
+  return closed;
+}
+
 function backgroundJobResolutionCas(job: ResolutionJob) {
   return {
     id: job.id,
@@ -389,6 +476,7 @@ async function writeResolutionAudit(
     pendingUnknownCount: number;
     jobBefore: unknown;
     jobAfter: unknown;
+    retiredEventClosedLogs?: RetiredEventClosedLog[];
   },
 ): Promise<void> {
   const outcome = resolutionLogOutcome(input.resolution, input.reason);
@@ -416,6 +504,9 @@ async function writeResolutionAudit(
       resolvedAt: input.resolvedAt,
       pendingUnknownCount: input.pendingUnknownCount,
       backgroundJob: input.jobAfter,
+      ...(input.retiredEventClosedLogs
+        ? { retiredEventClosedLogs: input.retiredEventClosedLogs }
+        : {}),
     },
     requestMetadata: {
       source: 'owner-notifications.resolveUnknownNotification',

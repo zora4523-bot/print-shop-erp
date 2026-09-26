@@ -101,6 +101,7 @@ describe('resolveUnknownNotification', () => {
       pendingUnknownCount: 0,
       rearmed: false,
       completed: true,
+      retiredClosedCount: 0,
     });
 
     expect(txMock.notificationLog.updateMany).toHaveBeenCalledWith({
@@ -147,6 +148,7 @@ describe('resolveUnknownNotification', () => {
       pendingUnknownCount: 0,
       rearmed: false,
       completed: true,
+      retiredClosedCount: 0,
     });
 
     expect(txMock.notificationLog.updateMany).toHaveBeenCalledWith({
@@ -204,6 +206,7 @@ describe('resolveUnknownNotification', () => {
       pendingUnknownCount: 0,
       rearmed: false,
       completed: true,
+      retiredClosedCount: 0,
     });
 
     expect(txMock.backgroundJob.updateMany).toHaveBeenCalledWith({
@@ -244,6 +247,7 @@ describe('resolveUnknownNotification', () => {
       pendingUnknownCount: 0,
       rearmed: false,
       completed: true,
+      retiredClosedCount: 0,
     });
 
     expect(txMock.notificationLog.updateMany).toHaveBeenCalledWith(
@@ -322,6 +326,100 @@ describe('resolveUnknownNotification', () => {
         resolveUnknownNotification('log-1', 'DELIVERED', actor, 7),
       ).resolves.toMatchObject({ completed: true });
     });
+
+    // Pre-upgrade state: one sibling was already confirmed not delivered
+    // (RETRYING, job still DEAD); the owner now closes the last UNKNOWN row.
+    describe.each([
+      {
+        resolution: 'DELIVERED' as const,
+        reason: undefined,
+        siblingMessage: '人工核对：未送达；事件已停用，不再重发',
+      },
+      {
+        resolution: 'IGNORED' as const,
+        reason: '客服已删除',
+        siblingMessage: '人工忽略：客服已删除',
+      },
+    ])('RETRYING + UNKNOWN mix closed with $resolution', ({ resolution, reason, siblingMessage }) => {
+      const retrying = [
+        { id: 'log-r1', deliveryStateVersion: 3 },
+        { id: 'log-r2', deliveryStateVersion: 9 },
+      ];
+
+      beforeEach(() => {
+        txMock.notificationLog.findUnique.mockResolvedValue(retiredLog);
+        lockDurableJob(retiredJob);
+        txMock.notificationLog.findMany.mockResolvedValue(retrying);
+      });
+
+      it('never re-arms the job, closes the RETRYING siblings and keeps the DEAD job as history', async () => {
+        await expect(
+          resolveUnknownNotification('log-1', resolution, actor, 7, reason),
+        ).resolves.toEqual({
+          backgroundJobId: 'job-1',
+          pendingUnknownCount: 0,
+          rearmed: false,
+          completed: false,
+          retiredClosedCount: 2,
+        });
+
+        for (const row of retrying) {
+          expect(txMock.notificationLog.updateMany).toHaveBeenCalledWith({
+            where: {
+              id: row.id,
+              deliveryKey: retiredLog.deliveryKey,
+              status: 'RETRYING',
+              deliveryStateVersion: row.deliveryStateVersion,
+            },
+            data: expect.objectContaining({
+              status: 'FAILED',
+              errorMessage: siblingMessage,
+              sentAt: null,
+              deliveryAttemptId: null,
+              deliveryJobAttempt: null,
+              deliveryStateVersion: { increment: 1 },
+            }),
+          });
+        }
+        // The job stays DEAD but no longer asks for owner resolution.
+        expect(txMock.backgroundJob.updateMany).toHaveBeenCalledTimes(1);
+        const jobUpdate = txMock.backgroundJob.updateMany.mock.calls[0]![0];
+        expect(jobUpdate.where).toMatchObject({
+          id: 'job-1',
+          status: BackgroundJobStatus.DEAD,
+          lastErrorCode: 'NotificationDeliveryUnknownError',
+        });
+        expect(jobUpdate.data).not.toHaveProperty('status');
+        expect(jobUpdate.data).not.toHaveProperty('payload');
+        expect(jobUpdate.data).toMatchObject({
+          lastErrorCode: 'NotificationReplayTerminalError',
+          result: expect.objectContaining({ unknown: 0, manuallyResolved: true }),
+        });
+        expect(txMock.businessAuditLog.create).toHaveBeenCalledTimes(1);
+        expect(txMock.businessAuditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+          data: expect.objectContaining({
+            entityId: 'log-1',
+            after: expect.objectContaining({
+              backgroundJob: expect.objectContaining({ status: BackgroundJobStatus.DEAD }),
+              retiredEventClosedLogs: [
+                { id: 'log-r1', stateVersionBefore: 3, status: 'FAILED', errorMessage: siblingMessage },
+                { id: 'log-r2', stateVersionBefore: 9, status: 'FAILED', errorMessage: siblingMessage },
+              ],
+            }),
+          }),
+        }));
+      });
+
+      it('rolls back as a conflict when a sibling moved concurrently', async () => {
+        txMock.notificationLog.updateMany
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValueOnce({ count: 0 });
+        await expect(
+          resolveUnknownNotification('log-1', resolution, actor, 7, reason),
+        ).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(txMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+      });
+    });
   });
 
   it('waits for every channel decision, then re-arms once with only original ledger targets', async () => {
@@ -360,6 +458,7 @@ describe('resolveUnknownNotification', () => {
       pendingUnknownCount: 1,
       rearmed: false,
       completed: false,
+      retiredClosedCount: 0,
     });
     expect(txMock.notificationLog.updateMany.mock.calls[0]![0]).toEqual(
       expect.objectContaining({
@@ -379,6 +478,7 @@ describe('resolveUnknownNotification', () => {
       pendingUnknownCount: 0,
       rearmed: true,
       completed: false,
+      retiredClosedCount: 0,
     });
 
     expect(txMock.backgroundJob.updateMany).toHaveBeenCalledTimes(1);

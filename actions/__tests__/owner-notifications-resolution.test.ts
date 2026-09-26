@@ -77,6 +77,7 @@ beforeEach(() => {
     pendingUnknownCount: 0,
     rearmed: false,
     completed: true,
+    retiredClosedCount: 0,
   });
   revalidatePathMock.mockReset();
 });
@@ -214,5 +215,26 @@ describe('UNKNOWN notification resolution actions', () => {
     const result = await retryUnknownNotificationAction(null, form());
     expect(result.status).toBe('error');
     expect(result.status === 'error' ? result.message : '').toContain('已停用');
+  });
+
+  it('reports retired-event siblings that were closed instead of re-queued', async () => {
+    resolveMock.mockResolvedValue({
+      backgroundJobId: 'job-1',
+      pendingUnknownCount: 0,
+      rearmed: false,
+      completed: false,
+      retiredClosedCount: 2,
+    });
+
+    const delivered = await confirmUnknownNotificationDeliveredAction(null, form());
+    expect(delivered).toEqual({
+      status: 'success',
+      message: '已记录该群已送达；其余 2 条已确认未送达的消息因事件已停用不再重发，已关闭',
+    });
+    const ignored = await ignoreUnknownNotificationAction(null, form('log-1', '7', '客服已删除'));
+    expect(ignored).toEqual({
+      status: 'success',
+      message: '已忽略该条；其余 2 条已确认未送达的消息因事件已停用不再重发，已关闭',
+    });
   });
 });
