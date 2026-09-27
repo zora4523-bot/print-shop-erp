@@ -41,10 +41,11 @@
 - CDR 旧链接失效只影响已发出的 READY 包，正式库 CDR 包为 0，无需重新生成。
 - Sentry 仍未配置。
 
-## 未清理的历史遗留（非本次产生，未处理）
+## 历史遗留清理（业主同日要求）
 
-- 数据库机：旧演练库 `erp_release_rehearsal_20260916`、`erp_release_rehearsal_20260917`、`erp_cleanup_rehearsal_20260917`，以及 `pg_hba.conf` 中 09-16 的临时演练规则。
-- 应用机 `/var/www/`：`print-shop-erp-before-20260917/19/21/27`、`print-shop-erp-release-{093aa3c2,52a3dc3e,f5dcd074}`、`print-shop-erp-loadtest`（磁盘剩余约 18 GB）。
+- 数据库机：删除旧演练库 `erp_release_rehearsal_20260916`、`erp_release_rehearsal_20260917`、`erp_cleanup_rehearsal_20260917`（各约 22 MB，无连接）；从 `pg_hba.conf` 删除 09-16 的临时演练规则两行（注释与规则），reload 后 HBA 错误为 0、不再有演练规则。删除前的 HBA 留存 `/var/backups/erp-20260927/pg_hba.before-legacy-cleanup`。剩余数据库只有 `meta`、`postgres`、`print_shop_erp`。
+- 应用机：删除 `/var/www/print-shop-erp-before-20260917`、`-before-20260919`、`-before-20260921`、`print-shop-erp-release-{093aa3c2,52a3dc3e,f5dcd074}`、`print-shop-erp-loadtest`（删除前确认没有 PM2 进程、nginx / systemd / cron、打开的文件或符号链接引用它们）；本次切换留下的 `print-shop-erp-before-20260927` 作为本次发布证据保留。磁盘剩余由约 18 GB 升到约 22 GB，线上 ready 正常。
+- 未动：`/root/erp-release-2026091x/2021/2027` 与数据库机 `/var/backups/erp-*` 的发布证据和逻辑备份。
 
 ## 证据位置
 
