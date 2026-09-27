@@ -17,11 +17,13 @@ export function creationPayloadHash(facts: Prisma.InputJsonObject) {
 async function lockRequest(tx: Prisma.TransactionClient, kind: FormKind, request: CreationRequest) {
   const parsed = creationIdentitySchema.safeParse({ draftId: request.draftId, clientRequestId: request.clientRequestId });
   if (!parsed.success) throw new FormCreationError('本次录入信息不完整，请保留内容并重新打开新建页面');
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${creationLockKey(kind, request)}, 0))`;
+  // Waiting for an earlier request may outlive an account/permission change.
+  // Authorize creation and receipt lookup from the state after that wait.
   const actor = await tx.user.findUnique({ where: { id: request.actorId }, select: {
     id: true, role: true, isActive: true, username: true, displayName: true,
   } });
   if (!actor?.isActive || !hasPermission(kind === 'purchase-new' ? 'purchase:manage' : 'bom:manage', actor.role)) throw new FormCreationError('当前账号不能创建该单据，请重新登录有权限的账号');
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${creationLockKey(kind, request)}, 0))`;
   return actor;
 }
 

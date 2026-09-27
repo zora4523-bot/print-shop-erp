@@ -102,4 +102,40 @@ postgres.sequential('form creation · real domain transactions on isolated Postg
     await db.user.update({ where: { id: otherId }, data: { isActive: true, role: 'SALES' } });
     await expect(createPurchaseOrder(purchase(), undefined, { ...identity(), actorId: otherId })).rejects.toThrow('当前账号不能');
   });
+
+  it.each(['create', 'status'] as const)('rechecks revoked permission after a queued %s acquires its request lock', async (operation) => {
+    const queuedActorId = `${prefix}_${operation}`;
+    await db.user.create({ data: { id: queuedActorId, username: queuedActorId, displayName: '等待期间停用', password: 'not-a-login-hash', role: 'ADMIN' } });
+    const request = { ...identity(), actorId: queuedActorId };
+    if (operation === 'status') await createPurchaseOrder(purchase(), undefined, request);
+    const blocker = new Client({ connectionString: url });
+    await blocker.connect();
+    let result: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [creationLockKey('purchase-new', request)]);
+      result = Promise.allSettled([operation === 'create'
+        ? createPurchaseOrder(purchase(), undefined, request)
+        : getCreationRequest('purchase-new', request)]);
+      await vi.waitFor(async () => {
+        const waiting = await blocker.query<{ waiting: boolean }>(`SELECT EXISTS (
+          SELECT 1 FROM pg_locks waiting JOIN pg_locks held
+          USING (locktype, database, classid, objid, objsubid)
+          WHERE held.pid=pg_backend_pid() AND held.granted AND NOT waiting.granted
+        ) AS waiting`);
+        expect(waiting.rows[0]!.waiting).toBe(true);
+      }, { timeout: 3000 });
+      await db.user.update({ where: { id: queuedActorId }, data: operation === 'create' ? { isActive: false } : { role: 'SALES' } });
+      await blocker.query('COMMIT');
+      const [settled] = await result;
+      expect(settled?.status).toBe('rejected');
+      if (settled?.status === 'rejected') expect(settled.reason.message).toContain('当前账号不能');
+      expect(await db.formCreationRequest.count({ where: { actorId: queuedActorId } })).toBe(operation === 'status' ? 1 : 0);
+      expect(await db.businessAuditLog.count({ where: { actorId: queuedActorId, action: 'FORM_CREATED' } })).toBe(operation === 'status' ? 1 : 0);
+    } finally {
+      await blocker.query('ROLLBACK');
+      if (result) await result;
+      await blocker.end();
+    }
+  });
 });

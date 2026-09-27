@@ -238,8 +238,8 @@ test('创建已提交但响应丢失，恢复只指向原单据；修改过的�
   await expect(page.locator('input[name="clientRequestId"]')).not.toHaveValue(requestId);
 });
 
-test('无 JS 原生提交带请求标识，补资料默认新标签页', async ({ browser }) => {
-  const context = await browser.newContext({ javaScriptEnabled: false, baseURL: 'http://127.0.0.1:3100' });
+test('无 JS 原生提交带请求标识，补资料默认新标签页', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false, baseURL });
   const page = await context.newPage();
   try {
     const fixture = await seedPurchasePrerequisites();
