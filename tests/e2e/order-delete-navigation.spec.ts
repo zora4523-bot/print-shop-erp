@@ -1,6 +1,34 @@
 import { test, expect } from '@playwright/test';
 import { login, E2E_PASSWORD, E2E_USERS } from './_helpers';
 
+for (const role of ['owner', 'sales'] as const) {
+  test(`${role}: 设计款操作区整款删除，移除规格不跳到其他款`, async ({ page }) => {
+    await login(page, { username: E2E_USERS[role].username, password: E2E_PASSWORD, from: '/orders/new' });
+    const designName = page.getByRole('textbox', { name: '设计款名称', exact: true });
+    await designName.fill('保留同款 A');
+    await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+    await designName.fill('独立款 B');
+    await page.getByRole('tab', { name: '设计款 1', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+    const specifications = page.getByRole('tablist', { name: '规格明细', exact: true });
+    await specifications.getByRole('tab').first().click();
+    await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
+    await expect(designName).toHaveValue('保留同款 A');
+    await expect(specifications.getByRole('tab')).toHaveCount(1);
+    await expect(specifications.getByRole('tab')).toBeFocused();
+    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+    const remove = page.getByRole('group', { name: '设计款操作', exact: true })
+      .getByRole('button', { name: '删除设计款', exact: true });
+    await remove.focus();
+    await remove.press('Enter');
+    await expect(designName).toHaveValue('独立款 B');
+    await expect(page.getByRole('tablist', { name: '设计款', exact: true }).getByRole('tab')).toHaveCount(1);
+    await expect(page.getByRole('tab', { name: '设计款 1', exact: true })).toBeFocused();
+    await expect(remove).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '移除当前规格', exact: true })).toHaveCount(0);
+  });
+}
+
 test('建单校验后连续删除设计款，报价更新不抢焦点', async ({ page }) => {
   test.setTimeout(90_000);
   await page.emulateMedia({ reducedMotion: 'reduce' });

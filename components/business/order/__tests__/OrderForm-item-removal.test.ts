@@ -41,6 +41,23 @@ function shipment(
 }
 
 describe('OrderForm item removal invariants', () => {
+  it('removes an interleaved whole design from shipping and mixed packaging in one projection', () => {
+    const result = removeOrderItemRelations({
+      index: [0, 2], remainingItemCount: 2, usesExternalSalesPricing: true,
+      additionalShipments: [shipment([5, 0, 3, 0]), shipment([1, 7, 2, 9])],
+      packagingGroups: [
+        { name: '混装', mode: 'MIXED_STYLE', actualBagCount: 100, itemUnitsPerBag: [1, 2, 3, 0] },
+        { name: '整款移除', mode: 'MIXED_STYLE', actualBagCount: 10, itemUnitsPerBag: [1, 0, 2, 0] },
+        { name: '保留', mode: 'SINGLE_STYLE', actualBagCount: 20, itemUnitsPerBag: [0, 0, 0, 5] },
+      ],
+    });
+    expect(result.additionalShipments.map((entry) => entry.itemQuantities)).toEqual([[7, 9]]);
+    expect(result.packagingGroups).toEqual([
+      { name: '混装', mode: 'SINGLE_STYLE', actualBagCount: 100, itemUnitsPerBag: [2, 0] },
+      { name: '保留', mode: 'SINGLE_STYLE', actualBagCount: 20, itemUnitsPerBag: [0, 5] },
+    ]);
+  });
+
   it('normalizes each remaining packaging group and removes empty shipments', () => {
     const result = removeOrderItemRelations({
       index: 0,

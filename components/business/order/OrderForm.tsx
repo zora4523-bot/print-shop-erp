@@ -13,6 +13,7 @@ import { foilColorLabel } from '@/lib/order/foil-colors';
 import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle, SampleOrderEditorSnapshot } from './order-creation-editor';
 import { orderDesignGroups, designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
+import { planOrderItemRemoval, remapDesignNameRecords } from './order-form-item-removal';
 import {
   DESIGN_NAME_MAX_LENGTH,
   designNameIssueSummary,
@@ -311,7 +312,7 @@ export function removeOrderItemRelations({
   packagingGroups,
   usesExternalSalesPricing,
 }: {
-  index: number;
+  index: number | readonly number[];
   remainingItemCount: number;
   additionalShipments: CreateOrderInput['additionalShipments'];
   packagingGroups: CreateOrderInput['packagingGroups'];
@@ -320,11 +321,12 @@ export function removeOrderItemRelations({
   additionalShipments: CreateOrderInput['additionalShipments'];
   packagingGroups: CreateOrderInput['packagingGroups'];
 } {
+  const removed = new Set(typeof index === 'number' ? [index] : index);
   const nextShipments = additionalShipments
     .map((shipment) => ({
       ...shipment,
       itemQuantities: shipment.itemQuantities.filter(
-        (_, itemIndex) => itemIndex !== index,
+        (_, itemIndex) => !removed.has(itemIndex),
       ),
     }))
     .filter((shipment) =>
@@ -332,7 +334,7 @@ export function removeOrderItemRelations({
     );
   const nextGroups = packagingGroups.flatMap((group) => {
     const itemUnitsPerBag = group.itemUnitsPerBag.filter(
-      (_, itemIndex) => itemIndex !== index,
+      (_, itemIndex) => !removed.has(itemIndex),
     );
     if (!usesExternalSalesPricing) {
       return [{ ...group, itemUnitsPerBag }];
@@ -1414,14 +1416,17 @@ export function OrderForm({
     setPendingSubmission(null);
   }
 
-  function removeItem(index: number, fieldId: string) {
+  function removeItems(indexes: readonly number[]) {
     const currentItems = getValues('items');
-    if (currentItems.length <= 1) return;
-    const remainingItems = currentItems.filter(
-      (_, itemIndex) => itemIndex !== index,
-    );
+    const plan = planOrderItemRemoval(currentItems, indexes, expandedItem);
+    if (!plan) return;
+    const remainingItems = plan.keptIndexes.map((index) => currentItems[index]);
+    const remainingFiles = Object.fromEntries(plan.keptIndexes.map((index) => {
+      const id = itemsArray.fields[index].id;
+      return [id, selectedDesignQueues[id] ?? []];
+    }));
     const relations = removeOrderItemRelations({
-      index,
+      index: plan.removedIndexes,
       remainingItemCount: remainingItems.length,
       additionalShipments: getValues('additionalShipments'),
       packagingGroups: getValues('packagingGroups'),
@@ -1439,26 +1444,17 @@ export function OrderForm({
       relations.packagingGroups,
       { shouldDirty: true, shouldValidate: true },
     );
-    itemsArray.remove(index);
+    handNamedDesignsRef.current = remapDesignNameRecords(currentItems, plan.keptIndexes, handNamedDesignsRef.current);
+    itemsArray.remove(plan.removedIndexes);
     // 回到单个设计款时，未手动命名的设计款重新跟随工单名称。
     const following = syncSingleDesignName(getValues('customName'), getValues('customName'));
     const persistedItems = following
       ? remainingItems.map((item, itemIndex) =>
           following.indexes.includes(itemIndex) ? { ...item, name: following.name } : item)
       : remainingItems;
-    setExpandedItem((current) => {
-      if (current > index) return current - 1;
-      if (current === index) {
-        return Math.max(0, Math.min(index, itemsArray.fields.length - 2));
-      }
-      return current;
-    });
+    setExpandedItem(plan.activeIndex);
     // Preserve the selected design files when removing its first specification.
-    setPendingDesigns(() => {
-      const next = { ...selectedDesignQueues };
-      delete next[fieldId];
-      return next;
-    });
+    setPendingDesigns(remainingFiles);
     invalidateStructuralQuotes();
     persistLocalDraftValues({
       ...getValues(),
@@ -3169,9 +3165,9 @@ export function OrderForm({
               setExpandedItem(nextIndex);
             }}
             onRemove={(index) => {
-              const field = itemsArray.fields[index];
-              if (field) removeItem(index, field.id);
+              if (designItemIndexes(getValues('items'), index).length > 1) removeItems([index]);
             }}
+            onRemoveDesign={(index) => removeItems(designItemIndexes(getValues('items'), index))}
             onCustomNameChange={(value) => {
               syncSingleDesignName(value, getValues('customName'));
               setValue('customName', value, {
