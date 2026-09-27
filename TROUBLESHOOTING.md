@@ -8,6 +8,11 @@ applies_to: local development and repository validation
 
 # 故障排查
 
+## 库存重放测试的开发调试通道（2026-09-27）
+
+Next 16.3.4 为每次浏览器 Server Action 建立独立调试请求标识。测试把同一请求重复投递并丢弃第二个响应时，第二个响应不应复用 `x-nextjs-request-id` / `x-nextjs-html-request-id`，否则开发调试流可能重复结束并触发 `Cannot write to closing writable stream`。`tests/e2e/_action-replay.ts` 仅移除被丢弃响应的两项调试标识；保留 action、cookie、请求体和业务请求键，继续真实并发与单笔流水断言。不能吞掉 pageerror 或改业务去重逻辑掩盖传输问题。
+
+
 ## 采购/BOM 补资料后返回与重复提交（2026-09-27）
 
 - 看到“继续上次录入”时，确认当前账号后续填；同一账号重新登录也需确认。不同标签页不会自动共享后续输入，复制标签页提示冲突时返回原页或明确另建。

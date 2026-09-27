@@ -7,6 +7,11 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 2026-09-27 仓库维护
+
+`maintainWarehouseAction` 接收 kind（warehouse/location）、id、operation（rename/disable/restore）、expectedUpdatedAt 及改名时的 name。入口与领域均要求当前启用的 warehouse:manage 账号；编码、所属仓库和默认标记不可变。相同结果的重试不重复审计；其他旧版本提交拒绝并提示刷新。库存逐条非零时拒绝停用，默认对象不能停用，恢复父仓不改变子库位各自状态。
+
+
 ## 2026-09-27 采购/BOM 录入恢复
 
 `createPurchaseOrderAction`、`createBomAction` 新表单提交 `draftId` 与 `clientRequestId`（UUID，必须成对）。服务端从当前会话取得 actor，按 actor / 表单类型 / 请求键串行核对；同键同规范化事实返回原实体并显示“该录入此前已创建”，同键异内容拒绝。旧表单两键均缺失时保留兼容，但不提供自动恢复去重承诺。BOM 行数明确限制为 1～20。

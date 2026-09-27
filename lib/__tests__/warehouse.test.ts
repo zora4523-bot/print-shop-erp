@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
+    $transaction: vi.fn(), $executeRaw: vi.fn(), user: { findUnique: vi.fn() },
     businessCodeSequence: {
       upsert: vi.fn(),
     },
@@ -27,6 +28,9 @@ import {
 } from '../warehouse';
 
 beforeEach(() => {
+  dbMock.$transaction.mockImplementation((fn) => fn(dbMock));
+  dbMock.$executeRaw.mockResolvedValue(1);
+  dbMock.user.findUnique.mockResolvedValue({ id: 'admin', role: 'ADMIN', isActive: true });
   dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.warehouse)) fn.mockReset();
   for (const fn of Object.values(dbMock.warehouseLocation)) fn.mockReset();
@@ -83,7 +87,7 @@ describe('createWarehouse', () => {
     dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 3 });
     dbMock.warehouse.create.mockResolvedValue({ id: 'wh1' });
 
-    await createWarehouse({ code: null, name: '三号仓' });
+    await createWarehouse({ code: null, name: '三号仓' }, 'admin');
 
     expect(dbMock.warehouse.create.mock.calls[0][0].data.code).toBe('WH-000003');
   });
@@ -91,7 +95,7 @@ describe('createWarehouse', () => {
   it('creates non-default active warehouses', async () => {
     dbMock.warehouse.create.mockResolvedValue({ id: 'wh1' });
 
-    await createWarehouse({ code: 'WH1', name: '一号仓' });
+    await createWarehouse({ code: 'WH1', name: '一号仓' }, 'admin');
 
     expect(dbMock.warehouse.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -116,7 +120,7 @@ describe('createWarehouseLocation', () => {
       warehouseId: 'wh1',
       code: null,
       name: '九号库位',
-    });
+    }, 'admin');
 
     expect(dbMock.warehouseLocation.create.mock.calls[0][0].data.code).toBe(
       'LOC-000009',
@@ -131,7 +135,7 @@ describe('createWarehouseLocation', () => {
         warehouseId: 'wh1',
         code: 'A01',
         name: 'A01',
-      }),
+      }, 'admin'),
     ).rejects.toBeInstanceOf(WarehouseInvariantError);
     expect(dbMock.warehouseLocation.create).not.toHaveBeenCalled();
   });
@@ -144,7 +148,7 @@ describe('createWarehouseLocation', () => {
       warehouseId: 'wh1',
       code: 'A01',
       name: 'A01',
-    });
+    }, 'admin');
 
     expect(dbMock.warehouseLocation.create).toHaveBeenCalledWith(
       expect.objectContaining({

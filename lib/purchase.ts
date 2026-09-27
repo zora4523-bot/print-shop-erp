@@ -1,3 +1,4 @@
+import { acquireWarehouseStockLock } from '@/lib/warehouse-coordination';
 import { createWithRequest, type CreationRequest } from '@/lib/form-drafts/creation-request';
 import { purchaseCreationFacts } from '@/lib/form-drafts/creation-facts';
 import Decimal from 'decimal.js';
@@ -498,6 +499,7 @@ export async function createPurchaseReceipt(
   const receiptNo = await reservePurchaseDocumentNumber('PURCHASE_RECEIPT', now);
 
   await db.$transaction(async (tx) => {
+    await acquireWarehouseStockLock(tx);
     // The request-key lock must precede the purchase-order row lock. Two
     // concurrent requests can reuse one key across different purchase orders;
     // serializing by the key makes the loser compare facts and fail with a
@@ -641,6 +643,7 @@ export async function cancelPurchaseReceipt(
   let notificationsQueued = false;
 
   await db.$transaction(async (tx) => {
+    await acquireWarehouseStockLock(tx);
     const receiptPointer = await tx.purchaseReceipt.findUnique({
       where: { id: receiptId },
       select: { id: true, purchaseOrderId: true },

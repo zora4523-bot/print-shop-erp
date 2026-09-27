@@ -62,16 +62,19 @@ export function PurchaseReceiptForm({
   locationOptions,
   initialIdempotencyKey,
 }: Props) {
+  const allowReset = useRef(false);
   const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const confirmedRef = useRef(false);
+  const [locationId, setLocationId] = useState('');
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [preview, setPreview] = useState<PurchaseReceiptPreview | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const submitReceipt = useCallback(
     async (prev: PurchaseMutationResult | null, formData: FormData) => {
       const result = await action(prev, formData);
+      allowReset.current = result.status === 'success';
       if (result.status === 'success') {
         setIdempotencyKey(window.crypto.randomUUID());
       }
@@ -135,6 +138,7 @@ export function PurchaseReceiptForm({
       id={formId}
       ref={formRef}
       action={formAction}
+      onReset={(event) => { if (!allowReset.current) event.preventDefault(); }}
       onSubmit={handleSubmit}
       onInvalidCapture={() => {
         // 原生校验若阻止确认后的 submit，不允许令牌泄漏到下一次提交。
@@ -152,10 +156,12 @@ export function PurchaseReceiptForm({
           id={`location-${purchaseOrderItemId}`}
           name="locationId"
           className={selectClass}
-          defaultValue=""
+          value={locationId}
+          onChange={(event) => setLocationId(event.target.value)}
           disabled={pending}
         >
           <option value="">默认库位</option>
+          {locationId && !locationOptions.some((option) => option.id === locationId) ? <option value={locationId}>原库位已停用，请重新选择</option> : null}
           {locationOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.warehouseName} / {option.name}

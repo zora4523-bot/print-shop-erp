@@ -1,3 +1,4 @@
+import { acquireWarehouseStockLock } from '@/lib/warehouse-coordination';
 import 'dotenv/config';
 
 import { Client } from 'pg';
@@ -145,6 +146,7 @@ postgresDescribe.sequential('material price-snapshot lock · PostgreSQL', () => 
       const movement = db
         .$transaction(
           async (tx) => {
+            await acquireWarehouseStockLock(tx);
             await tx.$executeRaw`SET LOCAL lock_timeout = '3s'`;
             await applyMaterialStockMovement(tx, {
               materialId: paper.id,

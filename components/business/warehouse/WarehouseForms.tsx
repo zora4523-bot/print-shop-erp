@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import {
   createWarehouseAction,
   createWarehouseLocationAction,
@@ -58,6 +58,7 @@ function WarehouseCreateForm() {
     <form
       id="warehouse-create-form"
       action={formAction}
+      onReset={(event) => event.preventDefault()}
       aria-busy={pending}
       className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
     >
@@ -101,6 +102,7 @@ function WarehouseCreateForm() {
 }
 
 function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] }) {
+  const [warehouseId, setWarehouseId] = useState('');
   const [state, formAction, pending] = useActionState<
     WarehouseMutationResult | null,
     FormData
@@ -119,6 +121,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
     <form
       id="location-create-form"
       action={formAction}
+      onReset={(event) => event.preventDefault()}
       aria-busy={pending}
       className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
     >
@@ -134,9 +137,11 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
             : {})}
           className={selectClass}
           disabled={pending || missingWarehouses}
-          defaultValue=""
+          value={warehouseId}
+          onChange={(event) => setWarehouseId(event.target.value)}
         >
           <option value="">请选择仓库</option>
+          {warehouseId && !warehouses.some((warehouse) => warehouse.id === warehouseId) ? <option value={warehouseId}>原仓库已停用，请重新选择</option> : null}
           {warehouses.map((warehouse) => (
             <option key={warehouse.id} value={warehouse.id}>
               {warehouse.code} · {warehouse.name}

@@ -329,7 +329,9 @@ describe('postInventoryCount', () => {
     );
 
     expect(txMock.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(txMock.$executeRaw).toHaveBeenCalledTimes(3);
+    // One extra transaction-level shared configuration lock, independent of row count.
+    expect(txMock.$executeRaw).toHaveBeenCalledTimes(4);
+    expect(txMock.$executeRaw.mock.calls[0]?.[0].join('')).toContain('pg_advisory_xact_lock_shared');
     expect(txMock.inventoryCountItem.createManyAndReturn).toHaveBeenCalledTimes(1);
     expect(txMock.materialTransaction.createMany).toHaveBeenCalledTimes(1);
     expect(dbMock.materialLocationStock.findMany).not.toHaveBeenCalled();

@@ -57,6 +57,16 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('warehouse maintenance controls pass focused light and dark gates', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [{ name: 'warehouse-maintenance', path: '/owner/warehouses', readyHeading: '仓库作业台', prepareGateState: async (page) => {
+      await page.getByText('仓库与库位设置', { exact: true }).click();
+      await page.getByText('改名', { exact: true }).first().click();
+      await expect(page.getByRole('button', { name: '保存名称', exact: true }).first()).toBeVisible();
+    } }];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
   test('purchase and BOM recovery controls pass focused light and dark gates', async ({ page }, testInfo) => {
     const routes: AdminRoute[] = [
       { name: 'recovery-purchase', path: '/owner/purchases/new', readyHeading: '新建采购单', prepareGateState: async (page) => {

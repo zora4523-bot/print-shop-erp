@@ -1,3 +1,4 @@
+import type { Prisma } from '@/generated/prisma/client';
 import { db } from './db';
 
 export type BusinessCodeKind =
@@ -30,9 +31,11 @@ export class BusinessCodeExhaustedError extends Error {
   }
 }
 
-export async function nextBusinessCode(kind: BusinessCodeKind): Promise<string> {
+type BusinessCodeClient = Pick<Prisma.TransactionClient, 'businessCodeSequence' | '$executeRaw'>;
+
+export async function nextBusinessCode(kind: BusinessCodeKind, client: BusinessCodeClient = db): Promise<string> {
   const spec = CODE_SPECS[kind];
-  const sequence = await db.businessCodeSequence.upsert({
+  const sequence = await client.businessCodeSequence.upsert({
     where: { key: kind },
     create: { key: kind, value: 1 },
     update: { value: { increment: 1 } },
@@ -48,9 +51,10 @@ export async function nextBusinessCode(kind: BusinessCodeKind): Promise<string> 
 export async function resolveBusinessCode(
   kind: BusinessCodeKind,
   requestedCode: string | null | undefined,
+  client: BusinessCodeClient = db,
 ): Promise<string> {
   const customCode = requestedCode?.trim();
-  if (!customCode) return nextBusinessCode(kind);
+  if (!customCode) return nextBusinessCode(kind, client);
 
   const serial = generatedCodeSerial(kind, customCode);
   if (serial !== null) {
@@ -58,7 +62,7 @@ export async function resolveBusinessCode(
     // Advance the counter before the entity insert so future automatic codes
     // never walk backwards into an already occupied value. Gaps are acceptable
     // for human-readable identifiers; duplicate identifiers are not.
-    await db.$executeRaw`
+    await client.$executeRaw`
       INSERT INTO "BusinessCodeSequence" ("key", "value", "updatedAt")
       VALUES (${kind}, ${serial}, NOW())
       ON CONFLICT ("key") DO UPDATE

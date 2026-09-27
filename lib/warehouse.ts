@@ -13,12 +13,8 @@ import type {
   CreateWarehouseLocationInput,
 } from './auth/schemas';
 
-export class WarehouseInvariantError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'WarehouseInvariantError';
-  }
-}
+import { acquireWarehouseConfigurationLock, requireWarehouseActor, WarehouseInvariantError } from '@/lib/warehouse-coordination';
+export { WarehouseInvariantError } from '@/lib/warehouse-coordination';
 
 export type WarehouseLocationSummary = Pick<
   WarehouseLocation,
@@ -261,47 +257,35 @@ export async function getWarehouseDashboard(now: Date = new Date()) {
 
 export async function createWarehouse(
   data: CreateWarehouseInput,
+  actorId: string,
 ): Promise<WarehouseSummary> {
-  const code = await resolveBusinessCode('WAREHOUSE', data.code);
-  return db.warehouse.create({
-    data: {
-      code,
-      name: data.name,
-      isDefault: false,
-      isActive: true,
-    },
-    select: WAREHOUSE_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquireWarehouseConfigurationLock(tx);
+    await requireWarehouseActor(tx, actorId);
+    const code = await resolveBusinessCode('WAREHOUSE', data.code, tx);
+    return tx.warehouse.create({
+      data: { code, name: data.name, isDefault: false, isActive: true },
+      select: WAREHOUSE_SELECT,
+    });
   });
 }
 
 export async function createWarehouseLocation(
   data: CreateWarehouseLocationInput,
+  actorId: string,
 ): Promise<WarehouseLocationSummary> {
-  const warehouse = await db.warehouse.findUnique({
-    where: { id: data.warehouseId },
-    select: { id: true, isActive: true },
-  });
-  if (!warehouse) throw new WarehouseInvariantError('仓库不存在');
-  if (!warehouse.isActive) throw new WarehouseInvariantError('仓库已停用');
-  const code = await resolveBusinessCode('LOCATION', data.code);
-
-  return db.warehouseLocation.create({
-    data: {
-      warehouseId: data.warehouseId,
-      code,
-      name: data.name,
-      isDefault: false,
-      isActive: true,
-    },
-    select: {
-      id: true,
-      warehouseId: true,
-      code: true,
-      name: true,
-      isDefault: true,
-      isActive: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+  return db.$transaction(async (tx) => {
+    await acquireWarehouseConfigurationLock(tx);
+    await requireWarehouseActor(tx, actorId);
+    const warehouse = await tx.warehouse.findUnique({
+      where: { id: data.warehouseId }, select: { id: true, isActive: true },
+    });
+    if (!warehouse) throw new WarehouseInvariantError('仓库不存在');
+    if (!warehouse.isActive) throw new WarehouseInvariantError('仓库已停用');
+    const code = await resolveBusinessCode('LOCATION', data.code, tx);
+    return tx.warehouseLocation.create({
+      data: { warehouseId: data.warehouseId, code, name: data.name, isDefault: false, isActive: true },
+      select: { id: true, warehouseId: true, code: true, name: true, isDefault: true, isActive: true, createdAt: true, updatedAt: true },
+    });
   });
 }

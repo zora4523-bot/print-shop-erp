@@ -7,6 +7,11 @@ applies_to: repository source at last_verified
 
 # 数据库指南
 
+## 2026-09-27 仓库配置与库存并发边界
+
+本批无 schema 或迁移改动。仓库维护、仓库/库位创建使用 `hashtextextended('print-shop-erp:warehouse-configuration',0)` 事务独占锁；手工出入库、采购收货/反向取消、调拨、盘点过账在顶层事务首先取得同键共享锁，再取得既有请求、采购、物料等锁。库位状态在锁内读取，维护逐条查询非零库存；改名/启停采用 updatedAt 比较及严格递增时间，同事务记录前后值审计。默认对象仅由既有迁移初始化，运行时没有默认库位创建函数；不修改历史迁移。
+
+
 ## 2026-09-27 表单创建记录
 
 前向迁移 `20260927170000_form_creation_requests` 新增 `FormCreationKind` 与 `FormCreationRequest`。记录包含操作者、采购/BOM 类型、UUID 请求键与 draftId、SHA-256 业务事实摘要和规范化 JSON、唯一目标实体引用及创建时间。CHECK 要求目标恰好一个并与类型对应，外键 Restrict 保留实体关系，`(actorId, kind, clientRequestId)` 唯一。禁止更新、删除记录，首版不做自动清理，避免丢失重试去重依据。

@@ -100,6 +100,7 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
   const triggerRef = useRef<HTMLButtonElement>(null);
   const confirmedRef = useRef(false);
   const formId = 'stock-transaction-form';
+  const [locationId, setLocationId] = useState('');
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [preview, setPreview] = useState<StockTransactionPreview | null>(null);
   useEffect(() => {
@@ -231,10 +232,12 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
             ? formMessageA11yProps('locationId', 'error')
             : {})}
           className={selectClass}
-          defaultValue=""
+          value={locationId}
+          onChange={(event) => setLocationId(event.target.value)}
           disabled={pending}
         >
           <option value="">默认库位</option>
+          {locationId && !locationOptions.some((option) => option.id === locationId) ? <option value={locationId}>原库位已停用，请重新选择</option> : null}
           {locationOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.warehouseName} / {option.name}
