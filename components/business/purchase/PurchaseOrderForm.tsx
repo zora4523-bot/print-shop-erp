@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useRef } from 'react';
+import { useActionState, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { emptyPurchaseDraft, type FormDraftContext } from '@/lib/form-drafts/model';
 import { useFormDraft } from '@/components/business/form-drafts/useFormDraft';
 import { DraftIdentityFields, DraftNotice, SupplementLink } from '@/components/business/form-drafts/FormDraftControls';
@@ -42,21 +42,26 @@ export function PurchaseOrderForm({
   initialSupplierPartyId = '',
   draftContext,
 }: Props) {
-  const [state, formAction, pending] = useActionState<
-    PurchaseMutationResult | null,
-    FormData
-  >(action, null);
 
+  const [state, formAction, pending] = useActionState<PurchaseMutationResult | null, FormData>(action, null);
   const formRef = useRef<HTMLFormElement>(null);
   const draft = useFormDraft(draftContext, emptyPurchaseDraft(initialSupplierPartyId), formRef);
+  const [feedback, setFeedback] = useState({ result: state, requestId: draft.identity.clientRequestId });
+  if (feedback.result !== state) setFeedback({ result: state, requestId: draft.identity.clientRequestId });
+  const currentState = feedback.requestId === draft.identity.clientRequestId ? state : null;
+  // Keep the original Server Action bound for native submissions without JS.
+  const recheckCreation = useEffectEvent(() => draft.retry());
+  useEffect(() => {
+    if (state?.status === 'error' && state.creationConflict) void recheckCreation();
+  }, [state]);
   const { payload } = draft;
   // Background status verification must not disable a focused native input
   // between keydown and input, which can silently discard the first keystroke.
   const disabled = pending || draft.editingBlocked;
   const change = (key: keyof typeof payload, value: string) => draft.update((current) => ({ ...current, [key]: value }));
 
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const generalError = state?.status === 'error' ? state.message : null;
+  const errs = currentState?.status === 'invalid' ? currentState.fieldErrors : {};
+  const generalError = currentState?.status === 'error' ? currentState.message : null;
   const missingSuppliers = suppliers.length === 0;
   const missingMaterials = materials.length === 0;
   const prerequisitesMissing = missingSuppliers || missingMaterials;
@@ -64,7 +69,7 @@ export function PurchaseOrderForm({
   return (
     <form ref={formRef} action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <DraftIdentityFields identity={draft.identity} />
-      <DraftNotice draft={draft} />
+      <DraftNotice draft={draft} disabled={pending} />
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">

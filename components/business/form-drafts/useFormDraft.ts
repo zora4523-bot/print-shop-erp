@@ -107,7 +107,10 @@ export function useFormDraft<T extends FormDraftPayload>(initialContext: FormDra
       }
       return result;
     } catch {
-      if (mounted.current) setMessage('暂时无法确认是否已经创建，请保留内容并重新核对；不要重复新建。');
+      if (mounted.current) {
+        setStatus(null);
+        setMessage('暂时无法确认是否已经创建，请保留内容并重新核对；不要重复新建。');
+      }
       return null;
     } finally { if (mounted.current) setChecking(false); }
   }
@@ -210,7 +213,7 @@ export function useFormDraft<T extends FormDraftPayload>(initialContext: FormDra
     // Explicit continuation retains the old request key even across logins.
     if (!status || status.status === 'not-created') write(candidate.payload as T, context);
     consumeReturn(context);
-    setMessage(conflict ? '另一标签页也在使用这份录入；继续保存会核对同一张单据。' : '已恢复上次录入，请核对可选资料。');
+    setMessage(conflict ? '另一标签页也在使用这份录入；继续保存会核对同一张单据。' : '已恢复上次录入，请核对可选资料；刚创建的资料请手动选择。');
   }
 
   function startAnother(keepContent: boolean) {
@@ -245,7 +248,10 @@ export function useFormDraft<T extends FormDraftPayload>(initialContext: FormDra
     blocked: checking || completed || Boolean(candidate) || status?.status === 'created',
     editingBlocked: completed || Boolean(candidate) || status?.status === 'created',
     resume, startAnother, supplement,
-    retry: () => { if (candidate) void check(candidate); },
+    retry: async () => {
+      const result = await check(candidate ?? { ...current.current.identity, payload: current.current.payload, supplement: null, schemaVersion: 1, savedAt: Date.now() } as StoredDraft);
+      if (result) setMessage(result.status === 'not-created' ? '尚未创建单据，可以继续录入。' : '');
+    },
     refresh: () => router.refresh(),
   };
 }

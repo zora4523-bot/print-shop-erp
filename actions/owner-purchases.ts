@@ -70,7 +70,7 @@ export async function createPurchaseOrderAction(
     createdId = created.id;
     replayed = created.creationReplayed === true;
   } catch (err) {
-    if (err instanceof FormCreationError) return { status: 'error', message: err.message };
+    if (err instanceof FormCreationError) return { status: 'error', message: err.message, ...(err.creationConflict ? { creationConflict: true } : {}) };
     const invariant = mapInvariantError(err, PurchaseInvariantError);
     if (invariant) return invariant;
     throw err;

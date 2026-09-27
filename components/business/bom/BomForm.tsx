@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useRef } from 'react';
+import { useActionState, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { emptyBomDraft, type FormDraftContext, type BomDraft } from '@/lib/form-drafts/model';
 import { useFormDraft } from '@/components/business/form-drafts/useFormDraft';
 import { DraftIdentityFields, DraftNotice, SupplementLink } from '@/components/business/form-drafts/FormDraftControls';
@@ -50,19 +50,24 @@ const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function BomForm({ action, products, categories, materials, papers, draftContext, initialRowId }: Props) {
-  const [state, formAction, pending] = useActionState<
-    BomMutationResult | null,
-    FormData
-  >(action, null);
+  const [state, formAction, pending] = useActionState<BomMutationResult | null, FormData>(action, null);
   const formRef = useRef<HTMLFormElement>(null);
   const draft = useFormDraft(draftContext, emptyBomDraft(initialRowId), formRef);
+  const [feedback, setFeedback] = useState({ result: state, requestId: draft.identity.clientRequestId });
+  if (feedback.result !== state) setFeedback({ result: state, requestId: draft.identity.clientRequestId });
+  const currentState = feedback.requestId === draft.identity.clientRequestId ? state : null;
+  // Keep the original Server Action bound for native submissions without JS.
+  const recheckCreation = useEffectEvent(() => draft.retry());
+  useEffect(() => {
+    if (state?.status === 'error' && state.creationConflict) void recheckCreation();
+  }, [state]);
   const { payload } = draft;
   const { rows, targetType } = payload;
   const disabled = pending || draft.editingBlocked;
   const change = <K extends keyof BomDraft>(key: K, value: BomDraft[K]) => draft.update((current) => ({ ...current, [key]: value }));
   const changeRow = (rowId: string, key: 'materialId' | 'quantity' | 'remark', value: string) => draft.update((current) => ({ ...current, rows: current.rows.map((row) => row.rowId === rowId ? { ...row, [key]: value } : row) }));
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const error = state?.status === 'error' ? state.message : null;
+  const errs = currentState?.status === 'invalid' ? currentState.fieldErrors : {};
+  const error = currentState?.status === 'error' ? currentState.message : null;
   const missingProducts = products.length === 0;
   const missingCategories = categories.length === 0;
   const missingMaterials = materials.length === 0;
@@ -72,7 +77,7 @@ export function BomForm({ action, products, categories, materials, papers, draft
   return (
     <form ref={formRef} action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <DraftIdentityFields identity={draft.identity} />
-      <DraftNotice draft={draft} />
+      <DraftNotice draft={draft} disabled={pending} />
       <input type="hidden" name="itemCount" value={rows.length} />
 
       <div className="grid gap-4 md:grid-cols-2">

@@ -14,7 +14,7 @@ export function DraftIdentityFields({ identity }: { identity: CreationIdentity }
   return <><input type="hidden" name="draftId" value={identity.draftId} /><input type="hidden" name="clientRequestId" value={identity.clientRequestId} /></>;
 }
 
-export function DraftNotice<T extends FormDraftPayload>({ draft }: { draft: ReturnType<typeof useFormDraft<T>> }) {
+export function DraftNotice<T extends FormDraftPayload>({ draft, disabled = false }: { draft: ReturnType<typeof useFormDraft<T>>; disabled?: boolean }) {
   if (!draft.candidate && !draft.message && draft.status?.status !== 'created') return null;
   return <section aria-label="录入恢复" className="space-y-3 rounded-lg border p-4">
     {draft.message ? <p role="status" className="text-sm">{draft.message}</p> : null}
@@ -26,12 +26,12 @@ export function DraftNotice<T extends FormDraftPayload>({ draft }: { draft: Retu
       {draft.status.differences.length ? <ul className="space-y-1 text-sm">{draft.status.differences.map((change) => <li key={change.label}>{change.label}：原单据为“{change.before}”，当前为“{change.after}”</li>)}</ul> : null}
     </> : null}
     <div className="flex flex-wrap gap-3">
-      {draft.candidate && !draft.status ? <Button type="button" variant="outline" disabled={draft.checking} onClick={draft.retry}>重新核对</Button> : null}
-      {draft.candidate && !draft.completed && draft.status?.status !== 'created' ? <Button type="button" variant="outline" disabled={draft.checking} onClick={draft.resume}>继续上次录入</Button> : null}
-      {draft.status ? <Button type="button" variant="outline" disabled={draft.checking} onClick={() => draft.startAnother(true)}>另建一单</Button> : null}
-      {draft.candidate && draft.status ? <Button type="button" variant="outline" disabled={draft.checking} onClick={() => draft.startAnother(false)}>重新填写</Button> : null}
+      {!draft.status ? <Button type="button" variant="outline" disabled={disabled || draft.checking} onClick={draft.retry}>重新核对</Button> : null}
+      {draft.candidate && !draft.completed && draft.status?.status !== 'created' ? <Button type="button" variant="outline" disabled={disabled || draft.checking} onClick={draft.resume}>继续上次录入</Button> : null}
+      {draft.status ? <Button type="button" variant="outline" disabled={disabled || draft.checking} onClick={() => draft.startAnother(true)}>另建一单</Button> : null}
+      {draft.candidate && draft.status ? <Button type="button" variant="outline" disabled={disabled || draft.checking} onClick={() => draft.startAnother(false)}>重新填写</Button> : null}
       {draft.fallbackHref ? <a href={draft.fallbackHref} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center text-primary underline">在新标签页补充资料</a> : null}
-      {draft.message ? <Button type="button" variant="outline" onClick={draft.refresh}>更新可选资料</Button> : null}
+      {draft.message ? <Button type="button" variant="outline" disabled={disabled} onClick={draft.refresh}>更新可选资料</Button> : null}
     </div>
   </section>;
 }

@@ -323,3 +323,74 @@ test('脚本尚未加载时输入的内容不会被挂载默认值覆盖', async
     await page.unroute('**/_next/static/**/*.js');
   }
 });
+
+for (const kind of ['purchase-new', 'bom-new'] as const) test(`${kind} 已创建但查询暂不可用：冲突后可重新核对并明确另建`, async ({ page }) => {
+  test.setTimeout(90_000);
+  const fixture = await seedPurchasePrerequisites();
+  const isPurchase = kind === 'purchase-new';
+  const path = isPurchase ? '/owner/purchases/new' : '/owner/boms/new';
+  const pattern = `**${path}**`;
+  const submitName = isPurchase ? '创建采购单' : '创建 BOM';
+  const categoryId = `recover_${randomUUID().replaceAll('-', '')}`;
+  if (!isPurchase) await withSupplyChainDb(async (db) => {
+    for (const id of [categoryId, `${categoryId}_another`]) await db.query('INSERT INTO "ProductCategoryNode" (id,path,name,"legacyCategory","updatedAt") VALUES ($1::text,$1::text,$1::text,\'CUSTOM_FLAT_FOIL\',now())', [id]);
+  });
+  await login(page, { ...owner, from: path });
+  if (isPurchase) await fillPurchase(page, fixture.supplierId, fixture.materialId);
+  else {
+    await page.getByLabel('BOM 名称', { exact: true }).fill('冲突恢复回归');
+    await page.getByLabel('适用对象', { exact: true }).selectOption('CATEGORY');
+    await page.getByLabel('产品结构分类', { exact: true }).selectOption(categoryId);
+    await page.locator('[name="items.0.materialId"]').selectOption(fixture.materialId);
+    await page.locator('[name="items.0.quantity"]').fill('123');
+  }
+  const requestId = await page.locator('[name="clientRequestId"]').inputValue();
+  const draftId = await page.locator('[name="draftId"]').inputValue();
+  let resolveCommitted!: () => void;
+  const committed = new Promise<void>((resolve) => { resolveCommitted = resolve; });
+  let intercepted = false;
+  await page.route(pattern, async (route) => {
+    if (intercepted || route.request().method() !== 'POST') { await route.continue(); return; }
+    intercepted = true;
+    const response = await route.fetch({ headers: detachedActionHeaders(route.request()) });
+    expect(response.ok()).toBe(true); await response.dispose();
+    await route.abort('connectionfailed'); resolveCommitted();
+  });
+  await page.getByRole('button', { name: submitName, exact: true }).click(); await committed;
+  await page.unroute(pattern);
+  await page.route(pattern, async (route) => {
+    if (route.request().method() === 'POST' && route.request().postData()?.includes(`"kind":"${kind}"`)) await route.fulfill({ status: 503, body: 'temporarily unavailable' });
+    else await route.continue();
+  });
+  await page.goto(`${path}?draft=${draftId}`);
+  await expect(page.getByText('暂时无法确认是否已经创建，请保留内容并重新核对；不要重复新建。', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '继续上次录入', exact: true }).click();
+  const quantity = page.locator(isPurchase ? '[name="quantity"]' : '[name="items.0.quantity"]');
+  await expect(quantity).toHaveValue('123'); await quantity.fill('124');
+  await page.getByRole('button', { name: submitName, exact: true }).click();
+  await expect(page.getByText(/这份录入已创建过单据，但当前内容不同/)).toBeVisible();
+  await expect(page.getByRole('button', { name: '重新核对', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '另建一单', exact: true })).toHaveCount(0);
+  await expect(quantity).toHaveValue('124');
+  await page.unroute(pattern);
+  await page.getByRole('button', { name: '重新核对', exact: true }).click();
+  await expect(page.getByRole('link', { name: '查看已创建单据', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: '录入恢复' })).toContainText('124');
+  await expect(page.locator('[name="clientRequestId"]')).toHaveValue(requestId);
+  await withSupplyChainDb(async (db) => {
+    const result = await db.query('SELECT count(*)::int AS n FROM "FormCreationRequest" WHERE "clientRequestId"=$1::uuid', [requestId]);
+    expect(result.rows).toEqual([{ n: 1 }]);
+  });
+  await page.getByRole('button', { name: '另建一单', exact: true }).click();
+  await expect(quantity).toHaveValue('124');
+  await expect(page.getByRole('alert').filter({ hasText: '这份录入已创建过单据' })).toHaveCount(0);
+  await expect(page.locator('[name="clientRequestId"]')).not.toHaveValue(requestId);
+  if (!isPurchase) {
+    // One category can only have one active BOM; choose a distinct target for
+    // the explicit new document instead of bypassing that business guard.
+    await page.getByLabel('产品结构分类', { exact: true }).selectOption(`${categoryId}_another`);
+    await page.getByLabel('版本号', { exact: true }).fill('2');
+  }
+  await page.getByRole('button', { name: submitName, exact: true }).click();
+  await expect(page).toHaveURL(isPurchase ? /\/owner\/purchases\/(?!new)[a-z0-9_-]+$/i : /\/owner\/boms\/(?!new)[a-z0-9_-]+$/i);
+});

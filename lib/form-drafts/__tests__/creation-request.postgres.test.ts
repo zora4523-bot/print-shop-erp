@@ -38,7 +38,7 @@ postgres.sequential('form creation · real domain transactions on isolated Postg
     expect(new Set(results.map((result) => result.id)).size).toBe(1);
     const replay = await createPurchaseOrder({ ...input, quantity: '123.00', unitCost: '2.5000' }, undefined, request);
     expect(replay.id).toBe(results[0]!.id);
-    await expect(createPurchaseOrder({ ...input, quantity: '124' }, undefined, request)).rejects.toThrow('当前内容不同');
+    await expect(createPurchaseOrder({ ...input, quantity: '124' }, undefined, request)).rejects.toMatchObject({ message: expect.stringContaining('当前内容不同'), creationConflict: true });
     expect(await db.formCreationRequest.count({ where: { actorId, clientRequestId: request.clientRequestId } })).toBe(1);
     expect(await db.businessAuditLog.count({ where: { actorId, action: 'FORM_CREATED', entityId: replay.id } })).toBe(1);
     expect(await getCreationRequest('purchase-new', { ...request, actorId: otherId })).toBeNull();
@@ -58,7 +58,7 @@ postgres.sequential('form creation · real domain transactions on isolated Postg
     const failed = identity();
     await expect(createBom(input, failed)).rejects.toThrow();
     expect(await getCreationRequest('bom-new', failed)).toBeNull();
-    await expect(createBom({ ...input, name: '改过的清单' }, request)).rejects.toThrow('当前内容不同');
+    await expect(createBom({ ...input, name: '改过的清单' }, request)).rejects.toMatchObject({ message: expect.stringContaining('当前内容不同'), creationConflict: true });
   });
 
   it('a status query queued behind an in-flight create observes its commit instead of claiming failure', async () => {

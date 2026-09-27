@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Prisma } from '../../generated/prisma/client';
 import { UnauthorizedError } from '../../lib/auth/errors';
 import { RULE_CENTER_HREFS } from '../../lib/navigation/rule-center';
+import { FormCreationError } from '@/lib/form-drafts/creation-request';
 
 const {
   permissionsMock,
@@ -79,6 +80,14 @@ beforeEach(() => {
 });
 
 describe('createBomAction', () => {
+  it('returns a structured creation conflict for recovery without redirecting', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    bomMock.createBom.mockRejectedValue(new FormCreationError('当前内容不同，请核对原单据', true));
+    const form = fd({ ...validBom, draftId: '11111111-1111-4111-8111-111111111111', clientRequestId: '22222222-2222-4222-8222-222222222222' });
+    expect(await createBomAction(null, form)).toEqual({ status: 'error', message: '当前内容不同，请核对原单据', creationConflict: true });
+    expect(redirectMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
   it("first-line requirePermission('bom:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');

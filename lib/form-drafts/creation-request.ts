@@ -5,7 +5,9 @@ import { db } from '@/lib/db';
 import { writeAuditLogInTx } from '@/lib/audit-log';
 import { creationIdentitySchema, type CreationIdentity, type FormKind } from './model';
 
-export class FormCreationError extends Error {}
+export class FormCreationError extends Error {
+  constructor(message: string, readonly creationConflict = false) { super(message); }
+}
 export type CreationRequest = CreationIdentity & { actorId: string };
 export const creationKind = (kind: FormKind) => kind === 'purchase-new' ? 'PURCHASE' as const : 'BOM' as const;
 export const creationLockKey = (kind: FormKind, request: CreationRequest) => `form-create:${request.actorId}:${creationKind(kind)}:${request.clientRequestId}`;
@@ -44,7 +46,7 @@ export async function createWithRequest(
   const existing = await tx.formCreationRequest.findUnique({ where: requestWhere(kind, request) });
   if (existing) {
     if (existing.draftId !== request.draftId || existing.payloadHash !== payloadHash) {
-      throw new FormCreationError('这份录入已创建过单据，但当前内容不同。请查看原单据，另建时选择“另建一单”');
+      throw new FormCreationError('这份录入已创建过单据，但当前内容不同。请保留内容并核对原单据；如需另建，也可返回列表重新新建。', true);
     }
     return { entityId: (kind === 'purchase-new' ? existing.purchaseOrderId : existing.billOfMaterialId)!, replayed: true };
   }

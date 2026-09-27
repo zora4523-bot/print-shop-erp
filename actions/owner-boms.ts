@@ -107,7 +107,7 @@ export async function createBomAction(
     createdId = created.id;
     replayed = created.creationReplayed === true;
   } catch (err) {
-    if (err instanceof FormCreationError) return { status: 'error', message: err.message };
+    if (err instanceof FormCreationError) return { status: 'error', message: err.message, ...(err.creationConflict ? { creationConflict: true } : {}) };
     const unique = mapBomUniqueViolation(err);
     if (unique) return unique;
     const invariant = mapInvariantError(err, BomInvariantError);
