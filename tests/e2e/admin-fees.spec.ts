@@ -79,7 +79,21 @@ test('管理员新建后编辑完整收费，重载保留且外部销售无入�
     await expect(editor.getByLabel('加工单价（元）', { exact: true })).toHaveValue('0.2000');
     for (const width of [375, 390, 768, 1024, 1440, 1920]) for (const dark of [false, true]) {
       await page.setViewportSize({ width, height: 1000 });
-      await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+      await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light', reducedMotion: 'reduce' });
+      await page.evaluate((dark) => {
+        const theme = dark ? 'dark' : 'light';
+        localStorage.setItem('erp-theme', theme);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      }, dark);
+      await expect(editor.locator('fieldset')).toBeEnabled();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', dark ? 'dark' : 'light');
+      for (let paint = 0; paint < 3; paint += 1) {
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+        await expect.poll(() => page.evaluate(() => document.getAnimations()
+          .filter(animation => animation.playState === 'running' || animation.pending).length)).toBe(0);
+      }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       const heights = await editor.locator('button').evaluateAll((nodes) => nodes.filter((node) => node.getBoundingClientRect().height > 0).map((node) => node.getBoundingClientRect().height));
       expect(heights.every((height) => height >= 44)).toBe(true);

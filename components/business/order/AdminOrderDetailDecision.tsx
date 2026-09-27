@@ -70,7 +70,7 @@ export function AdminOrderDetailDecision({ order, requiresPaperRecall }: {
     </div> : null}
     {hasAction ? <AdminOrderDecisionPanel order={panelOrder} compact /> : <p className="text-sm">{ORDER_STATUS_REGISTRY[order.status].label} · 暂无待办</p>}
     {requiresRecall ? <Dialog open={open} onOpenChange={(value) => { if (pending) return; setOpen(value); if (value) { setRecalled(false); setNotice(null); } }}>
-      <DialogTrigger render={<Button type="button" variant="outline" disabled={pending || resultUnknown || !order.pendingPrintJobId}>确认已打印</Button>} />
+      <DialogTrigger render={<Button type="button" disabled={pending || resultUnknown || !order.pendingPrintJobId}>确认已打印</Button>} />
       <DialogContent>
         <DialogTitle>确认 v{order.workOrderVersion} 已打印</DialogTitle>
         <DialogDescription>请先核对本次打印件，并收回此前纸质工单，避免车间继续使用旧单。</DialogDescription>

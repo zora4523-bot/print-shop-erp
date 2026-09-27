@@ -170,8 +170,18 @@
 }
 
 .otherActions { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
-.otherActions > h2 { font-size: var(--text-sm); margin-bottom: 8px; }
+.otherActions > h3 { font-size: var(--text-sm); margin-bottom: 8px; }
 .otherActions > div { justify-content: flex-start; }
 .otherActions a, .otherActions button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .aside { max-height: calc(100dvh - var(--order-detail-timeline-top) - 16px); overflow-y: auto; }
 @media (max-width: 960px) { .aside { max-height: none; overflow: visible; } }
+
+/* Detail-local disclosure affordance; nested disclosures use their own state. */
+.disclosureSummary { gap: 8px; }
+.disclosureChevron { width: 16px; height: 16px; flex-shrink: 0; margin-left: auto; }
+.collapseLabel, .expandLabel { font-size: var(--text-xs); color: var(--muted-foreground); font-weight: 400; }
+details > .disclosureSummary .collapseLabel { display: none; }
+details[open] > .disclosureSummary .expandLabel { display: none; }
+details[open] > .disclosureSummary .collapseLabel { display: inline; }
+details[open] > .disclosureSummary .disclosureChevron { transform: rotate(180deg); }
+.itemDetails { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--border); }

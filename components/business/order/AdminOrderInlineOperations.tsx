@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
@@ -8,6 +8,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { ActionNotice } from '@/components/ui-business';
 import { OrderPricingReviewForm } from './OrderPricingReviewForm';
 import { FulfillmentPricingReviewForm } from './FulfillmentPricingReviewForm';
+import { ORDER_DETAIL_REVEAL, type OrderDetailRevealRequest } from './order-detail-navigation';
 import styles from './AdminOrderInlineOperations.module.css';
 
 export function AdminOrderInlineOperations({ order, disabled = false, onCompleted }: {
@@ -29,6 +30,23 @@ export function AdminOrderInlineOperations({ order, disabled = false, onComplete
     router.refresh();
   }, [onCompleted, router]);
   const pricingFinished = useCallback(() => finish('核价已确认'), [finish]);
+  useEffect(() => {
+    const reveal = (event: Event) => {
+      const request = (event as CustomEvent<OrderDetailRevealRequest>).detail;
+      if (request.orderId !== order.id || disabled || order.pendingChangeRequest) return;
+      const genericPricing = request.targetId === 'pricing-review' && Boolean(data?.pricing);
+      const matches = genericPricing || (data?.pricing === 'fulfillment'
+        ? request.targetId === 'fulfillment-pricing'
+        : data?.pricing === 'factory' && /^pricing-review-(item|packaging|charge|shipment)-/.test(request.targetId));
+      if (!matches) return;
+      request.handled = true;
+      if (genericPricing) request.resolvedTargetId = `${panelId}-pricing`;
+      setOpenedModes((current) => ({ ...current, pricing: true }));
+      setMode('pricing');
+    };
+    window.addEventListener(ORDER_DETAIL_REVEAL, reveal);
+    return () => window.removeEventListener(ORDER_DETAIL_REVEAL, reveal);
+  }, [data?.pricing, disabled, order.id, order.pendingChangeRequest, panelId]);
   if (order.pendingChangeRequest) return null;
   const pricingFallback = !data?.pricing && (order.fee.source === 'PENDING' || Boolean(order.priceComparisonError));
   if (!data?.pricing && !data?.shipping && !pricingFallback && !receipt) return null;

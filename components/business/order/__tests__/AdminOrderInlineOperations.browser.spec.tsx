@@ -134,3 +134,53 @@ it.each(['pricing'] as const)('%s completes and reports once after its pending f
   await expect.poll(() => refresh.mock.calls.length).toBe(1);
   expect(action).toHaveBeenCalledTimes(1);
 });
+
+it('reveals a lazily mounted pricing error target and keeps input when reopened', async () => {
+  const { revealOrderDetailTarget } = await import('../order-detail-navigation');
+  flushSync(() => root.render(<AdminOrderInlineOperations order={order('pricing')} />));
+  const abort = new AbortController();
+  const target = await revealOrderDetailTarget('inline-order', 'pricing-review-charge-plate', abort.signal);
+  expect(target?.id).toBe('pricing-review-charge-plate');
+  await expect.element(page.getByLabelText('确认金额（元）')).toBeVisible();
+  await page.getByLabelText('确认金额（元）').fill('45.50');
+  await page.getByRole('button', { name: '录入人工核价', exact: true }).click();
+  expect(target?.closest('[hidden]')).not.toBeNull();
+  expect(await revealOrderDetailTarget('inline-order', target!.id, abort.signal)).toBe(target);
+  await expect.element(page.getByLabelText('确认金额（元）')).toHaveValue('45.50');
+  expect(host.querySelectorAll('#pricing-review-charge-plate')).toHaveLength(1);
+});
+
+it('opens the authorized pricing editor even when the generic pricing anchor already exists', async () => {
+  const { revealOrderDetailTarget } = await import('../order-detail-navigation');
+  flushSync(() => root.render(<><section id="pricing-review">价格状态</section><AdminOrderInlineOperations order={order('pricing')} /></>));
+  const target = await revealOrderDetailTarget('inline-order', 'pricing-review', new AbortController().signal);
+  await expect.element(page.getByLabelText('确认金额（元）')).toBeVisible();
+  expect(target?.querySelector('input')).not.toBeNull();
+  expect(target?.closest('[hidden]')).toBeNull();
+});
+
+it('does not reveal an editor for another order or a pending change', async () => {
+  const { revealOrderDetailTarget } = await import('../order-detail-navigation');
+  flushSync(() => root.render(<AdminOrderInlineOperations order={order('pricing')} disabled />));
+  const abort = new AbortController();
+  expect(await revealOrderDetailTarget('different-order', 'pricing-review-charge-plate', abort.signal)).toBeNull();
+  expect(await revealOrderDetailTarget('inline-order', 'pricing-review-charge-plate', abort.signal)).toBeNull();
+  expect(previewAction).not.toHaveBeenCalled();
+});
+
+it('opens the authorized fulfillment editor by deep link without duplicate forms', async () => {
+  const { revealOrderDetailTarget } = await import('../order-detail-navigation');
+  const fixture = order('pricing');
+  fixture.inlineOperations = { pricing: 'fulfillment', shipping: null,
+    fulfillment: { currentValue: false, isPricingPending: true,
+      shipments: [{ id: 'shipment', sequence: 1, destinationProvince: '广东', weightKg: '2' }] } };
+  flushSync(() => root.render(<AdminOrderInlineOperations order={fixture} />));
+  const target = await revealOrderDetailTarget('inline-order', 'fulfillment-pricing', new AbortController().signal);
+  expect(target?.id).toBe('fulfillment-pricing');
+  expect(target?.closest('[hidden]')).toBeNull();
+  expect(host.querySelectorAll('#fulfillment-pricing')).toHaveLength(1);
+  await page.getByRole('button', { name: '核对物流费用', exact: true }).click();
+  const genericTarget = await revealOrderDetailTarget('inline-order', 'pricing-review', new AbortController().signal);
+  expect(genericTarget?.querySelector('#fulfillment-pricing')).toBe(target);
+  expect(genericTarget?.closest('[hidden]')).toBeNull();
+});

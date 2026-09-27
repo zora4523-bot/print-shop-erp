@@ -1,3 +1,4 @@
+import { orderShippingAvailability } from './shipping-availability';
 import { inspectOrderProductionReadinessInTx } from './production-readiness';
 import 'server-only';
 import { adminOrderCraftTags, type AdminOrderCraftTag } from './admin-list-presentation';
@@ -433,15 +434,12 @@ type AdminOrderCapabilityFacts = {
 export function resolveAdminOrderShipDisabledReason(
   input: Pick<AdminOrderCapabilityFacts, 'status' | 'pricingPending' | 'hasShipment' | 'hasLiveOutsource' | 'hasIncompleteProduction' | 'hasPendingChange'>,
 ): string | null {
-  if (input.status !== OrderStatus.PACKING && input.status !== OrderStatus.COMPLETED) {
-    return '当前工单状态不支持发货';
-  }
-  if (input.hasPendingChange) return '存在待审批申请，请先处理变更';
-  if (input.pricingPending) return '费用尚未核定，请先完成核价';
-  if (input.hasLiveOutsource) return '外协尚未收回，请先核对外协进度';
-  if (input.hasIncompleteProduction) return '生产工序尚未完成，请先核对报工';
-  if (!input.hasShipment) return '尚未填写配送信息，请先补齐配送';
-  return null;
+  return orderShippingAvailability({
+    ...input,
+    isAdministrator: true,
+    isPricingPending: input.pricingPending,
+    incompleteProductionCount: input.hasIncompleteProduction ? 1 : 0,
+  }).disabledReason;
 }
 
 export function resolveAdminOrderCapabilities(input: AdminOrderCapabilityFacts): AdminOrderWorkspaceRow['capabilities'] {

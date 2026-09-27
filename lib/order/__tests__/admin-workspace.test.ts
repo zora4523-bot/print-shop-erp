@@ -587,7 +587,7 @@ describe('admin order workspace predicates', () => {
     const detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
 
     expect(detail?.capabilities.ship).toBe(false);
-    expect(detail?.shipDisabledReason).toBe('尚未填写配送信息，请先补齐配送');
+    expect(detail?.shipDisabledReason).toBe('缺少发货地址，无法发货');
   });
 
   it('resolves print-export membership from unresolved current-version requests', async () => {

@@ -50,6 +50,8 @@ export type AdminOrderDetailModel = {
   qty: number; isUrgent: boolean; items: DetailItem[]; orderFees: DetailFee[];
   total: string | null; feeSource: AdminOrderWorkspaceRow['fee']['source'];
   pricingStatus?: OrderPricingStatus; totalEstimated?: boolean;
+  itemProcessingAmount?: string | null; processingEstimated?: boolean;
+  isSfCollect?: boolean; hasItemPlateFees?: boolean;
   feeStages: { key: 'quoted' | 'confirmed' | 'settled'; title: string; total: string | null; current: boolean }[];
   vdiff: { from: number; to: number; at: string; items: DetailDiff[] } | null;
   changes: DetailChange[]; works: DetailWork[]; logs: DetailLog[]; shipments: DetailShipment[];
@@ -171,13 +173,6 @@ function detailExternalSalesName(order: Order): string | null {
   });
 }
 
-const WORKFLOW_LOG_LABELS: Record<string, string> = {
-  FACTORY_CONFIRMED: '工厂确认', FACTORY_REJECTED: '工厂驳回',
-  ORDER_RELEASED: '下发生产', ORDER_PRINT_REQUESTED: '创建打印任务', ORDER_PRINTED: '标记已打印',
-  ORDER_PRINT_REQUESTS_SUPERSEDED: '旧版打印任务作废', ORDER_SETTLED_V2: '工单结算',
-  FACTORY_HELD: '暂停生产', FACTORY_RESUMED: '恢复生产',
-};
-
 /** Pure admin-only projection. It does not quote, infer missing records or mutate a workflow. */
 export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminOrderDetailModel {
   const { order, workspace, signImageUrl, productionProgressSteps = [], workReports = [] } = input;
@@ -252,7 +247,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
   const dueLeft = adminOrderDueHint(workspace.dueAlert) ?? '';
   const feeStages = (['quoted', 'confirmed', 'settled'] as const).map((key) => ({
     key, title: { quoted: '提交报价', confirmed: '确认金额', settled: '结算金额' }[key],
-    total: key === 'quoted' && order.purpose === 'PROOF' ? null : amount(workspace.feeStages[key]), current: workspace.feeStages.active === key.toUpperCase(),
+    total: key === 'quoted' && order.purpose === 'PROOF' ? null : amount(workspace.feeStages[key]), current: monetaryFacts.feeSource === key.toUpperCase(),
   }));
   return {
     remark: order.remark,
@@ -262,8 +257,10 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
     sales: detailExternalSalesName(order),
     craft: workspace.craftTags?.join(' · ') || workspace.craftSummary,
     due: workspace.promisedDate?.slice(0, 10) ?? null, dueLeft, qty: workspace.totalQuantity, isUrgent: order.isUrgent,
-    items, orderFees, total: amount(workspace.fee.amount), feeSource: workspace.fee.source, feeStages,
-    pricingStatus: monetaryFacts.pricingStatus, totalEstimated: workspace.fee.estimated,
+    items, orderFees, total: monetaryFacts.totalAmount, feeSource: monetaryFacts.feeSource, feeStages,
+    pricingStatus: monetaryFacts.pricingStatus, totalEstimated: monetaryFacts.estimated,
+    itemProcessingAmount: monetaryFacts.itemProcessingAmount, processingEstimated: monetaryFacts.processingEstimated,
+    isSfCollect: order.isSfCollect, hasItemPlateFees: displayedPlateIds.size > 0,
     vdiff: currentApproval && currentApproval.baseWorkOrderVersion != null ? {
       from: currentApproval.baseWorkOrderVersion, to: order.workOrderVersion,
       at: dateTime(currentApproval.reviewedAt ?? currentApproval.createdAt),
@@ -277,7 +274,7 @@ export function buildAdminOrderDetailModel(input: AdminOrderDetailInput): AdminO
     })),
     logs: order.logs.map((log) => ({
       id: log.id, at: dateTime(log.createdAt), actor: log.operator.displayName,
-      label: WORKFLOW_LOG_LABELS[log.action] ?? actionLabel(log.action),
+      label: actionLabel(log.action),
       remark: 'remark' in log && typeof log.remark === 'string' ? log.remark : null,
       changes: formatOrderLogChanges('changedFields' in log ? log.changedFields : undefined),
     })),

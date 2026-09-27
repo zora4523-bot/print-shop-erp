@@ -178,6 +178,28 @@ export function formatOrderLogChanges(changedFields: unknown): LogChangeRow[] {
 // Human-readable label for OrderLog.action. Kept here so the detail
 // page doesn't hardcode the enum strings.
 const ACTION_LABELS: Record<string, string> = {
+  // Historical keys remain readable; current writers use OPERATIONS_RELEASED.
+  FACTORY_CONFIRMED: '工厂确认',
+  ORDER_RELEASED: '下发生产',
+  OPERATIONS_RELEASED: '下发生产',
+  OPERATIONS_MATERIALIZED: '生成生产工序',
+  OPERATIONS_REMATERIALIZED: '更新生产工序版本',
+  FACTORY_REJECTED: '工厂拒单',
+  FACTORY_HELD: '暂停生产',
+  FACTORY_RESUMED: '恢复生产',
+  ORDER_PRINT_REQUESTED: '创建打印任务',
+  ORDER_PRINTED: '确认已打印',
+  ORDER_PRINT_REQUESTS_SUPERSEDED: '旧版打印任务失效',
+  ORDER_SETTLED_V2: '工单结算',
+  CHANGE_REQUEST_CREATED: '提交工单变更申请',
+  CHANGE_REQUEST_WITHDRAWN: '撤回工单变更申请',
+  CHANGE_REQUEST_DENIED: '驳回工单变更申请',
+  CHANGE_REQUEST_CANCEL_APPROVED: '批准取消工单',
+  CHANGE_REQUEST_APPROVED: '批准工单变更',
+  CREATE_REWORK: '创建重做工单',
+  REPORT_DISPUTE_CREATED: '提交报工异议',
+  REPORT_DISPUTE_REVIEWED: '回复报工异议',
+  BLANK_MATERIAL_PRICE_CONFIRMED: '确认历史材料单价',
   CREATE: '创建',
   UPDATE: '编辑',
   PAYROLL_PASS_CHANGE: '调整计薪次数',

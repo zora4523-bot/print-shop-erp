@@ -13,14 +13,17 @@ function sourceLabel(source: Estimate['items'][number]['source']): string {
 export function OrderMaterialUsageEstimate({
   estimate,
   canManageBom = false,
+  headingLevel = 2,
 }: {
   estimate: Estimate;
   canManageBom?: boolean;
+  headingLevel?: 2 | 3;
 }) {
+  const Heading = headingLevel === 3 ? 'h3' : 'h2';
   return (
     <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
       <div>
-        <h2 className="text-base font-semibold">物料用量估算</h2>
+        <Heading className="text-base font-semibold">物料用量估算</Heading>
       </div>
 
       {canManageBom && estimate.items.some((item) => !item.bom) ? (

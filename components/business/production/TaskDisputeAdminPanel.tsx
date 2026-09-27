@@ -31,17 +31,19 @@ export type AdminTaskDisputeRow = {
 };
 
 export function TaskDisputeAdminPanel({
-  disputes,
+  disputes, headingLevel = 2,
 }: {
+  headingLevel?: 2 | 3;
   disputes: AdminTaskDisputeRow[];
 }) {
+  const Heading = headingLevel === 3 ? 'h3' : 'h2';
   const pendingCount = disputes.filter(
     (dispute) => dispute.status === ProductionTaskDisputeStatus.PENDING,
   ).length;
   return (
     <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <div>
-        <h2 className="text-base font-semibold">师傅任务 / 计件异议</h2>
+        <Heading className="text-base font-semibold">师傅任务 / 计件异议</Heading>
         {pendingCount > 0 ? <p className="mt-1 text-xs text-muted-foreground">待处理 {pendingCount} 条</p> : null}
       </div>
       {disputes.length === 0 ? (

@@ -144,12 +144,13 @@ test('列表队列、信号与搜索连续切换保持真实数据库统计一�
   await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('60.00');
 });
 
-test('待核价详情不把部分报价当应收，完整报价在上下两处标为估价', async ({ page }) => {
+test('待核价详情不把部分报价当应收，完整报价在当前合计及阶段标为估价', async ({ page }) => {
   test.setTimeout(90_000);
-  await login(page, { from: `/orders/${prefix}-manual`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
-  const basic = page.getByRole('heading', { name: '基本信息', exact: true }).locator('..');
-  for (const label of ['款式加工费', '加工费合计', '对客应收总额']) {
-    const value = basic.locator('dt').filter({ hasText: new RegExp(`^${label}$`) }).locator('..').locator('dd');
+  await login(page, { from: `/orders/${prefix}-manual#pricing-review`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
+  await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  const processing = page.getByRole('region', { name: '订单级费用', exact: true }).locator('dt').filter({ hasText: /^款式加工费合计$/ }).locator('..').locator('dd');
+  const currentTotal = page.locator('[data-slot="current-order-amount"]');
+  for (const value of [processing, currentTotal]) {
     await expect(value).toContainText('待工厂核价');
     await expect(value).not.toContainText(/13\.30|0\.00/);
   }
@@ -160,11 +161,11 @@ test('待核价详情不把部分报价当应收，完整报价在上下两处�
 
   const response = await page.goto(`/orders/${prefix}-quote`);
   expect(response?.status()).toBe(200);
-  const quotedBasic = page.getByRole('heading', { name: '基本信息', exact: true }).locator('..');
-  const total = quotedBasic.locator('dt').filter({ hasText: /^对客应收总额$/ }).locator('..').locator('dd');
-  await expect(total).toContainText('28.00');
-  await expect(total).toContainText('估');
-  await expect(page.getByRole('region', { name: '订单级费用', exact: true })).toContainText(/28\.00.*估/);
+  const currentStage = page.getByRole('region', { name: '工单费用', exact: true }).getByText('当前', { exact: true }).locator('..').locator('..').locator('strong');
+  for (const value of [currentTotal, currentStage]) {
+    await expect(value).toContainText('28.00');
+    await expect(value).toContainText('估');
+  }
 });
 
 test('队列切换仅延迟显示按钮图标，连续点击只采用最后选择', async ({ page }) => {

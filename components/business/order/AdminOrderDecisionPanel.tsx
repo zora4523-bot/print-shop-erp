@@ -151,7 +151,7 @@ function AdminDecisionActions({
         </Button>
       ) : null}
       {order.capabilities.hold ? (
-        <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => openMode('hold')}>
+        <Button type="button" size="sm" variant="ghost" className="order-last" disabled={pending} onClick={() => openMode('hold')}>
           暂停
         </Button>
       ) : null}
@@ -189,7 +189,7 @@ function AdminDecisionActions({
         </Button>
       ) : null}
       {order.capabilities.markPrinted ? (
-        <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('MARK_PRINTED')}>
+        <Button type="button" size="sm" variant={order.capabilities.release ? 'outline' : 'default'} disabled={pending} onClick={() => runOneBatch('MARK_PRINTED')}>
           确认已打印
         </Button>
       ) : null}

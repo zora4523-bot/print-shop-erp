@@ -29,6 +29,8 @@ it('requires explicit confirmation and displays the receivable consequence', asy
   await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
   expect(mocks.save).not.toHaveBeenCalled();
   await expect.element(page.getByRole('alertdialog')).toHaveTextContent('25.00 元');
+  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('工单自动结算');
+  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('尚未收款');
   await page.getByRole('alertdialog').getByRole('button', { name: '确认发货', exact: true }).click();
   await vi.waitFor(() => expect(mocks.save).toHaveBeenCalled());
   expect(mocks.save.mock.calls[0][0].get('confirm')).toBe('true');
@@ -37,6 +39,13 @@ it('permits draft entry but blocks early shipment', async () => {
   render({ ...props, canConfirm: false, disabledReason: '完工后才可发货' });
   await expect.element(page.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
   await expect.element(page.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
+});
+it('explains free-order settlement without claiming a receivable will be created', async () => {
+  render({ ...props, chargeable: false });
+  await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('工单自动结算');
+  await expect.element(page.getByRole('alertdialog')).not.toHaveTextContent('生成应收');
+  expect(mocks.save).not.toHaveBeenCalled();
 });
 it('accepts a pasted image and sends the prepared photo with the draft', async () => {
   mocks.save.mockResolvedValue({ ok: false, message: '保存失败，请重试' }); render();

@@ -1450,13 +1450,13 @@ async function prepareOrderDetailDesignPreview(
   // 同 testid 的节点（位于 #admin-main 之外），未限定范围会撞严格模式冲突。
   const records = page.locator('#admin-main [data-testid="admin-order-detail"]:visible');
   await expect(records).toBeVisible();
-  await expect(records.locator('details[id^="detail-"]:not([id^="detail-design-item-"])')).toHaveCount(6);
+  await expect(records.locator('details[id^="detail-"]:not([id^="detail-design-item-"]):not(#detail-packaging)')).toHaveCount(6);
   const sections = [
-    ['detail-design-files', '设计文件与完整工艺资料'],
+    ['detail-costs', '工厂成本'],
     ['detail-pricing-tools', '计价与收费维护'],
     ['detail-delivery-records', '配送与发货记录'],
     ['detail-production-records', '生产、用料与计件记录'],
-    ['detail-business-records', '基本信息、成本与重做'],
+    ['detail-business-records', '生产与业务资料'],
     ['detail-audit-records', '工单动态'],
   ] as const;
   for (const [id, title] of sections) {
@@ -1464,7 +1464,8 @@ async function prepareOrderDetailDesignPreview(
     await expect(section).toHaveAttribute('open', '');
     const summary = section.locator(':scope > summary');
     const content = section.locator(':scope > div');
-    await expect(summary).toHaveText(title);
+    await expect(summary).toContainText(title);
+    await expect(summary.getByText('收起', { exact: true })).toBeVisible();
     await expect(content).toBeVisible();
     await summary.click();
     await expect(section).not.toHaveAttribute('open', '');
@@ -1476,10 +1477,10 @@ async function prepareOrderDetailDesignPreview(
   await expect(records.locator('#detail-pricing-tools').getByRole('heading', { name: '工单价格状态', exact: true })).toBeVisible();
   await expect(records.locator('#detail-delivery-records').getByRole('heading', { name: '发货地址（1）', exact: true })).toBeVisible();
   await expect(records.locator('#detail-production-records').getByRole('heading', { name: '物料用量估算', exact: true })).toBeVisible();
-  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '基本信息', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '生产概况与业务资料', exact: true })).toBeVisible();
   await expect(records.locator('#detail-audit-records').getByRole('region', { name: '操作事件', exact: true })).toBeVisible();
   await expect(records.getByRole('complementary', { name: '工单概览与操作' }).locator('#detail-other-actions')).toBeVisible();
-  await expect(records.locator('#detail-other-actions').getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);
+  await expect(records.getByRole('complementary', { name: '工单概览与操作' }).getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);
 
   // The current detail contract keeps the style name, quantity, materials and
   // saved processing amount in the main card; complete facts remain on demand.
@@ -1492,7 +1493,9 @@ async function prepareOrderDetailDesignPreview(
   await expect(mainItem.getByText('1,234,567 个', { exact: true })).toBeVisible();
   await expect(mainItem.getByText('特种珠光纸ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', { exact: true })).toBeVisible();
   await expect(mainItem.getByText('https://example.invalid/specification/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/very-long-unbroken-value', { exact: true })).toBeVisible();
-  await expect(mainItem.getByText('¥ 152,345.57', { exact: true })).toBeVisible();
+  const visibleProcessingAmount = mainItem.getByText('¥ 152,345.57', { exact: true }).filter({ visible: true });
+  await expect(visibleProcessingAmount).toHaveCount(1);
+  await expect(visibleProcessingAmount).toBeVisible();
   await expect(mainItem).not.toContainText(data.craftId);
 
   const itemDetails = records.locator(`#detail-design-item-${data.orderItemActiveId}`);
@@ -1506,9 +1509,10 @@ async function prepareOrderDetailDesignPreview(
   await expect(itemDetails).toBeFocused();
   await expect(itemSummary.getByText('收起', { exact: true })).toBeVisible();
   await expect(itemSummary.getByText('展开', { exact: true })).toBeHidden();
-  const designSummary = records.locator('#detail-design-files > summary');
+  const designSummary = itemSummary;
   await designSummary.click();
-  await expect(itemDetails).toBeHidden();
+  await expect(itemDetails).not.toHaveAttribute('open', '');
+  await expect(itemDetails.locator(':scope > div')).toBeHidden();
   await designSummary.click();
   await expect(itemDetails).toHaveAttribute('open', '');
   await expect(itemSummary.getByText('收起', { exact: true })).toBeVisible();

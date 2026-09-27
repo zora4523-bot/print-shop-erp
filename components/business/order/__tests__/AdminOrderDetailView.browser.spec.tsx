@@ -257,7 +257,7 @@ describe('admin order detail design and interaction gates', () => {
     expect(details!.open).toBe(true);
     await page.getByText('完整审核记录', { exact: true }).click();
     expect(details!.open).toBe(false);
-    await expect.element(page.getByText('完整审核记录', { exact: true })).toHaveFocus();
+    expect(document.activeElement).toBe(details!.querySelector('summary'));
     await userEvent.keyboard('{Enter}');
     expect(details!.open).toBe(true);
     await userEvent.keyboard(' ');
@@ -404,4 +404,40 @@ it('opens the selected style supplement and preserves fee and print destinations
   expect(fees.textContent).toContain('¥ 570.00');
   expect(host.querySelector('a[href="/api/orders/detail-order-1/pdf?view=inline"]')).not.toBeNull();
   expect(geometryFailures(host, 1280)).toEqual([]);
+});
+
+it('keeps each specification file editor in its own card and opens only the selected details', async () => {
+  await page.viewport(1280, 800);
+  const model = detailModel({ totalEstimated: true });
+  flushSync(() => root.render(<AdminOrderDetailView model={model} canEdit prints={[]} decision={null}
+    itemDetails={model.items.map(item => ({ itemId: item.id, content:
+      <Disclosure id={`detail-design-item-${item.id}`}><DisclosureSummary>设计文件与工艺资料</DisclosureSummary>
+        <label>稿件备注 {item.sequence}<input className="h-11" defaultValue="保留草稿" /></label>
+      </Disclosure> }))}
+    supplementary={[]} />));
+  const second = document.getElementById('detail-design-item-item-2') as HTMLDetailsElement;
+  expect(second.closest('article')?.id).toBe('order-detail-item-item-2');
+  await page.getByRole('button', { name: '查看设计文件', exact: true }).nth(1).click();
+  await expect.poll(() => document.activeElement).toBe(second);
+  expect(second.open).toBe(true);
+  expect((document.getElementById('detail-design-item-item-1') as HTMLDetailsElement).open).toBe(false);
+  await page.getByLabelText('稿件备注 2').fill('未提交的资料');
+  second.open = false;
+  await page.getByRole('button', { name: '查看设计文件', exact: true }).nth(1).click();
+  await expect.element(page.getByLabelText('稿件备注 2')).toHaveValue('未提交的资料');
+  expect(host.querySelectorAll('#detail-design-item-item-2')).toHaveLength(1);
+  const fees = document.getElementById('order-detail-fees')!;
+  const stage = [...fees.querySelectorAll('p')].find(p => p.textContent === '确认金额当前')!;
+  expect(stage.parentElement?.textContent).toContain('估');
+  expect(host.querySelector('[data-slot="current-order-amount"]')?.textContent).toContain('估');
+});
+
+it('keeps collect-shipping and plate-fee context next to the total without contradicting the current quote', async () => {
+  renderDetail(detailModel({ isSfCollect: true, hasItemPlateFees: true, purpose: 'PROOF',
+    feeSource: 'QUOTED', totalEstimated: true,
+    feeStages: [{ key: 'quoted', title: '提交报价', total: null, current: true }] }));
+  const fees = page.getByRole('region', { name: '工单费用', exact: true });
+  await expect.element(fees.getByText('不含快递费，含耗材费', { exact: true })).toBeVisible();
+  await expect.element(fees.getByText('制版费见各款式，未计入款式加工费合计。', { exact: true })).toBeVisible();
+  expect(document.getElementById('order-detail-fees')?.textContent).not.toContain('尚未形成报价');
 });

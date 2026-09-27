@@ -5,9 +5,10 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { formatMoney } from '@/lib/dashboard/format';
 import { REPORT_OPERATION_LABELS } from '@/lib/salary/report-display';
 
-export function ReportDisputeAdminPanel({ disputes }: { disputes: Awaited<ReturnType<typeof listOrderReportDisputes>> }) {
+export function ReportDisputeAdminPanel({ disputes, headingLevel = 2 }: { headingLevel?: 2 | 3; disputes: Awaited<ReturnType<typeof listOrderReportDisputes>> }) {
+  const Heading = headingLevel === 3 ? 'h3' : 'h2';
   return <section aria-label="报工与工资问题" className="space-y-4 rounded-xl border bg-card p-4 sm:p-6">
-    <h2 className="font-semibold">报工与工资问题</h2>
+    <Heading className="font-semibold">报工与工资问题</Heading>
     {!disputes.length ? <p className="text-sm text-muted-foreground">暂无报工问题</p> : disputes.map((row) => <article id={`report-dispute-${row.id}`} key={row.id} className="space-y-3 rounded-lg border p-4 text-sm">
       <div className="flex flex-wrap items-center gap-2"><TaskDisputeStatusBadge status={row.status} /><strong>{row.report.reporter.displayName} · {REPORT_OPERATION_LABELS[row.report.operation.operationType]}</strong></div>
       <p>报工时间 {formatDateTimeShanghai(row.report.reportedAt)} · {formatMoney(row.report.amount)}</p>

@@ -55,6 +55,7 @@ type ItemWithPlateDetails = {
 };
 
 type Props = {
+  headingLevel?: 2 | 3;
   orderId: string;
   priceRevision: number;
   manualCharges: ManualCharge[];
@@ -508,19 +509,21 @@ export function OrderCommercialDetailsManager({
   priceRevision,
   manualCharges,
   items,
-  allowPlateDetailMaintenance,
+  allowPlateDetailMaintenance, headingLevel = 2,
 }: Props) {
+  const Heading = headingLevel === 3 ? 'h3' : 'h2';
+  const Subheading = headingLevel === 3 ? 'h4' : 'h3';
   const scope = useContext(OrderEditorAuxiliaryContext);
   const hasActiveEditor = scope?.mainBlocked || Object.values(scope?.entries ?? {}).some((entry) => entry.dirty || entry.pending);
   return (
     <section id="commercial-fees" className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <div>
-        <h2 className="text-base font-semibold">制版明细与其他费用</h2>
+        <Heading className="text-base font-semibold">制版明细与其他费用</Heading>
         {hasActiveEditor ? <p className="mt-1 text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}
       </div>
 
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold">订单级其他费用</h3>
+        <Subheading className="text-sm font-semibold">订单级其他费用</Subheading>
         {manualCharges.map((charge) => (
           <ManualChargeEditor
             key={charge.id}
@@ -538,7 +541,7 @@ export function OrderCommercialDetailsManager({
       </div>
 
       <div className="space-y-3 border-t pt-4">
-        <h3 className="text-sm font-semibold">按款式制版明细</h3>
+        <Subheading className="text-sm font-semibold">按款式制版明细</Subheading>
         {allowPlateDetailMaintenance ? (
           <ol className="space-y-4">
             {items.map((item) => (

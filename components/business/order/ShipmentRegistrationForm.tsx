@@ -13,6 +13,7 @@ export type ShipmentRegistrationProps = {
   revision: number; editVersion: number; workOrderVersion: number; priceRevision: number;
   trackingNo: string | null; carrierCode: string | null; carrierName: string | null;
   shipped: boolean; canConfirm: boolean; disabledReason: string | null;
+  chargeable?: boolean;
   lastPending: boolean; amount: string; labels: { id: string; createdAt: string }[];
 };
 
@@ -105,7 +106,7 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
         trigger={<Button type="button" disabled={busy || !ready || !props.canConfirm}>确认该地址已发货</Button>}
         onConfirm={() => submit(true)}>
         <ConfirmActionDialog action="确认该地址已发货" changes={[{ label: '运单号', old: props.trackingNo || '未填', new: tracking }]}
-          consequences={props.lastPending ? [`全部地址将标记已发货，并确认应收费用 ${props.amount} 元；尚未收款`] : ['该地址标记已发货，其他地址继续待发货']}
+          consequences={props.lastPending ? props.chargeable === false ? ['全部地址将标记已发货，工单自动结算；结算后不可再编辑，本单免收费'] : [`全部地址将标记已发货，工单自动结算，应收 ${props.amount} 元进入账单；结算后不可再编辑，尚未收款`] : ['该地址标记已发货，其他地址继续待发货']}
           confirmText="确认发货" />
       </ConfirmActionController> : null}
     </div>
