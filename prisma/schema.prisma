@@ -70,6 +70,8 @@ model User {
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
+  formCreationRequests FormCreationRequest[]
+
   // 关系
   submittedOrders             Order[]                       @relation("OrderSubmitter")
   createdOrders               Order[]                       @relation("OrderCreator")
@@ -1872,17 +1874,18 @@ model OrderCustomerCharge {
 // ============================================================
 
 model BillOfMaterial {
+  creationRequest       FormCreationRequest?
   blankPaperMaterialId  String?
   blankSpecificationKey String?
-  id                    String   @id @default(cuid())
+  id                    String               @id @default(cuid())
   productId             String?
   categoryNodeId        String?
   name                  String
-  version               Int      @default(1)
-  baseQuantity          Int      @default(1)
-  isActive              Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  version               Int                  @default(1)
+  baseQuantity          Int                  @default(1)
+  isActive              Boolean              @default(true)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   product            Product?             @relation(fields: [productId], references: [id], onDelete: Restrict)
   categoryNode       ProductCategoryNode? @relation(fields: [categoryNodeId], references: [id], onDelete: Restrict)
@@ -2145,16 +2148,17 @@ enum PurchaseReceiptStatus {
 }
 
 model PurchaseOrder {
-  id              String              @id @default(cuid())
-  purchaseNo      String              @unique
+  creationRequest FormCreationRequest?
+  id              String               @id @default(cuid())
+  purchaseNo      String               @unique
   supplierPartyId String?
   supplierCode    String
   supplierName    String
-  status          PurchaseOrderStatus @default(ORDERED)
+  status          PurchaseOrderStatus  @default(ORDERED)
   expectedDate    DateTime?
   remark          String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   supplierParty Party?              @relation("PurchaseOrderSupplierParty", fields: [supplierPartyId], references: [id], onDelete: SetNull)
   items         PurchaseOrderItem[]
@@ -2928,4 +2932,29 @@ model ProductionReportDispute {
   @@index([reportId, createdAt(sort: Desc)])
   @@index([status, createdAt])
   @@index([resolvedById])
+}
+
+// Parent form creation receipts are retained to resolve lost responses safely.
+enum FormCreationKind {
+  PURCHASE
+  BOM
+}
+
+model FormCreationRequest {
+  id                String           @id @default(cuid())
+  actorId           String
+  kind              FormCreationKind
+  clientRequestId   String           @db.Uuid
+  draftId           String           @db.Uuid
+  payloadHash       String           @db.VarChar(64)
+  normalizedPayload Json
+  purchaseOrderId   String?          @unique
+  billOfMaterialId  String?          @unique
+  createdAt         DateTime         @default(now())
+  actor             User             @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  purchaseOrder     PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  billOfMaterial    BillOfMaterial?  @relation(fields: [billOfMaterialId], references: [id], onDelete: Restrict)
+
+  @@unique([actorId, kind, clientRequestId])
+  @@index([actorId, kind, draftId])
 }

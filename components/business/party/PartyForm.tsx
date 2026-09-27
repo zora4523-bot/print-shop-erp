@@ -1,5 +1,9 @@
 'use client';
 
+import type { SupplementContext } from '@/lib/form-drafts/model';
+import { supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { SupplementFields } from '@/components/business/form-drafts/FormDraftControls';
+
 import Link from 'next/link';
 import { useActionState, useState, type ChangeEvent } from 'react';
 import { ReceiverAddressPasteField } from '@/components/business/order/ReceiverAddressPasteField';
@@ -44,9 +48,11 @@ type Props =
       ) => Promise<PartyMutationResult>;
       initialType?: PartyType;
       returnTo?: '/owner/purchases/new';
+      supplement?: SupplementContext | null;
     }
   | {
       mode: 'edit';
+      supplement?: SupplementContext | null;
       action: (
         prev: PartyMutationResult | null,
         fd: FormData,
@@ -106,7 +112,8 @@ export function PartyForm(props: Props) {
     props.mode === 'create'
       ? (props.initialType ?? PartyType.CUSTOMER)
       : props.initial.type;
-  const backHref =
+  const supplement = props.supplement;
+  const backHref = supplement ? supplementReturnHref(supplement) :
     props.mode === 'create' && props.returnTo
       ? props.returnTo
       : '/owner/parties';
@@ -119,6 +126,7 @@ export function PartyForm(props: Props) {
   return (
     <form
       action={formAction}
+      onReset={(event) => event.preventDefault()}
       aria-busy={pending}
       className="space-y-6"
       noValidate
@@ -126,6 +134,7 @@ export function PartyForm(props: Props) {
       {props.mode === 'create' && props.returnTo ? (
         <input type="hidden" name="returnTo" value={props.returnTo} />
       ) : null}
+      <SupplementFields context={supplement} />
       <FormErrorSummary errors={summaryErrors} />
 
       <section className="space-y-4">
@@ -143,7 +152,7 @@ export function PartyForm(props: Props) {
               defaultValue={initialType}
               disabled={pending}
             >
-              {PARTY_TYPE_OPTIONS.map((option) => (
+              {PARTY_TYPE_OPTIONS.filter((option) => !supplement || props.mode === 'edit' || option.value !== 'CUSTOMER').map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -320,7 +329,7 @@ export function PartyForm(props: Props) {
           {props.mode === 'create' ? '创建客户/供应商' : '保存修改'}
         </PendingButton>
         <Link href={backHref} className={buttonVariants({ variant: 'outline' })}>
-          {props.mode === 'create' && props.returnTo ? '返回采购单' : '返回列表'}
+          {supplement ? '返回原录入' : props.mode === 'create' && props.returnTo ? '返回采购单' : '返回列表'}
         </Link>
       </div>
     </form>

@@ -1,3 +1,6 @@
+import type { SupplementContext } from '@/lib/form-drafts/model';
+import { supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { SupplementOwnership } from '@/components/business/form-drafts/FormDraftControls';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
@@ -88,10 +91,14 @@ export async function ProductCategoryCatalogList({
 
 export async function NewProductCategoryCatalogItem({
   routeBase,
+  supplement,
 }: {
   routeBase: ProductCategoryRouteBase;
+  supplement?: SupplementContext | null;
 }) {
-  await requirePermission('dict:product:manage');
+  const actor = await requirePermission('dict:product:manage');
+  if (supplement) await requirePermission(supplement.origin === 'purchase-new' ? 'purchase:manage' : 'bom:manage');
+  const backHref = supplement ? supplementReturnHref(supplement) : routeBase;
   const nodes = await listProductCategoryNodes();
   const parentOptions = nodes
     .filter((node) => node.isActive && !isRetiredProductCategory(node))
@@ -101,15 +108,16 @@ export async function NewProductCategoryCatalogItem({
     });
   return (
     <div className="space-y-6">
+      <SupplementOwnership actorId={actor.id} context={supplement ?? null} />
       <RuleCenterPageHeader
         title="新建产品结构分类"
         effect="immediate"
         actions={
           <Link
-            href={routeBase}
+            href={backHref}
             className={buttonVariants({ variant: 'outline' })}
           >
-            返回分类列表
+            {supplement ? '返回原录入' : '返回分类列表'}
           </Link>
         }
       />
@@ -117,6 +125,7 @@ export async function NewProductCategoryCatalogItem({
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <ProductCategoryForm
           mode="create"
+          supplement={supplement}
           action={createRuleCenterProductCategoryNodeAction}
           parentOptions={parentOptions}
           routeBase={routeBase}

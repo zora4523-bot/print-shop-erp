@@ -1,3 +1,7 @@
+import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
+import { readSupplementContext, supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { SupplementOwnership } from '@/components/business/form-drafts/FormDraftControls';
 import { notFound } from 'next/navigation';
 import { updatePartyAction } from '@/actions/owner-parties';
 import { PartyForm } from '@/components/business/party/PartyForm';
@@ -24,7 +28,11 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function EditOwnerPartyPage({ params, searchParams }: PageProps) {
-  await requirePermission('party:manage');
+  const actor = await requirePermission('party:manage');
+  const query = await searchParams;
+  const rawContext = readSupplementContext(query ?? {});
+  const supplement = rawContext?.entityType === 'SUPPLIER' ? rawContext : null;
+  if (supplement) await requirePermission('purchase:manage');
   const { id } = await params;
   const party = await getPartySummary(id);
   if (!party) notFound();
@@ -46,10 +54,15 @@ export default async function EditOwnerPartyPage({ params, searchParams }: PageP
     defaultAddressDetail: party.defaultAddress?.detail ?? null,
   };
 
-  const receipt = readReceipt(await searchParams);
+  const receipt = readReceipt(query);
 
   return (
     <div className="space-y-6">
+      <SupplementOwnership actorId={actor.id} context={supplement} />
+      {supplement ? <div className="flex flex-wrap gap-3">
+        <Link href={supplementReturnHref(supplement)} className={buttonVariants({ variant: 'outline' })}>返回原录入</Link>
+        {party.isActive && party.type !== 'CUSTOMER' ? <Link href={supplementReturnHref(supplement, party.id)} className={buttonVariants()}>选用该供应商并返回</Link> : null}
+      </div> : null}
       <ReceiptNotice receipt={receipt} noun="往来单位" />
       <PageHeader
         title={`编辑客户/供应商：${party.name}`}
@@ -65,6 +78,7 @@ export default async function EditOwnerPartyPage({ params, searchParams }: PageP
         <PartyForm
           key={`${party.id}-${party.updatedAt.toISOString()}`}
           mode="edit"
+          supplement={supplement}
           action={boundUpdate}
           initial={formInitial}
         />

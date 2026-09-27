@@ -7,6 +7,12 @@ applies_to: repository source at last_verified
 
 # 系统架构
 
+## 2026-09-27 录入页恢复边界
+
+采购、BOM、供应商、物料及产品结构分类的五个新建页位于 `app/(admin-forms)/owner/`，URL 保持不变。该路由组复用管理端外壳和 OwnerLayout 的服务端授权，分类页继续复用规则工作区布局；不继承管理端 `loading.tsx`，避免禁用 JavaScript 时流式占位无法切换为可提交表单。其他管理路由保留原加载行为。
+
+`components/business/form-drafts` 与 `lib/form-drafts` 只服务采购/BOM 录入，不替换工单已有草稿。服务器提供 actor 与每次登录独立的 `draftSessionScope`；浏览器按身份和表单类型隔离 sessionStorage，有限时间与容量保存白名单字段。BroadcastChannel 仅用于提示活跃标签页冲突，服务器创建记录承担实际去重保证。认证外壳负责清理非当前用户、过期或失去权限的暂存；登录页和原生登出不依赖草稿清理。
+
 本文描述当前仓库可从代码验证的系统结构。业务规则以
 [SPEC-v1.2.md](./SPEC-v1.2.md) 为准；历史决策及其原因见
 [DECISIONS.md](./DECISIONS.md)。当本文与代码不一致时，先以代码保护数据，再在同一变更中修正文档。

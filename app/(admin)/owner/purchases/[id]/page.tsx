@@ -1,3 +1,4 @@
+import { VerifiedDraftReceipt } from '@/components/business/form-drafts/VerifiedDraftReceipt';
 import Decimal from 'decimal.js';
 import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
@@ -45,7 +46,7 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function OwnerPurchaseDetailPage({ params, searchParams }: PageProps) {
-  await requirePermission('purchase:manage');
+  const actor = await requirePermission('purchase:manage');
   const { id } = await params;
   const [order, locationOptions] = await Promise.all([
     getPurchaseOrderDetail(id),
@@ -62,6 +63,7 @@ export default async function OwnerPurchaseDetailPage({ params, searchParams }: 
 
   return (
     <div className="space-y-6">
+      <VerifiedDraftReceipt actorId={actor.id} kind="purchase-new" entityId={id} receipt={receipt} />
       <ReceiptNotice receipt={receipt} noun="采购单" />
       <PageHeader
         title={`采购单：${order.purchaseNo}`}

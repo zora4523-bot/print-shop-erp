@@ -27,7 +27,7 @@ test('从外协列表选择工单后真实创建外协', async ({ page }) => {
   await expect(page.getByRole('row').filter({ hasText: supplierName })).toBeVisible();
 });
 
-for (const width of [375, 1280]) test(`管理员 ${width}px 从导航找到用料和供应商，采购管理链接保留输入`, async ({ page, context }) => {
+for (const width of [375, 1280]) test(`管理员 ${width}px 从导航找到用料和供应商，采购管理链接保留输入`, async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width, height: 852 });
   await login(page, { username: E2E_USERS.owner!.username, password: E2E_PASSWORD, from: '/owner' });
@@ -43,17 +43,14 @@ for (const width of [375, 1280]) test(`管理员 ${width}px 从导航找到用�
   await page.getByLabel('采购数量', { exact: true }).fill('123');
   await page.getByLabel('单位成本（选填）', { exact: true }).fill('2.5');
   await page.getByLabel('备注（选填）', { exact: true }).fill('保留采购录入');
-  const popupPromise = context.waitForEvent('page');
+  await expect(page.getByLabel('采购数量', { exact: true })).toHaveValue('123');
+  await expect(page.getByLabel('单位成本（选填）', { exact: true })).toHaveValue('2.5');
   await page.getByRole('link', { name: '管理供应商', exact: true }).click();
-  const popup = await popupPromise;
-  try {
-    await expect(popup).toHaveURL(/\/owner\/parties\?type=suppliers/);
-    await expect(popup.getByRole('combobox', { name: '类型', exact: true })).toHaveValue('suppliers');
-    expect(await popup.evaluate(() => window.opener === null)).toBe(true);
-    await expect(page.getByLabel('采购数量', { exact: true })).toHaveValue('123');
-    await expect(page.getByLabel('单位成本（选填）', { exact: true })).toHaveValue('2.5');
-    await expect(page.getByLabel('备注（选填）', { exact: true })).toHaveValue('保留采购录入');
-  } finally { await popup.close(); }
+  await expect(page.getByRole('combobox', { name: '类型', exact: true })).toHaveValue('suppliers');
+  await page.getByRole('link', { name: '返回原录入', exact: true }).click();
+  await expect(page.getByLabel('采购数量', { exact: true })).toHaveValue('123');
+  await expect(page.getByLabel('单位成本（选填）', { exact: true })).toHaveValue('2.5');
+  await expect(page.getByLabel('备注（选填）', { exact: true })).toHaveValue('保留采购录入');
 });
 
 test('外协列表引导到工单列表，规则中心只有一个薪酬入口', async ({ page }) => {

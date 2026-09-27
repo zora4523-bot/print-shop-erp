@@ -1,5 +1,9 @@
 'use server';
 
+import { authorizedSupplement } from '@/lib/form-drafts/authorized-supplement';
+import { supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { FORM_PATHS } from '@/lib/form-drafts/model';
+
 import { redirect } from 'next/navigation';
 import { appendReceipt } from '@/lib/admin/receipt';
 import { MaterialCategory, TxDirection } from '../generated/prisma/enums';
@@ -117,6 +121,8 @@ async function createMaterialWithScope(
 ): Promise<MaterialMutationResult> {
   await requirePermission('material:manage');
 
+  const supplement = await authorizedSupplement(formData, 'MATERIAL');
+
   const parsed = createMaterialSchema.safeParse(
     normalizeMaterialFormInput(formData, scope.fixedCategory),
   );
@@ -148,8 +154,9 @@ async function createMaterialWithScope(
   }
 
   revalidateMaterialPaths(createdId);
+  if (supplement) revalidatePaths([FORM_PATHS[supplement.origin]]);
   redirect(
-    appendReceipt(`${scope.redirectBase}/${createdId}`, { created: '1' }),
+    appendReceipt(supplement ? supplementReturnHref(supplement, createdId) : `${scope.redirectBase}/${createdId}`, { created: '1' }),
   );
 }
 

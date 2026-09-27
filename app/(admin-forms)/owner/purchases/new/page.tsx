@@ -1,3 +1,5 @@
+import { readSupplementContext } from '@/lib/form-drafts/return-context';
+import { newFormDraftContext } from '@/lib/form-drafts/server-context';
 import Link from 'next/link';
 import { createPurchaseOrderAction } from '@/actions/owner-purchases';
 import { PurchaseOrderForm } from '@/components/business/purchase/PurchaseOrderForm';
@@ -21,10 +23,12 @@ type PageProps = {
 };
 
 export default async function NewOwnerPurchasePage({ searchParams }: PageProps) {
-  await requirePermission('purchase:manage');
+  const actor = await requirePermission('purchase:manage');
   const sp = await searchParams;
   const requestedSupplierPartyId = firstSearchParam(sp.supplierPartyId);
   const receipt = readReceipt(sp);
+  const returned = readSupplementContext(sp);
+  const receiptNoun = returned?.entityType === 'MATERIAL' ? '物料' : '供应商';
   const [suppliers, materials] = await Promise.all([
     listSupplierPartyOptions(),
     listMaterials(),
@@ -37,7 +41,7 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
 
   return (
     <div className="space-y-6">
-      <ReceiptNotice receipt={receipt} noun="供应商" />
+      <ReceiptNotice receipt={receipt} noun={receiptNoun} />
       <PageHeader
         title="新建采购单"
         subtitle="创建采购单不会增加库存；到货后可分批收货。"
@@ -53,6 +57,8 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <PurchaseOrderForm
+          key={`${actor.id}:${actor.draftSessionScope ?? 'legacy'}`}
+          draftContext={newFormDraftContext('purchase-new', actor)}
           action={createPurchaseOrderAction}
           suppliers={suppliers}
           initialSupplierPartyId={initialSupplierPartyId}

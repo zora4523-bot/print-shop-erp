@@ -1,5 +1,9 @@
 'use server';
 
+import { authorizedSupplement } from '@/lib/form-drafts/authorized-supplement';
+import { supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { FORM_PATHS } from '@/lib/form-drafts/model';
+
 import { redirect } from 'next/navigation';
 import { appendReceipt } from '@/lib/admin/receipt';
 import { Prisma } from '../generated/prisma/client';
@@ -78,6 +82,8 @@ export async function createRuleCenterProductCategoryNodeAction(
 ): Promise<ProductCategoryNodeMutationResult> {
   await requirePermission('dict:product:manage');
 
+  const supplement = await authorizedSupplement(formData, 'CATEGORY');
+
   const parsed = createProductCategoryNodeSchema.safeParse(
     normalizeProductCategoryCreateInput(formData),
   );
@@ -96,8 +102,9 @@ export async function createRuleCenterProductCategoryNodeAction(
   }
 
   revalidateProductCategoryPaths(createdId);
+  if (supplement) revalidatePaths([FORM_PATHS[supplement.origin]]);
   redirect(
-    appendReceipt(`${RULE_CENTER_HREFS.productCategories}/${createdId}`, {
+    appendReceipt(supplement ? supplementReturnHref(supplement, createdId) : `${RULE_CENTER_HREFS.productCategories}/${createdId}`, {
       created: '1',
     }),
   );

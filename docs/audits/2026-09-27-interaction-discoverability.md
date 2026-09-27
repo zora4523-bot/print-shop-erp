@@ -30,7 +30,7 @@
 
 供应商的情形较轻但同源：采购页只有“新建供应商”；按此入口进入的新建页，页头和表单底部都返回采购，不提供管理已有供应商的链接。375px 的父级面包屑隐藏，主菜单也没有“客户/供应商”，普通用户难以找到改名、停用已有供应商的位置。宽屏父级面包屑可能提供绕行，不能表述为所有尺寸绝对不可达。
 
-代码证据：[模块注册表](../../lib/navigation/admin-modules.ts) 第 239–262 行、[规则中心入口](../../lib/navigation/rule-center.ts)、[工单用料估算](../../components/business/bom/OrderMaterialUsageEstimate.tsx)、[供应商新建返回逻辑](../../app/(admin)/owner/parties/new/page.tsx) 第 33–58 行。
+代码证据：[模块注册表](../../lib/navigation/admin-modules.ts) 第 239–262 行、[规则中心入口](../../lib/navigation/rule-center.ts)、[工单用料估算](../../components/business/bom/OrderMaterialUsageEstimate.tsx)、[供应商新建返回逻辑](../../app/(admin-forms)/owner/parties/new/page.tsx) 第 33–58 行。
 
 建议：给有权限的管理员提供明确的“用料清单”和“供应商管理”入口，并从未配置用料、采购选择供应商处给上下文链接。验收须从工作台点击到达，不以直接访问 URL 代替。
 

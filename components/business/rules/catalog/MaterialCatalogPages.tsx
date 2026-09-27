@@ -1,3 +1,6 @@
+import type { SupplementContext } from '@/lib/form-drafts/model';
+import { supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { SupplementOwnership } from '@/components/business/form-drafts/FormDraftControls';
 import { createCatalogPaperAction } from '@/actions/catalog-paper';
 import { NewCatalogPaperForm } from './NewCatalogPaperForm';
 import { randomUUID } from 'node:crypto';
@@ -237,27 +240,32 @@ export async function MaterialCatalogList({
 
 export async function NewMaterialCatalogItem({
   routeBase,
+  supplement,
   categoryScope,
   excludedCategories,
 }: Pick<MaterialCatalogDetailProps, 'routeBase' | 'categoryScope'> & {
   excludedCategories?: readonly MaterialCategory[];
+  supplement?: SupplementContext | null;
 }) {
-  await requirePermission('material:manage');
+  const actor = await requirePermission('material:manage');
+  if (supplement) await requirePermission(supplement.origin === 'purchase-new' ? 'purchase:manage' : 'bom:manage');
+  const backHref = supplement ? supplementReturnHref(supplement) : routeBase;
   const paperOnly = categoryScope === MaterialCategory.PAPER;
   const excludesPaper = excludedCategories?.includes(MaterialCategory.PAPER);
 
   return (
     <div className="space-y-6">
+      <SupplementOwnership actorId={actor.id} context={supplement ?? null} />
       {paperOnly ? (
         <RuleCenterPageHeader
           title="新建纸张"
           effect="immediate"
           actions={
             <Link
-              href={routeBase}
+              href={backHref}
               className={buttonVariants({ variant: 'outline' })}
             >
-              返回列表
+              {supplement ? '返回原录入' : '返回列表'}
             </Link>
           }
         />
@@ -267,10 +275,10 @@ export async function NewMaterialCatalogItem({
           subtitle="默认启用；库存通过出入库维护。"
           actions={
           <Link
-            href={routeBase}
+            href={backHref}
             className={buttonVariants({ variant: 'outline' })}
           >
-            返回列表
+            {supplement ? '返回原录入' : '返回列表'}
           </Link>
           }
         />
@@ -279,6 +287,7 @@ export async function NewMaterialCatalogItem({
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         {paperOnly ? <NewCatalogPaperForm action={createCatalogPaperAction} /> : <MaterialForm
           mode="create"
+          supplement={supplement}
           action={
             excludesPaper ? createNonPaperMaterialAction : createMaterialAction
           }

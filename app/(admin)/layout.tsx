@@ -1,3 +1,6 @@
+import { AuthenticatedDraftCleanup } from '@/components/business/form-drafts/FormDraftControls';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import type { FormKind } from '@/lib/form-drafts/model';
 import { redirect } from 'next/navigation';
 import { Role } from '../../generated/prisma/enums';
 import { getSession } from '@/lib/auth/session';
@@ -41,8 +44,13 @@ export default async function AdminShellLayout({
     process.env.NODE_ENV ??
     'dev';
 
+  const allowedDrafts: FormKind[] = [];
+  if (hasPermission('purchase:manage', user.role)) allowedDrafts.push('purchase-new');
+  if (hasPermission('bom:manage', user.role)) allowedDrafts.push('bom-new');
+
   return (
     <SidebarProvider className="admin-viewport">
+      <AuthenticatedDraftCleanup actorId={user.id} allowed={allowedDrafts} />
       <a
         href="#admin-main"
         className="fixed left-3 top-3 z-50 inline-flex min-h-11 -translate-y-20 items-center rounded-md bg-background px-3 py-2 text-sm font-medium shadow-lg focus:translate-y-0"

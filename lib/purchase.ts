@@ -1,3 +1,5 @@
+import { createWithRequest, type CreationRequest } from '@/lib/form-drafts/creation-request';
+import { purchaseCreationFacts } from '@/lib/form-drafts/creation-facts';
 import Decimal from 'decimal.js';
 import { createHash } from 'node:crypto';
 import {
@@ -387,57 +389,61 @@ async function applyPurchaseStockMovement(
 export async function createPurchaseOrder(
   input: CreatePurchaseOrderInput,
   now: Date = new Date(),
-): Promise<PurchaseOrderDetail> {
+  request?: CreationRequest,
+): Promise<PurchaseOrderDetail & { creationReplayed?: boolean }> {
   const quantity = parsePositiveDecimal(input.quantity, '采购数量');
-  // 采购单号在业务事务外独立预留；后续供应商 / 物料校验或创建
-  // 失败会留下单号空隙。采购编号契约不要求连续，这里明确接受该空隙。
-  const purchaseNo = await reservePurchaseDocumentNumber('PURCHASE_ORDER', now);
+  // Legacy callers reserve before the transaction. Draft-aware creation reserves
+  // inside its request transaction after authorization; retries reuse the receipt.
+  const reservedNo = request ? null : await reservePurchaseDocumentNumber('PURCHASE_ORDER', now);
 
-  const createdId = await db.$transaction(async (tx) => {
-    const [supplier, material] = await Promise.all([
-      tx.party.findUnique({
-        where: { id: input.supplierPartyId },
-        select: { id: true, type: true, isActive: true, code: true, name: true },
-      }),
-      tx.material.findUnique({
-        where: { id: input.materialId },
-        select: { id: true, isActive: true },
-      }),
-    ]);
-    if (!supplier) throw new PurchaseInvariantError('供应商不存在');
-    if (!supplier.isActive) throw new PurchaseInvariantError('供应商已停用');
-    if (supplier.type === PartyType.CUSTOMER) {
-      throw new PurchaseInvariantError('客户不能作为采购供应商');
-    }
-    if (!material) throw new PurchaseInvariantError('物料不存在');
-    if (!material.isActive) throw new PurchaseInvariantError('物料已停用');
+  const result = await db.$transaction(async (tx) => {
+    const create = async () => {
+      const [supplier, material] = await Promise.all([
+        tx.party.findUnique({
+          where: { id: input.supplierPartyId },
+          select: { id: true, type: true, isActive: true, code: true, name: true },
+        }),
+        tx.material.findUnique({
+          where: { id: input.materialId },
+          select: { id: true, isActive: true },
+        }),
+      ]);
+      if (!supplier) throw new PurchaseInvariantError('供应商不存在');
+      if (!supplier.isActive) throw new PurchaseInvariantError('供应商已停用');
+      if (supplier.type === PartyType.CUSTOMER) {
+        throw new PurchaseInvariantError('客户不能作为采购供应商');
+      }
+      if (!material) throw new PurchaseInvariantError('物料不存在');
+      if (!material.isActive) throw new PurchaseInvariantError('物料已停用');
 
-    const created = await tx.purchaseOrder.create({
-      data: {
-        purchaseNo,
-        supplierPartyId: supplier.id,
-        supplierCode: supplier.code,
-        supplierName: supplier.name,
-        expectedDate: parseOptionalDate(input.expectedDate),
-        remark: input.remark,
-        items: {
-          create: [
-            {
-              materialId: input.materialId,
-              quantity: quantity.toFixed(2),
-              unitCost: input.unitCost,
-            },
-          ],
+      const created = await tx.purchaseOrder.create({
+        data: {
+          purchaseNo: reservedNo ?? await reservePurchaseDocumentNumber('PURCHASE_ORDER', now, tx),
+          supplierPartyId: supplier.id,
+          supplierCode: supplier.code,
+          supplierName: supplier.name,
+          expectedDate: parseOptionalDate(input.expectedDate),
+          remark: input.remark,
+          items: {
+            create: [
+              {
+                materialId: input.materialId,
+                quantity: quantity.toFixed(2),
+                unitCost: input.unitCost,
+              },
+            ],
+          },
         },
-      },
-      select: { id: true },
-    });
-    return created.id;
+        select: { id: true },
+      });
+      return created.id;
+    };
+    return request ? createWithRequest(tx, 'purchase-new', request, purchaseCreationFacts(input), create) : { entityId: await create(), replayed: false };
   });
 
-  const detail = await getPurchaseOrderDetail(createdId);
+  const detail = await getPurchaseOrderDetail(result.entityId);
   if (!detail) throw new PurchaseInvariantError('采购单创建后读取失败');
-  return detail;
+  return request ? { ...detail, creationReplayed: result.replayed } : detail;
 }
 
 function statusAfterReceivedQuantities(
@@ -607,9 +613,10 @@ export async function createPurchaseReceipt(
 async function reservePurchaseDocumentNumber(
   kind: 'PURCHASE_ORDER' | 'PURCHASE_RECEIPT',
   now: Date,
+  client?: Prisma.TransactionClient,
 ): Promise<string> {
   try {
-    return await nextDailyDocumentNumber(kind, now);
+    return await (client ? nextDailyDocumentNumber(kind, now, client) : nextDailyDocumentNumber(kind, now));
   } catch (error) {
     if (error instanceof DailyDocumentNumberExhaustedError) {
       throw new PurchaseInvariantError(error.message);

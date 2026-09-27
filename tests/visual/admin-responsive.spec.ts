@@ -57,6 +57,30 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('purchase and BOM recovery controls pass focused light and dark gates', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [
+      { name: 'recovery-purchase', path: '/owner/purchases/new', readyHeading: '新建采购单', prepareGateState: async (page) => {
+        const resume = page.getByRole('button', { name: '继续上次录入', exact: true });
+        if (await resume.count()) await resume.click();
+        await page.getByLabel('采购数量', { exact: true }).fill('123');
+        await page.reload();
+        await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
+      } },
+      { name: 'recovery-bom', path: '/owner/boms/new', readyHeading: '新建 BOM', prepareGateState: async (page) => {
+        const resume = page.getByRole('button', { name: '继续上次录入', exact: true });
+        if (await resume.count()) await resume.click();
+        await page.getByLabel('BOM 名称', { exact: true }).fill('待补物料的用料清单');
+        await page.reload();
+        await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
+      } },
+      { name: 'recovery-material', path: '/owner/materials/new', readyHeading: '新建物料' },
+      { name: 'recovery-supplier', path: '/owner/parties/new?type=SUPPLIER', readyHeading: '新建客户/供应商' },
+      { name: 'recovery-category', path: '/owner/rules/product-categories/new', readyHeading: '新建产品结构分类' },
+    ];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
   test('owner dashboard focused light and dark gates', async ({ page }, testInfo) => {
     const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention'));
     expect(routes).toHaveLength(6);

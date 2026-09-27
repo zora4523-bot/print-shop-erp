@@ -1,3 +1,5 @@
+import type { SupplementContext } from '@/lib/form-drafts/model';
+import { supplementParams } from '@/lib/form-drafts/return-context';
 import Link from 'next/link';
 import {
   AdminRowActions,
@@ -21,6 +23,7 @@ import {
 import type { SortDirection, TableHrefParams } from '@/lib/admin/table';
 
 type Props = {
+  supplement?: SupplementContext | null;
   parties: PartySummary[];
   tableBase?: string;
   queryParams?: TableHrefParams;
@@ -60,6 +63,7 @@ function SortHead({
 }
 
 export function PartiesTable({
+  supplement,
   parties,
   tableBase,
   queryParams = {},
@@ -128,7 +132,7 @@ export function PartiesTable({
             <TableCell>
               <AdminRowActions>
                 <Link
-                  href={`/owner/parties/${party.id}`}
+                  href={`/owner/parties/${party.id}${supplement ? `?${new URLSearchParams(supplementParams(supplement))}` : ''}`}
                   prefetch={false}
                   className="text-sm text-primary underline hover:no-underline"
                 >

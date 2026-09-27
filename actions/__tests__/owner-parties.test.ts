@@ -100,6 +100,17 @@ beforeEach(() => {
 });
 
 describe('createPartyAction', () => {
+  it('采购补供应商拒绝客户类型且保留字段错误，不先创建错误资料', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const result = await createPartyAction(null, fd({ ...validParty,
+      form_origin: 'purchase-new', form_draftId: '11111111-1111-4111-8111-111111111111',
+      form_nonce: '22222222-2222-4222-8222-222222222222', form_entityType: 'SUPPLIER', form_target: 'supplierPartyId',
+    }));
+    expect(result).toMatchObject({ status: 'invalid', fieldErrors: { type: ['采购只能使用供应商或客户/供应商，请调整类型'] } });
+    expect(partyMock.createParty).not.toHaveBeenCalled();
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('purchase:manage');
+  });
+
   it('passes null to the library when code is left for automatic generation', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     partyMock.createParty.mockResolvedValue({ id: 'party1' });

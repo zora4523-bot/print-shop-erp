@@ -7,6 +7,14 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 2026-09-27 采购/BOM 录入恢复
+
+`createPurchaseOrderAction`、`createBomAction` 新表单提交 `draftId` 与 `clientRequestId`（UUID，必须成对）。服务端从当前会话取得 actor，按 actor / 表单类型 / 请求键串行核对；同键同规范化事实返回原实体并显示“该录入此前已创建”，同键异内容拒绝。旧表单两键均缺失时保留兼容，但不提供自动恢复去重承诺。BOM 行数明确限制为 1～20。
+
+`getFormCreationStatusAction({kind,draftId,clientRequestId,payload?})` 使用对应创建权限和同一事务锁，返回 `not-created` 或 `created`（授权实体详情地址、业务差异）。查询超时不意味着创建失败，客户端只允许沿用原键续填重试；明确“另建一单”才换键。详情回执 `createdDraft` / `creationRequest` 必须经服务器核对 actor、类型、draftId 和实体，才清理浏览器草稿。
+
+补资料只接收 `form_origin`、`form_draftId`、`form_nonce`、`form_entityType`、`form_target`；来源限定 `purchase-new` / `bom-new`，目的地由固定映射产生。成功额外返回 `form_entityId`。`resolveSupplementAction` 重新核对来源及资料权限、启用状态、供应商类型和分类适用性。采购补供应商不接受 CUSTOMER 类型。协议不接收任意返回 URL，身份标识不是授权凭证；供应商独立新建的原有受限 `returnTo` 保持兼容。
+
 ## 2026-09-13 管理员建单人工定价与拆址修复
 
 `createOrderAction` 的管理员载荷支持 `items[].adminPrice={amount,reason,factsKey}`（整款加工费总额，两位小数）及 `packagingGroups[].adminPrice`（每袋/盒单价，四位小数）。服务端检查活跃管理员、金额、原因及当前条件，落库为既有管理员确认快照，提交时保留可信人工价。销售端禁止该字段（包含显式 null）。`factsKey` 是防止误用旧价的条件对照，不作为授权凭证。

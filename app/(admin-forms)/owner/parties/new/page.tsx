@@ -1,3 +1,5 @@
+import { readSupplementContext, supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { SupplementOwnership } from '@/components/business/form-drafts/FormDraftControls';
 import Link from 'next/link';
 import { PartyType } from '@/generated/prisma/enums';
 import { createPartyAction } from '@/actions/owner-parties';
@@ -12,10 +14,7 @@ export const metadata = {
 };
 
 type PageProps = {
-  searchParams: Promise<{
-    type?: string | string[];
-    returnTo?: string | string[];
-  }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
 const PURCHASE_RETURN_TO = '/owner/purchases/new' as const;
@@ -27,17 +26,21 @@ function parseInitialType(value: string): PartyType {
 }
 
 export default async function NewOwnerPartyPage({ searchParams }: PageProps) {
-  await requirePermission('party:manage');
+  const actor = await requirePermission('party:manage');
   const query = await searchParams;
+  const rawContext = readSupplementContext(query);
+  const supplement = rawContext?.entityType === 'SUPPLIER' ? rawContext : null;
+  if (supplement) await requirePermission('purchase:manage');
   const initialType = parseInitialType(firstSearchParam(query.type));
   const returnTo =
     firstSearchParam(query.returnTo) === PURCHASE_RETURN_TO
       ? PURCHASE_RETURN_TO
       : undefined;
-  const backHref = returnTo ?? '/owner/parties';
+  const backHref = supplement ? supplementReturnHref(supplement) : returnTo ?? '/owner/parties';
 
   return (
     <div className="space-y-6">
+      <SupplementOwnership actorId={actor.id} context={supplement} />
       <PageHeader
         title="新建客户/供应商"
         actions={
@@ -45,7 +48,7 @@ export default async function NewOwnerPartyPage({ searchParams }: PageProps) {
             href={backHref}
             className={buttonVariants({ variant: 'outline' })}
           >
-            {returnTo ? '返回采购单' : '返回列表'}
+            {supplement ? '返回原录入' : returnTo ? '返回采购单' : '返回列表'}
           </Link>
         }
       />
@@ -56,6 +59,7 @@ export default async function NewOwnerPartyPage({ searchParams }: PageProps) {
           action={createPartyAction}
           initialType={initialType}
           returnTo={returnTo}
+          supplement={supplement}
         />
       </section>
     </div>

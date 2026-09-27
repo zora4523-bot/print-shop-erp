@@ -5,10 +5,15 @@ import { BomsTable } from '@/components/business/bom/BomsTable';
 import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
 import { PurchaseOrderForm } from '@/components/business/purchase/PurchaseOrderForm';
 
+vi.mock('@/actions/form-drafts', () => ({ getFormCreationStatusAction: vi.fn(), resolveSupplementAction: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
+
 describe('业务路径的导入来源标识隔离', () => {
   it('BOM 选择器只显示产品、分类和物料的业务名称', () => {
     const html = renderToStaticMarkup(
       <BomForm
+        draftContext={{ actorId: 'admin', sessionScope: null, kind: 'bom-new', draftId: '11111111-1111-4111-8111-111111111111', clientRequestId: '22222222-2222-4222-8222-222222222222' }}
+        initialRowId="33333333-3333-4333-8333-333333333333"
         action={vi.fn() as never}
         products={[
           {
@@ -101,6 +106,7 @@ describe('业务路径的导入来源标识隔离', () => {
   it('采购物料选项保留 ID 值但不显示来源坐标', () => {
     const html = renderToStaticMarkup(
       <PurchaseOrderForm
+        draftContext={{ actorId: 'admin', sessionScope: null, kind: 'purchase-new', draftId: '11111111-1111-4111-8111-111111111111', clientRequestId: '22222222-2222-4222-8222-222222222222' }}
         action={vi.fn() as never}
         suppliers={[
           {

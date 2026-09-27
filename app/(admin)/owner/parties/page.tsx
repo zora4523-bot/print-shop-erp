@@ -1,3 +1,5 @@
+import { readSupplementContext, supplementParams, supplementReturnHref, supplementCreateHref } from '@/lib/form-drafts/return-context';
+import { SupplementOwnership } from '@/components/business/form-drafts/FormDraftControls';
 import Link from 'next/link';
 import { PartyType } from '../../../../generated/prisma/enums';
 import { buttonVariants } from '@/components/ui/button';
@@ -28,14 +30,7 @@ export const metadata = {
 };
 
 type PageProps = {
-  searchParams: Promise<{
-    q?: string | string[];
-    type?: string | string[];
-    page?: string | string[];
-    pageSize?: string | string[];
-    sort?: string | string[];
-    dir?: string | string[];
-  }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
 const OWNER_PARTIES_PATH = '/owner/parties';
@@ -48,8 +43,12 @@ function parsePartyType(value: string): PartyType | 'suppliers' | null {
 }
 
 export default async function OwnerPartiesPage({ searchParams }: PageProps) {
-  await requirePermission('party:manage');
+  const actor = await requirePermission('party:manage');
   const sp = await searchParams;
+  const rawContext = readSupplementContext(sp);
+  const supplement = rawContext?.entityType === 'SUPPLIER' ? rawContext : null;
+  if (supplement) await requirePermission('purchase:manage');
+  const contextParams = supplement ? supplementParams(supplement) : {};
   const q = firstSearchParam(sp.q).trim();
   const type = parsePartyType(firstSearchParam(sp.type));
   const page = parsePositiveInt(sp.page, { defaultValue: 1, min: 1 });
@@ -69,6 +68,7 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
     direction,
   });
   const queryParams: TableHrefParams = {
+    ...contextParams,
     q: q || undefined,
     type: type ?? undefined,
     page: partyPage.page,
@@ -79,10 +79,12 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
+      <SupplementOwnership actorId={actor.id} context={supplement} />
+      {supplement ? <Link href={supplementReturnHref(supplement)} className={buttonVariants({ variant: 'outline' })}>返回原录入</Link> : null}
       <PageHeader
         title="客户/供应商"
         actions={
-          <Link href="/owner/parties/new" className={buttonVariants()}>
+          <Link href={supplement ? supplementCreateHref(supplement) : '/owner/parties/new'} className={buttonVariants()}>
             新建客户/供应商
           </Link>
         }
@@ -92,8 +94,9 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
         action={OWNER_PARTIES_PATH}
         query={q}
         placeholder="搜索编码、名称、联系人、电话、地址、拼音"
-        clearHref={buildTableHref(OWNER_PARTIES_PATH, { type }, {})}
+        clearHref={buildTableHref(OWNER_PARTIES_PATH, { type, ...contextParams }, {})}
         hiddenParams={{
+          ...contextParams,
           pageSize,
           sort: sort === 'default' ? undefined : sort,
           dir: sort === 'default' ? undefined : direction,
@@ -134,6 +137,7 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
         }
       >
         <PartiesTable
+          supplement={supplement}
           parties={partyPage.rows}
           tableBase={OWNER_PARTIES_PATH}
           queryParams={queryParams}

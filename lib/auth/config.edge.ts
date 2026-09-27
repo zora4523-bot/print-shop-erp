@@ -44,6 +44,7 @@ declare module 'next-auth' {
       role: Role;
       workerType: WorkerType | null;
       machineType: MachineType | null;
+      draftSessionScope?: string;
     };
   }
 }
@@ -52,6 +53,7 @@ declare module 'next-auth' {
 // `@auth/core/jwt`. TS refuses augmentation on the shim but accepts it here.
 declare module '@auth/core/jwt' {
   interface JWT {
+    draftSessionScope?: string;
     username: string;
     displayName: string;
     role: Role;
@@ -81,6 +83,7 @@ export const authConfigEdge = {
       // On initial sign-in `user` is populated by the credentials authorize()
       // result. On subsequent requests only `token` is present.
       if (user) {
+        token.draftSessionScope = crypto.randomUUID();
         token.username = user.username;
         token.displayName = user.displayName;
         token.role = user.role;
@@ -100,6 +103,7 @@ export const authConfigEdge = {
     },
     async session({ session, token }) {
       if (session.user && token.sub) {
+        session.user.draftSessionScope = token.draftSessionScope;
         session.user.id = token.sub;
         session.user.username = token.username;
         session.user.displayName = token.displayName;

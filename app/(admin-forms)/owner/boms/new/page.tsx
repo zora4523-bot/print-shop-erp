@@ -1,6 +1,10 @@
+import { readReceipt } from '@/lib/admin/receipt';
+import { readSupplementContext } from '@/lib/form-drafts/return-context';
+import { randomUUID } from 'node:crypto';
+import { newFormDraftContext } from '@/lib/form-drafts/server-context';
 import { createBomAction } from '@/actions/owner-boms';
 import { BomForm } from '@/components/business/bom/BomForm';
-import { PageHeader } from '@/components/ui-business';
+import { PageHeader, ReceiptNotice } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBomProductOptions } from '@/lib/bom';
 import { listMaterials } from '@/lib/material';
@@ -13,8 +17,11 @@ export const metadata = {
   title: '新建 BOM',
 };
 
-export default async function NewBomPage() {
-  await requirePermission('bom:manage');
+export default async function NewBomPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const actor = await requirePermission('bom:manage');
+  const query = await searchParams;
+  const receipt = readReceipt(query);
+  const returned = readSupplementContext(query);
   const [products, categories, materials] = await Promise.all([
     listBomProductOptions(),
     listProductCategoryOptions(),
@@ -23,6 +30,7 @@ export default async function NewBomPage() {
 
   return (
     <div className="space-y-6">
+      <ReceiptNotice receipt={receipt} noun={returned?.entityType === 'CATEGORY' ? '分类' : '物料'} />
       <PageHeader
         title="新建 BOM"
         subtitle="同一用料对象只能有一个启用版本。"
@@ -30,6 +38,9 @@ export default async function NewBomPage() {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <BomForm
+          key={`${actor.id}:${actor.draftSessionScope ?? 'legacy'}`}
+          draftContext={newFormDraftContext('bom-new', actor)}
+          initialRowId={randomUUID()}
           action={createBomAction}
           products={products.map((product) => ({
             id: product.id,

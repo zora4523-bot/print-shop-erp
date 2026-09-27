@@ -1,3 +1,5 @@
+import { createWithRequest, type CreationRequest } from '@/lib/form-drafts/creation-request';
+import { bomCreationFacts } from '@/lib/form-drafts/creation-facts';
 import Decimal from 'decimal.js';
 import { Prisma } from '../generated/prisma/client';
 import { createBomSchema, type CreateBomInput } from './auth/schemas';
@@ -209,34 +211,41 @@ async function assertActiveMaterials(client: Prisma.TransactionClient, materialI
   }
 }
 
-export async function createBom(raw: CreateBomInput): Promise<BomDetail> {
+export async function createBom(raw: CreateBomInput, request?: CreationRequest): Promise<BomDetail & { creationReplayed?: boolean }> {
   const parsed = createBomSchema.safeParse(raw);
   if (!parsed.success) throw new BomInvariantError(parsed.error.issues[0]?.message ?? '物料清单输入无效');
   const data = parsed.data;
   return db.$transaction(async (client) => {
-    await acquirePriceRuleSnapshotWriteLock(client);
-    await assertActiveTarget(client, data);
-    await assertActiveMaterials(client, data.items.map((item) => item.materialId));
-    const target = targetWhere(data);
+    const create = async () => {
+      await acquirePriceRuleSnapshotWriteLock(client);
+      await assertActiveTarget(client, data);
+      await assertActiveMaterials(client, data.items.map((item) => item.materialId));
+      const target = targetWhere(data);
 
-    return client.billOfMaterial.create({
-      data: {
-        ...target,
-        name: data.name,
-        version: data.version,
-        baseQuantity: data.baseQuantity,
-        isActive: true,
-        items: {
-          create: data.items.map((item, index) => ({
-            materialId: item.materialId,
-            quantity: item.quantity,
-            sortOrder: (index + 1) * 10,
-            remark: item.remark,
-          })),
+      return client.billOfMaterial.create({
+        data: {
+          ...target,
+          name: data.name,
+          version: data.version,
+          baseQuantity: data.baseQuantity,
+          isActive: true,
+          items: {
+            create: data.items.map((item, index) => ({
+              materialId: item.materialId,
+              quantity: item.quantity,
+              sortOrder: (index + 1) * 10,
+              remark: item.remark,
+            })),
+          },
         },
-      },
-      select: BOM_DETAIL_SELECT,
-    });
+        select: BOM_DETAIL_SELECT,
+      });
+    };
+    if (!request) return create();
+    const result = await createWithRequest(client, 'bom-new', request, bomCreationFacts(data), async () => (await create()).id);
+    const created = await client.billOfMaterial.findUnique({ where: { id: result.entityId }, select: BOM_DETAIL_SELECT });
+    if (!created) throw new BomInvariantError('用料清单创建后读取失败，请用原内容重试');
+    return { ...created, creationReplayed: result.replayed };
   });
 }
 
