@@ -5,7 +5,7 @@ import {
   transitionOutsource,
   InvalidOutsourceTransitionError,
 } from './outsource/status-machine';
-import { canAttachOutsource } from './order/status-machine';
+import { outsourceUnavailableReason } from './order/outsource-eligibility';
 import { orderCascadeLockKey } from './order/locks';
 import { writeAuditLogInTx, type AuditActor } from './audit-log';
 import {
@@ -290,16 +290,8 @@ export async function createOutsourceOrder(
       select: { status: true, completedAt: true },
     });
     if (!order) throw new OutsourceError('工单不存在');
-    if (!canAttachOutsource(order.status)) {
-      throw new OutsourceError(
-        `工单状态 ${order.status} 不允许新建外协（已发货 / 已完成 / 已取消）`,
-      );
-    }
-    if (order.completedAt) {
-      throw new OutsourceError(
-        '当前纸质工单已完成生产，不能再追加外协；请通过工单变更生成新版本',
-      );
-    }
+    const unavailableReason = outsourceUnavailableReason(order);
+    if (unavailableReason) throw new OutsourceError(unavailableReason);
 
     const row = await txClient.outsourceOrder.create({
       data: {
@@ -833,6 +825,8 @@ export async function getOrderForOutsourceForm(orderId: string) {
     select: {
       id: true,
       orderNo: true,
+      status: true,
+      completedAt: true,
       items: {
         orderBy: { sequence: 'asc' },
         select: {

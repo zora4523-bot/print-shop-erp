@@ -44,6 +44,19 @@ test.describe('administrator workspace', () => {
     });
   });
 
+  test('discoverability entries pass focused light and dark gates', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [
+      { name: 'discovery-purchase-new', path: '/owner/purchases/new', readyHeading: '新建采购单' },
+      { name: 'discovery-parties', path: '/owner/parties?type=suppliers', readyHeading: '客户/供应商' },
+      { name: 'discovery-boms', path: '/owner/boms', readyHeading: 'BOM/用料' },
+      { name: 'discovery-categories', path: '/owner/rules/product-categories', readyHeading: '产品结构分类 / BOM 分类' },
+      { name: 'discovery-rules', path: '/owner/rules', readyHeading: '规则配置中心' },
+      { name: 'discovery-outsource', path: '/foreman/outsource', readyHeading: '外协单' },
+    ];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
   test('owner dashboard focused light and dark gates', async ({ page }, testInfo) => {
     const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention'));
     expect(routes).toHaveLength(6);

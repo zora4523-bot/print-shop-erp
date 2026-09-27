@@ -55,13 +55,24 @@ export function PurchaseOrderForm({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="supplierPartyId">供应商</Label>
-            <PendingLink
-              href={NEW_SUPPLIER_HREF}
-              pending={pending}
-              className="text-xs text-primary hover:underline"
-            >
-              新建供应商
-            </PendingLink>
+            <div className="flex flex-wrap gap-x-3">
+              <PendingLink
+                href="/owner/parties?type=suppliers"
+                pending={pending}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center text-xs text-primary hover:underline"
+              >
+                管理供应商
+              </PendingLink>
+              <PendingLink
+                href={NEW_SUPPLIER_HREF}
+                pending={pending}
+                className="inline-flex min-h-11 items-center text-xs text-primary hover:underline"
+              >
+                新建供应商
+              </PendingLink>
+            </div>
           </div>
           <select
             id="supplierPartyId"

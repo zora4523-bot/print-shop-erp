@@ -177,6 +177,15 @@ describe('listPartiesPage', () => {
     );
   });
 
+  it('supplier management includes BOTH without changing exact type filters', async () => {
+    dbMock.party.count.mockResolvedValue(0);
+    dbMock.party.findMany.mockResolvedValue([]);
+    await listPartiesPage({ type: 'suppliers', page: 1, pageSize: 20, sort: 'default', direction: 'asc' });
+    const where = { AND: [{ type: { in: [PartyType.SUPPLIER, PartyType.BOTH] } }] };
+    expect(dbMock.party.count).toHaveBeenCalledWith({ where });
+    expect(dbMock.party.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+  });
+
   it('uses the same type and text filters for count and rows', async () => {
     dbMock.party.count.mockResolvedValue(1);
     dbMock.party.findMany.mockResolvedValue([makeParty()]);

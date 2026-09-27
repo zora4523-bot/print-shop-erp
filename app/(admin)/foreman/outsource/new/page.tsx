@@ -1,8 +1,12 @@
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
 import { randomUUID } from 'node:crypto';
 import { getOrderForOutsourceForm } from '@/lib/outsource';
 import { CreateOutsourceForm } from '@/components/business/outsource/CreateOutsourceForm';
 import { requirePermission } from '@/lib/auth/permissions';
+import { outsourceUnavailableReason } from '@/lib/order/outsource-eligibility';
+import { DisabledReason } from '@/components/ui-business';
+import { buttonVariants } from '@/components/ui/button';
 
 type PageProps = {
   searchParams: Promise<{ orderId?: string }>;
@@ -22,22 +26,30 @@ export default async function NewOutsourcePage({ searchParams }: PageProps) {
   // the form can list items as checkboxes.
   const order = await getOrderForOutsourceForm(orderId);
   if (!order) notFound();
+  const unavailableReason = outsourceUnavailableReason(order);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">创建外协单</h1>
-        <p className="text-sm text-muted-foreground">
+        {!unavailableReason ? <p className="text-sm text-muted-foreground">
           选择要外协的款式，填写外协厂信息。保存后状态默认为&ldquo;已发出&rdquo;。
-        </p>
+        </p> : null}
       </div>
 
-      <CreateOutsourceForm
-        orderId={order.id}
-        orderNo={order.orderNo}
-        items={order.items}
-        initialIdempotencyKey={randomUUID()}
-      />
+      {unavailableReason ? (
+        <div className="space-y-3">
+          <DisabledReason cause="status" reason={unavailableReason} />
+          <Link href={`/orders/${order.id}`} className={buttonVariants({ variant: 'outline' })}>返回工单</Link>
+        </div>
+      ) : (
+        <CreateOutsourceForm
+          orderId={order.id}
+          orderNo={order.orderNo}
+          items={order.items}
+          initialIdempotencyKey={randomUUID()}
+        />
+      )}
     </div>
   );
 }

@@ -54,7 +54,7 @@ export async function ProductCategoryCatalogList({
 }: {
   routeBase: ProductCategoryRouteBase;
 }) {
-  await requirePermission('dict:product:manage');
+  const user = await requirePermission('dict:product:manage');
   const nodes = await listProductCategoryNodes();
 
   return (
@@ -65,6 +65,9 @@ export async function ProductCategoryCatalogList({
         subtitle="分类用于产品资料与用料；历史引用不会因停用而删除。"
         actions={
           <>
+          {hasPermission('bom:manage', user.role) ? (
+            <Link href="/owner/boms" className={buttonVariants({ variant: 'outline' })}>用料清单</Link>
+          ) : null}
           <Link href="/owner/rules/product-categories/items" className={buttonVariants({ variant: 'outline' })}>产品资料</Link>
           <Link href={`${routeBase}/new`} className={buttonVariants()}>
             新建产品结构分类

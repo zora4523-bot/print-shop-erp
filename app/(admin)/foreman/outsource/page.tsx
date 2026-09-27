@@ -21,18 +21,21 @@ export default async function OutsourceListPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">外协单</h1>
           <p className="text-sm text-muted-foreground">
             发往 UV / 啤 / 彩印 等外协厂的工艺清单。回货后点&ldquo;已回货&rdquo;。
           </p>
         </div>
+        <Link href="/orders" className={buttonVariants()}>
+          从工单创建外协
+        </Link>
       </div>
 
       {rows.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          暂无外协单
+          暂无外协单。先选择工单，再创建外协。
         </div>
       ) : (
         <TableScrollArea

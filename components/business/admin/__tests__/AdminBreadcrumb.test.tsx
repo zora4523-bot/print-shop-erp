@@ -67,6 +67,33 @@ function visibleText(html: string): string {
 }
 
 describe('AdminBreadcrumb SSR', () => {
+  it.each([
+    ['/owner/purchases/new', '新建采购单'],
+    ['/owner/accounts/new', '新建账号'],
+    ['/owner/boms/new', '新建用料清单'],
+    ['/owner/materials/new', '新建物料'],
+    ['/owner/parties/new', '新建客户/供应商'],
+    ['/owner/rules/papers/new', '新建纸张'],
+    ['/owner/rules/crafts/new', '新建工艺'],
+    ['/owner/rules/product-categories/new', '新建产品结构分类'],
+    ['/owner/rules/product-categories/items/new', '新建产品资料'],
+    ['/orders/new', '创建工单'],
+    ['/foreman/materials/new', '新建物料'],
+    ['/owner/notifications/channels/new', '新建企业微信通知目标'],
+  ])('首帧按完整路径显示 %s 的末级标题', (path, label) => {
+    usePathnameMock.mockReturnValue(path);
+    const html = renderToStaticMarkup(<AdminBreadcrumb />);
+    expect(html).toContain(`title="${label}"`);
+    expect(html).toContain(`>${label}</span>`);
+    if (path !== '/orders/new') expect(visibleText(html)).not.toContain('创建工单');
+  });
+
+  it.each(['/foreman/outsource/new', '/sales/orders/new'])('layout-only ancestors stay unlinked at %s', (path) => {
+    usePathnameMock.mockReturnValue(path);
+    const html = renderToStaticMarkup(<AdminBreadcrumb />);
+    expect(html).not.toContain('href="/foreman"');
+    expect(html).not.toContain('href="/sales"');
+  });
   it('不把 cuid 印到面包屑上', () => {
     usePathnameMock.mockReturnValue(`/orders/${CUID}/edit`);
 

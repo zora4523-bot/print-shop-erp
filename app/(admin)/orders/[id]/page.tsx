@@ -1,3 +1,5 @@
+import { CreateOrderOutsourceLink } from '@/components/business/outsource/CreateOrderOutsourceLink';
+import { hasPermission } from '@/lib/auth/permissions-dict';
 import { HistoricalBlankPriceEditor } from '@/components/business/order/HistoricalBlankPriceEditor';
 import { readHistoricalBlankPriceEditor } from '@/lib/order/confirm-historical-blank-price';
 import { listOrderReportDisputes } from '@/lib/production/report-dispute';
@@ -44,7 +46,7 @@ import { getSession, requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
 import { getOrderTitleRef } from '@/lib/page-title/refs';
 import { orderDetailTitle } from '@/lib/page-title/titles';
-import { canAttachOutsource } from '@/lib/order/status-machine';
+import { outsourceUnavailableReason } from '@/lib/order/outsource-eligibility';
 import { canCreateReworkFromStatus } from '@/lib/order/rework-eligibility';
 import {
   canEditOrderSfCollect,
@@ -286,12 +288,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   // 设计图增删仅 DRAFT（提交后的增删属于 A05，等业主拍板）；所有权
   // 与编辑一致。lib/order-design.ts 是真闸口，这里 UI-only。
   const canEditDesigns = order.status === OrderStatus.DRAFT && canEdit;
-  // Only foreman / owner creates outsource orders, and only on
-  // production-active states. SHIPPED is non-terminal but already
-  // out the door — no new production work attaches there.
-  // canAttachOutsource() is the canonical gate;
-  // lib/outsource.ts re-checks the same predicate.
-  const canCreateOutsource = canAttachOutsource(order.status);
+  const canManageBom = hasPermission('bom:manage', user.role);
+  const canManageOutsource = hasPermission('outsource:manage', user.role);
+  const canCreateOutsource = canManageOutsource && !outsourceUnavailableReason(order);
   const assignedWorkerNames = [
     ...new Set(
       order.items.flatMap((item) =>
@@ -552,14 +551,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 }))}
               />
             ) : null}
-            {canCreateOutsource ? (
-              <Link
-                href={`/foreman/outsource/new?orderId=${order.id}`}
-                className={buttonVariants({ variant: 'outline', size: 'sm' })}
-              >
-                外协
-              </Link>
-            ) : null}
+            <CreateOrderOutsourceLink orderId={order.id} status={order.status} completedAt={order.completedAt} canManage={canManageOutsource} />
             {canSubmit ? <SubmitOrderButton orderId={order.id} purpose={order.purpose} /> : null}
             {canShipOrSettle && order.status === OrderStatus.SHIPPED ? (
               isPricingPending ? (
@@ -1181,7 +1173,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           }))}
         />
       )}</>),
-    material: (<><OrderMaterialUsageEstimate estimate={materialEstimate} /></>),
+    material: (<><OrderMaterialUsageEstimate estimate={materialEstimate} canManageBom={canManageBom} /></>),
     piecework: (<><OrderWagePanel orderId={order.id} actor={user} />{pieceworkSummary ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-2">

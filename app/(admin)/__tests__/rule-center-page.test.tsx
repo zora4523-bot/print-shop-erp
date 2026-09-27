@@ -41,8 +41,9 @@ describe('rule center entry', () => {
   it('links to the implemented piecework editor', async () => {
     const html = renderToStaticMarkup(await RuleCenterPage());
 
-    expect(html).toContain('工序计件工价');
-    expect(html).toContain('维护计件工价');
+    expect(html).toContain('维护计件工价、标准工时与加班起点');
+    expect(html.match(/href="\/owner\/rules\/employee-pay"/g)).toHaveLength(1);
+    expect(html).not.toContain('不在这里配置');
     expect(html).not.toContain('未开放配置');
     expect(html).not.toContain('piecework-rules');
   });

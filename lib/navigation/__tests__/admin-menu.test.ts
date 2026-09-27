@@ -48,7 +48,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(35);
+    expect(items).toHaveLength(37);
     expect(items.map((i) => i.label)).toEqual([
       '工作台',
       '经营概览',
@@ -79,6 +79,8 @@ describe('getAdminMenuItems', () => {
       '历史时薪档案',
       '物料',
       '仓库/库位',
+      '用料清单',
+      '客户/供应商',
       '用户管理',
       '系统设置',
       '推送配置',
@@ -100,7 +102,8 @@ describe('getAdminMenuItems', () => {
     const orderChanges = items.find((i) => i.label === '工单修改申请');
     expect(orderChanges?.href).toBe('/owner/order-changes');
     expect(orderChanges?.requiredPermission).toBe('order:change:review');
-    expect(items.map((item) => item.label)).not.toContain('客户/供应商');
+    expect(items.find((item) => item.href === '/owner/parties')?.requiredPermission).toBe('party:manage');
+    expect(items.find((item) => item.href === '/owner/boms')?.requiredPermission).toBe('bom:manage');
     // P1 #2 Slice B：推送配置走 /owner/notifications，权限 notification:config
     const notif = items.find((i) => i.label === '推送配置');
     expect(notif?.href).toBe('/owner/notifications');
@@ -278,6 +281,8 @@ describe('getAdminMenuItems', () => {
     );
 
     const expectations = [
+      ['/owner/boms/new', '', '/owner/boms'],
+      ['/owner/parties/new', '', '/owner/parties'],
       ['/owner/rules', '', '/owner/rules'],
       ['/owner/rules/papers', '', '/owner/rules/papers'],
       ['/owner/rules/papers/new', '', '/owner/rules/papers'],
@@ -365,6 +370,8 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('外部销售收费');
     expect(labels).not.toContain('内部报价（低频）');
     expect(labels).not.toContain('规则配置中心');
+    expect(labels).not.toContain('用料清单');
+    expect(labels).not.toContain('客户/供应商');
     expect(labels).not.toContain('排产');
     expect(labels).not.toContain('外协');
     expect(labels).not.toContain('我的 Dashboard');

@@ -40,7 +40,8 @@ type PageProps = {
 
 const OWNER_PARTIES_PATH = '/owner/parties';
 
-function parsePartyType(value: string): PartyType | null {
+function parsePartyType(value: string): PartyType | 'suppliers' | null {
+  if (value === 'suppliers') return value;
   return Object.values(PartyType).includes(value as PartyType)
     ? (value as PartyType)
     : null;
@@ -93,7 +94,6 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
         placeholder="搜索编码、名称、联系人、电话、地址、拼音"
         clearHref={buildTableHref(OWNER_PARTIES_PATH, { type }, {})}
         hiddenParams={{
-          type: type ?? undefined,
           pageSize,
           sort: sort === 'default' ? undefined : sort,
           dir: sort === 'default' ? undefined : direction,
@@ -107,6 +107,7 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
               className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
             >
               <option value="">全部</option>
+              <option value="suppliers">供应商（含客户/供应商）</option>
               {Object.values(PartyType).map((option) => (
                 <option key={option} value={option}>
                   {PARTY_TYPE_LABELS[option]}
