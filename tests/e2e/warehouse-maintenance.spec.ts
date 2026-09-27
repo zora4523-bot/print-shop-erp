@@ -8,6 +8,12 @@ async function changeState(page: Page, name: string, button: string) {
   const section = page.getByLabel(`${name}维护`, { exact: true });
   await section.getByRole('button', { name: button, exact: true }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: button, exact: true }).click();
+  // The confirmation closes before the server action settles. Wait for the
+  // committed state before another tab reads the location list.
+  const nextAction = button.startsWith('停用')
+    ? button.replace('停用', '恢复使用')
+    : button.replace('恢复使用', '停用');
+  await expect(section.getByRole('button', { name: nextAction, exact: true })).toBeEnabled();
 }
 
 test('仓库与库位可改名停用恢复，旧出入库页面拒绝已停用库位', async ({ page, context }) => {
