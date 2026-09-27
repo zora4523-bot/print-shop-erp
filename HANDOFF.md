@@ -1,10 +1,10 @@
 # 会话交接
 
-## 当前生产状态（2026-09-21 更新）
+## 当前生产状态（2026-09-27 更新）
 
-生产已运行 `ef6fa012`（PR #26 合并提交），160 条迁移；2026-09-21 14:10（上海时间）完成切换，上线后检查通过。两条已获批的停售 120g 零元规则已停用，金额、历史记录和审计保留；其余价目及工价未发布或改写。Web/LIGHT/HEAVY 同一 SHA 在线，OSS 双仓库备份通过，企业微信 `CONNECTED`。正式库仍只有 1 个管理员 + 3 个销售账号，工单 / 账单 / 报工为空。详见 [09-21 发布记录](docs/audits/2026-09-21-production-release-ef6fa012.md)；此前 [09-19 发布](docs/audits/2026-09-19-production-release-09f1a1ca.md)与 [09-17 发布](docs/audits/2026-09-17-production-application-release.md)保留为历史证据。
+生产已运行 `b658328c`（PR #27 合并提交），166 条迁移；2026-09-27 13:23（上海时间）完成切换，停机约 66 秒，上线后检查通过。本批含删除客服 / 清废厨师、GPT-6 修复、设计款名称、打印抬头与停用客户字段；6 条迁移在正式库副本演练后执行，数据只有通知规则按预期变化（15 → 13，逾期模板改为外部销售）。crontab 按业主选择只删除已下线的 `cs-settle`、`cs-period-ending`、`hourly-payroll`，现行 4 行保留，示例里生产从未安装的 `pending-factory-backlog`、`production-alerts`、`order-export-cleanup` 仍不安装；cron 包装脚本已换为现行版本；nginx 访问日志已遮蔽 CDR token。Web/LIGHT/HEAVY 同一 SHA 在线，OSS 双仓库备份通过，企业微信 `CONNECTED`。正式库仍只有 1 个管理员 + 3 个销售账号，工单 / 账单 / 报工 / CDR 包为空，历史数据清理 dry-run 为 0。详见 [09-27 发布记录](docs/audits/2026-09-27-production-release-b658328c.md)；此前 [09-21](docs/audits/2026-09-21-production-release-ef6fa012.md)、[09-19](docs/audits/2026-09-19-production-release-09f1a1ca.md)、[09-17](docs/audits/2026-09-17-production-application-release.md) 发布保留为历史证据。
 
-发布方式（当前生产沿用，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包 → 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。当前候选目录切换步骤及证据以 09-21 发布记录为准。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。Claude Code 做生产 SSH 需要业主在权限设置里放行，聊天里的授权不够。
+发布方式（当前生产沿用，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包（容器至少 6 GB、`NODE_OPTIONS=--max-old-space-size=4096`、`CIRCLE_NODE_TOTAL=2`；4 GB 会在类型检查阶段无具体错误地失败；打包排除 `.next/cache` 用 `--exclude='.next/cache'`，不要带 `./` 前缀）→ 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。本批迁移不是空白封价格迁移，用发布目录里的 `migrate.cjs`（直接 `prisma migrate deploy`，带锁 / 语句超时、输出过滤连接串），不要复用 09-21 的 `deploy-blank-price-migrations.ts`（它遇到其他待执行迁移会拒绝）。步骤与脚本以 09-27 发布记录及应用机 `/root/erp-release-20260927/` 为准。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。
 
 未验收（不得写成已验收）：登录后的各角色页面逐页检查、真实写入、实体手机扫码、企业微信真实消息实收；Sentry 未配置。
 
@@ -22,7 +22,9 @@
 - 停用客户（DECISIONS 2026-09-27 第二条，业主批准 12 项方案）：分支 `codex/retire-customer`（基于 `2d9fa372`）。显示、录入、筛选、搜索、导出全部停用，凡指认“是谁的单”一律用 `lib/order/external-sales-name.ts`：师傅端一行“外部销售”取代客户与接单人；管理端列表去掉产品客户筛选与精确标签，旧链接客户参数静默忽略；详情去掉客户行、页头业务员改为外部销售；建单 / 编辑 / 草稿 / 样品 / 重做不再录入或写入客户（`createOrder` 一律写空）；销售端不再返回客户；账单明细“客户”列改“工单名称”，CDR 列改“工单名称 · 外部销售”，工作台关注列表主标签改工单名称、“提交人”改“外部销售”；工单 XLSX 客户列位改“外部销售”，代理商月账单 XLSX“客户快照”改“工单名称”；完工 / 逾期 / 急单通知载荷带 `externalSalesName`，逾期默认模板迁移 `20260927100000`。兼容：停用前入队的工单导出按原摘要校验、代理商月账单导出快照照常解析、部署前入队的通知由 `notify()` 按工单补外部销售名（查询失败写“未填”，不拖垮送达）、跨部署的建单重试接受停用前的指纹。4 个并行子代理实施、我逐项复核；Codex 三路对抗审查（写入 / 列表 / 金额导出通知）发现 4 项 P2 全部修复并复审通过。验证：静态门禁（architecture、backup、lint、typecheck、dead-code）通过；全量 Vitest（含数据库）7576 通过 / 44 跳过、覆盖率门禁通过；浏览器组件 842；空库迁移链 166 条通过；管理端六视口 116 通过 / 10 既有跳过、师傅端六视口 12 通过；chromium + no-js 186 通过，失败的 `admin-fees`（暗色费用输入框对比度）与 `inventory-flow` 在基线上同样失败，`sample-orders` 4 例与 `foil-wage` 是同库先跑六视口留下的夹具工单挤掉了列表首页，换新隔离库重跑 14/14 通过；各中间提交单独 typecheck 通过。
 - 已知遗留（写入 DECISIONS）：数据库拼音搜索列仍含旧客户，历史工单可能被旧客户名拼音搜到（改需重建生成列，未动库）；`/api/owner/agent-bills/[id]` 仍返回 `customerRefSnapshot`；回滚到本次之前的版本时，本次之后请求、尚未生成的代理商月账单导出会被旧代码拒绝，需重新发起；演示脚本 `scripts/lib/dashboard-order-completion.ts` 仍给演示工单写“演示客户”（列仍在、无处显示）。
 - 已合入 `codex/maindev` 并推送，PR #27 CI 15 项全绿（`viewports-main` 只在合并后跑），业主 2026-09-27 同意把 PR #27 合并到 `main`。本机清理了 24 个旧 `erp_e2e_*` 隔离库；另有 20 个其他前缀的旧测试库（`codex_order_flow_*`、`erp_samples_*` 等，以及疑似别的项目的 `xiaozan_review_test`）业主要求先保留。
-- **下一步**：看 `main` 上合并后的 `viewports-main`（六视口全量）；部署需业主授权，按「上线前置操作清单」执行（6 条新迁移，含 2 条 fail closed）。
+- `main` 上合并后的 CI（static + 六视口 `viewports-main`）通过。**已部署生产**（业主当日授权并回复“切”）：`b658328c`、166 条迁移，停机约 66 秒，见 [09-27 发布记录](docs/audits/2026-09-27-production-release-b658328c.md)。
+- 按业主要求清理生产主机历史遗留：数据库机删除 09-16 / 09-17 的 3 个旧演练库与 09-16 临时 HBA 规则；应用机删除 3 个旧 `before-*`、3 个旧 `release-*` 与压测目录（保留本次的 `print-shop-erp-before-20260927`），见发布记录「历史遗留清理」。
+- **下一步**：业主做「上线前置操作清单 → 五、业务验收」（真实 PDF / OSS 直传 / 企业微信实收等）；是否安装示例里另 3 个定时任务待业主决定（不装时导出产物文件不会被定时清理）。
 
 2026-09-26：**PR #27 的 CI 收尾 + 建单页“设计款名称”由建单人填写**。
 - CI：`e2e (admin-375x667)` / `(admin-1280x800)` 失败为六视口夹具落后于本批删除（`71b8e1b6`），顺带修掉 18d57bcc 的两个副作用：管理员回访建单页须明确恢复 / 放弃本地草稿（`bf3eaeda`，新增 `OrderFormLocalDraft.browser.spec.tsx`），未选外部销售保存草稿只提示选销售（`76bcd79d`）。已推送，PR #27 全绿。
@@ -297,8 +299,7 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 - remote：`https://github.com/zora4523-bot/print-shop-erp.git`（**私有，HTTPS**）。开发机 SSH 不通，**不要把 remote 改回 SSH**。
 - 远端只有 `main` 与 `codex/maindev`，**没有 `dev`**。日常开发在 `codex/maindev`（或从它开的 `codex/*` 工作树分支，完成后快进合回），
   经 PR 用合并提交回 `main`：PR #26 → `ef6fa012`，PR #27 于 2026-09-27 合并。
-- **生产**：<https://bag.sshapi.cn> 运行 `ef6fa012` / 160 项 migration（2026-09-21，见顶部「当前生产状态」）；仓库迁移链已有 166 项，
-  多出的 6 项未在生产执行，部署前必须重新核对（[上线前置操作清单](docs/上线前置操作清单.md)）。
+- **生产**：<https://bag.sshapi.cn> 运行 `b658328c` / 166 项 migration（2026-09-27，见顶部「当前生产状态」），与仓库迁移链一致。
 - 本机开发库加工费价目簿已到 v10（`2026-09-13-attained-custom-tiers`），v8 是 print-sentinel 迁移版。
   golden-gate 测试现在按谱系读 v8，**不要**为了让它过去回滚开发库版本。
 
@@ -631,4 +632,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-25：文档同步（`codex/docs-sync-0925`，仅文档）：SPEC / CLAUDE.md / 根目录文档 / docs 现行文档对齐 09-24 决定与 GPT-6 修复；部署指南补三条迁移只读预查 SQL；上线前置清单重写；9 份过程文件归档；DECISIONS 2026-09-25 四条；09-23 审查补 §7。
 - 2026-09-26：第二轮 GPT-6 对抗审查 22 个提交，6 项属实并修复（PDF 运维重试并入范围锁、已删除事件通知收尾不再入队、清理脚本测试、3 处文档），复审通过。
 - 2026-09-26：PR #27 CI 收尾（六视口夹具、管理员本地草稿恢复 / 放弃、草稿只拦外部销售）；建单页设计款名称改由建单人填写（单款跟随工单名称、新增须手填、同单不重名、打印单混用纸张逐行标纸张克重、导出加克重与类型），两轮对抗审查 18 项修复。
-- 2026-09-27：建单页紧凑布局；打印单抬头改工单归属的外部销售并去掉空工序占位；按业主批准的 12 项方案停用工单“客户名称/简称”（显示、录入、筛选、搜索、导出），统一改用外部销售，Codex 三路对抗审查 4 项 P2 修复。PR #27 CI 全绿后合并到 `main`；清理 24 个旧 `erp_e2e_*` 隔离库。
+- 2026-09-27：建单页紧凑布局；打印单抬头改工单归属的外部销售并去掉空工序占位；按业主批准的 12 项方案停用工单“客户名称/简称”（显示、录入、筛选、搜索、导出），统一改用外部销售，Codex 三路对抗审查 4 项 P2 修复。PR #27 CI 全绿后合并到 `main`；清理 24 个旧 `erp_e2e_*` 隔离库。同日部署生产 `b658328c`（166 条迁移，停机约 66 秒，crontab 只删三条已下线任务），并清理生产主机上的旧演练库、临时 HBA 规则与旧目录。
