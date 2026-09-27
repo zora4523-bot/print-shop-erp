@@ -24,6 +24,10 @@ export async function maintainWarehouse(raw: WarehouseMaintenanceInput, actorId:
       ? await tx.warehouse.findUnique({ where: { id: input.id } })
       : await tx.warehouseLocation.findUnique({ where: { id: input.id } });
     if (!before) throw new WarehouseInvariantError(input.kind === 'warehouse' ? '仓库不存在' : '库位不存在');
+    if (input.operation === 'restore' && 'warehouseId' in before && typeof before.warehouseId === 'string') {
+      const parent = await tx.warehouse.findUnique({ where: { id: before.warehouseId }, select: { isActive: true } });
+      if (!parent?.isActive) throw new WarehouseInvariantError('请先恢复所属仓库，再恢复库位');
+    }
     const name = input.operation === 'rename' ? input.name! : before.name;
     const isActive = input.operation === 'rename' ? before.isActive : input.operation === 'restore';
     // An identical request may be safely replayed, but never overwrite a newer value.

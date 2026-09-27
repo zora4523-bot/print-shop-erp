@@ -136,6 +136,24 @@ postgres.sequential('warehouse maintenance · real isolated PostgreSQL', () => {
     expect(await db.warehouseLocation.count({ where: { warehouseId: f.warehouse.id, code: 'NEW' } })).toBe(createFirst ? 1 : 0);
   });
 
+  for (const restoreFirst of [true, false]) it(`restore child vs parent disable, restoreFirst=${restoreFirst}`, async () => {
+    const f = await fixture();
+    const childOff = await maintainWarehouse(disable(f.target), actorId);
+    const restore = () => maintainWarehouse({ ...disable(childOff), operation: 'restore' }, actorId);
+    const stop = () => maintainWarehouse(disable(f.warehouse, 'warehouse'), actorId);
+    const [first, second] = await ordered(restoreFirst ? restore : stop, restoreFirst ? stop : restore);
+    expect(first!.status).toBe('fulfilled');
+    expect(second!.status).toBe(restoreFirst ? 'fulfilled' : 'rejected');
+    if (!restoreFirst && second!.status === 'rejected') expect(String(second!.reason)).toContain('请先恢复所属仓库');
+    const warehouseOff = await db.warehouse.findUniqueOrThrow({ where: { id: f.warehouse.id } });
+    expect(warehouseOff.isActive).toBe(false);
+    expect((await db.warehouseLocation.findUniqueOrThrow({ where: { id: f.target.id } })).isActive).toBe(restoreFirst);
+    expect(await db.businessAuditLog.count({ where: { entityId: f.target.id, action: 'WAREHOUSE_MAINTAINED' } })).toBe(restoreFirst ? 2 : 1);
+    await maintainWarehouse({ ...disable(warehouseOff, 'warehouse'), operation: 'restore' }, actorId);
+    if (!restoreFirst) await restore();
+    expect((await listActiveWarehouseLocationOptions()).some((row) => row.id === f.target.id)).toBe(true);
+  });
+
   it('cancelling historical receipt requires restoring its inactive location, with no partial reversal', async () => {
     const f = await fixture();
     const supplier = await db.party.create({ data: { code: randomUUID(), type: 'SUPPLIER', name: '历史收货供应商' } });

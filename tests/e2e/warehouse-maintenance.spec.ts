@@ -51,7 +51,8 @@ test('仓库与库位可改名停用恢复，旧出入库页面拒绝已停用�
     await expect(stock).toContainText('库位或所属仓库已停用');
     await expect(stock.getByLabel('库位', { exact: true })).toHaveValue(locationId);
     await changeState(page, renamed, '停用仓库');
-    await expect(page.getByLabel(`${locationName}维护`, { exact: true })).toContainText('所属仓库已停用');
+    await expect(page.getByLabel(`${locationName}维护`, { exact: true })).toContainText('请先恢复所属仓库，再恢复库位');
+    await expect(page.getByLabel(`${locationName}维护`, { exact: true }).getByRole('button', { name: '恢复使用库位', exact: true })).toBeDisabled();
     await changeState(page, renamed, '恢复使用仓库');
     await expect(page.getByLabel(`${locationName}维护`, { exact: true }).getByRole('button', { name: '恢复使用库位', exact: true })).toBeVisible();
     await changeState(page, locationName, '恢复使用库位');
