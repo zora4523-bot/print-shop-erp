@@ -41,10 +41,16 @@ export function WarehouseForms({ warehouses }: Props) {
 }
 
 function WarehouseCreateForm() {
+  const [input, setInput] = useState({ name: '', code: '' });
   const [state, formAction, pending] = useActionState<
     WarehouseMutationResult | null,
     FormData
   >(createWarehouseAction, null);
+  const [handledResult, setHandledResult] = useState(state);
+  if (state !== handledResult) {
+    setHandledResult(state);
+    if (state?.status === 'success') setInput({ name: '', code: '' });
+  }
   const visibleState = pending ? null : state;
   const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
   const error = visibleState?.status === 'error' ? visibleState.message : null;
@@ -68,6 +74,8 @@ function WarehouseCreateForm() {
         id="warehouse-name"
         name="name"
         label="仓库名称"
+        value={input.name}
+        onChange={(value) => setInput((current) => ({ ...current, name: value }))}
         error={errs.name?.[0]}
         disabled={pending}
       />
@@ -80,6 +88,8 @@ function WarehouseCreateForm() {
             id="warehouse-code"
             name="code"
             label="自定义编码（选填）"
+            value={input.code}
+            onChange={(value) => setInput((current) => ({ ...current, code: value }))}
             hint="留空将自动生成，例如 WH-000001。"
             error={errs.code?.[0]}
             disabled={pending}
@@ -103,10 +113,16 @@ function WarehouseCreateForm() {
 
 function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] }) {
   const [warehouseId, setWarehouseId] = useState('');
+  const [input, setInput] = useState({ name: '', code: '' });
   const [state, formAction, pending] = useActionState<
     WarehouseMutationResult | null,
     FormData
   >(createWarehouseLocationAction, null);
+  const [handledResult, setHandledResult] = useState(state);
+  if (state !== handledResult) {
+    setHandledResult(state);
+    if (state?.status === 'success') { setInput({ name: '', code: '' }); setWarehouseId(''); }
+  }
   const visibleState = pending ? null : state;
   const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
   const error = visibleState?.status === 'error' ? visibleState.message : null;
@@ -165,6 +181,8 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
         id="location-name"
         name="name"
         label="库位名称"
+        value={input.name}
+        onChange={(value) => setInput((current) => ({ ...current, name: value }))}
         error={errs.name?.[0]}
         disabled={pending}
       />
@@ -177,6 +195,8 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
             id="location-code"
             name="code"
             label="自定义编码（选填）"
+            value={input.code}
+            onChange={(value) => setInput((current) => ({ ...current, code: value }))}
             hint="留空将自动生成，例如 LOC-000001。"
             error={errs.code?.[0]}
             disabled={pending}
@@ -209,6 +229,8 @@ function TextField({
   hint,
   error,
   disabled,
+  value,
+  onChange,
 }: {
   id: string;
   name: string;
@@ -216,6 +238,8 @@ function TextField({
   hint?: string;
   error?: string | undefined;
   disabled?: boolean;
+  value: string;
+  onChange: (value: string) => void;
 }) {
   return (
     <div className="space-y-2">
@@ -224,6 +248,8 @@ function TextField({
         id={id}
         name={name}
         disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
         {...(error
           ? formMessageA11yProps(id, 'error')
           : hint

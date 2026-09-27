@@ -9,6 +9,7 @@ import { createMaterialTransaction } from '@/lib/material';
 import { createPurchaseOrder, createPurchaseReceipt, cancelPurchaseReceipt } from '@/lib/purchase';
 import { createStockTransfer } from '@/lib/stock-transfer';
 import { postInventoryCount } from '@/lib/inventory-count-posting';
+import { listInventoryCountMaterials } from '@/lib/inventory-count';
 
 vi.mock('server-only', () => ({}));
 const url = process.env.DATABASE_URL;
@@ -170,6 +171,18 @@ postgres.sequential('warehouse maintenance · real isolated PostgreSQL', () => {
     expect(Number((await db.material.findUniqueOrThrow({ where: { id: f.material.id } })).currentStock)).toBe(0);
   });
 
+  it('counting excludes zero-stock rows in disabled locations or warehouses and identifies stale submissions', async () => {
+    const f = await fixture();
+    await movement(f); await movement(f, f.target.id, 'OUT');
+    await movement(f, f.source.id); await movement(f, f.source.id, 'OUT');
+    await maintainWarehouse(disable(f.target), actorId);
+    const rows = await listInventoryCountMaterials({ q: f.material.code });
+    expect(rows[0]!.locations.map((location) => location.locationId)).toEqual([f.source.id]);
+    await expect(postInventoryCount({ idempotencyKey: randomUUID(), remark: '旧页面盘点', items: [{ materialId: f.material.id, locationId: f.target.id, bookQuantity: '0', countedQuantity: '1' }] }, { id: actorId })).rejects.toThrow(`${f.warehouse.name} / ${f.target.name}`);
+    await maintainWarehouse(disable(f.warehouse, 'warehouse'), actorId);
+    expect((await listInventoryCountMaterials({ q: f.material.code }))[0]!.locations).toEqual([]);
+  });
+
   it('configuration lock timeout rolls back before any write and leaves normal shared writers usable', async () => {
     const gate = new Client({ connectionString: url }); await gate.connect();
     try {
@@ -179,4 +192,26 @@ postgres.sequential('warehouse maintenance · real isolated PostgreSQL', () => {
       await expect(db.$transaction(async (tx) => { await acquireWarehouseStockLock(tx); return true; })).resolves.toBe(true);
     } finally { await gate.query('ROLLBACK'); await gate.end(); }
   });
+
+  it.each(['maintain', 'warehouse', 'location'] as const)('real %s configuration timeout gives a recoverable error without writing', async (operation) => {
+    const f = await fixture();
+    const gate = new Client({ connectionString: url }); await gate.connect();
+    let pending: Promise<PromiseSettledResult<unknown>> | undefined;
+    try {
+      await gate.query('BEGIN');
+      await gate.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))', [WAREHOUSE_CONFIGURATION_LOCK]);
+      const deadline = (await gate.query("SELECT clock_timestamp() + interval '4 seconds' AS deadline")).rows[0].deadline;
+      const action = operation === 'maintain' ? maintainWarehouse({ ...disable(f.target), operation: 'rename', name: '不能写入' }, actorId)
+        : operation === 'warehouse' ? createWarehouse({ code: `T${randomUUID().replaceAll('-', '')}`, name: '不能写入' }, actorId)
+        : createWarehouseLocation({ warehouseId: f.warehouse.id, code: 'TIMEOUT', name: '不能写入' }, actorId);
+      pending = action.then((value) => ({ status: 'fulfilled' as const, value }), (reason: unknown) => ({ status: 'rejected' as const, reason }));
+      while (!(await gate.query('SELECT clock_timestamp() >= $1::timestamptz AS elapsed', [deadline])).rows[0].elapsed) { /* Real DB deadline, no client-clock or injected lock timeout. */ }
+      await gate.query('COMMIT');
+      const result = await pending;
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') expect(result.reason).toMatchObject({ name: 'WarehouseInvariantError', message: '仓库正在处理出入库，请稍后重试' });
+      expect((await db.warehouseLocation.findUniqueOrThrow({ where: { id: f.target.id } })).name).toBe(f.target.name);
+      expect(await db.warehouseLocation.count({ where: { warehouseId: f.warehouse.id, code: 'TIMEOUT' } })).toBe(0);
+    } finally { await gate.query('ROLLBACK'); if (pending) await pending; await gate.end(); }
+  }, 10_000);
 });

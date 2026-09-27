@@ -378,7 +378,7 @@ export async function postInventoryCount(
         const location = locationById.get(locationId);
         if (!location) throw new InventoryCountInvariantError('盘点库位不存在');
         if (!location.isActive || !location.warehouse.isActive) {
-          throw new InventoryCountInvariantError('盘点库位或所属仓库已停用');
+          throw new InventoryCountInvariantError(`盘点库位或所属仓库已停用：${location.warehouse.name} / ${location.name}，请移除该行或恢复库位后重试`);
         }
       }
 

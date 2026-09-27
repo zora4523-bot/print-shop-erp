@@ -76,6 +76,7 @@ export function PurchaseReceiptForm({
       const result = await action(prev, formData);
       allowReset.current = result.status === 'success';
       if (result.status === 'success') {
+        setLocationId('');
         setIdempotencyKey(window.crypto.randomUUID());
       }
       return result;

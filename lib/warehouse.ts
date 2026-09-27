@@ -13,7 +13,7 @@ import type {
   CreateWarehouseLocationInput,
 } from './auth/schemas';
 
-import { acquireWarehouseConfigurationLock, requireWarehouseActor, WarehouseInvariantError } from '@/lib/warehouse-coordination';
+import { acquireWarehouseConfigurationLock, requireWarehouseActor, rethrowWarehouseWriteError, WarehouseInvariantError } from '@/lib/warehouse-coordination';
 export { WarehouseInvariantError } from '@/lib/warehouse-coordination';
 
 export type WarehouseLocationSummary = Pick<
@@ -267,7 +267,7 @@ export async function createWarehouse(
       data: { code, name: data.name, isDefault: false, isActive: true },
       select: WAREHOUSE_SELECT,
     });
-  });
+  }).catch(rethrowWarehouseWriteError);
 }
 
 export async function createWarehouseLocation(
@@ -287,5 +287,5 @@ export async function createWarehouseLocation(
       data: { warehouseId: data.warehouseId, code, name: data.name, isDefault: false, isActive: true },
       select: { id: true, warehouseId: true, code: true, name: true, isDefault: true, isActive: true, createdAt: true, updatedAt: true },
     });
-  });
+  }).catch(rethrowWarehouseWriteError);
 }

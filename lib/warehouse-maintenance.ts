@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createWarehouseSchema } from '@/lib/auth/schemas';
 import { db } from '@/lib/db';
 import { writeAuditLogInTx } from '@/lib/audit-log';
-import { acquireWarehouseConfigurationLock, requireWarehouseActor, WarehouseInvariantError } from '@/lib/warehouse-coordination';
+import { acquireWarehouseConfigurationLock, requireWarehouseActor, rethrowWarehouseWriteError, WarehouseInvariantError } from '@/lib/warehouse-coordination';
 
 export const warehouseMaintenanceSchema = z.object({
   kind: z.enum(['warehouse', 'location']),
@@ -55,5 +55,5 @@ export async function maintainWarehouse(raw: WarehouseMaintenanceInput, actorId:
       requestMetadata: { operation: input.operation, expectedUpdatedAt: input.expectedUpdatedAt },
     });
     return after;
-  });
+  }).catch(rethrowWarehouseWriteError);
 }
